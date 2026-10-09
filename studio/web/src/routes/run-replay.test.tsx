@@ -274,6 +274,31 @@ describe("replay from a failing step (F1's Done line, Studio half)", () => {
     await waitFor(() => expect(d.getByText("compare in the playground")).toBeTruthy())
   })
 
+  it("the finished replay is compared with its source step by step (plan E3, capability diff)", async () => {
+    serve({ capabilities: ["playground", "steps", "diff"] })
+    studio.on("GET diff", golden<object>("diff"))
+    renderApp(`/runs/${RUN}?view=story`)
+    const row = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>('[data-call="c3"]')
+      expect(el).toBeTruthy()
+      return el!
+    })
+    fireEvent.click(within(row).getByRole("button", { name: "edit this result and replay (call c3)" }))
+    await waitFor(() => expect(verdict("refund")).toBe("substituted"))
+    fireEvent.click(within(drawer()!).getByRole("button", { name: "Run" }))
+    const marker = await waitFor(() => {
+      const el = drawer()!.querySelector("[data-diff-marker]")
+      expect(el).toBeTruthy()
+      return el!
+    })
+    expect(studio.calls("GET diff").map((r) => r.query.toString())).toEqual([`a=${RUN}&b=pg_new`])
+    expect(drawer()!.querySelectorAll("[data-diff-marker]")).toHaveLength(1)
+    expect(marker.textContent).toBe("changed at step 3 · tool results")
+    expect(drawer()!.querySelector('[data-diff-step="3"] [data-diff-state="changed"]')!.getAttribute("data-diff-cell")).toBe("tool_results")
+    const open = drawer()!.querySelector<HTMLAnchorElement>("[data-replay-compare-link]")!
+    expect(open.getAttribute("href")).toContain("/compare?")
+  })
+
   it("the step card's verbs: replay from this step, re-run, continue here — each its own draft", async () => {
     renderApp(`/runs/${RUN}?view=story`)
     const card = await waitFor(() => {

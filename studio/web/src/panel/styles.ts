@@ -263,6 +263,14 @@ select.weft-input { width: auto; min-width: 120px; }
 .weft-diff-row { white-space: pre-wrap; word-break: break-word; }
 .weft-diff-add { color: var(--weft-info); }
 .weft-diff-del { color: var(--weft-warn); text-decoration: line-through; }
+.weft-diff-markers { margin: 0 0 4px; padding: 0; list-style: none; color: var(--weft-warn); }
+.weft-diff-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.weft-diff-table th, .weft-diff-table td { text-align: left; vertical-align: top; padding: 2px 4px; border-top: 1px solid var(--weft-line); font-weight: normal; }
+.weft-diff-same, .weft-diff-missing { color: var(--weft-faint); }
+.weft-diff-unknown { color: var(--weft-dim); font-style: italic; }
+.weft-diff-changed > th, td.weft-diff-changed { color: var(--weft-warn); }
+.weft-diff-a { color: var(--weft-warn); }
+.weft-diff-b { color: var(--weft-info); }
 .weft-resolve { width: auto; min-width: 150px; margin: 0 4px; }
 /* ── Replay from here (plan F1): hover/focus verbs, the ack preview ── */
 .weft-verbs { display: inline-flex; gap: 2px; margin-left: 4px; }

@@ -389,3 +389,38 @@ export function teardown() {
   vi.unstubAllGlobals()
   document.body.innerHTML = ""
 }
+
+// ── E3.2: the step compare in the result pane ────────────────────
+
+/** META with the step compare served (capability "diff"). */
+export const DIFF_META = { ...META, capabilities: [...META.capabilities, "diff"] }
+
+/** stepDiffRoutes is baseRoutes with an experiment that has ended by
+ * the time its command names the run (pg_x1, a replay of s_01-t1 from
+ * step 0), and GET /api/diff?a=s_01-t1&b=pg_x1 answering doc. */
+export function stepDiffRoutes(doc: unknown): Record<string, Route> {
+  const r = baseRoutes()
+  r["POST playground/runs"] = { command_id: "cmd_1", state: "queued" }
+  r["playground/commands/cmd_1"] = {
+    command_id: "cmd_1",
+    state: "finished",
+    run_id: "pg_x1",
+    status: "succeeded",
+    error: null,
+    created: T0,
+    updated: T0,
+  }
+  r["runs/pg_x1"] = { ...runRow({ id: "pg_x1", playground: true, session_id: "", forked_from: "s_01-t1#0" }), children: [] }
+  r["runs/pg_x1/events?after=0&limit=500"] = page(runEvents("pg_x1"))
+  r["runs/pg_x1/transcript"] = transcript([user("where is my order #4411?")], [assistant("It is delayed until Friday.")])
+  r["diff?a=s_01-t1&b=pg_x1"] = doc
+  return r
+}
+
+/** runExperiment opens the drawer and runs it, as the user does. */
+export async function runExperiment(el: WeftDevtools) {
+  click(button(el, "✎ Experiment"))
+  await settle()
+  click(button(el, "Run experiment ▶"))
+  await settle(60)
+}

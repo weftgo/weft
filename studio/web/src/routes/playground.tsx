@@ -68,7 +68,8 @@ import type { Experiment } from "@/hooks/use-command-tracking"
 import { useRunEvents } from "@/hooks/use-run-events"
 import { ExperimentForm, StepPicker, useSourceEditFields } from "@/components/studio/experiment-form"
 import { Button } from "@/components/ui/button"
-import { experimentLink, runLink } from "@/lib/links"
+import { compareLink, experimentLink, runLink } from "@/lib/links"
+import { StepCompare } from "@/components/studio/step-diff"
 
 // The command's pure halves and the form's controls live in shared
 // modules (plan F1: the run page's replay drawer renders the same
@@ -676,6 +677,7 @@ function Playground({ caps }: { caps: string[] }) {
                 ))}
               </div>
               <CompareTable variants={variants} />
+              <VariantSteps variants={ran} sourceRunID={sourceRunID} />
               {ran.length >= 2 && <VariantDiff a={ran[0]} b={ran[1]} />}
             </>
           ) : null}
@@ -1123,6 +1125,34 @@ function CompareTable({ variants }: { variants: Variant[] }) {
           ))}
         </tbody>
       </table>
+    </div>
+  )
+}
+
+/** VariantSteps is the step-aligned N-way compare (plan E3): the
+ * source run as the base — else the first variant's run — and every
+ * finished variant's run beside it, rows by step ordinal (N−1 calls of
+ * GET /api/diff against the one base; capability "diff"). The text
+ * diff below stays: it shows the final words line by line, which a
+ * step row only marks changed. */
+function VariantSteps({ variants, sourceRunID }: { variants: Variant[]; sourceRunID: string }) {
+  const done = variants.flatMap((v) =>
+    v.result?.state === "finished" && v.result.row && v.result.row.status !== "running" && v.result.runID
+      ? [v.result.runID]
+      : []
+  )
+  const base = sourceRunID || done[0] || ""
+  const others = done.filter((id) => id !== base)
+  if (!base || !others.length) return null
+  return (
+    <div className="space-y-2 rounded border p-3" data-variant-steps>
+      <div className="flex items-center gap-3 text-xs text-muted-foreground">
+        <span>step by step · {sourceRunID ? "against the source run" : "against the first variant"}</span>
+        <Link {...compareLink(base, others)} className="hover:text-foreground hover:underline">
+          open the compare page
+        </Link>
+      </div>
+      <StepCompare base={base} others={others} />
     </div>
   )
 }

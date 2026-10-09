@@ -23,6 +23,20 @@ module, ADR 0005).
   change by itself; every absent column is a hole from the one table, and
   a read-scoped panel token gets `system: null` under `hidden`.
 
+- **Step-aligned run diff, web half** (plan E3.2): both surfaces render
+  `GET /api/diff` through one module, `studio/web/src/lib/stepdiff.ts` —
+  rows by step ordinal, a cell per compared field (`same`, `changed`,
+  `not comparable` for the server's `unknown`, never "same"; `missing`),
+  one "changed at step N" marker per changed step, each side's marks as
+  chips and its holes (and the response's `truncated`/`response_cap`)
+  as badges from the one table. Studio gains the N-way `/compare` page
+  (N−1 diffs against one base; `compareLink` in `lib/links.ts`), reached
+  from the run header ("compare with source" via `weft.forked_from`,
+  "compare with…"), the replay drawer's finished result and the
+  playground's variants; the devtools panel's experiment result pane
+  draws the 2-way table (the replayed run against its source). Gated on
+  capability `diff` on both. Panel: +2,225 B gzip (ledger row E3).
+
 - **The option lab, Go half** (plan F3.1): a playground command's
   `overrides` gains, beside the numeric `options` (`max_steps`,
   `parallelism`, `temperature` — unchanged), `params` `{top_p?,

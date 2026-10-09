@@ -9,30 +9,30 @@ export const deepLinkRules = {
     "error",
     {
       selector:
-        "NewExpression[callee.name='URL']:not([arguments.1.callee.name='apiBase']) > Literal[value=/^\\/?(runs|sessions|traces|playground|experiments)(\\/|\\?|#|$)/]",
+        "NewExpression[callee.name='URL']:not([arguments.1.callee.name='apiBase']) > Literal[value=/^\\/?(runs|sessions|traces|playground|experiments|compare)(\\/|\\?|#|$)/]",
       message: "Build Studio page URLs with src/lib/links.ts (G1: one deep-link scheme).",
     },
     {
       selector:
-        "NewExpression[callee.name='URL']:not([arguments.1.callee.name='apiBase']) > TemplateLiteral > TemplateElement:first-child[value.raw=/^\\/?(runs|sessions|traces|playground|experiments)(\\/|\\?|#|$)/]",
+        "NewExpression[callee.name='URL']:not([arguments.1.callee.name='apiBase']) > TemplateLiteral > TemplateElement:first-child[value.raw=/^\\/?(runs|sessions|traces|playground|experiments|compare)(\\/|\\?|#|$)/]",
       message: "Build Studio page URLs with src/lib/links.ts (G1: one deep-link scheme).",
     },
     {
       selector:
-        "BinaryExpression[operator='+'] > Literal[value=/^\\/?(runs|sessions|traces|playground|experiments)\\/$/]",
+        "BinaryExpression[operator='+'] > Literal[value=/^\\/?(runs|sessions|traces|playground|experiments|compare)\\/$/]",
       message: "Build Studio page URLs with src/lib/links.ts (G1: one deep-link scheme).",
     },
     {
       // An absolute page path in a template: `/runs/${id}`.
       selector:
-        "TemplateLiteral > TemplateElement:first-child[value.raw=/^\\/(runs|sessions|traces|playground|experiments)(\\/|\\?|#|$)/]",
+        "TemplateLiteral > TemplateElement:first-child[value.raw=/^\\/(runs|sessions|traces|playground|experiments|compare)(\\/|\\?|#|$)/]",
       message: "Build Studio page URLs with src/lib/links.ts (G1: one deep-link scheme).",
     },
     {
       // A page path after an origin or a mount: `${origin}/studio/runs/${id}`
       // (an "api/runs/…" path is the API's, and stays allowed).
       selector:
-        "TemplateLiteral > TemplateElement:not(:first-child)[value.raw=/(?<!api)\\/(runs|sessions|traces|playground|experiments)(\\/|\\?|#|$)/]",
+        "TemplateLiteral > TemplateElement:not(:first-child)[value.raw=/(?<!api)\\/(runs|sessions|traces|playground|experiments|compare)(\\/|\\?|#|$)/]",
       message: "Build Studio page URLs with src/lib/links.ts (G1: one deep-link scheme).",
     },
     {
@@ -45,7 +45,7 @@ export const deepLinkRules = {
     },
     {
       selector:
-        "Literal[value=/^\\/(runs|sessions|traces)\\/\\$id|^\\/(playground|experiments)(\\/|\\?|#|$)/]:not(CallExpression[callee.name='createFileRoute'] > Literal):not(Property[key.name='from'] > Literal)",
+        "Literal[value=/^\\/(runs|sessions|traces)\\/\\$id|^\\/(playground|experiments|compare)(\\/|\\?|#|$)/]:not(CallExpression[callee.name='createFileRoute'] > Literal):not(Property[key.name='from'] > Literal)",
       message:
         "Link to a run, session or trace with runLink / sessionLink / traceLink from src/lib/links.ts (G1: one deep-link scheme).",
     },
@@ -87,7 +87,7 @@ export default [
     // paths, relative to /api/, exactly that way, and a syntax rule
     // cannot tell the two apart; the panel's page links all go through
     // new URL(…, endpoint), which is refused above.
-    // <page> is runs, sessions, traces, playground or experiments.
+    // <page> is runs, sessions, traces, playground, experiments or compare.
     files: ["src/**/*.{ts,tsx}"],
     ignores: ["src/lib/links.ts", "src/**/*.test.{ts,tsx}", "src/test/**", "src/panel/testkit.ts"],
     rules: deepLinkRules,

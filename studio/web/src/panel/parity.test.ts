@@ -21,6 +21,12 @@ import { REQUEST_NO_INDEX_REASON, REQUEST_NO_RECORD_REASON, REQUEST_NOT_RECORDED
 import { badgeLabel } from "./badges"
 import { CAUSES, HOLES, isHole, resultCapReason } from "../lib/honesty"
 import { renderApp, stubBrowser } from "../test/app"
+import { renderWithRouter } from "../test/render"
+import { createElement } from "react"
+import { StepDiffTable } from "../components/studio/step-diff"
+import { markerWords, nWayView, stepDiffView } from "../lib/stepdiff"
+import type { DiffDoc } from "../lib/stepdiff"
+import { stepDiffBlock } from "./compare"
 import { FakeEventSource as StudioEventSource } from "../test/fake-event-source"
 import { FakeStudio, golden, hiddenRefusal, pagedEvents, pagedRequests } from "../test/fake-studio"
 import type { FakePosEvent } from "../test/fake-studio"
@@ -464,5 +470,75 @@ describe("the Request panes word a record's holes alike (E1.2)", () => {
     expectBoth(await panes({ doc: {}, events: events(), rows: [r], tools }), [
       { hole: "stripped", title: "the destination stripped it (otel.NoContent) — fix: drop otel.NoContent()" },
     ])
+  })
+})
+
+// E3.2's parity: the step compare. The same GET /api/diff response
+// (the E3.1 goldens) drawn by the panel's 2-way block (panel/compare.ts)
+// and by Studio's table (components/studio/step-diff.tsx) gives the
+// same rows, the same cell states, the same "changed at step N"
+// markers and the same badges per side — both read lib/stepdiff.ts.
+describe("step compare parity (E3.2)", () => {
+  interface Drawn {
+    markers: { step: string; text: string }[]
+    cells: Record<string, Record<string, string>>
+    holes: Record<string, string[]>
+  }
+
+  function panelDrawn(doc: DiffDoc): Drawn {
+    const box = stepDiffBlock(doc, "http://studio.test/studio/")
+    const out: Drawn = { markers: [], cells: {}, holes: {} }
+    for (const m of box.querySelectorAll("[data-weft-diff-marker]"))
+      out.markers.push({ step: m.getAttribute("data-weft-diff-marker")!, text: m.textContent })
+    for (const tr of box.querySelectorAll("tbody tr")) {
+      const n = tr.getAttribute("data-weft-diff-step")!
+      out.cells[n] = {}
+      for (const td of tr.querySelectorAll("[data-weft-diff-cell]"))
+        out.cells[n][td.getAttribute("data-weft-diff-cell")!] = td.getAttribute("data-state")!
+      for (const side of ["a", "b"])
+        out.holes[`${n}${side}`] = [...tr.querySelectorAll(`[data-weft-diff-side="${side}"] [data-hole]`)].map((b) => b.getAttribute("data-hole")!)
+    }
+    return out
+  }
+
+  async function studioDrawn(doc: DiffDoc): Promise<Drawn> {
+    const { container } = await renderWithRouter(createElement(StepDiffTable, { view: nWayView([doc]) }))
+    await waitFor(() => expect(container.querySelector("[data-step-diff]")).toBeTruthy())
+    const out: Drawn = { markers: [], cells: {}, holes: {} }
+    for (const m of container.querySelectorAll("[data-diff-marker]"))
+      out.markers.push({ step: m.getAttribute("data-diff-marker")!, text: m.querySelector("a")!.textContent })
+    for (const tr of container.querySelectorAll("tbody tr")) {
+      const n = tr.getAttribute("data-diff-step")!
+      out.cells[n] = {}
+      for (const td of tr.querySelectorAll(`[data-diff-run="${doc.b.run_id}"][data-diff-state]`))
+        out.cells[n][td.getAttribute("data-diff-cell")!] = td.getAttribute("data-diff-state")!
+      for (const [side, run] of [["a", doc.a.run_id], ["b", doc.b.run_id]])
+        out.holes[`${n}${side}`] = [...tr.querySelectorAll(`[data-diff-run="${run}"][data-diff-marks] [data-hole]`)].map((b) => b.getAttribute("data-hole")!)
+    }
+    cleanup()
+    return out
+  }
+
+  it.each(["diff", "diff-hidden", "diff-not-recorded"])("%s.golden.json: the same rows, cells, markers and badges on both surfaces", async (name) => {
+    const doc = golden<DiffDoc>(name)
+    const v = stepDiffView(doc)
+    const want: Drawn = { markers: [], cells: {}, holes: {} }
+    for (const r of v.rows) {
+      if (r.changed) want.markers.push({ step: String(r.step), text: markerWords(r) })
+      want.cells[String(r.step)] = { ...r.cells }
+      want.holes[`${r.step}a`] = r.a.holes.map((h) => h.hole)
+      want.holes[`${r.step}b`] = r.b.holes.map((h) => h.hole)
+    }
+    expect(panelDrawn(doc), "panel").toEqual(want)
+    expect(await studioDrawn(doc), "studio").toEqual(want)
+  })
+
+  it("the Done line: a tool result that differs at step 3 is one marker on both, every other row the same", async () => {
+    const doc = golden<DiffDoc>("diff")
+    for (const got of [panelDrawn(doc), await studioDrawn(doc)]) {
+      expect(got.markers).toEqual([{ step: "3", text: "changed at step 3 · tool results" }])
+      for (const [n, row] of Object.entries(got.cells))
+        expect(Object.values(row).filter((s) => s !== "same")).toEqual(n === "3" ? ["changed"] : [])
+    }
   })
 })

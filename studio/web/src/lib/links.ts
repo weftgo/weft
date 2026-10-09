@@ -126,7 +126,19 @@ export interface PlaygroundLink {
   hash?: string
 }
 
-export type StudioLink = RunLink | SessionLink | TraceLink | PlaygroundLink
+/** The step-aligned compare (plan E3): the base run a, and the runs
+ * compared with it (each one GET /api/diff?a=&b= against a). */
+export interface CompareSearch {
+  a?: string
+  b?: string[]
+}
+
+export interface CompareLink {
+  to: "/compare"
+  search: CompareSearch
+}
+
+export type StudioLink = RunLink | SessionLink | TraceLink | PlaygroundLink | CompareLink
 
 /** A whole, non-negative number, or undefined. */
 function ordinal(n: number | undefined): number | undefined {
@@ -190,6 +202,14 @@ export function playgroundLink(
  * experiment history. */
 export function experimentLink(id: string): PlaygroundLink {
   return { to: "/playground", search: { experiment: id } }
+}
+
+/** compareLink is the step-aligned compare of a base run with others
+ * (rows by step ordinal; N-way is N−1 diffs against a). Empty ids and
+ * the base itself are dropped from others, duplicates kept once. */
+export function compareLink(a: string, others: string[] = []): CompareLink {
+  const b = [...new Set(others.filter((x) => x && x !== a))]
+  return { to: "/compare", search: b.length ? { a, b } : { a } }
 }
 
 /** A search value as the router writes it (TanStack's default

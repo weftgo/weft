@@ -19,7 +19,7 @@ import type { AgentView, PlaygroundRunBody, StepDoc } from "@/lib/api"
 import { compactionsOf, isSessionMarker } from "@/lib/compaction"
 import { buildRunBody, pickTarget, unmatchedDrafts } from "@/lib/experiment-body"
 import type { EditDraft, VariantFields } from "@/lib/experiment-body"
-import { playgroundLink, runLink } from "@/lib/links"
+import { compareLink, playgroundLink, runLink } from "@/lib/links"
 import { allowRefusals, breakpointsFor, prefixLine, replayVerdicts } from "@/lib/replay"
 import type { CatalogTool, ReplayDraft, SideEffectsMode, ToolVerdict } from "@/lib/replay"
 import { useCapabilities } from "@/hooks/use-capabilities"
@@ -32,6 +32,7 @@ import {
   useSourceSteps,
 } from "@/components/studio/experiment-form"
 import { HoleBadge } from "@/components/studio/hole-badge"
+import { StepCompare } from "@/components/studio/step-diff"
 import { Button } from "@/components/ui/button"
 
 /** One "replay from here": the run to take the turn from (a child
@@ -604,6 +605,7 @@ function ReplayOutcome({
   runtime?: string
 }) {
   const e = experiment
+  const { has } = useCapabilities()
   const label = e.state === "finished" && e.status ? `${e.state} · ${e.status}` : e.state
   return (
     <div className="space-y-1 rounded-md border px-3 py-2 text-xs" data-replay-state={e.state}>
@@ -633,8 +635,20 @@ function ReplayOutcome({
               compare in the playground
             </Link>
           ) : null}
+          {e.state === "finished" && has("diff") ? (
+            <Link
+              {...compareLink(sourceRunID, [e.runID])}
+              className="text-muted-foreground hover:underline"
+              data-replay-compare-link
+            >
+              open the step compare
+            </Link>
+          ) : null}
         </div>
       ) : null}
+      {/* The replayed run beside its source, step by step (plan E3):
+          once it finished — half a run is not a difference. */}
+      {e.runID && e.state === "finished" ? <StepCompare base={sourceRunID} others={[e.runID]} /> : null}
     </div>
   )
 }

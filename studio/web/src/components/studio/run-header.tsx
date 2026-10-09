@@ -29,7 +29,8 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
 import { forkSource } from "@/lib/experiments"
-import { experimentLink, runLink, sessionLink, traceLink } from "@/lib/links"
+import { compareLink, experimentLink, runLink, sessionLink, traceLink } from "@/lib/links"
+import { useCapabilities } from "@/hooks/use-capabilities"
 
 function shortHash(hash: string | undefined): string {
   return hash ? hash.slice(0, 8) : "—"
@@ -132,6 +133,39 @@ export function ReplayOf({ doc }: { doc: Pick<RunDoc, "forked_from" | "experimen
   )
 }
 
+/**
+ * CompareWith is the run's compare links (plan E3): "compare with
+ * source" for a replayed run (weft.forked_from: the source first, as
+ * the base), and "compare with…" — the compare page with this run as
+ * the base, which asks for the other. Gated on capability "diff".
+ */
+export function CompareWith({ doc }: { doc: Pick<RunDoc, "id" | "forked_from"> }) {
+  const { has } = useCapabilities()
+  if (!has("diff")) return null
+  const src = forkSource(doc)
+  return (
+    <span className="flex items-center gap-2 font-mono text-[11px] text-faint" data-compare-with>
+      {src ? (
+        <Link
+          {...compareLink(src.runID, [doc.id])}
+          className="text-thread-ink hover:underline"
+          title="this run beside its source, step by step"
+          data-compare-source
+        >
+          compare with source
+        </Link>
+      ) : null}
+      <Link
+        {...compareLink(doc.id)}
+        className="hover:text-foreground hover:underline"
+        title="this run beside another, step by step"
+      >
+        compare with…
+      </Link>
+    </span>
+  )
+}
+
 export function RunHeader({
   doc,
   folded,
@@ -221,6 +255,7 @@ export function RunHeader({
           </span>
         ) : null}
         <ReplayOf doc={doc} />
+        <CompareWith doc={doc} />
       </div>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs text-muted-foreground tabular-nums">

@@ -945,6 +945,30 @@ ack preview naming what each tool's calls would do) posts the same
 command, and the playground's "continue from step" is a picker over the
 source run's steps.
 
+The step compare (plan E3, capability `diff`; hidden when off, like
+every capability-gated control): two or more runs side by side, one row
+per step ordinal, a column per compared field — system, tool calls,
+tool results, text, usage — each cell `same`, `changed` (with the
+value), `not comparable` (the server's `unknown`: a side did not record
+the column, never read as the same) or `missing` (one run has no such
+step), and above the table one "changed at step N" marker per changed
+step, linking to that step. Each side's marks (`compacted`, `subagent`,
+`max_tokens`, `parked`, `running`, `interrupted`, `error`) are chips
+beside it — never a change by themselves — and its holes are badges
+from the one table, as is the response's own `truncated`
+(`response_cap`). Both surfaces read `GET /api/diff` through one module,
+`src/lib/stepdiff.ts`: Studio's `/compare?a=<run>&b=["<run>",…]` page
+(`lib/links.ts`'s `compareLink`; N-way is N−1 calls of the 2-way route
+against the base run `a`, drawn in the first column) — reached from the
+run header ("compare with source" for a replayed run, via
+`weft.forked_from`, and "compare with…"), the replay drawer's finished
+result, and the playground (every finished variant against the source
+run, beside the final-text diff); the panel's experiment result pane
+draws the 2-way table (the replayed run against its source) at panel
+width, with a ⤢ hand-off to the same compare page.
+`src/panel/parity.test.ts` holds both to the same rows, markers and
+badges from the same goldens (`studio/testdata/api/diff*.golden.json`).
+
 The runs list (light): status as a dot and a word, the error under a
 failed run's id, session/public-id/experiment filters that mirror the
 URL, the session column linking each turn to its thread, and a follow

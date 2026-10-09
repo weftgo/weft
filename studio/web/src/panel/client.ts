@@ -20,6 +20,8 @@ import type {
   Transcript,
 } from "../lib/api"
 import { asTranscript } from "../lib/api"
+import { diffPath } from "../lib/stepdiff"
+import type { DiffDoc } from "../lib/stepdiff"
 import type { LiveGrant, LiveRecord, LiveRun, LiveSelector } from "../lib/live"
 import { grantSpent, LiveGrantError, liveStreamURL, requestLiveGrant } from "../lib/live"
 
@@ -84,6 +86,12 @@ export async function panelGet<T>(
 
 export function fetchMeta(ep: PanelEndpoint, signal?: AbortSignal): Promise<Meta> {
   return panelGet<Meta>(ep, "meta", signal)
+}
+
+/** GET /api/diff?a=&b= (capability "diff", plan E3): the step-aligned
+ * compare lib/stepdiff.ts reads, as Studio fetches it. */
+export function fetchDiff(ep: PanelEndpoint, a: string, b: string, signal?: AbortSignal): Promise<DiffDoc> {
+  return panelGet<DiffDoc>(ep, diffPath(a, b), signal)
 }
 
 export function fetchRuns(

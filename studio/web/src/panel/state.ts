@@ -28,6 +28,7 @@ import type { FoldFeed, FoldedRun } from "../lib/events"
 import type { LiveRecord, LiveRun } from "../lib/live"
 import {
   fetchCommand,
+  fetchDiff,
   fetchEvents,
   fetchMeta,
   fetchRequests,
@@ -1754,6 +1755,8 @@ export class PanelModel {
         error: null,
         ready: false,
         words: null,
+        stepDiff: null,
+        stepDiffError: null,
         deciding: { callID, decision },
         // Its own lane bookkeeping: nothing held or in flight is the
         // new command's.
@@ -2054,6 +2057,23 @@ export class PanelModel {
     res.words = turnWordsOf(loaded.transcript) ?? foldedWords(res.folded)
     this.expSub?.close()
     this.expSub = undefined
+    this.emit()
+    void this.loadStepDiff(res).catch(quiet)
+  }
+
+  /** loadStepDiff reads the settled run's step-aligned compare against
+   * its source (plan E3): GET /api/diff, the response lib/stepdiff.ts
+   * reads on both surfaces — only when meta reports capability "diff". */
+  private async loadStepDiff(res: ExperimentResult) {
+    if (!res.runID || !res.sourceRunID || !(this.state.meta?.capabilities.includes("diff") ?? false)) return
+    try {
+      const doc = await fetchDiff(this.ep, res.sourceRunID, res.runID)
+      if (this.left(res)) return
+      res.stepDiff = doc
+    } catch (err) {
+      if (this.left(res)) return
+      res.stepDiffError = messageOf(err)
+    }
     this.emit()
   }
 

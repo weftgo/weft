@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  compareLink,
   experimentLink,
   href,
   path,
@@ -131,6 +132,20 @@ describe("the other builders", () => {
   })
 })
 
+describe("compareLink", () => {
+  it("is the compare page: the base run a and the runs compared with it, as the router reads them back", () => {
+    expect(compareLink("r_1", ["r_2", "", "r_1", "r_2", "r_3"])).toEqual({
+      to: "/compare",
+      search: { a: "r_1", b: ["r_2", "r_3"] },
+    })
+    expect(compareLink("r_1")).toEqual({ to: "/compare", search: { a: "r_1" } })
+    const u = new URL(href(BASE, compareLink("123", ["r/2"])))
+    expect(u.pathname).toBe("/studio/compare")
+    expect(JSON.parse(u.searchParams.get("a")!)).toBe("123")
+    expect(JSON.parse(u.searchParams.get("b")!)).toEqual(["r/2"])
+  })
+})
+
 describe("no link ever carries a token", () => {
   it("whatever the base or the values, no builder writes token=", () => {
     const links = [
@@ -146,6 +161,7 @@ describe("no link ever carries a token", () => {
         runtime: "rt",
       }),
       experimentLink("e_1"),
+      compareLink("r_1", ["r_2"]),
     ]
     for (const l of links) {
       // A base the token was handed over on (S4.6's ?token= / #token=)

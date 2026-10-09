@@ -210,7 +210,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    step reduced to system/tool_calls/tool_results/text/usage with changes and unknown per
 //    //    row (a column a side did not record is never compared) and a summary; compaction and
 //    //    subagent are marks, never a change; system hidden to a read token; past the step cap a
-//    //    truncated hole, cause response_cap; capability "diff"), traces/{id},
+//    //    truncated hole, cause response_cap; capability "diff"; drawn through src/lib/stepdiff.ts —
+//    //    unknown reads "not comparable" — by Studio's N-way /compare?a=&b=[…] page (N−1 diffs against
+//    //    a; from the run header, the replay drawer, the playground) and the panel's 2-way result
+//    //    pane, parity.test.ts holding both to the same rows), traces/{id},
 //    //    sessions, sessions/{id}, sessions/{id}/public_id (the reverse of public/{public_id}: the dev token's
 //    //    alone, every panel token 403 hidden), public/{public_id}, /api/live (SSE), /api/panel-tokens (with a Token),
 //    //    /panel.js (the devtools panel, WEFT-DEVTOOLS §5 — its host API, plan C4: the element's

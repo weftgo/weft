@@ -532,6 +532,42 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     })
   })
 
+  it("compares a finished variant with the source run step by step (plan E3, capability diff)", async () => {
+    const done = {
+      events: [
+        { type: "run_start", id: "pg_1", model: rOK.model, agent: "orders" },
+        { type: "step_start", run_id: "pg_1", index: 0 },
+        { type: "step_finish", run_id: "pg_1", index: 0, reason: "stop", usage: { input_tokens: 5, output_tokens: 2 } },
+        { type: "run_finish", run_id: "pg_1", usage: { input_tokens: 5, output_tokens: 2 }, steps: 1 },
+      ].map((event, pos) => ({ pos, time: rOK.started, event })),
+      next_after: null,
+      done: true,
+      gaps: [],
+    }
+    studio
+      .on("GET meta", meta(["live", "playground", "runtimes", "diff"]))
+      .on("POST playground/runs", command("cmd_1", "queued"))
+      .on("GET playground/commands/cmd_1", command("cmd_1", "finished", "pg_1"))
+      .on("GET runs/pg_1", { ...row({ id: "pg_1", playground: true, status: "succeeded" }), children: [] })
+      .on("GET runs/pg_1/events", done)
+      .on("GET runs/pg_1/transcript", { batches: [] })
+      .on("GET diff", golden<object>("diff"))
+    renderApp("/playground?run=r_ok")
+    const runButton = await screen.findByRole("button", { name: "Run A" })
+    await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
+    fireEvent.click(runButton)
+    const box = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>("[data-variant-steps] [data-step-diff]")
+      expect(el).toBeTruthy()
+      return el!
+    })
+    // The source is the base: one call, a=r_ok.
+    expect(studio.calls("GET diff").map((r) => r.query.toString())).toEqual(["a=r_ok&b=pg_1"])
+    expect([...box.querySelectorAll("[data-diff-marker]")].map((m) => m.textContent)).toEqual([
+      "changed at step 3 · tool results",
+    ])
+  })
+
   it("follows a variant's command after the reader moves to another variant, and offers a parked run's verbs", async () => {
     let state = "queued"
     studio

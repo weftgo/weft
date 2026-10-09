@@ -27,6 +27,7 @@ import { ackCatalogHole, badge, capLine, catalogCapped, catalogNotRecorded, cata
 import { fetchSessionPublicId, MAX_REQUEST_PAGES, PanelApiError, panelGet, REQUEST_PAGE } from "./client"
 import type { AgentView } from "./client"
 import { diffLines, diffSummary } from "../lib/diff"
+import { stepDiffBlock } from "./compare"
 import { callState, runHoles, stepHoles, truncation } from "../lib/events"
 import {
   compactionLine,
@@ -3210,6 +3211,14 @@ export class WeftDevtools extends HTMLElement {
       if (other.calls.join("\n") !== mine.calls.join("\n"))
         this.diffInto(diffBox, "tool calls:", other.calls.join("\n"), mine.calls.join("\n"))
       body.appendChild(diffBox)
+    }
+    // The step compare (plan E3): the run against its source, rows by
+    // step ordinal — GET /api/diff through lib/stepdiff.ts, the rows
+    // Studio's compare draws; capability "diff" only.
+    if (r.ready && hasCapability(s, "diff")) {
+      if (r.stepDiff) body.appendChild(stepDiffBlock(r.stepDiff, this.base))
+      else if (r.stepDiffError)
+        body.appendChild(el("div", "weft-note weft-warn", `the step compare could not be read: ${r.stepDiffError}`))
     }
 
     // The parked calls' controls: the runtime-started run's approval

@@ -55,6 +55,7 @@ describe("only links.ts builds a Studio URL", () => {
       'const x = <Link to="/traces/$id" params={{ id }} />',
     ],
     ["navigate to a run", 'void navigate({ to: "/runs/$id", params: { id } })'],
+    ["a router Link to the compare page", 'const x = <Link to="/compare" search={{ a }} />'],
     ["a helper given the route", 'go("/runs/$id", { id })'],
     ["an absolute template path", "const u = `/runs/${id}`"],
     ["a relative template path with a search", "const u = `runs/${id}?step=2`"],

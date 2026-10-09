@@ -7,6 +7,8 @@
 import { queryOptions } from "@tanstack/react-query"
 
 import type { ContentAttrs } from "./honesty"
+import { diffPath } from "./stepdiff"
+import type { DiffDoc } from "./stepdiff"
 
 // ── DTO mirrors (S4.3) ─────────────────────────────────────────────
 
@@ -1101,6 +1103,19 @@ export function stepQuery(runId: string, n: number) {
     // yet): an observer that fetches it re-reads it until it is over.
     // The run page also invalidates ["step", id] when the run ends.
     refetchInterval: (q) => (q.state.data?.status === "running" ? 2000 : false),
+  })
+}
+
+/** GET /api/diff?a=&b= (capability "diff", plan E3): two runs
+ * aligned by step ordinal (lib/stepdiff.ts reads it). A side still
+ * running is read again until it ends. */
+export function diffQuery(a: string, b: string) {
+  return queryOptions({
+    queryKey: ["diff", a, b],
+    queryFn: () => get<DiffDoc>(diffPath(a, b)),
+    retry: false,
+    refetchInterval: (q) =>
+      q.state.data && (q.state.data.a.status === "running" || q.state.data.b.status === "running") ? 2000 : false,
   })
 }
 

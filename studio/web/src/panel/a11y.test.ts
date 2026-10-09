@@ -3,7 +3,8 @@
 // docked right, the bottom sheet at 400 px, the pill, and (D4) the Raw
 // tab's open, filtered tree and the Timeline tab, and (D5) a turn
 // whose badges, cap line and chips are all drawn, and (E1.2) the
-// Request tab's chips, diff and trees — in both themes (D2),
+// Request tab's chips, diff and trees, and (E3.2) the experiment's
+// step compare table — in both themes (D2),
 // with axe's default rules; the budget is zero violations. jsdom has
 // no layout, so the rules that need one (color-contrast, and
 // label-content-name-mismatch's visible text) come back "incomplete",
@@ -14,7 +15,7 @@ import { resolve } from "node:path"
 import axe from "axe-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { golden } from "../test/fake-studio"
-import { baseRoutes, fakeStudio, META, mount, page, runEvents, runRow, settle, setup, teardown, transcript } from "./testkit"
+import { baseRoutes, DIFF_META, fakeStudio, META, mount, page, runEvents, runExperiment, runRow, settle, setup, stepDiffRoutes, teardown, transcript } from "./testkit"
 import type { Route } from "./testkit"
 import { FILTER_MS } from "./tree"
 import type { WeftDevtools } from "./element"
@@ -143,6 +144,7 @@ const MODES: { name: string; width: number; attrs: Record<string, string>; sel: 
   { name: "the Raw tab's tree with the shortcuts overlay", width: 1024, attrs: { "data-open": "true", "data-position": "bottom-dock" }, sel: ".weft-keys", act: rawAndKeys },
   { name: "the Request tab: chips, diff, a tool's schema tree, the earlier messages", width: 1024, attrs: { "data-open": "true", "data-position": "bottom-dock" }, sel: "#weft-tp-request [data-weft-messages-earlier] .weft-tn", act: request, routes: requestRoutes, meta: { ...META, capabilities: [...META.capabilities, "requests"] } },
   { name: "the replay verbs and a verb's drawer with its ack preview", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: ".weft-drawer [data-weft-ack] [data-verdict]", act: replayDrawer, routes: replayRoutes, meta: REPLAY_META },
+  { name: "the experiment's step compare: markers, the table, marks and badges", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: '[data-weft-step-diff] table [data-hole="hidden"]', act: runExperiment, routes: () => stepDiffRoutes(golden("diff-hidden")), meta: DIFF_META },
   { name: "badges, the cap line and the chips", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: '[data-weft-chip="fork"]', act: badgesDrawn, routes: badgeRoutes },
 ]
 

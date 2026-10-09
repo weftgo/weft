@@ -8,6 +8,7 @@ import type { FoldFeed, FoldedRun } from "../lib/events"
 import type { LiveRecord } from "../lib/live"
 import type { ReplayDraft, ReplayVerb } from "../lib/replay"
 import type { HoleMark } from "../lib/honesty"
+import type { DiffDoc } from "../lib/stepdiff"
 import type { CommandStatus, RuntimeView } from "./client"
 import { stringify } from "./render"
 
@@ -101,6 +102,11 @@ export interface ExperimentResult {
   ready: boolean
   /** The finished run's words (whole turn), once ready. */
   words: TurnWords | null
+  /** The step-aligned compare of the run against its source (plan E3,
+   * GET /api/diff, capability "diff"), read once ready; or why it
+   * could not be read. */
+  stepDiff?: DiffDoc | null
+  stepDiffError?: string | null
   /** The decision this result's command carries (decide): when the
    * runtime holds it — other calls of the parked run are still
    * undecided — it lands in decided and the pane stays on the park. */

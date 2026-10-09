@@ -17,15 +17,15 @@ import { createContext, useContext, useEffect, useRef, useState } from "react"
 import { ApiError, isHoleRef, isRequestRow, postPlaygroundRun, runQuery, runtimesQuery, stepQuery } from "@/lib/api"
 import type { AgentView, PlaygroundRunBody, StepDoc } from "@/lib/api"
 import { compactionsOf, isSessionMarker } from "@/lib/compaction"
-import { buildRunBody, pickTarget } from "@/lib/experiment-body"
+import { buildRunBody, pickTarget, unmatchedDrafts } from "@/lib/experiment-body"
 import type { EditDraft, VariantFields } from "@/lib/experiment-body"
 import { playgroundLink, runLink } from "@/lib/links"
-import { breakpointsFor, prefixLine, replayVerdicts } from "@/lib/replay"
+import { allowRefusals, breakpointsFor, prefixLine, replayVerdicts } from "@/lib/replay"
 import type { CatalogTool, ReplayDraft, SideEffectsMode, ToolVerdict } from "@/lib/replay"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { queued, settled, useCommandTracking } from "@/hooks/use-command-tracking"
 import type { Experiment } from "@/hooks/use-command-tracking"
-import { ExperimentForm, StepPicker, useSourceSteps } from "@/components/studio/experiment-form"
+import { ExperimentForm, StepPicker, useSourceEditFields } from "@/components/studio/experiment-form"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { Button } from "@/components/ui/button"
 
@@ -37,6 +37,9 @@ export interface ReplayRequest {
   runID: string
   agent?: string
   draft: ReplayDraft
+  /** The control that opened the drawer: focus returns to it on
+   * close. */
+  opener?: HTMLElement | null
 }
 
 /** The verbs' opener, provided by the run page when the drawer may be
@@ -69,16 +72,31 @@ export function ReplayDrawer({
 }) {
   // Non-modal (the sheet's look, not its focus trap): the run stays
   // readable and its other verbs usable beside the drawer. Escape
-  // closes it.
+  // closes it — except inside the drawer's own fields, where Escape is
+  // the field's — and focus goes back to the verb that opened it.
   const open = request !== null
+  const opener = request?.opener ?? null
+  const close = useRef(() => {})
+  close.current = () => {
+    onClose()
+    if (opener?.isConnected) opener.focus()
+  }
   useEffect(() => {
     if (!open) return
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose()
+      if (e.key !== "Escape") return
+      const t = e.target
+      if (
+        t instanceof HTMLElement &&
+        t.closest("[data-replay-drawer]") &&
+        (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT")
+      )
+        return
+      close.current()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [open, onClose])
+  }, [open])
   if (!request) return null
   return (
     <aside
@@ -93,7 +111,7 @@ export function ReplayDrawer({
         size="icon-sm"
         className="absolute top-4 right-4"
         aria-label="Close"
-        onClick={onClose}
+        onClick={() => close.current()}
       >
         <XIcon />
       </Button>
@@ -135,7 +153,16 @@ export function catalogOfStep(doc: StepDoc | undefined, error?: string): StepCat
     }
   if (!doc) return { loading: true, tools: null }
   const req = doc.request
-  if (!req) return { tools: [], none: true }
+  // No request block: which tools the step offered is unknown — a
+  // hole, never "no tools".
+  if (!req)
+    return {
+      tools: null,
+      hole: {
+        badge: "not_recorded",
+        reason: "the step carries no request record: the tools it offered are unknown",
+      },
+    }
   if (!isRequestRow(req))
     return { tools: null, hole: { badge: req.badge ?? "gap", reason: req.reason, fix: req.fix } }
   const tools = req.tools
@@ -178,6 +205,9 @@ export function ReplayAck({
 }) {
   const tools = catalog.tools ?? registeredCatalog(agent)
   const verdicts = replayVerdicts({ catalog: tools, agent, mode, toolsEnabled, breakpoints })
+  // A hole with nothing to stand in for it is the badge alone: an
+  // empty list would claim "no tools".
+  const holeOnly = catalog.tools === null && !catalog.loading && !agent
   return (
     <div className="space-y-1.5 rounded-md border px-3 py-2" data-replay-ack>
       <div className="eyebrow">before you run</div>
@@ -196,7 +226,7 @@ export function ReplayAck({
       ) : null}
       {catalog.loading ? (
         <p className="text-[11px] text-faint">reading the step's catalog…</p>
-      ) : catalog.none ? (
+      ) : holeOnly ? null : catalog.none ? (
         <p className="text-[11px] text-faint">the step offered no tools · nothing to substitute or park</p>
       ) : (
         <ul className="space-y-0.5 text-xs" aria-label="what each tool would do">
@@ -242,19 +272,27 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
     sideEffects: "substitute",
     thread: draft.thread,
   }))
-  const patch = (p: Partial<VariantFields>) => setVariant((v) => ({ ...v, ...p }))
+  const patch = (p: Partial<VariantFields>) => {
+    setVariant((v) => ({ ...v, ...p }))
+    // A fork re-runs no steps (from_step is the ephemeral verb): the
+    // step it would keep is reset, never sent and refused.
+    if (p.thread === "fork") setFromStep(0)
+  }
+  // The heading takes focus on open (the verb's click left it there).
+  const heading = useRef<HTMLHeadingElement>(null)
+  useEffect(() => {
+    heading.current?.focus()
+  }, [])
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
   const [experiment, setExperiment] = useState<Experiment | null>(null)
   useCommandTracking(experiment, setExperiment)
 
-  // The steps by position (the picker's list): the step whose catalog
-  // and compaction the preview reads is the one run fresh.
-  const { steps } = useSourceSteps(runID)
-  const fresh = steps?.find((st) => st.position === fromStep)
-  // Position = ordinal on a run with no lost records; the step route
-  // takes the ordinal.
-  const ordinal = fresh?.ordinal ?? fromStep
+  // from_step is the step ordinal: the step route's n, the step whose
+  // catalog and compaction the preview reads (the one run fresh).
+  const ordinal = fromStep
+  const edits = useSourceEditFields(runID)
+  const orphans = unmatchedDrafts(editDrafts, edits.fields, variant.thread === "fork" ? 0 : fromStep)
   const stepDoc = useQuery({ ...stepQuery(runID, ordinal), enabled: caps.includes("steps"), retry: false })
   const catalog = caps.includes("steps")
     ? catalogOfStep(stepDoc.data, stepDoc.isError ? stepDoc.error.message : undefined)
@@ -266,7 +304,9 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
   const seeded = useRef(false)
   useEffect(() => {
     if (seeded.current || draft.instructions !== undefined) return
-    if (draft.verb === "edit_prompt") {
+    // Without the step route there is no text to wait for: the
+    // registered prompt stands.
+    if (draft.verb === "edit_prompt" && caps.includes("steps")) {
       if (!stepDoc.data && !stepDoc.isError) return
       const req = stepDoc.data?.request
       const prompt = req && isRequestRow(req) ? req.prompt : undefined
@@ -279,7 +319,7 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
     if (!agent) return
     seeded.current = true
     patch({ instructions: registered })
-  }, [agent, registered, draft, stepDoc.data, stepDoc.isError])
+  }, [agent, registered, draft, stepDoc.data, stepDoc.isError, caps])
 
   const compacted =
     fromStep > 0 &&
@@ -288,14 +328,10 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
   const toolNames = agent?.tools.map((t) => t.name) ?? []
   const enabled = toolNames.filter((n) => !variant.toolsOff.has(n))
   const toolsEnabled = enabled.length < toolNames.length ? enabled : undefined
-  const verdicts = replayVerdicts({
-    catalog: catalog.tools ?? registeredCatalog(agent),
-    agent,
-    mode: variant.sideEffects,
-    toolsEnabled,
-    breakpoints: breakpointsFor(runtime, agent),
-  })
-  const refused = verdicts.filter((v) => v.refuses).map((v) => v.name)
+  // The ack preview judges the catalog's rows for display; the command
+  // is refused over the REGISTERED tools left on (studio/playground.go's
+  // walk), whatever the step offered.
+  const refused = allowRefusals(agent, variant.sideEffects, toolsEnabled)
 
   const run = async () => {
     setError("")
@@ -344,7 +380,12 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
   return (
     <>
       <div className="flex flex-col gap-1.5 p-6 pb-2">
-        <h2 id="replay-drawer-title" className="font-heading text-base font-medium text-foreground">
+        <h2
+          id="replay-drawer-title"
+          ref={heading}
+          tabIndex={-1}
+          className="font-heading text-base font-medium text-foreground outline-none"
+        >
           {VERB_TITLES[draft.verb]}
         </h2>
         <p className="font-mono text-xs text-muted-foreground">
@@ -359,7 +400,11 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
             {blocked}
           </p>
         ) : null}
-        {variant.thread === "fork" ? null : (
+        {variant.thread === "fork" ? (
+          <p className="text-[11px] text-faint">
+            fork: a new session continues the conversation after this turn · type its next message
+          </p>
+        ) : (
           <StepPicker runID={runID} value={fromStep} onChange={setFromStep} />
         )}
         <ExperimentForm
@@ -373,7 +418,6 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
           fromStep={fromStep}
           editDrafts={editDrafts}
           setEditDrafts={setEditDrafts}
-          focus={draft.focus}
         />
         <ReplayAck
           catalog={catalog}
@@ -390,6 +434,18 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
             turn {refused.length === 1 ? "it" : "them"} off, or pick substitute or park
           </p>
         ) : null}
+        {orphans.length ? (
+          <p className="text-xs text-status-bad" role="alert" data-replay-orphans>
+            {edits.fields === null
+              ? "the transcript is not read: the edits cannot be checked against the kept steps"
+              : "an edit names no field of the kept steps: fix it or drop it"}
+          </p>
+        ) : null}
+        {variant.thread === "fork" && !variant.input.trim() ? (
+          <p className="text-[11px] text-faint" data-replay-needs-input>
+            a fork needs its next message
+          </p>
+        ) : null}
         {error ? (
           <p className="text-xs text-status-bad" role="alert" data-replay-error>
             {error}
@@ -398,7 +454,16 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
         <div className="flex items-center gap-2">
           <Button
             onClick={() => void run()}
-            disabled={Boolean(blocked) || !runtime || !agent || busy || refused.length > 0 || Boolean(experiment && !settled(experiment.state))}
+            disabled={
+              Boolean(blocked) ||
+              !runtime ||
+              !agent ||
+              busy ||
+              refused.length > 0 ||
+              orphans.length > 0 ||
+              (variant.thread === "fork" && !variant.input.trim()) ||
+              Boolean(experiment && !settled(experiment.state))
+            }
           >
             {busy ? "sending…" : "Run"}
           </Button>

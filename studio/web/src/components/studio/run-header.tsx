@@ -107,9 +107,8 @@ function useNow(active: boolean): number {
 /**
  * ReplayOf is a replayed run's link back to its source step (plan F1):
  * forked_from is "<source run id>#<from_step>" (weft/runtime stamps
- * it). from_step counts the step's position among the source's own
- * steps, and the link lands on that number as the step ordinal — the
- * two are the same on a run with no lost records (lib/links.ts). The
+ * it). from_step is the step ordinal, so the link lands on it
+ * literally: runLink(src, {step: from_step}) (lib/links.ts). The
  * experiment it was filed under, when one was named, links too.
  */
 export function ReplayOf({ doc }: { doc: Pick<RunDoc, "forked_from" | "experiment_id"> }) {

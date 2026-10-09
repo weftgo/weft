@@ -90,14 +90,14 @@ export interface TraceLink {
 }
 
 /** The playground's hand-off: the run, the step it continues from
- * (from_step's count, see below) and the overrides, every one optional. */
+ * (source.from_step, see below) and the overrides, every one optional. */
 export interface PlaygroundHandoff {
   run?: string
-  /** The step the experiment continues from, as source.from_step
-   * counts it: the position of the assistant message among the run's
-   * own (the panel's stepPosition). Deliberately NOT the step ordinal
-   * runLink carries — the two differ when a fold lacks a leading
-   * step — and never converted from one. */
+  /** The step the experiment continues from: source.from_step, which
+   * IS the step ordinal runLink carries (the stored weft.step.index —
+   * the server and the runtime cut at the first assistant message whose
+   * stored index is ≥ from_step), so a step link's number hands off
+   * unchanged. */
   step?: number
   instructions?: string
   tools?: string

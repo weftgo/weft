@@ -28,7 +28,8 @@ import type {
 import { mergeHoles } from "@/lib/honesty"
 import type { HoleMark } from "@/lib/honesty"
 import { tokens } from "@/lib/format"
-import { stepPositionOf } from "@/lib/replay"
+import { sourceSteps } from "@/lib/experiment-body"
+import { transcriptStepCount } from "@/lib/replay"
 import { bytes } from "@/lib/summarize"
 import { CodeWin } from "@/components/studio/codewin"
 import { CompactionMarker } from "@/components/studio/compaction-marker"
@@ -649,15 +650,20 @@ export function StepList({
   // While scrubbing, the run reads as running: calls past the
   // playhead are "running", not "never completed".
   const runStatus = replaying ? "running" : doc.status
-  // The verbs' from_step is a step's POSITION among the run's own
-  // steps (the playground's count), read off the whole fold — a
-  // scrubbed prefix lists the same steps in the same order.
-  const indexes = folded.steps.map((st) => st.index)
+  // The verbs' from_step is the card's own step ordinal (the stored
+  // index the server cuts at). Whether a next step exists is the
+  // transcript's to say (the server's stepCount), never the fold's — a
+  // step_start without a reply counts there and would 400.
+  const stepCount = transcript
+    ? transcriptStepCount(sourceSteps(transcript.batches).map((st) => st.ordinal))
+    : null
+  const canFork = !doc.parent_run_id && Boolean(doc.session_id)
   const replayAt = (index: number): ReplayAt => ({
     runID: doc.id,
     agent: doc.agent || undefined,
-    position: stepPositionOf(indexes, index),
-    stepCount: indexes.length,
+    step: index,
+    stepCount,
+    canFork,
   })
   return (
     <div className="space-y-3">

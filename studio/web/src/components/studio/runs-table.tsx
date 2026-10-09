@@ -161,8 +161,7 @@ export interface RunsTableProps {
 }
 
 /** A replayed run's source step (plan F1): forked_from's run and
- * from_step, linked (the step number lands as the ordinal — the same
- * on a run with no lost records). */
+ * from_step — the step ordinal — linked literally. */
 function ReplayChip({ run }: { run: Pick<RunRow, "forked_from"> }) {
   const src = forkSource(run)
   if (!src) return null

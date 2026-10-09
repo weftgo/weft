@@ -52,6 +52,7 @@ import {
   overridesOf,
   pickTarget,
   toolsOffFor,
+  unmatchedDrafts,
 } from "@/lib/experiment-body"
 import type { EditDraft, Engine, SideEffects, ThreadMode, VariantFields } from "@/lib/experiment-body"
 import { spanMs } from "@/lib/format"
@@ -65,7 +66,7 @@ import {
 } from "@/hooks/use-command-tracking"
 import type { Experiment } from "@/hooks/use-command-tracking"
 import { useRunEvents } from "@/hooks/use-run-events"
-import { ExperimentForm, StepPicker } from "@/components/studio/experiment-form"
+import { ExperimentForm, StepPicker, useSourceEditFields } from "@/components/studio/experiment-form"
 import { Button } from "@/components/ui/button"
 import { experimentLink, runLink } from "@/lib/links"
 
@@ -356,6 +357,10 @@ function Playground({ caps }: { caps: string[] }) {
     )
 
   const sourceText = useSourceText(sourceRunID)
+  // Edits no field of the kept prefix matches (or that cannot be
+  // checked yet) hold Run: TranscriptEdits shows them, badged.
+  const editFields = useSourceEditFields(sourceRunID)
+  const orphans = sourceRunID ? unmatchedDrafts(editDrafts, editFields.fields, fromStep) : []
 
   /** decide answers one parked call of a variant's run with the
    * approval verbs (ADR 0007) — the panel's controls, rendered here
@@ -635,7 +640,7 @@ function Playground({ caps }: { caps: string[] }) {
           )}
           <Button
             onClick={() => void run()}
-            disabled={!runtime || !agent || busy || resolving}
+            disabled={!runtime || !agent || busy || resolving || orphans.length > 0}
           >
             {busy ? "sending…" : `Run ${variant.key}`}
           </Button>

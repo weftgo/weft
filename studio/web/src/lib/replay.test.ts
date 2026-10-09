@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  allowRefusals,
   breakpointsFor,
   canReplay,
   continueHere,
@@ -18,6 +19,7 @@ import {
   rerun,
   stepPositionOf,
   tokenScopeOf,
+  transcriptStepCount,
 } from "./replay"
 import type { CatalogTool, ReplayVerdict, SideEffectsMode } from "./replay"
 import type { AgentView } from "./api"
@@ -104,11 +106,20 @@ describe("replayVerdicts (allowedTools' rule, as the ack preview words it)", () 
     expect(replayVerdicts({ catalog, agent, mode: "" })).toEqual(shape(TABLE.substitute))
   })
 
-  it("a breakpoint parks whatever the mode and the class", () => {
+  it("a breakpoint parks whatever the mode and the class — and keeps allow's refusal", () => {
     for (const mode of ["", "substitute", "park", "allow"] as SideEffectsMode[]) {
       const out = replayVerdicts({ catalog, agent, mode, breakpoints: ["search", "lookup", "refund"] })
-      for (const name of ["search", "lookup", "refund"])
-        expect(out.find((v) => v.name === name)).toEqual({ name, verdict: "parked", why: "breakpoint · parks" })
+      for (const name of ["search", "lookup", "refund"]) {
+        // lookup is neither safe nor opted in: under allow the command
+        // is refused while it is on, breakpoint or not.
+        const refuses = mode === "allow" && name === "lookup"
+        expect(out.find((v) => v.name === name)).toEqual({
+          name,
+          verdict: "parked",
+          why: "breakpoint · parks",
+          ...(refuses ? { refuses } : {}),
+        })
+      }
     }
   })
 
@@ -165,6 +176,21 @@ describe("replayVerdicts (allowedTools' rule, as the ack preview words it)", () 
     })
   })
 
+  it("allowRefusals walks the registered tools left on, as the server does", () => {
+    expect(allowRefusals(agent, "allow")).toEqual(["lookup", "email", "transfer"])
+    // Turned off, a tool no longer blocks allow.
+    expect(allowRefusals(agent, "allow", ["search", "refund", "check"])).toEqual([])
+    // A registered tool the step's catalog never offered still counts.
+    expect(
+      allowRefusals({ tools: [...agent.tools, { name: "hidden_tool", side_effects: "never", allow: false }] }, "allow", [
+        "search",
+        "hidden_tool",
+      ])
+    ).toEqual(["hidden_tool"])
+    expect(allowRefusals(agent, "substitute")).toEqual([])
+    expect(allowRefusals(null, "allow")).toEqual([])
+  })
+
   it("breakpointsFor keeps the stored set the agent can fire", () => {
     expect(breakpointsFor({ breakpoints: ["lookup", "elsewhere"] }, agent)).toEqual(["lookup"])
     expect(breakpointsFor(undefined, agent)).toEqual([])
@@ -217,12 +243,23 @@ describe("the verbs' drafts (one command on both surfaces)", () => {
     expect(replayFromStep(1.5).fromStep).toBe(0)
   })
 
-  it("stepPositionOf maps an ordinal to its position; -1 for one the run lacks", () => {
-    // A fold that lacks step 1 (its events were lost): ordinal 2 is
-    // position 1 — from_step counts positions.
-    expect(stepPositionOf([0, 2, 3], 2)).toBe(1)
+  it("from_step is the step ordinal: stepPositionOf never shifts a number", () => {
+    // A fold that lacks step 1 (its events were lost): step 2's card
+    // sends 2 — the server cuts at the first assistant message whose
+    // stored index is ≥ from_step.
+    expect(stepPositionOf([0, 2, 3], 2)).toBe(2)
     expect(stepPositionOf([0, 2, 3], 1)).toBe(-1)
     expect(stepPositionOf([0, 1, 2], 2)).toBe(2)
+  })
+
+  it("transcriptStepCount is the server's stepCount: one past the last assistant step", () => {
+    expect(transcriptStepCount([0, 1, 2, 3])).toBe(4)
+    expect(transcriptStepCount([0, 2])).toBe(3)
+    expect(transcriptStepCount([])).toBe(0)
+  })
+
+  it("an empty recorded result seeds no edit (the server refuses an empty one)", () => {
+    expect(editResultAndReplay(2, "c7", "")).toMatchObject({ fromStep: 3, edits: [] })
   })
 })
 

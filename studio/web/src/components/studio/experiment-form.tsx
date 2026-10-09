@@ -9,10 +9,10 @@ import { useQuery } from "@tanstack/react-query"
 import { useEffect, useState } from "react"
 import type { Dispatch, SetStateAction } from "react"
 
-import { ApiError, fetchTranscript, putBreakpoints, runQuery, transcriptQuery } from "@/lib/api"
+import { ApiError, putBreakpoints, runQuery, transcriptQuery } from "@/lib/api"
 import type { AgentView, RuntimeView } from "@/lib/api"
 import { compactionsOf, isSessionMarker } from "@/lib/compaction"
-import { editFieldsOf, sourceSteps } from "@/lib/experiment-body"
+import { editFieldsOf, sourceSteps, unmatchedDrafts } from "@/lib/experiment-body"
 import type { EditDraft, EditField, SourceStep, VariantFields } from "@/lib/experiment-body"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { Badge } from "@/components/ui/badge"
@@ -28,7 +28,6 @@ export function ExperimentForm({
   fromStep,
   editDrafts,
   setEditDrafts,
-  focus,
 }: {
   variant: VariantFields
   patch: (p: Partial<VariantFields>) => void
@@ -40,12 +39,10 @@ export function ExperimentForm({
   /** /api/meta's capabilities (breakpoints is one). */
   caps: string[]
   sourceRunID: string
-  /** source.from_step: a position among the source run's own steps. */
+  /** source.from_step: the step ordinal run fresh. */
   fromStep: number
   editDrafts: EditDraft[]
   setEditDrafts: Dispatch<SetStateAction<EditDraft[]>>
-  /** The field to open on (the replay verbs, lib/replay.ts). */
-  focus?: "prompt" | "edit" | "input"
 }) {
   return (
     <>
@@ -59,7 +56,6 @@ export function ExperimentForm({
           fromStep={fromStep}
           drafts={editDrafts}
           setDrafts={setEditDrafts}
-          focus={focus === "edit"}
         />
       )}
       <label className="block space-y-1">
@@ -67,7 +63,6 @@ export function ExperimentForm({
         <textarea
           rows={4}
           aria-label="system prompt"
-          autoFocus={focus === "prompt"}
           className="w-full rounded border bg-transparent px-2 py-1 text-xs"
           value={variant.instructions}
           onChange={(e) => patch({ instructions: e.target.value })}
@@ -206,7 +201,6 @@ export function ExperimentForm({
           <textarea
             rows={2}
             aria-label="input"
-            autoFocus={focus === "input"}
             className="w-full rounded border bg-transparent px-2 py-1 text-xs"
             value={variant.input}
             onChange={(e) => patch({ input: e.target.value })}
@@ -221,41 +215,26 @@ export function ExperimentForm({
  * fix 4b): when continuing from a step, the kept steps' tool results
  * are patchable and their call-free replies rewritable — the
  * counterfactual the fresh step answers. The panel's drawer is the
- * shape; this is the same wire. */
+ * shape; this is the same wire. A draft is never dropped behind the
+ * user's back: one no field of the kept prefix matches (another step,
+ * an unreadable transcript) is shown with a badge, and the caller holds
+ * Run (unmatchedDrafts) until it is fixed or dropped here. */
 export function TranscriptEdits({
   runID,
   fromStep,
   drafts,
   setDrafts,
-  focus,
 }: {
   runID: string
   fromStep: number
   drafts: EditDraft[]
   setDrafts: Dispatch<SetStateAction<EditDraft[]>>
-  /** Open on the first field a draft pre-fills (edit this result). */
-  focus?: boolean
 }) {
-  const all = useSourceEditFields(runID)
-  const fields = (all ?? []).filter((f) => f.step < fromStep)
-  // A draft belongs to a field of the kept prefix: one left over from
-  // another source run, or from a step no longer kept, would be sent
-  // and refused (400) with nothing on screen to explain it. Only once
-  // the fields are read: a draft a verb pre-filled is kept while they
-  // load.
-  const fieldKeys =
-    all === null ? null : fields.map((f) => `${f.step}\u0000${f.callID ?? ""}`).join("\u0001")
-  useEffect(() => {
-    if (fieldKeys === null) return
-    const keep = new Set(fieldKeys ? fieldKeys.split("\u0001") : [])
-    setDrafts((cur) => {
-      const next = cur.filter((d) => keep.has(`${d.step}\u0000${d.callID ?? ""}`))
-      return next.length === cur.length ? cur : next
-    })
-  }, [fieldKeys, setDrafts])
-  if (!fields.length) return null
+  const source = useSourceEditFields(runID)
+  const fields = (source.fields ?? []).filter((f) => f.step < fromStep)
+  const orphans = unmatchedDrafts(drafts, source.fields, fromStep)
+  if (!fields.length && !orphans.length && !source.error) return null
   const draftOf = (f: EditField) => drafts.find((d) => d.step === f.step && d.callID === f.callID)
-  const firstDrafted = fields.find((f) => draftOf(f))
   const set = (f: EditField, v: string) => {
     const at = (d: EditDraft) => d.step === f.step && d.callID === f.callID
     setDrafts((cur) => {
@@ -272,6 +251,40 @@ export function TranscriptEdits({
       <span className="text-xs text-muted-foreground">
         Transcript edits (steps 0..{fromStep - 1} are kept)
       </span>
+      {source.error ? (
+        <Badge
+          variant="outline"
+          className="font-mono text-[10px] font-normal"
+          title={source.error}
+          data-edits-unreadable
+        >
+          transcript unreadable · {source.error}
+        </Badge>
+      ) : null}
+      {orphans.map((d) => (
+        <div
+          key={`orphan:${d.step}:${d.callID ?? "reply"}`}
+          className="flex flex-wrap items-center gap-1 text-xs"
+          data-edit-orphan={d.callID ?? "reply"}
+        >
+          <Badge
+            variant="outline"
+            className="border-ev-error/40 font-mono text-[10px] font-normal text-ev-error"
+          >
+            {source.fields === null ? "unchecked edit" : "no such field in the kept prefix"}
+          </Badge>
+          <span className="font-mono text-faint">
+            step {d.step} · {d.callID ?? "reply"} → {(d.toolResult ?? d.content ?? "").slice(0, 40)}
+          </span>
+          <button
+            type="button"
+            className="text-faint hover:underline"
+            onClick={() => setDrafts((cur) => cur.filter((x) => x !== d))}
+          >
+            drop
+          </button>
+        </div>
+      ))}
       {fields.map((f) =>
         f.callID ? (
           <label key={`${f.step}:${f.callID}`} className="flex items-center gap-1 text-xs">
@@ -282,7 +295,6 @@ export function TranscriptEdits({
               className="w-full rounded border bg-transparent px-2 py-1"
               aria-label={`edit the result of ${f.name} (${f.callID}) at step ${f.step}`}
               data-edit-call={f.callID}
-              autoFocus={focus && f === firstDrafted}
               placeholder={f.placeholder.slice(0, 60)}
               value={draftOf(f)?.toolResult ?? ""}
               onChange={(e) => set(f, e.target.value)}
@@ -305,30 +317,17 @@ export function TranscriptEdits({
   )
 }
 
-/** useSourceEditFields loads every editable field of the source
- * transcript (the fromStep filter is applied at render, so a changed
- * step needs no refetch); null while it loads. */
-export function useSourceEditFields(runID: string): EditField[] | null {
-  const [fields, setFields] = useState<EditField[] | null>(null)
-  useEffect(() => {
-    setFields(null)
-    if (!runID) {
-      setFields([])
-      return
-    }
-    let alive = true
-    fetchTranscript(runID)
-      .then((doc) => {
-        if (alive) setFields(editFieldsOf(doc.batches, Number.MAX_SAFE_INTEGER))
-      })
-      .catch(() => {
-        if (alive) setFields([])
-      })
-    return () => {
-      alive = false
-    }
-  }, [runID])
-  return fields
+/** useSourceEditFields reads every editable field of the source
+ * transcript (the fromStep filter is applied by the reader, so a
+ * changed step needs no refetch) through the transcript query the run
+ * page shares: fields null while loading — and on a failed read, with
+ * the error — never [] for "unknown". */
+export function useSourceEditFields(runID: string): { fields: EditField[] | null; error?: string } {
+  const q = useQuery({ ...transcriptQuery(runID), enabled: Boolean(runID) })
+  if (!runID) return { fields: [] }
+  if (q.isError) return { fields: null, error: q.error.message }
+  if (!q.data) return { fields: null }
+  return { fields: editFieldsOf(q.data.batches, Number.MAX_SAFE_INTEGER) }
 }
 
 /** useSourceSteps reads a source run's own steps (the transcript and
@@ -360,9 +359,10 @@ export function useSourceSteps(runID: string): {
 }
 
 /** StepPicker is the playground's (and the replay drawer's) from_step
- * field: the source run's steps by position — step 0 starts the turn
- * over with a new input; step N keeps steps 0..N-1 and runs N fresh.
- * The run's last step is not offered past: nothing fresh would answer.
+ * field: the source run's steps by their ordinal (from_step IS the
+ * ordinal) — step 0 starts the turn over with a new input; step N
+ * keeps steps 0..N-1 and runs N fresh. The run's last step is not
+ * offered past: nothing fresh would answer.
  * When the run's steps cannot be read the number field stays, with a
  * badge saying why — never an empty picker. */
 export function StepPicker({
@@ -411,9 +411,11 @@ export function StepPicker({
       </label>
     )
   }
-  // A value past the list (a hand-off's step the run does not have) is
+  // A value the list lacks (a hand-off's step the run does not have) is
   // shown as itself, not silently moved.
-  const known = value === 0 || steps.some((st) => st.position === value && value < steps.length)
+  const offered = steps.filter((st) => st.ordinal > 0)
+  const known = value === 0 || offered.some((st) => st.ordinal === value)
+  const last = Math.max(...steps.map((st) => st.ordinal))
   return (
     <label className="block space-y-1" data-step-picker="list">
       <span className="text-xs text-muted-foreground">Continue from step</span>
@@ -424,18 +426,17 @@ export function StepPicker({
         onChange={(e) => onChange(Number(e.target.value))}
       >
         <option value="0">0 · from the start (new input)</option>
-        {steps.slice(1).map((st) => {
-          const last = st.position === steps.length - 1
+        {offered.map((st) => {
           const bits = [
-            `${st.position}`,
+            `${st.ordinal}`,
             shownModel,
             st.tools.length ? `calls ${st.tools.join(", ")}` : "reply",
             st.toolError ? "tool error" : "",
-            last && failed ? "failed" : "",
+            st.ordinal === last && failed ? "failed" : "",
             st.compacted ? "compacted" : "",
           ].filter(Boolean)
           return (
-            <option key={st.position} value={String(st.position)} data-compacted={st.compacted ? "" : undefined}>
+            <option key={st.ordinal} value={String(st.ordinal)} data-compacted={st.compacted ? "" : undefined}>
               {bits.join(" · ")}
             </option>
           )

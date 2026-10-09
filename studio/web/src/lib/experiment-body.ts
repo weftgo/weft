@@ -194,10 +194,12 @@ export function ownMessages(batches: TranscriptBatch[]): { step: number; m: Mess
 
 /** One step of a source run as the step picker lists it. */
 export interface SourceStep {
-  /** source.from_step's count: the step's place among the run's own. */
+  /** The step's place in the list (display only: from_step is the
+   * ordinal). */
   position: number
-  /** The step number the transcript stamps (the ordinal on a run
-   * whose records all carry one). */
+  /** The step ordinal the transcript stamps (weft.step.index; by
+   * order only for records that carry none) — source.from_step's
+   * number. */
   ordinal: number
   /** The tools the step's reply called, in order. */
   tools: string[]
@@ -208,7 +210,7 @@ export interface SourceStep {
   compacted: boolean
 }
 
-/** sourceSteps lists a source run's own steps by position — the
+/** sourceSteps lists a source run's own steps in order — the
  * playground's step picker and the replay drawer read it. compactedAt
  * holds the ordinals that carry a run-scope compaction view (the run
  * document's compactions). */
@@ -278,6 +280,22 @@ export function editFieldsOf(
     }
   }
   return fields
+}
+
+/** unmatchedDrafts is the drafts no editable field of the kept prefix
+ * (steps < fromStep) matches — sent, the server would refuse them
+ * (400). fields null (not read, or unreadable) leaves every draft
+ * unchecked: all of them are returned, so the caller holds Run rather
+ * than send what it cannot check. None at fromStep 0 (no edit is sent). */
+export function unmatchedDrafts(
+  drafts: EditDraft[],
+  fields: EditField[] | null,
+  fromStep: number
+): EditDraft[] {
+  if (fromStep <= 0) return []
+  if (fields === null) return drafts
+  const keys = new Set(fields.filter((f) => f.step < fromStep).map((f) => `${f.step}\u0000${f.callID ?? ""}`))
+  return drafts.filter((d) => !keys.has(`${d.step}\u0000${d.callID ?? ""}`))
 }
 
 /** wireEdits maps the drafts to §5.1's flattened wire shape — the

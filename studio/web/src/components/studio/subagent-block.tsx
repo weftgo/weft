@@ -21,6 +21,8 @@ import { useRunEvents } from "@/hooks/use-run-events"
 
 import { HoleBadges } from "@/components/studio/hole-badge"
 import { ChildVerb, StepVerbs } from "@/components/studio/replay-verbs"
+import { sourceSteps } from "@/lib/experiment-body"
+import { transcriptStepCount } from "@/lib/replay"
 import { StepBody } from "@/components/studio/step-list"
 import { RequestSection, useRunRequests } from "@/components/studio/step-request"
 import { runLink } from "@/lib/links"
@@ -114,6 +116,17 @@ export function SubagentBlock({
   // The grandchildren, stamped on the child's calls by child id.
   const view =
     overlaid && doc.data ? linkView(overlaid, doc.data.children) : overlaid
+  // The child's verbs replay the CHILD (A10): its id, its agent, its
+  // step ordinals, its transcript's step count; never a fork (a child
+  // is no session turn).
+  const childAt = {
+    runID: child.id,
+    agent: child.agent,
+    stepCount: transcript.data
+      ? transcriptStepCount(sourceSteps(transcript.data.batches).map((st) => st.ordinal))
+      : null,
+    canFork: false,
+  }
 
   return (
     <div
@@ -188,7 +201,7 @@ export function SubagentBlock({
       {open ? (
         <div className="space-y-2 border-l border-ev-tool/25 pl-3">
           {view ? (
-            view.steps.map((step, position) => (
+            view.steps.map((step) => (
               <div key={step.index} className="group/row space-y-1.5" data-child-step={step.index}>
                 <div className="flex items-center gap-2">
                   <span className="eyebrow">step {step.index}</span>
@@ -198,9 +211,7 @@ export function SubagentBlock({
                     </span>
                   ) : null}
                   <span className="ml-auto">
-                    <StepVerbs
-                      at={{ runID: child.id, agent: child.agent, position, stepCount: view.steps.length }}
-                    />
+                    <StepVerbs at={{ ...childAt, step: step.index }} />
                   </span>
                 </div>
                 {requests ? (
@@ -213,7 +224,7 @@ export function SubagentBlock({
                   runStatus={childStatus}
                   childLinks={childLinksOf(doc.data?.children)}
                   compact
-                  replayAt={{ runID: child.id, agent: child.agent, position, stepCount: view.steps.length }}
+                  replayAt={{ ...childAt, step: step.index }}
                 />
               </div>
             ))

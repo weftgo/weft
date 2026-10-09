@@ -93,11 +93,15 @@ export function replayVerdicts(input: VerdictInput): ToolVerdict[] {
     const r = reg.get(name)
     const { safe, words } = classWords(entry, r)
     const output = name === OUTPUT_TOOL
+    const runsForReal = safe || output || (mode === "allow" && Boolean(r?.allow))
+    // The server's allow check walks every tool left on, a breakpoint
+    // or an approval tool included: the refusal is the command's, not
+    // the call's.
+    const refuses = mode === "allow" && !runsForReal
     // The runtime's breakpoints are restricted to the agent's own
     // tools (executor.go's breakpointTools).
-    if (breaks.has(name) && (r || !input.agent)) return { name, verdict: "parked", why: "breakpoint · parks" }
-    const runsForReal = safe || output || (mode === "allow" && Boolean(r?.allow))
-    const refuses = mode === "allow" && !runsForReal
+    if (breaks.has(name) && (r || !input.agent))
+      return { name, verdict: "parked", why: "breakpoint · parks", ...(refuses ? { refuses } : {}) }
     if (entry.approval) {
       // Parked at the approval boundary whatever the class; the
       // substitute chain answers a parked call it recorded.
@@ -122,6 +126,27 @@ export function replayVerdicts(input: VerdictInput): ToolVerdict[] {
   })
 }
 
+/**
+ * allowRefusals names the tools for which side_effects "allow" is
+ * refused (403) — studio/playground.go's walk: every REGISTERED tool
+ * left on (tools_enabled, or all of them) that is neither opted in by
+ * AllowSideEffects, nor vouched safe, nor the Output submission. The
+ * step's catalog is for display; the command is judged on this set.
+ * Empty outside allow mode.
+ */
+export function allowRefusals(
+  agent: Pick<AgentView, "tools"> | null | undefined,
+  mode: SideEffectsMode,
+  toolsEnabled?: string[]
+): string[] {
+  if (mode !== "allow" || !agent) return []
+  const on = toolsEnabled?.length ? new Set(toolsEnabled) : null
+  return agent.tools
+    .filter((t) => !on || on.has(t.name))
+    .filter((t) => !t.allow && t.side_effects !== "safe" && t.name !== OUTPUT_TOOL)
+    .map((t) => t.name)
+}
+
 /** The breakpoints a runtime parks on for this agent (its stored set,
  * restricted to the agent's tools). */
 export function breakpointsFor(runtime: Pick<RuntimeView, "breakpoints"> | undefined, agent: Pick<AgentView, "tools"> | undefined): string[] {
@@ -131,18 +156,20 @@ export function breakpointsFor(runtime: Pick<RuntimeView, "breakpoints"> | undef
 
 // ── The verbs (plan F1) ────────────────────────────────────────────
 // Each opens the drawer pre-filled; both surfaces build the same
-// command from it. from_step keeps the playground's convention: the
-// POSITION of the step among the run's own steps (the panel's
-// stepPosition, lib/links.ts's PlaygroundHandoff.step) — never the step
-// ordinal a run link carries. The two coincide on a run with no lost
-// records; where they differ the position is what the runtime cuts at.
+// command from it. from_step — and every edit's step — is the step
+// ORDINAL: the stored weft.step.index, the n of runs/{id}/steps/{n} and
+// of a run link's ?step=. studio/edits.go's cutTranscriptAtStep and the
+// runtime's cutAt cut at the first assistant message whose stored index
+// is ≥ from_step (numbering by order is only the fallback for records
+// without a stored step, where order is the ordinal). A card sends its
+// own step.index — a fold with a gap shifts nothing.
 
 export type ReplayVerb = "from_step" | "edit_result" | "edit_prompt" | "rerun" | "continue"
 
 /** One transcript edit on the kept prefix: a patched tool result
  * (callID + toolResult) or a rewritten call-free reply (content) — the
  * shape both clients' drafts share (§5.1's wire, flattened by their
- * buildRunBody). step is a position, as from_step. */
+ * buildRunBody). step is the step ordinal, as from_step. */
 export interface ReplayEdit {
   step: number
   callID?: string
@@ -153,7 +180,7 @@ export interface ReplayEdit {
 /** The drawer's pre-filled state for one verb. */
 export interface ReplayDraft {
   verb: ReplayVerb
-  /** source.from_step: a position among the run's own steps. */
+  /** source.from_step: the step ordinal run fresh. */
   fromStep: number
   edits: ReplayEdit[]
   /** The system prompt to start from, when the verb pre-fills one
@@ -179,13 +206,14 @@ export function replayFromStep(n: number): ReplayDraft {
 
 /** edit this result and replay: step `step`'s call `callID` patched
  * (pre-filled with its recorded content), the next step run fresh —
- * from_step = step + 1. */
+ * from_step = step + 1. An empty recorded result seeds no draft: the
+ * server refuses an empty edit (400), so the field starts blank. */
 export function editResultAndReplay(step: number, callID: string, content: string): ReplayDraft {
   const at = pos(step)
   return {
     verb: "edit_result",
     fromStep: at + 1,
-    edits: [{ step: at, callID, toolResult: content }],
+    edits: content ? [{ step: at, callID, toolResult: content }] : [],
     thread: "ephemeral",
     input: "",
     focus: "edit",
@@ -217,12 +245,21 @@ export function continueHere(): ReplayDraft {
   return { verb: "continue", fromStep: 0, edits: [], thread: "fork", input: "", focus: "input" }
 }
 
-/** stepPositionOf maps a step ordinal to its position among the run's
- * own steps (the folded steps' indexes, in order): -1 when the run has
- * no step of that ordinal — never send an ordinal that is not a
- * position. */
+/** stepPositionOf is the from_step a step of the run sends: its own
+ * ordinal (from_step IS the ordinal — see above), or -1 when the run
+ * has no step of that ordinal. It never shifts a number: a fold that
+ * lacks a step sends each card's own index. */
 export function stepPositionOf(stepIndexes: readonly number[], ordinal: number): number {
-  return stepIndexes.indexOf(ordinal)
+  return stepIndexes.includes(ordinal) ? ordinal : -1
+}
+
+/** transcriptStepCount is the server's stepCount (studio/edits.go):
+ * one past the last step ordinal holding an assistant message. A
+ * from_step at or past it has nothing fresh to answer (400). */
+export function transcriptStepCount(assistantOrdinals: readonly number[]): number {
+  let n = 0
+  for (const o of assistantOrdinals) if (o + 1 > n) n = o + 1
+  return n
 }
 
 /** The prefix line the ack preview shows: what the replayed run keeps.

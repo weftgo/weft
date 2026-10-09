@@ -15,6 +15,9 @@ import type { AgentView, RunDoc, RunRow, RunsPage, RuntimeView, StepDoc } from "
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { FakeStudio, golden, pagedEvents, transcriptOf } from "@/test/fake-studio"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { unmatchedDrafts } from "@/lib/experiment-body"
+import { TranscriptEdits } from "@/components/studio/experiment-form"
 import { ReplayAck, catalogOfStep } from "@/components/studio/replay-drawer"
 
 configure({ asyncUtilTimeout: 10_000 })
@@ -147,7 +150,9 @@ const runtime: RuntimeView = {
 }
 
 let studio: FakeStudio
-function serve(opts: { doc?: RunDoc; capabilities?: string[] } = {}) {
+function serve(
+  opts: { doc?: RunDoc; capabilities?: string[]; bodies?: unknown[]; events?: { pos: number; time: string; event: unknown }[] } = {}
+) {
   stubBrowser()
   FakeEventSource.reset()
   vi.stubGlobal("EventSource", FakeEventSource)
@@ -158,8 +163,8 @@ function serve(opts: { doc?: RunDoc; capabilities?: string[] } = {}) {
       capabilities: opts.capabilities ?? ["playground", "steps"],
     })
     .on(`GET runs/${doc.id}`, doc)
-    .on(`GET runs/${doc.id}/events`, pagedEvents(events, { done: true }))
-    .on(`GET runs/${doc.id}/transcript`, transcriptOf(bodies))
+    .on(`GET runs/${doc.id}/events`, pagedEvents(opts.events ?? events, { done: true }))
+    .on(`GET runs/${doc.id}/transcript`, transcriptOf(opts.bodies ?? bodies))
     .on(`GET runs/${doc.id}/spans`, { spans: [] })
     .on(`GET runs/${CHILD}`, { ...childRow, children: [], holes: [] })
     .on("GET runtimes", { runtimes: [runtime] })
@@ -362,6 +367,11 @@ describe("the verbs are capability-gated", () => {
     renderApp(`/runs/${RUN}?view=story`)
     await waitFor(() => expect(document.querySelector('[data-call="c3"]')).toBeTruthy())
     expect(document.querySelectorAll("[data-replay-verb]").length).toBe(0)
+    // Nothing the drawer reads is fetched for a token that may not act
+    // (and nothing a read scope may not see).
+    const paths = studio.requests.map((r) => r.path)
+    for (const banned of [/\/steps\//, /^runtimes$/, /\/requests$/, /\/tools$/, /^manifest$/])
+      expect(paths.filter((p) => banned.test(p))).toEqual([])
   })
 
   it("hidden without the playground capability", async () => {
@@ -438,5 +448,246 @@ describe("the playground's step picker lists the source run's steps", () => {
       expect(el.type).toBe("number")
     })
     await waitFor(() => expect(screen.getByText(/steps unreadable/)).toBeTruthy())
+  })
+})
+
+// ── Review fixes (F1.2) ────────────────────────────────────────────
+
+const openStory = async (sel: string) => {
+  renderApp(`/runs/${RUN}?view=story`)
+  return waitFor(() => {
+    const el = document.querySelector<HTMLElement>(sel)
+    expect(el).toBeTruthy()
+    return el!
+  })
+}
+
+describe("verbs gate on the transcript's steps, not the fold's (review 1)", () => {
+  // The common failing run: step 2's refund errors and the run fails
+  // during step 3 — its step_start is recorded, no reply ever is.
+  const failingLast = [
+    ...events.slice(0, -3).map((e) => e.event),
+    { type: "step_start", run_id: RUN, index: 3 },
+  ].map((event, pos) => ({ pos, time: rOK.started, event }))
+
+  it("no edit-result verb on the last transcript step (from_step would be past it: 400)", async () => {
+    serve({ events: failingLast, bodies: bodies.slice(0, -1), doc: runDoc({ status: "failed", err: "model down" }) })
+    const c3 = await openStory('[data-call="c3"]')
+    // Step 2 is the transcript's last step with a reply: nothing fresh
+    // would answer from_step 3.
+    await waitFor(() => expect(within(c3).getByRole("button", { name: /replay from this step \(call c3/ })).toBeTruthy())
+    expect(within(c3).queryByRole("button", { name: "edit this result and replay (call c3)" })).toBeNull()
+    // Step 1's call has a next step: its verb is drawn.
+    const c2 = document.querySelector<HTMLElement>('[data-call="c2"]')!
+    expect(within(c2).getByRole("button", { name: "edit this result and replay (call c2)" })).toBeTruthy()
+  })
+
+  it("the steer verb replays from the step that answers the steer, only when it exists", async () => {
+    const steerEvents = [
+      ...events.slice(0, 9).map((e) => e.event), // run_start + steps 0 and 1
+      { type: "steered", run_id: RUN, seq: 9, step: 1, messages: [{ role: "user", content: [{ type: "text", text: "actually, refund it" }] }] },
+      ...events.slice(9).map((e) => e.event),
+    ].map((event, pos) => ({ pos, time: rOK.started, event }))
+    serve({ events: steerEvents })
+    const steer = await openStory("[data-steer]")
+    await waitFor(() =>
+      expect(within(steer).getByRole("button", { name: "replay from this steer (step 2 runs fresh)" })).toBeTruthy()
+    )
+    fireEvent.click(within(steer).getByRole("button", { name: "replay from this steer (step 2 runs fresh)" }))
+    const picker = await waitFor(() => within(drawer()!).getByLabelText<HTMLSelectElement>("continue from step"))
+    await waitFor(() => expect(picker.value).toBe("2"))
+  })
+})
+
+describe("the step ordinal is from_step (review 4)", () => {
+  it("a fold that lacks step 1 sends each card's own ordinal", async () => {
+    // Step 1's events were lost: the fold holds steps 0, 2, 3.
+    const gapped = events.filter((e) => {
+      const ev = e.event as { type: string; index?: number; call_id?: string }
+      return !(ev.index === 1 || ev.call_id === "c2")
+    })
+    serve({ events: gapped })
+    const card = await openStory('[data-step="2"]')
+    fireEvent.click(within(card).getByRole("button", { name: "replay from this step (step 2)" }))
+    const d = await waitFor(() => within(drawer()!))
+    await waitFor(() => expect(d.getByLabelText<HTMLSelectElement>("continue from step").value).toBe("2"))
+    await waitFor(() => expect(d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(false))
+    fireEvent.click(d.getByRole("button", { name: "Run" }))
+    await waitFor(() => expect(studio.calls("POST playground/runs").length).toBe(1))
+    expect(studio.calls("POST playground/runs")[0].body).toMatchObject({ source: { run_id: RUN, from_step: 2 } })
+  })
+})
+
+describe("continue here and fork (reviews 5, 6)", () => {
+  it("not drawn on a run that is no session's turn, nor on a child's steps", async () => {
+    serve({ doc: runDoc({ session_id: "" }) })
+    const card = await openStory('[data-step="3"]')
+    expect(within(card).queryByRole("button", { name: "continue here with a new message" })).toBeNull()
+    expect(document.querySelectorAll('[data-replay-verb="continue"]').length).toBe(0)
+  })
+
+  it("switching to fork resets from_step to 0 and holds Run until the message is typed", async () => {
+    serve()
+    const card = await openStory('[data-step="2"]')
+    fireEvent.click(within(card).getByRole("button", { name: "replay from this step (step 2)" }))
+    const d = await waitFor(() => within(drawer()!))
+    await waitFor(() => expect(d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(false))
+    fireEvent.change(d.getByLabelText("Thread"), { target: { value: "fork" } })
+    expect(d.queryByLabelText("continue from step")).toBeNull()
+    expect(d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(true)
+    fireEvent.change(d.getByLabelText("input"), { target: { value: "one more thing" } })
+    expect(d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(false)
+    fireEvent.click(d.getByRole("button", { name: "Run" }))
+    await waitFor(() => expect(studio.calls("POST playground/runs").length).toBe(1))
+    expect(studio.calls("POST playground/runs")[0].body).toMatchObject({
+      source: { run_id: RUN, from_step: 0 },
+      thread: "fork",
+      input: "one more thing",
+    })
+  })
+})
+
+describe("keyboard (review 7)", () => {
+  it("a verb opened from the keyboard focuses the heading; Escape in a field stays, Escape closes and returns focus", async () => {
+    serve()
+    const card = await openStory('[data-step="2"]')
+    const verb = within(card).getByRole("button", { name: "replay from this step (step 2)" })
+    verb.focus()
+    // Enter on a button is its click; the key itself stops at the verb.
+    fireEvent.keyDown(verb, { key: "Enter" })
+    fireEvent.click(verb)
+    await waitFor(() => expect(drawer()).toBeTruthy())
+    const heading = drawer()!.querySelector("#replay-drawer-title")!
+    await waitFor(() => expect(document.activeElement).toBe(heading))
+    // Escape typed in the drawer's own field is the field's.
+    fireEvent.keyDown(within(drawer()!).getByLabelText("system prompt"), { key: "Escape" })
+    expect(drawer()).toBeTruthy()
+    fireEvent.keyDown(heading, { key: "Escape" })
+    await waitFor(() => expect(drawer()).toBeNull())
+    expect(document.activeElement).toBe(verb)
+  })
+})
+
+describe("edit the prompt without the step route (review 8)", () => {
+  it("falls through to the registered prompt", async () => {
+    serve({ capabilities: ["playground"] })
+    const card = await openStory('[data-step="1"]')
+    fireEvent.click(within(card).getByRole("button", { name: "edit the prompt and replay (step 1)" }))
+    const prompt = await waitFor(() => within(drawer()!).getByLabelText<HTMLTextAreaElement>("system prompt"))
+    await waitFor(() => expect(prompt.value).toBe("You are a support agent."))
+  })
+})
+
+describe("holes are badges, never 'no tools' (review 9)", () => {
+  it("a hidden catalog with no registered agent shows the badge alone", () => {
+    const { container } = render(
+      <ReplayAck catalog={catalogOfStep(golden<StepDoc>("step-hidden"))} mode="substitute" fromStep={1} compacted={false} />
+    )
+    expect(container.querySelector('[data-hole="hidden"]')).toBeTruthy()
+    expect(container.querySelectorAll("[data-verdict]").length).toBe(0)
+    expect(container.textContent).not.toContain("no tools")
+  })
+
+  it("a step with no request block is unknown (a badge), not 'offered no tools'", () => {
+    const cat = catalogOfStep({ ...stepDoc(1), request: undefined })
+    expect(cat.hole?.badge).toBe("not_recorded")
+    expect(cat.none).toBeUndefined()
+    const { container } = render(
+      <ReplayAck catalog={cat} agent={agentView} mode="substitute" fromStep={1} compacted={false} />
+    )
+    expect(container.querySelector('[data-hole="not_recorded"]')).toBeTruthy()
+    expect(container.textContent).not.toContain("offered no tools")
+  })
+})
+
+describe("the drawer's refusals and failures (review 10)", () => {
+  beforeEach(() => serve())
+
+  async function openFromStep2() {
+    const card = await openStory('[data-step="2"]')
+    fireEvent.click(within(card).getByRole("button", { name: "replay from this step (step 2)" }))
+    const d = await waitFor(() => within(drawer()!))
+    await waitFor(() => expect(d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(false))
+    return d
+  }
+
+  it("side effects allow over tools neither opted in nor safe: Run held, the tools named", async () => {
+    const d = await openFromStep2()
+    fireEvent.change(d.getByLabelText("Side effects"), { target: { value: "allow" } })
+    expect(d.getByText(/side effects allow is refused while lookup_order, refund are on/)).toBeTruthy()
+    expect(d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(true)
+    // Turning them off lifts it (the registered set, not the catalog).
+    for (const name of ["lookup_order", "refund"])
+      fireEvent.click(d.getByRole("checkbox", { name: new RegExp(`^${name}`) }))
+    expect(d.queryByText(/side effects allow is refused/)).toBeNull()
+    expect(d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(false)
+  })
+
+  it("a 503 on Run says no runtime is connected and how to start one", async () => {
+    studio.on("POST playground/runs", () =>
+      new Response(JSON.stringify({ error: { code: "unavailable", message: "runtime rt_1 is not connected" } }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      })
+    )
+    const d = await openFromStep2()
+    fireEvent.click(d.getByRole("button", { name: "Run" }))
+    await waitFor(() =>
+      expect(drawer()!.querySelector("[data-replay-error]")?.textContent).toBe(
+        "runtime rt_1 is not connected · no runtime connected · start the app with WEFT_ENV=dev"
+      )
+    )
+  })
+
+  it("no runtime at all: said, Run held", async () => {
+    studio.on("GET runtimes", { runtimes: [] })
+    const card = await openStory('[data-step="2"]')
+    fireEvent.click(within(card).getByRole("button", { name: "replay from this step (step 2)" }))
+    await waitFor(() =>
+      expect(drawer()!.querySelector("[data-replay-blocked]")?.textContent).toBe(
+        "no runtime connected · start the app with WEFT_ENV=dev"
+      )
+    )
+    expect(within(drawer()!).getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(true)
+  })
+})
+
+describe("a pre-filled edit is never pruned silently (review 2)", () => {
+  it("a draft no field matches is shown, badged, and holds Run", async () => {
+    // The transcript's result for the refund call carries another id:
+    // the draft the verb pre-fills (step 2, c3) names no field.
+    const other = bodies.map((b, i) => (i === 6 ? result("c3x", "refund", ERR, true) : b))
+    serve({ bodies: other })
+    const row = await openStory('[data-call="c3"]')
+    await waitFor(() =>
+      expect(within(row).getByRole("button", { name: "edit this result and replay (call c3)" })).toBeTruthy()
+    )
+    fireEvent.click(within(row).getByRole("button", { name: "edit this result and replay (call c3)" }))
+    await waitFor(() => expect(drawer()!.querySelector('[data-edit-orphan="c3"]')).toBeTruthy())
+    expect(drawer()!.querySelector('[data-edit-orphan="c3"]')!.textContent).toContain("no such field in the kept prefix")
+    expect(drawer()!.querySelector("[data-replay-orphans]")).toBeTruthy()
+    expect(within(drawer()!).getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(true)
+    // Dropping it lifts the hold.
+    fireEvent.click(within(drawer()!.querySelector<HTMLElement>('[data-edit-orphan="c3"]')!).getByRole("button", { name: "drop" }))
+    await waitFor(() =>
+      expect(within(drawer()!).getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(false)
+    )
+  })
+
+  it("an unreadable transcript keeps the drafts, badged unchecked", async () => {
+    serve()
+    studio.on(`GET runs/${RUN}/transcript`, () => new Response("{}", { status: 500 }))
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const drafts = [{ step: 2, callID: "c3", toolResult: ERR }]
+    const setDrafts = vi.fn()
+    const { container } = render(
+      <QueryClientProvider client={client}>
+        <TranscriptEdits runID={RUN} fromStep={3} drafts={drafts} setDrafts={setDrafts} />
+      </QueryClientProvider>
+    )
+    await waitFor(() => expect(container.querySelector("[data-edits-unreadable]")).toBeTruthy())
+    expect(container.querySelector('[data-edit-orphan="c3"]')!.textContent).toContain("unchecked edit")
+    expect(setDrafts).not.toHaveBeenCalled()
+    expect(unmatchedDrafts(drafts, null, 3)).toEqual(drafts)
   })
 })

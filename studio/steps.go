@@ -843,6 +843,10 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 
 	if first != nil {
 		doc.sysHash = first.SystemHash
+		if first.SystemHash == "" {
+			// No system text: a fact whoever reads, hidden or not.
+			doc.sysText = new(string)
+		}
 	}
 	// The request block: attempt 1, as the requests route serves it.
 	switch {
@@ -871,8 +875,6 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 		doc.Request = row
 		if d, ok := row.Prompt.(promptDoc); ok {
 			doc.sysText = &d.Text
-		} else if first.SystemHash == "" {
-			doc.sysText = new(string)
 		}
 		if first.Content != "" {
 			holes.note(first.Content)

@@ -694,3 +694,95 @@ func TestCanonicalJSON(t *testing.T) {
 		t.Errorf("an unparseable value = %s, want it verbatim", got)
 	}
 }
+
+// TestDiffNoInstructionsReadToken: an agent with no instructions sends
+// no system text — a fact every identity reads, so under a read token
+// the system column compares ("" on both sides, hash ""), never unknown.
+func TestDiffNoInstructionsReadToken(t *testing.T) {
+	const tok = "srv-token"
+	srv := New(Open(filepath.Join(t.TempDir(), "weft.db")), Token(tok))
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	for _, id := range []string{"r_ni1", "r_ni2"} {
+		withPipeline(t, ts.URL, true, func(prov []core.Option) {
+			agent := core.New(wefttest.Script(wefttest.Say("hi")), prov...)
+			if _, err := agent.Generate(context.Background(), core.RunID(id), core.Prompt("go"),
+				core.Metadata(map[string]string{"weft.public_id": "pub_a"})); err != nil {
+				t.Fatal(err)
+			}
+		})
+		waitRun(t, ts, id, 1, tok)
+	}
+	read, err := signPanelToken([]byte(tok), panelClaims{PublicID: "pub_a", Scope: scopeRead, Exp: time.Now().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, bearer := range []string{read, tok} {
+		d, _ := getDiff(t, ts, "r_ni1", "r_ni2", bearer)
+		if len(d.Steps) != 1 {
+			t.Fatalf("rows = %d, want 1", len(d.Steps))
+		}
+		r := d.Steps[0]
+		if slices.Contains(r.Unknown, "system") || r.Changed || r.A.System == nil || *r.A.System != "" || r.A.SystemHash != "" {
+			t.Errorf("no instructions (read token %v) = system %v hash %q unknown %v changes %v, want \"\" compared, unchanged",
+				bearer == read, r.A.System, r.A.SystemHash, r.Unknown, r.Changes)
+		}
+	}
+}
+
+// TestDiffWalkResumesPastLostStepStart: step 1's step_start was
+// dropped from a 3-step run. Assembled in sequence (each walk resuming
+// where the last stopped), every step equals the same step assembled
+// alone, and step 2 is still found by its step_start.
+func TestDiffWalkResumesPastLostStepStart(t *testing.T) {
+	_, srv := requestsServer(t)
+	const id = "r_lost3"
+	writeHand(t, srv.db, id, time.Now().UTC(), map[string]any{}, []handRec{
+		ev(0, `{"type":"run_start","id":"r_lost3","model":{"provider":"p","name":"m"},"agent":"hand"}`),
+		ev(1, `{"type":"step_start","run_id":"r_lost3","index":0}`),
+		ev(2, `{"type":"tool_start","run_id":"r_lost3","seq":1,"call_id":"c_a","name":"t","args":{}}`),
+		ev(3, `{"type":"tool_finish","run_id":"r_lost3","seq":2,"call_id":"c_a","name":"t","content":"a","is_error":false}`),
+		ev(4, `{"type":"step_finish","run_id":"r_lost3","index":0,"reason":"tool_calls","usage":{"input_tokens":1,"output_tokens":1}}`),
+		// pos 5, step 1's step_start, never arrived
+		ev(6, `{"type":"tool_start","run_id":"r_lost3","seq":3,"call_id":"c_b","name":"t","args":{}}`),
+		ev(7, `{"type":"tool_finish","run_id":"r_lost3","seq":4,"call_id":"c_b","name":"t","content":"b","is_error":false}`),
+		ev(8, `{"type":"step_finish","run_id":"r_lost3","index":1,"reason":"tool_calls","usage":{"input_tokens":1,"output_tokens":1}}`),
+		ev(9, `{"type":"step_start","run_id":"r_lost3","index":2}`),
+		ev(10, `{"type":"step_finish","run_id":"r_lost3","index":2,"reason":"stop","usage":{"input_tokens":1,"output_tokens":1}}`),
+		ev(11, `{"type":"run_finish","run_id":"r_lost3","usage":{"input_tokens":3,"output_tokens":3},"steps":3}`),
+	})
+	ctx := context.Background()
+	seq, err := srv.loadStepRun(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for n := range 3 {
+		got, err := seq.assembleStep(n, true)
+		if err != nil {
+			t.Fatalf("step %d in sequence: %v", n, err)
+		}
+		alone, err := srv.loadStepRun(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := alone.assembleStep(n, true)
+		if err != nil {
+			t.Fatalf("step %d alone: %v", n, err)
+		}
+		gb, _ := json.Marshal(got)
+		wb, _ := json.Marshal(want)
+		if string(gb) != string(wb) {
+			t.Errorf("step %d in sequence differs from step %d alone:\n%s\n%s", n, n, gb, wb)
+		}
+		if n == 2 && (got.Started == nil || got.Status != "ok" || got.eventsLost) {
+			t.Errorf("step 2 = started %v status %q eventsLost %v, want found by its step_start, ok", got.Started, got.Status, got.eventsLost)
+		}
+		if n == 1 && !got.eventsLost {
+			t.Error("step 1 (its step_start lost) reads eventsLost false")
+		}
+	}
+	if _, err := seq.assembleStep(3, true); !isNoStep(err) {
+		t.Errorf("step 3 in sequence = %v, want no such step", err)
+	}
+}

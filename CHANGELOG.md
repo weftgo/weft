@@ -15,7 +15,10 @@ module, ADR 0005).
   ordinal — each step assembled as `runs/{id}/steps/{n}` assembles it and
   reduced to its system prompt (by hash), tool calls `name(args)`, tool
   results, assistant text and usage; rows carry `changed` and `changes`
-  (`missing` for a step one run lacks), `summary` names the changed steps.
+  (`missing` for a step one run lacks) and `unknown` (a column a side did
+  not record — never compared, never read as the same), `summary` names
+  the changed steps. obsdb gains the `response_cap` hole cause (the
+  diff's step cap).
   A compaction view or a subagent call is a mark on its side, never a
   change by itself; every absent column is a hole from the one table, and
   a read-scoped panel token gets `system: null` under `hidden`.
@@ -28,13 +31,15 @@ module, ADR 0005).
   `weft.Params`, `weft.ToolChoice`, `weft.ParkOn` and `weft.OnlyTools`
   (and so on the run's `weft.override.*` attributes). Narrowing only,
   validated by Studio (§10.4: 400 for a tool the agent lacks, an
-  unknown mode, a named choice the command turns off or parks, `top_p`
-  outside 0..1, more than four or empty `stop` sequences; 403 for
+  unknown mode, a named choice the command turns off or parks — or,
+  with no `tool_choice` sent, an agent default naming a tool the command
+  turns off — `top_p` outside 0..1, `max_tokens` ≤ 0, more than four or
+  empty `stop` sequences; 403 for
   `only_tools` outside `tools_enabled`) and again by the runtime before
   its ack. An old command (none of the new fields) validates as before.
   **`runtime.ModelResolver(func(ctx, name) (weft.Model, error))`**: a
   model override outside `runtime.Models` is resolved by the app's code
-  before the ack — the run uses the returned model (named on the run
+  before the ack, bounded at 10 s ("resolver timed out") — the run uses the returned model (named on the run
   row and `weft.override.model`), an error rejects the command with
   `model <name>: <the error's text>`; without a resolver Studio refuses
   the name (400 `unknown model …: register it with runtime.Models or
@@ -114,7 +119,9 @@ module, ADR 0005).
   temperature-only command used to drop the agent's `MaxTokens`, `TopP`,
   `Stop` and `Seed` to the adapter defaults. The run's
   `weft.override.params` (and so `weft.override.hash`) now carries the
-  merged values.
+  merged values: override hashes from before and after this change are
+  not comparable (ADR 0029 §7). An absent field keeps the agent's own
+  value; a command cannot clear the agent's `stop` or `max_tokens`.
 
 - **The replay prefix across a compaction**: a playground command with
   `from_step` N whose source step N's request carried a `PrepareStep`

@@ -883,16 +883,20 @@ own runs are never touched. The command's `overrides` carry
 `instructions`, `tools_enabled`, `model`, `thinking`, the numeric
 `options` (`max_steps` and `parallelism` lower only, `temperature`
 0..2) and the option lab's typed knobs: `params` `{top_p?, max_tokens?,
-stop?, seed?}` (neutral; laid over the agent's own params — `top_p`
-0..1, at most four non-empty `stop` sequences, a negative `max_tokens`
-is the core's own step error), `tool_choice` `{mode:
+stop?, seed?}` (neutral; laid over the agent's own params — an absent
+field keeps the agent's value, and a command cannot clear the agent's
+`stop` or `max_tokens`; `top_p` 0..1, `max_tokens` positive, at most
+four non-empty `stop` sequences), `tool_choice` `{mode:
 auto|any|none|named, name?}` (a named choice must name a tool the
-command keeps on and does not park), `park_on` and `only_tools` (tools
+command keeps on and does not park; with none sent, an agent default
+naming a tool the command turns off is refused — send `tool_choice`),
+`park_on` (a parked call stops there even in substitute mode) and `only_tools` (tools
 of the agent; `only_tools` inside `tools_enabled` when both are sent,
 403 otherwise). `model` is the agent's own, a `runtime.Models` name,
 or — when the runtime registered `runtime.ModelResolver(func(ctx,
 name) (weft.Model, error))` — any name the app's resolver accepts: it
-runs before the ack, its error text is the rejected command's reason
+runs before the ack (bounded at 10 s: "resolver timed out"), its error
+text is the rejected command's reason
 (`model <name>: …`; the app writes that text, so it carries no key or
 URL), and without a resolver Studio answers 400 `unknown model … :
 register it with runtime.Models or add runtime.ModelResolver`.
@@ -1077,7 +1081,7 @@ compaction view's `messages` null under the same badge; `otlp` and
 `diff` capability — plan E3: `{a, b, steps, summary, holes}`, `a`/`b`
 `{run_id, steps, status}`; one row per step ordinal from 0 to the
 longer run's last — the ordinal is the alignment key — `{step, changed,
-a, b, changes}`, each side the step as `runs/{id}/steps/{n}` assembles
+a, b, changes, unknown}`, each side the step as `runs/{id}/steps/{n}` assembles
 it, reduced to `{status, system_hash, system, tool_calls: [{name,
 args}], tool_results: [{call_id, name, content, is_error}], text,
 usage, marks, holes}`, or `null` on the side whose run has no such
@@ -1087,7 +1091,16 @@ order `system` (by hash when both sides have one), `tool_calls`
 (content and `is_error`, in call order — call ids are not compared),
 `text` (the step's assistant text from the transcript, exact) and
 `usage` (the numbers); status, timing, marks and holes are never
-compared. `marks` say what the side's step was — `compacted` (a
+compared. A column a side could not record is never compared with the
+other side's value: it goes to `unknown` — "not comparable", neither
+changed nor the same — and the side's `holes` say why: `system` when a
+side has neither a hash nor the text (a run before the request record,
+a dropped request record; `hidden` and content-off keep the hash, so
+they still compare); `tool_calls`, `tool_results` and `usage` when a
+side's events are not all stored (a lost `step_start`, missing
+positions inside the step); `tool_calls` by name alone and
+`tool_results` unknown when a side was content-off; `text` when a
+side's text is null for a hole. `marks` say what the side's step was — `compacted` (a
 compaction view: the model saw other messages, which the diff does not
 compare), `subagent` (a call started a child run), `max_tokens`,
 `parked`, `running`, `interrupted`, `error` — and never flip `changed`
@@ -1097,10 +1110,12 @@ same table — `system: null` under `hidden` for a read-scoped panel
 token (the hash stays: `instructions_hash` is read-scoped too, so the
 column still compares), `not_recorded` for a run written before ADR
 0028, `text: null` under `gap` when no messages record of a finished
-step was stored; `summary` is `{changed_steps, first_changed}`
+step was stored, or when a messages record of the run does not parse;
+`summary` is `{changed_steps, first_changed}`
 (`first_changed: null` when nothing differs); the top-level `holes` is
-`truncated` when a run has more than 500 steps (the first 500 are
-compared). Both runs must be inside a panel token's public id (403
+`truncated` with the table's `response_cap` cause when a run has more
+than 500 steps (the first 500 are compared; each side's `steps` is still
+the run's count). Both runs must be inside a panel token's public id (403
 whichever side is outside; an unknown run 404; a missing `a` or `b`
 400); `a == b` is every row unchanged. The route is two-way: an N-way
 compare calls it N−1 times against one base run),

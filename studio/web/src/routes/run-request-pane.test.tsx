@@ -17,6 +17,7 @@ import { cleanup, configure, fireEvent, waitFor, within } from "@testing-library
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
+import { queryClient } from "@/lib/query"
 import type { Manifest, RequestsPage, RunDoc, RunsPage, Span } from "@/lib/api"
 import { sha256Hex } from "@/lib/request-pane"
 import { renderApp, stubBrowser } from "@/test/app"
@@ -155,6 +156,8 @@ async function serve(opts: {
   requests?: RequestsPage
   /** The run reads running until this returns true (the poll path). */
   ended?: () => boolean
+  /** The transcript's growth records (default BODIES, all five). */
+  bodies?: unknown[]
 }) {
   const doc: RunDoc = {
     ...rOK,
@@ -169,7 +172,7 @@ async function serve(opts: {
     .on("GET meta", { ...golden<Record<string, unknown>>("meta"), capabilities: ["requests", "ingest"] })
     .on(`GET runs/${RUN}`, () => (!ended || ended() ? doc : running))
     .on(`GET runs/${RUN}/events`, pagedEvents(events(), { done: () => !ended || ended() }))
-    .on(`GET runs/${RUN}/transcript`, transcriptOf(BODIES))
+    .on(`GET runs/${RUN}/transcript`, transcriptOf(opts.bodies ?? BODIES))
     .on(`GET runs/${RUN}/spans`, { spans: opts.spans ?? [] })
   if (opts.manifest) studio.on("GET manifest", opts.manifest)
   if (opts.hidden) studio.withRequests(RUN, "hidden")
@@ -190,6 +193,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  vi.useRealTimers()
 })
 
 function pane(step: number): HTMLElement {
@@ -221,9 +225,23 @@ function diff(step: number) {
     del: Array.from(d.querySelectorAll('[data-diff="del"]')).map((r) => r.textContent),
   }
 }
-/** Let every pending read settle (the manifest, the hash checks). */
+/** Let every pending read settle (the manifest, the hash checks — all
+ * queries): wait until the client fetches nothing, with a deadline. */
 async function settle() {
-  await new Promise((r) => setTimeout(r, 150))
+  await waitFor(() => expect(queryClient.isFetching()).toBe(0))
+}
+/** Under fake timers: advance the clock in steps until `check` passes,
+ * failing with its last error past the deadline (fake time). */
+async function until(check: () => void, stepMs = 500, deadlineMs = 15_000) {
+  for (let t = 0; ; t += stepMs) {
+    try {
+      check()
+      return
+    } catch (err) {
+      if (t >= deadlineMs) throw err
+    }
+    await vi.advanceTimersByTimeAsync(stepMs)
+  }
 }
 
 describe("the Request pane's chips and diff (E1 Done)", () => {
@@ -416,13 +434,17 @@ describe("the override chip reads the spans once, at run end (review 5)", () => 
       spans: [invokeAgent({ "weft.override.hash": "f00d", "weft.override.instructions": true })],
       ended: () => done,
     })
+    vi.useFakeTimers({ shouldAdvanceTime: true })
     renderApp(`/runs/${RUN}?view=story`)
     await waitFor(() => expect(document.querySelectorAll("[data-request]").length).toBe(3))
-    await new Promise((r) => setTimeout(r, 2500))
+    // Past the 2 s refetchInterval: the row was polled, the spans not.
+    const polls = studio.calls(`GET runs/${RUN}`).length
+    await vi.advanceTimersByTimeAsync(2500)
+    expect(studio.calls(`GET runs/${RUN}`).length).toBeGreaterThan(polls)
     expect(studio.calls(`GET runs/${RUN}/spans`)).toEqual([])
     expect(marks(0)).toEqual([])
     done = true
-    await waitFor(() => expect(marks(0)).toEqual(["overridden by experiment"]), { timeout: 10_000 })
+    await until(() => expect(marks(0)).toEqual(["overridden by experiment"]))
     await settle()
     expect(studio.calls(`GET runs/${RUN}/spans`)).toHaveLength(1)
   })
@@ -445,15 +467,52 @@ describe("the invoke_agent span lands after the end (round-2 review 1)", () => {
           ? [chat]
           : [chat, invokeAgent({ "weft.override.hash": "f00d", "weft.override.instructions": true })],
     }))
+    vi.useFakeTimers({ shouldAdvanceTime: true })
     renderApp(`/runs/${RUN}?view=story`)
     await waitFor(() => expect(document.querySelectorAll("[data-request]").length).toBe(3))
     done = true
-    await waitFor(() => expect(marks(0)).toEqual(["overridden by experiment"]), { timeout: 15_000 })
+    await until(() => expect(marks(0)).toEqual(["overridden by experiment"]))
     const reads = studio.calls(`GET runs/${RUN}/spans`).length
     expect(reads).toBe(2)
-    // Seen: the reads stop.
-    await new Promise((r) => setTimeout(r, 4500))
+    // Seen: the reads stop, two intervals on.
+    await vi.advanceTimersByTimeAsync(4500)
     expect(studio.calls(`GET runs/${RUN}/spans`)).toHaveLength(reads)
+  })
+
+  it("a finished run opened cold (no transition seen) reads its spans once, without the span, and never polls them (review fixes)", async () => {
+    await serve({ instructions: PROMPT0, manifest: manifest(REGISTERED) })
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    renderApp(`/runs/${RUN}?view=story`)
+    await waitFor(() => expect(document.querySelectorAll("[data-request]").length).toBe(3))
+    await waitFor(() => expect(studio.calls(`GET runs/${RUN}/spans`)).toHaveLength(1))
+    // Well past several 2 s intervals, inside the 30 s wait a seen end
+    // would have opened: still the one read.
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(studio.calls(`GET runs/${RUN}/spans`)).toHaveLength(1)
+    expect(marks(0)).toEqual([])
+  })
+})
+
+describe("a request row ahead of its transcript batch (review fixes)", () => {
+  it("while the run runs, the newest step's missing batch is the neutral no-transcript line, not the gap badge", async () => {
+    await serve({ instructions: PROMPT0, ended: () => false, bodies: BODIES.slice(0, 4) })
+    await story()
+    open(2)
+    const m2 = () => pane(2).querySelector("[data-messages-sent]")!
+    await waitFor(() => expect(m2().textContent).toContain("bytes when the transcript is read"))
+    expect(m2().querySelector('[data-hole="gap"]')).toBeNull()
+    // The steps whose batches are there resolve as ever.
+    open(1)
+    expect(pane(1).querySelector("[data-messages-line]")?.textContent).toMatch(/^3 messages · \d+ B$/)
+  })
+
+  it("once the run is over the same missing batch is a gap", async () => {
+    await serve({ instructions: PROMPT0, bodies: BODIES.slice(0, 4) })
+    await story()
+    open(2)
+    await waitFor(() =>
+      expect(pane(2).querySelector('[data-messages-sent] [data-hole="gap"]')).toBeTruthy()
+    )
   })
 })
 

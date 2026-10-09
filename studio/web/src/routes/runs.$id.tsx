@@ -235,11 +235,16 @@ function RunPage() {
   // Only a seen transition counts: a page opened on a finished run
   // reads the record once.
   const seenStatus = useRef<{ id: string; status?: string }>({ id })
+  // When the page saw the run end (the transition above, never a cold
+  // open of a finished run): the spans' wait below counts from it.
+  const endSeen = useRef<{ id: string; at: number | null }>({ id, at: null })
   const loadedStatus = run.data?.status
   useEffect(() => {
     const was = seenStatus.current.id === id ? seenStatus.current.status : undefined
     seenStatus.current = { id, status: loadedStatus }
+    if (endSeen.current.id !== id) endSeen.current = { id, at: null }
     if (was === "running" && loadedStatus && loadedStatus !== "running") {
+      endSeen.current.at = Date.now()
       void queryClient.invalidateQueries({ queryKey: ["requests", id] })
       // The invoke_agent span (the override fingerprint) ships at run
       // end: the spans are read again too — joining a read the status
@@ -262,13 +267,9 @@ function RunPage() {
   // (weft dev, setup B) spans batch later than the run_finish record
   // that flips the status, so a read just after the end may come back
   // without the run's invoke_agent span: until one is seen, the spans
-  // are read again every 2 s for 30 s after the page saw the end.
-  const endSeen = useRef<{ id: string; at: number | null }>({ id, at: null })
-  useEffect(() => {
-    if (endSeen.current.id !== id) endSeen.current = { id, at: null }
-    if (run.data && runStatus !== "running" && endSeen.current.at === null)
-      endSeen.current.at = Date.now()
-  }, [id, run.data, runStatus])
+  // are read again every 2 s for 30 s after the page saw the end — a
+  // transition it observed (endSeen), so a finished run opened cold
+  // reads its spans once and never polls.
   const spans = useQuery({
     ...spansQuery(id),
     enabled:

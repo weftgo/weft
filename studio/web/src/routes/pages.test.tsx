@@ -6,6 +6,7 @@ import { cleanup, configure, fireEvent, screen, waitFor, within } from "@testing
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
+import { queryClient } from "@/lib/query"
 import type { RunDoc, RunRow, RunsPage, SessionDoc, SessionsPage } from "@/lib/api"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
@@ -43,6 +44,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  vi.useRealTimers()
   setStudioToken("")
 })
 
@@ -59,12 +61,14 @@ describe("the token wall (S4.6, setup B)", () => {
 
   it("says a wrong token was refused, without looping on the API", async () => {
     studio.requireToken("dev-secret").on("GET runs", runs)
+    vi.useFakeTimers({ shouldAdvanceTime: true })
     renderApp("/runs")
     fireEvent.change(await screen.findByLabelText("API token"), { target: { value: "wrong" } })
     fireEvent.click(screen.getByRole("button", { name: "unlock" }))
     expect(await screen.findByText(/stored token was refused/)).toBeTruthy()
     const n = studio.requests.length
-    await new Promise((r) => setTimeout(r, 300))
+    // Past every poll and retry interval the page has (2–5 s): no loop.
+    await vi.advanceTimersByTimeAsync(10_000)
     expect(studio.requests.length).toBe(n)
   })
 
@@ -268,7 +272,13 @@ describe("a run page", () => {
       .on("GET runs/s_1-t2/transcript", transcriptOf([]))
     renderApp("/runs/s_1-t2")
     await waitFor(() => expect(studio.calls("GET runs/s_1-t2/events").length).toBeGreaterThan(0))
-    await new Promise((r) => setTimeout(r, 200))
+    // Meta answered (the capability that used to restart the walk) and
+    // every query settled: a restart would have read from 0 by now.
+    await waitFor(() => {
+      expect(studio.calls("GET meta").length).toBeGreaterThan(0)
+      expect(queryClient.isFetching()).toBe(0)
+      expect(screen.getAllByText("s_1-t2").length).toBeGreaterThan(0)
+    })
     const fromStart = studio
       .calls("GET runs/s_1-t2/events")
       .filter((r) => (r.query.get("after") ?? "0") === "0")

@@ -420,9 +420,17 @@ function CatalogView({ row, stripped }: { row: RequestRow; stripped?: Holed }) {
 /** The messages a request sent: the count and bytes, the last few
  * inline, the rest in the raw view — resolved against the transcript
  * the page holds, never fetched again. */
-function MessagesView({ row, ctx }: { row: RequestRow; ctx?: RequestContext }) {
+function MessagesView({
+  row,
+  ctx,
+  running,
+}: {
+  row: RequestRow
+  ctx?: RequestContext
+  running?: boolean
+}) {
   const [earlier, setEarlier] = useState(false)
-  const m = messagesSent(row, ctx?.transcript, ctx?.compactions)
+  const m = messagesSent(row, ctx?.transcript, ctx?.compactions, undefined, running)
   const n = `${m.count} ${m.count === 1 ? "message" : "messages"}`
   return (
     <div className="min-w-0 flex-1 space-y-1" data-messages-sent>
@@ -499,11 +507,13 @@ function AttemptView({
   stripped,
   base,
   ctx,
+  running,
 }: {
   row: RequestRow
   stripped?: Holed
   base?: PromptBaseline
   ctx?: RequestContext
+  running?: boolean
 }) {
   const b = row.body
   const model = [b.model.provider, b.model.name].filter(Boolean).join("/")
@@ -571,7 +581,7 @@ function AttemptView({
       </div>
       <div className="flex gap-2">
         <Label>messages</Label>
-        <MessagesView row={row} ctx={ctx} />
+        <MessagesView row={row} ctx={ctx} running={running} />
       </div>
       <div className="flex gap-2">
         <Label>model</Label>
@@ -817,6 +827,7 @@ export function RequestSection({
             facts.base && row.system_hash === rows[0].system_hash ? facts.base : undefined
           }
           ctx={req.ctx}
+          running={req.running}
         />
       </div>
     )

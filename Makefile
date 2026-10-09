@@ -175,12 +175,16 @@ devtools-npm: studio-build
 	cd studio/web && bun run scripts/npm-consumer.ts
 	cd studio/web/npm && npm pack --dry-run
 
-# The phase 3 gate's first clause (plan §12), reproducible: a real Vite
-# app (examples/devtools-vite) installs the packed @weftgo/devtools —
-# the tarball `npm publish` would upload — builds with `vite build`,
-# and its smoke test (check.ts, jsdom + a fake /api/meta, no browser)
-# proves the bundled package put <weft-devtools> on the page and that
-# the installed panel.js is studio/dist/panel/panel.js byte for byte.
+# The phase 3 gate's first clause (plan §12), pinned: a real Vite app
+# (examples/devtools-vite) installs the packed @weftgo/devtools — the
+# tarball `npm publish` would upload — builds with `vite build`, and its
+# smoke test (check.ts, jsdom + a fake /api/meta, no browser) proves the
+# bundled package put <weft-devtools> on the page and that the installed
+# panel.js is studio/dist/panel/panel.js byte for byte. vite and jsdom
+# are exact versions with a committed package-lock.json, installed by
+# `npm ci` (the registry or a warm npm cache, nothing else); the tarball
+# is not in the lockfile (its integrity changes with every panel build)
+# and goes in after, offline and unsaved. CI runs it after studio-check.
 # Needs the assembled studio/web/npm (make studio-build or
 # devtools-npm). The install is npm's: an explicit tarball spec
 # reinstalls a changed tarball, which bun's cache does not.
@@ -190,6 +194,7 @@ devtools-vite-check:
 	rm -rf $(DEVTOOLS_VITE)/vendor && mkdir -p $(DEVTOOLS_VITE)/vendor
 	cd studio/web/npm && npm pack --silent --pack-destination $(abspath $(DEVTOOLS_VITE))/vendor >/dev/null
 	mv $(DEVTOOLS_VITE)/vendor/weftgo-devtools-*.tgz $(DEVTOOLS_VITE)/vendor/weftgo-devtools.tgz
-	rm -rf $(DEVTOOLS_VITE)/node_modules/@weftgo
-	cd $(DEVTOOLS_VITE) && npm install --no-save --no-audit --no-fund --loglevel=error ./vendor/weftgo-devtools.tgz
+	cd $(DEVTOOLS_VITE) && npm ci --no-audit --no-fund --loglevel=error
+	cd $(DEVTOOLS_VITE) && npm install --offline --no-save --no-audit --no-fund --loglevel=error ./vendor/weftgo-devtools.tgz
+	! grep -q weftgo $(DEVTOOLS_VITE)/package.json $(DEVTOOLS_VITE)/package-lock.json || { echo "the tarball was saved into package.json or package-lock.json"; exit 1; }
 	cd $(DEVTOOLS_VITE) && bun run check

@@ -10,6 +10,27 @@ module, ADR 0005).
 
 ### Added
 
+- **Review fixes (panel)**: the size table and `budget.test.ts` measure
+  `panel.js` with its version stamp normalized to the fixed-length
+  placeholder `"v0.00.0"` (`normalizeStamp`), so a version bump moves no
+  ledger byte; the panel finds its own `<script>` tag by `data-weft`,
+  else by the `src` that resolves to the bundle's `import.meta.url` —
+  never by a generic `data-endpoint`/`data-token` word, so a
+  third-party widget's tag ahead of it no longer becomes its
+  configuration; nothing renders after a disconnect (the tree's filter
+  debounce and "copied" timer are cleared, no observer on a detached
+  sentinel); the turn filter's prompts, the reported parked calls and
+  failures and the header rung's paths are cleared on every start and
+  capped (oldest first); the server's `overflow` frame reopens a live
+  lane on its own bounded backoff (1 s, doubling while overflows repeat
+  within a minute, a minute at most) instead of at once; viewport
+  resizes are coalesced to one redraw per animation frame; with two
+  panels on a page only one (the global's, else the first connected)
+  answers Alt+W; external keys are looked up as own properties only
+  (`weft.content: "constructor"` is no mode, an unknown cause no
+  cause); a `data-weft-scope` marker on or inside a
+  `data-weft-untrusted` element is ignored, and the README says markers
+  must not appear in untrusted HTML.
 - **Review fixes (npm)**: `@weftgo/devtools` publishes public
   (`publishConfig.access`), with `prepublishOnly` running
   `npm-package.ts --check`, which now also fails on a missing `exports`
@@ -27,6 +48,25 @@ module, ADR 0005).
   `bottom-dock` added) and `mount()` takes `mode`, `push` and `zIndex`
   (written as `data-mode`, `data-push`, `data-z-index`). **Breaking**:
   `mount()` returns `WeftDevtoolsElement | null`.
+- **Review fixes (Studio UI)**: `make devtools-vite-check` is pinned
+  — `examples/devtools-vite` names vite 8.3.4 and jsdom 30.1.2 exactly
+  and commits its `package-lock.json` (installed by `npm ci`; the packed
+  tarball goes in after, `--offline --no-save`, and stays out of
+  `package.json` and the lockfile) — and runs in CI (job
+  `devtools-vite`, after `studio`); `check.ts` waits for the panel's
+  `/api/meta` request with a deadline instead of a fixed 300 ms and
+  gives the bundle's `import.meta` the built module's URL. The run page
+  re-reads a finished run's spans for the invoke_agent span only after
+  a running→finished transition it saw (a run opened cold reads them
+  once). While a run runs, a request row ahead of its transcript batch
+  says "bytes when the transcript is read" (`no_transcript`), not the
+  `gap` badge (`messagesSent`'s new optional `running`). The result-cap
+  badge shows the bytes cut (`truncated · 2.0 KiB cut`) and an unrun
+  call's `max_tokens · call never executed`. A badge's reason and fix
+  are its accessible description (`aria-describedby` to a hidden
+  element), said once; its name is the label. The Studio suites' real
+  sleeps are fake timers advanced past the 2 s poll or deadline-polled
+  conditions.
 - **The devtools panel's Request tab** (plan E1.2): the run page's
   Request pane in the panel, one step at a time (`J`/`K`, the tab's step
   buttons, a step card; `⤢` carries it) — the chips "changed by

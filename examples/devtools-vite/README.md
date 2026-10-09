@@ -15,7 +15,8 @@ this example proves that too.
 
 The package is not published from here. `make devtools-vite-check`
 packs `studio/web/npm` (the tarball `npm publish` would upload) into
-`vendor/weftgo-devtools.tgz`, which `package.json` depends on.
+`vendor/weftgo-devtools.tgz` and installs it beside the pinned
+dependencies; `package.json` does not name it.
 
 ## The check
 
@@ -25,8 +26,10 @@ From the repository root, after `make studio-build`:
 make devtools-vite-check
 ```
 
-It packs the package, installs it with npm, then runs `check.ts` with
-bun. The check runs `vite build`, fails if `dist/index.html` has a
+It packs the package, runs `npm ci` (vite and jsdom at the exact
+versions `package.json` and the committed `package-lock.json` pin),
+installs the tarball with `npm install --offline --no-save`, then runs
+`check.ts` with bun. CI runs the same target after `make studio-check`. The check runs `vite build`, fails if `dist/index.html` has a
 `<script src=…panel.js>` tag, loads the built page and JS into jsdom
 with a fake Studio answering `/api/meta`, and asserts that
 `<weft-devtools>` is defined, exactly one is on the page, and it
@@ -34,13 +37,14 @@ asked `/studio/api/meta`. It then compares the installed package's
 `panel.js` with `studio/dist/panel/panel.js` by sha256 (skipped, with
 a note, outside the weft repository). It prints
 `DEVTOOLS VITE CHECK PASS`, or exits 1. No browser, no network
-beyond the npm install, no model calls.
+beyond `npm ci` (the registry or a warm npm cache), no model calls.
 
 The install is npm's, not bun's: bun keeps serving a cached copy of a
 `file:` tarball after it changes, and npm reinstalls an explicit
-tarball spec. `vendor/`, `node_modules/`, `dist/` and the lockfile
-are git-ignored; the lockfile would pin the tarball's integrity,
-which changes with every panel build.
+tarball spec. `vendor/`, `node_modules/` and `dist/` are git-ignored.
+The lockfile is committed and holds vite, jsdom and their tree only:
+the tarball stays out of it (installed unsaved), since its integrity
+changes with every panel build.
 
 ## The live demo
 

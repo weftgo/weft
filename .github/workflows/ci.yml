@@ -209,3 +209,22 @@ jobs:
           bun-version: 1.3.14
       - name: make studio-check
         run: make studio-check
+
+  # The phase 3 gate's first clause (Makefile devtools-vite-check): the
+  # packed @weftgo/devtools in a real Vite app, built and smoke-tested
+  # in jsdom. vite and jsdom come from the example's committed
+  # package-lock.json via npm ci; the studio build assembles
+  # studio/web/npm first. Bun as in the studio job; npm is the
+  # runner's own.
+  devtools-vite:
+    runs-on: ubuntu-latest
+    needs: studio
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - name: make studio-build
+        run: make studio-build
+      - name: make devtools-vite-check
+        run: make devtools-vite-check

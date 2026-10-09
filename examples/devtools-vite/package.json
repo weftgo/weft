@@ -7,11 +7,8 @@
     "build": "vite build",
     "check": "bun run check.ts"
   },
-  "dependencies": {
-    "@weftgo/devtools": "file:./vendor/weftgo-devtools.tgz"
-  },
   "devDependencies": {
-    "jsdom": "^30",
-    "vite": "^8"
+    "jsdom": "30.1.2",
+    "vite": "8.3.4"
   }
 }

@@ -279,7 +279,9 @@ export interface MessagesSent {
   before: Message[]
   /** compacted: the request saw a compaction view (the marker above);
    * gap: the transcript does not hold what the record counts; absent
-   * index (capture off): only the count was kept. */
+   * index (capture off): only the count was kept; no_transcript: no
+   * transcript yet, or (while the run runs) its batch at the record's
+   * index has not arrived — neutral, not a gap. */
   hole?: "compacted" | "gap" | "no_index" | "no_transcript"
 }
 
@@ -291,13 +293,17 @@ export const MESSAGES_INLINE = 3
  * records the page holds: the run's view as of record `index` is the
  * growth records up to it, concatenated (ADR 0028 §8). A view record
  * (a run-scope compaction) is never in the plain transcript: such a
- * request keeps its count and says compacted. No fetch.
+ * request keeps its count and says compacted. No fetch. While the run
+ * runs (`running`), a request row can land before the transcript batch
+ * it names: that batch simply not being there yet is no_transcript,
+ * never the red gap.
  */
 export function messagesSent(
   row: RequestRow,
   transcript: Transcript | null | undefined,
   compactions: RunCompaction[] = [],
-  last = MESSAGES_INLINE
+  last = MESSAGES_INLINE,
+  running = false
 ): MessagesSent {
   const ref = row.body.messages_ref
   const count = ref.count
@@ -313,8 +319,8 @@ export function messagesSent(
   if (compactions.some((c) => c.scope === "run" && c.index === at)) return only("compacted")
   if (!transcript) return only("no_transcript")
   const batches = transcript.batches.filter((b) => b.index <= at)
-  if (!batches.some((b) => b.index === at) || batches.some((b) => b.unreadable))
-    return only("gap")
+  if (batches.some((b) => b.unreadable)) return only("gap")
+  if (!batches.some((b) => b.index === at)) return only(running ? "no_transcript" : "gap")
   const msgs = batches.flatMap((b) => b.messages)
   if (msgs.length !== count) return only("gap")
   const bytes = new TextEncoder().encode(JSON.stringify(msgs)).length

@@ -1,10 +1,10 @@
 # The packed @weftgo/devtools (make devtools-vite-check copies it in),
-# the install it feeds, and the build output. The lockfile is ignored
-# too: it pins the tarball's integrity, which changes with every panel
-# build.
+# the install it feeds, and the build output. package-lock.json is
+# committed (vite and jsdom pinned); the tarball stays out of it: the
+# check installs it with --no-save, since its integrity changes with
+# every panel build. bun's lockfiles are not used here.
 /vendor/
 /node_modules/
 /dist/
 /bun.lock
 /bun.lockb
-/package-lock.json

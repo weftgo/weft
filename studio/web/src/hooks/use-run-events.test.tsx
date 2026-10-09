@@ -121,6 +121,7 @@ describe("useRunEvents walk and tail", () => {
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
+    vi.useRealTimers()
   })
 
   // A collapsed subagent block mounts the hook with no id: it used to
@@ -129,8 +130,10 @@ describe("useRunEvents walk and tail", () => {
   it("does nothing without a run id", async () => {
     const fetchMock = vi.fn(async () => json(pageOf([], null)))
     vi.stubGlobal("fetch", withLiveGrant(fetchMock))
+    vi.useFakeTimers({ shouldAdvanceTime: true })
     const { result } = renderHook(() => useRunEvents("", "running", { live: true }))
-    await new Promise((r) => setTimeout(r, 30))
+    // Past the 2 s poll: still nothing read.
+    await vi.advanceTimersByTimeAsync(2500)
     expect(fetchMock).not.toHaveBeenCalled()
     expect(FakeEventSource.instances).toHaveLength(0)
     expect(result.current.loading).toBe(false)
@@ -234,9 +237,11 @@ describe("useRunEvents walk and tail", () => {
   it("stops on a cursor that does not advance", async () => {
     const fetchMock = vi.fn(async () => json(pageOf([0], 1)))
     vi.stubGlobal("fetch", withLiveGrant(fetchMock))
+    vi.useFakeTimers({ shouldAdvanceTime: true })
     const { result } = renderHook(() => useRunEvents("r1", "succeeded"))
     await waitFor(() => expect(result.current.loading).toBe(false))
-    await new Promise((r) => setTimeout(r, 30))
+    // Past the 2 s poll: the walk does not spin.
+    await vi.advanceTimersByTimeAsync(2500)
     expect(fetchMock.mock.calls.length).toBeLessThanOrEqual(4)
   })
 
@@ -280,12 +285,14 @@ describe("useRunEvents walk and tail", () => {
   it("closes its stream and stops polling on unmount", async () => {
     const fetchMock = vi.fn(async () => json(pageOf([0], null)))
     vi.stubGlobal("fetch", withLiveGrant(fetchMock))
+    vi.useFakeTimers({ shouldAdvanceTime: true })
     const { unmount } = renderHook(() => useRunEvents("r1", "running", { live: true }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
     unmount()
     expect(FakeEventSource.open()).toHaveLength(0)
     const calls = fetchMock.mock.calls.length
-    await new Promise((r) => setTimeout(r, 50))
+    // Past two 2 s polls: none ran.
+    await vi.advanceTimersByTimeAsync(4500)
     expect(fetchMock.mock.calls.length).toBe(calls)
   })
 })
@@ -300,6 +307,7 @@ describe("useRunEvents seam holes", () => {
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
+    vi.useRealTimers()
   })
 
   // The stream subscribes while the first page is in flight: what was
@@ -353,6 +361,7 @@ describe("useRunEvents live publish cost", () => {
   afterEach(() => {
     cleanup()
     vi.unstubAllGlobals()
+    vi.useRealTimers()
   })
 
   // Every publish re-renders the run page over the whole fold: a delta

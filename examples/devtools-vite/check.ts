@@ -98,12 +98,24 @@ try {
   // bundle has no import or export left; jsdom runs no module scripts).
   // window and self are rebound to the context's globalThis: under
   // bun's vm, the bare `window` in a jsdom context is not the wrapper
-  // jsdom's EventTarget methods accept (globalThis is).
-  win.eval(`"use strict";((window, self) => {\n${js}\n})(globalThis, globalThis)`)
+  // jsdom's EventTarget methods accept (globalThis is). import.meta,
+  // a module-only form, becomes a parameter carrying what a browser
+  // would give the built module: its own URL.
+  const metaURL = new URL(srcs[0], win.location.href).href
+  const body = js.replaceAll("import.meta", "__weftImportMeta")
+  win.eval(
+    `"use strict";((window, self, __weftImportMeta) => {\n${body}\n})(globalThis, globalThis, ${JSON.stringify({ url: metaURL })})`,
+  )
 } catch (err) {
   fail(`the built JS threw: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`)
 }
-await new Promise((r) => setTimeout(r, 300))
+// Wait for the panel's first /api/meta request (the mount is async),
+// polling with a deadline rather than sleeping a fixed time.
+for (const deadline = Date.now() + 5000; metaCalls.length === 0 && Date.now() < deadline; ) {
+  await new Promise((r) => setTimeout(r, 10))
+}
+// One more turn for the response to land and any error it raises.
+await new Promise((r) => setTimeout(r, 0))
 if (errors.length) fail(`uncaught page errors: ${errors.map(String).join("; ")}`)
 
 // 5. The assertions.

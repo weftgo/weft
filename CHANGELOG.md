@@ -6,7 +6,16 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
-## Unreleased
+## 0.12.0 — 2026-10-09
+
+Phase 3 of the devtools plan (the panel): `@weftgo/devtools` on npm,
+scope detection (explicit, response headers through `weft/scope`, DOM
+markers, the page URL, the fallback), the panel's host API, layout,
+theme, keyed renderer, views, honesty and the Request tab, Studio's
+Request pane, and the live grant. Tags `core/v0.12.0` (the
+`weft.version` literal only; core's API is unchanged since 0.10.1) and
+`v0.12.0` — a minor bump, as `?token=` is refused and `mount()` may
+return `null` (Changed — breaking, Changed — migration).
 
 ### Added
 

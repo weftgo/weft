@@ -2178,7 +2178,7 @@ function rr(e, t) {
 //#endregion
 //#region src/panel/version.ts
 function ir() {
-	return "v0.11.0";
+	return "v0.12.0";
 }
 function ar(e) {
 	if (typeof e != "string") return null;

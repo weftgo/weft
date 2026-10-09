@@ -397,6 +397,22 @@ type transcript struct {
 	Batches []transcriptBatch `json:"batches"`
 }
 
+// transcriptAsOf is api/runs/{id}/transcript?step=N (ADR 0029): the
+// bare route's batches, then the messages step N's model call carried
+// — the replay prefix for from_step N, assembled by
+// obsdb.MessagesAsOf. CompactedAt names the run-scope view step N's
+// request carried (counts, range and hash, as the run page serves
+// compactions), null when the request carried the plain transcript;
+// Badge is "derived" when no request record placed the messages (a run
+// written before ADR 0028: the from_step cut rule did).
+type transcriptAsOf struct {
+	transcript
+	Step        int            `json:"step"`
+	Messages    []core.Message `json:"messages"`
+	CompactedAt *compactedNote `json:"compacted_at"`
+	Badge       string         `json:"badge,omitempty"`
+}
+
 // spanStatus names an OTLP status code the way a reader expects it.
 func spanStatus(code int) string {
 	switch code {
@@ -936,10 +952,21 @@ func (s *Server) serveRunEvents(w http.ResponseWriter, r *http.Request, id strin
 // messages bodies, in order, one batch per messages record — the
 // replay-grade record of what the run saw and said (what replaces
 // the store's result document; the fold takes finished text from
-// here, because deltas are not stored).
+// here, because deltas are not stored). With ?step=N it also answers
+// the messages step N's model call carried (transcriptAsOf, ADR 0029);
+// a step the run never reached is 404, as steps/{n} answers it.
 func (s *Server) serveRunTranscript(w http.ResponseWriter, r *http.Request, id string) {
 	if !s.scopeRunID(w, r, id) {
 		return
+	}
+	step := -1
+	if q := r.URL.Query(); q.Has("step") {
+		n, err := strconv.Atoi(q.Get("step"))
+		if err != nil || n < 0 || strconv.Itoa(n) != q.Get("step") {
+			badRequest(w, r, "step must be a non-negative integer ordinal")
+			return
+		}
+		step = n
 	}
 	batches, err := s.db.TranscriptBatches(r.Context(), id)
 	if err != nil {
@@ -959,7 +986,33 @@ func (s *Server) serveRunTranscript(w http.ResponseWriter, r *http.Request, id s
 		}
 		out.Batches = append(out.Batches, tb)
 	}
-	writeJSON(w, r, http.StatusOK, out)
+	if step < 0 {
+		writeJSON(w, r, http.StatusOK, out)
+		return
+	}
+	sm, err := obsdb.MessagesAsOf(r.Context(), s.db, id, step)
+	switch {
+	case errors.Is(err, obsdb.ErrStepMessages):
+		conflict(w, r, err.Error(), badgeOf(obsdb.HoleDerived))
+		return
+	case errors.Is(err, obsdb.ErrNotFound):
+		notFound(w, r, fmt.Sprintf("no step %d of run %s", step, id))
+		return
+	case err != nil:
+		dbError(w, r, "transcript of run", id, err)
+		return
+	}
+	doc := transcriptAsOf{transcript: out, Step: step, Messages: sm.Messages}
+	if doc.Messages == nil {
+		doc.Messages = []core.Message{}
+	}
+	if sm.View != nil {
+		doc.CompactedAt = noteOf(*sm.View)
+	}
+	if sm.Derived {
+		doc.Badge = string(obsdb.HoleDerived)
+	}
+	writeJSON(w, r, http.StatusOK, doc)
 }
 
 // serveRunSpans answers api/runs/{id}/spans (S4.3): the run's timed

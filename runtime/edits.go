@@ -35,6 +35,11 @@ import (
 // refuses a prefix that leaves one of the kept steps' calls without a
 // result: Repair would synthesize one, and the experiment would run on
 // a transcript nobody wrote.
+//
+// When step from_step's request carried a compaction view (ADR 0028
+// §8), the prefix is what that request carried — the view's range
+// replaced (ADR 0029): the replay feeds the model its exact input.
+// from_step 0 re-runs the turn from what it was fed; no view applies.
 func keptPrefix(src *sourceRun, fromStep int) ([]core.Message, error) {
 	cut := src.cut(fromStep)
 	if err := prefixComplete(src.steps[:cut]); err != nil {
@@ -42,7 +47,24 @@ func keptPrefix(src *sourceRun, fromStep int) ([]core.Message, error) {
 	}
 	out := make([]core.Message, 0, len(src.input)+cut)
 	out = append(out, src.input...)
-	return append(out, src.steps[:cut]...), nil
+	return src.seenAt(fromStep, append(out, src.steps[:cut]...))
+}
+
+// seenAt applies the source's view to prefix when it is from_step's
+// (and from_step > 0).
+func (s *sourceRun) seenAt(fromStep int, prefix []core.Message) ([]core.Message, error) {
+	if s.view == nil || fromStep <= 0 || s.view.step != fromStep {
+		return prefix, nil
+	}
+	return s.seen(prefix)
+}
+
+// compactedEditError is the refusal of an edit to a message the
+// compacted prefix no longer holds — Studio's copy words it identically
+// (studio/edits.go's compactedEditError; both tests pin the text).
+func compactedEditError(what string, step, fromStep int, v *stepView) error {
+	return fmt.Errorf("%s of step %d was compacted away before step %d's request (messages [%d, %d) replaced by %d): the model never saw it there; edit from an earlier from_step",
+		what, step, fromStep, v.from, v.to, len(v.entries))
 }
 
 // applyTranscriptEdits returns the kept prefix (the input, then the
@@ -56,7 +78,10 @@ func keptPrefix(src *sourceRun, fromStep int) ([]core.Message, error) {
 //   - an edit carrying both a tool_result and a content (one edit, one
 //     meaning);
 //   - a kept prefix that leaves a call without a result (from_step
-//     must land on a step boundary).
+//     must land on a step boundary);
+//   - an edit to a message step from_step's compaction view replaced:
+//     the replay prefix is what the model saw (ADR 0029), and the model
+//     never saw that message there.
 func applyTranscriptEdits(src *sourceRun, fromStep int, edits []transcriptEdit) ([]core.Message, error) {
 	if len(edits) == 0 {
 		return keptPrefix(src, fromStep)
@@ -73,6 +98,14 @@ func applyTranscriptEdits(src *sourceRun, fromStep int, edits []transcriptEdit) 
 		steps[i] = core.Message{Role: m.Role, Content: append([]core.Part(nil), m.Content...)}
 	}
 
+	var view *stepView
+	if src.view != nil && src.view.step == fromStep {
+		view = src.view
+	}
+	inView := func(i int) bool {
+		seq := len(src.input) + i
+		return view != nil && seq >= view.from && seq < view.to
+	}
 	for _, e := range edits {
 		if e.Step < 0 {
 			return nil, fmt.Errorf("edit step %d is negative", e.Step)
@@ -89,12 +122,22 @@ func applyTranscriptEdits(src *sourceRun, fromStep int, edits []transcriptEdit) 
 			if e.CallID == "" {
 				return nil, fmt.Errorf("a tool_result edit needs call_id")
 			}
-			if !patchResult(steps, stepOf, e.Step, e.CallID, e.ToolResult) {
+			at := patchResult(steps, stepOf, e.Step, e.CallID, e.ToolResult)
+			if len(at) == 0 {
 				return nil, fmt.Errorf("no tool call %q in the kept prefix's step %d", e.CallID, e.Step)
 			}
+			for _, i := range at {
+				if inView(i) {
+					return nil, compactedEditError(fmt.Sprintf("call %q", e.CallID), e.Step, fromStep, view)
+				}
+			}
 		case e.Content != "":
-			if !rewriteReply(steps, stepOf, e.Step, e.Content) {
+			at := rewriteReply(steps, stepOf, e.Step, e.Content)
+			if at < 0 {
 				return nil, fmt.Errorf("step %d has no assistant reply in the kept prefix (or it carried tool calls: patch their results instead)", e.Step)
+			}
+			if inView(at) {
+				return nil, compactedEditError("the reply", e.Step, fromStep, view)
 			}
 		default:
 			return nil, fmt.Errorf("an empty edit (neither tool_result nor content)")
@@ -105,15 +148,16 @@ func applyTranscriptEdits(src *sourceRun, fromStep int, edits []transcriptEdit) 
 	}
 	out := make([]core.Message, 0, len(src.input)+cut)
 	out = append(out, src.input...)
-	return append(out, steps...), nil
+	return src.seenAt(fromStep, append(out, steps...))
 }
 
 // patchResult replaces one call's result content in place — the result
-// of call callID inside step (stepOf[i] is the step steps[i] joined).
-// Scoped to the step: call ids are only unique within a run's step,
-// and a deterministic model reuses them.
-func patchResult(steps []core.Message, stepOf []int, step int, callID, content string) bool {
-	patched := false
+// of call callID inside step (stepOf[i] is the step steps[i] joined) —
+// and returns the indices of the messages it patched (none: no such
+// call). Scoped to the step: call ids are only unique within a run's
+// step, and a deterministic model reuses them.
+func patchResult(steps []core.Message, stepOf []int, step int, callID, content string) []int {
+	var patched []int
 	for mi := range steps {
 		if steps[mi].Role != core.RoleTool || stepOf[mi] != step {
 			continue
@@ -126,29 +170,30 @@ func patchResult(steps []core.Message, stepOf []int, step int, callID, content s
 			tr.Content = content
 			tr.IsError = false
 			steps[mi].Content[pi] = tr
-			patched = true
+			patched = append(patched, mi)
 		}
 	}
 	return patched
 }
 
 // rewriteReply replaces one step's assistant message with a plain-text
-// reply. It refuses a message that carried tool calls: their results
-// would become orphans Repair drops silently.
-func rewriteReply(steps []core.Message, stepOf []int, step int, content string) bool {
+// reply and returns its index, -1 for none. It refuses (-1) a message
+// that carried tool calls: their results would become orphans Repair
+// drops silently.
+func rewriteReply(steps []core.Message, stepOf []int, step int, content string) int {
 	for mi := range steps {
 		if steps[mi].Role != core.RoleAssistant || stepOf[mi] != step {
 			continue
 		}
 		for _, p := range steps[mi].Content {
 			if _, ok := p.(core.ToolCallPart); ok {
-				return false
+				return -1
 			}
 		}
 		steps[mi].Content = []core.Part{core.TextPart{Text: content}}
-		return true
+		return mi
 	}
-	return false
+	return -1
 }
 
 // prefixComplete is §1's boundary rule over the kept steps: every tool

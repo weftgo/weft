@@ -1,0 +1,174 @@
+{
+  "batches": [
+    {
+      "index": 0,
+      "step": 0,
+      "input": true,
+      "messages": [
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "refund order 42"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "step": 0,
+      "input": false,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_call",
+              "id": "c_lookup",
+              "name": "lookup_order",
+              "args": {
+                "order_id": "42"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "step": 0,
+      "input": false,
+      "messages": [
+        {
+          "role": "tool",
+          "content": [
+            {
+              "type": "tool_result",
+              "call_id": "c_lookup",
+              "name": "lookup_order",
+              "content": "order 42 shipped",
+              "is_error": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "step": 1,
+      "input": false,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_call",
+              "id": "c_sub",
+              "name": "research",
+              "args": {
+                "prompt": "why is order 42 late?"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 4,
+      "step": 1,
+      "input": false,
+      "messages": [
+        {
+          "role": "tool",
+          "content": [
+            {
+              "type": "tool_result",
+              "call_id": "c_sub",
+              "name": "research",
+              "content": "the carrier lost it",
+              "is_error": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "index": 6,
+      "step": 2,
+      "input": false,
+      "messages": [
+        {
+          "role": "assistant",
+          "content": [
+            {
+              "type": "tool_call",
+              "id": "c_refund",
+              "name": "refund",
+              "args": {
+                "order_id": "42"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "step": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "refund order 42"
+        }
+      ]
+    },
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "summary: the order was looked up"
+        }
+      ]
+    },
+    {
+      "role": "assistant",
+      "content": [
+        {
+          "type": "tool_call",
+          "id": "c_sub",
+          "name": "research",
+          "args": {
+            "prompt": "why is order 42 late?"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": [
+        {
+          "type": "tool_result",
+          "call_id": "c_sub",
+          "name": "research",
+          "content": "the carrier lost it",
+          "is_error": false
+        }
+      ]
+    }
+  ],
+  "compacted_at": {
+    "index": 5,
+    "step": 2,
+    "from_seq": 1,
+    "to_seq": 3,
+    "hash": "f7f974691e358826798016f537798494fdc08c45bce009893a273b3cf26bd1c3",
+    "replaced": 2,
+    "entries": 1
+  }
+}
+

@@ -337,6 +337,11 @@ func TestAuthMatrix(t *testing.T) {
 		{name: "GET /api/runs/{id}", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] }, resources: all, want: scoped(ok)},
 		{name: "GET /api/runs/{id}/events", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/events" }, resources: all, want: scoped(ok)},
 		{name: "GET /api/runs/{id}/transcript", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/transcript" }, resources: all, want: scoped(ok)},
+		// ?step=N (ADR 0029: the messages step N's model call carried) is
+		// the same route, scoped alike; a step past the run's last is 404
+		// only once the scope passed, as steps/{n} answers it.
+		{name: "GET /api/runs/{id}/transcript?step=0", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/transcript?step=0" }, resources: all, want: scoped(ok)},
+		{name: "GET /api/runs/{id}/transcript?step=9", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/transcript?step=9" }, resources: all, want: scoped(miss)},
 		{name: "GET /api/runs/{id}/spans", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/spans" }, resources: all, want: scoped(ok)},
 		// The request record carries the system prompt and the catalog:
 		// refused to a read-scoped token whatever the run (the manifest's
@@ -369,6 +374,7 @@ func TestAuthMatrix(t *testing.T) {
 		{name: "GET /api/runs/{B's child}/steps/0", method: "GET", path: fixed("/api/runs/run_b/0/call_1/steps/0"), resources: []string{"B"}, want: scoped(ok)},
 		{name: "GET /api/runs/{B's child}", method: "GET", path: fixed("/api/runs/run_b/0/call_1"), resources: []string{"B"}, want: scoped(ok)},
 		{name: "GET /api/runs/{B's child}/transcript", method: "GET", path: fixed("/api/runs/run_b/0/call_1/transcript"), resources: []string{"B"}, want: scoped(ok)},
+		{name: "GET /api/runs/{B's child}/transcript?step=0", method: "GET", path: fixed("/api/runs/run_b/0/call_1/transcript?step=0"), resources: []string{"B"}, want: scoped(ok)},
 		{name: "GET /api/runs/{B's child}/events", method: "GET", path: fixed("/api/runs/run_b/0/call_1/events"), resources: []string{"B"}, want: scoped(ok)},
 		// The run export (plan A7): json and jsonl are scoped like the
 		// run's other reads — a read-scoped token gets them with the

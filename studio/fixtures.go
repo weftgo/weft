@@ -260,12 +260,6 @@ func runFixtures(src fixtureSource) ([]fixtureFile, error) {
 			answering[rec.Step] = rec
 		}
 	}
-	views := map[int64]obsdb.Compaction{}
-	for _, c := range src.compactions {
-		if c.Scope == obsdb.CompactionRun {
-			views[c.Index] = c
-		}
-	}
 
 	var files []fixtureFile
 	done := map[int]bool{}
@@ -304,18 +298,17 @@ func runFixtures(src fixtureSource) ([]fixtureFile, error) {
 			if body.Model.Provider != "" || body.Model.Name != "" {
 				doc.Model = core.ModelInfo{Provider: body.Model.Provider, Name: body.Model.Name}
 			}
-			if ref := body.MessagesRef.Index; ref != nil {
-				if v, ok := views[*ref]; ok {
-					seen, err := applyView(msgs[:i], v)
-					if err != nil {
-						return nil, derivedError("step %d: %v", step, err)
-					}
-					key.Messages = seen
-					doc.CompactedAt = &compactedNote{
-						Index: v.Index, Step: v.Step, FromSeq: v.FromSeq, ToSeq: v.ToSeq,
-						Hash: v.Hash, Replaced: v.Replaced, Entries: v.Entries,
-					}
+			if v, ok := obsdb.ViewOf(rec, src.compactions); ok {
+				// The step's request carried a view (ADR 0028 §8): the
+				// fixture keys on what the model saw — obsdb's one
+				// assembly, shared with the transcript route's ?step=
+				// and weft/runtime's replay prefix (ADR 0029).
+				seen, err := obsdb.ApplyView(msgs[:i], v)
+				if err != nil {
+					return nil, derivedError("step %d: %v", step, err)
 				}
+				key.Messages = seen
+				doc.CompactedAt = noteOf(v)
 			}
 			if src.system != nil && rec.SystemHash != "" {
 				doc.Request.System = src.system(rec.SystemHash)
@@ -336,21 +329,13 @@ func runFixtures(src fixtureSource) ([]fixtureFile, error) {
 	return files, nil
 }
 
-// applyView rebuilds the messages a compacted request carried (ADR
-// 0028 §8): the transcript the request was made over, with the range
-// [FromSeq, ToSeq) replaced by the view's messages.
-func applyView(transcript []core.Message, v obsdb.Compaction) ([]core.Message, error) {
-	if v.FromSeq < 0 || v.FromSeq > v.ToSeq || v.ToSeq > int64(len(transcript)) {
-		return nil, fmt.Errorf("compaction view %d replaces [%d, %d) of a %d-message transcript", v.Index, v.FromSeq, v.ToSeq, len(transcript))
+// noteOf is a view's compacted_at note: counts, range and hash, never
+// its body.
+func noteOf(v obsdb.Compaction) *compactedNote {
+	return &compactedNote{
+		Index: v.Index, Step: v.Step, FromSeq: v.FromSeq, ToSeq: v.ToSeq,
+		Hash: v.Hash, Replaced: v.Replaced, Entries: v.Entries,
 	}
-	var entries []core.Message
-	if err := json.Unmarshal(v.Messages, &entries); err != nil {
-		return nil, fmt.Errorf("compaction view %d is not readable as messages: %w", v.Index, err)
-	}
-	out := make([]core.Message, 0, len(transcript)-int(v.ToSeq-v.FromSeq)+len(entries))
-	out = append(out, transcript[:v.FromSeq]...)
-	out = append(out, entries...)
-	return append(out, transcript[v.ToSeq:]...), nil
 }
 
 // thinkingLevel reads a request record's thinking level name back

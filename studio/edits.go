@@ -91,12 +91,51 @@ func stepCount(steps []stepMessage) int {
 	return n
 }
 
+// compactedRange is the run-scope view from_step's request carried
+// (ADR 0028 §8), placed over the run's own messages: the transcript
+// seqs [from, to) it replaced (a seq counts the input's messages too —
+// inputLen of them precede the run's own) by entries messages. The
+// replay prefix is that view (ADR 0029), so an edit inside the range
+// edits a message the model never saw at from_step: refused.
+type compactedRange struct {
+	inputLen, from, to, entries int
+}
+
+// compactedRangeOf places sm's view, nil when the step's request
+// carried the plain transcript.
+func compactedRangeOf(batches []obsdb.TranscriptBatch, sm obsdb.StepMessages) *compactedRange {
+	if sm.View == nil {
+		return nil
+	}
+	n := 0
+	for _, b := range batches {
+		if !b.Input || len(b.Messages) == 0 || string(b.Messages) == "null" {
+			continue
+		}
+		var batch []json.RawMessage
+		if json.Unmarshal(b.Messages, &batch) == nil {
+			n += len(batch)
+		}
+	}
+	return &compactedRange{inputLen: n, from: int(sm.View.FromSeq), to: int(sm.View.ToSeq), entries: sm.View.Entries}
+}
+
+// compactedEditError is the refusal of an edit to a message the
+// compacted prefix no longer holds — weft/runtime's copy words it
+// identically (edits.go's compactedEditError; both tests pin the text).
+func compactedEditError(what string, step, fromStep int, c *compactedRange) error {
+	return fmt.Errorf("%s of step %d was compacted away before step %d's request (messages [%d, %d) replaced by %d): the model never saw it there; edit from an earlier from_step",
+		what, step, fromStep, c.from, c.to, c.entries)
+}
+
 // validateTranscriptEdits applies the edits to the source run's kept
 // steps in memory and reports the first rule they break, in the
 // runtime's own words. steps are the run's own (runSteps), never its
-// input. A nil error means the patched prefix is complete: every kept
-// call answered, the cut at a step boundary.
-func validateTranscriptEdits(steps []stepMessage, fromStep int, edits []linkruntime.TranscriptEdit) error {
+// input; view is the compaction from_step's request carried (nil:
+// none) — an edit inside its range is refused. A nil error means the
+// patched prefix is complete: every kept call answered, the cut at a
+// step boundary.
+func validateTranscriptEdits(steps []stepMessage, fromStep int, edits []linkruntime.TranscriptEdit, view *compactedRange) error {
 	if len(edits) == 0 {
 		return nil
 	}
@@ -130,12 +169,22 @@ func validateTranscriptEdits(steps []stepMessage, fromStep int, edits []linkrunt
 			if e.CallID == "" {
 				return fmt.Errorf("a tool_result edit needs call_id")
 			}
-			if !patchTranscriptResult(kept, e.Step, e.CallID, e.ToolResult) {
+			at := patchTranscriptResult(kept, e.Step, e.CallID, e.ToolResult)
+			if len(at) == 0 {
 				return fmt.Errorf("no tool call %q in the kept prefix's step %d", e.CallID, e.Step)
 			}
+			for _, i := range at {
+				if view.holds(i) {
+					return compactedEditError(fmt.Sprintf("call %q", e.CallID), e.Step, fromStep, view)
+				}
+			}
 		case e.Content != "":
-			if !checkRewrite(kept, e.Step) {
+			at := checkRewrite(kept, e.Step)
+			if at < 0 {
 				return fmt.Errorf("step %d has no assistant reply in the kept prefix (or it carried tool calls: patch their results instead)", e.Step)
+			}
+			if view.holds(at) {
+				return compactedEditError("the reply", e.Step, fromStep, view)
 			}
 		default:
 			return fmt.Errorf("an empty edit (neither tool_result nor content)")
@@ -182,10 +231,21 @@ func cutTranscriptAtStep(steps []stepMessage, fromStep int) int {
 	return len(steps)
 }
 
+// holds reports whether the run's own message i lies inside the
+// replaced range (false for no view).
+func (c *compactedRange) holds(i int) bool {
+	if c == nil {
+		return false
+	}
+	seq := c.inputLen + i
+	return seq >= c.from && seq < c.to
+}
+
 // patchTranscriptResult patches the result of call callID inside step
-// — scoped to the step, like the runtime's patchResult.
-func patchTranscriptResult(steps []stepMessage, step int, callID, content string) bool {
-	patched := false
+// — scoped to the step, like the runtime's patchResult — and returns
+// the indices of the messages it patched (none: no such call).
+func patchTranscriptResult(steps []stepMessage, step int, callID, content string) []int {
+	var patched []int
 	for mi := range steps {
 		if steps[mi].msg.Role != core.RoleTool || steps[mi].step != step {
 			continue
@@ -199,25 +259,26 @@ func patchTranscriptResult(steps []stepMessage, step int, callID, content string
 			tr.Content = content
 			tr.IsError = false
 			parts[pi] = tr
-			patched = true
+			patched = append(patched, mi)
 		}
 	}
 	return patched
 }
 
-// checkRewrite reports whether step's assistant message exists and
-// carries no tool calls (dropping them would orphan their results).
-func checkRewrite(steps []stepMessage, step int) bool {
-	for _, m := range steps {
+// checkRewrite returns the index of step's assistant message when it
+// exists and carries no tool calls (dropping them would orphan their
+// results), -1 otherwise.
+func checkRewrite(steps []stepMessage, step int) int {
+	for i, m := range steps {
 		if m.msg.Role != core.RoleAssistant || m.step != step {
 			continue
 		}
 		for _, p := range m.msg.Content {
 			if _, ok := p.(core.ToolCallPart); ok {
-				return false
+				return -1
 			}
 		}
-		return true
+		return i
 	}
-	return false
+	return -1
 }

@@ -6,6 +6,45 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
+## Unreleased
+
+### Added
+
+- **The transcript as of a step** (ADR 0029): `GET
+  /api/runs/{id}/transcript?step=N` adds `step`, `messages` — what step
+  N's model call carried, the replay prefix for `from_step` N — and
+  `compacted_at`, the run-scope compaction view that request carried
+  (`{index, step, from_seq, to_seq, hash, replaced, entries}`, counts and
+  hashes only) or `null`; `badge: "derived"` for a run without request
+  records; 404 past the run's last step. Without `step` the route is
+  unchanged. `obsdb.MessagesAsOf` (with `AssembleStep`, `ViewOf`,
+  `ApplyView`, `StepMessages` and `ErrStepMessages`) is the one assembly
+  the route, weft/runtime and the wefttest fixture export share.
+- **ADR 0029** (the replay input is what the model saw): the prefix
+  rule, the transcript route's `step`, the edit refusal inside a
+  compacted range, the child-as-source rule and `weft.forked_from` as
+  the link back.
+
+### Changed
+
+- **The replay prefix across a compaction**: a playground command with
+  `from_step` N whose source step N's request carried a `PrepareStep`
+  compaction view feeds the replay that view — the model's exact input
+  — instead of the original transcript, on the local obsdb, Studio and
+  thread source paths alike; from a step whose request carried the plain
+  transcript, the original prefix. The scripted engine keys the recorded
+  turns over the compacted prefix too.
+- **Edits inside a compacted range are refused** on both sides (Studio
+  400, the runtime's reject) in one wording: `call "c_1" of step 0 was
+  compacted away before step 3's request (messages [1, 3) replaced by
+  1): the model never saw it there; edit from an earlier from_step`.
+- **A subagent's child run as source** replays as its own run of the
+  child's agent — registered on the runtime by that name — with
+  `weft.playground` and `weft.forked_from="<child id>#<from_step>"`, no
+  parent linkage; a parent replay from the step that called the child
+  substitutes (or parks) the never-class `Subagent` call, and the child
+  is not re-run (pinned, no behaviour change).
+
 ## 0.12.0 — 2026-10-09
 
 Phase 3 of the devtools plan (the panel): `@weftgo/devtools` on npm,

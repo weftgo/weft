@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"net/http"
 	"strings"
@@ -210,7 +211,20 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 				badRequest(w, r, "the source run has no readable transcript to edit")
 				return
 			}
-			if verr := validateTranscriptEdits(steps, req.Source.FromStep, req.TranscriptEdits); verr != nil {
+			// The replay prefix is what the model saw at from_step (ADR
+			// 0029): when that request carried a compaction view, an
+			// edit inside its range is refused. A step the run never
+			// reached has no view; the step-count rule refuses it.
+			var view *compactedRange
+			sm, aerr := obsdb.MessagesAsOf(r.Context(), s.db, req.Source.RunID, req.Source.FromStep)
+			switch {
+			case aerr == nil:
+				view = compactedRangeOf(batches, sm)
+			case !errors.Is(aerr, obsdb.ErrNotFound):
+				badRequest(w, r, fmt.Sprintf("the source run's step %d does not rebuild from its records: %v", req.Source.FromStep, aerr))
+				return
+			}
+			if verr := validateTranscriptEdits(steps, req.Source.FromStep, req.TranscriptEdits, view); verr != nil {
 				badRequest(w, r, verr.Error())
 				return
 			}

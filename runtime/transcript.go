@@ -3,8 +3,10 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -13,7 +15,6 @@ import (
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/obsdb"
-	"github.com/weftgo/weft/otel"
 	"github.com/weftgo/weft/thread"
 )
 
@@ -42,6 +43,39 @@ type sourceRun struct {
 	// carried no step for some record (a row from before the stamp, the
 	// thread path): orderSteps numbers them instead.
 	stepOf []int
+	// view is the run-scope compaction view (ADR 0028 §8) the request
+	// of the command's from_step carried, nil when that request carried
+	// the plain transcript (or from_step is 0). The replay prefix is
+	// what the model saw (ADR 0029): the kept prefix with the view's
+	// range replaced.
+	view *stepView
+}
+
+// stepView is one step's compaction view placed over the source's
+// transcript (input, then steps): the seqs [from, to) the request did
+// not carry, and the messages it carried in their place.
+type stepView struct {
+	step     int
+	from, to int
+	entries  []core.Message
+}
+
+// seen is what the model saw over prefix — the source's transcript up
+// to step view.step's model call, edits applied — with the view's range
+// replaced; prefix itself without a view.
+func (s *sourceRun) seen(prefix []core.Message) ([]core.Message, error) {
+	v := s.view
+	if v == nil {
+		return prefix, nil
+	}
+	if v.from < 0 || v.from > v.to || v.to > len(prefix) {
+		return nil, fmt.Errorf("the compaction view step %d's request carried replaces [%d, %d) of a %d-message prefix: the source's records do not fit together",
+			v.step, v.from, v.to, len(prefix))
+	}
+	out := make([]core.Message, 0, len(prefix)-(v.to-v.from)+len(v.entries))
+	out = append(out, prefix[:v.from]...)
+	out = append(out, v.entries...)
+	return append(out, prefix[v.to:]...), nil
 }
 
 // all is the whole transcript: input, then steps.
@@ -104,21 +138,134 @@ const (
 
 // sourceTranscript resolves a source run's messages through the three
 // paths in order. agent is the command's agent (thread.Open needs one
-// to read a session's tree).
-func (l *link) sourceTranscript(ctx context.Context, agent *core.Agent, runID string) (*sourceRun, error) {
+// to read a session's tree). fromStep > 0 also resolves the compaction
+// view that step's request carried (sourceRun.view, ADR 0029) from the
+// records: the obsdb and Studio paths read it where they read the
+// transcript; the thread path, which holds no request records, asks the
+// local obsdb and then Studio — a run neither holds had no records, so
+// no view.
+func (l *link) sourceTranscript(ctx context.Context, agent *core.Agent, runID string, fromStep int) (*sourceRun, error) {
 	ctx, cancel := context.WithTimeout(ctx, sourceTimeout)
 	defer cancel()
+	db := l.localDB()
+	withView := func(src *sourceRun, find func() (*stepView, error)) (*sourceRun, error) {
+		if fromStep <= 0 {
+			return src, nil
+		}
+		v, err := find()
+		if err != nil {
+			return nil, fmt.Errorf("the compaction view of step %d: %w", fromStep, err)
+		}
+		src.view = v
+		return src, nil
+	}
 	if l.cfg.threads != nil && agent != nil {
 		if src, err := transcriptFromThread(ctx, l.cfg.threads, agent, runID); err == nil {
-			return src, nil
+			return withView(src, func() (*stepView, error) {
+				if db != nil {
+					// The local sink answers when it holds the run.
+					if _, err := db.Run(ctx, runID); err == nil {
+						return viewFromObsdb(ctx, db, runID, fromStep)
+					}
+				}
+				return l.viewFromStudio(ctx, runID, fromStep)
+			})
 		}
 	}
-	if db := otel.LocalDB(); db != nil {
+	if db != nil {
 		if src, err := transcriptFromObsdb(ctx, db, runID); err == nil {
-			return src, nil
+			return withView(src, func() (*stepView, error) { return viewFromObsdb(ctx, db, runID, fromStep) })
 		}
 	}
-	return l.transcriptFromStudio(ctx, runID)
+	src, err := l.transcriptFromStudio(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	return withView(src, func() (*stepView, error) { return l.viewFromStudio(ctx, runID, fromStep) })
+}
+
+// viewFromObsdb reads the compaction view step's request carried
+// through obsdb's one assembly (obsdb.MessagesAsOf). nil, nil when the
+// request carried the plain transcript, or the run never reached the
+// step (validate's step count refuses that command).
+func viewFromObsdb(ctx context.Context, db obsdb.DB, runID string, step int) (*stepView, error) {
+	sm, err := obsdb.MessagesAsOf(ctx, db, runID, step)
+	switch {
+	case errors.Is(err, obsdb.ErrStepMessages):
+		return nil, err
+	case errors.Is(err, obsdb.ErrNotFound):
+		return nil, nil
+	case err != nil:
+		return nil, err
+	case sm.View == nil:
+		return nil, nil
+	}
+	var entries []core.Message
+	if err := json.Unmarshal(sm.View.Messages, &entries); err != nil {
+		return nil, fmt.Errorf("compaction view %d: %w", sm.View.Index, err)
+	}
+	return &stepView{step: step, from: int(sm.View.FromSeq), to: int(sm.View.ToSeq), entries: entries}, nil
+}
+
+// viewFromStudio is viewFromObsdb over GET
+// /api/runs/{id}/transcript?step=N: the messages the step's model call
+// carried and the view's compacted_at range, its entries being those
+// messages from from_seq on. A 404 (an unknown run, a step the run never
+// reached) is no view; a Studio older than the parameter answers the
+// bare transcript (no "step"), and the view is unknown — logged, the
+// original prefix used.
+func (l *link) viewFromStudio(ctx context.Context, runID string, step int) (*stepView, error) {
+	u := &url.URL{Path: "/api/runs/" + runID + "/transcript", RawQuery: "step=" + strconv.Itoa(step)}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, l.url(u.EscapedPath()+"?"+u.RawQuery), nil)
+	if err != nil {
+		return nil, err
+	}
+	bearerAuth(req, l.token)
+	resp, err := l.client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+		_ = resp.Body.Close()
+	}()
+	switch resp.StatusCode {
+	case http.StatusOK:
+	case http.StatusNotFound:
+		return nil, nil
+	default:
+		return nil, fmt.Errorf("studio transcript as of step %d: %s", step, resp.Status)
+	}
+	var body struct {
+		Step        *int           `json:"step"`
+		Messages    []core.Message `json:"messages"`
+		CompactedAt *struct {
+			FromSeq int64 `json:"from_seq"`
+			ToSeq   int64 `json:"to_seq"`
+			Entries int   `json:"entries"`
+		} `json:"compacted_at"`
+	}
+	lr := &io.LimitedReader{R: resp.Body, N: maxTranscriptLen + 1}
+	if err := json.NewDecoder(lr).Decode(&body); err != nil {
+		if lr.N <= 0 {
+			return nil, fmt.Errorf("studio transcript: larger than %d bytes", maxTranscriptLen)
+		}
+		return nil, err
+	}
+	if body.Step == nil {
+		slog.Warn("weft/runtime: this Studio does not answer the transcript as of a step (ADR 0029); a compaction view of the source step is unknown",
+			"run_id", runID, "step", step)
+		return nil, nil
+	}
+	c := body.CompactedAt
+	if c == nil {
+		return nil, nil
+	}
+	from, n := int(c.FromSeq), c.Entries
+	if from < 0 || c.ToSeq < c.FromSeq || n < 0 || from+n > len(body.Messages) {
+		return nil, fmt.Errorf("studio transcript as of step %d: the view [%d, %d) → %d does not fit its %d messages", step, c.FromSeq, c.ToSeq, n, len(body.Messages))
+	}
+	return &stepView{step: step, from: from, to: int(c.ToSeq), entries: body.Messages[from : from+n]}, nil
 }
 
 // transcriptFromObsdb reads the run's messages records from the local

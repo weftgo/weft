@@ -837,11 +837,16 @@ routes (`POST /api/runtime/register`, `GET /api/runtime/commands` SSE,
 call is substituted with its recorded result or parked
 (`weft.Replay(weft.ReplaySafe)` vouches a read, `AllowSideEffects`
 opts a tool into allow mode); budgets cap each experiment; the app's
-own runs are never touched.
+own runs are never touched. A subagent's child run replays as its own
+agent, registered on the runtime by that name (`runtime.Agents(parent,
+child)`): the replay carries `weft.forked_from="<child id>#<from_step>"`
+and no parent linkage (ADR 0029).
 
 P1–P5 ride the same command: `transcript_edits` (validated on both
 sides — a patch names a call in the kept prefix, the prefix ends at a
-step boundary with every call answered), `engine: scripted` (the
+step boundary with every call answered, and an edit to a message
+`from_step`'s compaction view replaced is refused: the replay prefix is
+what the model saw at that step, ADR 0029), `engine: scripted` (the
 source run's recorded turns at zero tokens; scripted + an
 instructions/model override is refused — the §5.5 prompt trap), thread
 `fork` (a new session with lineage the panel can keep chatting in),
@@ -927,7 +932,12 @@ step, from_seq, to_seq, hash, replaced, entries}` and thread's session
 markers `{scope: "session", hash, replaced, entries, tokens_before?,
 tokens_after?, reason}`, counts and hashes only, `[]` when none),
 `runs/{id}/events?after=&limit=` (the paged durable stream),
-`runs/{id}/transcript` (the messages bodies), `runs/{id}/spans` (for a
+`runs/{id}/transcript` (the messages bodies; with `?step=N` also
+`step`, `messages` — what step N's model call carried, the replay
+prefix for `from_step` N (ADR 0029) — and `compacted_at`, the run-scope
+view that request carried `{index, step, from_seq, to_seq, hash,
+replaced, entries}` or `null`, `badge: "derived"` when no request record
+placed them; 404 past the run's last step), `runs/{id}/spans` (for a
 read-scoped panel token — here, in `traces/{trace_id}` and in the
 export alike — without the tool names a run's overrides put on its
 invoke_agent span: `weft.override.tools`, `park_on`,

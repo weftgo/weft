@@ -175,6 +175,10 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		{"events-ok.golden.json", "/api/runs/" + res.ID + "/events", nil},
 		{"events-ok-paged.golden.json", "/api/runs/" + res.ID + "/events?after=2&limit=3", nil},
 		{"transcript-ok.golden.json", "/api/runs/" + res.ID + "/transcript", nil},
+		// ?step= (ADR 0029), pinned from A9's compacted step run: this run
+		// never compacted, so its compacted_at is null (and its tool arguments
+		// are its own).
+		{"transcript-as-of-step.golden.json", "/api/runs/" + res.ID + "/transcript?step=1", []string{".compacted_at", ".batches[].messages[].content[][tool_call].args", ".messages[].content[][tool_call].args"}},
 		{"spans-sub.golden.json", "/api/runs/" + res.ID + "/spans", nil},
 		{"trace.golden.json", "/api/traces/" + trace, nil},
 		{"sessions.golden.json", "/api/sessions", nil},

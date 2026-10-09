@@ -66,6 +66,24 @@ func newScriptedModel(src *sourceRun, tools []string) *scriptedModel {
 		key := scriptedKey(msgs[:i], names)
 		m.byKey[key] = append(m.byKey[key], eventsOf(msgs[i]))
 	}
+	// A replay from a step whose request carried a compaction view is
+	// fed what the model saw there (ADR 0029): from that step on, the
+	// replay's requests hold the view's messages where the record holds
+	// the replaced range, so each recorded turn from there is keyed on
+	// that prefix too.
+	if v := src.view; v != nil {
+		for i := len(src.input) + src.cut(v.step); i < len(msgs); i++ {
+			if msgs[i].Role != core.RoleAssistant {
+				continue
+			}
+			seen, err := src.seen(msgs[:i])
+			if err != nil {
+				break
+			}
+			key := scriptedKey(seen, names)
+			m.byKey[key] = append(m.byKey[key], eventsOf(msgs[i]))
+		}
+	}
 	return m
 }
 

@@ -196,7 +196,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    Studio restart forgets them until the next registration; manifest_check.source file|runtime),
 //    //    runs (+session/public/playground filters; all=1 lists child
 //    //    runs too), runs/{id} (with its compactions: run-scope views, then session markers),
-//    //    runs/{id}/events|transcript|spans|requests|tools, runs/{id}/steps/{n} (one step
+//    //    runs/{id}/events|transcript|spans|requests|tools (transcript?step=N adds what step N's
+//    //    model call carried — the replay prefix, compacted_at naming its view, ADR 0029),
+//    //    runs/{id}/steps/{n} (one step
 //    //    assembled: request, attempts, events, tool calls, children, holes; capability
 //    //    "steps"), runs/{id}/export?format=json|jsonl|otlp|wefttest (the whole run as one
 //    //    download, capability "export"; otlp re-ingests through /v1/*, wefttest is a zip

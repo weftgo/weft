@@ -133,7 +133,7 @@ func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
 	// it (the session's own tree is the conversation) unless the
 	// scripted engine needs the record.
 	if hasSource && (cmd.Thread != "fork" || cmd.Engine == "scripted") {
-		src, err := l.sourceTranscript(ctx, agent, cmd.Source.RunID)
+		src, err := l.sourceTranscript(ctx, agent, cmd.Source.RunID, cmd.Source.FromStep)
 		switch {
 		case err == nil:
 			cmd.src = src

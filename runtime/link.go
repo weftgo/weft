@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/obsdb"
+	"github.com/weftgo/weft/otel"
 	"github.com/weftgo/weft/thread"
 )
 
@@ -68,6 +70,9 @@ type link struct {
 	client *http.Client
 	base   string // Studio's, no trailing slash; "" in-process (URLs are absolute anyway)
 	token  string
+	// localDB is the source path 2's database: otel.LocalDB, read per
+	// command (a field so a test aims it at its own sink).
+	localDB func() obsdb.DB
 
 	id string // this runtime's id, stable for the link's lifetime
 
@@ -107,6 +112,7 @@ func newLink(c *config, reg *registry, url, token string) *link {
 	l := &link{
 		cfg:         c,
 		reg:         reg,
+		localDB:     otel.LocalDB,
 		token:       token,
 		id:          newID("rt_"),
 		done:        make(chan struct{}),

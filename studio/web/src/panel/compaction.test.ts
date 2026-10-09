@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { golden } from "../test/fake-studio"
 import type { RunDoc } from "../lib/api"
 import { $, all, baseRoutes, click, fakeStudio, mount, page, runRow, settle, setup, teardown } from "./testkit"
+import { badgeLabel } from "./badges"
 
 beforeEach(setup)
 afterEach(teardown)
@@ -37,7 +38,7 @@ describe("the panel's compaction marker (A9.2)", () => {
     const m = $(el, '[data-weft-step="2"] [data-weft-compaction="2"]')!
     expect(m).not.toBeNull()
     expect(m.textContent).toContain("2 messages rewritten into 1 by PrepareStep")
-    expect(m.querySelector('[data-hole="compacted"]')?.textContent).toBe("compacted")
+    expect(badgeLabel(m.querySelector('[data-hole="compacted"]'))).toBe("compacted")
     const d = m.querySelector("details")!
     expect(d.hasAttribute("open")).toBe(false)
     expect(d.querySelector("summary")?.textContent).toBe("show original")

@@ -25,6 +25,7 @@ export function HoleBadge({
   fix,
   label,
   bytes,
+  cause,
   detail = false,
 }: {
   hole: string
@@ -32,9 +33,11 @@ export function HoleBadge({
   fix?: string
   label?: string
   bytes?: number
+  /** A known cause (lib/honesty's CAUSES): its words first. */
+  cause?: string
   detail?: boolean
 }) {
-  const w = holeWords({ hole, reason, fix, bytes })
+  const w = holeWords({ hole, reason, fix, bytes, cause })
   const badge = (
     <Badge
       variant="outline"
@@ -47,6 +50,13 @@ export function HoleBadge({
       title={w.fix ? `${w.reason} — fix: ${w.fix}` : w.reason}
     >
       {label ?? w.label}
+      {/* The title is a pointer's alone: the words are in the
+          accessible text too (beside it, visibly, with detail). */}
+      {detail ? null : (
+        <span className="sr-only">
+          {` — ${w.reason}${w.fix ? ` — fix: ${w.fix}` : ""}`}
+        </span>
+      )}
     </Badge>
   )
   if (!detail) return badge

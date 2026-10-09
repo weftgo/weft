@@ -150,7 +150,8 @@ export interface HoleMark {
   reason?: string
   fix?: string
   bytes?: number
-  /** A known cause (CAUSES): its words before the badge's own. */
+  /** A known cause (CAUSES): its words before the badge's own. fix
+   * "" (rather than absent) says no fix applies. */
   cause?: string
 }
 
@@ -184,6 +185,12 @@ export function contentHoles(attrs: unknown): HoleMark[] {
   if (Number.isFinite(cut) && cut > 0)
     out.push({ hole: "truncated", bytes: cut })
   return out
+}
+
+/** resultCapReason is the result_cap cause's words with the bytes a
+ * tool's result cap cut (the loop's model-visible marker). */
+export function resultCapReason(bytes: number): string {
+  return `${CAUSES.truncated?.result_cap.reason ?? ""} (${kib(bytes)} cut)`
 }
 
 /** mergeHoles is the union of hole lists: one mark per badge (the first
@@ -229,7 +236,9 @@ export function holeWords(m: HoleMark): {
   return {
     label,
     reason: m.reason || why?.reason || note?.reason || m.hole,
-    fix: m.fix || why?.fix || note?.fix,
+    // An explicit "" says no fix applies here (an unrun call the loop
+    // already retried): the table's is not added.
+    fix: m.fix === "" ? undefined : m.fix || why?.fix || note?.fix,
     tone: note?.tone ?? "loss",
   }
 }

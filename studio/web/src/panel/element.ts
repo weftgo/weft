@@ -8,7 +8,7 @@ import type { Manifest, RunCompaction, RunRow, ToolCallPart, Transcript, Usage }
 import { isHoleRef } from "../lib/api"
 import { mergeHoles, rowHoles, statusHoles, USAGE_AT_FINISH, usageKnown } from "../lib/honesty"
 import type { HoleMark } from "../lib/honesty"
-import { paramsLine, REQUEST_NOT_STORED, shortHash } from "../lib/requests"
+import { paramsLine, REQUEST_NO_RECORD_REASON, REQUEST_NOT_STORED, shortHash } from "../lib/requests"
 import { badge, capLine, cutBadge, holeBadges, holeLine, noPublicIdWords, requestCapped, requestHole, turnChips } from "./badges"
 import { fetchSessionPublicId, MAX_REQUEST_PAGES, PanelApiError, panelGet, REQUEST_PAGE } from "./client"
 import { diffLines, diffSummary } from "../lib/diff"
@@ -717,12 +717,18 @@ export class WeftDevtools extends HTMLElement {
       if (!this.ready || !this.base) return
       let pub = ""
       let mark = ""
+      let why: { reason?: string; fix?: string } = {}
       try {
         const doc = (await fetchSessionPublicId({ base: this.base, token: this.cfg.token }, id)) as
-          | { public_id?: unknown; badge?: unknown }
+          | { public_id?: unknown; badge?: unknown; reason?: unknown; fix?: unknown }
           | null
         pub = typeof doc?.public_id === "string" ? doc.public_id : ""
         mark = typeof doc?.badge === "string" ? doc.badge : ""
+        // The response's words first (api.go sends them).
+        why = {
+          reason: typeof doc?.reason === "string" ? doc.reason : undefined,
+          fix: typeof doc?.fix === "string" ? doc.fix : undefined,
+        }
       } catch (err) {
         if (seq !== this.scopeSeq) return
         const status = err instanceof PanelApiError ? err.status : 0
@@ -737,7 +743,7 @@ export class WeftDevtools extends HTMLElement {
       }
       if (seq !== this.scopeSeq) return
       if (!pub) {
-        this.say(`session ${id} has no public id · ${mark === "not_recorded" ? noPublicIdWords() : "none recorded"}`)
+        this.say(`session ${id} has no public id · ${mark === "not_recorded" ? noPublicIdWords(why.reason, why.fix) : "none recorded"}`)
         return
       }
       this.note = ""
@@ -3145,8 +3151,16 @@ export class WeftDevtools extends HTMLElement {
     const parts: HTMLElement[] = [el("span", undefined, line)]
     // The content line (D5): on or off and why, the recorder's cuts
     // counted — the shared table's words in its title.
-    const cap = capLine(s.turn, s.meta)
-    parts.push(el("span", "weft-cap", ` · ${cap.text}`, { title: cap.title, "data-weft-cap": cap.hole ?? "" }))
+    // Said only on evidence (nothing when unknown); the title's words
+    // ride in the accessible text too.
+    const cap = capLine(s.turn, s.meta, MAX_EVENT_PAGES * 500)
+    if (cap)
+      parts.push(
+        el("span", "weft-cap", [document.createTextNode(` · ${cap.text}`), el("span", "weft-sr", ` — ${cap.title}`)], {
+          title: cap.title,
+          "data-weft-cap": cap.hole ?? "",
+        })
+      )
     // The resolved detection choice, one word (C3.2); and, when the
     // page's fetch could not be put back (another patcher wrapped it
     // after the panel), that too.
@@ -3564,7 +3578,9 @@ function requestLine(step: number, req: PanelRequests, runStatus: string, open?:
     box.appendChild(
       runStatus !== "running" && req.truncated
         ? requestCapped(MAX_REQUEST_PAGES * REQUEST_PAGE)
-        : el("span", "weft-badge", runStatus === "running" ? `request: ${REQUEST_NOT_STORED}` : "request: no record for this step")
+        : runStatus === "running"
+          ? el("span", "weft-res", `request: ${REQUEST_NOT_STORED}`)
+          : el("span", undefined, requestHole("gap", { reason: REQUEST_NO_RECORD_REASON }))
     )
     return box
   }

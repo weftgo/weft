@@ -55,6 +55,7 @@ import type { PromptBaseline, RunOverride } from "@/lib/request-pane"
 import {
   byStep,
   paramFields,
+  REQUEST_NO_RECORD_REASON,
   REQUEST_NOT_RECORDED_LABEL,
   REQUEST_NOT_STORED,
   shortHash,
@@ -831,7 +832,7 @@ export function RequestSection({
     head = (
       <HoleBadge
         hole="gap"
-        reason="this step ran, but no request record names it"
+        reason={REQUEST_NO_RECORD_REASON}
         detail
       />
     )

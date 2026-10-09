@@ -169,6 +169,12 @@ describe("scope", () => {
 
     it.each([
       ["not_recorded", () => ({ session_id: "s_b", public_id: "", badge: "not_recorded" }), "session s_b has no public id · not recorded"],
+      // The response's reason and fix win over the cause's (D5 review).
+      [
+        "not_recorded with the response's words",
+        () => ({ session_id: "s_b", public_id: "", badge: "not_recorded", reason: "the server's reason", fix: "the server's fix" }),
+        "not recorded: the server's reason · fix: the server's fix",
+      ],
       ["403", () => json403(), "session s_b: the session lookup needs the dev token"],
       ["404", () => apiError(404, "not_found", "no such session"), "session s_b has no public id · unknown session"],
     ])("%s: says so in one line and keeps its scope", async (_name, answer, line) => {

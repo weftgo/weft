@@ -316,3 +316,19 @@ func TestDBFileClean(t *testing.T) {
 		}
 	}
 }
+
+// TestMetaContentNoneNamesBothCauses pins the none mark's words (D5
+// review): the core marks none when weft.Content(false) is set and also
+// when no destination takes content (core/observe.go's captureOn), so
+// the note and the fix name both — never the option alone.
+func TestMetaContentNoneNamesBothCauses(t *testing.T) {
+	n := contentNotes[markNone]
+	for _, want := range []string{"weft.Content(false)", "no destination takes content"} {
+		if !strings.Contains(n[0], want) {
+			t.Errorf("none note %q does not name %q", n[0], want)
+		}
+	}
+	if !strings.Contains(n[1], "weft.Content(false)") || !strings.Contains(n[1], "destination") {
+		t.Errorf("none fix %q does not name both causes", n[1])
+	}
+}

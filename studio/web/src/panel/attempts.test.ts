@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import type { RequestRow } from "../lib/api"
 import { golden } from "../test/fake-studio"
 import { $, baseRoutes, fakeStudio, META, mount, page, runRow, setup, teardown } from "./testkit"
+import { badgeLabel } from "./badges"
 
 beforeEach(setup)
 afterEach(teardown)
@@ -62,7 +63,7 @@ describe("the panel's step line (A4.2)", () => {
     const el = await mount()
     const head = $(el, '[data-weft-step="0"] .weft-step-h')!
     const badge = head.querySelector<HTMLElement>('[data-hole="not_recorded"]')
-    expect(badge?.textContent).toBe("not recorded")
+    expect(badgeLabel(badge)).toBe("not recorded")
     expect(head.querySelector("[data-weft-timing]")).toBeNull()
     expect(head.querySelector("[data-weft-attempts]")).toBeNull()
     // The pre-A1 run's own not_recorded and the attempts' are one badge.

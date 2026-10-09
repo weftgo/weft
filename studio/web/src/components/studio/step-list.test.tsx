@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from "vitest"
 import { stepQuery } from "@/lib/api"
 import type { EventsPage, RunDoc, StepDoc, WireEvent } from "@/lib/api"
 import { fold } from "@/lib/events"
+import { resultCapReason } from "@/lib/honesty"
 import { StepList } from "@/components/studio/step-list"
 import { renderWithRouter } from "@/test/render"
 
@@ -93,7 +94,10 @@ describe("StepList", () => {
     await renderWithRouter(
       <StepList events={events} folded={fold(events)} doc={doc} />
     )
-    expect(screen.getByText("cut 130,000 bytes")).toBeTruthy()
+    // The table's badge (D5): truncated, cause result_cap, the bytes cut.
+    const cut = document.querySelector<HTMLElement>('[data-hole="truncated"]')!
+    expect(cut.getAttribute("title")).toContain(resultCapReason(130000))
+    expect(cut.getAttribute("title")).toContain("raise the tool's weft.MaxResultBytes")
   })
 
   it("says a failed run's open step failed, not that it is in flight", async () => {

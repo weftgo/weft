@@ -43,7 +43,17 @@ module, ADR 0005).
   `weft.forked_from`). `parity.test.ts` proves every hole of the table
   shows on both the panel and the run page for the same run; a grep test
   keeps hole words out of every other panel source. The panel's badge
-  attribute is now `data-hole` (was `data-weft-hole`), as the run page's.
+  attribute is now `data-hole` (was `data-weft-hole`), as the run page's. Review fixes: a
+  finished step no request row names is `gap` on both surfaces (one
+  reason, `lib/requests.ts`); the run page's result-cap badge is the
+  table's (`truncated`/`result_cap`, `max_tokens` with no fix for an
+  unrun call; `HoleBadge` takes a `cause`); a badge's reason and fix
+  ride in its accessible text on both surfaces; the content line is said
+  only on evidence, and `none` reads "captured none (weft.Content(false),
+  or no destination takes content)" in the panel and in `/api/meta`'s
+  note; "scripted (0 tokens)" only at zero usage; the session lookup's
+  own reason/fix win; the parity test compares both surfaces' badge sets
+  over a hole-free baseline.
 - **The devtools panel's views** (plan D4): the open turn has tabs —
   **Story** (the step story), **Request** (a placeholder E1.2 fills),
   **Timeline** (the spans waterfall at full width over a time axis in

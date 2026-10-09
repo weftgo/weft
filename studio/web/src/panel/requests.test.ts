@@ -21,6 +21,8 @@ import {
   teardown,
   trap,
 } from "./testkit"
+import { badgeLabel } from "./badges"
+import { REQUEST_NO_RECORD_REASON } from "../lib/requests"
 
 beforeEach(setup)
 afterEach(teardown)
@@ -248,7 +250,7 @@ describe("the panel's request line (A1.4)", () => {
     let studio = fakeStudio(r, metaWithRequests)
     let el = await mount()
     expect(studio.gets(`runs/${RUN}/requests`).length).toBe(10)
-    expect($(el, '[data-weft-request="2"]')!.textContent).toBe(
+    expect(badgeLabel($(el, '[data-weft-request="2"] [data-hole="truncated"]'))).toBe(
       "request: truncated — first 10 000 requests"
     )
     el.remove()
@@ -257,9 +259,11 @@ describe("the panel's request line (A1.4)", () => {
     studio = fakeStudio(stuck, metaWithRequests)
     el = await mount()
     expect(studio.gets(`runs/${RUN}/requests`).length).toBe(1)
-    expect($(el, '[data-weft-request="2"]')!.textContent).toBe(
-      "request: no record for this step"
-    )
+    // A finished step no row names is the run page's gap (D5 review),
+    // with the shared reason.
+    const gap = $(el, '[data-weft-request="2"] [data-hole="gap"]')
+    expect(badgeLabel(gap)).toBe("request: gap")
+    expect($(el, '[data-weft-request="2"]')!.textContent).toContain(REQUEST_NO_RECORD_REASON)
   })
 
   it("without the requests capability, no line and no request", async () => {

@@ -13,6 +13,7 @@ import { partitionRuns, strippedContent } from "./state"
 import type { TurnView } from "./state"
 import { idle } from "./testkit"
 import { answerLiveGrant, checkLiveURL, resetGrants } from "../test/fake-live-grant"
+import { badgeLabel } from "./badges"
 
 // ── The fake Studio ───────────────────────────────────────────────
 // The shapes mirror studio/testdata/api/*.golden.json (S4.3), which
@@ -381,9 +382,11 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     // The step line: the recorder's cut in bytes, the table's reason and
     // fix as its title; the run's not_recorded holds for the step too.
     const cut = $(el, '[data-weft-step="0"] .weft-step-h [data-hole="truncated"]')!
-    expect(cut.textContent).toBe("shortened by the recorder: 12.3 KiB cut")
+    expect(badgeLabel(cut)).toBe("shortened by the recorder: 12.3 KiB cut")
+    // The title's words are in the accessible text too (D5 review).
+    expect(cut.querySelector(".weft-sr")?.textContent).toBe(` — ${HOLES.truncated.reason} — fix: ${HOLES.truncated.fix}`)
     expect(cut.getAttribute("title")).toBe(`${HOLES.truncated.reason} — fix: ${HOLES.truncated.fix}`)
-    expect($(el, '[data-weft-step="0"] .weft-step-h [data-hole="not_recorded"]')?.textContent).toBe(
+    expect(badgeLabel($(el, '[data-weft-step="0"] .weft-step-h [data-hole="not_recorded"]'))).toBe(
       HOLES.not_recorded.label
     )
     // The call that was cut carries it too.

@@ -147,8 +147,11 @@ var contentNotes = map[string][2]string{
 	markFull: {"the latest run's content is stored in full", ""},
 	markStripped: {"a content-off destination stripped the latest run's content before it reached studio",
 		"drop otel.NoContent() from the destination that sends to studio"},
-	markNone: {"the agent captured no content for the latest run",
-		"drop weft.Content(false) from the agent"},
+	// none is the core's capture-off mark: weft.Content(false), or no
+	// destination takes content (core/observe.go's captureOn) — the
+	// note names both, never only the option.
+	markNone: {"the latest run captured no content: weft.Content(false) on the agent, or no destination takes content",
+		"drop weft.Content(false) from the agent, or install a destination that takes content (otel.Local, or one without otel.NoContent())"},
 	markUnmarked: {"the latest run carries no content mark: no events stored, a weft older than the mark, or a non-weft exporter", ""},
 }
 

@@ -172,34 +172,58 @@ table's ten (`src/lib/honesty.ts`, `obsdb.HoleNote`'s words, pinned by
 `src/panel/badges.ts`: a `<span class="weft-badge" data-hole="<hole>">`
 whose text is the table's label and whose title is the reason and
 "— fix: …" (the response's `reason`/`fix` when the route sent them, a
-known cause's — `result_cap`, `no_public_id`, … — else the table's), the
-same span the run page draws. They sit on the turn's header (its holes
-said in full: `interrupted`, `gap`, `max_tokens`, `not_recorded`,
-`derived`, `stripped`), on each step card's header, on the tool call
-whose result was cut (a recorder cap's cut, a result cap's —
-`truncated`, cause `result_cap` — or a call a `max_tokens` step never
-ran), on compaction markers and on each request line (`not_recorded`,
-`hidden`, `stripped`); E1.2's Request tab calls the same
-`badge(hole, note)`. No other panel source spells a hole's words: a test
-greps them for it. The footer's content line replaces the old suffix:
-"content on", "content on · 2 events shortened (24.6 KiB cut)" (the
-open turn's events a recorder cap cut), or "content off ·
-weft.Content(false)" / "content off · otel.NoContent()" — the cause the
-turn's first event marks (`weft.content` `none` or `stripped`; the
-latest run's mark from `/api/meta`'s `content` when no turn is open).
-The cap itself is the app's (`otel.Content(otel.ContentConfig{MaxBytes:
-…})`) and no record carries it, so the line does not name it. Turn rows
-carry chips read from the run row, each titled with its source:
-"scripted (0 tokens)" (the run's model is `weft/runtime/scripted`, the
-scripted engine's own — no `weft.*` attribute names the engine), "fork
-of s_…#e_…" (`weft.session.forked_from`, from the row's `meta`) and
-"experiment of t3" (`weft.forked_from`, the source turn named by its
-turn number when the list holds it; "experiment" alone with only
-`weft.experiment.id`). `src/panel/parity.test.ts` serves one run per
-hole of the table to both surfaces from one fake Studio and asserts each
-shows `data-hole="<hole>"` with the table's words — and that a pre-A1
-run's request section says `not_recorded` on the run page and in the
-panel's Request tab.
+known cause's — `result_cap`, `no_public_id`, … — else the table's;
+`fix: ""` says none applies). The same words ride in the badge's
+accessible text, visually hidden, so a keyboard or screen-reader user
+reads them too. The run page's `HoleBadge` draws the same span, the loop's
+cuts included (its `TruncationBadge` is the table's `truncated`, cause
+`result_cap`, or `max_tokens` for an unrun call). They sit on the turn's
+header (its holes said in full: `interrupted`, `gap`, `max_tokens`,
+`not_recorded`, `derived`, `stripped`), on each step card's header, on
+the tool call whose result was cut (a recorder cap's cut; a result
+cap's, `truncated` with cause `result_cap`; or a call a `max_tokens` step
+never ran, `max_tokens` with no fix, since the loop already retried), on
+compaction markers and on each request line (`not_recorded`, `hidden`,
+`stripped`, and `gap` for a finished step no request row names, "this
+step ran, but no request record names it" on both surfaces). E1.2's
+Request tab calls the same `badge(hole, note)`. No other panel source
+spells a hole's words or builds a `weft-badge` outside a named list of
+non-hole badges (parked, the attempt line, a tool error, …), and the
+`lib/` modules the panel imports name no other hole: `badges.test.ts`
+greps for both. `weft.content: "redacted"` is reserved in Go and never
+emitted by weft's pipeline, so `redacted` comes only from a non-weft
+writer's records. Both surfaces still badge it.
+The footer's content line replaces the old suffix and is said only on
+evidence: "content on · 2 events shortened (24.6 KiB cut)" (a recorder
+cap cut the open turn's events, so content was there; on a capped walk,
+"· first 5000 events"), "content on" for a recorded `full` mark (the
+latest run's, from `/api/meta`'s `content`, when that run is the open
+turn or no turn is open), "content off · otel.NoContent()" for a
+destination's `stripped`, and "content off · captured none
+(weft.Content(false), or no destination takes content)" for the core's
+`none`. The core marks `none` when no destination takes content too,
+not only for the option (`/api/meta` words it the same). For a mark read from
+meta, its `note` and `fix` win. When nothing marks the content (a stored
+event carries no mark when full, an unmarked run, another run's mark),
+the line says nothing. The cap itself is the app's
+(`otel.Content(otel.ContentConfig{MaxBytes: …})`) and no record carries
+it, so the line does not name it. Turn rows carry chips read from the run
+row, each titled with its source: "scripted (0 tokens)" (the run's model
+is `weft/runtime/scripted`, the scripted engine's own, pinned by
+`runtime`'s `TestScriptedModelInfo`, because no `weft.*` attribute names the
+engine; plain "scripted" when the row's usage is not zero, as when a
+Subagent child ran a real model), "fork of s_…#e_…"
+(`weft.session.forked_from`, from the row's `meta`) and "experiment of
+t3" (`weft.forked_from`, the source turn named by its turn number when
+the list holds it; "experiment" alone with only `weft.experiment.id`).
+`src/panel/parity.test.ts` serves one run per hole of the table, and per
+loop cut, to both surfaces from one fake Studio. It asserts each shows
+`data-hole="<hole>"` where both mark its source (run header, step card,
+tool call, request section) with the table's words. It also asserts that
+every badge the run page shows is one the panel shows, and that a
+hole-free baseline (timed steps, a request row) shows none on either.
+And a pre-A1 run's request section says `not_recorded` on the run page
+and in the panel's Request tab.
 
 The Request tab (plan E1.2) is the run page's Request pane in the panel
 (`src/panel/request.ts`, the same readings: `lib/request-pane.ts`,

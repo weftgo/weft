@@ -715,6 +715,12 @@ const TRUNCATED_BYTES = /…\[truncated (\d+) bytes\]/u
 const TRUNCATED_CALL =
   /^tool call (.+) was not executed: the response hit the output token limit$/
 
+/** What a call the max_tokens step never ran says as its badge's
+ * reason (rule 11: the loop already retried with a full budget, so no
+ * fix applies). Both surfaces word it from here. */
+export const UNRUN_CALL_REASON =
+  "this call was not executed: the response hit the output token limit, and the loop retried the step with a full budget"
+
 export type Truncation =
   { kind: "bytes"; bytes: number } | { kind: "call"; tool: string }
 

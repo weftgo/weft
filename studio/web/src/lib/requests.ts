@@ -81,5 +81,18 @@ export function paramsLine(row: RequestRow): string {
 export const REQUEST_NOT_RECORDED_LABEL =
   "request not recorded by weft v0.9.0 or earlier"
 
+/** A finished step no request row names (a gap: the record lost it):
+ * the reason both surfaces give its badge. */
+export const REQUEST_NO_RECORD_REASON = "this step ran, but no request record names it"
+
+/** A step past the request pages the panel reads (MAX_REQUEST_PAGES ×
+ * REQUEST_PAGE): the record is whole, the panel read its first n. */
+export function requestCappedWords(n: number): { reason: string; fix: string } {
+  return {
+    reason: `the panel reads a run's first ${n} requests; this step's are past them`,
+    fix: "open the run in Studio (⤢)",
+  }
+}
+
 /** A step with no row while the run is still running. */
 export const REQUEST_NOT_STORED = "not stored yet — the run is still running"

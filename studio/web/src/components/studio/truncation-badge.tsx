@@ -1,25 +1,23 @@
-// Truncation honesty (B9): every cap badges what it cut. The markers
-// come from weft/loop.go (see lib/events.ts — the regexes live there
-// beside their tests); a result is never shown as complete when it
-// isn't.
-import { Scissors } from "lucide-react"
-
-import { truncation } from "@/lib/events"
-import { Badge } from "@/components/ui/badge"
+// Truncation honesty (B9, D5): a result the loop cut is the honesty
+// table's badge — a result cap's cut is truncated (cause result_cap,
+// the bytes named), a call the max_tokens step never ran is max_tokens
+// with no fix (the loop already retried). The markers come from
+// weft/loop.go (see lib/events.ts — the regexes and the unrun call's
+// words live there beside their tests); the panel draws the same.
+import { truncation, UNRUN_CALL_REASON } from "@/lib/events"
+import { resultCapReason } from "@/lib/honesty"
+import { HoleBadge } from "@/components/studio/hole-badge"
 
 export function TruncationBadge({ content }: { content: string }) {
   const cut = truncation(content)
   if (!cut) return null
-  return (
-    <Badge
-      variant="outline"
-      className="gap-1 border-ev-error/40 font-mono text-[10px] font-normal text-ev-error"
-      title="this result was truncated — the marker is part of the model-visible bytes"
-    >
-      <Scissors className="size-3" data-slot="icon" />
-      {cut.kind === "bytes"
-        ? `cut ${cut.bytes.toLocaleString()} bytes`
-        : `call never executed`}
-    </Badge>
+  return cut.kind === "bytes" ? (
+    <HoleBadge
+      hole="truncated"
+      cause="result_cap"
+      reason={resultCapReason(cut.bytes)}
+    />
+  ) : (
+    <HoleBadge hole="max_tokens" reason={UNRUN_CALL_REASON} fix="" />
   )
 }

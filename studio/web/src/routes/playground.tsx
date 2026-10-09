@@ -361,24 +361,35 @@ function Playground({ caps }: { caps: string[] }) {
   const write = (next: Partial<PageState>) => {
     const state = { ...current, ...next }
     const key = pageStateKey(state)
-    // A write the page's search already shows (the fragment's, merged)
-    // changes nothing the effect below sees: nothing to wait for.
+    // A write the router's query already shows changes nothing the
+    // effect below sees: nothing to wait for.
     if (search.own(state) && key !== queryKey) {
       pending.current.keys.add(key)
       pending.current.last = key
     }
   }
+  // The router's own query — never the fragment-merged hand-off: the
+  // fragment seeded the controls once, on arrival, and must not beat a
+  // value the reader typed since.
+  const routerQuery = useSearch({ from: "/playground" })
   const queryState: PageState = {
-    run: search.run ?? "",
-    step: search.step ?? 0,
-    agent: search.agent ?? "",
-    runtime: search.runtime ?? "",
-    engine: search.engine ?? "live",
+    run: routerQuery.run ?? "",
+    step: routerQuery.step ?? 0,
+    agent: routerQuery.agent ?? "",
+    runtime: routerQuery.runtime ?? "",
+    engine: routerQuery.engine ?? "live",
   }
   const queryKey = pageStateKey(queryState)
   const currentRef = useRef(current)
   currentRef.current = current
+  const arrived = useRef(false)
   useEffect(() => {
+    // On arrival the controls are the hand-off (query and fragment):
+    // nothing to adopt — the arrival write below joins them up.
+    if (!arrived.current) {
+      arrived.current = true
+      return
+    }
     const p = pending.current
     if (p.keys.has(queryKey)) {
       // The router caught up with one of the page's own writes.

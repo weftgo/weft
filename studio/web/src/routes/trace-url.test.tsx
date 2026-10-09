@@ -158,6 +158,39 @@ describe("the trace page's URL (G2)", () => {
     expect(await screen.findByText("link copied")).toBeTruthy()
   })
 
+  // Beside the palette test on purpose: once a portal (the ⌘K dialog)
+  // has mounted under <body>, an event fired on DOM there must still
+  // reach the app's handlers (the harness's root is the document, as
+  // the app's is).
+  it("y is a key only outside a text box, and once per press", async () => {
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      }
+    )
+    renderApp(`/traces/${TRACE}?span=aa01`)
+    await waitFor(() => expect(row("aa01")).toBeTruthy())
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true })
+    fireEvent.keyDown(await screen.findByPlaceholderText("Run id, agent, or a command…"), { key: "y" })
+    fireEvent.keyDown(window, { key: "Escape" })
+    for (const tag of ["input", "textarea"] as const) {
+      const box = document.body.appendChild(document.createElement(tag))
+      box.focus()
+      fireEvent.keyDown(box, { key: "y" })
+      box.remove()
+    }
+    // A held y repeats: not a copy each time.
+    fireEvent.keyDown(window, { key: "y", repeat: true })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(writeText).not.toHaveBeenCalled()
+    // A bare press does copy.
+    fireEvent.keyDown(window, { key: "y" })
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
+  })
+
   it("titles the tab with the trace", async () => {
     renderApp(`/traces/${TRACE}`)
     await waitFor(() => expect(document.title).toBe("trace 0af76519…319c · weft studio"))
@@ -182,7 +215,8 @@ describe("the trace page's URL (G2)", () => {
       basepath: "/studio",
       history: createMemoryHistory({ initialEntries: [`/studio/traces/${TRACE}?span=cc03`] }),
     })
-    render(<RouterProvider router={router} />)
+    cleanup()
+    render(<RouterProvider router={router} />, { container: document, baseElement: document.body })
     await waitFor(() => expect(selectedName()).toBe("execute_tool lookup_order"))
     fireEvent.keyDown(window, { key: "y" })
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))

@@ -212,4 +212,17 @@ describe("the model field follows the agent", () => {
     await settle()
     expect(router.state.location.search).toMatchObject({ run: "r_ok", step: 1, agent: "orders", engine: "scripted" })
   })
+
+  it("a run typed after a fragment hand-off stays through the next control change", async () => {
+    const { router } = renderApp("/playground#run=r_ok&tools=lookup_order")
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ run: "r_ok" }))
+    await waitFor(() => expect(agentSelect().value).toBe("orders"))
+    fireEvent.change(sourceInput(), { target: { value: "r_two" } })
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ run: "r_two" }))
+    fireEvent.change(agentSelect(), { target: { value: "planner" } })
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ agent: "planner" }))
+    await settle()
+    expect(sourceInput().value).toBe("r_two")
+    expect(router.state.location.search).toMatchObject({ run: "r_two", agent: "planner" })
+  })
 })

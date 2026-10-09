@@ -126,6 +126,16 @@ describe("the run page's URL (G2)", () => {
     expect(await screen.findByRole("button", { name: "copied" })).toBeTruthy()
   })
 
+  it("the header's button says the copy failed where the browser has no clipboard", async () => {
+    Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true })
+    const prompt = vi.fn()
+    vi.stubGlobal("prompt", prompt)
+    renderApp(`/runs/${RUN}?view=raw`)
+    fireEvent.click(await screen.findByRole("button", { name: "copy link" }))
+    expect(await screen.findByRole("button", { name: "copy failed" })).toBeTruthy()
+    expect(prompt).toHaveBeenCalledTimes(1)
+  })
+
   it("titles the tab with the run, its status and Studio", async () => {
     renderApp(`/runs/${RUN}`)
     await waitFor(() => expect(document.title).toBe("run s_…-t3 · succeeded · weft studio"))

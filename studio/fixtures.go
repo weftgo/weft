@@ -280,6 +280,15 @@ func runFixtures(src fixtureSource) ([]fixtureFile, error) {
 			return nil, &fixtureError{obsdb.HoleGap, fmt.Sprintf("step %d has no request record: a destination dropped it, so the step's request key cannot be rebuilt", step)}
 		}
 		if ok {
+			// The step's messages must rebuild from the records as the
+			// request names them (obsdb's assembly, ADR 0029): a ref to an
+			// unstored record, or a rewritten request with no view, means
+			// the transcript is not what the model saw — refused with the
+			// hole, never keyed on msgs[:i].
+			var se *obsdb.StepMessagesError
+			if _, err := obsdb.AssembleStep(src.batches, src.requests, src.compactions, step); errors.As(err, &se) {
+				return nil, &fixtureError{se.Hole, fmt.Sprintf("step %d: %s", step, se.Msg)}
+			}
 			body := rec.Body
 			key.Tools = sortedNames(body.Tools.Names)
 			key.Sequential = body.SequentialTools

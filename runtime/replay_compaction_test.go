@@ -586,3 +586,61 @@ func TestReplayRerunsTheAgentsPrepareStep(t *testing.T) {
 		t.Errorf("the replay's input record = %s, want the source's step-3 request exactly", b)
 	}
 }
+
+// TestThreadSourceWithUnreachableStudio (ADR 0029, the thread path): a
+// thread-stored turn the local sink does not hold asks Studio for the
+// view of from_step; a Studio that refuses the link (401) or cannot be
+// reached leaves the view unknown, logged, and the replay proceeds on
+// the thread's own prefix — it ran from the thread alone before ADR 0029
+// and is never refused for it.
+func TestThreadSourceWithUnreachableStudio(t *testing.T) {
+	ctx := context.Background()
+	p, err := otel.Start(ctx, otel.Local(filepath.Join(t.TempDir(), "weft.db")), otel.NoGlobal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = p.Shutdown(ctx) }()
+	model := &tailModel{}
+	agent := compactingAgent(p, model)
+	store := thread.Memory()
+	s, err := thread.Create(ctx, store, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close(ctx) }()
+	turn, err := s.Send(ctx, core.User("look everything up"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := turn.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	saw := model.take()
+	walled := httptest.NewServer(studio.New(studio.DB(p.LocalDB()), studio.Token("srv-token")).Handler())
+	defer walled.Close()
+	for name, url := range map[string]string{
+		"401":         walled.URL, // the link carries no token
+		"unreachable": "http://127.0.0.1:1",
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg := &config{agents: []*core.Agent{agent}, threads: store}
+			l := newLink(cfg, newRegistry(cfg), url, "")
+			l.localDB = func() obsdb.DB { return nil } // the local sink does not hold the run
+			defer l.stop()
+			cmd := command{CommandID: "cmd_" + name, Agent: "compactor", Engine: "live", SideEffects: "substitute",
+				Source: &sourceSpec{RunID: turn.RunID(), FromStep: 1}}
+			if reason, ok := l.validate(ctx, &cmd); !ok {
+				t.Fatalf("a thread source was refused over a Studio it could not ask: %s", reason)
+			}
+			if b, _ := json.Marshal(cmd.prefix); len(saw) != 4 || string(b) != saw[1] {
+				t.Fatalf("prefix %s, want the thread's step-1 prefix %v", b, saw)
+			}
+			if status, _, errText := l.execute(ctx, cmd, "pg_thread_"+name); status != "succeeded" {
+				t.Fatalf("execute = %s %s", status, errText)
+			}
+			if fed := model.take(); len(fed) == 0 || fed[0] != saw[1] {
+				t.Errorf("the replay's step 0 saw %v, want %s", fed, saw[1])
+			}
+		})
+	}
+}

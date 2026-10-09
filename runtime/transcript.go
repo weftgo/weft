@@ -171,17 +171,20 @@ func (l *link) sourceTranscript(ctx context.Context, agent *core.Agent, runID st
 				} else {
 					v, err = l.viewFromStudio(ctx, runID, fromStep)
 				}
-				if errors.Is(err, obsdb.ErrStepMessages) {
-					// The thread holds the turn's messages itself; records
+				if err != nil {
+					// The thread holds the turn's messages itself: records
 					// that cannot rebuild the step (content off, a lost
-					// record) only leave its view unknown — as a Studio
-					// older than ?step= does. Logged, the turn's own
-					// messages used, as before ADR 0029.
-					slog.Warn("weft/runtime: the source step's records do not rebuild its request; a compaction view of it is unknown, the thread's messages are used",
+					// record) or a Studio that cannot be asked (unreachable,
+					// 401/403, 5xx) only leave its view unknown — as a
+					// Studio older than ?step= does. Logged, the turn's own
+					// messages used, as before ADR 0029. (The obsdb and
+					// Studio paths below refuse instead: their transcript
+					// comes from the same records.)
+					slog.Warn("weft/runtime: the source step's compaction view could not be read; it is unknown, the thread's messages are used",
 						"run_id", runID, "step", fromStep, "err", err)
 					return nil, nil
 				}
-				return v, err
+				return v, nil
 			})
 		}
 	}

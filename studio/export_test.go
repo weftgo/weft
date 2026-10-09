@@ -847,6 +847,37 @@ func TestFixturesRefuseAStepWithoutItsRequest(t *testing.T) {
 	}
 }
 
+// TestFixturesRefuseAPrefixTheModelDidNotSee (ADR 0029): a step whose
+// request names a messages record that was never stored (a lost view,
+// its count matching a 1:1 replacement), or was rewritten with no view
+// recorded at all, is not keyed on the plain transcript — the builder
+// refuses with obsdb's gap hole, as the transcript route's ?step= does.
+func TestFixturesRefuseAPrefixTheModelDidNotSee(t *testing.T) {
+	ref := func(i int64) *int64 { return &i }
+	batches := []obsdb.TranscriptBatch{
+		{Index: 0, Step: 0, Input: true, Messages: json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"hi"}]}]`)},
+		{Index: 1, Step: 0, Messages: json.RawMessage(`[{"role":"assistant","content":[{"type":"text","text":"a"}]}]`)},
+		{Index: 2, Step: 0, Messages: json.RawMessage(`[{"role":"user","content":[{"type":"text","text":"more"}]}]`)},
+		{Index: 4, Step: 1, Messages: json.RawMessage(`[{"role":"assistant","content":[{"type":"text","text":"b"}]}]`)},
+	}
+	step0 := obsdb.RequestRecord{Index: 0, Step: 0, Body: obsdb.RequestBody{MessagesRef: obsdb.RequestMessagesRef{Index: ref(0), Count: 1}}}
+	for name, step1 := range map[string]obsdb.RequestRecord{
+		"a ref to an unstored record": {Index: 1, Step: 1, Body: obsdb.RequestBody{MessagesRef: obsdb.RequestMessagesRef{Index: ref(3), Count: 3}}},
+		"rewritten without a view":    {Index: 1, Step: 1, Body: obsdb.RequestBody{MessagesRef: obsdb.RequestMessagesRef{Count: 2}}},
+	} {
+		_, err := runFixtures(fixtureSource{batches: batches, requests: []obsdb.RequestRecord{step0, step1}})
+		var fe *fixtureError
+		if !errors.As(err, &fe) || fe.hole != obsdb.HoleGap || !strings.Contains(fe.msg, "step 1") {
+			t.Errorf("%s: err = %v, want the gap refusal naming step 1", name, err)
+		}
+	}
+	// The same run with step 1's request naming the stored record keys fine.
+	ok := obsdb.RequestRecord{Index: 1, Step: 1, Body: obsdb.RequestBody{MessagesRef: obsdb.RequestMessagesRef{Index: ref(2), Count: 3}}}
+	if files, err := runFixtures(fixtureSource{batches: batches, requests: []obsdb.RequestRecord{step0, ok}}); err != nil || len(files) != 2 {
+		t.Errorf("a plain ref = %d files, %v; want 2", len(files), err)
+	}
+}
+
 // TestExportDownloadHeaders: the attachment name is plain ASCII in
 // filename (slash, quote, backslash, control and non-ASCII characters
 // spelled "_") with filename* carrying a non-ASCII id; HEAD answers the

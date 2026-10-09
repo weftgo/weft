@@ -22,6 +22,7 @@ import { ReplayAck, ReplayDrawer, catalogOfStep } from "@/components/studio/repl
 import { editResultAndReplay, replayFromStep } from "@/lib/replay"
 import type { ReplayDraft } from "@/lib/replay"
 import { renderWithRouter } from "@/test/render"
+import { HOLES } from "@/lib/honesty"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -852,6 +853,10 @@ describe("edit the prompt from a hole says so (review 3.2)", () => {
     const prompt = await waitFor(() => within(drawer()!).getByLabelText<HTMLTextAreaElement>("system prompt"))
     await waitFor(() => expect(prompt.value).toBe("You are a support agent."))
     expect(drawer()!.querySelector('[data-prompt-hole="truncated"] [data-hole="truncated"]')).toBeTruthy()
+    // The badge carries the table's words, not the drawer's.
+    expect(
+      drawer()!.querySelector('[data-prompt-hole="truncated"] [data-hole="truncated"]')!.getAttribute("title")
+    ).toContain(HOLES.truncated.reason)
   })
 
   it("no step route: derived", async () => {
@@ -859,6 +864,9 @@ describe("edit the prompt from a hole says so (review 3.2)", () => {
     const card = await openStory('[data-step="1"]')
     fireEvent.click(within(card).getByRole("button", { name: "edit the prompt and replay (step 1)" }))
     await waitFor(() => expect(drawer()!.querySelector('[data-prompt-hole="derived"]')).toBeTruthy())
+    expect(drawer()!.querySelector('[data-prompt-hole="derived"]')!.textContent).toContain(
+      "prompt from the registered instructions, not the step's · this Studio has no step route"
+    )
   })
 })
 
@@ -918,6 +926,19 @@ describe("Run is held where the server would refuse (reviews 3.4, 3.5)", () => {
     await waitFor(() =>
       expect(drawer()!.querySelector("[data-replay-past-end]")?.textContent).toBe(
         "from step 4 has nothing fresh to answer: the run recorded 4 steps, and its last ended in a reply"
+      )
+    )
+    expect(d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(true)
+  })
+
+  it("past the last step (a hand-off's step the run never reached): held, 'past its last step'", async () => {
+    // The run's last step's calls ARE answered (max = count = 3): a
+    // from_step of 5 is past it, not a matter of the calls.
+    serve({ bodies: bodies.slice(0, -1) })
+    const d = await drawerFor(replayFromStep(5))
+    await waitFor(() =>
+      expect(drawer()!.querySelector("[data-replay-past-end]")?.textContent).toBe(
+        "from step 5 has nothing fresh to answer: the run recorded 3 steps, and this is past its last step"
       )
     )
     expect(d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(true)

@@ -353,30 +353,30 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
   // the step was called with (a truncated record is not pre-filled:
   // sending a prefix as the prompt would change what the model sees).
   // When "edit the prompt" cannot have the step's text, the box holds
-  // the registered prompt — and says so, with the hole that is why.
-  const [promptHole, setPromptHole] = useState<{ hole: string; reason?: string; fix?: string } | null>(null)
+  // the registered prompt — and says so, with the hole that is why. The
+  // badge carries the table's words (or the server's own reason); what
+  // this drawer adds (why a derived fallback) is the note's text.
+  type PromptHole = { hole: string; reason?: string; fix?: string; note?: string }
+  const [promptHole, setPromptHole] = useState<PromptHole | null>(null)
   const seeded = useRef(false)
   useEffect(() => {
     if (seeded.current || draft.instructions !== undefined) return
-    let hole: { hole: string; reason?: string; fix?: string } | null = null
+    let hole: PromptHole | null = null
     if (draft.verb === "edit_prompt") {
       if (!caps.includes("steps")) {
-        hole = { hole: "derived", reason: "this Studio has no step route: the step's prompt cannot be read" }
+        hole = { hole: "derived", note: "this Studio has no step route" }
       } else {
         if (!stepDoc.data && !stepDoc.isError) return
         const req = stepDoc.data?.request
         const prompt = req && isRequestRow(req) ? req.prompt : undefined
-        if (stepDoc.isError) hole = { hole: "derived", reason: `the step could not be read: ${stepDoc.error.message}` }
-        else if (!req) hole = { hole: "not_recorded", reason: "the step carries no request record" }
+        if (stepDoc.isError) hole = { hole: "derived", note: `the step could not be read: ${stepDoc.error.message}` }
+        else if (!req) hole = { hole: "not_recorded" }
         else if (!isRequestRow(req)) hole = { hole: req.badge ?? "gap", reason: req.reason, fix: req.fix }
-        else if (!prompt) hole = { hole: "derived", reason: "the step's request named no system prompt" }
+        else if (!prompt) hole = { hole: "derived", note: "the step's request named no system prompt" }
         else if (isHoleRef(prompt)) hole = { hole: prompt.badge }
         else if (prompt.content === "truncated" || prompt.truncated_bytes > 0)
-          hole = {
-            hole: "truncated",
-            reason: "the step's prompt record was cut: sending its prefix would change what the model sees",
-          }
-        else if (!prompt.text) hole = { hole: "derived", reason: "the step's system prompt is empty" }
+          hole = { hole: "truncated" }
+        else if (!prompt.text) hole = { hole: "derived", note: "the step's system prompt is empty" }
         else {
           seeded.current = true
           patch({ instructions: prompt.text })
@@ -492,6 +492,7 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
               <span className="flex flex-wrap items-center gap-1 text-[11px] text-faint" data-prompt-hole={promptHole.hole}>
                 <HoleBadge hole={promptHole.hole} reason={promptHole.reason} fix={promptHole.fix} />
                 prompt from the registered instructions, not the step's
+                {promptHole.note ? ` · ${promptHole.note}` : ""}
               </span>
             ) : null
           }
@@ -517,9 +518,11 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
             {stepCount === 1 ? "step" : "steps"}
             {stepCount === 0
               ? ""
-              : lastCalls
-                ? ", and its last step's calls are not all answered"
-                : ", and its last ended in a reply"}
+              : fromStep > stepCount
+                ? ", and this is past its last step"
+                : lastCalls
+                  ? ", and its last step's calls are not all answered"
+                  : ", and its last ended in a reply"}
           </p>
         ) : null}
         {scriptedPastEnd ? (

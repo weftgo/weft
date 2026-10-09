@@ -1174,7 +1174,9 @@ when its last cell settles, with "open" to the experiment. **run …
 parked at tool** — a run a page follows parked (`useRunEvents`: a
 playground card's run, or a run that parks while its page is open — a
 run opened already parked says so on its page only; the toast goes
-when the park ends), with "open" and,
+when this page decides it, or when its approve finds the park already
+decided — it reads the run's row first, then follows the command its
+post became and says a rejection), with "open" and,
 for one parked call of a runtime-started run where the playground is on
 and the token may act, "approve" (`POST /api/runs/{id}/approvals`).
 **runtime … connected / disconnected** — the live stream has no runtime
@@ -1182,7 +1184,9 @@ kind, so the shell reads `GET /api/runtimes` every 5 s (playground
 capability; never under a read-scoped panel token)
 and raises one toast per transition of a runtime's `connected` (a
 runtime gone from the list counts as disconnected, once; a failed read
-says nothing; each flap of the same id is its own toast).
+says nothing; each flap of the same id is its own toast). A runtime
+that goes down and comes back inside one 5 s poll interval is not
+noticed.
 **live updates stopped after 6 reconnects** — `lib/live.ts` gave up
 (never on a clean close or a panel token's `expired`), with "retry",
 which starts every stream that gave up over. **link copied** / **copy

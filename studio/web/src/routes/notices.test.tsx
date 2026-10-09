@@ -342,10 +342,16 @@ describe("a run page's parked notice", () => {
       pending: [{ type: "tool_call", id: "call_1", name: "refund", args: {} }],
     },
   }
+  /** The row after the park lands: parked reads succeeded, pending 1. */
+  let parkedRow = false
+  let rowPending = 1
   function serve(capabilities: string[]) {
+    parkedRow = false
+    rowPending = 1
     studio
       .on("GET meta", meta(capabilities))
-      .on("GET runs/r_ok", running)
+      .on("GET runs/r_ok", () => (parkedRow ? { ...running, status: "succeeded", pending: rowPending } : running))
+      .on("GET playground/commands/cmd_a", { command_id: "cmd_a", state: "finished", status: "succeeded", run_id: "r_ok-2", error: null, created: rOK.started, updated: rOK.started })
       .on("GET runs/r_ok/events", pagedEvents(head, { done: false }))
       .on("GET runs/r_ok/transcript", transcriptOf([]))
       .on("GET runs/r_ok/spans", { spans: [] })
@@ -359,6 +365,7 @@ describe("a run page's parked notice", () => {
     await waitFor(() => expect(studio.calls("GET runs/r_ok/events").length).toBeGreaterThan(0))
     await settle()
     expect(toastTitles()).toEqual([])
+    parkedRow = true
     es.emit("record", finish, "3")
   }
 
@@ -369,6 +376,37 @@ describe("a run page's parked notice", () => {
     fireEvent.click(within(t).getByRole("button", { name: "approve" }))
     await waitFor(() => expect(studio.calls("POST runs/r_ok/approvals")).toHaveLength(1))
     expect(studio.calls("POST runs/r_ok/approvals")[0].body).toEqual({ call_id: "call_1", decision: "approve" })
+  })
+
+  it("a park decided elsewhere: approve reads the row first, says so, and posts nothing", async () => {
+    serve(["live", "playground"])
+    await park()
+    const t = await toastFor(/^run r_ok parked at refund$/)
+    // Another tab (or the devtools panel) decided it meanwhile.
+    rowPending = 0
+    fireEvent.click(within(t).getByRole("button", { name: "approve" }))
+    await toastFor(/^approve on run r_ok refused: the park is no longer pending — it was decided elsewhere$/)
+    await waitFor(() => expect(toastTitles()).not.toContain("run r_ok parked at refund"))
+    expect(studio.calls("POST runs/r_ok/approvals")).toHaveLength(0)
+  })
+
+  it("a decision the runtime rejects is said, not left silent", async () => {
+    serve(["live", "playground"])
+    const why = 'no parked run "r_ok" on this runtime (it may already have been resumed)'
+    studio.on("GET playground/commands/cmd_a", {
+      command_id: "cmd_a",
+      state: "rejected",
+      run_id: "",
+      error: why,
+      created: rOK.started,
+      updated: rOK.started,
+    })
+    await park()
+    const t = await toastFor(/^run r_ok parked at refund$/)
+    fireEvent.click(within(t).getByRole("button", { name: "approve" }))
+    await toastFor(new RegExp(`^approve on run r_ok refused: ${why.replace(/[()]/g, "\\$&")}$`))
+    expect(studio.calls("POST runs/r_ok/approvals")).toHaveLength(1)
+    await waitFor(() => expect(toastTitles()).not.toContain("run r_ok parked at refund"))
   })
 
   it("without the playground capability the toast only opens the run", async () => {

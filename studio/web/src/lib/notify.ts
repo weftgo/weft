@@ -15,6 +15,8 @@ import { toast } from "sonner"
 
 import { ToastActions } from "@/components/studio/toast-actions"
 import type { ToastAction } from "@/components/studio/toast-actions"
+import { ApiError, fetchCommand, fetchRun } from "./api"
+import type { CommandStatus } from "./api"
 import { LIVE_RETRIES } from "./live"
 import { experimentLink, runLink } from "./links"
 
@@ -31,7 +33,10 @@ export type Notice =
       other: number
     }
   /** A run this page follows parked (run_finish.pending). */
-  | { kind: "parked"; runID: string; tools: string[]; approve?: () => Promise<void> }
+  /** approve posts the decision and answers the command it became (a
+   * caller that follows the command itself — the playground card —
+   * answers nothing). */
+  | { kind: "parked"; runID: string; tools: string[]; approve?: () => Promise<string | void> }
   /** The parked notice's "approve" was refused. */
   | { kind: "approve-failed"; runID: string; message: string }
   /** A runtime's connected flipped: transition counts this id's flips,
@@ -142,7 +147,7 @@ function actionsOf(n: Notice, id: string): ToastAction[] {
             if (sent) return
             sent = true
             dismiss()
-            approve().catch((e: unknown) => {
+            approveAndFollow(n.runID, approve).catch((e: unknown) => {
               notify({ kind: "approve-failed", runID: n.runID, message: e instanceof Error ? e.message : String(e) })
             })
           },
@@ -162,6 +167,57 @@ function actionsOf(n: Notice, id: string): ToastAction[] {
       ]
     default:
       return []
+  }
+}
+
+/** How the approve verb follows its command: every APPROVE_POLL_MS, at
+ * most APPROVE_POLLS times (a command the runtime never answers is the
+ * playground's "lost", not this toast's to wait on forever). */
+export const APPROVE_POLL_MS = 700
+const APPROVE_POLLS = 90
+
+/**
+ * approveAndFollow is the parked toast's "approve" (plan H5). A park can
+ * be decided elsewhere — another tab, the devtools panel — and the
+ * resume is a new run, so this page's fold never sees it end. So: read
+ * the run's row first, and a row with nothing pending says so instead
+ * of posting; then post, and follow the command it became until it
+ * settles — a rejection (the runtime's "no parked run … it may already
+ * have been resumed") is said, never left silent.
+ */
+async function approveAndFollow(runID: string, approve: () => Promise<string | void>): Promise<void> {
+  const refused = (message: string) => {
+    toast.dismiss(`parked:${runID}`)
+    notify({ kind: "approve-failed", runID, message })
+  }
+  try {
+    const row = await fetchRun(runID)
+    if (row.pending === 0) {
+      refused("the park is no longer pending — it was decided elsewhere")
+      return
+    }
+  } catch {
+    // The row could not be read: the post is the check.
+  }
+  const commandID = await approve()
+  if (!commandID) return
+  for (let i = 0; i < APPROVE_POLLS; i++) {
+    let st: CommandStatus
+    try {
+      st = await fetchCommand(commandID)
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 404) {
+        refused("Studio no longer knows this decision (it restarted)")
+        return
+      }
+      st = { state: "queued" } as CommandStatus // a blip: the next read
+    }
+    if (st.state === "rejected" || st.state === "lost") {
+      refused(st.error || `the decision was ${st.state}`)
+      return
+    }
+    if (st.state === "finished") return
+    await new Promise((r) => setTimeout(r, APPROVE_POLL_MS))
   }
 }
 

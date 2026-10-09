@@ -117,7 +117,7 @@ async function noticeParked(
   approve?: (runID: string, callID: string) => Promise<void>
 ) {
   const tools = [...new Set(pending.map((c) => c.name))]
-  let verb: (() => Promise<void>) | undefined
+  let verb: (() => Promise<string | void>) | undefined
   if (pending.length === 1) {
     const callID = pending[0].id
     if (approve) verb = () => approve(runID, callID)
@@ -128,9 +128,9 @@ async function noticeParked(
           queryClient.fetchQuery(runQuery(runID)),
         ])
         if (canReplay(meta.capabilities, studioToken()) && row.playground)
-          verb = async () => {
-            await postApproval(runID, { call_id: callID, decision: "approve" })
-          }
+          // The command it becomes: the toast follows it (a rejection
+          // is said, never silent).
+          verb = async () => (await postApproval(runID, { call_id: callID, decision: "approve" })).command_id
       } catch {
         // unknown scope: the notice offers "open" only
       }
@@ -226,11 +226,13 @@ export function useRunEvents(
           parkArmed = false
           parkedRun.current = id
           void noticeParked(id, pending, approveRef.current)
-        } else if (pending.length === 0 && parkedRun.current === id) {
-          // The park ended (a later finish with nothing pending).
-          dismissNotice("parked", id)
-          parkedRun.current = ""
         }
+        // A park never ends inside this fold: pending comes from the
+        // run's one run_finish, and the resume is a new run. A park
+        // decided here dismisses its toast (the toast's approve, the
+        // card's decision command — useCommandTracking); one decided
+        // elsewhere is found by the toast's approve (notify.ts's
+        // approveAndFollow).
       }
       setStream({
         events: s.events,

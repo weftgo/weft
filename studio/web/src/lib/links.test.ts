@@ -12,6 +12,8 @@ import {
   playgroundSearch,
   playgroundStateLink,
   rawFromSearch,
+  replayFromSearch,
+  replaySearch,
   rawSearch,
   runLink,
   sessionLink,
@@ -221,6 +223,23 @@ describe("G2: page state as search keys", () => {
     // A search of digits survives the router's JSON round trip.
     const u = new URL(href(BASE, runLink("r_1", { raw: { q: "123" } })))
     expect(u.searchParams.get("q")).toBe('"123"')
+  })
+
+  it("the replay drawer's verb, step and source run", () => {
+    expect(path(runLink("r_1", { view: "story", replay: { verb: "edit_prompt", from: 2 } }))).toBe(
+      "runs/r_1?view=story&replay=edit_prompt&from=2"
+    )
+    expect(path(runLink("r_1", { replay: { verb: "rerun", from: 0, of: "r_1/1/c2" } }))).toBe(
+      "runs/r_1?replay=rerun&from=0&of=r_1%2F1%2Fc2"
+    )
+    // replaySearch names every key: a closed drawer clears them all.
+    expect(replaySearch(null)).toEqual({ replay: undefined, from: undefined, of: undefined })
+    expect(replaySearch({ verb: "from_step", from: -3 })).toEqual({ replay: "from_step", from: 0, of: undefined })
+    // Read back as the router parsed it; an unknown verb is no drawer.
+    expect(replayFromSearch({ replay: "from_step", from: 3 })).toEqual({ verb: "from_step", from: 3 })
+    expect(replayFromSearch({ replay: "continue", from: 1.5, of: 42 })).toEqual({ verb: "continue", from: 0, of: "42" })
+    expect(replayFromSearch({ replay: "explode", from: 1 })).toBeNull()
+    expect(replayFromSearch({})).toBeNull()
   })
 
   it("the playground's own state rides the query, never a prompt", () => {

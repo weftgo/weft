@@ -1130,3 +1130,58 @@ describe("the option lab (plan F3, Studio's drawer)", () => {
     expect(d.getByRole<HTMLInputElement>("checkbox", { name: "park on: refund" }).disabled).toBe(true)
   })
 })
+
+// G2: the replay drawer's state is in the URL — ?replay=<verb>&from=<n>
+// [&of=<run>], written with replace (an opening is not a history entry)
+// and read back by a fresh load, which reopens the drawer on that step.
+describe("the replay drawer's state in the URL (G2)", () => {
+  beforeEach(() => serve())
+
+  it("a copied run link with the drawer open reopens it on the same step", async () => {
+    const { router } = renderApp(`/runs/${RUN}?view=story`)
+    const card = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>('[data-step="2"]')
+      expect(el).toBeTruthy()
+      return el!
+    })
+    fireEvent.click(within(card).getByRole("button", { name: "replay from this step (step 2)" }))
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ replay: "from_step", from: 2 }))
+    const href = router.state.location.href
+    expect(href).toContain("replay=from_step")
+    cleanup()
+    renderApp(href)
+    await waitFor(() => expect(drawer()).toBeTruthy())
+    const d = within(drawer()!)
+    expect(d.getByText("Replay from this step")).toBeTruthy()
+    await waitFor(() => expect(d.getByLabelText<HTMLSelectElement>("continue from step").value).toBe("2"))
+  })
+
+  it("opening and closing the drawer replace the entry: the history does not grow", async () => {
+    const { router } = renderApp(`/runs/${RUN}?view=story`)
+    const card = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>('[data-step="1"]')
+      expect(el).toBeTruthy()
+      return el!
+    })
+    const entries = router.history.length
+    fireEvent.click(within(card).getByRole("button", { name: "edit the prompt and replay (step 1)" }))
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ replay: "edit_prompt", from: 1 }))
+    expect(router.history.length).toBe(entries)
+    fireEvent.click(within(drawer()!).getByRole("button", { name: "Close" }))
+    await waitFor(() => expect(router.state.location.search).not.toHaveProperty("replay"))
+    expect(router.history.length).toBe(entries)
+  })
+
+  it("a child's drawer names its run (of=), and the link reopens the child's", async () => {
+    const { router } = renderApp(`/runs/${RUN}?view=story&replay=rerun&from=0&of=${encodeURIComponent(JSON.stringify(CHILD))}`)
+    await waitFor(() => expect(drawer()).toBeTruthy())
+    expect(within(drawer()!).getByText(new RegExp(`${CHILD} · researcher`))).toBeTruthy()
+    expect(router.state.location.search).toMatchObject({ replay: "rerun", of: CHILD })
+  })
+
+  it("the tab is titled while the run loads", async () => {
+    studio.on(`GET runs/${RUN}`, () => new Promise(() => {}))
+    renderApp(`/runs/${RUN}`)
+    await waitFor(() => expect(document.title).toBe("run r_fail · weft studio"))
+  })
+})

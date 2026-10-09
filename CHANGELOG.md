@@ -259,6 +259,16 @@ module, ADR 0005).
   `playground · weft studio`. The ⌘K palette's items render inside
   cmdk's root (opening it threw before).
 
+- **The replay drawer's state in the URL** (plan G2, after F2.2): the
+  run page writes `?replay=<verb>&from=<n>[&of=<run>]` (`lib/links.ts`'s
+  `replaySearch` / `replayFromSearch`, keys of `RunSearch`) with replace
+  when a verb or the editor opens the drawer and as its step changes,
+  and clears them on close; a fresh load with those keys reopens the
+  drawer on that step from the verb's own draft (re-run, continue here,
+  edit the prompt at `from`, else replay from `from`; the draft's edits
+  are not in the link). The run page's tab is titled while the run
+  loads.
+
 ### Changed
 
 - **An old runtime's registration shows no defaults** (plan F3.1's

@@ -80,6 +80,7 @@ describe("only links.ts builds a Studio URL", () => {
       'void navigate({ to: "/playground", search: { run, step, agent, engine } })',
     ],
     ["the playground's state off a base", 'const u = new URL("playground?run=r_1&engine=scripted", base)'],
+    ["the replay drawer's state by hand", "const u = `runs/${id}?replay=from_step&from=${n}`"],
   ])("refuses %s", async (_name, code) => {
     expect(await problems(code)).toBeGreaterThan(0)
   })
@@ -111,6 +112,10 @@ describe("only links.ts builds a Studio URL", () => {
     ],
     ["a spread trace link with its view", 'void navigate({ ...traceLink(id, { span, view }), replace: true })'],
     ["the playground's state through links.ts", "const x = <Link {...playgroundStateLink({ run })} />"],
+    [
+      "the replay drawer's state through links.ts",
+      'void navigate({ to: ".", search: (prev) => ({ ...prev, ...replaySearch(r) }), replace: true })',
+    ],
   ])("allows %s", async (_name, code) => {
     expect(await problems(code)).toBe(0)
   })

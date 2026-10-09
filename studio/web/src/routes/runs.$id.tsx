@@ -30,11 +30,13 @@ import { compactionsOf } from "@/lib/compaction"
 import { applyTranscript, fold, linkView } from "@/lib/events"
 import { isPlainShortcut } from "@/lib/keys"
 import { overrideOf } from "@/lib/request-pane"
-import { canReplay, editTranscript } from "@/lib/replay"
+import { canReplay, continueHere, editPromptAndReplay, editTranscript, replayFromStep, rerun } from "@/lib/replay"
+import { replayFromSearch, replaySearch } from "@/lib/links"
+import { useDocumentTitle } from "@/hooks/use-document-title"
 import { editKey, impliedFromStep, putEdit, schemaOf } from "@/lib/edits"
 import type { ReplayEdit } from "@/lib/edits"
 import { replayBounds } from "@/lib/experiment-body"
-import type { RunSearch } from "@/lib/links"
+import type { ReplayLinkState, RunSearch } from "@/lib/links"
 import type { Span as TraceSpan } from "@/lib/trace"
 import {
   defaultSelection,
@@ -152,6 +154,8 @@ export const Route = createFileRoute("/runs/$id")({
       typeof search.t === "number" && search.t >= 0
         ? Math.floor(search.t)
         : undefined,
+    // The replay drawer (G2): its verb, from_step and source run.
+    ...replaySearch(replayFromSearch(search)),
   }),
   component: RunPage,
 })
@@ -176,10 +180,21 @@ function RunPage() {
   // the Story and listed in the drawer; a verb's opening starts them
   // over from its draft, closing the drawer drops them.
   const [edits, setEdits] = useState<{ list: ReplayEdit[]; invalid: Record<string, string> }>({ list: [], invalid: {} })
-  const openReplay = useCallback((req: ReplayRequest) => {
-    setEdits({ list: req.draft.edits, invalid: {} })
-    setReplay((cur) => ({ req, n: cur.n + 1 }))
-  }, [])
+  // The drawer's state is in the URL (G2): written with replace — an
+  // opening is not a history entry — and read back on a fresh load.
+  const writeReplay = useCallback(
+    (r: ReplayLinkState | null) =>
+      void navigate({ search: (prev) => ({ ...prev, ...replaySearch(r) }), replace: true }),
+    [navigate]
+  )
+  const openReplay = useCallback(
+    (req: ReplayRequest) => {
+      setEdits({ list: req.draft.edits, invalid: {} })
+      setReplay((cur) => ({ req, n: cur.n + 1 }))
+      writeReplay({ verb: req.draft.verb, from: req.draft.fromStep, ...(req.runID !== id ? { of: req.runID } : {}) })
+    },
+    [writeReplay, id]
+  )
   const cycleLayout = () =>
     setLayout((l) => {
       const next: Layout =
@@ -210,6 +225,20 @@ function RunPage() {
     ...runQuery(id),
     refetchInterval: (q) => (q.state.data?.status === "running" ? 2000 : false),
   })
+  // The tab is titled while the run loads too (lib/title.ts).
+  useDocumentTitle({ page: "run", id, status: run.data?.status })
+  // A link with the drawer's state reopens it once, on that step, from
+  // the verb's own draft (the edits were never in the link).
+  const linked = useRef(false)
+  useEffect(() => {
+    if (linked.current || capsLoading) return
+    linked.current = true
+    const r = replayFromSearch(search)
+    if (!r || !replayable) return
+    const draft =
+      r.verb === "rerun" ? rerun() : r.verb === "continue" ? continueHere() : r.verb === "edit_prompt" ? editPromptAndReplay(r.from) : replayFromStep(r.from)
+    setReplay((cur) => ({ req: { runID: r.of ?? id, draft }, n: cur.n + 1 }))
+  }, [capsLoading, replayable, search, id])
   const transcript = useQuery({
     ...transcriptQuery(id),
     // The transcript is the finished words: refresh while running,
@@ -561,11 +590,14 @@ function RunPage() {
             setEdits({ list, invalid })
             // The edits feed the drawer's one command: opened (on this
             // run) when the first edit is made.
-            if (replay.req?.runID !== doc.id)
+            if (replay.req?.runID !== doc.id) {
+              const from = impliedFromStep(list)
               setReplay((cur) => ({
-                req: { runID: doc.id, agent: doc.agent || undefined, draft: editTranscript(impliedFromStep(list), list) },
+                req: { runID: doc.id, agent: doc.agent || undefined, draft: editTranscript(from, list) },
                 n: cur.n + 1,
               }))
+              writeReplay({ verb: "edit", from })
+            }
           },
         }
       : null
@@ -789,7 +821,11 @@ function RunPage() {
           onClose={() => {
             setReplay((cur) => ({ ...cur, req: null }))
             setEdits({ list: [], invalid: {} })
+            writeReplay(null)
           }}
+          onStep={(from) =>
+            void navigate({ search: (prev) => (prev.replay && prev.from !== from ? { ...prev, from } : prev), replace: true })
+          }
         />
       ) : null}
     </div>

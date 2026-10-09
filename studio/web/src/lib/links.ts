@@ -25,6 +25,8 @@
 // This module is shared by both clients: no React, no router, no DOM
 // globals — plain values and strings.
 
+import type { ReplayVerb } from "./replay"
+
 /** The run page's views: the trace (the default), the story (step
  * cards) and the raw JSON. */
 export type RunView = "trace" | "story" | "raw"
@@ -50,6 +52,45 @@ export interface RunSearch {
   hide?: string
   /** The raw view's open event: its stream position (G2). */
   ev?: number
+  /** The replay drawer's verb, while it is open (G2). */
+  replay?: ReplayVerb
+  /** The drawer's from_step (a step ordinal). */
+  from?: number
+  /** The run the drawer replays when it is not the page's (a child
+   * row's verb: the child's id). */
+  of?: string
+}
+
+/** The replay drawer's state a link carries (G2): its verb, from_step
+ * and — for a child — the run it replays. The draft's edits are not in
+ * the link: a reopened drawer starts from the verb's own draft. */
+export interface ReplayLinkState {
+  verb: ReplayVerb
+  from: number
+  of?: string
+}
+
+const REPLAY_VERBS: readonly ReplayVerb[] = ["from_step", "edit_result", "edit_prompt", "rerun", "continue", "edit"]
+
+/** replaySearch is the drawer's state as search keys, every one present
+ * (undefined clears it — a closed drawer). */
+export function replaySearch(r: ReplayLinkState | null): {
+  replay: ReplayVerb | undefined
+  from: number | undefined
+  of: string | undefined
+} {
+  if (!r) return { replay: undefined, from: undefined, of: undefined }
+  return { replay: r.verb, from: ordinal(r.from) ?? 0, of: r.of || undefined }
+}
+
+/** replayFromSearch reads the drawer's state back from a run page's
+ * search (null: no drawer, or a verb this Studio does not know). */
+export function replayFromSearch(search: Record<string, unknown>): ReplayLinkState | null {
+  const verb = REPLAY_VERBS.find((v) => v === search.replay)
+  if (!verb) return null
+  const from = ordinal(search.from as number | undefined) ?? 0
+  const of = typeof search.of === "string" && search.of ? search.of : typeof search.of === "number" ? String(search.of) : undefined
+  return of ? { verb, from, of } : { verb, from }
 }
 
 /** The raw view's event kinds (lib/summarize.ts's EventKind), as a
@@ -87,6 +128,8 @@ export interface RunLinkOptions {
   t?: number
   /** The raw view's filters and open event (view "raw"). */
   raw?: RawLinkState
+  /** The replay drawer open on this verb and step (G2). */
+  replay?: ReplayLinkState
 }
 
 export interface RunLink {
@@ -213,6 +256,12 @@ export function runLink(id: string, opts: RunLinkOptions = {}): RunLink {
     if (raw.q !== undefined) search.q = raw.q
     if (raw.hide !== undefined) search.hide = raw.hide
     if (raw.ev !== undefined) search.ev = raw.ev
+  }
+  if (opts.replay) {
+    const r = replaySearch(opts.replay)
+    search.replay = r.replay
+    search.from = r.from
+    if (r.of) search.of = r.of
   }
   return { to: "/runs/$id", params: { id }, search }
 }

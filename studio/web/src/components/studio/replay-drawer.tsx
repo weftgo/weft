@@ -77,6 +77,7 @@ export function ReplayDrawer({
   edits,
   setEdits,
   invalid = [],
+  onStep,
 }: {
   request: ReplayRequest | null
   /** A new value per opening: a new request is a new form. */
@@ -89,6 +90,8 @@ export function ReplayDrawer({
   setEdits?: (e: EditDraft[]) => void
   /** The editor's refusals (a schema-invalid args edit): Run is held. */
   invalid?: string[]
+  /** The form's from_step as it changes (the page writes it to its URL). */
+  onStep?: (from: number) => void
 }) {
   // Non-modal (the sheet's look, not its focus trap): the run stays
   // readable and its other verbs usable beside the drawer. Escape
@@ -135,7 +138,7 @@ export function ReplayDrawer({
       >
         <XIcon />
       </Button>
-      <ReplayForm key={requestKey} request={request} lifted={edits && setEdits ? { edits, setEdits } : undefined} invalid={invalid} />
+      <ReplayForm key={requestKey} request={request} lifted={edits && setEdits ? { edits, setEdits } : undefined} invalid={invalid} onStep={onStep} />
     </aside>
   )
 }
@@ -270,10 +273,12 @@ function ReplayForm({
   request,
   lifted,
   invalid,
+  onStep,
 }: {
   request: ReplayRequest
   lifted?: { edits: EditDraft[]; setEdits: (e: EditDraft[]) => void }
   invalid: string[]
+  onStep?: (from: number) => void
 }) {
   const { caps } = useCapabilities()
   const { draft, runID } = request
@@ -313,6 +318,9 @@ function ReplayForm({
   // The prefix keeps every edited step (plan F2): from_step follows the
   // edits up, never down; and an edited prefix needs engine live (the
   // scripted engine's turns answered the recorded prompt).
+  const stepRef = useRef(onStep)
+  stepRef.current = onStep
+  useEffect(() => stepRef.current?.(fromStep), [fromStep])
   const implied = impliedFromStep(editDrafts)
   useEffect(() => {
     if (variant.thread !== "fork" && implied > fromStep) setFromStep(implied)

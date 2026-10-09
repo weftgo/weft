@@ -1129,6 +1129,7 @@ walks views, never cursor moves:
 | run | `sel`, `d`, `axis` | the selected span, detail mode, axis | replace |
 | run | `t` | the replay playhead (seeks and pauses) | replace |
 | run | `q`, `hide`, `ev` | the raw view's search, hidden kinds (`hide=step,delta`), open event's position | replace |
+| run | `replay`, `from`, `of` | the replay drawer: its verb, its from_step, the child run it replays (a fresh load reopens it on that step, from the verb's draft — edits are not in the link) | replace |
 | trace | `view=chat` | the GenAI chat view (the tree is the default) | push |
 | trace | `span` | the selected span | replace |
 | playground | `run`, `step`, `agent`, `runtime`, `engine` | the source run, its step, the target, the first variant's engine — written back as they change | replace |
@@ -1137,8 +1138,8 @@ walks views, never cursor moves:
 
 The playground's prompt and other hand-off fields ride the fragment
 (`playground#run=…&instructions=…`), read once and stripped: a prompt
-never reaches the query. The replay drawer's state is not in the URL
-yet. **Copy link** — the button in the run header, `y` anywhere, or
+never reaches the query. The replay drawer's state is in the URL
+(`replay`, `from`, `of`). **Copy link** — the button in the run header, `y` anywhere, or
 "Copy link to this page" in `⌘K` — copies the page's canonical link:
 the bare URL with its state, never a fragment, a token or a panel scope
 (`lib/links.ts`'s `canonical`); the header says "link copied". Each page

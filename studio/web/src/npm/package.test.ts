@@ -8,7 +8,7 @@
 import { createHash } from "node:crypto"
 import { readFileSync } from "node:fs"
 import path from "node:path"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type * as Devtools from "@weftgo/devtools"
 import { weftVersion } from "../../scripts/weft-version.ts"
@@ -93,6 +93,38 @@ describe('import "@weftgo/devtools" (the Done line)', () => {
     const served = sum("../../../dist/panel/panel.js")
     expect(sum("../../npm/panel.js")).toBe(served)
     expect(readFileSync(path.resolve(here, "../../npm/panel.js.sha256"), "utf8")).toBe(`${served}  panel.js\n`)
+  })
+})
+
+// Bundled into an app (Vite, webpack), panel.js is part of the app's
+// chunk: its import.meta.url is the chunk's URL, whose <script> is the
+// app's entry. The assembled package's ssr-guard.js marks the import,
+// so rung 4 never takes that tag for the panel's: the endpoint default
+// stays the page's directory. The tag here carries the package's own
+// panel.js URL — what import.meta.url reads in this suite, as the
+// chunk's would in the app. Package mode only: under the sources the
+// entry imports the served bundle with no guard in front of it.
+describe.runIf(process.env.WEFT_DEVTOOLS_PKG === "1")("the app's chunk under the npm entry (rung 4)", () => {
+  it("is not the panel's tag: endpoint the page's directory, no panel-config.json beside the chunk", async () => {
+    const prev = location.href
+    history.pushState(null, "", "/app/")
+    try {
+      const chunk = document.createElement("script")
+      chunk.type = "module"
+      chunk.src = pathToFileURL(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../npm/panel.js")).href
+      chunk.setAttribute("data-endpoint", "/assets/api-proxy/")
+      document.head.appendChild(chunk)
+      const studio = fakeStudio(baseRoutes())
+      await load()
+      await settle()
+      expect(dock()?.autoMounted).toBe(true)
+      expect(dock()?.studioLink("r_1").startsWith(`${location.origin}/app/`)).toBe(true)
+      const urls = studio.fetchMock.mock.calls.map((c) => new URL(String(c[0]), location.href).href)
+      expect(urls).toContain(`${location.origin}/app/api/meta`)
+      expect(urls.some((u) => u.includes("panel-config.json") || u.includes("api-proxy"))).toBe(false)
+    } finally {
+      history.pushState(null, "", prev)
+    }
   })
 })
 

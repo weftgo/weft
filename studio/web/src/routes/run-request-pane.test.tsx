@@ -158,9 +158,12 @@ async function serve(opts: {
   ended?: () => boolean
   /** The transcript's growth records (default BODIES, all five). */
   bodies?: unknown[]
+  /** The finished row's end time (default rOK's, long past). */
+  finished?: string
 }) {
   const doc: RunDoc = {
     ...rOK,
+    ...(opts.finished ? { finished: opts.finished } : {}),
     id: RUN,
     steps: 3,
     children: [],
@@ -489,6 +492,48 @@ describe("the invoke_agent span lands after the end (round-2 review 1)", () => {
     // would have opened: still the one read.
     await vi.advanceTimersByTimeAsync(10_000)
     expect(studio.calls(`GET runs/${RUN}/spans`)).toHaveLength(1)
+    expect(marks(0)).toEqual([])
+  })
+})
+
+describe("a run opened cold just after it finished (verification review)", () => {
+  // The runs list → click flow under OTLP: the row already reads
+  // finished, the spans have not all landed. The page polls them inside
+  // the wait counted from the row's end time, and only there.
+  it("polls the spans until the invoke_agent span comes: the chip appears without a reload", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    await serve({ instructions: PROMPT0, manifest: manifest(REGISTERED), finished: new Date(Date.now() - 5_000).toISOString() })
+    const chat: Span = { ...invokeAgent({}), span_id: "c1", name: "chat script", attrs: { "gen_ai.operation.name": "chat", "weft.run.id": RUN } }
+    studio.on(`GET runs/${RUN}/spans`, () => ({
+      spans:
+        studio.calls(`GET runs/${RUN}/spans`).length <= 1
+          ? [chat]
+          : [chat, invokeAgent({ "weft.override.hash": "f00d", "weft.override.instructions": true })],
+    }))
+    renderApp(`/runs/${RUN}?view=story`)
+    await waitFor(() => expect(document.querySelectorAll("[data-request]").length).toBe(3))
+    await waitFor(() => expect(studio.calls(`GET runs/${RUN}/spans`)).toHaveLength(1))
+    expect(marks(0)).toEqual([])
+    await vi.advanceTimersByTimeAsync(2500)
+    await until(() => expect(marks(0)).toEqual(["overridden by experiment"]))
+    const reads = studio.calls(`GET runs/${RUN}/spans`).length
+    expect(reads).toBe(2)
+    await vi.advanceTimersByTimeAsync(4500)
+    expect(studio.calls(`GET runs/${RUN}/spans`)).toHaveLength(reads)
+  })
+
+  it("bounded to the wait: a span that never comes stops the polling once the row's end is 30 s old", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    await serve({ instructions: PROMPT0, manifest: manifest(REGISTERED), finished: new Date(Date.now() - 20_000).toISOString() })
+    renderApp(`/runs/${RUN}?view=story`)
+    await waitFor(() => expect(document.querySelectorAll("[data-request]").length).toBe(3))
+    await waitFor(() => expect(studio.calls(`GET runs/${RUN}/spans`)).toHaveLength(1))
+    await vi.advanceTimersByTimeAsync(4500)
+    expect(studio.calls(`GET runs/${RUN}/spans`).length).toBeGreaterThan(1) // inside the wait: polled
+    await vi.advanceTimersByTimeAsync(10_000) // the row's end is 34.5 s old
+    const reads = studio.calls(`GET runs/${RUN}/spans`).length
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(studio.calls(`GET runs/${RUN}/spans`)).toHaveLength(reads)
     expect(marks(0)).toEqual([])
   })
 })

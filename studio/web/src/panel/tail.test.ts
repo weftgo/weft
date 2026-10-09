@@ -31,7 +31,7 @@ import {
   user,
 } from "./testkit"
 import { WeftDevtools } from "./element"
-import { OVERFLOW_MIN_MS } from "./state"
+import { OVERFLOW_CALM_MS, OVERFLOW_MIN_MS } from "./state"
 
 beforeEach(setup)
 afterEach(teardown)
@@ -197,6 +197,34 @@ describe("the live tail", () => {
     await vi.advanceTimersByTimeAsync(200)
     expect(grants()).toBe(before + 2)
     expect(FakeEventSource.live("run=s_01-t1")).toHaveLength(1)
+  })
+
+  it("review: a sustained overflow holds at the minute cap; a quiet minute after the reopen resets it", async () => {
+    const routes = liveTurn()
+    const studio = fakeStudio(routes)
+    await mount()
+    const grants = () => studio.posts("live-grant").filter((c) => (c.body as { run?: string } | undefined)?.run === "s_01-t1").length
+    vi.useFakeTimers()
+    /** One overflow right after the last reopen: no reopen before
+     * wait, one just after it. */
+    const cycle = async (wait: number) => {
+      const n = grants()
+      FakeEventSource.last("run=s_01-t1")!.emit("overflow", {})
+      await vi.advanceTimersByTimeAsync(wait - 100)
+      expect(grants(), `not before ${wait} ms`).toBe(n)
+      await vi.advanceTimersByTimeAsync(200)
+      expect(grants(), `reopened after ${wait} ms`).toBe(n + 1)
+      expect(FakeEventSource.live("run=s_01-t1")).toHaveLength(1)
+    }
+    // The wait itself is not calm: 1, 2, 4 … 32 s, then the cap, held.
+    for (const k of [0, 1, 2, 3, 4, 5]) await cycle(OVERFLOW_MIN_MS * 2 ** k)
+    await cycle(60_000)
+    await cycle(60_000)
+    await cycle(60_000)
+    // A quiet minute after the reopen: back to the first step.
+    await vi.advanceTimersByTimeAsync(OVERFLOW_CALM_MS + 1_000)
+    await cycle(OVERFLOW_MIN_MS)
+    await cycle(2 * OVERFLOW_MIN_MS)
   })
 
   const TOOL_START = { type: "tool_start", run_id: "s_01-t1", seq: 1, call_id: "c1", name: "lookup_order", args: { id: "4411" } }

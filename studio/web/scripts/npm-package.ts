@@ -16,8 +16,11 @@
 // becomes three imports, evaluated in order: ssr-guard.js defines a
 // placeholder HTMLElement only where there is none, panel.js
 // evaluates, ssr-unguard.js deletes the placeholder again. In a browser
-// (or jsdom) both are no-ops; there is no export condition to get
-// wrong, and panel.js stays the served bytes.
+// (or jsdom) the placeholder is a no-op; there is no export condition
+// to get wrong, and panel.js stays the served bytes. ssr-guard.js also
+// sets the npm entry's mark (config.ts NPM_MARK), which panel.js reads
+// as it evaluates and ssr-unguard.js deletes: the bundle imported into
+// an app's chunk never takes the app's <script> for its own tag.
 //
 // --check writes nothing and fails when npm/panel.js is not the served
 // bundle (sha256), the .sha256 file disagrees, package.json carries
@@ -48,6 +51,9 @@ interface Pkg {
   publishConfig?: { access?: string }
 }
 
+/** The npm entry's mark: src/panel/config.ts's NPM_MARK, the same
+ * string (ladder.test.ts pins the two). */
+const NPM_MARK = "__weftDevtoolsNpm"
 const PANEL_IMPORT = `import "./panel.js";`
 const GUARDED_IMPORT = `import "./ssr-guard.js";\nimport "./panel.js";\nimport "./ssr-unguard.js";`
 /** The two modules around the panel import (see the header). */
@@ -55,11 +61,15 @@ const SSR_GUARD = `// @weftgo/devtools: evaluated just before panel.js. Without 
 // server, a worker, an edge runtime) the panel's element class would
 // throw "HTMLElement is not defined" as it evaluates; a placeholder
 // stands in until ssr-unguard.js, evaluated right after, removes it.
-// Where HTMLElement exists this does nothing.
+// Where HTMLElement exists no placeholder is made.
 if (typeof globalThis.HTMLElement === "undefined") {
   globalThis.HTMLElement = class {}
   globalThis.__weftDevtoolsSSRGuard = globalThis.HTMLElement
 }
+// The npm entry's mark, read once by panel.js as it evaluates: bundled
+// into the app's chunk, its own URL and the running script are the
+// app's, so the panel never takes the app's <script> for its tag.
+globalThis.${NPM_MARK} = true
 `
 const SSR_UNGUARD = `// @weftgo/devtools: evaluated just after panel.js; removes the
 // placeholder ssr-guard.js defined (only its own).
@@ -67,6 +77,7 @@ if (globalThis.__weftDevtoolsSSRGuard !== undefined) {
   if (globalThis.HTMLElement === globalThis.__weftDevtoolsSSRGuard) delete globalThis.HTMLElement
   delete globalThis.__weftDevtoolsSSRGuard
 }
+delete globalThis.${NPM_MARK}
 `
 
 /** leaves lists every string target in an exports/imports map. */
@@ -113,6 +124,8 @@ async function check(): Promise<void> {
     fail("npm/index.js must import panel.js once, between ssr-guard.js and ssr-unguard.js (import-safe on a server)")
   for (const f of ["ssr-guard.js", "ssr-unguard.js"])
     if (!(await exists(`${pkgDir}${f}`))) fail(`npm/${f} is missing — run 'make studio-build'`)
+  if ((await readFile(`${pkgDir}ssr-guard.js`, "utf8")) !== SSR_GUARD || (await readFile(`${pkgDir}ssr-unguard.js`, "utf8")) !== SSR_UNGUARD)
+    fail("npm/ssr-guard.js or ssr-unguard.js is not this script's (the npm entry's mark) — run 'make studio-build'")
   const readme = await readFile(`${pkgDir}README.md`, "utf8")
   const other = [...readme.matchAll(/\bv?(\d+\.\d+\.\d+)\b/g)].map((m) => m[1]).filter((v) => v !== npmVersion)
   if (other.length) fail(`npm/README.md names version ${other[0]}, the weft version is ${npmVersion}`)

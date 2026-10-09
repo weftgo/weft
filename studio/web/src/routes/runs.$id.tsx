@@ -235,14 +235,25 @@ function RunPage() {
   // Only a seen transition counts: a page opened on a finished run
   // reads the record once.
   const seenStatus = useRef<{ id: string; status?: string }>({ id })
-  // When the page saw the run end (the transition above, never a cold
-  // open of a finished run): the spans' wait below counts from it.
+  // When the run ended for the spans' wait below: the transition above
+  // when the page saw it, else — a cold open — the row's own end time
+  // when that is inside the wait (the runs list → click flow, where
+  // spans batch after run_finish), never earlier than now. An older
+  // finished run opened cold never polls.
   const endSeen = useRef<{ id: string; at: number | null }>({ id, at: null })
   const loadedStatus = run.data?.status
+  const loadedFinished = run.data?.finished
   useEffect(() => {
     const was = seenStatus.current.id === id ? seenStatus.current.status : undefined
     seenStatus.current = { id, status: loadedStatus }
     if (endSeen.current.id !== id) endSeen.current = { id, at: null }
+    if (was === undefined && loadedStatus && loadedStatus !== "running" && loadedFinished) {
+      const fin = Date.parse(loadedFinished)
+      const now = Date.now()
+      // A server clock ahead of this one counts as now: the window is
+      // never longer than INVOKE_AGENT_WAIT_MS from the open.
+      if (Number.isFinite(fin) && now - fin <= INVOKE_AGENT_WAIT_MS) endSeen.current.at = Math.min(fin, now)
+    }
     if (was === "running" && loadedStatus && loadedStatus !== "running") {
       endSeen.current.at = Date.now()
       void queryClient.invalidateQueries({ queryKey: ["requests", id] })
@@ -255,7 +266,7 @@ function RunPage() {
       // spans yet): every cached step of the run is read again.
       void queryClient.invalidateQueries({ queryKey: ["step", id] })
     }
-  }, [loadedStatus, id, queryClient])
+  }, [loadedStatus, loadedFinished, id, queryClient])
   // The run's timed spans (the time axis's rows, S4.7), fetched when
   // the trace view is on and the run has a trace — and, under the
   // requests capability, for the Request pane's "overridden by
@@ -267,9 +278,10 @@ function RunPage() {
   // (weft dev, setup B) spans batch later than the run_finish record
   // that flips the status, so a read just after the end may come back
   // without the run's invoke_agent span: until one is seen, the spans
-  // are read again every 2 s for 30 s after the page saw the end — a
-  // transition it observed (endSeen), so a finished run opened cold
-  // reads its spans once and never polls.
+  // are read again every 2 s for 30 s after the end (endSeen) — a
+  // transition the page observed, or a cold open of a run whose row
+  // says it finished inside those 30 s; a run that finished earlier,
+  // opened cold, reads its spans once and never polls.
   const spans = useQuery({
     ...spansQuery(id),
     enabled:

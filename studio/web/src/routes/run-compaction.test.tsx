@@ -93,11 +93,11 @@ describe("the compaction marker on the run page (A9.2)", () => {
       "2 messages rewritten into 1 by PrepareStep"
     )
     const badge = m.querySelector('[data-hole="compacted"]')
-    // The label, then (D5) the reason and fix as its accessible
-    // description (aria-describedby), said once.
+    // The label, then (D5) the reason and fix in its accessible text,
+    // inline and visually hidden.
     expect(badge?.firstChild?.textContent).toBe("compacted")
     expect(
-      document.getElementById(badge!.getAttribute("aria-describedby")!)?.textContent
+      badge?.querySelector("[data-hole-words]")?.textContent
     ).toContain("the model saw a compacted view")
     expect(badge?.getAttribute("title")).toContain("the model saw a compacted view")
     // Collapsed by default: no original drawn.

@@ -4,8 +4,6 @@
 // reason and, where one exists, a fix. A pane with a hole shows the
 // badge and says why; it is never just empty. A response's own reason
 // and fix win over the table's words.
-import { useId } from "react"
-
 import { holeWords } from "@/lib/honesty"
 import type { HoleMark } from "@/lib/honesty"
 import { Badge } from "@/components/ui/badge"
@@ -22,9 +20,12 @@ export type { Hole } from "@/lib/honesty"
  * suffix after the label ("truncated · 12.1 KiB cut"), the label's word
  * kept first. An unknown badge still renders, verbatim.
  *
- * Without `detail` the reason and fix are the badge's description: a
- * hidden element its aria-describedby names (said once — a described
- * element's title is not read again); `title` is the pointer's.
+ * Without `detail` the reason and fix ride inside the badge as
+ * visually hidden text after the label (and note) — part of its
+ * accessible name, as the panel's badge (src/panel/badges.ts) carries
+ * them: browse-mode screen readers read a span's own text, where an
+ * aria-describedby on a generic, non-focusable span may be read zero
+ * times. `title` stays for the pointer.
  */
 export function HoleBadge({
   hole,
@@ -48,13 +49,11 @@ export function HoleBadge({
   detail?: boolean
 }) {
   const w = holeWords({ hole, reason, fix, bytes, cause })
-  const descId = useId()
   const words = `${w.reason}${w.fix ? ` — fix: ${w.fix}` : ""}`
   const badge = (
     <Badge
       variant="outline"
       data-hole={hole}
-      aria-describedby={detail ? undefined : descId}
       className={`font-mono text-[10px] font-normal ${
         w.tone === "note"
           ? "border-thread/40 text-muted-foreground"
@@ -64,19 +63,18 @@ export function HoleBadge({
     >
       {label ?? w.label}
       {note ? <span data-hole-note>{` · ${note}`}</span> : null}
+      {/* The words in the accessible text (the panel's .weft-sr, the
+          same " — reason — fix: …"). A screen reader that also reads
+          title may say them twice: accepted — said twice beats said
+          never. With detail they are visible beside the badge instead. */}
+      {detail ? null : (
+        <span className="sr-only" data-hole-words>
+          {` — ${words}`}
+        </span>
+      )}
     </Badge>
   )
-  // The title is a pointer's alone: the words are the badge's
-  // accessible description too (beside it, visibly, with detail).
-  if (!detail)
-    return (
-      <>
-        {badge}
-        <span id={descId} hidden data-hole-words>
-          {words}
-        </span>
-      </>
-    )
+  if (!detail) return badge
   return (
     <span className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
       {badge}

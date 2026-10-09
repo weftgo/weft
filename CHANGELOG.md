@@ -82,6 +82,30 @@ return `null` (Changed — breaking, Changed — migration).
   element), said once; its name is the label. The Studio suites' real
   sleeps are fake timers advanced past the 2 s poll or deadline-polled
   conditions.
+- **Review fixes (verification)**: imported through `@weftgo/devtools`
+  (bundled into an app's chunk) the panel no longer takes the app's
+  entry `<script>` for its own tag — its `import.meta.url` is the
+  chunk's — so the endpoint default stays the page's directory (it was
+  `/assets/`, with a `panel-config.json` asked there and the app tag's
+  `data-*` read as configuration): the package's `ssr-guard.js` marks
+  the import before `panel.js` evaluates (`ssr-unguard.js` removes the
+  mark) and the element class's `npmEntry` keeps it, and under it rung 4
+  is `data-weft` alone; the standalone `panel.js` still matches its own
+  `src`. `make devtools-vite-check` keeps the app's entry tag in a
+  second variant (page `/app/`) and asserts the endpoint. The panel's
+  Request tab passes `running` to `messagesSent`, so it draws the
+  neutral `no_transcript` where the run page does (a parity fixture
+  pins it). A badge's reason and fix are inline visually hidden text
+  after the label on both surfaces (the panel's `.weft-sr`, the run
+  page's `sr-only`) — part of its accessible name, replacing the
+  `aria-describedby` above; `title` stays for the pointer. The overflow
+  backoff measures calm from the reopen, so a sustained overflow holds
+  at the minute cap. Alt+W prefers a live, page-mounted panel (the
+  global's if it is one, else the first connected one; the dormant or
+  self-mounted docks only when there is none), so markup a page adds
+  later can be toggled. A run opened cold within 30 s of its end (the
+  row's `finished`) polls its spans for the invoke_agent span inside
+  that window.
 - **The devtools panel's Request tab** (plan E1.2): the run page's
   Request pane in the panel, one step at a time (`J`/`K`, the tab's step
   buttons, a step card; `⤢` carries it) — the chips "changed by

@@ -316,13 +316,23 @@ function catalogView(d: RequestTabDeps, r: RequestRow, scope: string, step: numb
 
 /** messagesSent per row and the records it read: a redraw resolves
  * nothing again, and the earlier messages' tree keeps its root. */
-const sentMemo = new WeakMap<RequestRow, { tr: unknown; comps: unknown; m: MessagesSent }>()
+const sentMemo = new WeakMap<RequestRow, { tr: unknown; comps: unknown; running: boolean; m: MessagesSent }>()
 
 function messagesView(d: RequestTabDeps, r: RequestRow, step: number): Node[] {
   const comps = compactionsOf(d.t.doc)
   let memo = sentMemo.get(r)
-  if (!memo || memo.tr !== d.t.transcript || memo.comps !== d.t.doc)
-    sentMemo.set(r, (memo = { tr: d.t.transcript, comps: d.t.doc, m: messagesSent(r, d.t.transcript, comps) }))
+  // running: a running run's batch not yet landed is no_transcript, not
+  // gap — the run page's reading (messagesSent's fifth argument).
+  if (!memo || memo.tr !== d.t.transcript || memo.comps !== d.t.doc || memo.running !== d.running)
+    sentMemo.set(
+      r,
+      (memo = {
+        tr: d.t.transcript,
+        comps: d.t.doc,
+        running: d.running,
+        m: messagesSent(r, d.t.transcript, comps, undefined, d.running),
+      })
+    )
   const m = memo.m
   const n = `${m.count} ${m.count === 1 ? "message" : "messages"}`
   const out: Node[] = [el("div", "weft-res", m.bytes !== undefined ? `${n} · ${bytes(m.bytes)}` : n, { "data-weft-messages-line": "" })]

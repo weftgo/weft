@@ -477,7 +477,7 @@ export class PanelModel {
   private timers = new Set<ReturnType<typeof setTimeout>>()
   /** Reopen attempts since each stream last opened (LIVE_RETRIES). */
   private retries = { scope: 0, run: 0, exp: 0, dev: 0 }
-  /** Each lane's overflow backoff: the step it is at and the last overflow. */
+  /** Each lane's overflow backoff: the step it is at and its last reopen. */
   private overflows = { scope: { n: 0, at: 0 }, run: { n: 0, at: 0 }, exp: { n: 0, at: 0 }, dev: { n: 0, at: 0 } }
   /** Run frames that arrived while a turn-list fetch was in flight:
    * the fetch's snapshot is older than they are, so they are applied
@@ -685,14 +685,20 @@ export class PanelModel {
   }
 
   /** overflowed reopens a lane the server's overflow frame closed, on
-   * the overflow backoff (OVERFLOW_MIN_MS, doubling while overflows
-   * follow each other within OVERFLOW_CALM_MS, a minute at most). */
+   * the overflow backoff (OVERFLOW_MIN_MS, doubling while an overflow
+   * follows the last reopen within OVERFLOW_CALM_MS, a minute at most).
+   * Calm is measured from the reopen, not from the overflow: the
+   * backoff's own wait is not calm, so a sustained overflow holds at
+   * the cap instead of falling back to a second each cycle. */
   private overflowed(kind: "scope" | "run" | "exp" | "dev", fn: () => Promise<void>) {
     const o = this.overflows[kind]
-    const now = Date.now()
-    o.n = o.at && now - o.at < OVERFLOW_CALM_MS ? o.n + 1 : 0
-    o.at = now
-    this.after(Math.min(OVERFLOW_MIN_MS * 2 ** Math.min(o.n, 6), 60_000), () => void fn().catch(quiet))
+    o.n = o.at && Date.now() - o.at < OVERFLOW_CALM_MS ? o.n + 1 : 0
+    this.after(Math.min(OVERFLOW_MIN_MS * 2 ** Math.min(o.n, 6), 60_000), () => {
+      // The lane reopens now: the calm window starts here (the lanes'
+      // record, which a rescope replaces, is read again).
+      this.overflows[kind].at = Date.now()
+      void fn().catch(quiet)
+    })
   }
 
   private after(ms: number, fn: () => void): ReturnType<typeof setTimeout> {

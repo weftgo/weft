@@ -42,7 +42,10 @@ export function badge(hole: string, note: BadgeNote = {}): HTMLElement {
   })
   // The title is a pointer's alone: the words ride in the accessible
   // text too, visually hidden (a keyboard or screen-reader user reads
-  // them with the label). badgeLabel reads the label back.
+  // them with the label) — the run page's HoleBadge carries the same
+  // inline words. A reader that also reads title may say them twice:
+  // accepted, over a description browse mode may never read.
+  // badgeLabel reads the label back.
   b.appendChild(el("span", "weft-sr", ` — ${badgeTitle(w.reason, w.fix)}`))
   return b
 }

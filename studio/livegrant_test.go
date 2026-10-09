@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -434,12 +435,23 @@ func TestNoTokenOrSigInLogs(t *testing.T) {
 // window, not a ticket — a browser's EventSource reconnects with the
 // very same URL, so any number of streams open on one sig while the
 // grant lasts (here the first still open while the second opens), and
-// none after its expiry.
+// none after its expiry. The server's clock is a fake one the test
+// moves: no sleeps.
 func TestLiveGrantReusableWithinWindow(t *testing.T) {
-	old := liveGrantTTL
-	liveGrantTTL = 500 * time.Millisecond
-	t.Cleanup(func() { liveGrantTTL = old })
-	ts := httptest.NewServer(New(DB(fixtureDB(t)), Token("srv")).Handler())
+	srv := New(DB(fixtureDB(t)), Token("srv"))
+	var mu sync.Mutex
+	clock := time.Date(2026, 10, 9, 12, 0, 0, 0, time.UTC)
+	srv.now = func() time.Time {
+		mu.Lock()
+		defer mu.Unlock()
+		return clock
+	}
+	advance := func(d time.Duration) {
+		mu.Lock()
+		defer mu.Unlock()
+		clock = clock.Add(d)
+	}
+	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 
 	code, sig, body := grantAt(t, ts.URL, "srv", "run=r_ok")
@@ -450,6 +462,9 @@ func TestLiveGrantReusableWithinWindow(t *testing.T) {
 		Exp time.Time `json:"exp"`
 	}
 	decode(t, body, &g)
+	if want := clock.Add(liveGrantTTL); !g.Exp.Equal(want) {
+		t.Fatalf("exp %v, want the fake clock + TTL %v", g.Exp, want)
+	}
 	first, err := http.Get(ts.URL + "/api/live?run=r_ok&sig=" + sig)
 	if err != nil {
 		t.Fatal(err)
@@ -461,7 +476,13 @@ func TestLiveGrantReusableWithinWindow(t *testing.T) {
 	if got := liveStatus(t, ts.URL, "run=r_ok&sig="+sig); got != http.StatusOK {
 		t.Fatalf("second open on the same sig (a reconnect): %d, want 200", got)
 	}
-	time.Sleep(time.Until(g.Exp) + 50*time.Millisecond)
+	// Late in the window: still a reconnect.
+	advance(liveGrantTTL - time.Second)
+	if got := liveStatus(t, ts.URL, "run=r_ok&sig="+sig); got != http.StatusOK {
+		t.Fatalf("open a second before expiry: %d, want 200", got)
+	}
+	// Past it: refused.
+	advance(2 * time.Second)
 	if got := liveStatus(t, ts.URL, "run=r_ok&sig="+sig); got != http.StatusUnauthorized {
 		t.Errorf("open after the window: %d, want 401", got)
 	}

@@ -433,6 +433,28 @@ describe("the Request panes word a record's holes alike (E1.2)", () => {
     ])
   })
 
+  // A running run's request row can land before the transcript batch
+  // it names: the run page reads that as the neutral no_transcript, and
+  // so must the panel's Request tab (messagesSent's running argument).
+  it("a running run whose transcript batch has not landed: neutral on both panes, never the red gap", async () => {
+    const r = row0()
+    r.body.messages_ref = { count: 3, index: 99 }
+    const fx: Fixture = { doc: { status: "running", finished: null }, events: events({ finish: false }), rows: [r] }
+    const got = await panes(fx)
+    expect(got.panel.filter((x) => x.hole === "gap"), "panel").toEqual([])
+    expect(got.studio.filter((x) => x.hole === "gap"), "run page").toEqual([])
+    expect(document.querySelector('[data-request="0"]')!.textContent).toContain("bytes when the transcript is read")
+    serve(fx, false)
+    const el = await mount(ATTRS)
+    await vi.waitFor(() => expect($(el, "#weft-tab-request")).toBeTruthy())
+    click($(el, "#weft-tab-request"))
+    await vi.waitFor(() => expect($(el, "#weft-tp-request [data-weft-messages-line]")).toBeTruthy(), { timeout: 5_000 })
+    await settle()
+    expect($(el, "#weft-tp-request [data-weft-rq-pane]")!.textContent).toContain("bytes when the transcript is read")
+    expect(all(el, '#weft-tp-request [data-hole="gap"]')).toEqual([])
+    el.remove()
+  })
+
   it("a stripped HoleRef carries the tools route's reason and fix on both", async () => {
     const r = row0()
     r.content = "stripped"

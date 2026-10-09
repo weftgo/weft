@@ -6,7 +6,9 @@
 // and a mount the host made says "Studio not reachable at … · retry"
 // where the panel's own dock removes itself silently.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { discoverEndpoint, findPanelScript, readConfig, selfURL } from "./config"
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
+import { discoverEndpoint, findPanelScript, NPM_MARK, readConfig, selfURL } from "./config"
 import type { MountOptions } from "./config"
 import { mount as mountPanel, WeftDevtools } from "./element"
 import { $, baseRoutes, click, fakeStudio, json, META, settle, setup, teardown, text } from "./testkit"
@@ -279,6 +281,77 @@ describe("the panel's script tag (C2: never by its file name)", () => {
     expect(cfg.publicId).toBe("pub_mine")
     expect(cfg.endpoint).not.toContain("widget.example")
     expect(cfg.token).toBe("tok_meta")
+  })
+})
+
+// ── Rung 4 under the npm entry: the app's chunk is not the panel's tag ─
+
+describe("rung 4 imported through @weftgo/devtools", () => {
+  // Bundled into an app, the panel's import.meta.url is the app chunk's
+  // URL (<script type="module" src="/assets/index-abc.js">): the tag
+  // whose src is the module's own URL is the app's entry, not the
+  // panel's. selfURL stands in for that chunk here — in the bundle they
+  // are the same URL. examples/devtools-vite/check.ts proves it on a
+  // real `vite build` (page /app/, the chunk under /assets/).
+  let prev = ""
+  beforeEach(() => {
+    prev = location.href
+    history.pushState(null, "", "/app/")
+  })
+  afterEach(() => {
+    WeftDevtools.npmEntry = false
+    history.pushState(null, "", prev)
+  })
+
+  it("the app chunk's tag is never the panel's: endpoint the page's directory, no panel-config.json, the app's data-* unread", async () => {
+    const chunk = script({ "data-endpoint": "/assets/api-proxy/", "data-auto": "false", "data-position": "left-dock" }, selfURL)
+    expect(findPanelScript()).toBe(chunk) // the standalone panel.js: its own src is its tag
+    WeftDevtools.npmEntry = true
+    expect(findPanelScript()).toBeNull()
+    const cfg = readConfig()
+    expect(cfg.endpoint).toBe(`${location.origin}/app/`)
+    expect(cfg.endpointExplicit).toBe(false)
+    expect(cfg.configURL).toBe("")
+    expect(cfg.auto).toBe(true)
+    expect(cfg.position).toBe("bottom-right")
+    // The dock asks the page's directory, and nothing under the chunk's.
+    const studio = fakeStudio(baseRoutes())
+    document.body.appendChild(element({}))
+    await settle()
+    const urls = studio.fetchMock.mock.calls.map((c) => new URL(String(c[0]), location.href).href)
+    expect(urls).toContain(`${location.origin}/app/api/meta`)
+    expect(urls.some((u) => u.includes("panel-config.json"))).toBe(false)
+  })
+
+  it("data-weft still names the panel's tag under the npm entry", () => {
+    WeftDevtools.npmEntry = true
+    script({}, selfURL)
+    const tagged = script({ "data-weft": "", "data-endpoint": "https://studio.example/studio" }, "/assets/index-abc.js")
+    expect(findPanelScript()).toBe(tagged)
+    expect(readConfig().endpoint).toBe("https://studio.example/studio/")
+  })
+
+  it("the mark the package's ssr-guard.js sets before panel.js is read once, as the bundle evaluates", async () => {
+    const g = globalThis as Record<string, unknown>
+    try {
+      g[NPM_MARK] = true
+      vi.resetModules()
+      const marked = await import("./config")
+      delete g[NPM_MARK]
+      expect(marked.viaPackage()).toBe(true) // kept after ssr-unguard.js deletes the mark
+      vi.resetModules()
+      expect((await import("./config")).viaPackage()).toBe(false) // the standalone panel.js
+    } finally {
+      delete g[NPM_MARK]
+      vi.resetModules()
+    }
+  })
+
+  it("the assembler writes the same mark config.ts reads", () => {
+    const src = readFileSync(resolve(process.cwd(), "scripts/npm-package.ts"), "utf8")
+    expect(src).toContain(`const NPM_MARK = "${NPM_MARK}"`)
+    expect(src).toContain("globalThis.${NPM_MARK} = true")
+    expect(src).toContain("delete globalThis.${NPM_MARK}")
   })
 })
 

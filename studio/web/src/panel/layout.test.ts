@@ -8,6 +8,7 @@ import {
   all,
   assistant,
   baseRoutes,
+  create,
   FakeEventSource,
   fakeStudio,
   mount,
@@ -536,6 +537,36 @@ describe("the keyboard (only inside the panel, except Alt+W)", () => {
     key(el.shadowRoot!.activeElement!, { key: "Escape" })
     await settle()
     expect($(el, ".weft-fab")).toBeTruthy()
+  })
+
+  it("review: Alt+W prefers a live, page-mounted panel — markup the page adds after the auto dock or a dormant mount toggles", async () => {
+    const studio = fakeStudio(baseRoutes())
+    // The dock the bundle mounted by itself, connected first (and the
+    // publisher of window.weft.devtools).
+    const auto = create({ ...BASE })
+    auto.autoMounted = true
+    document.body.appendChild(auto)
+    await settle()
+    // A host mount whose Studio does not answer: dormant, in place.
+    const answer = studio.fetchMock.getMockImplementation()!
+    studio.fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) =>
+      String(input).startsWith("http://down.test/") ? new Response("no studio", { status: 404 }) : answer(input, init)
+    )
+    const down = await mount({ "data-endpoint": "http://down.test/studio/", "data-public-id": "pub_orders" })
+    expect(text(down, ".weft-unreachable")).toContain("Studio not reachable")
+    // The page's own markup, added later.
+    const markup = await mount({ ...BASE })
+    expect([auto.isOpen, markup.isOpen]).toEqual([false, false])
+    key(window, { code: "KeyW", altKey: true })
+    await settle()
+    expect(markup.isOpen).toBe(true)
+    expect(auto.isOpen).toBe(false)
+    // Without the page's markup, the auto dock answers again.
+    markup.remove()
+    await settle()
+    key(window, { code: "KeyW", altKey: true })
+    await settle()
+    expect(auto.isOpen).toBe(true)
   })
 
   it("j / k move through the turns, J / K through the steps; ⤢ carries the step", async () => {

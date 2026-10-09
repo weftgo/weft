@@ -37,7 +37,7 @@ describe.runIf(process.env.WEFT_DEVTOOLS_PKG === "1")("the assembled package on 
     const code = `
       const api = await import("./index.js")
       const checks = [
-        typeof HTMLElement === "undefined" && !("__weftDevtoolsSSRGuard" in globalThis), // the guard leaves nothing behind
+        typeof HTMLElement === "undefined" && !("__weftDevtoolsSSRGuard" in globalThis) && !("__weftDevtoolsNpm" in globalThis), // the guard leaves nothing behind
         api.mount({ endpoint: "/studio/" }) === null,
         api.mount({ enabled: false }) === null,
         api.scope("pub_1") === undefined,

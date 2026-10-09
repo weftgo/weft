@@ -159,19 +159,57 @@ export const selfURL: string = (() => {
   }
 })()
 
+/** NPM_MARK is the global @weftgo/devtools's entry sets just before
+ * panel.js evaluates (its ssr-guard.js; ssr-unguard.js deletes it
+ * right after). This copy of the bundle reads it once, as it
+ * evaluates: imported through the npm entry, the bundle is part of the
+ * app's own chunk, so import.meta.url and document.currentScript name
+ * the app's script — never the panel's tag. */
+export const NPM_MARK = "__weftDevtoolsNpm"
+
+/** Whether this copy of the bundle came in through the npm entry: the
+ * mark above, or the element class's npmEntry flag the entry sets
+ * (WeftDevtools.npmEntry, for every read after it). The standalone
+ * panel.js — /studio/panel.js, or the package's panel.js served as its
+ * own file — has neither. */
+const entry = {
+  npm: (() => {
+    try {
+      return (globalThis as Record<string, unknown>)[NPM_MARK] === true
+    } catch {
+      return false
+    }
+  })(),
+}
+
+/** viaPackage reports whether the bundle runs as the npm entry's import. */
+export function viaPackage(): boolean {
+  return entry.npm
+}
+
+/** setViaPackage sets it (the element class's npmEntry setter). */
+export function setViaPackage(v: boolean): void {
+  entry.npm = v
+}
+
 /** The panel's own <script> tag (rung 4): document.currentScript when
  * the bundle ran as a classic script; else the first script carrying
  * data-weft, in document order (any src: a renamed bundle, a proxy);
  * else the script whose src resolves to the module's own URL
  * (import.meta.url). Never the file name, and never a tag because it
  * carries a generic data-* attribute: a third-party widget's
- * data-endpoint or data-token is not the panel's configuration. */
+ * data-endpoint or data-token is not the panel's configuration.
+ * Imported through the npm entry (viaPackage) only data-weft counts:
+ * the running script and the module's own URL are the app's bundle
+ * then, whose directory is not Studio's and whose data-* attributes
+ * are the app's — the endpoint default stays the page's directory. */
 export function findPanelScript(): HTMLScriptElement | null {
-  if (bootScript?.isConnected) return bootScript
+  const npm = entry.npm
+  if (!npm && bootScript?.isConnected) return bootScript
   try {
     const tagged = document.querySelector<HTMLScriptElement>("script[data-weft]")
     if (tagged) return tagged
-    if (!selfURL) return null
+    if (npm || !selfURL) return null
     for (const s of Array.from(document.querySelectorAll<HTMLScriptElement>("script[src]"))) {
       try {
         if (new URL(s.getAttribute("src") ?? "", document.baseURI).href === selfURL) return s

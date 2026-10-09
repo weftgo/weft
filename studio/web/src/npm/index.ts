@@ -138,7 +138,11 @@ const hasDOM = () => typeof document !== "undefined" && typeof HTMLElement !== "
 // window.weft.devtools (the script-tag install's global).
 try {
   if (!hasDOM()) throw new Error("no DOM")
-  const ctor: (CustomElementConstructor & { noGlobal?: boolean }) | undefined = customElements.get(TAG)
+  const ctor: (CustomElementConstructor & { noGlobal?: boolean; npmEntry?: boolean }) | undefined = customElements.get(TAG)
+  // Imported here, the panel is part of the app's chunk: its rung 4
+  // never takes the app's script for its tag (the package's
+  // ssr-guard.js marked that before panel.js evaluated; this keeps it).
+  if (ctor && "npmEntry" in ctor) ctor.npmEntry = true
   if (ctor && "noGlobal" in ctor) {
     ctor.noGlobal = true
     for (const n of Array.from(document.querySelectorAll<WeftDevtoolsElement>(TAG)))

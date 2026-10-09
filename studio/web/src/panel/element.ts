@@ -26,7 +26,7 @@ import {
 import { attemptLine, attemptsHole, factsFromRows, timingLine } from "../lib/attempts"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "../lib/events"
 import { duration, relativeTime, tokens } from "../lib/format"
-import { discoverEndpoint, headerRungOn, markerRungOn, readConfig, tokenScope, urlScope } from "./config"
+import { discoverEndpoint, headerRungOn, markerRungOn, readConfig, setViaPackage, tokenScope, urlScope, viaPackage } from "./config"
 import type { MountOptions, PanelConfig } from "./config"
 import { installHeaderRung } from "./detect"
 import type { HeaderRung } from "./detect"
@@ -147,9 +147,9 @@ function capSet<V>(m: Map<string, V>, k: string, v: V, max: number): void {
   if (m.size > max) m.delete(m.keys().next().value as string)
 }
 
-/** The connected panels, in connect order: the first (or the one
- * window.weft.devtools is) owns Alt+W, so two panels on one page do not
- * toggle out of phase. */
+/** The connected panels, in connect order: one owns Alt+W (a live,
+ * page-mounted panel first — ownsToggle), so two panels on one page do
+ * not toggle out of phase. */
 const LIVE = new Set<WeftDevtools>()
 
 /** A scope the header rung saw (C3.2): the newest response path that
@@ -565,6 +565,16 @@ export class WeftDevtools extends HTMLElement {
   /** Set by the npm entry on the registered class: the package's
    * exports are the API, so no panel adds the global. */
   static noGlobal = false
+  /** Set by the npm entry on the registered class (with noGlobal): the
+   * bundle is part of the app's chunk, so rung 4 never takes the app's
+   * script for the panel's tag (config.ts viaPackage). The package's
+   * ssr-guard.js marks it before the first read; this keeps it. */
+  static get npmEntry(): boolean {
+    return viaPackage()
+  }
+  static set npmEntry(v: boolean) {
+    setViaPackage(v === true)
+  }
 
   constructor() {
     super()
@@ -1383,17 +1393,26 @@ export class WeftDevtools extends HTMLElement {
     if (this.shown) this.body.querySelector<HTMLElement>(".weft-dock")?.focus({ preventScroll: true })
   }
 
-  /** ownsToggle: of the connected panels, the one window.weft.devtools
-   * is answers Alt+W, else the first connected — one toggle per press. */
+  /** ownsToggle: of the connected panels, exactly one answers Alt+W —
+   * one toggle per press. A live, page-mounted panel (not dormant, not
+   * the dock the bundle mounted by itself) is preferred, so markup the
+   * page adds after a dormant mount or the auto dock can be toggled:
+   * the one window.weft.devtools is when it is such a panel, else the
+   * first connected such panel; with none, the global's panel, else
+   * the first connected. */
   private ownsToggle(): boolean {
+    let owner: WeftDevtools | undefined
     try {
       const ns = (window as unknown as { weft?: unknown }).weft
       const api = isPlainObject(ns) ? Object.getOwnPropertyDescriptor(ns, "devtools")?.value : undefined
-      if (api) for (const p of LIVE) if (p.apiObjIs(api)) return p === this
+      if (api) for (const p of LIVE) if (p.apiObjIs(api)) owner = p
     } catch {
-      // a page's own window.weft: the first panel answers
+      // a page's own window.weft: no global panel
     }
-    return LIVE.values().next().value === this
+    const pageLive = (p: WeftDevtools) => !p.dormant && !p.autoMounted
+    if (owner && pageLive(owner)) return owner === this
+    for (const p of LIVE) if (pageLive(p)) return p === this
+    return (owner ?? LIVE.values().next().value) === this
   }
 
   /** panelKey is every other shortcut (SHORTCUTS), heard on the shadow

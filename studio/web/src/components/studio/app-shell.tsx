@@ -1,7 +1,7 @@
 // The app shell (plan §4.3): sidebar navigation (Runs; Agents only
 // when a manifest is configured), a header with the current place, a
 // command palette that jumps to any recent run, and a footer with the
-// theme toggle and the weft version and store from api/meta.
+// theme and density toggles and the weft version and store from api/meta.
 //
 // Hydration rule: the shell is prerendered once, at /runs, and every
 // deep link hydrates against it. Anything whose markup depends on the
@@ -28,12 +28,16 @@ import {
   Link2,
   List,
   MessagesSquare,
+  PanelsLeftRight,
+  Rows3,
   Search,
   SunMoon,
 } from "lucide-react"
 
 import { metaQuery, runsQuery, studioToken } from "@/lib/api"
 import { canReplay } from "@/lib/replay"
+import { applyStoredDensity, toggleDensity } from "@/lib/density"
+import { resetPaneSizes } from "@/lib/pane-sizes"
 import { isPlainShortcut } from "@/lib/keys"
 import { useCopyLink } from "@/hooks/use-copy-link"
 import { useLiveGaveUpNotices, useRuntimeNotices } from "@/hooks/use-notices"
@@ -52,6 +56,7 @@ import {
   applyStoredTheme,
   cycleTheme,
 } from "@/components/studio/theme"
+import { DensityToggle, useDensity } from "@/components/studio/density-toggle"
 import { StatusDot } from "@/components/studio/runs-table"
 import { WeftWordmark } from "@/components/studio/weft-mark"
 import { Button } from "@/components/ui/button"
@@ -167,8 +172,11 @@ export function AppShell() {
   // Recent runs feed the palette; fetched only once it opens.
   const recent = useQuery({ ...runsQuery({}), enabled: paletteOpen })
 
-  // The theme class survives hydration (see applyStoredTheme).
+  // The theme class survives hydration (see applyStoredTheme), and the
+  // density attribute with it (plan H3).
   useEffect(applyStoredTheme, [])
+  useEffect(applyStoredDensity, [])
+  const density = useDensity()
 
   // The notices no page owns (plan H5): a runtime coming or going, a
   // live stream that gave up. Toasts, raised by lib/notify.ts.
@@ -223,7 +231,10 @@ export function AppShell() {
         </SidebarContent>
         <SidebarFooter>
           <div className="flex items-center justify-between px-2 pb-1 group-data-[collapsible=icon]:justify-center">
-            <ThemeToggle />
+            <span className="flex items-center gap-0.5 group-data-[collapsible=icon]:flex-col">
+              <ThemeToggle />
+              <DensityToggle />
+            </span>
             <Button
               variant="ghost"
               size="icon-sm"
@@ -378,6 +389,26 @@ export function AppShell() {
               >
                 <SunMoon data-slot="icon" />
                 Cycle theme
+              </CommandItem>
+              <CommandItem
+                value="density compact comfortable spacing toggle"
+                onSelect={() => {
+                  toggleDensity()
+                  setPaletteOpen(false)
+                }}
+              >
+                <Rows3 data-slot="icon" />
+                {density === "compact" ? "Comfortable density" : "Compact density"}
+              </CommandItem>
+              <CommandItem
+                value="reset pane layout split sizes"
+                onSelect={() => {
+                  resetPaneSizes()
+                  setPaletteOpen(false)
+                }}
+              >
+                <PanelsLeftRight data-slot="icon" />
+                Reset pane layout
               </CommandItem>
               <CommandItem
                 value="keyboard help shortcuts"

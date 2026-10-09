@@ -2,6 +2,9 @@
 /* The devtools panel styles itself in its shadow root (src/panel/styles.ts):
    its sources are not the app's utility candidates. */
 @source not "./panel";
+/* Tests are not the app's utility candidates either: the H3 lint test
+   spells the raw colours it refuses (src/lib/controls.lint.test.ts). */
+@source not "./**/*.test.{ts,tsx}";
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
@@ -131,6 +134,19 @@
   --status-int: #e3b341;
 }
 
+/* Density (plan H3): compact is the same pages, tighter — through the
+   theme's own tokens, never a per-component override. --spacing is the
+   step every p-/m-/gap-/w- utility multiplies; the text steps are the
+   type scale; --studio-text is the body's base step. Set by lib/density.ts
+   (data-density on <html>, comfortable by default). */
+html[data-density="compact"] {
+  --spacing: 0.1875rem;
+  --text-xs: 0.6875rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --studio-text: 0.8125rem;
+}
+
 @theme inline {
   --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
@@ -208,7 +224,7 @@
   body {
     @apply bg-background text-foreground;
     /* Studio is a tool: denser than the site (plan §5.4) */
-    font-size: 0.875rem;
+    font-size: var(--studio-text, 0.875rem);
     line-height: 1.55;
   }
   ::selection {

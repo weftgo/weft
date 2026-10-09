@@ -9,6 +9,7 @@ import { setStudioToken } from "@/lib/api"
 import { queryClient } from "@/lib/query"
 import type { RunDoc, RunRow, RunsPage, SessionDoc, SessionsPage } from "@/lib/api"
 import { renderApp, stubBrowser } from "@/test/app"
+import { valueOf } from "@/test/select"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { FakeStudio, apiError, golden, pagedEvents, transcriptOf } from "@/test/fake-studio"
 
@@ -475,7 +476,7 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     )
     // The source run is an `orders` turn: not the first agent registered.
     await waitFor(() =>
-      expect(screen.getByLabelText<HTMLSelectElement>("agent").value).toBe("orders")
+      expect(valueOf(screen.getByLabelText("agent"))).toBe("orders")
     )
     const runButton = await screen.findByRole("button", { name: "Run A" })
     await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
@@ -511,7 +512,7 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
         "#instructions=You%20are%20careful.&input=refund%20order%2042%20%26%20more&tools=lookup_order"
     )
     await waitFor(() =>
-      expect(screen.getByLabelText<HTMLSelectElement>("agent").value).toBe("orders")
+      expect(valueOf(screen.getByLabelText("agent"))).toBe("orders")
     )
     await waitFor(() => expect(router.state.location.hash).toBe(""))
     expect(router.history.location.href).not.toContain("#")
@@ -593,6 +594,11 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
     fireEvent.click(runButton)
     await waitFor(() => expect(document.querySelector('[data-variant="A"]')?.textContent).toContain("finished"))
+    // Plan H3: a result card scrolls inside its own box, one per row at
+    // phone width.
+    const card = document.querySelector<HTMLElement>('[data-variant="A"]')!
+    expect(card.className).toContain("overflow-x-auto")
+    expect(card.closest("[data-result-grid]")!.className).toMatch(/(^| )grid-cols-1( |$)/)
     await new Promise((r) => setTimeout(r, 100))
     expect(document.querySelector("[data-variant-steps]")).toBeNull()
     expect(studio.calls("GET diff")).toHaveLength(0)
@@ -853,7 +859,7 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
       })
     renderApp("/playground?run=r_ok")
     await waitFor(() =>
-      expect(screen.getByLabelText<HTMLSelectElement>("agent").value).toBe("orders")
+      expect(valueOf(screen.getByLabelText("agent"))).toBe("orders")
     )
     fireEvent.click(screen.getByRole("button", { name: "+ variant" }))
     fireEvent.change(screen.getByLabelText("experiment name"), { target: { value: "exp_tone" } })
@@ -879,10 +885,12 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
       return el!
     }, { timeout: 10_000 })
     expect(within(cellA).getByRole("link").getAttribute("href")).toContain("pg_m1")
+    // Plan H3: the matrix's table scrolls inside its own box.
+    expect(cellA.closest("[data-scroll-box]")!.className).toContain("overflow-x-auto")
     // A finished command whose run failed reads failed — never the
     // green of a success (the row's status, §10.4).
     expect(cellA.textContent).toContain("failed")
-    expect(cellA.querySelector(".text-emerald-500")).toBeNull()
+    expect(cellA.querySelector(".text-status-ok")).toBeNull()
     expect(document.querySelector('[data-cell="B×1"]')?.textContent).toContain(
       "rejected (runtime rt_1 is not connected)"
     )

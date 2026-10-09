@@ -11,6 +11,7 @@ import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { FakeStudio, golden } from "@/test/fake-studio"
 import { playgroundStateLink } from "@/lib/links"
+import { choose, valueOf } from "@/test/select"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -57,21 +58,20 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-const agentSelect = () => screen.getByLabelText<HTMLSelectElement>("agent")
-const engineSelect = () =>
-  screen.getByText("Engine").parentElement!.querySelector("select")!
+const agentSelect = () => screen.getByLabelText("agent")
+const engineSelect = () => screen.getByLabelText("Engine")
 
 describe("the playground's URL (G2)", () => {
   it("writes the agent, the source run and the engine back in place", async () => {
     const { router } = renderApp("/playground?run=r_ok&instructions=keep-me")
-    await waitFor(() => expect(agentSelect().value).toBe("orders"))
+    await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
     const entries = router.history.length
     const actions: string[] = []
     router.history.subscribe(({ action }) => actions.push(action.type))
 
-    fireEvent.change(agentSelect(), { target: { value: "planner" } })
+    await choose(agentSelect(), "planner")
     await waitFor(() => expect(router.state.location.search).toMatchObject({ agent: "planner" }))
-    fireEvent.change(engineSelect(), { target: { value: "scripted" } })
+    await choose(engineSelect(), "scripted")
     await waitFor(() => expect(router.state.location.search).toMatchObject({ engine: "scripted" }))
     fireEvent.change(screen.getByPlaceholderText("a run id, or blank for fresh input"), {
       target: { value: "" },
@@ -85,9 +85,9 @@ describe("the playground's URL (G2)", () => {
 
   it("a copied link reopens the page as it stood", async () => {
     renderApp("/playground?run=r_ok&agent=planner&engine=scripted")
-    await waitFor(() => expect(agentSelect().value).toBe("planner"))
+    await waitFor(() => expect(valueOf(agentSelect())).toBe("planner"))
     expect(screen.getByPlaceholderText<HTMLInputElement>("a run id, or blank for fresh input").value).toBe("r_ok")
-    expect(engineSelect().value).toBe("scripted")
+    expect(valueOf(engineSelect())).toBe("scripted")
     expect(document.title).toBe("playground · weft studio")
   })
 
@@ -100,7 +100,7 @@ describe("the playground's URL (G2)", () => {
     )
     await waitFor(() => expect(router.state.location.search).toMatchObject({ run: "r_ok" }))
     await waitFor(() => expect(router.state.location.hash).toBe(""))
-    await waitFor(() => expect(agentSelect().value).toBe("orders"))
+    await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
     expect(screen.getByDisplayValue("You are careful.")).toBeTruthy()
     await waitFor(() =>
       expect(screen.getByLabelText<HTMLInputElement>(/^refund/).checked).toBe(false)
@@ -134,17 +134,17 @@ describe("the model field follows the agent", () => {
       .on("GET playground/commands/cmd_1", { command_id: "cmd_1", state: "queued", run_id: "", error: null, created: rOK.started, updated: rOK.started })
     studio.install()
     renderApp("/playground?agent=planner")
-    await waitFor(() => expect(agentSelect().value).toBe("planner"))
+    await waitFor(() => expect(valueOf(agentSelect())).toBe("planner"))
     const free = await screen.findByLabelText<HTMLInputElement>("model name the app resolves")
     fireEvent.change(free, { target: { value: "my-own-model" } })
     expect(free.value).toBe("my-own-model")
-    fireEvent.change(agentSelect(), { target: { value: "orders" } })
-    await waitFor(() => expect(agentSelect().value).toBe("orders"))
+    await choose(agentSelect(), "orders")
+    await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
     // orders' app holds no resolver: the field is gone, the model with it.
     await waitFor(() => expect(screen.queryByLabelText("model name the app resolves")).toBeNull())
-    expect(screen.getByLabelText<HTMLSelectElement>("model").value).toBe("")
+    expect(valueOf(screen.getByLabelText("model"))).toBe("")
     // Back to planner: the free field is empty, not the stale name.
-    fireEvent.change(agentSelect(), { target: { value: "planner" } })
+    await choose(agentSelect(), "planner")
     const again = await screen.findByLabelText<HTMLInputElement>("model name the app resolves")
     expect(again.value).toBe("")
     fireEvent.change(screen.getByLabelText("input"), { target: { value: "plan my day" } })
@@ -159,12 +159,12 @@ describe("the model field follows the agent", () => {
   // Review fix 1: a change under a mounted page is adopted, never
   // fought — the page and the router once flipped the URL forever.
   const sourceInput = () => screen.getByPlaceholderText<HTMLInputElement>("a run id, or blank for fresh input")
-  const stepSelect = () => screen.getByLabelText<HTMLSelectElement>("continue from step")
+  const stepSelect = () => screen.getByLabelText("continue from step")
   const settle = () => new Promise((r) => setTimeout(r, 300))
 
   it("Back over a typed source run settles in a bounded number of history writes", async () => {
     const { router } = renderApp("/playground?run=r_ok")
-    await waitFor(() => expect(agentSelect().value).toBe("orders"))
+    await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
     // A saved experiment is a push that keeps the page's state.
     fireEvent.click(await screen.findByRole("link", { name: "e1" }))
     await waitFor(() => expect(router.state.location.search).toMatchObject({ experiment: "e1", run: "r_ok" }))
@@ -184,31 +184,31 @@ describe("the model field follows the agent", () => {
 
   it("adopts an outside navigate while mounted, and writes nothing back", async () => {
     const { router } = renderApp("/playground?run=r_ok")
-    await waitFor(() => expect(agentSelect().value).toBe("orders"))
+    await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
     const actions: string[] = []
     router.history.subscribe(({ action }) => actions.push(action.type))
     void router.navigate(playgroundStateLink({ run: "r_two", step: 1, agent: "planner", engine: "scripted" }))
     await waitFor(() => expect(sourceInput().value).toBe("r_two"))
-    await waitFor(() => expect(agentSelect().value).toBe("planner"))
-    expect(engineSelect().value).toBe("scripted")
-    await waitFor(() => expect(stepSelect().value).toBe("1"))
+    await waitFor(() => expect(valueOf(agentSelect())).toBe("planner"))
+    expect(valueOf(engineSelect())).toBe("scripted")
+    await waitFor(() => expect(valueOf(stepSelect())).toBe("1"))
     await settle()
     expect(actions).toEqual(["PUSH"])
   })
 
   it("Back and Forward round-trip the agent, the step and the engine", async () => {
     const { router } = renderApp("/playground?run=r_ok&agent=planner")
-    await waitFor(() => expect(agentSelect().value).toBe("planner"))
+    await waitFor(() => expect(valueOf(agentSelect())).toBe("planner"))
     void router.navigate(playgroundStateLink({ run: "r_ok", step: 1, agent: "orders", engine: "scripted" }))
-    await waitFor(() => expect(agentSelect().value).toBe("orders"))
+    await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
     router.history.back()
-    await waitFor(() => expect(agentSelect().value).toBe("planner"))
-    expect(engineSelect().value).toBe("live")
-    await waitFor(() => expect(stepSelect().value).toBe("0"))
+    await waitFor(() => expect(valueOf(agentSelect())).toBe("planner"))
+    expect(valueOf(engineSelect())).toBe("live")
+    await waitFor(() => expect(valueOf(stepSelect())).toBe("0"))
     router.history.forward()
-    await waitFor(() => expect(agentSelect().value).toBe("orders"))
-    expect(engineSelect().value).toBe("scripted")
-    await waitFor(() => expect(stepSelect().value).toBe("1"))
+    await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
+    expect(valueOf(engineSelect())).toBe("scripted")
+    await waitFor(() => expect(valueOf(stepSelect())).toBe("1"))
     await settle()
     expect(router.state.location.search).toMatchObject({ run: "r_ok", step: 1, agent: "orders", engine: "scripted" })
   })
@@ -216,10 +216,10 @@ describe("the model field follows the agent", () => {
   it("a run typed after a fragment hand-off stays through the next control change", async () => {
     const { router } = renderApp("/playground#run=r_ok&tools=lookup_order")
     await waitFor(() => expect(router.state.location.search).toMatchObject({ run: "r_ok" }))
-    await waitFor(() => expect(agentSelect().value).toBe("orders"))
+    await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
     fireEvent.change(sourceInput(), { target: { value: "r_two" } })
     await waitFor(() => expect(router.state.location.search).toMatchObject({ run: "r_two" }))
-    fireEvent.change(agentSelect(), { target: { value: "planner" } })
+    await choose(agentSelect(), "planner")
     await waitFor(() => expect(router.state.location.search).toMatchObject({ agent: "planner" }))
     await settle()
     expect(sourceInput().value).toBe("r_two")

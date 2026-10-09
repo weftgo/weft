@@ -52,6 +52,47 @@ export const deepLinkRules = {
   ],
 }
 
+/** Raw Tailwind palette colours (text-red-500, bg-amber-100/50,
+ * hover:border-emerald-400, text-white …): the H3 rule refuses them —
+ * the Studio palette's tokens (text-destructive, bg-muted,
+ * text-status-ok, …) are the one source of colour. */
+const RAW_COLOUR =
+  "(^|[\\s:'\"`!])-?(text|bg|border|border-[trblxyse]|ring|ring-offset|outline|fill|stroke|from|via|to|divide|decoration|shadow|accent|caret|placeholder|inset-shadow|inset-ring)-((red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose|slate|gray|zinc|neutral|stone)-[0-9]{2,3}|white|black)(?![\\w-])"
+
+/** The H3 rule (the playground's controls are the shared components/ui
+ * ones, coloured by theme tokens), exported for its own test
+ * (src/lib/controls.lint.test.ts). See the config block below. */
+export const controlRules = {
+  "no-restricted-syntax": [
+    "error",
+    {
+      selector: "JSXOpeningElement[name.name=/^(select|option|optgroup)$/]",
+      message:
+        "Use the shared Select (components/ui/select-field) — no native <select> (plan H3).",
+    },
+    {
+      selector: `Literal[value=/${RAW_COLOUR}/]`,
+      message:
+        "Use a theme token class (text-destructive, bg-muted, text-status-ok, …), not a raw Tailwind colour (plan H3).",
+    },
+    {
+      selector: `TemplateElement[value.raw=/${RAW_COLOUR}/]`,
+      message:
+        "Use a theme token class (text-destructive, bg-muted, text-status-ok, …), not a raw Tailwind colour (plan H3).",
+    },
+  ],
+}
+
+/** The files the H3 rule holds: the playground's controls and the
+ * split, density and select components. */
+export const controlFiles = [
+  "src/routes/playground.tsx",
+  "src/components/studio/experiment-form.tsx",
+  "src/components/studio/split-pane.tsx",
+  "src/components/studio/density-toggle.tsx",
+  "src/components/ui/select-field.tsx",
+]
+
 export default [
   ...tanstackConfig,
   {
@@ -91,6 +132,21 @@ export default [
     files: ["src/**/*.{ts,tsx}"],
     ignores: ["src/lib/links.ts", "src/**/*.test.{ts,tsx}", "src/test/**", "src/panel/testkit.ts"],
     rules: deepLinkRules,
+  },
+  {
+    // The playground's controls (plan H3): the shared components/ui
+    // Select, never a native <select>, and theme-token colours only —
+    // never a raw Tailwind palette class. One no-restricted-syntax per
+    // file wins in flat config, so these files carry the G1 selectors
+    // too.
+    files: controlFiles,
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        ...deepLinkRules["no-restricted-syntax"].slice(1),
+        ...controlRules["no-restricted-syntax"].slice(1),
+      ],
+    },
   },
   {
     // shadcn components are copied in, not authored here (ADR 0018 §9);

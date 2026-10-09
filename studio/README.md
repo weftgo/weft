@@ -1190,6 +1190,38 @@ failed** — copy link, beside the header's own words. A toast is a view:
 it names ids, tools and counts, never a token or a prompt, and acts only
 when its action is clicked.
 
+Panes and density (plan H3): three splits resize — the trace page's
+span tree beside the selected span, a run step's story beside its open
+Request pane (one size for every card), and the playground's config
+column beside its runs column. Drag the handle, or focus it (`Tab`) and
+use the arrow keys, `Home`/`End`; a double click puts it back. Each
+pane keeps a minimum size, so nothing — a badge, a hole mark — is
+squeezed out of sight. The sizes are a per-device preference, never
+the URL: `localStorage["studio.panes.<split>"]` (`trace-detail`,
+`story-request`, `playground`) holds the panes' percentages, and a
+missing, unreadable or garbled value opens the split at its default.
+**Reset pane layout** in `⌘K` forgets them all and puts the open
+splits back. **Density** — comfortable (the default) or compact — is
+the toggle beside the theme toggle in the sidebar footer and
+"Compact density" / "Comfortable density" in `⌘K`: `data-density` on
+`<html>`, set before paint by the bootstrap and stored as
+`localStorage["studio.density"]`; compact scales the theme's own
+tokens (Tailwind's `--spacing` step, `--text-xs`/`--text-sm`/`--text-base`,
+the body's `--studio-text`) under `[data-density="compact"]`, so every
+page follows. At phone width (≤ 640 px) the splits stack: the trace
+detail under its tree, the playground's config column above its runs
+column, the page scrolling as one with no horizontal scroll; its header
+controls wrap, its result cards go one per row, and the cards and the
+matrix table scroll inside their own box. A step's Request pane opens
+beside its story from the `lg` width (1024 px) up, inline above it
+below that. The playground's controls are the shared
+`components/ui` Select (`select-field.tsx`) in theme-token colours: the
+lint rule `controlRules` (eslint.config.js, pinned by
+`src/lib/controls.lint.test.ts`) refuses a native `<select>` and a raw
+Tailwind palette class (`text-red-500`, `bg-amber-100`, …) in the
+playground, the experiment form and the split, density and select
+components.
+
 Keyboard: `⌘K` jumps to any recent run, `/` filters, `j`/`k` move,
 `enter` opens, `e`/`s`/`r` switch trace/story/raw, `space` replays,
 `[`/`]` jump by step or tool event, `,`/`.` move one event, `y` copies

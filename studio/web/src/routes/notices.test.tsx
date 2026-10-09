@@ -10,6 +10,7 @@ import type { RunDoc, RunRow, RunsPage } from "@/lib/api"
 import { resetNotices } from "@/lib/notify"
 import { queryClient } from "@/lib/query"
 import { renderApp, stubBrowser } from "@/test/app"
+import { valueOf } from "@/test/select"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { FakeStudio, apiError, golden, pagedEvents, transcriptOf } from "@/test/fake-studio"
 
@@ -147,7 +148,7 @@ describe("the playground's notices", () => {
         secondDone ? command("cmd_m2", "finished", "pg_m2", "failed") : command("cmd_m2", "accepted", "pg_m2")
       )
     renderApp("/playground?run=r_ok")
-    await waitFor(() => expect(screen.getByLabelText<HTMLSelectElement>("agent").value).toBe("orders"))
+    await waitFor(() => expect(valueOf(screen.getByLabelText("agent"))).toBe("orders"))
     fireEvent.click(screen.getByRole("button", { name: "+ variant" }))
     fireEvent.change(screen.getByLabelText("experiment name"), { target: { value: "exp_tone" } })
     const go = screen.getByRole("button", { name: "Run matrix" })
@@ -269,7 +270,7 @@ describe("the playground's notices", () => {
       )
       .on("GET playground/commands/cmd_m3", command("cmd_m3", "finished", "pg_m3", "failed"))
     const { router } = renderApp("/playground?run=r_ok")
-    await waitFor(() => expect(screen.getByLabelText<HTMLSelectElement>("agent").value).toBe("orders"))
+    await waitFor(() => expect(valueOf(screen.getByLabelText("agent"))).toBe("orders"))
     fireEvent.click(screen.getByRole("button", { name: "+ variant" }))
     fireEvent.click(screen.getByRole("button", { name: "+ variant" }))
     fireEvent.change(screen.getByLabelText("experiment name"), { target: { value: "exp_mix" } })

@@ -69,6 +69,9 @@ import type { Experiment } from "@/hooks/use-command-tracking"
 import { useRunEvents } from "@/hooks/use-run-events"
 import { ExperimentForm, StepPicker, useSourceEditFields } from "@/components/studio/experiment-form"
 import { Button } from "@/components/ui/button"
+import { SelectField } from "@/components/ui/select-field"
+import { SplitPane } from "@/components/studio/split-pane"
+import { SPLITS } from "@/lib/pane-sizes"
 import { compareLink, experimentLink, playgroundSearch, runLink } from "@/lib/links"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { notify } from "@/lib/notify"
@@ -644,39 +647,31 @@ function Playground({ caps }: { caps: string[] }) {
         <span>Playground ·</span>
         {runtime && agent ? (
           <>
-            <select
-              aria-label="agent"
-              className="rounded border bg-transparent px-1 py-0.5 text-xs text-foreground"
+            <SelectField
+              label="agent"
+              className="text-foreground"
               value={agent.name}
-              onChange={(e) => {
-                setAgentChoice(e.target.value)
-                write({ agent: e.target.value })
+              onValueChange={(v) => {
+                setAgentChoice(v)
+                write({ agent: v })
               }}
-            >
-              {runtime.agents.map((a) => (
-                <option key={a.name} value={a.name}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
+              options={runtime.agents.map((a) => ({ value: a.name, label: a.name }))}
+            />
             <span>on</span>
-            <select
-              aria-label="runtime"
-              className="rounded border bg-transparent px-1 py-0.5 text-xs"
+            <SelectField
+              label="runtime"
               value={runtime.id}
-              onChange={(e) => {
-                setRuntimeChoice(e.target.value)
+              onValueChange={(v) => {
+                setRuntimeChoice(v)
                 // The agent stays when the new runtime has it.
                 setAgentChoice(agent.name)
-                write({ runtime: e.target.value, agent: agent.name })
+                write({ runtime: v, agent: agent.name })
               }}
-            >
-              {all.map((r) => (
-                <option key={r.id} value={r.id}>
-                  {r.service || r.id} · {r.env || "?"} · {r.host}
-                </option>
-              ))}
-            </select>
+              options={all.map((r) => ({
+                value: r.id,
+                label: `${r.service || r.id} · ${r.env || "?"} · ${r.host}`,
+              }))}
+            />
           </>
         ) : (
           <span>
@@ -688,7 +683,7 @@ function Playground({ caps }: { caps: string[] }) {
           </span>
         )}
         {target.mismatch && (
-          <span className="text-red-500" role="alert">
+          <span className="text-destructive" role="alert">
             · no connected runtime registers agent {target.mismatch}
             {sourceRow?.agent === target.mismatch ? " (the source run's)" : ""} — this
             would run {agent?.name ?? "nothing"} instead
@@ -701,9 +696,26 @@ function Playground({ caps }: { caps: string[] }) {
           </span>
         )}
       </header>
-      <div className="flex min-h-0 flex-1">
-        {/* The config column (§4's left half). */}
-        <section className="w-80 shrink-0 space-y-3 overflow-y-auto border-r p-4">
+      {/* The two columns (§4): the config beside the runs, the divider
+          dragged or arrowed (plan H3's split, its size remembered per
+          device); at phone width they stack and the page scrolls. */}
+      <SplitPane
+        split={SPLITS.playground}
+        className="min-h-0 flex-1"
+        stackedClassName="min-h-0 flex-1 overflow-y-auto"
+        panes={[
+          {
+            id: "config",
+            label: "the config column",
+            defaultSize: 30,
+            minSize: 20,
+            className: "h-full in-data-stacked:h-auto",
+            children: (
+              // The config column (§4's left half).
+              <section
+                data-column="config"
+                className="h-full space-y-3 overflow-y-auto p-4 in-data-stacked:h-auto in-data-stacked:overflow-visible in-data-stacked:border-b"
+              >
           {/* The variant switcher (§4's "+ variant"): each column of the
               N-way view is one variant's overrides and run. */}
           <div className="flex items-center gap-1">
@@ -748,7 +760,7 @@ function Playground({ caps }: { caps: string[] }) {
               placeholder="a run id, or blank for fresh input"
             />
             {sourceRunID && source.isError ? (
-              <span className="block text-red-500">{source.error.message}</span>
+              <span className="block text-destructive">{source.error.message}</span>
             ) : null}
           </label>
           {sourceRunID && (
@@ -774,7 +786,7 @@ function Playground({ caps }: { caps: string[] }) {
             setEditDrafts={setEditDrafts}
           />
           {error && (
-            <p className="text-xs text-red-500" role="alert">
+            <p className="text-xs text-destructive" role="alert">
               {error}
             </p>
           )}
@@ -786,10 +798,22 @@ function Playground({ caps }: { caps: string[] }) {
           >
             {busy ? "sending…" : `Run ${variant.key}`}
           </Button>
-        </section>
-        {/* The runs column (§4's right half): the variant's run, side
-            by side with its source once P3 adds the N-way view. */}
-        <section className="min-w-0 flex-1 space-y-3 overflow-y-auto p-4">
+              </section>
+            ),
+          },
+          {
+            id: "runs",
+            label: "the runs column",
+            defaultSize: 70,
+            minSize: 40,
+            className: "h-full in-data-stacked:h-auto",
+            children: (
+              // The runs column (§4's right half): the variant's run, side
+              // by side with its source once P3 adds the N-way view.
+              <section
+                data-column="runs"
+                className="h-full min-w-0 space-y-3 overflow-y-auto p-4 in-data-stacked:h-auto in-data-stacked:overflow-visible"
+              >
           {ran.length > 0 ? (
             <>
               {/* The N-way compare (P3): one card per variant, side by
@@ -797,7 +821,7 @@ function Playground({ caps }: { caps: string[] }) {
                   and the pairwise text diff of the first two below.
                   Each card follows its own command, whichever variant
                   is being edited. */}
-              <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3" data-result-grid="">
                 {ran.map((v) => (
                   <ResultCard
                     key={v.result!.commandID || v.key}
@@ -831,8 +855,11 @@ function Playground({ caps }: { caps: string[] }) {
             sourceRunID={sourceRunID}
           />
           <History selected={search.experiment} />
-        </section>
-      </div>
+              </section>
+            ),
+          },
+        ]}
+      />
     </div>
   )
 }
@@ -911,7 +938,7 @@ function PendingCall({
   return (
     <div className="flex flex-wrap items-center gap-2">
       <span className="font-mono">{call.name}</span>
-      {decided && <span className="text-emerald-500">decided: {decided}</span>}
+      {decided && <span className="text-status-ok">decided: {decided}</span>}
       <button
         className="text-faint hover:underline"
         title="Approve: the handler runs for real"
@@ -1038,11 +1065,11 @@ function ResultCard({
   const decidedHere = folded.pending.filter((c) => decidedCalls[c.id]).length
 
   return (
-    <div className="rounded border" data-variant={variant.key}>
-      <div className="flex items-center gap-2 border-b px-3 py-2 text-xs">
+    <div className="min-w-0 overflow-x-auto rounded border" data-variant={variant.key}>
+      <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2 text-xs">
         <span className="font-medium">{experiment.label}</span>
         <span
-          className={experiment.status === "failed" ? "text-red-500" : "text-muted-foreground"}
+          className={experiment.status === "failed" ? "text-destructive" : "text-muted-foreground"}
         >
           {stateLabel(experiment)}
         </span>
@@ -1081,9 +1108,9 @@ function ResultCard({
         </button>
       </div>
       <div className="space-y-2 p-3 text-xs">
-        {experiment.error && <p className="text-red-500">{experiment.error}</p>}
+        {experiment.error && <p className="text-destructive">{experiment.error}</p>}
         {stream.error && (
-          <p className="text-red-500">event stream: {stream.error}</p>
+          <p className="text-destructive">event stream: {stream.error}</p>
         )}
         {experiment.state === "queued" && !experiment.runID && (
           <p className="text-muted-foreground">waiting for the runtime to ack…</p>
@@ -1118,7 +1145,7 @@ function ResultCard({
               awaiting decision
             </div>
             {folded.pending.length > 1 && (
-              <div className="text-amber-500">
+              <div className="text-status-int">
                 the run resumes once every parked call has a decision
                 {decidedHere > 0
                   ? ` · ${decidedHere} of ${folded.pending.length} decided`
@@ -1191,7 +1218,7 @@ function ResultCard({
             </button>
           </form>
         )}
-        {cardErr && <p className="text-xs text-red-500">{cardErr}</p>}
+        {cardErr && <p className="text-xs text-destructive">{cardErr}</p>}
         {diff && (
           <div className="rounded border border-dashed p-2">
             <div className="text-faint">
@@ -1217,8 +1244,8 @@ function DiffRows({ rows }: { rows: DiffRow[] }) {
             key={i}
             className={
               r.kind === "add"
-                ? "whitespace-pre-wrap text-emerald-500"
-                : "whitespace-pre-wrap text-amber-500 line-through"
+                ? "whitespace-pre-wrap text-status-ok"
+                : "whitespace-pre-wrap text-status-int line-through"
             }
           >
             {r.kind === "add" ? "+ " : "− "}
@@ -1245,6 +1272,7 @@ function CompareTable({ variants }: { variants: Variant[] }) {
       <div className="border-b px-3 py-2 text-xs text-muted-foreground">
         compare · {ran.length} variants
       </div>
+      <div className="overflow-x-auto" data-scroll-box="">
       <table className="w-full text-xs">
         <thead>
           <tr className="text-left text-faint">
@@ -1272,6 +1300,7 @@ function CompareTable({ variants }: { variants: Variant[] }) {
           ))}
         </tbody>
       </table>
+      </div>
     </div>
   )
 }
@@ -1548,6 +1577,7 @@ function Matrix({
           + input
         </button>
         {inputKeys.length > 0 && (
+          <div className="overflow-x-auto" data-scroll-box="">
           <table className="w-full">
             <thead>
               <tr className="text-left text-faint">
@@ -1571,11 +1601,11 @@ function Matrix({
                           <span
                             className={
                               cell.state === "finished" && cell.status !== "failed"
-                                ? "text-emerald-500"
+                                ? "text-status-ok"
                                 : cell.state === "rejected" ||
                                     cell.state === "lost" ||
                                     cell.status === "failed"
-                                  ? "text-red-500"
+                                  ? "text-destructive"
                                   : "text-muted-foreground"
                             }
                           >
@@ -1602,6 +1632,7 @@ function Matrix({
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
     </div>
@@ -1615,7 +1646,7 @@ function History({ selected }: { selected?: string }) {
   const list = experiments.data?.experiments ?? []
   if (experiments.isError)
     return (
-      <p className="text-xs text-red-500">
+      <p className="text-xs text-destructive">
         the experiment history could not be read: {experiments.error.message}
       </p>
     )

@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { setStudioToken } from "@/lib/api"
 import type { AgentView, RunDoc, RunRow, RunsPage, RuntimeView, StepDoc } from "@/lib/api"
 import { renderApp, stubBrowser } from "@/test/app"
+import { choose, optionsOf, valueOf } from "@/test/select"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { FakeStudio, golden, hiddenRefusal, pagedEvents, transcriptOf } from "@/test/fake-studio"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
@@ -219,12 +220,12 @@ describe("replay from a failing step (F1's Done line, Studio half)", () => {
     // from_step 3 (the next step runs fresh), in the step picker that
     // lists the run's own steps.
     const picker = await waitFor(() => {
-      const el = d.getByLabelText<HTMLSelectElement>("continue from step")
-      expect(el.tagName).toBe("SELECT")
+      const el = d.getByLabelText("continue from step")
+      expect(el.getAttribute("role")).toBe("combobox")
       return el
     })
-    expect(picker.value).toBe("3")
-    expect([...picker.options].map((o) => o.textContent)).toEqual([
+    expect(valueOf(picker)).toBe("3")
+    expect((await optionsOf(picker)).map((o) => o.text)).toEqual([
       "0 · from the start (new input)",
       "1 · script · calls search_kb",
       "2 · script · calls refund · tool error",
@@ -244,7 +245,7 @@ describe("replay from a failing step (F1's Done line, Studio half)", () => {
     expect(drawer()!.querySelector("[data-replay-prefix]")!.textContent).toBe("steps 0–2 kept")
 
     // Park: the never tools are named as parked before Run.
-    fireEvent.change(d.getByLabelText("Side effects"), { target: { value: "park" } })
+    await choose(d.getByLabelText("Side effects"), "park")
     expect(verdict("lookup_order")).toBe("parked")
     expect(verdict("refund")).toBe("parked")
     expect(verdict("search_kb")).toBe("runs")
@@ -329,8 +330,8 @@ describe("replay from a failing step (F1's Done line, Studio half)", () => {
     })
     fireEvent.click(within(card).getByRole("button", { name: "replay from this step (step 2)" }))
     await waitFor(() => expect(drawer()).toBeTruthy())
-    const picker = await waitFor(() => within(drawer()!).getByLabelText<HTMLSelectElement>("continue from step"))
-    await waitFor(() => expect(picker.value).toBe("2"))
+    const picker = await waitFor(() => within(drawer()!).getByLabelText("continue from step"))
+    await waitFor(() => expect(valueOf(picker)).toBe("2"))
     await waitFor(() => expect(drawer()!.querySelector("[data-replay-prefix]")!.textContent).toBe("steps 0–1 kept"))
     // The input appears only at from_step 0.
     expect(within(drawer()!).queryByLabelText("input")).toBeNull()
@@ -358,7 +359,7 @@ describe("replay from a failing step (F1's Done line, Studio half)", () => {
     fireEvent.click(within(card).getByRole("button", { name: "continue here with a new message" }))
     const d = await waitFor(() => within(drawer()!))
     const input = d.getByLabelText("input")
-    expect(d.getByLabelText<HTMLSelectElement>("Thread").value).toBe("fork")
+    expect(valueOf(d.getByLabelText("Thread"))).toBe("fork")
     fireEvent.change(input, { target: { value: "and the other order?" } })
     await waitFor(() => expect(d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(false))
     fireEvent.click(d.getByRole("button", { name: "Run" }))
@@ -479,13 +480,14 @@ describe("the playground's step picker lists the source run's steps", () => {
     serve()
     renderApp(`/playground?run=${RUN}`)
     const picker = await waitFor(() => {
-      const el = screen.getByLabelText<HTMLSelectElement>("continue from step")
-      expect(el.tagName).toBe("SELECT")
+      const el = screen.getByLabelText("continue from step")
+      expect(el.getAttribute("role")).toBe("combobox")
       return el
     })
-    expect(picker.options.length).toBe(4)
-    expect(picker.options[0].textContent).toBe("0 · from the start (new input)")
-    fireEvent.change(picker, { target: { value: "2" } })
+    const options = await optionsOf(picker)
+    expect(options.length).toBe(4)
+    expect(options[0].text).toBe("0 · from the start (new input)")
+    await choose(picker, "2")
     await waitFor(() => expect(screen.getByText(/Transcript edits \(steps 0\.\.1 are kept\)/)).toBeTruthy())
   })
 
@@ -533,12 +535,12 @@ describe("verbs gate on the transcript's steps, not the fold's (review 1)", () =
     fireEvent.click(verb)
     const d = await waitFor(() => within(drawer()!))
     const picker = await waitFor(() => {
-      const el = d.getByLabelText<HTMLSelectElement>("continue from step")
-      expect(el.tagName).toBe("SELECT")
+      const el = d.getByLabelText("continue from step")
+      expect(el.getAttribute("role")).toBe("combobox")
       return el
     })
-    expect(picker.value).toBe("3")
-    expect([...picker.options].map((o) => o.textContent).at(-1)).toBe(
+    expect(valueOf(picker)).toBe("3")
+    expect((await optionsOf(picker)).map((o) => o.text).at(-1)).toBe(
       "3 · after the last step (answers its calls)"
     )
     const edit = await waitFor(() => d.getByLabelText<HTMLInputElement>("edit the result of refund (c3) at step 2"))
@@ -572,11 +574,11 @@ describe("verbs gate on the transcript's steps, not the fold's (review 1)", () =
     expect(within(steer).queryByRole("button", { name: /replay from this steer/ })).toBeNull()
     fireEvent.click(document.querySelector<HTMLElement>('[data-call="c3"] [data-replay-verb="edit_result"]')!)
     const picker = await waitFor(() => {
-      const el = within(drawer()!).getByLabelText<HTMLSelectElement>("continue from step")
-      expect(el.tagName).toBe("SELECT")
+      const el = within(drawer()!).getByLabelText("continue from step")
+      expect(el.getAttribute("role")).toBe("combobox")
       return el
     })
-    expect([...picker.options].some((o) => o.textContent.includes("after the last step"))).toBe(false)
+    expect((await optionsOf(picker)).some((o) => o.text.includes("after the last step"))).toBe(false)
   })
 
   it("the steer verb replays from the step that answers the steer, only when it exists", async () => {
@@ -591,8 +593,8 @@ describe("verbs gate on the transcript's steps, not the fold's (review 1)", () =
       expect(within(steer).getByRole("button", { name: "replay from this steer (step 2 runs fresh)" })).toBeTruthy()
     )
     fireEvent.click(within(steer).getByRole("button", { name: "replay from this steer (step 2 runs fresh)" }))
-    const picker = await waitFor(() => within(drawer()!).getByLabelText<HTMLSelectElement>("continue from step"))
-    await waitFor(() => expect(picker.value).toBe("2"))
+    const picker = await waitFor(() => within(drawer()!).getByLabelText("continue from step"))
+    await waitFor(() => expect(valueOf(picker)).toBe("2"))
   })
 })
 
@@ -607,7 +609,7 @@ describe("the step ordinal is from_step (review 4)", () => {
     const card = await openStory('[data-step="2"]')
     fireEvent.click(within(card).getByRole("button", { name: "replay from this step (step 2)" }))
     const d = await waitFor(() => within(drawer()!))
-    await waitFor(() => expect(d.getByLabelText<HTMLSelectElement>("continue from step").value).toBe("2"))
+    await waitFor(() => expect(valueOf(d.getByLabelText("continue from step"))).toBe("2"))
     await waitFor(() => expect(d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(false))
     fireEvent.click(d.getByRole("button", { name: "Run" }))
     await waitFor(() => expect(studio.calls("POST playground/runs").length).toBe(1))
@@ -629,7 +631,7 @@ describe("continue here and fork (reviews 5, 6)", () => {
     fireEvent.click(within(card).getByRole("button", { name: "replay from this step (step 2)" }))
     const d = await waitFor(() => within(drawer()!))
     await waitFor(() => expect(d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(false))
-    fireEvent.change(d.getByLabelText("Thread"), { target: { value: "fork" } })
+    await choose(d.getByLabelText("Thread"), "fork")
     expect(d.queryByLabelText("continue from step")).toBeNull()
     expect(d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(true)
     fireEvent.change(d.getByLabelText("input"), { target: { value: "one more thing" } })
@@ -710,7 +712,7 @@ describe("the drawer's refusals and failures (review 10)", () => {
 
   it("side effects allow over tools neither opted in nor safe: Run held, the tools named", async () => {
     const d = await openFromStep2()
-    fireEvent.change(d.getByLabelText("Side effects"), { target: { value: "allow" } })
+    await choose(d.getByLabelText("Side effects"), "allow")
     expect(d.getByText(/side effects allow is refused while lookup_order, refund are on/)).toBeTruthy()
     expect(d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(true)
     // Turning them off lifts it (the registered set, not the catalog).
@@ -941,9 +943,9 @@ describe("the deferred field focus yields to the user (review 3.3)", () => {
     const release = servePending()
     const d = await drawerFor(editResultAndReplay(2, "c3", ERR))
     await waitFor(() => expect(document.activeElement?.id).toBe("replay-drawer-title"))
-    const mine = d.getByLabelText<HTMLSelectElement>("Side effects")
+    const mine = d.getByLabelText("Side effects")
     mine.focus()
-    fireEvent.change(mine, { target: { value: "park" } })
+    await choose(mine, "park")
     release()
     await waitFor(() => d.getByLabelText("edit the result of refund (c3) at step 2"))
     expect(document.activeElement).toBe(mine)
@@ -960,7 +962,7 @@ describe("Run is held where the server would refuse (reviews 3.4, 3.5)", () => {
     // No edit (an edited prefix runs live, plan F2): the step count alone.
     const d = await drawerFor(replayFromStep(3))
     await waitFor(() => expect(d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(false))
-    fireEvent.change(d.getByLabelText("Engine"), { target: { value: "scripted" } })
+    await choose(d.getByLabelText("Engine"), "scripted")
     expect(drawer()!.querySelector("[data-replay-scripted-past-end]")!.textContent).toBe(
       "the scripted engine has no recorded turn for step 3: the source never answered it (use engine live)"
     )
@@ -1026,8 +1028,8 @@ describe("the option lab (plan F3, Studio's drawer)", () => {
     expect(d.getByLabelText<HTMLInputElement>("max steps").placeholder).toBe("10")
     expect(d.getByLabelText<HTMLInputElement>("top_p").placeholder).toBe("0.9")
     expect(d.getByLabelText<HTMLTextAreaElement>("stop sequences, one per line").placeholder).toBe("END")
-    expect(d.getByLabelText<HTMLSelectElement>("tool choice").options[0].textContent).toBe("default (named lookup_order)")
-    expect(d.getByLabelText<HTMLSelectElement>("thinking").options[0].textContent).toBe("default (low)")
+    expect((await optionsOf(d.getByLabelText("tool choice")))[0].text).toBe("default (named lookup_order)")
+    expect((await optionsOf(d.getByLabelText("thinking")))[0].text).toBe("default (low)")
     expect(document.querySelector("[data-lab-old]")).toBeNull()
     const steps = d.getByLabelText<HTMLInputElement>("max steps")
     fireEvent.change(steps, { target: { value: "3" } })
@@ -1154,7 +1156,7 @@ describe("the replay drawer's state in the URL (G2)", () => {
     await waitFor(() => expect(drawer()).toBeTruthy())
     const d = within(drawer()!)
     expect(d.getByText("Replay from this step")).toBeTruthy()
-    await waitFor(() => expect(d.getByLabelText<HTMLSelectElement>("continue from step").value).toBe("2"))
+    await waitFor(() => expect(valueOf(d.getByLabelText("continue from step"))).toBe("2"))
   })
 
   it("opening and closing the drawer replace the entry: the history does not grow", async () => {

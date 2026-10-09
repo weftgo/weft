@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { setStudioToken } from "@/lib/api"
 import type { RunDoc, RunsPage } from "@/lib/api"
 import { renderApp, stubBrowser } from "@/test/app"
+import { choose, valueOf } from "@/test/select"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { apiError, FakeStudio, golden, pagedEvents, pagedRequests, transcriptOf } from "@/test/fake-studio"
 import { agentView, bodies, DONE_EDITS, editCatalog as catalog, events, requestRow, RUN, runtimeOf, steerBodies, steerEvents } from "@/panel/replaykit"
@@ -106,7 +107,7 @@ describe("the Story's editor (F2's Done line, Studio half)", () => {
       expect([...drawer()!.querySelectorAll("[data-edit-kind]")].map((n) => n.getAttribute("data-edit-kind"))).toEqual(["user", "tool_args", "tool_result", "insert"])
     )
     // The prefix keeps every edited step: from_step 2 (the insert's boundary).
-    await waitFor(() => expect(within(drawer()!).getByLabelText<HTMLSelectElement>("continue from step").value).toBe("2"))
+    await waitFor(() => expect(valueOf(within(drawer()!).getByLabelText("continue from step"))).toBe("2"))
     expect(drawer()!.querySelector("[data-replay-live]")).toBeTruthy()
     const run = within(drawer()!).getByRole<HTMLButtonElement>("button", { name: "Run" })
     await waitFor(() => expect(run.disabled).toBe(false))
@@ -290,7 +291,7 @@ describe("a steer is its step's user message (review 2)", () => {
     const second = document.querySelectorAll<HTMLElement>("[data-steer]")[1]
     fireEvent.click(within(second).getByRole("button", { name: /^edit the steer/ }))
     fireEvent.change(within(second).getByRole("textbox"), { target: { value: "stop here" } })
-    await waitFor(() => expect(within(drawer()!).getByLabelText<HTMLSelectElement>("continue from step").value).toBe("4"))
+    await waitFor(() => expect(valueOf(within(drawer()!).getByLabelText("continue from step"))).toBe("4"))
     const run = within(drawer()!).getByRole<HTMLButtonElement>("button", { name: "Run" })
     await waitFor(() => expect(run.disabled).toBe(false))
     fireEvent.click(run)
@@ -332,7 +333,7 @@ describe("a fork carries no edits (review 4)", () => {
     await story()
     await edit("the result of search_kb (c2)", "x")
     await waitFor(() => expect(kinds()).toEqual(["tool_result"]))
-    fireEvent.change(within(drawer()!).getByLabelText("Thread"), { target: { value: "fork" } })
+    await choose(within(drawer()!).getByLabelText("Thread"), "fork")
     fireEvent.change(within(drawer()!).getByLabelText("input"), { target: { value: "next" } })
     await waitFor(() => expect(drawer()!.querySelector("[data-replay-fork-edits]")?.textContent).toBe(FORK_EDITS))
     expect(drawer()!.querySelector("[data-replay-live]")).toBeNull()

@@ -31,6 +31,7 @@ import {
 import type { EditDraft, EditField, LabFields, LabProblem, SourceStep, VariantFields } from "@/lib/experiment-body"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { Badge } from "@/components/ui/badge"
+import { SelectField } from "@/components/ui/select-field"
 
 export function ExperimentForm({
   variant,
@@ -120,53 +121,62 @@ export function ExperimentForm({
         </div>
       ) : null}
       <ModelField variant={variant} patch={patch} agent={agent} />
-      <div className="flex gap-2">
-        <label className="block flex-1 space-y-1">
-          <span className="text-xs text-muted-foreground">Engine</span>
-          <select
-            className="w-full rounded border bg-transparent px-1 py-1 text-xs"
+      <div className="flex flex-wrap gap-2">
+        <div className="block min-w-0 flex-1 space-y-1">
+          <span className="block text-xs text-muted-foreground">Engine</span>
+          <SelectField
+            label="Engine"
+            className="w-full"
             value={variant.engine}
-            onChange={(e) => patch({ engine: e.target.value as VariantFields["engine"] })}
-          >
-            <option value="live">live</option>
-            <option value="scripted">scripted (zero tokens)</option>
-          </select>
-        </label>
-        <label className="block flex-1 space-y-1">
-          <span className="text-xs text-muted-foreground">Side effects</span>
-          <select
-            className="w-full rounded border bg-transparent px-1 py-1 text-xs"
+            onValueChange={(v) => patch({ engine: v as VariantFields["engine"] })}
+            options={[
+              { value: "live", label: "live" },
+              { value: "scripted", label: "scripted (zero tokens)" },
+            ]}
+          />
+        </div>
+        <div className="block min-w-0 flex-1 space-y-1">
+          <span className="block text-xs text-muted-foreground">Side effects</span>
+          <SelectField
+            label="Side effects"
+            className="w-full"
             value={variant.sideEffects}
-            onChange={(e) => patch({ sideEffects: e.target.value as VariantFields["sideEffects"] })}
-          >
-            <option
-              value="substitute"
-              title="a side-effect call the source recorded is answered from the record; any other call parks"
-            >
-              substitute — recorded results, else park
-            </option>
-            <option value="park" title="every side-effect call parks; nothing is answered from the record">
-              park — every side-effect call waits
-            </option>
-            <option value="allow" title="refused unless every tool left on is opted in or ReplaySafe">
-              allow — runs the tools this app opted in (AllowSideEffects) for real
-            </option>
-          </select>
-        </label>
+            onValueChange={(v) => patch({ sideEffects: v as VariantFields["sideEffects"] })}
+            options={[
+              {
+                value: "substitute",
+                title: "a side-effect call the source recorded is answered from the record; any other call parks",
+                label: "substitute — recorded results, else park",
+              },
+              {
+                value: "park",
+                title: "every side-effect call parks; nothing is answered from the record",
+                label: "park — every side-effect call waits",
+              },
+              {
+                value: "allow",
+                title: "refused unless every tool left on is opted in or ReplaySafe",
+                label: "allow — runs the tools this app opted in (AllowSideEffects) for real",
+              },
+            ]}
+          />
+        </div>
         {/* §5.4's thread mode (review fix 4a): fork continues the
             conversation in a new session with lineage — it needs a
             source turn and an input. */}
-        <label className="block flex-1 space-y-1">
-          <span className="text-xs text-muted-foreground">Thread</span>
-          <select
-            className="w-full rounded border bg-transparent px-1 py-1 text-xs"
+        <div className="block min-w-0 flex-1 space-y-1">
+          <span className="block text-xs text-muted-foreground">Thread</span>
+          <SelectField
+            label="Thread"
+            className="w-full"
             value={variant.thread}
-            onChange={(e) => patch({ thread: e.target.value as VariantFields["thread"] })}
-          >
-            <option value="ephemeral">ephemeral</option>
-            <option value="fork">fork (new session)</option>
-          </select>
-        </label>
+            onValueChange={(v) => patch({ thread: v as VariantFields["thread"] })}
+            options={[
+              { value: "ephemeral", label: "ephemeral" },
+              { value: "fork", label: "fork (new session)" },
+            ]}
+          />
+        </div>
       </div>
       {agent ? <OptionLab variant={variant} patch={patch} agent={agent} /> : null}
       {/* Rung 3 (§8.3): break on tools — PUT /api/runtimes/{id}/
@@ -228,26 +238,23 @@ function ModelField({
   const thinkingDef = agent?.defaults?.thinking
   return (
     <div className="flex flex-wrap gap-2">
-      <label className="block flex-1 space-y-1">
-        <span className="text-xs text-muted-foreground">Model</span>
-        <select
-          aria-label="model"
-          className={`w-full rounded border bg-transparent px-1 py-1 text-xs ${variant.model ? "border-primary text-primary" : ""}`}
+      <div className="block min-w-0 flex-1 space-y-1">
+        <span className="block text-xs text-muted-foreground">Model</span>
+        <SelectField
+          label="model"
+          className={`w-full ${variant.model ? "border-primary text-primary" : ""}`}
           value={listed && models.includes(variant.model) ? variant.model : ""}
-          data-override={variant.model ? "" : undefined}
-          onChange={(e) => {
+          attrs={{ "data-override": variant.model ? "" : undefined }}
+          onValueChange={(v) => {
             setFree("")
-            patch({ model: e.target.value })
+            patch({ model: v })
           }}
-        >
-          <option value="">(the agent's own)</option>
-          {models.map((m) => (
-            <option key={m} value={m}>
-              {m}
-            </option>
-          ))}
-        </select>
-      </label>
+          options={[
+            { value: "", label: "(the agent's own)" },
+            ...models.map((m) => ({ value: m, label: m })),
+          ]}
+        />
+      </div>
       {agent?.resolver ? (
         <label className="block flex-1 space-y-1">
           <span className="text-xs text-muted-foreground">or any model name</span>
@@ -264,22 +271,18 @@ function ModelField({
           />
         </label>
       ) : null}
-      <label className="block space-y-1">
-        <span className="text-xs text-muted-foreground">Thinking</span>
-        <select
-          aria-label="thinking"
-          className="rounded border bg-transparent px-1 py-1 text-xs"
+      <div className="block space-y-1">
+        <span className="block text-xs text-muted-foreground">Thinking</span>
+        <SelectField
+          label="thinking"
           value={variant.thinking}
-          onChange={(e) => patch({ thinking: e.target.value })}
-        >
-          <option value="">default{thinkingDef ? ` (${thinkingDef})` : ""}</option>
-          {["off", "low", "medium", "high"].map((l) => (
-            <option key={l} value={l}>
-              {l}
-            </option>
-          ))}
-        </select>
-      </label>
+          onValueChange={(v) => patch({ thinking: v })}
+          options={[
+            { value: "", label: `default${thinkingDef ? ` (${thinkingDef})` : ""}` },
+            ...["off", "low", "medium", "high"].map((l) => ({ value: l, label: l })),
+          ]}
+        />
+      </div>
     </div>
   )
 }
@@ -410,41 +413,42 @@ export function OptionLab({
         <span className="flex items-center gap-1 text-xs text-muted-foreground">
           {LAB_LABELS.tool_choice} {reset("tool_choice")}
         </span>
-        <div className="flex gap-2">
-          <select
-            aria-label="tool choice"
-            data-lab="tool_choice"
-            data-override={labOn(lab, "tool_choice", d) ? "" : undefined}
+        <div className="flex flex-wrap gap-2">
+          <SelectField
+            label="tool choice"
+            attrs={{
+              "data-lab": "tool_choice",
+              "data-override": labOn(lab, "tool_choice", d) ? "" : undefined,
+            }}
             disabled={greyed("tool_choice")}
-            className={`rounded border bg-transparent px-1 py-1 text-xs disabled:opacity-50 ${ring("tool_choice")}`}
+            className={`disabled:opacity-50 ${ring("tool_choice")}`}
             value={tc}
-            onChange={(e) => set({ tool_choice: e.target.value as LabFields["tool_choice"] })}
-          >
-            <option value="">
-              default{d ? ` (${d.tool_choice.mode}${d.tool_choice.name ? ` ${d.tool_choice.name}` : ""})` : ""}
-            </option>
-            {(["auto", "any", "none", "named"] as const).map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
+            onValueChange={(v) => set({ tool_choice: v as LabFields["tool_choice"] })}
+            options={[
+              {
+                value: "",
+                label: `default${d ? ` (${d.tool_choice.mode}${d.tool_choice.name ? ` ${d.tool_choice.name}` : ""})` : ""}`,
+              },
+              ...(["auto", "any", "none", "named"] as const).map((m) => ({ value: m, label: m })),
+            ]}
+          />
           {tc === "named" ? (
-            <select
-              aria-label="tool choice: the tool"
-              data-lab="tool_choice_name"
-              className={`flex-1 rounded border bg-transparent px-1 py-1 text-xs ${ring("tool_choice")}`}
+            <SelectField
+              label="tool choice: the tool"
+              attrs={{ "data-lab": "tool_choice_name" }}
+              className={`min-w-0 flex-1 ${ring("tool_choice")}`}
               value={lab.tool_choice_name}
-              onChange={(e) => set({ tool_choice_name: e.target.value })}
-            >
-              <option value="">(pick a tool)</option>
-              {names.map((n) => (
+              onValueChange={(v) => set({ tool_choice_name: v })}
+              options={[
+                { value: "", label: "(pick a tool)" },
                 // A tool the run turns off or parks cannot be forced: greyed.
-                <option key={n} value={n} disabled={(only ? !only.has(n) : variant.toolsOff.has(n)) || parked.has(n)}>
-                  {n}
-                </option>
-              ))}
-            </select>
+                ...names.map((n) => ({
+                  value: n,
+                  label: n,
+                  disabled: (only ? !only.has(n) : variant.toolsOff.has(n)) || parked.has(n),
+                })),
+              ]}
+            />
           ) : null}
         </div>
         <Problems list={problemOf("tool_choice")} />
@@ -716,36 +720,37 @@ export function StepPicker({
   const known = value === 0 || value === after || offered.some((st) => st.ordinal === value)
   const last = Math.max(...steps.map((st) => st.ordinal))
   return (
-    <label className="block space-y-1" data-step-picker="list">
-      <span className="text-xs text-muted-foreground">Continue from step</span>
-      <select
-        aria-label="continue from step"
-        className="w-full rounded border bg-transparent px-1 py-1 text-xs"
+    <div className="block space-y-1" data-step-picker="list">
+      <span className="block text-xs text-muted-foreground">Continue from step</span>
+      <SelectField
+        label="continue from step"
+        className="w-full"
         value={String(value)}
-        onChange={(e) => onChange(Number(e.target.value))}
-      >
-        <option value="0">0 · from the start (new input)</option>
-        {offered.map((st) => {
-          const bits = [
-            `${st.ordinal}`,
-            shownModel,
-            st.tools.length ? `calls ${st.tools.join(", ")}` : "reply",
-            st.toolError ? "tool error" : "",
-            st.ordinal === last && failed ? "failed" : "",
-            st.compacted ? "compacted" : "",
-          ].filter(Boolean)
-          return (
-            <option key={st.ordinal} value={String(st.ordinal)} data-compacted={st.compacted ? "" : undefined}>
-              {bits.join(" · ")}
-            </option>
-          )
-        })}
-        {after !== null ? (
-          <option value={String(after)}>{after} · after the last step (answers its calls)</option>
-        ) : null}
-        {known ? null : <option value={String(value)}>{value} · not a step of this run</option>}
-      </select>
-    </label>
+        onValueChange={(v) => onChange(Number(v))}
+        options={[
+          { value: "0", label: "0 · from the start (new input)" },
+          ...offered.map((st) => {
+            const bits = [
+              `${st.ordinal}`,
+              shownModel,
+              st.tools.length ? `calls ${st.tools.join(", ")}` : "reply",
+              st.toolError ? "tool error" : "",
+              st.ordinal === last && failed ? "failed" : "",
+              st.compacted ? "compacted" : "",
+            ].filter(Boolean)
+            return {
+              value: String(st.ordinal),
+              label: bits.join(" · "),
+              data: { "data-compacted": st.compacted ? "" : undefined },
+            }
+          }),
+          ...(after !== null
+            ? [{ value: String(after), label: `${after} · after the last step (answers its calls)` }]
+            : []),
+          ...(known ? [] : [{ value: String(value), label: `${value} · not a step of this run` }]),
+        ]}
+      />
+    </div>
   )
 }
 
@@ -811,7 +816,7 @@ export function Breakpoints({
         ))}
       </div>
       {err && (
-        <p className="text-xs text-red-500" role="alert">
+        <p className="text-xs text-destructive" role="alert">
           {err}
         </p>
       )}

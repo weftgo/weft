@@ -41,6 +41,8 @@ import {
 import { CallVerbs, SteerVerb, StepVerbs } from "@/components/studio/replay-verbs"
 import type { ReplayAt } from "@/components/studio/replay-verbs"
 import { RequestSection } from "@/components/studio/step-request"
+import { SplitPane, useCanSplit } from "@/components/studio/split-pane"
+import { SPLITS } from "@/lib/pane-sizes"
 import { Editable, EditsMark, InsertHere, PromptEditor } from "@/components/studio/transcript-editor"
 import { userMessagesOf } from "@/lib/edits"
 import type { UserMessage } from "@/lib/edits"
@@ -476,6 +478,9 @@ export function stepOutcome(step: FoldedStep, runStatus: string) {
   )
 }
 
+/** Narrower than this, a step's Request pane stays inline (plan H3). */
+const STORY_REQUEST_STACK = "(max-width: 1023px)"
+
 function StepCard({
   step,
   runId,
@@ -526,6 +531,44 @@ function StepCard({
     if (highlighted) ref.current?.scrollIntoView({ block: "center" })
   }, [highlighted])
   const failedHere = !step.finish && runStatus === "failed"
+  // The Request pane open beside the story (plan H3) — where the page
+  // is wide enough and a ResizeObserver measures the split.
+  const [reqOpen, setReqOpen] = useState(false)
+  const [moved, setMoved] = useState(false)
+  const wide = useCanSplit(STORY_REQUEST_STACK)
+  const split = Boolean(requests) && reqOpen && wide
+  const request = requests ? (
+    <RequestSection
+      req={requests}
+      step={step.index}
+      open={reqOpen}
+      onOpenChange={(o) => {
+        setReqOpen(o)
+        setMoved(wide)
+      }}
+      focusToggle={moved}
+    />
+  ) : null
+  const promptEl = prompt ? <PromptEditor user={prompt} /> : null
+  const rest = (
+    <>
+      <AttemptsSection
+        step={step}
+        runId={runId}
+        runStatus={runStatus}
+        requests={requests}
+      />
+      <StepBody
+        step={step}
+        runStatus={runStatus}
+        childLinks={childLinks}
+        stepChildren={stepChildren}
+        onJump={onJump}
+        replayAt={replayAt}
+        editable
+      />
+    </>
+  )
   return (
     <div
       ref={ref}
@@ -572,23 +615,44 @@ function StepCard({
             transcriptError={transcriptError}
           />
         ))}
-      {prompt ? <PromptEditor user={prompt} /> : null}
-      {requests ? <RequestSection req={requests} step={step.index} /> : null}
-      <AttemptsSection
-        step={step}
-        runId={runId}
-        runStatus={runStatus}
-        requests={requests}
-      />
-      <StepBody
-        step={step}
-        runStatus={runStatus}
-        childLinks={childLinks}
-        stepChildren={stepChildren}
-        onJump={onJump}
-        replayAt={replayAt}
-        editable
-      />
+      {split ? (
+        // The story beside the open Request pane (plan H3): the
+        // divider dragged or arrowed, one remembered size for every
+        // card; narrower than lg, the pane stays inline above the story.
+        <SplitPane
+          split={SPLITS.storyRequest}
+          instance={`story-request-${runId}-${step.index}`}
+          panes={[
+            {
+              id: "story",
+              label: "the step's story",
+              defaultSize: 55,
+              minSize: 30,
+              className: "space-y-2 pr-1",
+              children: (
+                <>
+                  {promptEl}
+                  {rest}
+                </>
+              ),
+            },
+            {
+              id: "request",
+              label: "the step's request",
+              defaultSize: 45,
+              minSize: 25,
+              className: "pl-1",
+              children: request,
+            },
+          ]}
+        />
+      ) : (
+        <>
+          {promptEl}
+          {request}
+          {rest}
+        </>
+      )}
     </div>
   )
 }

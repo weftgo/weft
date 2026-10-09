@@ -15,7 +15,9 @@ import {
 } from "@/lib/trace"
 import { JsonTree } from "@/components/studio/json-tree"
 import { Waterfall } from "@/components/studio/waterfall"
+import { SplitPane } from "@/components/studio/split-pane"
 import { Spinner } from "@/components/ui/spinner"
+import { SPLITS } from "@/lib/pane-sizes"
 import { runLink, traceLink } from "@/lib/links"
 import type { TraceSearch } from "@/lib/links"
 import { useDocumentTitle } from "@/hooks/use-document-title"
@@ -113,23 +115,45 @@ function TracePage() {
       </div>
 
       {view === "tree" ? (
-        <div className="rounded-lg border bg-background">
-          <Waterfall
-            spans={rows}
-            domain={timeDomain(spans)}
-            playhead={null}
-            unit="ms"
-            onSelect={(sp) => setSel(sp.key)}
-            selectedId={sel}
-          />
-        </div>
+        // The tree beside the selected span (plan H3): the divider
+        // dragged or arrowed, its place remembered per device; at
+        // phone width the detail stacks under the tree.
+        <SplitPane
+          split={SPLITS.traceDetail}
+          stackedClassName="gap-3"
+          panes={[
+            {
+              id: "tree",
+              label: "the span tree",
+              defaultSize: 60,
+              minSize: 30,
+              children: (
+                <div className="rounded-lg border bg-background">
+                  <Waterfall
+                    spans={rows}
+                    domain={timeDomain(spans)}
+                    playhead={null}
+                    unit="ms"
+                    onSelect={(sp) => setSel(sp.key)}
+                    selectedId={sel}
+                  />
+                </div>
+              ),
+            },
+            {
+              id: "detail",
+              label: "the span detail",
+              defaultSize: 40,
+              minSize: 25,
+              children: (
+                <SelectedSpan span={spans.find((s) => `t:${s.span_id}` === sel)} />
+              ),
+            },
+          ]}
+        />
       ) : (
         <GenAIChat spans={genai} />
       )}
-
-      {view === "tree" ? (
-        <SelectedSpan span={spans.find((s) => `t:${s.span_id}` === sel)} />
-      ) : null}
     </div>
   )
 }
@@ -144,7 +168,7 @@ function SelectedSpan({ span }: { span: TimedSpan | undefined }) {
     )
   }
   return (
-    <div className="grid gap-3 lg:grid-cols-2">
+    <div className="grid min-w-0 gap-3">
       <div className="codewin">
         <div className="codewin-bar">
           <span className="font-mono text-[11px] text-code-mut">

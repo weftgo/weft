@@ -273,6 +273,26 @@ module, ADR 0005).
   are not in the link). The run page's tab is titled while the run
   loads.
 
+- **Studio panes and density** (plan H3): the installed
+  `react-resizable-panels` draws three resizable splits — the trace
+  page's span tree beside the selected span, a run step's story beside
+  its open Request pane (from 1024 px; one size for every card) and the
+  playground's config column beside its runs column — dragged, or moved
+  from the keyboard (arrow keys, `Home`/`End`, a visible focus ring from
+  the theme's ring token), each pane held at a minimum size, the sizes
+  remembered per device in `localStorage["studio.panes.<split>"]`
+  (garbage reads as the default; never the URL), and "Reset pane
+  layout" in `⌘K`. A density toggle, comfortable | compact, beside the
+  theme toggle and in `⌘K`: `data-density` on `<html>` (set before paint,
+  stored as `studio.density`), compact scaling the theme's spacing and
+  type tokens. At phone width the splits stack and the playground has no
+  horizontal scroll (its header wraps, its result cards and matrix table
+  scroll in their own box). The playground's and the experiment form's
+  native `<select>`s are the shared `components/ui` Select
+  (`select-field.tsx`; same labels, values and options) and their raw
+  Tailwind colours theme tokens; a lint rule (`controlRules`,
+  `src/lib/controls.lint.test.ts`) refuses either coming back.
+
 - **Studio notifications** (plan H5): the installed `sonner` toaster is
   mounted in the app shell (bottom-right, the Studio theme, no hotkey),
   every toast worded in `src/lib/notify.ts` and raised once per

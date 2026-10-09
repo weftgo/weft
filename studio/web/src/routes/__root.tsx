@@ -8,6 +8,7 @@ import { QueryClientProvider } from "@tanstack/react-query"
 
 import { AppShell } from "@/components/studio/app-shell"
 import { queryClient } from "@/lib/query"
+import { densityBootstrap } from "@/lib/density"
 import appCss from "../styles.css?url"
 
 export const Route = createRootRoute({
@@ -51,12 +52,13 @@ export const Route = createRootRoute({
   shellComponent: RootDocument,
 })
 
-// The theme bootstrap runs before paint so the first frame is already
+// The theme bootstrap runs before paint (and sets the density, plan
+// H3, lib/density.ts) so the first frame is already
 // right (no flash). It is inline, so the Go handler's CSP carries its
 // sha256 hash (plan §5.5). The localStorage key is the site's.
 const themeBootstrap = `(function(){var t;try{t=localStorage.getItem('theme')}catch(e){}
 var d=t==='dark'||(t!=='light'&&window.matchMedia&&matchMedia('(prefers-color-scheme:dark)').matches);
-var h=document.documentElement;h.classList.toggle('dark',d);h.style.colorScheme=d?'dark':'light'})()`
+var h=document.documentElement;h.classList.toggle('dark',d);h.style.colorScheme=d?'dark':'light';${densityBootstrap}})()`
 
 function RootComponent() {
   return (

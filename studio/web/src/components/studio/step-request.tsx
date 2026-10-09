@@ -22,7 +22,7 @@
 // is not recorded by any route yet: nothing is drawn for it.
 import { useQuery } from "@tanstack/react-query"
 import { ChevronRight } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import { isHoleRef, manifestQuery, requestsQuery } from "@/lib/api"
 import type {
@@ -720,11 +720,32 @@ function Mark({ mark, title, children }: { mark: string; title: string; children
 export function RequestSection({
   req,
   step,
+  open: openProp,
+  onOpenChange,
+  focusToggle,
 }: {
   req: RunRequests
   step: number
+  /** Controlled open state (the step card's split, plan H3); the
+   * section holds its own when absent. */
+  open?: boolean
+  onOpenChange?: (open: boolean) => void
+  /** Focus the toggle on mount: the card moved the section into (or
+   * out of) its split, and the keyboard stays where it was. */
+  focusToggle?: boolean
 }) {
-  const [open, setOpen] = useState(false)
+  const [ownOpen, setOwnOpen] = useState(false)
+  const open = openProp ?? ownOpen
+  const setOpen = (f: (x: boolean) => boolean) => {
+    const next = f(open)
+    if (onOpenChange) onOpenChange(next)
+    else setOwnOpen(next)
+  }
+  const toggleRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    if (focusToggle) toggleRef.current?.focus()
+    // On mount only: the card remounts the section where it moved it.
+  }, [focusToggle])
   const [pick, setPick] = useState<number | null>(null)
   const env = req.doc?.badge ? req.doc : undefined
   const mine = req.steps.get(step)
@@ -867,6 +888,7 @@ export function RequestSection({
       <div className="flex flex-wrap items-center gap-2">
         {body ? (
           <button
+            ref={toggleRef}
             type="button"
             className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
             aria-expanded={open}

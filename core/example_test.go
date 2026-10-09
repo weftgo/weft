@@ -1119,3 +1119,37 @@ func ExampleReportFromContext() {
 	fmt.Println(res.Text())
 	// Output: hello
 }
+
+// Params reports the agent's default sampling knobs — a copy: a caller
+// that overrides one knob per run starts from it, because a run-level
+// Params replaces the struct whole.
+func ExampleAgent_Params() {
+	temp, maxTok := 0.2, 512
+	agt := core.New(wefttest.Script(wefttest.Say("ok")),
+		core.Params(core.RequestParams{Temperature: &temp, MaxTokens: &maxTok}))
+	p := agt.Params()
+	warmer := 0.9
+	p.Temperature = &warmer // this run's override; MaxTokens stays the agent's
+	res, _ := agt.Generate(context.Background(), core.Params(p), core.Prompt("hi"))
+	fmt.Println(*agt.Params().Temperature, *p.MaxTokens, res.Text())
+	// Output: 0.2 512 ok
+}
+
+// Thinking reports the agent's default reasoning level; the zero value
+// (ThinkUnset) is the provider default.
+func ExampleAgent_Thinking() {
+	agt := core.New(wefttest.Script(wefttest.Say("ok")), core.Thinking(core.ThinkingConfig{Level: core.ThinkLow}))
+	fmt.Println(agt.Thinking().Level == core.ThinkLow, core.New(wefttest.Script()).Thinking().Level == core.ThinkUnset)
+	// Output: true true
+}
+
+// ToolChoice reports the agent's default tool choice; the zero value is
+// ToolChoiceAuto.
+func ExampleAgent_ToolChoice() {
+	classify := core.Tool("classify", "Classify.", func(context.Context, struct{}) (string, error) { return "", nil })
+	agt := core.New(wefttest.Script(wefttest.Say("ok")), classify,
+		core.ToolChoice(core.ToolChoiceConfig{Mode: core.ToolChoiceNamed, Name: "classify"}))
+	tc := agt.ToolChoice()
+	fmt.Println(tc.Mode == core.ToolChoiceNamed, tc.Name)
+	// Output: true classify
+}

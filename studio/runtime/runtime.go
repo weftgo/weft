@@ -262,7 +262,8 @@ type Overrides struct {
 }
 
 // Params is the sampling override beside options.temperature: the
-// rest of core.RequestParams. Absent fields keep the agent's own.
+// rest of core.RequestParams. Absent fields keep the agent's own — a
+// command cannot clear the agent's stop or max_tokens.
 type Params struct {
 	TopP      *float64 `json:"top_p,omitempty"`
 	MaxTokens *int     `json:"max_tokens,omitempty"`

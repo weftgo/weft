@@ -9,6 +9,9 @@ import (
 	"sync/atomic"
 	"testing"
 
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
@@ -683,6 +686,8 @@ func TestValidateOptionLab(t *testing.T) {
 		{"top_p negative", "top_p -0.1 is outside 0..1", overrides{Params: &paramsWire{TopP: f(-0.1)}}},
 		{"stop too many", "stop takes at most 4 sequences, got 5", overrides{Params: &paramsWire{Stop: []string{"a", "b", "c", "d", "e"}}}},
 		{"stop empty", "stop sequences must be non-empty", overrides{Params: &paramsWire{Stop: []string{""}}}},
+		{"max_tokens zero", "max_tokens must be positive", overrides{Params: &paramsWire{MaxTokens: n(0)}}},
+		{"max_tokens negative", "max_tokens must be positive", overrides{Params: &paramsWire{MaxTokens: n(-5)}}},
 		{"raised max_steps", "raises the agent's cap", overrides{Options: map[string]float64{"max_steps": 7}}},
 		{"unknown model, no resolver", `unknown model "claude-haiku-4-5": not on this runtime's allow-list (register it with runtime.Models or add runtime.ModelResolver)`,
 			overrides{Model: "claude-haiku-4-5"}},
@@ -694,6 +699,37 @@ func TestValidateOptionLab(t *testing.T) {
 		}
 		if !strings.Contains(reason, tc.want) {
 			t.Errorf("%s: reason = %q, want it to contain %q", tc.name, reason, tc.want)
+		}
+	}
+}
+
+// TestValidateAgentDefaultToolChoice pins the agent's own tool choice
+// under a command that sends none: a named default the command turns
+// off (only_tools or tools_enabled) would fail the run's first step
+// after the ack — refused before it, naming the fix; a default the
+// command keeps on, or a tool_choice sent over it, passes.
+func TestValidateAgentDefaultToolChoice(t *testing.T) {
+	classify := core.Tool("classify", "Classify.", func(ctx context.Context, in struct{}) (string, error) { return "", nil })
+	lookup := core.Tool("lookup_order", "Look up.", func(ctx context.Context, in struct{}) (string, error) { return "", nil })
+	agent := core.New(wefttest.Script(wefttest.Say("ok")), core.Name("router"), classify, lookup,
+		core.ToolChoice(core.ToolChoiceConfig{Mode: core.ToolChoiceNamed, Name: "classify"}))
+	l := newExecLink(nil, agent)
+	cmd := func(o overrides) *command {
+		return &command{CommandID: "cmd_def", Agent: "router", Engine: "live", Thread: "ephemeral", Overrides: o}
+	}
+	for _, o := range []overrides{{OnlyTools: []string{"lookup_order"}}, {ToolsEnabled: []string{"lookup_order"}}} {
+		reason, ok := l.validate(context.Background(), cmd(o))
+		if want := `the agent's default tool_choice names "classify", which this command turns off; send tool_choice`; ok || reason != want {
+			t.Errorf("%+v: reason = %q ok = %v, want %q", o, reason, ok, want)
+		}
+	}
+	for _, o := range []overrides{
+		{},
+		{OnlyTools: []string{"classify"}},
+		{OnlyTools: []string{"lookup_order"}, ToolChoice: &toolChoiceWire{Mode: "auto"}},
+	} {
+		if reason, ok := l.validate(context.Background(), cmd(o)); !ok {
+			t.Errorf("%+v: rejected (%s)", o, reason)
 		}
 	}
 }
@@ -866,5 +902,43 @@ func TestRegistrationDefaults(t *testing.T) {
 	got, _ = json.Marshal(reg.Agents[1].Defaults)
 	if want := `{"max_steps":10,"parallelism":4,"thinking":"","tool_choice":{"mode":"auto"}}`; string(got) != want {
 		t.Errorf("bare defaults = %s\nwant            %s", got, want)
+	}
+}
+
+// TestAutoToolChoiceOverAutoIsNoOverride pins that tool_choice auto over
+// an agent whose default is already auto writes no
+// weft.override.tool_choice (it would be empty) and leaves the run
+// un-overridden, while auto over a named default is a real override.
+func TestAutoToolChoiceOverAutoIsNoOverride(t *testing.T) {
+	classify := core.Tool("classify", "Classify.", func(ctx context.Context, in struct{}) (string, error) { return "", nil })
+	attrsOf := func(agentOpts ...core.Option) map[string]string {
+		rec := tracetest.NewSpanRecorder()
+		tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec))
+		opts := append([]core.Option{core.Name("a"), classify, core.TracerProvider(tp)}, agentOpts...)
+		agent := core.New(wefttest.Script(wefttest.Say("ok")), opts...)
+		l := newExecLink(nil, agent)
+		in := "hi"
+		cmd := command{CommandID: "cmd_auto", Agent: "a", Engine: "live", Thread: "ephemeral", Input: &in,
+			Overrides: overrides{ToolChoice: &toolChoiceWire{Mode: "auto"}}}
+		if _, err := agent.Generate(context.Background(), l.runOptions(cmd, "pg_auto")...); err != nil {
+			t.Fatal(err)
+		}
+		for _, s := range rec.Ended() {
+			if strings.HasPrefix(s.Name(), "invoke_agent") {
+				out := map[string]string{}
+				for _, kv := range s.Attributes() {
+					out[string(kv.Key)] = kv.Value.String()
+				}
+				return out
+			}
+		}
+		t.Fatal("no invoke_agent span")
+		return nil
+	}
+	if v, ok := attrsOf()["weft.override.tool_choice"]; ok {
+		t.Errorf("auto over auto wrote weft.override.tool_choice = %q", v)
+	}
+	if _, ok := attrsOf(core.ToolChoice(core.ToolChoiceConfig{Mode: core.ToolChoiceNamed, Name: "classify"}))["weft.override.tool_choice"]; !ok {
+		t.Error("auto over a named default is an override: weft.override.tool_choice missing")
 	}
 }

@@ -477,8 +477,8 @@ type spansDoc struct {
 // toolNameAttrs are the invoke_agent span's per-run tool overrides
 // (core's OnlyTools, ParkOn, ParkAllExcept): comma-joined tool names —
 // a slice of the catalog, which a read-scoped panel token does not
-// read. A named tool choice (weft.override.tool_choice "named:<tool>")
-// names one too.
+// read. A named tool choice (weft.override.tool_choice "tool:<name>",
+// core's ToolChoiceNamed mode and the name) names one too.
 var toolNameAttrs = []string{"weft.override.tools", "weft.override.park_on", "weft.override.park_all_except"}
 
 const attrOverrideToolChoice = "weft.override.tool_choice"

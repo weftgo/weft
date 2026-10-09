@@ -9,6 +9,7 @@ import (
 	"slices"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/thread"
@@ -114,7 +115,7 @@ func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
 			return fmt.Sprintf("unknown tool %q", name), false
 		}
 	}
-	if reason, ok := validToolOverrides(cmd.Overrides, tools); !ok {
+	if reason, ok := validToolOverrides(cmd.Overrides, tools, agent.ToolChoice()); !ok {
 		return reason, false
 	}
 	// A model the agent does not run and the allow-list does not name
@@ -203,8 +204,13 @@ func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
 		// the ack, so a refusal is a rejected command naming why, never
 		// a failed run. Its error text is the app's (ModelResolver).
 		m := cmd.Overrides.Model
-		model, err := l.cfg.resolve(ctx, m)
+		rctx, cancel := context.WithTimeout(ctx, resolveTimeout)
+		model, err := l.cfg.resolve(rctx, m)
+		timedOut := errors.Is(rctx.Err(), context.DeadlineExceeded)
+		cancel()
 		switch {
+		case timedOut:
+			return fmt.Sprintf("model %s: resolver timed out after %s", m, resolveTimeout), false
 		case err != nil:
 			return fmt.Sprintf("model %s: %v", m, err), false
 		case model == nil:
@@ -215,13 +221,21 @@ func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
 	return "", true
 }
 
+// resolveTimeout bounds one ModelResolver call: validate runs before
+// the ack, and a command Studio sees unacked for long is marked lost —
+// a re-issue would then run twice. A var so a test can shorten it.
+var resolveTimeout = 10 * time.Second
+
 // validToolOverrides checks the tool-shaped overrides against the
 // agent's tools — narrowing only: only_tools and park_on name tools the
 // agent has, only_tools stays inside tools_enabled when both are sent
 // (the narrower set is the run's), and a named tool_choice names a tool
 // the run keeps on and does not park (a forced call that always parks
-// is no experiment).
-func validToolOverrides(o overrides, tools map[string]bool) (string, bool) {
+// is no experiment). Without a tool_choice override the agent's own
+// default (def) must still be satisfiable by the tools the command
+// leaves on: a named default the command turns off would fail the
+// run's first step after the ack.
+func validToolOverrides(o overrides, tools map[string]bool, def core.ToolChoiceConfig) (string, bool) {
 	enabled := map[string]bool{}
 	for _, name := range o.ToolsEnabled {
 		enabled[name] = true
@@ -243,6 +257,10 @@ func validToolOverrides(o overrides, tools map[string]bool) (string, bool) {
 	}
 	tc := o.ToolChoice
 	if tc == nil {
+		if def.Mode == core.ToolChoiceNamed && len(o.OnlyTools)+len(o.ToolsEnabled) > 0 &&
+			!onTool(o, enabled, def.Name) {
+			return fmt.Sprintf("the agent's default tool_choice names %q, which this command turns off; send tool_choice", def.Name), false
+		}
 		return "", true
 	}
 	mode, ok := toolChoiceMode(tc.Mode)
@@ -255,15 +273,7 @@ func validToolOverrides(o overrides, tools map[string]bool) (string, bool) {
 		}
 		return "", true
 	}
-	on := func(name string) bool {
-		switch {
-		case len(o.OnlyTools) > 0:
-			return slices.Contains(o.OnlyTools, name)
-		case len(o.ToolsEnabled) > 0:
-			return enabled[name]
-		}
-		return true
-	}
+	on := func(name string) bool { return onTool(o, enabled, name) }
 	switch {
 	case tc.Name == "":
 		return "tool_choice named needs a tool name", false
@@ -277,16 +287,32 @@ func validToolOverrides(o overrides, tools map[string]bool) (string, bool) {
 	return "", true
 }
 
+// onTool reports whether the command leaves tool name on: only_tools
+// when set, else tools_enabled (as the set enabled), else every tool.
+func onTool(o overrides, enabled map[string]bool, name string) bool {
+	switch {
+	case len(o.OnlyTools) > 0:
+		return slices.Contains(o.OnlyTools, name)
+	case len(o.ToolsEnabled) > 0:
+		return enabled[name]
+	}
+	return true
+}
+
 // validParams checks the sampling override: neutral knobs, any value
 // the core's RequestParams accepts — top_p inside 0..1, at most four
-// non-empty stop sequences (the common provider limit), any seed. A
-// negative max_tokens is the core's own step error, left to it.
+// non-empty stop sequences (the common provider limit), a positive
+// max_tokens (refused before the ack rather than failing the run's
+// first step), any seed.
 func validParams(p *paramsWire) (string, bool) {
 	if p == nil {
 		return "", true
 	}
 	if v := p.TopP; v != nil && (math.IsNaN(*v) || *v < 0 || *v > 1) {
 		return fmt.Sprintf("top_p %v is outside 0..1", *v), false
+	}
+	if v := p.MaxTokens; v != nil && *v <= 0 {
+		return "max_tokens must be positive", false
 	}
 	if len(p.Stop) > maxStop {
 		return fmt.Sprintf("stop takes at most %d sequences, got %d", maxStop, len(p.Stop)), false
@@ -513,14 +539,20 @@ func (l *link) execute(ctx context.Context, cmd command, runID string) (status, 
 		for _, t := range l.breakpointTools(cmd.Agent) {
 			breaks[t] = true
 		}
+		// The command's own park_on stops where the user asked, like a
+		// breakpoint: answered from the record, the call would never
+		// park (and a ReplaySafe one would be substituted, not run).
+		for _, t := range cmd.Overrides.ParkOn {
+			breaks[t] = true
+		}
 		for err == nil && res != nil && len(res.Pending) > 0 {
 			resolves := make([]core.RunOption, 0, len(res.Pending))
 			all := true
 			for _, call := range res.Pending {
 				if breaks[call.Name] {
-					// The debugger's breakpoint (§8.3) stops here whatever
-					// the mode: answering it from the record would run
-					// straight past it.
+					// The debugger's breakpoint (§8.3) or the command's
+					// park_on stops here whatever the mode: answering it
+					// from the record would run straight past it.
 					all = false
 					break
 				}
@@ -1157,7 +1189,13 @@ func (l *link) overrideOptions(cmd command) []core.RunOption {
 	}
 	if tc := o.ToolChoice; tc != nil {
 		mode, _ := toolChoiceMode(tc.Mode) // validated
-		opts = append(opts, core.ToolChoice(core.ToolChoiceConfig{Mode: mode, Name: tc.Name}))
+		// auto over an agent whose default is already auto changes
+		// nothing: sent, it would still mark the run overridden (an
+		// empty weft.override.tool_choice and a new hash).
+		if agent, ok := l.reg.agent(cmd.Agent); mode != core.ToolChoiceAuto || !ok || agent == nil ||
+			agent.ToolChoice() != (core.ToolChoiceConfig{}) {
+			opts = append(opts, core.ToolChoice(core.ToolChoiceConfig{Mode: mode, Name: tc.Name}))
+		}
 	}
 
 	// Side-effect safety (§6 rule 3), default-deny: every tool call of

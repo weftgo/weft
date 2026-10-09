@@ -108,6 +108,14 @@ The request a replay sends is model-visible behaviour (AGENTS.md rule
    human). The playground never re-runs a child from outside the loop.
 6. **The link back** is the replay's `weft.forked_from =
    "<source run id>#<from_step>"` (unchanged), for a child source too.
+7. **The sampling override is laid over the agent's own** (plan F3):
+   a playground run's `options.temperature` and `params` are applied as
+   one `weft.Params` built from the agent's `Params()` with the sent
+   fields replaced, so a temperature-only command keeps the agent's
+   `max_tokens`, `top_p`, `stop` and `seed` (a run-level `Params`
+   alone would replace the struct whole); an absent field keeps the
+   agent's value, and a command cannot clear the agent's `stop` or
+   `max_tokens`.
 
 ## Consequences
 

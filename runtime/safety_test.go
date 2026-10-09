@@ -938,3 +938,68 @@ func TestForkTurnAckedInFlight(t *testing.T) {
 		t.Errorf("acks during the fork turn = %+v, want one accepted naming %s", acks, runID)
 	}
 }
+
+// TestParkOnIsNotSubstituted pins the command's park_on against
+// substitute mode, like a breakpoint: a re-run whose source recorded
+// the parked call stops there — the record does not answer it — and a
+// ReplaySafe tool in park_on parks instead of running or being
+// substituted.
+func TestParkOnIsNotSubstituted(t *testing.T) {
+	var lookups atomic.Int64
+	lookup := core.Tool("lookup_order", "Look up.", func(ctx context.Context, in struct {
+		OrderID string `json:"order_id"`
+	}) (string, error) {
+		lookups.Add(1)
+		return "shipped", nil
+	}, core.Replay(core.ReplaySafe))
+	agent := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"1"}`, ID: "c1"}),
+		wefttest.Say("done")), core.Name("acme-support"), lookup)
+	l := newExecLink(nil, agent)
+	defer l.stop()
+	src := &sourceRun{
+		input: []core.Message{core.User("where is 1?")},
+		steps: []core.Message{
+			{Role: core.RoleAssistant, Content: []core.Part{core.ToolCallPart{ID: "c1", Name: "lookup_order", Args: []byte(`{"order_id":"1"}`)}}},
+			{Role: core.RoleTool, Content: []core.Part{core.ToolResultPart{CallID: "c1", Name: "lookup_order", Content: "recorded"}}},
+			core.Assistant("done"),
+		},
+	}
+	cmd := command{CommandID: "cmd_po", Agent: "acme-support", Source: &sourceSpec{RunID: "run_src"}, src: src, prefix: src.input,
+		Overrides: overrides{ParkOn: []string{"lookup_order"}}}
+	status, runID, errText := l.execute(context.Background(), cmd, "pg_po")
+	if status != "succeeded" {
+		t.Fatalf("run = %s %s", status, errText)
+	}
+	l.mu.Lock()
+	pr := l.parked[runID]
+	l.mu.Unlock()
+	if pr == nil || len(pr.pending) != 1 || pr.pending[0].Name != "lookup_order" {
+		t.Errorf("the run did not stop at park_on (parked: %+v): the record answered the call", pr)
+	}
+	if n := lookups.Load(); n != 0 {
+		t.Errorf("lookup ran %d times", n)
+	}
+}
+
+// TestModelResolverIsBounded pins the resolver's deadline: one that
+// never returns is cut off before the ack and the command rejected
+// "resolver timed out" — never left unacked for Studio to mark lost.
+func TestModelResolverIsBounded(t *testing.T) {
+	defer func(d time.Duration) { resolveTimeout = d }(resolveTimeout)
+	resolveTimeout = 20 * time.Millisecond
+	agent := core.New(wefttest.Script(wefttest.Say("own")), core.Name("a"))
+	cfg := &config{agents: []*core.Agent{agent}}
+	ModelResolver(func(ctx context.Context, name string) (core.Model, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})(cfg)
+	l := newLink(cfg, newRegistry(cfg), "", "")
+	in := "hi"
+	cmd := &command{CommandID: "cmd_slow", Agent: "a", Engine: "live", Thread: "ephemeral", Input: &in,
+		Overrides: overrides{Model: "anthropic/claude-haiku-4-5"}}
+	reason, ok := l.validate(context.Background(), cmd)
+	if ok || !strings.Contains(reason, "model anthropic/claude-haiku-4-5: resolver timed out") {
+		t.Errorf("slow resolver: reason = %q ok = %v, want rejected as timed out", reason, ok)
+	}
+}

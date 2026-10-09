@@ -361,7 +361,7 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 		// manifest lacks are 400; only_tools outside tools_enabled is a
 		// widening, 403; a named tool_choice the run turns off or parks
 		// could never be honoured, 400.
-		if widens, msg := toolOverrides(req.Overrides, agent.Name, known); msg != "" {
+		if widens, msg := toolOverrides(req.Overrides, agent.Name, known, agent.Defaults.ToolChoice); msg != "" {
 			if widens {
 				writeError(w, r, http.StatusForbidden, "forbidden", msg)
 			} else {
@@ -502,8 +502,9 @@ func actorOf(r *http.Request) string {
 // the agent's manifest tools (known) — weft/runtime's validToolOverrides,
 // answered as §10.4's statuses: msg is empty when they pass; widens
 // marks the 403 (only_tools outside tools_enabled), every other refusal
-// is a 400.
-func toolOverrides(o linkruntime.Overrides, agent string, known map[string]bool) (widens bool, msg string) {
+// is a 400. Without a tool_choice override the agent's registered
+// default (def) must still name a tool the command leaves on.
+func toolOverrides(o linkruntime.Overrides, agent string, known map[string]bool, def linkruntime.ToolChoice) (widens bool, msg string) {
 	for _, name := range o.OnlyTools {
 		if !known[name] {
 			return false, "tool " + name + " in only_tools is not in agent " + agent + "'s manifest"
@@ -519,6 +520,9 @@ func toolOverrides(o linkruntime.Overrides, agent string, known map[string]bool)
 	}
 	tc := o.ToolChoice
 	if tc == nil {
+		if def.Mode == "named" && !leavesOn(o, def.Name) {
+			return false, "the agent's default tool_choice names " + def.Name + ", which this command turns off; send tool_choice"
+		}
 		return false, ""
 	}
 	switch tc.Mode {
@@ -531,13 +535,7 @@ func toolOverrides(o linkruntime.Overrides, agent string, known map[string]bool)
 	default:
 		return false, "unknown tool_choice mode " + tc.Mode + " (auto, any, none or named)"
 	}
-	on := true
-	switch {
-	case len(o.OnlyTools) > 0:
-		on = contains(o.OnlyTools, tc.Name)
-	case len(o.ToolsEnabled) > 0:
-		on = contains(o.ToolsEnabled, tc.Name)
-	}
+	on := leavesOn(o, tc.Name)
 	switch {
 	case tc.Name == "":
 		return false, "tool_choice named needs a tool name"
@@ -551,6 +549,18 @@ func toolOverrides(o linkruntime.Overrides, agent string, known map[string]bool)
 	return false, ""
 }
 
+// leavesOn reports whether the command leaves tool name on: only_tools
+// when set, else tools_enabled, else every tool.
+func leavesOn(o linkruntime.Overrides, name string) bool {
+	switch {
+	case len(o.OnlyTools) > 0:
+		return contains(o.OnlyTools, name)
+	case len(o.ToolsEnabled) > 0:
+		return contains(o.ToolsEnabled, name)
+	}
+	return true
+}
+
 // orAuto spells an empty tool_choice mode as the auto it means.
 func orAuto(mode string) string {
 	if mode == "" {
@@ -560,15 +570,18 @@ func orAuto(mode string) string {
 }
 
 // paramsOverride checks the sampling override (neutral knobs) as
-// weft/runtime's validParams does: top_p inside 0..1, at most four
-// non-empty stop sequences; any seed; a negative max_tokens is the
-// core's own step error. Empty when it passes.
+// weft/runtime's validParams does: top_p inside 0..1, a positive
+// max_tokens, at most four non-empty stop sequences; any seed. Empty
+// when it passes.
 func paramsOverride(p *linkruntime.Params) string {
 	if p == nil {
 		return ""
 	}
 	if v := p.TopP; v != nil && (*v < 0 || *v > 1) {
 		return "top_p must be between 0 and 1"
+	}
+	if v := p.MaxTokens; v != nil && *v <= 0 {
+		return "max_tokens must be positive"
 	}
 	if len(p.Stop) > 4 {
 		return fmt.Sprintf("stop takes at most 4 sequences, got %d", len(p.Stop))

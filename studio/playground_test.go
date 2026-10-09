@@ -806,6 +806,8 @@ func TestPlaygroundOptionLabValidation(t *testing.T) {
 		{"top_p", `"params": {"top_p": 1.2}`, http.StatusBadRequest, "top_p must be between 0 and 1"},
 		{"stop count", `"params": {"stop": ["a", "b", "c", "d", "e"]}`, http.StatusBadRequest, "stop takes at most 4 sequences, got 5"},
 		{"stop empty", `"params": {"stop": [""]}`, http.StatusBadRequest, "stop sequences must be non-empty"},
+		{"max_tokens zero", `"params": {"max_tokens": 0}`, http.StatusBadRequest, "max_tokens must be positive"},
+		{"max_tokens negative", `"params": {"max_tokens": -1}`, http.StatusBadRequest, "max_tokens must be positive"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code, body := pt.post(t, with(tc.extra))
@@ -845,5 +847,43 @@ func TestPlaygroundOptionLabValidation(t *testing.T) {
 	}
 	if _, view := pt.get(t, "/api/runtimes"); !strings.Contains(view, `"resolver":true`) {
 		t.Errorf("runtimes view lacks the resolver flag: %s", view)
+	}
+}
+
+// TestPlaygroundAgentDefaultToolChoice pins the agent's registered
+// default tool choice under a command that sends none: a named default
+// the command turns off would fail the run's first step after the ack —
+// refused here (400, naming the fix); kept on, or with a tool_choice
+// sent over it, the command passes.
+func TestPlaygroundAgentDefaultToolChoice(t *testing.T) {
+	pt := newPlaygroundTestServer(t)
+	reg, _ := pt.rs.Registration("rt_test")
+	reg.Agents[0].Defaults.ToolChoice = linkruntime.ToolChoice{Mode: "named", Name: "refund"}
+	b, _ := json.Marshal(reg)
+	req, _ := http.NewRequest(http.MethodPost, pt.ts.URL+"/api/runtime/register", strings.NewReader(string(b)))
+	req.Header.Set("Content-Type", "application/json")
+	pt.auth(req)
+	if code, out := pt.do(t, req); code != http.StatusOK {
+		t.Fatalf("re-register: %d %s", code, out)
+	}
+	off := strings.Replace(validRun, `"tools_enabled": ["lookup_order", "refund"]`, `"tools_enabled": ["lookup_order"]`, 1)
+	code, body := pt.post(t, off)
+	if code != http.StatusBadRequest ||
+		!strings.Contains(body, "the agent's default tool_choice names refund, which this command turns off; send tool_choice") {
+		t.Errorf("default named tool turned off = %d (%s), want 400 naming the fix", code, body)
+	}
+	onlyOff := strings.Replace(validRun, `"thinking": "off"`, `"thinking": "off", "only_tools": ["lookup_order"]`, 1)
+	if code, body := pt.post(t, onlyOff); code != http.StatusBadRequest || !strings.Contains(body, "default tool_choice names refund") {
+		t.Errorf("default named tool outside only_tools = %d (%s), want 400", code, body)
+	}
+	for _, ok := range []string{
+		validRun, // refund stays on
+		strings.Replace(off, `"thinking": "off"`, `"thinking": "off", "tool_choice": {"mode": "auto"}`, 1),
+	} {
+		if code, body := pt.post(t, ok); code != http.StatusAccepted {
+			t.Errorf("= %d (%s), want 202", code, body)
+			continue
+		}
+		pt.waitCommand(t, "ok")
 	}
 }

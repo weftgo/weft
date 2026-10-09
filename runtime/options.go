@@ -91,7 +91,10 @@ func Models(models map[string]core.Model) Option {
 // support. The error text is shown to whoever ran the experiment, so
 // it must carry no key, URL or secret; the app controls the message.
 // resolve may be called concurrently and once per command; cache
-// clients if building one is costly. Registration reports the flag
+// clients if building one is costly. Each call is bounded: its ctx is
+// canceled after 10 s and the command is rejected with "model <name>:
+// resolver timed out" (the command runs before its ack, and an ack
+// Studio waits on too long is marked lost) — honour ctx. Registration reports the flag
 // (resolver: true), and Studio accepts an unlisted name only then. A
 // nil resolve is ignored.
 func ModelResolver(resolve func(ctx context.Context, name string) (core.Model, error)) Option {

@@ -661,7 +661,12 @@ review fixes); the
 layout (D1) +3.6 KiB against +4 KiB (with its review fixes); the keyed
 renderer and ARIA (D3) +1.5 KiB against +2 KiB (with its review fixes); the views (D4: tabs,
 the JSON tree and its filter, the turn filter, paging) +5.2 KiB against
-+5 KiB (with its review fixes).
++5 KiB (with its review fixes). The Request tab (E1) measured +6.1 KiB
+against its +4 KiB estimate (with its review fixes): the overrun is the
+review's honesty work (derived records, the manifest asked again, the
+unreachable child, `not_served`), nothing in it is deferrable at first
+paint, and minifying the bundle is held in reserve, so it is accepted
+rather than cut.
 `make studio-panel-asset` stages it as `panel-<version>.js` + sha256
 for non-Go backends.
 

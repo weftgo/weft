@@ -6,7 +6,7 @@
     { "id": "D2", "what": "theme tokens", "estimate": 1024 },
     { "id": "D3", "what": "keyed renderer + ARIA", "estimate": 2048 },
     { "id": "D4", "what": "JSON tree + filter", "estimate": 5120 },
-    { "id": "E1", "what": "Request tab", "estimate": 4096 },
+    { "id": "E1", "what": "Request tab", "estimate": 4096, "accepted": "review-driven honesty (derived records, the manifest re-asked, the unreachable child, not_served); nothing deferrable at first paint; the minify lever in reserve" },
     { "id": "E3", "what": "2-way step diff", "estimate": 4096 },
     { "id": "C3", "what": "detection ladder", "estimate": 3072, "accepted": "nothing deferrable supplies the first scope; the deferrable remainder is under 1 KiB" },
     { "id": "C4", "what": "typed API surface (the host API)", "estimate": 1024, "accepted": "the host API is one surface for both installs; nothing to load later" }

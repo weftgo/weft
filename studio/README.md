@@ -266,8 +266,9 @@ steers, the subagent call's child row and the child's own steps carry
 the run page's verbs, shown on hover and on keyboard focus
 (`aria-label`s; Enter/Space stop at the verb, Escape goes on to the
 panel): **replay from this step**, **edit this result and replay**
-(`from_step` N+1 with the call's recorded result pre-filled — not on
-the transcript's last step; an empty result seeds no edit), **edit the
+(`from_step` N+1 with the call's recorded result pre-filled — on the
+transcript's last step only when every call there has its result; an
+empty result seeds no edit), **edit the
 prompt and replay** (the step's system prompt from its request record;
 unreadable or cut, the registered prompt and a line saying so),
 **re-run** and **continue here with a new message** (a fork, on a

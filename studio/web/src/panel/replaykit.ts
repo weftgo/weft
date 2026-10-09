@@ -184,6 +184,6 @@ export function replayRoutes(opts: { agents?: AgentView[]; compactions?: unknown
   return r
 }
 
-/** The transcript through step 2 only: the fold's step 3 holds no
- * reply the server could cut at. */
-export const transcriptCut = () => transcript(...bodies.slice(0, 7))
+/** The transcript cut after its first n batches (5: steps 0–1, each
+ * call answered): the fold's later steps hold no reply. */
+export const transcriptCut = (n: number) => transcript(...bodies.slice(0, n))

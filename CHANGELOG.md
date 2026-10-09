@@ -97,8 +97,9 @@ module, ADR 0005).
 - **"jump to", not "replay"**: the run page's playhead buttons read
   "jump to this step/call/steer (event #N)"; "replay" now names the
   replay verbs only.
-- **The panel's ⎇ Continue from step N** sends the step being read by
-  its ordinal (as every verb does), and its token-scope reading is
+- **The panel's ⎇ Continue from step N and its "compare in Studio"
+  hand-off** send the step being read by its ordinal (as every verb
+  does; `stepPosition` is gone, `readStep` replaces it), and its token-scope reading is
   `lib/replay.ts`'s `tokenScopeOf` (one reading for both surfaces).
 
 ## 0.12.0 — 2026-10-09

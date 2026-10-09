@@ -6,7 +6,7 @@
 // Studio hand-off (P2-17), and every refusal surfacing as words.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { tokenScope } from "./config"
-import { stepPosition, studioPlaygroundLink } from "./element"
+import { readStep, studioPlaygroundLink } from "./element"
 import { pickRuntime } from "./playground"
 import { OVERFLOW_MIN_MS } from "./state"
 import type { ExperimentDraft } from "./playground"
@@ -704,15 +704,15 @@ describe("the inline diff", () => {
 })
 
 describe("step numbering", () => {
-  it("continue-from counts the run's own steps in order, as source.from_step does", () => {
+  it("continue-from and the hand-off send the step's own ordinal, as source.from_step reads it", () => {
     const step = (index: number) => ({ index, text: "", reasoning: "", toolCalls: [], from: 0, to: 0 })
     // A run whose events number its steps from 3 (a resumed run): the
-    // wire still counts its first step as 0.
+    // wire carries the stored index, never a position.
     const view = { runId: "r", steps: [step(3), step(4), step(5)], pending: [], finished: true }
-    expect(stepPosition(view, 3)).toBe(0)
-    expect(stepPosition(view, 5)).toBe(2)
-    expect(stepPosition(view, null)).toBe(-1)
-    expect(stepPosition(view, 9)).toBe(-1)
+    expect(readStep(view, 3)).toBe(3)
+    expect(readStep(view, 5)).toBe(5)
+    expect(readStep(view, null)).toBe(-1)
+    expect(readStep(view, 9)).toBe(-1)
   })
 })
 

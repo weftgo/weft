@@ -2890,7 +2890,7 @@ export class WeftDevtools extends HTMLElement {
       const editsBox = el("div", "weft-field")
       editsBox.appendChild(el("span", undefined, `Transcript edits (steps 0..${d.step - 1} are kept)`))
       // Steps are numbered the way from_step and the edits count them
-      // on the wire: over the run's own steps, in order (stepPosition).
+      // on the wire: by the step's own ordinal (its stored index).
       const placed = new Set<string>()
       for (const step of src.folded.steps) {
         const n = step.index
@@ -3100,7 +3100,7 @@ export class WeftDevtools extends HTMLElement {
       const mine = draft && draft.runId === r.sourceRunID ? draft : null
       // The step Studio continues from: the drawer's own, else the one
       // being read — as from_step counts it.
-      const step = mine && mine.step > 0 ? mine.step : (s.selectedStep ?? -1)
+      const step = mine && mine.step > 0 ? mine.step : s.turn ? readStep(s.turn.folded, s.selectedStep) : -1
       a.setAttribute("href", studioPlaygroundLink(this.base, mine, step))
     }
     link(compare)
@@ -3408,7 +3408,7 @@ export class WeftDevtools extends HTMLElement {
     on(again, "click", () => this.go(this.model?.rerun(t.id)))
     row.appendChild(again)
     // The step being read, by its ordinal (from_step's count).
-    const from = s.selectedStep != null && t.folded.steps.some((st) => st.index === s.selectedStep) ? s.selectedStep : -1
+    const from = readStep(t.folded, s.selectedStep)
     if (from > 0) {
       const cont = el("button", "weft-btn", `⎇ Continue from step ${from}`, {
         title: "keep the transcript through the previous step (edits apply) and run this step fresh",
@@ -3744,11 +3744,13 @@ function stepVerbs(n: number, r: ReplayCtx): HTMLElement {
 }
 
 /** A tool call's verbs: edit its result and replay (the next step run
- * fresh against the edit — not on the run's last step, which has no
- * next), and replay from its step. */
-function callVerbs(n: number, call: FoldedToolCall, r: ReplayCtx): HTMLElement {
+ * fresh against the edit), and replay from its step. */
+function callVerbs(n: number, call: FoldedToolCall, r: ReplayCtx, answered: boolean): HTMLElement {
   const list: HTMLElement[] = []
-  if (call.result && call.callId && n + 1 < r.count) {
+  // from_step n+1 is one the server accepts while a later step holds a
+  // reply, or — n the transcript's last step — when every call of n has
+  // its result (the kept prefix ends in answered calls).
+  if (call.result && call.callId && (n + 1 < r.count || (n + 1 === r.count && answered))) {
     // An empty recorded result seeds no edit (lib/replay.ts).
     list.push(verb(`edit this result and replay (call ${call.callId})`, "✎", editResultAndReplay(n, call.callId, String(call.result.content)), r))
   }
@@ -3787,13 +3789,12 @@ export function linkedStep(s: PanelState): number | undefined {
   return running ? t.folded.steps.at(-1)?.index : undefined
 }
 
-/** stepPosition is the step being read as source.from_step counts it
- * (the playground hand-off's step — not the step ordinal links carry):
- * its place among the run's own steps (0-based) — the runtime and
- * Studio cut the transcript at the Nth assistant message the run
- * produced, whatever index the step's events carry. -1 when none. */
-export function stepPosition(view: FoldedRun, selected: number | null): number {
-  return selected == null ? -1 : view.steps.findIndex((st) => st.index === selected)
+/** readStep is the step being read as source.from_step and the
+ * playground hand-off count it: its own ordinal (the stored step index
+ * the server and the runtime cut at) — never a position — or -1 when
+ * none is read or the run has no such step. */
+export function readStep(view: FoldedRun, selected: number | null): number {
+  return selected != null && view.steps.some((st) => st.index === selected) ? selected : -1
 }
 
 /** renderTimeline is the Timeline tab (D4): the waterfall at the
@@ -3982,7 +3983,8 @@ function renderStep(
       note.appendChild(verbs("steer", [verb(`replay from this steer (step ${next} runs fresh)`, "↦", replayFromStep(next), ctx.replay)]))
     body.appendChild(note)
   }
-  for (const call of step.toolCalls) body.appendChild(renderCall(call, step.index, runStatus, t, open, ctx))
+  const answered = step.toolCalls.every((c) => c.result)
+  for (const call of step.toolCalls) body.appendChild(renderCall(call, step.index, runStatus, t, open, ctx, answered))
   card.appendChild(body)
   return card
 }
@@ -4112,7 +4114,9 @@ function renderCall(
   runStatus: string,
   t?: TurnView,
   open?: OpenState,
-  ctx?: FoldCtx
+  ctx?: FoldCtx,
+  /** Every call of the step has its result (the verbs' gate). */
+  answered = false
 ): HTMLElement {
   const box = el("div", "weft-call", undefined, { "data-key": call.callId })
   const state = callState(call, runStatus)
@@ -4171,7 +4175,7 @@ function renderCall(
       box.appendChild(childBlock(call.childRunId, t, open, ctx?.endpoint, replay))
     }
   }
-  if (replay) head.appendChild(callVerbs(stepIndex, call, replay))
+  if (replay) head.appendChild(callVerbs(stepIndex, call, replay, answered))
   if (call.result) {
     const ms = spanMs(t, call)
     if (ms) head.appendChild(el("span", "weft-badge weft-info", ms))

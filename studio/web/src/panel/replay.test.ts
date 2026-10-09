@@ -197,14 +197,15 @@ describe("replay from a failing step (F1's Done line, panel half)", () => {
     expect(text(el, "[data-weft-prefix]")).toBe("nothing kept · the whole turn runs again")
   })
 
-  it("edit this result is offered by the transcript's step count, not the fold's: a step with no reply is no from_step", async () => {
+  it("edit this result follows the transcript's steps, not the fold's: on its last step only when every call there is answered", async () => {
     const r = replayRoutes()
-    r[`runs/${RUN}/transcript`] = transcriptCut()
+    r[`runs/${RUN}/transcript`] = transcriptCut(5) // steps 0–1; the fold's step 2 holds no reply
     fakeStudio(r, REPLAY_META)
     const el = await mount()
-    // The transcript holds steps 0–2: c2's edit replays step 2; c3's
-    // would replay step 3, which holds no reply.
+    // c2 is on the transcript's last step and answered: from_step 2 ==
+    // the step count is valid (the kept prefix ends in answered calls).
     expect(verbIn(el, callBox(el, "c2"), "edit_result")).not.toBeNull()
+    // c3 is past the transcript: no from_step 3 the server accepts.
     expect(verbIn(el, callBox(el, "c3"), "edit_result")).toBeNull()
     expect(verbIn(el, callBox(el, "c3"), "from_step")).not.toBeNull()
   })

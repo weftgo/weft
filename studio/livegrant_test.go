@@ -429,3 +429,75 @@ func TestNoTokenOrSigInLogs(t *testing.T) {
 		t.Errorf("error bodies lack the refusals: %s", bodies.String())
 	}
 }
+
+// TestLiveGrantReusableWithinWindow pins the grant's reuse: a sig is a
+// window, not a ticket — a browser's EventSource reconnects with the
+// very same URL, so any number of streams open on one sig while the
+// grant lasts (here the first still open while the second opens), and
+// none after its expiry.
+func TestLiveGrantReusableWithinWindow(t *testing.T) {
+	old := liveGrantTTL
+	liveGrantTTL = 500 * time.Millisecond
+	t.Cleanup(func() { liveGrantTTL = old })
+	ts := httptest.NewServer(New(DB(fixtureDB(t)), Token("srv")).Handler())
+	t.Cleanup(ts.Close)
+
+	code, sig, body := grantAt(t, ts.URL, "srv", "run=r_ok")
+	if code != http.StatusOK {
+		t.Fatalf("grant: %d %s", code, body)
+	}
+	var g struct {
+		Exp time.Time `json:"exp"`
+	}
+	decode(t, body, &g)
+	first, err := http.Get(ts.URL + "/api/live?run=r_ok&sig=" + sig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = first.Body.Close() }()
+	if first.StatusCode != http.StatusOK {
+		t.Fatalf("first open: %d", first.StatusCode)
+	}
+	if got := liveStatus(t, ts.URL, "run=r_ok&sig="+sig); got != http.StatusOK {
+		t.Fatalf("second open on the same sig (a reconnect): %d, want 200", got)
+	}
+	time.Sleep(time.Until(g.Exp) + 50*time.Millisecond)
+	if got := liveStatus(t, ts.URL, "run=r_ok&sig="+sig); got != http.StatusUnauthorized {
+		t.Errorf("open after the window: %d, want 401", got)
+	}
+}
+
+// failingBody is a request body whose read fails with a plain error.
+type failingBody struct{}
+
+func (failingBody) Read([]byte) (int, error) { return 0, io.ErrUnexpectedEOF }
+func (failingBody) Close() error             { return nil }
+
+// TestLiveGrantBodyErrors: only a body over the 4 MiB limit is 413; a
+// body that fails to read for any other reason is 400, never worded as
+// a size.
+func TestLiveGrantBodyErrors(t *testing.T) {
+	h := New(DB(fixtureDB(t)), Token("srv")).Handler()
+	for name, tc := range map[string]struct {
+		body     io.Reader
+		want     int
+		wantText string
+	}{
+		"over the limit": {strings.NewReader(`{"run":"` + strings.Repeat("x", maxBody) + `"}`), http.StatusRequestEntityTooLarge, "4 MiB"},
+		"read fails":     {failingBody{}, http.StatusBadRequest, "could not be read"},
+		"not JSON":       {strings.NewReader("nope"), http.StatusBadRequest, "must be JSON"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, "/api/live-grant", tc.body)
+			req.Header.Set("Authorization", "Bearer srv")
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+			if rec.Code != tc.want || !strings.Contains(rec.Body.String(), tc.wantText) {
+				t.Errorf("%d %s, want %d naming %q", rec.Code, rec.Body.String(), tc.want, tc.wantText)
+			}
+			if tc.want != http.StatusRequestEntityTooLarge && strings.Contains(rec.Body.String(), "4 MiB") {
+				t.Errorf("a non-size failure worded as a size: %s", rec.Body.String())
+			}
+		})
+	}
+}

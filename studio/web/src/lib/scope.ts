@@ -24,14 +24,20 @@ export interface Scope {
 const KEYS = ["session", "flow", "run"] as const
 
 /** enc percent-encodes a value; a string encodeURIComponent refuses
- * (a lone surrogate) has only the marker's own delimiters encoded —
- * the marker is set inside a host's ref or action, where a throw would
- * be the host's. */
+ * (a lone surrogate) has only the marker's own delimiters and the
+ * control characters (below U+0020, and U+007F) encoded — the marker
+ * is set inside a host's ref or action, where a throw would be the
+ * host's, and a raw CR/LF must never reach a Weft-Scope header (the
+ * Go side's fallback, scope.String, does the same). */
 const enc = (v: string) => {
   try {
     return encodeURIComponent(v)
   } catch {
-    return v.replace(/[%;=]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
+    return v.replace(
+      // eslint-disable-next-line no-control-regex
+      /[%;=\x00-\x1f\x7f]/g,
+      (c) => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`
+    )
   }
 }
 const dec = (v: string) => {

@@ -7,7 +7,7 @@ var e = [
 	try {
 		return encodeURIComponent(e);
 	} catch {
-		return e.replace(/[%;=]/g, (e) => `%${e.charCodeAt(0).toString(16).toUpperCase()}`);
+		return e.replace(/[%;=\x00-\x1f\x7f]/g, (e) => `%${e.charCodeAt(0).toString(16).toUpperCase().padStart(2, "0")}`);
 	}
 }, n = (e) => {
 	try {

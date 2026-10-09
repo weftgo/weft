@@ -149,13 +149,15 @@ func Set(w http.ResponseWriter, s Scope) {
 // encode is encodeURIComponent: every byte outside A–Z a–z 0–9 and
 // -_.!~*'() becomes %XX. A string that is not valid UTF-8 — what
 // encodeURIComponent refuses — has only the form's own delimiters
-// (%, ;, =) encoded, as the web side's fallback does.
+// (%, ;, =) and the control bytes (below 0x20, and 0x7F) encoded, as
+// the web side's fallback does: a raw CR or LF never reaches a header,
+// where net/http would rewrite it and an HTTP/2 server drop the field.
 func encode(v string) string {
 	valid := utf8.ValidString(v)
 	var b strings.Builder
 	for i := 0; i < len(v); i++ {
 		c := v[i]
-		keep := !valid && c != '%' && c != ';' && c != '=' ||
+		keep := !valid && c != '%' && c != ';' && c != '=' && c >= 0x20 && c != 0x7F ||
 			valid && ('a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || strings.IndexByte("-_.!~*'()", c) >= 0)
 		if keep {
 			b.WriteByte(c)

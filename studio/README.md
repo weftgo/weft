@@ -991,10 +991,16 @@ expiry; another selector, another kinds set, a tampered or an expired
 sig is 401, and a panel token is refused a stream outside its public
 id at grant time (403), as the stream would refuse it. Without a
 `Token` the key is random per process: one mechanism in every setup.
-A grant opens one stream within 60 s; a panel token's stream (opened
-with a grant or with the bearer) ends at the token's expiry with one
-final `event: expired` frame (`data: {}`) and closes; a server
-token's does not (nor setup A's). After `expired`, reopen only with a
+A grant is a 60 s window, not a single-use ticket: any number of
+streams may open with that sig while it lasts (a browser's
+`EventSource` reconnect reuses the same URL, so a single-use sig would
+end the tail at the first reconnect), and each runs until it is
+closed. A leaked grant URL is therefore live for 60 s — the bearer is
+never in it, the grant answer is `Cache-Control: no-store`, and Studio
+never logs the URL. A panel token's stream (opened with a grant or
+with the bearer) ends at the token's expiry with one final `event:
+expired` frame (`data: {}`) and closes; a server token's does not (nor
+setup A's). After `expired`, reopen only with a
 bearer that is still valid — a new panel token, then a new grant.
 Both clients do exactly this (`lib/live.ts`'s `openLive` for the UI,
 `openPanelLive` for the panel): a grant before every connection, the

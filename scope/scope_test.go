@@ -81,6 +81,23 @@ func TestInvalidUTF8EncodesOnlyTheDelimiters(t *testing.T) {
 	}
 }
 
+// The fallback also encodes control bytes: a CR/LF in a value that is
+// not valid UTF-8 never reaches the header raw, and still round-trips.
+func TestInvalidUTF8EncodesControlBytes(t *testing.T) {
+	s := Scope{PublicID: "pub\xff\r\nX: y", RunID: "\x00\t\x7f\xfe"}
+	if got, want := s.String(), "pub\xff%0D%0AX: y;run=%00%09%7F\xfe"; got != want {
+		t.Errorf("String() = %q, want %q", got, want)
+	}
+	for i := 0; i < len(s.String()); i++ {
+		if c := s.String()[i]; c < 0x20 || c == 0x7F {
+			t.Fatalf("String() = %q carries the control byte %#x", s.String(), c)
+		}
+	}
+	if got := Parse(s.String()); got != s {
+		t.Errorf("round trip = %#v, want %#v", got, s)
+	}
+}
+
 func TestIsZero(t *testing.T) {
 	if !(Scope{}).IsZero() {
 		t.Error("the zero Scope is not zero")

@@ -54,4 +54,9 @@ describe("serializeScope", () => {
       parseScope(serializeScope({ publicId: "a;\uD800", run: "=%" }))
     ).toEqual({ publicId: "a;\uD800", run: "=%" })
   })
+  it("encodes control characters in that fallback too (no raw CR/LF in a header), and still round-trips", () => {
+    const s = { publicId: "pub\uD800\r\nX: y", run: "\u0000\t\u007f\uDFFF" }
+    expect(serializeScope(s)).toBe("pub\uD800%0D%0AX: y;run=%00%09%7F\uDFFF")
+    expect(parseScope(serializeScope(s))).toEqual(s)
+  })
 })

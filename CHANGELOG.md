@@ -291,10 +291,14 @@ module, ADR 0005).
   past a panel token's own); it is refused (401) on another selector
   or kinds set, tampered or expired. A panel token is granted only a
   stream inside its public id. Without a `Token` the key is random per
-  process, so setup A takes the same path. A grant bounds opening only:
-  a panel token's stream — opened with a grant or with the bearer —
-  now ends at the token's expiry with one `event: expired` frame; a
-  server token's stream does not.
+  process, so setup A takes the same path. A grant is a 60 s window,
+  not a single-use ticket: any number of streams may open with its sig
+  while it lasts (an `EventSource` reconnect reuses the URL), each
+  running until closed, so a leaked grant URL is live for 60 s — the
+  grant answer is `no-store` and Studio never logs the URL. A panel
+  token's stream — opened with a grant or with the bearer — ends at
+  the token's expiry with one `event: expired` frame; a server token's
+  stream does not.
 
 - **The panel follows a whole scope, and detects it from response
   headers** (plan C3.2). Detection rung 1 is the explicit forms:

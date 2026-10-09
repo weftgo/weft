@@ -32,12 +32,17 @@ import (
 // The sig binds the identity that asked (the server token, a panel
 // token's public id and scope, or setup A's open API), the selector,
 // the kinds set and the expiry — liveGrantTTL (60 s) from the grant,
-// never later than the panel token's own expiry. A leaked URL opens
-// one stream for a minute; the token itself is never in it. The grant
-// bounds opening: a stream opened in time runs on, as the identity
-// that asked — and a panel token's stream ends at the token's own
-// expiry (signed into the grant as token_exp), whichever way it was
-// opened; a server token's or setup A's has nothing to end it. One code
+// never later than the panel token's own expiry. A grant is a window,
+// not a ticket: within its 60 s any number of streams may open with
+// that sig — deliberately, since a browser's EventSource reconnects
+// with the very same URL, and a single-use sig would end the live tail
+// at the first reconnect. So a leaked grant URL is live for 60 s; the
+// token itself is never in it, the grant response is no-store, and
+// Studio never logs the URL. The grant bounds opening: each stream
+// opened in time runs until it is closed, as the identity that asked —
+// a panel token's until the token's own expiry (signed into the grant
+// as token_exp; `event: expired`), whichever way it was opened; a
+// server token's or setup A's has nothing to end it. One code
 // path for every setup: without a Token the key is a per-process
 // random one (no cookie, no second mechanism).
 
@@ -243,7 +248,12 @@ func (s *Server) serveLiveGrant(w http.ResponseWriter, r *http.Request) {
 	q := map[string][]string(r.URL.Query())
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
 	if err != nil {
-		writeError(w, r, http.StatusRequestEntityTooLarge, "bad_request", "body: larger than the 4 MiB limit")
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeError(w, r, http.StatusRequestEntityTooLarge, "bad_request", "body: larger than the 4 MiB limit")
+			return
+		}
+		badRequest(w, r, "body: could not be read")
 		return
 	}
 	if len(strings.TrimSpace(string(body))) > 0 {

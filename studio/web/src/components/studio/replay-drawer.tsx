@@ -282,7 +282,9 @@ function ReplayForm({
 }) {
   const { caps } = useCapabilities()
   const { draft, runID } = request
-  const runtimes = useQuery({ ...runtimesQuery(), refetchInterval: 5_000 })
+  // The shell's runtime notices poll this key every 5 s (use-notices.ts,
+  // the one poller): this observer reads the shared cache.
+  const runtimes = useQuery(runtimesQuery())
   const source = useQuery({ ...runQuery(runID), staleTime: 30_000 })
   const sourceRow = source.data?.id === runID ? source.data : undefined
   const wantAgent = request.agent || sourceRow?.agent || undefined

@@ -9,8 +9,8 @@ import {
 
 import { useThemeDark } from "@/components/studio/theme"
 
-// Studio's theme is the "dark" class on <html> (theme.tsx), not
-// next-themes: the toaster follows it, and its colours are the palette's
+// Studio's theme is the "dark" class on <html> (theme.tsx): the toaster
+// follows it (useThemeDark), and its colours are the palette's
 // tokens (styles.css, src/lib/palette.ts). No hotkey: the toaster never
 // takes focus or a key from the page (plan H5).
 const Toaster = ({ ...props }: ToasterProps) => {

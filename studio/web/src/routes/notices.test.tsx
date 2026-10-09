@@ -257,6 +257,38 @@ describe("the playground's notices", () => {
     expect(toastTitles().filter((x) => x.startsWith("experiment"))).toEqual([])
   })
 
+  it("a matrix's toast keeps the id it was saved under: a rename in flight or a refused save cannot relabel it", async () => {
+    let n = 0
+    let done = false
+    let refuseSave = false
+    studio
+      .on("POST experiments", (req) => (refuseSave ? apiError(500, "internal", "db down") : req.body))
+      .on("POST playground/runs", () => command(`cmd_m${++n}`, "queued"))
+      .on("GET playground/commands/cmd_m1", () =>
+        done ? command("cmd_m1", "finished", "pg_m1", "succeeded") : command("cmd_m1", "accepted", "pg_m1")
+      )
+    renderApp("/playground?run=r_ok")
+    const runButton = await screen.findByRole("button", { name: "Run A" })
+    await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
+    const name = screen.getByLabelText("experiment name")
+    fireEvent.change(name, { target: { value: "exp_one" } })
+    const go = screen.getByRole("button", { name: "Run matrix" })
+    await waitFor(() => expect(go).toHaveProperty("disabled", false))
+    fireEvent.click(go)
+    await waitFor(() => expect(studio.calls("POST playground/runs")).toHaveLength(1))
+    // Renamed while the cell runs; then a second matrix whose save is refused.
+    fireEvent.change(name, { target: { value: "exp_two" } })
+    refuseSave = true
+    await waitFor(() => expect(go).toHaveProperty("disabled", false))
+    fireEvent.click(go)
+    await waitFor(() => expect(studio.calls("POST experiments")).toHaveLength(2))
+    expect(studio.calls("POST playground/runs")).toHaveLength(1)
+    done = true
+    await toastFor(/^experiment exp_one finished · 1 succeeded$/)
+    await settle()
+    expect(toastTitles()).toEqual(["experiment exp_one finished · 1 succeeded"])
+  })
+
   it("a matrix with a refused cell and out-of-order settles: one toast, and open opens the experiment", async () => {
     let n = 0
     let aDone = false
@@ -433,17 +465,40 @@ describe("runtime notices", () => {
     )
   })
 
-  it("the shell is the one poller: one read of /api/runtimes per 5 s", async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true })
-    studio
-      .on("GET meta", meta(["live", "playground", "runtimes"]))
-      .on("GET runs", runs)
-      .on("GET runtimes", { runtimes: [] })
-    renderApp("/runs")
-    await waitFor(() => expect(studio.calls("GET runtimes")).toHaveLength(1))
-    await vi.advanceTimersByTimeAsync(15_000)
-    expect(studio.calls("GET runtimes")).toHaveLength(4)
-  })
+  // The shell's hook is the one 5 s poller: the playground and the
+  // replay drawer read the same key without an interval of their own,
+  // so a page holding them still reads /api/runtimes once per 5 s.
+  const pollCases: [string, string, () => Element | null][] = [
+    ["the shell alone", "/runs", () => screen.queryByText("r_ok")],
+    ["the playground", "/playground?run=r_ok", () => screen.queryByRole("button", { name: "Run A" })],
+    ["the open replay drawer", "/runs/r_ok?replay=rerun&from=0", () => document.querySelector("[data-replay-drawer]")],
+  ]
+  for (const [name, url, mounted] of pollCases)
+    it(`one read of /api/runtimes per 5 s: ${name}`, async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true })
+      studio
+        .on("GET meta", meta(["live", "playground", "runtimes"]))
+        .on("GET runs", runs)
+        .on("GET runtimes", { runtimes: [] })
+        .on("GET experiments", { experiments: [] })
+        .on("GET runs/r_ok", { ...rOK, children: [] })
+        .on("GET runs/r_ok/events", pagedEvents([]))
+        .on("GET runs/r_ok/transcript", golden("transcript-ok"))
+        .on("GET runs/r_ok/spans", { spans: [] })
+      renderApp(url)
+      await waitFor(() => expect(mounted()).toBeTruthy())
+      await waitFor(() => expect(studio.calls("GET runtimes").length).toBeGreaterThan(0))
+      const start = studio.calls("GET runtimes").length
+      await vi.advanceTimersByTimeAsync(15_000)
+      expect(studio.calls("GET runtimes").length - start).toBe(3)
+      // react-query dedupes timers that fire together, so the count alone
+      // cannot see a second poller: exactly one observer of the key has an
+      // interval — the shell's — however many read it.
+      const query = queryClient.getQueryCache().find({ queryKey: ["runtimes"] })!
+      const intervals = query.observers.map((o) => o.options.refetchInterval).filter(Boolean)
+      expect(intervals).toEqual([5_000])
+      expect(query.observers.length).toBe(url === "/runs" ? 1 : 2)
+    })
 
   it("reads no runtimes without the playground capability", async () => {
     studio.on("GET runs", runs).on("GET runtimes", { runtimes: [] })

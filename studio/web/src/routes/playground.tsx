@@ -313,7 +313,9 @@ function Playground({ caps }: { caps: string[] }) {
   const search = useHandoff()
   // Runtimes come and go (an app restarts, a second one connects):
   // the picker follows them.
-  const runtimes = useQuery({ ...runtimesQuery(), refetchInterval: 5_000 })
+  // The shell's runtime notices poll this key every 5 s (use-notices.ts,
+  // the one poller): this observer reads the shared cache.
+  const runtimes = useQuery(runtimesQuery())
   const meta = useQuery(metaQuery())
 
   // The variants (§4): A starts as the original, more are added with
@@ -562,7 +564,13 @@ function Playground({ caps }: { caps: string[] }) {
    * budget caps the whole matrix — §6 rule 6). Every cell is recorded
    * as it is issued: a refused one shows its reason in place and the
    * rest still run, so nothing issued is ever missing from the grid. */
-  const runMatrix = async (inputs: { key: string; text: string }[], experimentID: string) => {
+  const runMatrix = async (
+    inputs: { key: string; text: string }[],
+    experimentID: string,
+    /** Called once the definition is saved, before any cell is issued
+     * (the matrix's notice is labelled from here: plan H5). */
+    onSaved?: () => void
+  ) => {
     setError("")
     if (!runtime || !agent || busy) return
     if (inputs.length === 0) {
@@ -607,6 +615,7 @@ function Playground({ caps }: { caps: string[] }) {
     setBusy(true)
     try {
       await postExperiment(definition)
+      onSaved?.()
       // A new matrix replaces the grid: the keys are the same cells.
       setCells({})
       for (const c of plan) {
@@ -1411,7 +1420,11 @@ function Matrix({
   sourceRunID,
 }: {
   variants: Variant[]
-  runMatrix: (inputs: { key: string; text: string }[], experimentID: string) => Promise<void>
+  runMatrix: (
+    inputs: { key: string; text: string }[],
+    experimentID: string,
+    onSaved?: () => void
+  ) => Promise<void>
   busy: boolean
   cells: Record<string, Experiment>
   setCells: React.Dispatch<React.SetStateAction<Record<string, Experiment>>>
@@ -1429,19 +1442,18 @@ function Matrix({
   /** Bumped after every poll, so the next one is scheduled even when
    * nothing changed. */
   const [polled, setPolled] = useState(0)
-  /** The experiment the last "Run matrix" was saved under: the name
-   * field may change after. */
+  /** The experiment the grid's cells were issued under: set once its
+   * definition is saved — never from the name field (renamed after the
+   * click) and never by a matrix whose save was refused (the grid then
+   * still holds the previous matrix's cells, under its own id). */
   const issued = useRef("")
-  /** The grid as it was at that click: a matrix that issued nothing
-   * (its save refused) leaves it as it was — not this matrix's cells. */
-  const before = useRef<Record<string, Experiment> | null>(null)
 
   // One notice for the whole matrix (plan H5), when its last cell
   // settles — never one per cell — and never while cells are still
   // being issued.
   useEffect(() => {
     const all = Object.values(cells)
-    if (busy || !issued.current || all.length === 0 || cells === before.current) return
+    if (busy || !issued.current || all.length === 0) return
     if (all.some((c) => !settled(c.state))) return
     const finished = all.filter((c) => c.state === "finished")
     const failed = finished.filter((c) => c.status === "failed").length
@@ -1533,9 +1545,10 @@ function Matrix({
             variant="outline"
             disabled={busy}
             onClick={() => {
-              issued.current = experimentID
-              before.current = cells
-              void runMatrix(matrixInputs(inputs, sourceRunID), experimentID)
+              const id = experimentID
+              void runMatrix(matrixInputs(inputs, sourceRunID), id, () => {
+                issued.current = id
+              })
             }}
           >
             Run matrix

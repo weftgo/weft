@@ -36,6 +36,24 @@ func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
 	}
 	hasSource := cmd.Source != nil && cmd.Source.RunID != ""
 	hasInput := cmd.Input != nil && *cmd.Input != ""
+	// The edits first, as Studio checks them (checkCommand): a command
+	// that edits the transcript gets the edit's refusal before any
+	// other check's, so one body reads one sentence on both sides.
+	prepared := false
+	if len(cmd.TranscriptEdits) > 0 {
+		switch {
+		case !hasSource:
+			return "transcript_edits need a source run", false
+		case cmd.Source.FromStep <= 0:
+			return "transcript_edits need from_step > 0 (0 re-runs the whole turn, nothing is kept)", false
+		case !validRunID(cmd.Source.RunID):
+			return "source.run_id is not a run id", false
+		}
+		if reason, ok := l.prepareSource(ctx, agent, cmd, hasInput, hasSource); !ok {
+			return reason, false
+		}
+		prepared = true
+	}
 	switch cmd.Engine {
 	case "", "live":
 	case "scripted":
@@ -45,13 +63,20 @@ func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
 		// change (tools off, thinking, edited messages) misses instead
 		// and fails the step with "no recorded turn".
 		if cmd.Overrides.Instructions != "" {
-			return "scripted engine with an instructions override would silently replay the old answer", false
+			return "scripted engine with an instructions override would silently replay the old answer (WEFT-PLAYGROUND §5.5)", false
 		}
 		if cmd.Overrides.Model != "" {
-			return "scripted engine with a model override would silently replay the old answer", false
+			return "scripted engine with a model override would silently replay the old answer (WEFT-PLAYGROUND §5.5)", false
 		}
 		if !hasSource {
 			return "the scripted engine replays a source run's recorded turns: a source run is required", false
+		}
+		if len(cmd.TranscriptEdits) > 0 {
+			// An edit changes what the model saw at from_step, and the
+			// recorded turns are keyed on what it saw: refused here (the
+			// edits validated above), in one sentence, rather than acked
+			// and failed "no recorded turn" at the first step (ADR 0029 §8).
+			return scriptedEdits(cmd.Source.FromStep), false
 		}
 	default:
 		return fmt.Sprintf("unknown engine %q", cmd.Engine), false
@@ -147,63 +172,15 @@ func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
 		}
 	}
 
-	// The source turn's context, read once. A fork reads nothing from
-	// it (the session's own tree is the conversation) unless the
-	// scripted engine needs the record.
-	if hasSource && (cmd.Thread != "fork" || cmd.Engine == "scripted") {
-		src, err := l.sourceTranscript(ctx, agent, cmd.Source.RunID, cmd.Source.FromStep)
-		switch {
-		case err == nil:
-			cmd.src = src
-		case cmd.Source.FromStep > 0 || len(cmd.TranscriptEdits) > 0 || cmd.Engine == "scripted" || !hasInput:
-			// The command is a re-run of that transcript: without it
-			// there is nothing to run — and a scripted command must
-			// never fall through to the live model. An input beside
-			// from_step > 0 is refused for itself first, as Studio does
-			// before it looks the source up (checkSource).
-			if hasInput && cmd.Source.FromStep > 0 && len(cmd.TranscriptEdits) == 0 {
-				return inputPastStepZero, false
-			}
-			return fmt.Sprintf("source transcript unresolved: %v", err), false
-		default:
-			// A fresh input on an unresolvable source still runs, on
-			// the input alone: a playground run from the words given
-			// beats a dev tool that wedges. Logged.
-			slog.Warn("weft/runtime: source transcript unresolved; running on the input alone",
-				"run_id", cmd.Source.RunID, "err", err)
+	if !prepared {
+		if reason, ok := l.prepareSource(ctx, agent, cmd, hasInput, hasSource); !ok {
+			return reason, false
 		}
 	}
 	if cmd.src != nil && cmd.Thread != "fork" {
-		// from_step at the step count is a step that never answered: fresh
-		// when the last kept step ended in answered tool calls (the replay's
-		// first model call answers them — the source's next step, failed or
-		// never made), nothing to answer after a call-free reply (ADR 0029).
-		if n := cmd.src.stepCount(); cmd.Source.FromStep > 0 &&
-			(cmd.Source.FromStep > n || cmd.Source.FromStep == n && !endsInAnsweredCalls(cmd.src.steps)) {
-			return fmt.Sprintf("from_step %d is beyond the source run's last step (it recorded %d; a run past the end has nothing fresh to answer)",
-				cmd.Source.FromStep, n), false
-		}
-		cmd.schemas = toolSchemas(agent)
-		var err error
-		if cmd.prefix, err = runPrefix(cmd.src, *cmd, hasInput); err != nil {
-			return err.Error(), false
-		}
-		if len(cmd.TranscriptEdits) > 0 {
-			// The kept steps as edited: what the substitute lookup keys
-			// the kept calls on (validated just above).
-			_, cmd.kept, _ = applyEditsKept(cmd.src, cmd.Source.FromStep, cmd.TranscriptEdits, cmd.schemas)
-		}
 		// Studio's order (playground.go's checkCommand, then
-		// checkSource): the edits first, then the scripted engine's
-		// refusals, then the input — so one body gets one sentence on
-		// both sides.
-		if cmd.Engine == "scripted" && len(cmd.TranscriptEdits) > 0 {
-			// An edit changes what the model saw at from_step, and the
-			// recorded turns are keyed on what it saw: refused here, in
-			// one sentence, rather than acked and failed "no recorded
-			// turn" at the first step (ADR 0029 §8).
-			return scriptedEdits(cmd.Source.FromStep), false
-		}
+		// checkSource): the scripted engine's step it never answered,
+		// then the input.
 		if n := cmd.src.stepCount(); cmd.Engine == "scripted" && cmd.Source.FromStep > 0 && cmd.Source.FromStep == n {
 			// The step at the count is the one the source never answered:
 			// the scripted engine has nothing to replay for it — refused
@@ -243,6 +220,64 @@ func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
 			return fmt.Sprintf("model %s: the resolver returned no model", m), false
 		}
 		cmd.model = model
+	}
+	return "", true
+}
+
+// prepareSource resolves the source turn's transcript once and, for
+// an ephemeral command, composes the kept prefix the run is fed (the
+// edits applied and validated, the step-count rule checked) — what
+// validate runs first when the command edits the transcript, so the
+// edits are refused before any other check, in Studio's order
+// (playground.go's checkCommand).
+func (l *link) prepareSource(ctx context.Context, agent *core.Agent, cmd *command, hasInput, hasSource bool) (string, bool) {
+	// The source turn's context, read once. A fork reads nothing from
+	// it (the session's own tree is the conversation) unless the
+	// scripted engine needs the record.
+	if hasSource && (cmd.Thread != "fork" || cmd.Engine == "scripted") {
+		src, err := l.sourceTranscript(ctx, agent, cmd.Source.RunID, cmd.Source.FromStep)
+		switch {
+		case err == nil:
+			cmd.src = src
+		case cmd.Source.FromStep > 0 || len(cmd.TranscriptEdits) > 0 || cmd.Engine == "scripted" || !hasInput:
+			// The command is a re-run of that transcript: without it
+			// there is nothing to run — and a scripted command must
+			// never fall through to the live model. An input beside
+			// from_step > 0 is refused for itself first, as Studio does
+			// before it looks the source up (checkSource).
+			if hasInput && cmd.Source.FromStep > 0 && len(cmd.TranscriptEdits) == 0 {
+				return inputPastStepZero, false
+			}
+			return fmt.Sprintf("source transcript unresolved: %v", err), false
+		default:
+			// A fresh input on an unresolvable source still runs, on
+			// the input alone: a playground run from the words given
+			// beats a dev tool that wedges. Logged.
+			slog.Warn("weft/runtime: source transcript unresolved; running on the input alone",
+				"run_id", cmd.Source.RunID, "err", err)
+		}
+	}
+	if cmd.src == nil || cmd.Thread == "fork" {
+		return "", true
+	}
+	// from_step at the step count is a step that never answered: fresh
+	// when the last kept step ended in answered tool calls (the replay's
+	// first model call answers them — the source's next step, failed or
+	// never made), nothing to answer after a call-free reply (ADR 0029).
+	if n := cmd.src.stepCount(); cmd.Source.FromStep > 0 &&
+		(cmd.Source.FromStep > n || cmd.Source.FromStep == n && !endsInAnsweredCalls(cmd.src.steps)) {
+		return fmt.Sprintf("from_step %d is beyond the source run's last step (it recorded %d; a run past the end has nothing fresh to answer)",
+			cmd.Source.FromStep, n), false
+	}
+	cmd.schemas = toolSchemas(agent)
+	var err error
+	if cmd.prefix, err = runPrefix(cmd.src, *cmd, hasInput); err != nil {
+		return err.Error(), false
+	}
+	if len(cmd.TranscriptEdits) > 0 {
+		// The kept steps as edited: what the substitute lookup keys
+		// the kept calls on (validated just above).
+		_, cmd.kept, _ = applyEditsKept(cmd.src, cmd.Source.FromStep, cmd.TranscriptEdits, cmd.schemas)
 	}
 	return "", true
 }

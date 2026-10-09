@@ -133,6 +133,7 @@ func TestReplayWithEditedRequest(t *testing.T) {
 			nullArgs := command{CommandID: "cmd_null", Agent: "orders", Engine: "live",
 				Source: &sourceSpec{RunID: "r_edit", FromStep: 2},
 				TranscriptEdits: []transcriptEdit{{Kind: "user", Step: 0, Content: "x", Args: json.RawMessage(`null`)},
+					{Kind: "insert", Step: 1, Content: "z", Args: json.RawMessage(`null`)},
 					{Kind: "reply", Step: 1, Content: "y", Args: json.RawMessage(` `)}}}
 			if reason, ok := l.validate(ctx, &nullArgs); ok || reason != "step 1 has no assistant reply in the kept prefix (or it carried tool calls: patch their results instead)" {
 				t.Errorf("null args = %v %q, want them read as absent (and the explicit reply kind checked as a reply)", ok, reason)

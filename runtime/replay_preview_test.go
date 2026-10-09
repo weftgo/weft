@@ -59,6 +59,8 @@ type previewBody struct {
 	Overrides       overrides        `json:"overrides"`
 	TranscriptEdits []transcriptEdit `json:"transcript_edits,omitempty"`
 	Engine          string           `json:"engine,omitempty"`
+	Thread          string           `json:"thread,omitempty"`
+	SideEffects     string           `json:"side_effects,omitempty"`
 }
 
 // previewWill is the part of the preview this file compares.
@@ -204,7 +206,9 @@ func TestPreviewMatchesTheReplayInput(t *testing.T) {
 // TestOneSentenceOnBothSides: a body that breaks two rules gets the
 // same refusal from Studio (the run route, 400) and from the runtime
 // (validate, before the ack) — the checks run in one order on both
-// sides: the edits first, then the scripted engine, then the input.
+// sides: the edits first (before the engine, the thread, the side
+// effects and the overrides), then the scripted engine's refusals
+// (worded alike, §5.5 suffix included), then the input.
 func TestOneSentenceOnBothSides(t *testing.T) {
 	ctx := context.Background()
 	p, err := otel.Start(ctx, otel.Local(filepath.Join(t.TempDir(), "weft.db")), otel.NoGlobal())
@@ -231,6 +235,8 @@ func TestOneSentenceOnBothSides(t *testing.T) {
 	l.localDB = func() obsdb.DB { return db }
 	defer l.stop()
 	in := "where is order 9?"
+	badEdit := []transcriptEdit{{Kind: "insert", Step: 5, Content: "x"}}
+	const badInsert = "insert step 5 is past from_step 2: an insert lands at a step boundary 0..2"
 	for _, c := range []struct {
 		name string
 		body previewBody
@@ -245,13 +251,38 @@ func TestOneSentenceOnBothSides(t *testing.T) {
 		{"scripted, from_step 2, an edit", previewBody{Engine: "scripted", Source: &sourceSpec{RunID: "r_os", FromStep: 2},
 			TranscriptEdits: []transcriptEdit{{Kind: "insert", Step: 2, Content: "x"}}},
 			"the scripted engine would replay the recorded turn 2, which answered a different prompt: transcript edits need engine live"},
+		{"from_step -1, an edit", previewBody{Source: &sourceSpec{RunID: "r_os", FromStep: -1},
+			TranscriptEdits: []transcriptEdit{{Kind: "user", Step: 0, Content: "x"}}},
+			"transcript_edits need from_step > 0 (0 re-runs the whole turn, nothing is kept)"},
+		{"scripted, an instructions override, a bad edit", previewBody{Engine: "scripted", Overrides: overrides{Instructions: "x"},
+			Source: &sourceSpec{RunID: "r_os", FromStep: 2}, TranscriptEdits: badEdit}, badInsert},
+		{"scripted, a model override, a bad edit", previewBody{Engine: "scripted", Overrides: overrides{Model: "m"},
+			Source: &sourceSpec{RunID: "r_os", FromStep: 2}, TranscriptEdits: badEdit}, badInsert},
+		{"an unknown thinking level, a bad edit", previewBody{Overrides: overrides{Thinking: "max"},
+			Source: &sourceSpec{RunID: "r_os", FromStep: 2}, TranscriptEdits: badEdit}, badInsert},
+		{"an unknown thread mode, a bad edit", previewBody{Thread: "branch",
+			Source: &sourceSpec{RunID: "r_os", FromStep: 2}, TranscriptEdits: badEdit}, badInsert},
+		{"an unknown side_effects mode, a bad edit", previewBody{SideEffects: "maybe",
+			Source: &sourceSpec{RunID: "r_os", FromStep: 2}, TranscriptEdits: badEdit}, badInsert},
+		{"an unknown tool, a bad edit", previewBody{Overrides: overrides{ToolsEnabled: []string{"nope"}},
+			Source: &sourceSpec{RunID: "r_os", FromStep: 2}, TranscriptEdits: badEdit}, badInsert},
+		{"scripted, a valid edit, an unknown thread mode", previewBody{Engine: "scripted", Thread: "branch",
+			Source: &sourceSpec{RunID: "r_os", FromStep: 2}, TranscriptEdits: []transcriptEdit{{Kind: "insert", Step: 2, Content: "x"}}},
+			"the scripted engine would replay the recorded turn 2, which answered a different prompt: transcript edits need engine live"},
+		{"scripted, an instructions override, no edit", previewBody{Engine: "scripted", Overrides: overrides{Instructions: "x"},
+			Source: &sourceSpec{RunID: "r_os", FromStep: 1}},
+			"scripted engine with an instructions override would silently replay the old answer (WEFT-PLAYGROUND §5.5)"},
+		{"scripted, a model override, no edit", previewBody{Engine: "scripted", Overrides: overrides{Model: "m"},
+			Source: &sourceSpec{RunID: "r_os", FromStep: 1}},
+			"scripted engine with a model override would silently replay the old answer (WEFT-PLAYGROUND §5.5)"},
 	} {
 		c.body.Agent, c.body.Runtime = "orders", l.id
 		if code, msg := postStudio(t, ts.URL, "/api/playground/runs", c.body); code != http.StatusBadRequest || msg != c.want {
 			t.Errorf("%s: Studio = %d %q, want 400 %q", c.name, code, msg, c.want)
 		}
 		cmd := command{CommandID: "cmd_os", Agent: "orders", Engine: c.body.Engine, Source: c.body.Source,
-			Input: c.body.Input, TranscriptEdits: c.body.TranscriptEdits}
+			Input: c.body.Input, TranscriptEdits: c.body.TranscriptEdits, Overrides: c.body.Overrides,
+			Thread: c.body.Thread, SideEffects: c.body.SideEffects}
 		if reason, ok := l.validate(ctx, &cmd); ok || reason != c.want {
 			t.Errorf("%s: runtime = %v %q, want %q", c.name, ok, reason, c.want)
 		}
@@ -292,12 +323,18 @@ func TestSubstituteKeysOnTheEditedPair(t *testing.T) {
 	}
 	db := p.LocalDB()
 	ran.Store(0)
+	argsEdit := transcriptEdit{Kind: "tool_args", Step: 0, CallID: "c1", Args: json.RawMessage(`{"order_id":"7"}`)}
 	for _, c := range []struct {
 		name, args string
+		edit       transcriptEdit
 		parked     bool
+		answer     string
 	}{
-		{"edited args re-issued", `{"order_id":"7"}`, false},
-		{"original args re-issued", `{"order_id":"42"}`, true},
+		{"edited args re-issued", `{"order_id":"7"}`, argsEdit, false, "order 42 shipped"},
+		{"original args re-issued", `{"order_id":"42"}`, argsEdit, true, ""},
+		// A patched result answers its call's re-issue (the fresh steps
+		// never recorded that key: their records would queue first).
+		{"patched result re-issued", `{"order_id":"42"}`, transcriptEdit{Step: 0, CallID: "c1", ToolResult: "lost"}, false, "lost"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			model := wefttest.Script(
@@ -310,7 +347,7 @@ func TestSubstituteKeysOnTheEditedPair(t *testing.T) {
 			defer l.stop()
 			cmd := command{CommandID: "cmd_sub", Agent: "orders", Engine: "live", SideEffects: "substitute",
 				Source:          &sourceSpec{RunID: "r_sub", FromStep: 1},
-				TranscriptEdits: []transcriptEdit{{Kind: "tool_args", Step: 0, CallID: "c1", Args: json.RawMessage(`{"order_id":"7"}`)}}}
+				TranscriptEdits: []transcriptEdit{c.edit}}
 			if reason, ok := l.validate(ctx, &cmd); !ok {
 				t.Fatalf("validate: %s", reason)
 			}
@@ -331,7 +368,7 @@ func TestSubstituteKeysOnTheEditedPair(t *testing.T) {
 			if !c.parked {
 				reqs := model.Requests()
 				last, _ := json.Marshal(reqs[len(reqs)-1].Messages)
-				if !strings.Contains(string(last), `"call_id":"r1","name":"lookup","content":"order 42 shipped"`) {
+				if !strings.Contains(string(last), `"call_id":"r1","name":"lookup","content":"`+c.answer+`"`) {
 					t.Errorf("the re-issued call was not answered with the kept result: %s", last)
 				}
 			}

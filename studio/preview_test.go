@@ -221,6 +221,7 @@ func TestPreviewRoute(t *testing.T) {
 		{"args without kind", edit(`{"step":0,"call_id":"c1","args":{}}`), `an edit with args needs kind "tool_args"`},
 		{"args null on a tool_args edit", edit(`{"kind":"tool_args","step":0,"call_id":"c1","args":null}`), "a tool_args edit needs args"},
 		{"args null beside a user edit", edit(`{"kind":"user","step":0,"content":"x","args":null}`), ""},
+		{"args null beside an insert", edit(`{"kind":"insert","step":1,"content":"x","args":null}`), ""},
 		{"input beside from_step", `{"runtime":"rt_test","agent":"acme-support","source":{"run_id":"r_pv","from_step":2},"input":"x"}`,
 			`input replaces the turn's user message only when from_step is 0: with from_step > 0, edit step 0's user message instead (a transcript edit of kind "user")`},
 	} {

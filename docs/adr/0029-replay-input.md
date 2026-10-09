@@ -175,7 +175,14 @@ The request a replay sends is model-visible behaviour (AGENTS.md rule
    arguments is answered with the kept (or patched) result; one
    re-issued with the original arguments no longer matches and parks (or
    runs, per its replay class); a patched result's re-issue gets the
-   patched result. The fresh steps' records are unchanged.
+   patched result. The fresh steps' records are unchanged and queue
+   first: a key a fresh step also recorded is answered from that record
+   before the kept one. The checks run in one order on both sides — the
+   edits first, then the engine (the scripted refusals worded alike),
+   the thread and side-effect modes, the overrides, then the input — so
+   one body reads one sentence; the one residue is a scripted command
+   from the step it never answered beside another refusal, which the
+   runtime meets after the overrides.
 
    *The mark.* A replayed run whose prefix was edited carries
    `weft.edits` (run metadata, on every span and record, in the run

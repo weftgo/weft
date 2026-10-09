@@ -966,13 +966,17 @@ mirrors the server's rules by name — caps lower only, the ranges, a tool
 the agent lacks, only tools inside the tools left on, a named choice the
 command turns off or parks, the agent's own named default turned off —
 says each refusal on its knob in the server's words and holds Run; a
-tool turned off is greyed out of only tools and the named tool picker.
-The server stays the authority: its 400 is shown verbatim where the
-command's error goes. A registration without `defaults` (a Studio older
-than the field) shows the knobs with no default and greys the four new
-ones, saying why (`runtime predates the option lab …`); a current
-Studio fills an old runtime's defaults in (its caps, tool choice auto),
-and then the server's 400 says it. The ack preview follows park on
+tool turned off is greyed out of only tools (a box already ticked stays
+clearable) and the named tool picker; park on lists every tool of the
+agent, unrestricted. A cap of 0 is no bound: no default shown, no
+refusal. The server stays the authority: its 400 is shown verbatim where
+the command's error goes. A registration without `defaults` (a runtime
+older than the option lab, whose `defaults` `/api/runtimes` omits, or a
+Studio older than the field) shows the knobs with no default and greys
+the seven option-lab controls the old runtime cannot carry — top_p, max
+tokens, seed, stop, tool choice, only tools, park on — saying why
+(`runtime predates the option lab …`). The model's free text is kept as
+typed (the name sent is its trim). The ack preview follows park on
 (those calls park) and only tools (the others are off). Both surfaces
 build the command's overrides through `labOverrides`, so they post
 byte-identical JSON for the same choices (`src/panel/optionlab.test.ts`:

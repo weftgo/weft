@@ -214,7 +214,16 @@ function ModelField({
   agent?: AgentView
 }) {
   const models = agent?.models ?? []
-  const listed = variant.model === "" || models.includes(variant.model)
+  // The free text is its own state: what was typed stays as typed (a
+  // name that extends a listed one, inner spaces) and the model sent is
+  // its trim; the select shows a listed name only when nothing is typed.
+  const [free, setFree] = useState(() => (variant.model && !models.includes(variant.model) ? variant.model : ""))
+  useEffect(() => {
+    // Set from outside (another agent, a hand-off): follow it.
+    if (variant.model !== free.trim() && !(free === "" && (variant.model === "" || models.includes(variant.model))))
+      setFree(models.includes(variant.model) ? "" : variant.model)
+  }, [variant.model, free, models])
+  const listed = free.trim() === ""
   const thinkingDef = agent?.defaults?.thinking
   return (
     <div className="flex flex-wrap gap-2">
@@ -223,9 +232,12 @@ function ModelField({
         <select
           aria-label="model"
           className={`w-full rounded border bg-transparent px-1 py-1 text-xs ${variant.model ? "border-primary text-primary" : ""}`}
-          value={listed ? variant.model : ""}
+          value={listed && models.includes(variant.model) ? variant.model : ""}
           data-override={variant.model ? "" : undefined}
-          onChange={(e) => patch({ model: e.target.value })}
+          onChange={(e) => {
+            setFree("")
+            patch({ model: e.target.value })
+          }}
         >
           <option value="">(the agent's own)</option>
           {models.map((m) => (
@@ -243,8 +255,11 @@ function ModelField({
             data-model-free=""
             className={`w-full rounded border bg-transparent px-2 py-1 text-xs ${!listed ? "border-primary text-primary" : ""}`}
             placeholder="the app resolves it (runtime.ModelResolver)"
-            value={listed ? "" : variant.model}
-            onChange={(e) => patch({ model: e.target.value.trim() })}
+            value={free}
+            onChange={(e) => {
+              setFree(e.target.value)
+              patch({ model: e.target.value.trim() })
+            }}
           />
         </label>
       ) : null}
@@ -331,7 +346,8 @@ export function OptionLab({
                 type="checkbox"
                 aria-label={`${LAB_LABELS[k]}: ${n}`}
                 checked={on}
-                disabled={off || greyed(k)}
+                // A checked box stays clearable after its tool is turned off.
+                disabled={greyed(k) || (off && !on)}
                 onChange={(e) => set({ [k]: e.target.checked ? [...lab[k], n] : lab[k].filter((x) => x !== n) })}
               />
               {n}
@@ -442,8 +458,8 @@ function Problems({ list }: { list: LabProblem[] }) {
   if (!list.length) return null
   return (
     <>
-      {list.map((p) => (
-        <p key={p.message} className="text-[11px] text-status-bad" role="alert" data-lab-problem={p.field}>
+      {list.map((p, i) => (
+        <p key={`${i}:${p.message}`} className="text-[11px] text-status-bad" role="alert" data-lab-problem={p.field}>
           {p.message}
         </p>
       ))}

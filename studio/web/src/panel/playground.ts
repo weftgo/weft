@@ -44,6 +44,8 @@ export interface ExperimentDraft {
   /** Tools by name; false = turned off (narrowing only). */
   tools: Record<string, boolean>
   model: string
+  /** The resolver's free text as typed (model is its trim). */
+  modelFree?: string
   thinking: string
   input: string
   engine: "live" | "scripted"

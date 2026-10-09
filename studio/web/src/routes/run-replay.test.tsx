@@ -1083,6 +1083,35 @@ describe("the option lab (plan F3, Studio's drawer)", () => {
     expect(verdict("refund")).toBe("off")
   })
 
+  it("a model name that extends a listed one is kept as typed and sent trimmed", async () => {
+    const d = await openLab()
+    const free = d.getByLabelText<HTMLInputElement>("model name the app resolves")
+    for (const v of ["glm-5.3-flash", "glm-5.3-flash-", "glm-5.3-flash-lite", "glm-5.3-flash-lite "]) {
+      fireEvent.change(free, { target: { value: v } })
+      expect(free.value).toBe(v)
+    }
+    await waitFor(() => expect(run(d).disabled).toBe(false))
+    fireEvent.click(run(d))
+    await waitFor(() => expect(studio.calls("POST playground/runs")).toHaveLength(1))
+    expect((studio.calls("POST playground/runs")[0].body as { overrides: { model: string } }).overrides.model).toBe("glm-5.3-flash-lite")
+  })
+
+  it("a ticked only_tools box whose tool is then turned off stays clearable; clearing it frees Run", async () => {
+    const d = await openLab()
+    await waitFor(() => expect(run(d).disabled).toBe(false))
+    fireEvent.click(d.getByRole("checkbox", { name: "only tools: refund" }))
+    fireEvent.click(d.getByRole("checkbox", { name: /^refund/ }))
+    expect(document.querySelector('[data-lab-problem="only_tools"]')?.textContent).toBe(
+      "only_tools may only narrow tools_enabled: tool refund is not enabled"
+    )
+    expect(run(d).disabled).toBe(true)
+    const box = d.getByRole<HTMLInputElement>("checkbox", { name: "only tools: refund" })
+    expect(box.disabled).toBe(false)
+    fireEvent.click(box)
+    expect(box.disabled).toBe(true)
+    await waitFor(() => expect(run(d).disabled).toBe(false))
+  })
+
   it("model free text only when the runtime holds a resolver", async () => {
     const d = await openLab(withAgent({ resolver: false }))
     expect(d.queryByLabelText("model name the app resolves")).toBeNull()

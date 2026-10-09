@@ -2755,10 +2755,12 @@ export class WeftDevtools extends HTMLElement {
       o.value = m
       modelSel.appendChild(o)
     }
-    const listed = !d.model || (agent?.models ?? []).includes(d.model)
+    // The free text as typed (modelFree); the model sent is its trim.
+    const typed = d.modelFree ?? (d.model && !(agent?.models ?? []).includes(d.model) ? d.model : "")
+    const listed = !typed.trim()
     modelSel.value = listed ? d.model : ""
     if (d.model) modelSel.classList.add("weft-ovr")
-    on(modelSel, "change", (_, n) => this.model?.setDraft({ model: (n as HTMLSelectElement).value }))
+    on(modelSel, "change", (_, n) => this.model?.setDraft({ model: (n as HTMLSelectElement).value, modelFree: "" }))
     opts.appendChild(modelSel)
     // Any model name, when the app holds a runtime.ModelResolver (plan
     // F3): the app decides; its refusal is the command's reason.
@@ -2767,8 +2769,11 @@ export class WeftDevtools extends HTMLElement {
         "aria-label": "model name the app resolves",
         placeholder: "or any model: the app resolves it",
       }) as HTMLInputElement
-      free.value = listed ? "" : d.model
-      on(free, "input", (_, n) => this.model?.setDraft({ model: (n as HTMLInputElement).value.trim() }))
+      free.value = typed
+      on(free, "input", (_, n) => {
+        const v = (n as HTMLInputElement).value
+        this.model?.setDraft({ model: v.trim(), modelFree: v })
+      })
       opts.appendChild(free)
     }
     const thinkSel = el("select", "weft-input", undefined, { "aria-label": "thinking" }) as HTMLSelectElement
@@ -3073,7 +3078,8 @@ export class WeftDevtools extends HTMLElement {
         cb.type = "checkbox"
         cb.checked = lab[k].includes(n)
         // only_tools narrows tools_enabled: a tool turned off is greyed.
-        cb.disabled = old || (k === "only_tools" && isOff(n))
+        // A checked box stays clearable after its tool is turned off.
+        cb.disabled = old || (k === "only_tools" && isOff(n) && !cb.checked)
         on(cb, "change", (_, b) => {
           const cur = this.model?.state.drawer?.lab?.[k] ?? []
           set({ [k]: (b as HTMLInputElement).checked ? [...cur, n] : cur.filter((x) => x !== n) })

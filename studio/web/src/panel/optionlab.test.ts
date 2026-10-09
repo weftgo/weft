@@ -13,7 +13,7 @@ import { resolve } from "node:path"
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
 import type { AgentView, RuntimeView } from "../lib/api"
-import { buildRunBody as studioBody, emptyLab, LAB_PREDATES, labOverrides } from "../lib/experiment-body"
+import { buildRunBody as studioBody, emptyLab, LAB_PREDATES, labDefault, labOverrides } from "../lib/experiment-body"
 import type { LabFields, VariantFields } from "../lib/experiment-body"
 import { buildRunBody, draftProblem } from "./playground"
 import type { ExperimentDraft } from "./playground"
@@ -57,7 +57,11 @@ const TABLE: Row[] = [
   { name: "top_p out of range", lab: { top_p: "1.5" }, refused: "top_p must be between 0 and 1" },
   { name: "max_tokens zero", lab: { max_tokens: "0" }, refused: "max_tokens must be positive" },
   { name: "five stop sequences", lab: { stop: "a\nb\nc\nd\ne" }, refused: "stop takes at most 4 sequences, got 5" },
-  { name: "a tool the agent lacks in only_tools", lab: { only_tools: ["delete_all"] }, refused: "tool delete_all is not in agent acme-support's manifest" },
+  { name: "a tool the agent lacks in only_tools", lab: { only_tools: ["delete_all"] }, refused: "tool delete_all in only_tools is not in agent acme-support's manifest" },
+  { name: "a tool the agent lacks in park_on", lab: { park_on: ["delete_all"] }, refused: "tool delete_all in park_on is not in agent acme-support's manifest" },
+  { name: "max_tokens fractional", lab: { max_tokens: "2.5" }, refused: "max_tokens must be a whole number" },
+  { name: "max_tokens past a safe integer", lab: { max_tokens: "1e20" }, refused: "max_tokens must be a whole number" },
+  { name: "seed past a safe integer", lab: { seed: "1e20" }, refused: "seed must be a whole number" },
   { name: "only_tools outside tools_enabled", off: ["refund"], lab: { only_tools: ["refund"], tool_choice: "auto" }, refused: "only_tools may only narrow tools_enabled: tool refund is not enabled" },
   { name: "named with no tool", lab: { tool_choice: "named" }, refused: "tool_choice named needs a tool name" },
   { name: "named a tool the command turns off", lab: { tool_choice: "named", tool_choice_name: "refund", only_tools: ["lookup_order"] }, refused: "tool_choice names refund, which this command turns off" },
@@ -128,6 +132,26 @@ describe("labOverrides over the runtimes golden (one table, the server's rules b
         expect(got.overrides).toEqual(row.sends)
       }
     })
+  it("an unknown name in both lists is said once per list, in the server's words", () => {
+    const got = labOverrides({ ...emptyLab(), only_tools: ["x", "x"], park_on: ["x"] }, agent, [])
+    expect(got.problems.map((p) => p.message)).toEqual([
+      "tool x in only_tools is not in agent acme-support's manifest",
+      "tool x in park_on is not in agent acme-support's manifest",
+    ])
+  })
+  it("a 0 cap is no bound: no default shown, no refusal", () => {
+    const unbound: AgentView = { ...agent, defaults: { ...agent.defaults!, max_steps: 0, parallelism: 0 } }
+    expect(labDefault("max_steps", unbound.defaults)).toBe("")
+    expect(labOverrides({ ...emptyLab(), max_steps: "50", parallelism: "16" }, unbound, [])).toEqual({
+      overrides: { options: { max_steps: 50, parallelism: 16 } },
+      problems: [],
+    })
+  })
+  it("with the cap unknown, checkNeutral's bound: at most 1e6", () => {
+    const old: AgentView = { ...agent, defaults: undefined }
+    expect(labOverrides({ ...emptyLab(), max_steps: "2000000" }, old, []).problems[0].message).toBe("max_steps must be a whole number from 1")
+    expect(labOverrides({ ...emptyLab(), max_steps: "1000000" }, old, []).problems).toEqual([])
+  })
   it("a registration without defaults refuses the new knobs with the server's sentence; the old ones still go", () => {
     const old: AgentView = { ...agent, defaults: undefined }
     expect(labOverrides({ ...emptyLab(), top_p: "0.5" }, old, []).problems[0].message).toBe(LAB_PREDATES)
@@ -270,6 +294,34 @@ describe("the panel's option lab", () => {
     tick(field(el, "only tools: lookup_order"))
     await settle()
     expect(verdict("refund")).toBe("off")
+  })
+
+  it("a model name that extends a listed one is kept as typed and sent trimmed", async () => {
+    const { el, studio } = await open(undefined, { "POST playground/runs": { command_id: "cmd_1", state: "queued" } })
+    const free = field(el, "model name the app resolves")
+    for (const v of ["glm-5.3-flash", "glm-5.3-flash-", "glm-5.3-flash-lite", "glm-5.3-flash-lite "]) {
+      type(free, v)
+      await settle()
+      expect(field(el, "model name the app resolves").value).toBe(v)
+    }
+    click(runBtn(el))
+    await settle(20)
+    expect((studio.posts("playground/runs")[0].body as { overrides: { model: string } }).overrides.model).toBe("glm-5.3-flash-lite")
+  })
+
+  it("a ticked only_tools box whose tool is then turned off stays clearable; clearing it frees Run", async () => {
+    const { el } = await open()
+    tick(field(el, "only tools: refund"))
+    await settle()
+    tick(toolBox(el, "refund"))
+    await settle()
+    expect(text(el, '[data-weft-lab-problem="only_tools"]')).toBe("only_tools may only narrow tools_enabled: tool refund is not enabled")
+    expect(runBtn(el).disabled).toBe(true)
+    expect(field(el, "only tools: refund").disabled).toBe(false)
+    tick(field(el, "only tools: refund"))
+    await settle()
+    expect(field(el, "only tools: refund").disabled).toBe(true)
+    expect(runBtn(el).disabled).toBe(false)
   })
 
   it("model free text only when the agent's runtime holds a resolver", async () => {

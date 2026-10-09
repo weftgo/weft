@@ -274,7 +274,7 @@ describe("no panel-only badge strings", () => {
     "requests:not recorded (stripped)": "paramFields — the run page's params of a content-off request",
     "requests:request not recorded by weft v0.9.0 or earlier": "REQUEST_NOT_RECORDED_LABEL — the run page's request label",
     "replay: · the compacted prefix (what the model saw at step )": "prefixLine — the replay drawers' ack preview (plan F1)",
-    "experiment-body:max_tokens must be positive":
+    "experiment-body:max_tokens must be ":
       "labOverrides — both drawers' option lab (plan F3): the server's refusal, naming the param, not the hole",
   }
 

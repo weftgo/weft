@@ -433,6 +433,8 @@ export function labDefault(key: keyof LabFields, d: AgentDefaults | undefined): 
       return ""
   }
   const v = (d as unknown as Record<string, unknown>)[key]
+  // A 0 cap is no bound (the server refuses a raise only over a cap > 0).
+  if ((key === "max_steps" || key === "parallelism") && !(typeof v === "number" && v > 0)) return ""
   return typeof v === "number" ? String(v) : ""
 }
 
@@ -473,9 +475,10 @@ export function labOverrides(
       continue
     }
     if (def !== "" && Number(def) === v) continue
-    const whole = Number.isInteger(v)
+    const whole = Number.isSafeInteger(v)
     if (key === "max_steps" || key === "parallelism") {
-      if (!whole || v < 1) no(key, `${key} must be a whole number from 1`)
+      // checkNeutral's range: a whole number from 1, at most 1e6.
+      if (!whole || v < 1 || v > 1e6) no(key, `${key} must be a whole number from 1`)
       else if (def !== "" && v > Number(def)) no(key, `${key} may only lower the agent's cap`)
       options[key] = v
     } else if (key === "temperature") {
@@ -485,7 +488,8 @@ export function labOverrides(
       if (v < 0 || v > 1) no(key, "top_p must be between 0 and 1")
       params.top_p = v
     } else if (key === "max_tokens") {
-      if (!whole || v <= 0) no(key, "max_tokens must be positive")
+      if (!whole) no(key, "max_tokens must be a whole number")
+      else if (v <= 0) no(key, "max_tokens must be positive")
       params.max_tokens = v
     } else {
       if (!whole) no(key, "seed must be a whole number")
@@ -503,8 +507,9 @@ export function labOverrides(
   if (params.max_tokens !== undefined) p.max_tokens = params.max_tokens
   if (params.stop) p.stop = params.stop
   if (params.seed !== undefined) p.seed = params.seed
-  for (const name of [...lab.only_tools, ...lab.park_on])
-    if (!tools.includes(name)) no(lab.only_tools.includes(name) ? "only_tools" : "park_on", `tool ${name} is not in agent ${agent.name}'s manifest`)
+  // studio/playground.go toolOverrides' words, once per list.
+  for (const k of ["only_tools", "park_on"] as const)
+    for (const name of new Set(lab[k])) if (!tools.includes(name)) no(k, `tool ${name} in ${k} is not in agent ${agent.name}'s manifest`)
   let only = inOrder(lab.only_tools, tools)
   if (only.length === tools.length) only = []
   for (const name of only)

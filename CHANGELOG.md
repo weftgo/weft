@@ -88,11 +88,13 @@ module, ADR 0005).
   only, ranges, a tool the agent lacks, only_tools inside
   tools_enabled, a named choice turned off or parked, the agent's named
   default turned off): a refusal is said on its knob in the server's
-  words and holds Run; a tool turned off is greyed out of only_tools and
-  the named tool picker; the server's 400 is still shown verbatim when it
-  refuses anyway. A registration without defaults (a Studio older than
-  the field) shows the knobs with no default, greys the four new ones
-  and says why. The ack preview follows `park_on` and `only_tools`.
+  words and holds Run; a tool turned off is greyed out of only_tools
+  (a ticked box stays clearable) and the named tool picker (park_on
+  lists every tool); a 0 cap is no bound; the server's 400 is still
+  shown verbatim when it refuses anyway. A registration without
+  defaults (an old runtime, or a Studio older than the field) shows the
+  knobs with no default, greys the seven option-lab controls it cannot
+  carry and says why. The ack preview follows `park_on` and `only_tools`.
   Both surfaces post byte-identical JSON for the same choices (pinned by
   a table over `testdata/api/runtimes.golden.json` and a parity test).
   Panel: +2,821 B gzip (ledger row F3, of a +3,072 B estimate).

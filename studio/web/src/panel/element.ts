@@ -52,7 +52,7 @@ import { panelStudioVersion } from "./version"
 import { clampLayout, CYCLE, geometry, initialLayout, NARROW_W, pillPlace, placedIn, Push, readStore, TABS, writeStore } from "./layout"
 import { newTree, treeView } from "./tree"
 import type { TreeState } from "./tree"
-import { renderRequestTab } from "./request"
+import { renderRequestTab, stepsOf } from "./request"
 import type { Geometry, Layout } from "./layout"
 import { href, playgroundLink, runLink, sessionLink, traceLink } from "../lib/links"
 import type { PlaygroundHandoff } from "../lib/links"
@@ -435,8 +435,10 @@ export class WeftDevtools extends HTMLElement {
   private rqTrees = new Map<string, TreeState>()
   private rqPick = new Map<number, number>()
   private rqFor = ""
-  private manifest: Manifest | null | undefined = undefined
-  private manifestAsked = false
+  /** The manifest the Request tab reads, per (endpoint, token): doc
+   * undefined until answered, null when it could not be read (asked
+   * again after MANIFEST_RETRY_MS); hashes it was re-asked for. */
+  private mf: { key: string; doc: Manifest | null | undefined; at: number; busy: boolean; asked: Set<string> } | null = null
   /** The turn list's filter (D4), this session only. */
   private tq = { text: "", status: "", err: false }
   /** The prompts of the turns opened so far, by run id: what the
@@ -1425,17 +1427,27 @@ export class WeftDevtools extends HTMLElement {
    * as the one being read (⤢ and g s carry it). */
   private stepKey(d: number) {
     const s = this.last
-    const steps = s.turn?.folded.steps ?? []
+    // The Request tab's picker lists the steps the record names too.
+    const steps = s.turn ? (this.lay.tab === "request" ? stepsOf(s.turn, s.turn.requests) : s.turn.folded.steps.map((st) => st.index)) : []
     if (!steps.length) return
-    const i = steps.findIndex((st) => st.index === linkedStep(s))
+    const i = steps.indexOf(this.stepNow(s) ?? -1)
     const at = i < 0 ? (d > 0 ? 0 : steps.length - 1) : Math.min(Math.max(i + d, 0), steps.length - 1)
-    this.model?.selectStep(steps[at].index)
+    this.model?.selectStep(steps[at])
+  }
+
+  /** stepNow is the step being read: linkedStep, or — on the Request
+   * tab, which always shows one — the step it falls back to (the
+   * first), so ⤢ and J/K start from what is on screen. */
+  private stepNow(s: PanelState): number | undefined {
+    const n = linkedStep(s)
+    if (n !== undefined || this.lay.tab !== "request" || !s.turn || s.turn.id !== s.selected) return n
+    return stepsOf(s.turn, s.turn.requests)[0]
   }
 
   /** openInStudio is g s: the selected turn (and step) in Studio, the
    * link ⤢ carries (lib/links.ts), in a new tab. */
   private openInStudio() {
-    const url = this.last.selected ? this.studioLink(this.last.selected, linkedStep(this.last)) : ""
+    const url = this.last.selected ? this.studioLink(this.last.selected, this.stepNow(this.last)) : ""
     try {
       if (url) window.open(url, "_blank", "noopener")
     } catch {
@@ -2083,7 +2095,7 @@ export class WeftDevtools extends HTMLElement {
     h.appendChild(el("span", undefined, stats, { title: stats }))
     if (s.turns.length && s.selected) {
       const a = el("a", "weft-btn", "⤢", {
-        href: studioLink(this.base, s.selected, linkedStep(s)),
+        href: studioLink(this.base, s.selected, this.stepNow(s)),
         target: "_blank",
         rel: "noopener",
         title: "open in Studio (run, and the step you are reading)",
@@ -2365,6 +2377,7 @@ export class WeftDevtools extends HTMLElement {
         } else {
           turn.expanded.delete(child)
           turn.tried.delete(child) // reopening asks again
+          turn.unreachable.delete(child)
         }
       },
       true
@@ -3225,9 +3238,10 @@ export class WeftDevtools extends HTMLElement {
     const open = { keys: this.openKeys, scope: t.id }
     return renderRequestTab({
       t,
-      step: linkedStep(s),
+      step: this.stepNow(s),
       running: status === "running",
-      manifest: () => this.readManifest(redraw),
+      manifest: () => this.readManifest(redraw, t.doc?.manifest_hash),
+      notServed: s.meta?.capabilities_off?.requests,
       keys: this.openKeys,
       tree: (k) => {
         let st = this.rqTrees.get(k)
@@ -3247,33 +3261,55 @@ export class WeftDevtools extends HTMLElement {
           "data-key": `sub:${call.callId}`,
           "data-weft-rq-child": id,
         })
-        // Read on demand, as the Story's expander reads it (A10).
-        if (cv?.requests) box.appendChild(requestLine(0, cv.requests, cv.status, open))
-        else box.appendChild(on(el("button", "weft-btn", "read its request", { type: "button" }), "click", () => this.go(this.model?.expandChild(id))))
+        // Read on demand, as the Story's expander reads it (A10): the
+        // child's request line once read (its hole without the record),
+        // a hand-off when its history could not be read.
+        if (cv) box.appendChild(cv.requests ? requestLine(0, cv.requests, cv.status, open) : el("div", "weft-req", requestHole("not_recorded", { cause: "not_served", reason: s.meta?.capabilities_off?.requests })))
+        else if (t.unreachable.has(id))
+          box.appendChild(
+            el("div", "weft-reason", [
+              el("span", undefined, "child's history unreachable · "),
+              el("a", undefined, "open in Studio (⤢)", { href: studioLink(this.base, id), target: "_blank", rel: "noopener", "data-weft-handoff": id }),
+            ])
+          )
+        else if (t.tried.has(id)) box.appendChild(el("div", "weft-reason", "reading…"))
+        else box.appendChild(on(el("button", "weft-btn", "read its turn", { type: "button" }), "click", () => this.go(this.model?.expandChild(id))))
         return box
       },
     })
   }
 
   /** readManifest is the registered config the Request tab's first
-   * step diffs against (E1.2): read once, when a chip needs it, and
-   * only where it can be read — a read-scoped token never asks. */
-  private readManifest(redraw: () => void): Manifest | null | undefined {
+   * step diffs against (E1.2): read when a chip needs it, only where it
+   * can be read (a read-scoped token never asks), kept per (endpoint,
+   * token); asked again after a failure (MANIFEST_RETRY_MS on), and
+   * once per run manifest hash it does not list — a redeploy under
+   * weft dev registers a new one. */
+  private readManifest(redraw: () => void, hash?: string): Manifest | null | undefined {
     if (tokenScope(this.cfg.token) === "read") return null
-    if (!this.manifestAsked) {
-      this.manifestAsked = true
+    const key = `${this.base}\u0000${this.cfg.token}`
+    if (this.mf?.key !== key) this.mf = { key, doc: undefined, at: 0, busy: false, asked: new Set() }
+    const m = this.mf
+    const unlisted = !!m.doc && !!hash && !m.doc.agents.some((a) => a.manifest_hash === hash) && !m.asked.has(hash)
+    const again = m.doc === null && Date.now() - m.at >= MANIFEST_RETRY_MS
+    if (!m.busy && (m.at === 0 || again || unlisted)) {
+      if (unlisted) m.asked.add(hash)
+      m.busy = true
+      m.at = Date.now()
+      const done = (doc: Manifest | null) => {
+        if (this.mf !== m) return
+        m.busy = false
+        m.at = Date.now()
+        // A failed re-ask keeps what was read.
+        m.doc = doc || m.doc || null
+        redraw()
+      }
       panelGet<Manifest>({ base: this.base, token: this.cfg.token }, "manifest").then(
-        (m) => {
-          this.manifest = Array.isArray((m as Partial<Manifest> | null)?.agents) ? m : null
-          redraw()
-        },
-        () => {
-          this.manifest = null
-          redraw()
-        }
+        (doc) => done(Array.isArray((doc as Partial<Manifest> | null)?.agents) ? doc : null),
+        () => done(null)
       )
     }
-    return this.manifest
+    return m.doc
   }
 
   private rowOf(id: string): RunRow | undefined {
@@ -3281,6 +3317,10 @@ export class WeftDevtools extends HTMLElement {
   }
 
 }
+
+/** The Request tab asks for a manifest it could not read again after
+ * this long (a 404 before a runtime registered, a restart). */
+export const MANIFEST_RETRY_MS = 30_000
 
 /** turnHoles is a turn's holes, from the shared table: the run
  * document's and the fold's (runHoles, the run page's header), the

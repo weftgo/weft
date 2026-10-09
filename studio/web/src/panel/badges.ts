@@ -77,8 +77,10 @@ export function holeLine(m: HoleMark): HTMLElement {
 /** requestLabel is a request hole's badge text: the table's label,
  * prefixed where it does not name the request; not_recorded names the
  * version that kept no record (the run page's words). */
-export function requestLabel(hole: string): string {
-  const label = hole === "not_recorded" ? REQUEST_NOT_RECORDED_LABEL : holeWords({ hole }).label
+export function requestLabel(hole: string, cause?: string): string {
+  // The version's words are the default cause's alone (not_served: the
+  // record may exist, this Studio does not serve it).
+  const label = hole === "not_recorded" && !cause ? REQUEST_NOT_RECORDED_LABEL : holeWords({ hole }).label
   return label.startsWith("request") ? label : `request: ${label}`
 }
 
@@ -86,7 +88,7 @@ export function requestLabel(hole: string): string {
  * the Request tab): the badge, then the reason and fix as words. */
 export function requestHole(hole: string, note: BadgeNote = {}): HTMLElement[] {
   const w = holeWords({ hole, ...note })
-  const b = badge(hole, { ...note, label: note.label ?? requestLabel(hole) })
+  const b = badge(hole, { ...note, label: note.label ?? requestLabel(hole, note.cause) })
   b.lastChild?.remove() // said visibly below
   return [
     b,

@@ -165,6 +165,15 @@ export async function fetchRequests(
   return { requests: rows, truncated: true }
 }
 
+/** fetchStrippedNote reads the tools route's stripped badge (its
+ * reason and fix) — what the run page reads for a stripped row (the
+ * requests route badges the row, the tools route words it). Undefined
+ * when the route says nothing more. */
+export async function fetchStrippedNote(ep: PanelEndpoint, id: string): Promise<Holed | undefined> {
+  const doc = await panelGet<Holed>(ep, `runs/${encodeURIComponent(id)}/tools`).catch(() => null)
+  return doc?.badge === "stripped" ? { badge: doc.badge, reason: doc.reason, fix: doc.fix } : undefined
+}
+
 export function fetchSpans(
   ep: PanelEndpoint,
   id: string,

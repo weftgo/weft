@@ -14,6 +14,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { golden } from "../test/fake-studio"
 import type { RequestRow, RunDoc, Span } from "../lib/api"
 import { sha256Hex } from "../lib/request-pane"
+import { CAUSES } from "../lib/honesty"
+import { badgeLabel } from "./badges"
+import { MANIFEST_RETRY_MS } from "./element"
+import { COMPOSED_MAX, composedCache } from "./request"
 import {
   $,
 
@@ -281,11 +285,36 @@ describe("E1 Done, in the panel", () => {
     expect(tp(el).querySelector("[data-weft-rq-pane]")).toBeNull()
   })
 
-  it("a Studio without the requests capability says so, never an empty tab", async () => {
+  it("a Studio without the requests capability says so with the table's not_served cause, never an empty tab", async () => {
     const studio = fakeStudio(await routes())
-    const el = await openTab()
-    expect(tp(el).querySelector('[data-weft-rq-hole="not_recorded"]')?.textContent).toContain("not served by this Studio")
+    let el = await openTab()
+    const b = () => tp(el).querySelector('[data-weft-rq-hole="not_recorded"] [data-hole="not_recorded"]')!
+    expect(b().getAttribute("title")).toBe(`${CAUSES.not_recorded!.not_served.reason} — fix: ${CAUSES.not_recorded!.not_served.fix}`)
+    // Not the version's label: the run may hold a record.
+    expect(badgeLabel(b())).toBe("request: not recorded")
     expect(studio.gets(`runs/${RUN}/requests`)).toEqual([])
+    el.remove()
+    // The server's own words (capabilities_off.requests) win.
+    fakeStudio(await routes(), { ...META, capabilities_off: { requests: "the requests group is off (studio.NoRequests)" } })
+    el = await openTab()
+    expect(b().getAttribute("title")).toContain("the requests group is off (studio.NoRequests)")
+  })
+
+  it("(item 1) a derived prompt and catalog: the derived badge on both, no prompt box, and no diff over it on the next step", async () => {
+    const rows = await rowsFor([PROMPT0, PROMPT1, PROMPT0])
+    rows[1].prompt = { hash: rows[1].system_hash, text: "", content: "derived", truncated_bytes: 0 }
+    rows[1].tools = { hash: rows[1].catalog_hash, tools: [], content: "derived", truncated_bytes: 0 }
+    fakeStudio(await routes({ instructions: PROMPT0, requests: { requests: rows } }), META_R)
+    const el = await openTab()
+    await pickStep(el, 1)
+    expect(tp(el).querySelector('[data-weft-rq="system"] [data-hole="derived"]')).not.toBeNull()
+    expect(tp(el).querySelector('[data-weft-rq="tools"] [data-hole="derived"]')).not.toBeNull()
+    expect(tp(el).querySelector("[data-weft-prompt]")).toBeNull()
+    expect(diff(el)).toBeNull()
+    await pickStep(el, 2)
+    // Step 1's text is unknown: nothing to diff step 2 against.
+    expect(marks(el)).toEqual(["changed by PrepareStep"])
+    expect(diff(el)).toBeNull()
   })
 })
 
@@ -364,17 +393,19 @@ describe("the tab's blocks", () => {
     expect(pick(2).getAttribute("aria-pressed")).toBe("false")
   })
 
-  it("J/K move the step the tab shows; a step picked in the tab is what ⤢ carries", async () => {
-    fakeStudio(await routes({ instructions: PROMPT0 }), META_R)
+  it("J/K move the step the tab shows, from the one on screen; ⤢ carries it; a step only the record names is walked", async () => {
+    const r = await routes({ instructions: PROMPT0 })
+    // The events fold two steps; the record names a third.
+    r[`runs/${RUN}/events?after=0&limit=500`] = page(threeSteps().filter((e) => (e as { index?: number }).index !== 2))
+    fakeStudio(r, META_R)
     const el = await openTab()
     const dock = $(el, ".weft-dock")!
     expect(shown(el)).toBe(0)
+    // The step on screen is the one ⤢ carries, before any key.
+    expect($(el, ".weft-head a")?.getAttribute("href")).toMatch(/[?&]step=0(&|$)/)
     key(dock, { key: "J" })
     await settle()
-    expect(shown(el)).toBe(0) // the first J selects the first step
-    key(dock, { key: "J" })
-    await settle()
-    expect(shown(el)).toBe(1)
+    expect(shown(el)).toBe(1) // the first J moves on from what is shown
     key(dock, { key: "J" })
     await settle()
     expect(shown(el)).toBe(2)
@@ -408,12 +439,41 @@ describe("the tab's blocks", () => {
     const box = () => tp(el).querySelector(`[data-weft-rq-child="${CHILD}"]`)!
     expect(box().textContent).toContain("research")
     expect(studio.gets(`runs/${CHILD}/requests`)).toEqual([])
-    click(box().querySelector("button"))
+    const read = box().querySelector("button")!
+    expect(read.textContent).toBe("read its turn")
+    click(read)
     await settle()
     const line = box().querySelector('[data-weft-request="0"]')!
     expect(line.textContent).toContain("You research orders.")
     expect(line.textContent).not.toContain(PROMPT0)
     expect(studio.gets(`runs/${CHILD}/requests`).length).toBe(1)
+  })
+
+  it("a child whose history cannot be read says so and hands off to Studio, never a dead button", async () => {
+    const CHILD = `${RUN}/0/c_sub`
+    const r = await routes({ instructions: PROMPT0 })
+    const childRow = runRow({ id: CHILD, parent_run_id: RUN, parent_call_id: "c_sub", agent: "researcher", session_id: "" })
+    r[`runs/${RUN}`] = { ...runRow({}), children: [childRow] }
+    r[`runs/${RUN}/events?after=0&limit=500`] = page([
+      { type: "run_start", id: RUN, model: { provider: "wefttest", name: "script" }, agent: "a" },
+      { type: "step_start", run_id: RUN, index: 0 },
+      { type: "tool_start", run_id: RUN, seq: 1, call_id: "c_sub", name: "research", args: {} },
+      { type: "tool_finish", run_id: RUN, seq: 1, call_id: "c_sub", name: "research", content: "found it", is_error: false },
+      { type: "step_finish", run_id: RUN, index: 0, reason: "tool_calls", usage: U },
+      { type: "run_finish", run_id: RUN, usage: U, steps: 1 },
+    ])
+    r[REQS] = { requests: goldenRows().slice(0, 1) }
+    r[`runs/${CHILD}/events?after=0&limit=500`] = () => new Response("down", { status: 500 })
+    fakeStudio(r, META_R)
+    const el = await openTab()
+    const box = () => tp(el).querySelector(`[data-weft-rq-child="${CHILD}"]`)!
+    click(box().querySelector("button"))
+    await settle()
+    expect(box().querySelector("button")).toBeNull()
+    expect(box().textContent).toContain("child's history unreachable")
+    expect(box().querySelector(`a[data-weft-handoff="${CHILD}"]`)?.getAttribute("href")).toBe(
+      `http://studio.test/studio/runs/${encodeURIComponent(CHILD)}`
+    )
   })
 
   it("after a compaction the step shows the marker, and its messages the compacted badge", async () => {
@@ -449,6 +509,10 @@ describe("the tab's blocks", () => {
     // The running step is the one shown; its request is not stored yet.
     expect(shown(el)).toBe(1)
     expect(tp(el).textContent).toContain("not stored yet")
+    // Read a recorded step while the tail streams: every block drawn.
+    await pickStep(el, 0)
+    for (const b of ["system", "messages", "tools", "params", "tool_choice", "thinking"]) expect(tp(el).querySelector(`[data-weft-rq="${b}"]`), b).not.toBeNull()
+    expect(tp(el).querySelector("[data-weft-prompt]")?.textContent).toBe(PROMPT0)
     const tail = FakeEventSource.last(`run=${RUN}`)!
     const inTab: MutationRecord[] = []
     const mo = new MutationObserver((ms) => {
@@ -471,3 +535,74 @@ describe("the tab's blocks", () => {
 
 const tab = (el: WeftDevtools) => $(el, "#weft-tab-request")?.getAttribute("aria-selected")
 
+
+describe("the manifest the tab reads (review 2, 10, 11)", () => {
+  const OVERRIDE = [invokeAgent({ "weft.override.hash": "f00d", "weft.override.instructions": true })]
+  const caption = (el: WeftDevtools) => diff(el)?.caption
+
+  it("a failed read is asked again after the backoff, not kept until reload", async () => {
+    let n = 0
+    const r = await routes({ instructions: PROMPT0, spans: OVERRIDE })
+    r.manifest = () => (++n === 1 ? new Response("{}", { status: 500 }) : manifest(REGISTERED))
+    const studio = fakeStudio(r, META_R)
+    const t0 = Date.now()
+    const now = vi.spyOn(Date, "now").mockReturnValue(t0)
+    const el = await openTab()
+    await settle(30)
+    expect(studio.gets("manifest").length).toBe(1)
+    expect(tp(el).querySelector("[data-weft-no-manifest]")).not.toBeNull()
+    // A redraw inside the backoff asks nothing.
+    await pickStep(el, 1)
+    await pickStep(el, 0)
+    expect(studio.gets("manifest").length).toBe(1)
+    now.mockReturnValue(t0 + MANIFEST_RETRY_MS + 1)
+    await pickStep(el, 1)
+    await pickStep(el, 0)
+    await settle(30)
+    expect(studio.gets("manifest").length).toBe(2)
+    expect(caption(el)).toBe("diff vs the registered instructions (overridden for this run)")
+  })
+
+  it("a redeploy: a manifest that does not list the run's hash is asked again once, and the new one verifies", async () => {
+    let n = 0
+    const stale = { ...manifest(REGISTERED), agents: manifest(REGISTERED).agents.map((a) => ({ ...a, manifest_hash: "sha256:old" })) }
+    const r = await routes({ instructions: PROMPT0, spans: OVERRIDE })
+    r.manifest = () => (++n === 1 ? stale : manifest(REGISTERED))
+    const studio = fakeStudio(r, META_R)
+    const el = await openTab()
+    await settle(50)
+    await pickStep(el, 1)
+    await pickStep(el, 0)
+    await settle(30)
+    expect(studio.gets("manifest").length).toBe(2)
+    expect(caption(el)).toBe("diff vs the registered instructions (overridden for this run)")
+    // Listed now: no third read.
+    await pickStep(el, 1)
+    await pickStep(el, 0)
+    expect(studio.gets("manifest").length).toBe(2)
+  })
+
+  it("a playground token reads the manifest once, and the caption is the dev token's", async () => {
+    const studio = fakeStudio(await routes({ instructions: PROMPT0, manifest: manifest(REGISTERED), spans: OVERRIDE }), META_R)
+    const el = await openTab({ ...BASE, "data-token": claims("playground") })
+    await settle(50)
+    expect(marks(el)).toEqual(["overridden by experiment"])
+    expect(caption(el)).toBe("diff vs the registered instructions (overridden for this run)")
+    await pickStep(el, 1)
+    await pickStep(el, 0)
+    expect(studio.gets("manifest").length).toBe(1)
+    expect(studio.calls.find((c) => c.path === "manifest")?.headers.Authorization).toBe(`Bearer ${claims("playground")}`)
+  })
+
+  it("the composition checks are bounded (COMPOSED_MAX, the oldest dropped)", async () => {
+    composedCache.clear()
+    for (let i = 0; i < COMPOSED_MAX; i++) composedCache.set(`k${i}`, true)
+    // A first step that is not its instructions asks for one check.
+    fakeStudio(await routes({ instructions: REGISTERED, manifest: manifest(REGISTERED) }), META_R)
+    const el = await openTab()
+    await settle(50)
+    expect(marks(el)).toEqual(["changed by PrepareStep"])
+    expect(composedCache.size).toBeLessThanOrEqual(COMPOSED_MAX)
+    expect(composedCache.has("k0")).toBe(false)
+  })
+})

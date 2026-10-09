@@ -18,13 +18,25 @@ module, ADR 0005).
   record's hashes, the system prompt with its bounded diff (vs the
   previous step; at the first step vs the registered instructions when
   the panel can read `/api/manifest`), the messages sent (count · bytes,
-  the last three inline, the rest in the Raw tab's tree), the tool
+  the last three inline, the rest in a D4 JSON tree inside the tab), the tool
   catalog (description, policy chips, schema tree), params with "adapter
   default", tool choice, thinking, the attempts, a subagent call's child
   request and the compaction marker. Every absent block is a badge; a
   read-scoped token sees `hidden` and nothing else, and asks for no
   prompt. The panel gate checks the studio-local trim's chip and diff
-  live. +5.5 KiB gzip (estimate +4 KiB).
+  live. +5.5 KiB gzip (estimate +4 KiB). Review fixes: a derived
+  prompt or catalog record (a body that did not parse) is badged
+  `derived` and never diffed over, on both surfaces (`promptText` says
+  undefined for it); the manifest is read per endpoint and token, asked
+  again 30 s after a failure and once when it does not list the run's
+  manifest hash (a redeploy); a subagent's "read its turn" says when the
+  child's history is unreachable and hands off to Studio; the tab's step
+  is the one ⤢ carries and J/K start from, walking the steps the record
+  names too; a Studio that serves no request record is `not_recorded`
+  with the new obsdb cause `not_served` (`/api/meta`'s
+  `capabilities_off.requests` words first); the panes share their words
+  through `lib/requests.ts` and the stripped words of the tools route
+  (+0.6 KiB: the tab is +6.1 KiB, 0.1 KiB past half again its estimate).
 - **The devtools panel's honesty** (plan D5): every badge the panel
   draws comes from the A3 table through one module,
   `src/panel/badges.ts` (`<span class="weft-badge" data-hole="…">`, the

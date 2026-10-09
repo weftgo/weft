@@ -32,6 +32,7 @@
     { "label": "D4 fixes", "item": "D4", "gzip": 54040 },
     { "label": "D5", "item": "", "gzip": 55239, "note": "honesty badges, cap line, turn chips; no estimate in D1's table (+1.2 KiB)" },
     { "label": "E1", "item": "E1", "gzip": 60868, "note": "the Request tab (E1.2): E1.1's pane ported (lib/request-pane.ts, diffLinesBounded) — +5.5 KiB of +4 KiB, under the over line" },
-    { "label": "D5 fixes", "item": "", "gzip": 61258, "note": "D5 review: the no-record gap, accessible badge words, the content line on evidence (+0.4 KiB)" }
+    { "label": "D5 fixes", "item": "", "gzip": 61258, "note": "D5 review: the no-record gap, accessible badge words, the content line on evidence (+0.4 KiB)" },
+    { "label": "E1 fixes", "item": "E1", "gzip": 61898, "note": "E1.2 review: derived records, the manifest re-asked, the unreachable child, the tab's step for ⤢ and J/K, not_served, the tools route's stripped words (+0.6 KiB; E1 +6.1 KiB, 0.1 KiB past half again its estimate)" }
   ]
 }

@@ -124,7 +124,7 @@ describe("the tabs", () => {
     const el = await mount(BASE)
     click(tab(el, "request"))
     await settle()
-    expect(text(el, "#weft-tp-request")).toContain("request record not served by this Studio")
+    expect(text(el, "#weft-tp-request")).toContain("this Studio does not serve the request record")
   })
 
   it("r opens Raw and again goes back to the tab before it; the raw button is a toggle (aria-pressed)", async () => {

@@ -159,7 +159,8 @@ func (s *Server) serveManifest(w http.ResponseWriter, r *http.Request) {
 	// read-scoped panel token's page does not get (serveRuntimes strips
 	// the same field for it): only an identity that may start
 	// experiments reads it — the file's and the registered ones alike.
-	// The panel itself never asks for it.
+	// The panel asks for it (the Request tab's first-step diff) only
+	// under a token that reads prompts; a read-scoped one never asks.
 	if !readsPrompts(r) {
 		refuseHidden(w, r, "the manifest carries the agents' system prompts: a read-scoped panel token does not read it")
 		return

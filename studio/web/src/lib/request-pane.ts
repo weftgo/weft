@@ -142,11 +142,13 @@ export function snippetsOf(
   return names.map((n) => byName.get(n) ?? "")
 }
 
-/** The prompt text a row carries, when the record is here. */
+/** The prompt text a row carries, when the record is here — and
+ * parsed: a derived record (its body did not parse; obsdb's
+ * PromptRecordOf keeps the hash, not the text) is no text to diff. */
 export function promptText(row: RequestRow | undefined): string | undefined {
   const p = row?.prompt
   if (!row || !p || isHoleRef(p)) return row && !row.system_hash ? "" : undefined
-  return p.text
+  return p.content === "derived" ? undefined : p.text
 }
 
 /**

@@ -78,11 +78,16 @@ const (
 	// setup A's open API only; a panel token, scoped to one public id,
 	// may not learn another (hidden: the session-to-public-id lookup).
 	CauseDevTokenOnly HoleCause = "dev_token_only"
+	// CauseNotServed: the Studio asked serves no request record (its
+	// requests capability is off, or it predates the record), so the
+	// run's request, prompt and tools records were not read — the run
+	// may hold them (not_recorded: the panel's Request tab).
+	CauseNotServed HoleCause = "not_served"
 )
 
 // HoleCauses lists the causes the table words, in order.
 func HoleCauses() []HoleCause {
-	return []HoleCause{CauseNoSpans, CauseResultCap, CauseLogCap, CauseNoPublicID, CauseDevTokenOnly}
+	return []HoleCause{CauseNoSpans, CauseResultCap, CauseLogCap, CauseNoPublicID, CauseDevTokenOnly, CauseNotServed}
 }
 
 var causeNotes = map[Hole]map[HoleCause]holeNote{
@@ -94,6 +99,10 @@ var causeNotes = map[Hole]map[HoleCause]holeNote{
 		CauseNoPublicID: {
 			"the session's turns carry no weft.public_id (a thread session is created without thread.PublicID)",
 			"thread.Create(…, thread.PublicID(id)), or set weft.public_id on every turn",
+		},
+		CauseNotServed: {
+			"this Studio does not serve the request record (no requests capability): the run may hold one",
+			"open the run in a Studio that serves it (upgrade Studio, or enable the requests group)",
 		},
 	},
 	HoleHidden: {

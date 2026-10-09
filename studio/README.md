@@ -244,8 +244,17 @@ bytes from the transcript the panel holds, the last three inline, the
 rest in D4's tree), the tool catalog (each name expands to its
 description, its policy chips and its schema in D4's tree), every param
 ("adapter default" when nil), tool choice, thinking, a subagent call's
-child request (its step 0, read by the child's id on demand) and the
-step's compaction marker. `/` on the tab focuses an open tree's filter,
+child request (its step 0, read by the child's id on demand — "read its
+turn"; a child whose history cannot be read says so and links to its
+Studio page) and the step's compaction marker. The step shown is the one
+⤢ carries and `J`/`K` move from (over the steps the record names too).
+The manifest is read per endpoint and token, asked again 30 s after a
+failure and once more when it does not list the run's manifest hash (a
+redeploy under `weft dev`). A derived prompt or catalog record (its
+body did not parse) is badged `derived` and never diffed over, here and
+on the run page. A Studio without the `requests` capability is
+`not_recorded`, cause `not_served` (obsdb's table; `/api/meta`'s
+`capabilities_off.requests` words first). `/` on the tab focuses an open tree's filter,
 else the turn list's. Every absent block is a badge from `badges.ts`
 with its reason; a run-wide hole is that badge and nothing else — a
 read-scoped token sees `hidden` and never asks for the record or the
@@ -845,7 +854,8 @@ weft.json), **overridden by experiment** (the invoke_agent span carries
 `weft.override.instructions`; the story view reads the spans once the
 run ends) and **catalog changed at this step**; a read-scoped token
 sees the `hidden` badge and nothing else
-(`examples/studio-local`'s PrepareStep trim is the live demo):
+(`examples/studio-local`'s PrepareStep trim is the live demo; a derived
+prompt or catalog record is badged and never diffed over):
 
 ![run page with the trace, light theme](screenshots/run-light.png)
 

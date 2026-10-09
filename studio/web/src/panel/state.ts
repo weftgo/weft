@@ -27,6 +27,7 @@ import {
   fetchEvents,
   fetchMeta,
   fetchRequests,
+  fetchStrippedNote,
   fetchRun,
   fetchRuns,
   fetchRuntimes,
@@ -153,6 +154,9 @@ export interface TurnView {
    * every state change, and each redraw must not fetch again (a child
    * that cannot be read is asked for once, until the user reopens it). */
   tried: Set<string>
+  /** Children whose history could not be read (the walk failed): the
+   * Request tab says so and hands off to Studio. */
+  unreachable: Set<string>
   /** The run ended and its stored records were reloaded: late deltas
    * are dropped (the transcript carries the final words). */
   done: boolean
@@ -292,6 +296,8 @@ export interface PanelRequests extends Holed {
   truncated?: boolean
   /** The record could not be read (not a hole: an error). */
   error?: string
+  /** A stripped row's reason and fix (the tools route's words). */
+  stripped?: Holed
 }
 
 /** newTurnView starts an empty fold for one run. */
@@ -312,6 +318,7 @@ function newTurnView(id: string): TurnView {
     children: new Map(),
     expanded: new Set(),
     tried: new Set(),
+    unreachable: new Set(),
     done: false,
     loading: false,
     again: false,
@@ -1159,12 +1166,15 @@ export class PanelModel {
     if (tokenScope(this.ep.token) === "read") return { badge: "hidden", reason: HOLES.hidden.reason, fix: HOLES.hidden.fix, steps: new Map() }
     try {
       const doc = await fetchRequests(this.ep, id)
+      // A stripped row's words are the tools route's (the run page's).
+      const stripped = doc.requests.some((r) => r.content === "stripped") ? await fetchStrippedNote(this.ep, id) : undefined
       return {
         badge: doc.badge,
         reason: doc.reason,
         fix: doc.fix,
         truncated: doc.truncated,
         steps: byStep(doc.requests),
+        stripped,
       }
     } catch (err) {
       // The panel's error path: words in the view, nothing thrown into
@@ -1337,7 +1347,12 @@ export class PanelModel {
     try {
       walk = await this.walkEvents(childId)
     } catch {
-      return // the child's history is unreachable: leave the expander
+      // The child's history is unreachable: leave the expander, say so.
+      if (this.state.turn === view) {
+        view.unreachable.add(childId)
+        this.emit()
+      }
+      return
     }
     const feed = newFold()
     foldInto(feed, new Set(), walk.events)

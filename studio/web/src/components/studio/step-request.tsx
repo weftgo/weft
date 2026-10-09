@@ -56,6 +56,9 @@ import {
   byStep,
   paramFields,
   REQUEST_NO_RECORD_REASON,
+  REQUEST_DIFF_CUT_LABEL,
+  REQUEST_MESSAGES_GAP_REASON,
+  REQUEST_NO_INDEX_REASON,
   REQUEST_NOT_RECORDED_LABEL,
   REQUEST_NOT_STORED,
   shortHash,
@@ -192,7 +195,7 @@ function PromptDiff({
       <span className="font-mono text-[10px] text-faint">{baselineCaption(base)}</span>
       {diff === null ? (
         // A cut tail would read as lines a PrepareStep removed.
-        <HoleBadge hole="truncated" label="diff not drawn: the prompt was cut" />
+        <HoleBadge hole="truncated" label={REQUEST_DIFF_CUT_LABEL} />
       ) : "tooLarge" in diff ? (
         <span className="block font-mono text-[11px] text-faint" data-diff-too-large>
           too large to diff ({diff.tooLarge.before} → {diff.tooLarge.after} lines)
@@ -278,7 +281,7 @@ function PromptView({
         ) : null}
         {doc.content === "derived" ? <HoleBadge hole="derived" detail /> : null}
       </span>
-      {base && base.text !== doc.text ? (
+      {base && doc.content !== "derived" && base.text !== doc.text ? (
         <PromptDiff base={base} text={doc.text} truncated={doc.truncated_bytes > 0} />
       ) : null}
     </div>
@@ -435,7 +438,7 @@ function MessagesView({ row, ctx }: { row: RequestRow; ctx?: RequestContext }) {
         ) : m.hole === "gap" ? (
           <HoleBadge
             hole="gap"
-            reason="the transcript does not hold the messages this request counts"
+            reason={REQUEST_MESSAGES_GAP_REASON}
             detail
           />
         ) : m.hole === "no_index" ? (
@@ -447,7 +450,7 @@ function MessagesView({ row, ctx }: { row: RequestRow; ctx?: RequestContext }) {
             // request's view could not be recorded.
             <HoleBadge
               hole="gap"
-              reason="no messages record names this request (its compaction view could not be recorded)"
+              reason={REQUEST_NO_INDEX_REASON}
               detail
             />
           )
@@ -774,7 +777,14 @@ export function RequestSection({
             {CHIP_CATALOG}
           </Mark>
         ) : null}
-        {row.content ? <HoleBadge hole={row.content} /> : null}
+        {row.content ? (
+          // A stripped row's words are the tools route's, as below.
+          <HoleBadge
+            hole={row.content}
+            reason={row.content === "stripped" ? req.doc?.stripped?.reason : undefined}
+            fix={row.content === "stripped" ? req.doc?.stripped?.fix : undefined}
+          />
+        ) : null}
       </>
     )
     body = (

@@ -94,5 +94,14 @@ export function requestCappedWords(n: number): { reason: string; fix: string } {
   }
 }
 
+/** The Request pane's words both surfaces share (E1): a messages
+ * record the transcript does not hold, a request no messages record
+ * names (the core omits the index when a rewritten request's view
+ * could not be recorded), and the diff not drawn over a cut prompt. */
+export const REQUEST_MESSAGES_GAP_REASON = "the transcript does not hold the messages this request counts"
+export const REQUEST_NO_INDEX_REASON =
+  "no messages record names this request (its compaction view could not be recorded)"
+export const REQUEST_DIFF_CUT_LABEL = "diff not drawn: the prompt was cut"
+
 /** A step with no row while the run is still running. */
 export const REQUEST_NOT_STORED = "not stored yet — the run is still running"

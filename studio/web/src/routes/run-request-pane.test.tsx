@@ -364,6 +364,20 @@ describe("nothing is decided from what cannot be verified (review 1, 2)", () => 
 })
 
 describe("the diff's bounds (review 3, 4)", () => {
+  it("no diff over a derived prompt record (its body did not parse): the derived badge, on its step and the next", async () => {
+    const page = await rowsFor([DEMO0, DEMO1, DEMO0])
+    // obsdb's PromptRecordOf keeps a derived record's hash, not its text.
+    page.requests[1].prompt = { hash: page.requests[1].system_hash, text: "", content: "derived", truncated_bytes: 0 }
+    await serve({ instructions: DEMO0, requests: page })
+    await story()
+    await waitFor(() => expect(marks(1)).toEqual(["changed by PrepareStep"]))
+    open(1)
+    expect(pane(1).querySelector('[data-hole="derived"]')).toBeTruthy()
+    expect(diff(1)).toBeNull()
+    open(2)
+    expect(diff(2)).toBeNull()
+  })
+
   it("no diff over a cut prompt: the badge says why", async () => {
     await serve({
       instructions: DEMO0,

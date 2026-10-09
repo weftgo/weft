@@ -17,7 +17,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { setStudioToken } from "../lib/api"
 import type { RunDoc } from "../lib/api"
 import { UNRUN_CALL_REASON } from "../lib/events"
-import { REQUEST_NO_RECORD_REASON } from "../lib/requests"
+import { REQUEST_NO_INDEX_REASON, REQUEST_NO_RECORD_REASON, REQUEST_NOT_RECORDED_LABEL } from "../lib/requests"
+import { badgeLabel } from "./badges"
 import { CAUSES, HOLES, isHole, resultCapReason } from "../lib/honesty"
 import { renderApp, stubBrowser } from "../test/app"
 import { FakeEventSource as StudioEventSource } from "../test/fake-event-source"
@@ -57,6 +58,10 @@ interface Fixture {
   gaps?: number[]
   transcript?: unknown
   requests?: "ok" | "empty" | "not-recorded" | "hidden"
+  /** The request rows served as given (E1.2's pane cases), and the
+   * tools route's answer beside them. */
+  rows?: unknown[]
+  tools?: unknown
 }
 
 /** A one-step run as an A4 weft records it: a lookup and its result,
@@ -242,7 +247,8 @@ function serve(fx: Fixture, studioMeta: boolean): FakeStudio {
     .on(`GET runs/${RUN}/transcript`, fx.transcript ?? transcript([user("where is 42?")], [assistant("It shipped.")]))
     .on(`GET runs/${RUN}/spans`, { spans: [] })
   const variant = fx.requests ?? "ok"
-  if (variant === "hidden") fake.on(`GET runs/${RUN}/requests`, () => hiddenRefusal()).on(`GET runs/${RUN}/tools`, () => hiddenRefusal())
+  if (fx.rows) fake.on(`GET runs/${RUN}/requests`, pagedRequests({ requests: fx.rows as never })).on(`GET runs/${RUN}/tools`, fx.tools ?? golden<object>("tools-ok"))
+  else if (variant === "hidden") fake.on(`GET runs/${RUN}/requests`, () => hiddenRefusal()).on(`GET runs/${RUN}/tools`, () => hiddenRefusal())
   else if (variant === "not-recorded")
     fake
       .on(`GET runs/${RUN}/requests`, pagedRequests(golden("requests-not-recorded")))
@@ -356,5 +362,85 @@ describe("a pre-A1 run's Request tab (D5's second Done clause)", () => {
     expect(tab.textContent).not.toMatch(/lands with E1\.2/)
     await vi.waitFor(() => expect(tab.querySelector('[data-hole="not_recorded"]')).toBeTruthy())
     expect(tab.querySelector('[data-hole="not_recorded"]')!.getAttribute("title")).toContain(HOLES.not_recorded.fix!)
+  })
+})
+
+// E1.2 review: the Request panes word a record's holes alike — the
+// panel's Request tab and the run page's open Request pane, on the same
+// row: a derived prompt and catalog (bodies that did not parse), a
+// not_recorded HoleRef (the version's label), a stripped one (the tools
+// route's reason and fix) and a request no messages record names.
+describe("the Request panes word a record's holes alike (E1.2)", () => {
+  type Seen = { hole: string; label: string; title: string }
+  const seen = (nodes: Element[]): Seen[] =>
+    nodes.map((n) => ({ hole: n.getAttribute("data-hole") ?? "", label: badgeLabel(n), title: n.getAttribute("title") ?? "" }))
+  const key = (x: Seen) => `${x.hole} | ${x.label} | ${x.title}`
+  const row0 = () => structuredClone(golden<{ requests: Record<string, unknown>[] }>("requests-ok").requests[0]) as Record<string, any>
+
+  async function panes(fx: Fixture): Promise<{ panel: Seen[]; studio: Seen[] }> {
+    serve(fx, false)
+    const el = await mount(ATTRS)
+    await vi.waitFor(() => expect($(el, "#weft-tab-request")).toBeTruthy())
+    click($(el, "#weft-tab-request"))
+    await vi.waitFor(() => expect($(el, "#weft-tp-request [data-weft-rq-pane]")).toBeTruthy(), { timeout: 5_000 })
+    await settle()
+    const panel = seen(all(el, "#weft-tp-request [data-weft-rq-pane] [data-hole]"))
+    el.remove()
+    await settle()
+    cleanup()
+    document.body.innerHTML = ""
+    stubBrowser()
+    vi.stubGlobal("scrollTo", vi.fn())
+    StudioEventSource.reset()
+    vi.stubGlobal("EventSource", StudioEventSource)
+    setStudioToken("")
+    serve(fx, true)
+    renderApp(`/runs/${RUN}?view=story`)
+    const pane = () => document.querySelector<HTMLElement>('[data-request="0"]')
+    await waitFor(() => expect(pane()?.querySelector("button[aria-expanded]")).toBeTruthy())
+    pane()!.querySelector<HTMLElement>("button[aria-expanded]")!.click()
+    await new Promise((r) => setTimeout(r, 150))
+    return { panel, studio: seen(Array.from(pane()!.querySelectorAll("[data-hole]"))) }
+  }
+  const expectBoth = (r: { panel: Seen[]; studio: Seen[] }, want: Partial<Seen>[]) => {
+    for (const w of want)
+      for (const [side, list] of Object.entries(r))
+        expect(
+          list.some((x) => Object.entries(w).every(([k, v]) => x[k as "hole"].includes(v))),
+          `${side} lacks ${JSON.stringify(w)}: ${list.map(key).join("; ")}`
+        ).toBe(true)
+    // What the run page's pane says of the record, the panel's says.
+    expect(r.studio.map(key).filter((k) => !r.panel.map(key).includes(k))).toEqual([])
+  }
+
+  it("a derived prompt and catalog: the derived badge on both blocks of both panes, no prompt box", async () => {
+    const r = row0()
+    r.prompt = { hash: r.system_hash, text: "", content: "derived", truncated_bytes: 0 }
+    r.tools = { hash: r.catalog_hash, tools: [], content: "derived", truncated_bytes: 0 }
+    const got = await panes({ doc: {}, events: events(), rows: [r] })
+    expect(got.panel.filter((x) => x.hole === "derived").length).toBe(2)
+    expect(got.studio.filter((x) => x.hole === "derived").length).toBe(2)
+    expectBoth(got, [{ hole: "derived", title: HOLES.derived.reason }])
+  })
+
+  it("a not_recorded prompt HoleRef names the version; a request no messages record names says why — the same words", async () => {
+    const r = row0()
+    r.prompt = { hash: r.system_hash, badge: "not_recorded" }
+    r.body.messages_ref = { count: 1 }
+    expectBoth(await panes({ doc: {}, events: events(), rows: [r] }), [
+      { hole: "not_recorded", label: REQUEST_NOT_RECORDED_LABEL },
+      { hole: "gap", title: REQUEST_NO_INDEX_REASON },
+    ])
+  })
+
+  it("a stripped HoleRef carries the tools route's reason and fix on both", async () => {
+    const r = row0()
+    r.content = "stripped"
+    r.prompt = { hash: r.system_hash, badge: "stripped" }
+    r.tools = { hash: r.catalog_hash, badge: "stripped" }
+    const tools = { catalogs: [], badge: "stripped", reason: "the destination stripped it (otel.NoContent)", fix: "drop otel.NoContent()" }
+    expectBoth(await panes({ doc: {}, events: events(), rows: [r], tools }), [
+      { hole: "stripped", title: "the destination stripped it (otel.NoContent) — fix: drop otel.NoContent()" },
+    ])
   })
 })

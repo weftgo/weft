@@ -125,6 +125,10 @@ export const CAUSES: Partial<Record<Hole, Record<string, { reason: string; fix?:
         "the run was recorded without a tracer, so attempt spans and the answering model were not stored",
       fix: "install a tracer (otel.Install records spans)",
     },
+    not_served: {
+      reason: "this Studio does not serve the request record (no requests capability): the run may hold one",
+      fix: "open the run in a Studio that serves it (upgrade Studio, or enable the requests group)",
+    },
   },
   hidden: {
     dev_token_only: {

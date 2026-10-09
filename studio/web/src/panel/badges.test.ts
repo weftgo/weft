@@ -314,6 +314,27 @@ describe("no panel-only badge strings", () => {
     expect(found.sort()).toEqual([...NON_HOLE_BADGES].sort())
   })
 
+  // A badge's words passed in by hand slip past both scans when they
+  // name no hole (E1.2 review): no panel source but badges.ts hands a
+  // badge renderer a label, reason or fix it spells itself — shared
+  // words come from lib (lib/requests.ts's REQUEST_* constants), a
+  // server's from its response.
+  const BADGE_CALL = /\b(?:badge|hole|runHole|refHole|requestHole|holeBadges|holeLine)\(([^()]|\([^()]*\))*?\b(label|reason|fix)\s*:\s*["'`]/g
+  it("the call scan sees a literal note and passes a shared one", () => {
+    expect('hole("gap", { reason: "x" })'.match(BADGE_CALL)).not.toBeNull()
+    expect('badge("truncated", { label: `n ${x}` })'.match(BADGE_CALL)).not.toBeNull()
+    expect('hole("gap", { reason: REQUEST_NO_INDEX_REASON })'.match(BADGE_CALL)).toBeNull()
+    expect('runHole("not_recorded", { cause: "not_served", reason: d.notServed })'.match(BADGE_CALL)).toBeNull()
+  })
+  it("no panel source but badges.ts passes a badge its own label, reason or fix", () => {
+    const found: string[] = []
+    for (const f of files) {
+      const code = readFileSync(resolve(dir, f), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:\\])\/\/.*$/gm, "$1")
+      for (const m of code.matchAll(BADGE_CALL)) found.push(`${f}: ${m[0].slice(0, 80)}`)
+    }
+    expect(found).toEqual([])
+  })
+
   it("no panel source but badges.ts spells a hole's words", () => {
     expect(files).toContain("element.ts")
     const found: string[] = []

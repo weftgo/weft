@@ -41,7 +41,16 @@ import {
   toolSetMayExplain,
 } from "../lib/request-pane"
 import type { MessagesSent, PromptBaseline } from "../lib/request-pane"
-import { paramFields, REQUEST_NOT_STORED, shortHash } from "../lib/requests"
+import {
+  paramFields,
+  REQUEST_DIFF_CUT_LABEL,
+  REQUEST_MESSAGES_GAP_REASON,
+  REQUEST_NO_INDEX_REASON,
+  REQUEST_NO_RECORD_REASON,
+  REQUEST_NOT_RECORDED_LABEL,
+  REQUEST_NOT_STORED,
+  shortHash,
+} from "../lib/requests"
 import { bytes } from "../lib/summarize"
 import { badge, requestCapped, requestHole } from "./badges"
 import type { BadgeNote } from "./badges"
@@ -76,10 +85,18 @@ export interface RequestTabDeps {
   compaction: (c: RunCompaction) => HTMLElement
   /** A subagent call's child request (its step 0, A10). */
   child: (call: FoldedToolCall) => HTMLElement
+  /** Why the server serves no request record, in its words
+   * (/api/meta's capabilities_off.requests), when it says. */
+  notServed?: string
 }
 
 /** A hole inside the pane: D5's badge (its reason and fix the title). */
 const hole = (name: string, note?: BadgeNote): HTMLElement => el("div", "weft-rq-hole", [badge(name, note)], { "data-weft-rq-hole": name })
+/** A record the run does not hold (a HoleRef), worded as the run
+ * page's HoleRefView: not_recorded names the version, stripped carries
+ * the tools route's reason and fix. */
+const refHole = (name: string, d: RequestTabDeps): HTMLElement =>
+  hole(name, name === "not_recorded" ? { label: REQUEST_NOT_RECORDED_LABEL } : name === "stripped" ? d.t.requests?.stripped : undefined)
 /** A run-wide hole: the badge, then its reason and fix as words. */
 const runHole = (name: string, note?: BadgeNote): HTMLElement => el("div", "weft-rq-hole", requestHole(name, note), { "data-weft-rq-hole": name })
 
@@ -108,21 +125,27 @@ function picker(label: string, items: number[], cur: number, pick: (n: number) =
 }
 
 /** The composition checks, by their inputs (sha256 is async): a
- * pending one draws no chip and redraws when it answers. */
-const composedCache = new Map<string, boolean | null | "pending">()
+ * pending one draws no chip and redraws when it answers. Bounded: past
+ * COMPOSED_MAX the oldest goes (a Map iterates in insertion order). */
+export const composedCache = new Map<string, boolean | null | "pending">()
+export const COMPOSED_MAX = 64
+function remember(key: string, v: boolean | null | "pending") {
+  composedCache.set(key, v)
+  if (composedCache.size > COMPOSED_MAX) composedCache.delete(composedCache.keys().next().value!)
+}
 
 function composed(r: RequestRow, insHash: string, snippets: string[] | undefined, redraw: () => void): boolean | undefined {
   const key = [r.system_hash, insHash, r.body.tools.names.join(","), snippets?.join("\u0000") ?? "\u0001"].join("|")
   const got = composedCache.get(key)
   if (got === "pending") return undefined
   if (got !== undefined) return got ?? undefined
-  composedCache.set(key, "pending")
+  remember(key, "pending")
   composedFromInstructions(r, insHash, snippets).then(
     (v) => {
-      composedCache.set(key, v ?? null)
+      remember(key, v ?? null)
       redraw()
     },
-    () => composedCache.set(key, null)
+    () => remember(key, null)
   )
   return undefined
 }
@@ -193,7 +216,7 @@ function diffView(r: RequestRow, base: PromptBaseline, text: string): HTMLElemen
   const box = el("div", "weft-diff", [el("div", "weft-diff-h", baselineCaption(base))], { "data-weft-prompt-diff": base.kind })
   if (cut(r) || base.truncated) {
     // A cut tail would read as lines a PrepareStep removed.
-    box.appendChild(hole("truncated", { label: "diff not drawn: the prompt was cut" }))
+    box.appendChild(hole("truncated", { label: REQUEST_DIFF_CUT_LABEL }))
     return box
   }
   let m = diffMemo.get(r)
@@ -204,13 +227,11 @@ function diffView(r: RequestRow, base: PromptBaseline, text: string): HTMLElemen
     return box
   }
   for (const d of diff.rows)
-    box.appendChild(
-      el("div", `weft-diff-row${d.kind === "add" ? " weft-diff-add" : d.kind === "del" ? " weft-diff-del" : ""}`, `${d.kind === "add" ? "+ " : d.kind === "del" ? "− " : "  "}${d.text}`, {
-        "data-weft-diff": d.kind,
-      })
-    )
+    box.appendChild(el("div", `weft-diff-row weft-diff-${d.kind}`, `${DIFF_MARK[d.kind]}${d.text}`, { "data-weft-diff": d.kind }))
   return box
 }
+
+const DIFF_MARK = { add: "+ ", del: "− ", same: "  " }
 
 /** A toggle the user opened, kept in the element's open keys. */
 function toggle(d: RequestTabDeps, key: string, label: (open: boolean) => string): [HTMLElement, boolean] {
@@ -228,7 +249,11 @@ function promptView(d: RequestTabDeps, r: RequestRow, facts: Facts, scope: strin
   const p = r.prompt
   if (!r.system_hash) return [mono("no system prompt")]
   if (!p || isHoleRef(p))
-    return [mono(shortHash(r.system_hash), "weft-rq-hash"), ...(p ? [hole(p.badge)] : [])]
+    return [mono(shortHash(r.system_hash), "weft-rq-hash"), ...(p ? [refHole(p.badge, d)] : [])]
+  // A record whose body did not parse keeps its hash, not its text:
+  // its badge, and no prompt box (an empty one would read as no
+  // prompt) — nor a diff over it (promptText says undefined).
+  if (p.content === "derived") return [mono(shortHash(p.hash), "weft-rq-hash"), hole("derived")]
   const lines = p.text.split("\n")
   const long = lines.length > PROMPT_LINES
   const [more, all] = long
@@ -266,11 +291,12 @@ function catalogView(d: RequestTabDeps, r: RequestRow, scope: string, step: numb
   if (!r.catalog_hash) return [mono("no tools offered")]
   if (!c || isHoleRef(c)) {
     const out: Node[] = []
-    if (names.length) out.push(mono(names.join(", "), "weft-res weft-rq-names"))
-    out.push(c ? hole(c.badge) : mono(shortHash(r.catalog_hash), "weft-rq-hash"))
+    if (names.length) out.push(mono(names.join(", ")))
+    out.push(c ? refHole(c.badge, d) : mono(shortHash(r.catalog_hash), "weft-rq-hash"))
     return out
   }
-  const list = el("div", "weft-rq-tools", undefined, { "data-weft-catalog": "" })
+  if (c.content === "derived") return [mono(shortHash(c.hash), "weft-rq-hash"), hole("derived")]
+  const list = el("div", "weft-rq-tools")
   for (const t of c.tools) {
     const key = `${scope}\u0000rq-tool\u0000${t.name}`
     const [b, open] = toggle(d, key, (o) => `${o ? "▾" : "▸"} ${t.name}`)
@@ -308,7 +334,7 @@ function messagesView(d: RequestTabDeps, r: RequestRow, step: number): Node[] {
     out.push(
       m.hole === "compacted" || (m.hole === "no_index" && r.content === "stripped")
         ? hole(m.hole === "compacted" ? m.hole : "stripped")
-        : hole("gap", { reason: m.hole === "gap" ? "the transcript does not hold the messages this request counts" : "no messages record names this request" })
+        : hole("gap", { reason: m.hole === "gap" ? REQUEST_MESSAGES_GAP_REASON : REQUEST_NO_INDEX_REASON })
     )
   if (m.last.length) {
     const list = el("div", undefined, undefined, { "data-weft-messages-last": "" })
@@ -329,8 +355,9 @@ function messagesView(d: RequestTabDeps, r: RequestRow, step: number): Node[] {
   return out
 }
 
-/** stepsOf: every step the turn ran or the record names, in order. */
-function stepsOf(t: TurnView, req: PanelRequests | null): number[] {
+/** stepsOf: every step the turn ran or the record names, in order —
+ * the tab's picker, and what J/K walk while it is open. */
+export function stepsOf(t: TurnView, req: PanelRequests | null): number[] {
   const s = new Set<number>(t.folded.steps.map((x) => x.index))
   for (const k of req?.steps.keys() ?? []) s.add(k)
   return [...s].sort((a, b) => a - b)
@@ -341,7 +368,7 @@ function stepsOf(t: TurnView, req: PanelRequests | null): number[] {
 export function renderRequestTab(d: RequestTabDeps): HTMLElement {
   const t = d.t
   const req = t.requests
-  const box = el("div", "weft-rq", undefined, { "data-weft-request-tab": "" })
+  const box = el("div", "weft-rq")
   // A run-wide hole: the badge and its words, nothing else (a
   // read-scoped token's hidden; a run older than the record).
   if (req?.badge) {
@@ -352,7 +379,7 @@ export function renderRequestTab(d: RequestTabDeps): HTMLElement {
     box.appendChild(
       t.doc?.requests_badge
         ? runHole(t.doc.requests_badge)
-        : runHole("not_recorded", { reason: "this Studio serves no request record (no requests capability)", fix: "upgrade Studio", label: "request record not served by this Studio" })
+        : runHole("not_recorded", { cause: "not_served", reason: d.notServed })
     )
     return box
   }
@@ -382,7 +409,7 @@ export function renderRequestTab(d: RequestTabDeps): HTMLElement {
         ? el("div", "weft-reason", REQUEST_NOT_STORED)
         : req.truncated
           ? requestCapped(MAX_REQUEST_PAGES * REQUEST_PAGE)
-          : hole("gap", { reason: "this step ran, but no request record names it" })
+          : hole("gap", { reason: REQUEST_NO_RECORD_REASON })
     )
     return box
   }
@@ -412,7 +439,7 @@ export function renderRequestTab(d: RequestTabDeps): HTMLElement {
       })
     )
 
-  if (r.content) pane.appendChild(hole(r.content))
+  if (r.content) pane.appendChild(hole(r.content, r.content === "stripped" ? req.stripped : undefined))
   if (facts.noManifest)
     pane.appendChild(
       el("div", "weft-reason", "no manifest readable here: no diff vs the registered instructions", { "data-weft-no-manifest": "" })

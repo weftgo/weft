@@ -190,6 +190,11 @@ interface PageState {
   engine: Engine
 }
 
+/** pageStateKey is a page state's identity: its query form. */
+function pageStateKey(state: PageState): string {
+  return JSON.stringify(playgroundSearch(state))
+}
+
 /**
  * useHandoff is the page's hand-off: the query's parameters, with the
  * fragment's laid over them. The fragment is read once, on arrival,
@@ -198,7 +203,7 @@ interface PageState {
  * not when the page itself writes its state back (G2: own() names
  * those writes).
  */
-function useHandoff(): PlaygroundSearch & { own: (state: PageState) => void } {
+function useHandoff(): PlaygroundSearch & { own: (state: PageState) => boolean } {
   const query = useSearch({ from: "/playground" })
   const hash = useLocation({ select: (l) => l.hash })
   const navigate = useNavigate()
@@ -230,10 +235,11 @@ function useHandoff(): PlaygroundSearch & { own: (state: PageState) => void } {
         engine: mine.engine,
       })
       const key = JSON.stringify(next)
-      if (key === queryKey) return
+      if (key === queryKey) return false
       if (queryKey === arrival.query || arrival.own.has(queryKey)) arrival.own.add(key)
       // No hash: the fragment was read on arrival and leaves the bar.
       void navigate({ to: ".", search: next, replace: true })
+      return true
     },
     [query, queryKey, arrival, navigate]
   )
@@ -326,11 +332,6 @@ function Playground({ caps }: { caps: string[] }) {
    * rewritten call-free replies — the counterfactual the fresh step
    * answers. Source-shaped, not variant-shaped, so they live here. */
   const [editDrafts, setEditDrafts] = useState<EditDraft[]>([])
-  // A later navigation to /playground?run=… takes the page there; the
-  // page's own write-back (below) is the value it already shows.
-  useEffect(() => {
-    if (search.run) setSourceRunID(search.run)
-  }, [search.run])
 
   // The target (§4's header): the source run's own agent on a runtime
   // that registers it — an app with several agents (any app with a
@@ -340,21 +341,67 @@ function Playground({ caps }: { caps: string[] }) {
   const [runtimeChoice, setRuntimeChoice] = useState(search.runtime ?? "")
   const [agentChoice, setAgentChoice] = useState(search.agent ?? "")
   // The page's state is its URL (G2): the source run, the step, the
-  // agent and runtime picked and the first variant's engine are
-  // written back in place as they change — the address bar (and the
-  // copy link) reopens this page as it stands. A prompt is never
-  // written: it stays in the fragment hand-off and in memory.
-  const own = search.own
+  // agent and runtime picked and the first variant's engine. The
+  // controls write it back in place as the reader changes them (from
+  // their handlers — never an effect, which would fight the router); a
+  // change that arrives from outside (Back, Forward, a link followed
+  // while the page is open) is adopted into the controls and never
+  // written back. The page never writes a prompt into the query.
   const engineA = variants[0]?.engine ?? "live"
+  const current: PageState = {
+    run: sourceRunID.trim(),
+    step: fromStep,
+    agent: agentChoice,
+    runtime: runtimeChoice,
+    engine: engineA,
+  }
+  /** The states this page wrote that the router has not shown yet
+   * (its commit lags a keystroke), and the last one. */
+  const pending = useRef<{ keys: Set<string>; last: string }>({ keys: new Set(), last: "" })
+  const write = (next: Partial<PageState>) => {
+    const state = { ...current, ...next }
+    const key = pageStateKey(state)
+    // A write the page's search already shows (the fragment's, merged)
+    // changes nothing the effect below sees: nothing to wait for.
+    if (search.own(state) && key !== queryKey) {
+      pending.current.keys.add(key)
+      pending.current.last = key
+    }
+  }
+  const queryState: PageState = {
+    run: search.run ?? "",
+    step: search.step ?? 0,
+    agent: search.agent ?? "",
+    runtime: search.runtime ?? "",
+    engine: search.engine ?? "live",
+  }
+  const queryKey = pageStateKey(queryState)
+  const currentRef = useRef(current)
+  currentRef.current = current
   useEffect(() => {
-    own({
-      run: sourceRunID.trim(),
-      step: fromStep,
-      agent: agentChoice,
-      runtime: runtimeChoice,
-      engine: engineA,
-    })
-  }, [own, sourceRunID, fromStep, agentChoice, runtimeChoice, engineA])
+    const p = pending.current
+    if (p.keys.has(queryKey)) {
+      // The router caught up with one of the page's own writes.
+      if (queryKey === p.last) p.keys.clear()
+      return
+    }
+    p.keys.clear()
+    if (queryKey === pageStateKey(currentRef.current)) return
+    // An outside change: the controls follow the URL.
+    setSourceRunID(queryState.run)
+    setFromStep(queryState.step)
+    setAgentChoice(queryState.agent)
+    setRuntimeChoice(queryState.runtime)
+    setVariants((cur) =>
+      cur.map((v, i) => (i === 0 && v.engine !== queryState.engine ? { ...v, engine: queryState.engine } : v))
+    )
+    // queryKey is queryState's identity.
+  }, [queryKey])
+  // On arrival: a fragment hand-off's run (or step, agent…) joins the
+  // query once — the only write no control made.
+  useEffect(() => {
+    write({})
+  }, [])
   const source = useQuery({
     ...runQuery(sourceRunID),
     enabled: Boolean(sourceRunID),
@@ -406,8 +453,11 @@ function Playground({ caps }: { caps: string[] }) {
     )
   }, [agent, registered, resolving, search.tools])
 
-  const patch = (p: Partial<Variant>) =>
+  const patch = (p: Partial<Variant>) => {
     setVariants((cur) => cur.map((v, i) => (i === active ? { ...v, ...p } : v)))
+    // Variant A's engine is page state (G2).
+    if (active === 0 && p.engine && p.engine !== engineA) write({ engine: p.engine })
+  }
 
   /** setResult updates one variant's experiment by the variant's KEY:
    * a card belongs to its variant whichever one is being edited. */
@@ -586,7 +636,10 @@ function Playground({ caps }: { caps: string[] }) {
               aria-label="agent"
               className="rounded border bg-transparent px-1 py-0.5 text-xs text-foreground"
               value={agent.name}
-              onChange={(e) => setAgentChoice(e.target.value)}
+              onChange={(e) => {
+                setAgentChoice(e.target.value)
+                write({ agent: e.target.value })
+              }}
             >
               {runtime.agents.map((a) => (
                 <option key={a.name} value={a.name}>
@@ -603,6 +656,7 @@ function Playground({ caps }: { caps: string[] }) {
                 setRuntimeChoice(e.target.value)
                 // The agent stays when the new runtime has it.
                 setAgentChoice(agent.name)
+                write({ runtime: e.target.value, agent: agent.name })
               }}
             >
               {all.map((r) => (
@@ -675,7 +729,10 @@ function Playground({ caps }: { caps: string[] }) {
             <input
               className="w-full rounded border bg-transparent px-2 py-1 font-mono text-xs"
               value={sourceRunID}
-              onChange={(e) => setSourceRunID(e.target.value)}
+              onChange={(e) => {
+                setSourceRunID(e.target.value)
+                write({ run: e.target.value.trim() })
+              }}
               placeholder="a run id, or blank for fresh input"
             />
             {sourceRunID && source.isError ? (
@@ -683,7 +740,14 @@ function Playground({ caps }: { caps: string[] }) {
             ) : null}
           </label>
           {sourceRunID && (
-            <StepPicker runID={sourceRunID} value={fromStep} onChange={setFromStep} />
+            <StepPicker
+              runID={sourceRunID}
+              value={fromStep}
+              onChange={(n) => {
+                setFromStep(n)
+                write({ step: n })
+              }}
+            />
           )}
           <ExperimentForm
             variant={variant}
@@ -1521,7 +1585,12 @@ function History({ selected }: { selected?: string }) {
             className={`flex items-center gap-2 px-3 py-1.5${e.id === selected ? " bg-secondary" : ""}`}
             data-selected={e.id === selected ? "" : undefined}
           >
-            <Link {...experimentLink(e.id)} className="font-mono text-faint hover:underline">
+            {/* The page's own state stays beside the experiment picked. */}
+            <Link
+              {...experimentLink(e.id)}
+              search={(prev: Record<string, unknown>) => ({ ...prev, ...experimentLink(e.id).search })}
+              className="font-mono text-faint hover:underline"
+            >
               {e.id}
             </Link>
             <span>{e.name || "—"}</span>

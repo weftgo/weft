@@ -187,7 +187,8 @@ export function AppShell() {
         return
       }
       if (e.key === "?" && isPlainShortcut(e)) setHelpOpen(true)
-      else if (e.key === "y" && isPlainShortcut(e)) void copyLink()
+      // Not on key repeat: a held y copies once.
+      else if (e.key === "y" && !e.repeat && isPlainShortcut(e)) void copyLink()
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
@@ -247,7 +248,11 @@ export function AppShell() {
             role="status"
             data-link-copied={link.copied ? "" : undefined}
           >
-            {link.copied ? "link copied" : ""}
+            {link.copied
+              ? "link copied"
+              : link.state === "failed"
+                ? "copy failed — the browser refused the clipboard"
+                : ""}
           </span>
           <Button
             variant="outline"

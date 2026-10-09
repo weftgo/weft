@@ -42,7 +42,7 @@ import { Button } from "@/components/ui/button"
  * "copied" says it worked.
  */
 export function CopyLink() {
-  const { copy, copied } = useCopyLink()
+  const { copy, copied, state } = useCopyLink()
   return (
     <Button
       variant="outline"
@@ -53,7 +53,9 @@ export function CopyLink() {
       data-copy-link
     >
       {copied ? <Check data-slot="icon" /> : <Link2 data-slot="icon" />}
-      <span aria-live="polite">{copied ? "copied" : "copy link"}</span>
+      <span aria-live="polite">
+        {copied ? "copied" : state === "failed" ? "copy failed" : "copy link"}
+      </span>
     </Button>
   )
 }

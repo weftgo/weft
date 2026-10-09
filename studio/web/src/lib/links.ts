@@ -143,7 +143,8 @@ export interface PlaygroundSearch {
   /** The page's own state (G2), written back as it changes so a
    * copied link reopens it: the source run, the step it continues
    * from (the ordinal), the agent and runtime picked, and the engine.
-   * A prompt never rides the query (see hash below). */
+   * The page never writes a prompt into the query (the hand-off's
+   * prompt rides the fragment, see hash below). */
   run?: string
   step?: number
   agent?: string
@@ -287,7 +288,7 @@ export function playgroundLink(
 /** playgroundStateLink is the playground with its own state in the
  * query (G2): what the page writes back as the reader changes it, so
  * the address bar is always a link to what is on screen. The hand-off
- * (playgroundLink) stays the fragment's: a prompt never rides here. */
+ * (playgroundLink) stays the fragment's: this link carries no prompt. */
 export function playgroundStateLink(
   state: PlaygroundState,
   experiment?: string
@@ -360,18 +361,19 @@ export function path(link: StudioLink): string {
   return `${p}${qs ? `?${qs}` : ""}${hash}`
 }
 
-/** Search keys a copied link never carries: credentials, and a panel
- * scope string. Studio's own pages strip a handed-over token on
- * arrival (adoptTokenFromLocation); this is the second wall, so a
+/** Search keys a copied link never carries: credentials, a panel
+ * scope string, and prompt text (a playground hand-off's input= and
+ * instructions=, which an old link may still carry in its query).
+ * Studio's own pages strip a handed-over token on arrival (adoptTokenFromLocation); this is the second wall, so a
  * "copy link" can never leak one. */
-const STRIPPED_KEYS = ["token", "access_token", "sig", "weft_scope"]
+const STRIPPED_KEYS = ["token", "access_token", "sig", "weft_scope", "input", "instructions"]
 
 /**
  * canonical is the page's link as a reader copies it (G2's copy link):
  * the absolute URL with its search — every bit of page state — and
  * without a fragment (a hand-off or a token, never page state) or a
  * credential key. A copied link is the bare page URL: never a token,
- * never a panel scope string.
+ * never a panel scope string, never prompt text.
  */
 export function canonical(url: string | URL): string {
   const u = new URL(url)

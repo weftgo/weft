@@ -2,7 +2,8 @@
 // view are its URL: a copied link to a selected span reopens with that
 // span selected, and the back button walks view changes but not cursor
 // moves (a selection is replaced in place, a view is pushed).
-import { cleanup, configure, fireEvent, screen, waitFor } from "@testing-library/react"
+import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router"
+import { cleanup, configure, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
@@ -10,6 +11,8 @@ import type { Span } from "@/lib/api"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { FakeStudio, golden } from "@/test/fake-studio"
+import { queryClient } from "@/lib/query"
+import { routeTree } from "@/routeTree.gen"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -143,6 +146,9 @@ describe("the trace page's URL (G2)", () => {
     expect(await screen.findByText("where is order 42?")).toBeTruthy()
     fireEvent.keyDown(window, { key: "k", ctrlKey: true })
     const item = await screen.findByText("Copy link to this page")
+    // Typed into the palette's own input, y is a letter, not the key.
+    fireEvent.keyDown(screen.getByPlaceholderText("Run id, agent, or a command…"), { key: "y" })
+    expect(writeText).not.toHaveBeenCalled()
     expect(item.closest("[cmdk-item]")?.textContent).toContain("y")
     fireEvent.click(item)
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
@@ -155,5 +161,47 @@ describe("the trace page's URL (G2)", () => {
   it("titles the tab with the trace", async () => {
     renderApp(`/traces/${TRACE}`)
     await waitFor(() => expect(document.title).toBe("trace 0af76519…319c · weft studio"))
+  })
+
+  // Review fix 4: what a link may carry that the page has not got.
+  it.each([
+    ["an unknown span and view", "?span=nope&view=bogus"],
+    ["an empty span", "?span=&view="],
+    ["no search at all", ""],
+  ])("survives %s: the tree, nothing selected", async (_name, q) => {
+    renderApp(`/traces/${TRACE}${q}`)
+    expect(await screen.findByText("select a span for its attributes")).toBeTruthy()
+    expect(row("aa01")).toBeTruthy()
+    expect(document.querySelector('[aria-selected="true"]')).toBeNull()
+  })
+
+  it("keeps the mount in a copied link (Studio under /studio/)", async () => {
+    queryClient.clear()
+    const router = createRouter({
+      routeTree,
+      basepath: "/studio",
+      history: createMemoryHistory({ initialEntries: [`/studio/traces/${TRACE}?span=cc03`] }),
+    })
+    render(<RouterProvider router={router} />)
+    await waitFor(() => expect(selectedName()).toBe("execute_tool lookup_order"))
+    fireEvent.keyDown(window, { key: "y" })
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
+    const copied = new URL(writeText.mock.calls[0][0] as string)
+    expect(copied.pathname).toBe(`/studio/traces/${TRACE}`)
+    expect(copied.searchParams.get("span")).toBe("cc03")
+  })
+
+  it("says the copy failed — and shows the link — where the browser has no clipboard", async () => {
+    // Studio over a LAN's plain http: no navigator.clipboard.
+    Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true })
+    const prompt = vi.fn()
+    vi.stubGlobal("prompt", prompt)
+    renderApp(`/traces/${TRACE}?span=bb02`)
+    await waitFor(() => expect(row("bb02")).toBeTruthy())
+    fireEvent.keyDown(window, { key: "y" })
+    expect(await screen.findByText(/copy failed/)).toBeTruthy()
+    expect(prompt).toHaveBeenCalledTimes(1)
+    const shown = new URL(prompt.mock.calls[0][1] as string)
+    expect(shown.searchParams.get("span")).toBe("bb02")
   })
 })

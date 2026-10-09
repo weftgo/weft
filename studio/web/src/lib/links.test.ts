@@ -246,6 +246,13 @@ describe("canonical (the copy link)", () => {
     expect(u).toBe(`${BASE}runs/r_1?view=raw`)
   })
 
+  it("never carries prompt text, even from an old hand-off's query", () => {
+    const u = canonical(
+      `${BASE}playground?run=r_1&instructions=You%20are%20careful.&input=refund%20order%2042&agent=orders`
+    )
+    expect(u).toBe(`${BASE}playground?run=r_1&agent=orders`)
+  })
+
   it("leaves a query with nothing to drop byte for byte", () => {
     const u = `${BASE}traces/t_1?span=%22123%22&view=chat`
     expect(canonical(u)).toBe(u)

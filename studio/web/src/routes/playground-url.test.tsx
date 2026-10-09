@@ -10,6 +10,7 @@ import type { RunDoc, RunsPage } from "@/lib/api"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { FakeStudio, golden } from "@/test/fake-studio"
+import { playgroundStateLink } from "@/lib/links"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -42,9 +43,13 @@ beforeEach(() => {
   new FakeStudio()
     .on("GET meta", { ...golden<Record<string, unknown>>("meta"), capabilities: ["live", "playground", "runtimes"] })
     .on("GET runtimes", runtimes)
-    .on("GET experiments", { experiments: [] })
+    .on("GET experiments", {
+      experiments: [{ id: "e1", name: "probe", agent: "orders", variants: [], inputs: [], created: rOK.started }],
+    })
     .on("GET runs/r_ok", { ...rOK, children: [] } satisfies RunDoc)
     .on("GET runs/r_ok/transcript", golden("transcript-ok"))
+    .on("GET runs/r_two", { ...rOK, id: "r_two", children: [] } satisfies RunDoc)
+    .on("GET runs/r_two/transcript", golden("transcript-ok"))
     .install()
 })
 afterEach(() => {
@@ -149,5 +154,62 @@ describe("the model field follows the agent", () => {
     await waitFor(() => expect(studio.calls("POST playground/runs")).toHaveLength(1))
     const body = studio.calls("POST playground/runs")[0].body as { overrides?: { model?: string } }
     expect(body.overrides?.model).toBeUndefined()
+  })
+
+  // Review fix 1: a change under a mounted page is adopted, never
+  // fought — the page and the router once flipped the URL forever.
+  const sourceInput = () => screen.getByPlaceholderText<HTMLInputElement>("a run id, or blank for fresh input")
+  const stepSelect = () => screen.getByLabelText<HTMLSelectElement>("continue from step")
+  const settle = () => new Promise((r) => setTimeout(r, 300))
+
+  it("Back over a typed source run settles in a bounded number of history writes", async () => {
+    const { router } = renderApp("/playground?run=r_ok")
+    await waitFor(() => expect(agentSelect().value).toBe("orders"))
+    // A saved experiment is a push that keeps the page's state.
+    fireEvent.click(await screen.findByRole("link", { name: "e1" }))
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ experiment: "e1", run: "r_ok" }))
+    fireEvent.change(sourceInput(), { target: { value: "r_two" } })
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ run: "r_two" }))
+    const actions: string[] = []
+    router.history.subscribe(({ action }) => actions.push(action.type))
+    router.history.back()
+    await waitFor(() => expect(sourceInput().value).toBe("r_ok"))
+    await settle()
+    expect(router.state.location.search).toMatchObject({ run: "r_ok" })
+    expect(router.state.location.search).not.toHaveProperty("experiment")
+    // The Back itself, and no write-back after it.
+    expect(actions).toEqual(["BACK"])
+    expect(sourceInput().value).toBe("r_ok")
+  })
+
+  it("adopts an outside navigate while mounted, and writes nothing back", async () => {
+    const { router } = renderApp("/playground?run=r_ok")
+    await waitFor(() => expect(agentSelect().value).toBe("orders"))
+    const actions: string[] = []
+    router.history.subscribe(({ action }) => actions.push(action.type))
+    void router.navigate(playgroundStateLink({ run: "r_two", step: 1, agent: "planner", engine: "scripted" }))
+    await waitFor(() => expect(sourceInput().value).toBe("r_two"))
+    await waitFor(() => expect(agentSelect().value).toBe("planner"))
+    expect(engineSelect().value).toBe("scripted")
+    await waitFor(() => expect(stepSelect().value).toBe("1"))
+    await settle()
+    expect(actions).toEqual(["PUSH"])
+  })
+
+  it("Back and Forward round-trip the agent, the step and the engine", async () => {
+    const { router } = renderApp("/playground?run=r_ok&agent=planner")
+    await waitFor(() => expect(agentSelect().value).toBe("planner"))
+    void router.navigate(playgroundStateLink({ run: "r_ok", step: 1, agent: "orders", engine: "scripted" }))
+    await waitFor(() => expect(agentSelect().value).toBe("orders"))
+    router.history.back()
+    await waitFor(() => expect(agentSelect().value).toBe("planner"))
+    expect(engineSelect().value).toBe("live")
+    await waitFor(() => expect(stepSelect().value).toBe("0"))
+    router.history.forward()
+    await waitFor(() => expect(agentSelect().value).toBe("orders"))
+    expect(engineSelect().value).toBe("scripted")
+    await waitFor(() => expect(stepSelect().value).toBe("1"))
+    await settle()
+    expect(router.state.location.search).toMatchObject({ run: "r_ok", step: 1, agent: "orders", engine: "scripted" })
   })
 })

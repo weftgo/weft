@@ -25,6 +25,17 @@ const stored = [
   { type: "run_finish", run_id: RUN, usage, steps: 1 },
 ].map((event, pos) => ({ pos, time: doc.started, event }))
 
+// A run longer than the raw view's first page of rows (500).
+const BIG = "r_big"
+const bigDoc: RunDoc = { ...doc, id: BIG, event_count: 602 }
+const bigEvents = [
+  { type: "run_start", id: BIG, model: doc.model, agent: "orders" },
+  { type: "step_start", run_id: BIG, index: 0 },
+  ...Array.from({ length: 598 }, (_, i) => ({ type: "text_delta", run_id: BIG, text: `w${i} ` })),
+  { type: "step_finish", run_id: BIG, index: 0, reason: "stop", usage },
+  { type: "run_finish", run_id: BIG, usage, steps: 1 },
+].map((event, pos) => ({ pos, time: doc.started, event }))
+
 let writeText: ReturnType<typeof vi.fn>
 beforeEach(() => {
   stubBrowser()
@@ -41,6 +52,10 @@ beforeEach(() => {
     .on(`GET runs/${RUN}/events`, pagedEvents(stored))
     .on(`GET runs/${RUN}/spans`, { spans: [] })
     .on(`GET runs/${RUN}/transcript`, transcriptOf([]))
+    .on(`GET runs/${BIG}`, bigDoc)
+    .on(`GET runs/${BIG}/events`, pagedEvents(bigEvents))
+    .on(`GET runs/${BIG}/spans`, { spans: [] })
+    .on(`GET runs/${BIG}/transcript`, transcriptOf([]))
     .install()
 })
 afterEach(() => {
@@ -114,5 +129,20 @@ describe("the run page's URL (G2)", () => {
   it("titles the tab with the run, its status and Studio", async () => {
     renderApp(`/runs/${RUN}`)
     await waitFor(() => expect(document.title).toBe("run s_…-t3 · succeeded · weft studio"))
+  })
+
+  it("opens a linked event past the first page of rows", async () => {
+    renderApp(`/runs/${BIG}?view=raw&ev=550`)
+    await waitFor(() => expect(eventRow(550)).toBeTruthy())
+    expect(eventRow(550).getAttribute("aria-expanded")).toBe("true")
+    expect(screen.getByText(/w548 /, { selector: "code *, code" })).toBeTruthy()
+  })
+
+  it("survives a linked event the run does not have", async () => {
+    const { router } = renderApp(`/runs/${RUN}?view=raw&ev=9999`)
+    await waitFor(() => expect(eventRow(3)).toBeTruthy())
+    expect(document.querySelectorAll('[aria-expanded="true"]')).toHaveLength(0)
+    // Nothing rewrote the link.
+    expect(router.state.location.search).toMatchObject({ ev: 9999 })
   })
 })

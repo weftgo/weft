@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"slices"
 	"sort"
 	"strings"
 
@@ -113,12 +114,25 @@ func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
 			return fmt.Sprintf("unknown tool %q", name), false
 		}
 	}
+	if reason, ok := validToolOverrides(cmd.Overrides, tools); !ok {
+		return reason, false
+	}
+	// A model the agent does not run and the allow-list does not name
+	// is the app's ModelResolver's to decide — resolved last, below,
+	// once everything cheaper has passed. Without one it is refused.
+	resolve := false
 	if m := cmd.Overrides.Model; m != "" {
 		if alt, ok := l.reg.model(m); (!ok || alt == nil) && m != l.reg.ownModel(cmd.Agent) {
-			return fmt.Sprintf("model %q is not on this runtime's allow-list", m), false
+			if l.cfg.resolve == nil {
+				return fmt.Sprintf("unknown model %q: not on this runtime's allow-list (register it with runtime.Models or add runtime.ModelResolver)", m), false
+			}
+			resolve = true
 		}
 	}
 	if reason, ok := validOptions(cmd.Overrides.Options, entry.Limits); !ok {
+		return reason, false
+	}
+	if reason, ok := validParams(cmd.Overrides.Params); !ok {
 		return reason, false
 	}
 	if cmd.SideEffects == "allow" {
@@ -184,8 +198,110 @@ func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
 			return "budget_exceeded", false
 		}
 	}
+	if resolve {
+		// The app's resolver decides whether the name exists — before
+		// the ack, so a refusal is a rejected command naming why, never
+		// a failed run. Its error text is the app's (ModelResolver).
+		m := cmd.Overrides.Model
+		model, err := l.cfg.resolve(ctx, m)
+		switch {
+		case err != nil:
+			return fmt.Sprintf("model %s: %v", m, err), false
+		case model == nil:
+			return fmt.Sprintf("model %s: the resolver returned no model", m), false
+		}
+		cmd.model = model
+	}
 	return "", true
 }
+
+// validToolOverrides checks the tool-shaped overrides against the
+// agent's tools — narrowing only: only_tools and park_on name tools the
+// agent has, only_tools stays inside tools_enabled when both are sent
+// (the narrower set is the run's), and a named tool_choice names a tool
+// the run keeps on and does not park (a forced call that always parks
+// is no experiment).
+func validToolOverrides(o overrides, tools map[string]bool) (string, bool) {
+	enabled := map[string]bool{}
+	for _, name := range o.ToolsEnabled {
+		enabled[name] = true
+	}
+	for _, name := range o.OnlyTools {
+		if !tools[name] {
+			return fmt.Sprintf("unknown tool %q in only_tools", name), false
+		}
+		if len(o.ToolsEnabled) > 0 && !enabled[name] {
+			return fmt.Sprintf("only_tools may only narrow tools_enabled: tool %q is not enabled", name), false
+		}
+	}
+	parked := map[string]bool{}
+	for _, name := range o.ParkOn {
+		if !tools[name] {
+			return fmt.Sprintf("unknown tool %q in park_on", name), false
+		}
+		parked[name] = true
+	}
+	tc := o.ToolChoice
+	if tc == nil {
+		return "", true
+	}
+	mode, ok := toolChoiceMode(tc.Mode)
+	if !ok {
+		return fmt.Sprintf("unknown tool_choice mode %q (auto, any, none or named)", tc.Mode), false
+	}
+	if mode != core.ToolChoiceNamed {
+		if tc.Name != "" {
+			return fmt.Sprintf("tool_choice mode %q takes no name (only named does)", tc.Mode), false
+		}
+		return "", true
+	}
+	on := func(name string) bool {
+		switch {
+		case len(o.OnlyTools) > 0:
+			return slices.Contains(o.OnlyTools, name)
+		case len(o.ToolsEnabled) > 0:
+			return enabled[name]
+		}
+		return true
+	}
+	switch {
+	case tc.Name == "":
+		return "tool_choice named needs a tool name", false
+	case !tools[tc.Name]:
+		return fmt.Sprintf("unknown tool %q in tool_choice", tc.Name), false
+	case !on(tc.Name):
+		return fmt.Sprintf("tool_choice names %q, which this command turns off", tc.Name), false
+	case parked[tc.Name]:
+		return fmt.Sprintf("tool_choice names %q, which park_on parks: every forced call would park", tc.Name), false
+	}
+	return "", true
+}
+
+// validParams checks the sampling override: neutral knobs, any value
+// the core's RequestParams accepts — top_p inside 0..1, at most four
+// non-empty stop sequences (the common provider limit), any seed. A
+// negative max_tokens is the core's own step error, left to it.
+func validParams(p *paramsWire) (string, bool) {
+	if p == nil {
+		return "", true
+	}
+	if v := p.TopP; v != nil && (math.IsNaN(*v) || *v < 0 || *v > 1) {
+		return fmt.Sprintf("top_p %v is outside 0..1", *v), false
+	}
+	if len(p.Stop) > maxStop {
+		return fmt.Sprintf("stop takes at most %d sequences, got %d", maxStop, len(p.Stop)), false
+	}
+	for _, s := range p.Stop {
+		if s == "" {
+			return "stop sequences must be non-empty", false
+		}
+	}
+	return "", true
+}
+
+// maxStop is the stop-sequence cap a command may carry (the smallest
+// common provider limit).
+const maxStop = 4
 
 // runPrefix composes the transcript a re-run of src is fed before its
 // input.
@@ -263,8 +379,12 @@ func withoutPrompt(input []core.Message) []core.Message {
 }
 
 // enabledTools lists the tools this command leaves on: the override
-// subset when set, else the agent's full set.
+// subset when set (only_tools, the narrower, before tools_enabled),
+// else the agent's full set.
 func enabledTools(cmd command, tools map[string]bool) []string {
+	if len(cmd.Overrides.OnlyTools) > 0 {
+		return cmd.Overrides.OnlyTools // inside tools_enabled: validated
+	}
 	if len(cmd.Overrides.ToolsEnabled) > 0 {
 		return cmd.Overrides.ToolsEnabled
 	}
@@ -1000,7 +1120,13 @@ func (l *link) overrideOptions(cmd command) []core.RunOption {
 	if o.Instructions != "" {
 		opts = append(opts, core.Instructions(o.Instructions))
 	}
-	if len(o.ToolsEnabled) > 0 {
+	// Several OnlyTools options add up (core.OnlyTools), so the run
+	// carries one: only_tools, validated inside tools_enabled, is the
+	// narrower set when both are sent.
+	switch {
+	case len(o.OnlyTools) > 0:
+		opts = append(opts, core.OnlyTools(o.OnlyTools...))
+	case len(o.ToolsEnabled) > 0:
 		opts = append(opts, core.OnlyTools(o.ToolsEnabled...))
 	}
 	if cmd.Engine == "scripted" {
@@ -1010,6 +1136,8 @@ func (l *link) overrideOptions(cmd command) []core.RunOption {
 		// over a model override (validate refuses the pair): nothing a
 		// scripted command carries may reach a live model.
 		opts = append(opts, core.UseModel(l.scriptedFor(cmd)))
+	} else if cmd.model != nil {
+		opts = append(opts, core.UseModel(cmd.model)) // the ModelResolver's, resolved in validate
 	} else if m := o.Model; m != "" {
 		if alt, ok := l.reg.model(m); ok && alt != nil {
 			opts = append(opts, core.UseModel(alt))
@@ -1024,9 +1152,12 @@ func (l *link) overrideOptions(cmd command) []core.RunOption {
 	if n := int(o.Options["parallelism"]); n > 0 {
 		opts = append(opts, core.Parallelism(n))
 	}
-	if t, ok := o.Options["temperature"]; ok {
-		temp := t
-		opts = append(opts, core.Params(core.RequestParams{Temperature: &temp}))
+	if p, ok := l.runParams(cmd); ok {
+		opts = append(opts, core.Params(p))
+	}
+	if tc := o.ToolChoice; tc != nil {
+		mode, _ := toolChoiceMode(tc.Mode) // validated
+		opts = append(opts, core.ToolChoice(core.ToolChoiceConfig{Mode: mode, Name: tc.Name}))
 	}
 
 	// Side-effect safety (§6 rule 3), default-deny: every tool call of
@@ -1043,6 +1174,10 @@ func (l *link) overrideOptions(cmd command) []core.RunOption {
 	// applied per run because the agent is immutable.
 	if breaks := l.breakpointTools(cmd.Agent); len(breaks) > 0 {
 		opts = append(opts, core.ParkOn(breaks...))
+	}
+	// The command's own park_on adds to both: parking only narrows.
+	if len(o.ParkOn) > 0 {
+		opts = append(opts, core.ParkOn(o.ParkOn...))
 	}
 
 	meta := map[string]string{
@@ -1063,6 +1198,92 @@ func (l *link) overrideOptions(cmd command) []core.RunOption {
 	}
 	opts = append(opts, core.Metadata(meta))
 	return opts
+}
+
+// runParams is the run's sampling override, ok when the command sets
+// any knob: the agent's own params (core's run-level Params replaces
+// the struct whole, so a command turning one knob keeps the others)
+// with options.temperature and params' fields laid over them.
+func (l *link) runParams(cmd command) (core.RequestParams, bool) {
+	o := cmd.Overrides
+	temp, hasTemp := o.Options["temperature"]
+	if !hasTemp && o.Params == nil {
+		return core.RequestParams{}, false
+	}
+	var p core.RequestParams
+	if agent, ok := l.reg.agent(cmd.Agent); ok && agent != nil {
+		p = agent.Params()
+	}
+	if hasTemp {
+		p.Temperature = &temp
+	}
+	if q := o.Params; q != nil {
+		if q.TopP != nil {
+			v := *q.TopP
+			p.TopP = &v
+		}
+		if q.MaxTokens != nil {
+			v := *q.MaxTokens
+			p.MaxTokens = &v
+		}
+		if q.Seed != nil {
+			v := *q.Seed
+			p.Seed = &v
+		}
+		if len(q.Stop) > 0 {
+			p.Stop = slices.Clone(q.Stop)
+		}
+	}
+	return p, true
+}
+
+// toolChoiceMode maps the wire's tool_choice mode onto the core's:
+// auto (or "") | any | none | named. ok is false outside the four.
+func toolChoiceMode(s string) (core.ToolChoiceMode, bool) {
+	switch s {
+	case "", "auto":
+		return core.ToolChoiceAuto, true
+	case "any":
+		return core.ToolChoiceAny, true
+	case "none":
+		return core.ToolChoiceNone, true
+	case "named":
+		return core.ToolChoiceNamed, true
+	default:
+		return "", false
+	}
+}
+
+// toolChoiceWord is toolChoiceMode turned around, for the registered
+// defaults.
+func toolChoiceWord(m core.ToolChoiceMode) string {
+	switch m {
+	case core.ToolChoiceAny:
+		return "any"
+	case core.ToolChoiceNone:
+		return "none"
+	case core.ToolChoiceNamed:
+		return "named"
+	default:
+		return "auto"
+	}
+}
+
+// thinkingWord is thinkingLevel turned around, for the registered
+// defaults: "" is the provider default (ThinkUnset).
+func thinkingWord(l core.ThinkingLevel) string {
+	switch l {
+	case core.ThinkOff:
+		return "off"
+	case core.ThinkLow:
+		return "low"
+	case core.ThinkMedium:
+		return "medium"
+	case core.ThinkHigh:
+		return "high"
+	default:
+		return ""
+	}
 }
 
 // thinkingLevel maps the wire vocabulary (the arena playground's)

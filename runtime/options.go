@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"log/slog"
 	"net"
 	"net/url"
@@ -25,6 +26,7 @@ type config struct {
 	local       *studio.Server // setup A: the embedded Studio, in-process
 	agents      []*core.Agent
 	models      map[string]core.Model
+	resolve     func(ctx context.Context, name string) (core.Model, error)
 	budget      Budget
 	allow       map[string]bool
 	threads     thread.Storage
@@ -71,6 +73,31 @@ func Models(models map[string]core.Model) Option {
 		}
 		for name, m := range models {
 			c.models[name] = m
+		}
+	}
+}
+
+// ModelResolver lets a command name a model the runtime did not list
+// in Models — "try this on claude-haiku-4-5" without pre-registering
+// every model. A command's model override that is neither the agent's
+// own model name nor a Models name is handed to resolve while the
+// command is validated, before its ack: a model back runs the command
+// (the run's RunStart.Model and weft.override.model name it); an error
+// rejects the command with "model <name>: <err.Error()>".
+//
+// resolve is the app's code, so the playground still only narrows:
+// Studio proposes a name, the app decides whether it exists — build
+// the client from the app's own credentials, refuse names it does not
+// support. The error text is shown to whoever ran the experiment, so
+// it must carry no key, URL or secret; the app controls the message.
+// resolve may be called concurrently and once per command; cache
+// clients if building one is costly. Registration reports the flag
+// (resolver: true), and Studio accepts an unlisted name only then. A
+// nil resolve is ignored.
+func ModelResolver(resolve func(ctx context.Context, name string) (core.Model, error)) Option {
+	return func(c *config) {
+		if resolve != nil {
+			c.resolve = resolve
 		}
 	}
 }

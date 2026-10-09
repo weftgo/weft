@@ -1,0 +1,37 @@
+{
+  "runtimes": [
+    {
+      "id": "rt_01K7Q2W3E4R5T6Y7U8I9O0PABC",
+      "host": "dev-laptop",
+      "pid": 41237,
+      "service": "acme-api",
+      "env": "dev",
+      "connected_since": "2026-10-09T10:00:00Z",
+      "last_seen": "2026-10-09T10:00:05Z",
+      "agents": [
+        {
+          "name": "acme-support",
+          "models": ["glm-5.3-flash"],
+          "resolver": true,
+          "defaults": {
+            "max_steps": 10,
+            "parallelism": 4,
+            "thinking": "low",
+            "temperature": 0.2,
+            "top_p": 0.9,
+            "max_tokens": 1024,
+            "seed": 7,
+            "stop": ["END"],
+            "tool_choice": {"mode": "named", "name": "lookup_order"}
+          },
+          "tools": [
+            {"name": "lookup_order", "side_effects": "safe", "allow": false},
+            {"name": "refund", "side_effects": "never", "allow": true}
+          ],
+          "instructions": "You are Acme's support agent."
+        }
+      ],
+      "breakpoints": []
+    }
+  ]
+}

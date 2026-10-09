@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"sync/atomic"
@@ -619,5 +621,250 @@ func TestBudgetCountsSubagentUsageOnce(t *testing.T) {
 	}
 	if len(l.parked) != 0 || len(l.steerQ) != 0 {
 		t.Errorf("bookkeeping left behind: parked %d, steer queues %d", len(l.parked), len(l.steerQ))
+	}
+}
+
+// TestValidateOptionLab pins the runtime's re-validation of the option
+// lab's typed overrides (plan F3): each tool name is the agent's, only_tools
+// stays inside tools_enabled, a named tool_choice names a tool the run
+// keeps on and does not park, the mode is one of the four, top_p sits in
+// 0..1 and stop carries at most four non-empty sequences — each refusal
+// naming its rule before the ack. Valid values pass, and a command
+// without the new fields validates as before.
+func TestValidateOptionLab(t *testing.T) {
+	lookup := core.Tool("lookup_order", "Look up.", func(ctx context.Context, in struct{}) (string, error) { return "", nil })
+	refund := core.Tool("refund", "Refund.", func(ctx context.Context, in struct{}) (string, error) { return "", nil })
+	track := core.Tool("track_parcel", "Track.", func(ctx context.Context, in struct{}) (string, error) { return "", nil })
+	agent := core.New(wefttest.Script(wefttest.Say("ok")), core.Name("a"), core.MaxSteps(6), lookup, refund, track)
+	l := newExecLink(nil, agent)
+	f := func(v float64) *float64 { return &v }
+	n := func(v int) *int { return &v }
+	cmd := func(o overrides) *command {
+		return &command{CommandID: "cmd_lab", Agent: "a", Engine: "live", Thread: "ephemeral", Overrides: o}
+	}
+	for _, tc := range []struct {
+		name string
+		o    overrides
+	}{
+		{"old shape", overrides{ToolsEnabled: []string{"refund"}, Options: map[string]float64{"max_steps": 3, "temperature": 0.4}}},
+		{"only_tools alone", overrides{OnlyTools: []string{"lookup_order"}}},
+		{"only_tools inside tools_enabled", overrides{ToolsEnabled: []string{"lookup_order", "refund"}, OnlyTools: []string{"refund"}}},
+		{"park_on", overrides{ParkOn: []string{"track_parcel"}}},
+		{"tool_choice auto", overrides{ToolChoice: &toolChoiceWire{Mode: "auto"}}},
+		{"tool_choice any", overrides{ToolChoice: &toolChoiceWire{Mode: "any"}}},
+		{"tool_choice none", overrides{ToolChoice: &toolChoiceWire{Mode: "none"}}},
+		{"tool_choice named", overrides{OnlyTools: []string{"lookup_order"}, ToolChoice: &toolChoiceWire{Mode: "named", Name: "lookup_order"}}},
+		{"params", overrides{Params: &paramsWire{TopP: f(0.9), MaxTokens: n(256), Stop: []string{"END", "STOP"}, Seed: new(int64)}}},
+		{"params edges", overrides{Params: &paramsWire{TopP: f(0), Stop: []string{"a", "b", "c", "d"}}}},
+	} {
+		if reason, ok := l.validate(context.Background(), cmd(tc.o)); !ok {
+			t.Errorf("%s: rejected (%s), want accepted", tc.name, reason)
+		}
+	}
+	for _, tc := range []struct {
+		name, want string
+		o          overrides
+	}{
+		{"only_tools unknown", `unknown tool "nope" in only_tools`, overrides{OnlyTools: []string{"nope"}}},
+		{"only_tools widens tools_enabled", `only_tools may only narrow tools_enabled: tool "refund" is not enabled`,
+			overrides{ToolsEnabled: []string{"lookup_order"}, OnlyTools: []string{"refund"}}},
+		{"park_on unknown", `unknown tool "nope" in park_on`, overrides{ParkOn: []string{"nope"}}},
+		{"tool_choice mode", `unknown tool_choice mode "tool"`, overrides{ToolChoice: &toolChoiceWire{Mode: "tool"}}},
+		{"tool_choice name without named", `takes no name`, overrides{ToolChoice: &toolChoiceWire{Mode: "any", Name: "refund"}}},
+		{"tool_choice named without a name", "needs a tool name", overrides{ToolChoice: &toolChoiceWire{Mode: "named"}}},
+		{"tool_choice named unknown", `unknown tool "nope" in tool_choice`, overrides{ToolChoice: &toolChoiceWire{Mode: "named", Name: "nope"}}},
+		{"tool_choice named off", `tool_choice names "refund", which this command turns off`,
+			overrides{OnlyTools: []string{"lookup_order"}, ToolChoice: &toolChoiceWire{Mode: "named", Name: "refund"}}},
+		{"tool_choice named off by tools_enabled", `which this command turns off`,
+			overrides{ToolsEnabled: []string{"lookup_order"}, ToolChoice: &toolChoiceWire{Mode: "named", Name: "refund"}}},
+		{"tool_choice named parked", `which park_on parks: every forced call would park`,
+			overrides{ParkOn: []string{"refund"}, ToolChoice: &toolChoiceWire{Mode: "named", Name: "refund"}}},
+		{"top_p high", "top_p 1.5 is outside 0..1", overrides{Params: &paramsWire{TopP: f(1.5)}}},
+		{"top_p negative", "top_p -0.1 is outside 0..1", overrides{Params: &paramsWire{TopP: f(-0.1)}}},
+		{"stop too many", "stop takes at most 4 sequences, got 5", overrides{Params: &paramsWire{Stop: []string{"a", "b", "c", "d", "e"}}}},
+		{"stop empty", "stop sequences must be non-empty", overrides{Params: &paramsWire{Stop: []string{""}}}},
+		{"raised max_steps", "raises the agent's cap", overrides{Options: map[string]float64{"max_steps": 7}}},
+		{"unknown model, no resolver", `unknown model "claude-haiku-4-5": not on this runtime's allow-list (register it with runtime.Models or add runtime.ModelResolver)`,
+			overrides{Model: "claude-haiku-4-5"}},
+	} {
+		reason, ok := l.validate(context.Background(), cmd(tc.o))
+		if ok {
+			t.Errorf("%s: accepted, want rejected with %q", tc.name, tc.want)
+			continue
+		}
+		if !strings.Contains(reason, tc.want) {
+			t.Errorf("%s: reason = %q, want it to contain %q", tc.name, reason, tc.want)
+		}
+	}
+}
+
+// TestOptionLabReachesTheModel pins that the option lab's overrides are
+// the run's: the sampling params (laid over the agent's own — the
+// knobs a command leaves alone keep the agent's values), the tool
+// choice, the tool list narrowed by only_tools, and park_on parking a
+// tool the code vouched safe.
+func TestOptionLabReachesTheModel(t *testing.T) {
+	var lookupRan atomic.Bool
+	lookup := core.Tool("lookup_order", "Look up.", func(ctx context.Context, in struct{}) (string, error) {
+		lookupRan.Store(true)
+		return "shipped", nil
+	}, core.Replay(core.ReplaySafe))
+	refund := core.Tool("refund", "Refund.", func(ctx context.Context, in struct{}) (string, error) { return "", nil })
+	track := core.Tool("track_parcel", "Track.", func(ctx context.Context, in struct{}) (string, error) { return "", nil },
+		core.Replay(core.ReplaySafe))
+	model := wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{}`}), wefttest.Say("never reached"))
+	temp, maxTok := 0.3, 900
+	agent := core.New(model, core.Name("a"), lookup, refund, track,
+		core.Params(core.RequestParams{Temperature: &temp, MaxTokens: &maxTok}))
+	l := newExecLink(nil, agent)
+
+	topP, seed := 0.5, int64(42)
+	in := "where is it?"
+	cmd := command{CommandID: "cmd_lab", Agent: "a", Engine: "live", Thread: "ephemeral", Input: &in, Overrides: overrides{
+		ToolsEnabled: []string{"lookup_order", "track_parcel"},
+		OnlyTools:    []string{"lookup_order", "track_parcel"},
+		Options:      map[string]float64{"temperature": 0.9},
+		Params:       &paramsWire{TopP: &topP, Stop: []string{"END"}, Seed: &seed},
+		ToolChoice:   &toolChoiceWire{Mode: "any"},
+		ParkOn:       []string{"lookup_order"},
+	}}
+	if reason, ok := l.validate(context.Background(), &cmd); !ok {
+		t.Fatal(reason)
+	}
+	res, err := agent.Generate(context.Background(), l.runOptions(cmd, "pg_lab")...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reqs := model.Requests()
+	if len(reqs) != 1 {
+		t.Fatalf("model calls = %d, want 1 (the run parks at the call)", len(reqs))
+	}
+	req := reqs[0]
+	p := req.Params
+	if p.Temperature == nil || *p.Temperature != 0.9 || p.TopP == nil || *p.TopP != 0.5 || p.Seed == nil || *p.Seed != 42 ||
+		!reflect.DeepEqual(p.Stop, []string{"END"}) {
+		t.Errorf("params = %+v, want the command's temperature/top_p/seed/stop", p)
+	}
+	if p.MaxTokens == nil || *p.MaxTokens != 900 {
+		t.Errorf("max_tokens = %v, want the agent's own 900 kept (a run-level Params replaces the struct whole)", p.MaxTokens)
+	}
+	if req.ToolChoice != (core.ToolChoiceConfig{Mode: core.ToolChoiceAny}) {
+		t.Errorf("tool choice = %+v, want any", req.ToolChoice)
+	}
+	var names []string
+	for _, td := range req.Tools {
+		names = append(names, td.Name)
+	}
+	if !reflect.DeepEqual(names, []string{"lookup_order", "track_parcel"}) {
+		t.Errorf("tools = %v, want only_tools' set", names)
+	}
+	if len(res.Pending) != 1 || res.Pending[0].Name != "lookup_order" || lookupRan.Load() {
+		t.Errorf("pending = %+v, lookup ran = %v — want park_on to park the safe tool", res.Pending, lookupRan.Load())
+	}
+
+	// A named choice reaches the request too.
+	named := wefttest.Script(wefttest.Say("ok"))
+	l2 := newExecLink(nil, core.New(named, core.Name("b"), lookup, refund))
+	cmd2 := command{CommandID: "cmd_named", Agent: "b", Engine: "live", Thread: "ephemeral", Input: &in,
+		Overrides: overrides{ToolChoice: &toolChoiceWire{Mode: "named", Name: "refund"}}}
+	if reason, ok := l2.validate(context.Background(), &cmd2); !ok {
+		t.Fatal(reason)
+	}
+	b, _ := l2.reg.agent("b")
+	if _, err := b.Generate(context.Background(), l2.runOptions(cmd2, "pg_named")...); err != nil {
+		t.Fatal(err)
+	}
+	if got := named.Requests()[0].ToolChoice; got != (core.ToolChoiceConfig{Mode: core.ToolChoiceNamed, Name: "refund"}) {
+		t.Errorf("named tool choice = %+v", got)
+	}
+}
+
+// TestModelResolver pins runtime.ModelResolver: a model name outside
+// the allow-list is resolved in validate (before the ack) and the run
+// uses the model it returned; the resolver's error rejects the command
+// with its text; a nil model is refused; the allow-list and the
+// agent's own name never reach the resolver; and the registration
+// reports the flag.
+func TestModelResolver(t *testing.T) {
+	agent := core.New(wefttest.Script(wefttest.Say("own")), core.Name("a"))
+	haiku := wefttest.Script(wefttest.Say("from haiku"))
+	alt := wefttest.Script(wefttest.Say("alt"))
+	var asked []string
+	cfg := &config{agents: []*core.Agent{agent}, models: map[string]core.Model{"glm-5.3-flash": alt}}
+	ModelResolver(func(ctx context.Context, name string) (core.Model, error) {
+		asked = append(asked, name)
+		switch name {
+		case "anthropic/claude-haiku-4-5":
+			return haiku, nil
+		case "nil-model":
+			return nil, nil
+		}
+		return nil, errors.New("not a model this app serves")
+	})(cfg)
+	l := newLink(cfg, newRegistry(cfg), "", "")
+	in := "hi"
+	mk := func(model string) *command {
+		return &command{CommandID: "cmd_m", Agent: "a", Engine: "live", Thread: "ephemeral", Input: &in,
+			Overrides: overrides{Model: model}}
+	}
+
+	cmd := mk("anthropic/claude-haiku-4-5")
+	if reason, ok := l.validate(context.Background(), cmd); !ok {
+		t.Fatalf("resolved model rejected: %s", reason)
+	}
+	res, err := agent.Generate(context.Background(), l.runOptions(*cmd, "pg_m")...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Text() != "from haiku" || len(haiku.Requests()) != 1 {
+		t.Errorf("text = %q, haiku calls = %d — want the resolved model to answer", res.Text(), len(haiku.Requests()))
+	}
+	if reason, ok := l.validate(context.Background(), mk("gpt-9")); ok || reason != "model gpt-9: not a model this app serves" {
+		t.Errorf("resolver error: reason = %q ok = %v, want the resolver's text", reason, ok)
+	}
+	if reason, ok := l.validate(context.Background(), mk("nil-model")); ok || !strings.Contains(reason, "returned no model") {
+		t.Errorf("nil model: reason = %q ok = %v", reason, ok)
+	}
+	asked = nil
+	for _, name := range []string{"glm-5.3-flash", l.reg.ownModel("a")} {
+		if reason, ok := l.validate(context.Background(), mk(name)); !ok {
+			t.Errorf("%s rejected: %s", name, reason)
+		}
+	}
+	if len(asked) != 0 {
+		t.Errorf("the resolver was asked %v; the allow-list and the agent's own name never reach it", asked)
+	}
+	scripted := mk("anthropic/claude-haiku-4-5")
+	scripted.Engine, scripted.Source = "scripted", &sourceSpec{RunID: "s_x"}
+	if reason, ok := l.validate(context.Background(), scripted); ok || !strings.Contains(reason, "silently replay") {
+		t.Errorf("scripted + resolved model: reason = %q ok = %v, want the §5.5 refusal", reason, ok)
+	}
+	if !l.reg.registration("rt").Agents[0].Resolver {
+		t.Error("registration resolver = false with a ModelResolver")
+	}
+	if newRegistry(&config{agents: []*core.Agent{agent}}).registration("rt").Agents[0].Resolver {
+		t.Error("registration resolver = true without one")
+	}
+}
+
+// TestRegistrationDefaults pins the agent's run defaults on the
+// registration — what the option lab greys beside each override.
+func TestRegistrationDefaults(t *testing.T) {
+	temp, seed := 0.2, int64(9)
+	tool := core.Tool("classify", "Classify.", func(ctx context.Context, in struct{}) (string, error) { return "", nil })
+	agent := core.New(wefttest.Script(wefttest.Say("ok")), core.Name("a"), tool,
+		core.MaxSteps(7), core.Parallelism(2),
+		core.Thinking(core.ThinkingConfig{Level: core.ThinkLow}),
+		core.Params(core.RequestParams{Temperature: &temp, Seed: &seed, Stop: []string{"END"}}),
+		core.ToolChoice(core.ToolChoiceConfig{Mode: core.ToolChoiceNamed, Name: "classify"}))
+	bare := core.New(wefttest.Script(wefttest.Say("ok")), core.Name("bare"))
+	reg := newRegistry(&config{agents: []*core.Agent{agent, bare}}).registration("rt")
+	got, _ := json.Marshal(reg.Agents[0].Defaults)
+	if want := `{"max_steps":7,"parallelism":2,"thinking":"low","temperature":0.2,"seed":9,"stop":["END"],"tool_choice":{"mode":"named","name":"classify"}}`; string(got) != want {
+		t.Errorf("defaults = %s\nwant       %s", got, want)
+	}
+	got, _ = json.Marshal(reg.Agents[1].Defaults)
+	if want := `{"max_steps":10,"parallelism":4,"thinking":"","tool_choice":{"mode":"auto"}}`; string(got) != want {
+		t.Errorf("bare defaults = %s\nwant            %s", got, want)
 	}
 }

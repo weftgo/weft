@@ -59,14 +59,36 @@ type Registration struct {
 	Agents      []AgentRegistration `json:"agents"`
 }
 
-// AgentRegistration is one exposed agent.
+// AgentRegistration is one exposed agent. Resolver says the runtime
+// holds a runtime.ModelResolver (a command may name a model outside
+// Models; the runtime decides); Defaults are the agent's run defaults
+// (plan F3's option lab greys them). A runtime older than either sends
+// neither: false and the zero value.
 type AgentRegistration struct {
 	Name        string            `json:"name"`
 	Manifest    string            `json:"manifest"`
 	Models      []string          `json:"models"`
+	Resolver    bool              `json:"resolver"`
 	Limits      AgentLimits       `json:"limits"`
+	Defaults    AgentDefaults     `json:"defaults"`
 	SideEffects map[string]string `json:"side_effects"`
 	Allow       []string          `json:"allow"`
+}
+
+// AgentDefaults are an agent's run defaults in the command's override
+// vocabulary: its caps, its thinking level ("" is the provider
+// default), the sampling knobs its core.Params set (absent: the
+// adapter's own) and its tool choice (mode "auto" when none was set).
+type AgentDefaults struct {
+	MaxSteps    int        `json:"max_steps"`
+	Parallelism int        `json:"parallelism"`
+	Thinking    string     `json:"thinking"`
+	Temperature *float64   `json:"temperature,omitempty"`
+	TopP        *float64   `json:"top_p,omitempty"`
+	MaxTokens   *int       `json:"max_tokens,omitempty"`
+	Seed        *int64     `json:"seed,omitempty"`
+	Stop        []string   `json:"stop,omitempty"`
+	ToolChoice  ToolChoice `json:"tool_choice"`
 }
 
 // AgentLimits are the agent's own lower-only bounds.
@@ -224,13 +246,35 @@ type SourceSpec struct {
 	FromStep int    `json:"from_step"`
 }
 
-// Overrides are the experiment's changes (§5.1).
+// Overrides are the experiment's changes (§5.1): the numeric options
+// (max_steps, parallelism, temperature) and, beside them, the option
+// lab's typed knobs (plan F3) — every one narrowing or neutral.
 type Overrides struct {
 	Instructions string             `json:"instructions,omitempty"`
 	ToolsEnabled []string           `json:"tools_enabled,omitempty"`
 	Model        string             `json:"model,omitempty"`
 	Thinking     string             `json:"thinking,omitempty"`
 	Options      map[string]float64 `json:"options,omitempty"`
+	Params       *Params            `json:"params,omitempty"`
+	ToolChoice   *ToolChoice        `json:"tool_choice,omitempty"`
+	ParkOn       []string           `json:"park_on,omitempty"`
+	OnlyTools    []string           `json:"only_tools,omitempty"`
+}
+
+// Params is the sampling override beside options.temperature: the
+// rest of core.RequestParams. Absent fields keep the agent's own.
+type Params struct {
+	TopP      *float64 `json:"top_p,omitempty"`
+	MaxTokens *int     `json:"max_tokens,omitempty"`
+	Stop      []string `json:"stop,omitempty"`
+	Seed      *int64   `json:"seed,omitempty"`
+}
+
+// ToolChoice is a tool choice on the wire: mode auto | any | none |
+// named, and the tool's name under named.
+type ToolChoice struct {
+	Mode string `json:"mode"`
+	Name string `json:"name,omitempty"`
 }
 
 // TranscriptEdit is a D2/D3 edit: a step's recorded tool result or
@@ -314,11 +358,16 @@ type RuntimeView struct {
 	Breakpoints []string `json:"breakpoints"`
 }
 
-// AgentView is one agent of a connected runtime.
+// AgentView is one agent of a connected runtime. Resolver and Defaults
+// are the registration's (AgentRegistration): whether a model name
+// outside Models may be proposed, and the run defaults the option lab
+// shows greyed beside each override.
 type AgentView struct {
-	Name   string     `json:"name"`
-	Models []string   `json:"models"`
-	Tools  []ToolView `json:"tools"`
+	Name     string        `json:"name"`
+	Models   []string      `json:"models"`
+	Resolver bool          `json:"resolver"`
+	Defaults AgentDefaults `json:"defaults"`
+	Tools    []ToolView    `json:"tools"`
 	// Instructions is the agent's registered system prompt, read from
 	// its manifest: the experiment drawer pre-fills from the registered
 	// config, never a guess from the trace (WEFT-PLAYGROUND §3).
@@ -1097,7 +1146,16 @@ func (rs *RuntimeServer) Snapshot() []RuntimeView {
 			Breakpoints:    append([]string{}, c.breakpoints...),
 		}
 		for _, a := range c.reg.Agents {
-			av := AgentView{Name: a.Name, Models: a.Models, Instructions: a.ManifestInstructions()}
+			av := AgentView{Name: a.Name, Models: a.Models, Resolver: a.Resolver, Defaults: a.Defaults,
+				Instructions: a.ManifestInstructions()}
+			// A runtime older than defaults sends none: its caps are
+			// still the registered limits, and no tool choice is auto.
+			if av.Defaults.MaxSteps == 0 && av.Defaults.Parallelism == 0 {
+				av.Defaults.MaxSteps, av.Defaults.Parallelism = a.Limits.MaxSteps, a.Limits.Parallelism
+			}
+			if av.Defaults.ToolChoice.Mode == "" {
+				av.Defaults.ToolChoice.Mode = "auto"
+			}
 			if av.Models == nil {
 				av.Models = []string{}
 			}

@@ -357,8 +357,23 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 				return
 			}
 		}
-		if m := req.Overrides.Model; m != "" && !contains(agent.Models, m) && m != agent.ManifestModelName() {
-			badRequest(w, r, "model "+m+" is neither the agent's own nor a registered alternate")
+		// The option lab's tool-shaped overrides (plan F3): names the
+		// manifest lacks are 400; only_tools outside tools_enabled is a
+		// widening, 403; a named tool_choice the run turns off or parks
+		// could never be honoured, 400.
+		if widens, msg := toolOverrides(req.Overrides, agent.Name, known); msg != "" {
+			if widens {
+				writeError(w, r, http.StatusForbidden, "forbidden", msg)
+			} else {
+				badRequest(w, r, msg)
+			}
+			return
+		}
+		// A model outside the allow-list is the runtime's ModelResolver
+		// to decide (it resolves before the ack, and its refusal is the
+		// rejected command's reason); without one it is unknown here.
+		if m := req.Overrides.Model; m != "" && !contains(agent.Models, m) && m != agent.ManifestModelName() && !agent.Resolver {
+			badRequest(w, r, "unknown model "+m+": neither the agent's own nor a registered alternate (register it with runtime.Models or add runtime.ModelResolver)")
 			return
 		}
 		switch req.Overrides.Thinking {
@@ -390,6 +405,10 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 				return
 			}
 		}
+		if msg := paramsOverride(req.Overrides.Params); msg != "" {
+			badRequest(w, r, msg)
+			return
+		}
 		if n := int(req.Overrides.Options["max_steps"]); n > 0 && agent.Limits.MaxSteps > 0 && n > agent.Limits.MaxSteps {
 			writeError(w, r, http.StatusForbidden, "forbidden",
 				"max_steps may only lower the agent's cap")
@@ -402,6 +421,9 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 		}
 		if req.SideEffects == "allow" {
 			touched := enabled
+			if len(req.Overrides.OnlyTools) > 0 {
+				touched = req.Overrides.OnlyTools // inside tools_enabled: checked above
+			}
 			if len(touched) == 0 {
 				touched = manifestTools
 			}
@@ -474,6 +496,89 @@ func actorOf(r *http.Request) string {
 		return "server"
 	}
 	return "local"
+}
+
+// toolOverrides checks the option lab's tool-shaped overrides against
+// the agent's manifest tools (known) — weft/runtime's validToolOverrides,
+// answered as §10.4's statuses: msg is empty when they pass; widens
+// marks the 403 (only_tools outside tools_enabled), every other refusal
+// is a 400.
+func toolOverrides(o linkruntime.Overrides, agent string, known map[string]bool) (widens bool, msg string) {
+	for _, name := range o.OnlyTools {
+		if !known[name] {
+			return false, "tool " + name + " in only_tools is not in agent " + agent + "'s manifest"
+		}
+		if len(o.ToolsEnabled) > 0 && !contains(o.ToolsEnabled, name) {
+			return true, "only_tools may only narrow tools_enabled: tool " + name + " is not enabled"
+		}
+	}
+	for _, name := range o.ParkOn {
+		if !known[name] {
+			return false, "tool " + name + " in park_on is not in agent " + agent + "'s manifest"
+		}
+	}
+	tc := o.ToolChoice
+	if tc == nil {
+		return false, ""
+	}
+	switch tc.Mode {
+	case "", "auto", "any", "none":
+		if tc.Name != "" {
+			return false, "tool_choice mode " + orAuto(tc.Mode) + " takes no name (only named does)"
+		}
+		return false, ""
+	case "named":
+	default:
+		return false, "unknown tool_choice mode " + tc.Mode + " (auto, any, none or named)"
+	}
+	on := true
+	switch {
+	case len(o.OnlyTools) > 0:
+		on = contains(o.OnlyTools, tc.Name)
+	case len(o.ToolsEnabled) > 0:
+		on = contains(o.ToolsEnabled, tc.Name)
+	}
+	switch {
+	case tc.Name == "":
+		return false, "tool_choice named needs a tool name"
+	case !known[tc.Name]:
+		return false, "tool " + tc.Name + " in tool_choice is not in agent " + agent + "'s manifest"
+	case !on:
+		return false, "tool_choice names " + tc.Name + ", which this command turns off"
+	case contains(o.ParkOn, tc.Name):
+		return false, "tool_choice names " + tc.Name + ", which park_on parks: every forced call would park"
+	}
+	return false, ""
+}
+
+// orAuto spells an empty tool_choice mode as the auto it means.
+func orAuto(mode string) string {
+	if mode == "" {
+		return "auto"
+	}
+	return mode
+}
+
+// paramsOverride checks the sampling override (neutral knobs) as
+// weft/runtime's validParams does: top_p inside 0..1, at most four
+// non-empty stop sequences; any seed; a negative max_tokens is the
+// core's own step error. Empty when it passes.
+func paramsOverride(p *linkruntime.Params) string {
+	if p == nil {
+		return ""
+	}
+	if v := p.TopP; v != nil && (*v < 0 || *v > 1) {
+		return "top_p must be between 0 and 1"
+	}
+	if len(p.Stop) > 4 {
+		return fmt.Sprintf("stop takes at most 4 sequences, got %d", len(p.Stop))
+	}
+	for _, s := range p.Stop {
+		if s == "" {
+			return "stop sequences must be non-empty"
+		}
+	}
+	return ""
 }
 
 // contains reports whether s holds v.

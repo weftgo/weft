@@ -1,7 +1,10 @@
 package runtime_test
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/runtime"
@@ -28,4 +31,30 @@ func ExampleInstall() {
 	defer shutdown()
 	fmt.Println("link:", "closed")
 	// Output: link: closed
+}
+
+// ExampleModelResolver lets the playground try a model the app never
+// listed in runtime.Models: a command's provider-qualified name reaches
+// the resolver before its ack, and the app decides whether it exists —
+// it builds the client from its own credentials (here a scripted model
+// stands in for anthropic.New) and refuses everything else. The error
+// text is the rejected command's reason, so it names no key or URL.
+func ExampleModelResolver() {
+	support := weft.New(wefttest.Script(wefttest.Say("ok")), weft.Name("acme-support"))
+	resolve := func(ctx context.Context, name string) (weft.Model, error) {
+		provider, model, ok := strings.Cut(name, "/")
+		if !ok || provider != "anthropic" || !strings.HasPrefix(model, "claude-") {
+			return nil, errors.New("this app serves anthropic/claude-* models only")
+		}
+		return wefttest.Script(wefttest.Say("…")), nil // anthropic.New(anthropic.Model(model)) in a real app
+	}
+	shutdown := runtime.Install(
+		runtime.Agents(support),
+		runtime.ModelResolver(resolve),
+		runtime.Enabled(false), // dev-only by default: WEFT_ENV=dev
+	)
+	defer shutdown()
+	_, err := resolve(context.Background(), "openai/gpt-9")
+	fmt.Println(err)
+	// Output: this app serves anthropic/claude-* models only
 }

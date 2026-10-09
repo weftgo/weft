@@ -2130,3 +2130,102 @@ func TestPlaygroundEditsTheStoredStep(t *testing.T) {
 		e.waitTranscript(t, runID, c.patched)
 	}
 }
+
+// infoModel is a scripted model under another name: what an app's
+// ModelResolver hands back for a provider-qualified name.
+type infoModel struct {
+	*wefttest.Model
+	info core.ModelInfo
+}
+
+func (m *infoModel) Info() core.ModelInfo { return m.info }
+
+// TestPlaygroundOptionLabAndResolver is plan F3's Go half end to end:
+// a command naming a model outside the allow-list runs on what the
+// app's runtime.ModelResolver returned (the run row and
+// weft.override.model name it), the option lab's typed overrides reach
+// the run's invoke_agent span as weft.override.* (params laid over the
+// agent's own, the tool choice, only_tools as the tool subset,
+// park_on), and a name the resolver refuses is a rejected command whose
+// reason is the resolver's text.
+func TestPlaygroundOptionLabAndResolver(t *testing.T) {
+	e := newE2E(t)
+	haiku := &infoModel{Model: wefttest.Script(wefttest.Say("It shipped yesterday.")),
+		info: core.ModelInfo{Provider: "anthropic", Name: "claude-haiku-4-5"}}
+	shutdown := runtime.Install(
+		runtime.Studio(e.ts.URL, ""),
+		runtime.Agents(e.agent),
+		runtime.Models(map[string]core.Model{"glm-5.3-flash": e.alt}),
+		runtime.ModelResolver(func(ctx context.Context, name string) (core.Model, error) {
+			if name == "anthropic/claude-haiku-4-5" {
+				return haiku, nil
+			}
+			return nil, fmt.Errorf("this app serves no model named %s", name)
+		}),
+		runtime.Enabled(true),
+	)
+	defer shutdown()
+	rt := e.runtimeID(t)
+
+	body := fmt.Sprintf(`{
+	  "command_id": "cmd_haiku", "runtime": %q, "agent": "acme-support",
+	  "input": "where is my order #4411?",
+	  "overrides": {
+	    "model": "anthropic/claude-haiku-4-5",
+	    "tools_enabled": ["lookup_order", "refund"], "only_tools": ["lookup_order"],
+	    "park_on": ["lookup_order"], "tool_choice": {"mode": "none"},
+	    "params": {"top_p": 0.5, "seed": 3}, "options": {"temperature": 0.1}
+	  },
+	  "engine": "live", "side_effects": "substitute", "thread": "ephemeral"
+	}`, rt)
+	row, runID := e.run(t, "cmd_haiku", body, "finished")
+	if !strings.Contains(row, `"status":"succeeded"`) {
+		t.Fatalf("command row = %s", row)
+	}
+	reqs := haiku.Requests()
+	if len(reqs) != 1 || len(reqs[0].Tools) != 1 || reqs[0].Tools[0].Name != "lookup_order" || reqs[0].ToolChoice.Mode != core.ToolChoiceNone {
+		t.Errorf("the resolved model's requests = %+v, want one, only_tools' set, tool choice none", reqs)
+	}
+	if err := e.p.ForceFlush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		_, run := e.api(t, http.MethodGet, "/api/runs/"+runID, "")
+		if strings.Contains(run, `"provider":"anthropic","name":"claude-haiku-4-5"`) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("run row does not name the resolved model: %s", run)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	attrs := e.rec.playgroundSpan(t)
+	for key, want := range map[string]string{
+		"weft.override.model":       "anthropic/claude-haiku-4-5",
+		"weft.override.tools":       "lookup_order",
+		"weft.override.park_on":     "lookup_order",
+		"weft.override.tool_choice": "none",
+	} {
+		if attrs[key] != want {
+			t.Errorf("%s = %q, want %q", key, attrs[key], want)
+		}
+	}
+	for _, frag := range []string{`"Temperature":0.1`, `"TopP":0.5`, `"Seed":3`} {
+		if !strings.Contains(attrs["weft.override.params"], frag) {
+			t.Errorf("weft.override.params = %s, want %s", attrs["weft.override.params"], frag)
+		}
+	}
+	if attrs["weft.override.hash"] == "" {
+		t.Error("weft.override.hash missing")
+	}
+
+	refused := strings.NewReplacer(`"cmd_haiku"`, `"cmd_gpt9"`, `anthropic/claude-haiku-4-5`, `gpt-9`).Replace(body)
+	if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", refused); code != http.StatusAccepted {
+		t.Fatalf("refused command = %d %s", code, resp)
+	}
+	row = e.waitCommand(t, "cmd_gpt9", "rejected")
+	if !strings.Contains(row, `"state":"rejected"`) || !strings.Contains(row, "model gpt-9: this app serves no model named gpt-9") {
+		t.Errorf("refused command row = %s, want rejected with the resolver's text", row)
+	}
+}

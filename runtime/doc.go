@@ -24,7 +24,10 @@
 // or Enabled(true) is set — production binaries expose nothing unless
 // they opt in explicitly. Commands can only narrow: tools the agent
 // registered can be turned off, never added (OnlyTools); models come
-// from the Models allow-list; MaxSteps and Parallelism only lower.
+// from the Models allow-list or the app's own ModelResolver; MaxSteps
+// and Parallelism only lower; park_on only adds parking; sampling
+// params and the tool choice are neutral (a named choice must name a
+// tool the command keeps on and does not park).
 // Side effects never re-fire silently (§6 rule 3): a tool counts as
 // "never" unless its code vouched core.Replay(core.ReplaySafe) — a
 // vouched tool runs in every mode. A tool the runtime opted in with

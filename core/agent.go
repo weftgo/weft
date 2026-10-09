@@ -898,6 +898,40 @@ func (a *Agent) Logger() *slog.Logger {
 // for log lines.
 func (a *Agent) LoggerProvider() log.LoggerProvider { return a.records }
 
+// Params returns the agent's default sampling knobs — the Params
+// option's value, the zero value (every knob the adapter's own) when
+// none was set. The result is a copy: its pointers and Stop slice are
+// fresh, so changing them does not reach the agent. A caller that
+// overrides one knob per run starts from it, because a run-level
+// Params replaces the struct whole (the playground runtime does).
+func (a *Agent) Params() RequestParams {
+	p := a.params
+	p.Temperature = clonePtr(p.Temperature)
+	p.TopP = clonePtr(p.TopP)
+	p.MaxTokens = clonePtr(p.MaxTokens)
+	p.Seed = clonePtr(p.Seed)
+	p.Stop = slices.Clone(p.Stop)
+	return p
+}
+
+// Thinking returns the agent's default reasoning configuration — the
+// Thinking option's value; the zero value (ThinkUnset) is the
+// provider default.
+func (a *Agent) Thinking() ThinkingConfig { return a.thinking }
+
+// ToolChoice returns the agent's default tool choice — the ToolChoice
+// option's value; the zero value is ToolChoiceAuto.
+func (a *Agent) ToolChoice() ToolChoiceConfig { return a.toolChoice }
+
+// clonePtr returns a fresh pointer to *p's value, nil for nil.
+func clonePtr[T any](p *T) *T {
+	if p == nil {
+		return nil
+	}
+	v := *p
+	return &v
+}
+
 // TapPanics reports how many tap invocations have panicked and been
 // contained since construction — taps, OnMessages and OnRunEnd
 // observers, and reports (ReportFromContext) whose tracer or logger

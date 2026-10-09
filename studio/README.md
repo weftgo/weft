@@ -879,7 +879,27 @@ routes (`POST /api/runtime/register`, `GET /api/runtime/commands` SSE,
 call is substituted with its recorded result or parked
 (`weft.Replay(weft.ReplaySafe)` vouches a read, `AllowSideEffects`
 opts a tool into allow mode); budgets cap each experiment; the app's
-own runs are never touched. A subagent's child run replays as its own
+own runs are never touched. The command's `overrides` carry
+`instructions`, `tools_enabled`, `model`, `thinking`, the numeric
+`options` (`max_steps` and `parallelism` lower only, `temperature`
+0..2) and the option lab's typed knobs: `params` `{top_p?, max_tokens?,
+stop?, seed?}` (neutral; laid over the agent's own params — `top_p`
+0..1, at most four non-empty `stop` sequences, a negative `max_tokens`
+is the core's own step error), `tool_choice` `{mode:
+auto|any|none|named, name?}` (a named choice must name a tool the
+command keeps on and does not park), `park_on` and `only_tools` (tools
+of the agent; `only_tools` inside `tools_enabled` when both are sent,
+403 otherwise). `model` is the agent's own, a `runtime.Models` name,
+or — when the runtime registered `runtime.ModelResolver(func(ctx,
+name) (weft.Model, error))` — any name the app's resolver accepts: it
+runs before the ack, its error text is the rejected command's reason
+(`model <name>: …`; the app writes that text, so it carries no key or
+URL), and without a resolver Studio answers 400 `unknown model … :
+register it with runtime.Models or add runtime.ModelResolver`.
+`GET /api/runtimes` gives each agent `resolver` and `defaults`
+`{max_steps, parallelism, thinking, temperature?, top_p?, max_tokens?,
+seed?, stop?, tool_choice}` — the run defaults the form greys beside
+each override. A subagent's child run replays as its own
 agent, registered on the runtime by that name (`runtime.Agents(parent,
 child)`): the replay carries `weft.forked_from="<child id>#<from_step>"`
 and no parent linkage (ADR 0029). A replay from step N is fed what step

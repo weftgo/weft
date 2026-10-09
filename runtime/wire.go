@@ -40,13 +40,37 @@ type registration struct {
 // effect class (its ReplayPolicy; unannotated is "never",
 // WEFT-PLAYGROUND §6 rule 3), and the tools opted in with
 // AllowSideEffects.
+//
+// Resolver says the runtime holds a ModelResolver: a command may name
+// a model outside Models and the runtime decides whether it exists.
+// Defaults are the agent's own run defaults — what a command's
+// overrides replace, shown greyed beside them by the option lab.
 type agentRegistration struct {
 	Name        string            `json:"name"`
 	Manifest    string            `json:"manifest"` // core.Manifest JSON for this one agent
 	Models      []string          `json:"models"`
+	Resolver    bool              `json:"resolver"`
 	Limits      agentLimits       `json:"limits"`
+	Defaults    agentDefaults     `json:"defaults"`
 	SideEffects map[string]string `json:"side_effects"`
 	Allow       []string          `json:"allow"`
+}
+
+// agentDefaults are the agent's run defaults as the command's override
+// vocabulary spells them: the caps (the manifest policy's), the
+// thinking level ("" is the provider default, never sent), the
+// sampling knobs its core.Params set (absent: the adapter's own), and
+// its tool choice (mode "auto" when none was set).
+type agentDefaults struct {
+	MaxSteps    int            `json:"max_steps"`
+	Parallelism int            `json:"parallelism"`
+	Thinking    string         `json:"thinking"`
+	Temperature *float64       `json:"temperature,omitempty"`
+	TopP        *float64       `json:"top_p,omitempty"`
+	MaxTokens   *int           `json:"max_tokens,omitempty"`
+	Seed        *int64         `json:"seed,omitempty"`
+	Stop        []string       `json:"stop,omitempty"`
+	ToolChoice  toolChoiceWire `json:"tool_choice"`
 }
 
 // agentLimits are the agent's own caps — the lower-only bounds a
@@ -95,6 +119,11 @@ type command struct {
 	// source's kept part with the edits applied, composed (and so
 	// validated) once at dispatch.
 	prefix []core.Message
+	// model is the model a ModelResolver returned for the command's
+	// model override, resolved once in validate (before the ack) and
+	// carried by every run of the command, a resume's included. Nil when
+	// the override is the agent's own or an allow-list name.
+	model core.Model
 }
 
 // sourceSpec names the run to re-run: its id and the step to continue
@@ -107,14 +136,37 @@ type sourceSpec struct {
 
 // overrides are the experiment's changes (§5.1): a replacement system
 // prompt, a subset of the agent's tools (narrowing only), an alternate
-// model's display name, a thinking level, and the option lab's knobs
-// (the arena playground's OptionsSpec vocabulary).
+// model's name, a thinking level, and the option lab's knobs — the
+// numeric options (the arena playground's OptionsSpec vocabulary) and,
+// beside them, the typed ones (plan F3): sampling params, a tool
+// choice, tools to park, and only_tools (a subset of tools_enabled
+// when both are sent). Every one narrows or is neutral.
 type overrides struct {
 	Instructions string             `json:"instructions,omitempty"`
 	ToolsEnabled []string           `json:"tools_enabled,omitempty"`
 	Model        string             `json:"model,omitempty"`
 	Thinking     string             `json:"thinking,omitempty"` // off|low|medium|high
 	Options      map[string]float64 `json:"options,omitempty"`  // max_steps, parallelism, temperature
+	Params       *paramsWire        `json:"params,omitempty"`
+	ToolChoice   *toolChoiceWire    `json:"tool_choice,omitempty"`
+	ParkOn       []string           `json:"park_on,omitempty"`
+	OnlyTools    []string           `json:"only_tools,omitempty"`
+}
+
+// paramsWire is the sampling override beside options.temperature: the
+// rest of core.RequestParams. Absent fields keep the agent's own.
+type paramsWire struct {
+	TopP      *float64 `json:"top_p,omitempty"`
+	MaxTokens *int     `json:"max_tokens,omitempty"`
+	Stop      []string `json:"stop,omitempty"`
+	Seed      *int64   `json:"seed,omitempty"`
+}
+
+// toolChoiceWire is a tool choice on the wire: mode auto | any | none
+// | named, and the tool's name under named (core.ToolChoiceConfig).
+type toolChoiceWire struct {
+	Mode string `json:"mode"`
+	Name string `json:"name,omitempty"`
 }
 
 // transcriptEdit is a D2/D3 edit — rewrite a kept step's model reply

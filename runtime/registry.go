@@ -72,7 +72,28 @@ func (r *registry) entryFor(a *core.Agent, name string) agentRegistration {
 	}
 	e.Limits = manifestLimits(manifest)
 	e.Models = append(e.Models, r.modelNames()...)
+	e.Resolver = r.cfg.resolve != nil
+	e.Defaults = defaultsOf(a, e.Limits)
 	return e
+}
+
+// defaultsOf reads the agent's run defaults — what each override
+// replaces — in the command's own vocabulary: the caps from the
+// manifest policy, the rest from the agent's accessors.
+func defaultsOf(a *core.Agent, limits agentLimits) agentDefaults {
+	p := a.Params()
+	tc := a.ToolChoice()
+	return agentDefaults{
+		MaxSteps:    limits.MaxSteps,
+		Parallelism: limits.Parallelism,
+		Thinking:    thinkingWord(a.Thinking().Level),
+		Temperature: p.Temperature,
+		TopP:        p.TopP,
+		MaxTokens:   p.MaxTokens,
+		Seed:        p.Seed,
+		Stop:        p.Stop,
+		ToolChoice:  toolChoiceWire{Mode: toolChoiceWord(tc.Mode), Name: tc.Name},
+	}
 }
 
 // modelNames lists the allowed alternates, sorted for a deterministic

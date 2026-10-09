@@ -10,6 +10,31 @@ module, ADR 0005).
 
 ### Added
 
+- **The option lab, Go half** (plan F3.1): a playground command's
+  `overrides` gains, beside the numeric `options` (`max_steps`,
+  `parallelism`, `temperature` — unchanged), `params` `{top_p?,
+  max_tokens?, stop?, seed?}`, `tool_choice` `{mode: auto|any|none|named,
+  name?}`, `park_on: []` and `only_tools: []`, applied as
+  `weft.Params`, `weft.ToolChoice`, `weft.ParkOn` and `weft.OnlyTools`
+  (and so on the run's `weft.override.*` attributes). Narrowing only,
+  validated by Studio (§10.4: 400 for a tool the agent lacks, an
+  unknown mode, a named choice the command turns off or parks, `top_p`
+  outside 0..1, more than four or empty `stop` sequences; 403 for
+  `only_tools` outside `tools_enabled`) and again by the runtime before
+  its ack. An old command (none of the new fields) validates as before.
+  **`runtime.ModelResolver(func(ctx, name) (weft.Model, error))`**: a
+  model override outside `runtime.Models` is resolved by the app's code
+  before the ack — the run uses the returned model (named on the run
+  row and `weft.override.model`), an error rejects the command with
+  `model <name>: <the error's text>`; without a resolver Studio refuses
+  the name (400 `unknown model …: register it with runtime.Models or
+  add runtime.ModelResolver`). The registration and `GET /api/runtimes`
+  carry per agent `resolver` and `defaults` `{max_steps, parallelism,
+  thinking, temperature?, top_p?, max_tokens?, seed?, stop?,
+  tool_choice}` (the form greys them; `testdata/api/runtimes.golden.json`
+  pins the shape). Core gains the plain accessors `(*Agent).Params`,
+  `(*Agent).Thinking` and `(*Agent).ToolChoice`.
+
 - **The transcript as of a step** (ADR 0029): `GET
   /api/runs/{id}/transcript?step=N` adds `step`, `messages` — what step
   N's model call carried, the replay prefix for `from_step` N — and
@@ -72,6 +97,14 @@ module, ADR 0005).
   row of the size ledger.
 
 ### Changed
+
+- A playground command's sampling override (`options.temperature`, now
+  also `params`) is laid over the agent's own `weft.Params` instead of
+  replacing it: a run-level `Params` replaces the struct whole, so a
+  temperature-only command used to drop the agent's `MaxTokens`, `TopP`,
+  `Stop` and `Seed` to the adapter defaults. The run's
+  `weft.override.params` (and so `weft.override.hash`) now carries the
+  merged values.
 
 - **The replay prefix across a compaction**: a playground command with
   `from_step` N whose source step N's request carried a `PrepareStep`

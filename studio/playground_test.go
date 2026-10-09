@@ -441,7 +441,11 @@ func TestPlaygroundRuntimesView(t *testing.T) {
 		`"service":"acme-api"`, `"env":"dev"`, `"connected_since"`, `"last_seen"`,
 		`"name":"acme-support"`, `"models":["glm-5.3-flash"]`,
 		`{"name":"lookup_order","side_effects":"never","allow":true}`,
-		`{"name":"refund","side_effects":"never","allow":false}`} {
+		`{"name":"refund","side_effects":"never","allow":false}`,
+		// A registration without defaults (an older runtime) shows its
+		// caps as the defaults and auto as the tool choice.
+		`"resolver":false`,
+		`"defaults":{"max_steps":10,"parallelism":4,"thinking":"","tool_choice":{"mode":"auto"}}`} {
 		if !strings.Contains(body, key) {
 			t.Errorf("runtimes view lacks %s: %s", key, body)
 		}
@@ -737,5 +741,109 @@ func TestStep8RoutesRefusePanelTokens(t *testing.T) {
 	}
 	if code, body := pt.authed(t, http.MethodPost, "/api/runs/run_rt_other/steer", pt.token, `{"message":"hi"}`); code != http.StatusAccepted {
 		t.Errorf("steer, server token = %d (%s), want 202", code, body)
+	}
+}
+
+// TestPlaygroundOptionLabValidation pins §10.4's table for the option
+// lab's typed overrides (plan F3): each one accepted and carried to the
+// runtime verbatim, each refusal with its status and its rule, an
+// old-shape body (no new fields) accepted as before, and a model
+// outside the allow-list accepted only from a runtime that registered
+// a ModelResolver.
+func TestPlaygroundOptionLabValidation(t *testing.T) {
+	pt := newPlaygroundTestServer(t)
+	with := func(extra string) string {
+		return strings.Replace(validRun, `"options": {"max_steps": 6, "temperature": 0.2}`,
+			`"options": {"max_steps": 6, "temperature": 0.2}, `+extra, 1)
+	}
+
+	// The old shape is the validRun body itself.
+	if code, body := pt.post(t, validRun); code != http.StatusAccepted {
+		t.Fatalf("old-shape body = %d (%s), want 202", code, body)
+	}
+	pt.waitCommand(t, "old shape")
+
+	full := with(`"params": {"top_p": 0.9, "max_tokens": 256, "stop": ["END"], "seed": 7},
+	  "tool_choice": {"mode": "named", "name": "lookup_order"},
+	  "park_on": ["refund"], "only_tools": ["lookup_order", "refund"]`)
+	code, body := pt.post(t, full)
+	if code != http.StatusAccepted {
+		t.Fatalf("every new field = %d (%s), want 202", code, body)
+	}
+	cmd := pt.waitCommand(t, "full")
+	o := cmd.Overrides
+	if o.Params == nil || *o.Params.TopP != 0.9 || *o.Params.MaxTokens != 256 || *o.Params.Seed != 7 || len(o.Params.Stop) != 1 ||
+		o.ToolChoice == nil || *o.ToolChoice != (linkruntime.ToolChoice{Mode: "named", Name: "lookup_order"}) ||
+		strings.Join(o.ParkOn, ",") != "refund" || strings.Join(o.OnlyTools, ",") != "lookup_order,refund" {
+		t.Errorf("overrides on the wire = %+v", o)
+	}
+	for _, ok := range []string{
+		`"tool_choice": {"mode": "auto"}`, `"tool_choice": {"mode": "any"}`, `"tool_choice": {"mode": "none"}`,
+		`"params": {"top_p": 0, "stop": ["a", "b", "c", "d"]}`, `"params": {"seed": -3}`,
+	} {
+		if code, body := pt.post(t, with(ok)); code != http.StatusAccepted {
+			t.Errorf("%s = %d (%s), want 202", ok, code, body)
+			continue
+		}
+		pt.waitCommand(t, ok)
+	}
+
+	for _, tc := range []struct {
+		name, extra string
+		status      int
+		in          string
+	}{
+		{"only_tools unknown", `"only_tools": ["nope"]`, http.StatusBadRequest, "tool nope in only_tools is not in agent acme-support's manifest"},
+		{"only_tools widens", `"only_tools": ["track_parcel"]`, http.StatusForbidden, "only_tools may only narrow tools_enabled: tool track_parcel is not enabled"},
+		{"park_on unknown", `"park_on": ["nope"]`, http.StatusBadRequest, "tool nope in park_on is not in agent"},
+		{"tool_choice mode", `"tool_choice": {"mode": "tool"}`, http.StatusBadRequest, "unknown tool_choice mode tool"},
+		{"tool_choice name without named", `"tool_choice": {"mode": "any", "name": "refund"}`, http.StatusBadRequest, "takes no name"},
+		{"tool_choice named without a name", `"tool_choice": {"mode": "named"}`, http.StatusBadRequest, "needs a tool name"},
+		{"tool_choice named unknown", `"tool_choice": {"mode": "named", "name": "nope"}`, http.StatusBadRequest, "tool nope in tool_choice is not in agent"},
+		{"tool_choice named off", `"tool_choice": {"mode": "named", "name": "track_parcel"}`, http.StatusBadRequest, "tool_choice names track_parcel, which this command turns off"},
+		{"tool_choice named off by only_tools", `"only_tools": ["refund"], "tool_choice": {"mode": "named", "name": "lookup_order"}`, http.StatusBadRequest, "which this command turns off"},
+		{"tool_choice named parked", `"park_on": ["refund"], "tool_choice": {"mode": "named", "name": "refund"}`, http.StatusBadRequest, "which park_on parks: every forced call would park"},
+		{"top_p", `"params": {"top_p": 1.2}`, http.StatusBadRequest, "top_p must be between 0 and 1"},
+		{"stop count", `"params": {"stop": ["a", "b", "c", "d", "e"]}`, http.StatusBadRequest, "stop takes at most 4 sequences, got 5"},
+		{"stop empty", `"params": {"stop": [""]}`, http.StatusBadRequest, "stop sequences must be non-empty"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, body := pt.post(t, with(tc.extra))
+			if code != tc.status {
+				t.Errorf("status = %d (%s), want %d", code, body, tc.status)
+			}
+			if !strings.Contains(body, tc.in) {
+				t.Errorf("body %q lacks %q", body, tc.in)
+			}
+		})
+	}
+
+	// A model outside the allow-list: unknown without a resolver …
+	unlisted := strings.Replace(validRun, `"glm-5.3-flash"`, `"anthropic/claude-haiku-4-5"`, 1)
+	code, body = pt.post(t, unlisted)
+	if code != http.StatusBadRequest ||
+		!strings.Contains(body, "unknown model anthropic/claude-haiku-4-5: neither the agent's own nor a registered alternate (register it with runtime.Models or add runtime.ModelResolver)") {
+		t.Errorf("unlisted model without a resolver = %d (%s), want 400 naming runtime.ModelResolver", code, body)
+	}
+	// … proposed to the runtime when it registered one (the runtime's
+	// resolver decides, before its ack).
+	reg, _ := pt.rs.Registration("rt_test")
+	reg.Agents[0].Resolver = true
+	b, _ := json.Marshal(reg)
+	req, _ := http.NewRequest(http.MethodPost, pt.ts.URL+"/api/runtime/register", strings.NewReader(string(b)))
+	req.Header.Set("Content-Type", "application/json")
+	pt.auth(req)
+	if code, out := pt.do(t, req); code != http.StatusOK {
+		t.Fatalf("re-register: %d %s", code, out)
+	}
+	code, body = pt.post(t, unlisted)
+	if code != http.StatusAccepted {
+		t.Fatalf("unlisted model with a resolver = %d (%s), want 202", code, body)
+	}
+	if cmd := pt.waitCommand(t, "resolver"); cmd.Overrides.Model != "anthropic/claude-haiku-4-5" {
+		t.Errorf("model on the wire = %q", cmd.Overrides.Model)
+	}
+	if _, view := pt.get(t, "/api/runtimes"); !strings.Contains(view, `"resolver":true`) {
+		t.Errorf("runtimes view lacks the resolver flag: %s", view)
 	}
 }

@@ -4980,3 +4980,37 @@ func TestReportFromContextOutsideAModelCall(t *testing.T) {
 		t.Error("a tool handler's context carries the model call's reporter")
 	}
 }
+
+// TestAgentRunDefaultsAccessors pins the run-default accessors: Params,
+// Thinking and ToolChoice report the New options' values (zero values
+// when unset), and Params is a copy — changing its pointers or Stop
+// does not reach the agent.
+func TestAgentRunDefaultsAccessors(t *testing.T) {
+	temp, topP, maxTok, seed := 0.2, 0.9, 512, int64(7)
+	agt := core.New(wefttest.Script(wefttest.Say("ok")),
+		core.Params(core.RequestParams{Temperature: &temp, TopP: &topP, MaxTokens: &maxTok, Seed: &seed, Stop: []string{"END"}}),
+		core.Thinking(core.ThinkingConfig{Level: core.ThinkHigh}),
+		core.ToolChoice(core.ToolChoiceConfig{Mode: core.ToolChoiceNone}),
+	)
+	p := agt.Params()
+	if *p.Temperature != 0.2 || *p.TopP != 0.9 || *p.MaxTokens != 512 || *p.Seed != 7 || !slices.Equal(p.Stop, []string{"END"}) {
+		t.Fatalf("Params = %+v, want the New option's values", p)
+	}
+	*p.Temperature, p.Stop[0] = 1.5, "X"
+	if q := agt.Params(); *q.Temperature != 0.2 || q.Stop[0] != "END" {
+		t.Errorf("a changed copy reached the agent: %+v", q)
+	}
+	if agt.Thinking().Level != core.ThinkHigh {
+		t.Errorf("Thinking = %+v", agt.Thinking())
+	}
+	if agt.ToolChoice().Mode != core.ToolChoiceNone {
+		t.Errorf("ToolChoice = %+v", agt.ToolChoice())
+	}
+	bare := core.New(wefttest.Script(wefttest.Say("ok")))
+	if p := bare.Params(); p.Temperature != nil || p.TopP != nil || p.MaxTokens != nil || p.Seed != nil || p.Stop != nil {
+		t.Errorf("unset Params = %+v, want the zero value", p)
+	}
+	if bare.Thinking() != (core.ThinkingConfig{}) || bare.ToolChoice() != (core.ToolChoiceConfig{}) {
+		t.Errorf("unset Thinking/ToolChoice = %+v / %+v, want zero values", bare.Thinking(), bare.ToolChoice())
+	}
+}

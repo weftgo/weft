@@ -293,7 +293,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     defer runtime.Install(runtime.Studio(url, tok) /* or runtime.Local(srv) */,
 //         runtime.Agents(support), runtime.Models(map[string]weft.Model{"glm": m}),
 //         runtime.Limits(runtime.Budget{MaxTokensPerExperiment: 200_000}),
-//         runtime.AllowSideEffects("send_email"), runtime.Threads(store))()
+//         runtime.AllowSideEffects("send_email"), runtime.Threads(store),
+//         runtime.ModelResolver(resolve))() // a model outside Models: the app's func(ctx, name) decides, before the ack
 //     // WEFT_ENV=dev (or runtime.Enabled(true)) opens the link; with no Studio option
 //     // and no otel Studio destination it dials the discovery file's Studio (block 6's
 //     // rule: WEFT_STUDIO_URL wins, WEFT_DISCOVERY=off, stale ignored); commands ack
@@ -302,7 +303,11 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // read: it runs in every mode); side_effects substitute (default) | park |
 //     // allow — only allow runs the AllowSideEffects tools for real, and is refused
 //     // unless every tool left on is opted in or ReplaySafe; budgets cap each
-//     // experiment; runs carry weft.playground and never touch weft.session.id
+//     // experiment; overrides: instructions, tools_enabled, model, thinking, options
+//     // {max_steps, parallelism, temperature}, params {top_p, max_tokens, stop, seed},
+//     // tool_choice {mode, name}, park_on, only_tools — narrowing or neutral, each refusal
+//     // naming its rule; /api/runtimes gives each agent resolver + defaults (the form greys
+//     // them); runs carry weft.playground and never touch weft.session.id
 //     // (ephemeral). Engines live | scripted (the source
 //     // run's recorded turns, zero tokens); thread ephemeral | fork (a new session
 //     // with lineage, the panel keeps chatting in it). Breakpoints and steer act

@@ -1250,9 +1250,38 @@ export interface ToolView {
   allow: boolean
 }
 
+/** A tool choice on the wire: mode auto | any | none | named, and the
+ * tool's name under named. */
+export interface ToolChoiceWire {
+  mode: "auto" | "any" | "none" | "named"
+  name?: string
+}
+
+/** An agent's run defaults, in the command's override vocabulary — what
+ * the option lab shows greyed beside each override (plan F3). thinking
+ * "" is the provider default; an absent sampling knob is the adapter's
+ * own. */
+export interface AgentDefaults {
+  max_steps: number
+  parallelism: number
+  thinking: string
+  temperature?: number
+  top_p?: number
+  max_tokens?: number
+  seed?: number
+  stop?: string[]
+  tool_choice: ToolChoiceWire
+}
+
 export interface AgentView {
   name: string
   models: string[]
+  /** The runtime holds a runtime.ModelResolver: a model name outside
+   * `models` may be proposed (the runtime decides before its ack).
+   * Absent on a Studio older than the field. */
+  resolver?: boolean
+  /** The agent's run defaults. Absent on a Studio older than the field. */
+  defaults?: AgentDefaults
   tools: ToolView[]
   /** The registered system prompt (the drawer pre-fills from it). */
   instructions?: string
@@ -1293,7 +1322,15 @@ export interface PlaygroundRunBody {
     tools_enabled?: string[]
     model?: string
     thinking?: string
+    /** max_steps, parallelism (lower only), temperature. */
     options?: Record<string, number>
+    /** The rest of the sampling knobs; absent fields keep the agent's own. */
+    params?: { top_p?: number; max_tokens?: number; stop?: string[]; seed?: number }
+    tool_choice?: ToolChoiceWire
+    /** Tools of the agent to park at the approval boundary. */
+    park_on?: string[]
+    /** Narrows the run's tools (inside tools_enabled when both are sent). */
+    only_tools?: string[]
   }
   transcript_edits?: unknown[]
   engine?: string

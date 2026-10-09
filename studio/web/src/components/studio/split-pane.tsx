@@ -66,6 +66,9 @@ function hasResizeObserver(): boolean {
 export const HANDLE_CLASS =
   "mx-1 w-1 rounded-full bg-border transition-colors hover:bg-ring/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 data-[separator=active]:bg-ring"
 
+/** A lone pane's inner div: no clipping, no inner scroll. */
+export const SINGLE_PANE_CLASS = "overflow-visible! max-h-none!"
+
 export function SplitPane({
   split,
   instance,
@@ -184,6 +187,11 @@ function Split({
       data-split={split}
       data-stacked={stacked ? "" : undefined}
       className={cn("min-w-0", className, stacked && stackedClassName)}
+      // One pane alone (the step card's closed Request pane) is no split:
+      // nothing is clipped or scrolled inside it — a focus ring or a
+      // shadow at its edge stays visible, wide content overflows as it
+      // would without the group. The split itself keeps the library's.
+      style={second ? undefined : { overflow: "visible" }}
       defaultLayout={initial}
       onLayoutChanged={(layout, meta) => {
         // Only what the reader did is remembered: a mount, a reset or
@@ -199,7 +207,10 @@ function Split({
         data-pane={panes[0].id}
         defaultSize={String(panes[0].defaultSize)}
         minSize={String(panes[0].minSize)}
-        className={cn("min-w-0", panes[0].className)}
+        style={second ? undefined : { overflow: "visible" }}
+        // The class lands on the panel's inner div, whose inline
+        // overflow: auto / max-height: 100% it overrides when alone.
+        className={cn("min-w-0", !second && SINGLE_PANE_CLASS, panes[0].className)}
       >
         {panes[0].children}
       </ResizablePanel>

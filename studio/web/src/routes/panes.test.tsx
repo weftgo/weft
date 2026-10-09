@@ -168,6 +168,10 @@ describe("the run page's story/request split", () => {
     await waitFor(() => expect(card(0).querySelector('[data-request] button[aria-expanded="true"]')).toBeTruthy())
     expect(card(0).querySelector('[data-pane="request"]')).toBeNull()
     expect(within(card(0)).queryByRole("separator")).toBeNull()
+    // Inline, in the story's pane (the full order — prompt → request →
+    // attempts → body — is pinned in run-edit.test.tsx, over a run with
+    // an editable prompt, attempts and calls; this run has none).
+    expect(card(0).querySelector('[data-pane="story"] [data-request="0"]')).toBeTruthy()
   })
 
   it("a resize across lg with the pane open leaves the keyboard where it is", async () => {

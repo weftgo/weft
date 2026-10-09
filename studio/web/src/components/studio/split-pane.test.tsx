@@ -9,7 +9,7 @@ import { useState } from "react"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { HANDLE_CLASS, SplitPane } from "@/components/studio/split-pane"
+import { HANDLE_CLASS, SINGLE_PANE_CLASS, SplitPane } from "@/components/studio/split-pane"
 import { paneKey, readPaneSizes, resetPaneSizes } from "@/lib/pane-sizes"
 import { stubLayout, stubViewport } from "@/test/layout"
 
@@ -266,6 +266,21 @@ describe("SplitPane", () => {
     vi.stubGlobal("ResizeObserver", undefined)
     render(<Probe />)
     expect(document.querySelector('[data-split="trace-detail"]')?.hasAttribute("data-stacked")).toBe(true)
+  })
+
+  it("a lone pane clips nothing; the split keeps the library's overflow", async () => {
+    const r = render(<Probe second={false} />)
+    const group = () => document.querySelector<HTMLElement>('[data-split="trace-detail"]')!
+    const pane = () => document.querySelector<HTMLElement>('[data-pane="tree"]')!
+    const inner = () => pane().firstElementChild as HTMLElement
+    expect(getComputedStyle(group()).overflow).toBe("visible")
+    expect(getComputedStyle(pane()).overflow).toBe("visible")
+    for (const c of SINGLE_PANE_CLASS.split(" ")) expect(inner().classList.contains(c), c).toBe(true)
+    r.rerender(<Probe second />)
+    await act(async () => {})
+    expect(getComputedStyle(group()).overflow).toBe("hidden")
+    expect(getComputedStyle(inner()).overflow).toBe("auto")
+    for (const c of SINGLE_PANE_CLASS.split(" ")) expect(inner().classList.contains(c), c).toBe(false)
   })
 
   it("styles.css lays a stacked split out as a column at content height, over the library's inline layout", () => {

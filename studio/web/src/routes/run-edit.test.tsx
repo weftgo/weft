@@ -15,6 +15,7 @@ import { setStudioToken } from "@/lib/api"
 import type { RunDoc, RunsPage } from "@/lib/api"
 import { renderApp, stubBrowser } from "@/test/app"
 import { choose, valueOf } from "@/test/select"
+import { stubViewport } from "@/test/layout"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { apiError, FakeStudio, golden, pagedEvents, pagedRequests, transcriptOf } from "@/test/fake-studio"
 import { agentView, bodies, DONE_EDITS, editCatalog as catalog, events, requestRow, RUN, runtimeOf, steerBodies, steerEvents } from "@/panel/replaykit"
@@ -168,6 +169,26 @@ describe("a draft survives the Request pane opening beside it (plan H3)", () => 
     await waitFor(() => expect(card.querySelector('[data-pane="request"]')).toBeNull())
     expect(card.querySelector('textarea[aria-label="edit the result of search_kb (c2)"]')).toBe(ta)
     expect(ta.value).toBe("policy: no refunds")
+  })
+})
+
+describe("narrower than lg the Request pane stays inline (plan H3)", () => {
+  it("the story's order is prompt → request → attempts → body, all in the story pane", async () => {
+    serve()
+    stubViewport(900)
+    await story()
+    const card = document.querySelector<HTMLElement>('[data-step="0"]')!
+    fireEvent.click(within(card).getByRole("button", { name: /^request$/ }))
+    await waitFor(() => expect(card.querySelector('[data-request="0"] button[aria-expanded="true"]')).toBeTruthy())
+    expect(card.querySelector('[data-pane="request"]')).toBeNull()
+    const pane = card.querySelector<HTMLElement>('[data-pane="story"]')!
+    const order = ["[data-prompt-editor]", '[data-request="0"]', "[data-attempts]", "[data-call]"].map((sel) => {
+      const el = pane.querySelector(sel)
+      expect(el, sel).toBeTruthy()
+      return el!
+    })
+    for (let i = 1; i < order.length; i++)
+      expect(order[i - 1].compareDocumentPosition(order[i]) & Node.DOCUMENT_POSITION_FOLLOWING, `${i}`).toBeTruthy()
   })
 })
 

@@ -234,7 +234,11 @@ func (l *link) prepareSource(ctx context.Context, agent *core.Agent, cmd *comman
 	// The source turn's context, read once. A fork reads nothing from
 	// it (the session's own tree is the conversation) unless the
 	// scripted engine needs the record.
-	if hasSource && (cmd.Thread != "fork" || cmd.Engine == "scripted") {
+	// A fork reads no kept prefix — except to validate its edits, which
+	// Studio validates before it refuses the fork's from_step, so one
+	// body reads the edit's sentence on both sides.
+	fork := cmd.Thread == "fork" && len(cmd.TranscriptEdits) == 0
+	if hasSource && (!fork || cmd.Engine == "scripted") {
 		src, err := l.sourceTranscript(ctx, agent, cmd.Source.RunID, cmd.Source.FromStep)
 		switch {
 		case err == nil:
@@ -257,7 +261,7 @@ func (l *link) prepareSource(ctx context.Context, agent *core.Agent, cmd *comman
 				"run_id", cmd.Source.RunID, "err", err)
 		}
 	}
-	if cmd.src == nil || cmd.Thread == "fork" {
+	if cmd.src == nil || fork {
 		return "", true
 	}
 	// from_step at the step count is a step that never answered: fresh

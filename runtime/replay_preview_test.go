@@ -251,6 +251,8 @@ func TestOneSentenceOnBothSides(t *testing.T) {
 		{"scripted, from_step 2, an edit", previewBody{Engine: "scripted", Source: &sourceSpec{RunID: "r_os", FromStep: 2},
 			TranscriptEdits: []transcriptEdit{{Kind: "insert", Step: 2, Content: "x"}}},
 			"the scripted engine would replay the recorded turn 2, which answered a different prompt: transcript edits need engine live"},
+		{"fork, a bad edit", previewBody{Thread: "fork", Input: &in,
+			Source: &sourceSpec{RunID: "r_os", FromStep: 2}, TranscriptEdits: badEdit}, badInsert},
 		{"from_step -1, an edit", previewBody{Source: &sourceSpec{RunID: "r_os", FromStep: -1},
 			TranscriptEdits: []transcriptEdit{{Kind: "user", Step: 0, Content: "x"}}},
 			"transcript_edits need from_step > 0 (0 re-runs the whole turn, nothing is kept)"},

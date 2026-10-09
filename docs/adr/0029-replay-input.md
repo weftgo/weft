@@ -177,12 +177,15 @@ The request a replay sends is model-visible behaviour (AGENTS.md rule
    runs, per its replay class); a patched result's re-issue gets the
    patched result. The fresh steps' records are unchanged and queue
    first: a key a fresh step also recorded is answered from that record
-   before the kept one. The checks run in one order on both sides — the
-   edits first, then the engine (the scripted refusals worded alike),
-   the thread and side-effect modes, the overrides, then the input — so
-   one body reads one sentence; the one residue is a scripted command
-   from the step it never answered beside another refusal, which the
-   runtime meets after the overrides.
+   before the kept one. The edit refusals and the scripted engine's
+   (§5.5) refusals read one sentence on both sides: each side checks
+   the edits first (a fork's included), then the scripted engine. The
+   rest is not aligned: Studio refuses an input beside `from_step` > 0
+   before it checks the overrides against the registration, the runtime
+   after; the override refusals are worded per side (`unknown tool "x"`
+   in the runtime, `tool x is not in agent …'s manifest` in Studio); and
+   a scripted command from the step it never answered meets the
+   runtime's refusal after its override checks.
 
    *The mark.* A replayed run whose prefix was edited carries
    `weft.edits` (run metadata, on every span and record, in the run

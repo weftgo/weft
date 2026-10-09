@@ -71,7 +71,14 @@
           }
         ]
       },
-      "changes": []
+      "changes": [],
+      "unknown": [
+        "system",
+        "tool_calls",
+        "tool_results",
+        "text",
+        "usage"
+      ]
     },
     {
       "step": 1,
@@ -134,7 +141,14 @@
           }
         ]
       },
-      "changes": []
+      "changes": [],
+      "unknown": [
+        "system",
+        "tool_calls",
+        "tool_results",
+        "text",
+        "usage"
+      ]
     }
   ],
   "summary": {

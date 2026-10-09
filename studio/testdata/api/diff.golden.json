@@ -69,7 +69,8 @@
         "marks": [],
         "holes": []
       },
-      "changes": []
+      "changes": [],
+      "unknown": []
     },
     {
       "step": 1,
@@ -130,7 +131,8 @@
         "marks": [],
         "holes": []
       },
-      "changes": []
+      "changes": [],
+      "unknown": []
     },
     {
       "step": 2,
@@ -191,7 +193,8 @@
         "marks": [],
         "holes": []
       },
-      "changes": []
+      "changes": [],
+      "unknown": []
     },
     {
       "step": 3,
@@ -254,7 +257,8 @@
       },
       "changes": [
         "tool_results"
-      ]
+      ],
+      "unknown": []
     },
     {
       "step": 4,
@@ -287,7 +291,8 @@
         "marks": [],
         "holes": []
       },
-      "changes": []
+      "changes": [],
+      "unknown": []
     }
   ],
   "summary": {

@@ -93,6 +93,10 @@ type stepDoc struct {
 	// block is a badge or the prompt record is missing).
 	sysHash string
 	sysText *string
+	// eventsLost: the step's events are not all stored (its step_start
+	// never arrived, or positions inside it are missing once the run
+	// stopped), so its calls, results and usage may be incomplete.
+	eventsLost bool
 }
 
 // stepModel is the model the step asked for and the one that answered
@@ -309,7 +313,15 @@ type stepRun struct {
 	pages   []obsdb.EventPage
 	batches []obsdb.TranscriptBatch
 	batched bool
+	// resume is where the last walk stopped: the first event that was
+	// not its step's. A walk for the next step starts there, never at
+	// page 0 — every event before it belongs to a step it has passed.
+	resume *walkPoint
 }
+
+// walkPoint is a position in the cached event pages: event i of page
+// pi, where a walk for step n begins.
+type walkPoint struct{ n, pi, i int }
 
 // stepReadError is a failed database read of the step assembly: noun
 // names it for dbError ("run", "events of run", …).
@@ -404,14 +416,26 @@ func (sr *stepRun) readStepEvents(n int) (stepEvents, error) {
 	var startPos, endPos int64 = -1, -1
 	var allGaps []int64
 	var before []obsdb.PosEvent // step 0's events ahead of its step_start
+	startPi, startI := 0, 0
+	if r := sr.resume; r != nil && r.n == n && n > 0 {
+		startPi, startI = r.pi, r.i
+	}
+	stopPi, stopI := 0, 0
+	defer func() { sr.resume = &walkPoint{n: n + 1, pi: stopPi, i: stopI} }()
 walk:
-	for pi := 0; ; pi++ {
+	for pi := startPi; ; pi++ {
 		page, err := sr.eventPage(pi)
 		if err != nil {
 			return out, err
 		}
 		allGaps = page.Gaps
-		for i := range page.Events {
+		first := 0
+		if pi == startPi {
+			first = startI
+		}
+		stopPi, stopI = pi, len(page.Events)
+		for i := first; i < len(page.Events); i++ {
+			stopI = i
 			pe := page.Events[i]
 			var h eventHead
 			_ = json.Unmarshal(pe.Event, &h)
@@ -459,6 +483,7 @@ walk:
 				_ = json.Unmarshal(pe.Event, &out.finishBody)
 			}
 		}
+		stopI = len(page.Events)
 		if page.NextAfter == nil {
 			break
 		}
@@ -532,6 +557,7 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 		Children: []stepChild{},
 	}
 
+	doc.eventsLost = !evs.found || (len(evs.gaps) > 0 && det.Status != obsdb.StatusRunning)
 	// Events, status, timing, usage.
 	for _, pe := range evs.events {
 		doc.Events = append(doc.Events, posEventOf(pe))

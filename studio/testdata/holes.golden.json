@@ -8,6 +8,10 @@
         "reason": "the app-log reader's candidate cap was reached before attribution; later lines of this run may be missing",
         "fix": "log less in the run's trace (a busy subagent or sibling run counts too); phase 2 filters by span before the cap"
       },
+      "response_cap": {
+        "reason": "this response reads a bounded number of steps and the run has more: the later steps were not compared, nothing was lost",
+        "fix": "open the later steps one by one (runs/{id}/steps/{n})"
+      },
       "result_cap": {
         "reason": "a tool result was cut by its result cap: the model saw a prefix and the marker",
         "fix": "raise the tool's weft.MaxResultBytes"

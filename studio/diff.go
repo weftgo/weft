@@ -6,7 +6,6 @@ import (
 	"errors"
 	"net/http"
 	"slices"
-	"strconv"
 	"strings"
 
 	"github.com/weftgo/weft/core"
@@ -41,8 +40,8 @@ import (
 // maxDiffSteps bounds the steps one diff compares: a run row's step
 // count is the producer's number, and one hostile value must not size
 // the response. A longer run is compared this far, said by the
-// truncated hole.
-const maxDiffSteps = 500
+// truncated hole (cause response_cap). A var so a test can lower it.
+var maxDiffSteps = 500
 
 // The changes a row can list, in this order.
 const (
@@ -60,8 +59,8 @@ type diffDoc struct {
 	B       diffRun     `json:"b"`
 	Steps   []diffRow   `json:"steps"`
 	Summary diffSummary `json:"summary"`
-	// Holes is the diff's own: truncated when a run has more steps than
-	// the diff compares.
+	// Holes is the diff's own: truncated (cause response_cap) when a
+	// run has more steps than the diff compares.
 	Holes []stepHole `json:"holes"`
 }
 
@@ -86,6 +85,10 @@ type diffRow struct {
 	A       *diffSide `json:"a"`
 	B       *diffSide `json:"b"`
 	Changes []string  `json:"changes"`
+	// Unknown lists the columns that could not be compared because a
+	// side did not record them (its holes say why) — neither changed
+	// nor the same; [] when every column compared.
+	Unknown []string `json:"unknown"`
 }
 
 // diffSide is one run's step, reduced to the compared columns. System
@@ -103,6 +106,10 @@ type diffSide struct {
 	Usage       core.Usage       `json:"usage"`
 	Marks       []string         `json:"marks"`
 	Holes       []stepHole       `json:"holes"`
+
+	// What the side could not record, for compareSides (never served:
+	// each is a hole in Holes).
+	eventsLost, contentLost, namesLost, textLost bool
 }
 
 // diffToolCall is a call as compared: its name and its arguments,
@@ -150,16 +157,12 @@ func (s *Server) serveDiff(w http.ResponseWriter, r *http.Request) {
 		A: ra.ref, B: rb.ref, Steps: []diffRow{},
 		Summary: diffSummary{ChangedSteps: []int{}}, Holes: []stepHole{},
 	}
-	holes := holeSet{}
-	for _, side := range []diffRunSteps{ra, rb} {
-		if side.truncated {
-			holes.also(obsdb.HoleTruncated, "run "+side.ref.RunID+" has more than "+strconv.Itoa(maxDiffSteps)+
-				" steps: the diff compares the first "+strconv.Itoa(maxDiffSteps), "open the run's steps one by one")
-		}
+	if ra.truncated || rb.truncated {
+		reason, fix := obsdb.HoleNoteFor(obsdb.HoleTruncated, obsdb.CauseResponseCap)
+		doc.Holes = []stepHole{{Hole: string(obsdb.HoleTruncated), Reason: reason, Fix: fix}}
 	}
-	doc.Holes = holes.list()
 	for n := range max(len(ra.sides), len(rb.sides)) {
-		row := diffRow{Step: n, Changes: []string{}}
+		row := diffRow{Step: n, Changes: []string{}, Unknown: []string{}}
 		if n < len(ra.sides) {
 			row.A = ra.sides[n]
 		}
@@ -169,7 +172,7 @@ func (s *Server) serveDiff(w http.ResponseWriter, r *http.Request) {
 		if row.A == nil || row.B == nil {
 			row.Changes = append(row.Changes, diffMissing)
 		} else {
-			row.Changes = compareSides(row.A, row.B)
+			row.Changes, row.Unknown = compareSides(row.A, row.B)
 		}
 		row.Changed = len(row.Changes) > 0
 		if row.Changed {
@@ -201,6 +204,7 @@ func (s *Server) diffSteps(r *http.Request, id string, prompts bool) (diffRunSte
 	}
 	out := diffRunSteps{ref: diffRun{RunID: id, Status: string(sr.det.Status)}}
 	var texts map[int]*string
+	readable := true
 	for n := 0; ; n++ {
 		if n == maxDiffSteps {
 			// One more step recorded is a truncated diff.
@@ -219,11 +223,11 @@ func (s *Server) diffSteps(r *http.Request, id string, prompts bool) (diffRunSte
 			return diffRunSteps{}, err
 		}
 		if texts == nil {
-			if texts, err = stepTexts(sr); err != nil {
+			if texts, readable, err = stepTexts(sr); err != nil {
 				return diffRunSteps{}, err
 			}
 		}
-		out.sides = append(out.sides, diffSideOf(doc, texts[n]))
+		out.sides = append(out.sides, diffSideOf(doc, texts[n], readable))
 	}
 	// The run row's count when it says more (a truncated diff, a step
 	// the walk could not reach); a running run's row may lag its
@@ -237,19 +241,17 @@ func isNoStep(err error) bool { return errors.Is(err, errNoStep) }
 // stepTexts is each step's assistant text from the run's transcript
 // (the transcript route's records, read once): the text parts of the
 // step's assistant messages, joined by a newline. A step with no
-// assistant message stored is absent.
-func stepTexts(sr *stepRun) (map[int]*string, error) {
+// assistant message stored is absent. readable is false when a
+// messages body does not parse: then no step's text is known.
+func stepTexts(sr *stepRun) (texts map[int]*string, readable bool, err error) {
 	batches, err := sr.transcript()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	out := map[int]*string{}
 	msgs, err := runSteps(batches)
 	if err != nil {
-		// A messages body that does not parse holds no text the diff
-		// can read: every step's text is null, and each side says so
-		// (diffSideOf's gap).
-		return out, nil
+		return out, false, nil
 	}
 	for _, m := range msgs {
 		if m.msg.Role != core.RoleAssistant {
@@ -269,15 +271,16 @@ func stepTexts(sr *stepRun) (map[int]*string, error) {
 		}
 		out[m.step] = &t
 	}
-	return out, nil
+	return out, true, nil
 }
 
-// diffSideOf reduces one assembled step.
-func diffSideOf(doc stepDoc, text *string) *diffSide {
+// diffSideOf reduces one assembled step. readable is stepTexts'.
+func diffSideOf(doc stepDoc, text *string, readable bool) *diffSide {
 	side := &diffSide{
 		Status: doc.Status, SystemHash: doc.sysHash, System: doc.sysText,
 		ToolCalls: []diffToolCall{}, ToolResults: []diffToolResult{},
 		Text: text, Usage: doc.Usage, Marks: []string{},
+		eventsLost: doc.eventsLost,
 	}
 	holes := holeSet{}
 	for _, h := range doc.Holes {
@@ -285,6 +288,12 @@ func diffSideOf(doc stepDoc, text *string) *diffSide {
 	}
 	for _, c := range doc.ToolCalls {
 		side.ToolCalls = append(side.ToolCalls, diffToolCall{Name: c.Name, Args: canonicalJSON(c.Args)})
+		if c.Badge == string(obsdb.HoleStripped) {
+			side.contentLost = true
+			// A content-off max_tokens step counts its calls, nothing
+			// more: their names are unknown too.
+			side.namesLost = side.namesLost || c.Name == ""
+		}
 		if c.Result != nil {
 			side.ToolResults = append(side.ToolResults, diffToolResult{
 				CallID: c.CallID, Name: c.Name, Content: c.Result.Content, IsError: c.Result.IsError,
@@ -311,10 +320,16 @@ func diffSideOf(doc stepDoc, text *string) *diffSide {
 	case doc.Status == stepError:
 		side.Marks = append(side.Marks, stepError)
 	}
-	// A finished step's assistant message is recorded with it: none
+	// The text: a messages body that does not parse hides every step's;
+	// a finished step's assistant message is recorded with it, so none
 	// stored is a hole, unless one already says why (content-off, a run
-	// before the record, a gap, a hidden block does not hide text).
-	if text == nil && (doc.Status == stepOK || doc.Status == stepParked) {
+	// before the record, a gap — a hidden block does not hide text).
+	switch {
+	case !readable:
+		side.Text, side.textLost = nil, true
+		holes.also(obsdb.HoleGap, "a messages record of this run does not parse: the step's assistant text is unknown", holeFix(obsdb.HoleGap))
+	case text == nil && (doc.Status == stepOK || doc.Status == stepParked):
+		side.textLost = true
 		explained := false
 		for _, h := range []obsdb.Hole{obsdb.HoleStripped, obsdb.HoleNotRecorded, obsdb.HoleGap} {
 			_, ok := holes[h]
@@ -328,37 +343,58 @@ func diffSideOf(doc stepDoc, text *string) *diffSide {
 	return side
 }
 
-// compareSides lists what differs between two sides of one step.
+// compareSides lists what differs between two sides of one step
+// (changes) and what cannot be compared (unknown): a column either side
+// could not record — its hole says why — is never compared with the
+// other side's value, so "unknown" is never read as "same".
+//
+//   - system: unknown when a side has neither a hash nor the text (a
+//     run before the request record, a dropped request record); by
+//     hash when both have one (hidden and content-off keep the hash);
+//   - tool_calls, tool_results, usage: unknown when a side's events
+//     are not all stored (eventsLost); tool_calls by name alone and
+//     tool_results unknown when a side's calls were content-off;
+//   - text: unknown when a side's text is null for a hole.
+//
 // Marks, holes, status and timing are never compared: a compaction or
 // a subagent call marks its side and changes nothing by itself.
-func compareSides(a, b *diffSide) []string {
-	out := []string{}
-	// By hash when both sides have one; else the hashes (one or both
-	// "") and the texts must agree.
+func compareSides(a, b *diffSide) (changes, unknown []string) {
+	changes, unknown = []string{}, []string{}
+	note := func(col string, known, same bool) {
+		switch {
+		case !known:
+			unknown = append(unknown, col)
+		case !same:
+			changes = append(changes, col)
+		}
+	}
+	sysKnown := (a.SystemHash != "" || a.System != nil) && (b.SystemHash != "" || b.System != nil)
 	sysSame := a.SystemHash == b.SystemHash
 	if a.SystemHash == "" || b.SystemHash == "" {
 		sysSame = sysSame && sameText(a.System, b.System)
 	}
-	if !sysSame {
-		out = append(out, diffSystem)
-	}
-	if !slices.EqualFunc(a.ToolCalls, b.ToolCalls, func(x, y diffToolCall) bool {
+	note(diffSystem, sysKnown, sysSame)
+
+	eventsKnown := !a.eventsLost && !b.eventsLost
+	contentKnown := !a.contentLost && !b.contentLost
+	namesSame := slices.EqualFunc(a.ToolCalls, b.ToolCalls, func(x, y diffToolCall) bool { return x.Name == y.Name })
+	callsSame := slices.EqualFunc(a.ToolCalls, b.ToolCalls, func(x, y diffToolCall) bool {
 		return x.Name == y.Name && bytes.Equal(x.Args, y.Args)
-	}) {
-		out = append(out, diffToolCalls)
+	})
+	switch {
+	case !eventsKnown || a.namesLost || b.namesLost:
+		note(diffToolCalls, false, false)
+	case !namesSame:
+		note(diffToolCalls, true, false) // the names alone already differ
+	default:
+		note(diffToolCalls, contentKnown, callsSame)
 	}
-	if !slices.EqualFunc(a.ToolResults, b.ToolResults, func(x, y diffToolResult) bool {
+	note(diffToolResults, eventsKnown && contentKnown, slices.EqualFunc(a.ToolResults, b.ToolResults, func(x, y diffToolResult) bool {
 		return x.Content == y.Content && x.IsError == y.IsError
-	}) {
-		out = append(out, diffToolResults)
-	}
-	if !sameText(a.Text, b.Text) {
-		out = append(out, diffText)
-	}
-	if a.Usage != b.Usage {
-		out = append(out, diffUsage)
-	}
-	return out
+	}))
+	note(diffText, !a.textLost && !b.textLost, sameText(a.Text, b.Text))
+	note(diffUsage, eventsKnown, a.Usage == b.Usage)
+	return changes, unknown
 }
 
 // sameText says two nullable texts are both null or equal.

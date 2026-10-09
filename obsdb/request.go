@@ -83,11 +83,16 @@ const (
 	// run's request, prompt and tools records were not read — the run
 	// may hold them (not_recorded: the panel's Request tab).
 	CauseNotServed HoleCause = "not_served"
+	// CauseResponseCap: the route bounds how much one response reads
+	// (Studio's GET /api/diff compares a bounded number of steps), and
+	// the run holds more than it read (truncated: nothing was lost; the
+	// rest is a read away).
+	CauseResponseCap HoleCause = "response_cap"
 )
 
 // HoleCauses lists the causes the table words, in order.
 func HoleCauses() []HoleCause {
-	return []HoleCause{CauseNoSpans, CauseResultCap, CauseLogCap, CauseNoPublicID, CauseDevTokenOnly, CauseNotServed}
+	return []HoleCause{CauseNoSpans, CauseResultCap, CauseLogCap, CauseNoPublicID, CauseDevTokenOnly, CauseNotServed, CauseResponseCap}
 }
 
 var causeNotes = map[Hole]map[HoleCause]holeNote{
@@ -119,6 +124,10 @@ var causeNotes = map[Hole]map[HoleCause]holeNote{
 		CauseLogCap: {
 			"the app-log reader's candidate cap was reached before attribution; later lines of this run may be missing",
 			"log less in the run's trace (a busy subagent or sibling run counts too); phase 2 filters by span before the cap",
+		},
+		CauseResponseCap: {
+			"this response reads a bounded number of steps and the run has more: the later steps were not compared, nothing was lost",
+			"open the later steps one by one (runs/{id}/steps/{n})",
 		},
 	},
 }

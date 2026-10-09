@@ -81,7 +81,8 @@
           }
         ]
       },
-      "changes": []
+      "changes": [],
+      "unknown": []
     },
     {
       "step": 1,
@@ -154,7 +155,8 @@
           }
         ]
       },
-      "changes": []
+      "changes": [],
+      "unknown": []
     },
     {
       "step": 2,
@@ -227,7 +229,8 @@
           }
         ]
       },
-      "changes": []
+      "changes": [],
+      "unknown": []
     },
     {
       "step": 3,
@@ -302,7 +305,8 @@
       },
       "changes": [
         "tool_results"
-      ]
+      ],
+      "unknown": []
     },
     {
       "step": 4,
@@ -347,7 +351,8 @@
           }
         ]
       },
-      "changes": []
+      "changes": [],
+      "unknown": []
     }
   ],
   "summary": {

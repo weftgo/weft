@@ -113,6 +113,11 @@ export const CAUSES: Partial<Record<Hole, Record<string, { reason: string; fix?:
       reason: "a tool result was cut by its result cap: the model saw a prefix and the marker",
       fix: "raise the tool's weft.MaxResultBytes",
     },
+    response_cap: {
+      reason:
+        "this response reads a bounded number of steps and the run has more: the later steps were not compared, nothing was lost",
+      fix: "open the later steps one by one (runs/{id}/steps/{n})",
+    },
   },
   not_recorded: {
     no_public_id: {

@@ -17,6 +17,8 @@ import (
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/wefttest"
+	"github.com/weftgo/weft/obsdb"
+	"github.com/weftgo/weft/otel"
 )
 
 // diffDocT is GET /api/diff as a client decodes it.
@@ -32,6 +34,7 @@ type diffDocT struct {
 		A       *diffSideT `json:"a"`
 		B       *diffSideT `json:"b"`
 		Changes []string   `json:"changes"`
+		Unknown []string   `json:"unknown"`
 	} `json:"steps"`
 	Summary struct {
 		ChangedSteps []int `json:"changed_steps"`
@@ -98,6 +101,13 @@ type diffOrderIn struct {
 // in. extra adds agent options (a PrepareStep compaction).
 func recordDiffRun(t *testing.T, url, runID, third string, calls int, meta map[string]string, extra ...core.Option) {
 	t.Helper()
+	recordDiffRunTo(t, url, runID, third, calls, meta, nil, extra...)
+}
+
+// recordDiffRunTo is recordDiffRun through destination options
+// (otel.NoContent: the content-off twin).
+func recordDiffRunTo(t *testing.T, url, runID, third string, calls int, meta map[string]string, dest []otel.DestOption, extra ...core.Option) {
+	t.Helper()
 	withPipeline(t, url, true, func(prov []core.Option) {
 		lookup := core.Tool("lookup_order", "Look up an order.", func(_ context.Context, in diffOrderIn) (string, error) {
 			if in.OrderID == "3" {
@@ -116,7 +126,7 @@ func recordDiffRun(t *testing.T, url, runID, third string, calls int, meta map[s
 		if _, err := agent.Generate(context.Background(), core.RunID(runID), core.Prompt("look up orders 0 to 3"), core.Metadata(meta)); err != nil {
 			t.Fatal(err)
 		}
-	})
+	}, dest...)
 }
 
 // waitRun waits until the run's row counts steps steps and its
@@ -176,7 +186,7 @@ func TestDiffRoute(t *testing.T) {
 		if row.Step == 3 {
 			want = []string{"tool_results"}
 		}
-		if row.Changed != (row.Step == 3) || !slices.Equal(row.Changes, want) {
+		if row.Changed != (row.Step == 3) || !slices.Equal(row.Changes, want) || row.Unknown == nil || len(row.Unknown) != 0 {
 			t.Errorf("step %d = changed %v %v, want %v %v", row.Step, row.Changed, row.Changes, row.Step == 3, want)
 		}
 		for _, side := range []*diffSideT{row.A, row.B} {
@@ -376,6 +386,9 @@ func TestDiffNotRecorded(t *testing.T) {
 		t.Fatalf("pre-A1 diff = %d rows changed %v, want 2, none", len(d.Steps), d.Summary.ChangedSteps)
 	}
 	for _, row := range d.Steps {
+		if want := []string{"system", "tool_calls", "tool_results", "text", "usage"}; row.Changed || !slices.Equal(row.Unknown, want) {
+			t.Errorf("pre-A1 step %d = changed %v unknown %v, want unchanged and every column unknown %v", row.Step, row.Changed, row.Unknown, want)
+		}
 		for _, side := range []*diffSideT{row.A, row.B} {
 			h := side.holes()
 			if side.System != nil || side.SystemHash != "" || side.Text != nil || !slices.Contains(h, "not_recorded") || !slices.Contains(h, "gap") {
@@ -450,5 +463,234 @@ func TestDiffPanelTokens(t *testing.T) {
 		if resp.StatusCode != http.StatusForbidden || strings.Contains(string(b), "order 3") {
 			t.Errorf("%s as a read token = %d %s, want 403 and nothing of either run", path, resp.StatusCode, b)
 		}
+	}
+}
+
+// TestDiffUnknownColumns (review finding 1): a column one side could
+// not record is never compared with the other side's value — it is
+// listed in unknown, neither changed nor the same. A run written before
+// the request record against a recorded one; a content-off run against
+// its content-on twin; a run whose step 1 lost its step_start against
+// a whole one.
+func TestDiffUnknownColumns(t *testing.T) {
+	path := oldDB(t, "old1")
+	srv := New(Open(path))
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	recordDiffRun(t, ts.URL, "r_on", "order 3 shipped", 4, nil)
+	recordDiffRunTo(t, ts.URL, "r_off", "order 3 shipped", 4, nil, []otel.DestOption{otel.NoContent()})
+	waitRun(t, ts, "r_on", 5, "")
+	waitRun(t, ts, "r_off", 5, "")
+
+	// Pre-A1 against recorded: steps 0 and 1 compare nothing (the old
+	// run stored no event, request or message of them), 2..4 missing.
+	d, _ := getDiff(t, ts, "old1", "r_on", "")
+	if !slices.Equal(d.Summary.ChangedSteps, []int{2, 3, 4}) {
+		t.Errorf("pre-A1 vs recorded changed = %v, want [2 3 4] (missing only)", d.Summary.ChangedSteps)
+	}
+	for _, row := range d.Steps[:2] {
+		if row.Changed || !slices.Contains(row.Unknown, "usage") || !slices.Contains(row.Unknown, "system") {
+			t.Errorf("pre-A1 vs recorded step %d = changes %v unknown %v, want none changed, system and usage unknown", row.Step, row.Changes, row.Unknown)
+		}
+	}
+
+	// Content-off against content-on: the hashes compare the system,
+	// the usage compares; calls, results and text are unknown.
+	d, _ = getDiff(t, ts, "r_off", "r_on", "")
+	if len(d.Summary.ChangedSteps) != 0 {
+		t.Errorf("content-off vs on changed = %v (%+v), want none", d.Summary.ChangedSteps, d.Steps)
+	}
+	for _, row := range d.Steps {
+		want := []string{"tool_calls", "tool_results", "text"}
+		if row.Step == 4 {
+			want = []string{"text"} // the final step made no call
+		}
+		if !slices.Equal(row.Unknown, want) || row.A.SystemHash == "" || row.A.SystemHash != row.B.SystemHash {
+			t.Errorf("content-off vs on step %d unknown = %v (hashes %q / %q), want %v", row.Step, row.Unknown, row.A.SystemHash, row.B.SystemHash, want)
+		}
+		if !slices.Contains(row.A.holes(), "stripped") {
+			t.Errorf("content-off step %d holes = %v, want stripped", row.Step, row.A.holes())
+		}
+	}
+
+	// A lost step_start inside the run (finding 5): the row is the gap
+	// on its side, unknown for calls, results and usage, not changed.
+	t0 := time.Now().UTC()
+	evs := func(id string, lost bool) []handRec {
+		out := []handRec{
+			ev(0, `{"type":"run_start","id":"`+id+`","model":{"provider":"p","name":"m"},"agent":"hand"}`),
+			ev(1, `{"type":"step_start","run_id":"`+id+`","index":0}`),
+			ev(2, `{"type":"tool_start","run_id":"`+id+`","seq":1,"call_id":"c_a","name":"t","args":{}}`),
+			ev(3, `{"type":"tool_finish","run_id":"`+id+`","seq":2,"call_id":"c_a","name":"t","content":"a","is_error":false}`),
+			ev(4, `{"type":"step_finish","run_id":"`+id+`","index":0,"reason":"tool_calls","usage":{"input_tokens":1,"output_tokens":1}}`),
+			ev(5, `{"type":"step_start","run_id":"`+id+`","index":1}`),
+			ev(6, `{"type":"tool_start","run_id":"`+id+`","seq":3,"call_id":"c_b","name":"t","args":{}}`),
+			ev(7, `{"type":"tool_finish","run_id":"`+id+`","seq":4,"call_id":"c_b","name":"t","content":"b","is_error":false}`),
+			ev(8, `{"type":"step_finish","run_id":"`+id+`","index":1,"reason":"stop","usage":{"input_tokens":1,"output_tokens":1}}`),
+			ev(9, `{"type":"run_finish","run_id":"`+id+`","usage":{"input_tokens":2,"output_tokens":2},"steps":2}`),
+		}
+		if lost {
+			out = slices.Delete(out, 5, 6)
+		}
+		return out
+	}
+	writeHand(t, srv.db, "r_whole", t0, map[string]any{}, evs("r_whole", false))
+	writeHand(t, srv.db, "r_lost", t0, map[string]any{}, evs("r_lost", true))
+	d, _ = getDiff(t, ts, "r_lost", "r_whole", "")
+	if len(d.Steps) != 2 || len(d.Summary.ChangedSteps) != 0 {
+		t.Fatalf("lost step_start diff = %d rows changed %v (%+v), want 2 rows, none changed", len(d.Steps), d.Summary.ChangedSteps, d.Steps)
+	}
+	if r := d.Steps[1]; !slices.Contains(r.A.holes(), "gap") || !slices.Contains(r.Unknown, "tool_calls") || !slices.Contains(r.Unknown, "tool_results") ||
+		!slices.Contains(r.Unknown, "usage") || len(r.A.ToolCalls) != 0 || len(r.B.ToolCalls) != 1 {
+		t.Errorf("lost step 1 = a holes %v, unknown %v, calls %d / %d; want the gap, calls/results/usage unknown", r.A.holes(), r.Unknown, len(r.A.ToolCalls), len(r.B.ToolCalls))
+	}
+}
+
+// TestDiffStepCap (finding 3): a run with more steps than the diff
+// reads is compared that far; the top-level hole is truncated with the
+// table's response-cap cause — its reason and fix, not a destination
+// cap's — and each side's steps is the run's own count.
+func TestDiffStepCap(t *testing.T) {
+	ts, _ := requestsServer(t)
+	recordDiffRun(t, ts.URL, "r_ca", "order 3 shipped", 4, nil)
+	recordDiffRun(t, ts.URL, "r_cb", "order 3 lost", 4, nil)
+	waitRun(t, ts, "r_ca", 5, "")
+	waitRun(t, ts, "r_cb", 5, "")
+	defer func(n int) { maxDiffSteps = n }(maxDiffSteps)
+	maxDiffSteps = 2
+	d, _ := getDiff(t, ts, "r_ca", "r_cb", "")
+	reason, fix := obsdb.HoleNoteFor(obsdb.HoleTruncated, obsdb.CauseResponseCap)
+	if def, _ := obsdb.HoleNote(obsdb.HoleTruncated); reason == def {
+		t.Fatal("the response cap has no reason of its own in the table")
+	}
+	if len(d.Steps) != 2 || d.A.Steps != 5 || d.B.Steps != 5 || len(d.Summary.ChangedSteps) != 0 ||
+		len(d.Holes) != 1 || d.Holes[0].Hole != "truncated" || d.Holes[0].Reason != reason || d.Holes[0].Fix != fix {
+		t.Errorf("capped diff = %d rows, steps %d/%d, changed %v, holes %+v; want 2 rows, 5/5, none, the response-cap truncated", len(d.Steps), d.A.Steps, d.B.Steps, d.Summary.ChangedSteps, d.Holes)
+	}
+	maxDiffSteps = 5 // exactly the run's count: nothing cut
+	if d, _ := getDiff(t, ts, "r_ca", "r_cb", ""); len(d.Steps) != 5 || len(d.Holes) != 0 {
+		t.Errorf("cap at the count = %d rows holes %+v, want 5, none", len(d.Steps), d.Holes)
+	}
+}
+
+// TestDiffUnreadableTranscript (finding 4): a messages record that
+// does not parse makes every step's text unknown, said as such — never
+// "no messages record was stored".
+func TestDiffUnreadableTranscript(t *testing.T) {
+	ts, srv := requestsServer(t)
+	t0 := time.Now().UTC()
+	for _, id := range []string{"r_bad", "r_good"} {
+		writeHand(t, srv.db, id, t0, map[string]any{}, []handRec{
+			ev(0, `{"type":"run_start","id":"`+id+`","model":{"provider":"p","name":"m"},"agent":"hand"}`),
+			ev(1, `{"type":"step_start","run_id":"`+id+`","index":0}`),
+			ev(2, `{"type":"step_finish","run_id":"`+id+`","index":0,"reason":"stop","usage":{"input_tokens":1,"output_tokens":1}}`),
+			ev(3, `{"type":"run_finish","run_id":"`+id+`","usage":{"input_tokens":1,"output_tokens":1},"steps":1}`),
+		})
+		body := `[{"role":"assistant","content":[{"type":"text","text":"hi"}]}]`
+		if id == "r_bad" {
+			body = `[{"role":"assistant","content":[{"type":"no_such_part"}]}]`
+		}
+		if err := srv.db.Write(context.Background(), obsdb.Batch{Records: []obsdb.Record{{
+			Time: t0, EventName: "weft.messages", Severity: 9, Body: body, Service: "svc",
+			Attrs: map[string]any{"weft.record": "messages", "weft.run.id": id, "gen_ai.agent.name": "hand",
+				"weft.messages.index": int64(0), "weft.messages.count": int64(1), "weft.step.index": int64(0)},
+			Resource: map[string]any{"service.name": "svc"},
+		}}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d, _ := getDiff(t, ts, "r_bad", "r_good", "")
+	if len(d.Steps) != 1 {
+		t.Fatalf("rows = %d, want 1", len(d.Steps))
+	}
+	r := d.Steps[0]
+	if r.B.Text == nil || *r.B.Text != "hi" || r.A.Text != nil || !slices.Contains(r.Unknown, "text") || slices.Contains(r.Changes, "text") {
+		t.Errorf("unreadable vs readable = text %v / %v unknown %v changes %v, want null / hi, text unknown", r.A.Text, r.B.Text, r.Unknown, r.Changes)
+	}
+	var gap string
+	for _, h := range r.A.Holes {
+		if h.Hole == "gap" {
+			gap = h.Reason
+		}
+	}
+	if !strings.Contains(gap, "does not parse") || strings.Contains(gap, "was stored") {
+		t.Errorf("unreadable side's gap = %q, want the does-not-parse reason", gap)
+	}
+}
+
+// TestDiffWalkResumes (finding 2): assembling a run's steps in order
+// starts each step's event walk where the last one stopped — never at
+// page 0 — and yields exactly what assembling each step alone does.
+func TestDiffWalkResumes(t *testing.T) {
+	ts, srv := requestsServer(t)
+	recordStepsRun(t, ts.URL, "r_walk", nil)
+	fetchJSON(t, ts, "/api/runs/r_walk", func(b string) bool {
+		return strings.Contains(b, `"request_count":6`) && strings.Contains(b, `"id":"r_walk/1/c_sub"`)
+	})
+	ctx := context.Background()
+	seq, err := srv.loadStepRun(ctx, "r_walk")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for n := range 3 {
+		if n > 0 {
+			r := seq.resume
+			if r == nil || r.n != n {
+				t.Fatalf("before step %d resume = %+v, want a point for step %d", n, r, n)
+			}
+			var h eventHead
+			_ = json.Unmarshal(seq.pages[r.pi].Events[r.i].Event, &h)
+			if h.Type != "step_start" || h.Index != n {
+				t.Errorf("step %d resumes at a %s of step %d, want its step_start", n, h.Type, h.Index)
+			}
+		}
+		got, err := seq.assembleStep(n, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		alone, err := srv.loadStepRun(ctx, "r_walk")
+		if err != nil {
+			t.Fatal(err)
+		}
+		want, err := alone.assembleStep(n, true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		gb, _ := json.Marshal(got)
+		wb, _ := json.Marshal(want)
+		if string(gb) != string(wb) {
+			t.Errorf("step %d in sequence differs from step %d alone:\n%s\n%s", n, n, gb, wb)
+		}
+	}
+}
+
+// TestCanonicalJSON pins the args rule (finding 5): object keys sorted
+// at every depth, array order kept, a \u escape and its literal
+// character equal, numbers as written — 1 and 1.0 differ.
+func TestCanonicalJSON(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		same bool
+	}{
+		{`{"b":1,"a":2}`, `{"a":2,"b":1}`, true},
+		{`{"o":{"z":[1,{"y":2,"x":3}],"a":null}}`, ` { "o" : { "a" : null , "z" : [ 1 , { "x" : 3 , "y" : 2 } ] } } `, true},
+		{`[1,2]`, `[2,1]`, false},
+		{`{"s":"\u00e9\u003c"}`, `{"s":"é<"}`, true},
+		{`{"n":1}`, `{"n":1.0}`, false},
+		{`{"n":1e2}`, `{"n":100}`, false},
+		{`{"n":12345678901234567890}`, `{"n":12345678901234567890}`, true},
+		{``, `null`, true},
+	} {
+		ca, cb := string(canonicalJSON(json.RawMessage(c.a))), string(canonicalJSON(json.RawMessage(c.b)))
+		if (ca == cb) != c.same {
+			t.Errorf("canonical(%s) = %s, canonical(%s) = %s; same = %v, want %v", c.a, ca, c.b, cb, ca == cb, c.same)
+		}
+	}
+	if got := string(canonicalJSON(json.RawMessage(`{"b":{"d":1,"c":"é"},"a":[3,1]}`))); got != `{"a":[3,1],"b":{"c":"é","d":1}}` {
+		t.Errorf("canonical = %s", got)
+	}
+	if got := string(canonicalJSON(json.RawMessage(`{not json`))); got != `{not json` {
+		t.Errorf("an unparseable value = %s, want it verbatim", got)
 	}
 }

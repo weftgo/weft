@@ -1136,13 +1136,21 @@ walks views, never cursor moves:
 | playground | `experiment` | a saved experiment, highlighted in the history | push |
 | compare | `a`, `b`, `step` | the base, the runs compared, the step | push |
 
-The playground's prompt and other hand-off fields ride the fragment
-(`playground#run=…&instructions=…`), read once and stripped: a prompt
-never reaches the query. The replay drawer's state is in the URL
-(`replay`, `from`, `of`). **Copy link** — the button in the run header, `y` anywhere, or
-"Copy link to this page" in `⌘K` — copies the page's canonical link:
-the bare URL with its state, never a fragment, a token or a panel scope
-(`lib/links.ts`'s `canonical`); the header says "link copied". Each page
+The panel hands the playground its prompt and other fields in the
+fragment (`playground#run=…&instructions=…`), read once and stripped.
+The page never writes a prompt into the query (an older link's
+`?instructions=` / `?input=` are still read). The playground writes
+its state from its controls; a change from outside (Back, Forward, a
+link followed while it is open) is adopted into the controls and never
+written back. **Copy link** — the button in the run header, `y`
+anywhere, or "Copy link to this page" in `⌘K` — copies the page's
+canonical link: the bare URL with its state, never a fragment, a token,
+a panel scope or prompt text (`lib/links.ts`'s `canonical` drops
+`token`, `access_token`, `sig`, `weft_scope`, `input`, `instructions`);
+the header says "link copied". Where the browser refuses the clipboard
+(plain http off loopback, a denied permission) it falls back to
+`execCommand("copy")`, then shows the link in a prompt, and says "copy
+failed". Each page
 titles its tab through `lib/title.ts`: `run s_…-t3 · succeeded · weft
 studio`, `trace 0af76519…319c · weft studio`, `playground · weft
 studio`.

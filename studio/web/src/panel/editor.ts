@@ -17,6 +17,8 @@ export interface PanelPreview {
   doc?: PreviewDoc
   error?: string
   refused?: boolean
+  /** The draft changed and its answer is not in yet: Run waits. */
+  pending?: boolean
 }
 
 const line = (cls: string, text: string, attrs: Record<string, string>) => el("div", cls, text, attrs)
@@ -25,6 +27,7 @@ const line = (cls: string, text: string, attrs: Record<string, string>) => el("d
 export function previewBlock(p: PanelPreview, fromStep: number): HTMLElement {
   const box = el("div", "weft-ack", [el("div", "weft-name", `will be sent · step ${fromStep}'s request`)], { "data-weft-preview": "", "data-key": "preview" })
   if (p.error) box.appendChild(line("weft-note weft-warn", p.error, { role: "alert", "data-weft-preview-error": "" }))
+  if (p.pending && p.doc) box.appendChild(line("weft-reason", "reading it again for the changed command…", { "data-weft-preview-pending": "" }))
   const v = p.doc && previewView(p.doc)
   if (!v) {
     if (!p.error) box.appendChild(line("weft-reason", "assembling the request…", {}))
@@ -72,10 +75,13 @@ export function marksBlock(
 ): HTMLElement | null {
   const { marks, more } = editMarks(row)
   if (!marks.length && !more) return null
+  // The replay's from_step (forked_from's "#N"): where its kept prefix ends.
+  const at = /#(\d+)$/.exec(row?.forked_from ?? "")?.[1]
+  const from = at === undefined ? undefined : Number(at)
   const box = el("div", "weft-note", [el("div", "weft-name", `kept prefix edited${row?.forked_from ? ` · from ${row.forked_from}` : ""}`)], { "data-weft-edits-mark": "" })
   for (const m of marks)
     box.appendChild(
-      el("div", "weft-res", [el("span", "weft-badge weft-err", MARK_CHIPS[m.what]), ` ${markLine(m)} `, markedPart(batches, m)].map((x) => (typeof x === "string" ? document.createTextNode(x) : x)), {
+      el("div", "weft-res", [el("span", "weft-badge weft-err", MARK_CHIPS[m.what]), ` ${markLine(m)} `, markedPart(batches, m, from)].map((x) => (typeof x === "string" ? document.createTextNode(x) : x)), {
         "data-weft-edit-mark": m.what,
       })
     )

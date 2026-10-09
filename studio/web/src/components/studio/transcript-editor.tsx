@@ -10,12 +10,12 @@
 // are drawn here too — lib/preview.ts and lib/edits.ts, the rows the
 // panel draws.
 import { PencilLine, Plus } from "lucide-react"
-import { createContext, useContext, useEffect, useState } from "react"
+import { createContext, useContext, useEffect, useRef, useState } from "react"
 import type { ReactNode } from "react"
 
 import { ApiError, postPlaygroundPreview } from "@/lib/api"
 import type { PlaygroundRunBody, RunRow } from "@/lib/api"
-import { checkArgs, editKey, editLine, editMarks, kindOf, markedPart, markLine, MARK_CHIPS } from "@/lib/edits"
+import { checkArgs, editable, editKey, editLine, editMarks, kindOf, markedPart, markLine, MARK_CHIPS } from "@/lib/edits"
 import type { ReplayEdit, UserMessage } from "@/lib/edits"
 import type { TranscriptBatch } from "@/lib/events"
 import { previewView } from "@/lib/preview"
@@ -31,7 +31,7 @@ export interface Editor {
   edits: ReplayEdit[]
   invalid: Record<string, string>
   put: (target: ReplayEdit, next: ReplayEdit | null, error?: string) => void
-  schema: (step: number, tool: string) => unknown
+  schema: (tool: string) => unknown
   maxFrom: number | null
 }
 
@@ -46,12 +46,12 @@ function valueOf(e: ReplayEdit | undefined): string | undefined {
 
 /** The edit a field's text makes (undefined: none — empty, or the
  * recorded text again), or the refusal. */
-function editOf(target: ReplayEdit, text: string, recorded: string, schema: unknown, tool: string): { edit?: ReplayEdit; error?: string } {
+function editOf(target: ReplayEdit, text: string, recorded: string, schema: unknown, tool: string): { edit?: ReplayEdit; error?: string; unchecked?: boolean } {
   if (!text.trim() || text === recorded) return {}
   const k = kindOf(target)
   if (k === "tool_args") {
     const r = checkArgs(tool, schema, text)
-    return r.error ? { error: r.error } : { edit: { ...target, args: r.args } }
+    return r.error ? { error: r.error } : { edit: { ...target, args: r.args }, unchecked: r.unchecked }
   }
   return { edit: k === "tool_result" ? { ...target, toolResult: text } : { ...target, content: text } }
 }
@@ -59,8 +59,7 @@ function editOf(target: ReplayEdit, text: string, recorded: string, schema: unkn
 /** offered: the editor may edit this target (the step is one a replay
  * can keep: its from_step within the server's bound). */
 export function offered(ed: Editor | null, target: ReplayEdit): ed is Editor {
-  if (!ed || ed.maxFrom === null || target.step < 0) return false
-  return (kindOf(target) === "insert" ? target.step : target.step + 1) <= ed.maxFrom
+  return !!ed && editable(target, ed.maxFrom)
 }
 
 /**
@@ -85,10 +84,26 @@ export function Editable({
   const ed = useEditor()
   const [open, setOpen] = useState(false)
   const [text, setText] = useState<string | null>(null)
-  if (!offered(ed, target)) return <>{children}</>
+  const [unchecked, setUnchecked] = useState(false)
   const key = editKey(target)
-  const cur = ed.edits.find((e) => editKey(e) === key)
-  const err = ed.invalid[key]
+  const cur = ed?.edits.find((e) => editKey(e) === key)
+  const err = ed?.invalid[key]
+  // The field's state in the command: its edit and its refusal. What
+  // this field last put is mine; a change from anywhere else — the
+  // drawer closed (every edit dropped), another verb opened, a drop
+  // from the drawer's list, the drawer's own field rewriting it —
+  // resets the text to the command's, and closes the editor when the
+  // command no longer holds the field.
+  const held = `${cur ? JSON.stringify(cur) : ""}\u0000${err ?? ""}`
+  const mine = useRef(held)
+  useEffect(() => {
+    if (held === mine.current) return
+    mine.current = held
+    setText(null)
+    setUnchecked(false)
+    if (held === "\u0000") setOpen(false)
+  }, [held])
+  if (!offered(ed, target)) return <>{children}</>
   const k = kindOf(target)
   if (!open && !cur && !err)
     return (
@@ -136,6 +151,7 @@ export function Editable({
           className="ml-auto text-[11px] text-faint hover:underline"
           data-edit-revert
           onClick={() => {
+            mine.current = "\u0000"
             setText(null)
             setOpen(false)
             ed.put(target, null)
@@ -155,10 +171,17 @@ export function Editable({
         onChange={(e) => {
           const v = e.target.value
           setText(v)
-          const r = editOf(target, v, recorded, ed.schema(target.step, tool), tool)
+          const r = editOf(target, v, recorded, ed.schema(tool), tool)
+          mine.current = `${r.edit ? JSON.stringify(r.edit) : ""}\u0000${r.error ?? ""}`
+          setUnchecked(Boolean(r.unchecked))
           ed.put(target, r.edit ?? null, r.error)
         }}
       />
+      {unchecked ? (
+        <p className="text-[11px] text-faint" data-edit-unchecked>
+          this browser gives no number literals: integers and exactness are checked by the runtime
+        </p>
+      ) : null}
       {err ? (
         <p className="text-xs text-status-bad" role="alert" data-edit-error>
           {err}
@@ -186,13 +209,14 @@ export function PromptEditor({ user }: { user: UserMessage }) {
 
 /** InsertHere is the boundary before step `step`'s model call: a
  * message inserted there (the ADR 0019 steer shape at rest). */
-export function InsertHere({ step }: { step: number }) {
+export function InsertHere({ step, last = false }: { step: number; last?: boolean }) {
   const ed = useEditor()
   if (!offered(ed, { kind: "insert", step })) return null
+  const words = last ? "insert a message after the last step" : `insert a message before step ${step}`
   return (
     <div data-insert-at={step} className="pl-4">
       <Editable target={{ kind: "insert", step }} recorded="" label={`a message inserted before step ${step}`}>
-        <span className="block font-mono text-[10px] text-faint">· insert a message before step {step}</span>
+        <span className="block font-mono text-[10px] text-faint">· {words}</span>
       </Editable>
     </div>
   )
@@ -229,6 +253,8 @@ export interface PreviewState {
   doc?: PreviewDoc
   error?: string
   refused?: boolean
+  /** The body changed and its answer is not in yet: Run waits. */
+  pending?: boolean
 }
 
 /** How long the form rests before the preview is read again. */
@@ -237,19 +263,18 @@ export const PREVIEW_DEBOUNCE_MS = 300
 /** usePreview reads the preview of a body (JSON; "" — none), debounced:
  * the last body's answer wins. */
 export function usePreview(body: string): PreviewState {
-  const [st, setSt] = useState<PreviewState>({})
+  // The answer and the body it answers: a body not answered yet is
+  // pending (the last answer stays drawn meanwhile).
+  const [st, setSt] = useState<PreviewState & { for?: string }>({})
   useEffect(() => {
-    if (!body) {
-      setSt({})
-      return
-    }
+    if (!body) return
     let live = true
     const t = setTimeout(() => {
       postPlaygroundPreview(JSON.parse(body) as PlaygroundRunBody).then(
-        (doc) => live && setSt({ doc }),
+        (doc) => live && setSt({ doc, for: body }),
         (e: unknown) =>
           live &&
-          setSt({ error: e instanceof Error ? e.message : String(e), refused: e instanceof ApiError && e.status === 400 })
+          setSt({ error: e instanceof Error ? e.message : String(e), refused: e instanceof ApiError && e.status === 400, for: body })
       )
     }, PREVIEW_DEBOUNCE_MS)
     return () => {
@@ -257,7 +282,8 @@ export function usePreview(body: string): PreviewState {
       clearTimeout(t)
     }
   }, [body])
-  return st
+  if (!body) return {}
+  return st.for === body ? st : { doc: st.doc, pending: true }
 }
 
 /**
@@ -272,6 +298,11 @@ export function PreviewPane({ state, fromStep }: { state: PreviewState; fromStep
   return (
     <div className="space-y-1.5 rounded-md border px-3 py-2" data-preview>
       <div className="eyebrow">will be sent · step {fromStep}'s request</div>
+      {state.pending && v ? (
+        <p className="text-[11px] text-faint" data-preview-pending>
+          reading it again for the changed command…
+        </p>
+      ) : null}
       {state.error ? (
         <p className="text-xs text-status-bad" role="alert" data-preview-error>
           {state.error}
@@ -345,6 +376,10 @@ export function PreviewPane({ state, fromStep }: { state: PreviewState; fromStep
 export function EditsMark({ row, batches }: { row: Pick<RunRow, "meta" | "parent_run_id" | "forked_from">; batches?: TranscriptBatch[] }) {
   const { marks, more } = editMarks(row)
   if (!marks.length && !more) return null
+  // The replay's from_step (weft.forked_from's "#N"): where its kept
+  // prefix ends, so a token's step ordinal finds its pair.
+  const at = /#(\d+)$/.exec(row.forked_from)?.[1]
+  const from = at === undefined ? undefined : Number(at)
   return (
     <div className="space-y-1 rounded-lg border border-ev-error/30 px-4 py-2 text-xs" data-edits-mark>
       <span className="eyebrow">kept prefix edited{row.forked_from ? ` · from ${row.forked_from}` : ""}</span>
@@ -355,7 +390,7 @@ export function EditsMark({ row, batches }: { row: Pick<RunRow, "meta" | "parent
               {MARK_CHIPS[m.what]}
             </span>
             <span className="font-mono">{markLine(m)}</span>
-            <span className="min-w-0 truncate font-mono text-muted-foreground">{markedPart(batches, m)}</span>
+            <span className="min-w-0 truncate font-mono text-muted-foreground">{markedPart(batches, m, from)}</span>
           </li>
         ))}
       </ul>

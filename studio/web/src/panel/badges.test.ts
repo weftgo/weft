@@ -274,6 +274,8 @@ describe("no panel-only badge strings", () => {
     "requests:not recorded (stripped)": "paramFields — the run page's params of a content-off request",
     "requests:request not recorded by weft v0.9.0 or earlier": "REQUEST_NOT_RECORDED_LABEL — the run page's request label",
     "replay: · the compacted prefix (what the model saw at step )": "prefixLine — the replay drawers' ack preview (plan F1)",
+    "experiment-body:the boundary before step  was compacted away": "compactedRefusal — the server's refusal of an insert inside a view (ADR 0029 decision 4), not the hole",
+    "experiment-body: of step  was compacted away": "compactedRefusal — the server's refusal of an edit inside a view (F1.1's words), not the hole",
     "experiment-body:max_tokens must be ":
       "labOverrides — both drawers' option lab (plan F3): the server's refusal, naming the param, not the hole",
   }

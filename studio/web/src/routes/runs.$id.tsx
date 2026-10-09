@@ -31,7 +31,7 @@ import { applyTranscript, fold, linkView } from "@/lib/events"
 import { isPlainShortcut } from "@/lib/keys"
 import { overrideOf } from "@/lib/request-pane"
 import { canReplay, editTranscript } from "@/lib/replay"
-import { editKey, impliedFromStep, putEdit, schemaAt } from "@/lib/edits"
+import { editKey, impliedFromStep, putEdit, schemaOf } from "@/lib/edits"
 import type { ReplayEdit } from "@/lib/edits"
 import { replayBounds } from "@/lib/experiment-body"
 import type { RunSearch } from "@/lib/links"
@@ -551,7 +551,7 @@ function RunPage() {
           edits: edits.list,
           invalid: edits.invalid,
           maxFrom,
-          schema: (step, tool) => schemaAt(requests?.steps, step, tool),
+          schema: (tool) => schemaOf(requests?.steps, tool),
           put: (target, next, error) => {
             const k = editKey(target)
             const list = putEdit(edits.list, next ?? target, !next)

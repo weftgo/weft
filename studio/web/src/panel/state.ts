@@ -44,6 +44,7 @@ import {
   postApproval,
   postPlaygroundRun,
   postPreview,
+  panelGet,
   postSteer,
   putBreakpoints,
 } from "./client"
@@ -59,6 +60,7 @@ import {
 } from "./playground"
 import type { ExperimentDraft, ExperimentResult, TurnWords } from "./playground"
 import type { PanelPreview } from "./editor"
+import type { CompactedNote } from "../lib/experiment-body"
 import { studioIsTooNew } from "./version"
 
 /** The runs list's paging cursor (next_before, next_before_id). */
@@ -1652,10 +1654,28 @@ export class PanelModel {
   private schedulePreview() {
     const seq = ++this.pvSeq
     const d = this.state.drawer
+    // The view from_step's request carried (transcript?step's
+    // compacted_at), read once per (run, step) while edits exist: the
+    // drawer refuses an edit inside it before anything is posted.
+    const at = d ? `${d.runId}#${d.step}` : ""
+    if (d && d.edits.length && d.step > 0 && d.thread !== "fork" && !this.asOf.has(at)) {
+      this.asOf.set(at, null)
+      void panelGet<{ compacted_at: CompactedNote | null }>(this.ep, `runs/${encodeURIComponent(d.runId)}/transcript?step=${d.step}`).then(
+        (doc) => {
+          if (this.disposed || !doc.compacted_at) return
+          this.asOf.set(at, doc.compacted_at)
+          this.emit()
+        },
+        quiet
+      )
+    }
     if (!d || d.thread === "fork" || !(this.state.meta?.capabilities.includes("preview") ?? false)) {
       this.state.preview = null
       return
     }
+    // Pending until this draft's answer: Run waits (the last answer
+    // stays drawn).
+    this.state.preview = { doc: this.state.preview?.doc, pending: true }
     this.after(PREVIEW_MS, () => {
       const left = () => this.disposed || seq !== this.pvSeq
       void postPreview(this.ep, buildRunBody(d, this.publicId)).then(
@@ -1663,6 +1683,12 @@ export class PanelModel {
         (err: unknown) => !left() && this.setPreview({ error: messageOf(err), refused: err instanceof PanelApiError && err.status === 400 })
       )
     })
+  }
+
+  private asOf = new Map<string, CompactedNote | null>()
+  /** compactedAt is the view step `step` of run carried, once read. */
+  compactedAt(run: string, step: number): CompactedNote | null {
+    return this.asOf.get(`${run}#${step}`) ?? null
   }
 
   private setPreview(p: PanelPreview) {

@@ -68,6 +68,17 @@ export function impliedFromStep(list: ReplayEdit[]): number {
   return list.length ? Math.max(n, 1) : 0
 }
 
+/** editable: the target is one a replay can keep — the from_step it
+ * implies (impliedFromStep) within the server's bound (max: the
+ * highest from_step it accepts; null: unknown, nothing offered). */
+export function editable(target: ReplayEdit, max: number | null): boolean {
+  return max !== null && target.step >= 0 && impliedFromStep([target]) <= max
+}
+
+/** The line that holds Run while a fork carries edits (both surfaces). */
+export const FORK_EDITS =
+  "transcript edits belong to an ephemeral replay; a fork starts at step 0 — switch thread to ephemeral or drop the edits"
+
 /** The edit's line in the drawer's list: its kind and its place. */
 export function editLine(e: ReplayEdit): string {
   const k = kindOf(e)
@@ -107,15 +118,21 @@ export function userMessagesOf(batches: TranscriptBatch[]): UserMessage[] {
   return out
 }
 
-/** schemaAt is the input schema the step's catalog recorded for tool
- * (its answering attempt's row), undefined where no catalog says. */
-export function schemaAt(
-  steps: Map<number, { rows: { tools?: unknown }[] }> | undefined,
-  step: number,
-  tool: string
-): unknown {
-  const tools = (steps?.get(step)?.rows.at(-1)?.tools as { tools?: { name: string; schema?: unknown }[] } | undefined)?.tools
-  return tools?.find((t) => t.name === tool)?.schema
+/** schemaOf is the input schema the run's records hold for tool: the
+ * LAST catalog of the run that names it (steps in order, rows in
+ * order) — what Studio's server checks against (studio/playground.go's
+ * recordedSchemas keys by name over every catalog, the last one
+ * winning, not by the edited step's own catalog: a Go-side debt this
+ * mirrors so the editor and the server never disagree). undefined
+ * where no catalog says. */
+export function schemaOf(steps: Map<number, { rows: { tools?: unknown }[] }> | undefined, tool: string): unknown {
+  let out: unknown
+  for (const n of [...(steps?.keys() ?? [])].sort((a, b) => a - b))
+    for (const row of steps?.get(n)?.rows ?? []) {
+      const t = (row.tools as { tools?: { name: string; schema?: unknown }[] } | undefined)?.tools?.find((x) => x.name === tool)
+      if (t?.schema) out = t.schema
+    }
+  return out
 }
 
 // ── The editor's schema check ─────────────────────────────────────
@@ -149,9 +166,19 @@ const canon = (v: unknown): string =>
             .map((k) => `${JSON.stringify(k)}:${canon((v as Record<string, unknown>)[k])}`)
             .join(",")}}`
         : JSON.stringify(v)
+// int64's range, as the loop's decode into an int reads it.
+const INT64 = BigInt("9223372036854775808")
+const integral = (v: Num): boolean => {
+  // No literal (an engine without JSON.parse source access): unchecked
+  // here — checkArgs says so — never a pass on 3.0's behalf.
+  if (v.lit === undefined) return Number.isInteger(+v)
+  if (!/^-?\d+$/.test(v.lit)) return false
+  const b = BigInt(v.lit)
+  return b >= -INT64 && b < INT64
+}
 const fits = (t: string, v: unknown): boolean =>
   t === "integer"
-    ? v instanceof Number && /^-?\d+$/.test((v as unknown as Num).lit ?? String(+v))
+    ? v instanceof Number && integral(v as unknown as Num)
     : !["object", "array", "string", "boolean", "null", "number"].includes(t) || kind(v) === (t === "boolean" ? "bool" : t)
 type Schema = Record<string, unknown>
 
@@ -192,26 +219,53 @@ function walk(path: string, s: Schema, v: unknown): string {
   return ""
 }
 
+/** lossy names the first number the browser cannot carry as written:
+ * past the doubles' exact integers (9007199254740993 would be sent as
+ * …992) or out of range (1e400 would be sent as null). */
+function lossy(path: string, v: unknown): string {
+  const at = (k: string) => (path ? `${path}.${k}` : k)
+  if (v instanceof Number) {
+    const lit = (v as unknown as Num).lit
+    const n = +v
+    if (!Number.isFinite(n)) return `field "${path}": the number ${lit ?? n} is out of range here: write it as a string`
+    if (lit && /^-?\d+$/.test(lit) && BigInt(lit) !== BigInt(n))
+      return `field "${path}": the number ${lit} would be sent as ${BigInt(n).toString()} (past the exact integers JSON keeps here): write it as a string or a smaller number`
+    return ""
+  }
+  if (v && typeof v === "object")
+    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+      const m = lossy(at(k), x)
+      if (m) return m
+    }
+  return ""
+}
+
 /** checkArgs reads an args edit: the object to send, or the refusal in
- * the loop's words. A tool with no recorded schema needs an object. */
-export function checkArgs(tool: string, schema: unknown, text: string): { args?: Record<string, unknown>; error?: string } {
+ * the loop's words. A tool with no recorded schema needs an object.
+ * unchecked: this engine gave no number literals (JSON.parse source
+ * access), so integer literals and exactness were not checked here —
+ * the runtime checks them. */
+export function checkArgs(tool: string, schema: unknown, text: string): { args?: Record<string, unknown>; error?: string; unchecked?: boolean } {
   const fail = (m: string) => ({ error: `INVALID_INPUT: tool "${tool}": ${m}` })
   let v: unknown
+  const seen = { unchecked: false }
   try {
     // Each number as a Number carrying its literal: integer means an
-    // integral literal (3.0 is refused, as the loop's decode does).
+    // integral literal in int64 (3.0 is refused, as the loop's decode does).
     v = JSON.parse(text, (_k, x: unknown, ctx?: { source?: string }) => {
       if (typeof x !== "number") return x
       const n = new Number(x) as Num
       n.lit = ctx?.source
+      if (n.lit === undefined) seen.unchecked = true
       return n
     })
   } catch (e) {
     return fail(`invalid JSON: ${e instanceof Error ? e.message : String(e)}`)
   }
   if (kind(v) !== "object") return fail(`expected object at the top level, got ${kind(v)}`)
-  const m = schema && typeof schema === "object" ? walk("", schema as Schema, v) : ""
-  return m ? fail(m) : { args: JSON.parse(text) as Record<string, unknown> }
+  const m = lossy("", v) || (schema && typeof schema === "object" ? walk("", schema as Schema, v) : "")
+  if (m) return fail(m)
+  return { args: JSON.parse(text) as Record<string, unknown>, ...(seen.unchecked ? { unchecked: true } : {}) }
 }
 
 // ── The mark (weft.edits) ─────────────────────────────────────────
@@ -246,12 +300,15 @@ export function editMarks(row: { meta?: Record<string, string>; parent_run_id?: 
       more = Number(m[1])
       continue
     }
-    const [s, a, b] = tok.split(":")
-    const step = Number(s)
-    if (!Number.isInteger(step)) continue
-    if (b === "args" || b === "result") marks.push({ step, what: b, callID: a })
-    else if (a === "reply" || a === "insert") marks.push({ step, what: a })
-    else if (a === "user") marks.push({ step, what: "user", index: b ? Number(b) : 0 })
+    // A call id may hold ":" itself: the step is the first segment,
+    // the kind the last, the call id what lies between.
+    const parts = tok.split(":")
+    const step = Number(parts[0])
+    const last = parts[parts.length - 1]
+    if (!parts[0] || !Number.isInteger(step) || parts.length < 2) continue
+    if ((last === "args" || last === "result") && parts.length > 2) marks.push({ step, what: last, callID: parts.slice(1, -1).join(":") })
+    else if (parts.length === 2 && (last === "reply" || last === "insert" || last === "user")) marks.push(last === "user" ? { step, what: "user", index: 0 } : { step, what: last })
+    else if (parts.length === 3 && parts[1] === "user") marks.push({ step, what: "user", index: Number(last) })
   }
   return { marks, more }
 }
@@ -267,17 +324,35 @@ export function markLine(m: EditMark): string {
         : `step ${m.step} · reply`
 }
 
-/** markedPart is what the replay's input holds for a call token (its
- * kept prefix is the source's, positional: the call id joins). */
-export function markedPart(batches: TranscriptBatch[] | undefined, m: EditMark): string {
+/** markedPart is what the replay's input holds for a call token. The
+ * kept prefix is the source's steps 0..fromStep−1, one assistant
+ * message each, at the input's end: the token's step ordinal picks its
+ * assistant message (the key), the call id its part there (a result
+ * in the tool messages before the next). Without fromStep, or where
+ * that place does not hold the id, a call id the input names once
+ * stands; one it names more than once (a reused id) gives "" — the
+ * chip drawn without a value rather than the wrong pair's. */
+export function markedPart(batches: TranscriptBatch[] | undefined, m: EditMark, fromStep?: number): string {
   if (!m.callID || !batches) return ""
-  for (const b of placeBatches(batches)) {
-    if (!b.input) continue
-    for (const msg of b.messages)
+  const input = placeBatches(batches)
+    .filter((b) => b.input)
+    .flatMap((b) => b.messages)
+  const said = (msgs: Message[]): string[] => {
+    const out: string[] = []
+    for (const msg of msgs)
       for (const p of msg.content as (Part | null)[]) {
-        if (m.what === "args" && p?.type === "tool_call" && p.id === m.callID) return `${p.name}(${JSON.stringify(p.args)})`
-        if (m.what === "result" && p?.type === "tool_result" && p.call_id === m.callID) return String(p.content)
+        if (m.what === "args" && p?.type === "tool_call" && p.id === m.callID) out.push(`${p.name}(${JSON.stringify(p.args)})`)
+        if (m.what === "result" && p?.type === "tool_result" && p.call_id === m.callID) out.push(String(p.content))
       }
+    return out
   }
-  return ""
+  const asst = input.flatMap((x, i) => (x.role === "assistant" ? [i] : []))
+  const at = fromStep === undefined ? -1 : asst.length - fromStep + m.step
+  if (at >= 0 && at < asst.length && m.step < (fromStep ?? 0)) {
+    const own = m.what === "args" ? input.slice(asst[at], asst[at] + 1) : input.slice(asst[at] + 1, asst[at + 1] ?? input.length)
+    const hit = said(own)
+    if (hit.length === 1) return hit[0]
+  }
+  const all = said(input)
+  return all.length === 1 ? all[0] : ""
 }

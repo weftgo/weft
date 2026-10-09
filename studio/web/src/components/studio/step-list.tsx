@@ -754,11 +754,19 @@ export function StepList({
               steer={step.steer}
               onJump={onJump}
               replayAt={replayAt(step.index)}
-              user={users.find((u) => u !== prompt && u.text === step.steer?.text)}
+              // The steer's user message is the step's own (its stored
+              // step, studio/edits.go's userSeqs): the step's first
+              // after the turn's prompt — never another step's same words.
+              user={users.find((u) => u !== prompt && u.step === step.index)}
             />
           ) : null}
         </div>
       ))}
+      {/* The boundary after the last step (its calls all answered, so
+          a replay from the step count is accepted). */}
+      {maxFrom !== null && view.steps.length > 0 && maxFrom > Math.max(...view.steps.map((s) => s.index)) ? (
+        <InsertHere step={maxFrom} last />
+      ) : null}
       {view.unplaced?.length ? <Unplaced batches={view.unplaced} /> : null}
       {view.steps.length === 0 ? (
         <p className="py-6 text-center font-mono text-xs text-faint">

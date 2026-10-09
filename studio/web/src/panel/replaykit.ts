@@ -223,3 +223,41 @@ export function editRoutes(preview: Route = golden("playground-preview")): Recor
   r["POST playground/preview"] = preview
   return r
 }
+
+/** Two identical steers ("continue"), after step 1 and after step 3 —
+ * a five-step run (calls c1..c4, then a reply). The transcript stamps
+ * each steer with the step it followed. */
+export const steered = (step: number) => ({
+  type: "steered",
+  run_id: RUN,
+  seq: 0,
+  step,
+  messages: [{ role: "user", content: [{ type: "text", text: "continue" }] }],
+})
+export const steerEvents = [
+  { type: "run_start", id: RUN, model: { provider: "wefttest", name: "script" }, agent: "acme-support" },
+  ...call(0, "c1", "lookup_order", "shipped"),
+  ...call(1, "c2", "search_kb", "policy"),
+  steered(1),
+  ...call(2, "c3", "search_kb", "more"),
+  ...call(3, "c4", "search_kb", "even more"),
+  steered(3),
+  { type: "step_start", run_id: RUN, index: 4 },
+  { type: "step_finish", run_id: RUN, index: 4, reason: "stop", usage },
+  { type: "run_finish", run_id: RUN, usage, steps: 5 },
+]
+const steerUser = [{ role: "user", content: [{ type: "text", text: "continue" }] }]
+export const steerBodies = [
+  bodies[0],
+  assistantCall("c1", "lookup_order"),
+  result("c1", "lookup_order", "shipped"),
+  assistantCall("c2", "search_kb"),
+  result("c2", "search_kb", "policy"),
+  steerUser,
+  assistantCall("c3", "search_kb"),
+  result("c3", "search_kb", "more"),
+  assistantCall("c4", "search_kb"),
+  result("c4", "search_kb", "even more"),
+  steerUser,
+  [{ role: "assistant", content: [{ type: "text", text: "Done." }] }],
+]

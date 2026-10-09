@@ -1027,6 +1027,21 @@ edited", "edited" (a user message or a reply), "inserted" — at its
 source coordinates, a call's edited args or result read from the
 replay's input by call id (the kept prefix is positional); a child run
 inherits the mark and draws none.
+An editor follows its command: Escape inside a Story textarea is the
+field's (the drawer stays); closing the drawer, another verb's opening,
+a drop from the list or the drawer's own field rewriting the edit resets
+the textarea to what the command holds (the recorded text when nothing).
+A steer's user edit is the steer's own step's (its stored step, then its
+place among that step's user messages). The schema is the run's last
+catalog naming the tool (studio's server checks against it; the edited
+step's own catalog is a Go-side debt). Numbers the browser would change
+(past 2^53 exactly, out of range) are refused; without JSON.parse source
+access the integer-literal check is marked unchecked, never passed. A
+fork never carries edits — the drawer says so and holds Run. Run also
+waits while the preview of a changed command is pending, and an edit
+inside the compaction view `transcript?step=<from_step>` names
+(`compacted_at`) is refused in the server's words before anything is
+posted.
 
 The step compare (plan E3, capability `diff`; hidden when off, like
 every capability-gated control): two or more runs side by side, one row

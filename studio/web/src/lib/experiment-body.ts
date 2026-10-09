@@ -195,6 +195,62 @@ export function ownMessages(batches: TranscriptBatch[]): { step: number; m: Mess
   return tagged
 }
 
+/** A compaction view's place (the transcript?step answer's, or the
+ * preview's, compacted_at): messages [from_seq, to_seq) of the whole
+ * transcript replaced by entries. */
+export interface CompactedNote {
+  from_seq: number
+  to_seq: number
+  entries: number
+}
+
+/**
+ * compactedRefusal is studio/edits.go's refusal of an edit inside the
+ * view from_step's request carried (ADR 0029 decision 4, F1.1's words),
+ * checked before anything is posted: the first edit whose message — or
+ * insert whose boundary, strictly inside — lies in [from_seq, to_seq)
+ * of the transcript (the input's messages counted first). "" when none.
+ */
+export function compactedRefusal(batches: TranscriptBatch[], edits: EditDraft[], fromStep: number, note: CompactedNote | null | undefined): string {
+  if (!note || fromStep <= 0) return ""
+  const input = placeBatches(batches)
+    .filter((b) => b.input)
+    .flatMap((b) => b.messages)
+  const n = input.length
+  const own = ownMessages(batches)
+  const range = `(messages [${note.from_seq}, ${note.to_seq}) replaced by ${note.entries}): the model never saw it there`
+  for (const e of edits) {
+    const k = kindOf(e)
+    if (k === "insert") {
+      const cut = own.findIndex((t) => t.m.role === "assistant" && t.step >= e.step)
+      const seq = n + (cut < 0 ? own.length : cut)
+      if (seq > note.from_seq && seq < note.to_seq)
+        return `the boundary before step ${e.step} was compacted away before step ${fromStep}'s request ${range}; insert outside the range`
+      continue
+    }
+    const seqs: number[] = []
+    if (k === "user") {
+      if (e.step === 0 && input.at(-1)?.role === "user") seqs.push(n - 1)
+      own.forEach((t, i) => t.step === e.step && t.m.role === "user" && seqs.push(n + i))
+      const i = e.index ?? 0
+      seqs.splice(0, seqs.length, ...(i < seqs.length ? [seqs[i]] : []))
+    } else
+      own.forEach((t, i) => {
+        if (t.step !== e.step) return
+        const parts = t.m.content
+        if (k === "reply" ? t.m.role === "assistant" : k === "tool_args"
+          ? parts.some((p) => p.type === "tool_call" && p.id === e.callID)
+          : parts.some((p) => p.type === "tool_result" && p.call_id === e.callID))
+          seqs.push(n + i)
+      })
+    if (seqs.some((q) => q >= note.from_seq && q < note.to_seq)) {
+      const what = k === "reply" ? "the reply" : k === "user" ? "the user message" : `call "${e.callID ?? ""}"`
+      return `${what} of step ${e.step} was compacted away before step ${fromStep}'s request ${range}; edit from an earlier from_step`
+    }
+  }
+  return ""
+}
+
 /** replayBounds is what the server will accept as from_step for this
  * source transcript (studio/edits.go): its step count, whether the kept
  * prefix ends in answered calls, and the highest from_step. */

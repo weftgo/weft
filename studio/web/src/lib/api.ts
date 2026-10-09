@@ -724,6 +724,20 @@ export function transcriptQuery(id: string) {
   })
 }
 
+/** GET /api/runs/{id}/transcript?step=N (ADR 0029): the view step N's
+ * request carried, when one did — the editor's compacted-range check
+ * reads compacted_at alone. */
+export function transcriptAsOfQuery(id: string, step: number) {
+  return queryOptions({
+    queryKey: ["transcript-as-of", id, step],
+    staleTime: 30_000,
+    queryFn: () =>
+      get<{ step: number; compacted_at: { from_seq: number; to_seq: number; entries: number } | null }>(
+        `runs/${encodeURIComponent(id)}/transcript?step=${step}`
+      ),
+  })
+}
+
 /** GET /api/runs/{id}/transcript, coerced (asTranscript). */
 export async function fetchTranscript(id: string): Promise<Transcript> {
   return asTranscript(

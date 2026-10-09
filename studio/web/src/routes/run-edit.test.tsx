@@ -16,7 +16,9 @@ import type { RunDoc, RunsPage } from "@/lib/api"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { apiError, FakeStudio, golden, pagedEvents, pagedRequests, transcriptOf } from "@/test/fake-studio"
-import { agentView, bodies, DONE_EDITS, editCatalog as catalog, events, requestRow, RUN, runtimeOf } from "@/panel/replaykit"
+import { agentView, bodies, DONE_EDITS, editCatalog as catalog, events, requestRow, RUN, runtimeOf, steerBodies, steerEvents } from "@/panel/replaykit"
+import { AS_OF_2, COMPACTED_C1 } from "@/test/edit-fixtures"
+import { FORK_EDITS } from "@/lib/edits"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -42,15 +44,17 @@ function runDoc(over: Partial<RunDoc> = {}): RunDoc {
 }
 
 let studio: FakeStudio
-function serve(opts: { capabilities?: string[]; preview?: unknown } = {}) {
+function serve(opts: { capabilities?: string[]; preview?: unknown; events?: unknown[]; bodies?: unknown[]; asOf?: unknown } = {}) {
   stubBrowser()
   FakeEventSource.reset()
   vi.stubGlobal("EventSource", FakeEventSource)
   studio = new FakeStudio()
     .on("GET meta", { ...golden<Record<string, unknown>>("meta"), capabilities: opts.capabilities ?? ["playground", "steps", "requests", "preview"] })
     .on(`GET runs/${RUN}`, runDoc())
-    .on(`GET runs/${RUN}/events`, pagedEvents(events.map((event, pos) => ({ pos, time: rOK.started, event })), { done: true }))
-    .on(`GET runs/${RUN}/transcript`, transcriptOf(bodies))
+    .on(`GET runs/${RUN}/events`, pagedEvents((opts.events ?? events).map((event, pos) => ({ pos, time: rOK.started, event })), { done: true }))
+    .on(`GET runs/${RUN}/transcript`, (req) =>
+      req.query.get("step") ? (opts.asOf ?? { step: Number(req.query.get("step")), messages: [], compacted_at: null }) : transcriptOf(opts.bodies ?? bodies)
+    )
     .on(`GET runs/${RUN}/spans`, { spans: [] })
     .on(`GET runs/${RUN}/requests`, pagedRequests({ requests: [0, 1, 2, 3].map((n) => requestRow(n, catalog)) }))
     .on("GET runtimes", { runtimes: [runtimeOf()] })
@@ -230,5 +234,131 @@ describe("the replayed run carries the mark (weft.edits)", () => {
     await waitFor(() => expect(document.querySelector("[data-step]") ?? document.querySelector("main")).toBeTruthy())
     await new Promise((r) => setTimeout(r, 200))
     expect(document.querySelector("[data-edits-mark]")).toBeNull()
+  })
+})
+
+// ── F2.2 review fixes ────────────────────────────────────────────────
+
+const ta = (label: string) => document.querySelector<HTMLTextAreaElement>(`textarea[aria-label="edit ${label}"]`)
+const kinds = () => [...drawer()!.querySelectorAll("[data-edit-kind]")].map((n) => n.getAttribute("data-edit-kind"))
+
+describe("an editor follows the command (review 1)", () => {
+  it("Escape inside a Story textarea keeps the drawer and its edits", async () => {
+    serve()
+    await story()
+    const t = await edit("the result of search_kb (c2)", "x")
+    await waitFor(() => expect(kinds()).toEqual(["tool_result"]))
+    fireEvent.keyDown(t, { key: "Escape" })
+    expect(drawer()).toBeTruthy()
+    expect(kinds()).toEqual(["tool_result"])
+  })
+
+  it("closing the drawer resets every editor to the recorded text", async () => {
+    serve()
+    await story()
+    await edit("the result of search_kb (c2)", "x")
+    await edit("the turn's prompt", "y")
+    await waitFor(() => expect(kinds()).toHaveLength(2))
+    fireEvent.click(within(drawer()!).getByRole("button", { name: "Close" }))
+    await waitFor(() => expect(drawer()).toBeNull())
+    await waitFor(() => expect(document.querySelector("[data-edit]")).toBeNull())
+    expect(ta("the result of search_kb (c2)")).toBeNull()
+    expect(document.querySelector('[data-call="c2"] [data-editable="tool_result"]')).toBeTruthy()
+    // The next edit starts from the recorded text, alone in its command.
+    await edit("the turn's prompt", "z")
+    await waitFor(() => expect(kinds()).toEqual(["user"]))
+  })
+
+  it("a drop from the drawer's list resets that editor", async () => {
+    serve()
+    await story()
+    await edit("the result of search_kb (c2)", "x")
+    await waitFor(() => expect(kinds()).toEqual(["tool_result"]))
+    fireEvent.click(within(drawer()!.querySelector("[data-edit-list]") as HTMLElement).getByRole("button", { name: "drop" }))
+    await waitFor(() => expect(ta("the result of search_kb (c2)")).toBeNull())
+    expect(document.querySelector('[data-call="c2"] [data-editable="tool_result"]')).toBeTruthy()
+  })
+})
+
+describe("a steer is its step's user message (review 2)", () => {
+  it("two identical steers: the second edits step 3's, from_step 4", async () => {
+    serve({ events: steerEvents, bodies: steerBodies })
+    renderApp(`/runs/${RUN}?view=story`)
+    await waitFor(() => expect(document.querySelectorAll("[data-steer] [data-editable]")).toHaveLength(2))
+    const second = document.querySelectorAll<HTMLElement>("[data-steer]")[1]
+    fireEvent.click(within(second).getByRole("button", { name: /^edit the steer/ }))
+    fireEvent.change(within(second).getByRole("textbox"), { target: { value: "stop here" } })
+    await waitFor(() => expect(within(drawer()!).getByLabelText<HTMLSelectElement>("continue from step").value).toBe("4"))
+    const run = within(drawer()!).getByRole<HTMLButtonElement>("button", { name: "Run" })
+    await waitFor(() => expect(run.disabled).toBe(false))
+    fireEvent.click(run)
+    await waitFor(() => expect(studio.calls("POST playground/runs")).toHaveLength(1))
+    expect(studio.calls("POST playground/runs")[0].body).toMatchObject({
+      source: { run_id: RUN, from_step: 4 },
+      transcript_edits: [{ kind: "user", step: 3, content: "stop here" }],
+    })
+  })
+})
+
+describe("inserts where a replay can keep them (review 3)", () => {
+  it("a one-step run that ended in a reply offers no boundary (from_step 1 is past its end)", async () => {
+    serve({
+      events: [events[0], { type: "step_start", run_id: RUN, index: 0 }, { type: "step_finish", run_id: RUN, index: 0, reason: "stop", usage: { input_tokens: 1, output_tokens: 1 } }, { type: "run_finish", run_id: RUN, usage: { input_tokens: 1, output_tokens: 1 }, steps: 1 }],
+      bodies: [bodies[0], [{ role: "assistant", content: [{ type: "text", text: "hi" }] }]],
+    })
+    renderApp(`/runs/${RUN}?view=story`)
+    await waitFor(() => expect(document.querySelector('[data-step="0"]')).toBeTruthy())
+    await new Promise((r) => setTimeout(r, 100))
+    expect(document.querySelector("[data-insert-at]")).toBeNull()
+  })
+
+  it("a run whose last step's calls are answered takes a message after its last step", async () => {
+    serve({ events: events.slice(0, -3), bodies: bodies.slice(0, -1) })
+    await story()
+    const after = await waitFor(() => {
+      const a = document.querySelector<HTMLElement>('[data-insert-at="3"]')
+      expect(a).toBeTruthy()
+      return a!
+    })
+    expect(after.textContent).toBe("· insert a message after the last step")
+  })
+})
+
+describe("a fork carries no edits (review 4)", () => {
+  it("edits then thread fork: the line, and Run held", async () => {
+    serve()
+    await story()
+    await edit("the result of search_kb (c2)", "x")
+    await waitFor(() => expect(kinds()).toEqual(["tool_result"]))
+    fireEvent.change(within(drawer()!).getByLabelText("Thread"), { target: { value: "fork" } })
+    fireEvent.change(within(drawer()!).getByLabelText("input"), { target: { value: "next" } })
+    await waitFor(() => expect(drawer()!.querySelector("[data-replay-fork-edits]")?.textContent).toBe(FORK_EDITS))
+    expect(drawer()!.querySelector("[data-replay-live]")).toBeNull()
+    expect(within(drawer()!).getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(true)
+  })
+})
+
+describe("Run waits for the preview (review 9)", () => {
+  it("held while the changed command's preview is pending, released by its answer", async () => {
+    let release: (v: Response) => void = () => {}
+    serve({ preview: () => new Promise<Response>((r) => (release = r)) })
+    await story()
+    await edit("the result of search_kb (c2)", "x")
+    const run = within(drawer()!).getByRole<HTMLButtonElement>("button", { name: "Run" })
+    await waitFor(() => expect(studio.calls("POST playground/preview")).toHaveLength(1))
+    expect(run.disabled).toBe(true)
+    release(new Response(JSON.stringify(golden("playground-preview")), { headers: { "Content-Type": "application/json" } }))
+    await waitFor(() => expect(run.disabled).toBe(false))
+  })
+})
+
+describe("an edit inside the compacted range is said before anything is posted (review 10)", () => {
+  it("F1.1's words from transcript?step's compacted_at, and Run held", async () => {
+    serve({ asOf: AS_OF_2 })
+    await story()
+    await edit("the result of lookup_order (c1)", "x")
+    await edit("the result of search_kb (c2)", "y")
+    await waitFor(() => expect(drawer()!.querySelector("[data-replay-view-edit]")?.textContent).toBe(COMPACTED_C1))
+    expect(within(drawer()!).getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(true)
   })
 })

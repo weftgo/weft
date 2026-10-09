@@ -2,9 +2,10 @@
 // list, the from_step the edits imply, the schema check (obsdb's
 // TestCheckToolArgs table, case for case where JSON.parse can say the
 // same) and the weft.edits mark read back.
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 
-import { checkArgs, editLine, editMarks, impliedFromStep, markedPart, putEdit, userMessagesOf, wireEdits } from "./edits"
+import { checkArgs, editLine, editMarks, impliedFromStep, markedPart, putEdit, schemaOf, userMessagesOf, wireEdits } from "./edits"
+import { compactedRefusal } from "./experiment-body"
 import type { ReplayEdit } from "./edits"
 import type { TranscriptBatch } from "./events"
 
@@ -152,3 +153,108 @@ describe("userMessagesOf counts a step's user messages as studio/edits.go's user
     ])
   })
 })
+
+// ── F2.2 review fixes ────────────────────────────────────────────────
+
+describe("checkArgs: numbers the browser carries (review 5)", () => {
+  const P = 'INVALID_INPUT: tool "t": '
+  const int = { type: "object", properties: { n: { type: "integer" } } }
+  const rows: [unknown, string, string][] = [
+    // int64's max is not a double: sent from here it would be …808.
+    [int, '{"n":9223372036854775807}', `${P}field "n": the number 9223372036854775807 would be sent as 9223372036854775808 (past the exact integers JSON keeps here): write it as a string or a smaller number`],
+    [int, '{"n":-9223372036854775808}', ""],
+    [int, '{"n":9223372036854775808}', `${P}field "n": expected integer, got number 9223372036854775808`],
+    [int, '{"n":1e2}', `${P}field "n": expected integer, got number 1e2`],
+    [undefined, '{"n":9007199254740993}', `${P}field "n": the number 9007199254740993 would be sent as 9007199254740992 (past the exact integers JSON keeps here): write it as a string or a smaller number`],
+    [undefined, '{"a":{"b":[1e400]}}', `${P}field "a.b.0": the number 1e400 is out of range here: write it as a string`],
+    [undefined, '{"n":9007199254740992}', ""],
+  ]
+  for (const [s, args, want] of rows)
+    it(`${args} → ${want || "accepted"}`, () => expect(checkArgs("t", s, args).error ?? "").toBe(want))
+
+  it("an engine without number literals: the integer check is unchecked, never a pass", () => {
+    const parse = JSON.parse.bind(JSON)
+    const spy = vi.spyOn(JSON, "parse").mockImplementation((t: string, r?: (this: unknown, k: string, v: unknown) => unknown) =>
+      parse(t, r ? function (this: unknown, k: string, v: unknown) { return r.call(this, k, v) } : undefined)
+    )
+    try {
+      for (const lit of ["3.0", "1e2"]) {
+        const r = checkArgs("t", int, `{"n":${lit}}`)
+        expect(r.error).toBeUndefined()
+        expect(r.unchecked).toBe(true)
+      }
+    } finally {
+      spy.mockRestore()
+    }
+    expect(checkArgs("t", int, '{"n":3}').unchecked).toBeUndefined()
+  })
+})
+
+describe("schemaOf: the run's last catalog per name, as the server checks (review 6)", () => {
+  it("a tool whose schema changed between steps is checked against the last one", () => {
+    const cat = (type: string) => ({ tools: { tools: [{ name: "lookup_order", schema: { type: "object", properties: { q: { type } } } }] } })
+    const steps = new Map([
+      [2, { rows: [cat("integer")] }],
+      [0, { rows: [cat("string")] }],
+      [1, { rows: [{ tools: { tools: [{ name: "other" }] } }] }],
+    ])
+    const s = schemaOf(steps, "lookup_order")
+    expect(s).toEqual(cat("integer").tools.tools[0].schema)
+    expect(checkArgs("lookup_order", s, '{"q":"7"}').error).toBe('INVALID_INPUT: tool "lookup_order": field "q": expected integer, got string')
+    expect(schemaOf(steps, "nope")).toBeUndefined()
+  })
+})
+
+describe("the mark's tokens (reviews 7, 8)", () => {
+  it("a call id holding ':' keeps it: the first segment is the step, the last the kind", () => {
+    expect(editMarks({ meta: { "weft.edits": "3:ns:c1:args,2:a:b:c:result,1:user:2,0:user" } }).marks).toEqual([
+      { step: 3, what: "args", callID: "ns:c1" },
+      { step: 2, what: "result", callID: "a:b:c" },
+      { step: 1, what: "user", index: 2 },
+      { step: 0, what: "user", index: 0 },
+    ])
+  })
+
+  it("a reused call id: the token's step ordinal picks its pair; without from_step, no value rather than the wrong one", () => {
+    const call = (q: string) => ({ role: "assistant" as const, content: [{ type: "tool_call" as const, id: "c1", name: "lookup_order", args: { q } }] })
+    const res = (c: string) => ({ role: "tool" as const, content: [{ type: "tool_result" as const, call_id: "c1", name: "lookup_order", content: c, is_error: false }] })
+    const batches: TranscriptBatch[] = [
+      { step: 0, input: true, messages: [{ role: "user", content: [{ type: "text", text: "go" }] }, call("a"), res("first"), call("b"), res("second")] },
+    ]
+    expect(markedPart(batches, { step: 1, what: "args", callID: "c1" }, 2)).toBe('lookup_order({"q":"b"})')
+    expect(markedPart(batches, { step: 0, what: "result", callID: "c1" }, 2)).toBe("first")
+    expect(markedPart(batches, { step: 1, what: "result", callID: "c1" }, 2)).toBe("second")
+    expect(markedPart(batches, { step: 1, what: "args", callID: "c1" })).toBe("")
+  })
+})
+
+describe("compactedRefusal: the server's refusal of an edit inside a view (review 10)", () => {
+  const b = transcriptOfBodies()
+  const note = { from_seq: 1, to_seq: 3, entries: 1 }
+  it("an edit of a message in [from_seq, to_seq) is refused in F1.1's words; one outside is not", () => {
+    expect(compactedRefusal(b, [{ kind: "tool_result", step: 0, callID: "c1", toolResult: "x" }], 2, note)).toBe(
+      'call "c1" of step 0 was compacted away before step 2\'s request (messages [1, 3) replaced by 1): the model never saw it there; edit from an earlier from_step'
+    )
+    expect(compactedRefusal(b, [{ kind: "tool_args", step: 0, callID: "c1", args: {} }], 2, note)).toMatch(/^call "c1" of step 0 was compacted away/)
+    expect(compactedRefusal(b, [{ kind: "tool_result", step: 1, callID: "c2", toolResult: "x" }], 2, note)).toBe("")
+    expect(compactedRefusal(b, [{ kind: "user", step: 0, content: "x" }], 2, note)).toBe("")
+    expect(compactedRefusal(b, [{ kind: "tool_result", step: 0, callID: "c1", toolResult: "x" }], 2, null)).toBe("")
+  })
+  it("an insert at a boundary strictly inside the range is refused", () => {
+    expect(compactedRefusal(b, [{ kind: "insert", step: 1, content: "x" }], 2, { from_seq: 1, to_seq: 4, entries: 1 })).toBe(
+      "the boundary before step 1 was compacted away before step 2's request (messages [1, 4) replaced by 1): the model never saw it there; insert outside the range"
+    )
+    expect(compactedRefusal(b, [{ kind: "insert", step: 1, content: "x" }], 2, note)).toBe("")
+  })
+})
+
+function transcriptOfBodies(): TranscriptBatch[] {
+  const m = (role: "user" | "assistant" | "tool", content: unknown[]) => ({ role, content }) as never
+  return [
+    { step: 0, input: true, messages: [m("user", [{ type: "text", text: "go" }])] },
+    { step: 0, input: false, messages: [m("assistant", [{ type: "tool_call", id: "c1", name: "x", args: {} }])] },
+    { step: 0, input: false, messages: [m("tool", [{ type: "tool_result", call_id: "c1", name: "x", content: "r", is_error: false }])] },
+    { step: 1, input: false, messages: [m("assistant", [{ type: "tool_call", id: "c2", name: "x", args: {} }])] },
+    { step: 1, input: false, messages: [m("tool", [{ type: "tool_result", call_id: "c2", name: "x", content: "r", is_error: false }])] },
+  ]
+}

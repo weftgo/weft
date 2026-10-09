@@ -15,13 +15,13 @@ import { XIcon } from "lucide-react"
 import { createContext, useContext, useEffect, useRef, useState } from "react"
 import type { Dispatch, SetStateAction } from "react"
 
-import { ApiError, isHoleRef, isRequestRow, postPlaygroundRun, runQuery, runtimesQuery, stepQuery } from "@/lib/api"
+import { ApiError, isHoleRef, isRequestRow, postPlaygroundRun, runQuery, runtimesQuery, stepQuery, transcriptAsOfQuery, transcriptQuery } from "@/lib/api"
 import type { AgentView, PlaygroundRunBody, StepDoc } from "@/lib/api"
 import { compactionsOf, isSessionMarker } from "@/lib/compaction"
-import { buildRunBody, labProblems, pickTarget, unmatchedDrafts } from "@/lib/experiment-body"
+import { buildRunBody, compactedRefusal, labProblems, pickTarget, unmatchedDrafts } from "@/lib/experiment-body"
 import type { EditDraft, VariantFields } from "@/lib/experiment-body"
 import { compareLink, playgroundLink, runLink } from "@/lib/links"
-import { impliedFromStep, putEdit } from "@/lib/edits"
+import { FORK_EDITS, impliedFromStep, putEdit } from "@/lib/edits"
 import { allowRefusals, breakpointsFor, prefixLine, replayVerdicts } from "@/lib/replay"
 import type { CatalogTool, ReplayDraft, SideEffectsMode, ToolVerdict } from "@/lib/replay"
 import { useCapabilities } from "@/hooks/use-capabilities"
@@ -108,7 +108,7 @@ export function ReplayDrawer({
       const t = e.target
       if (
         t instanceof HTMLElement &&
-        t.closest("[data-replay-drawer]") &&
+        (t.closest("[data-replay-drawer]") || t.closest("[data-edit]")) &&
         (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT")
       )
         return
@@ -468,6 +468,17 @@ function ReplayForm({
     }
   }
   const preview = usePreview(previewBody)
+  // An edit inside the view from_step's request carried is refused by
+  // the server (ADR 0029 decision 4): said here first, in its words,
+  // from transcript?step's compacted_at.
+  const editing = editDrafts.length > 0 && fromStep > 0 && variant.thread !== "fork"
+  const asOf = useQuery({ ...transcriptAsOfQuery(runID, fromStep), enabled: editing, retry: false })
+  const sourceTranscript = useQuery({ ...transcriptQuery(runID), enabled: editing })
+  const compactedEdit =
+    editing && sourceTranscript.data
+      ? compactedRefusal(sourceTranscript.data.batches, editDrafts, fromStep, asOf.data?.compacted_at)
+      : ""
+  const forkEdits = variant.thread === "fork" && editDrafts.length > 0
 
   const run = async () => {
     setError("")
@@ -581,6 +592,16 @@ function ReplayForm({
           compacted={compacted}
         />
         {previewBody ? <PreviewPane state={preview} fromStep={fromStep} /> : null}
+        {forkEdits ? (
+          <p className="text-xs text-status-bad" role="alert" data-replay-fork-edits>
+            {FORK_EDITS}
+          </p>
+        ) : null}
+        {compactedEdit ? (
+          <p className="text-xs text-status-bad" role="alert" data-replay-view-edit>
+            {compactedEdit}
+          </p>
+        ) : null}
         {invalid.length ? (
           <p className="text-xs text-status-bad" role="alert" data-replay-invalid>
             an edit is refused in the editor: {invalid[0]}
@@ -644,6 +665,9 @@ function ReplayForm({
               scriptedPastEnd ||
               invalid.length > 0 ||
               Boolean(preview.refused) ||
+              Boolean(preview.pending) ||
+              forkEdits ||
+              Boolean(compactedEdit) ||
               (variant.thread === "fork" && !variant.input.trim()) ||
               Boolean(experiment && !settled(experiment.state))
             }

@@ -224,6 +224,21 @@ module, ADR 0005).
   none. The panel no longer says "reading the step compare…" forever
   for a run that settled before meta reported `diff`. Panel: +4,822 B
   gzip (ledger row F2, estimate 4,096 B).
+  Review fixes: an editor follows its command (Escape in a Story
+  textarea keeps the drawer; closing it, another verb, a drop or the
+  drawer's own field resets the text); a steer is its own step's user
+  message, never another step's same words; an insert is offered only
+  where the from_step it implies is accepted, and after the last step
+  when its calls are answered; a fork with edits holds Run and says why
+  on both surfaces; `checkArgs` refuses an integer past int64 and a
+  number the browser would change (9007199254740993, 1e400), and an
+  engine without number literals marks the integer check unchecked; the
+  args schema is the run's last catalog per tool, as Studio's server
+  checks it; `weft.edits` keeps a call id holding `:` and maps a reused
+  call id by its step ordinal (else no value); Run waits while the
+  preview of a changed command is pending; an edit inside the view
+  `transcript?step=N`'s `compacted_at` names is refused before posting,
+  in F1.1's words.
 
 - **Studio URLs that mean something** (plan G2): every piece of page
   state lives in search params, through `lib/links.ts` — the trace

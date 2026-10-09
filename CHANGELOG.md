@@ -273,6 +273,21 @@ module, ADR 0005).
   are not in the link). The run page's tab is titled while the run
   loads.
 
+- **Studio notifications** (plan H5): the installed `sonner` toaster is
+  mounted in the app shell (bottom-right, the Studio theme, no hotkey),
+  every toast worded in `src/lib/notify.ts` and raised once per
+  instance: an experiment finished (`experiment <run> finished ·
+  <status>`, "open"; a matrix once, when its last cell settles), a run
+  parked (`run <id> parked at <tool>`, "open", and "approve" through
+  `POST /api/runs/{id}/approvals` for one parked call of a
+  runtime-started run when the playground is on and the token may act),
+  a runtime connected or disconnected (from `GET /api/runtimes`' set —
+  the live stream has no runtime kind), the live stream giving up
+  (`live updates stopped after 6 reconnects`, "retry" — it stopped in
+  silence before; `openLive`'s handle gains `gaveUp()` / `retry()` and
+  `onGaveUp`), and copy link ("link copied" / "copy failed", beside the
+  header's own words).
+
 ### Changed
 
 - **An old runtime's registration shows no defaults** (plan F3.1's

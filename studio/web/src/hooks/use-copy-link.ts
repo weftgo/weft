@@ -14,6 +14,10 @@ import { useCallback, useEffect, useRef, useState } from "react"
 
 import { copyText } from "@/lib/json"
 import { canonical } from "@/lib/links"
+import { notify } from "@/lib/notify"
+
+/** Every press is its own notice (plan H5): one toast per press. */
+let presses = 0
 
 /** How long the "copied" / "copy failed" confirmation stays. */
 export const COPIED_MS = 1500
@@ -66,6 +70,9 @@ export function useCopyLink(): {
     setState(ok ? "copied" : "failed")
     clearTimeout(timer.current)
     timer.current = setTimeout(() => setState("idle"), COPIED_MS)
+    // The inline state stays (the header, the run header's button); the
+    // toast says it too, where the reader's eyes may be (plan H5).
+    notify({ kind: "copy-link", ok, n: ++presses })
     if (!ok) {
       // The last resort: the link itself, selected, to copy by hand.
       try {

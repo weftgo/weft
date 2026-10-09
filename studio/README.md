@@ -1160,6 +1160,29 @@ titles its tab through `lib/title.ts`: `run s_…-t3 · succeeded · weft
 studio`, `trace 0af76519…319c · weft studio`, `playground · weft
 studio`.
 
+Notifications (plan H5): one toaster, bottom-right, in the app's theme,
+with no hotkey (it never takes focus or a key from the page), and every
+toast's words in `src/lib/notify.ts` — raised once per instance (a
+command, a run, a runtime, a stream's give-up, a press), never again on
+a re-render or refetch. **experiment … finished · status** — a
+playground variant's or the replay drawer's command settled
+(`useCommandTracking`), with "open" to the run; a matrix raises one
+when its last cell settles, with "open" to the experiment. **run …
+parked at tool** — a run a page follows parked (`useRunEvents`: a
+playground card's run, or a run that parks while its page is open — a
+run opened already parked says so on its page only), with "open" and,
+for one parked call of a runtime-started run where the playground is on
+and the token may act, "approve" (`POST /api/runs/{id}/approvals`).
+**runtime … connected / disconnected** — the live stream has no runtime
+kind, so the shell compares `GET /api/runtimes`' set every 5 s
+(playground capability; never under a read-scoped panel token).
+**live updates stopped after 6 reconnects** — `lib/live.ts` gave up
+(never on a clean close or a panel token's `expired`), with "retry",
+which starts every stream that gave up over. **link copied** / **copy
+failed** — copy link, beside the header's own words. A toast is a view:
+it names ids, tools and counts, never a token or a prompt, and acts only
+when its action is clicked.
+
 Keyboard: `⌘K` jumps to any recent run, `/` filters, `j`/`k` move,
 `enter` opens, `e`/`s`/`r` switch trace/story/raw, `space` replays,
 `[`/`]` jump by step or tool event, `,`/`.` move one event, `y` copies

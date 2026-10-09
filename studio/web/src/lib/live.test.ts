@@ -11,7 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "./api"
-import { freshBearer, grantDeadline, LIVE_GRANT_TTL_MS, openLive, panelTokenExp, throttle } from "./live"
+import { freshBearer, grantDeadline, LIVE_GRANT_TTL_MS, onLiveGaveUp, openLive, panelTokenExp, throttle } from "./live"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { setServerSkew } from "@/test/fake-live-grant"
 import { FakeStudio, apiError } from "@/test/fake-studio"
@@ -278,6 +278,35 @@ describe("openLive", () => {
     live.close()
   })
 
+  it("says it gave up once (plan H5), and retry starts over with a fresh grant", async () => {
+    const onGaveUp = vi.fn()
+    const heard = vi.fn()
+    const closed = vi.fn()
+    const off = onLiveGaveUp(heard, closed)
+    const live = openLive({ selector: { run: "r1" }, onGaveUp })
+    await flush()
+    for (let i = 0; i < 20; i++) {
+      FakeEventSource.instances.at(-1)!.fail()
+      await vi.advanceTimersByTimeAsync(60_000)
+    }
+    expect(live.gaveUp()).toBe(true)
+    expect(onGaveUp).toHaveBeenCalledTimes(1)
+    expect(heard).toHaveBeenCalledTimes(1)
+    expect(heard.mock.calls[0][0]).toMatchObject({ round: 1 })
+    const grants = studio.calls("POST live-grant").length
+    live.retry()
+    await flush()
+    expect(live.gaveUp()).toBe(false)
+    expect(studio.calls("POST live-grant")).toHaveLength(grants + 1)
+    // It opens: the stream is back, nothing more is said.
+    FakeEventSource.instances.at(-1)!.connect()
+    expect(live.overflowed()).toBe(false)
+    expect(onGaveUp).toHaveBeenCalledTimes(1)
+    live.close()
+    expect(closed).toHaveBeenCalledTimes(1)
+    off()
+  })
+
   it("backs off a refused grant the same way (a token the wall refuses)", async () => {
     setStudioToken("wrong")
     studio.requireToken("dev-secret")
@@ -295,7 +324,8 @@ describe("openLive", () => {
     setStudioToken(tok)
     studio.requireToken(tok)
     const onOverflow = vi.fn()
-    const live = openLive({ selector: { public_id: "pub_1" }, kinds: ["run"], onOverflow })
+    const onGaveUp = vi.fn()
+    const live = openLive({ selector: { public_id: "pub_1" }, kinds: ["run"], onOverflow, onGaveUp })
     await flush()
     const es = FakeEventSource.nth(0)
     es.connect()
@@ -307,6 +337,9 @@ describe("openLive", () => {
     expect(studio.calls("POST live-grant")).toHaveLength(1)
     expect(live.overflowed()).toBe(true) // the existing end state: down, the fallback stays
     expect(onOverflow).toHaveBeenCalledTimes(1)
+    // An expiry is not a give-up: no notice (plan H5).
+    expect(onGaveUp).not.toHaveBeenCalled()
+    expect(live.gaveUp()).toBe(false)
     for (const spy of quiet) expect(spy).not.toHaveBeenCalled()
     live.close()
   })

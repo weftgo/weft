@@ -32,9 +32,12 @@ import {
   SunMoon,
 } from "lucide-react"
 
-import { metaQuery, runsQuery } from "@/lib/api"
+import { metaQuery, runsQuery, studioToken } from "@/lib/api"
+import { canReplay } from "@/lib/replay"
 import { isPlainShortcut } from "@/lib/keys"
 import { useCopyLink } from "@/hooks/use-copy-link"
+import { useLiveGaveUpNotices, useRuntimeNotices } from "@/hooks/use-notices"
+import { Toaster } from "@/components/ui/sonner"
 import { KbdHelpBody } from "@/components/studio/kbd-help"
 import { TokenWall } from "@/components/studio/token-wall"
 import {
@@ -166,6 +169,12 @@ export function AppShell() {
 
   // The theme class survives hydration (see applyStoredTheme).
   useEffect(applyStoredTheme, [])
+
+  // The notices no page owns (plan H5): a runtime coming or going, a
+  // live stream that gave up. Toasts, raised by lib/notify.ts.
+  // A read-scoped panel token may not read the runtimes (canReplay).
+  useRuntimeNotices(canReplay(meta.data?.capabilities ?? [], studioToken()))
+  useLiveGaveUpNotices()
 
   // ⌘K / ctrl-K opens the palette; "?" opens the keyboard help from
   // anywhere (A4). "/" is reserved for search where there is a list
@@ -384,6 +393,12 @@ export function AppShell() {
           </CommandList>
         </Command>
       </CommandDialog>
+
+      {/* The one toaster (plan H5): bottom-right, the app's theme, no
+          hotkey — it never takes focus or a key from the page. */}
+      <ClientOnly fallback={null}>
+        <Toaster position="bottom-right" />
+      </ClientOnly>
     </SidebarProvider>
   )
 }

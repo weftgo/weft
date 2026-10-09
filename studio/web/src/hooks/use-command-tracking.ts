@@ -8,6 +8,7 @@ import type { Dispatch, SetStateAction } from "react"
 import { ApiError, fetchCommand, fetchRun } from "@/lib/api"
 import type { CommandStatus, RunRow } from "@/lib/api"
 import type { ThreadMode } from "@/lib/experiment-body"
+import { notify } from "@/lib/notify"
 
 /** One experiment in flight or finished: the command's lifecycle, the
  * run it produced, the fold streaming in from the live lane. */
@@ -74,6 +75,17 @@ export function useCommandTracking(
     // still read running (partial usage, no finish) — it is read again
     // until it settles, a bounded number of times.
     let afterSettled = 0
+    let lastRow: RunRow | null = null
+    /** The finished notice (plan H5), once the run's row says how it
+     * ended — or the reads gave up waiting. A parked run (its row still
+     * holds pending calls — a park, or a decision held while another
+     * call waits) is not finished: the parked notice speaks for it. */
+    const finished = (st: CommandStatus) => {
+      if (st.state !== "finished" || (lastRow?.pending ?? 0) > 0) return
+      const status =
+        lastRow && lastRow.status !== "running" ? lastRow.status : (st.status ?? "succeeded")
+      notify({ kind: "experiment", commandID, runID: st.run_id, status })
+    }
     const tick = async () => {
       let st: CommandStatus
       try {
@@ -104,6 +116,7 @@ export function useCommandTracking(
           const row: RunRow = await fetchRun(st.run_id)
           if (gone()) return
           rowSettled = row.status !== "running"
+          lastRow = row
           setRef.current((cur) => (mine(cur) ? { ...cur, row } : cur))
         } catch {
           // the row loads on the next poll
@@ -111,7 +124,10 @@ export function useCommandTracking(
       }
       if (gone()) return
       if (settled(st.state)) {
-        if (!st.run_id || rowSettled || ++afterSettled > ROW_SETTLE_READS) return
+        if (!st.run_id || rowSettled || ++afterSettled > ROW_SETTLE_READS) {
+          finished(st)
+          return
+        }
         timer = setTimeout(() => void tick(), 1000)
         return
       }

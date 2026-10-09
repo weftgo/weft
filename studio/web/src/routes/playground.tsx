@@ -71,6 +71,7 @@ import { ExperimentForm, StepPicker, useSourceEditFields } from "@/components/st
 import { Button } from "@/components/ui/button"
 import { compareLink, experimentLink, playgroundSearch, runLink } from "@/lib/links"
 import { useDocumentTitle } from "@/hooks/use-document-title"
+import { notify } from "@/lib/notify"
 import { StepCompare } from "@/components/studio/step-diff"
 
 // The command's pure halves and the form's controls live in shared
@@ -989,7 +990,13 @@ function ResultCard({
   const over =
     settled(experiment.state) &&
     (experiment.row ? experiment.row.status !== "running" : !experiment.runID)
-  const stream = useRunEvents(experiment.runID, over ? "ended" : "running", { live })
+  // The card issued this run: a park in its first read is news, and the
+  // parked notice's "approve" is this card's own verb (plan H5).
+  const stream = useRunEvents(experiment.runID, over ? "ended" : "running", {
+    live,
+    tracked: true,
+    approve: (runID, callID) => decide(runID, callID, "approve", ""),
+  })
   const folded = stream.folded
 
   // The final words come from the transcript when the run ends — its
@@ -1393,6 +1400,31 @@ function Matrix({
   /** Bumped after every poll, so the next one is scheduled even when
    * nothing changed. */
   const [polled, setPolled] = useState(0)
+  /** The experiment the last "Run matrix" was saved under: the name
+   * field may change after. */
+  const issued = useRef("")
+  /** The grid as it was at that click: a matrix that issued nothing
+   * (its save refused) leaves it as it was — not this matrix's cells. */
+  const before = useRef<Record<string, Experiment> | null>(null)
+
+  // One notice for the whole matrix (plan H5), when its last cell
+  // settles — never one per cell — and never while cells are still
+  // being issued.
+  useEffect(() => {
+    const all = Object.values(cells)
+    if (busy || !issued.current || all.length === 0 || cells === before.current) return
+    if (all.some((c) => !settled(c.state))) return
+    const finished = all.filter((c) => c.state === "finished")
+    const failed = finished.filter((c) => c.status === "failed").length
+    notify({
+      kind: "matrix",
+      experimentID: issued.current,
+      commandIDs: all.map((c) => c.commandID),
+      succeeded: finished.length - failed,
+      failed,
+      other: all.length - finished.length,
+    })
+  }, [cells, busy])
 
   // Poll the cells' lifecycle while any is queued or accepted.
   useEffect(() => {
@@ -1471,7 +1503,11 @@ function Matrix({
             size="sm"
             variant="outline"
             disabled={busy}
-            onClick={() => void runMatrix(matrixInputs(inputs, sourceRunID), experimentID)}
+            onClick={() => {
+              issued.current = experimentID
+              before.current = cells
+              void runMatrix(matrixInputs(inputs, sourceRunID), experimentID)
+            }}
           >
             Run matrix
           </Button>

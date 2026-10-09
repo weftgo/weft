@@ -1,4 +1,3 @@
-import { useTheme } from "next-themes"
 import { Toaster as Sonner, type ToasterProps } from "sonner"
 import {
   CircleCheckIcon,
@@ -8,12 +7,19 @@ import {
   Loader2Icon,
 } from "lucide-react"
 
+import { useThemeDark } from "@/components/studio/theme"
+
+// Studio's theme is the "dark" class on <html> (theme.tsx), not
+// next-themes: the toaster follows it, and its colours are the palette's
+// tokens (styles.css, src/lib/palette.ts). No hotkey: the toaster never
+// takes focus or a key from the page (plan H5).
 const Toaster = ({ ...props }: ToasterProps) => {
-  const { theme = "system" } = useTheme()
+  const dark = useThemeDark()
 
   return (
     <Sonner
-      theme={theme as ToasterProps["theme"]}
+      theme={dark ? "dark" : "light"}
+      hotkey={[]}
       className="toaster group"
       icons={{
         success: <CircleCheckIcon className="size-4" />,

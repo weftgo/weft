@@ -197,6 +197,9 @@ export interface LiveHandlers {
    * retried; the caller says so and keeps its poll.
    */
   onRefused?: () => void
+  /** The client gave up reconnecting (LIVE_RETRIES attempts that never
+   * opened); handle.retry() starts over. */
+  onGaveUp?: () => void
 }
 
 export interface LiveOptions extends LiveHandlers {
@@ -212,7 +215,45 @@ export interface LiveHandle {
   overflowed: () => boolean
   /** True once the grant was refused for good (403): no stream comes. */
   refused: () => boolean
+  /** True once the client gave up reconnecting (LIVE_RETRIES attempts
+   * that never opened): the fallback is the tail until retry(). */
+  gaveUp: () => boolean
+  /** Start over after a give-up: the backoff from its first step, a
+   * fresh grant now. A no-op on a closed stream or one still trying. */
+  retry: () => void
 }
+
+/** A stream that gave up (plan H5): the page says so once — the silence
+ * this ends was a Studio that stopped updating with no word. */
+export interface LiveGaveUp {
+  /** The stream instance (one per openLive), the notice's key. */
+  stream: number
+  /** The give-up's number on this stream (a retry that fails again is
+   * a new one). */
+  round: number
+  retry: () => void
+}
+
+type GaveUpListener = (g: LiveGaveUp) => void
+const gaveUpListeners = new Set<GaveUpListener>()
+const closedListeners = new Set<(stream: number) => void>()
+
+/**
+ * onLiveGaveUp hears every stream of this page that gives up, and
+ * (closed) every stream that ends — the app shell's one notice for all
+ * of them. A view: it changes nothing about the streams. Returns the
+ * unsubscribe.
+ */
+export function onLiveGaveUp(fn: GaveUpListener, closed?: (stream: number) => void): () => void {
+  gaveUpListeners.add(fn)
+  if (closed) closedListeners.add(closed)
+  return () => {
+    gaveUpListeners.delete(fn)
+    if (closed) closedListeners.delete(closed)
+  }
+}
+
+let streams = 0
 
 interface RawRecordFrame {
   run_id: string
@@ -232,6 +273,9 @@ interface RawRecordFrame {
 const RETRY_BASE_MS = 1000
 const RETRY_MAX_MS = 30_000
 const RETRIES = 6
+
+/** How many reconnects the client tries before it gives up. */
+export const LIVE_RETRIES = RETRIES
 
 /** The dedup window: two generations of keys, rotated at this size, so
  * a tab left on a busy stream holds a bounded set. A re-delivery is a
@@ -257,6 +301,9 @@ export function openLive(opts: LiveOptions): LiveHandle {
   let refused = false
   let seen = new Set<string>()
   let older = new Set<string>()
+  let gaveUp = false
+  let rounds = 0
+  const stream = ++streams
 
   const lost = () => {
     if (down) return
@@ -265,7 +312,17 @@ export function openLive(opts: LiveOptions): LiveHandle {
   }
   const reopenLater = () => {
     if (closed || timer !== null) return
-    if (failures >= RETRIES) return // given up: the fallback is the tail
+    if (failures >= RETRIES) {
+      // Given up: the fallback is the tail — and the page says so, once
+      // per give-up (plan H5), never on a clean close or an expiry.
+      if (!gaveUp) {
+        gaveUp = true
+        opts.onGaveUp?.()
+        rounds++
+        for (const fn of gaveUpListeners) fn({ stream, round: rounds, retry })
+      }
+      return
+    }
     const delay = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** failures)
     failures++
     timer = setTimeout(() => {
@@ -409,6 +466,14 @@ export function openLive(opts: LiveOptions): LiveHandle {
       }
     }
   }
+  /** retry starts over after a give-up (the notice's action). */
+  function retry() {
+    if (closed || !gaveUp) return
+    gaveUp = false
+    failures = 0
+    connect()
+  }
+
   connect()
 
   return {
@@ -418,9 +483,12 @@ export function openLive(opts: LiveOptions): LiveHandle {
       if (timer !== null) clearTimeout(timer)
       timer = null
       es?.close()
+      for (const fn of closedListeners) fn(stream)
     },
     overflowed: () => down,
     refused: () => refused,
+    gaveUp: () => gaveUp,
+    retry,
   }
 }
 

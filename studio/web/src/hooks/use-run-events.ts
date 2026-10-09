@@ -13,8 +13,11 @@
 // reader back to the pages for what the stream did not carry.
 import { useEffect, useRef, useState } from "react"
 
-import { fetchEventsPage } from "@/lib/api"
-import type { EventsPage, RunRow, WireEvent } from "@/lib/api"
+import { fetchEventsPage, metaQuery, postApproval, runQuery, studioToken } from "@/lib/api"
+import { canReplay } from "@/lib/replay"
+import type { EventsPage, RunRow, ToolCallPart, WireEvent } from "@/lib/api"
+import { notify } from "@/lib/notify"
+import { queryClient } from "@/lib/query"
 import { openLive } from "@/lib/live"
 import type { LiveHandle, LiveRecord } from "@/lib/live"
 import { foldMore, newFold } from "@/lib/events"
@@ -97,10 +100,56 @@ function apply(s: Walk, page: EventsPage): boolean {
   return changed
 }
 
+/**
+ * noticeParked raises the run's parked notice (plan H5): the tools it
+ * parked at, "open", and — where this page may decide it — "approve".
+ * approve is the caller's own verb (the playground card's decide); else
+ * the approvals API (POST /api/runs/{id}/approvals, the verbs the
+ * playground and the panel send) when the playground capability is on,
+ * the bearer may act (canReplay: never a read-scoped panel token) and
+ * the run is runtime-started (its row's playground flag: the
+ * debugger acts on those only). One call parked: approve decides it;
+ * several: no inline approve — each one is the reader's to read first.
+ */
+async function noticeParked(
+  runID: string,
+  pending: ToolCallPart[],
+  approve?: (runID: string, callID: string) => Promise<void>
+) {
+  const tools = [...new Set(pending.map((c) => c.name))]
+  let verb: (() => Promise<void>) | undefined
+  if (pending.length === 1) {
+    const callID = pending[0].id
+    if (approve) verb = () => approve(runID, callID)
+    else {
+      try {
+        const [meta, row] = await Promise.all([
+          queryClient.fetchQuery(metaQuery()),
+          queryClient.fetchQuery(runQuery(runID)),
+        ])
+        if (canReplay(meta.capabilities, studioToken()) && row.playground)
+          verb = async () => {
+            await postApproval(runID, { call_id: callID, decision: "approve" })
+          }
+      } catch {
+        // unknown scope: the notice offers "open" only
+      }
+    }
+  }
+  notify({ kind: "parked", runID, tools, approve: verb })
+}
+
 export function useRunEvents(
   id: string,
   status: string,
   opts?: {
+    /** The caller follows this run from its start (a playground card,
+     * which issued it): a park already in the first read is news. Else
+     * only a park that arrives after the first read is — a run opened
+     * already parked says so on its page, not in a toast. */
+    tracked?: boolean
+    /** The parked notice's "approve" (see noticeParked). */
+    approve?: (runID: string, callID: string) => Promise<void>
     live?: boolean
     /** Run frames of this run, off the same stream (the row that
      * changed: usage, status, counts). Asking for them adds the run
@@ -126,6 +175,10 @@ export function useRunEvents(
   const onRunRef = useRef(opts?.onRun)
   onRunRef.current = opts?.onRun
   const wantRun = Boolean(opts?.onRun)
+  const trackedRef = useRef(Boolean(opts?.tracked))
+  trackedRef.current = Boolean(opts?.tracked)
+  const approveRef = useRef(opts?.approve)
+  approveRef.current = opts?.approve
   /** Read the pages again from the cursor (the current effect's). */
   const catchUp = useRef<() => void>(() => {})
   /** Close the current effect's live stream (the run is over). */
@@ -149,12 +202,25 @@ export function useRunEvents(
     // which would defeat the post-await checks.
     const isCancelled = (): boolean => ctrl.cancelled
 
+    // The parked notice (plan H5): armed by the first complete read —
+    // when it shows no park (or the caller tracks the run from its
+    // start) — and raised once pending calls appear.
+    let parkArmed: boolean | null = null
     const publish = (loading: boolean, error: string | null = null) => {
       const s = walk.current
+      const folded = s.feed.result()
+      if (!loading && !error) {
+        const pending = folded.pending
+        if (parkArmed === null) parkArmed = pending.length === 0 || trackedRef.current
+        if (parkArmed && pending.length > 0) {
+          parkArmed = false
+          void noticeParked(id, pending, approveRef.current)
+        }
+      }
       setStream({
         events: s.events,
         attrs: s.attrs,
-        folded: s.feed.result(),
+        folded,
         done: s.done,
         lastPos: s.pos,
         loading,

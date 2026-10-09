@@ -17,7 +17,7 @@ import { createContext, useContext, useEffect, useRef, useState } from "react"
 import { ApiError, isHoleRef, isRequestRow, postPlaygroundRun, runQuery, runtimesQuery, stepQuery } from "@/lib/api"
 import type { AgentView, PlaygroundRunBody, StepDoc } from "@/lib/api"
 import { compactionsOf, isSessionMarker } from "@/lib/compaction"
-import { buildRunBody, pickTarget, unmatchedDrafts } from "@/lib/experiment-body"
+import { buildRunBody, labProblems, pickTarget, unmatchedDrafts } from "@/lib/experiment-body"
 import type { EditDraft, VariantFields } from "@/lib/experiment-body"
 import { compareLink, playgroundLink, runLink } from "@/lib/links"
 import { allowRefusals, breakpointsFor, prefixLine, replayVerdicts } from "@/lib/replay"
@@ -397,7 +397,11 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
       compactionsOf(sourceRow).some((c) => !isSessionMarker(c) && typeof c.step === "number" && c.step <= ordinal))
   const toolNames = agent?.tools.map((t) => t.name) ?? []
   const enabled = toolNames.filter((n) => !variant.toolsOff.has(n))
-  const toolsEnabled = enabled.length < toolNames.length ? enabled : undefined
+  // only_tools (plan F3) narrows inside tools_enabled: the narrower set
+  // is the run's, as the server walks it.
+  const only = toolNames.filter((n) => variant.lab?.only_tools.includes(n))
+  const toolsEnabled =
+    only.length && only.length < toolNames.length ? only : enabled.length < toolNames.length ? enabled : undefined
   // The ack preview judges the catalog's rows for display; the command
   // is refused over the REGISTERED tools left on (studio/playground.go's
   // walk), whatever the step offered.
@@ -503,7 +507,7 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
           agent={agent}
           mode={variant.sideEffects}
           toolsEnabled={toolsEnabled}
-          breakpoints={breakpointsFor(runtime, agent)}
+          breakpoints={[...breakpointsFor(runtime, agent), ...(variant.lab?.park_on ?? [])]}
           fromStep={variant.thread === "fork" ? 0 : fromStep}
           compacted={compacted}
         />
@@ -559,6 +563,8 @@ function ReplayForm({ request }: { request: ReplayRequest }) {
               busy ||
               refused.length > 0 ||
               orphans.length > 0 ||
+              // The option lab's refusals (plan F3), said on their knobs.
+              labProblems(variant, agent).length > 0 ||
               pastEnd ||
               scriptedPastEnd ||
               (variant.thread === "fork" && !variant.input.trim()) ||

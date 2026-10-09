@@ -4,7 +4,8 @@
 // tab's open, filtered tree and the Timeline tab, and (D5) a turn
 // whose badges, cap line and chips are all drawn, and (E1.2) the
 // Request tab's chips, diff and trees, and (E3.2) the experiment's
-// step compare table — in both themes (D2),
+// step compare table, and (F3.2) the option lab with an override, a
+// refusal and the named tool picker — in both themes (D2),
 // with axe's default rules; the budget is zero violations. jsdom has
 // no layout, so the rules that need one (color-contrast, and
 // label-content-name-mismatch's visible text) come back "incomplete",
@@ -133,6 +134,26 @@ async function request(el: WeftDevtools) {
     expect(el.shadowRoot!.querySelector(sel), sel).not.toBeNull()
 }
 
+/** F3.2: the option lab over the runtimes golden — defaults greyed,
+ * an override with its reset, a refusal, the named tool picker. */
+function labRoutes(): Record<string, Route> {
+  const r = baseRoutes()
+  const rts = JSON.parse(readFileSync(resolve(process.cwd(), "../testdata/api/runtimes.golden.json"), "utf8")) as { runtimes: { id: string }[] }
+  r.runtimes = { runtimes: rts.runtimes.map((x) => ({ ...x, id: "rt_01" })) }
+  return r
+}
+async function optionLab(el: WeftDevtools) {
+  await drawer(el)
+  const q = (sel: string) => el.shadowRoot!.querySelector(sel) as HTMLInputElement
+  const steps = q('.weft-drawer [aria-label="max steps"]')
+  steps.value = "50"
+  steps.dispatchEvent(new Event("input", { bubbles: true }))
+  const tc = q('.weft-drawer [aria-label="tool choice"]')
+  tc.value = "named"
+  tc.dispatchEvent(new Event("change", { bubbles: true }))
+  await settle()
+}
+
 const MODES: { name: string; width: number; attrs: Record<string, string>; sel: string; act?: (el: WeftDevtools) => Promise<void>; routes?: () => Record<string, Route>; meta?: unknown }[] = [
   { name: "float, open", width: 1024, attrs: { "data-open": "true" }, sel: ".weft-dock.weft-float" },
   { name: "docked right", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: ".weft-dock.weft-docked" },
@@ -145,6 +166,7 @@ const MODES: { name: string; width: number; attrs: Record<string, string>; sel: 
   { name: "the Request tab: chips, diff, a tool's schema tree, the earlier messages", width: 1024, attrs: { "data-open": "true", "data-position": "bottom-dock" }, sel: "#weft-tp-request [data-weft-messages-earlier] .weft-tn", act: request, routes: requestRoutes, meta: { ...META, capabilities: [...META.capabilities, "requests"] } },
   { name: "the replay verbs and a verb's drawer with its ack preview", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: ".weft-drawer [data-weft-ack] [data-verdict]", act: replayDrawer, routes: replayRoutes, meta: REPLAY_META },
   { name: "the experiment's step compare: markers, the table, marks and badges", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: '[data-weft-step-diff] table [data-hole="hidden"]', act: runExperiment, routes: () => stepDiffRoutes(golden("diff-hidden")), meta: DIFF_META },
+  { name: "the option lab: defaults, an override, a refusal, the named tool picker", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: '.weft-drawer [data-weft-lab-problem="max_steps"]', act: optionLab, routes: labRoutes },
   { name: "badges, the cap line and the chips", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: '[data-weft-chip="fork"]', act: badgesDrawn, routes: badgeRoutes },
 ]
 

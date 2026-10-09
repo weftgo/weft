@@ -1602,6 +1602,8 @@ export class PanelModel {
       sideEffects: "",
       thread: replay?.thread ?? "ephemeral",
       runtimeId: rt.id,
+      // The option lab's greyed defaults (plan F3), as registered.
+      ...(agent.defaults ? { defaults: agent.defaults } : {}),
       under,
       key: ++this.drawerKey,
       ...(replay ? { verb: replay.verb } : {}),

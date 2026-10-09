@@ -22,7 +22,8 @@ import {
   rerun,
 } from "../lib/replay"
 import type { CatalogTool, ReplayDraft } from "../lib/replay"
-import { replayBounds } from "../lib/experiment-body"
+import { emptyLab, LAB_LABELS, LAB_NEW, LAB_NUMBERS, LAB_PREDATES, labDefault, labLacksDefaults, labOn, replayBounds } from "../lib/experiment-body"
+import type { LabFields } from "../lib/experiment-body"
 import { ackCatalogHole, badge, capLine, catalogCapped, catalogNotRecorded, catalogNotStored, catalogReadError, cutBadge, holeBadges, holeLine, noPublicIdWords, requestCapped, requestHole, turnChips } from "./badges"
 import { fetchSessionPublicId, MAX_REQUEST_PAGES, PanelApiError, panelGet, REQUEST_PAGE } from "./client"
 import type { AgentView } from "./client"
@@ -62,7 +63,7 @@ import {
   PanelModel,
 } from "./state"
 import type { ChildView, PanelRequests, PanelState, TurnView } from "./state"
-import { foldedWords, turnPromptOf } from "./playground"
+import { foldedWords, labOf, turnPromptOf } from "./playground"
 import type { ExperimentDraft, TurnWords } from "./playground"
 import { panelStudioVersion } from "./version"
 import { clampLayout, CYCLE, geometry, initialLayout, NARROW_W, pillPlace, placedIn, Push, readStore, TABS, writeStore } from "./layout"
@@ -2754,11 +2755,24 @@ export class WeftDevtools extends HTMLElement {
       o.value = m
       modelSel.appendChild(o)
     }
-    modelSel.value = d.model
+    const listed = !d.model || (agent?.models ?? []).includes(d.model)
+    modelSel.value = listed ? d.model : ""
+    if (d.model) modelSel.classList.add("weft-ovr")
     on(modelSel, "change", (_, n) => this.model?.setDraft({ model: (n as HTMLSelectElement).value }))
     opts.appendChild(modelSel)
+    // Any model name, when the app holds a runtime.ModelResolver (plan
+    // F3): the app decides; its refusal is the command's reason.
+    if (agent?.resolver) {
+      const free = el("input", "weft-input" + (listed ? "" : " weft-ovr"), undefined, {
+        "aria-label": "model name the app resolves",
+        placeholder: "or any model: the app resolves it",
+      }) as HTMLInputElement
+      free.value = listed ? "" : d.model
+      on(free, "input", (_, n) => this.model?.setDraft({ model: (n as HTMLInputElement).value.trim() }))
+      opts.appendChild(free)
+    }
     const thinkSel = el("select", "weft-input", undefined, { "aria-label": "thinking" }) as HTMLSelectElement
-    const defOpt = el("option", undefined, "thinking: default") as unknown as HTMLOptionElement
+    const defOpt = el("option", undefined, `thinking: default${agent?.defaults?.thinking ? ` (${agent.defaults.thinking})` : ""}`) as unknown as HTMLOptionElement
     defOpt.value = ""
     thinkSel.appendChild(defOpt)
     for (const lvl of ["off", "low", "medium", "high"]) {
@@ -2849,6 +2863,7 @@ export class WeftDevtools extends HTMLElement {
     })
     seRow.appendChild(thrSel)
     body.appendChild(seRow)
+    if (agent) body.appendChild(this.lab(d, agent))
 
     // Rung 3 in the panel (§8.3, review fix 4c — "all in the panel"
     // per WEFT-DEVTOOLS §10's rung-3 gate): the tools every run the
@@ -2975,12 +2990,105 @@ export class WeftDevtools extends HTMLElement {
     const run = el("button", "weft-run-btn", "Run experiment ▶", {
       title: "POST /api/playground/runs — the runtime in your app executes it",
     })
-    if (refused || unplaced) run.setAttribute("data-weft-held", "")
-    if (refused || unplaced || (d.thread === "fork" && !d.input.trim())) run.setAttribute("disabled", "")
+    const held = refused || unplaced || labOf(d).problems.length
+    if (held) run.setAttribute("data-weft-held", "")
+    if (held || (d.thread === "fork" && !d.input.trim())) run.setAttribute("disabled", "")
     on(run, "click", () => this.go(this.model?.runExperiment()))
     body.appendChild(run)
     card.appendChild(body)
     return card
+  }
+
+  /** lab is the option lab (plan F3; Studio's OptionLab): every
+   * narrowing or neutral knob the command carries, the agent's default
+   * greyed as the placeholder, an override in colour with a reset; the
+   * rules are lib/experiment-body.ts's (the server's, by name) and a
+   * problem holds Run. A registration without defaults greys the knobs
+   * it cannot carry, and says why. */
+  private lab(d: ExperimentDraft, agent: AgentView): HTMLElement {
+    const lab = d.lab ?? emptyLab()
+    const def = agent.defaults
+    const old = labLacksDefaults(agent)
+    const set = (p: Partial<LabFields>) => this.model?.setDraft({ lab: { ...(this.model.state.drawer?.lab ?? emptyLab()), ...p } })
+    const { problems } = labOf(d)
+    const box = el("div", "weft-field weft-lab", [el("span", undefined, "Options · empty keeps the agent's default (greyed)")], { "data-weft-lab": "" })
+    if (old) box.appendChild(el("div", "weft-note", `this runtime reports no defaults — ${LAB_PREDATES}`, { "data-weft-lab-old": "" }))
+    const said = (k: keyof LabFields | "lab", into: HTMLElement) => {
+      for (const p of problems)
+        if (p.field === k) into.appendChild(el("div", "weft-lab-p", p.message, { role: "alert", "data-weft-lab-problem": k }))
+    }
+    said("lab", box)
+    const row = (k: keyof LabFields, input: HTMLElement) => {
+      const lb = el("label", "weft-lab-k", [el("span", undefined, LAB_LABELS[k]), input], { "data-key": `lab:${k}` })
+      if (old && LAB_NEW.includes(k)) input.setAttribute("disabled", "")
+      if (labOn(lab, k, def)) {
+        input.classList.add("weft-ovr")
+        input.setAttribute("data-weft-override", "")
+        const r = el("button", "weft-btn", "↺", { type: "button", "aria-label": `reset ${LAB_LABELS[k]} to the agent's default` })
+        on(r, "click", () => set(k === "tool_choice" ? { tool_choice: "", tool_choice_name: "" } : { [k]: Array.isArray(lab[k]) ? [] : "" }))
+        lb.appendChild(r)
+      }
+      said(k, lb)
+      box.appendChild(lb)
+    }
+    for (const k of [...LAB_NUMBERS, "stop" as const]) {
+      const inp = el(k === "stop" ? "textarea" : "input", "weft-input", undefined, {
+        "aria-label": LAB_LABELS[k],
+        placeholder: labDefault(k, def) || (old ? "" : k === "stop" ? "none" : "adapter default"),
+      }) as HTMLInputElement
+      inp.value = lab[k]
+      on(inp, "input", (_, n) => set({ [k]: (n as HTMLInputElement).value }))
+      row(k, inp)
+    }
+    const tc = el("select", "weft-input", undefined, { "aria-label": LAB_LABELS.tool_choice }) as HTMLSelectElement
+    const dtc = def?.tool_choice
+    for (const m of ["", "auto", "any", "none", "named"]) {
+      const o = el("option", undefined, m || `default${dtc?.mode ? ` (${dtc.mode}${dtc.name ? ` ${dtc.name}` : ""})` : ""}`) as HTMLOptionElement
+      o.value = m
+      tc.appendChild(o)
+    }
+    tc.value = lab.tool_choice
+    on(tc, "change", (_, n) => set({ tool_choice: (n as HTMLSelectElement).value as LabFields["tool_choice"] }))
+    row("tool_choice", tc)
+    const names = agent.tools.map((t) => t.name)
+    const isOff = (n: string) => d.tools[n] === false
+    if (lab.tool_choice === "named") {
+      const ns = el("select", "weft-input", undefined, { "aria-label": "tool choice: the tool" }) as HTMLSelectElement
+      for (const n of ["", ...names]) {
+        const o = el("option", undefined, n || "(pick a tool)") as HTMLOptionElement
+        o.value = n
+        // A tool the run turns off or parks cannot be forced: greyed.
+        if (n && ((lab.only_tools.length ? !lab.only_tools.includes(n) : isOff(n)) || lab.park_on.includes(n))) o.disabled = true
+        ns.appendChild(o)
+      }
+      ns.value = lab.tool_choice_name
+      on(ns, "change", (_, n) => set({ tool_choice_name: (n as HTMLSelectElement).value }))
+      row("tool_choice_name", ns)
+    }
+    for (const k of ["only_tools", "park_on"] as const) {
+      const g = el("div", "weft-lab-k", undefined, { role: "group", "aria-label": LAB_LABELS[k], "data-key": `lab:${k}` })
+      g.appendChild(el("span", undefined, `${LAB_LABELS[k]} · default ${k === "park_on" ? "none" : "every tool"}`))
+      for (const n of names) {
+        const cb = el("input", undefined, undefined, { "aria-label": `${LAB_LABELS[k]}: ${n}` }) as HTMLInputElement
+        cb.type = "checkbox"
+        cb.checked = lab[k].includes(n)
+        // only_tools narrows tools_enabled: a tool turned off is greyed.
+        cb.disabled = old || (k === "only_tools" && isOff(n))
+        on(cb, "change", (_, b) => {
+          const cur = this.model?.state.drawer?.lab?.[k] ?? []
+          set({ [k]: (b as HTMLInputElement).checked ? [...cur, n] : cur.filter((x) => x !== n) })
+        })
+        g.appendChild(el("span", "weft-tool" + (cb.checked ? " weft-ovr" : ""), [cb, el("span", undefined, n)]))
+      }
+      if (labOn(lab, k, def)) {
+        const r = el("button", "weft-btn", "↺", { type: "button", "aria-label": `reset ${LAB_LABELS[k]} to the agent's default` })
+        on(r, "click", () => set({ [k]: [] }))
+        g.appendChild(r)
+      }
+      said(k, g)
+      box.appendChild(g)
+    }
+    return box
   }
 
   /** closeDrawer closes the experiment drawer and gives focus back to
@@ -3013,13 +3121,15 @@ export class WeftDevtools extends HTMLElement {
       : { tools: null, hole: catalogReadError("the run's records could not be read") }
     if (cat.hole) box.appendChild(ackCatalogHole(cat.hole, !!agent))
     const names = Object.keys(d.tools)
-    const kept = names.filter((n) => d.tools[n])
+    // only_tools narrows inside tools_enabled; park_on parks (plan F3).
+    const lo = labOf(d).overrides
+    const kept = lo.only_tools ?? names.filter((n) => d.tools[n])
     const verdicts = replayVerdicts({
       catalog: cat.tools ?? (agent?.tools ?? []).map((t): CatalogTool => ({ name: t.name, replay: t.side_effects === "safe" ? "safe" : "never", approval: false })),
       agent,
       mode: d.sideEffects,
       toolsEnabled: kept.length < names.length ? kept : undefined,
-      breakpoints: breakpointsFor({ breakpoints: s.breakpoints }, agent),
+      breakpoints: [...breakpointsFor({ breakpoints: s.breakpoints }, agent), ...(lo.park_on ?? [])],
     })
     if (cat.loading) box.appendChild(el("div", "weft-reason", "reading the step's catalog…"))
     else if (cat.none) box.appendChild(el("div", "weft-reason", "the step offered no tools · nothing to substitute or park"))

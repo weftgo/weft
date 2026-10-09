@@ -1001,3 +1001,102 @@ describe("Run is held where the server would refuse (reviews 3.4, 3.5)", () => {
     expect(d.getByRole<HTMLButtonElement>("button", { name: "Run" }).disabled).toBe(true)
   })
 })
+
+describe("the option lab (plan F3, Studio's drawer)", () => {
+  // The registration as GET /api/runtimes serves it (the golden): a
+  // resolver and the option-lab defaults.
+  const lab = golden<{ runtimes: RuntimeView[] }>("runtimes").runtimes[0]
+  const withAgent = (a: Partial<AgentView>) => ({ runtimes: [{ ...lab, agents: [{ ...lab.agents[0], ...a }] }] })
+
+  async function openLab(runtimes: object = withAgent({})) {
+    serve()
+    studio.on("GET runtimes", runtimes)
+    const card = await openStory('[data-step="2"]')
+    fireEvent.click(within(card).getByRole("button", { name: "replay from this step (step 2)" }))
+    const d = await waitFor(() => within(drawer()!))
+    await waitFor(() => expect(d.getByLabelText<HTMLInputElement>("max steps")).toBeTruthy())
+    return d
+  }
+  const run = (d: ReturnType<typeof within>) => d.getByRole("button", { name: "Run" }) as HTMLButtonElement
+
+  it("each default greyed (the placeholder); an override in colour with a reset back to the default", async () => {
+    const d = await openLab()
+    expect(d.getByLabelText<HTMLInputElement>("max steps").placeholder).toBe("10")
+    expect(d.getByLabelText<HTMLInputElement>("top_p").placeholder).toBe("0.9")
+    expect(d.getByLabelText<HTMLTextAreaElement>("stop sequences, one per line").placeholder).toBe("END")
+    expect(d.getByLabelText<HTMLSelectElement>("tool choice").options[0].textContent).toBe("default (named lookup_order)")
+    expect(d.getByLabelText<HTMLSelectElement>("thinking").options[0].textContent).toBe("default (low)")
+    expect(document.querySelector("[data-lab-old]")).toBeNull()
+    const steps = d.getByLabelText<HTMLInputElement>("max steps")
+    fireEvent.change(steps, { target: { value: "3" } })
+    expect(steps.hasAttribute("data-override")).toBe(true)
+    expect(steps.className).toContain("text-primary")
+    // The default's own value is no override.
+    fireEvent.change(d.getByLabelText("parallelism"), { target: { value: "4" } })
+    expect(d.getByLabelText("parallelism").hasAttribute("data-override")).toBe(false)
+    fireEvent.click(d.getByRole("button", { name: "reset max steps to the agent's default" }))
+    expect(steps.value).toBe("")
+    expect(steps.hasAttribute("data-override")).toBe(false)
+  })
+
+  it("a widening value is refused in the form with the rule named, and Run is held", async () => {
+    const d = await openLab()
+    await waitFor(() => expect(run(d).disabled).toBe(false))
+    fireEvent.change(d.getByLabelText("max steps"), { target: { value: "50" } })
+    expect(document.querySelector('[data-lab-problem="max_steps"]')?.textContent).toBe("max_steps may only lower the agent's cap")
+    expect(run(d).disabled).toBe(true)
+    fireEvent.change(d.getByLabelText("max steps"), { target: { value: "" } })
+    // A tool the agent's named default needs, turned off: warned first.
+    fireEvent.click(d.getByRole("checkbox", { name: /^lookup_order/ }))
+    expect(document.querySelector('[data-lab-problem="tool_choice"]')?.textContent).toBe(
+      "the agent's default tool_choice names lookup_order, which this command turns off; send tool_choice"
+    )
+    expect(run(d).disabled).toBe(true)
+    expect(studio.calls("POST playground/runs")).toHaveLength(0)
+  })
+
+  it("posts the knobs set, and the server's 400 is shown verbatim when it refuses anyway", async () => {
+    const said = "runtime predates the option lab: upgrade weft/runtime to use params, tool_choice, park_on, only_tools"
+    const d = await openLab()
+    studio.on("POST playground/runs", () =>
+      new Response(JSON.stringify({ error: { code: "bad_request", message: said } }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      })
+    )
+    fireEvent.change(d.getByLabelText("top_p"), { target: { value: "0.5" } })
+    fireEvent.click(d.getByRole("checkbox", { name: "park on: refund" }))
+    fireEvent.change(d.getByLabelText("model name the app resolves"), { target: { value: "claude-haiku-4-5" } })
+    await waitFor(() => expect(run(d).disabled).toBe(false))
+    fireEvent.click(run(d))
+    await waitFor(() => expect(drawer()!.querySelector("[data-replay-error]")?.textContent).toBe(said))
+    const body = studio.calls("POST playground/runs")[0].body as { overrides: unknown }
+    expect(body.overrides).toEqual({ model: "claude-haiku-4-5", params: { top_p: 0.5 }, park_on: ["refund"] })
+  })
+
+  it("the ack preview follows park_on and only_tools", async () => {
+    const d = await openLab()
+    await waitFor(() => expect(verdict("search_kb")).toBe("runs"))
+    fireEvent.click(d.getByRole("checkbox", { name: "park on: lookup_order" }))
+    expect(verdict("lookup_order")).toBe("parked")
+    fireEvent.click(d.getByRole("checkbox", { name: "only tools: lookup_order" }))
+    expect(verdict("refund")).toBe("off")
+  })
+
+  it("model free text only when the runtime holds a resolver", async () => {
+    const d = await openLab(withAgent({ resolver: false }))
+    expect(d.queryByLabelText("model name the app resolves")).toBeNull()
+    expect(d.getByLabelText("model")).toBeTruthy()
+  })
+
+  it("a registration without defaults: the knobs with no default, the new ones greyed, a line saying why", async () => {
+    const d = await openLab(withAgent({ defaults: undefined, resolver: undefined }))
+    expect(document.querySelector("[data-lab-old]")?.textContent).toBe(
+      "this runtime reports no defaults — runtime predates the option lab: upgrade weft/runtime to use params, tool_choice, park_on, only_tools"
+    )
+    expect(d.getByLabelText<HTMLInputElement>("max steps").placeholder).toBe("")
+    expect(d.getByLabelText<HTMLInputElement>("max steps").disabled).toBe(false)
+    for (const k of ["top_p", "max tokens", "seed", "tool choice"]) expect(d.getByLabelText<HTMLInputElement>(k).disabled, k).toBe(true)
+    expect(d.getByRole<HTMLInputElement>("checkbox", { name: "park on: refund" }).disabled).toBe(true)
+  })
+})

@@ -49,6 +49,7 @@ import { diffLines, diffSummary } from "@/lib/diff"
 import type { DiffRow } from "@/lib/diff"
 import {
   buildRunBody,
+  labProblems,
   overridesOf,
   pickTarget,
   toolsOffFor,
@@ -338,7 +339,10 @@ function Playground({ caps }: { caps: string[] }) {
             ? registered
             : v.instructions,
         // A model the new agent does not offer is not carried over.
-        model: v.model && !agent.models.includes(v.model) && prev ? "" : v.model,
+        model: v.model && !agent.models.includes(v.model) && !agent.resolver && prev ? "" : v.model,
+        // The option lab is the agent's: another agent's knobs (its
+        // defaults, its tools) are not carried over.
+        lab: prev && prev.agent !== agent.name ? undefined : v.lab,
       }))
     )
   }, [agent, registered, resolving, search.tools])
@@ -641,7 +645,9 @@ function Playground({ caps }: { caps: string[] }) {
           )}
           <Button
             onClick={() => void run()}
-            disabled={!runtime || !agent || busy || resolving || orphans.length > 0}
+            disabled={
+              !runtime || !agent || busy || resolving || orphans.length > 0 || labProblems(variant, agent).length > 0
+            }
           >
             {busy ? "sending…" : `Run ${variant.key}`}
           </Button>

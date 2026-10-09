@@ -330,7 +330,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // /api/playground/fixtures (wefttest replay fixtures from a run's records),
 //     // /api/experiments (the saved groups + the runs they label), /api/runtimes/
 //     // {id}/breakpoints, /api/runs/{id}/steer; the panel drawer and /playground
-//     // (the Studio UI) render them, gated on capabilities.
+//     // (the Studio UI) render them, gated on capabilities — the option lab (plan F3.2)
+//     // one form on both: every override above, defaults greyed, an override in colour
+//     // with a reset, lib/experiment-body.ts's labOverrides (the server's rules by name,
+//     // a refusal holds Run, the 400 still shown verbatim; one body, parity-tested).
 
 // 8. Sessions (package weft/thread) — the map; godoc is the reference, docs/thread-operations.md the
 //    operator's page; pre-1.0, API and format not frozen. st: jsonl.Open(dir) | sqlite.Open(path) (own

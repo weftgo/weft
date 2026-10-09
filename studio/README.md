@@ -650,14 +650,15 @@ throttle stays.
 | the filters | `aria-label="filter turns"`, `aria-label="status"`, `aria-label="filter keys and values"`; `⧉` labelled `copy <key>` |
 | icon buttons | an `aria-label` on each: `⤢`, `⇆`, `◐`, `–`, `↺`, and the pill (its visible words, `weft devtools · 10→4`) |
 | the switcher, the turn dropdown | `aria-label="conversation"`, `aria-label="turn"` |
-| the experiment drawer | the system prompt, input and edit fields inside their `<label>`; the selects `aria-label`led `model`, `thinking`, `side effects`, `engine`, `thread`; the result pane's `compare with`; tool and breakpoint checkboxes inside their labels; `–` / `↺` labelled |
+| the experiment drawer | the system prompt, input and edit fields inside their `<label>`; the selects `aria-label`led `model`, `thinking`, `side effects`, `engine`, `thread`; the result pane's `compare with`; tool and breakpoint checkboxes inside their labels; `–` / `↺` labelled; the option lab's fields inside their `<label>`, its checkboxes `aria-label`led `only tools: <tool>` / `park on: <tool>` in a labelled group, each `↺` `reset <knob> to the agent's default` |
 
 The accessibility budget. `src/panel/a11y.test.ts` runs axe-core (a
 devDependency only — a test asserts `panel.js` holds no `axe`) with its
 default rules over the panel's shadow root in each mode — float open,
 docked right, the bottom sheet at 400 px, the pill, the Raw tab with
 its tree open and filtered, the Timeline tab, the experiment drawer
-open, and the Raw tree under the `?` shortcuts overlay — in both themes,
+open (and its option lab with an override, a refusal and the named tool
+picker), and the Raw tree under the `?` shortcuts overlay — in both themes,
 and fails on any violation, listing them. jsdom has no layout, so the
 rules that need one come back incomplete, never as a pass:
 `color-contrast` (D2's `theme.test.ts` holds the palette to WCAG AA
@@ -944,6 +945,38 @@ drawer (plan F1: its verbs on every step, call, steer and child row, the
 ack preview naming what each tool's calls would do) posts the same
 command, and the playground's "continue from step" is a picker over the
 source run's steps.
+
+The option lab (plan F3) is one form on both surfaces — Studio's
+experiment form (the playground page and the replay drawer) and the
+panel's experiment drawer — with a knob for every override the command
+carries: max steps, parallelism and temperature (`options`), top_p, max
+tokens, stop (one sequence per line) and seed (`params`), tool choice
+(auto, any, none, named and its tool), only tools and park on, beside
+the prompt, tools, model and thinking. Each knob shows the agent's
+default from `GET /api/runtimes` greyed (the placeholder, or the
+default option's words); a value that differs from it is drawn in
+colour with a `↺` back to the default; an empty knob, or one set to the
+default, sends nothing ("absent keeps the agent's value" — the form
+cannot clear the agent's `stop` or `max_tokens` either). The model is a
+select over the runtime's models, plus free text when the agent's
+runtime holds a `runtime.ModelResolver` (the app resolves the name; its
+refusal is the rejected command's reason, shown as given). Widening is
+never silently sent: `src/lib/experiment-body.ts`'s `labOverrides`
+mirrors the server's rules by name — caps lower only, the ranges, a tool
+the agent lacks, only tools inside the tools left on, a named choice the
+command turns off or parks, the agent's own named default turned off —
+says each refusal on its knob in the server's words and holds Run; a
+tool turned off is greyed out of only tools and the named tool picker.
+The server stays the authority: its 400 is shown verbatim where the
+command's error goes. A registration without `defaults` (a Studio older
+than the field) shows the knobs with no default and greys the four new
+ones, saying why (`runtime predates the option lab …`); a current
+Studio fills an old runtime's defaults in (its caps, tool choice auto),
+and then the server's 400 says it. The ack preview follows park on
+(those calls park) and only tools (the others are off). Both surfaces
+build the command's overrides through `labOverrides`, so they post
+byte-identical JSON for the same choices (`src/panel/optionlab.test.ts`:
+a table over `testdata/api/runtimes.golden.json` and the parity check).
 
 The step compare (plan E3, capability `diff`; hidden when off, like
 every capability-gated control): two or more runs side by side, one row

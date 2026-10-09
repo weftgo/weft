@@ -12,8 +12,22 @@ import type { Dispatch, ReactNode, SetStateAction } from "react"
 import { ApiError, putBreakpoints, runQuery, transcriptQuery } from "@/lib/api"
 import type { AgentView, RuntimeView } from "@/lib/api"
 import { compactionsOf, isSessionMarker } from "@/lib/compaction"
-import { editFieldsOf, replayBounds, sourceSteps, unmatchedDrafts } from "@/lib/experiment-body"
-import type { EditDraft, EditField, SourceStep, VariantFields } from "@/lib/experiment-body"
+import {
+  editFieldsOf,
+  emptyLab,
+  LAB_LABELS,
+  LAB_NEW,
+  LAB_NUMBERS,
+  LAB_PREDATES,
+  labDefault,
+  labLacksDefaults,
+  labOn,
+  labProblems,
+  replayBounds,
+  sourceSteps,
+  unmatchedDrafts,
+} from "@/lib/experiment-body"
+import type { EditDraft, EditField, LabFields, LabProblem, SourceStep, VariantFields } from "@/lib/experiment-body"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { Badge } from "@/components/ui/badge"
 
@@ -104,38 +118,7 @@ export function ExperimentForm({
           ))}
         </div>
       ) : null}
-      <div className="flex gap-2">
-        <label className="block flex-1 space-y-1">
-          <span className="text-xs text-muted-foreground">Model</span>
-          <select
-            className="w-full rounded border bg-transparent px-1 py-1 text-xs"
-            value={variant.model}
-            onChange={(e) => patch({ model: e.target.value })}
-          >
-            <option value="">(the agent's own)</option>
-            {agent?.models.map((m) => (
-              <option key={m} value={m}>
-                {m}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block space-y-1">
-          <span className="text-xs text-muted-foreground">Thinking</span>
-          <select
-            className="rounded border bg-transparent px-1 py-1 text-xs"
-            value={variant.thinking}
-            onChange={(e) => patch({ thinking: e.target.value })}
-          >
-            <option value="">default</option>
-            {["off", "low", "medium", "high"].map((l) => (
-              <option key={l} value={l}>
-                {l}
-              </option>
-            ))}
-          </select>
-        </label>
-      </div>
+      <ModelField variant={variant} patch={patch} agent={agent} />
       <div className="flex gap-2">
         <label className="block flex-1 space-y-1">
           <span className="text-xs text-muted-foreground">Engine</span>
@@ -184,6 +167,7 @@ export function ExperimentForm({
           </select>
         </label>
       </div>
+      {agent ? <OptionLab variant={variant} patch={patch} agent={agent} /> : null}
       {/* Rung 3 (§8.3): break on tools — PUT /api/runtimes/{id}/
           breakpoints; the runtime parks them on every run it
           starts. */}
@@ -212,6 +196,257 @@ export function ExperimentForm({
           />
         </label>
       )}
+    </>
+  )
+}
+
+/** ModelField is the model knob: a select over the runtime's models
+ * and — when the app holds a runtime.ModelResolver — free text the app
+ * resolves (its refusal comes back as the command's reason), and the
+ * thinking level beside it (as it was; its default named). */
+function ModelField({
+  variant,
+  patch,
+  agent,
+}: {
+  variant: VariantFields
+  patch: (p: Partial<VariantFields>) => void
+  agent?: AgentView
+}) {
+  const models = agent?.models ?? []
+  const listed = variant.model === "" || models.includes(variant.model)
+  const thinkingDef = agent?.defaults?.thinking
+  return (
+    <div className="flex flex-wrap gap-2">
+      <label className="block flex-1 space-y-1">
+        <span className="text-xs text-muted-foreground">Model</span>
+        <select
+          aria-label="model"
+          className={`w-full rounded border bg-transparent px-1 py-1 text-xs ${variant.model ? "border-primary text-primary" : ""}`}
+          value={listed ? variant.model : ""}
+          data-override={variant.model ? "" : undefined}
+          onChange={(e) => patch({ model: e.target.value })}
+        >
+          <option value="">(the agent's own)</option>
+          {models.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </select>
+      </label>
+      {agent?.resolver ? (
+        <label className="block flex-1 space-y-1">
+          <span className="text-xs text-muted-foreground">or any model name</span>
+          <input
+            aria-label="model name the app resolves"
+            data-model-free=""
+            className={`w-full rounded border bg-transparent px-2 py-1 text-xs ${!listed ? "border-primary text-primary" : ""}`}
+            placeholder="the app resolves it (runtime.ModelResolver)"
+            value={listed ? "" : variant.model}
+            onChange={(e) => patch({ model: e.target.value.trim() })}
+          />
+        </label>
+      ) : null}
+      <label className="block space-y-1">
+        <span className="text-xs text-muted-foreground">Thinking</span>
+        <select
+          aria-label="thinking"
+          className="rounded border bg-transparent px-1 py-1 text-xs"
+          value={variant.thinking}
+          onChange={(e) => patch({ thinking: e.target.value })}
+        >
+          <option value="">default{thinkingDef ? ` (${thinkingDef})` : ""}</option>
+          {["off", "low", "medium", "high"].map((l) => (
+            <option key={l} value={l}>
+              {l}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
+  )
+}
+
+
+/** OptionLab is plan F3's form: every narrowing or neutral run option
+ * the command carries, each with the agent's default greyed (the
+ * placeholder) and an override drawn in colour with a one-click reset.
+ * An empty knob sends nothing. The rules are the server's, by name
+ * (lib/experiment-body.ts's labOverrides): a problem is said on its
+ * knob and holds the command; the server's own 400 stays authoritative
+ * and is shown verbatim where the command's error goes. A registration
+ * without defaults (an old runtime) shows the knobs with no default and
+ * greys the ones it cannot carry. */
+export function OptionLab({
+  variant,
+  patch,
+  agent,
+}: {
+  variant: VariantFields
+  patch: (p: Partial<VariantFields>) => void
+  agent: AgentView
+}) {
+  const lab = variant.lab ?? emptyLab()
+  const d = agent.defaults
+  const old = labLacksDefaults(agent)
+  const set = (p: Partial<LabFields>) => patch({ lab: { ...lab, ...p } })
+  const names = agent.tools.map((t) => t.name)
+  const problems = labProblems(variant, agent)
+  const problemOf = (k: keyof LabFields | "lab") => problems.filter((p) => p.field === k)
+  const greyed = (k: keyof LabFields) => old && LAB_NEW.includes(k)
+  const reset = (k: keyof LabFields) =>
+    labOn(lab, k, d) ? (
+      <button
+        type="button"
+        className="text-[11px] text-faint hover:underline"
+        aria-label={`reset ${LAB_LABELS[k]} to the agent's default`}
+        data-lab-reset={k}
+        onClick={() => set(k === "tool_choice" ? { tool_choice: "", tool_choice_name: "" } : { [k]: Array.isArray(lab[k]) ? [] : "" })}
+      >
+        ↺ default
+      </button>
+    ) : null
+  const ring = (k: keyof LabFields) => (labOn(lab, k, d) ? "border-primary text-primary" : "")
+  const tc = lab.tool_choice
+  const parked = new Set(lab.park_on)
+  const only = lab.only_tools.length ? new Set(lab.only_tools) : null
+  const tools = (k: "park_on" | "only_tools") => (
+    <fieldset className="space-y-1" data-lab={k} disabled={greyed(k)}>
+      <legend className="flex items-center gap-2 text-xs text-muted-foreground">
+        {LAB_LABELS[k]}
+        <span className="text-faint">default: {k === "park_on" ? "none" : "every tool"}</span>
+        {reset(k)}
+      </legend>
+      <div className="flex flex-wrap gap-2 text-xs">
+        {names.map((n) => {
+          // only_tools narrows tools_enabled: a tool turned off is greyed.
+          const off = k === "only_tools" && variant.toolsOff.has(n)
+          const on = lab[k].includes(n)
+          return (
+            // A span, not a label: the checkbox's name says which set
+            // (the Tools boxes are the bare names).
+            <span key={n} className={`flex items-center gap-1 ${off ? "opacity-50" : on ? "text-primary" : ""}`}>
+              <input
+                type="checkbox"
+                aria-label={`${LAB_LABELS[k]}: ${n}`}
+                checked={on}
+                disabled={off || greyed(k)}
+                onChange={(e) => set({ [k]: e.target.checked ? [...lab[k], n] : lab[k].filter((x) => x !== n) })}
+              />
+              {n}
+            </span>
+          )
+        })}
+      </div>
+      <Problems list={problemOf(k)} />
+    </fieldset>
+  )
+  return (
+    <div className="space-y-2 rounded border border-dashed p-2" data-option-lab="">
+      <span className="text-xs text-muted-foreground">Options (empty keeps the agent's default, shown greyed)</span>
+      {old ? (
+        <p className="text-[11px] text-faint" data-lab-old="">
+          this runtime reports no defaults — {LAB_PREDATES}
+        </p>
+      ) : null}
+      <Problems list={problemOf("lab")} />
+      <div className="grid grid-cols-3 gap-2">
+        {LAB_NUMBERS.map((k) => (
+          <label key={k} className="block space-y-1">
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              {LAB_LABELS[k]} {reset(k)}
+            </span>
+            <input
+              inputMode="decimal"
+              aria-label={LAB_LABELS[k]}
+              data-lab={k}
+              data-override={labOn(lab, k, d) ? "" : undefined}
+              disabled={greyed(k)}
+              className={`w-full rounded border bg-transparent px-2 py-1 text-xs disabled:opacity-50 ${ring(k)}`}
+              placeholder={labDefault(k, d) || (old ? "" : "adapter default")}
+              value={lab[k]}
+              onChange={(e) => set({ [k]: e.target.value })}
+            />
+            <Problems list={problemOf(k)} />
+          </label>
+        ))}
+      </div>
+      <label className="block space-y-1">
+        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+          {LAB_LABELS.stop} {reset("stop")}
+        </span>
+        <textarea
+          rows={2}
+          aria-label="stop sequences, one per line"
+          data-lab="stop"
+          data-override={labOn(lab, "stop", d) ? "" : undefined}
+          disabled={greyed("stop")}
+          className={`w-full rounded border bg-transparent px-2 py-1 text-xs disabled:opacity-50 ${ring("stop")}`}
+          placeholder={labDefault("stop", d) || (old ? "" : "none")}
+          value={lab.stop}
+          onChange={(e) => set({ stop: e.target.value })}
+        />
+        <Problems list={problemOf("stop")} />
+      </label>
+      <div className="space-y-1">
+        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+          {LAB_LABELS.tool_choice} {reset("tool_choice")}
+        </span>
+        <div className="flex gap-2">
+          <select
+            aria-label="tool choice"
+            data-lab="tool_choice"
+            data-override={labOn(lab, "tool_choice", d) ? "" : undefined}
+            disabled={greyed("tool_choice")}
+            className={`rounded border bg-transparent px-1 py-1 text-xs disabled:opacity-50 ${ring("tool_choice")}`}
+            value={tc}
+            onChange={(e) => set({ tool_choice: e.target.value as LabFields["tool_choice"] })}
+          >
+            <option value="">
+              default{d ? ` (${d.tool_choice.mode}${d.tool_choice.name ? ` ${d.tool_choice.name}` : ""})` : ""}
+            </option>
+            {(["auto", "any", "none", "named"] as const).map((m) => (
+              <option key={m} value={m}>
+                {m}
+              </option>
+            ))}
+          </select>
+          {tc === "named" ? (
+            <select
+              aria-label="tool choice: the tool"
+              data-lab="tool_choice_name"
+              className={`flex-1 rounded border bg-transparent px-1 py-1 text-xs ${ring("tool_choice")}`}
+              value={lab.tool_choice_name}
+              onChange={(e) => set({ tool_choice_name: e.target.value })}
+            >
+              <option value="">(pick a tool)</option>
+              {names.map((n) => (
+                // A tool the run turns off or parks cannot be forced: greyed.
+                <option key={n} value={n} disabled={(only ? !only.has(n) : variant.toolsOff.has(n)) || parked.has(n)}>
+                  {n}
+                </option>
+              ))}
+            </select>
+          ) : null}
+        </div>
+        <Problems list={problemOf("tool_choice")} />
+      </div>
+      {names.length ? tools("only_tools") : null}
+      {names.length ? tools("park_on") : null}
+    </div>
+  )
+}
+
+function Problems({ list }: { list: LabProblem[] }) {
+  if (!list.length) return null
+  return (
+    <>
+      {list.map((p) => (
+        <p key={p.message} className="text-[11px] text-status-bad" role="alert" data-lab-problem={p.field}>
+          {p.message}
+        </p>
+      ))}
     </>
   )
 }

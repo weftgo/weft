@@ -2,7 +2,9 @@
 // §8.2): the experiment drawer's draft, the command body it becomes,
 // and the result slot the live lane fills. One API, two clients — the
 // Studio UI posts the same body to the same endpoint (V6).
-import type { Message, Part, PosEvent, RunRow, Transcript } from "../lib/api"
+import type { AgentDefaults, Message, Part, PosEvent, RunRow, Transcript } from "../lib/api"
+import { labOverrides } from "../lib/experiment-body"
+import type { LabFields } from "../lib/experiment-body"
 import { splitTranscript, turnPrompt } from "../lib/events"
 import type { FoldFeed, FoldedRun } from "../lib/events"
 import type { LiveRecord } from "../lib/live"
@@ -49,6 +51,10 @@ export interface ExperimentDraft {
   thread: "ephemeral" | "fork"
   /** The connected runtime the command goes to. */
   runtimeId: string
+  /** The option lab's knobs (plan F3; absent: every knob at the
+   * agent's default) and the defaults it greys, as registered. */
+  lab?: LabFields
+  defaults?: AgentDefaults
   /** The "replay from here" verb that opened the drawer (plan F1;
    * lib/replay.ts's drafts), absent for ✎ Experiment. */
   verb?: ReplayVerb
@@ -226,7 +232,19 @@ export function draftProblem(draft: ExperimentDraft): string | null {
   const names = Object.keys(draft.tools)
   if (names.length && !names.some((n) => draft.tools[n]))
     return "at least one tool must stay on — the command cannot express an empty tool set (it would run with every tool)"
-  return null
+  return labOf(draft).problems[0]?.message ?? null
+}
+
+/** labOf is the drawer's option lab through Studio's labOverrides: the
+ * same fields, the same refusals (plan F3). */
+export function labOf(draft: ExperimentDraft) {
+  const names = Object.keys(draft.tools)
+  const on = names.filter((n) => draft.tools[n])
+  return labOverrides(
+    draft.lab,
+    { name: draft.agent, defaults: draft.defaults, tools: names.map((name) => ({ name })) },
+    on.length < names.length ? on : []
+  )
 }
 
 /** buildRunBody is §5.1's command, assembled from the draft. The
@@ -247,6 +265,7 @@ export function buildRunBody(draft: ExperimentDraft, publicId: string): Record<s
     overrides.tools_enabled = toolsEnabled
   if (draft.model) overrides.model = draft.model
   if (draft.thinking) overrides.thinking = draft.thinking
+  Object.assign(overrides, labOf(draft).overrides)
   const body: Record<string, unknown> = {
     runtime: draft.runtimeId,
     agent: draft.agent,

@@ -69,6 +69,34 @@ module, ADR 0005).
   pins the shape). Core gains the plain accessors `(*Agent).Params`,
   `(*Agent).Thinking` and `(*Agent).ToolChoice`.
 
+- **The option lab, web half** (plan F3.2): one option form on both
+  surfaces — Studio's experiment form (the playground page and the run
+  page's replay drawer) and the devtools panel's experiment drawer —
+  for every knob the command carries: `options` (max steps,
+  parallelism, temperature), `params` (top_p, max tokens, stop — one
+  sequence per line — and seed), `tool_choice` (auto, any, none, named
+  and its tool), `only_tools` and `park_on`, beside the prompt, tools,
+  model and thinking. Each knob shows the agent's default from
+  `GET /api/runtimes` greyed (the placeholder; thinking's and
+  tool_choice's in their default option); an override is drawn in
+  colour with a one-click reset; an empty knob, or one equal to the
+  default, sends nothing. The model is a select over the runtime's
+  models plus free text when the agent's runtime holds a
+  `runtime.ModelResolver` (the app resolves it; its refusal is the
+  command's reason, shown as given). The form mirrors the server's
+  rules by name (`lib/experiment-body.ts`'s `labOverrides`: caps lower
+  only, ranges, a tool the agent lacks, only_tools inside
+  tools_enabled, a named choice turned off or parked, the agent's named
+  default turned off): a refusal is said on its knob in the server's
+  words and holds Run; a tool turned off is greyed out of only_tools and
+  the named tool picker; the server's 400 is still shown verbatim when it
+  refuses anyway. A registration without defaults (a Studio older than
+  the field) shows the knobs with no default, greys the four new ones
+  and says why. The ack preview follows `park_on` and `only_tools`.
+  Both surfaces post byte-identical JSON for the same choices (pinned by
+  a table over `testdata/api/runtimes.golden.json` and a parity test).
+  Panel: +2,821 B gzip (ledger row F3, of a +3,072 B estimate).
+
 - **The transcript as of a step** (ADR 0029): `GET
   /api/runs/{id}/transcript?step=N` adds `step`, `messages` — what step
   N's model call carried, the replay prefix for `from_step` N — and

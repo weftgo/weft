@@ -3,7 +3,7 @@
 // only what changed), and the kept prefix's transcript edits
 // (editFieldsOf, wireEdits). Shared by the playground page and the run
 // page's replay drawer (plan F1): one form, one body, one wire.
-import type { AgentView, Message, PlaygroundRunBody, RuntimeView } from "@/lib/api"
+import type { AgentDefaults, AgentView, Message, PlaygroundRunBody, RuntimeView, ToolChoiceWire } from "@/lib/api"
 import { placeBatches } from "@/lib/events"
 import { endsInAnsweredCalls, maxFromStep, transcriptStepCount } from "@/lib/replay"
 import type { TranscriptBatch } from "@/lib/events"
@@ -26,6 +26,9 @@ export interface VariantFields {
    * never a turn — or fork, a new session with lineage whose next
    * turn is the input. */
   thread: ThreadMode
+  /** The option lab's knobs (plan F3); absent is every knob at the
+   * agent's default. */
+  lab?: LabFields
 }
 
 /** toolsOffFor turns the hand-off's tools= (the names left ON) into
@@ -74,7 +77,7 @@ export function pickTarget(
  * what changed (§10.1): an unchanged prompt is not an override, and
  * no tool turned off sends no tools_enabled. */
 export function overridesOf(
-  variant: Pick<VariantFields, "instructions" | "toolsOff" | "model" | "thinking">,
+  variant: Pick<VariantFields, "instructions" | "toolsOff" | "model" | "thinking" | "lab">,
   agent: AgentView
 ): NonNullable<PlaygroundRunBody["overrides"]> {
   const overrides: NonNullable<PlaygroundRunBody["overrides"]> = {}
@@ -94,7 +97,9 @@ export function overridesOf(
   }
   if (variant.model) overrides.model = variant.model
   if (variant.thinking) overrides.thinking = variant.thinking
-  return overrides
+  const lab = labOverrides(variant.lab, agent, overrides.tools_enabled ?? [])
+  if (lab.problems.length) throw new Error(lab.problems[0].message)
+  return { ...overrides, ...lab.overrides }
 }
 
 /**
@@ -328,4 +333,227 @@ export function wireEdits(drafts: EditDraft[]): unknown[] {
     ...(e.toolResult ? { tool_result: e.toolResult } : {}),
     ...(e.content ? { content: e.content } : {}),
   }))
+}
+
+// ── The option lab (plan F3) ─────────────────────────────────────
+// Every run option the core exposes as narrowing or neutral, as the
+// form holds it: a knob left empty (or equal to the agent's default)
+// is no override — the wire's "absent keeps the agent's value". The
+// rules mirror the server's by name (studio/playground.go's
+// checkRegistered, weft/runtime's validate); the server stays the
+// authority and its 400 is shown verbatim. One function for both
+// surfaces: the panel's drawer builds its overrides here too, so the
+// two post byte-identical JSON for the same choices.
+
+/** The option lab's draft: every knob as text ("" = no override), the
+ * tool sets as names ([] = no override). */
+export interface LabFields {
+  max_steps: string
+  parallelism: string
+  temperature: string
+  top_p: string
+  max_tokens: string
+  seed: string
+  /** Stop sequences, one per line. */
+  stop: string
+  /** "" keeps the agent's tool_choice. */
+  tool_choice: "" | ToolChoiceWire["mode"]
+  tool_choice_name: string
+  park_on: string[]
+  only_tools: string[]
+}
+
+export const emptyLab = (): LabFields => ({
+  max_steps: "",
+  parallelism: "",
+  temperature: "",
+  top_p: "",
+  max_tokens: "",
+  seed: "",
+  stop: "",
+  tool_choice: "",
+  tool_choice_name: "",
+  park_on: [],
+  only_tools: [],
+})
+
+/** Each knob's name on both surfaces' forms. */
+export const LAB_LABELS: Record<keyof LabFields, string> = {
+  max_steps: "max steps",
+  parallelism: "parallelism",
+  temperature: "temperature",
+  top_p: "top_p",
+  max_tokens: "max tokens",
+  seed: "seed",
+  stop: "stop (one per line)",
+  tool_choice: "tool choice",
+  tool_choice_name: "tool",
+  park_on: "park on",
+  only_tools: "only tools",
+}
+
+/** The numeric knobs, in wire order: options first, then params. */
+export const LAB_NUMBERS = ["max_steps", "parallelism", "temperature", "top_p", "max_tokens", "seed"] as const
+export type LabNumber = (typeof LAB_NUMBERS)[number]
+
+/** The knobs the server refuses on a registration that predates the
+ * option lab, and its sentence. */
+export const LAB_NEW: (keyof LabFields)[] = ["top_p", "max_tokens", "seed", "stop", "tool_choice", "park_on", "only_tools"]
+export const LAB_PREDATES =
+  "runtime predates the option lab: upgrade weft/runtime to use params, tool_choice, park_on, only_tools"
+
+/** One refusal the form found, on the knob it names. */
+export interface LabProblem {
+  field: keyof LabFields | "lab"
+  message: string
+}
+
+/** labLacksDefaults: the registration carries no option-lab defaults
+ * — the server's own test (tool_choice mode unset). /api/runtimes
+ * omits them only when Studio itself predates the field; a current
+ * Studio fills an old runtime's in (its caps, tool_choice auto), and
+ * then the server's 400 is the one that says so, shown verbatim. */
+export function labLacksDefaults(agent: Pick<AgentView, "defaults">): boolean {
+  return !agent.defaults?.tool_choice.mode
+}
+
+/** labDefault is the agent's default for a knob as the form shows it,
+ * greyed: "" when the registration reports none. */
+export function labDefault(key: keyof LabFields, d: AgentDefaults | undefined): string {
+  if (!d) return ""
+  switch (key) {
+    case "stop":
+      return (d.stop ?? []).join("\n")
+    case "tool_choice":
+      return d.tool_choice.mode
+    case "tool_choice_name":
+      return d.tool_choice.name ?? ""
+    case "park_on":
+    case "only_tools":
+      return ""
+  }
+  const v = (d as unknown as Record<string, unknown>)[key]
+  return typeof v === "number" ? String(v) : ""
+}
+
+/** stopsOf splits the stop field: one sequence per line, empty lines
+ * dropped. */
+const stopsOf = (s: string) => s.split("\n").filter((x) => x !== "")
+
+/** inOrder keeps the agent's tool order (both surfaces send the same
+ * array whatever the clicks' order). */
+const inOrder = (names: string[], tools: string[]) => tools.filter((t) => names.includes(t))
+
+/**
+ * labOverrides turns the lab into the command's typed fields and the
+ * problems that would make the server refuse it. enabled is the
+ * tools_enabled the command sends ([] = none). A knob equal to the
+ * agent's default is no override (§10.1: only what changed).
+ */
+export function labOverrides(
+  lab: LabFields | undefined,
+  agent: Pick<AgentView, "name" | "defaults"> & { tools: { name: string }[] },
+  enabled: string[]
+): { overrides: Partial<NonNullable<PlaygroundRunBody["overrides"]>>; problems: LabProblem[] } {
+  const out: Partial<NonNullable<PlaygroundRunBody["overrides"]>> = {}
+  const problems: LabProblem[] = []
+  const d = agent.defaults
+  const tools = agent.tools.map((t) => t.name)
+  const no = (field: keyof LabFields, message: string) => problems.push({ field, message })
+  if (!lab) lab = emptyLab()
+  const options: Record<string, number> = {}
+  const params: NonNullable<NonNullable<PlaygroundRunBody["overrides"]>["params"]> = {}
+  for (const key of LAB_NUMBERS) {
+    const s = lab[key].trim()
+    if (!s) continue
+    const v = Number(s)
+    const def = labDefault(key, d)
+    if (!Number.isFinite(v)) {
+      no(key, `${key} must be a number`)
+      continue
+    }
+    if (def !== "" && Number(def) === v) continue
+    const whole = Number.isInteger(v)
+    if (key === "max_steps" || key === "parallelism") {
+      if (!whole || v < 1) no(key, `${key} must be a whole number from 1`)
+      else if (def !== "" && v > Number(def)) no(key, `${key} may only lower the agent's cap`)
+      options[key] = v
+    } else if (key === "temperature") {
+      if (v < 0 || v > 2) no(key, "temperature must be between 0 and 2")
+      options[key] = v
+    } else if (key === "top_p") {
+      if (v < 0 || v > 1) no(key, "top_p must be between 0 and 1")
+      params.top_p = v
+    } else if (key === "max_tokens") {
+      if (!whole || v <= 0) no(key, "max_tokens must be positive")
+      params.max_tokens = v
+    } else {
+      if (!whole) no(key, "seed must be a whole number")
+      params.seed = v
+    }
+  }
+  const stop = stopsOf(lab.stop)
+  if (stop.length && stop.join("\n") !== labDefault("stop", d)) {
+    if (stop.length > 4) no("stop", `stop takes at most 4 sequences, got ${stop.length}`)
+    params.stop = stop
+  }
+  // params in the wire's order, whatever order the knobs were read.
+  const p: typeof params = {}
+  if (params.top_p !== undefined) p.top_p = params.top_p
+  if (params.max_tokens !== undefined) p.max_tokens = params.max_tokens
+  if (params.stop) p.stop = params.stop
+  if (params.seed !== undefined) p.seed = params.seed
+  for (const name of [...lab.only_tools, ...lab.park_on])
+    if (!tools.includes(name)) no(lab.only_tools.includes(name) ? "only_tools" : "park_on", `tool ${name} is not in agent ${agent.name}'s manifest`)
+  let only = inOrder(lab.only_tools, tools)
+  if (only.length === tools.length) only = []
+  for (const name of only)
+    if (enabled.length && !enabled.includes(name))
+      no("only_tools", `only_tools may only narrow tools_enabled: tool ${name} is not enabled`)
+  const park = inOrder(lab.park_on, tools)
+  const leavesOn = (name: string) => (only.length ? only.includes(name) : enabled.length ? enabled.includes(name) : true)
+  let tc: ToolChoiceWire | undefined
+  if (lab.tool_choice) {
+    tc = lab.tool_choice === "named" ? { mode: "named", name: lab.tool_choice_name } : { mode: lab.tool_choice }
+    if (d && tc.mode === d.tool_choice.mode && (tc.mode !== "named" || tc.name === d.tool_choice.name)) tc = undefined
+  }
+  if (tc?.mode === "named") {
+    const n = tc.name ?? ""
+    if (!n) no("tool_choice", "tool_choice named needs a tool name")
+    else if (!tools.includes(n)) no("tool_choice", `tool ${n} in tool_choice is not in agent ${agent.name}'s manifest`)
+    else if (!leavesOn(n)) no("tool_choice", `tool_choice names ${n}, which this command turns off`)
+    else if (park.includes(n)) no("tool_choice", `tool_choice names ${n}, which park_on parks: every forced call would park`)
+  } else if (!tc && d?.tool_choice.mode === "named" && d.tool_choice.name && !leavesOn(d.tool_choice.name))
+    no("tool_choice", `the agent's default tool_choice names ${d.tool_choice.name}, which this command turns off; send tool_choice`)
+  if (Object.keys(options).length) out.options = options
+  if (Object.keys(p).length) out.params = p
+  if (tc) out.tool_choice = tc
+  if (park.length) out.park_on = park
+  if (only.length) out.only_tools = only
+  if (labLacksDefaults(agent) && (out.params || out.tool_choice || out.park_on || out.only_tools))
+    problems.unshift({ field: "lab", message: LAB_PREDATES })
+  return { overrides: out, problems }
+}
+
+/** labProblems is a variant's option-lab refusals against its agent
+ * (the tools it leaves on as the tools_enabled it sends): what holds
+ * Run on Studio's surfaces, as the panel's labOf does in the drawer. */
+export function labProblems(variant: Pick<VariantFields, "lab" | "toolsOff">, agent: AgentView): LabProblem[] {
+  const names = agent.tools.map((t) => t.name)
+  const enabled = names.filter((n) => !variant.toolsOff.has(n))
+  return labOverrides(variant.lab, agent, enabled.length < names.length ? enabled : []).problems
+}
+
+/** labOn: the knob is an override (it differs from the agent's
+ * default and would be sent) — the form draws it in colour. */
+export function labOn(lab: LabFields | undefined, key: keyof LabFields, d: AgentDefaults | undefined): boolean {
+  if (!lab) return false
+  const v = lab[key]
+  if (Array.isArray(v)) return v.length > 0
+  if (key === "stop") return stopsOf(v).length > 0 && stopsOf(v).join("\n") !== labDefault(key, d)
+  if (key === "tool_choice")
+    return v !== "" && !(v === labDefault(key, d) && (v !== "named" || lab.tool_choice_name === labDefault("tool_choice_name", d)))
+  if (key === "tool_choice_name") return false
+  const def = labDefault(key, d)
+  return v.trim() !== "" && !(def !== "" && Number(def) === Number(v))
 }

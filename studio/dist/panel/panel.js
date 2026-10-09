@@ -209,15 +209,15 @@ function x(e) {
 }
 //#endregion
 //#region src/panel/detect.ts
-var S = "Weft-Scope";
-function C(e) {
+var ee = "Weft-Scope";
+function S(e) {
 	try {
 		return typeof e == "function" && Function.prototype.toString.call(e).includes("[native code]");
 	} catch {
 		return !1;
 	}
 }
-function ee(e) {
+function te(e) {
 	try {
 		if (typeof e == "string") return e;
 		if (e instanceof URL) return e.href;
@@ -227,7 +227,7 @@ function ee(e) {
 		return "";
 	}
 }
-function w(e) {
+function C(e) {
 	try {
 		let t = new URL(e).hostname.toLowerCase();
 		return t === "localhost" || t.endsWith(".localhost") || /^127(\.\d{1,3}){3}$/.test(t) || t === "[::1]";
@@ -235,13 +235,13 @@ function w(e) {
 		return !1;
 	}
 }
-function te(e, t) {
+function w(e, t) {
 	try {
 		if (new URL(e).origin === new URL(t).origin) return !0;
 	} catch {
 		return !1;
 	}
-	return w(e) && w(t);
+	return C(e) && C(t);
 }
 function ne(e) {
 	let t;
@@ -251,14 +251,14 @@ function ne(e) {
 		return null;
 	}
 	if (typeof t != "function") return null;
-	let n = (e.isNativeFetch ?? C)(t), r = !0, i = (t, n) => {
+	let n = (e.isNativeFetch ?? S)(t), r = !0, i = (t, n) => {
 		if (!r || !t || typeof t != "object") return;
 		let i = t.headers;
 		if (!i || typeof i.get != "function") return;
-		let a = i.get(S);
+		let a = i.get(ee);
 		if (!a) return;
-		let o = t.url, s = e.pageURL ? e.pageURL() : location.href, c = new URL(typeof o == "string" && o ? o : ee(n), s);
-		if (!te(c.href, s) || e.ignore?.(c.href)) return;
+		let o = t.url, s = e.pageURL ? e.pageURL() : location.href, c = new URL(typeof o == "string" && o ? o : te(n), s);
+		if (!w(c.href, s) || e.ignore?.(c.href)) return;
 		let l = x(a);
 		(l.publicId || l.session || l.flow || l.run) && e.onScope(l, c.pathname);
 	}, a = function(...e) {
@@ -295,27 +295,27 @@ function ne(e) {
 }
 //#endregion
 //#region src/panel/layout.ts
-var T = [
+var re = [
 	"float",
 	"right",
 	"bottom",
 	"left",
 	"top"
-], E = [
+], T = [
 	"story",
 	"request",
 	"timeline",
 	"raw"
-], re = "weft.devtools", D = (e, t, n) => Math.min(Math.max(e, t), Math.max(t, n)), ie = () => window.innerWidth || 1024, ae = () => window.innerHeight || 768;
-function oe(e, t, n) {
+], ie = "weft.devtools", ae = (e, t, n) => Math.min(Math.max(e, t), Math.max(t, n)), E = () => window.innerWidth || 1024, oe = () => window.innerHeight || 768;
+function se(e, t, n) {
 	let r = e.endsWith("-dock");
 	return {
 		mode: n === "float" ? "float" : r || n === "dock" ? "dock" : "float",
 		side: r ? e.slice(0, -5) : "right",
 		open: n === "pill" ? !1 : n === "float" || n === "dock" || t,
 		hidden: n === "hidden",
-		x: e === "bottom-left" ? 16 : ie() - 520 - 16,
-		y: ae() - 560 - 16,
+		x: e === "bottom-left" ? 16 : E() - 520 - 16,
+		y: oe() - 560 - 16,
 		w: 520,
 		h: 560,
 		d: 460,
@@ -326,16 +326,16 @@ function oe(e, t, n) {
 		debug: !1
 	};
 }
-function se() {
+function ce() {
 	try {
 		return window.localStorage;
 	} catch {
 		return null;
 	}
 }
-function ce() {
+function le() {
 	try {
-		let e = JSON.parse(se()?.getItem("weft.devtools") ?? "null");
+		let e = JSON.parse(ce()?.getItem("weft.devtools") ?? "null");
 		if (!e || typeof e != "object" || e.v !== 1) return {};
 		let t = {};
 		for (let [n, r] of Object.entries({
@@ -357,12 +357,12 @@ function ce() {
 			"right",
 			"bottom",
 			"top"
-		].includes(e.side) && (t.side = e.side), E.includes(t.tab) || (t.tab = t.raw ? "raw" : "story"), t;
+		].includes(e.side) && (t.side = e.side), T.includes(t.tab) || (t.tab = t.raw ? "raw" : "story"), t;
 	} catch {
 		return {};
 	}
 }
-var le = [
+var ue = [
 	"mode",
 	"side",
 	"open",
@@ -372,35 +372,35 @@ var le = [
 	"w",
 	"h",
 	"d"
-], ue = (e) => le.some((t) => Object.hasOwn(e, t));
-function de(e, t) {
+], de = (e) => ue.some((t) => Object.hasOwn(e, t));
+function fe(e, t) {
 	try {
 		let n = { v: 1 };
-		for (let [r, i] of Object.entries(e)) (t || !le.includes(r)) && (n[r] = i);
-		se()?.setItem(re, JSON.stringify(n));
+		for (let [r, i] of Object.entries(e)) (t || !ue.includes(r)) && (n[r] = i);
+		ce()?.setItem(ie, JSON.stringify(n));
 	} catch {}
 }
-function fe() {
+function pe() {
 	let e = !1;
 	try {
-		let t = se();
-		e = t?.getItem("weft_debug") === "1", e && (t?.setItem(re, JSON.stringify({
+		let t = ce();
+		e = t?.getItem("weft_debug") === "1", e && (t?.setItem(ie, JSON.stringify({
 			v: 1,
-			...ce(),
+			...le(),
 			debug: !0
 		})), t?.removeItem("weft_debug"));
 	} catch {}
-	return e || ce().debug === !0;
+	return e || le().debug === !0;
 }
-var pe = (e) => e === "left" || e === "right";
-function me(e) {
-	let t = ie(), n = ae();
-	e.w = D(e.w, Math.min(360, t - 16), t - 16), e.h = D(e.h, Math.min(280, n - 16), n - 16), e.x = D(e.x, 0, t - e.w), e.y = D(e.y, 0, n - e.h);
-	let r = pe(e.side) ? t : n, i = pe(e.side) ? 360 : 280;
-	e.d = D(e.d, Math.min(i, r - 16), r - 16);
-}
+var me = (e) => e === "left" || e === "right";
 function he(e) {
-	let t = ie();
+	let t = E(), n = oe();
+	e.w = ae(e.w, Math.min(360, t - 16), t - 16), e.h = ae(e.h, Math.min(280, n - 16), n - 16), e.x = ae(e.x, 0, t - e.w), e.y = ae(e.y, 0, n - e.h);
+	let r = me(e.side) ? t : n, i = me(e.side) ? 360 : 280;
+	e.d = ae(e.d, Math.min(i, r - 16), r - 16);
+}
+function ge(e) {
+	let t = E();
 	if (t < 480) return {
 		cls: "weft-sheet",
 		style: {},
@@ -418,7 +418,7 @@ function he(e) {
 		width: e.w,
 		sheet: !1
 	};
-	let n = pe(e.side);
+	let n = me(e.side);
 	return {
 		cls: `weft-docked weft-side-${e.side}`,
 		style: n ? { width: `${e.d}px` } : { height: `${e.d}px` },
@@ -426,26 +426,26 @@ function he(e) {
 		sheet: !1
 	};
 }
-function ge(e) {
-	return e.mode === "float" ? e.x + e.w / 2 < ie() / 2 ? "bottom-left" : "bottom-right" : e.side === "left" ? "bottom-left" : e.side === "top" ? "top-right" : "bottom-right";
+function _e(e) {
+	return e.mode === "float" ? e.x + e.w / 2 < E() / 2 ? "bottom-left" : "bottom-right" : e.side === "left" ? "bottom-left" : e.side === "top" ? "top-right" : "bottom-right";
 }
-var _e = "--weft-devtools-inset", ve = `var(${_e})`, ye = class {
+var ve = "--weft-devtools-inset", ye = `var(${ve})`, be = class {
 	prev = null;
 	apply(e, t) {
 		let n = document.documentElement.style, r = e ? `padding-${e}` : "";
 		if (this.prev && this.prev.prop !== r && this.restore(), !e) return;
-		let i = (e) => [n.getPropertyValue(e), n.getPropertyPriority(e)], a = n.getPropertyValue(r) === ve;
+		let i = (e) => [n.getPropertyValue(e), n.getPropertyPriority(e)], a = n.getPropertyValue(r) === ye;
 		this.prev ? a || (this.prev.was[1] = i(r)) : this.prev = {
 			prop: r,
-			was: [i(_e), i(r)]
-		}, n.getPropertyValue(_e) !== t && n.setProperty(_e, t), a || n.setProperty(r, ve);
+			was: [i(ve), i(r)]
+		}, n.getPropertyValue(ve) !== t && n.setProperty(ve, t), a || n.setProperty(r, ye);
 	}
 	restore() {
 		let e = this.prev;
 		if (!e) return;
 		this.prev = null;
 		let t = document.documentElement.style;
-		[_e, e.prop].forEach((n, r) => {
+		[ve, e.prop].forEach((n, r) => {
 			let [i, a] = e.was[r];
 			i ? t.setProperty(n, i, a) : t.removeProperty(n);
 		});
@@ -453,38 +453,38 @@ var _e = "--weft-devtools-inset", ve = `var(${_e})`, ye = class {
 };
 //#endregion
 //#region src/panel/theme.ts
-function be(e) {
+function xe(e) {
 	let t = String(e ?? "").trim().toLowerCase();
 	return t === "light" || t === "dark" ? t : "auto";
 }
-var xe = (e) => {
-	let t = be(e);
+var Se = (e) => {
+	let t = xe(e);
 	return t === "auto" ? "" : t;
 };
-function Se() {
+function Ce() {
 	try {
 		let e = document.documentElement;
-		return xe(e.getAttribute("data-theme")) || (e.classList.contains("dark") ? "dark" : e.classList.contains("light") ? "light" : xe(getComputedStyle(e).getPropertyValue("color-scheme")));
+		return Se(e.getAttribute("data-theme")) || (e.classList.contains("dark") ? "dark" : e.classList.contains("light") ? "light" : Se(getComputedStyle(e).getPropertyValue("color-scheme")));
 	} catch {
 		return "";
 	}
 }
-var Ce = "(prefers-color-scheme: dark)";
-function we(e) {
+var we = "(prefers-color-scheme: dark)";
+function Te(e) {
 	try {
 		return typeof window.matchMedia == "function" ? window.matchMedia(e) : null;
 	} catch {
 		return null;
 	}
 }
-function Te() {
-	let e = we(Ce);
-	return e ? e.matches ? "dark" : we("(prefers-color-scheme: light)")?.matches ? "light" : "" : "";
+function Ee() {
+	let e = Te(we);
+	return e ? e.matches ? "dark" : Te("(prefers-color-scheme: light)")?.matches ? "light" : "" : "";
 }
-function Ee(e, t, n = Se) {
-	return e === "auto" ? xe(t) || n() || Te() || "dark" : e;
+function De(e, t, n = Ce) {
+	return e === "auto" ? Se(t) || n() || Ee() || "dark" : e;
 }
-var De = (e) => e === "auto" ? "light" : e === "light" ? "dark" : "auto", Oe = class {
+var Oe = (e) => e === "auto" ? "light" : e === "light" ? "dark" : "auto", ke = class {
 	obs = null;
 	mq = null;
 	cb = () => {};
@@ -492,7 +492,7 @@ var De = (e) => e === "auto" ? "light" : e === "light" ? "dark" : "auto", Oe = c
 	fire = () => {
 		this.cached = null, this.cb();
 	};
-	host = () => this.obs ? this.cached ??= Se() : Se();
+	host = () => this.obs ? this.cached ??= Ce() : Ce();
 	start(e) {
 		this.stop(), this.cb = e;
 		try {
@@ -503,7 +503,7 @@ var De = (e) => e === "auto" ? "light" : e === "light" ? "dark" : "auto", Oe = c
 		} catch {
 			this.obs = null;
 		}
-		this.mq = we(Ce);
+		this.mq = Te(we);
 		try {
 			this.mq?.addEventListener ? this.mq.addEventListener("change", this.fire, { passive: !0 }) : this.mq?.addListener(this.fire);
 		} catch {
@@ -520,62 +520,62 @@ var De = (e) => e === "auto" ? "light" : e === "light" ? "dark" : "auto", Oe = c
 };
 //#endregion
 //#region src/panel/config.ts
-function ke(e) {
+function Ae(e) {
 	let t = new Set(String(e ?? "").toLowerCase().split(",").map((e) => e.trim()).filter(Boolean));
 	if (t.has("off")) return "off";
 	let n = t.delete("headers"), r = t.delete("markers");
 	return t.size ? "" : n && r ? "headers,markers" : n ? "headers" : r ? "markers" : "";
 }
-var Ae = [
+var je = [
 	"bottom-right",
 	"bottom-left",
 	"right-dock",
 	"left-dock",
 	"top-dock",
 	"bottom-dock"
-], je = (() => {
+], Me = (() => {
 	try {
 		let e = document.currentScript;
 		return e && e.tagName === "SCRIPT" ? e : null;
 	} catch {
 		return null;
 	}
-})(), Me = (() => {
+})(), Ne = (() => {
 	try {
 		let e = import.meta.url;
 		return typeof e == "string" ? e : "";
 	} catch {
 		return "";
 	}
-})(), Ne = "__weftDevtoolsNpm", Pe = { npm: (() => {
+})(), Pe = "__weftDevtoolsNpm", Fe = { npm: (() => {
 	try {
-		return globalThis[Ne] === !0;
+		return globalThis[Pe] === !0;
 	} catch {
 		return !1;
 	}
 })() };
-function Fe() {
-	return Pe.npm;
+function Ie() {
+	return Fe.npm;
 }
-function Ie(e) {
-	Pe.npm = e;
+function Le(e) {
+	Fe.npm = e;
 }
-function Le() {
-	let e = Pe.npm;
-	if (!e && je?.isConnected) return je;
+function Re() {
+	let e = Fe.npm;
+	if (!e && Me?.isConnected) return Me;
 	try {
 		let t = document.querySelector("script[data-weft]");
 		if (t) return t;
-		if (e || !Me) return null;
+		if (e || !Ne) return null;
 		for (let e of Array.from(document.querySelectorAll("script[src]"))) try {
-			if (new URL(e.getAttribute("src") ?? "", document.baseURI).href === Me) return e;
+			if (new URL(e.getAttribute("src") ?? "", document.baseURI).href === Ne) return e;
 		} catch {}
 		return null;
 	} catch {
 		return null;
 	}
 }
-function Re(e, t) {
+function ze(e, t) {
 	try {
 		let n = new URL(e, t);
 		return n.protocol !== "http:" && n.protocol !== "https:" ? "" : (n.pathname.endsWith("/") || (n.pathname += "/"), n.toString());
@@ -583,21 +583,21 @@ function Re(e, t) {
 		return "";
 	}
 }
-function ze(e) {
+function Be(e) {
 	let t = e?.getAttribute("src");
 	if (!t) return "";
 	try {
-		return Re("./", new URL(t, document.baseURI).toString());
+		return ze("./", new URL(t, document.baseURI).toString());
 	} catch {
 		return "";
 	}
 }
-function Be(e) {
+function Ve(e) {
 	return (t) => {
 		if (!e) return null;
 		let n = {
 			endpoint: e.endpoint,
-			scope: Ve(e.scope),
+			scope: He(e.scope),
 			"public-id": e.publicId,
 			token: e.token,
 			detect: e.detect,
@@ -613,7 +613,7 @@ function Be(e) {
 		return n === void 0 ? null : String(n);
 	};
 }
-function Ve(e) {
+function He(e) {
 	if (typeof e == "string") return e;
 	if (e && typeof e == "object" && typeof e.publicId == "string") try {
 		return b(e);
@@ -621,7 +621,7 @@ function Ve(e) {
 		return;
 	}
 }
-function He() {
+function Ue() {
 	return (e) => {
 		try {
 			return document.querySelector(`meta[name="weft:${e}"]`)?.getAttribute("content") ?? null;
@@ -630,20 +630,20 @@ function He() {
 		}
 	};
 }
-var Ue = (e) => (t) => e?.getAttribute(`data-${t}`) ?? null;
-function We(e) {
-	let t = Le(), n = [
-		Be(e?.options),
-		Ue(e),
-		He(),
-		Ue(t)
+var We = (e) => (t) => e?.getAttribute(`data-${t}`) ?? null;
+function Ge(e) {
+	let t = Re(), n = [
+		Ve(e?.options),
+		We(e),
+		Ue(),
+		We(t)
 	], r = (e) => {
 		for (let t of n) {
 			let n = t(e);
 			if (n !== null && (e !== "endpoint" || n.trim() !== "")) return n;
 		}
 		return null;
-	}, i = ze(t), a = r("endpoint"), o = a === null ? i || Re("./", document.baseURI) : Re(a, document.baseURI), s = r("position"), c = r("open"), l = null;
+	}, i = Be(t), a = r("endpoint"), o = a === null ? i || ze("./", document.baseURI) : ze(a, document.baseURI), s = r("position"), c = r("open"), l = null;
 	for (let e of n) {
 		let t = e("scope");
 		if (t !== null) {
@@ -656,7 +656,7 @@ function We(e) {
 			break;
 		}
 	}
-	l ??= qe();
+	l ??= Je();
 	let u = r("detect"), d = r("mode") ?? "", f = (r("z-index") ?? "").trim();
 	return {
 		endpoint: o,
@@ -665,10 +665,10 @@ function We(e) {
 		publicId: l.publicId,
 		scope: l,
 		scopeExplicit: !!(l.publicId || l.session || l.flow || l.run),
-		urlScope: Xe(),
+		urlScope: Ze(),
 		token: r("token") ?? "",
-		detect: ke(u),
-		position: Ae.includes(s) ? s : "bottom-right",
+		detect: Ae(u),
+		position: je.includes(s) ? s : "bottom-right",
 		open: c === "true" || c === "",
 		mode: [
 			"float",
@@ -678,12 +678,12 @@ function We(e) {
 		].includes(d) ? d : "",
 		push: r("push") === "true",
 		zIndex: /^-?\d+$/.test(f) ? f : "",
-		theme: be(r("theme")),
+		theme: xe(r("theme")),
 		auto: r("auto") !== "false",
 		global: !["off", "false"].includes((r("global") ?? "").trim().toLowerCase())
 	};
 }
-async function Ge(e, t) {
+async function Ke(e, t) {
 	if (t?.aborted) return "";
 	try {
 		let n = await fetch(e, {
@@ -694,13 +694,13 @@ async function Ge(e, t) {
 		if (!n.ok) return "";
 		let r = await n.json();
 		if (!r || typeof r.endpoint != "string" || !r.endpoint) return "";
-		let i = Re(r.endpoint, e);
+		let i = ze(r.endpoint, e);
 		return !i || new URL(i).origin !== new URL(e).origin ? "" : i;
 	} catch {
 		return "";
 	}
 }
-function Ke() {
+function qe() {
 	try {
 		let e = window.__WEFT__?.publicId;
 		return e == null ? "" : String(e);
@@ -708,17 +708,17 @@ function Ke() {
 		return "";
 	}
 }
-function qe() {
+function Je() {
 	try {
 		let e = window.__WEFT__?.scope;
 		if (typeof e == "string") return x(e);
-		let t = Ve(e);
+		let t = He(e);
 		if (t !== void 0) return x(t);
 	} catch {}
-	return { publicId: Ke() };
+	return { publicId: qe() };
 }
-var Je = { href: () => location.href };
-function Ye(e) {
+var Ye = { href: () => location.href };
+function Xe(e) {
 	for (let t of e.replace(/^[?#]/, "").split(/[?&]/)) {
 		let e = t.indexOf("=");
 		if ((e < 0 ? t : t.slice(0, e)) !== "weft_scope") continue;
@@ -731,11 +731,11 @@ function Ye(e) {
 	}
 	return null;
 }
-function Xe(e = Je.href()) {
+function Ze(e = Ye.href()) {
 	try {
 		let t = new URL(e);
 		for (let e of [t.search, t.hash]) {
-			let t = Ye(e);
+			let t = Xe(e);
 			if (t === null) continue;
 			let n = x(t);
 			if (n.publicId && !/[;=]/.test(n.publicId)) return n;
@@ -743,22 +743,22 @@ function Xe(e = Je.href()) {
 	} catch {}
 	return null;
 }
-function Ze(e, t = Je.href()) {
-	return e.detect === "off" ? !1 : e.detect.includes("headers") ? !0 : w(t) && w(e.endpoint) && !e.token.startsWith("weft_pt.");
+function Qe(e, t = Ye.href()) {
+	return e.detect === "off" ? !1 : e.detect.includes("headers") ? !0 : C(t) && C(e.endpoint) && !e.token.startsWith("weft_pt.");
 }
-function Qe(e, t = Je.href()) {
-	return e.detect === "off" ? !1 : e.detect.includes("markers") ? !0 : w(t) || $e(e.token) !== "read";
+function $e(e, t = Ye.href()) {
+	return e.detect === "off" ? !1 : e.detect.includes("markers") ? !0 : C(t) || et(e.token) !== "read";
 }
-var $e = h;
-function et() {
+var et = h;
+function tt() {
 	try {
-		if (new URLSearchParams(location.search).get("weft") === "debug" || fe()) return !0;
+		if (new URLSearchParams(location.search).get("weft") === "debug" || pe()) return !0;
 	} catch {}
 	return !1;
 }
 //#endregion
 //#region src/lib/honesty.ts
-var O = {
+var D = {
 	truncated: {
 		label: "truncated",
 		reason: "a destination's size cap cut this content before it was stored (weft.content.truncated_bytes)",
@@ -816,7 +816,7 @@ var O = {
 		fix: "open the compaction record",
 		tone: "note"
 	}
-}, tt = {
+}, nt = {
 	truncated: {
 		log_cap: {
 			reason: "the app-log reader's candidate cap was reached before attribution; later lines of this run may be missing",
@@ -849,14 +849,14 @@ var O = {
 		reason: "a panel token is scoped to one public id and may not look up a session's: this route answers the dev token only",
 		fix: "ask with the server (dev) token, or use the public id the panel token was minted for"
 	} }
-}, nt = Object.keys(O);
-function rt(e) {
-	return e !== void 0 && Object.prototype.hasOwnProperty.call(O, e);
-}
+}, rt = Object.keys(D);
 function it(e) {
-	return e < 1024 ? `${e} B` : e < 1048576 ? `${(e / 1024).toFixed(1)} KiB` : `${(e / 1048576).toFixed(1)} MiB`;
+	return e !== void 0 && Object.prototype.hasOwnProperty.call(D, e);
 }
 function at(e) {
+	return e < 1024 ? `${e} B` : e < 1048576 ? `${(e / 1024).toFixed(1)} KiB` : `${(e / 1048576).toFixed(1)} MiB`;
+}
+function ot(e) {
 	if (typeof e != "object" || !e) return [];
 	let t = e, n = [], r = t["weft.content"];
 	(r === "stripped" || r === "none") && n.push({ hole: "stripped" }), r === "redacted" && n.push({ hole: "redacted" });
@@ -866,10 +866,10 @@ function at(e) {
 		bytes: i
 	}), n;
 }
-function ot(e) {
-	return `${tt.truncated?.result_cap.reason ?? ""} (${it(e)} cut)`;
+function st(e) {
+	return `${nt.truncated?.result_cap.reason ?? ""} (${at(e)} cut)`;
 }
-function k(...e) {
+function O(...e) {
 	let t = /* @__PURE__ */ new Map();
 	for (let n of e) for (let e of n ?? []) {
 		let n = e;
@@ -882,25 +882,25 @@ function k(...e) {
 		n.bytes && r.hole === "truncated" && (r.bytes = (r.bytes ?? 0) + n.bytes);
 	}
 	let n = (e) => {
-		let t = nt.indexOf(e);
-		return t < 0 ? nt.length : t;
+		let t = rt.indexOf(e);
+		return t < 0 ? rt.length : t;
 	};
 	return [...t.values()].sort((e, t) => n(e.hole) - n(t.hole));
 }
-function A(e) {
-	let t = rt(e.hole) ? O[e.hole] : void 0, n = rt(e.hole) ? tt[e.hole] : void 0, r = e.cause && n && Object.hasOwn(n, e.cause) ? n[e.cause] : void 0;
+function k(e) {
+	let t = it(e.hole) ? D[e.hole] : void 0, n = it(e.hole) ? nt[e.hole] : void 0, r = e.cause && n && Object.hasOwn(n, e.cause) ? n[e.cause] : void 0;
 	return {
-		label: e.hole === "truncated" && e.bytes && !e.cause ? `shortened by the recorder: ${it(e.bytes)} cut` : t?.label ?? e.hole,
+		label: e.hole === "truncated" && e.bytes && !e.cause ? `shortened by the recorder: ${at(e.bytes)} cut` : t?.label ?? e.hole,
 		reason: e.reason || r?.reason || t?.reason || e.hole,
 		fix: e.fix === "" ? void 0 : e.fix || r?.fix || t?.fix,
 		tone: t?.tone ?? "loss"
 	};
 }
-function st(e) {
-	let t = Array.isArray(e.holes) ? [...e.holes] : [];
-	return e.requests_badge === "not_recorded" && t.push({ hole: "not_recorded" }), e.status === "interrupted" && t.push({ hole: "interrupted" }), k(t);
-}
 function ct(e) {
+	let t = Array.isArray(e.holes) ? [...e.holes] : [];
+	return e.requests_badge === "not_recorded" && t.push({ hole: "not_recorded" }), e.status === "interrupted" && t.push({ hole: "interrupted" }), O(t);
+}
+function lt(e) {
 	let t = [];
 	e.status === "interrupted" && t.push({ hole: "interrupted" });
 	let n = Array.isArray(e.gaps) ? e.gaps : [];
@@ -909,43 +909,43 @@ function ct(e) {
 		reason: `${n.length} ${n.length === 1 ? "event" : "events"} missing (${n.length === 1 ? "position" : "positions"} ${n.slice(0, 8).join(", ")}${n.length > 8 ? ", …" : ""}): a destination dropped a batch`
 	}), e.stop_reason === "max_tokens" && t.push({ hole: "max_tokens" }), t;
 }
-function lt(e) {
+function ut(e) {
 	return e === "succeeded" || e === "failed";
 }
-var ut = "usage at finish", j = [
+var dt = "usage at finish", A = [
 	"system",
 	"tool_calls",
 	"tool_results",
 	"text",
 	"usage"
-], dt = {
+], ft = {
 	system: "system",
 	tool_calls: "tool calls",
 	tool_results: "tool results",
 	text: "text",
 	usage: "usage"
 };
-function ft(e, t) {
+function pt(e, t) {
 	return `diff?${new URLSearchParams({
 		a: e,
 		b: t
 	}).toString()}`;
 }
-var pt = {
+var mt = {
 	same: "same",
 	changed: "changed",
 	unknown: "not comparable",
 	missing: "missing"
-}, mt = {
+}, ht = {
 	same: "both runs recorded this column and it is the same",
 	changed: "both runs recorded this column and it differs",
 	unknown: "a side did not record this column (its holes say why): the two were not compared",
 	missing: "one run has no such step"
 };
-function ht(e, t) {
+function gt(e, t) {
 	return !e.a || !e.b || e.changes.includes("missing") ? "missing" : e.unknown.includes(t) ? "unknown" : e.changes.includes(t) ? "changed" : "same";
 }
-var gt = {
+var _t = {
 	subagent: {
 		label: "subagent",
 		title: "this step called a subagent: the child run's steps are its own, marked here, never aligned"
@@ -963,9 +963,9 @@ var gt = {
 		title: "this step ended in an error"
 	}
 };
-function _t(e) {
-	if (rt(e)) {
-		let t = O[e];
+function vt(e) {
+	if (it(e)) {
+		let t = D[e];
 		return {
 			mark: e,
 			label: t.label,
@@ -973,67 +973,67 @@ function _t(e) {
 			hole: e
 		};
 	}
-	let t = Object.hasOwn(gt, e) ? gt[e] : void 0;
+	let t = Object.hasOwn(_t, e) ? _t[e] : void 0;
 	return {
 		mark: e,
 		label: t?.label ?? e,
 		title: t?.title ?? e
 	};
 }
-function vt(e) {
-	return e ? k(e.holes) : [];
-}
 function yt(e) {
-	return k((Array.isArray(e.holes) ? e.holes : []).map((e) => e.hole === "truncated" && !e.cause ? {
+	return e ? O(e.holes) : [];
+}
+function bt(e) {
+	return O((Array.isArray(e.holes) ? e.holes : []).map((e) => e.hole === "truncated" && !e.cause ? {
 		...e,
 		cause: "response_cap"
 	} : e));
 }
-function bt(e, t = 160) {
+function xt(e, t = 160) {
 	return e.length > t ? `${e.slice(0, t - 1)}…` : e;
 }
-function xt(e) {
+function St(e) {
 	return e == null ? "" : typeof e == "string" ? e : JSON.stringify(e);
 }
-function St(e) {
+function Ct(e) {
 	return !!e && e.system === null && e.holes.some((e) => e.hole === "hidden");
 }
-function Ct(e, ...t) {
-	return e === "system" && t.some(St) ? "hidden" : void 0;
+function wt(e, ...t) {
+	return e === "system" && t.some(Ct) ? "hidden" : void 0;
 }
-function wt(e, t) {
+function Tt(e, t) {
 	if (!e) return "—";
 	switch (t) {
-		case "system": return e.system === null ? St(e) ? O.hidden.label : e.system_hash ? `#${e.system_hash.slice(0, 8)}` : "—" : e.system ? bt(e.system) : "(empty)";
-		case "tool_calls": return e.tool_calls.length ? bt(e.tool_calls.map((e) => `${e.name}(${xt(e.args)})`).join(", ")) : "(none)";
-		case "tool_results": return e.tool_results.length ? bt(e.tool_results.map((e) => `${e.is_error ? "error: " : ""}${e.content}`).join(" · ")) : "(none)";
-		case "text": return e.text === null ? "—" : e.text ? bt(e.text) : "(none)";
+		case "system": return e.system === null ? Ct(e) ? D.hidden.label : e.system_hash ? `#${e.system_hash.slice(0, 8)}` : "—" : e.system ? xt(e.system) : "(empty)";
+		case "tool_calls": return e.tool_calls.length ? xt(e.tool_calls.map((e) => `${e.name}(${St(e.args)})`).join(", ")) : "(none)";
+		case "tool_results": return e.tool_results.length ? xt(e.tool_results.map((e) => `${e.is_error ? "error: " : ""}${e.content}`).join(" · ")) : "(none)";
+		case "text": return e.text === null ? "—" : e.text ? xt(e.text) : "(none)";
 		case "usage": return `${e.usage.input_tokens}→${e.usage.output_tokens}`;
 	}
 }
-function Tt(e) {
-	let t = vt(e);
+function Et(e) {
+	let t = yt(e);
 	return {
 		side: e,
-		marks: (e?.marks ?? []).filter((e) => !t.some((t) => t.hole === e)).map(_t),
+		marks: (e?.marks ?? []).filter((e) => !t.some((t) => t.hole === e)).map(vt),
 		holes: t
 	};
 }
-function Et(e) {
+function Dt(e) {
 	let t = {};
-	for (let n of j) t[n] = ht(e, n);
+	for (let n of A) t[n] = gt(e, n);
 	return t;
 }
-function Dt(e) {
+function Ot(e) {
 	let t = [...e.steps].sort((e, t) => e.step - t.step).map((e) => {
-		let t = Et(e);
+		let t = Dt(e);
 		return {
 			step: e.step,
 			changed: e.changed,
 			cells: t,
-			changedColumns: j.filter((e) => t[e] === "changed").map((e) => dt[e]),
-			a: Tt(e.a),
-			b: Tt(e.b)
+			changedColumns: A.filter((e) => t[e] === "changed").map((e) => ft[e]),
+			a: Et(e.a),
+			b: Et(e.b)
 		};
 	});
 	return {
@@ -1041,23 +1041,23 @@ function Dt(e) {
 		b: e.b,
 		rows: t,
 		markers: t.filter((e) => e.changed).map((e) => e.step),
-		holes: yt(e),
-		unknown: t.reduce((e, t) => e + j.filter((e) => t.cells[e] === "unknown").length, 0)
+		holes: bt(e),
+		unknown: t.reduce((e, t) => e + A.filter((e) => t.cells[e] === "unknown").length, 0)
 	};
 }
-function Ot(e) {
-	return j.every((t) => e.cells[t] === "missing") ? `changed at step ${e.step} · ${e.a.side ? "only in the base run" : "missing from the base run"}` : `changed at step ${e.step}${e.changedColumns.length ? ` · ${e.changedColumns.join(", ")}` : ""}`;
-}
 function kt(e) {
-	let t = e.markers.length, n = e.rows.filter((e) => e.changed && j.every((t) => e.cells[t] === "missing")).length, r = t ? `${t} of ${e.rows.length} ${e.rows.length === 1 ? "step" : "steps"} changed${n ? ` (${n} only in one run)` : ""} · first at step ${e.markers[0]}` : `no step changed of ${e.rows.length}`;
+	return A.every((t) => e.cells[t] === "missing") ? `changed at step ${e.step} · ${e.a.side ? "only in the base run" : "missing from the base run"}` : `changed at step ${e.step}${e.changedColumns.length ? ` · ${e.changedColumns.join(", ")}` : ""}`;
+}
+function At(e) {
+	let t = e.markers.length, n = e.rows.filter((e) => e.changed && A.every((t) => e.cells[t] === "missing")).length, r = t ? `${t} of ${e.rows.length} ${e.rows.length === 1 ? "step" : "steps"} changed${n ? ` (${n} only in one run)` : ""} · first at step ${e.markers[0]}` : `no step changed of ${e.rows.length}`;
 	return e.unknown ? `${r} · ${e.unknown} ${e.unknown === 1 ? "cell" : "cells"} not comparable` : r;
 }
 //#endregion
 //#region src/lib/api.ts
-function At(e) {
+function jt(e) {
 	let t = e?.batches;
 	return Array.isArray(t) ? { batches: t.map((e) => {
-		let t = jt(e.messages), n = !Array.isArray(e.messages) || t.length !== e.messages.length;
+		let t = Mt(e.messages), n = !Array.isArray(e.messages) || t.length !== e.messages.length;
 		return {
 			index: e.index,
 			step: e.step,
@@ -1068,7 +1068,7 @@ function At(e) {
 		};
 	}) } : { batches: [] };
 }
-function jt(e) {
+function Mt(e) {
 	if (!Array.isArray(e)) return [];
 	let t = [];
 	for (let n of e) {
@@ -1081,12 +1081,12 @@ function jt(e) {
 	}
 	return t;
 }
-function M(e) {
+function j(e) {
 	return typeof e.badge == "string";
 }
 //#endregion
 //#region src/lib/requests.ts
-function Mt(e) {
+function Nt(e) {
 	let t = /* @__PURE__ */ new Map(), n = [...e].sort((e, t) => e.step - t.step || e.index - t.index), r;
 	for (let e of n) {
 		let n = t.get(e.step);
@@ -1099,10 +1099,10 @@ function Mt(e) {
 	}
 	return t;
 }
-function N(e) {
+function M(e) {
 	return e.length > 12 ? e.slice(0, 12) : e;
 }
-function Nt(e) {
+function Pt(e) {
 	let t = e.body.params, n = (e) => e == null ? "adapter default" : JSON.stringify(e);
 	return [
 		["temperature", n(t.temperature)],
@@ -1112,29 +1112,29 @@ function Nt(e) {
 		["seed", n(t.seed)]
 	];
 }
-function Pt(e) {
-	return Nt(e).map(([e, t]) => `${e} ${t}`).join(" · ");
+function Ft(e) {
+	return Pt(e).map(([e, t]) => `${e} ${t}`).join(" · ");
 }
-var Ft = "request not recorded by weft v0.9.0 or earlier", It = "this step ran, but no request record names it";
-function Lt(e) {
+var It = "request not recorded by weft v0.9.0 or earlier", Lt = "this step ran, but no request record names it";
+function Rt(e) {
 	return {
 		reason: `the panel reads a run's first ${e} requests; this step's are past them`,
 		fix: "open the run in Studio (⤢)"
 	};
 }
-var Rt = "the transcript does not hold the messages this request counts", zt = "no messages record names this request (its compaction view could not be recorded)", Bt = "diff not drawn: the prompt was cut", Vt = "not stored yet — the run is still running";
+var zt = "the transcript does not hold the messages this request counts", Bt = "no messages record names this request (its compaction view could not be recorded)", Vt = "diff not drawn: the prompt was cut", Ht = "not stored yet — the run is still running";
 //#endregion
 //#region src/lib/events.ts
-function P(e) {
+function N(e) {
 	return typeof e == "string" ? e : "";
 }
-function Ht(e, t) {
+function Ut(e, t) {
 	return typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : t;
 }
-function Ut(e) {
+function Wt(e) {
 	return typeof e == "number" && Number.isFinite(e) && e > 0;
 }
-function Wt(e) {
+function Gt(e) {
 	let t = typeof e == "object" ? e : null;
 	return {
 		...t,
@@ -1142,7 +1142,7 @@ function Wt(e) {
 		output_tokens: t?.output_tokens ?? 0
 	};
 }
-function F() {
+function P() {
 	let e = {
 		runId: "",
 		steps: [],
@@ -1173,30 +1173,30 @@ function F() {
 	return {
 		push(l, u, d) {
 			i = u ?? r, r++;
-			let f = at(d);
-			f.length && (t[i] = f, e.holes = k(e.holes, f));
+			let f = ot(d);
+			f.length && (t[i] = f, e.holes = O(e.holes, f));
 			let p, m;
 			if (typeof l == "object" && l) {
 				switch (l.type) {
 					case "run_start":
-						e.runId = P(l.id), e.agent = typeof l.agent == "string" ? l.agent : void 0, e.model = l.model, e.startPos = i;
+						e.runId = N(l.id), e.agent = typeof l.agent == "string" ? l.agent : void 0, e.model = l.model, e.startPos = i;
 						break;
 					case "step_start":
-						a = !0, p = o(Ht(l.index, c()));
+						a = !0, p = o(Ut(l.index, c()));
 						break;
 					case "text_delta":
-						p = o(c()), p.text += P(l.text);
+						p = o(c()), p.text += N(l.text);
 						break;
 					case "reasoning_delta":
-						p = o(c()), p.reasoning += P(l.text);
+						p = o(c()), p.reasoning += N(l.text);
 						break;
 					case "tool_args_delta":
-						n.set(l.name, (n.get(l.name) ?? "") + P(l.args));
+						n.set(l.name, (n.get(l.name) ?? "") + N(l.args));
 						break;
 					case "tool_start":
 						p = o(c()), m = {
-							callId: P(l.call_id),
-							name: P(l.name),
+							callId: N(l.call_id),
+							name: N(l.name),
 							args: l.args,
 							streamedArgs: n.get(l.name) ?? "",
 							state: "running",
@@ -1207,7 +1207,7 @@ function F() {
 						let t = s(l.call_id);
 						if (m = t, t) {
 							t.result = {
-								content: P(l.content),
+								content: N(l.content),
 								isError: !!l.is_error
 							}, t.state = "done", t.finishPos = i;
 							for (let n of e.steps) n.toolCalls.includes(t) && (p = n, i > n.to && (n.to = i));
@@ -1215,25 +1215,25 @@ function F() {
 						break;
 					}
 					case "step_finish":
-						p = o(Ht(l.index, c())), p.finish = {
-							reason: P(l.reason),
+						p = o(Ut(l.index, c())), p.finish = {
+							reason: N(l.reason),
 							raw: l.raw,
-							usage: Wt(l.usage)
-						}, Ut(l.latency_ms) && (p.finish.latencyMs = l.latency_ms), Ut(l.ttft_ms) && (p.finish.ttftMs = l.ttft_ms);
+							usage: Gt(l.usage)
+						}, Wt(l.latency_ms) && (p.finish.latencyMs = l.latency_ms), Wt(l.ttft_ms) && (p.finish.ttftMs = l.ttft_ms);
 						break;
 					case "steered": {
-						let e = o(Ht(l.step, c()));
+						let e = o(Ut(l.step, c()));
 						p = e;
-						let t = (Array.isArray(l.messages) ? l.messages : []).map((e) => qt(e)).filter(Boolean).join("\n");
+						let t = (Array.isArray(l.messages) ? l.messages : []).map((e) => Jt(e)).filter(Boolean).join("\n");
 						e.steer = {
 							text: (e.steer?.text ? e.steer.text + "\n" : "") + t,
 							pos: i
 						};
 						break;
 					}
-					case "run_finish": e.finished = !0, e.usage = Wt(l.usage), e.pending = Array.isArray(l.pending) ? l.pending : [], e.finishPos = i;
+					case "run_finish": e.finished = !0, e.usage = Gt(l.usage), e.pending = Array.isArray(l.pending) ? l.pending : [], e.finishPos = i;
 				}
-				f.length && (p && (p.holes = k(p.holes, f)), m && (m.holes = k(m.holes, f)));
+				f.length && (p && (p.holes = O(p.holes, f)), m && (m.holes = O(m.holes, f)));
 			}
 		},
 		result() {
@@ -1252,7 +1252,7 @@ function F() {
 		}
 	};
 }
-function Gt(e, t) {
+function Kt(e, t) {
 	for (let t of e.steps) for (let e of t.toolCalls) delete e.childRunId;
 	let n = /* @__PURE__ */ new Map();
 	for (let r of t) {
@@ -1269,7 +1269,7 @@ function Gt(e, t) {
 	for (let i of t) i.parent_call_id && !n.has(i) && r(i, e.steps, !0);
 	return e;
 }
-function Kt(e) {
+function qt(e) {
 	let t = e?.messages;
 	if (!Array.isArray(t)) return [];
 	let n = [];
@@ -1283,14 +1283,14 @@ function Kt(e) {
 	}
 	return n;
 }
-function qt(e, t = "") {
+function Jt(e, t = "") {
 	let n = e?.content;
 	return Array.isArray(n) ? n.filter((e) => e?.type === "text" && typeof e.text == "string").map((e) => e.text).join(t) : "";
 }
-function Jt(e) {
-	let t = Array.isArray(e) ? e : [], n = Yt(t);
+function Yt(e) {
+	let t = Array.isArray(e) ? e : [], n = Xt(t);
 	return t.map((e, t) => {
-		let r = Kt(e), i = e?.step, a = e?.input, o = e?.badge;
+		let r = qt(e), i = e?.step, a = e?.input, o = e?.badge;
 		return typeof i == "number" && i >= 0 && typeof a == "boolean" && o !== "derived" ? {
 			step: i,
 			input: a,
@@ -1303,34 +1303,34 @@ function Jt(e) {
 		};
 	});
 }
-function Yt(e) {
+function Xt(e) {
 	let t = -1;
 	return e.map((e, n) => {
-		let r = Kt(e), i = e?.input, a = typeof i == "boolean" ? i : n === 0 && (r.length !== 1 || r[0].role !== "assistant");
+		let r = qt(e), i = e?.input, a = typeof i == "boolean" ? i : n === 0 && (r.length !== 1 || r[0].role !== "assistant");
 		return !a && r.some((e) => e.role === "assistant") && t++, {
 			step: Math.max(t, 0),
 			input: a
 		};
 	});
 }
-function Xt(e) {
+function Zt(e) {
 	let t = [], n = [];
-	for (let r of Jt(e)) (r.input ? t : n).push(...r.messages);
+	for (let r of Yt(e)) (r.input ? t : n).push(...r.messages);
 	return {
 		input: t,
 		produced: n
 	};
 }
-function Zt(e) {
-	let { input: t } = Xt(e);
+function Qt(e) {
+	let { input: t } = Zt(e);
 	for (let e = t.length - 1; e >= 0; e--) {
 		if (t[e].role !== "user") continue;
-		let n = qt(t[e], "\n");
+		let n = Jt(t[e], "\n");
 		if (n) return n;
 	}
 	return null;
 }
-function Qt(e, t, n) {
+function $t(e, t, n) {
 	let r = n?.replace === !0, i = {
 		...e,
 		steps: [...e.steps],
@@ -1344,7 +1344,7 @@ function Qt(e, t, n) {
 		};
 		return o.add(n), i.steps[e] = n, n;
 	};
-	for (let e of Jt(t)) {
+	for (let e of Yt(t)) {
 		if (e.input) continue;
 		let t = i.steps.findIndex((t) => t.index === e.step);
 		if (t < 0) {
@@ -1355,7 +1355,7 @@ function Qt(e, t, n) {
 		for (let t of e.messages) {
 			if (t.role !== "assistant") continue;
 			e.derived && (n.derived = !0);
-			let i = qt(t);
+			let i = Jt(t);
 			i && (r || !n.text) && (n.text = i);
 			let a = t.content.filter((e) => e?.type === "reasoning" && typeof e.text == "string").map((e) => e.text).join("");
 			a && (r || !n.reasoning) && (n.reasoning = a);
@@ -1368,28 +1368,28 @@ function Qt(e, t, n) {
 	}
 	return i.unplaced = a, i;
 }
-function $t(e, t, n) {
+function en(e, t, n) {
 	n?.status === "running" && (n = void 0);
 	let r = [...e.holes ?? []];
 	return e.derived && r.push({
 		hole: "derived",
 		reason: "this step's words come from a transcript batch whose step was inferred, not stored"
-	}), e.finish?.reason === "max_tokens" && r.push({ hole: "max_tokens" }), k(Array.isArray(n?.holes) ? n.holes : [], r, (t ?? []).filter((e) => e.hole === "not_recorded" || e.hole === "stripped"));
-}
-function en(e, t) {
-	return k(Array.isArray(e?.holes) ? e.holes : [], t.holes);
+	}), e.finish?.reason === "max_tokens" && r.push({ hole: "max_tokens" }), O(Array.isArray(n?.holes) ? n.holes : [], r, (t ?? []).filter((e) => e.hole === "not_recorded" || e.hole === "stripped"));
 }
 function tn(e, t) {
+	return O(Array.isArray(e?.holes) ? e.holes : [], t.holes);
+}
+function nn(e, t) {
 	return e.state === "done" ? "done" : t === "running" ? "running" : "never";
 }
-var nn = /…\[truncated (\d+) bytes\]/u, rn = /^tool call (.+) was not executed: the response hit the output token limit$/, an = "this call was not executed: the response hit the output token limit, and the loop retried the step with a full budget";
-function on(e) {
-	let t = nn.exec(e);
+var rn = /…\[truncated (\d+) bytes\]/u, an = /^tool call (.+) was not executed: the response hit the output token limit$/, on = "this call was not executed: the response hit the output token limit, and the loop retried the step with a full budget";
+function sn(e) {
+	let t = rn.exec(e);
 	if (t) return {
 		kind: "bytes",
 		bytes: Number(t[1])
 	};
-	let n = rn.exec(e);
+	let n = an.exec(e);
 	return n ? {
 		kind: "call",
 		tool: n[1]
@@ -1397,8 +1397,8 @@ function on(e) {
 }
 //#endregion
 //#region src/lib/experiment-body.ts
-function sn(e) {
-	let t = Jt(e), n = Array.isArray(e) ? e : [], r = n.length > 0 && n.every((e) => typeof e.step == "number" && e.step >= 0 && typeof e.input == "boolean"), i = [];
+function cn(e) {
+	let t = Yt(e), n = Array.isArray(e) ? e : [], r = n.length > 0 && n.every((e) => typeof e.step == "number" && e.step >= 0 && typeof e.input == "boolean"), i = [];
 	for (let [e, a] of t.entries()) {
 		let t = n[e]?.input;
 		if (!(typeof t == "boolean" ? t : a.input)) for (let t of a.messages) i.push({
@@ -1412,8 +1412,8 @@ function sn(e) {
 	}
 	return i;
 }
-function cn(e) {
-	let t = sn(e), n = t.filter((e) => e.m.role === "assistant"), r = d(n.map((e) => e.step)), i = f(t.map((e) => e.m));
+function ln(e) {
+	let t = cn(e), n = t.filter((e) => e.m.role === "assistant"), r = d(n.map((e) => e.step)), i = f(t.map((e) => e.m));
 	return {
 		stepCount: r,
 		answeredCalls: i,
@@ -1421,34 +1421,143 @@ function cn(e) {
 		max: p(r, i)
 	};
 }
+var un = () => ({
+	max_steps: "",
+	parallelism: "",
+	temperature: "",
+	top_p: "",
+	max_tokens: "",
+	seed: "",
+	stop: "",
+	tool_choice: "",
+	tool_choice_name: "",
+	park_on: [],
+	only_tools: []
+}), F = {
+	max_steps: "max steps",
+	parallelism: "parallelism",
+	temperature: "temperature",
+	top_p: "top_p",
+	max_tokens: "max tokens",
+	seed: "seed",
+	stop: "stop (one per line)",
+	tool_choice: "tool choice",
+	tool_choice_name: "tool",
+	park_on: "park on",
+	only_tools: "only tools"
+}, dn = [
+	"max_steps",
+	"parallelism",
+	"temperature",
+	"top_p",
+	"max_tokens",
+	"seed"
+], fn = [
+	"top_p",
+	"max_tokens",
+	"seed",
+	"stop",
+	"tool_choice",
+	"park_on",
+	"only_tools"
+], pn = "runtime predates the option lab: upgrade weft/runtime to use params, tool_choice, park_on, only_tools";
+function mn(e) {
+	return !e.defaults?.tool_choice.mode;
+}
+function I(e, t) {
+	if (!t) return "";
+	switch (e) {
+		case "stop": return (t.stop ?? []).join("\n");
+		case "tool_choice": return t.tool_choice.mode;
+		case "tool_choice_name": return t.tool_choice.name ?? "";
+		case "park_on":
+		case "only_tools": return "";
+	}
+	let n = t[e];
+	return typeof n == "number" ? String(n) : "";
+}
+var hn = (e) => e.split("\n").filter((e) => e !== ""), gn = (e, t) => t.filter((t) => e.includes(t));
+function _n(e, t, n) {
+	let r = {}, i = [], a = t.defaults, o = t.tools.map((e) => e.name), s = (e, t) => i.push({
+		field: e,
+		message: t
+	});
+	e ||= un();
+	let c = {}, l = {};
+	for (let t of dn) {
+		let n = e[t].trim();
+		if (!n) continue;
+		let r = Number(n), i = I(t, a);
+		if (!Number.isFinite(r)) {
+			s(t, `${t} must be a number`);
+			continue;
+		}
+		if (i !== "" && Number(i) === r) continue;
+		let o = Number.isInteger(r);
+		t === "max_steps" || t === "parallelism" ? (!o || r < 1 ? s(t, `${t} must be a whole number from 1`) : i !== "" && r > Number(i) && s(t, `${t} may only lower the agent's cap`), c[t] = r) : t === "temperature" ? ((r < 0 || r > 2) && s(t, "temperature must be between 0 and 2"), c[t] = r) : t === "top_p" ? ((r < 0 || r > 1) && s(t, "top_p must be between 0 and 1"), l.top_p = r) : t === "max_tokens" ? ((!o || r <= 0) && s(t, "max_tokens must be positive"), l.max_tokens = r) : (o || s(t, "seed must be a whole number"), l.seed = r);
+	}
+	let u = hn(e.stop);
+	u.length && u.join("\n") !== I("stop", a) && (u.length > 4 && s("stop", `stop takes at most 4 sequences, got ${u.length}`), l.stop = u);
+	let d = {};
+	l.top_p !== void 0 && (d.top_p = l.top_p), l.max_tokens !== void 0 && (d.max_tokens = l.max_tokens), l.stop && (d.stop = l.stop), l.seed !== void 0 && (d.seed = l.seed);
+	for (let n of [...e.only_tools, ...e.park_on]) o.includes(n) || s(e.only_tools.includes(n) ? "only_tools" : "park_on", `tool ${n} is not in agent ${t.name}'s manifest`);
+	let f = gn(e.only_tools, o);
+	f.length === o.length && (f = []);
+	for (let e of f) n.length && !n.includes(e) && s("only_tools", `only_tools may only narrow tools_enabled: tool ${e} is not enabled`);
+	let p = gn(e.park_on, o), m = (e) => f.length ? f.includes(e) : !n.length || n.includes(e), h;
+	if (e.tool_choice && (h = e.tool_choice === "named" ? {
+		mode: "named",
+		name: e.tool_choice_name
+	} : { mode: e.tool_choice }, a && h.mode === a.tool_choice.mode && (h.mode !== "named" || h.name === a.tool_choice.name) && (h = void 0)), h?.mode === "named") {
+		let e = h.name ?? "";
+		e ? o.includes(e) ? m(e) ? p.includes(e) && s("tool_choice", `tool_choice names ${e}, which park_on parks: every forced call would park`) : s("tool_choice", `tool_choice names ${e}, which this command turns off`) : s("tool_choice", `tool ${e} in tool_choice is not in agent ${t.name}'s manifest`) : s("tool_choice", "tool_choice named needs a tool name");
+	} else !h && a?.tool_choice.mode === "named" && a.tool_choice.name && !m(a.tool_choice.name) && s("tool_choice", `the agent's default tool_choice names ${a.tool_choice.name}, which this command turns off; send tool_choice`);
+	return Object.keys(c).length && (r.options = c), Object.keys(d).length && (r.params = d), h && (r.tool_choice = h), p.length && (r.park_on = p), f.length && (r.only_tools = f), mn(t) && (r.params || r.tool_choice || r.park_on || r.only_tools) && i.unshift({
+		field: "lab",
+		message: pn
+	}), {
+		overrides: r,
+		problems: i
+	};
+}
+function vn(e, t, n) {
+	if (!e) return !1;
+	let r = e[t];
+	if (Array.isArray(r)) return r.length > 0;
+	if (t === "stop") return hn(r).length > 0 && hn(r).join("\n") !== I(t, n);
+	if (t === "tool_choice") return r !== "" && (r !== I(t, n) || r === "named" && e.tool_choice_name !== I("tool_choice_name", n));
+	if (t === "tool_choice_name") return !1;
+	let i = I(t, n);
+	return r.trim() !== "" && (i === "" || Number(i) !== Number(r));
+}
 //#endregion
 //#region src/panel/render.ts
-function I(e, t, n, r) {
+function L(e, t, n, r) {
 	let i = document.createElement(e);
 	if (t && (i.className = t), typeof n == "string") i.textContent = n;
 	else if (Array.isArray(n)) for (let e of n) i.appendChild(e);
 	if (r) for (let [e, t] of Object.entries(r)) i.setAttribute(e, t);
 	return i;
 }
-function L(e, t, n, r = !1) {
+function R(e, t, n, r = !1) {
 	let i = e._on ??= {}, a = r ? `${t}!` : t;
 	return a in i || e.addEventListener(t, (t) => e._on?.[a]?.(t, e), r), i[a] = n, e;
 }
-var ln = (e) => e.nodeType === 1 ? e.getAttribute("data-key") : null, un = (e, t) => e.nodeName === t.nodeName && ln(e) === ln(t), dn = (e) => e.nodeType === 1 ? e.className : "";
-function fn(e, t) {
+var yn = (e) => e.nodeType === 1 ? e.getAttribute("data-key") : null, bn = (e, t) => e.nodeName === t.nodeName && yn(e) === yn(t), xn = (e) => e.nodeType === 1 ? e.className : "";
+function Sn(e, t) {
 	let n = Array.from(e.childNodes), r = /* @__PURE__ */ new Map(), i = [];
 	for (let e of n) {
-		let t = ln(e);
+		let t = yn(e);
 		t === null ? i.push(e) : r.set(t, [...r.get(t) ?? [], e]);
 	}
 	let a = t.map((e) => {
-		let t = ln(e);
+		let t = yn(e);
 		if (t !== null) {
 			let n = r.get(t)?.shift();
-			return [e, n && un(n, e) ? n : void 0];
+			return [e, n && bn(n, e) ? n : void 0];
 		}
-		let n = i.findIndex((t) => un(t, e) && dn(t) === dn(e));
-		return n < 0 && (n = i.findIndex((t) => un(t, e))), [e, n < 0 ? void 0 : i.splice(n, 1)[0]];
+		let n = i.findIndex((t) => bn(t, e) && xn(t) === xn(e));
+		return n < 0 && (n = i.findIndex((t) => bn(t, e))), [e, n < 0 ? void 0 : i.splice(n, 1)[0]];
 	}), o = new Set(a.map((e) => e[1]));
 	for (let t of n) o.has(t) || e.removeChild(t);
 	let s = e.getRootNode().activeElement ?? null, c = e.firstChild;
@@ -1461,10 +1570,10 @@ function fn(e, t) {
 				e.insertBefore(c, t), c = n;
 			}
 		}
-		r === c ? c = c.nextSibling : e.insertBefore(r, c), n && pn(n, t);
+		r === c ? c = c.nextSibling : e.insertBefore(r, c), n && Cn(n, t);
 	}
 }
-function pn(e, t) {
+function Cn(e, t) {
 	if (e.nodeType !== 1) {
 		e.nodeValue !== t.nodeValue && (e.nodeValue = t.nodeValue);
 		return;
@@ -1474,20 +1583,20 @@ function pn(e, t) {
 	for (let e of Array.from(r.attributes)) n.getAttribute(e.name) !== e.value && n.setAttribute(e.name, e.value);
 	let i = r._on, a = n._on;
 	if (a) for (let e in a) i?.[e] || (a[e] = void 0);
-	if (i) for (let e in i) L(n, e.replace("!", ""), i[e], e.endsWith("!"));
-	fn(n, Array.from(r.childNodes)), /^(INPUT|TEXTAREA|SELECT)$/.test(n.tagName) && n.value !== r.value && (n.value = r.value), n.tagName === "INPUT" && n.checked !== r.checked && (n.checked = r.checked);
+	if (i) for (let e in i) R(n, e.replace("!", ""), i[e], e.endsWith("!"));
+	Sn(n, Array.from(r.childNodes)), /^(INPUT|TEXTAREA|SELECT)$/.test(n.tagName) && n.value !== r.value && (n.value = r.value), n.tagName === "INPUT" && n.checked !== r.checked && (n.checked = r.checked);
 }
-function mn(e, t) {
+function wn(e, t) {
 	return JSON.stringify(e, null, t);
 }
-function hn(e) {
+function Tn(e) {
 	try {
-		return mn(e, 2) ?? String(e);
+		return wn(e, 2) ?? String(e);
 	} catch {
 		return String(e);
 	}
 }
-function gn(e) {
+function En(e) {
 	let t = e.map((e) => ({
 		name: e.name,
 		a: Date.parse(e.start),
@@ -1500,8 +1609,8 @@ function gn(e) {
 		placed: t.length
 	};
 }
-function _n(e) {
-	let { parsed: t, from: n, to: r } = gn(e);
+function Dn(e) {
+	let { parsed: t, from: n, to: r } = En(e);
 	if (!t.length) return [];
 	let i = Math.max(1, r - n);
 	return t.map((e) => ({
@@ -1513,60 +1622,60 @@ function _n(e) {
 }
 //#endregion
 //#region src/panel/badges.ts
-function vn(e, t) {
+function On(e, t) {
 	return t ? `${e} — fix: ${t}` : e;
 }
-function R(e, t = {}) {
-	let n = A({
+function z(e, t = {}) {
+	let n = k({
 		hole: e,
 		...t
-	}), r = I("span", `weft-badge ${n.tone === "loss" ? "weft-warn-badge" : "weft-info"}`, t.label ?? n.label, {
-		title: vn(n.reason, n.fix),
+	}), r = L("span", `weft-badge ${n.tone === "loss" ? "weft-warn-badge" : "weft-info"}`, t.label ?? n.label, {
+		title: On(n.reason, n.fix),
 		"data-hole": e
 	});
-	return r.appendChild(I("span", "weft-sr", ` — ${vn(n.reason, n.fix)}`)), r;
+	return r.appendChild(L("span", "weft-sr", ` — ${On(n.reason, n.fix)}`)), r;
 }
-function yn(e) {
+function kn(e) {
 	if (!e.length) return null;
-	let t = I("span", "weft-holes");
-	for (let n of e) t.appendChild(R(n.hole, n));
+	let t = L("span", "weft-holes");
+	for (let n of e) t.appendChild(z(n.hole, n));
 	return t;
 }
-function bn(e) {
-	let t = A(e), n = R(e.hole, e);
-	return n.lastChild?.remove(), I("div", `weft-note${t.tone === "loss" ? " weft-warn" : ""}`, [n, document.createTextNode(` — ${t.reason}${t.fix ? ` · fix: ${t.fix}` : ""}`)]);
+function An(e) {
+	let t = k(e), n = z(e.hole, e);
+	return n.lastChild?.remove(), L("div", `weft-note${t.tone === "loss" ? " weft-warn" : ""}`, [n, document.createTextNode(` — ${t.reason}${t.fix ? ` · fix: ${t.fix}` : ""}`)]);
 }
-function xn(e, t) {
-	let n = e === "not_recorded" && !t ? Ft : A({ hole: e }).label;
+function jn(e, t) {
+	let n = e === "not_recorded" && !t ? It : k({ hole: e }).label;
 	return n.startsWith("request") ? n : `request: ${n}`;
 }
-function Sn(e, t = {}) {
-	let n = A({
+function Mn(e, t = {}) {
+	let n = k({
 		hole: e,
 		...t
-	}), r = R(e, {
+	}), r = z(e, {
 		...t,
-		label: t.label ?? xn(e, t.cause)
+		label: t.label ?? jn(e, t.cause)
 	});
-	return r.lastChild?.remove(), [r, I("div", "weft-reason", [n.reason, n.fix && `fix: ${n.fix}`].filter(Boolean).join(" — "))];
+	return r.lastChild?.remove(), [r, L("div", "weft-reason", [n.reason, n.fix && `fix: ${n.fix}`].filter(Boolean).join(" — "))];
 }
-function Cn(e) {
-	return R("truncated", {
-		label: `request: ${O.truncated.label} — first ${e.toLocaleString("en-US").replace(",", " ")} requests`,
-		...Lt(e)
+function Nn(e) {
+	return z("truncated", {
+		label: `request: ${D.truncated.label} — first ${e.toLocaleString("en-US").replace(",", " ")} requests`,
+		...Rt(e)
 	});
 }
-function wn(e) {
-	return e.kind === "bytes" ? R("truncated", {
+function Pn(e) {
+	return e.kind === "bytes" ? z("truncated", {
 		cause: "result_cap",
-		reason: ot(e.bytes)
-	}) : R("max_tokens", {
-		reason: an,
+		reason: st(e.bytes)
+	}) : z("max_tokens", {
+		reason: on,
 		fix: ""
 	});
 }
-function Tn(e, t) {
-	let n = A({
+function Fn(e, t) {
+	let n = k({
 		hole: "not_recorded",
 		cause: "no_public_id",
 		reason: e,
@@ -1574,31 +1683,31 @@ function Tn(e, t) {
 	});
 	return `${n.label}: ${n.reason} · fix: ${n.fix}`;
 }
-var En = {
+var In = {
 	none: "captured none (weft.Content(false), or no destination takes content)",
 	stripped: "otel.NoContent()"
 };
-function Dn(e, t, n = 0) {
+function Ln(e, t, n = 0) {
 	let r = e?.events.find((e) => typeof e.attrs?.["weft.content"] == "string")?.attrs?.["weft.content"], i = t?.content?.latest, a = !r && i && (!e || i.run_id === e.id) ? i : null, o = r ?? a?.mark ?? "", s = e?.capped && n ? ` · first ${n} events` : "";
-	if (Object.hasOwn(En, o)) {
-		let e = A({
+	if (Object.hasOwn(In, o)) {
+		let e = k({
 			hole: "stripped",
 			reason: a?.note,
 			fix: a?.fix
 		});
 		return {
-			text: `content off · ${En[o]}${s}`,
-			title: vn(e.reason, e.fix),
+			text: `content off · ${In[o]}${s}`,
+			title: On(e.reason, e.fix),
 			hole: "stripped"
 		};
 	}
 	let c = 0, l = 0;
 	for (let t of Object.values(e?.folded.eventHoles ?? {})) for (let e of t) e.hole === "truncated" && (c++, l += e.bytes ?? 0);
 	if (c) {
-		let e = A({ hole: "truncated" });
+		let e = k({ hole: "truncated" });
 		return {
-			text: `content on · ${c} ${c === 1 ? "event" : "events"} shortened (${it(l)} cut)${s}`,
-			title: vn(e.reason, e.fix),
+			text: `content on · ${c} ${c === 1 ? "event" : "events"} shortened (${at(l)} cut)${s}`,
+			title: On(e.reason, e.fix),
 			hole: "truncated"
 		};
 	}
@@ -1607,16 +1716,16 @@ function Dn(e, t, n = 0) {
 		title: a?.note || "the record marks this run's content stored in full"
 	} : null;
 }
-var On = {
+var Rn = {
 	provider: "weft/runtime",
 	name: "scripted"
 };
-function kn(e, t) {
-	let n = [], r = (e, t, r) => n.push(I("span", "weft-chip weft-tag", e, {
+function zn(e, t) {
+	let n = [], r = (e, t, r) => n.push(L("span", "weft-chip weft-tag", e, {
 		title: t,
 		"data-weft-chip": r
 	}));
-	e.model.provider === On.provider && e.model.name === On.name && r(e.usage.input_tokens + e.usage.output_tokens === 0 ? "scripted (0 tokens)" : "scripted", "model weft/runtime/scripted: the scripted engine replayed the source run's recorded turns", "scripted");
+	e.model.provider === Rn.provider && e.model.name === Rn.name && r(e.usage.input_tokens + e.usage.output_tokens === 0 ? "scripted (0 tokens)" : "scripted", "model weft/runtime/scripted: the scripted engine replayed the source run's recorded turns", "scripted");
 	let i = e.meta["weft.session.forked_from"];
 	if (i && r(`fork of ${i}`, `weft.session.forked_from = ${i}: a thread fork's run (<session>#<entry>)`, "fork"), e.forked_from) {
 		let [n, i] = e.forked_from.split("#");
@@ -1624,47 +1733,47 @@ function kn(e, t) {
 	} else e.experiment_id && r("experiment", `weft.experiment.id = ${e.experiment_id}`, "experiment");
 	return n;
 }
-function An(e) {
+function Bn(e) {
 	return {
 		hole: "derived",
 		reason: `the step's catalog could not be read (${e}): the list is the runtime's registration`
 	};
 }
-function jn(e, t) {
-	let n = bn(e);
-	return n.setAttribute("data-weft-catalog-hole", e.hole), n.appendChild(I("div", "weft-reason", t ? "the step's catalog is not readable here: the verdicts below cover the tools the runtime registers" : "the step's catalog is not readable here, and no runtime registers the agent")), n;
+function Vn(e, t) {
+	let n = An(e);
+	return n.setAttribute("data-weft-catalog-hole", e.hole), n.appendChild(L("div", "weft-reason", t ? "the step's catalog is not readable here: the verdicts below cover the tools the runtime registers" : "the step's catalog is not readable here, and no runtime registers the agent")), n;
 }
-function Mn() {
+function Hn() {
 	return {
 		hole: "not_recorded",
 		reason: "the step carries no request record: the tools it offered are unknown"
 	};
 }
-function Nn(e) {
+function Un(e) {
 	return {
 		hole: "truncated",
-		...Lt(e)
+		...Rt(e)
 	};
 }
-function Pn() {
+function Wn() {
 	return {
 		hole: "not_recorded",
-		reason: `request: ${Vt}`
+		reason: `request: ${Ht}`
 	};
 }
-function Fn() {
+function Gn() {
 	return {
 		hole: "not_recorded",
 		cause: "not_served"
 	};
 }
-function In() {
+function Kn() {
 	return {
 		hole: "not_recorded",
 		reason: "the step carries no request record: the system prompt it was called with is unknown"
 	};
 }
-function Ln(e) {
+function qn(e) {
 	return {
 		hole: "derived",
 		reason: `the step's prompt could not be read (${e}): the registered prompt is pre-filled`
@@ -1672,20 +1781,20 @@ function Ln(e) {
 }
 //#endregion
 //#region src/lib/live.ts
-function Rn(e) {
+function Jn(e) {
 	let [[t, n]] = Object.entries(e);
 	return `${encodeURIComponent(t)}=${encodeURIComponent(n)}`;
 }
-var zn = 6e4, Bn = class extends Error {
+var Yn = 6e4, Xn = class extends Error {
 	status;
 	constructor(e) {
 		super(`live grant refused: ${e}`), this.status = e;
 	}
 };
-function Vn(e) {
+function Zn(e) {
 	return (e ?? ["event", "run"]).join(",");
 }
-async function Hn(e, t, n, r, i) {
+async function Qn(e, t, n, r, i) {
 	let a = {
 		Accept: "application/json",
 		"Content-Type": "application/json"
@@ -1696,35 +1805,35 @@ async function Hn(e, t, n, r, i) {
 		headers: a,
 		body: JSON.stringify({
 			...n,
-			kinds: Vn(r)
+			kinds: Zn(r)
 		}),
 		signal: i
 	});
-	if (!o.ok) throw new Bn(o.status);
+	if (!o.ok) throw new Xn(o.status);
 	let s = await o.json();
-	if (typeof s?.sig != "string" || !s.sig) throw new Bn(o.status);
+	if (typeof s?.sig != "string" || !s.sig) throw new Xn(o.status);
 	return {
 		sig: s.sig,
-		exp: Un(s.exp, o.headers.get("Date"))
+		exp: $n(s.exp, o.headers.get("Date"))
 	};
 }
-function Un(e, t, n = Date.now()) {
+function $n(e, t, n = Date.now()) {
 	let r = typeof e == "string" ? Date.parse(e) : NaN, i = t ? Date.parse(t) : NaN;
-	return !Number.isFinite(r) || !Number.isFinite(i) ? n + zn : n + Math.min(zn, Math.max(0, r - i - 1e3));
+	return !Number.isFinite(r) || !Number.isFinite(i) ? n + Yn : n + Math.min(Yn, Math.max(0, r - i - 1e3));
 }
-function Wn(e, t, n, r) {
+function er(e, t, n, r) {
 	let i = new URL(e);
-	return i.search = Rn(t), i.searchParams.set("kinds", Vn(n)), i.searchParams.set("sig", r.sig), i.toString();
+	return i.search = Jn(t), i.searchParams.set("kinds", Zn(n)), i.searchParams.set("sig", r.sig), i.toString();
 }
-function Gn(e, t = Date.now()) {
+function tr(e, t = Date.now()) {
 	return t >= e.exp;
 }
 //#endregion
 //#region src/panel/client.ts
-function Kn(e, t) {
+function nr(e, t) {
 	return new URL(t, new URL("api/", e.base)).toString();
 }
-var z = class extends Error {
+var B = class extends Error {
 	status;
 	code;
 	body;
@@ -1732,10 +1841,10 @@ var z = class extends Error {
 		super(n), this.status = e, this.code = t, this.body = r;
 	}
 };
-async function B(e, t, n) {
+async function V(e, t, n) {
 	let r = { Accept: "application/json" };
 	e.token && (r.Authorization = `Bearer ${e.token}`);
-	let i = await fetch(Kn(e, t), {
+	let i = await fetch(nr(e, t), {
 		headers: r,
 		signal: n
 	});
@@ -1745,38 +1854,38 @@ async function B(e, t, n) {
 			let r = await i.json();
 			n = r, r.error && (e = r.error.code ?? e, t = r.error.message ?? t);
 		} catch {}
-		throw new z(i.status, e, t, n);
+		throw new B(i.status, e, t, n);
 	}
 	return await i.json();
 }
-function qn(e, t) {
-	return B(e, "meta", t);
+function rr(e, t) {
+	return V(e, "meta", t);
 }
-function Jn(e, t, n, r) {
-	return B(e, ft(t, n), r);
+function ir(e, t, n, r) {
+	return V(e, pt(t, n), r);
 }
-function Yn(e, t, n) {
+function ar(e, t, n) {
 	let r = new URLSearchParams(t).toString();
-	return B(e, `runs${r ? `?${r}` : ""}`, n);
+	return V(e, `runs${r ? `?${r}` : ""}`, n);
 }
-function Xn(e, t, n) {
-	return B(e, `runs/${encodeURIComponent(t)}`, n);
+function or(e, t, n) {
+	return V(e, `runs/${encodeURIComponent(t)}`, n);
 }
-function Zn(e, t, n, r) {
-	return B(e, `runs/${encodeURIComponent(t)}/events?after=${n}&limit=500`, r);
+function sr(e, t, n, r) {
+	return V(e, `runs/${encodeURIComponent(t)}/events?after=${n}&limit=500`, r);
 }
-function Qn(e, t, n) {
-	return B(e, `runs/${encodeURIComponent(t)}/transcript`, n).then(At);
+function cr(e, t, n) {
+	return V(e, `runs/${encodeURIComponent(t)}/transcript`, n).then(jt);
 }
-var $n = 1e3;
-async function er(e, t, n) {
+var lr = 1e3;
+async function ur(e, t, n) {
 	let r = [], i = 0;
 	for (let a = 0; a < 10; a++) {
 		let a;
 		try {
-			a = await B(e, `runs/${encodeURIComponent(t)}/requests?limit=${$n}${i ? `&from=${i}` : ""}`, n);
+			a = await V(e, `runs/${encodeURIComponent(t)}/requests?limit=${lr}${i ? `&from=${i}` : ""}`, n);
 		} catch (e) {
-			let t = e instanceof z && e.status === 403 ? e.body : null;
+			let t = e instanceof B && e.status === 403 ? e.body : null;
 			if (t?.badge === "hidden") return {
 				requests: [],
 				badge: "hidden",
@@ -1799,49 +1908,49 @@ async function er(e, t, n) {
 		truncated: !0
 	};
 }
-async function tr(e, t) {
-	let n = await B(e, `runs/${encodeURIComponent(t)}/tools`).catch(() => null);
+async function dr(e, t) {
+	let n = await V(e, `runs/${encodeURIComponent(t)}/tools`).catch(() => null);
 	return n?.badge === "stripped" ? {
 		badge: n.badge,
 		reason: n.reason,
 		fix: n.fix
 	} : void 0;
 }
-function nr(e, t, n) {
-	return B(e, `runs/${encodeURIComponent(t)}/spans`, n);
+function fr(e, t, n) {
+	return V(e, `runs/${encodeURIComponent(t)}/spans`, n);
 }
-function rr(e, t, n) {
+function pr(e, t, n) {
 	let r = new URLSearchParams(t).toString();
-	return B(e, `sessions${r ? `?${r}` : ""}`, n);
+	return V(e, `sessions${r ? `?${r}` : ""}`, n);
 }
-function ir(e, t, n) {
-	return B(e, `sessions/${encodeURIComponent(t)}/public_id`, n);
+function mr(e, t, n) {
+	return V(e, `sessions/${encodeURIComponent(t)}/public_id`, n);
 }
-function ar(e, t) {
-	return B(e, "runtimes", t);
+function hr(e, t) {
+	return V(e, "runtimes", t);
 }
-function or(e, t) {
-	return fr(e, "playground/runs", t);
+function gr(e, t) {
+	return Sr(e, "playground/runs", t);
 }
-function sr(e, t) {
-	return B(e, `playground/commands/${encodeURIComponent(t)}`);
+function _r(e, t) {
+	return V(e, `playground/commands/${encodeURIComponent(t)}`);
 }
-function cr(e, t, n) {
-	return fr(e, `runs/${encodeURIComponent(t)}/approvals`, n);
+function vr(e, t, n) {
+	return Sr(e, `runs/${encodeURIComponent(t)}/approvals`, n);
 }
-function lr(e, t, n) {
-	return dr(e, `runtimes/${encodeURIComponent(t)}/breakpoints`, { tools: n });
+function yr(e, t, n) {
+	return xr(e, `runtimes/${encodeURIComponent(t)}/breakpoints`, { tools: n });
 }
-function ur(e, t, n) {
-	return fr(e, `runs/${encodeURIComponent(t)}/steer`, { message: n });
+function br(e, t, n) {
+	return Sr(e, `runs/${encodeURIComponent(t)}/steer`, { message: n });
 }
-async function dr(e, t, n) {
+async function xr(e, t, n) {
 	let r = {
 		Accept: "application/json",
 		"Content-Type": "application/json"
 	};
 	e.token && (r.Authorization = `Bearer ${e.token}`);
-	let i = await fetch(Kn(e, t), {
+	let i = await fetch(nr(e, t), {
 		method: "PUT",
 		headers: r,
 		body: JSON.stringify(n)
@@ -1852,17 +1961,17 @@ async function dr(e, t, n) {
 			let n = await i.json();
 			n.error && (e = n.error.code ?? e, t = n.error.message ?? t);
 		} catch {}
-		throw new z(i.status, e, t);
+		throw new B(i.status, e, t);
 	}
 	return await i.json();
 }
-async function fr(e, t, n) {
+async function Sr(e, t, n) {
 	let r = {
 		Accept: "application/json",
 		"Content-Type": "application/json"
 	};
 	e.token && (r.Authorization = `Bearer ${e.token}`);
-	let i = await fetch(Kn(e, t), {
+	let i = await fetch(nr(e, t), {
 		method: "POST",
 		headers: r,
 		body: JSON.stringify(n)
@@ -1873,12 +1982,12 @@ async function fr(e, t, n) {
 			let n = await i.json();
 			n.error && (e = n.error.code ?? e, t = n.error.message ?? t);
 		} catch {}
-		throw new z(i.status, e, t);
+		throw new B(i.status, e, t);
 	}
 	return await i.json();
 }
-var pr = 1e4;
-function mr(e, t) {
+var Cr = 1e4;
+function wr(e, t) {
 	let n = !1, r = !1, i = null, a = null, o = 0, s = 0, c = /* @__PURE__ */ new Set(), l = () => {
 		n = !0, o++, i && clearTimeout(i), i = null, a?.close();
 	}, u = (e) => {
@@ -1890,11 +1999,11 @@ function mr(e, t) {
 	if (typeof EventSource > "u") return { close: l };
 	let d = () => {
 		let r = ++o;
-		Hn(Kn(e, "live-grant"), e.token, t.selector, t.kinds).then((e) => {
+		Qn(nr(e, "live-grant"), e.token, t.selector, t.kinds).then((e) => {
 			!n && r === o && f(e);
 		}, (e) => {
 			if (!(n || r !== o)) {
-				if (t.onRefused && e instanceof Bn && e.status === 403) {
+				if (t.onRefused && e instanceof Xn && e.status === 403) {
 					l();
 					try {
 						t.onRefused();
@@ -1907,7 +2016,7 @@ function mr(e, t) {
 	}, f = (o) => {
 		let f;
 		try {
-			f = new EventSource(Wn(Kn(e, "live"), t.selector, t.kinds, o));
+			f = new EventSource(er(nr(e, "live"), t.selector, t.kinds, o));
 		} catch {
 			l();
 			return;
@@ -1949,7 +2058,7 @@ function mr(e, t) {
 			r = !1, t.onOpen?.(e);
 		}), f.onerror = () => {
 			if (!(n || a !== f)) {
-				if (r = !0, f.readyState === EventSource.CLOSED || Gn(o)) {
+				if (r = !0, f.readyState === EventSource.CLOSED || tr(o)) {
 					if (f.close(), s >= 1) {
 						u("closed");
 						return;
@@ -1958,7 +2067,7 @@ function mr(e, t) {
 				}
 				i ||= setTimeout(() => {
 					i = null, !(n || a?.readyState === EventSource.OPEN) && u("closed");
-				}, pr);
+				}, Cr);
 			}
 		};
 	};
@@ -1966,7 +2075,7 @@ function mr(e, t) {
 }
 //#endregion
 //#region src/lib/diff.ts
-function hr(e, t) {
+function Tr(e, t) {
 	let n = e.split("\n"), r = t.split("\n"), i = Array.from({ length: n.length + 1 }, () => Array(r.length + 1).fill(0));
 	for (let e = n.length - 1; e >= 0; e--) for (let t = r.length - 1; t >= 0; t--) i[e][t] = n[e] === r[t] ? i[e + 1][t + 1] + 1 : Math.max(i[e + 1][t], i[e][t + 1]);
 	let a = [], o = 0, s = 0;
@@ -1990,12 +2099,12 @@ function hr(e, t) {
 	});
 	return a;
 }
-function gr(e) {
+function Er(e) {
 	let t = e.filter((e) => e.kind === "add").length, n = e.filter((e) => e.kind === "del").length;
 	return !t && !n ? "identical" : `+${t} −${n}`;
 }
-var _r = 2e3;
-function vr(e, t, n = _r) {
+var Dr = 2e3;
+function Or(e, t, n = Dr) {
 	let r = e.split("\n"), i = t.split("\n"), a = 0;
 	for (; a < r.length && a < i.length && r[a] === i[a];) a++;
 	let o = 0;
@@ -2014,7 +2123,7 @@ function vr(e, t, n = _r) {
 	})) : c.length === 0 ? s.map((e) => ({
 		kind: "del",
 		text: e
-	})) : hr(s.join("\n"), c.join("\n"));
+	})) : Tr(s.join("\n"), c.join("\n"));
 	return { rows: [
 		...l(r.slice(0, a)),
 		...u,
@@ -2023,36 +2132,36 @@ function vr(e, t, n = _r) {
 }
 //#endregion
 //#region src/lib/links.ts
-function yr(e) {
+function kr(e) {
 	return typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void 0;
 }
-function br(e, t = {}) {
-	let n = yr(t.step), r = {};
+function Ar(e, t = {}) {
+	let n = kr(t.step), r = {};
 	n !== void 0 && (r.step = n), t.view && t.view !== "trace" && (r.view = t.view), t.call && (t.resumed || n !== void 0) ? r.sel = `c:${t.resumed ? "resume" : String(n)}:${t.call}` : t.span && (r.sel = `t:${t.span}`), t.axis === "time" ? r.axis = "time" : t.axis === "events" && (r.axis = "events");
-	let i = yr(t.t);
+	let i = kr(t.t);
 	return i !== void 0 && (r.t = i), {
 		to: "/runs/$id",
 		params: { id: e },
 		search: r
 	};
 }
-function xr(e) {
+function jr(e) {
 	return {
 		to: "/sessions/$id",
 		params: { id: e },
 		search: {}
 	};
 }
-function Sr(e, t = {}) {
+function Mr(e, t = {}) {
 	return {
 		to: "/traces/$id",
 		params: { id: e },
 		search: t.span ? { span: t.span } : {}
 	};
 }
-function Cr(e = {}) {
+function Nr(e = {}) {
 	let t = new URLSearchParams();
-	for (let [n, r] of Object.entries(e)) r !== void 0 && r !== "" && (n !== "step" || yr(r) !== void 0) && t.set(n, String(r));
+	for (let [n, r] of Object.entries(e)) r !== void 0 && r !== "" && (n !== "step" || kr(r) !== void 0) && t.set(n, String(r));
 	let n = t.toString();
 	return n ? {
 		to: "/playground",
@@ -2063,16 +2172,16 @@ function Cr(e = {}) {
 		search: {}
 	};
 }
-function wr(e, t = [], n) {
+function Pr(e, t = [], n) {
 	let r = [...new Set(t.filter((t) => t && t !== e))], i = { a: e };
 	r.length && (i.b = r);
-	let a = yr(n);
+	let a = kr(n);
 	return a !== void 0 && (i.step = a), {
 		to: "/compare",
 		search: i
 	};
 }
-function Tr(e) {
+function Fr(e) {
 	if (typeof e == "string") try {
 		return JSON.parse(e), JSON.stringify(e);
 	} catch {
@@ -2080,74 +2189,74 @@ function Tr(e) {
 	}
 	return typeof e == "object" ? JSON.stringify(e) : String(e);
 }
-function Er(e) {
+function Ir(e) {
 	let t = e.to.replace(/^\//, "");
 	"params" in e && (t = t.replace("$id", encodeURIComponent(e.params.id)));
 	let n = new URLSearchParams();
-	for (let [t, r] of Object.entries(e.search)) r !== void 0 && n.set(t, Tr(r));
+	for (let [t, r] of Object.entries(e.search)) r !== void 0 && n.set(t, Fr(r));
 	let r = n.toString(), i = "hash" in e && e.hash ? `#${e.hash}` : "";
 	return `${t}${r ? `?${r}` : ""}${i}`;
 }
-function V(e, t) {
-	return new URL(Er(t), e).toString();
+function H(e, t) {
+	return new URL(Ir(t), e).toString();
 }
 //#endregion
 //#region src/panel/compare.ts
-function Dr(e, t) {
+function Lr(e, t) {
 	if (!t.marks.length && !t.holes.length) return null;
-	let n = I("span", "weft-holes", `${e} `, { "data-weft-diff-side": e });
-	for (let e of t.marks) n.appendChild(e.hole ? R(e.hole) : I("span", "weft-chip weft-tag", e.label, {
+	let n = L("span", "weft-holes", `${e} `, { "data-weft-diff-side": e });
+	for (let e of t.marks) n.appendChild(e.hole ? z(e.hole) : L("span", "weft-chip weft-tag", e.label, {
 		title: e.title,
 		"data-weft-diff-mark": e.mark
 	}));
-	let r = yn(t.holes);
+	let r = kn(t.holes);
 	return r && n.appendChild(r), n;
 }
-function Or(e, t) {
-	let n = Dt(e), r = I("div", "weft-diff", void 0, {
+function Rr(e, t) {
+	let n = Ot(e), r = L("div", "weft-diff", void 0, {
 		"data-weft-step-diff": "",
 		"data-key": "step-diff"
-	}), i = I("a", "weft-btn", "⤢", {
-		href: V(t, wr(n.a.run_id, [n.b.run_id], n.markers.at(0))),
+	}), i = L("a", "weft-btn", "⤢", {
+		href: H(t, Pr(n.a.run_id, [n.b.run_id], n.markers.at(0))),
 		target: "_blank",
 		rel: "noopener",
 		"aria-label": `open the step compare of ${n.a.run_id} and ${n.b.run_id} in Studio`
 	});
-	i.style.textDecoration = "none", r.appendChild(I("div", "weft-diff-h", [document.createTextNode(`steps vs source: ${kt(n)} `), i]));
-	for (let e of n.holes) r.appendChild(bn(e));
+	i.style.textDecoration = "none", r.appendChild(L("div", "weft-diff-h", [document.createTextNode(`steps vs source: ${At(n)} `), i]));
+	for (let e of n.holes) r.appendChild(An(e));
 	if (n.markers.length) {
-		let e = I("ul", "weft-diff-markers", void 0, { "aria-label": "changed steps" });
+		let e = L("ul", "weft-diff-markers", void 0, { "aria-label": "changed steps" });
 		for (let r of n.rows) if (r.changed) {
-			let i = I("a", void 0, Ot(r), {
-				href: V(t, br(n.b.run_id, { step: r.step })),
+			let i = L("a", void 0, kt(r), {
+				href: H(t, Ar(n.b.run_id, { step: r.step })),
 				target: "_blank",
 				rel: "noopener"
 			});
-			e.appendChild(I("li", void 0, [i], { "data-weft-diff-marker": String(r.step) }));
+			e.appendChild(L("li", void 0, [i], { "data-weft-diff-marker": String(r.step) }));
 		}
 		r.appendChild(e);
 	}
-	let a = I("table", "weft-diff-table");
-	a.appendChild(I("caption", "weft-sr", `the source ${n.a.run_id} (a) and ${n.b.run_id} (b), aligned by step ordinal`));
-	let o = I("tr");
-	o.appendChild(I("th", void 0, "step", { scope: "col" }));
-	for (let e of j) o.appendChild(I("th", void 0, dt[e], { scope: "col" }));
-	a.appendChild(I("thead", void 0, [o]));
-	let s = I("tbody");
+	let a = L("table", "weft-diff-table");
+	a.appendChild(L("caption", "weft-sr", `the source ${n.a.run_id} (a) and ${n.b.run_id} (b), aligned by step ordinal`));
+	let o = L("tr");
+	o.appendChild(L("th", void 0, "step", { scope: "col" }));
+	for (let e of A) o.appendChild(L("th", void 0, ft[e], { scope: "col" }));
+	a.appendChild(L("thead", void 0, [o]));
+	let s = L("tbody");
 	for (let e of n.rows) {
-		let t = I("tr", e.changed ? "weft-diff-changed" : void 0, void 0, { "data-weft-diff-step": String(e.step) }), n = I("th", void 0, String(e.step), { scope: "row" });
+		let t = L("tr", e.changed ? "weft-diff-changed" : void 0, void 0, { "data-weft-diff-step": String(e.step) }), n = L("th", void 0, String(e.step), { scope: "row" });
 		for (let [t, r] of [["a", e.a], ["b", e.b]]) {
-			let e = Dr(t, r);
+			let e = Lr(t, r);
 			e && n.appendChild(e);
 		}
 		t.appendChild(n);
-		for (let n of j) {
-			let r = e.cells[n], i = I("td", `weft-diff-${r}`, pt[r], {
+		for (let n of A) {
+			let r = e.cells[n], i = L("td", `weft-diff-${r}`, mt[r], {
 				"data-weft-diff-cell": n,
 				"data-state": r,
-				title: mt[r]
-			}), a = Ct(n, e.a.side, e.b.side);
-			a && (i.appendChild(document.createTextNode(" ")), i.appendChild(R(a))), r === "changed" && (i.appendChild(I("div", "weft-diff-row weft-diff-a", `a ${wt(e.a.side, n)}`)), i.appendChild(I("div", "weft-diff-row weft-diff-b", `b ${wt(e.b.side, n)}`))), t.appendChild(i);
+				title: ht[r]
+			}), a = wt(n, e.a.side, e.b.side);
+			a && (i.appendChild(document.createTextNode(" ")), i.appendChild(z(a))), r === "changed" && (i.appendChild(L("div", "weft-diff-row weft-diff-a", `a ${Tt(e.a.side, n)}`)), i.appendChild(L("div", "weft-diff-row weft-diff-b", `b ${Tt(e.b.side, n)}`))), t.appendChild(i);
 		}
 		s.appendChild(t);
 	}
@@ -2155,7 +2264,7 @@ function Or(e, t) {
 }
 //#endregion
 //#region src/lib/format.ts
-function kr(e, t = Date.now()) {
+function zr(e, t = Date.now()) {
 	let n = Date.parse(e);
 	if (Number.isNaN(n)) return "—";
 	let r = Math.max(0, Math.round((t - n) / 1e3));
@@ -2170,47 +2279,47 @@ function kr(e, t = Date.now()) {
 		day: "numeric"
 	});
 }
-function Ar(e, t) {
+function Br(e, t) {
 	let n = Date.parse(e), r = t ? Date.parse(t) : NaN;
-	return Number.isNaN(n) || Number.isNaN(r) || r < n ? "—" : jr(r - n);
+	return Number.isNaN(n) || Number.isNaN(r) || r < n ? "—" : Vr(r - n);
 }
-function jr(e) {
+function Vr(e) {
 	if (!Number.isFinite(e)) return "—";
 	if (e < 1e3) return `${Math.round(e)}ms`;
 	if (e < 59950) return `${(e / 1e3).toFixed(1)}s`;
 	let t = Math.round(e / 1e3), n = Math.floor(t / 60);
 	return n < 60 ? `${n}m${String(t % 60).padStart(2, "0")}s` : `${Math.floor(n / 60)}h${String(n % 60).padStart(2, "0")}m`;
 }
-function H(e) {
+function U(e) {
 	if (!Number.isFinite(e)) return "—";
 	let t = Math.abs(e);
 	return t >= 999950 ? `${(e / 1e6).toFixed(1)}M` : t >= 1e3 ? `${(e / 1e3).toFixed(1)}k` : String(e);
 }
 //#endregion
 //#region src/lib/compaction.ts
-var Mr = (e, t) => `${e} ${t}${e === 1 ? "" : "s"}`;
-function U(e) {
+var Hr = (e, t) => `${e} ${t}${e === 1 ? "" : "s"}`;
+function W(e) {
 	return e.scope === "session";
 }
-function Nr(e) {
+function Ur(e) {
 	return Array.isArray(e?.compactions) ? e.compactions : [];
 }
-function Pr(e) {
-	if (U(e)) {
-		let t = e.tokens_before && e.tokens_after ? ` · ${H(e.tokens_before)} → ${H(e.tokens_after)} tokens` : "";
-		return `${Mr(e.replaced, "message")} compacted into ${e.entries}${t}`;
+function Wr(e) {
+	if (W(e)) {
+		let t = e.tokens_before && e.tokens_after ? ` · ${U(e.tokens_before)} → ${U(e.tokens_after)} tokens` : "";
+		return `${Hr(e.replaced, "message")} compacted into ${e.entries}${t}`;
 	}
-	return e.replaced === 0 ? `${Mr(e.entries, "message")} inserted by PrepareStep` : `${Mr(e.replaced, "message")} rewritten into ${e.entries} by PrepareStep`;
+	return e.replaced === 0 ? `${Hr(e.entries, "message")} inserted by PrepareStep` : `${Hr(e.replaced, "message")} rewritten into ${e.entries} by PrepareStep`;
 }
-var Fr = "session compaction · after this run";
-function Ir(e) {
+var Gr = "session compaction · after this run";
+function Kr(e) {
 	return `thread compacted the session context this run belongs to: ${e.replaced} of its messages were replaced by ${e.entries}; the next run starts on the compacted context (its input record). The marker carries counts and a hash, never messages. (For entries appended by hand that no run produced, thread files the marker under the run that follows, which starts on the compacted context.)`;
 }
-function Lr(e, t, n) {
+function qr(e, t, n) {
 	if (!t) return { loading: !0 };
 	let r = e.index ?? -1, i = e.from_seq ?? -1, a = e.to_seq ?? -1;
 	if (r < 0 || i < 0 || a < i) return { gap: "the view names no usable range: its replaced messages cannot be placed" };
-	let o = new Set(n.filter((e) => !U(e) && e.index != null).map((e) => e.index)), s = (Array.isArray(t.batches) ? t.batches : []).filter((e) => e !== null && typeof e.index == "number" && e.index < r).sort((e, t) => e.index - t.index), c = new Set(s.map((e) => e.index)), l = [];
+	let o = new Set(n.filter((e) => !W(e) && e.index != null).map((e) => e.index)), s = (Array.isArray(t.batches) ? t.batches : []).filter((e) => e !== null && typeof e.index == "number" && e.index < r).sort((e, t) => e.index - t.index), c = new Set(s.map((e) => e.index)), l = [];
 	for (let e = 0; e < r; e++) !c.has(e) && !o.has(e) && l.push(e);
 	if (l.length) return { gap: `messages record${l.length === 1 ? "" : "s"} ${l.slice(0, 6).join(", ")}${l.length > 6 ? ", …" : ""} before the view ${l.length === 1 ? "is" : "are"} missing: the replaced range cannot be placed` };
 	let u = s.filter((e) => e.unreadable).map((e) => e.index);
@@ -2223,7 +2332,7 @@ function Lr(e, t, n) {
 		to: a
 	};
 }
-function Rr(e, t = 160) {
+function Jr(e, t = 160) {
 	let n = e, r = n?.content, i = (Array.isArray(r) ? r : []).map((e) => {
 		switch (e?.type) {
 			case "text": return e.text;
@@ -2235,13 +2344,13 @@ function Rr(e, t = 160) {
 	}).filter(Boolean).join(" "), a = `${n?.role ?? "?"}: ${i}`;
 	return a.length > t ? `${a.slice(0, t - 1)}…` : a;
 }
-function zr(e, t) {
-	let n = t == null ? "" : ` — the step's request carried ${Mr(t, "message")} in all`;
-	return `in their place, ${Mr(e.entries, "message")}${n}; the view's body stays in its record (export the run: compactions[].messages)`;
+function Yr(e, t) {
+	let n = t == null ? "" : ` — the step's request carried ${Hr(t, "message")} in all`;
+	return `in their place, ${Hr(e.entries, "message")}${n}; the view's body stays in its record (export the run: compactions[].messages)`;
 }
 //#endregion
 //#region src/lib/attempts.ts
-function Br(e, t, n = !1) {
+function Xr(e, t, n = !1) {
 	if (!e?.length) return null;
 	if (!t) return n ? null : {
 		n: 0,
@@ -2257,24 +2366,24 @@ function Br(e, t, n = !1) {
 		answered: r.body.model.name || void 0
 	};
 }
-function Vr(e) {
+function Zr(e) {
 	if (!e) return null;
 	if (e.n === 0) return e.total > 0 ? `${e.total} ${e.total === 1 ? "attempt" : "attempts"} · none answered` : null;
 	if (e.n <= 1) return null;
 	let t = `attempt ${e.n} of ${Math.max(e.total, e.n)}`;
 	return e.requested && e.answered && (t += e.answered === e.requested ? " · retry" : ` · fallback to ${e.answered}`), t;
 }
-function Hr(e) {
+function Qr(e) {
 	if (e < 1e3) return `${Math.round(e)} ms`;
 	if (e < 59950) return `${(e / 1e3).toFixed(1)} s`;
 	let t = Math.round(e / 1e3);
 	return `${Math.floor(t / 60)}m${String(t % 60).padStart(2, "0")}s`;
 }
-function Ur(e, t, n = "first token") {
+function $r(e, t, n = "first token") {
 	let r = [];
-	return e && e > 0 && r.push(Hr(e)), t && t > 0 && r.push(`${n} ${Hr(t)}`), r.length ? r.join(" · ") : null;
+	return e && e > 0 && r.push(Qr(e)), t && t > 0 && r.push(`${n} ${Qr(t)}`), r.length ? r.join(" · ") : null;
 }
-function Wr(e, t) {
+function ei(e, t) {
 	return e === void 0 || e.latencyMs || t !== 0 ? null : {
 		hole: "not_recorded",
 		reason: "this step's step_finish has no timing and its request record no attempt rows: it was recorded by a weft before attempt reporting (A4)"
@@ -2282,26 +2391,26 @@ function Wr(e, t) {
 }
 //#endregion
 //#region src/panel/markers.ts
-var Gr = "data-weft-scope", Kr = "data-weft-untrusted", qr = (e) => !!e.closest(`[${Kr}]`), Jr = "weft-devtools";
-function Yr(e) {
+var ti = "data-weft-scope", ni = "data-weft-untrusted", ri = (e) => !!e.closest(`[${ni}]`), ii = "weft-devtools";
+function ai(e) {
 	try {
-		if (!(e instanceof Element) || e.closest(Jr)) return null;
-		let t = e.closest(`[${Gr}]`);
-		for (; t && qr(t);) t = t.parentElement?.closest("[data-weft-scope]") ?? null;
+		if (!(e instanceof Element) || e.closest(ii)) return null;
+		let t = e.closest(`[${ti}]`);
+		for (; t && ri(t);) t = t.parentElement?.closest("[data-weft-scope]") ?? null;
 		return t;
 	} catch {
 		return null;
 	}
 }
-function Xr(e) {
-	if (e.type === "attributes") return !(e.target instanceof Element && e.target.closest(Jr));
+function oi(e) {
+	if (e.type === "attributes") return !(e.target instanceof Element && e.target.closest(ii));
 	for (let t of [...Array.from(e.addedNodes), ...Array.from(e.removedNodes)]) if (t instanceof Element && (t.hasAttribute("data-weft-scope") || t.querySelector("[data-weft-scope]"))) return !0;
 	return !1;
 }
-function Zr(e = document) {
+function si(e = document) {
 	let t = [];
-	for (let n of Array.from(e.querySelectorAll(`[${Gr}]`))) {
-		if (n.closest(Jr) || qr(n)) continue;
+	for (let n of Array.from(e.querySelectorAll(`[${ti}]`))) {
+		if (n.closest(ii) || ri(n)) continue;
 		let e = x(n.getAttribute("data-weft-scope") ?? "");
 		e.publicId && t.push({
 			scope: e,
@@ -2310,7 +2419,7 @@ function Zr(e = document) {
 	}
 	return t;
 }
-function Qr(e) {
+function ci(e) {
 	let t = e.root ?? document, n = null, r = null, i = 0, a = !1, o = () => {
 		if (n = null, i = 0, t.hidden) {
 			a = !0;
@@ -2318,26 +2427,26 @@ function Qr(e) {
 		}
 		a = !1;
 		try {
-			e.onScopes(Zr(t));
+			e.onScopes(si(t));
 		} catch {}
 	}, s = () => {
 		a && !t.hidden && o();
 	}, c = (t) => {
-		let n = Yr(t.target);
+		let n = ai(t.target);
 		if (n) try {
 			e.onFocus?.(n);
 		} catch {}
 	};
 	try {
 		r = new MutationObserver((t) => {
-			if (!t.some(Xr)) return;
+			if (!t.some(oi)) return;
 			let r = Date.now();
 			i ||= r, n && clearTimeout(n), n = setTimeout(o, Math.max(0, Math.min(e.debounceMs ?? 100, i + 500 - r)));
 		}), r.observe(t.documentElement, {
 			subtree: !0,
 			childList: !0,
 			attributes: !0,
-			attributeFilter: [Gr, Kr]
+			attributeFilter: [ti, ni]
 		}), t.addEventListener("focusin", c, {
 			capture: !0,
 			passive: !0
@@ -2351,7 +2460,7 @@ function Qr(e) {
 }
 //#endregion
 //#region src/lib/palette.ts
-var $r = {
+var li = {
 	light: {
 		bg: "#fbfaf7",
 		bg2: "#fbfaf7",
@@ -2388,12 +2497,12 @@ var $r = {
 		scrim: "rgba(19,18,17,.92)",
 		shadow: "rgba(0,0,0,.45)"
 	}
-}, ei = "ui-monospace, SFMono-Regular, Menlo, Consolas, \"Liberation Mono\", monospace", ti = (e) => Object.entries($r[e]).map(([e, t]) => `--weft-${e}: ${t};`).join(" ");
-[...Object.keys($r.dark).map((e) => `--weft-${e}`)];
-var ni = `
-:host { all: initial; color: inherit; box-sizing: border-box; color-scheme: dark; ${ti("dark")}
-  --weft-font: ${ei}; --weft-radius: 8px; --weft-radius-sm: 5px; }
-:host([data-theme-resolved="light"]) { color-scheme: light; ${ti("light")} }
+}, ui = "ui-monospace, SFMono-Regular, Menlo, Consolas, \"Liberation Mono\", monospace", di = (e) => Object.entries(li[e]).map(([e, t]) => `--weft-${e}: ${t};`).join(" ");
+[...Object.keys(li.dark).map((e) => `--weft-${e}`)];
+var fi = `
+:host { all: initial; color: inherit; box-sizing: border-box; color-scheme: dark; ${di("dark")}
+  --weft-font: ${ui}; --weft-radius: 8px; --weft-radius-sm: 5px; }
+:host([data-theme-resolved="light"]) { color-scheme: light; ${di("light")} }
 *, *::before, *::after { box-sizing: inherit; }
 /* No colour here: the dock and the pill set theirs; the unreachable
    line keeps the host's (:host inherits color past all: initial). */
@@ -2615,6 +2724,12 @@ details.weft-collapsible[open] > summary::before { content: "\\25BE "; }
 textarea.weft-input { resize: vertical; }
 select.weft-input { width: auto; min-width: 120px; }
 .weft-fields { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 7px; }
+.weft-lab { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 6px; }
+.weft-lab > span, .weft-lab > .weft-note, .weft-lab > [role=group], .weft-lab > .weft-lab-p { grid-column: 1 / -1; }
+.weft-lab-k > span { display: block; font-size: 11px; }
+.weft-lab .weft-input { width: 100%; min-width: 0; }
+.weft-ovr, .weft-ovr.weft-input { color: var(--weft-accent); border-color: var(--weft-accent); }
+.weft-lab-p { color: var(--weft-err); font-size: 11px; }
 .weft-tool { display: inline-flex; gap: 4px; align-items: baseline; margin-right: 10px;
   color: var(--weft-fg); cursor: pointer; }
 .weft-edit { display: block; margin: 3px 0; color: var(--weft-dim); }
@@ -2659,50 +2774,58 @@ select.weft-input { width: auto; min-width: 120px; }
 `;
 //#endregion
 //#region src/panel/playground.ts
-function ri(e) {
+function pi(e) {
 	return e.content.filter((e) => e?.type === "text").map((e) => e.text).join("");
 }
-function ii(e, t) {
+function mi(e, t) {
 	let n = "";
 	if (t !== void 0) try {
-		n = mn(t) ?? "";
+		n = wn(t) ?? "";
 	} catch {
 		n = "?";
 	}
 	return `${e}(${n})`;
 }
-function ai(e) {
-	return e ? Zt(e.batches) ?? "" : "";
+function hi(e) {
+	return e ? Qt(e.batches) ?? "" : "";
 }
-function oi(e) {
+function gi(e) {
 	if (!e || !e.batches.length) return null;
-	let { input: t, produced: n } = Xt(e.batches), r = t.length;
+	let { input: t, produced: n } = Zt(e.batches), r = t.length;
 	for (let e = t.length - 1; e >= 0 && t[e].role !== "user"; e--) r = e;
 	let i = [...t.slice(r), ...n].filter((e) => e.role === "assistant"), a = [];
-	for (let e of i) for (let t of e.content) t?.type === "tool_call" && a.push(ii(t.name, t.args));
+	for (let e of i) for (let t of e.content) t?.type === "tool_call" && a.push(mi(t.name, t.args));
 	return {
-		text: i.map(ri).filter(Boolean).join("\n"),
+		text: i.map(pi).filter(Boolean).join("\n"),
 		calls: a
 	};
 }
-function si(e) {
+function _i(e) {
 	return {
 		text: e.steps.map((e) => e.text).filter(Boolean).join("\n"),
-		calls: e.steps.flatMap((e) => e.toolCalls).map((e) => ii(e.name, e.args))
+		calls: e.steps.flatMap((e) => e.toolCalls).map((e) => mi(e.name, e.args))
 	};
 }
-function ci(e, t) {
+function vi(e, t) {
 	let n = /-t(\d+)$/.exec(e);
 	return `${n ? `t${n[1]}` : e.slice(-8)}·x${t + 1}`;
 }
-function li(e) {
+function yi(e) {
 	if (e.thread === "fork" && !(e.runId && e.input.trim() && e.step === 0)) return "fork continues the conversation in a new session: it needs a source run, an input, and step 0";
 	let t = Object.keys(e.tools);
-	return t.length && !t.some((t) => e.tools[t]) ? "at least one tool must stay on — the command cannot express an empty tool set (it would run with every tool)" : null;
+	return t.length && !t.some((t) => e.tools[t]) ? "at least one tool must stay on — the command cannot express an empty tool set (it would run with every tool)" : bi(e).problems[0]?.message ?? null;
 }
-function ui(e, t) {
+function bi(e) {
+	let t = Object.keys(e.tools), n = t.filter((t) => e.tools[t]);
+	return _n(e.lab, {
+		name: e.agent,
+		defaults: e.defaults,
+		tools: t.map((e) => ({ name: e }))
+	}, n.length < t.length ? n : []);
+}
+function xi(e, t) {
 	let n = Object.entries(e.tools).filter(([, e]) => e).map(([e]) => e), r = {};
-	e.instructions && e.instructions !== e.registeredInstructions && (r.instructions = e.instructions), n.length && n.length < Object.keys(e.tools).length && (r.tools_enabled = n), e.model && (r.model = e.model), e.thinking && (r.thinking = e.thinking);
+	e.instructions && e.instructions !== e.registeredInstructions && (r.instructions = e.instructions), n.length && n.length < Object.keys(e.tools).length && (r.tools_enabled = n), e.model && (r.model = e.model), e.thinking && (r.thinking = e.thinking), Object.assign(r, bi(e).overrides);
 	let i = {
 		runtime: e.runtimeId,
 		agent: e.agent,
@@ -2722,7 +2845,7 @@ function ui(e, t) {
 		...e.content ? { content: e.content } : {}
 	}))), t && (i.public_id = t), i;
 }
-function di(e, t) {
+function Si(e, t) {
 	let n = e.filter((e) => e.agents.some((e) => e.name === t));
 	if (!n.length) return e[0] ?? null;
 	let r = (e) => Date.parse(e.last_seen) || 0;
@@ -2730,10 +2853,10 @@ function di(e, t) {
 }
 //#endregion
 //#region src/panel/version.ts
-function fi() {
+function Ci() {
 	return "v0.12.0";
 }
-function pi(e) {
+function wi(e) {
 	if (typeof e != "string") return null;
 	let t = /^v?(\d+(?:\.\d+)*)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]*)?$/.exec(e.trim());
 	return t ? {
@@ -2741,8 +2864,8 @@ function pi(e) {
 		pre: t.at(2) ?? ""
 	} : null;
 }
-function mi(e, t) {
-	let n = pi(e), r = pi(t);
+function Ti(e, t) {
+	let n = wi(e), r = wi(t);
 	if (!n || !r) return NaN;
 	for (let e = 0; e < Math.max(n.nums.length, r.nums.length); e++) {
 		let t = n.nums.at(e) ?? -1, i = r.nums.at(e) ?? -1;
@@ -2762,13 +2885,13 @@ function mi(e, t) {
 	}
 	return 0;
 }
-function hi(e) {
-	return mi(e, fi()) > 0;
+function Ei(e) {
+	return Ti(e, Ci()) > 0;
 }
 //#endregion
 //#region src/panel/state.ts
-var gi = (e, t) => !!e && e.before === t.before && e.id === t.id, _i = 1e3, vi = 700, yi = 8, bi = 1e4, xi = 3e4, Si = 1e3;
-function Ci() {
+var Di = (e, t) => !!e && e.before === t.before && e.id === t.id, Oi = 1e3, ki = 700, Ai = 8, ji = 1e4, Mi = 3e4, Ni = 1e3;
+function Pi() {
 	return {
 		meta: null,
 		tooNew: !1,
@@ -2795,8 +2918,8 @@ function Ci() {
 		listKey: ""
 	};
 }
-function wi(e) {
-	let t = F();
+function Fi(e) {
+	let t = P();
 	return {
 		id: e,
 		doc: null,
@@ -2823,7 +2946,7 @@ function wi(e) {
 		stale: !1
 	};
 }
-function Ti(e) {
+function Ii(e) {
 	let t = [], n = /* @__PURE__ */ new Map();
 	for (let r of e) {
 		let e = r.forked_from ? r.forked_from.split("#")[0] : "";
@@ -2839,19 +2962,19 @@ function Ti(e) {
 		experiments: n
 	};
 }
-function Ei(e, t, n, r) {
+function Li(e, t, n, r) {
 	if (t && typeof t == "object" && typeof t.type == "string") try {
 		e.push(t, n, r);
 	} catch {}
 }
-function Di(e, t, n) {
-	for (let r of n) r && typeof r.pos == "number" && !t.has(r.pos) && (t.add(r.pos), Ei(e, r.event, r.pos, r.attrs));
+function Ri(e, t, n) {
+	for (let r of n) r && typeof r.pos == "number" && !t.has(r.pos) && (t.add(r.pos), Li(e, r.event, r.pos, r.attrs));
 }
-function Oi(e, t) {
-	let n = F(), r = /* @__PURE__ */ new Set();
-	Di(n, r, t), e.feed = n, e.seen = r, e.events = t, e.pos = r.size ? Math.max(...r) : -1, e.stale = !0;
+function zi(e, t) {
+	let n = P(), r = /* @__PURE__ */ new Set();
+	Ri(n, r, t), e.feed = n, e.seen = r, e.events = t, e.pos = r.size ? Math.max(...r) : -1, e.stale = !0;
 }
-function ki(e, t, n = !1) {
+function Bi(e, t, n = !1) {
 	let r = Number(t.pos);
 	if (t.kind === "event") {
 		if (!Number.isFinite(r) || e.seen.has(r)) return "skip";
@@ -2863,22 +2986,22 @@ function ki(e, t, n = !1) {
 			...t.attrs ? { attrs: t.attrs } : {}
 		}), r > e.pos && (e.pos = r);
 	} else if (t.kind !== "delta") return "skip";
-	return Ei(e.feed, t.event, r, t.attrs), e.stale = !0, "folded";
+	return Li(e.feed, t.event, r, t.attrs), e.stale = !0, "folded";
 }
-function W(e) {
+function G(e) {
 	let t = e.result();
 	return Array.isArray(t.pending) || (t.pending = []), t;
 }
-function Ai(e, t, n = !1) {
+function Vi(e, t, n = !1) {
 	if (!t) return e;
 	try {
-		return Qt(e, t.batches, { replace: n });
+		return $t(e, t.batches, { replace: n });
 	} catch {
 		return e;
 	}
 }
-var G = () => {}, ji = class {
-	state = Ci();
+var K = () => {}, Hi = class {
+	state = Pi();
 	notify;
 	ep;
 	scopeSub;
@@ -2927,7 +3050,7 @@ var G = () => {}, ji = class {
 	constructor(e, t, n) {
 		this.ep = e, this.notify = n;
 		let r = typeof t == "string" ? { publicId: t } : t;
-		this.publicId = r.publicId, this.narrowing = Fi(r);
+		this.publicId = r.publicId, this.narrowing = Ki(r);
 	}
 	get following() {
 		return {
@@ -2938,7 +3061,7 @@ var G = () => {}, ji = class {
 	async start() {
 		let e;
 		try {
-			let t = await qn(this.ep);
+			let t = await rr(this.ep);
 			if (!t || typeof t != "object" || typeof t.studio_version != "string") throw Error("not a Studio");
 			e = {
 				...t,
@@ -2947,10 +3070,10 @@ var G = () => {}, ji = class {
 		} catch {
 			return this.state.gone = !0, !1;
 		}
-		return !this.disposed && (this.state.meta = e, this.state.tooNew = hi(e.studio_version), this.emit(), this.state.tooNew || await this.scope(), !0);
+		return !this.disposed && (this.state.meta = e, this.state.tooNew = Ei(e.studio_version), this.emit(), this.state.tooNew || await this.scope(), !0);
 	}
 	async rescope(e, t = {}) {
-		let n = typeof e == "string" ? { publicId: e } : e, r = Fi(n), i = b({
+		let n = typeof e == "string" ? { publicId: e } : e, r = Ki(n), i = b({
 			publicId: "",
 			...r
 		}) === b({
@@ -3005,11 +3128,11 @@ var G = () => {}, ji = class {
 		let t = async () => {
 			e !== this.loadSeq || this.disposed || (this.subscribe(e), await this.refresh());
 		};
-		this.scopeSub = mr(this.ep, {
+		this.scopeSub = wr(this.ep, {
 			selector: { public_id: this.publicId },
 			kinds: ["run"],
 			onOpen: (e) => {
-				this.retries.scope = 0, this.state.live || (this.state.live = !0, this.emit()), e && this.refresh().catch(G);
+				this.retries.scope = 0, this.state.live || (this.state.live = !0, this.emit()), e && this.refresh().catch(K);
 			},
 			onRun: (e) => this.onRunFrame(e),
 			onOverflow: (e) => {
@@ -3019,12 +3142,12 @@ var G = () => {}, ji = class {
 	}
 	retry(e, t) {
 		let n = this.retries[e];
-		n >= 5 || (this.retries[e] = n + 1, this.after(Math.min(5e3 * 2 ** n, 6e4), () => void t().catch(G)));
+		n >= 5 || (this.retries[e] = n + 1, this.after(Math.min(5e3 * 2 ** n, 6e4), () => void t().catch(K)));
 	}
 	overflowed(e, t) {
 		let n = this.overflows[e];
-		n.n = n.at && Date.now() - n.at < 6e4 ? n.n + 1 : 0, this.after(Math.min(_i * 2 ** Math.min(n.n, 6), 6e4), () => {
-			this.overflows[e].at = Date.now(), t().catch(G);
+		n.n = n.at && Date.now() - n.at < 6e4 ? n.n + 1 : 0, this.after(Math.min(Oi * 2 ** Math.min(n.n, 6), 6e4), () => {
+			this.overflows[e].at = Date.now(), t().catch(K);
 		});
 	}
 	after(e, t) {
@@ -3043,19 +3166,19 @@ var G = () => {}, ji = class {
 		e !== this.watching && (this.watching = e, this.armDev());
 	}
 	armDev() {
-		this.cancel(this.devTimer), this.devTimer = null, !(!this.watching || this.publicId || this.disposed || !this.state.meta || this.state.tooNew) && (this.devTimer = this.after(this.devSub ? xi : bi, () => {
+		this.cancel(this.devTimer), this.devTimer = null, !(!this.watching || this.publicId || this.disposed || !this.state.meta || this.state.tooNew) && (this.devTimer = this.after(this.devSub ? Mi : ji, () => {
 			if (this.devTimer = null, typeof document < "u" && document.visibilityState === "hidden") {
 				this.armDev();
 				return;
 			}
-			this.refresh().catch(G).then(() => this.armDev());
+			this.refresh().catch(K).then(() => this.armDev());
 		}));
 	}
 	armStale() {
 		if (this.cancel(this.staleTimer), this.staleTimer = null, this.disposed || ![...this.state.turns, ...[...this.state.experiments.values()].flat()].some((e) => e.status === "running")) return;
 		let e = this.state.meta?.interrupted_after_ms, t = (typeof e == "number" && e > 0 ? Math.min(e, 6e5) : 3e4) + 1e3;
 		this.staleTimer = this.after(t, () => {
-			this.staleTimer = null, this.refresh().catch(G);
+			this.staleTimer = null, this.refresh().catch(K);
 		});
 	}
 	capDev() {
@@ -3073,7 +3196,7 @@ var G = () => {}, ji = class {
 	subscribeDev(e) {
 		let t = this.state;
 		if (this.publicId || this.devSub || t.devRefused || this.devBackoff || this.disposed || !t.meta || t.tooNew) return;
-		if ($e(this.ep.token) !== "") {
+		if (et(this.ep.token) !== "") {
 			t.devRefused = !0;
 			return;
 		}
@@ -3084,11 +3207,11 @@ var G = () => {}, ji = class {
 		}, i = async () => {
 			e !== this.loadSeq || this.disposed || await this.refresh();
 		};
-		this.devSub = mr(this.ep, {
+		this.devSub = wr(this.ep, {
 			selector: { agent: n },
 			kinds: ["run"],
 			onOpen: (e) => {
-				this.retries.dev = 0, e && this.refresh().catch(G);
+				this.retries.dev = 0, e && this.refresh().catch(K);
 			},
 			onRun: (e) => this.onRunFrame(e),
 			onRefused: () => {
@@ -3112,19 +3235,19 @@ var G = () => {}, ji = class {
 		this.collectors.add(t);
 		try {
 			if (this.publicId) {
-				let t = await rr(this.ep, { public_id: this.publicId }).catch(() => null);
+				let t = await pr(this.ep, { public_id: this.publicId }).catch(() => null);
 				if (e !== this.loadSeq || this.disposed) return;
 				if (t && Array.isArray(t.sessions)) {
 					let e = this.narrowing.session;
 					this.state.session = (e ? t.sessions.find((t) => t.id === e) : t.sessions[0]) ?? null;
 				}
 			}
-			let n = await Yn(this.ep, this.publicId ? {
+			let n = await ar(this.ep, this.publicId ? {
 				public_id: this.publicId,
 				limit: "50"
 			} : { limit: "10" });
 			if (e !== this.loadSeq || this.disposed) return;
-			let { turns: r, experiments: i } = Ti((Array.isArray(n.runs) ? n.runs : []).filter((e) => !!e && typeof e.id == "string")), a = this.narrowing.session, o = this.state;
+			let { turns: r, experiments: i } = Ii((Array.isArray(n.runs) ? n.runs : []).filter((e) => !!e && typeof e.id == "string")), a = this.narrowing.session, o = this.state;
 			o.sessionUnrecorded = !!a && r.length > 0 && !r.some((e) => e.session_id);
 			let s = o.turns, c = o.experiments;
 			if (o.turns = r.filter((e) => this.inSession(e)), o.experiments = i, o.paged && n.next_before != null) {
@@ -3137,7 +3260,7 @@ var G = () => {}, ji = class {
 			});
 			o.turnsCapped = this.cursor != null;
 			for (let e of t) this.upsertRun(e);
-			this.state.listKey = Pi(this.publicId, this.narrowing.session);
+			this.state.listKey = Gi(this.publicId, this.narrowing.session);
 		} catch {
 			return;
 		} finally {
@@ -3147,7 +3270,7 @@ var G = () => {}, ji = class {
 		let n = this.state.turn;
 		if (n && !n.done && !n.loading) {
 			let e = this.rowOf(n.id)?.status;
-			e && e !== "running" && this.settleTurn(n).catch(G);
+			e && e !== "running" && this.settleTurn(n).catch(K);
 		}
 		let r = this.takePin();
 		if (r) await this.select(r);
@@ -3167,8 +3290,8 @@ var G = () => {}, ji = class {
 		let e = this.narrowing.run;
 		if (!e) return this.state.pinMissing = "", "";
 		let t = this.rowOf(e);
-		return this.pinChecks++, t ? (this.state.pinMissing = "", this.pinApplied === e || this.userSelected ? "" : (this.pinApplied = e, e)) : (this.state.pinMissing = this.pinChecks >= 2 ? e : "", this.pinChecks === 1 && !this.pinTimer && (this.pinTimer = this.after(Si, () => {
-			this.pinTimer = null, this.refresh().catch(G);
+		return this.pinChecks++, t ? (this.state.pinMissing = "", this.pinApplied === e || this.userSelected ? "" : (this.pinApplied = e, e)) : (this.state.pinMissing = this.pinChecks >= 2 ? e : "", this.pinChecks === 1 && !this.pinTimer && (this.pinTimer = this.after(Ni, () => {
+			this.pinTimer = null, this.refresh().catch(K);
 		})), "");
 	}
 	onRunFrame(e) {
@@ -3178,16 +3301,16 @@ var G = () => {}, ji = class {
 		this.upsertRun(t), this.publicId || this.capDev(), this.armStale();
 		let n = this.takePin();
 		if (n) {
-			this.select(n).catch(G);
+			this.select(n).catch(K);
 			return;
 		}
 		if (!this.state.selected && this.state.turns.length) {
 			let e = this.state.turns.find((e) => e.status === "running");
-			this.select((e ?? this.state.turns[0]).id).catch(G);
+			this.select((e ?? this.state.turns[0]).id).catch(K);
 			return;
 		}
 		let r = this.state.turn;
-		r && r.id === t.id && (t.status === "running" ? r.done && !this.runSub && !r.loading && (r.done = !1, this.resumeTurn(r).catch(G)) : this.settleTurn(r).catch(G)), this.emit();
+		r && r.id === t.id && (t.status === "running" ? r.done && !this.runSub && !r.loading && (r.done = !1, this.resumeTurn(r).catch(K)) : this.settleTurn(r).catch(K)), this.emit();
 	}
 	upsertRun(e, t = !1) {
 		if (t && this.rowOf(e.id)) return;
@@ -3196,7 +3319,7 @@ var G = () => {}, ji = class {
 			let i = n.filter((t) => t.id !== e.id);
 			i.length && r.set(t, i);
 		}
-		let i = Ti([e, ...n]);
+		let i = Ii([e, ...n]);
 		this.state.turns = i.turns;
 		for (let [e, t] of i.experiments) r.set(e, [...r.get(e) ?? [], ...t]);
 		this.state.experiments = r;
@@ -3204,7 +3327,7 @@ var G = () => {}, ji = class {
 	async walkEvents(e) {
 		let t = [], n = [], r = 0;
 		for (let i = 0; i < 20; i++) {
-			let i = await Zn(this.ep, e, r);
+			let i = await sr(this.ep, e, r);
 			if (Array.isArray(i.events)) for (let e of i.events) t.push(e);
 			if (Array.isArray(i.gaps)) for (let e of i.gaps) n.push(e);
 			if (typeof i.next_after != "number" || i.next_after <= r) return {
@@ -3222,7 +3345,7 @@ var G = () => {}, ji = class {
 	}
 	async select(e, t = !1) {
 		t && (this.userSelected = !0), this.runSub?.close(), this.runSub = void 0, this.retries.run = 0, this.state.selected !== e && (this.state.selectedStep = null), this.state.selected = e;
-		let n = wi(e);
+		let n = Fi(e);
 		this.state.turn = n, this.emit(), await this.resumeTurn(n);
 	}
 	async resumeTurn(e) {
@@ -3239,10 +3362,10 @@ var G = () => {}, ji = class {
 		let t = this.loadSeq, n = this.ep, r = e.id;
 		e.loading = !0;
 		let [i, a, o, s, c] = await Promise.all([
-			Xn(n, r).catch(() => null),
+			or(n, r).catch(() => null),
 			this.walkEvents(r).catch(() => null),
-			Qn(n, r).catch(() => null),
-			nr(n, r).then((e) => Array.isArray(e.spans) ? e.spans : null).catch(() => null),
+			cr(n, r).catch(() => null),
+			fr(n, r).then((e) => Array.isArray(e.spans) ? e.spans : null).catch(() => null),
 			this.readRequests(r)
 		]);
 		if (e.loading = !1, !(t !== this.loadSeq || this.disposed || this.state.turn !== e)) {
@@ -3253,27 +3376,27 @@ var G = () => {}, ji = class {
 			}
 			if (i && Array.isArray(i.children)) for (let [t, n] of e.children) {
 				let r = i.children.find((e) => e.id === t)?.status;
-				r && r !== n.status && (e.tried.delete(t), e.expanded.has(t) ? this.expandChild(t, !0).catch(G) : e.children.delete(t));
+				r && r !== n.status && (e.tried.delete(t), e.expanded.has(t) ? this.expandChild(t, !0).catch(K) : e.children.delete(t));
 			}
-			a && (Oi(e, a.events), e.gaps = a.gaps, e.capped = a.capped), o && (e.transcript = o), s && (e.spans = s), c && (e.requests = c), e.done || e.capped ? e.held.length = 0 : this.drain(e, r, () => this.state.turn === e && !e.done), e.recheck && !e.done && (e.recheck = !1, this.catchUp(e, r, () => this.state.turn === e && !e.done).catch(G)), this.dress(e), this.emit();
+			a && (zi(e, a.events), e.gaps = a.gaps, e.capped = a.capped), o && (e.transcript = o), s && (e.spans = s), c && (e.requests = c), e.done || e.capped ? e.held.length = 0 : this.drain(e, r, () => this.state.turn === e && !e.done), e.recheck && !e.done && (e.recheck = !1, this.catchUp(e, r, () => this.state.turn === e && !e.done).catch(K)), this.dress(e), this.emit();
 		}
 	}
 	async readRequests(e) {
 		if (!this.state.meta?.capabilities.includes("requests")) return null;
-		if ($e(this.ep.token) === "read") return {
+		if (et(this.ep.token) === "read") return {
 			badge: "hidden",
-			reason: O.hidden.reason,
-			fix: O.hidden.fix,
+			reason: D.hidden.reason,
+			fix: D.hidden.fix,
 			steps: /* @__PURE__ */ new Map()
 		};
 		try {
-			let t = await er(this.ep, e), n = t.requests.some((e) => e.content === "stripped") ? await tr(this.ep, e) : void 0;
+			let t = await ur(this.ep, e), n = t.requests.some((e) => e.content === "stripped") ? await dr(this.ep, e) : void 0;
 			return {
 				badge: t.badge,
 				reason: t.reason,
 				fix: t.fix,
 				truncated: t.truncated,
-				steps: Mt(t.requests),
+				steps: Nt(t.requests),
 				stripped: n
 			};
 		} catch (e) {
@@ -3285,8 +3408,8 @@ var G = () => {}, ji = class {
 	}
 	drain(e, t, n) {
 		let r = e.held.splice(0);
-		for (let i = 0; i < r.length; i++) if (ki(e, r[i]) === "gap") {
-			e.held.push(...r.slice(i)), this.catchUp(e, t, n).catch(G);
+		for (let i = 0; i < r.length; i++) if (Bi(e, r[i]) === "gap") {
+			e.held.push(...r.slice(i)), this.catchUp(e, t, n).catch(K);
 			return;
 		}
 	}
@@ -3295,8 +3418,8 @@ var G = () => {}, ji = class {
 			e.held.push(n);
 			return;
 		}
-		let i = ki(e, n);
-		i === "gap" ? (e.held.push(n), this.catchUp(e, t, r).catch(G)) : i === "folded" && this.emit(!0);
+		let i = Bi(e, n);
+		i === "gap" ? (e.held.push(n), this.catchUp(e, t, r).catch(K)) : i === "folded" && this.emit(!0);
 	}
 	async catchUp(e, t, n) {
 		if (e.loading || e.reading) {
@@ -3310,9 +3433,9 @@ var G = () => {}, ji = class {
 				e.recheck = !1;
 				let r = e.pos + 1;
 				for (let i = 0; i < 20; i++) {
-					let i = await Zn(this.ep, t, r);
+					let i = await sr(this.ep, t, r);
 					if (!n()) return;
-					if (Array.isArray(i.events)) for (let t of i.events) t && typeof t.pos == "number" && !e.seen.has(t.pos) && (e.seen.add(t.pos), e.events.push(t), Ei(e.feed, t.event, t.pos, t.attrs), t.pos > e.pos && (e.pos = t.pos), e.stale = !0);
+					if (Array.isArray(i.events)) for (let t of i.events) t && typeof t.pos == "number" && !e.seen.has(t.pos) && (e.seen.add(t.pos), e.events.push(t), Li(e.feed, t.event, t.pos, t.attrs), t.pos > e.pos && (e.pos = t.pos), e.stale = !0);
 					if (typeof i.next_after != "number" || i.next_after <= r) break;
 					r = i.next_after;
 				}
@@ -3321,20 +3444,20 @@ var G = () => {}, ji = class {
 			e.reading = !1;
 		}
 		if (n() && !i()) {
-			for (let t of e.held.splice(0)) ki(e, t, !0);
+			for (let t of e.held.splice(0)) Bi(e, t, !0);
 			this.emit(!0);
 		}
 	}
 	dress(e) {
 		e.stale = !1;
 		let t = this.rowOf(e.id)?.status ?? e.doc?.status;
-		if (e.folded = Ai(W(e.feed), e.transcript, e.done || !!t && t !== "running"), e.doc && Array.isArray(e.doc.children)) try {
-			Gt(e.folded, e.doc.children);
+		if (e.folded = Vi(G(e.feed), e.transcript, e.done || !!t && t !== "running"), e.doc && Array.isArray(e.doc.children)) try {
+			Kt(e.folded, e.doc.children);
 		} catch {}
 	}
 	follow(e) {
 		let t = e.id;
-		this.runSub?.close(), this.runSub = mr(this.ep, {
+		this.runSub?.close(), this.runSub = wr(this.ep, {
 			selector: { run: t },
 			kinds: [
 				"event",
@@ -3342,13 +3465,13 @@ var G = () => {}, ji = class {
 				"run"
 			],
 			onOpen: () => {
-				this.retries.run = 0, this.state.turn === e && !e.done && !e.capped && this.catchUp(e, t, () => this.state.turn === e && !e.done).catch(G);
+				this.retries.run = 0, this.state.turn === e && !e.done && !e.capped && this.catchUp(e, t, () => this.state.turn === e && !e.done).catch(K);
 			},
 			onRecord: (n) => {
 				this.state.turn !== e || e.id !== n.run_id || e.done || e.capped || this.liveInto(e, t, n, () => this.state.turn === e && !e.done);
 			},
 			onRun: (n) => {
-				n.run.id === t && this.state.turn === e && (this.rowOf(t) && this.upsertRun(n.run), n.run.status !== "running" && this.settleTurn(e).catch(G), this.emit());
+				n.run.id === t && this.state.turn === e && (this.rowOf(t) && this.upsertRun(n.run), n.run.status !== "running" && this.settleTurn(e).catch(K), this.emit());
 			},
 			onOverflow: (t) => {
 				this.runSub = void 0, !(this.state.turn !== e || e.done) && t !== "expired" && (t === "overflow" ? this.overflowed("run", async () => {
@@ -3377,17 +3500,17 @@ var G = () => {}, ji = class {
 			this.state.turn === n && (n.unreachable.add(e), this.emit());
 			return;
 		}
-		let a = F();
-		Di(a, /* @__PURE__ */ new Set(), i.events);
+		let a = P();
+		Ri(a, /* @__PURE__ */ new Set(), i.events);
 		let [o, s, c] = await Promise.all([
-			Qn(this.ep, e).catch(() => null),
-			Xn(this.ep, e).catch(() => null),
+			cr(this.ep, e).catch(() => null),
+			or(this.ep, e).catch(() => null),
 			this.readRequests(e)
 		]);
 		if (r !== this.loadSeq || this.disposed || this.state.turn !== n) return;
-		let l = n.doc?.children.find((t) => t.id === e)?.status ?? "running", u = Ai(W(a), o, l !== "running");
+		let l = n.doc?.children.find((t) => t.id === e)?.status ?? "running", u = Vi(G(a), o, l !== "running");
 		if (s && Array.isArray(s.children)) try {
-			Gt(u, s.children);
+			Kt(u, s.children);
 		} catch {}
 		n.children.set(e, {
 			events: i.events,
@@ -3404,9 +3527,9 @@ var G = () => {}, ji = class {
 		if (this.rowOf(e)) return "ok";
 		let t;
 		try {
-			t = await Xn(this.ep, e);
+			t = await or(this.ep, e);
 		} catch (e) {
-			let t = e instanceof z ? e.status : 0;
+			let t = e instanceof B ? e.status : 0;
 			return t >= 400 && t < 500 ? "foreign" : "unreachable";
 		}
 		if (this.disposed || !t || typeof t != "object") return "unreachable";
@@ -3440,15 +3563,15 @@ var G = () => {}, ji = class {
 		if (i === void 0) return;
 		let a = n.under ?? e, o = typeof t == "number" ? null : t, s = typeof t == "number" ? t : t.fromStep, c = this.loadSeq, l;
 		try {
-			let e = await ar(this.ep);
+			let e = await hr(this.ep);
 			l = Array.isArray(e.runtimes) ? e.runtimes : [];
 		} catch (e) {
-			!this.disposed && c === this.loadSeq && this.setExperimentError(K(e), a);
+			!this.disposed && c === this.loadSeq && this.setExperimentError(q(e), a);
 			return;
 		}
 		if (this.disposed || c !== this.loadSeq) return;
 		this.state.runtimes = l;
-		let u = di(l, i), d = u?.agents.find((e) => e.name === i);
+		let u = Si(l, i), d = u?.agents.find((e) => e.name === i);
 		if (!u || !d) {
 			this.setExperimentError(`no connected runtime registers the agent "${i}"${e === a ? "" : ` (run ${e})`} — experiments run in your app (weft/runtime)`, a);
 			return;
@@ -3458,21 +3581,21 @@ var G = () => {}, ji = class {
 		this.state.breakpoints = Array.isArray(u.breakpoints) ? [...u.breakpoints] : [];
 		let p = this.state.turn;
 		if (p && e !== p.id && !p.children.has(e) && (await this.expandChild(e), this.disposed || c !== this.loadSeq)) return;
-		let m = this.state.turn, h = m ? m.id === e ? m : m.children.get(e) : void 0, g = s === 0 && m && m.id === e ? ai(m.transcript) : "", _ = d.instructions ?? "", v = o?.instructions ?? _, y, b;
+		let m = this.state.turn, h = m ? m.id === e ? m : m.children.get(e) : void 0, g = s === 0 && m && m.id === e ? hi(m.transcript) : "", _ = d.instructions ?? "", v = o?.instructions ?? _, y, b;
 		if (o?.verb === "edit_prompt" && o.instructions === void 0) {
 			let e = h?.requests?.steps.get(s)?.rows, t = e?.[e.length - 1]?.prompt;
-			if (t && !M(t) && t.content !== "truncated" && t.text) v = t.text, y = "step";
+			if (t && !j(t) && t.content !== "truncated" && t.text) v = t.text, y = "step";
 			else {
 				y = "registered";
 				let e = h?.requests;
-				b = t ? M(t) ? { hole: t.badge } : {
+				b = t ? j(t) ? { hole: t.badge } : {
 					hole: "truncated",
 					bytes: t.truncated_bytes
 				} : e ? e.badge ? {
 					hole: e.badge,
 					reason: e.reason,
 					fix: e.fix
-				} : e.error ? Ln(e.error) : In() : Fn();
+				} : e.error ? qn(e.error) : Kn() : Gn();
 			}
 		}
 		this.state.drawer = {
@@ -3491,6 +3614,7 @@ var G = () => {}, ji = class {
 			sideEffects: "",
 			thread: o?.thread ?? "ephemeral",
 			runtimeId: u.id,
+			...d.defaults ? { defaults: d.defaults } : {},
 			under: a,
 			key: ++this.drawerKey,
 			...o ? { verb: o.verb } : {},
@@ -3526,7 +3650,7 @@ var G = () => {}, ji = class {
 	async runExperiment() {
 		let e = this.state.drawer;
 		if (!e || this.posting) return;
-		let t = li(e);
+		let t = yi(e);
 		if (t) {
 			this.setExperimentError(t, e.under ?? e.runId);
 			return;
@@ -3534,20 +3658,20 @@ var G = () => {}, ji = class {
 		this.posting = !0;
 		let n = this.loadSeq, r;
 		try {
-			r = await or(this.ep, ui(e, this.publicId));
+			r = await gr(this.ep, xi(e, this.publicId));
 		} catch (t) {
-			!this.disposed && n === this.loadSeq && this.setExperimentError(K(t), e.under ?? e.runId);
+			!this.disposed && n === this.loadSeq && this.setExperimentError(q(t), e.under ?? e.runId);
 			return;
 		} finally {
 			this.posting = !1;
 		}
 		if (this.disposed || n !== this.loadSeq) return;
-		let i = this.state.experiments.get(e.runId)?.length ?? 0, a = this.state.turn, o = a?.children.get(e.runId), s = a && a.id === e.runId ? oi(a.transcript) ?? si(a.folded) : o ? oi(o.transcript) ?? si(o.folded) : {
+		let i = this.state.experiments.get(e.runId)?.length ?? 0, a = this.state.turn, o = a?.children.get(e.runId), s = a && a.id === e.runId ? gi(a.transcript) ?? _i(a.folded) : o ? gi(o.transcript) ?? _i(o.folded) : {
 			text: "",
 			calls: []
 		};
 		this.expSub?.close(), this.expSub = void 0;
-		let c = Mi(e.runId, ci(e.runId, i), s);
+		let c = Ui(e.runId, vi(e.runId, i), s);
 		c.under = e.under ?? e.runId, c.fromStep = e.thread === "fork" ? 0 : e.step, c.commandID = r.command_id, c.thread = e.thread, c.state = "queued", this.state.result = c, this.emit(), this.trackCommand(c);
 	}
 	async decide(e, t, n) {
@@ -3559,30 +3683,30 @@ var G = () => {}, ji = class {
 				try {
 					i = await this.walkEvents(r.runID);
 				} catch (e) {
-					r.error = `the parked run could not be read again — nothing was sent (${K(e)})`, this.emit();
+					r.error = `the parked run could not be read again — nothing was sent (${q(e)})`, this.emit();
 					return;
 				}
 				if (this.left(r)) return;
-				let a = F();
-				Di(a, /* @__PURE__ */ new Set(), i.events);
-				let o = W(a).pending;
+				let a = P();
+				Ri(a, /* @__PURE__ */ new Set(), i.events);
+				let o = G(a).pending;
 				if (!o.some((t) => t.id === e)) {
 					r.folded.pending = o, r.error = `call ${e} is not pending on ${r.runID} — nothing was sent`, this.emit();
 					return;
 				}
 				let s;
 				try {
-					s = await cr(this.ep, r.runID, {
+					s = await vr(this.ep, r.runID, {
 						call_id: e,
 						decision: t,
 						content: n
 					});
 				} catch (e) {
-					r.error = K(e), this.emit();
+					r.error = q(e), this.emit();
 					let t = await this.walkEvents(r.runID).catch(() => null);
 					if (t && !this.left(r)) {
-						let e = F();
-						Di(e, /* @__PURE__ */ new Set(), t.events), r.folded.pending = W(e).pending, this.emit();
+						let e = P();
+						Ri(e, /* @__PURE__ */ new Set(), t.events), r.folded.pending = G(e).pending, this.emit();
 					}
 					return;
 				}
@@ -3614,13 +3738,13 @@ var G = () => {}, ji = class {
 	async setCompare(e) {
 		let t = this.state.result;
 		if (!t || (t.compareWith = e, this.emit(), !e || this.compareWords.has(e))) return;
-		let n = oi(await Qn(this.ep, e).catch(() => null));
+		let n = gi(await cr(this.ep, e).catch(() => null));
 		if (!n) {
-			let t = F();
+			let t = P();
 			try {
-				Di(t, /* @__PURE__ */ new Set(), (await this.walkEvents(e)).events);
+				Ri(t, /* @__PURE__ */ new Set(), (await this.walkEvents(e)).events);
 			} catch {}
-			n = si(W(t));
+			n = _i(G(t));
 		}
 		this.left(t) || (this.compareWords.set(e, n), this.emit());
 	}
@@ -3630,9 +3754,9 @@ var G = () => {}, ji = class {
 		if (!t) return;
 		let n = this.loadSeq, r;
 		try {
-			r = await lr(this.ep, t.runtimeId, e);
+			r = await yr(this.ep, t.runtimeId, e);
 		} catch (e) {
-			!this.disposed && n === this.loadSeq && this.setExperimentError(K(e), t.runId);
+			!this.disposed && n === this.loadSeq && this.setExperimentError(q(e), t.runId);
 			return;
 		}
 		this.disposed || n !== this.loadSeq || (this.state.breakpoints = Array.isArray(r?.tools) ? r.tools : e, this.emit());
@@ -3641,9 +3765,9 @@ var G = () => {}, ji = class {
 		let t = this.state.result;
 		if (t && t.runID && e) {
 			try {
-				await ur(this.ep, t.runID, e);
+				await br(this.ep, t.runID, e);
 			} catch (e) {
-				t.error = K(e);
+				t.error = q(e);
 			}
 			this.left(t) || this.emit();
 		}
@@ -3656,7 +3780,7 @@ var G = () => {}, ji = class {
 		if (n && (!t || n.under === t)) n.error = e;
 		else {
 			this.expSub?.close(), this.expSub = void 0;
-			let n = Mi(t ?? this.state.selected, "—", {
+			let n = Ui(t ?? this.state.selected, "—", {
 				text: "",
 				calls: []
 			});
@@ -3669,20 +3793,20 @@ var G = () => {}, ji = class {
 			if (this.left(e)) return;
 			let r;
 			try {
-				r = await sr(this.ep, e.commandID);
+				r = await _r(this.ep, e.commandID);
 			} catch (r) {
 				if (this.left(e)) return;
-				let i = r instanceof z && [
+				let i = r instanceof B && [
 					401,
 					403,
 					404,
 					410
 				].includes(r.status);
-				if (i || ++t >= yi) {
-					e.state = "lost", e.error = i ? K(r) : "Studio stopped answering — the command's state is unknown", this.emit();
+				if (i || ++t >= Ai) {
+					e.state = "lost", e.error = i ? q(r) : "Studio stopped answering — the command's state is unknown", this.emit();
 					return;
 				}
-				this.after(vi, () => void n().catch(G));
+				this.after(ki, () => void n().catch(K));
 				return;
 			}
 			if (!this.left(e)) {
@@ -3693,18 +3817,18 @@ var G = () => {}, ji = class {
 					}), e.deciding = null, e.runID && await this.settleExperiment(e, 0);
 					return;
 				}
-				this.after(vi, () => void n().catch(G));
+				this.after(ki, () => void n().catch(K));
 			}
 		};
-		n().catch(G);
+		n().catch(K);
 	}
 	followExperiment(e, t) {
-		let n = F();
-		e.runID = t, e.row = null, e.events = [], e.seen = /* @__PURE__ */ new Set(), e.feed = n, e.folded = W(n), e.pos = -1, e.held = [], e.reading = !1, e.recheck = !1, e.loading = !1, e.stale = !1, e.ready = !1, e.words = null, e.deciding = null, e.decided = {}, this.retries.exp = 0, this.openExperimentStream(e);
+		let n = P();
+		e.runID = t, e.row = null, e.events = [], e.seen = /* @__PURE__ */ new Set(), e.feed = n, e.folded = G(n), e.pos = -1, e.held = [], e.reading = !1, e.recheck = !1, e.loading = !1, e.stale = !1, e.ready = !1, e.words = null, e.deciding = null, e.decided = {}, this.retries.exp = 0, this.openExperimentStream(e);
 	}
 	openExperimentStream(e) {
 		let t = e.runID, n = () => !this.left(e) && e.runID === t && !e.ready;
-		this.expSub?.close(), this.expSub = mr(this.ep, {
+		this.expSub?.close(), this.expSub = wr(this.ep, {
 			selector: { run: t },
 			kinds: [
 				"event",
@@ -3712,18 +3836,18 @@ var G = () => {}, ji = class {
 				"run"
 			],
 			onOpen: () => {
-				this.retries.exp = 0, !this.left(e) && e.runID === t && !e.ready && this.catchUp(e, t, n).catch(G);
+				this.retries.exp = 0, !this.left(e) && e.runID === t && !e.ready && this.catchUp(e, t, n).catch(K);
 			},
 			onRecord: (r) => {
 				this.state.result !== e || e.runID !== r.run_id || e.ready || this.liveInto(e, t, r, n);
 			},
 			onRun: (t) => {
-				this.state.result === e && t.run.id === e.runID && (e.row = t.run, this.emit(), t.run.status !== "running" && this.settleExperiment(e, 0).catch(G));
+				this.state.result === e && t.run.id === e.runID && (e.row = t.run, this.emit(), t.run.status !== "running" && this.settleExperiment(e, 0).catch(K));
 			},
 			onOverflow: (n) => {
 				if (this.expSub = void 0, this.state.result !== e || e.runID !== t || e.ready) return;
 				let r = async () => {
-					this.state.result !== e || e.runID !== t || e.ready || (await this.loadExperiment(e), !(this.left(e) || e.runID !== t || Ni(e)) && (e.state === "queued" || e.state === "accepted") && this.openExperimentStream(e));
+					this.state.result !== e || e.runID !== t || e.ready || (await this.loadExperiment(e), !(this.left(e) || e.runID !== t || Wi(e)) && (e.state === "queued" || e.state === "accepted") && this.openExperimentStream(e));
 				};
 				n !== "expired" && (n === "overflow" ? this.overflowed("exp", r) : this.retry("exp", r));
 			}
@@ -3736,16 +3860,16 @@ var G = () => {}, ji = class {
 		try {
 			[n, r, i] = await Promise.all([
 				this.walkEvents(t).catch(() => null),
-				Qn(this.ep, t).catch(() => null),
-				Xn(this.ep, t).catch(() => null)
+				cr(this.ep, t).catch(() => null),
+				or(this.ep, t).catch(() => null)
 			]);
 		} finally {
 			e.loading = !1;
 		}
 		if (this.disposed || this.state.result !== e || e.runID !== t) return null;
-		n && n.events.length && Oi(e, n.events);
+		n && n.events.length && zi(e, n.events);
 		let a = () => !this.left(e) && e.runID === t && !e.ready;
-		return this.drain(e, t, a), e.recheck && (e.recheck = !1, this.catchUp(e, t, a).catch(G)), i && (e.row = i), e.folded = Ai(W(e.feed), r, !!e.row && e.row.status !== "running"), e.stale = !1, this.emit(), { transcript: r };
+		return this.drain(e, t, a), e.recheck && (e.recheck = !1, this.catchUp(e, t, a).catch(K)), i && (e.row = i), e.folded = Vi(G(e.feed), r, !!e.row && e.row.status !== "running"), e.stale = !1, this.emit(), { transcript: r };
 	}
 	async settleExperiment(e, t) {
 		if (e.ready || this.state.result !== e || this.settling.has(e)) return;
@@ -3756,23 +3880,23 @@ var G = () => {}, ji = class {
 		} finally {
 			this.settling.delete(e);
 		}
-		if (!n || Ni(e)) return;
+		if (!n || Wi(e)) return;
 		let r = e.row;
 		if ((!r || r.status === "running" || r.status === "succeeded" && !e.folded.finished) && t < 14) {
-			this.after(1e3, () => void this.settleExperiment(e, t + 1).catch(G));
+			this.after(1e3, () => void this.settleExperiment(e, t + 1).catch(K));
 			return;
 		}
-		e.ready = !0, e.words = oi(n.transcript) ?? si(e.folded), this.expSub?.close(), this.expSub = void 0, this.emit(), this.loadStepDiff(e).catch(G);
+		e.ready = !0, e.words = gi(n.transcript) ?? _i(e.folded), this.expSub?.close(), this.expSub = void 0, this.emit(), this.loadStepDiff(e).catch(K);
 	}
 	async loadStepDiff(e) {
 		if (e.runID && e.sourceRunID && (this.state.meta?.capabilities.includes("diff") ?? !1)) {
 			try {
-				let t = await Jn(this.ep, e.sourceRunID, e.runID);
+				let t = await ir(this.ep, e.sourceRunID, e.runID);
 				if (this.left(e)) return;
 				e.stepDiff = t;
 			} catch (t) {
 				if (this.left(e)) return;
-				e.stepDiffError = K(t);
+				e.stepDiffError = q(t);
 			}
 			this.emit();
 		}
@@ -3791,13 +3915,13 @@ var G = () => {}, ji = class {
 		let n = this.loadSeq;
 		e.loadingOlder = !0, this.emit();
 		try {
-			let r = await Yn(this.ep, {
+			let r = await ar(this.ep, {
 				public_id: this.publicId,
 				limit: "50",
 				before: t.before,
 				...t.id ? { before_id: t.id } : {}
 			});
-			if (n !== this.loadSeq || this.disposed || !gi(this.cursor, t)) return;
+			if (n !== this.loadSeq || this.disposed || !Di(this.cursor, t)) return;
 			let i = Array.isArray(r.runs) ? r.runs : [];
 			for (let e of i) e && typeof e.id == "string" && !e.parent_run_id && this.inSession(e) && this.upsertRun(e, !0);
 			this.setCursor(r.next_before == null ? null : {
@@ -3834,7 +3958,7 @@ var G = () => {}, ji = class {
 				let e = this.state.turn;
 				e?.stale && this.dress(e);
 				let t = this.state.result;
-				t?.stale && (t.stale = !1, t.folded = W(t.feed)), this.notify(this.state);
+				t?.stale && (t.stale = !1, t.folded = G(t.feed)), this.notify(this.state);
 			});
 		}
 	}
@@ -3842,8 +3966,8 @@ var G = () => {}, ji = class {
 		this.disposed = !0, this.raf && cancelAnimationFrame(this.raf), this.raf = 0, this.clearTimers(), this.scopeSub?.close(), this.runSub?.close(), this.expSub?.close(), this.devSub?.close(), this.scopeSub = this.runSub = this.expSub = this.devSub = void 0;
 	}
 };
-function Mi(e, t, n) {
-	let r = F();
+function Ui(e, t, n) {
+	let r = P();
 	return {
 		commandID: "",
 		state: "rejected",
@@ -3859,7 +3983,7 @@ function Mi(e, t, n) {
 		events: [],
 		seen: /* @__PURE__ */ new Set(),
 		feed: r,
-		folded: W(r),
+		folded: G(r),
 		ready: !1,
 		words: null,
 		deciding: null,
@@ -3873,29 +3997,29 @@ function Mi(e, t, n) {
 		loading: !1
 	};
 }
-function Ni(e) {
+function Wi(e) {
 	return e.ready;
 }
-function K(e) {
+function q(e) {
 	return e instanceof Error ? e.message : String(e);
 }
-function Pi(e, t) {
+function Gi(e, t) {
 	return b({
 		publicId: e,
 		session: t
 	});
 }
-function Fi(e) {
+function Ki(e) {
 	let t = {};
 	return e.session && (t.session = e.session), e.flow && (t.flow = e.flow), e.run && (t.run = e.run), t;
 }
 //#endregion
 //#region src/panel/tree.ts
-var Ii = 2048, Li = 200;
-function Ri(e) {
+var qi = 2048, Ji = 200;
+function Yi(e) {
 	e.timer !== void 0 && e.applied !== e.q && (e.applied = e.q, e.open.clear()), clearTimeout(e.timer), clearTimeout(e.saidTimer), e.timer = e.saidTimer = void 0, e.said === "copied" && (e.said = "");
 }
-var zi = () => ({
+var Xi = () => ({
 	open: /* @__PURE__ */ new Map(),
 	more: /* @__PURE__ */ new Map(),
 	full: /* @__PURE__ */ new Set(),
@@ -3904,47 +4028,47 @@ var zi = () => ({
 	said: "",
 	box: "",
 	bytes: /* @__PURE__ */ new Map()
-}), Bi = (e) => typeof e == "object" && !!e, Vi = (e) => Array.isArray(e) ? e.length : Object.keys(e).length;
-function Hi(e, t, n = Infinity) {
+}), Zi = (e) => typeof e == "object" && !!e, Qi = (e) => Array.isArray(e) ? e.length : Object.keys(e).length;
+function $i(e, t, n = Infinity) {
 	if (Array.isArray(e)) for (let r = 0; r < Math.min(e.length, n); r++) t(String(r), e[r], r);
 	else {
 		let r = Object.keys(e);
 		for (let i = 0; i < Math.min(r.length, n); i++) t(r[i], e[r[i]], i);
 	}
 }
-var Ui = (e, t) => `${e}/${t.replace(/~/g, "~0").replace(/\//g, "~1")}`;
-function Wi(e, t = 2) {
+var ea = (e, t) => `${e}/${t.replace(/~/g, "~0").replace(/\//g, "~1")}`;
+function ta(e, t = 2) {
 	try {
-		return mn(e, t) ?? String(e);
+		return wn(e, t) ?? String(e);
 	} catch {
 		return String(e);
 	}
 }
-function Gi(e) {
+function na(e) {
 	let t = /* @__PURE__ */ new Set();
-	if (!Bi(e)) return t;
+	if (!Zi(e)) return t;
 	let n = 0, r = [["", e]];
 	for (let [e, i] of r) {
-		let a = Math.min(Vi(i), 200);
-		e && n + a > 150 || (t.add(e), n += a, Hi(i, (t, n) => Bi(n) && r.push([Ui(e, t), n]), 200));
+		let a = Math.min(Qi(i), 200);
+		e && n + a > 150 || (t.add(e), n += a, $i(i, (t, n) => Zi(n) && r.push([ea(e, t), n]), 200));
 	}
 	return t;
 }
-function Ki(e, t) {
+function ra(e, t) {
 	let n = /* @__PURE__ */ new Set(), r = /* @__PURE__ */ new Set(), i = 0, a = t.toLowerCase(), o = [[
 		"",
 		null,
 		e
 	]];
 	for (; o.length;) {
-		let [e, t, s] = o.pop(), c = Bi(s) ? "" : String(s);
-		if ((t !== null && t.toLowerCase().includes(a) || c.toLowerCase().includes(a)) && (i++, n.size < Li)) {
+		let [e, t, s] = o.pop(), c = Zi(s) ? "" : String(s);
+		if ((t !== null && t.toLowerCase().includes(a) || c.toLowerCase().includes(a)) && (i++, n.size < Ji)) {
 			n.add(e);
 			for (let t = e.lastIndexOf("/"); t > 0; t = e.lastIndexOf("/", t - 1)) r.add(e.slice(0, t));
 			r.add("");
 		}
-		Bi(s) && Hi(s, (t, n) => o.push([
-			Ui(e, t),
+		Zi(s) && $i(s, (t, n) => o.push([
+			ea(e, t),
 			t,
 			n
 		]));
@@ -3955,7 +4079,7 @@ function Ki(e, t) {
 		n: i
 	};
 }
-function qi(e, t = 0) {
+function ia(e, t = 0) {
 	let n = 0;
 	for (let r = t; r < e.length; r++) {
 		let t = e.charCodeAt(r);
@@ -3963,8 +4087,8 @@ function qi(e, t = 0) {
 	}
 	return n;
 }
-var Ji = (e) => (e.charCodeAt(2047) & 64512) == 55296 ? 2047 : Ii, Yi = (e) => Array.isArray(e) ? `[…] ${e.length} items` : `{…} ${Vi(e)} keys`;
-function Xi(e, t, n) {
+var aa = (e) => (e.charCodeAt(2047) & 64512) == 55296 ? 2047 : qi, oa = (e) => Array.isArray(e) ? `[…] ${e.length} items` : `{…} ${Qi(e)} keys`;
+function sa(e, t, n) {
 	let r = (r) => {
 		if (e.said = r ? "copied" : "the clipboard refused: select and copy below", e.box = r ? "" : t, clearTimeout(e.saidTimer), r && (e.saidTimer = setTimeout(() => {
 			e.said === "copied" && (e.said = "", n.redraw());
@@ -3980,102 +4104,102 @@ function Xi(e, t, n) {
 		r(!1);
 	}
 }
-function Zi(e, t, n, r) {
+function ca(e, t, n, r) {
 	let i = t.applied.trim(), a = null;
 	if (i) {
 		let n = t.memo;
 		a = n && n.root === e && n.q === i ? n : t.memo = {
 			root: e,
 			q: i,
-			...Ki(e, i)
+			...ra(e, i)
 		};
 	}
 	let o = t.auto;
 	(!o || o.root !== e) && (o = t.auto = {
 		root: e,
-		open: Gi(e)
+		open: na(e)
 	});
 	let s = o.open, c = (e) => () => {
 		e(), t.said = "", r.redraw();
 	}, l = (e) => t.open.get(e) ?? (a?.via.has(e) || s.has(e)), u = [], d = (e, n, i, o) => {
-		let s = Bi(n), d = s && l(i), p = I("div", `weft-tn${a?.hits.has(i) ? " weft-hit" : ""}`, void 0, { "data-key": `n${i}` });
+		let s = Zi(n), d = s && l(i), p = L("div", `weft-tn${a?.hits.has(i) ? " weft-hit" : ""}`, void 0, { "data-key": `n${i}` });
 		if (p.style.paddingLeft = `${o * 12}px`, s) {
-			let n = I("button", "weft-tt", d ? "▾" : "▸", {
+			let n = L("button", "weft-tt", d ? "▾" : "▸", {
 				type: "button",
 				"aria-expanded": String(d),
 				"aria-label": `${d ? "collapse" : "expand"} ${e}`
 			});
-			L(n, "click", c(() => t.open.set(i, !d))), p.appendChild(n);
-		} else p.appendChild(I("span", "weft-tt", "", { "aria-hidden": "true" }));
-		if (p.appendChild(I("span", "weft-tk", `${e}: `)), s) p.appendChild(I("span", "weft-tv", Yi(n)));
+			R(n, "click", c(() => t.open.set(i, !d))), p.appendChild(n);
+		} else p.appendChild(L("span", "weft-tt", "", { "aria-hidden": "true" }));
+		if (p.appendChild(L("span", "weft-tk", `${e}: `)), s) p.appendChild(L("span", "weft-tv", oa(n)));
 		else if (typeof n == "string" && n.length > 2048 && !t.full.has(i)) {
-			let e = Ji(n);
-			p.appendChild(I("span", "weft-tv", `${JSON.stringify(n.slice(0, e)).slice(0, -1)}…`));
+			let e = aa(n);
+			p.appendChild(L("span", "weft-tv", `${JSON.stringify(n.slice(0, e)).slice(0, -1)}…`));
 			let r = t.bytes.get(i);
 			r?.v !== n && t.bytes.set(i, r = {
 				v: n,
-				n: qi(n, e)
+				n: ia(n, e)
 			});
-			let a = I("button", "weft-btn weft-tmore", `… +${r.n} bytes`, {
+			let a = L("button", "weft-btn weft-tmore", `… +${r.n} bytes`, {
 				type: "button",
 				title: "show the whole string"
 			});
-			L(a, "click", c(() => t.full.add(i))), p.appendChild(a);
-		} else p.appendChild(I("span", "weft-tv", Wi(n, 0)));
-		let m = I("button", "weft-tc", "⧉", {
+			R(a, "click", c(() => t.full.add(i))), p.appendChild(a);
+		} else p.appendChild(L("span", "weft-tv", ta(n, 0)));
+		let m = L("button", "weft-tc", "⧉", {
 			type: "button",
 			title: "copy this node's JSON",
 			"aria-label": `copy ${e}`
 		});
-		L(m, "click", () => Xi(t, Wi(n), r)), p.appendChild(m), u.push(p), d && f(n, i, o + 1);
+		R(m, "click", () => sa(t, ta(n), r)), p.appendChild(m), u.push(p), d && f(n, i, o + 1);
 	}, f = (e, n, r) => {
 		let i = 200 + (t.more.get(n) ?? 0), o = 0;
-		if (Hi(e, (e, t, s) => {
-			let c = Ui(n, e);
+		if ($i(e, (e, t, s) => {
+			let c = ea(n, e);
 			s < i || a?.via.has(c) || a?.hits.has(c) ? d(e, t, c, r) : o++;
 		}), o) {
-			let e = I("button", "weft-btn weft-tmore", `… +${o} more`, {
+			let e = L("button", "weft-btn weft-tmore", `… +${o} more`, {
 				type: "button",
 				"data-key": `m${n}`
 			});
-			e.style.marginLeft = `${r * 12 + 16}px`, L(e, "click", c(() => t.more.set(n, (t.more.get(n) ?? 0) + 200))), u.push(e);
+			e.style.marginLeft = `${r * 12 + 16}px`, R(e, "click", c(() => t.more.set(n, (t.more.get(n) ?? 0) + 200))), u.push(e);
 		}
 	};
-	Bi(e) ? f(e, "", 0) : d("value", e, "", 0);
-	let p = I("div", "weft-tbar", void 0, { "data-key": "tbar" }), m = I("input", "weft-input weft-tree-q", void 0, {
+	Zi(e) ? f(e, "", 0) : d("value", e, "", 0);
+	let p = L("div", "weft-tbar", void 0, { "data-key": "tbar" }), m = L("input", "weft-input weft-tree-q", void 0, {
 		type: "search",
 		"aria-label": "filter keys and values",
 		placeholder: "/ filter keys and values"
 	});
-	m.value = t.q, L(m, "input", (e, n) => {
+	m.value = t.q, R(m, "input", (e, n) => {
 		t.q = n.value, clearTimeout(t.timer), t.timer = setTimeout(() => {
 			t.applied = t.q, t.open.clear(), t.said = "", r.redraw();
 		}, 100);
 	}), p.appendChild(m);
 	let h = a ? `${a.n} match${a.n === 1 ? "" : "es"}${a.n > a.hits.size ? ` · first ${a.hits.size} opened` : ""}` : "";
-	p.appendChild(I("span", "weft-tree-n", h));
-	let g = I("button", "weft-btn", "copy all", {
+	p.appendChild(L("span", "weft-tree-n", h));
+	let g = L("button", "weft-btn", "copy all", {
 		type: "button",
 		title: "copy the whole document's JSON"
 	});
-	L(g, "click", () => Xi(t, Wi(e), r)), p.appendChild(g);
-	let _ = I("a", "weft-btn weft-dl", "download", {
+	R(g, "click", () => sa(t, ta(e), r)), p.appendChild(g);
+	let _ = L("a", "weft-btn weft-dl", "download", {
 		href: "#",
 		download: `${n}.json`,
 		title: `save as ${n}.json`
 	});
-	L(_, "click", (t, n) => {
-		let r = Wi(e);
+	R(_, "click", (t, n) => {
+		let r = ta(e);
 		try {
 			let e = URL.createObjectURL(new Blob([r], { type: "application/json" }));
 			setTimeout(() => URL.revokeObjectURL(e), 6e4), n.setAttribute("href", e);
 		} catch {
 			n.setAttribute("href", `data:application/json;charset=utf-8,${encodeURIComponent(r)}`);
 		}
-	}), p.appendChild(_), t.said && p.appendChild(I("span", "weft-tree-said", t.said));
-	let v = I("div", "weft-raw", [p], { "data-key": "raw" });
+	}), p.appendChild(_), t.said && p.appendChild(L("span", "weft-tree-said", t.said));
+	let v = L("div", "weft-raw", [p], { "data-key": "raw" });
 	if (t.box) {
-		let e = I("textarea", "weft-input weft-copybox", void 0, {
+		let e = L("textarea", "weft-input weft-copybox", void 0, {
 			readonly: "",
 			"aria-label": "the JSON to copy",
 			rows: "4"
@@ -4084,37 +4208,37 @@ function Zi(e, t, n, r) {
 		let n = () => {
 			t.box = "", t.said = "", r.redraw();
 		};
-		L(e, "blur", n), L(e, "keydown", (e) => {
+		R(e, "blur", n), R(e, "keydown", (e) => {
 			e.key === "Escape" && (e.preventDefault(), n());
 		}), v.appendChild(e);
 	}
-	let y = I("div", "weft-tree", u, { "data-key": "tree" });
-	return L(y, "keydown", (e) => {
+	let y = L("div", "weft-tree", u, { "data-key": "tree" });
+	return R(y, "keydown", (e) => {
 		let t = e.key, n = e.target;
 		t !== "ArrowRight" && t !== "ArrowLeft" || !n.classList.contains("weft-tt") || n.getAttribute("aria-expanded") === "true" == (t === "ArrowLeft") && (e.preventDefault(), n.click());
 	}), v.appendChild(y), v;
 }
 //#endregion
 //#region src/lib/request-pane.ts
-var Qi = "changed by PrepareStep", $i = "overridden by experiment", ea = "catalog changed at this step", ta = "prompt changed at this step", na = "weft.override.";
-function ra(e, t) {
+var la = "changed by PrepareStep", ua = "overridden by experiment", da = "catalog changed at this step", fa = "prompt changed at this step", pa = "weft.override.";
+function ma(e, t) {
 	let n = e?.find((e) => e.attrs["gen_ai.operation.name"] === "invoke_agent" && e.attrs["weft.run.id"] === t);
 	if (!n) return;
 	let r = [], i;
 	for (let [e, t] of Object.entries(n.attrs)) {
-		if (!e.startsWith(na)) continue;
+		if (!e.startsWith(pa)) continue;
 		let n = e.slice(14);
 		n === "hash" ? i = typeof t == "string" ? t : String(t) : r.push(n);
 	}
 	if (!i && r.length === 0) return;
-	let a = n.attrs[`${na}instructions`];
+	let a = n.attrs[`${pa}instructions`];
 	return {
 		hash: i,
 		instructions: a === !0 || a === "true",
 		fields: r.sort()
 	};
 }
-function ia(e, t, n) {
+function ha(e, t, n) {
 	let r = e?.agents ?? [];
 	if (n) {
 		let e = r.find((e) => e.manifest_hash === n);
@@ -4129,70 +4253,70 @@ function ia(e, t, n) {
 		verified: !!n && (e?.sources ?? []).some((e) => e.source === "file" && e.agents.some((e) => e.name === t && e.manifest_hash === n))
 	};
 }
-async function aa(e) {
+async function ga(e) {
 	let t = globalThis.crypto?.subtle;
 	if (!t) return;
 	let n = await t.digest("SHA-256", new TextEncoder().encode(e));
 	return Array.from(new Uint8Array(n), (e) => e.toString(16).padStart(2, "0")).join("");
 }
-function oa(e, t) {
+function _a(e, t) {
 	let n = e;
 	for (let e of t) e && (n.length > 0 && (n += "\n\n"), n += e);
 	return n;
 }
-function sa(e, t) {
+function va(e, t) {
 	if (!t) return;
 	let n = new Map(t.tools.map((e) => [e.name, e.prompt_snippet ?? ""]));
 	if (!e.some((e) => !n.has(e))) return e.map((e) => n.get(e) ?? "");
 }
-function ca(e) {
+function ya(e) {
 	let t = e?.prompt;
-	return !e || !t || M(t) ? e && !e.system_hash ? "" : void 0 : t.content === "derived" ? void 0 : t.text;
+	return !e || !t || j(t) ? e && !e.system_hash ? "" : void 0 : t.content === "derived" ? void 0 : t.text;
 }
-async function la(e, t, n) {
+async function ba(e, t, n) {
 	let r = e.system_hash;
 	if (r === t || r === "" && t === "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855") return !0;
-	let i = ca(e);
+	let i = ya(e);
 	if (i === void 0) return;
 	if (n === void 0) {
 		if (e.body.tools.names.length > 0) {
-			let e = await aa(i);
+			let e = await ga(i);
 			return e === void 0 || e !== t ? void 0 : !0;
 		}
 		n = [];
 	}
 	let a = n.filter(Boolean);
 	if (a.length === 0) {
-		let e = await aa(i);
+		let e = await ga(i);
 		return e === void 0 ? void 0 : e === t;
 	}
 	let o = a.join("\n\n");
 	if (t === "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855") return i === o;
 	if (!i.endsWith(`\n\n${o}`)) return !1;
-	let s = await aa(i.slice(0, i.length - o.length - 2));
+	let s = await ga(i.slice(0, i.length - o.length - 2));
 	return s === void 0 ? void 0 : s === t;
 }
-function ua(e) {
+function xa(e) {
 	return e.kind === "previous" ? `diff vs step ${e.step}` : e.verified ? e.overridden ? "diff vs the registered instructions (overridden for this run)" : "diff vs the registered instructions" : "diff vs weft.json's instructions — not verified for this run";
 }
-function da(e, t, n) {
+function Sa(e, t, n) {
 	let r = new Set(e), i = new Set(t), a = [...e.filter((e) => !i.has(e)), ...t.filter((e) => !r.has(e))];
 	if (a.length === 0) {
 		if (!(e.length !== t.length || e.some((e, n) => e !== t[n]))) return !1;
 		if (!n?.verified) return !0;
-		let r = sa(t, n.agent);
+		let r = va(t, n.agent);
 		return r === void 0 || r.some(Boolean);
 	}
 	if (!n?.verified) return !0;
-	let o = sa(a, n.agent);
+	let o = va(a, n.agent);
 	return o === void 0 || o.some(Boolean);
 }
-function fa(e) {
+function Ca(e) {
 	let t = [...e].sort((e, t) => e.step - t.step || e.index - t.index), n = /* @__PURE__ */ new Map(), r;
 	for (let e of t) r && r.step !== e.step && !n.has(e.step) && n.set(e.step, r), (!r || r.step !== e.step || e.index > r.index) && (r = e);
 	return n;
 }
-function pa(e, t, n = [], r = 3, i = !1) {
+function wa(e, t, n = [], r = 3, i = !1) {
 	let a = e.body.messages_ref, o = a.count, s = (e) => ({
 		count: o,
 		last: [],
@@ -4220,245 +4344,245 @@ function pa(e, t, n = [], r = 3, i = !1) {
 }
 //#endregion
 //#region src/lib/summarize.ts
-function ma(e) {
+function Ta(e) {
 	return e < 1024 ? `${e} B` : e < 1048576 ? `${(e / 1024).toFixed(1)} KB` : `${(e / 1048576).toFixed(1)} MB`;
 }
 //#endregion
 //#region src/panel/request.ts
-var ha = 12, q = (e, t) => I("div", "weft-rq-hole", [R(e, t)], { "data-weft-rq-hole": e }), ga = (e, t) => q(e, e === "not_recorded" ? { label: Ft } : e === "stripped" ? t.t.requests?.stripped : void 0), _a = (e, t) => I("div", "weft-rq-hole", Sn(e, t), { "data-weft-rq-hole": e }), J = (e, t, n) => I("div", "weft-rq-row", [I("span", "weft-rq-k", e), I("div", "weft-rq-v", t)], {
+var Ea = 12, J = (e, t) => L("div", "weft-rq-hole", [z(e, t)], { "data-weft-rq-hole": e }), Da = (e, t) => J(e, e === "not_recorded" ? { label: It } : e === "stripped" ? t.t.requests?.stripped : void 0), Oa = (e, t) => L("div", "weft-rq-hole", Mn(e, t), { "data-weft-rq-hole": e }), ka = (e, t, n) => L("div", "weft-rq-row", [L("span", "weft-rq-k", e), L("div", "weft-rq-v", t)], {
 	"data-key": n,
 	"data-weft-rq": n
-}), Y = (e, t = "weft-res") => I("span", t, e), va = (e, t) => I("span", "weft-badge weft-info", t, { "data-weft-mark": e });
-function ya(e, t, n, r) {
-	let i = I("div", "weft-holes weft-rq-pick", void 0, {
+}), Y = (e, t = "weft-res") => L("span", t, e), Aa = (e, t) => L("span", "weft-badge weft-info", t, { "data-weft-mark": e });
+function ja(e, t, n, r) {
+	let i = L("div", "weft-holes weft-rq-pick", void 0, {
 		role: "group",
 		"aria-label": e,
 		"data-key": e
 	});
 	for (let a of t) {
-		let t = I("button", `weft-btn${a === n ? " weft-active" : ""}`, `${e} ${a}`, {
+		let t = L("button", `weft-btn${a === n ? " weft-active" : ""}`, `${e} ${a}`, {
 			type: "button",
 			"aria-pressed": String(a === n),
 			[`data-weft-rq-${e}`]: String(a)
 		});
-		L(t, "click", () => r(a)), i.appendChild(t);
+		R(t, "click", () => r(a)), i.appendChild(t);
 	}
 	return i;
 }
-var ba = /* @__PURE__ */ new Map();
-function xa(e, t) {
-	ba.set(e, t), ba.size > 64 && ba.delete(ba.keys().next().value);
+var Ma = /* @__PURE__ */ new Map();
+function Na(e, t) {
+	Ma.set(e, t), Ma.size > 64 && Ma.delete(Ma.keys().next().value);
 }
-function Sa(e, t, n, r) {
+function Pa(e, t, n, r) {
 	let i = [
 		e.system_hash,
 		t,
 		e.body.tools.names.join(","),
 		n?.join("\0") ?? ""
-	].join("|"), a = ba.get(i);
+	].join("|"), a = Ma.get(i);
 	if (a !== "pending") {
 		if (a !== void 0) return a ?? void 0;
-		xa(i, "pending"), la(e, t, n).then((e) => {
-			xa(i, e ?? null), r();
-		}, () => xa(i, null));
+		Na(i, "pending"), ba(e, t, n).then((e) => {
+			Na(i, e ?? null), r();
+		}, () => Na(i, null));
 	}
 }
-function Ca(e) {
+function Fa(e) {
 	let t = e?.prompt;
-	return !!t && !M(t) && t.truncated_bytes > 0;
+	return !!t && !j(t) && t.truncated_bytes > 0;
 }
-function wa(e, t, n, r, i) {
-	let a = e.t.doc, o = n === void 0, s = a?.instructions_hash, c = ra(e.t.spans ?? void 0, e.t.id), l = o && c?.instructions === !0, u = o && !!s && i.system_hash !== s, d = !o && (t.steps.get(r)?.promptChanged ?? !1), f = i.body.tools.names, p = n?.body.tools.names ?? [], m = d && (f.length !== p.length || f.some((e, t) => e !== p[t])), h = u || l || m, g = h ? e.manifest() : void 0, _ = !h || g !== void 0, v = a?.agent ? ia(g ?? void 0, a.agent, a.manifest_hash || void 0) : void 0, y = sa(f, v?.agent), b = v?.verified ? y : void 0, x = ca(i);
+function Ia(e, t, n, r, i) {
+	let a = e.t.doc, o = n === void 0, s = a?.instructions_hash, c = ma(e.t.spans ?? void 0, e.t.id), l = o && c?.instructions === !0, u = o && !!s && i.system_hash !== s, d = !o && (t.steps.get(r)?.promptChanged ?? !1), f = i.body.tools.names, p = n?.body.tools.names ?? [], m = d && (f.length !== p.length || f.some((e, t) => e !== p[t])), h = u || l || m, g = h ? e.manifest() : void 0, _ = !h || g !== void 0, v = a?.agent ? ha(g ?? void 0, a.agent, a.manifest_hash || void 0) : void 0, y = va(f, v?.agent), b = v?.verified ? y : void 0, x = ya(i);
 	if (!o) {
-		let e = ca(n);
+		let e = ya(n);
 		return {
-			prompt: d ? m && (!_ || da(p, f, v)) ? "either" : "prepare_step" : void 0,
+			prompt: d ? m && (!_ || Sa(p, f, v)) ? "either" : "prepare_step" : void 0,
 			experiment: !1,
 			noManifest: !1,
 			base: d && e !== void 0 && x !== void 0 ? {
 				kind: "previous",
 				step: n.step,
 				text: e,
-				truncated: Ca(n)
+				truncated: Fa(n)
 			} : void 0
 		};
 	}
-	let S = u && _ ? Sa(i, s, b, e.redraw) : void 0, C = v && v.agent.instructions !== void 0 && y ? oa(v.agent.instructions, y) : void 0;
+	let ee = u && _ ? Pa(i, s, b, e.redraw) : void 0, S = v && v.agent.instructions !== void 0 && y ? _a(v.agent.instructions, y) : void 0;
 	return {
-		prompt: S === !1 ? "prepare_step" : void 0,
+		prompt: ee === !1 ? "prepare_step" : void 0,
 		experiment: l,
 		noManifest: (u || l) && g === null,
-		base: C !== void 0 && x !== void 0 && C !== x ? {
+		base: S !== void 0 && x !== void 0 && S !== x ? {
 			kind: "registered",
-			text: C,
+			text: S,
 			verified: v?.verified,
 			overridden: l
 		} : void 0
 	};
 }
-var Ta = /* @__PURE__ */ new WeakMap();
-function Ea(e, t, n) {
-	let r = I("div", "weft-diff", [I("div", "weft-diff-h", ua(t))], { "data-weft-prompt-diff": t.kind });
-	if (Ca(e) || t.truncated) return r.appendChild(q("truncated", { label: Bt })), r;
-	let i = Ta.get(e);
-	(!i || i.base !== t.text) && Ta.set(e, i = {
+var La = /* @__PURE__ */ new WeakMap();
+function Ra(e, t, n) {
+	let r = L("div", "weft-diff", [L("div", "weft-diff-h", xa(t))], { "data-weft-prompt-diff": t.kind });
+	if (Fa(e) || t.truncated) return r.appendChild(J("truncated", { label: Vt })), r;
+	let i = La.get(e);
+	(!i || i.base !== t.text) && La.set(e, i = {
 		base: t.text,
-		diff: vr(t.text, n)
+		diff: Or(t.text, n)
 	});
 	let a = i.diff;
-	if ("tooLarge" in a) return r.appendChild(I("div", "weft-reason", `too large to diff (${a.tooLarge.before} → ${a.tooLarge.after} lines)`, { "data-weft-diff-too-large": "" })), r;
-	for (let e of a.rows) r.appendChild(I("div", `weft-diff-row weft-diff-${e.kind}`, `${Da[e.kind]}${e.text}`, { "data-weft-diff": e.kind }));
+	if ("tooLarge" in a) return r.appendChild(L("div", "weft-reason", `too large to diff (${a.tooLarge.before} → ${a.tooLarge.after} lines)`, { "data-weft-diff-too-large": "" })), r;
+	for (let e of a.rows) r.appendChild(L("div", `weft-diff-row weft-diff-${e.kind}`, `${za[e.kind]}${e.text}`, { "data-weft-diff": e.kind }));
 	return r;
 }
-var Da = {
+var za = {
 	add: "+ ",
 	del: "− ",
 	same: "  "
 };
-function Oa(e, t, n) {
-	let r = e.keys.has(t), i = I("button", "weft-btn weft-rq-more", n(r), {
+function Ba(e, t, n) {
+	let r = e.keys.has(t), i = L("button", "weft-btn weft-rq-more", n(r), {
 		type: "button",
 		"aria-expanded": String(r)
 	});
-	return L(i, "click", () => {
+	return R(i, "click", () => {
 		e.keys.has(t) ? e.keys.delete(t) : e.keys.add(t), e.redraw();
 	}), [i, r];
 }
-function ka(e, t, n, r) {
+function Va(e, t, n, r) {
 	let i = t.prompt;
 	if (!t.system_hash) return [Y("no system prompt")];
-	if (!i || M(i)) return [Y(N(t.system_hash), "weft-rq-hash"), ...i ? [ga(i.badge, e)] : []];
-	if (i.content === "derived") return [Y(N(i.hash), "weft-rq-hash"), q("derived")];
-	let a = i.text.split("\n"), o = a.length > ha, [s, c] = o ? Oa(e, `${r}\u0000rq-prompt`, (e) => e ? "show less" : `show all ${a.length} lines`) : [null, !0], l = [I("div", "weft-res weft-rq-prompt", o && !c ? `${a.slice(0, ha).join("\n")}\n…` : i.text, { "data-weft-prompt": "" })], u = I("div", "weft-holes", [Y(N(i.hash), "weft-rq-hash")]);
-	return s && u.appendChild(s), l.push(u), i.truncated_bytes > 0 && l.push(q("truncated", { bytes: i.truncated_bytes })), n.base && n.base.text !== i.text && l.push(Ea(t, n.base, i.text)), l;
+	if (!i || j(i)) return [Y(M(t.system_hash), "weft-rq-hash"), ...i ? [Da(i.badge, e)] : []];
+	if (i.content === "derived") return [Y(M(i.hash), "weft-rq-hash"), J("derived")];
+	let a = i.text.split("\n"), o = a.length > Ea, [s, c] = o ? Ba(e, `${r}\u0000rq-prompt`, (e) => e ? "show less" : `show all ${a.length} lines`) : [null, !0], l = [L("div", "weft-res weft-rq-prompt", o && !c ? `${a.slice(0, Ea).join("\n")}\n…` : i.text, { "data-weft-prompt": "" })], u = L("div", "weft-holes", [Y(M(i.hash), "weft-rq-hash")]);
+	return s && u.appendChild(s), l.push(u), i.truncated_bytes > 0 && l.push(J("truncated", { bytes: i.truncated_bytes })), n.base && n.base.text !== i.text && l.push(Ra(t, n.base, i.text)), l;
 }
-function Aa(e) {
-	let t = I("div", "weft-holes");
+function Ha(e) {
+	let t = L("div", "weft-holes");
 	for (let n of [
 		`timeout ${e.timeout_ms > 0 ? `${e.timeout_ms}ms` : "none"}`,
 		`approval ${e.approval ? "required" : "no"}`,
 		`replay ${e.replay || "never"}`,
-		`result cap ${e.max_result_bytes > 0 ? ma(e.max_result_bytes) : "off"}`,
+		`result cap ${e.max_result_bytes > 0 ? Ta(e.max_result_bytes) : "off"}`,
 		e.sequential ? "sequential" : "",
 		`source ${e.source || "?"}`
-	]) n && t.appendChild(I("span", "weft-chip", n));
+	]) n && t.appendChild(L("span", "weft-chip", n));
 	return t;
 }
-function ja(e, t, n, r) {
+function Ua(e, t, n, r) {
 	let i = t.tools, a = t.body.tools.names;
 	if (!t.catalog_hash) return [Y("no tools offered")];
-	if (!i || M(i)) {
+	if (!i || j(i)) {
 		let n = [];
-		return a.length && n.push(Y(a.join(", "))), n.push(i ? ga(i.badge, e) : Y(N(t.catalog_hash), "weft-rq-hash")), n;
+		return a.length && n.push(Y(a.join(", "))), n.push(i ? Da(i.badge, e) : Y(M(t.catalog_hash), "weft-rq-hash")), n;
 	}
-	if (i.content === "derived") return [Y(N(i.hash), "weft-rq-hash"), q("derived")];
-	let o = I("div", "weft-rq-tools");
+	if (i.content === "derived") return [Y(M(i.hash), "weft-rq-hash"), J("derived")];
+	let o = L("div", "weft-rq-tools");
 	for (let t of i.tools) {
-		let [i, a] = Oa(e, `${n}\u0000rq-tool\u0000${t.name}`, (e) => `${e ? "▾" : "▸"} ${t.name}`);
+		let [i, a] = Ba(e, `${n}\u0000rq-tool\u0000${t.name}`, (e) => `${e ? "▾" : "▸"} ${t.name}`);
 		i.className = "weft-btn weft-rq-tool";
-		let s = I("div", void 0, [i], {
+		let s = L("div", void 0, [i], {
 			"data-key": `tool:${t.name}`,
 			"data-weft-tool": t.name
 		});
-		a && (s.appendChild(I("div", "weft-res", t.description)), s.appendChild(Aa(t)), s.appendChild(Zi(t.schema, e.tree(`schema\u0000${r}\u0000${t.name}`), `${t.name}-schema`, e.cx))), o.appendChild(s);
+		a && (s.appendChild(L("div", "weft-res", t.description)), s.appendChild(Ha(t)), s.appendChild(ca(t.schema, e.tree(`schema\u0000${r}\u0000${t.name}`), `${t.name}-schema`, e.cx))), o.appendChild(s);
 	}
-	let s = [o, I("div", "weft-holes", [Y(N(i.hash), "weft-rq-hash")])];
-	return i.truncated_bytes > 0 && s.push(q("truncated", { bytes: i.truncated_bytes })), s;
+	let s = [o, L("div", "weft-holes", [Y(M(i.hash), "weft-rq-hash")])];
+	return i.truncated_bytes > 0 && s.push(J("truncated", { bytes: i.truncated_bytes })), s;
 }
-var Ma = /* @__PURE__ */ new WeakMap();
-function Na(e, t, n) {
-	let r = Nr(e.t.doc), i = Ma.get(t);
-	(!i || i.tr !== e.t.transcript || i.comps !== e.t.doc || i.running !== e.running) && Ma.set(t, i = {
+var Wa = /* @__PURE__ */ new WeakMap();
+function Ga(e, t, n) {
+	let r = Ur(e.t.doc), i = Wa.get(t);
+	(!i || i.tr !== e.t.transcript || i.comps !== e.t.doc || i.running !== e.running) && Wa.set(t, i = {
 		tr: e.t.transcript,
 		comps: e.t.doc,
 		running: e.running,
-		m: pa(t, e.t.transcript, r, void 0, e.running)
+		m: wa(t, e.t.transcript, r, void 0, e.running)
 	});
-	let a = i.m, o = `${a.count} ${a.count === 1 ? "message" : "messages"}`, s = [I("div", "weft-res", a.bytes === void 0 ? o : `${o} · ${ma(a.bytes)}`, { "data-weft-messages-line": "" })];
-	if (a.hole === "no_transcript" ? s.push(I("div", "weft-reason", "bytes when the transcript is read")) : a.hole && s.push(a.hole === "compacted" || a.hole === "no_index" && t.content === "stripped" ? q(a.hole === "compacted" ? a.hole : "stripped") : q("gap", { reason: a.hole === "gap" ? Rt : zt })), a.last.length) {
-		let e = I("div", void 0, void 0, { "data-weft-messages-last": "" });
-		for (let t of a.last) e.appendChild(I("div", "weft-res", Rr(t)));
+	let a = i.m, o = `${a.count} ${a.count === 1 ? "message" : "messages"}`, s = [L("div", "weft-res", a.bytes === void 0 ? o : `${o} · ${Ta(a.bytes)}`, { "data-weft-messages-line": "" })];
+	if (a.hole === "no_transcript" ? s.push(L("div", "weft-reason", "bytes when the transcript is read")) : a.hole && s.push(a.hole === "compacted" || a.hole === "no_index" && t.content === "stripped" ? J(a.hole === "compacted" ? a.hole : "stripped") : J("gap", { reason: a.hole === "gap" ? zt : Bt })), a.last.length) {
+		let e = L("div", void 0, void 0, { "data-weft-messages-last": "" });
+		for (let t of a.last) e.appendChild(L("div", "weft-res", Jr(t)));
 		s.push(e);
 	}
 	if (a.before.length) {
-		let [t, r] = Oa(e, `${e.t.id}\u0000rq-earlier\u0000${n}`, (e) => `${e ? "▾" : "▸"} ${a.before.length} earlier ${a.before.length === 1 ? "message" : "messages"} (raw)`);
-		s.push(t), r && s.push(I("div", void 0, [Zi(a.before, e.tree(`earlier\u0000${n}`), `step${n}-messages`, e.cx)], { "data-weft-messages-earlier": "" }));
+		let [t, r] = Ba(e, `${e.t.id}\u0000rq-earlier\u0000${n}`, (e) => `${e ? "▾" : "▸"} ${a.before.length} earlier ${a.before.length === 1 ? "message" : "messages"} (raw)`);
+		s.push(t), r && s.push(L("div", void 0, [ca(a.before, e.tree(`earlier\u0000${n}`), `step${n}-messages`, e.cx)], { "data-weft-messages-earlier": "" }));
 	}
 	return s;
 }
-function Pa(e, t) {
+function Ka(e, t) {
 	let n = new Set(e.folded.steps.map((e) => e.index));
 	for (let e of t?.steps.keys() ?? []) n.add(e);
 	return [...n].sort((e, t) => e - t);
 }
-function Fa(e) {
-	let t = e.t, n = t.requests, r = I("div", "weft-rq");
-	if (n?.badge) return r.appendChild(_a(n.badge, {
+function qa(e) {
+	let t = e.t, n = t.requests, r = L("div", "weft-rq");
+	if (n?.badge) return r.appendChild(Oa(n.badge, {
 		reason: n.reason,
 		fix: n.fix
 	})), r;
-	if (!n) return r.appendChild(t.doc?.requests_badge ? _a(t.doc.requests_badge) : _a("not_recorded", {
+	if (!n) return r.appendChild(t.doc?.requests_badge ? Oa(t.doc.requests_badge) : Oa("not_recorded", {
 		cause: "not_served",
 		reason: e.notServed
 	})), r;
-	if (n.error) return r.appendChild(I("span", "weft-badge weft-err", `request could not be read: ${n.error}`)), r;
-	let i = Pa(t, n), a = e.step !== void 0 && i.includes(e.step) ? e.step : i[0] ?? 0;
-	r.appendChild(ya("step", i, a, e.select));
-	let o = I("div", "weft-rq-pane", void 0, {
+	if (n.error) return r.appendChild(L("span", "weft-badge weft-err", `request could not be read: ${n.error}`)), r;
+	let i = Ka(t, n), a = e.step !== void 0 && i.includes(e.step) ? e.step : i[0] ?? 0;
+	r.appendChild(ja("step", i, a, e.select));
+	let o = L("div", "weft-rq-pane", void 0, {
 		"data-key": `rq${a}`,
 		"data-weft-rq-pane": String(a)
 	});
 	r.appendChild(o);
-	let s = Nr(t.doc);
-	for (let t of s) (U(t) ? a === i[0] : t.step === a) && o.appendChild(e.compaction(t));
+	let s = Ur(t.doc);
+	for (let t of s) (W(t) ? a === i[0] : t.step === a) && o.appendChild(e.compaction(t));
 	let c = n.steps.get(a), l = c?.rows ?? [];
-	if (!l.length) return o.appendChild(e.running ? I("div", "weft-reason", Vt) : n.truncated ? Cn(10 * $n) : q("gap", { reason: It })), r;
-	let u = fa([...n.steps.values()].flatMap((e) => e.rows)), d = l[0], f = e.pick.get(a), p = l.find((e) => e.attempt === f) ?? l[l.length - 1], m = wa(e, n, u.get(a), a, d), h = I("div", "weft-holes weft-rq-head", void 0, { "data-key": "head" }), g = [p.body.model.provider, p.body.model.name].filter(Boolean).join("/");
+	if (!l.length) return o.appendChild(e.running ? L("div", "weft-reason", Ht) : n.truncated ? Nn(10 * lr) : J("gap", { reason: Lt })), r;
+	let u = Ca([...n.steps.values()].flatMap((e) => e.rows)), d = l[0], f = e.pick.get(a), p = l.find((e) => e.attempt === f) ?? l[l.length - 1], m = Ia(e, n, u.get(a), a, d), h = L("div", "weft-holes weft-rq-head", void 0, { "data-key": "head" }), g = [p.body.model.provider, p.body.model.name].filter(Boolean).join("/");
 	g && h.appendChild(Y(g));
-	let _ = t.folded.steps.find((e) => e.index === a), v = Vr(Br(l, !!_?.finish || (_?.toolCalls.length ?? 0) > 0, e.running));
-	v && h.appendChild(I("span", "weft-badge weft-info", v, { "data-weft-attempts": "" })), m.prompt && h.appendChild(va("prompt", m.prompt === "either" ? ta : Qi)), m.experiment && h.appendChild(va("experiment", $i)), c?.catalogChanged && h.appendChild(va("catalog", ea)), o.appendChild(h), l.length > 1 && o.appendChild(ya("attempt", l.map((e) => e.attempt), p.attempt, (t) => {
+	let _ = t.folded.steps.find((e) => e.index === a), v = Zr(Xr(l, !!_?.finish || (_?.toolCalls.length ?? 0) > 0, e.running));
+	v && h.appendChild(L("span", "weft-badge weft-info", v, { "data-weft-attempts": "" })), m.prompt && h.appendChild(Aa("prompt", m.prompt === "either" ? fa : la)), m.experiment && h.appendChild(Aa("experiment", ua)), c?.catalogChanged && h.appendChild(Aa("catalog", da)), o.appendChild(h), l.length > 1 && o.appendChild(ja("attempt", l.map((e) => e.attempt), p.attempt, (t) => {
 		e.pick.set(a, t), e.redraw();
-	})), p.content && o.appendChild(q(p.content, p.content === "stripped" ? n.stripped : void 0)), m.noManifest && o.appendChild(I("div", "weft-reason", "no manifest readable here: no diff vs the registered instructions", { "data-weft-no-manifest": "" }));
+	})), p.content && o.appendChild(J(p.content, p.content === "stripped" ? n.stripped : void 0)), m.noManifest && o.appendChild(L("div", "weft-reason", "no manifest readable here: no diff vs the registered instructions", { "data-weft-no-manifest": "" }));
 	let y = `${t.id}\u0000${a}`, b = p.body, x = m.base && p.system_hash === d.system_hash ? m : {
 		...m,
 		base: void 0
 	};
-	o.appendChild(J("system", ka(e, p, x, y), "system")), o.appendChild(J("messages", Na(e, p, a), "messages")), o.appendChild(J("tools", ja(e, p, y, a), "tools"));
-	let S = I("div", "weft-rq-params");
-	for (let [e, t] of Nt(p)) S.appendChild(I("div", void 0, [I("span", "weft-rq-pk", e), I("span", t === "adapter default" ? "weft-rq-def" : "weft-res", t)], { "data-weft-param": e }));
-	o.appendChild(J("params", [S], "params")), o.appendChild(J("tool choice", [Y(b.tool_choice ? `${b.tool_choice.mode}${b.tool_choice.name ? ` (${b.tool_choice.name})` : ""}` : "adapter default")], "tool_choice")), o.appendChild(J("thinking", [Y(b.thinking ? `${b.thinking.level}${b.thinking.budget ? ` · budget ${b.thinking.budget}` : ""}` : "adapter default")], "thinking"));
-	let C = _?.toolCalls.filter((e) => e.childRunId) ?? [];
-	return C.length && o.appendChild(J("subagents", C.map((t) => e.child(t)), "subagents")), r;
+	o.appendChild(ka("system", Va(e, p, x, y), "system")), o.appendChild(ka("messages", Ga(e, p, a), "messages")), o.appendChild(ka("tools", Ua(e, p, y, a), "tools"));
+	let ee = L("div", "weft-rq-params");
+	for (let [e, t] of Pt(p)) ee.appendChild(L("div", void 0, [L("span", "weft-rq-pk", e), L("span", t === "adapter default" ? "weft-rq-def" : "weft-res", t)], { "data-weft-param": e }));
+	o.appendChild(ka("params", [ee], "params")), o.appendChild(ka("tool choice", [Y(b.tool_choice ? `${b.tool_choice.mode}${b.tool_choice.name ? ` (${b.tool_choice.name})` : ""}` : "adapter default")], "tool_choice")), o.appendChild(ka("thinking", [Y(b.thinking ? `${b.thinking.level}${b.thinking.budget ? ` · budget ${b.thinking.budget}` : ""}` : "adapter default")], "thinking"));
+	let S = _?.toolCalls.filter((e) => e.childRunId) ?? [];
+	return S.length && o.appendChild(ka("subagents", S.map((t) => e.child(t)), "subagents")), r;
 }
 //#endregion
 //#region src/panel/element.ts
-function Ia(e, t) {
+function Ja(e, t) {
 	return e.meta?.capabilities.includes(t) ?? !1;
 }
-function La(e) {
+function Ya(e) {
 	return e.status === "succeeded" && e.pending > 0 ? "parked" : e.status;
 }
-function Ra(e, t, n) {
-	return V(e, br(t, n === void 0 ? {} : {
+function Xa(e, t, n) {
+	return H(e, Ar(t, n === void 0 ? {} : {
 		step: n,
 		view: "story"
 	}));
 }
-var za = null;
-function Ba(e) {
+var Za = null;
+function Qa(e) {
 	try {
 		if ("adoptedStyleSheets" in e && typeof CSSStyleSheet == "function") {
-			if (!za) {
+			if (!Za) {
 				let e = new CSSStyleSheet();
-				e.replaceSync(ni), za = e;
+				e.replaceSync(fi), Za = e;
 			}
-			e.adoptedStyleSheets = [za];
+			e.adoptedStyleSheets = [Za];
 			return;
 		}
 	} catch {}
-	e.append(I("style", void 0, ni));
+	e.append(L("style", void 0, fi));
 }
-var X = () => {}, Va = 3e3;
+var X = () => {}, $a = 3e3;
 function Z(e) {
 	return b({
 		publicId: e.publicId,
@@ -4466,30 +4590,30 @@ function Z(e) {
 		flow: e.flow
 	});
 }
-function Ha(e, t, n) {
+function eo(e, t, n) {
 	e.add(t), e.size > n && e.delete(e.values().next().value);
 }
-function Ua(e, t, n, r) {
+function to(e, t, n, r) {
 	e.delete(t), e.set(t, n), e.size > r && e.delete(e.keys().next().value);
 }
-var Wa = /* @__PURE__ */ new Set(), Ga = [
+var no = /* @__PURE__ */ new Set(), ro = [
 	"data-scope=\"pub_…\" on the panel's <script> tag (or <weft-devtools>)",
 	"scope(\"pub_…\") from @weftgo/devtools",
 	"data-weft-scope=\"pub_…\" on the chat's element",
 	"scope.Header(h, …) on the app's handler (Go, package weft/scope)"
-], Ka = "no conversation detected on this page";
-function qa() {
+], io = "no conversation detected on this page";
+function ao() {
 	try {
 		return typeof window.matchMedia == "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 	} catch {
 		return !1;
 	}
 }
-function Ja(e) {
+function oo(e) {
 	let t = (typeof e.composedPath == "function" ? e.composedPath()[0] : null) ?? e.target;
 	return !!t && (/^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName) || t.isContentEditable);
 }
-var Ya = [
+var so = [
 	["Alt+W", "toggle the dock from the page, not while a text field has focus (Ctrl+Shift+W too, where delivered)"],
 	["Alt+Shift+W", "next layout: float, dock right, bottom, left, top"],
 	["Esc", "close (this list first); the page's own Esc handlers still run"],
@@ -4500,18 +4624,18 @@ var Ya = [
 	["/", "filter: the raw tree's on the Raw tab, else the turn list's"],
 	["← / →", "on the tabs: the previous / next tab"],
 	["?", "this list"]
-], Xa = [
+], co = [
 	"run",
 	"parked",
 	"error"
-], Za = /* @__PURE__ */ new WeakSet(), Qa = null;
-function $a(e) {
+], lo = /* @__PURE__ */ new WeakSet(), uo = null;
+function fo(e) {
 	if (!e || typeof e != "object") return !1;
 	let t = Object.getPrototypeOf(e);
 	return t === Object.prototype || t === null;
 }
-var eo = 1e3, to = 3;
-function no(e) {
+var po = 1e3, mo = 3;
+function ho(e) {
 	if (!e || typeof e != "object") return null;
 	let t = e, n = (...e) => {
 		for (let n of e) if (typeof t[n] == "string" && t[n]) return t[n];
@@ -4521,12 +4645,12 @@ function no(e) {
 	let i = { publicId: typeof t.publicId == "string" ? t.publicId : "" }, a = n("flow"), o = n("run", "runId");
 	return r && (i.session = r), a && (i.flow = a), o && (i.run = o), i;
 }
-var ro = 1e4;
-function io(e) {
+var go = 1e4;
+function _o(e) {
 	let t = e.scope;
 	return typeof t == "string" ? t : t ? b(t) : e.publicId ? b({ publicId: e.publicId }) : "";
 }
-var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void 0, oo = class e extends HTMLElement {
+var vo = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void 0, yo = class e extends HTMLElement {
 	static observedAttributes = [
 		"data-endpoint",
 		"data-scope",
@@ -4572,11 +4696,11 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 	scheduled = !1;
 	dormant = !1;
 	lay;
-	push = new ye();
-	themeWatch = new Oe();
+	push = new be();
+	themeWatch = new ke();
 	themeNow = "dark";
 	resolveNow() {
-		return Ee(this.cfg.theme, this.lay.theme, this.themeWatch.host);
+		return De(this.cfg.theme, this.lay.theme, this.themeWatch.host);
 	}
 	placed = !1;
 	dragging = !1;
@@ -4584,7 +4708,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 	said = "";
 	rove = "";
 	gAt = 0;
-	tree = zi();
+	tree = Xi();
 	treeFor = "";
 	rawMemo = null;
 	rqTrees = /* @__PURE__ */ new Map();
@@ -4603,7 +4727,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 	onResize = () => {
 		if (this.resizeFrame !== null) return;
 		let e = () => {
-			this.resizeFrame = null, this.isConnected && (me(this.lay), this.render(this.last));
+			this.resizeFrame = null, this.isConnected && (he(this.lay), this.render(this.last));
 		};
 		this.resizeFrame = typeof requestAnimationFrame == "function" ? requestAnimationFrame(e) : setTimeout(e, 16);
 	};
@@ -4613,7 +4737,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 	opened = !1;
 	keys = !1;
 	body;
-	last = Ci();
+	last = Pi();
 	held = !1;
 	composing = !1;
 	dirty = !1;
@@ -4622,7 +4746,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 	openKeys = /* @__PURE__ */ new Set();
 	onKey = (e) => this.keydown(e);
 	onURL = () => {
-		let e = Xe();
+		let e = Ze();
 		(e ? b(e) : "") !== (this.cfg.urlScope ? b(this.cfg.urlScope) : "") && this.rescan();
 	};
 	onRelease = () => {
@@ -4650,13 +4774,13 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 	globalNote = "";
 	static noGlobal = !1;
 	static get npmEntry() {
-		return Fe();
+		return Ie();
 	}
 	static set npmEntry(e) {
-		Ie(e === !0);
+		Le(e === !0);
 	}
 	constructor() {
-		super(), this.cfg = We(this), this.lay = oe(this.cfg.position, this.cfg.open, this.cfg.mode), this.shadow = this.attachShadow({ mode: "open" }), this.body = I("div", "weft-root"), Ba(this.shadow), this.shadow.append(this.body), this.shadow.addEventListener("pointerdown", () => this.hold()), this.shadow.addEventListener("keydown", (e) => this.panelKey(e)), this.shadow.addEventListener("compositionstart", () => {
+		super(), this.cfg = Ge(this), this.lay = se(this.cfg.position, this.cfg.open, this.cfg.mode), this.shadow = this.attachShadow({ mode: "open" }), this.body = L("div", "weft-root"), Qa(this.shadow), this.shadow.append(this.body), this.shadow.addEventListener("pointerdown", () => this.hold()), this.shadow.addEventListener("keydown", (e) => this.panelKey(e)), this.shadow.addEventListener("compositionstart", () => {
 			this.composing = !0;
 		}), this.shadow.addEventListener("compositionend", () => {
 			this.composing = !1, this.flush();
@@ -4665,21 +4789,21 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 		}), this.render(this.last);
 	}
 	connectedCallback() {
-		if (this.cfg = We(this), !this.opened) {
+		if (this.cfg = Ge(this), !this.opened) {
 			this.opened = !0;
-			let e = ce();
-			this.placed = ue(e), this.lay = {
-				...oe(this.cfg.position, this.cfg.open, this.cfg.mode),
+			let e = le();
+			this.placed = de(e), this.lay = {
+				...se(this.cfg.position, this.cfg.open, this.cfg.mode),
 				...e
 			};
 		}
-		me(this.lay), Wa.add(this), window.addEventListener("keydown", this.onKey), window.addEventListener("resize", this.onResize, { passive: !0 }), window.addEventListener("pointerup", this.onRelease, !0), window.addEventListener("pointercancel", this.onRelease, !0), window.addEventListener("hashchange", this.onURL, { passive: !0 }), window.addEventListener("popstate", this.onURL, { passive: !0 }), this.themeWatch.start(() => {
+		he(this.lay), no.add(this), window.addEventListener("keydown", this.onKey), window.addEventListener("resize", this.onResize, { passive: !0 }), window.addEventListener("pointerup", this.onRelease, !0), window.addEventListener("pointercancel", this.onRelease, !0), window.addEventListener("hashchange", this.onURL, { passive: !0 }), window.addEventListener("popstate", this.onURL, { passive: !0 }), this.themeWatch.start(() => {
 			this.getAttribute("data-theme-resolved") !== this.resolveNow() && this.render(this.last);
 		}), this.themeNow = this.resolveNow(), this.syncTheme(), this.syncGlobal(), this.schedule();
 	}
 	disconnectedCallback() {
-		Wa.delete(this), window.removeEventListener("keydown", this.onKey), window.removeEventListener("resize", this.onResize), this.resizeFrame !== null && (typeof cancelAnimationFrame == "function" && cancelAnimationFrame(this.resizeFrame), clearTimeout(this.resizeFrame), this.resizeFrame = null), Ri(this.tree);
-		for (let e of this.rqTrees.values()) Ri(e);
+		no.delete(this), window.removeEventListener("keydown", this.onKey), window.removeEventListener("resize", this.onResize), this.resizeFrame !== null && (typeof cancelAnimationFrame == "function" && cancelAnimationFrame(this.resizeFrame), clearTimeout(this.resizeFrame), this.resizeFrame = null), Yi(this.tree);
+		for (let e of this.rqTrees.values()) Yi(e);
 		this.dropDrag?.(), this.dropDrag = null, this.dragging = !1, this.push.restore(), this.themeWatch.stop(), this.io?.disconnect(), this.io = this.ioAt = null, window.removeEventListener("pointerup", this.onRelease, !0), window.removeEventListener("pointercancel", this.onRelease, !0), window.removeEventListener("hashchange", this.onURL), window.removeEventListener("popstate", this.onURL), this.holdTimer && clearTimeout(this.holdTimer), this.holdTimer = null, this.held = this.composing = !1, this.startSeq++, this.probe?.abort(), this.probe = null, this.model?.dispose(), this.model = null, this.conn = null, this.ready = !1, this.dropRung(), this.dropMarkers(), this.dropGlobal();
 	}
 	get isOpen() {
@@ -4700,11 +4824,11 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 				this.preScope = null;
 				let i = { ...n };
 				r?.scope !== void 0 && (i.scope = r.scope), r?.publicId !== void 0 && (i.publicId = r.publicId), this.options = i;
-				let a = io(i);
+				let a = _o(i);
 				a ? this.setAttribute("data-weft-scope", a) : this.removeAttribute("data-weft-scope"), this.rescan(), this.render(this.last);
 				return;
 			}
-			let n = typeof e == "string" ? x(e) : no(e);
+			let n = typeof e == "string" ? x(e) : ho(e);
 			if (!n || !n.publicId && !n.session && typeof e == "string" && e.trim() !== "") {
 				this.say("scope: no public id or session");
 				return;
@@ -4733,7 +4857,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 	}
 	lookupSession(e, t) {
 		let n = e.session ?? "";
-		if ($e(this.cfg.token) !== "") {
+		if (et(this.cfg.token) !== "") {
 			this.say(`session ${n}: the session lookup needs the dev token`);
 			return;
 		}
@@ -4746,7 +4870,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 			if (!this.ready || !this.base) return;
 			let i = "", a = "", o = {};
 			try {
-				let e = await ir({
+				let e = await mr({
 					base: this.base,
 					token: this.cfg.token
 				}, n);
@@ -4756,13 +4880,13 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 				};
 			} catch (e) {
 				if (t !== this.scopeSeq) return;
-				let r = e instanceof z ? e.status : 0;
+				let r = e instanceof B ? e.status : 0;
 				this.say(r === 403 || r === 401 ? `session ${n}: the session lookup needs the dev token` : r === 404 ? `session ${n} has no public id · unknown session` : `session ${n}: Studio did not answer the lookup`);
 				return;
 			}
 			if (t === this.scopeSeq) {
 				if (!i) {
-					this.say(`session ${n} has no public id · ${a === "not_recorded" ? Tn(o.reason, o.fix) : "none recorded"}`);
+					this.say(`session ${n} has no public id · ${a === "not_recorded" ? Fn(o.reason, o.fix) : "none recorded"}`);
 					return;
 				}
 				this.note = "", this.applyScope({
@@ -4776,7 +4900,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 		try {
 			let n = typeof e == "string" ? e : "";
 			if (!n) return;
-			let r = ao(t), i = ++this.selectSeq;
+			let r = vo(t), i = ++this.selectSeq;
 			this.afterSettle(async (e) => {
 				if (i !== this.selectSeq) return;
 				if (!e) {
@@ -4803,7 +4927,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 		} catch {}
 	}
 	on(e, t) {
-		if (!Xa.includes(e) || typeof t != "function") return () => {};
+		if (!co.includes(e) || typeof t != "function") return () => {};
 		let n = (e) => {
 			try {
 				t(e.detail);
@@ -4815,7 +4939,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 		let n = this.base || this.cfg.endpoint;
 		if (!n || typeof e != "string" || !e) return "";
 		try {
-			return Ra(n, e, ao(t));
+			return Xa(n, e, vo(t));
 		} catch {
 			return "";
 		}
@@ -4834,7 +4958,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 			on: (e, t) => this.on(e, t),
 			studioLink: (e, t) => this.studioLink(e, t)
 		});
-		return Za.add(t), this.apiObj = t, t;
+		return lo.add(t), this.apiObj = t, t;
 	}
 	syncGlobal() {
 		try {
@@ -4843,8 +4967,8 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 				return;
 			}
 			let t = window, n = t.weft;
-			if (n === void 0) Qa = {}, n = Qa, t.weft = n;
-			else if (!$a(n)) {
+			if (n === void 0) uo = {}, n = uo, t.weft = n;
+			else if (!fo(n)) {
 				this.globalNote = "window.weft is the page's: no window.weft.devtools";
 				return;
 			}
@@ -4853,7 +4977,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 				this.globalNote = "window.weft is the page's: no window.weft.devtools";
 				return;
 			}
-			let a = r.devtools, o = a !== void 0 && !!a && typeof a == "object" && Za.has(a);
+			let a = r.devtools, o = a !== void 0 && !!a && typeof a == "object" && lo.has(a);
 			if (a !== void 0 && !o) {
 				this.globalNote = "window.weft.devtools is the page's: not replaced";
 				return;
@@ -4871,8 +4995,8 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 	dropGlobal() {
 		try {
 			let e = window, t = e.weft;
-			if (!$a(t) || t.devtools !== this.apiObj || !this.apiObj) return;
-			delete t.devtools, Array.from(document.querySelectorAll("weft-devtools")).find((e) => e !== this && e.isConnected && typeof e.syncGlobal == "function")?.syncGlobal(), !("devtools" in t) && t === Qa && Object.keys(t).length === 0 && (delete e.weft, Qa = null);
+			if (!fo(t) || t.devtools !== this.apiObj || !this.apiObj) return;
+			delete t.devtools, Array.from(document.querySelectorAll("weft-devtools")).find((e) => e !== this && e.isConnected && typeof e.syncGlobal == "function")?.syncGlobal(), !("devtools" in t) && t === uo && Object.keys(t).length === 0 && (delete e.weft, uo = null);
 		} catch {}
 	}
 	say(e) {
@@ -4882,7 +5006,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 		this.settled().then(e).catch(X);
 	}
 	async settled() {
-		let e = Date.now() + ro;
+		let e = Date.now() + go;
 		for (let t = 0; t < 20; t++) {
 			this.scheduled && await Promise.resolve();
 			let t = this.settling, n = e - Date.now();
@@ -4896,7 +5020,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 	watchRuns(e) {
 		let t = this.model;
 		if (!t || e !== t.state || !t.publicId || this.dormant) return;
-		let n = Pi(t.publicId, t.narrowing.session);
+		let n = Gi(t.publicId, t.narrowing.session);
 		if (e.listKey !== n) return;
 		if (t !== this.evModel || n !== this.evKey) {
 			t !== this.evModel && this.evByKey.clear(), this.evModel = t, this.evKey = n;
@@ -4907,7 +5031,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 		this.evBaseline = !1;
 		let i = t.narrowing.run ?? "";
 		for (let n of [...e.turns, ...[...e.experiments.values()].flat()]) {
-			let a = La(n), o = this.evStatus.get(n.id);
+			let a = Ya(n), o = this.evStatus.get(n.id);
 			if (o === a || (this.evStatus.set(n.id, a), o === void 0 && r && a !== "running" && n.id !== i)) continue;
 			let s = (e.turn?.id === n.id ? e.turn.folded.steps.at(-1)?.index : void 0) ?? (n.steps > 0 ? n.steps - 1 : void 0);
 			this.fire("run", {
@@ -4916,7 +5040,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 				publicId: n.public_id || t.publicId,
 				...n.session_id ? { sessionId: n.session_id } : {},
 				...s === void 0 ? {} : { step: s }
-			}), a === "failed" && !this.evErrored.has(n.id) && (Ha(this.evErrored, n.id, 500), this.fire("error", {
+			}), a === "failed" && !this.evErrored.has(n.id) && (eo(this.evErrored, n.id, 500), this.fire("error", {
 				message: n.err || `run ${n.id} failed`,
 				runId: n.id
 			})), a === "parked" && this.reportParked(t, n.id, 1);
@@ -4926,16 +5050,16 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 		this.evParking.has(t) || (this.evParking.add(t), e.pendingCalls(t).then((r) => {
 			this.evParking.delete(t);
 			let i = e.rowOf(t);
-			if (this.model === e && i && La(i) === "parked") {
+			if (this.model === e && i && Ya(i) === "parked") {
 				if (!r.length) {
-					n < to && setTimeout(() => {
+					n < mo && setTimeout(() => {
 						this.model === e && this.reportParked(e, t, n + 1);
-					}, eo);
+					}, po);
 					return;
 				}
 				for (let e of r) {
 					let n = `${t}\u0000${e.id}`;
-					this.evParked.has(n) || (Ha(this.evParked, n, 500), this.fire("parked", {
+					this.evParked.has(n) || (eo(this.evParked, n, 500), this.fire("parked", {
 						runId: t,
 						callId: e.id,
 						ackId: e.id,
@@ -5010,7 +5134,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 		this.lastFocused = e, this.chosen = null, this.follow(), this.markerSig() !== t && this.rescopeSoon();
 	}
 	follow() {
-		let e = this.markers, t = (t) => t ? e.find((e) => e.element === t) : void 0, n = this.marked ? Z(this.marked) : "", r = t(Yr(document.activeElement)) ?? t(this.lastFocused) ?? e.find((e) => n && Z(e.scope) === n), i = Z(this.cfg.scope);
+		let e = this.markers, t = (t) => t ? e.find((e) => e.element === t) : void 0, n = this.marked ? Z(this.marked) : "", r = t(ai(document.activeElement)) ?? t(this.lastFocused) ?? e.find((e) => n && Z(e.scope) === n), i = Z(this.cfg.scope);
 		if (this.cfg.scopeExplicit && e.some((e) => Z(e.scope) === i) && (this.explicitMarked = !0), r) this.marked = r.scope;
 		else if (!this.marked) {
 			let t = this.cfg.scopeExplicit ? Z(this.cfg.scope) : "";
@@ -5024,13 +5148,13 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 		return new Map(this.byPath);
 	}
 	syncDetect() {
-		let e = this.isConnected && this.ready && !this.dormant && Ze(this.cfg);
+		let e = this.isConnected && this.ready && !this.dormant && Qe(this.cfg);
 		e && !this.rung ? (this.notRestored = !1, this.rung = ne({
 			onScope: (e, t) => this.onDetected(e, t),
 			ignore: (e) => !!this.base && e.startsWith(this.base)
 		})) : !e && this.rung && this.dropRung();
-		let t = this.isConnected && !this.dormant && Qe(this.cfg);
-		t && !this.markerRung ? this.markerRung = Qr({
+		let t = this.isConnected && !this.dormant && $e(this.cfg);
+		t && !this.markerRung ? this.markerRung = ci({
 			onScopes: (e) => this.onMarkers(e),
 			onFocus: (e) => this.onMarkerFocus(e)
 		}) : !t && this.markerRung && this.dropMarkers();
@@ -5044,7 +5168,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 	}
 	onDetected(e, t) {
 		let n = Z(e);
-		Ua(this.byPath, t, e, 64);
+		to(this.byPath, t, e, 64);
 		let r = Date.now(), i = this.seen.find((e) => e.key === n);
 		i ? (i.scope = e, i.path = t, i.at = r) : (this.seen.push({
 			scope: e,
@@ -5068,23 +5192,23 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 		return t ? n && Z(n) === Z(t) ? n : t : e.scopeExplicit ? e.scope : n ?? e.scope;
 	}
 	keydown(e) {
-		e.defaultPrevented || e.isComposing || Ja(e) || this.ownsToggle() && (e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && e.code === "KeyW" || e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && e.code === "KeyW") && (e.preventDefault(), this.keys = !1, this.toggle(), this.shown && this.body.querySelector(".weft-dock")?.focus({ preventScroll: !0 }));
+		e.defaultPrevented || e.isComposing || oo(e) || this.ownsToggle() && (e.altKey && !e.ctrlKey && !e.shiftKey && !e.metaKey && e.code === "KeyW" || e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && e.code === "KeyW") && (e.preventDefault(), this.keys = !1, this.toggle(), this.shown && this.body.querySelector(".weft-dock")?.focus({ preventScroll: !0 }));
 	}
 	ownsToggle() {
 		let e;
 		try {
-			let t = window.weft, n = $a(t) ? Object.getOwnPropertyDescriptor(t, "devtools")?.value : void 0;
-			if (n) for (let t of Wa) t.apiObjIs(n) && (e = t);
+			let t = window.weft, n = fo(t) ? Object.getOwnPropertyDescriptor(t, "devtools")?.value : void 0;
+			if (n) for (let t of no) t.apiObjIs(n) && (e = t);
 		} catch {}
 		let t = (e) => !e.dormant && !e.autoMounted;
 		if (e && t(e)) return e === this;
-		for (let e of Wa) if (t(e)) return e === this;
-		return (e ?? Wa.values().next().value) === this;
+		for (let e of no) if (t(e)) return e === this;
+		return (e ?? no.values().next().value) === this;
 	}
 	panelKey(e) {
 		if (e.defaultPrevented || e.isComposing) return;
 		if (e.key === "Tab") return this.trap(e);
-		if (Ja(e)) return;
+		if (oo(e)) return;
 		let t = e.target;
 		if ((e.key === "ArrowDown" || e.key === "ArrowUp") && t.classList.contains("weft-turn")) {
 			let n = Array.from(this.body.querySelectorAll(".weft-turn")), r = n.indexOf(t) + (e.key === "ArrowDown" ? 1 : -1), i = r < 0 ? void 0 : n.at(r);
@@ -5128,14 +5252,14 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 		i && i !== t.selected && this.go(this.model?.select(i, !0));
 	}
 	stepKey(e) {
-		let t = this.last, n = t.turn ? this.lay.tab === "request" ? Pa(t.turn, t.turn.requests) : t.turn.folded.steps.map((e) => e.index) : [];
+		let t = this.last, n = t.turn ? this.lay.tab === "request" ? Ka(t.turn, t.turn.requests) : t.turn.folded.steps.map((e) => e.index) : [];
 		if (!n.length) return;
 		let r = n.indexOf(this.stepNow(t) ?? -1), i = r < 0 ? e > 0 ? 0 : n.length - 1 : Math.min(Math.max(r + e, 0), n.length - 1);
 		this.model?.selectStep(n[i]);
 	}
 	stepNow(e) {
-		let t = ho(e);
-		return t !== void 0 || this.lay.tab !== "request" || !e.turn || e.turn.id !== e.selected ? t : Pa(e.turn, e.turn.requests)[0];
+		let t = Do(e);
+		return t !== void 0 || this.lay.tab !== "request" || !e.turn || e.turn.id !== e.selected ? t : Ka(e.turn, e.turn.requests)[0];
 	}
 	openInStudio() {
 		let e = this.last.selected ? this.studioLink(this.last.selected, this.stepNow(this.last)) : "";
@@ -5144,22 +5268,22 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 		} catch {}
 	}
 	cycle() {
-		let e = this.lay, t = T[(T.indexOf(e.mode === "float" ? "float" : e.side) + 1) % T.length];
-		t === "float" ? e.mode = "float" : (e.mode = "dock", e.side = t), me(e), this.save(!0), this.render(this.last);
+		let e = this.lay, t = re[(re.indexOf(e.mode === "float" ? "float" : e.side) + 1) % re.length];
+		t === "float" ? e.mode = "float" : (e.mode = "dock", e.side = t), he(e), this.save(!0), this.render(this.last);
 	}
 	save(e = !1) {
-		this.placed ||= e, de(this.lay, this.placed);
+		this.placed ||= e, fe(this.lay, this.placed);
 	}
 	quiet() {
 		return !(this.model?.drawPending() ?? !1);
 	}
 	rescan() {
-		this.cfg = We(this), this.isConnected && (this.syncGlobal(), this.syncDetect(), this.schedule());
+		this.cfg = Ge(this), this.isConnected && (this.syncGlobal(), this.syncDetect(), this.schedule());
 	}
 	attributeChangedCallback(e, t, n) {
-		if (t !== n && (this.cfg = We(this), this.isConnected)) {
+		if (t !== n && (this.cfg = Ge(this), this.isConnected)) {
 			if (e === "data-position") {
-				let e = oe(this.cfg.position, !0, ""), t = this.lay;
+				let e = se(this.cfg.position, !0, ""), t = this.lay;
 				Object.assign(t, {
 					mode: e.mode,
 					side: e.side,
@@ -5190,14 +5314,14 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 	}
 	async start(e = !1) {
 		let t = ++this.startSeq, n = this.cfg;
-		this.ready = !1, this.dropRung(), this.model?.dispose(), this.model = null, this.conn = null, this.probe?.abort(), this.probe = null, this.scratch.clear(), this.byPath.clear(), this.prompts.clear(), this.evParked.clear(), this.evErrored.clear(), e && this.dormant && this.unreachable !== null ? (this.checking = !0, this.render(Ci())) : (this.dormant = !1, this.unreachable = null, this.checking = !1, this.render(Ci()));
+		this.ready = !1, this.dropRung(), this.model?.dispose(), this.model = null, this.conn = null, this.probe?.abort(), this.probe = null, this.scratch.clear(), this.byPath.clear(), this.prompts.clear(), this.evParked.clear(), this.evErrored.clear(), e && this.dormant && this.unreachable !== null ? (this.checking = !0, this.render(Pi())) : (this.dormant = !1, this.unreachable = null, this.checking = !1, this.render(Pi()));
 		let r = !1, i = n.endpoint;
 		if (n.configURL) {
 			let e = new AbortController();
 			this.probe = e;
-			let r = setTimeout(() => e.abort(), Va);
+			let r = setTimeout(() => e.abort(), $a);
 			try {
-				i = await Ge(n.configURL, e.signal) || n.endpoint;
+				i = await Ke(n.configURL, e.signal) || n.endpoint;
 			} finally {
 				clearTimeout(r), this.probe === e && (this.probe = null);
 			}
@@ -5206,7 +5330,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 		if (i) {
 			let e = this.scopeNow();
 			this.forceNext = !1;
-			let a = new ji({
+			let a = new Hi({
 				base: i,
 				token: n.token
 			}, e, (e) => this.render(e));
@@ -5229,7 +5353,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 		this.dropRung(), this.dropMarkers(), this.model?.dispose(), this.model = null, this.conn = null, this.autoMounted ? this.remove() : (this.dormant = !0, this.unreachable = i, this.render(this.last));
 	}
 	retry() {
-		this.cfg = We(this), this.settling = this.start(!0).catch(X);
+		this.cfg = Ge(this), this.settling = this.start(!0).catch(X);
 	}
 	toggle() {
 		this.lay.hidden ? (this.lay.hidden = !1, this.lay.open = !0) : this.lay.open = !this.lay.open, this.save(!0), this.render(this.last);
@@ -5239,7 +5363,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 	}
 	prevTab = "story";
 	setTab(e) {
-		E.includes(e) && (this.lay.tab !== "raw" && (this.prevTab = this.lay.tab), this.lay.tab = e, this.lay.raw = e === "raw", this.save(), this.render(this.last));
+		T.includes(e) && (this.lay.tab !== "raw" && (this.prevTab = this.lay.tab), this.lay.tab = e, this.lay.raw = e === "raw", this.save(), this.render(this.last));
 	}
 	hold() {
 		this.held = !0, this.holdTimer && clearTimeout(this.holdTimer), this.holdTimer = setTimeout(() => this.unhold(), 1500);
@@ -5273,20 +5397,20 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 		let t = this.body, n = [];
 		if (this.dormant) {
 			if (this.unreachable !== null) {
-				let e = I("div", "weft-unreachable", void 0, { role: "status" });
-				if (e.append(this.unreachable ? "Studio not reachable at " : "Studio not reachable: no http(s) endpoint", ...this.unreachable ? [I("span", "weft-unreachable-at", this.unreachable)] : [], " · "), this.checking) e.append(I("span", "weft-checking", "checking…"));
+				let e = L("div", "weft-unreachable", void 0, { role: "status" });
+				if (e.append(this.unreachable ? "Studio not reachable at " : "Studio not reachable: no http(s) endpoint", ...this.unreachable ? [L("span", "weft-unreachable-at", this.unreachable)] : [], " · "), this.checking) e.append(L("span", "weft-checking", "checking…"));
 				else {
-					let t = I("button", "weft-retry", "retry", {
+					let t = L("button", "weft-retry", "retry", {
 						type: "button",
 						title: "ask Studio again"
 					});
-					L(t, "click", () => this.retry()), e.appendChild(t);
+					R(t, "click", () => this.retry()), e.appendChild(t);
 				}
 				n.push(e);
 			}
 		} else this.lay.hidden || (this.shown ? e.gone || n.push(this.dock(e)) : n.push(this.pill(e)));
 		let r = !!this.shadow.activeElement;
-		if (fn(t, n), r && !this.shadow.activeElement && t.querySelector(".weft-dock, .weft-fab")?.focus({ preventScroll: !0 }), this.focusNext) {
+		if (Sn(t, n), r && !this.shadow.activeElement && t.querySelector(".weft-dock, .weft-fab")?.focus({ preventScroll: !0 }), this.focusNext) {
 			let e = Array.from(t.querySelectorAll("[data-weft-k]")).find((e) => e.getAttribute("data-weft-k") === this.focusNext);
 			this.focusNext = "", e?.focus({ preventScroll: !0 });
 		}
@@ -5299,21 +5423,21 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 		this.isConnected && this.getAttribute("data-theme-resolved") !== e && this.setAttribute("data-theme-resolved", e);
 	}
 	themeButton() {
-		let e = be(this.lay.theme), t = this.themeNow, n = this.cfg.theme !== "auto", r = n ? `theme: ${t}, set by the page` : `theme: ${e}${e === "auto" ? ` (${t})` : ""}`, i = I("button", "weft-btn weft-theme", "◐", {
+		let e = xe(this.lay.theme), t = this.themeNow, n = this.cfg.theme !== "auto", r = n ? `theme: ${t}, set by the page` : `theme: ${e}${e === "auto" ? ` (${t})` : ""}`, i = L("button", "weft-btn weft-theme", "◐", {
 			type: "button",
-			title: n ? r : `${r} — next: ${De(e)}`,
+			title: n ? r : `${r} — next: ${Oe(e)}`,
 			"aria-label": r,
 			...n ? { "aria-disabled": "true" } : {}
 		});
-		return L(i, "click", () => {
+		return R(i, "click", () => {
 			if (n) return;
-			let t = De(e);
-			this.lay.theme = t === "auto" ? "" : t, de(this.lay, this.placed), this.render(this.last);
+			let t = Oe(e);
+			this.lay.theme = t === "auto" ? "" : t, fe(this.lay, this.placed), this.render(this.last);
 		}), i;
 	}
 	dock(e) {
-		me(this.lay);
-		let t = he(this.lay), n = I("div", `weft-dock weft-open ${t.cls}`, void 0, {
+		he(this.lay);
+		let t = ge(this.lay), n = L("div", `weft-dock weft-open ${t.cls}`, void 0, {
 			tabindex: "-1",
 			role: "complementary",
 			"aria-label": "weft devtools",
@@ -5321,23 +5445,23 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 		});
 		this.place(n, t);
 		let r = this.header(e), i = this.lay;
-		i.mode === "float" && !t.sheet && (r.classList.add("weft-drag"), L(r, "pointerdown", (e) => {
+		i.mode === "float" && !t.sheet && (r.classList.add("weft-drag"), R(r, "pointerdown", (e) => {
 			let { x: t, y: n } = i;
 			this.grab(e, (e, r) => {
 				i.x = t + e, i.y = n + r;
 			});
 		})), n.appendChild(r), this.howTo && !this.model?.publicId && n.appendChild(this.howToBox());
-		let a = I("div", "weft-cols");
+		let a = L("div", "weft-cols");
 		if (t.width < 640) {
 			let t = this.turnPick(e);
 			t && a.appendChild(t);
 		}
 		if (a.appendChild(this.turnList(e)), a.appendChild(this.main(e)), n.appendChild(a), n.appendChild(this.footer(e)), this.keys && n.appendChild(this.shortcuts()), n.appendChild(this.announcer(e)), !t.sheet) {
-			let e = i.mode === "float", t = I("div", e ? "weft-grip" : `weft-edge weft-edge-${i.side}`, void 0, {
+			let e = i.mode === "float", t = L("div", e ? "weft-grip" : `weft-edge weft-edge-${i.side}`, void 0, {
 				title: "resize",
 				"aria-hidden": "true"
 			});
-			L(t, "pointerdown", (t) => {
+			R(t, "pointerdown", (t) => {
 				let { w: n, h: r, d: a } = i;
 				this.grab(t, (t, o) => {
 					e ? (i.w = n + t, i.h = r + o) : i.d = a + {
@@ -5351,7 +5475,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 		}
 		return n;
 	}
-	place(e, t = he(this.lay)) {
+	place(e, t = ge(this.lay)) {
 		for (let n of [
 			"left",
 			"top",
@@ -5371,7 +5495,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 		} catch {}
 		let o = (e) => {
 			let n = e;
-			t(n.clientX - i, n.clientY - a), me(this.lay), this.place(r), this.cfg.push && r.classList.contains("weft-docked") && this.push.apply(this.lay.side, `${this.lay.d}px`);
+			t(n.clientX - i, n.clientY - a), he(this.lay), this.place(r), this.cfg.push && r.classList.contains("weft-docked") && this.push.apply(this.lay.side, `${this.lay.d}px`);
 		}, s = [
 			"pointerup",
 			"pointercancel",
@@ -5392,7 +5516,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 			let [e, n] = this.streamKey.split("\0"), r = t?.id === e ? t.folded.steps.find((e) => String(e.index) === n) : void 0;
 			r && (this.said = `step ${n} finished · ${(r.text || "").split(/\s+/).filter(Boolean).length} words`);
 		}
-		return this.streamKey = r, I("div", "weft-sr", this.said, {
+		return this.streamKey = r, L("div", "weft-sr", this.said, {
 			role: "status",
 			"data-key": "said"
 		});
@@ -5400,26 +5524,26 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 	turnPick(e) {
 		let t = [...e.turns, ...[...e.experiments.values()].flat()].filter((t) => t.id === e.selected || this.match(t));
 		if (!t.length) return null;
-		let n = I("select", "weft-turn-pick", void 0, {
+		let n = L("select", "weft-turn-pick", void 0, {
 			"aria-label": "turn",
 			"data-weft-k": "turnpick"
 		});
 		for (let r of t) {
-			let t = I("option", void 0, `${La(r)} · ${r.id} · ${r.steps} steps`, {
+			let t = L("option", void 0, `${Ya(r)} · ${r.id} · ${r.steps} steps`, {
 				value: r.id,
 				"data-key": r.id
 			});
 			t.selected = r.id === e.selected, n.appendChild(t);
 		}
-		return L(n, "change", (e, t) => this.go(this.model?.select(t.value, !0))), n;
+		return R(n, "change", (e, t) => this.go(this.model?.select(t.value, !0))), n;
 	}
 	pill(e) {
-		let t = (t) => !!this.model?.publicId || t.agent === e.devAgent, n = e.live ? e.turns.find((e) => e.status === "running" && t(e)) : void 0, r = `weft-fab weft-fab-${ge(this.lay)}`;
+		let t = (t) => !!this.model?.publicId || t.agent === e.devAgent, n = e.live ? e.turns.find((e) => e.status === "running" && t(e)) : void 0, r = `weft-fab weft-fab-${_e(this.lay)}`;
 		if (!n) {
-			let t = I("button", r, "devtools", { title: "weft devtools — Alt+W" });
+			let t = L("button", r, "devtools", { title: "weft devtools — Alt+W" });
 			return this.pillEnd(t, e);
 		}
-		let i = e.turn?.id === n.id ? e.turn.folded.steps.length : 0, a = Math.max(i, n.steps), o = `weft devtools · running${a ? `, step ${a}` : ""}`, s = I("button", `${r} weft-fab-running${qa() ? "" : " weft-fab-pulse"}`, [document.createTextNode("devtools"), I("span", "weft-fab-count", a ? ` ● ${a}` : " ●")], {
+		let i = e.turn?.id === n.id ? e.turn.folded.steps.length : 0, a = Math.max(i, n.steps), o = `weft devtools · running${a ? `, step ${a}` : ""}`, s = L("button", `${r} weft-fab-running${ao() ? "" : " weft-fab-pulse"}`, [document.createTextNode("devtools"), L("span", "weft-fab-count", a ? ` ● ${a}` : " ●")], {
 			title: `${o} — Alt+W`,
 			"aria-label": o
 		});
@@ -5428,46 +5552,46 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 	pillEnd(e, t, n) {
 		let r = n ?? [...t.turns, ...[...t.experiments.values()].flat()].find((e) => e.id === t.selected);
 		if (r) {
-			let t = lt(r.status);
-			e.appendChild(I("span", "weft-fab-cost", ` · ${t ? `${H(r.usage.input_tokens)}→${H(r.usage.output_tokens)}` : "—"}`, { title: t ? "the current turn's tokens, input→output" : "the current turn's usage: known when it finishes" }));
+			let t = ut(r.status);
+			e.appendChild(L("span", "weft-fab-cost", ` · ${t ? `${U(r.usage.input_tokens)}→${U(r.usage.output_tokens)}` : "—"}`, { title: t ? "the current turn's tokens, input→output" : "the current turn's usage: known when it finishes" }));
 		}
-		return n || e.setAttribute("aria-label", `weft ${e.textContent}`), this.cfg.zIndex && (e.style.zIndex = this.cfg.zIndex), L(e, "click", () => this.toggle()), e;
+		return n || e.setAttribute("aria-label", `weft ${e.textContent}`), this.cfg.zIndex && (e.style.zIndex = this.cfg.zIndex), R(e, "click", () => this.toggle()), e;
 	}
 	howToBox() {
-		let e = I("div", "weft-howto");
-		for (let t of Ga) e.appendChild(I("code", void 0, t));
+		let e = L("div", "weft-howto");
+		for (let t of ro) e.appendChild(L("code", void 0, t));
 		return e;
 	}
 	go(e) {
 		e?.catch(X);
 	}
 	shortcuts() {
-		let e = I("div", "weft-keys"), t = I("dl");
-		for (let [e, n] of Ya) t.appendChild(I("dt", void 0, e)), t.appendChild(I("dd", void 0, n));
+		let e = L("div", "weft-keys"), t = L("dl");
+		for (let [e, n] of so) t.appendChild(L("dt", void 0, e)), t.appendChild(L("dd", void 0, n));
 		return e.appendChild(t), e;
 	}
 	header(e) {
-		let t = I("div", "weft-head"), n = e.turns.some((e) => e.status === "running");
-		t.appendChild(I("span", `weft-dot${e.live ? n ? " weft-run" : " weft-on" : ""}`, void 0, { title: e.live ? "live" : "history" }));
-		let r = e.session?.agent ?? e.turns.at(0)?.agent ?? "", i = this.model?.publicId || e.session?.public_id || "", a = i ? `${r ? r + " · " : ""}${i}` : Ka;
-		if (t.appendChild(I("span", "weft-title", a, { title: i ? a : `${a}: the newest runs are shown` })), !i) {
-			let e = I("button", `weft-btn weft-howto-btn${this.howTo ? " weft-active" : ""}`, "how to scope", {
+		let t = L("div", "weft-head"), n = e.turns.some((e) => e.status === "running");
+		t.appendChild(L("span", `weft-dot${e.live ? n ? " weft-run" : " weft-on" : ""}`, void 0, { title: e.live ? "live" : "history" }));
+		let r = e.session?.agent ?? e.turns.at(0)?.agent ?? "", i = this.model?.publicId || e.session?.public_id || "", a = i ? `${r ? r + " · " : ""}${i}` : io;
+		if (t.appendChild(L("span", "weft-title", a, { title: i ? a : `${a}: the newest runs are shown` })), !i) {
+			let e = L("button", `weft-btn weft-howto-btn${this.howTo ? " weft-active" : ""}`, "how to scope", {
 				type: "button",
 				"aria-expanded": String(this.howTo),
 				title: "the one-line ways to scope the panel to your conversation"
 			});
-			L(e, "click", () => {
+			R(e, "click", () => {
 				this.howTo = !this.howTo, this.render(this.last);
 			}), t.append(" · ", e);
 		}
 		let o = this.switcher(e);
 		o && t.appendChild(o);
 		let s = this.model?.narrowing ?? {};
-		s.session && t.appendChild(I("span", "weft-chip weft-scope-chip", `session ${s.session}`, { title: "the turn list is narrowed to this session" })), s.flow && t.appendChild(I("span", "weft-chip weft-scope-chip", `flow ${s.flow}`, { title: "the scope's flow — carried, filters nothing yet" })), t.appendChild(I("span", "weft-grow"));
-		let c = e.turns.reduce((e, t) => e + t.usage.input_tokens, 0), l = e.turns.reduce((e, t) => e + t.usage.output_tokens, 0), u = `${e.turns.length}${e.turnsCapped ? "+" : ""} turns · ${H(c)}→${H(l)} tok`;
-		if (t.appendChild(I("span", void 0, u, { title: u })), e.turns.length && e.selected) {
-			let n = I("a", "weft-btn", "⤢", {
-				href: Ra(this.base, e.selected, this.stepNow(e)),
+		s.session && t.appendChild(L("span", "weft-chip weft-scope-chip", `session ${s.session}`, { title: "the turn list is narrowed to this session" })), s.flow && t.appendChild(L("span", "weft-chip weft-scope-chip", `flow ${s.flow}`, { title: "the scope's flow — carried, filters nothing yet" })), t.appendChild(L("span", "weft-grow"));
+		let c = e.turns.reduce((e, t) => e + t.usage.input_tokens, 0), l = e.turns.reduce((e, t) => e + t.usage.output_tokens, 0), u = `${e.turns.length}${e.turnsCapped ? "+" : ""} turns · ${U(c)}→${U(l)} tok`;
+		if (t.appendChild(L("span", void 0, u, { title: u })), e.turns.length && e.selected) {
+			let n = L("a", "weft-btn", "⤢", {
+				href: Xa(this.base, e.selected, this.stepNow(e)),
 				target: "_blank",
 				rel: "noopener",
 				title: "open in Studio (run, and the step you are reading)",
@@ -5475,30 +5599,30 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 			});
 			n.style.textDecoration = "none", t.appendChild(n);
 		}
-		let d = this.lay.tab === "raw", f = I("button", `weft-btn${d ? " weft-active" : ""}`, "raw", {
+		let d = this.lay.tab === "raw", f = L("button", `weft-btn${d ? " weft-active" : ""}`, "raw", {
 			title: "the JSON, one keypress away (r)",
 			"aria-pressed": String(d)
 		});
-		L(f, "click", () => this.toggleRaw()), t.appendChild(f);
-		let p = this.lay.mode === "float" ? "float" : `dock ${this.lay.side}`, m = I("button", "weft-btn weft-layout", "⇆", {
+		R(f, "click", () => this.toggleRaw()), t.appendChild(f);
+		let p = this.lay.mode === "float" ? "float" : `dock ${this.lay.side}`, m = L("button", "weft-btn weft-layout", "⇆", {
 			title: `layout: ${p} — next (Alt+Shift+W)`,
 			"aria-label": `layout: ${p}`
 		});
-		L(m, "click", () => this.cycle()), t.appendChild(m), t.appendChild(this.themeButton());
-		let h = I("button", "weft-btn", "–", {
+		R(m, "click", () => this.cycle()), t.appendChild(m), t.appendChild(this.themeButton());
+		let h = L("button", "weft-btn", "–", {
 			title: "collapse (Alt+W)",
 			"aria-label": "collapse"
 		});
-		return L(h, "click", () => this.toggle()), t.appendChild(h), t;
+		return R(h, "click", () => this.toggle()), t.appendChild(h), t;
 	}
 	switcher(e) {
 		let t = this.conversations(), n = Z(this.scopeNow()), r = t.some((e) => e.key === n);
 		if (t.length < (r ? 2 : 1)) return null;
-		let i = I("select", "weft-switch", void 0, {
+		let i = L("select", "weft-switch", void 0, {
 			"aria-label": "conversation",
 			"data-weft-k": "switch"
 		}), a = (e, t, n, r) => {
-			let a = I("option", void 0, e, {
+			let a = L("option", void 0, e, {
 				value: t,
 				"data-key": r
 			});
@@ -5512,53 +5636,53 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 				e.source
 			].filter(Boolean).join(" · ");
 			a(e.key === n ? o + c : c, String(t), e.key === n, e.key).setAttribute("data-weft-source", e.source);
-		}), L(i, "change", (e, r) => {
+		}), R(i, "change", (e, r) => {
 			let i = r.value, a = i ? t.at(Number(i)) : void 0;
 			a && a.key !== n && this.choose(a);
 		}), i;
 	}
 	turnList(e) {
-		let t = I("div", "weft-turns");
-		this.note && t.appendChild(I("div", "weft-note weft-api-note", this.note, { role: "status" })), e.pinMissing && t.appendChild(I("div", "weft-note weft-pin-missing", `run ${e.pinMissing} not in this conversation`));
+		let t = L("div", "weft-turns");
+		this.note && t.appendChild(L("div", "weft-note weft-api-note", this.note, { role: "status" })), e.pinMissing && t.appendChild(L("div", "weft-note weft-pin-missing", `run ${e.pinMissing} not in this conversation`));
 		let n = this.model?.narrowing.session;
-		if (n && e.sessionUnrecorded && t.appendChild(I("div", "weft-note", `session ${n}: these runs carry no session id — not narrowed`)), !this.model?.publicId && e.devRefused ? t.appendChild(I("div", "weft-note weft-dev-poll", "streaming needs the server token · polling")) : !this.model?.publicId && e.devAgent && t.appendChild(I("div", "weft-note weft-dev-poll", `live: agent ${e.devAgent} · the other agents' runs every ${xi / 1e3} s`)), !e.turns.length && !e.experiments.size) {
+		if (n && e.sessionUnrecorded && t.appendChild(L("div", "weft-note", `session ${n}: these runs carry no session id — not narrowed`)), !this.model?.publicId && e.devRefused ? t.appendChild(L("div", "weft-note weft-dev-poll", "streaming needs the server token · polling")) : !this.model?.publicId && e.devAgent && t.appendChild(L("div", "weft-note weft-dev-poll", `live: agent ${e.devAgent} · the other agents' runs every ${Mi / 1e3} s`)), !e.turns.length && !e.experiments.size) {
 			let e = n ? `no turns of session ${n} yet` : this.model?.publicId ? "no turns yet — run your app" : "no runs yet (dev)";
-			return t.appendChild(I("div", "weft-splash", e)), t;
+			return t.appendChild(L("div", "weft-splash", e)), t;
 		}
 		t.appendChild(this.turnFilter());
 		let r = e.turns.filter((e) => this.match(e));
-		this.filtering() && t.appendChild(I("div", "weft-tq-n", `${r.length} of ${e.turns.length} ${e.turnsCapped ? "loaded" : "turns"}${e.turnsCapped ? " · the filter applies to the loaded turns" : ""}`));
-		let i = [...r, ...[...e.experiments.values()].flat()].map((e) => e.id), a = i.includes(this.rove) ? this.rove : i.includes(e.selected) ? e.selected : i[0], o = I("div", "weft-rows", void 0, {
+		this.filtering() && t.appendChild(L("div", "weft-tq-n", `${r.length} of ${e.turns.length} ${e.turnsCapped ? "loaded" : "turns"}${e.turnsCapped ? " · the filter applies to the loaded turns" : ""}`));
+		let i = [...r, ...[...e.experiments.values()].flat()].map((e) => e.id), a = i.includes(this.rove) ? this.rove : i.includes(e.selected) ? e.selected : i[0], o = L("div", "weft-rows", void 0, {
 			role: "list",
 			"aria-label": "turns"
 		}), s = (t) => this.turnRow(t, e.selected, a), c = new Set(e.turns.map((e) => e.id));
 		for (let t of r) {
 			o.appendChild(s(t));
 			let n = e.experiments.get(t.id) ?? [];
-			n.length && o.appendChild(I("div", "weft-expts", n.map(s), { "data-key": `x:${t.id}` }));
+			n.length && o.appendChild(L("div", "weft-expts", n.map(s), { "data-key": `x:${t.id}` }));
 		}
 		let l = [];
 		for (let [t, n] of e.experiments) c.has(t) || l.push(...n.filter((e) => this.match(e)));
-		if (l.length && o.appendChild(I("div", "weft-expts", l.map(s), { "data-key": "x:" })), t.appendChild(o), e.turnsCapped && this.model?.publicId) {
-			let n = I("button", "weft-btn weft-older", e.loadingOlder ? "loading older turns…" : "older turns ↓", {
+		if (l.length && o.appendChild(L("div", "weft-expts", l.map(s), { "data-key": "x:" })), t.appendChild(o), e.turnsCapped && this.model?.publicId) {
+			let n = L("button", "weft-btn weft-older", e.loadingOlder ? "loading older turns…" : "older turns ↓", {
 				type: "button",
 				title: "load the next older page of turns",
 				"data-key": `older:${e.olderAt}`
 			});
-			L(n, "click", () => this.go(this.model?.loadOlder())), t.appendChild(n);
-		} else e.turnsCapped ? t.appendChild(I("div", "weft-note", "the newest 10 runs — older ones are in Studio (⤢)")) : e.paged && t.appendChild(I("div", "weft-tq-n weft-all", `all ${e.turns.length} turns loaded`));
+			R(n, "click", () => this.go(this.model?.loadOlder())), t.appendChild(n);
+		} else e.turnsCapped ? t.appendChild(L("div", "weft-note", "the newest 10 runs — older ones are in Studio (⤢)")) : e.paged && t.appendChild(L("div", "weft-tq-n weft-all", `all ${e.turns.length} turns loaded`));
 		return t;
 	}
 	turnFilter() {
-		let e = this.tq, t = I("div", "weft-tq", void 0, { "data-key": "tq" }), n = I("input", "weft-input weft-turn-q", void 0, {
+		let e = this.tq, t = L("div", "weft-tq", void 0, { "data-key": "tq" }), n = L("input", "weft-input weft-turn-q", void 0, {
 			type: "search",
 			"aria-label": "filter turns",
 			placeholder: "/ filter turns"
 		});
-		n.value = e.text, L(n, "input", (t, n) => {
+		n.value = e.text, R(n, "input", (t, n) => {
 			e.text = n.value, this.render(this.last);
 		});
-		let r = I("select", "weft-input weft-tq-status", void 0, { "aria-label": "status" });
+		let r = L("select", "weft-input weft-tq-status", void 0, { "aria-label": "status" });
 		for (let t of [
 			"",
 			"running",
@@ -5566,23 +5690,23 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 			"failed",
 			"parked"
 		]) {
-			let n = I("option", void 0, t || "any status", { value: t });
+			let n = L("option", void 0, t || "any status", { value: t });
 			n.selected = t === e.status, r.appendChild(n);
 		}
-		r.value = e.status, L(r, "change", (t, n) => {
+		r.value = e.status, R(r, "change", (t, n) => {
 			e.status = n.value, this.render(this.last);
 		});
-		let i = I("input", "weft-tq-err", void 0, { type: "checkbox" });
-		return i.checked = e.err, L(i, "change", (t, n) => {
+		let i = L("input", "weft-tq-err", void 0, { type: "checkbox" });
+		return i.checked = e.err, R(i, "change", (t, n) => {
 			e.err = n.checked, this.render(this.last);
-		}), t.append(n, r, I("label", "weft-tool", [i, document.createTextNode("has error")])), t;
+		}), t.append(n, r, L("label", "weft-tool", [i, document.createTextNode("has error")])), t;
 	}
 	filtering() {
 		return this.tq.text.trim() !== "" || !!this.tq.status || this.tq.err;
 	}
 	match(e) {
 		let t = this.tq;
-		if (t.status && La(e) !== t.status || t.err && !e.err && e.status !== "failed") return !1;
+		if (t.status && Ya(e) !== t.status || t.err && !e.err && e.status !== "failed") return !1;
 		let n = t.text.trim().toLowerCase();
 		return !n || `${e.id}\n${e.err}\n${this.prompts.get(e.id) ?? ""}`.toLowerCase().includes(n);
 	}
@@ -5601,49 +5725,49 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 		}
 	}
 	turnRow(e, t, n) {
-		let r = La(e), i = I("button", `weft-turn${e.id === t ? " weft-sel" : ""}`, void 0, {
+		let r = Ya(e), i = L("button", `weft-turn${e.id === t ? " weft-sel" : ""}`, void 0, {
 			type: "button",
 			tabindex: e.id === n ? "0" : "-1",
 			...e.id === t ? { "aria-current": "true" } : {}
-		}), a = I("div", "weft-row1", [
-			I("span", `weft-chip weft-${r}`, r),
-			I("span", "weft-id", e.id, { title: e.id }),
-			...kn(e, (e) => {
+		}), a = L("div", "weft-row1", [
+			L("span", `weft-chip weft-${r}`, r),
+			L("span", "weft-id", e.id, { title: e.id }),
+			...zn(e, (e) => {
 				let t = this.rowOf(e);
 				return t?.turn ? `t${t.turn}` : $(e);
 			}),
-			I("span", "weft-when", kr(e.last_seen || e.started))
-		]), o = e.usage, s = I("div", "weft-row2", [
-			I("span", void 0, e.model.name ? `${e.model.provider}/${e.model.name}` : ""),
-			I("span", void 0, `${e.steps} steps`),
-			I("span", void 0, `${H(o.input_tokens)}→${H(o.output_tokens)}`),
-			I("span", void 0, Ar(e.started, e.finished) || "…")
+			L("span", "weft-when", zr(e.last_seen || e.started))
+		]), o = e.usage, s = L("div", "weft-row2", [
+			L("span", void 0, e.model.name ? `${e.model.provider}/${e.model.name}` : ""),
+			L("span", void 0, `${e.steps} steps`),
+			L("span", void 0, `${U(o.input_tokens)}→${U(o.output_tokens)}`),
+			L("span", void 0, Br(e.started, e.finished) || "…")
 		]);
-		return i.append(a, s), e.err && i.appendChild(I("div", "weft-reason", e.err)), L(i, "click", () => this.go(this.model?.select(e.id, !0))), L(i, "focus", (t, n) => this.roveTo(n, e.id)), I("div", void 0, [i, ...this.sourceLink(e)], {
+		return i.append(a, s), e.err && i.appendChild(L("div", "weft-reason", e.err)), R(i, "click", () => this.go(this.model?.select(e.id, !0))), R(i, "focus", (t, n) => this.roveTo(n, e.id)), L("div", void 0, [i, ...this.sourceLink(e)], {
 			role: "listitem",
 			"data-key": e.id
 		});
 	}
 	sourceLink(e) {
 		if (!e.forked_from) return [];
-		let [t, n = ""] = e.forked_from.split("#"), r = /^\d+$/.test(n) ? Number(n) : void 0, i = r === void 0 ? "" : ` step ${r}`, a = this.rowOf(t), o = `${a?.turn ? `t${a.turn}` : $(t)}${i}`, s = I(a ? "button" : "a", "weft-btn weft-src", `↖ ${o}${a ? "" : " ⤢"}`, {
+		let [t, n = ""] = e.forked_from.split("#"), r = /^\d+$/.test(n) ? Number(n) : void 0, i = r === void 0 ? "" : ` step ${r}`, a = this.rowOf(t), o = `${a?.turn ? `t${a.turn}` : $(t)}${i}`, s = L(a ? "button" : "a", "weft-btn weft-src", `↖ ${o}${a ? "" : " ⤢"}`, {
 			"aria-label": `${a ? "go to" : "open in Studio"} the source: run ${t}${i}`,
 			"data-weft-source": e.forked_from,
 			...a ? { type: "button" } : {
-				href: V(this.base, br(t, { step: r })),
+				href: H(this.base, Ar(t, { step: r })),
 				target: "_blank",
 				rel: "noopener"
 			}
 		});
-		return a ? L(s, "click", () => this.select(t, r)) : s.style.textDecoration = "none", [s];
+		return a ? R(s, "click", () => this.select(t, r)) : s.style.textDecoration = "none", [s];
 	}
 	roveTo(e, t) {
 		this.rove = t;
 		for (let t of Array.from(this.body.querySelectorAll(".weft-turn"))) t.tabIndex = t === e ? 0 : -1;
 	}
 	main(e) {
-		let t = I("div", "weft-main");
-		if (L(t, "toggle", (e) => {
+		let t = L("div", "weft-main");
+		if (R(t, "toggle", (e) => {
 			if (!(e.target instanceof HTMLElement)) return;
 			let t = e.target, n = t.open, r = t.getAttribute("data-weft-open");
 			r && this.openKeys.has(r) !== n && (n ? this.openKeys.add(r) : this.openKeys.delete(r), this.render(this.last));
@@ -5652,14 +5776,14 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 			t.querySelector("summary")?.setAttribute("aria-expanded", String(n));
 			let a = this.model?.state.turn;
 			a && (n ? (a.expanded.add(i), this.go(this.model?.expandChild(i))) : (a.expanded.delete(i), a.tried.delete(i), a.unreachable.delete(i)));
-		}, !0), L(t, "click", (e) => {
+		}, !0), R(t, "click", (e) => {
 			if (!(e.target instanceof Element)) return;
 			let t = e.target.closest("[data-weft-step]");
 			if (!t) return;
 			let n = Number(t.getAttribute("data-weft-step"));
 			Number.isFinite(n) && this.model?.selectStep(n);
-		}), e.tooNew && e.meta) return t.appendChild(I("div", "weft-note weft-warn", [I("span", "weft-warn", "Studio is newer than this panel; update panel.js"), I("span", void 0, `studio_version ${e.meta.studio_version} · panel built for ${fi()}`)])), t;
-		if (!e.turn) return t.appendChild(I("div", "weft-splash", "select a turn")), t;
+		}), e.tooNew && e.meta) return t.appendChild(L("div", "weft-note weft-warn", [L("span", "weft-warn", "Studio is newer than this panel; update panel.js"), L("span", void 0, `studio_version ${e.meta.studio_version} · panel built for ${Ci()}`)])), t;
+		if (!e.turn) return t.appendChild(L("div", "weft-splash", "select a turn")), t;
 		t.appendChild(this.tabs());
 		let n = this.lay.tab, r = e.turn, i = (e, n) => {
 			let r = {
@@ -5672,16 +5796,16 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 			for (let [t, n] of Object.entries(r)) e.setAttribute(t, n);
 			return t.appendChild(e), e;
 		}, a = this.turnView(e);
-		return a.appendChild(this.playgroundArea(e)), n !== "story" && a.setAttribute("hidden", ""), i(a, "story"), n !== "story" && i(I("div", void 0, [n === "raw" ? this.rawView(r) : n === "timeline" ? _o(r) : this.requestView(e, r)]), n), t;
+		return a.appendChild(this.playgroundArea(e)), n !== "story" && a.setAttribute("hidden", ""), i(a, "story"), n !== "story" && i(L("div", void 0, [n === "raw" ? this.rawView(r) : n === "timeline" ? ko(r) : this.requestView(e, r)]), n), t;
 	}
 	tabs() {
-		let e = I("div", "weft-tabs", void 0, {
+		let e = L("div", "weft-tabs", void 0, {
 			role: "tablist",
 			"aria-label": "turn views",
 			"data-key": "tabs"
 		});
-		for (let t of E) {
-			let n = t === this.lay.tab, r = I("button", `weft-tab${n ? " weft-active" : ""}`, t[0].toUpperCase() + t.slice(1), {
+		for (let t of T) {
+			let n = t === this.lay.tab, r = L("button", `weft-tab${n ? " weft-active" : ""}`, t[0].toUpperCase() + t.slice(1), {
 				type: "button",
 				role: "tab",
 				id: `weft-tab-${t}`,
@@ -5690,18 +5814,18 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 				"data-key": `tab:${t}`,
 				...n ? { "aria-controls": `weft-tp-${t}` } : {}
 			});
-			L(r, "click", () => this.setTab(t)), e.appendChild(r);
+			R(r, "click", () => this.setTab(t)), e.appendChild(r);
 		}
-		return L(e, "keydown", (e) => {
-			let t = e.key, n = E.indexOf(this.lay.tab), r = E.length, i = t === "ArrowRight" ? n + 1 : t === "ArrowLeft" ? n - 1 : t === "Home" ? 0 : t === "End" ? r - 1 : null;
+		return R(e, "keydown", (e) => {
+			let t = e.key, n = T.indexOf(this.lay.tab), r = T.length, i = t === "ArrowRight" ? n + 1 : t === "ArrowLeft" ? n - 1 : t === "Home" ? 0 : t === "End" ? r - 1 : null;
 			if (i === null) return;
 			e.preventDefault();
-			let a = E[(i + r) % r];
+			let a = T[(i + r) % r];
 			this.setTab(a), this.body.querySelector(`#weft-tab-${a}`)?.focus();
 		}), e;
 	}
 	playgroundArea(e) {
-		let t = I("div"), n = e.turn?.id ?? "";
+		let t = L("div"), n = e.turn?.id ?? "";
 		return e.result && e.result.under === n && t.appendChild(this.experimentResult(e)), this.canAct(e) && e.drawer && (e.drawer.under ?? e.drawer.runId) === n && t.appendChild(this.drawer(e)), t;
 	}
 	canAct(e) {
@@ -5712,120 +5836,127 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 	}
 	drawer(e) {
 		let t = e.drawer;
-		if (!t) return I("div");
-		let n = e.runtimes.find((e) => e.id === t.runtimeId)?.agents.find((e) => e.name === t.agent), r = I("div", "weft-step weft-drawer"), i = t.runId !== (t.under ?? t.runId), a = I("div", "weft-step-h", [I("span", void 0, `Experiment · ${t.agent}${i ? ` · child run ${t.runId}` : ""}${t.step > 0 ? ` · continue from step ${t.step}` : ""}`), I("span", "weft-grow")]), o = I("button", "weft-btn", "–", {
+		if (!t) return L("div");
+		let n = e.runtimes.find((e) => e.id === t.runtimeId)?.agents.find((e) => e.name === t.agent), r = L("div", "weft-step weft-drawer"), i = t.runId !== (t.under ?? t.runId), a = L("div", "weft-step-h", [L("span", void 0, `Experiment · ${t.agent}${i ? ` · child run ${t.runId}` : ""}${t.step > 0 ? ` · continue from step ${t.step}` : ""}`), L("span", "weft-grow")]), o = L("button", "weft-btn", "–", {
 			title: "close the drawer",
 			"aria-label": "close the drawer"
 		});
-		L(o, "click", () => this.closeDrawer()), a.appendChild(o), r.appendChild(a);
-		let s = I("div", "weft-step-b");
-		if (t.verb && s.appendChild(I("div", "weft-verb-t", so[t.verb], { "data-weft-drawer-verb": t.verb })), t.key !== void 0 && t.key !== this.focusedKey) {
+		R(o, "click", () => this.closeDrawer()), a.appendChild(o), r.appendChild(a);
+		let s = L("div", "weft-step-b");
+		if (t.verb && s.appendChild(L("div", "weft-verb-t", bo[t.verb], { "data-weft-drawer-verb": t.verb })), t.key !== void 0 && t.key !== this.focusedKey) {
 			this.focusedKey = t.key;
 			let e = t.edits.at(0);
 			this.focusNext = t.focus === "edit" && e ? `edit:${e.step}:${e.callID}` : t.focus === "input" ? "input" : "prompt";
 		}
-		let c = I("label", "weft-field", [I("span", void 0, "System prompt")]), l = this.field(I("textarea", "weft-input"), "prompt");
-		l.rows = 3, l.value = t.instructions, L(l, "input", (e, t) => this.model?.setDraft({ instructions: t.value }, !0));
-		let u = I("button", "weft-btn", "↺", {
+		let c = L("label", "weft-field", [L("span", void 0, "System prompt")]), l = this.field(L("textarea", "weft-input"), "prompt");
+		l.rows = 3, l.value = t.instructions, R(l, "input", (e, t) => this.model?.setDraft({ instructions: t.value }, !0));
+		let u = L("button", "weft-btn", "↺", {
 			title: "reset to the registered prompt",
 			"aria-label": "reset to the registered prompt"
 		});
-		if (L(u, "click", () => {
+		if (R(u, "click", () => {
 			this.model?.setDraft({ instructions: t.registeredInstructions });
 		}), c.append(l, u), s.appendChild(c), t.promptFrom === "registered") {
-			let e = I("div", "weft-note", void 0, { "data-weft-prompt-from": "registered" });
-			t.promptHole && e.append(R(t.promptHole.hole, t.promptHole), " "), e.append("step prompt unreadable · the registered one pre-filled"), s.appendChild(e);
+			let e = L("div", "weft-note", void 0, { "data-weft-prompt-from": "registered" });
+			t.promptHole && e.append(z(t.promptHole.hole, t.promptHole), " "), e.append("step prompt unreadable · the registered one pre-filled"), s.appendChild(e);
 		}
 		if (n?.tools.length) {
-			let e = I("div", "weft-field", [I("span", void 0, "Tools")]);
+			let e = L("div", "weft-field", [L("span", void 0, "Tools")]);
 			for (let r of n.tools) {
-				let n = I("input");
-				n.type = "checkbox", n.checked = t.tools[r.name] ?? !0, L(n, "change", (e, n) => this.model?.setDraft({ tools: {
+				let n = L("input");
+				n.type = "checkbox", n.checked = t.tools[r.name] ?? !0, R(n, "change", (e, n) => this.model?.setDraft({ tools: {
 					...this.model.state.drawer?.tools ?? t.tools,
 					[r.name]: n.checked
 				} }));
-				let i = I("label", "weft-tool", [n, I("span", void 0, r.name)]);
-				(r.side_effects === "never" || !r.side_effects) && i.appendChild(I("span", "weft-badge weft-warn-badge", "⚠", { title: "side-effect tool (ReplayPolicy never): its calls substitute or park — never re-fire silently; only side effects: allow runs it for real, and only if the app opted it in" })), e.appendChild(i);
+				let i = L("label", "weft-tool", [n, L("span", void 0, r.name)]);
+				(r.side_effects === "never" || !r.side_effects) && i.appendChild(L("span", "weft-badge weft-warn-badge", "⚠", { title: "side-effect tool (ReplayPolicy never): its calls substitute or park — never re-fire silently; only side effects: allow runs it for real, and only if the app opted it in" })), e.appendChild(i);
 			}
 			s.appendChild(e);
 		}
-		let d = I("div", "weft-fields"), f = I("select", "weft-input", void 0, { "aria-label": "model" }), p = e.turn?.doc?.model.name ?? "", m = I("option", void 0, `model: ${p || "—"}`);
+		let d = L("div", "weft-fields"), f = L("select", "weft-input", void 0, { "aria-label": "model" }), p = e.turn?.doc?.model.name ?? "", m = L("option", void 0, `model: ${p || "—"}`);
 		m.value = "", f.appendChild(m);
 		for (let e of n?.models ?? []) {
 			if (e === p) continue;
-			let t = I("option", void 0, e);
+			let t = L("option", void 0, e);
 			t.value = e, f.appendChild(t);
 		}
-		f.value = t.model, L(f, "change", (e, t) => this.model?.setDraft({ model: t.value })), d.appendChild(f);
-		let h = I("select", "weft-input", void 0, { "aria-label": "thinking" }), g = I("option", void 0, "thinking: default");
-		g.value = "", h.appendChild(g);
+		let h = !t.model || (n?.models ?? []).includes(t.model);
+		if (f.value = h ? t.model : "", t.model && f.classList.add("weft-ovr"), R(f, "change", (e, t) => this.model?.setDraft({ model: t.value })), d.appendChild(f), n?.resolver) {
+			let e = L("input", "weft-input" + (h ? "" : " weft-ovr"), void 0, {
+				"aria-label": "model name the app resolves",
+				placeholder: "or any model: the app resolves it"
+			});
+			e.value = h ? "" : t.model, R(e, "input", (e, t) => this.model?.setDraft({ model: t.value.trim() })), d.appendChild(e);
+		}
+		let g = L("select", "weft-input", void 0, { "aria-label": "thinking" }), _ = L("option", void 0, `thinking: default${n?.defaults?.thinking ? ` (${n.defaults.thinking})` : ""}`);
+		_.value = "", g.appendChild(_);
 		for (let e of [
 			"off",
 			"low",
 			"medium",
 			"high"
 		]) {
-			let t = I("option", void 0, e);
-			t.value = e, h.appendChild(t);
+			let t = L("option", void 0, e);
+			t.value = e, g.appendChild(t);
 		}
-		if (h.value = t.thinking, L(h, "change", (e, t) => this.model?.setDraft({ thinking: t.value })), d.appendChild(h), s.appendChild(d), t.step === 0) {
-			let e = I("label", "weft-field", [I("span", void 0, "Input (replaces the user message)")]), n = this.field(I("textarea", "weft-input"), "input");
-			n.rows = 2, n.value = t.input, t.sourceInput && t.thread !== "fork" && (n.placeholder = t.sourceInput), L(n, "input", (e, t) => {
+		if (g.value = t.thinking, R(g, "change", (e, t) => this.model?.setDraft({ thinking: t.value })), d.appendChild(g), s.appendChild(d), t.step === 0) {
+			let e = L("label", "weft-field", [L("span", void 0, "Input (replaces the user message)")]), n = this.field(L("textarea", "weft-input"), "input");
+			n.rows = 2, n.value = t.input, t.sourceInput && t.thread !== "fork" && (n.placeholder = t.sourceInput), R(n, "input", (e, t) => {
 				let n = t.value;
 				this.model?.setDraft({ input: n }, !0);
 				let r = t.closest(".weft-drawer")?.querySelector(".weft-run-btn");
 				r && (r.disabled = r.hasAttribute("data-weft-held") || this.model?.state.drawer?.thread === "fork" && !n.trim());
 			}), e.appendChild(n), s.appendChild(e);
 		}
-		let _ = I("div", "weft-fields"), v = I("select", "weft-input", void 0, { "aria-label": "side effects" });
-		v.title = "How side-effect tools behave in the re-run. ReplaySafe tools always run; the others substitute, park, or — under allow, if the app opted them in — run for real.";
-		let y = I("option", void 0, "side effects: substitute", { title: "a side-effect call the source recorded is answered from the record; any other call parks for you" });
-		y.value = "", v.appendChild(y);
-		let b = I("option", void 0, "park", { title: "every side-effect call parks for you; nothing is answered from the record" });
-		b.value = "park", v.appendChild(b);
-		let x = I("option", void 0, "allow — runs the tools this app opted in (AllowSideEffects) for real", { title: "refused unless every tool left on is opted in or ReplaySafe" });
-		x.value = "allow", v.appendChild(x), v.value = t.sideEffects === "substitute" ? "" : t.sideEffects, L(v, "change", (e, t) => this.model?.setDraft({ sideEffects: t.value })), _.appendChild(v);
-		let S = I("select", "weft-input", void 0, { "aria-label": "engine" }), C = I("option", void 0, "engine: live");
-		C.value = "live", S.appendChild(C);
-		let ee = I("option", void 0, "scripted (zero tokens)");
-		ee.value = "scripted", S.appendChild(ee), S.value = t.engine, L(S, "change", (e, t) => this.model?.setDraft({ engine: t.value })), _.appendChild(S);
-		let w = I("select", "weft-input", void 0, { "aria-label": "thread" }), te = I("option", void 0, "thread: ephemeral");
-		te.value = "ephemeral", w.appendChild(te);
-		let ne = I("option", void 0, "fork (new session)");
-		if (ne.value = "fork", w.appendChild(ne), w.value = t.thread, w.title = "fork continues the conversation in a new session (needs an input)", L(w, "change", (e, t) => {
+		let v = L("div", "weft-fields"), y = L("select", "weft-input", void 0, { "aria-label": "side effects" });
+		y.title = "How side-effect tools behave in the re-run. ReplaySafe tools always run; the others substitute, park, or — under allow, if the app opted them in — run for real.";
+		let b = L("option", void 0, "side effects: substitute", { title: "a side-effect call the source recorded is answered from the record; any other call parks for you" });
+		b.value = "", y.appendChild(b);
+		let x = L("option", void 0, "park", { title: "every side-effect call parks for you; nothing is answered from the record" });
+		x.value = "park", y.appendChild(x);
+		let ee = L("option", void 0, "allow — runs the tools this app opted in (AllowSideEffects) for real", { title: "refused unless every tool left on is opted in or ReplaySafe" });
+		ee.value = "allow", y.appendChild(ee), y.value = t.sideEffects === "substitute" ? "" : t.sideEffects, R(y, "change", (e, t) => this.model?.setDraft({ sideEffects: t.value })), v.appendChild(y);
+		let S = L("select", "weft-input", void 0, { "aria-label": "engine" }), te = L("option", void 0, "engine: live");
+		te.value = "live", S.appendChild(te);
+		let C = L("option", void 0, "scripted (zero tokens)");
+		C.value = "scripted", S.appendChild(C), S.value = t.engine, R(S, "change", (e, t) => this.model?.setDraft({ engine: t.value })), v.appendChild(S);
+		let w = L("select", "weft-input", void 0, { "aria-label": "thread" }), ne = L("option", void 0, "thread: ephemeral");
+		ne.value = "ephemeral", w.appendChild(ne);
+		let re = L("option", void 0, "fork (new session)");
+		if (re.value = "fork", w.appendChild(re), w.value = t.thread, w.title = "fork continues the conversation in a new session (needs an input)", R(w, "change", (e, t) => {
 			let n = t.value;
 			this.model?.setDraft(n === "fork" ? {
 				thread: n,
 				step: 0
 			} : { thread: n });
-		}), _.appendChild(w), s.appendChild(_), Ia(e, "breakpoints") && $e(this.cfg.token) === "" && n?.tools.length) {
-			let t = I("div", "weft-field");
-			t.appendChild(I("span", void 0, "Break on (parks every run)", { title: "applies to runs this runtime starts — the app's own turns are viewer-only (PQ7)" }));
+		}), v.appendChild(w), s.appendChild(v), n && s.appendChild(this.lab(t, n)), Ja(e, "breakpoints") && et(this.cfg.token) === "" && n?.tools.length) {
+			let t = L("div", "weft-field");
+			t.appendChild(L("span", void 0, "Break on (parks every run)", { title: "applies to runs this runtime starts — the app's own turns are viewer-only (PQ7)" }));
 			for (let r of n.tools) {
-				let n = I("input");
-				n.type = "checkbox", n.checked = e.breakpoints.includes(r.name), L(n, "change", (t, n) => {
+				let n = L("input");
+				n.type = "checkbox", n.checked = e.breakpoints.includes(r.name), R(n, "change", (t, n) => {
 					let i = (this.model?.state.breakpoints ?? e.breakpoints).filter((e) => e !== r.name);
 					n.checked && i.push(r.name), i.sort(), this.go(this.model?.setBreakpoints(i));
-				}), t.appendChild(I("label", "weft-tool", [n, I("span", void 0, r.name)]));
+				}), t.appendChild(L("label", "weft-tool", [n, L("span", void 0, r.name)]));
 			}
 			s.appendChild(t);
 		}
-		let T = 0, E = e.turn ? t.runId === e.turn.id ? e.turn : e.turn.children.get(t.runId) : void 0;
-		if (t.step > 0 && E) {
-			let e = () => this.model?.state.drawer ?? t, n = I("div", "weft-field");
-			n.appendChild(I("span", void 0, `Transcript edits (steps 0..${t.step - 1} are kept)`));
+		let T = 0, ie = e.turn ? t.runId === e.turn.id ? e.turn : e.turn.children.get(t.runId) : void 0;
+		if (t.step > 0 && ie) {
+			let e = () => this.model?.state.drawer ?? t, n = L("div", "weft-field");
+			n.appendChild(L("span", void 0, `Transcript edits (steps 0..${t.step - 1} are kept)`));
 			let r = /* @__PURE__ */ new Set();
-			for (let i of E.folded.steps) {
+			for (let i of ie.folded.steps) {
 				let a = i.index;
 				if (!(a >= t.step)) {
 					for (let t of i.toolCalls) {
 						if (!t.result) continue;
-						let i = I("label", "weft-edit", void 0, { "data-key": `${a}:${t.callId}` });
-						i.appendChild(I("span", void 0, `step ${a} · ${t.name} →`));
-						let o = this.field(I("input", "weft-input"), `edit:${a}:${t.callId}`);
+						let i = L("label", "weft-edit", void 0, { "data-key": `${a}:${t.callId}` });
+						i.appendChild(L("span", void 0, `step ${a} · ${t.name} →`));
+						let o = this.field(L("input", "weft-input"), `edit:${a}:${t.callId}`);
 						o.placeholder = String(t.result.content).slice(0, 60);
 						let s = () => e().edits.find((e) => e.step === a && e.callID === t.callId);
-						o.value = s()?.toolResult ?? "", L(o, "input", (n, r) => {
+						o.value = s()?.toolResult ?? "", R(o, "input", (n, r) => {
 							let i = r.value, o = s(), c = [...e().edits], l = o ? c.indexOf(o) : -1;
 							i === "" ? l >= 0 && c.splice(l, 1) : l >= 0 ? c[l] = {
 								...o,
@@ -5840,12 +5971,12 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 						}), i.appendChild(o), n.appendChild(i), r.add(`${a}:${t.callId}`);
 					}
 					if (i.text && !i.toolCalls.length) {
-						let t = I("label", "weft-edit", void 0, { "data-key": `${a}` });
-						t.appendChild(I("span", void 0, `step ${a} · reply`));
-						let i = this.field(I("textarea", "weft-input"), `edit:${a}`);
+						let t = L("label", "weft-edit", void 0, { "data-key": `${a}` });
+						t.appendChild(L("span", void 0, `step ${a} · reply`));
+						let i = this.field(L("textarea", "weft-input"), `edit:${a}`);
 						i.rows = 2;
 						let o = () => e().edits.find((e) => e.step === a && !e.callID);
-						i.value = o()?.content ?? "", L(i, "input", (t, n) => {
+						i.value = o()?.content ?? "", R(i, "input", (t, n) => {
 							let r = n.value, i = o(), s = [...e().edits], c = i ? s.indexOf(i) : -1;
 							r === "" ? c >= 0 && s.splice(c, 1) : c >= 0 ? s[c] = {
 								...i,
@@ -5859,33 +5990,114 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 					}
 				}
 			}
-			for (let e of t.edits) r.has(`${e.step}:${e.callID ?? ""}`) || (T++, n.appendChild(I("div", "weft-edit", [R("gap"), document.createTextNode(` step ${e.step} · ${e.callID ?? "reply"} → ${e.toolResult ?? e.content ?? ""} · not in the steps read · Run held`)], {
+			for (let e of t.edits) r.has(`${e.step}:${e.callID ?? ""}`) || (T++, n.appendChild(L("div", "weft-edit", [z("gap"), document.createTextNode(` step ${e.step} · ${e.callID ?? "reply"} → ${e.toolResult ?? e.content ?? ""} · not in the steps read · Run held`)], {
 				"data-key": `u:${e.step}:${e.callID ?? ""}`,
 				"data-weft-unplaced": ""
 			})));
 			n.childElementCount > 1 && s.appendChild(n);
 		}
-		let re = this.ack(e, t, E, n, s), D = I("button", "weft-run-btn", "Run experiment ▶", { title: "POST /api/playground/runs — the runtime in your app executes it" });
-		return (re || T) && D.setAttribute("data-weft-held", ""), (re || T || t.thread === "fork" && !t.input.trim()) && D.setAttribute("disabled", ""), L(D, "click", () => this.go(this.model?.runExperiment())), s.appendChild(D), r.appendChild(s), r;
+		let ae = this.ack(e, t, ie, n, s), E = L("button", "weft-run-btn", "Run experiment ▶", { title: "POST /api/playground/runs — the runtime in your app executes it" }), oe = ae || T || bi(t).problems.length;
+		return oe && E.setAttribute("data-weft-held", ""), (oe || t.thread === "fork" && !t.input.trim()) && E.setAttribute("disabled", ""), R(E, "click", () => this.go(this.model?.runExperiment())), s.appendChild(E), r.appendChild(s), r;
+	}
+	lab(e, t) {
+		let n = e.lab ?? un(), r = t.defaults, i = mn(t), a = (e) => this.model?.setDraft({ lab: {
+			...this.model.state.drawer?.lab ?? un(),
+			...e
+		} }), { problems: o } = bi(e), s = L("div", "weft-field weft-lab", [L("span", void 0, "Options · empty keeps the agent's default (greyed)")], { "data-weft-lab": "" });
+		i && s.appendChild(L("div", "weft-note", `this runtime reports no defaults — ${pn}`, { "data-weft-lab-old": "" }));
+		let c = (e, t) => {
+			for (let n of o) n.field === e && t.appendChild(L("div", "weft-lab-p", n.message, {
+				role: "alert",
+				"data-weft-lab-problem": e
+			}));
+		};
+		c("lab", s);
+		let l = (e, t) => {
+			let o = L("label", "weft-lab-k", [L("span", void 0, F[e]), t], { "data-key": `lab:${e}` });
+			if (i && fn.includes(e) && t.setAttribute("disabled", ""), vn(n, e, r)) {
+				t.classList.add("weft-ovr"), t.setAttribute("data-weft-override", "");
+				let r = L("button", "weft-btn", "↺", {
+					type: "button",
+					"aria-label": `reset ${F[e]} to the agent's default`
+				});
+				R(r, "click", () => a(e === "tool_choice" ? {
+					tool_choice: "",
+					tool_choice_name: ""
+				} : { [e]: Array.isArray(n[e]) ? [] : "" })), o.appendChild(r);
+			}
+			c(e, o), s.appendChild(o);
+		};
+		for (let e of [...dn, "stop"]) {
+			let t = L(e === "stop" ? "textarea" : "input", "weft-input", void 0, {
+				"aria-label": F[e],
+				placeholder: I(e, r) || (i ? "" : e === "stop" ? "none" : "adapter default")
+			});
+			t.value = n[e], R(t, "input", (t, n) => a({ [e]: n.value })), l(e, t);
+		}
+		let u = L("select", "weft-input", void 0, { "aria-label": F.tool_choice }), d = r?.tool_choice;
+		for (let e of [
+			"",
+			"auto",
+			"any",
+			"none",
+			"named"
+		]) {
+			let t = L("option", void 0, e || `default${d?.mode ? ` (${d.mode}${d.name ? ` ${d.name}` : ""})` : ""}`);
+			t.value = e, u.appendChild(t);
+		}
+		u.value = n.tool_choice, R(u, "change", (e, t) => a({ tool_choice: t.value })), l("tool_choice", u);
+		let f = t.tools.map((e) => e.name), p = (t) => e.tools[t] === !1;
+		if (n.tool_choice === "named") {
+			let e = L("select", "weft-input", void 0, { "aria-label": "tool choice: the tool" });
+			for (let t of ["", ...f]) {
+				let r = L("option", void 0, t || "(pick a tool)");
+				r.value = t, t && ((n.only_tools.length ? !n.only_tools.includes(t) : p(t)) || n.park_on.includes(t)) && (r.disabled = !0), e.appendChild(r);
+			}
+			e.value = n.tool_choice_name, R(e, "change", (e, t) => a({ tool_choice_name: t.value })), l("tool_choice_name", e);
+		}
+		for (let e of ["only_tools", "park_on"]) {
+			let t = L("div", "weft-lab-k", void 0, {
+				role: "group",
+				"aria-label": F[e],
+				"data-key": `lab:${e}`
+			});
+			t.appendChild(L("span", void 0, `${F[e]} · default ${e === "park_on" ? "none" : "every tool"}`));
+			for (let r of f) {
+				let o = L("input", void 0, void 0, { "aria-label": `${F[e]}: ${r}` });
+				o.type = "checkbox", o.checked = n[e].includes(r), o.disabled = i || e === "only_tools" && p(r), R(o, "change", (t, n) => {
+					let i = this.model?.state.drawer?.lab?.[e] ?? [];
+					a({ [e]: n.checked ? [...i, r] : i.filter((e) => e !== r) });
+				}), t.appendChild(L("span", "weft-tool" + (o.checked ? " weft-ovr" : ""), [o, L("span", void 0, r)]));
+			}
+			if (vn(n, e, r)) {
+				let n = L("button", "weft-btn", "↺", {
+					type: "button",
+					"aria-label": `reset ${F[e]} to the agent's default`
+				});
+				R(n, "click", () => a({ [e]: [] })), t.appendChild(n);
+			}
+			c(e, t), s.appendChild(t);
+		}
+		return s;
 	}
 	closeDrawer() {
 		let e = this.opener;
 		this.opener = null, this.model?.closeExperiment(), e?.isConnected && e.focus({ preventScroll: !0 });
 	}
 	ack(e, t, a, o, s) {
-		let c = I("div", "weft-ack", void 0, {
+		let c = L("div", "weft-ack", void 0, {
 			"data-weft-ack": "",
 			"data-key": "ack"
 		});
-		c.appendChild(I("div", "weft-name", "before you run"));
-		let l = t.thread === "fork" ? 0 : t.step, u = l > 0 && Nr(a?.doc).some((e) => !U(e) && typeof e.step == "number" && e.step <= l);
-		c.appendChild(I("div", "weft-res", m(l, u), { "data-weft-prefix": "" }));
-		let d = a && "status" in a ? a.status : this.rowOf(t.runId)?.status ?? a?.doc?.status ?? "", f = a ? co(a.requests, l, Ia(e, "requests"), lo(a.transcript)?.stepCount ?? null, d === "running") : {
+		c.appendChild(L("div", "weft-name", "before you run"));
+		let l = t.thread === "fork" ? 0 : t.step, u = l > 0 && Ur(a?.doc).some((e) => !W(e) && typeof e.step == "number" && e.step <= l);
+		c.appendChild(L("div", "weft-res", m(l, u), { "data-weft-prefix": "" }));
+		let d = a && "status" in a ? a.status : this.rowOf(t.runId)?.status ?? a?.doc?.status ?? "", f = a ? xo(a.requests, l, Ja(e, "requests"), So(a.transcript)?.stepCount ?? null, d === "running") : {
 			tools: null,
-			hole: An("the run's records could not be read")
+			hole: Bn("the run's records could not be read")
 		};
-		f.hole && c.appendChild(jn(f.hole, !!o));
-		let p = Object.keys(t.tools), h = p.filter((e) => t.tools[e]), g = n({
+		f.hole && c.appendChild(Vn(f.hole, !!o));
+		let p = Object.keys(t.tools), h = bi(t).overrides, g = h.only_tools ?? p.filter((e) => t.tools[e]), _ = n({
 			catalog: f.tools ?? (o?.tools ?? []).map((e) => ({
 				name: e.name,
 				replay: e.side_effects === "safe" ? "safe" : "never",
@@ -5893,63 +6105,63 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 			})),
 			agent: o,
 			mode: t.sideEffects,
-			toolsEnabled: h.length < p.length ? h : void 0,
-			breakpoints: i({ breakpoints: e.breakpoints }, o)
+			toolsEnabled: g.length < p.length ? g : void 0,
+			breakpoints: [...i({ breakpoints: e.breakpoints }, o), ...h.park_on ?? []]
 		});
-		if (f.loading) c.appendChild(I("div", "weft-reason", "reading the step's catalog…"));
-		else if (f.none) c.appendChild(I("div", "weft-reason", "the step offered no tools · nothing to substitute or park"));
+		if (f.loading) c.appendChild(L("div", "weft-reason", "reading the step's catalog…"));
+		else if (f.none) c.appendChild(L("div", "weft-reason", "the step offered no tools · nothing to substitute or park"));
 		else {
-			let e = I("ul", "weft-verdicts", void 0, { "aria-label": "what each tool would do" });
-			for (let t of g) e.appendChild(I("li", `weft-v-${t.verdict}`, [
-				I("span", "weft-name", t.name),
-				I("span", "weft-v", t.verdict),
-				I("span", "weft-reason", t.why)
+			let e = L("ul", "weft-verdicts", void 0, { "aria-label": "what each tool would do" });
+			for (let t of _) e.appendChild(L("li", `weft-v-${t.verdict}`, [
+				L("span", "weft-name", t.name),
+				L("span", "weft-v", t.verdict),
+				L("span", "weft-reason", t.why)
 			], {
 				"data-verdict": t.verdict,
 				"data-tool": t.name,
 				"data-key": t.name
 			}));
-			!g.length && !f.hole && e.appendChild(I("li", "weft-reason", "no tools · nothing to substitute or park")), e.childElementCount && c.appendChild(e);
+			!_.length && !f.hole && e.appendChild(L("li", "weft-reason", "no tools · nothing to substitute or park")), e.childElementCount && c.appendChild(e);
 		}
 		s.appendChild(c);
-		let _ = r(o, t.sideEffects, h.length < p.length ? h : void 0);
-		if (_.length) {
-			let e = _.length === 1;
-			s.appendChild(I("div", "weft-note weft-warn", `side effects allow is refused while ${_.join(", ")} ${e ? "is" : "are"} on (allow runs only ReplaySafe tools and those opted in with AllowSideEffects): turn ${e ? "it" : "them"} off, or pick substitute or park`, {
+		let v = r(o, t.sideEffects, g.length < p.length ? g : void 0);
+		if (v.length) {
+			let e = v.length === 1;
+			s.appendChild(L("div", "weft-note weft-warn", `side effects allow is refused while ${v.join(", ")} ${e ? "is" : "are"} on (allow runs only ReplaySafe tools and those opted in with AllowSideEffects): turn ${e ? "it" : "them"} off, or pick substitute or park`, {
 				role: "alert",
 				"data-weft-refused": ""
 			}));
 		}
-		return _.length > 0 || !!f.loading;
+		return v.length > 0 || !!f.loading;
 	}
 	experimentResult(e) {
 		let t = e.result;
-		if (!t) return I("div");
-		let n = I("div", "weft-step weft-xres"), r = t.row?.usage, i = [
+		if (!t) return L("div");
+		let n = L("div", "weft-step weft-xres"), r = t.row?.usage, i = [
 			t.state,
-			r ? `${H(r.input_tokens)}→${H(r.output_tokens)} tok` : "",
-			t.row ? Ar(t.row.started, t.row.finished) : ""
-		].filter(Boolean).join(" · "), a = I("div", "weft-step-h", [
-			I("span", void 0, `Result · ${t.label}`),
-			I("span", void 0, i),
-			I("span", "weft-grow")
-		]), o = I("button", "weft-btn", "keep as prompt ⤴", { title: "copy the edited prompt (weft/prompt versions are post-v1, PQ2)" });
-		L(o, "click", () => {
+			r ? `${U(r.input_tokens)}→${U(r.output_tokens)} tok` : "",
+			t.row ? Br(t.row.started, t.row.finished) : ""
+		].filter(Boolean).join(" · "), a = L("div", "weft-step-h", [
+			L("span", void 0, `Result · ${t.label}`),
+			L("span", void 0, i),
+			L("span", "weft-grow")
+		]), o = L("button", "weft-btn", "keep as prompt ⤴", { title: "copy the edited prompt (weft/prompt versions are post-v1, PQ2)" });
+		R(o, "click", () => {
 			let e = this.model?.state.drawer?.instructions ?? "";
 			try {
 				navigator.clipboard?.writeText(e).catch(X);
 			} catch {}
 		}), a.appendChild(o);
-		let s = I("a", "weft-btn", "save as fixture", {
-			href: V(this.base, Cr(t.runID ? { run: t.runID } : {})),
+		let s = L("a", "weft-btn", "save as fixture", {
+			href: H(this.base, Nr(t.runID ? { run: t.runID } : {})),
 			target: "_blank",
 			rel: "noopener",
 			title: "hand off to Studio: the run's records as wefttest replay fixtures (D4)"
 		});
 		s.style.textDecoration = "none", a.appendChild(s);
-		let c = I("a", "weft-btn", "compare in Studio", { title: "open the Studio playground with this run, step and the current overrides carried over" }), l = (n) => {
-			let r = this.model?.state.drawer ?? null, i = r && r.runId === t.sourceRunID ? r : null, a = i ? i.step : e.turn ? go(e.turn.folded, e.selectedStep) : -1;
-			n.setAttribute("href", Oo(this.base, i, a));
+		let c = L("a", "weft-btn", "compare in Studio", { title: "open the Studio playground with this run, step and the current overrides carried over" }), l = (n) => {
+			let r = this.model?.state.drawer ?? null, i = r && r.runId === t.sourceRunID ? r : null, a = i ? i.step : e.turn ? Oo(e.turn.folded, e.selectedStep) : -1;
+			n.setAttribute("href", Bo(this.base, i, a));
 		};
 		l(c), c.setAttribute("target", "_blank"), c.setAttribute("rel", "noopener");
 		for (let e of [
@@ -5957,26 +6169,26 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 			"focus",
 			"click",
 			"contextmenu"
-		]) L(c, e, (e, t) => l(t));
+		]) R(c, e, (e, t) => l(t));
 		c.style.textDecoration = "none", a.appendChild(c);
-		let u = I("button", "weft-btn", "discard", { title: "clear the result pane" });
-		L(u, "click", () => this.model?.discardResult()), a.appendChild(u), n.appendChild(a);
-		let d = I("div", "weft-step-b");
-		if (t.error && d.appendChild(I("div", "weft-note weft-warn", t.error)), t.runID) {
-			let e = t.sourceRunID, n = I("div", "weft-row2", [I("span", void 0, `${$(t.runID)} · replay of`)], {
+		let u = L("button", "weft-btn", "discard", { title: "clear the result pane" });
+		R(u, "click", () => this.model?.discardResult()), a.appendChild(u), n.appendChild(a);
+		let d = L("div", "weft-step-b");
+		if (t.error && d.appendChild(L("div", "weft-note weft-warn", t.error)), t.runID) {
+			let e = t.sourceRunID, n = L("div", "weft-row2", [L("span", void 0, `${$(t.runID)} · replay of`)], {
 				"data-weft-replay-of": `${e}#${t.fromStep}`,
 				"data-key": "replay-of"
 			}), r = `${$(e)} from step ${t.fromStep}`;
 			if (e === t.under) {
-				let i = I("button", "weft-btn", r, {
+				let i = L("button", "weft-btn", r, {
 					type: "button",
 					"aria-label": `go to the source: run ${e} step ${t.fromStep}`,
 					"data-weft-source": `${e}#${t.fromStep}`
 				});
-				L(i, "click", () => this.select(e, t.fromStep)), n.appendChild(i);
-			} else n.appendChild(I("span", void 0, r));
+				R(i, "click", () => this.select(e, t.fromStep)), n.appendChild(i);
+			} else n.appendChild(L("span", void 0, r));
 			let i = (e, t, n, r) => {
-				let i = I("a", "weft-btn", e, {
+				let i = L("a", "weft-btn", e, {
 					href: t,
 					target: "_blank",
 					rel: "noopener",
@@ -5985,44 +6197,44 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 				});
 				return i.style.textDecoration = "none", i;
 			};
-			n.appendChild(i("⤢", V(this.base, br(e, { step: t.fromStep })), `open the source step in Studio (run ${e} step ${t.fromStep})`, "data-weft-source-link")), n.appendChild(i("open the replayed run ⤢", V(this.base, br(t.runID)), `open the replayed run ${t.runID} in Studio`, "data-weft-run-link")), d.appendChild(n);
+			n.appendChild(i("⤢", H(this.base, Ar(e, { step: t.fromStep })), `open the source step in Studio (run ${e} step ${t.fromStep})`, "data-weft-source-link")), n.appendChild(i("open the replayed run ⤢", H(this.base, Ar(t.runID)), `open the replayed run ${t.runID} in Studio`, "data-weft-run-link")), d.appendChild(n);
 		}
 		let f = t.row?.status ?? (t.ready ? "succeeded" : "running");
 		for (let e of t.folded.steps) {
-			e.text && d.appendChild(I("div", void 0, e.text));
-			for (let n of e.toolCalls) d.appendChild(wo(n, e.index, f, void 0, void 0, t.runID ? {
+			e.text && d.appendChild(L("div", void 0, e.text));
+			for (let n of e.toolCalls) d.appendChild(Io(n, e.index, f, void 0, void 0, t.runID ? {
 				endpoint: this.base,
 				runId: t.runID
 			} : void 0));
 		}
-		!t.folded.steps.length && !t.error && t.state === "queued" ? d.appendChild(I("div", "weft-note", "queued — waiting for the runtime to ack…")) : !t.folded.steps.length && !t.error && t.state === "accepted" && !t.runID && d.appendChild(I("div", "weft-note", "accepted — the fork's turn is running in its new session…"));
+		!t.folded.steps.length && !t.error && t.state === "queued" ? d.appendChild(L("div", "weft-note", "queued — waiting for the runtime to ack…")) : !t.folded.steps.length && !t.error && t.state === "accepted" && !t.runID && d.appendChild(L("div", "weft-note", "accepted — the fork's turn is running in its new session…"));
 		let p = [{
 			id: "",
-			label: ko(t.label)
+			label: Vo(t.label)
 		}, ...(e.experiments.get(t.sourceRunID) ?? []).filter((e) => e.id !== t.runID).map((e) => ({
 			id: e.id,
 			label: $(e.id)
 		}))];
 		if (p.length > 1) {
-			let e = I("select", "weft-input", void 0, { "aria-label": "compare with" });
+			let e = L("select", "weft-input", void 0, { "aria-label": "compare with" });
 			for (let t of p) {
-				let n = I("option", void 0, `compare vs ${t.label || "source"}`);
+				let n = L("option", void 0, `compare vs ${t.label || "source"}`);
 				n.value = t.id, e.appendChild(n);
 			}
-			e.value = t.compareWith, L(e, "change", (e, t) => this.go(this.model?.setCompare(t.value))), d.appendChild(e);
+			e.value = t.compareWith, R(e, "change", (e, t) => this.go(this.model?.setCompare(t.value))), d.appendChild(e);
 		}
-		let m = t.ready ? t.words ?? si(t.folded) : null, h = t.compareWith ? this.model?.compareWords.get(t.compareWith) : t.source, g = t.compareWith ? $(t.compareWith) : ko(t.label);
+		let m = t.ready ? t.words ?? _i(t.folded) : null, h = t.compareWith ? this.model?.compareWords.get(t.compareWith) : t.source, g = t.compareWith ? $(t.compareWith) : Vo(t.label);
 		if (m && h && m.text && h.text) {
-			let e = I("div", "weft-diff");
+			let e = L("div", "weft-diff");
 			this.diffInto(e, `diff vs ${g}:`, h.text, m.text), h.calls.join("\n") !== m.calls.join("\n") && this.diffInto(e, "tool calls:", h.calls.join("\n"), m.calls.join("\n")), d.appendChild(e);
 		}
-		if (t.ready && Ia(e, "diff") && (t.stepDiff ? d.appendChild(Or(t.stepDiff, this.base)) : t.stepDiffError ? d.appendChild(I("div", "weft-note weft-warn", `the step compare could not be read: ${t.stepDiffError}`)) : t.runID && t.sourceRunID && d.appendChild(I("div", "weft-note", "reading the step compare…", { "data-weft-step-diff-loading": "" }))), t.ready && t.folded.pending.length && t.runID && this.canAct(e) && d.appendChild(this.decisions(t.folded.pending, t.decided)), Ia(e, "steer") && this.canAct(e) && t.state === "accepted" && t.runID) {
-			let e = I("div", "weft-step");
-			e.appendChild(I("div", "weft-step-h", [I("span", void 0, "steer this run")]));
-			let t = I("div", "weft-step-b"), n = this.field(I("input", "weft-input"), "steer");
-			n.placeholder = "a message delivered mid-flight", n.value = this.scratch.get("steer") ?? "", L(n, "input", (e, t) => this.scratch.set("steer", t.value));
-			let r = I("button", "weft-btn", "steer", { title: "POST /api/runs/{id}/steer (ADR 0019)" });
-			L(r, "click", (e, t) => {
+		if (t.ready && Ja(e, "diff") && (t.stepDiff ? d.appendChild(Rr(t.stepDiff, this.base)) : t.stepDiffError ? d.appendChild(L("div", "weft-note weft-warn", `the step compare could not be read: ${t.stepDiffError}`)) : t.runID && t.sourceRunID && d.appendChild(L("div", "weft-note", "reading the step compare…", { "data-weft-step-diff-loading": "" }))), t.ready && t.folded.pending.length && t.runID && this.canAct(e) && d.appendChild(this.decisions(t.folded.pending, t.decided)), Ja(e, "steer") && this.canAct(e) && t.state === "accepted" && t.runID) {
+			let e = L("div", "weft-step");
+			e.appendChild(L("div", "weft-step-h", [L("span", void 0, "steer this run")]));
+			let t = L("div", "weft-step-b"), n = this.field(L("input", "weft-input"), "steer");
+			n.placeholder = "a message delivered mid-flight", n.value = this.scratch.get("steer") ?? "", R(n, "input", (e, t) => this.scratch.set("steer", t.value));
+			let r = L("button", "weft-btn", "steer", { title: "POST /api/runs/{id}/steer (ADR 0019)" });
+			R(r, "click", (e, t) => {
 				let n = t.parentElement?.querySelector("input");
 				n?.value && (this.go(this.model?.steer(n.value)), this.scratch.delete("steer"), n.value = "");
 			}), t.append(n, r), e.appendChild(t), d.appendChild(e);
@@ -6031,31 +6243,31 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 	}
 	diffInto(e, t, n, r) {
 		if ((n.split("\n").length + 1) * (r.split("\n").length + 1) > 25e4) {
-			e.appendChild(I("div", "weft-diff-h", `${t}  too large for the panel — compare in Studio`));
+			e.appendChild(L("div", "weft-diff-h", `${t}  too large for the panel — compare in Studio`));
 			return;
 		}
-		let i = hr(n, r);
-		e.appendChild(I("div", "weft-diff-h", `${t}  ${gr(i)}`));
-		for (let t of i) t.kind !== "same" && e.appendChild(I("div", `weft-diff-row weft-diff-${t.kind}`, `${t.kind === "add" ? "+" : "−"} ${t.text}`));
+		let i = Tr(n, r);
+		e.appendChild(L("div", "weft-diff-h", `${t}  ${Er(i)}`));
+		for (let t of i) t.kind !== "same" && e.appendChild(L("div", `weft-diff-row weft-diff-${t.kind}`, `${t.kind === "add" ? "+" : "−"} ${t.text}`));
 	}
 	decisions(e, t) {
-		let n = I("div", "weft-step");
-		n.appendChild(I("div", "weft-step-h", [I("span", void 0, "awaiting decision")]));
-		let r = I("div", "weft-step-b"), i = e.filter((e) => !t[e.id]).length;
-		i < e.length && r.appendChild(I("div", "weft-note", `waiting for ${i} more decision${i === 1 ? "" : "s"} — the run resumes once every parked call is decided`));
+		let n = L("div", "weft-step");
+		n.appendChild(L("div", "weft-step-h", [L("span", void 0, "awaiting decision")]));
+		let r = L("div", "weft-step-b"), i = e.filter((e) => !t[e.id]).length;
+		i < e.length && r.appendChild(L("div", "weft-note", `waiting for ${i} more decision${i === 1 ? "" : "s"} — the run resumes once every parked call is decided`));
 		let a = {
 			approve: "continue",
 			deny: "skip",
 			resolve: "resolve"
 		};
 		for (let n of e) {
-			let e = I("div", "weft-call", void 0, { "data-key": n.id }), i = I("div", "weft-call-h", [I("span", "weft-name", n.name), I("span", "weft-args", n.args === void 0 ? "(…)" : hn(n.args))]);
-			t[n.id] && i.appendChild(I("span", "weft-badge weft-info", `decided: ${a[t[n.id]] ?? t[n.id]}`)), e.appendChild(i);
-			let o = I("div", "weft-res"), s = `resolve:${n.id}`, c = this.field(I("input", "weft-input weft-resolve"), s);
-			c.placeholder = "the result to resolve with", c.value = this.scratch.get(s) ?? "", L(c, "input", (e, t) => this.scratch.set(s, t.value));
+			let e = L("div", "weft-call", void 0, { "data-key": n.id }), i = L("div", "weft-call-h", [L("span", "weft-name", n.name), L("span", "weft-args", n.args === void 0 ? "(…)" : Tn(n.args))]);
+			t[n.id] && i.appendChild(L("span", "weft-badge weft-info", `decided: ${a[t[n.id]] ?? t[n.id]}`)), e.appendChild(i);
+			let o = L("div", "weft-res"), s = `resolve:${n.id}`, c = this.field(L("input", "weft-input weft-resolve"), s);
+			c.placeholder = "the result to resolve with", c.value = this.scratch.get(s) ?? "", R(c, "input", (e, t) => this.scratch.set(s, t.value));
 			let l = (e, t, n) => {
-				let r = I("button", "weft-btn", e, { title: t });
-				return L(r, "click", (e, t) => n(t)), r;
+				let r = L("button", "weft-btn", e, { title: t });
+				return R(r, "click", (e, t) => n(t)), r;
 			};
 			o.append(l("continue", "Approve: the handler runs for real", () => this.go(this.model?.decide(n.id, "approve"))), l("skip", "Deny: the model sees a denied result", () => this.go(this.model?.decide(n.id, "deny"))), c, l("resolve…", "Resolve: the model sees the result typed here; the handler never runs", (e) => {
 				let t = e.parentElement?.querySelector(".weft-resolve");
@@ -6070,20 +6282,20 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 	}
 	turnView(e) {
 		let t = e.turn;
-		if (!t) return I("div");
-		let n = I("div");
+		if (!t) return L("div");
+		let n = L("div");
 		n.appendChild(this.notes(t));
 		let r = this.turnLinks(t);
 		r && n.appendChild(r);
-		let i = ai(t.transcript);
-		i && Ua(this.prompts, t.id, i, 500), i && n.appendChild(I("div", "weft-note", i));
-		let a = Nr(t.doc);
-		for (let e of a.filter(U)) n.appendChild(xo(e, a, t.transcript, {
+		let i = hi(t.transcript);
+		i && to(this.prompts, t.id, i, 500), i && n.appendChild(L("div", "weft-note", i));
+		let a = Ur(t.doc);
+		for (let e of a.filter(W)) n.appendChild(No(e, a, t.transcript, {
 			keys: this.openKeys,
 			scope: t.id
 		}));
 		let o = this.rowOf(t.id);
-		return n.appendChild(yo(t.folded, o?.status ?? t.doc?.status ?? "running", t, e.selectedStep, {
+		return n.appendChild(jo(t.folded, o?.status ?? t.doc?.status ?? "running", t, e.selectedStep, {
 			keys: this.openKeys,
 			scope: t.id
 		}, {
@@ -6092,7 +6304,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 			...this.canAct(e) ? { replay: {
 				runId: t.id,
 				agent: o?.agent,
-				max: lo(t.transcript)?.max ?? null,
+				max: So(t.transcript)?.max ?? null,
 				fork: !!(o?.session_id || t.doc?.session_id) && !(o?.parent_run_id || t.doc?.parent_run_id),
 				open: (e, n, r, i) => {
 					this.opener = i, this.go(this.model?.openExperiment(e, n, {
@@ -6106,8 +6318,8 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 	turnLinks(e) {
 		let t = this.rowOf(e.id), n = t?.session_id || e.doc?.session_id || "", r = t?.trace_id || e.doc?.trace_id || "";
 		if (!n && !r) return null;
-		let i = I("div", "weft-row2"), a = (e, t, n, r, i) => {
-			let a = I("a", "weft-chip", e, {
+		let i = L("div", "weft-row2"), a = (e, t, n, r, i) => {
+			let a = L("a", "weft-chip", e, {
 				href: t,
 				target: "_blank",
 				rel: "noopener",
@@ -6116,55 +6328,55 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 			});
 			return a.style.textDecoration = "none", a;
 		};
-		return n && i.appendChild(a(`session ${n}`, V(this.base, xr(n)), "the session in Studio", "data-weft-session-link", n)), r && i.appendChild(a(`trace ${r.slice(0, 8)}`, V(this.base, Sr(r)), `the OTel trace ${r} in Studio`, "data-weft-trace-link", r)), i;
+		return n && i.appendChild(a(`session ${n}`, H(this.base, jr(n)), "the session in Studio", "data-weft-session-link", n)), r && i.appendChild(a(`trace ${r.slice(0, 8)}`, H(this.base, Mr(r)), `the OTel trace ${r} in Studio`, "data-weft-trace-link", r)), i;
 	}
 	actions(e) {
 		let t = e.turn;
-		if (!t) return I("div");
-		let n = I("div", "weft-actions"), r = I("button", "weft-btn", "✎ Experiment", { title: "open the experiment drawer, pre-filled from the registered config" });
-		L(r, "click", () => this.go(this.model?.openExperiment(t.id, 0))), n.appendChild(r);
-		let i = I("button", "weft-btn", "↻ Re-run", { title: "re-run the whole turn: the drawer from step 0, with its current edits — Run after the ack" });
-		L(i, "click", () => this.go(this.model?.rerun(t.id))), n.appendChild(i);
-		let a = go(t.folded, e.selectedStep);
+		if (!t) return L("div");
+		let n = L("div", "weft-actions"), r = L("button", "weft-btn", "✎ Experiment", { title: "open the experiment drawer, pre-filled from the registered config" });
+		R(r, "click", () => this.go(this.model?.openExperiment(t.id, 0))), n.appendChild(r);
+		let i = L("button", "weft-btn", "↻ Re-run", { title: "re-run the whole turn: the drawer from step 0, with its current edits — Run after the ack" });
+		R(i, "click", () => this.go(this.model?.rerun(t.id))), n.appendChild(i);
+		let a = Oo(t.folded, e.selectedStep);
 		if (a > 0) {
-			let e = I("button", "weft-btn", `⎇ Continue from step ${a}`, { title: "keep the transcript through the previous step (edits apply) and run this step fresh" });
-			L(e, "click", () => this.go(this.model?.openExperiment(t.id, o(a)))), n.appendChild(e);
+			let e = L("button", "weft-btn", `⎇ Continue from step ${a}`, { title: "keep the transcript through the previous step (edits apply) and run this step fresh" });
+			R(e, "click", () => this.go(this.model?.openExperiment(t.id, o(a)))), n.appendChild(e);
 		}
 		return n;
 	}
 	notes(e) {
-		let t = I("div");
+		let t = L("div");
 		t.setAttribute("data-weft-turn-holes", "");
-		let n = mo(e, this.rowOf(e.id));
-		for (let e of n) t.appendChild(bn(e));
-		return e.capped && t.appendChild(I("div", "weft-note weft-warn", "a long run: the first 10000 events are shown — the whole story is in Studio (⤢)")), t;
+		let n = Eo(e, this.rowOf(e.id));
+		for (let e of n) t.appendChild(An(e));
+		return e.capped && t.appendChild(L("div", "weft-note weft-warn", "a long run: the first 10000 events are shown — the whole story is in Studio (⤢)")), t;
 	}
 	approvals(e, t) {
-		let n = I("div", "weft-step");
-		n.appendChild(I("div", "weft-step-h", [I("span", void 0, "awaiting decision (read-only)")]));
-		let r = I("div", "weft-step-b");
+		let n = L("div", "weft-step");
+		n.appendChild(L("div", "weft-step-h", [L("span", void 0, "awaiting decision (read-only)")]));
+		let r = L("div", "weft-step-b");
 		for (let n of e) {
-			let e = I("div", "weft-call", void 0, { "data-key": n.id });
-			e.appendChild(I("div", "weft-call-h", [
-				I("span", "weft-name", n.name),
-				I("span", "weft-args", n.args === void 0 ? "(…)" : hn(n.args)),
-				I("span", "weft-badge weft-info", "parked")
-			])), e.appendChild(I("div", "weft-res", t ? "an experiment's run — its decision controls are in the result pane of the turn that ran it" : "the app's own turns are viewer-only (PQ7) — decide from your app")), r.appendChild(e);
+			let e = L("div", "weft-call", void 0, { "data-key": n.id });
+			e.appendChild(L("div", "weft-call-h", [
+				L("span", "weft-name", n.name),
+				L("span", "weft-args", n.args === void 0 ? "(…)" : Tn(n.args)),
+				L("span", "weft-badge weft-info", "parked")
+			])), e.appendChild(L("div", "weft-res", t ? "an experiment's run — its decision controls are in the result pane of the turn that ran it" : "the app's own turns are viewer-only (PQ7) — decide from your app")), r.appendChild(e);
 		}
 		return n.appendChild(r), n;
 	}
 	footer(e) {
-		let t = [I("span", void 0, "prompts, args and results from your app, via your Studio")], n = Dn(e.turn, e.meta, 1e4);
-		n && t.push(I("span", "weft-cap", [document.createTextNode(` · ${n.text}`), I("span", "weft-sr", ` — ${n.title}`)], {
+		let t = [L("span", void 0, "prompts, args and results from your app, via your Studio")], n = Ln(e.turn, e.meta, 1e4);
+		n && t.push(L("span", "weft-cap", [document.createTextNode(` · ${n.text}`), L("span", "weft-sr", ` — ${n.title}`)], {
 			title: n.title,
 			"data-weft-cap": n.hole ?? ""
 		}));
 		let r = this.detectWord();
-		return t.push(I("span", "weft-detect", ` · detect: ${r}${this.rung?.chained ? " (chained)" : ""}${this.notRestored && !this.rung ? " (fetch not restored: patched after the panel)" : ""}`, { title: r.startsWith("url") ? "scope from the page URL's weft_scope" : r.includes("headers") || r === "markers" ? "reading Weft-Scope on same-origin fetches / data-weft-scope markers" : "scope from data-scope / window.__WEFT__" })), this.globalNote && t.push(I("span", "weft-global", ` · global: ${this.globalNote}`)), I("div", "weft-footer", t, { "data-key": "foot" });
+		return t.push(L("span", "weft-detect", ` · detect: ${r}${this.rung?.chained ? " (chained)" : ""}${this.notRestored && !this.rung ? " (fetch not restored: patched after the panel)" : ""}`, { title: r.startsWith("url") ? "scope from the page URL's weft_scope" : r.includes("headers") || r === "markers" ? "reading Weft-Scope on same-origin fetches / data-weft-scope markers" : "scope from data-scope / window.__WEFT__" })), this.globalNote && t.push(L("span", "weft-global", ` · global: ${this.globalNote}`)), L("div", "weft-footer", t, { "data-key": "foot" });
 	}
 	rawView(e) {
 		this.treeFor !== e.id && (this.tree = {
-			...zi(),
+			...Xi(),
 			q: this.tree.q,
 			applied: this.tree.applied
 		}, this.treeFor = e.id);
@@ -6188,7 +6400,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 					steps: Object.fromEntries(t.steps)
 				} } : {}
 			}
-		}), Zi(this.rawMemo.doc, this.tree, e.id.replace(/[\\/]/g, "_"), {
+		}), ca(this.rawMemo.doc, this.tree, e.id.replace(/[\\/]/g, "_"), {
 			redraw: () => {
 				this.isConnected && this.render(this.last);
 			},
@@ -6203,7 +6415,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 			keys: this.openKeys,
 			scope: t.id
 		};
-		return Fa({
+		return qa({
 			t,
 			step: this.stepNow(e),
 			running: r === "running",
@@ -6212,7 +6424,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 			keys: this.openKeys,
 			tree: (e) => {
 				let t = this.rqTrees.get(e);
-				return t || this.rqTrees.set(e, t = zi()), t;
+				return t || this.rqTrees.set(e, t = Xi()), t;
 			},
 			cx: {
 				redraw: n,
@@ -6221,26 +6433,26 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 			select: (e) => this.model?.selectStep(e),
 			pick: this.rqPick,
 			redraw: n,
-			compaction: (e) => xo(e, Nr(t.doc), t.transcript, i),
+			compaction: (e) => No(e, Ur(t.doc), t.transcript, i),
 			child: (n) => {
-				let r = n.childRunId ?? "", a = t.children.get(r), o = I("div", "weft-call", [I("div", "weft-call-h", [I("span", "weft-name", n.name, { title: r }), I("span", "weft-args", "subagent · step 0")])], {
+				let r = n.childRunId ?? "", a = t.children.get(r), o = L("div", "weft-call", [L("div", "weft-call-h", [L("span", "weft-name", n.name, { title: r }), L("span", "weft-args", "subagent · step 0")])], {
 					"data-key": `sub:${n.callId}`,
 					"data-weft-rq-child": r
 				});
-				return a ? o.appendChild(a.requests ? Co(0, a.requests, a.status, i) : I("div", "weft-req", Sn("not_recorded", {
+				return a ? o.appendChild(a.requests ? Fo(0, a.requests, a.status, i) : L("div", "weft-req", Mn("not_recorded", {
 					cause: "not_served",
 					reason: e.meta?.capabilities_off?.requests
-				}))) : t.unreachable.has(r) ? o.appendChild(I("div", "weft-reason", [I("span", void 0, "child's history unreachable · "), I("a", void 0, "open in Studio (⤢)", {
-					href: Ra(this.base, r),
+				}))) : t.unreachable.has(r) ? o.appendChild(L("div", "weft-reason", [L("span", void 0, "child's history unreachable · "), L("a", void 0, "open in Studio (⤢)", {
+					href: Xa(this.base, r),
 					target: "_blank",
 					rel: "noopener",
 					"data-weft-handoff": r
-				})])) : t.tried.has(r) ? o.appendChild(I("div", "weft-reason", "reading…")) : o.appendChild(L(I("button", "weft-btn", "read its turn", { type: "button" }), "click", () => this.go(this.model?.expandChild(r)))), o;
+				})])) : t.tried.has(r) ? o.appendChild(L("div", "weft-reason", "reading…")) : o.appendChild(R(L("button", "weft-btn", "read its turn", { type: "button" }), "click", () => this.go(this.model?.expandChild(r)))), o;
 			}
 		});
 	}
 	readManifest(e, t) {
-		if ($e(this.cfg.token) === "read") return null;
+		if (et(this.cfg.token) === "read") return null;
 		let n = `${this.base}\u0000${this.cfg.token}`;
 		this.mf?.key !== n && (this.mf = {
 			key: n,
@@ -6255,7 +6467,7 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 			let n = (t) => {
 				this.mf === r && (r.busy = !1, r.at = Date.now(), r.doc = t || r.doc || null, e());
 			};
-			B({
+			V({
 				base: this.base,
 				token: this.cfg.token
 			}, "manifest").then((e) => n(Array.isArray(e?.agents) ? e : null), () => n(null));
@@ -6265,20 +6477,20 @@ var ao = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 	rowOf(e) {
 		return this.model?.rowOf(e);
 	}
-}, so = {
+}, bo = {
 	from_step: "Replay from this step",
 	edit_result: "Edit this result and replay",
 	edit_prompt: "Edit the prompt and replay",
 	rerun: "Re-run",
 	continue: "Continue here with a new message"
 };
-function co(e, t, n, r = null, i = !1) {
+function xo(e, t, n, r = null, i = !1) {
 	if (!e) return n ? {
 		tools: null,
 		loading: !0
 	} : {
 		tools: null,
-		hole: An("the server has no request route")
+		hole: Bn("the server has no request route")
 	};
 	if (e.badge) return {
 		tools: null,
@@ -6290,27 +6502,27 @@ function co(e, t, n, r = null, i = !1) {
 	};
 	if (e.error) return {
 		tools: null,
-		hole: An(e.error)
+		hole: Bn(e.error)
 	};
 	let a = e.steps.get(t)?.rows, o = a?.[a.length - 1];
-	if (!o) return e.truncated && t > So(e) ? {
+	if (!o) return e.truncated && t > Po(e) ? {
 		tools: null,
-		hole: Nn(10 * $n)
+		hole: Un(10 * lr)
 	} : r !== null && t >= r ? {
 		tools: null,
-		hole: Mn()
+		hole: Hn()
 	} : i ? {
 		tools: null,
-		hole: Pn()
+		hole: Wn()
 	} : {
 		tools: null,
 		hole: {
 			hole: "gap",
-			reason: It
+			reason: Lt
 		}
 	};
 	let s = o.tools;
-	return s ? M(s) ? {
+	return s ? j(s) ? {
 		tools: null,
 		hole: { hole: s.badge }
 	} : { tools: s.tools } : o.catalog_hash ? {
@@ -6321,11 +6533,11 @@ function co(e, t, n, r = null, i = !1) {
 		none: !0
 	};
 }
-function lo(e) {
-	return e ? cn(e.batches) : null;
+function So(e) {
+	return e ? ln(e.batches) : null;
 }
 function Q(e, t, n, r) {
-	let i = I("button", "weft-verb", void 0, {
+	let i = L("button", "weft-verb", void 0, {
 		type: "button",
 		"aria-label": e,
 		title: e,
@@ -6333,46 +6545,46 @@ function Q(e, t, n, r) {
 		"data-weft-verb": n.verb,
 		"data-key": `v:${n.verb}`
 	});
-	return L(i, "click", (e, t) => {
+	return R(i, "click", (e, t) => {
 		e.stopPropagation(), r.open(r.runId, n, r.agent, t);
-	}), L(i, "keydown", (e) => {
+	}), R(i, "keydown", (e) => {
 		let t = e.key;
 		(t === "Enter" || t === " ") && e.stopPropagation();
 	}), i;
 }
-var uo = (e, t) => I("span", "weft-verbs", t, {
+var Co = (e, t) => L("span", "weft-verbs", t, {
 	"data-weft-verbs": e,
 	"data-key": `verbs:${e}`
 });
-function fo(e, t) {
+function wo(e, t) {
 	let n = [
 		Q(`replay from this step (step ${e})`, "↦", o(e), t),
 		Q(`edit the prompt and replay (step ${e})`, "✎", c(e), t),
 		Q("re-run the whole turn", "↻", l(), t)
 	];
-	return t.fork && n.push(Q("continue here with a new message", "⎇", u(), t)), uo("step", n);
+	return t.fork && n.push(Q("continue here with a new message", "⎇", u(), t)), Co("step", n);
 }
-function po(e, t, n) {
+function To(e, t, n) {
 	let r = [];
-	return t.result && t.callId && n.max !== null && e + 1 <= n.max && r.push(Q(`edit this result and replay (call ${t.callId})`, "✎", s(e, t.callId, String(t.result.content)), n)), r.push(Q(`replay from this step (call ${t.callId}, step ${e})`, "↦", o(e), n)), uo("call", r);
+	return t.result && t.callId && n.max !== null && e + 1 <= n.max && r.push(Q(`edit this result and replay (call ${t.callId})`, "✎", s(e, t.callId, String(t.result.content)), n)), r.push(Q(`replay from this step (call ${t.callId}, step ${e})`, "↦", o(e), n)), Co("call", r);
 }
-function mo(e, t) {
-	return k(en(e.doc, e.folded), ct({
+function Eo(e, t) {
+	return O(tn(e.doc, e.folded), lt({
 		status: t?.status ?? e.doc?.status,
 		stop_reason: t?.stop_reason ?? e.doc?.stop_reason,
 		gaps: e.gaps
 	}));
 }
-function ho(e) {
+function Do(e) {
 	if (e.selectedStep != null) return e.selectedStep;
 	let t = e.turn;
 	if (t && t.id === e.selected) return ([...e.turns, ...[...e.experiments.values()].flat()].find((e) => e.id === t.id)?.status ?? t.doc?.status) === "running" ? t.folded.steps.at(-1)?.index : void 0;
 }
-function go(e, t) {
+function Oo(e, t) {
 	return t != null && e.steps.some((e) => e.index === t) ? t : -1;
 }
-function _o(e) {
-	let t = e.spans ?? [], n = gn(t), r = _n(t), i = "time", a = 0;
+function ko(e) {
+	let t = e.spans ?? [], n = En(t), r = Dn(t), i = "time", a = 0;
 	if (r.length) a = n.to - n.from;
 	else {
 		i = "seq";
@@ -6395,9 +6607,9 @@ function _o(e) {
 		}
 		for (let [e, r] of t.values()) n(e, r, a);
 	}
-	let o = I("div", "weft-timeline", void 0, { "data-axis": i }), s = t.length - n.placed;
-	if (s > 0 && o.appendChild(I("div", "weft-note weft-warn", `${s} span${s === 1 ? "" : "s"} not placed: unreadable times, or an end before the start`)), !r.length) return o.appendChild(I("div", "weft-note", "nothing to place yet: no spans and no steps")), o;
-	let c = I("div", "weft-axis");
+	let o = L("div", "weft-timeline", void 0, { "data-axis": i }), s = t.length - n.placed;
+	if (s > 0 && o.appendChild(L("div", "weft-note weft-warn", `${s} span${s === 1 ? "" : "s"} not placed: unreadable times, or an end before the start`)), !r.length) return o.appendChild(L("div", "weft-note", "nothing to place yet: no spans and no steps")), o;
+	let c = L("div", "weft-axis");
 	for (let e of [
 		0,
 		.25,
@@ -6405,125 +6617,125 @@ function _o(e) {
 		.75,
 		1
 	]) {
-		let t = Math.round(a * e), n = I("span", "weft-tick", i === "time" ? `${t} ms` : `seq ${t}`);
+		let t = Math.round(a * e), n = L("span", "weft-tick", i === "time" ? `${t} ms` : `seq ${t}`);
 		n.style.left = `${e * 100}%`, c.appendChild(n);
 	}
-	return o.appendChild(I("div", "weft-wf-row", [
-		I("span", "weft-wf-name", i === "time" ? "time (ms)" : "seq"),
+	return o.appendChild(L("div", "weft-wf-row", [
+		L("span", "weft-wf-name", i === "time" ? "time (ms)" : "seq"),
 		c,
-		I("span", "weft-wf-ms")
-	])), o.appendChild(vo(r)), o;
+		L("span", "weft-wf-ms")
+	])), o.appendChild(Ao(r)), o;
 }
-function vo(e) {
-	let t = I("div", "weft-wf");
+function Ao(e) {
+	let t = L("div", "weft-wf");
 	for (let n of e) {
-		let e = I("div", "weft-wf-row");
-		e.appendChild(I("span", "weft-wf-name", n.name, { title: n.name }));
-		let r = I("span", "weft-wf-track"), i = I("span", "weft-wf-bar");
-		i.style.left = `${(n.left * 100).toFixed(2)}%`, i.style.width = `${(n.width * 100).toFixed(2)}%`, r.appendChild(i), e.appendChild(r), e.appendChild(I("span", "weft-wf-ms", n.label ?? `${n.ms}ms`)), t.appendChild(e);
+		let e = L("div", "weft-wf-row");
+		e.appendChild(L("span", "weft-wf-name", n.name, { title: n.name }));
+		let r = L("span", "weft-wf-track"), i = L("span", "weft-wf-bar");
+		i.style.left = `${(n.left * 100).toFixed(2)}%`, i.style.width = `${(n.width * 100).toFixed(2)}%`, r.appendChild(i), e.appendChild(r), e.appendChild(L("span", "weft-wf-ms", n.label ?? `${n.ms}ms`)), t.appendChild(e);
 	}
 	return t;
 }
-function yo(e, t, n, r, i, a) {
-	let o = I("div");
-	e.model?.name && o.appendChild(I("div", "weft-reason", `${e.model.provider}/${e.model.name}`));
+function jo(e, t, n, r, i, a) {
+	let o = L("div");
+	e.model?.name && o.appendChild(L("div", "weft-reason", `${e.model.provider}/${e.model.name}`));
 	let s = t === "running" && !a?.child ? e.steps.at(-1) : void 0;
-	for (let c of e.steps) o.appendChild(bo(c, t, n, r, i, a, c === s));
+	for (let c of e.steps) o.appendChild(Mo(c, t, n, r, i, a, c === s));
 	return o;
 }
-function bo(e, t, n, r, i, a, s = !1) {
-	let c = I("div", "weft-step", void 0, { "data-key": `s${e.index}` });
+function Mo(e, t, n, r, i, a, s = !1) {
+	let c = L("div", "weft-step", void 0, { "data-key": `s${e.index}` });
 	c.setAttribute("data-weft-step", String(e.index)), r === e.index && (c.style.outline = "1px solid var(--weft-accent)");
-	let l = I("div", "weft-step-h", [I("span", void 0, `step ${e.index}`), I("span", "weft-grow")]), u = a?.child ? a.child.requests : n?.requests, d = u?.steps.get(e.index)?.rows ?? [], f = !u?.error && (!u?.truncated || e.index < So(u));
-	e.finish && (l.appendChild(I("span", void 0, e.finish.reason)), l.appendChild(I("span", void 0, jo(e.finish.usage))));
-	let p = f ? Vr(Br(d, !!e.finish || e.toolCalls.length > 0, t === "running")) : null;
-	if (p && l.appendChild(I("span", "weft-badge weft-info", p, { "data-weft-attempts": "" })), e.finish) {
-		let t = Ur(e.finish.latencyMs, e.finish.ttftMs, "ttft");
-		t && l.appendChild(I("span", void 0, t, { "data-weft-timing": "" }));
+	let l = L("div", "weft-step-h", [L("span", void 0, `step ${e.index}`), L("span", "weft-grow")]), u = a?.child ? a.child.requests : n?.requests, d = u?.steps.get(e.index)?.rows ?? [], f = !u?.error && (!u?.truncated || e.index < Po(u));
+	e.finish && (l.appendChild(L("span", void 0, e.finish.reason)), l.appendChild(L("span", void 0, Uo(e.finish.usage))));
+	let p = f ? Zr(Xr(d, !!e.finish || e.toolCalls.length > 0, t === "running")) : null;
+	if (p && l.appendChild(L("span", "weft-badge weft-info", p, { "data-weft-attempts": "" })), e.finish) {
+		let t = $r(e.finish.latencyMs, e.finish.ttftMs, "ttft");
+		t && l.appendChild(L("span", void 0, t, { "data-weft-timing": "" }));
 	}
-	let m = $t(e, a?.child ? a.child.doc?.holes : n?.doc?.holes), h = f ? Wr(e.finish, d.length) : null, g = yn(h ? k(m, [h]) : m);
-	g && l.appendChild(g), a?.replay && l.appendChild(fo(e.index, a.replay)), c.appendChild(l);
-	let _ = I("div", "weft-step-b"), v = Nr(a?.child ? a.child.doc : n?.doc);
-	for (let t of v) !U(t) && t.step === e.index && _.appendChild(xo(t, v, a?.child ? a.child.transcript : n?.transcript, i));
-	if (u && _.appendChild(Co(e.index, u, t, i)), e.reasoning) {
-		let t = I("details", "weft-collapsible");
+	let m = en(e, a?.child ? a.child.doc?.holes : n?.doc?.holes), h = f ? ei(e.finish, d.length) : null, g = kn(h ? O(m, [h]) : m);
+	g && l.appendChild(g), a?.replay && l.appendChild(wo(e.index, a.replay)), c.appendChild(l);
+	let _ = L("div", "weft-step-b"), v = Ur(a?.child ? a.child.doc : n?.doc);
+	for (let t of v) !W(t) && t.step === e.index && _.appendChild(No(t, v, a?.child ? a.child.transcript : n?.transcript, i));
+	if (u && _.appendChild(Fo(e.index, u, t, i)), e.reasoning) {
+		let t = L("details", "weft-collapsible");
 		if (i) {
 			let n = `${i.scope}\u0000reasoning\u0000${e.index}`;
 			t.setAttribute("data-weft-open", n), i.keys.has(n) && t.setAttribute("open", "");
 		}
-		t.appendChild(I("summary", void 0, "reasoning")), t.appendChild(I("div", void 0, e.reasoning)), _.appendChild(t);
+		t.appendChild(L("summary", void 0, "reasoning")), t.appendChild(L("div", void 0, e.reasoning)), _.appendChild(t);
 	}
-	if (s ? _.appendChild(I("div", "weft-stream", e.text, {
+	if (s ? _.appendChild(L("div", "weft-stream", e.text, {
 		"aria-live": "polite",
 		"aria-busy": "true"
-	})) : e.text && _.appendChild(I("div", void 0, e.text)), e.steer) {
-		let t = I("div", "weft-note", `steered: ${e.steer.text}`, { "data-key": "steer" }), n = e.index + 1, r = a?.replay?.max;
-		a?.replay && r != null && n <= r && t.appendChild(uo("steer", [Q(`replay from this steer (step ${n} runs fresh)`, "↦", o(n), a.replay)])), _.appendChild(t);
+	})) : e.text && _.appendChild(L("div", void 0, e.text)), e.steer) {
+		let t = L("div", "weft-note", `steered: ${e.steer.text}`, { "data-key": "steer" }), n = e.index + 1, r = a?.replay?.max;
+		a?.replay && r != null && n <= r && t.appendChild(Co("steer", [Q(`replay from this steer (step ${n} runs fresh)`, "↦", o(n), a.replay)])), _.appendChild(t);
 	}
-	for (let r of e.toolCalls) _.appendChild(wo(r, e.index, t, n, i, a));
+	for (let r of e.toolCalls) _.appendChild(Io(r, e.index, t, n, i, a));
 	return c.appendChild(_), c;
 }
-function xo(e, t, n, r) {
-	let i = U(e), a = I("div", "weft-note");
+function No(e, t, n, r) {
+	let i = W(e), a = L("div", "weft-note");
 	a.setAttribute("data-weft-compaction", i ? "session" : String(e.step ?? ""));
-	let o = I("div", "weft-call-h", [I("span", "weft-name", i ? Fr : "compaction"), I("span", "weft-args", Pr(e))]), s = yn([{ hole: "compacted" }]);
+	let o = L("div", "weft-call-h", [L("span", "weft-name", i ? Gr : "compaction"), L("span", "weft-args", Wr(e))]), s = kn([{ hole: "compacted" }]);
 	s && o.appendChild(s), a.appendChild(o);
-	let c = I("details", "weft-collapsible");
+	let c = L("details", "weft-collapsible");
 	if (r) {
 		let t = `${r.scope}\u0000compaction\u0000${i ? `session\u0000${e.hash}` : `view\u0000${e.index ?? ""}`}`;
 		c.setAttribute("data-weft-open", t), r.keys.has(t) && c.setAttribute("open", "");
 	}
-	if (c.appendChild(I("summary", void 0, "show original")), i) c.appendChild(I("div", "weft-res", Ir(e)));
+	if (c.appendChild(L("summary", void 0, "show original")), i) c.appendChild(L("div", "weft-res", Kr(e)));
 	else {
-		let r = Lr(e, n, t);
-		if ("loading" in r) c.appendChild(I("div", "weft-res", "loading the transcript…"));
+		let r = qr(e, n, t);
+		if ("loading" in r) c.appendChild(L("div", "weft-res", "loading the transcript…"));
 		else if ("gap" in r) {
-			let e = yn([{
+			let e = kn([{
 				hole: "gap",
 				reason: r.gap
 			}]);
-			e && c.appendChild(e), c.appendChild(I("div", "weft-reason", r.gap));
-		} else if (!r.messages.length) c.appendChild(I("div", "weft-res", `nothing replaced: inserted at message ${r.from}`));
-		else for (let [e, t] of r.messages.entries()) c.appendChild(I("div", "weft-res", Rr(t), { "data-weft-original": String(r.from + e) }));
-		c.appendChild(I("div", "weft-reason", zr(e)));
+			e && c.appendChild(e), c.appendChild(L("div", "weft-reason", r.gap));
+		} else if (!r.messages.length) c.appendChild(L("div", "weft-res", `nothing replaced: inserted at message ${r.from}`));
+		else for (let [e, t] of r.messages.entries()) c.appendChild(L("div", "weft-res", Jr(t), { "data-weft-original": String(r.from + e) }));
+		c.appendChild(L("div", "weft-reason", Yr(e)));
 	}
 	return a.appendChild(c), a;
 }
-function So(e) {
+function Po(e) {
 	let t = -1;
 	for (let n of e.steps.keys()) n > t && (t = n);
 	return t;
 }
-function Co(e, t, n, r) {
-	let i = I("div", "weft-req");
-	if (i.setAttribute("data-weft-request", String(e)), t.badge) return i.append(...Sn(t.badge, {
+function Fo(e, t, n, r) {
+	let i = L("div", "weft-req");
+	if (i.setAttribute("data-weft-request", String(e)), t.badge) return i.append(...Mn(t.badge, {
 		reason: t.reason,
 		fix: t.fix
 	})), i;
-	if (t.error) return i.appendChild(I("span", "weft-badge weft-err", `request could not be read: ${t.error}`)), i;
+	if (t.error) return i.appendChild(L("span", "weft-badge weft-err", `request could not be read: ${t.error}`)), i;
 	let a = t.steps.get(e), o = a?.rows[a.rows.length - 1];
-	if (!a || !o) return i.appendChild(n !== "running" && t.truncated ? Cn(10 * $n) : n === "running" ? I("span", "weft-res", `request: ${Vt}`) : I("span", void 0, Sn("gap", { reason: It }))), i;
-	let s = I("div", "weft-call-h", [I("span", "weft-name", "request"), I("span", "weft-args", a.rows.map((e) => `attempt ${e.attempt}`).join(" · "))]);
-	a.promptChanged && s.appendChild(I("span", "weft-badge weft-info", "prompt changed at this step")), a.catalogChanged && s.appendChild(I("span", "weft-badge weft-info", "catalog changed at this step")), o.content && o.content !== "stripped" && s.appendChild(R(o.content)), i.appendChild(s), o.content === "stripped" && i.append(...Sn("stripped"));
+	if (!a || !o) return i.appendChild(n !== "running" && t.truncated ? Nn(10 * lr) : n === "running" ? L("span", "weft-res", `request: ${Ht}`) : L("span", void 0, Mn("gap", { reason: Lt }))), i;
+	let s = L("div", "weft-call-h", [L("span", "weft-name", "request"), L("span", "weft-args", a.rows.map((e) => `attempt ${e.attempt}`).join(" · "))]);
+	a.promptChanged && s.appendChild(L("span", "weft-badge weft-info", "prompt changed at this step")), a.catalogChanged && s.appendChild(L("span", "weft-badge weft-info", "catalog changed at this step")), o.content && o.content !== "stripped" && s.appendChild(z(o.content)), i.appendChild(s), o.content === "stripped" && i.append(...Mn("stripped"));
 	let c = o.prompt;
-	if (c && !M(c)) {
-		let t = I("details", "weft-collapsible");
+	if (c && !j(c)) {
+		let t = L("details", "weft-collapsible");
 		if (r) {
 			let n = `${r.scope}\u0000request\u0000${e}`;
 			t.setAttribute("data-weft-open", n), r.keys.has(n) && t.setAttribute("open", "");
 		}
 		let n = c.text;
-		t.appendChild(I("summary", void 0, `system prompt · ${n.length} chars`)), t.appendChild(I("div", "weft-res", n)), i.appendChild(t);
+		t.appendChild(L("summary", void 0, `system prompt · ${n.length} chars`)), t.appendChild(L("div", "weft-res", n)), i.appendChild(t);
 	} else if (o.system_hash) {
-		let e = I("div", "weft-res", `system prompt ${N(o.system_hash)}`);
-		c && e.append(" · ", R(c.badge)), i.appendChild(e);
+		let e = L("div", "weft-res", `system prompt ${M(o.system_hash)}`);
+		c && e.append(" · ", z(c.badge)), i.appendChild(e);
 	}
 	let l = o.body.tools.names;
-	return i.appendChild(I("div", "weft-res", `tools: ${l.length ? l.join(", ") : "none"}`)), i.appendChild(I("div", "weft-res", `params: ${Pt(o)}`)), i;
+	return i.appendChild(L("div", "weft-res", `tools: ${l.length ? l.join(", ") : "none"}`)), i.appendChild(L("div", "weft-res", `params: ${Ft(o)}`)), i;
 }
-function wo(e, t, n, r, i, a) {
-	let o = I("div", "weft-call", void 0, { "data-key": e.callId }), s = tn(e, n), c = a?.runId, u = I("div", "weft-call-h", [a?.endpoint && c ? I("a", "weft-name", e.name, {
-		href: V(a.endpoint, br(c, {
+function Io(e, t, n, r, i, a) {
+	let o = L("div", "weft-call", void 0, { "data-key": e.callId }), s = nn(e, n), c = a?.runId, u = L("div", "weft-call-h", [a?.endpoint && c ? L("a", "weft-name", e.name, {
+		href: H(a.endpoint, Ar(c, {
 			step: t,
 			call: e.callId,
 			resumed: e.resumed
@@ -6532,57 +6744,57 @@ function wo(e, t, n, r, i, a) {
 		rel: "noopener",
 		title: `open this call in Studio (step ${t})`,
 		"data-weft-call-link": e.callId
-	}) : I("span", "weft-name", e.name), I("span", "weft-args", Ao(e))]);
+	}) : L("span", "weft-name", e.name), L("span", "weft-args", Ho(e))]);
 	o.appendChild(u);
 	let d = a?.replay;
 	if (e.childRunId && (r || a?.child)) {
-		if (u.appendChild(a?.endpoint ? I("a", "weft-badge weft-info", "subagent", {
-			href: Ra(a.endpoint, e.childRunId),
+		if (u.appendChild(a?.endpoint ? L("a", "weft-badge weft-info", "subagent", {
+			href: Xa(a.endpoint, e.childRunId),
 			target: "_blank",
 			rel: "noopener",
 			title: e.childRunId,
 			"data-weft-subagent-link": e.childRunId
-		}) : I("span", "weft-badge weft-info", "subagent", { title: e.childRunId })), a?.child) a.endpoint && u.appendChild(Do(a.endpoint, e.childRunId));
+		}) : L("span", "weft-badge weft-info", "subagent", { title: e.childRunId })), a?.child) a.endpoint && u.appendChild(zo(a.endpoint, e.childRunId));
 		else if (r) {
 			if (d) {
 				let t = r.doc?.children.find((t) => t.id === e.childRunId)?.agent ?? "";
-				u.appendChild(uo("child", [Q(`replay the child run ${e.childRunId} (agent ${t || "unnamed"})`, "↻", l(), {
+				u.appendChild(Co("child", [Q(`replay the child run ${e.childRunId} (agent ${t || "unnamed"})`, "↻", l(), {
 					...d,
 					runId: e.childRunId,
 					agent: t,
 					fork: !1
 				})]));
 			}
-			o.appendChild(Eo(e.childRunId, r, i, a?.endpoint, d));
+			o.appendChild(Ro(e.childRunId, r, i, a?.endpoint, d));
 		}
 	}
-	if (d && u.appendChild(po(t, e, d)), e.result) {
-		let t = To(r, e);
-		t && u.appendChild(I("span", "weft-badge weft-info", t));
-		let n = on(String(e.result.content));
-		n && u.appendChild(wn(n)), e.result.isError && u.appendChild(I("span", "weft-badge weft-err", "error"));
-		let i = yn(e.holes ?? []);
-		i && u.appendChild(i), o.appendChild(I("div", "weft-res", e.result.content));
-	} else s === "running" ? o.appendChild(I("div", "weft-res", "running…")) : o.appendChild(I("div", "weft-res weft-warn", "never completed"));
+	if (d && u.appendChild(To(t, e, d)), e.result) {
+		let t = Lo(r, e);
+		t && u.appendChild(L("span", "weft-badge weft-info", t));
+		let n = sn(String(e.result.content));
+		n && u.appendChild(Pn(n)), e.result.isError && u.appendChild(L("span", "weft-badge weft-err", "error"));
+		let i = kn(e.holes ?? []);
+		i && u.appendChild(i), o.appendChild(L("div", "weft-res", e.result.content));
+	} else s === "running" ? o.appendChild(L("div", "weft-res", "running…")) : o.appendChild(L("div", "weft-res weft-warn", "never completed"));
 	return o;
 }
-function To(e, t) {
+function Lo(e, t) {
 	if (!e?.spans) return "";
 	let n = e.spans.filter((e) => e.name === "execute_tool"), r = n.find((e) => e.attrs["gen_ai.tool.call.id"] === t.callId) ?? n.find((e) => e.attrs["gen_ai.tool.call.id"] === void 0 && e.attrs["gen_ai.tool.name"] === t.name);
 	if (!r) return "";
 	let i = Date.parse(r.end) - Date.parse(r.start);
 	return !Number.isFinite(i) || i < 0 ? "" : `${Math.round(i)}ms`;
 }
-function Eo(e, t, n, r, i) {
-	let a = t.children.get(e), o = t.doc?.children.find((t) => t.id === e), s = I("details", "weft-collapsible");
+function Ro(e, t, n, r, i) {
+	let a = t.children.get(e), o = t.doc?.children.find((t) => t.id === e), s = L("details", "weft-collapsible");
 	s.setAttribute("data-weft-child", e), t.expanded.has(e) && s.setAttribute("open", "");
-	let c = I("summary", void 0, o ? `subagent ${o.agent || $(e)} · ${o.status} · ${lt(o.status) ? jo(o.usage) : o.status === "running" ? ut : "—"}` : `subagent ${$(e)}`);
+	let c = L("summary", void 0, o ? `subagent ${o.agent || $(e)} · ${o.status} · ${ut(o.status) ? Uo(o.usage) : o.status === "running" ? dt : "—"}` : `subagent ${$(e)}`);
 	c.setAttribute("aria-expanded", String(t.expanded.has(e)));
-	let l = o && yn(a?.doc?.holes ?? st(o));
-	if (l && c.appendChild(l), s.appendChild(c), r && s.appendChild(Do(r, e)), !a) s.appendChild(I("div", void 0, "loading the subagent's turn…"));
+	let l = o && kn(a?.doc?.holes ?? ct(o));
+	if (l && c.appendChild(l), s.appendChild(c), r && s.appendChild(zo(r, e)), !a) s.appendChild(L("div", void 0, "loading the subagent's turn…"));
 	else {
 		let t = o?.status ?? "succeeded";
-		s.appendChild(yo(a.folded, t, void 0, void 0, n && {
+		s.appendChild(jo(a.folded, t, void 0, void 0, n && {
 			keys: n.keys,
 			scope: e
 		}, {
@@ -6593,16 +6805,16 @@ function Eo(e, t, n, r, i) {
 				...i,
 				runId: e,
 				agent: o?.agent ?? "",
-				max: lo(a.transcript)?.max ?? null,
+				max: So(a.transcript)?.max ?? null,
 				fork: !1
 			} } : {}
-		})), a.capped && s.appendChild(I("div", "weft-note weft-warn", "a long run: its first events are shown"));
+		})), a.capped && s.appendChild(L("div", "weft-note weft-warn", "a long run: its first events are shown"));
 	}
 	return s;
 }
-function Do(e, t) {
-	return I("a", "weft-btn", "open in Studio ⤢", {
-		href: Ra(e, t),
+function zo(e, t) {
+	return L("a", "weft-btn", "open in Studio ⤢", {
+		href: Xa(e, t),
 		target: "_blank",
 		rel: "noopener",
 		title: `open the child run ${t} in Studio`,
@@ -6613,19 +6825,19 @@ function $(e) {
 	let t = e.split("/");
 	return t[t.length - 1] || e;
 }
-function Oo(e, t, n) {
+function Bo(e, t, n) {
 	let r = {};
 	if (t) {
 		t.runId && (r.run = t.runId), n != null && n > 0 && (r.step = n), t.instructions && t.instructions !== t.registeredInstructions && (r.instructions = t.instructions);
 		let e = Object.entries(t.tools).filter(([, e]) => e).map(([e]) => e);
 		e.length && e.length < Object.keys(t.tools).length && (r.tools = e.join(",")), t.model && (r.model = t.model), t.thinking && (r.thinking = t.thinking), t.input && t.step === 0 && (r.input = t.input), t.engine === "scripted" && (r.engine = t.engine), t.sideEffects && t.sideEffects !== "substitute" && (r.side_effects = t.sideEffects), t.thread === "fork" && (r.thread = t.thread), t.agent && (r.agent = t.agent), t.runtimeId && (r.runtime = t.runtimeId);
 	}
-	return V(e, Cr(r));
+	return H(e, Nr(r));
 }
-function ko(e) {
+function Vo(e) {
 	return e.split("·")[0] || e;
 }
-function Ao(e) {
+function Ho(e) {
 	if (e.args !== void 0) try {
 		return `(${JSON.stringify(e.args)})`;
 	} catch {
@@ -6633,13 +6845,13 @@ function Ao(e) {
 	}
 	return e.streamedArgs ? `(${e.streamedArgs}…)` : "(…)";
 }
-function jo(e) {
-	let t = [`${H(e.input_tokens)}→${H(e.output_tokens)} tok`];
-	return e.cached_input_tokens && t.push(`${H(e.cached_input_tokens)} cached`), e.reasoning_tokens && t.push(`${H(e.reasoning_tokens)} reasoning`), e.cache_write_tokens && t.push(`${H(e.cache_write_tokens)} cache-write`), t.join(" · ");
+function Uo(e) {
+	let t = [`${U(e.input_tokens)}→${U(e.output_tokens)} tok`];
+	return e.cached_input_tokens && t.push(`${U(e.cached_input_tokens)} cached`), e.reasoning_tokens && t.push(`${U(e.reasoning_tokens)} reasoning`), e.cache_write_tokens && t.push(`${U(e.cache_write_tokens)} cache-write`), t.join(" · ");
 }
 //#endregion
 //#region src/panel/main.ts
-function Mo() {
+function Wo() {
 	let e = () => {
 		try {
 			for (let e of Array.from(document.querySelectorAll("weft-devtools"))) e.rescan?.();
@@ -6670,27 +6882,27 @@ function Mo() {
 		});
 	} catch {}
 }
-function No() {
+function Go() {
 	let e = document.createElement("weft-devtools");
 	e.autoMounted = !0, document.body?.appendChild(e);
 }
-function Po() {
-	if (customElements.get("weft-devtools") || customElements.define("weft-devtools", oo), document.readyState === "loading") {
+function Ko() {
+	if (customElements.get("weft-devtools") || customElements.define("weft-devtools", yo), document.readyState === "loading") {
 		document.addEventListener("DOMContentLoaded", () => {
 			try {
-				Fo();
+				qo();
 			} catch {}
 		}, { once: !0 });
 		return;
 	}
-	Fo();
+	qo();
 }
-function Fo() {
-	Mo();
-	let e = We();
-	document.querySelector("weft-devtools") || (e.auto || et()) && No();
+function qo() {
+	Wo();
+	let e = Ge();
+	document.querySelector("weft-devtools") || (e.auto || tt()) && Go();
 }
 try {
-	Po();
+	Ko();
 } catch {}
 //#endregion

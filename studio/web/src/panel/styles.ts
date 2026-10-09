@@ -248,6 +248,12 @@ details.weft-collapsible[open] > summary::before { content: "\\25BE "; }
 textarea.weft-input { resize: vertical; }
 select.weft-input { width: auto; min-width: 120px; }
 .weft-fields { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 7px; }
+.weft-lab { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 4px 6px; }
+.weft-lab > span, .weft-lab > .weft-note, .weft-lab > [role=group], .weft-lab > .weft-lab-p { grid-column: 1 / -1; }
+.weft-lab-k > span { display: block; font-size: 11px; }
+.weft-lab .weft-input { width: 100%; min-width: 0; }
+.weft-ovr, .weft-ovr.weft-input { color: var(--weft-accent); border-color: var(--weft-accent); }
+.weft-lab-p { color: var(--weft-err); font-size: 11px; }
 .weft-tool { display: inline-flex; gap: 4px; align-items: baseline; margin-right: 10px;
   color: var(--weft-fg); cursor: pointer; }
 .weft-edit { display: block; margin: 3px 0; color: var(--weft-dim); }

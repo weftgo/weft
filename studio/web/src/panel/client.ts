@@ -5,6 +5,7 @@
 // points it at an embedded Studio, the local binary or a hosted one
 // (§3) — while the app's own api.ts resolves against its document.
 import type {
+  AgentDefaults,
   EventsPage,
   Holed,
   Meta,
@@ -241,6 +242,11 @@ export interface ToolView {
 export interface AgentView {
   name: string
   models: string[]
+  /** The app holds a runtime.ModelResolver (plan F3): any model name
+   * may be proposed; the runtime decides before its ack. */
+  resolver?: boolean
+  /** The run defaults the option lab greys (absent: an old runtime). */
+  defaults?: AgentDefaults
   tools: ToolView[]
   /** The agent's registered system prompt (the drawer pre-fills from
    * the code's own words, not a guess from the trace). */

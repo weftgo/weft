@@ -76,7 +76,7 @@ func TestAssembleStep(t *testing.T) {
 		t.Errorf("last attempt = %+v %v, want the plain ref of 3", sm, err)
 	}
 	// A count the records do not rebuild: a growth record is missing.
-	if _, err := AssembleStep(batches[:2], reqs, cs, 2); !errors.Is(err, ErrStepMessages) {
+	if _, err := AssembleStep(batches[:2], reqs, cs, 2); !isHole(err, HoleGap) {
 		t.Errorf("missing growth = %v, want ErrStepMessages", err)
 	}
 	// No request records (a run before ADR 0028): the cut rule.
@@ -93,7 +93,36 @@ func TestAssembleStep(t *testing.T) {
 	// A view that does not fit is ErrStepMessages, never a guess.
 	bad := view
 	bad.ToSeq = 9
-	if _, err := AssembleStep(batches, reqs, []Compaction{bad}, 1); !errors.Is(err, ErrStepMessages) {
-		t.Errorf("unfit view = %v, want ErrStepMessages", err)
+	if _, err := AssembleStep(batches, reqs, []Compaction{bad}, 1); !isHole(err, HoleGap) {
+		t.Errorf("unfit view = %v, want ErrStepMessages (gap)", err)
 	}
+	// The growth record a plain ref names must be stored: a lost view
+	// (here: step 1's request names index 3, and the view is gone with
+	// the count still matching a 1:1 replacement) never passes as the
+	// original transcript.
+	lost := []RequestRecord{req(1, 1, 3, 3)}
+	if _, err := AssembleStep(batches, lost, nil, 1); !isHole(err, HoleGap) {
+		t.Errorf("a ref to an unstored record = %v, want ErrStepMessages (gap)", err)
+	}
+	// A rewritten request whose view the core could not build: no index,
+	// unstripped, messages captured — the growth is not what it saw.
+	rewrote := []RequestRecord{{Index: 1, Step: 1, Body: RequestBody{MessagesRef: RequestMessagesRef{Count: 2}}}}
+	if _, err := AssembleStep(batches, rewrote, nil, 1); !isHole(err, HoleGap) {
+		t.Errorf("rewritten without a view = %v, want ErrStepMessages (gap)", err)
+	}
+	// ...but a step-0 request of a run fed nothing carried nothing.
+	empty := []RequestRecord{{Index: 0, Step: 0, Body: RequestBody{MessagesRef: RequestMessagesRef{Count: 0}}}}
+	if sm, err := AssembleStep(batches[1:], empty, nil, 0); err != nil || len(sm.Messages) != 0 {
+		t.Errorf("empty input = %+v %v, want no messages", sm, err)
+	}
+	// Content off: a stripped request and no messages records.
+	stripped := []RequestRecord{{Index: 0, Step: 0, Content: HoleStripped, Body: RequestBody{MessagesRef: RequestMessagesRef{Count: 1}}}}
+	if _, err := AssembleStep(nil, stripped, nil, 0); !isHole(err, HoleStripped) {
+		t.Errorf("content off = %v, want ErrStepMessages (stripped)", err)
+	}
+}
+
+func isHole(err error, h Hole) bool {
+	var e *StepMessagesError
+	return errors.Is(err, ErrStepMessages) && errors.As(err, &e) && e.Hole == h
 }

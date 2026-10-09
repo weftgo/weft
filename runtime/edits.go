@@ -64,7 +64,7 @@ func (s *sourceRun) seenAt(fromStep int, prefix []core.Message) ([]core.Message,
 // (studio/edits.go's compactedEditError; both tests pin the text).
 func compactedEditError(what string, step, fromStep int, v *stepView) error {
 	return fmt.Errorf("%s of step %d was compacted away before step %d's request (messages [%d, %d) replaced by %d): the model never saw it there; edit from an earlier from_step",
-		what, step, fromStep, v.from, v.to, len(v.entries))
+		what, step, fromStep, v.c.FromSeq, v.c.ToSeq, v.c.Entries)
 }
 
 // applyTranscriptEdits returns the kept prefix (the input, then the
@@ -102,10 +102,7 @@ func applyTranscriptEdits(src *sourceRun, fromStep int, edits []transcriptEdit) 
 	if src.view != nil && src.view.step == fromStep {
 		view = src.view
 	}
-	inView := func(i int) bool {
-		seq := len(src.input) + i
-		return view != nil && seq >= view.from && seq < view.to
-	}
+	inView := func(i int) bool { return view.holds(len(src.input) + i) }
 	for _, e := range edits {
 		if e.Step < 0 {
 			return nil, fmt.Errorf("edit step %d is negative", e.Step)

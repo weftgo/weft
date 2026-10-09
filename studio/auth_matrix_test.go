@@ -954,6 +954,51 @@ func TestAuthMatrix(t *testing.T) {
 			t.Errorf("POST /v1/logs?token= = %d, want 401", resp.StatusCode)
 		}
 	}
+
+	// transcript?step=N over a step whose request carried a compaction
+	// view (ADR 0029): the view's messages are request content, so a
+	// read-scoped token gets messages null under the hidden badge (the
+	// counts and hash of compacted_at kept); every other identity that
+	// may read the run gets the messages. Seeded last: a newer pub_a run
+	// would move content.latest above.
+	seedRun(t, srv.db, "run_a_view", "pub_a", "", "", nil)
+	view := func(kind string, attrs map[string]any, body string) obsdb.Record {
+		a := map[string]any{"weft.record": kind, "weft.run.id": "run_a_view", "weft.public_id": "pub_a"}
+		for k, v := range attrs {
+			a[k] = v
+		}
+		return obsdb.Record{Time: time.Now().UTC(), EventName: "weft." + kind, Body: body, Attrs: a}
+	}
+	if err := srv.db.Write(context.Background(), obsdb.Batch{Records: []obsdb.Record{
+		view("messages", map[string]any{"weft.messages.index": int64(2), "weft.step.index": int64(1),
+			"weft.messages.reason": "compacted", "weft.messages.from_seq": int64(0), "weft.messages.to_seq": int64(1),
+			"weft.compaction.scope": "run", "weft.compaction.hash": "h_view"},
+			`[{"role":"user","content":[{"type":"text","text":"view secret"}]}]`),
+		view("request", map[string]any{"weft.request.index": int64(0), "weft.step.index": int64(1), "weft.attempt.index": int64(1)},
+			`{"step":1,"attempt":1,"messages_ref":{"index":2,"count":2},"tools":{"catalog_hash":"","names":[]},"params":{},"model":{"name":"m"}}`),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range identities {
+		if id.kind == "bad" {
+			continue
+		}
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/runs/run_a_view/transcript?step=1", nil)
+		req.Header.Set("Authorization", "Bearer "+id.token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		reason, fix := obsdb.HoleNote(obsdb.HoleHidden)
+		hidden := strings.Contains(string(b), `"messages":null`) &&
+			strings.Contains(string(b), `"badge":"hidden","reason":"`+reason+`","fix":"`+fix+`"`)
+		counts := strings.Contains(string(b), `"hash":"h_view"`)
+		if resp.StatusCode != ok || hidden != (id.kind == "read") || strings.Contains(string(b), "view secret") == (id.kind == "read") || !counts {
+			t.Errorf("transcript?step=1 over a view as %s = %d %s, want 200 with the view's messages hidden = %v and its counts", id.name, resp.StatusCode, b, id.kind == "read")
+		}
+	}
 }
 
 // TestSpansHideOverrideTools, through the real pipeline: a run started

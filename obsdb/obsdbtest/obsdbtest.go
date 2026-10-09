@@ -43,6 +43,7 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("TranscriptRebuilt", transcriptRebuilt(open))
 	t.Run("TranscriptSteps", transcriptSteps(open))
 	t.Run("Compactions", compactions(open))
+	t.Run("MessagesAsOf", messagesAsOf(open))
 	t.Run("RequestRecords", requestRecords(open))
 	t.Run("RequestsManySteps", requestsManySteps(open))
 	t.Run("RequestRunRows", requestRunRows(open))

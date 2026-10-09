@@ -197,7 +197,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    runs (+session/public/playground filters; all=1 lists child
 //    //    runs too), runs/{id} (with its compactions: run-scope views, then session markers),
 //    //    runs/{id}/events|transcript|spans|requests|tools (transcript?step=N adds what step N's
-//    //    model call carried — the replay prefix, compacted_at naming its view, ADR 0029),
+//    //    model call carried — the record's truth, the replay prefix for N > 0 (from_step 0 re-runs
+//    //    step 0's PrepareStep), compacted_at naming its view; null under hidden for a read token, ADR 0029),
 //    //    runs/{id}/steps/{n} (one step
 //    //    assembled: request, attempts, events, tool calls, children, holes; capability
 //    //    "steps"), runs/{id}/export?format=json|jsonl|otlp|wefttest (the whole run as one

@@ -1,6 +1,7 @@
 package studio
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -8,8 +9,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/obsdb"
+	"github.com/weftgo/weft/otel"
 )
 
 // transcriptAsOfT is transcript?step=N as a client decodes it.
@@ -74,6 +78,49 @@ func TestTranscriptAsOfStep(t *testing.T) {
 		_ = resp.Body.Close()
 		if resp.StatusCode != want {
 			t.Errorf("GET %s = %d, want %d", path, resp.StatusCode, want)
+		}
+	}
+}
+
+// TestTranscriptAsOfStepHoles (ADR 0029): a step whose messages the
+// records cannot rebuild is 409 with the hole by cause — gap when the
+// growth record a request names was never stored, stripped for a
+// content-off run (no messages captured) — never derived, which the
+// 200 answer keeps for the cut rule.
+func TestTranscriptAsOfStepHoles(t *testing.T) {
+	ts, srv := requestsServer(t)
+	now := time.Now().UTC()
+	rec := func(kind string, attrs map[string]any, body string) obsdb.Record {
+		a := map[string]any{"weft.record": kind, "weft.run.id": "r_gap"}
+		for k, v := range attrs {
+			a[k] = v
+		}
+		return obsdb.Record{Time: now, EventName: "weft." + kind, Body: body, Attrs: a}
+	}
+	if err := srv.db.Write(context.Background(), obsdb.Batch{Records: []obsdb.Record{
+		rec("event", map[string]any{"weft.event.type": "run_start", "weft.event.pos": int64(0), "weft.instructions.hash": "ih"}, `{"type":"run_start","id":"r_gap"}`),
+		rec("messages", map[string]any{"weft.messages.index": int64(0), "weft.step.index": int64(0), "weft.messages.input": true},
+			`[{"role":"user","content":[{"type":"text","text":"hi"}]}]`),
+		// Step 0's request names messages record 3, which never arrived.
+		rec("request", map[string]any{"weft.request.index": int64(0), "weft.step.index": int64(0), "weft.attempt.index": int64(1)},
+			`{"step":0,"attempt":1,"messages_ref":{"index":3,"count":1},"tools":{"catalog_hash":"","names":[]},"params":{},"model":{"name":"m"}}`),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	recordStepsRun(t, ts.URL, "r_off", nil, otel.NoContent())
+	fetchJSON(t, ts, "/api/runs/r_off", func(b string) bool { return strings.Contains(b, `"request_count":6`) })
+	for path, hole := range map[string]obsdb.Hole{
+		"/api/runs/r_gap/transcript?step=0": obsdb.HoleGap,
+		"/api/runs/r_off/transcript?step=1": obsdb.HoleStripped,
+	} {
+		resp, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusConflict || !strings.Contains(string(b), `"badge":"`+string(hole)+`"`) {
+			t.Errorf("GET %s = %d %s, want 409 with badge %s", path, resp.StatusCode, b, hole)
 		}
 	}
 }

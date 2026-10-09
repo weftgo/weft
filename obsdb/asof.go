@@ -28,12 +28,35 @@ type StepMessages struct {
 	Derived  bool
 }
 
-// ErrStepMessages is wrapped by MessagesAsOf and AssembleStep when the
-// stored records do not rebuild the messages a request names: a growth
-// record missing below its index, a view that does not fit the
-// transcript, a body that is not messages. A reader badges it derived
-// (or gap) and never guesses.
+// ErrStepMessages is matched (errors.Is) by every *StepMessagesError:
+// the stored records do not rebuild the messages a request names.
 var ErrStepMessages = errors.New("obsdb: the records do not rebuild the step's messages")
+
+// StepMessagesError is MessagesAsOf's and AssembleStep's refusal, with
+// the hole that explains it (ADR 0028 §11's table): HoleGap when a
+// record the step's request names is missing or does not fit — a
+// growth record below its index, the growth record its plain ref
+// names, a view that does not fit or was never written (a rewritten
+// request with no view index), a body that is not messages — and
+// HoleStripped when the run stored no messages at all (content capture
+// off, or a content-off chain). errors.Is(err, ErrStepMessages) holds;
+// a reader badges Hole and never guesses.
+type StepMessagesError struct {
+	Step int
+	Hole Hole
+	Msg  string
+}
+
+func (e *StepMessagesError) Error() string {
+	return fmt.Sprintf("obsdb: step %d: %s", e.Step, e.Msg)
+}
+
+// Is makes a StepMessagesError an ErrStepMessages.
+func (e *StepMessagesError) Is(target error) bool { return target == ErrStepMessages }
+
+func stepErr(step int, h Hole, format string, args ...any) error {
+	return &StepMessagesError{Step: step, Hole: h, Msg: fmt.Sprintf(format, args...)}
+}
 
 // MessagesAsOf answers the messages step step of run runID's model call
 // carried (StepMessages), read through TranscriptBatches, Requests and
@@ -89,14 +112,16 @@ func AssembleStep(batches []TranscriptBatch, requests []RequestRecord, compactio
 		msg   core.Message
 	}
 	var all []placed
+	indices := map[int64]bool{}
 	stored := true
 	for _, b := range batches {
+		indices[b.Index] = true
 		if len(b.Messages) == 0 || string(b.Messages) == "null" {
 			continue
 		}
 		var batch []core.Message
 		if err := json.Unmarshal(b.Messages, &batch); err != nil {
-			return StepMessages{}, fmt.Errorf("messages record %d: %v: %w", b.Index, err, ErrStepMessages)
+			return StepMessages{}, stepErr(step, HoleGap, "messages record %d is not readable as messages: %v", b.Index, err)
 		}
 		if !b.Input && b.Step < 0 {
 			stored = false
@@ -128,22 +153,39 @@ func AssembleStep(batches []TranscriptBatch, requests []RequestRecord, compactio
 		if v, ok := ViewOf(*rec, compactions); ok {
 			seen, err := ApplyView(upTo(func(i int64) bool { return i < ref }), v)
 			if err != nil {
-				return StepMessages{}, fmt.Errorf("step %d: %v: %w", step, err, ErrStepMessages)
+				return StepMessages{}, stepErr(step, HoleGap, "%v", err)
 			}
 			out.Messages, out.View = seen, &v
 		} else {
+			if !indices[ref] {
+				// The ref names a record that is not a growth record here:
+				// lost on the way — or a view that was never stored, which
+				// must never pass as the original transcript.
+				return StepMessages{}, stepErr(step, HoleGap, "the request names messages record %d, which is not stored", ref)
+			}
 			out.Messages = upTo(func(i int64) bool { return i <= ref })
 		}
 		if n := rec.Body.MessagesRef.Count; n != len(out.Messages) {
-			return StepMessages{}, fmt.Errorf("step %d's request names %d messages, the stored records rebuild %d (a messages record is missing): %w",
-				step, n, len(out.Messages), ErrStepMessages)
+			return StepMessages{}, stepErr(step, HoleGap, "the request names %d messages, the stored records rebuild %d (a messages record is missing)", n, len(out.Messages))
 		}
 		return out, nil
 	}
+	if rec != nil && rec.Content == "" && len(all) > 0 {
+		// An unstripped request without a view index while messages were
+		// captured: a step-0 request of a run fed nothing (count 0), or a
+		// rewritten request whose view the core could not build — the
+		// growth records are not what that model saw (core/request.go).
+		if rec.Body.MessagesRef.Count == 0 {
+			return StepMessages{Step: step, Messages: []core.Message{}}, nil
+		}
+		return StepMessages{}, stepErr(step, HoleGap, "the request was rewritten but no view of it was recorded: the transcript is not what the model saw")
+	}
 
-	// No request record places the messages: the cut rule — the input,
-	// then the run's own messages before step's assistant message, each
-	// at its stored step (numbered by order when a record stored none).
+	// No request record places the messages (a run written before ADR
+	// 0028, or a content-off chain's request): the cut rule — the
+	// input, then the run's own messages before step's assistant
+	// message, each at its stored step (numbered by order when a record
+	// stored none).
 	steps := make([]int, len(all))
 	at := -1
 	for i, p := range all {
@@ -176,7 +218,7 @@ func AssembleStep(batches []TranscriptBatch, requests []RequestRecord, compactio
 			// messages, and no record was written for an empty input.
 			return StepMessages{Step: step, Messages: []core.Message{}}, nil
 		}
-		return StepMessages{}, fmt.Errorf("step %d: the run stored no messages (content capture off?): %w", step, ErrStepMessages)
+		return StepMessages{}, stepErr(step, HoleStripped, "the run stored no messages (content capture off)")
 	}
 	out := StepMessages{Step: step, Derived: true, Messages: make([]core.Message, 0, cut)}
 	for _, p := range all[:cut] {

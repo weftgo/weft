@@ -840,7 +840,11 @@ opts a tool into allow mode); budgets cap each experiment; the app's
 own runs are never touched. A subagent's child run replays as its own
 agent, registered on the runtime by that name (`runtime.Agents(parent,
 child)`): the replay carries `weft.forked_from="<child id>#<from_step>"`
-and no parent linkage (ADR 0029).
+and no parent linkage (ADR 0029). A replay from step N is fed what step
+N's model call carried, compaction view included; the replayed agent's
+own PrepareStep then runs over it, so the model's input is exact when
+the agent's PrepareStep is idempotent over its own output — a count- or
+index-keyed PrepareStep re-shapes the replay's input.
 
 P1–P5 ride the same command: `transcript_edits` (validated on both
 sides — a patch names a call in the kept prefix, the prefix ends at a
@@ -933,11 +937,15 @@ markers `{scope: "session", hash, replaced, entries, tokens_before?,
 tokens_after?, reason}`, counts and hashes only, `[]` when none),
 `runs/{id}/events?after=&limit=` (the paged durable stream),
 `runs/{id}/transcript` (the messages bodies; with `?step=N` also
-`step`, `messages` — what step N's model call carried, the replay
-prefix for `from_step` N (ADR 0029) — and `compacted_at`, the run-scope
-view that request carried `{index, step, from_seq, to_seq, hash,
-replaced, entries}` or `null`, `badge: "derived"` when no request record
-placed them; 404 past the run's last step), `runs/{id}/spans` (for a
+`step`, `messages` — what step N's model call carried, the record's
+truth and the replay prefix for `from_step` N > 0 (ADR 0029; `from_step`
+0 re-runs step 0's PrepareStep over the original input) — and
+`compacted_at`, the run-scope view that request carried `{index, step,
+from_seq, to_seq, hash, replaced, entries}` or `null`; `badge:
+"derived"` when no request record placed them, `messages: null` with
+`badge: "hidden"` for a read-scoped panel token over a view; 404 past
+the run's last step, 409 with the hole — `gap`, `stripped` — when the
+records do not rebuild it), `runs/{id}/spans` (for a
 read-scoped panel token — here, in `traces/{trace_id}` and in the
 export alike — without the tool names a run's overrides put on its
 invoke_agent span: `weft.override.tools`, `park_on`,

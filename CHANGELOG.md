@@ -16,10 +16,17 @@ module, ADR 0005).
   `compacted_at`, the run-scope compaction view that request carried
   (`{index, step, from_seq, to_seq, hash, replaced, entries}`, counts and
   hashes only) or `null`; `badge: "derived"` for a run without request
-  records; 404 past the run's last step. Without `step` the route is
-  unchanged. `obsdb.MessagesAsOf` (with `AssembleStep`, `ViewOf`,
-  `ApplyView`, `StepMessages` and `ErrStepMessages`) is the one assembly
-  the route, weft/runtime and the wefttest fixture export share.
+  records; `messages: null` under `badge: "hidden"` for a read-scoped
+  panel token when the step carried a view; 404 past the run's last
+  step; 409 with the hole (`gap`, `stripped`) when the records do not
+  rebuild the step. `messages` is what step N's model call carried —
+  the replay prefix for N > 0 (`from_step` 0 re-runs step 0's
+  PrepareStep). Without `step` the route is unchanged.
+  `obsdb.MessagesAsOf` (with `AssembleStep`, `ViewOf`, `ApplyView`,
+  `StepMessages`, `StepMessagesError` and `ErrStepMessages`, and a
+  `MessagesAsOf` case in the `obsdbtest` conformance suite) is the one
+  assembly: the route reads through it, the fixture export and
+  weft/runtime splice views through `ApplyView`.
 - **ADR 0029** (the replay input is what the model saw): the prefix
   rule, the transcript route's `step`, the edit refusal inside a
   compacted range, the child-as-source rule and `weft.forked_from` as
@@ -33,7 +40,12 @@ module, ADR 0005).
   — instead of the original transcript, on the local obsdb, Studio and
   thread source paths alike; from a step whose request carried the plain
   transcript, the original prefix. The scripted engine keys the recorded
-  turns over the compacted prefix too.
+  turns over the compacted prefix too. The replayed agent's own
+  PrepareStep runs over that prefix: the model's input is exact when it
+  is idempotent over its own output (a count- or index-keyed one
+  re-shapes it). A thread-stored source whose records cannot rebuild the
+  step (content off) replays on the thread's messages with a warning
+  instead of being refused.
 - **Edits inside a compacted range are refused** on both sides (Studio
   400, the runtime's reject) in one wording: `call "c_1" of step 0 was
   compacted away before step 3's request (messages [1, 3) replaced by

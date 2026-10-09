@@ -36,27 +36,54 @@ The request a replay sends is model-visible behaviour (AGENTS.md rule
    transcript. A session-scope `compaction` marker is never applied: the
    run's input record already holds the compacted context. `from_step`
    0 re-runs the turn from what it was fed (its step-0 `PrepareStep`
-   runs again); no view applies there. `from_step` counts the run's own
-   steps, unchanged — a compaction changes no step count.
+   runs again over the original input); no view applies there.
+   `from_step` counts the run's own steps, unchanged — a compaction
+   changes no step count.
+
+   *The limit.* The runtime runs the agent (Studio never does), so the
+   replayed agent's own `PrepareStep` runs over that prefix as it is.
+   The replay's input is exact; what its model sees is exact when the
+   agent's `PrepareStep` is idempotent over its own output — a count- or
+   index-keyed `PrepareStep` re-shapes the replay's input (pinned by
+   `TestReplayRerunsTheAgentsPrepareStep`). The runtime does not
+   suppress or second-guess the agent's code.
 2. **One assembly.** `obsdb.MessagesAsOf(ctx, db, runID, step)` (over
    `TranscriptBatches`, `Requests` and `Compactions`; `AssembleStep` for
    records already read, `ViewOf` and `ApplyView` its parts) is the one
-   reader: weft/runtime's local path, Studio's transcript route and the
-   wefttest fixture export all use it, so they agree byte for byte. A
-   run without request records (before ADR 0028, or a content-off
-   request) falls back to the `from_step` cut rule and says so
-   (`Derived`, the `derived` badge); records that do not rebuild the
-   count a request names are an error (`ErrStepMessages`), never a
-   guess.
+   reader: Studio's transcript route reads through it, the wefttest
+   fixture export picks and splices its views with `ViewOf` and
+   `ApplyView`, and weft/runtime splices every view — read locally, or
+   from Studio's answer — through `ApplyView`, so they agree byte for
+   byte. A run without request records (before ADR 0028, or a
+   content-off chain's request) falls back to the `from_step` cut rule
+   and says so (`Derived`, the `derived` badge; the runtime logs a
+   warning when it proceeds on one). Records that do not rebuild what a
+   request names are a `*StepMessagesError` (`errors.Is` it
+   `ErrStepMessages`) carrying its hole, never a guess: `gap` when the
+   growth record a plain ref names is not stored (a lost view never
+   passes as the original), a growth record below it is missing, the
+   view does not fit, or a rewritten request has no view index (the
+   growth is not what that model saw); `stripped` when no messages were
+   captured.
 3. **`GET /api/runs/{id}/transcript?step=N`.** Without `step` the route
    is unchanged (growth records only: a view is not transcript). With
-   it, the answer adds `step`, `messages` (decision 1) and
-   `compacted_at` — the view's `{index, step, from_seq, to_seq, hash,
-   replaced, entries}`, counts and hashes only, or `null` — plus
-   `badge: "derived"` for the fallback. A step the run never reached is
-   404, as `steps/{n}` answers it; the route is scoped like the bare
-   one. The runtime's Studio path reads the view from it; its thread
-   path (no request records) asks the local obsdb, then Studio.
+   it, the answer adds `step`, `messages` — what step N's model call
+   carried, the record's truth (decision 1's assembly), which is the
+   replay prefix for N > 0; at N = 0 a compacted answer is not the
+   replay's prefix, since `from_step` 0 re-runs step 0's `PrepareStep`
+   over the original input — and `compacted_at`, the view's `{index,
+   step, from_seq, to_seq, hash, replaced, entries}`, counts and hashes
+   only, or `null` — plus `badge: "derived"` for the fallback. A view's
+   messages are request content: a read-scoped panel token gets
+   `messages: null` under `badge: "hidden"` (the counts and hash kept),
+   as the export's compaction block does. A step the run never reached
+   is 404, as `steps/{n}` answers it; records that do not rebuild the
+   step are 409 with the error's hole (`gap`, `stripped`); the route is
+   scoped like the bare one. The runtime's Studio path reads the view
+   from it; its thread path (no request records) asks the local obsdb
+   when it holds the run, else Studio — and there, records that cannot
+   rebuild the step (content off, a lost record) leave the view unknown
+   (logged) rather than refuse a turn the thread itself holds.
 4. **Edits inside a compacted range are refused**, on both sides in one
    wording: an edit (a tool-result patch or a reply rewrite) whose
    message lies in the range `from_step`'s view replaced names a message

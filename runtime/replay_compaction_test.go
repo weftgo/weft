@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"iter"
 	"net/http/httptest"
@@ -443,5 +444,145 @@ func (f modelFunc) Stream(_ context.Context, req core.ModelRequest) iter.Seq2[co
 				return
 			}
 		}
+	}
+}
+
+// TestThreadSourceWithContentOffRecords (ADR 0029, the thread path): a
+// thread-stored turn whose records were captured content-off holds no
+// messages to rebuild a step's request from — the local sink's
+// MessagesAsOf and Studio's ?step= (409) refuse it — so the view of
+// from_step is unknown, logged, and the replay proceeds on the thread's
+// own messages, as it did before ADR 0029; it is never refused.
+func TestThreadSourceWithContentOffRecords(t *testing.T) {
+	ctx := context.Background()
+	p, err := otel.Start(ctx, otel.Local(filepath.Join(t.TempDir(), "weft.db"), otel.NoContent()), otel.NoGlobal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = p.Shutdown(ctx) }()
+	model := &tailModel{}
+	agent := compactingAgent(p, model)
+	store := thread.Memory()
+	s, err := thread.Create(ctx, store, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close(ctx) }()
+	turn, err := s.Send(ctx, core.User("look everything up"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := turn.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.ForceFlush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	saw := model.take()
+	db := p.LocalDB()
+	if _, err := obsdb.MessagesAsOf(ctx, db, turn.RunID(), 1); !errors.Is(err, obsdb.ErrStepMessages) {
+		t.Fatalf("the content-off records answer step 1 with %v, want ErrStepMessages", err)
+	}
+	ts := httptest.NewServer(studio.New(studio.DB(db)).Handler())
+	defer ts.Close()
+	for name, local := range map[string]func() obsdb.DB{
+		"local":  func() obsdb.DB { return db },
+		"studio": func() obsdb.DB { return nil },
+	} {
+		cfg := &config{agents: []*core.Agent{agent}, threads: store}
+		l := newLink(cfg, newRegistry(cfg), ts.URL, "")
+		l.localDB = local
+		cmd := command{CommandID: "cmd_off", Agent: "compactor", Engine: "live",
+			Source: &sourceSpec{RunID: turn.RunID(), FromStep: 1}}
+		if reason, ok := l.validate(ctx, &cmd); !ok {
+			t.Errorf("%s: a thread source with content-off records was refused: %s", name, reason)
+		} else if b, _ := json.Marshal(cmd.prefix); len(saw) != 4 || string(b) != saw[1] {
+			t.Errorf("%s: prefix %s, want step 1's request %v", name, b, saw)
+		}
+		l.stop()
+	}
+}
+
+// TestReplayRerunsTheAgentsPrepareStep (ADR 0029's limit): the runtime
+// runs the agent, PrepareStep included, so the replay is fed step N's
+// exact request — but the replay's own PrepareStep then runs over it.
+// A PrepareStep idempotent over its own output leaves it as is (the
+// main test's); one keyed on a count re-shapes it. Here PrepareStep
+// summarizes everything between the prompt and the last two messages
+// as "summary of K messages" once a request holds four or more: the
+// source's step 3 saw "summary of 4 messages"; the replay from step 3
+// is fed exactly that, and its PrepareStep — over 4 messages — rewrites
+// it to "summary of 1 messages". The replay's input record is the exact
+// prefix; what its model saw is not.
+func TestReplayRerunsTheAgentsPrepareStep(t *testing.T) {
+	ctx := context.Background()
+	p, err := otel.Start(ctx, otel.Local(filepath.Join(t.TempDir(), "weft.db")), otel.NoGlobal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = p.Shutdown(ctx) }()
+	model := &tailModel{}
+	lookup := core.Tool("lookup", "Look up a record.", func(_ context.Context, in struct {
+		ID string `json:"id"`
+	}) (string, error) {
+		return "record " + in.ID, nil
+	}, core.Replay(core.ReplaySafe))
+	agent := core.New(model, core.Name("counter"),
+		core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()),
+		core.PrepareStep(func(_ context.Context, _ int, req core.ModelRequest) (core.ModelRequest, error) {
+			m := req.Messages
+			if len(m) < 4 {
+				return req, nil
+			}
+			req.Messages = []core.Message{m[0], core.User(fmt.Sprintf("summary of %d messages", len(m)-3)), m[len(m)-2], m[len(m)-1]}
+			return req, nil
+		}), lookup)
+	if _, err := agent.Generate(ctx, core.RunID("r_count"), core.Prompt("look everything up")); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.ForceFlush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	source := model.take()
+	if len(source) != 4 || !strings.Contains(source[3], "summary of 4 messages") {
+		t.Fatalf("source requests = %v", source)
+	}
+	cfg := &config{agents: []*core.Agent{agent}}
+	l := newLink(cfg, newRegistry(cfg), "http://127.0.0.1:1", "")
+	db := p.LocalDB()
+	l.localDB = func() obsdb.DB { return db }
+	defer l.stop()
+	cmd := command{CommandID: "cmd_count", Agent: "counter", Engine: "live",
+		Source: &sourceSpec{RunID: "r_count", FromStep: 3}}
+	if reason, ok := l.validate(ctx, &cmd); !ok {
+		t.Fatalf("validate: %s", reason)
+	}
+	if b, _ := json.Marshal(cmd.prefix); string(b) != source[3] {
+		t.Fatalf("the replay's prefix\n%s\nwant step 3's request\n%s", b, source[3])
+	}
+	if status, _, errText := l.execute(ctx, cmd, "pg_count"); status != "succeeded" {
+		t.Fatalf("execute = %s %s", status, errText)
+	}
+	if err := p.ForceFlush(ctx); err != nil {
+		t.Fatal(err)
+	}
+	fed := model.take()
+	if len(fed) == 0 || fed[0] == source[3] || !strings.Contains(fed[0], "summary of 1 messages") {
+		t.Fatalf("the replay's step 0 saw %v, want its PrepareStep's re-shaping (summary of 1 messages)", fed)
+	}
+	got, view := stepMessagesJSON(t, db, "pg_count", 0)
+	if got != fed[0] || view == nil {
+		t.Errorf("the replay's step-0 request record = %s (view %v), want what its model saw, as a view", got, view)
+	}
+	batches, err := db.TranscriptBatches(ctx, "pg_count")
+	if err != nil || len(batches) == 0 || !batches[0].Input {
+		t.Fatalf("batches = %+v %v", batches, err)
+	}
+	var input []core.Message
+	if err := json.Unmarshal(batches[0].Messages, &input); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := json.Marshal(input); string(b) != source[3] {
+		t.Errorf("the replay's input record = %s, want the source's step-3 request exactly", b)
 	}
 }

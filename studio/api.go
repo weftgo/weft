@@ -399,18 +399,22 @@ type transcript struct {
 
 // transcriptAsOf is api/runs/{id}/transcript?step=N (ADR 0029): the
 // bare route's batches, then the messages step N's model call carried
-// — the replay prefix for from_step N, assembled by
-// obsdb.MessagesAsOf. CompactedAt names the run-scope view step N's
-// request carried (counts, range and hash, as the run page serves
-// compactions), null when the request carried the plain transcript;
-// Badge is "derived" when no request record placed the messages (a run
-// written before ADR 0028: the from_step cut rule did).
+// — the record's truth, assembled by obsdb.MessagesAsOf, and the replay
+// prefix for from_step N > 0. (from_step 0 re-runs step 0's PrepareStep
+// over the run's original input, so at N = 0 a compacted answer here is
+// not the replay's prefix.) CompactedAt names the run-scope view step
+// N's request carried (counts, range and hash, as the run page serves
+// compactions), null when the request carried the plain transcript.
+// The badge is "derived" when no request record placed the messages (a
+// run written before ADR 0028: the from_step cut rule did), "hidden"
+// with Messages null when a read-scoped panel token asks for a step
+// whose request carried a view (its messages are request content).
 type transcriptAsOf struct {
 	transcript
 	Step        int            `json:"step"`
 	Messages    []core.Message `json:"messages"`
 	CompactedAt *compactedNote `json:"compacted_at"`
-	Badge       string         `json:"badge,omitempty"`
+	badgeFields
 }
 
 // spanStatus names an OTLP status code the way a reader expects it.
@@ -991,9 +995,12 @@ func (s *Server) serveRunTranscript(w http.ResponseWriter, r *http.Request, id s
 		return
 	}
 	sm, err := obsdb.MessagesAsOf(r.Context(), s.db, id, step)
+	var se *obsdb.StepMessagesError
 	switch {
-	case errors.Is(err, obsdb.ErrStepMessages):
-		conflict(w, r, err.Error(), badgeOf(obsdb.HoleDerived))
+	case errors.As(err, &se):
+		// The hole by cause: gap (a record the request names is missing
+		// or does not fit), stripped (no messages were captured).
+		conflict(w, r, err.Error(), badgeOf(se.Hole))
 		return
 	case errors.Is(err, obsdb.ErrNotFound):
 		notFound(w, r, fmt.Sprintf("no step %d of run %s", step, id))
@@ -1006,11 +1013,18 @@ func (s *Server) serveRunTranscript(w http.ResponseWriter, r *http.Request, id s
 	if doc.Messages == nil {
 		doc.Messages = []core.Message{}
 	}
+	if sm.Derived {
+		doc.badgeFields = badgeOf(obsdb.HoleDerived)
+	}
 	if sm.View != nil {
 		doc.CompactedAt = noteOf(*sm.View)
-	}
-	if sm.Derived {
-		doc.Badge = string(obsdb.HoleDerived)
+		if !readsPrompts(r) {
+			// A view's messages are the request's content (the export's
+			// rule, export.go's compactionsBlock): a read-scoped panel
+			// token gets the counts and hash, the messages null under
+			// the hidden badge.
+			doc.Messages, doc.badgeFields = nil, badgeOf(obsdb.HoleHidden)
+		}
 	}
 	writeJSON(w, r, http.StatusOK, doc)
 }

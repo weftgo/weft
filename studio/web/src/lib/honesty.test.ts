@@ -8,6 +8,7 @@ import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 
 import {
+  CAUSES,
   HOLE_ORDER,
   HOLES,
   contentHoles,
@@ -22,6 +23,7 @@ interface GoHole {
   hole: string
   reason: string
   fix?: string
+  causes?: Record<string, { reason: string; fix?: string }>
 }
 
 const golden = JSON.parse(
@@ -55,6 +57,23 @@ describe("the honesty table", () => {
       expect(note.label, g.hole).toBeTruthy()
       expect(["loss", "note"]).toContain(note.tone)
     }
+  })
+
+  it("words every cause as obsdb.HoleNoteFor does, and a mark's cause wins over the badge's words (D5)", () => {
+    for (const g of golden) {
+      const mine = isHole(g.hole) ? (CAUSES[g.hole] ?? {}) : {}
+      expect(Object.keys(mine).sort(), g.hole).toEqual(Object.keys(g.causes ?? {}).sort())
+      for (const [cause, note] of Object.entries(g.causes ?? {})) {
+        expect(mine[cause], `${g.hole}/${cause}`).toEqual(note)
+        const w = holeWords({ hole: g.hole, cause })
+        expect(w.reason).toBe(note.reason)
+        expect(w.fix).toBe(note.fix)
+      }
+    }
+    // A result cap's cut is the badge, not the recorder's words.
+    expect(holeWords({ hole: "truncated", cause: "result_cap", bytes: 12 }).label).toBe("truncated")
+    // An unknown cause reads the badge's own words.
+    expect(holeWords({ hole: "gap", cause: "nope" }).reason).toBe(HOLES.gap.reason)
   })
 
   it("reads an event's attrs: the recorder's cut and the content-off mark", () => {

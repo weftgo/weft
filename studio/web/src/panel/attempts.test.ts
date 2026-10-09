@@ -52,7 +52,7 @@ describe("the panel's step line (A4.2)", () => {
     const head = $(el, '[data-weft-step="0"] .weft-step-h')!
     expect(head.querySelector("[data-weft-attempts]")?.textContent).toBe("attempt 4 of 4 · fallback to glm-b")
     expect(head.querySelector("[data-weft-timing]")?.textContent).toBe("1.2 s · ttft 180 ms")
-    expect(head.querySelector('[data-weft-hole="not_recorded"]')).toBeNull()
+    expect(head.querySelector('[data-hole="not_recorded"]')).toBeNull()
     // No fetch of its own: the step route is never asked.
     expect(studio.gets(`runs/${RUN}/steps/0`)).toEqual([])
   })
@@ -61,12 +61,12 @@ describe("the panel's step line (A4.2)", () => {
     fakeStudio(routes({}, golden("requests-not-recorded")), metaWithRequests)
     const el = await mount()
     const head = $(el, '[data-weft-step="0"] .weft-step-h')!
-    const badge = head.querySelector<HTMLElement>('[data-weft-hole="not_recorded"]')
+    const badge = head.querySelector<HTMLElement>('[data-hole="not_recorded"]')
     expect(badge?.textContent).toBe("not recorded")
     expect(head.querySelector("[data-weft-timing]")).toBeNull()
     expect(head.querySelector("[data-weft-attempts]")).toBeNull()
     // The pre-A1 run's own not_recorded and the attempts' are one badge.
-    expect(head.querySelectorAll('[data-weft-hole="not_recorded"]').length).toBe(1)
+    expect(head.querySelectorAll('[data-hole="not_recorded"]').length).toBe(1)
     expect(badge?.title).toContain("fix: upgrade weft and re-run")
   })
 
@@ -92,7 +92,7 @@ describe("the panel's step line (A4.2)", () => {
   it("a pre-A4 run badges not_recorded on a Studio without the requests capability too", async () => {
     const studio = fakeStudio(routes({}, undefined))
     const el = await mount()
-    const badge = $(el, '[data-weft-step="0"] .weft-step-h [data-weft-hole="not_recorded"]')
+    const badge = $(el, '[data-weft-step="0"] .weft-step-h [data-hole="not_recorded"]')
     expect(badge?.getAttribute("title")).toContain("its request record no attempt rows")
     expect(studio.gets(`runs/${RUN}/requests`)).toEqual([])
   })

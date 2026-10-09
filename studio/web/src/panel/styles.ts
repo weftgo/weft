@@ -167,6 +167,7 @@ details.weft-collapsible[open] > summary::before { content: "\\25BE "; }
 .weft-badge.weft-err { border-color: var(--weft-err); color: var(--weft-err); }
 .weft-badge.weft-info { border-color: var(--weft-info); color: var(--weft-info); }
 .weft-holes { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.weft-chip.weft-tag { border: 1px solid var(--weft-line); color: var(--weft-dim); }
 .weft-note { color: var(--weft-dim); border: 1px dashed var(--weft-line); border-radius: var(--weft-radius);
   padding: 6px 9px; margin-bottom: 8px; }
 .weft-note.weft-warn { color: var(--weft-warn); border-color: var(--weft-warn); }

@@ -219,7 +219,11 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    budget in a11y.test.ts (axe-core dev-only); its views, plan D4: tabs Story/Request (E1.2's
 //    //    placeholder)/Timeline (time axis with spans, seq without)/Raw (src/panel/tree.ts: a lazy JSON
 //    //    tree, "/" filter, copy-node/all, download), a turn-list filter, runs paged by before=/before_id=
-//    //    with no cap, the tab stored as `tab`; the build prints the per-item size table from
+//    //    with no cap, the tab stored as `tab`; its honesty, plan D5: every badge drawn by
+//    //    src/panel/badges.ts from the A3 table (data-hole, reason — fix: as title; badge(hole, note) for
+//    //    the Request tab), the footer's content line, turn chips from the run row (model
+//    //    weft/runtime/scripted, weft.session.forked_from, weft.forked_from), parity.test.ts against the
+//    //    run page; the build prints the per-item size table from
 //    //    studio/web/panel-budget.json; configured by a data-weft
 //    //    script tag, weft:* meta tags, or <base>/panel-config.json; studio/README.md
 //    //    has the ladder; it follows a scope — data-scope="pub_…;session=…;flow=…;run=…" or

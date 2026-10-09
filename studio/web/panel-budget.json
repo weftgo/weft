@@ -29,6 +29,7 @@
     { "label": "D2 fixes", "item": "D2", "gzip": 48298 },
     { "label": "D4", "item": "D4", "gzip": 52951 },
     { "label": "D3 fixes", "item": "D3", "gzip": 53386 },
-    { "label": "D4 fixes", "item": "D4", "gzip": 54040 }
+    { "label": "D4 fixes", "item": "D4", "gzip": 54040 },
+    { "label": "D5", "item": "", "gzip": 55239, "note": "honesty badges, cap line, turn chips; no estimate in D1's table (+1.2 KiB)" }
   ]
 }

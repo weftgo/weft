@@ -37,7 +37,7 @@ describe("the panel's compaction marker (A9.2)", () => {
     const m = $(el, '[data-weft-step="2"] [data-weft-compaction="2"]')!
     expect(m).not.toBeNull()
     expect(m.textContent).toContain("2 messages rewritten into 1 by PrepareStep")
-    expect(m.querySelector('[data-weft-hole="compacted"]')?.textContent).toBe("compacted")
+    expect(m.querySelector('[data-hole="compacted"]')?.textContent).toBe("compacted")
     const d = m.querySelector("details")!
     expect(d.hasAttribute("open")).toBe(false)
     expect(d.querySelector("summary")?.textContent).toBe("show original")
@@ -65,7 +65,7 @@ describe("the panel's compaction marker (A9.2)", () => {
     // Before the first step card: the top of the turn.
     expect(m.compareDocumentPosition($(el, "[data-weft-step]")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(m.textContent).toContain("3 messages compacted into 1 · 2.1k → 1.0k tokens")
-    expect(m.querySelector('[data-weft-hole="compacted"]')).not.toBeNull()
+    expect(m.querySelector('[data-hole="compacted"]')).not.toBeNull()
     expect(m.querySelector("details")?.hasAttribute("open")).toBe(false)
     expect(all(el, "[data-weft-step] [data-weft-compaction]")).toEqual([])
     // Filed under the run that produced the context: it reads as after it.
@@ -91,7 +91,7 @@ describe("the panel's compaction marker (A9.2)", () => {
     fakeStudio(r)
     const el = await mount()
     const d = $(el, '[data-weft-compaction="2"] details')!
-    expect(d.querySelector('[data-weft-hole="gap"]')).not.toBeNull()
+    expect(d.querySelector('[data-hole="gap"]')).not.toBeNull()
     expect(d.querySelectorAll("[data-weft-original]").length).toBe(0)
     expect(d.textContent).toContain("messages record 1 before the view is missing")
   })
@@ -115,7 +115,7 @@ describe("the panel's compaction marker (A9.2)", () => {
     fakeStudio(r)
     const el = await mount()
     const d = $(el, '[data-weft-compaction="2"] details')!
-    expect(d.querySelector('[data-weft-hole="gap"]')).not.toBeNull()
+    expect(d.querySelector('[data-hole="gap"]')).not.toBeNull()
     expect(d.querySelectorAll("[data-weft-original]").length).toBe(0)
     expect(d.textContent).toContain("messages record 0 before the view does not read as messages")
   })

@@ -342,13 +342,14 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     })
     const main = text(el, ".weft-main")
     expect(main).toContain("interrupted — the run stopped reporting")
-    expect(el.shadowRoot?.querySelector(`[data-weft-hole="interrupted"]`)).toBeTruthy()
+    expect(el.shadowRoot?.querySelector(`[data-hole="interrupted"]`)).toBeTruthy()
     expect(main).toContain("2 events missing")
     expect(main).toContain("content not captured by this app")
     expect(text(el, ".weft-footer")).toContain(
       "prompts, args and results from your app, via your Studio"
     )
-    expect(text(el, ".weft-footer")).toContain("content is stripped")
+    // The footer's content line (D5) names the cause the record marks.
+    expect(text(el, ".weft-footer")).toContain("content off · otel.NoContent()")
   })
 
   it("honesty: the step lines and the turn header badge from the shared table (A3)", async () => {
@@ -376,21 +377,21 @@ describe("the rung-1 surfaces against a fake Studio", () => {
       "data-public-id": "pub_orders",
       "data-open": "true",
     })
-    await vi.waitFor(() => expect($(el, '[data-weft-step="0"] [data-weft-hole="truncated"]')).toBeTruthy())
+    await vi.waitFor(() => expect($(el, '[data-weft-step="0"] [data-hole="truncated"]')).toBeTruthy())
     // The step line: the recorder's cut in bytes, the table's reason and
     // fix as its title; the run's not_recorded holds for the step too.
-    const cut = $(el, '[data-weft-step="0"] .weft-step-h [data-weft-hole="truncated"]')!
+    const cut = $(el, '[data-weft-step="0"] .weft-step-h [data-hole="truncated"]')!
     expect(cut.textContent).toBe("shortened by the recorder: 12.3 KiB cut")
     expect(cut.getAttribute("title")).toBe(`${HOLES.truncated.reason} — fix: ${HOLES.truncated.fix}`)
-    expect($(el, '[data-weft-step="0"] .weft-step-h [data-weft-hole="not_recorded"]')?.textContent).toBe(
+    expect($(el, '[data-weft-step="0"] .weft-step-h [data-hole="not_recorded"]')?.textContent).toBe(
       HOLES.not_recorded.label
     )
     // The call that was cut carries it too.
-    expect($(el, '[data-weft-step="0"] .weft-call-h [data-weft-hole="truncated"]')).toBeTruthy()
+    expect($(el, '[data-weft-step="0"] .weft-call-h [data-hole="truncated"]')).toBeTruthy()
     // The turn header: every hole of the turn, with the table's words.
-    const notes = all(el, "[data-weft-turn-holes] [data-weft-hole]")
-    expect(notes.map((n) => n.getAttribute("data-weft-hole"))).toEqual(["truncated", "not_recorded"])
-    expect(notes[1].textContent).toBe(
+    const notes = all(el, "[data-weft-turn-holes] [data-hole]")
+    expect(notes.map((n) => n.getAttribute("data-hole"))).toEqual(["truncated", "not_recorded"])
+    expect(notes[1].parentElement!.textContent).toBe(
       `${HOLES.not_recorded.label} — ${HOLES.not_recorded.reason} · fix: ${HOLES.not_recorded.fix}`
     )
   })

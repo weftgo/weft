@@ -6,9 +6,10 @@
 // meta.capabilities reports the playground (§8.5 item 3).
 import type { RunCompaction, RunRow, ToolCallPart, Transcript, Usage } from "../lib/api"
 import { isHoleRef } from "../lib/api"
-import { holeWords, mergeHoles, rowHoles, statusHoles, USAGE_AT_FINISH, usageKnown } from "../lib/honesty"
+import { mergeHoles, rowHoles, statusHoles, USAGE_AT_FINISH, usageKnown } from "../lib/honesty"
 import type { HoleMark } from "../lib/honesty"
-import { paramsLine, REQUEST_NOT_RECORDED_LABEL, REQUEST_NOT_STORED, shortHash } from "../lib/requests"
+import { paramsLine, REQUEST_NOT_STORED, shortHash } from "../lib/requests"
+import { badge, capLine, cutBadge, holeBadges, holeLine, noPublicIdWords, requestCapped, requestHole, turnChips } from "./badges"
 import { fetchSessionPublicId, MAX_REQUEST_PAGES, PanelApiError, REQUEST_PAGE } from "./client"
 import { diffLines, diffSummary } from "../lib/diff"
 import { callState, runHoles, stepHoles, truncation } from "../lib/events"
@@ -43,7 +44,6 @@ import {
   MAX_EVENT_PAGES,
   DEV_LIMIT,
   PanelModel,
-  strippedContent,
 } from "./state"
 import type { ChildView, PanelRequests, PanelState, TurnView } from "./state"
 import { foldedWords, turnPromptOf } from "./playground"
@@ -706,13 +706,13 @@ export class WeftDevtools extends HTMLElement {
       }
       if (!this.ready || !this.base) return
       let pub = ""
-      let badge = ""
+      let mark = ""
       try {
         const doc = (await fetchSessionPublicId({ base: this.base, token: this.cfg.token }, id)) as
           | { public_id?: unknown; badge?: unknown }
           | null
         pub = typeof doc?.public_id === "string" ? doc.public_id : ""
-        badge = typeof doc?.badge === "string" ? doc.badge : ""
+        mark = typeof doc?.badge === "string" ? doc.badge : ""
       } catch (err) {
         if (seq !== this.scopeSeq) return
         const status = err instanceof PanelApiError ? err.status : 0
@@ -727,7 +727,7 @@ export class WeftDevtools extends HTMLElement {
       }
       if (seq !== this.scopeSeq) return
       if (!pub) {
-        this.say(`session ${id} has no public id · ${badge === "not_recorded" ? "not recorded (created without thread.PublicID)" : "none recorded"}`)
+        this.say(`session ${id} has no public id · ${mark === "not_recorded" ? noPublicIdWords() : "none recorded"}`)
         return
       }
       this.note = ""
@@ -2287,6 +2287,12 @@ export class WeftDevtools extends HTMLElement {
     const row1 = el("div", "weft-row1", [
       el("span", `weft-chip weft-${chip}`, chip),
       el("span", "weft-id", r.id, { title: r.id }),
+      // What the record says this turn is (D5): scripted, a fork, an
+      // experiment of a turn the list names.
+      ...turnChips(r, (id) => {
+        const src = this.rowOf(id)
+        return src?.turn ? `t${src.turn}` : shortId(id)
+      }),
       el("span", "weft-when", relativeTime(r.last_seen || r.started)),
     ])
     const usage = r.usage
@@ -3077,12 +3083,7 @@ export class WeftDevtools extends HTMLElement {
     box.setAttribute("data-weft-turn-holes", "")
     const row = this.rowOf(t.id)
     const holes = turnHoles(t, row)
-    for (const m of holes) {
-      const w = holeWords(m)
-      const note = el("div", `weft-note${w.tone === "loss" ? " weft-warn" : ""}`, `${w.label} — ${w.reason}${w.fix ? ` · fix: ${w.fix}` : ""}`)
-      note.setAttribute("data-weft-hole", m.hole)
-      box.appendChild(note)
-    }
+    for (const m of holes) box.appendChild(holeLine(m))
     if (t.capped) {
       box.appendChild(
         el(
@@ -3130,7 +3131,10 @@ export class WeftDevtools extends HTMLElement {
   private footer(s: PanelState): HTMLElement {
     const line = "prompts, args and results from your app, via your Studio"
     const parts: HTMLElement[] = [el("span", undefined, line)]
-    if (strippedContent(s.turn?.folded)) parts.push(el("span", undefined, " · content is stripped for this destination"))
+    // The content line (D5): on or off and why, the recorder's cuts
+    // counted — the shared table's words in its title.
+    const cap = capLine(s.turn, s.meta)
+    parts.push(el("span", "weft-cap", ` · ${cap.text}`, { title: cap.title, "data-weft-cap": cap.hole ?? "" }))
     // The resolved detection choice, one word (C3.2); and, when the
     // page's fetch could not be put back (another patcher wrapped it
     // after the panel), that too.
@@ -3458,38 +3462,6 @@ function lastStep(req: PanelRequests): number {
   return n
 }
 
-/** A request hole's badge as the panel words it: the shared honesty
- * table's label (lib/honesty.ts — the run page reads the same table),
- * prefixed where the label does not name the request. */
-function holeLabel(badge: string): string {
-  const label = badge === "not_recorded" ? REQUEST_NOT_RECORDED_LABEL : holeWords({ hole: badge }).label
-  return label.startsWith("request") ? label : `request: ${label}`
-}
-
-/** holeNote draws one hole: the badge, then its reason and fix as
- * words (the response's when it gave them, the shared table's else). */
-function holeNote(box: HTMLElement, badge: string, reason?: string, fix?: string): void {
-  const w = holeWords({ hole: badge, reason, fix })
-  box.appendChild(el("span", "weft-badge weft-info", holeLabel(badge)))
-  box.appendChild(el("div", "weft-reason", [w.reason, w.fix && `fix: ${w.fix}`].filter(Boolean).join(" — ")))
-}
-
-/** holeBadges draws a list of holes (a step's, a turn's) from the
- * shared table: one badge each, its reason and fix as the title. */
-export function holeBadges(holes: HoleMark[]): HTMLElement | null {
-  if (!holes.length) return null
-  const box = el("span", "weft-holes")
-  for (const m of holes) {
-    const w = holeWords(m)
-    const b = el("span", `weft-badge ${w.tone === "loss" ? "weft-warn-badge" : "weft-info"}`, w.label, {
-      title: w.fix ? `${w.reason} — fix: ${w.fix}` : w.reason,
-    })
-    b.setAttribute("data-weft-hole", m.hole)
-    box.appendChild(b)
-  }
-  return box
-}
-
 /** requestLine is the step's request (ADR 0028 §10, the Studio run
  * page's section in one line): the attempts and the changed marks,
  * the system prompt collapsed, the catalog's names, the params. A hole
@@ -3500,7 +3472,7 @@ function requestLine(step: number, req: PanelRequests, runStatus: string, open?:
   const box = el("div", "weft-req")
   box.setAttribute("data-weft-request", String(step))
   if (req.badge) {
-    holeNote(box, req.badge, req.reason, req.fix)
+    box.append(...requestHole(req.badge, { reason: req.reason, fix: req.fix }))
     return box
   }
   if (req.error) {
@@ -3511,15 +3483,9 @@ function requestLine(step: number, req: PanelRequests, runStatus: string, open?:
   const row = mine?.rows[mine.rows.length - 1]
   if (!mine || !row) {
     box.appendChild(
-      el(
-        "span",
-        "weft-badge",
-        runStatus === "running"
-          ? `request: ${REQUEST_NOT_STORED}`
-          : req.truncated
-            ? `request: truncated — first ${(MAX_REQUEST_PAGES * REQUEST_PAGE).toLocaleString("en-US").replace(",", " ")} requests`
-            : "request: no record for this step"
-      )
+      runStatus !== "running" && req.truncated
+        ? requestCapped(MAX_REQUEST_PAGES * REQUEST_PAGE)
+        : el("span", "weft-badge", runStatus === "running" ? `request: ${REQUEST_NOT_STORED}` : "request: no record for this step")
     )
     return box
   }
@@ -3529,9 +3495,9 @@ function requestLine(step: number, req: PanelRequests, runStatus: string, open?:
   ])
   if (mine.promptChanged) head.appendChild(el("span", "weft-badge weft-info", "prompt changed at this step"))
   if (mine.catalogChanged) head.appendChild(el("span", "weft-badge weft-info", "catalog changed at this step"))
-  if (row.content && row.content !== "stripped") head.appendChild(el("span", "weft-badge", row.content))
+  if (row.content && row.content !== "stripped") head.appendChild(badge(row.content))
   box.appendChild(head)
-  if (row.content === "stripped") holeNote(box, "stripped")
+  if (row.content === "stripped") box.append(...requestHole("stripped"))
   const p = row.prompt
   if (p && !isHoleRef(p)) {
     const d = el("details", "weft-collapsible")
@@ -3545,9 +3511,9 @@ function requestLine(step: number, req: PanelRequests, runStatus: string, open?:
     d.appendChild(el("div", "weft-res", text))
     box.appendChild(d)
   } else if (row.system_hash) {
-    box.appendChild(
-      el("div", "weft-res", `system prompt ${shortHash(row.system_hash)}${p ? ` · ${p.badge === "stripped" ? "stripped" : holeLabel(p.badge)}` : ""}`)
-    )
+    const line = el("div", "weft-res", `system prompt ${shortHash(row.system_hash)}`)
+    if (p) line.append(" · ", badge(p.badge))
+    box.appendChild(line)
   }
   const names = row.body.tools.names
   box.appendChild(el("div", "weft-res", `tools: ${names.length ? names.join(", ") : "none"}`))
@@ -3605,18 +3571,8 @@ function renderCall(
   if (call.result) {
     const ms = spanMs(t, call)
     if (ms) head.appendChild(el("span", "weft-badge weft-info", ms))
-    const trunc = truncation(String(call.result.content))
-    if (trunc) {
-      head.appendChild(
-        el(
-          "span",
-          "weft-badge",
-          trunc.kind === "bytes"
-            ? `truncated ${trunc.bytes} bytes`
-            : "not executed (max_tokens)"
-        )
-      )
-    }
+    const cut = truncation(String(call.result.content))
+    if (cut) head.appendChild(cutBadge(cut))
     if (call.result.isError) head.appendChild(el("span", "weft-badge weft-err", "error"))
     const holes = holeBadges(call.holes ?? [])
     if (holes) head.appendChild(holes)

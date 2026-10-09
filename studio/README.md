@@ -166,6 +166,40 @@ so in them older turns load by the button — three clicks for 200
 turns. A refresh (the live lane reconnecting, a stale read) keeps the
 pages already read and adds new rows at the top.
 The dev list (no public id) stays the newest 10 runs.
+Honesty (plan D5). Every badge the panel draws is one of the A3
+table's ten (`src/lib/honesty.ts`, `obsdb.HoleNote`'s words, pinned by
+`studio/testdata/holes.golden.json`), drawn by one module,
+`src/panel/badges.ts`: a `<span class="weft-badge" data-hole="<hole>">`
+whose text is the table's label and whose title is the reason and
+"— fix: …" (the response's `reason`/`fix` when the route sent them, a
+known cause's — `result_cap`, `no_public_id`, … — else the table's), the
+same span the run page draws. They sit on the turn's header (its holes
+said in full: `interrupted`, `gap`, `max_tokens`, `not_recorded`,
+`derived`, `stripped`), on each step card's header, on the tool call
+whose result was cut (a recorder cap's cut, a result cap's —
+`truncated`, cause `result_cap` — or a call a `max_tokens` step never
+ran), on compaction markers and on each request line (`not_recorded`,
+`hidden`, `stripped`); E1.2's Request tab calls the same
+`badge(hole, note)`. No other panel source spells a hole's words: a test
+greps them for it. The footer's content line replaces the old suffix:
+"content on", "content on · 2 events shortened (24.6 KiB cut)" (the
+open turn's events a recorder cap cut), or "content off ·
+weft.Content(false)" / "content off · otel.NoContent()" — the cause the
+turn's first event marks (`weft.content` `none` or `stripped`; the
+latest run's mark from `/api/meta`'s `content` when no turn is open).
+The cap itself is the app's (`otel.Content(otel.ContentConfig{MaxBytes:
+…})`) and no record carries it, so the line does not name it. Turn rows
+carry chips read from the run row, each titled with its source:
+"scripted (0 tokens)" (the run's model is `weft/runtime/scripted`, the
+scripted engine's own — no `weft.*` attribute names the engine), "fork
+of s_…#e_…" (`weft.session.forked_from`, from the row's `meta`) and
+"experiment of t3" (`weft.forked_from`, the source turn named by its
+turn number when the list holds it; "experiment" alone with only
+`weft.experiment.id`). `src/panel/parity.test.ts` serves one run per
+hole of the table to both surfaces from one fake Studio and asserts each
+shows `data-hole="<hole>"` with the table's words — and that a pre-A1
+run's request section says `not_recorded` on the run page (the panel's
+Request tab case runs once E1.2 draws the tab).
 Deep links (plan G1) follow one scheme, `src/lib/links.ts`, shared by
 the panel and Studio's app (an ESLint rule refuses a Studio URL built
 anywhere else): `runs/<id>?step=<n>&view=story|raw&sel=…&axis=time&t=…`,

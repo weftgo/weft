@@ -99,6 +99,42 @@ export const HOLES: Record<Hole, HoleNote> = {
   },
 }
 
+/** The causes the table words more precisely (obsdb.HoleNoteFor's
+ * keyed notes, the golden's causes): the same badge, the words of one
+ * known cause — honesty.test.ts checks them against the golden too. */
+export const CAUSES: Partial<Record<Hole, Record<string, { reason: string; fix?: string }>>> = {
+  truncated: {
+    log_cap: {
+      reason:
+        "the app-log reader's candidate cap was reached before attribution; later lines of this run may be missing",
+      fix: "log less in the run's trace (a busy subagent or sibling run counts too); phase 2 filters by span before the cap",
+    },
+    result_cap: {
+      reason: "a tool result was cut by its result cap: the model saw a prefix and the marker",
+      fix: "raise the tool's weft.MaxResultBytes",
+    },
+  },
+  not_recorded: {
+    no_public_id: {
+      reason:
+        "the session's turns carry no weft.public_id (a thread session is created without thread.PublicID)",
+      fix: "thread.Create(…, thread.PublicID(id)), or set weft.public_id on every turn",
+    },
+    no_spans: {
+      reason:
+        "the run was recorded without a tracer, so attempt spans and the answering model were not stored",
+      fix: "install a tracer (otel.Install records spans)",
+    },
+  },
+  hidden: {
+    dev_token_only: {
+      reason:
+        "a panel token is scoped to one public id and may not look up a session's: this route answers the dev token only",
+      fix: "ask with the server (dev) token, or use the public id the panel token was minted for",
+    },
+  },
+}
+
 /** The table's order: the order every list of holes renders in. */
 export const HOLE_ORDER = Object.keys(HOLES) as Hole[]
 
@@ -114,6 +150,8 @@ export interface HoleMark {
   reason?: string
   fix?: string
   bytes?: number
+  /** A known cause (CAUSES): its words before the badge's own. */
+  cause?: string
 }
 
 /** The weft.content.* attributes an event row or a live frame carries
@@ -183,14 +221,15 @@ export function holeWords(m: HoleMark): {
   tone: "loss" | "note"
 } {
   const note = isHole(m.hole) ? HOLES[m.hole] : undefined
+  const why = m.cause && isHole(m.hole) ? CAUSES[m.hole]?.[m.cause] : undefined
   const label =
-    m.hole === "truncated" && m.bytes
+    m.hole === "truncated" && m.bytes && !m.cause
       ? `shortened by the recorder: ${kib(m.bytes)} cut`
       : (note?.label ?? m.hole)
   return {
     label,
-    reason: m.reason || note?.reason || m.hole,
-    fix: m.fix || note?.fix,
+    reason: m.reason || why?.reason || note?.reason || m.hole,
+    fix: m.fix || why?.fix || note?.fix,
     tone: note?.tone ?? "loss",
   }
 }

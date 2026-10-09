@@ -10,6 +10,25 @@ module, ADR 0005).
 
 ### Added
 
+- **The devtools panel's honesty** (plan D5): every badge the panel
+  draws comes from the A3 table through one module,
+  `src/panel/badges.ts` (`<span class="weft-badge" data-hole="…">`, the
+  table's label, the reason and fix as its title — the run page's span;
+  `badge(hole, note)` is what the Request tab calls): on the turn's
+  header, step cards, tool calls (a result cap's cut is `truncated`,
+  cause `result_cap`; an unrun call of a `max_tokens` step is
+  `max_tokens`), compaction markers and request lines. The table's
+  causes (`log_cap`, `result_cap`, `no_public_id`, `no_spans`,
+  `dev_token_only`) join `lib/honesty.ts` as `CAUSES`, checked against
+  the golden. The footer's content line ("content on · 2 events
+  shortened (24.6 KiB cut)", "content off · weft.Content(false)" /
+  "· otel.NoContent()") replaces the "content is stripped" suffix; turn
+  rows carry "scripted (0 tokens)", "fork of s_…#e_…" and "experiment
+  of t3" chips from the run row (its model, `weft.session.forked_from`,
+  `weft.forked_from`). `parity.test.ts` proves every hole of the table
+  shows on both the panel and the run page for the same run; a grep test
+  keeps hole words out of every other panel source. The panel's badge
+  attribute is now `data-hole` (was `data-weft-hole`), as the run page's.
 - **The devtools panel's views** (plan D4): the open turn has tabs —
   **Story** (the step story), **Request** (a placeholder E1.2 fills),
   **Timeline** (the spans waterfall at full width over a time axis in

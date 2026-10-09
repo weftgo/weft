@@ -1,7 +1,8 @@
 // Plan D3's accessibility budget: axe-core (a devDependency, never in
 // the bundle) over the panel's shadow root in each mode — float open,
 // docked right, the bottom sheet at 400 px, the pill, and (D4) the Raw
-// tab's open, filtered tree and the Timeline tab — in both themes (D2),
+// tab's open, filtered tree and the Timeline tab, and (D5) a turn
+// whose badges, cap line and chips are all drawn — in both themes (D2),
 // with axe's default rules; the budget is zero violations. jsdom has
 // no layout, so the rules that need one (color-contrast, and
 // label-content-name-mismatch's visible text) come back "incomplete",
@@ -11,7 +12,8 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import axe from "axe-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { baseRoutes, fakeStudio, mount, settle, setup, teardown } from "./testkit"
+import { baseRoutes, fakeStudio, mount, page, runEvents, runRow, settle, setup, teardown } from "./testkit"
+import type { Route } from "./testkit"
 import { FILTER_MS } from "./tree"
 import type { WeftDevtools } from "./element"
 
@@ -66,7 +68,34 @@ async function timeline(el: WeftDevtools) {
   await settle()
 }
 
-const MODES: { name: string; width: number; attrs: Record<string, string>; sel: string; act?: (el: WeftDevtools) => Promise<void> }[] = [
+/** D5: a turn with the table's badges on its header, step and call,
+ * the footer's cap line and the turn chips (a thread fork). */
+function badgeRoutes(): Record<string, Route> {
+  const r = baseRoutes()
+  const row = runRow({ meta: { "weft.session.forked_from": "s_00#e_3" }, stop_reason: "max_tokens" })
+  r["runs?public_id=pub_orders&limit=50"] = { total: 1, runs: [row], next_before: null }
+  r["runs/s_01-t1"] = { ...row, children: [], holes: [{ hole: "not_recorded" }, { hole: "derived" }] }
+  r["runs/s_01-t1/events?after=0&limit=500"] = page(
+    runEvents("s_01-t1").map((event, pos) => (pos === 2 ? { pos, time: "2026-10-01T09:00:00Z", event, attrs: { "weft.content.truncated_bytes": 4096 } } : event)),
+    { gaps: [9] }
+  )
+  return r
+}
+
+async function badgesDrawn(el: WeftDevtools) {
+  const root = el.shadowRoot!
+  for (const sel of [
+    '.weft-step-h [data-hole="truncated"]',
+    '[data-weft-turn-holes] [data-hole="max_tokens"]',
+    '[data-weft-turn-holes] [data-hole="gap"]',
+    '[data-weft-turn-holes] [data-hole="not_recorded"]',
+    '[data-weft-turn-holes] [data-hole="derived"]',
+    '.weft-footer [data-weft-cap="truncated"]',
+  ])
+    expect(root.querySelector(sel), sel).not.toBeNull()
+}
+
+const MODES: { name: string; width: number; attrs: Record<string, string>; sel: string; act?: (el: WeftDevtools) => Promise<void>; routes?: () => Record<string, Route> }[] = [
   { name: "float, open", width: 1024, attrs: { "data-open": "true" }, sel: ".weft-dock.weft-float" },
   { name: "docked right", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: ".weft-dock.weft-docked" },
   { name: "bottom sheet at 400 px", width: 400, attrs: { "data-open": "true" }, sel: ".weft-dock.weft-sheet" },
@@ -75,6 +104,7 @@ const MODES: { name: string; width: number; attrs: Record<string, string>; sel: 
   { name: "the Timeline tab", width: 1024, attrs: { "data-open": "true" }, sel: ".weft-timeline", act: timeline },
   { name: "the experiment drawer open", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: ".weft-drawer select[aria-label=thread]", act: drawer },
   { name: "the Raw tab's tree with the shortcuts overlay", width: 1024, attrs: { "data-open": "true", "data-position": "bottom-dock" }, sel: ".weft-keys", act: rawAndKeys },
+  { name: "badges, the cap line and the chips", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: '[data-weft-chip="fork"]', act: badgesDrawn, routes: badgeRoutes },
 ]
 
 /** The rules jsdom leaves incomplete: they need layout (the browser
@@ -97,7 +127,7 @@ describe("the axe budget: zero violations", () => {
     for (const m of MODES)
       it(`${m.name} (${theme})`, async () => {
         viewport(m.width, 768)
-        fakeStudio(baseRoutes())
+        fakeStudio((m.routes ?? baseRoutes)())
         const el = await mount({ ...BASE, ...m.attrs, ...themeAttrs })
         await m.act?.(el)
         expect(el.shadowRoot!.querySelector(m.sel)).not.toBeNull()

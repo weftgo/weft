@@ -32,6 +32,43 @@ module, ADR 0005).
   compacted range, the child-as-source rule and `weft.forked_from` as
   the link back.
 
+- **Replay from here** (plan F1, both surfaces): on Studio's run page
+  every step card, tool call, steer and subagent row carries hover and
+  focus verbs — replay from this step, edit this result and replay
+  (`from_step` N+1, the call's recorded result pre-filled), edit the
+  prompt and replay (the step's own system prompt from its request
+  record, else the registered one, said), re-run, and continue here
+  with a new message (a fork; a session's top-level turn only) — that
+  open a non-modal replay drawer on the run page. `from_step` and every
+  edit's step are the step ordinal. Above Run, the ack preview lists per
+  tool of the step's catalog whether its calls run, are substituted from
+  the record (else parked) or park, and why ("replay safe · runs",
+  "replay never (unannotated) · substituted from the recorded result
+  when the call repeats, else parked", "breakpoint · parks", …; a
+  catalog hole badged, the registered tools judged instead), the kept
+  prefix ("steps 0–2 kept · the compacted prefix (what the model saw at
+  step 3)"), and holds Run while side effects allow would be refused or
+  a pre-filled edit has no field. A child row replays the child as its
+  own run of its own agent (an unregistered agent is said, Run held).
+  The verdicts, drafts and gates are one framework-free module,
+  `studio/web/src/lib/replay.ts`, both surfaces import. The run header
+  and the runs table say "replay of <src> from step N" from
+  `weft.forked_from`, linking the source step; the playground's step
+  number became a picker over the source run's steps (the number field,
+  badged, when they cannot be read).
+- **The panel's replay verbs** (plan F1.3): the same verbs on the
+  panel's Story view (steps, calls, steers, the child row and the
+  child's steps), the experiment drawer pre-filled from the verb's draft
+  with the same ack preview and prefix line, focus moved into the drawer
+  and back to the verb on close; the command posted is byte for byte
+  Studio's for the same draft. The result pane links the new run to its
+  source step (selected in the panel, ⤢ to Studio), and an experiment's
+  turn row gets a "↖ t3 step 2" button beside its "experiment of" chip
+  (⤢ to Studio's run page when the source is not in the list). The
+  verbs are drawn only under the `playground` capability and a token
+  that may act (`canReplay`, Studio's gate). panel.js grows by the F1
+  row of the size ledger.
+
 ### Changed
 
 - **The replay prefix across a compaction**: a playground command with
@@ -56,6 +93,13 @@ module, ADR 0005).
   parent linkage; a parent replay from the step that called the child
   substitutes (or parks) the never-class `Subagent` call, and the child
   is not re-run (pinned, no behaviour change).
+
+- **"jump to", not "replay"**: the run page's playhead buttons read
+  "jump to this step/call/steer (event #N)"; "replay" now names the
+  replay verbs only.
+- **The panel's ⎇ Continue from step N** sends the step being read by
+  its ordinal (as every verb does), and its token-scope reading is
+  `lib/replay.ts`'s `tokenScopeOf` (one reading for both surfaces).
 
 ## 0.12.0 — 2026-10-09
 

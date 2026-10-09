@@ -264,4 +264,20 @@ select.weft-input { width: auto; min-width: 120px; }
 .weft-diff-add { color: var(--weft-info); }
 .weft-diff-del { color: var(--weft-warn); text-decoration: line-through; }
 .weft-resolve { width: auto; min-width: 150px; margin: 0 4px; }
+/* ── Replay from here (plan F1): hover/focus verbs, the ack preview ── */
+.weft-verbs { display: inline-flex; gap: 2px; margin-left: 4px; }
+.weft-verb { background: none; border: none; color: var(--weft-dim); cursor: pointer; padding: 0 3px; font: inherit; clip-path: inset(50%); }
+.weft-verb::before { content: attr(data-g); }
+.weft-step:hover > .weft-step-h .weft-verb, .weft-call:hover > .weft-call-h .weft-verb, .weft-note:hover .weft-verb,
+.weft-verb:focus-visible { clip-path: none; }
+@media (hover: none) { .weft-verb { clip-path: none; } }
+.weft-verb-t { font-weight: 600; margin-bottom: 6px; }
+.weft-ack { border: 1px solid var(--weft-line); border-radius: var(--weft-radius-sm); padding: 5px 8px; margin: 6px 0; }
+.weft-verdicts { list-style: none; margin: 4px 0 0; padding: 0; }
+.weft-verdicts li { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.weft-v { font-weight: 600; }
+.weft-v-runs .weft-v { color: var(--weft-info); }
+.weft-v-parked .weft-v { color: var(--weft-warn); }
+.weft-run-btn:disabled { background: var(--weft-bg3); color: var(--weft-dim); cursor: not-allowed; }
+.weft-src { margin: 2px 0 0 18px; font-size: 11px; }
 `

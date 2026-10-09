@@ -18,6 +18,7 @@ import { baseRoutes, fakeStudio, META, mount, page, runEvents, runRow, settle, s
 import type { Route } from "./testkit"
 import { FILTER_MS } from "./tree"
 import type { WeftDevtools } from "./element"
+import { REPLAY_META, replayRoutes } from "./replaykit"
 
 beforeEach(() => {
   setup()
@@ -58,6 +59,12 @@ async function rawOpen(el: WeftDevtools) {
  * Raw tab's tree with the ? shortcuts overlay over it. */
 async function drawer(el: WeftDevtools) {
   ;(Array.from(el.shadowRoot!.querySelectorAll("button")).find((b) => b.textContent === "✎ Experiment") as HTMLElement).click()
+  await settle()
+}
+/** F1: the replay verbs drawn, and the drawer a verb opened — its
+ * ack preview and the pre-filled edit. */
+async function replayDrawer(el: WeftDevtools) {
+  ;(el.shadowRoot!.querySelector('.weft-call[data-key="c3"] [data-weft-verb="edit_result"]') as HTMLElement).click()
   await settle()
 }
 async function rawAndKeys(el: WeftDevtools) {
@@ -135,6 +142,7 @@ const MODES: { name: string; width: number; attrs: Record<string, string>; sel: 
   { name: "the experiment drawer open", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: ".weft-drawer select[aria-label=thread]", act: drawer },
   { name: "the Raw tab's tree with the shortcuts overlay", width: 1024, attrs: { "data-open": "true", "data-position": "bottom-dock" }, sel: ".weft-keys", act: rawAndKeys },
   { name: "the Request tab: chips, diff, a tool's schema tree, the earlier messages", width: 1024, attrs: { "data-open": "true", "data-position": "bottom-dock" }, sel: "#weft-tp-request [data-weft-messages-earlier] .weft-tn", act: request, routes: requestRoutes, meta: { ...META, capabilities: [...META.capabilities, "requests"] } },
+  { name: "the replay verbs and a verb's drawer with its ack preview", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: ".weft-drawer [data-weft-ack] [data-verdict]", act: replayDrawer, routes: replayRoutes, meta: REPLAY_META },
   { name: "badges, the cap line and the chips", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: '[data-weft-chip="fork"]', act: badgesDrawn, routes: badgeRoutes },
 ]
 

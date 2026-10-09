@@ -6,6 +6,7 @@ import type { Message, Part, PosEvent, RunRow, Transcript } from "../lib/api"
 import { splitTranscript, turnPrompt } from "../lib/events"
 import type { FoldFeed, FoldedRun } from "../lib/events"
 import type { LiveRecord } from "../lib/live"
+import type { ReplayDraft, ReplayVerb } from "../lib/replay"
 import type { CommandStatus, RuntimeView } from "./client"
 import { stringify } from "./render"
 
@@ -46,6 +47,25 @@ export interface ExperimentDraft {
   thread: "ephemeral" | "fork"
   /** The connected runtime the command goes to. */
   runtimeId: string
+  /** The "replay from here" verb that opened the drawer (plan F1;
+   * lib/replay.ts's drafts), absent for ✎ Experiment. */
+  verb?: ReplayVerb
+  /** The turn the drawer draws under: a child step's verb replays the
+   * child (runId) from its parent turn's story (A10). Default runId. */
+  under?: string
+  /** The source turn's own prompt: a verb's draft leaves the input
+   * empty (the runtime then takes the source's own, as from Studio's
+   * drawer — the same body) and shows it as the placeholder. */
+  sourceInput?: string
+  /** The field the drawer opens on (the verb's focus). */
+  focus?: ReplayDraft["focus"]
+  /** One per opening: focus moves once per opening, not per draw. */
+  key?: number
+  /** edit the prompt: where the pre-filled prompt came from — the
+   * step's request record, or (unreadable there: the hole, if one is
+   * named) the registered prompt. */
+  promptFrom?: "step" | "registered"
+  promptHole?: { hole: string; bytes?: number }
 }
 
 /** The running (or finished) experiment: the command's lifecycle, the
@@ -92,6 +112,10 @@ export interface ExperimentResult {
    * naming the turn once it is in flight (then it can be steered), and
    * the finished row names it too. */
   thread: ExperimentDraft["thread"]
+  /** The turn the pane draws under (a child's experiment: its parent
+   * turn) and the position the run replayed from (the link back). */
+  under: string
+  fromStep: number
   /** The live lane's bookkeeping (state.ts's Lane): the highest
    * durable position folded, the frames held while pages are read, a
    * catch-up read in flight or asked for again, a full reload in
@@ -189,6 +213,9 @@ export function experimentLabel(sourceRunID: string, forkedCount: number): strin
  * a draft with every tool off would run with every tool on — the
  * opposite of what the drawer shows. */
 export function draftProblem(draft: ExperimentDraft): string | null {
+  // Studio's buildRunBody refuses the same (lib/experiment-body.ts).
+  if (draft.thread === "fork" && !(draft.runId && draft.input && draft.step === 0))
+    return "fork continues the conversation in a new session: it needs a source run, an input, and step 0"
   const names = Object.keys(draft.tools)
   if (names.length && !names.some((n) => draft.tools[n]))
     return "at least one tool must stay on — the command cannot express an empty tool set (it would run with every tool)"
@@ -197,7 +224,9 @@ export function draftProblem(draft: ExperimentDraft): string | null {
 
 /** buildRunBody is §5.1's command, assembled from the draft. The
  * overrides carry only what changed (§10.1: only present when
- * something changed — an ordinary run has none of them). */
+ * something changed — an ordinary run has none of them). The body is
+ * Studio's (lib/experiment-body.ts's buildRunBody) for the same draft,
+ * key for key and in the same order — replay.test.ts builds both. */
 export function buildRunBody(draft: ExperimentDraft, publicId: string): Record<string, unknown> {
   const toolsEnabled = Object.entries(draft.tools)
     .filter(([, on]) => on)
@@ -215,11 +244,14 @@ export function buildRunBody(draft: ExperimentDraft, publicId: string): Record<s
     runtime: draft.runtimeId,
     agent: draft.agent,
     source: { run_id: draft.runId, from_step: draft.step },
+    overrides,
     engine: draft.engine,
     side_effects: draft.sideEffects || "substitute",
     thread: draft.thread,
-    overrides,
   }
+  // Input replaces the turn's user message, and only when the run
+  // starts the turn over (§10.4's table).
+  if (draft.step === 0 && draft.input) body.input = draft.input
   if (draft.step > 0 && draft.edits.length)
     body.transcript_edits = draft.edits.map((e) => ({
       step: e.step,
@@ -227,9 +259,6 @@ export function buildRunBody(draft: ExperimentDraft, publicId: string): Record<s
       ...(e.toolResult ? { tool_result: e.toolResult } : {}),
       ...(e.content ? { content: e.content } : {}),
     }))
-  // Input replaces the turn's user message, and only when the run
-  // starts the turn over (§10.4's table).
-  if (draft.step === 0 && draft.input) body.input = draft.input
   if (publicId) body.public_id = publicId
   return body
 }

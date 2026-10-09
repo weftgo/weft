@@ -273,6 +273,7 @@ describe("no panel-only badge strings", () => {
       "sessionNote — the run page's session marker",
     "requests:not recorded (stripped)": "paramFields — the run page's params of a content-off request",
     "requests:request not recorded by weft v0.9.0 or earlier": "REQUEST_NOT_RECORDED_LABEL — the run page's request label",
+    "replay: · the compacted prefix (what the model saw at step )": "prefixLine — the replay drawers' ack preview (plan F1)",
   }
 
   it("the lib modules the panel imports spell no other hole words and draw no panel badge", () => {

@@ -19,6 +19,9 @@ import type { StepRequests } from "../lib/requests"
 import { serializeScope } from "../lib/scope"
 import type { Scope } from "../lib/scope"
 import { tokenScope } from "./config"
+import { isHoleRef } from "../lib/api"
+import { rerun as rerunDraft } from "../lib/replay"
+import type { ReplayDraft } from "../lib/replay"
 import { applyTranscript, linkView, newFold } from "../lib/events"
 import type { FoldFeed, FoldedRun } from "../lib/events"
 import type { LiveRecord, LiveRun } from "../lib/live"
@@ -485,6 +488,8 @@ export class PanelModel {
   private collectors = new Set<RunRow[]>()
   private posting = false
   private deciding = false
+  /** One per drawer opening (ExperimentDraft.key). */
+  private drawerKey = 0
 
   /** The conversation followed; "" is the dev list. */
   publicId: string
@@ -1494,14 +1499,21 @@ export class PanelModel {
 
   /** openExperiment opens the drawer pre-filled from the run's
    * registered config — instructions, tools and models come from the
-   * runtime's manifest, never guessed from the trace. step 0 re-runs
-   * the whole turn; the Continue-from button passes the read step.
-   * The runtimes are read each time: a restarted app registers under
-   * a new runtime id, and a remembered list would post to the dead
-   * one. */
-  async openExperiment(runId: string, step = 0) {
+   * runtime's manifest, never guessed from the trace. A number is the
+   * step to continue from (0 re-runs the whole turn: ✎ Experiment); a
+   * ReplayDraft is a "replay from here" verb's (plan F1, lib/replay.ts
+   * — the draft Studio's replay drawer opens on): its from_step, edits,
+   * prompt, thread and focus. opts.agent and opts.under replay a child
+   * as its own run (A10): its agent, drawn under the parent turn. The
+   * runtimes are read each time: a restarted app registers under a new
+   * runtime id, and a remembered list would post to the dead one. */
+  async openExperiment(runId: string, at: number | ReplayDraft = 0, opts: { agent?: string; under?: string } = {}) {
     const row = this.rowOf(runId)
-    if (!row) return
+    const agentName = opts.agent ?? row?.agent
+    if (agentName === undefined) return
+    const under = opts.under ?? runId
+    const replay = typeof at === "number" ? null : at
+    const step = typeof at === "number" ? at : at.fromStep
     // Every await below re-asks whether the conversation is still the
     // one the verb was for: an SPA that switched users meanwhile must
     // not get the previous one's drawer, result or stream.
@@ -1511,19 +1523,19 @@ export class PanelModel {
       const doc = await fetchRuntimes(this.ep)
       runtimes = Array.isArray(doc.runtimes) ? doc.runtimes : []
     } catch (err) {
-      if (!this.disposed && seq === this.loadSeq) this.setExperimentError(messageOf(err), runId)
+      if (!this.disposed && seq === this.loadSeq) this.setExperimentError(messageOf(err), under)
       return
     }
     if (this.disposed || seq !== this.loadSeq) return
     this.state.runtimes = runtimes
-    const rt = pickRuntime(runtimes, row.agent)
-    const agent = rt?.agents.find((a) => a.name === row.agent)
+    const rt = pickRuntime(runtimes, agentName)
+    const agent = rt?.agents.find((a) => a.name === agentName)
     if (!rt || !agent) {
       // The verb cannot run; say why instead of a button that does
-      // nothing.
+      // nothing (a child's agent the app does not register: A10).
       this.setExperimentError(
-        `no connected runtime registers the agent "${row.agent}" — experiments run in your app (weft/runtime)`,
-        runId
+        `no connected runtime registers the agent "${agentName}"${runId !== under ? ` (run ${runId})` : ""} — experiments run in your app (weft/runtime)`,
+        under
       )
       return
     }
@@ -1532,21 +1544,54 @@ export class PanelModel {
     // The rule that is parking this runtime's runs, whoever set it.
     this.state.breakpoints = Array.isArray(rt.breakpoints) ? [...rt.breakpoints] : []
     const turn = this.state.turn
+    const src = turn ? (turn.id === runId ? turn : turn.children.get(runId)) : undefined
+    // The source's own prompt, pre-filled where the run starts over —
+    // not for "continue here", whose message is a new one.
+    const own = step === 0 && turn && turn.id === runId ? turnPromptOf(turn.transcript) : ""
+    const registered = agent.instructions ?? ""
+    let instructions = replay?.instructions ?? registered
+    let promptFrom: ExperimentDraft["promptFrom"]
+    let promptHole: ExperimentDraft["promptHole"]
+    if (replay?.verb === "edit_prompt" && replay.instructions === undefined) {
+      // The text the step was called with (its request record), when
+      // readable and whole: a cut prompt sent as the prompt would change
+      // what the model sees.
+      // step is the ordinal (from_step's count: the stored index).
+      const rows = src?.requests?.steps.get(step)?.rows
+      const p = rows?.[rows.length - 1]?.prompt
+      if (p && !isHoleRef(p) && p.content !== "truncated" && p.text) {
+        instructions = p.text
+        promptFrom = "step"
+      } else {
+        promptFrom = "registered"
+        if (p) promptHole = isHoleRef(p) ? { hole: p.badge } : { hole: "truncated", bytes: p.truncated_bytes }
+        else if (src?.requests?.badge) promptHole = { hole: src.requests.badge }
+      }
+    }
     this.state.drawer = {
       runId,
-      agent: row.agent,
-      edits: [],
+      agent: agentName,
+      edits: replay ? replay.edits.map((e) => ({ ...e })) : [],
       step,
-      instructions: agent.instructions ?? "",
-      registeredInstructions: agent.instructions ?? "",
+      instructions,
+      registeredInstructions: registered,
       tools,
       model: "",
       thinking: "",
-      input: step === 0 && turn && turn.id === runId ? turnPromptOf(turn.transcript) : "",
+      // ✎ Experiment pre-fills the source's own prompt to edit; a
+      // verb's draft carries its own input ("" = the source's own).
+      input: replay ? replay.input : own,
+      sourceInput: own,
       engine: "live",
       sideEffects: "",
-      thread: "ephemeral",
+      thread: replay?.thread ?? "ephemeral",
       runtimeId: rt.id,
+      under,
+      key: ++this.drawerKey,
+      ...(replay ? { verb: replay.verb } : {}),
+      ...(replay?.focus ? { focus: replay.focus } : {}),
+      ...(promptFrom ? { promptFrom } : {}),
+      ...(promptHole ? { promptHole } : {}),
     }
     this.emit()
   }
@@ -1572,7 +1617,7 @@ export class PanelModel {
   async rerun(runId: string) {
     const d = this.state.drawer
     if (!d || d.runId !== runId) {
-      await this.openExperiment(runId, 0)
+      await this.openExperiment(runId, rerunDraft())
       if (this.state.drawer?.runId !== runId) return
     } else if (d.step !== 0) {
       const turn = this.state.turn
@@ -1594,7 +1639,7 @@ export class PanelModel {
     if (!draft || this.posting) return
     const problem = draftProblem(draft)
     if (problem) {
-      this.setExperimentError(problem, draft.runId)
+      this.setExperimentError(problem, draft.under ?? draft.runId)
       return
     }
     this.posting = true
@@ -1603,7 +1648,7 @@ export class PanelModel {
     try {
       out = await postPlaygroundRun(this.ep, buildRunBody(draft, this.publicId))
     } catch (err) {
-      if (!this.disposed && seq === this.loadSeq) this.setExperimentError(messageOf(err), draft.runId)
+      if (!this.disposed && seq === this.loadSeq) this.setExperimentError(messageOf(err), draft.under ?? draft.runId)
       return
     } finally {
       this.posting = false
@@ -1613,13 +1658,18 @@ export class PanelModel {
     if (this.disposed || seq !== this.loadSeq) return
     const forked = this.state.experiments.get(draft.runId)?.length ?? 0
     const turn = this.state.turn
+    const child = turn?.children.get(draft.runId)
     const source =
       turn && turn.id === draft.runId
         ? (turnWordsOf(turn.transcript) ?? foldedWords(turn.folded))
-        : { text: "", calls: [] }
+        : child
+          ? (turnWordsOf(child.transcript) ?? foldedWords(child.folded))
+          : { text: "", calls: [] }
     this.expSub?.close()
     this.expSub = undefined
     const res = newResult(draft.runId, experimentLabel(draft.runId, forked), source)
+    res.under = draft.under ?? draft.runId
+    res.fromStep = draft.thread === "fork" ? 0 : draft.step
     res.commandID = out.command_id
     res.thread = draft.thread
     res.state = "queued"
@@ -1781,14 +1831,14 @@ export class PanelModel {
   /** setExperimentError shows a refused verb where its result would
    * have been: on the open result, or on an empty one under the turn
    * the verb was for. */
-  private setExperimentError(message: string, sourceRunID?: string) {
+  private setExperimentError(message: string, under?: string) {
     const res = this.state.result
-    if (res && (!sourceRunID || res.sourceRunID === sourceRunID)) {
+    if (res && (!under || res.under === under)) {
       res.error = message
     } else {
       this.expSub?.close()
       this.expSub = undefined
-      const blank = newResult(sourceRunID ?? this.state.selected, "—", { text: "", calls: [] })
+      const blank = newResult(under ?? this.state.selected, "—", { text: "", calls: [] })
       blank.error = message
       this.state.result = blank
     }
@@ -2121,6 +2171,8 @@ function newResult(sourceRunID: string, label: string, source: TurnWords): Exper
     error: null,
     label,
     sourceRunID,
+    under: sourceRunID,
+    fromStep: 0,
     source,
     compareWith: "",
     row: null,

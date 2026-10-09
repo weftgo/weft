@@ -260,6 +260,40 @@ with its reason; a run-wide hole is that badge and nothing else — a
 read-scoped token sees `hidden` and never asks for the record or the
 manifest, so no prompt byte reaches the page. The provider wire pair
 (plan A6) is recorded by no route yet, so the tab draws nothing for it.
+
+Replay from here (plan F1). The Story view's step cards, tool calls,
+steers, the subagent call's child row and the child's own steps carry
+the run page's verbs, shown on hover and on keyboard focus
+(`aria-label`s; Enter/Space stop at the verb, Escape goes on to the
+panel): **replay from this step**, **edit this result and replay**
+(`from_step` N+1 with the call's recorded result pre-filled — not on
+the transcript's last step; an empty result seeds no edit), **edit the
+prompt and replay** (the step's system prompt from its request record;
+unreadable or cut, the registered prompt and a line saying so),
+**re-run** and **continue here with a new message** (a fork, on a
+session's top-level turn only; Run waits for the message). `from_step`
+and an edit's step are the step ordinal. Each opens the experiment
+drawer pre-filled from `lib/replay.ts`'s draft — the same draft Studio's
+replay drawer opens on, posting byte for byte the same command — with
+focus on the verb's field, and back on the verb when it closes. Above
+Run, the ack preview: per tool of the step's catalog (the request
+record's replay classes) "runs", "substituted" or "parked" and why, in
+`lib/replay.ts`'s words ("replay never (unannotated) · substituted from
+the recorded result when the call repeats, else parked"), redrawn as
+the tools, mode and breakpoints change; a catalog it cannot read is
+its badge, the registered tools judged instead; and the prefix line —
+"steps 0–2 kept", "· the compacted prefix (what the model saw at step
+3)" when a run-scope compaction view sits at or before the step. Run is
+held while side effects allow would be refused (the registered tools
+left on) or a pre-filled edit has no field (shown, badged). A child's
+verbs replay the child as its own run of the child row's agent; an
+agent no runtime registers is said and nothing is posted. The result
+pane links the new run to its source step (selected in the panel, ⤢ to
+Studio's run page), and an experiment's turn row has a "↖ t3 step 2"
+button beside its "experiment of" chip (a ⤢ link when the source turn
+is not listed). The verbs and the drawer are drawn only under the
+`playground` capability and a token that may act — `lib/replay.ts`'s
+`canReplay`, the run page's gate: a read-scoped panel token sees none.
 `scripts/panel-gate.ts` opens the tab on `examples/studio-local`'s
 trimmed turn and checks the chip and the deleted guidance line.
 Deep links (plan G1) follow one scheme, `src/lib/links.ts`, shared by
@@ -865,7 +899,11 @@ says so. The panel's experiment drawer (the §3 form, the live result
 with the inline diff, the approvals, the 2-way compare) and the
 Studio `/playground` page (variants side by side with the metrics, the
 E9 variants × inputs matrix, the experiment history) both render them,
-each control only for its reported capability.
+each control only for its reported capability. The run page's replay
+drawer (plan F1: its verbs on every step, call, steer and child row, the
+ack preview naming what each tool's calls would do) posts the same
+command, and the playground's "continue from step" is a picker over the
+source run's steps.
 
 The runs list (light): status as a dot and a word, the error under a
 failed run's id, session/public-id/experiment filters that mirror the

@@ -221,7 +221,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    restored), ARIA roles + roving tabindex + a trap only in a focused float, axe zero-violation
 //    //    budget in a11y.test.ts (axe-core dev-only); its views, plan D4: tabs Story/Request (plan E1.2,
 //    //    src/panel/request.ts: the run page's Request pane per step — J/K pick it — chips, prompt diff,
-//    //    messages, catalog, params; a read token sees hidden only)/Timeline (time axis with spans, seq without)/Raw (src/panel/tree.ts: a lazy JSON
+//    //    messages, catalog, params; a read token sees hidden only; plan F1: the Story's replay verbs —
+//    //    replay from this step, edit this result, edit the prompt, re-run, continue here — open the
+//    //    experiment drawer pre-filled from lib/replay.ts with its ack preview, gated by canReplay)/Timeline (time axis with spans, seq without)/Raw (src/panel/tree.ts: a lazy JSON
 //    //    tree, "/" filter, copy-node/all, download), a turn-list filter, runs paged by before=/before_id=
 //    //    with no cap, the tab stored as `tab`; its honesty, plan D5: every badge drawn by
 //    //    src/panel/badges.ts from the A3 table (data-hole, reason — fix: as title; badge(hole, note) for

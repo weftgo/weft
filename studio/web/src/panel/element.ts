@@ -9,8 +9,22 @@ import { isHoleRef } from "../lib/api"
 import { mergeHoles, rowHoles, statusHoles, USAGE_AT_FINISH, usageKnown } from "../lib/honesty"
 import type { HoleMark } from "../lib/honesty"
 import { paramsLine, REQUEST_NO_RECORD_REASON, REQUEST_NOT_STORED, shortHash } from "../lib/requests"
-import { badge, capLine, cutBadge, holeBadges, holeLine, noPublicIdWords, requestCapped, requestHole, turnChips } from "./badges"
+import {
+  allowRefusals,
+  breakpointsFor,
+  canReplay,
+  continueHere,
+  editPromptAndReplay,
+  editResultAndReplay,
+  prefixLine,
+  replayFromStep,
+  replayVerdicts,
+  rerun,
+} from "../lib/replay"
+import type { CatalogTool, ReplayDraft } from "../lib/replay"
+import { ackCatalogHole, badge, capLine, catalogReadError, cutBadge, holeBadges, holeLine, noPublicIdWords, requestCapped, requestHole, turnChips } from "./badges"
 import { fetchSessionPublicId, MAX_REQUEST_PAGES, PanelApiError, panelGet, REQUEST_PAGE } from "./client"
+import type { AgentView } from "./client"
 import { diffLines, diffSummary } from "../lib/diff"
 import { callState, runHoles, stepHoles, truncation } from "../lib/events"
 import {
@@ -560,6 +574,12 @@ export class WeftDevtools extends HTMLElement {
   private evParking = new Set<string>()
   /** The API object (window.weft.devtools), made once. */
   private apiObj: DevtoolsAPI | null = null
+  /** The drawer opening whose verb's field took focus, and the field
+   * (data-weft-k) the next draw focuses (plan F1). */
+  private focusedKey = 0
+  private focusNext = ""
+  /** The verb that opened the drawer: focus goes back to it on close. */
+  private opener: HTMLElement | null = null
   /** Why window.weft.devtools was not added ("" when it was, or off). */
   private globalNote = ""
   /** Set by the npm entry on the registered class: the package's
@@ -1889,6 +1909,13 @@ export class WeftDevtools extends HTMLElement {
     const had = !!this.shadow.activeElement
     patch(root, next)
     if (had && !this.shadow.activeElement) root.querySelector<HTMLElement>(".weft-dock, .weft-fab")?.focus({ preventScroll: true })
+    // A verb's drawer opens on its field (plan F1): once, then the
+    // user's focus is theirs.
+    if (this.focusNext) {
+      const f = Array.from(root.querySelectorAll<HTMLElement>("[data-weft-k]")).find((n) => n.getAttribute("data-weft-k") === this.focusNext)
+      this.focusNext = ""
+      f?.focus({ preventScroll: true })
+    }
     this.watchOlder()
     this.syncTheme()
     const mode = this.dormant ? "line" : this.lay.hidden ? "hidden" : this.shown ? this.lay.mode : "pill"
@@ -2442,7 +2469,29 @@ export class WeftDevtools extends HTMLElement {
     if (r.err) row.appendChild(el("div", "weft-reason", r.err))
     on(row, "click", () => this.go(this.model?.select(r.id, true)))
     on(row, "focus", (_, n) => this.roveTo(n, r.id))
-    return el("div", undefined, [row], { role: "listitem", "data-key": r.id })
+    return el("div", undefined, [row, ...this.sourceLink(r)], { role: "listitem", "data-key": r.id })
+  }
+
+  /** sourceLink is an experiment's way back (plan F1): its source turn
+   * and step (forked_from = "<src>#<from_step>", the step ordinal) —
+   * selected in the panel when the conversation holds it (select()'s
+   * rule), and on Studio's run page (⤢) when the list does not. Beside
+   * the row, not in it: a button cannot hold another. */
+  private sourceLink(r: RunRow): HTMLElement[] {
+    if (!r.forked_from) return []
+    const [src, at = ""] = r.forked_from.split("#")
+    const n = /^\d+$/.test(at) ? Number(at) : undefined
+    const where = n === undefined ? "" : ` step ${n}`
+    const known = this.rowOf(src)
+    const name = `${known?.turn ? `t${known.turn}` : shortId(src)}${where}`
+    const n2 = el(known ? "button" : "a", "weft-btn weft-src", `↖ ${name}${known ? "" : " ⤢"}`, {
+      "aria-label": `${known ? "go to" : "open in Studio"} the source: run ${src}${where}`,
+      "data-weft-source": r.forked_from,
+      ...(known ? { type: "button" } : { href: href(this.base, runLink(src, { step: n })), target: "_blank", rel: "noopener" }),
+    })
+    if (known) on(n2, "click", () => this.select(src, n))
+    else n2.style.textDecoration = "none"
+    return [n2]
   }
 
   /** roveTo makes one turn row the list's tabbable one (D3). */
@@ -2585,18 +2634,19 @@ export class WeftDevtools extends HTMLElement {
   private playgroundArea(s: PanelState): HTMLElement {
     const box = el("div")
     const here = s.turn?.id ?? ""
-    if (s.result && s.result.sourceRunID === here) box.appendChild(this.experimentResult(s))
+    if (s.result && s.result.under === here) box.appendChild(this.experimentResult(s))
     if (!this.canAct(s)) return box
-    if (s.drawer && s.drawer.runId === here) box.appendChild(this.drawer(s))
+    if (s.drawer && (s.drawer.under ?? s.drawer.runId) === here) box.appendChild(this.drawer(s))
     return box
   }
 
   /** canAct: the write verbs are drawn when the server reports the
    * playground AND the page's token may use them — a read-scoped
    * panel token (§6: read-only unless minted with "playground": true)
-   * is refused on every one, so they are not offered. */
+   * is refused on every one, so they are not offered. lib/replay.ts's
+   * canReplay: Studio's replay verbs gate on the same rule. */
   private canAct(s: PanelState): boolean {
-    return hasCapability(s, "playground") && tokenScope(this.cfg.token) !== "read"
+    return canReplay(s.meta?.capabilities ?? [], this.cfg.token)
   }
 
   /** field marks an input the redraw must give focus and caret back
@@ -2617,15 +2667,31 @@ export class WeftDevtools extends HTMLElement {
     const rt = s.runtimes.find((r) => r.id === d.runtimeId)
     const agent = rt?.agents.find((a) => a.name === d.agent)
     const card = el("div", "weft-step weft-drawer")
+    const child = d.runId !== (d.under ?? d.runId)
     const head = el("div", "weft-step-h", [
-      el("span", undefined, `Experiment · ${d.agent}${d.step > 0 ? ` · continue from step ${d.step}` : ""}`),
+      el("span", undefined, `Experiment · ${d.agent}${child ? ` · child run ${d.runId}` : ""}${d.step > 0 ? ` · continue from step ${d.step}` : ""}`),
       el("span", "weft-grow"),
     ])
     const close = el("button", "weft-btn", "–", { title: "close the drawer", "aria-label": "close the drawer" })
-    on(close, "click", () => this.model?.closeExperiment())
+    on(close, "click", () => {
+      const back = this.opener
+      this.opener = null
+      this.model?.closeExperiment()
+      if (back?.isConnected) back.focus({ preventScroll: true })
+    })
     head.appendChild(close)
     card.appendChild(head)
     const body = el("div", "weft-step-b")
+    // The verb that opened it (plan F1): Studio's replay drawer title.
+    if (d.verb) body.appendChild(el("div", "weft-verb-t", VERB_TITLES[d.verb], { "data-weft-drawer-verb": d.verb }))
+    // The field the verb opens on gets focus once per opening (draw()).
+    // Focus moves into the drawer once per opening: the verb's field,
+    // else the prompt.
+    if (d.key !== undefined && d.key !== this.focusedKey) {
+      this.focusedKey = d.key
+      const e = d.edits.at(0)
+      this.focusNext = d.focus === "edit" && e ? `edit:${e.step}:${e.callID}` : d.focus === "input" ? "input" : "prompt"
+    }
 
     // System prompt, with the registered config one reset away.
     const promptRow = el("label", "weft-field", [el("span", undefined, "System prompt")])
@@ -2639,6 +2705,14 @@ export class WeftDevtools extends HTMLElement {
     })
     promptRow.append(ta, reset)
     body.appendChild(promptRow)
+    // edit the prompt: the step's own system text when its request
+    // record holds it whole, else the registered prompt — said.
+    if (d.promptFrom === "registered") {
+      const note = el("div", "weft-note", undefined, { "data-weft-prompt-from": "registered" })
+      if (d.promptHole) note.append(badge(d.promptHole.hole, { bytes: d.promptHole.bytes }), " ")
+      note.append("step prompt unreadable · the registered one pre-filled")
+      body.appendChild(note)
+    }
 
     // Tools: turning off is narrowing; ⚠ marks the side-effect class.
     if (agent?.tools.length) {
@@ -2702,7 +2776,14 @@ export class WeftDevtools extends HTMLElement {
       const inTa = this.field(el("textarea", "weft-input") as HTMLTextAreaElement, "input")
       inTa.rows = 2
       inTa.value = d.input
-      on(inTa, "input", (_, n) => this.model?.setDraft({ input: (n as HTMLTextAreaElement).value }, true))
+      if (d.sourceInput && d.thread !== "fork") inTa.placeholder = d.sourceInput
+      on(inTa, "input", (_, n) => {
+        const v = (n as HTMLTextAreaElement).value
+        this.model?.setDraft({ input: v }, true)
+        // A fork's Run waits for its message (no redraw while typing).
+        const btn = n.closest(".weft-drawer")?.querySelector<HTMLButtonElement>(".weft-run-btn")
+        if (btn) btn.disabled = btn.hasAttribute("data-weft-held") || (this.model?.state.drawer?.thread === "fork" && !v)
+      })
       inputRow.appendChild(inTa)
       body.appendChild(inputRow)
     }
@@ -2760,7 +2841,11 @@ export class WeftDevtools extends HTMLElement {
     thrSel.appendChild(thrFork)
     thrSel.value = d.thread
     thrSel.title = "fork continues the conversation in a new session (needs an input)"
-    on(thrSel, "change", (_, n) => this.model?.setDraft({ thread: (n as HTMLSelectElement).value as ExperimentDraft["thread"] }))
+    on(thrSel, "change", (_, n) => {
+      const thread = (n as HTMLSelectElement).value as ExperimentDraft["thread"]
+      // A fork continues the conversation: it starts at step 0.
+      this.model?.setDraft(thread === "fork" ? { thread, step: 0 } : { thread })
+    })
     seRow.appendChild(thrSel)
     body.appendChild(seRow)
 
@@ -2797,15 +2882,19 @@ export class WeftDevtools extends HTMLElement {
     // The transcript edits (D2/D3): when continuing from a step, the
     // kept steps' results are patchable and their call-free replies
     // rewritable — the counterfactual the fresh step answers.
-    const t = s.turn
-    if (d.step > 0 && t) {
+    let unplaced = 0
+    // The run the drawer replays: the turn, or a child of it (A10).
+    const src = s.turn ? (d.runId === s.turn.id ? s.turn : s.turn.children.get(d.runId)) : undefined
+    if (d.step > 0 && src) {
       const draft = (): ExperimentDraft => this.model?.state.drawer ?? d
       const editsBox = el("div", "weft-field")
       editsBox.appendChild(el("span", undefined, `Transcript edits (steps 0..${d.step - 1} are kept)`))
       // Steps are numbered the way from_step and the edits count them
       // on the wire: over the run's own steps, in order (stepPosition).
-      for (const [n, step] of t.folded.steps.entries()) {
-        if (n >= d.step) break
+      const placed = new Set<string>()
+      for (const step of src.folded.steps) {
+        const n = step.index
+        if (n >= d.step) continue
         for (const call of step.toolCalls) {
           if (!call.result) continue
           const lab = el("label", "weft-edit", undefined, { "data-key": `${n}:${call.callId}` })
@@ -2833,6 +2922,7 @@ export class WeftDevtools extends HTMLElement {
           })
           lab.appendChild(inp)
           editsBox.appendChild(lab)
+          placed.add(`${n}:${call.callId}`)
         }
         if (step.text && !step.toolCalls.length) {
           const lab = el("label", "weft-edit", undefined, { "data-key": `${n}` })
@@ -2860,18 +2950,96 @@ export class WeftDevtools extends HTMLElement {
           })
           lab.appendChild(reply)
           editsBox.appendChild(lab)
+          placed.add(`${n}:`)
         }
+      }
+      // A pre-filled edit is never dropped silently: one whose call
+      // the steps as read do not hold is shown, badged, and holds Run.
+      for (const e of d.edits) {
+        if (placed.has(`${e.step}:${e.callID ?? ""}`)) continue
+        unplaced++
+        editsBox.appendChild(
+          el("div", "weft-edit", [badge("gap"), document.createTextNode(` step ${e.step} · ${e.callID ?? "reply"} → ${e.toolResult ?? e.content ?? ""} · not in the steps read · Run held`)], {
+            "data-key": `u:${e.step}:${e.callID ?? ""}`,
+            "data-weft-unplaced": "",
+          })
+        )
       }
       if (editsBox.childElementCount > 1) body.appendChild(editsBox)
     }
 
+    // The ack preview (plan F1, ack-before-execute): what each tool's
+    // calls would do, and which prefix is kept — redrawn with the draft.
+    const refused = this.ack(s, d, src, agent, body)
     const run = el("button", "weft-run-btn", "Run experiment ▶", {
       title: "POST /api/playground/runs — the runtime in your app executes it",
     })
+    if (refused || unplaced) run.setAttribute("data-weft-held", "")
+    if (refused || unplaced || (d.thread === "fork" && !d.input)) run.setAttribute("disabled", "")
     on(run, "click", () => this.go(this.model?.runExperiment()))
     body.appendChild(run)
     card.appendChild(body)
     return card
+  }
+
+  /** ack draws the drawer's ack preview (plan F1; the run page's
+   * ReplayAck): the prefix line and, per tool of the step's catalog
+   * (the request record's replay classes; a hole badged and the
+   * registered tools judged instead), whether its calls run, are
+   * substituted or park, and why — lib/replay.ts's words. Returns
+   * whether the server would refuse the command (side effects allow
+   * over a tool not opted in): Run is then held. */
+  private ack(s: PanelState, d: ExperimentDraft, src: TurnView | ChildView | undefined, agent: AgentView | undefined, into: HTMLElement): boolean {
+    const box = el("div", "weft-ack", undefined, { "data-weft-ack": "", "data-key": "ack" })
+    box.appendChild(el("div", "weft-name", "before you run"))
+    const from = d.thread === "fork" ? 0 : d.step
+    const compacted = from > 0 && compactionsOf(src?.doc).some((c) => !isSessionMarker(c) && typeof c.step === "number" && c.step <= from)
+    box.appendChild(el("div", "weft-res", prefixLine(from, compacted), { "data-weft-prefix": "" }))
+    const cat = catalogAt(src?.requests, from, hasCapability(s, "requests"))
+    if (cat.hole) box.appendChild(ackCatalogHole(cat.hole, !!agent))
+    const names = Object.keys(d.tools)
+    const kept = names.filter((n) => d.tools[n])
+    const verdicts = replayVerdicts({
+      catalog: cat.tools ?? (agent?.tools ?? []).map((t): CatalogTool => ({ name: t.name, replay: t.side_effects === "safe" ? "safe" : "never", approval: false })),
+      agent,
+      mode: d.sideEffects,
+      toolsEnabled: kept.length < names.length ? kept : undefined,
+      breakpoints: breakpointsFor({ breakpoints: s.breakpoints }, agent),
+    })
+    if (cat.loading) box.appendChild(el("div", "weft-reason", "reading the step's catalog…"))
+    else if (cat.none) box.appendChild(el("div", "weft-reason", "the step offered no tools · nothing to substitute or park"))
+    else {
+      const list = el("ul", "weft-verdicts", undefined, { "aria-label": "what each tool would do" })
+      for (const v of verdicts)
+        list.appendChild(
+          el("li", `weft-v-${v.verdict}`, [el("span", "weft-name", v.name), el("span", "weft-v", v.verdict), el("span", "weft-reason", v.why)], {
+            "data-verdict": v.verdict,
+            "data-tool": v.name,
+            "data-key": v.name,
+          })
+        )
+      // Beside a hole the badge stands alone: an empty stand-in list is
+      // not "no tools".
+      if (!verdicts.length && !cat.hole) list.appendChild(el("li", "weft-reason", "no tools · nothing to substitute or park"))
+      if (list.childElementCount) box.appendChild(list)
+    }
+    into.appendChild(box)
+    // The server's rule is over the registered tools left on, whatever
+    // the step offered: allow runs only ReplaySafe tools and the ones
+    // the app opted in (AllowSideEffects) — any other refuses it.
+    const refused = allowRefusals(agent, d.sideEffects, kept.length < names.length ? kept : undefined)
+    if (refused.length) {
+      const one = refused.length === 1
+      into.appendChild(
+        el(
+          "div",
+          "weft-note weft-warn",
+          `side effects allow is refused while ${refused.join(", ")} ${one ? "is" : "are"} on (allow runs only ReplaySafe tools and those opted in with AllowSideEffects): turn ${one ? "it" : "them"} off, or pick substitute or park`,
+          { role: "alert", "data-weft-refused": "" }
+        )
+      )
+    }
+    return refused.length > 0
   }
 
   /** experimentResult is §3's Result pane: the label (`t3·x1`), the
@@ -2932,8 +3100,7 @@ export class WeftDevtools extends HTMLElement {
       const mine = draft && draft.runId === r.sourceRunID ? draft : null
       // The step Studio continues from: the drawer's own, else the one
       // being read — as from_step counts it.
-      const step =
-        mine && mine.step > 0 ? mine.step : s.turn ? stepPosition(s.turn.folded, s.selectedStep) : -1
+      const step = mine && mine.step > 0 ? mine.step : (s.selectedStep ?? -1)
       a.setAttribute("href", studioPlaygroundLink(this.base, mine, step))
     }
     link(compare)
@@ -2948,6 +3115,32 @@ export class WeftDevtools extends HTMLElement {
     card.appendChild(head)
     const body = el("div", "weft-step-b")
     if (r.error) body.appendChild(el("div", "weft-note weft-warn", r.error))
+    // The link back (plan F1): the new run, the source step it replays.
+    if (r.runID) {
+      const src = r.sourceRunID
+      const line = el("div", "weft-row2", [el("span", undefined, `${shortId(r.runID)} · replay of`)], {
+        "data-weft-replay-of": `${src}#${r.fromStep}`,
+        "data-key": "replay-of",
+      })
+      const words = `${shortId(src)} from step ${r.fromStep}`
+      if (src === r.under) {
+        const b = el("button", "weft-btn", words, {
+          type: "button",
+          "aria-label": `go to the source: run ${src} step ${r.fromStep}`,
+          "data-weft-source": `${src}#${r.fromStep}`,
+        })
+        on(b, "click", () => this.select(src, r.fromStep))
+        line.appendChild(b)
+      } else line.appendChild(el("span", undefined, words))
+      const mk = (text: string, url: string, label: string, attr: string) => {
+        const a = el("a", "weft-btn", text, { href: url, target: "_blank", rel: "noopener", "aria-label": label, [attr]: "" })
+        a.style.textDecoration = "none"
+        return a
+      }
+      line.appendChild(mk("⤢", href(this.base, runLink(src, { step: r.fromStep })), `open the source step in Studio (run ${src} step ${r.fromStep})`, "data-weft-source-link"))
+      line.appendChild(mk("open the replayed run ⤢", href(this.base, runLink(r.runID)), `open the replayed run ${r.runID} in Studio`, "data-weft-run-link"))
+      body.appendChild(line)
+    }
     const status = r.row?.status ?? (r.ready ? "succeeded" : "running")
     for (const step of r.folded.steps) {
       if (step.text) body.appendChild(el("div", undefined, step.text))
@@ -3148,7 +3341,24 @@ export class WeftDevtools extends HTMLElement {
         t,
         s.selectedStep,
         { keys: this.openKeys, scope: t.id },
-        { endpoint: this.base, runId: t.id }
+        {
+          endpoint: this.base,
+          runId: t.id,
+          ...(this.canAct(s)
+            ? {
+                replay: {
+                  runId: t.id,
+                  agent: row?.agent,
+                  count: replayStepCount(t.transcript, t.folded),
+                  fork: !!(row?.session_id || t.doc?.session_id),
+                  open: (runId, draft, agent, from) => {
+                    this.opener = from
+                    this.go(this.model?.openExperiment(runId, draft, { agent, under: t.id }))
+                  },
+                },
+              }
+            : {}),
+        }
       )
     )
     if (t.folded.pending.length) wrap.appendChild(this.approvals(t.folded.pending, !!row?.playground))
@@ -3192,17 +3402,18 @@ export class WeftDevtools extends HTMLElement {
     })
     on(experiment, "click", () => this.go(this.model?.openExperiment(t.id, 0)))
     row.appendChild(experiment)
-    const rerun = el("button", "weft-btn", "↻ Re-run", {
+    const again = el("button", "weft-btn", "↻ Re-run", {
       title: "re-run the whole turn with the drawer's current edits",
     })
-    on(rerun, "click", () => this.go(this.model?.rerun(t.id)))
-    row.appendChild(rerun)
-    const from = stepPosition(t.folded, s.selectedStep)
+    on(again, "click", () => this.go(this.model?.rerun(t.id)))
+    row.appendChild(again)
+    // The step being read, by its ordinal (from_step's count).
+    const from = s.selectedStep != null && t.folded.steps.some((st) => st.index === s.selectedStep) ? s.selectedStep : -1
     if (from > 0) {
       const cont = el("button", "weft-btn", `⎇ Continue from step ${from}`, {
         title: "keep the transcript through the previous step (edits apply) and run this step fresh",
       })
-      on(cont, "click", () => this.go(this.model?.openExperiment(t.id, from)))
+      on(cont, "click", () => this.go(this.model?.openExperiment(t.id, replayFromStep(from))))
       row.appendChild(cont)
     }
     return row
@@ -3424,6 +3635,127 @@ export class WeftDevtools extends HTMLElement {
 
 }
 
+/** The replay drawer's title per verb (Studio's VERB_TITLES). */
+const VERB_TITLES: Record<ReplayDraft["verb"], string> = {
+  from_step: "Replay from this step",
+  edit_result: "Edit this result and replay",
+  edit_prompt: "Edit the prompt and replay",
+  rerun: "Re-run",
+  continue: "Continue here with a new message",
+}
+
+/** The step's catalog as the ack preview reads it (the run page's
+ * catalogOfStep over the panel's request record): its tools, or the
+ * hole that says why not. */
+interface AckCatalog {
+  tools: CatalogTool[] | null
+  hole?: HoleMark
+  none?: boolean
+  loading?: boolean
+}
+
+export function catalogAt(req: PanelRequests | null | undefined, ordinal: number, served: boolean): AckCatalog {
+  if (!req) return served ? { tools: null, loading: true } : { tools: null, hole: catalogReadError("the server has no request route") }
+  if (req.badge) return { tools: null, hole: { hole: req.badge, reason: req.reason, fix: req.fix } }
+  if (req.error) return { tools: null, hole: catalogReadError(req.error) }
+  const rows = req.steps.get(ordinal)?.rows
+  const row = rows?.[rows.length - 1]
+  if (!row) return { tools: null, hole: { hole: "gap", reason: REQUEST_NO_RECORD_REASON } }
+  const c = row.tools
+  if (!c) return row.catalog_hash ? { tools: null, hole: { hole: "gap" } } : { tools: [], none: true }
+  if (isHoleRef(c)) return { tools: null, hole: { hole: c.badge } }
+  return { tools: c.tools }
+}
+
+/** Where a story's verbs replay from (plan F1): the run (a child's own
+ * id on a child's steps — A10), its agent, how many steps it has as
+ * its transcript counts them (one past the last step holding an
+ * assistant message: a step that started and never answered is no
+ * from_step the server accepts), whether "continue here" (a fork) is
+ * offered — a top-level run with a session only — and the opener.
+ * from_step and an edit's step are the step's ordinal (its stored
+ * index), as studio/edits.go and the runtime cut. */
+export interface ReplayCtx {
+  runId: string
+  agent?: string
+  count: number
+  fork: boolean
+  open: (runId: string, draft: ReplayDraft, agent: string | undefined, from: HTMLElement) => void
+}
+
+/** replayStepCount is the run's step count as its transcript stores it
+ * (the stored step of each batch holding an assistant message; by
+ * order where a batch carries none); without a transcript, one past
+ * the last step the fold saw finish. */
+export function replayStepCount(tr: Transcript | null | undefined, folded: FoldedRun): number {
+  const batches = tr?.batches ?? []
+  if (batches.length) {
+    let n = 0
+    let order = 0
+    const stored = batches.every((b) => typeof b.step === "number" && typeof b.input === "boolean")
+    for (const b of batches) {
+      if (b.input || (!stored && b.index === 0)) continue
+      if (!b.messages.some((m) => m.role === "assistant")) continue
+      order++
+      n = Math.max(n, stored ? b.step + 1 : order)
+    }
+    return n
+  }
+  let n = 0
+  for (const st of folded.steps) if (st.finish) n = Math.max(n, st.index + 1)
+  return n
+}
+
+/** verb is one hover/focus affordance (the run page's Verb): a button
+ * named by its aria-label, its glyph drawn by CSS, keyed so a live
+ * draw keeps it (and its focus); the click never reaches the card. */
+function verb(label: string, glyph: string, draft: ReplayDraft, r: ReplayCtx): HTMLElement {
+  const b = el("button", "weft-verb", undefined, {
+    type: "button",
+    "aria-label": label,
+    title: label,
+    "data-g": glyph,
+    "data-weft-verb": draft.verb,
+    "data-key": `v:${draft.verb}`,
+  })
+  on(b, "click", (e, n) => {
+    e.stopPropagation()
+    r.open(r.runId, draft, r.agent, n)
+  })
+  on(b, "keydown", (e) => {
+    const k = (e as KeyboardEvent).key
+    if (k === "Enter" || k === " ") e.stopPropagation()
+  })
+  return b
+}
+
+const verbs = (kind: string, list: HTMLElement[]) => el("span", "weft-verbs", list, { "data-weft-verbs": kind, "data-key": `verbs:${kind}` })
+
+/** A step card's verbs: replay from it, edit the prompt and replay,
+ * re-run the turn, continue with a new message. */
+function stepVerbs(n: number, r: ReplayCtx): HTMLElement {
+  const list = [
+    verb(`replay from this step (step ${n})`, "↦", replayFromStep(n), r),
+    verb(`edit the prompt and replay (step ${n})`, "✎", editPromptAndReplay(n), r),
+    verb("re-run the whole turn", "↻", rerun(), r),
+  ]
+  if (r.fork) list.push(verb("continue here with a new message", "⎇", continueHere(), r))
+  return verbs("step", list)
+}
+
+/** A tool call's verbs: edit its result and replay (the next step run
+ * fresh against the edit — not on the run's last step, which has no
+ * next), and replay from its step. */
+function callVerbs(n: number, call: FoldedToolCall, r: ReplayCtx): HTMLElement {
+  const list: HTMLElement[] = []
+  if (call.result && call.callId && n + 1 < r.count) {
+    // An empty recorded result seeds no edit (lib/replay.ts).
+    list.push(verb(`edit this result and replay (call ${call.callId})`, "✎", editResultAndReplay(n, call.callId, String(call.result.content)), r))
+  }
+  list.push(verb(`replay from this step (call ${call.callId}, step ${n})`, "↦", replayFromStep(n), r))
+  return verbs("call", list)
+}
+
 /** The Request tab asks for a manifest it could not read again after
  * this long (a 404 before a runtime registered, a restart). */
 export const MANIFEST_RETRY_MS = 30_000
@@ -3546,6 +3878,9 @@ export interface FoldCtx {
   /** The run the fold is of: its calls link to their place on its run
    * page (G1). */
   runId?: string
+  /** The replay verbs' context (plan F1); absent: none drawn (no
+   * playground, a read-scoped token, a result pane). */
+  replay?: ReplayCtx
 }
 
 /** renderFolded draws the turn view (§2). */
@@ -3611,6 +3946,7 @@ function renderStep(
   const old = complete ? attemptsHole(step.finish, rows.length) : null
   const holes = holeBadges(old ? mergeHoles(own, [old]) : own)
   if (holes) head.appendChild(holes)
+  if (ctx?.replay) head.appendChild(stepVerbs(step.index, ctx.replay))
   card.appendChild(head)
   const body = el("div", "weft-step-b")
   // The step's run-scope compaction views (A9.2), on its step line.
@@ -3637,7 +3973,15 @@ function renderStep(
   // text per draw; the step's end is said once by the dock's status.
   if (streaming) body.appendChild(el("div", "weft-stream", step.text, { "aria-live": "polite", "aria-busy": "true" }))
   else if (step.text) body.appendChild(el("div", undefined, step.text))
-  if (step.steer) body.appendChild(el("div", "weft-note", `steered: ${step.steer.text}`))
+  if (step.steer) {
+    const note = el("div", "weft-note", `steered: ${step.steer.text}`, { "data-key": "steer" })
+    // The steer is kept in the prefix; the step that answers it runs
+    // fresh (none after it: nothing to replay).
+    const next = step.index + 1
+    if (ctx?.replay && next < ctx.replay.count)
+      note.appendChild(verbs("steer", [verb(`replay from this steer (step ${next} runs fresh)`, "↦", replayFromStep(next), ctx.replay)]))
+    body.appendChild(note)
+  }
   for (const call of step.toolCalls) body.appendChild(renderCall(call, step.index, runStatus, t, open, ctx))
   card.appendChild(body)
   return card
@@ -3791,6 +4135,7 @@ function renderCall(
       : el("span", "weft-name", call.name)
   const head = el("div", "weft-call-h", [name, el("span", "weft-args", argsText(call))])
   box.appendChild(head)
+  const replay = ctx?.replay
   if (call.childRunId && (t || ctx?.child)) {
     // The badge is the child's run page too.
     head.appendChild(
@@ -3807,8 +4152,26 @@ function renderCall(
     // One level inline: a grandchild is its badge and the hand-off.
     if (ctx?.child) {
       if (ctx.endpoint) head.appendChild(handOff(ctx.endpoint, call.childRunId))
-    } else if (t) box.appendChild(childBlock(call.childRunId, t, open, ctx?.endpoint))
+    } else if (t) {
+      // A10: replay from here on the child replays the CHILD as its own
+      // run (its id, its agent), the parent untouched.
+      if (replay) {
+        const agent = t.doc?.children.find((c) => c.id === call.childRunId)?.agent ?? ""
+        head.appendChild(
+          verbs("child", [
+            verb(`replay the child run ${call.childRunId} (agent ${agent || "unnamed"})`, "↻", rerun(), {
+              ...replay,
+              runId: call.childRunId,
+              agent,
+              fork: false,
+            }),
+          ])
+        )
+      }
+      box.appendChild(childBlock(call.childRunId, t, open, ctx?.endpoint, replay))
+    }
   }
+  if (replay) head.appendChild(callVerbs(stepIndex, call, replay))
   if (call.result) {
     const ms = spanMs(t, call)
     if (ms) head.appendChild(el("span", "weft-badge weft-info", ms))
@@ -3849,7 +4212,7 @@ function spanMs(t: TurnView | undefined, call: FoldedToolCall): string {
 /** childBlock is the lazy subagent expander (§2, Dv3): the call's
  * child run folds on demand and nests under the call. The element
  * delegates the toggle through [data-weft-child]. */
-function childBlock(childId: string, t: TurnView, open?: OpenState, endpoint?: string): HTMLElement {
+function childBlock(childId: string, t: TurnView, open?: OpenState, endpoint?: string, replay?: ReplayCtx): HTMLElement {
   const child = t.children.get(childId)
   const row = t.doc?.children.find((c) => c.id === childId)
   const details = el("details", "weft-collapsible")
@@ -3883,6 +4246,10 @@ function childBlock(childId: string, t: TurnView, open?: OpenState, endpoint?: s
         endpoint,
         child,
         runId: childId,
+        // The child's steps replay the child (A10); never a fork.
+        ...(replay
+          ? { replay: { ...replay, runId: childId, agent: row?.agent ?? "", count: replayStepCount(child.transcript, child.folded), fork: false } }
+          : {}),
       })
     )
     if (child.capped)

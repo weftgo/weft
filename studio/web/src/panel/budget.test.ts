@@ -11,7 +11,7 @@ const ledger = JSON.parse(readFileSync(resolve(process.cwd(), "panel-budget.json
 
 describe("the size ledger (panel-budget.json)", () => {
   it("is append-only: the recorded rows stay as recorded", () => {
-    expect(ledger.rows.slice(0, 26).map((r) => [r.label, r.item, r.gzip])).toEqual([
+    expect(ledger.rows.slice(0, 27).map((r) => [r.label, r.item, r.gzip])).toEqual([
       ["C1", "", 32359],
       ["G1", "", 32700],
       ["C5.2", "", 32810],
@@ -38,6 +38,7 @@ describe("the size ledger (panel-budget.json)", () => {
       ["phase 3 review fixes", "", 62591],
       ["verification fixes", "", 62734],
       ["ci fixes", "", 62591],
+      ["F1", "F1", 67199],
     ])
     for (let i = 1; i < ledger.rows.length; i++) expect(ledger.items.some((x) => x.id === ledger.rows[i].item) || ledger.rows[i].item === "").toBe(true)
   })
@@ -70,6 +71,7 @@ describe("the size ledger (panel-budget.json)", () => {
     expect(row("C4")).toMatch(/\+1\.0 KiB\s+\+3\.1 KiB\s+over \(accepted\)$/) // C4.2 + its fixes
     expect(row("D4")).toMatch(/JSON tree \+ filter\s+\+5\.0 KiB\s+\+5\.2 KiB\s+ok$/) // D4 + its fixes
     expect(row("E1")).toMatch(/Request tab\s+\+4\.0 KiB\s+\+6\.1 KiB\s+over \(accepted\)$/) // E1 + its fixes: past half again its estimate, accepted
+    expect(row("F1")).toMatch(/replay from here\s+\+3\.0 KiB\s+\+4\.5 KiB\s+ok$/) // at the over line, not past it
     expect(lines).toContain("baseline C1: 32,359 B")
     expect(lines.find((l) => l.includes("unbudgeted"))).toMatch(/G1, C5\.2, D5, D5 fixes.*\+2\.7 KiB/)
     expect(lines.at(-1)).toBe("total 61,898 B (60.4 KiB) of 81,920 B · headroom 20,022 B (19.6 KiB)")

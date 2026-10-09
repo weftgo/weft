@@ -220,3 +220,28 @@ export function turnChips(r: RunRow, label: (runId: string) => string): HTMLElem
   } else if (r.experiment_id) chip("experiment", `weft.experiment.id = ${r.experiment_id}`, "experiment")
   return out
 }
+
+/** catalogReadError is the ack preview's hole when the step's catalog
+ * could not be read (plan F1, the run page's catalogOfStep words): the
+ * verdicts are the runtime's registration's, derived. */
+export function catalogReadError(error: string): HoleMark {
+  return { hole: "derived", reason: `the step's catalog could not be read (${error}): the list is the runtime's registration` }
+}
+
+/** ackCatalogHole is the ack preview's line for a catalog it cannot
+ * read (the run page's ReplayAck): the hole's badge, its words said,
+ * then what the verdicts cover instead — never an empty list. */
+export function ackCatalogHole(m: HoleMark, registered: boolean): HTMLElement {
+  const box = holeLine(m)
+  box.setAttribute("data-weft-catalog-hole", m.hole)
+  box.appendChild(
+    el(
+      "div",
+      "weft-reason",
+      registered
+        ? "the step's catalog is not readable here: the verdicts below cover the tools the runtime registers"
+        : "the step's catalog is not readable here, and no runtime registers the agent"
+    )
+  )
+  return box
+}

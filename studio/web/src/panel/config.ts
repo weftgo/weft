@@ -29,6 +29,7 @@
 // ?weft_scope= / #weft_scope= (rung 4, urlScope) comes next, then the
 // marker and header rungs (markers.ts, detect.ts) — each supplies a
 // scope only when no rung above it names one.
+import { tokenScopeOf } from "../lib/replay"
 import { parseScope, serializeScope } from "../lib/scope"
 import { isLoopback } from "./detect"
 import { migrateDebug } from "./layout"
@@ -522,19 +523,11 @@ export { isLoopback }
  * is "" — the server token, or none (setups A and B). A hint for what
  * to draw, never a check: Studio enforces the scope on every route,
  * and the token is read here, not sent or logged. */
-export type TokenScope = "" | "read" | "playground"
+export type TokenScope = ReturnType<typeof tokenScopeOf>
 
-export function tokenScope(token: string): TokenScope {
-  if (!token.startsWith("weft_pt.")) return ""
-  try {
-    const body = token.slice("weft_pt.".length).split(".")[0]
-    const b64 = body.replace(/-/g, "+").replace(/_/g, "/")
-    const claims = JSON.parse(atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4))) as { scope?: unknown }
-    return claims.scope === "playground" ? "playground" : "read"
-  } catch {
-    return "read" // a panel token the page cannot read: assume the default mint
-  }
-}
+/** tokenScope is lib/replay.ts's tokenScopeOf: one reading of a
+ * bearer for both surfaces (Studio's replay verbs gate on it too). */
+export const tokenScope = tokenScopeOf
 
 /** ?weft=debug or localStorage.weft_debug=1 forces the panel on
  * where the endpoint exists (staging) — §5.3's override switch. The

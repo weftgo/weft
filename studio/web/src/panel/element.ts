@@ -3410,8 +3410,9 @@ export class WeftDevtools extends HTMLElement {
   }
 
   /** actions is §3's row: ✎ Experiment (the drawer), ↻ Re-run (the
-   * whole turn with the drawer's current edits), ⎇ Continue from the
-   * step being read. */
+   * drawer as the rerun() draft — the whole turn, its current edits
+   * kept — posted only by Run after the ack preview), ⎇ Continue from
+   * the step being read. */
   private actions(s: PanelState): HTMLElement {
     const t = s.turn
     if (!t) return el("div")

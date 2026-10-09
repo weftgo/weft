@@ -514,6 +514,18 @@ describe("F1.3 review fixes", () => {
     expect(draftProblem(model.state.drawer)).toContain("it needs a source run, an input, and step 0")
   })
 
+  it("10b: edit the prompt where the record has no row for the step: not_recorded, worded about the prompt", async () => {
+    const r = replayRoutes()
+    r[`runs/${RUN}/requests?limit=1000`] = { requests: [requestRow(0)] }
+    fakeStudio(r, REPLAY_META)
+    const el = await mount()
+    click(verbIn(el, '[data-weft-step="2"] > .weft-step-h', "edit_prompt"))
+    await settle()
+    const b = $(el, '[data-weft-prompt-from="registered"] [data-hole="not_recorded"]')!
+    expect(b.getAttribute("title")).toContain("the step carries no request record: the system prompt it was called with is unknown")
+    expect(b.getAttribute("title")).not.toContain("tools")
+  })
+
   it("10b: edit the prompt without the requests capability: the registered prompt, badged not_served", async () => {
     fakeStudio(replayRoutes(), META)
     const el = await mount()

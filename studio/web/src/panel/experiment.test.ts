@@ -6,6 +6,8 @@
 // Studio hand-off (P2-17), and every refusal surfacing as words.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { tokenScope } from "./config"
+import { buildRunBody as studioBody } from "../lib/experiment-body"
+import { rerun as rerunDraft } from "../lib/replay"
 import { readStep, studioPlaygroundLink } from "./element"
 import { pickRuntime } from "./playground"
 import { OVERFLOW_MIN_MS } from "./state"
@@ -525,6 +527,14 @@ describe("the drawer", () => {
     const prompt = $(el, ".weft-drawer textarea") as HTMLTextAreaElement
     prompt.value = "Always include the tracking link."
     prompt.dispatchEvent(new Event("input", { bubbles: true }))
+    // A drawer turned into a fork with a message: ↻ makes it a re-run.
+    const thread = $(el, '.weft-drawer select[aria-label="thread"]') as HTMLSelectElement
+    thread.value = "fork"
+    thread.dispatchEvent(new Event("change", { bubbles: true }))
+    await settle()
+    const input = $(el, '.weft-drawer [data-weft-k="input"]') as HTMLTextAreaElement
+    input.value = "a new message"
+    input.dispatchEvent(new Event("input", { bubbles: true }))
     click(button(el, "↻ Re-run"))
     await settle()
     // The drawer, from step 0, its ack preview drawn: nothing posted yet.
@@ -537,6 +547,33 @@ describe("the drawer", () => {
       | { overrides: { instructions?: string } }
       | undefined
     expect(body?.overrides.instructions).toBe("Always include the tracking link.")
+    // The rerun verb's body, byte for byte Studio's for rerun() over
+    // this turn with the edited prompt: ephemeral, step 0, no input.
+    const agent = RUNTIMES.runtimes[0].agents[0]
+    const r = rerunDraft()
+    expect(JSON.stringify(body)).toBe(
+      JSON.stringify(
+        studioBody({
+          runtime: "rt_01",
+          agent,
+          variant: {
+            instructions: "Always include the tracking link.",
+            toolsOff: new Set(),
+            model: "",
+            thinking: "",
+            input: r.input,
+            engine: "live",
+            sideEffects: "substitute",
+            thread: r.thread,
+          },
+          sourceRunID: "s_01-t1",
+          fromStep: r.fromStep,
+          input: r.input,
+          edits: r.edits,
+          publicID: "pub_orders",
+        })
+      )
+    )
     expect((prompt.isConnected ? prompt : ($(el, ".weft-drawer textarea") as HTMLTextAreaElement)).value).toBe(
       "Always include the tracking link."
     )

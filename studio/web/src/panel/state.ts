@@ -20,7 +20,7 @@ import { serializeScope } from "../lib/scope"
 import type { Scope } from "../lib/scope"
 import { tokenScope } from "./config"
 import { isHoleRef } from "../lib/api"
-import { catalogNotRecorded, promptNotServed, promptReadError } from "./badges"
+import { promptNotRecorded, promptNotServed, promptReadError } from "./badges"
 import { rerun as rerunDraft } from "../lib/replay"
 import type { ReplayDraft } from "../lib/replay"
 import { applyTranscript, linkView, newFold } from "../lib/events"
@@ -1580,7 +1580,7 @@ export class PanelModel {
         else if (!req) promptHole = promptNotServed()
         else if (req.badge) promptHole = { hole: req.badge, reason: req.reason, fix: req.fix }
         else if (req.error) promptHole = promptReadError(req.error)
-        else promptHole = catalogNotRecorded()
+        else promptHole = promptNotRecorded()
       }
     }
     this.state.drawer = {
@@ -1635,15 +1635,13 @@ export class PanelModel {
       await this.openExperiment(runId, rerunDraft())
       return
     }
-    // The drawer open on this turn: its edits kept, from step 0 — the
-    // ack preview drawn again before anything is posted.
-    const turn = this.state.turn
-    this.state.drawer = {
-      ...d,
-      verb: "rerun",
-      step: 0,
-      input: d.input || (turn && turn.id === runId ? turnPromptOf(turn.transcript) : ""),
-    }
+    // The drawer open on this turn: its edits (prompt, tools, model,
+    // modes) kept, reshaped as the rerun() draft — from step 0,
+    // ephemeral, no input (the source turn's own, as Studio's rerun
+    // sends none) — and the ack preview drawn again before anything is
+    // posted.
+    const r = rerunDraft()
+    this.state.drawer = { ...d, verb: r.verb, step: r.fromStep, thread: r.thread, input: r.input }
     this.emit()
   }
 

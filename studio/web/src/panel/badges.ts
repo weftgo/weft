@@ -261,10 +261,14 @@ export function catalogNotStored(): HoleMark {
 }
 
 /** The edit-the-prompt fallback's hole when the step's prompt cannot
- * be read: the server serves no request record (not_served), or the
- * read failed (derived: the registered prompt stands in). */
+ * be read: the server serves no request record (not_served), the
+ * record has no row for the step (its prompt unknown), or the read
+ * failed (derived: the registered prompt stands in). */
 export function promptNotServed(): HoleMark {
   return { hole: "not_recorded", cause: "not_served" }
+}
+export function promptNotRecorded(): HoleMark {
+  return { hole: "not_recorded", reason: "the step carries no request record: the system prompt it was called with is unknown" }
 }
 export function promptReadError(error: string): HoleMark {
   return { hole: "derived", reason: `the step's prompt could not be read (${error}): the registered prompt is pre-filled` }

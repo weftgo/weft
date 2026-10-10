@@ -1911,7 +1911,7 @@ ingest is `POST /v1/traces` and `/v1/logs` (protobuf and JSON, gzip,
 so the exporter retries). Under `Playground(true)` the playground's
 routes join (`GET /api/runtimes`, `POST /api/playground/runs`, `GET
 /api/playground/commands/{id}`, `POST /api/runs/{id}/approvals`,
-`POST /api/playground/fixtures`, `GET/POST /api/experiments` (each row with `created`, `run_count`,
+`POST /api/playground/fixtures`, `GET/POST /api/experiments` (id: `[A-Za-z0-9._:-]{1,128}`, as command_id; each row with `created`, `run_count`,
 `cost_usd`/`cost_known`; a POST creates or replaces the whole definition —
 `engine`/`side_effects`/`thread`/`from_step`/`source_run_id`/`transcript_edits`
 kept as sent, per variant its overrides + modes), `GET

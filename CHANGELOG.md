@@ -27,7 +27,12 @@ module, ADR 0005).
   delegated). obsdb: `ExperimentCommand` (embedded in `Experiment`),
   `ExperimentVariant.Engine/SideEffects/Thread`; migrations sqlite 0005 /
   ClickHouse 0006 add the experiments table's command column (old rows read
-  back without it).
+  back without it). An experiment's id (POST
+  /api/experiments `id`, a run command's `experiment_id`) follows
+  command_id's rule, `[A-Za-z0-9._:-]{1,128}`; a variant's `overrides` must
+  be an object; the save's answer carries `run_count` and the cost. The
+  playground mints the id (a name that fits the rule is used as is, any other
+  is slugged with a nonce) and keeps the typed name as `name`.
 - Studio: experiments you can come back to (plan F5). The playground keeps its
   whole form as a draft in this browser (`?exp=<draft id>`, IndexedDB) once it
   changes, and "copy share link" puts the form in the fragment (`#state=`,

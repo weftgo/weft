@@ -1613,7 +1613,8 @@ catalog — with `agent`, `tool` (exact name), `status`, `model` (exact),
 `error` (substring), `since`/`until` (RFC 3339, started at-or-after /
 before), `min_tokens` (input + output), `sort=started|duration|tokens`
 (newest, longest, most first), `limit`, `offset` and `/api/runs`' own
-`session`, `public_id`, `parent`, `all`, `playground`, `tag.<k>=<v>`;
+`session`, `public_id`, `parent`, `all`, `playground`, `experiment_id`,
+`tag.<k>=<v>`;
 `min_cost` (USD at least, the run's whole bill — own + delegated; an
 unpriced run never matches) and `sort=cost` (most first, unpriced runs
 last, newest first) are applied in Studio, one rule for both backends:

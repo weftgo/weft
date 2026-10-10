@@ -1,0 +1,7 @@
+{
+  "run_id": "pg_cancel_1",
+  "command_id": "cmd_cancel_1",
+  "runtime_id": "rt_test",
+  "state": "cancelling"
+}
+

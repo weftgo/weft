@@ -22,10 +22,13 @@ import (
 // open API.
 type playgroundTestServer struct {
 	*Server
-	ts    *httptest.Server
-	rs    *linkruntime.RuntimeServer
-	cmd   chan linkruntime.Command // what the fake runtime receives
-	token string
+	ts  *httptest.Server
+	rs  *linkruntime.RuntimeServer
+	cmd chan linkruntime.Command // what the fake runtime receives
+	// cancels carries the command ids of the cancel frames the fake
+	// runtime receives (POST /api/runs/{id}/cancel).
+	cancels chan string
+	token   string
 }
 
 // newPlaygroundTestServer starts the Studio and connects one runtime
@@ -47,7 +50,7 @@ func newPlaygroundServer(t *testing.T, token string) *playgroundTestServer {
 	srv := New(opts...)
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
-	pt := &playgroundTestServer{Server: srv, ts: ts, cmd: make(chan linkruntime.Command, 16), token: token}
+	pt := &playgroundTestServer{Server: srv, ts: ts, cmd: make(chan linkruntime.Command, 16), cancels: make(chan string, 16), token: token}
 
 	// The link server the routes built is exposed by the Server
 	// (Runtime() returns it under Playground(true)); the fake runtime
@@ -111,10 +114,21 @@ func newPlaygroundServer(t *testing.T, token string) *playgroundTestServer {
 			line := sc.Text()
 			switch {
 			case line == "":
-				if cur.event == "run" {
+				switch cur.event {
+				case "run":
 					var cmd linkruntime.Command
 					if json.Unmarshal([]byte(cur.data), &cmd) == nil {
 						pt.cmd <- cmd
+					}
+				case "cancel":
+					var c struct {
+						CommandID string `json:"command_id"`
+					}
+					if json.Unmarshal([]byte(cur.data), &c) == nil {
+						select {
+						case pt.cancels <- c.CommandID:
+						default:
+						}
 					}
 				}
 				cur = sseFrame{}

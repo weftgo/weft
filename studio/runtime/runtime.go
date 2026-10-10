@@ -462,6 +462,13 @@ var (
 	// a line — and with it forge a frame on the runtime's stream — is
 	// refused before it reaches a row or the wire.
 	ErrInvalidCommandID = fmt.Errorf("studio/runtime: invalid command id")
+	// ErrUnknownRun: no runtime started the run (CancelRun) — the app's
+	// own turns, or an id no ack ever named.
+	ErrUnknownRun = fmt.Errorf("studio/runtime: no runtime started the run")
+	// ErrRunFinished: the run's command is over — finished (a parked
+	// run included: approval is a run boundary), rejected or lost — so
+	// there is nothing in flight to cancel (CancelRun).
+	ErrRunFinished = fmt.Errorf("studio/runtime: the run's command is no longer in flight")
 )
 
 // maxCommandID bounds a caller-supplied command id.
@@ -1114,6 +1121,57 @@ func (rs *RuntimeServer) Cancel(runtimeID, commandID string) {
 		default:
 		}
 	}
+}
+
+// CancelTarget is what CancelRun asked to stop: the run, the command
+// that holds it in its runtime, and that runtime.
+type CancelTarget struct {
+	RunID     string `json:"run_id"`
+	CommandID string `json:"command_id"`
+	RuntimeID string `json:"runtime_id"`
+}
+
+// CancelRun asks the runtime that started runID to cancel the command
+// holding it (an `event: cancel` frame for that command id): the
+// runtime cancels the command's own context, and the run ends as the
+// core ends a canceled run — its error and partial transcript in the
+// records, its command finished failed. It asks, never kills: the
+// frame is the whole effect, and a run that ends first simply finishes.
+//
+// The command is the accepted one whose acks named the run (the
+// experiment's own command, or the approval command a resumed run runs
+// under). Errors: ErrUnknownRun (no runtime started the run),
+// ErrRunFinished (its command is no longer accepted), ErrNotConnected
+// (the runtime holds no live stream, or its feed is full — the stream
+// is then dropped, as every enqueue drops it).
+func (rs *RuntimeServer) CancelRun(runID string) (CancelTarget, error) {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	runtimeID, ok := rs.runs[runID]
+	if !ok {
+		return CancelTarget{}, ErrUnknownRun
+	}
+	var row *commandRow
+	for _, r := range rs.commands {
+		if r.runID == runID && r.state == StateAccepted && (row == nil || r.seq > row.seq) {
+			row = r
+		}
+	}
+	if row == nil {
+		return CancelTarget{RunID: runID, RuntimeID: runtimeID}, ErrRunFinished
+	}
+	t := CancelTarget{RunID: runID, CommandID: row.CommandID, RuntimeID: row.Runtime}
+	c := rs.runtimes[row.Runtime]
+	if c == nil || c.feed == nil {
+		return t, ErrNotConnected
+	}
+	select {
+	case c.feed <- Command{CommandID: row.CommandID, Runtime: row.Runtime, cancel: true}:
+	default:
+		rs.dropFeedLocked(row.Runtime, c)
+		return t, ErrNotConnected
+	}
+	return t, nil
 }
 
 // RuntimeOf names the runtime that started runID (learned from its

@@ -502,7 +502,7 @@ func TestMetaGolden(t *testing.T) {
 	// runtime link's (step 8's playground.go registers both; the
 	// step-6 pin asserted neither existed yet).
 	_, _, pg := get(t, Handler(DB(fixtureDB(t)), Playground(true)), "/studio/api/meta")
-	if !strings.Contains(pg, `"capabilities":["requests","steps","export","logs","diff","traces","search","pricing","delete","proposals","live","ingest","panel-config","runtimes","preview","breakpoints","steer","playground"]`) {
+	if !strings.Contains(pg, `"capabilities":["requests","steps","export","logs","diff","traces","search","pricing","delete","proposals","live","ingest","panel-config","runtimes","preview","breakpoints","steer","cancel","playground"]`) {
 		t.Errorf("Playground capabilities = %s", pg)
 	}
 	// A hosting wrapper declares its own verbs beside the groups'.

@@ -44,6 +44,7 @@ var optionalCapabilities = map[string]string{
 	"runtimes":    offPlayground,
 	"breakpoints": offPlayground,
 	"steer":       offPlayground,
+	"cancel":      offPlayground,
 	"preview":     offPlayground,
 	"ingest":      offIngest,
 	"auth":        offAuth,

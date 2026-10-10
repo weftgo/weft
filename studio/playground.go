@@ -105,6 +105,16 @@ func registerPlayground(mux *http.ServeMux, s *Server) {
 		capability: "steer",
 		register:   func(mux *http.ServeMux, s *Server) { /* mounted above */ },
 	})
+	// The Live page's cancel (plan H6, cancel.go): a runtime-started
+	// run, stopped through the link's cancel frame — its own capability
+	// so the UIs draw the button only when meta reports it.
+	s.addGroup(routeGroup{
+		name:       "cancel",
+		capability: "cancel",
+		register: func(mux *http.ServeMux, s *Server) {
+			mux.HandleFunc("POST /api/runs/{id}/cancel", s.serveCancel(rs))
+		},
+	})
 }
 
 // ── GET /api/runtimes ─────────────────────────────────────────────

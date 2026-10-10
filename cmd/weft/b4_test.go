@@ -163,7 +163,7 @@ func TestStudioAgentsFromRuntime(t *testing.T) {
 				if !md.HasManifest || md.ManifestSources != 1 {
 					t.Errorf("meta has_manifest %v, manifest_sources %d, want true and 1", md.HasManifest, md.ManifestSources)
 				}
-				for _, capability := range []string{"playground", "runtimes", "breakpoints", "steer"} {
+				for _, capability := range []string{"playground", "runtimes", "breakpoints", "steer", "cancel"} {
 					if !slices.Contains(md.Capabilities, capability) {
 						t.Errorf("capabilities %v lack %s", md.Capabilities, capability)
 					}
@@ -177,7 +177,7 @@ func TestStudioAgentsFromRuntime(t *testing.T) {
 				// is there, and meta says why.
 				time.Sleep(300 * time.Millisecond)
 				md := meta()
-				for _, capability := range []string{"playground", "runtimes", "breakpoints", "steer"} {
+				for _, capability := range []string{"playground", "runtimes", "breakpoints", "steer", "cancel"} {
 					if slices.Contains(md.Capabilities, capability) {
 						t.Errorf("--no-playground: capabilities %v carry %s", md.Capabilities, capability)
 					}

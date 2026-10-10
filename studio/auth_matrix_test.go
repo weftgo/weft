@@ -46,8 +46,9 @@ var overrideNames = map[string]string{
 //     id's resource, or one with no public id at all, is 403; an
 //     unknown id is 404 (scoping never says whether it exists
 //     elsewhere);
-//   - a read-scoped panel token never acts (runs, approvals, steer are
-//     403); a playground-scoped one acts inside its public id;
+//   - a read-scoped panel token never acts (runs, approvals, steer,
+//     cancel are 403); a playground-scoped one acts inside its public
+//     id;
 //   - a read-scoped panel token never reads system prompts (the
 //     manifest, a run's requests, tools and app logs — which may
 //     carry prompts the app logged: 403, badge "hidden"; a
@@ -262,6 +263,21 @@ func TestAuthMatrix(t *testing.T) {
 		}
 		if code := do(http.MethodPost, "/api/runtime/acks", `{"command_id":"`+cmd[res]+`","state":"accepted","run_id":"`+rtRun[res]+`"}`, server); code != http.StatusOK {
 			t.Fatalf("ack %s: %d", cmd[res], code)
+		}
+	}
+	// Runtime-started runs that are over (the cancel rows' 409): each
+	// command accepted, then finished.
+	finRun := map[string]string{"A": "pgfin_a", "B": "pgfin_b", "none": "pgfin_none", "missing": "pgfin_missing"}
+	for _, res := range []string{"A", "B", "none"} {
+		id := "cmd_fin_" + res
+		body := `{"runtime":"rt_test","agent":"acme-support","command_id":"` + id + `","input":"go","public_id":"` + public[res] + `"}`
+		if code := do(http.MethodPost, "/api/playground/runs", body, server); code != http.StatusAccepted {
+			t.Fatalf("enqueue %s: %d", id, code)
+		}
+		for _, state := range []string{"accepted", "finished"} {
+			if code := do(http.MethodPost, "/api/runtime/acks", `{"command_id":"`+id+`","state":"`+state+`","run_id":"`+finRun[res]+`","status":"succeeded"}`, server); code != http.StatusOK {
+				t.Fatalf("ack %s %s: %d", id, state, code)
+			}
 		}
 	}
 	if code := do(http.MethodPost, "/api/experiments",
@@ -669,6 +685,17 @@ func TestAuthMatrix(t *testing.T) {
 			body: fixed(`{"message":"hi"}`), resources: []string{"A", "B"}, want: anyValid(forbidden403)},
 		{name: "POST /api/runs/{app's own run}/approvals", method: "POST", path: func(res string) string { return "/api/runs/" + run[res] + "/approvals" },
 			body: fixed(`{"call_id":"call_1","decision":"deny"}`), resources: []string{"A", "B"}, want: anyValid(forbidden403)},
+		// Cancel (plan H6): steer's rule — a read-scoped token never
+		// acts, a playground-scoped one inside its public id; the scope
+		// is checked before the run is said to be the app's own or
+		// finished (409), so a refusal never describes another public
+		// id's run.
+		{name: "POST /api/runs/{id}/cancel", method: "POST", path: func(res string) string { return "/api/runs/" + rtRun[res] + "/cancel" },
+			resources: all, want: acting(accepted)},
+		{name: "POST /api/runs/{app's own run}/cancel", method: "POST", path: func(res string) string { return "/api/runs/" + run[res] + "/cancel" },
+			resources: []string{"A", "B", "none"}, want: acting(http.StatusConflict)},
+		{name: "POST /api/runs/{finished}/cancel", method: "POST", path: func(res string) string { return "/api/runs/" + finRun[res] + "/cancel" },
+			resources: []string{"A", "B", "none"}, want: acting(http.StatusConflict)},
 		// Fixtures are request-derived (tool names, the system prompt):
 		// refused to a read-scoped token like the export's wefttest.
 		{name: "POST /api/playground/fixtures", method: "POST", path: fixed("/api/playground/fixtures"),

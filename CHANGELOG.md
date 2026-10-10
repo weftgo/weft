@@ -327,6 +327,37 @@ module, ADR 0005).
   same id, so the list alone could not say a runtime went away;
   `RuntimeView.Connected` in `weft/studio/runtime`.
 
+- **`weft.replay.view`** (ADR 0029 §2): a playground replay from step
+  N > 0 carries how its prefix knew what the model saw — `transcript`,
+  `compacted:<index>`, `derived` (no request record placed N's
+  messages) or `unknown` (the thread path with Studio unreachable or
+  content-off records, a Studio older than `?step=`). The last two are
+  the run's `derived` hole on `GET /api/runs/{id}` and in the export,
+  its reason naming the mark and the source step (a subagent child of
+  the replay inherits the mark but carries no hole: its input is its
+  tool call's arguments), pinned by `run-replay-view.golden.json` — the
+  fallback used to be a log line only. obsdb gains
+  `Assembler`/`NewAssembler`; studio/runtime gains
+  `AgentRegistration.ManifestToolSchemas`.
+- **Accepted-ack heartbeat** (weft/runtime ↔ Studio): registration
+  carries `heartbeat_ms` (one minute in `weft/runtime`); while a
+  playground command is in the runtime's hands — waiting for a run slot
+  or running — the runtime re-posts its accepted ack at that cadence. A
+  repeated accepted ack is liveness: on an accepted row it restarts the
+  finish watch, on a lost row it is a 409 (and the beating stops), on a
+  finished row a no-op. Studio watches a heartbeating runtime's accepted
+  command from the accepted ack on, stream open or not, and marks it
+  lost after max(`FinishDeadline`, three beats) of silence with the new
+  reason "accepted, but no finish and no heartbeat from the runtime in
+  <d>" — so a command nobody runs any more is marked lost even while the
+  stream stays open, and a run that keeps beating is never marked lost
+  however long it takes. A runtime-supplied `heartbeat_ms` is taken at
+  most `FinishDeadline` (the watch is at most 3 × `FinishDeadline`); a
+  runtime older than the heartbeat (`heartbeat_ms` 0) is watched only
+  once its stream ends, as before. The heartbeat stops — its in-flight
+  POST abandoned, its goroutine gone — before the finished ack is
+  posted, so an accepted ack never lands after the finished one.
+
 ### Changed
 
 - **An old runtime's registration shows no defaults** (plan F3.1's
@@ -397,6 +428,68 @@ module, ADR 0005).
   and model kept, its transcript edits dropped) with the ack preview; the command is posted by Run, as every
   verb's. Escape on a drawer control closes the drawer and returns focus
   to the verb that opened it, instead of collapsing the panel.
+
+### Fixed — the playground and the replay (phase 4 review, Go)
+
+- **Version skew, ADR 0029's half**: against a runtime older than this
+  release (no registered `defaults`) Studio now refuses, on
+  `POST /api/playground/runs` and the preview alike (400), a `user`,
+  `tool_args` or `insert` transcript edit (`runtime predates transcript
+  edit kinds: upgrade weft/runtime to use user, tool_args, insert
+  edits`) and a `from_step` whose request carried a compaction view
+  (`runtime predates replay across a compaction: …; upgrade
+  weft/runtime`) — the old runtime's decoder dropped `kind`, `args` and
+  `index` and applied a `user`/`insert` edit's content as a reply
+  rewrite, acked, unmarked, and it spliced no view.
+- **At-most-once across the ack window**: weft/runtime's validation —
+  the source transcript fetch, the compaction view and the
+  `ModelResolver` — now runs under one 25 s deadline (the resolver gets
+  at most 10 s of what is left), inside Studio's 30 s ack window; it used
+  to be 20 s + 10 s, so a slow fetch and a slow resolver could ack after
+  Studio marked the command lost. Studio answers an `accepted` ack on a
+  lost row `409` instead of reviving it, and an accepted ack Studio did
+  not take runs nothing: refused (409/404/400) it posts nothing;
+  unconfirmed (a transport error or a 5xx — Studio may have recorded it)
+  it is settled with a finished ack, failed `not run: the accepted ack
+  was not confirmed` (a held decision's adds "; decide again", a
+  resume's "; decide again to resume", and the park is back) — so the
+  command never shows "accepted" forever and a re-issued command can no
+  longer run twice (with `side_effects: allow`, twice for real). A
+  `finished` ack on a lost row still records what ran.
+- **A held approval decision whose accepted ack is refused is no longer
+  held.** On a run with several parked calls, a decision that does not
+  complete the set and whose accepted ack Studio refuses is dropped (no
+  finished ack), so deciding that call again is taken instead of refused
+  "already decided"; one whose park another decision's resume took
+  meanwhile (the set completed) is reported finished/succeeded — it was
+  applied — instead of "decide again".
+- **A `tool_args` edit is checked against the right schema**: the
+  registered agent's manifest (what the runtime itself checks) when a
+  runtime holds the agent, else the catalog the edited step's own
+  request recorded — no longer the run's last catalog per tool name, so
+  a schema that changed mid-run no longer refuses a valid edit of an
+  earlier step (or passes an invalid one). Both routes.
+- **A named default `tool_choice` that `park_on` parks** is refused on
+  both sides, in the explicit case's sentence (`tool_choice names x,
+  which park_on parks: every forced call would park`). weft/runtime's
+  "turns off" sentences now read the tool unquoted, as Studio's always
+  did — one sentence on both sides.
+- **Read-token hygiene**: the preview no longer serves a named tool
+  choice's tool or the stop sequences in `will_send`/`was_sent` to a
+  read-scoped panel token, and `GET /api/runtimes` drops the registered
+  defaults' `tool_choice.name` and `stop` for it — as the spans already
+  hide the tool name.
+- **The preview's `was_sent` at the step count**: from a `from_step`
+  equal to the step count, the recorded request is now step
+  `from_step − 1`'s last attempt (each query paged to its end), not the
+  last of the run's first 1000 request records.
+- **`weft.override.tool_choice` reads `auto`** for an auto override (the
+  zero mode); it recorded `""`, indistinguishable from no override. An
+  attribute, not model-visible; the override hash of such a run changes.
+- **The wefttest fixture export decodes the transcript once**:
+  `obsdb.NewAssembler(batches).Step(...)` answers `AssembleStep`'s
+  result per step without re-decoding every messages batch (the export
+  was O(steps × transcript)); output unchanged.
 
 ### Fixed — the devtools panel (phase 4 review)
 

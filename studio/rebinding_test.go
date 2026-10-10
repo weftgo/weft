@@ -78,6 +78,7 @@ func TestDNSRebindingGuard(t *testing.T) {
 	}{
 		{"runs", http.MethodGet, "/api/runs", "", http.StatusOK},
 		{"search", http.MethodGet, "/api/search?q=hi", "", http.StatusOK},
+		{"traces", http.MethodGet, "/api/traces", "", http.StatusOK},
 		{"playground run", http.MethodPost, "/api/playground/runs", run, http.StatusAccepted},
 		{"live", http.MethodGet, "/api/live?session=s_1", "", http.StatusOK},
 		{"live grant", http.MethodPost, "/api/live-grant?session=s_1", "", http.StatusOK},

@@ -1,0 +1,71 @@
+{
+  "total": 4,
+  "traces": [
+    {
+      "trace_id": "4d000000000000000000000000000004",
+      "root": {
+        "span_id": "4d00000000000001",
+        "name": "invoke_agent orders"
+      },
+      "service": "studio-test",
+      "start": "2020-01-01T09:00:30.123Z",
+      "end": "2020-01-01T09:00:31.123Z",
+      "duration_ms": 1000,
+      "span_count": 1,
+      "error": false,
+      "run_ids": [
+        "tl_other"
+      ]
+    },
+    {
+      "trace_id": "3c000000000000000000000000000003",
+      "root": null,
+      "service": "orphan-svc",
+      "start": "2020-01-01T09:00:20.123Z",
+      "end": "2020-01-01T09:00:23.123Z",
+      "duration_ms": 3000,
+      "span_count": 2,
+      "error": false,
+      "run_ids": [],
+      "badge": "gap",
+      "reason": "the trace's root span was not stored: only spans under a parent that never arrived are here",
+      "fix": "check the exporter's drops"
+    },
+    {
+      "trace_id": "2b000000000000000000000000000002",
+      "root": {
+        "span_id": "2b00000000000001",
+        "name": "POST /chat"
+      },
+      "service": "edge-svc",
+      "start": "2020-01-01T09:00:10.123Z",
+      "end": "2020-01-01T09:00:13.123Z",
+      "duration_ms": 3000,
+      "span_count": 2,
+      "error": false,
+      "run_ids": [
+        "tl_web"
+      ]
+    },
+    {
+      "trace_id": "1a000000000000000000000000000001",
+      "root": {
+        "span_id": "1a00000000000001",
+        "name": "invoke_agent orders"
+      },
+      "service": "studio-test",
+      "start": "2020-01-01T09:00:00.123Z",
+      "end": "2020-01-01T09:00:05.123Z",
+      "duration_ms": 5000,
+      "span_count": 3,
+      "error": true,
+      "run_ids": [
+        "tl_parent",
+        "tl_parent/0/call_1"
+      ]
+    }
+  ],
+  "next_before": null,
+  "next_before_id": null
+}
+

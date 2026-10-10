@@ -531,6 +531,165 @@ func (d *DB) Trace(ctx context.Context, traceID string) (_ []obsdb.Span, err err
 	return d.querySpans(ctx, `trace_id = ? ORDER BY start_ns, span_id`, traceID)
 }
 
+// Traces groups the spans table by trace id (obsdb.DB.Traces): one
+// scan of the primary key's order, the filters in HAVING over the
+// group's aggregates — a trace's Start is MIN(start_ns), never one
+// span's — and three keyed reads for the page's roots, services and
+// run ids. The scope filter reads weft.public_id off every span's
+// attrs, the attribute /api/traces/{id}'s scope check reads.
+func (d *DB) Traces(ctx context.Context, q obsdb.TraceQuery) (_ obsdb.TracePage, err error) {
+	if err := d.checkOpen(); err != nil {
+		return obsdb.TracePage{}, err
+	}
+	defer d.closedErr(&err)
+	having, args := traceHaving(q)
+	const group = `SELECT trace_id, MIN(start_ns), MAX(end_ns), COUNT(*), MAX(status_code = 2)
+		FROM spans GROUP BY trace_id HAVING `
+	var total int
+	if err := d.reads.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM (`+group+having+`)`, args...).Scan(&total); err != nil {
+		return obsdb.TracePage{}, err
+	}
+	limit := obsdb.LimitOf(q.Limit)
+	frag, qargs := having, append([]any{}, args...)
+	if !q.Before.IsZero() {
+		ns := q.Before.UnixNano()
+		if q.BeforeID != "" {
+			frag += " AND (MIN(start_ns) < ? OR (MIN(start_ns) = ? AND trace_id < ?))"
+			qargs = append(qargs, ns, ns, q.BeforeID)
+		} else {
+			frag += " AND MIN(start_ns) < ?"
+			qargs = append(qargs, ns)
+		}
+	}
+	rows, err := d.queryTraceRows(ctx, group+frag+` ORDER BY MIN(start_ns) DESC, trace_id DESC LIMIT ?`,
+		append(qargs, limit))
+	if err != nil {
+		return obsdb.TracePage{}, err
+	}
+	page := obsdb.TracePage{Traces: rows, Total: total}
+	if len(rows) == limit {
+		// The tied traces ride along (RunPage's rule), up to MaxTies.
+		last := rows[len(rows)-1]
+		ties, err := d.queryTraceRows(ctx,
+			group+having+` AND MIN(start_ns) = ? AND trace_id < ? ORDER BY trace_id DESC LIMIT ?`,
+			append(append([]any{}, args...), last.Start.UnixNano(), last.TraceID, obsdb.MaxTies))
+		if err != nil {
+			return obsdb.TracePage{}, err
+		}
+		page.Traces = append(page.Traces, ties...)
+		end := page.Traces[len(page.Traces)-1]
+		page.NextBefore, page.NextBeforeID = &end.Start, end.TraceID
+	}
+	if err := d.fillTraces(ctx, page.Traces); err != nil {
+		return obsdb.TracePage{}, err
+	}
+	return page, nil
+}
+
+// traceHaving builds Traces' HAVING fragment over one trace's group of
+// spans, with its bind arguments in text order.
+func traceHaving(q obsdb.TraceQuery) (string, []any) {
+	conds := []string{"1=1"}
+	var args []any
+	if q.Service != "" {
+		conds = append(conds, "SUM(service = ?) > 0")
+		args = append(args, q.Service)
+	}
+	if q.PublicID != "" {
+		conds = append(conds, `SUM(COALESCE(json_extract(attrs, '$."weft.public_id"'), '') <> ?) = 0`)
+		args = append(args, q.PublicID)
+	}
+	if !q.Since.IsZero() {
+		conds = append(conds, "MIN(start_ns) >= ?")
+		args = append(args, q.Since.UnixNano())
+	}
+	if !q.Until.IsZero() {
+		conds = append(conds, "MIN(start_ns) < ?")
+		args = append(args, q.Until.UnixNano())
+	}
+	return strings.Join(conds, " AND "), args
+}
+
+// queryTraceRows reads the grouped columns of Traces' select.
+func (d *DB) queryTraceRows(ctx context.Context, query string, args []any) ([]obsdb.TraceRow, error) {
+	rs, err := d.reads.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rs.Close() }()
+	var out []obsdb.TraceRow
+	for rs.Next() {
+		var r obsdb.TraceRow
+		var start, end int64
+		var failed int
+		if err := rs.Scan(&r.TraceID, &start, &end, &r.SpanCount, &failed); err != nil {
+			return nil, err
+		}
+		r.Start, r.End, r.Error = timeOf(start), timeOf(end), failed == 1
+		out = append(out, r)
+	}
+	return out, rs.Err()
+}
+
+// fillTraces completes a page's rows by trace id: the root (the
+// earliest parentless span), the service (the root's, else the
+// earliest span's) and the distinct run ids.
+func (d *DB) fillTraces(ctx context.Context, rows []obsdb.TraceRow) error {
+	if len(rows) == 0 {
+		return nil
+	}
+	ids := make([]any, len(rows))
+	byID := make(map[string]*obsdb.TraceRow, len(rows))
+	for i := range rows {
+		ids[i] = rows[i].TraceID
+		byID[rows[i].TraceID] = &rows[i]
+	}
+	in := "(" + strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",") + ")"
+	// The first span of each trace, a parentless one before any other:
+	// the root when there is one, the earliest span otherwise.
+	rs, err := d.reads.QueryContext(ctx, `SELECT trace_id, span_id, name, service, parent_span_id = '' FROM (
+		SELECT trace_id, span_id, name, service, parent_span_id, ROW_NUMBER() OVER (
+			PARTITION BY trace_id ORDER BY parent_span_id <> '', start_ns, span_id) AS rn
+		FROM spans WHERE trace_id IN `+in+`) WHERE rn = 1`, ids...)
+	if err != nil {
+		return err
+	}
+	for rs.Next() {
+		var id, spanID, name, service string
+		var root int
+		if err := rs.Scan(&id, &spanID, &name, &service, &root); err != nil {
+			_ = rs.Close()
+			return err
+		}
+		if r := byID[id]; r != nil {
+			r.Service = service
+			if root == 1 {
+				r.Root = &obsdb.TraceRoot{SpanID: spanID, Name: name}
+			}
+		}
+	}
+	if err := rs.Close(); err != nil {
+		return err
+	}
+	rs, err = d.reads.QueryContext(ctx, `SELECT DISTINCT trace_id, run_id FROM spans
+		WHERE run_id <> '' AND trace_id IN `+in+` ORDER BY trace_id, run_id`, ids...)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rs.Close() }()
+	for rs.Next() {
+		var id, run string
+		if err := rs.Scan(&id, &run); err != nil {
+			return err
+		}
+		if r := byID[id]; r != nil {
+			r.RunIDs = append(r.RunIDs, run)
+		}
+	}
+	return rs.Err()
+}
+
 func (d *DB) querySpans(ctx context.Context, where string, arg any) ([]obsdb.Span, error) {
 	rs, err := d.reads.QueryContext(ctx, `SELECT trace_id, span_id, parent_span_id, name, kind,
 		start_ns, end_ns, status_code, status_message, service, attrs, resource, events

@@ -15,6 +15,7 @@
     "export",
     "logs",
     "diff",
+    "traces",
     "search",
     "live",
     "ingest",

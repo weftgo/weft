@@ -218,7 +218,12 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    truncated hole, cause response_cap; capability "diff"; drawn through src/lib/stepdiff.ts —
 //    //    unknown reads "not comparable" — by Studio's N-way /compare?a=&b=[…] page (N−1 diffs against
 //    //    a; from the run header, the replay drawer, the playground) and the panel's 2-way result
-//    //    pane, parity.test.ts holding both to the same rows), traces/{id},
+//    //    pane, parity.test.ts holding both to the same rows), traces (the trace list: each
+//    //    trace's root {span_id, name} — null + badge gap when only child spans arrived — service,
+//    //    start/end/duration_ms, span_count, error, run_ids (the join key); since/until (RFC 3339, on
+//    //    its earliest span)/service (exact, any span)/public_id, paged as runs; a panel token lists
+//    //    the traces every span of which is its public id's; capability "traces" — obsdb.DB.Traces,
+//    //    no migration), traces/{id},
 //    //    sessions, sessions/{id}, sessions/{id}/public_id (the reverse of public/{public_id}: the dev token's
 //    //    alone, every panel token 403 hidden), public/{public_id}, /api/live (SSE), /api/panel-tokens (with a Token),
 //    //    /panel.js (the devtools panel, WEFT-DEVTOOLS §5 — its host API, plan C4: the element's

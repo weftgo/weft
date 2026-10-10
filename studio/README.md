@@ -1394,7 +1394,24 @@ the run's count). Both runs must be inside a panel token's public id (403
 whichever side is outside; an unknown run 404; a missing `a` or `b`
 400); `a == b` is every row unchanged. The route is two-way: an N-way
 compare calls it N−1 times against one base run),
-`traces/{trace_id}` (any trace), `sessions`, `sessions/{id}` (turns in
+`traces` (plan A7, under the `traces` capability: the trace list —
+every trace the database holds, weft or not, one row each, newest
+first — `{total, traces, next_before, next_before_id}`, each row
+`{trace_id, root: {span_id, name} | null, service, start, end,
+duration_ms, span_count, error, run_ids}`: the root is the earliest span
+with no parent, `null` with `badge: "gap"` (and its reason and fix)
+when only child spans arrived; `service` is the root's, else the
+earliest span's; `error` is any span ended in error; `run_ids` the weft
+runs the trace holds, a subagent child beside its parent — the join key
+to `runs/{id}`, `[]` for non-weft spans only. `since`/`until` (RFC 3339,
+on the trace's start: its earliest span), `service` (exact; traces
+holding a span of it), `public_id`, `before`/`before_id`/`limit` paged
+as `runs` (default 50, max 500). Scoped like `runs`: a panel token lists
+the traces every span of which carries its public id — the rule
+`traces/{trace_id}` checks, so the list offers no trace the detail
+refuses and no other public id's run id — and a foreign `public_id` is
+403; a row carries no span attribute, so the read scope has nothing to
+redact), `traces/{trace_id}` (any trace), `sessions`, `sessions/{id}` (turns in
 order), `sessions/{id}/public_id` (the reverse of `public/`: `{session_id,
 public_id}`, the public id `thread.PublicID` stamped on the session's
 turns — MAX(`weft.public_id`) over its top-level turns: one value per
@@ -1476,7 +1493,8 @@ capabilities}`, capability `panel-config`) answers a loopback (or
 Origin only, else 404.
 
 Capabilities are computed from the registered route groups
-(`routes.go`) — never hard-coded: `live` (the stream and its grant),
+(`routes.go`) — never hard-coded: `requests`, `steps`, `export`,
+`logs`, `diff` and `traces` (always present), `live` (the stream and its grant),
 `ingest`, `auth` (with a
 token), `search` (when the database implements `obsdb.Searcher` — both
 first-party backends do; `capabilities_off.search` says so otherwise), and `runtimes`, `breakpoints`, `steer` + `playground` under

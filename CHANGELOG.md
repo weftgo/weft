@@ -42,6 +42,34 @@ module, ADR 0005).
   are indexed in the migration's transaction). ClickHouse needs no
   migration: search scans the stored records with
   `positionCaseInsensitiveUTF8`.
+- `GET /api/traces` (plan A7, capability `traces`): the trace list —
+  every trace the database holds, weft or not, one row each, newest
+  first: `trace_id`, `root` (`{span_id, name}`, the earliest span with
+  no parent; `null` with `badge: "gap"` when only child spans arrived),
+  `service` (the root's, else the earliest span's), `start`, `end`,
+  `duration_ms`, `span_count`, `error` (any span ended in error) and
+  `run_ids` (the weft runs the trace holds — a subagent child beside
+  its parent — the join key to run pages). Filters `since`/`until`
+  (RFC 3339, on the trace's start: its earliest span), `service` (exact:
+  traces holding a span of that service), `public_id`; paged like
+  `/api/runs` (`before`/`before_id`/`limit`, default 50, max 500,
+  `next_before`/`next_before_id`, `total`). Scoped like `/api/runs`: a
+  panel token lists the traces every span of which carries its public
+  id — the rule `/api/traces/{id}` checks, so no listed trace is refused
+  and no other public id's run id is listed; a foreign `public_id` is
+  403. A row carries no span attribute, so the read scope has nothing
+  to redact. In the auth matrix for every identity, the rebinding
+  guard's table and `/api/meta.capabilities`.
+- `obsdb.DB.Traces(ctx, obsdb.TraceQuery) (obsdb.TracePage, error)`
+  with `obsdb.TraceRow` and `obsdb.TraceRoot`, on both backends over
+  the spans table (SQLite `spans`, ClickHouse `otel_traces`; no
+  migration); the obsdbtest conformance table gains `Traces`.
+
+### Changed — breaking
+
+- `obsdb.DB` gains `Traces`: a third-party `obsdb.DB` implementation
+  must add the method (group its spans by trace id; the obsdbtest
+  `Traces` case pins the answer).
 
 ## 0.13.0 — 2026-10-10
 

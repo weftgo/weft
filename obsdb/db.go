@@ -72,6 +72,11 @@ type DB interface {
 	// a finished run with no span to attribute them through.
 	OtherLogs(ctx context.Context, runID string, q LogQuery) (LogPage, error)
 	Trace(ctx context.Context, traceID string) ([]Span, error) // empty, not an error, for an unknown trace
+	// Traces lists traces — weft and non-weft alike, one row per trace
+	// id the spans table holds — newest first (TraceQuery, TracePage):
+	// the row is computed from the trace's spans alone, so a trace
+	// whose root never arrived is listed with Root nil.
+	Traces(ctx context.Context, q TraceQuery) (TracePage, error)
 
 	Sessions(ctx context.Context, q SessionQuery) (SessionPage, error)
 	Session(ctx context.Context, id string) (SessionDetail, error)
@@ -148,6 +153,63 @@ type RunQuery struct {
 	// sharing one Started. Pass RunPage.NextBeforeID.
 	BeforeID string
 	Limit    int // 0 = 50, max 500
+}
+
+// TraceQuery selects traces for Traces. The zero value lists every
+// trace, newest first, 50 at a time. A trace's time is its Start: the
+// earliest start of the spans it holds.
+type TraceQuery struct {
+	// Service keeps the traces holding at least one span whose resource
+	// service name is exactly this ("" any).
+	Service string
+	// PublicID keeps the traces every span of which carries
+	// weft.public_id = PublicID — the rule a panel token's
+	// /api/traces/{id} read applies, so a scoped list offers no trace
+	// its detail would refuse (a non-weft span or another public id's
+	// run in the trace excludes it).
+	PublicID string
+	Since    time.Time // Start at or after; zero = no bound
+	Until    time.Time // Start before; zero = no bound
+	Before   time.Time // cursor on Start; zero = newest
+	// BeforeID, with Before, makes the cursor the pair (Start, TraceID),
+	// as RunQuery.BeforeID: pass TracePage.NextBeforeID.
+	BeforeID string
+	Limit    int // 0 = 50, max 500
+}
+
+// TraceRow is one trace in a list, computed from its spans: the time
+// range they cover, how many there are (each (trace, span) once,
+// whatever a retried batch duplicated), whether any ended with status
+// error, the distinct weft.run.id values they carry (sorted: a subagent
+// child shares its parent's trace, so both are here) and the root —
+// the earliest span with no parent span id, nil when none arrived (only
+// child spans were stored: a hole the reader badges). Service is the
+// root's, or the earliest span's when the root is missing.
+type TraceRow struct {
+	TraceID    string
+	Root       *TraceRoot
+	Service    string
+	Start, End time.Time
+	SpanCount  int
+	Error      bool
+	RunIDs     []string
+}
+
+// TraceRoot is a trace's root span: its id and name.
+type TraceRoot struct {
+	SpanID, Name string
+}
+
+// TracePage is one Traces result, paged as RunPage is: newest Start
+// first (ties by TraceID, descending), NextBefore/NextBeforeID are the
+// next TraceQuery.Before/BeforeID (nil and "" on the last page), traces
+// sharing the last row's Start ride along up to MaxTies, and Total
+// counts the whole match, cursor aside.
+type TracePage struct {
+	Traces       []TraceRow
+	Total        int
+	NextBefore   *time.Time
+	NextBeforeID string
 }
 
 // Experiment is one saved playground group: a name, the variants and

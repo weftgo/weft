@@ -163,6 +163,16 @@ func (s *Server) registerGroups() {
 			mux.HandleFunc("GET /api/diff", s.serveDiff)
 		},
 	})
+	// The trace list (plan A7): every trace the database holds, one
+	// row each. Always present; the capability is what the trace page
+	// and the command palette gate their list on.
+	s.addGroup(routeGroup{
+		name:       "traces",
+		capability: "traces",
+		register: func(mux *http.ServeMux, s *Server) {
+			mux.HandleFunc("GET /api/traces", s.serveTraces)
+		},
+	})
 	// Search over runs (plan A7): present when the database can
 	// search (obsdb.Searcher — both first-party backends); otherwise
 	// meta.capabilities_off says why.

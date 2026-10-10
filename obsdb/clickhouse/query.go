@@ -680,6 +680,142 @@ func (d *DB) Trace(ctx context.Context, traceID string) (_ []obsdb.Span, err err
 		spanDedup, traceID)
 }
 
+// traceColumns is Traces' outer select over traceInner's groups.
+const traceColumns = `TraceId, StartNs, EndNs, SpanCount, Failed, HasRoot, RootSpanId, RootName, Svc, RunIds`
+
+// Traces groups otel_traces by TraceId (obsdb.DB.Traces), every column
+// an aggregate over the trace's span rows — idempotent under a retried
+// batch's duplicate rows (uniqExact counts each SpanId once; argMin,
+// min, max and groupUniqArray ignore a repeat) — and filters the groups,
+// never the rows: a trace's Start is min(Timestamp) over all its spans.
+// Times bind as integer nanoseconds (Runs' reason: a positional
+// time.Time renders at Seconds scale).
+func (d *DB) Traces(ctx context.Context, q obsdb.TraceQuery) (_ obsdb.TracePage, err error) {
+	if err := d.checkOpen(); err != nil {
+		return obsdb.TracePage{}, err
+	}
+	defer d.closedErr(&err)
+	inner, args := traceInner(q)
+	conds := []string{"1=1"}
+	if q.Service != "" {
+		conds = append(conds, "SvcHits > 0")
+	}
+	if q.PublicID != "" {
+		conds = append(conds, "Foreign = 0")
+	}
+	if !q.Since.IsZero() {
+		conds = append(conds, "StartNs >= ?")
+		args = append(args, q.Since.UnixNano())
+	}
+	if !q.Until.IsZero() {
+		conds = append(conds, "StartNs < ?")
+		args = append(args, q.Until.UnixNano())
+	}
+	where := strings.Join(conds, " AND ")
+	var total uint64
+	if err := d.conn.QueryRow(ctx, "SELECT count() FROM ("+inner+") WHERE "+where, args...).Scan(&total); err != nil {
+		return obsdb.TracePage{}, err
+	}
+	pageArgs := append([]any{}, args...)
+	if !q.Before.IsZero() {
+		ns := q.Before.UnixNano()
+		if q.BeforeID != "" {
+			where += " AND (StartNs < ? OR (StartNs = ? AND TraceId < ?))"
+			pageArgs = append(pageArgs, ns, ns, q.BeforeID)
+		} else {
+			where += " AND StartNs < ?"
+			pageArgs = append(pageArgs, ns)
+		}
+	}
+	// WITH TIES, capped at MaxTies past the limit: Runs' paging rule.
+	limit := obsdb.LimitOf(q.Limit)
+	sql := "SELECT " + traceColumns + " FROM (SELECT * FROM (" + inner + ") WHERE " + where +
+		" ORDER BY StartNs DESC LIMIT ? WITH TIES) ORDER BY StartNs DESC, TraceId DESC LIMIT ?"
+	pageArgs = append(pageArgs, limit, limit+obsdb.MaxTies)
+	rs, err := d.conn.Query(ctx, sql, pageArgs...)
+	if err != nil {
+		return obsdb.TracePage{}, err
+	}
+	defer func() { _ = rs.Close() }()
+	page := obsdb.TracePage{Total: int(total)}
+	for rs.Next() {
+		var r obsdb.TraceRow
+		var start, end int64
+		var count uint64
+		var failed, hasRoot uint8
+		var rootID, rootName string
+		if err := rs.Scan(&r.TraceID, &start, &end, &count, &failed, &hasRoot,
+			&rootID, &rootName, &r.Service, &r.RunIDs); err != nil {
+			return obsdb.TracePage{}, err
+		}
+		r.Start, r.End = timeOf(time.Unix(0, start)), timeOf(time.Unix(0, end))
+		r.SpanCount, r.Error = int(count), failed == 1
+		if hasRoot == 1 {
+			r.Root = &obsdb.TraceRoot{SpanID: rootID, Name: rootName}
+		}
+		if len(r.RunIDs) == 0 {
+			r.RunIDs = nil
+		}
+		page.Traces = append(page.Traces, r)
+	}
+	if err := rs.Err(); err != nil {
+		return obsdb.TracePage{}, err
+	}
+	if len(page.Traces) >= limit {
+		end := page.Traces[len(page.Traces)-1]
+		page.NextBefore, page.NextBeforeID = &end.Start, end.TraceID
+	}
+	return page, nil
+}
+
+// traceInner is the grouped trace list with its bind arguments, in text
+// order: the select list's two filter counts first, then the narrowing.
+// Each filter also narrows the scan to the traces holding a span that
+// could satisfy it (a superset: a trace that starts at or after Since
+// has a span that does; one every span of which carries the public id
+// has one that does), so a filtered list reads those traces by the
+// TraceId bloom index instead of grouping the table. The aliases differ
+// from every column name: ClickHouse aliases are query-global
+// (runsInner's note).
+func traceInner(q obsdb.TraceQuery) (string, []any) {
+	const first = "(Timestamp, SpanId)"
+	cols := []string{
+		"TraceId",
+		"min(toUnixTimestamp64Nano(Timestamp)) AS StartNs",
+		"max(toUnixTimestamp64Nano(Timestamp) + toInt64(Duration)) AS EndNs",
+		"uniqExact(SpanId) AS SpanCount",
+		"countIf(StatusCode IN ('Error', 'STATUS_CODE_ERROR')) > 0 AS Failed",
+		"countIf(ParentSpanId = '') > 0 AS HasRoot",
+		"argMinIf(SpanId, " + first + ", ParentSpanId = '') AS RootSpanId",
+		"toString(argMinIf(SpanName, " + first + ", ParentSpanId = '')) AS RootName",
+		"toString(if(HasRoot, argMinIf(ServiceName, " + first + ", ParentSpanId = ''), argMin(ServiceName, " + first + "))) AS Svc",
+		"arraySort(groupUniqArrayIf(toString(RunId), RunId != '')) AS RunIds",
+	}
+	var args, narrowArgs []any
+	var narrow []string
+	if q.Service != "" {
+		cols = append(cols, "countIf(ServiceName = ?) AS SvcHits")
+		args = append(args, q.Service)
+		narrow = append(narrow, "TraceId IN (SELECT t.TraceId FROM otel_traces AS t WHERE t.ServiceName = ?)")
+		narrowArgs = append(narrowArgs, q.Service)
+	}
+	if q.PublicID != "" {
+		cols = append(cols, "countIf(PublicId != ?) AS Foreign")
+		args = append(args, q.PublicID)
+		narrow = append(narrow, "TraceId IN (SELECT t.TraceId FROM otel_traces AS t WHERE t.PublicId = ?)")
+		narrowArgs = append(narrowArgs, q.PublicID)
+	}
+	if !q.Since.IsZero() {
+		narrow = append(narrow, "TraceId IN (SELECT t.TraceId FROM otel_traces AS t WHERE t.Timestamp >= fromUnixTimestamp64Nano(toInt64(?)))")
+		narrowArgs = append(narrowArgs, q.Since.UnixNano())
+	}
+	sql := "SELECT " + strings.Join(cols, ", ") + " FROM otel_traces"
+	if len(narrow) > 0 {
+		sql += " WHERE " + strings.Join(narrow, " AND ")
+	}
+	return sql + " GROUP BY TraceId", append(args, narrowArgs...)
+}
+
 // spanDedup makes the span reads idempotent on (trace, span) — the
 // promise doc.go makes and obsdb/sqlite keeps with INSERT OR IGNORE.
 // otel_traces is a plain MergeTree (a replacing key would collapse

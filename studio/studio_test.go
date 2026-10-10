@@ -471,14 +471,14 @@ func TestMetaGolden(t *testing.T) {
 	// (S4.2): the read API names none; the request record's routes
 	// (requests, ADR 0028 §10), the step route (steps, plan A7), the
 	// export and the app logs (export, logs, plan A7), the run diff
-	// (diff, plan E3.1), live, ingest and
+	// (diff, plan E3.1), the trace list (traces, plan A7), live, ingest and
 	// the panel's config (panel-config, plan B3) are registered, so the
 	// open handler reports exactly
-	// [requests steps export logs diff search live ingest panel-config] — the
+	// [requests steps export logs diff traces search live ingest panel-config] — the
 	// playground joins with its own (step 8).
 	_, _, plain := get(t, Handler(DB(fixtureDB(t))), "/studio/api/meta")
-	if !strings.Contains(plain, `"capabilities":["requests","steps","export","logs","diff","search","live","ingest","panel-config"]`) {
-		t.Errorf("default capabilities = %s, want [requests steps export logs diff search live ingest panel-config]", plain)
+	if !strings.Contains(plain, `"capabilities":["requests","steps","export","logs","diff","traces","search","live","ingest","panel-config"]`) {
+		t.Errorf("default capabilities = %s, want [requests steps export logs diff traces search live ingest panel-config]", plain)
 	}
 	// Ingest is open on loopback without a token, and meta says so
 	// (S4.4); a configured token closes it.
@@ -491,8 +491,8 @@ func TestMetaGolden(t *testing.T) {
 	}
 	// NoIngest drops the ingest group with its routes and capability.
 	_, _, ro := get(t, Handler(DB(fixtureDB(t)), NoIngest()), "/studio/api/meta")
-	if !strings.Contains(ro, `"capabilities":["requests","steps","export","logs","diff","search","live","panel-config"]`) || !strings.Contains(ro, `"ingest_open":false`) {
-		t.Errorf("NoIngest meta = %s, want capabilities [requests steps export logs diff search live panel-config] and ingest_open false", ro)
+	if !strings.Contains(ro, `"capabilities":["requests","steps","export","logs","diff","traces","search","live","panel-config"]`) || !strings.Contains(ro, `"ingest_open":false`) {
+		t.Errorf("NoIngest meta = %s, want capabilities [requests steps export logs diff traces search live panel-config] and ingest_open false", ro)
 	}
 	if code, _, _ := post(t, Handler(DB(fixtureDB(t)), NoIngest()), "/studio/v1/logs", "application/json", "{}"); code != http.StatusNotFound {
 		t.Errorf("NoIngest /v1/logs: %d, want 404", code)
@@ -501,12 +501,12 @@ func TestMetaGolden(t *testing.T) {
 	// runtime link's (step 8's playground.go registers both; the
 	// step-6 pin asserted neither existed yet).
 	_, _, pg := get(t, Handler(DB(fixtureDB(t)), Playground(true)), "/studio/api/meta")
-	if !strings.Contains(pg, `"capabilities":["requests","steps","export","logs","diff","search","live","ingest","panel-config","runtimes","preview","breakpoints","steer","playground"]`) {
+	if !strings.Contains(pg, `"capabilities":["requests","steps","export","logs","diff","traces","search","live","ingest","panel-config","runtimes","preview","breakpoints","steer","playground"]`) {
 		t.Errorf("Playground capabilities = %s", pg)
 	}
 	// A hosting wrapper declares its own verbs beside the groups'.
 	_, _, caps := get(t, Handler(DB(fixtureDB(t)), Capabilities("fleet")), "/studio/api/meta")
-	if !strings.Contains(caps, `"capabilities":["requests","steps","export","logs","diff","search","live","ingest","panel-config","fleet"]`) {
+	if !strings.Contains(caps, `"capabilities":["requests","steps","export","logs","diff","traces","search","live","ingest","panel-config","fleet"]`) {
 		t.Errorf("declared capabilities = %s", caps)
 	}
 }

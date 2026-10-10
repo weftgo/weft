@@ -184,6 +184,9 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		{"transcript-as-of-step.golden.json", "/api/runs/" + res.ID + "/transcript?step=1", []string{".compacted_at", ".batches[].messages[].content[][tool_call].args", ".messages[].content[][tool_call].args"}},
 		{"spans-sub.golden.json", "/api/runs/" + res.ID + "/spans", nil},
 		{"trace.golden.json", "/api/traces/" + trace, nil},
+		// The trace list (plan A7): the real run's trace has its root; the
+		// fixture's orphan trace pins the missing root's null and badge.
+		{"traces.golden.json", "/api/traces", []string{".traces[].root=<nil>", ".traces[].badge", ".traces[].reason", ".traces[].fix"}},
 		{"sessions.golden.json", "/api/sessions", nil},
 		{"session-orders.golden.json", "/api/sessions/s_x", []string{".runs[].finished=<nil>", ".runs[].meta.cwd"}},
 		{"public.golden.json", "/api/public/pub_x", nil},

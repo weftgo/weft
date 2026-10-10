@@ -59,7 +59,8 @@ var overrideNames = map[string]string{
 //   - a read-scoped panel token never reads the tool names a run's
 //     overrides carry on its invoke_agent span (OnlyTools, ParkOn,
 //     ParkAllExcept, a named ToolChoice): spans, traces and the
-//     export drop them (spansFor);
+//     export drop them (spansFor); the trace list carries no span
+//     attribute, so there is nothing to drop;
 
 //   - what is not public-id-shaped is the server token's alone: the
 //     runtime link, breakpoints, experiments, the token mint;
@@ -432,6 +433,26 @@ func TestAuthMatrix(t *testing.T) {
 		{name: "HEAD /api/runs/{id}/export?format=wefttest", method: "HEAD", path: func(res string) string { return "/api/runs/" + run[res] + "/export?format=wefttest" }, resources: all, want: acting(ok)},
 		{name: "GET /api/runs/{id}/export?format=xml", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/export?format=xml" }, resources: one, want: anyValid(http.StatusBadRequest)},
 		{name: "GET /api/traces/{id}", method: "GET", path: func(res string) string { return "/api/traces/" + trace[res] }, resources: all, want: scoped(ok)},
+		// The trace list (plan A7): /api/runs' scoping — forced onto a
+		// panel token's public id (pinned below: no foreign trace or run
+		// id), a foreign public_id 403 before any parameter is read.
+		{name: "GET /api/traces", method: "GET", path: fixed("/api/traces"), resources: one, want: anyValid(ok)},
+		{name: "GET /api/traces?service=svc&limit=500", method: "GET", path: fixed("/api/traces?service=svc&limit=500"), resources: one, want: anyValid(ok)},
+		{name: "GET /api/traces?public_id=", method: "GET", path: func(res string) string { return "/api/traces?public_id=" + public[res] },
+			resources: []string{"A", "B", "missing"}, want: func(kind, res string) int {
+				if kind == "server" || res == "A" {
+					return ok // an unknown public id is an empty list for the server
+				}
+				return forbidden403
+			}},
+		{name: "GET /api/traces?since=bad", method: "GET", path: fixed("/api/traces?since=bad"), resources: one, want: anyValid(http.StatusBadRequest)},
+		{name: "GET /api/traces?public_id=<B>&since=bad", method: "GET", path: fixed("/api/traces?public_id=pub_b&since=bad"), resources: []string{"B"},
+			want: func(kind, _ string) int {
+				if kind == "server" {
+					return http.StatusBadRequest
+				}
+				return forbidden403
+			}},
 		{name: "GET /api/sessions", method: "GET", path: fixed("/api/sessions"), resources: one, want: anyValid(ok)},
 		{name: "GET /api/sessions?public_id=", method: "GET", path: func(res string) string { return "/api/sessions?public_id=" + public[res] },
 			resources: []string{"A", "B", "missing"}, want: func(kind, res string) int {
@@ -911,6 +932,32 @@ func TestAuthMatrix(t *testing.T) {
 		}
 	}
 
+	// The trace list (plan A7) carries no span attribute: the read
+	// scope's override redaction has nothing to remove, so no identity
+	// reads a tool override there — and every panel token still lists
+	// its own trace A.
+	for _, id := range identities {
+		if id.kind == "bad" {
+			continue
+		}
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/traces?limit=500", nil)
+		req.Header.Set("Authorization", "Bearer "+id.token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != ok || !strings.Contains(string(b), `"trace_id":"`+trace["A"]+`"`) || !strings.Contains(string(b), `"run_ids":["run_a"]`) {
+			t.Errorf("GET /api/traces as %s = %d %s, want 200 listing trace A with run_a", id.name, resp.StatusCode, b)
+		}
+		for k, v := range overrideNames {
+			if strings.Contains(string(b), v) || strings.Contains(string(b), k) {
+				t.Errorf("GET /api/traces as %s carries %s (%s): %s", id.name, k, v, b)
+			}
+		}
+	}
+
 	// api/meta's db.path and db.size (plan B5), and pid (plan B2), are the server token's
 	// (setup B's dev token) — omitted, never nulled, for a read- or a
 	// playground-scoped panel token; db.kind and runtimes are
@@ -983,7 +1030,7 @@ func TestAuthMatrix(t *testing.T) {
 		for _, path := range []string{"/api/runs?parent=*", "/api/runs?all=1", "/api/runs?parent=run_b",
 			"/api/runs?session=s_b", "/api/runs?agent=acme-support&limit=500", "/api/sessions?agent=acme-support",
 			"/api/search?q=secret", "/api/search?q=secret&all=1", "/api/search?q=pub_b&parent=*", "/api/search?session=s_b&all=1",
-			"/api/search?tool=refund&all=1"} {
+			"/api/search?tool=refund&all=1", "/api/traces", "/api/traces?service=svc&limit=500"} {
 			req, _ := http.NewRequest(http.MethodGet, ts.URL+path, nil)
 			req.Header.Set("Authorization", "Bearer "+id.token)
 			resp, err := http.DefaultClient.Do(req)
@@ -992,7 +1039,7 @@ func TestAuthMatrix(t *testing.T) {
 			}
 			b, _ := io.ReadAll(resp.Body)
 			_ = resp.Body.Close()
-			for _, foreign := range []string{"run_b", "run_none", "pub_b", "s_b", "s_none"} {
+			for _, foreign := range []string{"run_b", "run_none", "pub_b", "s_b", "s_none", trace["B"], trace["none"]} {
 				if strings.Contains(string(b), `"`+foreign) {
 					t.Errorf("%s as %s lists %s: %s", path, id.name, foreign, b)
 				}

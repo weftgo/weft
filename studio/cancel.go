@@ -41,8 +41,14 @@ const cancelling = "cancelling"
 // token is refused; a playground-scoped one cancels inside its public
 // id only (the command's scope, else the run row's; a run with none
 // is outside every panel token). The scope is checked before anything
-// says whether the run is the app's or finished, so a refusal never
-// describes another public id's run.
+// says whether the run is the app's, parked or finished; an unknown id
+// is 404 before the scope check (as steer answers it), which says only
+// that no run has that id — run ids are ULIDs, not guessable.
+//
+// Best effort: the cancel frame rides the runtime's command stream, and
+// a frame lost to a stream reconnect is not retried — cancel again. A
+// parked run (pending calls, the approval boundary) is not cancelled:
+// it is over until decided, so the 409 says to approve or deny instead.
 func (s *Server) serveCancel(rs *linkruntime.RuntimeServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		runID := r.PathValue("id")
@@ -78,6 +84,13 @@ func (s *Server) serveCancel(rs *linkruntime.RuntimeServer) http.HandlerFunc {
 		if !started {
 			writeError(w, r, http.StatusConflict, "conflict",
 				"run "+runID+" is the app's own run, not one a runtime started: cancel arrives with F4")
+			return
+		}
+		if stored && row.Pending > 0 {
+			// Parked at the approval boundary: the run ended successfully
+			// with its calls pending; the next move is a decision.
+			writeError(w, r, http.StatusConflict, "conflict",
+				"run "+runID+" is parked: decide its pending calls (approve/deny) instead")
 			return
 		}
 		if stored && (row.Status == obsdb.StatusSucceeded || row.Status == obsdb.StatusFailed) {

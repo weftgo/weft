@@ -103,6 +103,15 @@ func TestAuthMatrix(t *testing.T) {
 	public := map[string]string{"A": "pub_a", "B": "pub_b", "none": "", "missing": "pub_missing"}
 	run := map[string]string{"A": "run_a", "B": "run_b", "none": "run_none", "missing": "run_missing"}
 	session := map[string]string{"A": "s_a", "B": "s_b", "none": "s_none", "missing": "s_missing"}
+	// Runtime-started runs parked at the approval boundary (the cancel
+	// row's "decide instead" 409): rows ended with a pending call, seeded
+	// before every other run so none of them is a public id's latest;
+	// their commands are accepted below.
+	parkRun := map[string]string{"A": "pgpark_a", "B": "pgpark_b", "none": "pgpark_none", "missing": "pgpark_missing"}
+	for _, res := range []string{"A", "B", "none"} {
+		seedRun(t, srv.db, parkRun[res], public[res], "",
+			`{"type":"run_finish","run_id":"`+parkRun[res]+`","usage":{},"steps":1,"pending":[{"type":"tool_call","id":"call_1","name":"refund","args":{}}]}`, nil)
+	}
 	for _, res := range []string{"A", "B", "none"} {
 		seedRun(t, srv.db, run[res], public[res], session[res], "", nil)
 		span := obsdb.Span{
@@ -266,6 +275,17 @@ func TestAuthMatrix(t *testing.T) {
 		}
 		if code := do(http.MethodPost, "/api/runtime/acks", `{"command_id":"`+cmd[res]+`","state":"accepted","run_id":"`+rtRun[res]+`"}`, server); code != http.StatusOK {
 			t.Fatalf("ack %s: %d", cmd[res], code)
+		}
+	}
+	// The parked runs' commands (their rows were seeded first, above).
+	for _, res := range []string{"A", "B", "none"} {
+		id := "cmd_park_" + res
+		body := `{"runtime":"rt_test","agent":"acme-support","command_id":"` + id + `","input":"go","public_id":"` + public[res] + `"}`
+		if code := do(http.MethodPost, "/api/playground/runs", body, server); code != http.StatusAccepted {
+			t.Fatalf("enqueue %s: %d", id, code)
+		}
+		if code := do(http.MethodPost, "/api/runtime/acks", `{"command_id":"`+id+`","state":"accepted","run_id":"`+parkRun[res]+`"}`, server); code != http.StatusOK {
+			t.Fatalf("ack %s: %d", id, code)
 		}
 	}
 	// Runtime-started runs that are over (the cancel rows' 409): each
@@ -690,14 +710,16 @@ func TestAuthMatrix(t *testing.T) {
 			body: fixed(`{"call_id":"call_1","decision":"deny"}`), resources: []string{"A", "B"}, want: anyValid(forbidden403)},
 		// Cancel (plan H6): steer's rule — a read-scoped token never
 		// acts, a playground-scoped one inside its public id; the scope
-		// is checked before the run is said to be the app's own or
-		// finished (409), so a refusal never describes another public
-		// id's run.
+		// is checked before the run is said to be the app's own, parked
+		// or finished (409). An unknown id is 404 before the scope
+		// check, as steer answers it.
 		{name: "POST /api/runs/{id}/cancel", method: "POST", path: func(res string) string { return "/api/runs/" + rtRun[res] + "/cancel" },
 			resources: all, want: acting(accepted)},
 		{name: "POST /api/runs/{app's own run}/cancel", method: "POST", path: func(res string) string { return "/api/runs/" + run[res] + "/cancel" },
 			resources: []string{"A", "B", "none"}, want: acting(http.StatusConflict)},
 		{name: "POST /api/runs/{finished}/cancel", method: "POST", path: func(res string) string { return "/api/runs/" + finRun[res] + "/cancel" },
+			resources: []string{"A", "B", "none"}, want: acting(http.StatusConflict)},
+		{name: "POST /api/runs/{parked}/cancel", method: "POST", path: func(res string) string { return "/api/runs/" + parkRun[res] + "/cancel" },
 			resources: []string{"A", "B", "none"}, want: acting(http.StatusConflict)},
 		// Fixtures are request-derived (tool names, the system prompt):
 		// refused to a read-scoped token like the export's wefttest.

@@ -37,12 +37,13 @@ const runtimes = {
   ],
 }
 
+let fake: FakeStudio
 beforeEach(() => {
   stubBrowser()
   FakeEventSource.reset()
   vi.stubGlobal("EventSource", FakeEventSource)
   setStudioToken("")
-  new FakeStudio()
+  fake = new FakeStudio()
     .on("GET meta", { ...golden<Record<string, unknown>>("meta"), capabilities: ["live", "playground", "runtimes"] })
     .on("GET runtimes", runtimes)
     .on("GET experiments", {
@@ -57,6 +58,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
+  setStudioToken("")
 })
 
 const agentSelect = () => screen.getByLabelText("agent")
@@ -307,6 +309,77 @@ describe("the playground's hand-off edits and run controls (final web review)", 
     expect(await screen.findByRole("button", { name: "Run A" })).toBeTruthy()
     expect(screen.getByRole("button", { name: "Run matrix" })).toBeTruthy()
     expect(document.querySelector("[data-playground-read-only]")).toBeNull()
+  })
+
+  // The result cards follow the same rule: every verb that POSTs —
+  // save as fixture, a parked call's continue/skip/resolve, steer — is
+  // for a bearer that may act; a read-scoped token keeps the links (the
+  // run id) and sees the parked call's name, read-only. A card is on
+  // screen under a read token when the bearer changed after Run (the
+  // token re-adopted, another tab's sign-in): the swap lands before the
+  // card's first parked read.
+  describe("the result cards' verbs", () => {
+    const command = (id: string, state: string, run_id = "") => ({
+      command_id: id,
+      state,
+      run_id,
+      error: null,
+      created: rOK.started,
+      updated: rOK.started,
+    })
+    const pending = [{ type: "tool_call", id: "call_9", name: "refund", args: {} }]
+    beforeEach(() => {
+      fake
+        .on("GET meta", { ...golden<Record<string, unknown>>("meta"), capabilities: ["playground", "runtimes", "steer"] })
+        .on("POST playground/runs", command("cmd_1", "queued"))
+        .on("GET playground/commands/cmd_1", command("cmd_1", "accepted", "pg_1"))
+        .on("GET runs/pg_1", { ...rOK, id: "pg_1", status: "running", playground: true, pending: 1, children: [] })
+        .on("GET runs/pg_1/events", {
+          events: [
+            { type: "run_start", id: "pg_1", model: rOK.model, agent: "orders" },
+            { type: "step_start", run_id: "pg_1", index: 0 },
+            { type: "step_finish", run_id: "pg_1", index: 0, reason: "tool_calls", usage: { input_tokens: 5, output_tokens: 2 } },
+            { type: "run_finish", run_id: "pg_1", usage: { input_tokens: 5, output_tokens: 2 }, steps: 1, pending },
+          ].map((event, pos) => ({ pos, time: rOK.started, event })),
+          next_after: null,
+          done: true,
+          gaps: [],
+        })
+        .on("GET runs/pg_1/transcript", { batches: [] })
+    })
+    async function runCard(swapTo?: string): Promise<HTMLElement> {
+      renderApp("/playground?run=r_ok")
+      const run = await screen.findByRole<HTMLButtonElement>("button", { name: "Run A" })
+      await waitFor(() => expect(run.disabled).toBe(false))
+      fireEvent.click(run)
+      await waitFor(() => expect(fake.calls("POST playground/runs")).toHaveLength(1))
+      if (swapTo !== undefined) setStudioToken(swapTo)
+      const card = await waitFor(() => {
+        const c = document.querySelector<HTMLElement>('[data-variant="A"]')
+        expect(c).toBeTruthy()
+        return c!
+      })
+      await within(card).findByText(/^awaiting decision/)
+      return card
+    }
+
+    it("a read-scoped token: no fixture, no decision, no steer; the run link and the parked name stay", async () => {
+      const card = await runCard(readToken)
+      expect(within(card).getByText("awaiting decision (read-only)")).toBeTruthy()
+      expect(within(card).getByText("refund", { selector: "[data-pending-read-only]" })).toBeTruthy()
+      for (const name of ["save as fixture", "continue", "skip", "resolve", "steer"])
+        expect(within(card).queryByRole("button", { name })).toBeNull()
+      expect(within(card).queryByLabelText("steer message")).toBeNull()
+      expect(within(card).getByRole("link", { name: "pg_1" })).toBeTruthy()
+    })
+
+    it("a dev token: the fixture, decision and steer verbs are drawn", async () => {
+      const card = await runCard()
+      for (const name of ["save as fixture", "continue", "skip", "resolve", "steer"])
+        expect(within(card).getByRole("button", { name })).toBeTruthy()
+      expect(within(card).getByLabelText("steer message")).toBeTruthy()
+      expect(card.querySelector("[data-pending-read-only]")).toBeNull()
+    })
   })
 
   it("a hand-built edits= / lab= in the query leaves the bar with the first write-back; the page keeps them", async () => {

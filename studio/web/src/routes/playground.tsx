@@ -908,6 +908,7 @@ function Playground({ caps }: { caps: string[] }) {
                       .map((t) => t.name)
                       .filter((n) => !v.toolsOff.has(n))}
                     caps={caps}
+                    mayRun={mayRun}
                     live={caps.includes("live") && streamed.has(v.key)}
                     decide={(runID, callID, decision, text) =>
                       decide(v.key, runID, callID, decision, text)
@@ -1060,6 +1061,7 @@ function ResultCard({
   variant,
   tools,
   caps,
+  mayRun,
   live,
   decide,
 }: {
@@ -1070,6 +1072,10 @@ function ResultCard({
   variant: Variant
   tools: string[]
   caps: string[]
+  /** The bearer may act (canReplay, the run page's rule): else the
+   * card draws no verb that POSTs — no fixture save, no decision, no
+   * steer; a read-scoped token would be answered 403. The links stay. */
+  mayRun: boolean
   /** Tail the run over the live lane (else the 2 s poll). */
   live: boolean
   decide: (
@@ -1162,19 +1168,21 @@ function ResultCard({
         {/* P4's saves: the fixture is a wefttest replay test of this
             run (D4); keep-as-prompt is the copy-the-text fallback
             (PQ2: the weft/prompt version lands with that module). */}
-        <button
-          className="text-faint hover:underline disabled:opacity-50"
-          title="write this run's records as wefttest replay fixtures"
-          disabled={!experiment.runID}
-          onClick={() => {
-            setCardErr("")
-            saveFixtures(experiment.runID, tools).catch((e: unknown) =>
-              setCardErr(e instanceof Error ? e.message : String(e))
-            )
-          }}
-        >
-          save as fixture
-        </button>
+        {mayRun && (
+          <button
+            className="text-faint hover:underline disabled:opacity-50"
+            title="write this run's records as wefttest replay fixtures"
+            disabled={!experiment.runID}
+            onClick={() => {
+              setCardErr("")
+              saveFixtures(experiment.runID, tools).catch((e: unknown) =>
+                setCardErr(e instanceof Error ? e.message : String(e))
+              )
+            }}
+          >
+            save as fixture
+          </button>
+        )}
         <button
           className="text-faint hover:underline"
           title="copy the edited prompt (weft/prompt versions are post-v1, PQ2)"
@@ -1218,7 +1226,7 @@ function ResultCard({
         {folded.pending.length > 0 && experiment.runID && (
           <div className="space-y-1 rounded border border-dashed p-2">
             <div className="text-faint">
-              awaiting decision
+              {mayRun ? "awaiting decision" : "awaiting decision (read-only)"}
             </div>
             {folded.pending.length > 1 && (
               <div className="text-status-int">
@@ -1228,41 +1236,49 @@ function ResultCard({
                   : ""}
               </div>
             )}
-            <fieldset disabled={deciding} className="space-y-1">
-              {folded.pending.map((c) => (
-                <PendingCall
-                  key={c.id}
-                  call={c}
-                  decided={decidedCalls[c.id]}
-                  onDecide={(decision, reason) => {
-                    // A decision completing the park resumes the run and
-                    // replaces this card; one that does not is held, and
-                    // the card comes back to the parked run with the call
-                    // marked. A refusal (the call is no longer pending —
-                    // it was decided elsewhere — or the runtime is gone)
-                    // stays on the card, and the row is re-read so the
-                    // card shows where the run stands now.
-                    setDeciding(true)
-                    setCardErr("")
-                    decide(experiment.runID, c.id, decision, reason)
-                      .catch((e: unknown) => {
-                        setCardErr(e instanceof Error ? e.message : String(e))
-                        fetchRun(experiment.runID)
-                          .then((row) =>
-                            onUpdate((cur) => (cur ? { ...cur, row } : cur))
-                          )
-                          .catch(() => {})
-                      })
-                      .finally(() => setDeciding(false))
-                  }}
-                />
-              ))}
-            </fieldset>
+            {!mayRun ? (
+              folded.pending.map((c) => (
+                <div key={c.id} className="font-mono" data-pending-read-only="">
+                  {c.name}
+                </div>
+              ))
+            ) : (
+              <fieldset disabled={deciding} className="space-y-1">
+                {folded.pending.map((c) => (
+                  <PendingCall
+                    key={c.id}
+                    call={c}
+                    decided={decidedCalls[c.id]}
+                    onDecide={(decision, reason) => {
+                      // A decision completing the park resumes the run and
+                      // replaces this card; one that does not is held, and
+                      // the card comes back to the parked run with the call
+                      // marked. A refusal (the call is no longer pending —
+                      // it was decided elsewhere — or the runtime is gone)
+                      // stays on the card, and the row is re-read so the
+                      // card shows where the run stands now.
+                      setDeciding(true)
+                      setCardErr("")
+                      decide(experiment.runID, c.id, decision, reason)
+                        .catch((e: unknown) => {
+                          setCardErr(e instanceof Error ? e.message : String(e))
+                          fetchRun(experiment.runID)
+                            .then((row) =>
+                              onUpdate((cur) => (cur ? { ...cur, row } : cur))
+                            )
+                            .catch(() => {})
+                        })
+                        .finally(() => setDeciding(false))
+                    }}
+                  />
+                ))}
+              </fieldset>
+            )}
           </div>
         )}
         {/* Rung 4 (§8.4, review fix 4d): steer the in-flight run — one
             user message delivered mid-flight. */}
-        {caps.includes("steer") && experiment.state === "accepted" && experiment.runID && (
+        {mayRun && caps.includes("steer") && experiment.state === "accepted" && experiment.runID && (
           <form
             className="flex items-center gap-2"
             onSubmit={(e) => {

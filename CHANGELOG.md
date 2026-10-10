@@ -468,6 +468,11 @@ module, ADR 0005).
   saying why, and their list stays on the page so they can be dropped.
 - **A read-scoped token sees no Run and no Run matrix** in the
   playground (the server refuses them), with a line saying why.
+- **…nor the result cards' verbs**: under a read-scoped token a card
+  draws no "save as fixture", no continue/skip/resolve on a parked call
+  and no steer (each POST would be refused, 403); the run link stays and
+  a parked call is listed by name, read-only — the run page's
+  `canReplay` rule on both pages.
 - **A hand-built `edits=` / `lab=` leaves the playground's address bar**
   with the page's first write-back (the page holds them).
 

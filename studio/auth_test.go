@@ -310,6 +310,10 @@ func TestCORS(t *testing.T) {
 		if m := hdr.Get("Access-Control-Allow-Methods"); !strings.Contains(m, "PUT") {
 			t.Errorf("%s: Allow-Methods = %q, want PUT among them", origin, m)
 		}
+		// DELETE too: the delete capability's two verbs (plan A7).
+		if m := hdr.Get("Access-Control-Allow-Methods"); !strings.Contains(m, "DELETE") {
+			t.Errorf("%s: Allow-Methods = %q, want DELETE among them", origin, m)
+		}
 	}
 	// A foreign origin gets no CORS headers; the preflight falls
 	// through to the API's own answer (here the token check's 401),

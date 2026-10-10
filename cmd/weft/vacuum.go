@@ -18,13 +18,14 @@ import (
 // retainFlag adds --retain to a flag set: studio.Retain's duration,
 // mirroring WEFT_RETAIN one to one (resolveRetain reads both).
 func retainFlag(fs *flag.FlagSet, what string) *string {
-	return fs.String("retain", "", "`duration` (Go syntax: 720h, 168h30m) "+what+
+	return fs.String("retain", "", "`duration` (Go syntax: 720h, 168h30m; at least 1h) "+what+
 		" (default: $WEFT_RETAIN, else none: everything is kept)")
 }
 
 // resolveRetain is --retain, else WEFT_RETAIN, as a duration: 0 when
-// neither is set (off). A value that does not parse, or a negative one,
-// is a usage error naming where it came from.
+// neither is set (off). A value that does not parse, a negative one, or
+// one under an hour (studio.Retain's floor, the same words) is a usage
+// error naming where it came from.
 func resolveRetain(flagVal string) (time.Duration, error) {
 	val, from := flagVal, "--retain"
 	if val == "" {
@@ -40,8 +41,16 @@ func resolveRetain(flagVal string) (time.Duration, error) {
 	if d < 0 {
 		return 0, usageError("%s %q: a retention cannot be negative", from, val)
 	}
+	if d > 0 && d < time.Hour {
+		return 0, usageError("%s %q: %s", from, val, retainFloorMsg)
+	}
 	return d, nil
 }
+
+// retainFloorMsg is studio.Retain's refusal under an hour, word for
+// word (TestRetainFloorMatchesStudio pins it to the panic New raises).
+const retainFloorMsg = "retention must be at least 1h: the sweeper's not-running rule counts a run silent for 30 s " +
+	"as interrupted, so a short retention would sweep a live run paused at a breakpoint"
 
 // retainOptions turns --retain / WEFT_RETAIN into studio options and the
 // line the banner prints ("" when off).

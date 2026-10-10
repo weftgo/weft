@@ -180,9 +180,14 @@ func (d *DB) closure(ctx context.Context, roots []string, sweeping bool) ([]stri
 }
 
 // deleteRuns removes the runs' rows: the app log lines under the spans
-// obsdb.DeletedSpans names and the runs' own records (both in
-// otel_logs), the spans, weft_records, weft_deltas, and weft_runs last,
-// so a deletion cut short leaves the run listed and a retry finds it.
+// obsdb.DeletedSpans names and the non-weft spans below the runs' own
+// (planSpanDeletes' chunks), then the runs' own spans, their records
+// (otel_logs), weft_records, weft_deltas, and weft_runs last, so a
+// deletion cut short leaves the run listed and a retry finds it — with
+// its own spans still there, so the retry's trace lookup (RunId IN …)
+// still reaches the non-weft spans it has yet to delete. Each chunk is
+// up to seven synchronous lightweight DELETE mutations (clickhouse
+// README): a large sweep is many mutations.
 func (d *DB) deleteRuns(ctx context.Context, ids []string) error {
 	if len(ids) == 0 {
 		return nil
@@ -218,19 +223,18 @@ func (d *DB) deleteRuns(ctx context.Context, ids []string) error {
 	}); err != nil {
 		return err
 	}
-	keys := obsdb.DeletedSpans(links, deleted)
-	for start := 0; start < len(keys); start += deleteChunk / 2 {
-		chunk := keys[start:min(start+deleteChunk/2, len(keys))]
-		args := make([]any, 0, 2*len(chunk))
-		for _, k := range chunk {
-			args = append(args, k.TraceID, k.SpanID)
+	for _, c := range planSpanDeletes(links, obsdb.DeletedSpans(links, deleted)) {
+		if len(c.logs) > 0 {
+			args, tuples := keyTuples(c.logs)
+			if err := d.conn.Exec(ctx, `DELETE FROM otel_logs WHERE LogAttributes['weft.run.id'] = '' AND (TraceId, SpanId) IN (`+tuples+`)`, args...); err != nil {
+				return fmt.Errorf("clickhouse: delete app logs: %w", err)
+			}
 		}
-		tuples := strings.TrimSuffix(strings.Repeat("(?,?),", len(chunk)), ",")
-		if err := d.conn.Exec(ctx, `DELETE FROM otel_logs WHERE LogAttributes['weft.run.id'] = '' AND (TraceId, SpanId) IN (`+tuples+`)`, args...); err != nil {
-			return fmt.Errorf("clickhouse: delete app logs: %w", err)
-		}
-		if err := d.conn.Exec(ctx, `DELETE FROM otel_traces WHERE (TraceId, SpanId) IN (`+tuples+`)`, args...); err != nil {
-			return fmt.Errorf("clickhouse: delete spans: %w", err)
+		if len(c.spans) > 0 {
+			args, tuples := keyTuples(c.spans)
+			if err := d.conn.Exec(ctx, `DELETE FROM otel_traces WHERE (TraceId, SpanId) IN (`+tuples+`)`, args...); err != nil {
+				return fmt.Errorf("clickhouse: delete spans: %w", err)
+			}
 		}
 	}
 	for _, stmt := range []string{
@@ -247,6 +251,45 @@ func (d *DB) deleteRuns(ctx context.Context, ids []string) error {
 		}
 	}
 	return nil
+}
+
+// spanChunk is one round of the key loop: the app log lines under
+// logs, and the spans in spans.
+type spanChunk struct{ logs, spans []obsdb.SpanKey }
+
+// planSpanDeletes chunks DeletedSpans' keys for the key loop. Every key
+// has its app log lines deleted there, but a key that is a run's own
+// span (a link carrying a RunID) is left out of the chunk's spans: the
+// RunId IN … statement after the loop removes those last. A crash
+// midway then leaves the run's own spans, so a retry's trace lookup
+// still finds the non-weft spans below them.
+func planSpanDeletes(links []obsdb.SpanLink, keys []obsdb.SpanKey) []spanChunk {
+	own := map[obsdb.SpanKey]bool{}
+	for _, l := range links {
+		if l.RunID != "" {
+			own[obsdb.SpanKey{TraceID: l.TraceID, SpanID: l.SpanID}] = true
+		}
+	}
+	var out []spanChunk
+	for start := 0; start < len(keys); start += deleteChunk / 2 {
+		c := spanChunk{logs: keys[start:min(start+deleteChunk/2, len(keys))]}
+		for _, k := range c.logs {
+			if !own[k] {
+				c.spans = append(c.spans, k)
+			}
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// keyTuples is keys as (TraceId, SpanId) IN args and placeholders.
+func keyTuples(keys []obsdb.SpanKey) ([]any, string) {
+	args := make([]any, 0, 2*len(keys))
+	for _, k := range keys {
+		args = append(args, k.TraceID, k.SpanID)
+	}
+	return args, strings.TrimSuffix(strings.Repeat("(?,?),", len(keys)), ",")
 }
 
 func (d *DB) queryIDs(ctx context.Context, q string, args ...any) ([]string, error) {

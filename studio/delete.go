@@ -66,8 +66,9 @@ func (s *Server) mayDelete(w http.ResponseWriter, r *http.Request) bool {
 
 // serveDeleteRun answers DELETE /api/runs/{id}: the run and its
 // subagent children (run ids carry slashes: everything after
-// /api/runs/ is the id). A live stream following the run emits nothing
-// new; a later read is 404.
+// /api/runs/ is the id). A later read is 404. A live stream following
+// the deleted run emits nothing more unless the app keeps writing to
+// it; a later write starts a new run row under the same id.
 func (s *Server) serveDeleteRun(w http.ResponseWriter, r *http.Request) {
 	if !s.mayDelete(w, r) {
 		return
@@ -112,15 +113,25 @@ func deleteError(w http.ResponseWriter, r *http.Request, noun, id string, err er
 
 // Retain keeps runs for d after they were last seen: a sweeper deletes
 // (obsdb.DB.Sweep) every run that is not running — succeeded, failed
-// or interrupted — whose last_seen is older than d, with its children,
-// from obsdb's tables only. It sweeps once when New returns, then every
-// min(d/10, 1h), never more often than once a minute; each sweep logs
-// one Debug line (slog's default logger) with its count, and a failed
-// sweep one Warn line — it never stops the server. 0 (the default) is
-// off: the local sink keeps everything until told otherwise. api/meta
-// reports it as retention. The sweeper runs until Close, so a Studio
-// with Retain is built with New and closed, never through Handler(...).
-// The weft binary reads it from --retain / WEFT_RETAIN.
+// or interrupted (a run silent past obsdb.InterruptedAfter counts as
+// interrupted, hence not running, and is swept) — whose last_seen is
+// older than d, with its children, from obsdb's tables only. It sweeps
+// once when New returns, then every min(d/10, 1h), never more often
+// than once a minute; each sweep logs one Debug line (slog's default
+// logger) with its count, and a failed sweep one Warn line — it never
+// stops the server. Once the DB is closed (obsdb.ErrClosed) the sweeper
+// stops on its own with one Debug line. 0 (the default) is off: the
+// local sink keeps everything until told otherwise. api/meta reports it
+// as retention.
+//
+// d must be at least an hour: New panics on 0 < d < 1h. The sweeper's
+// not-running rule counts a run silent for 30 s as interrupted, so a
+// short retention would sweep a live run paused at a breakpoint.
+//
+// The sweeper runs until Close: a Studio with Retain is built with New
+// and closed, never through Handler(...), whose server nothing can
+// close (its sweeper ends only when the DB does). The weft binary reads
+// it from --retain / WEFT_RETAIN.
 func Retain(d time.Duration) Option {
 	return func(c *config) {
 		if d < 0 {
@@ -129,6 +140,15 @@ func Retain(d time.Duration) Option {
 		c.retain = d
 	}
 }
+
+// minRetention is Retain's floor; retainFloorMsg the refusal's words.
+// The weft binary's --retain check says the same (cmd/weft's
+// resolveRetain; its test pins the two equal).
+const (
+	minRetention   = time.Hour
+	retainFloorMsg = "retention must be at least 1h: the sweeper's not-running rule counts a run silent for 30 s " +
+		"as interrupted, so a short retention would sweep a live run paused at a breakpoint"
+)
 
 // sweepInterval is Retain's timer: min(d/10, 1h), floored at a minute.
 func sweepInterval(d time.Duration) time.Duration {
@@ -143,7 +163,9 @@ func (s *Server) startSweeper() {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
+	s.sweepMu.Lock()
 	s.stopSweep = func() { cancel(); <-done }
+	s.sweepMu.Unlock()
 	iv := s.sweepEvery
 	if iv <= 0 {
 		iv = sweepInterval(s.retain)
@@ -153,7 +175,9 @@ func (s *Server) startSweeper() {
 		t := time.NewTicker(iv)
 		defer t.Stop()
 		for {
-			s.sweepOnce(ctx)
+			if !s.sweepOnce(ctx) {
+				return
+			}
 			select {
 			case <-ctx.Done():
 				return
@@ -163,15 +187,22 @@ func (s *Server) startSweeper() {
 	}()
 }
 
-// sweepOnce is one sweep: errors go to the logger, never further.
-func (s *Server) sweepOnce(ctx context.Context) {
+// sweepOnce is one sweep: errors go to the logger, never further. It
+// reports false when the sweeper should stop: the DB was closed under
+// it (the pipeline owns it and shut down), which no later tick fixes.
+func (s *Server) sweepOnce(ctx context.Context) bool {
 	cutoff := s.now().Add(-s.retain)
 	n, err := s.db.Sweep(ctx, cutoff)
 	if err != nil {
+		if errors.Is(err, obsdb.ErrClosed) {
+			slog.Debug("studio: sweeper stopped: database closed", "retention", s.retain.String())
+			return false
+		}
 		if ctx.Err() == nil {
 			slog.Warn("studio: retention sweep failed", "retention", s.retain.String(), "err", err)
 		}
-		return
+		return true
 	}
 	slog.Debug("studio: retention sweep", "deleted_runs", n, "retention", s.retain.String(), "cutoff", cutoff)
+	return true
 }

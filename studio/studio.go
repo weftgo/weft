@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/weftgo/weft/obsdb"
@@ -190,6 +191,8 @@ type Server struct {
 	grantKey []byte
 
 	// stopSweep stops Retain's sweeper (delete.go); nil without one.
+	// sweepMu guards it: Close may race another Close.
+	sweepMu   sync.Mutex
 	stopSweep func()
 }
 
@@ -207,6 +210,9 @@ func New(opts ...Option) *Server {
 	}
 	if c.dbSet && c.db == nil {
 		panic("studio: New called with a nil DB")
+	}
+	if c.retain > 0 && c.retain < minRetention {
+		panic("studio: " + retainFloorMsg)
 	}
 	s := &Server{config: c, now: time.Now, mux: http.NewServeMux(), grantKey: liveGrantKey(c.token)}
 	if c.db == nil {
@@ -245,7 +251,9 @@ func New(opts ...Option) *Server {
 func (s *Server) Handler() http.Handler { return s }
 
 // Handler is New(opts...).Handler(): the one-liner for setups A and B
-// when the playground is not in play.
+// when the playground is not in play. Nothing can Close the server it
+// builds, so a Studio with Retain is built with New and closed: under
+// Handler the sweeper stops only when the DB is closed.
 func Handler(opts ...Option) http.Handler {
 	return New(opts...).Handler()
 }
@@ -261,9 +269,12 @@ func (s *Server) Runtime() *RuntimeServer { return s.runtimeSrv }
 // its owner's — closing otel's handle out from under the pipeline is
 // not Studio's call.
 func (s *Server) Close() error {
-	if s.stopSweep != nil {
-		s.stopSweep()
-		s.stopSweep = nil
+	s.sweepMu.Lock()
+	stop := s.stopSweep
+	s.stopSweep = nil
+	s.sweepMu.Unlock()
+	if stop != nil {
+		stop()
 	}
 	if s.ownsDB {
 		return s.db.Close()

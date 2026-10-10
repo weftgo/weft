@@ -94,14 +94,22 @@ module, ADR 0005).
   byte-identical (§13.13). The dev token's, or a loopback Host's in
   setup A (no AllowOrigins widening); every panel token is 403, read or
   playground, before anything is looked up; an unknown id is 404. A live
-  stream following a deleted run emits nothing more; a later read is
-  404. In the auth matrix for every identity and in
+  stream following a deleted run emits nothing more unless the app keeps
+  writing; a later write starts a new run row; a later read is 404. In the auth matrix for every identity and in
   `/api/meta.capabilities`; CORS preflights allow `DELETE`.
 - `studio.Retain(d)`: a sweeper deletes (as above) the runs that are
   not running — succeeded, failed, interrupted — whose `last_seen` is
   older than `d`, once at `New` and then every `min(d/10, 1h)`, at least
   a minute apart; one Debug line per sweep with its count, a failed
-  sweep one Warn line, never a stopped server. Off by default (`0`):
+  sweep one Warn line, never a stopped server; a closed DB stops the
+  sweeper (one Debug line). Interrupted counts as not running and is
+  swept, so `d` must be at least `1h` (`New` panics below it; `--retain`
+  / `WEFT_RETAIN` under `1h` is exit 2): a run silent for 30 s reads
+  interrupted, and a shorter retention would sweep a live run paused at
+  a breakpoint. A running child of a swept parent stays, listed only
+  under `all=1` / `parent=*` until swept itself. Build it with `New` and
+  `Close`; under `Handler(...)` nothing stops the sweeper but a closed
+  DB. Off by default (`0`):
   the local sink keeps everything. `/api/meta.retention` reports it as
   a Go duration string (`"720h0m0s"`), `null` when off. `weft studio`
   and `weft dev` take it as `--retain`, mirrored by `WEFT_RETAIN`.

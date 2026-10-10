@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -308,6 +309,89 @@ func TestRetainSweepFailureIsLogged(t *testing.T) {
 	}
 	if err := srv.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// A sweeper whose DB the pipeline closed under it (Handler, nothing to
+// Close) stops on its own: at most one Warn, a Debug line saying why,
+// and no further sweep.
+func TestRetainSweeperStopsOnClosedDB(t *testing.T) {
+	logs := &lockedBuf{}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	db, err := sqlite.Open(t.TempDir() + "/closed.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	counted := &countingSweep{DB: db}
+	srv := New(DB(counted), Retain(time.Hour), func(c *config) { c.sweepEvery = 10 * time.Millisecond })
+	deadline := time.Now().Add(5 * time.Second)
+	for counted.n.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for !strings.Contains(logs.String(), "sweeper stopped: database closed") && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if !strings.Contains(logs.String(), "level=DEBUG msg=\"studio: sweeper stopped: database closed\"") {
+		t.Fatalf("no stop line: %s", logs.String())
+	}
+	n := counted.n.Load()
+	time.Sleep(100 * time.Millisecond) // ten ticks
+	if got := counted.n.Load(); got != n {
+		t.Errorf("the sweeper kept sweeping after the DB closed: %d sweeps, then %d", n, got)
+	}
+	if w := strings.Count(logs.String(), "level=WARN"); w > 1 {
+		t.Errorf("%d Warn lines after the DB closed, want at most one: %s", w, logs.String())
+	}
+	// The goroutine is gone: Close returns at once.
+	done := make(chan struct{})
+	go func() { _ = srv.Close(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Close blocked on a stopped sweeper")
+	}
+}
+
+type countingSweep struct {
+	obsdb.DB
+	n atomic.Int64
+}
+
+func (c *countingSweep) Sweep(ctx context.Context, before time.Time) (int, error) {
+	c.n.Add(1)
+	return c.DB.Sweep(ctx, before)
+}
+
+// Retain's floor: 0 < d < 1h panics at New with the reason; 0 (off) and
+// an hour pass. Close is safe to call twice, concurrently.
+func TestRetainFloor(t *testing.T) {
+	for _, d := range []time.Duration{time.Second, 30 * time.Minute, time.Hour - time.Nanosecond} {
+		func() {
+			defer func() {
+				r := recover()
+				if r == nil || !strings.Contains(fmt.Sprint(r), retainFloorMsg) {
+					t.Errorf("Retain(%v): panic = %v, want the floor's message", d, r)
+				}
+			}()
+			_ = New(DB(openTestDB(t)), Retain(d))
+		}()
+	}
+	if !strings.HasPrefix(retainFloorMsg, "retention must be at least 1h: ") {
+		t.Errorf("floor message = %q", retainFloorMsg)
+	}
+	for _, d := range []time.Duration{0, time.Hour} {
+		srv := New(DB(openTestDB(t)), Retain(d))
+		var wg sync.WaitGroup
+		for range 2 {
+			wg.Add(1)
+			go func() { defer wg.Done(); _ = srv.Close() }()
+		}
+		wg.Wait()
 	}
 }
 

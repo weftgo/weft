@@ -167,6 +167,10 @@
 // longer ago, with their subagent children, every min(retain/10, 1h)
 // (at least a minute apart), from Studio's own tables only — a SQLite
 // file that also holds the app's thread sessions keeps them untouched.
+// Interrupted runs count as not running and are swept; a run silent for
+// 30 s reads interrupted, so a retention under 1h — which would sweep a
+// live run paused at a breakpoint — is a usage error (exit 2) on
+// studio, dev and vacuum alike.
 // `weft vacuum [--db] [--retain]` is the one-shot form: one sweep
 // when a retention is given, then VACUUM (SQLite: the file shrinks;
 // it waits on the busy timeout while another process writes) or
@@ -241,7 +245,7 @@ Usage:
 
 Environment (each mirrors a flag): WEFT_STUDIO_ADDR (--addr), WEFT_DB (--db),
 WEFT_STUDIO_TOKEN (--token), WEFT_MANIFEST (--manifest), WEFT_STUDIO_URL (--url),
-WEFT_RETAIN (--retain).
+WEFT_RETAIN (--retain; a Go duration of at least 1h, 0 = off).
 Run "weft <command> -h" for a command's flags.
 `
 

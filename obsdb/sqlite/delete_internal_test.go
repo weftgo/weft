@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/obsdb"
 	"github.com/weftgo/weft/thread"
 	threadsqlite "github.com/weftgo/weft/thread/sqlite"
@@ -150,8 +151,10 @@ func threadDump(t *testing.T, path string) string {
 // One SQLite file may hold thread's sessions beside obsdb's tables
 // (each module owns its migrations table, §13.13): DeleteRun,
 // DeleteSession — on the very session id the thread store holds —
-// Sweep and Vacuum leave every thread table byte-identical, and the
-// thread store keeps working on the file afterwards.
+// Sweep and Vacuum leave every thread table byte-identical — a
+// thread.Session holding its writer lease included, so session_locks
+// has a row to keep — and the thread store keeps working on the file
+// afterwards.
 func TestDeleteLeavesThreadTablesOnTheSharedFile(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "shared.db")
@@ -172,6 +175,14 @@ func TestDeleteLeavesThreadTablesOnTheSharedFile(t *testing.T) {
 	if err := st.Create(ctx, thread.Header{ID: "s_other", Created: created}); err != nil {
 		t.Fatal(err)
 	}
+	// A live Session: Create takes its writer lease (a session_locks
+	// row) and holds it through every deletion below.
+	leased, err := thread.Create(ctx, st, core.New(wefttest.Script(wefttest.Say("ok"))),
+		thread.IDs(func() string { return "s_leased" }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = leased.Close(ctx) }()
 
 	db, err := Open(path)
 	if err != nil {
@@ -186,6 +197,9 @@ func TestDeleteLeavesThreadTablesOnTheSharedFile(t *testing.T) {
 	delFixture(t, db, "run_d", "", "", old.Add(4*time.Millisecond))
 
 	before := threadDump(t, path)
+	if sections := strings.Split(before, "--\n"); len(sections) < 4 || !strings.HasPrefix(sections[3], "'s_leased'") {
+		t.Fatalf("session_locks holds no lease for s_leased:\n%s", before)
+	}
 	if !strings.Contains(before, "s_shared") || !strings.Contains(before, "Where is order 1234?") {
 		t.Fatalf("the thread dump does not hold the session:\n%s", before)
 	}

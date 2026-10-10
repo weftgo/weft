@@ -47,7 +47,12 @@ verbs and `studio.Retain`) is a lightweight `DELETE FROM … WHERE` on
 `weft_runs` (ClickHouse 23.3 or later): rows are masked at once and
 leave the parts at the next merge; `Vacuum` (`weft vacuum`) forces that
 with `OPTIMIZE TABLE … FINAL` on the same tables — heavy on a large
-database. The TTLs stay as they are: Studio's retention is additive.
+database. Each chunk of a deletion (400 runs, 200 span keys) issues up
+to seven synchronous (`mutations_sync = 2`) lightweight DELETE
+mutations, so a large sweep is many mutations. The runs' own spans go
+after the non-weft spans below them, and `weft_runs` last: a deletion
+cut short leaves the run listed and a retry finishes it. The TTLs stay
+as they are: Studio's retention is additive.
 
 DSN forms: `clickhouse://user:pass@host:9000/database` (native
 protocol, the port is 9000 not 8123), `clickhouses://...` or

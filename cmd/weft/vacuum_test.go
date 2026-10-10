@@ -14,6 +14,7 @@ import (
 
 	"github.com/weftgo/weft/obsdb"
 	"github.com/weftgo/weft/obsdb/sqlite"
+	"github.com/weftgo/weft/studio"
 )
 
 // vacuumRun writes one finished run last seen at at.
@@ -103,6 +104,12 @@ func TestVacuumUsage(t *testing.T) {
 		{[]string{"vacuum", "--db", "sqlite://" + filepath.Join(dir, "missing.db")}, "", 1, "missing.db"},
 		{[]string{"vacuum", "--db", "postgres://x"}, "", 1, "--db must be"},
 		{[]string{"studio", "--retain", "soon"}, "", 2, `--retain "soon"`},
+		// Retain's floor: under an hour is a usage error on all three.
+		{[]string{"vacuum", "--db", "sqlite://" + path, "--retain", "30m"}, "", 2, `--retain "30m": retention must be at least 1h`},
+		{[]string{"vacuum", "--db", "sqlite://" + path}, "59m", 2, `WEFT_RETAIN "59m": retention must be at least 1h`},
+		{[]string{"studio", "--retain", "10m"}, "", 2, "retention must be at least 1h"},
+		{[]string{"studio"}, "30s", 2, `WEFT_RETAIN "30s": retention must be at least 1h`},
+		{[]string{"dev", "--no-watch", "--retain", "30m"}, "", 2, "retention must be at least 1h"},
 	} {
 		t.Setenv("WEFT_RETAIN", c.env)
 		var out, errb bytes.Buffer
@@ -129,9 +136,28 @@ func TestRetainOptions(t *testing.T) {
 	if opts, note, err := retainOptions(""); err != nil || len(opts) != 1 || !strings.Contains(note, "retention 720h0m0s") {
 		t.Errorf("WEFT_RETAIN=720h = %d opts, %q, %v", len(opts), note, err)
 	}
+	if d, err := resolveRetain("1h"); err != nil || d != time.Hour {
+		t.Errorf("--retain 1h (the floor) = %v, %v", d, err)
+	}
 	if d, err := resolveRetain("2h"); err != nil || d != 2*time.Hour {
 		t.Errorf("--retain 2h over WEFT_RETAIN = %v, %v", d, err)
 	}
+}
+
+// The binary's floor message is studio.Retain's, word for word: the
+// panic New raises under an hour carries it.
+func TestRetainFloorMatchesStudio(t *testing.T) {
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "floor.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	defer func() {
+		if r := recover(); r != "studio: "+retainFloorMsg {
+			t.Errorf("studio.New(Retain(30m)) panicked %v, want %q", r, "studio: "+retainFloorMsg)
+		}
+	}()
+	_ = studio.New(studio.DB(db), studio.Retain(30*time.Minute))
 }
 
 // weft studio --retain reaches api/meta as retention.

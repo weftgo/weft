@@ -103,10 +103,18 @@ on `weft studio` and `weft dev` — starts a sweeper that deletes, as
 `DELETE /api/runs/{id}` does, every run that is not running
 (succeeded, failed, interrupted) last seen longer ago than the
 retention, with its children that are not running: once at start, then
-every `min(retention/10, 1h)`, at least a minute apart. Each sweep logs
-one Debug line with its count; a failed one logs a Warn line and the
-server keeps serving. The sweeper runs until `Server.Close`, so a Studio
-with `Retain` is built with `studio.New` and closed. `/api/meta`'s
+every `min(retention/10, 1h)`, at least a minute apart. Interrupted
+counts as not running and is swept: a run silent for 30 s reads
+interrupted, which is why the retention must be at least `1h` (`New`
+panics below it; `--retain` / `WEFT_RETAIN` under `1h` is a usage error,
+exit 2, on `weft studio`, `weft dev` and `weft vacuum`) — a shorter one
+would sweep a live run paused at a breakpoint. A running child of a
+swept parent stays and is listed only under `all=1` / `parent=*` until
+it is swept itself. Each sweep logs one Debug line with its count; a
+failed one logs a Warn line and the server keeps serving. The sweeper
+runs until `Server.Close`, so a Studio with `Retain` is built with
+`studio.New` and closed; under `studio.Handler(...)` nothing can close
+it, and it stops (one Debug line) only once the DB is closed. `/api/meta`'s
 `retention` reports it. `weft vacuum [--db sqlite://path|clickhouse://…]
 [--retain d]` is the one-shot form — one sweep when a retention is
 given, then VACUUM (SQLite: the file shrinks; it waits on the busy
@@ -1468,7 +1476,8 @@ SQLite file that also holds `thread`'s sessions keeps them
 byte-identical. The dev token's, or a loopback `Host`'s in setup A —
 never an AllowOrigins host's, never a panel token's: every panel token,
 read or playground, is 403 before anything is looked up. A live stream
-following a deleted run emits nothing more; a later read is 404),
+following a deleted run emits nothing more unless the app keeps writing;
+a later write starts a new run row; a later read is 404),
 `POST /api/panel-tokens`
 
 (mint; the panel's scoped tokens — see the devtools panel above), and

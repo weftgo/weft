@@ -187,8 +187,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    (the runtime link's server under Playground(true), else nil),
 //    //    options DB/Open/Base/Manifest/Title/Capabilities/Token/Live/NoIngest/
 //    //    IngestToken/AllowOrigins/Playground/Retain (Retain(d): a sweeper deletes the runs not
-//    //    running last seen more than d ago, once at New then every min(d/10, 1h), floor 1 min,
-//    //    one Debug line per sweep; off by default; runs until Close); routes register through
+//    //    running (interrupted included) last seen more than d ago, once at New then every
+//    //    min(d/10, 1h), floor 1 min, one Debug line per sweep; off by default; d ≥ 1h (New panics
+//    //    below: a 30 s silence reads interrupted); runs until Close — New + Close, not Handler — or a
+//    //    closed DB); routes register through
 //    //    routes.go's groups (panel.go/playground.go add theirs in their own files).
 //    // API: meta (db {kind, path, size: path/size to loopback and the server token only},
 //    //    auth_required, content, runtimes, manifest_check, pricing, retention (Retain's Go
@@ -297,7 +299,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    --force] (fixtures where wefttest.Replay reads them; --force replaces, never
 //    //    merges); weft vacuum [--db --retain] (one sweep when a retention is given, then VACUUM
 //    //    / OPTIMIZE TABLE … FINAL; `make vacuum` on $WEFT_DB or ./.weft/weft.db); weft version.
-//    //    --retain (WEFT_RETAIN) on weft studio and weft dev is studio.Retain.
+//    //    --retain (WEFT_RETAIN) on weft studio and weft dev is studio.Retain (under 1h: exit 2).
 //    //    weft dev [studio's flags --no-watch --watch dir] [-- go run ./cmd/app] (default: go run .):
 //    //    Studio in-process + the app with WEFT_ENV=dev (kept if set), WEFT_STUDIO_URL,
 //    //    WEFT_STUDIO_TOKEN, WEFT_DB set (plain env vars the app may set itself), restarted

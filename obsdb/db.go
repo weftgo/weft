@@ -110,10 +110,14 @@ type DB interface {
 	DeleteSession(ctx context.Context, id string) error
 	// Sweep deletes, as DeleteRun does, the runs whose LastSeen is
 	// before the cutoff and whose status is not running (succeeded,
-	// failed or interrupted), with their children that are not running
-	// either; a running child keeps its own subtree and is swept on its
-	// own once it ends. It returns how many runs it deleted, children
-	// counted.
+	// failed or interrupted — a run silent past InterruptedAfter is
+	// interrupted, so it counts as not running and is swept), with
+	// their children that are not running either; a running child keeps
+	// its own subtree and is swept on its own once it ends. Until then
+	// that child of a swept parent is listed only under RunQuery's
+	// ParentRunID "*" (the API's all=1 / parent=*), never among the
+	// top-level runs. It returns how many runs it
+	// deleted, children counted.
 	Sweep(ctx context.Context, before time.Time) (int, error)
 	// Vacuum gives the space deletions freed back: SQLite runs VACUUM
 	// (the whole file is rewritten, other modules' tables with their

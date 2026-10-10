@@ -5705,9 +5705,11 @@ var _s = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 	}
 	handoff(e) {
 		if (et(this.cfg.token) !== "playground" || !qo(this.last, "handoff")) return !1;
-		let t = new URL(e);
-		return Xr(this.ep, t.pathname.slice(new URL(this.base).pathname.length - 1) + t.search).then((t) => zs(t.location || e), (t) => {
-			zs(e), t instanceof Kr && (t.status === 403 || t.status === 404) || this.say(`open in Studio: ${t.message}`);
+		let t = new URL(e), n = setTimeout(() => this.say(`open in Studio: ${e}`), 1e3);
+		return Xr(this.ep, t.pathname.slice(new URL(this.base).pathname.length - 1) + t.search).then((t) => {
+			clearTimeout(n), zs(t.location ? new URL(t.location, this.base).toString() : e);
+		}, (t) => {
+			clearTimeout(n), zs(e), t instanceof Kr && (t.status === 403 || t.status === 404) || this.say(`open in Studio: ${t.message}`);
 		}), !0;
 	}
 	cycle() {

@@ -97,10 +97,14 @@ reads the agents' system prompts (`/api/manifest`, the runtimes'
 instructions) — and experiments (`experiment_id` included) are the
 server token's alone. "Open in Studio" from the panel (⤢, `g s`) under a
 playground-scoped panel token, when `/api/meta` lists `handoff`, asks
-`GET /api/panel-handoff?to=<the deep link's path>` with the bearer and
-`Accept: application/json` and opens the answer's `location` — its
-fragment carries a 5-minute read token for the same public id, so the
-hosted Studio opens on the run without a token pasted. Without the
+`GET /api/panel-handoff?to=` — the deep link's path under the base — with
+the bearer and `Accept: application/json` and opens the answer's
+`location`, a path under the base resolved against the endpoint (never
+the host page) — its fragment carries a 5-minute read token for the same
+public id, so the hosted Studio opens on the run without a token pasted.
+The tab opens after the hand-off answers; a browser that blocks a popup
+after a slow answer leaves the plain link on the note line (put there
+once the answer takes over a second). Without the
 capability, under a read-scoped panel token (its Studio page is already a
 read view), the dev token or none, the plain link opens; a refusal opens
 the plain link too (a 403 or 404 silently, anything else with the note

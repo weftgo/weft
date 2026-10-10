@@ -1575,17 +1575,26 @@ export class WeftDevtools extends HTMLElement {
 
   /** handoff opens a Studio page through GET /api/panel-handoff (plan
    * G3) under a playground panel token with the handoff capability:
-   * the answer's location carries a minted read token in its fragment,
-   * so the hosted Studio opens on that conversation without a token
-   * pasted. false (the caller follows the plain link) otherwise; a
-   * refusal opens the plain link — a 403 or 404 silently (the server's
-   * rule), anything else with the note line. */
+   * the answer's location — a path under the base, resolved against
+   * the endpoint, never the host page — carries a minted read token in
+   * its fragment, so the hosted Studio opens on that conversation
+   * without a token pasted. false (the caller follows the plain link)
+   * otherwise; a refusal opens the plain link — a 403 or 404 silently
+   * (the server's rule), anything else with the note line. The tab
+   * opens after the hand-off answers; a browser that blocks a popup
+   * after a slow answer leaves the plain link on the note line (put
+   * there past 1 s). */
   private handoff(url: string): boolean {
     if (tokenScope(this.cfg.token) !== "playground" || !hasCapability(this.last, "handoff")) return false
     const u = new URL(url)
+    const slow = setTimeout(() => this.say(`open in Studio: ${url}`), 1000)
     fetchHandoff(this.ep, u.pathname.slice(new URL(this.base).pathname.length - 1) + u.search).then(
-      (r) => openTab(r.location || url),
+      (r) => {
+        clearTimeout(slow)
+        openTab(r.location ? new URL(r.location, this.base).toString() : url)
+      },
       (e) => {
+        clearTimeout(slow)
         openTab(url)
         if (!(e instanceof PanelApiError && (e.status === 403 || e.status === 404))) this.say(`open in Studio: ${e.message}`)
       }

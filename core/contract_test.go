@@ -5038,3 +5038,70 @@ func TestOverrideToolChoiceAutoIsSpelledOut(t *testing.T) {
 		t.Errorf("named override recorded %q, want \"tool:lookup\"", got)
 	}
 }
+
+// WithMetadata is the context-carried metadata source (G3.1): pairs a
+// context carries reach every run started under it — its RunStart's
+// context, its invoke_agent span, a Subagent's child run — merged under
+// the run's own Metadata, which wins; WithMetadata calls stack, a later
+// key winning; what a limit drops is counted once, on the next run.
+func TestWithMetadataReachesEveryRunUnderTheContext(t *testing.T) {
+	var parentMD, childMD map[string]string
+	tp := newRecProvider()
+	child := core.New(wefttest.Script(wefttest.Say("done")), core.Name("kid"), core.TracerProvider(tp),
+		core.Tap(func(ctx context.Context, ev core.Event) {
+			if _, ok := ev.(core.RunStart); ok {
+				childMD = core.MetadataFromContext(ctx)
+			}
+		}))
+	parent := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research", Args: `{"prompt":"x"}`}),
+		wefttest.Say("final"),
+	), core.Name("demo"), core.TracerProvider(tp), core.Subagent("research", "Research.", child),
+		core.Tap(func(ctx context.Context, ev core.Event) {
+			if _, ok := ev.(core.RunStart); ok && parentMD == nil {
+				parentMD = core.MetadataFromContext(ctx)
+			}
+		}))
+	ctx := core.WithMetadata(context.Background(), map[string]string{"weft.page_url": "https://old.example/", "tenant": "ctx"})
+	ctx = core.WithMetadata(ctx, map[string]string{"weft.page_url": "https://app.example/chat", "": "dropped"})
+	if _, err := parent.Generate(ctx, core.RunID("r_md"), core.Prompt("x"),
+		core.Metadata(map[string]string{"tenant": "option"})); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{"weft.page_url": "https://app.example/chat", "tenant": "option"}
+	for name, got := range map[string]map[string]string{"parent": parentMD, "child": childMD} {
+		if len(got) != len(want) || got["weft.page_url"] != want["weft.page_url"] || got["tenant"] != want["tenant"] {
+			t.Errorf("%s run metadata = %v, want %v", name, got, want)
+		}
+	}
+	attrs := spanAttrsByID(t, tp, "r_md")
+	if attrs["weft.page_url"] != "https://app.example/chat" {
+		t.Errorf("invoke_agent weft.page_url = %q", attrs["weft.page_url"])
+	}
+	if attrs["weft.metadata.dropped"] != "1" {
+		t.Errorf("invoke_agent weft.metadata.dropped = %q, want 1 (the empty key WithMetadata dropped)", attrs["weft.metadata.dropped"])
+	}
+	tp.mu.Lock()
+	children := 0
+	for _, sp := range tp.spans {
+		a := sp.attrsMap()
+		if strings.HasPrefix(sp.name, "invoke_agent") && a["weft.run.id"] != "r_md" {
+			children++
+			if a["weft.metadata.dropped"] != "" || a["weft.page_url"] != "https://app.example/chat" {
+				t.Errorf("child invoke_agent: dropped %q (want none: counted once, on the parent), page_url %q", a["weft.metadata.dropped"], a["weft.page_url"])
+			}
+		}
+	}
+	tp.mu.Unlock()
+	if children != 1 {
+		t.Errorf("%d child invoke_agent spans, want 1", children)
+	}
+	// The ctx is untouched: a second run under it reports the drop again
+	// (the count rides ctx, cleared only for the run's own children).
+	if got := core.MetadataFromContext(ctx); got["weft.page_url"] != "https://app.example/chat" {
+		t.Errorf("MetadataFromContext(ctx) = %v", got)
+	}
+	if core.WithMetadata(ctx, nil) != ctx {
+		t.Error("WithMetadata(ctx, nil) must return ctx itself")
+	}
+}

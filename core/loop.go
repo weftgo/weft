@@ -43,6 +43,12 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// every span and record of this run carries it and a Subagent's child
 	// run inherits it through the tool call's context (ADR 0024 S1.1).
 	md, mdDropped := mergeMetadata(metadataFromCtx(ctx), cfg.metadata)
+	if n := metadataDroppedFromCtx(ctx); n > 0 {
+		// What WithMetadata dropped is this run's to report, once: its
+		// children start from a cleared count.
+		mdDropped += n
+		ctx = context.WithValue(ctx, metadataDroppedKey{}, 0)
+	}
 	if md != nil {
 		ctx = withMetadata(ctx, md)
 	}

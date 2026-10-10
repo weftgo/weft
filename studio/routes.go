@@ -226,6 +226,11 @@ func (s *Server) registerGroups() {
 				mux.HandleFunc("POST /api/panel-tokens", s.servePanelTokens)
 			},
 		})
+		// The setup C hand-off (plan G3): a playground-scoped panel
+		// token's page opens the hosted Studio on a 5-minute read token
+		// (handoff.go). Under the same condition: no panel tokens
+		// without a server token.
+		s.addGroup(handoffGroup())
 	}
 	if panelGroupHook != nil {
 		s.addGroup(panelGroupHook()) // step 7: always on

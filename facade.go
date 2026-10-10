@@ -850,7 +850,8 @@ type FilePart = core.FilePart
 // runs of its subagents (the pairs ride the context). Several Metadata
 // options merge in order; a later key wins. Keys under "weft." are the
 // weft modules' namespace by convention (thread writes weft.session.id);
-// the core does not police callers.
+// the core does not police callers. Pairs a context carries
+// (WithMetadata) merge under the run's own: the option wins.
 //
 // Limits, because metadata rides every span and record: at most 64 keys,
 // a key at most 128 bytes, a value at most 1024 bytes. An entry over a
@@ -861,6 +862,21 @@ type FilePart = core.FilePart
 // the merged, limited view back with MetadataFromContext, e.g. inside a
 // Tap, a tool handler, or a Subagent's child run.
 func Metadata(kv map[string]string) RunOption { return core.Metadata(kv) }
+
+// WithMetadata returns a copy of ctx carrying kv as metadata for every
+// run started under it — the context-carried source a run option cannot
+// be: net/http middleware that learns something about the request (the
+// page it came from, a tenant) before the handler calls Generate or
+// thread's Send. Pairs merge over any ctx already carries (an earlier
+// WithMetadata, or the run ctx belongs to), a later key winning, under
+// Metadata's limits; a run's own Metadata options win over them, and a
+// Subagent's child run inherits them as it inherits the parent's. An
+// entry over a limit is dropped and counted on the next run started
+// under the returned ctx (weft.metadata.dropped). Reporting only: the
+// pairs change no model-visible behaviour.
+func WithMetadata(ctx context.Context, kv map[string]string) context.Context {
+	return core.WithMetadata(ctx, kv)
+}
 
 // MetadataFromContext returns a copy of the metadata in force on ctx —
 // the run's own merged over its ancestors'. nil when there is none.

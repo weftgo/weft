@@ -1,10 +1,13 @@
 package scope_test
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/scope"
 )
 
@@ -47,4 +50,30 @@ func ExampleScope_String() {
 	// Output:
 	// pub_demo;session=s_1;run=r_2
 	// a%3Bb
+}
+
+// Header stamps the page the request came from — its Referer, query
+// and fragment dropped — as weft.page_url on every run the handler
+// starts: the handler passes no option. Studio's run page reads it back
+// for "open in app".
+func ExamplePageURLFromContext() {
+	agt := core.New(wefttest.Script(wefttest.Say("hi")),
+		core.Tap(func(ctx context.Context, ev core.Event) {
+			if _, ok := ev.(core.RunStart); ok {
+				fmt.Println("run:", core.MetadataFromContext(ctx)[scope.PageURLKey])
+			}
+		}))
+	chat := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		page, _ := scope.PageURLFromContext(r.Context())
+		fmt.Println("handler:", page)
+		_, _ = agt.Generate(r.Context(), core.Prompt("hello"))
+	})
+	h := scope.Header(chat, func(*http.Request) scope.Scope { return scope.Scope{PublicID: "pub_demo"} })
+
+	req := httptest.NewRequest(http.MethodPost, "/chat", nil)
+	req.Header.Set("Referer", "https://app.example/support?draft=1#top")
+	h.ServeHTTP(httptest.NewRecorder(), req)
+	// Output:
+	// handler: https://app.example/support
+	// run: https://app.example/support
 }

@@ -71,6 +71,10 @@ var overrideNames = map[string]string{
 //   - a proposed prompt (PUT and DELETE /api/agents/{name}/proposal,
 //     plan F6) is a system prompt: the server token's alone, every
 //     panel token 403, before the agent is looked up;
+//   - the setup C hand-off (GET /api/panel-handoff, plan G3) is a
+//     playground-scoped panel token's (303 with a minted read token)
+//     and the server token's (303, no token); a read-scoped token
+//     cannot widen (403); a to outside the base is 400;
 //   - ingest takes the ingest token and nothing else.
 func TestAuthMatrix(t *testing.T) {
 
@@ -179,6 +183,9 @@ func TestAuthMatrix(t *testing.T) {
 		{name: "panel token without a public id", token: sign(serverTok, panelClaims{Scope: scopePlayground, Exp: hour}), kind: "bad"},
 	}
 
+	// A redirect is the row's answer (the hand-off's 303), never
+	// followed.
+	noFollow := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	do := func(method, path, body string, id identity) int {
 		t.Helper()
 		if id.query && id.token != "" {
@@ -202,7 +209,7 @@ func TestAuthMatrix(t *testing.T) {
 		if (!id.query || id.both) && id.token != "" {
 			req.Header.Set("Authorization", "Bearer "+id.token)
 		}
-		resp, err := http.DefaultClient.Do(req)
+		resp, err := noFollow.Do(req)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -358,6 +365,14 @@ func TestAuthMatrix(t *testing.T) {
 			return miss
 		}
 		return ok
+	}
+	// handoffBad: a bad to is 400 for every identity that may hand
+	// off; a read-scoped token is refused first (403).
+	handoffBad := func(kind, _ string) int {
+		if kind == "read" {
+			return forbidden403
+		}
+		return http.StatusBadRequest
 	}
 	runBody := func(pub, source string) string {
 		b := `{"runtime":"rt_test","agent":"acme-support","input":"go","public_id":"` + pub + `"`
@@ -662,6 +677,25 @@ func TestAuthMatrix(t *testing.T) {
 				}
 				return unauthorized
 			}},
+
+		// The setup C hand-off (plan G3): a playground-scoped panel token
+		// mints a read token for its own public id and is redirected
+		// (303); the server token is redirected with no token; a
+		// read-scoped token cannot widen (403, before to is read). to is
+		// a path under the base or 400 — never an open redirect.
+		{name: "GET /api/panel-handoff?to=/runs/{id}", method: "GET", path: fixed("/api/panel-handoff?to=/runs/run_a"), resources: one,
+			want: func(kind, _ string) int {
+				if kind == "read" {
+					return forbidden403
+				}
+				return http.StatusSeeOther
+			}},
+		{name: "GET /api/panel-handoff?to=//evil", method: "GET", path: fixed("/api/panel-handoff?to=//evil.example/x"), resources: one, want: handoffBad},
+		{name: "GET /api/panel-handoff?to=http://evil", method: "GET", path: fixed("/api/panel-handoff?to=http://evil.example/x"), resources: one, want: handoffBad},
+		{name: "GET /api/panel-handoff?to=/../x", method: "GET", path: fixed("/api/panel-handoff?to=/../x"), resources: one, want: handoffBad},
+		{name: "GET /api/panel-handoff?to=", method: "GET", path: fixed("/api/panel-handoff?to="), resources: one, want: handoffBad},
+		{name: "GET /api/panel-handoff (no to)", method: "GET", path: fixed("/api/panel-handoff"), resources: one, want: handoffBad},
+		{name: "POST /api/panel-handoff", method: "POST", path: fixed("/api/panel-handoff?to=/runs/run_a"), resources: one, want: anyValid(miss)}, // another method: no route, the API's 404
 
 		// The playground.
 		{name: "GET /api/runtimes", method: "GET", path: fixed("/api/runtimes"), resources: one, want: anyValid(ok)},

@@ -1153,3 +1153,24 @@ func ExampleAgent_ToolChoice() {
 	fmt.Println(tc.Mode == core.ToolChoiceNamed, tc.Name)
 	// Output: true classify
 }
+
+// WithMetadata carries metadata on a context, for every run started
+// under it — what net/http middleware uses to stamp a request's facts
+// (weft/scope's weft.page_url) on the runs its handler starts, without
+// the handler passing a RunOption. A run's own Metadata wins.
+func ExampleWithMetadata() {
+	agt := core.New(wefttest.Script(wefttest.Say("ok")),
+		core.Tap(func(ctx context.Context, ev core.Event) {
+			if _, ok := ev.(core.RunStart); ok {
+				md := core.MetadataFromContext(ctx)
+				fmt.Println("page =", md["weft.page_url"], "tenant =", md["tenant"])
+			}
+		}))
+	ctx := core.WithMetadata(context.Background(), map[string]string{
+		"weft.page_url": "https://app.example/chat",
+		"tenant":        "from-the-request",
+	})
+	_, _ = agt.Generate(ctx, core.Metadata(map[string]string{"tenant": "acme"}), core.Prompt("hello"))
+	// Output:
+	// page = https://app.example/chat tenant = acme
+}

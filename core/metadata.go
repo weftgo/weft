@@ -24,7 +24,8 @@ const (
 // runs of its subagents (the pairs ride the context). Several Metadata
 // options merge in order; a later key wins. Keys under "weft." are the
 // weft modules' namespace by convention (thread writes weft.session.id);
-// the core does not police callers.
+// the core does not police callers. Pairs a context carries
+// (WithMetadata) merge under the run's own: the option wins.
 //
 // Limits, because metadata rides every span and record: at most 64 keys,
 // a key at most 128 bytes, a value at most 1024 bytes. An entry over a
@@ -46,6 +47,41 @@ func (o metadataOption) applyRun(c *runConfig) {
 		c.metadata = make(map[string]string, len(o.kv))
 	}
 	maps.Copy(c.metadata, o.kv)
+}
+
+// WithMetadata returns a copy of ctx carrying kv as metadata for every
+// run started under it — the context-carried source a run option cannot
+// be: net/http middleware that learns something about the request (the
+// page it came from, a tenant) before the handler calls Generate or
+// thread's Send. Pairs merge over any ctx already carries (an earlier
+// WithMetadata, or the run ctx belongs to), a later key winning, under
+// Metadata's limits; a run's own Metadata options win over them, and a
+// Subagent's child run inherits them as it inherits the parent's. An
+// entry over a limit is dropped and counted on the next run started
+// under the returned ctx (weft.metadata.dropped). Reporting only: the
+// pairs change no model-visible behaviour.
+func WithMetadata(ctx context.Context, kv map[string]string) context.Context {
+	if len(kv) == 0 {
+		return ctx
+	}
+	md, dropped := mergeMetadata(metadataFromCtx(ctx), kv)
+	if dropped > 0 {
+		ctx = context.WithValue(ctx, metadataDroppedKey{}, metadataDroppedFromCtx(ctx)+dropped)
+	}
+	if md == nil {
+		return ctx
+	}
+	return withMetadata(ctx, md)
+}
+
+// metadataDroppedKey carries the count of pairs WithMetadata dropped,
+// until the next run started under the context reports it on its
+// invoke_agent span and clears it for its own children.
+type metadataDroppedKey struct{}
+
+func metadataDroppedFromCtx(ctx context.Context) int {
+	n, _ := ctx.Value(metadataDroppedKey{}).(int)
+	return n
 }
 
 // metadataKey is the context key for the metadata in force on a run: the

@@ -28,6 +28,7 @@
     "auth": "no server token to sign panel tokens with: turn it on with studio.Token(tok); weft studio always sets one",
     "breakpoints": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
     "cancel": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
+    "handoff": "no Token: panel tokens do not exist here, so there is none to hand off from: turn it on with studio.Token(tok); weft studio always sets one",
     "playground": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
     "preview": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
     "runtimes": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",

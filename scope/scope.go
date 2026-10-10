@@ -25,20 +25,41 @@
 // calls scope.Set(w, …) before it writes. The header never carries a
 // token; a Scope has nowhere to put one.
 //
+// Header also learns the page the request came from — its Referer, else
+// its Origin — and stamps it, sanitised, as weft.page_url on every run
+// the handler starts (core.WithMetadata on the request's context: no
+// option for the handler to pass, thread's Send included), so Studio's
+// "open in app" can return to that page with #weft_scope= and the
+// devtools panel scopes itself there. PageURLFromContext reads it back.
+//
 // The package lives beside the root rather than in it: the root
 // package is a generated facade over core, which never imports
 // net/http (ADR 0016, ADR 0027).
 package scope
 
 import (
+	"context"
 	"net/http"
+	"net/url"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/weftgo/weft/core"
 )
 
 // HeaderName is the response header the app's handler sets and the
 // panel reads.
 const HeaderName = "Weft-Scope"
+
+// PageURLKey is the metadata key Header stamps the request's page URL
+// under, on every run its handler starts (and so on each run's spans
+// and records, and on Studio's run row).
+const PageURLKey = "weft.page_url"
+
+// maxPageURL bounds a page URL: core's metadata value limit (1024
+// bytes). A longer one is dropped, never truncated — a cut URL names
+// another page.
+const maxPageURL = 1024
 
 // Scope names what the devtools follow. PublicID is the join key the
 // app hands out ("" is the dev list: no conversation); the other
@@ -112,13 +133,82 @@ func Parse(str string) Scope {
 // loopback (a dev server on :5173 calling the app on :8080); a
 // cross-origin production app names its scope with data-scope or the
 // DOM marker instead.
+//
+// Header also puts the request's page URL (PageURL) on the request's
+// context, for PageURLFromContext and — through core.WithMetadata — as
+// weft.page_url on every run next starts under that context. A run's
+// own core.Metadata option wins over it.
 func Header(next http.Handler, scopeOf func(*http.Request) Scope) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if s := scopeOf(r); !s.IsZero() {
 			Set(w, s)
 		}
+		if page := PageURL(r); page != "" {
+			ctx := context.WithValue(r.Context(), pageURLKey{}, page)
+			ctx = core.WithMetadata(ctx, map[string]string{PageURLKey: page})
+			r = r.WithContext(ctx)
+		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// pageURLKey is the context key Header puts the page URL under.
+type pageURLKey struct{}
+
+// PageURLFromContext returns the page URL Header put on a request's
+// context, and whether there was one.
+func PageURLFromContext(ctx context.Context) (string, bool) {
+	page, ok := ctx.Value(pageURLKey{}).(string)
+	return page, ok && page != ""
+}
+
+// PageURL is the page a request came from, sanitised: its Referer, else
+// its Origin plus "/". Only an absolute http or https URL with a host
+// counts; userinfo, the query and the fragment are dropped (a page, not
+// a state: the panel re-adds #weft_scope=), and so is a URL over 1024
+// bytes, whole. "" when the request names no such page — no Referer or
+// Origin, an opaque Origin ("null"), another scheme. The browser's
+// default Referrer-Policy sends a cross-origin request only the
+// origin, so a page on another origin is often its origin's root.
+func PageURL(r *http.Request) string {
+	if page := cleanPageURL(r.Header.Get("Referer"), false); page != "" {
+		return page
+	}
+	return cleanPageURL(r.Header.Get("Origin"), true)
+}
+
+// cleanPageURL applies PageURL's rule to one header's value; origin
+// asks for a bare scheme://host[:port], which gains the root path.
+func cleanPageURL(raw string, origin bool) string {
+	if raw == "" || len(raw) > 4*maxPageURL {
+		return ""
+	}
+	for i := 0; i < len(raw); i++ {
+		if c := raw[i]; c < 0x21 || c == 0x7F {
+			return "" // a header value with spaces or controls is no URL
+		}
+	}
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.Opaque != "" {
+		return ""
+	}
+	if origin {
+		if u.Path != "" && u.Path != "/" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+			return ""
+		}
+		u.Path = "/"
+	}
+	u.User = nil
+	u.RawQuery, u.ForceQuery = "", false
+	u.Fragment, u.RawFragment = "", ""
+	if u.Path == "" {
+		u.Path = "/"
+	}
+	page := u.String()
+	if len(page) > maxPageURL {
+		return ""
+	}
+	return page
 }
 
 // Set sets the Weft-Scope header on w to s, replacing any earlier

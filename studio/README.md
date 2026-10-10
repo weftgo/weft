@@ -184,7 +184,12 @@ read-only, every valid identity) answers the effective table in the
 file's shape plus `source` (`default` | `file` | `option`) and the file's
 `path` under `db.path`'s rule — the body saves as a `WEFT_PRICING` file
 and loads back. `/api/meta`'s `pricing` is `{source, path?, dated,
-models}`.
+models}`. The Studio UI shows cost, under capability `pricing` only, in the runs
+table (a Cost column, sortable through `sort=cost` when `search` is
+there too, else over the loaded rows), the run header (own · delegated),
+the step cards, the compare page's cost column, the playground's result
+cards and matrix (a per-variant total) and the sessions list — an
+unknown figure as "—" with `cost_reason` as its tooltip, never `$0.00`.
 
 ## The devtools panel (WEFT-DEVTOOLS.md)
 

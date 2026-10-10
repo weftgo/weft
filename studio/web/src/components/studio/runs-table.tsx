@@ -34,6 +34,8 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { forkSource } from "@/lib/experiments"
+import { costView, delegatedView } from "@/lib/cost"
+import { CacheHint, CostText } from "@/components/studio/cost"
 import { runLink, sessionLink } from "@/lib/links"
 
 const statusColor: Record<RunRow["status"], string> = {
@@ -154,10 +156,70 @@ function TokensCell({ usage }: { usage: RunRow["usage"] }) {
   )
 }
 
+/** The Cost column's sort control (plan A5): server is true when the
+ * page sorts through /api/search?sort=cost (capabilities search and
+ * pricing), false when it sorts the loaded rows only. */
+export interface CostSort {
+  active: boolean
+  server: boolean
+  onToggle: () => void
+}
+
 export interface RunsTableProps {
   runs: RunRow[]
   selectedId?: string
   now?: number
+  /** Draw the Cost column (capability "pricing"); absent, no cell. */
+  showCost?: boolean
+  costSort?: CostSort
+}
+
+/** CostCell is a run's own cost and, when its subagents cost anything
+ * (or could not be priced), their delegated figure under it. */
+function CostCell({ run }: { run: RunRow }) {
+  const del = delegatedView(run)
+  const showDel = !del.known || (del.usd ?? 0) > 0
+  return (
+    <div className="flex flex-col items-end">
+      <CostText v={costView(run)} />
+      {showDel ? (
+        <span className="text-[11px] text-faint" data-delegated-cost>
+          + <CostText v={del} /> delegated
+        </span>
+      ) : null}
+      <CacheHint fields={run} />
+    </div>
+  )
+}
+
+const COST_SORT_SERVER =
+  "sorted by Studio (/api/search?sort=cost): each run's whole bill, own + delegated, most first; unpriced runs last"
+const COST_SORT_LOCAL =
+  "sorts the loaded rows only (own + delegated, most first; unpriced last): this Studio cannot sort by cost itself (it needs the search capability) — load more to sort more"
+
+function CostHead({ sort }: { sort?: CostSort }) {
+  if (!sort)
+    return (
+      <TableHead className="text-right" title="the run's own cost, priced at read time; its subagents' apart">
+        cost
+      </TableHead>
+    )
+  const why = sort.server ? COST_SORT_SERVER : COST_SORT_LOCAL
+  return (
+    <TableHead className="text-right" aria-sort={sort.active ? "descending" : "none"}>
+      <button
+        type="button"
+        className={`font-medium hover:text-foreground ${sort.active ? "text-foreground" : ""}`}
+        title={sort.active ? `${why} — click for newest first` : why}
+        onClick={sort.onToggle}
+        data-cost-sort={sort.server ? "server" : "page"}
+        aria-pressed={sort.active}
+      >
+        cost{sort.active ? " ↓" : ""}
+        {sort.active && !sort.server ? <span className="text-faint"> (page)</span> : null}
+      </button>
+    </TableHead>
+  )
 }
 
 /** A replayed run's source step (plan F1): forked_from's run and
@@ -178,7 +240,7 @@ function ReplayChip({ run }: { run: Pick<RunRow, "forked_from"> }) {
   )
 }
 
-export function RunsTable({ runs, selectedId, now }: RunsTableProps) {
+export function RunsTable({ runs, selectedId, now, showCost, costSort }: RunsTableProps) {
   const clock = now ?? Date.now()
   const navigate = useNavigate()
   const selectedRow = useRef<HTMLTableRowElement>(null)
@@ -199,6 +261,7 @@ export function RunsTable({ runs, selectedId, now }: RunsTableProps) {
           <TableHead className="text-right" title="input / output tokens">
             tokens in / out
           </TableHead>
+          {showCost ? <CostHead sort={costSort} /> : null}
           <TableHead className="text-right">started</TableHead>
           <TableHead className="text-right">duration</TableHead>
         </TableRow>
@@ -291,6 +354,11 @@ export function RunsTable({ runs, selectedId, now }: RunsTableProps) {
               <TableCell className="text-right">
                 <TokensCell usage={run.usage} />
               </TableCell>
+              {showCost ? (
+                <TableCell className="text-right whitespace-nowrap" data-cost-cell>
+                  <CostCell run={run} />
+                </TableCell>
+              ) : null}
               <TableCell
                 className="text-right font-mono whitespace-nowrap tabular-nums"
                 title={absoluteTime(run.started)}

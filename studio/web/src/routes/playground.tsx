@@ -24,7 +24,7 @@
 // The same drawer fields as the panel (prompt, tools off, model,
 // thinking, input), the same POST /api/playground/runs, the same live
 // result — V6: one API, two clients.
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, useLocation, useNavigate, useSearch } from "@tanstack/react-router"
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { Dispatch, SetStateAction } from "react"
@@ -83,6 +83,8 @@ import { compareLink, experimentLink, playgroundSearch, runLink } from "@/lib/li
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { notify } from "@/lib/notify"
 import { StepCompare } from "@/components/studio/step-diff"
+import { CostText, useCostCapable } from "@/components/studio/cost"
+import { sumCost } from "@/lib/cost"
 
 // The command's pure halves and the form's controls live in shared
 // modules (plan F1: the run page's replay drawer renders the same
@@ -1091,6 +1093,7 @@ function ResultCard({
   const [steerText, setSteerText] = useState("")
   const [cardErr, setCardErr] = useState("")
   const [deciding, setDeciding] = useState(false)
+  const costCapable = useCostCapable()
 
   useCommandTracking(experiment, onUpdate)
 
@@ -1218,6 +1221,11 @@ function ResultCard({
                 {experiment.row.usage.input_tokens}→{experiment.row.usage.output_tokens} tok
               </span>
               <span>{latency(experiment.row)}</span>
+              {costCapable ? (
+                <span title="the run's whole bill: its own model calls + its subagents'" data-result-cost>
+                  <CostText v={sumCost([experiment.row])} />
+                </span>
+              ) : null}
             </>
           )}
           {toolCalls.length > 0 && <span>{toolCalls.join(", ")}</span>}
@@ -1361,6 +1369,7 @@ function latency(row: RunRow): string {
  * finish, tokens, latency and tool calls of each, one column each. */
 function CompareTable({ variants }: { variants: Variant[] }) {
   const ran = variants.flatMap((v) => (v.result?.row ? [{ key: v.key, row: v.result.row }] : []))
+  const costCapable = useCostCapable()
   if (ran.length < 2) return null
   return (
     <div className="rounded border">
@@ -1376,6 +1385,11 @@ function CompareTable({ variants }: { variants: Variant[] }) {
             <th className="px-3 py-1 font-normal">tokens</th>
             <th className="px-3 py-1 font-normal">latency</th>
             <th className="px-3 py-1 font-normal">steps</th>
+            {costCapable ? (
+              <th className="px-3 py-1 font-normal" title="the run's whole bill: its own model calls + its subagents'">
+                cost
+              </th>
+            ) : null}
           </tr>
         </thead>
         <tbody>
@@ -1391,6 +1405,11 @@ function CompareTable({ variants }: { variants: Variant[] }) {
               </td>
               <td className="px-3 py-1">{latency(row)}</td>
               <td className="px-3 py-1">{row.steps}</td>
+              {costCapable ? (
+                <td className="px-3 py-1" data-compare-cost={key}>
+                  <CostText v={sumCost([row])} />
+                </td>
+              ) : null}
             </tr>
           ))}
         </tbody>
@@ -1628,6 +1647,29 @@ function Matrix({
   }, [cells, polled, qc, setCells])
 
   const inputKeys = [...new Set(Object.keys(cells).map((k) => k.split("\u0000")[1]))]
+  // Cost per cell and per variant (plan A5): each finished cell's run
+  // row (its whole bill, own + delegated), summed client-side per
+  // variant — "—" while any run is unread, unfinished or unpriced.
+  const costCapable = useCostCapable()
+  const priced = Object.entries(cells).filter(([, c]) => c.runID && c.state === "finished")
+  const rowQs = useQueries({
+    queries: priced.map(([, c]) => ({ ...runQuery(c.runID), enabled: costCapable })),
+  })
+  const rowOf = new Map(priced.map(([k], i) => [k, rowQs[i]?.data]))
+  const cellCost = (key: string) => {
+    const r = rowOf.get(key)
+    return r ? sumCost([r]) : null
+  }
+  const variantCost = (vk: string) =>
+    sumCost(
+      inputKeys.flatMap((ik) => {
+        const key = `${vk}\u0000${ik}`
+        const c = cells[key] as Experiment | undefined
+        // A cell that ran nothing (rejected, lost before a run) bills nothing.
+        if (!c || (!c.runID && (c.state === "rejected" || c.state === "lost"))) return []
+        return [rowOf.get(key)]
+      })
+    )
   return (
     <div className="rounded border">
       <div className="border-b px-3 py-2 text-xs text-muted-foreground">
@@ -1749,6 +1791,15 @@ function Matrix({
                               stateLabel(cell)
                             )}
                             {cell.error ? ` (${cell.error})` : ""}
+                            {costCapable && cell.runID && cell.state === "finished" ? (
+                              <span className="ml-1.5 text-muted-foreground" data-cell-cost>
+                                {cellCost(`${v.key}\u0000${ik}`) ? (
+                                  <CostText v={cellCost(`${v.key}\u0000${ik}`)!} />
+                                ) : (
+                                  <span className="text-faint" title="reading the run's cost">…</span>
+                                )}
+                              </span>
+                            ) : null}
                           </span>
                         ) : (
                           <span className="text-faint">—</span>
@@ -1759,6 +1810,20 @@ function Matrix({
                 </tr>
               ))}
             </tbody>
+            {costCapable ? (
+              <tfoot>
+                <tr className="border-t text-muted-foreground">
+                  <td className="py-1" title="each variant's runs, own + delegated, summed here">
+                    cost
+                  </td>
+                  {variants.map((v) => (
+                    <td key={v.key} className="py-1" data-variant-cost={v.key}>
+                      <CostText v={variantCost(v.key)} />
+                    </td>
+                  ))}
+                </tr>
+              </tfoot>
+            ) : null}
           </table>
           </div>
         )}

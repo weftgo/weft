@@ -157,6 +157,11 @@ const STEP_DOC_KEYS: Record<keyof StepDoc, true> = {
   usage: true,
   compaction: true,
   holes: true,
+  cost_usd: true,
+  cost_known: true,
+  cost_badge: true,
+  cost_reason: true,
+  cache: true,
 }
 const STEP_ATTEMPT_KEYS: Record<keyof StepAttempt, true> = {
   attempt: true,

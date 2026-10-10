@@ -29,8 +29,36 @@ export interface Usage {
 
 export type RunStatus = "running" | "succeeded" | "failed" | "interrupted"
 
-/** RunRow — every list and detail (S4.3). */
-export interface RunRow {
+/** The cost block every priced object carries (plan A5, studio/
+ * pricing.go's costFields): priced at read time from the pricing
+ * table. cost_usd is null when unknown — never 0 for an unpriced
+ * model — and cost_badge says why: "unpriced" (no row matches the
+ * model) or "unknown" (the figure could not be computed), with
+ * cost_reason naming it. cache says whether the adapter reported the
+ * cache splits ("exact") or not (then every input token was priced at
+ * the input rate). All absent from a Studio older than A5. */
+export interface CostFields {
+  cost_usd?: number | null
+  cost_known?: boolean
+  cost_badge?: "unpriced" | "unknown"
+  cost_reason?: string
+  /** "exact" | "not_reported" ("unknown" from a Studio before the
+   * rename) — compared against "exact" only. */
+  cache?: string
+}
+
+/** A run's subagent bill beside its own (pricing.go's
+ * delegatedFields): the sum of its descendants' own costs, never
+ * folded into cost_usd; null and known false when any is unpriced. */
+export interface DelegatedCostFields {
+  delegated_cost_usd?: number | null
+  delegated_cost_known?: boolean
+  delegated_cost_reason?: string
+}
+
+/** RunRow — every list and detail (S4.3); its cost is the run's own
+ * model calls and, apart, its subagents' (plan A5). */
+export interface RunRow extends CostFields, DelegatedCostFields {
   id: string
   parent_run_id: string
   parent_call_id: string
@@ -241,7 +269,9 @@ export interface SpansDoc {
   spans: Span[]
 }
 
-export interface SessionRow {
+/** A session row: its cost is its turns' own + delegated (plan A5);
+ * a session carries no delegated figure of its own. */
+export interface SessionRow extends CostFields {
   id: string
   public_id: string
   agent: string
@@ -304,7 +334,10 @@ export interface Meta {
     ingest: string
     latest: { run_id: string; mark: string; note: string; fix?: string } | null
   }
-  pricing?: boolean
+  /** The pricing table Studio prices with (plan A5): its source,
+   * the override file's path (under db.path's rule), the day its rates
+   * were read and how many rows it holds. */
+  pricing?: MetaPricing
   retention?: string | null
   /** Runtimes holding a command stream now. */
   runtimes?: number
@@ -317,6 +350,36 @@ export interface Meta {
     /** Agents registered services hold in different versions. */
     differs?: string[]
   } | null
+}
+
+/** api/meta's pricing block (pricing.go's metaPricing). */
+export interface MetaPricing {
+  source: "default" | "file" | "option"
+  path?: string
+  dated: string
+  models: number
+}
+
+/** One row of the pricing table: rates in USD per 1M tokens; a
+ * missing optional rate prices that kind at the base rate. */
+export interface ModelPrice {
+  provider: string
+  model_glob: string
+  input: number
+  output: number
+  cached_input?: number
+  cache_write?: number
+  reasoning?: number
+}
+
+/** GET /api/settings/pricing (capability "pricing"): the effective
+ * table. */
+export interface PricingSettings {
+  source: "default" | "file" | "option"
+  path?: string
+  dated: string
+  note?: string
+  models: ModelPrice[]
 }
 
 /** A panel token minted by the backend (S4.6). */
@@ -692,6 +755,35 @@ export async function fetchRuns(filters: RunsFilters = {}): Promise<RunsPage> {
   return get<RunsPage>(`runs${runsSearch(filters)}`)
 }
 
+/** GET /api/search's body (capability "search", plan A7): one page
+ * of run rows in the order asked, offset-paged. cost_sort_cap is set
+ * when sort=cost (or min_cost) read a match larger than the cap: the
+ * runs past it were neither priced nor listed (plan A5). */
+export interface SearchPage {
+  total: number
+  runs: RunRow[]
+  sort: string
+  next_offset: number | null
+  cost_sort_cap?: number
+}
+
+/** A search over /api/runs' filters, in an order (sort=cost: the
+ * run's whole bill, own + delegated, most first; unpriced runs last). */
+export interface SearchFilters extends Omit<RunsFilters, "before" | "before_id"> {
+  sort?: "started" | "duration" | "tokens" | "cost"
+  offset?: number
+}
+
+/** GET /api/search?…: the runs list's filters, sort and offset. */
+export function fetchSearch(filters: SearchFilters = {}): Promise<SearchPage> {
+  const { sort, offset, ...rest } = filters
+  const params = new URLSearchParams(runsSearch(rest).replace(/^\?/, ""))
+  if (sort) params.set("sort", sort)
+  if (offset) params.set("offset", String(offset))
+  const qs = params.toString()
+  return get<SearchPage>(`search${qs ? `?${qs}` : ""}`)
+}
+
 export function runsQuery(filters: RunsFilters = {}) {
   return queryOptions({
     queryKey: ["runs", filters],
@@ -1044,8 +1136,9 @@ export interface StepToolCall {
   badge?: "max_tokens" | "stripped"
 }
 
-/** A child run a step's call started (A10). Cost arrives with A5. */
-export interface StepChild {
+/** A child run a step's call started (A10), with its cost as its run
+ * row carries it (plan A5): own and delegated, never folded. */
+export interface StepChild extends CostFields, DelegatedCostFields {
   id: string
   call_id: string
   agent: string
@@ -1077,7 +1170,7 @@ export interface StepHole {
  * (prompt and catalog inline) or, when it is not here, the badge that
  * says why (hidden for a read-scoped token, not_recorded, gap); absent
  * only for a step that made no model call. */
-export interface StepDoc {
+export interface StepDoc extends CostFields {
   run_id: string
   step: number
   status: StepStatus

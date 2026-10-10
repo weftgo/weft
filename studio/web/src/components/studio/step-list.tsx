@@ -10,6 +10,7 @@ import { ChevronRight, Play } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 
 import { stepQuery } from "@/lib/api"
+import { CacheHint, Cost, useCostCapable } from "@/components/studio/cost"
 import type { RunCompaction, RunDoc, StepChild, Transcript, WireEvent } from "@/lib/api"
 import { compactionsOf, isSessionMarker } from "@/lib/compaction"
 import {
@@ -519,6 +520,10 @@ function StepCard({
   // The step route's assembled holes when the page has it (A7): read
   // from the cache only — the card never fetches it.
   const stepDoc = useQuery({ ...stepQuery(runId, step.index), enabled: false })
+  // The step's own model call priced (plan A5), from the same cached
+  // step doc: drawn once the page holds it, "—" with the reason when
+  // its model is unpriced; nothing without capability "pricing".
+  const costCapable = useCostCapable()
   const holes = mergeHoles(
     stepHoles(step, runHoles, stepDoc.data),
     stepAttemptsHole(step, requests)
@@ -595,6 +600,12 @@ function StepCard({
           requests={requests}
         />
         <HoleBadges holes={holes} />
+        {costCapable && stepDoc.data ? (
+          <span className="flex items-center gap-1 text-[11px] text-muted-foreground" data-step-cost>
+            <Cost fields={stepDoc.data} label="step cost" />
+            <CacheHint fields={stepDoc.data} />
+          </span>
+        ) : null}
         <span className="ml-auto flex items-center gap-1">
           <span
             className="font-mono text-[10px] text-faint tabular-nums"

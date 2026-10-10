@@ -18,6 +18,7 @@ import {
   usageSummary,
 } from "@/lib/format"
 import { CopyButton } from "@/components/studio/codewin"
+import { RunCost, useCostCapable } from "@/components/studio/cost"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { StatusChip } from "@/components/studio/runs-table"
 import { Badge } from "@/components/ui/badge"
@@ -212,6 +213,7 @@ export function RunHeader({
   transcript?: Transcript
 }) {
   const now = useNow(doc.status === "running")
+  const costCapable = useCostCapable()
   useDocumentTitle({ page: "run", id: doc.id, status: doc.status })
   // The words this run was asked: the last user message it was fed
   // (in a thread the first one is an earlier turn's).
@@ -298,6 +300,14 @@ export function RunHeader({
         <span title="input / output tokens, subagents included">
           {usageSummary(doc.usage)}
         </span>
+        {costCapable ? (
+          <RunCost
+            run={doc}
+            hasChildren={
+              doc.children.length > 0 || doc.delegated_cost_known === false || (doc.delegated_cost_usd ?? 0) > 0
+            }
+          />
+        ) : null}
         <span title={absoluteTime(doc.started)}>
           started {relativeTime(doc.started, now)} · {absoluteTime(doc.started)}
         </span>

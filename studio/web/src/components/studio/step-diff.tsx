@@ -9,7 +9,9 @@ import { useQueries } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { Fragment, useEffect, useRef } from "react"
 
-import { diffQuery } from "@/lib/api"
+import { diffQuery, stepQuery } from "@/lib/api"
+import type { CostFields } from "@/lib/api"
+import { costCell, costCellWords, costView } from "@/lib/cost"
 import { runLink } from "@/lib/links"
 import {
   CELL_REASONS,
@@ -108,9 +110,85 @@ function Cell({
   )
 }
 
+/** A step's cost as the compare reads it (plan A5): the step route's
+ * cost block, "loading" while it is read, or the read's error. */
+export type StepCostRead = { fields: CostFields } | { loading: true } | { error: string }
+
+/** The compare's cost lookup: run id and step ordinal → its read;
+ * absent (no capability "pricing") → no cost column at all. */
+export type StepCosts = (run: string, step: number) => StepCostRead | undefined
+
+/** The steps a run's cost column reads at most: one step route read
+ * each, so a long run's tail says it was not read. */
+export const COST_STEPS = 50
+
+function costFieldsOf(r: StepCostRead | undefined): CostFields | null {
+  if (!r) return { cost_known: false, cost_badge: "unknown", cost_reason: `the cost is read for the first ${COST_STEPS} steps only` }
+  if ("fields" in r) return r.fields
+  if ("error" in r) return { cost_known: false, cost_badge: "unknown", cost_reason: `the step could not be read: ${r.error}` }
+  return null
+}
+
+/** CostCellTd is one run's cost at one ordinal: the base's figure, or
+ * a compared run's state against it (lib/cost.ts's costCell: an
+ * unknown side is "not comparable"). */
+function CostCellTd({
+  run,
+  read,
+  base,
+  missing,
+  compared,
+}: {
+  run: string
+  read: StepCostRead | undefined
+  base?: StepCostRead | undefined
+  missing: boolean
+  compared: boolean
+}) {
+  const cls = "border-l px-2 py-1 align-top whitespace-nowrap"
+  if (missing && !compared)
+    return (
+      <td className={`${cls} text-muted-foreground`} data-diff-run={run} data-diff-cell="cost">
+        —
+      </td>
+    )
+  const side = costFieldsOf(read)
+  const baseSide = costFieldsOf(base)
+  if (!missing && (side === null || (compared && baseSide === null)))
+    return (
+      <td className={`${cls} text-faint`} data-diff-run={run} data-diff-cell="cost">
+        …
+      </td>
+    )
+  if (!compared) {
+    const v = costView(side)
+    return (
+      <td className={`${cls} ${v.known ? "" : "text-faint"}`} data-diff-run={run} data-diff-cell="cost" title={v.title}>
+        {v.text}
+      </td>
+    )
+  }
+  const state = costCell(baseSide, side, missing)
+  const w = costCellWords(state, state === "unknown" && costView(side).known ? baseSide : side)
+  return (
+    <td
+      className={`${cls} ${STATE_TONE[state]}`}
+      data-diff-run={run}
+      data-diff-cell="cost"
+      data-diff-state={state}
+      title={w.title}
+    >
+      {w.text}
+    </td>
+  )
+}
+
 /** StepDiffTable renders an N-way view: the base run first, each
- * compared run beside it, one row per step ordinal. */
-export function StepDiffTable({ view, focus }: { view: NWayView; focus?: number }) {
+ * compared run beside it, one row per step ordinal. With costs, each
+ * run gains a cost column (plan A5) — informational: it never marks a
+ * step changed (cost follows usage, already compared). */
+export function StepDiffTable({ view, focus, costs }: { view: NWayView; focus?: number; costs?: StepCosts }) {
+  const width = DIFF_COLUMNS.length + 1 + (costs ? 1 : 0)
   // The step a link landed on (compareLink's step): scrolled to once.
   const target = useRef<HTMLTableRowElement>(null)
   useEffect(() => {
@@ -168,7 +246,7 @@ export function StepDiffTable({ view, focus }: { view: NWayView; focus?: number 
                 step
               </th>
               {runs.map((r, i) => (
-                <th key={r} scope="colgroup" colSpan={DIFF_COLUMNS.length + 1} className="border-l px-2 py-1 font-normal">
+                <th key={r} scope="colgroup" colSpan={width} className="border-l px-2 py-1 font-normal">
                   <Link {...runLink(r)} className="hover:text-foreground hover:underline">
                     {r}
                   </Link>
@@ -187,6 +265,15 @@ export function StepDiffTable({ view, focus }: { view: NWayView; focus?: number 
                       {COLUMN_LABELS[c]}
                     </th>
                   ))}
+                  {costs ? (
+                    <th
+                      scope="col"
+                      className="border-l px-2 py-1 font-normal"
+                      title="the step's own model call, priced at read time: shown, never counted as a change"
+                    >
+                      cost
+                    </th>
+                  ) : null}
                 </Fragment>
               ))}
             </tr>
@@ -212,6 +299,14 @@ export function StepDiffTable({ view, focus }: { view: NWayView; focus?: number 
                 {DIFF_COLUMNS.map((c) => (
                   <Cell key={c} run={view.base.run_id} col={c} side={row.base} />
                 ))}
+                {costs ? (
+                  <CostCellTd
+                    run={view.base.run_id}
+                    read={costs(view.base.run_id, row.step)}
+                    missing={!row.base.side}
+                    compared={false}
+                  />
+                ) : null}
                 {row.others.map((o) => (
                   <Fragment key={o.run_id}>
                     <td className="border-l px-2 py-1 align-top" data-diff-run={o.run_id} data-diff-marks>
@@ -220,6 +315,15 @@ export function StepDiffTable({ view, focus }: { view: NWayView; focus?: number 
                     {DIFF_COLUMNS.map((c) => (
                       <Cell key={c} run={o.run_id} col={c} side={o.side} base={row.base.side} state={o.cells[c]} />
                     ))}
+                    {costs ? (
+                      <CostCellTd
+                        run={o.run_id}
+                        read={costs(o.run_id, row.step)}
+                        base={costs(view.base.run_id, row.step)}
+                        missing={!row.base.side || !o.side.side}
+                        compared
+                      />
+                    ) : null}
                   </Fragment>
                 ))}
               </tr>
@@ -244,6 +348,33 @@ export function StepCompare({ base, others, focus }: { base: string; others: str
   const ids = [...new Set(others.filter((x) => x && x !== base))]
   const on = has("diff") && !!base && ids.length > 0
   const qs = useQueries({ queries: ids.map((b) => ({ ...diffQuery(base, b), enabled: on })) })
+  // The cost column (plan A5): each side's step docs (the step route
+  // prices a step's own model call), the first COST_STEPS of each run.
+  const costOn = on && has("pricing") && has("steps")
+  const answeredDocs = qs.flatMap((q) => (q.data ? [q.data] : []))
+  const keys: { run: string; step: number }[] = []
+  if (costOn && answeredDocs.length) {
+    const seen = new Set<string>()
+    for (const d of answeredDocs)
+      for (const r of (d.steps as DiffDoc["steps"] | undefined) ?? [])
+        for (const [run, side] of [[d.a.run_id, r.a], [d.b.run_id, r.b]] as const) {
+          const k = `${run}#${r.step}`
+          if (side && r.step < COST_STEPS && !seen.has(k)) {
+            seen.add(k)
+            keys.push({ run, step: r.step })
+          }
+        }
+  }
+  const stepQs = useQueries({ queries: keys.map((k) => ({ ...stepQuery(k.run, k.step), retry: false })) })
+  const reads = new Map<string, StepCostRead>()
+  keys.forEach((k, i) => {
+    const q = stepQs[i]
+    reads.set(
+      `${k.run}#${k.step}`,
+      q.data ? { fields: q.data } : q.isError ? { error: q.error.message } : { loading: true }
+    )
+  })
+  const costs: StepCosts | undefined = costOn ? (run, step) => reads.get(`${run}#${step}`) : undefined
   if (!on) return null
   // A failed background re-read keeps what was drawn: a side with data
   // is drawn whatever its last read said.
@@ -273,7 +404,7 @@ export function StepCompare({ base, others, focus }: { base: string; others: str
   return (
     <div className="space-y-2">
       {errors}
-      <StepDiffTable view={nWayView(answered.map(({ q }) => q.data as DiffDoc))} focus={focus} />
+      <StepDiffTable view={nWayView(answered.map(({ q }) => q.data as DiffDoc))} focus={focus} costs={costs} />
     </div>
   )
 }

@@ -12,8 +12,9 @@ import type { InfiniteData } from "@tanstack/react-query"
 import { createFileRoute, useNavigate, useRouter } from "@tanstack/react-router"
 import { RefreshCw, Radio, X } from "lucide-react"
 
-import { fetchRuns, nextCursor } from "@/lib/api"
+import { fetchRuns, fetchSearch, nextCursor } from "@/lib/api"
 import type { PageCursor, RunsFilters, RunsPage, RunStatus } from "@/lib/api"
+import { sortByCost } from "@/lib/cost"
 import { openLive, throttle } from "@/lib/live"
 import { isPlainShortcut } from "@/lib/keys"
 import { useCapabilities } from "@/hooks/use-capabilities"
@@ -48,6 +49,10 @@ interface RunsSearch {
    * top-level-only default. */
   subagents?: "all"
   before?: string
+  /** The Cost column's order (plan A5): the whole bill, most first —
+   * through /api/search?sort=cost when the Studio can, else the
+   * loaded rows sorted in place. */
+  sort?: "cost"
 }
 
 const STATUSES: RunStatus[] = ["running", "succeeded", "failed", "interrupted"]
@@ -96,6 +101,7 @@ export const Route = createFileRoute("/runs/")({
       typeof search.before === "string" && search.before
         ? search.before
         : undefined,
+    sort: search.sort === "cost" ? "cost" : undefined,
   }),
   component: RunsPage,
 })
@@ -178,7 +184,14 @@ function RunsPage() {
   // A grant refused for good (a panel token is never granted an agent's
   // stream, plan C5): following polls the list instead, and says so.
   const [liveRefused, setLiveRefused] = useState(false)
-  const page = useInfiniteQuery({
+  const { has } = useCapabilities()
+  // The Cost column (plan A5): drawn under capability "pricing" only;
+  // sorted by Studio (search's sort=cost) when it also searches, else
+  // the loaded rows are sorted here and the header says so.
+  const costCapable = has("pricing")
+  const byCost = costCapable && search.sort === "cost"
+  const serverCost = byCost && has("search")
+  const listPage = useInfiniteQuery({
     // Its own key: runsQuery (the ⌘K palette) caches a plain RunsPage
     // under ["runs", filters]; sharing it would hand this observer a
     // non-infinite entry.
@@ -191,16 +204,32 @@ function RunsPage() {
     // not move ends the list (never a page loop).
     getNextPageParam: (last, _all, lastParam) => nextCursor(last, lastParam),
     refetchInterval: follow && liveRefused ? 5_000 : false,
+    enabled: !serverCost,
   })
-  const runs = page.data?.pages.flatMap((p) => p.runs) ?? []
+  // sort=cost: offset-paged search pages, the same filters less the
+  // time cursor (a cost order has none).
+  const { before: _before, before_id: _beforeID, ...searchFilters } = filters
+  const costPage = useInfiniteQuery({
+    queryKey: ["runs", "infinite", "cost", filters],
+    staleTime: 5_000,
+    initialPageParam: 0,
+    queryFn: ({ pageParam }) =>
+      fetchSearch({ ...searchFilters, sort: "cost", offset: pageParam }),
+    getNextPageParam: (last) => last.next_offset ?? undefined,
+    refetchInterval: follow && liveRefused ? 5_000 : false,
+    enabled: serverCost,
+  })
+  const page = serverCost ? costPage : listPage
+  const loaded = page.data?.pages.flatMap((p) => p.runs) ?? []
+  const runs = byCost && !serverCost ? sortByCost(loaded) : loaded
   const total = page.data?.pages[0]?.total ?? 0
+  const costCap = serverCost ? costPage.data?.pages[0]?.cost_sort_cap : undefined
   const filtered = Boolean(
     search.agent || search.status || search.tag || search.session || search.public_id || search.experiments || search.parent
   )
   // Live rows (S4.7): with an agent filter — the live stream's one
   // selector shape — a follow toggle subscribes to that agent's run
   // frames and refreshes the list as runs start and finish.
-  const { has } = useCapabilities()
   const agentKey = search.agent ?? ""
   const liveCapable = has("live")
   useEffect(() => {
@@ -551,8 +580,24 @@ function RunsPage() {
             <RunsTable
               runs={runs}
               selectedId={selected >= 0 ? runs[selected]?.id : undefined}
+              showCost={costCapable}
+              costSort={
+                costCapable
+                  ? {
+                      active: byCost,
+                      server: has("search"),
+                      onToggle: () => setSearch({ sort: byCost ? undefined : "cost" }),
+                    }
+                  : undefined
+              }
             />
           </div>
+          {costCap ? (
+            <p className="text-center font-mono text-[11px] text-faint" data-cost-sort-cap>
+              sorted by cost among the newest {costCap.toLocaleString()} matching runs: Studio prices at read time, so
+              the runs past them were neither priced nor listed
+            </p>
+          ) : null}
           <div className="flex items-center justify-center gap-3">
             <span className="font-mono text-[11px] text-faint tabular-nums">
               showing {runs.length.toLocaleString()} of {total.toLocaleString()}

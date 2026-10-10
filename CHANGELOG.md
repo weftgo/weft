@@ -180,6 +180,21 @@ module, ADR 0005).
   `source` (`default` | `file` | `option`), `dated` and the file's `path`
   (the server token's, or loopback setup A's). No obsdb change.
 
+- Cost in Studio (plan A5.2): under capability `pricing` the runs table
+  gains a Cost column (the run's own `cost_usd`, its subagents'
+  `delegated_cost_usd` under it; sortable — through `/api/search?sort=cost`
+  when the Studio also has `search`, else over the loaded rows, which the
+  header says), the run header shows `own $x · delegated $y` as two
+  numbers, a step card its own model call's cost once the step doc is
+  read, the compare page a cost column per run (informational: an unknown
+  side is "not comparable", never a change), the playground its result
+  cards, compare row and matrix cells with a per-variant total summed
+  client-side, and the sessions list a cost column. An unknown figure is
+  "—" with `cost_reason` as its tooltip, never `$0.00`; a figure priced
+  without cache splits carries a "cache not reported" hint. Without
+  `pricing` no cost cell is drawn. The web mirrors learn the cost fields,
+  `meta.pricing`'s object, `cost_sort_cap` and the settings route's shape.
+
 ### Changed — breaking
 
 - `otel.Pipeline.LoggerProvider()` returns `*otel.LoggerProvider` (embedding

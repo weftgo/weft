@@ -9,6 +9,7 @@ import { fetchSessions, nextCursor } from "@/lib/api"
 import type { PageCursor } from "@/lib/api"
 import { absoluteTime, relativeTime, tokens } from "@/lib/format"
 import { EmptyState } from "@/components/studio/empty-state"
+import { CacheHint, Cost, useCostCapable } from "@/components/studio/cost"
 import { StatusChip } from "@/components/studio/runs-table"
 import { Button } from "@/components/ui/button"
 import {
@@ -73,6 +74,7 @@ function FilterBox({
 
 function SessionsPage() {
   useDocumentTitle({ page: "sessions" })
+  const costCapable = useCostCapable()
   const search = Route.useSearch()
   const navigate = useNavigate({ from: "/sessions/" })
   const filters = { agent: search.agent, public_id: search.public_id }
@@ -159,6 +161,11 @@ function SessionsPage() {
                 <TableHead className="text-right" title="input / output tokens">
                   tokens in / out
                 </TableHead>
+                {costCapable ? (
+                  <TableHead className="text-right" title="the session's turns, own + delegated, priced at read time">
+                    cost
+                  </TableHead>
+                ) : null}
                 <TableHead className="text-right">last seen</TableHead>
               </TableRow>
             </TableHeader>
@@ -195,6 +202,14 @@ function SessionsPage() {
                     {tokens(s.usage.input_tokens)} /{" "}
                     {tokens(s.usage.output_tokens)}
                   </TableCell>
+                  {costCapable ? (
+                    <TableCell className="text-right whitespace-nowrap" data-cost-cell>
+                      <div className="flex flex-col items-end">
+                        <Cost fields={s} />
+                        <CacheHint fields={s} />
+                      </div>
+                    </TableCell>
+                  ) : null}
                   <TableCell
                     className="text-right font-mono whitespace-nowrap tabular-nums"
                     title={absoluteTime(s.last_seen)}

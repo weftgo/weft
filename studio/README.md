@@ -1822,19 +1822,6 @@ read or playground, is 403 before anything is looked up. A live stream
 following a deleted run emits nothing more unless the app keeps writing;
 a later write starts a new run row; a later read is 404),
 `POST /api/panel-tokens`
-`GET /api/panel-handoff?to=<path>` (capability `handoff`; registered only
-with a `Token`, else `capabilities_off.handoff` says why): setup C's "open in
-Studio". A playground-scoped panel token gets a 303 to `<base><to>#token=<t>`,
-where `t` is a read-scoped panel token for the same public id, signed like
-`/api/panel-tokens`'s, expiring in 5 minutes or at the asking token's own
-expiry if sooner, logged as a hand-off without the token; `Accept:
-application/json` gets the same as `{"location","exp"}` for a fetch. The
-server token gets the 303 with no fragment. A read-scoped panel token is 403:
-it cannot widen, and its page links to Studio directly. `to` must be a path
-under the base — a single leading `/`, no scheme, host, fragment, backslash,
-white space or `.`/`..` segment (raw or `%2e`) — else 400: never an open
-redirect.
-
 (mint; the panel's scoped tokens — see the devtools panel above), and
 `GET /api/live` — the SSE
 stream whose frame ids are the hub's Seq: exactly one selector
@@ -1920,6 +1907,19 @@ unauthenticated; `/panel-config.json` (`{endpoint, version,
 capabilities}`, capability `panel-config`) answers a loopback (or
 `AllowOrigins`) Host and a same-origin, `AllowOrigins` or loopback
 Origin only, else 404.
+
+`GET /api/panel-handoff?to=<path>` (capability `handoff`; registered only
+with a `Token`, else `capabilities_off.handoff` says why): setup C's "open in
+Studio". A playground-scoped panel token gets a 303 to `<base><to>#token=<t>`,
+where `t` is a read-scoped panel token for the same public id, signed like
+`/api/panel-tokens`'s, expiring in 5 minutes or at the asking token's own
+expiry if sooner, logged as a hand-off without the token; `Accept:
+application/json` gets the same as `{"location","exp"}` for a fetch. The
+server token gets the 303 with no fragment. A read-scoped panel token is 403:
+it cannot widen, and its page links to Studio directly. `to` must be a path
+under the base — a single leading `/`, no scheme, host, fragment, backslash,
+white space or `.`/`..` segment (raw or `%2e`) — else 400: never an open
+redirect.
 
 Capabilities are computed from the registered route groups
 (`routes.go`) — never hard-coded: `requests`, `steps`, `export`,

@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as CompareRouteImport } from './routes/compare'
 import { Route as LiveRouteImport } from './routes/live'
 import { Route as PlaygroundRouteImport } from './routes/playground'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as AgentsIndexRouteImport } from './routes/agents.index'
 import { Route as RunsIndexRouteImport } from './routes/runs.index'
 import { Route as RunsIdRouteImport } from './routes/runs.$id'
@@ -39,6 +40,11 @@ const LiveRoute = LiveRouteImport.update({
 const PlaygroundRoute = PlaygroundRouteImport.update({
   id: '/playground',
   path: '/playground',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AgentsIndexRoute = AgentsIndexRouteImport.update({
@@ -82,6 +88,7 @@ export interface FileRoutesByFullPath {
   '/compare': typeof CompareRoute
   '/live': typeof LiveRoute
   '/playground': typeof PlaygroundRoute
+  '/settings': typeof SettingsRoute
   '/runs/$id': typeof RunsIdRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/traces/$id': typeof TracesIdRoute
@@ -95,6 +102,7 @@ export interface FileRoutesByTo {
   '/compare': typeof CompareRoute
   '/live': typeof LiveRoute
   '/playground': typeof PlaygroundRoute
+  '/settings': typeof SettingsRoute
   '/runs/$id': typeof RunsIdRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/traces/$id': typeof TracesIdRoute
@@ -109,6 +117,7 @@ export interface FileRoutesById {
   '/compare': typeof CompareRoute
   '/live': typeof LiveRoute
   '/playground': typeof PlaygroundRoute
+  '/settings': typeof SettingsRoute
   '/runs/$id': typeof RunsIdRoute
   '/sessions/$id': typeof SessionsIdRoute
   '/traces/$id': typeof TracesIdRoute
@@ -124,6 +133,7 @@ export interface FileRouteTypes {
     | '/compare'
     | '/live'
     | '/playground'
+    | '/settings'
     | '/runs/$id'
     | '/sessions/$id'
     | '/traces/$id'
@@ -137,6 +147,7 @@ export interface FileRouteTypes {
     | '/compare'
     | '/live'
     | '/playground'
+    | '/settings'
     | '/runs/$id'
     | '/sessions/$id'
     | '/traces/$id'
@@ -150,6 +161,7 @@ export interface FileRouteTypes {
     | '/compare'
     | '/live'
     | '/playground'
+    | '/settings'
     | '/runs/$id'
     | '/sessions/$id'
     | '/traces/$id'
@@ -164,6 +176,7 @@ export interface RootRouteChildren {
   CompareRoute: typeof CompareRoute
   LiveRoute: typeof LiveRoute
   PlaygroundRoute: typeof PlaygroundRoute
+  SettingsRoute: typeof SettingsRoute
   RunsIdRoute: typeof RunsIdRoute
   SessionsIdRoute: typeof SessionsIdRoute
   TracesIdRoute: typeof TracesIdRoute
@@ -201,6 +214,13 @@ declare module '@tanstack/react-router' {
       path: '/playground'
       fullPath: '/playground'
       preLoaderRoute: typeof PlaygroundRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/agents/': {
@@ -260,6 +280,7 @@ const rootRouteChildren: RootRouteChildren = {
   CompareRoute: CompareRoute,
   LiveRoute: LiveRoute,
   PlaygroundRoute: PlaygroundRoute,
+  SettingsRoute: SettingsRoute,
   RunsIdRoute: RunsIdRoute,
   SessionsIdRoute: SessionsIdRoute,
   TracesIdRoute: TracesIdRoute,

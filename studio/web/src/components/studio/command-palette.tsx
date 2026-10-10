@@ -65,10 +65,6 @@ import {
   CommandList,
 } from "@/components/ui/command"
 
-/** Settings' path, widened: its route lands with plan H4, and a
- * router path the tree does not have yet is refused by the types. */
-const SETTINGS_PATH: string = settingsLink().to
-
 export const PALETTE_PLACEHOLDER = "Search runs, sessions, traces, experiments… or a command"
 
 /** The input's settled text: what the run search asks for. */
@@ -262,10 +258,10 @@ export function CommandPalette({
                 Playground
               </CommandItem>
             ) : null}
-            {/* Settings (plan H4): its page lands with H4 — linked now. */}
+            {/* Settings (plan H4). */}
             <CommandItem
               value="settings pricing preferences"
-              onSelect={() => go(() => router.navigate({ to: SETTINGS_PATH }))}
+              onSelect={() => go(() => router.navigate(settingsLink()))}
             >
               <Settings data-slot="icon" />
               Settings

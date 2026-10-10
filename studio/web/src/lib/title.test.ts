@@ -18,6 +18,7 @@ describe("pageTitle", () => {
     [{ page: "sessions" }, "sessions · weft studio"],
     [{ page: "live" }, "live · weft studio"],
     [{ page: "agents" }, "agents · weft studio"],
+    [{ page: "settings" }, "settings · weft studio"],
   ] as const)("%o → %s", (place, want) => {
     expect(pageTitle(place)).toBe(want)
   })

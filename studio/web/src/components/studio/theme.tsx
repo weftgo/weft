@@ -78,6 +78,12 @@ const cycle: Record<ThemeChoice, ThemeChoice> = {
 /** Advance system → light → dark → system and apply it. Returns the new choice. */
 export function cycleTheme(): ThemeChoice {
   const next = cycle[readChoice()]
+  setThemeChoice(next)
+  return next
+}
+
+/** Store and apply one choice (the Settings page's radio, plan H4). */
+export function setThemeChoice(next: ThemeChoice) {
   // 'system' is stored as no value — the bootstrap's own rule —
   // so a fresh visit follows the system again.
   if (next === "system") {
@@ -91,7 +97,6 @@ export function cycleTheme(): ThemeChoice {
   }
   apply(next)
   window.dispatchEvent(new Event("studio:theme"))
-  return next
 }
 
 function subscribeTheme(onChange: () => void) {

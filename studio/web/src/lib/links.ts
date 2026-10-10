@@ -291,8 +291,7 @@ export interface TracesLink {
   search: TracesSearch
 }
 
-/** The Settings page (plan H4). Not a StudioLink until its route
- * lands: a router <Link> refuses a path the tree does not have. */
+/** The Settings page (plan H4). */
 export interface SettingsLink {
   to: "/settings"
   search: Record<string, never>
@@ -306,6 +305,7 @@ export type StudioLink =
   | CompareLink
   | RunsLink
   | TracesLink
+  | SettingsLink
 
 /** A whole, non-negative number, or undefined. */
 function ordinal(n: number | undefined): number | undefined {

@@ -30,6 +30,7 @@ import {
   MessagesSquare,
   Network,
   Search,
+  Settings,
 } from "lucide-react"
 
 import { metaQuery, studioToken } from "@/lib/api"
@@ -69,7 +70,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar"
 import { CommandPalette } from "@/components/studio/command-palette"
-import { playgroundLink, tracesLink } from "@/lib/links"
+import { playgroundLink, settingsLink, tracesLink } from "@/lib/links"
 
 function Nav() {
   const meta = useQuery(metaQuery())
@@ -110,6 +111,8 @@ function Nav() {
               "Playground",
               <FlaskConical data-slot="icon" />
             )}
+          {/* Settings (plan H4): every Studio has one. */}
+          {item(settingsLink().to, "Settings", <Settings data-slot="icon" />)}
         </SidebarMenu>
       </SidebarGroupContent>
     </SidebarGroup>
@@ -143,7 +146,7 @@ function Place() {
       </span>
     )
   }
-  const places = ["runs", "sessions", "traces", "live", "agents", "playground"]
+  const places = ["runs", "sessions", "traces", "live", "agents", "playground", "settings"]
   return (
     <span className="text-xs text-muted-foreground">
       {places.includes(parts[0]) ? parts[0] : "runs"}

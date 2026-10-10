@@ -1257,7 +1257,33 @@ root span, service, start, duration, span count, error, the runs it
 holds linked; since/until/service chips, paged by the exact cursor and
 deduped by trace id, a rootless trace carrying its `gap` badge);
 `/traces/{id}` renders any trace — a stock OTel GenAI app's included —
-as a span tree plus a chat view when semconv content was captured.
+as a span tree plus a chat view when semconv content was captured;
+`/settings` says what this Studio is and serves.
+
+Settings (plan H4): `/settings` (a sidebar entry, the palette's Settings
+item) is one card per section — Studio (endpoint, versions, pid,
+`interrupted_after_ms`, ingest), Token, Database, Retention, Pricing,
+Capabilities, Runtimes, Content policy, Appearance, Keyboard. Served
+(read from `/api/meta`, `/api/settings/pricing` under `pricing` and
+`/api/runtimes` under `runtimes`): the versions, the database (its path,
+size and the pid badged `hidden` to a caller `db.path`'s rule refuses),
+retention, the pricing table, each capability off with its
+`capabilities_off` reason, the runtimes with their breakpoints (the
+playground's own editor, under `breakpoints`), the latest run's content
+mark with its note and fix. Per browser: the token (`studio.token` in
+localStorage — masked, shown on request, copied, cleared, or switched by
+pasting another, which re-reads everything with it; its identity is
+read from its shape: a `weft_pt.` panel token names its scope and public
+id in its claims, any other bearer a walled Studio accepts is the server
+token, confirmed when meta served `db.path`'s fields), theme
+(auto/light/dark), density and the pricing edits. Studio never writes a
+file, so the pricing table's edits stay in localStorage (keyed by the
+served table's source and dated; "reset to the server's table" drops
+them) and are never sent; "download pricing.json" writes them as the
+override file — `{dated, note, models: [{provider, model_glob, input,
+output, cached_input?, cache_write?, reasoning?}]}`, refused while a
+field `LoadPricing` would reject is wrong — to run Studio with through
+`--pricing <file>` or `WEFT_PRICING`.
 
 Search and the palette (plan H1): the Runs page has a free-text box
 (`?q=`, debounced; every term must match the prompt, answer, error or a

@@ -10,6 +10,19 @@ module, ADR 0005).
 
 ### Added
 
+- Studio's Settings page (plan H4): `/settings`, a sidebar entry and the
+  palette's Settings item, renders `/api/meta`, `/api/settings/pricing` and
+  `/api/runtimes` beside this browser's preferences — the endpoint, versions
+  and pid; the stored token (masked, show, copy, clear, switch; its identity:
+  server token or a read/playground panel token); the database's kind, path
+  and size (badged `hidden` where `db.path`'s rule withholds them); retention;
+  the pricing table, editable per browser (localStorage, keyed by the table's
+  source and dated, never sent) and downloadable as a `pricing.json` in the
+  exact shape `WEFT_PRICING` / `--pricing` load; the capabilities on and off,
+  each off one with its `capabilities_off` reason; the runtimes with their
+  breakpoints (the playground's editor); the content policy; theme and
+  density; the keyboard map. Each section says why when its data is refused
+  or its capability is off.
 - Studio search and filters (plan H1): the Runs page's free-text box and
   filters (agent, status, tool, model, error, date range, duration, tokens,
   cost, several tags) as removable URL chips, with column sorting, read

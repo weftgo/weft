@@ -311,6 +311,11 @@ export interface Meta {
   /** path and size reach loopback (no token) and the server token only. */
   db: { kind: string; path?: string; size?: number }
   title: string
+  /** Studio's process id: under db.path's rule (absent otherwise). */
+  pid?: number
+  /** Whether the caller may watch every run live (db.path's rule: the
+   * server token, or a loopback request to a Studio with no Token). */
+  live_all?: boolean
   has_manifest: boolean
   ingest_open: boolean
   interrupted_after_ms: number
@@ -333,6 +338,8 @@ export interface Meta {
   content?: {
     ingest: string
     latest: { run_id: string; mark: string; note: string; fix?: string } | null
+    /** The read that failed while looking for the latest run. */
+    error?: string
   }
   /** The pricing table Studio prices with (plan A5): its source,
    * the override file's path (under db.path's rule), the day its rates
@@ -1431,6 +1438,16 @@ export function metaQuery() {
     queryKey: ["meta"],
     staleTime: 60_000,
     queryFn: () => get<Meta>("meta"),
+  })
+}
+
+/** GET /api/settings/pricing (capability "pricing"): the table Studio
+ * prices with, whole. */
+export function pricingQuery() {
+  return queryOptions({
+    queryKey: ["settings", "pricing"],
+    staleTime: 60_000,
+    queryFn: () => get<PricingSettings>("settings/pricing"),
   })
 }
 

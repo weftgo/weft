@@ -55,6 +55,10 @@ func handoffGroup() routeGroup {
 // fetch, which cannot read a cross-origin redirect's Location — gets
 // the same answer as 200 {"location", "exp"} instead of the 303.
 func (s *Server) servePanelHandoff(w http.ResponseWriter, r *http.Request) {
+	// Every answer, refusals included: a Location carries a token, and
+	// no answer of this route may be cached or leak its URL onward.
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer")
 	id := idFrom(r)
 	if id.panel != nil && id.panel.Scope != scopePlayground {
 		writeError(w, r, http.StatusForbidden, "forbidden",
@@ -86,8 +90,6 @@ func (s *Server) servePanelHandoff(w http.ResponseWriter, r *http.Request) {
 		location += "#token=" + tok
 		slog.Info("studio: panel hand-off", "public_id", claims.PublicID, "to", to, "exp", exp)
 	}
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Referrer-Policy", "no-referrer")
 	if strings.Contains(r.Header.Get("Accept"), "application/json") {
 		var expOut *time.Time
 		if !exp.IsZero() {

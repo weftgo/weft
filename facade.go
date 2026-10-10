@@ -871,8 +871,9 @@ func Metadata(kv map[string]string) RunOption { return core.Metadata(kv) }
 // WithMetadata, or the run ctx belongs to), a later key winning, under
 // Metadata's limits; a run's own Metadata options win over them, and a
 // Subagent's child run inherits them as it inherits the parent's. An
-// entry over a limit is dropped and counted on the next run started
-// under the returned ctx (weft.metadata.dropped). Reporting only: the
+// entry over a limit is dropped and counted on each run started under
+// the returned ctx (weft.metadata.dropped); that run's children start
+// from zero. Reporting only: the
 // pairs change no model-visible behaviour.
 func WithMetadata(ctx context.Context, kv map[string]string) context.Context {
 	return core.WithMetadata(ctx, kv)

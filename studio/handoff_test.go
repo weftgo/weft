@@ -51,6 +51,13 @@ func handoffGet(t *testing.T, ts *httptest.Server, rawQuery, tok, accept string)
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = resp.Body.Close() })
+	// Every hand-off answer — 303, the JSON 200, 403, 400 — is
+	// uncacheable and sends no Referer onward (the 401 is the wall's).
+	if resp.StatusCode != http.StatusUnauthorized {
+		if cc, rp := resp.Header.Get("Cache-Control"), resp.Header.Get("Referrer-Policy"); cc != "no-store" || rp != "no-referrer" {
+			t.Errorf("hand-off %s as %.12q = %d: Cache-Control %q, Referrer-Policy %q, want no-store, no-referrer", rawQuery, tok, resp.StatusCode, cc, rp)
+		}
+	}
 	return resp
 }
 

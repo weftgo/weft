@@ -5043,7 +5043,7 @@ func TestOverrideToolChoiceAutoIsSpelledOut(t *testing.T) {
 // context carries reach every run started under it — its RunStart's
 // context, its invoke_agent span, a Subagent's child run — merged under
 // the run's own Metadata, which wins; WithMetadata calls stack, a later
-// key winning; what a limit drops is counted once, on the next run.
+// key winning; what a limit drops is counted on each run started under the ctx, never again on its children.
 func TestWithMetadataReachesEveryRunUnderTheContext(t *testing.T) {
 	var parentMD, childMD map[string]string
 	tp := newRecProvider()

@@ -57,8 +57,9 @@ func (o metadataOption) applyRun(c *runConfig) {
 // WithMetadata, or the run ctx belongs to), a later key winning, under
 // Metadata's limits; a run's own Metadata options win over them, and a
 // Subagent's child run inherits them as it inherits the parent's. An
-// entry over a limit is dropped and counted on the next run started
-// under the returned ctx (weft.metadata.dropped). Reporting only: the
+// entry over a limit is dropped and counted on each run started under
+// the returned ctx (weft.metadata.dropped); that run's children start
+// from zero. Reporting only: the
 // pairs change no model-visible behaviour.
 func WithMetadata(ctx context.Context, kv map[string]string) context.Context {
 	if len(kv) == 0 {
@@ -74,9 +75,9 @@ func WithMetadata(ctx context.Context, kv map[string]string) context.Context {
 	return withMetadata(ctx, md)
 }
 
-// metadataDroppedKey carries the count of pairs WithMetadata dropped,
-// until the next run started under the context reports it on its
-// invoke_agent span and clears it for its own children.
+// metadataDroppedKey carries the count of pairs WithMetadata dropped:
+// each run started under the context reports it on its invoke_agent
+// span and clears it for its own children.
 type metadataDroppedKey struct{}
 
 func metadataDroppedFromCtx(ctx context.Context) int {

@@ -524,7 +524,8 @@ function RunPage() {
   const select = useCallback(
     (key: string) =>
       void navigate({
-        search: (prev) => ({ ...prev, sel: key, view: undefined }),
+        // The trace's selection: a pane would hold the view on the story.
+        search: (prev) => ({ ...prev, sel: key, view: undefined, pane: undefined }),
         replace: true,
       }),
     [navigate]
@@ -553,7 +554,12 @@ function RunPage() {
   const stepInput = useRef<HTMLInputElement>(null)
   const onStep = useCallback(
     (n: number, mode: "push" | "replace") =>
-      void navigate({ search: (prev) => ({ ...prev, step: n }), replace: mode === "replace" }),
+      // A step's pane (?pane=, A6.2) is the step's the link landed on:
+      // it never rides onto the steps the scrubber crosses.
+      void navigate({
+        search: (prev) => ({ ...prev, step: n, pane: n === prev.step ? prev.pane : undefined }),
+        replace: mode === "replace",
+      }),
     [navigate]
   )
 

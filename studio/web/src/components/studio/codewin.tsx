@@ -81,9 +81,14 @@ export function CodeWin({
   fold = true,
   className = "",
   tone,
+  copyOriginal = false,
 }: {
   title?: string
   text: string
+  /** Copy the text as given, never the pretty-printed form (a wire
+   * body: JSON.parse loses big integers and rewrites 1.0); the bar
+   * says "pretty-printed" when what is shown differs from it. */
+  copyOriginal?: boolean
   copy?: boolean
   /** Force JSON colouring; by default JSON-looking text is detected. */
   json?: boolean
@@ -120,7 +125,7 @@ export function CodeWin({
           </span>
         ) : null}
         <span className="ml-auto shrink-0 font-mono text-[10px] text-code-mut tabular-nums">
-          {parsed !== null ? "json · " : ""}
+          {parsed !== null ? (copyOriginal && shown !== text ? "json · pretty-printed · " : "json · ") : ""}
           {bytes(size)}
           {lines > 1 ? ` · ${lines} lines` : ""}
         </span>
@@ -140,7 +145,7 @@ export function CodeWin({
             )}
           </Button>
         ) : null}
-        {copy ? <CopyButton text={shown} /> : null}
+        {copy ? <CopyButton text={copyOriginal ? text : shown} /> : null}
       </div>
       <pre
         className={`${folded ? "max-h-[26rem]" : ""} ${

@@ -9,13 +9,14 @@
 // the hidden badge — never an empty tab.
 import { Download } from "lucide-react"
 
-import type { Holed, RawSide, RequestRow } from "@/lib/api"
+import type { RawSide, RequestRow } from "@/lib/api"
 import { download, pretty } from "@/lib/json"
 import { bytes } from "@/lib/summarize"
 import { hasWire } from "@/lib/requests"
 import {
   headerRows,
   isJSONMedia,
+  WIRE_DERIVED_REASON,
   WIRE_INCOMPLETE,
   WIRE_INCOMPLETE_REASON,
   wireCutReason,
@@ -58,7 +59,9 @@ function Body({ side, title }: { side: RawSide; title: string }) {
   }
   if (side.body === "")
     return <p className="font-mono text-[11px] text-faint">empty body</p>
-  return <CodeWin title={title} text={side.body} json={isJSONMedia(side.media_type) ? undefined : false} />
+  // Copy keeps the wire bytes: the pretty form may differ (big
+  // integers, 1.0), and the bar says when it does.
+  return <CodeWin title={title} text={side.body} json={isJSONMedia(side.media_type) ? undefined : false} copyOriginal />
 }
 
 /** The cuts a side carries: the cap's, a body not read to its end. */
@@ -83,17 +86,20 @@ function SideBlock({
   kind,
   side,
   withheldWords,
+  attempt,
 }: {
   kind: "request" | "response"
   side: RawSide
   withheldWords: string[]
+  /** The attempt's label when the step has several (unique landmarks). */
+  attempt?: string
 }) {
   const line =
     kind === "request"
       ? `${side.method ?? ""} ${side.url ?? ""}`.trim()
       : `${side.status ?? ""}${side.media_type ? ` · ${side.media_type}` : ""}`
   return (
-    <section className="space-y-1.5" aria-label={kind} data-wire-side={kind}>
+    <section className="space-y-1.5" aria-label={attempt ? `${kind}, ${attempt}` : kind} data-wire-side={kind}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="eyebrow">{kind}</span>
         <span className="break-all font-mono text-[11px]" data-wire-line>
@@ -133,6 +139,20 @@ function AttemptWire({ row, runId, label }: { row: RequestRow; runId: string; la
     )
   }
   const raw = row.raw
+  // A record that did not parse (obsdb.RawRecordOf: content derived,
+  // zero sides): a badge, never an empty exchange.
+  if (raw.content === "derived")
+    return (
+      <div data-wire-attempt={row.attempt} className="space-y-1">
+        {label ? <span className="font-mono text-[11px] text-faint">{label}</span> : null}
+        <HoleBadge hole="derived" reason={WIRE_DERIVED_REASON} fix="" detail />
+      </div>
+    )
+  // The record's cut (both bodies') when neither side counts its own.
+  const recordCut =
+    (raw.truncated_bytes ?? 0) > 0 && !raw.request.truncated_bytes && !raw.response?.truncated_bytes
+      ? (raw.truncated_bytes ?? 0)
+      : 0
   const reqWithheld = [withheld(raw.redacted_headers, "header"), withheld(raw.redacted_query, "query parameter")].filter(
     (w): w is string => w !== null
   )
@@ -150,11 +170,14 @@ function AttemptWire({ row, runId, label }: { row: RequestRow; runId: string; la
           download .json
         </Button>
       </div>
-      <SideBlock kind="request" side={raw.request} withheldWords={reqWithheld} />
+      {recordCut > 0 ? (
+        <HoleBadge hole="truncated" reason={wireCutReason(recordCut)} fix="" note={`${kib(recordCut)} cut`} />
+      ) : null}
+      <SideBlock kind="request" side={raw.request} withheldWords={reqWithheld} attempt={label} />
       {raw.response ? (
-        <SideBlock kind="response" side={raw.response} withheldWords={[]} />
+        <SideBlock kind="response" side={raw.response} withheldWords={[]} attempt={label} />
       ) : (
-        <section aria-label="response" data-wire-side="response">
+        <section aria-label={label ? `response, ${label}` : "response"} data-wire-side="response">
           <span className="eyebrow">response</span>{" "}
           <span className="font-mono text-[11px] text-muted-foreground">
             none: the exchange got no response (a transport error)
@@ -167,16 +190,10 @@ function AttemptWire({ row, runId, label }: { row: RequestRow; runId: string; la
 
 /**
  * WireView is the Wire tab: the step's attempts, each its own block,
- * labelled as the Request pane labels them; `env` is the whole record's
- * hole (hidden for a read-scoped token).
+ * labelled as the Request pane labels them. The whole record's hole
+ * (hidden for a read-scoped token) is the Request pane's header badge.
  */
-export function WireView({ rows, runId, env }: { rows: RequestRow[]; runId: string; env?: Holed }) {
-  if (env?.badge)
-    return (
-      <div data-wire="" className="pt-2">
-        <HoleBadge hole={env.badge} reason={env.reason} fix={env.fix} detail />
-      </div>
-    )
+export function WireView({ rows, runId }: { rows: RequestRow[]; runId: string }) {
   return (
     <div data-wire="" className="space-y-4 pt-2">
       {rows.map((r) => (

@@ -1,0 +1,223 @@
+{
+  "requests": [
+    {
+      "index": 0,
+      "step": 0,
+      "attempt": 1,
+      "time": "(time)",
+      "system_hash": "",
+      "catalog_hash": "",
+      "content": "",
+      "truncated_bytes": 0,
+      "body": {
+        "step": 0,
+        "attempt": 1,
+        "system_hash": "",
+        "messages_ref": {
+          "count": 1
+        },
+        "tools": {
+          "catalog_hash": "",
+          "names": []
+        },
+        "sequential_tools": false,
+        "params": {},
+        "model": {
+          "provider": "anthropic",
+          "name": "m"
+        },
+        "stream": true
+      },
+      "raw": {
+        "index": 0,
+        "step": 0,
+        "attempt": 1,
+        "time": "(time)",
+        "request": {
+          "method": "POST",
+          "url": "https://api.example/v1/messages?key=REDACTED",
+          "headers": {
+            "Anthropic-Version": [
+              "2023-06-01"
+            ],
+            "Content-Type": [
+              "application/json"
+            ]
+          },
+          "media_type": "application/json",
+          "body": "{\"model\":\"m\",\"seed\":9007199254740993,\"temperature\":1.0}",
+          "bytes": 56
+        },
+        "response": {
+          "status": 200,
+          "headers": {
+            "Content-Type": [
+              "text/event-stream"
+            ]
+          },
+          "media_type": "text/event-stream",
+          "body": "event: message_start\ndata: {}\n\n",
+          "bytes": 2079,
+          "truncated_bytes": 2048,
+          "complete": false
+        },
+        "redacted_headers": [
+          "authorization",
+          "x-api-key"
+        ],
+        "redacted_query": [
+          "key"
+        ],
+        "content": "truncated",
+        "truncated_bytes": 2048
+      }
+    },
+    {
+      "index": 1,
+      "step": 0,
+      "attempt": 2,
+      "time": "(time)",
+      "system_hash": "",
+      "catalog_hash": "",
+      "content": "",
+      "truncated_bytes": 0,
+      "body": {
+        "step": 0,
+        "attempt": 2,
+        "system_hash": "",
+        "messages_ref": {
+          "count": 1
+        },
+        "tools": {
+          "catalog_hash": "",
+          "names": []
+        },
+        "sequential_tools": false,
+        "params": {},
+        "model": {
+          "provider": "anthropic",
+          "name": "m"
+        },
+        "stream": true
+      },
+      "raw": {
+        "index": 1,
+        "step": 0,
+        "attempt": 2,
+        "time": "(time)",
+        "request": {
+          "method": "POST",
+          "url": "https://api.example/v1/messages",
+          "headers": {
+            "Content-Type": [
+              "application/json"
+            ]
+          },
+          "media_type": "application/json",
+          "body": "{\"model\":\"m\",\"messages\":[",
+          "bytes": 266240,
+          "truncated_bytes": 4096
+        },
+        "response": {
+          "status": 200,
+          "headers": {
+            "Content-Type": [
+              "application/octet-stream"
+            ]
+          },
+          "media_type": "application/octet-stream",
+          "body": "AAEC/w==",
+          "encoding": "base64",
+          "bytes": 4,
+          "complete": true
+        },
+        "redacted_headers": [
+          "x-api-key"
+        ],
+        "content": "truncated",
+        "truncated_bytes": 4096
+      }
+    },
+    {
+      "index": 2,
+      "step": 1,
+      "attempt": 1,
+      "time": "(time)",
+      "system_hash": "",
+      "catalog_hash": "",
+      "content": "",
+      "truncated_bytes": 0,
+      "body": {
+        "step": 1,
+        "attempt": 1,
+        "system_hash": "",
+        "messages_ref": {
+          "count": 1
+        },
+        "tools": {
+          "catalog_hash": "",
+          "names": []
+        },
+        "sequential_tools": false,
+        "params": {},
+        "model": {
+          "provider": "anthropic",
+          "name": "m"
+        },
+        "stream": true
+      },
+      "raw": {
+        "index": 2,
+        "step": 1,
+        "attempt": 1,
+        "time": "(time)",
+        "request": {
+          "method": "POST",
+          "url": "https://api.example/v1/messages",
+          "headers": {},
+          "media_type": "application/json",
+          "body": "{}",
+          "bytes": 2
+        },
+        "response": null,
+        "redacted_headers": [],
+        "content": "",
+        "truncated_bytes": 0
+      }
+    },
+    {
+      "index": 3,
+      "step": 2,
+      "attempt": 1,
+      "time": "(time)",
+      "system_hash": "",
+      "catalog_hash": "",
+      "content": "",
+      "truncated_bytes": 0,
+      "body": {
+        "step": 2,
+        "attempt": 1,
+        "system_hash": "",
+        "messages_ref": {
+          "count": 1
+        },
+        "tools": {
+          "catalog_hash": "",
+          "names": []
+        },
+        "sequential_tools": false,
+        "params": {},
+        "model": {
+          "provider": "anthropic",
+          "name": "m"
+        },
+        "stream": true
+      },
+      "raw": null,
+      "raw_badge": "not_recorded",
+      "raw_reason": "no wire bodies were recorded for this attempt: otel.RawBodies is off (the default, and refused outside WEFT_ENV=dev), or the adapter does not report them",
+      "raw_fix": "run under WEFT_ENV=dev with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)"
+    }
+  ]
+}
+

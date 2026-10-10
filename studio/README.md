@@ -425,7 +425,7 @@ is not listed). The verbs and the drawer are drawn only under the
 trimmed turn and checks the chip and the deleted guidance line.
 Deep links (plan G1) follow one scheme, `src/lib/links.ts`, shared by
 the panel and Studio's app (an ESLint rule refuses a Studio URL built
-anywhere else): `runs/<id>?step=<n>&view=story|raw&sel=…&axis=time&t=…`,
+anywhere else): `runs/<id>?step=<n>&view=story|raw&pane=request|wire&sel=…&axis=time&t=…`,
 `sessions/<id>`, `traces/<id>?span=<span id>&view=chat`,
 `playground#run=…` (the hand-off in the fragment),
 `playground?run=…&step=…&agent=…&engine=…` (the page's own state, G2)
@@ -1266,15 +1266,17 @@ prompt or catalog record is badged and never diffed over). The open
 pane has two tabs, **request** and **Wire** (plan A6.2,
 `components/studio/step-wire.tsx`): per attempt, the provider request
 (method and URL, headers, the body — pretty-printed when its media type
-is JSON, "binary, N bytes" with a copy when base64) and response
+is JSON and it parses, the bar then saying "pretty-printed" while Copy
+copies the wire bytes; "binary, N bytes" with a copy when base64) and response
 (status, media type, headers, body or raw SSE text), from the requests
 row's `raw`; the withheld credentials are listed ("2 headers withheld:
 …", "1 query parameter withheld: …"), the 256 KiB cap's cut is a
 `truncated` badge naming the bytes, a body not read to its end
 (`complete: false`) a `truncated` badge "incomplete: the body was not
 read to the end"; a row without `raw` shows its `raw_badge`,
-`raw_reason` and `raw_fix` (`not_recorded`, cause `raw_off`), a
-read-scoped token the `hidden` badge; each pair downloads as .json. The
+`raw_reason` and `raw_fix` (`not_recorded`, cause `raw_off`), a raw
+record that did not parse the `derived` badge, a read-scoped token the
+`hidden` badge once, in the pane's header; each pair downloads as .json. The
 tab is remembered per step and URL-addressable: `?step=N&pane=wire`
 (`pane=request` for the request tab) opens that step's pane on it, in
 the story view. A long run
@@ -1362,6 +1364,7 @@ walks views, never cursor moves:
 | run | `view=story\|raw` | the view (trace is the default) | push |
 | run | `raw=doc` | the raw view's surface | push |
 | run | `step` | the step (its ordinal) | — (a link's landing) |
+| run | `pane=request\|wire` | the highlighted step's pane (its tab); dropped when the step or the view changes | — (a link's landing; not written back) |
 | run | `sel`, `d`, `axis` | the selected span, detail mode, axis | replace |
 | run | `t` | the replay playhead (seeks and pauses) | replace |
 | run | `q`, `hide`, `ev` | the raw view's search, hidden kinds (`hide=step,delta`), open event's position | replace |
@@ -1383,6 +1386,9 @@ anywhere, or "Copy link to this page" in `⌘K` — copies the page's
 canonical link: the bare URL with its state, never a fragment, a token,
 a panel scope or prompt text (`lib/links.ts`'s `canonical` drops
 `token`, `access_token`, `sig`, `weft_scope`, `input`, `instructions`);
+on a run page it carries the `pane` the URL landed with, not a later
+switch of the step card's tab (the tab is remembered on the card, never
+written to the URL);
 the header says "link copied". Where the browser refuses the clipboard
 (plain http off loopback, a denied permission) it falls back to
 `execCommand("copy")`, then shows the link in a prompt, and says "copy

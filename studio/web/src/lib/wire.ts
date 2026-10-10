@@ -17,6 +17,9 @@ export function wireCutReason(n: number): string {
   return `the recorder keeps ${kib(WIRE_CAP)} of each wire body: ${kib(n)} of this one were not recorded`
 }
 
+/** A raw record that did not parse (content derived, zero sides). */
+export const WIRE_DERIVED_REASON = "the raw record did not parse: its request and response were not recoverable"
+
 /** A response body not read to its end (complete: false). */
 export const WIRE_INCOMPLETE = "incomplete: the body was not read to the end"
 export const WIRE_INCOMPLETE_REASON =

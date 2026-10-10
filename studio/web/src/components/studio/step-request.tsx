@@ -778,10 +778,9 @@ export function RequestSection({
   if (env) {
     // The whole run's hole (not_recorded, hidden): the badge, its
     // reason and fix — on every step, never an empty section.
+    // The whole record's hole (hidden, not_recorded) says it once, for
+    // both tabs: a ?pane=wire landing reads the same badge, no tablist.
     head = <EnvelopeHole env={env} />
-    // ?pane=wire on a hidden (or older) record: the Wire tab says the
-    // same hole, never an empty tab.
-    if (tab === "wire") body = <WireView rows={[]} runId={runId ?? req.ctx?.runId ?? "run"} env={env} />
   } else if (row) {
     const model = [row.body.model.provider, row.body.model.name]
       .filter(Boolean)

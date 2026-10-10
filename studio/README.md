@@ -95,7 +95,16 @@ anything outside the token's public id. A token is read-only unless
 minted with `"playground": true` — a read-scoped one neither acts nor
 reads the agents' system prompts (`/api/manifest`, the runtimes'
 instructions) — and experiments (`experiment_id` included) are the
-server token's alone.
+server token's alone. "Open in Studio" from the panel (⤢, `g s`) under a
+playground-scoped panel token, when `/api/meta` lists `handoff`, asks
+`GET /api/panel-handoff?to=<the deep link's path>` with the bearer and
+`Accept: application/json` and opens the answer's `location` — its
+fragment carries a 5-minute read token for the same public id, so the
+hosted Studio opens on the run without a token pasted. Without the
+capability, under a read-scoped panel token (its Studio page is already a
+read view), the dev token or none, the plain link opens; a refusal opens
+the plain link too (a 403 or 404 silently, anything else with the note
+line). The host API's `studioLink()` stays the plain URL.
 
 **Retention.** Studio keeps everything until told otherwise.
 `studio.Retain(720*time.Hour)` — `--retain 720h` or `WEFT_RETAIN=720h`
@@ -1454,6 +1463,17 @@ failed". Each page
 titles its tab through `lib/title.ts`: `run s_…-t3 · succeeded · weft
 studio`, `trace 0af76519…319c · weft studio`, `playground · weft
 studio`.
+
+**Open in app** in the run header (plan G3): a run whose request came
+through `scope.Header` carries `meta["weft.page_url"]` (the sanitised
+Referer/Origin); the verb opens that page in a new tab with
+`#weft_scope=<encodeURIComponent(serializeScope({publicId, session,
+run}))>` — `lib/links.ts`'s `appLink`, the serialised scope encoded once —
+so the devtools panel there scopes itself (its URL rung). The panel's URL
+rung needs a public id: a run without one opens the bare page. Without a
+page URL the verb stays, disabled, titled "the run carries no
+weft.page_url: wrap the app's handler in scope.Header". A read-scoped
+panel token sees it too.
 
 Saves (plan F6): Studio writes nothing to your files — the download is
 the hand-off. **Save as test** in the run header (capability `export`;

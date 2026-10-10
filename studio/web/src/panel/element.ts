@@ -29,7 +29,7 @@ import { editList, marksBlock, previewBlock } from "./editor"
 import { compactedRefusal, editsHandoff, emptyLab, LAB_LABELS, LAB_NEW, LAB_NUMBERS, LAB_PREDATES, labDefault, labHandoff, labLacksDefaults, labOn, replayBounds } from "../lib/experiment-body"
 import type { LabFields } from "../lib/experiment-body"
 import { ackCatalogHole, badge, capLine, catalogCapped, catalogNotRecorded, catalogNotStored, catalogReadError, cutBadge, holeBadges, holeLine, noPublicIdWords, requestCapped, requestHole, turnChips } from "./badges"
-import { fetchSessionPublicId, MAX_REQUEST_PAGES, PanelApiError, panelGet, putProposal, REQUEST_PAGE } from "./client"
+import { fetchHandoff, fetchSessionPublicId, MAX_REQUEST_PAGES, PanelApiError, panelGet, putProposal, REQUEST_PAGE } from "./client"
 import { keepPromptWords, mayExportTestWith, mayProposeWith, SAVE_TEST_LABEL, SAVE_TEST_TITLE } from "../lib/saves"
 import type { KeepPrompt } from "../lib/saves"
 import type { AgentView } from "./client"
@@ -1570,11 +1570,27 @@ export class WeftDevtools extends HTMLElement {
    * link ⤢ carries (lib/links.ts), in a new tab. */
   private openInStudio() {
     const url = this.last.selected ? this.studioLink(this.last.selected, this.stepNow(this.last)) : ""
-    try {
-      if (url) window.open(url, "_blank", "noopener")
-    } catch {
-      // a blocked popup: nothing thrown into the host
-    }
+    if (url && !this.handoff(url)) openTab(url)
+  }
+
+  /** handoff opens a Studio page through GET /api/panel-handoff (plan
+   * G3) under a playground panel token with the handoff capability:
+   * the answer's location carries a minted read token in its fragment,
+   * so the hosted Studio opens on that conversation without a token
+   * pasted. false (the caller follows the plain link) otherwise; a
+   * refusal opens the plain link — a 403 or 404 silently (the server's
+   * rule), anything else with the note line. */
+  private handoff(url: string): boolean {
+    if (tokenScope(this.cfg.token) !== "playground" || !hasCapability(this.last, "handoff")) return false
+    const u = new URL(url)
+    fetchHandoff(this.ep, u.pathname.slice(new URL(this.base).pathname.length - 1) + u.search).then(
+      (r) => openTab(r.location || url),
+      (e) => {
+        openTab(url)
+        if (!(e instanceof PanelApiError && (e.status === 403 || e.status === 404))) this.say(`open in Studio: ${e.message}`)
+      }
+    )
+    return true
   }
 
   /** cycle moves the dock to the next layout of CYCLE (Alt+Shift+W,
@@ -2249,6 +2265,9 @@ export class WeftDevtools extends HTMLElement {
         "aria-label": "open in Studio",
       })
       a.style.textDecoration = "none"
+      on(a, "click", (e, n) => {
+        if (this.handoff((n as HTMLAnchorElement).href)) e.preventDefault()
+      })
       h.appendChild(a)
     }
     const isRaw = this.lay.tab === "raw"
@@ -4669,6 +4688,16 @@ function handOff(endpoint: string, runId: string): HTMLElement {
     title: `open the child run ${runId} in Studio`,
     "data-weft-handoff": runId,
   })
+}
+
+/** openTab opens url in a new tab; a blocked popup throws nothing into
+ * the host. */
+function openTab(url: string) {
+  try {
+    window.open(url, "_blank", "noopener")
+  } catch {
+    // blocked
+  }
 }
 
 function shortId(id: string): string {

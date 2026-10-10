@@ -31,11 +31,11 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
 import { forkSource } from "@/lib/experiments"
-import { compareLink, experimentLink, runLink, sessionLink, traceLink } from "@/lib/links"
+import { appLink, compareLink, experimentLink, runLink, sessionLink, traceLink } from "@/lib/links"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { useCopyLink } from "@/hooks/use-copy-link"
 import { useDocumentTitle } from "@/hooks/use-document-title"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 
 /**
  * CopyLink copies this page's link as it stands (plan G2): the run,
@@ -59,6 +59,53 @@ export function CopyLink() {
         {copied ? "copied" : state === "failed" ? "copy failed" : "copy link"}
       </span>
     </Button>
+  )
+}
+
+/** The words of "open in app" without a page to open (plan G3). */
+export const NO_PAGE_URL =
+  "the run carries no weft.page_url: wrap the app's handler in scope.Header"
+
+/**
+ * OpenInApp is "open in app" (plan G3): the host page the run's request
+ * came from (meta weft.page_url, stamped by scope.Header from the
+ * request's Referer/Origin) with #weft_scope= (lib/links.ts's appLink),
+ * so the devtools panel there scopes itself to this conversation and
+ * run. Without a page URL the verb stays, disabled, saying why.
+ */
+export function OpenInApp({
+  doc,
+}: {
+  doc: Pick<RunDoc, "id" | "meta" | "public_id" | "session_id">
+}) {
+  const page = doc.meta["weft.page_url"]
+  const publicId = doc.public_id || doc.meta["weft.public_id"] || ""
+  const href = page ? appLink(page, { publicId, session: doc.session_id, run: doc.id }) : null
+  if (!href)
+    return (
+      <span title={page ? `weft.page_url is not an http(s) URL: ${page}` : NO_PAGE_URL}>
+        <Button variant="outline" size="xs" className="font-mono" disabled data-open-in-app="">
+          <ArrowUpRight data-slot="icon" />
+          open in app
+        </Button>
+      </span>
+    )
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener"
+      className={buttonVariants({ variant: "outline", size: "xs", className: "font-mono" })}
+      title={
+        publicId
+          ? `open ${page} with the devtools panel scoped to this run`
+          : `open ${page} (the run has no public id: the panel's URL scope needs one)`
+      }
+      data-open-in-app={href}
+    >
+      <ArrowUpRight data-slot="icon" />
+      open in app
+    </a>
   )
 }
 
@@ -289,6 +336,7 @@ export function RunHeader({
         <ReplayOf doc={doc} />
         <CompareWith doc={doc} />
         <span className="ml-auto flex items-center gap-2">
+          <OpenInApp doc={doc} />
           <SaveAsTest runID={doc.id} />
           <CopyLink />
         </span>

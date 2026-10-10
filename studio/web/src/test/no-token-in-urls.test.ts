@@ -17,7 +17,7 @@
 //   panel/client.ts  panelGet    — fetchMeta, fetchRuns, fetchRun, fetchEvents,
 //                                  fetchTranscript, fetchRequests, fetchSpans,
 //                                  fetchSessions, fetchSession, fetchPublic,
-//                                  fetchRuntimes, fetchCommand
+//                                  fetchRuntimes, fetchCommand, fetchHandoff
 //                    panelPost   — postPlaygroundRun, postApproval, postSteer
 //                    panelPut    — putBreakpoints
 //                    openPanelLive — POST live-grant, then new EventSource
@@ -158,6 +158,7 @@ describe("no client request carries the token in a URL", () => {
       await drive("postApproval", () => panel.postApproval(ep, "r1", { call_id: "c", decision: "deny" }))
       await drive("putBreakpoints", () => panel.putBreakpoints(ep, "rt1", []))
       await drive("postSteer", () => panel.postSteer(ep, "r1", "hi"))
+      await drive("fetchHandoff", () => panel.fetchHandoff(ep, "/runs/r1?step=0"))
       await drive("discoverEndpoint", () => discoverEndpoint("http://studio.test/studio/panel-config.json"))
       site = "openPanelLive"
       const h = panel.openPanelLive(ep, { selector: { public_id: "pub_1" }, kinds: ["run"] })

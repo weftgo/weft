@@ -26,6 +26,8 @@
 // globals — plain values and strings.
 
 import type { ReplayVerb } from "./replay"
+import { serializeScope } from "./scope"
+import type { Scope } from "./scope"
 
 /** The run page's views: the trace (the default), the story (step
  * cards) and the raw JSON. */
@@ -615,4 +617,26 @@ export function href(base: string, link: StudioLink): string {
 export function saveTestLink(id: string): RunLink {
   const l = runLink(id)
   return { ...l, search: { ...l.search, save: "test" } }
+}
+
+// ── Open in app (plan G3) ───────────────────────────────────────────
+
+/** appLink is "open in app": the host page a run's request came from
+ * (its weft.page_url, set by scope.Header) with #weft_scope= — the
+ * serialised Scope (lib/scope.ts), encoded ONCE, as the panel's URL
+ * rung (plan C3.4) reads it — replacing any fragment the page had.
+ * The panel's rung accepts a scope only when it names a public id, so
+ * a scope without one carries no fragment: the page opens as it is.
+ * null for a page that is not an http(s) URL. Never a token. */
+export function appLink(page: string, scope: Scope): string | null {
+  let u: URL
+  try {
+    u = new URL(page)
+  } catch {
+    return null
+  }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return null
+  u.hash = ""
+  const base = u.toString()
+  return scope.publicId ? `${base}#weft_scope=${encodeURIComponent(serializeScope(scope))}` : base
 }

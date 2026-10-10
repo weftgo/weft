@@ -102,6 +102,14 @@ export function fetchMeta(ep: PanelEndpoint, signal?: AbortSignal): Promise<Meta
   return panelGet<Meta>(ep, "meta", signal)
 }
 
+/** GET /api/panel-handoff?to= (plan G3, capability "handoff"): a
+ * playground panel token's Studio page, as {location} — the minted
+ * read token rides its fragment. Accept: application/json, as every
+ * read here: a fetch cannot read a redirect's Location. */
+export function fetchHandoff(ep: PanelEndpoint, to: string): Promise<{ location: string }> {
+  return panelGet(ep, `panel-handoff?to=${encodeURIComponent(to)}`)
+}
+
 /** GET /api/diff?a=&b= (capability "diff", plan E3): the step-aligned
  * compare lib/stepdiff.ts reads, as Studio fetches it. */
 export function fetchDiff(ep: PanelEndpoint, a: string, b: string, signal?: AbortSignal): Promise<DiffDoc> {

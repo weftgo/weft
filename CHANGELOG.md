@@ -10,6 +10,14 @@ module, ADR 0005).
 
 ### Added
 
+- Studio: **open in app** on the run page (plan G3) — a run carrying
+  `weft.page_url` (set by `scope.Header`) opens that page with
+  `#weft_scope=` so the devtools panel there scopes itself to the run's
+  conversation; disabled, naming `scope.Header`, without one. The panel's
+  "open in Studio" (⤢, `g s`) under a playground-scoped panel token goes
+  through `GET /api/panel-handoff` and opens the hosted Studio already
+  authenticated to that conversation; any refusal falls back to the plain
+  link.
 - Studio: `/api/runs` and `/api/search` take `experiment_id=` (a narrowing
   filter; a panel token stays inside its public id). A saved experiment keeps
   its whole command — `engine`, `side_effects`, `thread`, `from_step`,

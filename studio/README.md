@@ -1307,7 +1307,8 @@ as a span tree plus a chat view when semconv content was captured;
 The trace page (plan H7): every selection is a URL, `?sel=` the row's
 step-qualified key (`src/lib/trace-sel.ts`, G1's scheme) — `r:<run>` an
 invoke_agent span, `s<step>` a chat span, `c:<step>:<call id>` a tool
-execution, run-qualified (`s:<run>:<step>`, `c:<run>:<step>:<call id>`)
+execution (`c:resume:<call id>` a resumed call, its span the one carrying
+`weft.tool.approved` — the run page's key), run-qualified (`s:<run>:<step>`, `c:<run>:<step>:<call id>`)
 when the trace holds several runs, `t:<span id>` for any other span and
 for a second span wanting a taken key; each row's label links to it (a
 plain click selects in place, replacing the URL; `y` copies it). An old
@@ -1319,7 +1320,8 @@ section draws its messages role by role from either key family —
 arrays, `tool_call` parts folded as name + arguments) with
 `gen_ai.system_instructions`, else the legacy `gen_ai.prompt` /
 `gen_ai.completion` (plain, `gen_ai.content.*`, or indexed
-`.N.role|content` with `gen_ai.completion.N.tool_calls.M.*`) — and a
+`.N.role|content`, `.N.tool_calls.M.*` on either side and a tool
+result's `gen_ai.prompt.N.tool_call_id`) — and a
 model call carrying neither says `not_recorded` (weft's own chat spans
 carry no content; nothing is reconstructed). The raw attributes stay
 listed beneath. An errored chat span of a playground run

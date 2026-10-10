@@ -6,8 +6,13 @@
 //   r:<run>                     the run's invoke_agent span
 //   s<step> / c:<step>:<call>   a model call / a tool execution, when
 //                               the trace holds one run
+//   c:resume:<call>             a resumed (approved) call: run before
+//                               step 0's model call, its execute_tool
+//                               span the only one carrying
+//                               weft.tool.approved — the run page's key
 //   s:<run>:<step>              the same, run-qualified, when the trace
-//   c:<run>:<step>:<call>       holds several (the run page's child form)
+//   c:<run>:<step>:<call>       holds several (the run page's child form;
+//   c:<run>:resume:<call>       a resumed call's too)
 //   t:<span id>                 any other span, and any span whose key
 //                               another span took first
 //
@@ -44,8 +49,14 @@ function wantedKey(sp: TimedSpan, qualify: boolean): string | undefined {
   if (step === undefined) return undefined
   if (op === "chat") return qualify ? `s:${run}:${step}` : `s${step}`
   const call = a["gen_ai.tool.call.id"]
-  if (op === "execute_tool" && typeof call === "string" && call)
-    return qualify ? `c:${run}:${step}:${call}` : `c:${step}:${call}`
+  if (op === "execute_tool" && typeof call === "string" && call) {
+    // core/loop.go runs a resumed call through the tool batch at step 0,
+    // weft.tool.approved=true on its span alone: the run page keys it
+    // "resume" (lib/trace.ts), so a step-0 call of the same id is apart.
+    const approved = a["weft.tool.approved"]
+    const at = approved === true || approved === "true" ? "resume" : step
+    return qualify ? `c:${run}:${at}:${call}` : `c:${at}:${call}`
+  }
   return undefined
 }
 

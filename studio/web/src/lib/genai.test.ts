@@ -69,6 +69,36 @@ describe("genaiChat", () => {
     ])
   })
 
+  it("reads a legacy prompt's history: the assistant's tool calls and the tool result's call id", () => {
+    const c = genaiChat({
+      "gen_ai.prompt.0.role": "user",
+      "gen_ai.prompt.0.content": "where is 42?",
+      "gen_ai.prompt.1.role": "assistant",
+      "gen_ai.prompt.1.tool_calls.0.id": "call_1",
+      "gen_ai.prompt.1.tool_calls.0.name": "lookup_order",
+      "gen_ai.prompt.1.tool_calls.0.arguments": '{"order_id":"42"}',
+      "gen_ai.prompt.2.role": "tool",
+      "gen_ai.prompt.2.tool_call_id": "call_1",
+      "gen_ai.prompt.2.content": "shipped",
+      "gen_ai.prompt.3.tool_call_id": "call_2",
+      "gen_ai.prompt.3.content": "no role given",
+      "gen_ai.completion.0.content": "it shipped",
+    })
+    expect(c.family).toBe("legacy")
+    expect(c.messages.map((m) => [m.role, m.side])).toEqual([
+      ["user", "input"],
+      ["assistant", "input"],
+      ["tool", "input"],
+      ["tool", "input"],
+      ["assistant", "output"],
+    ])
+    expect(c.messages[1].parts).toEqual([{ kind: "tool_call", id: "call_1", name: "lookup_order", arguments: { order_id: "42" } }])
+    expect(c.messages[2].parts).toEqual([{ kind: "tool_result", id: "call_1", response: "shipped" }])
+    expect(c.messages[3].parts).toEqual([{ kind: "tool_result", id: "call_2", response: "no role given" }])
+    expect(c.keys).toContain("gen_ai.prompt.1.tool_calls.0.name")
+    expect(c.keys).toContain("gen_ai.prompt.2.tool_call_id")
+  })
+
   it("carries none: family null, nothing reconstructed", () => {
     expect(genaiChat({ "gen_ai.operation.name": "chat", "weft.run.id": "r" })).toEqual({
       family: null,
@@ -116,6 +146,27 @@ describe("the trace page's selection keys", () => {
     expect(resolveSel(rows, "c:nope")).toEqual({})
     expect(resolveSel(rows, undefined)).toEqual({})
     expect(traceRuns(spans)).toEqual(["r"])
+  })
+
+  it("a resumed (approved) call keys c:resume:<call> as the run page does, apart from step 0's call of the same id", () => {
+    const tool = (id: string, run: string, approved: boolean) =>
+      sp(id, {
+        "gen_ai.operation.name": "execute_tool",
+        "weft.run.id": run,
+        "weft.step.index": 0,
+        "gen_ai.tool.call.id": "call_1",
+        ...(approved ? { "weft.tool.approved": true } : {}),
+      })
+    const one = keyRows(spansFromTimed([tool("r1", "r", true), tool("s1", "r", false)]))
+    expect(one.map((r) => r.key)).toEqual(["c:resume:call_1", "c:0:call_1"])
+    // A run page's key pasted into the trace page lands on the resumed call.
+    expect(resolveSel(one, "c:resume:call_1")).toEqual({ id: "t:r1", key: "c:resume:call_1" })
+    expect(resolveSel(one, "c:0:call_1")).toEqual({ id: "t:s1", key: "c:0:call_1" })
+    // An old bare key names both: the first, ambiguous.
+    expect(resolveSel(one, "c:call_1")).toEqual({ id: "t:r1", key: "c:resume:call_1", ambiguous: true })
+    const two = keyRows(spansFromTimed([tool("r1", "ra", true), tool("x1", "rb", false)]))
+    expect(two.map((r) => r.key)).toEqual(["c:ra:resume:call_1", "c:rb:0:call_1"])
+    expect(resolveSel(two, "c:ra:resume:call_1").id).toBe("t:r1")
   })
 
   it("traceSelectionLink writes sel before view, and nothing for no selection", () => {

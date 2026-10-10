@@ -6,7 +6,10 @@
 //   - the legacy one: gen_ai.prompt / gen_ai.completion (plain text),
 //     their indexed forms gen_ai.prompt.N.role|content and
 //     gen_ai.completion.N.role|content (with
-//     gen_ai.completion.N.tool_calls.M.id|name|arguments), and the
+//     gen_ai.{prompt,completion}.N.tool_calls.M.id|name|arguments — a
+//     prompt's are the assistant turns of the history, as OpenLLMetry
+//     writes them — and gen_ai.prompt.N.tool_call_id, the id a tool
+//     result answers), and the
 //     event-era gen_ai.content.prompt / gen_ai.content.completion.
 // The current family wins when both are present. Nothing is
 // reconstructed: a span carrying neither reads as not recorded. Plain
@@ -128,13 +131,13 @@ function semconvMessages(
   })
 }
 
-const INDEXED = /^gen_ai\.(prompt|completion)\.(\d+)\.(role|content)$/
-const INDEXED_CALL = /^gen_ai\.completion\.(\d+)\.tool_calls\.(\d+)\.(id|name|arguments)$/
+const INDEXED = /^gen_ai\.(prompt|completion)\.(\d+)\.(role|content|tool_call_id)$/
+const INDEXED_CALL = /^gen_ai\.(prompt|completion)\.(\d+)\.tool_calls\.(\d+)\.(id|name|arguments)$/
 
 function legacyMessages(attrs: Record<string, unknown>, keys: string[]): ChatMessage[] {
   const out: ChatMessage[] = []
   // The indexed forms first: they carry roles.
-  type Slot = { role?: string; content?: string; calls: Map<number, { id?: string; name?: string; arguments?: string }> }
+  type Slot = { role?: string; content?: string; toolCallID?: string; calls: Map<number, { id?: string; name?: string; arguments?: string }> }
   const sides: Record<"prompt" | "completion", Map<number, Slot>> = { prompt: new Map(), completion: new Map() }
   const slot = (side: "prompt" | "completion", n: number): Slot => {
     let s = sides[side].get(n)
@@ -147,16 +150,17 @@ function legacyMessages(attrs: Record<string, unknown>, keys: string[]): ChatMes
       keys.push(k)
       const s = slot(m[1] as "prompt" | "completion", Number(m[2]))
       if (m[3] === "role") s.role = str(v)
+      else if (m[3] === "tool_call_id") s.toolCallID = str(v)
       else s.content = str(v)
       continue
     }
     const c = INDEXED_CALL.exec(k)
     if (c) {
       keys.push(k)
-      const s = slot("completion", Number(c[1]))
-      const n = Number(c[2])
+      const s = slot(c[1] as "prompt" | "completion", Number(c[2]))
+      const n = Number(c[3])
       const call = s.calls.get(n) ?? {}
-      call[c[3] as "id" | "name" | "arguments"] = str(v)
+      call[c[4] as "id" | "name" | "arguments"] = str(v)
       s.calls.set(n, call)
     }
   }
@@ -164,7 +168,9 @@ function legacyMessages(attrs: Record<string, unknown>, keys: string[]): ChatMes
     const slots = [...sides[side].entries()].sort((a, b) => a[0] - b[0])
     for (const [, s] of slots) {
       const parts: ChatPart[] = []
-      if (s.content) parts.push({ kind: "text", text: s.content })
+      // A tool message answering a call: its content is that result.
+      if (s.toolCallID !== undefined) parts.push({ kind: "tool_result", id: s.toolCallID, response: s.content ?? "" })
+      else if (s.content) parts.push({ kind: "text", text: s.content })
       for (const [, call] of [...s.calls.entries()].sort((a, b) => a[0] - b[0]))
         parts.push({
           kind: "tool_call",
@@ -173,7 +179,7 @@ function legacyMessages(attrs: Record<string, unknown>, keys: string[]): ChatMes
           arguments: call.arguments !== undefined ? parsedOrText(call.arguments) : undefined,
         })
       out.push({
-        role: s.role || (side === "prompt" ? "user" : "assistant"),
+        role: s.role || (s.toolCallID !== undefined ? "tool" : side === "prompt" ? "user" : "assistant"),
         parts,
         side: side === "prompt" ? "input" : "output",
       })

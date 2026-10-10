@@ -209,6 +209,17 @@ describe("the trace page's selection links (H7, G1's keys)", () => {
     expect(note()).toBeNull()
   })
 
+  it("a resumed call is c:resume:<call>, and the run page's key pasted here selects it", async () => {
+    const resumed = tool("r0", 0, "call_7")
+    resumed.attrs["weft.tool.approved"] = true
+    resumed.start = "2026-10-01T09:00:00.000Z"
+    serve({ spans: [...weftSpans(), resumed] })
+    const { router } = renderApp(`/traces/${TRACE}?sel=c:resume:call_7`)
+    await waitFor(() => expect(selectedKey()).toBe("c:resume:call_7"))
+    expect(router.state.location.search).toEqual({ sel: "c:resume:call_7" })
+    expect(row("c:0:call_7")).toBeNull()
+  })
+
   it("a pre-H7 ?span= link still selects its span", async () => {
     serve()
     renderApp(`/traces/${TRACE}?span=c1`)

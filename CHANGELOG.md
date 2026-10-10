@@ -10,6 +10,21 @@ module, ADR 0005).
 
 ### Added
 
+- Studio's `/live` page (plan H6) runs on one `/api/live?all=1` stream (kinds
+  event,run, opened through the live grant) when `meta.live_all` allows it.
+  Each row shows the run's current step, tokens so far (the sum of
+  step_finish usage), TTFT (the last step_finish's `ttft_ms`) and cost — "—"
+  with A5.1's reason while running, the real figure on the final run frame.
+  Finished runs stay listed for 30 s. A reconnect resumes with the server's
+  bounded backfill, and a `backfill_error` shows a "could not read" gap badge
+  on that run. Without `live_all` (a panel token) the page polls every 5 s
+  and says why. Under capability `cancel`, runtime-started runs get a cancel
+  button with an inline confirm: it posts `POST /api/runs/{id}/cancel`, the
+  row shows "cancelling…" until the failed row arrives, and a refusal is
+  toasted in the server's own words. App-owned runs show a disabled button
+  (F4), and parked runs link to their page to decide. Clicking a row opens
+  its story in a resizable side pane (`?peek=<id>`, remembered as split
+  `live-peek`); Escape closes it.
 - Studio's trace page (plan H7): every selection is a URL — `?sel=` the
   row's step-qualified key (`r:<run>`, `s<step>`, `c:<step>:<call id>`,
   run-qualified `s:<run>:<step>` / `c:<run>:<step>:<call id>` when the

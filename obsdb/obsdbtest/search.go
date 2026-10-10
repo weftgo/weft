@@ -20,7 +20,8 @@ import (
 // events carry and any extra records (a system prompt, a tool result).
 type searchRun struct {
 	id, parent, public, model string
-	input                     bool // record 0 carries weft.messages.input, as the core stamps it
+	experiment                string // weft.experiment.id, when set
+	input                     bool   // record 0 carries weft.messages.input, as the core stamps it
 	start, dur                time.Duration
 	in, out                   int64
 	err                       string
@@ -37,6 +38,9 @@ func textMsg(role, text string) string {
 
 func (s searchRun) attrs(kind string) map[string]any {
 	a := map[string]any{"weft.record": kind, "weft.run.id": s.id, "gen_ai.agent.name": "search", "weft.public_id": s.public}
+	if s.experiment != "" {
+		a["weft.experiment.id"] = s.experiment
+	}
 	if s.parent != "" {
 		a["weft.parent.run.id"] = s.parent
 		a["weft.parent.call.id"] = "call_1"
@@ -108,7 +112,8 @@ func (s searchRun) span(n int) obsdb.Span {
 //   - sr-refund (t0, 5 s, 300 tokens, failed "payment gateway failed"):
 //     prompt "Refund order #7 please", tool issue_refund, no answer —
 //     matches "refund failed" across prompt, tool and error.
-//   - sr-parcel (t0+1m, 9 s, 100 tokens, model big, public pub_other):
+//   - sr-parcel (t0+1m, 9 s, 100 tokens, model big, public pub_other,
+//     experiment exp_search with sr-done):
 //     prompt "Where is my parcel?", answer "Your refund failed to
 //     process." (the later of two assistant texts; its records written
 //     out of order) — matches through the answer, and the phrase.
@@ -150,14 +155,14 @@ func searchFixture() []searchRun {
 		{id: "sr-refund", input: true, public: "pub_search", model: "small", start: 0, dur: 5 * time.Second, in: 250, out: 50,
 			err: "payment gateway failed", tools: []string{"issue_refund"},
 			messages: []string{msgs(textMsg("user", "Refund order #7 please"))}},
-		{id: "sr-parcel", input: true, public: "pub_other", model: "big", start: time.Minute, dur: 9 * time.Second, in: 80, out: 20,
+		{id: "sr-parcel", input: true, public: "pub_other", experiment: "exp_search", model: "big", start: time.Minute, dur: 9 * time.Second, in: 80, out: 20,
 			messages: []string{
 				msgs(textMsg("user", "Where is my parcel?")),
 				msgs(textMsg("assistant", "Checking."), `{"role":"assistant","content":[{"type":"tool_call","id":"c0","name":"track","args":{}}]}`),
 				msgs(`{"role":"tool","content":[{"type":"tool_result","call_id":"c0","content":"in transit"}]}`),
 				msgs(textMsg("assistant", "Your refund failed to process."), `{"role":"assistant","content":[]}`),
 			}},
-		{id: "sr-done", input: true, public: "pub_search", model: "small", start: 2*time.Minute + 30*time.Second, dur: 2 * time.Second, in: 40, out: 10,
+		{id: "sr-done", input: true, public: "pub_search", experiment: "exp_search", model: "small", start: 2*time.Minute + 30*time.Second, dur: 2 * time.Second, in: 40, out: 10,
 			messages: []string{msgs(textMsg("user", long)), msgs(textMsg("assistant", "Done, refunded."))}},
 		{id: "sr-off", public: "pub_search", model: "small", start: 3 * time.Minute, dur: time.Second, in: 150, out: 50,
 			err: "upstream failed", tools: []string{"refund"}},
@@ -294,6 +299,10 @@ func searchTable(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			{"public id (a panel token's scope)", obsdb.SearchQuery{Text: "refund failed", RunQuery: obsdb.RunQuery{PublicID: "pub_search"}},
 				[]string{"sr-off", "sr-refund"}, 0},
 			{"agent", obsdb.SearchQuery{Text: "refund failed", RunQuery: obsdb.RunQuery{Agent: "nobody"}}, nil, 0},
+			{"experiment", obsdb.SearchQuery{Text: "refund", RunQuery: obsdb.RunQuery{ExperimentID: "exp_search"}}, []string{"sr-done", "sr-parcel"}, 0},
+			{"experiment, no text", obsdb.SearchQuery{RunQuery: obsdb.RunQuery{ExperimentID: "exp_search"}}, []string{"sr-done", "sr-parcel"}, 0},
+			{"experiment inside a public id (a panel token's scope)", obsdb.SearchQuery{RunQuery: obsdb.RunQuery{ExperimentID: "exp_search", PublicID: "pub_search"}}, []string{"sr-done"}, 0},
+			{"another experiment", obsdb.SearchQuery{RunQuery: obsdb.RunQuery{ExperimentID: "exp_nope"}}, nil, 0},
 			{"a page", obsdb.SearchQuery{Text: "refund failed", Offset: 1, RunQuery: obsdb.RunQuery{Limit: 1}}, []string{"sr-parcel"}, 3},
 			{"past the match", obsdb.SearchQuery{Text: "refund failed", Offset: 10}, nil, 3},
 		} {

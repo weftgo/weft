@@ -38,7 +38,8 @@ import (
 //
 // and /api/runs' own filters with their meaning there: session,
 // public_id, parent ("" top-level only, "*" all, a run id its
-// children), all, playground, tag.<k>=<v>. A panel token searches its
+// children), all, playground, experiment_id (the runs labelled with
+// that weft.experiment.id), tag.<k>=<v>. A panel token searches its
 // own public id only — the scoping /api/runs applies (scopeRunsQuery):
 // a foreign public_id is 403. Hits are run rows and nothing else: no
 // snippet, so nothing of a system prompt or a tool catalog can leave
@@ -83,11 +84,12 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	query := obsdb.SearchQuery{
 		RunQuery: obsdb.RunQuery{
-			Agent:       q.Get("agent"),
-			SessionID:   q.Get("session"),
-			PublicID:    q.Get("public_id"),
-			ParentRunID: parentParam(q),
-			Meta:        tagParams(q),
+			Agent:        q.Get("agent"),
+			SessionID:    q.Get("session"),
+			PublicID:     q.Get("public_id"),
+			ExperimentID: q.Get("experiment_id"),
+			ParentRunID:  parentParam(q),
+			Meta:         tagParams(q),
 		},
 		Text:  q.Get("q"),
 		Tool:  q.Get("tool"),

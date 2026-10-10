@@ -267,13 +267,39 @@ type Experiment struct {
 	Created, Updated time.Time
 	Variants         []ExperimentVariant
 	Inputs           []ExperimentInput
+	// ExperimentCommand is the rest of the §5.1 command the matrix
+	// sent, so a saved experiment reopens as the form that ran it.
+	// Zero on an experiment saved before obsdb kept it.
+	ExperimentCommand
 }
 
-// ExperimentVariant is one column of the matrix: a key and the
-// overrides object it applies.
+// ExperimentCommand is the experiment-wide part of the §5.1 run
+// command, kept as sent: the modes, the step the cells continue from,
+// the source run and the transcript edits. Every field is optional —
+// zero is "not recorded" (an older row) or the command's default, and
+// a reader does not tell the two apart. obsdb stores it as one JSON
+// document beside the definition and does not validate it (Studio
+// does, on the way in).
+type ExperimentCommand struct {
+	Engine          string          `json:"engine,omitempty"`           // live | scripted
+	SideEffects     string          `json:"side_effects,omitempty"`     // substitute | park | allow
+	Thread          string          `json:"thread,omitempty"`           // ephemeral | fork
+	FromStep        *int            `json:"from_step,omitempty"`        // the step every cell continues from
+	SourceRunID     string          `json:"source_run_id,omitempty"`    // the run the cells replay from
+	TranscriptEdits json.RawMessage `json:"transcript_edits,omitempty"` // the list as sent
+}
+
+// ExperimentVariant is one column of the matrix: a key, the overrides
+// object it applies (verbatim — instructions, tools_enabled, model,
+// thinking, options, params, tool_choice, park_on, only_tools, and any
+// key a later command adds), and the modes it runs under when they
+// differ from the experiment's (empty: the experiment's own).
 type ExperimentVariant struct {
-	Key       string          `json:"key"`
-	Overrides json.RawMessage `json:"overrides,omitempty"`
+	Key         string          `json:"key"`
+	Overrides   json.RawMessage `json:"overrides,omitempty"`
+	Engine      string          `json:"engine,omitempty"`
+	SideEffects string          `json:"side_effects,omitempty"`
+	Thread      string          `json:"thread,omitempty"`
 }
 
 // ExperimentInput is one row of the matrix: a key, a source run to

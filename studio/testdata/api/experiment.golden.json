@@ -1,0 +1,175 @@
+{
+  "id": "exp_g",
+  "name": "tracking link",
+  "agent": "orders",
+  "variants": [
+    {
+      "key": "A",
+      "overrides": {}
+    },
+    {
+      "key": "B",
+      "overrides": {
+        "instructions": "new",
+        "tools_enabled": [
+          "lookup_order"
+        ],
+        "model": "m2",
+        "thinking": "high",
+        "options": {
+          "max_steps": 4,
+          "parallelism": 1,
+          "temperature": 0.2
+        },
+        "params": {
+          "top_p": 0.9,
+          "max_tokens": 256,
+          "stop": [
+            "END"
+          ],
+          "seed": 7
+        },
+        "tool_choice": {
+          "mode": "named",
+          "name": "lookup_order"
+        },
+        "park_on": [
+          "refund"
+        ],
+        "only_tools": [
+          "lookup_order"
+        ]
+      },
+      "engine": "scripted",
+      "side_effects": "park",
+      "thread": "ephemeral"
+    }
+  ],
+  "inputs": [
+    {
+      "key": "1",
+      "source_run_id": "r_ok"
+    },
+    {
+      "key": "2",
+      "text": "angry user"
+    }
+  ],
+  "engine": "live",
+  "side_effects": "substitute",
+  "thread": "ephemeral",
+  "from_step": 1,
+  "source_run_id": "r_ok",
+  "transcript_edits": [
+    {
+      "kind": "tool_result",
+      "step": 0,
+      "call_id": "call_1",
+      "content": "order 42: lost"
+    }
+  ],
+  "created": "2020-01-01T09:00:00Z",
+  "updated": "2020-01-01T09:00:00Z",
+  "run_count": 2,
+  "cost_usd": 0.00024,
+  "cost_known": true,
+  "cost_reason": "no cache split reported; a cached prompt may be overstated",
+  "cache": "not_reported",
+  "runs": [
+    {
+      "id": "pg_e1",
+      "parent_run_id": "",
+      "parent_call_id": "",
+      "trace_id": "0102030405060708090a0b0c0d0e0f10",
+      "agent": "orders",
+      "model": {
+        "provider": "p",
+        "name": "m"
+      },
+      "manifest_hash": "sha256:demo-fleet",
+      "weft_version": "(test)",
+      "service": "studio-test",
+      "session_id": "",
+      "public_id": "",
+      "turn": 0,
+      "playground": true,
+      "experiment_id": "exp_g",
+      "forked_from": "",
+      "meta": {
+        "cwd": "/tmp/demo"
+      },
+      "started": "2020-01-01T09:00:00.123Z",
+      "finished": "2020-01-01T09:00:01.123Z",
+      "last_seen": "2020-01-01T09:00:01.123Z",
+      "status": "succeeded",
+      "err": "",
+      "steps": 1,
+      "pending": 0,
+      "stop_reason": "",
+      "usage": {
+        "input_tokens": 100,
+        "output_tokens": 50
+      },
+      "cost_usd": 0.00018,
+      "cost_known": true,
+      "cost_reason": "no cache split reported; a cached prompt may be overstated",
+      "cache": "not_reported",
+      "delegated_cost_usd": 0.00002,
+      "delegated_cost_known": true,
+      "event_count": 2,
+      "message_count": 0,
+      "delta_count": 0,
+      "instructions_hash": "9d1f0a5c3b7e2a4d6f8091b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f6",
+      "catalog_hash": "",
+      "request_count": 0
+    },
+    {
+      "id": "pg_e2",
+      "parent_run_id": "",
+      "parent_call_id": "",
+      "trace_id": "0102030405060708090a0b0c0d0e0f10",
+      "agent": "orders",
+      "model": {
+        "provider": "p",
+        "name": "m"
+      },
+      "manifest_hash": "sha256:demo-fleet",
+      "weft_version": "(test)",
+      "service": "studio-test",
+      "session_id": "",
+      "public_id": "",
+      "turn": 0,
+      "playground": true,
+      "experiment_id": "exp_g",
+      "forked_from": "",
+      "meta": {
+        "cwd": "/tmp/demo"
+      },
+      "started": "2020-01-01T09:00:02.123Z",
+      "finished": "2020-01-01T09:00:03.123Z",
+      "last_seen": "2020-01-01T09:00:03.123Z",
+      "status": "succeeded",
+      "err": "",
+      "steps": 1,
+      "pending": 0,
+      "stop_reason": "",
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "cost_usd": 0.00004,
+      "cost_known": true,
+      "cost_reason": "no cache split reported; a cached prompt may be overstated",
+      "cache": "not_reported",
+      "delegated_cost_usd": 0,
+      "delegated_cost_known": true,
+      "event_count": 2,
+      "message_count": 0,
+      "delta_count": 0,
+      "instructions_hash": "9d1f0a5c3b7e2a4d6f8091b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f6",
+      "catalog_hash": "",
+      "request_count": 0
+    }
+  ]
+}
+

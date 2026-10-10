@@ -116,6 +116,13 @@ func TestAuthMatrix(t *testing.T) {
 		seedRun(t, srv.db, parkRun[res], public[res], "",
 			`{"type":"run_finish","run_id":"`+parkRun[res]+`","usage":{},"steps":1,"pending":[{"type":"tool_call","id":"call_1","name":"refund","args":{}}]}`, nil)
 	}
+	// One experiment's runs across the public ids (plan F5.1): the
+	// experiment_id filter narrows, it never widens a panel token's
+	// public id (pinned below). Seeded before the runs below, so none
+	// of them is a public id's latest.
+	for _, res := range []string{"A", "B", "none"} {
+		seedRun(t, srv.db, run[res]+"_exp", public[res], "", "", map[string]any{"weft.playground": true, "weft.experiment.id": "exp_1"})
+	}
 	for _, res := range []string{"A", "B", "none"} {
 		seedRun(t, srv.db, run[res], public[res], session[res], "", nil)
 		span := obsdb.Span{
@@ -424,6 +431,25 @@ func TestAuthMatrix(t *testing.T) {
 			resources: []string{"A", "B", "missing"}, want: func(kind, res string) int {
 				if kind == "server" || res == "A" {
 					return ok // an unknown public id is an empty list for the server
+				}
+				return forbidden403
+			}},
+		// experiment_id (plan F5.1): a filter any identity may send —
+		// a panel token's rows stay inside its public id (pinned below),
+		// a foreign public_id beside it is still 403.
+		{name: "GET /api/runs?experiment_id=", method: "GET", path: fixed("/api/runs?experiment_id=exp_1"), resources: one, want: anyValid(ok)},
+		{name: "GET /api/runs?experiment_id=&public_id=", method: "GET", path: func(res string) string { return "/api/runs?experiment_id=exp_1&public_id=" + public[res] },
+			resources: []string{"A", "B", "missing"}, want: func(kind, res string) int {
+				if kind == "server" || res == "A" {
+					return ok
+				}
+				return forbidden403
+			}},
+		{name: "GET /api/search?experiment_id=", method: "GET", path: fixed("/api/search?experiment_id=exp_1&all=1"), resources: one, want: anyValid(ok)},
+		{name: "GET /api/search?experiment_id=&public_id=", method: "GET", path: func(res string) string { return "/api/search?experiment_id=exp_1&public_id=" + public[res] },
+			resources: []string{"A", "B", "missing"}, want: func(kind, res string) int {
+				if kind == "server" || res == "A" {
+					return ok
 				}
 				return forbidden403
 			}},
@@ -1225,7 +1251,8 @@ func TestAuthMatrix(t *testing.T) {
 		for _, path := range []string{"/api/runs?parent=*", "/api/runs?all=1", "/api/runs?parent=run_b",
 			"/api/runs?session=s_b", "/api/runs?agent=acme-support&limit=500", "/api/sessions?agent=acme-support",
 			"/api/search?q=secret", "/api/search?q=secret&all=1", "/api/search?q=pub_b&parent=*", "/api/search?session=s_b&all=1",
-			"/api/search?tool=refund&all=1", "/api/traces", "/api/traces?service=svc&limit=500"} {
+			"/api/search?tool=refund&all=1", "/api/traces", "/api/traces?service=svc&limit=500",
+			"/api/runs?experiment_id=exp_1", "/api/runs?experiment_id=exp_1&all=1", "/api/search?experiment_id=exp_1&all=1"} {
 			req, _ := http.NewRequest(http.MethodGet, ts.URL+path, nil)
 			req.Header.Set("Authorization", "Bearer "+id.token)
 			resp, err := http.DefaultClient.Do(req)
@@ -1237,6 +1264,45 @@ func TestAuthMatrix(t *testing.T) {
 			for _, foreign := range []string{"run_b", "run_none", "pub_b", "s_b", "s_none", trace["B"], trace["none"]} {
 				if strings.Contains(string(b), `"`+foreign) {
 					t.Errorf("%s as %s lists %s: %s", path, id.name, foreign, b)
+				}
+			}
+		}
+	}
+
+	// The experiment filter narrows to its runs, inside the identity's
+	// scope: the server token reads all three, a panel token its own.
+	for _, id := range identities {
+		if id.kind == "bad" {
+			continue
+		}
+		want := []string{run["A"] + "_exp", run["B"] + "_exp", run["none"] + "_exp"}
+		if id.kind != "server" {
+			want = want[:1]
+		}
+		for _, path := range []string{"/api/runs?experiment_id=exp_1", "/api/search?experiment_id=exp_1"} {
+			req, _ := http.NewRequest(http.MethodGet, ts.URL+path, nil)
+			req.Header.Set("Authorization", "Bearer "+id.token)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var page struct {
+				Runs []struct {
+					ID string `json:"id"`
+				} `json:"runs"`
+			}
+			_ = json.NewDecoder(resp.Body).Decode(&page)
+			_ = resp.Body.Close()
+			got := map[string]bool{}
+			for _, r := range page.Runs {
+				got[r.ID] = true
+			}
+			if len(got) != len(want) {
+				t.Errorf("%s as %s = %v, want exactly %v", path, id.name, got, want)
+			}
+			for _, w := range want {
+				if !got[w] {
+					t.Errorf("%s as %s = %v, want %s among them", path, id.name, got, w)
 				}
 			}
 		}

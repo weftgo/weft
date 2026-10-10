@@ -6,6 +6,8 @@ import (
 	"errors"
 	"time"
 
+	"github.com/ClickHouse/clickhouse-go/v2/lib/driver"
+
 	"github.com/weftgo/weft/obsdb"
 )
 
@@ -33,6 +35,10 @@ func (d *DB) SaveExperiment(ctx context.Context, e obsdb.Experiment) (err error)
 	if err != nil {
 		return err
 	}
+	command, err := json.Marshal(e.ExperimentCommand)
+	if err != nil {
+		return err
+	}
 	// Created survives an update: the row's own, else now. Only a
 	// genuine ErrNotFound means "first save" — any other read error
 	// must surface, not silently reset Created on an update (the
@@ -52,9 +58,9 @@ func (d *DB) SaveExperiment(ctx context.Context, e obsdb.Experiment) (err error)
 	// work around), which floored Created and Updated — the SQLite
 	// backend keeps the nanoseconds.
 	return d.conn.Exec(ctx, `INSERT INTO experiments
-		(Id, Name, Agent, Created, Updated, Variants, Inputs)
-		VALUES (?, ?, ?, fromUnixTimestamp64Nano(?), fromUnixTimestamp64Nano(?), ?, ?)`,
-		e.ID, e.Name, e.Agent, created.UnixNano(), now.UnixNano(), string(variants), string(inputs))
+		(Id, Name, Agent, Created, Updated, Variants, Inputs, Command)
+		VALUES (?, ?, ?, fromUnixTimestamp64Nano(?), fromUnixTimestamp64Nano(?), ?, ?, ?)`,
+		e.ID, e.Name, e.Agent, created.UnixNano(), now.UnixNano(), string(variants), string(inputs), string(command))
 }
 
 // Experiments lists the saved definitions, newest update first.
@@ -68,7 +74,7 @@ func (d *DB) Experiments(ctx context.Context) (_ []obsdb.Experiment, err error) 
 	// list order and the surviving row can never disagree. (Updated was
 	// also written at whole seconds until the nanosecond bind; rows
 	// from before it still tie there.)
-	rows, err := d.conn.Query(ctx, `SELECT Id, Name, Agent, Created, Updated, Variants, Inputs
+	rows, err := d.conn.Query(ctx, `SELECT Id, Name, Agent, Created, Updated, Variants, Inputs, Command
 		FROM experiments FINAL ORDER BY InsertTime DESC, Id`)
 	if err != nil {
 		return nil, err
@@ -76,18 +82,10 @@ func (d *DB) Experiments(ctx context.Context) (_ []obsdb.Experiment, err error) 
 	defer func() { _ = rows.Close() }()
 	var out []obsdb.Experiment
 	for rows.Next() {
-		var e obsdb.Experiment
-		var variants, inputs string
-		if err := rows.Scan(&e.ID, &e.Name, &e.Agent, &e.Created, &e.Updated, &variants, &inputs); err != nil {
+		e, err := scanExperiment(rows)
+		if err != nil {
 			return nil, err
 		}
-		if err := json.Unmarshal([]byte(variants), &e.Variants); err != nil {
-			return nil, err
-		}
-		if err := json.Unmarshal([]byte(inputs), &e.Inputs); err != nil {
-			return nil, err
-		}
-		e.Created, e.Updated = e.Created.UTC(), e.Updated.UTC()
 		out = append(out, e)
 	}
 	return out, rows.Err()
@@ -99,7 +97,7 @@ func (d *DB) Experiment(ctx context.Context, id string) (_ obsdb.Experiment, err
 		return obsdb.Experiment{}, err
 	}
 	defer d.closedErr(&err)
-	rows, err := d.conn.Query(ctx, `SELECT Id, Name, Agent, Created, Updated, Variants, Inputs
+	rows, err := d.conn.Query(ctx, `SELECT Id, Name, Agent, Created, Updated, Variants, Inputs, Command
 		FROM experiments FINAL WHERE Id = ? ORDER BY InsertTime DESC`, id)
 	if err != nil {
 		return obsdb.Experiment{}, err
@@ -113,9 +111,16 @@ func (d *DB) Experiment(ctx context.Context, id string) (_ obsdb.Experiment, err
 		}
 		return obsdb.Experiment{}, obsdb.ErrNotFound
 	}
+	return scanExperiment(rows)
+}
+
+// scanExperiment reads one experiments row: the two documents, and
+// the command's when the row has one (” is a row written before
+// 0006: the command's fields stay absent).
+func scanExperiment(rows driver.Rows) (obsdb.Experiment, error) {
 	var e obsdb.Experiment
-	var variants, inputs string
-	if err := rows.Scan(&e.ID, &e.Name, &e.Agent, &e.Created, &e.Updated, &variants, &inputs); err != nil {
+	var variants, inputs, command string
+	if err := rows.Scan(&e.ID, &e.Name, &e.Agent, &e.Created, &e.Updated, &variants, &inputs, &command); err != nil {
 		return e, err
 	}
 	if err := json.Unmarshal([]byte(variants), &e.Variants); err != nil {
@@ -123,6 +128,11 @@ func (d *DB) Experiment(ctx context.Context, id string) (_ obsdb.Experiment, err
 	}
 	if err := json.Unmarshal([]byte(inputs), &e.Inputs); err != nil {
 		return e, err
+	}
+	if command != "" {
+		if err := json.Unmarshal([]byte(command), &e.ExperimentCommand); err != nil {
+			return e, err
+		}
 	}
 	e.Created, e.Updated = e.Created.UTC(), e.Updated.UTC()
 	return e, nil

@@ -1,9 +1,13 @@
 package studio
 
 import (
+	"bytes"
+	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
+	"strconv"
 	"time"
 
 	"github.com/weftgo/weft/obsdb"
@@ -16,6 +20,14 @@ import (
 // creates or updates (the matrix runner writes it before issuing the
 // cells' commands); GET lists the history and reads one with its runs.
 //
+// The join is by id alone: POST /api/playground/runs accepts any
+// experiment_id, saved or not, and labels the run with it — so a
+// re-run sent with a saved experiment's id joins that experiment (its
+// runs[], run_count and cost), and a definition saved after its runs
+// finds them all. Nothing is stored per run here: the runs list is the
+// runs table read by weft.experiment.id (RunQuery.ExperimentID, the
+// same filter /api/runs and /api/search take as experiment_id=).
+//
 // These are Studio-only surfaces by nature (§2): the panel reaches
 // them through "open in Studio" with the context carried over. Nothing
 // here is public-id-shaped — the history lists every definition
@@ -24,22 +36,105 @@ import (
 // all three routes (S4.6), the reads like the write.
 
 // experimentBody is the POST body and the wire shape of one
-// experiment: the §10.4 document, dates read-only.
+// experiment: the §10.4 document, dates read-only. Beside the matrix
+// (variants, inputs) it keeps the rest of the §5.1 command the cells
+// were sent with (obsdb.ExperimentCommand, flat: engine, side_effects,
+// thread, from_step, source_run_id, transcript_edits), and each variant
+// its overrides object verbatim plus its own engine / side_effects /
+// thread when they differ — so a saved experiment reopens as the form
+// that ran it (plan F5). Every one of those is optional: an experiment
+// saved before Studio kept them reads back without them. A POST
+// replaces the whole definition: a field it leaves out is cleared.
 type experimentBody struct {
 	ID       string                    `json:"id"`
 	Name     string                    `json:"name"`
 	Agent    string                    `json:"agent"`
 	Variants []obsdb.ExperimentVariant `json:"variants"`
 	Inputs   []obsdb.ExperimentInput   `json:"inputs"`
+	obsdb.ExperimentCommand
+}
+
+func bodyOf(e obsdb.Experiment) experimentBody {
+	return experimentBody{ID: e.ID, Name: e.Name, Agent: e.Agent, Variants: e.Variants, Inputs: e.Inputs, ExperimentCommand: e.ExperimentCommand}
+}
+
+// experimentSummary is what the history and the detail both carry
+// about an experiment's runs, derived at read time from the runs
+// labelled with its id (never stored): run_count counts its top-level
+// runs (the detail's runs[]), and the cost block is their whole bill —
+// each run's own + delegated (pricing.go), unknown with a reason when a
+// run is not priced or the runs could not all be read.
+type experimentSummary struct {
+	RunCount int `json:"run_count"`
+	costFields
+}
+
+// experimentRow is one row of GET /api/experiments: the definition,
+// its dates and the summary, so the history needs no per-row detail
+// read.
+type experimentRow struct {
+	experimentBody
+	Created time.Time `json:"created"`
+	Updated time.Time `json:"updated"`
+	experimentSummary
 }
 
 // experimentView is GET /api/experiments/{id}'s document: the
-// definition plus the runs grouped under it (§10.4's shape).
+// definition plus the runs grouped under it (§10.4's shape) and the
+// summary.
 type experimentView struct {
 	experimentBody
 	Created time.Time `json:"created"`
 	Updated time.Time `json:"updated"`
-	Runs    []runRow  `json:"runs"`
+	experimentSummary
+	Runs []runRow `json:"runs"`
+}
+
+// checkExperiment refuses a definition the matrix could not have sent:
+// the modes are the §5.1 command's words (playground.go's
+// validateCommand reads the same ones), from_step an ordinal, the
+// edits a list. The edits themselves are checked when a cell is run,
+// against its source run — here they are kept as sent.
+func checkExperiment(b experimentBody) string {
+	if b.ID == "" {
+		return "an experiment needs an id (the weft.experiment.id its runs carry)"
+	}
+	if len(b.Variants) == 0 || len(b.Inputs) == 0 {
+		return "an experiment defines at least one variant and one input"
+	}
+	modes := func(at, engine, sideEffects, thread string) string {
+		switch engine {
+		case "", "live", "scripted":
+		default:
+			return at + "engine must be live or scripted"
+		}
+		switch sideEffects {
+		case "", "substitute", "park", "allow":
+		default:
+			return at + "side_effects must be substitute, park or allow"
+		}
+		switch thread {
+		case "", "ephemeral", "fork":
+		default:
+			return at + "thread must be ephemeral or fork"
+		}
+		return ""
+	}
+	if msg := modes("", b.Engine, b.SideEffects, b.Thread); msg != "" {
+		return msg
+	}
+	for _, v := range b.Variants {
+		if msg := modes("variant "+strconv.Quote(v.Key)+": ", v.Engine, v.SideEffects, v.Thread); msg != "" {
+			return msg
+		}
+	}
+	if b.FromStep != nil && *b.FromStep < 0 {
+		return "from_step must be a step ordinal (0 or more)"
+	}
+	if t := bytes.TrimSpace(b.TranscriptEdits); len(t) > 0 && !bytes.Equal(t, []byte("null")) && t[0] != '[' {
+		return "transcript_edits must be a list"
+	}
+	return ""
 }
 
 // serveExperiments is GET /api/experiments (the history) and POST
@@ -56,29 +151,35 @@ func (s *Server) serveExperiments(w http.ResponseWriter, r *http.Request) {
 			dbError(w, r, "experiments", "", err)
 			return
 		}
-		out := make([]experimentBody, 0, len(list))
+		out := make([]experimentRow, 0, len(list))
+		c := s.coster(r.Context())
 		for _, e := range list {
-			out = append(out, experimentBody{ID: e.ID, Name: e.Name, Agent: e.Agent, Variants: e.Variants, Inputs: e.Inputs})
+			sum, err := s.experimentSummary(r.Context(), c, e.ID)
+			if err != nil {
+				dbError(w, r, "experiment runs", e.ID, err)
+				return
+			}
+			out = append(out, experimentRow{experimentBody: bodyOf(e), Created: e.Created, Updated: e.Updated, experimentSummary: sum})
 		}
 		writeJSON(w, r, http.StatusOK, struct {
-			Experiments []experimentBody `json:"experiments"`
+			Experiments []experimentRow `json:"experiments"`
 		}{out})
 	case http.MethodPost:
 		var body experimentBody
 		if !decodeBody(w, r, "experiment body", &body) {
 			return
 		}
-		if body.ID == "" {
-			badRequest(w, r, "an experiment needs an id (the weft.experiment.id its runs carry)")
+		if msg := checkExperiment(body); msg != "" {
+			badRequest(w, r, msg)
 			return
 		}
-		if len(body.Variants) == 0 || len(body.Inputs) == 0 {
-			badRequest(w, r, "an experiment defines at least one variant and one input")
-			return
+		if t := bytes.TrimSpace(body.TranscriptEdits); bytes.Equal(t, []byte("null")) || len(t) == 0 {
+			body.TranscriptEdits = nil
 		}
 		if err := s.db.SaveExperiment(r.Context(), obsdb.Experiment{
 			ID: body.ID, Name: body.Name, Agent: body.Agent,
 			Variants: body.Variants, Inputs: body.Inputs,
+			ExperimentCommand: body.ExperimentCommand,
 		}); err != nil {
 			dbError(w, r, "experiment", body.ID, err)
 			return
@@ -89,7 +190,7 @@ func (s *Server) serveExperiments(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		writeJSON(w, r, http.StatusOK, experimentView{
-			experimentBody: experimentBody{ID: saved.ID, Name: saved.Name, Agent: saved.Agent, Variants: saved.Variants, Inputs: saved.Inputs},
+			experimentBody: bodyOf(saved),
 			Created:        saved.Created,
 			Updated:        saved.Updated,
 		})
@@ -142,10 +243,53 @@ func (s *Server) serveExperiment(w http.ResponseWriter, r *http.Request) {
 		query.Before, query.BeforeID = *page.NextBefore, page.NextBeforeID
 	}
 	slices.Reverse(runs) // the database lists newest first
+	sum, err := s.experimentSummary(r.Context(), c, id)
+	if err != nil {
+		dbError(w, r, "experiment runs", id, err)
+		return
+	}
 	writeJSON(w, r, http.StatusOK, experimentView{
-		experimentBody: experimentBody{ID: e.ID, Name: e.Name, Agent: e.Agent, Variants: e.Variants, Inputs: e.Inputs},
-		Created:        e.Created,
-		Updated:        e.Updated,
-		Runs:           runs,
+		experimentBody:    bodyOf(e),
+		Created:           e.Created,
+		Updated:           e.Updated,
+		experimentSummary: sum,
+		Runs:              runs,
 	})
+}
+
+// experimentSummary walks every run labelled with the experiment's id
+// — its subagent children included, which inherit the label — once:
+// the top-level ones are counted, and the set is priced as a session's
+// is (setCost), so the tree costs no children reads. Past the walk's
+// cap the count comes from the database's own total and the cost is
+// unknown, saying why. A failed read is the caller's error.
+func (s *Server) experimentSummary(ctx context.Context, c *coster, id string) (experimentSummary, error) {
+	q := obsdb.RunQuery{ExperimentID: id, ParentRunID: "*", Limit: 500}
+	var runs []obsdb.RunRow
+	for pages := 0; ; pages++ {
+		if pages == experimentRunPages {
+			page, err := s.db.Runs(ctx, obsdb.RunQuery{ExperimentID: id, Limit: 1})
+			if err != nil {
+				return experimentSummary{}, err
+			}
+			why := fmt.Sprintf("the experiment holds more than %d runs: too many to price at read time", experimentRunPages*500)
+			return experimentSummary{RunCount: page.Total, costFields: cost{badge: costUnknown, reason: why}.fields()}, nil
+		}
+		page, err := s.db.Runs(ctx, q)
+		if err != nil {
+			return experimentSummary{}, err
+		}
+		runs = append(runs, page.Runs...)
+		if page.NextBefore == nil || len(page.Runs) == 0 {
+			break
+		}
+		q.Before, q.BeforeID = *page.NextBefore, page.NextBeforeID
+	}
+	n := 0
+	for _, r := range runs {
+		if r.ParentRunID == "" {
+			n++
+		}
+	}
+	return experimentSummary{RunCount: n, costFields: c.setCost(runs, "a run").fields()}, nil
 }

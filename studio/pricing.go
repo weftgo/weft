@@ -636,6 +636,16 @@ func (s *Server) sessionCost(ctx context.Context, id string) (cost, *coster) {
 		}
 		q.Before, q.BeforeID = *page.NextBefore, page.NextBeforeID
 	}
+	return c.setCost(runs, "a turn"), c
+}
+
+// setCost is the bill of a set of runs read whole — a session's, an
+// experiment's — with their subagent children among them: each root's
+// own + delegated, where a root is every run of the set that is not a
+// core Subagent child of another run in it. It primes c with the tree,
+// so pricing the roots costs no children reads. what names a root in
+// the unpriced reason ("a turn", "a run").
+func (c *coster) setCost(runs []obsdb.RunRow, what string) cost {
 	kids := map[string][]obsdb.RunRow{}
 	inSet := map[string]bool{}
 	for _, r := range runs {
@@ -671,9 +681,9 @@ func (s *Server) sessionCost(ctx context.Context, id string) (cost, *coster) {
 	out.cache = cacheOf(usage)
 	if len(unpriced) > 0 {
 		out.known, out.usd = false, 0
-		out.badge, out.reason = badge, "a turn is not priced: "+strings.Join(unpriced, "; ")
+		out.badge, out.reason = badge, what+" is not priced: "+strings.Join(unpriced, "; ")
 	}
-	return out, c
+	return out
 }
 
 // ── api/meta and GET /api/settings/pricing ─────────────────────────

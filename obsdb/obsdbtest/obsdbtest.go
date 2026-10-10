@@ -782,15 +782,21 @@ func experiments(open func(t *testing.T) obsdb.DB) func(t *testing.T) {
 		db := open(t)
 		defer func() { _ = db.Close() }()
 
+		fromStep := 2
 		e := obsdb.Experiment{
 			ID: "exp_1", Name: "tracking-link prompt", Agent: "acme-support",
 			Variants: []obsdb.ExperimentVariant{
 				{Key: "A", Overrides: json.RawMessage(`{}`)},
-				{Key: "B", Overrides: json.RawMessage(`{"instructions":"new"}`)},
+				{Key: "B", Overrides: json.RawMessage(`{"instructions":"new"}`), Engine: "scripted", SideEffects: "park"},
 			},
 			Inputs: []obsdb.ExperimentInput{
 				{Key: "1", SourceRunID: "s_1-t1"},
 				{Key: "2", Text: "angry user"},
+			},
+			ExperimentCommand: obsdb.ExperimentCommand{
+				Engine: "live", SideEffects: "substitute", Thread: "fork", FromStep: &fromStep,
+				SourceRunID:     "s_1-t1",
+				TranscriptEdits: json.RawMessage(`[{"kind":"tool_result","step":1,"call_id":"c0","content":"edited"}]`),
 			},
 		}
 		if err := db.SaveExperiment(ctx, e); err != nil {
@@ -814,6 +820,17 @@ func experiments(open func(t *testing.T) obsdb.DB) func(t *testing.T) {
 		if len(got.Inputs) != 2 || got.Inputs[1].Text != "angry user" {
 			t.Errorf("inputs = %+v", got.Inputs)
 		}
+		// The rest of the command, kept as sent (plan F5.1): the modes,
+		// the step, the source, the edits verbatim, the variant's own
+		// modes.
+		c := got.ExperimentCommand
+		if c.Engine != "live" || c.SideEffects != "substitute" || c.Thread != "fork" || c.FromStep == nil || *c.FromStep != 2 ||
+			c.SourceRunID != "s_1-t1" || string(c.TranscriptEdits) != string(e.TranscriptEdits) {
+			t.Errorf("command = %+v, want the saved command verbatim", c)
+		}
+		if v := got.Variants[1]; v.Engine != "scripted" || v.SideEffects != "park" || v.Thread != "" {
+			t.Errorf("variant B modes = %+v, want scripted, park and the experiment's thread", v)
+		}
 
 		// An older experiment (saved before exp_1's updates) sorts
 		// behind it.
@@ -833,6 +850,9 @@ func experiments(open func(t *testing.T) obsdb.DB) func(t *testing.T) {
 		}
 		if len(list) != 2 || list[0].ID != "exp_1" {
 			t.Errorf("list = %+v, want the newest update first", list)
+		}
+		if len(list) == 2 && (list[0].Thread != "fork" || list[1].Engine != "" || list[1].FromStep != nil) {
+			t.Errorf("list commands = %+v / %+v, want exp_1's and none for exp_0", list[0].ExperimentCommand, list[1].ExperimentCommand)
 		}
 
 		if _, err := db.Experiment(ctx, "exp_nope"); !errors.Is(err, obsdb.ErrNotFound) {

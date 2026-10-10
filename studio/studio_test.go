@@ -578,6 +578,114 @@ func TestRunsGolden(t *testing.T) {
 	golden(t, "runs.golden.json", body)
 }
 
+// experimentDB is fixtureDB's experiment (plan F5.1): exp_g's two runs
+// — pg_e1 with a Subagent child that inherits the label, pg_e2 — and a
+// run of another experiment, each priced at p/m.
+func experimentDB(t *testing.T) obsdb.DB {
+	t.Helper()
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	at := func(d time.Duration) time.Time { return fixtureT0.Add(d) }
+	run := func(id, experiment string, start time.Duration, in, out int64, extra map[string]any) []obsdb.Record {
+		recs := []obsdb.Record{
+			fxRecord(id, "event", "run_start", 0, at(start), `{"type":"run_start","id":"`+id+`","model":{"provider":"p","name":"m"},"agent":"orders"}`),
+			fxRecord(id, "event", "run_finish", 1, at(start+time.Second),
+				fmt.Sprintf(`{"type":"run_finish","run_id":"%s","usage":{"input_tokens":%d,"output_tokens":%d},"steps":1}`, id, in, out)),
+		}
+		for _, r := range recs {
+			r.Attrs["weft.playground"] = true
+			r.Attrs["weft.experiment.id"] = experiment
+			for k, v := range extra {
+				r.Attrs[k] = v
+			}
+		}
+		return recs
+	}
+	var recs []obsdb.Record
+	recs = append(recs, run("pg_e1", "exp_g", 0, 100, 50, nil)...)
+	recs = append(recs, run("pg_e1/0/call_1", "exp_g", 100*time.Millisecond, 10, 5,
+		map[string]any{"weft.parent.run.id": "pg_e1", "weft.parent.call.id": "call_1"})...)
+	recs = append(recs, run("pg_e2", "exp_g", 2*time.Second, 20, 10, nil)...)
+	recs = append(recs, run("pg_other", "exp_other", 4*time.Second, 1, 1, nil)...)
+	if err := db.Write(context.Background(), obsdb.Batch{Records: recs}); err != nil {
+		t.Fatal(err)
+	}
+	return db
+}
+
+// experimentDates normalizes an experiment document's created and
+// updated (the save's clock) for its golden.
+var experimentDates = regexp.MustCompile(`"(created|updated)":"[^"]*"`)
+
+// TestExperimentsGolden pins plan F5.1's three gaps on one experiment:
+// /api/runs?experiment_id= lists its top-level runs and nothing else; a
+// saved experiment reads back with its whole command (engine,
+// side_effects, thread, from_step, source_run_id, transcript_edits, the
+// variants' overrides and modes); the history and the detail carry
+// created, run_count and the cost of its runs (own + delegated).
+func TestExperimentsGolden(t *testing.T) {
+	h := Handler(DB(experimentDB(t)), Playground(true),
+		Pricing(PricingTable{Dated: "2026-10-01", Models: []ModelPrice{{Provider: "p", ModelGlob: "m", Input: 1, Output: 2}}}))
+
+	code, _, body := get(t, h, "/studio/api/runs?experiment_id=exp_g")
+	if code != http.StatusOK || !strings.Contains(body, `"id":"pg_e1"`) || !strings.Contains(body, `"id":"pg_e2"`) ||
+		strings.Contains(body, "pg_other") || strings.Contains(body, `"pg_e1/`) || !strings.Contains(body, `"total":2`) {
+		t.Fatalf("runs?experiment_id=exp_g = %d %s, want pg_e2 and pg_e1, top-level only", code, body)
+	}
+	golden(t, "runs-experiment.golden.json", body)
+	if _, _, all := get(t, h, "/studio/api/runs?experiment_id=exp_g&all=1"); !strings.Contains(all, `"id":"pg_e1/0/call_1"`) || strings.Contains(all, "pg_other") {
+		t.Errorf("runs?experiment_id=exp_g&all=1 = %s, want the child too and no other experiment", all)
+	}
+	if _, _, srch := get(t, h, "/studio/api/search?experiment_id=exp_other"); !strings.Contains(srch, `"id":"pg_other"`) || strings.Contains(srch, "pg_e") {
+		t.Errorf("search?experiment_id=exp_other = %s, want pg_other alone", srch)
+	}
+
+	exp := `{"id":"exp_g","name":"tracking link","agent":"orders",
+	  "variants":[{"key":"A","overrides":{}},
+	    {"key":"B","overrides":{"instructions":"new","tools_enabled":["lookup_order"],"model":"m2","thinking":"high",
+	      "options":{"max_steps":4,"parallelism":1,"temperature":0.2},"params":{"top_p":0.9,"max_tokens":256,"stop":["END"],"seed":7},
+	      "tool_choice":{"mode":"named","name":"lookup_order"},"park_on":["refund"],"only_tools":["lookup_order"]},
+	     "engine":"scripted","side_effects":"park","thread":"ephemeral"}],
+	  "inputs":[{"key":"1","source_run_id":"r_ok"},{"key":"2","text":"angry user"}],
+	  "engine":"live","side_effects":"substitute","thread":"ephemeral","from_step":1,"source_run_id":"r_ok",
+	  "transcript_edits":[{"kind":"tool_result","step":0,"call_id":"call_1","content":"order 42: lost"}]}`
+	code, _, saved := post(t, h, "/studio/api/experiments", "application/json", exp)
+	if code != http.StatusOK {
+		t.Fatalf("save = %d %s", code, saved)
+	}
+	for _, want := range []string{`"engine":"live"`, `"side_effects":"substitute"`, `"from_step":1`, `"source_run_id":"r_ok"`,
+		`"transcript_edits":[{"kind":"tool_result"`, `"engine":"scripted"`, `"only_tools":["lookup_order"]`} {
+		if !strings.Contains(saved, want) {
+			t.Errorf("saved experiment missing %s: %s", want, saved)
+		}
+	}
+
+	code, _, detail := get(t, h, "/studio/api/experiments/exp_g")
+	if code != http.StatusOK {
+		t.Fatalf("detail = %d %s", code, detail)
+	}
+	// pg_e1's own 90 in + 45 out (its child's 10 + 5 taken out) and
+	// the child's 10 + 5, pg_e2's 20 + 10, at 1 and 2 USD per 1M:
+	// (90 + 90 + 10 + 10 + 20 + 20) / 1e6.
+	for _, want := range []string{`"run_count":2`, `"cost_usd":0.00024`, `"cost_known":true`, `"id":"pg_e1"`, `"id":"pg_e2"`} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("detail missing %s: %s", want, detail)
+		}
+	}
+	golden(t, "experiment.golden.json", experimentDates.ReplaceAllString(detail, `"$1":"2020-01-01T09:00:00Z"`))
+
+	_, _, list := get(t, h, "/studio/api/experiments")
+	for _, want := range []string{`"run_count":2`, `"cost_usd":0.00024`, `"created":"`, `"transcript_edits":[`} {
+		if !strings.Contains(list, want) {
+			t.Errorf("history missing %s: %s", want, list)
+		}
+	}
+	golden(t, "experiments.golden.json", experimentDates.ReplaceAllString(list, `"$1":"2020-01-01T09:00:00Z"`))
+}
+
 // TestRunsParentFilter pins the runs list's subagent filters (plan
 // A10): the default is top-level only; parent=<run id> lists that
 // run's children (golden); parent=* and all=1 list every run, children

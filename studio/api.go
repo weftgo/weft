@@ -617,7 +617,10 @@ func (s *Server) debugScope() string {
 }
 
 // serveRuns answers api/runs (S4.2): agent, status, session,
-// public_id, playground, parent ("" top-level only, "*" all, or a run
+// public_id, playground, experiment_id (the runs one playground
+// experiment labelled weft.experiment.id: a filter that narrows, so any
+// identity may send it — a panel token's rows stay inside its public
+// id, which it scopes on top), parent ("" top-level only, "*" all, or a run
 // id for its children), all (a boolean: true is parent=*, every run,
 // subagent children included — a parent id given beside it wins),
 // tag.<k>=<v> metadata matches, before (the
@@ -627,12 +630,13 @@ func (s *Server) debugScope() string {
 func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	query := obsdb.RunQuery{
-		Agent:       q.Get("agent"),
-		Status:      obsdb.Status(q.Get("status")),
-		SessionID:   q.Get("session"),
-		PublicID:    q.Get("public_id"),
-		ParentRunID: parentParam(q),
-		Meta:        tagParams(q),
+		Agent:        q.Get("agent"),
+		Status:       obsdb.Status(q.Get("status")),
+		SessionID:    q.Get("session"),
+		PublicID:     q.Get("public_id"),
+		ExperimentID: q.Get("experiment_id"),
+		ParentRunID:  parentParam(q),
+		Meta:         tagParams(q),
 	}
 	if v := q.Get("playground"); v != "" {
 		b, err := strconv.ParseBool(v)

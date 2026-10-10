@@ -153,12 +153,12 @@ func TestReopenIsANoop(t *testing.T) {
 		t.Fatal(err)
 	}
 	// One row per migration: 0001 (init), 0002 (experiments), 0003
-	// (status spelling), 0004 (request record) and 0005 (raw record) — the same count TestMigrationPinsExporterVersion
+	// (status spelling), 0004 (request record), 0005 (raw record) and 0006 (experiment command) — the same count TestMigrationPinsExporterVersion
 	// pins as the highest version. (Step 8b review fix 1: this read still
 	// wanted 1 after 0002 landed, failing only on a real server, where
 	// the gated suite first ran.)
-	if versions != 5 {
-		t.Errorf("obsdb_migrations rows after reopen = %d, want 5 (0001, 0002, 0003, 0004, 0005)", versions)
+	if versions != 6 {
+		t.Errorf("obsdb_migrations rows after reopen = %d, want 6 (0001, 0002, 0003, 0004, 0005, 0006)", versions)
 	}
 }
 

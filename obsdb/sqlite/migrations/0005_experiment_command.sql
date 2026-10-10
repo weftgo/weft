@@ -1,0 +1,7 @@
+-- 0005 · the experiment's command (plan F5.1): the rest of the §5.1
+-- command a saved experiment reopens with — engine, side_effects,
+-- thread, from_step, source_run_id, transcript_edits — as one JSON
+-- document (obsdb.ExperimentCommand). Additive, no backfill: a row
+-- saved before it reads '' and comes back with the fields absent. The
+-- per-variant modes need no column: they ride in variants' document.
+ALTER TABLE experiments ADD COLUMN command TEXT NOT NULL DEFAULT '';  -- {engine, side_effects, thread, from_step, source_run_id, transcript_edits}

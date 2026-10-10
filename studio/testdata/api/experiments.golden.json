@@ -1,0 +1,83 @@
+{
+  "experiments": [
+    {
+      "id": "exp_g",
+      "name": "tracking link",
+      "agent": "orders",
+      "variants": [
+        {
+          "key": "A",
+          "overrides": {}
+        },
+        {
+          "key": "B",
+          "overrides": {
+            "instructions": "new",
+            "tools_enabled": [
+              "lookup_order"
+            ],
+            "model": "m2",
+            "thinking": "high",
+            "options": {
+              "max_steps": 4,
+              "parallelism": 1,
+              "temperature": 0.2
+            },
+            "params": {
+              "top_p": 0.9,
+              "max_tokens": 256,
+              "stop": [
+                "END"
+              ],
+              "seed": 7
+            },
+            "tool_choice": {
+              "mode": "named",
+              "name": "lookup_order"
+            },
+            "park_on": [
+              "refund"
+            ],
+            "only_tools": [
+              "lookup_order"
+            ]
+          },
+          "engine": "scripted",
+          "side_effects": "park",
+          "thread": "ephemeral"
+        }
+      ],
+      "inputs": [
+        {
+          "key": "1",
+          "source_run_id": "r_ok"
+        },
+        {
+          "key": "2",
+          "text": "angry user"
+        }
+      ],
+      "engine": "live",
+      "side_effects": "substitute",
+      "thread": "ephemeral",
+      "from_step": 1,
+      "source_run_id": "r_ok",
+      "transcript_edits": [
+        {
+          "kind": "tool_result",
+          "step": 0,
+          "call_id": "call_1",
+          "content": "order 42: lost"
+        }
+      ],
+      "created": "2020-01-01T09:00:00Z",
+      "updated": "2020-01-01T09:00:00Z",
+      "run_count": 2,
+      "cost_usd": 0.00024,
+      "cost_known": true,
+      "cost_reason": "no cache split reported; a cached prompt may be overstated",
+      "cache": "not_reported"
+    }
+  ]
+}
+

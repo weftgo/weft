@@ -12,9 +12,10 @@ import (
 
 // A file written before ADR 0028 — migrations 0001 and 0002 applied by
 // hand from the embedded bodies, one run row and one record in it —
-// opens through 0004: the rows survive, the new run columns read their
+// opens through 0005: the rows survive, the new run columns read their
 // defaults (instructions_hash ” is the not_recorded reading, which the
-// read API reports), and the recorded version is 4.
+// read API reports), a saved experiment reads with no command, and the
+// recorded version is 5.
 func TestUpgradeFrom0002(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old.db")
 	raw, err := sql.Open("sqlite", "file:"+path)
@@ -44,6 +45,12 @@ func TestUpgradeFrom0002(t *testing.T) {
 		VALUES ('old1', 'messages', 0, 100, '', 0, '[]', '{}')`); err != nil {
 		t.Fatal(err)
 	}
+	// A saved experiment from before 0005: it reads back with the
+	// command's fields absent (plan F5.1).
+	if _, err := raw.Exec(`INSERT INTO experiments (id, name, agent, created_ns, updated_ns, variants, inputs)
+		VALUES ('exp_old', 'old', 'support', 100, 100, '[{"key":"A","overrides":{"model":"m"}}]', '[{"key":"1","text":"hi"}]')`); err != nil {
+		t.Fatal(err)
+	}
 	if err := raw.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -51,6 +58,14 @@ func TestUpgradeFrom0002(t *testing.T) {
 	db, err := Open(path)
 	if err != nil {
 		t.Fatalf("open a 0002 file: %v", err)
+	}
+	exp, err := db.Experiment(context.Background(), "exp_old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exp.Name != "old" || len(exp.Variants) != 1 || string(exp.Variants[0].Overrides) != `{"model":"m"}` ||
+		exp.Engine != "" || exp.FromStep != nil || exp.TranscriptEdits != nil {
+		t.Errorf("pre-0005 experiment = %+v, want the definition and no command", exp)
 	}
 	// Through the read API: ADR 0028 §10's reading table says
 	// not_recorded, and so do the prompt and tools readers.
@@ -81,8 +96,8 @@ func TestUpgradeFrom0002(t *testing.T) {
 	if err := raw.QueryRowContext(ctx, `SELECT MAX(version) FROM obsdb_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 4 {
-		t.Errorf("migration max = %d, want 4 (through 0004 search)", version)
+	if version != 5 {
+		t.Errorf("migration max = %d, want 5 (through 0005 experiment command)", version)
 	}
 	var agent, instructions, catalog string
 	var steps, requests int

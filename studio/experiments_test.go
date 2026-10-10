@@ -7,6 +7,7 @@ package studio_test
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -108,4 +109,62 @@ func TestExperimentsRoutes(t *testing.T) {
 		t.Errorf("empty definition = %d, want 400", bad.StatusCode)
 	}
 	_ = bad.Body.Close()
+}
+
+// TestExperimentCommandFields (plan F5.1): a definition saved without
+// the command's fields reads back without them (absent, never zero
+// values), and a command the matrix could not have sent is a 400 that
+// names the field.
+func TestExperimentCommandFields(t *testing.T) {
+	ts, _ := newExperimentServer(t)
+	matrix := `"variants":[{"key":"A","overrides":{}}],"inputs":[{"key":"1","text":"x"}]`
+	resp, err := http.Post(ts.URL+"/api/experiments", "application/json", strings.NewReader(`{"id":"exp_bare",`+matrix+`}`))
+	if err != nil || resp.StatusCode != http.StatusOK {
+		t.Fatalf("post = %v %v", err, resp)
+	}
+	_ = resp.Body.Close()
+	get, err := http.Get(ts.URL + "/api/experiments/exp_bare")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	if err := json.NewDecoder(get.Body).Decode(&doc); err != nil {
+		t.Fatal(err)
+	}
+	_ = get.Body.Close()
+	for _, k := range []string{"engine", "side_effects", "thread", "from_step", "source_run_id", "transcript_edits"} {
+		if _, ok := doc[k]; ok {
+			t.Errorf("a bare definition carries %s = %v, want it absent", k, doc[k])
+		}
+	}
+	if doc["run_count"] != float64(0) || doc["cost_known"] != true {
+		t.Errorf("a definition with no runs: run_count %v, cost_known %v; want 0 and a known zero", doc["run_count"], doc["cost_known"])
+	}
+	// from_step 0 is a value, not an absence.
+	resp, _ = http.Post(ts.URL+"/api/experiments", "application/json", strings.NewReader(`{"id":"exp_zero","from_step":0,`+matrix+`}`))
+	var zero map[string]any
+	_ = json.NewDecoder(resp.Body).Decode(&zero)
+	_ = resp.Body.Close()
+	if zero["from_step"] != float64(0) {
+		t.Errorf("from_step 0 read back as %v, want 0", zero["from_step"])
+	}
+
+	for _, c := range []struct{ body, want string }{
+		{`{"id":"e","engine":"turbo",` + matrix + `}`, "engine must be live or scripted"},
+		{`{"id":"e","side_effects":"yolo",` + matrix + `}`, "side_effects must be substitute, park or allow"},
+		{`{"id":"e","thread":"branch",` + matrix + `}`, "thread must be ephemeral or fork"},
+		{`{"id":"e","variants":[{"key":"B","engine":"x"}],"inputs":[{"key":"1"}]}`, `variant \"B\": engine must be live or scripted`},
+		{`{"id":"e","from_step":-1,` + matrix + `}`, "from_step must be a step ordinal"},
+		{`{"id":"e","transcript_edits":{"kind":"reply"},` + matrix + `}`, "transcript_edits must be a list"},
+	} {
+		resp, err := http.Post(ts.URL+"/api/experiments", "application/json", strings.NewReader(c.body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(b), c.want) {
+			t.Errorf("%s = %d %s, want 400 naming %q", c.body, resp.StatusCode, b, c.want)
+		}
+	}
 }

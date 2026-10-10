@@ -1415,7 +1415,12 @@ base64 when `encoding` is `base64` — bytes and truncated_bytes, plus
 `otel.RawBodies(true)` with `WEFT_ENV=dev`; `null` with `raw_badge:
 "not_recorded"`, `raw_reason` and `raw_fix` when the run holds none; the
 route is refused to read-scoped panel tokens, so a wire body is never shown
-to one — the prompt and catalog its hashes name inline unless `refs=1`,
+to one; the response side's `complete` is `false` when its body was not
+read to the end — closed unread by a transport retry, a timeout, a stopped
+reader — and `truncated_bytes` then counts the unread rest when
+Content-Length was known; a raw record is up to ≈ 650 KiB and Studio's
+ingest refuses bodies over 16 MiB, so under RawBodies the pipeline exports
+to Studio in batches of 16 records — the prompt and catalog its hashes name inline unless `refs=1`,
 `next_from` while pages are full) and `runs/{id}/tools` (the run's
 catalogs by hash) — both under the `requests` capability, refused to a
 read-scoped panel token (403, `badge: "hidden"`), and badged

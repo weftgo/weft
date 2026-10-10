@@ -20,7 +20,12 @@ module, ADR 0005).
   `core.Reporter.WantsRaw()` and the new `RawPair` fields let third-party
   adapters report it. `obsdb.RequestRecord.Wire`; ClickHouse migration 0005;
   `GET /api/runs/{id}/requests` rows carry `raw` (or `null` with
-  `raw_badge: not_recorded`).
+  `raw_badge: not_recorded`)); a raw record's response carries `complete: false` when its
+  body was not read to the end; under RawBodies a Studio destination's log
+  batch is capped at 16 records. The gate is a marker on the pipeline's
+  LoggerProvider (`RawBodies() bool`): a stock OTel SDK LoggerProvider handed
+  to an agent never records wire bodies, whatever its processors answer
+  Enabled.
 - `GET /api/live?all=1` (plan A7, for the Live page): every run in the
   database on one stream, subagent child runs included (each frame
   names its `run_id`), with the `kinds` the request asks for; a resume
@@ -171,6 +176,11 @@ module, ADR 0005).
   (the server token's, or loopback setup A's). No obsdb change.
 
 ### Changed — breaking
+
+- `otel.Pipeline.LoggerProvider()` returns `*otel.LoggerProvider` (embedding
+  `*sdklog.LoggerProvider`, carrying the RawBodies marker); method calls are
+  unchanged, a variable typed `*sdklog.LoggerProvider` must use
+  `.LoggerProvider`.
 
 - Studio's `GET /api/meta` `pricing` is an object, `{source, path?,
   dated, models}` (plan A5.1), where it was `false`; a client reading it

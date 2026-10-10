@@ -840,7 +840,10 @@ func lostEvents(rec obsdb.RunRow, hasSpans bool) []badgeFields {
 //     none);
 //   - gap: event positions missing below the run's high-water mark
 //     (EventPage.Gaps) once the run is no longer running — a running
-//     run's missing positions may still be in flight.
+//     run's missing positions may still be in flight;
+//   - derived: a playground replay whose prefix no request record
+//     placed — its weft.replay.view metadata (ADR 0029 §2) is derived
+//     or unknown (replayViewHole).
 //
 // One one-event read answers the last two; truncated, redacted,
 // max_tokens and compacted are facts of an event or a step, badged
@@ -852,6 +855,9 @@ func (s *Server) runHoles(ctx context.Context, rec obsdb.RunRow) ([]stepHole, er
 	}
 	if rec.Status == obsdb.StatusInterrupted {
 		holes.note(obsdb.HoleInterrupted)
+	}
+	if reason, fix := replayViewHole(rec); reason != "" {
+		holes.also(obsdb.HoleDerived, reason, fix)
 	}
 	if rec.EventCount == 0 && rec.Status != obsdb.StatusRunning {
 		sp, err := s.db.RunSpans(ctx, rec.ID)
@@ -880,6 +886,32 @@ func (s *Server) runHoles(ctx context.Context, rec obsdb.RunRow) ([]stepHole, er
 		}
 	}
 	return holes.list(), nil
+}
+
+// attrReplayView is weft/runtime's mark on a playground replay from a
+// step > 0 (ADR 0029 §2): transcript | compacted:<index> | derived |
+// unknown — how its prefix knows what the source's model saw there.
+const attrReplayView = "weft.replay.view"
+
+// replayViewHole is a replay's derived hole when its prefix is not the
+// request record's (weft.replay.view derived or unknown): the reason
+// and fix the run's holes carry, "" for any other run. A truncation the
+// user cannot see is a hole with a reason: the replay ran, but on a
+// prefix that may not be what the source's model saw.
+func replayViewHole(rec obsdb.RunRow) (reason, fix string) {
+	at := "its source step"
+	if _, step, ok := strings.Cut(rec.ForkedFrom, "#"); ok && step != "" {
+		at = "step " + step + " of " + strings.TrimSuffix(rec.ForkedFrom, "#"+step)
+	}
+	switch rec.Meta[attrReplayView] {
+	case "derived":
+		return "this replay's prefix was cut from the transcript at " + at + " (weft.replay.view = derived): no request record placed that step's messages, so a compaction view its model saw is not known",
+			"record the source with a current weft and content on, so a request record places every step (ADR 0028)"
+	case "unknown":
+		return "this replay's prefix is the transcript before " + at + " (weft.replay.view = unknown): the runtime could not read that step's records (Studio unreachable, content off, or a Studio without ?step=), so a compaction view its model saw may be missing",
+			"replay again with the runtime able to read the source's records: Studio reachable, content on, Studio upgraded"
+	}
+	return "", ""
 }
 
 // serveRunEvents answers api/runs/{id}/events?after=&limit=: one page

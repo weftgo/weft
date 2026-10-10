@@ -133,9 +133,21 @@ func compactedEditError(what string, step, fromStep int, c *compactedRange) erro
 // validateTranscriptEdits applies the edits to the source run's kept
 // prefix in memory and reports the first rule they break, in the
 // runtime's own words (editedPrefix).
-func validateTranscriptEdits(input []core.Message, steps []stepMessage, fromStep int, edits []linkruntime.TranscriptEdit, view *compactedRange, schemas map[string]json.RawMessage) error {
+func validateTranscriptEdits(input []core.Message, steps []stepMessage, fromStep int, edits []linkruntime.TranscriptEdit, view *compactedRange, schemas schemaOf) error {
 	_, _, err := editedPrefix(input, steps, fromStep, edits, view, schemas)
 	return err
+}
+
+// schemaOf resolves the input schema a tool_args edit of a call made at
+// step is checked against: nil when none is at hand (the arguments need
+// only be an object).
+type schemaOf func(step int, name string) json.RawMessage
+
+func (f schemaOf) of(step int, name string) json.RawMessage {
+	if f == nil {
+		return nil
+	}
+	return f(step, name)
 }
 
 // Edit kinds (ADR 0029 §8) — weft/runtime's names. An edit without one
@@ -231,11 +243,12 @@ type insertAt struct {
 // compaction view is spliced in. input is the run's input record
 // (runInput), steps its own messages (runSteps); view is the
 // compaction from_step's request carried (nil: none) — an edit inside
-// its range is refused; schemas the run's recorded tool schemas (a
-// tool absent: its arguments need only be an object). A nil error
+// its range is refused; schemas resolves a tool's input schema for the
+// step whose call an args edit rewrites (Server.editSchemas; nil, or a
+// tool it has none for: the arguments need only be an object). A nil error
 // means the patched prefix is complete: every kept call answered, the
 // cut at a step boundary. Every refusal is the runtime's sentence.
-func editedPrefix(input []core.Message, steps []stepMessage, fromStep int, edits []linkruntime.TranscriptEdit, view *compactedRange, schemas map[string]json.RawMessage) ([]core.Message, []insertAt, error) {
+func editedPrefix(input []core.Message, steps []stepMessage, fromStep int, edits []linkruntime.TranscriptEdit, view *compactedRange, schemas schemaOf) ([]core.Message, []insertAt, error) {
 	if len(edits) == 0 {
 		return nil, nil, nil
 	}
@@ -326,7 +339,7 @@ func editedPrefix(input []core.Message, steps []stepMessage, fromStep int, edits
 			if mi < 0 {
 				return nil, nil, fmt.Errorf("no tool call %q in the kept prefix's step %d", e.CallID, e.Step)
 			}
-			if err := obsdb.CheckToolArgs(name, schemas[name], e.Args); err != nil {
+			if err := obsdb.CheckToolArgs(name, schemas.of(e.Step, name), e.Args); err != nil {
 				return nil, nil, err
 			}
 			if view.holds(mi) {

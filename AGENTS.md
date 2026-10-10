@@ -308,7 +308,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // WEFT_ENV=dev (or runtime.Enabled(true)) opens the link; with no Studio option
 //     // and no otel Studio destination it dials the discovery file's Studio (block 6's
 //     // rule: WEFT_STUDIO_URL wins, WEFT_DISCOVERY=off, stale ignored); commands ack
-//     // before they run (at-most-once), a never-class tool's call is substituted
+//     // before they run (at-most-once: validation, source fetch and resolver included,
+//     // is bounded at 25 s inside Studio's 30 s ack window; an accepted ack Studio answers
+//     // non-200 — 409 once it marked the command lost — runs nothing), a never-class tool's call is substituted
 //     // with its recorded result or parked (weft.Replay(weft.ReplaySafe) vouches a
 //     // read: it runs in every mode); side_effects substitute (default) | park |
 //     // allow — only allow runs the AllowSideEffects tools for real, and is refused
@@ -318,7 +320,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // tool_choice {mode, name}, park_on, only_tools — narrowing or neutral, each refusal
 //     // naming its rule; /api/runtimes gives each runtime connected (a live stream now; a dropped
 //     // one stays listed, false, until pruned) and each agent resolver + defaults (the form greys
-//     // them; absent for a runtime older than the option lab); runs carry weft.playground and never touch weft.session.id
+//     // them; absent for a runtime older than the option lab — Studio then refuses the option lab's
+//     // knobs, the user/tool_args/insert edit kinds and a replay across a compaction view; a read
+//     // token gets no instructions, default tool_choice name or stop); runs carry weft.playground and never touch weft.session.id
 //     // (ephemeral). Engines live | scripted (the source
 //     // run's recorded turns, zero tokens); thread ephemeral | fork (a new session
 //     // with lineage, the panel keeps chatting in it). Breakpoints and steer act
@@ -327,7 +331,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // command, transcript_edits validated on both sides — kind tool_result | reply |
 //     // user | tool_args (schema-checked, obsdb.CheckToolArgs) | insert, absent = the
 //     // pre-F2 shape, ADR 0029 §8; the replay carries weft.edits, <step>:<call>:args the
-//     // "args edited" mark; scripted + edits refused), /api/playground/preview (the
+//     // "args edited" mark; a replay from step N > 0 carries weft.replay.view = transcript |
+//     // compacted:<index> | derived | unknown (ADR 0029 §2), the last two the run's derived
+//     // hole; scripted + edits refused), /api/playground/preview (the
 //     // same body → the replay's exact first request beside the recorded step's and
 //     // their diff, pure assembly, no runtime needed; capability preview), /api/playground/
 //     // commands/{id}, /api/runs/{id}/approvals (a parked run's own verbs),

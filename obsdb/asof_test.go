@@ -179,3 +179,52 @@ func isHole(err error, h Hole) bool {
 	var e *StepMessagesError
 	return errors.Is(err, ErrStepMessages) && errors.As(err, &e) && e.Hole == h
 }
+
+// TestAssemblerMatchesAssembleStep: an Assembler built once answers
+// every step exactly as AssembleStep does over the same records — the
+// view, the plain refs, the derived fallback, a step never reached —
+// and an unreadable batch is the same per-step gap.
+func TestAssemblerMatchesAssembleStep(t *testing.T) {
+	body := func(msgs ...core.Message) json.RawMessage {
+		b, _ := json.Marshal(msgs)
+		return b
+	}
+	call := core.Message{Role: core.RoleAssistant, Content: []core.Part{core.ToolCallPart{ID: "c1", Name: "lookup", Args: []byte(`{}`)}}}
+	result := core.Message{Role: core.RoleTool, Content: []core.Part{core.ToolResultPart{CallID: "c1", Name: "lookup", Content: "t1"}}}
+	batches := []TranscriptBatch{
+		{Index: 0, Step: 0, Input: true, Messages: body(core.User("u1"))},
+		{Index: 1, Step: 0, Messages: body(call)},
+		{Index: 2, Step: 0, Messages: body(result)},
+		{Index: 4, Step: 1, Messages: body(core.Assistant("a2"))},
+		{Index: 6, Step: 2, Messages: body(core.Assistant("a3"))},
+	}
+	ref := func(i int64) *int64 { return &i }
+	req := func(index int64, step int, at int64, count int) RequestRecord {
+		return RequestRecord{Index: index, Step: step, Body: RequestBody{MessagesRef: RequestMessagesRef{Index: ref(at), Count: count}}}
+	}
+	view := Compaction{Scope: CompactionRun, Index: 3, Step: 1, FromSeq: 1, ToSeq: 3, Messages: body(core.User("s")), Replaced: 2, Entries: 1}
+	for _, reqs := range [][]RequestRecord{
+		{req(0, 0, 0, 1), req(1, 1, 3, 2), req(2, 2, 4, 4)},
+		nil, // the derived fallback
+	} {
+		asm := NewAssembler(batches)
+		for step := 0; step <= 4; step++ {
+			want, werr := AssembleStep(batches, reqs, []Compaction{view}, step)
+			got, gerr := asm.Step(reqs, []Compaction{view}, step)
+			wj, _ := json.Marshal(want)
+			gj, _ := json.Marshal(got)
+			if string(wj) != string(gj) || (werr == nil) != (gerr == nil) || werr != nil && werr.Error() != gerr.Error() {
+				t.Errorf("step %d (%d requests): Assembler = %s, %v; AssembleStep = %s, %v", step, len(reqs), gj, gerr, wj, werr)
+			}
+		}
+	}
+	bad := append(append([]TranscriptBatch(nil), batches...), TranscriptBatch{Index: 7, Step: 2, Messages: json.RawMessage(`{`)})
+	asm := NewAssembler(bad)
+	for step := 0; step <= 2; step++ {
+		_, werr := AssembleStep(bad, nil, nil, step)
+		_, gerr := asm.Step(nil, nil, step)
+		if !isHole(gerr, HoleGap) || werr == nil || werr.Error() != gerr.Error() {
+			t.Errorf("unreadable batch, step %d: Assembler %v, AssembleStep %v", step, gerr, werr)
+		}
+	}
+}

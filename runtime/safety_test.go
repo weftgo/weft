@@ -18,6 +18,7 @@ import (
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/wefttest"
+	"github.com/weftgo/weft/obsdb"
 	"github.com/weftgo/weft/thread"
 )
 
@@ -1036,5 +1037,51 @@ func TestModelResolverIgnoringCtxIsAbandoned(t *testing.T) {
 	<-late
 	if cmd.model != nil {
 		t.Error("the abandoned call's late model reached the command")
+	}
+}
+
+// TestValidateIsBoundedByTheAckWindow pins one deadline over the whole
+// validation (validateTimeout), inside Studio's 30 s ack window: a slow
+// source fetch and a slow resolver share it — the resolver gets what is
+// left, never its own full bound on top — so the accepted ack can never
+// land after Studio marked the command lost.
+func TestValidateIsBoundedByTheAckWindow(t *testing.T) {
+	defer func(v, r time.Duration) { validateTimeout, resolveTimeout = v, r }(validateTimeout, resolveTimeout)
+	validateTimeout, resolveTimeout = 80*time.Millisecond, 10*time.Second
+
+	// A resolver that waits on ctx: cut off at validate's deadline, not
+	// at its own 10 s.
+	agent := core.New(wefttest.Script(wefttest.Say("own")), core.Name("a"))
+	cfg := &config{agents: []*core.Agent{agent}}
+	ModelResolver(func(ctx context.Context, name string) (core.Model, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})(cfg)
+	l := newLink(cfg, newRegistry(cfg), "", "")
+	in := "hi"
+	start := time.Now()
+	reason, ok := l.validate(context.Background(), &command{CommandID: "cmd_slow", Agent: "a", Engine: "live",
+		Thread: "ephemeral", Input: &in, Overrides: overrides{Model: "anthropic/claude-haiku-4-5"}})
+	if ok || !strings.Contains(reason, "resolver timed out after") {
+		t.Errorf("slow resolver: reason = %q ok = %v, want timed out", reason, ok)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Errorf("validate took %v: the resolver ran past validate's deadline", d)
+	}
+
+	// A source fetch that never answers: refused at the same deadline.
+	stall := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() }))
+	defer stall.Close()
+	cfg2 := &config{agents: []*core.Agent{agent}}
+	l2 := newLink(cfg2, newRegistry(cfg2), stall.URL, "")
+	l2.localDB = func() obsdb.DB { return nil }
+	start = time.Now()
+	reason, ok = l2.validate(context.Background(), &command{CommandID: "cmd_stall", Agent: "a", Engine: "live",
+		Thread: "ephemeral", Source: &sourceSpec{RunID: "r_src", FromStep: 1}})
+	if ok || !strings.Contains(reason, "source transcript unresolved") {
+		t.Errorf("stalled source: reason = %q ok = %v, want unresolved", reason, ok)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Errorf("validate took %v on a stalled source: past validate's deadline", d)
 	}
 }

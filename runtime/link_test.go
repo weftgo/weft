@@ -39,6 +39,10 @@ type fakeStudio struct {
 	// drop, when closed, ends every live command stream (a network
 	// break) so the link reconnects.
 	drop chan struct{}
+	// ackStatus, when set, is the status an ack is answered with (200
+	// otherwise) — a Studio that marked the command lost answers a late
+	// accepted ack 409.
+	ackStatus func(ack) int
 }
 
 func newFakeStudio(t *testing.T) *fakeStudio {
@@ -97,10 +101,13 @@ func (f *fakeStudio) handler() http.Handler {
 		}
 		f.mu.Lock()
 		f.acks = append(f.acks, a)
-		n := len(f.acks)
+		status := f.ackStatus
 		f.mu.Unlock()
+		if status != nil {
+			w.WriteHeader(status(a))
+			return
+		}
 		w.WriteHeader(200)
-		_ = n
 	})
 	return mux
 }
@@ -833,5 +840,41 @@ func TestLinkReportsBreakpointsAtRegistration(t *testing.T) {
 	}
 	if got := fs.registrations[1].Breakpoints; len(got) != 2 || got[0] != "escalate" || got[1] != "refund" {
 		t.Errorf("re-registration's breakpoints = %v, want the set the runtime still holds", got)
+	}
+}
+
+// TestLinkRunsNothingOnARefusedAcceptedAck pins the at-most-once rule
+// across Studio's ack window: an accepted ack Studio answers non-200
+// (it marked the command lost — 409 — or forgot it) means Studio does
+// not hold the command accepted, so the runtime runs nothing — no model
+// call, no finished ack — rather than run a command a re-issue would
+// run again.
+func TestLinkRunsNothingOnARefusedAcceptedAck(t *testing.T) {
+	fs := newFakeStudio(t)
+	fs.ackStatus = func(a ack) int {
+		if a.State == "accepted" {
+			return http.StatusConflict
+		}
+		return http.StatusOK
+	}
+	ts := httptest.NewServer(fs.handler())
+	t.Cleanup(ts.Close)
+
+	gate := make(chan struct{})
+	close(gate)
+	calls := make(chan struct{}, 4)
+	model := &gatedModel{model: wefttest.Script(wefttest.Say("ran")), gate: gate, calls: calls}
+	newTestLink(t, ts.URL, model, Budget{})
+
+	fs.frames <- runFrame("cmd_01JTEST0000000000000000LATE")
+	fs.waitAck(t, 1)
+	time.Sleep(100 * time.Millisecond)
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	if len(fs.acks) != 1 || fs.acks[0].State != "accepted" {
+		t.Errorf("acks = %+v, want the refused accepted ack alone", fs.acks)
+	}
+	if n := len(calls); n != 0 {
+		t.Errorf("model calls = %d, want 0: a command Studio did not take as accepted ran", n)
 	}
 }

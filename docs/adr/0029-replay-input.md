@@ -64,7 +64,18 @@ The request a replay sends is model-visible behaviour (AGENTS.md rule
    byte. A run without request records (before ADR 0028, or a
    content-off chain's request) falls back to the `from_step` cut rule
    and says so (`Derived`, the `derived` badge; the runtime logs a
-   warning when it proceeds on one). Records that do not rebuild what a
+   warning when it proceeds on one). A replay from step N > 0 carries
+   how its prefix knew what the model saw as run metadata
+   `weft.replay.view`: `transcript` (N's request record placed the
+   plain transcript), `compacted:<index>` (it named the run-scope view
+   at that record index, spliced in), `derived` (no request record
+   placed N's messages: the cut rule) or `unknown` (the records could
+   not be read — decision 3's thread path, a Studio older than
+   `?step=`). An attribute, not model-visible; Studio draws the last
+   two as the run's `derived` hole (`runs/{id}`'s `holes`, the
+   children rows, the export), its reason naming the mark and the
+   source step, so a fallback the user cannot see in the request is
+   never silent. Records that do not rebuild what a
    request names are a `*StepMessagesError` (`errors.Is` it
    `ErrStepMessages`) carrying its hole, never a guess: `gap` when the
    growth record a plain ref names is not stored (a lost view never
@@ -90,7 +101,8 @@ The request a replay sends is model-visible behaviour (AGENTS.md rule
    from it; its thread path (no request records) asks the local obsdb
    when it holds the run, else Studio — and there, records that cannot
    rebuild the step (content off, a lost record) leave the view unknown
-   (logged) rather than refuse a turn the thread itself holds.
+   (logged, and marked `weft.replay.view = unknown`, decision 2)
+   rather than refuse a turn the thread itself holds.
 4. **Edits inside a compacted range are refused**, on both sides in one
    wording: an edit (a tool-result patch or a reply rewrite) whose
    message lies in the range `from_step`'s view replaced names a message
@@ -118,6 +130,10 @@ The request a replay sends is model-visible behaviour (AGENTS.md rule
    alone would replace the struct whole); an absent field keeps the
    agent's value, and a command cannot clear the agent's `stop` or
    `max_tokens`.
+   A named tool choice that `park_on` parks is refused on both sides
+   in one sentence — `tool_choice names x, which park_on parks: every
+   forced call would park` — whether the command sends it or it is the
+   agent's registered default under a command that sends none.
 
 8. **The edited request** (plan F2, item F2.1). A command's
    `transcript_edits` is one list; each edit's optional `kind` is the
@@ -138,18 +154,21 @@ The request a replay sends is model-visible behaviour (AGENTS.md rule
      `input` beside `from_step` > 0 is refused pointing at it.
    - `tool_args` (`step`, `call_id`, `args`) rewrites a kept call's
      arguments: a JSON object, checked against the tool's input schema
-     (`obsdb.CheckToolArgs` — the runtime against its agent's tool,
-     Studio against the run's tools record; a tool with no schema at
-     hand needs only an object) and refused in the loop's own
+     (`obsdb.CheckToolArgs` — the runtime against its agent's tool;
+     Studio against the registered agent's manifest when a runtime
+     holds it, the runtime's own schemas, else the catalog the edited
+     step's request recorded, the run's latest for a step without one;
+     a tool with no schema at hand needs only an object) and refused in
+     the loop's own
      `INVALID_INPUT: tool "x": field "f": expected …, got …` wording.
      The call keeps its id, name and signature; its result stays unless
      a `tool_result` edit rewrites it too. `args` empty or `null` is
      absent (a `tool_args` edit then needs it; any other kind ignores
-     it). The two schema sources differ by design: Studio checks against
-     the run's recorded catalogs, the runtime against its agent's
-     current tool — a schema changed since the recording can make Studio
-     accept what the runtime refuses (or the reverse), and the runtime,
-     authoritative, decides before the ack. A read-scoped panel token's
+     it). Without a registration the two schema sources differ by
+     design: Studio checks against the recorded catalog, the runtime
+     against its agent's current tool — a schema changed since the
+     recording can make Studio accept what the runtime refuses (or the
+     reverse), and the runtime, authoritative, decides before the ack. A read-scoped panel token's
      preview checks the object shape alone, so no refusal names what
      the hidden catalog declares.
    - `insert` (`step`, `content`) adds a user message at the boundary
@@ -223,8 +242,22 @@ The request a replay sends is model-visible behaviour (AGENTS.md rule
    prompt snippets the record does not hold — a warning); overrides
    only a registration can check are listed `unchecked` when no
    runtime holds the agent. A read-scoped panel token gets the system
-   prompt and the catalog hidden, and the messages hidden when a view
-   is in them.
+   prompt and the catalog hidden, a named tool choice's tool and the
+   stop sequences with them (as `GET /api/runtimes` hides the
+   registered defaults' own), and the messages hidden when a view is
+   in them.
+
+   *Version skew.* A runtime that registers no defaults predates this
+   record (and plan F3's option lab): its decoder drops an edit's
+   `kind`, `args` and `index` — a `user` or `insert` edit would apply
+   its content as a reply rewrite, unmarked — and it splices no view.
+   Against it Studio refuses, on the run route and the preview alike
+   (400), any `user`, `tool_args` or `insert` edit (`runtime predates
+   transcript edit kinds: upgrade weft/runtime to use user, tool_args,
+   insert edits`) and a `from_step` whose request carried a view
+   (`runtime predates replay across a compaction: step N's request
+   carried a compaction view the runtime would not splice in, so its
+   model would see the uncompacted transcript; upgrade weft/runtime`).
 
 ## Consequences
 

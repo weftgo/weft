@@ -632,11 +632,13 @@ func TestFullFeedEndsStalledStream(t *testing.T) {
 	}
 }
 
-// TestLateAcceptedAckArmsFinishWatch pins the audit's P2-10: a late
-// accepted-ack that resurrects a row the lost sweep already took must
-// arm the finish watch — the old code left the resurrected row
-// accepted forever if the runtime never finished.
-func TestLateAcceptedAckArmsFinishWatch(t *testing.T) {
+// TestLateAcceptedAckIsRefused pins the at-most-once rule across the
+// ack window: a command the lost sweep took (no accepted ack in time)
+// is never revived by a late accepted ack — the user may already have
+// re-issued it, and both would run. The late ack is 409 and the row
+// stays lost (weft/runtime runs nothing on a non-200 accepted ack); a
+// finished ack still records what did run.
+func TestLateAcceptedAckIsRefused(t *testing.T) {
 	rs := fastServer()
 	ts := httptest.NewServer(mux(rs))
 	defer ts.Close()
@@ -648,10 +650,23 @@ func TestLateAcceptedAckArmsFinishWatch(t *testing.T) {
 	nextRun(t, r) // delivered; no ack
 	waitState(t, rs, cmd.CommandID, StateLost)
 
-	// The late accepted-ack resurrects the row...
-	ack(t, rs, Ack{CommandID: "cmd_late", State: "accepted", RunID: "pg_late"})
-	waitState(t, rs, "cmd_late", StateAccepted)
-	// ...and the finish watch is armed: without a finish the row is
-	// lost again, not accepted forever.
-	waitState(t, rs, "cmd_late", StateLost)
+	post := func(a Ack) int {
+		t.Helper()
+		body, _ := json.Marshal(a)
+		resp, err := http.Post(ts.URL+"/api/runtime/acks", "application/json", strings.NewReader(string(body)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	if code := post(Ack{CommandID: "cmd_late", State: "accepted", RunID: "pg_late"}); code != http.StatusConflict {
+		t.Errorf("late accepted ack = %d, want 409", code)
+	}
+	if st, err := rs.Command("cmd_late"); err != nil || st.State != StateLost {
+		t.Errorf("after the late accepted ack the row is %+v (%v), want lost", st, err)
+	}
+	// A finished ack still lands: what ran is recorded.
+	ack(t, rs, Ack{CommandID: "cmd_late", State: "finished", RunID: "pg_late", Status: "succeeded"})
+	waitState(t, rs, "cmd_late", StateFinished)
 }

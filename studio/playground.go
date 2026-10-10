@@ -120,10 +120,20 @@ func registerPlayground(mux *http.ServeMux, s *Server) {
 func (s *Server) serveRuntimes(rs *linkruntime.RuntimeServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		views := rs.Snapshot()
-		if p := idFrom(r).panel; p != nil && p.Scope != scopePlayground {
+		if !readsPrompts(r) {
+			// A read-scoped panel token reads no prompt-adjacent value:
+			// the system prompt, a named default tool choice's tool (the
+			// spans' rule, toolNameAttrs) and the stop sequences. The
+			// defaults are copied: the view shares the registration's.
 			for i := range views {
 				for j := range views[i].Agents {
-					views[i].Agents[j].Instructions = ""
+					a := &views[i].Agents[j]
+					a.Instructions = ""
+					if a.Defaults != nil {
+						d := *a.Defaults
+						d.ToolChoice.Name, d.Stop = "", nil
+						a.Defaults = &d
+					}
 				}
 			}
 		}
@@ -196,7 +206,16 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 			return
 		}
 
-		if e := s.checkCommand(r.Context(), &req, false); e != nil {
+		// The registered agent when the runtime holds it: its manifest's
+		// schemas are what a tool_args edit is checked against (the
+		// runtime's own). Its absence is refused below, in order.
+		var registered *linkruntime.AgentRegistration
+		if reg, ok := rs.Registration(req.Runtime); ok && req.Runtime != "" {
+			if a, ok := reg.Agent(req.Agent); ok {
+				registered = &a
+			}
+		}
+		if e := s.checkCommand(r.Context(), &req, false, registered); e != nil {
 			e.write(w, r)
 			return
 		}
@@ -230,6 +249,10 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 			return
 		}
 
+		if e := s.checkSkew(r.Context(), &req, agent); e != nil {
+			e.write(w, r)
+			return
+		}
 		if e := checkRegistered(&req, agent); e != nil {
 			e.write(w, r)
 			return
@@ -309,8 +332,8 @@ func refuseWidening(msg string) *cmdError {
 // reading of the scripted engine's refusals (§5.5's prompt trap, the
 // step it never answered, the edits it cannot answer): returned as
 // warnings instead, worded the same, never a 400 there.
-func (s *Server) checkCommand(ctx context.Context, req *runRequest, preview bool) *cmdError {
-	_, err := s.checkCommandWarn(ctx, req, preview, true)
+func (s *Server) checkCommand(ctx context.Context, req *runRequest, preview bool, agent *linkruntime.AgentRegistration) *cmdError {
+	_, err := s.checkCommandWarn(ctx, req, preview, true, agent)
 	return err
 }
 
@@ -318,8 +341,10 @@ func (s *Server) checkCommand(ctx context.Context, req *runRequest, preview bool
 // preview reads (always nil when preview is false). prompts is
 // readsPrompts' answer for the identity: without it the tool schemas
 // stay hidden — a tool_args edit is checked for its object shape
-// alone, so no refusal names what the catalog declares.
-func (s *Server) checkCommandWarn(ctx context.Context, req *runRequest, preview, prompts bool) ([]string, *cmdError) {
+// alone, so no refusal names what the catalog declares. agent is the
+// registered agent when the body's runtime holds it (nil: none), whose
+// manifest schemas a tool_args edit is checked against (editSchemas).
+func (s *Server) checkCommandWarn(ctx context.Context, req *runRequest, preview, prompts bool, agent *linkruntime.AgentRegistration) ([]string, *cmdError) {
 	if len(req.TranscriptEdits) > 0 {
 		switch {
 		case req.Source == nil || req.Source.RunID == "":
@@ -350,9 +375,9 @@ func (s *Server) checkCommandWarn(ctx context.Context, req *runRequest, preview,
 		case !errors.Is(aerr, obsdb.ErrNotFound):
 			return nil, refuse(fmt.Sprintf("the source run's step %d does not rebuild from its records: %v", req.Source.FromStep, aerr))
 		}
-		var schemas map[string]json.RawMessage
+		var schemas schemaOf
 		if prompts {
-			schemas = s.recordedSchemas(ctx, req.Source.RunID)
+			schemas = s.editSchemas(ctx, req.Source.RunID, agent)
 		}
 		if verr := validateTranscriptEdits(input, steps, req.Source.FromStep, req.TranscriptEdits, view, schemas); verr != nil {
 			return nil, refuse(verr.Error())
@@ -437,25 +462,81 @@ func (s *Server) checkCommandWarn(ctx context.Context, req *runRequest, preview,
 	return warnings, nil
 }
 
-// recordedSchemas is the source run's recorded tool schemas by name
-// (every catalog its requests named, a later one winning): what a
-// tool_args edit is checked against on this side. None recorded (a run
-// before ADR 0028, a content-off chain): an empty map — the arguments
-// need only be an object, and the runtime checks its agent's own.
-func (s *Server) recordedSchemas(ctx context.Context, runID string) map[string]json.RawMessage {
-	out := map[string]json.RawMessage{}
-	cats, err := s.db.Catalogs(ctx, runID)
-	if err != nil {
-		return out
+// editSchemas resolves the input schema a tool_args edit is checked
+// against on this side. With the agent registered (agent non-nil and
+// its manifest readable) it is the manifest's — what the runtime itself
+// checks against, its agent's current tools; a tool the manifest lists
+// without a schema, or does not list, needs only an object there too.
+// Without, it is the recorded catalog of the step whose call the edit
+// rewrites (that step's answering request: the schema the model wrote
+// the call against); a step with no request record, or whose catalog
+// lacks the tool, falls back to the run's latest recorded schema for the
+// name. None recorded (a run before ADR 0028, a content-off chain): the
+// arguments need only be an object. The records are read once, on the
+// first lookup.
+func (s *Server) editSchemas(ctx context.Context, runID string, agent *linkruntime.AgentRegistration) schemaOf {
+	if agent != nil {
+		if m, ok := agent.ManifestToolSchemas(); ok {
+			return func(_ int, name string) json.RawMessage { return m[name] }
+		}
 	}
-	for _, c := range cats {
-		for _, t := range c.Tools {
-			if len(t.Schema) > 0 {
-				out[t.Name] = t.Schema
+	var (
+		loaded bool
+		latest map[string]json.RawMessage         // by name, the run's last catalog winning
+		byStep map[int]map[string]json.RawMessage // step → its answering request's catalog
+	)
+	load := func() {
+		loaded = true
+		latest, byStep = map[string]json.RawMessage{}, map[int]map[string]json.RawMessage{}
+		cats, err := s.db.Catalogs(ctx, runID)
+		if err != nil {
+			return
+		}
+		byHash := map[string]map[string]json.RawMessage{}
+		for _, c := range cats {
+			m := map[string]json.RawMessage{}
+			for _, t := range c.Tools {
+				if len(t.Schema) > 0 {
+					m[t.Name] = t.Schema
+					latest[t.Name] = t.Schema
+				}
+			}
+			byHash[c.Hash] = m
+		}
+		// Each step's answering attempt (the highest index) names its
+		// catalog; paged to the end.
+		last := map[int]obsdb.RequestRecord{}
+		q := obsdb.RequestQuery{Limit: maxRequestsLimit}
+		for {
+			page, err := s.db.Requests(ctx, runID, q)
+			if err != nil {
+				break
+			}
+			for _, r := range page {
+				if cur, ok := last[r.Step]; !ok || r.Index > cur.Index {
+					last[r.Step] = r
+				}
+			}
+			if len(page) < q.PageLimit() {
+				break
+			}
+			q.From = page[len(page)-1].Index + 1
+		}
+		for step, r := range last {
+			if m, ok := byHash[r.CatalogHash]; ok && r.CatalogHash != "" {
+				byStep[step] = m
 			}
 		}
 	}
-	return out
+	return func(step int, name string) json.RawMessage {
+		if !loaded {
+			load()
+		}
+		if sch, ok := byStep[step][name]; ok {
+			return sch
+		}
+		return latest[name]
+	}
 }
 
 // checkSource checks the source turn: from_step is 0+ and input may not
@@ -505,7 +586,7 @@ func checkRegistered(req *runRequest, agent linkruntime.AgentRegistration) *cmdE
 	// ignored runs a ReplaySafe tool for real). A current runtime
 	// always registers its defaults (tool_choice mode at least
 	// "auto"); one that sends none is refused the new knobs.
-	if o := req.Overrides; agent.Defaults.ToolChoice.Mode == "" &&
+	if o := req.Overrides; predatesOptionLab(agent) &&
 		(o.Params != nil || o.ToolChoice != nil || len(o.ParkOn) > 0 || len(o.OnlyTools) > 0) {
 		return refuse("runtime predates the option lab: upgrade weft/runtime to use params, tool_choice, park_on, only_tools")
 	}
@@ -546,6 +627,41 @@ func checkRegistered(req *runRequest, agent linkruntime.AgentRegistration) *cmdE
 			if !agent.IsAllowed(name) && agent.SideEffects[name] != "safe" && name != "submit_output" {
 				return refuseWidening("tool " + name + " is not opted in for real side effects")
 			}
+		}
+	}
+	return nil
+}
+
+// predatesOptionLab reports a runtime older than the option lab (and
+// than ADR 0029's edit kinds and compaction views, the same release):
+// a current runtime always registers its defaults, tool_choice mode at
+// least "auto"; an older one sends none.
+func predatesOptionLab(agent linkruntime.AgentRegistration) bool {
+	return agent.Defaults.ToolChoice.Mode == ""
+}
+
+// checkSkew refuses what a runtime older than ADR 0029 would run as
+// something else (version skew; the option lab's own knobs are
+// checkRegistered's). Its decoder drops an edit's kind, args and
+// index, so a user or insert edit would apply its content as a reply
+// rewrite and a tool_args edit not at all — acked, with no weft.edits
+// mark; and it splices no compaction view, so a replay from a step
+// whose request carried one would feed the model the uncompacted
+// transcript. Both are 400s naming the upgrade. Nothing here reads the
+// catalog: the sentences go to a read-scoped preview as they are.
+func (s *Server) checkSkew(ctx context.Context, req *runRequest, agent linkruntime.AgentRegistration) *cmdError {
+	if !predatesOptionLab(agent) {
+		return nil
+	}
+	for _, e := range req.TranscriptEdits {
+		if kind, err := editKindOf(e); err == nil && (kind == editUser || kind == editToolArgs || kind == editInsert) {
+			return refuse("runtime predates transcript edit kinds: upgrade weft/runtime to use user, tool_args, insert edits")
+		}
+	}
+	if req.Source != nil && req.Source.RunID != "" && req.Source.FromStep > 0 {
+		sm, err := obsdb.MessagesAsOf(ctx, s.db, req.Source.RunID, req.Source.FromStep)
+		if err == nil && sm.View != nil {
+			return refuse(fmt.Sprintf("runtime predates replay across a compaction: step %d's request carried a compaction view the runtime would not splice in, so its model would see the uncompacted transcript; upgrade weft/runtime", req.Source.FromStep))
 		}
 	}
 	return nil
@@ -622,6 +738,12 @@ func toolOverrides(o linkruntime.Overrides, agent string, known map[string]bool,
 		if def.Mode == "named" && !leavesOn(o, def.Name) {
 			return false, "the agent's default tool_choice names " + def.Name + ", which this command turns off; send tool_choice"
 		}
+		if def.Mode == "named" && contains(o.ParkOn, def.Name) {
+			// The explicit case's rule and sentence (below): a default
+			// that forces a tool park_on parks makes every forced call
+			// park, whoever named it.
+			return false, parkedChoice(def.Name)
+		}
 		return false, ""
 	}
 	switch tc.Mode {
@@ -643,9 +765,16 @@ func toolOverrides(o linkruntime.Overrides, agent string, known map[string]bool,
 	case !on:
 		return false, "tool_choice names " + tc.Name + ", which this command turns off"
 	case contains(o.ParkOn, tc.Name):
-		return false, "tool_choice names " + tc.Name + ", which park_on parks: every forced call would park"
+		return false, parkedChoice(tc.Name)
 	}
 	return false, ""
+}
+
+// parkedChoice is the refusal of a named tool_choice — the command's or
+// the agent's default — that park_on parks, in weft/runtime's words
+// (executor.go's parkedChoice; TestOneSentenceOnBothSides).
+func parkedChoice(name string) string {
+	return "tool_choice names " + name + ", which park_on parks: every forced call would park"
 }
 
 // leavesOn reports whether the command leaves tool name on: only_tools

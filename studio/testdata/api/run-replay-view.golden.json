@@ -1,0 +1,52 @@
+{
+  "id": "r_unknown",
+  "parent_run_id": "",
+  "parent_call_id": "",
+  "trace_id": "0102030405060708090a0b0c0d0e0f10",
+  "agent": "orders",
+  "model": {
+    "provider": "wefttest",
+    "name": "script"
+  },
+  "manifest_hash": "sha256:demo-fleet",
+  "weft_version": "(test)",
+  "service": "studio-test",
+  "session_id": "",
+  "public_id": "",
+  "turn": 0,
+  "playground": true,
+  "experiment_id": "",
+  "forked_from": "r_src#2",
+  "meta": {
+    "cwd": "/tmp/demo",
+    "weft.replay.view": "unknown"
+  },
+  "started": "2020-01-01T09:00:00.123Z",
+  "finished": "2020-01-01T09:00:02.123Z",
+  "last_seen": "(norm)",
+  "status": "succeeded",
+  "err": "",
+  "steps": 1,
+  "pending": 0,
+  "stop_reason": "",
+  "usage": {
+    "input_tokens": 10,
+    "output_tokens": 4
+  },
+  "event_count": 4,
+  "message_count": 2,
+  "delta_count": 0,
+  "instructions_hash": "9d1f0a5c3b7e2a4d6f8091b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f6",
+  "catalog_hash": "4e3d2c1b0a99887766554433221100ffeeddccbbaa0099887766554433221100",
+  "request_count": 1,
+  "children": [],
+  "holes": [
+    {
+      "hole": "derived",
+      "reason": "this replay's prefix is the transcript before step 2 of r_src (weft.replay.view = unknown): the runtime could not read that step's records (Studio unreachable, content off, or a Studio without ?step=), so a compaction view its model saw may be missing",
+      "fix": "replay again with the runtime able to read the source's records: Studio reachable, content on, Studio upgraded"
+    }
+  ],
+  "compactions": []
+}
+

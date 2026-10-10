@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
@@ -190,7 +191,7 @@ func TestReplayAcrossCompactionReproducesTheModelsInput(t *testing.T) {
 					t.Fatalf("the replay's step 0 saw\n%v\nwant the source's step-%d request\n%s", fed, from, source[from])
 				}
 				got, view := stepMessagesJSON(t, db, runID, 0)
-				want, _ := stepMessagesJSON(t, db, "r_src", from)
+				want, srcView := stepMessagesJSON(t, db, "r_src", from)
 				if got != want {
 					t.Errorf("replay step-0 request record\n%s\nwant source step-%d request record\n%s", got, from, want)
 				}
@@ -203,6 +204,15 @@ func TestReplayAcrossCompactionReproducesTheModelsInput(t *testing.T) {
 				}
 				if row.ForkedFrom != fmt.Sprintf("r_src#%d", from) || !row.Playground {
 					t.Errorf("lineage = forked_from %q playground %v, want r_src#%d", row.ForkedFrom, row.Playground, from)
+				}
+				// weft.replay.view names what the prefix is (ADR 0029 §2):
+				// the plain transcript, or the view spliced in, by index.
+				wantMark := "transcript"
+				if srcView != nil {
+					wantMark = fmt.Sprintf("compacted:%d", srcView.Index)
+				}
+				if got := row.Meta["weft.replay.view"]; got != wantMark {
+					t.Errorf("weft.replay.view = %q, want %q", got, wantMark)
 				}
 			})
 		}
@@ -498,6 +508,10 @@ func TestThreadSourceWithContentOffRecords(t *testing.T) {
 			t.Errorf("%s: a thread source with content-off records was refused: %s", name, reason)
 		} else if b, _ := json.Marshal(cmd.prefix); len(saw) != 4 || string(b) != saw[1] {
 			t.Errorf("%s: prefix %s, want step 1's request %v", name, b, saw)
+		} else if mark := replayViewMark(cmd); mark != "unknown" {
+			// The thread's own messages, a view the records could not
+			// say: marked, so Studio badges the replay (ADR 0029 §2).
+			t.Errorf("%s: weft.replay.view = %q, want unknown", name, mark)
 		}
 		l.stop()
 	}
@@ -641,6 +655,13 @@ func TestThreadSourceWithUnreachableStudio(t *testing.T) {
 			if fed := model.take(); len(fed) == 0 || fed[0] != saw[1] {
 				t.Errorf("the replay's step 0 saw %v, want %s", fed, saw[1])
 			}
+			// The view is unknown, and the run says so (ADR 0029 §2).
+			if err := p.ForceFlush(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if row, err := p.LocalDB().Run(ctx, "pg_thread_"+name); err != nil || row.Meta["weft.replay.view"] != "unknown" {
+				t.Errorf("replay row meta = %v (%v), want weft.replay.view unknown", row.Meta, err)
+			}
 		})
 	}
 }
@@ -715,6 +736,11 @@ func TestReplayFromTheStepCountAnswersTheCalls(t *testing.T) {
 			if reason, ok := l.validate(ctx, &cmd); !ok {
 				t.Fatalf("from_step at the step count after answered calls: %s", reason)
 			}
+			// Step 3's failed call recorded its request: the plain
+			// transcript, placed by the record (ADR 0029 §2's mark).
+			if mark := replayViewMark(cmd); mark != "transcript" {
+				t.Errorf("weft.replay.view = %q, want transcript", mark)
+			}
 			if status, _, errText := l.execute(ctx, cmd, "pg_count_"+name); status != "succeeded" {
 				t.Fatalf("execute = %s %s", status, errText)
 			}
@@ -755,4 +781,45 @@ func (modelStream) Info() core.ModelInfo { return core.ModelInfo{Provider: "weft
 
 func (f modelStream) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	return f(ctx, req)
+}
+
+// TestReplayViewMarkFromStudio pins weft.replay.view's two holes over
+// Studio's ?step= answer (ADR 0029 §2): a derived badge (no request
+// record placed the step's messages) is "derived"; a Studio older than
+// the parameter (no "step" in the answer) leaves the view "unknown"; a
+// placed answer is "transcript", a view "compacted:<index>". A replay
+// from step 0 and a fork carry no mark.
+func TestReplayViewMarkFromStudio(t *testing.T) {
+	answers := map[string]string{
+		"r_derived": `{"step":1,"messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}],"badge":"derived","compacted_at":null}`,
+		"r_old":     `{"messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}]}`,
+		"r_placed":  `{"step":1,"messages":[{"role":"user","content":[{"type":"text","text":"hi"}]}],"compacted_at":null}`,
+		"r_view": `{"step":1,"messages":[{"role":"user","content":[{"type":"text","text":"hi"}]},{"role":"user","content":[{"type":"text","text":"summary"}]}],` +
+			`"compacted_at":{"index":7,"step":1,"from_seq":1,"to_seq":3,"hash":"h","entries":1}}`,
+	}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		run := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/api/runs/"), "/transcript")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(answers[run]))
+	}))
+	defer ts.Close()
+	l := newLink(&config{}, newRegistry(&config{}), ts.URL, "")
+	for run, want := range map[string]string{"r_derived": "derived", "r_old": "unknown", "r_placed": "transcript", "r_view": "compacted:7"} {
+		v, note, err := l.viewFromStudio(context.Background(), run, 1)
+		if err != nil {
+			t.Fatalf("%s: %v", run, err)
+		}
+		cmd := command{Source: &sourceSpec{RunID: run, FromStep: 1}, src: &sourceRun{view: v, viewNote: note}}
+		if got := replayViewMark(cmd); got != want {
+			t.Errorf("%s: weft.replay.view = %q, want %q", run, got, want)
+		}
+		cmd.Source.FromStep = 0
+		if got := replayViewMark(cmd); got != "" {
+			t.Errorf("%s from step 0: weft.replay.view = %q, want none", run, got)
+		}
+		cmd.Source.FromStep, cmd.Thread = 1, "fork"
+		if got := replayViewMark(cmd); got != "" {
+			t.Errorf("%s fork: weft.replay.view = %q, want none", run, got)
+		}
+	}
 }

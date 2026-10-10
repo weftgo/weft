@@ -8,11 +8,13 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/wefttest"
+	"github.com/weftgo/weft/obsdb"
 	linkruntime "github.com/weftgo/weft/studio/runtime"
 )
 
@@ -306,13 +308,17 @@ func TestPreviewRoute(t *testing.T) {
 
 // TestPreviewHidesSystemFromAReadToken: a read-scoped panel token
 // previews a run of its public id with the system prompt and the
-// catalog hidden (badge hidden, the diff's columns with them); a
-// playground-scoped one reads them.
+// catalog hidden (badge hidden, the diff's columns with them), and the
+// prompt-adjacent knobs with them — a named tool choice's tool and the
+// stop sequences, on both requests; a playground-scoped one reads them.
 func TestPreviewHidesSystemFromAReadToken(t *testing.T) {
 	pt := newPlaygroundServer(t, "srv-token")
 	withPipeline(t, pt.ts.URL, true, func(prov []core.Option) {
+		secret := core.Tool("SECRET_TOOL", "A tool.", func(context.Context, struct{}) (string, error) { return "", nil })
 		agent := core.New(wefttest.Script(wefttest.Say("hi")),
-			append([]core.Option{core.Name("acme-support"), core.Instructions("SECRET SYSTEM")}, prov...)...)
+			append([]core.Option{core.Name("acme-support"), core.Instructions("SECRET SYSTEM"), secret,
+				core.ToolChoice(core.ToolChoiceConfig{Mode: core.ToolChoiceNamed, Name: "SECRET_TOOL"}),
+				core.Params(core.RequestParams{Stop: []string{"SECRET STOP"}})}, prov...)...)
 		if _, err := agent.Generate(context.Background(), core.RunID("r_tok"), core.Prompt("hello"),
 			core.Metadata(map[string]string{"weft.public_id": "pub_a"})); err != nil {
 			t.Fatal(err)
@@ -332,7 +338,8 @@ func TestPreviewHidesSystemFromAReadToken(t *testing.T) {
 		var d previewDocT
 		decode(t, out, &d)
 		hidden := d.WillSend.System == nil && d.WillSend.SystemBadge == "hidden" && d.Diff.System == "hidden" && !strings.Contains(out, "SECRET")
-		if code != http.StatusOK || hidden != c.hidden {
+		shown := strings.Contains(out, `"name":"SECRET_TOOL"`) && strings.Contains(out, "SECRET STOP") && strings.Contains(out, "SECRET SYSTEM")
+		if code != http.StatusOK || hidden != c.hidden || shown == c.hidden {
 			t.Errorf("%s token: preview = %d %s, want system hidden %v", c.scope, code, out, c.hidden)
 		}
 	}
@@ -515,5 +522,138 @@ func TestDiffMessagesFallsBackPastTheCap(t *testing.T) {
 	}
 	if len(rows) != n || changed != 1 || rows[500].Op != "changed" {
 		t.Errorf("%d rows, %d changed, row 500 %s", len(rows), changed, rows[500].Op)
+	}
+}
+
+// pagedRequestsDB answers Requests from a synthetic list, in index
+// order, a page at a time as obsdb does (Step filters, From is the
+// first index, PageLimit caps the page).
+type pagedRequestsDB struct {
+	obsdb.DB
+	recs []obsdb.RequestRecord
+}
+
+func (p *pagedRequestsDB) Requests(_ context.Context, _ string, q obsdb.RequestQuery) ([]obsdb.RequestRecord, error) {
+	var out []obsdb.RequestRecord
+	for _, r := range p.recs {
+		if r.Index < q.From || q.Step != nil && r.Step != *q.Step {
+			continue
+		}
+		if len(out) == q.PageLimit() {
+			break
+		}
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+// TestRecordedRequestIsTheLatestEarlier: from_step at the step count
+// has no request of its own, and was_sent is the latest earlier one —
+// for a run with more attempts than one page holds, the last of step
+// from − 1, never the 1000th by index. A step's own answering attempt
+// is its highest index even past a page.
+func TestRecordedRequestIsTheLatestEarlier(t *testing.T) {
+	var recs []obsdb.RequestRecord
+	for i := 0; i < 1500; i++ {
+		recs = append(recs, obsdb.RequestRecord{Index: int64(i), Step: i / 500}) // steps 0..2, 500 attempts each
+	}
+	for i := 1500; i < 2700; i++ {
+		recs = append(recs, obsdb.RequestRecord{Index: int64(i), Step: 3}) // step 3: 1200 attempts
+	}
+	s := &Server{config: config{db: &pagedRequestsDB{recs: recs}}}
+	for _, c := range []struct {
+		from      int
+		step      int
+		index     int64
+		situation string
+	}{
+		{4, 3, 2699, "from_step at the count: step 3's last attempt"},
+		{3, 3, 2699, "step 3's own answering attempt, past one page"},
+		{1, 1, 999, "step 1's own"},
+	} {
+		got, err := s.recordedRequest(context.Background(), "r", c.from)
+		if err != nil || got == nil || got.Step != c.step || got.Index != c.index {
+			t.Errorf("%s: recordedRequest(%d) = %+v, %v; want step %d index %d", c.situation, c.from, got, err, c.step, c.index)
+		}
+	}
+	empty := &Server{config: config{db: &pagedRequestsDB{}}}
+	if got, err := empty.recordedRequest(context.Background(), "r", 2); got != nil || err != nil {
+		t.Errorf("no records: %+v, %v; want nil", got, err)
+	}
+}
+
+// TestArgsEditChecksTheEditedStepsSchema: a tool_args edit is checked
+// against the schema of the step whose call it rewrites — the catalog
+// that step's request recorded, not the run's last — and, with the
+// agent registered, against its manifest's (what the runtime itself
+// checks). Here lookup_order takes a string order_id at step 0 and an
+// integer one from step 1 on (a ToolSource swaps it).
+func TestArgsEditChecksTheEditedStepsSchema(t *testing.T) {
+	pt := newPlaygroundTestServer(t)
+	type intIn struct {
+		OrderID int `json:"order_id"`
+	}
+	var swapped atomic.Bool
+	withPipeline(t, pt.ts.URL, true, func(prov []core.Option) {
+		byString := core.Tool("lookup_order", "Look up an order.", func(_ context.Context, in diffOrderIn) (string, error) {
+			swapped.Store(true)
+			return "order " + in.OrderID + " shipped", nil
+		})
+		byInt := core.Tool("lookup_order", "Look up an order.", func(_ context.Context, in intIn) (string, error) {
+			return "order " + strconv.Itoa(in.OrderID) + " shipped", nil
+		})
+		agent := core.New(wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"42"}`, ID: "c1"}),
+			wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":43}`, ID: "c2"}),
+			wefttest.Say("both shipped"),
+		), append([]core.Option{core.Name("acme-support"), core.ToolSource(func() []*core.ToolDef {
+			if swapped.Load() {
+				return []*core.ToolDef{byInt}
+			}
+			return []*core.ToolDef{byString}
+		})}, prov...)...)
+		if _, err := agent.Generate(context.Background(), core.RunID("r_sw"), core.Prompt("42 and 43?")); err != nil {
+			t.Fatal(err)
+		}
+	})
+	waitRun(t, pt.ts, "r_sw", 3, pt.token)
+	fetchJSON(t, pt.ts, "/api/runs/r_sw", func(b string) bool { return strings.Contains(b, `"request_count":3`) })
+
+	edit := func(runtime, step, call, args string) string {
+		rt := ""
+		if runtime != "" {
+			rt = `"runtime":"` + runtime + `",`
+		}
+		return `{` + rt + `"agent":"acme-support","source":{"run_id":"r_sw","from_step":2},` +
+			`"transcript_edits":[{"kind":"tool_args","step":` + step + `,"call_id":"` + call + `","args":` + args + `}]}`
+	}
+	for _, c := range []struct {
+		name, body string
+		code       int
+		want       string
+	}{
+		// No registration: each step's own recorded catalog.
+		{"step 0, a string, step 0's schema", edit("", "0", "c1", `{"order_id":"7"}`), http.StatusOK, ""},
+		{"step 0, a number, step 0's schema", edit("", "0", "c1", `{"order_id":7}`), http.StatusBadRequest, `field \"order_id\": expected string, got number`},
+		{"step 1, a number, step 1's schema", edit("", "1", "c2", `{"order_id":7}`), http.StatusOK, ""},
+		{"step 1, a string, step 1's schema", edit("", "1", "c2", `{"order_id":"7"}`), http.StatusBadRequest, `field \"order_id\": expected integer, got string`},
+		// Registered: the manifest's (a string order_id), whatever the step.
+		{"registered, step 1, a string", edit("rt_test", "1", "c2", `{"order_id":"7"}`), http.StatusOK, ""},
+		{"registered, step 1, a number", edit("rt_test", "1", "c2", `{"order_id":7}`), http.StatusBadRequest, `field \"order_id\": expected string, got number`},
+	} {
+		code, out := previewPost(t, pt, "/api/playground/preview", "", c.body)
+		if code != c.code || !strings.Contains(out, c.want) {
+			t.Errorf("%s: preview = %d %s, want %d %q", c.name, code, out, c.code, c.want)
+		}
+	}
+	// The run route shares the rule: registered, the manifest decides.
+	run := strings.Replace(edit("rt_test", "1", "c2", `{"order_id":7}`), `{"runtime"`, `{"engine":"live","runtime"`, 1)
+	if code, out := pt.post(t, run); code != http.StatusBadRequest || !strings.Contains(out, `expected string, got number`) {
+		t.Errorf("run route, registered, a number = %d %s, want the manifest's refusal", code, out)
+	}
+	if code, out := pt.post(t, edit("rt_test", "1", "c2", `{"order_id":"7"}`)); code != http.StatusAccepted {
+		t.Errorf("run route, registered, a string = %d %s, want 202", code, out)
+	} else {
+		pt.waitCommand(t, "registered string")
 	}
 }

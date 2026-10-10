@@ -535,3 +535,81 @@ func TestPreviewGoldenMatchesARealRun(t *testing.T) {
 		t.Errorf("playground-preview.golden.json pins fields a real run's preview does not carry: %v", missing)
 	}
 }
+
+// TestReplayViewGoldenMatchesARealRun is the shape row of
+// run-replay-view.golden.json (ADR 0029 §2): a run carrying
+// weft/runtime's replay marks (weft.playground, weft.forked_from,
+// weft.replay.view = unknown) driven through the real pipeline reads
+// back with every field the golden pins, the derived hole among its
+// holes with the golden's reason.
+func TestReplayViewGoldenMatchesARealRun(t *testing.T) {
+	srv := studio.New(studio.Open(filepath.Join(t.TempDir(), "weft.db")))
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	t.Cleanup(func() { _ = srv.Close() })
+	ctx := context.Background()
+	p, err := otel.Start(ctx, otel.Studio(ts.URL, ""), otel.NoGlobal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent := core.New(wefttest.Script(wefttest.Say("shipped")), core.Name("orders"), core.Instructions("You handle orders."),
+		core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()))
+	if _, err := agent.Generate(ctx, core.RunID("pg_view"), core.Prompt("where is 42?"), core.Metadata(map[string]string{
+		"weft.playground": "true", "weft.forked_from": "r_src#2", "weft.replay.view": "unknown", "cwd": "/tmp/demo",
+	})); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var got any
+	var raw string
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		resp, err := http.Get(ts.URL + "/api/runs/pg_view")
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusOK && strings.Contains(string(b), `"status":"succeeded"`) {
+			raw = string(b)
+			if err := json.Unmarshal(b, &got); err != nil {
+				t.Fatal(err)
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("GET run = %d %s", resp.StatusCode, b)
+		}
+	}
+	b, err := os.ReadFile(filepath.Join("testdata", "api", "run-replay-view.golden.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var g struct {
+		Holes []struct {
+			Reason string `json:"reason"`
+		} `json:"holes"`
+	}
+	var gv any
+	if err := json.Unmarshal(b, &gv); err != nil {
+		t.Fatal(err)
+	}
+	_ = json.Unmarshal(b, &g)
+	want, have := map[string]bool{}, map[string]bool{}
+	shapePaths("", gv, want)
+	shapePaths("", got, have)
+	var missing []string
+	for k := range want {
+		if !have[k] {
+			missing = append(missing, k)
+		}
+	}
+	sort.Strings(missing)
+	if len(missing) > 0 {
+		t.Errorf("run-replay-view.golden.json pins fields a real replay's run does not carry: %v", missing)
+	}
+	if len(g.Holes) != 1 || !strings.Contains(raw, `"hole":"derived"`) || !strings.Contains(raw, g.Holes[0].Reason) {
+		t.Errorf("the real run's holes lack the golden's derived reason: %s", raw)
+	}
+}

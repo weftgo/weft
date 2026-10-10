@@ -707,7 +707,12 @@ func (c *runConfig) overrideAttrs() []attribute.KeyValue {
 	if c.toolChoiceSet {
 		tc := c.toolChoice
 		value := string(tc.Mode)
-		if tc.Mode == ToolChoiceNamed {
+		switch tc.Mode {
+		case ToolChoiceAuto:
+			// The zero mode is auto: spelled out, so an auto override
+			// over a forcing default reads "auto", never "".
+			value = "auto"
+		case ToolChoiceNamed:
 			value = string(ToolChoiceNamed) + ":" + tc.Name
 		}
 		add("tool_choice", value, attribute.String(attrOverrideToolChoice, value))

@@ -29,7 +29,23 @@ import (
 // transcript once and composes the kept prefix the run will be fed —
 // both land on cmd, so everything after reads the same copy. A false
 // return rejects the command with the given reason — never a run.
+//
+// The whole of it — the source fetch, the resolver — runs under one
+// deadline, validateTimeout, inside Studio's ack window (§10.5's 30 s,
+// counted from the enqueue): a validation past it is rejected, never
+// acked accepted after Studio marked the command lost.
 func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
+	ctx, cancel := context.WithTimeout(ctx, validateTimeout)
+	defer cancel()
+	reason, ok := l.validateWithin(ctx, cmd)
+	if ok && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return fmt.Sprintf("validation took longer than %s, past Studio's ack window: the command is not run", validateTimeout), false
+	}
+	return reason, ok
+}
+
+// validateWithin is validate under its deadline.
+func (l *link) validateWithin(ctx context.Context, cmd *command) (string, bool) {
 	agent, ok := l.reg.agent(cmd.Agent)
 	if !ok || agent == nil {
 		return fmt.Sprintf("unknown agent %q", cmd.Agent), false
@@ -210,10 +226,10 @@ func (l *link) validate(ctx context.Context, cmd *command) (string, bool) {
 		// the ack, so a refusal is a rejected command naming why, never
 		// a failed run. Its error text is the app's (ModelResolver).
 		m := cmd.Overrides.Model
-		model, timedOut, err := l.resolveModel(ctx, m)
+		model, timedOut, bound, err := l.resolveModel(ctx, m)
 		switch {
 		case timedOut:
-			return fmt.Sprintf("model %s: resolver timed out after %s", m, resolveTimeout), false
+			return fmt.Sprintf("model %s: resolver timed out after %s", m, bound), false
 		case err != nil:
 			return fmt.Sprintf("model %s: %v", m, err), false
 		case model == nil:
@@ -286,14 +302,22 @@ func (l *link) prepareSource(ctx context.Context, agent *core.Agent, cmd *comman
 	return "", true
 }
 
-// resolveModel calls the app's resolver bounded by resolveTimeout. The
-// call runs on its own goroutine so a resolver that ignores ctx cannot
-// hold validate (and the ack) past the bound: on timeout the goroutine
-// is abandoned, as the core abandons a timed-out tool handler, and its
-// late result is dropped. A panic in the resolver is an error, never a
-// crash of the app.
-func (l *link) resolveModel(ctx context.Context, name string) (model core.Model, timedOut bool, err error) {
-	rctx, cancel := context.WithTimeout(ctx, resolveTimeout)
+// resolveModel calls the app's resolver bounded by resolveTimeout, or
+// by what is left of validate's deadline when that is less (bound is
+// the one applied, to the millisecond). The call runs on its own
+// goroutine so a resolver that ignores ctx cannot hold validate (and
+// the ack) past the bound: on timeout the goroutine is abandoned, as
+// the core abandons a timed-out tool handler, and its late result is
+// dropped. A panic in the resolver is an error, never a crash of the
+// app.
+func (l *link) resolveModel(ctx context.Context, name string) (model core.Model, timedOut bool, bound time.Duration, err error) {
+	bound = resolveTimeout
+	if dl, ok := ctx.Deadline(); ok {
+		if left := time.Until(dl).Round(time.Millisecond); left < bound {
+			bound = max(left, 0)
+		}
+	}
+	rctx, cancel := context.WithTimeout(ctx, bound)
 	defer cancel()
 	type result struct {
 		m   core.Model
@@ -312,21 +336,30 @@ func (l *link) resolveModel(ctx context.Context, name string) (model core.Model,
 	select {
 	case r := <-done:
 		if errors.Is(rctx.Err(), context.DeadlineExceeded) {
-			return nil, true, nil
+			return nil, true, bound, nil
 		}
-		return r.m, false, r.err
+		return r.m, false, bound, r.err
 	case <-rctx.Done():
 		if errors.Is(rctx.Err(), context.DeadlineExceeded) {
-			return nil, true, nil
+			return nil, true, bound, nil
 		}
-		return nil, false, rctx.Err()
+		return nil, false, bound, rctx.Err()
 	}
 }
 
 // resolveTimeout bounds one ModelResolver call: validate runs before
 // the ack, and a command Studio sees unacked for long is marked lost —
-// a re-issue would then run twice. A var so a test can shorten it.
+// a re-issue would then run twice. Never more than what is left of
+// validateTimeout. A var so a test can shorten it.
 var resolveTimeout = 10 * time.Second
+
+// validateTimeout bounds the whole validation — the source transcript
+// fetch (local obsdb, the thread store or Studio), the compaction view,
+// the resolver — so the accepted ack lands inside Studio's ack window
+// (§10.5: 30 s from the enqueue; the 5 s left cover the stream's
+// delivery and the ack's own round trip). A var so a test can shorten
+// it.
+var validateTimeout = 25 * time.Second
 
 // validToolOverrides checks the tool-shaped overrides against the
 // agent's tools — narrowing only: only_tools and park_on name tools the
@@ -363,6 +396,12 @@ func validToolOverrides(o overrides, tools map[string]bool, def core.ToolChoiceC
 			!onTool(o, enabled, def.Name) {
 			return fmt.Sprintf("the agent's default tool_choice names %q, which this command turns off; send tool_choice", def.Name), false
 		}
+		if def.Mode == core.ToolChoiceNamed && parked[def.Name] {
+			// The explicit case's rule and sentence (below): a default
+			// that forces a tool park_on parks makes every forced call
+			// park, whoever named it.
+			return parkedChoice(def.Name), false
+		}
 		return "", true
 	}
 	mode, ok := toolChoiceMode(tc.Mode)
@@ -384,9 +423,16 @@ func validToolOverrides(o overrides, tools map[string]bool, def core.ToolChoiceC
 	case !on(tc.Name):
 		return fmt.Sprintf("tool_choice names %q, which this command turns off", tc.Name), false
 	case parked[tc.Name]:
-		return fmt.Sprintf("tool_choice names %q, which park_on parks: every forced call would park", tc.Name), false
+		return parkedChoice(tc.Name), false
 	}
 	return "", true
+}
+
+// parkedChoice is the refusal of a named tool_choice — the command's or
+// the agent's default — that park_on parks, in Studio's words
+// (playground.go's toolOverrides; TestOneSentenceOnBothSides).
+func parkedChoice(name string) string {
+	return "tool_choice names " + name + ", which park_on parks: every forced call would park"
 }
 
 // onTool reports whether the command leaves tool name on: only_tools
@@ -1301,8 +1347,8 @@ func (l *link) overrideOptions(cmd command) []core.RunOption {
 	if tc := o.ToolChoice; tc != nil {
 		mode, _ := toolChoiceMode(tc.Mode) // validated
 		// auto over an agent whose default is already auto changes
-		// nothing: sent, it would still mark the run overridden (an
-		// empty weft.override.tool_choice and a new hash).
+		// nothing: sent, it would still mark the run overridden
+		// (weft.override.tool_choice "auto" and a new hash).
 		if agent, ok := l.reg.agent(cmd.Agent); mode != core.ToolChoiceAuto || !ok || agent == nil ||
 			agent.ToolChoice() != (core.ToolChoiceConfig{}) {
 			opts = append(opts, core.ToolChoice(core.ToolChoiceConfig{Mode: mode, Name: tc.Name}))
@@ -1345,6 +1391,9 @@ func (l *link) overrideOptions(cmd command) []core.RunOption {
 	if cmd.Actor != "" {
 		meta["weft.playground.actor"] = cmd.Actor
 	}
+	if v := replayViewMark(cmd); v != "" {
+		meta["weft.replay.view"] = v
+	}
 	if len(cmd.TranscriptEdits) > 0 {
 		// The edits the run's prefix carries (ADR 0029 §8): a call whose
 		// arguments were rewritten reads "<step>:<call_id>:args" — the
@@ -1353,6 +1402,29 @@ func (l *link) overrideOptions(cmd command) []core.RunOption {
 	}
 	opts = append(opts, core.Metadata(meta))
 	return opts
+}
+
+// replayViewMark is weft.replay.view (ADR 0029 §2): how the prefix of a
+// replay from step N > 0 knows what the model saw at N — "transcript"
+// (N's request record carried the plain transcript), "compacted:<index>"
+// (it named the run-scope view at that record index, spliced in),
+// "derived" (no request record placed N's messages: the transcript cut
+// at N, a view unknowable) or "unknown" (the records could not be read
+// — a thread's own messages with Studio unreachable or content off, a
+// Studio older than ?step=: a view N's request carried may be missing).
+// The last two are what Studio badges (the run's derived hole); "" for
+// a run that replays no prefix (from_step 0, a fork, no source).
+func replayViewMark(cmd command) string {
+	if cmd.src == nil || cmd.Source == nil || cmd.Source.FromStep <= 0 || cmd.Thread == "fork" {
+		return ""
+	}
+	switch v := cmd.src.view; {
+	case v != nil && v.step == cmd.Source.FromStep:
+		return fmt.Sprintf("compacted:%d", v.c.Index)
+	case cmd.src.viewNote != "":
+		return cmd.src.viewNote
+	}
+	return "transcript"
 }
 
 // runParams is the run's sampling override, ok when the command sets

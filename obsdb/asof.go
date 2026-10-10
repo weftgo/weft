@@ -104,26 +104,58 @@ func hasViewRef(reqs []RequestRecord) bool {
 // AssembleStep is MessagesAsOf over records already read: the run's
 // growth batches (TranscriptBatches), its request records (any steps;
 // the answering — last — attempt of step is used) and its compactions.
+// A reader assembling several steps of one run decodes the batches once
+// with NewAssembler instead.
 func AssembleStep(batches []TranscriptBatch, requests []RequestRecord, compactions []Compaction, step int) (StepMessages, error) {
-	var all []placed
-	indices := map[int64]bool{}
-	stored := true
-	for _, b := range batches {
-		indices[b.Index] = true
+	return NewAssembler(batches).Step(requests, compactions, step)
+}
+
+// Assembler is AssembleStep over one run's growth batches decoded once:
+// each Step call answers exactly what AssembleStep answers for the same
+// records and step, without re-reading every batch (a reader that walks
+// every step of a run — the wefttest fixture export — would otherwise
+// decode the transcript once per step). The messages Step returns share
+// their parts with the Assembler's decoded batches: read them, or copy
+// before patching. Not safe for concurrent use.
+type Assembler struct {
+	all     []placed
+	indices map[int64]bool
+	stored  bool
+	// bad is the first batch that did not decode (index, error): every
+	// step's answer is then that gap, worded for the step asked.
+	bad    *TranscriptBatch
+	badErr error
+}
+
+// NewAssembler decodes batches once for Step.
+func NewAssembler(batches []TranscriptBatch) *Assembler {
+	a := &Assembler{indices: map[int64]bool{}, stored: true}
+	for i, b := range batches {
+		a.indices[b.Index] = true
 		if len(b.Messages) == 0 || string(b.Messages) == "null" {
 			continue
 		}
 		var batch []core.Message
 		if err := json.Unmarshal(b.Messages, &batch); err != nil {
-			return StepMessages{}, stepErr(step, HoleGap, "messages record %d is not readable as messages: %v", b.Index, err)
+			a.bad, a.badErr = &batches[i], err
+			return a
 		}
 		if !b.Input && b.Step < 0 {
-			stored = false
+			a.stored = false
 		}
 		for _, m := range batch {
-			all = append(all, placed{index: b.Index, step: b.Step, input: b.Input, msg: m})
+			a.all = append(a.all, placed{index: b.Index, step: b.Step, input: b.Input, msg: m})
 		}
 	}
+	return a
+}
+
+// Step is AssembleStep for one step over the decoded batches.
+func (a *Assembler) Step(requests []RequestRecord, compactions []Compaction, step int) (StepMessages, error) {
+	if a.bad != nil {
+		return StepMessages{}, stepErr(step, HoleGap, "messages record %d is not readable as messages: %v", a.bad.Index, a.badErr)
+	}
+	all, indices, stored := a.all, a.indices, a.stored
 	upTo := func(keep func(index int64) bool) []core.Message {
 		out := make([]core.Message, 0, len(all))
 		for _, p := range all {

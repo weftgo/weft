@@ -513,6 +513,7 @@ func (l *link) dispatch(ctx context.Context, cmd command) {
 	accepted := false
 	defer l.contain(cmd.CommandID, &accepted)
 
+	// validate bounds itself inside Studio's ack window (validateTimeout).
 	reason, ok := l.validate(ctx, &cmd)
 	switch {
 	case !ok:
@@ -538,7 +539,17 @@ func (l *link) dispatch(ctx context.Context, cmd command) {
 		// exists.
 		acked = ""
 	}
-	l.postAck(ack{CommandID: cmd.CommandID, State: "accepted", RunID: acked})
+	if !l.postAck(ack{CommandID: cmd.CommandID, State: "accepted", RunID: acked}) {
+		// Studio does not hold the command accepted — it marked it lost
+		// (no ack inside its window: validation ran long) and answered
+		// the late ack 409, or the ack never reached it. Running now
+		// would run a command Studio may already show lost, and a
+		// re-issue would run it twice: nothing runs.
+		l.unreserve(cmd)
+		slog.Warn("weft/runtime: the accepted ack was not taken; the command is not run",
+			"command_id", cmd.CommandID)
+		return
+	}
 	accepted = true
 
 	if !l.slot(ctx) {
@@ -647,7 +658,14 @@ func (l *link) dispatchDecision(ctx context.Context, d approvalDecision) {
 	if ps.sess != nil {
 		acked = "" // a fork's resume is its session's next turn (see dispatch)
 	}
-	l.postAck(ack{CommandID: d.CommandID, State: "accepted", RunID: acked})
+	if !l.postAck(ack{CommandID: d.CommandID, State: "accepted", RunID: acked}) {
+		// Not held accepted by Studio (dispatch's rule): the resume does
+		// not run, and the park goes back without this decision.
+		l.restorePark(d.RunID, ps, d.CallID)
+		slog.Warn("weft/runtime: the accepted ack was not taken; the decision is not applied",
+			"command_id", d.CommandID)
+		return
+	}
 	accepted = true
 
 	if !l.slot(ctx) {
@@ -681,33 +699,39 @@ func (l *link) lastEventID() string {
 
 // postAck is POST /api/runtime/acks. Best effort: a failed ack is
 // logged, never retried beyond the next command's own traffic — the
-// lost-command state machine on Studio's side is the backstop.
-func (l *link) postAck(a ack) {
+// lost-command state machine on Studio's side is the backstop. ok is
+// true when Studio answered 200: an accepted ack that is not (refused —
+// Studio already marked the command lost, or forgot it — or never
+// delivered) is a command Studio does not hold accepted, so its caller
+// runs nothing (§5.3's at-most-once: a re-issue would run it twice).
+func (l *link) postAck(a ack) (ok bool) {
 	if len(a.Error) > maxAckError {
 		a.Error = a.Error[:maxAckError] + "…"
 	}
 	body, err := json.Marshal(a)
 	if err != nil {
-		return
+		return false
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, l.url("/api/runtime/acks"), bytes.NewReader(body))
 	if err != nil {
-		return
+		return false
 	}
 	req.Header.Set("Content-Type", "application/json")
 	bearerAuth(req, l.token)
 	resp, err := l.client.Do(req)
 	if err != nil {
 		slog.Warn("weft/runtime: ack failed", "command_id", a.CommandID, "state", a.State, "err", err)
-		return
+		return false
 	}
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 	_ = resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		slog.Warn("weft/runtime: ack refused", "command_id", a.CommandID, "state", a.State, "status", resp.Status)
+		return false
 	}
+	return true
 }
 
 // url resolves a server-relative Studio path against the link's base.

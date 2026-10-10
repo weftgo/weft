@@ -261,6 +261,10 @@ func runFixtures(src fixtureSource) ([]fixtureFile, error) {
 		}
 	}
 
+	// The batches decoded once for every step's assembly check below
+	// (obsdb.Assembler: AssembleStep's answer without re-decoding the
+	// transcript per step).
+	asm := obsdb.NewAssembler(src.batches)
 	var files []fixtureFile
 	done := map[int]bool{}
 	for i, msg := range msgs {
@@ -286,7 +290,7 @@ func runFixtures(src fixtureSource) ([]fixtureFile, error) {
 			// the transcript is not what the model saw — refused with the
 			// hole, never keyed on msgs[:i].
 			var se *obsdb.StepMessagesError
-			if _, err := obsdb.AssembleStep(src.batches, src.requests, src.compactions, step); errors.As(err, &se) {
+			if _, err := asm.Step(src.requests, src.compactions, step); errors.As(err, &se) {
 				return nil, &fixtureError{se.Hole, fmt.Sprintf("step %d: %s", step, se.Msg)}
 			}
 			body := rec.Body

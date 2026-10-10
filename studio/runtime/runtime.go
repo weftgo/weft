@@ -143,6 +143,31 @@ func (a AgentRegistration) ManifestToolNames() []string {
 	return names
 }
 
+// ManifestToolSchemas returns the agent's tools' input schemas by name,
+// as its manifest records them — what the runtime checks a tool_args
+// edit against (its agent's own tools). ok is false when the manifest
+// does not read; a tool listed without a schema is absent from the map.
+func (a AgentRegistration) ManifestToolSchemas() (schemas map[string]json.RawMessage, ok bool) {
+	var doc struct {
+		Agents []struct {
+			Tools []struct {
+				Name        string          `json:"name"`
+				InputSchema json.RawMessage `json:"input_schema"`
+			} `json:"tools"`
+		} `json:"agents"`
+	}
+	if err := json.Unmarshal([]byte(a.Manifest), &doc); err != nil || len(doc.Agents) == 0 {
+		return nil, false
+	}
+	out := map[string]json.RawMessage{}
+	for _, t := range doc.Agents[0].Tools {
+		if len(t.InputSchema) > 0 && string(t.InputSchema) != "null" {
+			out[t.Name] = t.InputSchema
+		}
+	}
+	return out, true
+}
+
 // ManifestModelName returns the agent's own model name.
 func (a AgentRegistration) ManifestModelName() string {
 	var doc struct {
@@ -889,6 +914,18 @@ func (rs *RuntimeServer) serveAcks(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, r, http.StatusBadRequest, "bad_request", "ack body: unknown state "+a.State)
 		return
 	}
+	if a.State == "accepted" && row.state == StateLost {
+		// The command was marked lost — no accepted ack inside the ack
+		// window, or the runtime dropped before one — and the user may
+		// already have re-issued it: a late accepted ack must not revive
+		// it, or the command would run twice (with side_effects allow,
+		// twice for real). 409, and the runtime runs nothing
+		// (weft/runtime's dispatch). A finished ack still records what
+		// did run; a rejected one what was refused.
+		writeErr(w, r, http.StatusConflict, "conflict",
+			"command "+a.CommandID+" was marked lost before this accepted ack ("+row.errText+"): it must not run")
+		return
+	}
 	if a.RunID != "" {
 		rs.runs[a.RunID] = row.Runtime
 		rs.runSeen[a.RunID] = rs.now()
@@ -905,19 +942,17 @@ func (rs *RuntimeServer) serveAcks(w http.ResponseWriter, r *http.Request) {
 	// forever.
 	switch a.State {
 	case "accepted":
-		if row.state == StateQueued || row.state == StateLost {
-			revived := row.state == StateLost
+		if row.state == StateQueued {
 			rs.stopTimersLocked(row)
 			row.state = StateAccepted
 			row.runID = a.RunID
 			row.updated = rs.now()
-			if c := rs.runtimes[row.Runtime]; revived || c == nil || c.feed == nil {
+			if c := rs.runtimes[row.Runtime]; c == nil || c.feed == nil {
 				// No sweep will arm the finish watch for this row: the
-				// lost sweep already ran (the audit's P2-10), or the
 				// runtime holds no stream — a feed dropped full ends
 				// without the disconnect sweep. Arm one now, or a
 				// runtime that never finishes leaves the row accepted
-				// forever.
+				// forever (the audit's P2-10).
 				rs.armLostLocked(row, rs.FinishDeadline, "accepted while the runtime was disconnected, no finish")
 			}
 		} else if row.state == StateAccepted && row.runID == "" && a.RunID != "" {

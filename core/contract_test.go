@@ -5014,3 +5014,27 @@ func TestAgentRunDefaultsAccessors(t *testing.T) {
 		t.Errorf("unset Thinking/ToolChoice = %+v / %+v, want zero values", bare.Thinking(), bare.ToolChoice())
 	}
 }
+
+// An auto tool-choice override over a forcing default is recorded as
+// "auto" on weft.override.tool_choice — the zero mode spelled out, never
+// an empty value a reader cannot tell from "not overridden".
+func TestOverrideToolChoiceAutoIsSpelledOut(t *testing.T) {
+	tp := newRecProvider()
+	agt := core.New(wefttest.Script(wefttest.Say("ok"), wefttest.Say("ok")),
+		core.Name("demo"), core.TracerProvider(tp), lookupTool(),
+		core.ToolChoice(core.ToolChoiceConfig{Mode: core.ToolChoiceAny}))
+	for id, tc := range map[string]core.ToolChoiceConfig{
+		"r_auto":  {Mode: core.ToolChoiceAuto},
+		"r_named": {Mode: core.ToolChoiceNamed, Name: "lookup"},
+	} {
+		if _, err := agt.Generate(context.Background(), core.RunID(id), core.Prompt("x"), core.ToolChoice(tc)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := spanAttrsByID(t, tp, "r_auto")["weft.override.tool_choice"]; got != "auto" {
+		t.Errorf("auto override recorded %q, want \"auto\"", got)
+	}
+	if got := spanAttrsByID(t, tp, "r_named")["weft.override.tool_choice"]; got != "tool:lookup" {
+		t.Errorf("named override recorded %q, want \"tool:lookup\"", got)
+	}
+}

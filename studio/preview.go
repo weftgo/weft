@@ -157,14 +157,6 @@ func (s *Server) servePlaygroundPreview(rs *linkruntime.RuntimeServer) http.Hand
 			return
 		}
 		prompts := readsPrompts(r)
-		scripted, e := s.checkCommandWarn(ctx, &req, true, prompts)
-		if e == nil {
-			e = s.checkSource(ctx, &req)
-		}
-		if e != nil {
-			e.write(w, r)
-			return
-		}
 		var agent *linkruntime.AgentRegistration
 		if req.Runtime != "" {
 			if reg, ok := rs.Registration(req.Runtime); ok {
@@ -173,9 +165,23 @@ func (s *Server) servePlaygroundPreview(rs *linkruntime.RuntimeServer) http.Hand
 				}
 			}
 		}
+		scripted, e := s.checkCommandWarn(ctx, &req, true, prompts, agent)
+		if e == nil {
+			e = s.checkSource(ctx, &req)
+		}
+		if e != nil {
+			e.write(w, r)
+			return
+		}
 		doc := previewDoc{Source: *req.Source, Agent: req.Agent, Engine: orDefault(req.Engine, "live"),
 			Warnings: []previewWarning{}, Unchecked: []string{}}
 		if agent != nil {
+			// Version skew is the run route's refusal too, its status
+			// and sentence (no catalog in it, so unmasked).
+			if e := s.checkSkew(ctx, &req, *agent); e != nil {
+				e.write(w, r)
+				return
+			}
 			if e := checkRegistered(&req, *agent); e != nil {
 				if !prompts {
 					// The refusal would name what the hidden catalog
@@ -281,9 +287,9 @@ func (s *Server) assemblePreview(ctx context.Context, doc *previewDoc, req runRe
 		if sm.View != nil {
 			view = compactedRangeOf(batches, sm)
 		}
-		var schemas map[string]json.RawMessage
+		var schemas schemaOf
 		if prompts {
-			schemas = s.recordedSchemas(ctx, run)
+			schemas = s.editSchemas(ctx, run, agent)
 		}
 		prefix, inserts, err := editedPrefix(input, own, from, req.TranscriptEdits, view, schemas)
 		if err != nil {
@@ -365,6 +371,9 @@ func (s *Server) assemblePreview(ctx context.Context, doc *previewDoc, req runRe
 		for _, pr := range []*previewRequest{&doc.WillSend, &doc.WasSent} {
 			pr.System, pr.SystemBadge = nil, string(obsdb.HoleHidden)
 			pr.Tools, pr.ToolsBadge = nil, string(obsdb.HoleHidden)
+			// Prompt-adjacent knobs (the spans' rule, toolNameAttrs): a
+			// named tool choice's tool and the stop sequences.
+			pr.ToolChoice.Name, pr.Params.Stop = "", nil
 			if sm.View != nil {
 				pr.Messages, pr.MessagesBadge = nil, string(obsdb.HoleHidden)
 			}
@@ -379,28 +388,53 @@ func (s *Server) assemblePreview(ctx context.Context, doc *previewDoc, req runRe
 
 // recordedRequest is the request record of step from's answering
 // attempt (the highest index), else the latest record of an earlier
-// step; nil when the run recorded none.
+// step; nil when the run recorded none. Each query is paged to its end
+// (obsdb returns a page of 1000 at most, in index order), so the
+// latest is the latest however many attempts the run made: step from's
+// own first, then step from − 1's (from_step at the count: the step
+// before it), and only when neither holds a record every step's.
 func (s *Server) recordedRequest(ctx context.Context, run string, from int) (*obsdb.RequestRecord, error) {
-	recs, err := s.db.Requests(ctx, run, obsdb.RequestQuery{Step: &from, Limit: maxRequestsLimit})
-	if err == nil && len(recs) == 0 {
-		// A step never sent (from_step at the count): the latest
-		// request of an earlier step stands in, badged derived.
-		recs, err = s.db.Requests(ctx, run, obsdb.RequestQuery{Limit: maxRequestsLimit})
-	}
-	if err != nil && !errors.Is(err, obsdb.ErrNotFound) {
-		return nil, err
-	}
 	var best *obsdb.RequestRecord
-	for i := range recs {
-		r := &recs[i]
-		if r.Step > from {
-			continue
-		}
-		if best == nil || r.Step > best.Step || r.Step == best.Step && r.Index > best.Index {
-			best = r
+	scan := func(step *int) error {
+		q := obsdb.RequestQuery{Step: step, Limit: maxRequestsLimit}
+		for {
+			page, err := s.db.Requests(ctx, run, q)
+			if errors.Is(err, obsdb.ErrNotFound) {
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			for i := range page {
+				r := page[i]
+				if r.Step > from {
+					continue
+				}
+				if best == nil || r.Step > best.Step || r.Step == best.Step && r.Index > best.Index {
+					best = &r
+				}
+			}
+			if len(page) < q.PageLimit() {
+				return nil
+			}
+			q.From = page[len(page)-1].Index + 1
 		}
 	}
-	return best, nil
+	steps := []*int{&from}
+	if from > 0 {
+		prev := from - 1
+		steps = append(steps, &prev)
+	}
+	steps = append(steps, nil)
+	for _, st := range steps {
+		if err := scan(st); err != nil {
+			return nil, err
+		}
+		if best != nil {
+			return best, nil
+		}
+	}
+	return nil, nil
 }
 
 // recordedBlocks is a request record's blocks resolved: the system

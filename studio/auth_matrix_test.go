@@ -204,7 +204,8 @@ func TestAuthMatrix(t *testing.T) {
 	// here), rt_link is the one the link routes of the matrix touch.
 	manifest := `{\"weft\":1,\"agents\":[{\"name\":\"acme-support\",\"instructions\":\"THE SYSTEM PROMPT\",\"model\":{\"provider\":\"p\",\"name\":\"m\"},\"policy\":{},\"tools\":[{\"name\":\"refund\"}]}]}`
 	regBody := func(id string) string {
-		return `{"runtime_id":"` + id + `","agents":[{"name":"acme-support","manifest":"` + manifest + `","limits":{"max_steps":10,"parallelism":4}}]}`
+		return `{"runtime_id":"` + id + `","agents":[{"name":"acme-support","manifest":"` + manifest + `","limits":{"max_steps":10,"parallelism":4},` +
+			`"defaults":{"tool_choice":{"mode":"named","name":"refund"},"stop":["THE STOP"]}}]}`
 	}
 	for _, id := range []string{"rt_test", "rt_link"} {
 		if code := do(http.MethodPost, "/api/runtime/register", regBody(id), server); code != http.StatusOK {
@@ -720,6 +721,14 @@ func TestAuthMatrix(t *testing.T) {
 		}
 		if got, want := strings.Contains(string(b), "THE SYSTEM PROMPT"), id.kind != "read"; got != want {
 			t.Errorf("GET /api/runtimes as %s: instructions present = %v, want %v", id.name, got, want)
+		}
+		// The prompt-adjacent defaults with it: a named default tool
+		// choice's tool and the stop sequences (the spans' rule).
+		if got, want := strings.Contains(string(b), `"tool_choice":{"mode":"named","name":"refund"}`), id.kind != "read"; got != want {
+			t.Errorf("GET /api/runtimes as %s: default tool_choice name present = %v, want %v: %s", id.name, got, want, b)
+		}
+		if got, want := strings.Contains(string(b), "THE STOP"), id.kind != "read"; got != want {
+			t.Errorf("GET /api/runtimes as %s: default stop present = %v, want %v", id.name, got, want)
 		}
 	}
 

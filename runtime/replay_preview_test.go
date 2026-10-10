@@ -289,6 +289,40 @@ func TestOneSentenceOnBothSides(t *testing.T) {
 			t.Errorf("%s: runtime = %v %q, want %q", c.name, ok, reason, c.want)
 		}
 	}
+
+	// The option lab's park rule, one sentence on both sides: a named
+	// tool_choice park_on parks — the command's own, or the agent's
+	// default under a command that sends none — makes every forced call
+	// park. Studio's side is the preview's registration check (the run
+	// route's checkRegistered), the runtime's validate.
+	lookup := core.Tool("lookup", "Look up an order.", func(_ context.Context, in struct {
+		OrderID string `json:"order_id"`
+	}) (string, error) {
+		return "order " + in.OrderID, nil
+	})
+	forced := core.New(wefttest.Script(wefttest.Say("ok")), core.Name("forced"), lookup,
+		core.ToolChoice(core.ToolChoiceConfig{Mode: core.ToolChoiceNamed, Name: "lookup"}))
+	fcfg := &config{agents: []*core.Agent{forced}}
+	fl := newLink(fcfg, newRegistry(fcfg), ts.URL, "")
+	fl.localDB = func() obsdb.DB { return db }
+	defer fl.stop()
+	if err := fl.register(ctx); err != nil {
+		t.Fatal(err)
+	}
+	const parked = "tool_choice names lookup, which park_on parks: every forced call would park"
+	for name, o := range map[string]overrides{
+		"the agent's default": {ParkOn: []string{"lookup"}},
+		"the command's own":   {ParkOn: []string{"lookup"}, ToolChoice: &toolChoiceWire{Mode: "named", Name: "lookup"}},
+	} {
+		body := previewBody{Runtime: fl.id, Agent: "forced", Source: &sourceSpec{RunID: "r_os", FromStep: 1}, Overrides: o}
+		if code, msg := postStudio(t, ts.URL, "/api/playground/preview", body); code != http.StatusBadRequest || msg != parked {
+			t.Errorf("%s parked: Studio = %d %q, want 400 %q", name, code, msg, parked)
+		}
+		cmd := command{CommandID: "cmd_park", Agent: "forced", Engine: "live", Source: body.Source, Overrides: o}
+		if reason, ok := fl.validate(ctx, &cmd); ok || reason != parked {
+			t.Errorf("%s parked: runtime = %v %q, want %q", name, ok, reason, parked)
+		}
+	}
 }
 
 // TestSubstituteKeysOnTheEditedPair (ADR 0029 §8): the substitute

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -521,5 +522,75 @@ func TestStepHolesBothCuts(t *testing.T) {
 	}
 	if !strings.HasPrefix(tr.Fix, "raise the tool's weft.MaxResultBytes") {
 		t.Errorf("truncated fix = %q, want the core cut's weft.MaxResultBytes first", tr.Fix)
+	}
+}
+
+// TestRunHolesReplayView: a playground replay whose prefix no request
+// record placed — weft/runtime's weft.replay.view derived or unknown
+// (ADR 0029 §2) — carries the derived hole on its run document, its
+// reason naming the mark and the source step (weft.forked_from), with a
+// fix; a replay on a placed prefix (transcript, compacted:<index>)
+// carries none. The unknown run's document is the golden
+// run-replay-view.golden.json the web's badge tables draw from.
+func TestRunHolesReplayView(t *testing.T) {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	at := func(d time.Duration) time.Time { return fixtureT0.Add(d) }
+	for run, view := range map[string]string{"r_unknown": "unknown", "r_derived": "derived", "r_view": "compacted:3", "r_plain": "transcript"} {
+		recs := []obsdb.Record{
+			fxRecord(run, "event", "run_start", 0, at(0), `{"type":"run_start","id":"`+run+`","model":{"provider":"wefttest","name":"script"},"agent":"orders"}`),
+			fxRecord(run, "event", "step_start", 1, at(100*time.Millisecond), `{"type":"step_start","run_id":"`+run+`","index":0}`),
+			fxRecord(run, "event", "step_finish", 2, at(time.Second), `{"type":"step_finish","run_id":"`+run+`","index":0,"reason":"stop","usage":{"input_tokens":10,"output_tokens":4}}`),
+			fxRecord(run, "event", "run_finish", 3, at(2*time.Second), `{"type":"run_finish","run_id":"`+run+`","usage":{"input_tokens":10,"output_tokens":4},"steps":1}`),
+			fxRecord(run, "messages", "", 0, at(50*time.Millisecond), `[{"role":"user","content":[{"type":"text","text":"Where is order 42?"}]}]`),
+			fxRecord(run, "messages", "", 1, at(time.Second), `[{"role":"assistant","content":[{"type":"text","text":"Shipped."}]}]`),
+			fxRecord(run, "prompt", "", 0, at(60*time.Millisecond), `{"hash":"`+fxInstructionsHash+`","text":"You handle orders."}`),
+			fxRecord(run, "tools", "", 0, at(60*time.Millisecond), `{"hash":"`+fxCatalogHash+`","tools":[]}`),
+			fxRecord(run, "request", "", 0, at(60*time.Millisecond), `{"step":0,"attempt":1,"system_hash":"`+fxInstructionsHash+`","messages_ref":{"index":0,"count":1},`+
+				`"tools":{"catalog_hash":"`+fxCatalogHash+`","names":[]},"sequential_tools":false,"params":{},"model":{"provider":"wefttest","name":"script"},"stream":true}`),
+		}
+		for i := range recs {
+			recs[i].Attrs["weft.playground"] = "true"
+			recs[i].Attrs["weft.forked_from"] = "r_src#2"
+			recs[i].Attrs["weft.replay.view"] = view
+		}
+		if err := db.Write(context.Background(), obsdb.Batch{Records: recs}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := Handler(DB(db))
+	for run, want := range map[string]string{
+		"r_unknown": "this replay's prefix is the transcript before step 2 of r_src (weft.replay.view = unknown): the runtime could not read that step's records (Studio unreachable, content off, or a Studio without ?step=), so a compaction view its model saw may be missing",
+		"r_derived": "this replay's prefix was cut from the transcript at step 2 of r_src (weft.replay.view = derived): no request record placed that step's messages, so a compaction view its model saw is not known",
+		"r_view":    "",
+		"r_plain":   "",
+	} {
+		code, _, body := get(t, h, "/studio/api/runs/"+run)
+		if code != http.StatusOK {
+			t.Fatalf("%s: %d %s", run, code, body)
+		}
+		var doc holesDoc
+		decode(t, body, &doc)
+		var got []string
+		for _, hl := range doc.Holes {
+			if hl.Hole == "derived" {
+				got = append(got, hl.Reason)
+				if hl.Fix == "" {
+					t.Errorf("%s: the derived hole has no fix", run)
+				}
+			}
+		}
+		switch {
+		case want == "" && len(got) != 0:
+			t.Errorf("%s: holes %+v, want no derived hole", run, doc.Holes)
+		case want != "" && (len(got) != 1 || got[0] != want):
+			t.Errorf("%s: derived reasons %q, want %q", run, got, want)
+		}
+		if run == "r_unknown" {
+			golden(t, "run-replay-view.golden.json", regexp.MustCompile(`"last_seen": ?"[^"]*"`).ReplaceAllString(body, `"last_seen":"(norm)"`))
+		}
 	}
 }

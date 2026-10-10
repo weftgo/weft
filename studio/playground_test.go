@@ -68,7 +68,8 @@ func newPlaygroundServer(t *testing.T, token string) *playgroundTestServer {
 			Name: "acme-support",
 			Manifest: `{"weft":1,"agents":[{"name":"acme-support","model":{"provider":"wefttest","name":"script"},` +
 				`"policy":{"parallelism":4,"max_steps":10,"max_model_retries":3},` +
-				`"tools":[{"name":"lookup_order"},{"name":"refund"},{"name":"track_parcel"}]}]}`,
+				`"tools":[{"name":"lookup_order","input_schema":{"type":"object","properties":{"order_id":{"type":"string","description":"the order"}},"required":["order_id"]}},` +
+				`{"name":"refund"},{"name":"track_parcel"}]}]}`,
 			Models: []string{"glm-5.3-flash"},
 			Limits: linkruntime.AgentLimits{MaxSteps: 10, Parallelism: 4},
 			// A current runtime always registers its defaults; zero
@@ -877,9 +878,17 @@ func TestPlaygroundAgentDefaultToolChoice(t *testing.T) {
 	if code, body := pt.post(t, onlyOff); code != http.StatusBadRequest || !strings.Contains(body, "default tool_choice names refund") {
 		t.Errorf("default named tool outside only_tools = %d (%s), want 400", code, body)
 	}
+	// A named default park_on parks: every forced call would park — the
+	// explicit case's rule and sentence, the tool named.
+	parked := strings.Replace(validRun, `"thinking": "off"`, `"thinking": "off", "park_on": ["refund"]`, 1)
+	if code, body := pt.post(t, parked); code != http.StatusBadRequest ||
+		!strings.Contains(body, "tool_choice names refund, which park_on parks: every forced call would park") {
+		t.Errorf("default named tool parked = %d (%s), want 400 naming it", code, body)
+	}
 	for _, ok := range []string{
 		validRun, // refund stays on
 		strings.Replace(off, `"thinking": "off"`, `"thinking": "off", "tool_choice": {"mode": "auto"}`, 1),
+		strings.Replace(parked, `"thinking": "off"`, `"thinking": "off", "tool_choice": {"mode": "auto"}`, 1),
 	} {
 		if code, body := pt.post(t, ok); code != http.StatusAccepted {
 			t.Errorf("= %d (%s), want 202", code, body)
@@ -927,5 +936,76 @@ func TestPlaygroundOldRuntimeRefusesOptionLab(t *testing.T) {
 	pt.waitCommand(t, "old shape")
 	if _, view := pt.get(t, "/api/runtimes"); strings.Contains(view, `"defaults"`) || !strings.Contains(view, `"name":"acme-support"`) {
 		t.Errorf("old runtime's view = %s, want the agent with no defaults (absent = older than the option lab)", view)
+	}
+}
+
+// TestPlaygroundOldRuntimeRefusesEditKinds pins the version-skew rule
+// for ADR 0029: a runtime older than the edit kinds drops an edit's
+// kind, args and index — a user or insert edit would apply its content
+// as a reply rewrite, a tool_args edit not at all, acked with no
+// weft.edits mark — and splices no compaction view. So against it
+// Studio refuses the three new kinds and a from_step whose request
+// carried a view (400, naming the upgrade), on the run route and the
+// preview alike, and still accepts the pre-F2 kinds. A current runtime
+// takes all of them.
+func TestPlaygroundOldRuntimeRefusesEditKinds(t *testing.T) {
+	pt := newPlaygroundTestServer(t)
+	recordPreviewRun(t, pt, "r_old")
+	recordStepsRun(t, pt.ts.URL, "r_oldcv", nil)
+	fetchJSON(t, pt.ts, "/api/runs/r_oldcv", func(b string) bool { return strings.Contains(b, `"request_count":6`) })
+	reRegister := func(d linkruntime.AgentDefaults) {
+		t.Helper()
+		reg, _ := pt.rs.Registration("rt_test")
+		reg.Agents[0].Defaults = d
+		b, _ := json.Marshal(reg)
+		req, _ := http.NewRequest(http.MethodPost, pt.ts.URL+"/api/runtime/register", strings.NewReader(string(b)))
+		req.Header.Set("Content-Type", "application/json")
+		pt.auth(req)
+		if code, out := pt.do(t, req); code != http.StatusOK {
+			t.Fatalf("re-register: %d %s", code, out)
+		}
+	}
+	body := func(run string, from int, edits string) string {
+		return `{"runtime":"rt_test","agent":"acme-support","source":{"run_id":"` + run + `","from_step":` + fmt.Sprint(from) +
+			`},"transcript_edits":` + edits + `,"engine":"live","side_effects":"substitute","thread":"ephemeral"}`
+	}
+	const kinds = "runtime predates transcript edit kinds: upgrade weft/runtime to use user, tool_args, insert edits"
+	const view = "runtime predates replay across a compaction: step 2's request carried a compaction view the runtime would not splice in, so its model would see the uncompacted transcript; upgrade weft/runtime"
+	refused := []struct{ name, body, want string }{
+		{"user", body("r_old", 2, `[{"kind":"user","step":0,"content":"where is 7?"}]`), kinds},
+		{"tool_args", body("r_old", 2, `[{"kind":"tool_args","step":0,"call_id":"c1","args":{"order_id":"7"}}]`), kinds},
+		{"insert", body("r_old", 2, `[{"kind":"insert","step":1,"content":"go on"}]`), kinds},
+		{"a view at from_step", body("r_oldcv", 2, `[]`), view},
+	}
+	accepted := []string{
+		body("r_old", 2, `[{"step":1,"call_id":"c2","tool_result":"order 43 lost"}]`),
+		body("r_old", 2, `[{"kind":"tool_result","step":1,"call_id":"c2","tool_result":"order 43 lost"}]`),
+		body("r_old", 1, `[]`),
+	}
+
+	reRegister(linkruntime.AgentDefaults{})
+	for _, c := range refused {
+		if code, out := pt.post(t, c.body); code != http.StatusBadRequest || !strings.Contains(out, c.want) {
+			t.Errorf("%s on an old runtime: run = %d (%s), want 400 %q", c.name, code, out, c.want)
+		}
+		if code, out := previewPost(t, pt, "/api/playground/preview", "", c.body); code != http.StatusBadRequest || !strings.Contains(out, c.want) {
+			t.Errorf("%s on an old runtime: preview = %d (%s), want 400 %q", c.name, code, out, c.want)
+		}
+	}
+	for i, b := range accepted {
+		if code, out := pt.post(t, b); code != http.StatusAccepted {
+			t.Errorf("pre-F2 body %d on an old runtime = %d (%s), want 202", i, code, out)
+			continue
+		}
+		pt.waitCommand(t, "old")
+	}
+
+	reRegister(linkruntime.AgentDefaults{MaxSteps: 10, Parallelism: 4, ToolChoice: linkruntime.ToolChoice{Mode: "auto"}})
+	for _, c := range refused {
+		if code, out := pt.post(t, c.body); code != http.StatusAccepted {
+			t.Errorf("%s on a current runtime = %d (%s), want 202", c.name, code, out)
+			continue
+		}
+		pt.waitCommand(t, c.name)
 	}
 }

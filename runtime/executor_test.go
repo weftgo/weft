@@ -732,6 +732,21 @@ func TestValidateAgentDefaultToolChoice(t *testing.T) {
 			t.Errorf("%+v: rejected (%s)", o, reason)
 		}
 	}
+	// A named default park_on parks: every forced call would park — the
+	// explicit case's rule and sentence, the tool named.
+	reason, ok := l.validate(context.Background(), cmd(overrides{ParkOn: []string{"classify"}}))
+	if want := "tool_choice names classify, which park_on parks: every forced call would park"; ok || reason != want {
+		t.Errorf("default named tool parked: reason = %q ok = %v, want %q", reason, ok, want)
+	}
+	// park_on another tool, or a tool_choice sent over the default, passes.
+	for _, o := range []overrides{
+		{ParkOn: []string{"lookup_order"}},
+		{ParkOn: []string{"classify"}, ToolChoice: &toolChoiceWire{Mode: "auto"}},
+	} {
+		if reason, ok := l.validate(context.Background(), cmd(o)); !ok {
+			t.Errorf("%+v: rejected (%s)", o, reason)
+		}
+	}
 }
 
 // TestOptionLabReachesTheModel pins that the option lab's overrides are

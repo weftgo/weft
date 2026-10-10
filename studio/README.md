@@ -125,7 +125,8 @@ would sweep a live run paused at a breakpoint. A running child of a
 swept parent stays and is listed only under `all=1` / `parent=*` until
 it is swept itself. Each sweep logs one Debug line with its count; a
 failed one logs a Warn line and the server keeps serving. The sweeper
-runs until `Server.Close`, so a Studio with `Retain` is built with
+runs until `Server. The sweep runs in batches of 500 root runs (`obsdb.SweepBatch`), one writer
+transaction each, so ingest proceeds between them.Close`, so a Studio with `Retain` is built with
 `studio.New` and closed; under `studio.Handler(...)` nothing can close
 it, and it stops (one Debug line) only once the DB is closed. `/api/meta`'s
 `retention` reports it. `weft vacuum [--db sqlite://path|clickhouse://…]

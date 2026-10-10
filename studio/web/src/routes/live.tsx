@@ -347,7 +347,7 @@ function StreamedRuns({ filter, peek, onPeek, now, canCancel, onRefused }: ListP
           here the moment its first run row is written
         </p>
       ) : (
-        <LiveTable rows={rows} now={now} peek={peek} onPeek={onPeek} canCancel={canCancel} />
+        <LiveTable rows={rows} allRows={all} now={now} peek={peek} onPeek={onPeek} canCancel={canCancel} />
       )}
       <p className="font-mono text-[11px] text-faint" data-live-footer>
         {LIVE_BACKFILL_LINE}

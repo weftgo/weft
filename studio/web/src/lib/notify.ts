@@ -52,10 +52,11 @@ export type Notice =
   /** A copy-link press: n is the press (each one its own instance). */
   | { kind: "copy-link"; ok: boolean; n: number }
   /** The live page's cancel (plan H6): n is the press; sent (the 202),
-   * refused (the server's words, verbatim), or cancelled (the run's
-   * failed row arrived). One toast per run, each outcome replacing the
+   * refused (the server's words, verbatim), or ended (the run's ended
+   * row arrived: status says how — "cancelled" is said for failed
+   * alone). One toast per run, each outcome replacing the
    * last. */
-  | { kind: "cancel"; runID: string; n: number; outcome: "sent" | "refused" | "cancelled"; message?: string }
+  | { kind: "cancel"; runID: string; n: number; outcome: "sent" | "refused" | "ended"; message?: string; status?: string }
 
 /** The key of the instance a notice reports: one toast per key. */
 export function noticeKey(n: Notice): string {
@@ -119,8 +120,11 @@ export function noticeText(n: Notice): { title: string; tone: Tone } {
     case "cancel":
       return n.outcome === "sent"
         ? { title: `cancel sent to run ${n.runID}'s runtime · cancelling…`, tone: "info" }
-        : n.outcome === "cancelled"
-          ? { title: `run ${n.runID} cancelled · ended failed`, tone: "success" }
+        : n.outcome === "ended"
+          ? // A cancelled run ends failed; any other end raced the cancel.
+            n.status === "failed"
+            ? { title: `run ${n.runID} cancelled · ended failed`, tone: "success" }
+            : { title: `run ${n.runID} ended ${n.status ?? "—"}`, tone: "info" }
           : { title: `cancel on run ${n.runID} refused: ${n.message ?? ""}`, tone: "error" }
   }
 }

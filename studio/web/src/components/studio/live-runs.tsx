@@ -92,13 +92,12 @@ export function LiveRuns({
     }
   }, [streamedKey])
 
+  const views = runs.map((r) => polledView(newest(r, frames[r.id] as RunRow | undefined)))
   return (
     <div className="space-y-2">
       <LiveTable
-        rows={runs
-          .map((r) => newest(r, frames[r.id] as RunRow | undefined))
-          .filter((r) => matchesFilter(r, filter))
-          .map(polledView)}
+        rows={views.filter((v) => matchesFilter(v.run, filter))}
+        allRows={views}
         now={now}
         peek={peek}
         onPeek={onPeek}

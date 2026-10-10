@@ -53,6 +53,18 @@ describe("the row fold", () => {
     expect(v.stats?.ttftMs).toBe(90)
   })
 
+  it("a re-delivered step_finish (a resume's backfill past the dedup window) does not change the total", () => {
+    const fin = (pos: number, index: number, i: number, o: number) =>
+      ({ run_id: "r", session_id: "", public_id: "", kind: "event", pos, time: "", event: { type: "step_finish", run_id: "r", index, usage: { input_tokens: i, output_tokens: o } } }) as unknown as LiveRecord
+    let s = applyRecord(emptyLiveRows, { ...fin(0, 0, 0, 0), event: { type: "run_start", id: "r" } } as LiveRecord)
+    s = applyRecord(s, fin(1, 0, 10, 2))
+    s = applyRecord(s, fin(2, 1, 20, 4))
+    expect([s.stats.r.input, s.stats.r.output]).toEqual([30, 6])
+    s = applyRecord(s, fin(1, 0, 10, 2))
+    s = applyRecord(s, fin(2, 1, 20, 4))
+    expect([s.stats.r.input, s.stats.r.output]).toEqual([30, 6])
+  })
+
   it("a run joined mid-way counts only what it saw, and says so", () => {
     let s = applyRun(emptyLiveRows, run("r1"))
     s = applyRecord(s, rec("r1", 9, { type: "step_finish", index: 4, usage: { input_tokens: 1, output_tokens: 1 } }))

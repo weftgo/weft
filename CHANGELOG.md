@@ -20,8 +20,9 @@ module, ADR 0005).
   on that run. Without `live_all` (a panel token) the page polls every 5 s
   and says why. Under capability `cancel`, runtime-started runs get a cancel
   button with an inline confirm: it posts `POST /api/runs/{id}/cancel`, the
-  row shows "cancelling…" until the failed row arrives, and a refusal is
-  toasted in the server's own words. App-owned runs show a disabled button
+  row shows "cancelling…" until the run's row ends (any row, the filter
+  aside) or 30 s pass — then "no end seen — cancel again" — the end
+  toasted with its status, and a refusal in the server's own words. App-owned runs show a disabled button
   (F4), and parked runs link to their page to decide. Clicking a row opens
   its story in a resizable side pane (`?peek=<id>`, remembered as split
   `live-peek`); Escape closes it.

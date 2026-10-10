@@ -13,9 +13,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
 import type { RunDoc, RunRow, RunsPage } from "@/lib/api"
-import { LIVE_BACKFILL_LINE, LIVE_GRACE_MS, RUNNING_COST_REASON } from "@/lib/live-rows"
+import { CANCEL_WAIT_MS, LIVE_BACKFILL_LINE, LIVE_GRACE_MS, RUNNING_COST_REASON } from "@/lib/live-rows"
 import { resetNotices } from "@/lib/notify"
-import { APP_RUN_CANCEL } from "@/components/studio/live-table"
+import { APP_RUN_CANCEL, CANCEL_AGAIN } from "@/components/studio/live-table"
+import { POLLING_LINE } from "@/routes/live"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { FakeStudio, apiError, golden, pagedEvents, transcriptOf } from "@/test/fake-studio"
@@ -253,6 +254,54 @@ describe("the all stream", () => {
   })
 })
 
+describe("the stream's life", () => {
+  it("closes the all stream when the page goes (a route change)", async () => {
+    const { es, router } = await openPage()
+    expect(es.closedByClient).toBe(false)
+    await act(() => router.navigate({ to: "/runs" }))
+    await waitFor(() => expect(es.closedByClient).toBe(true))
+    expect(FakeEventSource.open().some((s) => new URL(s.url).searchParams.has("all"))).toBe(false)
+  })
+
+  it("closes the all stream on unmount", async () => {
+    const { es, unmount } = await openPage()
+    unmount()
+    expect(es.closedByClient).toBe(true)
+  })
+
+  it("a server overflow says catching up, opens a fresh stream and reads the running list again", async () => {
+    const { es } = await openPage()
+    await waitFor(() => expect(document.querySelector("[data-live-conn]")?.getAttribute("data-live-conn")).toBe("live"))
+    const reads = studio.calls("GET runs").length
+    act(() => es.emit("overflow", {}))
+    await waitFor(() => expect(document.querySelector("[data-live-conn]")!.textContent).toBe("overflow — catching up"))
+    expect(es.closedByClient).toBe(true)
+    const fresh = await waitFor(
+      () => {
+        const n = FakeEventSource.open().find((s) => s !== es && new URL(s.url).searchParams.has("all"))
+        expect(n).toBeTruthy()
+        return n!
+      },
+      { timeout: 15_000 }
+    )
+    act(() => fresh.connect())
+    await waitFor(() => expect(studio.calls("GET runs").length).toBeGreaterThan(reads), { timeout: 5_000 })
+    await waitFor(() => expect(document.querySelector("[data-live-conn]")?.getAttribute("data-live-conn")).toBe("live"))
+  })
+
+  it("a 403 on the all grant although live_all said yes: polling, with the honest line", async () => {
+    studio
+      .on("POST live-grant", () => apiError(403, "forbidden", "the all stream needs the dev token"))
+      .on("GET runs", { total: 1, runs: [running("r_p", { agent: "orders" })], next_before: null })
+    renderApp("/live")
+    expect(await screen.findByText(POLLING_LINE)).toBeTruthy()
+    expect(document.querySelector('[data-live-mode="polling"]')).toBeTruthy()
+    expect(await screen.findByText("r_p")).toBeTruthy()
+    expect(studio.calls("POST live-grant").some((g) => (g.body as { all?: boolean }).all)).toBe(true)
+    expect(FakeEventSource.open().some((s) => new URL(s.url).searchParams.has("all"))).toBe(false)
+  })
+})
+
 describe("without live_all", () => {
   it("a panel token: polls every 5 s, says why, opens no stream", async () => {
     const tok = panelToken("playground")
@@ -327,6 +376,65 @@ describe("cancel", () => {
     await waitFor(() => expect(within(rowOf("r_pg")!).getByText("failed")).toBeTruthy())
     expect(within(rowOf("r_pg")!).queryByText("cancelling…")).toBeNull()
     await waitFor(() => expect(toastTitles()).toContain("run r_pg cancelled · ended failed"))
+  })
+
+  /** A playground row with its cancel sent (the 202), "cancelling…" showing. */
+  async function sentCancel(over: Partial<RunRow> = {}) {
+    studio.on("POST runs/r_pg/cancel", () =>
+      new Response(JSON.stringify({ ...golden<Record<string, unknown>>("cancel"), run_id: "r_pg" }), {
+        status: 202,
+        headers: { "Content-Type": "application/json" },
+      })
+    )
+    const page = await openPage()
+    act(() => {
+      page.es.emit("run", { run: running("r_pg", { playground: true, agent: "orders", ...over }) }, "1")
+      page.es.emit("run", { run: running("r_other", { agent: "research" }) }, "2")
+    })
+    await waitFor(() => expect(rowOf("r_pg")).toBeTruthy())
+    fireEvent.click(within(rowOf("r_pg")!).getByRole("button", { name: "cancel run r_pg" }))
+    fireEvent.click(within(rowOf("r_pg")!).getByRole("button", { name: "confirm cancel run r_pg" }))
+    await waitFor(() => expect(within(rowOf("r_pg")!).getByText("cancelling…")).toBeTruthy())
+    return page
+  }
+  const ended = (status: RunRow["status"]) => ({
+    run: running("r_pg", {
+      playground: true,
+      agent: "orders",
+      status,
+      finished: new Date().toISOString(),
+      last_seen: new Date(Date.now() + 1_000).toISOString(),
+    }),
+  })
+
+  it("a cancel that sees no end in 30 s gives the button back: no end seen — cancel again", async () => {
+    await sentCancel()
+    // Still waiting a tick later.
+    await new Promise((r) => setTimeout(r, 1200))
+    expect(within(rowOf("r_pg")!).getByText("cancelling…")).toBeTruthy()
+    const real = Date.now()
+    vi.spyOn(Date, "now").mockImplementation(() => real + CANCEL_WAIT_MS + 1_000)
+    const again = await waitFor(() => within(rowOf("r_pg")!).getByRole("button", { name: "cancel run r_pg" }))
+    expect(again.getAttribute("title")).toBe(CANCEL_AGAIN)
+    expect(within(rowOf("r_pg")!).queryByText("cancelling…")).toBeNull()
+  })
+
+  it("a cancelled run that ends while the filter hides it still lets go, and the toast says so", async () => {
+    const { es } = await sentCancel()
+    fireEvent.change(screen.getByLabelText("filter the runs by agent or status"), { target: { value: "research" } })
+    await waitFor(() => expect(rowOf("r_pg")).toBeNull())
+    act(() => es.emit("run", ended("failed"), "3"))
+    await waitFor(() => expect(toastTitles()).toContain("run r_pg cancelled · ended failed"))
+    fireEvent.change(screen.getByLabelText("filter the runs by agent or status"), { target: { value: "" } })
+    await waitFor(() => expect(within(rowOf("r_pg")!).getByText("failed")).toBeTruthy())
+    expect(within(rowOf("r_pg")!).queryByText("cancelling…")).toBeNull()
+  })
+
+  it("a run that ends otherwise while cancelling: the toast says how it ended, not cancelled", async () => {
+    const { es } = await sentCancel()
+    act(() => es.emit("run", ended("succeeded"), "3"))
+    await waitFor(() => expect(toastTitles()).toContain("run r_pg ended succeeded"))
+    expect(toastTitles().some((t) => t.includes("cancelled"))).toBe(false)
   })
 
   it("an armed cancel disarms after 3 s", async () => {

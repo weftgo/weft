@@ -8,7 +8,9 @@
 // backfilled: a run already running when the page opened says nothing
 // until its next write). Event frames keep its live figures (H6.1's
 // rule): the step is the last step_start's or step_finish's index (in
-// flight between the two), tokens so far the sum of step_finish usage,
+// flight between the two), tokens so far the sum of step_finish usage
+// kept per step index (a re-delivered step_finish — a resume's backfill
+// past live.ts's dedup window — replaces its step's, never adds),
 // TTFT the last step_finish's ttft_ms. Cost is the row's own block —
 // unknown while running (A5.1: usage arrives at run end), known on the
 // final run frame. A row that ended stays GRACE_MS, then drops (unless
@@ -21,6 +23,10 @@ export const LIVE_GRACE_MS = 30_000
 
 /** How long an armed cancel waits for its confirming click. */
 export const CANCEL_CONFIRM_MS = 3_000
+
+/** How long a sent cancel shows "cancelling…" without seeing the run
+ * end (a cancel is best effort): then the button is back. */
+export const CANCEL_WAIT_MS = 30_000
 
 /** The polling fallback's interval (no all stream for this caller). */
 export const LIVE_POLL_MS = 5_000
@@ -35,8 +41,13 @@ export interface LiveStats {
   step: number | null
   /** A step_start (or a tool call) with no step_finish after it yet. */
   inFlight: boolean
+  /** The sums of perStep (and of unindexed). */
   input: number
   output: number
+  /** Each step's usage, by step index (a re-delivery replaces). */
+  perStep: Record<number, { input: number; output: number }>
+  /** Usage from step_finish frames without an index (summed). */
+  unindexed: { input: number; output: number }
   /** At least one step_finish carried usage. */
   sawUsage: boolean
   ttftMs: number | null
@@ -116,6 +127,8 @@ export function applyRecord(state: LiveRows, rec: LiveRecord, now = Date.now()):
         inFlight: false,
         input: 0,
         output: 0,
+        perStep: {},
+        unindexed: { input: 0, output: 0 },
         sawUsage: false,
         ttftMs: null,
         partial: ev?.type !== "run_start",
@@ -133,8 +146,17 @@ export function applyRecord(state: LiveRows, rec: LiveRecord, now = Date.now()):
       if (typeof ev.index === "number") s.step = Math.max(s.step ?? -1, ev.index)
       s.inFlight = false
       if (ev.usage && typeof ev.usage === "object") {
-        s.input += num(ev.usage.input_tokens)
-        s.output += num(ev.usage.output_tokens)
+        const u = { input: num(ev.usage.input_tokens), output: num(ev.usage.output_tokens) }
+        if (typeof ev.index === "number") s.perStep = { ...s.perStep, [ev.index]: u }
+        else s.unindexed = { input: s.unindexed.input + u.input, output: s.unindexed.output + u.output }
+        let input = s.unindexed.input
+        let output = s.unindexed.output
+        for (const v of Object.values(s.perStep)) {
+          input += v.input
+          output += v.output
+        }
+        s.input = input
+        s.output = output
         s.sawUsage = true
       }
       if (typeof ev.ttft_ms === "number" && ev.ttft_ms > 0) s.ttftMs = ev.ttft_ms

@@ -6,14 +6,16 @@
 // the side pane) and, under capability "cancel", the cancel verb:
 // runtime-started (playground) runs only, an inline confirm (a second
 // click within CANCEL_CONFIRM_MS — no window.confirm), "cancelling…"
-// until the run's failed row arrives, and the server's refusal toasted
-// in its own words.
+// until the run's end arrives (looked for over every row, a filtered-out
+// one included) or CANCEL_WAIT_MS pass without it — then the button is
+// back, "no end seen — cancel again" (a cancel is best effort) — and the
+// server's refusal toasted in its own words.
 import { useEffect, useState } from "react"
 import { Link } from "@tanstack/react-router"
 
 import { ApiError, postCancel } from "@/lib/api"
 import { duration, elapsed, relativeTime, tokens as fmtTokens } from "@/lib/format"
-import { CANCEL_CONFIRM_MS, costFieldsOf, ended, stepText, tokensOf } from "@/lib/live-rows"
+import { CANCEL_CONFIRM_MS, CANCEL_WAIT_MS, costFieldsOf, ended, stepText, tokensOf } from "@/lib/live-rows"
 import type { LiveRowView } from "@/lib/live-rows"
 import { runLink, sessionLink } from "@/lib/links"
 import { notify } from "@/lib/notify"
@@ -33,15 +35,22 @@ import {
 /** The disabled cancel's words on an app-owned run. */
 export const APP_RUN_CANCEL = "the app's own run: cancel arrives with F4"
 
+/** The ready button's title once a sent cancel saw no end in
+ * CANCEL_WAIT_MS. */
+export const CANCEL_AGAIN = "no end seen — cancel again"
+
 let presses = 0
 
 function CancelCell({
   run,
   cancelling,
+  stale,
   onCancelling,
 }: {
   run: LiveRowView["run"]
   cancelling: boolean
+  /** A sent cancel saw no end in CANCEL_WAIT_MS. */
+  stale: boolean
   onCancelling: (id: string, on: boolean) => void
 }) {
   const [armed, setArmed] = useState(false)
@@ -116,7 +125,9 @@ function CancelCell({
       size="xs"
       onClick={press}
       aria-label={armed ? `confirm cancel run ${run.id}` : `cancel run ${run.id}`}
-      title={armed ? "click again to cancel this run" : "ask the runtime that started this run to stop it"}
+      title={
+        armed ? "click again to cancel this run" : stale ? CANCEL_AGAIN : "ask the runtime that started this run to stop it"
+      }
       data-cancel={armed ? "armed" : "ready"}
     >
       {armed ? "confirm cancel" : "cancel"}
@@ -126,12 +137,16 @@ function CancelCell({
 
 export function LiveTable({
   rows,
+  allRows,
   now,
   peek,
   onPeek,
   canCancel,
 }: {
   rows: LiveRowView[]
+  /** Every row the page holds, the filter aside: where a cancelled
+   * run's end is looked for (default: rows). */
+  allRows?: LiveRowView[]
   /** The clock the elapsed cells read (the page ticks it). */
   now: number
   /** The peeked run id, if any. */
@@ -141,25 +156,42 @@ export function LiveTable({
   canCancel: boolean
 }) {
   const priced = useCostCapable()
-  const [cancelling, setCancelling] = useState<Partial<Record<string, true>>>({})
+  // A sent cancel, by run: when it was sent (Date.now()).
+  const [cancelling, setCancelling] = useState<Partial<Record<string, number>>>({})
   const onCancelling = (id: string, on: boolean) =>
     setCancelling((cur) => {
-      if (on === Boolean(cur[id])) return cur
+      if (!on && cur[id] === undefined) return cur
       const next = { ...cur }
-      if (on) next[id] = true
+      if (on) next[id] = Date.now()
       else delete next[id]
       return next
     })
-  // A cancelled run's end is its failed row: the cell lets go, and the
-  // toast says it ended.
+  // A cancelled run's end is its row ending — failed, or another end
+  // the cancel raced: the cell lets go, and the toast says how it ended.
+  // Every row is looked at, not the filtered ones only.
+  const watched = allRows ?? rows
   useEffect(() => {
-    for (const r of rows) {
-      if (cancelling[r.run.id] && ended(r.run)) {
+    for (const r of watched) {
+      if (cancelling[r.run.id] !== undefined && ended(r.run)) {
         onCancelling(r.run.id, false)
-        notify({ kind: "cancel", runID: r.run.id, n: ++presses, outcome: "cancelled" })
+        notify({
+          kind: "cancel",
+          runID: r.run.id,
+          n: ++presses,
+          outcome: "ended",
+          status: r.run.pending > 0 ? "parked" : r.run.status,
+        })
       }
     }
-  }, [rows, cancelling])
+  }, [watched, cancelling])
+  const waiting = (id: string) => {
+    const at = cancelling[id]
+    return at !== undefined && now - at < CANCEL_WAIT_MS
+  }
+  const staleCancel = (id: string) => {
+    const at = cancelling[id]
+    return at !== undefined && now - at >= CANCEL_WAIT_MS
+  }
 
   return (
     <Table aria-label="runs streaming now">
@@ -286,7 +318,7 @@ export function LiveTable({
                     peek
                   </Button>
                   {canCancel ? (
-                    <CancelCell run={r} cancelling={Boolean(cancelling[r.id])} onCancelling={onCancelling} />
+                    <CancelCell run={r} cancelling={waiting(r.id)} stale={staleCancel(r.id)} onCancelling={onCancelling} />
                   ) : null}
                 </div>
               </TableCell>

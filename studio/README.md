@@ -1285,7 +1285,10 @@ heads the story (range and number box, `n`; one `?step=` history entry
 per scrub, written in place while the drag goes on); and the page keeps the stream's
 last 50,000 events in a ring (`lib/ring.ts`'s `EVENT_RING_CAPACITY`) — a
 run past it says which positions it shows, the earlier ones read from
-`api/runs/{id}/events?after=`, and turns replay off:
+`api/runs/{id}/events?after=`, and turns replay off. Live deltas are folded
+into the story's words but never kept in the ring: they have no position on
+the API, so the window's positions, its `base` and the eviction note count
+positioned events only:
 
 ![run page with the trace, light theme](screenshots/run-light.png)
 

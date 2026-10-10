@@ -185,6 +185,10 @@ func (s *Server) registerGroups() {
 			},
 		})
 	}
+	// The pricing table (plan A5): GET /api/settings/pricing, the
+	// effective table read-only. Always present; cost itself rides the
+	// rows, priced at read time.
+	s.addGroup(pricingGroup())
 	// Deletion (plan A7, §13.13): DELETE /api/runs/{id} and
 	// /api/sessions/{id}, obsdb's tables only. Always present; the
 	// dev token's (or loopback's in setup A), never a panel token's.

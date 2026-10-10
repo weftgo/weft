@@ -71,8 +71,18 @@ var overrideNames = map[string]string{
 func TestAuthMatrix(t *testing.T) {
 
 	const serverTok, ingestTok = "srv-token", "ingest-token"
+	// A pricing override file (plan A5): its path is db.path's — the
+	// server token's alone, on api/meta and the settings route.
+	pricingPath := t.TempDir() + "/prices.json"
+	if err := os.WriteFile(pricingPath, []byte(`{"dated":"2026-10-01","models":[{"provider":"wefttest","model_glob":"*","input":1,"output":2}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	prices, err := LoadPricing(pricingPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	srv := New(Open(t.TempDir()+"/matrix.db"), Playground(true), Token(serverTok),
-		IngestToken(ingestTok), Manifest([]byte(`{"weft":1,"agents":[]}`)))
+		IngestToken(ingestTok), Manifest([]byte(`{"weft":1,"agents":[]}`)), Pricing(prices))
 	t.Cleanup(func() { _ = srv.Close() })
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
@@ -374,15 +384,19 @@ func TestAuthMatrix(t *testing.T) {
 				}
 				return forbidden403
 			}},
-		{name: "GET /api/search?min_cost=1", method: "GET", path: fixed("/api/search?q=secret&min_cost=1"), resources: one, want: anyValid(http.StatusBadRequest)},
-		{name: "GET /api/search?sort=cost", method: "GET", path: fixed("/api/search?sort=cost"), resources: one, want: anyValid(http.StatusBadRequest)},
+		// Cost (plan A5): min_cost and sort=cost are live, scoped as the
+		// rest of search (a panel token prices its own public id only).
+		{name: "GET /api/search?min_cost=1", method: "GET", path: fixed("/api/search?q=secret&min_cost=1"), resources: one, want: anyValid(ok)},
+		{name: "GET /api/search?sort=cost", method: "GET", path: fixed("/api/search?sort=cost"), resources: one, want: anyValid(ok)},
 		{name: "GET /api/search?public_id=<B>&min_cost=1", method: "GET", path: fixed("/api/search?public_id=pub_b&min_cost=1"), resources: []string{"B"},
 			want: func(kind, _ string) int {
 				if kind == "server" {
-					return http.StatusBadRequest
+					return ok
 				}
 				return forbidden403
 			}},
+		// The pricing table (plan A5): every valid identity reads it.
+		{name: "GET /api/settings/pricing", method: "GET", path: fixed("/api/settings/pricing"), resources: one, want: anyValid(ok)},
 		{name: "GET /api/runs?parent=<B's run>", method: "GET", path: fixed("/api/runs?parent=run_b"), resources: one, want: anyValid(ok)}, // forced onto the token's public id: empty for a panel token (pinned below)
 		{name: "GET /api/runs/{id}", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] }, resources: all, want: scoped(ok)},
 		{name: "GET /api/runs/{id}/events", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/events" }, resources: all, want: scoped(ok)},
@@ -1049,8 +1063,29 @@ func TestAuthMatrix(t *testing.T) {
 			ManifestCheck *struct {
 				Agents int `json:"agents"`
 			} `json:"manifest_check"`
+			Pricing map[string]any `json:"pricing"`
 		}
 		decode(t, string(b), &meta)
+		// pricing.path (plan A5) follows db.path: the server token's alone;
+		// the rest of the block is everyone's — and so is the settings
+		// route, whose path follows the same rule.
+		if p, has := meta.Pricing["path"]; has != (id.kind == "server") || (has && p != pricingPath) ||
+			meta.Pricing["source"] != "file" || meta.Pricing["dated"] != "2026-10-01" || meta.Pricing["models"] != float64(1) {
+			t.Errorf("GET /api/meta as %s: pricing = %v, want source file, dated, 1 model, path only for the server token", id.name, meta.Pricing)
+		}
+		preq, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/settings/pricing", nil)
+		preq.Header.Set("Authorization", "Bearer "+id.token)
+		presp, err := http.DefaultClient.Do(preq)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pb, _ := io.ReadAll(presp.Body)
+		_ = presp.Body.Close()
+		var settings map[string]any
+		decode(t, string(pb), &settings)
+		if _, has := settings["path"]; presp.StatusCode != http.StatusOK || has != (id.kind == "server") || settings["source"] != "file" {
+			t.Errorf("GET /api/settings/pricing as %s = %d %s, want 200, source file, path only for the server token", id.name, presp.StatusCode, pb)
+		}
 		if meta.AuthRequired == nil || !*meta.AuthRequired {
 			t.Errorf("GET /api/meta as %s: auth_required = %v, want true (a Token is configured)", id.name, meta.AuthRequired)
 		}

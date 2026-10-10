@@ -190,10 +190,15 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    running (interrupted included) last seen more than d ago, once at New then every
 //    //    min(d/10, 1h), floor 1 min, one Debug line per sweep; off by default; d ≥ 1h (New panics
 //    //    below: a 30 s silence reads interrupted); runs until Close — New + Close, not Handler — or a
-//    //    closed DB); routes register through
+//    //    closed DB)/Pricing (Pricing(studio.PricingTable{Dated, Models: []studio.ModelPrice{{Provider,
+//    //    ModelGlob (path.Match over provider/model, first match wins), Input, Output, CachedInput?,
+//    //    CacheWrite?, Reasoning?}}}) — USD per 1M; default studio.DefaultPricing() = studio/pricing.json,
+//    //    dated, go generate ./studio/... from internal/pricingdata; else WEFT_PRICING=<path>
+//    //    (studio.LoadPricing; replaces the table whole; malformed → New panics naming path + field)); routes register through
 //    //    routes.go's groups (panel.go/playground.go add theirs in their own files).
 //    // API: meta (db {kind, path, size: path/size to loopback and the server token only},
-//    //    auth_required, content, runtimes, manifest_check, pricing, retention (Retain's Go
+//    //    auth_required, content, runtimes, manifest_check, pricing {source default|file|option, path?
+//    //    (db.path's rule), dated, models}, retention (Retain's Go
 //    //    duration string, null when off) — `weft doctor` prints it
 //    //    line by line; capabilities_off {capability: why} names the option/flag that left one off;
 //    //    manifest_sources), manifest (the weft.json, else the manifests runtimes registered with —
@@ -203,15 +208,22 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    runs too; each row's prompt_preview: the turn's own prompt (input record's last user text — a resume's new prompt when it carries one — else first), 200 runes, absent content-off),
 //    //    search (?q= terms over prompt/answer/error/tool names — substrings, AND, a "phrase" one
 //    //    term; agent/tool/status/model/error/since/until/min_tokens/sort=started|duration|tokens/
-//    //    limit/offset + runs' filters; min_cost and sort=cost 400 unsupported until A5; run rows
+//    //    limit/offset + runs' filters; min_cost (USD, own + delegated; unpriced never matches) and
+//    //    sort=cost (most first, unpriced last) applied in Studio over the match's first 2,000 runs,
+//    //    cost_sort_cap when cut; run rows
 //    //    only, scoped like runs; capability "search" — obsdb.Searcher: SQLite FTS5 trigram,
 //    //    migration 0004; ClickHouse one derivation per search + positionCaseInsensitiveUTF8, no migration; short terms ASCII-folded on SQLite), runs/{id} (with its compactions: run-scope views, then session markers),
 //    //    runs/{id}/events|transcript|spans|requests|tools (each requests row's `raw`: the attempt's wire pair under otel.RawBodies, else null + raw_badge not_recorded; transcript?step=N adds what step N's
 //    //    model call carried — the record's truth, the replay prefix for N > 0 (from_step 0 re-runs
 //    //    step 0's PrepareStep), compacted_at naming its view; null under hidden for a read token, ADR 0029),
 //    //    runs/{id}/steps/{n} (one step
-//    //    assembled: request, attempts, events, tool calls, children, holes; capability
-//    //    "steps"), runs/{id}/export?format=json|jsonl|otlp|wefttest (the whole run as one
+//    //    assembled: request, attempts, events, tool calls, children, holes, its own call's cost;
+//    //    capability "steps"), cost on every run row (plan A5, read time, never stored): cost_usd
+//    //    (own: usage minus the subagent children's, at its model's rates; null + cost_badge
+//    //    unpriced|unknown + cost_reason, never 0), cost_known, cache exact|unknown (no splits
+//    //    reported), delegated_cost_usd/_known/_reason (descendants' own, never folded); session rows
+//    //    cost_usd = turns' own + delegated (no pool-child figure); settings/pricing (the effective
+//    //    table in the file's shape + source, path?; capability "pricing", every identity reads it), runs/{id}/export?format=json|jsonl|otlp|wefttest (the whole run as one
 //    //    download, capability "export"; otlp re-ingests through /v1/*, wefttest is a zip
 //    //    wefttest.Replay reads — a compacted step keys on its view, noted compacted_at),
 //    //    runs/{id}/logs?from=&limit=&severity= (the app's own log lines under the run's
@@ -300,7 +312,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    --force] (fixtures where wefttest.Replay reads them; --force replaces, never
 //    //    merges); weft vacuum [--db --retain] (one sweep when a retention is given, then VACUUM
 //    //    / OPTIMIZE TABLE … FINAL; `make vacuum` on $WEFT_DB or ./.weft/weft.db); weft version.
-//    //    --retain (WEFT_RETAIN) on weft studio and weft dev is studio.Retain (under 1h: exit 2).
+//    //    --retain (WEFT_RETAIN) on weft studio and weft dev is studio.Retain (under 1h: exit 2);
+//    //    --pricing <path> (WEFT_PRICING; the flag wins) is studio.Pricing(studio.LoadPricing(path))
+//    //    (a malformed file: exit 1 naming the path and the field).
 //    //    weft dev [studio's flags --no-watch --watch dir] [-- go run ./cmd/app] (default: go run .):
 //    //    Studio in-process + the app with WEFT_ENV=dev (kept if set), WEFT_STUDIO_URL,
 //    //    WEFT_STUDIO_TOKEN, WEFT_DB set (plain env vars the app may set itself), restarted

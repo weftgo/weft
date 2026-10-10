@@ -24,8 +24,12 @@ import (
 // then GET /api/search. A run matches when every term is in its prompt,
 // answer, error or a tool name — each term in any of them — and only
 // those: a system prompt or a tool result holding the words is no hit.
+// The gate's "sorted by cost" (plan A5): the scripted model is priced
+// ($1 input, $2 output per 1M), and sort=cost orders the hits by bill.
 func TestSearchRefundFailedAcrossRealRuns(t *testing.T) {
-	srv := studio.New(studio.Open(filepath.Join(t.TempDir(), "weft.db")))
+	srv := studio.New(studio.Open(filepath.Join(t.TempDir(), "weft.db")), studio.Pricing(studio.PricingTable{
+		Dated: "2026-10-01", Models: []studio.ModelPrice{{Provider: "wefttest", ModelGlob: "*", Input: 1, Output: 2}},
+	}))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	t.Cleanup(func() { _ = srv.Close() })
@@ -58,7 +62,10 @@ func TestSearchRefundFailedAcrossRealRuns(t *testing.T) {
 		}
 		return res.ID
 	}
-	answer := run("support", "Where is my parcel?", wefttest.Say("Your refund failed to process; retrying."))
+	// The answer run bills more than the error run (1,000 / 500 tokens
+	// against the scripted 10 / 5): sort=cost puts it first.
+	answer := run("support", "Where is my parcel?",
+		wefttest.Say("Your refund failed to process; retrying.").WithUsage(core.Usage{InputTokens: 1000, OutputTokens: 500}))
 	time.Sleep(5 * time.Millisecond)
 	errored := run("support", "Refund order 7 please",
 		wefttest.ToolCalls(wefttest.Call{Name: "issue_refund", Args: `{"order_id":"7"}`}),
@@ -146,6 +153,16 @@ func TestSearchRefundFailedAcrossRealRuns(t *testing.T) {
 	if got := search(q.Encode()); len(got) != 2 {
 		t.Errorf("search 'refund failed' by duration = %v, want the same two runs", got)
 	}
+	q.Set("sort", "cost")
+	if got, want := search(q.Encode()), []string{answer, errored}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Errorf("search 'refund failed' sorted by cost = %v, want %v (the $0.002 answer run, then the error run)", got, want)
+	}
+	q.Del("sort")
+	q.Set("min_cost", "0.001")
+	if got := search(q.Encode()); strings.Join(got, ",") != answer {
+		t.Errorf("search 'refund failed' with min_cost=0.001 = %v, want the answer run alone", got)
+	}
+	q.Del("min_cost")
 	if got := search("tool=issue_refund&q=failed"); strings.Join(got, ",") != errored {
 		t.Errorf("tool=issue_refund&q=failed = %v, want %s", got, errored)
 	}

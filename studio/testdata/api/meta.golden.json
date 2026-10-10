@@ -17,6 +17,7 @@
     "diff",
     "traces",
     "search",
+    "pricing",
     "delete",
     "live",
     "ingest",
@@ -41,7 +42,11 @@
       "note": "the latest run carries no content mark: no events stored, a weft older than the mark, or a non-weft exporter"
     }
   },
-  "pricing": false,
+  "pricing": {
+    "source": "default",
+    "dated": "2026-10-10",
+    "models": 43
+  },
   "retention": null,
   "runtimes": 0,
   "manifest_check": {

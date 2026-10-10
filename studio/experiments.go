@@ -126,6 +126,7 @@ func (s *Server) serveExperiment(w http.ResponseWriter, r *http.Request) {
 	// Every run, not the default page's newest 50: a 3×20 matrix is 60.
 	query := obsdb.RunQuery{ExperimentID: id, Limit: 500}
 	runs := []runRow{}
+	c := s.coster(r.Context())
 	for pages := 0; pages < experimentRunPages; pages++ {
 		page, err := s.db.Runs(r.Context(), query)
 		if err != nil {
@@ -133,7 +134,7 @@ func (s *Server) serveExperiment(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		for _, rec := range page.Runs {
-			runs = append(runs, row(rec))
+			runs = append(runs, c.row(rec))
 		}
 		if page.NextBefore == nil || len(page.Runs) == 0 {
 			break

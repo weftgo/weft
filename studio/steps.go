@@ -80,10 +80,14 @@ type stepDoc struct {
 	// Events are the step's durable events, pos ordered, from its
 	// step_start up to the next step's (a steer delivered after the
 	// step included); run_start and run_finish are the run's own.
-	Events     []posEvent      `json:"events"`
-	ToolCalls  []stepToolCall  `json:"tool_calls"`
-	Children   []stepChild     `json:"children"`
-	Usage      core.Usage      `json:"usage"`
+	Events    []posEvent     `json:"events"`
+	ToolCalls []stepToolCall `json:"tool_calls"`
+	Children  []stepChild    `json:"children"`
+	Usage     core.Usage     `json:"usage"`
+	// The step's cost (plan A5): its own model call (usage) at the
+	// model it requested, priced at read time by the step route
+	// (priceStep); absent from the diff route's internal use.
+	*costFields
 	Compaction *stepCompaction `json:"compaction,omitempty"`
 	Holes      []stepHole      `json:"holes"`
 
@@ -185,14 +189,17 @@ type stepSpan struct {
 }
 
 // stepChild is a child run one of the step's calls started (ADR 0014's
-// weft.parent.run.id / weft.parent.call.id). The plan's cost field is
-// omitted until A5 adds costs: it is absent, not zero.
+// weft.parent.run.id / weft.parent.call.id), with its cost as its run
+// row carries it (plan A5): own and delegated, never folded.
 type stepChild struct {
 	ID     string     `json:"id"`
 	CallID string     `json:"call_id"`
 	Agent  string     `json:"agent"`
 	Status string     `json:"status"`
 	Usage  core.Usage `json:"usage"`
+	costFields
+	delegatedFields
+	rec obsdb.RunRow // the child's row, for priceStep
 }
 
 // stepCompaction is the run-scope compaction view the step's request
@@ -521,7 +528,28 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 		writeStepError(w, r, id, n, err)
 		return
 	}
+	s.priceStep(r.Context(), &doc, sr.det)
 	writeJSON(w, r, http.StatusOK, doc)
+}
+
+// priceStep sets the step's cost (plan A5): its own model call at the
+// model it requested (the run's model when no request names one), and
+// each child's own and delegated figures as its run row carries them.
+func (s *Server) priceStep(ctx context.Context, doc *stepDoc, det obsdb.RunDetail) {
+	provider, model := doc.Model.Provider, doc.Model.Requested
+	if model == "" {
+		provider, model = det.Provider, det.Model
+	} else if provider == "" {
+		provider = det.Provider
+	}
+	f := s.pricing.price(provider, model, doc.Usage).fields()
+	doc.costFields = &f
+	c := s.coster(ctx)
+	for i := range doc.Children {
+		rc := c.cost(doc.Children[i].rec)
+		doc.Children[i].costFields = rc.own.fields()
+		doc.Children[i].delegatedFields = rc.delegated.delegatedFields()
+	}
 }
 
 // assembleStep is step n of sr's run as the step route serves it;
@@ -775,7 +803,7 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 			c.ChildRunID = kid.ID
 		}
 		doc.Children = append(doc.Children, stepChild{
-			ID: kid.ID, CallID: kid.ParentCallID, Agent: kid.Agent, Status: string(kid.Status), Usage: kid.Usage,
+			ID: kid.ID, CallID: kid.ParentCallID, Agent: kid.Agent, Status: string(kid.Status), Usage: kid.Usage, rec: kid,
 		})
 	}
 	for _, cid := range order {

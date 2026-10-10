@@ -336,7 +336,7 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 			if key, ok := liveDedupKey(f); ok && sent.seen(key) {
 				continue
 			}
-			writeFrame(sw, f)
+			writeFrame(sw, f, s.coster(ctx))
 		}
 	}
 }
@@ -388,7 +388,10 @@ func liveDedupKey(f obsdb.Frame) (liveKey, bool) {
 }
 
 // writeFrame writes one SSE frame with the hub's Seq as its id.
-func writeFrame(sw *sseWriter, f obsdb.Frame) {
+//
+// A run frame's row carries its cost (plan A5) as every run row does:
+// c reads the run's children to tell its own usage from theirs.
+func writeFrame(sw *sseWriter, f obsdb.Frame, c *coster) {
 	switch f.Kind {
 	case obsdb.FrameRecord:
 		if f.Record == nil {
@@ -415,7 +418,7 @@ func writeFrame(sw *sseWriter, f obsdb.Frame) {
 		if f.Run == nil {
 			return
 		}
-		rowJSON, err := json.Marshal(row(*f.Run))
+		rowJSON, err := json.Marshal(c.row(*f.Run))
 		if err != nil {
 			return
 		}

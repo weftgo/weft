@@ -3,7 +3,7 @@
 //
 //	go install github.com/weftgo/weft/cmd/weft@latest
 //
-//	weft studio [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--no-playground] [--retain]
+//	weft studio [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--no-playground] [--retain] [--pricing]
 //	weft dev [studio's flags] [--no-watch] [--watch dir] [-- command args…]
 //	weft runs [--agent] [--since] [--failed] [--limit] [--json]
 //	weft open <run id> [--open] [--with-token]
@@ -21,7 +21,8 @@
 // Every connection flag mirrors an environment variable one to one: --addr
 // WEFT_STUDIO_ADDR, --db WEFT_DB, --token WEFT_STUDIO_TOKEN, --manifest
 // WEFT_MANIFEST, --url WEFT_STUDIO_URL (the Studio the API clients talk
-// to, default http://127.0.0.1:7331), --retain WEFT_RETAIN.
+// to, default http://127.0.0.1:7331), --retain WEFT_RETAIN, --pricing
+// WEFT_PRICING.
 //
 // # weft studio
 //
@@ -178,6 +179,15 @@
 // every part, heavy on a large database). `make vacuum` runs it on
 // $WEFT_DB, else ./.weft/weft.db.
 //
+// # Pricing
+//
+// Studio prices usage at read time (plan A5) with the table shipped in
+// the studio package (studio/pricing.json, dated). --pricing (or
+// WEFT_PRICING) on weft studio and weft dev names a file of the same
+// shape that replaces it whole — studio.LoadPricing; a file that does
+// not load is a start error (exit 1) naming the path and the field.
+// Nothing is fetched: prices are a plain file.
+//
 // `weft version` prints the weft version (version.Runtime: the module
 // tag this binary was built from).
 //
@@ -234,7 +244,7 @@ func usageError(format string, args ...any) error {
 const usage = `weft — the weft framework's command line
 
 Usage:
-  weft studio  [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--no-playground] [--retain]
+  weft studio  [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--no-playground] [--retain] [--pricing]
   weft dev     [studio's flags] [--no-watch] [--watch dir] [-- command args…]   (default: go run .)
   weft runs    [--url] [--token] [--agent] [--since] [--failed] [--limit] [--json]
   weft open    <run id> [--url] [--token] [--open] [--with-token]
@@ -245,7 +255,7 @@ Usage:
 
 Environment (each mirrors a flag): WEFT_STUDIO_ADDR (--addr), WEFT_DB (--db),
 WEFT_STUDIO_TOKEN (--token), WEFT_MANIFEST (--manifest), WEFT_STUDIO_URL (--url),
-WEFT_RETAIN (--retain; a Go duration of at least 1h, 0 = off).
+WEFT_RETAIN (--retain; a Go duration of at least 1h, 0 = off), WEFT_PRICING (--pricing).
 Run "weft <command> -h" for a command's flags.
 `
 
@@ -355,6 +365,7 @@ func runStudio(args []string, stdout, stderr io.Writer) error {
 	rotate := fs.Bool("rotate-token", false,
 		"write a new stable dev token beside the database (<db>.token) before serving; an action, so no environment mirror")
 	retain := retainFlag(fs, "to keep runs after they were last seen: older ones that are not running are deleted from studio's tables")
+	pricing := pricingFlag(fs)
 	if err := parse(fs, args); err != nil {
 		return err
 	}
@@ -362,6 +373,10 @@ func runStudio(args []string, stdout, stderr io.Writer) error {
 		return usageError("studio takes no arguments, got %q", fs.Args())
 	}
 	retainOpts, retainNote, err := retainOptions(*retain)
+	if err != nil {
+		return err
+	}
+	pricingOpts, pricingNote, err := pricingOptions(*pricing)
 	if err != nil {
 		return err
 	}
@@ -375,8 +390,9 @@ func runStudio(args []string, stdout, stderr io.Writer) error {
 	}
 	opts = append(opts, studio.Playground(!*noPlayground))
 	opts = append(opts, retainOpts...)
+	opts = append(opts, pricingOpts...)
 	return serveWith(*db, wantAddr(*addr, defaultAddr), *token, stdout,
-		afterBoot{notes: []string{note, retainNote}, open: *open, rotate: *rotate}, opts...)
+		afterBoot{notes: []string{note, retainNote, pricingNote}, open: *open, rotate: *rotate}, opts...)
 }
 
 // want is the address the command wants and whether it is pinned.

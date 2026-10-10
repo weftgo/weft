@@ -364,7 +364,7 @@ func TestExportOTLPRoundTrip(t *testing.T) {
 	}
 }
 
-// withoutChildren is a json export with the run's child rows dropped,
+// withoutChildren is a json export with the run's child rows (and the cost split they decide) dropped,
 // re-indented for the diff.
 func withoutChildren(t *testing.T, body []byte) string {
 	t.Helper()
@@ -372,6 +372,12 @@ func withoutChildren(t *testing.T, body []byte) string {
 	decode(t, string(body), &doc)
 	run, _ := doc["run"].(map[string]any)
 	delete(run, "children")
+	// The run's cost split reads its children (plan A5: own usage is its
+	// usage minus theirs, delegated is theirs), which the copy lacks.
+	for _, k := range []string{"cost_usd", "cost_known", "cost_badge", "cost_reason", "cache",
+		"delegated_cost_usd", "delegated_cost_known", "delegated_cost_reason"} {
+		delete(run, k)
+	}
 	b, err := json.MarshalIndent(doc, "", " ")
 	if err != nil {
 		t.Fatal(err)

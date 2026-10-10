@@ -134,8 +134,15 @@ type runRow struct {
 	Pending      int               `json:"pending"`
 	StopReason   string            `json:"stop_reason"`
 	Usage        core.Usage        `json:"usage"`
-	EventCount   int64             `json:"event_count"`
-	MessageCount int64             `json:"message_count"`
+	// The run's cost (plan A5, pricing.go): its own model calls
+	// (cost_usd: its usage minus its subagent children's, at its own
+	// model's rates) and its descendants' (delegated_cost_usd), two
+	// numbers, never folded; null with a badge and a reason when
+	// unpriced, never 0. Computed at read time, never stored.
+	costFields
+	delegatedFields
+	EventCount   int64 `json:"event_count"`
+	MessageCount int64 `json:"message_count"`
 	// DeltaCount is the run's streamed deltas: counted, never stored
 	// (obsdb.RunRow.DeltaCount, a high-water mark over their counter).
 	DeltaCount int64 `json:"delta_count"`
@@ -560,6 +567,11 @@ type sessionRow struct {
 	LastSeen  time.Time  `json:"last_seen"`
 	Status    string     `json:"status"`
 	Usage     core.Usage `json:"usage"`
+	// The session's cost (plan A5): its turns' own + delegated — the
+	// session's usage already includes their subagents. A thread/pool
+	// child is another session, which this row does not link: no
+	// delegated figure here.
+	costFields
 }
 
 func sessRow(r obsdb.SessionRow) sessionRow {
@@ -664,8 +676,9 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := runsPage{Total: page.Total, Runs: make([]runRow, 0, len(page.Runs))}
+	c := s.coster(r.Context())
 	for _, rec := range page.Runs {
-		out.Runs = append(out.Runs, row(rec))
+		out.Runs = append(out.Runs, c.row(rec))
 	}
 	// The cursor is the database's own: it knows whether the page was
 	// cut at its limit. Counting rows here cannot — a page may exceed
@@ -774,7 +787,9 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 		dbError(w, r, "run", id, err)
 		return
 	}
-	doc := runDoc{runRow: row(det.RunRow), Children: s.childRows(r.Context(), det.Children)}
+	c := s.coster(r.Context())
+	c.prime(det.ID, det.Children)
+	doc := runDoc{runRow: c.row(det.RunRow), Children: s.childRows(r.Context(), c, det.Children)}
 	holes, err := s.runHoles(r.Context(), det.RunRow)
 	if err != nil {
 		dbError(w, r, "run", id, err)
@@ -793,10 +808,10 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 // runHoles (plan A10) — the run page's and the export's. A child whose
 // holes cannot be read goes out without them: one unreadable child
 // never fails its parent's page.
-func (s *Server) childRows(ctx context.Context, kids []obsdb.RunRow) []runRow {
+func (s *Server) childRows(ctx context.Context, c *coster, kids []obsdb.RunRow) []runRow {
 	out := make([]runRow, 0, len(kids))
 	for _, kid := range kids {
-		kr := row(kid)
+		kr := c.row(kid)
 		if kh, err := s.runHoles(ctx, kid); err == nil {
 			kr.Holes = kh
 		}
@@ -1154,7 +1169,10 @@ func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 	}
 	out := sessionsPage{Total: page.Total, Sessions: make([]sessionRow, 0, len(page.Sessions))}
 	for _, sr := range page.Sessions {
-		out.Sessions = append(out.Sessions, sessRow(sr))
+		srow := sessRow(sr)
+		sc, _ := s.sessionCost(r.Context(), sr.ID)
+		srow.costFields = sc.fields()
+		out.Sessions = append(out.Sessions, srow)
 	}
 	if page.NextBefore != nil { // the database's own cursor, as in serveRuns
 		next := *page.NextBefore
@@ -1190,8 +1208,10 @@ func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	doc := sessionDoc{sessionRow: sessRow(det.SessionRow), Runs: make([]runRow, 0, len(det.Runs))}
+	sc, c := s.sessionCost(r.Context(), id)
+	doc.costFields = sc.fields()
 	for _, rr := range det.Runs {
-		doc.Runs = append(doc.Runs, row(rr))
+		doc.Runs = append(doc.Runs, c.row(rr))
 	}
 	writeJSON(w, r, http.StatusOK, doc)
 }

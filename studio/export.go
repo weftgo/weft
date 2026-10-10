@@ -267,6 +267,7 @@ type runExport struct {
 	spans       []obsdb.Span
 	runHoles    []stepHole // the run's own (runHoles), as /api/runs/{id} serves them
 	children    []runRow   // the run's children with their holes (childRows), as /api/runs/{id} serves them
+	row         runRow     // the run's own row with its cost, as /api/runs/{id} serves it
 	// hidden: the identity is a read-scoped panel token — the request
 	// block and the compaction views' bodies are not its.
 	hidden bool
@@ -303,7 +304,9 @@ func (s *Server) collectExport(ctx context.Context, id string, hidden bool) (*ru
 	if err != nil {
 		return nil, err
 	}
-	x := &runExport{run: det, hidden: hidden, children: s.childRows(ctx, det.Children)}
+	c := s.coster(ctx)
+	c.prime(det.ID, det.Children)
+	x := &runExport{run: det, hidden: hidden, row: c.row(det.RunRow), children: s.childRows(ctx, c, det.Children)}
 	if x.runHoles, err = s.runHoles(ctx, det.RunRow); err != nil {
 		return nil, err
 	}
@@ -463,7 +466,7 @@ type exportBlock struct {
 }
 
 func (x *runExport) runDoc() runDoc {
-	doc := runDoc{runRow: row(x.run.RunRow), Children: x.children}
+	doc := runDoc{runRow: x.row, Children: x.children}
 	if doc.Children == nil {
 		doc.Children = []runRow{}
 	}

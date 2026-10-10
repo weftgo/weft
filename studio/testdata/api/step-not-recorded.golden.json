@@ -29,6 +29,11 @@
     "input_tokens": 0,
     "output_tokens": 0
   },
+  "cost_usd": null,
+  "cost_known": false,
+  "cost_badge": "unpriced",
+  "cost_reason": "the run reported no model to price",
+  "cache": "unknown",
   "holes": [
     {
       "hole": "gap",

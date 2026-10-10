@@ -12,7 +12,12 @@
       "usage": {
         "input_tokens": 18,
         "output_tokens": 6
-      }
+      },
+      "cost_usd": null,
+      "cost_known": false,
+      "cost_badge": "unpriced",
+      "cost_reason": "a turn is not priced: r_stale (no row of the default pricing table matches wefttest/script); r_fail (no row of the default pricing table matches wefttest/script); r_ok (no row of the default pricing table matches wefttest/script)",
+      "cache": "unknown"
     },
     {
       "id": "s_research",
@@ -25,7 +30,12 @@
       "usage": {
         "input_tokens": 12,
         "output_tokens": 6
-      }
+      },
+      "cost_usd": null,
+      "cost_known": false,
+      "cost_badge": "unpriced",
+      "cost_reason": "a turn is not priced: r_sub (no row of the default pricing table matches wefttest/script)",
+      "cache": "unknown"
     }
   ],
   "next_before": null,

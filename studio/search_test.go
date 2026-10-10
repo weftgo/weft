@@ -95,6 +95,12 @@ func TestSearchRoute(t *testing.T) {
 		{"q=order&limit=1&offset=2", []string{"r_ok"}, 3, -1},
 		{"q=order&offset=9", nil, 3, -1},
 		{"", []string{"r_stale", "r_sub", "r_fail", "r_ok"}, 4, -1},
+		// Cost (plan A5) under the default table: the fixture's
+		// wefttest/script is unpriced, so min_cost matches nothing and
+		// sort=cost keeps the unpriced runs newest first.
+		{"min_cost=0", nil, 0, -1},
+		{"sort=cost", []string{"r_stale", "r_sub", "r_fail", "r_ok"}, 4, -1},
+		{"sort=cost&limit=1&offset=1", []string{"r_sub"}, 4, 2},
 	} {
 		ids, total, next := searchIDs(t, h, "/studio/api/search?"+c.path)
 		if strings.Join(ids, ",") != strings.Join(c.want, ",") || total != c.total {
@@ -107,10 +113,10 @@ func TestSearchRoute(t *testing.T) {
 	for _, c := range []struct {
 		path, code, msg string
 	}{
-		{"min_cost=0.5", "unsupported", "pricing arrives with A5"},
-		{"min_cost=", "unsupported", "pricing arrives with A5"},
-		{"sort=cost", "unsupported", "pricing arrives with A5"},
-		{"sort=price", "bad_request", "sort must be started, duration or tokens"},
+		{"min_cost=", "bad_request", "min_cost must be a non-negative number of USD"},
+		{"min_cost=-1", "bad_request", "min_cost must be a non-negative number of USD"},
+		{"min_cost=NaN", "bad_request", "min_cost must be a non-negative number of USD"},
+		{"sort=price", "bad_request", "sort must be started, duration, tokens or cost"},
 		{"status=done", "bad_request", "status must be"},
 		{"since=yesterday", "bad_request", "since must be RFC 3339"},
 		{"until=1700000000000", "bad_request", "until must be RFC 3339"},

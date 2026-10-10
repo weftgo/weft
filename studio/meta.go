@@ -58,9 +58,10 @@ type metaDoc struct {
 	// (WEFT-DEVTOOLS §8.5 item 6).
 	DebugScope string      `json:"debug_scope,omitempty"`
 	Content    metaContent `json:"content"`
-	// Pricing is whether Studio prices usage (false until a pricing
-	// table exists, plan A5).
-	Pricing bool `json:"pricing"`
+	// Pricing is the table Studio prices usage with (plan A5): its
+	// source (default | file | option), the override file's path under
+	// db.path's rule, its date and its row count.
+	Pricing metaPricing `json:"pricing"`
 	// Retention is Retain's duration as a Go duration string
 	// ("720h0m0s"); null: none configured (the default — everything is
 	// kept). The key is always present.
@@ -182,6 +183,7 @@ func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
 		LiveAll:            mayReadDBPath(s, r),
 		Content:            s.latestContent(r.Context(), id),
 		Runtimes:           s.connectedRuntimes(),
+		Pricing:            s.metaPricing(r),
 	}
 	if s.retain > 0 {
 		r := s.retain.String()

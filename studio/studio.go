@@ -39,6 +39,7 @@ type config struct {
 	playground   bool
 	retain       time.Duration // Retain: 0 = off
 	sweepEvery   time.Duration // the sweeper's interval in tests; 0 = sweepInterval(retain)
+	pricing      *PricingTable // Pricing; New resolves it (resolvePricing), never nil after
 }
 
 // DB serves Studio over db (setup A: DB(otel.LocalDB()) — the same
@@ -214,6 +215,7 @@ func New(opts ...Option) *Server {
 	if c.retain > 0 && c.retain < minRetention {
 		panic("studio: " + retainFloorMsg)
 	}
+	resolvePricing(&c)
 	s := &Server{config: c, now: time.Now, mux: http.NewServeMux(), grantKey: liveGrantKey(c.token)}
 	if c.db == nil {
 		path := c.dbPath

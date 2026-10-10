@@ -1,0 +1,317 @@
+{
+  "dated": "2026-10-10",
+  "note": "Prices are the vendors' public per-1M-token list rates in USD (first-party APIs), read on the dated day. model_glob is a path.Match pattern over provider/model; the first match wins. A missing cached_input, cache_write or reasoning rate prices those tokens at the input or output rate. This file is also the template for a WEFT_PRICING / --pricing override, which replaces this table whole. Generated from studio/internal/pricingdata: edit there, then go generate ./studio/...",
+  "models": [
+    {
+      "provider": "anthropic",
+      "model_glob": "claude-fable-5-1",
+      "input": 10,
+      "output": 50,
+      "cached_input": 0.25,
+      "cache_write": 12.5
+    },
+    {
+      "provider": "anthropic",
+      "model_glob": "claude-mythos-5-1",
+      "input": 10,
+      "output": 50,
+      "cached_input": 0.25,
+      "cache_write": 12.5
+    },
+    {
+      "provider": "anthropic",
+      "model_glob": "claude-fable-5",
+      "input": 10,
+      "output": 50,
+      "cached_input": 1,
+      "cache_write": 12.5
+    },
+    {
+      "provider": "anthropic",
+      "model_glob": "claude-mythos-5",
+      "input": 10,
+      "output": 50,
+      "cached_input": 1,
+      "cache_write": 12.5
+    },
+    {
+      "provider": "anthropic",
+      "model_glob": "claude-opus-5-5",
+      "input": 4,
+      "output": 20,
+      "cached_input": 0.2,
+      "cache_write": 5
+    },
+    {
+      "provider": "anthropic",
+      "model_glob": "claude-opus-5",
+      "input": 5,
+      "output": 25,
+      "cached_input": 0.5,
+      "cache_write": 6.25
+    },
+    {
+      "provider": "anthropic",
+      "model_glob": "claude-opus-4-8",
+      "input": 5,
+      "output": 25,
+      "cached_input": 0.5,
+      "cache_write": 6.25
+    },
+    {
+      "provider": "anthropic",
+      "model_glob": "claude-opus-4-7",
+      "input": 5,
+      "output": 25,
+      "cached_input": 0.5,
+      "cache_write": 6.25
+    },
+    {
+      "provider": "anthropic",
+      "model_glob": "claude-opus-4-6",
+      "input": 5,
+      "output": 25,
+      "cached_input": 0.5,
+      "cache_write": 6.25
+    },
+    {
+      "provider": "anthropic",
+      "model_glob": "claude-sonnet-5-5",
+      "input": 2,
+      "output": 10,
+      "cached_input": 0.2,
+      "cache_write": 2.5
+    },
+    {
+      "provider": "anthropic",
+      "model_glob": "claude-sonnet-5",
+      "input": 2,
+      "output": 10,
+      "cached_input": 0.2,
+      "cache_write": 2.5
+    },
+    {
+      "provider": "anthropic",
+      "model_glob": "claude-sonnet-4-6",
+      "input": 3,
+      "output": 15,
+      "cached_input": 0.3,
+      "cache_write": 3.75
+    },
+    {
+      "provider": "anthropic",
+      "model_glob": "claude-haiku-4-5",
+      "input": 1,
+      "output": 5,
+      "cached_input": 0.1,
+      "cache_write": 1.25
+    },
+    {
+      "provider": "anthropic",
+      "model_glob": "claude-haiku-4-5-20*",
+      "input": 1,
+      "output": 5,
+      "cached_input": 0.1,
+      "cache_write": 1.25
+    },
+    {
+      "provider": "openai",
+      "model_glob": "gpt-5",
+      "input": 1.25,
+      "output": 10,
+      "cached_input": 0.125
+    },
+    {
+      "provider": "openai",
+      "model_glob": "gpt-5-2025-08-07",
+      "input": 1.25,
+      "output": 10,
+      "cached_input": 0.125
+    },
+    {
+      "provider": "openai",
+      "model_glob": "gpt-5-mini",
+      "input": 0.25,
+      "output": 2,
+      "cached_input": 0.025
+    },
+    {
+      "provider": "openai",
+      "model_glob": "gpt-5-mini-2025-08-07",
+      "input": 0.25,
+      "output": 2,
+      "cached_input": 0.025
+    },
+    {
+      "provider": "openai",
+      "model_glob": "gpt-5-nano",
+      "input": 0.05,
+      "output": 0.4,
+      "cached_input": 0.005
+    },
+    {
+      "provider": "openai",
+      "model_glob": "gpt-5-nano-2025-08-07",
+      "input": 0.05,
+      "output": 0.4,
+      "cached_input": 0.005
+    },
+    {
+      "provider": "openai",
+      "model_glob": "gpt-4.1",
+      "input": 2,
+      "output": 8,
+      "cached_input": 0.5
+    },
+    {
+      "provider": "openai",
+      "model_glob": "gpt-4.1-2025-04-14",
+      "input": 2,
+      "output": 8,
+      "cached_input": 0.5
+    },
+    {
+      "provider": "openai",
+      "model_glob": "gpt-4.1-mini",
+      "input": 0.4,
+      "output": 1.6,
+      "cached_input": 0.1
+    },
+    {
+      "provider": "openai",
+      "model_glob": "gpt-4.1-mini-2025-04-14",
+      "input": 0.4,
+      "output": 1.6,
+      "cached_input": 0.1
+    },
+    {
+      "provider": "openai",
+      "model_glob": "gpt-4.1-nano",
+      "input": 0.1,
+      "output": 0.4,
+      "cached_input": 0.025
+    },
+    {
+      "provider": "openai",
+      "model_glob": "gpt-4.1-nano-2025-04-14",
+      "input": 0.1,
+      "output": 0.4,
+      "cached_input": 0.025
+    },
+    {
+      "provider": "openai",
+      "model_glob": "gpt-4o",
+      "input": 2.5,
+      "output": 10,
+      "cached_input": 1.25
+    },
+    {
+      "provider": "openai",
+      "model_glob": "gpt-4o-2024-08-06",
+      "input": 2.5,
+      "output": 10,
+      "cached_input": 1.25
+    },
+    {
+      "provider": "openai",
+      "model_glob": "gpt-4o-2024-11-20",
+      "input": 2.5,
+      "output": 10,
+      "cached_input": 1.25
+    },
+    {
+      "provider": "openai",
+      "model_glob": "gpt-4o-mini",
+      "input": 0.15,
+      "output": 0.6,
+      "cached_input": 0.075
+    },
+    {
+      "provider": "openai",
+      "model_glob": "gpt-4o-mini-2024-07-18",
+      "input": 0.15,
+      "output": 0.6,
+      "cached_input": 0.075
+    },
+    {
+      "provider": "openai",
+      "model_glob": "o3",
+      "input": 2,
+      "output": 8,
+      "cached_input": 0.5
+    },
+    {
+      "provider": "openai",
+      "model_glob": "o3-2025-04-16",
+      "input": 2,
+      "output": 8,
+      "cached_input": 0.5
+    },
+    {
+      "provider": "openai",
+      "model_glob": "o3-mini",
+      "input": 1.1,
+      "output": 4.4,
+      "cached_input": 0.55
+    },
+    {
+      "provider": "openai",
+      "model_glob": "o3-mini-2025-01-31",
+      "input": 1.1,
+      "output": 4.4,
+      "cached_input": 0.55
+    },
+    {
+      "provider": "openai",
+      "model_glob": "o4-mini",
+      "input": 1.1,
+      "output": 4.4,
+      "cached_input": 0.275
+    },
+    {
+      "provider": "openai",
+      "model_glob": "o4-mini-2025-04-16",
+      "input": 1.1,
+      "output": 4.4,
+      "cached_input": 0.275
+    },
+    {
+      "provider": "openai",
+      "model_glob": "o1",
+      "input": 15,
+      "output": 60,
+      "cached_input": 7.5
+    },
+    {
+      "provider": "openai",
+      "model_glob": "o1-2024-12-17",
+      "input": 15,
+      "output": 60,
+      "cached_input": 7.5
+    },
+    {
+      "provider": "google",
+      "model_glob": "gemini-2.5-flash",
+      "input": 0.3,
+      "output": 2.5
+    },
+    {
+      "provider": "google",
+      "model_glob": "gemini-2.5-flash-lite",
+      "input": 0.1,
+      "output": 0.4
+    },
+    {
+      "provider": "google",
+      "model_glob": "gemini-2.0-flash",
+      "input": 0.1,
+      "output": 0.4
+    },
+    {
+      "provider": "google",
+      "model_glob": "gemini-2.0-flash-lite",
+      "input": 0.075,
+      "output": 0.3
+    }
+  ]
+}

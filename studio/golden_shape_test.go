@@ -161,20 +161,21 @@ func TestGoldensMatchARealRun(t *testing.T) {
 	for _, c := range []struct {
 		golden, path string
 		// what the fixture holds that this run does not: a subagent
-		// child, a crash orphan's open finish, a metadata key of its own.
+		// child (and so an unpriced delegated figure), a crash orphan's
+		// open finish, a metadata key of its own.
 		absent []string
 	}{
-		{"run-sub.golden.json", "/api/runs/" + res.ID, []string{".children[]", ".meta.cwd"}},
+		{"run-sub.golden.json", "/api/runs/" + res.ID, []string{".children[]", ".meta.cwd", ".delegated_cost_reason", ".delegated_cost_usd=<nil>"}},
 		// The run documents A9.2 pins from runs that compacted (a
 		// PrepareStep trim, thread's session marker): every field but the
 		// compactions themselves is the plain run's.
-		{"run-compacted.golden.json", "/api/runs/" + res.ID, []string{".children[]", ".compactions[]", ".holes[]"}},
+		{"run-compacted.golden.json", "/api/runs/" + res.ID, []string{".children[]", ".compactions[]", ".holes[]", ".delegated_cost_reason", ".delegated_cost_usd=<nil>"}},
 		{"run-session-compacted.golden.json", "/api/runs/" + res.ID, []string{".compactions[]"}},
-		{"runs.golden.json", "/api/runs", []string{".runs[].finished=<nil>", ".runs[].meta.cwd"}},
+		{"runs.golden.json", "/api/runs", []string{".runs[].finished=<nil>", ".runs[].meta.cwd", ".runs[].delegated_cost_reason", ".runs[].delegated_cost_usd=<nil>"}},
 		{"runs-children.golden.json", "/api/runs?all=1", []string{".runs[].meta.cwd"}},
 		// Search (plan A7): run rows, prompt_preview included, from the
 		// real run's prompt "where is order 42?".
-		{"search.golden.json", "/api/search?q=order&sort=tokens", []string{".runs[].meta.cwd"}},
+		{"search.golden.json", "/api/search?q=order&sort=tokens", []string{".runs[].meta.cwd", ".runs[].delegated_cost_reason", ".runs[].delegated_cost_usd=<nil>"}},
 		{"events-ok.golden.json", "/api/runs/" + res.ID + "/events", nil},
 		{"events-ok-paged.golden.json", "/api/runs/" + res.ID + "/events?after=2&limit=3", nil},
 		{"transcript-ok.golden.json", "/api/runs/" + res.ID + "/transcript", nil},

@@ -2,7 +2,9 @@ package studio
 
 import (
 	"errors"
+	"math"
 	"net/http"
+	"slices"
 	"strconv"
 	"time"
 
@@ -26,9 +28,11 @@ import (
 //	since       RFC 3339: started at or after
 //	until       RFC 3339: started before
 //	min_tokens  input + output tokens at least (a non-negative integer)
-//	min_cost    reserved for A5 (pricing): 400, code unsupported
+//	min_cost    USD at least (a non-negative number): the run's whole bill,
+//	            own + delegated (pricing.go); an unpriced run never matches
 //	sort        started (default, newest first) | duration (longest first) |
-//	            tokens (most first); cost is reserved for A5: 400 unsupported
+//	            tokens (most first) | cost (own + delegated, most first;
+//	            unpriced runs after every priced one, newest first)
 //	limit       page size (0 = 50, max 500)
 //	offset      rows to skip (0..100000); next_offset is the next page's
 //
@@ -40,6 +44,16 @@ import (
 // snippet, so nothing of a system prompt or a tool catalog can leave
 // through a search (the read scope never reads either).
 
+//
+// Cost (plan A5) is computed at read time, never stored, so min_cost and
+// sort=cost are applied here, not in SQL — one rule for both backends:
+// Studio reads the match's first costSortCap runs in the order asked
+// (newest first for sort=cost), prices each (its own and its subagent
+// children's cost), filters and orders them, and pages the result with
+// offset and limit. A match larger than the cap is cut there, and the
+// body says so: cost_sort_cap is the cap, present exactly when the
+// match ran past it (total then counts the capped set).
+
 // searchPage is GET /api/search's body: the whole match's count, one
 // page of run rows in the order asked, the order, and the next page's
 // offset (null on the last page).
@@ -48,11 +62,16 @@ type searchPage struct {
 	Runs       []runRow `json:"runs"`
 	Sort       string   `json:"sort"`
 	NextOffset *int     `json:"next_offset"`
+	// CostSortCap is costSortCap when min_cost or sort=cost read a match
+	// larger than it: the runs past it were neither priced nor listed.
+	CostSortCap *int `json:"cost_sort_cap,omitempty"`
 }
 
-// errPricingPending is the min_cost / sort=cost answer until A5 wires
-// pricing: the names are reserved so A5 only flips the switch.
-const errPricingPending = "pricing arrives with A5"
+// costSortCap bounds the runs min_cost / sort=cost price per request.
+const costSortCap = 2000
+
+// sortCost is sort=cost: Studio's own order, not obsdb's.
+const sortCost = "cost"
 
 func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 	srch, ok := s.db.(obsdb.Searcher)
@@ -78,18 +97,23 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 	if !scopeRunsQuery(w, r, &query.RunQuery, q.Get("public_id")) {
 		return
 	}
+	var minCost *float64
 	if _, set := q["min_cost"]; set {
-		writeError(w, r, http.StatusBadRequest, "unsupported", errPricingPending)
-		return
+		v, err := strconv.ParseFloat(q.Get("min_cost"), 64)
+		if err != nil || v < 0 || math.IsNaN(v) || math.IsInf(v, 0) {
+			badRequest(w, r, "min_cost must be a non-negative number of USD")
+			return
+		}
+		minCost = &v
 	}
+	byCost := false
 	switch v := q.Get("sort"); v {
 	case "", string(obsdb.SortStarted), string(obsdb.SortDuration), string(obsdb.SortTokens):
 		query.Sort = obsdb.SearchSort(v)
-	case "cost":
-		writeError(w, r, http.StatusBadRequest, "unsupported", errPricingPending)
-		return
+	case sortCost:
+		byCost = true
 	default:
-		badRequest(w, r, "sort must be started, duration or tokens")
+		badRequest(w, r, "sort must be started, duration, tokens or cost")
 		return
 	}
 	switch v := obsdb.Status(q.Get("status")); v {
@@ -151,6 +175,10 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query.Limit = limit
+	if byCost || minCost != nil {
+		s.serveCostSearch(w, r, srch, query, byCost, minCost)
+		return
+	}
 	page, err := srch.Search(r.Context(), query)
 	if errors.Is(err, obsdb.ErrInvalidSearch) {
 		badRequest(w, r, err.Error())
@@ -164,10 +192,95 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 	if query.Sort != "" {
 		out.Sort = string(query.Sort)
 	}
+	c := s.coster(r.Context())
 	for _, rec := range page.Runs {
-		out.Runs = append(out.Runs, row(rec))
+		out.Runs = append(out.Runs, c.row(rec))
 	}
 	if next := query.Offset + len(page.Runs); len(page.Runs) > 0 && next < page.Total {
+		out.NextOffset = &next
+	}
+	writeJSON(w, r, http.StatusOK, out)
+}
+
+// serveCostSearch is a search with min_cost or sort=cost: the match's
+// first costSortCap runs in query's order (started for sort=cost),
+// priced, filtered by minCost, ordered by cost when byCost (stable:
+// ties keep the newest-first order; unpriced runs last), then paged by
+// query's offset and limit.
+func (s *Server) serveCostSearch(w http.ResponseWriter, r *http.Request, srch obsdb.Searcher,
+	query obsdb.SearchQuery, byCost bool, minCost *float64) {
+	offset, limit := query.Offset, obsdb.LimitOf(query.Limit)
+	scan := query
+	scan.Offset, scan.Limit = 0, 500
+	var cands []obsdb.RunRow
+	matched := 0
+	for len(cands) < costSortCap {
+		page, err := srch.Search(r.Context(), scan)
+		if errors.Is(err, obsdb.ErrInvalidSearch) {
+			badRequest(w, r, err.Error())
+			return
+		}
+		if err != nil {
+			dbError(w, r, "search", "", err)
+			return
+		}
+		cands, matched = append(cands, page.Runs...), page.Total
+		if len(page.Runs) == 0 || scan.Offset+len(page.Runs) >= page.Total {
+			break
+		}
+		scan.Offset += len(page.Runs)
+	}
+	capped := matched > costSortCap
+	if len(cands) > costSortCap {
+		cands = cands[:costSortCap]
+	}
+	c := s.coster(r.Context())
+	type priced struct {
+		rec   obsdb.RunRow
+		usd   float64
+		known bool
+	}
+	var hits []priced
+	for _, rec := range cands {
+		usd, known := c.cost(rec).total()
+		if minCost != nil && (!known || round6(usd) < *minCost) {
+			continue
+		}
+		hits = append(hits, priced{rec, usd, known})
+	}
+	if byCost {
+		slices.SortStableFunc(hits, func(a, b priced) int {
+			switch {
+			case a.known != b.known:
+				if a.known {
+					return -1
+				}
+				return 1
+			case !a.known: // both unpriced: newest first, as read
+				return 0
+			case a.usd > b.usd:
+				return -1
+			case a.usd < b.usd:
+				return 1
+			}
+			return 0
+		})
+	}
+	out := searchPage{Total: len(hits), Runs: []runRow{}, Sort: string(obsdb.SortStarted)}
+	switch {
+	case byCost:
+		out.Sort = sortCost
+	case query.Sort != "":
+		out.Sort = string(query.Sort)
+	}
+	if capped {
+		n := costSortCap
+		out.CostSortCap = &n
+	}
+	for i := offset; i < len(hits) && i < offset+limit; i++ {
+		out.Runs = append(out.Runs, c.row(hits[i].rec))
+	}
+	if next := offset + len(out.Runs); len(out.Runs) > 0 && next < out.Total {
 		out.NextOffset = &next
 	}
 	writeJSON(w, r, http.StatusOK, out)

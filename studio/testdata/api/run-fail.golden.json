@@ -32,6 +32,13 @@
     "input_tokens": 8,
     "output_tokens": 2
   },
+  "cost_usd": null,
+  "cost_known": false,
+  "cost_badge": "unpriced",
+  "cost_reason": "no row of the default pricing table matches wefttest/script",
+  "cache": "unknown",
+  "delegated_cost_usd": 0,
+  "delegated_cost_known": true,
   "event_count": 4,
   "message_count": 1,
   "delta_count": 0,

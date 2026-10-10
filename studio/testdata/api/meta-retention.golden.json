@@ -17,6 +17,7 @@
     "diff",
     "traces",
     "search",
+    "pricing",
     "delete",
     "live",
     "ingest",
@@ -37,7 +38,11 @@
     "ingest": "as_received",
     "latest": null
   },
-  "pricing": false,
+  "pricing": {
+    "source": "default",
+    "dated": "2026-10-10",
+    "models": 43
+  },
   "retention": "720h0m0s",
   "runtimes": 0,
   "manifest_check": {

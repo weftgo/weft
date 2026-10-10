@@ -229,6 +229,13 @@ func MessagesText(body []byte) []MessageText {
 // + 1). Its user text before its first assistant message is the turn's
 // prompt when there is any; a plain resume (Approve or Deny, no new
 // prompt) keeps the input record's.
+//
+// An accepted edge of the resume rule: on a plain Approve or Deny
+// resume, a user message steered in before the resumed batch's first
+// assistant reply lands in the same next record, before that reply,
+// and is indexed as the prompt. It is structurally indistinguishable
+// from a resume carrying a new prompt — the transcript carries no
+// steered mark — so the rule cannot tell the two apart.
 func PromptText(body []byte, input bool) (string, bool) {
 	msgs := MessagesText(body)
 	if input {
@@ -251,7 +258,10 @@ func PromptText(body []byte, input bool) (string, bool) {
 // at the next index (nil when none is stored): PromptText's resume rule
 // over the pair — the next record's first user text before its first
 // assistant message when the input record ends at an assistant message
-// with tool calls, else the input record's last user text.
+// with tool calls, else the input record's last user text. A user
+// message steered in before the first assistant reply of a plain
+// resume's batch reads as that resume's new prompt (PromptText names
+// the edge: the transcript carries no steered mark).
 func TurnPrompt(input, next []byte) (string, bool) {
 	in := MessagesText(input)
 	if n := len(in); n > 0 && in[n-1].Role == "assistant" && in[n-1].ToolCall && next != nil {

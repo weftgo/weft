@@ -536,7 +536,9 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 // model that answered it (gen_ai.response.model — a Fallback's backup,
 // a UseModel override), else the model it requested, else the run's;
 // and each child's own and delegated figures as its run row carries
-// them.
+// them. A cross-provider Fallback step (the backup on another
+// provider) reads unpriced: the step's provider is the request's, so
+// the backup's model is looked up under the wrong provider.
 func (s *Server) priceStep(ctx context.Context, doc *stepDoc, det obsdb.RunDetail) {
 	provider, model := doc.Model.Provider, doc.Model.Answered
 	if model == "" {

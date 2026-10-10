@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/weftgo/weft/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/weftgo/weft/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/weftgo/weft.svg)](https://pkg.go.dev/github.com/weftgo/weft)
-[![Version](https://img.shields.io/badge/version-v0.12.0-orange)](https://github.com/weftgo/weft/releases/tag/v0.12.0)
+[![Version](https://img.shields.io/badge/version-v0.13.0-orange)](https://github.com/weftgo/weft/releases/tag/v0.13.0)
 
 A modular framework for building AI agents in Go — designed the way the
 standard library is: small interfaces, `context` everywhere, functional
@@ -10,8 +10,8 @@ options, wrapped errors, and zero required configuration. One `go get`
 is the whole framework; one import path is the loop alone:
 
 ```sh
-go get github.com/weftgo/weft@v0.12.0       # the framework: every package below, one version
-go get github.com/weftgo/weft/core@v0.12.0  # the loop alone: its only dependency is the OTel API
+go get github.com/weftgo/weft@v0.13.0       # the framework: every package below, one version
+go get github.com/weftgo/weft/core@v0.13.0  # the loop alone: its only dependency is the OTel API
 ```
 
 | Package | What it gives you |
@@ -29,7 +29,7 @@ Concurrency is the point, not a feature: a step's tools fan out over
 goroutines, parallelism is a one-line dial, and tool failures never cancel
 their siblings.
 
-> **Status:** v0.12.0 — experimental, pre-1.0, released as one module
+> **Status:** v0.13.0 — experimental, pre-1.0, released as one module
 > (plus `core`; see [Releases](https://github.com/weftgo/weft/releases),
 > `CHANGELOG.md` and, coming from 0.8, [`MIGRATION-0.9.md`](MIGRATION-0.9.md)). The core's three load-bearing contracts — message
 > model, error model, tool contract — are implemented and tested, and

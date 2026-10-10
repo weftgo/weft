@@ -3201,7 +3201,7 @@ function ua(e, t) {
 //#endregion
 //#region src/panel/version.ts
 function da() {
-	return "v0.12.0";
+	return "v0.13.0";
 }
 function fa(e) {
 	if (typeof e != "string") return null;

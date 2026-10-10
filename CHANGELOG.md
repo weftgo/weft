@@ -6,7 +6,25 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
-## Unreleased
+## 0.13.0 — 2026-10-10
+
+Phase 4 of the devtools plan (replay): replay from any step, call or
+message on both surfaces with the ack naming what parks; the transcript
+edited in place (`user`, `tool_args`, `insert` beside `tool_result` and
+`reply`) with the "will be sent" preview of the exact first request —
+pure assembly in Studio's process, proven equal to what the runtime
+sends — and a replay across a compaction boundary reproducing the
+model's input (`transcript?step=N`, `weft.replay.view`); the option lab
+complete (params, tool choice, park_on, only_tools, a `ModelResolver`);
+the step-aligned compare (`GET /api/diff`, N-way in Studio, 2-way in the
+panel); Studio URLs that mean something; resizable panes and density;
+notifications; and a pre-release review of the whole phase (the Go,
+panel and Studio fix sections below — among them the version-skew
+refusals, the ack window and the accepted-ack heartbeat). Tags
+`core/v0.13.0` (three accessors added, `weft.override.tool_choice`
+spelled `auto`) and `v0.13.0` — a minor bump, as
+`studio/runtime.TranscriptEdit` is no longer comparable (Changed —
+breaking).
 
 ### Added
 

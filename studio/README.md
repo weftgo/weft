@@ -1341,7 +1341,14 @@ export alike — without the tool names a run's overrides put on its
 invoke_agent span: `weft.override.tools`, `park_on`,
 `park_all_except`, and a named `tool_choice` cut to its mode),
 `runs/{id}/requests?step=&from=&limit=&refs=1` (one row per model-call
-attempt, the prompt and catalog its hashes name inline unless `refs=1`,
+attempt — each row carries `raw`: the attempt's wire exchange
+(`request`/`response` with method, url, status, headers, media_type, body —
+base64 when `encoding` is `base64` — bytes and truncated_bytes, plus
+`redacted_headers`/`redacted_query`), recorded only under
+`otel.RawBodies(true)` with `WEFT_ENV=dev`; `null` with `raw_badge:
+"not_recorded"`, `raw_reason` and `raw_fix` when the run holds none; the
+route is refused to read-scoped panel tokens, so a wire body is never shown
+to one — the prompt and catalog its hashes name inline unless `refs=1`,
 `next_from` while pages are full) and `runs/{id}/tools` (the run's
 catalogs by hash) — both under the `requests` capability, refused to a
 read-scoped panel token (403, `badge: "hidden"`), and badged

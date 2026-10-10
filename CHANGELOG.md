@@ -10,6 +10,17 @@ module, ADR 0005).
 
 ### Added
 
+- Provider raw bodies (plan A6.1, ADR 0028 §12): `otel.RawBodies(true)` records
+  each model-call attempt's wire request and response as a `raw` record
+  (headers minus credentials, named in `redacted_headers`; bodies capped at
+  256 KiB with the cut counted; SSE as received), for the Local and Studio
+  destinations only. It takes effect only under `WEFT_ENV=dev` (never with
+  `otel.NoEnv()`); otherwise one WARN and off. The anthropic, openai and
+  google adapters capture it (an injected google client is not);
+  `core.Reporter.WantsRaw()` and the new `RawPair` fields let third-party
+  adapters report it. `obsdb.RequestRecord.Wire`; ClickHouse migration 0005;
+  `GET /api/runs/{id}/requests` rows carry `raw` (or `null` with
+  `raw_badge: not_recorded`).
 - `GET /api/live?all=1` (plan A7, for the Live page): every run in the
   database on one stream, subagent child runs included (each frame
   names its `run_id`), with the `kinds` the request asks for; a resume

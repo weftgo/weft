@@ -206,7 +206,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    limit/offset + runs' filters; min_cost and sort=cost 400 unsupported until A5; run rows
 //    //    only, scoped like runs; capability "search" — obsdb.Searcher: SQLite FTS5 trigram,
 //    //    migration 0004; ClickHouse one derivation per search + positionCaseInsensitiveUTF8, no migration; short terms ASCII-folded on SQLite), runs/{id} (with its compactions: run-scope views, then session markers),
-//    //    runs/{id}/events|transcript|spans|requests|tools (transcript?step=N adds what step N's
+//    //    runs/{id}/events|transcript|spans|requests|tools (each requests row's `raw`: the attempt's wire pair under otel.RawBodies, else null + raw_badge not_recorded; transcript?step=N adds what step N's
 //    //    model call carried — the record's truth, the replay prefix for N > 0 (from_step 0 re-runs
 //    //    step 0's PrepareStep), compacted_at naming its view; null under hidden for a read token, ADR 0029),
 //    //    runs/{id}/steps/{n} (one step
@@ -409,6 +409,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //        otel.Datadog(),                               // the Agent's OTLP intake, content off
 //        otel.Exporters(spanExporter, logExporter),    // your own exporters (either may be nil)
 //        otel.Content(otel.ContentConfig{MaxBytes: 32 << 10, Redact: redact}),
+//        otel.RawBodies(true),  // dev only (WEFT_ENV=dev; refused under NoEnv, one WARN): each attempt's provider
+//                               // wire request/response as a weft.raw record, Local/Studio only, credentials stripped, 256 KiB per body (ADR 0028 §12)
 //    )()
 //    p, err := otel.Start(ctx, opts...)               // Install with errors; otel.NoGlobal() for tests
 //    otel.LocalDB()   // the installed pipeline's obsdb.DB (nil without a Local destination)

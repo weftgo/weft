@@ -6,6 +6,7 @@ import (
 	"iter"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -142,11 +143,23 @@ func TestDelegateForReadsTheLedgerAfterTheMiss(t *testing.T) {
 // watch's — sees no parked child and leaves it, and nothing pumps
 // again. park reads the verdicts once more after the phase is parked
 // and arms the resume itself; before, the receipt stayed parked for
-// good (TestConcurrentDecide on CI, "no receipt reached done").
+// good (TestConcurrentDecide on CI, "no receipt reached done"). Both
+// paths: a Submit, and a sync wrap — where the park also marks the
+// delegating call to resolve and the armed resume first waits for
+// the parent's turn to park that call.
 func TestDecisionWhileParkingIsArmed(t *testing.T) {
+	for _, syncWrap := range []bool{false, true} {
+		name := "submit"
+		if syncWrap {
+			name = "wrap"
+		}
+		t.Run(name, func(t *testing.T) { decisionWhileParking(t, syncWrap) })
+	}
+}
+
+func decisionWhileParking(t *testing.T, syncWrap bool) {
 	ctx := context.Background()
 	p := New(1)
-	parent, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
 	refund := core.Tool("refund", "", func(_ context.Context, _ struct{ OrderID string }) (string, error) {
 		return "refunded", nil
 	}, core.RequireApproval())
@@ -154,10 +167,21 @@ func TestDecisionWhileParkingIsArmed(t *testing.T) {
 		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"1"}`}),
 		wefttest.Say("approved"),
 	), refund)
+	parentAgent := core.New(wefttest.Script())
+	if syncWrap {
+		parentAgent = core.New(wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "research", ID: "c-wrapper", Args: `{"prompt":"refund order 1"}`}),
+			wefttest.Say("all done"),
+		), p.MustWrap("research", "", child))
+	}
+	parent, _ := thread.Create(ctx, thread.Memory(), parentAgent)
 	var decided []error
 	p.testHookParking = func(d *delegate) {
 		if len(decided) > 0 {
 			return // the resume parks no more; one decision only
+		}
+		if (d.wrapper != "") != syncWrap {
+			t.Errorf("delegate wrapper = %q, sync wrap %v", d.wrapper, syncWrap)
 		}
 		pending := parent.Pending()
 		if len(pending) != 1 {
@@ -187,22 +211,156 @@ func TestDecisionWhileParkingIsArmed(t *testing.T) {
 			t.Errorf("phase inside the window = %d, want running", phase)
 		}
 	}
-	r, err := p.Submit(ctx, parent, child, "refund order 1")
-	if err != nil {
-		t.Fatal(err)
+	var (
+		turn *thread.Turn
+		id   string
+	)
+	if syncWrap {
+		var err error
+		turn, err = parent.Send(ctx, core.User("refund order 1"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := turn.Wait()
+		if err != nil || len(res.Pending) != 1 || res.Pending[0].ID != "c-wrapper" {
+			t.Fatalf("the parent's delegating turn = %+v, %v; want the delegating call parked", res, err)
+		}
+		rs := Receipts(parent)
+		if len(rs) != 1 {
+			t.Fatalf("receipts = %+v", rs)
+		}
+		id = rs[0].ID
+	} else {
+		r, err := p.Submit(ctx, parent, child, "refund order 1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		id = r.ID
 	}
 	// Wait returns at rest, and parked is rest: poll to settlement.
 	deadline := time.Now().Add(5 * time.Second)
-	rc, err := p.Wait(ctx, parent, r.ID)
+	rc, err := p.Wait(ctx, parent, id)
 	for err == nil && !rc.Settled() && time.Now().Before(deadline) {
 		time.Sleep(time.Millisecond)
-		rc, err = p.Wait(ctx, parent, r.ID)
+		rc, err = p.Wait(ctx, parent, id)
 	}
 	if err != nil || rc.State != Done || rc.Stop != "approved" {
 		t.Fatalf("receipt = %+v, %v; want done \"approved\" (the decision made while parking was lost)", rc, err)
 	}
 	if len(decided) != 1 || decided[0] != nil {
 		t.Fatalf("Decide inside the window = %v", decided)
+	}
+	if syncWrap {
+		// The resolution landed on the parked delegating call: the
+		// parent's turn resumes with the child's answer.
+		next := turn.Next()
+		if next == nil {
+			t.Fatal("the delegating call did not resolve")
+		}
+		if res, err := next.Wait(); err != nil || res.Text() != "all done" {
+			t.Fatalf("the parent's continuation = %+v, %v", res, err)
+		}
+	}
+	if err := p.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A park's own arm can come after a newer park: a pump arms the resume
+// between the park's phase write and its arm, the resume takes a
+// second slot, runs and parks again — under the same call id, which a
+// new run mints afresh. The first park's replay, read at its own
+// boundary, approves call_1 of the first run; armed now it used to
+// pass the phase check (the child is parked again) and its approval,
+// replayed by bare call id, ran the second run's call_1 without
+// anyone deciding it. arm takes the park's number and refuses a stale
+// one.
+func TestStaleParkReplayRefused(t *testing.T) {
+	ctx := context.Background()
+	p := New(2)
+	var refunds atomic.Int32
+	refund := core.Tool("refund", "", func(_ context.Context, _ struct{ OrderID string }) (string, error) {
+		refunds.Add(1)
+		return "refunded", nil
+	}, core.RequireApproval())
+	child := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"1"}`}),
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"2"}`}),
+		wefttest.Say("both refunded"),
+	), refund)
+	parent, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
+	var parking, arming atomic.Int32
+	p.testHookParking = func(d *delegate) {
+		if parking.Add(1) != 1 {
+			return
+		}
+		// No watch pumps here: the window's pump is the one the arming
+		// hook runs. Record the approval of the first run's call_1, so
+		// the park's own re-read finds its boundary complete.
+		parent.WatchMirrors(p, func(*slog.Logger) {})
+		pending := parent.Pending()
+		if len(pending) != 1 {
+			t.Errorf("mirrors while parking = %+v", pending)
+			return
+		}
+		if _, err := parent.Decide(ctx, thread.Approve(pending[0].CallID)); err != nil {
+			t.Errorf("Decide: %v", err)
+		}
+	}
+	p.testHookArming = func(d *delegate) {
+		if arming.Add(1) != 1 {
+			t.Error("a second park found its boundary complete")
+			return
+		}
+		// The racing pump: it reads parked and arms the resume, which
+		// runs in the second slot and parks again on the new call_1.
+		if err := p.pump(ctx, parent); err != nil {
+			t.Errorf("pump: %v", err)
+		}
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			p.mu.Lock()
+			reparked := d.phase == phaseParked && d.parks == 2
+			p.mu.Unlock()
+			if reparked {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Error("the resume did not park again")
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	r, err := p.Submit(ctx, parent, child, "refund orders 1 and 2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc, err := p.Wait(ctx, parent, r.ID)
+	if err != nil || rc.State != Parked {
+		t.Fatalf("receipt after the re-park = %+v, %v; want parked", rc, err)
+	}
+	if n := refunds.Load(); n != 1 {
+		t.Fatalf("refund ran %d times before the second call was decided, want 1 (a stale replay approved it)", n)
+	}
+	pending := parent.Pending()
+	if len(pending) != 1 {
+		t.Fatalf("Pending after the re-park = %+v, want the second run's call alone", pending)
+	}
+	if err := p.Decide(ctx, parent, thread.Approve(pending[0].CallID)); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	rc, err = p.Wait(ctx, parent, r.ID)
+	for err == nil && !rc.Settled() && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+		rc, err = p.Wait(ctx, parent, r.ID)
+	}
+	if err != nil || rc.State != Done || rc.Stop != "both refunded" {
+		t.Fatalf("receipt = %+v, %v; want done \"both refunded\"", rc, err)
+	}
+	if n := refunds.Load(); n != 2 {
+		t.Errorf("refund ran %d times, want 2", n)
 	}
 	if err := p.Close(ctx); err != nil {
 		t.Fatal(err)

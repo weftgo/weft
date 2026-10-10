@@ -179,6 +179,10 @@ type Pool struct {
 	// in park between the parked receipt and the parked phase — the
 	// window a decision recorded there used to be lost in.
 	testHookParking func(*delegate)
+	// testHookArming, when set (by this package's tests only), runs in
+	// park between its boundary read and its arm — the window a resume
+	// armed by a pump can run and park again in.
+	testHookArming func(*delegate)
 }
 
 // An Option configures a Pool at New.

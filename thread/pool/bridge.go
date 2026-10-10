@@ -48,6 +48,14 @@ type delegate struct {
 	// park the delegating call — the moment a resolution can land.
 	wrapperSeen bool
 	settled     bool
+	// parks counts the delegate's parks: each park's phase write takes
+	// the next number. A boundary read — the child's Pending and the
+	// replay built from it — belongs to the park whose number was read
+	// with the parked phase before it; arm takes that number along and
+	// refuses once another park has come. Call ids repeat across runs:
+	// a replay read at an earlier park would decide the re-parked
+	// run's calls of the same id.
+	parks uint64
 }
 
 const (
@@ -161,6 +169,8 @@ func (p *Pool) park(ctx context.Context, d *delegate) error {
 	}
 	p.mu.Lock()
 	d.phase = phaseParked
+	d.parks++
+	gen := d.parks
 	if d.wrapper != "" {
 		d.resolve = true
 	}
@@ -171,12 +181,17 @@ func (p *Pool) park(ctx context.Context, d *delegate) error {
 	// calls. Read the parent's verdicts again now the phase is parked:
 	// a decision recorded before this read is armed here, one recorded
 	// after it meets a pump that reads parked. arm is once per park
-	// whichever of them gets there.
+	// whichever of them gets there — and only for this park: a pump
+	// may arm the resume first, and the child run and park again
+	// before this arm, which gen then refuses.
 	if mirrors, err := d.parent.MirroredRequests(ctx); err != nil {
 		d.agent.Logger().Error("thread/pool: parked child's decisions not re-read; the next Decide pumps it",
 			"receipt", d.receipt, "child", d.child.ID(), "err", err)
 	} else if replay, ready, _ := readiness(d.child.ID(), d.child.Pending(), heldMirrors(mirrors)); ready {
-		p.arm(d, replay)
+		if p.testHookArming != nil {
+			p.testHookArming(d)
+		}
+		p.arm(d, gen, replay)
 	}
 	return nil
 }
@@ -457,7 +472,7 @@ func (p *Pool) pump(ctx context.Context, parent *thread.Session) error {
 			continue
 		}
 		p.mu.Lock()
-		parked := d.phase == phaseParked
+		parked, gen := d.phase == phaseParked, d.parks
 		p.mu.Unlock()
 		if !parked {
 			continue // queued, running or being canceled: not the pump's (a park re-reads the verdicts itself)
@@ -471,7 +486,7 @@ func (p *Pool) pump(ctx context.Context, parent *thread.Session) error {
 			}
 		}
 		if ready {
-			p.arm(d, replay)
+			p.arm(d, gen, replay)
 		}
 	}
 	return errors.Join(errs...)
@@ -480,12 +495,15 @@ func (p *Pool) pump(ctx context.Context, parent *thread.Session) error {
 // arm queues a parked child's resume: a pool goroutine that waits for
 // the parent's delegating call to be parked (a sync delegation's
 // resolution has nowhere to land before), takes a slot, replays the
-// decisions and runs the child to its next rest. A child that is not
-// parked — already armed by a racing pump, being canceled — and a
-// closed pool arm nothing.
-func (p *Pool) arm(d *delegate, replay []thread.ApprovalDecisionEntry) {
+// decisions and runs the child to its next rest. gen is the park the
+// caller read the child's boundary at, its replay built from that
+// read (a parked phase and d.parks read together, then Pending). A
+// child that is not parked — already armed by a racing pump, being
+// canceled — a child parked again since that read, and a closed pool
+// arm nothing; the later park reads its own boundary and arms it.
+func (p *Pool) arm(d *delegate, gen uint64, replay []thread.ApprovalDecisionEntry) {
 	p.mu.Lock()
-	if p.closed || d.phase != phaseParked {
+	if p.closed || d.phase != phaseParked || d.parks != gen {
 		p.mu.Unlock()
 		return
 	}

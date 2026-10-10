@@ -23,13 +23,20 @@ import (
 //	           next_before_id, null on the last page
 //	limit      page size (0 = 50, max 500)
 //
+// A trace's start is its earliest span, so a trace whose earlier span
+// arrives between page reads can be listed again on a later page
+// (never skipped); clients dedupe by trace_id. before_id without
+// before is ignored.
+//
 // A panel token lists its own public id only — /api/runs' scoping
 // (scopeRunsQuery): a foreign public_id is 403, and the list is forced
 // onto the token's public id with the rule /api/traces/{id} checks
 // (every span carries it), so it offers no trace the detail refuses
-// and no run id of another public id. A row carries no span attribute,
-// so the read scope's override-tool-name redaction (spansFor) has
-// nothing to remove here.
+// and no run id of another public id. So a trace holding any span
+// without its weft.public_id (an instrumented HTTP root, a client span
+// under a tool) is not listed to a panel token: its detail would be
+// refused. A row carries no span attribute, so the read scope's
+// override-tool-name redaction (spansFor) has nothing to remove here.
 
 // traceRoot is a trace's root span: the earliest span with no parent.
 type traceRoot struct {
@@ -67,7 +74,7 @@ type tracesPage struct {
 // the gap hole (a destination dropped a record), in the trace's words.
 var rootMissing = badgeFields{
 	Badge:  string(obsdb.HoleGap),
-	Reason: "the trace's root span was not stored: only spans under a parent that never arrived are here",
+	Reason: "the trace's root span never arrived here (dropped, or recorded by a service that does not export to this database)",
 	Fix:    holeFix(obsdb.HoleGap),
 }
 

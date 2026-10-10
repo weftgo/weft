@@ -96,9 +96,14 @@ module, ADR 0005).
   panel token lists the traces every span of which carries its public
   id — the rule `/api/traces/{id}` checks, so no listed trace is refused
   and no other public id's run id is listed; a foreign `public_id` is
-  403. A row carries no span attribute, so the read scope has nothing
-  to redact. In the auth matrix for every identity, the rebinding
-  guard's table and `/api/meta.capabilities`.
+  403; a trace holding any span without its `weft.public_id` (an
+  instrumented HTTP root, a client span under a tool) is not listed to a
+  panel token: its detail would be refused. A row carries no span
+  attribute, so the read scope has nothing to redact. A trace's start is
+  its earliest span, so a trace whose earlier span arrives between page
+  reads can be listed again on a later page (never skipped); clients
+  dedupe by `trace_id`. In the auth matrix for every identity, the
+  rebinding guard's table and `/api/meta.capabilities`.
 - `obsdb.DB.Traces(ctx, obsdb.TraceQuery) (obsdb.TracePage, error)`
   with `obsdb.TraceRow` and `obsdb.TraceRoot`, on both backends over
   the spans table (SQLite `spans`, ClickHouse `otel_traces`; no

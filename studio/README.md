@@ -1531,9 +1531,14 @@ as `runs` (default 50, max 500). Scoped like `runs`: a panel token lists
 the traces every span of which carries its public id — the rule
 `traces/{trace_id}` checks, so the list offers no trace the detail
 refuses and no other public id's run id — and a foreign `public_id` is
-403; a row carries no span attribute, so the read scope has nothing to
-redact), `traces/{trace_id}` (any trace), `sessions`, `sessions/{id}` (turns in
-order), `sessions/{id}/public_id` (the reverse of `public/`: `{session_id,
+403 — a trace holding any span without its `weft.public_id` (an
+instrumented HTTP root, a client span under a tool) is not listed to a
+panel token: its detail would be refused. A row carries no span
+attribute, so the read scope has nothing to redact; a trace whose
+earlier span arrives between page reads can be listed again on a later
+page (never skipped); clients dedupe by `trace_id`. `before_id` without
+`before` is ignored), `traces/{trace_id}` (any trace), `sessions`,
+`sessions/{id}` (turns in order), `sessions/{id}/public_id` (the reverse of `public/`: `{session_id,
 public_id}`, the public id `thread.PublicID` stamped on the session's
 turns — MAX(`weft.public_id`) over its top-level turns: one value per
 thread session; a session whose turns carry several answers the

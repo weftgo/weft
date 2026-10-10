@@ -1,6 +1,7 @@
 package obsdbtest
 
 import (
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -188,6 +189,105 @@ func traces(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		empty, err := open(t).Traces(ctx(), obsdb.TraceQuery{})
 		if err != nil || len(empty.Traces) != 0 || empty.Total != 0 || empty.NextBefore != nil {
 			t.Errorf("empty = %+v, %v", empty, err)
+		}
+	}
+}
+
+// walkTraces pages q with the (Before, BeforeID) pair until the last
+// page, returning every listed id in order and each page's length.
+func walkTraces(t *testing.T, db obsdb.DB, q obsdb.TraceQuery, total int) (ids []string, pages []int) {
+	t.Helper()
+	for i := 0; i < 10; i++ {
+		p, err := db.Traces(ctx(), q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if p.Total != total {
+			t.Errorf("page %d total = %d, want %d (the cursor aside)", i, p.Total, total)
+		}
+		for _, r := range p.Traces {
+			ids = append(ids, r.TraceID)
+		}
+		pages = append(pages, len(p.Traces))
+		if p.NextBefore == nil {
+			return ids, pages
+		}
+		q.Before, q.BeforeID = *p.NextBefore, p.NextBeforeID
+	}
+	t.Fatal("the cursor never reached the last page")
+	return nil, nil
+}
+
+// tracesBigTie: a tie longer than MaxTies is cut there, and the
+// (Before, BeforeID) pair resumes inside it — every trace listed once.
+func tracesBigTie(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		const tied = obsdb.MaxTies + 3
+		spans := []obsdb.Span{
+			traceSpan("f0000000000000000000000000000000", "f000000000000001", "", "newer", "tie-svc", 20*time.Second, 21*time.Second, 1, nil),
+			traceSpan("00000000000000000000000000000001", "0000000000000001", "", "older", "tie-svc", 0, time.Second, 1, nil),
+		}
+		for i := range tied {
+			spans = append(spans, traceSpan(fmt.Sprintf("e%031x", i), fmt.Sprintf("e%015x", i), "", "tied", "tie-svc",
+				10*time.Second, 11*time.Second, 1, nil))
+		}
+		if err := db.Write(ctx(), obsdb.Batch{Spans: spans}); err != nil {
+			t.Fatal(err)
+		}
+		ids, pages := walkTraces(t, db, obsdb.TraceQuery{Limit: 2}, tied+2)
+		// Page one: the newer trace, one tied by the limit, MaxTies more
+		// riding along; the pair resumes the last two tied, then the older.
+		if len(pages) < 2 || pages[0] != 2+obsdb.MaxTies {
+			t.Errorf("pages = %v, want the first cut at %d (limit 2 + MaxTies)", pages, 2+obsdb.MaxTies)
+		}
+		seen := map[string]bool{}
+		for _, id := range ids {
+			if seen[id] {
+				t.Errorf("%s listed twice", id)
+			}
+			seen[id] = true
+		}
+		if len(seen) != tied+2 || ids[0] != spans[0].TraceID || ids[len(ids)-1] != spans[1].TraceID {
+			t.Errorf("walked %d distinct (first %s, last %s), want %d from the newer to the older", len(seen), ids[0], ids[len(ids)-1], tied+2)
+		}
+		// Before alone after the cut skips the rest of the tie (strictly
+		// older): only the pair resumes inside it.
+		p, err := db.Traces(ctx(), obsdb.TraceQuery{Limit: 2, Before: at(10 * time.Second)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(p.Traces) != 1 || p.Traces[0].TraceID != spans[1].TraceID {
+			t.Errorf("Before alone at the tie = %d rows, want the older trace only", len(p.Traces))
+		}
+	}
+}
+
+// tracesScopedPaging: the public-id filter under the cursor — every
+// page holds only traces every span of which carries the id, Total
+// counts that match on every page, and the walk lists each once.
+func tracesScopedPaging(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		const s = time.Second
+		spans := traceFixture()
+		for i, tr := range []string{"f6000000000000000000000000000006", "f7000000000000000000000000000007", "f8000000000000000000000000000008"} {
+			start := time.Duration(40+10*i) * s
+			spans = append(spans, traceSpan(tr, fmt.Sprintf("f%d00000000000001", 6+i), "", "invoke_agent conf", "conf-svc", start, start+s, 1,
+				weftAttrs(fmt.Sprintf("tr_scoped_%d", i), "pub_conf", "invoke_agent")))
+		}
+		// A mixed trace at 45s: a pub_conf run beside a pub_other span.
+		const mixed = "f9000000000000000000000000000009"
+		spans = append(spans,
+			traceSpan(mixed, "f900000000000001", "", "invoke_agent conf", "conf-svc", 45*s, 46*s, 1, weftAttrs("tr_mixed", "pub_conf", "invoke_agent")),
+			traceSpan(mixed, "f900000000000002", "f900000000000001", "invoke_agent other", "conf-svc", 45*s+s/2, 46*s, 1, weftAttrs("tr_mixed_kid", "pub_other", "invoke_agent")))
+		if err := db.Write(ctx(), obsdb.Batch{Spans: spans}); err != nil {
+			t.Fatal(err)
+		}
+		ids, pages := walkTraces(t, db, obsdb.TraceQuery{PublicID: "pub_conf", Limit: 2}, 4)
+		want := []string{"f8000000000000000000000000000008", "f7000000000000000000000000000007", "f6000000000000000000000000000006", trA}
+		if !reflect.DeepEqual(ids, want) || pages[0] != 2 {
+			t.Errorf("scoped walk = %v (pages %v), want %v two at a time (no %s, no %s)", ids, pages, want, trB, mixed)
 		}
 	}
 }

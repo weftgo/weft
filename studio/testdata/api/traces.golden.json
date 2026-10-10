@@ -28,7 +28,7 @@
       "error": false,
       "run_ids": [],
       "badge": "gap",
-      "reason": "the trace's root span was not stored: only spans under a parent that never arrived are here",
+      "reason": "the trace's root span never arrived here (dropped, or recorded by a service that does not export to this database)",
       "fix": "check the exporter's drops"
     },
     {

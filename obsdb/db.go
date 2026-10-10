@@ -213,7 +213,8 @@ type TraceQuery struct {
 	Until    time.Time // Start before; zero = no bound
 	Before   time.Time // cursor on Start; zero = newest
 	// BeforeID, with Before, makes the cursor the pair (Start, TraceID),
-	// as RunQuery.BeforeID: pass TracePage.NextBeforeID.
+	// as RunQuery.BeforeID: pass TracePage.NextBeforeID. A late earlier
+	// span can re-list a trace on a later page (TracePage).
 	BeforeID string
 	Limit    int // 0 = 50, max 500
 }
@@ -245,7 +246,10 @@ type TraceRoot struct {
 // first (ties by TraceID, descending), NextBefore/NextBeforeID are the
 // next TraceQuery.Before/BeforeID (nil and "" on the last page), traces
 // sharing the last row's Start ride along up to MaxTies, and Total
-// counts the whole match, cursor aside.
+// counts the whole match, cursor aside. A trace's Start is its earliest
+// span, so a trace whose earlier span arrives between page reads can be
+// listed again on a later page (never skipped); clients dedupe by
+// TraceID.
 type TracePage struct {
 	Traces       []TraceRow
 	Total        int

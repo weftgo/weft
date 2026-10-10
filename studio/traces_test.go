@@ -233,6 +233,10 @@ func TestTracesRoute(t *testing.T) {
 	if want := []string{tlOther, tlOrphan, tlWeb, tlParent}; !reflect.DeepEqual(walked, want) {
 		t.Errorf("paged = %v, want %v", walked, want)
 	}
+	// before_id without before is ignored: the first page, not a cursor.
+	if doc := traceList(t, h, "/studio/api/traces?limit=2&before_id="+tlOrphan); !reflect.DeepEqual(doc.ids(), []string{tlOther, tlOrphan}) {
+		t.Errorf("before_id alone = %v, want the first page [%s %s]", doc.ids(), tlOther, tlOrphan)
+	}
 	for _, q := range []string{"since=yesterday", "until=1", "before=x", "limit=-1", "limit=x"} {
 		if code, _, body := get(t, h, "/studio/api/traces?"+q); code != http.StatusBadRequest {
 			t.Errorf("?%s = %d %s, want 400", q, code, body)

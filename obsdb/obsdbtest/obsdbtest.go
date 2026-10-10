@@ -36,6 +36,8 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("HeartbeatRule", heartbeatRule(open))
 	t.Run("NonWeft", nonWeft(open))
 	t.Run("Traces", traces(open))
+	t.Run("TracesBigTie", tracesBigTie(open))
+	t.Run("TracesScopedPaging", tracesScopedPaging(open))
 	t.Run("NotFound", notFound(open))
 	t.Run("Experiments", experiments(open))
 	t.Run("PipelineSpellings", pipelineSpellings(open))

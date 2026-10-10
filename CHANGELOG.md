@@ -10,6 +10,18 @@ module, ADR 0005).
 
 ### Added
 
+- Studio: experiments you can come back to (plan F5). The playground keeps its
+  whole form as a draft in this browser (`?exp=<draft id>`, IndexedDB) once it
+  changes, and "copy share link" puts the form in the fragment (`#state=`,
+  deflated where the browser can, else base64url JSON; at most 8,000
+  characters, beyond which it stays a draft) — the link restores the form on
+  any browser against the same Studio and starts nothing. Variants can be
+  renamed, duplicated and removed; a matrix runs every cell from one
+  `from_step`. New `/experiments` and `/experiments/{id}` pages: the
+  variants × inputs grid with each cell's run and cost, re-run one cell or
+  all under the same experiment id, clone into the form, compare any two
+  cells. The runs list takes an `experiment_id` chip, and a finished matrix's
+  toast carries its cost.
 - Studio's saves (plan F6, web half): **save as test** in the run header
   (capability `export`) fetches the wefttest zip
   (`export?format=wefttest`) with the bearer in the `Authorization` header

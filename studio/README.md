@@ -1113,6 +1113,22 @@ ack preview naming what each tool's calls would do) posts the same
 command, and the playground's "continue from step" is a picker over the
 source run's steps.
 
+Every matrix is saved as an experiment (plan F5). Experiments in the
+sidebar (`/experiments`) lists them with their agent, size, run count and
+cost. `/experiments/{id}` draws the variants × inputs grid, each cell its
+latest run with status and cost. From there you can re-run one cell or all
+of them under the same experiment id, compare two cells on the compare page,
+or "clone into the form", which reopens the playground on a draft holding the
+matrix's form. "Its runs" opens `/runs?experiment_id=<id>`. The playground
+keeps your form as a draft in this browser once you change it. `?exp=<draft
+id>` reopens it, and the drafts list opens or deletes the others. Drafts
+never leave the browser. "Copy share link" carries the whole form in the URL
+fragment (`#state=`, no token, at most 8,000 characters encoded). It opens
+against the same Studio, restores the form, and runs nothing. A matrix runs
+every cell from its own `from_step`, the source run's step ordinal; past
+step 0 the rows' text is not sent. When its last cell settles, one toast says
+how many succeeded and failed, with the bill when pricing is on.
+
 The option lab (plan F3) is one form on both surfaces — Studio's
 experiment form (the playground page and the replay drawer) and the
 panel's experiment drawer — with a knob for every override the command
@@ -1407,6 +1423,10 @@ walks views, never cursor moves:
 | run | `q`, `hide`, `ev` | the raw view's search, hidden kinds (`hide=step,delta`), open event's position | replace |
 | run | `replay`, `from`, `of` | the replay drawer: its verb, its from_step, the child run it replays (a fresh load reopens it on that step, from the verb's draft — edits are not in the link) | replace |
 | run | `save=test` | download the run's wefttest zip on landing (the panel's save as test), then dropped | — (a link's landing; replace) |
+| experiments | `/experiments` | the saved experiments: agent, size, run count, cost | — |
+| experiment | `/experiments/{id}` | one experiment's variants × inputs grid: re-run a cell or all, clone into the form, compare two cells | — |
+| playground | `?exp=<draft id>` | a draft of the form in this browser's IndexedDB (never leaves the browser) | the drafts list |
+| playground | `#state=<compact>` | a shared form — deflated or base64url JSON, ≤ 8,000 characters, no token — restored on arrival, never run | "copy share link" |
 | trace | `view=chat` | the GenAI chat view (the tree is the default) | push |
 | trace | `sel` | the selected row: its step-qualified key (H7; a pre-H7 `span=<span id>` is still read) | replace |
 | playground | `run`, `step`, `agent`, `runtime`, `engine` | the source run, its step, the target, the first variant's engine — written back as they change | replace |

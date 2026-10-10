@@ -1,0 +1,134 @@
+{
+  "total": 3,
+  "runs": [
+    {
+      "id": "r_sub",
+      "parent_run_id": "",
+      "parent_call_id": "",
+      "trace_id": "0102030405060708090a0b0c0d0e0f10",
+      "agent": "researcher",
+      "model": {
+        "provider": "wefttest",
+        "name": "script"
+      },
+      "manifest_hash": "sha256:demo-fleet",
+      "weft_version": "(test)",
+      "service": "studio-test",
+      "session_id": "s_research",
+      "public_id": "pub_research",
+      "turn": 1,
+      "playground": false,
+      "experiment_id": "",
+      "forked_from": "",
+      "meta": {
+        "cwd": "/tmp/demo"
+      },
+      "started": "2020-01-01T09:02:00.123Z",
+      "finished": "2020-01-01T09:02:05.123Z",
+      "last_seen": "2020-01-01T09:02:05.123Z",
+      "status": "succeeded",
+      "err": "",
+      "steps": 1,
+      "pending": 0,
+      "stop_reason": "",
+      "usage": {
+        "input_tokens": 12,
+        "output_tokens": 6
+      },
+      "event_count": 6,
+      "message_count": 2,
+      "delta_count": 0,
+      "instructions_hash": "9d1f0a5c3b7e2a4d6f8091b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f6",
+      "catalog_hash": "",
+      "request_count": 0,
+      "prompt_preview": "Where is order 42?"
+    },
+    {
+      "id": "r_ok",
+      "parent_run_id": "",
+      "parent_call_id": "",
+      "trace_id": "0102030405060708090a0b0c0d0e0f10",
+      "agent": "orders",
+      "model": {
+        "provider": "wefttest",
+        "name": "script"
+      },
+      "manifest_hash": "sha256:demo-fleet",
+      "weft_version": "(test)",
+      "service": "studio-test",
+      "session_id": "s_orders",
+      "public_id": "pub_orders",
+      "turn": 1,
+      "playground": false,
+      "experiment_id": "",
+      "forked_from": "",
+      "meta": {
+        "cwd": "/tmp/demo"
+      },
+      "started": "2020-01-01T09:00:00.123Z",
+      "finished": "2020-01-01T09:00:02.123Z",
+      "last_seen": "2020-01-01T09:00:02.123Z",
+      "status": "succeeded",
+      "err": "",
+      "steps": 1,
+      "pending": 0,
+      "stop_reason": "",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 4
+      },
+      "event_count": 6,
+      "message_count": 2,
+      "delta_count": 0,
+      "instructions_hash": "9d1f0a5c3b7e2a4d6f8091b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f6",
+      "catalog_hash": "4e3d2c1b0a99887766554433221100ffeeddccbbaa0099887766554433221100",
+      "request_count": 1,
+      "prompt_preview": "Where is order 42?"
+    },
+    {
+      "id": "r_fail",
+      "parent_run_id": "",
+      "parent_call_id": "",
+      "trace_id": "0102030405060708090a0b0c0d0e0f10",
+      "agent": "orders",
+      "model": {
+        "provider": "wefttest",
+        "name": "script"
+      },
+      "manifest_hash": "sha256:demo-fleet",
+      "weft_version": "(test)",
+      "service": "studio-test",
+      "session_id": "s_orders",
+      "public_id": "pub_orders",
+      "turn": 2,
+      "playground": false,
+      "experiment_id": "",
+      "forked_from": "",
+      "meta": {
+        "cwd": "/tmp/demo"
+      },
+      "started": "2020-01-01T09:01:00.123Z",
+      "finished": "2020-01-01T09:01:02.123Z",
+      "last_seen": "2020-01-01T09:01:02.123Z",
+      "status": "failed",
+      "err": "wefttest: injected provider 500",
+      "steps": 1,
+      "pending": 0,
+      "stop_reason": "",
+      "usage": {
+        "input_tokens": 8,
+        "output_tokens": 2
+      },
+      "event_count": 4,
+      "message_count": 1,
+      "delta_count": 0,
+      "instructions_hash": "9d1f0a5c3b7e2a4d6f8091b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f6",
+      "catalog_hash": "",
+      "request_count": 0,
+      "prompt_preview": "Where is order 43?"
+    }
+  ],
+  "sort": "tokens",
+  "next_offset": null
+}
+

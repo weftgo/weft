@@ -177,3 +177,40 @@ func ExampleMessagesAsOf() {
 	// 1 [user user] true
 	// true
 }
+
+// A Searcher finds runs by what they said and did: every term a
+// case-insensitive substring of the run's prompt, answer, error or a
+// tool name, each term in any of them. The run row carries its prompt
+// preview.
+func ExampleSearcher() {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	t0 := time.Unix(0, 1790845923120000000).UTC()
+	write := func(run, prompt, answer string, at time.Duration) {
+		rec := func(idx int64, body string) obsdb.Record {
+			return obsdb.Record{Time: t0.Add(at), Body: body, Attrs: map[string]any{
+				"weft.record": "messages", "weft.run.id": run, "weft.messages.index": idx}}
+		}
+		if err := db.Write(context.Background(), obsdb.Batch{Records: []obsdb.Record{
+			rec(0, `[{"role":"user","content":[{"type":"text","text":"`+prompt+`"}]}]`),
+			rec(1, `[{"role":"assistant","content":[{"type":"text","text":"`+answer+`"}]}]`),
+		}}); err != nil {
+			log.Fatal(err)
+		}
+	}
+	write("run_1", "Refund order 7", "The refund failed: card declined.", 0)
+	write("run_2", "Refund order 9", "Refunded.", time.Second)
+
+	page, err := db.(obsdb.Searcher).Search(context.Background(), obsdb.SearchQuery{Text: "refund failed"})
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, r := range page.Runs {
+		fmt.Println(r.ID, "-", r.PromptPreview)
+	}
+	// Output:
+	// run_1 - Refund order 7
+}

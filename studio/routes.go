@@ -3,6 +3,7 @@ package studio
 import (
 	"net/http"
 
+	"github.com/weftgo/weft/obsdb"
 	"github.com/weftgo/weft/studio/ingest"
 	linkrt "github.com/weftgo/weft/studio/runtime"
 )
@@ -162,6 +163,18 @@ func (s *Server) registerGroups() {
 			mux.HandleFunc("GET /api/diff", s.serveDiff)
 		},
 	})
+	// Search over runs (plan A7): present when the database can
+	// search (obsdb.Searcher — both first-party backends); otherwise
+	// meta.capabilities_off says why.
+	if _, ok := s.db.(obsdb.Searcher); ok {
+		s.addGroup(routeGroup{
+			name:       "search",
+			capability: "search",
+			register: func(mux *http.ServeMux, s *Server) {
+				mux.HandleFunc("GET /api/search", s.serveSearch)
+			},
+		})
+	}
 	// The live stream (S4.5) and its grant (plan C5): the stream's
 	// credential is its other half, so one group, one capability.
 	s.addGroup(routeGroup{

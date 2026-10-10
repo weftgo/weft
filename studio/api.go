@@ -148,6 +148,12 @@ type runRow struct {
 	CatalogHash      string `json:"catalog_hash"`
 	RequestCount     int64  `json:"request_count"`
 	RequestsBadge    string `json:"requests_badge,omitempty"`
+	// PromptPreview is the run's prompt — its first user message's
+	// text — cut to 200 runes (obsdb.RunRow.PromptPreview, plan A7).
+	// Absent when the records carried no content: a content-off run
+	// stores no messages, and the stripped / not_recorded holes the run
+	// document already reports say why — no badge of its own.
+	PromptPreview string `json:"prompt_preview,omitempty"`
 	// Holes is set on a run document's children[] rows only (plan
 	// A10): each child's own runHoles, so the parent's page badges a
 	// content-off or interrupted child before its document is read.
@@ -192,6 +198,7 @@ func row(rec obsdb.RunRow) runRow {
 		CatalogHash:      rec.CatalogHash,
 		RequestCount:     rec.RequestCount,
 		RequestsBadge:    string(rec.RequestsHole()),
+		PromptPreview:    rec.PromptPreview,
 	}
 	if out.Meta == nil {
 		out.Meta = map[string]string{}

@@ -87,6 +87,7 @@ func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 				if err := u.applyDurable(ctx, tx, r, w); err != nil {
 					return err
 				}
+				u.seeSearch(r, w)
 			}
 		case "delta":
 			if d.keepDeltasOn() {
@@ -122,6 +123,9 @@ func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 	}
 	for _, id := range runIDs.order {
 		if err := upsertRun(ctx, tx, id, runIDs.upds[id]); err != nil {
+			return err
+		}
+		if err := updateSearch(ctx, tx, id, runIDs.upds[id]); err != nil {
 			return err
 		}
 	}
@@ -350,6 +354,9 @@ type runUpdate struct {
 	instructionsHash string
 	catalogHash      string
 	requestCount     int64
+	// srch is what the batch taught the run's search fields (plan A7,
+	// search.go); nil when nothing.
+	srch *runSearch
 }
 
 // seeInstructions keeps the larger weft.instructions.hash seen — run_start's

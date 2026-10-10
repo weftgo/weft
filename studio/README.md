@@ -1254,7 +1254,27 @@ path and size to loopback and the server token only}, `pid`,
 status, session, public id, playground, parent and `tag.<k>=<v>`
 filters, cursor-paged; top-level only by default — `parent=<run id>`
 lists one run's subagent children, `all=1` (or `parent=*`) every run,
-children included),
+children included; every run row carries `prompt_preview` — its first
+user message's text cut to 200 runes — absent when the records carried
+no content, the run's `stripped`/`not_recorded` holes saying why),
+`search` (plan A7, under the `search` capability: `?q=` terms —
+whitespace-separated, a `"quoted phrase"` one term, each a
+case-insensitive substring of the run's prompt, answer (its last
+assistant text), error or a tool name it called, every term required,
+each in any field; never the system prompt, a tool result or the
+catalog — with `agent`, `tool` (exact name), `status`, `model` (exact),
+`error` (substring), `since`/`until` (RFC 3339, started at-or-after /
+before), `min_tokens` (input + output), `sort=started|duration|tokens`
+(newest, longest, most first), `limit`, `offset` and `/api/runs`' own
+`session`, `public_id`, `parent`, `all`, `playground`, `tag.<k>=<v>`;
+`min_cost` and `sort=cost` are reserved for A5 and answer 400
+`unsupported` "pricing arrives with A5" until pricing lands. Answers
+`{total, runs, sort, next_offset}` — run rows only, no snippet — scoped
+like `runs`: a panel token searches its own public id, a foreign
+`public_id` is 403. SQLite searches an FTS5 trigram index the writer
+keeps (migration 0004: `run_search`, `run_tools`, `runs_fts`, runs
+stored before it indexed when it applies); ClickHouse scans the stored
+records with `positionCaseInsensitiveUTF8`, no migration),
 `runs/{id}` (the row and the subagent children, each child row with its own `holes` — never events; with
 `delta_count` (the streamed deltas, counted and never stored),
 `instructions_hash`, `catalog_hash`, `request_count` and, for a run
@@ -1458,7 +1478,8 @@ Origin only, else 404.
 Capabilities are computed from the registered route groups
 (`routes.go`) — never hard-coded: `live` (the stream and its grant),
 `ingest`, `auth` (with a
-token), and `runtimes`, `breakpoints`, `steer` + `playground` under
+token), `search` (when the database implements `obsdb.Searcher` — both
+first-party backends do; `capabilities_off.search` says so otherwise), and `runtimes`, `breakpoints`, `steer` + `playground` under
 `Playground(true)`, plus anything a hosting wrapper declares with
 `studio.Capabilities(…)`.
 The panel group registers always on and names no capability;

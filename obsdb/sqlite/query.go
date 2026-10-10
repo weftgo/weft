@@ -27,6 +27,12 @@ const runColumns = `run_id, parent_run_id, parent_call_id, trace_id, agent, prov
 	event_count, delta_count, message_count,
 	instructions_hash, catalog_hash, request_count`
 
+// promptPreviewColumn is the run row's prompt_preview (plan A7): the
+// prompt migration 0004's run_search holds, cut to
+// obsdb.PromptPreviewRunes characters (” for a run with none).
+const promptPreviewColumn = `COALESCE((SELECT substr(run_search.prompt, 1, 200) FROM run_search
+	WHERE run_search.run_id = runs.run_id), '')`
+
 // statusExpr is the four-row table in SQL: it must agree with
 // obsdb.DeriveStatus, whose test pins the boundaries. One bind
 // parameter: the interrupted cutoff (now - InterruptedAfter).
@@ -182,7 +188,7 @@ func (d *DB) queryRunRows(ctx context.Context, where string, args []any, now tim
 }
 
 func (d *DB) runRowsQuery(ctx context.Context, where string, args []any) ([]runRowScan, error) {
-	rs, err := d.reads.QueryContext(ctx, `SELECT `+runColumns+` FROM runs WHERE `+where, args...)
+	rs, err := d.reads.QueryContext(ctx, `SELECT `+runColumns+`, `+promptPreviewColumn+` FROM runs WHERE `+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -197,7 +203,7 @@ func (d *DB) runRowsQuery(ctx context.Context, where string, args []any) ([]runR
 			&r.Steps, &r.Pending, &r.StopReason,
 			&r.InTok, &r.OutTok, &r.CachedTok, &r.CacheWrite, &r.ReasonTok,
 			&r.EventCount, &r.DeltaCount, &r.MessageCount,
-			&r.InstructionsHash, &r.CatalogHash, &r.RequestCount); err != nil {
+			&r.InstructionsHash, &r.CatalogHash, &r.RequestCount, &r.PromptPreview); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -221,6 +227,7 @@ type runRowScan struct {
 	EventCount, DeltaCount, MessageCount              int64
 	InstructionsHash, CatalogHash                     string
 	RequestCount                                      int64
+	PromptPreview                                     string
 }
 
 func scanRunRow(r runRowScan, now time.Time) (obsdb.RunRow, error) {
@@ -240,6 +247,7 @@ func scanRunRow(r runRowScan, now time.Time) (obsdb.RunRow, error) {
 		},
 		EventCount: r.EventCount, DeltaCount: r.DeltaCount, MessageCount: r.MessageCount,
 		InstructionsHash: r.InstructionsHash, CatalogHash: r.CatalogHash, RequestCount: r.RequestCount,
+		PromptPreview: r.PromptPreview,
 	}
 	if r.Finished.Valid {
 		f := time.Unix(0, r.Finished.Int64).UTC()

@@ -322,7 +322,8 @@ func rowPtrs(rows []obsdb.RunRow) []*obsdb.RunRow {
 	return ptrs
 }
 
-// fillCounts loads EventCount/MessageCount for the rows' runs from
+// fillCounts loads EventCount/MessageCount (and PromptPreview,
+// fillPreviewsOf) for the rows' runs from
 // weft_records: uniqExact over the (RunId, Kind, Pos) key is exact even
 // before ReplacingMergeTree merges a retried batch's duplicates, so a
 // transport retry can never inflate a count (the reason counts are
@@ -346,6 +347,9 @@ func (d *DB) fillCounts(ctx context.Context, rows []*obsdb.RunRow) error {
 			n++
 		}
 		if err := d.fillCountsOf(ctx, ids[:n], byID); err != nil {
+			return err
+		}
+		if err := d.fillPreviewsOf(ctx, ids[:n], byID); err != nil {
 			return err
 		}
 		ids = ids[n:]

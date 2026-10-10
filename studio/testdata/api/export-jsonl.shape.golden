@@ -149,6 +149,7 @@
 <run>.run.children[].parent_run_id=string
 <run>.run.children[].pending=float64
 <run>.run.children[].playground=bool
+<run>.run.children[].prompt_preview=string
 <run>.run.children[].public_id=string
 <run>.run.children[].request_count=float64
 <run>.run.children[].service=string
@@ -184,6 +185,7 @@
 <run>.run.parent_run_id=string
 <run>.run.pending=float64
 <run>.run.playground=bool
+<run>.run.prompt_preview=string
 <run>.run.public_id=string
 <run>.run.request_count=float64
 <run>.run.service=string

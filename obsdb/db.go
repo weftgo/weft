@@ -220,6 +220,11 @@ type RunRow struct {
 	// catalog_hash and request_count.
 	InstructionsHash, CatalogHash string
 	RequestCount                  int64
+	// PromptPreview is the run's prompt — the text of its first user
+	// message with text (Searcher's prompt field) — cut to
+	// PromptPreviewRunes runes; "" when the records carried no content
+	// (a content-off run stores no messages) or no user text.
+	PromptPreview string
 }
 
 // RunPage is one Runs result, newest Started first (ties by ID,

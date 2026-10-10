@@ -32,6 +32,7 @@ const (
 	offPlayground = "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off"
 	offIngest     = "OTLP ingest is off: studio.NoIngest() turned it off"
 	offAuth       = "no server token to sign panel tokens with: turn it on with studio.Token(tok); weft studio always sets one"
+	offSearch     = "the database cannot search: its obsdb.DB does not implement obsdb.Searcher (obsdb/sqlite and obsdb/clickhouse both do)"
 )
 
 // optionalCapabilities is every capability a route group registers
@@ -46,6 +47,7 @@ var optionalCapabilities = map[string]string{
 	"preview":     offPlayground,
 	"ingest":      offIngest,
 	"auth":        offAuth,
+	"search":      offSearch,
 }
 
 // manifestSourceView is one entry of api/manifest's sources.

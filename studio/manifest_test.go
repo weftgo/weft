@@ -15,6 +15,7 @@ import (
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/wefttest"
+	"github.com/weftgo/weft/obsdb"
 	"github.com/weftgo/weft/otel"
 )
 
@@ -387,7 +388,9 @@ func TestCapabilitiesOffTable(t *testing.T) {
 		return out
 	}
 	all := caps(Playground(true), Token("t"))
-	none := caps(NoIngest())
+	// The least: no ingest, and a database that cannot search (the
+	// search group registers only over an obsdb.Searcher).
+	none := caps(NoIngest(), DB(cannotSearch{fixtureDB(t)}))
 	optional := map[string]bool{}
 	for c := range all {
 		if !none[c] {
@@ -406,5 +409,38 @@ func TestCapabilitiesOffTable(t *testing.T) {
 	t.Cleanup(func() { _ = srv.Close() })
 	if off := srv.capabilitiesOff(); off["playground"] != "" || off["steer"] == "" {
 		t.Errorf("declared playground: capabilities_off = %v, want playground absent, steer present", off)
+	}
+}
+
+// cannotSearch is an obsdb.DB without obsdb.Searcher: the embedded
+// interface hides the backend's Search.
+type cannotSearch struct{ obsdb.DB }
+
+// TestSearchCapabilityFollowsTheDB: a database that cannot search
+// registers no search route and reports the capability off with its
+// reason; one that can lists it.
+func TestSearchCapabilityFollowsTheDB(t *testing.T) {
+	_, _, body := get(t, Handler(DB(cannotSearch{fixtureDB(t)})), "/studio/api/meta")
+	var meta struct {
+		Capabilities    []string          `json:"capabilities"`
+		CapabilitiesOff map[string]string `json:"capabilities_off"`
+	}
+	decode(t, body, &meta)
+	for _, c := range meta.Capabilities {
+		if c == "search" {
+			t.Errorf("capabilities = %v, want no search over a DB that cannot", meta.Capabilities)
+		}
+	}
+	if meta.CapabilitiesOff["search"] != offSearch {
+		t.Errorf("capabilities_off = %v, want search: %q", meta.CapabilitiesOff, offSearch)
+	}
+	if code, _, _ := get(t, Handler(DB(cannotSearch{fixtureDB(t)})), "/studio/api/search?q=x"); code != http.StatusNotFound {
+		t.Errorf("GET /api/search over a DB that cannot search = %d, want 404", code)
+	}
+	_, _, body = get(t, Handler(DB(fixtureDB(t))), "/studio/api/meta")
+	meta.CapabilitiesOff = nil
+	decode(t, body, &meta)
+	if _, off := meta.CapabilitiesOff["search"]; off || !strings.Contains(body, `"search"`) {
+		t.Errorf("meta over sqlite = %s, want search on", body)
 	}
 }

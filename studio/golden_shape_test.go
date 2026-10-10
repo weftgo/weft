@@ -172,6 +172,9 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		{"run-session-compacted.golden.json", "/api/runs/" + res.ID, []string{".compactions[]"}},
 		{"runs.golden.json", "/api/runs", []string{".runs[].finished=<nil>", ".runs[].meta.cwd"}},
 		{"runs-children.golden.json", "/api/runs?all=1", []string{".runs[].meta.cwd"}},
+		// Search (plan A7): run rows, prompt_preview included, from the
+		// real run's prompt "where is order 42?".
+		{"search.golden.json", "/api/search?q=order&sort=tokens", []string{".runs[].meta.cwd"}},
 		{"events-ok.golden.json", "/api/runs/" + res.ID + "/events", nil},
 		{"events-ok-paged.golden.json", "/api/runs/" + res.ID + "/events?after=2&limit=3", nil},
 		{"transcript-ok.golden.json", "/api/runs/" + res.ID + "/transcript", nil},

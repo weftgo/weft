@@ -37,6 +37,7 @@
   "catalog_hash": "",
   "request_count": 0,
   "requests_badge": "not_recorded",
+  "prompt_preview": "Where is order 42?",
   "children": [],
   "holes": [
     {

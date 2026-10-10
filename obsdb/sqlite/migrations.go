@@ -42,6 +42,14 @@ var migrations = func() map[int]string {
 	return out
 }()
 
+// postMigrations are Go steps a migration runs after its SQL, in the
+// same transaction: what SQL alone cannot derive (0004's search index
+// over the runs already stored reads message bodies the way the writer
+// does).
+var postMigrations = map[int]func(*sql.Tx) error{
+	4: backfillSearch,
+}
+
 func highestMigration() int {
 	versions := sortedVersions()
 	if len(versions) == 0 {
@@ -110,6 +118,12 @@ func migrate(db *sql.DB) error {
 		if _, err := tx.Exec(string(body)); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("sqlite: migration %s: %w", migrations[v], err)
+		}
+		if post := postMigrations[v]; post != nil {
+			if err := post(tx); err != nil {
+				_ = tx.Rollback()
+				return fmt.Errorf("sqlite: migration %s: %w", migrations[v], err)
+			}
 		}
 		if _, err := tx.Exec(`INSERT INTO obsdb_migrations (version, applied_at) VALUES (?, ?)`,
 			v, time.Now().UTC().Format(time.RFC3339)); err != nil {

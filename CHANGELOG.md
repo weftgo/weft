@@ -6,6 +6,43 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
+## Unreleased
+
+### Added
+
+- `GET /api/search` (plan A7, capability `search`): runs found by what
+  they said and did. `q=` terms — whitespace-separated, a `"quoted
+  phrase"` one term — each a case-insensitive substring of the run's
+  prompt (its first user message's text), answer (its last assistant
+  text), error or the name of a tool it called; every term required,
+  each in any field; never the system prompt, a tool result or the tool
+  catalog. Filters `agent`, `tool` (exact), `status`, `model` (exact),
+  `error` (substring), `since`/`until` (RFC 3339), `min_tokens`
+  (input + output) and `/api/runs`' own `session`, `public_id`,
+  `parent`, `all`, `playground`, `tag.<k>=<v>`; `sort=started`
+  (default, newest first) `| duration | tokens`; `limit`/`offset`
+  paging with `next_offset`. Answers run rows only (no snippet), scoped
+  like `/api/runs`: a panel token searches its own public id. In the
+  auth matrix for every identity, and in `/api/meta.capabilities`;
+  `capabilities_off.search` names a database that cannot search.
+- `min_cost=` and `sort=cost` are reserved parameter names: 400 with
+  code `unsupported`, "pricing arrives with A5", until A5 wires pricing.
+- `obsdb.Searcher` (optional, implemented by `obsdb/sqlite` and
+  `obsdb/clickhouse`), `obsdb.SearchQuery`, `obsdb.SearchSort`,
+  `obsdb.ParseSearch`, `obsdb.CheckSearch`, `obsdb.ErrInvalidSearch`,
+  and the shared text readers (`MessagesText`, `FirstUserText`,
+  `LastAssistantText`, `PromptPreview`); the obsdbtest conformance table
+  gains `Search` and `PromptPreview`, so both backends answer alike.
+- The run row's `prompt_preview` (`obsdb.RunRow.PromptPreview`): the
+  first user message's text cut to 200 runes, on every run row Studio
+  serves; absent when the records carried no content (the existing
+  `stripped`/`not_recorded` holes say why).
+- SQLite migration 0004 (`run_search`, `run_tools` and the FTS5
+  trigram table `runs_fts`, kept by the writer; runs stored before it
+  are indexed in the migration's transaction). ClickHouse needs no
+  migration: search scans the stored records with
+  `positionCaseInsensitiveUTF8`.
+
 ## 0.13.0 — 2026-10-10
 
 Phase 4 of the devtools plan (replay): replay from any step, call or

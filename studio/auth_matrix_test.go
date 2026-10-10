@@ -334,6 +334,29 @@ func TestAuthMatrix(t *testing.T) {
 				}
 				return forbidden403
 			}},
+		// Search over runs (plan A7): /api/runs' scoping exactly — a
+		// panel token's search is forced onto its public id (pinned
+		// below), a foreign public_id is 403 before any parameter is
+		// read; min_cost and sort=cost are reserved for A5 (400
+		// unsupported for every identity that passes the scope).
+		{name: "GET /api/search", method: "GET", path: fixed("/api/search"), resources: one, want: anyValid(ok)},
+		{name: "GET /api/search?q=secret&all=1", method: "GET", path: fixed("/api/search?q=secret&all=1"), resources: one, want: anyValid(ok)},
+		{name: "GET /api/search?public_id=", method: "GET", path: func(res string) string { return "/api/search?q=secret&public_id=" + public[res] },
+			resources: []string{"A", "B", "missing"}, want: func(kind, res string) int {
+				if kind == "server" || res == "A" {
+					return ok
+				}
+				return forbidden403
+			}},
+		{name: "GET /api/search?min_cost=1", method: "GET", path: fixed("/api/search?q=secret&min_cost=1"), resources: one, want: anyValid(http.StatusBadRequest)},
+		{name: "GET /api/search?sort=cost", method: "GET", path: fixed("/api/search?sort=cost"), resources: one, want: anyValid(http.StatusBadRequest)},
+		{name: "GET /api/search?public_id=<B>&min_cost=1", method: "GET", path: fixed("/api/search?public_id=pub_b&min_cost=1"), resources: []string{"B"},
+			want: func(kind, _ string) int {
+				if kind == "server" {
+					return http.StatusBadRequest
+				}
+				return forbidden403
+			}},
 		{name: "GET /api/runs?parent=<B's run>", method: "GET", path: fixed("/api/runs?parent=run_b"), resources: one, want: anyValid(ok)}, // forced onto the token's public id: empty for a panel token (pinned below)
 		{name: "GET /api/runs/{id}", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] }, resources: all, want: scoped(ok)},
 		{name: "GET /api/runs/{id}/events", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/events" }, resources: all, want: scoped(ok)},
@@ -958,7 +981,9 @@ func TestAuthMatrix(t *testing.T) {
 			continue
 		}
 		for _, path := range []string{"/api/runs?parent=*", "/api/runs?all=1", "/api/runs?parent=run_b",
-			"/api/runs?session=s_b", "/api/runs?agent=acme-support&limit=500", "/api/sessions?agent=acme-support"} {
+			"/api/runs?session=s_b", "/api/runs?agent=acme-support&limit=500", "/api/sessions?agent=acme-support",
+			"/api/search?q=secret", "/api/search?q=secret&all=1", "/api/search?q=pub_b&parent=*", "/api/search?session=s_b&all=1",
+			"/api/search?tool=refund&all=1"} {
 			req, _ := http.NewRequest(http.MethodGet, ts.URL+path, nil)
 			req.Header.Set("Authorization", "Bearer "+id.token)
 			resp, err := http.DefaultClient.Do(req)

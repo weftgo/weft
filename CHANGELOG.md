@@ -13,7 +13,7 @@ module, ADR 0005).
 - `GET /api/search` (plan A7, capability `search`): runs found by what
   they said and did. `q=` terms — whitespace-separated, a `"quoted
   phrase"` one term — each a case-insensitive substring of the run's
-  prompt (its first user message's text), answer (its last assistant
+  prompt (the turn's own: the input record's last user message with text — on a continued conversation the turn's question, not the conversation's opener — else the first user message with text; a message steered in later is never the prompt), answer (its last assistant
   text), error or the name of a tool it called; every term required,
   each in any field; never the system prompt, a tool result or the tool
   catalog. Filters `agent`, `tool` (exact), `status`, `model` (exact),
@@ -30,18 +30,26 @@ module, ADR 0005).
 - `obsdb.Searcher` (optional, implemented by `obsdb/sqlite` and
   `obsdb/clickhouse`), `obsdb.SearchQuery`, `obsdb.SearchSort`,
   `obsdb.ParseSearch`, `obsdb.CheckSearch`, `obsdb.ErrInvalidSearch`,
-  and the shared text readers (`MessagesText`, `FirstUserText`,
-  `LastAssistantText`, `PromptPreview`); the obsdbtest conformance table
+  and the shared text readers (`MessagesText`, `PromptText`,
+  `LastAssistantText`, `PromptPreview`) and `obsdb.Weft.Input`; the obsdbtest conformance table
   gains `Search` and `PromptPreview`, so both backends answer alike.
 - The run row's `prompt_preview` (`obsdb.RunRow.PromptPreview`): the
-  first user message's text cut to 200 runes, on every run row Studio
+  turn's own prompt (as search reads it) cut to 200 runes, on every run row Studio
   serves; absent when the records carried no content (the existing
   `stripped`/`not_recorded` holes say why).
 - SQLite migration 0004 (`run_search`, `run_tools` and the FTS5
   trigram table `runs_fts`, kept by the writer; runs stored before it
   are indexed in the migration's transaction). ClickHouse needs no
-  migration: search scans the stored records with
-  `positionCaseInsensitiveUTF8`.
+  migration: search derives the fields at read — once per search, for
+  the runs the other filters leave, joined to the run rows — and tests
+  every term with `positionCaseInsensitiveUTF8`. A term under three
+  runes is matched with LIKE on SQLite, case-folded for ASCII only
+  (`lower()` on both sides) where ClickHouse folds UTF-8 — the one
+  difference between the backends; `%` and `_` are literal.
+- `obsdb.DeriveRecord` reads a non-string `weft.messages.reason` as its
+  text — not growth — as the SQLite transcript reader and ClickHouse
+  already did: such a record is no longer counted in a SQLite run's
+  `message_count`.
 - `GET /api/traces` (plan A7, capability `traces`): the trace list —
   every trace the database holds, weft or not, one row each, newest
   first: `trace_id`, `root` (`{span_id, name}`, the earliest span with
@@ -70,6 +78,15 @@ module, ADR 0005).
 - `obsdb.DB` gains `Traces`: a third-party `obsdb.DB` implementation
   must add the method (group its spans by trace id; the obsdbtest
   `Traces` case pins the answer).
+
+### Fixed
+
+- thread/pool: an approval recorded while a nested child was still
+  parking (requests mirrored, phase not yet parked) was skipped by every
+  pump and the child stayed parked for good; `park` now reads the
+  parent's verdicts again once parked and arms the resume itself, and a
+  park generation counter keeps a stale park's replay from reaching a
+  re-parked run (the TestConcurrentDecide CI flake).
 
 ## 0.13.0 — 2026-10-10
 

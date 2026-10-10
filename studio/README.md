@@ -1254,14 +1254,19 @@ path and size to loopback and the server token only}, `pid`,
 status, session, public id, playground, parent and `tag.<k>=<v>`
 filters, cursor-paged; top-level only by default — `parent=<run id>`
 lists one run's subagent children, `all=1` (or `parent=*`) every run,
-children included; every run row carries `prompt_preview` — its first
-user message's text cut to 200 runes — absent when the records carried
+children included; every run row carries `prompt_preview` — the turn's
+own prompt: the input record's last user message with text, else the
+first user message with text, cut to 200 runes — absent when the records carried
 no content, the run's `stripped`/`not_recorded` holes saying why),
 `search` (plan A7, under the `search` capability: `?q=` terms —
 whitespace-separated, a `"quoted phrase"` one term, each a
-case-insensitive substring of the run's prompt, answer (its last
-assistant text), error or a tool name it called, every term required,
-each in any field; never the system prompt, a tool result or the
+case-insensitive substring of the run's prompt (the turn's own, as
+above), answer (its last assistant text), error or a tool name it
+called, every term required, each in any field; a term under three
+runes is matched with LIKE on SQLite, case-folded for ASCII only
+(`lower()` on both sides; a short non-ASCII term matches its own case
+alone there — ClickHouse folds UTF-8: the one difference between the
+backends), `%` and `_` literal; never the system prompt, a tool result or the
 catalog — with `agent`, `tool` (exact name), `status`, `model` (exact),
 `error` (substring), `since`/`until` (RFC 3339, started at-or-after /
 before), `min_tokens` (input + output), `sort=started|duration|tokens`
@@ -1273,8 +1278,10 @@ before), `min_tokens` (input + output), `sort=started|duration|tokens`
 like `runs`: a panel token searches its own public id, a foreign
 `public_id` is 403. SQLite searches an FTS5 trigram index the writer
 keeps (migration 0004: `run_search`, `run_tools`, `runs_fts`, runs
-stored before it indexed when it applies); ClickHouse scans the stored
-records with `positionCaseInsensitiveUTF8`, no migration),
+stored before it indexed when it applies); ClickHouse derives the fields at
+read — once per search, for the runs the other filters leave, joined to
+the run rows — and tests every term with `positionCaseInsensitiveUTF8`,
+no migration),
 `runs/{id}` (the row and the subagent children, each child row with its own `holes` — never events; with
 `delta_count` (the streamed deltas, counted and never stored),
 `instructions_hash`, `catalog_hash`, `request_count` and, for a run

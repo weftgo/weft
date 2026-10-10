@@ -195,12 +195,12 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    remembered in memory by (service, manifest_hash), each in sources[] live or remembered; a
 //    //    Studio restart forgets them until the next registration; manifest_check.source file|runtime),
 //    //    runs (+session/public/playground filters; all=1 lists child
-//    //    runs too; each row's prompt_preview: the first user text, 200 runes, absent content-off),
+//    //    runs too; each row's prompt_preview: the turn's own prompt (input record's last user text, else first), 200 runes, absent content-off),
 //    //    search (?q= terms over prompt/answer/error/tool names — substrings, AND, a "phrase" one
 //    //    term; agent/tool/status/model/error/since/until/min_tokens/sort=started|duration|tokens/
 //    //    limit/offset + runs' filters; min_cost and sort=cost 400 unsupported until A5; run rows
 //    //    only, scoped like runs; capability "search" — obsdb.Searcher: SQLite FTS5 trigram,
-//    //    migration 0004; ClickHouse substring scans, no migration), runs/{id} (with its compactions: run-scope views, then session markers),
+//    //    migration 0004; ClickHouse one derivation per search + positionCaseInsensitiveUTF8, no migration; short terms ASCII-folded on SQLite), runs/{id} (with its compactions: run-scope views, then session markers),
 //    //    runs/{id}/events|transcript|spans|requests|tools (transcript?step=N adds what step N's
 //    //    model call carried — the record's truth, the replay prefix for N > 0 (from_step 0 re-runs
 //    //    step 0's PrepareStep), compacted_at naming its view; null under hidden for a read token, ADR 0029),

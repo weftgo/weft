@@ -416,11 +416,13 @@ export function path(link: StudioLink): string {
 }
 
 /** Search keys a copied link never carries: credentials, a panel
- * scope string, and prompt text (a playground hand-off's input= and
- * instructions=, which an old link may still carry in its query).
+ * scope string, and prompt text (a playground hand-off's input=,
+ * instructions=, edits= — tool results and user words — and lab=,
+ * which an old or hand-built link may still carry in its query; the
+ * hand-off rides the fragment).
  * Studio's own pages strip a handed-over token on arrival (adoptTokenFromLocation); this is the second wall, so a
  * "copy link" can never leak one. */
-const STRIPPED_KEYS = ["token", "access_token", "sig", "weft_scope", "input", "instructions"]
+const STRIPPED_KEYS = ["token", "access_token", "sig", "weft_scope", "input", "instructions", "edits", "lab"]
 
 /**
  * canonical is the page's link as a reader copies it (G2's copy link):

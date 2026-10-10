@@ -8,6 +8,7 @@ import {
   createRouter,
 } from "@tanstack/react-router"
 import { cleanup, render } from "@testing-library/react"
+import { StrictMode } from "react"
 import { vi } from "vitest"
 
 import { queryClient } from "@/lib/query"
@@ -28,7 +29,7 @@ export function stubBrowser() {
   }))
 }
 
-export function renderApp(url: string) {
+export function renderApp(url: string, opts: { strict?: boolean } = {}) {
   // One document, one root: a page rendered before (unmounted or not)
   // is cleaned up first, or the next render would reuse its root.
   cleanup()
@@ -46,6 +47,9 @@ export function renderApp(url: string) {
   // there.
   return {
     router,
-    ...render(<RouterProvider router={router} />, { container: document, baseElement: document.body }),
+    ...render(opts.strict ? <StrictMode><RouterProvider router={router} /></StrictMode> : <RouterProvider router={router} />, {
+      container: document,
+      baseElement: document.body,
+    }),
   }
 }

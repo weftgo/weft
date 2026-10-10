@@ -12,7 +12,7 @@ import { cleanup, configure, fireEvent, waitFor, within } from "@testing-library
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
-import type { RunDoc, RunsPage } from "@/lib/api"
+import type { AgentView, RunDoc, RunsPage } from "@/lib/api"
 import { renderApp, stubBrowser } from "@/test/app"
 import { choose, valueOf } from "@/test/select"
 import { stubViewport } from "@/test/layout"
@@ -23,6 +23,11 @@ import { AS_OF_2, COMPACTED_C1 } from "@/test/edit-fixtures"
 import { FORK_EDITS } from "@/lib/edits"
 import { PREVIEW_SILENT, PREVIEW_TIMEOUT_MS } from "@/lib/preview"
 import { PREVIEW_DEBOUNCE_MS } from "@/components/studio/transcript-editor"
+import { playgroundLink, runLink } from "@/lib/links"
+import { editsFromHandoff, emptyLab, labFromHandoff, toolsOffFor } from "@/lib/experiment-body"
+import type { VariantFields } from "@/lib/experiment-body"
+import { drawerHandoff } from "@/components/studio/replay-drawer"
+import { handoffFromHash } from "@/routes/playground"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -425,5 +430,130 @@ describe("a preview that never answers (closing round)", () => {
     vi.advanceTimersByTime(PREVIEW_DEBOUNCE_MS + PREVIEW_TIMEOUT_MS + 50)
     await waitFor(() => expect(drawer()!.querySelector("[data-preview-error]")?.textContent).toBe(PREVIEW_SILENT))
     await waitFor(() => expect(run.disabled).toBe(false))
+  })
+})
+
+describe("run → run navigation keeps nothing of the first run's (phase 4 review)", () => {
+  const B = "r_other"
+  function serveB() {
+    studio
+      .on(`GET runs/${B}`, runDoc({ id: B }))
+      .on(`GET runs/${B}/events`, pagedEvents(events.map((event, pos) => ({ pos, time: rOK.started, event })), { done: true }))
+      .on(`GET runs/${B}/transcript`, (req) =>
+        req.query.get("step") ? { step: Number(req.query.get("step")), messages: [], compacted_at: null } : transcriptOf(bodies)
+      )
+      .on(`GET runs/${B}/spans`, { spans: [] })
+      .on(`GET runs/${B}/requests`, pagedRequests({ requests: [0, 1, 2, 3].map((n) => requestRow(n, catalog)) }))
+  }
+  async function storyOn(path: string) {
+    const app = renderApp(path)
+    await waitFor(() => expect(document.querySelector('[data-call="c3"] [data-editable="tool_result"]')).toBeTruthy())
+    return app
+  }
+  const onB = async () =>
+    waitFor(() => {
+      expect(document.title).toContain(B)
+      expect(document.querySelector('[data-call="c3"] [data-editable="tool_result"]')).toBeTruthy()
+    })
+
+  it("a drawer open and edits held on A: B shows no drawer and no chips, and B's own drawer carries none of A's edits", async () => {
+    serve()
+    serveB()
+    const { router } = await storyOn(`/runs/${RUN}?view=story`)
+    await edit("the result of search_kb (c2)", "policy: no refunds")
+    await waitFor(() => expect(kinds()).toEqual(["tool_result"]))
+    void router.navigate({ ...runLink(B, { view: "story" }) })
+    await onB()
+    expect(router.state.location.search).not.toHaveProperty("replay")
+    expect(drawer()).toBeNull()
+    expect(document.querySelector("[data-edited]")).toBeNull()
+    expect(ta("the result of search_kb (c2)")).toBeNull()
+    // B's own first edit is alone in its command.
+    await edit("the turn's prompt", "z")
+    await waitFor(() => expect(kinds()).toEqual(["user"]))
+  })
+
+  it("edits held on A, then a link to B's drawer: B's drawer opens with none of A's edits", async () => {
+    serve()
+    serveB()
+    const { router } = await storyOn(`/runs/${RUN}?view=story`)
+    await edit("the result of search_kb (c2)", "policy: no refunds")
+    await waitFor(() => expect(kinds()).toEqual(["tool_result"]))
+    void router.navigate({ ...runLink(B, { view: "story", replay: { verb: "from_step", from: 1 } }) })
+    await onB()
+    await waitFor(() => expect(within(drawer()!).getByText(new RegExp(`^${B}`))).toBeTruthy())
+    expect(kinds()).toEqual([])
+    expect(document.querySelector("[data-edited]")).toBeNull()
+    await waitFor(() => expect(valueOf(within(drawer()!).getByLabelText("continue from step"))).toBe("1"))
+  })
+})
+
+describe("the drawer's playground link is the same command (phase 4 review)", () => {
+  it("drawerHandoff's fragment parses back to the same draft: prompt, input, model, thinking, tools, lab, edits", () => {
+    const lab = { ...emptyLab(), max_steps: "3", temperature: "0.2", park_on: ["refund"] }
+    const edits = [
+      { kind: "tool_result" as const, step: 1, callID: "c2", toolResult: "policy: no refunds" },
+      { kind: "user" as const, step: 0, index: 0, content: "refund order 7" },
+    ]
+    const variant: VariantFields = {
+      instructions: "be terse",
+      toolsOff: new Set(["refund"]),
+      model: "glm",
+      thinking: "high",
+      input: "and order 9?",
+      engine: "live",
+      sideEffects: "park",
+      thread: "ephemeral",
+      lab,
+    }
+    const tools = ["lookup_order", "search_kb", "refund"]
+    const link = playgroundLink(
+      drawerHandoff({ runID: RUN, fromStep: 2, agent: "acme-support", runtime: "rt_1", tools, registered: "you help", variant, edits })
+    )
+    expect(link.search).toEqual({})
+    const back = handoffFromHash(link.hash ?? "")
+    expect(back).toMatchObject({
+      run: RUN,
+      step: 2,
+      agent: "acme-support",
+      runtime: "rt_1",
+      instructions: "be terse",
+      input: "and order 9?",
+      model: "glm",
+      thinking: "high",
+      side_effects: "park",
+      engine: "live",
+      thread: "ephemeral",
+    })
+    expect(labFromHandoff(back.lab)).toEqual(lab)
+    expect(editsFromHandoff(back.edits)).toEqual(edits)
+    expect(toolsOffFor(back.tools, { tools: tools.map((name) => ({ name })) } as unknown as AgentView)).toEqual(new Set(["refund"]))
+    // The registered prompt, no lab, no edits, every tool on: none of them ride along.
+    const plain = handoffFromHash(
+      playgroundLink(
+        drawerHandoff({
+          runID: RUN,
+          fromStep: 0,
+          tools,
+          registered: "you help",
+          variant: { ...variant, instructions: "you help", toolsOff: new Set(), lab: undefined, input: "", model: "", thinking: "" },
+          edits: [],
+        })
+      ).hash ?? ""
+    )
+    for (const k of ["instructions", "tools", "lab", "edits", "input", "model", "thinking"]) expect(plain).not.toHaveProperty(k)
+  })
+
+  it("the drawer's link carries the held edits in its fragment", async () => {
+    serve()
+    await story()
+    await edit("the result of search_kb (c2)", "policy: no refunds")
+    await waitFor(() => expect(kinds()).toEqual(["tool_result"]))
+    const a = within(drawer()!).getByRole("link", { name: /open in the playground/ })
+    const hash = new URL(a.getAttribute("href")!, "http://studio.test/").hash
+    const back = handoffFromHash(hash)
+    expect(back).toMatchObject({ run: RUN })
+    expect(editsFromHandoff(back.edits)).toEqual([expect.objectContaining({ callID: "c2", toolResult: "policy: no refunds" })])
+    expect(new URL(a.getAttribute("href")!, "http://studio.test/").search).toBe("")
   })
 })

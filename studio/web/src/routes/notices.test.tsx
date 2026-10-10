@@ -289,6 +289,33 @@ describe("the playground's notices", () => {
     expect(toastTitles()).toEqual(["experiment exp_one finished · 1 succeeded"])
   })
 
+  it("a matrix whose runtime left after its cells went out still says they settled", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    let gone = false
+    let settledCell = false
+    studio
+      .on("GET runtimes", () => (gone ? { runtimes: [] } : runtimes))
+      .on("POST experiments", (req) => req.body)
+      .on("POST playground/runs", command("cmd_m1", "queued"))
+      .on("GET playground/commands/cmd_m1", () =>
+        settledCell ? { ...command("cmd_m1", "rejected"), error: "runtime rt_1 disconnected" } : command("cmd_m1", "accepted", "pg_m1")
+      )
+    renderApp("/playground?run=r_ok")
+    await waitFor(() => expect(valueOf(screen.getByLabelText("agent"))).toBe("orders"))
+    fireEvent.change(screen.getByLabelText("experiment name"), { target: { value: "exp_gone" } })
+    const go = screen.getByRole("button", { name: "Run matrix" })
+    await waitFor(() => expect(go).toHaveProperty("disabled", false))
+    fireEvent.click(go)
+    await waitFor(() => expect(document.querySelector('[data-cell="A×1"]')?.textContent).toContain("accepted"))
+    // The runtime goes (the shell's 5 s read): the matrix's button is held.
+    gone = true
+    await vi.advanceTimersByTimeAsync(5_000)
+    await waitFor(() => expect(go).toHaveProperty("disabled", true))
+    settledCell = true
+    await vi.advanceTimersByTimeAsync(5_000)
+    await toastFor(/^experiment exp_gone finished · 1 not run$/)
+  })
+
   it("a matrix with a refused cell and out-of-order settles: one toast, and open opens the experiment", async () => {
     let n = 0
     let aDone = false
@@ -559,6 +586,30 @@ describe("runtime notices under a read-scoped panel token", () => {
     await screen.findByText("r_ok")
     await settle()
     expect(studio.calls("GET runtimes")).toHaveLength(0)
+  })
+
+  it("the playground's picker still follows the runtimes: the page is the one 5 s poller", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const tok = `weft_pt.${btoa(JSON.stringify({ public_id: "pub_1", scope: "read", exp: new Date(Date.now() + 3600_000).toISOString() }))
+      .replace(/=+$/, "")
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")}.c2ln`
+    setStudioToken(tok)
+    studio
+      .on("GET meta", meta(["live", "playground", "runtimes"]))
+      .on("GET runs", runs)
+      .on("GET runtimes", { runtimes: [] })
+      .on("GET experiments", { experiments: [] })
+      .on("GET runs/r_ok", { ...rOK, children: [] })
+    renderApp("/playground?run=r_ok")
+    await waitFor(() => expect(studio.calls("GET runtimes").length).toBeGreaterThan(0))
+    const start = studio.calls("GET runtimes").length
+    await vi.advanceTimersByTimeAsync(15_000)
+    expect(studio.calls("GET runtimes").length - start).toBe(3)
+    // One observer polls: the shell's is off under this token, the page's on.
+    const query = queryClient.getQueryCache().find({ queryKey: ["runtimes"] })!
+    const polling = query.observers.filter((o) => o.options.enabled !== false && o.options.refetchInterval)
+    expect(polling.map((o) => o.options.refetchInterval)).toEqual([5_000])
   })
 })
 

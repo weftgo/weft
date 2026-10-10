@@ -103,6 +103,20 @@ describe("SplitPane", () => {
     expect(now(handle())).toBe(45)
   })
 
+  it("a saved layout outside a pane's minimum (it sums to 100) opens clamped to the bound", async () => {
+    localStorage.setItem(paneKey("trace-detail"), "[5,95]")
+    render(<Probe />)
+    await act(async () => {})
+    expect(now(handle())).toBe(30)
+    expect(document.querySelector<HTMLElement>('[data-pane="tree"]')!.style.flex).toMatch(/^30 /)
+    localStorage.setItem(paneKey("trace-detail"), "[95,5]")
+    cleanup()
+    render(<Probe />)
+    await act(async () => {})
+    expect(now(handle())).toBe(75)
+    expect(document.querySelector<HTMLElement>('[data-pane="detail"]')!.style.flex).toMatch(/^25 /)
+  })
+
   it("a garbage saved value opens at the default", () => {
     localStorage.setItem(paneKey("trace-detail"), '"wide"')
     render(<Probe />)

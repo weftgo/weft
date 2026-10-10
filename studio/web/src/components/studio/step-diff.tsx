@@ -235,28 +235,45 @@ export function StepDiffTable({ view, focus }: { view: NWayView; focus?: number 
  * StepCompare fetches the N−1 diffs of `others` against `base` and
  * draws them. Renders nothing without capability "diff" (the
  * capability seam: a hidden control, never a broken one) or without a
- * run to compare.
+ * run to compare. A side whose diff failed (a 404 on a mistyped id) is
+ * badged with its error, never blanking the sides that answered; only
+ * when none answered is the error the whole compare.
  */
 export function StepCompare({ base, others, focus }: { base: string; others: string[]; focus?: number }) {
   const { has } = useCapabilities()
-  const ids = others.filter((x) => x && x !== base)
+  const ids = [...new Set(others.filter((x) => x && x !== base))]
   const on = has("diff") && !!base && ids.length > 0
   const qs = useQueries({ queries: ids.map((b) => ({ ...diffQuery(base, b), enabled: on })) })
   if (!on) return null
-  // An error replaces the table only before every response arrived: a
-  // failed background re-read keeps what was drawn.
-  const failed = qs.find((q) => q.isError)
-  if (failed?.error && !qs.every((q) => q.data))
-    return (
-      <p className="text-xs text-status-bad" role="alert" data-step-diff-error>
-        the step compare could not be read: {failed.error.message}
-      </p>
-    )
-  if (qs.some((q) => !q.data))
+  // A failed background re-read keeps what was drawn: a side with data
+  // is drawn whatever its last read said.
+  const sides = ids.map((id, i) => ({ id, q: qs[i] }))
+  if (sides.some(({ q }) => !q.data && !q.isError))
     return (
       <div className="flex items-center gap-2 text-xs text-faint">
         <Spinner /> reading the step compare…
       </div>
     )
-  return <StepDiffTable view={nWayView(qs.map((q) => q.data as DiffDoc))} focus={focus} />
+  const answered = sides.filter(({ q }) => q.data)
+  const failed = sides.filter(({ q }) => !q.data && q.isError)
+  const errors = failed.length ? (
+    <ul className="space-y-0.5 text-xs" aria-label="runs not compared">
+      {failed.map(({ id, q }) => (
+        <li key={id} className="flex flex-wrap items-center gap-1.5" role="alert" data-step-diff-error data-step-diff-side-error={id}>
+          <Badge variant="outline" className="border-status-bad/40 font-mono text-[10px] font-normal text-status-bad">
+            not compared
+          </Badge>
+          <span className="font-mono">{id}</span>
+          <span className="text-status-bad">the step compare could not be read: {q.error?.message}</span>
+        </li>
+      ))}
+    </ul>
+  ) : null
+  if (!answered.length) return errors
+  return (
+    <div className="space-y-2">
+      {errors}
+      <StepDiffTable view={nWayView(answered.map(({ q }) => q.data as DiffDoc))} focus={focus} />
+    </div>
+  )
 }

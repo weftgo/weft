@@ -213,6 +213,21 @@ describe("the model field follows the agent", () => {
     expect(router.state.location.search).toMatchObject({ run: "r_ok", step: 1, agent: "orders", engine: "scripted" })
   })
 
+  it("under StrictMode the fragment hand-off is the controls, and the query joins it (the mount's re-run adopts nothing)", async () => {
+    const { router } = renderApp("/playground#run=r_ok&agent=planner&engine=scripted", { strict: true })
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ run: "r_ok", agent: "planner", engine: "scripted" }))
+    await waitFor(() => expect(valueOf(agentSelect())).toBe("planner"))
+    await settle()
+    expect(sourceInput().value).toBe("r_ok")
+    expect(valueOf(agentSelect())).toBe("planner")
+    expect(valueOf(engineSelect())).toBe("scripted")
+    expect(router.state.location.search).toMatchObject({ run: "r_ok", agent: "planner", engine: "scripted" })
+    // An outside navigate is still adopted after the double mount.
+    void router.navigate(playgroundStateLink({ run: "r_two", agent: "orders" }))
+    await waitFor(() => expect(sourceInput().value).toBe("r_two"))
+    await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
+  })
+
   it("a run typed after a fragment hand-off stays through the next control change", async () => {
     const { router } = renderApp("/playground#run=r_ok&tools=lookup_order")
     await waitFor(() => expect(router.state.location.search).toMatchObject({ run: "r_ok" }))

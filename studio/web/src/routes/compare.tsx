@@ -24,10 +24,13 @@ function str(v: unknown): string | undefined {
 export const Route = createFileRoute("/compare")({
   validateSearch: (search: Record<string, unknown>): CompareSearch => {
     const list = Array.isArray(search.b) ? search.b : search.b === undefined ? [] : [search.b]
-    const b = list.map(str).filter((x): x is string => !!x)
+    const a = str(search.a)
+    // compareLink's rule: the base itself and a repeat are dropped (one
+    // diff, one column, one key per compared run).
+    const b = [...new Set(list.map(str).filter((x): x is string => !!x && x !== a))]
     const step =
       typeof search.step === "number" && Number.isInteger(search.step) && search.step >= 0 ? search.step : undefined
-    return { a: str(search.a), ...(b.length ? { b } : {}), ...(step !== undefined ? { step } : {}) }
+    return { a, ...(b.length ? { b } : {}), ...(step !== undefined ? { step } : {}) }
   },
   component: ComparePage,
 })

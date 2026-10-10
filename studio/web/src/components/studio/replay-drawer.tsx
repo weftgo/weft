@@ -18,9 +18,10 @@ import type { Dispatch, SetStateAction } from "react"
 import { ApiError, isHoleRef, isRequestRow, postPlaygroundRun, runQuery, runtimesQuery, stepQuery, transcriptAsOfQuery, transcriptQuery } from "@/lib/api"
 import type { AgentView, PlaygroundRunBody, StepDoc } from "@/lib/api"
 import { compactionsOf, isSessionMarker } from "@/lib/compaction"
-import { buildRunBody, compactedRefusal, labProblems, pickTarget, unmatchedDrafts } from "@/lib/experiment-body"
+import { buildRunBody, compactedRefusal, editsHandoff, labHandoff, labProblems, pickTarget, unmatchedDrafts } from "@/lib/experiment-body"
 import type { EditDraft, VariantFields } from "@/lib/experiment-body"
 import { compareLink, playgroundLink, runLink } from "@/lib/links"
+import type { PlaygroundHandoff } from "@/lib/links"
 import { FORK_EDITS, impliedFromStep, putEdit } from "@/lib/edits"
 import { allowRefusals, breakpointsFor, prefixLine, replayVerdicts } from "@/lib/replay"
 import type { CatalogTool, ReplayDraft, SideEffectsMode, ToolVerdict } from "@/lib/replay"
@@ -685,15 +686,7 @@ function ReplayForm({
             {busy ? "sending…" : "Run"}
           </Button>
           <Link
-            {...playgroundLink({
-              run: runID,
-              step: fromStep,
-              agent: wantAgent,
-              runtime: runtime?.id,
-              side_effects: variant.sideEffects,
-              thread: variant.thread,
-              engine: variant.engine,
-            })}
+            {...playgroundLink(drawerHandoff({ runID, fromStep, agent: wantAgent, runtime: runtime?.id, tools: agent?.tools.map((t) => t.name), registered, variant, edits: editDrafts }))}
             className="text-xs text-muted-foreground hover:underline"
           >
             open in the playground (variants × inputs)
@@ -703,6 +696,45 @@ function ReplayForm({
       </div>
     </>
   )
+}
+
+/**
+ * drawerHandoff is the drawer's "open in the playground" hand-off: the
+ * same command, not a cousin — the source, the target, the run's shape,
+ * the prompt (when it is not the registered one), the input, the model,
+ * the thinking, the tools left on (when some are off), the option lab
+ * and the transcript edits, as the panel's "compare in Studio" carries
+ * them (parity). It rides playgroundLink's fragment: never a query.
+ */
+export function drawerHandoff(d: {
+  runID: string
+  fromStep: number
+  agent?: string
+  runtime?: string
+  /** The agent's registered tool names, in order. */
+  tools?: string[]
+  registered: string
+  variant: VariantFields
+  edits: EditDraft[]
+}): PlaygroundHandoff {
+  const { variant: v } = d
+  const kept = (d.tools ?? []).filter((n) => !v.toolsOff.has(n))
+  return {
+    run: d.runID,
+    step: d.fromStep,
+    agent: d.agent,
+    runtime: d.runtime,
+    side_effects: v.sideEffects,
+    thread: v.thread,
+    engine: v.engine,
+    instructions: v.instructions && v.instructions !== d.registered ? v.instructions : undefined,
+    input: v.input || undefined,
+    model: v.model || undefined,
+    thinking: v.thinking || undefined,
+    tools: kept.length && kept.length < (d.tools ?? []).length ? kept.join(",") : undefined,
+    lab: labHandoff(v.lab),
+    edits: editsHandoff(d.edits),
+  }
 }
 
 /** The command's lifecycle in the drawer: queued → accepted (the run

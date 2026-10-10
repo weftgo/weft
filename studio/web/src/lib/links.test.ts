@@ -291,6 +291,13 @@ describe("canonical (the copy link)", () => {
     expect(u).toBe(`${BASE}playground?run=r_1&agent=orders`)
   })
 
+  it("never carries a hand-off's edits= or lab= from a hand-built query", () => {
+    const edits = encodeURIComponent(JSON.stringify([{ kind: "user", step: 0, content: "my card is 4111" }]))
+    const lab = encodeURIComponent(JSON.stringify({ temperature: "0.2" }))
+    const u = canonical(`${BASE}playground?run=r_1&edits=${edits}&lab=${lab}&agent=orders`)
+    expect(u).toBe(`${BASE}playground?run=r_1&agent=orders`)
+  })
+
   it("leaves a query with nothing to drop byte for byte", () => {
     const u = `${BASE}traces/t_1?span=%22123%22&view=chat`
     expect(canonical(u)).toBe(u)

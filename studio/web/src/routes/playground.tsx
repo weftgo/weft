@@ -42,6 +42,7 @@ import {
   postPlaygroundRun,
   runQuery,
   runtimesQuery,
+  studioToken,
 } from "@/lib/api"
 import type { PlaygroundRunBody, RunRow } from "@/lib/api"
 import { producedText } from "@/lib/events"
@@ -61,6 +62,8 @@ import type { EditDraft, Engine, SideEffects, ThreadMode, VariantFields } from "
 import { spanMs } from "@/lib/format"
 import { copyText, download } from "@/lib/json"
 import { useCapabilities } from "@/hooks/use-capabilities"
+import { RUNTIMES_POLL_MS } from "@/hooks/use-notices"
+import { canReplay } from "@/lib/replay"
 import {
   isUnknownCommand,
   queued,
@@ -323,8 +326,12 @@ function Playground({ caps }: { caps: string[] }) {
   // Runtimes come and go (an app restarts, a second one connects):
   // the picker follows them.
   // The shell's runtime notices poll this key every 5 s (use-notices.ts,
-  // the one poller): this observer reads the shared cache.
-  const runtimes = useQuery(runtimesQuery())
+  // the one poller) where the bearer may act (canReplay): this observer
+  // reads the shared cache. A read-scoped token sees the playground with
+  // the shell's poll off — GET /api/runtimes is the picker for every
+  // identity — so here the page is that one poller itself.
+  const shellPolls = canReplay(caps, studioToken())
+  const runtimes = useQuery({ ...runtimesQuery(), refetchInterval: shellPolls ? false : RUNTIMES_POLL_MS })
   const meta = useQuery(metaQuery())
 
   // The variants (§4): A starts as the original, more are added with
@@ -423,6 +430,17 @@ function Playground({ caps }: { caps: string[] }) {
     )
     // queryKey is queryState's identity.
   }, [queryKey])
+  // An unmount ends the arrival: StrictMode's re-run of the mount
+  // (every cleanup, then every effect again) is an arrival too —
+  // adopting there would reset the controls to the router's query
+  // while the arrival write puts the hand-off into it. A [] effect's
+  // cleanup runs only then, never on a query change.
+  useEffect(
+    () => () => {
+      arrived.current = false
+    },
+    []
+  )
   // On arrival: a fragment hand-off's run (or step, agent…) joins the
   // query once — the only write no control made.
   useEffect(() => {
@@ -868,6 +886,7 @@ function Playground({ caps }: { caps: string[] }) {
             variants={variants}
             runMatrix={runMatrix}
             busy={busy || resolving || !runtime || !agent}
+            issuing={busy}
             cells={cells}
             setCells={setCells}
             sourceRunID={sourceRunID}
@@ -1424,6 +1443,7 @@ function Matrix({
   variants,
   runMatrix,
   busy,
+  issuing,
   cells,
   setCells,
   sourceRunID,
@@ -1434,7 +1454,13 @@ function Matrix({
     experimentID: string,
     onSaved?: () => void
   ) => Promise<void>
+  /** The matrix's run button is held (a command posting, the target
+   * not resolved, no runtime or agent). */
   busy: boolean
+  /** Cells are being issued (a command posting): the notice waits for
+   * this alone — a runtime gone after the cells were issued must not
+   * hold the toast for their settling. */
+  issuing: boolean
   cells: Record<string, Experiment>
   setCells: React.Dispatch<React.SetStateAction<Record<string, Experiment>>>
   sourceRunID: string
@@ -1459,10 +1485,12 @@ function Matrix({
 
   // One notice for the whole matrix (plan H5), when its last cell
   // settles — never one per cell — and never while cells are still
-  // being issued.
+  // being issued (issuing, not the run button's busy: a runtime that
+  // disconnects after the cells went out holds the button, not the
+  // news that they settled lost or rejected).
   useEffect(() => {
     const all = Object.values(cells)
-    if (busy || !issued.current || all.length === 0) return
+    if (issuing || !issued.current || all.length === 0) return
     if (all.some((c) => !settled(c.state))) return
     const finished = all.filter((c) => c.state === "finished")
     const failed = finished.filter((c) => c.status === "failed").length
@@ -1474,7 +1502,7 @@ function Matrix({
       failed,
       other: all.length - finished.length,
     })
-  }, [cells, busy])
+  }, [cells, issuing])
 
   // Poll the cells' lifecycle while any is queued or accepted.
   useEffect(() => {

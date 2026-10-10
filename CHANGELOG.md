@@ -424,6 +424,31 @@ module, ADR 0005).
   record) without a throw. Panel: +351 B gzip (ledger row "review fixes
   (session 8)").
 
+### Fixed — Studio (phase 4 review)
+
+- **One run page per run**: `/runs/A` → `/runs/B` is a fresh page, so a
+  replay drawer open on A, its form and the transcript edits held there
+  no longer carry onto B (a link to B's drawer opens it with none of A's
+  edits), and B's `?ev=` is scrolled to after visiting A.
+- **The playground follows runtimes under a read-scoped token**: the
+  shell's 5 s `/api/runtimes` poll is off for a token that may not act,
+  so the playground page polls itself there — still one poller.
+- **The drawer's "open in the playground" is the same command**: its
+  fragment carries the prompt, input, model, thinking, the tools left
+  on, the option lab and the transcript edits, as the panel's "compare
+  in Studio" does.
+- **A copied link never carries `edits=` or `lab=`**: `canonical` strips
+  them with the other prompt-bearing keys.
+- **One failed side no longer blanks the step compare**: the runs that
+  answered are drawn and the failed one is badged "not compared" with
+  its error; `/compare` drops a repeated `b` and a `b` equal to `a`.
+- **A matrix's finished toast is not held by a runtime that left** after
+  its cells went out: the notice waits only for cells being issued.
+- **The playground's hand-off survives a StrictMode double mount** (the
+  controls are no longer reset to the router's query on the re-run).
+- A saved pane layout outside a pane's minimum opens clamped to the
+  bound (pinned by a test).
+
 ### Changed — breaking
 
 - **`studio/runtime.TranscriptEdit` is no longer comparable** (plan

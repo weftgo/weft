@@ -171,6 +171,28 @@ describe("the compare page", () => {
     expect(line.textContent).toContain("the database is gone")
   })
 
+  it("one failed side is badged; the sides that answered are still drawn", async () => {
+    serve(["diff"], { "r_da|r_db": golden<DiffDoc>("diff") })
+    renderApp('/compare?a=r_da&b=["r_db","r_typo"]')
+    await waitFor(() => expect(document.querySelector("[data-step-diff]")).toBeTruthy())
+    const bad = document.querySelector("[data-step-diff-side-error]")!
+    expect(bad.getAttribute("data-step-diff-side-error")).toBe("r_typo")
+    expect(bad.textContent).toContain("not compared")
+    expect(bad.textContent).toContain("no such run")
+    expect(document.querySelectorAll("[data-step-diff-side-error]")).toHaveLength(1)
+    expect(Object.keys(cells("r_db")).length).toBeGreaterThan(0)
+    expect(document.querySelector('[data-diff-run="r_typo"]')).toBeNull()
+  })
+
+  it("a repeated b, or b equal to a, is one compared run (one call, one column)", async () => {
+    serve(["diff"], { "r_da|r_db": golden<DiffDoc>("diff") })
+    const { router } = renderApp('/compare?a=r_da&b=["r_db","r_db","r_da"]')
+    await waitFor(() => expect(document.querySelector("[data-step-diff]")).toBeTruthy())
+    expect(router.state.location.search).toMatchObject({ a: "r_da", b: ["r_db"] })
+    expect(studio.calls("GET diff")).toHaveLength(1)
+    expect(document.querySelectorAll('thead th[scope="colgroup"]')).toHaveLength(2)
+  })
+
   it("without capability diff: no call, the page says why", async () => {
     serve(["playground"], { "r_da|r_db": golden<DiffDoc>("diff") })
     renderApp('/compare?a=r_da&b=["r_db"]')

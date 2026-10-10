@@ -157,6 +157,11 @@ export const Route = createFileRoute("/runs/$id")({
     // The replay drawer (G2): its verb, from_step and source run.
     ...replaySearch(replayFromSearch(search)),
   }),
+  // One page per run: /runs/A → /runs/B is a fresh page, so nothing of
+  // A's (an open drawer and its form, the transcript edits held, the
+  // events explorer's linked row) survives onto B. The page's state is
+  // its run's; B's URL decides B's drawer (the linked effect).
+  remountDeps: ({ params }) => params.id,
   component: RunPage,
 })
 
@@ -245,6 +250,7 @@ function RunPage() {
     }
     const draft =
       r.verb === "rerun" ? rerun() : r.verb === "continue" ? continueHere() : r.verb === "edit_prompt" ? editPromptAndReplay(r.from) : replayFromStep(r.from)
+    setEdits({ list: draft.edits, invalid: {} })
     setReplay((cur) => ({ req: { runID: r.of ?? id, draft }, n: cur.n + 1 }))
     // The link's edits were never in it: a reopened edit / edit_result
     // drawer is the rebuilt draft's verb, and the URL says so.

@@ -1,12 +1,15 @@
 package studio
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/weftgo/weft/obsdb"
 )
 
 // searchIDs reads GET path's run ids, total and next_offset.
@@ -137,14 +140,32 @@ func TestSearchPanelTokenScope(t *testing.T) {
 	t.Cleanup(func() { _ = srv.Close() })
 	seedRun(t, srv.db, "run_a", "pub_a", "s_a", "", nil)
 	seedRun(t, srv.db, "run_b", "pub_b", "s_b", "", nil)
+	// B's run called the tool "refund" (seedRun stores no tool_start):
+	// a tool search has a foreign hit to keep out of A's token.
+	if err := srv.db.Write(context.Background(), obsdb.Batch{Records: []obsdb.Record{{
+		Time: time.Now().UTC(), EventName: "weft.event", Severity: 9, Service: "svc",
+		Body: `{"type":"tool_start","run_id":"run_b","seq":1,"call_id":"call_1","name":"refund","args":{}}`,
+		Attrs: map[string]any{"weft.record": "event", "weft.run.id": "run_b", "weft.public_id": "pub_b",
+			"gen_ai.agent.name": "acme-support", "weft.event.type": "tool_start", "weft.event.pos": int64(2)},
+		Resource: map[string]any{"service.name": "svc"},
+	}}}); err != nil {
+		t.Fatal(err)
+	}
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
 	read, err := signPanelToken([]byte(tok), panelClaims{PublicID: "pub_a", Scope: scopeRead, Exp: time.Now().Add(time.Hour)})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for bearer, want := range map[string]string{tok: "run_b,run_a", read: "run_a"} {
-		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/search?q=secret&all=1", nil)
+	for _, c := range []struct{ bearer, query, want string }{
+		{tok, "q=secret&all=1", "run_b,run_a"},
+		{read, "q=secret&all=1", "run_a"},
+		{tok, "tool=refund&all=1", "run_b"}, // the row below is load-bearing
+		{read, "tool=refund&all=1", ""},
+		{read, "q=refund&all=1", ""},
+	} {
+		bearer, want := c.bearer, c.want
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/search?"+c.query, nil)
 		req.Header.Set("Authorization", "Bearer "+bearer)
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
@@ -160,12 +181,12 @@ func TestSearchPanelTokenScope(t *testing.T) {
 		var ids []string
 		for _, r := range page.Runs {
 			ids = append(ids, r.ID)
-			if !strings.HasPrefix(r.PromptPreview, "secret of ") {
+			if !strings.HasPrefix(r.PromptPreview, "secret of ") && r.PromptPreview != "" {
 				t.Errorf("hit %s prompt_preview = %q", r.ID, r.PromptPreview)
 			}
 		}
 		if strings.Join(ids, ",") != want {
-			t.Errorf("search as %q = %v, want %s", bearer[:3], ids, want)
+			t.Errorf("search?%s as %q = %v, want %q", c.query, bearer[:3], ids, want)
 		}
 	}
 }

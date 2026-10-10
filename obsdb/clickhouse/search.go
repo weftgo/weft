@@ -14,37 +14,59 @@ import (
 // answer from the growth messages records' bodies, the tool names from
 // the tool_start events — and the error from weft_runs' Err, every
 // term a positionCaseInsensitiveUTF8 substring test (the semantics of
-// the SQLite backend's trigram index). No skip index narrows the
-// scan: a search reads the messages records of the runs the filters
-// leave, which is what an ILIKE over them would read too.
+// the SQLite backend's trigram index). No skip index narrows the scan;
+// instead the fields are derived once per search, for the runs the
+// cheap filters (status, model, time, tokens and RunQuery's) leave,
+// and every term is tested against that one derivation.
 
 var _ obsdb.Searcher = (*DB)(nil)
 
 // searchMessages is one row per message of every growth messages
-// record (never a compaction view, never an index-less record): its
-// run, record index, place in the body, role, and the text of its text
-// parts joined by "\n" — obsdb.MessagesText in SQL. %s narrows the
-// records read (a RunId IN list, or nothing).
-const searchMessages = `SELECT RunId, Pos, I, JSONExtractString(M, 'role') AS Role,
+// record (never a compaction view, never an index-less record) the
+// extra condition leaves: its run, record index, place in the body,
+// whether the record is the run's input (IsIn: weft.messages.input,
+// inferred for index 0 on a row written before 0004 stored the flag —
+// Transcript's reading), role, and the text of its text parts joined by
+// "\n" — obsdb.MessagesText in SQL.
+func searchMessages(extra string) string {
+	return `SELECT RunId, Pos, I, IsIn, JSONExtractString(M, 'role') AS Role,
 		arrayStringConcat(arrayMap(p -> JSONExtractString(p, 'text'),
 			arrayFilter(p -> JSONExtractString(p, 'type') = 'text', JSONExtractArrayRaw(M, 'content'))), '\n') AS Txt
-	FROM (SELECT RunId, Pos, Body FROM weft_records WHERE Kind = 'messages' AND Reason = '' AND Pos >= 0%s)
+	FROM (SELECT RunId, Pos, (Input = 1 OR (Input = -1 AND Pos = 0)) AS IsIn, Body FROM weft_records
+		WHERE Kind = 'messages' AND Reason = '' AND Pos >= 0` + extra + `)
 	ARRAY JOIN JSONExtractArrayRaw(Body) AS M, arrayEnumerate(JSONExtractArrayRaw(Body)) AS I`
+}
 
-// searchFields is each run's prompt — the first user message with
-// text, by (record index, place) — and answer — the last assistant
-// message with text. A transport duplicate repeats a row with the same
-// text, so neither aggregate needs FINAL.
-const searchFields = `SELECT RunId,
-		argMinIf(Txt, (Pos, I), Role = 'user' AND Txt != '') AS Prompt,
-		argMaxIf(Txt, (Pos, I), Role = 'assistant' AND Txt != '') AS Answer
-	FROM (` + searchMessages + `) GROUP BY RunId`
+// The prompt, obsdb.PromptText's rule over a run's records: the input
+// record's last user message with text (of the lowest-index input
+// record, should there be two), else the first user message with text
+// by (record index, place). A transport duplicate repeats a row with
+// the same text, so no aggregate needs FINAL.
+const (
+	userText    = `Role = 'user' AND Txt != ''`
+	inputPrompt = `argMaxIf(Txt, (-Pos, I), IsIn AND ` + userText + `)`
+	firstPrompt = `argMinIf(Txt, (Pos, I), ` + userText + `)`
+	promptExpr  = `if(countIf(IsIn AND ` + userText + `) > 0, ` + inputPrompt + `, ` + firstPrompt + `)`
+	answerExpr  = `argMaxIf(Txt, (Pos, I), Role = 'assistant' AND Txt != '')`
+)
 
-// toolStarts narrows weft_records to the tool_start events; the tool
-// name is JSONExtractString(Body, 'name') (content-off chains keep it).
-const toolStarts = `SELECT RunId FROM weft_records WHERE Kind = 'event' AND EventType = 'tool_start' AND `
+// joinedRunColumns is runColumns read from the join's run side by
+// their own names (r.* names them r.<col> past a join).
+var joinedRunColumns = func() string {
+	cols := strings.Split(runColumns, ",")
+	for i, c := range cols {
+		c = strings.TrimSpace(c)
+		cols[i] = "r." + c + " AS " + c
+	}
+	return strings.Join(cols, ", ")
+}()
 
-// Search answers obsdb.Searcher: Runs' grouped rows, filtered.
+// Search answers obsdb.Searcher in one query (plus a count only when
+// the page is past the match): the run list Runs reads, narrowed by
+// the cheap filters, joined once to the search fields of exactly those
+// runs — prompt and answer from one pass over their messages records,
+// the tool names from one pass over their tool_start events — and every
+// term tested against the joined row.
 func (d *DB) Search(ctx context.Context, q obsdb.SearchQuery) (_ obsdb.RunPage, err error) {
 	if err := d.checkOpen(); err != nil {
 		return obsdb.RunPage{}, err
@@ -57,49 +79,62 @@ func (d *DB) Search(ctx context.Context, q obsdb.SearchQuery) (_ obsdb.RunPage, 
 	now := time.Now()
 	rq := q.RunQuery
 	rq.Before, rq.BeforeID = time.Time{}, ""
-	inner, args := runsInner(rq)
-	var conds []string
-	var outer []any
+	inner, innerArgs := runsInner(rq)
+
+	// The cheap filters, over the grouped rows.
+	var cheap []string
+	var cheapArgs []any
 	if q.Status != "" {
-		conds = append(conds, "("+statusCase+") = ?")
-		outer = append(outer, now.Add(-obsdb.InterruptedAfter).UnixNano(), string(q.Status))
+		cheap = append(cheap, "("+statusCase+") = ?")
+		cheapArgs = append(cheapArgs, now.Add(-obsdb.InterruptedAfter).UnixNano(), string(q.Status))
 	}
 	if q.Model != "" {
-		conds = append(conds, "Model = ?")
-		outer = append(outer, q.Model)
+		cheap = append(cheap, "Model = ?")
+		cheapArgs = append(cheapArgs, q.Model)
 	}
 	if !q.Since.IsZero() {
-		conds = append(conds, "toUnixTimestamp64Nano(Started) >= ?")
-		outer = append(outer, q.Since.UnixNano())
+		cheap = append(cheap, "toUnixTimestamp64Nano(Started) >= ?")
+		cheapArgs = append(cheapArgs, q.Since.UnixNano())
 	}
 	if !q.Until.IsZero() {
-		conds = append(conds, "toUnixTimestamp64Nano(Started) < ?")
-		outer = append(outer, q.Until.UnixNano())
+		cheap = append(cheap, "toUnixTimestamp64Nano(Started) < ?")
+		cheapArgs = append(cheapArgs, q.Until.UnixNano())
 	}
 	if q.MinTokens > 0 {
-		conds = append(conds, "(InputTokens + OutputTokens) >= ?")
-		outer = append(outer, q.MinTokens)
-	}
-	if q.Tool != "" {
-		conds = append(conds, "RunId IN ("+toolStarts+"JSONExtractString(Body, 'name') = ?)")
-		outer = append(outer, q.Tool)
+		cheap = append(cheap, "(InputTokens + OutputTokens) >= ?")
+		cheapArgs = append(cheapArgs, q.MinTokens)
 	}
 	if q.Error != "" {
-		conds = append(conds, "positionCaseInsensitiveUTF8(Err, ?) > 0")
-		outer = append(outer, q.Error)
+		cheap = append(cheap, "positionCaseInsensitiveUTF8(Err, ?) > 0")
+		cheapArgs = append(cheapArgs, q.Error)
 	}
-	for _, t := range terms {
-		conds = append(conds, "(positionCaseInsensitiveUTF8(Err, ?) > 0"+
-			" OR RunId IN ("+toolStarts+"positionCaseInsensitiveUTF8(JSONExtractString(Body, 'name'), ?) > 0)"+
-			" OR RunId IN (SELECT RunId FROM ("+strings.Replace(searchFields, "%s", "", 1)+")"+
-			" WHERE positionCaseInsensitiveUTF8(Prompt, ?) > 0 OR positionCaseInsensitiveUTF8(Answer, ?) > 0))")
-		outer = append(outer, t, t, t, t)
+	runs := "SELECT * FROM (" + inner + ") WHERE " + strings.Join(or1(cheap), " AND ")
+	runsArgs := append(append([]any{}, innerArgs...), cheapArgs...)
+
+	// The search fields, only when a term or the tool filter reads them.
+	from, args := "("+runs+")", runsArgs
+	var conds []string
+	var condArgs []any
+	if len(terms) > 0 || q.Tool != "" {
+		cand := " AND RunId IN (SELECT RunId FROM (" + runs + "))"
+		from = "(SELECT " + joinedRunColumns + ", f.Prompt AS SPrompt, f.Answer AS SAnswer, t.Tools AS STools FROM (" + runs + ") AS r" +
+			" LEFT JOIN (SELECT RunId, " + promptExpr + " AS Prompt, " + answerExpr + " AS Answer FROM (" +
+			searchMessages(cand) + ") GROUP BY RunId) AS f ON f.RunId = r.RunId" +
+			" LEFT JOIN (SELECT RunId, groupUniqArray(JSONExtractString(Body, 'name')) AS Tools FROM weft_records" +
+			" WHERE Kind = 'event' AND EventType = 'tool_start'" + cand + " GROUP BY RunId) AS t ON t.RunId = r.RunId)"
+		args = append(append(append([]any{}, runsArgs...), runsArgs...), runsArgs...) // r, f's and t's candidates
+		if q.Tool != "" {
+			conds = append(conds, "has(STools, ?)")
+			condArgs = append(condArgs, q.Tool)
+		}
+		for _, t := range terms {
+			conds = append(conds, "(positionCaseInsensitiveUTF8(Err, ?) > 0"+
+				" OR positionCaseInsensitiveUTF8(SPrompt, ?) > 0 OR positionCaseInsensitiveUTF8(SAnswer, ?) > 0"+
+				" OR arrayExists(n -> positionCaseInsensitiveUTF8(n, ?) > 0, STools))")
+			condArgs = append(condArgs, t, t, t, t)
+		}
 	}
 	where := strings.Join(or1(conds), " AND ")
-	total, err := d.countRows(ctx, "SELECT count() FROM ("+inner+") WHERE "+where, args, outer)
-	if err != nil {
-		return obsdb.RunPage{}, err
-	}
 	order := "Started DESC, RunId DESC"
 	switch q.Sort {
 	case obsdb.SortDuration:
@@ -107,11 +142,18 @@ func (d *DB) Search(ctx context.Context, q obsdb.SearchQuery) (_ obsdb.RunPage, 
 	case obsdb.SortTokens:
 		order = "(InputTokens + OutputTokens) DESC, " + order
 	}
-	pageArgs := append(append(append([]any{}, args...), outer...), obsdb.LimitOf(q.Limit), q.Offset)
-	rows, err := d.queryRunRows(ctx, now,
-		"SELECT * FROM ("+inner+") WHERE "+where+" ORDER BY "+order+" LIMIT ? OFFSET ?", pageArgs...)
+	all := append(append([]any{}, args...), condArgs...)
+	rows, total, err := d.searchRows(ctx, now,
+		"SELECT "+runColumns+", count() OVER () FROM "+from+" WHERE "+where+" ORDER BY "+order+" LIMIT ? OFFSET ?",
+		append(all, obsdb.LimitOf(q.Limit), q.Offset)...)
 	if err != nil {
 		return obsdb.RunPage{}, err
+	}
+	if len(rows) == 0 && q.Offset > 0 {
+		// Past the match: no row carried the total.
+		if total, err = d.countRows(ctx, "SELECT count() FROM "+from+" WHERE "+where, args, condArgs); err != nil {
+			return obsdb.RunPage{}, err
+		}
 	}
 	if err := d.fillCounts(ctx, rowPtrs(rows)); err != nil {
 		return obsdb.RunPage{}, err
@@ -119,32 +161,82 @@ func (d *DB) Search(ctx context.Context, q obsdb.SearchQuery) (_ obsdb.RunPage, 
 	return obsdb.RunPage{Runs: rows, Total: total}, nil
 }
 
-// fillPreviewsOf sets PromptPreview on the rows of ids: the prompt
-// searchFields derives, cut to obsdb.PromptPreviewRunes code points
-// (substringUTF8, as SQLite's substr counts them). Called beside the
-// counts, so every run row a read returns carries it.
-func (d *DB) fillPreviewsOf(ctx context.Context, ids []string, byID map[string]*obsdb.RunRow) error {
-	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
-	args := make([]any, len(ids))
-	for i, id := range ids {
-		args[i] = id
-	}
-	rs, err := d.conn.Query(ctx,
-		"SELECT RunId, substringUTF8(Prompt, 1, 200) FROM ("+
-			strings.Replace(searchFields, "%s", " AND RunId IN ("+placeholders+")", 1)+") WHERE Prompt != ''",
-		args...)
+// searchRows is queryRunRows for Search's page: each row also carries
+// the window's count of the whole match.
+func (d *DB) searchRows(ctx context.Context, now time.Time, sql string, args ...any) ([]obsdb.RunRow, int, error) {
+	rs, err := d.conn.Query(ctx, sql, args...)
 	if err != nil {
-		return err
+		return nil, 0, err
 	}
 	defer func() { _ = rs.Close() }()
+	var out []obsdb.RunRow
+	var total uint64
 	for rs.Next() {
-		var id, preview string
-		if err := rs.Scan(&id, &preview); err != nil {
+		var s runScan
+		if err := rs.Scan(&s.ID, &s.ParentRunID, &s.ParentCallID, &s.TraceID, &s.Agent,
+			&s.Provider, &s.Model, &s.ManifestHash, &s.WeftVersion, &s.Service,
+			&s.SessionID, &s.PublicID, &s.Turn, &s.Playground, &s.ExperimentID, &s.ForkedFrom,
+			&s.Meta, &s.Started, &s.Finished, &s.LastSeen, &s.FinishedOK, &s.Failed, &s.Err,
+			&s.Steps, &s.Pending, &s.StopReason,
+			&s.InTok, &s.OutTok, &s.CachedTok, &s.CacheWriteTok, &s.ReasonTok, &s.DeltaCount,
+			&s.InstructionsHash, &s.CatalogHash, &s.RequestCount, &total); err != nil {
+			return nil, 0, err
+		}
+		row, err := s.row(now)
+		if err != nil {
+			return nil, 0, err
+		}
+		out = append(out, row)
+	}
+	return out, int(total), rs.Err()
+}
+
+// fillPreviewsOf sets PromptPreview on the rows of ids — the prompt
+// Search derives, cut to obsdb.PromptPreviewRunes code points
+// (substringUTF8, as SQLite's substr counts them). Called beside the
+// counts, so every run row a read returns carries it. It reads the
+// input records first (index 0, one record per run) and scans a run's
+// other messages records only when its input record holds no user
+// text (a run written without the flag, or fed no user message).
+func (d *DB) fillPreviewsOf(ctx context.Context, ids []string, byID map[string]*obsdb.RunRow) error {
+	found := map[string]bool{}
+	read := func(extra, expr string, ids []string) error {
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+		args := make([]any, len(ids))
+		for i, id := range ids {
+			args[i] = id
+		}
+		rs, err := d.conn.Query(ctx,
+			"SELECT RunId, substringUTF8("+expr+", 1, 200) FROM ("+
+				searchMessages(extra+" AND RunId IN ("+placeholders+")")+") GROUP BY RunId HAVING countIf("+userText+") > 0",
+			args...)
+		if err != nil {
 			return err
 		}
-		if row, ok := byID[id]; ok {
-			row.PromptPreview = preview
+		defer func() { _ = rs.Close() }()
+		for rs.Next() {
+			var id, preview string
+			if err := rs.Scan(&id, &preview); err != nil {
+				return err
+			}
+			if row, ok := byID[id]; ok {
+				row.PromptPreview = preview
+				found[id] = true
+			}
+		}
+		return rs.Err()
+	}
+	if err := read(" AND (Input = 1 OR (Input = -1 AND Pos = 0))", inputPrompt, ids); err != nil {
+		return err
+	}
+	var rest []string
+	for _, id := range ids {
+		if !found[id] {
+			rest = append(rest, id)
 		}
 	}
-	return rs.Err()
+	if len(rest) == 0 {
+		return nil
+	}
+	return read("", firstPrompt, rest)
 }

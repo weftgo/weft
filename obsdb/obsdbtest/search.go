@@ -20,6 +20,7 @@ import (
 // events carry and any extra records (a system prompt, a tool result).
 type searchRun struct {
 	id, parent, public, model string
+	input                     bool // record 0 carries weft.messages.input, as the core stamps it
 	start, dur                time.Duration
 	in, out                   int64
 	err                       string
@@ -71,8 +72,11 @@ func (s searchRun) records() (events, messages []obsdb.Record) {
 		ev("run_finish", fmt.Sprintf(`{"type":"run_finish","run_id":"%s","usage":{"input_tokens":%d,"output_tokens":%d},"steps":1}`, s.id, s.in, s.out))
 	}
 	for i, body := range s.messages {
-		messages = append(messages, s.rec("messages", t0.Add(time.Duration(i)*time.Millisecond), body,
-			map[string]any{"weft.messages.index": int64(i), "weft.step.index": int64(0)}))
+		attrs := map[string]any{"weft.messages.index": int64(i), "weft.step.index": int64(0)}
+		if i == 0 && s.input {
+			attrs["weft.messages.input"] = true
+		}
+		messages = append(messages, s.rec("messages", t0.Add(time.Duration(i)*time.Millisecond), body, attrs))
 	}
 	if s.extra != nil {
 		events = append(events, s.extra(s.id, t0)...)
@@ -113,25 +117,32 @@ func (s searchRun) span(n int) obsdb.Span {
 //   - sr-off (t0+3m, 1 s, 200 tokens, failed "upstream failed"):
 //     content-off — no messages; tool refund — matches through its tool
 //     name and error alone.
-//   - sr-hidden (t0+4m, 3 s, 50 tokens): "refund failed" only in its
-//     system prompt record, a tool's arguments and result, and a second
-//     user message — none of them search fields: no match.
+//   - sr-hidden (t0+4m, 3 s, 50 tokens): no input flag — the fallback,
+//     its prompt the first user message "hello there"; "refund failed"
+//     only in its system prompt record, a tool's arguments and result,
+//     and a second user message — none of them search fields: no match.
+//     Its answer "Sorted %_." pins a short term's literal % and _.
+//   - sr-turn2 (t0+4m30s, 2 s, 30 tokens): a continued conversation —
+//     its input record holds turn 1 ("Where is order 1?" / "Shipped.")
+//     and the turn's question "Can I get a refund on order 2?", which is
+//     the prompt; a message steered in at index 1 ("Also check order 3")
+//     is not; no "failed" anywhere, so the gate stays three runs.
 //   - sr-refund/0/call_1 (a child of sr-refund, t0+10s): prompt
 //     "refund failed twice" — matches only when children are included.
 func searchFixture() []searchRun {
 	long := strings.Repeat("é", 150) + strings.Repeat("x", 150) // 300 runes, 450 bytes
 	return []searchRun{
-		{id: "sr-refund", public: "pub_search", model: "small", start: 0, dur: 5 * time.Second, in: 250, out: 50,
+		{id: "sr-refund", input: true, public: "pub_search", model: "small", start: 0, dur: 5 * time.Second, in: 250, out: 50,
 			err: "payment gateway failed", tools: []string{"issue_refund"},
 			messages: []string{msgs(textMsg("user", "Refund order #7 please"))}},
-		{id: "sr-parcel", public: "pub_other", model: "big", start: time.Minute, dur: 9 * time.Second, in: 80, out: 20,
+		{id: "sr-parcel", input: true, public: "pub_other", model: "big", start: time.Minute, dur: 9 * time.Second, in: 80, out: 20,
 			messages: []string{
 				msgs(textMsg("user", "Where is my parcel?")),
 				msgs(textMsg("assistant", "Checking."), `{"role":"assistant","content":[{"type":"tool_call","id":"c0","name":"track","args":{}}]}`),
 				msgs(`{"role":"tool","content":[{"type":"tool_result","call_id":"c0","content":"in transit"}]}`),
 				msgs(textMsg("assistant", "Your refund failed to process."), `{"role":"assistant","content":[]}`),
 			}},
-		{id: "sr-done", public: "pub_search", model: "small", start: 2*time.Minute + 30*time.Second, dur: 2 * time.Second, in: 40, out: 10,
+		{id: "sr-done", input: true, public: "pub_search", model: "small", start: 2*time.Minute + 30*time.Second, dur: 2 * time.Second, in: 40, out: 10,
 			messages: []string{msgs(textMsg("user", long)), msgs(textMsg("assistant", "Done, refunded."))}},
 		{id: "sr-off", public: "pub_search", model: "small", start: 3 * time.Minute, dur: time.Second, in: 150, out: 50,
 			err: "upstream failed", tools: []string{"refund"}},
@@ -140,7 +151,7 @@ func searchFixture() []searchRun {
 			messages: []string{
 				msgs(textMsg("user", "hello there"), textMsg("assistant", "hi"), textMsg("user", "my refund failed")),
 				msgs(`{"role":"tool","content":[{"type":"tool_result","call_id":"c0","content":"refund failed"}]}`),
-				msgs(textMsg("assistant", "Sorted.")),
+				msgs(textMsg("assistant", "Sorted %_.")),
 			},
 			extra: func(id string, t time.Time) []obsdb.Record {
 				r := searchRun{id: id, public: "pub_search"}
@@ -151,7 +162,13 @@ func searchFixture() []searchRun {
 						map[string]any{"weft.event.type": "tool_finish", "weft.event.pos": int64(9)}),
 				}
 			}},
-		{id: "sr-refund/0/call_1", parent: "sr-refund", public: "pub_search", model: "small", start: 10 * time.Second, dur: time.Second, in: 5, out: 5,
+		{id: "sr-turn2", input: true, public: "pub_search", model: "small", start: 4*time.Minute + 30*time.Second, dur: 2 * time.Second, in: 20, out: 10,
+			messages: []string{
+				msgs(textMsg("user", "Where is order 1?"), textMsg("assistant", "Shipped."), textMsg("user", "Can I get a refund on order 2?")),
+				msgs(textMsg("user", "Also check order 3")),
+				msgs(textMsg("assistant", "Refund for order 2 is on its way.")),
+			}},
+		{id: "sr-refund/0/call_1", input: true, parent: "sr-refund", public: "pub_search", model: "small", start: 10 * time.Second, dur: time.Second, in: 5, out: 5,
 			messages: []string{msgs(textMsg("user", "refund failed twice"))}},
 	}
 }
@@ -201,10 +218,17 @@ func searchTable(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			{"a short term", obsdb.SearchQuery{Text: "#7"}, []string{"sr-refund"}, 0},
 			{"a tool name", obsdb.SearchQuery{Text: "issue_"}, []string{"sr-refund"}, 0},
 			{"the answer, not the prompt", obsdb.SearchQuery{Text: "refunded"}, []string{"sr-done"}, 0},
-			{"never the system prompt, a tool result, args or a later user message",
-				obsdb.SearchQuery{Text: "apologise"}, nil, 0},
+			{"never the system prompt", obsdb.SearchQuery{Text: "apologise"}, nil, 0},
+			{"no input record: the first user message is the prompt", obsdb.SearchQuery{Text: "hello there"}, []string{"sr-hidden"}, 0},
+			{"no input record: a later user message is no field", obsdb.SearchQuery{Text: `"my refund"`}, nil, 0},
+			{"the turn's own prompt", obsdb.SearchQuery{Text: `"order 2"`}, []string{"sr-turn2"}, 0},
+			{"never an earlier turn's prompt", obsdb.SearchQuery{Text: `"order 1"`}, nil, 0},
+			{"never a steered message", obsdb.SearchQuery{Text: `"order 3"`}, nil, 0},
+			{"a short term's % and _ are literal", obsdb.SearchQuery{Text: "%_"}, []string{"sr-hidden"}, 0},
+			{"a short term's % is literal", obsdb.SearchQuery{Text: "%x"}, nil, 0},
+			{"a short term's _ is literal", obsdb.SearchQuery{Text: "_r"}, []string{"sr-refund"}, 0},
 			{"nothing", obsdb.SearchQuery{Text: "zebra"}, nil, 0},
-			{"no text: every top-level run", obsdb.SearchQuery{}, []string{"sr-hidden", "sr-off", "sr-done", "sr-parcel", "sr-refund"}, 0},
+			{"no text: every top-level run", obsdb.SearchQuery{}, []string{"sr-turn2", "sr-hidden", "sr-off", "sr-done", "sr-parcel", "sr-refund"}, 0},
 			{"tool, exact", obsdb.SearchQuery{Tool: "refund"}, []string{"sr-off"}, 0},
 			{"tool, exact (2)", obsdb.SearchQuery{Tool: "issue_refund"}, []string{"sr-refund"}, 0},
 			{"error substring", obsdb.SearchQuery{Error: "GATEWAY"}, []string{"sr-refund"}, 0},
@@ -217,6 +241,7 @@ func searchTable(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 				[]string{"sr-off", "sr-refund"}, 0},
 			{"agent", obsdb.SearchQuery{Text: "refund failed", RunQuery: obsdb.RunQuery{Agent: "nobody"}}, nil, 0},
 			{"a page", obsdb.SearchQuery{Text: "refund failed", Offset: 1, RunQuery: obsdb.RunQuery{Limit: 1}}, []string{"sr-parcel"}, 3},
+			{"past the match", obsdb.SearchQuery{Text: "refund failed", Offset: 10}, nil, 3},
 		} {
 			page, err := srch.Search(ctx(), c.q)
 			if err != nil {
@@ -249,8 +274,8 @@ func searchTable(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 }
 
 // promptPreview: every run row read carries its prompt preview — the
-// first user message's text, cut to 200 runes — and a content-off run
-// none; Runs, Run (children included), Session and Search agree.
+// turn's own prompt (obsdb.PromptText), cut to 200 runes — and a
+// content-off run none; Runs, Run (children included), Session and Search agree.
 func promptPreview(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
 		db := open(t)
@@ -261,6 +286,7 @@ func promptPreview(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			"sr-done":            strings.Repeat("é", 150) + strings.Repeat("x", 50),
 			"sr-off":             "",
 			"sr-hidden":          "hello there",
+			"sr-turn2":           "Can I get a refund on order 2?",
 			"sr-refund/0/call_1": "refund failed twice",
 		}
 		check := func(where string, rows []obsdb.RunRow) {

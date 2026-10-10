@@ -1,6 +1,7 @@
 package obsdb
 
 import (
+	"fmt"
 	"hash/fnv"
 	"strconv"
 	"time"
@@ -63,8 +64,13 @@ type Weft struct {
 	ExperimentID, ForkedFrom         string
 	// Reason is a messages record's weft.messages.reason: "" for
 	// transcript growth, "compacted" for a compaction view (ADR 0028
-	// §8), which is never counted or concatenated as transcript.
+	// §8), which is never counted or concatenated as transcript. A
+	// non-string reason reads as its text (never "": the record is not
+	// growth), as ClickHouse's stringified attribute column reads it.
 	Reason string
+	// Input is a messages record's weft.messages.input: the run's input
+	// record (ADR 0028 §8) — what search reads the turn's prompt from.
+	Input bool
 }
 
 // The identity-chain and record attribute names (ADR 0024's record
@@ -94,6 +100,7 @@ const (
 
 	// ADR 0028 §8: the compaction view and the session marker.
 	attrMessagesReason  = "weft.messages.reason"
+	attrMessagesInput   = "weft.messages.input"
 	attrMessagesCount   = "weft.messages.count"
 	attrFromSeq         = "weft.messages.from_seq"
 	attrToSeq           = "weft.messages.to_seq"
@@ -143,7 +150,8 @@ func DeriveRecord(r Record) Weft {
 		Playground:   attrBool(r.Attrs, attrPlayground),
 		ExperimentID: attr(r.Attrs, attrExperimentID),
 		ForkedFrom:   attr(r.Attrs, attrForkedFrom),
-		Reason:       attr(r.Attrs, attrMessagesReason),
+		Reason:       attrReason(r.Attrs),
+		Input:        attrBool(r.Attrs, attrMessagesInput),
 	}
 	switch {
 	case hasIndex(r.Attrs, attrEventPos):
@@ -179,6 +187,22 @@ func DeriveRecord(r Record) Weft {
 		w.Pos = -1
 	}
 	return w
+}
+
+// attrReason reads weft.messages.reason: missing is "" (growth), a
+// string is itself, any other type its text — not growth, the reading
+// the SQLite transcript reader (messagesFlags) and ClickHouse's
+// stringified column give, so a malformed producer's view is never
+// counted or indexed as transcript on one backend only.
+func attrReason(m map[string]any) string {
+	switch v := m[attrMessagesReason].(type) {
+	case nil:
+		return ""
+	case string:
+		return v
+	default:
+		return fmt.Sprint(v)
+	}
 }
 
 // attr reads a string attribute; missing and non-string read as "".

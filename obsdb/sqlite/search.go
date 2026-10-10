@@ -36,15 +36,17 @@ func (u *runUpdate) search() *runSearch {
 }
 
 // seeSearch folds one newly stored durable record into the run's
-// search fields: a growth messages record's first user text (the
-// lowest index wins) and last assistant text (the highest wins), and a
+// search fields: a growth messages record's prompt text (PromptText:
+// the input record's last user text, another record's first; the
+// lowest index wins — the input record is index 0) and last assistant
+// text (the highest wins), and a
 // tool_start event's tool name. Applied only to records actually
 // inserted — a duplicate teaches nothing new.
 func (u *runUpdate) seeSearch(r obsdb.Record, w obsdb.Weft) {
 	switch {
 	case w.Record == "messages":
 		s := u.search()
-		if t, ok := obsdb.FirstUserText([]byte(r.Body)); ok && (s.promptIdx < 0 || w.Pos < s.promptIdx) {
+		if t, ok := obsdb.PromptText([]byte(r.Body), w.Input); ok && (s.promptIdx < 0 || w.Pos < s.promptIdx) {
 			s.prompt, s.promptIdx = t, w.Pos
 		}
 		if t, ok := obsdb.LastAssistantText([]byte(r.Body)); ok && w.Pos > s.answerIdx {
@@ -134,10 +136,8 @@ func reindexRun(ctx context.Context, tx *sql.Tx, runID string) error {
 // records and tool_start events.
 func backfillSearch(tx *sql.Tx) error {
 	ctx := context.Background()
-	rows, err := tx.QueryContext(ctx, `SELECT run_id, kind, pos, event_type, body FROM records
-		WHERE (kind = 'messages' AND pos >= 0
-		       AND COALESCE(json_extract(attrs, '$."weft.messages.reason"'), '') = '')
-		   OR (kind = 'event' AND event_type = 'tool_start')
+	rows, err := tx.QueryContext(ctx, `SELECT run_id, kind, pos, event_type, body, attrs FROM records
+		WHERE (kind = 'messages' AND pos >= 0) OR (kind = 'event' AND event_type = 'tool_start')
 		ORDER BY run_id, kind, pos`)
 	if err != nil {
 		return err
@@ -145,11 +145,17 @@ func backfillSearch(tx *sql.Tx) error {
 	upds := map[string]*runUpdate{}
 	var order []string
 	for rows.Next() {
-		var runID, kind, eventType, body string
+		var runID, kind, eventType, body, attrs string
 		var pos int64
-		if err := rows.Scan(&runID, &kind, &pos, &eventType, &body); err != nil {
+		if err := rows.Scan(&runID, &kind, &pos, &eventType, &body, &attrs); err != nil {
 			_ = rows.Close()
 			return err
+		}
+		// The writer's reading of the flags (obsdb.DeriveRecord): a
+		// reason of any type is a compaction view, never a search field.
+		input, reason := messagesFlags([]byte(attrs))
+		if kind == "messages" && reason != "" {
+			continue
 		}
 		u := upds[runID]
 		if u == nil {
@@ -157,7 +163,7 @@ func backfillSearch(tx *sql.Tx) error {
 			upds[runID] = u
 			order = append(order, runID)
 		}
-		u.seeSearch(obsdb.Record{Body: body}, obsdb.Weft{Record: kind, Pos: pos, EventType: eventType})
+		u.seeSearch(obsdb.Record{Body: body}, obsdb.Weft{Record: kind, Pos: pos, EventType: eventType, Input: input})
 	}
 	if err := rows.Close(); err != nil {
 		return err
@@ -258,8 +264,11 @@ func (d *DB) Search(ctx context.Context, q obsdb.SearchQuery) (_ obsdb.RunPage, 
 // ftsCond is one term's condition over the named runs_fts columns: a
 // trigram MATCH on a column filter with the term as one quoted phrase
 // (a case-insensitive substring), or — for a term under three runes,
-// which a trigram index cannot hold — a LIKE over the same columns
-// (case-insensitive for ASCII only, SQLite's LIKE).
+// which a trigram index cannot hold — a LIKE over the same columns,
+// both sides through lower(): SQLite folds ASCII only there, so a
+// short non-ASCII term matches its own case alone (ClickHouse folds
+// UTF-8: the one difference between the backends). %, _ and \ in the
+// term are literal (escaped).
 func ftsCond(term string, cols []string) (string, []any) {
 	const sub = "run_id IN (SELECT s.run_id FROM runs_fts JOIN run_search s ON s.id = runs_fts.rowid WHERE "
 	if utf8.RuneCountInString(term) >= 3 {
@@ -270,7 +279,7 @@ func ftsCond(term string, cols []string) (string, []any) {
 	ors := make([]string, len(cols))
 	args := make([]any, len(cols))
 	for i, c := range cols {
-		ors[i] = "runs_fts." + c + ` LIKE ? ESCAPE '\'`
+		ors[i] = "lower(runs_fts." + c + `) LIKE lower(?) ESCAPE '\'`
 		args[i] = pat
 	}
 	return sub + "(" + strings.Join(ors, " OR ") + "))", args

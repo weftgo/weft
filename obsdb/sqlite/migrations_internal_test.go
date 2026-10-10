@@ -105,8 +105,9 @@ func TestUpgradeFrom0002(t *testing.T) {
 // A file written before search (migrations 0001–0003, a run stored
 // through them) opens through 0004 with that run indexed by the Go
 // step the migration runs: searchable by prompt, answer, error and tool
-// name, its row carrying its prompt preview — and a compaction view's
-// text is no search field.
+// name, its row carrying its prompt preview (the turn's own: an
+// input-flagged record's last user message) — and a compaction view's
+// text, whatever its reason's type, is no search field.
 func TestUpgradeFrom0003IndexesStoredRuns(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old.db")
 	raw, err := sql.Open("sqlite", "file:"+path)
@@ -135,6 +136,8 @@ func TestUpgradeFrom0003IndexesStoredRuns(t *testing.T) {
 			('old1', 'messages', 0, 100, '', 0, '[{"role":"user","content":[{"type":"text","text":"refund my order"}]}]', '{}'),
 			('old1', 'messages', 1, 110, '', 0, '[{"role":"assistant","content":[{"type":"text","text":"working on it"}]}]', '{}'),
 			('old1', 'messages', 2, 120, '', 0, '[{"role":"assistant","content":[{"type":"text","text":"a compacted summary"}]}]', '{"weft.messages.reason":"compacted"}'),
+			('old1', 'messages', 3, 130, '', 0, '[{"role":"assistant","content":[{"type":"text","text":"a numeric reason"}]}]', '{"weft.messages.reason":7}'),
+			('old2', 'messages', 0, 300, '', 0, '[{"role":"user","content":[{"type":"text","text":"turn one question"}]},{"role":"assistant","content":[{"type":"text","text":"ok"}]},{"role":"user","content":[{"type":"text","text":"turn two question"}]}]', '{"weft.messages.input":true}'),
 			('old1', 'event', 1, 105, 'tool_start', 0, '{"type":"tool_start","name":"issue_refund"}', '{}'),
 			('old2', 'event', 0, 300, 'run_start', 0, '{"type":"run_start"}', '{}')`,
 	} {
@@ -154,6 +157,8 @@ func TestUpgradeFrom0003IndexesStoredRuns(t *testing.T) {
 	srch := db.(obsdb.Searcher)
 	for text, want := range map[string]string{
 		"refund my": "old1", "working": "old1", "declined": "old1", "issue_refund": "old1", "compacted summary": "",
+		"numeric reason": "",                     // a reason of any type is a view: the writer's reading (obsdb.DeriveRecord)
+		"turn two":       "old2", "turn one": "", // the input record's last user message is the turn's prompt
 	} {
 		page, err := srch.Search(ctx, obsdb.SearchQuery{Text: `"` + text + `"`})
 		if err != nil {
@@ -173,6 +178,9 @@ func TestUpgradeFrom0003IndexesStoredRuns(t *testing.T) {
 	}
 	if run.PromptPreview != "refund my order" {
 		t.Errorf("upgraded run's prompt preview = %q", run.PromptPreview)
+	}
+	if run2, err := db.Run(ctx, "old2"); err != nil || run2.PromptPreview != "turn two question" {
+		t.Errorf("upgraded multi-turn run's prompt preview = %q, %v; want the turn's own", run2.PromptPreview, err)
 	}
 	page, err := srch.Search(ctx, obsdb.SearchQuery{Tool: "issue_refund"})
 	if err != nil || len(page.Runs) != 1 {

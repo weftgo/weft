@@ -69,6 +69,19 @@ func TestSearchRefundFailedAcrossRealRuns(t *testing.T) {
 	_ = run("billing", "Check order 3",
 		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"3"}`}),
 		wefttest.Say("All good.")) // the words only in a tool result and the system prompt
+	// A continued conversation: turn 2 is fed turn 1's transcript and
+	// its own question — found by that question, never by turn 1's.
+	conv := core.New(wefttest.Script(wefttest.Say("Order 5 shipped."), wefttest.Say("Your parcel insurance is active.")),
+		core.Name("support"), core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()))
+	turn1, err := conv.Generate(ctx, core.Prompt("Where is order 5?"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(5 * time.Millisecond)
+	turn2, err := conv.Generate(ctx, core.Messages(turn1.Messages...), core.Prompt("Is my parcel insured?"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := p.Shutdown(ctx); err != nil {
 		t.Fatal(err)
 	}
@@ -117,6 +130,12 @@ func TestSearchRefundFailedAcrossRealRuns(t *testing.T) {
 	}
 	if got := search("error=gateway"); strings.Join(got, ",") != errored {
 		t.Errorf("error=gateway = %v, want %s", got, errored)
+	}
+	if got := search(url.Values{"q": {`"parcel insured"`}}.Encode()); strings.Join(got, ",") != turn2.ID {
+		t.Errorf("search turn 2's question = %v, want turn 2 %s", got, turn2.ID)
+	}
+	if got := search(url.Values{"q": {`"order 5?"`}}.Encode()); strings.Join(got, ",") != turn1.ID {
+		t.Errorf("search turn 1's question = %v, want turn 1 %s alone", got, turn1.ID)
 	}
 	if got := search("q=apologise"); len(got) != 0 {
 		t.Errorf("q=apologise (the system prompt's word) = %v, want nothing", got)

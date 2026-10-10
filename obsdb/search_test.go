@@ -41,7 +41,7 @@ func TestParseSearch(t *testing.T) {
 }
 
 // The search fields' text: text parts only, joined by "\n"; the first
-// user and last assistant message with text; a body that does not
+// user (the input record's last) and last assistant message with text; a body that does not
 // parse is no text, never an error.
 func TestMessagesText(t *testing.T) {
 	body := []byte(`[
@@ -49,14 +49,29 @@ func TestMessagesText(t *testing.T) {
 		{"role":"user","content":[{"type":"text","text":"one"},{"type":"tool_result","content":"no"},{"type":"text","text":"two"}]},
 		{"role":"assistant","content":[{"type":"text","text":"answer"}]},
 		{"role":"assistant","content":[{"type":"tool_call","name":"x"}]}]`)
-	if got, ok := obsdb.FirstUserText(body); !ok || got != "one\ntwo" {
-		t.Errorf("FirstUserText = %q, %v", got, ok)
+	if got, ok := obsdb.PromptText(body, false); !ok || got != "one\ntwo" {
+		t.Errorf("PromptText(not input) = %q, %v; want the first user text", got, ok)
+	}
+	// The input record: the turn's question is its last user message.
+	turn := []byte(`[
+		{"role":"user","content":[{"type":"text","text":"Where is order 1?"}]},
+		{"role":"assistant","content":[{"type":"text","text":"Shipped."}]},
+		{"role":"user","content":[{"type":"text","text":"Can I get a refund?"}]},
+		{"role":"user","content":[{"type":"text","text":""}]}]`)
+	if got, ok := obsdb.PromptText(turn, true); !ok || got != "Can I get a refund?" {
+		t.Errorf("PromptText(input) = %q, %v; want the last user text", got, ok)
+	}
+	if got, _ := obsdb.PromptText(turn, false); got != "Where is order 1?" {
+		t.Errorf("PromptText(not input) = %q; want the first user text", got)
+	}
+	if _, ok := obsdb.PromptText([]byte(`[{"role":"assistant","content":[{"type":"text","text":"x"}]}]`), true); ok {
+		t.Error("PromptText of a record with no user text found one")
 	}
 	if got, ok := obsdb.LastAssistantText(body); !ok || got != "answer" {
 		t.Errorf("LastAssistantText = %q, %v", got, ok)
 	}
-	if _, ok := obsdb.FirstUserText([]byte(`not json`)); ok {
-		t.Error("FirstUserText of a malformed body found text")
+	if _, ok := obsdb.PromptText([]byte(`not json`), true); ok {
+		t.Error("PromptText of a malformed body found text")
 	}
 	if got := obsdb.MessagesText([]byte(`[]`)); len(got) != 0 {
 		t.Errorf("MessagesText([]) = %v", got)
@@ -83,6 +98,30 @@ func TestCheckSearch(t *testing.T) {
 		{Tool: strings.Repeat("t", obsdb.MaxSearchTermBytes+1)}} {
 		if _, err := obsdb.CheckSearch(q); !errors.Is(err, obsdb.ErrInvalidSearch) {
 			t.Errorf("CheckSearch(%+v) = %v, want ErrInvalidSearch", q, err)
+		}
+	}
+}
+
+// DeriveRecord reads the two flags search needs as the transcript
+// readers do: weft.messages.input (bool or "true"), and a
+// weft.messages.reason of any type as not growth.
+func TestDeriveRecordMessagesFlags(t *testing.T) {
+	for _, c := range []struct {
+		attrs  map[string]any
+		reason string
+		input  bool
+	}{
+		{map[string]any{}, "", false},
+		{map[string]any{"weft.messages.input": true}, "", true},
+		{map[string]any{"weft.messages.input": "true"}, "", true},
+		{map[string]any{"weft.messages.reason": "compacted"}, "compacted", false},
+		{map[string]any{"weft.messages.reason": int64(7)}, "7", false},
+		{map[string]any{"weft.messages.reason": false}, "false", false},
+	} {
+		c.attrs["weft.record"] = "messages"
+		w := obsdb.DeriveRecord(obsdb.Record{Attrs: c.attrs})
+		if w.Reason != c.reason || w.Input != c.input {
+			t.Errorf("DeriveRecord(%v) = reason %q input %v, want %q %v", c.attrs, w.Reason, w.Input, c.reason, c.input)
 		}
 	}
 }

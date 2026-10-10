@@ -37,8 +37,8 @@ type Searcher interface {
 //
 //   - Text: the search terms (ParseSearch's grammar). A run matches
 //     when every term occurs, case-insensitively, as a substring of at
-//     least one of the run's search fields — its prompt (the text of
-//     its first user message), its answer (the text of its last
+//     least one of the run's search fields — its prompt (the turn's
+//     own: PromptText), its answer (the text of its last
 //     assistant message that carries text), its error, or the name of
 //     a tool it called (tool_start events) — each term free to match a
 //     different field. A content-off run has no prompt or answer:
@@ -207,11 +207,25 @@ func MessagesText(body []byte) []MessageText {
 	return out
 }
 
-// FirstUserText is the text of a body's first user message with
-// non-empty text: the run's prompt when the body is its earliest
-// messages record holding one.
-func FirstUserText(body []byte) (string, bool) {
-	for _, m := range MessagesText(body) {
+// PromptText is the turn's own prompt as one messages record body
+// holds it. The input record (weft.messages.input: what the run was
+// fed — on a continued conversation the whole history, the turn's
+// question last) gives its last user message with non-empty text; any
+// other record its first. A run's prompt is its input record's when
+// that holds user text, else the lowest-index record's that does — so
+// a message steered in at a later step is never the prompt. A record
+// with no user text gives none.
+func PromptText(body []byte, input bool) (string, bool) {
+	msgs := MessagesText(body)
+	if input {
+		for i := len(msgs) - 1; i >= 0; i-- {
+			if msgs[i].Role == "user" && msgs[i].Text != "" {
+				return msgs[i].Text, true
+			}
+		}
+		return "", false
+	}
+	for _, m := range msgs {
 		if m.Role == "user" && m.Text != "" {
 			return m.Text, true
 		}

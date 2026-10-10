@@ -109,6 +109,12 @@ func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 			if w.Record == "request" {
 				u.applyRequest(r, w)
 			}
+		case obsdb.RecordRaw:
+			// ADR 0028 §12: stored under weft.raw.index, counted under
+			// none; DB.Requests attaches it to its attempt.
+			if _, err := insertRecord(ctx, tx, r, w); err != nil {
+				return err
+			}
 		case "heartbeat":
 			// Never a row: no position, so the (run, kind, pos) key
 			// could not hold it anyway. It moves last_seen only, which

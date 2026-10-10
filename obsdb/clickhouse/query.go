@@ -1189,6 +1189,9 @@ var contractKeys = []string{
 	"weft.override.parallelism", "weft.override.params", "weft.override.park_all_except",
 	"weft.override.park_on", "weft.override.thinking", "weft.override.tool_choice",
 	"weft.override.tools",
+	// ADR 0028 §12: the raw record's position (migration 0005's
+	// restatement of the logs view).
+	"weft.raw.index",
 }
 
 // unmarshalAttrs decodes a JSON column keeping integral numbers as

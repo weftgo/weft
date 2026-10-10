@@ -96,6 +96,23 @@ func NoEnv() Option {
 	return optionFunc(func(c *config) { c.noEnv = true })
 }
 
+// RawBodies records each model call attempt's wire exchange — the
+// provider request and response the first-party adapters sent and
+// received, headers included minus the credential ones, each body
+// capped at 256 KiB — as one weft.raw record per attempt (ADR 0028
+// §12), for the Local and Studio destinations only (never Datadog,
+// Langfuse, OTLP or Exporters, whatever their content setting, and not
+// a Local or Studio destination under NoContent). Off by default, and
+// refused outside development: it takes effect only when WEFT_ENV is
+// "dev" when the pipeline starts; otherwise — and always under NoEnv,
+// which does not read WEFT_ENV — Start logs one WARN line ("otel:
+// RawBodies ignored: WEFT_ENV is not dev") and the pipeline behaves as
+// if the option were absent: no destination asks for weft.raw, so the
+// adapters buffer nothing (core.Reporter.WantsRaw is false).
+func RawBodies(on bool) Option {
+	return optionFunc(func(c *config) { c.rawBodies = on })
+}
+
 // NoGlobal leaves the OTel globals alone (Start only; Install always
 // registers). For tests and dependency-injected programs.
 func NoGlobal() Option {

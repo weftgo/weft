@@ -144,7 +144,8 @@ func reportVia(fn func(ctx context.Context)) core.ModelMiddleware {
 
 // Times are both-or-neither: a zero Start (or an End before Start)
 // drops both, so no span is negative and the line carries no dur. Raw
-// is accepted and discarded, with only its sizes on a Debug line.
+// nobody asks for (no destination wants weft.raw) is discarded, with
+// only its sizes on a Debug line.
 func TestReportUntimedAttemptAndRawLine(t *testing.T) {
 	tp, h := newRecProvider(), &reportLines{}
 	end := time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC)

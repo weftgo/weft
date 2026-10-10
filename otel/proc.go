@@ -26,6 +26,7 @@ const (
 	eventNameMessages = "weft.messages"
 	eventNamePrompt   = "weft.prompt"
 	eventNameTools    = "weft.tools"
+	eventNameRaw      = "weft.raw"
 )
 
 // contentEvent reports whether a record kind is pure content, asked of
@@ -74,11 +75,21 @@ type destProc struct {
 	contentC ContentConfig
 	noDeltas bool
 	drops    *dropCounter
+	// raw is whether this chain takes weft.raw records (ADR 0028 §12):
+	// RawBodies in force (dev only) and a Local or Studio destination
+	// with content on (dest.rawOn). It answers Enabled for weft.raw, so
+	// with no such chain the core builds no raw record and the adapters
+	// buffer no body; a raw record that reaches a chain without it is
+	// dropped.
+	raw bool
 }
 
 var _ sdklog.Processor = (*destProc)(nil)
 
 func (p *destProc) Enabled(_ context.Context, param sdklog.EnabledParameters) bool {
+	if param.EventName == eventNameRaw {
+		return p.raw
+	}
 	if contentEvent(param.EventName) {
 		return p.content
 	}
@@ -127,6 +138,14 @@ func (p *destProc) OnEmit(ctx context.Context, r *sdklog.Record) error {
 		} else {
 			p.stripRequest(&clone)
 		}
+	case "raw":
+		if !p.raw {
+			p.drops.filtered(1)
+			return nil // never a third party's, nor a content-off chain's
+		}
+		if !p.redactRaw(&clone) {
+			return nil // never sent unredacted
+		}
 	case "heartbeat":
 		// No body, no content: through unchanged.
 	}
@@ -147,6 +166,71 @@ func recordKind(r *sdklog.Record) string {
 		return true
 	})
 	return kind
+}
+
+// redactRaw applies the destination's Redact to a raw record's two
+// bodies (core.ContentRaw), each as the string the record carries — a
+// base64 body is not redacted (it is not text). Never capped here: the
+// core capped each body at 256 KiB and counted the cut. It reports
+// whether the record may go on: a body that does not decode, re-encode
+// or survive Redact (a panic) drops the record, counted as the
+// destination's loss.
+func (p *destProc) redactRaw(clone *sdklog.Record) (keep bool) {
+	redact := p.contentC.Redact
+	if redact == nil {
+		return true
+	}
+	defer func() {
+		if v := recover(); v != nil {
+			keep = false
+			p.drops.dropped(1, fmt.Errorf("content redaction panicked (%T): the raw record was dropped", v))
+		}
+	}()
+	body := clone.Body()
+	if body.Type() != attribute.STRING {
+		p.drops.dropped(1, errors.New("a raw record without a string body cannot be redacted: dropped"))
+		return false
+	}
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(body.AsString()), &doc); err != nil {
+		p.drops.dropped(1, errors.New("a raw record that does not decode cannot be redacted: dropped"))
+		return false
+	}
+	changed := false
+	for _, side := range []string{"request", "response"} {
+		raw, ok := doc[side]
+		if !ok || string(raw) == "null" {
+			continue
+		}
+		var m map[string]any
+		if err := json.Unmarshal(raw, &m); err != nil {
+			p.drops.dropped(1, errors.New("a raw record that does not decode cannot be redacted: dropped"))
+			return false
+		}
+		text, _ := m["body"].(string)
+		if enc, _ := m["encoding"].(string); enc != "" || text == "" {
+			continue
+		}
+		if r := redact(core.ContentRaw, text); r != text {
+			m["body"] = r
+			b, err := json.Marshal(m)
+			if err != nil {
+				p.drops.dropped(1, errors.New("a redacted raw record did not re-encode: dropped"))
+				return false
+			}
+			doc[side], changed = b, true
+		}
+	}
+	if !changed {
+		return true
+	}
+	b, err := json.Marshal(doc)
+	if err != nil {
+		p.drops.dropped(1, errors.New("a redacted raw record did not re-encode: dropped"))
+		return false
+	}
+	clone.SetBody(attribute.StringValue(string(b)))
+	return true
 }
 
 // stripEvent empties the body's content fields and marks the record

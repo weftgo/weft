@@ -36,14 +36,46 @@ type AttemptInfo struct {
 	RetryAfter time.Duration
 }
 
-// RawPair is one attempt's wire bodies: the request as sent and the
-// response as received, as the reporter holds them. The bytes are
-// content (the request carries the prompt), governed by the content
-// policy wherever they are recorded.
+// RawPair is one attempt's wire exchange: the request as sent and the
+// response as received, as the reporter holds them (ADR 0028 §12). The
+// bytes are content (the request carries the prompt). A reporter fills
+// what it knows; the zero fields are absent from the record. Whatever
+// the reporter strips, the record strips again: the credential headers
+// (Authorization, Proxy-Authorization, X-Api-Key, Api-Key, Cookie,
+// Set-Cookie, X-Goog-Api-Key, and any name that reads as a credential),
+// any header whose value is a Bearer or Basic token, the URL's userinfo
+// and its credential query values; each body is capped at 256 KiB with
+// the cut counted. A streamed response is the raw stream as received
+// (the SSE bytes), not a re-serialisation.
 type RawPair struct {
 	Request   []byte
 	Response  []byte
-	MediaType string // e.g. "application/json"
+	MediaType string // the request's media type, e.g. "application/json"
+
+	// Method and URL are the request line (the URL as sent; the record
+	// drops its userinfo and credential query values).
+	Method string
+	URL    string
+	// Status is the response's HTTP status, 0 when no response arrived
+	// (a transport error): the record then carries no response side
+	// unless response headers or bytes were reported.
+	Status int
+	// RequestHeaders and ResponseHeaders are the two sides' headers,
+	// names as sent. The record never carries a sensitive one.
+	RequestHeaders  map[string][]string
+	ResponseHeaders map[string][]string
+	// ResponseMediaType is the response's media type, e.g.
+	// "text/event-stream".
+	ResponseMediaType string
+	// RedactedHeaders names headers the reporter stripped before
+	// reporting (an SDK's own sensitive list): the record lists them
+	// with its own strips, so it says what is missing.
+	RedactedHeaders []string
+	// RequestTruncated and ResponseTruncated are the bytes the reporter
+	// did not keep past its own cap: counted into the record's cut,
+	// never silent.
+	RequestTruncated  int64
+	ResponseTruncated int64
 }
 
 // Reporter is the reporting path from the model chain into the loop's
@@ -100,16 +132,31 @@ func (r Reporter) Attempt(a AttemptInfo) {
 	r.s.attempt(a)
 }
 
-// Raw reports one attempt's wire bodies. They are accepted and
-// discarded: what is recorded, and under which content policy, is a
-// later ADR's decision (the request record). Until then nothing is
-// written anywhere; with the logger at Debug a "model raw dropped" line
-// names the sizes, never the bytes.
+// Raw reports one attempt's wire exchange. When a destination asks for
+// raw records (WantsRaw; weft/otel's otel.RawBodies, dev only), it
+// becomes one weft.raw record on the chat span's context, attributed to
+// the step and to the attempt in flight — the number the next Attempt
+// report will take, so a layer that reports both reports Raw first.
+// Nobody asking, it is discarded, and with the logger at Debug a
+// "model raw dropped" line names the sizes, never the bytes.
 func (r Reporter) Raw(p RawPair) {
 	if r.s == nil {
 		return
 	}
 	r.s.raw(p)
+}
+
+// WantsRaw reports whether a Raw report would be recorded now: inside a
+// run's model call that has not ended, with the agent not under
+// Content(false), and with a destination answering the Logs API's
+// Enabled for the weft.raw event name. An adapter asks it before an
+// HTTP call and buffers no body when it is false. False for the zero
+// Reporter and outside a run.
+func (r Reporter) WantsRaw() bool {
+	if r.s == nil {
+		return false
+	}
+	return r.s.rawWanted()
 }
 
 type reportKey struct{}
@@ -130,6 +177,9 @@ type stepReport struct {
 	// number. Nil when no destination wants request records. Set before
 	// the chain runs, never after.
 	request *requestRecord
+	// rec is the run's recorder, for the raw record (raw.go): nil in
+	// observer-only tests, which drops every Raw report.
+	rec *recorder
 	// answered is the model of the last attempt reported as a success
 	// (AttemptInfo.Model with a nil Err): the model that answered after
 	// a retry or a fallback, read by the loop once the call has ended
@@ -327,24 +377,6 @@ func (s *stepReport) requestAttempt(ctx context.Context, index int64, a AttemptI
 	defer s.mu.Unlock()
 	if !s.ended.Load() {
 		s.request.attempt(ctx, index, a)
-	}
-}
-
-// raw receives an attempt's wire bodies. Storage is not decided (the
-// request record's ADR will); until then the report is dropped here, on
-// purpose, and only its sizes reach a Debug line.
-func (s *stepReport) raw(p RawPair) {
-	if s.ended.Load() {
-		return
-	}
-	defer s.contain()
-	if l := s.obs.logger(); l.Enabled(s.Context, slog.LevelDebug) {
-		l.LogAttrs(s.Context, slog.LevelDebug, "model raw dropped",
-			slog.String(logRun, s.runID),
-			slog.Int(logStep, s.step),
-			slog.String(logMediaType, p.MediaType),
-			slog.Int(logRequestBytes, len(p.Request)),
-			slog.Int(logResponseBytes, len(p.Response)))
 	}
 }
 

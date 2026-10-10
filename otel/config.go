@@ -21,6 +21,9 @@ type config struct {
 	noEnv      bool
 	noGlobal   bool
 	dropFailed bool // Install's WARN-and-skip mode
+	// rawBodies is RawBodies' ask; Start keeps it only under
+	// WEFT_ENV=dev (and never under NoEnv), else one WARN and off.
+	rawBodies bool
 }
 
 type destKind int
@@ -73,6 +76,13 @@ func (d dest) contentDefault() bool {
 	default:
 		return false
 	}
+}
+
+// rawOn is whether this destination takes raw records (ADR 0028 §12)
+// when the pipeline's RawBodies is in force: Local and Studio with
+// content on, never a third party whatever its content setting.
+func (d dest) rawOn() bool {
+	return (d.kind == destLocal || d.kind == destStudio) && d.contentOn()
 }
 
 func (d dest) contentOn() bool {

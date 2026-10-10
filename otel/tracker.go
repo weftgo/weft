@@ -40,7 +40,9 @@ var _ sdktrace.SpanProcessor = (*trackerSpanProc)(nil)
 // content-off pipeline must not capture) — and true for everything
 // else.
 func (t *runTracker) Enabled(_ context.Context, param sdklog.EnabledParameters) bool {
-	return !contentEvent(param.EventName)
+	// weft.raw too: only a destination's chain may ask for wire bodies
+	// (RawBodies), never the tracker on every pipeline's behalf.
+	return !contentEvent(param.EventName) && param.EventName != eventNameRaw
 }
 
 func (t *runTracker) OnEmit(_ context.Context, r *sdklog.Record) error {

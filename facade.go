@@ -394,7 +394,7 @@ func ToolSource(fn func() []*ToolDef) Option { return core.ToolSource(fn) }
 // say which field of which event is content (ADR 0024 S1.1, [D2]).
 type ContentKind = core.ContentKind
 
-// The seven kinds of content the core ever puts in a record.
+// The eight kinds of content the core ever puts in a record.
 const (
 	ContentText      = core.ContentText      // assistant text, text deltas
 	ContentReasoning = core.ContentReasoning // reasoning text and deltas
@@ -403,6 +403,7 @@ const (
 	ContentMessages  = core.ContentMessages  // whole transcript batches (weft/otel redacts them per part with the four kinds above)
 	ContentPrompt    = core.ContentPrompt    // the composed system text of a prompt record (ADR 0028)
 	ContentStop      = core.ContentStop      // one stop sequence of a request record's params (ADR 0028)
+	ContentRaw       = core.ContentRaw       // one wire body of a raw record (ADR 0028 §12; otel.RawBodies, dev only)
 )
 
 // Content sets whether this agent's runs put content into their records,
@@ -1144,10 +1145,17 @@ func Repair(msgs []Message) []Message { return core.Repair(msgs) }
 // numbers stay unique however many layers report.
 type AttemptInfo = core.AttemptInfo
 
-// RawPair is one attempt's wire bodies: the request as sent and the
-// response as received, as the reporter holds them. The bytes are
-// content (the request carries the prompt), governed by the content
-// policy wherever they are recorded.
+// RawPair is one attempt's wire exchange: the request as sent and the
+// response as received, as the reporter holds them (ADR 0028 §12). The
+// bytes are content (the request carries the prompt). A reporter fills
+// what it knows; the zero fields are absent from the record. Whatever
+// the reporter strips, the record strips again: the credential headers
+// (Authorization, Proxy-Authorization, X-Api-Key, Api-Key, Cookie,
+// Set-Cookie, X-Goog-Api-Key, and any name that reads as a credential),
+// any header whose value is a Bearer or Basic token, the URL's userinfo
+// and its credential query values; each body is capped at 256 KiB with
+// the cut counted. A streamed response is the raw stream as received
+// (the SSE bytes), not a re-serialisation.
 type RawPair = core.RawPair
 
 // Reporter is the reporting path from the model chain into the loop's

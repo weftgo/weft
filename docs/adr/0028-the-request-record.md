@@ -263,8 +263,8 @@ attempt); when no `attempt` span exists (attempt 1 with nothing
 reporting, or no tracer recording), the join falls back to the `chat`
 span by the record's span id (§2). The hook reports; it wraps no call
 and changes no result, so it is not a third seam (ADR 0006).
-`Reporter.Raw`'s wire bodies stay dropped under this ADR: storing them
-is content of another size and a separate amendment.
+`Reporter.Raw`'s wire bodies were dropped when this ADR was decided;
+§12 (plan A6, 2026-10-10) records them, opt-in and dev only.
 
 The `chat` span gains `weft.ttft_ms` (time to the first model event:
 the first `TextDelta` or `ToolArgsDelta`, as ADR 0016's A4 note
@@ -591,6 +591,87 @@ reader's candidate cap, which no destination setting changes);
 session-to-public-id lookup, which no panel token may make).
 `redacted` is reserved: weft's pipeline does not yet mark a redaction
 on the record.
+
+### 12. The `raw` record: provider wire bodies (plan A6, amended 2026-10-10)
+
+`Reporter.Raw` stops discarding. One attempt's wire exchange — the HTTP
+request a first-party adapter sent and the response it received —
+becomes one `raw` record (`weft.raw`), emitted through the same Logs API
+path as the other kinds, on the `chat` span's context.
+
+**The gate is the Enabled question, not a core option.** Before anything
+is built the reporter asks the logger `Enabled` with EventName
+`weft.raw` (false under `weft.Content(false)`; `Content(true)` does not
+force it). `Reporter.WantsRaw()` asks the same question, so an adapter
+buffers no body when nobody wants one. weft/otel answers yes only under
+`otel.RawBodies(true)` **and** `WEFT_ENV=dev` read by the pipeline at
+Start (never under `otel.NoEnv()`), and only for its `Local` and
+`Studio` chains with content on. Otherwise Start logs one WARN
+(`otel: RawBodies ignored: WEFT_ENV is not dev`) and the pipeline
+behaves as if the option were absent. Datadog, Langfuse, OTLP and
+Exporters never receive a raw record, whatever their content setting;
+the run tracker never asks.
+
+| Attribute | Value |
+|---|---|
+| `weft.record` | `raw` |
+| `weft.raw.index` | the per-run position (the dedup key's `pos`), contiguous from 0 |
+| `weft.step.index`, `weft.attempt.index` | the step; the attempt in flight (the reporter's attempt count + 1 at report time, so a layer reports `Raw` before its `Attempt`) |
+| `weft.content` | `full` |
+| `weft.content.truncated_bytes` | both bodies' cut, when above 0 |
+| identity chain | `weft.run.id`, `gen_ai.agent.name`, every `Metadata` key |
+
+Body: `{"step", "attempt", "request": {"method", "url", "headers",
+"media_type", "body", "encoding"?, "bytes", "truncated_bytes"?},
+"response": {"status", "headers", "media_type", "body", "encoding"?,
+"bytes", "truncated_bytes"?} | null, "redacted_headers": [...],
+"redacted_query"?: [...]}`. `body` is the bytes as text, or base64 with
+`encoding: "base64"` when they are not UTF-8; a streamed response is the
+raw SSE bytes as received, never a re-serialisation. Each body is capped
+at 256 KiB (cut back to a rune boundary for text), `bytes` is the whole
+size, `truncated_bytes` the cut — the `truncated` badge, never silent.
+`response` is null when no response arrived (a transport error).
+
+**Credentials.** The core strips, case-insensitively, `Authorization`,
+`Proxy-Authorization`, `X-Api-Key`, `Api-Key`, `Cookie`, `Set-Cookie`,
+`X-Goog-Api-Key`, any header whose name contains `auth`, `secret`,
+`apikey`, `api-key`, `api_key` or ends in `-key`, `_key`, `-token`,
+`_token`, and any header whose value is a `Bearer`/`Basic` token,
+whatever the reporter did. The adapters strip their SDK's own list first
+— anthropic-sdk-go v1.72.0's `sensitiveLogHeaders` (`authorization`,
+`api-key`, `x-api-key`, `cookie`, `set-cookie`); openai-go v1.12.0 marks
+none (the adapter strips `authorization`, `api-key`,
+`openai-organization`, `openai-project`); genai v1.71.0's replay
+redaction (`x-goog-api-key`, `authorization`, `x-goog-user-project`).
+Every stripped name is listed, lowercased, in `redacted_headers`. The URL
+loses its userinfo and its credential query values (`key`, `token`,
+`sig`, …, replaced by `REDACTED`, named in `redacted_query`).
+
+**Capture.** The first-party adapters tee each HTTP call — anthropic and
+openai through the SDK's innermost `option.WithMiddleware`, google by
+wrapping the transport of the `*http.Client` genai built for the
+adapter's own client (an injected `Client(c)` is the caller's and is not
+captured) — one pair per HTTP call, so an SDK's own transport retries
+report one pair each, and the request row of an attempt shows the last.
+Capturing never changes the request, the retry or the stream; a capture
+that fails drops the pair. Third-party adapters may call `Raw` or not; a
+run whose adapter did not report shows `not_recorded` (cause `raw_off`).
+
+**Content policy.** A content-on chain's `Redact` sees each text body as
+`core.ContentRaw`; `MaxBytes` does not apply (the 256 KiB cap is the
+core's). A content-off `Local` or `Studio` chain drops raw records.
+
+**obsdb.** `raw` is stored beside the other kinds on both backends
+(SQLite: free-text kind; ClickHouse: migration
+`0005_raw_record.sql` widens `weft_records_mv` to the kind and its index
+and adds `weft.raw.index` to the logs run view's contract tuple — no new
+column). `weft.raw.index` is contract (`obsdb.MetaOf` excludes it).
+`DB.Requests` attaches each attempt's raw record as
+`RequestRecord.Wire` (`*obsdb.RawRecord`), nil when the run holds none.
+Studio's `GET /api/runs/{id}/requests` row carries it as `raw`, or
+`null` with `raw_badge: "not_recorded"` and the `raw_off` reason and
+fix; the route is refused to read-scoped panel tokens (`hidden`), so a
+read token never sees a wire body. The export keeps its rows without it.
 
 ## Why this is a record-contract change, not a model-visible one
 

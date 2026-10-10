@@ -48,6 +48,7 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("RequestRecords", requestRecords(open))
 	t.Run("RequestsManySteps", requestsManySteps(open))
 	t.Run("RequestRunRows", requestRunRows(open))
+	t.Run("RequestRaw", requestRaw(open))
 	t.Run("NonFiniteAttrs", nonFiniteAttrs(open))
 	t.Run("ZeroTimes", zeroTimes(open))
 	t.Run("OutOfOrder", outOfOrder(open))

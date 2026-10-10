@@ -251,7 +251,8 @@ type model struct {
 	idle         time.Duration
 }
 
-// requestOptions builds the per-request options the escape hatch adds:
+// requestOptions builds the per-request options: the wire capture (raw
+// records, ADR 0028 §12) and those the escape hatch adds:
 // a middleware deep-merging ExtraBody's fields into the JSON body
 // (adapterkit.MergeBody, caller wins) and one header option per
 // ExtraHeaders entry (ADR 0013's 2026-09-22 amendment).
@@ -286,8 +287,20 @@ func (m *model) requestOptions() []option.RequestOption {
 			}
 		}
 	}
+	// The wire capture (ADR 0028 §12), last so it is innermost: it sees
+	// the bytes ExtraBody merged and the headers the SDK set, once per
+	// HTTP attempt, and buffers nothing unless a destination asks
+	// (otel.RawBodies, dev only).
+	opts = append(opts, option.WithMiddleware(func(r *http.Request, next option.MiddlewareNext) (*http.Response, error) {
+		return adapterkit.CaptureRaw(r, next, sensitiveHeaders)
+	}))
 	return opts
 }
+
+// sensitiveHeaders is anthropic-sdk-go's own redaction list
+// (option/middleware.go's sensitiveLogHeaders, v1.72.0): the headers a
+// raw record never carries. The core strips its floor again.
+var sensitiveHeaders = []string{"authorization", "api-key", "x-api-key", "cookie", "set-cookie"}
 
 // Info identifies the model for RunStart and the manifest.
 func (m *model) Info() core.ModelInfo {

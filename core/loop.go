@@ -469,6 +469,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		// attempt after the first adds its own request record.
 		rep := a.obs.withReport(mctx, cfg.id, step, &a.tapPanics)
 		rep.request = reqRec
+		rep.rec = &records
 		mctx = rep
 		// The Model stream contract (see Model) is enforced here, not just
 		// documented: exactly one ModelFinish, nothing after it, and a

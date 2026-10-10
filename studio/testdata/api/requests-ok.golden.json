@@ -65,7 +65,11 @@
         ],
         "content": "",
         "truncated_bytes": 0
-      }
+      },
+      "raw": null,
+      "raw_badge": "not_recorded",
+      "raw_reason": "no wire bodies were recorded for this attempt: otel.RawBodies is off (the default, and refused outside WEFT_ENV=dev), or the adapter does not report them",
+      "raw_fix": "run under WEFT_ENV=dev with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)"
     },
     {
       "index": 1,
@@ -155,7 +159,11 @@
         ],
         "content": "",
         "truncated_bytes": 0
-      }
+      },
+      "raw": null,
+      "raw_badge": "not_recorded",
+      "raw_reason": "no wire bodies were recorded for this attempt: otel.RawBodies is off (the default, and refused outside WEFT_ENV=dev), or the adapter does not report them",
+      "raw_fix": "run under WEFT_ENV=dev with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)"
     },
     {
       "index": 2,
@@ -245,7 +253,11 @@
         ],
         "content": "",
         "truncated_bytes": 0
-      }
+      },
+      "raw": null,
+      "raw_badge": "not_recorded",
+      "raw_reason": "no wire bodies were recorded for this attempt: otel.RawBodies is off (the default, and refused outside WEFT_ENV=dev), or the adapter does not report them",
+      "raw_fix": "run under WEFT_ENV=dev with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)"
     },
     {
       "index": 3,
@@ -335,7 +347,11 @@
         ],
         "content": "",
         "truncated_bytes": 0
-      }
+      },
+      "raw": null,
+      "raw_badge": "not_recorded",
+      "raw_reason": "no wire bodies were recorded for this attempt: otel.RawBodies is off (the default, and refused outside WEFT_ENV=dev), or the adapter does not report them",
+      "raw_fix": "run under WEFT_ENV=dev with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)"
     }
   ]
 }

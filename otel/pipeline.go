@@ -178,6 +178,14 @@ func Start(ctx context.Context, opts ...Option) (*Pipeline, error) {
 	if len(dests) == 0 {
 		return nil, errNoDestinations
 	}
+	// RawBodies is a development switch (ADR 0028 §12): kept only under
+	// WEFT_ENV=dev as this pipeline reads the environment; NoEnv reads
+	// none, so it refuses it. A refusal is one WARN, after a successful
+	// build (Install may call Start more than once).
+	rawRefused := cfg.rawBodies && (cfg.noEnv || envGetenv("WEFT_ENV") != "dev")
+	if rawRefused {
+		cfg.rawBodies = false
+	}
 	p, failed := build(ctx, cfg, dests)
 	if failed != nil {
 		return nil, failed
@@ -188,6 +196,10 @@ func Start(ctx context.Context, opts ...Option) (*Pipeline, error) {
 		slog.Info("weft/otel: joined the running Studio", "url", joined.info.URL,
 			"pid", joined.info.PID, "file", joined.path,
 			"hint", "WEFT_STUDIO_URL names another; WEFT_DISCOVERY=off ignores the file")
+	}
+	if rawRefused {
+		slog.Warn("otel: RawBodies ignored: WEFT_ENV is not dev",
+			"hint", "set WEFT_ENV=dev (and drop otel.NoEnv) to record provider wire bodies")
 	}
 	if !cfg.noGlobal {
 		registerGlobals(p)
@@ -391,6 +403,7 @@ func buildDest(ctx context.Context, d dest, cfg config) (_ *destRuntime, err err
 			rt.logProc = &destProc{
 				name: d.name, inner: sdklog.NewSimpleProcessor(&localLogExporter{db: db, drops: drops}),
 				content: content, contentC: contentCfg, noDeltas: d.noDeltas, drops: drops,
+				raw: cfg.rawBodies && d.rawOn(),
 			}
 		}
 	case destStudio, destDatadog, destLangfuse, destOTLP:
@@ -443,7 +456,8 @@ func buildDest(ctx context.Context, d dest, cfg config) (_ *destRuntime, err err
 			inner = sdklog.NewBatchProcessor(counted)
 		}
 		rt.logProc = &destProc{name: d.name, inner: inner,
-			content: content, contentC: contentCfg, noDeltas: d.noDeltas, drops: drops}
+			content: content, contentC: contentCfg, noDeltas: d.noDeltas, drops: drops,
+			raw: cfg.rawBodies && d.rawOn()}
 	}
 	if rt.spanProc == nil && rt.logProc == nil {
 		return nil, errors.New("neither signal enabled")

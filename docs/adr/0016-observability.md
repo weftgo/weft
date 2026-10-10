@@ -463,10 +463,10 @@ the run's metadata, status `Ok` or `Error` + `error.type` (the chat
 span's classification), start and end at the reported times when both
 are given and ordered (otherwise neither) — and, with the logger at
 Debug, a `model attempt` line (`run`, `step`, `attempt`, `provider`,
-`model`, `dur`, `retry_after`, `err`). `Raw` is accepted and
-discarded: what the wire bodies become, and under which content
-policy, is the request record's decision (ADR 0028), not this
-amendment's; until then a Debug `model raw dropped` line carries the
+`model`, `dur`, `retry_after`, `err`). `Raw` becomes a `raw`
+record when a destination asks for `weft.raw` (ADR 0028 §12:
+`otel.RawBodies`, dev only; `Reporter.WantsRaw` asks first); nobody
+asking, it is discarded and a Debug `model raw dropped` line carries the
 sizes and media type, never the bytes. `mw.Retry` and `mw.Fallback`
 report one attempt per provider request — a layer whose inner model
 carries the duck-typed marker `ReportsAttempts() bool` (true on

@@ -624,6 +624,7 @@ type recorder struct {
 	requestIdx     atomic.Int64
 	promptIdx      atomic.Int64
 	toolsIdx       atomic.Int64
+	rawIdx         atomic.Int64 // weft.raw.index (raw.go)
 	seenPrompts    map[string]bool
 	seenCatalogs   map[string]bool
 	lastSystem     string

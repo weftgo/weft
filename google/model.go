@@ -249,9 +249,23 @@ func (m *model) initClient(ctx context.Context) error {
 	if err != nil {
 		return err // not cached: the next call retries
 	}
+	// The wire capture (raw records, ADR 0028 §12): genai has no
+	// per-request middleware, so the transport of the *http.Client
+	// NewClient built for this client alone is wrapped — a pass-through
+	// unless a destination asks (otel.RawBodies, dev only). An injected
+	// Client(c)'s *http.Client is the caller's and is never touched: its
+	// runs record no raw pair.
+	if hc := client.ClientConfig().HTTPClient; hc != nil {
+		hc.Transport = adapterkit.RawTransport(hc.Transport, sensitiveHeaders)
+	}
 	m.client, m.ready = client, true
 	return nil
 }
+
+// sensitiveHeaders are the headers a raw record never carries: the ones
+// genai's own replay recorder redacts or drops (replay_api_client.go's
+// redactRequestHeaders, v1.71.0). The core strips its floor again.
+var sensitiveHeaders = []string{"x-goog-api-key", "authorization", "x-goog-user-project"}
 
 // Info identifies the model for RunStart and the manifest.
 func (m *model) Info() core.ModelInfo {

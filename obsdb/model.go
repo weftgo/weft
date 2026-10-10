@@ -92,6 +92,7 @@ const (
 	attrRequestIdx   = "weft.request.index" // ADR 0028: request, prompt and tools records
 	attrPromptIdx    = "weft.prompt.index"  // are positioned by their own per-run index
 	attrToolsIdx     = "weft.tools.index"
+	attrRawIdx       = "weft.raw.index" // ADR 0028 §12: the raw record's own per-run index
 	attrStepIndex    = "weft.step.index"
 	attrToolSeq      = "weft.tool.seq"
 	attrPlayground   = "weft.playground"
@@ -131,7 +132,7 @@ func DeriveSpan(s Span) Weft {
 // DeriveRecord returns the weft identity a log record carries. Pos is
 // the event position for event records, the messages index for
 // transcript records, the delta position for delta records, and the
-// request, prompt or tools index for those kinds (ADR 0028) — the
+// request, prompt, tools or raw index for those kinds (ADR 0028) — the
 // value the (run, kind, pos) key and the live lane's dedup need. A
 // record with no weft.run.id is non-weft and lands in other_logs.
 func DeriveRecord(r Record) Weft {
@@ -166,6 +167,8 @@ func DeriveRecord(r Record) Weft {
 		w.Pos = int64(attrInt(r.Attrs, attrPromptIdx))
 	case hasIndex(r.Attrs, attrToolsIdx):
 		w.Pos = int64(attrInt(r.Attrs, attrToolsIdx))
+	case hasIndex(r.Attrs, attrRawIdx):
+		w.Pos = int64(attrInt(r.Attrs, attrRawIdx))
 	case w.Record == "messages":
 		// A messages record without its index — a compaction view or a
 		// growth record (ADR 0028 §8): only a malformed producer gets
@@ -181,7 +184,7 @@ func DeriveRecord(r Record) Weft {
 		// position is derived from its hash, so a retried batch lands on
 		// the same key and two compactions filed under one run do not.
 		w.Pos = markerPos(attr(r.Attrs, attrCompactionHash))
-	case w.Record == "request" || w.Record == "prompt" || w.Record == "tools":
+	case w.Record == "request" || w.Record == "prompt" || w.Record == "tools" || w.Record == RecordRaw:
 		// One of ADR 0028's kinds without its index: only a malformed
 		// producer gets here. -1 on both backends; duplicates collapse.
 		w.Pos = -1
@@ -326,17 +329,19 @@ var nonMetaAttr = map[string]struct{}{
 	// contract, never caller metadata — and not strings only, so left
 	// out they would land in ClickHouse's meta (stringified) and not in
 	// SQLite's (MetaOf keeps strings), the two backends disagreeing.
-	"weft.attempt.retry_after_ms":              {},
-	"weft.override.instructions":               {},
-	"weft.override.max_steps":                  {},
-	"weft.override.model":                      {},
-	"weft.override.parallelism":                {},
-	"weft.override.params":                     {},
-	"weft.override.park_all_except":            {},
-	"weft.override.park_on":                    {},
-	"weft.override.thinking":                   {},
-	"weft.override.tool_choice":                {},
-	"weft.override.tools":                      {},
+	"weft.attempt.retry_after_ms":   {},
+	"weft.override.instructions":    {},
+	"weft.override.max_steps":       {},
+	"weft.override.model":           {},
+	"weft.override.parallelism":     {},
+	"weft.override.params":          {},
+	"weft.override.park_all_except": {},
+	"weft.override.park_on":         {},
+	"weft.override.thinking":        {},
+	"weft.override.tool_choice":     {},
+	"weft.override.tools":           {},
+	// ADR 0028 §12: the raw record's position.
+	"weft.raw.index":                           {},
 	"gen_ai.operation.name":                    {},
 	"gen_ai.provider.name":                     {},
 	"gen_ai.request.model":                     {},

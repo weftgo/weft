@@ -27,8 +27,8 @@ func TestMigrationPinsExporterVersion(t *testing.T) {
 	if !strings.Contains(string(body), pinnedExporterVersion) {
 		t.Errorf("migration 0001 does not name the pinned exporter version %s", pinnedExporterVersion)
 	}
-	if highestMigration() != 4 {
-		t.Errorf("highest migration = %d, want 4 (0001 init, 0002 experiments, 0003 status spelling, 0004 request record)", highestMigration())
+	if highestMigration() != 5 {
+		t.Errorf("highest migration = %d, want 5 (0001 init, 0002 experiments, 0003 status spelling, 0004 request record, 0005 raw record)", highestMigration())
 	}
 }
 
@@ -408,15 +408,20 @@ func TestRunsInnerFiltersAfterGrouping(t *testing.T) {
 // 0003's restated traces view carry the set as it was before ADR 0028,
 // contractKeys without its last adr0028Keys entries (ADR 0028's twelve,
 // plan A4's four, the attempt span's retry-after and the ten
-// weft.override.* fields, all added by 0004).
-const adr0028Keys = 12 + 4 + 1 + 10
+// weft.override.* fields, all added by 0004). 0005 restates the logs
+// view alone with the raw record's weft.raw.index (rawKeys) appended.
+const (
+	adr0028Keys = 12 + 4 + 1 + 10
+	rawKeys     = 1
+)
 
 func TestMigrationContractTuple(t *testing.T) {
-	before := contractKeys[:len(contractKeys)-adr0028Keys]
+	at0004 := contractKeys[:len(contractKeys)-rawKeys]
+	before := at0004[:len(at0004)-adr0028Keys]
 	for _, c := range []struct {
 		version, tuples int
 		keys            []string
-	}{{1, 2, before}, {3, 1, before}, {4, 2, contractKeys}} {
+	}{{1, 2, before}, {3, 1, before}, {4, 2, at0004}, {5, 1, contractKeys}} {
 		body, err := migrationsFS.ReadFile("migrations/" + migrations[c.version])
 		if err != nil {
 			t.Fatal(err)
@@ -484,6 +489,50 @@ func TestMigration0003RestatesTracesView(t *testing.T) {
 	stmts := splitStatements(string(fix))
 	if len(stmts) != 1 || !strings.HasPrefix(stmts[0], alter) {
 		t.Errorf("0003 must be the one ALTER statement, got %d", len(stmts))
+	}
+}
+
+// Migration 0005 (ADR 0028 §12) restates two of 0004's views: the
+// records view with the raw kind and its index, the logs run view with
+// weft.raw.index in its contract tuple — nothing else.
+func TestMigration0005RestatesViews(t *testing.T) {
+	read := func(v int) string {
+		b, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	const (
+		recordsAlter = "ALTER TABLE weft_records_mv MODIFY QUERY"
+		logsAlter    = "ALTER TABLE weft_runs_logs_mv MODIFY QUERY"
+	)
+	was, now := splitStatements(read(4)), splitStatements(read(5))
+	if len(now) != 2 || !strings.HasPrefix(now[0], recordsAlter) || !strings.HasPrefix(now[1], logsAlter) {
+		t.Fatalf("0005 = %d statements, want the records then the logs view restated", len(now))
+	}
+	find := func(stmts []string, prefix string) string {
+		for _, s := range stmts {
+			if strings.HasPrefix(s, prefix) {
+				return s
+			}
+		}
+		t.Fatalf("0004 has no %q", prefix)
+		return ""
+	}
+	records := strings.NewReplacer(
+		`LogAttributes['weft.tools.index'] != '', toInt64OrZero(LogAttributes['weft.tools.index']), -1) AS Pos,`,
+		`LogAttributes['weft.tools.index'] != '', toInt64OrZero(LogAttributes['weft.tools.index']),
+      LogAttributes['weft.raw.index'] != '', toInt64OrZero(LogAttributes['weft.raw.index']), -1) AS Pos,`,
+		`IN ('event', 'messages', 'request', 'prompt', 'tools')`, `IN ('event', 'messages', 'request', 'prompt', 'tools', 'raw')`,
+	).Replace(find(was, recordsAlter))
+	if now[0] != records {
+		t.Errorf("0005's records select is not 0004's with the raw kind:\n%s\nwant:\n%s", now[0], records)
+	}
+	logs := strings.Replace(find(was, logsAlter), `'weft.override.tools'], k)`, `'weft.override.tools',
+        'weft.raw.index'], k)`, 1)
+	if now[1] != logs {
+		t.Errorf("0005's logs select is not 0004's with weft.raw.index:\n%s\nwant:\n%s", now[1], logs)
 	}
 }
 

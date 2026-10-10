@@ -88,11 +88,16 @@ const (
 	// the run holds more than it read (truncated: nothing was lost; the
 	// rest is a read away).
 	CauseResponseCap HoleCause = "response_cap"
+	// CauseRawOff: the attempt has no raw record (ADR 0028 §12) — wire
+	// bodies are recorded only under otel.RawBodies(true) with
+	// WEFT_ENV=dev, by an adapter that reports them (not_recorded: the
+	// requests row's raw, the wire tab).
+	CauseRawOff HoleCause = "raw_off"
 )
 
 // HoleCauses lists the causes the table words, in order.
 func HoleCauses() []HoleCause {
-	return []HoleCause{CauseNoSpans, CauseResultCap, CauseLogCap, CauseNoPublicID, CauseDevTokenOnly, CauseNotServed, CauseResponseCap}
+	return []HoleCause{CauseNoSpans, CauseResultCap, CauseLogCap, CauseNoPublicID, CauseDevTokenOnly, CauseNotServed, CauseResponseCap, CauseRawOff}
 }
 
 var causeNotes = map[Hole]map[HoleCause]holeNote{
@@ -104,6 +109,10 @@ var causeNotes = map[Hole]map[HoleCause]holeNote{
 		CauseNoPublicID: {
 			"the session's turns carry no weft.public_id (a thread session is created without thread.PublicID)",
 			"thread.Create(…, thread.PublicID(id)), or set weft.public_id on every turn",
+		},
+		CauseRawOff: {
+			"no wire bodies were recorded for this attempt: otel.RawBodies is off (the default, and refused outside WEFT_ENV=dev), or the adapter does not report them",
+			"run under WEFT_ENV=dev with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)",
 		},
 		CauseNotServed: {
 			"this Studio does not serve the request record (no requests capability): the run may hold one",
@@ -233,6 +242,11 @@ func (q RequestQuery) PageLimit() int {
 // are), and a destination's Redact over params.stop is not marked on
 // the record: HoleRedacted is reserved for the readers that can tell
 // (ADR 0028 §11, A3).
+//
+// Wire is the attempt's raw record (ADR 0028 §12: the provider request
+// and response on the wire, recorded only under otel.RawBodies in
+// development), nil when the run holds none for this attempt
+// (AttachRaw).
 type RequestRecord struct {
 	Index          int64
 	Step           int
@@ -244,6 +258,7 @@ type RequestRecord struct {
 	TruncatedBytes int64 // informational only; a request record is never capped by weft
 	Body           RequestBody
 	Raw            json.RawMessage
+	Wire           *RawRecord
 }
 
 // RequestBody is the request record's body (ADR 0028 §3), keys as the

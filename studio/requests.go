@@ -76,13 +76,38 @@ type requestRow struct {
 	Tools          any               `json:"tools,omitempty"`
 }
 
+// requestWire is a requests row as GET /api/runs/{id}/requests serves
+// it: the request record plus its attempt's raw record (ADR 0028 §12,
+// plan A6) — the provider request and response on the wire, credential
+// headers stripped and named, each body capped at 256 KiB — or null
+// with raw_badge not_recorded (cause raw_off) and its reason and fix
+// when the run holds none for the attempt. The export keeps the plain
+// requestRow: wire bodies are served here alone. A read-scoped panel
+// token never reaches it: the route refuses it (mayReadPrompts).
+type requestWire struct {
+	requestRow
+	Raw       *obsdb.RawRecord `json:"raw"`
+	RawBadge  string           `json:"raw_badge,omitempty"`
+	RawReason string           `json:"raw_reason,omitempty"`
+	RawFix    string           `json:"raw_fix,omitempty"`
+}
+
+func wireOf(row requestRow, rec obsdb.RequestRecord) requestWire {
+	w := requestWire{requestRow: row, Raw: rec.Wire}
+	if w.Raw == nil {
+		w.RawBadge = string(obsdb.HoleNotRecorded)
+		w.RawReason, w.RawFix = obsdb.HoleNoteFor(obsdb.HoleNotRecorded, obsdb.CauseRawOff)
+	}
+	return w
+}
+
 // requestsPage is GET /api/runs/{id}/requests. NextFrom is the next
 // page's from (the last index + 1) when the page is full; absent on
 // the last page. A run written before the record carries the
 // not_recorded badge beside an empty list.
 type requestsPage struct {
-	Requests []requestRow `json:"requests"`
-	NextFrom *int64       `json:"next_from,omitempty"`
+	Requests []requestWire `json:"requests"`
+	NextFrom *int64        `json:"next_from,omitempty"`
 	badgeFields
 }
 
@@ -210,7 +235,7 @@ func (s *Server) serveRunRequests(w http.ResponseWriter, r *http.Request, id str
 		dbError(w, r, "run", id, err)
 		return
 	}
-	out := requestsPage{Requests: []requestRow{}}
+	out := requestsPage{Requests: []requestWire{}}
 	if h := det.RequestsHole(); h != "" {
 		out.badgeFields = badgeOf(h)
 		writeJSON(w, r, http.StatusOK, out)
@@ -241,7 +266,7 @@ func (s *Server) serveRunRequests(w http.ResponseWriter, r *http.Request, id str
 				return
 			}
 		}
-		out.Requests = append(out.Requests, row)
+		out.Requests = append(out.Requests, wireOf(row, rec))
 	}
 	if n := len(recs); n > 0 && n >= query.PageLimit() {
 		next := recs[n-1].Index + 1

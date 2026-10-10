@@ -34,6 +34,14 @@ func (d *DB) Requests(ctx context.Context, runID string, q obsdb.RequestQuery) (
 	for i, r := range rows {
 		out[i] = obsdb.RequestRecordOf(r)
 	}
+	if lo, hi, ok := obsdb.StepRange(out); ok {
+		// The attempts' raw records (ADR 0028 §12), when the run holds any.
+		raws, err := d.storedRecords(ctx, `RunId = ? AND Kind = 'raw' AND Step BETWEEN ? AND ? ORDER BY Pos`, runID, int32(lo), int32(hi))
+		if err != nil {
+			return nil, err
+		}
+		obsdb.AttachRaw(out, raws)
+	}
 	return out, nil
 }
 

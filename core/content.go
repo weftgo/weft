@@ -10,7 +10,7 @@ import (
 // say which field of which event is content (ADR 0024 S1.1, [D2]).
 type ContentKind string
 
-// The seven kinds of content the core ever puts in a record.
+// The eight kinds of content the core ever puts in a record.
 const (
 	ContentText      ContentKind = "text"      // assistant text, text deltas
 	ContentReasoning ContentKind = "reasoning" // reasoning text and deltas
@@ -19,6 +19,7 @@ const (
 	ContentMessages  ContentKind = "messages"  // whole transcript batches (weft/otel redacts them per part with the four kinds above)
 	ContentPrompt    ContentKind = "prompt"    // the composed system text of a prompt record (ADR 0028)
 	ContentStop      ContentKind = "stop"      // one stop sequence of a request record's params (ADR 0028)
+	ContentRaw       ContentKind = "raw"       // one wire body of a raw record (ADR 0028 §12; otel.RawBodies, dev only)
 )
 
 type contentOption struct{ capture bool }

@@ -37,7 +37,11 @@
       "tools": {
         "hash": "eb2241595b06a331d17acf3b446ed383b91e48ab5e2ef19967f9c0fecdd5e394",
         "badge": "stripped"
-      }
+      },
+      "raw": null,
+      "raw_badge": "not_recorded",
+      "raw_reason": "no wire bodies were recorded for this attempt: otel.RawBodies is off (the default, and refused outside WEFT_ENV=dev), or the adapter does not report them",
+      "raw_fix": "run under WEFT_ENV=dev with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)"
     },
     {
       "index": 1,
@@ -77,7 +81,11 @@
       "tools": {
         "hash": "58a2f735b942ba5f583d0fb01ec3a4112b4a0d632576193ea8af7676cba166f1",
         "badge": "stripped"
-      }
+      },
+      "raw": null,
+      "raw_badge": "not_recorded",
+      "raw_reason": "no wire bodies were recorded for this attempt: otel.RawBodies is off (the default, and refused outside WEFT_ENV=dev), or the adapter does not report them",
+      "raw_fix": "run under WEFT_ENV=dev with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)"
     },
     {
       "index": 2,
@@ -117,7 +125,11 @@
       "tools": {
         "hash": "58a2f735b942ba5f583d0fb01ec3a4112b4a0d632576193ea8af7676cba166f1",
         "badge": "stripped"
-      }
+      },
+      "raw": null,
+      "raw_badge": "not_recorded",
+      "raw_reason": "no wire bodies were recorded for this attempt: otel.RawBodies is off (the default, and refused outside WEFT_ENV=dev), or the adapter does not report them",
+      "raw_fix": "run under WEFT_ENV=dev with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)"
     },
     {
       "index": 3,
@@ -157,7 +169,11 @@
       "tools": {
         "hash": "58a2f735b942ba5f583d0fb01ec3a4112b4a0d632576193ea8af7676cba166f1",
         "badge": "stripped"
-      }
+      },
+      "raw": null,
+      "raw_badge": "not_recorded",
+      "raw_reason": "no wire bodies were recorded for this attempt: otel.RawBodies is off (the default, and refused outside WEFT_ENV=dev), or the adapter does not report them",
+      "raw_fix": "run under WEFT_ENV=dev with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)"
     }
   ]
 }

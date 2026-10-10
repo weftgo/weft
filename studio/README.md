@@ -1281,8 +1281,8 @@ the story view. A long run
 scrolls (plan H2): past 60 steps the story is virtualised, past 200 rows
 the waterfall and the raw table are, mounting only the rows in view plus
 an overscan (and the row the URL names); a **jump to step** scrubber
-heads the story (range and number box, `n`; `?step=` in place while
-dragging, one history entry on release); and the page keeps the stream's
+heads the story (range and number box, `n`; one `?step=` history entry
+per scrub, written in place while the drag goes on); and the page keeps the stream's
 last 50,000 events in a ring (`lib/ring.ts`'s `EVENT_RING_CAPACITY`) — a
 run past it says which positions it shows, the earlier ones read from
 `api/runs/{id}/events?after=`, and turns replay off:

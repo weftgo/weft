@@ -225,7 +225,12 @@ describe("useRunEvents walk and tail", () => {
     es.emit("record", frame(0, "delta"))
     es.emit("record", frame(1), "5")
     es.emit("record", frame(1, "delta"))
-    await waitFor(() => expect(result.current.events).toHaveLength(4))
+    await waitFor(() => expect(result.current.folded.steps.find((st) => st.index === 1)?.text).toBe("d1"))
+    // Deltas are folded (their words reach the step) but never kept in
+    // the window (plan H2): it holds the two positioned events.
+    expect(result.current.events).toHaveLength(2)
+    expect(result.current.total).toBe(2)
+    expect(result.current.folded.steps.find((st) => st.index === 0)?.text).toBe("d0")
     expect(result.current.lastPos).toBe(1)
     // The first walk and the open's catch-up (plan C5: the stream opens
     // after the walk began); no refetch for the frames: nothing skipped.
@@ -383,7 +388,8 @@ describe("useRunEvents live publish cost", () => {
     // act() flushes whatever a frame scheduled before the next one.
     for (let i = 0; i < 30; i++) act(() => es.emit("record", frame(i, "delta")))
     act(() => es.emit("record", frame(1), "5"))
-    await waitFor(() => expect(result.current.events).toHaveLength(32))
+    // 30 deltas folded, 2 positioned events kept (plan H2).
+    await waitFor(() => expect(result.current.events).toHaveLength(2))
     expect(published.size - before).toBe(1)
     expect(result.current.lastPos).toBe(1)
   })

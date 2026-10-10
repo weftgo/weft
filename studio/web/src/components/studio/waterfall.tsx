@@ -9,9 +9,9 @@
 // fixed ROW_PX tall, so only the rows in view plus an overscan are
 // mounted, between two spacers that keep the scroll height whole.
 import { useVirtualizer } from "@tanstack/react-virtual"
-import { shared } from "@/lib/virtual"
+import { shared, spacers } from "@/lib/virtual"
 import { ChevronRight } from "lucide-react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 
 import type { Span, SpanKind, SpanTone } from "@/lib/trace"
 
@@ -196,11 +196,12 @@ export function Waterfall({
   })
   const items = virt.getVirtualItems()
   const shown = virtual ? items.map((it) => visible[it.index]) : visible
-  const padTop = virtual && items.length > 0 ? items[0].start - AXIS_PX : 0
-  const padBottom =
-    virtual && items.length > 0
-      ? virt.getTotalSize() - items[items.length - 1].end
-      : 0
+  // A spacer before every row that does not follow on from the one
+  // before it (the pinned selected row far from the window), one after
+  // the last: each row lands at its own start.
+  const pads = virtual
+    ? spacers(items, AXIS_PX, virt.getTotalSize())
+    : { before: [], after: 0 }
 
   // Keep the selected row in view: a mounted row scrolls itself; in a
   // virtualised tree the virtualiser scrolls to its index.
@@ -285,10 +286,7 @@ export function Waterfall({
         {unit}s
       </div>
 
-      {padTop > 0 ? (
-        <div className="col-span-3" style={{ height: padTop }} aria-hidden data-spacer />
-      ) : null}
-      {shown.map((sp) => {
+      {shown.map((sp, n) => {
         const kids = children.get(sp.id) ?? 0
         const isFolded = folded.has(sp.id)
         const left = pct(sp.from, domain)
@@ -296,9 +294,13 @@ export function Waterfall({
         const width = Math.max(0.6, pct(end + 1, domain) - left)
         const selected = selectedId === sp.id
         const revealed = sp.from < at
+        const gap = pads.before[n] ?? 0
         return (
+          <Fragment key={sp.id}>
+          {gap > 0 ? (
+            <div className="col-span-3" style={{ height: gap }} aria-hidden data-spacer />
+          ) : null}
           <div
-            key={sp.id}
             className="group/row contents"
             role="treeitem"
             aria-selected={selected}
@@ -398,10 +400,11 @@ export function Waterfall({
                   : `${sp.from}–${sp.to}`}
             </div>
           </div>
+          </Fragment>
         )
       })}
-      {padBottom > 0 ? (
-        <div className="col-span-3" style={{ height: padBottom }} aria-hidden data-spacer />
+      {pads.after > 0 ? (
+        <div className="col-span-3" style={{ height: pads.after }} aria-hidden data-spacer />
       ) : null}
       {spans.length === 0 ? (
         <div className="col-span-3 py-6 text-center text-faint">

@@ -67,3 +67,24 @@ export function shared(pinned: number) {
     measureElement: measure<HTMLDivElement>,
   }
 }
+
+/**
+ * spacers lays out a virtualised list whose rows sit in normal flow
+ * (the waterfall's grid rows): the height of the spacer before each
+ * mounted row and after the last, so every row lands at its own start
+ * — mounted rows need not be consecutive (a pinned row far from the
+ * window gets a spacer on each side of it, never a shared one).
+ */
+export function spacers(
+  items: { start: number; end: number }[],
+  origin: number,
+  total: number
+): { before: number[]; after: number } {
+  let at = origin
+  const before = items.map((it) => {
+    const gap = Math.max(0, it.start - at)
+    at = Math.max(at, it.end)
+    return gap
+  })
+  return { before, after: Math.max(0, total - at) }
+}

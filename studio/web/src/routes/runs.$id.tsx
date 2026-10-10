@@ -547,28 +547,14 @@ function RunPage() {
   )
 
   // The story's scrubber (plan H2) names a step the way a deep link
-  // does (?step=, G1): in place while the thumb is dragged, one history
-  // entry on release — the entry the drag started from is put back
-  // first, so back returns to the step before the drag.
-  const dragFrom = useRef<{ step?: number } | null>(null)
+  // does (?step=, G1): one history entry per scrub (its first move),
+  // the rest of a drag written in place — back returns to the step
+  // before the drag.
   const stepInput = useRef<HTMLInputElement>(null)
   const onStep = useCallback(
-    (n: number, commit: boolean) => {
-      if (!commit) {
-        if (!dragFrom.current) dragFrom.current = { step: search.step }
-        void navigate({ search: (prev) => ({ ...prev, step: n }), replace: true })
-        return
-      }
-      const from = dragFrom.current
-      dragFrom.current = null
-      if (from && from.step === n) {
-        void navigate({ search: (prev) => ({ ...prev, step: n }), replace: true })
-        return
-      }
-      if (from) void navigate({ search: (prev) => ({ ...prev, step: from.step }), replace: true })
-      void navigate({ search: (prev) => ({ ...prev, step: n }) })
-    },
-    [navigate, search.step]
+    (n: number, mode: "push" | "replace") =>
+      void navigate({ search: (prev) => ({ ...prev, step: n }), replace: mode === "replace" }),
+    [navigate]
   )
 
   // Keys: r toggles raw, s the story, e the trace; j/k walk the

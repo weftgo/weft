@@ -1,10 +1,11 @@
 // The story's "jump to step" scrubber (plan H2): a range over the
 // run's step ordinals and a numeric box beside it. Moving it names a
-// step the way a deep link does (?step=, G1's ordinal): the page
-// writes the URL in place while the thumb is dragged and pushes one
-// history entry on release, and the story scrolls the card into view
+// step the way a deep link does (?step=, G1's ordinal): a drag pushes
+// one history entry on its first move and writes the URL in place for
+// the rest (a key press or the box's enter is one entry), and the story scrolls the card into view
 // and rings it. The step's status and time offset are read out in a
-// polite live region (and the thumb's aria-valuetext).
+// visible line and the thumb's aria-valuetext; a pointer drag is also
+// spoken by a polite live region once the thumb rests (150 ms).
 import { useEffect, useRef, useState } from "react"
 
 import type { FoldedStep } from "@/lib/events"
@@ -75,6 +76,9 @@ export function stepOffsets(steps: FoldedStep[]): (number | null)[] {
   return out
 }
 
+/** How long the drag's live region waits for the thumb to settle. */
+const ANNOUNCE_MS = 150
+
 export function StepScrubber({
   steps,
   value,
@@ -87,9 +91,10 @@ export function StepScrubber({
   /** The step the URL names (?step=), when it names one. */
   value?: number
   runStatus: string
-  /** Name a step: commit false while dragging (the URL replaced), true
-   * on release (one history entry). */
-  onStep: (ordinal: number, commit: boolean) => void
+  /** Name a step: "push" — one history entry per scrub (a drag's first
+   * move, a key press, the box's enter) — or "replace" (the rest of a
+   * drag: the URL written in place). */
+  onStep: (ordinal: number, mode: "push" | "replace") => void
   /** The numeric box, for the page's keyboard shortcut. */
   inputRef?: React.Ref<HTMLInputElement>
 }) {
@@ -101,23 +106,45 @@ export function StepScrubber({
   // While the thumb moves the box shows the thumb, not the URL.
   const [draft, setDraft] = useState(String(current))
   useEffect(() => setDraft(String(current)), [current])
-  const dragging = useRef(false)
+  // idle · down (pressed, not moved yet: the first move pushes) ·
+  // moving (the rest of the drag replaces).
+  const drag = useRef<"idle" | "down" | "moving">("idle")
   const offsets = stepOffsets(steps)
   const i = Math.max(0, ordinals.indexOf(current))
   const readout =
     steps.length > 0 ? describeStep(steps, i, runStatus, offsets) : ""
+  // The live region speaks for pointer drags only, once the thumb has
+  // rested ANNOUNCE_MS: a key press is announced by the slider's own
+  // aria-valuetext, never twice.
+  const [spoken, setSpoken] = useState("")
+  const announce = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(
+    () => () => {
+      if (announce.current !== null) clearTimeout(announce.current)
+    },
+    []
+  )
+  const say = (n: number) => {
+    if (announce.current !== null) clearTimeout(announce.current)
+    announce.current = setTimeout(() => {
+      announce.current = null
+      const at = ordinals.indexOf(n)
+      if (at >= 0) setSpoken(describeStep(steps, at, runStatus, offsets))
+    }, ANNOUNCE_MS)
+  }
 
-  const move = (raw: number, commit: boolean) => {
+  const move = (raw: number, mode: "push" | "replace") => {
     const n = nearestOrdinal(ordinals, raw)
     if (n === undefined) return
     setDraft(String(n))
-    onStep(n, commit)
+    onStep(n, mode)
   }
-  const release = () => {
-    if (!dragging.current) return
-    dragging.current = false
-    const n = nearestOrdinal(ordinals, Number(draft))
-    if (n !== undefined) onStep(n, true)
+  const release = (e: React.PointerEvent<HTMLInputElement>) => {
+    drag.current = "idle"
+    const el = e.currentTarget
+    // jsdom (and an old engine) has no pointer capture.
+    if ("hasPointerCapture" in el && el.hasPointerCapture(e.pointerId))
+      el.releasePointerCapture(e.pointerId)
   }
 
   if (steps.length < 2) return null
@@ -143,16 +170,32 @@ export function StepScrubber({
         aria-valuetext={readout}
         title={readout}
         onChange={(e) => {
-          // A pointer drag replaces the URL as it goes; a key press is
-          // a release of its own (one entry per step moved).
-          move(Number(e.target.value), !dragging.current)
+          const raw = Number(e.target.value)
+          if (drag.current === "idle") {
+            move(raw, "push") // a key press: one entry per step moved
+            return
+          }
+          // A drag: its first move is the one history entry, the rest
+          // write the URL in place.
+          move(raw, drag.current === "down" ? "push" : "replace")
+          drag.current = "moving"
+          const n = nearestOrdinal(ordinals, raw)
+          if (n !== undefined) say(n)
         }}
-        onPointerDown={() => {
-          dragging.current = true
+        onPointerDown={(e) => {
+          drag.current = "down"
+          // A pointerup outside the thumb (or the page) still ends it.
+          const el = e.currentTarget
+          if ("setPointerCapture" in el) el.setPointerCapture(e.pointerId)
         }}
         onPointerUp={release}
         onPointerCancel={release}
-        onBlur={release}
+        onLostPointerCapture={() => {
+          drag.current = "idle"
+        }}
+        onBlur={() => {
+          drag.current = "idle"
+        }}
       />
       <input
         ref={inputRef}
@@ -168,20 +211,22 @@ export function StepScrubber({
           if (e.key === "Enter") {
             e.preventDefault()
             const n = Number(draft)
-            if (Number.isFinite(n)) move(n, true)
+            if (Number.isFinite(n)) move(n, "push")
           }
         }}
         onBlur={() => {
           const n = Number(draft)
-          if (draft !== String(current) && Number.isFinite(n)) move(n, true)
+          if (draft !== String(current) && Number.isFinite(n)) move(n, "push")
         }}
       />
       <span
         className="font-mono text-[11px] text-faint tabular-nums"
-        aria-live="polite"
         data-scrubber-readout
       >
         {readout}
+      </span>
+      <span className="sr-only" aria-live="polite" data-scrubber-live>
+        {spoken}
       </span>
     </div>
   )

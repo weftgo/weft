@@ -513,7 +513,7 @@ export function RawView({
         </div>
         <span className="font-mono text-[11px] text-faint">
           {surface === "events"
-            ? `api/runs/${doc.id}/events — the stream, positions ${base}…${Math.max(base, base + events.length - 1)}${base > 0 ? ` (the last ${events.length.toLocaleString()} kept; 0…${base - 1} on the API)` : ""}`
+            ? `api/runs/${doc.id}/events — the stream, positions ${base}…${Math.max(base, base + events.length - 1)}${base > 0 ? ` (the last ${events.length.toLocaleString()} kept; 0…${base - 1} on the API — copy and download cover the kept window)` : ""}`
             : `api/runs/${doc.id} — the run document (events are paged separately)`}
         </span>
         <span className="ml-auto flex items-center gap-1">

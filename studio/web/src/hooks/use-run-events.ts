@@ -1,6 +1,6 @@
 // The events reader behind the run page (ADR 0018 §8, S4.5/S4.7):
 // walk api/runs/{id}/events page by page into one incremental fold
-// (foldMore — events are folded exactly once as they arrive). While
+// (feed.push — events are folded exactly once as they arrive). While
 // the run is live, the /api/live stream is the tail when the server
 // reports the capability — record frames are folded as they arrive
 // (deltas included: they are live-only) — and the 2 s poll is the
@@ -18,6 +18,8 @@
 // copy per publish (which is coalesced). Past the capacity the oldest
 // events are evicted: RunStream.base says how many, the fold keeps
 // what they contributed, and the page says the window is partial.
+// Live deltas are folded but never kept: they have no API position, so
+// base and total count positioned events only.
 import { useEffect, useRef, useState } from "react"
 
 import { fetchEventsPage, metaQuery, postApproval, runQuery, studioToken } from "@/lib/api"
@@ -27,14 +29,15 @@ import { dismissNotice, notify } from "@/lib/notify"
 import { queryClient } from "@/lib/query"
 import { openLive } from "@/lib/live"
 import type { LiveHandle, LiveRecord } from "@/lib/live"
-import { foldMore, newFold } from "@/lib/events"
+import { newFold } from "@/lib/events"
 import type { FoldedRun, FoldFeed } from "@/lib/events"
 import type { ContentAttrs } from "@/lib/honesty"
 import { EVENT_RING_CAPACITY, Ring } from "@/lib/ring"
 
 export interface RunStream {
   /** The stream's kept window (the last EVENT_RING_CAPACITY events at
-   * most): events[i] is stream index base + i. A fresh array on every
+   * most): events[i] is stream index base + i. Positioned events only:
+   * a live delta (no API position) is folded, never kept here. A fresh array on every
    * publish that changed it, so memoized consumers see the change;
    * never mutated after publish. */
   events: WireEvent[]
@@ -109,8 +112,10 @@ function apply(s: Walk, page: EventsPage): boolean {
   if (fresh.length > 0) {
     const evs = fresh.map((pe) => pe.event)
     const attrs = fresh.map((pe) => pe.attrs)
-    foldMore(s.feed, evs, attrs)
+    // Each event folds at the index it takes in the window (its
+    // stream index): deltas folded meanwhile hold no index of their own.
     for (let i = 0; i < evs.length; i++) {
+      s.feed.push(evs[i], s.events.total, attrs[i])
       s.events.push(evs[i])
       s.attrs.push(attrs[i])
     }
@@ -321,8 +326,16 @@ export function useRunEvents(
         if (rec.pos <= s.pos) return false
         s.pos = rec.pos
       } else if (rec.kind !== "delta") return false
-      // O(1): a push into the ring, never a copy of the window.
-      s.feed.push(rec.event, undefined, rec.attrs)
+      // O(1): a push into the ring, never a copy of the window. A delta
+      // is folded only (its words reach the step): it has no position
+      // on the API, so it takes none in the window — base and total
+      // count positioned events, and a streamed reply never evicts the
+      // events it streams between. It folds at the last event's index.
+      if (rec.kind === "delta") {
+        s.feed.push(rec.event, Math.max(0, s.events.total - 1), rec.attrs)
+        return true
+      }
+      s.feed.push(rec.event, s.events.total, rec.attrs)
       s.events.push(rec.event)
       s.attrs.push(rec.attrs)
       return true

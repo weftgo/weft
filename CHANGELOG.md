@@ -38,9 +38,9 @@ module, ADR 0005).
   view plus an overscan are mounted, the row a `?step=` / `?ev=` / selection
   names always among them; a card's open/closed state is kept per step
   ordinal. A **jump to step** scrubber heads the story (a range plus a
-  number box, the `n` key; it writes `?step=` in place while dragged and one
-  history entry on release, and reads out the step's status and model-time
-  offset). The fold keeps its raw events in a ring of 50,000
+  number box, the `n` key; a scrub is one history entry, pushed on the drag's
+  first move and written in place for the rest, and it reads out the step's
+  status and model-time offset). The fold keeps its raw events in a ring of 50,000
   (`EVENT_RING_CAPACITY`): a live frame is an O(1) push, never a copy of the
   stream; past the capacity the oldest events are evicted — the fold keeps
   what they contributed, the page says "showing the last N events" (the rest

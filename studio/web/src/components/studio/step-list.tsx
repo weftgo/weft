@@ -16,7 +16,7 @@ import { useQuery } from "@tanstack/react-query"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { shared } from "@/lib/virtual"
 import { ChevronRight, Play } from "lucide-react"
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 
 import { stepQuery } from "@/lib/api"
 import { CacheHint, Cost, useCostCapable } from "@/components/studio/cost"
@@ -68,6 +68,11 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+
+/** isAtEnd: the scroller shows its last 48 px. */
+function isAtEnd(el: HTMLElement): boolean {
+  return el.scrollTop + el.clientHeight >= el.scrollHeight - 48
+}
 
 /** More steps than this and the story is virtualised (plan H2). */
 export const STORY_VIRTUAL_AT = 60
@@ -833,8 +838,9 @@ export function StepList({
   /** The transcript query's error message, when it failed. */
   transcriptError?: string
   /** The scrubber names a step (plan H2): the page writes ?step= —
-   * commit false while dragging, true on release. Absent: no scrubber. */
-  onStep?: (ordinal: number, commit: boolean) => void
+   * one history entry per scrub ("push"), in place while the drag goes
+   * on ("replace"). Absent: no scrubber. */
+  onStep?: (ordinal: number, mode: "push" | "replace") => void
   /** The scrubber's numeric box, for the page's shortcut. */
   stepInputRef?: React.Ref<HTMLInputElement>
 }) {
@@ -894,7 +900,8 @@ export function StepList({
   })
   // ?step= lands on its card: the virtualiser scrolls to it once the
   // card's step is in the fold (a deep link opens before the events
-  // arrive), and again whenever the step named changes.
+  // arrive), and again whenever the step named changes — or is named
+  // again after the reader scrolled away from it (scrubTo, below).
   const scrolledTo = useRef<number | undefined>(undefined)
   useEffect(() => {
     if (!virtual || hlIndex < 0 || scrolledTo.current === highlight) return
@@ -903,7 +910,14 @@ export function StepList({
   }, [virtual, hlIndex, highlight, virt])
   // Follow: a live run's new steps keep the view at the end only while
   // the reader is there (scrolled up, nothing moves).
-  const atEnd = useRef(true)
+  // Read from the scroll position: on mount (after the first layout)
+  // and on every scroll — a reader who opens a long run and stays at
+  // its top is not at the end.
+  const atEnd = useRef(false)
+  useLayoutEffect(() => {
+    const el = scroller.current
+    if (virtual && el) atEnd.current = isAtEnd(el)
+  }, [virtual])
   const live = doc.status === "running" && !replaying
   const lastCount = useRef(steps.length)
   useEffect(() => {
@@ -912,6 +926,20 @@ export function StepList({
     if (virtual && live && grew && atEnd.current && highlight === undefined)
       virt.scrollToIndex(steps.length - 1, { align: "end" })
   }, [steps.length, virtual, live, highlight, virt])
+
+  // The scrubber names a step: the same step named again (the URL does
+  // not change) still brings its card back into view.
+  const scrubTo = (n: number, mode: "push" | "replace") => {
+    if (n === highlight) {
+      const i = indexOf.get(n)
+      if (virtual && i !== undefined) {
+        scrolledTo.current = n
+        virt.scrollToIndex(i, { align: "center" })
+      } else if (!virtual)
+        document.querySelector(`[data-step="${n}"]`)?.scrollIntoView({ block: "center" })
+    }
+    onStep?.(n, mode)
+  }
 
   const stepBlock = (step: FoldedStep) => (
     <>
@@ -954,7 +982,7 @@ export function StepList({
           steps={steps}
           value={highlight}
           runStatus={runStatus}
-          onStep={onStep}
+          onStep={scrubTo}
           inputRef={stepInputRef}
         />
       ) : null}
@@ -979,8 +1007,12 @@ export function StepList({
           aria-label={`steps, ${steps.length.toLocaleString()}`}
           data-virtual
           onScroll={(e) => {
-            const el = e.currentTarget
-            atEnd.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 48
+            atEnd.current = isAtEnd(e.currentTarget)
+            // Scrolled away from the named card: naming it again
+            // scrolls back to it.
+            const r = virt.range
+            if (r && hlIndex >= 0 && (hlIndex < r.startIndex || hlIndex > r.endIndex))
+              scrolledTo.current = undefined
           }}
         >
           <div className="relative w-full" style={{ height: virt.getTotalSize() }}>

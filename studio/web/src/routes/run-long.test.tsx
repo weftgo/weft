@@ -30,6 +30,7 @@ import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { withLiveGrant } from "@/test/fake-live-grant"
 import { FakeStudio, golden, pagedEvents } from "@/test/fake-studio"
+import { scrollTo, stubScroll } from "@/test/scroll"
 
 configure({ asyncUtilTimeout: 30_000 })
 vi.setConfig({ testTimeout: 120_000 })
@@ -81,62 +82,6 @@ function longRun(): WireEvent[] {
   }
   evs.push({ type: "run_finish", run_id: RUN, usage, steps: STEPS })
   return evs
-}
-
-/** jsdom lays nothing out and has no Element.scrollTo: the
- * virtualisers read a viewport-tall window and estimated rows
- * (lib/virtual.ts), a scroll is a scrollTop write plus its event, and a
- * virtualised scroller is as tall as its spacer says (a browser's
- * scrollHeight) and shows a viewport of it (its clientHeight). */
-function stubScroll(): () => void {
-  const proto = HTMLElement.prototype
-  const saved = {
-    scrollTo: Element.prototype.scrollTo,
-    scrollHeight: Object.getOwnPropertyDescriptor(
-      Element.prototype,
-      "scrollHeight"
-    ),
-    clientHeight: Object.getOwnPropertyDescriptor(
-      Element.prototype,
-      "clientHeight"
-    ),
-  }
-  Element.prototype.scrollTo = function (
-    this: Element,
-    opts?: ScrollToOptions | number
-  ) {
-    const top = typeof opts === "number" ? opts : opts?.top
-    if (typeof top === "number") this.scrollTop = top
-    this.dispatchEvent(new Event("scroll"))
-  }
-  const virtualised = (el: HTMLElement) => el.hasAttribute("data-virtual")
-  Object.defineProperty(proto, "scrollHeight", {
-    configurable: true,
-    get(this: HTMLElement) {
-      if (!virtualised(this)) return 0
-      const spacer = this.querySelector<HTMLElement>(":scope > .relative")
-      const h = spacer ? Number.parseFloat(spacer.style.height) : 0
-      return Number.isFinite(h) ? h : 0
-    },
-  })
-  Object.defineProperty(proto, "clientHeight", {
-    configurable: true,
-    get(this: HTMLElement) {
-      return virtualised(this) ? window.innerHeight : 0
-    },
-  })
-  return () => {
-    Element.prototype.scrollTo = saved.scrollTo
-    delete (proto as { scrollHeight?: number }).scrollHeight
-    delete (proto as { clientHeight?: number }).clientHeight
-  }
-}
-
-function scrollTo(el: Element, top: number) {
-  act(() => {
-    el.scrollTop = top
-    el.dispatchEvent(new Event("scroll"))
-  })
 }
 
 const steps = () => document.querySelectorAll("[data-step]")
@@ -197,7 +142,7 @@ describe("a 5,000-step run scrolls (plan H2)", () => {
     )
     // (a) the top: a window of cards, never 5,000.
     expect(steps().length).toBeGreaterThan(0)
-    expect(steps().length).toBeLessThan(200)
+    expect(steps().length).toBeLessThan(20)
     expect(ordinals()).toContain(0)
     // The items say where they sit in the whole.
     const first = list.querySelector('[role="listitem"]')!
@@ -211,11 +156,11 @@ describe("a 5,000-step run scrolls (plan H2)", () => {
     expect(height).toBeGreaterThan(STEPS * 100)
     scrollTo(list, height / 2)
     await waitFor(() => expect(ordinals()).toContain(2500))
-    expect(steps().length).toBeLessThan(200)
+    expect(steps().length).toBeLessThan(20)
     expect(ordinals()).not.toContain(0)
     scrollTo(list, height)
     await waitFor(() => expect(ordinals()).toContain(4999))
-    expect(steps().length).toBeLessThan(200)
+    expect(steps().length).toBeLessThan(20)
 
     // (c) back to the top, then the scrubber: 4,999 names the last
     // step in the URL, scrolls to it and rings it.
@@ -237,14 +182,23 @@ describe("a 5,000-step run scrolls (plan H2)", () => {
     )
     expect(document.querySelectorAll("[data-highlighted]")).toHaveLength(1)
     await waitFor(() => expect(list.scrollTop).toBeGreaterThan(height * 0.9))
-    expect(steps().length).toBeLessThan(200)
+    expect(steps().length).toBeLessThan(20)
     expect(slider.getAttribute("aria-valuenow")).toBe("4999")
     expect(slider.getAttribute("aria-valuetext")).toMatch(
       /^step 4999 of 5,000 · tool_calls · t\+499\.9 s model time$/
     )
+    // Scrolled away, the same step named again brings its card back
+    // (the URL does not change).
+    scrollTo(list, 0)
+    await waitFor(() => expect(ordinals()).toContain(0))
+    const box = screen.getByRole("spinbutton", { name: "step number" })
+    fireEvent.change(box, { target: { value: "4999" } })
+    fireEvent.keyDown(box, { key: "Enter" })
+    await waitFor(() => expect(list.scrollTop).toBeGreaterThan(height * 0.9))
+    expect(ordinals()).toContain(4999)
   })
 
-  it("a drag replaces the URL as it goes and leaves one history entry; back returns to where it started", async () => {
+  it("a scrub is one history entry: pushed on the drag's first move, replaced for the rest; back returns to where it started", async () => {
     const { router } = renderApp(`/runs/${RUN}?view=story&step=10`)
     const slider = await screen.findByRole(
       "slider",
@@ -252,19 +206,47 @@ describe("a 5,000-step run scrolls (plan H2)", () => {
       { timeout: 60_000 }
     )
     const entries = router.history.length
-    fireEvent.pointerDown(slider)
-    for (const v of ["100", "2000", "3000"])
+    const capture = vi.fn()
+    slider.setPointerCapture = capture
+    fireEvent.pointerDown(slider, { pointerId: 7 })
+    // The pointer is captured: a release outside the thumb still ends it.
+    expect(capture).toHaveBeenCalledWith(7)
+    expect(router.history.length).toBe(entries) // pressed, not moved: no entry
+    fireEvent.change(slider, { target: { value: "100" } })
+    await waitFor(() => expect(router.history.length).toBe(entries + 1))
+    for (const v of ["2000", "3000"])
       fireEvent.change(slider, { target: { value: v } })
     await waitFor(() =>
       expect(router.state.location.search).toMatchObject({ step: 3000 })
     )
-    expect(router.history.length).toBe(entries)
-    fireEvent.pointerUp(slider)
-    await waitFor(() => expect(router.history.length).toBe(entries + 1))
+    expect(router.history.length).toBe(entries + 1)
+    // The drag is spoken once the thumb rests, by the live region.
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-scrubber-live]")?.textContent
+      ).toMatch(/^step 3000 of 5,000 · /)
+    )
+    fireEvent.pointerUp(slider, { pointerId: 7 })
+    expect(router.history.length).toBe(entries + 1) // the release navigates nothing
     expect(router.state.location.search).toMatchObject({ step: 3000 })
     act(() => router.history.back())
     await waitFor(() =>
       expect(router.state.location.search).toMatchObject({ step: 10 })
+    )
+    // A key step is its own entry, announced by the slider's
+    // aria-valuetext only: the live region keeps the drag's words.
+    const spoken = document.querySelector("[data-scrubber-live]")?.textContent
+    fireEvent.change(slider, { target: { value: "11" } })
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ step: 11 })
+    )
+    expect(router.history.length).toBe(entries + 1)
+    await new Promise((r) => setTimeout(r, 200))
+    expect(document.querySelector("[data-scrubber-live]")?.textContent).toBe(
+      spoken
+    )
+    expect(slider.getAttribute("aria-valuetext")).toMatch(
+      /^step 11 of 5,000 · /
     )
     // n (kbd-help) puts the keyboard in the box; a number + enter names
     // that step.
@@ -309,9 +291,9 @@ describe("a 5,000-step run scrolls (plan H2)", () => {
         )
       ).toEqual([])
     }
-    expect(scrubber.querySelector("[aria-live]")?.textContent).toMatch(
-      /^step 0 of 5,000 · tool_calls · t\+0 ms model time$/
-    )
+    expect(
+      scrubber.querySelector("[data-scrubber-readout]")?.textContent
+    ).toMatch(/^step 0 of 5,000 · tool_calls · t\+0 ms model time$/)
   })
 
   it("a ?step= deep link into the long story mounts and rings that card", async () => {
@@ -325,7 +307,7 @@ describe("a 5,000-step run scrolls (plan H2)", () => {
         ).toBe(true),
       { timeout: 60_000 }
     )
-    expect(steps().length).toBeLessThan(200)
+    expect(steps().length).toBeLessThan(20)
   })
 
   it("the waterfall mounts a bounded window of its 10,001 rows", async () => {
@@ -340,14 +322,14 @@ describe("a 5,000-step run scrolls (plan H2)", () => {
     })
     const rows = () => tree.querySelectorAll('[role="treeitem"]')
     expect(rows().length).toBeGreaterThan(0)
-    expect(rows().length).toBeLessThan(200)
+    expect(rows().length).toBeLessThan(80)
     // The spacers keep the whole height: scrolled to the end, the last
     // step's call row is mounted.
     scrollTo(tree, 10_001 * 25)
     await waitFor(() =>
       expect(tree.querySelector('[data-span="c:4999:c4999"]')).toBeTruthy()
     )
-    expect(rows().length).toBeLessThan(200)
+    expect(rows().length).toBeLessThan(80)
     const last = tree.querySelector('[data-span="s4999"]')!
     expect(last.getAttribute("aria-level")).toBe("2")
     expect(last.getAttribute("aria-posinset")).toBe("5000")
@@ -362,12 +344,12 @@ describe("a 5,000-step run scrolls (plan H2)", () => {
     )
     const rows = () => table.querySelectorAll("[data-pos]")
     expect(rows().length).toBeGreaterThan(0)
-    expect(rows().length).toBeLessThan(200)
+    expect(rows().length).toBeLessThan(80)
     scrollTo(table, 10_000 * 29)
     await waitFor(() =>
       expect(table.querySelector('[data-pos="10000"]')).toBeTruthy()
     )
-    expect(rows().length).toBeLessThan(200)
+    expect(rows().length).toBeLessThan(80)
     const item = table
       .querySelector('[data-pos="10000"]')!
       .closest('[role="listitem"]')!
@@ -401,8 +383,17 @@ describe("the fold's live tail is a bounded ring (plan H2)", () => {
     time: "2026-10-01T09:00:00Z",
     event: { type: "step_start", run_id: "r1", index: pos },
   })
+  const delta = (pos: number) => ({
+    run_id: "r1",
+    session_id: "",
+    public_id: "",
+    kind: "delta",
+    pos,
+    time: "2026-10-01T09:00:00Z",
+    event: { type: "text_delta", run_id: "r1", text: "w" },
+  })
 
-  it("5,000 live appends keep the window within capacity; a frame of 100 folds in under 50 ms", async () => {
+  it("5,000 live appends keep the window within capacity; a frame of 100 folds in under 10 ms", async () => {
     const CAP = 1_000
     const fetchMock = vi.fn(
       async () =>
@@ -436,12 +427,18 @@ describe("the fold's live tail is a bounded ring (plan H2)", () => {
     })
 
     let pos = 1
-    for (; pos <= 4_900; pos++) es.emit("record", frame(pos), String(pos))
+    let dpos = 0 // deltas carry their own counter
+    // Each step streams three deltas: folded into its words, never
+    // kept in the window — base and total count positioned events.
+    for (; pos <= 4_900; pos++) {
+      es.emit("record", frame(pos), String(pos))
+      for (let d = 0; d < 3; d++) es.emit("record", delta(dpos++))
+    }
     // A frame of 100 appends on top of 4,900 steps: O(1) each.
     const t0 = performance.now()
     for (; pos <= 5_000; pos++) es.emit("record", frame(pos), String(pos))
     const took = performance.now() - t0
-    expect(took).toBeLessThan(50)
+    expect(took).toBeLessThan(10)
 
     await waitFor(() => expect(result.current.lastPos).toBe(5_000))
     const s = result.current
@@ -453,6 +450,8 @@ describe("the fold's live tail is a bounded ring (plan H2)", () => {
     expect((s.events[0] as { index: number }).index).toBe(s.base)
     expect((s.events.at(-1) as { index: number }).index).toBe(5_000)
     expect(s.folded.steps).toHaveLength(5_000)
+    expect(s.folded.steps.find((st) => st.index === 4_900)?.text).toBe("www")
+    expect(s.events.every((e) => e.type === "step_start")).toBe(true)
   })
 })
 

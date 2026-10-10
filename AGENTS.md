@@ -383,7 +383,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // commands/{id}, /api/runs/{id}/approvals (a parked run's own verbs),
 //     // /api/playground/fixtures (wefttest replay fixtures from a run's records),
 //     // /api/experiments (the saved groups + the runs they label), /api/runtimes/
-//     // {id}/breakpoints, /api/runs/{id}/steer; the panel drawer and /playground
+//     // {id}/breakpoints, /api/runs/{id}/steer, /api/runs/{id}/cancel (capability cancel: the link's cancel frame for the command
+//     // holding a runtime-started run; 202 cancelling, 409 app-owned/finished, 503 runtime gone; steer's auth); the panel drawer and /playground
 //     // (the Studio UI) render them, gated on capabilities — the option lab (plan F3.2)
 //     // one form on both: every override above, defaults greyed, an override in colour
 //     // with a reset, lib/experiment-body.ts's labOverrides (the server's rules by name,

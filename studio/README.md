@@ -1066,7 +1066,20 @@ with `GET /api/experiments/{id}` (the saved groups, PQ4). The
 debugger's rungs 3–4 act on runtime-started runs only (D7, PQ7):
 `PUT /api/runtimes/{id}/breakpoints` (capability `breakpoints`) and
 `POST /api/runs/{id}/steer` (capability `steer`) — `meta.debug_scope`
-says so. The panel's experiment drawer (the §3 form, the live result
+says so. `POST /api/runs/{id}/cancel` (capability `cancel`, plan H6) asks
+the runtime holding a runtime-started run to stop it — the link's cancel
+frame for the command whose acks named the run; the runtime cancels that
+command's own context, never kills, and the run ends failed with `context
+canceled` and its partial transcript, its command finished failed; the
+live stream carries the failed run row (a cancelled run has no run_finish).
+202 `{run_id, command_id, runtime_id, state: "cancelling"}`; 404 an unknown
+run; 409 the app's own run (cancel arrives with F4) or one already finished
+(a parked run included); 503 its runtime is disconnected. Auth is steer's:
+the dev token or setup A's loopback, a playground-scoped panel token inside
+its public id; a read panel token is 403. The Live page derives a running
+row from the event frames it already receives: step = the last
+step_finish's index, tokens = the sum of step_finish usage, TTFT = its
+ttft_ms; cost stays unknown while running. The panel's experiment drawer (the §3 form, the live result
 with the inline diff, the approvals, the 2-way compare) and the
 Studio `/playground` page (variants side by side with the metrics, the
 E9 variants × inputs matrix, the experiment history) both render them,
@@ -1688,7 +1701,7 @@ Capabilities are computed from the registered route groups
 `logs`, `diff`, `traces` and `pricing` (always present), `live` (the stream and its grant),
 `ingest`, `auth` (with a
 token), `search` (when the database implements `obsdb.Searcher` — both
-first-party backends do; `capabilities_off.search` says so otherwise), and `runtimes`, `breakpoints`, `steer` + `playground` under
+first-party backends do; `capabilities_off.search` says so otherwise), and `runtimes`, `breakpoints`, `steer`, `cancel` + `playground` under
 `Playground(true)`, plus anything a hosting wrapper declares with
 `studio.Capabilities(…)`.
 The panel group registers always on and names no capability;

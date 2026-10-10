@@ -10,6 +10,21 @@ module, ADR 0005).
 
 ### Added
 
+- `POST /api/runs/{id}/cancel` (plan H6, capability `cancel`, `Playground(true)`
+  only): asks the runtime that started a playground run to stop it, through
+  the runtime link's existing cancel frame; the run ends as the core ends a
+  cancelled run (`*RunError`, the partial transcript kept, its command
+  finished failed; a cancelled run has no run_finish — the live stream
+  carries the failed run row). 202 `{run_id, command_id, runtime_id, state:
+  "cancelling"}`; 404 an unknown run; 409 the app's own run (cancel arrives
+  with F4) or one already finished (a parked run included); 503 its runtime
+  is disconnected. Auth is steer's: the dev token or setup A's loopback, a
+  playground-scoped panel token inside its public id, a read panel token
+  403. `studio/runtime`: `RuntimeServer.CancelRun`, `CancelTarget`,
+  `ErrUnknownRun`, `ErrRunFinished`. The Live page (H6.2) derives a running
+  row from the event frames it already receives: step = the last
+  step_finish's index, tokens = the sum of step_finish usage, TTFT = its
+  ttft_ms; cost stays unknown while running (A5.1's rule).
 - Save as test (plan F6): `GET /api/runs/{id}/export?format=wefttest` now
   zips a generated `<agent>_replay_test.go` at the root beside the fixtures,
   which move to `testdata/TestReplay_<run>/`. Unzipped into a package

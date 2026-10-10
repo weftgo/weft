@@ -31,11 +31,18 @@ import type { ReplayVerb } from "./replay"
  * cards) and the raw JSON. */
 export type RunView = "trace" | "story" | "raw"
 
+/** A step card's panes a link can open (A6.2): the Request pane, or
+ * its Wire tab (the attempt's provider request and response). */
+export type StepPane = "request" | "wire"
+
 /** The run page's search, as runs/$id validates it. */
 export interface RunSearch {
   /** The step ordinal (see the header). */
   step?: number
   view?: Exclude<RunView, "trace">
+  /** The step card's pane open on the step named (A6.2): its Request
+   * pane, or that pane's Wire tab. Only beside a step. */
+  pane?: StepPane
   raw?: "events" | "doc"
   /** The selected span's key (trace view): s<step>, c:<step>:<call id>
    * (c:resume:<call id> for a resumed call), t:<span id>. */
@@ -123,6 +130,8 @@ export interface RunLinkOptions {
    * axis rows). */
   span?: string
   view?: RunView
+  /** The step's pane to open (needs `step`). */
+  pane?: StepPane
   axis?: "events" | "time"
   /** The replay playhead (a stream position). */
   t?: number
@@ -321,6 +330,7 @@ export function runLink(id: string, opts: RunLinkOptions = {}): RunLink {
   // Key order is the URL's order: step first, then the view.
   if (step !== undefined) search.step = step
   if (opts.view && opts.view !== "trace") search.view = opts.view
+  if (step !== undefined && (opts.pane === "request" || opts.pane === "wire")) search.pane = opts.pane
   if (opts.call && (opts.resumed || step !== undefined))
     search.sel = `c:${opts.resumed ? "resume" : String(step)}:${opts.call}`
   else if (opts.span) search.sel = `t:${opts.span}`

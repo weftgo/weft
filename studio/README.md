@@ -374,7 +374,11 @@ else the turn list's. Every absent block is a badge from `badges.ts`
 with its reason; a run-wide hole is that badge and nothing else — a
 read-scoped token sees `hidden` and never asks for the record or the
 manifest, so no prompt byte reaches the page. The provider wire pair
-(plan A6) is recorded by no route yet, so the tab draws nothing for it.
+(plan A6) is never drawn here: a step whose request row carries `raw`
+gets one **wire ↗** link — `lib/links.ts`'s `runLink(id, {step, view:
+"story", pane: "wire"})` off the endpoint, in a new tab like `⤢` — to the
+run page's Wire tab for that step; a step whose rows have `raw: null`
+gets no link.
 
 Replay from here (plan F1). The Story view's step cards, tool calls,
 steers, the subagent call's child row and the child's own steps carry
@@ -1258,7 +1262,22 @@ weft.json), **overridden by experiment** (the invoke_agent span carries
 run ends) and **catalog changed at this step**; a read-scoped token
 sees the `hidden` badge and nothing else
 (`examples/studio-local`'s PrepareStep trim is the live demo; a derived
-prompt or catalog record is badged and never diffed over). A long run
+prompt or catalog record is badged and never diffed over). The open
+pane has two tabs, **request** and **Wire** (plan A6.2,
+`components/studio/step-wire.tsx`): per attempt, the provider request
+(method and URL, headers, the body — pretty-printed when its media type
+is JSON, "binary, N bytes" with a copy when base64) and response
+(status, media type, headers, body or raw SSE text), from the requests
+row's `raw`; the withheld credentials are listed ("2 headers withheld:
+…", "1 query parameter withheld: …"), the 256 KiB cap's cut is a
+`truncated` badge naming the bytes, a body not read to its end
+(`complete: false`) a `truncated` badge "incomplete: the body was not
+read to the end"; a row without `raw` shows its `raw_badge`,
+`raw_reason` and `raw_fix` (`not_recorded`, cause `raw_off`), a
+read-scoped token the `hidden` badge; each pair downloads as .json. The
+tab is remembered per step and URL-addressable: `?step=N&pane=wire`
+(`pane=request` for the request tab) opens that step's pane on it, in
+the story view. A long run
 scrolls (plan H2): past 60 steps the story is virtualised, past 200 rows
 the waterfall and the raw table are, mounting only the rows in view plus
 an overscan (and the row the URL names); a **jump to step** scrubber

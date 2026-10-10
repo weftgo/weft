@@ -57,6 +57,7 @@ import { Editable, EditsMark, InsertHere, PromptEditor } from "@/components/stud
 import { userMessagesOf } from "@/lib/edits"
 import type { UserMessage } from "@/lib/edits"
 import type { RunRequests } from "@/components/studio/step-request"
+import type { StepPane } from "@/lib/links"
 import { childOfStep, SubagentBlock } from "@/components/studio/subagent-block"
 import type { ChildRow } from "@/components/studio/subagent-block"
 import { TruncationBadge } from "@/components/studio/truncation-badge"
@@ -72,7 +73,8 @@ import {
 export const STORY_VIRTUAL_AT = 60
 
 /** The story's open/closed memory, by key (call:<startPos>,
- * req:<step>, reason:<step>): a virtualised card unmounts when it
+ * req:<step>, wire:<step> — the Request pane on its Wire tab —,
+ * reason:<step>): a virtualised card unmounts when it
  * scrolls away and reads its state back from here when it returns. */
 const StoryMemory = createContext<Map<string, boolean> | null>(null)
 
@@ -544,9 +546,12 @@ function StepCard({
   replayAt,
   prompt,
   scrollOnHighlight = true,
+  pane,
 }: {
   step: FoldedStep
   runId: string
+  /** The ?pane= a link opened on this (highlighted) step (A6.2). */
+  pane?: StepPane
   /** The run document's holes: those that hold for every step badge
    * each card (stepHoles). */
   runHoles?: HoleMark[]
@@ -589,7 +594,15 @@ function StepCard({
   const failedHere = !step.finish && runStatus === "failed"
   // The Request pane open beside the story (plan H3) — where the page
   // is wide enough and a ResizeObserver measures the split.
-  const [reqOpen, setReqOpen] = useRemembered(`req:${step.index}`, false)
+  const [reqOpen, setReqOpen] = useRemembered(`req:${step.index}`, pane !== undefined)
+  // The pane's tab (A6.2): the request or the wire pair, remembered
+  // per step; ?pane= sets both when the link names this step.
+  const [wireTab, setWireTab] = useRemembered(`wire:${step.index}`, pane === "wire")
+  useEffect(() => {
+    if (!pane) return
+    setReqOpen(true)
+    setWireTab(pane === "wire")
+  }, [pane, setReqOpen, setWireTab])
   // A toggle that moves the section (into or out of the split) hands
   // the keyboard to the toggle where it lands — once: a later remount
   // (the viewport crossing lg) leaves focus where it is.
@@ -600,6 +613,9 @@ function StepCard({
     <RequestSection
       req={requests}
       step={step.index}
+      runId={runId}
+      tab={wireTab ? "wire" : "request"}
+      onTab={(t) => setWireTab(t === "wire")}
       open={reqOpen}
       onOpenChange={(o) => {
         setReqOpen(o)
@@ -782,6 +798,7 @@ export function StepList({
   doc,
   upTo,
   highlight,
+  pane,
   onJump,
   requests,
   transcript,
@@ -801,6 +818,9 @@ export function StepList({
   upTo?: number
   /** The ?step= selection (A3): the named step is ringed and centred. */
   highlight?: number
+  /** The ?pane= (A6.2): the highlighted step's Request pane opened,
+   * on its Wire tab for "wire". */
+  pane?: StepPane
   /** Send the replay playhead to a position (a step or call's start). */
   onJump?: (t: number) => void
   /** The run's request record (ADR 0028 §10): each step shows what it
@@ -903,6 +923,7 @@ export function StepList({
         runStatus={runStatus}
         childLinks={childLinks}
         highlighted={step.index === highlight}
+        pane={step.index === highlight ? pane : undefined}
         onJump={onJump}
         requests={requests}
         compactions={compactions}

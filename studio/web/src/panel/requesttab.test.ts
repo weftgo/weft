@@ -18,6 +18,7 @@ import { CAUSES } from "../lib/honesty"
 import { badgeLabel } from "./badges"
 import { MANIFEST_RETRY_MS } from "./element"
 import { COMPOSED_MAX, composedCache } from "./request"
+import { href, runLink } from "../lib/links"
 import {
   $,
 
@@ -604,5 +605,41 @@ describe("the manifest the tab reads (review 2, 10, 11)", () => {
     expect(marks(el)).toEqual(["changed by PrepareStep"])
     expect(composedCache.size).toBeLessThanOrEqual(COMPOSED_MAX)
     expect(composedCache.has("k0")).toBe(false)
+  })
+})
+
+describe("A6.2: the wire link", () => {
+  const RAW = {
+    step: 1,
+    attempt: 1,
+    request: { method: "POST", url: "https://api.example/v1/messages", headers: {}, media_type: "application/json", body: "{}", bytes: 2 },
+    response: { status: 200, headers: {}, media_type: "text/event-stream", body: "data: ok\n\n", bytes: 10 },
+    redacted_headers: ["x-api-key"],
+  }
+  const wire = (el: WeftDevtools) => tp(el).querySelectorAll<HTMLAnchorElement>("[data-weft-wire-link]")
+
+  it("a step whose row carries raw gets one anchor: links.ts's deep link to the step's Wire tab, opened in Studio", async () => {
+    const rows = goldenRows()
+    rows[1].raw = RAW
+    fakeStudio(await routes({ requests: { requests: rows } }), META_R)
+    const el = await openTab()
+    await pickStep(el, 1)
+    const links = wire(el)
+    expect(links.length).toBe(1)
+    expect(links[0].getAttribute("href")).toBe(href(BASE["data-endpoint"], runLink(RUN, { step: 1, view: "story", pane: "wire" })))
+    expect(links[0].getAttribute("href")).toBe(`http://studio.test/studio/runs/${RUN}?step=1&view=story&pane=wire`)
+    expect(links[0].target).toBe("_blank")
+    expect(links[0].textContent).toBe("wire ↗")
+    // The panel never draws a body: the link is all of it.
+    expect(tp(el).textContent).not.toContain("data: ok")
+  })
+
+  it("a step whose rows have raw null (the golden's not_recorded) draws no link", async () => {
+    fakeStudio(await routes(), META_R)
+    const el = await openTab()
+    for (const n of [0, 1, 2]) {
+      await pickStep(el, n)
+      expect(wire(el).length).toBe(0)
+    }
   })
 })

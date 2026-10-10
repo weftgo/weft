@@ -13,7 +13,9 @@
 // the schema in D4's tree), params with "adapter default", tool
 // choice, thinking, the attempts, a subagent call's child request
 // (A10) and the step's compaction marker (A9). The provider wire pair
-// (plan A6) is recorded by no route yet: nothing is drawn for it.
+// (plan A6) is not drawn here: a step whose row carries raw gets one
+// "wire ↗" link to the Studio step card's Wire tab (G1's runLink,
+// pane wire) — the panel never draws a body.
 // Every absent block is a badge with its reason; a run-wide hole
 // (hidden for a read-scoped token, not_recorded before A1) is that
 // badge and nothing else — a read token never asked for a byte.
@@ -42,6 +44,7 @@ import {
 } from "../lib/request-pane"
 import type { MessagesSent, PromptBaseline } from "../lib/request-pane"
 import {
+  hasWire,
   paramFields,
   REQUEST_DIFF_CUT_LABEL,
   REQUEST_MESSAGES_GAP_REASON,
@@ -56,6 +59,7 @@ import { badge, requestCapped, requestHole } from "./badges"
 import type { BadgeNote } from "./badges"
 import { MAX_REQUEST_PAGES, REQUEST_PAGE } from "./client"
 import { el, on } from "./render"
+import { href, runLink } from "../lib/links"
 import type { PanelRequests, TurnView } from "./state"
 import { treeView } from "./tree"
 import type { TreeCtx, TreeState } from "./tree"
@@ -88,6 +92,8 @@ export interface RequestTabDeps {
   /** Why the server serves no request record, in its words
    * (/api/meta's capabilities_off.requests), when it says. */
   notServed?: string
+  /** The Studio the wire link opens (the element's endpoint). */
+  base: string
 }
 
 /** A hole inside the pane: D5's badge (its reason and fix the title). */
@@ -439,6 +445,17 @@ export function renderRequestTab(d: RequestTabDeps): HTMLElement {
   if (facts.prompt) head.appendChild(chip("prompt", facts.prompt === "either" ? CHIP_PROMPT_CHANGED : CHIP_PREPARE_STEP))
   if (facts.experiment) head.appendChild(chip("experiment", CHIP_EXPERIMENT))
   if (mine?.catalogChanged) head.appendChild(chip("catalog", CHIP_CATALOG))
+  // The wire pair lives in Studio (A6.2): one link, when a row has it.
+  if (rows.some(hasWire))
+    head.appendChild(
+      el("a", "weft-btn", "wire ↗", {
+        href: href(d.base, runLink(t.id, { step, view: "story", pane: "wire" })),
+        target: "_blank",
+        rel: "noopener",
+        title: "the step's wire request and response, in Studio",
+        "data-weft-wire-link": "",
+      })
+    )
   pane.appendChild(head)
   // The attempts: each one's request, picked here (a retry may differ).
   if (rows.length > 1)

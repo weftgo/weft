@@ -761,3 +761,62 @@ describe("the hand-off to Studio's playground is one fragment (final web review)
       expect(panel).toContain(`run=${RUN}`)
     })
 })
+
+// A6.2: the wire pair. The panel draws no body — its Request tab links
+// to the run page's Wire tab exactly where that tab draws an exchange,
+// with the deep link that opens it; where the row carries none, no link,
+// and the run page says the row's not_recorded with the raw_off words.
+describe("the wire pair: the panel links where the run page draws it (A6.2)", () => {
+  const row0 = () => structuredClone(golden<{ requests: Record<string, unknown>[] }>("requests-ok").requests[0]) as Record<string, any>
+  const RAW = {
+    step: 0,
+    attempt: 1,
+    request: { method: "POST", url: "https://api.example/v1/messages", headers: {}, media_type: "application/json", body: "{}", bytes: 2 },
+    response: { status: 200, headers: {}, media_type: "text/event-stream", body: "data: ok\n\n", bytes: 10 },
+    redacted_headers: ["x-api-key"],
+  }
+  async function wirePair(r: Record<string, any>): Promise<{ link: string | null; exchange: boolean; hole: Element | null }> {
+    const fx: Fixture = { doc: {}, events: events(), rows: [r] }
+    serve(fx, false)
+    const el = await mount(ATTRS)
+    await vi.waitFor(() => expect($(el, "#weft-tab-request")).toBeTruthy())
+    click($(el, "#weft-tab-request"))
+    await vi.waitFor(() => expect($(el, "#weft-tp-request [data-weft-rq-pane]")).toBeTruthy(), { timeout: 5_000 })
+    await settle()
+    const link = $(el, "#weft-tp-request [data-weft-wire-link]")?.getAttribute("href") ?? null
+    el.remove()
+    await settle()
+    cleanup()
+    document.body.innerHTML = ""
+    stubBrowser()
+    vi.stubGlobal("scrollTo", vi.fn())
+    StudioEventSource.reset()
+    vi.stubGlobal("EventSource", StudioEventSource)
+    setStudioToken("")
+    serve(fx, true)
+    renderApp(`/runs/${RUN}?step=0&view=story&pane=wire`)
+    const wire = () => document.querySelector<HTMLElement>('[data-step="0"] [data-wire]')
+    await waitFor(() => expect(wire()?.querySelector("[data-wire-attempt]")).toBeTruthy())
+    return { link, exchange: Boolean(wire()!.querySelector("[data-wire-side]")), hole: wire()!.querySelector("[data-hole]") }
+  }
+
+  it("a row with raw: the panel's link is the run page's own pane=wire URL, and that page draws the exchange", async () => {
+    const r = row0()
+    r.raw = RAW
+    delete r.raw_badge
+    delete r.raw_reason
+    delete r.raw_fix
+    const got = await wirePair(r)
+    expect(got.link).toBe(`${ATTRS["data-endpoint"]}runs/${RUN}?step=0&view=story&pane=wire`)
+    expect(got.exchange).toBe(true)
+    expect(got.hole).toBeNull()
+  })
+
+  it("a row with raw null: no link in the panel; the run page's Wire tab says not_recorded in the raw_off words", async () => {
+    const got = await wirePair(row0())
+    expect(got.link).toBeNull()
+    expect(got.exchange).toBe(false)
+    expect(got.hole?.getAttribute("data-hole")).toBe("not_recorded")
+    expect(got.hole?.getAttribute("title")).toBe(`${CAUSES.not_recorded!.raw_off.reason} — fix: ${CAUSES.not_recorded!.raw_off.fix}`)
+  })
+})

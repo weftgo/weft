@@ -147,6 +147,7 @@ export const Route = createFileRoute("/runs/$id")({
         ? search.view
         : undefined,
     raw: search.raw === "doc" ? "doc" : undefined,
+    pane: search.pane === "request" || search.pane === "wire" ? search.pane : undefined,
     sel: typeof search.sel === "string" && search.sel ? search.sel : undefined,
     d: search.d === "events" || search.d === "json" ? search.d : undefined,
     axis: search.axis === "time" ? "time" : undefined,
@@ -169,7 +170,8 @@ function RunPage() {
   const { id } = Route.useParams()
   const search = Route.useSearch()
   const navigate = useNavigate({ from: "/runs/$id" })
-  const view: View = search.view ?? "trace"
+  // A step's pane (A6.2) lives on its story card: ?pane= opens there.
+  const view: View = search.view ?? (search.pane && search.step !== undefined ? "story" : "trace")
   const [layout, setLayout] = useState<Layout>(readLayout)
   const { has, caps, loading: capsLoading } = useCapabilities()
   const liveCapable = has("live")
@@ -576,10 +578,10 @@ function RunPage() {
       if (!isPlainShortcut(e) || !run.data) return
       const setView = (v: View) =>
         void navigate({
-          search: (prev) => ({
-            ...prev,
-            view: prev.view === v || v === "trace" ? undefined : v,
-          }),
+          search: (prev) => {
+            const next = prev.view === v || v === "trace" ? undefined : v
+            return { ...prev, view: next, pane: next === "story" ? prev.pane : undefined }
+          },
         })
       if (e.key === "r") setView("raw")
       else if (e.key === "s") setView("story")
@@ -723,6 +725,8 @@ function RunPage() {
             search: (prev) => ({
               ...prev,
               view: v === "raw" || v === "story" ? v : undefined,
+              // A step pane is the story's (it would hold the view there).
+              pane: v === "story" ? prev.pane : undefined,
             }),
           })
         }
@@ -864,6 +868,7 @@ function RunPage() {
             doc={doc}
             upTo={axis === "events" ? (ph ?? undefined) : undefined}
             highlight={search.step}
+            pane={search.step === undefined ? undefined : search.pane}
             onJump={evicted ? undefined : jump}
             requests={requests}
             transcript={transcript.data}

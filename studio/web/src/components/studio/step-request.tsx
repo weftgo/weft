@@ -19,7 +19,7 @@
 // Every hole is a badge with its reason and fix: a run older than the
 // record, a content-off destination, a token that may not read
 // prompts — never an empty section. The provider wire pair (plan A6)
-// is not recorded by any route yet: nothing is drawn for it.
+// is the pane's second tab, Wire (step-wire.tsx): the same rows' raw.
 import { useQuery } from "@tanstack/react-query"
 import { ChevronRight } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -67,6 +67,8 @@ import type { StepRequests } from "@/lib/requests"
 import { bytes } from "@/lib/summarize"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { JsonTree } from "@/components/studio/json-tree"
+import { WireView } from "@/components/studio/step-wire"
+import type { StepPane } from "@/lib/links"
 import { useCapabilities } from "@/hooks/use-capabilities"
 
 /** What the pane reads beside the request record — all of it what
@@ -723,9 +725,19 @@ export function RequestSection({
   open: openProp,
   onOpenChange,
   takeFocus,
+  tab: tabProp,
+  onTab,
+  runId,
 }: {
   req: RunRequests
   step: number
+  /** The open pane's tab (A6.2): the request, or the wire pair.
+   * Controlled by the step card (its memory, ?pane=); the section holds
+   * its own when absent. */
+  tab?: StepPane
+  onTab?: (tab: StepPane) => void
+  /** The run the rows are of (the wire download's name). */
+  runId?: string
   /** Controlled open state (the step card's split, plan H3); the
    * section holds its own when absent. */
   open?: boolean
@@ -748,6 +760,12 @@ export function RequestSection({
     // On mount only: the card remounts the section where it moved it.
     if (takeFocusRef.current?.()) toggleRef.current?.focus()
   }, [])
+  const [ownTab, setOwnTab] = useState<StepPane>("request")
+  const tab = tabProp ?? ownTab
+  const setTab = (t: StepPane) => {
+    if (onTab) onTab(t)
+    else setOwnTab(t)
+  }
   const [pick, setPick] = useState<number | null>(null)
   const env = req.doc?.badge ? req.doc : undefined
   const mine = req.steps.get(step)
@@ -761,6 +779,9 @@ export function RequestSection({
     // The whole run's hole (not_recorded, hidden): the badge, its
     // reason and fix — on every step, never an empty section.
     head = <EnvelopeHole env={env} />
+    // ?pane=wire on a hidden (or older) record: the Wire tab says the
+    // same hole, never an empty tab.
+    if (tab === "wire") body = <WireView rows={[]} runId={runId ?? req.ctx?.runId ?? "run"} env={env} />
   } else if (row) {
     const model = [row.body.model.provider, row.body.model.name]
       .filter(Boolean)
@@ -820,8 +841,39 @@ export function RequestSection({
         ) : null}
       </>
     )
-    body = (
+    const tabId = (t: StepPane) => `step-${step}-pane-${t}`
+    const tabs = (
+      <div className="flex w-fit rounded-md border p-0.5" role="tablist" aria-label={`step ${step} request`}>
+        {(["request", "wire"] as const).map((t) => (
+          <button
+            key={t}
+            id={tabId(t)}
+            type="button"
+            role="tab"
+            aria-selected={tab === t}
+            aria-controls={`${tabId(t)}-panel`}
+            data-pane-tab={t}
+            className={`rounded-sm px-2.5 py-0.5 font-mono text-[11px] ${
+              tab === t ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
+            }`}
+            onClick={() => setTab(t)}
+          >
+            {t}
+          </button>
+        ))}
+      </div>
+    )
+    body = tab === "wire" ? (
       <div className="space-y-2 pt-2">
+        {tabs}
+        <div role="tabpanel" id={`${tabId("wire")}-panel`} aria-labelledby={tabId("wire")}>
+          <WireView rows={rows} runId={runId ?? req.ctx?.runId ?? "run"} />
+        </div>
+      </div>
+    ) : (
+      <div className="space-y-2 pt-2">
+        {tabs}
+        <div role="tabpanel" id={`${tabId("request")}-panel`} aria-labelledby={tabId("request")} className="space-y-2">
         {rows.length > 1 ? (
           <div className="flex gap-1">
             {rows.map((r) => (
@@ -852,6 +904,7 @@ export function RequestSection({
           ctx={req.ctx}
           running={req.running}
         />
+        </div>
       </div>
     )
   } else if (req.loading) {

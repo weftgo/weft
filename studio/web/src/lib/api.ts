@@ -1029,6 +1029,47 @@ export interface RequestRow {
   body: RequestBody
   prompt?: PromptDoc | HoleRef
   tools?: CatalogDoc | HoleRef
+  /** The attempt's provider exchange on the wire (ADR 0028 §12, plan
+   * A6): null with raw_badge not_recorded (cause raw_off) and its
+   * reason and fix when the run holds none for the attempt. Absent
+   * from a Studio older than A6.1. */
+  raw?: RawRecord | null
+  raw_badge?: string
+  raw_reason?: string
+  raw_fix?: string
+}
+
+/** One side of a wire exchange (obsdb.RawSide): body is the bytes as
+ * text, or base64 when encoding is "base64" (not UTF-8); bytes the
+ * whole body's size, truncated_bytes what the 256 KiB cap removed.
+ * complete is the response's: false when the body was not read to the
+ * end. */
+export interface RawSide {
+  method?: string
+  url?: string
+  status?: number
+  headers: Record<string, string[]> | null
+  media_type?: string
+  body: string
+  encoding?: string
+  bytes: number
+  truncated_bytes?: number
+  complete?: boolean
+}
+
+/** A requests row's raw (obsdb.RawRecord): a nil response is an
+ * exchange that got none (a transport error). */
+export interface RawRecord {
+  index?: number
+  step: number
+  attempt: number
+  time?: string
+  request: RawSide
+  response: RawSide | null
+  redacted_headers: string[] | null
+  redacted_query?: string[]
+  content?: string
+  truncated_bytes?: number
 }
 
 /** GET /api/runs/{id}/requests: one page. next_from is the next

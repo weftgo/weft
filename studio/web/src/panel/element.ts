@@ -3883,6 +3883,7 @@ export class WeftDevtools extends HTMLElement {
       running: status === "running",
       manifest: () => this.readManifest(redraw, t.doc?.manifest_hash),
       notServed: s.meta?.capabilities_off?.requests,
+      base: this.base || this.cfg.endpoint,
       keys: this.openKeys,
       tree: (k) => {
         let st = this.rqTrees.get(k)

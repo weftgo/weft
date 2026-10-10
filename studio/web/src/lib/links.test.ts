@@ -33,6 +33,15 @@ describe("runLink", () => {
     expect(href(BASE, runLink("r_1"))).toBe(`${BASE}runs/r_1`)
   })
 
+  it("carries a step's pane (A6.2) after the view, and never without a step", () => {
+    expect(path(runLink("r_1", { step: 3, view: "story", pane: "wire" }))).toBe(
+      "runs/r_1?step=3&view=story&pane=wire"
+    )
+    expect(path(runLink("r_1", { step: 0, pane: "request" }))).toBe("runs/r_1?step=0&pane=request")
+    expect(path(runLink("r_1", { pane: "wire" }))).toBe("runs/r_1")
+    expect(path(runLink("r_1", { step: 1, pane: "bogus" as never }))).toBe("runs/r_1?step=1")
+  })
+
   it("carries the step as the ordinal, then the view", () => {
     expect(path(runLink("r_1", { step: 2, view: "story" }))).toBe(
       "runs/r_1?step=2&view=story"

@@ -2,7 +2,7 @@
 // GET runs/{id}/requests grouped by the step they called the model
 // for, with the "changed at this step" marks — the one reading both
 // clients make of the same route (the run page and the panel, parity).
-import type { RequestRow } from "./api"
+import type { RawRecord, RequestRow } from "./api"
 
 export interface StepRequests {
   step: number
@@ -40,6 +40,12 @@ export function byStep(rows: RequestRow[]): Map<number, StepRequests> {
     prev = row
   }
   return out
+}
+
+/** hasWire: the row carries its attempt's provider exchange (plan A6)
+ * — the Studio Wire tab draws it, the panel links to that tab. */
+export function hasWire(row: Pick<RequestRow, "raw">): row is { raw: RawRecord } {
+  return row.raw != null
 }
 
 /** shortHash is a hash as a chip shows it. */

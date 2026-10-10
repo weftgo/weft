@@ -10,6 +10,15 @@ module, ADR 0005).
 
 ### Added
 
+- Studio (plan A6.2): the step card's **Wire** tab — beside the Request
+  pane's request tab, each attempt's provider request and response from
+  the requests row's `raw` (method, URL, headers, the body pretty-printed
+  when JSON, base64 said as binary), the withheld headers and query
+  parameters listed, the 256 KiB cap's cut and a body not read to its end
+  badged `truncated`, a row without `raw` its `not_recorded` (`raw_off`)
+  words, a read token `hidden`; addressable as `?step=N&pane=wire`
+  (`runLink`'s new `pane`). The panel's Request tab links a step whose row
+  carries `raw` to it ("wire ↗").
 - core: `WithMetadata(ctx, kv)` — context-carried run metadata: every run
   started under ctx carries the pairs, merged under its own `weft.Metadata`
   (the option wins; same limits; subagents inherit).

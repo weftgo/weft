@@ -1670,7 +1670,10 @@ export class PanelModel {
           this.asOf.set(at, doc.compacted_at)
           this.emit()
         },
-        () => this.asOf.set(at, Date.now())
+        // Only this read's pending marker: a scope change (cleared) or a newer answer stays.
+        () => {
+          if (this.asOf.get(at) === null) this.asOf.set(at, Date.now())
+        }
       )
     }
     if (!d || d.thread === "fork" || !(this.state.meta?.capabilities.includes("preview") ?? false)) {

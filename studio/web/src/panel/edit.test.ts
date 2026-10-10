@@ -473,4 +473,22 @@ describe("review fixes (session 8)", () => {
     await settle()
     expect(model.compactedAt(RUN, 2)).toBeNull()
   })
+
+  it("8b: a failure that lands after a scope change does not mark the new scope's key failed", async () => {
+    let fail = () => {}
+    const r = routes()
+    r[`runs/${RUN}/transcript?step=2`] = () => new Promise((ok) => (fail = () => ok(apiError(500, "internal", "boom"))))
+    fakeStudio(r, META_PV)
+    const el = await mount()
+    await edit(el, '.weft-call[data-key="c1"] [data-weft-editable="tool_result"]', "tool_result:0:c1:0", "x")
+    await edit(el, C2, "tool_result:1:c2:0", "y")
+    await pause(400) // the read stays in flight
+    const asOf = (el as unknown as { model: { asOf: Map<string, unknown> } }).model.asOf
+    expect(asOf.get(`${RUN}#2`)).toBeNull()
+    el.scope("pub_other")
+    await pause(50)
+    fail()
+    await settle()
+    expect(asOf.has(`${RUN}#2`)).toBe(false)
+  })
 })

@@ -11,6 +11,7 @@ import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { FakeStudio, golden } from "@/test/fake-studio"
 import { playgroundStateLink } from "@/lib/links"
+import { resetNotices } from "@/lib/notify"
 import { choose, valueOf } from "@/test/select"
 import { READ_ONLY_NOTE } from "@/routes/playground"
 
@@ -303,6 +304,20 @@ describe("the playground's hand-off edits and run controls (final web review)", 
     expect(document.querySelector("[data-matrix-read-only]")).toBeTruthy()
   })
 
+  it("the matrix says it runs from step 0 when the page holds a later step or edits", async () => {
+    const line = () => document.querySelector("[data-matrix-from-step-0]")
+    renderApp("/playground?run=r_ok")
+    await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
+    await screen.findByRole("button", { name: "Run matrix" })
+    expect(line()).toBeNull()
+    renderApp("/playground#run=r_ok&step=2")
+    await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
+    await waitFor(() => expect(line()?.textContent).toBe("the matrix runs each input from step 0; the step and transcript edits stay with Run"))
+    renderApp(`/playground#run=r_ok&edits=${encodeURIComponent('[{"step":1,"callID":"c2","toolResult":"none"}]')}`)
+    await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
+    await waitFor(() => expect(line()).toBeTruthy())
+  })
+
   it("a dev token keeps Run and Run matrix", async () => {
     renderApp("/playground?run=r_ok")
     await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
@@ -329,6 +344,8 @@ describe("the playground's hand-off edits and run controls (final web review)", 
     })
     const pending = [{ type: "tool_call", id: "call_9", name: "refund", args: {} }]
     beforeEach(() => {
+      // One parked notice per test: the previous card's toast (same run id) is forgotten.
+      resetNotices()
       fake
         .on("GET meta", { ...golden<Record<string, unknown>>("meta"), capabilities: ["playground", "runtimes", "steer"] })
         .on("POST playground/runs", command("cmd_1", "queued"))
@@ -371,6 +388,11 @@ describe("the playground's hand-off edits and run controls (final web review)", 
         expect(within(card).queryByRole("button", { name })).toBeNull()
       expect(within(card).queryByLabelText("steer message")).toBeNull()
       expect(within(card).getByRole("link", { name: "pg_1" })).toBeTruthy()
+      // The parked notice follows the same rule: "open" only, no approve
+      // anywhere on the page.
+      await screen.findByText("run pg_1 parked at refund")
+      await new Promise((r) => setTimeout(r, 300)) // noticeParked's own reads settle
+      expect(screen.queryByRole("button", { name: "approve" })).toBeNull()
     })
 
     it("a dev token: the fixture, decision and steer verbs are drawn", async () => {
@@ -379,6 +401,9 @@ describe("the playground's hand-off edits and run controls (final web review)", 
         expect(within(card).getByRole("button", { name })).toBeTruthy()
       expect(within(card).getByLabelText("steer message")).toBeTruthy()
       expect(card.querySelector("[data-pending-read-only]")).toBeNull()
+      // The parked notice offers the card's own approve.
+      await screen.findByText("run pg_1 parked at refund")
+      expect(await screen.findByRole("button", { name: "approve" })).toBeTruthy()
     })
   })
 

@@ -930,6 +930,8 @@ function Playground({ caps }: { caps: string[] }) {
             cells={cells}
             setCells={setCells}
             sourceRunID={sourceRunID}
+            pageFromStep={fromStep}
+            pageEdits={editDrafts.length}
           />
           <History selected={search.experiment} />
               </section>
@@ -1100,11 +1102,12 @@ function ResultCard({
     settled(experiment.state) &&
     (experiment.row ? experiment.row.status !== "running" : !experiment.runID)
   // The card issued this run: a park in its first read is news, and the
-  // parked notice's "approve" is this card's own verb (plan H5).
+  // parked notice's "approve" is this card's own verb (plan H5) — for
+  // a bearer that may act; under a read token the notice offers "open".
   const stream = useRunEvents(experiment.runID, over ? "ended" : "running", {
     live,
     tracked: true,
-    approve: (runID, callID) => decide(runID, callID, "approve", ""),
+    approve: mayRun ? (runID, callID) => decide(runID, callID, "approve", "") : undefined,
   })
   const folded = stream.folded
 
@@ -1503,6 +1506,8 @@ function Matrix({
   cells,
   setCells,
   sourceRunID,
+  pageFromStep = 0,
+  pageEdits = 0,
 }: {
   variants: Variant[]
   runMatrix: (
@@ -1522,6 +1527,10 @@ function Matrix({
   cells: Record<string, Experiment>
   setCells: React.Dispatch<React.SetStateAction<Record<string, Experiment>>>
   sourceRunID: string
+  /** The page's from_step and transcript edits: the matrix runs every
+   * cell from step 0 without them, and says so when the page holds any. */
+  pageFromStep?: number
+  pageEdits?: number
 }) {
   const [inputs, setInputs] = useState<{ key: string; text: string }[]>([
     { key: "1", text: "" },
@@ -1624,6 +1633,11 @@ function Matrix({
       <div className="border-b px-3 py-2 text-xs text-muted-foreground">
         Experiment matrix · {variants.length} variants × {inputs.length} inputs
         {sourceRunID ? " · over the source run" : ""}
+        {(pageFromStep > 0 || pageEdits > 0) && (
+          <div className="text-faint" data-matrix-from-step-0>
+            the matrix runs each input from step 0; the step and transcript edits stay with Run
+          </div>
+        )}
       </div>
       <div className="space-y-2 p-3 text-xs">
         <div className="flex flex-wrap items-center gap-2">

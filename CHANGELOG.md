@@ -524,6 +524,11 @@ module, ADR 0005).
   the server's sentence ("tool_choice names X, which park_on parks:
   every forced call would park") on both surfaces, as Studio and the
   runtime refuse it.
+- **A stale `transcript?step` failure no longer marks a newer read
+  failed**: a failure replaces only its own pending marker, so one that
+  lands after a scope change (or after a newer answer for the same run
+  and step) neither starts a 10 s back-off nor overwrites the view.
+  Panel: +8 B gzip (ledger row "web closer (session 8)").
 
 ### Fixed — Studio (phase 4 review)
 
@@ -568,6 +573,16 @@ module, ADR 0005).
   `canReplay` rule on both pages.
 - **A hand-built `edits=` / `lab=` leaves the playground's address bar**
   with the page's first write-back (the page holds them).
+- **…nor the parked notice's "approve"**: a result card hands its own
+  approve to the parked toast only for a bearer that may act; under a
+  read-scoped token the toast offers "open" alone (the click was a 403).
+- **The matrix says it runs from step 0**: when the page holds a later
+  step or transcript edits, a line under the Matrix header says each
+  input runs from step 0 and the step and edits stay with Run.
+- **A hand-off's repeated edits are one edit per target**: `edits=`
+  keeps the last edit on a target (as the editor's `putEdit` does), so
+  the list draws no duplicate rows and the command sends no duplicate
+  `transcript_edits`.
 
 ### Changed — breaking
 

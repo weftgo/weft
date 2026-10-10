@@ -176,6 +176,19 @@ describe("the other builders", () => {
     expect(editsFromHandoff(JSON.stringify(many))).toHaveLength(HANDOFF_EDITS_MAX)
   })
 
+  it("editsFromHandoff keeps one edit per target, the last (as putEdit does)", () => {
+    const list = [
+      { step: 1, callID: "c2", toolResult: "first" },
+      { step: 0, content: "reply" },
+      { step: 1, callID: "c2", toolResult: "last" },
+      { kind: "tool_result", step: 1, callID: "c2", toolResult: "kind spelled out" },
+    ]
+    expect(editsFromHandoff(JSON.stringify(list))).toEqual([
+      { kind: "tool_result", step: 1, callID: "c2", toolResult: "kind spelled out" },
+      { step: 0, content: "reply" },
+    ])
+  })
+
   it("experimentLink is the saved experiment in the playground's history", () => {
     expect(experimentLink("exp_1")).toEqual({
       to: "/playground",

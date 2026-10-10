@@ -7,7 +7,7 @@ import type { AgentDefaults, AgentView, Message, PlaygroundRunBody, RuntimeView,
 import { placeBatches } from "@/lib/events"
 import { endsInAnsweredCalls, maxFromStep, transcriptStepCount } from "@/lib/replay"
 import type { TranscriptBatch } from "@/lib/events"
-import { editsProblem, kindOf, wireEdits } from "@/lib/edits"
+import { editsProblem, kindOf, putEdit, wireEdits } from "@/lib/edits"
 import type { ReplayEdit } from "@/lib/edits"
 
 export type Engine = "live" | "scripted"
@@ -517,7 +517,8 @@ const ord = (v: unknown) => Number.isInteger(v) && (v as number) >= 0
 /** editsFromHandoff reads edits= back: each an object with a step
  * ordinal and every other field of its type (a known kind, text where
  * text goes, args an object) — junk is dropped, never drawn; the server
- * stays the authority on the rest. */
+ * stays the authority on the rest. One edit per target (editKey): a
+ * repeat keeps the last, as putEdit does. */
 export function editsFromHandoff(s: string | undefined): ReplayEdit[] {
   const o = parseJSON(s)
   const text = (v: unknown) => v === undefined || typeof v === "string"
@@ -537,6 +538,7 @@ export function editsFromHandoff(s: string | undefined): ReplayEdit[] {
           )
         })
         .slice(0, HANDOFF_EDITS_MAX)
+        .reduce<ReplayEdit[]>((list, e) => putEdit(list, e), [])
     : []
 }
 

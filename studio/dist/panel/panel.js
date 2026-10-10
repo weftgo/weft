@@ -3985,7 +3985,9 @@ var K = () => {}, Aa = class {
 		let e = ++this.pvSeq, t = this.state.drawer, n = t ? `${t.runId}#${t.step}` : "", r = this.asOf.get(n);
 		if (t && t.edits.length && t.step > 0 && t.thread !== "fork" && (r === void 0 || typeof r == "number" && Date.now() - r > 1e4) && (this.asOf.set(n, null), H(this.ep, `runs/${encodeURIComponent(t.runId)}/transcript?step=${t.step}`).then((e) => {
 			!this.disposed && e.compacted_at && (this.asOf.set(n, e.compacted_at), this.emit());
-		}, () => this.asOf.set(n, Date.now()))), !t || t.thread === "fork" || !(this.state.meta?.capabilities.includes("preview") ?? !1)) {
+		}, () => {
+			this.asOf.get(n) === null && this.asOf.set(n, Date.now());
+		})), !t || t.thread === "fork" || !(this.state.meta?.capabilities.includes("preview") ?? !1)) {
 			this.state.preview = null;
 			return;
 		}

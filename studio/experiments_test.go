@@ -140,6 +140,14 @@ func TestExperimentCommandFields(t *testing.T) {
 	if doc["run_count"] != float64(0) || doc["cost_known"] != true {
 		t.Errorf("a definition with no runs: run_count %v, cost_known %v; want 0 and a known zero", doc["run_count"], doc["cost_known"])
 	}
+	// A null or absent overrides is no override; the web's minted id
+	// (exp_ + an ISO second) is a valid id.
+	resp, _ = http.Post(ts.URL+"/api/experiments", "application/json",
+		strings.NewReader(`{"id":"exp_2026-10-10T19:42:13","variants":[{"key":"A","overrides":null},{"key":"B"}],"inputs":[{"key":"1"}]}`))
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("null / absent overrides under a minted id = %d, want 200", resp.StatusCode)
+	}
+	_ = resp.Body.Close()
 	// from_step 0 is a value, not an absence.
 	resp, _ = http.Post(ts.URL+"/api/experiments", "application/json", strings.NewReader(`{"id":"exp_zero","from_step":0,`+matrix+`}`))
 	var zero map[string]any
@@ -156,6 +164,11 @@ func TestExperimentCommandFields(t *testing.T) {
 		{`{"id":"e","variants":[{"key":"B","engine":"x"}],"inputs":[{"key":"1"}]}`, `variant \"B\": engine must be live or scripted`},
 		{`{"id":"e","from_step":-1,` + matrix + `}`, "from_step must be a step ordinal"},
 		{`{"id":"e","transcript_edits":{"kind":"reply"},` + matrix + `}`, "transcript_edits must be a list"},
+		{`{"id":"e","variants":[{"key":"A","overrides":{}},{"key":"B","overrides":["model"]}],"inputs":[{"key":"1"}]}`, "variants[1].overrides must be an object"},
+		{`{"id":"e","variants":[{"key":"A","overrides":"m2"}],"inputs":[{"key":"1"}]}`, "variants[0].overrides must be an object"},
+		{`{"id":"has space",` + matrix + `}`, "id must be 1 to 128 characters of [A-Za-z0-9._:-]"},
+		{`{"id":"a/b",` + matrix + `}`, "id must be 1 to 128 characters"},
+		{`{"id":"` + strings.Repeat("e", 129) + `",` + matrix + `}`, "id must be 1 to 128 characters"},
 	} {
 		resp, err := http.Post(ts.URL+"/api/experiments", "application/json", strings.NewReader(c.body))
 		if err != nil {

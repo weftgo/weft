@@ -652,9 +652,19 @@ func TestExperimentsGolden(t *testing.T) {
 	  "inputs":[{"key":"1","source_run_id":"r_ok"},{"key":"2","text":"angry user"}],
 	  "engine":"live","side_effects":"substitute","thread":"ephemeral","from_step":1,"source_run_id":"r_ok",
 	  "transcript_edits":[{"kind":"tool_result","step":0,"call_id":"call_1","content":"order 42: lost"}]}`
+	// Saved after its runs (the re-save case): the answer carries the
+	// summary the detail does, not a zero run_count and an unknown cost.
 	code, _, saved := post(t, h, "/studio/api/experiments", "application/json", exp)
 	if code != http.StatusOK {
 		t.Fatalf("save = %d %s", code, saved)
+	}
+	for _, want := range []string{`"run_count":2`, `"cost_usd":0.00024`, `"cost_known":true`, `"cache":"not_reported"`} {
+		if !strings.Contains(saved, want) {
+			t.Errorf("the save's answer missing %s: %s", want, saved)
+		}
+	}
+	if code, _, again := post(t, h, "/studio/api/experiments", "application/json", exp); code != http.StatusOK || !strings.Contains(again, `"run_count":2`) || !strings.Contains(again, `"cost_usd":0.00024`) {
+		t.Errorf("re-save = %d %s, want run_count 2 and cost 0.00024", code, again)
 	}
 	for _, want := range []string{`"engine":"live"`, `"side_effects":"substitute"`, `"from_step":1`, `"source_run_id":"r_ok"`,
 		`"transcript_edits":[{"kind":"tool_result"`, `"engine":"scripted"`, `"only_tools":["lookup_order"]`} {

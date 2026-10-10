@@ -3,6 +3,7 @@ package studio
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/weftgo/weft/obsdb"
+	linkruntime "github.com/weftgo/weft/studio/runtime"
 )
 
 // The experiments routes (WEFT-PLAYGROUND §10.4, S4.2): an experiment
@@ -99,6 +101,11 @@ func checkExperiment(b experimentBody) string {
 	if b.ID == "" {
 		return "an experiment needs an id (the weft.experiment.id its runs carry)"
 	}
+	// The run command's experiment_id rule (playground.go): an id saved
+	// here must be one a cell can be sent with.
+	if !linkruntime.ValidCommandID(b.ID) {
+		return "id must be 1 to 128 characters of [A-Za-z0-9._:-] (the experiment_id its runs are sent with)"
+	}
 	if len(b.Variants) == 0 || len(b.Inputs) == 0 {
 		return "an experiment defines at least one variant and one input"
 	}
@@ -123,18 +130,28 @@ func checkExperiment(b experimentBody) string {
 	if msg := modes("", b.Engine, b.SideEffects, b.Thread); msg != "" {
 		return msg
 	}
-	for _, v := range b.Variants {
+	for i, v := range b.Variants {
 		if msg := modes("variant "+strconv.Quote(v.Key)+": ", v.Engine, v.SideEffects, v.Thread); msg != "" {
 			return msg
+		}
+		if !jsonIs(v.Overrides, '{') {
+			return fmt.Sprintf("variants[%d].overrides must be an object", i)
 		}
 	}
 	if b.FromStep != nil && *b.FromStep < 0 {
 		return "from_step must be a step ordinal (0 or more)"
 	}
-	if t := bytes.TrimSpace(b.TranscriptEdits); len(t) > 0 && !bytes.Equal(t, []byte("null")) && t[0] != '[' {
+	if !jsonIs(b.TranscriptEdits, '[') {
 		return "transcript_edits must be a list"
 	}
 	return ""
+}
+
+// jsonIs says a raw JSON value is absent, null, or opens with open (an
+// object's '{', a list's '['): the decoder already proved it is JSON.
+func jsonIs(raw json.RawMessage, open byte) bool {
+	t := bytes.TrimSpace(raw)
+	return len(t) == 0 || bytes.Equal(t, []byte("null")) || t[0] == open
 }
 
 // serveExperiments is GET /api/experiments (the history) and POST
@@ -189,10 +206,18 @@ func (s *Server) serveExperiments(w http.ResponseWriter, r *http.Request) {
 			dbError(w, r, "experiment", body.ID, err)
 			return
 		}
+		// The answer is the detail's document but runs[]: a re-save of
+		// an experiment that already ran says what it holds.
+		sum, err := s.experimentSummary(r.Context(), s.coster(r.Context()), saved.ID)
+		if err != nil {
+			dbError(w, r, "experiment runs", saved.ID, err)
+			return
+		}
 		writeJSON(w, r, http.StatusOK, experimentView{
-			experimentBody: bodyOf(saved),
-			Created:        saved.Created,
-			Updated:        saved.Updated,
+			experimentBody:    bodyOf(saved),
+			Created:           saved.Created,
+			Updated:           saved.Updated,
+			experimentSummary: sum,
 		})
 	default:
 		w.Header().Set("Allow", "GET, POST")

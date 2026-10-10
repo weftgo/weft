@@ -122,6 +122,25 @@ func TestPlaygroundRunRefusesFrameInjectingCommandID(t *testing.T) {
 	}
 }
 
+// TestPlaygroundRunExperimentIDRule (plan F5.1 review): experiment_id
+// keeps command_id's rule, [A-Za-z0-9._:-]{1,128} — it labels the run,
+// keys the runtime's per-experiment budget and is the experiments
+// detail's path segment. The F5 web's minted default (exp_ + an ISO
+// second) passes.
+func TestPlaygroundRunExperimentIDRule(t *testing.T) {
+	pt := newPlaygroundTestServer(t)
+	for _, bad := range []string{"has space", `x\nevent: approve`, "a/b", strings.Repeat("e", 129)} {
+		body := strings.Replace(validRun, `"experiment_id": "exp_1"`, `"experiment_id": "`+bad+`"`, 1)
+		if code, out := pt.post(t, body); code != http.StatusBadRequest || !strings.Contains(out, "experiment_id must be 1 to 128 characters") {
+			t.Errorf("experiment_id %q = %d (%s), want 400 naming experiment_id", bad, code, out)
+		}
+	}
+	ok := strings.Replace(validRun, `"experiment_id": "exp_1"`, `"experiment_id": "exp_2026-10-10T19:42:13"`, 1)
+	if code, out := pt.post(t, ok); code != http.StatusAccepted {
+		t.Errorf("the web's minted experiment id = %d (%s), want 202", code, out)
+	}
+}
+
 // TestReadScopedPanelTokenCannotAct: S4.6 and WEFT-DEVTOOLS §6 — a
 // panel token is read-only unless minted with "playground": true. The
 // approval and steer routes checked the public id but never the scope,

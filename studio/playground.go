@@ -215,6 +215,13 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 			badRequest(w, r, "command_id must be 1 to 128 characters of [A-Za-z0-9._:-]")
 			return
 		}
+		// The experiment id is the command id's rule (experiments.go's
+		// POST holds a saved definition's id to it too): it labels the
+		// run, keys the runtime's budget and is a URL path segment.
+		if req.ExperimentID != "" && !linkruntime.ValidCommandID(req.ExperimentID) {
+			badRequest(w, r, "experiment_id must be 1 to 128 characters of [A-Za-z0-9._:-]")
+			return
+		}
 
 		// The registered agent when the runtime holds it: its manifest's
 		// schemas are what a tool_args edit is checked against (the

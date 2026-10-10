@@ -395,7 +395,8 @@ describe("a run page", () => {
 })
 
 describe("the live page (S4.7)", () => {
-  it("streams per agent — never a connection per running run", async () => {
+  it("without live_all (the poll's fallback) streams per agent — never a connection per running run", async () => {
+    studio.on("GET meta", { ...meta(), live_all: false })
     const running = Array.from({ length: 9 }, (_, i) =>
       row({ id: `r_run_${i}`, status: "running", finished: null, agent: i % 2 ? "orders" : "researcher" })
     )

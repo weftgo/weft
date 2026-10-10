@@ -58,11 +58,14 @@ const statusHint: Record<RunRow["status"], string> = {
     "stored as running, but the heartbeat went stale — a crash or kill",
 }
 
-export function StatusDot({ status }: { status: RunRow["status"] }) {
+export function StatusDot({ status, decorative }: { status: RunRow["status"]; decorative?: boolean }) {
+  // Alone, the dot is an image named for the status (a bare span may not
+  // carry aria-label: axe aria-prohibited-attr); beside the status word
+  // it is decoration.
   return (
     <span
       title={status}
-      aria-label={status}
+      {...(decorative ? { "aria-hidden": true } : { role: "img", "aria-label": status })}
       className={`inline-block size-2 shrink-0 rounded-full ${statusColor[status]} ${status === "running" ? "pulse-dot" : ""}`}
     />
   )
@@ -82,7 +85,7 @@ export function StatusChip({
       className={`inline-flex items-center gap-1.5 font-mono text-xs ${statusText[status]}`}
       title={statusHint[status]}
     >
-      <StatusDot status={status} />
+      <StatusDot status={status} decorative />
       {status}
     </span>
   )

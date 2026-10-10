@@ -1661,6 +1661,25 @@ export function postSteer(runID: string, message: string) {
   return post<{ steered: boolean }>(`runs/${encodeURIComponent(runID)}/steer`, { message })
 }
 
+/** POST /api/runs/{id}/cancel's 202 (studio/cancel.go): the frame is
+ * on the runtime's command stream; the run's end arrives through its
+ * records — a failed run row on the live stream. */
+export interface CancelAccepted {
+  run_id: string
+  command_id: string
+  runtime_id: string
+  state: "cancelling"
+}
+
+/** POST /api/runs/{id}/cancel (capability "cancel", plan H6): ask the
+ * runtime that started a run to stop it. Best effort: a frame lost to a
+ * stream reconnect is not retried — cancel again. A 409 names why not
+ * (the app's own run, finished, parked), a 503 a disconnected runtime:
+ * the ApiError carries the server's words. */
+export function postCancel(runID: string) {
+  return post<CancelAccepted>(`runs/${encodeURIComponent(runID)}/cancel`, undefined)
+}
+
 /** PUT /api/runtimes/{id}/breakpoints — the rung-3 verb (WEFT-DEVTOOLS
  * §8.3): the tools the runtime parks on every run it starts from now
  * on (an empty set clears). Answers the set the runtime now holds; a

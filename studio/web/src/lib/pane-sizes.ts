@@ -14,6 +14,8 @@ export const SPLITS = {
   storyRequest: "story-request",
   /** The playground: the config column beside the runs column. */
   playground: "playground",
+  /** The live page: the running runs beside a peeked run's story. */
+  livePeek: "live-peek",
 } as const
 
 export type SplitID = (typeof SPLITS)[keyof typeof SPLITS]

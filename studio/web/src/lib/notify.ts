@@ -51,6 +51,11 @@ export type Notice =
   | { kind: "live-gave-up"; stream: number; round: number; retry: () => void }
   /** A copy-link press: n is the press (each one its own instance). */
   | { kind: "copy-link"; ok: boolean; n: number }
+  /** The live page's cancel (plan H6): n is the press; sent (the 202),
+   * refused (the server's words, verbatim), or cancelled (the run's
+   * failed row arrived). One toast per run, each outcome replacing the
+   * last. */
+  | { kind: "cancel"; runID: string; n: number; outcome: "sent" | "refused" | "cancelled"; message?: string }
 
 /** The key of the instance a notice reports: one toast per key. */
 export function noticeKey(n: Notice): string {
@@ -71,6 +76,8 @@ export function noticeKey(n: Notice): string {
       return `live-gave-up:${n.stream}:${n.round}`
     case "copy-link":
       return `copy-link:${n.n}`
+    case "cancel":
+      return `cancel:${n.runID}:${n.n}:${n.outcome}`
   }
 }
 
@@ -109,6 +116,12 @@ export function noticeText(n: Notice): { title: string; tone: Tone } {
       return n.ok
         ? { title: "link copied", tone: "success" }
         : { title: "copy failed — the browser refused the clipboard", tone: "error" }
+    case "cancel":
+      return n.outcome === "sent"
+        ? { title: `cancel sent to run ${n.runID}'s runtime · cancelling…`, tone: "info" }
+        : n.outcome === "cancelled"
+          ? { title: `run ${n.runID} cancelled · ended failed`, tone: "success" }
+          : { title: `cancel on run ${n.runID} refused: ${n.message ?? ""}`, tone: "error" }
   }
 }
 
@@ -122,6 +135,7 @@ function runtimeName(n: { runtimeID: string; service: string }): string {
 function toastID(n: Notice): string {
   if (n.kind === "live-gave-up") return "live-gave-up"
   if (n.kind === "copy-link") return "copy-link"
+  if (n.kind === "cancel") return `cancel:${n.runID}`
   return noticeKey(n)
 }
 
@@ -131,6 +145,8 @@ function actionsOf(n: Notice, id: string): ToastAction[] {
   switch (n.kind) {
     case "experiment":
       return n.runID ? [{ label: "open", link: runLink(n.runID) }] : []
+    case "cancel":
+      return [{ label: "open", link: runLink(n.runID) }]
     case "matrix":
       return [{ label: "open", link: experimentLink(n.experimentID) }]
     case "parked": {

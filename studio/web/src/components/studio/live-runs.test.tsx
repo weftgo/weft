@@ -71,18 +71,23 @@ describe("LiveRuns", () => {
     act(() => {
       es.connect()
       // A heartbeat-driven frame of a run already listed: no refetch.
-      es.emit("run", { run: run("r1", "orders", { last_seen: "2026-10-01T09:00:05Z", event_count: 7 }) }, "1")
+      es.emit("run", { run: run("r1", "orders", { last_seen: "2026-10-01T09:00:05Z", steps: 7 }) }, "1")
     })
     expect(onStale).not.toHaveBeenCalled()
-    // The count is the row's own (the run frame carries it).
-    await waitFor(() => expect(screen.getByText(/7 evt/)).toBeTruthy())
+    // The step count is the row's own (the run frame carries it).
+    await waitFor(() =>
+      expect(document.querySelector('[data-run="r1"] [data-cell="step"]')?.textContent).toBe("7")
+    )
     act(() => {
       // It ended: the row says so at once, and the list is refetched.
-      es.emit("run", { run: run("r1", "orders", { status: "succeeded", last_seen: "2026-10-01T09:00:09Z" }) }, "3")
+      es.emit("run", { run: run("r1", "orders", { status: "succeeded", steps: 7, last_seen: "2026-10-01T09:00:09Z" }) }, "3")
       // A run the list has not seen started.
       es.emit("run", { run: run("r2", "orders") }, "4")
     })
-    await waitFor(() => expect(screen.getByText("ended")).toBeTruthy())
+    await waitFor(() =>
+      expect(document.querySelector('[data-run="r1"] [data-cell="step"]')?.textContent).toBe("7 / 7")
+    )
+    expect(screen.getByText("succeeded")).toBeTruthy()
     expect(onStale).toHaveBeenCalledTimes(1) // throttled: one refetch
   })
 

@@ -13,12 +13,15 @@ import type { RunRow, WireEvent } from "./api"
 import type { ContentAttrs } from "./honesty"
 import { apiBase, studioToken } from "./api"
 
-/** Exactly one of run, session, public_id or agent (S4.5). */
+/** Exactly one of run, session, public_id or agent (S4.5), or every
+ * run (plan A7: all=true, the dev token's and loopback's alone —
+ * api/meta's live_all says whether this caller may). */
 export type LiveSelector =
   | { run: string }
   | { session: string }
   | { public_id: string }
   | { agent: string }
+  | { all: true }
 
 export function selectorSearch(sel: LiveSelector): string {
   const [[k, v]] = Object.entries(sel)
@@ -200,6 +203,14 @@ export interface LiveHandlers {
   /** The client gave up reconnecting (LIVE_RETRIES attempts that never
    * opened); handle.retry() starts over. */
   onGaveUp?: () => void
+  /** The server dropped this subscriber (its `event: overflow` frame):
+   * said before onOverflow, so a caller can tell an overflow from a
+   * dropped connection. */
+  onServerOverflow?: () => void
+  /** A resume's backfill could not read one run's stored records of a
+   * kind (`event: backfill_error {run_id, kind}`; the cause is in
+   * Studio's log): that run's history on this stream is incomplete. */
+  onBackfillError?: (f: { run_id: string; kind: string }) => void
 }
 
 export interface LiveOptions extends LiveHandlers {
@@ -420,12 +431,24 @@ export function openLive(opts: LiveOptions): LiveHandle {
       if (typeof raw?.run !== "object") return
       opts.onRun?.({ seq: seqOf(e), run: raw.run })
     })
+    src.addEventListener("backfill_error", (e) => {
+      if (!current()) return
+      let raw: { run_id?: unknown; kind?: unknown } | null
+      try {
+        raw = JSON.parse((e).data as string) as { run_id?: unknown; kind?: unknown } | null
+      } catch {
+        return
+      }
+      if (typeof raw?.run_id !== "string" || !raw.run_id) return
+      opts.onBackfillError?.({ run_id: raw.run_id, kind: typeof raw.kind === "string" ? raw.kind : "" })
+    })
     // Ping keeps the connection warm; nothing to do.
     src.addEventListener("ping", () => {})
     src.addEventListener("overflow", () => {
       // The server dropped this subscriber and closed (S4.5): refetch
       // pages, then a fresh connection.
       if (!current()) return
+      opts.onServerOverflow?.()
       src.close()
       lost()
       reopenLater()

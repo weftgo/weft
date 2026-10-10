@@ -37,16 +37,21 @@ export function setServerSkew(ms: number) {
   serverSkewMs = ms
 }
 
-const SELECTORS = ["run", "session", "public_id", "agent"] as const
+const SELECTORS = ["run", "session", "public_id", "agent", "all"] as const
 const KINDS = ["event", "delta", "messages", "run"]
 
 /** The canonical stream a query names, or an error message. */
 function streamOf(q: URLSearchParams): { stream: string; sel: string; value: string } | { error: string } {
   const named = SELECTORS.filter((k) => q.has(k))
-  if (named.length !== 1) return { error: "exactly one of run, session, public_id or agent" }
+  if (named.length !== 1) return { error: "exactly one of run, session, public_id, agent or all" }
   const sel = named[0]
-  const value = q.get(sel) ?? ""
+  let value = q.get(sel) ?? ""
   if (!value || q.getAll(sel).length !== 1) return { error: `${sel} must name one id` }
+  // live.go's liveSelector: all takes 1 or true, one stream either way.
+  if (sel === "all") {
+    if (value !== "1" && value !== "true") return { error: `all takes 1 (all="${value}" given)` }
+    value = "1"
+  }
   // live.go's liveKinds: omitted or empty is event,run; names trimmed,
   // a trailing comma allowed, anything outside the four a 400.
   const raw = q.get("kinds") || "event,run"
@@ -98,6 +103,8 @@ export function answerLiveGrant(url: URL, bearer: string, body: string | undefin
     }
     q = new URLSearchParams()
     for (const k of [...SELECTORS, "kinds"]) if (typeof doc[k] === "string" && doc[k]) q.set(k, doc[k])
+    // The body's form of all=1 is {"all": true} (livegrant.go).
+    if (doc.all === true) q.set("all", "1")
   }
   const s = streamOf(q)
   if ("error" in s) return refuse(400, "bad_request", s.error)
@@ -111,6 +118,7 @@ export function answerLiveGrant(url: URL, bearer: string, body: string | undefin
     const tokExp = claims.exp ? Date.parse(claims.exp) : NaN
     if (!Number.isFinite(tokExp) || tokExp <= now) return refuse(401, "unauthorized", "bad or expired token")
     if (s.sel === "agent") return refuse(403, "forbidden", "a panel token does not read an agent's stream")
+    if (s.sel === "all") return refuse(403, "forbidden", "a panel token does not read every run's stream")
     if (s.sel === "public_id" && s.value !== claims.public_id)
       return refuse(403, "forbidden", "outside the panel token's public id")
     // The token's expiry caps the grant, as the server's does.

@@ -97,11 +97,14 @@ describe("the run page's tail opens with a grant", () => {
   }
 })
 
-describe("the live page's agent streams", () => {
+describe("the live page's streams", () => {
   for (const [name, token, panel] of SETUPS) {
-    it(name + (panel ? ": refused an agent stream (403) once, says so, the poll stays" : ": open with a grant"), async () => {
+    it(name + (panel ? ": no all stream (live_all false); refused an agent stream (403) once, says so, the poll stays" : ": the all stream opens with a grant"), async () => {
       const tok = token()
       wall(tok)
+      // meta.go's live_all: the server token and setup A's loopback;
+      // never a panel token.
+      studio.on("GET meta", { ...golden<Record<string, unknown>>("meta"), capabilities: ["live", "ingest"], live_all: !panel })
       const running = [row({ id: "r_run_1", status: "running", finished: null, agent: "orders" })]
       studio.on("GET runs", { total: 1, runs: running, next_before: null })
       renderApp("/live")
@@ -109,12 +112,13 @@ describe("the live page's agent streams", () => {
       await waitFor(() => expect(studio.calls("POST live-grant").length).toBeGreaterThan(0))
       const [grant] = studio.calls("POST live-grant")
       expect(grant.headers.get("Authorization")).toBe(tok ? `Bearer ${tok}` : null)
-      expect(grant.body).toEqual({ agent: "orders", kinds: "run" })
+      expect(grant.body).toEqual(panel ? { agent: "orders", kinds: "run" } : { all: true, kinds: "event,run" })
       if (panel) {
         // studio/livegrant.go: a panel token is never granted an agent
         // selector. One ask, no stream, one line saying so, and the
         // list's 5 s poll carries on.
         expect(await screen.findByText("streaming needs the server token · polling")).toBeTruthy()
+        expect(screen.getByText("live: polling every 5 s — the all stream needs the dev token or loopback")).toBeTruthy()
         const polls = studio.calls("GET runs").length
         await waitFor(() => expect(studio.calls("GET runs").length).toBeGreaterThan(polls))
         expect(studio.calls("POST live-grant")).toHaveLength(1)

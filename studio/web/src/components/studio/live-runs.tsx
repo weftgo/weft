@@ -1,5 +1,6 @@
-// The live page's rows (S4.7): everything running right now, kept
-// current by the live lane. One stream per AGENT — the agent selector
+// The live page's polled rows (S4.7; plan H6's fallback when the all
+// stream is not this caller's — a panel token): everything running
+// right now, kept current by the live lane where it may open. One stream per AGENT — the agent selector
 // carries every run of that agent, record and run frames alike — and
 // rows are updated in place from the run frames — run frames only: an
 // agent stream asking for events is backfilled, on every browser
@@ -11,13 +12,11 @@
 // streams are capped too; the rest of a large fleet rides the list's
 // own 5 s poll.
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Link } from "@tanstack/react-router"
 
 import type { RunRow } from "@/lib/api"
 import { openLive, throttle } from "@/lib/live"
-import { elapsed, relativeTime } from "@/lib/format"
-import { StatusChip } from "@/components/studio/runs-table"
-import { runLink } from "@/lib/links"
+import { matchesFilter, polledView } from "@/lib/live-rows"
+import { LiveTable } from "@/components/studio/live-table"
 
 /** Agent streams held open at once; a browser's per-origin budget is
  * six, and the page still needs its own requests. */
@@ -31,47 +30,26 @@ function newest(polled: RunRow, frame: RunRow | undefined): RunRow {
     : polled
 }
 
-function RunLane({ row }: { row: RunRow }) {
-  return (
-    <div
-      className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border bg-background px-3 py-2"
-      data-run={row.id}
-    >
-      <StatusChip status={row.status} />
-      <Link
-        {...runLink(row.id)}
-        className="font-mono text-[13px] hover:text-thread-ink"
-      >
-        {row.id}
-      </Link>
-      <span className="text-xs">{row.agent || "—"}</span>
-      <span className="font-mono text-[11px] text-muted-foreground">
-        {row.model.provider}/{row.model.name}
-      </span>
-      <span
-        className="font-mono text-[11px] text-status-run tabular-nums"
-        title={`${row.event_count} durable event${row.event_count === 1 ? "" : "s"} recorded`}
-      >
-        {row.status === "running"
-          ? `${elapsed(row.started)} · ${row.event_count} evt`
-          : "ended"}
-      </span>
-      <span
-        className="ml-auto font-mono text-[11px] text-faint"
-        title={row.last_seen}
-      >
-        {relativeTime(row.last_seen)}
-      </span>
-    </div>
-  )
-}
-
 export function LiveRuns({
   runs,
   onStale,
+  filter = "",
+  peek,
+  onPeek = () => {},
+  now = Date.now(),
+  canCancel = false,
 }: {
   /** The running runs, as the list query last read them. */
   runs: RunRow[]
+  /** The filter box's words (agent or status). */
+  filter?: string
+  /** The peeked run id, and how a row asks to be peeked. */
+  peek?: string
+  onPeek?: (id: string | undefined) => void
+  /** The clock the elapsed cells read. */
+  now?: number
+  /** Capability "cancel". */
+  canCancel?: boolean
   /** The list is out of date (a run started or ended, or frames were
    * missed): refetch it. Called at most once a second. */
   onStale: () => void
@@ -116,12 +94,16 @@ export function LiveRuns({
 
   return (
     <div className="space-y-2">
-      {runs.map((r) => (
-        <RunLane
-          key={r.id}
-          row={newest(r, frames[r.id] as RunRow | undefined)}
-        />
-      ))}
+      <LiveTable
+        rows={runs
+          .map((r) => newest(r, frames[r.id] as RunRow | undefined))
+          .filter((r) => matchesFilter(r, filter))
+          .map(polledView)}
+        now={now}
+        peek={peek}
+        onPeek={onPeek}
+        canCancel={canCancel}
+      />
       {refused ? (
         <p className="font-mono text-[11px] text-faint">
           streaming needs the server token · polling

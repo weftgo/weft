@@ -159,9 +159,9 @@ The formula, exact where the adapter reports `core.Usage`'s splits
 CacheWriteTokens) + cached_input × CachedInputTokens + cache_write ×
 CacheWriteTokens + output × (OutputTokens − ReasoningTokens) + reasoning
 × ReasoningTokens`, ÷ 1,000,000, rounded to 6 decimals on the wire. With
-no split reported every token prices at its base rate and the row says
-`cache: "unknown"`. Every priced object carries `cost_usd` (null when
-unknown, never 0), `cost_known`, `cache` (`exact` | `unknown`) and, when
+no cache split reported every input token prices at the input rate and
+the row says `cache: "not_reported"`. Every priced object carries `cost_usd` (null when
+unknown, never 0), `cost_known`, `cache` (`exact` | `not_reported`) and, when
 unknown, `cost_badge` (`unpriced`: no row matches — the reason names
 `provider/model`; `unknown`: the figure could not be computed) with
 `cost_reason`. Run rows — lists, documents and their `children[]`,

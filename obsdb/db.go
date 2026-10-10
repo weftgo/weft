@@ -283,7 +283,7 @@ type RunRow struct {
 	InstructionsHash, CatalogHash string
 	RequestCount                  int64
 	// PromptPreview is the run's prompt — the turn's own, PromptText's
-	// rule (Searcher's prompt field) — cut to
+	// rule with TurnPrompt's resume clause (Searcher's prompt field) — cut to
 	// PromptPreviewRunes runes; "" when the records carried no content
 	// (a content-off run stores no messages) or no user text.
 	PromptPreview string

@@ -148,8 +148,9 @@ type runRow struct {
 	CatalogHash      string `json:"catalog_hash"`
 	RequestCount     int64  `json:"request_count"`
 	RequestsBadge    string `json:"requests_badge,omitempty"`
-	// PromptPreview is the run's prompt — the turn's own (obsdb.PromptText:
-	// the input record's last user text, else the first) — cut to 200 runes (obsdb.RunRow.PromptPreview, plan A7).
+	// PromptPreview is the run's prompt — the turn's own (obsdb.PromptText/TurnPrompt:
+	// the input record's last user text, a resume's new prompt when it
+	// carries one, else the first) — cut to 200 runes (obsdb.RunRow.PromptPreview, plan A7).
 	// Absent when the records carried no content: a content-off run
 	// stores no messages, and the stripped / not_recorded holes the run
 	// document already reports say why — no badge of its own.

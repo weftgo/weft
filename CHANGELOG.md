@@ -13,7 +13,7 @@ module, ADR 0005).
 - `GET /api/search` (plan A7, capability `search`): runs found by what
   they said and did. `q=` terms — whitespace-separated, a `"quoted
   phrase"` one term — each a case-insensitive substring of the run's
-  prompt (the turn's own: the input record's last user message with text — on a continued conversation the turn's question, not the conversation's opener — else the first user message with text; a message steered in later is never the prompt), answer (its last assistant
+  prompt (the turn's own: the input record's last user message with text — on a continued conversation the turn's question, not the conversation's opener — else the first user message with text; a message steered in later is never the prompt; a resume that carries a new prompt — the core records it after the rebuilt tool message, in the record after the input record — has that prompt, a plain Approve/Deny resume keeps the parked question), answer (its last assistant
   text), error or the name of a tool it called; every term required,
   each in any field; never the system prompt, a tool result or the tool
   catalog. Filters `agent`, `tool` (exact), `status`, `model` (exact),

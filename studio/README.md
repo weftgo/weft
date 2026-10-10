@@ -1255,8 +1255,10 @@ status, session, public id, playground, parent and `tag.<k>=<v>`
 filters, cursor-paged; top-level only by default — `parent=<run id>`
 lists one run's subagent children, `all=1` (or `parent=*`) every run,
 children included; every run row carries `prompt_preview` — the turn's
-own prompt: the input record's last user message with text, else the
-first user message with text, cut to 200 runes — absent when the records carried
+own prompt: the input record's last user message with text (on a resume
+that carries a new prompt, that prompt: the next record's user text
+before its first assistant message), else the first user message with
+text, cut to 200 runes — absent when the records carried
 no content, the run's `stripped`/`not_recorded` holes saying why),
 `search` (plan A7, under the `search` capability: `?q=` terms —
 whitespace-separated, a `"quoted phrase"` one term, each a

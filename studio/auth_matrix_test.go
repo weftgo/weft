@@ -67,6 +67,9 @@ var overrideNames = map[string]string{
 //   - deletion (DELETE /api/runs/{id}, /api/sessions/{id}) is the
 //     server token's alone: every panel token is 403, read or
 //     playground, its own public id included;
+//   - a proposed prompt (PUT and DELETE /api/agents/{name}/proposal,
+//     plan F6) is a system prompt: the server token's alone, every
+//     panel token 403, before the agent is looked up;
 //   - ingest takes the ingest token and nothing else.
 func TestAuthMatrix(t *testing.T) {
 
@@ -708,6 +711,16 @@ func TestAuthMatrix(t *testing.T) {
 				}
 				return forbidden403
 			}},
+		// Proposed prompts (plan F6): deletion's rule — the server token
+		// sets (200) and forgets (200, then 404 with none left); every
+		// panel token is 403 before the agent is looked up, so an unknown
+		// agent is 404 for the server token alone.
+		{name: "PUT /api/agents/{name}/proposal", method: "PUT", path: fixed("/api/agents/acme-support/proposal"),
+			body: fixed(`{"instructions":"THE PROPOSED PROMPT"}`), resources: one, want: serverOnly(ok)},
+		{name: "PUT /api/agents/{unknown}/proposal", method: "PUT", path: fixed("/api/agents/nope/proposal"),
+			body: fixed(`{"instructions":"x"}`), resources: one, want: serverOnly(miss)},
+		{name: "DELETE /api/agents/{name}/proposal", method: "DELETE", path: fixed("/api/agents/acme-support/proposal"), resources: one, want: serverOnly(ok)},
+		{name: "DELETE /api/agents/{name}/proposal (none)", method: "DELETE", path: fixed("/api/agents/acme-support/proposal"), resources: one, want: serverOnly(miss)},
 		{name: "PATCH /api/runs/{id}", method: "PATCH", path: func(res string) string { return "/api/runs/" + run[res] }, resources: one, want: anyValid(miss)},
 		{name: "PUT /api/sessions/{id}", method: "PUT", path: func(res string) string { return "/api/sessions/" + session[res] }, resources: one, want: anyValid(miss)},
 

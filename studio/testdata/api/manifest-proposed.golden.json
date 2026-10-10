@@ -1,0 +1,6 @@
+{
+  "weft": 1,
+  "agents": [
+    {"name": "support", "instructions": "You help.","proposed":{"instructions":"You help, tersely.","instructions_hash":"47306a5b29b05aea91416b72ac9ac7a881a2ea37d66575614a9c908781c1fd2e","since":"(time)"}},
+    {"name": "triage", "instructions": "You sort."}
+  ],"sources":[{"source":"file","manifest_hash":"43c0f3e669d8e2f05b20fc5b2d0710985429893b480c78dfa6fd71858c799ff3","agents":[{"name":"support","manifest_hash":"111d8f515f1c81edf2d7afb409017d5bb212dbdc2cd9b45b952d738b3c5afbde"},{"name":"triage","manifest_hash":"695dbfef9fc57fc810e3c6d5ffee4e8968cd39fb2656390a58413283b36d237d"}]}]}

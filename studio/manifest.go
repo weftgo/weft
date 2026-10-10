@@ -170,8 +170,11 @@ func (s *Server) serveManifest(w http.ResponseWriter, r *http.Request) {
 	}
 	reg := s.registeredManifests()
 	sources := s.manifestSources(reg)
+	// Each agent's proposed instructions (plan F6, proposals.go) ride
+	// its entry as "proposed", beside the registered "instructions".
+	props := s.proposals.snapshot()
 	if len(s.manifest) > 0 {
-		writeRaw(w, r, withSources(s.manifest, sources))
+		writeRaw(w, r, withSources(fileWithProposals(s.manifest, props), sources))
 		return
 	}
 	if len(reg) == 0 {
@@ -183,10 +186,7 @@ func (s *Server) serveManifest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	version, agents := registeredAgents(reg)
-	entries := make([]json.RawMessage, 0, len(agents))
-	for _, a := range agents {
-		entries = append(entries, withHash(a.Entry, a.ManifestHash))
-	}
+	entries := registeredWithProposals(agents, props)
 	writeJSON(w, r, http.StatusOK, struct {
 		Version int                  `json:"weft"`
 		Agents  []json.RawMessage    `json:"agents"`

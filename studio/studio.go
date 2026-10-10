@@ -195,6 +195,10 @@ type Server struct {
 	// sweepMu guards it: Close may race another Close.
 	sweepMu   sync.Mutex
 	stopSweep func()
+
+	// proposals are the agents' proposed instructions (proposals.go,
+	// plan F6): in memory, bounded, forgotten on restart.
+	proposals proposals
 }
 
 // New builds a Studio server over one obsdb.DB (S4.1). Handler()

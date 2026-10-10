@@ -56,10 +56,13 @@ import (
 //     start time (obsdb keeps none of its own), and one heartbeat at
 //     the run's last-seen keeps the derived status.
 //   - wefttest: the run's model calls as wefttest replay fixtures (the
-//     builder POST /api/playground/fixtures uses, fixtures.go), zipped
-//     flat: unzip into testdata/<TestName>/ and wefttest.Replay answers
-//     from them. A step whose request carried a compaction view keys on
-//     the view and says so in its compacted_at header.
+//     builder POST /api/playground/fixtures uses, fixtures.go) under
+//     testdata/TestReplay_<run>/, beside a generated
+//     <agent>_replay_test.go that replays them (plan F6, savetest.go):
+//     unzip into a package directory and `go test` passes against the
+//     recorded run. A step whose request carried a compaction view keys
+//     on the view and says so in its compacted_at header, and the
+//     skeleton's header repeats it.
 //
 // The read-scope rule is the requests route's: a read-scoped panel
 // token never reads system prompts or tool catalogs. json and jsonl
@@ -191,9 +194,10 @@ func refuseHiddenFor(w http.ResponseWriter, r *http.Request, msg string, cause o
 	}{Error: errBody{"forbidden", msg}, badgeFields: badgeFor(obsdb.HoleHidden, cause)})
 }
 
-// exportFixtures answers format=wefttest: the run's fixtures zipped
-// flat, each file named the way wefttest.Replay loads it. A run with
-// no transcript (content capture off) or no recorded answer is 409,
+// exportFixtures answers format=wefttest: the replay skeleton at the
+// zip's root, then the run's fixtures under testdata/<test name>/,
+// each file named the way wefttest.Replay loads it. A run with no
+// transcript (content capture off) or no recorded answer is 409,
 // badged when there is a reason.
 func (s *Server) exportFixtures(w http.ResponseWriter, r *http.Request, id string, f exportFormat) {
 	ctx := r.Context()
@@ -207,9 +211,23 @@ func (s *Server) exportFixtures(w http.ResponseWriter, r *http.Request, id strin
 		dbError(w, r, "run", id, err)
 		return
 	}
-	files, ok := fixturesOrConflict(w, r, src)
+	set, ok := fixturesOrConflict(w, r, src)
 	if !ok {
 		return
+	}
+	model := det.Model
+	if det.Provider != "" && model != "" {
+		model = det.Provider + "/" + model
+	}
+	skeleton, err := replaySkeleton{runID: id, agent: det.Agent, model: model, recorded: det.Started, set: set}.render()
+	if err != nil {
+		writeError(w, r, http.StatusInternalServerError, "internal", "replay test of run "+id+": "+err.Error())
+		return
+	}
+	dir := "testdata/" + replayTestName(id) + "/"
+	files := []fixtureFile{{Name: replayFileName(det.Agent), Body: string(skeleton)}}
+	for _, f := range set.files {
+		files = append(files, fixtureFile{Name: dir + f.Name, Body: f.Body})
 	}
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)

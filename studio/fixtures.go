@@ -196,10 +196,40 @@ type compactedNote struct {
 	Entries  int    `json:"entries"`
 }
 
+// fixtureSet is runFixtures' answer with what the save-as-test
+// skeleton (savetest.go) reads beside the files: per file the step it
+// answers, its key and its compaction note; the step-0 system prompt;
+// the run's last assistant message.
+type fixtureSet struct {
+	files  []fixtureFile
+	steps  []fixtureStep // one per file, in file order
+	system string        // the first fixture's system prompt ("" when not recorded)
+	last   core.Message  // the last assistant message fixtured
+}
+
+// fixtureStep is one fixture file's step: the recorded step index, the
+// key it carries, and the compaction view it keys on (nil for the
+// plain transcript).
+type fixtureStep struct {
+	step      int
+	key       fixtureKeyDoc
+	compacted *compactedNote
+}
+
 // runFixtures renders one file per step of the run that recorded an
 // answer — per model call it made: <seq>-<key>.json in wefttest's
 // naming (five-digit sequence, the key Replay matches on).
 func runFixtures(src fixtureSource) ([]fixtureFile, error) {
+	set, err := buildFixtures(src)
+	if err != nil {
+		return nil, err
+	}
+	return set.files, nil
+}
+
+// buildFixtures is runFixtures with the skeleton's reading beside the
+// files.
+func buildFixtures(src fixtureSource) (*fixtureSet, error) {
 	var (
 		msgs  []core.Message
 		steps []int  // the step each message joined (-1: none recorded)
@@ -265,6 +295,7 @@ func runFixtures(src fixtureSource) ([]fixtureFile, error) {
 	// (obsdb.Assembler: AssembleStep's answer without re-decoding the
 	// transcript per step).
 	asm := obsdb.NewAssembler(src.batches)
+	set := &fixtureSet{}
 	var files []fixtureFile
 	done := map[int]bool{}
 	for i, msg := range msgs {
@@ -338,8 +369,14 @@ func runFixtures(src fixtureSource) ([]fixtureFile, error) {
 			Name: fmt.Sprintf("%05d-%s.json", len(files)+1, fixtureKey(key)),
 			Body: string(b) + "\n",
 		})
+		if len(set.steps) == 0 {
+			set.system = doc.Request.System
+		}
+		set.steps = append(set.steps, fixtureStep{step: step, key: key, compacted: doc.CompactedAt})
+		set.last = msg
 	}
-	return files, nil
+	set.files = files
+	return set, nil
 }
 
 // noteOf is a view's compacted_at note: counts, range and hash, never
@@ -508,7 +545,7 @@ func (s *Server) servePlaygroundFixture(w http.ResponseWriter, r *http.Request) 
 		dbError(w, r, "transcript of run", req.RunID, err)
 		return
 	}
-	files, ok := fixturesOrConflict(w, r, src)
+	set, ok := fixturesOrConflict(w, r, src)
 	if !ok {
 		return
 	}
@@ -516,7 +553,7 @@ func (s *Server) servePlaygroundFixture(w http.ResponseWriter, r *http.Request) 
 		RunID string        `json:"run_id"`
 		Agent string        `json:"agent"`
 		Files []fixtureFile `json:"files"`
-	}{RunID: req.RunID, Agent: row.Agent, Files: files})
+	}{RunID: req.RunID, Agent: row.Agent, Files: set.files})
 }
 
 // fixturesOrConflict builds the run's fixtures, or answers the refusal
@@ -525,8 +562,8 @@ func (s *Server) servePlaygroundFixture(w http.ResponseWriter, r *http.Request) 
 // gap or derived otherwise. A run with a transcript but no recorded
 // answer (it failed before any step answered) is 409 without a badge:
 // nothing is missing, there is nothing to replay.
-func fixturesOrConflict(w http.ResponseWriter, r *http.Request, src fixtureSource) ([]fixtureFile, bool) {
-	files, err := runFixtures(src)
+func fixturesOrConflict(w http.ResponseWriter, r *http.Request, src fixtureSource) (*fixtureSet, bool) {
+	set, err := buildFixtures(src)
 	var fe *fixtureError
 	switch {
 	case errors.As(err, &fe):
@@ -539,9 +576,9 @@ func fixturesOrConflict(w http.ResponseWriter, r *http.Request, src fixtureSourc
 	case err != nil:
 		conflict(w, r, "the run's transcript cannot be fixtured: "+err.Error(), badgeOf(obsdb.HoleDerived))
 		return nil, false
-	case len(files) == 0:
+	case len(set.files) == 0:
 		conflict(w, r, "the run recorded no assistant turns to fixture", badgeFields{})
 		return nil, false
 	}
-	return files, true
+	return set, true
 }

@@ -440,20 +440,31 @@ func TestExportWefttestReplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	var all strings.Builder
+	n := 0
 	for _, f := range zr.File {
+		// The fixtures sit under testdata/TestReplay_<run>/ beside the
+		// replay skeleton (plan F6; TestSaveAsTestPasses runs it).
+		name, ok := strings.CutPrefix(f.Name, "testdata/TestReplay_r_fx/")
+		if !ok {
+			if f.Name != "orders_replay_test.go" {
+				t.Errorf("zip entry %q: want the skeleton or a fixture", f.Name)
+			}
+			continue
+		}
+		n++
 		rc, err := f.Open()
 		if err != nil {
 			t.Fatal(err)
 		}
 		b, _ := io.ReadAll(rc)
 		_ = rc.Close()
-		if err := os.WriteFile(filepath.Join(fixtures, f.Name), b, 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(fixtures, name), b, 0o644); err != nil {
 			t.Fatal(err)
 		}
-		fmt.Fprintf(&all, "=== %s\n%s", f.Name, b)
+		fmt.Fprintf(&all, "=== %s\n%s", name, b)
 	}
-	if len(zr.File) != 3 {
-		t.Fatalf("fixtures = %d, want one per step", len(zr.File))
+	if n != 3 || len(zr.File) != 4 {
+		t.Fatalf("fixtures = %d of %d entries, want one per step and the skeleton", n, len(zr.File))
 	}
 	if strings.Contains(all.String(), `"compacted_at"`) != true || strings.Count(all.String(), `"compacted_at"`) != 1 {
 		t.Errorf("want exactly step 2's fixture to carry compacted_at:\n%s", all.String())

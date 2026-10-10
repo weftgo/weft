@@ -421,29 +421,57 @@ func runExport(args []string, stdout, stderr io.Writer) error {
 	return err
 }
 
-// unzipFixtures writes the export's flat zip into dir. Every entry
-// must be a plain file name — the export zips flat — so nothing lands
-// outside dir; the zip is checked whole (names and total size) before
-// the first write. The *.json files already in dir are removed first,
-// as wefttest.Record replaces a test's fixtures: Replay loads every
-// *.json there, and a stale one from an earlier export would answer
-// in place of ErrNoFixture. A symlink among them is removed, never
-// followed.
+// unzipFixtures writes the export's fixtures into dir. The zip holds
+// the fixtures under testdata/<test>/ beside a generated replay test
+// at its root (plan F6) — or, from a Studio before F6, flat. Every
+// fixture entry must be a plain file name inside that one directory
+// (or at the root, flat) and the skeleton a root *_test.go, so nothing
+// lands outside dir; the skeleton is not written (this command writes
+// fixtures where --test names them, which the skeleton's test name
+// need not match: the Studio download carries it). The zip is checked
+// whole (names and total size) before the first write. The *.json
+// files already in dir are removed first, as wefttest.Record replaces
+// a test's fixtures: Replay loads every *.json there, and a stale one
+// from an earlier export would answer in place of ErrNoFixture. A
+// symlink among them is removed, never followed.
 func unzipFixtures(body []byte, dir string) (int, error) {
 	zr, err := zip.NewReader(bytes.NewReader(body), int64(len(body)))
 	if err != nil {
 		return 0, fmt.Errorf("the wefttest export is not a zip: %w", err)
 	}
-	for _, f := range zr.File {
-		if f.Name == "" || f.Name == "." || f.Name == ".." || strings.ContainsAny(f.Name, `/\:`) || !f.Mode().IsRegular() {
-			return 0, fmt.Errorf("the wefttest export holds %q: want flat fixture files", f.Name)
-		}
+	plain := func(name string) bool {
+		return name != "" && name != "." && name != ".." && !strings.ContainsAny(name, `/\:`)
 	}
-	if len(zr.File) == 0 {
+	var (
+		fixtures []*zip.File
+		names    []string
+		testDir  string
+	)
+	for _, f := range zr.File {
+		name := f.Name
+		if !f.Mode().IsRegular() {
+			return 0, fmt.Errorf("the wefttest export holds %q: want fixture files", f.Name)
+		}
+		if plain(name) && strings.HasSuffix(name, "_test.go") {
+			continue // the replay skeleton (plan F6)
+		}
+		if rest, ok := strings.CutPrefix(name, "testdata/"); ok {
+			test, file, ok := strings.Cut(rest, "/")
+			if !ok || !plain(test) || !plain(file) || testDir != "" && test != testDir {
+				return 0, fmt.Errorf("the wefttest export holds %q: want fixture files under one testdata/<test>/", f.Name)
+			}
+			testDir, name = test, file
+		} else if !plain(name) {
+			return 0, fmt.Errorf("the wefttest export holds %q: want fixture files under testdata/<test>/", f.Name)
+		}
+		fixtures = append(fixtures, f)
+		names = append(names, name)
+	}
+	if len(fixtures) == 0 {
 		return 0, errors.New("the wefttest export holds no fixtures")
 	}
 	var total uint64
-	for _, f := range zr.File {
+	for _, f := range fixtures {
 		total += f.UncompressedSize64
 		if total > uint64(maxUnzip) {
 			return 0, fmt.Errorf("the wefttest export unzips to more than %d bytes", maxUnzip)
@@ -462,7 +490,7 @@ func unzipFixtures(body []byte, dir string) (int, error) {
 		}
 	}
 	var written int64
-	for _, f := range zr.File {
+	for i, f := range fixtures {
 		rc, err := f.Open()
 		if err != nil {
 			return 0, err
@@ -477,11 +505,11 @@ func unzipFixtures(body []byte, dir string) (int, error) {
 		if written += int64(len(b)); written > maxUnzip {
 			return 0, fmt.Errorf("the wefttest export unzips to more than %d bytes", maxUnzip)
 		}
-		if err := writeNew(filepath.Join(dir, f.Name), b); err != nil {
+		if err := writeNew(filepath.Join(dir, names[i]), b); err != nil {
 			return 0, err
 		}
 	}
-	return len(zr.File), nil
+	return len(fixtures), nil
 }
 
 // writeNew writes b to path, replacing whatever is there without

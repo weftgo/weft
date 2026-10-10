@@ -619,7 +619,8 @@ func TestExportCommand(t *testing.T) {
 // plain file name (a path, a parent reference) refuses the whole zip
 // before anything is written.
 func TestUnzipFixturesFlat(t *testing.T) {
-	for _, name := range []string{"../escape.json", "sub/x.json", `..\x.json`, ".."} {
+	for _, name := range []string{"../escape.json", "sub/x.json", `..\x.json`, "..",
+		"testdata/../x.json", "testdata/T/sub/x.json", "testdata/x.json", "sub/a_test.go"} {
 		var buf bytes.Buffer
 		zw := zip.NewWriter(&buf)
 		for _, n := range []string{"ok.json", name} {
@@ -664,5 +665,27 @@ func TestUnzipFixturesFlat(t *testing.T) {
 	}
 	if _, err := unzipFixtures([]byte("not a zip"), t.TempDir()); err == nil {
 		t.Error("a non-zip unzipped")
+	}
+
+	// F6's layout: the fixtures under one testdata/<test>/, the replay
+	// skeleton at the root (not written); a second test directory is
+	// refused.
+	layout := func(names ...string) []byte {
+		var buf bytes.Buffer
+		zw := zip.NewWriter(&buf)
+		for _, n := range names {
+			w, _ := zw.Create(n)
+			_, _ = w.Write([]byte("{}"))
+		}
+		_ = zw.Close()
+		return buf.Bytes()
+	}
+	dir = filepath.Join(t.TempDir(), "target")
+	n, err := unzipFixtures(layout("orders_replay_test.go", "testdata/TestReplay_r/00001-a.json", "testdata/TestReplay_r/00002-b.json"), dir)
+	if entries, _ := os.ReadDir(dir); err != nil || n != 2 || len(entries) != 2 {
+		t.Errorf("F6 layout: %d %v, %d entries; want the two fixtures alone", n, err, len(entries))
+	}
+	if _, err := unzipFixtures(layout("testdata/A/00001-a.json", "testdata/B/00002-b.json"), t.TempDir()); err == nil {
+		t.Error("two test directories unzipped")
 	}
 }

@@ -31,7 +31,7 @@ import { FakeEventSource as StudioEventSource } from "../test/fake-event-source"
 import { FakeStudio, golden, hiddenRefusal, pagedEvents, pagedRequests } from "../test/fake-studio"
 import type { FakePosEvent } from "../test/fake-studio"
 import { $, all, assistant, ATTRS, baseRoutes, button, click, fakeStudio as panelStudio, META, mount, runExperiment, runRow, SESSION, settle, setup, T0, teardown, transcript, user } from "./testkit"
-import { keepPromptWords, SAVE_TEST_LABEL, SAVE_TEST_TITLE } from "../lib/saves"
+import { keepEditedTitle, keepPromptWords, SAVE_TEST_LABEL, SAVE_TEST_TITLE } from "../lib/saves"
 import { resetNotices } from "../lib/notify"
 import type { WeftDevtools } from "./element"
 import { buildRunBody as studioBody, emptyLab } from "../lib/experiment-body"
@@ -838,6 +838,11 @@ describe("the saves say the same words on both surfaces (F6.2)", () => {
     expect(link?.textContent).toBe(SAVE_TEST_LABEL)
     expect(link?.getAttribute("title")).toBe(SAVE_TEST_TITLE)
     await runExperiment(el)
+    // Its title is the playground card's (lib/saves.ts's keepEditedTitle).
+    expect(button(el, "keep as prompt ⤴")?.getAttribute("title")).toBe(
+      keepEditedTitle("acme-support", [...META.capabilities, ...CAPS], PLAY)
+    )
+    expect(button(el, "keep as prompt ⤴")?.getAttribute("title")).toBe("copy the edited prompt — a proposal needs the dev token")
     click(button(el, "keep as prompt ⤴"))
     await settle(20)
     const keepLine = keepPromptWords({ kind: "keep-prompt", agent: "acme-support", copied: true, proposal: "copy-only" }).title

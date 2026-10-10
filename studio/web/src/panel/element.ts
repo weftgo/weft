@@ -30,7 +30,7 @@ import { compactedRefusal, editsHandoff, emptyLab, LAB_LABELS, LAB_NEW, LAB_NUMB
 import type { LabFields } from "../lib/experiment-body"
 import { ackCatalogHole, badge, capLine, catalogCapped, catalogNotRecorded, catalogNotStored, catalogReadError, cutBadge, holeBadges, holeLine, noPublicIdWords, requestCapped, requestHole, turnChips } from "./badges"
 import { fetchHandoff, fetchSessionPublicId, MAX_REQUEST_PAGES, PanelApiError, panelGet, putProposal, REQUEST_PAGE } from "./client"
-import { keepPromptWords, mayExportTestWith, mayProposeWith, SAVE_TEST_LABEL, SAVE_TEST_TITLE } from "../lib/saves"
+import { keepEditedTitle, keepPromptWords, mayExportTestWith, mayProposeWith, SAVE_TEST_LABEL, SAVE_TEST_TITLE } from "../lib/saves"
 import type { KeepPrompt } from "../lib/saves"
 import type { AgentView } from "./client"
 import { diffLines, diffSummary } from "../lib/diff"
@@ -557,6 +557,8 @@ export class WeftDevtools extends HTMLElement {
   /** The API's honest line (a session lookup refused, a run not in the
    * conversation), drawn atop the turn list; "" for none. */
   private note = ""
+  /** The hand-off's slow-answer timer (handoff). */
+  private slow?: ReturnType<typeof setTimeout>
   /** The newest start or rescope apply began: the API's select and
    * session lookups run once it has settled. */
   private settling: Promise<unknown> = Promise.resolve()
@@ -698,6 +700,7 @@ export class WeftDevtools extends HTMLElement {
     window.removeEventListener("popstate", this.onURL)
     if (this.holdTimer) clearTimeout(this.holdTimer)
     this.holdTimer = null
+    clearTimeout(this.slow)
     this.held = this.composing = false
     this.startSeq++ // a start still in flight is no longer this element's
     this.probe?.abort()
@@ -1587,14 +1590,25 @@ export class WeftDevtools extends HTMLElement {
   private handoff(url: string): boolean {
     if (tokenScope(this.cfg.token) !== "playground" || !hasCapability(this.last, "handoff")) return false
     const u = new URL(url)
-    const slow = setTimeout(() => this.say(`open in Studio: ${url}`), 1000)
+    const origin = new URL(this.base).origin
+    clearTimeout(this.slow)
+    this.slow = setTimeout(() => this.say(`open in Studio: ${url}`), 1000)
     fetchHandoff(this.ep, u.pathname.slice(new URL(this.base).pathname.length - 1) + u.search).then(
       (r) => {
-        clearTimeout(slow)
-        openTab(r.location ? new URL(r.location, this.base).toString() : url)
+        clearTimeout(this.slow)
+        let to = url
+        try {
+          const l = new URL(r.location, this.base)
+          // A path under the base: anything off the endpoint's origin
+          // (or no URL at all) is not this hand-off's answer.
+          if (r.location && l.origin === origin) to = l.toString()
+        } catch {
+          // malformed: the plain link
+        }
+        openTab(to)
       },
       (e) => {
-        clearTimeout(slow)
+        clearTimeout(this.slow)
         openTab(url)
         if (!(e instanceof PanelApiError && (e.status === 403 || e.status === 404))) this.say(`open in Studio: ${e.message}`)
       }
@@ -3393,11 +3407,11 @@ export class WeftDevtools extends HTMLElement {
       el("span", undefined, stats),
       el("span", "weft-grow"),
     ])
-    // P4's saves (§3's row): keep-as-prompt is the copy-the-text
-    // fallback (PQ2: the weft/prompt version lands with that module);
-    // save-as-fixture hands off to Studio (the files download there).
+    // P4's saves (§3's row): keep-as-prompt copies the text and, under
+    // the dev token, proposes it (plan F6) — Studio's title; save-as-
+    // fixture hands off to Studio (the files download there).
     const keep = el("button", "weft-btn", "keep as prompt ⤴", {
-      title: "copy the edited prompt (weft/prompt versions are post-v1, PQ2)",
+      title: keepEditedTitle(this.model?.state.drawer?.agent ?? "", s.meta?.capabilities ?? [], this.cfg.token),
     })
     on(keep, "click", () => {
       const d = this.model?.state.drawer

@@ -162,6 +162,34 @@ describe("open in Studio under a playground panel token (setup C)", () => {
     expect(opened).toEqual([MINTED])
   })
 
+  for (const [name, loc] of [
+    ["a malformed location", "http://"],
+    ["a location off the endpoint's origin", "https://evil.example/studio/runs/s_01-t1#token=weft_pt.minted.sig"],
+  ] as const)
+    it(`${name}: the plain link, nothing thrown`, async () => {
+      const escaped: unknown[] = []
+      const onReject = (r: unknown) => escaped.push(r)
+      process.on("unhandledRejection", onReject)
+      studioWith({ location: loc })
+      const el = await mount({ ...ATTRS, "data-token": PLAYGROUND })
+      expect(await clickExpand(el)).toBe(true)
+      await settle(10)
+      process.off("unhandledRejection", onReject)
+      expect(opened).toEqual([PLAIN])
+      expect(escaped).toEqual([])
+    })
+
+  it("the slow-answer timer is cleared on disconnect: no stale note on reconnect", async () => {
+    studioWith(() => new Promise(() => {}))
+    const el = await mount({ ...ATTRS, "data-token": PLAYGROUND })
+    expand(el).dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
+    el.remove()
+    await new Promise((r) => setTimeout(r, 1100))
+    document.body.appendChild(el)
+    await settle()
+    expect($(el, ".weft-dock")?.textContent ?? "").not.toContain("open in Studio:")
+  })
+
   it("studioLink() stays the plain URL", async () => {
     studioWith({ location: LOCATION })
     const el = await mount({ ...ATTRS, "data-token": PLAYGROUND })

@@ -29,6 +29,11 @@ export interface Experiment {
   /** The thread mode the command was issued with (fork: no run id
    * until the turn is in flight — the runtime acks again naming it). */
   thread?: ThreadMode
+  /** The agent and instructions the command was issued with: the
+   * playground card's keep as prompt proposes these, never the live
+   * form (an agent switch or an edit after Run is another command's). */
+  agent?: string
+  instructions?: string
 }
 
 /** A fresh experiment for a command just issued. */

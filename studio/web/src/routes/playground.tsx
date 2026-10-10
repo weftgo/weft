@@ -68,7 +68,7 @@ import {
 import type { EditDraft, Engine, SideEffects, ThreadMode, VariantFields } from "@/lib/experiment-body"
 import { relativeTime, spanMs } from "@/lib/format"
 import { copyText, download } from "@/lib/json"
-import { mayProposeWith, PROPOSAL_NEEDS_DEV } from "@/lib/saves"
+import { keepEditedTitle } from "@/lib/saves"
 import { mintExperimentID, validExperimentID } from "@/lib/experiments"
 import { keepPrompt } from "@/components/studio/saves"
 import { useCapabilities } from "@/hooks/use-capabilities"
@@ -859,6 +859,8 @@ function Playground({ caps }: { caps: string[] }) {
     setResult(variantKey, (cur) => ({
       ...queued(out.command_id, cur?.label ?? variantKey),
       thread: cur?.thread,
+      agent: cur?.agent,
+      instructions: cur?.instructions,
       decided: {
         runID,
         calls: {
@@ -895,6 +897,8 @@ function Playground({ caps }: { caps: string[] }) {
       setResult(key, {
         ...queued(out.command_id, `${key}${sourceRunID ? ` · ${runLabel(sourceRunID)}` : ""}`),
         thread: variant.thread,
+        agent: agent.name,
+        instructions: variant.instructions,
       })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -1287,7 +1291,7 @@ function Playground({ caps }: { caps: string[] }) {
                     sourceText={sourceText}
                     sourceRunID={sourceRunID}
                     variant={v}
-                    agentName={agent?.name ?? ""}
+                    agentName={v.result?.agent ?? v.result?.row?.agent ?? agent?.name ?? ""}
                     tools={(agent?.tools ?? [])
                       .map((t) => t.name)
                       .filter((n) => !v.toolsOff.has(n))}
@@ -1595,14 +1599,10 @@ function ResultCard({
         )}
         <button
           className="text-faint hover:underline"
-          title={
-            agentName && mayProposeWith(caps, studioToken())
-              ? `copy the edited prompt and propose it as ${agentName}'s instructions (shown on the Agents page beside the registered ones)`
-              : `copy the edited prompt${caps.includes("proposals") ? ` — ${PROPOSAL_NEEDS_DEV}` : ""}`
-          }
+          title={keepEditedTitle(agentName, caps, studioToken())}
           data-keep-prompt
           onClick={() => {
-            void keepPrompt(caps, agentName, variant.instructions).then((stored) => {
+            void keepPrompt(caps, agentName, experiment.instructions ?? variant.instructions).then((stored) => {
               if (stored) void qc.invalidateQueries({ queryKey: ["manifest"] })
             })
           }}

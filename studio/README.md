@@ -1134,11 +1134,13 @@ of them under the same experiment id, compare two cells on the compare page,
 or "clone into the form", which reopens the playground on a draft holding the
 matrix's form — exactly, in any browser: the experiment saves the whole
 command (engine, side effects and thread per variant, `from_step`, the source
-run, transcript edits), and only a definition saved before that is read back
+run, transcript edits (none from a matrix)), and only a definition saved before that is read back
 from its runs. The matrix's name is free text; its id follows command_id's
 rule (`[A-Za-z0-9._:-]{1,128}`): a name that fits is its own id, any other is
-slugged with a nonce, an empty one is `exp_<time>`, and a reopened experiment
-keeps its id until you rename it. "Its runs" opens
+slugged with a per-page nonce, an empty one is `exp_<time>`, and a reopened
+experiment keeps its id until you rename it. Because of that nonce, the same
+out-of-rule name in another tab or after a reload makes a separate
+experiment; only a name that fits the rule re-runs the same one. "Its runs" opens
 `/runs?experiment_id=<id>`, which `/api/runs` filters. The playground
 keeps your form as a draft in this browser once you change it. `?exp=<draft
 id>` reopens it, and the drafts list opens or deletes the others. Drafts

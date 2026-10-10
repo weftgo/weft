@@ -380,7 +380,7 @@ describe("the Agents page: proposed beside registered (F6.2)", () => {
 })
 
 describe("the playground card's keep as prompt (F6.2 review)", () => {
-  it("copies the variant's instructions and proposes them for the agent", async () => {
+  const playgroundStudio = () => {
     const command = (state: string, run_id = "", status?: string) => ({
       command_id: "cmd_1",
       state,
@@ -418,15 +418,23 @@ describe("the playground card's keep as prompt (F6.2 review)", () => {
         json({ agent: "orders", proposed: { ...(req.body as object), instructions_hash: "h", since: "t" }, note: "" })
       )
       .install()
+    return s
+  }
+  const runA = async () => {
     renderApp("/playground?run=r_ok")
     const run = await screen.findByRole("button", { name: "Run A" })
     await waitFor(() => expect(run).toHaveProperty("disabled", false))
     fireEvent.click(run)
-    const keep = await waitFor(() => {
+    return waitFor(() => {
       const b = document.querySelector<HTMLElement>("button[data-keep-prompt]")
       expect(b).toBeTruthy()
       return b!
     })
+  }
+
+  it("copies the variant's instructions and proposes them for the agent", async () => {
+    const s = playgroundStudio()
+    const keep = await runA()
     fireEvent.click(keep)
     await waitFor(() => expect(s.calls("PUT agents/orders/proposal")).toHaveLength(1))
     expect(s.calls("PUT agents/orders/proposal")[0].body).toEqual({ instructions: copied[0] })
@@ -436,5 +444,15 @@ describe("the playground card's keep as prompt (F6.2 review)", () => {
         keepPromptWords({ kind: "keep-prompt", agent: "orders", copied: true, proposal: "proposed" }).title
       )
     )
+  })
+
+  it("proposes the instructions the card's command carried, not the form edited after Run", async () => {
+    const s = playgroundStudio()
+    const keep = await runA()
+    fireEvent.change(screen.getByLabelText("system prompt"), { target: { value: "edited after the run" } })
+    fireEvent.click(keep)
+    await waitFor(() => expect(s.calls("PUT agents/orders/proposal")).toHaveLength(1))
+    expect(s.calls("PUT agents/orders/proposal")[0].body).toEqual({ instructions: "You are support." })
+    expect(copied[0]).toBe("You are support.")
   })
 })

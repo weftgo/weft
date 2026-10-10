@@ -75,6 +75,16 @@ export const SAVE_TEST_LABEL = "save as test"
 export const SAVE_TEST_TITLE =
   "download this run as a wefttest replay test (a zip: <agent>_replay_test.go + testdata) — Studio writes nothing to your files"
 export const KEEP_PROMPT_LABEL = "keep as prompt"
+/** keepEditedTitle is the title of keep as prompt over an edited
+ * prompt — the playground card's and the panel drawer's alike: it
+ * proposes to agent where the identity may (mayProposeWith), else it
+ * copies, naming the dev token where Studio serves proposals. */
+export function keepEditedTitle(agent: string, capabilities: readonly string[], token: string): string {
+  return agent && mayProposeWith(capabilities, token)
+    ? `copy the edited prompt and propose it as ${agent}'s instructions (shown on the Agents page beside the registered ones)`
+    : `copy the edited prompt${capabilities.includes("proposals") ? ` — ${PROPOSAL_NEEDS_DEV}` : ""}`
+}
+
 /** What a panel token (or a Studio without proposals) is told. */
 export const PROPOSAL_NEEDS_DEV = "a proposal needs the dev token"
 /** The Agents page's pointer, said once. */

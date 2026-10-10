@@ -88,7 +88,7 @@ describe("the size ledger (panel-budget.json)", () => {
     expect(row("F2")).toMatch(/transcript editor \+ preview\s+\+4\.0 KiB\s+\+6\.\d KiB\s+over \(accepted\)$/) // F2 + its fixes: past half again its estimate, accepted
     expect(row("F1")).toMatch(/replay from here\s+\+3\.0 KiB\s+\+5\.1 KiB\s+over \(accepted\)$/) // F1 + its fixes: past half again its estimate, accepted
     expect(lines).toContain("baseline C1: 32,359 B")
-    expect(lines.find((l) => l.includes("unbudgeted"))).toMatch(/G1, C5\.2, D5, D5 fixes.*\+4\.2 KiB/)
+    expect(lines.find((l) => l.includes("unbudgeted"))).toMatch(/G1, C5\.2, D5, D5 fixes.*\+4\.3 KiB/)
     expect(lines.at(-1)).toBe("total 61,898 B (60.4 KiB) of 81,920 B · headroom 20,022 B (19.6 KiB)")
   })
 

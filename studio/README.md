@@ -988,8 +988,8 @@ starts: it puts the pairs on the request's context with `weft.WithMetadata`,
 so `Generate` and thread's `Send` under `r.Context()` carry it with no option
 passed (a run's own `weft.Metadata` wins). `scope.PageURLFromContext(ctx)`
 reads it in the handler; `scope.PageURL(r)` applies the rule to any request.
-Studio's run row serves it in `meta`, and the run page's "open in app"
-returns to that page with `#weft_scope=`.
+Studio's run row serves it in `meta`; the run page's "open in app" (plan
+G3, forthcoming with its web half) returns to that page with `#weft_scope=`.
 
 ## The playground (WEFT-PLAYGROUND.md)
 

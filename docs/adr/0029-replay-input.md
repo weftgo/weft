@@ -73,9 +73,11 @@ The request a replay sends is model-visible behaviour (AGENTS.md rule
    not be read — decision 3's thread path, a Studio older than
    `?step=`). An attribute, not model-visible; Studio draws the last
    two as the run's `derived` hole (`runs/{id}`'s `holes`, the
-   children rows, the export), its reason naming the mark and the
-   source step, so a fallback the user cannot see in the request is
-   never silent. Records that do not rebuild what a
+   export), its reason naming the mark and the source step, so a
+   fallback the user cannot see in the request is never silent. A
+   subagent child of the replay inherits the mark (core's Metadata)
+   but not the prefix — its input is its tool call's arguments — so
+   its row in `children` carries no such hole. Records that do not rebuild what a
    request names are a `*StepMessagesError` (`errors.Is` it
    `ErrStepMessages`) carrying its hole, never a guess: `gap` when the
    growth record a plain ref names is not stored (a lost view never

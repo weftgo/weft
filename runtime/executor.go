@@ -394,7 +394,7 @@ func validToolOverrides(o overrides, tools map[string]bool, def core.ToolChoiceC
 	if tc == nil {
 		if def.Mode == core.ToolChoiceNamed && len(o.OnlyTools)+len(o.ToolsEnabled) > 0 &&
 			!onTool(o, enabled, def.Name) {
-			return fmt.Sprintf("the agent's default tool_choice names %q, which this command turns off; send tool_choice", def.Name), false
+			return "the agent's default tool_choice names " + def.Name + ", which this command turns off; send tool_choice", false
 		}
 		if def.Mode == core.ToolChoiceNamed && parked[def.Name] {
 			// The explicit case's rule and sentence (below): a default
@@ -421,7 +421,7 @@ func validToolOverrides(o overrides, tools map[string]bool, def core.ToolChoiceC
 	case !tools[tc.Name]:
 		return fmt.Sprintf("unknown tool %q in tool_choice", tc.Name), false
 	case !on(tc.Name):
-		return fmt.Sprintf("tool_choice names %q, which this command turns off", tc.Name), false
+		return "tool_choice names " + tc.Name + ", which this command turns off", false
 	case parked[tc.Name]:
 		return parkedChoice(tc.Name), false
 	}

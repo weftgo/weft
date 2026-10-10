@@ -36,6 +36,12 @@ type registration struct {
 	// runtime's runs instead of an empty set that is not true.
 	Breakpoints []string            `json:"breakpoints"`
 	Agents      []agentRegistration `json:"agents"`
+	// HeartbeatMS is the link's ackHeartbeat in milliseconds: while a command is
+	// in this runtime's hands, its accepted ack is re-posted at this
+	// cadence (link.heartbeat), and Studio watches the command from the
+	// accepted ack on — a runtime that ran nothing and could not say so
+	// is marked lost, a long run that keeps beating is not.
+	HeartbeatMS int64 `json:"heartbeat_ms"`
 }
 
 // agentRegistration is one exposed agent: its core.Manifest (names,

@@ -670,3 +670,61 @@ func TestLateAcceptedAckIsRefused(t *testing.T) {
 	ack(t, rs, Ack{CommandID: "cmd_late", State: "finished", RunID: "pg_late", Status: "succeeded"})
 	waitState(t, rs, "cmd_late", StateFinished)
 }
+
+// TestAcceptedRowWatchedByHeartbeat pins the finish watch on a
+// connected runtime's accepted command (Registration.HeartbeatMS): a
+// runtime that heartbeats and then falls silent — its accepted ack's
+// response lost, it ran nothing and could not say so — has the row
+// marked lost after the watch although its stream stays open; one
+// whose heartbeats keep coming stays accepted however long it runs
+// (here well past FinishDeadline) and finishes; a runtime older than
+// the heartbeat (0) is not watched while connected, as before.
+func TestAcceptedRowWatchedByHeartbeat(t *testing.T) {
+	rs := fastServer()
+	rs.FinishDeadline = 40 * time.Millisecond // the watch: max(40 ms, 3 × 10 ms)
+	ts := httptest.NewServer(mux(rs))
+	defer ts.Close()
+	beating := regBody("rt_beat")
+	beating.HeartbeatMS = 10
+	register(t, mux(rs), beating)
+	register(t, mux(rs), regBody("rt_old"))
+	rb, closeB := subscribe(t, rs, ts.URL, "rt_beat", "")
+	defer closeB()
+	ro, closeO := subscribe(t, rs, ts.URL, "rt_old", "")
+	defer closeO()
+
+	// Silent after the accepted ack: lost, the stream still open.
+	mustEnqueue(t, rs, "rt_beat", Command{CommandID: "cmd_silent"})
+	nextRun(t, rb)
+	ack(t, rs, Ack{CommandID: "cmd_silent", State: "accepted", RunID: "pg_silent"})
+	st := waitState(t, rs, "cmd_silent", StateLost)
+	if want := "accepted, but no finish and no heartbeat from the runtime in 40ms"; st.Error == nil || *st.Error != want {
+		t.Errorf("lost reason = %v, want %q", st.Error, want)
+	}
+	if !rs.Connected("rt_beat") {
+		t.Error("the runtime's stream closed: the watch fired on a disconnect, not on silence")
+	}
+
+	// Beating: accepted for 3× FinishDeadline, then its finish lands.
+	mustEnqueue(t, rs, "rt_beat", Command{CommandID: "cmd_long"})
+	nextRun(t, rb)
+	ack(t, rs, Ack{CommandID: "cmd_long", State: "accepted", RunID: "pg_long"})
+	for end := time.Now().Add(3 * rs.FinishDeadline); time.Now().Before(end); {
+		time.Sleep(10 * time.Millisecond)
+		ack(t, rs, Ack{CommandID: "cmd_long", State: "accepted", RunID: "pg_long"})
+	}
+	if st, _ := rs.Command("cmd_long"); st.State != StateAccepted {
+		t.Fatalf("a heartbeating command is %+v, want accepted", st)
+	}
+	ack(t, rs, Ack{CommandID: "cmd_long", State: "finished", RunID: "pg_long", Status: "succeeded"})
+	waitState(t, rs, "cmd_long", StateFinished)
+
+	// An older runtime, connected: no watch.
+	mustEnqueue(t, rs, "rt_old", Command{CommandID: "cmd_old"})
+	nextRun(t, ro)
+	ack(t, rs, Ack{CommandID: "cmd_old", State: "accepted", RunID: "pg_old"})
+	time.Sleep(2 * rs.FinishDeadline)
+	if st, _ := rs.Command("cmd_old"); st.State != StateAccepted {
+		t.Errorf("an older runtime's connected command is %+v, want accepted (no heartbeat, no watch)", st)
+	}
+}

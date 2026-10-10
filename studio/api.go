@@ -843,7 +843,8 @@ func lostEvents(rec obsdb.RunRow, hasSpans bool) []badgeFields {
 //     run's missing positions may still be in flight;
 //   - derived: a playground replay whose prefix no request record
 //     placed — its weft.replay.view metadata (ADR 0029 §2) is derived
-//     or unknown (replayViewHole).
+//     or unknown (replayViewHole); never a child run, which inherits
+//     the mark but not the prefix.
 //
 // One one-event read answers the last two; truncated, redacted,
 // max_tokens and compacted are facts of an event or a step, badged
@@ -898,7 +899,15 @@ const attrReplayView = "weft.replay.view"
 // and fix the run's holes carry, "" for any other run. A truncation the
 // user cannot see is a hole with a reason: the replay ran, but on a
 // prefix that may not be what the source's model saw.
+//
+// A child run is never one: core's metadata is inherited, so a
+// Subagent child of a replay carries the parent's weft.replay.view and
+// weft.forked_from, but its input is its tool call's arguments, not a
+// cut prefix — the hole is the parent's alone.
 func replayViewHole(rec obsdb.RunRow) (reason, fix string) {
+	if rec.ParentRunID != "" {
+		return "", ""
+	}
 	at := "its source step"
 	if _, step, ok := strings.Cut(rec.ForkedFrom, "#"); ok && step != "" {
 		at = "step " + step + " of " + strings.TrimSuffix(rec.ForkedFrom, "#"+step)

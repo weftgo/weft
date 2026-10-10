@@ -41,9 +41,14 @@ type fakeStudio struct {
 	drop chan struct{}
 	// ackStatus, when set, is the status an ack is answered with (200
 	// otherwise) — a Studio that marked the command lost answers a late
-	// accepted ack 409.
+	// accepted ack 409. dropResponse (-1) records the ack and closes the
+	// connection without an answer: the response lost on the way back.
 	ackStatus func(ack) int
 }
+
+// dropResponse is the ackStatus that records the ack and answers
+// nothing (the connection closed): a transport error at the runtime.
+const dropResponse = -1
 
 func newFakeStudio(t *testing.T) *fakeStudio {
 	return &fakeStudio{
@@ -104,7 +109,17 @@ func (f *fakeStudio) handler() http.Handler {
 		status := f.ackStatus
 		f.mu.Unlock()
 		if status != nil {
-			w.WriteHeader(status(a))
+			code := status(a)
+			if code == dropResponse {
+				conn, _, err := w.(http.Hijacker).Hijack()
+				if err != nil {
+					f.t.Errorf("hijack: %v", err)
+					return
+				}
+				_ = conn.Close()
+				return
+			}
+			w.WriteHeader(code)
 			return
 		}
 		w.WriteHeader(200)
@@ -844,15 +859,17 @@ func TestLinkReportsBreakpointsAtRegistration(t *testing.T) {
 }
 
 // TestLinkRunsNothingOnARefusedAcceptedAck pins the at-most-once rule
-// across Studio's ack window: an accepted ack Studio answers non-200
-// (it marked the command lost — 409 — or forgot it) means Studio does
-// not hold the command accepted, so the runtime runs nothing — no model
-// call, no finished ack — rather than run a command a re-issue would
-// run again.
+// across Studio's ack window: an accepted ack Studio answers 409 (it
+// marked the command lost) means Studio does not hold the command
+// accepted, so the runtime runs nothing — no model call, no finished
+// ack — rather than run a command a re-issue would run again. The run
+// it reserved goes back to the experiment's cap: under a cap of one, the
+// next command of the same experiment is admitted and runs.
 func TestLinkRunsNothingOnARefusedAcceptedAck(t *testing.T) {
+	const late, next = "cmd_01JTEST0000000000000000LATE", "cmd_01JTEST0000000000000000NEXT"
 	fs := newFakeStudio(t)
 	fs.ackStatus = func(a ack) int {
-		if a.State == "accepted" {
+		if a.CommandID == late && a.State == "accepted" {
 			return http.StatusConflict
 		}
 		return http.StatusOK
@@ -864,17 +881,111 @@ func TestLinkRunsNothingOnARefusedAcceptedAck(t *testing.T) {
 	close(gate)
 	calls := make(chan struct{}, 4)
 	model := &gatedModel{model: wefttest.Script(wefttest.Say("ran")), gate: gate, calls: calls}
-	newTestLink(t, ts.URL, model, Budget{})
+	newTestLink(t, ts.URL, model, Budget{MaxRunsPerExperiment: 1})
 
-	fs.frames <- runFrame("cmd_01JTEST0000000000000000LATE")
+	fs.frames <- runFrame(late) // experiment exp_1
 	fs.waitAck(t, 1)
-	time.Sleep(100 * time.Millisecond)
+	fs.frames <- runFrame(next) // exp_1 again: admitted only if late's run went back
+	if a := fs.ackOf(t, next, "finished"); a.Status != "succeeded" {
+		t.Errorf("the next command's finished ack = %+v, want succeeded: the refused command's run was not given back", a)
+	}
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
-	if len(fs.acks) != 1 || fs.acks[0].State != "accepted" {
-		t.Errorf("acks = %+v, want the refused accepted ack alone", fs.acks)
+	var lateAcks []ack
+	for _, a := range fs.acks {
+		if a.CommandID == late {
+			lateAcks = append(lateAcks, a)
+		}
+	}
+	if len(lateAcks) != 1 || lateAcks[0].State != "accepted" {
+		t.Errorf("late acks = %+v, want the refused accepted ack alone (a 409 settles nothing)", lateAcks)
+	}
+	if n := len(calls); n != 1 {
+		t.Errorf("model calls = %d, want 1 (the next command's): a command Studio did not take as accepted ran", n)
+	}
+}
+
+// TestLinkSettlesAnUnconfirmedAcceptedAck pins the other half: an
+// accepted ack Studio may have recorded — the response lost on the way
+// back — runs nothing either, and is followed by a finished ack, failed
+// "not run", so the row Studio may hold accepted settles instead of
+// waiting on a finish that never comes.
+func TestLinkSettlesAnUnconfirmedAcceptedAck(t *testing.T) {
+	const cmd = "cmd_01JTEST00000000000000DROP"
+	fs := newFakeStudio(t)
+	fs.ackStatus = func(a ack) int {
+		if a.State == "accepted" {
+			return dropResponse
+		}
+		return http.StatusOK
+	}
+	ts := httptest.NewServer(fs.handler())
+	t.Cleanup(ts.Close)
+	gate := make(chan struct{})
+	close(gate)
+	calls := make(chan struct{}, 4)
+	model := &gatedModel{model: wefttest.Script(wefttest.Say("ran")), gate: gate, calls: calls}
+	l := newTestLink(t, ts.URL, model, Budget{MaxRunsPerExperiment: 1})
+
+	fs.frames <- runFrame(cmd)
+	a := fs.ackOf(t, cmd, "finished")
+	if a.Status != "failed" || a.Error != notConfirmed || a.RunID != "" {
+		t.Errorf("finished ack = %+v, want failed %q naming no run", a, notConfirmed)
 	}
 	if n := len(calls); n != 0 {
-		t.Errorf("model calls = %d, want 0: a command Studio did not take as accepted ran", n)
+		t.Errorf("model calls = %d, want 0", n)
+	}
+	l.mu.Lock()
+	runs := l.tally["exp_1"].runs
+	l.mu.Unlock()
+	if runs != 0 {
+		t.Errorf("exp_1 counts %d run(s), want 0: the command never ran", runs)
+	}
+}
+
+// TestLinkHeartbeatsAnAcceptedCommand pins the heartbeat: while a
+// command is in the runtime's hands its accepted ack is re-posted every
+// ackHeartbeat, naming the same run, and the registration says the
+// cadence (Studio watches accepted rows only for a runtime that beats).
+func TestLinkHeartbeatsAnAcceptedCommand(t *testing.T) {
+	defer func(d time.Duration) { ackHeartbeat = d }(ackHeartbeat)
+	ackHeartbeat = 10 * time.Millisecond
+	const cmd = "cmd_01JTEST00000000000000BEAT"
+	fs := newFakeStudio(t)
+	ts := httptest.NewServer(fs.handler())
+	t.Cleanup(ts.Close)
+	gate := make(chan struct{})
+	calls := make(chan struct{}, 4)
+	model := &gatedModel{model: wefttest.Script(wefttest.Say("ran")), gate: gate, calls: calls}
+	newTestLink(t, ts.URL, model, Budget{})
+
+	fs.frames <- runFrame(cmd)
+	first := fs.ackOf(t, cmd, "accepted")
+	deadline := time.Now().Add(5 * time.Second)
+	for beats := 0; beats < 3; {
+		if time.Now().After(deadline) {
+			t.Fatalf("%d accepted acks while the run is held, want 3", beats)
+		}
+		time.Sleep(5 * time.Millisecond)
+		fs.mu.Lock()
+		beats = 0
+		for _, a := range fs.acks {
+			if a.CommandID == cmd && a.State == "accepted" {
+				beats++
+				if a.RunID != first.RunID {
+					t.Errorf("a heartbeat names run %q, the accepted ack %q", a.RunID, first.RunID)
+				}
+			}
+		}
+		fs.mu.Unlock()
+	}
+	close(gate)
+	if a := fs.ackOf(t, cmd, "finished"); a.Status != "succeeded" {
+		t.Errorf("finished ack = %+v", a)
+	}
+	fs.mu.Lock()
+	defer fs.mu.Unlock()
+	if got := fs.registrations[0].HeartbeatMS; got != 10 {
+		t.Errorf("registration heartbeat_ms = %d, want 10", got)
 	}
 }

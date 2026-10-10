@@ -357,6 +357,112 @@ func TestSecondDecisionOnACallIsRejected(t *testing.T) {
 	}
 }
 
+// TestRefusedDecisionAckRestoresThePark pins dispatchDecision's
+// at-most-once rule on the decision that completes the set: its
+// accepted ack refused (409), the resume does not run and the park
+// goes back without the decision — no finished ack — so deciding again
+// resumes it. Unconfirmed (the response lost), the same, plus a
+// finished ack, failed "not run", settling the row Studio may hold.
+func TestRefusedDecisionAckRestoresThePark(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		status int
+		settle string // the refused decision's finished ack error, "" none
+	}{
+		{"refused", http.StatusConflict, ""},
+		{"unconfirmed", dropResponse, notConfirmed + "; decide again to resume"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			l, f, _ := decisionLink(t, "c1")
+			f.mu.Lock()
+			f.ackStatus = func(a ack) int {
+				if a.CommandID == "cmd_d1" && a.State == "accepted" {
+					return c.status
+				}
+				return http.StatusOK
+			}
+			f.mu.Unlock()
+			decide(t, l, nil, approvalDecision{CommandID: "cmd_d1", RunID: "pg_parked", CallID: "c1", Decision: "approve"})
+			l.mu.Lock()
+			pr := l.parked["pg_parked"]
+			held := 0
+			if pr != nil {
+				held = len(pr.decisions)
+			}
+			l.mu.Unlock()
+			if pr == nil || held != 0 {
+				t.Fatalf("after a refused accepted ack: park %v holding %d decision(s), want it back with none", pr != nil, held)
+			}
+			f.mu.Lock()
+			var fin []ack
+			for _, a := range f.acks {
+				if a.CommandID == "cmd_d1" && a.State == "finished" {
+					fin = append(fin, a)
+				}
+			}
+			f.mu.Unlock()
+			switch {
+			case c.settle == "" && len(fin) != 0:
+				t.Errorf("finished acks %+v after a 409, want none", fin)
+			case c.settle != "" && (len(fin) != 1 || fin[0].Status != "failed" || fin[0].Error != c.settle):
+				t.Errorf("finished acks %+v, want one failed %q", fin, c.settle)
+			}
+
+			// Deciding again resumes it: accepted, the park taken, finished.
+			decide(t, l, nil, approvalDecision{CommandID: "cmd_d2", RunID: "pg_parked", CallID: "c1", Decision: "approve"})
+			f.ackOf(t, "cmd_d2", "accepted")
+			f.ackOf(t, "cmd_d2", "finished")
+			l.mu.Lock()
+			_, still := l.parked["pg_parked"]
+			l.mu.Unlock()
+			if still {
+				t.Error("the re-decision did not resume the run: still parked")
+			}
+		})
+	}
+}
+
+// TestRefusedHeldDecisionIsNotHeld pins the decision that does not
+// complete the set (two calls parked, one decided): its accepted ack
+// refused, the decision is not held either — no finished ack — so a
+// re-decision on the same call is taken, not refused "already
+// decided".
+func TestRefusedHeldDecisionIsNotHeld(t *testing.T) {
+	l, f, pr := decisionLink(t, "c1", "c2")
+	f.mu.Lock()
+	f.ackStatus = func(a ack) int {
+		if a.CommandID == "cmd_d1" && a.State == "accepted" {
+			return http.StatusConflict
+		}
+		return http.StatusOK
+	}
+	f.mu.Unlock()
+	decide(t, l, nil, approvalDecision{CommandID: "cmd_d1", RunID: "pg_parked", CallID: "c1", Decision: "approve"})
+	l.mu.Lock()
+	held := len(pr.decisions)
+	l.mu.Unlock()
+	if held != 0 {
+		t.Errorf("the park holds %d decision(s) after a refused accepted ack, want none", held)
+	}
+	f.mu.Lock()
+	for _, a := range f.acks {
+		if a.CommandID == "cmd_d1" && a.State == "finished" {
+			t.Errorf("a finished ack after a 409: %+v", a)
+		}
+	}
+	f.mu.Unlock()
+	decide(t, l, nil, approvalDecision{CommandID: "cmd_d2", RunID: "pg_parked", CallID: "c1", Decision: "deny"})
+	if a := f.ackOf(t, "cmd_d2", "finished"); a.Status != "succeeded" {
+		t.Errorf("the re-decision's finished ack = %+v, want succeeded (held)", a)
+	}
+	l.mu.Lock()
+	got := pr.decisions["c1"].Decision
+	l.mu.Unlock()
+	if got != "deny" {
+		t.Errorf("c1's held decision = %q, want the re-decision (deny)", got)
+	}
+}
+
 // TestDecisionCanceledBeforeItsSlotKeepsThePark pins the resume that
 // never started: the decision completing the set takes the park, and
 // when it is canceled waiting for a run slot (sixteen runs busy) the
@@ -1083,5 +1189,38 @@ func TestValidateIsBoundedByTheAckWindow(t *testing.T) {
 	}
 	if d := time.Since(start); d > 2*time.Second {
 		t.Errorf("validate took %v on a stalled source: past validate's deadline", d)
+	}
+}
+
+// TestValidatePastTheDeadlineIsRefused pins validate's own branch: a
+// validation that succeeds — every check passed — but only after its
+// deadline (a step that ignored ctx) is refused in validate's sentence,
+// never acked accepted after Studio's ack window closed.
+func TestValidatePastTheDeadlineIsRefused(t *testing.T) {
+	defer func(v time.Duration) { validateTimeout = v }(validateTimeout)
+	validateTimeout = 20 * time.Millisecond
+
+	agent := core.New(wefttest.Script(wefttest.Say("own")), core.Name("a"))
+	cfg := &config{agents: []*core.Agent{agent}}
+	l := newLink(cfg, newRegistry(cfg), "http://127.0.0.1:1", "") // no Studio there
+	defer l.stop()
+	in := "and order 9?"
+	cmd := func() *command {
+		// A fresh input on a source nobody holds: validated, and run on
+		// the input alone (prepareSource's fallback).
+		return &command{CommandID: "cmd_late", Agent: "a", Thread: "ephemeral", Engine: "live",
+			Source: &sourceSpec{RunID: "r_gone"}, Input: &in}
+	}
+	ctx := context.Background()
+	l.localDB = func() obsdb.DB { return nil }
+	if reason, ok := l.validate(ctx, cmd()); !ok {
+		t.Fatalf("in time: %s", reason)
+	}
+	// A local-sink lookup that ignores the deadline: every check still
+	// passes, just past validateTimeout.
+	l.localDB = func() obsdb.DB { time.Sleep(3 * validateTimeout); return nil }
+	want := fmt.Sprintf("validation took longer than %s, past Studio's ack window: the command is not run", validateTimeout)
+	if reason, ok := l.validate(ctx, cmd()); ok || reason != want {
+		t.Errorf("late: %v %q, want %q", ok, reason, want)
 	}
 }

@@ -676,7 +676,7 @@ func TestValidateOptionLab(t *testing.T) {
 		{"tool_choice name without named", `takes no name`, overrides{ToolChoice: &toolChoiceWire{Mode: "any", Name: "refund"}}},
 		{"tool_choice named without a name", "needs a tool name", overrides{ToolChoice: &toolChoiceWire{Mode: "named"}}},
 		{"tool_choice named unknown", `unknown tool "nope" in tool_choice`, overrides{ToolChoice: &toolChoiceWire{Mode: "named", Name: "nope"}}},
-		{"tool_choice named off", `tool_choice names "refund", which this command turns off`,
+		{"tool_choice named off", `tool_choice names refund, which this command turns off`,
 			overrides{OnlyTools: []string{"lookup_order"}, ToolChoice: &toolChoiceWire{Mode: "named", Name: "refund"}}},
 		{"tool_choice named off by tools_enabled", `which this command turns off`,
 			overrides{ToolsEnabled: []string{"lookup_order"}, ToolChoice: &toolChoiceWire{Mode: "named", Name: "refund"}}},
@@ -719,7 +719,7 @@ func TestValidateAgentDefaultToolChoice(t *testing.T) {
 	}
 	for _, o := range []overrides{{OnlyTools: []string{"lookup_order"}}, {ToolsEnabled: []string{"lookup_order"}}} {
 		reason, ok := l.validate(context.Background(), cmd(o))
-		if want := `the agent's default tool_choice names "classify", which this command turns off; send tool_choice`; ok || reason != want {
+		if want := `the agent's default tool_choice names classify, which this command turns off; send tool_choice`; ok || reason != want {
 			t.Errorf("%+v: reason = %q ok = %v, want %q", o, reason, ok, want)
 		}
 	}

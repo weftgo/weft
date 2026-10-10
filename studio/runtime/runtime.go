@@ -57,6 +57,15 @@ type Registration struct {
 	// the runtime adopts this one (serveRegister).
 	Breakpoints []string            `json:"breakpoints"`
 	Agents      []AgentRegistration `json:"agents"`
+	// HeartbeatMS is the cadence, in milliseconds, at which the runtime
+	// re-posts a command's accepted ack while the command is in its
+	// hands (waiting for a run slot, running) — its word that the
+	// command is still alive. A runtime that heartbeats gets a finish
+	// watch on every accepted command (serveAcks), so a lost response
+	// to the accepted ack cannot leave the row accepted forever while
+	// the stream stays open; one older than the heartbeat sends 0 and
+	// gets the watch only when its stream ends, as before.
+	HeartbeatMS int64 `json:"heartbeat_ms"`
 }
 
 // AgentRegistration is one exposed agent. Resolver says the runtime
@@ -560,6 +569,11 @@ type commandRow struct {
 	updated   time.Time
 	ackTimer  *time.Timer
 	lostTimer *time.Timer
+	// beat is the heartbeat cadence the row's finish watch was armed
+	// for (armBeatLocked): non-zero, a repeated accepted ack restarts
+	// the watch. Zero, the watch (if any) is the disconnect sweep's and
+	// keeps its deadline.
+	beat time.Duration
 }
 
 // New builds an empty RuntimeServer with §10.5's timers.
@@ -939,10 +953,12 @@ func (rs *RuntimeServer) serveAcks(w http.ResponseWriter, r *http.Request) {
 	// The timers stop only when the ack moves the row: a repeated ack
 	// (a retried POST) on an accepted row must not cancel the finish
 	// watch the disconnect sweep armed, or the row stays accepted
-	// forever.
+	// forever. A heartbeat's repeated ack restarts its own watch
+	// (armBeatLocked): the runtime says the command is still alive.
 	switch a.State {
 	case "accepted":
-		if row.state == StateQueued {
+		switch row.state {
+		case StateQueued:
 			rs.stopTimersLocked(row)
 			row.state = StateAccepted
 			row.runID = a.RunID
@@ -954,14 +970,29 @@ func (rs *RuntimeServer) serveAcks(w http.ResponseWriter, r *http.Request) {
 				// runtime that never finishes leaves the row accepted
 				// forever (the audit's P2-10).
 				rs.armLostLocked(row, rs.FinishDeadline, "accepted while the runtime was disconnected, no finish")
+			} else {
+				// Connected: a runtime that heartbeats is watched from
+				// the accepted ack on. Its own word keeps a long run
+				// accepted; silence — the ack's response lost and the
+				// runtime ran nothing, or a runtime gone without its
+				// stream noticing — ends it lost after the watch.
+				rs.armBeatLocked(row, c.reg.HeartbeatMS)
 			}
-		} else if row.state == StateAccepted && row.runID == "" && a.RunID != "" {
-			// A fork's turn: the first accepted ack names no run (its
-			// session mints the id at Send), the runtime acks again once
-			// the turn is in flight, naming it — so the panel can follow
-			// and steer the run before it finishes.
-			row.runID = a.RunID
-			row.updated = rs.now()
+		case StateAccepted:
+			if row.runID == "" && a.RunID != "" {
+				// A fork's turn: the first accepted ack names no run (its
+				// session mints the id at Send), the runtime acks again
+				// once the turn is in flight, naming it — so the panel can
+				// follow and steer the run before it finishes.
+				row.runID = a.RunID
+				row.updated = rs.now()
+			}
+			if row.beat > 0 {
+				// A heartbeat: the command is alive in the runtime's
+				// hands, so its watch starts over.
+				rs.stopTimersLocked(row)
+				rs.armBeatLocked(row, row.beat.Milliseconds())
+			}
 		}
 	case "rejected":
 		if row.state == StateQueued || row.state == StateLost {
@@ -1267,13 +1298,37 @@ func (rs *RuntimeServer) armLostLocked(row *commandRow, d time.Duration, why str
 		// timer stopTimersLocked can no longer reach.
 		return
 	}
-	row.lostTimer = time.AfterFunc(d, func() {
+	// The callback checks it is still the row's watch: one a heartbeat
+	// replaced (armBeatLocked) may already have fired and be waiting on
+	// mu, and must not mark lost a command its runtime just vouched for.
+	// The assignment happens under mu, before the callback can take it.
+	var t *time.Timer
+	t = time.AfterFunc(d, func() {
 		rs.mu.Lock()
 		defer rs.mu.Unlock()
-		if row.state == StateAccepted {
+		if row.lostTimer == t && row.state == StateAccepted {
 			rs.transitionLocked(row, StateLost, why)
 		}
 	})
+	row.lostTimer = t
+}
+
+// armBeatLocked starts the finish watch of an accepted command whose
+// runtime heartbeats every beatMS (Registration.HeartbeatMS; 0 arms
+// nothing — an older runtime, watched only once its stream ends). The
+// watch is FinishDeadline, or three heartbeats when that is longer, so
+// a run kept alive by its heartbeats is never marked lost however long
+// it takes, and a command nobody is running any more — its accepted
+// ack's response lost, the runtime ran nothing and its settling ack
+// failed too — is lost after it. Each heartbeat re-arms it.
+func (rs *RuntimeServer) armBeatLocked(row *commandRow, beatMS int64) {
+	if beatMS <= 0 || rs.FinishDeadline <= 0 {
+		return
+	}
+	beat := time.Duration(beatMS) * time.Millisecond
+	d := max(rs.FinishDeadline, 3*beat)
+	rs.armLostLocked(row, d, fmt.Sprintf("accepted, but no finish and no heartbeat from the runtime in %s", d))
+	row.beat = beat
 }
 
 // transitionLocked moves a row to a terminal state with a reason.
@@ -1294,6 +1349,7 @@ func (rs *RuntimeServer) stopTimersLocked(row *commandRow) {
 		row.lostTimer.Stop()
 		row.lostTimer = nil
 	}
+	row.beat = 0
 }
 
 // view renders the row in §10.4's shape.

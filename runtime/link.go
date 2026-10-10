@@ -79,6 +79,10 @@ type link struct {
 	ctx    context.Context // the link's life: every run this link starts hangs off it
 	cancel context.CancelFunc
 	done   chan struct{}
+	// beat is ackHeartbeat as the link was built: the heartbeat cadence
+	// and the registration's heartbeat_ms (one read, so a test that
+	// shortens the var races no link another test left running).
+	beat time.Duration
 	// started is set by start, before its goroutine exists: stop waits
 	// for the connect loop only when there is one.
 	started bool
@@ -110,6 +114,7 @@ type link struct {
 // socket), else a plain HTTP client on url.
 func newLink(c *config, reg *registry, url, token string) *link {
 	l := &link{
+		beat:        ackHeartbeat,
 		cfg:         c,
 		reg:         reg,
 		localDB:     otel.LocalDB,
@@ -236,6 +241,7 @@ func (l *link) connect(ctx context.Context) error {
 func (l *link) register(ctx context.Context) error {
 	reg := l.reg.registration(l.id)
 	reg.Breakpoints = l.breakpointSet()
+	reg.HeartbeatMS = l.beat.Milliseconds()
 	body, err := json.Marshal(reg)
 	if err != nil {
 		return err
@@ -539,18 +545,20 @@ func (l *link) dispatch(ctx context.Context, cmd command) {
 		// exists.
 		acked = ""
 	}
-	if !l.postAck(ack{CommandID: cmd.CommandID, State: "accepted", RunID: acked}) {
+	if res := l.postAck(ack{CommandID: cmd.CommandID, State: "accepted", RunID: acked}); res != ackTaken {
 		// Studio does not hold the command accepted — it marked it lost
 		// (no ack inside its window: validation ran long) and answered
-		// the late ack 409, or the ack never reached it. Running now
+		// the late ack 409 — or did not confirm it did. Running now
 		// would run a command Studio may already show lost, and a
 		// re-issue would run it twice: nothing runs.
 		l.unreserve(cmd)
+		l.settleUnconfirmed(cmd.CommandID, res, notConfirmed)
 		slog.Warn("weft/runtime: the accepted ack was not taken; the command is not run",
 			"command_id", cmd.CommandID)
 		return
 	}
 	accepted = true
+	defer l.heartbeat(cmd.CommandID, acked)()
 
 	if !l.slot(ctx) {
 		// It never ran: its run goes back to the experiment's cap.
@@ -648,7 +656,21 @@ func (l *link) dispatchDecision(ctx context.Context, d approvalDecision) {
 		return
 	}
 	if !complete {
-		l.postAck(ack{CommandID: d.CommandID, State: "accepted", RunID: d.RunID})
+		if res := l.postAck(ack{CommandID: d.CommandID, State: "accepted", RunID: d.RunID}); res != ackTaken {
+			// Not held accepted by Studio: the decision is not held here
+			// either, so deciding again is not told "already decided" —
+			// unless another decision completed the set meanwhile and
+			// its resume took this one with it (the park is gone).
+			l.mu.Lock()
+			if l.parked[d.RunID] == ps && ps.decisions[d.CallID] == d {
+				delete(ps.decisions, d.CallID)
+			}
+			l.mu.Unlock()
+			l.settleUnconfirmed(d.CommandID, res, notConfirmed+"; decide again")
+			slog.Warn("weft/runtime: the accepted ack was not taken; the decision is not held",
+				"command_id", d.CommandID)
+			return
+		}
 		l.postAck(ack{CommandID: d.CommandID, State: "finished", RunID: d.RunID, Status: "succeeded"})
 		return
 	}
@@ -658,15 +680,17 @@ func (l *link) dispatchDecision(ctx context.Context, d approvalDecision) {
 	if ps.sess != nil {
 		acked = "" // a fork's resume is its session's next turn (see dispatch)
 	}
-	if !l.postAck(ack{CommandID: d.CommandID, State: "accepted", RunID: acked}) {
+	if res := l.postAck(ack{CommandID: d.CommandID, State: "accepted", RunID: acked}); res != ackTaken {
 		// Not held accepted by Studio (dispatch's rule): the resume does
 		// not run, and the park goes back without this decision.
 		l.restorePark(d.RunID, ps, d.CallID)
+		l.settleUnconfirmed(d.CommandID, res, notConfirmed+"; decide again to resume")
 		slog.Warn("weft/runtime: the accepted ack was not taken; the decision is not applied",
 			"command_id", d.CommandID)
 		return
 	}
 	accepted = true
+	defer l.heartbeat(d.CommandID, acked)()
 
 	if !l.slot(ctx) {
 		// The resume never started: the park goes back, without this
@@ -697,41 +721,118 @@ func (l *link) lastEventID() string {
 	return l.lastID
 }
 
+// ackResult is what postAck learned of Studio's answer.
+type ackResult int
+
+const (
+	// ackTaken: Studio answered 200.
+	ackTaken ackResult = iota
+	// ackRefused: Studio answered and said no — 409 (it marked the
+	// command lost before this accepted ack), 404 (it forgot the
+	// command), 400 — or the ack was never sent. Studio does not hold
+	// the command accepted.
+	ackRefused
+	// ackUnconfirmed: no answer — a transport error (a client timeout,
+	// a reset connection) or a 5xx from whatever stands between. Studio
+	// may have recorded the ack and lost only its response.
+	ackUnconfirmed
+)
+
+// notConfirmed is the finished ack's error for a command whose accepted
+// ack Studio never confirmed (settleUnconfirmed).
+const notConfirmed = "not run: the accepted ack was not confirmed"
+
 // postAck is POST /api/runtime/acks. Best effort: a failed ack is
 // logged, never retried beyond the next command's own traffic — the
-// lost-command state machine on Studio's side is the backstop. ok is
-// true when Studio answered 200: an accepted ack that is not (refused —
-// Studio already marked the command lost, or forgot it — or never
-// delivered) is a command Studio does not hold accepted, so its caller
-// runs nothing (§5.3's at-most-once: a re-issue would run it twice).
-func (l *link) postAck(a ack) (ok bool) {
+// lost-command state machine on Studio's side is the backstop. An
+// accepted ack that is not ackTaken is a command Studio may not hold
+// accepted, so its caller runs nothing (§5.3's at-most-once: a re-issue
+// would run it twice).
+func (l *link) postAck(a ack) ackResult {
 	if len(a.Error) > maxAckError {
 		a.Error = a.Error[:maxAckError] + "…"
 	}
 	body, err := json.Marshal(a)
 	if err != nil {
-		return false
+		return ackRefused
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), ackTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, l.url("/api/runtime/acks"), bytes.NewReader(body))
 	if err != nil {
-		return false
+		return ackRefused
 	}
 	req.Header.Set("Content-Type", "application/json")
 	bearerAuth(req, l.token)
 	resp, err := l.client.Do(req)
 	if err != nil {
 		slog.Warn("weft/runtime: ack failed", "command_id", a.CommandID, "state", a.State, "err", err)
-		return false
+		return ackUnconfirmed
 	}
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
 	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
+	switch {
+	case resp.StatusCode == http.StatusOK:
+		return ackTaken
+	case resp.StatusCode >= 500:
+		slog.Warn("weft/runtime: ack unconfirmed", "command_id", a.CommandID, "state", a.State, "status", resp.Status)
+		return ackUnconfirmed
+	default:
 		slog.Warn("weft/runtime: ack refused", "command_id", a.CommandID, "state", a.State, "status", resp.Status)
-		return false
+		return ackRefused
 	}
-	return true
+}
+
+// ackTimeout bounds one ack's POST.
+const ackTimeout = 10 * time.Second
+
+// settleUnconfirmed follows an accepted ack the runtime acted on as not
+// taken (nothing runs). Unconfirmed, Studio may hold the command
+// accepted with only the response lost: a finished ack, failed with
+// why, settles the row instead of leaving it accepted until Studio's
+// watch (best effort; the watch is the backstop). Refused, Studio
+// already holds it lost or unknown: nothing is posted.
+func (l *link) settleUnconfirmed(commandID string, res ackResult, why string) {
+	if res != ackUnconfirmed {
+		return
+	}
+	l.postAck(ack{CommandID: commandID, State: "finished", Status: "failed", Error: why})
+}
+
+// ackHeartbeat is the cadence at which a command's accepted ack is
+// re-posted while the command is in this runtime's hands (heartbeat);
+// registration reports it as heartbeat_ms. A link reads it once, when
+// built (link.beat). Studio watches an accepted
+// command for max(its FinishDeadline, three heartbeats) from the last
+// one. A var so a test can shorten it.
+var ackHeartbeat = time.Minute
+
+// heartbeat re-posts commandID's accepted ack (naming runID, as the
+// first did) every ackHeartbeat until the returned stop is called —
+// the runtime's word to Studio that the command is alive however long
+// it runs. Best effort: a missed beat is a late one, and an answer
+// other than 200 (the row already finished, or marked lost) changes
+// nothing here.
+func (l *link) heartbeat(commandID, runID string) (stop func()) {
+	if l.beat <= 0 {
+		return func() {}
+	}
+	done := make(chan struct{})
+	go func() {
+		t := time.NewTicker(l.beat)
+		defer t.Stop()
+		for {
+			select {
+			case <-t.C:
+				l.postAck(ack{CommandID: commandID, State: "accepted", RunID: runID})
+			case <-done:
+				return
+			case <-l.ctx.Done():
+				return
+			}
+		}
+	}()
+	return func() { close(done) }
 }
 
 // url resolves a server-relative Studio path against the link's base.

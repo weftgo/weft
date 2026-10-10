@@ -300,7 +300,8 @@ func TestOneSentenceOnBothSides(t *testing.T) {
 	}) (string, error) {
 		return "order " + in.OrderID, nil
 	})
-	forced := core.New(wefttest.Script(wefttest.Say("ok")), core.Name("forced"), lookup,
+	track := core.Tool("track", "Track a parcel.", func(_ context.Context, in struct{}) (string, error) { return "moving", nil })
+	forced := core.New(wefttest.Script(wefttest.Say("ok")), core.Name("forced"), lookup, track,
 		core.ToolChoice(core.ToolChoiceConfig{Mode: core.ToolChoiceNamed, Name: "lookup"}))
 	fcfg := &config{agents: []*core.Agent{forced}}
 	fl := newLink(fcfg, newRegistry(fcfg), ts.URL, "")
@@ -310,17 +311,28 @@ func TestOneSentenceOnBothSides(t *testing.T) {
 		t.Fatal(err)
 	}
 	const parked = "tool_choice names lookup, which park_on parks: every forced call would park"
-	for name, o := range map[string]overrides{
-		"the agent's default": {ParkOn: []string{"lookup"}},
-		"the command's own":   {ParkOn: []string{"lookup"}, ToolChoice: &toolChoiceWire{Mode: "named", Name: "lookup"}},
+	// And the turned-off rule's two sentences: a named tool_choice the
+	// command's tool set leaves off — the agent's default, or its own.
+	for name, c := range map[string]struct {
+		o    overrides
+		want string
+	}{
+		"the agent's default parked": {overrides{ParkOn: []string{"lookup"}}, parked},
+		"the command's own parked": {overrides{ParkOn: []string{"lookup"},
+			ToolChoice: &toolChoiceWire{Mode: "named", Name: "lookup"}}, parked},
+		"the agent's default turned off": {overrides{ToolsEnabled: []string{"track"}},
+			"the agent's default tool_choice names lookup, which this command turns off; send tool_choice"},
+		"the command's own turned off": {overrides{ToolsEnabled: []string{"track"},
+			ToolChoice: &toolChoiceWire{Mode: "named", Name: "lookup"}},
+			"tool_choice names lookup, which this command turns off"},
 	} {
-		body := previewBody{Runtime: fl.id, Agent: "forced", Source: &sourceSpec{RunID: "r_os", FromStep: 1}, Overrides: o}
-		if code, msg := postStudio(t, ts.URL, "/api/playground/preview", body); code != http.StatusBadRequest || msg != parked {
-			t.Errorf("%s parked: Studio = %d %q, want 400 %q", name, code, msg, parked)
+		body := previewBody{Runtime: fl.id, Agent: "forced", Source: &sourceSpec{RunID: "r_os", FromStep: 1}, Overrides: c.o}
+		if code, msg := postStudio(t, ts.URL, "/api/playground/preview", body); code != http.StatusBadRequest || msg != c.want {
+			t.Errorf("%s: Studio = %d %q, want 400 %q", name, code, msg, c.want)
 		}
-		cmd := command{CommandID: "cmd_park", Agent: "forced", Engine: "live", Source: body.Source, Overrides: o}
-		if reason, ok := fl.validate(ctx, &cmd); ok || reason != parked {
-			t.Errorf("%s parked: runtime = %v %q, want %q", name, ok, reason, parked)
+		cmd := command{CommandID: "cmd_park", Agent: "forced", Engine: "live", Source: body.Source, Overrides: c.o}
+		if reason, ok := fl.validate(ctx, &cmd); ok || reason != c.want {
+			t.Errorf("%s: runtime = %v %q, want %q", name, ok, reason, c.want)
 		}
 	}
 }

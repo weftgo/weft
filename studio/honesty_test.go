@@ -539,7 +539,10 @@ func TestRunHolesReplayView(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	at := func(d time.Duration) time.Time { return fixtureT0.Add(d) }
-	for run, view := range map[string]string{"r_unknown": "unknown", "r_derived": "derived", "r_view": "compacted:3", "r_plain": "transcript"} {
+	// r_derived/0/call_1 is a Subagent child of the derived replay: it
+	// inherits the replay's metadata (core's Metadata), not its prefix.
+	for run, view := range map[string]string{"r_unknown": "unknown", "r_derived": "derived", "r_view": "compacted:3", "r_plain": "transcript",
+		"r_derived/0/call_1": "derived"} {
 		recs := []obsdb.Record{
 			fxRecord(run, "event", "run_start", 0, at(0), `{"type":"run_start","id":"`+run+`","model":{"provider":"wefttest","name":"script"},"agent":"orders"}`),
 			fxRecord(run, "event", "step_start", 1, at(100*time.Millisecond), `{"type":"step_start","run_id":"`+run+`","index":0}`),
@@ -556,6 +559,10 @@ func TestRunHolesReplayView(t *testing.T) {
 			recs[i].Attrs["weft.playground"] = "true"
 			recs[i].Attrs["weft.forked_from"] = "r_src#2"
 			recs[i].Attrs["weft.replay.view"] = view
+			if parent, _, ok := strings.Cut(run, "/"); ok {
+				recs[i].Attrs["weft.parent.run.id"] = parent
+				recs[i].Attrs["weft.parent.call.id"] = "call_1"
+			}
 		}
 		if err := db.Write(context.Background(), obsdb.Batch{Records: recs}); err != nil {
 			t.Fatal(err)
@@ -563,10 +570,11 @@ func TestRunHolesReplayView(t *testing.T) {
 	}
 	h := Handler(DB(db))
 	for run, want := range map[string]string{
-		"r_unknown": "this replay's prefix is the transcript before step 2 of r_src (weft.replay.view = unknown): the runtime could not read that step's records (Studio unreachable, content off, or a Studio without ?step=), so a compaction view its model saw may be missing",
-		"r_derived": "this replay's prefix was cut from the transcript at step 2 of r_src (weft.replay.view = derived): no request record placed that step's messages, so a compaction view its model saw is not known",
-		"r_view":    "",
-		"r_plain":   "",
+		"r_unknown":          "this replay's prefix is the transcript before step 2 of r_src (weft.replay.view = unknown): the runtime could not read that step's records (Studio unreachable, content off, or a Studio without ?step=), so a compaction view its model saw may be missing",
+		"r_derived":          "this replay's prefix was cut from the transcript at step 2 of r_src (weft.replay.view = derived): no request record placed that step's messages, so a compaction view its model saw is not known",
+		"r_view":             "",
+		"r_plain":            "",
+		"r_derived/0/call_1": "",
 	} {
 		code, _, body := get(t, h, "/studio/api/runs/"+run)
 		if code != http.StatusOK {
@@ -591,6 +599,21 @@ func TestRunHolesReplayView(t *testing.T) {
 		}
 		if run == "r_unknown" {
 			golden(t, "run-replay-view.golden.json", regexp.MustCompile(`"last_seen": ?"[^"]*"`).ReplaceAllString(body, `"last_seen":"(norm)"`))
+		}
+		if run == "r_derived" {
+			// The parent's children[] row for the child: no hole either.
+			var kids struct {
+				Children []runRow `json:"children"`
+			}
+			decode(t, body, &kids)
+			if len(kids.Children) != 1 || kids.Children[0].ID != "r_derived/0/call_1" {
+				t.Fatalf("r_derived children = %+v, want the one subagent child", kids.Children)
+			}
+			for _, hl := range kids.Children[0].Holes {
+				if hl.Hole == "derived" {
+					t.Errorf("the child row carries the parent's derived hole: %+v", hl)
+				}
+			}
 		}
 	}
 }

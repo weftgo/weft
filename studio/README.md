@@ -207,7 +207,10 @@ table (a Cost column, sortable through `sort=cost` when `search` is
 there too, else over the loaded rows), the run header (own · delegated),
 the step cards, the compare page's cost column, the playground's result
 cards and matrix (a per-variant total) and the sessions list — an
-unknown figure as "—" with `cost_reason` as its tooltip, never `$0.00`.
+unknown figure as "—" with `cost_reason` as its tooltip, never `$0.00`. With the server cost sort on, a live frame updates its run's row in place
+without re-sorting until the next refetch; load more re-reads up to 2,000
+runs; and offset paging over a set that is changing can repeat or skip a
+row.
 
 ## The devtools panel (WEFT-DEVTOOLS.md)
 
@@ -1489,8 +1492,11 @@ badged; `jsonl` is the same records one per line, each with a
 `{"logs": ExportLogsServiceRequest, "traces": ExportTraceServiceRequest}`
 in OTLP/JSON, which `POST /v1/logs` and `/v1/traces` read back into the
 same run; `wefttest` is the run's model calls as replay fixtures,
-zipped flat — unzip into `testdata/<TestName>/` and `wefttest.Replay`
-answers, a step whose request carried a compaction view keyed on it
+zipped as `<agent>_replay_test.go` (a generated test, plan F6) beside
+`testdata/TestReplay_<run>/` — unzip into a package directory and
+`go test` replays the run, `wefttest.Replay(t, "testdata")` answering;
+the skeleton's header repeats each step that replays from a compacted
+view; a step whose request carried a compaction view is keyed on it
 and noted `compacted_at`. The run block's children carry their `holes`
 as `runs/{id}` serves them. A read-scoped panel token gets `json` and
 `jsonl` with the request block `{badge: "hidden", …}` and each
@@ -1569,7 +1575,14 @@ greatest, unbadged; `public_id: ""` with `badge: "not_recorded"` when the sessio
 created without one, 404 for an unknown session; the dev token's and
 setup A's alone — every panel token, read or playground, its own
 session included, is 403 with `badge: "hidden"`; session ids carry no
-`/`, so the sub-route shadows none), `public/{public_id}`, `manifest` (it carries the agents' system
+`/`, so the sub-route shadows none), `public/{public_id}`, `manifest` (each agent entry carries `proposed: {instructions,
+instructions_hash, since}` when a proposal is held — plan F6, the
+`PUT`/`DELETE /api/agents/{name}/proposal` `{instructions}` routes under the
+`proposals` capability: an agent's proposed instructions held in Studio's
+memory, at most 64 agents with the oldest forgotten first, lost on restart,
+never sent to the app or written to files; 200 `{agent, proposed, note}`,
+404 for an agent no manifest names or, on DELETE, one with no proposal; the
+dev token's and setup A's loopback alone, every panel token 403; it carries the agents' system
 prompts: 403 with `badge: "hidden"` to a read-scoped panel token),
 `DELETE /api/runs/{id}` and `DELETE /api/sessions/{id}` (plan A7, the
 `delete` capability: a run with its subagent children, or every run of
@@ -1600,7 +1613,9 @@ its frames are published — subagent child runs included, each frame
 naming its own `run_id` (a record that names no run is not forwarded);
 a resume (`Last-Event-ID`, however old) backfills a bounded set — the
 runs running or last seen within the last hour, newest first, at most
-500 — never the whole database, never an error. A grant names one
+500 — never the whole database, never an error; a resume names a run it
+could not read with `event: backfill_error {run_id, kind}` (the cause in
+the log). A grant names one
 stream: a run grant's `sig` never opens `all`, nor an `all` grant's a
 run. It is setup A's on a loopback
 Host and the server token's alone: every panel token, read or

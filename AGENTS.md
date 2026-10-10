@@ -201,7 +201,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    (db.path's rule), dated, models}, retention (Retain's Go
 //    //    duration string, null when off) — `weft doctor` prints it
 //    //    line by line; capabilities_off {capability: why} names the option/flag that left one off;
-//    //    manifest_sources), manifest (the weft.json, else the manifests runtimes registered with —
+//    //    manifest_sources), agents/{name}/proposal (PUT {instructions} / DELETE, plan F6: proposed prompts in memory, 64, lost
+//    //    on restart; dev token or setup A loopback only; capability proposals), manifest (each agent with `proposed`
+//    //    {instructions, instructions_hash, since} when one is held; the weft.json, else the manifests runtimes registered with —
 //    //    remembered in memory by (service, manifest_hash), each in sources[] live or remembered; a
 //    //    Studio restart forgets them until the next registration; manifest_check.source file|runtime),
 //    //    runs (+session/public/playground filters; all=1 lists child
@@ -224,7 +226,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    cache exact|not_reported (no cache split); running or end-never-arrived → own unknown, delegated_cost_usd/_known/_reason (descendants' own, never folded); session rows
 //    //    cost_usd = turns' own + delegated (no pool-child figure); settings/pricing (the effective
 //    //    table in the file's shape + source, path?; capability "pricing", every identity reads it), runs/{id}/export?format=json|jsonl|otlp|wefttest (the whole run as one
-//    //    download, capability "export"; otlp re-ingests through /v1/*, wefttest is a zip
+//    //    download, capability "export"; otlp re-ingests through /v1/*, wefttest is a zip:
+//    //    `<agent>_replay_test.go` (plan F6, a passing replay test) beside `testdata/TestReplay_<run>/` fixtures
 //    //    wefttest.Replay reads — a compacted step keys on its view, noted compacted_at),
 //    //    runs/{id}/logs?from=&limit=&severity= (the app's own log lines under the run's
 //    //    spans, capability "logs"; refused to a read-scoped token: they may carry prompts;

@@ -10,6 +10,27 @@ module, ADR 0005).
 
 ### Added
 
+- Save as test (plan F6): `GET /api/runs/{id}/export?format=wefttest` now
+  zips a generated `<agent>_replay_test.go` at the root beside the fixtures,
+  which move to `testdata/TestReplay_<run>/`. Unzipped into a package
+  directory it is a passing `go test` against the recorded run. It uses
+  `wefttest.Replay(t, "testdata")` with stub tools that answer with the
+  recorded results; step 0's thinking, tool choice and sequential flag; a
+  generated `PrepareStep` for steps whose catalog or settings differ, and
+  for compacted steps ("Step N replays from the compacted view", the
+  fixture's `compacted_at`); and `StopWhen(StepCountIs(n))`. It compiles
+  against the public `github.com/weftgo/weft` API only. `weft export
+  --wefttest` reads the new layout and writes the fixtures only.
+- Proposed prompts (plan F6): `PUT`/`DELETE /api/agents/{name}/proposal`
+  (capability `proposals`; the dev token, or loopback in setup A; every
+  panel token 403) hold an agent's proposed instructions in Studio's memory
+  (64 agents, forgotten on restart). `GET /api/manifest` shows them as
+  `proposed: {instructions, instructions_hash, since}` beside the registered
+  instructions. "Keep as prompt" stays a clipboard copy. Nothing is written
+  to your files: the download is the hand-off. WEFT-PROMPT.md P3 replaces the
+  clipboard with a propose command over the runtime link.
+- `/api/live`: a resume names a run it could not read with
+  `event: backfill_error {run_id, kind}` instead of skipping it silently.
 - Provider raw bodies (plan A6.1, ADR 0028 §12): `otel.RawBodies(true)` records
   each model-call attempt's wire request and response as a `raw` record
   (headers minus credentials, named in `redacted_headers`; bodies capped at
@@ -44,7 +65,7 @@ module, ADR 0005).
 - `GET /api/search` (plan A7, capability `search`): runs found by what
   they said and did. `q=` terms — whitespace-separated, a `"quoted
   phrase"` one term — each a case-insensitive substring of the run's
-  prompt (the turn's own: the input record's last user message with text — on a continued conversation the turn's question, not the conversation's opener — else the first user message with text; a message steered in later is never the prompt; a resume that carries a new prompt — the core records it after the rebuilt tool message, in the record after the input record — has that prompt, a plain Approve/Deny resume keeps the parked question), answer (its last assistant
+  prompt (the turn's own: the input record's last user message with text — on a continued conversation the turn's question, not the conversation's opener — else the first user message with text; a message steered in later is never the prompt — with one accepted edge: on a plain Approve/Deny resume, a user message steered in before the resumed batch's first assistant reply is indexed as the prompt, being structurally the same as a resume carrying a new prompt (the transcript has no steered mark); a resume that carries a new prompt — the core records it after the rebuilt tool message, in the record after the input record — has that prompt, a plain Approve/Deny resume keeps the parked question), answer (its last assistant
   text), error or the name of a tool it called; every term required,
   each in any field; never the system prompt, a tool result or the tool
   catalog. Filters `agent`, `tool` (exact), `status`, `model` (exact),
@@ -210,6 +231,10 @@ module, ADR 0005).
   `meta.pricing`'s object, `cost_sort_cap` and the settings route's shape.
 
 ### Changed — breaking
+
+- The wefttest export zip is no longer flat: fixtures sit under
+  `testdata/TestReplay_<run>/` beside the skeleton. Unzip it into the
+  package directory, not into `testdata/<TestName>/`.
 
 - `otel.Pipeline.LoggerProvider()` returns `*otel.LoggerProvider` (embedding
   `*sdklog.LoggerProvider`, carrying the RawBodies marker); method calls are

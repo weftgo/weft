@@ -216,6 +216,9 @@ export interface PlaygroundSearch {
   agent?: string
   runtime?: string
   engine?: "live" | "scripted"
+  /** The form's draft in this browser's IndexedDB (plan F5,
+   * lib/drafts.ts): the page writes it once the form is saved. */
+  exp?: string
 }
 
 /** The playground's state a link carries (G2): see PlaygroundSearch. */
@@ -290,6 +293,8 @@ export interface RunsSearch {
   before?: string
   /** The order: absent = newest first (started). */
   sort?: "duration" | "tokens" | "cost"
+  /** One experiment's runs (weft.experiment.id, plan F5). */
+  experiment_id?: string
 }
 
 export interface RunsLink {
@@ -324,6 +329,8 @@ export type StudioLink =
   | RunsLink
   | TracesLink
   | SettingsLink
+  | ExperimentLink
+  | ExperimentsLink
 
 /** A whole, non-negative number, or undefined. */
 function ordinal(n: number | undefined): number | undefined {
@@ -492,10 +499,41 @@ export function playgroundSearch(
   return search
 }
 
-/** experimentLink is a saved experiment, shown in the playground's
- * experiment history. */
-export function experimentLink(id: string): PlaygroundLink {
-  return { to: "/playground", search: { experiment: id } }
+/** The experiments pages (plan F5): the saved experiments, and one
+ * experiment's variants × inputs grid. */
+export interface ExperimentsLink {
+  to: "/experiments"
+  search: Record<string, never>
+}
+
+export interface ExperimentLink {
+  to: "/experiments/$id"
+  params: { id: string }
+  search: Record<string, never>
+}
+
+/** experimentLink is a saved experiment's page (plan F5: its grid,
+ * re-run, clone and compare). */
+export function experimentLink(id: string): ExperimentLink {
+  return { to: "/experiments/$id", params: { id }, search: {} }
+}
+
+/** experimentsLink is the saved experiments' list. */
+export function experimentsLink(): ExperimentsLink {
+  return { to: "/experiments", search: {} }
+}
+
+/** playgroundDraftLink is the playground with a draft of this browser
+ * open (?exp=, lib/drafts.ts). */
+export function playgroundDraftLink(id: string): PlaygroundLink {
+  return { to: "/playground", search: { exp: id } }
+}
+
+/** playgroundShareLink is the playground with a whole form in the
+ * fragment (#state=, lib/form-state.ts's encodeForm): it restores the
+ * form on any browser against the same Studio, and starts nothing. */
+export function playgroundShareLink(state: string): PlaygroundLink {
+  return { to: "/playground", search: {}, hash: `state=${state}` }
 }
 
 /** compareLink is the step-aligned compare of a base run with others

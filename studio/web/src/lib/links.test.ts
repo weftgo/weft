@@ -7,10 +7,13 @@ import {
   canonical,
   compareLink,
   experimentLink,
+  experimentsLink,
   href,
   path,
+  playgroundDraftLink,
   playgroundLink,
   playgroundSearch,
+  playgroundShareLink,
   playgroundStateLink,
   rawFromSearch,
   replayFromSearch,
@@ -198,14 +201,23 @@ describe("the other builders", () => {
     ])
   })
 
-  it("experimentLink is the saved experiment in the playground's history", () => {
+  it("experimentLink is the saved experiment's own page (plan F5)", () => {
     expect(experimentLink("exp_1")).toEqual({
-      to: "/playground",
-      search: { experiment: "exp_1" },
+      to: "/experiments/$id",
+      params: { id: "exp_1" },
+      search: {},
     })
-    expect(href(BASE, experimentLink("exp_1"))).toBe(
-      `${BASE}playground?experiment=exp_1`
-    )
+    expect(href(BASE, experimentLink("exp_1"))).toBe(`${BASE}experiments/exp_1`)
+    // An id is one encoded segment.
+    expect(href(BASE, experimentLink("a/b?c"))).toBe(`${BASE}experiments/a%2Fb%3Fc`)
+    expect(href(BASE, experimentsLink())).toBe(`${BASE}experiments`)
+  })
+
+  it("a draft is ?exp=, a shared form the fragment's state= (plan F5)", () => {
+    expect(href(BASE, playgroundDraftLink("d_1"))).toBe(`${BASE}playground?exp=d_1`)
+    expect(href(BASE, playgroundShareLink("zAbC-_"))).toBe(`${BASE}playground#state=zAbC-_`)
+    // A copied page link never carries the form: the fragment is dropped.
+    expect(canonical(href(BASE, playgroundShareLink("zAbC")))).toBe(`${BASE}playground`)
   })
 })
 

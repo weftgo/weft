@@ -25,6 +25,7 @@ import {
   Activity,
   Bot,
   FlaskConical,
+  Grid3x3,
   Keyboard,
   List,
   MessagesSquare,
@@ -70,7 +71,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar"
 import { CommandPalette } from "@/components/studio/command-palette"
-import { playgroundLink, settingsLink, tracesLink } from "@/lib/links"
+import { experimentsLink, playgroundLink, settingsLink, tracesLink } from "@/lib/links"
 
 function Nav() {
   const meta = useQuery(metaQuery())
@@ -111,6 +112,10 @@ function Nav() {
               "Playground",
               <FlaskConical data-slot="icon" />
             )}
+          {/* The saved experiments (plan F5): the playground's history,
+              under the same capability. */}
+          {meta.data?.capabilities.includes("playground") &&
+            item(experimentsLink().to, "Experiments", <Grid3x3 data-slot="icon" />)}
           {/* Settings (plan H4): every Studio has one. */}
           {item(settingsLink().to, "Settings", <Settings data-slot="icon" />)}
         </SidebarMenu>
@@ -146,7 +151,7 @@ function Place() {
       </span>
     )
   }
-  const places = ["runs", "sessions", "traces", "live", "agents", "playground", "settings"]
+  const places = ["runs", "sessions", "traces", "live", "agents", "playground", "experiments", "settings"]
   return (
     <span className="text-xs text-muted-foreground">
       {places.includes(parts[0]) ? parts[0] : "runs"}

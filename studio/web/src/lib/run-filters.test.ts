@@ -6,11 +6,12 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { fetchSearch, fetchTraces } from "./api"
+import { fetchRuns, fetchSearch, fetchTraces } from "./api"
 import type { RunRow, RunsPage, TraceRow, TracesPage } from "./api"
 import {
   CLEARED,
   applyLocal,
+  filtersFromSearch as filtersFromSearchOf,
   dedupeTraces,
   localKeys,
   rangeTime,
@@ -165,6 +166,25 @@ describe("the loaded rows answer what the list cannot", () => {
     expect(runChips(s, ALL)[0].note).toBe("the loaded rows only")
   })
 
+  it("experiment_id (plan F5): a URL chip, playground runs asked of both lists, the loaded rows narrowed here", () => {
+    const s = validateRunsSearch({ experiment_id: "exp_tone" })
+    expect(s.experiment_id).toBe("exp_tone")
+    const chips = runChips(s, ALL)
+    expect(chips).toEqual([
+      { key: "experiment_id", label: "experiment exp_tone", applied: true, note: "the loaded rows only" },
+    ])
+    expect(removeChip(s, chips[0])).toEqual({ experiment_id: undefined })
+    expect(CLEARED).toHaveProperty("experiment_id", undefined)
+    // Both lists are asked for the experiment's playground runs.
+    expect(filtersFromSearchOf(s)).toMatchObject({ experiment_id: "exp_tone", playground: true })
+    expect(searchFiltersFrom({ ...s, q: "x" }, ALL)).toMatchObject({ experiment_id: "exp_tone", playground: true })
+    // A Studio that ignores the key answers every run: the rows say.
+    const mine = { ...runs[0], id: "pg_1", experiment_id: "exp_tone" }
+    expect(applyLocal([mine, ...runs], s, ALL, now).map((r) => r.id)).toEqual(["pg_1"])
+    expect(localKeys(s, NONE)).toEqual(["experiment_id"])
+    expect(runsLink({ experiment_id: "exp_tone" })).toEqual({ to: "/runs", search: { experiment_id: "exp_tone" } })
+  })
+
   it("without search: model, error, range and tokens filter the loaded rows; text and tool cannot", () => {
     const s = validateRunsSearch({ q: "refund", tool: "lookup", error: "INJECTED", since: "2020-01-01T09:00:30Z" })
     expect(localKeys(s, NONE)).toEqual(["error", "since"])
@@ -254,6 +274,21 @@ describe("the queries", () => {
       offset: 50,
     })
     expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("experiment_id rides both routes' queries (plan F5)", async () => {
+    const seen: string[] = []
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = new URL(String(input))
+        seen.push(`${url.pathname.split("/api/")[1]}${url.search}`)
+        return reply({ total: 0, runs: [], sort: "started", next_offset: null, next_before: null })
+      })
+    )
+    await fetchSearch({ playground: true, experiment_id: "exp_tone", q: "x" })
+    await fetchRuns({ playground: true, experiment_id: "exp_tone" })
+    expect(seen).toEqual(["search?playground=true&experiment_id=exp_tone&q=x", "runs?playground=true&experiment_id=exp_tone"])
   })
 
   it("fetchTraces sends the filters and the exact cursor", async () => {

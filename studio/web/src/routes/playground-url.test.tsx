@@ -169,11 +169,13 @@ describe("the model field follows the agent", () => {
   it("Back over a typed source run settles in a bounded number of history writes", async () => {
     const { router } = renderApp("/playground?run=r_ok")
     await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
-    // A saved experiment is a push that keeps the page's state.
-    fireEvent.click(await screen.findByRole("link", { name: "e1" }))
+    // A push that keeps the page's state (a pre-F5 experiment link).
+    void router.navigate(playgroundStateLink({ run: "r_ok" }, "e1"))
     await waitFor(() => expect(router.state.location.search).toMatchObject({ experiment: "e1", run: "r_ok" }))
     fireEvent.change(sourceInput(), { target: { value: "r_two" } })
     await waitFor(() => expect(router.state.location.search).toMatchObject({ run: "r_two" }))
+    // The changed form's draft joins the query once (plan F5).
+    await waitFor(() => expect(router.state.location.search).toHaveProperty("exp"))
     const actions: string[] = []
     router.history.subscribe(({ action }) => actions.push(action.type))
     router.history.back()
@@ -312,7 +314,7 @@ describe("the playground's hand-off edits and run controls (final web review)", 
     expect(line()).toBeNull()
     renderApp("/playground#run=r_ok&step=2")
     await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
-    await waitFor(() => expect(line()?.textContent).toBe("the matrix runs each input from step 0; the step and transcript edits stay with Run"))
+    await waitFor(() => expect(line()?.textContent).toBe("the matrix runs each cell from its own step (0); Run's step and transcript edits stay with Run"))
     renderApp(`/playground#run=r_ok&edits=${encodeURIComponent('[{"step":1,"callID":"c2","toolResult":"none"}]')}`)
     await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
     await waitFor(() => expect(line()).toBeTruthy())

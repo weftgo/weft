@@ -44,6 +44,11 @@ describe("noticeText: the words", () => {
       "experiment exp_1 finished · 1 succeeded, 1 not run",
       "error",
     ],
+    [
+      { kind: "matrix", experimentID: "exp_1", commandIDs: ["a", "b"], succeeded: 2, failed: 0, other: 0, cost: "$0.42" },
+      "experiment exp_1 finished · 2 succeeded · $0.42",
+      "success",
+    ],
     [{ kind: "parked", runID: "pg_1", tools: ["refund"] }, "run pg_1 parked at refund", "info"],
     [{ kind: "parked", runID: "pg_1", tools: ["refund", "lookup_order"] }, "run pg_1 parked at refund, lookup_order", "info"],
     [{ kind: "runtime-connected", runtimeID: "rt_1", service: "acme-api", transition: 1 }, "runtime acme-api (rt_1) connected", "success"],

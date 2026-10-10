@@ -471,7 +471,7 @@ describe("the replayed run links back to its source step", () => {
     expect(a.getAttribute("href")).toBe("/runs/r_src?step=3")
     expect(
       document.querySelectorAll<HTMLAnchorElement>("[data-replay-of] a")[1].getAttribute("href")
-    ).toBe("/playground?experiment=exp_1")
+    ).toBe("/experiments/exp_1")
   })
 })
 

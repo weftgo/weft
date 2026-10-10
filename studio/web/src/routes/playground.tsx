@@ -24,6 +24,12 @@
 // The same drawer fields as the panel (prompt, tools off, model,
 // thinking, input), the same POST /api/playground/runs, the same live
 // result — V6: one API, two clients.
+//
+// The whole form is a value (plan F5, lib/form-state.ts): kept as a
+// draft in this browser's IndexedDB once it changes — ?exp=<draft id>
+// in the query reopens it (lib/drafts.ts) — and carried whole by a
+// share link's fragment, #state=<compact>, which restores the form on
+// any browser against the same Studio and starts nothing.
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, useLocation, useNavigate, useSearch } from "@tanstack/react-router"
 import { useEffect, useMemo, useRef, useState } from "react"
@@ -51,6 +57,7 @@ import type { DiffRow } from "@/lib/diff"
 import {
   buildRunBody,
   editsFromHandoff,
+  emptyLab,
   labFromHandoff,
   labProblems,
   overridesOf,
@@ -59,7 +66,7 @@ import {
   unmatchedDrafts,
 } from "@/lib/experiment-body"
 import type { EditDraft, Engine, SideEffects, ThreadMode, VariantFields } from "@/lib/experiment-body"
-import { spanMs } from "@/lib/format"
+import { relativeTime, spanMs } from "@/lib/format"
 import { copyText, download } from "@/lib/json"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { RUNTIMES_POLL_MS } from "@/hooks/use-notices"
@@ -79,12 +86,16 @@ import { Button } from "@/components/ui/button"
 import { SelectField } from "@/components/ui/select-field"
 import { SplitPane } from "@/components/studio/split-pane"
 import { SPLITS } from "@/lib/pane-sizes"
-import { compareLink, experimentLink, playgroundSearch, runLink } from "@/lib/links"
+import { compareLink, experimentLink, experimentsLink, href, playgroundSearch, playgroundShareLink, runLink } from "@/lib/links"
+import { decodeForm, encodeForm, formOfFields, SHARE_CAP, cellCommandID, stateFromHash } from "@/lib/form-state"
+import type { FormState, FormVariant } from "@/lib/form-state"
+import { deleteDraft, experimentDraftID, listDrafts, loadDraft, newDraftID, saveDraft } from "@/lib/drafts"
+import type { DraftRecord } from "@/lib/drafts"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { notify } from "@/lib/notify"
 import { StepCompare } from "@/components/studio/step-diff"
 import { CostText, useCostCapable } from "@/components/studio/cost"
-import { lostCellCost, sumCost } from "@/lib/cost"
+import { formatUSD, lostCellCost, sumCost } from "@/lib/cost"
 
 // The command's pure halves and the form's controls live in shared
 // modules (plan F1: the run page's replay drawer renders the same
@@ -123,9 +134,11 @@ interface PlaygroundSearch {
    * hand-off: lib/experiment-body.ts's labHandoff / editsHandoff). */
   lab?: string
   edits?: string
-  /** A saved experiment to point at in the history (lib/links.ts's
-   * experimentLink). */
+  /** A saved experiment to point at in the history (a pre-F5 link:
+   * experimentLink now opens the experiment's own page). */
   experiment?: string
+  /** The form's draft in this browser (plan F5): lib/drafts.ts. */
+  exp?: string
 }
 
 /** A search value as text: the router parses values as JSON, so an
@@ -171,6 +184,7 @@ function parseHandoff(search: Record<string, unknown>): PlaygroundSearch {
     lab: str(search.lab),
     edits: str(search.edits),
     experiment: str(search.experiment),
+    exp: str(search.exp),
   }
 }
 
@@ -225,7 +239,7 @@ function pageStateKey(state: PageState): string {
  * not when the page itself writes its state back (G2: own() names
  * those writes).
  */
-function useHandoff(): PlaygroundSearch & { own: (state: PageState) => boolean } {
+function useHandoff(): PlaygroundSearch & { own: (state: PageState, exp?: string) => boolean } {
   const query = useSearch({ from: "/playground" })
   const hash = useLocation({ select: (l) => l.hash })
   const navigate = useNavigate()
@@ -246,7 +260,7 @@ function useHandoff(): PlaygroundSearch & { own: (state: PageState) => boolean }
   // not a view: back does not walk it), keeping every other key — a
   // hand-off's instructions= and experiment= stay as they arrived.
   const own = useMemo(
-    () => (state: PageState) => {
+    () => (state: PageState, exp?: string) => {
       const mine = playgroundSearch(state)
       const next = parseHandoff({
         ...query,
@@ -261,6 +275,9 @@ function useHandoff(): PlaygroundSearch & { own: (state: PageState) => boolean }
         agent: mine.agent,
         runtime: mine.runtime,
         engine: mine.engine,
+        // The draft id, once the form is saved (plan F5): never cleared
+        // by a write that does not name it.
+        exp: exp ?? query.exp,
       })
       const key = JSON.stringify(next)
       if (key === queryKey) return false
@@ -312,6 +329,66 @@ function NoPlayground({ why }: { why?: string }) {
 interface Variant extends VariantFields {
   key: string
   result: Experiment | null
+  /** A restored form's tools left on (a saved experiment's
+   * tools_enabled), until the agent's tool list resolves them. */
+  toolsOn?: string[]
+}
+
+/** variantOfForm is a form's variant as the page holds it. */
+function variantOfForm(fv: FormVariant): Variant {
+  return {
+    key: fv.key,
+    instructions: fv.instructions ?? "",
+    toolsOff: new Set(fv.tools_off ?? []),
+    toolsOn: fv.tools_on,
+    model: fv.model ?? "",
+    thinking: fv.thinking ?? "",
+    input: fv.input ?? "",
+    engine: fv.engine ?? "live",
+    sideEffects: fv.side_effects ?? "substitute",
+    thread: fv.thread ?? "ephemeral",
+    lab: fv.lab ? { ...emptyLab(), ...fv.lab } : undefined,
+    result: null,
+  }
+}
+
+/** nextVariantKey is a key no variant holds: the first free letter,
+ * then V27, V28… — a removed variant's letter is handed out again only
+ * once it is free (two variants sharing a key share a card and a cell). */
+export function nextVariantKey(keys: string[]): string {
+  const used = new Set(keys)
+  for (let c = 0; c < 26; c++) {
+    const k = String.fromCharCode(65 + c)
+    if (!used.has(k)) return k
+  }
+  let n = 27
+  while (used.has(`V${n}`)) n++
+  return `V${n}`
+}
+
+/** variantKeyProblem is why a variant cannot take this name: "" when
+ * it can. Keys address the cells and the experiment's variants. */
+export function variantKeyProblem(key: string, others: string[]): string {
+  if (!key.trim()) return "a variant needs a name"
+  if (key !== key.trim()) return "a variant's name has no leading or trailing spaces"
+  if (key.length > 32) return "a variant's name is at most 32 characters"
+  if ([...key].some((ch) => ch.charCodeAt(0) < 32)) return "a variant's name has no control characters"
+  if (others.includes(key)) return `variant ${key} already exists`
+  return ""
+}
+
+/** How long the form rests before its draft is written. */
+export const DRAFT_SAVE_MS = 400
+
+/** draftLabel is what the drafts list says about a form. */
+function draftLabel(f: FormState): string {
+  const parts = [
+    f.agent ?? "",
+    `${f.variants.length} variant${f.variants.length === 1 ? "" : "s"}`,
+    f.matrix?.name ? `matrix ${f.matrix.name}` : "",
+    f.run ? `over ${f.run}` : "",
+  ]
+  return parts.filter(Boolean).join(" · ")
 }
 
 /** variantA seeds the first variant from the panel's carried-over
@@ -363,6 +440,33 @@ function Playground({ caps }: { caps: string[] }) {
   const [busy, setBusy] = useState(false)
   /** The E9 matrix: the cells' experiments, keyed variant×input. */
   const [cells, setCells] = useState<Record<string, Experiment>>({})
+  /** The matrix's form (plan F5: part of the draft and the share link):
+   * its rows, its name (the experiment id) and the step every cell
+   * continues from. */
+  const [matrixRows, setMatrixRows] = useState<{ key: string; text: string }[]>([{ key: "1", text: "" }])
+  const [matrixName, setMatrixName] = useState("")
+  const [matrixFromStep, setMatrixFromStep] = useState(0)
+
+  // The form's draft (plan F5): its id is minted per page, or the
+  // query's ?exp= when the page opened on one; it joins the query once
+  // the form is first saved (savedExp), so an untouched page leaves no
+  // draft and no ?exp= behind.
+  const [draftID, setDraftID] = useState(() => search.exp || newDraftID())
+  const savedExp = useRef(search.exp ?? "")
+  /** What the page says about where its form came from. */
+  const [restored, setRestored] = useState<{ text: string; tone: "info" | "bad" } | null>(null)
+  // A share link's form, read once on arrival (the hand-off strips the
+  // fragment from the bar after the first render).
+  const arrivalHash = useLocation({ select: (l) => l.hash })
+  const [shared] = useState(() => stateFromHash(arrivalHash))
+  const [restoring, setRestoring] = useState(() => Boolean(shared || search.exp))
+  /** A form was restored: the hand-off's tools= no longer applies. */
+  const restoredForm = useRef(false)
+  /** Bumped by a restore: the seeding below runs again over the form. */
+  const [seedTick, setSeedTick] = useState(0)
+  /** The form changed since it was opened (or was restored): its draft
+   * is kept. */
+  const dirty = useRef(false)
 
   const [sourceRunID, setSourceRunID] = useState(search.run ?? "")
   const [fromStep, setFromStep] = useState(search.step ?? 0)
@@ -401,7 +505,7 @@ function Playground({ caps }: { caps: string[] }) {
     const key = pageStateKey(state)
     // A write the router's query already shows changes nothing the
     // effect below sees: nothing to wait for.
-    if (search.own(state) && key !== queryKey) {
+    if (search.own(state, savedExp.current || undefined) && key !== queryKey) {
       pending.current.keys.add(key)
       pending.current.last = key
     }
@@ -462,6 +566,8 @@ function Playground({ caps }: { caps: string[] }) {
   useEffect(() => {
     write({})
   }, [])
+  const writeRef = useRef(write)
+  writeRef.current = write
   const source = useQuery({
     ...runQuery(sourceRunID),
     enabled: Boolean(sourceRunID),
@@ -496,10 +602,14 @@ function Playground({ caps }: { caps: string[] }) {
     setVariants((cur) =>
       cur.map((v, i) => ({
         ...v,
-        toolsOff:
-          i === 0 && prev?.agent !== agent.name
+        // A restored form's tools left on resolve against the agent
+        // now; a restored form never takes the hand-off's tools=.
+        toolsOff: v.toolsOn
+          ? toolsOffFor(v.toolsOn.join(","), agent)
+          : i === 0 && prev?.agent !== agent.name && !restoredForm.current
             ? toolsOffFor(search.tools, agent)
             : new Set([...v.toolsOff].filter((n) => names.has(n))),
+        toolsOn: undefined,
         instructions:
           v.instructions === "" || (prev && v.instructions === prev.registered)
             ? registered
@@ -511,7 +621,189 @@ function Playground({ caps }: { caps: string[] }) {
         lab: prev && prev.agent !== agent.name ? undefined : v.lab,
       }))
     )
-  }, [agent, registered, resolving, search.tools])
+  }, [agent, registered, resolving, search.tools, seedTick])
+
+  /** applyForm puts a form on the page (a share link, a draft, a
+   * clone): every control, the matrix, and the page's URL state. Nothing
+   * runs. */
+  const applyForm = (form: FormState) => {
+    restoredForm.current = true
+    seeded.current = null
+    setSeedTick((n) => n + 1)
+    const vs = form.variants.map(variantOfForm)
+    setVariants(vs)
+    setActive(0)
+    setCells({})
+    setSourceRunID(form.run ?? "")
+    setFromStep(form.step ?? 0)
+    setEditDrafts(form.edits ?? [])
+    setAgentChoice(form.agent ?? "")
+    setRuntimeChoice(form.runtime ?? "")
+    setMatrixRows(form.matrix?.inputs.length ? form.matrix.inputs : [{ key: "1", text: "" }])
+    setMatrixName(form.matrix?.name ?? "")
+    setMatrixFromStep(form.matrix?.from_step ?? 0)
+    writeRef.current({
+      run: form.run ?? "",
+      step: form.step ?? 0,
+      agent: form.agent ?? "",
+      runtime: form.runtime ?? "",
+      engine: vs[0]?.engine ?? "live",
+    })
+  }
+  const applyFormRef = useRef(applyForm)
+  applyFormRef.current = applyForm
+
+  // On arrival: a share link's form (#state=), else the query's draft
+  // (?exp=), is read and put on the page — no run starts.
+  useEffect(() => {
+    if (!shared && !search.exp) return
+    const run = { alive: true }
+    void (async () => {
+      if (shared) {
+        const form = await decodeForm(shared)
+        if (!run.alive) return
+        if (form) {
+          applyFormRef.current(form)
+          dirty.current = true
+          setRestored({ text: "restored from a link — nothing runs until you press Run", tone: "info" })
+        } else
+          setRestored({
+            text: "the link's form could not be read: it was cut, damaged, or made by a newer Studio",
+            tone: "bad",
+          })
+      } else if (search.exp) {
+        const rec = await loadDraft(search.exp)
+        if (!run.alive) return
+        if (rec) {
+          applyFormRef.current(rec.form)
+          savedExp.current = search.exp
+          setRestored({ text: `draft ${search.exp} reopened${rec.label ? ` · ${rec.label}` : ""}`, tone: "info" })
+        } else
+          setRestored({
+            text: `draft ${search.exp} is not in this browser — a draft stays in the browser that made it; a share link travels`,
+            tone: "bad",
+          })
+      }
+      setRestoring(false)
+    })()
+    return () => {
+      run.alive = false
+    }
+  }, [])
+
+  // The form as a value (lib/form-state.ts): what the draft keeps and
+  // the share link carries.
+  const form = formOfFields({
+    variants,
+    registered,
+    agent: agentChoice || undefined,
+    runtime: runtimeChoice || undefined,
+    run: sourceRunID.trim() || undefined,
+    step: fromStep,
+    edits: editDrafts,
+    matrix: { name: matrixName.trim() || undefined, from_step: matrixFromStep, inputs: matrixRows },
+  })
+  const formJSON = JSON.stringify(form)
+  const formRef = useRef(form)
+  formRef.current = form
+  /** The form as first seen, settled: a change from it keeps a draft. */
+  const baseline = useRef<string | null>(null)
+  /** Bumped after each save: the drafts list reads again. */
+  const [saves, setSaves] = useState(0)
+  useEffect(() => {
+    if (restoring) return
+    if (!dirty.current) {
+      if (baseline.current === null) {
+        baseline.current = formJSON
+        return
+      }
+      if (formJSON === baseline.current) return
+      dirty.current = true
+    }
+    const id = draftID
+    const t = setTimeout(() => {
+      const f = formRef.current
+      void saveDraft(id, f, { label: draftLabel(f) }).then(() => {
+        setSaves((n) => n + 1)
+        if (savedExp.current !== id) {
+          savedExp.current = id
+          writeRef.current({})
+        }
+      })
+    }, DRAFT_SAVE_MS)
+    return () => clearTimeout(t)
+  }, [formJSON, restoring, draftID])
+
+  /** openDraft puts another draft of this browser on the page. */
+  const openDraft = async (id: string) => {
+    const rec = await loadDraft(id)
+    if (!rec) {
+      setRestored({ text: `draft ${id} is no longer in this browser`, tone: "bad" })
+      return
+    }
+    setDraftID(id)
+    savedExp.current = id
+    applyForm(rec.form)
+    setRestored({ text: `draft ${id} reopened${rec.label ? ` · ${rec.label}` : ""}`, tone: "info" })
+  }
+
+  /** The share link's state: the URL, or why there is none. */
+  const [share, setShare] = useState<{ url?: string; note: string } | null>(null)
+  const makeShareLink = async () => {
+    const enc = await encodeForm(form)
+    if (enc.tooLong) {
+      setShare({
+        note: `the form is ${enc.value.length.toLocaleString("en-US")} characters encoded, over the share link's ${SHARE_CAP.toLocaleString("en-US")}: it stays a draft in this browser`,
+      })
+      return
+    }
+    const url = href(document.baseURI, playgroundShareLink(enc.value))
+    const ok = await copyText(url)
+    setShare({
+      url,
+      note: `${ok ? "share link copied" : "share link (copy it by hand)"} · ${enc.codec === "z" ? "deflated" : "uncompressed: this browser has no CompressionStream"} · the whole form, no token — it opens against this Studio`,
+    })
+  }
+
+  /** The variant's name being edited (rename). */
+  const [nameDraft, setNameDraft] = useState<string | null>(null)
+  const renameProblem =
+    nameDraft === null || nameDraft === variant.key
+      ? ""
+      : variantKeyProblem(nameDraft, variants.filter((_, i) => i !== active).map((v) => v.key))
+  const applyRename = () => {
+    if (nameDraft === null) return
+    const next = nameDraft
+    setNameDraft(null)
+    if (next === variant.key || renameProblem) return
+    const old = variant.key
+    setVariants((cur) => cur.map((v, i) => (i === active ? { ...v, key: next } : v)))
+    // The matrix's cells follow their variant.
+    setCells((cur) =>
+      Object.fromEntries(
+        Object.entries(cur).map(([k, c]) => {
+          const [vk, ik] = k.split("\u0000")
+          return [vk === old ? `${next}\u0000${ik}` : k, c]
+        })
+      )
+    )
+  }
+  const duplicateVariant = () => {
+    setVariants((cur) => {
+      const src = cur[active]
+      const copy: Variant = { ...src, toolsOff: new Set(src.toolsOff), key: nextVariantKey(cur.map((v) => v.key)), result: null }
+      return [...cur.slice(0, active + 1), copy, ...cur.slice(active + 1)]
+    })
+    setActive(active + 1)
+  }
+  const removeVariant = () => {
+    if (variants.length < 2) return
+    const rest = variants.filter((_, i) => i !== active)
+    setVariants(rest)
+    setActive(Math.max(0, active - 1))
+    // Variant A's engine is page state (G2): the new first one's.
+    if (active === 0 && rest[0].engine !== engineA) write({ engine: rest[0].engine })
+  }
 
   const patch = (p: Partial<Variant>) => {
     setVariants((cur) => cur.map((v, i) => (i === active ? { ...v, ...p } : v)))
@@ -611,6 +903,9 @@ function Playground({ caps }: { caps: string[] }) {
   const runMatrix = async (
     inputs: { key: string; text: string }[],
     experimentID: string,
+    /** The step every cell continues from (plan F5: one number for the
+     * whole matrix, source.from_step's ordinal). */
+    matrixStep: number,
     /** Called once the definition is saved, before any cell is issued
      * (the matrix's notice is labelled from here: plan H5). */
     onSaved?: () => void
@@ -629,16 +924,21 @@ function Playground({ caps }: { caps: string[] }) {
           plan.push({
             key: `${v.key}\u0000${i.key}`,
             label: `${v.key}×${i.key}`,
-            body: buildRunBody({
-              runtime: runtime.id,
-              agent,
-              variant: v,
-              sourceRunID,
-              fromStep: 0,
-              input: i.text,
-              publicID: sourceRow?.public_id,
-              experimentID,
-            }),
+            body: withCommandID(
+              buildRunBody({
+                runtime: runtime.id,
+                agent,
+                variant: v,
+                sourceRunID,
+                fromStep: sourceRunID ? matrixStep : 0,
+                input: i.text,
+                publicID: sourceRow?.public_id,
+                experimentID,
+              }),
+              // The cell's address rides its command id: the
+              // experiment page places the run by it (plan F5).
+              cellCommandID(v.key, i.key, v.sideEffects)
+            ),
           })
       definition = {
         id: experimentID,
@@ -660,6 +960,14 @@ function Playground({ caps }: { caps: string[] }) {
     try {
       await postExperiment(definition)
       onSaved?.()
+      // This browser keeps the form the matrix ran (lib/drafts.ts):
+      // the experiment page clones from it exactly — the definition
+      // keeps neither the modes nor the step.
+      void saveDraft(
+        experimentDraftID(experimentID),
+        { ...formRef.current, matrix: { ...(formRef.current.matrix ?? { inputs }), name: experimentID } },
+        { kind: "experiment", label: experimentID }
+      )
       // A new matrix replaces the grid: the keys are the same cells.
       setCells({})
       for (const c of plan) {
@@ -769,13 +1077,27 @@ function Playground({ caps }: { caps: string[] }) {
                 data-column="config"
                 className="h-full space-y-3 overflow-y-auto p-4 in-data-stacked:h-auto in-data-stacked:overflow-visible in-data-stacked:border-b"
               >
+          {/* Where the form came from (plan F5): a share link, a draft. */}
+          {restored ? (
+            <p
+              className={`text-xs ${restored.tone === "bad" ? "text-status-bad" : "text-muted-foreground"}`}
+              role="status"
+              data-form-restored
+            >
+              {restored.text}
+            </p>
+          ) : null}
           {/* The variant switcher (§4's "+ variant"): each column of the
               N-way view is one variant's overrides and run. */}
-          <div className="flex items-center gap-1">
+          <div className="flex flex-wrap items-center gap-1" data-variant-switcher>
             {variants.map((v, i) => (
               <button
                 key={v.key}
-                onClick={() => setActive(i)}
+                onClick={() => {
+                  setActive(i)
+                  setNameDraft(null)
+                }}
+                aria-pressed={i === active}
                 className={
                   "rounded border px-2 py-0.5 text-xs " +
                   (i === active ? "border-foreground font-medium" : "text-muted-foreground")
@@ -791,7 +1113,8 @@ function Playground({ caps }: { caps: string[] }) {
                   ...cur,
                   {
                     ...cur[active],
-                    key: String.fromCharCode("A".charCodeAt(0) + cur.length),
+                    toolsOff: new Set(cur[active].toolsOff),
+                    key: nextVariantKey(cur.map((v) => v.key)),
                     result: null,
                   },
                 ])
@@ -800,7 +1123,38 @@ function Playground({ caps }: { caps: string[] }) {
               + variant
             </button>
           </div>
-          <h2 className="text-sm font-medium">Variant {variant.key}</h2>
+          {/* The variant's own verbs (plan F5): rename, duplicate, remove. */}
+          <div className="flex flex-wrap items-center gap-2 text-xs" data-variant-verbs>
+            <h2 className="text-sm font-medium">Variant {variant.key}</h2>
+            <input
+              className="w-24 rounded border bg-transparent px-2 py-0.5 text-xs"
+              aria-label="variant name"
+              aria-invalid={renameProblem ? true : undefined}
+              value={nameDraft ?? variant.key}
+              onChange={(e) => setNameDraft(e.target.value)}
+              onBlur={applyRename}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") applyRename()
+                if (e.key === "Escape") setNameDraft(null)
+              }}
+            />
+            <button className="text-muted-foreground hover:underline" onClick={duplicateVariant}>
+              duplicate
+            </button>
+            <button
+              className="text-muted-foreground hover:underline disabled:opacity-50 disabled:no-underline"
+              onClick={removeVariant}
+              disabled={variants.length < 2}
+              title={variants.length < 2 ? "the form keeps at least one variant" : undefined}
+            >
+              remove
+            </button>
+          </div>
+          {renameProblem ? (
+            <p className="text-xs text-status-bad" role="alert">
+              {renameProblem}
+            </p>
+          ) : null}
           <label className="block space-y-1">
             <span className="text-xs text-muted-foreground">Source run</span>
             <input
@@ -925,6 +1279,12 @@ function Playground({ caps }: { caps: string[] }) {
           ) : null}
           <Matrix
             variants={variants}
+            inputs={matrixRows}
+            setInputs={setMatrixRows}
+            name={matrixName}
+            setName={setMatrixName}
+            fromStep={matrixFromStep}
+            setFromStep={setMatrixFromStep}
             runMatrix={runMatrix}
             busy={busy || resolving || !runtime || !agent}
             mayRun={mayRun}
@@ -935,6 +1295,8 @@ function Playground({ caps }: { caps: string[] }) {
             pageFromStep={fromStep}
             pageEdits={editDrafts.length}
           />
+          <FormVerbs share={share} makeShareLink={() => void makeShareLink()} />
+          <Drafts current={draftID} saves={saves} open={(id) => void openDraft(id)} />
           <History selected={search.experiment} />
               </section>
             ),
@@ -953,6 +1315,12 @@ async function saveFixtures(runID: string, tools: string[]) {
   if (!runID) return
   const doc = await postFixtures(runID, tools)
   for (const f of doc.files) download(f.name, f.body)
+}
+
+/** withCommandID names a command's at-most-once id (none: the server
+ * mints one). */
+function withCommandID(body: PlaygroundRunBody, id: string | undefined): PlaygroundRunBody {
+  return id ? { ...body, command_id: id } : body
 }
 
 /** runLabel shortens a run id for the variant card's header. */
@@ -1518,6 +1886,12 @@ export function matrixInputs<T extends { text: string }>(
  */
 function Matrix({
   variants,
+  inputs,
+  setInputs,
+  name,
+  setName,
+  fromStep,
+  setFromStep,
   runMatrix,
   busy,
   mayRun,
@@ -1529,9 +1903,17 @@ function Matrix({
   pageEdits = 0,
 }: {
   variants: Variant[]
+  /** The matrix's rows, name and from_step: the page's form (plan F5). */
+  inputs: { key: string; text: string }[]
+  setInputs: Dispatch<SetStateAction<{ key: string; text: string }[]>>
+  name: string
+  setName: (v: string) => void
+  fromStep: number
+  setFromStep: (n: number) => void
   runMatrix: (
     inputs: { key: string; text: string }[],
     experimentID: string,
+    fromStep: number,
     onSaved?: () => void
   ) => Promise<void>
   /** The matrix's run button is held (a command posting, the target
@@ -1547,14 +1929,11 @@ function Matrix({
   setCells: React.Dispatch<React.SetStateAction<Record<string, Experiment>>>
   sourceRunID: string
   /** The page's from_step and transcript edits: the matrix runs every
-   * cell from step 0 without them, and says so when the page holds any. */
+   * cell from its own step without Run's edits, and says so when the
+   * page holds either. */
   pageFromStep?: number
   pageEdits?: number
 }) {
-  const [inputs, setInputs] = useState<{ key: string; text: string }[]>([
-    { key: "1", text: "" },
-  ])
-  const [name, setName] = useState("")
   const qc = useQueryClient()
   // The default id is minted once per page, not per render: the id on
   // screen is the one the matrix is saved under.
@@ -1569,17 +1948,52 @@ function Matrix({
    * still holds the previous matrix's cells, under its own id). */
   const issued = useRef("")
 
+  const inputKeys = [...new Set(Object.keys(cells).map((k) => k.split("\u0000")[1]))]
+  // Cost per cell and per variant (plan A5): each finished cell's run
+  // row (its whole bill, own + delegated), summed client-side per
+  // variant — "—" while any run is unread, unfinished or unpriced.
+  const costCapable = useCostCapable()
+  const priced = Object.entries(cells).filter(([, c]) => c.runID && c.state === "finished")
+  const rowQs = useQueries({
+    queries: priced.map(([, c]) => ({ ...runQuery(c.runID), enabled: costCapable })),
+  })
+  const rowOf = new Map(priced.map(([k], i) => [k, rowQs[i]?.data]))
+  const cellCost = (key: string) => {
+    const r = rowOf.get(key)
+    return r ? sumCost([r]) : null
+  }
+  /** cellBill is one cell's part of a total. */
+  const cellBill = (key: string): Parameters<typeof sumCost>[0][number][] => {
+    const c = cells[key] as Experiment | undefined
+    // A cell that ran nothing (rejected, lost before a run) bills nothing.
+    if (!c || (!c.runID && (c.state === "rejected" || c.state === "lost"))) return []
+    // A lost cell that had started a run may have billed: its own
+    // reason, and the variant's total unknown — never left at "not
+    // read yet", never dropped from the sum.
+    if (c.state === "lost") return [lostCellCost()]
+    return [rowOf.get(key)]
+  }
+  const variantCost = (vk: string) => sumCost(inputKeys.flatMap((ik) => cellBill(`${vk}\u0000${ik}`)))
+  /** Every finished cell's row is read, or could not be. */
+  const rowsRead = priced.every((_, i) => Boolean(rowQs[i]?.data) || Boolean(rowQs[i]?.isError))
+  /** The whole matrix's bill: every variant's. */
+  const matrixCost = () => sumCost(Object.keys(cells).flatMap(cellBill))
   // One notice for the whole matrix (plan H5), when its last cell
   // settles — never one per cell — and never while cells are still
   // being issued (issuing, not the run button's busy: a runtime that
   // disconnects after the cells went out holds the button, not the
   // news that they settled lost or rejected).
+  // Its cost (plan F5) is the cells' whole bill, said once every
+  // finished cell's row is read (or could not be): a figure not known
+  // is left out of the line, never guessed.
   useEffect(() => {
     const all = Object.values(cells)
     if (issuing || !issued.current || all.length === 0) return
     if (all.some((c) => !settled(c.state))) return
+    if (costCapable && !rowsRead) return
     const finished = all.filter((c) => c.state === "finished")
     const failed = finished.filter((c) => c.status === "failed").length
+    const total = costCapable ? matrixCost() : null
     notify({
       kind: "matrix",
       experimentID: issued.current,
@@ -1587,8 +2001,10 @@ function Matrix({
       succeeded: finished.length - failed,
       failed,
       other: all.length - finished.length,
+      ...(total?.known && typeof total.usd === "number" ? { cost: formatUSD(total.usd) } : {}),
     })
-  }, [cells, issuing])
+    // matrixCost reads the rows rowsRead waits for.
+  }, [cells, issuing, rowsRead, costCapable])
 
   // Poll the cells' lifecycle while any is queued or accepted.
   useEffect(() => {
@@ -1646,42 +2062,15 @@ function Matrix({
     }
   }, [cells, polled, qc, setCells])
 
-  const inputKeys = [...new Set(Object.keys(cells).map((k) => k.split("\u0000")[1]))]
-  // Cost per cell and per variant (plan A5): each finished cell's run
-  // row (its whole bill, own + delegated), summed client-side per
-  // variant — "—" while any run is unread, unfinished or unpriced.
-  const costCapable = useCostCapable()
-  const priced = Object.entries(cells).filter(([, c]) => c.runID && c.state === "finished")
-  const rowQs = useQueries({
-    queries: priced.map(([, c]) => ({ ...runQuery(c.runID), enabled: costCapable })),
-  })
-  const rowOf = new Map(priced.map(([k], i) => [k, rowQs[i]?.data]))
-  const cellCost = (key: string) => {
-    const r = rowOf.get(key)
-    return r ? sumCost([r]) : null
-  }
-  const variantCost = (vk: string) =>
-    sumCost(
-      inputKeys.flatMap((ik): Parameters<typeof sumCost>[0][number][] => {
-        const key = `${vk}\u0000${ik}`
-        const c = cells[key] as Experiment | undefined
-        // A cell that ran nothing (rejected, lost before a run) bills nothing.
-        if (!c || (!c.runID && (c.state === "rejected" || c.state === "lost"))) return []
-        // A lost cell that had started a run may have billed: its own
-        // reason, and the variant's total unknown — never left at "not
-        // read yet", never dropped from the sum.
-        if (c.state === "lost") return [lostCellCost()]
-        return [rowOf.get(key)]
-      })
-    )
   return (
     <div className="rounded border">
       <div className="border-b px-3 py-2 text-xs text-muted-foreground">
         Experiment matrix · {variants.length} variants × {inputs.length} inputs
         {sourceRunID ? " · over the source run" : ""}
-        {(pageFromStep > 0 || pageEdits > 0) && (
+        {sourceRunID && fromStep > 0 ? ` · from step ${fromStep}` : ""}
+        {((pageFromStep > 0 && pageFromStep !== (sourceRunID ? fromStep : 0)) || pageEdits > 0) && (
           <div className="text-faint" data-matrix-from-step-0>
-            the matrix runs each input from step 0; the step and transcript edits stay with Run
+            the matrix runs each cell from its own step ({sourceRunID ? fromStep : 0}); Run's step and transcript edits stay with Run
           </div>
         )}
       </div>
@@ -1702,7 +2091,7 @@ function Matrix({
               disabled={busy}
               onClick={() => {
                 const id = experimentID
-                void runMatrix(matrixInputs(inputs, sourceRunID), id, () => {
+                void runMatrix(matrixInputs(inputs, sourceRunID), id, fromStep, () => {
                   issued.current = id
                 })
               }}
@@ -1715,6 +2104,28 @@ function Matrix({
             </span>
           )}
         </div>
+        {/* One from_step for every cell (plan F5): the step ordinal the
+            cells continue the source run from — the replay drawer's
+            from_step. Past step 0 a cell continues the kept prefix, so
+            an input row's text is not sent (§5.1). */}
+        {sourceRunID ? (
+          <label className="flex flex-wrap items-center gap-2">
+            <span className="text-muted-foreground">from step</span>
+            <input
+              type="number"
+              min={0}
+              aria-label="matrix from step"
+              className="w-20 rounded border bg-transparent px-2 py-1"
+              value={fromStep}
+              onChange={(e) => setFromStep(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+            />
+            {fromStep > 0 ? (
+              <span className="text-faint" data-matrix-from-step>
+                every cell continues {sourceRunID} from step {fromStep}; the rows' text is not sent past step 0
+              </span>
+            ) : null}
+          </label>
+        ) : null}
         {inputs.map((inp, i) => (
           <div key={inp.key} className="flex items-center gap-2">
             <span className="w-6 text-faint">{inp.key}</span>
@@ -1836,8 +2247,100 @@ function Matrix({
   )
 }
 
+/** FormVerbs is the form's own verbs (plan F5): the share link — the
+ * whole form in the fragment, copied — and what became of it. */
+function FormVerbs({
+  share,
+  makeShareLink,
+}: {
+  share: { url?: string; note: string } | null
+  makeShareLink: () => void
+}) {
+  return (
+    <div className="space-y-1 text-xs" data-form-verbs>
+      <Button size="sm" variant="outline" onClick={makeShareLink}>
+        copy share link
+      </Button>
+      {share ? (
+        <p className={share.url ? "text-muted-foreground" : "text-status-bad"} role="status" data-share-note>
+          {share.note}
+        </p>
+      ) : null}
+      {share?.url ? (
+        <input
+          readOnly
+          aria-label="share link"
+          className="w-full rounded border bg-transparent px-2 py-1 font-mono text-[11px]"
+          value={share.url}
+          onFocus={(e) => e.currentTarget.select()}
+          data-share-link
+        />
+      ) : null}
+    </div>
+  )
+}
+
+/** How many drafts the list shows (the rest stay in the browser). */
+const DRAFTS_SHOWN = 10
+
+/** Drafts lists this browser's drafts of the form (plan F5,
+ * lib/drafts.ts), newest first: open one, or delete it. */
+function Drafts({ current, saves, open }: { current: string; saves: number; open: (id: string) => void }) {
+  const [list, setList] = useState<DraftRecord[] | null>(null)
+  const [reads, setReads] = useState(0)
+  useEffect(() => {
+    let alive = true
+    void listDrafts("draft").then((l) => {
+      if (alive) setList(l)
+    })
+    return () => {
+      alive = false
+    }
+  }, [saves, reads, current])
+  if (!list?.length) return null
+  return (
+    <div className="rounded border" data-drafts>
+      <div className="border-b px-3 py-2 text-xs text-muted-foreground">
+        Drafts · in this browser only
+      </div>
+      <ul className="divide-y text-xs">
+        {list.slice(0, DRAFTS_SHOWN).map((d) => (
+          <li
+            key={d.id}
+            className={`flex flex-wrap items-center gap-2 px-3 py-1.5${d.id === current ? " bg-secondary" : ""}`}
+            data-draft={d.id}
+          >
+            <span className="font-mono text-faint">{d.id}</span>
+            <span className="min-w-0 truncate">{d.label || "—"}</span>
+            {d.saved ? <span className="text-faint">{relativeTime(d.saved)}</span> : null}
+            <span className="ml-auto flex gap-2">
+              {d.id === current ? (
+                <span className="text-faint">open</span>
+              ) : (
+                <button className="hover:underline" onClick={() => open(d.id)} aria-label={`open draft ${d.id}`}>
+                  open
+                </button>
+              )}
+              {d.id !== current ? (
+                <button
+                  className="text-faint hover:underline"
+                  aria-label={`delete draft ${d.id}`}
+                  onClick={() => void deleteDraft(d.id).then(() => setReads((n) => n + 1))}
+                >
+                  delete
+                </button>
+              ) : null}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 /** History is the experiment list (§4: "experiment history"): the
- * saved definitions with their matrix sizes. */
+ * saved definitions with their matrix sizes, each opening its own page
+ * (plan F5: its grid, re-run, clone, compare). */
 function History({ selected }: { selected?: string }) {
   const experiments = useQuery(experimentsQuery())
   const list = experiments.data?.experiments ?? []
@@ -1850,8 +2353,11 @@ function History({ selected }: { selected?: string }) {
   if (!list.length) return null
   return (
     <div className="rounded border">
-      <div className="border-b px-3 py-2 text-xs text-muted-foreground">
+      <div className="flex items-center border-b px-3 py-2 text-xs text-muted-foreground">
         Experiment history
+        <Link {...experimentsLink()} className="ml-auto hover:underline">
+          all experiments
+        </Link>
       </div>
       <div className="divide-y text-xs">
         {list.map((e) => (
@@ -1860,12 +2366,7 @@ function History({ selected }: { selected?: string }) {
             className={`flex items-center gap-2 px-3 py-1.5${e.id === selected ? " bg-secondary" : ""}`}
             data-selected={e.id === selected ? "" : undefined}
           >
-            {/* The page's own state stays beside the experiment picked. */}
-            <Link
-              {...experimentLink(e.id)}
-              search={(prev: Record<string, unknown>) => ({ ...prev, ...experimentLink(e.id).search })}
-              className="font-mono text-faint hover:underline"
-            >
+            <Link {...experimentLink(e.id)} className="font-mono text-faint hover:underline">
               {e.id}
             </Link>
             <span>{e.name || "—"}</span>

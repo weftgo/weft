@@ -100,6 +100,7 @@ export function validateRunsSearch(search: Record<string, unknown>): RunsSearch 
     subagents: search.subagents === "all" ? "all" : undefined,
     before: str(search.before),
     sort,
+    experiment_id: str(search.experiment_id),
   }
   if (out.min_tokens !== undefined) out.min_tokens = Math.floor(out.min_tokens)
   return out
@@ -126,6 +127,13 @@ export function filtersFromSearch(s: RunsSearch): RunsFilters {
   if (s.session) filters.session = s.session
   if (s.public_id) filters.public_id = s.public_id
   if (s.experiments) filters.playground = s.experiments === "on"
+  // An experiment's runs are playground runs (plan F5): the server
+  // narrows to those, and experiment_id rides along for a Studio that
+  // reads it.
+  if (s.experiment_id) {
+    filters.experiment_id = s.experiment_id
+    if (!s.experiments) filters.playground = true
+  }
   if (s.before) filters.before = s.before
   if (s.parent) filters.parent = s.parent
   else if (s.subagents === "all") filters.all = true
@@ -202,13 +210,16 @@ export function runDurationMs(r: Pick<RunRow, "started" | "finished">, now = Dat
 
 const tokensOf = (r: RunRow) => r.usage.input_tokens + r.usage.output_tokens
 
-/** localKeys is the filters the loaded rows answer here: duration
- * always (the API has none), and search's own when the Studio cannot
- * search (text and tool cannot be: a row carries neither). */
+/** localKeys is the filters the loaded rows answer here: duration and
+ * experiment_id always (/api/runs and /api/search have neither — a
+ * Studio that reads experiment_id narrows first, and this is then a
+ * no-op), and search's own when the Studio cannot search (text and
+ * tool cannot be: a row carries neither). */
 export function localKeys(search: RunsSearch, caps: FilterCaps): (keyof RunsSearch)[] {
   const s = usable(search)
   const keys: (keyof RunsSearch)[] = []
   if (s.min_duration !== undefined) keys.push("min_duration")
+  if (s.experiment_id !== undefined) keys.push("experiment_id")
   if (!caps.search) {
     for (const k of ["model", "error", "since", "until", "min_tokens"] as const) if (s[k] !== undefined) keys.push(k)
     if (caps.pricing && s.min_cost !== undefined) keys.push("min_cost")
@@ -229,6 +240,7 @@ export function applyLocal(runs: RunRow[], search: RunsSearch, caps: FilterCaps,
     const err = s.error?.toLowerCase()
     out = runs.filter((r) => {
       if (keys.has("min_duration") && runDurationMs(r, now) < (s.min_duration ?? 0) * 1000) return false
+      if (keys.has("experiment_id") && r.experiment_id !== s.experiment_id) return false
       if (keys.has("model") && r.model.name !== s.model) return false
       if (keys.has("error") && !r.err.toLowerCase().includes(err ?? "")) return false
       if (since !== undefined && Date.parse(r.started) < since) return false
@@ -300,6 +312,7 @@ export function runChips(s: RunsSearch, caps: FilterCaps): RunChip[] {
   if (s.session) push("session", `session ${s.session}`)
   if (s.public_id) push("public_id", `public id ${s.public_id}`)
   if (s.experiments) push("experiments", s.experiments === "on" ? "experiments only" : "experiments off")
+  if (s.experiment_id) push("experiment_id", `experiment ${s.experiment_id}`)
   for (const t of tagsOf(s)) push("tag", `tag ${t}`, { value: t })
   if (s.parent) push("parent", `children of ${s.parent}`)
   return chips
@@ -332,6 +345,7 @@ export const CLEARED: Partial<RunsSearch> = {
   experiments: undefined,
   tag: undefined,
   parent: undefined,
+  experiment_id: undefined,
 }
 
 /** dedupeTraces keeps each trace's first row, in page order: a trace

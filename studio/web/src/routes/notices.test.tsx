@@ -163,7 +163,7 @@ describe("the playground's notices", () => {
     secondDone = true
     const t = await toastFor(/^experiment exp_tone finished · 1 succeeded, 1 failed$/)
     expect(within(t).getByRole("link", { name: "open" }).getAttribute("href")).toMatch(
-      /\/playground\?experiment=exp_tone$/
+      /\/experiments\/exp_tone$/
     )
     await settle()
     expect(toastTitles()).toEqual(["experiment exp_tone finished · 1 succeeded, 1 failed"])
@@ -343,7 +343,7 @@ describe("the playground's notices", () => {
     aDone = true
     const t = await toastFor(/^experiment exp_mix finished · 1 succeeded, 1 failed, 1 not run$/)
     fireEvent.click(within(t).getByRole("link", { name: "open" }))
-    await waitFor(() => expect(router.state.location.search).toEqual({ experiment: "exp_mix" }))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/experiments/exp_mix"))
     expect(toastTitles().filter((x) => x.startsWith("experiment"))).toHaveLength(1)
   })
 })

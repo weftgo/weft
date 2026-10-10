@@ -751,6 +751,11 @@ export interface RunsFilters {
   before_id?: string
   /** Page size: 0/absent is the server's 50, above 500 clamps. */
   limit?: number
+  /** One experiment's runs (plan F5). Sent as experiment_id; a Studio
+   * whose /api/runs and /api/search do not read it answers every run,
+   * so the runs list also applies it to the loaded rows
+   * (lib/run-filters.ts). */
+  experiment_id?: string
 }
 
 export function runsSearch(filters: RunsFilters): string {
@@ -767,6 +772,7 @@ export function runsSearch(filters: RunsFilters): string {
   for (const [k, v] of Object.entries(filters.tag ?? {}))
     params.set(`tag.${k}`, v)
   if (filters.limit) params.set("limit", String(filters.limit))
+  if (filters.experiment_id) params.set("experiment_id", filters.experiment_id)
   const qs = params.toString()
   return qs ? `?${qs}` : ""
 }
@@ -1663,6 +1669,9 @@ export interface PlaygroundRunBody {
   thread?: string
   experiment_id?: string
   public_id?: string
+  /** The caller's at-most-once id ([A-Za-z0-9._:-]{1,128}; a reuse is
+   * 409): the matrix names each cell's (lib/form-state.ts). */
+  command_id?: string
 }
 
 /** post one JSON document (the playground's write verbs). */
@@ -1776,6 +1785,16 @@ export function experimentsQuery() {
 /** POST /api/experiments — create or update a definition. */
 export function postExperiment(body: ExperimentRow) {
   return post<ExperimentRow>("experiments", body)
+}
+
+/** GET /api/experiments/{id} — the definition with its runs, oldest
+ * first, each priced (plan F5's page). */
+export function experimentQuery(id: string) {
+  return queryOptions({
+    queryKey: ["experiments", id],
+    staleTime: 5_000,
+    queryFn: () => get<ExperimentRow>(`experiments/${encodeURIComponent(id)}`),
+  })
 }
 
 /** POST /api/runs/{id}/approvals: a parked runtime-started run's

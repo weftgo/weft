@@ -33,6 +33,9 @@ export type Notice =
       succeeded: number
       failed: number
       other: number
+      /** The cells' whole bill, own + delegated, formatted (plan F5):
+       * absent when pricing is off or any cell's cost is unknown. */
+      cost?: string
     }
   /** A run this page follows parked (run_finish.pending). */
   /** approve posts the decision and answers the command it became (a
@@ -101,7 +104,7 @@ export function noticeText(n: Notice): { title: string; tone: Tone } {
         n.other ? `${n.other} not run` : "",
       ].filter(Boolean)
       return {
-        title: `experiment ${n.experimentID} finished · ${parts.join(", ") || "no runs"}`,
+        title: `experiment ${n.experimentID} finished · ${parts.join(", ") || "no runs"}${n.cost ? ` · ${n.cost}` : ""}`,
         tone: n.failed || n.other ? "error" : "success",
       }
     }

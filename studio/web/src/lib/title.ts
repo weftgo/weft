@@ -13,7 +13,8 @@ export type TitlePlace =
   | { page: "session"; id: string }
   | { page: "compare"; a?: string; b?: readonly string[] }
   | { page: "playground"; experiment?: string }
-  | { page: "runs" | "sessions" | "traces" | "live" | "agents" | "settings" }
+  | { page: "experiment"; id: string }
+  | { page: "runs" | "sessions" | "traces" | "live" | "agents" | "settings" | "experiments" }
 
 /**
  * shortId elides a long id for a title, keeping what tells ids apart:
@@ -47,6 +48,9 @@ export function pageTitle(place: TitlePlace): string {
       parts.push(ids.length ? `compare ${ids.map(shortId).join(" ↔ ")}` : "compare")
       break
     }
+    case "experiment":
+      parts.push(`experiment ${shortId(place.id)}`)
+      break
     case "playground":
       parts.push(place.experiment ? `playground ${shortId(place.experiment)}` : "playground")
       break

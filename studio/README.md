@@ -1270,7 +1270,9 @@ outside a text box.
 
 JSON under `{base}api/`: `meta` (versions, `db` {kind, path, size —
 path and size to loopback and the server token only}, `pid`,
-`ingest_open`, `interrupted_after_ms`, capabilities, `capabilities_off`
+`live_all` (true when this caller may open `/api/live?all=1` — setup
+A's loopback Host and the server token, `db.path`'s rule; false for a
+panel token and an `AllowOrigins` host), `ingest_open`, `interrupted_after_ms`, capabilities, `capabilities_off`
 {capability: why}, `manifest_sources`, `retention` — `studio.Retain`'s
 duration as a Go duration string, `"720h0m0s"`, `null` when off, the
 default), `runs` (agent,
@@ -1472,11 +1474,20 @@ following a deleted run emits nothing more; a later read is 404),
 (mint; the panel's scoped tokens — see the devtools panel above), and
 `GET /api/live` — the SSE
 stream whose frame ids are the hub's Seq: exactly one selector
-(`run`/`session`/`public_id`/`agent`), `kinds` over
+(`run`/`session`/`public_id`/`agent`/`all`), `kinds` over
 event/delta/messages/run (default `event,run`; deltas are opt-in,
 heartbeats never), a ping every 15 s, `Last-Event-ID` resume with the
 gap backfilled from the database and deduped on `(run, kind, pos)`,
-and `event: overflow` when a slow subscriber's queue drops it. A token
+and `event: overflow` when a slow subscriber's queue drops it.
+`all=1` (plan A7, the Live page) streams every run in the database as
+its frames are published — subagent child runs included, each frame
+naming its own `run_id` (a record that names no run is not forwarded);
+a resume backfills every stored run. It is setup A's on a loopback
+Host and the server token's alone: every panel token, read or
+playground, is 403 `forbidden` on the stream and on its grant (the
+body form is `{"all":true}`), as is a Host let in only by
+`AllowOrigins`; `/api/meta`'s `live_all` tells the UI whether to offer
+it. A token
 travels in the `Authorization` header only — `?token=` is refused on
 every `/api` route, in every setup (401 naming the grant) — so a
 browser's `EventSource`, which cannot set headers,

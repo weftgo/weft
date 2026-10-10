@@ -1,6 +1,11 @@
 {
-  "sig": "(sig)",
-  "exp": "(time)"
+  "run": {
+    "sig": "(sig)",
+    "exp": "(time)"
+  },
+  "all": {
+    "sig": "(sig)",
+    "exp": "(time)"
+  }
 }
-
 

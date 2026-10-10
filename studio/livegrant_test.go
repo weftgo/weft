@@ -3,6 +3,7 @@ package studio
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"log/slog"
@@ -331,26 +332,36 @@ var (
 	grantExpRe = regexp.MustCompile(`"exp": "[^"]*"`)
 )
 
-// TestLiveGrantGolden pins the grant's response shape.
+// TestLiveGrantGolden pins the grant's response shape, per selector: a
+// run stream and the all stream (plan A7, the server token's) answer
+// the same {sig, exp}.
 func TestLiveGrantGolden(t *testing.T) {
 	ts := httptest.NewServer(New(DB(fixtureDB(t)), Token("srv")).Handler())
 	t.Cleanup(ts.Close)
-	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/live-grant", strings.NewReader(`{"run":"r_ok","kinds":"event,messages"}`))
-	req.Header.Set("Authorization", "Bearer srv")
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
+	cases := []struct{ name, body string }{
+		{"run", `{"run":"r_ok","kinds":"event,messages"}`},
+		{"all", `{"all":true,"kinds":"event,run"}`},
 	}
-	b, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || resp.Header.Get("Cache-Control") != "no-store" {
-		t.Fatalf("grant: %d %q %s", resp.StatusCode, resp.Header.Get("Cache-Control"), b)
+	var parts []string
+	for _, c := range cases {
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/live-grant", strings.NewReader(c.body))
+		req.Header.Set("Authorization", "Bearer srv")
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || resp.Header.Get("Cache-Control") != "no-store" {
+			t.Fatalf("grant %s: %d %q %s", c.name, resp.StatusCode, resp.Header.Get("Cache-Control"), b)
+		}
+		if !grantSigRe.MatchString(indent(t, string(b))) {
+			t.Fatalf("grant %s: sig shape: %s", c.name, b)
+		}
+		parts = append(parts, fmt.Sprintf("%q:%s", c.name, b))
 	}
-	out := pretty(t, string(b))
-	if !grantSigRe.MatchString(out) {
-		t.Fatalf("sig shape: %s", out)
-	}
+	out := pretty(t, "{"+strings.Join(parts, ",")+"}")
 	out = grantSigRe.ReplaceAllString(out, `"sig": "(sig)"`)
 	golden(t, "live-grant.golden.json", grantExpRe.ReplaceAllString(out, `"exp": "(time)"`))
 }

@@ -523,3 +523,189 @@ func TestLiveSkipsCompactionViews(t *testing.T) {
 		t.Errorf("messages frames by position = %v, want 0 and 2 once each, never the view (1)", seen)
 	}
 }
+
+// pubRecord is one event record of run under public id pub (and, for a
+// subagent child, its parent run).
+func pubRecord(run, pub, parent string, pos int64) obsdb.Record {
+	rec := fxRecord(run, "event", "run_start", pos, time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC),
+		`{"type":"run_start","id":"`+run+`"}`)
+	if pub != "" {
+		rec.Attrs["weft.public_id"] = pub
+	}
+	if parent != "" {
+		rec.Attrs["weft.parent.run.id"] = parent
+	}
+	return rec
+}
+
+// liveRunIDs is each record frame's run_id, in order.
+func liveRunIDs(t *testing.T, frames []sseFrame) []string {
+	t.Helper()
+	var ids []string
+	for _, f := range frames {
+		var d struct {
+			RunID string `json:"run_id"`
+		}
+		if err := json.Unmarshal([]byte(f.data), &d); err != nil {
+			t.Fatalf("frame %q: %v", f.data, err)
+		}
+		ids = append(ids, d.RunID)
+	}
+	return ids
+}
+
+// TestLiveAllSeesEveryPublicID pins the all selector (plan A7, the Live
+// page) in setup A on a loopback Host: one all stream carries the runs
+// of two public ids and a subagent child (a run of its own); a record
+// that names no run is no run's and is not forwarded; a public_id
+// stream beside it still sees its own runs alone.
+func TestLiveAllSeesEveryPublicID(t *testing.T) {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	hub := obsdb.NewHub()
+	h := Handler(DB(db), Live(hub))
+	all := subscribeLive(t, h, "?all=1&kinds=event", "")
+	if all.StatusCode != http.StatusOK {
+		t.Fatalf("all stream: %d", all.StatusCode)
+	}
+	onlyA := subscribeLive(t, h, "?public_id=pub_a&kinds=event", "")
+
+	ctx := context.Background()
+	hub.Publish(ctx, obsdb.RecordFrame(pubRecord("r_a", "pub_a", "", 0)))
+	hub.Publish(ctx, obsdb.RecordFrame(pubRecord("r_b", "pub_b", "", 0)))
+	hub.Publish(ctx, obsdb.RecordFrame(pubRecord("r_b/0/call_1", "pub_b", "r_b", 0)))
+	hub.Publish(ctx, obsdb.RecordFrame(obsdb.Record{EventName: "app.log", Body: "no run"}))
+	hub.Publish(ctx, obsdb.RecordFrame(pubRecord("r_a2", "pub_a", "", 0)))
+
+	if got := strings.Join(liveRunIDs(t, readSSE(t, all, 4, 5*time.Second)), " "); got != "r_a r_b r_b/0/call_1 r_a2" {
+		t.Errorf("all stream saw runs %q, want r_a r_b r_b/0/call_1 r_a2", got)
+	}
+	if got := strings.Join(liveRunIDs(t, readSSE(t, onlyA, 2, 5*time.Second)), " "); got != "r_a r_a2" {
+		t.Errorf("public_id=pub_a stream saw runs %q, want r_a r_a2", got)
+	}
+}
+
+// TestLiveAllSetupA: the all selector is setup A's on a loopback Host
+// only — a Host let in by AllowOrigins is refused (403), as api/meta's
+// live_all says (TestMetaDBPathSetupA); all takes 1 (or true) and
+// stands alone.
+func TestLiveAllSetupA(t *testing.T) {
+	srv := New(DB(fixtureDB(t)), AllowOrigins("http://studio.example"))
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	open := func(query, host string) int {
+		t.Helper()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, ts.URL+"/api/live"+query, nil)
+		if host != "" {
+			req.Host = host
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	for _, c := range []struct {
+		query, host string
+		want        int
+	}{
+		{"?all=1", "", http.StatusOK},
+		{"?all=true", "", http.StatusOK},
+		{"?all=1", "studio.example", http.StatusForbidden},
+		{"?all=0", "", http.StatusBadRequest},
+		{"?all=1&run=r_ok", "", http.StatusBadRequest},
+		{"?all=1&agent=orders", "", http.StatusBadRequest},
+	} {
+		if got := open(c.query, c.host); got != c.want {
+			t.Errorf("GET /api/live%s (Host %q): %d, want %d", c.query, c.host, got, c.want)
+		}
+	}
+}
+
+// TestLiveAllThroughGrant: the Studio UI's EventSource opens the all
+// stream with a grant — the server token's grant opens it and frames of
+// two public ids arrive on it; a panel token is refused the grant and
+// the stream (403 forbidden), whatever its scope.
+func TestLiveAllThroughGrant(t *testing.T) {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	hub := obsdb.NewHub()
+	srv := New(DB(db), Live(hub), Token("srv"))
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	grant := func(bearer string) (int, string) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPost, ts.URL+"/api/live-grant", strings.NewReader(`{"all":true,"kinds":"event"}`))
+		req.Header.Set("Authorization", "Bearer "+bearer)
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var g struct {
+			Sig   string `json:"sig"`
+			Error struct {
+				Code string `json:"code"`
+			} `json:"error"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&g)
+		if resp.StatusCode != http.StatusOK {
+			return resp.StatusCode, g.Error.Code
+		}
+		return resp.StatusCode, g.Sig
+	}
+	hour := time.Now().Add(time.Hour)
+	for _, scope := range []string{scopeRead, scopePlayground} {
+		tok, err := signPanelToken([]byte("srv"), panelClaims{PublicID: "pub_a", Scope: scope, Exp: hour})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if code, what := grant(tok); code != http.StatusForbidden || what != "forbidden" {
+			t.Errorf("%s panel token's all grant: %d %q, want 403 forbidden", scope, code, what)
+		}
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/live?all=1&kinds=event", nil)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != http.StatusForbidden {
+			t.Errorf("%s panel token's all stream: %d, want 403", scope, resp.StatusCode)
+		}
+	}
+
+	code, sig := grant("srv")
+	if code != http.StatusOK {
+		t.Fatalf("server token's all grant: %d", code)
+	}
+	// The sig names this stream: kinds=event and all=1 (all=true is the
+	// same stream).
+	resp, err := http.Get(ts.URL + "/api/live?all=true&kinds=event&sig=" + sig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("all stream with the grant: %d", resp.StatusCode)
+	}
+	ctx := context.Background()
+	hub.Publish(ctx, obsdb.RecordFrame(pubRecord("r_a", "pub_a", "", 0)))
+	hub.Publish(ctx, obsdb.RecordFrame(pubRecord("r_b", "pub_b", "", 0)))
+	if got := strings.Join(liveRunIDs(t, readSSE(t, resp, 2, 5*time.Second)), " "); got != "r_a r_b" {
+		t.Errorf("granted all stream saw runs %q, want r_a r_b", got)
+	}
+}

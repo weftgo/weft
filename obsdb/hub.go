@@ -24,12 +24,21 @@ const (
 // Selector scopes a subscription: exactly one field set. A run-scoped
 // subscription follows one run; a session- or public-id-scoped one spans
 // the many runs of one conversation, which is why the cursor is
-// hub-wide rather than per run.
-type Selector struct{ RunID, SessionID, PublicID, Agent string }
+// hub-wide rather than per run. All is the explicit every-run scope
+// (Studio's Live page): it must be asked for, never implied.
+type Selector struct {
+	RunID, SessionID, PublicID, Agent string
+	// All matches every run's frames (subagent children included; a
+	// record that names no run is no run's, and is not matched). It is
+	// a scope of its own: set with any other field, the selector is
+	// over-set and matches nothing.
+	All bool
+}
 
 // matches reports whether a frame's derived identity falls in the
 // selector. An empty selector (or an over-set one, treated as empty)
-// matches nothing, never everything: a live tail must be scoped.
+// matches nothing, never everything: a live tail must be scoped — All
+// is the one way to ask for everything.
 func (s Selector) matches(w Weft) bool {
 	set := 0
 	for _, v := range []string{s.RunID, s.SessionID, s.PublicID, s.Agent} {
@@ -37,10 +46,15 @@ func (s Selector) matches(w Weft) bool {
 			set++
 		}
 	}
+	if s.All {
+		set++
+	}
 	if set != 1 {
 		return false
 	}
 	switch {
+	case s.All:
+		return w.RunID != ""
 	case s.RunID != "":
 		return w.RunID == s.RunID
 	case s.SessionID != "":

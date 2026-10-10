@@ -47,6 +47,11 @@ type metaDoc struct {
 	// AuthRequired is whether a Token is configured: the API then reads
 	// the bearer (setup B/C); false is setup A, where no token is read.
 	AuthRequired bool `json:"auth_required"`
+	// LiveAll is whether this caller may open /api/live?all=1 (every
+	// run on one stream, the Live page): db.path's rule (mayReadDBPath)
+	// — the server token, or setup A on a loopback Host; false for a
+	// panel token. Always present.
+	LiveAll bool `json:"live_all"`
 	// DebugScope says what the debugger's write verbs (breakpoints,
 	// steer) can act on — the runtime-started runs only. The app's
 	// own turns are viewer-only (D7, PQ7); meta says so plainly
@@ -174,6 +179,7 @@ func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
 		CapabilitiesOff:    s.capabilitiesOff(),
 		DebugScope:         s.debugScope(),
 		AuthRequired:       s.token != "",
+		LiveAll:            mayReadDBPath(s, r),
 		Content:            s.latestContent(r.Context(), id),
 		Runtimes:           s.connectedRuntimes(),
 	}
@@ -191,7 +197,8 @@ func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, r, http.StatusOK, doc)
 }
 
-// mayReadDBPath is the db.path/db.size/pid rule: the server token, or no
+// mayReadDBPath is the db.path/db.size/pid rule (and live_all's, the
+// /api/live all selector's): the server token, or no
 // Token configured and a loopback Host (setup A's guard, without the
 // AllowOrigins widening).
 func mayReadDBPath(s *Server, r *http.Request) bool {

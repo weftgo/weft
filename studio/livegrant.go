@@ -108,6 +108,8 @@ func liveStream(sel obsdb.Selector, kinds map[string]bool) []byte {
 		name, value = "session", sel.SessionID
 	case sel.PublicID != "":
 		name, value = "public_id", sel.PublicID
+	case sel.All:
+		name, value = "all", "1" // all=1 and all=true name one stream
 	}
 	ks := make([]string, 0, len(kinds))
 	for k := range kinds {
@@ -243,7 +245,7 @@ func badGrant(w http.ResponseWriter, r *http.Request) {
 // "event,run"}) or the query string — one or the other. The caller's
 // identity is the bearer's (or setup A's open API), and the scope
 // rules are /api/live's own, checked now: a panel token is granted
-// only a stream inside its public id, never an agent selector.
+// only a stream inside its public id, never an agent or all selector.
 func (s *Server) serveLiveGrant(w http.ResponseWriter, r *http.Request) {
 	q := map[string][]string(r.URL.Query())
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxBody))
@@ -257,7 +259,7 @@ func (s *Server) serveLiveGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(strings.TrimSpace(string(body))) > 0 {
-		for _, k := range []string{"run", "session", "public_id", "agent", "kinds"} {
+		for _, k := range []string{"run", "session", "public_id", "agent", "all", "kinds"} {
 			if _, ok := q[k]; ok {
 				badRequest(w, r, "name the stream in the body or in the query, not both")
 				return
@@ -268,10 +270,13 @@ func (s *Server) serveLiveGrant(w http.ResponseWriter, r *http.Request) {
 			Session  string `json:"session"`
 			PublicID string `json:"public_id"`
 			Agent    string `json:"agent"`
-			Kinds    string `json:"kinds"`
+			// All is the every-run selector: true (the body's form of
+			// the query's all=1).
+			All   bool   `json:"all"`
+			Kinds string `json:"kinds"`
 		}
 		if err := json.Unmarshal(body, &req); err != nil {
-			badRequest(w, r, "body must be JSON: {\"run\"|\"session\"|\"public_id\"|\"agent\": \"…\", \"kinds\": \"event,run\"}")
+			badRequest(w, r, "body must be JSON: {\"run\"|\"session\"|\"public_id\"|\"agent\": \"…\" or \"all\": true, \"kinds\": \"event,run\"}")
 			return
 		}
 		q = url.Values{}
@@ -282,6 +287,9 @@ func (s *Server) serveLiveGrant(w http.ResponseWriter, r *http.Request) {
 			if v != "" {
 				q[k] = []string{v}
 			}
+		}
+		if req.All {
+			q["all"] = []string{"1"}
 		}
 	}
 	sel, err := liveSelector(q)

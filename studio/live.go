@@ -142,10 +142,17 @@ type runFrameDTO struct {
 }
 
 // liveSelector parses S4.5's selector: exactly one of run, session,
-// public_id or agent, or the request is a 400.
+// public_id, agent or all (plan A7: all=1, every run — the dev token's
+// and setup A's alone, scopeLive), or the request is a 400.
 func liveSelector(q map[string][]string) (obsdb.Selector, error) {
 	var sel obsdb.Selector
 	set := 0
+	if vs, ok := q["all"]; ok && len(vs) > 0 && vs[0] != "" {
+		if vs[0] != "1" && vs[0] != "true" {
+			return sel, fmt.Errorf("all takes 1 (all=%q given)", vs[0])
+		}
+		sel.All, set = true, 1
+	}
 	for _, f := range []struct {
 		name string
 		dst  *string
@@ -163,7 +170,7 @@ func liveSelector(q map[string][]string) (obsdb.Selector, error) {
 	}
 	if set != 1 {
 		return sel, fmt.Errorf(
-			"exactly one of run, session, public_id or agent is required (%d given)", set)
+			"exactly one of run, session, public_id, agent or all is required (%d given)", set)
 	}
 	return sel, nil
 }
@@ -336,6 +343,9 @@ func (s *Server) serveLive(w http.ResponseWriter, r *http.Request) {
 
 // liveInScope reports whether a panel token scoped to the public id
 // scope may receive f; "" is the server token or setup A — everything.
+// An all stream never reaches here with a scope: scopeLive refuses it
+// to every panel token (403) before the stream opens, and this check
+// would hold it to the token's public id regardless.
 func liveInScope(scope string, f obsdb.Frame) bool {
 	if scope == "" {
 		return true
@@ -447,6 +457,9 @@ func (s *Server) backfill(
 		query.PublicID = sel.PublicID
 	case sel.Agent != "":
 		query.Agent = sel.Agent
+	case sel.All:
+		// Every stored run, children included (ParentRunID "*"): the
+		// selector covers them all.
 	}
 	for { // the runs list pages
 		page, err := s.db.Runs(ctx, query)

@@ -538,12 +538,18 @@ func TestAuthMatrix(t *testing.T) {
 				return forbidden403
 			}},
 		{name: "GET /api/live?agent=", method: "GET", path: fixed("/api/live?agent=acme-support"), resources: one, want: serverOnly(ok)},
+		// all (plan A7, the Live page): every run on one stream — the
+		// server token's alone here (setup A's loopback: TestLiveAll*);
+		// every panel token 403, whatever its scope.
+		{name: "GET /api/live?all=1", method: "GET", path: fixed("/api/live?all=1"), resources: one, want: serverOnly(ok)},
+		{name: "GET /api/live?all=1&kinds=event,delta,messages,run", method: "GET", path: fixed("/api/live?all=1&kinds=event,delta,messages,run"), resources: one, want: serverOnly(ok)},
+		{name: "GET /api/live?all=1&public_id= (two selectors)", method: "GET", path: fixed("/api/live?all=1&public_id=pub_a"), resources: one, want: anyValid(http.StatusBadRequest)},
 		{name: "GET /api/live?run=&kinds=delta,messages,run", method: "GET", path: func(res string) string { return "/api/live?kinds=delta,messages,run&run=" + run[res] },
 			resources: []string{"A", "B", "none"}, want: scoped(ok)},
 
 		// The live grant (plan C5): scoped exactly as the stream is —
 		// a panel token is refused, at grant time, a stream outside its
-		// public id and every agent selector; a run or session nothing
+		// public id and every agent or all selector; a run or session nothing
 		// has stored yet is granted (each frame is checked).
 		{name: "POST /api/live-grant?run=", method: "POST", path: func(res string) string { return "/api/live-grant?run=" + run[res] }, resources: all,
 			want: func(kind, res string) int {
@@ -567,6 +573,9 @@ func TestAuthMatrix(t *testing.T) {
 				return forbidden403
 			}},
 		{name: "POST /api/live-grant?agent=", method: "POST", path: fixed("/api/live-grant?agent=acme-support"), resources: one, want: serverOnly(ok)},
+		{name: "POST /api/live-grant?all=1", method: "POST", path: fixed("/api/live-grant?all=1"), resources: one, want: serverOnly(ok)},
+		{name: "POST /api/live-grant {all}", method: "POST", path: fixed("/api/live-grant"), body: fixed(`{"all":true,"kinds":"event,run"}`), resources: one, want: serverOnly(ok)},
+		{name: "POST /api/live-grant {all, public_id} (two selectors)", method: "POST", path: fixed("/api/live-grant"), body: fixed(`{"all":true,"public_id":"pub_a"}`), resources: one, want: anyValid(http.StatusBadRequest)},
 		{name: "POST /api/live-grant (two selectors)", method: "POST", path: fixed("/api/live-grant?run=run_a&session=s_a"), resources: one, want: anyValid(http.StatusBadRequest)},
 		{name: "POST /api/live-grant (body and query)", method: "POST", path: fixed("/api/live-grant?run=run_a"), body: fixed(`{"run":"run_a"}`), resources: one, want: anyValid(http.StatusBadRequest)},
 		// The stream opened with the grant alone answers as the bearer
@@ -586,6 +595,7 @@ func TestAuthMatrix(t *testing.T) {
 				return forbidden403
 			}},
 		{name: "GET /api/live?agent=&sig=", method: "GET", path: fixed("/api/live?agent=acme-support"), resources: one, grant: true, want: serverOnly(ok)},
+		{name: "GET /api/live?all=1&kinds=&sig=", method: "GET", path: fixed("/api/live?all=1&kinds=event,run"), resources: one, grant: true, want: serverOnly(ok)},
 
 		// The token mint: the server token's (401 for a panel token, as
 		// TestPanelTokenMint pins for the anonymous caller).
@@ -1003,7 +1013,7 @@ func TestAuthMatrix(t *testing.T) {
 		}
 	}
 
-	// api/meta's db.path and db.size (plan B5), and pid (plan B2), are the server token's
+	// api/meta's db.path and db.size (plan B5), pid (plan B2) and live_all (plan A7) are the server token's
 	// (setup B's dev token) — omitted, never nulled, for a read- or a
 	// playground-scoped panel token; db.kind and runtimes are
 	// everyone's (rt_test holds a command stream; the table's own
@@ -1030,6 +1040,7 @@ func TestAuthMatrix(t *testing.T) {
 			PID          *int           `json:"pid"`
 			Runtimes     int            `json:"runtimes"`
 			AuthRequired *bool          `json:"auth_required"`
+			LiveAll      *bool          `json:"live_all"`
 			Content      struct {
 				Latest *struct {
 					RunID string `json:"run_id"`
@@ -1061,6 +1072,11 @@ func TestAuthMatrix(t *testing.T) {
 		// pid (plan B2) follows db.path: the server token's alone.
 		if want := id.kind == "server"; (meta.PID != nil) != want || (want && *meta.PID != os.Getpid()) {
 			t.Errorf("GET /api/meta as %s: pid = %v, want present (this process's) = %v", id.name, meta.PID, want)
+		}
+		// live_all (plan A7) follows db.path too: true for the server
+		// token, false — present, never omitted — for every panel token.
+		if want := id.kind == "server"; meta.LiveAll == nil || *meta.LiveAll != want {
+			t.Errorf("GET /api/meta as %s: live_all = %v, want %v", id.name, meta.LiveAll, want)
 		}
 		if meta.Runtimes < 1 {
 			t.Errorf("GET /api/meta as %s: runtimes = %d, want at least rt_test's stream", id.name, meta.Runtimes)

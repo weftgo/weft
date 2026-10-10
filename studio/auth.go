@@ -338,9 +338,21 @@ func scopeSpans(w http.ResponseWriter, r *http.Request, spans []spanDTO) bool {
 // token gets a 403 rather than a leak. A run or session nothing has
 // stored yet passes — there is no row to read a public id from — which
 // is why serveLive also checks every frame against the token's public
-// id before forwarding it.
+// id before forwarding it. The all selector is no identity's but the
+// server token's and setup A's loopback (mayReadDBPath): 403 for every
+// panel token, whatever its scope.
 func (s *Server) scopeLive(w http.ResponseWriter, r *http.Request, sel obsdb.Selector) bool {
 	id := idFrom(r)
+	if sel.All {
+		// Every run (plan A7, the Live page): the dev token's and setup
+		// A's loopback alone — api/meta's live_all, db.path's rule.
+		if !mayReadDBPath(s, r) {
+			writeError(w, r, http.StatusForbidden, "forbidden",
+				"the all selector streams every run: it needs the server token, or setup A on a loopback Host")
+			return false
+		}
+		return true
+	}
 	if id.panel == nil {
 		return true
 	}

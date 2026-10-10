@@ -51,8 +51,10 @@ func TestHubSeqMonotonicAcrossSelectors(t *testing.T) {
 }
 
 // A selector matches exactly its scope: a session subscription sees both
-// its runs, a run subscription only its own frames, and an unset
-// selector sees nothing (a live tail must be scoped, never a firehose).
+// its runs, a run subscription only its own frames, an unset selector
+// sees nothing (a live tail must be scoped, never an implied firehose),
+// and All — the one explicit every-run scope — sees every run's frames
+// but a record that names no run, and nothing at all when over-set.
 func TestHubSelectorScoping(t *testing.T) {
 	h := NewHub()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -60,9 +62,19 @@ func TestHubSelectorScoping(t *testing.T) {
 	byRun, _ := h.Subscribe(ctx, Selector{RunID: "r1"}, 0)
 	bySess, _ := h.Subscribe(ctx, Selector{SessionID: "s1"}, 0)
 	byNone, _ := h.Subscribe(ctx, Selector{}, 0)
+	byAll, _ := h.Subscribe(ctx, Selector{All: true}, 0)
+	byOverSet, _ := h.Subscribe(ctx, Selector{All: true, RunID: "r1"}, 0)
 	h.Publish(ctx, recFrame("r1", "s1", "event"))
-	h.Publish(ctx, recFrame("r2", "s1", "event")) // same session, other run
-	h.Publish(ctx, recFrame("r9", "s9", "event")) // neither
+	h.Publish(ctx, recFrame("r2", "s1", "event"))                        // same session, other run
+	h.Publish(ctx, recFrame("r9", "s9", "event"))                        // neither
+	h.Publish(ctx, RunFrame(RunRow{ID: "r8"}))                           // a run row
+	h.Publish(ctx, RecordFrame(Record{EventName: "app.log", Body: "x"})) // no run
+	if n := drain(byAll); n != 4 {
+		t.Errorf("all selector saw %d frames, want 4 (every run's, not the runless record)", n)
+	}
+	if n := drain(byOverSet); n != 0 {
+		t.Errorf("over-set all selector saw %d frames, want 0", n)
+	}
 	if n := drain(byRun); n != 1 {
 		t.Errorf("run selector saw %d frames, want 1", n)
 	}

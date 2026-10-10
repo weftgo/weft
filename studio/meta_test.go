@@ -153,7 +153,7 @@ func TestMetaManifestCheck(t *testing.T) {
 	}
 }
 
-// TestMetaDBPathSetupA pins db.path/db.size and pid in setup A (no
+// TestMetaDBPathSetupA pins db.path/db.size, pid and live_all in setup A (no
 // Token): a loopback Host reads them; a Host let in only by
 // AllowOrigins reads the kind alone. (Setup B and the panel tokens: TestAuthMatrix.)
 func TestMetaDBPathSetupA(t *testing.T) {
@@ -170,6 +170,14 @@ func TestMetaDBPathSetupA(t *testing.T) {
 	}
 	if m := metaOf(t, ts, "studio.example"); m.DB.Kind != "sqlite" || m.DB.Path != "" || m.DB.Size != nil || m.PID != 0 {
 		t.Errorf("AllowOrigins host meta.db = %+v, pid %d, want the kind only and no pid", m.DB, m.PID)
+	}
+	// live_all (plan A7) follows the same rule: the loopback Host may
+	// open /api/live?all=1, the AllowOrigins host may not (TestLiveAllSetupA).
+	if m := metaOf(t, ts, ""); !m.LiveAll {
+		t.Error("loopback meta.live_all = false, want true")
+	}
+	if m := metaOf(t, ts, "studio.example"); m.LiveAll {
+		t.Error("AllowOrigins host meta.live_all = true, want false")
 	}
 }
 

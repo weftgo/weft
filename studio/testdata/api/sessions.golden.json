@@ -15,9 +15,9 @@
       },
       "cost_usd": null,
       "cost_known": false,
-      "cost_badge": "unpriced",
-      "cost_reason": "a turn is not priced: r_stale (no row of the default pricing table matches wefttest/script); r_fail (no row of the default pricing table matches wefttest/script); r_ok (no row of the default pricing table matches wefttest/script)",
-      "cache": "unknown"
+      "cost_badge": "unknown",
+      "cost_reason": "a turn is not priced: r_stale (the run's end (run_finish or its invoke_agent span) never arrived: its usage is not recorded); r_fail (no row of the default pricing table matches wefttest/script); r_ok (no row of the default pricing table matches wefttest/script)",
+      "cache": "not_reported"
     },
     {
       "id": "s_research",
@@ -35,7 +35,7 @@
       "cost_known": false,
       "cost_badge": "unpriced",
       "cost_reason": "a turn is not priced: r_sub (no row of the default pricing table matches wefttest/script)",
-      "cache": "unknown"
+      "cache": "not_reported"
     }
   ],
   "next_before": null,

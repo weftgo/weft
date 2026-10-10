@@ -194,8 +194,8 @@
   "cost_usd": null,
   "cost_known": false,
   "cost_badge": "unpriced",
-  "cost_reason": "no row of the default pricing table matches wefttest/glm-a",
-  "cache": "unknown",
+  "cost_reason": "no row of the default pricing table matches wefttest/glm-b",
+  "cache": "not_reported",
   "holes": [
     {
       "hole": "stripped",

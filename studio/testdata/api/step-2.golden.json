@@ -209,7 +209,7 @@
   "cost_known": false,
   "cost_badge": "unpriced",
   "cost_reason": "no row of the default pricing table matches wefttest/glm-a",
-  "cache": "unknown",
+  "cache": "not_reported",
   "compaction": {
     "scope": "run",
     "index": 5,

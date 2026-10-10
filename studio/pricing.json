@@ -1,6 +1,6 @@
 {
   "dated": "2026-10-10",
-  "note": "Prices are the vendors' public per-1M-token list rates in USD (first-party APIs), read on the dated day. model_glob is a path.Match pattern over provider/model; the first match wins. A missing cached_input, cache_write or reasoning rate prices those tokens at the input or output rate. This file is also the template for a WEFT_PRICING / --pricing override, which replaces this table whole. Generated from studio/internal/pricingdata: edit there, then go generate ./studio/...",
+  "note": "Prices are the vendors' public per-1M-token list rates in USD (first-party APIs), read on the dated day. model_glob is a path.Match pattern over provider/model; the first match wins. A missing cached_input, cache_write or reasoning rate prices those tokens at the input or output rate. cache_write is the 5-minute-TTL rate (1.25x input): a 1-hour cache write (2x) is understated. The Gemini rows have no cached_input: a cached Gemini prompt is priced at the input rate. Premium speed tiers (Claude Opus 5.5 fast mode) and long-context tiers are not modelled; models with a long-context tier are left out. This file is also the template for a WEFT_PRICING / --pricing override, which replaces this table whole. Generated from studio/internal/pricingdata: edit there, then go generate ./studio/...",
   "models": [
     {
       "provider": "anthropic",
@@ -113,6 +113,38 @@
       "output": 5,
       "cached_input": 0.1,
       "cache_write": 1.25
+    },
+    {
+      "provider": "anthropic",
+      "model_glob": "claude-opus-4-5",
+      "input": 5,
+      "output": 25,
+      "cached_input": 0.5,
+      "cache_write": 6.25
+    },
+    {
+      "provider": "anthropic",
+      "model_glob": "claude-opus-4-5-20*",
+      "input": 5,
+      "output": 25,
+      "cached_input": 0.5,
+      "cache_write": 6.25
+    },
+    {
+      "provider": "anthropic",
+      "model_glob": "claude-opus-4-1",
+      "input": 15,
+      "output": 75,
+      "cached_input": 1.5,
+      "cache_write": 18.75
+    },
+    {
+      "provider": "anthropic",
+      "model_glob": "claude-opus-4-1-20*",
+      "input": 15,
+      "output": 75,
+      "cached_input": 1.5,
+      "cache_write": 18.75
     },
     {
       "provider": "openai",

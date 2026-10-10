@@ -37,7 +37,7 @@
   "cost_known": false,
   "cost_badge": "unpriced",
   "cost_reason": "no row of the default pricing table matches wefttest/script",
-  "cache": "unknown",
+  "cache": "not_reported",
   "delegated_cost_usd": 0,
   "delegated_cost_known": true,
   "event_count": 4,

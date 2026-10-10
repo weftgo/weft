@@ -17,8 +17,13 @@
 //   - a rate column the vendor does not publish is omitted, and Studio
 //     then prices that token kind at the base rate (input or output);
 //   - cache_write is the 5-minute-TTL write rate (Anthropic: 1.25× the
-//     input rate; a 1-hour write bills 2×, which the usage cannot tell
-//     apart);
+//     input rate); a 1-hour write bills 2×, which the usage cannot tell
+//     apart, so a 1-hour cache write is understated;
+//   - the Gemini rows carry no cached_input (the context-cache rates were
+//     not certain): a cached Gemini prompt is priced at the input rate,
+//     an overstatement;
+//   - a premium speed tier (Claude Opus 5.5 fast mode, 2× the rates) is
+//     not modelled: the usage does not say which speed served a call;
 //   - reasoning tokens bill as output at every vendor listed, so no
 //     reasoning column is set;
 //   - globs are path.Match patterns over "provider/model", first match
@@ -39,6 +44,9 @@ const Dated = "2026-10-10"
 const Note = "Prices are the vendors' public per-1M-token list rates in USD (first-party APIs), read on the dated day. " +
 	"model_glob is a path.Match pattern over provider/model; the first match wins. A missing cached_input, " +
 	"cache_write or reasoning rate prices those tokens at the input or output rate. " +
+	"cache_write is the 5-minute-TTL rate (1.25x input): a 1-hour cache write (2x) is understated. " +
+	"The Gemini rows have no cached_input: a cached Gemini prompt is priced at the input rate. " +
+	"Premium speed tiers (Claude Opus 5.5 fast mode) and long-context tiers are not modelled; models with a long-context tier are left out. " +
 	"This file is also the template for a WEFT_PRICING / --pricing override, which replaces this table whole. " +
 	"Generated from studio/internal/pricingdata: edit there, then go generate ./studio/..."
 
@@ -92,6 +100,12 @@ var Models = []Model{
 	anthropic("claude-sonnet-4-6", 3, 15, 0.30),
 	anthropic("claude-haiku-4-5", 1, 5, 0.10),
 	anthropic("claude-haiku-4-5-20*", 1, 5, 0.10),
+	// Older ids still served. Claude Sonnet 4.5 is left out: its rate
+	// rises past 200K prompt tokens.
+	anthropic("claude-opus-4-5", 5, 25, 0.50),
+	anthropic("claude-opus-4-5-20*", 5, 25, 0.50),
+	anthropic("claude-opus-4-1", 15, 75, 1.50),
+	anthropic("claude-opus-4-1-20*", 15, 75, 1.50),
 
 	// OpenAI (gpt-*, o*): the aliases and their dated snapshots at the
 	// same rate. gpt-4o's older snapshot (2024-05-13) billed more and is

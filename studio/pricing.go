@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strconv"
@@ -41,11 +42,14 @@ import (
 // "provider/model" against each row's "provider/model_glob" with
 // path.Match semantics (so either half may be a glob: "*" matches any
 // run of characters but "/"); the first match wins, so the most specific
-// row comes first. input and output are required; cached_input,
-// cache_write and reasoning are optional, and a missing one prices that
-// token kind at the base rate (cached_input and cache_write at input,
-// reasoning at output). An override file replaces the default table
-// whole — there is no merging; start from pricing.json, the template.
+// row comes first. The provider is the table's spelling: a row whose
+// provider came from the invoke_agent span's semconv name ("gcp.gemini")
+// is looked up as the adapter's ("google"). input and output are
+// required; cached_input, cache_write and reasoning are optional, and a
+// missing one prices that token kind at the base rate (cached_input and
+// cache_write at input, reasoning at output). An override file replaces
+// the default table whole — there is no merging; start from
+// pricing.json, the template.
 //
 // # The formula
 //
@@ -58,31 +62,48 @@ import (
 //	     + output      × (OutputTokens − ReasoningTokens)
 //	     + reasoning   × ReasoningTokens          (all ÷ 1,000,000)
 //
-// exact where the adapter reports the splits. When it reported none
-// (all three zero) every input token is priced at the input rate and
-// every output token at the output rate, and the row says cache
-// "unknown" — the figure may then overstate a cached prompt. Figures
-// are float64, rounded to 6 decimals on the wire.
+// exact where the adapter reports the splits. When it reported no cache
+// split (CachedInputTokens and CacheWriteTokens both zero) every input
+// token is priced at the input rate, and the object says cache
+// "not_reported" with cost_reason "no cache split reported; a cached
+// prompt may be overstated" (an uncached prompt reads the same, its
+// figure exact). Figures are float64, rounded to 6 decimals on the wire.
 //
 // # On the wire
 //
 // Every priced object carries cost_usd (null when unknown — never 0 for
-// an unpriced model), cost_known, cache ("exact" | "unknown"), and when
-// unknown cost_badge ("unpriced": no row matches the model; "unknown":
-// the figure could not be computed, e.g. the run's subagent children
-// could not be read) with cost_reason naming why. Run rows (lists,
-// documents, children, search hits, live frames, experiment runs) and a
-// step's children[] add delegated_cost_usd / delegated_cost_known /
-// delegated_cost_reason: a run's usage includes its subagent children's
-// (core rolls them up), so cost_usd is the run's own model calls — its
-// usage minus its direct children's, at its own model's rates — and
-// delegated_cost_usd is the sum of its descendants' own costs, two
-// numbers, never folded (null and known false when any descendant is
-// unpriced). A session row's cost_usd is its turns' own + delegated
-// (the session's usage already includes them); a thread/pool child is
-// another session, which obsdb's session row does not link, so no
-// session carries a delegated figure. A step's cost_usd prices its own
-// model call (step_finish's usage) at the model it requested.
+// an unpriced model), cost_known, cache ("exact" | "not_reported"), and
+// when unknown cost_badge ("unpriced": no row matches the model;
+// "unknown": the figure cannot be computed yet or at all) with
+// cost_reason naming why. A running run is "unknown" ("running: usage
+// arrives at run end" — the core reports a run's usage once, at its
+// end), as is one whose end never arrived (no run_finish, no
+// invoke_agent span: nothing recorded its usage).
+//
+// Run rows (lists, documents, children, search hits, live frames,
+// experiment runs, the export) and a step's children[] add
+// delegated_cost_usd / delegated_cost_known / delegated_cost_reason. A
+// run's usage includes its core Subagent children's (rule 13: the core
+// rolls them up) — the runs whose id is <run id>/<step>/<call> — so
+// cost_usd is the run's own model calls: its usage minus those direct
+// children's, priced at the run's model (a step that a Fallback or
+// UseModel answered with another model is priced at the run's model in
+// this figure; the step route prices it at the answering model), and
+// delegated_cost_usd is the sum of its Subagent descendants' own costs —
+// two numbers, never folded (null and known false when any is unpriced
+// or running). Other runs linked to it by weft.parent.run.id — a
+// thread/pool child session's run, another agent's Generate inside a
+// tool handler — were never rolled up: they are neither subtracted nor
+// delegated, and carry their own figures on their own rows.
+//
+// A session row's cost_usd is its turns' own + delegated (sessionCost:
+// every run of the session that is not a Subagent child of another of
+// its runs — a pool child session's run is a turn of the child
+// session). The pool child's cost is on its own session, not on the
+// parent session's row (thread's Usage.Delegated is in the session
+// file, not in obsdb). A step's cost_usd prices its own model call
+// (step_finish's usage) at the model that answered it, else the model
+// it requested, else the run's.
 
 // PricingTable is a pricing table: pricing.json's shape (and a
 // WEFT_PRICING override file's). Build one in Go, or read one with
@@ -166,6 +187,9 @@ func DefaultPricing() PricingTable {
 // silent fallback to the default. The table it returns reports source
 // "file" and its path.
 func LoadPricing(file string) (PricingTable, error) {
+	if abs, err := filepath.Abs(file); err == nil {
+		file = abs
+	}
 	b, err := os.ReadFile(file)
 	if err != nil {
 		return PricingTable{}, fmt.Errorf("pricing %s: %w", file, err)
@@ -286,13 +310,29 @@ func resolvePricing(c *config) {
 
 // lookup is the first row matching provider/model.
 func (t *PricingTable) lookup(provider, model string) (ModelPrice, bool) {
-	key := provider + "/" + model
+	key := pricingProvider(provider) + "/" + model
 	for _, m := range t.Models {
 		if ok, _ := path.Match(m.Provider+"/"+m.ModelGlob, key); ok {
 			return m, true
 		}
 	}
 	return ModelPrice{}, false
+}
+
+// providerAliases maps the provider names a run row can carry onto the
+// table's: run_start writes the adapter's ModelInfo.Provider ("google"),
+// but the invoke_agent span writes the semconv gen_ai.provider.name
+// (core/observe.go's providerNames: "google" → "gcp.gemini"; openai and
+// anthropic are spelled the same both ways), and obsdb keeps whichever
+// arrived first.
+var providerAliases = map[string]string{"gcp.gemini": "google"}
+
+// pricingProvider is provider under the table's spelling.
+func pricingProvider(p string) string {
+	if a, ok := providerAliases[p]; ok {
+		return a
+	}
+	return p
 }
 
 // Cost badges (cost_badge).
@@ -303,8 +343,8 @@ const (
 
 // Cache marks (cache).
 const (
-	cacheExact   = "exact"
-	cacheUnknown = "unknown"
+	cacheExact       = "exact"
+	cacheNotReported = "not_reported"
 )
 
 // costFields is the cost block every priced object carries.
@@ -334,6 +374,9 @@ type cost struct {
 // fields is c on the wire: rounded, null when unknown.
 func (c cost) fields() costFields {
 	out := costFields{CostKnown: c.known, CostBadge: c.badge, CostReason: c.reason, Cache: c.cache}
+	if c.known && c.cache == cacheNotReported && out.CostReason == "" {
+		out.CostReason = cacheNote
+	}
 	if c.known {
 		v := round6(c.usd)
 		out.CostUSD = &v
@@ -343,13 +386,23 @@ func (c cost) fields() costFields {
 
 func round6(v float64) float64 { return math.Round(v*1e6) / 1e6 }
 
-// cacheOf reads whether the adapter reported the splits.
+// cacheOf reads whether the adapter reported a cache split: with
+// neither CachedInputTokens nor CacheWriteTokens every input token is
+// priced at the input rate, which may overstate a cached prompt.
+// (A zero split cannot be told from an unreported one: an uncached
+// prompt reads not_reported too, and its figure is exact.) Reasoning
+// tokens are left out — they bill at the output rate at every vendor
+// the default table lists.
 func cacheOf(u core.Usage) string {
-	if u.CachedInputTokens == 0 && u.CacheWriteTokens == 0 && u.ReasoningTokens == 0 {
-		return cacheUnknown
+	if u.CachedInputTokens == 0 && u.CacheWriteTokens == 0 {
+		return cacheNotReported
 	}
 	return cacheExact
 }
+
+// cacheNote is cost_reason's words for a not_reported cache on a
+// known figure.
+const cacheNote = "no cache split reported; a cached prompt may be overstated"
 
 // price is u's cost on provider/model under t: the formula above, or
 // the unpriced badge naming the model when no row matches.
@@ -468,7 +521,7 @@ func (c *coster) cost(rec obsdb.RunRow) runCost {
 }
 
 func (c *coster) compute(rec obsdb.RunRow) runCost {
-	kids, err := c.children(rec.ID)
+	all, err := c.children(rec.ID)
 	if err != nil {
 		why := "the run's subagent children could not be read, so its own usage cannot be told from theirs"
 		return runCost{
@@ -477,9 +530,9 @@ func (c *coster) compute(rec obsdb.RunRow) runCost {
 		}
 	}
 	own := rec.Usage
-	del := cost{known: true, cache: cacheExact}
+	del := cost{known: true}
 	var unpriced []string
-	for _, k := range kids {
+	for _, k := range subagents(rec.ID, all) {
 		own = sub(own, k.Usage)
 		kc := c.cost(k)
 		del.usd += kc.own.usd + kc.delegated.usd
@@ -493,7 +546,41 @@ func (c *coster) compute(rec obsdb.RunRow) runCost {
 	if len(unpriced) > 0 {
 		del = cost{badge: costUnpriced, reason: "a subagent run is not priced: " + strings.Join(unpriced, "; ")}
 	}
+	if why := usagePending(rec); why != "" {
+		return runCost{own: cost{badge: costUnknown, reason: why, cache: cacheOf(own)}, delegated: del}
+	}
 	return runCost{own: c.table.price(rec.Provider, rec.Model, own), delegated: del}
+}
+
+// subagents is the core Subagent children among a run's parent-linked
+// runs: those whose id is <parent>/<step>/<call> (core's childRunID) —
+// the only ones whose usage the core rolled into the parent's (rule
+// 13). A thread/pool child session's run, or another agent's Generate
+// called inside a tool handler, is linked by weft.parent.run.id too but
+// was never rolled up: neither subtracted nor counted as delegated.
+func subagents(id string, kids []obsdb.RunRow) []obsdb.RunRow {
+	var out []obsdb.RunRow
+	for _, k := range kids {
+		if strings.HasPrefix(k.ID, id+"/") {
+			out = append(out, k)
+		}
+	}
+	return out
+}
+
+// usagePending says why a run's usage is not its bill yet: the core
+// reports a run's usage once, at its end (run_finish, the invoke_agent
+// span), so a running run — or one whose end never arrived (Finished
+// unset: the same records set both) — carries none to price. "" when
+// the usage is recorded.
+func usagePending(rec obsdb.RunRow) string {
+	switch {
+	case rec.Status == obsdb.StatusRunning:
+		return "running: usage arrives at run end"
+	case rec.Finished == nil:
+		return "the run's end (run_finish or its invoke_agent span) never arrived: its usage is not recorded"
+	}
+	return ""
 }
 
 // row is row(rec) with its cost.
@@ -522,9 +609,13 @@ func (c cost) delegatedFields() delegatedFields {
 // sessionCostPages bounds a session's runs walk: 20 pages of 500.
 const sessionCostPages = 20
 
-// sessionCost is a session's cost: its top-level turns' own +
-// delegated, from one walk of every run carrying the session id
-// (subagent children inherit it), so the tree costs no children reads.
+// sessionCost is a session's cost: its turns' own + delegated, from
+// one walk of every run carrying the session id (Subagent children
+// inherit it), so the tree costs no children reads. A turn is every run
+// of the set that is not a core Subagent child of another run in it: a
+// top-level turn, a thread/pool child session's run (its parent run is
+// in the parent's session), and another agent's Generate inside a tool
+// handler (linked but never rolled up, so no other figure carries it).
 // The coster it returns is primed with that tree for the turn rows.
 func (s *Server) sessionCost(ctx context.Context, id string) (cost, *coster) {
 	c := s.coster(ctx)
@@ -546,7 +637,9 @@ func (s *Server) sessionCost(ctx context.Context, id string) (cost, *coster) {
 		q.Before, q.BeforeID = *page.NextBefore, page.NextBeforeID
 	}
 	kids := map[string][]obsdb.RunRow{}
+	inSet := map[string]bool{}
 	for _, r := range runs {
+		inSet[r.ID] = true
 		if r.ParentRunID != "" {
 			kids[r.ParentRunID] = append(kids[r.ParentRunID], r)
 		}
@@ -557,15 +650,19 @@ func (s *Server) sessionCost(ctx context.Context, id string) (cost, *coster) {
 	out := cost{known: true}
 	var usage core.Usage
 	var unpriced []string
+	badge := costUnpriced
 	for _, r := range runs {
-		if r.ParentRunID != "" {
-			continue
+		if inSet[r.ParentRunID] && strings.HasPrefix(r.ID, r.ParentRunID+"/") {
+			continue // a Subagent child: in its parent's delegated figure
 		}
 		usage = usage.Add(r.Usage)
 		rc := c.cost(r)
 		out.usd += rc.own.usd + rc.delegated.usd
 		if !rc.own.known {
 			unpriced = append(unpriced, r.ID+" ("+rc.own.reason+")")
+			if rc.own.badge == costUnknown {
+				badge = costUnknown
+			}
 		}
 		if !rc.delegated.known {
 			unpriced = append(unpriced, r.ID+"'s subagents ("+rc.delegated.reason+")")
@@ -574,7 +671,7 @@ func (s *Server) sessionCost(ctx context.Context, id string) (cost, *coster) {
 	out.cache = cacheOf(usage)
 	if len(unpriced) > 0 {
 		out.known, out.usd = false, 0
-		out.badge, out.reason = costUnpriced, "a turn is not priced: "+strings.Join(unpriced, "; ")
+		out.badge, out.reason = badge, "a turn is not priced: "+strings.Join(unpriced, "; ")
 	}
 	return out, c
 }

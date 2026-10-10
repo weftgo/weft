@@ -41,7 +41,7 @@
   "pricing": {
     "source": "default",
     "dated": "2026-10-10",
-    "models": 43
+    "models": 47
   },
   "retention": "720h0m0s",
   "runtimes": 0,

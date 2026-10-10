@@ -33,7 +33,7 @@
   "cost_known": false,
   "cost_badge": "unpriced",
   "cost_reason": "the run reported no model to price",
-  "cache": "unknown",
+  "cache": "not_reported",
   "holes": [
     {
       "hole": "gap",

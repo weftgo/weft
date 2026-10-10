@@ -20,6 +20,8 @@ import (
 	"github.com/weftgo/weft/obsdb/sqlite"
 	"github.com/weftgo/weft/otel"
 	"github.com/weftgo/weft/studio/internal/pricingdata"
+	"github.com/weftgo/weft/thread"
+	"github.com/weftgo/weft/thread/pool"
 )
 
 // TestPricingJSONIsGenerated: the committed pricing.json is exactly the
@@ -152,7 +154,7 @@ func costDB(t *testing.T) obsdb.DB {
 // TestCostHandCalculation is the Done line's first two clauses (plan
 // A5): a run on a model in the default table costs what a hand
 // calculation from its usage says, exact with the splits and at the
-// input rate (cache "unknown") without them; a run on an unlisted
+// input rate (cache "not_reported") without them; a run on an unlisted
 // model is null with the unpriced badge and a reason naming it —
 // never 0.
 func TestCostHandCalculation(t *testing.T) {
@@ -175,7 +177,7 @@ func TestCostHandCalculation(t *testing.T) {
 	flat := core.Usage{InputTokens: 120_000, OutputTokens: 9_000}
 	costUsage(t, db, "r_flat", "", "", "anthropic", "claude-opus-5-5", t0.Add(time.Second), flat, flat)
 	// No splits reported: 120,000 × $4 + 9,000 × $20 = 480,000 + 180,000
-	// = 660,000 ÷ 1,000,000 = $0.66, cache "unknown".
+	// = 660,000 ÷ 1,000,000 = $0.66, cache "not_reported".
 	const wantFlat = 0.66
 	costUsage(t, db, "r_unpriced", "", "", "acme", "mystery-1", t0.Add(2*time.Second), flat, flat)
 
@@ -183,7 +185,7 @@ func TestCostHandCalculation(t *testing.T) {
 	for _, c := range []struct {
 		id, cache string
 		want      float64
-	}{{"r_split", cacheExact, wantSplit}, {"r_flat", cacheUnknown, wantFlat}} {
+	}{{"r_split", cacheExact, wantSplit}, {"r_flat", cacheNotReported, wantFlat}} {
 		_, _, body := get(t, h, "/studio/api/runs/"+c.id)
 		var r costRow
 		decode(t, body, &r)
@@ -518,5 +520,276 @@ func TestCostSubagentRealRun(t *testing.T) {
 	if usd(doc.CostUSD) != "0.04" || usd(doc.DelegatedCostUSD) != "0.002" || usd(doc.Children[0].CostUSD) != "0.002" {
 		t.Errorf("real subagent run: own %s delegated %s child %s, want 0.04, 0.002, 0.002",
 			usd(doc.CostUSD), usd(doc.DelegatedCostUSD), usd(doc.Children[0].CostUSD))
+	}
+}
+
+// pricedServer is a Studio over a fresh file, pricing the test models,
+// with the pipeline that feeds it.
+func pricedServer(t *testing.T, rows ...ModelPrice) (*Server, *httptest.Server, *otel.Pipeline) {
+	t.Helper()
+	srv := New(Open(filepath.Join(t.TempDir(), "w.db")), Pricing(PricingTable{Dated: "2026-10-01", Models: rows}))
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	p, err := otel.Start(context.Background(), otel.Studio(ts.URL, ""), otel.NoGlobal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return srv, ts, p
+}
+
+// getUntil GETs path until ok accepts the decoded body (ingest lands
+// asynchronously) and returns the body.
+func getUntil(t *testing.T, ts *httptest.Server, path string, v any, ok func() bool) {
+	t.Helper()
+	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		resp, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		_ = resp.Body.Close()
+		if resp.StatusCode == http.StatusOK {
+			decode(t, string(b), v)
+			if ok() {
+				return
+			}
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("GET %s = %d %s", path, resp.StatusCode, b)
+		}
+	}
+}
+
+// TestCostPoolChild: a thread/pool child session's run carries
+// weft.parent.run.id = the parent run (obsdb lists it as a child), but
+// the core never rolled its usage into the parent's (rule 13's pool
+// exception). The parent's own figure is its own usage priced, nothing
+// is delegated, and the child's session is priced on its own run.
+func TestCostPoolChild(t *testing.T) {
+	srv, ts, p := pricedServer(t,
+		ModelPrice{Provider: "wefttest", ModelGlob: "parent-m", Input: 1000, Output: 2000},
+		ModelPrice{Provider: "wefttest", ModelGlob: "child-m", Input: 100, Output: 200})
+	ctx := context.Background()
+	obs := []core.Option{core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider())}
+	pl := pool.New(2)
+	child := core.New(namedModel{wefttest.Script(wefttest.Say("the answer is 42")), "child-m"}, append(obs, core.Name("researcher"))...)
+	parent := core.New(namedModel{wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research", Args: wefttest.Args(struct{ Prompt string }{"find it"})}),
+		wefttest.Say("done"),
+	), "parent-m"}, append(obs, core.Name("orders"), pl.MustWrap("research", "delegates research", child))...)
+	s, err := thread.Create(ctx, thread.Memory(), parent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := s.Send(ctx, core.User("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := turn.Wait()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Usage.InputTokens != 20 || res.Usage.OutputTokens != 10 {
+		t.Fatalf("parent usage = %+v, want 20/10: a pool child is never rolled up", res.Usage)
+	}
+	receipts := pool.Receipts(s)
+	if len(receipts) != 1 {
+		t.Fatalf("receipts = %+v", receipts)
+	}
+	childSession := receipts[0].Child
+	if err := pl.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	var doc struct {
+		costRow
+		Children []costRow `json:"children"`
+	}
+	getUntil(t, ts, "/api/runs/"+res.ID, &doc, func() bool { return len(doc.Children) == 1 && doc.CostKnown })
+	// own: 20 × $1000 + 10 × $2000 = 40,000 ÷ 1M = $0.04 — not reduced by
+	// the pool child's 10/5; delegated: 0, the child is not a Subagent.
+	if usd(doc.CostUSD) != "0.04" || usd(doc.DelegatedCostUSD) != "0" || !doc.DelegatedCostKnown {
+		t.Errorf("pool parent: own %s delegated %s, want 0.04 and 0 (the pool child %s is listed, not subtracted)",
+			usd(doc.CostUSD), usd(doc.DelegatedCostUSD), doc.Children[0].ID)
+	}
+	// The pool child's own row: 10 × $100 + 5 × $200 = 2,000 ÷ 1M = $0.002.
+	if usd(doc.Children[0].CostUSD) != "0.002" {
+		t.Errorf("pool child row: own %s, want 0.002", usd(doc.Children[0].CostUSD))
+	}
+	// The child's session is priced on that run: a turn of its session,
+	// its parent being in another session. (obsdb groups a session over
+	// top-level runs only, so /api/sessions/{child} is 404 today — the
+	// figure is read through sessionCost, the session routes' rule.)
+	var childRow struct {
+		SessionID string `json:"session_id"`
+	}
+	getUntil(t, ts, "/api/runs/"+doc.Children[0].ID, &childRow, func() bool { return true })
+	if childRow.SessionID != childSession {
+		t.Fatalf("the pool child's run carries session %q, want the child session %s", childRow.SessionID, childSession)
+	}
+	sc, _ := srv.sessionCost(ctx, childSession)
+	if f := sc.fields(); usd(f.CostUSD) != "0.002" || !f.CostKnown {
+		t.Errorf("pool child session %s: cost %s known %v (%s), want 0.002", childSession, usd(f.CostUSD), f.CostKnown, f.CostReason)
+	}
+	// And the parent's session is its own turn's bill alone.
+	pc, _ := srv.sessionCost(ctx, s.ID())
+	if f := pc.fields(); usd(f.CostUSD) != "0.04" {
+		t.Errorf("pool parent session: cost %s, want 0.04", usd(f.CostUSD))
+	}
+}
+
+// TestCostNestedGenerate: another agent's Generate inside a tool
+// handler is linked to the run (weft.parent.run.id) but never rolled
+// up: the parent's own figure is its own usage, nothing delegated.
+func TestCostNestedGenerate(t *testing.T) {
+	_, ts, p := pricedServer(t,
+		ModelPrice{Provider: "wefttest", ModelGlob: "parent-m", Input: 1000, Output: 2000},
+		ModelPrice{Provider: "wefttest", ModelGlob: "helper-m", Input: 100, Output: 200})
+	ctx := context.Background()
+	obs := []core.Option{core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider())}
+	helper := core.New(namedModel{wefttest.Script(wefttest.Say("helped")), "helper-m"}, append(obs, core.Name("helper"))...)
+	ask := core.Tool("ask", "Ask the helper.", func(ctx context.Context, in struct {
+		Q string `json:"q"`
+	}) (string, error) {
+		r, err := helper.Generate(ctx, core.Prompt(in.Q))
+		if err != nil {
+			return "", err
+		}
+		return r.Text(), nil
+	})
+	parent := core.New(namedModel{wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "ask", Args: `{"q":"help"}`}),
+		wefttest.Say("done"),
+	), "parent-m"}, append(obs, core.Name("orders"), ask)...)
+	res, err := parent.Generate(ctx, core.Prompt("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var doc struct {
+		costRow
+		Children []costRow `json:"children"`
+	}
+	getUntil(t, ts, "/api/runs/"+res.ID, &doc, func() bool { return len(doc.Children) == 1 && doc.CostKnown })
+	if strings.HasPrefix(doc.Children[0].ID, res.ID+"/") {
+		t.Fatalf("the nested run %s carries the Subagent id shape", doc.Children[0].ID)
+	}
+	if usd(doc.CostUSD) != "0.04" || usd(doc.DelegatedCostUSD) != "0" || usd(doc.Children[0].CostUSD) != "0.002" {
+		t.Errorf("nested Generate: own %s delegated %s nested %s, want 0.04, 0 and 0.002 on its own row",
+			usd(doc.CostUSD), usd(doc.DelegatedCostUSD), usd(doc.Children[0].CostUSD))
+	}
+}
+
+// TestCostProviderAlias: a Gemini run whose row kept the invoke_agent
+// span's semconv provider name (gcp.gemini) prices as google.
+func TestCostProviderAlias(t *testing.T) {
+	db := costDB(t)
+	u := core.Usage{InputTokens: 100_000, OutputTokens: 10_000}
+	costUsage(t, db, "r_gem", "", "", "gcp.gemini", "gemini-2.5-flash", time.Now().Add(-time.Hour).UTC(), u, u)
+	_, _, body := get(t, Handler(DB(db)), "/studio/api/runs/r_gem")
+	var r costRow
+	decode(t, body, &r)
+	// 100,000 × $0.30 + 10,000 × $2.50 = 30,000 + 25,000 = 55,000 ÷ 1M = $0.055.
+	if usd(r.CostUSD) != "0.055" {
+		t.Errorf("gcp.gemini/gemini-2.5-flash: cost %s (%s), want 0.055 at google's rates", usd(r.CostUSD), r.CostReason)
+	}
+}
+
+// TestCostRunning: a running run's usage arrives at its end, so its own
+// figure is unknown — never 0 — on the document and on a live run frame;
+// a finished frame carries the priced figure.
+func TestCostRunning(t *testing.T) {
+	db := costDB(t)
+	// A run_start alone: running (last seen now).
+	costUsageOpen(t, db, "r_run", "anthropic", "claude-opus-5-5")
+	hub := obsdb.NewHub()
+	h := Handler(DB(db), Live(hub))
+	_, _, body := get(t, h, "/studio/api/runs/r_run")
+	var r costRow
+	decode(t, body, &r)
+	if r.CostUSD != nil || r.CostKnown || r.CostBadge != costUnknown || r.CostReason != "running: usage arrives at run end" ||
+		usd(r.DelegatedCostUSD) != "0" {
+		t.Errorf("running run: %s", body)
+	}
+
+	resp := subscribeLive(t, h, "?run=r_live&kinds=run", "")
+	hub.Publish(context.Background(), obsdb.RunFrame(obsdb.RunRow{ID: "r_live", Provider: "anthropic", Model: "claude-opus-5-5",
+		Status: obsdb.StatusRunning, Usage: core.Usage{InputTokens: 10}}))
+	fin := time.Now().UTC()
+	hub.Publish(context.Background(), obsdb.RunFrame(obsdb.RunRow{ID: "r_live", Provider: "anthropic", Model: "claude-opus-5-5",
+		Status: obsdb.StatusSucceeded, Finished: &fin, Usage: core.Usage{InputTokens: 100_000, OutputTokens: 10_000}}))
+	frames := readSSE(t, resp, 2, 5*time.Second)
+	if len(frames) != 2 {
+		t.Fatalf("frames = %+v", frames)
+	}
+	var running, done struct {
+		Run costRow `json:"run"`
+	}
+	decode(t, frames[0].data, &running)
+	decode(t, frames[1].data, &done)
+	if running.Run.CostUSD != nil || running.Run.CostBadge != costUnknown || running.Run.CostReason != "running: usage arrives at run end" {
+		t.Errorf("running frame: %s", frames[0].data)
+	}
+	// 100,000 × $4 + 10,000 × $20 = 600,000 ÷ 1M = $0.6, cache not_reported.
+	if usd(done.Run.CostUSD) != "0.6" || done.Run.Cache != cacheNotReported || done.Run.CostReason != cacheNote {
+		t.Errorf("finished frame: %s", frames[1].data)
+	}
+}
+
+// costUsageOpen writes a run_start alone: a run in flight.
+func costUsageOpen(t *testing.T, db obsdb.DB, id, provider, model string) {
+	t.Helper()
+	b, _ := json.Marshal(map[string]any{"type": "run_start", "id": id, "agent": "billing",
+		"model": map[string]string{"provider": provider, "name": model}})
+	rec := obsdb.Record{Time: time.Now().UTC(), EventName: "weft.event", Severity: 9, Body: string(b), Service: "svc",
+		Attrs: map[string]any{"weft.record": "event", "weft.run.id": id, "gen_ai.agent.name": "billing",
+			"weft.event.type": "run_start", "weft.event.pos": int64(0)},
+		Resource: map[string]any{"service.name": "svc"}}
+	if err := db.Write(context.Background(), obsdb.Batch{Records: []obsdb.Record{rec}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestCostSortCap: a match larger than the cap is priced and listed up
+// to it, and the body says so. The cap is lowered to 3 through the
+// package var (2,000 in production).
+func TestCostSortCap(t *testing.T) {
+	old := costSortCap
+	costSortCap = 3
+	t.Cleanup(func() { costSortCap = old })
+	db := costDB(t)
+	t0 := time.Now().Add(-time.Hour).UTC()
+	for i := range 5 {
+		u := core.Usage{InputTokens: int64(1000 * (i + 1))}
+		costUsage(t, db, "r_cap"+strconv.Itoa(i), "", "", "anthropic", "claude-opus-5-5", t0.Add(time.Duration(i)*time.Second), u, u)
+	}
+	h := Handler(DB(db))
+	_, _, body := get(t, h, "/studio/api/search?sort=cost")
+	var page struct {
+		Total       int       `json:"total"`
+		Runs        []costRow `json:"runs"`
+		CostSortCap *int      `json:"cost_sort_cap"`
+	}
+	decode(t, body, &page)
+	var ids []string
+	for _, r := range page.Runs {
+		ids = append(ids, r.ID)
+	}
+	// The newest three (r_cap4..2) are read, then ordered by cost.
+	if page.CostSortCap == nil || *page.CostSortCap != 3 || page.Total != 3 || strings.Join(ids, ",") != "r_cap4,r_cap3,r_cap2" {
+		t.Errorf("capped sort=cost = total %d cap %v %v, want 3, cap 3, r_cap4,r_cap3,r_cap2", page.Total, page.CostSortCap, ids)
+	}
+	_, _, body = get(t, h, "/studio/api/search?sort=cost&limit=10&agent=billing&q=nothing-matches")
+	if strings.Contains(body, "cost_sort_cap") {
+		t.Errorf("an uncapped match carries cost_sort_cap: %s", body)
 	}
 }

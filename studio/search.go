@@ -68,7 +68,8 @@ type searchPage struct {
 }
 
 // costSortCap bounds the runs min_cost / sort=cost price per request.
-const costSortCap = 2000
+// A var only so TestCostSortCap can lower it; nothing else writes it.
+var costSortCap = 2000
 
 // sortCost is sort=cost: Studio's own order, not obsdb's.
 const sortCost = "cost"

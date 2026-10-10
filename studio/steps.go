@@ -533,10 +533,15 @@ func (s *Server) serveRunStep(w http.ResponseWriter, r *http.Request, id, item s
 }
 
 // priceStep sets the step's cost (plan A5): its own model call at the
-// model it requested (the run's model when no request names one), and
-// each child's own and delegated figures as its run row carries them.
+// model that answered it (gen_ai.response.model — a Fallback's backup,
+// a UseModel override), else the model it requested, else the run's;
+// and each child's own and delegated figures as its run row carries
+// them.
 func (s *Server) priceStep(ctx context.Context, doc *stepDoc, det obsdb.RunDetail) {
-	provider, model := doc.Model.Provider, doc.Model.Requested
+	provider, model := doc.Model.Provider, doc.Model.Answered
+	if model == "" {
+		model = doc.Model.Requested
+	}
 	if model == "" {
 		provider, model = det.Provider, det.Model
 	} else if provider == "" {

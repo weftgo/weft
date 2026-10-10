@@ -2,6 +2,7 @@ package obsdbtest
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/weftgo/weft/obsdb"
@@ -37,7 +38,10 @@ func requestRaw(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		f.tools(0, fxCatalog1, fxTools1)
 		f.request(0, 0, 1, fxSystem1, fxCatalog1, "full", fxRequest0)
 		f.raw(0, 0, 1, fxRaw(0, 1, `{"step":0}`, "data: a\n\n"), nil)
-		f.raw(1, 1, 1, fxRaw(1, 1, `{"step":1}`, "data: b\n\n"), map[string]any{"weft.content.truncated_bytes": int64(7)})
+		// Step 1's first attempt: a stream the reader stopped mid-way,
+		// marked complete: false.
+		f.raw(1, 1, 1, strings.Replace(fxRaw(1, 1, `{"step":1}`, "data: b\n\n"), `"bytes":9}`, `"bytes":9,"truncated_bytes":7,"complete":false}`, 1),
+			map[string]any{"weft.content.truncated_bytes": int64(7)})
 		f.request(1, 1, 1, fxSystem1, fxCatalog1, "full", fxRequest(1, 1, fxSystem1, fxCatalog1, "lookup", "script", 2, 3))
 		f.raw(2, 1, 2, fxRaw(1, 2, `{"try":1}`, "overloaded"), nil)
 		f.raw(3, 1, 2, fxRaw(1, 2, `{"try":2}`, "data: c\n\n"), nil)
@@ -95,6 +99,12 @@ func requestRaw(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			if len(w.RedactedHeaders) != 2 || w.RedactedHeaders[0] != c.redactedHeader {
 				t.Errorf("request %d: redacted_headers = %v", i, w.RedactedHeaders)
 			}
+		}
+		if c := reqs[1].Wire.Response.Complete; c == nil || *c {
+			t.Errorf("an unfinished response reads complete = %v, want false", c)
+		}
+		if reqs[0].Wire.Response.Complete != nil {
+			t.Errorf("a record that does not say reads complete = %v, want nil", *reqs[0].Wire.Response.Complete)
 		}
 		// A step filter and a page that starts past the raw records still
 		// attach what is theirs.

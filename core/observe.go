@@ -148,6 +148,11 @@ type observer struct {
 	// false until one does — so a program with no SDK pays nothing.
 	elog log.Logger
 	log  *slog.Logger
+	// lp is the provider elog came from, and globalLP says it is the
+	// global one (no LoggerProvider option): the raw record's marker
+	// question (rawMarked, raw.go) is asked of it.
+	lp       log.LoggerProvider
+	globalLP bool
 }
 
 // logger resolves the destination once per line: the option's logger

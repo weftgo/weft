@@ -134,6 +134,11 @@ export const CAUSES: Partial<Record<Hole, Record<string, { reason: string; fix?:
       reason: "this Studio does not serve the request record (no requests capability): the run may hold one",
       fix: "open the run in a Studio that serves it (upgrade Studio, or enable the requests group)",
     },
+    raw_off: {
+      reason:
+        "no wire bodies were recorded for this attempt: otel.RawBodies is off (the default, and refused outside WEFT_ENV=dev), or the adapter does not report them",
+      fix: "run under WEFT_ENV=dev with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)",
+    },
   },
   hidden: {
     dev_token_only: {

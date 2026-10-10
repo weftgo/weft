@@ -69,8 +69,8 @@ func CaptureRaw(r *http.Request, next func(*http.Request) (*http.Response, error
 		rep.Raw(pair)
 		return resp, nil
 	}
-	resp.Body = &teeBody{rc: resp.Body, done: func(body []byte, dropped int64) {
-		pair.Response, pair.ResponseTruncated = body, dropped
+	resp.Body = &teeBody{rc: resp.Body, length: resp.ContentLength, done: func(body []byte, dropped int64, complete bool) {
+		pair.Response, pair.ResponseTruncated, pair.ResponseIncomplete = body, dropped, !complete
 		rep.Raw(pair)
 	}}
 	return resp, nil
@@ -146,15 +146,21 @@ func (e errReader) Read([]byte) (int, error) { return 0, e.err }
 
 // teeBody passes a response body through unchanged, keeping its first
 // RawCap bytes and counting the rest, and calls done once — at EOF, at
-// a read error, or at Close, whichever comes first.
+// a read error, or at Close, whichever comes first. complete is true
+// only at EOF: a body closed before it (an SDK's transport retry
+// discarding a 429/5xx unread, a timeout, a reader that stopped) or
+// ended by a read error is incomplete, and when Content-Length was
+// known the bytes never read are counted as dropped.
 type teeBody struct {
 	rc      io.ReadCloser
+	length  int64 // Content-Length, -1 when unknown
 	mu      sync.Mutex
 	buf     []byte
 	dropped int64
+	eof     bool
 	sealed  bool // reported: later reads pass through untouched
 	once    sync.Once
-	done    func(body []byte, dropped int64)
+	done    func(body []byte, dropped int64, complete bool)
 }
 
 func (t *teeBody) Read(p []byte) (int, error) {
@@ -173,6 +179,11 @@ func (t *teeBody) Read(p []byte) (int, error) {
 		t.mu.Unlock()
 	}
 	if err != nil {
+		if err == io.EOF {
+			t.mu.Lock()
+			t.eof = true
+			t.mu.Unlock()
+		}
 		t.finish()
 	}
 	return n, err
@@ -186,9 +197,12 @@ func (t *teeBody) Close() error {
 func (t *teeBody) finish() {
 	t.once.Do(func() {
 		t.mu.Lock()
-		body, dropped := t.buf, t.dropped
+		body, dropped, complete := t.buf, t.dropped, t.eof
+		if !complete && t.length >= 0 {
+			dropped += max(t.length-int64(len(body))-t.dropped, 0)
+		}
 		t.sealed = true
 		t.mu.Unlock()
-		t.done(body, dropped)
+		t.done(body, dropped, complete)
 	})
 }

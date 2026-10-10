@@ -108,7 +108,13 @@ func NoEnv() Option {
 // which does not read WEFT_ENV — Start logs one WARN line ("otel:
 // RawBodies ignored: WEFT_ENV is not dev") and the pipeline behaves as
 // if the option were absent: no destination asks for weft.raw, so the
-// adapters buffer nothing (core.Reporter.WantsRaw is false).
+// adapters buffer nothing (core.Reporter.WantsRaw is false). The gate
+// is the pipeline's LoggerProvider marker (LoggerProvider.RawBodies):
+// pass Pipeline.LoggerProvider() to weft.LoggerProvider, or rely on
+// Install's global registration — a stock SDK provider never records
+// raw bodies. Under it a Studio destination's log batch is capped at 16
+// records, keeping each export under Studio's 16 MiB ingest limit (a
+// raw record is up to ≈ 650 KiB).
 func RawBodies(on bool) Option {
 	return optionFunc(func(c *config) { c.rawBodies = on })
 }

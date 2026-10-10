@@ -52,6 +52,11 @@ type RawSide struct {
 	Encoding       string              `json:"encoding,omitempty"`
 	Bytes          int64               `json:"bytes"`
 	TruncatedBytes int64               `json:"truncated_bytes,omitempty"`
+	// Complete is the response side's: false when the body was not read
+	// to its end (closed unread by a transport retry, a timeout, a
+	// reader that stopped) — the body is what was read, never the whole;
+	// nil on the request side and on records that do not say.
+	Complete *bool `json:"complete,omitempty"`
 }
 
 // RawRecordOf builds a RawRecord from a stored raw record.

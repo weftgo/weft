@@ -690,6 +690,12 @@ func New(m Model, opts ...Option) *Agent {
 		tracer: tp.Tracer(instrumentationName, trace.WithInstrumentationVersion(version)),
 		elog:   lp.Logger(instrumentationName, log.WithInstrumentationVersion(version)),
 		log:    a.logger,
+		lp:     lp,
+		// No LoggerProvider option: the raw marker is read off the
+		// global provider in force at each ask (raw.go), since the one
+		// resolved here may be the delegating placeholder an SDK
+		// registered later replaces.
+		globalLP: a.loggerProvider == nil,
 	}
 	// The manifest hash is computed once, here, for the named agent: the
 	// agent is immutable after this, so one hash serves every run (the

@@ -266,3 +266,67 @@ func TestRawBodiesRedact(t *testing.T) {
 		t.Errorf("redacted body = %q, Redact calls = %d", reqs[0].Wire.Request.Body, len(kinds))
 	}
 }
+
+// A stock SDK LoggerProvider — whose Simple and Batch processors answer
+// Enabled true for every event name — never receives a raw record: it
+// carries no RawBodies marker, so the core never builds one and the
+// adapter is told not to buffer (review finding 1 of A6.1).
+func TestRawBodiesStockSDKProviderNever(t *testing.T) {
+	devEnv(t, map[string]string{"WEFT_ENV": "dev"})
+	mem := newMemExporter()
+	lp := sdklog.NewLoggerProvider(sdklog.WithProcessor(sdklog.NewSimpleProcessor(mem)))
+	defer func() { _ = lp.Shutdown(context.Background()) }()
+	if !lp.Logger("x").Enabled(context.Background(), enabledParams("weft.raw")) {
+		t.Fatal("precondition: the stock provider answers Enabled true for weft.raw")
+	}
+	var wanted bool
+	agt := core.New(wefttest.Script(wefttest.Say("done")), core.LoggerProvider(lp),
+		core.WrapModel(func(next core.Model) core.Model { return rawReporter{next: next, wanted: &wanted} }))
+	if _, err := agt.Generate(context.Background(), core.Prompt("hi")); err != nil {
+		t.Fatal(err)
+	}
+	if wanted {
+		t.Error("WantsRaw = true under a stock SDK provider")
+	}
+	if n := len(recordsOfKind(mem.snapshot(), "raw")); n != 0 {
+		t.Errorf("the stock provider exported %d raw records", n)
+	}
+	if len(recordsOfKind(mem.snapshot(), "request")) != 1 {
+		t.Error("the stock provider lost the request record (the gate must touch raw only)")
+	}
+}
+
+// The global path: otel.Install's zero-config local sink registered
+// globally and an agent with no LoggerProvider option. Under dev with
+// RawBodies the marker is reached through the registered global
+// provider (the core re-reads the global at each ask) and the raw
+// record lands in the sink. The agent is built after Install: an
+// earlier test in this process may have left its own (shut-down)
+// provider registered, which an agent built then would emit to.
+func TestRawBodiesThroughTheGlobalProvider(t *testing.T) {
+	t.Setenv("WEFT_ENV", "dev")
+	t.Setenv("WEFT_DISCOVERY", "off")
+	t.Setenv("WEFT_STUDIO_URL", "")
+	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "")
+	t.Setenv("WEFT_DB", filepath.Join(t.TempDir(), "weft.db"))
+	shutdown := Install(RawBodies(true), Heartbeat(0))
+	defer shutdown()
+	var wanted bool
+	agt := core.New(wefttest.Script(wefttest.Say("done")),
+		core.WrapModel(func(next core.Model) core.Model { return rawReporter{next: next, wanted: &wanted} }))
+	res, err := agt.Generate(context.Background(), core.Prompt("hi"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !wanted {
+		t.Fatal("WantsRaw = false through the globally installed pipeline")
+	}
+	db := LocalDB()
+	if db == nil {
+		t.Fatal("no local sink installed")
+	}
+	reqs, err := db.Requests(context.Background(), res.ID, obsdb.RequestQuery{})
+	if err != nil || len(reqs) != 1 || reqs[0].Wire == nil || reqs[0].Wire.Request.Body != `{"q":"wire"}` {
+		t.Fatalf("requests = %+v, %v; want one with its raw record", reqs, err)
+	}
+}

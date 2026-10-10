@@ -178,47 +178,69 @@ func TestRawBodiesRoundTripLocalSink(t *testing.T) {
 	}
 }
 
-// Every case variant of every credential header the SDKs send — set on
-// the wire by a client middleware outside the adapter's, so the
-// non-canonical spellings reach the capture as written — is stripped
-// from the stored record, its value in no stored byte.
+// Every case variant of every credential header the SDKs send, times
+// every value shape — set on the wire by a client middleware outside the
+// adapter's, so non-canonical spellings reach the capture as written —
+// plus Bearer/Basic values under an innocuous name: the header is
+// stripped from the stored record and named in redacted_headers, and
+// its value is in no byte of the local sink (database and WAL) nor of
+// the requests row. Fuzz-seeded: the seeds are FuzzRawRedaction's.
 func TestRawBodiesNoCredentialStored(t *testing.T) {
 	rawEnv(t)
-	for _, name := range []string{
+	names := []string{
 		"authorization", "AUTHORIZATION", "Authorization", "X-API-Key", "x-api-key", "X-Api-Key",
 		"api-key", "Api-Key", "Proxy-Authorization", "cookie", "COOKIE", "x-goog-api-key",
 		"X-Goog-Api-Key", "X-Auth-Token", "X-Client-Secret",
-	} {
-		t.Run(name, func(t *testing.T) {
+	}
+	shapes := []func(id string) string{
+		func(id string) string { return "SECRET-" + id },
+		func(id string) string { return "Bearer SECRET-" + id },
+		func(id string) string { return "Basic U0VDUkVU" + id },
+		func(id string) string { return `SECRET-"q"<&>` + id },
+	}
+	type tc struct{ name, value string }
+	var cases []tc
+	for _, n := range names {
+		for i, shape := range shapes {
+			cases = append(cases, tc{n, shape(strings.ToLower(n) + "-" + string(rune('a'+i)))})
+		}
+	}
+	for _, v := range []string{"Bearer SECRET-trace", "basic SECRET-trace2", "BEARER SECRET-trace3"} {
+		cases = append(cases, tc{"X-Trace", v})
+	}
+	for _, c := range cases {
+		t.Run(c.name+"/"+c.value, func(t *testing.T) {
 			ws := newWireServer(t)
-			secret := "SECRET-" + strings.ToLower(name)
-			c := antsdk.NewClient(option.WithBaseURL(ws.URL), option.WithAPIKey("SECRET-key"), option.WithMaxRetries(0),
+			cl := antsdk.NewClient(option.WithBaseURL(ws.URL), option.WithAPIKey("SECRET-key"), option.WithMaxRetries(0),
 				option.WithMiddleware(func(r *http.Request, next option.MiddlewareNext) (*http.Response, error) {
-					r.Header[name] = []string{secret}
+					r.Header[c.name] = []string{c.value}
 					return next(r)
 				}))
-			rec, stored := rawRound(t, c)
+			rec, stored := rawRound(t, cl)
 			if rec.Wire == nil {
 				t.Fatal("no raw record")
 			}
 			assertNoStripped(t, "request", rec.Wire.Request.Headers)
 			for k := range rec.Wire.Request.Headers {
-				if strings.EqualFold(k, name) {
-					t.Errorf("%q survived as %q", name, k)
+				if strings.EqualFold(k, c.name) {
+					t.Errorf("%q survived as %q", c.name, k)
 				}
 			}
 			listed := false
 			for _, r := range rec.Wire.RedactedHeaders {
-				listed = listed || r == strings.ToLower(name)
+				listed = listed || r == strings.ToLower(c.name)
 			}
 			if !listed {
-				t.Errorf("redacted_headers %v does not name %q", rec.Wire.RedactedHeaders, name)
+				t.Errorf("redacted_headers %v does not name %q", rec.Wire.RedactedHeaders, c.name)
 			}
-			if bytes.Contains(stored, []byte(secret)) || bytes.Contains(stored, []byte("SECRET-key")) {
-				t.Errorf("the value of %q reached the local sink's file", name)
+			esc, _ := json.Marshal(c.value)
+			for _, needle := range [][]byte{[]byte(c.value), esc[1 : len(esc)-1], []byte("SECRET-key")} {
+				if bytes.Contains(stored, needle) {
+					t.Errorf("%q reached the local sink's file", needle)
+				}
 			}
 			b, _ := json.Marshal(rec)
-			if bytes.Contains(b, []byte("SECRET")) {
+			if bytes.Contains(b, []byte("SECRET")) || bytes.Contains(b, []byte("U0VDUkVU")) {
 				t.Errorf("the requests row carries a credential: %s", b)
 			}
 		})

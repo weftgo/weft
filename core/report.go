@@ -76,6 +76,13 @@ type RawPair struct {
 	// never silent.
 	RequestTruncated  int64
 	ResponseTruncated int64
+	// ResponseIncomplete says the response body was not read to its end
+	// — closed unread (an SDK's transport retry discarding a 429/5xx),
+	// cut by a timeout, a reader that stopped mid-stream, or a read
+	// error: the record marks the side complete: false, never a short
+	// body passed off as whole. Bytes the reporter knows were never
+	// read (Content-Length minus what was) belong in ResponseTruncated.
+	ResponseIncomplete bool
 }
 
 // Reporter is the reporting path from the model chain into the loop's
@@ -148,8 +155,13 @@ func (r Reporter) Raw(p RawPair) {
 
 // WantsRaw reports whether a Raw report would be recorded now: inside a
 // run's model call that has not ended, with the agent not under
-// Content(false), and with a destination answering the Logs API's
-// Enabled for the weft.raw event name. An adapter asks it before an
+// Content(false), with a destination answering the Logs API's Enabled
+// for the weft.raw event name, and with the agent's LoggerProvider (or,
+// with no LoggerProvider option, the global one in force) carrying the
+// marker method RawBodies() bool answering true — a convention like
+// ReportsAttempts, which weft/otel's pipeline provider implements under
+// otel.RawBodies in development; a stock SDK provider has none, so it
+// never receives raw records. An adapter asks it before an
 // HTTP call and buffers no body when it is false. False for the zero
 // Reporter and outside a run.
 func (r Reporter) WantsRaw() bool {

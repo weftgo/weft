@@ -12,6 +12,7 @@ import (
 
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/log"
+	logglobal "go.opentelemetry.io/otel/log/global"
 )
 
 // The raw record (ADR 0028 §12, plan A6): one attempt's wire request
@@ -84,7 +85,8 @@ func sensitiveValue(v string) bool {
 // of a credential.
 func sensitiveParam(name string) bool {
 	switch strings.ToLower(name) {
-	case "key", "token", "sig", "signature", "code", "password", "access_token":
+	case "key", "token", "sig", "signature", "code", "password", "access_token",
+		"x-amz-signature", "x-amz-credential", "x-amz-security-token", "x-goog-signature", "x-goog-credential":
 		return true
 	}
 	return sensitiveHeader(name)
@@ -114,12 +116,54 @@ type rawMessage struct {
 	Encoding       string              `json:"encoding,omitempty"`
 	Bytes          int64               `json:"bytes"`
 	TruncatedBytes int64               `json:"truncated_bytes,omitempty"`
+	// Complete is set on the response side only: false when the body
+	// was not read to its end (RawPair.ResponseIncomplete).
+	Complete *bool `json:"complete,omitempty"`
+}
+
+// rawMarker is the duck-typed marker a LoggerProvider carries when it
+// was built to take raw records (ADR 0028 §12): weft/otel's pipeline
+// provider answers true under otel.RawBodies(true) and WEFT_ENV=dev. A
+// convention, not a core type — the ReportsAttempts() pattern (ADR 0013)
+// — so a stock SDK provider, whose processors answer Enabled true for
+// every event name, never receives a raw record.
+type rawMarker interface{ RawBodies() bool }
+
+// rawMarked asks the agent's LoggerProvider for the marker, walking an
+// Unwrap() log.LoggerProvider chain (at most 64 hops) so a wrapper that
+// forwards to the pipeline's provider keeps it reachable. With no
+// LoggerProvider option the global provider in force is asked at each
+// call: the one New saw may be the delegating placeholder that
+// otel.Install's registration later replaces (logglobal returns the
+// registered provider itself once one is set).
+func (o *observer) rawMarked() bool {
+	lp := o.lp
+	if o.globalLP {
+		lp = logglobal.GetLoggerProvider()
+	}
+	for range 64 {
+		if lp == nil {
+			return false
+		}
+		if m, ok := lp.(rawMarker); ok {
+			return m.RawBodies()
+		}
+		u, ok := lp.(interface{ Unwrap() log.LoggerProvider })
+		if !ok {
+			return false
+		}
+		lp = u.Unwrap()
+	}
+	return false
 }
 
 // rawWanted is the Enabled question for weft.raw: false outside a
 // run's model call (no recorder), after the call ended, under
 // weft.Content(false), or when no destination asks. Content(true) does
-// not force it — wire bodies are recorded only where asked for.
+// not force it — wire bodies are recorded only where asked for — and
+// the provider must carry the RawBodies marker (rawMarked): Enabled
+// alone is not enough, because a stock SDK provider answers it true for
+// every name.
 func (s *stepReport) rawWanted() (ok bool) {
 	if s.rec == nil || s.ended.Load() {
 		return false
@@ -135,7 +179,7 @@ func (s *stepReport) rawWanted() (ok bool) {
 			}
 		}
 	}()
-	return s.rec.elog.Enabled(s.Context, log.EnabledParameters{EventName: eventNameRaw})
+	return s.obs.rawMarked() && s.rec.elog.Enabled(s.Context, log.EnabledParameters{EventName: eventNameRaw})
 }
 
 // raw receives an attempt's wire bodies. Nobody asking (rawWanted
@@ -214,13 +258,15 @@ func buildRaw(step int, attempt int64, p RawPair) (rawBody, int64) {
 	req.Body, req.Encoding, req.Bytes, req.TruncatedBytes = capRaw(p.Request, p.RequestTruncated)
 	out := rawBody{Step: step, Attempt: attempt, Request: req, RedactedQuery: query}
 	cut := req.TruncatedBytes
-	if p.Status != 0 || len(p.Response) > 0 || len(p.ResponseHeaders) > 0 || p.ResponseTruncated > 0 {
+	if p.Status != 0 || len(p.Response) > 0 || len(p.ResponseHeaders) > 0 || p.ResponseTruncated > 0 || p.ResponseIncomplete {
 		resp := rawMessage{
 			Status:    p.Status,
 			Headers:   keepHeaders(p.ResponseHeaders, redacted),
 			MediaType: p.ResponseMediaType,
 		}
 		resp.Body, resp.Encoding, resp.Bytes, resp.TruncatedBytes = capRaw(p.Response, p.ResponseTruncated)
+		complete := !p.ResponseIncomplete
+		resp.Complete = &complete
 		cut += resp.TruncatedBytes
 		out.Response = &resp
 	}

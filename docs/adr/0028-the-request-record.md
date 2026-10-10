@@ -599,14 +599,28 @@ request a first-party adapter sent and the response it received —
 becomes one `raw` record (`weft.raw`), emitted through the same Logs API
 path as the other kinds, on the `chat` span's context.
 
-**The gate is the Enabled question, not a core option.** Before anything
-is built the reporter asks the logger `Enabled` with EventName
-`weft.raw` (false under `weft.Content(false)`; `Content(true)` does not
-force it). `Reporter.WantsRaw()` asks the same question, so an adapter
-buffers no body when nobody wants one. weft/otel answers yes only under
-`otel.RawBodies(true)` **and** `WEFT_ENV=dev` read by the pipeline at
-Start (never under `otel.NoEnv()`), and only for its `Local` and
-`Studio` chains with content on. Otherwise Start logs one WARN
+**The gate is two questions, not a core option.** Before anything is
+built the core asks (1) the logger's `Enabled` with EventName `weft.raw`
+(false under `weft.Content(false)`; `Content(true)` does not force it)
+and (2) the agent's LoggerProvider for a duck-typed marker,
+`RawBodies() bool`, read anonymously exactly as `ReportsAttempts()` is
+(ADR 0013): no exported core type, absent means false, a wrapper reaches
+it through `Unwrap() log.LoggerProvider` (at most 64 hops). With no
+`weft.LoggerProvider` option the core asks the global provider in force
+at each call — the one `New` saw may be the delegating placeholder, and
+once `otel.Install` registers its provider the Logs API's global returns
+that provider itself, marker included. `Reporter.WantsRaw()` asks both,
+so an adapter buffers no body when either says no. **A stock SDK
+provider never receives a raw record:** sdk/log's Simple and Batch
+processors answer `Enabled` true for every event name, so the Enabled
+question alone would let any `sdklog.NewLoggerProvider(...)` handed to
+an agent capture wire bodies outside development; it carries no marker.
+weft/otel's pipeline provider (`otel.LoggerProvider`, what
+`Pipeline.LoggerProvider()` returns and `Install` registers globally)
+answers the marker true only under `otel.RawBodies(true)` **and**
+`WEFT_ENV=dev` read by the pipeline at Start (never under
+`otel.NoEnv()`), and its chains answer `Enabled` yes only for `Local`
+and `Studio` with content on. Otherwise Start logs one WARN
 (`otel: RawBodies ignored: WEFT_ENV is not dev`) and the pipeline
 behaves as if the option were absent. Datadog, Langfuse, OTLP and
 Exporters never receive a raw record, whatever their content setting;
@@ -630,7 +644,12 @@ Body: `{"step", "attempt", "request": {"method", "url", "headers",
 raw SSE bytes as received, never a re-serialisation. Each body is capped
 at 256 KiB (cut back to a rune boundary for text), `bytes` is the whole
 size, `truncated_bytes` the cut — the `truncated` badge, never silent.
-`response` is null when no response arrived (a transport error).
+`response` is null when no response arrived (a transport error). The
+response side carries `complete`: `false` when its body was not read to
+the end — closed unread (an SDK's transport retry discarding a 429/5xx
+body), cut by a timeout, a reader that stopped mid-stream, a read error
+— so a short body is never passed off as whole; when Content-Length was
+known the unread bytes are counted in its `truncated_bytes`.
 
 **Credentials.** The core strips, case-insensitively, `Authorization`,
 `Proxy-Authorization`, `X-Api-Key`, `Api-Key`, `Cookie`, `Set-Cookie`,
@@ -645,7 +664,12 @@ none (the adapter strips `authorization`, `api-key`,
 redaction (`x-goog-api-key`, `authorization`, `x-goog-user-project`).
 Every stripped name is listed, lowercased, in `redacted_headers`. The URL
 loses its userinfo and its credential query values (`key`, `token`,
-`sig`, …, replaced by `REDACTED`, named in `redacted_query`).
+`sig`, `signature`, `code`, `password`, `access_token`,
+`X-Amz-Signature`, `X-Amz-Credential`, `X-Amz-Security-Token`,
+`X-Goog-Signature`, `X-Goog-Credential` and names matching the header
+rules, replaced by `REDACTED`, named in `redacted_query`). Headers and
+the URL are stripped by this list and heuristic only — an application
+cannot redact them further; `Redact` sees the bodies alone.
 
 **Capture.** The first-party adapters tee each HTTP call — anthropic and
 openai through the SDK's innermost `option.WithMiddleware`, google by
@@ -660,6 +684,13 @@ run whose adapter did not report shows `not_recorded` (cause `raw_off`).
 **Content policy.** A content-on chain's `Redact` sees each text body as
 `core.ContentRaw`; `MaxBytes` does not apply (the 256 KiB cap is the
 core's). A content-off `Local` or `Studio` chain drops raw records.
+
+**Size.** A raw record is typically up to ≈ 650 KiB (two 256 KiB bodies,
+JSON-escaped, plus headers). Studio's OTLP ingest refuses a request body
+over 16 MiB (`studio/ingest.MaxBody`) whole, so under RawBodies a Studio
+destination's log batch is capped at 16 records (the SDK default is 512,
+which a burst of raw records would push past the limit and lose); the
+Local sink writes each record synchronously and needs no cap.
 
 **obsdb.** `raw` is stored beside the other kinds on both backends
 (SQLite: free-text kind; ClickHouse: migration

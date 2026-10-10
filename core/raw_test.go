@@ -6,11 +6,14 @@ package core_test
 // WantsRaw says — when none does.
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"go.opentelemetry.io/otel/log"
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/mw"
@@ -38,11 +41,64 @@ type rawDoc struct {
 	RedactedQuery   []string `json:"redacted_query"`
 }
 
+// markedLP is a provider carrying the RawBodies marker, as weft/otel's
+// pipeline provider does under RawBodies and WEFT_ENV=dev.
+type markedLP struct{ *recLogProvider }
+
+func (markedLP) RawBodies() bool { return true }
+
+// wrappedLP forwards to an inner provider and exposes it through
+// Unwrap, so the marker stays reachable.
+type wrappedLP struct{ log.LoggerProvider }
+
+func (w wrappedLP) Unwrap() log.LoggerProvider { return w.LoggerProvider }
+
+// unmarkedLP carries the marker answering false.
+type unmarkedLP struct{ *recLogProvider }
+
+func (unmarkedLP) RawBodies() bool { return false }
+
+// The core asks two things before it builds a raw record: Enabled for
+// weft.raw and the provider's RawBodies marker. A provider whose
+// processors answer Enabled true for every name (a stock SDK provider;
+// recLogProvider does the same) but carries no marker — or a marker
+// answering false — never gets one; a wrapper reaches the marker
+// through Unwrap.
+func TestRawNeedsTheProviderMarker(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		lp   func(*recLogProvider) log.LoggerProvider
+		want bool
+	}{
+		{"no marker", func(p *recLogProvider) log.LoggerProvider { return p }, false},
+		{"marker false", func(p *recLogProvider) log.LoggerProvider { return unmarkedLP{p} }, false},
+		{"marker true", func(p *recLogProvider) log.LoggerProvider { return markedLP{p} }, true},
+		{"marker behind Unwrap", func(p *recLogProvider) log.LoggerProvider { return wrappedLP{markedLP{p}} }, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			p := newRecLogProvider()
+			var wanted bool
+			agt := core.New(wefttest.Script(wefttest.Say("done")), core.LoggerProvider(c.lp(p)),
+				core.WrapModel(reportVia(func(ctx context.Context) {
+					r := core.ReportFromContext(ctx)
+					wanted = r.WantsRaw()
+					r.Raw(core.RawPair{Request: []byte("x")})
+				})))
+			if _, err := agt.Generate(context.Background(), core.Prompt("x")); err != nil {
+				t.Fatal(err)
+			}
+			if n := len(p.ofKind(t, "raw")); wanted != c.want || (n == 1) != c.want {
+				t.Errorf("WantsRaw %v, raw records %d; want %v", wanted, n, c.want)
+			}
+		})
+	}
+}
+
 // rawRun runs one scripted step whose chain reports through fn, under
 // p, and returns the raw records.
 func rawRun(t testing.TB, p *recLogProvider, fn func(ctx context.Context), opts ...core.Option) []recLogRecord {
 	t.Helper()
-	opts = append([]core.Option{core.LoggerProvider(p), core.WrapModel(reportVia(fn))}, opts...)
+	opts = append([]core.Option{core.LoggerProvider(markedLP{p}), core.WrapModel(reportVia(fn))}, opts...)
 	agt := core.New(wefttest.Script(wefttest.Say("done")), opts...)
 	if _, err := agt.Generate(context.Background(), core.Prompt("x")); err != nil {
 		t.Fatal(err)
@@ -212,7 +268,7 @@ func TestRawAttemptsUnderRetry(t *testing.T) {
 			}
 		})
 	}
-	agt := core.New(model, core.LoggerProvider(p), core.WrapModel(mw.Retry(mw.BaseDelay(1), mw.MaxWait(1e9)), raw))
+	agt := core.New(model, core.LoggerProvider(markedLP{p}), core.WrapModel(mw.Retry(mw.BaseDelay(1), mw.MaxWait(1e9)), raw))
 	if _, err := agt.Generate(context.Background(), core.Prompt("x")); err != nil {
 		t.Fatal(err)
 	}
@@ -237,26 +293,30 @@ var rawSecrets = []string{
 
 // FuzzRawRedaction: whatever header names and values a reporter hands
 // over, no value under a credential header (any case) and no Bearer or
-// Basic token reaches the emitted record, and every stripped name is
-// listed.
+// Basic token reaches the emitted record's bytes, and every stripped
+// name is listed. The fuzzed value is suffixed with a marker so the
+// byte search cannot match the record's own JSON by accident.
 func FuzzRawRedaction(f *testing.F) {
 	for _, s := range rawSecrets {
 		f.Add(s, "sk-ant-SEKRET", "X-Other", "fine")
 	}
 	f.Add("X-Trace", "Bearer SEKRET", "Content-Type", "application/json")
 	f.Add("x-custom", "basic SEKRET", "Accept", "*/*")
+	f.Add("Authorization", `"quoted"<&>`, "X-Other", "fine")
 	f.Fuzz(func(t *testing.T, name, value, other, otherValue string) {
-		if name == "" || other == "" || value == "" {
+		if name == "" || other == "" {
 			return
 		}
+		secret := value + "~sk9~"
 		p := newRecLogProvider()
-		h := map[string][]string{name: {value}, other: {otherValue}}
+		h := map[string][]string{name: {secret}, other: {otherValue}}
 		recs := rawRun(t, p, func(ctx context.Context) {
 			core.ReportFromContext(ctx).Raw(core.RawPair{RequestHeaders: h, ResponseHeaders: h, Status: 200})
 		})
 		if len(recs) != 1 {
 			t.Fatalf("raw records = %d", len(recs))
 		}
+		body := []byte(recs[0].body)
 		d := decodeRaw(t, recs[0])
 		for _, side := range []map[string][]string{d.Request.Headers, d.Response.Headers} {
 			for k, vs := range side {
@@ -274,15 +334,18 @@ func FuzzRawRedaction(f *testing.F) {
 				}
 			}
 		}
-		for _, s := range rawSecrets {
-			if strings.EqualFold(name, s) {
-				listed := false
-				for _, r := range d.RedactedHeaders {
-					listed = listed || r == strings.ToLower(strings.TrimSpace(name))
-				}
-				if !listed {
-					t.Fatalf("stripped %q not listed in %v", name, d.RedactedHeaders)
-				}
+		if name != other && (core.SensitiveHeader(name) || core.SensitiveValue(secret)) &&
+			!strings.Contains(otherValue, secret) && !strings.Contains(other, secret) && !strings.Contains(name, secret) {
+			esc, _ := json.Marshal(secret)
+			if bytes.Contains(body, []byte(secret)) || bytes.Contains(body, esc[1:len(esc)-1]) {
+				t.Fatalf("the value under %q reached the record: %s", name, body)
+			}
+			listed := false
+			for _, r := range d.RedactedHeaders {
+				listed = listed || r == strings.ToLower(strings.TrimSpace(name))
+			}
+			if !listed {
+				t.Fatalf("stripped %q not listed in %v", name, d.RedactedHeaders)
 			}
 		}
 	})

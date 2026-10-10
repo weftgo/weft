@@ -41,7 +41,7 @@ const (
 // Create it with Start (or Install, which never fails).
 type Pipeline struct {
 	tp *sdktrace.TracerProvider
-	lp *sdklog.LoggerProvider
+	lp *LoggerProvider
 
 	local       obsdb.DB   // the Local destination's DB (the last one configured): what LocalDB returns
 	locals      []obsdb.DB // every Local destination's DB; all close at Shutdown
@@ -62,8 +62,25 @@ type Pipeline struct {
 // TracerProvider returns the pipeline's tracer provider.
 func (p *Pipeline) TracerProvider() *sdktrace.TracerProvider { return p.tp }
 
-// LoggerProvider returns the pipeline's logger provider.
-func (p *Pipeline) LoggerProvider() *sdklog.LoggerProvider { return p.lp }
+// LoggerProvider returns the pipeline's logger provider: the SDK's,
+// carrying the raw-record marker (RawBodies).
+func (p *Pipeline) LoggerProvider() *LoggerProvider { return p.lp }
+
+// LoggerProvider is the pipeline's OpenTelemetry logger provider: the
+// SDK provider every method of which it forwards, plus the marker the
+// core asks before it builds a raw record (ADR 0028 §12). A stock SDK
+// provider has no marker, so an agent handed one never records wire
+// bodies, whatever its processors answer Enabled.
+type LoggerProvider struct {
+	*sdklog.LoggerProvider
+	raw bool
+}
+
+// RawBodies reports whether this pipeline records provider wire bodies:
+// otel.RawBodies(true) and WEFT_ENV=dev at Start (never under NoEnv).
+// It is the duck-typed marker core.Reporter.WantsRaw asks for; the
+// destinations still decide per chain (Local and Studio only).
+func (p *LoggerProvider) RawBodies() bool { return p != nil && p.raw }
 
 // LocalDB returns the pipeline's local obsdb.DB — the handle setup A
 // shares with Studio (studio.DB(otel.LocalDB())). nil without a Local
@@ -279,6 +296,11 @@ func (dropFailed) apply(c *config) { c.dropFailed = true }
 
 const defaultHeartbeat = 10 * time.Second
 
+// rawBatchSize is a raw-taking batch destination's log batch size under
+// RawBodies (ADR 0028 §12): 16 records of at most ≈ 650 KiB each stay
+// under Studio's 16 MiB ingest body limit.
+const rawBatchSize = 16
+
 // build assembles the pipeline from the config and destinations. On
 // failure nothing stays behind: every destination already built is
 // released (its processors' goroutines, its exporters, its database).
@@ -339,7 +361,7 @@ func build(ctx context.Context, cfg config, dests []dest) (p *Pipeline, failed e
 	for _, lp := range logProcs {
 		lpOpts = append(lpOpts, sdklog.WithProcessor(lp))
 	}
-	p.lp = sdklog.NewLoggerProvider(lpOpts...)
+	p.lp = &LoggerProvider{LoggerProvider: sdklog.NewLoggerProvider(lpOpts...), raw: cfg.rawBodies}
 	p.startHeartbeat()
 	return p, nil
 }
@@ -449,12 +471,19 @@ func buildDest(ctx context.Context, d dest, cfg config) (_ *destRuntime, err err
 	}
 	if logExp != nil {
 		counted := countingLogExporter{Exporter: logExp, drops: drops}
-		var inner sdklog.Processor
+		var batch []sdklog.BatchProcessorOption
 		if logDelay > 0 {
-			inner = sdklog.NewBatchProcessor(counted, sdklog.WithExportInterval(logDelay))
-		} else {
-			inner = sdklog.NewBatchProcessor(counted)
+			batch = append(batch, sdklog.WithExportInterval(logDelay))
 		}
+		if cfg.rawBodies && d.rawOn() {
+			// A raw record is up to ≈ 650 KiB (two 256 KiB bodies,
+			// JSON-escaped, plus headers): the SDK's default 512-record
+			// batch would far exceed Studio's 16 MiB ingest limit
+			// (studio/ingest.MaxBody) and be refused whole. rawBatchSize
+			// records stay under it.
+			batch = append(batch, sdklog.WithExportMaxBatchSize(rawBatchSize))
+		}
+		inner := sdklog.NewBatchProcessor(counted, batch...)
 		rt.logProc = &destProc{name: d.name, inner: inner,
 			content: content, contentC: contentCfg, noDeltas: d.noDeltas, drops: drops,
 			raw: cfg.rawBodies && d.rawOn()}

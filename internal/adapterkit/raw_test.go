@@ -33,6 +33,10 @@ type rawLogger struct {
 	p *rawLogs
 }
 
+// RawBodies is the provider marker the core asks before a raw record
+// (weft/otel's pipeline provider carries it under RawBodies and dev).
+func (p *rawLogs) RawBodies() bool { return true }
+
 func (p *rawLogs) Logger(string, ...log.LoggerOption) log.Logger { return rawLogger{p: p} }
 func (rawLogger) Enabled(context.Context, log.EnabledParameters) bool {
 	return true
@@ -175,7 +179,9 @@ func TestCaptureRawDropsOnReadFailure(t *testing.T) {
 }
 
 // A transport error is reported as a request without a response; a
-// response closed before EOF is reported at Close with what was read.
+// response closed before EOF is reported at Close with what was read,
+// marked complete: false, the unread rest of a known Content-Length
+// counted as truncated; one read to EOF is complete.
 func TestCaptureRawTransportErrorAndEarlyClose(t *testing.T) {
 	lp := &rawLogs{}
 	runWith(t, lp, func(ctx context.Context) {
@@ -183,20 +189,54 @@ func TestCaptureRawTransportErrorAndEarlyClose(t *testing.T) {
 		_, _ = CaptureRaw(req, func(*http.Request) (*http.Response, error) { return nil, errors.New("refused") }, nil)
 		req2, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://x/b", nil)
 		resp, _ := CaptureRaw(req2, func(*http.Request) (*http.Response, error) {
-			return &http.Response{StatusCode: 200, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader([]byte("abcdef")))}, nil
+			return &http.Response{StatusCode: 200, Header: http.Header{}, ContentLength: 6,
+				Body: io.NopCloser(bytes.NewReader([]byte("abcdef")))}, nil
 		}, nil)
 		buf := make([]byte, 3)
 		_, _ = resp.Body.Read(buf)
 		_ = resp.Body.Close()
 		_ = resp.Body.Close() // reported once
+		// A 429 an SDK's retry closes unread, length unknown.
+		req3, _ := http.NewRequestWithContext(ctx, http.MethodPost, "http://x/c", nil)
+		resp3, _ := CaptureRaw(req3, func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 429, Header: http.Header{}, ContentLength: -1,
+				Body: io.NopCloser(strings.NewReader(`{"error":"overloaded"}`))}, nil
+		}, nil)
+		_ = resp3.Body.Close()
+		req4, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://x/d", nil)
+		resp4, _ := CaptureRaw(req4, func(*http.Request) (*http.Response, error) {
+			return &http.Response{StatusCode: 200, Header: http.Header{}, ContentLength: 2,
+				Body: io.NopCloser(strings.NewReader("ok"))}, nil
+		}, nil)
+		_, _ = io.ReadAll(resp4.Body)
+		_ = resp4.Body.Close()
 	})
-	if len(lp.bodies) != 2 {
-		t.Fatalf("raw records = %d, want 2", len(lp.bodies))
+	if len(lp.bodies) != 4 {
+		t.Fatalf("raw records = %d, want 4", len(lp.bodies))
 	}
-	if !strings.Contains(lp.bodies[0], `"response":null`) {
+	type side struct {
+		Status         int
+		Body           string
+		Bytes          int64
+		TruncatedBytes int64 `json:"truncated_bytes"`
+		Complete       *bool
+	}
+	var docs [4]struct{ Response *side }
+	for i, b := range lp.bodies {
+		if err := json.Unmarshal([]byte(b), &docs[i]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if docs[0].Response != nil {
 		t.Errorf("transport error record = %s", lp.bodies[0])
 	}
-	if !strings.Contains(lp.bodies[1], `"body":"abc"`) {
+	if r := docs[1].Response; r == nil || r.Body != "abc" || r.Complete == nil || *r.Complete || r.TruncatedBytes != 3 || r.Bytes != 6 {
 		t.Errorf("early close record = %s", lp.bodies[1])
+	}
+	if r := docs[2].Response; r == nil || r.Status != 429 || r.Body != "" || r.Complete == nil || *r.Complete || r.TruncatedBytes != 0 {
+		t.Errorf("unread 429 record = %s", lp.bodies[2])
+	}
+	if r := docs[3].Response; r == nil || r.Body != "ok" || r.Complete == nil || !*r.Complete {
+		t.Errorf("read-to-EOF record = %s", lp.bodies[3])
 	}
 }

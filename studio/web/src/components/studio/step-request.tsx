@@ -36,6 +36,7 @@ import type {
 } from "@/lib/api"
 import { messageLine } from "@/lib/compaction"
 import { diffLinesBounded } from "@/lib/diff"
+import type { BoundedDiff } from "@/lib/diff"
 import {
   CHIP_CATALOG,
   CHIP_EXPERIMENT,
@@ -68,6 +69,7 @@ import { bytes } from "@/lib/summarize"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { JsonTree } from "@/components/studio/json-tree"
 import { WireView } from "@/components/studio/step-wire"
+import { KeepAsPrompt } from "@/components/studio/saves"
 import type { StepPane } from "@/lib/links"
 import { useCapabilities } from "@/hooks/use-capabilities"
 
@@ -198,42 +200,60 @@ function PromptDiff({
       {diff === null ? (
         // A cut tail would read as lines a PrepareStep removed.
         <HoleBadge hole="truncated" label={REQUEST_DIFF_CUT_LABEL} />
-      ) : "tooLarge" in diff ? (
-        <span className="block font-mono text-[11px] text-faint" data-diff-too-large>
-          too large to diff ({diff.tooLarge.before} → {diff.tooLarge.after} lines)
-        </span>
       ) : (
-        <pre className="max-w-full overflow-x-auto rounded-md border px-2 py-1.5 font-mono text-[12px] whitespace-pre-wrap">
-          {diff.rows.map((r, i) => (
-            <div
-              key={i}
-              data-diff={r.kind}
-              className={
-                r.kind === "add"
-                  ? "bg-status-ok/10 text-status-ok"
-                  : r.kind === "del"
-                    ? "bg-status-bad/10 text-status-bad line-through"
-                    : "text-muted-foreground"
-              }
-            >
-              {r.kind === "add" ? "+ " : r.kind === "del" ? "− " : "  "}
-              {r.text}
-            </div>
-          ))}
-        </pre>
+        <DiffBlock diff={diff} />
       )}
     </div>
   )
+}
+
+/** DiffBlock draws a bounded line diff: the rows (+ added, − removed),
+ * or "too large to diff". The Request pane's prompt diff and the Agents
+ * page's registered → proposed diff (plan F6) are this one renderer. */
+export function DiffBlock({ diff }: { diff: BoundedDiff }) {
+  return "tooLarge" in diff ? (
+    <span className="block font-mono text-[11px] text-faint" data-diff-too-large>
+      too large to diff ({diff.tooLarge.before} → {diff.tooLarge.after} lines)
+    </span>
+  ) : (
+    <pre className="max-w-full overflow-x-auto rounded-md border px-2 py-1.5 font-mono text-[12px] whitespace-pre-wrap">
+      {diff.rows.map((r, i) => (
+        <div
+          key={i}
+          data-diff={r.kind}
+          className={
+            r.kind === "add"
+              ? "bg-status-ok/10 text-status-ok"
+              : r.kind === "del"
+                ? "bg-status-bad/10 text-status-bad line-through"
+                : "text-muted-foreground"
+          }
+        >
+          {r.kind === "add" ? "+ " : r.kind === "del" ? "− " : "  "}
+          {r.text}
+        </div>
+      ))}
+    </pre>
+  )
+}
+
+/** TextDiff is DiffBlock over two texts, memoized. */
+export function TextDiff({ before, after }: { before: string; after: string }) {
+  const diff = useMemo(() => diffLinesBounded(before, after), [before, after])
+  return <DiffBlock diff={diff} />
 }
 
 function PromptView({
   row,
   stripped,
   base,
+  agent,
 }: {
   row: RequestRow
   stripped?: Holed
   base?: PromptBaseline
+  /** The run's agent: "keep as prompt" proposes to it (plan F6). */
+  agent?: string
 }) {
   const [all, setAll] = useState(false)
   const p = row.prompt
@@ -265,6 +285,9 @@ function PromptView({
       </pre>
       <span className="flex flex-wrap items-center gap-2">
         <Hash h={doc.hash} />
+        {doc.truncated_bytes > 0 || doc.content === "derived" ? null : (
+          <KeepAsPrompt agent={agent} text={doc.text} />
+        )}
         {long ? (
           <button
             type="button"
@@ -539,7 +562,7 @@ function AttemptView({
       ) : null}
       <div className="flex gap-2">
         <Label>system</Label>
-        <PromptView row={row} stripped={stripped} base={base} />
+        <PromptView row={row} stripped={stripped} base={base} agent={ctx?.agent} />
       </div>
       <div className="flex gap-2">
         <Label>tools</Label>

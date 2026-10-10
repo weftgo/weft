@@ -29,7 +29,9 @@ import { editList, marksBlock, previewBlock } from "./editor"
 import { compactedRefusal, editsHandoff, emptyLab, LAB_LABELS, LAB_NEW, LAB_NUMBERS, LAB_PREDATES, labDefault, labHandoff, labLacksDefaults, labOn, replayBounds } from "../lib/experiment-body"
 import type { LabFields } from "../lib/experiment-body"
 import { ackCatalogHole, badge, capLine, catalogCapped, catalogNotRecorded, catalogNotStored, catalogReadError, cutBadge, holeBadges, holeLine, noPublicIdWords, requestCapped, requestHole, turnChips } from "./badges"
-import { fetchSessionPublicId, MAX_REQUEST_PAGES, PanelApiError, panelGet, REQUEST_PAGE } from "./client"
+import { fetchSessionPublicId, MAX_REQUEST_PAGES, PanelApiError, panelGet, putProposal, REQUEST_PAGE } from "./client"
+import { keepPromptWords, mayExportTestWith, mayProposeWith, SAVE_TEST_LABEL, SAVE_TEST_TITLE } from "../lib/saves"
+import type { KeepPrompt } from "../lib/saves"
 import type { AgentView } from "./client"
 import { diffLines, diffSummary } from "../lib/diff"
 import { stepDiffBlock } from "./compare"
@@ -75,7 +77,7 @@ import { newTree, stopTree, treeView } from "./tree"
 import type { TreeState } from "./tree"
 import { renderRequestTab, stepsOf } from "./request"
 import type { Geometry, Layout } from "./layout"
-import { href, playgroundLink, runLink, sessionLink, traceLink } from "../lib/links"
+import { href, playgroundLink, runLink, saveTestLink, sessionLink, traceLink } from "../lib/links"
 import type { PlaygroundHandoff } from "../lib/links"
 
 /** hasCapability reports whether meta lists the named capability (the
@@ -1020,6 +1022,11 @@ export class WeftDevtools extends HTMLElement {
   }
 
   /** say draws the API's honest line. */
+  /** The endpoint the panel's own fetches go to. */
+  private get ep() {
+    return { base: this.base, token: this.cfg.token }
+  }
+
   private say(line: string) {
     this.note = line
     this.render(this.last)
@@ -3365,16 +3372,30 @@ export class WeftDevtools extends HTMLElement {
       title: "copy the edited prompt (weft/prompt versions are post-v1, PQ2)",
     })
     on(keep, "click", () => {
-      const text = this.model?.state.drawer?.instructions ?? ""
+      const d = this.model?.state.drawer
+      const text = d?.instructions ?? ""
+      const agent = d?.agent ?? ""
+      const caps = s.meta?.capabilities ?? []
       // The clipboard refuses without focus or permission: not the
       // host page's error.
+      let copied: Promise<boolean>
       try {
         // undefined outside a secure context
         const clip = navigator.clipboard as Clipboard | undefined
-        clip?.writeText(text).catch(quiet)
+        copied = clip ? clip.writeText(text).then(() => true, () => false) : Promise.resolve(false)
       } catch {
-        // no clipboard here
+        copied = Promise.resolve(false)
       }
+      // Plan F6: the dev token also proposes it (the Agents page shows
+      // it beside the registered prompt); a panel token copies only.
+      if (!caps.includes("proposals")) return
+      const say = (o: Omit<KeepPrompt, "kind" | "agent" | "copied">) =>
+        void copied.then((ok) => this.say(keepPromptWords({ kind: "keep-prompt", agent, copied: ok, ...o }).title))
+      if (!agent || !mayProposeWith(caps, this.cfg.token)) return say({ proposal: "copy-only" })
+      putProposal(this.ep, agent, text).then(
+        () => say({ proposal: "proposed" }),
+        (e: unknown) => say({ proposal: "refused", message: (e as Error).message })
+      )
     })
     head.appendChild(keep)
     const fixture = el("a", "weft-btn", "save as fixture", {
@@ -3630,7 +3651,7 @@ export class WeftDevtools extends HTMLElement {
     if (!t) return el("div")
     const wrap = el("div")
     wrap.appendChild(this.notes(t))
-    const ids = this.turnLinks(t)
+    const ids = this.turnLinks(t, s)
     if (ids) wrap.appendChild(ids)
     const prompt = turnPromptOf(t.transcript)
     if (prompt) capSet(this.prompts, t.id, prompt, RUN_MEMO_LIMIT)
@@ -3687,12 +3708,27 @@ export class WeftDevtools extends HTMLElement {
 
   /** turnLinks is the turn's join keys as links (G1): its session and
    * its trace, each the page Studio shows it on. */
-  private turnLinks(t: TurnView): HTMLElement | null {
+  private turnLinks(t: TurnView, s: PanelState): HTMLElement | null {
     const row = this.rowOf(t.id)
     const session = row?.session_id || t.doc?.session_id || ""
     const trace = row?.trace_id || t.doc?.trace_id || ""
-    if (!session && !trace) return null
+    // Plan F6's "save as test": the run's wefttest zip.
+    const save = mayExportTestWith(s.meta?.capabilities ?? [], this.cfg.token)
+    if (!session && !trace && !save) return null
     const box = el("div", "weft-row2")
+    if (save) {
+      // A hand-off (G1 style): Studio's run page downloads it with its
+      // own bearer — the measured in-panel fetch-and-save cost ~0.8 KiB.
+      const a = el("a", "weft-chip", SAVE_TEST_LABEL, {
+        href: href(this.base, saveTestLink(t.id)),
+        target: "_blank",
+        rel: "noopener",
+        title: SAVE_TEST_TITLE,
+        "data-weft-save-test": t.id,
+      })
+      a.style.textDecoration = "none"
+      box.appendChild(a)
+    }
     const link = (label: string, url: string, title: string, attr: string, id: string) => {
       const a = el("a", "weft-chip", label, { href: url, target: "_blank", rel: "noopener", title, [attr]: id })
       a.style.textDecoration = "none"

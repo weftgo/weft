@@ -47,6 +47,9 @@ import {
 } from "@/lib/trace"
 import { FlowStrip } from "@/components/studio/flow-strip"
 import { RunHeader } from "@/components/studio/run-header"
+import { saveTest } from "@/components/studio/saves"
+import { notifySave } from "@/lib/notify"
+import { mayExportTestWith } from "@/lib/saves"
 import { RawView } from "@/components/studio/raw-view"
 import { ReplayBar } from "@/components/studio/replay-bar"
 import { ReplayContext, ReplayDrawer } from "@/components/studio/replay-drawer"
@@ -157,6 +160,8 @@ export const Route = createFileRoute("/runs/$id")({
         : undefined,
     // The replay drawer (G2): its verb, from_step and source run.
     ...replaySearch(replayFromSearch(search)),
+    // Save as test on landing (plan F6, the panel's hand-off).
+    save: search.save === "test" ? "test" : undefined,
   }),
   // One page per run: /runs/A → /runs/B is a fresh page, so nothing of
   // A's (an open drawer and its form, the transcript edits held, the
@@ -173,7 +178,7 @@ function RunPage() {
   // A step's pane (A6.2) lives on its story card: ?pane= opens there.
   const view: View = search.view ?? (search.pane && search.step !== undefined ? "story" : "trace")
   const [layout, setLayout] = useState<Layout>(readLayout)
-  const { has, caps, loading: capsLoading } = useCapabilities()
+  const { has, caps, why: capsWhy, loading: capsLoading } = useCapabilities()
   const liveCapable = has("live")
   // The replay drawer (plan F1): its verbs are drawn when the server
   // has the playground and the bearer may act (a read-scoped panel
@@ -226,6 +231,25 @@ function RunPage() {
       : layout === "stack"
         ? ""
         : "@3xl/trace:sticky @3xl/trace:top-3 @3xl/trace:max-h-[calc(100vh-8rem)]"
+
+  // ?save=test (plan F6: the devtools panel's "save as test" hands off
+  // here): the zip downloads once with this page's bearer, and the key
+  // is dropped so a reload or a copied link does not save again.
+  const saved = useRef("")
+  useEffect(() => {
+    if (search.save !== "test" || capsLoading || saved.current === id) return
+    saved.current = id
+    void navigate({ search: (prev) => ({ ...prev, save: undefined }), replace: true })
+    if (mayExportTestWith(caps, studioToken())) void saveTest(id)
+    else
+      notifySave({
+        kind: "save-test",
+        ok: false,
+        message: caps.includes("export")
+          ? "a read-scoped panel token does not read the run's prompts"
+          : `this Studio has no export capability${capsWhy("export") ? `: ${capsWhy("export")}` : ""}`,
+      })
+  }, [search.save, capsLoading, caps, capsWhy, id, navigate])
 
   const queryClient = useQueryClient()
   const run = useQuery({

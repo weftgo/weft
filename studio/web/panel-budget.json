@@ -58,6 +58,7 @@
     { "label": "final web fixes (session 8)", "item": "", "gzip": 80088, "note": "phase 4 final web review: a failed transcript?step read remembered and re-asked after 10 s (not per keystroke), the option lab's parked default tool_choice refused in the server's words, editLine drawn for a field-less or mistyped edit (+30 B)" },
     { "label": "web closer (session 8)", "item": "", "gzip": 80096, "note": "phase 4 web closer: a failed transcript?step read replaces only its own pending marker, never a scope change's cleared map or a newer answer (+8 B)" },
     { "label": "A6.1 raw_off cause", "item": "", "gzip": 80240, "note": "A6.1 review: lib/honesty.ts words not_recorded's raw_off cause (no wire bodies recorded: otel.RawBodies off or not dev), the golden's words verbatim (+144 B)" },
-    { "label": "A6.2 wire link", "item": "", "gzip": 80413, "note": "A6.2: the Request tab's one \"wire ↗\" anchor per step whose row carries raw (lib/requests.ts's hasWire), to the run page's Wire tab by runLink's new pane key (+173 B)" }
+    { "label": "A6.2 wire link", "item": "", "gzip": 80413, "note": "A6.2: the Request tab's one \"wire ↗\" anchor per step whose row carries raw (lib/requests.ts's hasWire), to the run page's Wire tab by runLink's new pane key (+173 B)" },
+    { "label": "F6.2 saves", "item": "", "gzip": 80996, "note": "F6.2: a turn's save as test as a link to the run page with ?save=test (lib/links.ts's saveTestLink, +162 B — the in-panel fetch-and-save measured ~770 B, past the plan's ~400 B), keep as prompt's proposal under proposals with lib/saves.ts's words (+369 B), the client's error reading shared (+52 B); +583 B, no estimate in the table" }
   ]
 }

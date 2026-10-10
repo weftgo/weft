@@ -10,6 +10,7 @@ import { queryOptions } from "@tanstack/react-query"
 
 import type { ContentAttrs } from "./honesty"
 import { diffPath } from "./stepdiff"
+import { dispositionName, testExportPath } from "./saves"
 import type { DiffDoc } from "./stepdiff"
 
 // ── DTO mirrors (S4.3) ─────────────────────────────────────────────
@@ -524,6 +525,18 @@ export interface ManifestAgent {
     detect_loops?: number
   }
   tools: ManifestTool[]
+  /** The agent's proposed instructions (plan F6, studio/proposals.go):
+   * held in Studio's memory beside the registered ones, forgotten on
+   * restart; absent when none. */
+  proposed?: ManifestProposal
+}
+
+/** One agent's proposed instructions: the text, its sha256 hex (ADR
+ * 0028 §4's weft.instructions.hash) and when it was proposed. */
+export interface ManifestProposal {
+  instructions: string
+  instructions_hash: string
+  since: string
 }
 
 export interface ManifestTool {
@@ -645,7 +658,7 @@ export class ApiError extends Error {
  * Studio is token-walled. A non-2xx answer is an ApiError carrying the
  * server's code and message (S4.2's error shape). */
 async function request<T>(
-  method: "GET" | "POST" | "PUT",
+  method: "GET" | "POST" | "PUT" | "DELETE",
   path: string,
   body?: unknown
 ): Promise<T> {
@@ -1355,8 +1368,54 @@ export function diffQuery(a: string, b: string) {
   })
 }
 
-// A run's export (GET /api/runs/{id}/export, capability "export") has no
-// UI caller: a walled export is fetched through request() and saved as a blob when one needs it.
+// A run's export (GET /api/runs/{id}/export, capability "export"): the
+// run page's "save as test" (plan F6) fetches the wefttest zip with the
+// bearer and saves it as a blob (lib/saves.ts) — never a token in a URL.
+
+/** GET /api/runs/{id}/export?format=wefttest: the zip and the
+ * Content-Disposition's file name. A refusal is an ApiError carrying
+ * the server's words (403 hidden to a read token, 409 a run with no
+ * recorded answer). */
+export async function fetchTestExport(runID: string): Promise<{ blob: Blob; name: string }> {
+  const headers: Record<string, string> = { Accept: "application/zip" }
+  const tok = studioToken()
+  if (tok) headers.Authorization = `Bearer ${tok}`
+  const res = await fetch(new URL(testExportPath(runID), apiBase()).toString(), { headers })
+  if (!res.ok) {
+    let code = "network"
+    let message = `${res.status} ${res.statusText}`
+    try {
+      const doc = (await res.json()) as { error?: { code?: string; message?: string } }
+      code = doc.error?.code ?? code
+      message = doc.error?.message ?? message
+    } catch {
+      // not JSON — keep the status line
+    }
+    throw new ApiError(res.status, code, message)
+  }
+  return { blob: await res.blob(), name: dispositionName(res.headers.get("Content-Disposition"), `${runID}.zip`) }
+}
+
+/** PUT /api/agents/{name}/proposal's and DELETE's 200 (studio/proposals.go). */
+export interface ProposalDoc {
+  agent: string
+  proposed: ManifestProposal | null
+  note: string
+}
+
+/** PUT /api/agents/{name}/proposal (capability "proposals"): remember
+ * instructions as the agent's proposed prompt, shown on the Agents
+ * page beside the registered one. 404 no such agent, 409 the served
+ * manifest file does not name it, 403 a panel token — the ApiError
+ * carries the server's words. */
+export function putProposal(agent: string, instructions: string) {
+  return request<ProposalDoc>("PUT", `agents/${encodeURIComponent(agent)}/proposal`, { instructions })
+}
+
+/** DELETE /api/agents/{name}/proposal: withdraw it (404 when none). */
+export function deleteProposal(agent: string) {
+  return request<ProposalDoc>("DELETE", `agents/${encodeURIComponent(agent)}/proposal`)
+}
 
 /** One app log record of a run (GET /api/runs/{id}/logs): a non-weft
  * log line the app emitted under one of the run's spans. severity is

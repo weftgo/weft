@@ -19,6 +19,7 @@ import {
 } from "@/lib/format"
 import { CopyButton } from "@/components/studio/codewin"
 import { RunCost, useCostCapable } from "@/components/studio/cost"
+import { SaveAsTest } from "@/components/studio/saves"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { StatusChip } from "@/components/studio/runs-table"
 import { Badge } from "@/components/ui/badge"
@@ -287,7 +288,8 @@ export function RunHeader({
         ) : null}
         <ReplayOf doc={doc} />
         <CompareWith doc={doc} />
-        <span className="ml-auto">
+        <span className="ml-auto flex items-center gap-2">
+          <SaveAsTest runID={doc.id} />
           <CopyLink />
         </span>
       </div>

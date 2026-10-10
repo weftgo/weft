@@ -436,7 +436,15 @@ the step's ordinal — its index as the loop counts it, the `n` of
 index; a call is named with its step (`sel=c:<step>:<call id>`,
 `c:resume:<call id>`). ⤢ carries the step being read (else the running
 one); each tool call, subagent badge, session and trace in the panel is
-a link. No link carries a token, and no request does in its URL: the
+a link. A turn's **save as test** (capability `export`, not under a
+read-scoped token) is one too: `runs/<id>?save=test`
+(`saveTestLink`), where the run page downloads the wefttest zip with
+Studio's own bearer — an in-panel fetch-and-save measured ~0.8 KiB of
+`panel.js`. The result pane's **keep as prompt ⤴** copies the drawer's
+prompt and, under `proposals` with the dev token (or none), also
+proposes it (`PUT /api/agents/{name}/proposal`), the outcome on the
+panel's note line in Studio's toast words (`lib/saves.ts`); a panel
+token copies only and is told "a proposal needs the dev token". No link carries a token, and no request does in its URL: the
 token travels in the `Authorization` header, and each live stream is
 opened with a grant (`POST /api/live-grant`, the bearer in the header;
 the stream URL carries only the `sig`). The browser's own reconnect is
@@ -1398,6 +1406,7 @@ walks views, never cursor moves:
 | run | `t` | the replay playhead (seeks and pauses) | replace |
 | run | `q`, `hide`, `ev` | the raw view's search, hidden kinds (`hide=step,delta`), open event's position | replace |
 | run | `replay`, `from`, `of` | the replay drawer: its verb, its from_step, the child run it replays (a fresh load reopens it on that step, from the verb's draft — edits are not in the link) | replace |
+| run | `save=test` | download the run's wefttest zip on landing (the panel's save as test), then dropped | — (a link's landing; replace) |
 | trace | `view=chat` | the GenAI chat view (the tree is the default) | push |
 | trace | `sel` | the selected row: its step-qualified key (H7; a pre-H7 `span=<span id>` is still read) | replace |
 | playground | `run`, `step`, `agent`, `runtime`, `engine` | the source run, its step, the target, the first variant's engine — written back as they change | replace |
@@ -1425,6 +1434,32 @@ failed". Each page
 titles its tab through `lib/title.ts`: `run s_…-t3 · succeeded · weft
 studio`, `trace 0af76519…319c · weft studio`, `playground · weft
 studio`.
+
+Saves (plan F6): Studio writes nothing to your files — the download is
+the hand-off. **Save as test** in the run header (capability `export`;
+hidden to a read-scoped panel token, which the format refuses) fetches
+`GET /api/runs/{id}/export?format=wefttest` with the bearer in the
+`Authorization` header — never a token in a URL — and saves the zip
+under its `Content-Disposition` name (`<run>.zip`: a generated
+`<agent>_replay_test.go` beside `testdata/TestReplay_<run>/`); the toast
+says "saved <file> — unzip into a package directory and go test", or a
+refusal in the server's words. **Keep as prompt** beside a step's system
+prompt in the Request pane copies it and, under `proposals` and an
+identity that may propose (the dev token, or setup A's loopback with no
+token), proposes it as the run's agent's instructions; the toast says
+the outcome, a 404 ("no agent … in the manifest file or any registered
+manifest") or 409 ("the served manifest file does not name agent …") in
+the server's words, and a panel token copies only ("a proposal needs the
+dev token"). The playground card's keep as prompt is still the plain
+copy. The **Agents page** shows each agent's proposal beside its
+registered prompt: a `registered → proposed` line with the proposal's
+`since` and hash (12 characters, the full one on hover), the line diff
+from registered to proposed (the Request pane's prompt-diff renderer),
+**copy proposed**, and **withdraw** (`DELETE`, the same gating — a panel
+token sees it disabled with the hint); once on the page, the pointer
+"the durable path is WEFT-PROMPT.md P3: a propose command over the
+runtime link". A read-scoped panel token never reads the manifest (403,
+hidden), so it never sees a proposal.
 
 Notifications (plan H5): one toaster, bottom-right, in the app's theme,
 with no hotkey (it never takes focus or a key from the page), and every

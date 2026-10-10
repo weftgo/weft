@@ -4,12 +4,18 @@
 // (plan B4): each source is listed with its hash, live while a
 // connected runtime holds it, remembered once that runtime is gone —
 // never a remembered one shown as live.
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute } from "@tanstack/react-router"
+import { useState } from "react"
 
 import type { ManifestAgent, ManifestSource } from "@/lib/api"
-import { ApiError, manifestQuery } from "@/lib/api"
+import { ApiError, deleteProposal, manifestQuery, studioToken } from "@/lib/api"
+import { absoluteTime } from "@/lib/format"
+import { copyText } from "@/lib/json"
+import { notifySave } from "@/lib/notify"
+import { mayProposeWith, PROPOSAL_NEEDS_DEV, PROPOSAL_POINTER } from "@/lib/saves"
 import { AgentCard } from "@/components/studio/agent-cards"
+import { TextDiff } from "@/components/studio/step-request"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { Spinner } from "@/components/ui/spinner"
 import { useDocumentTitle } from "@/hooks/use-document-title"
@@ -56,6 +62,14 @@ function AgentsPage() {
           : "agents · registered by runtimes (no weft.json)"}
       </span>
       {sources.length > 0 && <SourceList sources={sources} />}
+      {caps.has("proposals") && (
+        <p className="text-[11px] text-faint" data-proposal-pointer>
+          A proposed prompt (&ldquo;keep as prompt&rdquo;) is held in
+          Studio&apos;s memory beside the registered one and forgotten on
+          restart; nothing is sent to the app or written to your files —{" "}
+          {PROPOSAL_POINTER}.
+        </p>
+      )}
       {manifest.data.agents.map((a) => (
         <div key={`${a.name}:${a.manifest_hash ?? ""}`} className="space-y-1">
           <AgentSources agent={a} sources={sources} />
@@ -64,6 +78,7 @@ function AgentsPage() {
               {a.name} differs between services: one card per version
             </p>
           )}
+          {a.proposed && <Proposed agent={a} caps={caps.caps} />}
           <AgentCard agent={a} />
         </div>
       ))}
@@ -171,5 +186,86 @@ function AgentSources({
         </span>
       ))}
     </p>
+  )
+}
+
+/** Proposed is plan F6's "proposed" beside "registered": the agent's
+ * proposed instructions (studio/proposals.go) as a diff from the
+ * registered ones, with the proposal's since and hash, "copy proposed"
+ * and "withdraw" (DELETE, the dev token's — a panel token is told). */
+function Proposed({
+  agent,
+  caps,
+}: {
+  agent: ManifestAgent
+  caps: readonly string[]
+}) {
+  const qc = useQueryClient()
+  const [busy, setBusy] = useState(false)
+  const p = agent.proposed
+  if (!p) return null
+  const may = mayProposeWith(caps, studioToken())
+  return (
+    <section
+      className="space-y-1 rounded-md border border-dashed px-3 py-2 text-xs"
+      aria-label={`${agent.name} proposed instructions`}
+      data-proposed={agent.name}
+    >
+      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px]">
+        <span className="rounded-sm border px-1.5 text-muted-foreground">
+          registered
+        </span>
+        <span aria-hidden="true" className="text-faint">
+          →
+        </span>
+        <span className="rounded-sm border border-thread/60 px-1.5 text-thread-ink">
+          proposed
+        </span>
+        <span className="text-faint" data-proposal-since>
+          since {absoluteTime(p.since)}
+        </span>
+        <span className="text-muted-foreground" title={p.instructions_hash} data-proposal-hash>
+          {shortHash(p.instructions_hash)}
+        </span>
+        <span className="grow" />
+        <button
+          type="button"
+          className="text-thread hover:underline"
+          onClick={() =>
+            void copyText(p.instructions).then((ok) =>
+              notifySave({ kind: "keep-prompt", agent: agent.name, copied: ok, proposal: "copy-only" })
+            )
+          }
+        >
+          copy proposed
+        </button>
+        <button
+          type="button"
+          className="text-faint hover:text-foreground hover:underline disabled:opacity-50"
+          disabled={!may || busy}
+          title={may ? `withdraw the proposal for ${agent.name}` : PROPOSAL_NEEDS_DEV}
+          onClick={() => {
+            setBusy(true)
+            deleteProposal(agent.name)
+              .then(() => {
+                notifySave({ kind: "withdraw", agent: agent.name, ok: true })
+                return qc.invalidateQueries({ queryKey: ["manifest"] })
+              })
+              .catch((e: unknown) =>
+                notifySave({
+                  kind: "withdraw",
+                  agent: agent.name,
+                  ok: false,
+                  message: e instanceof Error ? e.message : String(e),
+                })
+              )
+              .finally(() => setBusy(false))
+          }}
+        >
+          withdraw
+        </button>
+      </p>
+      <TextDiff before={agent.instructions ?? ""} after={p.instructions} />
+    </section>
   )
 }

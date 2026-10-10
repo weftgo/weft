@@ -66,6 +66,9 @@ export interface RunSearch {
   /** The run the drawer replays when it is not the page's (a child
    * row's verb: the child's id). */
   of?: string
+  /** Save as test (plan F6): the page downloads the run's wefttest zip
+   * on landing, then drops the key (saveTestLink). */
+  save?: "test"
 }
 
 /** The replay drawer's state a link carries (G2): its verb, from_step
@@ -564,4 +567,14 @@ export function canonical(url: string | URL): string {
  * endpoint: the Studio mount, ending in "/"). */
 export function href(base: string, link: StudioLink): string {
   return new URL(path(link), base).toString()
+}
+
+// ── Save as test (plan F6) ──────────────────────────────────────────
+
+/** saveTestLink is the run page that, on landing, downloads the run's
+ * wefttest zip with Studio's own bearer (never a token in the URL) and
+ * drops ?save= — the devtools panel's "save as test" hands off here. */
+export function saveTestLink(id: string): RunLink {
+  const l = runLink(id)
+  return { ...l, search: { ...l.search, save: "test" } }
 }

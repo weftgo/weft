@@ -19,6 +19,8 @@ import { ApiError, fetchCommand, fetchRun } from "./api"
 import type { CommandStatus } from "./api"
 import { LIVE_RETRIES } from "./live"
 import { experimentLink, runLink } from "./links"
+import { saveWords } from "./saves"
+import type { SaveOutcome } from "./saves"
 
 export type Notice =
   /** A playground or replay-drawer command's run settled. */
@@ -277,4 +279,16 @@ export function dismissNotice(kind: "live-gave-up" | "parked", runID = ""): void
 export function resetNotices(): void {
   raised.clear()
   toast.dismiss()
+}
+
+// ── The saves (plan F6): save as test, keep as prompt, withdraw ─────
+// Each press is its own outcome: no once-per-key memory, one toast per
+// kind that the next press replaces. The words are lib/saves.ts's, the
+// panel's too (parity.test.ts); never a token, never the prompt's text.
+
+/** notifySave raises a save's toast (lib/saves.ts's saveWords). */
+export function notifySave(o: SaveOutcome): void {
+  const { title, tone } = saveWords(o)
+  const show = tone === "success" ? toast.success : tone === "error" ? toast.error : toast.info
+  show(title, { id: `save:${o.kind}` })
 }

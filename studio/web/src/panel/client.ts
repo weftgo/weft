@@ -66,23 +66,34 @@ export async function panelGet<T>(
   const headers: Record<string, string> = { Accept: "application/json" }
   if (ep.token) headers.Authorization = `Bearer ${ep.token}`
   const res = await fetch(apiUrl(ep, path), { headers, signal })
-  if (!res.ok) {
-    let code = "network"
-    let message = `${res.status} ${res.statusText}`
-    let parsed: unknown
-    try {
-      const body = (await res.json()) as { error?: { code?: string; message?: string } }
-      parsed = body
-      if (body.error) {
-        code = body.error.code ?? code
-        message = body.error.message ?? message
-      }
-    } catch {
-      // not JSON: the status line says enough
-    }
-    throw new PanelApiError(res.status, code, message, parsed)
-  }
+  if (!res.ok) throw await failure(res)
   return (await res.json()) as T
+}
+
+/** failure reads a non-2xx answer as a PanelApiError: the server's
+ * code and message (S4.2's error shape) and the body as sent, else the
+ * status line. */
+async function failure(res: Response): Promise<PanelApiError> {
+  let code = "network"
+  let message = `${res.status} ${res.statusText}`
+  let parsed: unknown
+  try {
+    const body = (await res.json()) as { error?: { code?: string; message?: string } }
+    parsed = body
+    if (body.error) {
+      code = body.error.code ?? code
+      message = body.error.message ?? message
+    }
+  } catch {
+    // not JSON: the status line says enough
+  }
+  return new PanelApiError(res.status, code, message, parsed)
+}
+
+/** PUT /api/agents/{name}/proposal (plan F6): keep as prompt's
+ * proposal, the dev token's only (every panel token is 403). */
+export function putProposal(ep: PanelEndpoint, agent: string, instructions: string): Promise<unknown> {
+  return panelPut(ep, `agents/${encodeURIComponent(agent)}/proposal`, { instructions })
 }
 
 // ── Reads the panel uses (S4.2 shapes) ────────────────────────────
@@ -338,20 +349,7 @@ async function panelPut<T>(ep: PanelEndpoint, path: string, body: unknown): Prom
   }
   if (ep.token) headers.Authorization = `Bearer ${ep.token}`
   const res = await fetch(apiUrl(ep, path), { method: "PUT", headers, body: JSON.stringify(body) })
-  if (!res.ok) {
-    let code = "network"
-    let message = `${res.status} ${res.statusText}`
-    try {
-      const doc = (await res.json()) as { error?: { code?: string; message?: string } }
-      if (doc.error) {
-        code = doc.error.code ?? code
-        message = doc.error.message ?? message
-      }
-    } catch {
-      // not JSON — the status line says enough
-    }
-    throw new PanelApiError(res.status, code, message)
-  }
+  if (!res.ok) throw await failure(res)
   return (await res.json()) as T
 }
 
@@ -368,20 +366,7 @@ export async function panelPost<T>(ep: PanelEndpoint, path: string, body: unknow
     headers,
     body: JSON.stringify(body),
   })
-  if (!res.ok) {
-    let code = "network"
-    let message = `${res.status} ${res.statusText}`
-    try {
-      const doc = (await res.json()) as { error?: { code?: string; message?: string } }
-      if (doc.error) {
-        code = doc.error.code ?? code
-        message = doc.error.message ?? message
-      }
-    } catch {
-      // not JSON — the status line says enough
-    }
-    throw new PanelApiError(res.status, code, message)
-  }
+  if (!res.ok) throw await failure(res)
   return (await res.json()) as T
 }
 

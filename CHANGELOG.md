@@ -10,6 +10,18 @@ module, ADR 0005).
 
 ### Added
 
+- Studio's saves (plan F6, web half): **save as test** in the run header
+  (capability `export`) fetches the wefttest zip
+  (`export?format=wefttest`) with the bearer in the `Authorization` header
+  and saves it under its `Content-Disposition` name; the devtools panel's
+  turn offers it as a link to the run page with `?save=test`, which
+  downloads there. **Keep as prompt** on the Request pane's system prompt
+  (and in the panel's result pane) copies and, under `proposals` with the
+  dev token, proposes it (`PUT /api/agents/{name}/proposal`), the outcome
+  toasted in the server's words (a panel token copies only). The Agents
+  page shows each proposal beside the registered prompt as a diff, with
+  its since and hash, copy proposed and withdraw (`DELETE`), and points to
+  WEFT-PROMPT.md P3 as the durable path.
 - Studio's `/live` page (plan H6) runs on one `/api/live?all=1` stream (kinds
   event,run, opened through the live grant) when `meta.live_all` allows it.
   Each row shows the run's current step, tokens so far (the sum of

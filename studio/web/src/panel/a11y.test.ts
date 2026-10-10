@@ -200,6 +200,7 @@ const MODES: { name: string; width: number; attrs: Record<string, string>; sel: 
   { name: "the option lab: defaults, an override, a refusal, the named tool picker", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: '.weft-drawer [data-weft-lab-problem="max_steps"]', act: optionLab, routes: labRoutes },
   { name: "the transcript editor: an edit, a refusal, the edit list and the preview", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: ".weft-drawer [data-weft-preview-op]", act: transcriptEditor, routes: editRoutes, meta: EDIT_META },
   { name: "editable steers with their verb, a result's editor open", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: 'textarea[data-weft-k="ed:tool_result:1:c2:0"]', act: resultEditor, routes: steerRoutes, meta: EDIT_META },
+  { name: "F6's save as test on the turn and keep as prompt in the result pane", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: "[data-weft-save-test]", act: runExperiment, meta: { ...META, capabilities: [...META.capabilities, "export", "proposals"] } },
   { name: "badges, the cap line and the chips", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: '[data-weft-chip="fork"]', act: badgesDrawn, routes: badgeRoutes },
 ]
 

@@ -1,1 +1,0 @@
-import{$ as e,Ut as t}from"./dist-B11xKKgU.js";function n(){let n=t(e()),r=n.data?.capabilities??[],i=e=>r.includes(e);return{caps:r,has:i,why:e=>i(e)?void 0:n.data?.capabilities_off?.[e],loading:n.isPending}}export{n as t};

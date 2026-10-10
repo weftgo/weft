@@ -154,7 +154,13 @@ export interface SessionLink {
 }
 
 export interface TraceSearch {
-  /** The span to select, by its span id. */
+  /** The selected row's key (plan H7, G1's scheme — lib/trace-sel.ts):
+   * r:<run>, s<step>, c:<step>:<call id> (run-qualified, s:<run>:<step>
+   * and c:<run>:<step>:<call id>, when the trace holds several runs),
+   * t:<span id> for any other span. A bare c:<call id> (pre-G1) still
+   * resolves, to the first match. */
+  sel?: string
+  /** A pre-H7 link's selection, by span id: read, never written. */
   span?: string
   /** The view: the span tree (the default, never written) or the
    * GenAI chat (G2). */
@@ -399,6 +405,16 @@ export function traceLink(
   if (opts.span) search.span = opts.span
   if (opts.view === "chat") search.view = "chat"
   return { to: "/traces/$id", params: { id }, search }
+}
+
+/** traceSelectionLink is a trace's page with a row selected by its
+ * key (TraceSearch.sel) — the trace page's own links (plan H7). */
+export function traceSelectionLink(
+  id: string,
+  opts: { sel?: string; view?: "tree" | "chat" } = {}
+): TraceLink {
+  const link = traceLink(id, { view: opts.view })
+  return opts.sel ? { ...link, search: { sel: opts.sel, ...link.search } } : link
 }
 
 /** runsLink is the runs list under these filters (empty values are

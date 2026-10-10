@@ -426,7 +426,7 @@ trimmed turn and checks the chip and the deleted guidance line.
 Deep links (plan G1) follow one scheme, `src/lib/links.ts`, shared by
 the panel and Studio's app (an ESLint rule refuses a Studio URL built
 anywhere else): `runs/<id>?step=<n>&view=story|raw&pane=request|wire&sel=…&axis=time&t=…`,
-`sessions/<id>`, `traces/<id>?span=<span id>&view=chat`,
+`sessions/<id>`, `traces/<id>?sel=<row key>&view=chat`,
 `playground#run=…` (the hand-off in the fragment),
 `playground?run=…&step=…&agent=…&engine=…` (the page's own state, G2)
 and `playground?experiment=<id>`; the page state each one carries is
@@ -1304,6 +1304,33 @@ deduped by trace id, a rootless trace carrying its `gap` badge);
 as a span tree plus a chat view when semconv content was captured;
 `/settings` says what this Studio is and serves.
 
+The trace page (plan H7): every selection is a URL, `?sel=` the row's
+step-qualified key (`src/lib/trace-sel.ts`, G1's scheme) — `r:<run>` an
+invoke_agent span, `s<step>` a chat span, `c:<step>:<call id>` a tool
+execution, run-qualified (`s:<run>:<step>`, `c:<run>:<step>:<call id>`)
+when the trace holds several runs, `t:<span id>` for any other span and
+for a second span wanting a taken key; each row's label links to it (a
+plain click selects in place, replacing the URL; `y` copies it). An old
+bare `c:<call id>` lands on the first tool span of that id, saying "an
+old link: this call id repeats across steps; showing the first" when it
+repeats; a pre-H7 `?span=<span id>` still selects. A model call's chat
+section draws its messages role by role from either key family —
+`gen_ai.input.messages` / `gen_ai.output.messages` (JSON `{role, parts}`
+arrays, `tool_call` parts folded as name + arguments) with
+`gen_ai.system_instructions`, else the legacy `gen_ai.prompt` /
+`gen_ai.completion` (plain, `gen_ai.content.*`, or indexed
+`.N.role|content` with `gen_ai.completion.N.tool_calls.M.*`) — and a
+model call carrying neither says `not_recorded` (weft's own chat spans
+carry no content; nothing is reconstructed). The raw attributes stay
+listed beneath. An errored chat span of a playground run
+(`RunRow.playground`) offers "replay from this step": the run page's own
+drawer, pre-filled with the run and step ordinal, shown under the
+`playground` capability and a token that may act (`canReplay`); on the
+app's own run it is disabled, titled "the app's own run: replay runs
+through the playground". The header lists the trace's root, service,
+start and error, and its runs (the spans' `weft.run.id`, sorted) linked;
+"all traces" under the `traces` capability.
+
 Settings (plan H4): `/settings` (a sidebar entry, the palette's Settings
 item) is one card per section — Studio (endpoint, versions, pid,
 `interrupted_after_ms`, ingest), Token, Database, Retention, Pricing,
@@ -1370,7 +1397,7 @@ walks views, never cursor moves:
 | run | `q`, `hide`, `ev` | the raw view's search, hidden kinds (`hide=step,delta`), open event's position | replace |
 | run | `replay`, `from`, `of` | the replay drawer: its verb, its from_step, the child run it replays (a fresh load reopens it on that step, from the verb's draft — edits are not in the link) | replace |
 | trace | `view=chat` | the GenAI chat view (the tree is the default) | push |
-| trace | `span` | the selected span | replace |
+| trace | `sel` | the selected row: its step-qualified key (H7; a pre-H7 `span=<span id>` is still read) | replace |
 | playground | `run`, `step`, `agent`, `runtime`, `engine` | the source run, its step, the target, the first variant's engine — written back as they change | replace |
 | playground | `experiment` | a saved experiment, highlighted in the history | push |
 | compare | `a`, `b`, `step` | the base, the runs compared, the step | push |

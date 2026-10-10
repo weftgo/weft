@@ -60,6 +60,10 @@ export interface WaterfallProps {
   onSeek?: (t: number) => void
   onSelect?: (span: Span) => void
   selectedId?: string
+  /** A row's own URL (the trace page's selection links, plan H7): the
+   * label becomes a link to it — a plain click still selects in place,
+   * a modified or middle click opens the link as the browser would. */
+  hrefOf?: (span: Span) => string | undefined
   /** Rows deeper than this start folded. */
   foldDepth?: number
   className?: string
@@ -85,6 +89,7 @@ export function Waterfall({
   onSeek,
   onSelect,
   selectedId,
+  hrefOf,
   foldDepth = 5,
   className = "",
 }: WaterfallProps) {
@@ -342,14 +347,38 @@ export function Waterfall({
               >
                 {kindIcon[sp.kind]}
               </span>
-              <span
-                className={`shrink-0 truncate ${toneText[sp.tone]} ${
+              {(() => {
+                const cls = `shrink-0 truncate ${toneText[sp.tone]} ${
                   sp.kind === "run" || sp.kind === "step" ? "font-medium" : ""
-                }`}
-                style={{ maxWidth: "8rem" }}
-              >
-                {sp.label}
-              </span>
+                }`
+                const href = hrefOf?.(sp)
+                if (!href)
+                  return (
+                    <span className={cls} style={{ maxWidth: "8rem" }}>
+                      {sp.label}
+                    </span>
+                  )
+                // Out of the tab order: the tree is one stop, its rows
+                // walked with the arrows (the selection is the URL).
+                return (
+                  <a
+                    href={href}
+                    tabIndex={-1}
+                    data-span-link
+                    className={`${cls} hover:underline`}
+                    style={{ maxWidth: "8rem" }}
+                    onClick={(e) => {
+                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) {
+                        e.stopPropagation()
+                        return
+                      }
+                      e.preventDefault()
+                    }}
+                  >
+                    {sp.label}
+                  </a>
+                )
+              })()}
               {sp.badge ? (
                 <span
                   className={`max-w-28 shrink-0 truncate rounded-full border px-1.5 text-[9.5px] leading-4 ${badgeTone[sp.tone]}`}

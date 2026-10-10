@@ -85,7 +85,7 @@ describe("the trace page's URL (G2)", () => {
     await waitFor(() => expect(row("cc03")).toBeTruthy())
     expect(selectedName()).toBeUndefined()
     fireEvent.click(row("cc03"))
-    await waitFor(() => expect(first.router.state.location.search).toMatchObject({ span: "cc03" }))
+    await waitFor(() => expect(first.router.state.location.search).toMatchObject({ sel: "t:cc03" }))
     expect(selectedName()).toBe("execute_tool lookup_order")
 
     // y copies the page's link as it stands — the bare URL, no token.
@@ -93,7 +93,7 @@ describe("the trace page's URL (G2)", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
     const copied = new URL(writeText.mock.calls[0][0] as string)
     expect(copied.pathname).toBe(`/traces/${TRACE}`)
-    expect(copied.searchParams.get("span")).toBe("cc03")
+    expect(copied.searchParams.get("sel")).toBe("t:cc03")
     expect(copied.hash).toBe("")
     expect(await screen.findByText("link copied")).toBeTruthy()
 
@@ -113,9 +113,9 @@ describe("the trace page's URL (G2)", () => {
 
     // Cursor moves: the selection is replaced in place.
     fireEvent.click(row("aa01"))
-    await waitFor(() => expect(router.state.location.search).toMatchObject({ span: "aa01" }))
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ sel: "t:aa01" }))
     fireEvent.click(row("bb02"))
-    await waitFor(() => expect(router.state.location.search).toMatchObject({ span: "bb02" }))
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ sel: "t:bb02" }))
     expect(router.history.length).toBe(entries)
     expect(actions).toEqual(["REPLACE", "REPLACE"])
 
@@ -129,7 +129,7 @@ describe("the trace page's URL (G2)", () => {
     // Back: the tree, with the last selection — not the one before it.
     router.history.back()
     await waitFor(() => expect(router.state.location.search.view).toBeUndefined())
-    expect(router.state.location.search).toMatchObject({ span: "bb02" })
+    expect(router.state.location.search).toMatchObject({ sel: "t:bb02" })
     await waitFor(() => expect(selectedName()).toBe("chat glm"))
   })
 
@@ -143,7 +143,7 @@ describe("the trace page's URL (G2)", () => {
         disconnect() {}
       }
     )
-    renderApp(`/traces/${TRACE}?span=bb02&view=chat`)
+    renderApp(`/traces/${TRACE}?sel=t:bb02&view=chat`)
     expect(await screen.findByText("where is order 42?")).toBeTruthy()
     fireEvent.keyDown(window, { key: "k", ctrlKey: true })
     const item = await screen.findByText("Copy link to this page")
@@ -154,7 +154,7 @@ describe("the trace page's URL (G2)", () => {
     fireEvent.click(item)
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
     const copied = new URL(writeText.mock.calls[0][0] as string)
-    expect(copied.searchParams.get("span")).toBe("bb02")
+    expect(copied.searchParams.get("sel")).toBe("t:bb02")
     expect(copied.searchParams.get("view")).toBe("chat")
     expect(await screen.findByText("link copied")).toBeTruthy()
   })
@@ -214,7 +214,7 @@ describe("the trace page's URL (G2)", () => {
     const router = createRouter({
       routeTree,
       basepath: "/studio",
-      history: createMemoryHistory({ initialEntries: [`/studio/traces/${TRACE}?span=cc03`] }),
+      history: createMemoryHistory({ initialEntries: [`/studio/traces/${TRACE}?sel=t:cc03`] }),
     })
     cleanup()
     render(<RouterProvider router={router} />, { container: document, baseElement: document.body })
@@ -223,7 +223,7 @@ describe("the trace page's URL (G2)", () => {
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
     const copied = new URL(writeText.mock.calls[0][0] as string)
     expect(copied.pathname).toBe(`/studio/traces/${TRACE}`)
-    expect(copied.searchParams.get("span")).toBe("cc03")
+    expect(copied.searchParams.get("sel")).toBe("t:cc03")
   })
 
   it("says the copy failed — and shows the link — where the browser has no clipboard", async () => {
@@ -231,12 +231,12 @@ describe("the trace page's URL (G2)", () => {
     Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true })
     const prompt = vi.fn()
     vi.stubGlobal("prompt", prompt)
-    renderApp(`/traces/${TRACE}?span=bb02`)
+    renderApp(`/traces/${TRACE}?sel=t:bb02`)
     await waitFor(() => expect(row("bb02")).toBeTruthy())
     fireEvent.keyDown(window, { key: "y" })
     expect(await screen.findByText(/copy failed/)).toBeTruthy()
     expect(prompt).toHaveBeenCalledTimes(1)
     const shown = new URL(prompt.mock.calls[0][1] as string)
-    expect(shown.searchParams.get("span")).toBe("bb02")
+    expect(shown.searchParams.get("sel")).toBe("t:bb02")
   })
 })

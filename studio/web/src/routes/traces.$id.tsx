@@ -1,62 +1,103 @@
-// A trace page (S4.7): any trace, weft or not — the generic span tree
-// on the time axis, plus a GenAI chat view when semconv attributes
-// are present (the polyglot promise: a Python app's OTel GenAI
-// instrumentation shows up exactly like a weft run's chats).
+// A trace page (S4.7, plan H7): any trace, weft or not — the generic
+// span tree on the time axis, the runs the trace holds, and a GenAI
+// chat view when a span carries the conventions' messages (the
+// polyglot promise: a Python app's OTel GenAI instrumentation shows up
+// exactly like a weft run's chats). Every selection is a URL: ?sel= is
+// the row's step-qualified key (lib/trace-sel.ts); an errored model
+// call of a playground run offers "replay from this step" in the run
+// page's own drawer.
 import { useQuery } from "@tanstack/react-query"
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, Link, useNavigate, useRouter } from "@tanstack/react-router"
+import { ChevronRight } from "lucide-react"
+import { useCallback, useMemo, useState } from "react"
 
-import { traceQuery } from "@/lib/api"
+import { runQuery, studioToken, traceQuery } from "@/lib/api"
 import type { Span as TimedSpan } from "@/lib/api"
-import { spanMs } from "@/lib/format"
-import {
-  isGenAISpan,
-  spansFromTimed,
-  timeDomain,
-} from "@/lib/trace"
+import { absoluteTime, relativeTime, spanMs } from "@/lib/format"
+import { genaiChat, isModelCall, NO_MESSAGES_REASON } from "@/lib/genai"
+import type { ChatMessage, ChatPart } from "@/lib/genai"
+import { canReplay, replayFromStep } from "@/lib/replay"
+import { isGenAISpan, spansFromTimed, timeDomain } from "@/lib/trace"
+import type { Span as TraceRow } from "@/lib/trace"
+import { keyRows, OLD_KEY_NOTE, resolveSel, traceRuns } from "@/lib/trace-sel"
+import { useCapabilities } from "@/hooks/use-capabilities"
+import { HoleBadge } from "@/components/studio/hole-badge"
 import { JsonTree } from "@/components/studio/json-tree"
+import { ReplayDrawer } from "@/components/studio/replay-drawer"
+import type { ReplayRequest } from "@/components/studio/replay-drawer"
 import { Waterfall } from "@/components/studio/waterfall"
 import { SplitPane } from "@/components/studio/split-pane"
+import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { SPLITS } from "@/lib/pane-sizes"
-import { runLink, traceLink } from "@/lib/links"
+import { runLink, traceSelectionLink, tracesLink } from "@/lib/links"
 import type { TraceSearch } from "@/lib/links"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 
+const searchText = (v: unknown): string | undefined =>
+  typeof v === "string" && v ? v : typeof v === "number" ? String(v) : undefined
+
 export const Route = createFileRoute("/traces/$id")({
-  // ?span=<span id> (lib/links.ts's traceLink) selects that span;
-  // ?view=chat is the GenAI chat view (G2: the page's state is its URL).
+  // ?sel=<row key> (lib/trace-sel.ts) selects that row; a pre-H7
+  // ?span=<span id> still does. ?view=chat is the GenAI chat view (G2:
+  // the page's state is its URL).
   validateSearch: (search: Record<string, unknown>): TraceSearch => ({
-    span:
-      typeof search.span === "string" && search.span
-        ? search.span
-        : typeof search.span === "number"
-          ? String(search.span)
-          : undefined,
+    sel: searchText(search.sel),
+    span: searchText(search.span),
     view: search.view === "chat" ? "chat" : undefined,
   }),
   component: TracePage,
 })
 
+/** What the trace list shows of a trace, from its spans. */
+function traceFacts(spans: TimedSpan[]) {
+  const ids = new Set(spans.map((s) => s.span_id))
+  const roots = spans
+    .filter((s) => !s.parent_span_id || !ids.has(s.parent_span_id))
+    .sort((a, b) => Date.parse(a.start) - Date.parse(b.start))
+  const root = roots.at(0)
+  return {
+    root,
+    service: root?.service || spans.find((s) => s.service)?.service || "",
+    start: root?.start ?? spans.at(0)?.start ?? "",
+    durationMs: timeDomain(spans)[1],
+    error: spans.some((s) => s.status === "error"),
+  }
+}
+
 function TracePage() {
   const { id } = Route.useParams()
   const search = Route.useSearch()
-  const { span } = search
   const q = useQuery(traceQuery(id))
   const navigate = useNavigate()
+  const router = useRouter()
+  const { caps, has } = useCapabilities()
   useDocumentTitle({ page: "trace", id })
+  // The replay drawer (plan F1's, as the run page mounts it): offered
+  // when the server has the playground and the bearer may act.
+  const replayable = canReplay(caps, studioToken())
+  const [replay, setReplay] = useState<{ req: ReplayRequest | null; n: number }>({ req: null, n: 0 })
+  const openReplay = useCallback(
+    (req: ReplayRequest) => setReplay((cur) => ({ req, n: cur.n + 1 })),
+    []
+  )
+
+  const spans = useMemo(() => q.data?.spans ?? [], [q.data])
+  const rows = useMemo(() => keyRows(spansFromTimed(spans)), [spans])
+  const view = search.view === "chat" ? "chat" : "tree"
+  const wanted = search.sel ?? (search.span ? `t:${search.span}` : undefined)
+  const resolved = resolveSel(rows, wanted)
   // The page's state is its URL (G2): the view is a view change — a
   // history entry, so back walks it — and the selection a cursor move,
   // replaced in place.
-  const view = search.view === "chat" ? "chat" : "tree"
   const setView = (v: "tree" | "chat") =>
-    void navigate({ ...traceLink(id, { span, view: v }) })
-  // The time-axis rows are keyed t:<span id> (lib/trace).
-  const sel = span ? `t:${span}` : undefined
-  const setSel = (key: string) =>
-    void navigate({
-      ...traceLink(id, { span: key.replace(/^t:/, ""), view }),
-      replace: true,
-    })
+    void navigate({ ...traceSelectionLink(id, { sel: resolved.key ?? wanted, view: v }) })
+  const setSel = (row: TraceRow) =>
+    void navigate({ ...traceSelectionLink(id, { sel: row.key, view }), replace: true })
+  const hrefOf = (row: TraceRow) =>
+    router.history.createHref(
+      router.buildLocation(traceSelectionLink(id, { sel: row.key, view })).publicHref
+    )
 
   if (q.isPending) {
     return (
@@ -70,12 +111,16 @@ function TracePage() {
       <div className="mx-auto max-w-md space-y-3 py-24 text-center">
         <p className="font-mono text-xs text-faint">{id}</p>
         <p className="text-sm text-status-bad">{q.error.message}</p>
+        <Button variant="outline" size="sm" onClick={() => void q.refetch()}>
+          retry
+        </Button>
       </div>
     )
   }
-  const spans = q.data.spans
-  const rows = spansFromTimed(spans)
   const genai = spans.filter(isGenAISpan)
+  const facts = traceFacts(spans)
+  const runs = traceRuns(spans)
+  const selected = resolved.id ? rows.find((r) => r.id === resolved.id)?.timed?.span : undefined
 
   return (
     <div className="space-y-3">
@@ -85,9 +130,13 @@ function TracePage() {
           {id.length > 16 ? "…" : ""}
         </h1>
         <span className="font-mono text-[11px] text-faint">
-          {spans.length} {spans.length === 1 ? "span" : "spans"} ·{" "}
-          {spanMs(timeDomain(spans)[1])}
+          {spans.length} {spans.length === 1 ? "span" : "spans"} · {spanMs(facts.durationMs)}
         </span>
+        {has("traces") ? (
+          <Link {...tracesLink()} className="font-mono text-[11px] text-thread-ink hover:underline">
+            all traces
+          </Link>
+        ) : null}
         <div className="ml-auto flex gap-1">
           {(["tree", "chat"] as const).map((v) => (
             <button
@@ -98,6 +147,7 @@ function TracePage() {
                   ? "border-thread/60 bg-secondary"
                   : "text-muted-foreground hover:text-foreground"
               }`}
+              aria-pressed={view === v}
               disabled={v === "chat" && genai.length === 0}
               title={
                 v === "chat"
@@ -113,6 +163,55 @@ function TracePage() {
           ))}
         </div>
       </div>
+
+      {/* The trace as the list shows it (routes/traces.index.tsx), and
+          the runs it holds. */}
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px]" data-trace-facts>
+        <span>
+          <span className="text-faint">root </span>
+          {facts.root ? facts.root.name : <span className="text-muted-foreground">(no root span)</span>}
+        </span>
+        <span>
+          <span className="text-faint">service </span>
+          {facts.service || <span className="text-faint">—</span>}
+        </span>
+        {facts.start ? (
+          <span title={absoluteTime(facts.start)}>
+            <span className="text-faint">started </span>
+            {relativeTime(facts.start)}
+          </span>
+        ) : null}
+        {facts.error ? (
+          <span className="text-status-bad" data-trace-error>
+            error
+          </span>
+        ) : null}
+        <nav aria-label="runs in this trace" className="flex flex-wrap items-center gap-x-2" data-trace-runs>
+          <span className="text-faint">runs</span>
+          {runs.length === 0 ? (
+            <span className="text-faint" title="no weft run: a trace of non-weft spans only">
+              —
+            </span>
+          ) : (
+            runs.map((r) => (
+              <Link
+                key={r}
+                {...runLink(r)}
+                data-trace-run={r}
+                className="text-muted-foreground hover:text-thread-ink hover:underline"
+              >
+                {r}
+              </Link>
+            ))
+          )}
+        </nav>
+      </div>
+
+      {resolved.ambiguous ? (
+        <p className="font-mono text-[11px] text-muted-foreground" role="status" data-sel-note>
+          {OLD_KEY_NOTE}
+        </p>
+      ) : null}
 
       {view === "tree" ? (
         // The tree beside the selected span (plan H3): the divider
@@ -134,8 +233,9 @@ function TracePage() {
                     domain={timeDomain(spans)}
                     playhead={null}
                     unit="ms"
-                    onSelect={(sp) => setSel(sp.key)}
-                    selectedId={sel}
+                    onSelect={setSel}
+                    selectedId={resolved.id}
+                    hrefOf={hrefOf}
                   />
                 </div>
               ),
@@ -146,20 +246,84 @@ function TracePage() {
               defaultSize: 40,
               minSize: 25,
               children: (
-                <SelectedSpan span={spans.find((s) => `t:${s.span_id}` === sel)} />
+                <SelectedSpan
+                  span={selected}
+                  onReplay={replayable ? openReplay : null}
+                />
               ),
             },
           ]}
         />
       ) : (
-        <GenAIChat spans={genai} />
+        <GenAIConversation spans={genai} />
       )}
+      {replayable ? (
+        <ReplayDrawer
+          request={replay.req}
+          requestKey={replay.n}
+          onClose={() => setReplay((cur) => ({ ...cur, req: null }))}
+        />
+      ) : null}
     </div>
   )
 }
 
-/** The selected span's facts and attributes. */
-function SelectedSpan({ span }: { span: TimedSpan | undefined }) {
+/** A model call's run and step (the core stamps both on its chat span). */
+function runStepOf(span: TimedSpan): { run: string; step: number } | null {
+  const run = span.attrs["weft.run.id"]
+  const raw = span.attrs["weft.step.index"]
+  const step = typeof raw === "number" ? raw : typeof raw === "string" && /^\d+$/.test(raw) ? Number(raw) : NaN
+  if (typeof run !== "string" || !run || !Number.isInteger(step) || step < 0) return null
+  return { run, step }
+}
+
+/** "replay from this step" on an errored model call of a playground
+ * run: the run page's own verb, in its own drawer. The app's own run
+ * gets a disabled one that says where replay runs. */
+function ReplayFromHere({
+  run,
+  step,
+  onReplay,
+}: {
+  run: string
+  step: number
+  onReplay: (r: ReplayRequest) => void
+}) {
+  const doc = useQuery(runQuery(run))
+  if (!doc.data) return null
+  if (!doc.data.playground)
+    return (
+      <Button
+        variant="outline"
+        size="sm"
+        disabled
+        data-replay-from-here="off"
+        title="the app's own run: replay runs through the playground"
+      >
+        replay from this step
+      </Button>
+    )
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      data-replay-from-here={`${run}#${step}`}
+      onClick={(e) => onReplay({ runID: run, draft: replayFromStep(step), opener: e.currentTarget })}
+    >
+      replay from this step
+    </Button>
+  )
+}
+
+/** The selected span's facts, its chat (a model call's messages) and
+ * its attributes. */
+function SelectedSpan({
+  span,
+  onReplay,
+}: {
+  span: TimedSpan | undefined
+  onReplay: ((r: ReplayRequest) => void) | null
+}) {
   if (!span) {
     return (
       <p className="font-mono text-[11px] text-faint">
@@ -167,8 +331,35 @@ function SelectedSpan({ span }: { span: TimedSpan | undefined }) {
       </p>
     )
   }
+  const chat = genaiChat(span.attrs)
+  const modelCall = isModelCall(span.attrs)
+  const at = span.status === "error" && span.attrs["gen_ai.operation.name"] === "chat" ? runStepOf(span) : null
   return (
     <div className="grid min-w-0 gap-3">
+      {at && onReplay ? (
+        <div className="flex flex-wrap items-center gap-2" data-span-retry>
+          <span className="font-mono text-[11px] text-status-bad">
+            {span.status_message || "the model call failed"}
+          </span>
+          <ReplayFromHere run={at.run} step={at.step} onReplay={onReplay} />
+        </div>
+      ) : null}
+      {chat.family || modelCall ? (
+        <section className="codewin" aria-label="chat" data-span-chat={chat.family ?? "not_recorded"}>
+          <div className="codewin-bar">
+            <span className="font-mono text-[11px] text-code-mut">
+              chat{chat.family === "legacy" ? " · legacy gen_ai.prompt / completion keys" : ""}
+            </span>
+          </div>
+          <div className="overflow-auto px-3 py-3">
+            {chat.family ? (
+              <ChatMessages messages={chat.messages} problems={chat.problems} />
+            ) : (
+              <HoleBadge hole="not_recorded" reason={NO_MESSAGES_REASON} detail />
+            )}
+          </div>
+        </section>
+      ) : null}
       <div className="codewin">
         <div className="codewin-bar">
           <span className="font-mono text-[11px] text-code-mut">
@@ -195,73 +386,139 @@ function SelectedSpan({ span }: { span: TimedSpan | undefined }) {
   )
 }
 
-/** Semconv attribute keys the chat view reads, newest first. */
-const PROMPT_KEYS = [
-  "gen_ai.prompt",
-  "gen_ai.prompt.0.content",
-  "gen_ai.content.prompt",
-]
-const COMPLETION_KEYS = [
-  "gen_ai.completion",
-  "gen_ai.completion.0.content",
-  "gen_ai.content.completion",
-]
-
-function attrText(attrs: Record<string, unknown>, keys: string[]): string | null {
-  for (const k of keys) {
-    const v = attrs[k]
-    if (typeof v === "string" && v) return v
-  }
-  return null
+const ROLE_TONE: Record<string, string> = {
+  system: "border-dashed bg-secondary/30",
+  user: "bg-secondary/50",
+  assistant: "border-thread/30 bg-thread/5",
+  tool: "bg-background",
 }
 
-/** The GenAI chat view: one bubble per span with semconv prompt or
- * completion content (present when capture was on). */
-function GenAIChat({ spans }: { spans: TimedSpan[] }) {
+function PartView({ part }: { part: ChatPart }) {
+  switch (part.kind) {
+    case "text":
+      return <div className="text-xs whitespace-pre-wrap">{part.text}</div>
+    case "reasoning":
+      return <div className="text-xs whitespace-pre-wrap text-muted-foreground italic">{part.text}</div>
+    case "tool_call":
+      // As the run page's calls: the name, the arguments folded.
+      return (
+        <details className="font-mono text-[11px]" data-chat-tool-call={part.name}>
+          <summary className="cursor-pointer">
+            <span className="text-ev-tool">⚙ {part.name || "(unnamed tool)"}</span>
+            {part.id ? <span className="text-faint"> · {part.id}</span> : null}
+          </summary>
+          <div className="pt-1">
+            <JsonTree value={part.arguments ?? null} openDepth={2} />
+          </div>
+        </details>
+      )
+    case "tool_result":
+      return (
+        <div className="font-mono text-[11px]">
+          <span className="text-faint">result{part.id ? ` · ${part.id}` : ""}</span>
+          {typeof part.response === "string" ? (
+            <div className="text-xs whitespace-pre-wrap">{part.response}</div>
+          ) : (
+            <JsonTree value={part.response ?? null} openDepth={2} />
+          )}
+        </div>
+      )
+    default:
+      return (
+        <div className="font-mono text-[11px]">
+          <span className="text-faint">{part.type}</span>
+          <JsonTree value={part.value} openDepth={1} />
+        </div>
+      )
+  }
+}
+
+/** Role-labelled messages; with `fold`, the earlier inputs behind one
+ * toggle (each model call's input repeats the conversation so far). */
+function ChatMessages({
+  messages,
+  problems = [],
+  fold = false,
+}: {
+  messages: ChatMessage[]
+  problems?: string[]
+  fold?: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const lastInput = messages.reduce((n, m, i) => (m.side === "input" ? i : n), -1)
+  const hidden = fold && !open ? Math.max(0, lastInput) : 0
+  return (
+    <div className="space-y-2">
+      {hidden > 0 ? (
+        <button
+          type="button"
+          className="flex items-center gap-1 font-mono text-[11px] text-thread-ink hover:underline"
+          aria-expanded={false}
+          onClick={() => setOpen(true)}
+        >
+          <ChevronRight className="size-3" data-slot="icon" />
+          {hidden} earlier {hidden === 1 ? "message" : "messages"}
+        </button>
+      ) : null}
+      <ol className="space-y-2" aria-label="messages">
+        {messages.slice(hidden).map((m, i) => (
+          <li
+            key={i + hidden}
+            data-chat-role={m.role}
+            data-chat-side={m.side}
+            className={`max-w-2xl space-y-1 rounded-lg border px-3 py-2 ${ROLE_TONE[m.role] ?? "bg-background"}`}
+          >
+            <div className="flex items-center gap-2 font-mono text-[10px] tracking-wide text-muted-foreground uppercase">
+              <span>{m.role}</span>
+              {m.finishReason ? <span className="normal-case">· {m.finishReason}</span> : null}
+            </div>
+            {m.parts.length ? (
+              m.parts.map((p, j) => <PartView key={j} part={p} />)
+            ) : (
+              <span className="font-mono text-[11px] text-faint">(no parts)</span>
+            )}
+          </li>
+        ))}
+      </ol>
+      {problems.map((p) => (
+        <p key={p} className="font-mono text-[11px] text-status-bad">
+          {p} — the raw value is in the attributes
+        </p>
+      ))}
+    </div>
+  )
+}
+
+/** The GenAI chat view: one block per GenAI span, its messages drawn
+ * from either key family, or the honesty line when it carries none. */
+function GenAIConversation({ spans }: { spans: TimedSpan[] }) {
   const rows = spans
     .slice()
     .sort((a, b) => Date.parse(a.start) - Date.parse(b.start))
   return (
-    <div className="space-y-2">
+    <div className="space-y-4">
       {rows.map((sp) => {
-        const prompt = attrText(sp.attrs, PROMPT_KEYS)
-        const completion = attrText(sp.attrs, COMPLETION_KEYS)
-        const runID =
-          typeof sp.attrs["weft.run.id"] === "string"
-            ? (sp.attrs["weft.run.id"])
-            : null
+        const chat = genaiChat(sp.attrs)
+        if (!chat.family && !isModelCall(sp.attrs)) return null
+        const runID = typeof sp.attrs["weft.run.id"] === "string" ? sp.attrs["weft.run.id"] : null
         return (
-          <div key={sp.span_id} className="space-y-1">
+          <section key={sp.span_id} className="space-y-1" aria-label={sp.name} data-chat-span={sp.span_id}>
             <div className="flex flex-wrap items-center gap-2 font-mono text-[11px] text-faint">
               <span className="text-foreground">{sp.name}</span>
               <span>{String(sp.attrs["gen_ai.operation.name"] ?? "")}</span>
               <span>{spanMs(Date.parse(sp.end) - Date.parse(sp.start))}</span>
               {runID ? (
-                <Link
-                  {...runLink(runID)}
-                  className="text-thread-ink hover:underline"
-                >
+                <Link {...runLink(runID)} className="text-thread-ink hover:underline">
                   {runID}
                 </Link>
               ) : null}
             </div>
-            {prompt ? (
-              <div className="max-w-2xl rounded-lg border bg-secondary/50 px-3 py-2 text-xs whitespace-pre-wrap">
-                {prompt}
-              </div>
-            ) : null}
-            {completion ? (
-              <div className="max-w-2xl rounded-lg border border-thread/30 bg-thread/5 px-3 py-2 text-xs whitespace-pre-wrap">
-                {completion}
-              </div>
-            ) : null}
-            {!prompt && !completion ? (
-              <p className="font-mono text-[11px] text-faint">
-                no captured content (capture was off, or this app emits
-                attributes Studio does not read)
-              </p>
-            ) : null}
-          </div>
+            {chat.family ? (
+              <ChatMessages messages={chat.messages} problems={chat.problems} fold />
+            ) : (
+              <HoleBadge hole="not_recorded" reason={NO_MESSAGES_REASON} />
+            )}
+          </section>
         )
       })}
       {rows.length === 0 ? (

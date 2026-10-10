@@ -10,6 +10,20 @@ module, ADR 0005).
 
 ### Added
 
+- Studio's trace page (plan H7): every selection is a URL — `?sel=` the
+  row's step-qualified key (`r:<run>`, `s<step>`, `c:<step>:<call id>`,
+  run-qualified `s:<run>:<step>` / `c:<run>:<step>:<call id>` when the
+  trace holds several runs, `t:<span id>` otherwise; `traceSelectionLink`),
+  each row's label a link; a pre-G1 bare `c:<call id>` lands on the first
+  match with a note when the id repeats, a pre-H7 `?span=` still selects.
+  A model call's chat section reads `gen_ai.input.messages` /
+  `gen_ai.output.messages` (+ `gen_ai.system_instructions`) and the legacy
+  `gen_ai.prompt` / `gen_ai.completion` keys (plain and `.N.role|content`
+  indexed), else says `not_recorded`; an errored chat span of a playground
+  run offers "replay from this step" in the run page's drawer (capability
+  `playground`, a token that may act; the app's own run gets it disabled,
+  saying why); the header lists the trace's root, service, start, error
+  and its runs, linked.
 - Studio (plan A6.2): the step card's **Wire** tab — beside the Request
   pane's request tab, each attempt's provider request and response from
   the requests row's `raw` (method, URL, headers, the body pretty-printed

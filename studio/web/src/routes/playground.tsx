@@ -69,6 +69,7 @@ import type { EditDraft, Engine, SideEffects, ThreadMode, VariantFields } from "
 import { relativeTime, spanMs } from "@/lib/format"
 import { copyText, download } from "@/lib/json"
 import { mayProposeWith, PROPOSAL_NEEDS_DEV } from "@/lib/saves"
+import { mintExperimentID, validExperimentID } from "@/lib/experiments"
 import { keepPrompt } from "@/components/studio/saves"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { RUNTIMES_POLL_MS } from "@/hooks/use-notices"
@@ -447,6 +448,10 @@ function Playground({ caps }: { caps: string[] }) {
    * continues from. */
   const [matrixRows, setMatrixRows] = useState<{ key: string; text: string }[]>([{ key: "1", text: "" }])
   const [matrixName, setMatrixName] = useState("")
+  /** The id the matrix's form was saved under (a cloned or reopened
+   * experiment's): kept until the name is edited (lib/experiments.ts's
+   * rule; a renamed matrix mints its own). */
+  const [matrixID, setMatrixID] = useState("")
   const [matrixFromStep, setMatrixFromStep] = useState(0)
 
   // The form's draft (plan F5): its id is minted per page, or the
@@ -643,6 +648,7 @@ function Playground({ caps }: { caps: string[] }) {
     setRuntimeChoice(form.runtime ?? "")
     setMatrixRows(form.matrix?.inputs.length ? form.matrix.inputs : [{ key: "1", text: "" }])
     setMatrixName(form.matrix?.name ?? "")
+    setMatrixID(form.matrix?.id ?? "")
     setMatrixFromStep(form.matrix?.from_step ?? 0)
     writeRef.current({
       run: form.run ?? "",
@@ -703,7 +709,7 @@ function Playground({ caps }: { caps: string[] }) {
     run: sourceRunID.trim() || undefined,
     step: fromStep,
     edits: editDrafts,
-    matrix: { name: matrixName.trim() || undefined, from_step: matrixFromStep, inputs: matrixRows },
+    matrix: { name: matrixName.trim() || undefined, id: matrixID || undefined, from_step: matrixFromStep, inputs: matrixRows },
   })
   const formJSON = JSON.stringify(form)
   const formRef = useRef(form)
@@ -904,7 +910,10 @@ function Playground({ caps }: { caps: string[] }) {
    * rest still run, so nothing issued is ever missing from the grid. */
   const runMatrix = async (
     inputs: { key: string; text: string }[],
+    /** The id (command_id's rule, lib/experiments.ts) and the name as
+     * typed: the name is never sent as the id. */
     experimentID: string,
+    experimentName: string,
     /** The step every cell continues from (plan F5: one number for the
      * whole matrix, source.from_step's ordinal). */
     matrixStep: number,
@@ -914,6 +923,10 @@ function Playground({ caps }: { caps: string[] }) {
   ) => {
     setError("")
     if (!runtime || !agent || busy) return
+    if (!validExperimentID(experimentID)) {
+      setError(`experiment id ${experimentID} breaks the rule [A-Za-z0-9._:-]{1,128}`)
+      return
+    }
     if (inputs.length === 0) {
       setError("the matrix needs at least one input — or a source run, whose own turn an empty row re-runs")
       return
@@ -942,11 +955,20 @@ function Playground({ caps }: { caps: string[] }) {
               cellCommandID(v.key, i.key, v.sideEffects)
             ),
           })
+      // The whole command (F5.1): the modes per variant, the step and
+      // the source — so the experiment reopens exactly.
       definition = {
         id: experimentID,
-        name: experimentID,
+        name: experimentName.trim() || experimentID,
         agent: agent.name,
-        variants: variants.map((v) => ({ key: v.key, overrides: overridesOf(v, agent) })),
+        variants: variants.map((v) => ({
+          key: v.key,
+          overrides: overridesOf(v, agent),
+          engine: v.engine,
+          side_effects: v.sideEffects,
+          thread: v.thread,
+        })),
+        ...(sourceRunID ? { source_run_id: sourceRunID, from_step: matrixStep } : { from_step: 0 }),
         inputs: inputs.map((i) => ({
           key: i.key,
           ...(sourceRunID ? { source_run_id: sourceRunID } : {}),
@@ -962,13 +984,16 @@ function Playground({ caps }: { caps: string[] }) {
     try {
       await postExperiment(definition)
       onSaved?.()
-      // This browser keeps the form the matrix ran (lib/drafts.ts):
-      // the experiment page clones from it exactly — the definition
-      // keeps neither the modes nor the step.
+      // This browser keeps the form the matrix ran (lib/drafts.ts);
+      // the definition now keeps the whole command too (F5.1), so the
+      // experiment page reopens it exactly in any browser.
       void saveDraft(
         experimentDraftID(experimentID),
-        { ...formRef.current, matrix: { ...(formRef.current.matrix ?? { inputs }), name: experimentID } },
-        { kind: "experiment", label: experimentID }
+        {
+          ...formRef.current,
+          matrix: { ...(formRef.current.matrix ?? { inputs }), name: experimentName.trim() || experimentID, id: experimentID },
+        },
+        { kind: "experiment", label: experimentName.trim() || experimentID }
       )
       // A new matrix replaces the grid: the keys are the same cells.
       setCells({})
@@ -1285,7 +1310,11 @@ function Playground({ caps }: { caps: string[] }) {
             inputs={matrixRows}
             setInputs={setMatrixRows}
             name={matrixName}
-            setName={setMatrixName}
+            setName={(v) => {
+              setMatrixName(v)
+              setMatrixID("")
+            }}
+            savedID={matrixID}
             fromStep={matrixFromStep}
             setFromStep={setMatrixFromStep}
             runMatrix={runMatrix}
@@ -1906,6 +1935,7 @@ function Matrix({
   setInputs,
   name,
   setName,
+  savedID,
   fromStep,
   setFromStep,
   runMatrix,
@@ -1924,11 +1954,14 @@ function Matrix({
   setInputs: Dispatch<SetStateAction<{ key: string; text: string }[]>>
   name: string
   setName: (v: string) => void
+  /** The id the form carries (a reopened experiment's), else "". */
+  savedID: string
   fromStep: number
   setFromStep: (n: number) => void
   runMatrix: (
     inputs: { key: string; text: string }[],
     experimentID: string,
+    experimentName: string,
     fromStep: number,
     onSaved?: () => void
   ) => Promise<void>
@@ -1954,7 +1987,11 @@ function Matrix({
   // The default id is minted once per page, not per render: the id on
   // screen is the one the matrix is saved under.
   const [stamp] = useState(() => new Date().toISOString().slice(0, 19))
-  const experimentID = name.trim() || `exp_${stamp}`
+  const [nonce] = useState(() => Math.random().toString(36).slice(2, 8))
+  // The id is minted, never the typed name sent raw (POST
+  // /api/experiments and experiment_id take command_id's rule): a saved
+  // id the form carries, else lib/experiments.ts's mintExperimentID.
+  const experimentID = validExperimentID(savedID) ? savedID : mintExperimentID(name, stamp, nonce)
   /** Bumped after every poll, so the next one is scheduled even when
    * nothing changed. */
   const [polled, setPolled] = useState(0)
@@ -2107,7 +2144,7 @@ function Matrix({
               disabled={busy}
               onClick={() => {
                 const id = experimentID
-                void runMatrix(matrixInputs(inputs, sourceRunID), id, fromStep, () => {
+                void runMatrix(matrixInputs(inputs, sourceRunID), id, name, fromStep, () => {
                   issued.current = id
                 })
               }}

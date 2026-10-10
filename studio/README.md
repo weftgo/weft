@@ -1128,7 +1128,14 @@ cost. `/experiments/{id}` draws the variants × inputs grid, each cell its
 latest run with status and cost. From there you can re-run one cell or all
 of them under the same experiment id, compare two cells on the compare page,
 or "clone into the form", which reopens the playground on a draft holding the
-matrix's form. "Its runs" opens `/runs?experiment_id=<id>`. The playground
+matrix's form — exactly, in any browser: the experiment saves the whole
+command (engine, side effects and thread per variant, `from_step`, the source
+run, transcript edits), and only a definition saved before that is read back
+from its runs. The matrix's name is free text; its id follows command_id's
+rule (`[A-Za-z0-9._:-]{1,128}`): a name that fits is its own id, any other is
+slugged with a nonce, an empty one is `exp_<time>`, and a reopened experiment
+keeps its id until you rename it. "Its runs" opens
+`/runs?experiment_id=<id>`, which `/api/runs` filters. The playground
 keeps your form as a draft in this browser once you change it. `?exp=<draft
 id>` reopens it, and the drafts list opens or deletes the others. Drafts
 never leave the browser. "Copy share link" carries the whole form in the URL
@@ -1136,7 +1143,10 @@ fragment (`#state=`, no token, at most 8,000 characters encoded). It opens
 against the same Studio, restores the form, and runs nothing. A matrix runs
 every cell from its own `from_step`, the source run's step ordinal; past
 step 0 the rows' text is not sent. When its last cell settles, one toast says
-how many succeeded and failed, with the bill when pricing is on.
+how many succeeded and failed, with the bill when pricing is on (an
+experiment page's "re-run all" re-reads the experiment at most three times
+for a run not yet listed, then says "cost not read yet"). A share link's
+value is refused past 8,000 characters, or when it inflates past 256 KiB.
 
 The option lab (plan F3) is one form on both surfaces — Studio's
 experiment form (the playground page and the replay drawer) and the

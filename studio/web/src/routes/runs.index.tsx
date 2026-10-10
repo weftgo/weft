@@ -621,14 +621,9 @@ function RunsPage() {
       {local.length > 0 ? (
         <p className="font-mono text-[11px] text-faint" data-local-filters>
           {local.join(", ").replaceAll("min_", "")} filtered over the loaded rows only
-          {local.some((k) => k !== "min_duration" && k !== "experiment_id")
+          {local.some((k) => k !== "min_duration")
             ? ` — this Studio cannot search${why("search") ? ` (${why("search")})` : ""}`
-            : ` — the API has no ${[
-                local.includes("min_duration") ? "duration" : "",
-                local.includes("experiment_id") ? "experiment" : "",
-              ]
-                .filter(Boolean)
-                .join(" or ")} filter`}
+            : " — the API has no duration filter"}
           : load more to filter more
         </p>
       ) : null}

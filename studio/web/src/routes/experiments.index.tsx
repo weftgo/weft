@@ -1,17 +1,16 @@
 // The saved experiments (plan F5): every matrix the playground saved
 // (GET /api/experiments, studio/experiments.go) — its id and name, the
-// agent, its size (variants × inputs) and, from each experiment's own
-// document (GET /api/experiments/{id}: the list carries neither dates
-// nor runs), when it was made, how many runs it holds and their whole
-// bill, own + delegated, under capability "pricing". Each row opens the
-// experiment's page. Capability-gated on "playground", whose routes
-// these are.
-import { useQueries, useQuery } from "@tanstack/react-query"
+// agent, its size (variants × inputs), when it was made, how many runs
+// it holds and their whole bill, own + delegated, under capability
+// "pricing" — all on the list row itself (F5.1: created, run_count and
+// the cost block), no per-row read. Each row opens the experiment's
+// page. Capability-gated on "playground", whose routes these are.
+import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 
-import { experimentQuery, experimentsQuery } from "@/lib/api"
+import { experimentsQuery } from "@/lib/api"
 import { absoluteTime, relativeTime } from "@/lib/format"
-import { sumCost } from "@/lib/cost"
+import { costView } from "@/lib/cost"
 import { experimentLink, playgroundLink } from "@/lib/links"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { useDocumentTitle } from "@/hooks/use-document-title"
@@ -22,10 +21,6 @@ import { NoExperiments } from "@/components/studio/no-experiments"
 export const Route = createFileRoute("/experiments/")({
   component: ExperimentsPage,
 })
-
-/** How many experiments the list reads the documents of (each one GET
- * /api/experiments/{id}): the rest are listed without dates or runs. */
-export const EXPERIMENT_DETAILS = 50
 
 function ExperimentsPage() {
   useDocumentTitle({ page: "experiments" })
@@ -39,9 +34,6 @@ function ExperimentList() {
   const list = useQuery(experimentsQuery())
   const rows = list.data?.experiments ?? []
   const costCapable = useCostCapable()
-  const details = useQueries({
-    queries: rows.slice(0, EXPERIMENT_DETAILS).map((e) => experimentQuery(e.id)),
-  })
   return (
     <section className="space-y-3 p-4" aria-labelledby="experiments-title">
       <header className="flex flex-wrap items-baseline gap-2">
@@ -79,9 +71,7 @@ function ExperimentList() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((e, i) => {
-                const doc = i < EXPERIMENT_DETAILS ? details[i]?.data : undefined
-                const runs = doc?.runs ?? []
+              {rows.map((e) => {
                 return (
                   <TableRow key={e.id} data-experiment-row={e.id}>
                     <TableCell>
@@ -92,17 +82,17 @@ function ExperimentList() {
                     </TableCell>
                     <TableCell className="text-xs">{e.agent || "—"}</TableCell>
                     <TableCell className="text-xs text-muted-foreground">
-                      {doc?.created ? <span title={absoluteTime(doc.created)}>{relativeTime(doc.created)}</span> : "—"}
+                      {e.created ? <span title={absoluteTime(e.created)}>{relativeTime(e.created)}</span> : "—"}
                     </TableCell>
                     <TableCell className="font-mono text-xs">
                       {e.variants.length} × {e.inputs.length}
                     </TableCell>
                     <TableCell className="text-right font-mono text-xs" data-experiment-runs>
-                      {doc ? runs.length : "—"}
+                      {e.run_count ?? "—"}
                     </TableCell>
                     {costCapable ? (
                       <TableCell className="text-right text-xs" data-experiment-cost>
-                        {doc && runs.length ? <CostText v={sumCost(runs)} /> : <span className="text-faint">—</span>}
+                        {e.run_count ? <CostText v={costView(e)} /> : <span className="text-faint">—</span>}
                       </TableCell>
                     ) : null}
                   </TableRow>
@@ -112,11 +102,6 @@ function ExperimentList() {
           </Table>
         </div>
       )}
-      {rows.length > EXPERIMENT_DETAILS ? (
-        <p className="text-xs text-faint">
-          the first {EXPERIMENT_DETAILS} experiments show their dates, runs and cost; open an experiment for the rest
-        </p>
-      ) : null}
     </section>
   )
 }

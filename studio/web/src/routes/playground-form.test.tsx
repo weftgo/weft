@@ -13,6 +13,7 @@ import { decodeForm, encodeForm, parseCellCommandID } from "@/lib/form-state"
 import type { FormState } from "@/lib/form-state"
 import { playgroundShareLink, path } from "@/lib/links"
 import { resetNotices } from "@/lib/notify"
+import { EXPERIMENT_ID_RE } from "@/lib/experiments"
 import { nextVariantKey, variantKeyProblem } from "@/routes/playground"
 import { renderApp, stubBrowser } from "@/test/app"
 import { priced, rOK } from "@/test/experiment-fixture"
@@ -267,7 +268,55 @@ describe("the matrix (plan F5)", () => {
     // This browser keeps the form the matrix ran, under its id.
     await waitFor(async () => expect((await listDrafts("experiment")).map((d) => d.id)).toEqual(["exp:exp_step"]))
     const kept = (await listDrafts("experiment"))[0].form
-    expect(kept.matrix).toEqual({ name: "exp_step", from_step: 2, inputs: [{ key: "1", text: "" }] })
+    expect(kept.matrix).toEqual({ name: "exp_step", id: "exp_step", from_step: 2, inputs: [{ key: "1", text: "" }] })
+    // The definition saves the whole command (F5.1).
+    expect(studio.calls("POST experiments")[0].body).toMatchObject({
+      id: "exp_step",
+      name: "exp_step",
+      source_run_id: "r_ok",
+      from_step: 2,
+      variants: [
+        { key: "A", engine: "live", side_effects: "substitute", thread: "ephemeral" },
+        { key: "B", engine: "live", side_effects: "substitute", thread: "ephemeral" },
+      ],
+    })
+  })
+
+  it("a name with spaces or a slash saves under a minted id that fits the rule, the name kept as typed", async () => {
+    studio.on("POST experiments", (req) => req.body).on("POST playground/runs", command("cmd_n1", "queued"))
+    renderApp("/playground?run=r_ok")
+    await waitFor(() => expect(valueOf(screen.getByLabelText("agent"))).toBe("orders"))
+    fireEvent.change(screen.getByLabelText("experiment name"), { target: { value: "tone / brevity test" } })
+    const go = screen.getByRole("button", { name: "Run matrix" })
+    await waitFor(() => expect(go).toHaveProperty("disabled", false))
+    fireEvent.click(go)
+    await waitFor(() => expect(studio.calls("POST playground/runs")).toHaveLength(1))
+    const def = studio.calls("POST experiments")[0].body as { id: string; name: string }
+    expect(def.name).toBe("tone / brevity test")
+    expect(def.id).toMatch(/^tone-brevity-test_[a-z0-9]+$/)
+    expect(def.id).toMatch(EXPERIMENT_ID_RE)
+    expect((studio.calls("POST playground/runs")[0].body as PlaygroundRunBody).experiment_id).toBe(def.id)
+    expect(screen.getByLabelText<HTMLInputElement>("experiment name").value).toBe("tone / brevity test")
+  })
+
+  it("a link's id that breaks the rule is re-minted; a valid one is re-run under, the name shown as typed", async () => {
+    studio.on("POST experiments", (req) => req.body).on("POST playground/runs", () => command("cmd_r1", "queued"))
+    const bad = await encodeForm({ ...shared, matrix: { name: "tone test", id: "bad id/x", inputs: [{ key: "1", text: "hi" }] } })
+    renderApp(`/${path(playgroundShareLink(bad.value))}`)
+    await waitFor(() => expect(screen.getByLabelText<HTMLInputElement>("experiment name").value).toBe("tone test"))
+    let go = screen.getByRole("button", { name: "Run matrix" })
+    await waitFor(() => expect(go).toHaveProperty("disabled", false))
+    fireEvent.click(go)
+    await waitFor(() => expect(studio.calls("POST experiments")).toHaveLength(1))
+    expect((studio.calls("POST experiments")[0].body as { id: string }).id).toMatch(/^tone-test_[a-z0-9]+$/)
+    const good = await encodeForm({ ...shared, matrix: { name: "tracking link", id: "exp_g", inputs: [{ key: "1", text: "hi" }] } })
+    renderApp(`/${path(playgroundShareLink(good.value))}`)
+    await waitFor(() => expect(screen.getByLabelText<HTMLInputElement>("experiment name").value).toBe("tracking link"))
+    go = screen.getByRole("button", { name: "Run matrix" })
+    await waitFor(() => expect(go).toHaveProperty("disabled", false))
+    fireEvent.click(go)
+    await waitFor(() => expect(studio.calls("POST experiments")).toHaveLength(2))
+    expect(studio.calls("POST experiments")[1].body).toMatchObject({ id: "exp_g", name: "tracking link" })
   })
 
   it("its toast says the cells' bill once their rows are read", async () => {

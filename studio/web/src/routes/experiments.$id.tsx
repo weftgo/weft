@@ -10,7 +10,8 @@
 // matrix's runs are placed by issue order when they fill the grid
 // exactly, and listed apart otherwise. The form a clone opens is this
 // browser's record of the matrix as it ran (lib/drafts.ts) when there
-// is one, else the definition with its modes read back from the runs
+// is one, else the definition: its saved command (F5.1), or — for a
+// definition saved before it — its modes read back from the runs
 // (formFromExperiment).
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
@@ -67,6 +68,10 @@ function sameShape(form: FormState, exp: ExperimentRow): boolean {
  * run is in flight. */
 const POLL_MS = 1500
 
+/** How many times the matrix notice re-reads the experiment for a
+ * settled run not yet listed under it, before it goes without the cost. */
+export const COST_WAITS = 3
+
 function Experiment({ id, caps }: { id: string; caps: string[] }) {
   const qc = useQueryClient()
   const navigate = useNavigate()
@@ -95,7 +100,8 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
   }, [id])
   const form = useMemo(() => {
     if (!exp) return null
-    if (kept && sameShape(kept, exp)) return { form: { ...kept, matrix: { ...kept.matrix!, name: exp.id } }, from: "browser" as const }
+    if (kept && sameShape(kept, exp))
+      return { form: { ...kept, matrix: { ...kept.matrix!, name: exp.name || exp.id, id: exp.id } }, from: "browser" as const }
     return { form: formFromExperiment(exp), from: "definition" as const }
   }, [exp, kept])
   const placed = useMemo(() => (exp ? placeRuns(exp) : null), [exp])
@@ -156,6 +162,8 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
   // A "re-run all" raises one notice when its last cell settles (plan
   // H5's matrix notice), with the bill once every new run is read.
   const batch = useRef<{ keys: string[] } | null>(null)
+  /** The experiment re-reads the notice spent waiting for its runs. */
+  const costWaits = useRef(0)
   useEffect(() => {
     const b = batch.current
     if (!b || !exp) return
@@ -163,7 +171,15 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
     if (all.length !== b.keys.length || all.some((c) => !settled(c.state))) return
     const rows = all.map((c) => (c.runID ? exp.runs?.find((r) => r.id === c.runID) : undefined))
     const ran = all.filter((c) => c.runID)
-    if (costCapable && ran.some((c) => !exp.runs?.some((r) => r.id === c.runID))) return
+    // A run not yet listed under the label: read the experiment again,
+    // at most COST_WAITS times — then the notice goes without the cost,
+    // never held forever by a run that never shows.
+    const unread = costCapable && ran.some((c) => !exp.runs?.some((r) => r.id === c.runID))
+    if (unread && costWaits.current < COST_WAITS) {
+      costWaits.current++
+      void qc.invalidateQueries({ queryKey: experimentQuery(id).queryKey })
+      return
+    }
     const finished = all.filter((c) => c.state === "finished")
     const failed = finished.filter((c) => c.status === "failed").length
     const total = costCapable ? sumCost(rows.filter((r): r is RunRow => !!r)) : null
@@ -175,9 +191,14 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
       succeeded: finished.length - failed,
       failed,
       other: all.length - finished.length,
-      ...(total?.known && typeof total.usd === "number" ? { cost: formatUSD(total.usd) } : {}),
+      ...(unread
+        ? { cost: "cost not read yet" }
+        : total?.known && typeof total.usd === "number"
+          ? { cost: formatUSD(total.usd) }
+          : {}),
     })
-  }, [issued, exp, costCapable])
+    // dataUpdatedAt: a refetch that returns the same rows is still a read.
+  }, [issued, exp, costCapable, q.dataUpdatedAt, qc, id])
 
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
@@ -210,6 +231,7 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
     if (!exp) return
     const keys = exp.variants.flatMap((v) => exp.inputs.map((i) => ({ variant: v.key, input: i.key })))
     batch.current = { keys: keys.map((k) => cellKey(k.variant, k.input)) }
+    costWaits.current = 0
     void rerun(keys)
   }
 

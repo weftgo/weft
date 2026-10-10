@@ -166,22 +166,20 @@ describe("the loaded rows answer what the list cannot", () => {
     expect(runChips(s, ALL)[0].note).toBe("the loaded rows only")
   })
 
-  it("experiment_id (plan F5): a URL chip, playground runs asked of both lists, the loaded rows narrowed here", () => {
+  it("experiment_id (plan F5, F5.1): a URL chip the API applies, playground runs asked of both lists", () => {
     const s = validateRunsSearch({ experiment_id: "exp_tone" })
     expect(s.experiment_id).toBe("exp_tone")
     const chips = runChips(s, ALL)
-    expect(chips).toEqual([
-      { key: "experiment_id", label: "experiment exp_tone", applied: true, note: "the loaded rows only" },
-    ])
+    expect(chips).toEqual([{ key: "experiment_id", label: "experiment exp_tone", applied: true }])
     expect(removeChip(s, chips[0])).toEqual({ experiment_id: undefined })
     expect(CLEARED).toHaveProperty("experiment_id", undefined)
     // Both lists are asked for the experiment's playground runs.
     expect(filtersFromSearchOf(s)).toMatchObject({ experiment_id: "exp_tone", playground: true })
     expect(searchFiltersFrom({ ...s, q: "x" }, ALL)).toMatchObject({ experiment_id: "exp_tone", playground: true })
-    // A Studio that ignores the key answers every run: the rows say.
+    // The API filters (F5.1): the loaded rows are not narrowed again.
     const mine = { ...runs[0], id: "pg_1", experiment_id: "exp_tone" }
-    expect(applyLocal([mine, ...runs], s, ALL, now).map((r) => r.id)).toEqual(["pg_1"])
-    expect(localKeys(s, NONE)).toEqual(["experiment_id"])
+    expect(applyLocal([mine, ...runs], s, ALL, now)).toHaveLength(runs.length + 1)
+    expect(localKeys(s, NONE)).toEqual([])
     expect(runsLink({ experiment_id: "exp_tone" })).toEqual({ to: "/runs", search: { experiment_id: "exp_tone" } })
   })
 

@@ -3,12 +3,14 @@
 // saved experiment read back as the form, and the one-cell re-run.
 import { describe, expect, it, vi } from "vitest"
 
-import type { AgentView } from "./api"
+import type { AgentView, ExperimentRow } from "./api"
+import { golden } from "@/test/fake-studio"
 import { emptyLab, overridesOf } from "./experiment-body"
 import {
   cellBody,
   cellCommandID,
   cellKey,
+  DECODE_CAP,
   decodeForm,
   encodeForm,
   FORM_VERSION,
@@ -68,6 +70,26 @@ describe("the share link (#state=)", () => {
     const enc = await encodeForm(big)
     expect(enc.value.length).toBeGreaterThan(SHARE_CAP)
     expect(enc.tooLong).toBe(true)
+  })
+
+  it("a value longer than a share link carries is refused unread", async () => {
+    expect(await decodeForm("j" + "A".repeat(SHARE_CAP))).toBeNull()
+  })
+
+  it("a deflate bomb is cut off past DECODE_CAP, before it is parsed", async () => {
+    // A long run of zeros deflates ~1000:1: a short value, a huge body.
+    const zeros = new Uint8Array(DECODE_CAP * 4)
+    const cs = new CompressionStream("deflate-raw")
+    const z = new Uint8Array(await new Response(new Response(zeros).body!.pipeThrough(cs)).arrayBuffer())
+    let bin = ""
+    for (const b of z) bin += String.fromCharCode(b)
+    const value = "z" + btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+    expect(value.length).toBeLessThan(SHARE_CAP)
+    const parse = vi.spyOn(JSON, "parse")
+    expect(await decodeForm(value)).toBeNull()
+    // Nothing the size of the inflated body reached the parser.
+    expect(parse.mock.calls.some(([t]) => typeof t === "string" && t.length >= DECODE_CAP)).toBe(false)
+    parse.mockRestore()
   })
 
   it("a damaged, cut, foreign or newer value reads as nothing", async () => {
@@ -202,12 +224,48 @@ describe("a saved experiment read back", () => {
       ],
       matrix: {
         name: "exp_tone",
+        id: "exp_tone",
         from_step: 1,
         inputs: [
           { key: "1", text: "where is 42?" },
           { key: "2", text: "" },
         ],
       },
+    })
+  })
+
+  it("prefers the saved command (F5.1) over what the runs say, per field", () => {
+    const saved = golden<ExperimentRow>("experiment")
+    const f = formFromExperiment(saved)
+    // The golden's runs say nothing a heuristic could read; the command does.
+    expect(f.matrix).toMatchObject({ name: "tracking link", id: "exp_g", from_step: 1 })
+    expect(f.run).toBe("r_ok")
+    expect(f.variants.find((v) => v.key === "A")).toEqual({ key: "A" })
+    expect(f.variants.find((v) => v.key === "B")).toMatchObject({ engine: "scripted", side_effects: "park" })
+    expect(f.edits).toEqual([{ kind: "tool_result", step: 0, callID: "call_1", toolResult: "order 42: lost" }])
+    // A saved field wins over the runs' reading: the fixture's runs say
+    // B ran scripted and parked — the saved command says live, allow.
+    const over = formFromExperiment({
+      ...experiment,
+      engine: "live",
+      side_effects: "allow",
+      from_step: 0,
+      variants: experiment.variants.map((v) => ({ ...v, engine: "live" })),
+    })
+    expect(over.variants.find((v) => v.key === "B")).toMatchObject({ side_effects: "allow" })
+    expect(over.variants.find((v) => v.key === "B")?.engine).toBeUndefined()
+    expect(over.matrix?.from_step).toBeUndefined()
+    // Absent fields fall back to the runs (a definition before F5.1).
+    expect(formFromExperiment(experiment).variants[1]).toMatchObject({ engine: "scripted", side_effects: "park" })
+  })
+
+  it("keeps an id that fits command_id's rule and drops one that does not (re-minted)", () => {
+    const bad = formFromExperiment({ ...experiment, id: "my experiment/1", name: "my experiment/1" })
+    expect(bad.matrix?.name).toBe("my experiment/1")
+    expect(bad.matrix?.id).toBeUndefined()
+    expect(validateForm({ ...form, matrix: { inputs: [{ key: "1", text: "" }], name: "a b", id: "a b" } })?.matrix).toEqual({
+      inputs: [{ key: "1", text: "" }],
+      name: "a b",
     })
   })
 

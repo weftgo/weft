@@ -128,8 +128,7 @@ export function filtersFromSearch(s: RunsSearch): RunsFilters {
   if (s.public_id) filters.public_id = s.public_id
   if (s.experiments) filters.playground = s.experiments === "on"
   // An experiment's runs are playground runs (plan F5): the server
-  // narrows to those, and experiment_id rides along for a Studio that
-  // reads it.
+  // filters by experiment_id (F5.1), within the playground runs.
   if (s.experiment_id) {
     filters.experiment_id = s.experiment_id
     if (!s.experiments) filters.playground = true
@@ -210,16 +209,14 @@ export function runDurationMs(r: Pick<RunRow, "started" | "finished">, now = Dat
 
 const tokensOf = (r: RunRow) => r.usage.input_tokens + r.usage.output_tokens
 
-/** localKeys is the filters the loaded rows answer here: duration and
- * experiment_id always (/api/runs and /api/search have neither — a
- * Studio that reads experiment_id narrows first, and this is then a
- * no-op), and search's own when the Studio cannot search (text and
- * tool cannot be: a row carries neither). */
+/** localKeys is the filters the loaded rows answer here: duration
+ * always (/api/runs and /api/search have none), and search's own when
+ * the Studio cannot search (text and tool cannot be: a row carries
+ * neither). experiment_id is the API's (F5.1). */
 export function localKeys(search: RunsSearch, caps: FilterCaps): (keyof RunsSearch)[] {
   const s = usable(search)
   const keys: (keyof RunsSearch)[] = []
   if (s.min_duration !== undefined) keys.push("min_duration")
-  if (s.experiment_id !== undefined) keys.push("experiment_id")
   if (!caps.search) {
     for (const k of ["model", "error", "since", "until", "min_tokens"] as const) if (s[k] !== undefined) keys.push(k)
     if (caps.pricing && s.min_cost !== undefined) keys.push("min_cost")
@@ -240,7 +237,6 @@ export function applyLocal(runs: RunRow[], search: RunsSearch, caps: FilterCaps,
     const err = s.error?.toLowerCase()
     out = runs.filter((r) => {
       if (keys.has("min_duration") && runDurationMs(r, now) < (s.min_duration ?? 0) * 1000) return false
-      if (keys.has("experiment_id") && r.experiment_id !== s.experiment_id) return false
       if (keys.has("model") && r.model.name !== s.model) return false
       if (keys.has("error") && !r.err.toLowerCase().includes(err ?? "")) return false
       if (since !== undefined && Date.parse(r.started) < since) return false

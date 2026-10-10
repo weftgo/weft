@@ -7,8 +7,11 @@
 //
 // A saved experiment (GET /api/experiments/{id}, studio/experiments.go)
 // keeps its name, agent, variants (key + the overrides object the
-// command sent) and inputs (key, source run, text) — not the modes or
-// the step. Those are read back from the experiment's runs:
+// command sent) and inputs (key, source run, text) and — since F5.1 —
+// the command itself: engine, side_effects, thread (per variant where
+// they differ), from_step, source_run_id and transcript_edits, which
+// reopen it exactly. A definition saved before F5.1 has none of them:
+// they are then read back from the experiment's runs:
 // from_step from weft.forked_from ("<run>#<step>"), the engine from the
 // run's model (weft/runtime · scripted), the thread mode from a session
 // id (fork mode writes one), and the side-effect mode from the cell's
@@ -18,7 +21,7 @@ import type { ExperimentRow, PlaygroundRunBody, RunRow, ToolChoiceWire } from ".
 import type { ReplayEdit } from "./edits"
 import type { Engine, LabFields, SideEffects, ThreadMode, VariantFields } from "./experiment-body"
 import { editsFromHandoff, emptyLab } from "./experiment-body"
-import { forkSource } from "./experiments"
+import { forkSource, validExperimentID } from "./experiments"
 
 /** The form's format version: a newer one is refused, never guessed. */
 export const FORM_VERSION = 1
@@ -63,8 +66,11 @@ export interface FormState {
   edits?: ReplayEdit[]
   variants: FormVariant[]
   matrix?: {
-    /** The matrix's name — its experiment id. */
+    /** The matrix's name, as typed (free text). */
     name?: string
+    /** The experiment id it is saved under (lib/experiments.ts's rule;
+     * one that breaks it is dropped and re-minted). */
+    id?: string
     /** The step every cell continues from (an ordinal; 0 the whole turn). */
     from_step?: number
     inputs: FormInput[]
@@ -146,6 +152,8 @@ export function validateForm(o: unknown): FormState | null {
       out.matrix = { inputs }
       const name = text(o.matrix.name)
       if (name) out.matrix.name = name
+      const id = text(o.matrix.id)
+      if (validExperimentID(id)) out.matrix.id = id
       const fs = ordinal(o.matrix.from_step)
       if (fs) out.matrix.from_step = fs
     }
@@ -168,7 +176,7 @@ export function formOfFields(p: {
   run?: string
   step?: number
   edits?: ReplayEdit[]
-  matrix?: { name?: string; from_step?: number; inputs: FormInput[] }
+  matrix?: { name?: string; id?: string; from_step?: number; inputs: FormInput[] }
 }): FormState {
   const form: FormState = {
     v: FORM_VERSION,
@@ -196,6 +204,7 @@ export function formOfFields(p: {
   if (p.matrix) {
     form.matrix = { inputs: p.matrix.inputs.map((i) => ({ key: i.key, text: i.text })) }
     if (p.matrix.name) form.matrix.name = p.matrix.name
+    if (validExperimentID(p.matrix.id)) form.matrix.id = p.matrix.id
     if (p.matrix.from_step) form.matrix.from_step = p.matrix.from_step
   }
   return form
@@ -273,13 +282,54 @@ export async function encodeForm(
   return { value, codec: z ? "z" : "j", tooLong: value.length > SHARE_CAP }
 }
 
+/** The most bytes a #state= value inflates to: a form is a few KiB, so
+ * a value that inflates past this (a deflate bomb in a hand-built link)
+ * is refused before it is parsed. */
+export const DECODE_CAP = 256 * 1024
+
+/** inflateBounded inflates deflate-raw bytes, counting what comes out
+ * and cancelling past cap: null when it passes, or the platform has no
+ * DecompressionStream, or the bytes are not deflate. */
+async function inflateBounded(bytes: Uint8Array, cap: number): Promise<Uint8Array | null> {
+  const ds = inflater()
+  if (!ds) return null
+  try {
+    const body = new Response(bytes as BlobPart).body
+    if (!body) return null
+    const reader = (body.pipeThrough(ds) as ReadableStream<Uint8Array>).getReader()
+    const chunks: Uint8Array[] = []
+    let n = 0
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      n += value.byteLength
+      if (n > cap) {
+        await reader.cancel().catch(() => undefined)
+        return null
+      }
+      chunks.push(value)
+    }
+    const out = new Uint8Array(n)
+    let at = 0
+    for (const c of chunks) {
+      out.set(c, at)
+      at += c.byteLength
+    }
+    return out
+  } catch {
+    return null
+  }
+}
+
 /** decodeForm reads a #state= value back: null when it is not one (a
- * damaged or cut link, an unknown codec, a newer version). */
+ * damaged or cut link, an unknown codec, a newer version), when it is
+ * longer than a share link carries (SHARE_CAP), or when it inflates
+ * past DECODE_CAP. */
 export async function decodeForm(value: string): Promise<FormState | null> {
-  if (!value || value.length > SHARE_CAP * 2) return null
+  if (!value || value.length > SHARE_CAP) return null
   const bytes = unb64url(value.slice(1))
   if (!bytes) return null
-  const json = value[0] === "z" ? await pipe(bytes, inflater()) : value[0] === "j" ? bytes : null
+  const json = value[0] === "z" ? await inflateBounded(bytes, DECODE_CAP) : value[0] === "j" ? bytes : null
   if (!json) return null
   try {
     return validateForm(JSON.parse(new TextDecoder().decode(json)))
@@ -427,12 +477,33 @@ function modesOf(runs: RunRow[]): Pick<FormVariant, "engine" | "side_effects" | 
   return out
 }
 
+/** editsFromWire reads §5.1's transcript_edits (lib/edits.ts's
+ * wireEdits — call_id, tool_result or content, args, index) back into
+ * the form's edits; editsFromHandoff then keeps the well-formed ones. */
+function editsFromWire(list: unknown[]): ReplayEdit[] {
+  return list.filter(isObj).map((w) => {
+    const e: ReplayEdit = { step: typeof w.step === "number" ? w.step : -1 }
+    if (typeof w.kind === "string") e.kind = w.kind as ReplayEdit["kind"]
+    if (typeof w.call_id === "string") e.callID = w.call_id
+    if (w.kind === "tool_result") {
+      const r = text(w.tool_result) ?? text(w.content)
+      if (r !== undefined) e.toolResult = r
+    } else if (typeof w.content === "string") e.content = w.content
+    if (isObj(w.args)) e.args = w.args
+    if (typeof w.index === "number") e.index = w.index
+    return e
+  })
+}
+
 /**
  * formFromExperiment is a saved experiment as the playground's form:
  * its variants (overrides read back), its inputs as the matrix's rows,
- * the source run its inputs name, the matrix's from_step and each
- * variant's modes read from its runs (newest), its name as the
- * matrix's — so Run matrix re-runs it under the same id.
+ * and the command it saved (F5.1: engine, side_effects, thread — the
+ * variant's own over the experiment's — from_step, source_run_id,
+ * transcript_edits), each field falling back, when the definition
+ * predates it, to what the runs say (modesOf, newest run); its name as
+ * the matrix's and its id kept — so Run matrix re-runs it under the
+ * same id.
  */
 export function formFromExperiment(exp: ExperimentRow): FormState {
   const { cells } = placeRuns(exp)
@@ -440,21 +511,41 @@ export function formFromExperiment(exp: ExperimentRow): FormState {
   const variants = exp.variants.map((ev) => {
     const runs = exp.inputs.flatMap((i) => cells.get(cellKey(ev.key, i.key)) ?? [])
     runs.sort((a, b) => Date.parse(a.started) - Date.parse(b.started))
-    const { from_step, ...modes } = modesOf(runs)
+    const { from_step, ...guessed } = modesOf(runs)
     if (from_step !== undefined && fromStep === undefined) fromStep = from_step
-    return { ...variantFromOverrides(ev.key, ev.overrides), ...modes }
+    const v: FormVariant = { ...variantFromOverrides(ev.key, ev.overrides) }
+    const saved = {
+      engine: pick(ev.engine ?? exp.engine, ENGINES),
+      side_effects: pick(ev.side_effects ?? exp.side_effects, SIDE_EFFECTS),
+      thread: pick(ev.thread ?? exp.thread, THREADS),
+    }
+    // A saved default is left out of the form (absent is the default).
+    const engine = saved.engine ?? guessed.engine
+    if (engine && engine !== "live") v.engine = engine
+    const se = saved.side_effects ?? guessed.side_effects
+    if (se && se !== "substitute") v.side_effects = se
+    const th = saved.thread ?? guessed.thread
+    if (th && th !== "ephemeral") v.thread = th
+    return v
   })
-  const source = exp.inputs.find((i) => i.source_run_id)?.source_run_id
+  const savedStep = ordinal(exp.from_step)
+  if (savedStep !== undefined) fromStep = savedStep
+  const source = exp.source_run_id || exp.inputs.find((i) => i.source_run_id)?.source_run_id
   const form: FormState = {
     v: FORM_VERSION,
     agent: exp.agent || undefined,
     variants: variants.length ? variants : [{ key: "A" }],
     matrix: {
-      name: exp.id,
+      name: exp.name || exp.id,
       inputs: exp.inputs.map((i) => ({ key: i.key, text: i.text ?? "" })),
     },
   }
+  if (validExperimentID(exp.id)) form.matrix!.id = exp.id
   if (source) form.run = source
+  if (Array.isArray(exp.transcript_edits) && exp.transcript_edits.length) {
+    const edits = editsFromHandoff(JSON.stringify(editsFromWire(exp.transcript_edits)))
+    if (edits.length) form.edits = edits
+  }
   if (fromStep) form.matrix!.from_step = fromStep
   if (!form.matrix!.inputs.length) form.matrix!.inputs = [{ key: "1", text: "" }]
   return validateForm(form) ?? form

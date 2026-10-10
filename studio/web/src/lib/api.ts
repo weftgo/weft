@@ -751,10 +751,8 @@ export interface RunsFilters {
   before_id?: string
   /** Page size: 0/absent is the server's 50, above 500 clamps. */
   limit?: number
-  /** One experiment's runs (plan F5). Sent as experiment_id; a Studio
-   * whose /api/runs and /api/search do not read it answers every run,
-   * so the runs list also applies it to the loaded rows
-   * (lib/run-filters.ts). */
+  /** One experiment's runs (plan F5): /api/runs and /api/search
+   * filter by weft.experiment.id (F5.1). */
   experiment_id?: string
 }
 
@@ -1762,14 +1760,29 @@ export function putBreakpoints(runtimeID: string, tools: string[]) {
 
 /** One saved experiment (§10.4): the definition; the detail adds the
  * runs grouped under it. */
-export interface ExperimentRow {
+export interface ExperimentRow extends CostFields {
+  /** command_id's rule, [A-Za-z0-9._:-]{1,128} (lib/experiments.ts's
+   * EXPERIMENT_ID_RE); the name is free text. */
   id: string
   name: string
   agent: string
-  variants: { key: string; overrides?: unknown }[]
+  /** Each variant's modes when they differ from the experiment's (F5.1). */
+  variants: { key: string; overrides?: unknown; engine?: string; side_effects?: string; thread?: string }[]
   inputs: { key: string; source_run_id?: string; text?: string }[]
+  /** The command the matrix sent (F5.1, obsdb.ExperimentCommand): absent
+   * on a definition saved before it — the form is then read back from
+   * the runs (lib/form-state.ts's recovery). */
+  engine?: string
+  side_effects?: string
+  thread?: string
+  from_step?: number
+  source_run_id?: string
+  transcript_edits?: unknown[]
   created?: string
   updated?: string
+  /** The top-level runs under the label and their whole bill (own +
+   * delegated) — on the list rows and the detail alike (F5.1). */
+  run_count?: number
   runs?: RunRow[]
 }
 

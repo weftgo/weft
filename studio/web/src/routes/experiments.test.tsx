@@ -12,6 +12,7 @@ import { setStudioToken } from "@/lib/api"
 import type { ExperimentRow, PlaygroundRunBody, RunDoc, RunsPage } from "@/lib/api"
 import { experimentDraftID, resetDrafts, saveDraft } from "@/lib/drafts"
 import { parseCellCommandID } from "@/lib/form-state"
+import { COST_WAITS } from "@/routes/experiments.$id"
 import type { FormState } from "@/lib/form-state"
 import { resetNotices } from "@/lib/notify"
 import { renderApp, stubBrowser } from "@/test/app"
@@ -76,7 +77,23 @@ beforeEach(() => {
   studio = new FakeStudio()
     .on("GET meta", meta(["live", "playground", "runtimes", "pricing"]))
     .on("GET runtimes", runtimes)
-    .on("GET experiments", { experiments: [{ id: "exp_tone", name: "exp_tone", agent: "orders", variants: experiment.variants, inputs: experiment.inputs }] })
+    // F5.1's list row: created, run_count and the cost block on the row.
+    .on("GET experiments", {
+      experiments: [
+        {
+          id: "exp_tone",
+          name: "exp_tone",
+          agent: "orders",
+          variants: experiment.variants,
+          inputs: experiment.inputs,
+          created: rOK.started,
+          run_count: 4,
+          cost_usd: 0.1,
+          cost_known: true,
+          cache: "exact",
+        },
+      ],
+    })
     .on("GET experiments/exp_tone", pricedExp)
     .on("GET runs/r_ok", { ...rOK, children: [] } satisfies RunDoc)
     .on("GET runs/r_ok/transcript", golden("transcript-ok"))
@@ -103,6 +120,22 @@ describe("/experiments", () => {
     expect(row.querySelector("[data-experiment-cost]")?.textContent).toContain("$0.10")
     expect(within(row).getByRole("link", { name: "exp_tone" }).getAttribute("href")).toBe("/experiments/exp_tone")
     expect(document.title).toBe("experiments · weft studio")
+    expect(row.querySelector("[title]")?.getAttribute("title")).toBeTruthy()
+    // The row itself answers: no per-row detail read (F5.1).
+    expect(studio.calls("GET experiments/exp_tone")).toHaveLength(0)
+  })
+
+  it("the TS row type mirrors experiments.golden.json and experiment.golden.json (F5.1 keys)", () => {
+    const keys: (keyof ExperimentRow)[] = [
+      "id", "name", "agent", "variants", "inputs", "engine", "side_effects", "thread", "from_step", "source_run_id",
+      "transcript_edits", "created", "updated", "run_count", "runs", "cost_usd", "cost_known", "cost_badge", "cost_reason", "cache",
+    ]
+    const variantKeys = ["key", "overrides", "engine", "side_effects", "thread"]
+    const rows = [...golden<{ experiments: Record<string, unknown>[] }>("experiments").experiments, golden<Record<string, unknown>>("experiment")]
+    for (const r of rows) {
+      for (const k of Object.keys(r)) expect(keys).toContain(k)
+      for (const v of r.variants as Record<string, unknown>[]) for (const k of Object.keys(v)) expect(variantKeys).toContain(k)
+    }
   })
 
   it("is the playground's: without it, the page says why and reads nothing", async () => {
@@ -218,6 +251,29 @@ describe("/experiments/{id}", () => {
     expect(studio.calls("POST playground/runs")).toHaveLength(1)
   })
 
+  it("re-run all: a settled run never listed under the label holds the toast for COST_WAITS reads, then it goes without the cost", async () => {
+    let n = 0
+    let done = false
+    studio.on("POST playground/runs", () => command(`cmd_lost${++n}`, "queued"))
+    // The experiment never lists the new runs.
+    for (let i = 1; i <= 4; i++)
+      studio.on(`GET playground/commands/cmd_lost${i}`, () =>
+        done ? command(`cmd_lost${i}`, "finished", `pg_gone${i}`, "succeeded") : command(`cmd_lost${i}`, "accepted")
+      )
+    renderApp("/experiments/exp_tone")
+    const all = await screen.findByRole("button", { name: "re-run all" })
+    await waitFor(() => expect(all).toHaveProperty("disabled", false))
+    fireEvent.click(all)
+    await waitFor(() => expect(studio.calls("POST playground/runs")).toHaveLength(4))
+    const readsBefore = studio.calls("GET experiments/exp_tone").length
+    done = true
+    await waitFor(() =>
+      expect(toastTitles()).toEqual(["experiment exp_tone finished · 4 succeeded · cost not read yet"])
+    )
+    // It re-read the experiment (bounded), then gave up on the cost.
+    expect(studio.calls("GET experiments/exp_tone").length - readsBefore).toBeGreaterThanOrEqual(COST_WAITS)
+  })
+
   it("re-run all: every cell under the same id, one toast when the last settles, with its cost", async () => {
     let n = 0
     const after: ExperimentRow = {
@@ -305,7 +361,10 @@ describe("/experiments/{id}", () => {
 describe("the runs list's experiment_id chip", () => {
   it("lists the experiment's runs, through /api/runs, and the chip clears it", async () => {
     const page = golden<RunsPage>("runs")
-    studio.on("GET runs", { ...page, runs: [...page.runs, runOf("pg_a1", "A", "1")] })
+    // The API filters by experiment_id (F5.1): the fake answers so.
+    studio.on("GET runs", (req) =>
+      req.query.get("experiment_id") === "exp_tone" ? { ...page, runs: [runOf("pg_a1", "A", "1")] } : page
+    )
     const { router } = renderApp("/runs?experiment_id=exp_tone")
     const chip = await waitFor(() => {
       const el = document.querySelector<HTMLElement>('[data-chip="experiment_id"]')
@@ -313,13 +372,13 @@ describe("the runs list's experiment_id chip", () => {
       return el!
     })
     expect(chip.textContent).toContain("experiment exp_tone")
-    expect(chip.textContent).toContain("the loaded rows only")
+    expect(chip.textContent).not.toContain("the loaded rows only")
     await screen.findByText("pg_a1")
     expect(screen.queryByText("r_ok")).toBeNull()
     const q = studio.calls("GET runs").at(-1)!.query
     expect(q.get("experiment_id")).toBe("exp_tone")
     expect(q.get("playground")).toBe("true")
-    expect(document.querySelector("[data-local-filters]")?.textContent).toContain("the API has no experiment filter")
+    expect(document.querySelector("[data-local-filters]")).toBeNull()
     fireEvent.click(chip)
     await waitFor(() => expect(router.state.location.search).not.toHaveProperty("experiment_id"))
   })

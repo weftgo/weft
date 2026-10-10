@@ -768,20 +768,99 @@ export interface SearchPage {
 }
 
 /** A search over /api/runs' filters, in an order (sort=cost: the
- * run's whole bill, own + delegated, most first; unpriced runs last). */
+ * run's whole bill, own + delegated, most first; unpriced runs last),
+ * with search's own filters (studio/search.go): q (whitespace-split
+ * terms, a "quoted phrase" one term, every term a case-insensitive
+ * substring of the prompt, answer, error or a tool name), tool and
+ * model (exact), error (a substring), since/until (RFC 3339 on the
+ * start), min_tokens (input + output) and min_cost (USD, own +
+ * delegated; an unpriced run never matches). */
 export interface SearchFilters extends Omit<RunsFilters, "before" | "before_id"> {
+  q?: string
+  tool?: string
+  model?: string
+  error?: string
+  since?: string
+  until?: string
+  min_tokens?: number
+  min_cost?: number
   sort?: "started" | "duration" | "tokens" | "cost"
   offset?: number
 }
 
-/** GET /api/search?…: the runs list's filters, sort and offset. */
+/** GET /api/search?…: the runs list's filters, search's own, sort and
+ * offset. */
 export function fetchSearch(filters: SearchFilters = {}): Promise<SearchPage> {
-  const { sort, offset, ...rest } = filters
+  const { q, tool, model, error, since, until, min_tokens, min_cost, sort, offset, ...rest } = filters
   const params = new URLSearchParams(runsSearch(rest).replace(/^\?/, ""))
+  if (q) params.set("q", q)
+  if (tool) params.set("tool", tool)
+  if (model) params.set("model", model)
+  if (error) params.set("error", error)
+  if (since) params.set("since", since)
+  if (until) params.set("until", until)
+  if (min_tokens !== undefined) params.set("min_tokens", String(min_tokens))
+  if (min_cost !== undefined) params.set("min_cost", String(min_cost))
   if (sort) params.set("sort", sort)
   if (offset) params.set("offset", String(offset))
   const qs = params.toString()
   return get<SearchPage>(`search${qs ? `?${qs}` : ""}`)
+}
+
+/** One row of GET /api/traces (studio/traces.go's traceRow): the
+ * trace's root span (null, with the gap badge, when only child spans
+ * were stored), its service, the time its spans cover, how many,
+ * whether any ended in error, and the weft runs it holds. */
+export interface TraceRow {
+  trace_id: string
+  root: { span_id: string; name: string } | null
+  service: string
+  start: string
+  end: string
+  duration_ms: number
+  span_count: number
+  error: boolean
+  run_ids: string[]
+  badge?: string
+  reason?: string
+  fix?: string
+}
+
+/** GET /api/traces → TracesPage (capability "traces"), paged as
+ * RunsPage is. A trace whose earlier span arrives between page reads
+ * can be listed again on a later page: dedupe by trace_id. */
+export interface TracesPage {
+  total: number
+  traces: TraceRow[]
+  next_before: string | null
+  next_before_id: string | null
+}
+
+export interface TracesFilters {
+  /** RFC 3339: the trace started at or after (its earliest span). */
+  since?: string
+  /** RFC 3339: the trace started before. */
+  until?: string
+  /** A resource service name, exact. */
+  service?: string
+  public_id?: string
+  before?: string
+  before_id?: string
+  limit?: number
+}
+
+/** GET /api/traces?…: one page of the trace list, newest first. */
+export function fetchTraces(filters: TracesFilters = {}): Promise<TracesPage> {
+  const params = new URLSearchParams()
+  if (filters.since) params.set("since", filters.since)
+  if (filters.until) params.set("until", filters.until)
+  if (filters.service) params.set("service", filters.service)
+  if (filters.public_id) params.set("public_id", filters.public_id)
+  if (filters.before) params.set("before", filters.before)
+  if (filters.before && filters.before_id) params.set("before_id", filters.before_id)
+  if (filters.limit) params.set("limit", String(filters.limit))
+  const qs = params.toString()
+  return get<TracesPage>(`traces${qs ? `?${qs}` : ""}`)
 }
 
 export function runsQuery(filters: RunsFilters = {}) {

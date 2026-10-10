@@ -18,6 +18,7 @@ import { Route as RunsIndexRouteImport } from './routes/runs.index'
 import { Route as RunsIdRouteImport } from './routes/runs.$id'
 import { Route as SessionsIndexRouteImport } from './routes/sessions.index'
 import { Route as SessionsIdRouteImport } from './routes/sessions.$id'
+import { Route as TracesIndexRouteImport } from './routes/traces.index'
 import { Route as TracesIdRouteImport } from './routes/traces.$id'
 
 const IndexRoute = IndexRouteImport.update({
@@ -65,6 +66,11 @@ const SessionsIdRoute = SessionsIdRouteImport.update({
   path: '/sessions/$id',
   getParentRoute: () => rootRouteImport,
 } as any)
+const TracesIndexRoute = TracesIndexRouteImport.update({
+  id: '/traces/',
+  path: '/traces/',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const TracesIdRoute = TracesIdRouteImport.update({
   id: '/traces/$id',
   path: '/traces/$id',
@@ -82,6 +88,7 @@ export interface FileRoutesByFullPath {
   '/agents/': typeof AgentsIndexRoute
   '/runs/': typeof RunsIndexRoute
   '/sessions/': typeof SessionsIndexRoute
+  '/traces/': typeof TracesIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -94,6 +101,7 @@ export interface FileRoutesByTo {
   '/agents': typeof AgentsIndexRoute
   '/runs': typeof RunsIndexRoute
   '/sessions': typeof SessionsIndexRoute
+  '/traces': typeof TracesIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -107,6 +115,7 @@ export interface FileRoutesById {
   '/agents/': typeof AgentsIndexRoute
   '/runs/': typeof RunsIndexRoute
   '/sessions/': typeof SessionsIndexRoute
+  '/traces/': typeof TracesIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -121,6 +130,7 @@ export interface FileRouteTypes {
     | '/agents/'
     | '/runs/'
     | '/sessions/'
+    | '/traces/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -133,6 +143,7 @@ export interface FileRouteTypes {
     | '/agents'
     | '/runs'
     | '/sessions'
+    | '/traces'
   id:
     | '__root__'
     | '/'
@@ -145,6 +156,7 @@ export interface FileRouteTypes {
     | '/agents/'
     | '/runs/'
     | '/sessions/'
+    | '/traces/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -158,6 +170,7 @@ export interface RootRouteChildren {
   AgentsIndexRoute: typeof AgentsIndexRoute
   RunsIndexRoute: typeof RunsIndexRoute
   SessionsIndexRoute: typeof SessionsIndexRoute
+  TracesIndexRoute: typeof TracesIndexRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -225,6 +238,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SessionsIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/traces/': {
+      id: '/traces/'
+      path: '/traces'
+      fullPath: '/traces/'
+      preLoaderRoute: typeof TracesIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/traces/$id': {
       id: '/traces/$id'
       path: '/traces/$id'
@@ -246,6 +266,7 @@ const rootRouteChildren: RootRouteChildren = {
   AgentsIndexRoute: AgentsIndexRoute,
   RunsIndexRoute: RunsIndexRoute,
   SessionsIndexRoute: SessionsIndexRoute,
+  TracesIndexRoute: TracesIndexRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

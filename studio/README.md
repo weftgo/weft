@@ -1251,9 +1251,35 @@ prompt or catalog record is badged and never diffed over):
 ![run page with the trace, light theme](screenshots/run-light.png)
 
 Sessions list a thread's turns in order with usage and the newest
-status; `/live` shows everything streaming right now; `/traces/{id}`
-renders any trace — a stock OTel GenAI app's included — as a span tree
-plus a chat view when semconv content was captured.
+status; `/live` shows everything streaming right now; `/traces` lists
+every trace the database holds (`GET /api/traces`, capability `traces`:
+root span, service, start, duration, span count, error, the runs it
+holds linked; since/until/service chips, paged by the exact cursor and
+deduped by trace id, a rootless trace carrying its `gap` badge);
+`/traces/{id}` renders any trace — a stock OTel GenAI app's included —
+as a span tree plus a chat view when semconv content was captured.
+
+Search and the palette (plan H1): the Runs page has a free-text box
+(`?q=`, debounced; every term must match the prompt, answer, error or a
+tool name, a "quoted phrase" one term) and filters by agent, status,
+tool, model, error, date range (a day is UTC, until inclusive),
+duration, tokens, cost (with `pricing`) and any number of tags, plus
+column sorting on started, duration, tokens and cost — each filter a
+removable chip in the URL (`src/lib/run-filters.ts`). A text or
+search-only filter, or a sort, reads `/api/search` (offset-paged);
+otherwise `/api/runs`. Duration is always applied to the loaded rows
+(the API has no duration filter); without `search` the box says why
+(`capabilities_off.search`), model, error, the range and the minimums
+filter the loaded rows and say so, and text and tool chips are drawn
+struck through as not applied. The sessions list's text box (`?q=`)
+matches the loaded sessions' ids, public ids and agents — client-side:
+`/api/sessions` has no text filter and a session row no label. ⌘K (or
+Ctrl+K) opens the palette anywhere: runs through `/api/search?q=` (by
+id over the recent runs without `search`), sessions, traces (the
+newest page's ids, root names, services) under `traces`, experiments
+by name under `playground`, the pages — Playground under `playground`,
+Settings (plan H4's page) — and the Studio commands; ↑↓ move, Enter
+opens, Escape closes.
 
 Every view is a URL (plan G2): each piece of page state lives in a
 search param, built and read through `src/lib/links.ts`. A cursor move

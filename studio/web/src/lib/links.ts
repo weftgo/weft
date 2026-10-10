@@ -233,7 +233,79 @@ export interface CompareLink {
   search: CompareSearch
 }
 
-export type StudioLink = RunLink | SessionLink | TraceLink | PlaygroundLink | CompareLink
+/** The runs list's search (plan H1): every filter, the sort and the
+ * paging cursor, as /runs validates it (routes/runs.index.tsx) — each
+ * a URL chip. */
+export interface RunsSearch {
+  /** Free-text search terms (/api/search's q). */
+  q?: string
+  agent?: string
+  status?: "running" | "succeeded" | "failed" | "interrupted"
+  session?: string
+  public_id?: string
+  /** Experiments on/off: absent = all runs; "off" excludes playground
+   * runs, "on" only those (S4.7). */
+  experiments?: "on" | "off"
+  /** Tag pairs "k=v": one string, or several (each its own chip). */
+  tag?: string | string[]
+  /** A tool the run called (exact; search only). */
+  tool?: string
+  /** The run's model name (exact). */
+  model?: string
+  /** A substring of the run's error. */
+  error?: string
+  /** The start's range: a day (YYYY-MM-DD, UTC, until inclusive) or an
+   * RFC 3339 time. */
+  since?: string
+  until?: string
+  /** Seconds at least (the loaded rows only: the API has no duration
+   * filter). */
+  min_duration?: number
+  /** Input + output tokens at least. */
+  min_tokens?: number
+  /** USD at least, own + delegated (capability pricing). */
+  min_cost?: number
+  /** One run's subagent children (the API's parent=<run id>). */
+  parent?: string
+  /** Subagent children listed too (the API's all=1). */
+  subagents?: "all"
+  before?: string
+  /** The order: absent = newest first (started). */
+  sort?: "duration" | "tokens" | "cost"
+}
+
+export interface RunsLink {
+  to: "/runs"
+  search: RunsSearch
+}
+
+/** The trace list's search (plan H1): its filters as URL chips. */
+export interface TracesSearch {
+  since?: string
+  until?: string
+  service?: string
+}
+
+export interface TracesLink {
+  to: "/traces"
+  search: TracesSearch
+}
+
+/** The Settings page (plan H4). Not a StudioLink until its route
+ * lands: a router <Link> refuses a path the tree does not have. */
+export interface SettingsLink {
+  to: "/settings"
+  search: Record<string, never>
+}
+
+export type StudioLink =
+  | RunLink
+  | SessionLink
+  | TraceLink
+  | PlaygroundLink
+  | CompareLink
+  | RunsLink
+  | TracesLink
 
 /** A whole, non-negative number, or undefined. */
 function ordinal(n: number | undefined): number | undefined {
@@ -317,6 +389,29 @@ export function traceLink(
   if (opts.span) search.span = opts.span
   if (opts.view === "chat") search.view = "chat"
   return { to: "/traces/$id", params: { id }, search }
+}
+
+/** runsLink is the runs list under these filters (empty values are
+ * dropped: a link never carries a cleared chip). */
+export function runsLink(search: RunsSearch = {}): RunsLink {
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(search))
+    if (v !== undefined && v !== "" && !(Array.isArray(v) && v.length === 0)) out[k] = v
+  return { to: "/runs", search: out }
+}
+
+/** tracesLink is the trace list under these filters. */
+export function tracesLink(search: TracesSearch = {}): TracesLink {
+  const out: TracesSearch = {}
+  if (search.since) out.since = search.since
+  if (search.until) out.until = search.until
+  if (search.service) out.service = search.service
+  return { to: "/traces", search: out }
+}
+
+/** settingsLink is the Settings page (plan H4). */
+export function settingsLink(): SettingsLink {
+  return { to: "/settings", search: {} }
 }
 
 /** playgroundLink is the playground with the hand-off carried over

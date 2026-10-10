@@ -10,8 +10,8 @@ export interface Binding {
 }
 
 export const bindings: Binding[] = [
-  { keys: ["⌘K"], action: "command palette: jump to a run, agents, help" },
-  { keys: ["/"], action: "focus the agent filter", where: "runs" },
+  { keys: ["⌘K"], action: "command palette: find a run, session, trace or experiment; jump to a page" },
+  { keys: ["/"], action: "focus the search box", where: "runs" },
   { keys: ["j", "k"], action: "next / previous row (or ↓ ↑)", where: "runs" },
   { keys: ["enter"], action: "open the selected run", where: "runs" },
   { keys: ["e", "s", "r"], action: "trace · story · raw views", where: "run" },

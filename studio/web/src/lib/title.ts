@@ -13,7 +13,7 @@ export type TitlePlace =
   | { page: "session"; id: string }
   | { page: "compare"; a?: string; b?: readonly string[] }
   | { page: "playground"; experiment?: string }
-  | { page: "runs" | "sessions" | "live" | "agents" }
+  | { page: "runs" | "sessions" | "traces" | "live" | "agents" }
 
 /**
  * shortId elides a long id for a title, keeping what tells ids apart:

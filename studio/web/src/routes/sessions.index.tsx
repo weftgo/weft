@@ -1,9 +1,13 @@
 // The sessions list (S4.7): threads as rows — turns, newest status,
-// usage, first/last seen — with public-id and agent filters. Every
-// view is in the URL (A3).
+// usage, first/last seen — with public-id and agent filters, and a
+// text box (plan H1, ?q=) over the loaded sessions' ids, public ids
+// and agents: client-side, since /api/sessions has no text filter
+// (obsdb.SessionQuery) and a session row carries no label. Every view
+// is in the URL (A3).
 import { useEffect, useState } from "react"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
+import { X } from "lucide-react"
 
 import { fetchSessions, nextCursor } from "@/lib/api"
 import type { PageCursor } from "@/lib/api"
@@ -26,6 +30,19 @@ import { useDocumentTitle } from "@/hooks/use-document-title"
 interface SessionsSearch {
   agent?: string
   public_id?: string
+  /** Text over the loaded sessions' ids, public ids and agents. */
+  q?: string
+}
+
+/** matchSession: every whitespace-separated term is a case-insensitive
+ * substring of the session's id, public id or agent. */
+function matchSession(s: { id: string; public_id: string; agent: string }, q: string): boolean {
+  const hay = `${s.id} ${s.public_id} ${s.agent}`.toLowerCase()
+  return q
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((t) => hay.includes(t))
 }
 
 export const Route = createFileRoute("/sessions/")({
@@ -36,6 +53,12 @@ export const Route = createFileRoute("/sessions/")({
       typeof search.public_id === "string" && search.public_id
         ? search.public_id
         : undefined,
+    q:
+      typeof search.q === "string" && search.q.trim()
+        ? search.q.trim()
+        : typeof search.q === "number"
+          ? String(search.q)
+          : undefined,
   }),
   component: SessionsPage,
 })
@@ -78,7 +101,7 @@ function SessionsPage() {
   const search = Route.useSearch()
   const navigate = useNavigate({ from: "/sessions/" })
   const filters = { agent: search.agent, public_id: search.public_id }
-  const filtered = Boolean(search.agent || search.public_id)
+  const filtered = Boolean(search.agent || search.public_id || search.q)
   // Pages accumulate through the next_before cursor (S4.3): the first
   // page is the newest 50 threads, never the whole list.
   const q = useInfiniteQuery({
@@ -91,7 +114,9 @@ function SessionsPage() {
     // not move ends the list (never a page loop).
     getNextPageParam: (last, _all, lastParam) => nextCursor(last, lastParam),
   })
-  const sessions = q.data?.pages.flatMap((p) => p.sessions) ?? []
+  const loadedSessions = q.data?.pages.flatMap((p) => p.sessions) ?? []
+  const text = search.q ?? ""
+  const sessions = text ? loadedSessions.filter((s) => matchSession(s, text)) : loadedSessions
   const total = q.data?.pages[0]?.total ?? 0
 
   const set = (patch: Partial<SessionsSearch>) =>
@@ -120,7 +145,28 @@ function SessionsPage() {
           label="filter by public id"
           onApply={(v) => set({ public_id: v || undefined })}
         />
+        <FilterBox
+          value={search.q ?? ""}
+          placeholder="find id, public id, agent"
+          label="find sessions"
+          onApply={(v) => set({ q: v || undefined })}
+        />
       </div>
+      {search.q ? (
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            data-chip="q"
+            className="flex items-center gap-1 rounded-full border bg-secondary px-2 py-px font-mono text-[11px] hover:bg-accent"
+            onClick={() => set({ q: undefined })}
+            aria-label={`clear “${search.q}” (the loaded sessions only)`}
+            title="matches the loaded sessions' ids, public ids and agents only: the API has no text filter"
+          >
+            “{search.q}” <span className="text-faint">· the loaded sessions only</span>
+            <X className="size-3 text-faint" />
+          </button>
+        </div>
+      ) : null}
 
       {q.isPending ? (
         <p className="py-16 text-center font-mono text-xs text-faint">
@@ -133,14 +179,14 @@ function SessionsPage() {
             retry
           </Button>
         </div>
-      ) : sessions.length === 0 ? (
+      ) : sessions.length === 0 && !q.hasNextPage ? (
         filtered ? (
           <div className="space-y-2 py-20 text-center">
             <p className="text-sm">No sessions match these filters.</p>
             <Button
               variant="outline"
               size="sm"
-              onClick={() => set({ agent: undefined, public_id: undefined })}
+              onClick={() => set({ agent: undefined, public_id: undefined, q: undefined })}
             >
               clear filters
             </Button>
@@ -223,8 +269,9 @@ function SessionsPage() {
         </div>
         <div className="flex items-center justify-center gap-3">
           <span className="font-mono text-[11px] text-faint tabular-nums">
-            showing {sessions.length.toLocaleString()} of{" "}
-            {total.toLocaleString()}
+            {text
+              ? `${sessions.length.toLocaleString()} of ${loadedSessions.length.toLocaleString()} loaded match (${total.toLocaleString()} listed)`
+              : `showing ${sessions.length.toLocaleString()} of ${total.toLocaleString()}`}
           </span>
           {q.hasNextPage && (
             <Button

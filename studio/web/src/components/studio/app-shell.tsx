@@ -1,6 +1,8 @@
-// The app shell (plan §4.3): sidebar navigation (Runs; Agents only
-// when a manifest is configured), a header with the current place, a
-// command palette that jumps to any recent run, and a footer with the
+// The app shell (plan §4.3): sidebar navigation (Runs, Sessions,
+// Traces under its capability, Live; Agents only when a manifest is
+// configured), a header with the current place, the ⌘K palette
+// (command-palette.tsx: runs, sessions, traces, experiments, pages,
+// commands), and a footer with the
 // theme and density toggles and the weft version and store from api/meta.
 //
 // Hydration rule: the shell is prerendered once, at /runs, and every
@@ -18,26 +20,21 @@ import {
   Link,
   Outlet,
   useLocation,
-  useRouter,
 } from "@tanstack/react-router"
 import {
   Activity,
   Bot,
   FlaskConical,
   Keyboard,
-  Link2,
   List,
   MessagesSquare,
-  PanelsLeftRight,
-  Rows3,
+  Network,
   Search,
-  SunMoon,
 } from "lucide-react"
 
-import { metaQuery, runsQuery, studioToken } from "@/lib/api"
+import { metaQuery, studioToken } from "@/lib/api"
 import { canReplay } from "@/lib/replay"
-import { applyStoredDensity, toggleDensity } from "@/lib/density"
-import { resetPaneSizes } from "@/lib/pane-sizes"
+import { applyStoredDensity } from "@/lib/density"
 import { isPlainShortcut } from "@/lib/keys"
 import { useCopyLink } from "@/hooks/use-copy-link"
 import { useLiveGaveUpNotices, useRuntimeNotices } from "@/hooks/use-notices"
@@ -51,13 +48,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import {
-  ThemeToggle,
-  applyStoredTheme,
-  cycleTheme,
-} from "@/components/studio/theme"
-import { DensityToggle, useDensity } from "@/components/studio/density-toggle"
-import { StatusDot } from "@/components/studio/runs-table"
+import { ThemeToggle, applyStoredTheme } from "@/components/studio/theme"
+import { DensityToggle } from "@/components/studio/density-toggle"
 import { WeftWordmark } from "@/components/studio/weft-mark"
 import { Button } from "@/components/ui/button"
 import { Kbd } from "@/components/ui/kbd"
@@ -76,17 +68,8 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar"
-import {
-  Command,
-  CommandDialog,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandSeparator,
-} from "@/components/ui/command"
-import { playgroundLink, runLink } from "@/lib/links"
+import { CommandPalette } from "@/components/studio/command-palette"
+import { playgroundLink, tracesLink } from "@/lib/links"
 
 function Nav() {
   const meta = useQuery(metaQuery())
@@ -109,6 +92,9 @@ function Nav() {
         <SidebarMenu>
           {item("/runs", "Runs", <List data-slot="icon" />)}
           {item("/sessions", "Sessions", <MessagesSquare data-slot="icon" />)}
+          {/* The trace list (plan H1): under capability "traces". */}
+          {meta.data?.capabilities.includes("traces") &&
+            item(tracesLink().to, "Traces", <Network data-slot="icon" />)}
           {item("/live", "Live", <Activity data-slot="icon" />)}
           {/* Agents: a manifest (weft.json or a registration), or a
               runtime link a runtime may register one through (B4). */}
@@ -167,16 +153,12 @@ function Place() {
 
 export function AppShell() {
   const meta = useQuery(metaQuery())
-  const router = useRouter()
   const [paletteOpen, setPaletteOpen] = useState(false)
-  // Recent runs feed the palette; fetched only once it opens.
-  const recent = useQuery({ ...runsQuery({}), enabled: paletteOpen })
 
   // The theme class survives hydration (see applyStoredTheme), and the
   // density attribute with it (plan H3).
   useEffect(applyStoredTheme, [])
   useEffect(applyStoredDensity, [])
-  const density = useDensity()
 
   // The notices no page owns (plan H5): a runtime coming or going, a
   // live stream that gave up. Toasts, raised by lib/notify.ts.
@@ -210,11 +192,6 @@ export function AppShell() {
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [copyLink])
-
-  const go = (to: string, params?: Record<string, string>) => {
-    setPaletteOpen(false)
-    void router.navigate({ to, params })
-  }
 
   return (
     <SidebarProvider>
@@ -281,7 +258,7 @@ export function AppShell() {
             onClick={() => setPaletteOpen(true)}
           >
             <Search data-slot="icon" />
-            <span className="hidden sm:inline">Jump to run</span>
+            <span className="hidden sm:inline">Search</span>
             <Kbd className="ml-1">⌘K</Kbd>
           </Button>
         </header>
@@ -310,120 +287,12 @@ export function AppShell() {
         </DialogContent>
       </Dialog>
 
-      <CommandDialog open={paletteOpen} onOpenChange={setPaletteOpen}>
-        {/* The dialog is the frame; cmdk's root (its store) is Command —
-            without it every item throws on open. */}
-        <Command>
-          <CommandInput placeholder="Run id, agent, or a command…" />
-          <CommandList>
-            <CommandEmpty>Nothing matches.</CommandEmpty>
-            <CommandGroup heading="Recent runs">
-              {(recent.data?.runs ?? []).slice(0, 25).map((r) => (
-                <CommandItem
-                  key={r.id}
-                  value={`${r.id} ${r.agent} ${r.status}`}
-                  onSelect={() => {
-                    setPaletteOpen(false)
-                    void router.navigate(runLink(r.id))
-                  }}
-                >
-                  <StatusDot status={r.status} />
-                  <span className="font-mono text-xs">{r.id}</span>
-                  <span className="ml-auto text-xs text-muted-foreground">
-                    {r.agent}
-                  </span>
-                </CommandItem>
-              ))}
-              {recent.isPending && paletteOpen ? (
-                <CommandItem disabled value="loading">
-                  loading…
-                </CommandItem>
-              ) : null}
-            </CommandGroup>
-            <CommandSeparator />
-            <CommandGroup heading="Go to">
-              <CommandItem value="runs list" onSelect={() => go("/runs")}>
-                <List data-slot="icon" />
-                Runs
-              </CommandItem>
-              <CommandItem
-                value="sessions threads"
-                onSelect={() => go("/sessions")}
-              >
-                <MessagesSquare data-slot="icon" />
-                Sessions
-              </CommandItem>
-              <CommandItem value="live streaming" onSelect={() => go("/live")}>
-                <Activity data-slot="icon" />
-                Live
-              </CommandItem>
-              {(meta.data?.has_manifest ||
-                meta.data?.capabilities.includes("playground")) && (
-                <CommandItem
-                  value="agents manifest"
-                  onSelect={() => go("/agents")}
-                >
-                  <Bot data-slot="icon" />
-                  Agents
-                </CommandItem>
-              )}
-            </CommandGroup>
-            <CommandGroup heading="Studio">
-              <CommandItem
-                value="copy link to this page url share yank"
-                onSelect={() => {
-                  setPaletteOpen(false)
-                  void copyLink()
-                }}
-              >
-                <Link2 data-slot="icon" />
-                Copy link to this page
-                <Kbd className="ml-auto">y</Kbd>
-              </CommandItem>
-              <CommandItem
-                value="theme toggle dark light"
-                onSelect={() => {
-                  cycleTheme()
-                  setPaletteOpen(false)
-                }}
-              >
-                <SunMoon data-slot="icon" />
-                Cycle theme
-              </CommandItem>
-              <CommandItem
-                value="density compact comfortable spacing toggle"
-                onSelect={() => {
-                  toggleDensity()
-                  setPaletteOpen(false)
-                }}
-              >
-                <Rows3 data-slot="icon" />
-                {density === "compact" ? "Comfortable density" : "Compact density"}
-              </CommandItem>
-              <CommandItem
-                value="reset pane layout split sizes"
-                onSelect={() => {
-                  resetPaneSizes()
-                  setPaletteOpen(false)
-                }}
-              >
-                <PanelsLeftRight data-slot="icon" />
-                Reset pane layout
-              </CommandItem>
-              <CommandItem
-                value="keyboard help shortcuts"
-                onSelect={() => {
-                  setPaletteOpen(false)
-                  setHelpOpen(true)
-                }}
-              >
-                <Keyboard data-slot="icon" />
-                Keyboard help
-              </CommandItem>
-            </CommandGroup>
-          </CommandList>
-        </Command>
-      </CommandDialog>
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        onCopyLink={() => void copyLink()}
+        onHelp={() => setHelpOpen(true)}
+      />
 
       {/* The one toaster (plan H5): bottom-right, the app's theme, no
           hotkey — it never takes focus or a key from the page. */}

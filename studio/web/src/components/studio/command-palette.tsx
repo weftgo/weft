@@ -1,0 +1,331 @@
+// The ⌘K palette (plan H1): one box that finds a run, a session, a
+// trace or an experiment and jumps to it, lists the pages (Playground
+// and Settings among them) and runs the Studio's own commands. Runs
+// are searched through /api/search?q= when the Studio searches
+// (capability "search": the prompt, answer, error and tool names),
+// else matched by id over the recent runs; sessions over the newest
+// page's ids, public ids and agents; traces over the newest page of
+// /api/traces (ids, root names, services — the API has no text
+// filter); experiments by name. Each group is there only under its
+// capability ("traces", "playground" for experiments). cmdk gives the
+// dialog, the combobox and the listbox: ↑↓ move, Enter opens, Escape
+// closes. Every jump is a links.ts link. No separator between the
+// groups: a listbox may hold only groups and options (axe's
+// aria-required-children), and the headings divide them.
+import { useEffect, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
+import { useRouter } from "@tanstack/react-router"
+import {
+  Activity,
+  Bot,
+  FlaskConical,
+  Keyboard,
+  Link2,
+  List,
+  MessagesSquare,
+  Network,
+  PanelsLeftRight,
+  Rows3,
+  Settings,
+  SunMoon,
+} from "lucide-react"
+
+import {
+  experimentsQuery,
+  fetchSearch,
+  fetchTraces,
+  metaQuery,
+  runsQuery,
+  sessionsQuery,
+} from "@/lib/api"
+import type { RunRow } from "@/lib/api"
+import { toggleDensity } from "@/lib/density"
+import { resetPaneSizes } from "@/lib/pane-sizes"
+import {
+  experimentLink,
+  playgroundLink,
+  runLink,
+  runsLink,
+  sessionLink,
+  settingsLink,
+  traceLink,
+  tracesLink,
+} from "@/lib/links"
+import { cycleTheme } from "@/components/studio/theme"
+import { useDensity } from "@/components/studio/density-toggle"
+import { StatusDot } from "@/components/studio/runs-table"
+import { Kbd } from "@/components/ui/kbd"
+import {
+  Command,
+  CommandDialog,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
+
+/** Settings' path, widened: its route lands with plan H4, and a
+ * router path the tree does not have yet is refused by the types. */
+const SETTINGS_PATH: string = settingsLink().to
+
+export const PALETTE_PLACEHOLDER = "Search runs, sessions, traces, experiments… or a command"
+
+/** The input's settled text: what the run search asks for. */
+function useDebounced(value: string, ms: number): string {
+  const [v, setV] = useState(value)
+  useEffect(() => {
+    const t = setTimeout(() => setV(value), ms)
+    return () => clearTimeout(t)
+  }, [value, ms])
+  return v
+}
+
+export function CommandPalette({
+  open,
+  onOpenChange,
+  onCopyLink,
+  onHelp,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  onCopyLink: () => void
+  onHelp: () => void
+}) {
+  const router = useRouter()
+  const meta = useQuery(metaQuery())
+  const caps = meta.data?.capabilities ?? []
+  const has = (c: string) => caps.includes(c)
+  const density = useDensity()
+  const [input, setInput] = useState("")
+  useEffect(() => {
+    if (!open) setInput("")
+  }, [open])
+  const term = useDebounced(input.trim(), 250)
+
+  // Fetched only while the palette is open, each under its capability.
+  const recent = useQuery({ ...runsQuery({}), enabled: open })
+  const searchable = has("search")
+  const hits = useQuery({
+    queryKey: ["palette", "search", term],
+    staleTime: 5_000,
+    queryFn: () => fetchSearch({ q: term, limit: 10 }),
+    enabled: open && searchable && term.length > 0,
+  })
+  const sessions = useQuery({ ...sessionsQuery({}), enabled: open })
+  const tracesOn = has("traces")
+  const traces = useQuery({
+    queryKey: ["traces", "palette"],
+    staleTime: 5_000,
+    queryFn: () => fetchTraces({ limit: 50 }),
+    enabled: open && tracesOn,
+  })
+  const playgroundOn = has("playground")
+  const experiments = useQuery({ ...experimentsQuery(), enabled: open && playgroundOn })
+
+  const close = () => onOpenChange(false)
+  const go = (nav: () => Promise<unknown>) => {
+    close()
+    void nav()
+  }
+
+  // Search hits first (kept whatever cmdk's own match says: they matched
+  // on the prompt, answer, error or a tool name), then the recent runs
+  // cmdk matches by id and agent.
+  const hitRows = term && searchable ? (hits.data?.runs ?? []) : []
+  const hitIDs = new Set(hitRows.map((r) => r.id))
+  const recentRows = (recent.data?.runs ?? []).filter((r) => !hitIDs.has(r.id)).slice(0, 25)
+  const runItem = (r: RunRow, hit: boolean) => (
+    <CommandItem
+      key={r.id}
+      value={`run:${r.id} ${r.agent} ${r.status}`}
+      keywords={hit ? [input] : undefined}
+      onSelect={() => go(() => router.navigate(runLink(r.id)))}
+      data-palette-kind="run"
+    >
+      <StatusDot status={r.status} />
+      <span className="truncate font-mono text-xs">{r.id}</span>
+      <span className="ml-auto text-xs text-muted-foreground">{r.agent}</span>
+    </CommandItem>
+  )
+
+  return (
+    <CommandDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Command palette"
+      description="Find a run, session, trace or experiment, or jump to a page"
+    >
+      {/* The dialog is the frame; cmdk's root (its store) is Command —
+          without it every item throws on open. */}
+      <Command>
+        <CommandInput placeholder={PALETTE_PLACEHOLDER} value={input} onValueChange={setInput} />
+        <CommandList>
+          <CommandEmpty>Nothing matches.</CommandEmpty>
+          <CommandGroup heading={searchable ? "Runs" : "Runs (by id: this Studio cannot search)"}>
+            {hitRows.map((r) => runItem(r, true))}
+            {recentRows.map((r) => runItem(r, false))}
+            {(recent.isPending || (searchable && term && hits.isPending)) && open ? (
+              <CommandItem disabled value="loading runs">
+                loading…
+              </CommandItem>
+            ) : null}
+            {term && searchable && hitRows.length > 0 ? (
+              <CommandItem
+                value={`run:all matches ${input}`}
+                keywords={[input]}
+                onSelect={() => go(() => router.navigate(runsLink({ q: term })))}
+              >
+                <List data-slot="icon" />
+                All runs matching “{term}”
+              </CommandItem>
+            ) : null}
+          </CommandGroup>
+          <CommandGroup heading="Sessions">
+            {(sessions.data?.sessions ?? []).slice(0, 50).map((s) => (
+              <CommandItem
+                key={s.id}
+                value={`session:${s.id} ${s.public_id} ${s.agent}`}
+                onSelect={() => go(() => router.navigate(sessionLink(s.id)))}
+                data-palette-kind="session"
+              >
+                <MessagesSquare data-slot="icon" />
+                <span className="truncate font-mono text-xs">{s.id}</span>
+                <span className="ml-auto truncate font-mono text-[11px] text-muted-foreground">
+                  {s.public_id || s.agent}
+                </span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+          {tracesOn ? (
+            <CommandGroup heading="Traces">
+              {(traces.data?.traces ?? []).map((t) => (
+                <CommandItem
+                  key={t.trace_id}
+                  value={`trace:${t.trace_id} ${t.root?.name ?? ""} ${t.service}`}
+                  onSelect={() => go(() => router.navigate(traceLink(t.trace_id)))}
+                  data-palette-kind="trace"
+                >
+                  <Network data-slot="icon" />
+                  <span className="truncate text-xs">{t.root?.name ?? "(no root span)"}</span>
+                  <span className="ml-auto truncate font-mono text-[11px] text-muted-foreground">
+                    {t.trace_id.slice(0, 12)} · {t.service}
+                  </span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          ) : null}
+          {playgroundOn ? (
+            <CommandGroup heading="Experiments">
+              {(experiments.data?.experiments ?? []).slice(0, 50).map((x) => (
+                <CommandItem
+                  key={x.id}
+                  value={`experiment:${x.name} ${x.id} ${x.agent}`}
+                  onSelect={() => go(() => router.navigate(experimentLink(x.id)))}
+                  data-palette-kind="experiment"
+                >
+                  <FlaskConical data-slot="icon" />
+                  <span className="truncate text-xs">{x.name || x.id}</span>
+                  <span className="ml-auto text-xs text-muted-foreground">{x.agent}</span>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          ) : null}
+          <CommandGroup heading="Go to">
+            <CommandItem value="runs list" onSelect={() => go(() => router.navigate(runsLink()))}>
+              <List data-slot="icon" />
+              Runs
+            </CommandItem>
+            <CommandItem value="sessions threads" onSelect={() => go(() => router.navigate({ to: "/sessions" }))}>
+              <MessagesSquare data-slot="icon" />
+              Sessions
+            </CommandItem>
+            {tracesOn ? (
+              <CommandItem value="traces list spans" onSelect={() => go(() => router.navigate(tracesLink()))}>
+                <Network data-slot="icon" />
+                Traces
+              </CommandItem>
+            ) : null}
+            <CommandItem value="live streaming" onSelect={() => go(() => router.navigate({ to: "/live" }))}>
+              <Activity data-slot="icon" />
+              Live
+            </CommandItem>
+            {meta.data?.has_manifest || playgroundOn ? (
+              <CommandItem value="agents manifest" onSelect={() => go(() => router.navigate({ to: "/agents" }))}>
+                <Bot data-slot="icon" />
+                Agents
+              </CommandItem>
+            ) : null}
+            {playgroundOn ? (
+              <CommandItem value="playground experiment" onSelect={() => go(() => router.navigate(playgroundLink()))}>
+                <FlaskConical data-slot="icon" />
+                Playground
+              </CommandItem>
+            ) : null}
+            {/* Settings (plan H4): its page lands with H4 — linked now. */}
+            <CommandItem
+              value="settings pricing preferences"
+              onSelect={() => go(() => router.navigate({ to: SETTINGS_PATH }))}
+            >
+              <Settings data-slot="icon" />
+              Settings
+            </CommandItem>
+          </CommandGroup>
+          <CommandGroup heading="Studio">
+            <CommandItem
+              value="copy link to this page url share yank"
+              onSelect={() => {
+                close()
+                onCopyLink()
+              }}
+            >
+              <Link2 data-slot="icon" />
+              Copy link to this page
+              <Kbd className="ml-auto">y</Kbd>
+            </CommandItem>
+            <CommandItem
+              value="theme toggle dark light"
+              onSelect={() => {
+                cycleTheme()
+                close()
+              }}
+            >
+              <SunMoon data-slot="icon" />
+              Cycle theme
+            </CommandItem>
+            <CommandItem
+              value="density compact comfortable spacing toggle"
+              onSelect={() => {
+                toggleDensity()
+                close()
+              }}
+            >
+              <Rows3 data-slot="icon" />
+              {density === "compact" ? "Comfortable density" : "Compact density"}
+            </CommandItem>
+            <CommandItem
+              value="reset pane layout split sizes"
+              onSelect={() => {
+                resetPaneSizes()
+                close()
+              }}
+            >
+              <PanelsLeftRight data-slot="icon" />
+              Reset pane layout
+            </CommandItem>
+            <CommandItem
+              value="keyboard help shortcuts"
+              onSelect={() => {
+                close()
+                onHelp()
+              }}
+            >
+              <Keyboard data-slot="icon" />
+              Keyboard help
+            </CommandItem>
+          </CommandGroup>
+        </CommandList>
+      </Command>
+    </CommandDialog>
+  )
+}

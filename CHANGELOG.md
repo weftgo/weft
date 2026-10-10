@@ -10,6 +10,16 @@ module, ADR 0005).
 
 ### Added
 
+- Studio search and filters (plan H1): the Runs page's free-text box and
+  filters (agent, status, tool, model, error, date range, duration, tokens,
+  cost, several tags) as removable URL chips, with column sorting, read
+  through `/api/search` when a text or search-only filter or a sort is set
+  (`/api/runs` otherwise; duration, and without `search` the other
+  search-only filters, apply to the loaded rows and say so); a sessions text
+  filter over the loaded ids, public ids and agents; a `/traces` index over
+  `GET /api/traces` (capability `traces`, a sidebar entry); and the ⌘K
+  palette finding runs, sessions, traces and experiments and jumping to
+  Playground and Settings, each group under its capability.
 - `POST /api/runs/{id}/cancel` (plan H6, capability `cancel`, `Playground(true)`
   only): asks the runtime that started a playground run to stop it, through
   the runtime link's existing cancel frame; the run ends as the core ends a

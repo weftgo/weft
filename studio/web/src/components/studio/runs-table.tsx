@@ -156,13 +156,15 @@ function TokensCell({ usage }: { usage: RunRow["usage"] }) {
   )
 }
 
-/** The Cost column's sort control (plan A5): server is true when the
- * page sorts through /api/search?sort=cost (capabilities search and
- * pricing), false when it sorts the loaded rows only. */
-export interface CostSort {
-  active: boolean
+/** The list's order (plan H1): started (newest first, the default),
+ * duration, tokens or cost (most first). server is true when the page
+ * sorts through /api/search?sort= (capability search), false when it
+ * sorts the loaded rows only. */
+export type RunSortKey = "started" | "duration" | "tokens" | "cost"
+export interface RunsSort {
+  active: RunSortKey
   server: boolean
-  onToggle: () => void
+  onSort: (key: RunSortKey) => void
 }
 
 export interface RunsTableProps {
@@ -171,7 +173,8 @@ export interface RunsTableProps {
   now?: number
   /** Draw the Cost column (capability "pricing"); absent, no cell. */
   showCost?: boolean
-  costSort?: CostSort
+  /** The column sort; absent, the headers are plain. */
+  sort?: RunsSort
 }
 
 /** CostCell is a run's own cost and, when its subagents cost anything
@@ -196,27 +199,61 @@ const COST_SORT_SERVER =
   "sorted by Studio (/api/search?sort=cost): each run's whole bill, own + delegated, most first; unpriced runs last"
 const COST_SORT_LOCAL =
   "sorts the loaded rows only (own + delegated, most first; unpriced last): this Studio cannot sort by cost itself (it needs the search capability) — load more to sort more"
+const SORT_WORDS: Record<Exclude<RunSortKey, "cost">, { server: string; local: string }> = {
+  started: { server: "newest first (the default order)", local: "newest first (the default order)" },
+  duration: {
+    server: "sorted by Studio (/api/search?sort=duration): longest first",
+    local: "sorts the loaded rows only (longest first): this Studio cannot sort by duration itself (it needs the search capability) — load more to sort more",
+  },
+  tokens: {
+    server: "sorted by Studio (/api/search?sort=tokens): input + output tokens, most first",
+    local: "sorts the loaded rows only (input + output tokens, most first): this Studio cannot sort by tokens itself (it needs the search capability) — load more to sort more",
+  },
+}
 
-function CostHead({ sort }: { sort?: CostSort }) {
+/** SortHead is a sortable column's header: a toggle between its order
+ * and newest first; aria-sort says which is on. */
+function SortHead({
+  sortKey,
+  sort,
+  label,
+  title,
+  className = "text-right",
+}: {
+  sortKey: RunSortKey
+  sort?: RunsSort
+  label: string
+  title?: string
+  className?: string
+}) {
   if (!sort)
     return (
-      <TableHead className="text-right" title="the run's own cost, priced at read time; its subagents' apart">
-        cost
+      <TableHead className={className} title={title}>
+        {label}
       </TableHead>
     )
-  const why = sort.server ? COST_SORT_SERVER : COST_SORT_LOCAL
+  const active = sort.active === sortKey
+  const why =
+    sortKey === "cost"
+      ? sort.server
+        ? COST_SORT_SERVER
+        : COST_SORT_LOCAL
+      : SORT_WORDS[sortKey][sort.server ? "server" : "local"]
+  const toggle = sortKey === "started" || !active ? sortKey : "started"
   return (
-    <TableHead className="text-right" aria-sort={sort.active ? "descending" : "none"}>
+    <TableHead className={className} aria-sort={active ? "descending" : "none"}>
       <button
         type="button"
-        className={`font-medium hover:text-foreground ${sort.active ? "text-foreground" : ""}`}
-        title={sort.active ? `${why} — click for newest first` : why}
-        onClick={sort.onToggle}
-        data-cost-sort={sort.server ? "server" : "page"}
-        aria-pressed={sort.active}
+        className={`font-medium hover:text-foreground ${active ? "text-foreground" : ""}`}
+        title={active && sortKey !== "started" ? `${why} — click for newest first` : why}
+        onClick={() => sort.onSort(toggle)}
+        data-sort={sortKey}
+        data-cost-sort={sortKey === "cost" ? (sort.server ? "server" : "page") : undefined}
+        aria-pressed={active}
       >
-        cost{sort.active ? " ↓" : ""}
-        {sort.active && !sort.server ? <span className="text-faint"> (page)</span> : null}
+        {label}
+        {active ? " ↓" : ""}
+        {active && sortKey !== "started" && !sort.server ? <span className="text-faint"> (page)</span> : null}
       </button>
     </TableHead>
   )
@@ -240,7 +277,7 @@ function ReplayChip({ run }: { run: Pick<RunRow, "forked_from"> }) {
   )
 }
 
-export function RunsTable({ runs, selectedId, now, showCost, costSort }: RunsTableProps) {
+export function RunsTable({ runs, selectedId, now, showCost, sort }: RunsTableProps) {
   const clock = now ?? Date.now()
   const navigate = useNavigate()
   const selectedRow = useRef<HTMLTableRowElement>(null)
@@ -258,12 +295,17 @@ export function RunsTable({ runs, selectedId, now, showCost, costSort }: RunsTab
           <TableHead title="the thread this run is a turn of">session</TableHead>
           <TableHead>model</TableHead>
           <TableHead className="text-right">steps</TableHead>
-          <TableHead className="text-right" title="input / output tokens">
-            tokens in / out
-          </TableHead>
-          {showCost ? <CostHead sort={costSort} /> : null}
-          <TableHead className="text-right">started</TableHead>
-          <TableHead className="text-right">duration</TableHead>
+          <SortHead sortKey="tokens" sort={sort} label="tokens in / out" title="input / output tokens" />
+          {showCost ? (
+            <SortHead
+              sortKey="cost"
+              sort={sort}
+              label="cost"
+              title="the run's own cost, priced at read time; its subagents' apart"
+            />
+          ) : null}
+          <SortHead sortKey="started" sort={sort} label="started" />
+          <SortHead sortKey="duration" sort={sort} label="duration" />
         </TableRow>
       </TableHeader>
       <TableBody>

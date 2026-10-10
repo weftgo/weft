@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { setStudioToken } from "@/lib/api"
 import type { Span } from "@/lib/api"
 import { renderApp, stubBrowser } from "@/test/app"
+import { PALETTE_PLACEHOLDER } from "@/components/studio/command-palette"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { FakeStudio, golden } from "@/test/fake-studio"
 import { queryClient } from "@/lib/query"
@@ -147,7 +148,7 @@ describe("the trace page's URL (G2)", () => {
     fireEvent.keyDown(window, { key: "k", ctrlKey: true })
     const item = await screen.findByText("Copy link to this page")
     // Typed into the palette's own input, y is a letter, not the key.
-    fireEvent.keyDown(screen.getByPlaceholderText("Run id, agent, or a command…"), { key: "y" })
+    fireEvent.keyDown(screen.getByPlaceholderText(PALETTE_PLACEHOLDER), { key: "y" })
     expect(writeText).not.toHaveBeenCalled()
     expect(item.closest("[cmdk-item]")?.textContent).toContain("y")
     fireEvent.click(item)
@@ -174,7 +175,7 @@ describe("the trace page's URL (G2)", () => {
     renderApp(`/traces/${TRACE}?span=aa01`)
     await waitFor(() => expect(row("aa01")).toBeTruthy())
     fireEvent.keyDown(window, { key: "k", ctrlKey: true })
-    fireEvent.keyDown(await screen.findByPlaceholderText("Run id, agent, or a command…"), { key: "y" })
+    fireEvent.keyDown(await screen.findByPlaceholderText(PALETTE_PLACEHOLDER), { key: "y" })
     fireEvent.keyDown(window, { key: "Escape" })
     for (const tag of ["input", "textarea"] as const) {
       const box = document.body.appendChild(document.createElement(tag))

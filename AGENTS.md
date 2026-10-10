@@ -108,6 +108,7 @@ res, err := agt.Generate(ctx, weft.Prompt("Where is order 1234?"))
 //       weft.ParkAllExcept("lookup"),          // default-deny: every other call parks — ToolSource tools and Subagent child runs included
 //       weft.Metadata(map[string]string{"tenant": "acme"})) // on every span and record; subagent runs inherit
 //   weft.MetadataFromContext(ctx)   // read the merged pairs back (Tap, tool handler, child run)
+//   weft.WithMetadata(ctx, kv)      // the context-carried twin of weft.Metadata: pairs for every run started under ctx, the run option winning
 //   weft.StripContent(ev)           // the one content-shaping table: what a content-off destination receives
 // A changed run carries weft.override.hash + weft.override.* on its invoke_agent span (the experiment's fingerprint).
 // res.Text(), res.Messages (full transcript), res.Steps, res.Usage, res.ID
@@ -251,7 +252,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    rows, records, search index, spans, app logs — from obsdb's tables only, the app's
 //    //    conversation store and a shared file's thread tables untouched; the dev token or setup A's
 //    //    loopback Host, every panel token 403; obsdb.DB.DeleteRun/DeleteSession/Sweep/Vacuum), /api/live (SSE; ?all=1 every run, dev token/loopback only — meta live_all; its resume
-//    //    backfills the last hour / running runs, ≤ 500 — obsdb.RunQuery.LastSeenAfter), /api/panel-tokens (with a Token),
+//    //    backfills the last hour / running runs, ≤ 500 — obsdb.RunQuery.LastSeenAfter), /api/panel-tokens (with a Token), /api/panel-handoff?to= (setup C hand-off, capability handoff, with a Token only:
+//    //    a playground panel token → 303 <base><to>#token= with a 5-minute read token for its public id (capped at its own exp;
+//    //    Accept: application/json → {location, exp}); the server token → 303 with no fragment; a read token 403, it cannot widen;
+//    //    `to` a path under the base, else 400),
 //    //    /panel.js (the devtools panel, WEFT-DEVTOOLS §5 — its host API, plan C4: the element's
 //    //    open/close/toggle/isOpen/scope/select/on/studioLink, window.weft.devtools while connected
 //    //    unless data-global="off", events weft:run|parked|error; its layout, plan D1: float, dock
@@ -337,6 +341,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // lib/scope.ts form, both pinned by studio/testdata/scope.golden.json); scope.Set(w, s) once
 //     // the run id is known (before the first write); Access-Control-Expose-Headers gains
 //     // Weft-Scope; never a token. Not in the root package: that one is core's generated facade.
+//     // scope.Header also stamps the request's page — Referer, else Origin + "/", sanitised (http/https, no
+//     // userinfo/query/fragment, ≤ 1024 bytes) — as weft.page_url on every run under the handler, via
+//     // weft.WithMetadata on r.Context() (Generate and thread's Send alike; scope.PageURLFromContext, scope.PageURL,
+//     // scope.PageURLKey); Studio's run meta serves it for "open in app".
 
 // 7a. The playground (package weft/runtime): your app dials Studio out and
 //     executes experiment commands as runs of the agents you register:

@@ -183,6 +183,11 @@ type Pool struct {
 	// park between its boundary read and its arm — the window a resume
 	// armed by a pump can run and park again in.
 	testHookArming func(*delegate)
+	// testHookCanceling, when set (by this package's tests only), runs
+	// in cancelParked with the delegate settling, before the child's
+	// boundary is closed; a non-nil error stands in for that close
+	// failing.
+	testHookCanceling func(*delegate) error
 }
 
 // An Option configures a Pool at New.

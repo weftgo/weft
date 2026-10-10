@@ -367,6 +367,74 @@ func TestStaleParkReplayRefused(t *testing.T) {
 	}
 }
 
+// A Cancel that fails leaves the child parked — but a decision
+// recorded while the Cancel held it settling met a pump that skipped
+// it (the child was not parked), and no later pump comes unless
+// someone calls. The failed cancel's restore re-reads the verdicts
+// and arms the resume itself, as park does; it used to restore the
+// phase alone, and the ready decision waited for the next Decide.
+func TestFailedCancelArmsReadyDecision(t *testing.T) {
+	ctx := context.Background()
+	p := New(1)
+	var refunds atomic.Int32
+	refund := core.Tool("refund", "", func(_ context.Context, _ struct{ OrderID string }) (string, error) {
+		refunds.Add(1)
+		return "refunded", nil
+	}, core.RequireApproval())
+	child := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"1"}`}),
+		wefttest.Say("refunded"),
+	), refund)
+	parent, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
+	r, err := p.Submit(ctx, parent, child, "refund order 1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc, err := p.Wait(ctx, parent, r.ID)
+	if err != nil || rc.State != Parked {
+		t.Fatalf("receipt = %+v, %v; want parked", rc, err)
+	}
+	errClose := errors.New("boundary not closed")
+	p.testHookCanceling = func(d *delegate) error {
+		p.mu.Lock()
+		settling := d.phase == phaseSettling
+		p.mu.Unlock()
+		if !settling {
+			t.Error("cancel hook ran with the delegate not settling")
+		}
+		// No watch pumps from here on: the decision lands in the
+		// settling window and nothing but the restore can arm it.
+		parent.WatchMirrors(p, func(*slog.Logger) {})
+		pending := parent.Pending()
+		if len(pending) != 1 {
+			t.Errorf("mirrors while settling = %+v", pending)
+			return errClose
+		}
+		if _, err := parent.Decide(ctx, thread.Approve(pending[0].CallID)); err != nil {
+			t.Errorf("Decide: %v", err)
+		}
+		return errClose
+	}
+	if err := p.Cancel(ctx, parent, r.ID); !errors.Is(err, errClose) {
+		t.Fatalf("Cancel = %v; want the injected failure", err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	rc, err = p.Wait(ctx, parent, r.ID)
+	for err == nil && !rc.Settled() && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+		rc, err = p.Wait(ctx, parent, r.ID)
+	}
+	if err != nil || rc.State != Done || rc.Stop != "refunded" {
+		t.Fatalf("receipt = %+v, %v; want done \"refunded\" without another Decide", rc, err)
+	}
+	if n := refunds.Load(); n != 1 {
+		t.Errorf("refund ran %d times, want 1", n)
+	}
+	if err := p.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // stubModel answers every request with one line — a model any number
 // of sessions can share — once its gate, when it has one, is open.
 type stubModel struct{ gate chan struct{} }

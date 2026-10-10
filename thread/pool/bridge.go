@@ -184,16 +184,28 @@ func (p *Pool) park(ctx context.Context, d *delegate) error {
 	// whichever of them gets there — and only for this park: a pump
 	// may arm the resume first, and the child run and park again
 	// before this arm, which gen then refuses.
-	if mirrors, err := d.parent.MirroredRequests(ctx); err != nil {
+	p.rearm(ctx, d, gen)
+	return nil
+}
+
+// rearm reads the parent's verdicts for a child that has just come to
+// rest at park gen and arms its resume when every pending call holds
+// one — the decision a pump skipped while the child was not yet (or
+// no longer) parked. A read error is logged and left for the next
+// Decide, which pumps the child.
+func (p *Pool) rearm(ctx context.Context, d *delegate, gen uint64) {
+	mirrors, err := d.parent.MirroredRequests(ctx)
+	if err != nil {
 		d.agent.Logger().Error("thread/pool: parked child's decisions not re-read; the next Decide pumps it",
 			"receipt", d.receipt, "child", d.child.ID(), "err", err)
-	} else if replay, ready, _ := readiness(d.child.ID(), d.child.Pending(), heldMirrors(mirrors)); ready {
+		return
+	}
+	if replay, ready, _ := readiness(d.child.ID(), d.child.Pending(), heldMirrors(mirrors)); ready {
 		if p.testHookArming != nil {
 			p.testHookArming(d)
 		}
 		p.arm(d, gen, replay)
 	}
-	return nil
 }
 
 // mirrorKey keys a mirrored request: its namespaced call id and the
@@ -726,10 +738,25 @@ func (p *Pool) resolveWrapper(ctx context.Context, d *delegate, content string, 
 // later approval — nothing is resumed, and the delegation is
 // concluded canceled. The caller moved the delegate to phaseSettling.
 func (p *Pool) cancelParked(ctx context.Context, d *delegate) error {
-	if err := d.child.CancelDelegated(ctx, cancelDenyReason); err != nil {
+	var err error
+	if p.testHookCanceling != nil {
+		err = p.testHookCanceling(d)
+	}
+	if err == nil {
+		err = d.child.CancelDelegated(ctx, cancelDenyReason)
+	}
+	if err != nil {
 		// The boundary could not be closed: the child stays parked and
-		// decidable rather than half-canceled.
-		p.setPhase(d, phaseParked)
+		// decidable rather than half-canceled. A decision recorded
+		// while it read settling met a pump that skipped it, and no
+		// later pump comes unless someone calls: read the verdicts
+		// again, as park does. The park is the same one — a failed
+		// cancel left its boundary as it was — so gen stands.
+		p.mu.Lock()
+		d.phase = phaseParked
+		gen := d.parks
+		p.mu.Unlock()
+		p.rearm(context.WithoutCancel(ctx), d, gen)
 		return fmt.Errorf("thread/pool: child session %s: %w", d.child.ID(), err)
 	}
 	p.conclude(context.WithoutCancel(ctx), d, Canceled, "canceled while parked at an approval", d.canceledText(), true)

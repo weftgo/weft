@@ -228,7 +228,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    table in the file's shape + source, path?; capability "pricing", every identity reads it), runs/{id}/export?format=json|jsonl|otlp|wefttest (the whole run as one
 //    //    download, capability "export"; otlp re-ingests through /v1/*, wefttest is a zip:
 //    //    `<agent>_replay_test.go` (plan F6, a passing replay test) beside `testdata/TestReplay_<run>/` fixtures
-//    //    wefttest.Replay reads — a compacted step keys on its view, noted compacted_at),
+//    //    wefttest.Replay reads — results keyed by (step, call id), steered steps via a generated wefttest.NewSteers source, a
+//    //    compacted step keys on its view, noted compacted_at),
 //    //    runs/{id}/logs?from=&limit=&severity= (the app's own log lines under the run's
 //    //    spans, capability "logs"; refused to a read-scoped token: they may carry prompts;
 //    //    the run row carries delta_count), diff?a=&b= (two runs aligned by step ordinal, each
@@ -384,7 +385,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // /api/playground/fixtures (wefttest replay fixtures from a run's records),
 //     // /api/experiments (the saved groups + the runs they label), /api/runtimes/
 //     // {id}/breakpoints, /api/runs/{id}/steer, /api/runs/{id}/cancel (capability cancel: the link's cancel frame for the command
-//     // holding a runtime-started run; 202 cancelling, 409 app-owned/finished, 503 runtime gone; steer's auth); the panel drawer and /playground
+//     // holding a runtime-started run; 202 cancelling, 409 app-owned/finished/parked — decide instead, 503 runtime gone; best effort; steer's auth); the panel drawer and /playground
 //     // (the Studio UI) render them, gated on capabilities — the option lab (plan F3.2)
 //     // one form on both: every override above, defaults greyed, an override in colour
 //     // with a reset, lib/experiment-body.ts's labOverrides (the server's rules by name,

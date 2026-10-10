@@ -47,7 +47,11 @@ module, ADR 0005).
   `ErrUnknownRun`, `ErrRunFinished`. The Live page (H6.2) derives a running
   row from the event frames it already receives: step = the last
   step_finish's index, tokens = the sum of step_finish usage, TTFT = its
-  ttft_ms; cost stays unknown while running (A5.1's rule).
+  ttft_ms; cost stays unknown while running (A5.1's rule). Cancelling a parked
+  run is 409 "run X is parked: decide its pending calls (approve/deny)
+  instead". Cancel is best effort: a cancel lost to a stream reconnect is
+  not retried — cancel again; a fork-mode turn re-run after an overflow is
+  cancelled by its original run id while it runs.
 - Save as test (plan F6): `GET /api/runs/{id}/export?format=wefttest` now
   zips a generated `<agent>_replay_test.go` at the root beside the fixtures,
   which move to `testdata/TestReplay_<run>/`. Unzipped into a package
@@ -58,7 +62,17 @@ module, ADR 0005).
   for compacted steps ("Step N replays from the compacted view", the
   fixture's `compacted_at`); and `StopWhen(StepCountIs(n))`. It compiles
   against the public `github.com/weftgo/weft` API only. `weft export
-  --wefttest` reads the new layout and writes the fixtures only.
+  --wefttest` reads the new layout and writes the fixtures only. The skeleton keys recorded
+  results by (step, call id), so a provider that reuses call ids across
+  steps (Google's filled `call_<n>`, llama.cpp-style servers) replays
+  correctly; a run steered mid-turn is replayed through a generated
+  `wefttest.NewSteers().At(step, …)` source, the header naming each steered
+  step; a step whose transcript the recorded run changed any other way
+  replays its recorded messages from that step on ("Step N replays the
+  recorded messages: the recorded run rewrote them") — the limit: a
+  PrepareStep that rewrites per step is replayed from the record, not
+  re-derived. `weft export --wefttest` refuses a zip that mixes flat fixtures
+  with `testdata/<test>/`.
 - Proposed prompts (plan F6): `PUT`/`DELETE /api/agents/{name}/proposal`
   (capability `proposals`; the dev token, or loopback in setup A; every
   panel token 403) hold an agent's proposed instructions in Studio's memory
@@ -66,7 +80,8 @@ module, ADR 0005).
   `proposed: {instructions, instructions_hash, since}` beside the registered
   instructions. "Keep as prompt" stays a clipboard copy. Nothing is written
   to your files: the download is the hand-off. WEFT-PROMPT.md P3 replaces the
-  clipboard with a propose command over the runtime link.
+  clipboard with a propose command over the runtime link. A PUT for an agent the
+  served manifest file does not name is 409: the proposal would not show.
 - `/api/live`: a resume names a run it could not read with
   `event: backfill_error {run_id, kind}` instead of skipping it silently.
 - Provider raw bodies (plan A6.1, ADR 0028 §12): `otel.RawBodies(true)` records

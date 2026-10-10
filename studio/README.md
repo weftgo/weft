@@ -1074,7 +1074,9 @@ canceled` and its partial transcript, its command finished failed; the
 live stream carries the failed run row (a cancelled run has no run_finish).
 202 `{run_id, command_id, runtime_id, state: "cancelling"}`; 404 an unknown
 run; 409 the app's own run (cancel arrives with F4) or one already finished
-(a parked run included); 503 its runtime is disconnected. Auth is steer's:
+(a parked run answers 409 "decide its pending calls instead"); 503 its
+runtime is disconnected; best effort — a cancel lost to a stream reconnect
+is not retried, cancel again. Auth is steer's:
 the dev token or setup A's loopback, a playground-scoped panel token inside
 its public id; a read panel token is 403. The Live page derives a running
 row from the event frames it already receives: step = the last
@@ -1561,7 +1563,9 @@ zipped as `<agent>_replay_test.go` (a generated test, plan F6) beside
 `testdata/TestReplay_<run>/` — unzip into a package directory and
 `go test` replays the run, `wefttest.Replay(t, "testdata")` answering;
 the skeleton's header repeats each step that replays from a compacted
-view; a step whose request carried a compaction view is keyed on it
+view; results keyed by (step, call id); steered steps replayed through a
+generated `wefttest.NewSteers` source; a step the recorded run rewrote
+replays its recorded messages (replayed, not re-derived); a step whose request carried a compaction view is keyed on it
 and noted `compacted_at`. The run block's children carry their `holes`
 as `runs/{id}` serves them. A read-scoped panel token gets `json` and
 `jsonl` with the request block `{badge: "hidden", …}` and each
@@ -1646,7 +1650,8 @@ instructions_hash, since}` when a proposal is held — plan F6, the
 `proposals` capability: an agent's proposed instructions held in Studio's
 memory, at most 64 agents with the oldest forgotten first, lost on restart,
 never sent to the app or written to files; 200 `{agent, proposed, note}`,
-404 for an agent no manifest names or, on DELETE, one with no proposal; the
+404 for an agent no manifest names or, on DELETE, one with no proposal, 409
+when a manifest file is served and does not name the agent; the
 dev token's and setup A's loopback alone, every panel token 403; it carries the agents' system
 prompts: 403 with `badge: "hidden"` to a read-scoped panel token),
 `DELETE /api/runs/{id}` and `DELETE /api/sessions/{id}` (plan A7, the

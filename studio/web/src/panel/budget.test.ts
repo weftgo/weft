@@ -11,7 +11,7 @@ const ledger = JSON.parse(readFileSync(resolve(process.cwd(), "panel-budget.json
 
 describe("the size ledger (panel-budget.json)", () => {
   it("is append-only: the recorded rows stay as recorded", () => {
-    expect(ledger.rows.slice(0, 39).map((r) => [r.label, r.item, r.gzip])).toEqual([
+    expect(ledger.rows.slice(0, 40).map((r) => [r.label, r.item, r.gzip])).toEqual([
       ["C1", "", 32359],
       ["G1", "", 32700],
       ["C5.2", "", 32810],
@@ -51,6 +51,7 @@ describe("the size ledger (panel-budget.json)", () => {
       ["G2 replay URL", "", 79600],
       ["F2 final", "F2", 79707],
       ["review fixes (session 8)", "", 80058],
+      ["final web fixes (session 8)", "", 80088],
     ])
     for (let i = 1; i < ledger.rows.length; i++) expect(ledger.items.some((x) => x.id === ledger.rows[i].item) || ledger.rows[i].item === "").toBe(true)
   })

@@ -93,7 +93,8 @@ export function editLine(e: ReplayEdit): string {
   const k = kindOf(e)
   const at = k === "insert" ? `before step ${e.step}` : `step ${e.step}`
   const who = e.callID ? ` · ${e.callID}` : k === "user" && e.index ? ` · #${e.index}` : ""
-  const v = k === "tool_args" ? JSON.stringify(e.args) : (e.toolResult ?? e.content ?? "")
+  // Defensive: a hand-built edit may lack its field or carry another type.
+  const v = String((k === "tool_args" ? JSON.stringify(e.args) : (e.toolResult ?? e.content)) ?? "")
   return `${k} · ${at}${who} → ${v.length > 60 ? `${v.slice(0, 59)}…` : v}`
 }
 

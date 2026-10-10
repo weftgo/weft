@@ -73,6 +73,8 @@ import {
 import type { Experiment } from "@/hooks/use-command-tracking"
 import { useRunEvents } from "@/hooks/use-run-events"
 import { ExperimentForm, StepPicker, useSourceEditFields } from "@/components/studio/experiment-form"
+import { EditList } from "@/components/studio/transcript-editor"
+import { editsProblem } from "@/lib/edits"
 import { Button } from "@/components/ui/button"
 import { SelectField } from "@/components/ui/select-field"
 import { SplitPane } from "@/components/studio/split-pane"
@@ -189,6 +191,9 @@ export function handoffFromHash(hash: string): Partial<PlaygroundSearch> {
   return out
 }
 
+/** Why a read-scoped token sees no Run: the server refuses it (403). */
+export const READ_ONLY_NOTE = "this token may read the playground, not run it: Run is for a dev or write token"
+
 export const Route = createFileRoute("/playground")({
   validateSearch: (search: Record<string, unknown>): PlaygroundSearch => parseHandoff(search),
   component: PlaygroundPage,
@@ -243,6 +248,12 @@ function useHandoff(): PlaygroundSearch & { own: (state: PageState) => boolean }
       const mine = playgroundSearch(state)
       const next = parseHandoff({
         ...query,
+        // The edits and the lab were read on arrival (the page holds
+        // them now) and are prompt-bearing: a hand-built query's
+        // edits= / lab= leaves the bar with the first write, as a
+        // fragment's does (canonical strips them from a copied link).
+        edits: undefined,
+        lab: undefined,
         run: mine.run,
         step: mine.step,
         agent: mine.agent,
@@ -331,6 +342,9 @@ function Playground({ caps }: { caps: string[] }) {
   // the shell's poll off — GET /api/runtimes is the picker for every
   // identity — so here the page is that one poller itself.
   const shellPolls = canReplay(caps, studioToken())
+  // …and only such a bearer runs: a read-scoped token's Run would 403,
+  // so the run controls are not drawn (the run page's rule).
+  const mayRun = shellPolls
   const runtimes = useQuery({ ...runtimesQuery(), refetchInterval: shellPolls ? false : RUNTIMES_POLL_MS })
   const meta = useQuery(metaQuery())
 
@@ -519,6 +533,7 @@ function Playground({ caps }: { caps: string[] }) {
   // checked yet) hold Run: TranscriptEdits shows them, badged.
   const editFields = useSourceEditFields(sourceRunID)
   const orphans = sourceRunID ? unmatchedDrafts(editDrafts, editFields.fields, fromStep) : []
+  const heldEdits = editsProblem(variant.thread, fromStep, editDrafts)
 
   /** decide answers one parked call of a variant's run with the
    * approval verbs (ADR 0007) — the panel's controls, rendered here
@@ -821,19 +836,42 @@ function Playground({ caps }: { caps: string[] }) {
             editDrafts={editDrafts}
             setEditDrafts={setEditDrafts}
           />
+          {/* Edits held at step 0 cannot travel (editsProblem): the
+              line says so and holds Run, and the list stays here so
+              they can be dropped (the kept-prefix fields hide at 0). */}
+          {heldEdits ? (
+            <>
+              <p className="text-xs text-status-bad" role="alert" data-edits-held>
+                {heldEdits}
+              </p>
+              <EditList edits={editDrafts} onDrop={(e) => setEditDrafts((cur) => cur.filter((x) => x !== e))} />
+            </>
+          ) : null}
           {error && (
             <p className="text-xs text-destructive" role="alert">
               {error}
             </p>
           )}
-          <Button
-            onClick={() => void run()}
-            disabled={
-              !runtime || !agent || busy || resolving || orphans.length > 0 || labProblems(variant, agent).length > 0
-            }
-          >
-            {busy ? "sending…" : `Run ${variant.key}`}
-          </Button>
+          {mayRun ? (
+            <Button
+              onClick={() => void run()}
+              disabled={
+                !runtime ||
+                !agent ||
+                busy ||
+                resolving ||
+                orphans.length > 0 ||
+                !!heldEdits ||
+                labProblems(variant, agent).length > 0
+              }
+            >
+              {busy ? "sending…" : `Run ${variant.key}`}
+            </Button>
+          ) : (
+            <p className="text-xs text-muted-foreground" data-playground-read-only>
+              {READ_ONLY_NOTE}
+            </p>
+          )}
               </section>
             ),
           },
@@ -886,6 +924,7 @@ function Playground({ caps }: { caps: string[] }) {
             variants={variants}
             runMatrix={runMatrix}
             busy={busy || resolving || !runtime || !agent}
+            mayRun={mayRun}
             issuing={busy}
             cells={cells}
             setCells={setCells}
@@ -1443,6 +1482,7 @@ function Matrix({
   variants,
   runMatrix,
   busy,
+  mayRun,
   issuing,
   cells,
   setCells,
@@ -1457,6 +1497,8 @@ function Matrix({
   /** The matrix's run button is held (a command posting, the target
    * not resolved, no runtime or agent). */
   busy: boolean
+  /** The bearer may start runs (canReplay): else no Run matrix. */
+  mayRun: boolean
   /** Cells are being issued (a command posting): the notice waits for
    * this alone — a runtime gone after the cells were issued must not
    * hold the toast for their settling. */
@@ -1577,19 +1619,25 @@ function Matrix({
             onChange={(e) => setName(e.target.value)}
           />
           <code className="text-faint">{experimentID}</code>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={() => {
-              const id = experimentID
-              void runMatrix(matrixInputs(inputs, sourceRunID), id, () => {
-                issued.current = id
-              })
-            }}
-          >
-            Run matrix
-          </Button>
+          {mayRun ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => {
+                const id = experimentID
+                void runMatrix(matrixInputs(inputs, sourceRunID), id, () => {
+                  issued.current = id
+                })
+              }}
+            >
+              Run matrix
+            </Button>
+          ) : (
+            <span className="text-faint" data-matrix-read-only>
+              {READ_ONLY_NOTE}
+            </span>
+          )}
         </div>
         {inputs.map((inp, i) => (
           <div key={inp.key} className="flex items-center gap-2">

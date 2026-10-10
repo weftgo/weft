@@ -518,13 +518,18 @@ describe("the drawer's playground link is the same command (phase 4 review)", ()
       agent: "acme-support",
       runtime: "rt_1",
       instructions: "be terse",
-      input: "and order 9?",
       model: "glm",
       thinking: "high",
       side_effects: "park",
-      engine: "live",
-      thread: "ephemeral",
     })
+    // The panel's rule (parity.test.ts): the input only at step 0 (a
+    // later step keeps the source's prompt), the defaults left out.
+    for (const k of ["input", "engine", "thread"]) expect(back).not.toHaveProperty(k)
+    const at0 = handoffFromHash(
+      playgroundLink(drawerHandoff({ runID: RUN, fromStep: 0, tools, registered: "you help", variant, edits: [] })).hash ?? ""
+    )
+    expect(at0).toMatchObject({ run: RUN, input: "and order 9?" })
+    expect(at0).not.toHaveProperty("step")
     expect(labFromHandoff(back.lab)).toEqual(lab)
     expect(editsFromHandoff(back.edits)).toEqual(edits)
     expect(toolsOffFor(back.tools, { tools: tools.map((name) => ({ name })) } as unknown as AgentView)).toEqual(new Set(["refund"]))

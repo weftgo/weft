@@ -66,6 +66,8 @@ const TABLE: Row[] = [
   { name: "named with no tool", lab: { tool_choice: "named" }, refused: "tool_choice named needs a tool name" },
   { name: "named a tool the command turns off", lab: { tool_choice: "named", tool_choice_name: "refund", only_tools: ["lookup_order"] }, refused: "tool_choice names refund, which this command turns off" },
   { name: "named a tool park_on parks", lab: { tool_choice: "named", tool_choice_name: "refund", park_on: ["refund"] }, refused: "tool_choice names refund, which park_on parks: every forced call would park" },
+  { name: "the default named tool park_on parks (studio/playground.go's parkedChoice, a590f1e)", lab: { park_on: ["lookup_order"] }, refused: "tool_choice names lookup_order, which park_on parks: every forced call would park" },
+  { name: "the default named tool parked, an explicit tool_choice sent instead", lab: { park_on: ["lookup_order"], tool_choice: "auto" }, sends: { tool_choice: { mode: "auto" }, park_on: ["lookup_order"] } },
   { name: "the default named tool turned off (ADR 0029 decision 7)", off: ["lookup_order"], refused: "the agent's default tool_choice names lookup_order, which this command turns off; send tool_choice" },
 ]
 

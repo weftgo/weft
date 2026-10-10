@@ -423,6 +423,14 @@ module, ADR 0005).
   compare draws a thin diff** (no steps, a side without its request
   record) without a throw. Panel: +351 B gzip (ledger row "review fixes
   (session 8)").
+- **A failed `transcript?step` read is not re-asked per keystroke**: the
+  failure is remembered and the view asked again only after 10 s, so a
+  persistent 500 costs one request per back-off, not one per key.
+- **The option lab refuses a parked default `tool_choice`**: an agent
+  whose default forces tool X, with `park_on` naming X, holds Run with
+  the server's sentence ("tool_choice names X, which park_on parks:
+  every forced call would park") on both surfaces, as Studio and the
+  runtime refuse it.
 
 ### Fixed — Studio (phase 4 review)
 
@@ -448,6 +456,20 @@ module, ADR 0005).
   controls are no longer reset to the router's query on the re-run).
 - A saved pane layout outside a pane's minimum opens clamped to the
   bound (pinned by a test).
+- **A hand-off's junk edits no longer crash the playground**: `edits=`
+  keeps an edit only when every field has its type (a known kind, text
+  where text goes, a non-negative index, args an object), at most 200;
+  an edit's line draws whatever it holds.
+- **The drawer's "open in the playground" and the panel's "compare in
+  Studio" write the same fragment** for the same draft (pinned by a
+  parity test): the input only at step 0, `step` only past 0, the
+  engine, side effects and thread only when not the default.
+- **Edits held at step 0 hold the playground's Run** with the line
+  saying why, and their list stays on the page so they can be dropped.
+- **A read-scoped token sees no Run and no Run matrix** in the
+  playground (the server refuses them), with a line saying why.
+- **A hand-built `edits=` / `lab=` leaves the playground's address bar**
+  with the page's first write-back (the page holds them).
 
 ### Changed — breaking
 

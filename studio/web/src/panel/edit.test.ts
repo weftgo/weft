@@ -440,22 +440,34 @@ describe("review fixes (session 8)", () => {
     ])
   })
 
-  it("8: a failed transcript?step read is asked again; a scope change forgets the views", async () => {
+  it("8: a failed transcript?step read is asked again after a back-off, not per keystroke; a scope change forgets the views", async () => {
     let fail = true
     const r = routes()
     r[`runs/${RUN}/transcript?step=2`] = () => (fail ? apiError(500, "internal", "boom") : AS_OF_2)
     const studio = fakeStudio(r, META_PV)
     const el = await mount()
+    const asked = () => studio.gets(`runs/${RUN}/transcript?step=2`).length
     await edit(el, '.weft-call[data-key="c1"] [data-weft-editable="tool_result"]', "tool_result:0:c1:0", "x")
     await edit(el, C2, "tool_result:1:c2:0", "y")
     await settle(400)
     expect($(el, "[data-weft-view-edit]")).toBeNull()
-    fail = false
-    await edit(el, C2, "tool_result:1:c2:0", "yz")
-    await settle(400)
+    const first = asked()
+    expect(first).toBe(1)
+    // A persistent 500: more keystrokes inside the back-off ask nothing.
+    vi.useFakeTimers({ toFake: ["Date"], now: Date.now() })
+    try {
+      for (const v of ["y1", "y12", "y123"]) await edit(el, C2, "tool_result:1:c2:0", v)
+      await settle(400)
+      expect(asked()).toBe(first)
+      fail = false
+      vi.setSystemTime(Date.now() + 10_001)
+      await edit(el, C2, "tool_result:1:c2:0", "yz")
+      await settle(400)
+    } finally {
+      vi.useRealTimers()
+    }
     expect(text(el, "[data-weft-view-edit]")).toBe(COMPACTED_C1)
-    const asked = studio.gets(`runs/${RUN}/transcript?step=2`).length
-    expect(asked).toBeGreaterThanOrEqual(2)
+    expect(asked()).toBe(first + 1)
     const model = (el as unknown as { model: { compactedAt: (r: string, s: number) => unknown } }).model
     el.scope("pub_other")
     await settle()

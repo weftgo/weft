@@ -719,19 +719,23 @@ export function drawerHandoff(d: {
 }): PlaygroundHandoff {
   const { variant: v } = d
   const kept = (d.tools ?? []).filter((n) => !v.toolsOff.has(n))
+  // The panel's studioPlaygroundLink, key for key and in its order, so
+  // the same draft hands off the same fragment (parity.test.ts): step
+  // only past 0, the input only at step 0 (a later step keeps the
+  // source's prompt), the run's shape only where it is not the default.
   return {
-    run: d.runID,
-    step: d.fromStep,
-    agent: d.agent,
-    runtime: d.runtime,
-    side_effects: v.sideEffects,
-    thread: v.thread,
-    engine: v.engine,
+    run: d.runID || undefined,
+    step: d.fromStep > 0 ? d.fromStep : undefined,
     instructions: v.instructions && v.instructions !== d.registered ? v.instructions : undefined,
-    input: v.input || undefined,
+    tools: kept.length && kept.length < (d.tools ?? []).length ? kept.join(",") : undefined,
     model: v.model || undefined,
     thinking: v.thinking || undefined,
-    tools: kept.length && kept.length < (d.tools ?? []).length ? kept.join(",") : undefined,
+    input: d.fromStep === 0 ? v.input || undefined : undefined,
+    engine: v.engine === "scripted" ? v.engine : undefined,
+    side_effects: v.sideEffects !== "substitute" ? v.sideEffects : undefined,
+    thread: v.thread === "fork" ? v.thread : undefined,
+    agent: d.agent || undefined,
+    runtime: d.runtime || undefined,
     lab: labHandoff(v.lab),
     edits: editsHandoff(d.edits),
   }

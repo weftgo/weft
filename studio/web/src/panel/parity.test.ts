@@ -32,7 +32,7 @@ import { FakeStudio, golden, hiddenRefusal, pagedEvents, pagedRequests } from ".
 import type { FakePosEvent } from "../test/fake-studio"
 import { $, all, assistant, ATTRS, click, META, mount, runRow, SESSION, settle, setup, T0, teardown, transcript, user } from "./testkit"
 import type { WeftDevtools } from "./element"
-import { buildRunBody as studioBody } from "../lib/experiment-body"
+import { buildRunBody as studioBody, emptyLab } from "../lib/experiment-body"
 import type { VariantFields } from "../lib/experiment-body"
 import type { ReplayEdit } from "../lib/edits"
 import { previewView } from "../lib/preview"
@@ -40,6 +40,10 @@ import type { PreviewDoc } from "../lib/preview"
 import { PreviewPane } from "../components/studio/transcript-editor"
 import { previewBlock } from "./editor"
 import { buildRunBody as panelBody } from "./playground"
+import type { ExperimentDraft } from "./playground"
+import { studioPlaygroundLink } from "./element"
+import { drawerHandoff } from "../components/studio/replay-drawer"
+import { playgroundLink } from "../lib/links"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -701,5 +705,59 @@ describe("the transcript editor's command and preview (F2 parity)", () => {
       const v = previewView(doc)
       expect(studio.rows).toEqual(v.rows!.map((r) => [r.op, r.was, r.will]))
       expect(studio.holes).toEqual(v.holes.map((h) => h.hole))
+    })
+})
+
+describe("the hand-off to Studio's playground is one fragment (final web review)", () => {
+  // The same draft on both surfaces: the panel's "compare in Studio"
+  // and the run page drawer's "open in the playground" write the same
+  // keys, in the same order, by the same omission rule.
+  const tools = ["lookup_order", "search_kb", "refund"]
+  const cases: { name: string; step: number; v: Omit<VariantFields, "toolsOff"> & { off: string[] }; edits: ReplayEdit[] }[] = [
+    {
+      name: "a later step with edits, a lab and every override (the input stays behind)",
+      step: 2,
+      v: { off: ["refund"], instructions: "be terse", model: "glm", thinking: "high", input: "stale", engine: "live", sideEffects: "park", thread: "ephemeral", lab: { ...emptyLab(), max_steps: "3", park_on: ["refund"] } },
+      edits: [{ kind: "tool_result", step: 1, callID: "c2", toolResult: "none" }],
+    },
+    {
+      name: "step 0, a fork with its input, scripted",
+      step: 0,
+      v: { off: [], instructions: "you help", model: "", thinking: "", input: "and order 9?", engine: "scripted", sideEffects: "substitute", thread: "fork" },
+      edits: [],
+    },
+    {
+      name: "every default: the run and its target only",
+      step: 0,
+      v: { off: [], instructions: "you help", model: "", thinking: "", input: "", engine: "live", sideEffects: "substitute", thread: "ephemeral" },
+      edits: [],
+    },
+  ]
+  for (const c of cases)
+    it(c.name, () => {
+      const { off, ...v } = c.v
+      const studio = playgroundLink(
+        drawerHandoff({ runID: RUN, fromStep: c.step, agent: "acme-support", runtime: "rt_1", tools, registered: "you help", variant: { ...v, toolsOff: new Set(off) }, edits: c.edits })
+      ).hash
+      const draft: ExperimentDraft = {
+        runId: RUN,
+        agent: "acme-support",
+        runtimeId: "rt_1",
+        step: c.step,
+        instructions: v.instructions,
+        registeredInstructions: "you help",
+        tools: Object.fromEntries(tools.map((t) => [t, !off.includes(t)])),
+        model: v.model,
+        thinking: v.thinking,
+        input: v.input,
+        engine: v.engine,
+        sideEffects: v.sideEffects,
+        thread: v.thread,
+        edits: c.edits,
+        ...(v.lab ? { lab: v.lab } : {}),
+      }
+      const panel = new URL(studioPlaygroundLink("http://studio.test/studio/", draft, c.step)).hash.slice(1)
+      expect(panel).toBe(studio)
+      expect(panel).toContain(`run=${RUN}`)
     })
 })

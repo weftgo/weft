@@ -1660,7 +1660,9 @@ export class PanelModel {
     // compacted_at), read once per (run, step) while edits exist: the
     // drawer refuses an edit inside it before anything is posted.
     const at = d ? `${d.runId}#${d.step}` : ""
-    if (d && d.edits.length && d.step > 0 && d.thread !== "fork" && !this.asOf.has(at)) {
+    // A failed read is remembered (its time): asked again 10 s on, not per keystroke.
+    const f = this.asOf.get(at)
+    if (d && d.edits.length && d.step > 0 && d.thread !== "fork" && (f === undefined || (typeof f == "number" && Date.now() - f > 1e4))) {
       this.asOf.set(at, null)
       void panelGet<{ compacted_at: CompactedNote | null }>(this.ep, `runs/${encodeURIComponent(d.runId)}/transcript?step=${d.step}`).then(
         (doc) => {
@@ -1668,7 +1670,7 @@ export class PanelModel {
           this.asOf.set(at, doc.compacted_at)
           this.emit()
         },
-        () => this.asOf.delete(at)
+        () => this.asOf.set(at, Date.now())
       )
     }
     if (!d || d.thread === "fork" || !(this.state.meta?.capabilities.includes("preview") ?? false)) {
@@ -1699,10 +1701,11 @@ export class PanelModel {
     })
   }
 
-  private asOf = new Map<string, CompactedNote | null>()
+  private asOf = new Map<string, CompactedNote | null | number>()
   /** compactedAt is the view step `step` of run carried, once read. */
   compactedAt(run: string, step: number): CompactedNote | null {
-    return this.asOf.get(`${run}#${step}`) ?? null
+    const v = this.asOf.get(`${run}#${step}`)
+    return typeof v == "object" ? v : null
   }
 
   private setPreview(p: PanelPreview) {

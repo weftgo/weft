@@ -507,12 +507,36 @@ export function labFromHandoff(s: string | undefined): LabFields | undefined {
   return any ? (lab as unknown as LabFields) : undefined
 }
 
+/** The most edits a hand-off brings: a longer list is cut, so a huge
+ * fragment cannot stall the page. */
+export const HANDOFF_EDITS_MAX = 200
+
+const EDIT_KINDS = ["tool_result", "reply", "user", "tool_args", "insert"]
+const ord = (v: unknown) => Number.isInteger(v) && (v as number) >= 0
+
 /** editsFromHandoff reads edits= back: each an object with a step
- * ordinal; the server stays the authority on the rest. */
+ * ordinal and every other field of its type (a known kind, text where
+ * text goes, args an object) — junk is dropped, never drawn; the server
+ * stays the authority on the rest. */
 export function editsFromHandoff(s: string | undefined): ReplayEdit[] {
   const o = parseJSON(s)
+  const text = (v: unknown) => v === undefined || typeof v === "string"
   return Array.isArray(o)
-    ? o.filter((e): e is ReplayEdit => !!e && typeof e === "object" && Number.isInteger((e as ReplayEdit).step) && (e as ReplayEdit).step >= 0)
+    ? o
+        .filter((x): x is ReplayEdit => {
+          if (!x || typeof x !== "object" || Array.isArray(x)) return false
+          const e = x as Record<string, unknown>
+          return (
+            ord(e.step) &&
+            (e.kind === undefined || EDIT_KINDS.includes(e.kind as string)) &&
+            text(e.callID) &&
+            text(e.toolResult) &&
+            text(e.content) &&
+            (e.index === undefined || ord(e.index)) &&
+            (e.args === undefined || (!!e.args && typeof e.args === "object" && !Array.isArray(e.args)))
+          )
+        })
+        .slice(0, HANDOFF_EDITS_MAX)
     : []
 }
 
@@ -627,8 +651,13 @@ export function labOverrides(
     else if (!tools.includes(n)) no("tool_choice", `tool ${n} in tool_choice is not in agent ${agent.name}'s manifest`)
     else if (!leavesOn(n)) no("tool_choice", `tool_choice names ${n}, which this command turns off`)
     else if (park.includes(n)) no("tool_choice", `tool_choice names ${n}, which park_on parks: every forced call would park`)
-  } else if (!tc && d?.tool_choice.mode === "named" && d.tool_choice.name && !leavesOn(d.tool_choice.name))
-    no("tool_choice", `the agent's default tool_choice names ${d.tool_choice.name}, which this command turns off; send tool_choice`)
+  } else if (!tc && d?.tool_choice.mode === "named" && d.tool_choice.name) {
+    const n = d.tool_choice.name
+    if (!leavesOn(n)) no("tool_choice", `the agent's default tool_choice names ${n}, which this command turns off; send tool_choice`)
+    // The explicit rule's sentence (studio/playground.go's parkedChoice):
+    // a default that forces a parked tool parks every forced call too.
+    else if (park.includes(n)) no("tool_choice", `tool_choice names ${n}, which park_on parks: every forced call would park`)
+  }
   if (Object.keys(options).length) out.options = options
   if (Object.keys(p).length) out.params = p
   if (tc) out.tool_choice = tc

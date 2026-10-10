@@ -45,6 +45,10 @@ describe("wireEdits", () => {
     expect(putEdit(l, { kind: "tool_args", step: 0, callID: "c1" }, true)).toEqual([l[1]])
     expect(editLine(l[0])).toBe('tool_args · step 0 · c1 → {"a":2}')
     expect(editLine({ kind: "insert", step: 2, content: "hi" })).toBe("insert · before step 2 → hi")
+    // A hand-built edit without its field, or with another type, draws
+    // a line instead of throwing (final web review).
+    expect(editLine({ kind: "tool_args", step: 0, callID: "c1" })).toBe("tool_args · step 0 · c1 → ")
+    expect(editLine({ step: 1, callID: "zz", toolResult: 5 } as unknown as ReplayEdit)).toBe("tool_result · step 1 · zz → 5")
   })
 
   it("the prefix keeps every edited step: an edit of step N needs from_step N+1, an insert at N from_step N (and 1 at least)", () => {

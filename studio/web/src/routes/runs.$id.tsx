@@ -250,7 +250,8 @@ function RunPage() {
     }
     const draft =
       r.verb === "rerun" ? rerun() : r.verb === "continue" ? continueHere() : r.verb === "edit_prompt" ? editPromptAndReplay(r.from) : replayFromStep(r.from)
-    setEdits({ list: draft.edits, invalid: {} })
+    // No setEdits: a linked verb's draft carries none, and the page
+    // remounts per run id (remountDeps), so it starts with none held.
     setReplay((cur) => ({ req: { runID: r.of ?? id, draft }, n: cur.n + 1 }))
     // The link's edits were never in it: a reopened edit / edit_result
     // drawer is the rebuilt draft's verb, and the URL says so.

@@ -2,7 +2,7 @@
 // ids as one encoded segment, and never a token in a link.
 import { describe, expect, it } from "vitest"
 
-import { editsFromHandoff, editsHandoff, emptyLab, labFromHandoff, labHandoff } from "./experiment-body"
+import { editsFromHandoff, editsHandoff, emptyLab, HANDOFF_EDITS_MAX, labFromHandoff, labHandoff } from "./experiment-body"
 import {
   canonical,
   compareLink,
@@ -145,6 +145,35 @@ describe("the other builders", () => {
     expect(labFromHandoff("{nope")).toBeUndefined()
     expect(labFromHandoff('{"max_steps": 6, "x": "1"}')).toBeUndefined()
     expect(editsFromHandoff('[{"step": -1}, null, {"step": 2, "content": "x"}]')).toEqual([{ step: 2, content: "x" }])
+  })
+
+  it("editsFromHandoff drops an edit whose fields are of the wrong type (final web review)", () => {
+    const ok = [
+      { step: 1, callID: "c2", toolResult: "fine" },
+      { kind: "tool_args", step: 0, callID: "c1", args: { q: 1 } },
+      { kind: "user", step: 0, index: 1, content: "hi" },
+      { kind: "insert", step: 2, content: "go" },
+    ]
+    const junk = [
+      { step: 1, callID: "zz", toolResult: 5 },
+      { step: 0, content: {} },
+      { step: 0, callID: 7 },
+      { kind: "nope", step: 1, content: "x" },
+      { kind: "user", step: 0, index: -1, content: "x" },
+      { kind: "user", step: 0, index: 1.5, content: "x" },
+      { kind: "tool_args", step: 0, callID: "c1", args: [1] },
+      { kind: "tool_args", step: 0, callID: "c1", args: "{}" },
+      { kind: "tool_args", step: 0, callID: "c1", args: null },
+      { step: 1.5, content: "x" },
+      ["step", 1],
+    ]
+    expect(editsFromHandoff(JSON.stringify([...junk, ...ok]))).toEqual(ok)
+    // A tool_args edit without args is kept (its args are absent, not
+    // wrong); its line still draws (editLine, edits.test.ts).
+    expect(editsFromHandoff('[{"kind":"tool_args","step":0}]')).toEqual([{ kind: "tool_args", step: 0 }])
+    // A huge list is cut, never walked into the page whole.
+    const many = Array.from({ length: HANDOFF_EDITS_MAX + 50 }, (_, i) => ({ step: 1, callID: `c${i}`, toolResult: "x" }))
+    expect(editsFromHandoff(JSON.stringify(many))).toHaveLength(HANDOFF_EDITS_MAX)
   })
 
   it("experimentLink is the saved experiment in the playground's history", () => {

@@ -548,7 +548,7 @@ export function TranscriptEdits({
             {source.fields === null ? "unchecked edit" : "no such field in the kept prefix"}
           </Badge>
           <span className="font-mono text-faint">
-            step {d.step} · {d.callID ?? "reply"} → {(d.toolResult ?? d.content ?? "").slice(0, 40)}
+            step {String(d.step)} · {String(d.callID ?? "reply")} → {String(d.toolResult ?? d.content ?? "").slice(0, 40)}
           </span>
           <button
             type="button"

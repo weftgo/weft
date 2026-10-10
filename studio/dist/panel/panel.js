@@ -1474,7 +1474,7 @@ function bn(e, t, n) {
 	return n?.length && t === 0 ? e === "fork" ? yn : "transcript edits need from_step ≥ 1 (step 0 keeps nothing to edit) — pick a later step or drop the edits" : null;
 }
 function xn(e) {
-	let t = I(e), n = t === "insert" ? `before step ${e.step}` : `step ${e.step}`, r = e.callID ? ` · ${e.callID}` : t === "user" && e.index ? ` · #${e.index}` : "", i = t === "tool_args" ? JSON.stringify(e.args) : e.toolResult ?? e.content ?? "";
+	let t = I(e), n = t === "insert" ? `before step ${e.step}` : `step ${e.step}`, r = e.callID ? ` · ${e.callID}` : t === "user" && e.index ? ` · #${e.index}` : "", i = String((t === "tool_args" ? JSON.stringify(e.args) : e.toolResult ?? e.content) ?? "");
 	return `${t} · ${n}${r} → ${i.length > 60 ? `${i.slice(0, 59)}…` : i}`;
 }
 var Sn = (e) => e.content.filter((e) => e?.type === "text").map((e) => e.text).join("");
@@ -2070,7 +2070,10 @@ function kr(e, t, n) {
 	} : { mode: e.tool_choice }, a && h.mode === a.tool_choice.mode && (h.mode !== "named" || h.name === a.tool_choice.name) && (h = void 0)), h?.mode === "named") {
 		let e = h.name ?? "";
 		e ? o.includes(e) ? m(e) ? p.includes(e) && s("tool_choice", `tool_choice names ${e}, which park_on parks: every forced call would park`) : s("tool_choice", `tool_choice names ${e}, which this command turns off`) : s("tool_choice", `tool ${e} in tool_choice is not in agent ${t.name}'s manifest`) : s("tool_choice", "tool_choice named needs a tool name");
-	} else !h && a?.tool_choice.mode === "named" && a.tool_choice.name && !m(a.tool_choice.name) && s("tool_choice", `the agent's default tool_choice names ${a.tool_choice.name}, which this command turns off; send tool_choice`);
+	} else if (!h && a?.tool_choice.mode === "named" && a.tool_choice.name) {
+		let e = a.tool_choice.name;
+		m(e) ? p.includes(e) && s("tool_choice", `tool_choice names ${e}, which park_on parks: every forced call would park`) : s("tool_choice", `the agent's default tool_choice names ${e}, which this command turns off; send tool_choice`);
+	}
 	return Object.keys(c).length && (r.options = c), Object.keys(d).length && (r.params = d), h && (r.tool_choice = h), p.length && (r.park_on = p), f.length && (r.only_tools = f), Cr(t) && (r.params || r.tool_choice || r.park_on || r.only_tools) && i.unshift({
 		field: "lab",
 		message: Sr
@@ -3979,26 +3982,26 @@ var K = () => {}, Aa = class {
 	}
 	pvSeq = 0;
 	schedulePreview() {
-		let e = ++this.pvSeq, t = this.state.drawer, n = t ? `${t.runId}#${t.step}` : "";
-		if (t && t.edits.length && t.step > 0 && t.thread !== "fork" && !this.asOf.has(n) && (this.asOf.set(n, null), H(this.ep, `runs/${encodeURIComponent(t.runId)}/transcript?step=${t.step}`).then((e) => {
+		let e = ++this.pvSeq, t = this.state.drawer, n = t ? `${t.runId}#${t.step}` : "", r = this.asOf.get(n);
+		if (t && t.edits.length && t.step > 0 && t.thread !== "fork" && (r === void 0 || typeof r == "number" && Date.now() - r > 1e4) && (this.asOf.set(n, null), H(this.ep, `runs/${encodeURIComponent(t.runId)}/transcript?step=${t.step}`).then((e) => {
 			!this.disposed && e.compacted_at && (this.asOf.set(n, e.compacted_at), this.emit());
-		}, () => this.asOf.delete(n))), !t || t.thread === "fork" || !(this.state.meta?.capabilities.includes("preview") ?? !1)) {
+		}, () => this.asOf.set(n, Date.now()))), !t || t.thread === "fork" || !(this.state.meta?.capabilities.includes("preview") ?? !1)) {
 			this.state.preview = null;
 			return;
 		}
-		let r = this.state.preview?.pending;
+		let i = this.state.preview?.pending;
 		this.state.preview = {
 			doc: this.state.preview?.doc,
 			pending: !0
-		}, r || this.emit();
-		let i = () => this.disposed || e !== this.pvSeq;
+		}, i || this.emit();
+		let a = () => this.disposed || e !== this.pvSeq;
 		this.after(300, () => {
-			i() || ei(this.ep, la(t, this.publicId)).then((e) => !i() && this.setPreview({ doc: e }), (e) => !i() && this.setPreview({
+			a() || ei(this.ep, la(t, this.publicId)).then((e) => !a() && this.setPreview({ doc: e }), (e) => !a() && this.setPreview({
 				error: q(e),
 				refused: e instanceof V && e.status === 400
 			}));
 		}), this.after(300 + it, () => {
-			!i() && this.state.preview?.pending && (this.pvSeq++, this.setPreview({
+			!a() && this.state.preview?.pending && (this.pvSeq++, this.setPreview({
 				doc: this.state.preview.doc,
 				error: at
 			}));
@@ -4006,7 +4009,8 @@ var K = () => {}, Aa = class {
 	}
 	asOf = /* @__PURE__ */ new Map();
 	compactedAt(e, t) {
-		return this.asOf.get(`${e}#${t}`) ?? null;
+		let n = this.asOf.get(`${e}#${t}`);
+		return typeof n == "object" ? n : null;
 	}
 	setPreview(e) {
 		this.state.preview = e, this.emit();

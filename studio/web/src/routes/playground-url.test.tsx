@@ -2,7 +2,7 @@
 // agent and runtime picked, the engine — is written back to the query
 // in place, so the address bar (and a copied link) reopens the page as
 // it stands; a prompt never rides the query.
-import { cleanup, configure, fireEvent, screen, waitFor } from "@testing-library/react"
+import { cleanup, configure, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
@@ -12,6 +12,7 @@ import { FakeEventSource } from "@/test/fake-event-source"
 import { FakeStudio, golden } from "@/test/fake-studio"
 import { playgroundStateLink } from "@/lib/links"
 import { choose, valueOf } from "@/test/select"
+import { READ_ONLY_NOTE } from "@/routes/playground"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -239,5 +240,91 @@ describe("the model field follows the agent", () => {
     await settle()
     expect(sourceInput().value).toBe("r_two")
     expect(router.state.location.search).toMatchObject({ run: "r_two", agent: "planner" })
+  })
+})
+
+// The final web review: a hand-off's junk edits never crash the page,
+// edits held at step 0 hold Run and stay droppable, a read-scoped token
+// sees no run controls, and a hand-built edits= / lab= leaves the bar
+// with the page's first write-back.
+describe("the playground's hand-off edits and run controls (final web review)", () => {
+  const readToken = `weft_pt.${btoa(JSON.stringify({ public_id: "pub_1", scope: "read", exp: new Date(Date.now() + 3600_000).toISOString() }))
+    .replace(/=+$/, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")}.c2ln`
+  const runA = () => screen.queryByRole<HTMLButtonElement>("button", { name: "Run A" })
+
+  it("junk edits in the fragment are dropped: the page draws, no error screen", async () => {
+    const edits = JSON.stringify([
+      { step: 1, callID: "zz", toolResult: 5 },
+      { step: 0, content: {} },
+      { kind: "tool_args", step: 0 },
+      { kind: "user", step: 0, index: "x", content: "y" },
+      { step: 1, callID: "c9", toolResult: "kept" },
+    ])
+    renderApp(`/playground#run=r_ok&step=2&edits=${encodeURIComponent(edits)}`)
+    await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
+    // Only the well-typed edit survives, as an orphan (no such field in
+    // the kept prefix) the reader can drop; its row draws.
+    await waitFor(() => expect([...document.querySelectorAll("[data-edit-orphan]")].map((n) => n.getAttribute("data-edit-orphan"))).toEqual(["c9"]))
+    expect(screen.getByText(/step 1 · c9 → kept/)).toBeTruthy()
+  })
+
+  it("an args-less tool_args edit at step 0 draws its line (editLine), no throw", async () => {
+    renderApp(`/playground#run=r_ok&edits=${encodeURIComponent('[{"kind":"tool_args","step":0,"callID":"c1"}]')}`)
+    await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
+    const list = await screen.findByRole("list", { name: "transcript edits" })
+    expect(within(list).getByText("tool_args · step 0 · c1 →")).toBeTruthy()
+  })
+
+  it("edits held at step 0: the line holds Run and the list drops them", async () => {
+    const edits = JSON.stringify([{ step: 1, callID: "c2", toolResult: "none" }])
+    renderApp(`/playground#run=r_ok&edits=${encodeURIComponent(edits)}`)
+    await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
+    const held = await screen.findByText(/transcript edits need from_step ≥ 1/)
+    expect(held.closest("[data-edits-held]")).toBeTruthy()
+    await waitFor(() => expect(runA()?.disabled).toBe(true))
+    const list = screen.getByRole("list", { name: "transcript edits" })
+    fireEvent.click(within(list).getByRole("button", { name: "drop" }))
+    await waitFor(() => expect(document.querySelector("[data-edits-held]")).toBeNull())
+    expect(screen.queryByRole("list", { name: "transcript edits" })).toBeNull()
+    await waitFor(() => expect(runA()?.disabled).toBe(false))
+  })
+
+  it("a read-scoped token: no Run, no Run matrix, a line says why", async () => {
+    setStudioToken(readToken)
+    renderApp("/playground?run=r_ok")
+    await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
+    expect(await screen.findByText(READ_ONLY_NOTE, { selector: "[data-playground-read-only]" })).toBeTruthy()
+    expect(runA()).toBeNull()
+    expect(screen.queryByRole("button", { name: "Run matrix" })).toBeNull()
+    expect(document.querySelector("[data-matrix-read-only]")).toBeTruthy()
+  })
+
+  it("a dev token keeps Run and Run matrix", async () => {
+    renderApp("/playground?run=r_ok")
+    await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
+    expect(await screen.findByRole("button", { name: "Run A" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "Run matrix" })).toBeTruthy()
+    expect(document.querySelector("[data-playground-read-only]")).toBeNull()
+  })
+
+  it("a hand-built edits= / lab= in the query leaves the bar with the first write-back; the page keeps them", async () => {
+    const edits = JSON.stringify([{ step: 1, callID: "c2", toolResult: "none" }])
+    const lab = JSON.stringify({ max_steps: "3" })
+    // The router reads each value as JSON: a quoted string stays text.
+    const q = (v: string) => encodeURIComponent(JSON.stringify(v))
+    const { router } = renderApp(`/playground?run=r_ok&instructions=keep-me&edits=${q(edits)}&lab=${q(lab)}`)
+    await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
+    // Read on arrival (the edits are held: step 0's line and list).
+    expect(await screen.findByRole("list", { name: "transcript edits" })).toBeTruthy()
+    await choose(engineSelect(), "scripted")
+    await waitFor(() => expect(router.state.location.search).toMatchObject({ engine: "scripted", instructions: "keep-me" }))
+    expect(router.state.location.search).not.toHaveProperty("edits")
+    expect(router.state.location.search).not.toHaveProperty("lab")
+    expect(router.history.location.href).not.toContain("edits")
+    // Read on arrival, held by the page: the edits are still there (at
+    // step 0, the held line and its list).
+    expect(screen.getByRole("list", { name: "transcript edits" })).toBeTruthy()
   })
 })

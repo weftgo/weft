@@ -1,0 +1,502 @@
+// H2's Done line: a 5,000-step run scrolls. The run page opens a
+// synthetic run of 5,000 steps (each a tool call pair: 20,002 events)
+// and the story, the waterfall and the raw table hold a bounded DOM —
+// the rows in view plus an overscan — at any scroll position; the
+// scrubber jumps to any step (?step=, G1) and rings its card; and the
+// fold's live tail keeps its event window inside the ring's capacity,
+// folding a frame of 100 appends without an O(n²).
+import {
+  act,
+  cleanup,
+  configure,
+  fireEvent,
+  renderHook,
+  screen,
+  waitFor,
+} from "@testing-library/react"
+import axe from "axe-core"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+
+import { setStudioToken } from "@/lib/api"
+import type { RunDoc, RunsPage, WireEvent } from "@/lib/api"
+import { useRunEvents } from "@/hooks/use-run-events"
+import {
+  describeStep,
+  nearestOrdinal,
+  stepOffsets,
+} from "@/components/studio/step-scrubber"
+import type { FoldedStep } from "@/lib/events"
+import { renderApp, stubBrowser } from "@/test/app"
+import { FakeEventSource } from "@/test/fake-event-source"
+import { withLiveGrant } from "@/test/fake-live-grant"
+import { FakeStudio, golden, pagedEvents } from "@/test/fake-studio"
+
+configure({ asyncUtilTimeout: 30_000 })
+vi.setConfig({ testTimeout: 120_000 })
+
+const RUN = "r_long"
+const STEPS = 5_000
+const usage = { input_tokens: 10, output_tokens: 4 }
+
+/** run_start, STEPS × (step_start, tool_start, tool_finish,
+ * step_finish), run_finish. */
+function longRun(): WireEvent[] {
+  const evs: WireEvent[] = [
+    {
+      type: "run_start",
+      id: RUN,
+      model: { provider: "wefttest", name: "script" },
+      agent: "long",
+    },
+  ]
+  for (let i = 0; i < STEPS; i++) {
+    evs.push(
+      { type: "step_start", run_id: RUN, index: i },
+      {
+        type: "tool_start",
+        run_id: RUN,
+        seq: 2 * i + 1,
+        call_id: `c${i}`,
+        name: "lookup",
+        args: { i },
+      },
+      {
+        type: "tool_finish",
+        run_id: RUN,
+        seq: 2 * i + 2,
+        call_id: `c${i}`,
+        name: "lookup",
+        content: `ok ${i}`,
+        is_error: false,
+      },
+      {
+        type: "step_finish",
+        run_id: RUN,
+        index: i,
+        reason: "tool_calls",
+        usage,
+        latency_ms: 100,
+      }
+    )
+  }
+  evs.push({ type: "run_finish", run_id: RUN, usage, steps: STEPS })
+  return evs
+}
+
+/** jsdom lays nothing out and has no Element.scrollTo: the
+ * virtualisers read a viewport-tall window and estimated rows
+ * (lib/virtual.ts), a scroll is a scrollTop write plus its event, and a
+ * virtualised scroller is as tall as its spacer says (a browser's
+ * scrollHeight) and shows a viewport of it (its clientHeight). */
+function stubScroll(): () => void {
+  const proto = HTMLElement.prototype
+  const saved = {
+    scrollTo: Element.prototype.scrollTo,
+    scrollHeight: Object.getOwnPropertyDescriptor(
+      Element.prototype,
+      "scrollHeight"
+    ),
+    clientHeight: Object.getOwnPropertyDescriptor(
+      Element.prototype,
+      "clientHeight"
+    ),
+  }
+  Element.prototype.scrollTo = function (
+    this: Element,
+    opts?: ScrollToOptions | number
+  ) {
+    const top = typeof opts === "number" ? opts : opts?.top
+    if (typeof top === "number") this.scrollTop = top
+    this.dispatchEvent(new Event("scroll"))
+  }
+  const virtualised = (el: HTMLElement) => el.hasAttribute("data-virtual")
+  Object.defineProperty(proto, "scrollHeight", {
+    configurable: true,
+    get(this: HTMLElement) {
+      if (!virtualised(this)) return 0
+      const spacer = this.querySelector<HTMLElement>(":scope > .relative")
+      const h = spacer ? Number.parseFloat(spacer.style.height) : 0
+      return Number.isFinite(h) ? h : 0
+    },
+  })
+  Object.defineProperty(proto, "clientHeight", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return virtualised(this) ? window.innerHeight : 0
+    },
+  })
+  return () => {
+    Element.prototype.scrollTo = saved.scrollTo
+    delete (proto as { scrollHeight?: number }).scrollHeight
+    delete (proto as { clientHeight?: number }).clientHeight
+  }
+}
+
+function scrollTo(el: Element, top: number) {
+  act(() => {
+    el.scrollTop = top
+    el.dispatchEvent(new Event("scroll"))
+  })
+}
+
+const steps = () => document.querySelectorAll("[data-step]")
+const ordinals = () =>
+  [...steps()].map((n) => Number(n.getAttribute("data-step")))
+
+describe("a 5,000-step run scrolls (plan H2)", () => {
+  const rOK = golden<RunsPage>("runs").runs.find((r) => r.id === "r_ok")!
+  const events = longRun()
+  const doc: RunDoc = {
+    ...rOK,
+    id: RUN,
+    agent: "long",
+    status: "succeeded",
+    steps: STEPS,
+    event_count: events.length,
+    trace_id: "",
+    children: [],
+    holes: [],
+  }
+
+  let unstubScroll = () => {}
+  beforeEach(() => {
+    stubBrowser()
+    unstubScroll = stubScroll()
+    FakeEventSource.reset()
+    vi.stubGlobal("EventSource", FakeEventSource)
+    setStudioToken("")
+    new FakeStudio()
+      .on("GET meta", {
+        ...golden<Record<string, unknown>>("meta"),
+        capabilities: ["ingest"],
+      })
+      .on(`GET runs/${RUN}`, doc)
+      .on(
+        `GET runs/${RUN}/events`,
+        pagedEvents(
+          events.map((event, pos) => ({ pos, time: rOK.started, event })),
+          { done: true }
+        )
+      )
+      .on(`GET runs/${RUN}/transcript`, { run_id: RUN, batches: [] })
+      .on(`GET runs/${RUN}/spans`, { spans: [] })
+      .install()
+  })
+  afterEach(() => {
+    cleanup()
+    unstubScroll()
+    vi.unstubAllGlobals()
+  })
+
+  it("the story mounts a bounded window of cards — top, middle, end — and the scrubber lands on step 4,999", async () => {
+    const { router } = renderApp(`/runs/${RUN}?view=story`)
+    const list = await screen.findByRole(
+      "list",
+      { name: /^steps, 5,000$/ },
+      { timeout: 60_000 }
+    )
+    // (a) the top: a window of cards, never 5,000.
+    expect(steps().length).toBeGreaterThan(0)
+    expect(steps().length).toBeLessThan(200)
+    expect(ordinals()).toContain(0)
+    // The items say where they sit in the whole.
+    const first = list.querySelector('[role="listitem"]')!
+    expect(first.getAttribute("aria-setsize")).toBe("5000")
+    expect(first.getAttribute("aria-posinset")).toBe("1")
+
+    // (b) the middle and the end mount the cards there.
+    const height = Number.parseFloat(
+      (list.firstElementChild as HTMLElement).style.height
+    )
+    expect(height).toBeGreaterThan(STEPS * 100)
+    scrollTo(list, height / 2)
+    await waitFor(() => expect(ordinals()).toContain(2500))
+    expect(steps().length).toBeLessThan(200)
+    expect(ordinals()).not.toContain(0)
+    scrollTo(list, height)
+    await waitFor(() => expect(ordinals()).toContain(4999))
+    expect(steps().length).toBeLessThan(200)
+
+    // (c) back to the top, then the scrubber: 4,999 names the last
+    // step in the URL, scrolls to it and rings it.
+    scrollTo(list, 0)
+    await waitFor(() => expect(ordinals()).toContain(0))
+    const slider = screen.getByRole("slider", { name: "jump to step" })
+    expect(slider.getAttribute("aria-valuemin")).toBe("0")
+    expect(slider.getAttribute("aria-valuemax")).toBe("4999")
+    fireEvent.change(slider, { target: { value: "4999" } })
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ step: 4999 })
+    )
+    await waitFor(() =>
+      expect(
+        document
+          .querySelector('[data-step="4999"]')
+          ?.hasAttribute("data-highlighted")
+      ).toBe(true)
+    )
+    expect(document.querySelectorAll("[data-highlighted]")).toHaveLength(1)
+    await waitFor(() => expect(list.scrollTop).toBeGreaterThan(height * 0.9))
+    expect(steps().length).toBeLessThan(200)
+    expect(slider.getAttribute("aria-valuenow")).toBe("4999")
+    expect(slider.getAttribute("aria-valuetext")).toMatch(
+      /^step 4999 of 5,000 · tool_calls · t\+499\.9 s model time$/
+    )
+  })
+
+  it("a drag replaces the URL as it goes and leaves one history entry; back returns to where it started", async () => {
+    const { router } = renderApp(`/runs/${RUN}?view=story&step=10`)
+    const slider = await screen.findByRole(
+      "slider",
+      { name: "jump to step" },
+      { timeout: 60_000 }
+    )
+    const entries = router.history.length
+    fireEvent.pointerDown(slider)
+    for (const v of ["100", "2000", "3000"])
+      fireEvent.change(slider, { target: { value: v } })
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ step: 3000 })
+    )
+    expect(router.history.length).toBe(entries)
+    fireEvent.pointerUp(slider)
+    await waitFor(() => expect(router.history.length).toBe(entries + 1))
+    expect(router.state.location.search).toMatchObject({ step: 3000 })
+    act(() => router.history.back())
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ step: 10 })
+    )
+    // n (kbd-help) puts the keyboard in the box; a number + enter names
+    // that step.
+    const box = screen.getByRole("spinbutton", { name: "step number" })
+    act(() => {
+      ;(document.activeElement as HTMLElement | null)?.blur()
+    })
+    fireEvent.keyDown(window, { key: "n" })
+    await waitFor(() => expect(document.activeElement).toBe(box))
+    fireEvent.change(box, { target: { value: "4242" } })
+    fireEvent.keyDown(box, { key: "Enter" })
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ step: 4242 })
+    )
+    await waitFor(() =>
+      expect(
+        document
+          .querySelector('[data-step="4242"]')
+          ?.hasAttribute("data-highlighted")
+      ).toBe(true)
+    )
+  })
+
+  it("the scrubber and the virtualised story keep their roles: axe finds nothing", async () => {
+    renderApp(`/runs/${RUN}?view=story`)
+    const list = await screen.findByRole(
+      "list",
+      { name: /^steps, 5,000$/ },
+      { timeout: 60_000 }
+    )
+    const scrubber = document.querySelector<HTMLElement>("[data-scrubber]")!
+    for (const el of [scrubber, list]) {
+      // nested-interactive is the call row's own (a role=button row
+      // holding its verbs, ToolCallRow before H2) — not the list's.
+      const res = await axe.run(el, {
+        rules: { "nested-interactive": { enabled: false } },
+      })
+      expect(
+        res.violations.map(
+          (v) =>
+            `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(" | ")}`
+        )
+      ).toEqual([])
+    }
+    expect(scrubber.querySelector("[aria-live]")?.textContent).toMatch(
+      /^step 0 of 5,000 · tool_calls · t\+0 ms model time$/
+    )
+  })
+
+  it("a ?step= deep link into the long story mounts and rings that card", async () => {
+    renderApp(`/runs/${RUN}?view=story&step=3210`)
+    await waitFor(
+      () =>
+        expect(
+          document
+            .querySelector('[data-step="3210"]')
+            ?.hasAttribute("data-highlighted")
+        ).toBe(true),
+      { timeout: 60_000 }
+    )
+    expect(steps().length).toBeLessThan(200)
+  })
+
+  it("the waterfall mounts a bounded window of its 10,001 rows", async () => {
+    renderApp(`/runs/${RUN}`)
+    const tree = await screen.findByRole(
+      "tree",
+      { name: "trace" },
+      { timeout: 60_000 }
+    )
+    await waitFor(() => expect(tree.hasAttribute("data-virtual")).toBe(true), {
+      timeout: 60_000,
+    })
+    const rows = () => tree.querySelectorAll('[role="treeitem"]')
+    expect(rows().length).toBeGreaterThan(0)
+    expect(rows().length).toBeLessThan(200)
+    // The spacers keep the whole height: scrolled to the end, the last
+    // step's call row is mounted.
+    scrollTo(tree, 10_001 * 25)
+    await waitFor(() =>
+      expect(tree.querySelector('[data-span="c:4999:c4999"]')).toBeTruthy()
+    )
+    expect(rows().length).toBeLessThan(200)
+    const last = tree.querySelector('[data-span="s4999"]')!
+    expect(last.getAttribute("aria-level")).toBe("2")
+    expect(last.getAttribute("aria-posinset")).toBe("5000")
+  })
+
+  it("the raw table mounts a bounded window of its 20,002 rows", async () => {
+    renderApp(`/runs/${RUN}?view=raw`)
+    const table = await screen.findByRole(
+      "list",
+      { name: /^events, 20,002 rows$/ },
+      { timeout: 60_000 }
+    )
+    const rows = () => table.querySelectorAll("[data-pos]")
+    expect(rows().length).toBeGreaterThan(0)
+    expect(rows().length).toBeLessThan(200)
+    scrollTo(table, 10_000 * 29)
+    await waitFor(() =>
+      expect(table.querySelector('[data-pos="10000"]')).toBeTruthy()
+    )
+    expect(rows().length).toBeLessThan(200)
+    const item = table
+      .querySelector('[data-pos="10000"]')!
+      .closest('[role="listitem"]')!
+    expect(item.getAttribute("aria-posinset")).toBe("10001")
+    expect(item.getAttribute("aria-setsize")).toBe("20002")
+    // nested-interactive is the event row's own (a role=button row
+    // holding its copy button, before H2) — not the list's.
+    const res = await axe.run(table, {
+      rules: { "nested-interactive": { enabled: false } },
+    })
+    expect(res.violations.map((v) => v.id)).toEqual([])
+  })
+})
+
+describe("the fold's live tail is a bounded ring (plan H2)", () => {
+  beforeEach(() => {
+    FakeEventSource.reset()
+    vi.stubGlobal("EventSource", FakeEventSource)
+  })
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+  })
+
+  const frame = (pos: number) => ({
+    run_id: "r1",
+    session_id: "",
+    public_id: "",
+    kind: "event",
+    pos,
+    time: "2026-10-01T09:00:00Z",
+    event: { type: "step_start", run_id: "r1", index: pos },
+  })
+
+  it("5,000 live appends keep the window within capacity; a frame of 100 folds in under 50 ms", async () => {
+    const CAP = 1_000
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            events: [
+              {
+                pos: 0,
+                time: "2026-10-01T09:00:00Z",
+                event: { type: "run_start", id: "r1" },
+              },
+            ],
+            next_after: null,
+            done: false,
+            gaps: [],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        )
+    )
+    vi.stubGlobal("fetch", withLiveGrant(fetchMock))
+    const { result } = renderHook(() =>
+      useRunEvents("r1", "running", { live: true, capacity: CAP })
+    )
+    await waitFor(() => expect(result.current.lastPos).toBe(0))
+    const es = await waitFor(() => FakeEventSource.nth(0))
+    es.connect()
+    // Let the open's catch-up read settle: frames then fold straight in.
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0))
+    })
+
+    let pos = 1
+    for (; pos <= 4_900; pos++) es.emit("record", frame(pos), String(pos))
+    // A frame of 100 appends on top of 4,900 steps: O(1) each.
+    const t0 = performance.now()
+    for (; pos <= 5_000; pos++) es.emit("record", frame(pos), String(pos))
+    const took = performance.now() - t0
+    expect(took).toBeLessThan(50)
+
+    await waitFor(() => expect(result.current.lastPos).toBe(5_000))
+    const s = result.current
+    expect(s.events.length).toBe(CAP)
+    expect(s.attrs.length).toBe(CAP)
+    expect(s.total).toBe(5_001)
+    expect(s.base).toBe(5_001 - CAP)
+    // The window is the stream's tail; the fold still holds every step.
+    expect((s.events[0] as { index: number }).index).toBe(s.base)
+    expect((s.events.at(-1) as { index: number }).index).toBe(5_000)
+    expect(s.folded.steps).toHaveLength(5_000)
+  })
+})
+
+describe("the scrubber's read-out (plan H2)", () => {
+  const st = (
+    index: number,
+    latencyMs?: number,
+    finished = true
+  ): FoldedStep => ({
+    index,
+    text: "",
+    reasoning: "",
+    toolCalls: [],
+    from: index * 4,
+    to: index * 4 + 3,
+    finish: finished
+      ? {
+          reason: "stop",
+          usage: { input_tokens: 0, output_tokens: 0 },
+          ...(latencyMs ? { latencyMs } : {}),
+        }
+      : undefined,
+  })
+
+  it("snaps to the nearest ordinal a resumed run has", () => {
+    expect(nearestOrdinal([0, 1, 5, 9], 3)).toBe(1)
+    expect(nearestOrdinal([0, 1, 5, 9], 4)).toBe(5)
+    expect(nearestOrdinal([0, 1, 5, 9], 99)).toBe(9)
+    expect(nearestOrdinal([0, 1, 5, 9], -3)).toBe(0)
+    expect(nearestOrdinal([], 3)).toBeUndefined()
+  })
+
+  it("offsets are the model time before a step; unknown once a latency is missing", () => {
+    const three = [st(0, 1500), st(1), st(2, 200)]
+    expect(stepOffsets(three)).toEqual([0, 1500, null])
+    expect(describeStep(three, 1, "succeeded", stepOffsets(three))).toBe(
+      "step 1 of 3 · stop · t+1.5 s model time"
+    )
+    expect(describeStep(three, 2, "succeeded", stepOffsets(three))).toBe(
+      "step 2 of 3 · stop · events 8–11"
+    )
+    const live = [st(0, 10), st(1, undefined, false)]
+    expect(describeStep(live, 1, "running", stepOffsets(live))).toBe(
+      "step 1 of 2 · in flight · t+10 ms model time"
+    )
+  })
+})

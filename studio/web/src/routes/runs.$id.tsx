@@ -431,11 +431,18 @@ function RunPage() {
     setPlayhead(search.t ?? null)
   }, [search.t])
 
+  // The ring evicted the stream's head (plan H2: a run past
+  // EVENT_RING_CAPACITY events): a replay prefix needs every event from
+  // position 0, so there is no playhead — the page reads live, and says
+  // the window is partial.
+  const evicted = stream.base > 0
+  const ph = evicted ? null : playhead
+
   // Everything below renders the fold AT the playhead on the position
   // axis: one fold, one shape, whether live or scrubbed (B2). The
   // time axis has no playhead — durations do not replay.
   const replaying =
-    axis === "events" && playhead !== null && playhead < stream.events.length
+    axis === "events" && ph !== null && ph < stream.events.length
   const foldedNow =
     transcript.data && runStatus !== "running"
       ? applyTranscript(stream.folded, transcript.data.batches, { replace: true })
@@ -449,7 +456,7 @@ function RunPage() {
   const batches = transcript.data?.batches
   const atPlayhead = useMemo(() => {
     if (!replaying) return foldedNow
-    const prefix = fold(stream.events, playhead, stream.attrs)
+    const prefix = fold(stream.events, ph, stream.attrs)
     if (!batches || runStatus === "running") return prefix
     // Only the finished steps take the overlay; it returns clones,
     // which replace the prefix's own by index.
@@ -464,7 +471,7 @@ function RunPage() {
       steps: prefix.steps.map((st) => byIndex.get(st.index) ?? st),
       unplaced: foldedNow.unplaced,
     }
-  }, [replaying, stream.events, stream.attrs, foldedNow, playhead, batches, runStatus])
+  }, [replaying, stream.events, stream.attrs, foldedNow, ph, batches, runStatus])
   // While scrubbing the run reads as running: calls past the playhead
   // are "running", not "never completed".
   const viewStatus = replaying ? "running" : runStatus
@@ -477,10 +484,10 @@ function RunPage() {
     () =>
       spansFromFold(
         children ? linkView(atPlayhead, children) : atPlayhead,
-        stream.events.length,
+        stream.total,
         viewStatus
       ),
-    [atPlayhead, children, stream.events.length, viewStatus]
+    [atPlayhead, children, stream.total, viewStatus]
   )
   const timeSpans = useMemo(() => spansFromTimed(timed), [timed])
   const traceSpans = axis === "time" && haveTime ? timeSpans : posSpans
@@ -491,8 +498,8 @@ function RunPage() {
   // The selection: ?sel= names a span key; absent, start where
   // something went wrong (the full fold decides, not the prefix).
   const fullSpans = useMemo(
-    () => spansFromFold(stream.folded, stream.events.length, runStatus),
-    [stream.folded, stream.events.length, runStatus]
+    () => spansFromFold(stream.folded, stream.total, runStatus),
+    [stream.folded, stream.total, runStatus]
   )
   // ?step= (a deep link to a step, lib/links.ts) selects that step's
   // row when no (known) span is named: on the position axis the step's
@@ -537,8 +544,33 @@ function RunPage() {
     [navigate]
   )
 
+  // The story's scrubber (plan H2) names a step the way a deep link
+  // does (?step=, G1): in place while the thumb is dragged, one history
+  // entry on release — the entry the drag started from is put back
+  // first, so back returns to the step before the drag.
+  const dragFrom = useRef<{ step?: number } | null>(null)
+  const stepInput = useRef<HTMLInputElement>(null)
+  const onStep = useCallback(
+    (n: number, commit: boolean) => {
+      if (!commit) {
+        if (!dragFrom.current) dragFrom.current = { step: search.step }
+        void navigate({ search: (prev) => ({ ...prev, step: n }), replace: true })
+        return
+      }
+      const from = dragFrom.current
+      dragFrom.current = null
+      if (from && from.step === n) {
+        void navigate({ search: (prev) => ({ ...prev, step: n }), replace: true })
+        return
+      }
+      if (from) void navigate({ search: (prev) => ({ ...prev, step: from.step }), replace: true })
+      void navigate({ search: (prev) => ({ ...prev, step: n }) })
+    },
+    [navigate, search.step]
+  )
+
   // Keys: r toggles raw, s the story, e the trace; j/k walk the
-  // trace's rows (A4).
+  // trace's rows (A4); n jumps to a step (the story's scrubber).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!isPlainShortcut(e) || !run.data) return
@@ -552,6 +584,21 @@ function RunPage() {
       if (e.key === "r") setView("raw")
       else if (e.key === "s") setView("story")
       else if (e.key === "e") setView("trace")
+      else if (e.key === "n") {
+        e.preventDefault()
+        if (view !== "story") setView("story")
+        // The box mounts with the story: focus it once it is there (a
+        // few frames at most).
+        let tries = 0
+        const focusBox = () => {
+          const box = stepInput.current
+          if (box) {
+            box.focus()
+            box.select()
+          } else if (++tries < 10) requestAnimationFrame(focusBox)
+        }
+        requestAnimationFrame(focusBox)
+      }
       else if ((e.key === "j" || e.key === "k") && view === "trace") {
         const i = traceSpans.findIndex((s) => s.key === selKey)
         const next = traceSpans.at(e.key === "j" ? i + 1 : Math.max(i - 1, 0))
@@ -628,11 +675,22 @@ function RunPage() {
       <RunHeader
         doc={doc}
         folded={atPlayhead}
-        eventCount={Math.max(doc.event_count, stream.events.length)}
+        eventCount={Math.max(doc.event_count, stream.total)}
         transcript={transcript.data}
         gaps={stream.gaps}
       />
-      {axis === "events" ? (
+      {evicted ? (
+        <p
+          className="rounded-md border border-dashed px-3 py-2 font-mono text-[11px] text-faint"
+          data-ring-note
+        >
+          showing the last {stream.events.length.toLocaleString()} events (positions{" "}
+          {stream.base.toLocaleString()}–{(stream.total - 1).toLocaleString()}); the{" "}
+          {stream.base.toLocaleString()} before them are on the API (api/runs/{doc.id}
+          /events?after=) — the story and the trace hold the whole run, replay needs the
+          whole stream
+        </p>
+      ) : axis === "events" ? (
         <ReplayBar
           events={stream.events}
           eventCount={doc.event_count}
@@ -712,7 +770,7 @@ function RunPage() {
             <Kbd>s</Kbd>
             <Kbd>r</Kbd> views · <Kbd>j</Kbd>
             <Kbd>k</Kbd> spans · <Kbd>space</Kbd> replay · <Kbd>[</Kbd>
-            <Kbd>]</Kbd> step · <Kbd>?</Kbd> all keys
+            <Kbd>]</Kbd> step · <Kbd>n</Kbd> jump to step · <Kbd>?</Kbd> all keys
           </span>
           {stream.loading ? (
             <span className="ml-auto flex items-center gap-1.5 font-mono text-[11px] text-faint">
@@ -758,10 +816,10 @@ function RunPage() {
               domain={
                 axis === "time" && haveTime
                   ? timeDomain(timed)
-                  : [0, Math.max(0, stream.events.length - 1)]
+                  : [0, Math.max(0, stream.total - 1)]
               }
               unit={axis === "time" ? "ms" : "event"}
-              playhead={axis === "events" ? playhead : null}
+              playhead={axis === "events" ? ph : null}
               onSeek={axis === "events" ? seek : undefined}
               onSelect={(sp) => select(sp.key)}
               selectedId={selected?.id}
@@ -771,10 +829,11 @@ function RunPage() {
               <SpanDetail
                 span={selected}
                 events={stream.events}
+                base={stream.base}
                 doc={doc}
                 runStatus={viewStatus}
                 timed={timed}
-                playhead={axis === "events" ? playhead : null}
+                playhead={axis === "events" ? ph : null}
                 mode={search.d ?? "detail"}
                 onMode={(m) =>
                   void navigate({
@@ -803,21 +862,24 @@ function RunPage() {
             folded={foldedNow}
             atPlayhead={atPlayhead}
             doc={doc}
-            upTo={axis === "events" ? (playhead ?? undefined) : undefined}
+            upTo={axis === "events" ? (ph ?? undefined) : undefined}
             highlight={search.step}
-            onJump={jump}
+            onJump={evicted ? undefined : jump}
             requests={requests}
             transcript={transcript.data}
             transcriptError={transcript.isError ? transcript.error.message : undefined}
+            onStep={onStep}
+            stepInputRef={stepInput}
           />
         </TabsContent>
         <TabsContent value="raw" className="mt-3">
           <RawView
             doc={doc}
             events={stream.events}
+            base={stream.base}
             eventHoles={stream.folded.eventHoles}
-            playhead={playhead}
-            onJump={jump}
+            playhead={ph}
+            onJump={evicted ? undefined : jump}
             surface={search.raw ?? "events"}
             onSurface={(s) =>
               void navigate({

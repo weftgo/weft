@@ -10,6 +10,19 @@ module, ADR 0005).
 
 ### Added
 
+- Studio's run page scrolls a long run (plan H2): past 60 steps the story
+  is virtualised (`@tanstack/react-virtual` 3.14.13, pinned), and past 200
+  rows the waterfall and the raw events table are too — only the rows in
+  view plus an overscan are mounted, the row a `?step=` / `?ev=` / selection
+  names always among them; a card's open/closed state is kept per step
+  ordinal. A **jump to step** scrubber heads the story (a range plus a
+  number box, the `n` key; it writes `?step=` in place while dragged and one
+  history entry on release, and reads out the step's status and model-time
+  offset). The fold keeps its raw events in a ring of 50,000
+  (`EVENT_RING_CAPACITY`): a live frame is an O(1) push, never a copy of the
+  stream; past the capacity the oldest events are evicted — the fold keeps
+  what they contributed, the page says "showing the last N events" (the rest
+  are on `api/runs/{id}/events?after=`) and replay is off for that run.
 - Studio's Settings page (plan H4): `/settings`, a sidebar entry and the
   palette's Settings item, renders `/api/meta`, `/api/settings/pricing` and
   `/api/runtimes` beside this browser's preferences — the endpoint, versions

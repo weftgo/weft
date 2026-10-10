@@ -5,6 +5,11 @@
 // T2a's live view draws time on the same component. A row is
 // selectable (click, or ↑↓ when the tree has focus; ←→ fold); a bar
 // click seeks. Pure CSS: no chart library, nothing off-origin.
+// Past VIRTUAL_ROWS rows the tree is virtualised (plan H2): rows are a
+// fixed ROW_PX tall, so only the rows in view plus an overscan are
+// mounted, between two spacers that keep the scroll height whole.
+import { useVirtualizer } from "@tanstack/react-virtual"
+import { shared } from "@/lib/virtual"
 import { ChevronRight } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 
@@ -59,6 +64,13 @@ export interface WaterfallProps {
   foldDepth?: number
   className?: string
 }
+
+/** More visible rows than this and the tree is virtualised. */
+export const VIRTUAL_ROWS = 200
+/** A row's height: the track's h-6 plus its 1px border. */
+const ROW_PX = 25
+/** The sticky axis row above the first span row. */
+const AXIS_PX = 25
 
 function pct(v: number, [lo, hi]: [number, number]): number {
   const w = Math.max(1, hi - lo + 1)
@@ -154,10 +166,52 @@ export function Waterfall({
       if (folded.has(sp.id)) toggle(sp.id)
     }
   }
-  // Keep the selected row in view.
+  // Each row's place among its siblings (aria-posinset/-setsize):
+  // a virtualised tree mounts a window of it, and the rows say where
+  // they sit in the whole.
+  const siblings = useMemo(() => {
+    const count = new Map<string, number>()
+    const place = new Map<string, number>()
+    for (const sp of spans) {
+      const p = sp.parent ?? ""
+      const n = (count.get(p) ?? 0) + 1
+      count.set(p, n)
+      place.set(sp.id, n)
+    }
+    return { count, at: place }
+  }, [spans])
+
+  const virtual = visible.length > VIRTUAL_ROWS
+  const scroller = useRef<HTMLDivElement>(null)
+  const selIndex = virtual ? visible.findIndex((s) => s.id === selectedId) : -1
+  const virt = useVirtualizer({
+    count: virtual ? visible.length : 0,
+    getScrollElement: () => scroller.current,
+    estimateSize: () => ROW_PX,
+    paddingStart: AXIS_PX,
+    scrollPaddingStart: AXIS_PX,
+    overscan: 16,
+    getItemKey: (i) => visible[i]?.id ?? i,
+    ...shared(selIndex),
+  })
+  const items = virt.getVirtualItems()
+  const shown = virtual ? items.map((it) => visible[it.index]) : visible
+  const padTop = virtual && items.length > 0 ? items[0].start - AXIS_PX : 0
+  const padBottom =
+    virtual && items.length > 0
+      ? virt.getTotalSize() - items[items.length - 1].end
+      : 0
+
+  // Keep the selected row in view: a mounted row scrolls itself; in a
+  // virtualised tree the virtualiser scrolls to its index.
   const selRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
+    if (virtual) {
+      if (selIndex >= 0) virt.scrollToIndex(selIndex, { align: "auto" })
+      return
+    }
     selRef.current?.scrollIntoView({ block: "nearest" })
+    // On a selection change only: a live append must not pull the view.
   }, [selectedId])
 
   const cell = (selected: boolean) =>
@@ -165,9 +219,11 @@ export function Waterfall({
 
   return (
     <div
+      ref={scroller}
       className={`waterfall grid grid-cols-[minmax(12rem,17rem)_minmax(0,1fr)_3.5rem] overflow-auto rounded-lg border bg-background font-mono text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring/50 ${className}`}
       role="tree"
       aria-label="trace"
+      data-virtual={virtual ? "" : undefined}
       tabIndex={0}
       onKeyDown={onKey}
     >
@@ -229,7 +285,10 @@ export function Waterfall({
         {unit}s
       </div>
 
-      {visible.map((sp) => {
+      {padTop > 0 ? (
+        <div className="col-span-3" style={{ height: padTop }} aria-hidden data-spacer />
+      ) : null}
+      {shown.map((sp) => {
         const kids = children.get(sp.id) ?? 0
         const isFolded = folded.has(sp.id)
         const left = pct(sp.from, domain)
@@ -244,6 +303,9 @@ export function Waterfall({
             role="treeitem"
             aria-selected={selected}
             aria-expanded={kids > 0 ? !isFolded : undefined}
+            aria-level={sp.depth + 1}
+            aria-setsize={siblings.count.get(sp.parent ?? "")}
+            aria-posinset={siblings.at.get(sp.id)}
             data-span={sp.key}
           >
             <div
@@ -338,6 +400,9 @@ export function Waterfall({
           </div>
         )
       })}
+      {padBottom > 0 ? (
+        <div className="col-span-3" style={{ height: padBottom }} aria-hidden data-spacer />
+      ) : null}
       {spans.length === 0 ? (
         <div className="col-span-3 py-6 text-center text-faint">
           no spans yet

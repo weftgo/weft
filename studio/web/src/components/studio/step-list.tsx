@@ -5,9 +5,18 @@
 // and result windows, then finish reason and usage with the
 // cached/reasoning splits. Every step and call can send the replay
 // playhead to the moment it happened (the fold carries positions).
+//
+// A long run (past STORY_VIRTUAL_AT steps) is virtualised (plan H2):
+// only the cards in view plus an overscan are mounted, each measured;
+// what a reader opened or closed on a card is remembered per step
+// ordinal (StoryMemory) so it survives the card scrolling away; ?step=
+// scrolls the virtualiser to its card; and a live run's appends follow
+// the end only while the reader is at it.
 import { useQuery } from "@tanstack/react-query"
+import { useVirtualizer } from "@tanstack/react-virtual"
+import { shared } from "@/lib/virtual"
 import { ChevronRight, Play } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react"
 
 import { stepQuery } from "@/lib/api"
 import { CacheHint, Cost, useCostCapable } from "@/components/studio/cost"
@@ -51,12 +60,43 @@ import type { RunRequests } from "@/components/studio/step-request"
 import { childOfStep, SubagentBlock } from "@/components/studio/subagent-block"
 import type { ChildRow } from "@/components/studio/subagent-block"
 import { TruncationBadge } from "@/components/studio/truncation-badge"
+import { StepScrubber } from "@/components/studio/step-scrubber"
 import { Button } from "@/components/ui/button"
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
+
+/** More steps than this and the story is virtualised (plan H2). */
+export const STORY_VIRTUAL_AT = 60
+
+/** The story's open/closed memory, by key (call:<startPos>,
+ * req:<step>, reason:<step>): a virtualised card unmounts when it
+ * scrolls away and reads its state back from here when it returns. */
+const StoryMemory = createContext<Map<string, boolean> | null>(null)
+
+/** useRemembered is useState(initial) remembered under key in the
+ * story's memory; without a key (a subagent's or a span's step) or a
+ * memory, plain state. */
+function useRemembered(
+  key: string | undefined,
+  initial: boolean
+): [boolean, (next: boolean | ((cur: boolean) => boolean)) => void] {
+  const mem = useContext(StoryMemory)
+  const k = mem && key ? key : undefined
+  const [v, setV] = useState<boolean>(() => (k ? mem?.get(k) : undefined) ?? initial)
+  const set = useCallback(
+    (next: boolean | ((cur: boolean) => boolean)) =>
+      setV((cur) => {
+        const n = typeof next === "function" ? next(cur) : next
+        if (k) mem?.set(k, n)
+        return n
+      }),
+    [k, mem]
+  )
+  return [v, set]
+}
 
 /** A ToolError renders "CODE: message" — the code is a chip (5.2a). */
 const CODED = /^([A-Z][A-Z0-9_]+): /
@@ -196,7 +236,10 @@ export function ToolCallRow({
   editStep?: number
 }) {
   const state = callState(call, runStatus)
-  const [open, setOpen] = useState(true)
+  const [open, setOpen] = useRemembered(
+    editStep !== undefined ? `call:${call.startPos}` : undefined,
+    true
+  )
   const summary = argsSummary(call)
   return (
     <div
@@ -338,10 +381,14 @@ export function StepBody({
   editable?: boolean
 }) {
   const editStep = editable ? step.index : undefined
+  const [reasonOpen, setReasonOpen] = useRemembered(
+    editable ? `reason:${step.index}` : undefined,
+    false
+  )
   return (
     <>
       {step.reasoning ? (
-        <Collapsible defaultOpen={false}>
+        <Collapsible open={reasonOpen} onOpenChange={(o) => setReasonOpen(o)}>
           <CollapsibleTrigger className="group/reason flex items-center gap-1 text-xs text-ev-reasoning hover:text-foreground">
             <ChevronRight
               className="size-3 transition-transform group-aria-expanded/reason:rotate-90 group-data-[panel-open]/reason:rotate-90"
@@ -496,6 +543,7 @@ function StepCard({
   transcriptError,
   replayAt,
   prompt,
+  scrollOnHighlight = true,
 }: {
   step: FoldedStep
   runId: string
@@ -515,6 +563,9 @@ function StepCard({
   replayAt?: ReplayAt
   /** Step 0's turn prompt: editable in place (plan F2). */
   prompt?: UserMessage
+  /** The card scrolls itself into view when highlighted — not in a
+   * virtualised story, whose virtualiser scrolls to it. */
+  scrollOnHighlight?: boolean
 }) {
   const ref = useRef<HTMLDivElement>(null)
   // The step route's assembled holes when the page has it (A7): read
@@ -533,12 +584,12 @@ function StepCard({
   const stepChildren = stepChildMap(stepDoc.data?.children)
   // A ?step= link (A3) lands on the card it names.
   useEffect(() => {
-    if (highlighted) ref.current?.scrollIntoView({ block: "center" })
-  }, [highlighted])
+    if (highlighted && scrollOnHighlight) ref.current?.scrollIntoView({ block: "center" })
+  }, [highlighted, scrollOnHighlight])
   const failedHere = !step.finish && runStatus === "failed"
   // The Request pane open beside the story (plan H3) — where the page
   // is wide enough and a ResizeObserver measures the split.
-  const [reqOpen, setReqOpen] = useState(false)
+  const [reqOpen, setReqOpen] = useRemembered(`req:${step.index}`, false)
   // A toggle that moves the section (into or out of the split) hands
   // the keyboard to the toggle where it lands — once: a later remount
   // (the viewport crossing lg) leaves focus where it is.
@@ -735,6 +786,8 @@ export function StepList({
   requests,
   transcript,
   transcriptError,
+  onStep,
+  stepInputRef,
 }: {
   events: WireEvent[]
   folded: FoldedRun
@@ -759,6 +812,11 @@ export function StepList({
   transcript?: Transcript | null
   /** The transcript query's error message, when it failed. */
   transcriptError?: string
+  /** The scrubber names a step (plan H2): the page writes ?step= —
+   * commit false while dragging, true on release. Absent: no scrubber. */
+  onStep?: (ordinal: number, commit: boolean) => void
+  /** The scrubber's numeric box, for the page's shortcut. */
+  stepInputRef?: React.Ref<HTMLInputElement>
 }) {
   // The compactions the run document names (A9.2). A run from before
   // A9 has none in its document and draws no marker: the record is
@@ -796,8 +854,89 @@ export function StepList({
     maxFromStep: maxFrom,
     canFork,
   })
+
+  // The long-run story (plan H2): virtualised past STORY_VIRTUAL_AT
+  // steps. The memory outlives every card; the ordinal → card index
+  // map is rebuilt only when the steps change.
+  const memory = useRef(new Map<string, boolean>()).current
+  const steps = view.steps
+  const virtual = steps.length > STORY_VIRTUAL_AT
+  const indexOf = useMemo(() => new Map(steps.map((st, i) => [st.index, i])), [steps])
+  const hlIndex = highlight === undefined ? -1 : (indexOf.get(highlight) ?? -1)
+  const scroller = useRef<HTMLDivElement>(null)
+  const virt = useVirtualizer({
+    count: virtual ? steps.length : 0,
+    getScrollElement: () => scroller.current,
+    estimateSize: () => 160,
+    overscan: 4,
+    getItemKey: (i) => steps[i]?.index ?? i,
+    ...shared(hlIndex),
+  })
+  // ?step= lands on its card: the virtualiser scrolls to it once the
+  // card's step is in the fold (a deep link opens before the events
+  // arrive), and again whenever the step named changes.
+  const scrolledTo = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    if (!virtual || hlIndex < 0 || scrolledTo.current === highlight) return
+    scrolledTo.current = highlight
+    virt.scrollToIndex(hlIndex, { align: "center" })
+  }, [virtual, hlIndex, highlight, virt])
+  // Follow: a live run's new steps keep the view at the end only while
+  // the reader is there (scrolled up, nothing moves).
+  const atEnd = useRef(true)
+  const live = doc.status === "running" && !replaying
+  const lastCount = useRef(steps.length)
+  useEffect(() => {
+    const grew = steps.length > lastCount.current
+    lastCount.current = steps.length
+    if (virtual && live && grew && atEnd.current && highlight === undefined)
+      virt.scrollToIndex(steps.length - 1, { align: "end" })
+  }, [steps.length, virtual, live, highlight, virt])
+
+  const stepBlock = (step: FoldedStep) => (
+    <>
+      <InsertHere step={step.index} />
+      <StepCard
+        step={step}
+        runId={doc.id}
+        runHoles={doc.holes}
+        runStatus={runStatus}
+        childLinks={childLinks}
+        highlighted={step.index === highlight}
+        onJump={onJump}
+        requests={requests}
+        compactions={compactions}
+        transcript={transcript}
+        transcriptError={transcriptError}
+        replayAt={replayAt(step.index)}
+        prompt={step.index === 0 ? prompt : undefined}
+        scrollOnHighlight={!virtual}
+      />
+      {step.steer ? (
+        <SteerBlock
+          steer={step.steer}
+          onJump={onJump}
+          replayAt={replayAt(step.index)}
+          // The steer's user message is the step's own (its stored
+          // step, studio/edits.go's userSeqs): the step's first
+          // after the turn's prompt — never another step's same words.
+          user={users.find((u) => u !== prompt && u.step === step.index)}
+        />
+      ) : null}
+    </>
+  )
   return (
+    <StoryMemory.Provider value={memory}>
     <div className="space-y-3">
+      {onStep ? (
+        <StepScrubber
+          steps={steps}
+          value={highlight}
+          runStatus={runStatus}
+          onStep={onStep}
+          inputRef={stepInputRef}
+        />
+      ) : null}
       <EditsMark row={doc} batches={transcript?.batches} />
       {sessionMarkers.map((c, i) => (
         <CompactionMarker
@@ -809,37 +948,44 @@ export function StepList({
           transcriptError={transcriptError}
         />
       ))}
-      {view.steps.map((step) => (
-        <div key={step.index} className="space-y-3">
-          <InsertHere step={step.index} />
-          <StepCard
-            step={step}
-            runId={doc.id}
-            runHoles={doc.holes}
-            runStatus={runStatus}
-            childLinks={childLinks}
-            highlighted={step.index === highlight}
-            onJump={onJump}
-            requests={requests}
-            compactions={compactions}
-            transcript={transcript}
-            transcriptError={transcriptError}
-            replayAt={replayAt(step.index)}
-            prompt={step.index === 0 ? prompt : undefined}
-          />
-          {step.steer ? (
-            <SteerBlock
-              steer={step.steer}
-              onJump={onJump}
-              replayAt={replayAt(step.index)}
-              // The steer's user message is the step's own (its stored
-              // step, studio/edits.go's userSeqs): the step's first
-              // after the turn's prompt — never another step's same words.
-              user={users.find((u) => u !== prompt && u.step === step.index)}
-            />
-          ) : null}
+      {virtual ? (
+        // Virtualised (plan H2): a list whose items say where they sit
+        // in the whole; the DOM holds the cards in view plus overscan.
+        <div
+          ref={scroller}
+          className="max-h-[calc(100vh-12rem)] overflow-auto"
+          role="list"
+          aria-label={`steps, ${steps.length.toLocaleString()}`}
+          data-virtual
+          onScroll={(e) => {
+            const el = e.currentTarget
+            atEnd.current = el.scrollTop + el.clientHeight >= el.scrollHeight - 48
+          }}
+        >
+          <div className="relative w-full" style={{ height: virt.getTotalSize() }}>
+            {virt.getVirtualItems().map((item) => (
+              <div
+                key={item.key}
+                ref={virt.measureElement}
+                data-index={item.index}
+                role="listitem"
+                aria-setsize={steps.length}
+                aria-posinset={item.index + 1}
+                className="absolute top-0 left-0 w-full space-y-3 pb-3"
+                style={{ transform: `translateY(${item.start}px)` }}
+              >
+                {stepBlock(steps[item.index])}
+              </div>
+            ))}
+          </div>
         </div>
-      ))}
+      ) : (
+        steps.map((step) => (
+          <div key={step.index} className="space-y-3">
+            {stepBlock(step)}
+          </div>
+        ))
+      )}
       {/* The boundary after the last step (its calls all answered, so
           a replay from the step count is accepted). */}
       {maxFrom !== null && view.steps.length > 0 && maxFrom > Math.max(...view.steps.map((s) => s.index)) ? (
@@ -881,5 +1027,6 @@ export function StepList({
         </div>
       )}
     </div>
+    </StoryMemory.Provider>
   )
 }

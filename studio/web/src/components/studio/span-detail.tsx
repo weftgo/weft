@@ -250,6 +250,7 @@ function CallDetail({
 export function SpanDetail({
   span,
   events,
+  base = 0,
   doc,
   runStatus,
   playhead,
@@ -262,6 +263,8 @@ export function SpanDetail({
   /** The selected span, resolved against the fold at the playhead. */
   span: Span | undefined
   events: WireEvent[]
+  /** The stream index of events[0] (the ring's evicted count). */
+  base?: number
   doc: RunDoc
   runStatus: string
   playhead: number | null
@@ -287,7 +290,7 @@ export function SpanDetail({
   if (span?.timed) mode = "detail"
   const rangeEnd =
     span?.to ??
-    (playhead !== null ? Math.max(playhead - 1, 0) : events.length - 1)
+    (playhead !== null ? Math.max(playhead - 1, 0) : base + events.length - 1)
   return (
     <div className="flex min-h-0 flex-col rounded-lg border bg-background">
       <div className="flex items-center gap-1 border-b px-2 pt-1">
@@ -331,6 +334,7 @@ export function SpanDetail({
         ) : mode === "events" ? (
           <EventsExplorer
             events={events}
+            base={base}
             playhead={playhead}
             onJump={onJump}
             range={[span.from, rangeEnd]}

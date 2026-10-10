@@ -11,6 +11,13 @@
 // arrive while pages are being read are held and folded after them
 // (never dropped), and a frame whose position skips ahead sends the
 // reader back to the pages for what the stream did not carry.
+//
+// Memory is bounded (plan H2): the raw events sit in a ring of
+// EVENT_RING_CAPACITY (lib/ring.ts) — a frame is an O(1) push, never a
+// re-concatenation of the whole array, and the published array is one
+// copy per publish (which is coalesced). Past the capacity the oldest
+// events are evicted: RunStream.base says how many, the fold keeps
+// what they contributed, and the page says the window is partial.
 import { useEffect, useRef, useState } from "react"
 
 import { fetchEventsPage, metaQuery, postApproval, runQuery, studioToken } from "@/lib/api"
@@ -23,11 +30,19 @@ import type { LiveHandle, LiveRecord } from "@/lib/live"
 import { foldMore, newFold } from "@/lib/events"
 import type { FoldedRun, FoldFeed } from "@/lib/events"
 import type { ContentAttrs } from "@/lib/honesty"
+import { EVENT_RING_CAPACITY, Ring } from "@/lib/ring"
 
 export interface RunStream {
-  /** The stream so far. A fresh array on every publish, so memoized
-   * consumers see the change; never mutated after publish. */
+  /** The stream's kept window (the last EVENT_RING_CAPACITY events at
+   * most): events[i] is stream index base + i. A fresh array on every
+   * publish that changed it, so memoized consumers see the change;
+   * never mutated after publish. */
   events: WireEvent[]
+  /** Events evicted from the front of the window (0 until the ring is
+   * full): the stream index of events[0]. */
+  base: number
+  /** Events folded in all: base + events.length. */
+  total: number
   /** Each event's weft.content.* attributes, by index in events
    * (undefined where the recorder left the content as emitted): what a
    * replay fold of a prefix needs to keep the recorder's badges. */
@@ -52,6 +67,8 @@ const LIVE_PUBLISH_MAX_MS = 400
 
 const emptyStream: RunStream = {
   events: [],
+  base: 0,
+  total: 0,
   attrs: [],
   folded: newFold().result(),
   done: false,
@@ -67,11 +84,22 @@ const idleStream: RunStream = { ...emptyStream, loading: false }
 
 interface Walk {
   feed: FoldFeed
-  events: WireEvent[]
-  attrs: (ContentAttrs | undefined)[]
+  events: Ring<WireEvent>
+  attrs: Ring<ContentAttrs | undefined>
   pos: number
   done: boolean
   gaps: number[]
+}
+
+function newWalk(capacity: number): Walk {
+  return {
+    feed: newFold(),
+    events: new Ring(capacity),
+    attrs: new Ring(capacity),
+    pos: -1,
+    done: false,
+    gaps: [],
+  }
 }
 
 /** Apply a page: only positions past the cursor are new. Returns
@@ -82,8 +110,10 @@ function apply(s: Walk, page: EventsPage): boolean {
     const evs = fresh.map((pe) => pe.event)
     const attrs = fresh.map((pe) => pe.attrs)
     foldMore(s.feed, evs, attrs)
-    s.events = s.events.concat(evs)
-    s.attrs = s.attrs.concat(attrs)
+    for (let i = 0; i < evs.length; i++) {
+      s.events.push(evs[i])
+      s.attrs.push(attrs[i])
+    }
     s.pos = fresh[fresh.length - 1].pos
   }
   // The endpoint's done says the run reads terminal — even on a
@@ -155,6 +185,9 @@ export function useRunEvents(
      * changed: usage, status, counts). Asking for them adds the run
      * kind to the one subscription — a page needs no second stream. */
     onRun?: (run: RunRow) => void
+    /** The ring's capacity (default EVENT_RING_CAPACITY): a test's
+     * smaller window. Read when the walk starts. */
+    capacity?: number
   }
 ): RunStream {
   // The walk's accumulated state lives in a ref, not react-query: the
@@ -162,14 +195,9 @@ export function useRunEvents(
   // poll is one small request regardless of how long the run is. The
   // walk is keyed by id alone — a run finishing (status leaving
   // "running") must not restart it, just stop the tail.
-  const walk = useRef<Walk>({
-    feed: newFold(),
-    events: [],
-    attrs: [],
-    pos: -1,
-    done: false,
-    gaps: [],
-  })
+  const capacity = opts?.capacity ?? EVENT_RING_CAPACITY
+  const walk = useRef<Walk | null>(null)
+  if (walk.current === null) walk.current = newWalk(capacity)
   const statusRef = useRef(status)
   statusRef.current = status
   const onRunRef = useRef(opts?.onRun)
@@ -196,7 +224,7 @@ export function useRunEvents(
   const [stream, setStream] = useState<RunStream>(id ? emptyStream : idleStream)
 
   useEffect(() => {
-    walk.current = { feed: newFold(), events: [], attrs: [], pos: -1, done: false, gaps: [] }
+    walk.current = newWalk(capacity)
     catchUp.current = () => {}
     // No id, nothing to read: a collapsed subagent block mounts this
     // hook before it has a child to show.
@@ -217,7 +245,7 @@ export function useRunEvents(
     // start) — and raised once pending calls appear.
     let parkArmed: boolean | null = null
     const publish = (loading: boolean, error: string | null = null) => {
-      const s = walk.current
+      const s = walk.current!
       const folded = s.feed.result()
       if (!loading && !error) {
         const pending = folded.pending
@@ -235,8 +263,10 @@ export function useRunEvents(
         // approveAndFollow).
       }
       setStream({
-        events: s.events,
-        attrs: s.attrs,
+        events: s.events.snapshot(),
+        base: s.events.base,
+        total: s.events.total,
+        attrs: s.attrs.snapshot(),
         folded,
         done: s.done,
         lastPos: s.pos,
@@ -255,7 +285,7 @@ export function useRunEvents(
     let pubTimer: ReturnType<typeof setTimeout> | null = null
     const publishLive = () => {
       if (pubTimer !== null) return
-      const wait = Math.min(LIVE_PUBLISH_MAX_MS, 16 + walk.current.events.length / 20)
+      const wait = Math.min(LIVE_PUBLISH_MAX_MS, 16 + walk.current!.events.length / 20)
       pubTimer = setTimeout(() => {
         pubTimer = null
         if (!isCancelled()) publish(false)
@@ -286,14 +316,15 @@ export function useRunEvents(
      * fold an event the pages already covered (a resume's backfill
      * overlap). Deltas carry their own counter and are live-only. */
     const foldLive = (rec: LiveRecord): boolean => {
-      const s = walk.current
+      const s = walk.current!
       if (rec.kind === "event") {
         if (rec.pos <= s.pos) return false
         s.pos = rec.pos
       } else if (rec.kind !== "delta") return false
-      foldMore(s.feed, [rec.event], [rec.attrs])
-      s.events = s.events.concat([rec.event])
-      s.attrs = s.attrs.concat([rec.attrs])
+      // O(1): a push into the ring, never a copy of the window.
+      s.feed.push(rec.event, undefined, rec.attrs)
+      s.events.push(rec.event)
+      s.attrs.push(rec.attrs)
       return true
     }
 
@@ -311,14 +342,14 @@ export function useRunEvents(
             // The next page starts one past the last position read:
             // the endpoint's `after` names the first position to
             // return.
-            const before = walk.current.pos
+            const before = walk.current!.pos
             reads++
             const page = await fetchEventsPage(id, before + 1)
             if (isCancelled()) return
-            const changed = apply(walk.current, page)
+            const changed = apply(walk.current!, page)
             // More pages only while the cursor moves: a next_after
             // that does not advance the walk must end it, not spin.
-            const more = page.next_after != null && walk.current.pos > before
+            const more = page.next_after != null && walk.current!.pos > before
             if (initial && !walked) publish(more)
             else if (changed) publish(false)
             if (!more) break
@@ -349,7 +380,7 @@ export function useRunEvents(
       let retry = false
       while (held.length > 0) {
         const { rec, reads: at } = held[0]
-        if (rec.kind === "event" && rec.pos > walk.current.pos + 1 && reads <= at) {
+        if (rec.kind === "event" && rec.pos > walk.current!.pos + 1 && reads <= at) {
           retry = true
           break
         }
@@ -382,7 +413,7 @@ export function useRunEvents(
             return
           }
           if (!walked) return // the first walk failed: nothing to extend
-          if (rec.kind === "event" && rec.pos > walk.current.pos + 1) {
+          if (rec.kind === "event" && rec.pos > walk.current!.pos + 1) {
             // A position was skipped: published before this stream
             // subscribed, or lost on the way. The pages have it.
             held.push({ rec, reads })
@@ -419,7 +450,7 @@ export function useRunEvents(
         void readPages(true)
         return
       }
-      if (walk.current.done) return
+      if (walk.current!.done) return
       // The live stream is the tail; poll only without it (or while
       // it is down).
       if (live && !live.overflowed()) return
@@ -434,7 +465,7 @@ export function useRunEvents(
       endTail.current = () => {}
       clearInterval(timer)
     }
-  }, [id, opts?.live, wantRun])
+  }, [id, opts?.live, wantRun, capacity])
 
   // When the run's status leaves "running", drain what is left: the
   // closing events (run_finish) can land between the last tail probe

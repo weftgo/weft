@@ -6,16 +6,20 @@
 //  document the api/runs/{id} JSON as a collapsible tree (the result
 //           messages and steps fold, so a 200 KB document reads).
 //
-// Both copy and download whole. Rows are rendered in pages of ROWS
-// so a 50k-event run never becomes a 50k-row DOM in one go.
+// Both copy and download whole. Past VIRTUAL_AT rows the table is
+// virtualised (plan H2, @tanstack/react-virtual): only the rows in
+// view plus an overscan are mounted, each measured (an open row grows),
+// so a 50k-event run is never a 50k-row DOM.
 //
 // The events surface's filters and its open event are the page's URL
 // (G2): ?q= the search, ?hide= the hidden kinds, ?ev= the open row's
 // position (lib/links.ts's rawSearch) — written in place, cursor-like:
 // back walks the run page's views, never a keystroke.
 import { useNavigate, useSearch } from "@tanstack/react-router"
+import { useVirtualizer } from "@tanstack/react-virtual"
+import { shared } from "@/lib/virtual"
 import { ChevronRight, Download, Play } from "lucide-react"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 
 import type { RunDoc, WireEvent } from "@/lib/api"
 import type { HoleMark } from "@/lib/honesty"
@@ -35,7 +39,11 @@ import { JsonTree } from "@/components/studio/json-tree"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
-const ROWS = 500
+/** More rows than this and the table is virtualised (plan H2). */
+export const VIRTUAL_AT = 200
+/** A closed row's height, the virtualiser's estimate before it
+ * measures. */
+const ROW_PX = 29
 
 const KINDS: { kind: EventKind; label: string; hint: string }[] = [
   { kind: "step", label: "step", hint: "run and step boundaries" },
@@ -173,6 +181,7 @@ function EventRow({
 
 export function EventsExplorer({
   events,
+  base = 0,
   playhead,
   onJump,
   range,
@@ -182,6 +191,9 @@ export function EventsExplorer({
   onState,
 }: {
   events: WireEvent[]
+  /** The stream index of events[0] (the ring's evicted count, plan
+   * H2): row positions are base + i. */
+  base?: number
   playhead: number | null
   onJump?: (t: number) => void
   /** Each event's recorder holes by position (the fold's eventHoles). */
@@ -214,7 +226,9 @@ export function EventsExplorer({
     // Only the owner's value drives this (q is read, not watched).
   }, [ownerQ])
   const openPos = state?.ev
-  const [limit, setLimit] = useState(ROWS)
+  // Without an owner the explorer holds the open rows itself — here,
+  // not in the row: a virtualised row unmounts when scrolled away.
+  const [ownOpen, setOwnOpen] = useState<Set<number>>(() => new Set())
   const emit = (next: Partial<RawLinkState>) =>
     onState?.({ q, hide: [...hidden], ev: openPos, ...next })
   const setQ = (v: string) => {
@@ -246,35 +260,72 @@ export function EventsExplorer({
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase()
     const out: { pos: number; ev: WireEvent }[] = []
-    events.forEach((ev, pos) => {
+    events.forEach((ev, i) => {
+      const pos = base + i
       if (range && (pos < range[0] || pos > range[1])) return
       if (hidden.has(eventKind(ev))) return
       if (needle && !JSON.stringify(ev).toLowerCase().includes(needle)) return
       out.push({ pos, ev })
     })
     return out
-  }, [events, hidden, q, range])
+  }, [events, base, hidden, q, range])
 
-  // A linked open event (?ev=): its page of rows is drawn and the row
-  // scrolled to, once — when the events holding it have arrived.
-  const shownLinked = useRef(false)
+  const total = base + events.length
+  const virtual = rows.length > VIRTUAL_AT
+  const scroller = useRef<HTMLDivElement>(null)
   const linkedIndex =
     openPos === undefined ? -1 : rows.findIndex((r) => r.pos === openPos)
+  const virt = useVirtualizer({
+    count: virtual ? rows.length : 0,
+    getScrollElement: () => scroller.current,
+    estimateSize: () => ROW_PX,
+    overscan: 12,
+    getItemKey: (i) => rows[i]?.pos ?? i,
+    ...shared(linkedIndex),
+  })
+
+  // A linked open event (?ev=): the row is scrolled to, once — when the
+  // events holding it have arrived.
+  const shownLinked = useRef(false)
   useEffect(() => {
     if (shownLinked.current || linkedIndex < 0) return
     shownLinked.current = true
-    if (linkedIndex >= limit) setLimit((Math.floor(linkedIndex / ROWS) + 1) * ROWS)
+    if (virtual) {
+      virt.scrollToIndex(linkedIndex, { align: "center" })
+      return
+    }
     requestAnimationFrame(() =>
       document
         .querySelector(`[data-pos="${openPos}"]`)
         ?.scrollIntoView({ block: "center" })
     )
-  }, [linkedIndex, limit, openPos])
+  }, [linkedIndex, openPos, virtual, virt])
 
   const inRange = range
-    ? Math.max(0, Math.min(range[1], events.length - 1) - range[0] + 1)
+    ? Math.max(0, Math.min(range[1], total - 1) - Math.max(range[0], base) + 1)
     : events.length
-  const at = playhead ?? events.length
+  const at = playhead ?? total
+  const row = ({ pos, ev }: { pos: number; ev: WireEvent }) => (
+    <EventRow
+      pos={pos}
+      ev={ev}
+      revealed={pos < at}
+      onJump={onJump}
+      holes={eventHoles?.[pos]}
+      isOpen={state ? openPos === pos : ownOpen.has(pos)}
+      onOpen={
+        state
+          ? (o) => emit({ ev: o ? pos : undefined })
+          : (o) =>
+              setOwnOpen((cur) => {
+                const n = new Set(cur)
+                if (o) n.add(pos)
+                else n.delete(pos)
+                return n
+              })
+      }
+    />
+  )
   const toggle = (k: EventKind) =>
     setHidden((h) => {
       const n = new Set(h)
@@ -288,10 +339,7 @@ export function EventsExplorer({
       <div className="flex flex-wrap items-center gap-2">
         <Input
           value={q}
-          onChange={(e) => {
-            setQ(e.target.value)
-            setLimit(ROWS)
-          }}
+          onChange={(e) => setQ(e.target.value)}
           placeholder={compact ? "search…" : "search events · id, text, json…"}
           aria-label="search events"
           className={`h-8 font-mono text-xs ${compact ? "w-36" : "w-72"}`}
@@ -345,42 +393,44 @@ export function EventsExplorer({
               ? "no events yet"
               : "no events match — reset the filters"}
           </p>
-        ) : (
-          rows
-            .slice(0, limit)
-            .map(({ pos, ev }) => (
-              <EventRow
-                key={pos}
-                pos={pos}
-                ev={ev}
-                revealed={pos < at}
-                onJump={onJump}
-                holes={eventHoles?.[pos]}
-                isOpen={state ? openPos === pos : undefined}
-                onOpen={
-                  state ? (o) => emit({ ev: o ? pos : undefined }) : undefined
-                }
-              />
-            ))
-        )}
-        {rows.length > limit ? (
-          <div className="flex items-center justify-center gap-3 border-t px-2 py-2">
-            <span className="font-mono text-[11px] text-faint">
-              showing {limit.toLocaleString()} of {rows.length.toLocaleString()}
-            </span>
-            <Button
-              variant="outline"
-              size="xs"
-              onClick={() => setLimit((l) => l + ROWS)}
-            >
-              show {Math.min(ROWS, rows.length - limit)} more
-            </Button>
+        ) : virtual ? (
+          // Virtualised (plan H2): a list whose items say where they
+          // sit in the whole (aria-setsize/aria-posinset) — the DOM
+          // holds the rows in view plus the overscan.
+          <div
+            ref={scroller}
+            className={`overflow-auto ${compact ? "max-h-[50vh]" : "max-h-[70vh]"}`}
+            role="list"
+            aria-label={`events, ${rows.length.toLocaleString()} rows`}
+            data-virtual
+          >
+            <div className="relative w-full" style={{ height: virt.getTotalSize() }}>
+              {virt.getVirtualItems().map((item) => {
+                const r = rows[item.index]
+                return (
+                  <div
+                    key={item.key}
+                    ref={virt.measureElement}
+                    data-index={item.index}
+                    role="listitem"
+                    aria-setsize={rows.length}
+                    aria-posinset={item.index + 1}
+                    className="absolute top-0 left-0 w-full"
+                    style={{ transform: `translateY(${item.start}px)` }}
+                  >
+                    {row(r)}
+                  </div>
+                )
+              })}
+            </div>
           </div>
-        ) : null}
+        ) : (
+          rows.map((r) => <Fragment key={r.pos}>{row(r)}</Fragment>)
+        )}
       </div>
       {playhead !== null ? (
         <p className="font-mono text-[11px] text-faint">
-          dimmed rows are past the replay playhead ({at} of {events.length})
+          dimmed rows are past the replay playhead ({at} of {total})
         </p>
       ) : null}
     </div>
@@ -390,6 +440,7 @@ export function EventsExplorer({
 export function RawView({
   doc,
   events,
+  base = 0,
   eventHoles,
   playhead,
   onJump,
@@ -398,6 +449,8 @@ export function RawView({
 }: {
   doc: RunDoc
   events: WireEvent[]
+  /** The stream index of events[0] (the ring's evicted count). */
+  base?: number
   eventHoles?: Record<number, HoleMark[]>
   playhead: number | null
   onJump?: (t: number) => void
@@ -460,7 +513,7 @@ export function RawView({
         </div>
         <span className="font-mono text-[11px] text-faint">
           {surface === "events"
-            ? `api/runs/${doc.id}/events — the stream, positions 0…${Math.max(0, events.length - 1)}`
+            ? `api/runs/${doc.id}/events — the stream, positions ${base}…${Math.max(base, base + events.length - 1)}${base > 0 ? ` (the last ${events.length.toLocaleString()} kept; 0…${base - 1} on the API)` : ""}`
             : `api/runs/${doc.id} — the run document (events are paged separately)`}
         </span>
         <span className="ml-auto flex items-center gap-1">
@@ -487,6 +540,7 @@ export function RawView({
       {surface === "events" ? (
         <EventsExplorer
           events={events}
+          base={base}
           eventHoles={eventHoles}
           playhead={playhead}
           onJump={onJump}

@@ -96,8 +96,8 @@ func TestUpgradeFrom0002(t *testing.T) {
 	if err := raw.QueryRowContext(ctx, `SELECT MAX(version) FROM obsdb_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 5 {
-		t.Errorf("migration max = %d, want 5 (through 0005 experiment command)", version)
+	if version != 6 {
+		t.Errorf("migration max = %d, want 6 (through 0006 the experiment index)", version)
 	}
 	var agent, instructions, catalog string
 	var steps, requests int

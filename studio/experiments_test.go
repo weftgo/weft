@@ -7,6 +7,7 @@ package studio_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -179,5 +180,62 @@ func TestExperimentCommandFields(t *testing.T) {
 		if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(b), c.want) {
 			t.Errorf("%s = %d %s, want 400 naming %q", c.body, resp.StatusCode, b, c.want)
 		}
+	}
+}
+
+// TestExperimentsListBounded (M2): the history lists the most recently
+// updated experiments only — 50 by default, ?limit= up to 200 — with
+// total, how many are saved, so its per-row summaries stay bounded; a
+// bad limit is a 400.
+func TestExperimentsListBounded(t *testing.T) {
+	ts, db := newExperimentServer(t)
+	const saved = 203
+	for i := range saved {
+		if err := db.SaveExperiment(t.Context(), obsdb.Experiment{
+			ID: fmt.Sprintf("exp_%03d", i), Name: "n",
+			Variants: []obsdb.ExperimentVariant{{Key: "A"}}, Inputs: []obsdb.ExperimentInput{{Key: "1", Text: "x"}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	list := func(query string) (int, []string, int) {
+		t.Helper()
+		resp, err := http.Get(ts.URL + "/api/experiments" + query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var doc struct {
+			Experiments []struct {
+				ID string `json:"id"`
+			} `json:"experiments"`
+			Total int `json:"total"`
+		}
+		if resp.StatusCode == http.StatusOK {
+			if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+				t.Fatal(err)
+			}
+		}
+		ids := make([]string, len(doc.Experiments))
+		for i, e := range doc.Experiments {
+			ids[i] = e.ID
+		}
+		return resp.StatusCode, ids, doc.Total
+	}
+	for _, c := range []struct {
+		query string
+		rows  int
+	}{{"", 50}, {"?limit=0", 50}, {"?limit=3", 3}, {"?limit=1000", 200}} {
+		code, ids, total := list(c.query)
+		if code != http.StatusOK || len(ids) != c.rows || total != saved {
+			t.Errorf("GET /api/experiments%s = %d, %d rows, total %d; want 200, %d rows, total %d", c.query, code, len(ids), total, c.rows, saved)
+			continue
+		}
+		if ids[0] != fmt.Sprintf("exp_%03d", saved-1) {
+			t.Errorf("GET /api/experiments%s starts at %s, want the most recently updated", c.query, ids[0])
+		}
+	}
+	if code, _, _ := list("?limit=x"); code != http.StatusBadRequest {
+		t.Errorf("?limit=x = %d, want 400", code)
 	}
 }

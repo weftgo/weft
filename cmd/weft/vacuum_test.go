@@ -5,8 +5,10 @@ import (
 	"context"
 	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -120,6 +122,37 @@ func TestVacuumUsage(t *testing.T) {
 	var out, errb bytes.Buffer
 	if code := run([]string{"vacuum", "-h"}, &out, &errb); code != 0 || !strings.Contains(errb.String(), "Usage: weft vacuum") {
 		t.Errorf("vacuum -h = %d %q", code, errb.String())
+	}
+}
+
+// weft vacuum with no --db and no WEFT_DB, and no ./.weft/weft.db,
+// refuses (exit 1) and creates nothing: sqlite.Open would have made an
+// empty database to vacuum. A missing --db or WEFT_DB file the same.
+func TestVacuumNoDatabase(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	t.Setenv("WEFT_RETAIN", "")
+	for _, c := range []struct {
+		env, args []string
+		msg       string
+	}{
+		{nil, []string{"vacuum"}, "no database at ./.weft/weft.db (nothing to vacuum)"},
+		{[]string{"WEFT_DB", filepath.Join(dir, "env.db")}, []string{"vacuum"}, "no database at " + filepath.Join(dir, "env.db") + " (nothing to vacuum)"},
+		{nil, []string{"vacuum", "--db", "sqlite://flag.db"}, "no database at flag.db (nothing to vacuum)"},
+	} {
+		t.Setenv("WEFT_DB", "")
+		if c.env != nil {
+			t.Setenv(c.env[0], c.env[1])
+		}
+		var out, errb bytes.Buffer
+		if code := run(c.args, &out, &errb); code != 1 || !strings.Contains(errb.String(), c.msg) {
+			t.Errorf("%v = %d %q, want 1 naming %q", c.args, code, errb.String(), c.msg)
+		}
+	}
+	for _, p := range []string{".weft", "env.db", "flag.db"} {
+		if _, err := os.Stat(filepath.Join(dir, p)); !errors.Is(err, fs.ErrNotExist) {
+			t.Errorf("%s after a refused vacuum: %v, want never created", p, err)
+		}
 	}
 }
 

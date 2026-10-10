@@ -44,24 +44,20 @@ type deleteDoc struct {
 	Note      string `json:"note"`
 }
 
-// mayDelete is the delete capability's rule: the server token, or no
-// Token configured and a loopback Host (setup A, without the
-// AllowOrigins widening — db.path's rule, mayReadDBPath). Never a panel
-// token, whatever its scope.
+// mayDelete is the delete capability's rule — db.path's, mayReadDBPath:
+// the server token, or no Token configured and a loopback Host (setup
+// A, without the AllowOrigins widening); never a panel token, whatever
+// its scope. Only the refusal's wording is its own.
 func (s *Server) mayDelete(w http.ResponseWriter, r *http.Request) bool {
-	id := idFrom(r)
-	switch {
-	case id.panel != nil:
-		writeError(w, r, http.StatusForbidden, "forbidden",
-			"deletion answers the dev token (or loopback in setup A) only, never a panel token")
-		return false
-	case id.server, s.token == "" && isLoopbackName(hostOnly(r.Host)):
+	if mayReadDBPath(s, r) {
 		return true
-	default:
-		writeError(w, r, http.StatusForbidden, "forbidden",
-			"deletion answers a loopback Host only when no studio.Token is configured")
-		return false
 	}
+	msg := "deletion answers a loopback Host only when no studio.Token is configured"
+	if idFrom(r).panel != nil {
+		msg = "deletion answers the dev token (or loopback in setup A) only, never a panel token"
+	}
+	writeError(w, r, http.StatusForbidden, "forbidden", msg)
+	return false
 }
 
 // serveDeleteRun answers DELETE /api/runs/{id}: the run and its

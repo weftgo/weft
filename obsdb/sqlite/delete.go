@@ -67,30 +67,61 @@ const notRunning = `(failed = 1 OR finished_ok = 1 OR last_seen_ns < ?)`
 // cutoff, with their children that are not running (obsdb.DB). A run's
 // subtree is swept from its topmost not-running ancestor: a candidate
 // whose parent is a stored run is reached through it, or — when the
-// parent is running, or was never stored — is its own root.
+// parent is running, or was never stored — is its own root. Each pass
+// is one writer transaction over at most obsdb.SweepBatch roots, so a
+// write waits on one pass, never on the whole sweep; a pass that found
+// fewer roots than the batch was the last.
 func (d *DB) Sweep(ctx context.Context, before time.Time) (n int, err error) {
 	if err := d.checkOpen(); err != nil {
 		return 0, err
 	}
 	defer d.closedErr(&err)
+	for {
+		if err := ctx.Err(); err != nil {
+			return n, err
+		}
+		roots, deleted, err := d.sweepPass(ctx, before)
+		if err != nil {
+			return n, err
+		}
+		n += deleted
+		if roots < obsdb.SweepBatch {
+			return n, nil
+		}
+		if sweepPassHook != nil {
+			sweepPassHook()
+		}
+	}
+}
+
+// sweepPassHook, when set (tests), runs between two Sweep passes, with
+// no transaction open.
+var sweepPassHook func()
+
+// sweepPass deletes one batch: up to obsdb.SweepBatch roots and their
+// not-running subtrees, in one writer transaction. It returns how many
+// roots it found and how many runs it deleted.
+func (d *DB) sweepPass(ctx context.Context, before time.Time) (roots, deleted int, err error) {
 	err = d.deleteTx(ctx, func(tx *sql.Tx) ([]string, error) {
 		cut := time.Now().Add(-obsdb.InterruptedAfter).UnixNano()
-		roots, err := queryIDs(ctx, tx, `SELECT run_id FROM runs AS r
+		ids, err := queryIDs(ctx, tx, `SELECT run_id FROM runs AS r
 			WHERE last_seen_ns < ? AND `+notRunning+`
 			AND NOT EXISTS (SELECT 1 FROM runs AS p WHERE p.run_id = r.parent_run_id AND r.parent_run_id <> ''
-				AND p.last_seen_ns < ? AND (p.failed = 1 OR p.finished_ok = 1 OR p.last_seen_ns < ?))`,
-			unixNS(before), cut, unixNS(before), cut)
+				AND p.last_seen_ns < ? AND (p.failed = 1 OR p.finished_ok = 1 OR p.last_seen_ns < ?))
+			LIMIT ?`,
+			unixNS(before), cut, unixNS(before), cut, obsdb.SweepBatch)
 		if err != nil {
 			return nil, err
 		}
-		ids, err := closure(ctx, tx, roots, true)
-		n = len(ids)
-		return ids, err
+		roots = len(ids)
+		all, err := closure(ctx, tx, ids, true)
+		deleted = len(all)
+		return all, err
 	})
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	return n, nil
+	return roots, deleted, nil
 }
 
 // Vacuum folds the search index's segments and runs VACUUM (obsdb.DB):

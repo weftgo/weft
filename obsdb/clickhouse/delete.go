@@ -74,7 +74,10 @@ func (d *DB) DeleteSession(ctx context.Context, id string) (err error) {
 
 // Sweep deletes the runs not running whose LastSeen is before the
 // cutoff, with their children that are not running (obsdb.DB): a
-// candidate whose parent is a candidate too is reached through it.
+// candidate whose parent is a candidate too is reached through it. The
+// candidates are read once (one row of two strings each); the deletion
+// goes in passes of obsdb.SweepBatch roots, so a large backlog is a
+// bounded round of mutations at a time rather than one storm.
 func (d *DB) Sweep(ctx context.Context, before time.Time) (n int, err error) {
 	if err := d.checkOpen(); err != nil {
 		return 0, err
@@ -107,14 +110,23 @@ func (d *DB) Sweep(ctx context.Context, before time.Time) (n int, err error) {
 			roots = append(roots, id)
 		}
 	}
-	ids, err := d.closure(ctx, roots, true)
-	if err != nil {
-		return 0, err
+	// Passes of at most obsdb.SweepBatch roots: the roots' subtrees are
+	// disjoint (a root's parent is no candidate), so each pass is its
+	// own closure and its own round of mutations, ctx checked between.
+	for start := 0; start < len(roots); start += obsdb.SweepBatch {
+		if err := ctx.Err(); err != nil {
+			return n, err
+		}
+		ids, err := d.closure(ctx, roots[start:min(start+obsdb.SweepBatch, len(roots))], true)
+		if err != nil {
+			return n, err
+		}
+		if err := d.deleteRuns(ctx, ids); err != nil {
+			return n, err
+		}
+		n += len(ids)
 	}
-	if err := d.deleteRuns(ctx, ids); err != nil {
-		return 0, err
-	}
-	return len(ids), nil
+	return n, nil
 }
 
 func hasKey(m map[string]string, k string) bool { _, ok := m[k]; return ok }

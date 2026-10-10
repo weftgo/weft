@@ -116,8 +116,11 @@ type DB interface {
 	// its own subtree and is swept on its own once it ends. Until then
 	// that child of a swept parent is listed only under RunQuery's
 	// ParentRunID "*" (the API's all=1 / parent=*), never among the
-	// top-level runs. It returns how many runs it
-	// deleted, children counted.
+	// top-level runs. It works in passes of at most SweepBatch roots
+	// (each with its subtree), so a large backlog never holds the
+	// writer for the whole sweep; ctx is checked between passes. It
+	// returns how many runs it deleted, children counted, over every
+	// pass — on an error, the passes before it stay deleted.
 	Sweep(ctx context.Context, before time.Time) (int, error)
 	// Vacuum gives the space deletions freed back: SQLite runs VACUUM
 	// (the whole file is rewritten, other modules' tables with their
@@ -472,6 +475,14 @@ var ErrClosed = errors.New("obsdb: closed")
 // InterruptedAfter is the "last seen" age that turns a non-terminal run
 // interrupted: three missed heartbeats.
 const InterruptedAfter = 30 * time.Second
+
+// SweepBatch bounds one pass of DB.Sweep: at most this many root runs
+// (each with its subtree of not-running children) are deleted per
+// writer transaction on SQLite, per round of DELETE mutations on
+// ClickHouse. Between passes the writer is free: a sweep of a large
+// backlog (the first sweep of `weft studio --retain` on an old
+// database) interleaves with ingest instead of blocking it.
+const SweepBatch = 500
 
 // DeriveStatus applies the four-row table every backend reads through:
 //

@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"strings"
 	"time"
@@ -121,19 +123,23 @@ func runVacuum(args []string, stdout, stderr io.Writer) error {
 func openVacuumDB(dbFlag string) (obsdb.DB, string, error) {
 	switch {
 	case dbFlag == "" || strings.HasPrefix(dbFlag, "sqlite://"):
-		path := strings.TrimPrefix(dbFlag, "sqlite://")
+		path, from := strings.TrimPrefix(dbFlag, "sqlite://"), "--db"
 		if dbFlag == "" {
-			path = os.Getenv("WEFT_DB")
+			path, from = os.Getenv("WEFT_DB"), "WEFT_DB"
 			if path == "" {
-				path = ".weft/weft.db"
+				path, from = "./.weft/weft.db", "the default"
 			}
 		}
 		if path == "" {
 			return nil, "", fmt.Errorf("--db sqlite:// needs a path (sqlite://weft.db, sqlite:///var/lib/weft.db)")
 		}
+		// sqlite.Open creates a missing file: vacuuming a database
+		// that is not there must not leave an empty one behind.
 		if path != ":memory:" {
-			if _, err := os.Stat(path); err != nil {
-				return nil, "", fmt.Errorf("--db %s: %w", path, err)
+			if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+				return nil, "", fmt.Errorf("no database at %s (nothing to vacuum)", path)
+			} else if err != nil {
+				return nil, "", fmt.Errorf("%s %s: %w", from, path, err)
 			}
 		}
 		db, err := sqlite.Open(path)

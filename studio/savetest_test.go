@@ -5,6 +5,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"go/ast"
+	goparser "go/parser"
+	gotoken "go/token"
 	"io"
 	"os"
 	"os/exec"
@@ -271,5 +274,88 @@ func TestPlanStepsDiverged(t *testing.T) {
 		if !strings.Contains(string(src), want) {
 			t.Errorf("skeleton lacks %q:\n%s", want, src)
 		}
+	}
+}
+
+// TestSaveAsTestHostileRunID: run ids are not validated on ingest, so a
+// run id built to close the header comment and open a package of its
+// own (a newline, a backquote, "*/", "package evil_test") must come out
+// of the skeleton as data — a file that parses with one package clause,
+// the id inside quoted strings (BasicLit) only, never as code or as a
+// comment line of its own. The same for a recorded system prompt and
+// final text that try to close a raw string, and a hostile compaction
+// hash.
+func TestSaveAsTestHostileRunID(t *testing.T) {
+	hostile := "r\n*/ package evil_test\nfunc init() { panic(`pwned`) }\n/*"
+	u, a := core.User("hi"), core.Message{Role: core.RoleAssistant, Content: []core.Part{core.TextPart{Text: "*/\npackage evil_test\n`"}}}
+	steps := []fixtureStep{
+		{plain: []core.Message{u}, reply: a},
+		{plain: []core.Message{u, a}, reply: a, compacted: &compactedNote{Index: 1, Hash: hostile}},
+	}
+	set := &fixtureSet{steps: steps, last: a, system: "line one\n*/ package evil_test /*\nline three"}
+	for i := range steps {
+		steps[i].key.Messages = steps[i].plain
+		set.files = append(set.files, fixtureFile{Name: fmt.Sprintf("%05d-x.json", i+1)})
+	}
+	src, err := replaySkeleton{runID: hostile, agent: hostile, model: hostile, set: set}.render()
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	fset := gotoken.NewFileSet()
+	f, err := goparser.ParseFile(fset, "x_test.go", src, goparser.ParseComments)
+	if err != nil {
+		t.Fatalf("skeleton does not parse: %v\n%s", err, src)
+	}
+	if got := strings.Count(string(src), "\npackage "); got != 1 || f.Name.Name != replayPackage(hostile)+"_test" {
+		t.Errorf("package clauses = %d, name %q:\n%s", got, f.Name.Name, src)
+	}
+	if strings.Contains(string(src), "\nfunc init()") {
+		t.Errorf("the hostile id became code:\n%s", src)
+	}
+	// Every comment line stays one line: the id never breaks out.
+	for _, cg := range f.Comments {
+		for _, c := range cg.List {
+			if strings.HasPrefix(c.Text, "/*") {
+				t.Errorf("a block comment appeared: %q", c.Text)
+			}
+		}
+	}
+	// No identifier but the sanitized test and package names carries
+	// "evil" or "pwned".
+	ast.Inspect(f, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok && (strings.Contains(id.Name, "evil") || strings.Contains(id.Name, "pwned")) &&
+			!strings.HasPrefix(id.Name, "TestReplay_") && id != f.Name {
+			t.Errorf("identifier %q came from run data", id.Name)
+		}
+		return true
+	})
+}
+
+// TestReplayPackageKeyword: an agent named like a Go keyword gets a
+// package stem that is not one ("replay_func"), a digit or underscore
+// start the same prefix; the skeleton parses either way.
+func TestReplayPackageKeyword(t *testing.T) {
+	for agent, want := range map[string]string{
+		"func": "replay_func", "type": "replay_type", "go": "replay_go", "Select": "replay_select",
+		"orders": "orders", "": "replay", "9lives": "replay_9lives", "_x": "replay__x",
+	} {
+		if got := replayPackage(agent); got != want {
+			t.Errorf("replayPackage(%q) = %q, want %q", agent, got, want)
+		}
+		if gotoken.IsKeyword(replayPackage(agent)) {
+			t.Errorf("replayPackage(%q) is a keyword", agent)
+		}
+	}
+	u, a := core.User("hi"), core.Message{Role: core.RoleAssistant, Content: []core.Part{core.TextPart{Text: "ok"}}}
+	set := &fixtureSet{steps: []fixtureStep{{plain: []core.Message{u}, reply: a}}, last: a,
+		files: []fixtureFile{{Name: "00001-x.json"}}}
+	set.steps[0].key.Messages = set.steps[0].plain
+	src, err := replaySkeleton{runID: "r", agent: "select", set: set}.render()
+	if err != nil {
+		t.Fatal(err)
+	}
+	f, err := goparser.ParseFile(gotoken.NewFileSet(), "x_test.go", src, goparser.PackageClauseOnly)
+	if err != nil || f.Name.Name != "replay_select_test" {
+		t.Errorf("package = %v, %v", f, err)
 	}
 }

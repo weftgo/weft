@@ -116,7 +116,10 @@ func runWhere(q obsdb.RunQuery, now time.Time) (string, []any) {
 		args = append(args, q.SessionID)
 	}
 	if q.ExperimentID != "" {
-		conds = append(conds, "experiment_id = ?")
+		// The literal <> '' is redundant (the value is not empty) but
+		// lets the planner use the partial index runs_experiment
+		// (0006), which only a WHERE implying its own condition may.
+		conds = append(conds, "experiment_id = ? AND experiment_id <> ''")
 		args = append(args, q.ExperimentID)
 	}
 	if q.PublicID != "" {

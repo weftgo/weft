@@ -154,6 +154,14 @@ func jsonIs(raw json.RawMessage, open byte) bool {
 	return len(t) == 0 || bytes.Equal(t, []byte("null")) || t[0] == open
 }
 
+// The history's bound: GET /api/experiments lists the limit most
+// recently updated experiments (?limit=, 0 or absent the default,
+// clamped to the max; no cursor yet) with total, how many are saved.
+const (
+	experimentListDefault = 50
+	experimentListMax     = 200
+)
+
 // serveExperiments is GET /api/experiments (the history) and POST
 // /api/experiments (create or update a definition by id).
 func (s *Server) serveExperiments(w http.ResponseWriter, r *http.Request) {
@@ -163,11 +171,26 @@ func (s *Server) serveExperiments(w http.ResponseWriter, r *http.Request) {
 	}
 	switch r.Method {
 	case http.MethodGet:
+		limit, ok := limitParam(w, r, r.URL.Query())
+		if !ok {
+			return
+		}
+		switch {
+		case limit == 0:
+			limit = experimentListDefault
+		case limit > experimentListMax:
+			limit = experimentListMax
+		}
 		list, err := s.db.Experiments(r.Context())
 		if err != nil {
 			dbError(w, r, "experiments", "", err)
 			return
 		}
+		// Newest update first (obsdb.DB.Experiments): the cut keeps the
+		// most recently updated, so the per-row summaries — a runs read
+		// each — stay bounded however many experiments were saved.
+		total := len(list)
+		list = list[:min(limit, len(list))]
 		out := make([]experimentRow, 0, len(list))
 		c := s.coster(r.Context())
 		for _, e := range list {
@@ -180,7 +203,8 @@ func (s *Server) serveExperiments(w http.ResponseWriter, r *http.Request) {
 		}
 		writeJSON(w, r, http.StatusOK, struct {
 			Experiments []experimentRow `json:"experiments"`
-		}{out})
+			Total       int             `json:"total"`
+		}{out, total})
 	case http.MethodPost:
 		var body experimentBody
 		if !decodeBody(w, r, "experiment body", &body) {

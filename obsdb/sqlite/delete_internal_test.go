@@ -229,3 +229,52 @@ func TestDeleteLeavesThreadTablesOnTheSharedFile(t *testing.T) {
 		t.Fatalf("thread Append after = %v", err)
 	}
 }
+
+// TestSweepYieldsBetweenPasses (M1): a sweep of more roots than one pass
+// takes frees the single writer between passes — a Write issued after
+// the first pass lands before the sweep returns (it would block until
+// the end were the sweep one transaction), and the run it wrote, being
+// new, is kept.
+func TestSweepYieldsBetweenPasses(t *testing.T) {
+	db, err := Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	t0 := time.Now().UTC().Add(-time.Hour)
+	const roots = obsdb.SweepBatch + 3
+	for i := range roots {
+		delFixture(t, db, fmt.Sprintf("old_%04d", i), "", "", t0)
+	}
+	passes, landed := 0, false
+	sweepPassHook = func() {
+		passes++
+		if landed {
+			return
+		}
+		done := make(chan error, 1)
+		mid := obsdb.Batch{Records: []obsdb.Record{{Time: time.Now().UTC(), Body: `{"type":"run_start","id":"mid_sweep"}`,
+			Attrs: map[string]any{"weft.record": "event", "weft.run.id": "mid_sweep", "weft.event.pos": int64(0), "weft.event.type": "run_start"}}}}
+		go func() { done <- db.Write(context.Background(), mid) }()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("the mid-sweep write: %v", err)
+			}
+			landed = true
+		case <-time.After(10 * time.Second):
+			t.Error("a write issued between sweep passes did not land: the writer is held across passes")
+		}
+	}
+	defer func() { sweepPassHook = nil }()
+	n, err := db.Sweep(context.Background(), time.Now().Add(-time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != roots || passes != 1 || !landed {
+		t.Errorf("Sweep = %d runs over %d hook calls, write landed %v; want %d, 1, true", n, passes, landed, roots)
+	}
+	if _, err := db.Run(context.Background(), "mid_sweep"); err != nil {
+		t.Errorf("the run written mid-sweep = %v, want kept", err)
+	}
+}

@@ -78,6 +78,7 @@
       "cost_reason": "no cache split reported; a cached prompt may be overstated",
       "cache": "not_reported"
     }
-  ]
+  ],
+  "total": 1
 }
 

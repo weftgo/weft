@@ -326,6 +326,50 @@ func sweep(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	}
 }
 
+// sweepBatched: a backlog of more roots than one pass takes
+// (obsdb.SweepBatch) is swept whole — every root and its child, the
+// count over every pass — and a running run among them stays.
+func sweepBatched(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		old := time.Now().UTC().Add(-2 * time.Hour)
+		const roots = obsdb.SweepBatch + 37
+		var b obsdb.Batch
+		for i := range roots {
+			id := fmt.Sprintf("swb_%04d", i)
+			for _, r := range []delRun{
+				{id: id, t: old, end: "ok"},
+				{id: id + "/0/c1", parent: id, t: old.Add(time.Millisecond), end: "ok"},
+			} {
+				rb := r.batch(id)
+				b.Records = append(b.Records, rb.Records...)
+				b.Spans = append(b.Spans, rb.Spans...)
+			}
+		}
+		running := delRun{id: "swb_running", t: time.Now().UTC()}
+		rb := running.batch(running.id)
+		b.Records = append(b.Records, rb.Records...)
+		if err := db.Write(ctx(), b); err != nil {
+			t.Fatal(err)
+		}
+		n, err := db.Sweep(ctx(), time.Now().Add(time.Hour))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != 2*roots {
+			t.Errorf("Sweep deleted %d runs, want %d (%d roots, each with its child, over more than one pass)", n, 2*roots, roots)
+		}
+		page, err := db.Runs(ctx(), obsdb.RunQuery{ParentRunID: "*", Limit: 500})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := idsOf(page.Runs); fmt.Sprint(got) != "[swb_running]" {
+			t.Errorf("runs after a batched sweep = %v, want the running run alone", got)
+		}
+		gone(t, db, "swb_0000", "swb_0000/0/c1", fmt.Sprintf("swb_%04d", roots-1))
+	}
+}
+
 // vacuum: Vacuum succeeds after deletions and leaves what was kept
 // readable.
 func vacuum(open func(t *testing.T) obsdb.DB) func(*testing.T) {

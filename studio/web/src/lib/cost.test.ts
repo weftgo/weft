@@ -109,6 +109,12 @@ describe("formatUSD", () => {
   })
 })
 
+const goldenRun = (id: string): RunRow => golden<RunsPage>("runs").runs.find((r) => r.id === id)!
+/** A finished run on a model no row matches: unpriced. */
+const rFail = () => goldenRun("r_fail")
+/** A run whose end never arrived: its cost is unknown, not unpriced. */
+const rStale = () => goldenRun("r_stale")
+
 const priced = (usd: number, del: number | null = 0): RunRow => ({
   ...golden<RunsPage>("runs").runs[0],
   cost_usd: usd,
@@ -123,10 +129,18 @@ const priced = (usd: number, del: number | null = 0): RunRow => ({
 
 describe("costView", () => {
   it("an unpriced figure is — with its reason, never $0.00", () => {
-    const r = golden<RunsPage>("runs").runs[0]
+    const r = rFail()
     const v = costView(r)
     expect(v).toMatchObject({ known: false, text: "—", badge: "unpriced" })
     expect(v.title).toBe(r.cost_reason)
+    expect(v.title).toContain("no row of the default pricing table matches wefttest/script")
+  })
+  it("a run whose end never arrived is — too, badged unknown with its reason", () => {
+    const r = rStale()
+    const v = costView(r)
+    expect(v).toMatchObject({ known: false, text: "—", badge: "unknown" })
+    expect(v.title).toBe(r.cost_reason)
+    expect(v.title).toContain("never arrived")
   })
   it("a priced figure is formatted, the exact USD its title; cache not reported is said", () => {
     expect(costView(priced(0.0042))).toMatchObject({ known: true, text: "$0.0042", title: "$0.004200 USD" })
@@ -146,13 +160,13 @@ describe("the cost order and totals", () => {
   it("sortByCost: the whole bill, most first; unpriced last in their order", () => {
     const a = { ...priced(1, 0), id: "a" }
     const b = { ...priced(0.2, 2), id: "b" }
-    const u1 = { ...golden<RunsPage>("runs").runs[0], id: "u1" }
-    const u2 = { ...golden<RunsPage>("runs").runs[1], id: "u2" }
+    const u1 = { ...rFail(), id: "u1" }
+    const u2 = { ...rStale(), id: "u2" }
     expect(sortByCost([u1, a, u2, b]).map((r) => r.id)).toEqual(["b", "a", "u1", "u2"])
   })
   it("sumCost totals a variant's runs and is — when any is unknown or unread", () => {
     expect(sumCost([priced(0.01, 0.005), priced(0.02)])).toMatchObject({ known: true, text: "$0.04" })
-    const one = sumCost([priced(0.01), golden<RunsPage>("runs").runs[0]])
+    const one = sumCost([priced(0.01), rFail()])
     expect(one).toMatchObject({ known: false, text: "—" })
     expect(one.title).toContain("no row of the default pricing table matches wefttest/script")
     expect(sumCost([priced(0.01), undefined])).toMatchObject({ known: false, text: "—" })

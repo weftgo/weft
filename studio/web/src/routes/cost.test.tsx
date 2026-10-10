@@ -21,7 +21,10 @@ vi.setConfig({ testTimeout: 30_000 })
 const meta = (capabilities: string[]) => ({ ...golden<Record<string, unknown>>("meta"), capabilities })
 const runs = golden<RunsPage>("runs")
 const rOK = runs.runs.find((r) => r.id === "r_ok")!
+/** A run whose end never arrived: cost unknown (badge "unknown"). */
 const rStale = runs.runs.find((r) => r.id === "r_stale")!
+/** A finished run on a model no pricing row matches: unpriced. */
+const rFail = runs.runs.find((r) => r.id === "r_fail")!
 const row = (over: Partial<RunRow>): RunRow => ({ ...rOK, ...over })
 /** A run priced at usd (own) and del (its subagents'; null: unpriced). */
 const priced = (id: string, usd: number, del: number | null = 0, over: Partial<RunRow> = {}): RunRow =>
@@ -62,18 +65,25 @@ const listed = () =>
 
 describe("the runs table's Cost column", () => {
   const list = [priced("r_cheap", 0.0042), priced("r_dear", 0.5, 0.25), rStale]
+  const withUnpriced = [...list, rFail]
 
   it("a priced run shows the API's cost_usd; an unpriced one — with its reason; delegated apart", async () => {
-    studio.on("GET meta", meta(["pricing", "search"])).on("GET runs", { total: 3, runs: list, next_before: null })
+    studio.on("GET meta", meta(["pricing", "search"])).on("GET runs", { total: 4, runs: withUnpriced, next_before: null })
     renderApp("/runs")
     await screen.findByText("r_cheap")
     expect(within(costOf("r_cheap")!).getByText("$0.0042").getAttribute("data-cost")).toBe("0.0042")
     const dear = costOf("r_dear")!
     expect(within(dear).getByText("$0.50")).toBeTruthy()
     expect(dear.querySelector("[data-delegated-cost]")!.textContent).toContain("$0.25")
-    const unpriced = within(costOf("r_stale")!).getByText("—")
-    expect(unpriced.getAttribute("title")).toBe(rStale.cost_reason)
+    const unpriced = within(costOf("r_fail")!).getByText("—")
+    expect(unpriced.getAttribute("title")).toBe(rFail.cost_reason)
     expect(unpriced.getAttribute("data-cost-badge")).toBe("unpriced")
+    expect(costOf("r_fail")!.textContent).not.toContain("$0.00")
+    // The run whose end never arrived: — as well, badged unknown, its reason the title.
+    const unknown = within(costOf("r_stale")!).getByText("—")
+    expect(unknown.getAttribute("data-cost-badge")).toBe("unknown")
+    expect(unknown.getAttribute("title")).toBe(rStale.cost_reason)
+    expect(unknown.getAttribute("title")).toContain("never arrived")
     expect(costOf("r_stale")!.textContent).not.toContain("$0.00")
   })
 
@@ -163,7 +173,7 @@ describe("the run header", () => {
   })
 
   it("an unpriced run is — with the reason, never $0.00; cache not reported is a hint", async () => {
-    serveRun({ ...rStale, id: "r_u", status: "succeeded", finished: rOK.finished, children: [] }, ["pricing"])
+    serveRun({ ...rFail, id: "r_u", children: [] }, ["pricing"])
     renderApp("/runs/r_u?view=story")
     const cost = await waitFor(() => {
       const el = document.querySelector<HTMLElement>("[data-run-cost]")
@@ -171,7 +181,7 @@ describe("the run header", () => {
       return el!
     })
     const v = within(cost).getByText("—")
-    expect(v.getAttribute("title")).toBe(rStale.cost_reason)
+    expect(v.getAttribute("title")).toBe(rFail.cost_reason)
     expect(cost.textContent).not.toContain("$")
 
     cleanup()
@@ -318,7 +328,7 @@ describe("the playground matrix's cost", () => {
   })
 
   it("a variant with any unpriced run totals —, with the reason", async () => {
-    await runMatrix(["pricing"], { ...rStale, id: "pg_m2", status: "succeeded", playground: true })
+    await runMatrix(["pricing"], { ...rFail, id: "pg_m2", status: "succeeded", playground: true })
     await waitFor(
       () =>
         expect(total("B")?.querySelector("[data-cost]")?.getAttribute("title")).toContain(

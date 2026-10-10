@@ -131,6 +131,10 @@ func runWhere(q obsdb.RunQuery, now time.Time) (string, []any) {
 		conds = append(conds, "parent_run_id = ?")
 		args = append(args, q.ParentRunID)
 	}
+	if !q.LastSeenAfter.IsZero() {
+		conds = append(conds, "last_seen_ns >= ?")
+		args = append(args, q.LastSeenAfter.UnixNano())
+	}
 	if q.Playground != nil {
 		conds = append(conds, "playground = ?")
 		args = append(args, boolInt(*q.Playground))

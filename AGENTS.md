@@ -234,7 +234,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    sessions/{id} (capability "delete": a run with its subagent children, or a session's runs —
 //    //    rows, records, search index, spans, app logs — from obsdb's tables only, the app's
 //    //    conversation store and a shared file's thread tables untouched; the dev token or setup A's
-//    //    loopback Host, every panel token 403; obsdb.DB.DeleteRun/DeleteSession/Sweep/Vacuum), /api/live (SSE; ?all=1 every run, dev token/loopback only — meta live_all), /api/panel-tokens (with a Token),
+//    //    loopback Host, every panel token 403; obsdb.DB.DeleteRun/DeleteSession/Sweep/Vacuum), /api/live (SSE; ?all=1 every run, dev token/loopback only — meta live_all; its resume
+//    //    backfills the last hour / running runs, ≤ 500 — obsdb.RunQuery.LastSeenAfter), /api/panel-tokens (with a Token),
 //    //    /panel.js (the devtools panel, WEFT-DEVTOOLS §5 — its host API, plan C4: the element's
 //    //    open/close/toggle/isOpen/scope/select/on/studioLink, window.weft.devtools while connected
 //    //    unless data-global="off", events weft:run|parked|error; its layout, plan D1: float, dock

@@ -709,3 +709,66 @@ func TestLiveAllThroughGrant(t *testing.T) {
 		t.Errorf("granted all stream saw runs %q, want r_a r_b", got)
 	}
 }
+
+// TestLiveAllResumeIsBounded: a resume on the all selector (any
+// Last-Event-ID, however old) backfills the runs last seen within the
+// last hour — a run started hours ago and still heartbeating included —
+// never the older ones, and at most allBackfillMax runs, newest first.
+func TestLiveAllResumeIsBounded(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().UTC()
+	seedAt(t, db, "old_done", "", "", now.Add(-3*time.Hour), true)
+	seedAt(t, db, "old_interrupted", "", "", now.Add(-2*time.Hour), false)
+	seedAt(t, db, "old_alive", "", "", now.Add(-3*time.Hour), false)
+	if err := db.Write(context.Background(), obsdb.Batch{Records: []obsdb.Record{{Time: now,
+		Attrs: map[string]any{"weft.record": "heartbeat", "weft.run.id": "old_alive"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	seedAt(t, db, "new_done", "", "", now.Add(-10*time.Minute), true)
+	if det, err := db.Run(context.Background(), "old_alive"); err != nil || det.Status != obsdb.StatusRunning {
+		t.Fatalf("old_alive = %v, %v; want running", det.Status, err)
+	}
+	h := Handler(DB(db), Live(obsdb.NewHub()))
+	resp := subscribeLive(t, h, "?all=1&kinds=event", "1")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("all resume: %d", resp.StatusCode)
+	}
+	seen := map[string]int{}
+	for _, id := range liveRunIDs(t, readSSE(t, resp, 10, time.Second)) {
+		seen[id]++
+	}
+	if seen["old_done"] != 0 || seen["old_interrupted"] != 0 {
+		t.Errorf("the all resume replayed runs last seen over an hour ago: %v", seen)
+	}
+	if seen["old_alive"] == 0 || seen["new_done"] != 2 {
+		t.Errorf("the all resume = %v, want old_alive (running) and new_done's two events", seen)
+	}
+}
+
+// TestLiveAllResumeCap: past allBackfillMax runs in the window the
+// resume replays the newest allBackfillMax, never more.
+func TestLiveAllResumeCap(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().UTC()
+	b := obsdb.Batch{}
+	for i := range allBackfillMax + 5 {
+		id := fmt.Sprintf("r_%04d", i)
+		b.Records = append(b.Records, obsdb.Record{Time: now.Add(-time.Duration(allBackfillMax+5-i) * time.Second),
+			Body: `{"type":"run_start","id":"` + id + `"}`,
+			Attrs: map[string]any{"weft.record": "event", "weft.run.id": id, "weft.event.type": "run_start",
+				"weft.event.pos": int64(0), "gen_ai.agent.name": "acme"}})
+	}
+	if err := db.Write(context.Background(), b); err != nil {
+		t.Fatal(err)
+	}
+	resp := subscribeLive(t, Handler(DB(db), Live(obsdb.NewHub())), "?all=1&kinds=event", "1")
+	ids := liveRunIDs(t, readSSE(t, resp, allBackfillMax+5, 2*time.Second))
+	if len(ids) != allBackfillMax {
+		t.Fatalf("the all resume replayed %d runs, want %d", len(ids), allBackfillMax)
+	}
+	for _, id := range ids {
+		if id < "r_0005" {
+			t.Errorf("the all resume replayed %s, one of the five oldest", id)
+		}
+	}
+}

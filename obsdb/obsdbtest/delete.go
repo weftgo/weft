@@ -349,3 +349,52 @@ func vacuum(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		}
 	}
 }
+
+// lastSeenAfter: RunQuery.LastSeenAfter keeps the runs last seen at or
+// after it — a run started long ago and heartbeated now included,
+// children too under ParentRunID "*" — through Runs and, where the
+// backend searches, Search.
+func lastSeenAfter(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		now := time.Now().UTC()
+		old := now.Add(-3 * time.Hour)
+		writeDel(t, db, "ls_old", delRun{id: "ls_old", t: old, end: "ok"})
+		writeDel(t, db, "ls_old_int", delRun{id: "ls_old_int", t: old})
+		writeDel(t, db, "ls_new", delRun{id: "ls_new", t: now.Add(-10 * time.Minute), end: "ok"},
+			delRun{id: "ls_new/0/c1", parent: "ls_new", t: now.Add(-10 * time.Minute), end: "ok"})
+		writeDel(t, db, "ls_alive", delRun{id: "ls_alive", t: old})
+		hb := record("ls_alive", "heartbeat", "", 0, "", nil)
+		hb.Time = now
+		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{hb}}); err != nil {
+			t.Fatal(err)
+		}
+		q := obsdb.RunQuery{ParentRunID: "*", LastSeenAfter: now.Add(-time.Hour), Limit: 500}
+		page, err := db.Runs(ctx(), q)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := idsOf(page.Runs)
+		sort.Strings(ids)
+		if fmt.Sprint(ids) != "[ls_alive ls_new ls_new/0/c1]" {
+			t.Errorf("Runs(LastSeenAfter 1h ago) = %v, want the recent run, its child and the heartbeated old one", ids)
+		}
+		if page.Total != 3 {
+			t.Errorf("Total = %d, want 3", page.Total)
+		}
+		if got := allIDs(t, db); len(got) != 5 {
+			t.Errorf("unbounded Runs = %v, want all five", got)
+		}
+		if s, ok := db.(obsdb.Searcher); ok {
+			sp, err := s.Search(ctx(), obsdb.SearchQuery{RunQuery: q, Text: "zebracrossing"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := idsOf(sp.Runs)
+			sort.Strings(got)
+			if fmt.Sprint(got) != "[ls_alive ls_new ls_new/0/c1]" {
+				t.Errorf("Search(LastSeenAfter 1h ago) = %v", got)
+			}
+		}
+	}
+}

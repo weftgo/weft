@@ -13,14 +13,18 @@ module, ADR 0005).
 - `GET /api/live?all=1` (plan A7, for the Live page): every run in the
   database on one stream, subagent child runs included (each frame
   names its `run_id`), with the `kinds` the request asks for; a resume
-  backfills every stored run. Setup A on a loopback Host and the server
+  backfills a bounded set — the runs running or last seen within the
+  last hour, newest first, at most 500 (a `Last-Event-ID` older than
+  that gets the same set, never an error). Setup A on a loopback Host and the server
   token only: every panel token is 403 `forbidden` on the stream and
   on `POST /api/live-grant` (`{"all":true}` or `?all=1`), as is a Host
   let in only by `AllowOrigins`. `/api/meta` gains `live_all` (true
   under `db.path`'s rule) so the UI knows whether to offer it; no new
   capability (`all` is a selector of `live`). `obsdb.Selector` gains
   `All` (matches every run's frames; an empty selector still matches
-  nothing). In the auth matrix for every identity.
+  nothing). In the auth matrix for every identity; a run grant's sig
+  never opens `all`, nor an `all` grant's a run. `obsdb.RunQuery` gains
+  `LastSeenAfter` (both backends, a conformance case) for the bound.
 - `GET /api/search` (plan A7, capability `search`): runs found by what
   they said and did. `q=` terms — whitespace-separated, a `"quoted
   phrase"` one term — each a case-insensitive substring of the run's

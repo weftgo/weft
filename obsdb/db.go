@@ -185,6 +185,10 @@ type RunQuery struct {
 	ExperimentID                            string            // the runs of one experiment
 	Meta                                    map[string]string // subset match on metadata
 	Before                                  time.Time         // cursor on Started; zero = newest
+	// LastSeenAfter keeps the runs last seen at or after it (zero = no
+	// bound). A running run is always among them once the bound is
+	// older than InterruptedAfter: running means seen that recently.
+	LastSeenAfter time.Time
 	// BeforeID, with Before, makes the cursor the pair (Started, ID):
 	// the runs after that one in the list order — exact inside a group
 	// sharing one Started. Pass RunPage.NextBeforeID.

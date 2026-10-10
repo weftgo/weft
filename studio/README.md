@@ -1491,7 +1491,11 @@ and `event: overflow` when a slow subscriber's queue drops it.
 `all=1` (plan A7, the Live page) streams every run in the database as
 its frames are published — subagent child runs included, each frame
 naming its own `run_id` (a record that names no run is not forwarded);
-a resume backfills every stored run. It is setup A's on a loopback
+a resume (`Last-Event-ID`, however old) backfills a bounded set — the
+runs running or last seen within the last hour, newest first, at most
+500 — never the whole database, never an error. A grant names one
+stream: a run grant's `sig` never opens `all`, nor an `all` grant's a
+run. It is setup A's on a loopback
 Host and the server token's alone: every panel token, read or
 playground, is 403 `forbidden` on the stream and on its grant (the
 body form is `{"all":true}`), as is a Host let in only by

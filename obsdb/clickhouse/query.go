@@ -160,6 +160,10 @@ func runsInner(q obsdb.RunQuery) (string, []any) {
 	default:
 		eq("ParentRunID", q.ParentRunID)
 	}
+	if !q.LastSeenAfter.IsZero() {
+		conds = append(conds, "toUnixTimestamp64Nano(LastSeen) >= ?")
+		args = append(args, q.LastSeenAfter.UnixNano())
+	}
 	if q.Playground != nil {
 		conds = append(conds, "Playground = ?")
 		args = append(args, *q.Playground)

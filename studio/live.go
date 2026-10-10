@@ -425,6 +425,14 @@ func writeFrame(sw *sseWriter, f obsdb.Frame) {
 	sw.flush()
 }
 
+// The all selector's resume backfill bound: runs last seen within the
+// window (a running run always is: running means seen within
+// obsdb.InterruptedAfter), newest first, at most allBackfillMax.
+const (
+	allBackfillWindow = time.Hour
+	allBackfillMax    = 500
+)
+
 // backfill replays the stored durable records a resume needs (S4.5):
 // every event and messages record the selector covers, deltas
 // excluded (they are not stored). The hub's Seq is not persisted
@@ -458,8 +466,25 @@ func (s *Server) backfill(
 	case sel.Agent != "":
 		query.Agent = sel.Agent
 	case sel.All:
-		// Every stored run, children included (ParentRunID "*"): the
-		// selector covers them all.
+		// Bounded (allBackfillWindow, allBackfillMax): the runs last
+		// seen within the window — every running run among them —
+		// children included (ParentRunID "*"), newest first, one page,
+		// never more. A Last-Event-ID older than the window gets the
+		// same bounded set, never an error: a resume on every run in
+		// the database must not replay the database.
+		query.LastSeenAfter = s.now().Add(-allBackfillWindow)
+		query.Limit = allBackfillMax
+		page, err := s.db.Runs(ctx, query)
+		if err != nil {
+			return
+		}
+		for _, rec := range page.Runs {
+			if ctx.Err() != nil || sw.err != nil {
+				return
+			}
+			s.backfillRun(ctx, sw, rec, scope, kinds, sent)
+		}
+		return
 	}
 	for { // the runs list pages
 		page, err := s.db.Runs(ctx, query)

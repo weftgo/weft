@@ -533,3 +533,31 @@ func TestLiveGrantBodyErrors(t *testing.T) {
 		})
 	}
 }
+
+// TestLiveGrantRunAndAllDoNotCross: a grant names one stream — a
+// run-scoped grant's sig never opens the all stream, and an all grant's
+// sig never opens a run stream (401, the bad-sig answer).
+func TestLiveGrantRunAndAllDoNotCross(t *testing.T) {
+	srv := New(DB(fixtureDB(t)), Token("srv"))
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	_, runSig, _ := grantAt(t, ts.URL, "srv", "run=r_ok&kinds=event")
+	_, allSig, body := grantAt(t, ts.URL, "srv", "all=1&kinds=event")
+	if runSig == "" || allSig == "" {
+		t.Fatalf("grants: run %q, all %q (%s)", runSig, allSig, body)
+	}
+	for q, want := range map[string]int{
+		"run=r_ok&kinds=event&sig=" + runSig: http.StatusOK,
+		"all=1&kinds=event&sig=" + allSig:    http.StatusOK,
+		"all=1&kinds=event&sig=" + runSig:    http.StatusUnauthorized,
+		"all=true&kinds=event&sig=" + runSig: http.StatusUnauthorized,
+		"run=r_ok&kinds=event&sig=" + allSig: http.StatusUnauthorized,
+		"run=r_ok&sig=" + allSig:             http.StatusUnauthorized,
+	} {
+		if got := liveStatus(t, ts.URL, q); got != want {
+			t.Errorf("%s = %d, want %d", q, got, want)
+		}
+	}
+}

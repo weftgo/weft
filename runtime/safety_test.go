@@ -357,6 +357,55 @@ func TestSecondDecisionOnACallIsRejected(t *testing.T) {
 	}
 }
 
+// TestRestoreParkIsOneLockHold pins restorePark's atomicity: the
+// completer's decision leaves the park and the park goes back under one
+// l.mu hold. In a gap between the two, a held decision whose accepted
+// ack failed (dispatchDecision) would find its park missing and the set
+// short, settle "not held; decide again", and the park would come back
+// still holding it — a re-decision then "already decided". The hook
+// runs at that point: the lock must be held there, and a held
+// decision's check, queued on the lock, must see the park back with
+// itself still in it and the completer's decision gone.
+func TestRestoreParkIsOneLockHold(t *testing.T) {
+	l, _, pr := decisionLink(t, "c1", "c2")
+	held := approvalDecision{CommandID: "cmd_d1", RunID: "pg_parked", CallID: "c1", Decision: "approve"}
+	l.mu.Lock()
+	pr.decisions["c1"] = held
+	pr.decisions["c2"] = approvalDecision{CommandID: "cmd_d2", RunID: "pg_parked", CallID: "c2", Decision: "approve"}
+	l.forgetParkLocked("pg_parked") // the completer took the park
+	l.mu.Unlock()
+
+	type seen struct{ mine, dropped, taken bool }
+	got := make(chan seen, 1)
+	defer func(f func()) { restoreParkGap = f }(restoreParkGap)
+	restoreParkGap = func() {
+		restoreParkGap = nil
+		if l.mu.TryLock() {
+			l.mu.Unlock()
+			t.Error("restorePark's gap ran without l.mu: the decision's removal and the park's return are two holds")
+		}
+		go func() { // the held decision's check after its accepted ack failed
+			l.mu.Lock()
+			defer l.mu.Unlock()
+			mine := pr.decisions["c1"] == held
+			dropped := mine && l.parked["pg_parked"] == pr
+			got <- seen{mine, dropped, mine && !dropped && len(pr.decisions) == len(pr.pending)}
+		}()
+	}
+	l.restorePark("pg_parked", pr, "c2")
+	if s := <-got; !s.mine || !s.dropped || s.taken {
+		t.Errorf("the held decision's check saw mine=%v dropped=%v taken=%v, want the park back with it held (mine, dropped)", s.mine, s.dropped, s.taken)
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.parked["pg_parked"] != pr {
+		t.Error("the park did not go back")
+	}
+	if _, ok := pr.decisions["c2"]; ok {
+		t.Error("the completer's decision is still in the restored park")
+	}
+}
+
 // TestRefusedDecisionAckRestoresThePark pins dispatchDecision's
 // at-most-once rule on the decision that completes the set: its
 // accepted ack refused (409), the resume does not run and the park

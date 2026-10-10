@@ -1148,15 +1148,28 @@ func (l *link) rememberParkLocked(runID string, pr *parkedRun) {
 // again). A fork's park goes back only while its session still holds
 // every parked call open: once Decide recorded anything, the session's
 // boundary is the truth and a re-decision would be refused there.
+//
+// The decision's removal and the park's return are one l.mu hold: a
+// held decision whose accepted ack failed reads the park and the
+// decision count under that lock (handleDecision), and between the two
+// it would see neither its park nor a full set — and settle itself
+// "not held" while the park went back still holding it.
 func (l *link) restorePark(runID string, pr *parkedRun, callID string) {
 	if pr.sess != nil && len(pr.sess.Pending()) != len(pr.pending) {
 		return
 	}
 	l.mu.Lock()
+	defer l.mu.Unlock()
 	delete(pr.decisions, callID)
-	l.mu.Unlock()
-	l.rememberPark(runID, pr)
+	if restoreParkGap != nil {
+		restoreParkGap()
+	}
+	l.rememberParkLocked(runID, pr)
 }
+
+// restoreParkGap, when set by a test, runs between restorePark's
+// decision removal and the park's return, l.mu held.
+var restoreParkGap func()
 
 // forgetParkLocked drops a parked run (its decisions are complete, or
 // it was evicted). Caller holds l.mu.

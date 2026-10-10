@@ -20,7 +20,7 @@
 //	   ├──(reject)──► rejected
 //	   └──(no ack in 30 s, or the stream died before the ack)──► lost
 //	accepted ──(stream died, no finish in 10 min)──► lost
-//	accepted ──(stream open, no finish and no heartbeat in max(10 min, 3 beats))──► lost
+//	accepted ──(no finish and no heartbeat in max(10 min, 3 beats))──► lost
 //
 // The second accepted edge is for a runtime that heartbeats
 // (Registration.HeartbeatMS): while it holds the command it re-posts

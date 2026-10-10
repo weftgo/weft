@@ -801,14 +801,98 @@ func TestHugeHeartbeatIsClamped(t *testing.T) {
 		reg := regBody(id)
 		reg.HeartbeatMS = ms
 		register(t, mux(rs), reg)
-		r, closeStream := subscribe(t, rs, ts.URL, id, "")
-		cmd := mustEnqueue(t, rs, id, Command{})
-		nextRun(t, r)
-		ack(t, rs, Ack{CommandID: cmd.CommandID, State: "accepted", RunID: "pg_" + id})
-		st := waitState(t, rs, cmd.CommandID, StateLost)
-		if want := "accepted, but no finish and no heartbeat from the runtime in 150ms"; st.Error == nil || *st.Error != want {
-			t.Errorf("heartbeat_ms %d: lost reason = %v, want %q", ms, st.Error, want)
-		}
-		closeStream()
+		func() {
+			r, closeStream := subscribe(t, rs, ts.URL, id, "")
+			defer closeStream() // before ts.Close, on a failure too: an open stream would hang it
+			cmd := mustEnqueue(t, rs, id, Command{})
+			nextRun(t, r)
+			ack(t, rs, Ack{CommandID: cmd.CommandID, State: "accepted", RunID: "pg_" + id})
+			st := waitState(t, rs, cmd.CommandID, StateLost)
+			if want := "accepted, but no finish and no heartbeat from the runtime in 150ms"; st.Error == nil || *st.Error != want {
+				t.Errorf("heartbeat_ms %d: lost reason = %v, want %q", ms, st.Error, want)
+			}
+		}()
+	}
+}
+
+// TestAcceptedTransitionArmsBeatWatchWhileDisconnected pins the
+// queued→accepted arm on its own: a heartbeating runtime's command
+// accepted while it holds no stream gets the beat watch at that
+// transition — no repeated accepted ack needed — so its silence is
+// the beat reason over max(FinishDeadline, 3 beats), not the
+// disconnected FinishDeadline watch.
+func TestAcceptedTransitionArmsBeatWatchWhileDisconnected(t *testing.T) {
+	rs := fastServer()
+	rs.AckDeadline = 30 * time.Second
+	rs.FinishDeadline = 50 * time.Millisecond // the watch: max(50 ms, 3 × 40 ms) = 120 ms
+	h := mux(rs)
+	reg := regBody("rt_down")
+	reg.HeartbeatMS = 40
+	rs.mu.Lock()
+	stalled := make(chan Command, 1)
+	stalled <- Command{CommandID: "cmd_stuck"} // full: cap 1, nobody reads
+	rs.runtimes["rt_down"] = &connected{reg: reg, feed: stalled}
+	rs.mu.Unlock()
+
+	cmd := mustEnqueue(t, rs, "rt_down", Command{CommandID: "cmd_down"}) // drops the feed
+	if rs.Connected("rt_down") {
+		t.Fatal("the full feed was not dropped")
+	}
+	beat(t, h, cmd.CommandID, "pg_down") // the accepted ack only: no beat follows
+	rs.mu.Lock()
+	armed := rs.commands[cmd.CommandID].beat
+	rs.mu.Unlock()
+	if armed != 40*time.Millisecond {
+		t.Errorf("the accepted transition armed beat %s, want 40ms (the registration's cadence)", armed)
+	}
+	st := waitState(t, rs, cmd.CommandID, StateLost)
+	if want := "accepted, but no finish and no heartbeat from the runtime in 120ms"; st.Error == nil || *st.Error != want {
+		t.Errorf("lost reason = %v, want %q", st.Error, want)
+	}
+}
+
+// TestRepeatedAcceptedAckArmsRegistrationBeat pins the fallback on its
+// own: a row accepted while its runtime's registration said no
+// heartbeat (no watch, the stream open) holds beat 0; the runtime then
+// registers again with a cadence, and its next repeated accepted ack
+// arms the beat watch at that cadence — so silence after it ends the
+// row lost, though the stream stays open.
+func TestRepeatedAcceptedAckArmsRegistrationBeat(t *testing.T) {
+	rs := fastServer()
+	rs.FinishDeadline = 60 * time.Millisecond // the watch: max(60 ms, 3 × 10 ms) = 60 ms
+	h := mux(rs)
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+	register(t, h, regBody("rt_late_beat"))
+	r, closeStream := subscribe(t, rs, ts.URL, "rt_late_beat", "")
+	defer closeStream()
+
+	cmd := mustEnqueue(t, rs, "rt_late_beat", Command{CommandID: "cmd_late_beat"})
+	nextRun(t, r)
+	beat(t, h, cmd.CommandID, "pg_late_beat") // accepted, no heartbeat registered: no watch
+	rs.mu.Lock()
+	row := rs.commands[cmd.CommandID]
+	before, state := row.beat, row.state
+	rs.mu.Unlock()
+	if state != StateAccepted || before != 0 {
+		t.Fatalf("after the accepted ack: state %s beat %s, want accepted with beat 0", state, before)
+	}
+
+	again := regBody("rt_late_beat")
+	again.HeartbeatMS = 10
+	register(t, h, again)
+	beat(t, h, cmd.CommandID, "pg_late_beat") // a heartbeat on the beat-0 row
+	rs.mu.Lock()
+	armed := row.beat
+	rs.mu.Unlock()
+	if armed != 10*time.Millisecond {
+		t.Errorf("the repeated accepted ack armed beat %s, want 10ms (the new registration's cadence)", armed)
+	}
+	st := waitState(t, rs, cmd.CommandID, StateLost)
+	if want := "accepted, but no finish and no heartbeat from the runtime in 60ms"; st.Error == nil || *st.Error != want {
+		t.Errorf("lost reason = %v, want %q", st.Error, want)
+	}
+	if !rs.Connected("rt_late_beat") {
+		t.Error("the stream closed: the watch fired on a disconnect, not on silence")
 	}
 }

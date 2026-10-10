@@ -12,6 +12,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -969,11 +970,51 @@ func TestLinkSettlesAnUnconfirmedAcceptedAck(t *testing.T) {
 // command is in the runtime's hands its accepted ack is re-posted every
 // ackHeartbeat, naming the same run, and the registration says the
 // cadence (Studio watches accepted rows only for a runtime that beats).
+// And the beat stops before the finished ack: once three beats are in,
+// the fake Studio holds the next one in flight, lets the run finish
+// while it is held, and keeps it until the finished ack is recorded;
+// the finished ack's answer then waits for another accepted ack (or ten
+// cadences) — a beat not stopped before the finished ack lands after it.
 func TestLinkHeartbeatsAnAcceptedCommand(t *testing.T) {
 	defer func(d time.Duration) { ackHeartbeat = d }(ackHeartbeat)
 	ackHeartbeat = 10 * time.Millisecond
 	const cmd = "cmd_01JTEST00000000000000BEAT"
 	fs := newFakeStudio(t)
+	var (
+		arm        atomic.Bool // hold the next beat
+		held       = make(chan struct{})
+		finished   = make(chan struct{})
+		finishOnce sync.Once
+		lateBeat   = make(chan struct{}, 1)
+		answered   = make(chan struct{}) // the finished ack's answer is on its way
+	)
+	t.Cleanup(func() { finishOnce.Do(func() { close(finished) }) }) // never leave a beat held
+	fs.ackStatus = func(a ack) int {
+		switch {
+		case a.CommandID != cmd:
+		case a.State == "accepted":
+			select {
+			case <-finished:
+				select {
+				case lateBeat <- struct{}{}:
+				default:
+				}
+			default:
+				if arm.CompareAndSwap(true, false) {
+					close(held)
+					<-finished // in flight until the finished ack is recorded
+				}
+			}
+		case a.State == "finished":
+			finishOnce.Do(func() { close(finished) })
+			select { // a beat still running posts again while this answer is held
+			case <-lateBeat:
+			case <-time.After(10 * ackHeartbeat):
+			}
+			close(answered)
+		}
+		return http.StatusOK
+	}
 	ts := httptest.NewServer(fs.handler())
 	t.Cleanup(ts.Close)
 	gate := make(chan struct{})
@@ -1001,22 +1042,30 @@ func TestLinkHeartbeatsAnAcceptedCommand(t *testing.T) {
 		}
 		fs.mu.Unlock()
 	}
-	close(gate)
+	arm.Store(true)
+	select {
+	case <-held:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no beat after the third")
+	}
+	close(gate) // the run finishes with a beat in flight
 	if a := fs.ackOf(t, cmd, "finished"); a.Status != "succeeded" {
 		t.Errorf("finished ack = %+v", a)
 	}
-	// The beat stops before the finished ack: five cadences on, still
-	// no accepted ack after it.
-	time.Sleep(5 * ackHeartbeat)
+	select {
+	case <-answered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the finished ack was never answered")
+	}
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
-	finished := false
+	afterFinished := false
 	for _, a := range fs.acks {
 		switch {
 		case a.CommandID != cmd:
 		case a.State == "finished":
-			finished = true
-		case finished && a.State == "accepted":
+			afterFinished = true
+		case afterFinished && a.State == "accepted":
 			t.Errorf("an accepted ack after the finished one: %+v", a)
 		}
 	}

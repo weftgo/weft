@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -510,7 +511,12 @@ func (s *Server) backfill(
 // backfillRun replays one run's stored durable records as record
 // frames: its events (with their positions) and, when asked for, the
 // transcript bodies (a messages record per body, positioned by
-// index).
+// index). A read that fails is said, never skipped in silence: one
+// `event: backfill_error` frame naming the run and the kind it could
+// not read ({"run_id", "kind"}; the cause stays in the server's Warn
+// line), after whatever the read delivered before failing. A client
+// that has no listener for it loses nothing; one that has knows the
+// run's history is incomplete and can refetch the run's pages.
 func (s *Server) backfillRun(
 	ctx context.Context, sw *sseWriter,
 	rec obsdb.RunRow, scope string, kinds map[string]bool, sent *liveDedup,
@@ -520,7 +526,9 @@ func (s *Server) backfillRun(
 	}
 	if kinds["event"] {
 		page, err := s.db.Events(ctx, rec.ID, -1, 1000)
-		if err == nil {
+		if err != nil {
+			s.backfillFailed(ctx, sw, rec.ID, "event", err)
+		} else {
 			for {
 				for _, pe := range page.Events {
 					if sent.seen(liveKey{run: rec.ID, kind: "event", pos: pe.Pos}) {
@@ -542,6 +550,7 @@ func (s *Server) backfillRun(
 				}
 				page, err = s.db.Events(ctx, rec.ID, *page.NextAfter, 1000)
 				if err != nil {
+					s.backfillFailed(ctx, sw, rec.ID, "event", err)
 					break
 				}
 			}
@@ -556,7 +565,9 @@ func (s *Server) backfillRun(
 		// takes an index but is not transcript, and collide with the live
 		// frames of the records after it.
 		batches, err := s.db.TranscriptBatches(ctx, rec.ID)
-		if err == nil {
+		if err != nil {
+			s.backfillFailed(ctx, sw, rec.ID, "messages", err)
+		} else {
 			for _, b := range batches {
 				if sent.seen(liveKey{run: rec.ID, kind: "messages", pos: b.Index}) {
 					continue
@@ -573,6 +584,24 @@ func (s *Server) backfillRun(
 			sw.flush()
 		}
 	}
+}
+
+// backfillFailed says that one run's stored records of a kind could
+// not be read: a Warn line with the cause, and a backfill_error frame
+// without it (a database error is no client's business). A client
+// that left (the request's context done) is not told and not logged.
+func (s *Server) backfillFailed(ctx context.Context, sw *sseWriter, runID, kind string, err error) {
+	if ctx.Err() != nil {
+		return
+	}
+	slog.Warn("studio: live resume: a run's stored records could not be read",
+		"run_id", runID, "kind", kind, "err", err)
+	data, _ := json.Marshal(struct {
+		RunID string `json:"run_id"`
+		Kind  string `json:"kind"`
+	}{runID, kind})
+	sw.frame("event: backfill_error\ndata: %s\n\n", data)
+	sw.flush()
 }
 
 // rawOrNull embeds a record body verbatim when it is JSON, else as a

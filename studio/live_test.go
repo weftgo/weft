@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -69,6 +70,76 @@ func readSSE(t *testing.T, resp *http.Response, n int, timeout time.Duration) []
 		}
 	}
 	return out
+}
+
+// readSSEUntil reads frames until the first frame of event kind
+// marker (returned without it), failing the test when the body closes
+// or the ceiling passes first. A resume's first ping is the end of its
+// backfill: the ticker starts only after the backfill returns, so with
+// pingEvery shortened (fastPing) the marker bounds the read by what
+// the server did, never by how fast a starved scheduler ran it.
+func readSSEUntil(t *testing.T, resp *http.Response, marker string, ceiling time.Duration) []sseFrame {
+	t.Helper()
+	frames := make(chan sseFrame, 64)
+	go func() {
+		sc := bufio.NewScanner(resp.Body)
+		sc.Buffer(make([]byte, 0, 64*1024), 1<<20)
+		var cur sseFrame
+		for sc.Scan() {
+			line := sc.Text()
+			switch {
+			case line == "":
+				if cur.event != "" || cur.data != "" || cur.id != "" {
+					frames <- cur
+					cur = sseFrame{}
+				}
+			case strings.HasPrefix(line, "id: "):
+				cur.id = strings.TrimPrefix(line, "id: ")
+			case strings.HasPrefix(line, "event: "):
+				cur.event = strings.TrimPrefix(line, "event: ")
+			case strings.HasPrefix(line, "data: "):
+				cur.data = strings.TrimPrefix(line, "data: ")
+			}
+		}
+		close(frames)
+	}()
+	var out []sseFrame
+	deadline := time.After(ceiling)
+	for {
+		select {
+		case f, ok := <-frames:
+			if !ok {
+				t.Fatalf("the stream closed after %d frames, before an %q frame", len(out), marker)
+			}
+			if f.event == marker {
+				return out
+			}
+			out = append(out, f)
+		case <-deadline:
+			t.Fatalf("no %q frame within %s (%d frames read)", marker, ceiling, len(out))
+		}
+	}
+}
+
+// framesOf keeps the frames of one event kind.
+func framesOf(frames []sseFrame, event string) []sseFrame {
+	var out []sseFrame
+	for _, f := range frames {
+		if f.event == event {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// fastPing shortens the heartbeat for one test, so a resume's first
+// ping (readSSEUntil's end-of-backfill marker) follows the backfill
+// closely. No studio test runs in parallel: the package var is safe.
+func fastPing(t *testing.T) {
+	t.Helper()
+	old := pingEvery
+	pingEvery = 20 * time.Millisecond
+	t.Cleanup(func() { pingEvery = old })
 }
 
 // liveSSE opens one /api/live request and returns status and headers
@@ -728,20 +799,23 @@ func TestLiveAllResumeIsBounded(t *testing.T) {
 	if det, err := db.Run(context.Background(), "old_alive"); err != nil || det.Status != obsdb.StatusRunning {
 		t.Fatalf("old_alive = %v, %v; want running", det.Status, err)
 	}
+	fastPing(t)
 	h := Handler(DB(db), Live(obsdb.NewHub()))
 	resp := subscribeLive(t, h, "?all=1&kinds=event", "1")
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("all resume: %d", resp.StatusCode)
 	}
 	seen := map[string]int{}
-	for _, id := range liveRunIDs(t, readSSE(t, resp, 10, time.Second)) {
+	for _, id := range liveRunIDs(t, framesOf(readSSEUntil(t, resp, "ping", 30*time.Second), "record")) {
 		seen[id]++
 	}
 	if seen["old_done"] != 0 || seen["old_interrupted"] != 0 {
 		t.Errorf("the all resume replayed runs last seen over an hour ago: %v", seen)
 	}
-	if seen["old_alive"] == 0 || seen["new_done"] != 2 {
-		t.Errorf("the all resume = %v, want old_alive (running) and new_done's two events", seen)
+	// Exactly: old_alive's run_start (running, heartbeating) and
+	// new_done's two events; nothing else.
+	if len(seen) != 2 || seen["old_alive"] != 1 || seen["new_done"] != 2 {
+		t.Errorf("the all resume = %v, want old_alive:1 (running) and new_done:2", seen)
 	}
 }
 
@@ -761,8 +835,9 @@ func TestLiveAllResumeCap(t *testing.T) {
 	if err := db.Write(context.Background(), b); err != nil {
 		t.Fatal(err)
 	}
+	fastPing(t)
 	resp := subscribeLive(t, Handler(DB(db), Live(obsdb.NewHub())), "?all=1&kinds=event", "1")
-	ids := liveRunIDs(t, readSSE(t, resp, allBackfillMax+5, 2*time.Second))
+	ids := liveRunIDs(t, framesOf(readSSEUntil(t, resp, "ping", 30*time.Second), "record"))
 	if len(ids) != allBackfillMax {
 		t.Fatalf("the all resume replayed %d runs, want %d", len(ids), allBackfillMax)
 	}
@@ -770,5 +845,39 @@ func TestLiveAllResumeCap(t *testing.T) {
 		if id < "r_0005" {
 			t.Errorf("the all resume replayed %s, one of the five oldest", id)
 		}
+	}
+}
+
+// eventsFailDB fails Events for one run.
+type eventsFailDB struct {
+	obsdb.DB
+	fail string
+}
+
+func (d eventsFailDB) Events(ctx context.Context, runID string, after int64, limit int) (obsdb.EventPage, error) {
+	if runID == d.fail {
+		return obsdb.EventPage{}, errors.New("disk on fire")
+	}
+	return d.DB.Events(ctx, runID, after, limit)
+}
+
+// TestLiveResumeSaysAnUnreadableRun: a run whose stored events cannot
+// be read is not skipped in silence — the resume carries one
+// backfill_error frame naming it (never the cause), and the other runs
+// replay in full.
+func TestLiveResumeSaysAnUnreadableRun(t *testing.T) {
+	db := openTestDB(t)
+	now := time.Now().UTC()
+	seedAt(t, db, "r_ok", "", "", now.Add(-2*time.Minute), true)
+	seedAt(t, db, "r_bad", "", "", now.Add(-time.Minute), true)
+	fastPing(t)
+	resp := subscribeLive(t, Handler(DB(eventsFailDB{DB: db, fail: "r_bad"}), Live(obsdb.NewHub())), "?all=1&kinds=event", "1")
+	frames := readSSEUntil(t, resp, "ping", 30*time.Second)
+	if got := strings.Join(liveRunIDs(t, framesOf(frames, "record")), " "); got != "r_ok r_ok" {
+		t.Errorf("records replayed for %q, want r_ok's two events", got)
+	}
+	errs := framesOf(frames, "backfill_error")
+	if len(errs) != 1 || errs[0].data != `{"run_id":"r_bad","kind":"event"}` {
+		t.Errorf("backfill_error frames = %+v, want one naming r_bad", errs)
 	}
 }

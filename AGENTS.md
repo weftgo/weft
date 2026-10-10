@@ -391,7 +391,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // their diff, pure assembly, no runtime needed; capability preview), /api/playground/
 //     // commands/{id}, /api/runs/{id}/approvals (a parked run's own verbs),
 //     // /api/playground/fixtures (wefttest replay fixtures from a run's records),
-//     // /api/experiments (the saved groups + the runs they label — each saved with its whole command: engine,
+//     // /api/experiments (the saved groups + the runs they label — the 50 most recently updated by default, ?limit= up to 200, with `total`; each saved with its whole command: engine,
 //     // side_effects, thread, from_step, source_run_id, transcript_edits, per variant overrides + modes; listed with created,
 //     // run_count and cost; /api/runs and /api/search filter by experiment_id=; any experiment_id on a run command is
 //     // accepted, so a re-run joins the saved experiment), /api/runtimes/

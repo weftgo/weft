@@ -395,6 +395,27 @@ module, ADR 0005).
   `pricing` no cost cell is drawn. The web mirrors learn the cost fields,
   `meta.pricing`'s object, `cost_sort_cap` and the settings route's shape.
 
+### Changed
+
+- `DB.Sweep` (and so `studio.Retain` / `weft studio --retain` / `weft vacuum
+  --retain`) deletes in passes of `obsdb.SweepBatch` (500) root runs: one
+  writer transaction each on SQLite, one round of DELETE mutations each on
+  ClickHouse. A first sweep of a large database no longer blocks ingest for
+  its whole length. The count it returns is the total; on an error, earlier
+  passes stay deleted.
+- obsdb/sqlite migration 0006 adds a partial index for an experiment's runs.
+  obsdb/clickhouse migration 0007 adds a bloom_filter skip index on
+  `weft_runs.ExperimentID`. Parts written before 0007 are indexed when merged;
+  `ALTER TABLE weft_runs MATERIALIZE INDEX idx_experiment` does it at once.
+- `GET /api/experiments` lists the 50 most recently updated experiments by
+  default (`?limit=` up to 200) and adds `total`, the number saved.
+- Deleting or sweeping a Subagent child moves its usage into the parent's own
+  cost: own = the parent's usage minus its remaining children's.
+- `scope.Header` now stamps `weft.page_url` (the request's Referer/Origin
+  path) on every run under the handler, on every destination. A secret in a
+  page PATH would travel: strip it in your own middleware before
+  `scope.Header`, or do not use `scope.Header` on such routes.
+
 ### Changed — breaking
 
 - The wefttest export zip is no longer flat: fixtures sit under
@@ -419,6 +440,13 @@ module, ADR 0005).
   `Vacuum` cases pin the answers).
 
 ### Fixed
+
+- Studio's "save as test" skeleton puts the run id (and a compaction's hash) in
+  its header as a quoted string. Run ids are not validated on ingest, and an
+  id built to close the comment could inject code into the generated test.
+  An agent whose name is a Go keyword gets the package stem `replay_<name>`.
+- `weft vacuum` with no database at the path refuses with "no database at
+  <path> (nothing to vacuum)", exit 1, and creates nothing.
 
 - thread/pool: an approval recorded while a nested child was still
   parking (requests mirrored, phase not yet parked) was skipped by every

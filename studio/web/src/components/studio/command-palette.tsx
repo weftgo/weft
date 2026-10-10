@@ -126,8 +126,10 @@ export function CommandPalette({
   }
 
   // Search hits first (kept whatever cmdk's own match says: they matched
-  // on the prompt, answer, error or a tool name), then the recent runs
-  // cmdk matches by id and agent.
+  // on the prompt, answer, error or a tool name — but only while they
+  // answer the text in the box: a previous term's hits under new text
+  // are matched by cmdk like any row), then the recent runs cmdk
+  // matches by id and agent.
   const hitRows = term && searchable ? (hits.data?.runs ?? []) : []
   const hitIDs = new Set(hitRows.map((r) => r.id))
   const recentRows = (recent.data?.runs ?? []).filter((r) => !hitIDs.has(r.id)).slice(0, 25)
@@ -135,7 +137,7 @@ export function CommandPalette({
     <CommandItem
       key={r.id}
       value={`run:${r.id} ${r.agent} ${r.status}`}
-      keywords={hit ? [input] : undefined}
+      keywords={hit && term === input.trim() ? [input] : undefined}
       onSelect={() => go(() => router.navigate(runLink(r.id)))}
       data-palette-kind="run"
     >
@@ -169,7 +171,7 @@ export function CommandPalette({
             {term && searchable && hitRows.length > 0 ? (
               <CommandItem
                 value={`run:all matches ${input}`}
-                keywords={[input]}
+                keywords={term === input.trim() ? [input] : undefined}
                 onSelect={() => go(() => router.navigate(runsLink({ q: term })))}
               >
                 <List data-slot="icon" />

@@ -312,6 +312,30 @@ describe("capabilities and gating", () => {
     expect(studio.calls("GET runtimes")).toHaveLength(0)
   })
 
+  it("a Studio older than pid (db.path read, pid absent) says not reported, never the hidden badge", async () => {
+    const { pid: _pid, ...old } = metaG()
+    studio.on("GET meta", { ...old, db: { kind: "sqlite", path: "/tmp/weft.db", size: 4096 } })
+    await openSettings()
+    const pid = fact("studio", "pid")
+    expect(pid.querySelector("[data-unreported=pid]")).toBeTruthy()
+    expect(pid.querySelector("[data-hole=hidden]")).toBeNull()
+  })
+
+  it("capabilities_off absent: unreported on a Studio older than it, nothing is off on a current one", async () => {
+    const { capabilities_off: _o, manifest_sources: _m, ...old } = metaG()
+    studio.on("GET meta", old)
+    await openSettings()
+    expect(section("capabilities").querySelector("[data-unreported=capabilities_off]")).toBeTruthy()
+    expect(section("capabilities").textContent).not.toContain("nothing is off")
+    // A current Studio omits the key when nothing is off (omitempty):
+    // manifest_sources, always present, tells the two apart.
+    const { capabilities_off: _o2, ...current } = metaG()
+    studio.on("GET meta", { ...current, manifest_sources: 0 })
+    await openSettings()
+    expect(section("capabilities").textContent).toContain("nothing is off")
+    expect(section("capabilities").querySelector("[data-unreported]")).toBeNull()
+  })
+
   it("a Studio older than retention and content says so, never an empty pane", async () => {
     const { retention: _r, content: _c, ...old } = metaG()
     studio.on("GET meta", old)

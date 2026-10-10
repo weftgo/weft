@@ -34,6 +34,8 @@ import {
   tagsOf,
   validateRunsSearch,
   viaSearch,
+  parseWhen,
+  whenNotes,
   withTags,
 } from "@/lib/run-filters"
 import { useCapabilities } from "@/hooks/use-capabilities"
@@ -200,6 +202,10 @@ function RunsPage() {
   const total = page.data?.pages[0]?.total ?? 0
   const costCap = searching ? searchPage.data?.pages[0]?.cost_sort_cap : undefined
   const chips = runChips(search, caps)
+  // A since/until the server would refuse is dropped by validation —
+  // the list never lands in its error state — and said here, read off
+  // the unvalidated URL.
+  const badWhen = whenNotes(search)
   const filtered = chips.length > 0
   // Live rows (S4.7): with an agent filter — the live stream's one
   // selector shape — a follow toggle subscribes to that agent's run
@@ -501,7 +507,7 @@ function RunsPage() {
           label="started since"
           width="w-36"
           title="started on or after: a day (UTC) or an RFC 3339 time"
-          onApply={(v) => setSearch({ since: validateRunsSearch({ since: v }).since })}
+          onApply={(v) => setSearch({ since: v || undefined })}
         />
         <FilterBox
           value={search.until ?? ""}
@@ -509,7 +515,7 @@ function RunsPage() {
           label="started until"
           width="w-36"
           title="started on or before a day (UTC, the day included), or before an RFC 3339 time"
-          onApply={(v) => setSearch({ until: validateRunsSearch({ until: v }).until })}
+          onApply={(v) => setSearch({ until: v || undefined })}
         />
         <FilterBox
           value={search.min_duration?.toString() ?? ""}
@@ -576,17 +582,18 @@ function RunsPage() {
             <button
               key={`${c.key}:${c.value ?? ""}`}
               type="button"
-              className={`flex items-center gap-1 rounded-full border bg-secondary px-2 py-px font-mono text-[11px] hover:bg-accent ${
-                c.applied ? "" : "text-faint line-through"
-              }`}
+              className="flex items-center gap-1 rounded-full border bg-secondary px-2 py-px font-mono text-[11px] hover:bg-accent"
               onClick={() => setSearch(removeChip(search, c))}
-              title={`clear the ${c.key} filter${c.note ? ` (${c.note})` : ""}`}
-              aria-label={`clear ${c.label}${c.note ? ` (${c.note})` : ""}`}
+              title={`clear the ${c.key} filter${c.applied ? "" : " (not applied)"}${c.note ? ` (${c.note})` : ""}`}
+              aria-label={`clear ${c.applied ? "" : "not applied — "}${c.label}${c.note ? ` (${c.note})` : ""}`}
               data-chip={c.key}
               data-chip-applied={c.applied ? "true" : "false"}
             >
-              {c.label}
-              {c.note ? <span className="text-faint no-underline">· {c.note}</span> : null}
+              {c.applied ? null : <span className="text-faint">not applied —</span>}
+              <span className={c.applied ? "" : "text-faint line-through"} data-chip-label>
+                {c.label}
+              </span>
+              {c.note ? <span className="text-faint">· {c.note}</span> : null}
               <X className="size-3 text-faint" />
             </button>
           ))}
@@ -598,6 +605,18 @@ function RunsPage() {
             clear all
           </button>
         </div>
+      ) : null}
+      {badWhen.length > 0 ? (
+        <p className="font-mono text-[11px] text-status-bad" data-when-notes>
+          {badWhen.join(" · ")}{" "}
+          <button
+            type="button"
+            className="text-thread-ink hover:underline"
+            onClick={() => setSearch({ since: parseWhen(search.since), until: parseWhen(search.until) })}
+          >
+            clear
+          </button>
+        </p>
       ) : null}
       {local.length > 0 ? (
         <p className="font-mono text-[11px] text-faint" data-local-filters>

@@ -14,7 +14,7 @@ import { X } from "lucide-react"
 import { fetchTraces, nextCursor } from "@/lib/api"
 import type { PageCursor } from "@/lib/api"
 import { absoluteTime, relativeTime, spanMs } from "@/lib/format"
-import { dedupeTraces, parseWhen, rangeTime } from "@/lib/run-filters"
+import { dedupeTraces, parseWhen, rangeTime, whenNotes } from "@/lib/run-filters"
 import { runLink, traceLink } from "@/lib/links"
 import type { TracesSearch } from "@/lib/links"
 import { useCapabilities } from "@/hooks/use-capabilities"
@@ -34,8 +34,10 @@ import {
 
 export const Route = createFileRoute("/traces/")({
   validateSearch: (search: Record<string, unknown>): TracesSearch => ({
-    since: parseWhen(search.since),
-    until: parseWhen(search.until),
+    // Kept as typed: a refused one is ignored and said (whenNotes), since
+    // the router drops a key validation leaves undefined.
+    since: typeof search.since === "string" && search.since.trim() ? search.since.trim() : undefined,
+    until: typeof search.until === "string" && search.until.trim() ? search.until.trim() : undefined,
     service:
       typeof search.service === "string" && search.service.trim()
         ? search.service.trim()
@@ -83,9 +85,13 @@ function TracesPage() {
   const navigate = useNavigate({ from: "/traces/" })
   const { has, why, loading } = useCapabilities()
   const capable = has("traces")
+  // A since/until the server would refuse: dropped, and said.
+  const badWhen = whenNotes(search)
+  const since = parseWhen(search.since)
+  const until = parseWhen(search.until)
   const filters = {
-    since: search.since ? rangeTime(search.since, "since") : undefined,
-    until: search.until ? rangeTime(search.until, "until") : undefined,
+    since: since ? rangeTime(since, "since") : undefined,
+    until: until ? rangeTime(until, "until") : undefined,
     service: search.service,
   }
   const q = useInfiniteQuery({
@@ -119,8 +125,11 @@ function TracesPage() {
     )
 
   const chips: { key: keyof TracesSearch; label: string }[] = []
-  if (search.since) chips.push({ key: "since", label: `since ${search.since}` })
-  if (search.until) chips.push({ key: "until", label: `until ${search.until}` })
+  // A refused since/until: a chip that says it is not applied.
+  if (search.since)
+    chips.push({ key: "since", label: since ? `since ${search.since}` : `not applied — since ${search.since}` })
+  if (search.until)
+    chips.push({ key: "until", label: until ? `until ${search.until}` : `not applied — until ${search.until}` })
   if (search.service) chips.push({ key: "service", label: `service ${search.service}` })
 
   return (
@@ -142,17 +151,29 @@ function TracesPage() {
           placeholder="since YYYY-MM-DD"
           label="started since"
           title="the trace started on or after: a day (UTC) or an RFC 3339 time"
-          onApply={(v) => set({ since: parseWhen(v) })}
+          onApply={(v) => set({ since: v || undefined })}
         />
         <FilterBox
           value={search.until ?? ""}
           placeholder="until YYYY-MM-DD"
           label="started until"
           title="the trace started on or before a day (UTC, the day included), or before an RFC 3339 time"
-          onApply={(v) => set({ until: parseWhen(v) })}
+          onApply={(v) => set({ until: v || undefined })}
         />
       </div>
 
+      {badWhen.length > 0 ? (
+        <p className="font-mono text-[11px] text-status-bad" data-when-notes>
+          {badWhen.join(" · ")}{" "}
+          <button
+            type="button"
+            className="text-thread-ink hover:underline"
+            onClick={() => set({ since: parseWhen(search.since), until: parseWhen(search.until) })}
+          >
+            clear
+          </button>
+        </p>
+      ) : null}
       {chips.length > 0 ? (
         <div className="flex flex-wrap items-center gap-1.5" data-trace-chips>
           {chips.map((c) => (

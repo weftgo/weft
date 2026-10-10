@@ -18,7 +18,9 @@ import {
   runChips,
   searchFiltersFrom,
   validateRunsSearch,
+  parseWhen,
   viaSearch,
+  whenNotes,
 } from "./run-filters"
 import { runsLink } from "./links"
 
@@ -59,8 +61,30 @@ describe("the URL's filters", () => {
       sort: "cost",
     })
     expect(
-      validateRunsSearch({ status: "nope", since: "yesterday", min_tokens: -1, sort: "started", tag: "x" })
+      validateRunsSearch({ status: "nope", min_tokens: -1, sort: "started", tag: "x" })
     ).toEqual(validateRunsSearch({}))
+    // The server's RFC 3339 (time.Parse(time.RFC3339) → 400 otherwise):
+    // a real day only — never V8's 2026-02-30 rolled to March 2 — and a
+    // time with its zone; min_tokens a number.
+    // Refused values stay in the search as typed (the router would drop
+    // the key and the text with it) and are never sent or applied: a
+    // not-applied chip and a note say so.
+    const refused = validateRunsSearch({ q: "x", since: "2026-02-30", until: "2026-10-02T12:00:00", min_tokens: "abc" })
+    expect(refused.min_tokens).toBeUndefined()
+    expect(searchFiltersFrom(refused, ALL)).toEqual({ q: "x" })
+    expect(viaSearch({ since: "2026-02-30" }, ALL)).toBe(false)
+    expect(localKeys({ since: "2026-02-30" }, NONE)).toEqual([])
+    expect(runChips(refused, ALL).filter((c) => c.key === "since" || c.key === "until")).toEqual([
+      { key: "since", label: "since 2026-02-30", applied: false, note: "not a real day (YYYY-MM-DD) or an RFC 3339 time with a zone" },
+      { key: "until", label: "until 2026-10-02T12:00:00", applied: false, note: "not a real day (YYYY-MM-DD) or an RFC 3339 time with a zone" },
+    ])
+    for (const bad of ["2026-13-01", "2026-10-01T24:00:00Z", "2026-10-01T12:00:00+2:00", "2026-10-01 12:00:00Z", "2026-02-30"])
+      expect(parseWhen(bad), bad).toBeUndefined()
+    for (const good of ["2024-02-29", "2026-10-01T12:00:00Z", "2026-10-01T12:00:00.5+02:00"])
+      expect(parseWhen(good), good).toBe(good)
+    expect(whenNotes({ since: "2026-02-30", until: "2026-10-02" })).toEqual([
+      "since “2026-02-30” is ignored: not a real day (YYYY-MM-DD) or an RFC 3339 time with a zone",
+    ])
     // A number the router parsed from digits is still the text.
     expect(validateRunsSearch({ q: 42 }).q).toBe("42")
   })

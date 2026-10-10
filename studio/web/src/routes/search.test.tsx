@@ -159,6 +159,44 @@ describe("the Runs search box and its URL chips", () => {
     expect(studio.calls("GET search").map((r) => r.query.get("q"))).toEqual(['"card declined"'])
   })
 
+  it("a since the server would refuse is ignored and said — never the error state", async () => {
+    studio
+      .on("GET meta", meta(["search"]))
+      .on("GET runs", runs)
+      .on("GET search", { total: 1, runs: [rOK], sort: "started", next_offset: null })
+    const { router } = renderApp("/runs?since=2026-02-30&until=2026-10-02T12%3A00%3A00")
+    await waitFor(() => expect(listed()).toEqual(runs.runs.map((r) => r.id)))
+    // Neither reached the API: /api/runs answered, no search was asked.
+    expect(studio.calls("GET search")).toHaveLength(0)
+    const note = document.querySelector<HTMLElement>("[data-when-notes]")!
+    expect(note.textContent).toContain("since “2026-02-30” is ignored")
+    expect(note.textContent).toContain("until “2026-10-02T12:00:00” is ignored")
+    // Kept in the URL as typed, each a chip that says it is not applied.
+    expect(router.state.location.search).toMatchObject({ since: "2026-02-30", until: "2026-10-02T12:00:00" })
+    expect(chipKeys()).toEqual(["since", "until"])
+    const sinceChip = document.querySelector<HTMLElement>('[data-chip="since"]')!
+    expect(sinceChip.dataset.chipApplied).toBe("false")
+    expect(sinceChip.getAttribute("aria-label")).toContain("not applied — since 2026-02-30")
+    // Typed into the box, the same: kept in the URL, said, not sent.
+    fireEvent.click(within(note).getByRole("button", { name: "clear" }))
+    await waitFor(() => expect(document.querySelector("[data-when-notes]")).toBeNull())
+    const since = screen.getByRole("textbox", { name: "started since" })
+    fireEvent.change(since, { target: { value: "2026-10-01T09:00:00" } })
+    fireEvent.keyDown(since, { key: "Enter" })
+    await waitFor(() => expect(document.querySelector("[data-when-notes]")!.textContent).toContain("2026-10-01T09:00:00"))
+    expect(router.state.location.search).toMatchObject({ since: "2026-10-01T09:00:00" })
+    expect(studio.calls("GET search")).toHaveLength(0)
+  })
+
+  it("min_tokens=abc is dropped: no chip, no request key", async () => {
+    studio.on("GET meta", meta(["search"])).on("GET runs", runs)
+    renderApp("/runs?min_tokens=abc")
+    await waitFor(() => expect(listed()).toEqual(runs.runs.map((r) => r.id)))
+    expect(chipKeys()).toEqual([])
+    expect(studio.calls("GET search")).toHaveLength(0)
+    expect(studio.calls("GET runs").every((r) => !r.query.has("min_tokens"))).toBe(true)
+  })
+
   it("a column sort is a URL key and the search's order", async () => {
     studio
       .on("GET meta", meta(["search"]))
@@ -194,6 +232,13 @@ describe("the Runs search box and its URL chips", () => {
     const chip = (k: string) => document.querySelector<HTMLElement>(`[data-chip="${k}"]`)!
     expect(chip("q").dataset.chipApplied).toBe("false")
     expect(chip("q").textContent).toContain("needs the search capability")
+    // Said, not only struck: the name and the words lead with it, and
+    // only the label is struck (the note stays readable).
+    expect(chip("q").getAttribute("aria-label")).toBe("clear not applied — “refund” (needs the search capability)")
+    expect(chip("q").textContent.startsWith("not applied —")).toBe(true)
+    expect(chip("q").querySelector("[data-chip-label]")!.className).toContain("line-through")
+    expect(chip("q").className).not.toContain("line-through")
+    expect(chip("error").querySelector("[data-chip-label]")!.className).not.toContain("line-through")
     expect(chip("tool").dataset.chipApplied).toBe("false")
     expect(chip("error").dataset.chipApplied).toBe("true")
     expect(chip("error").textContent).toContain("the loaded rows only")
@@ -281,6 +326,15 @@ describe("the /traces index", () => {
     expect(router.state.location.search).toMatchObject({ since: "2020-01-01" })
   })
 
+  it("a since the server would refuse is ignored and said, never sent", async () => {
+    studio.on("GET meta", meta(["traces"])).on("GET traces", traces)
+    renderApp("/traces?since=2026-02-30&service=edge-svc")
+    await waitFor(() => expect(document.querySelectorAll("tbody tr")).toHaveLength(4))
+    expect(Object.fromEntries(studio.calls("GET traces")[0].query)).toEqual({ service: "edge-svc" })
+    expect(document.querySelector("[data-when-notes]")!.textContent).toContain("since “2026-02-30” is ignored")
+    expect(screen.getByRole("button", { name: "clear not applied — since 2026-02-30" })).toBeTruthy()
+  })
+
   it("off without the traces capability: the reason, no request, no sidebar entry", async () => {
     studio.on("GET meta", meta([], { traces: "the trace list is off here" })).on("GET traces", traces)
     renderApp("/traces")
@@ -350,6 +404,30 @@ describe("the ⌘K palette", () => {
     const settings = await screen.findByRole("option", { name: "Settings" })
     fireEvent.click(settings)
     await waitFor(() => expect(router.state.location.pathname).toBe("/settings"))
+  })
+
+  it("debounces the run search: two quick keystrokes send one request, for the settled text", async () => {
+    full()
+    renderApp("/runs")
+    await screen.findByText("r_ok")
+    const input = await open()
+    type(input, "refund")
+    type(input, "refund failed")
+    await waitFor(() => expect(kinds()).toContain("run:r_refundbilling"))
+    expect(studio.calls("GET search").map((r) => r.query.get("q"))).toEqual(["refund failed"])
+  })
+
+  it("a previous term's hits are not forced to match new text", async () => {
+    full()
+    renderApp("/runs")
+    await screen.findByText("r_ok")
+    const input = await open()
+    type(input, "refund failed")
+    await waitFor(() => expect(kinds()).toContain("run:r_refundbilling"))
+    // New text, before its own search settles: the stale hit is matched
+    // by cmdk like any row — "zzqx" matches nothing in it.
+    type(input, "zzqx")
+    expect(kinds()).not.toContain("run:r_refundbilling")
   })
 
   it("is keyboard-operable: ↑↓ move, Enter opens the item, Escape closes", async () => {

@@ -47,16 +47,37 @@ describe("the pricing draft", () => {
     expect(pricingFile(d)).toBeNull()
   })
 
-  it("keys edits by the served table's source and dated", () => {
-    expect(editsKey(served)).toBe("studio.pricing.edits:option:2026-10-01")
+  it("keys edits by the served table's source, file path and dated", () => {
+    expect(editsKey(served)).toBe(`studio.pricing.edits:option:${served.path ?? ""}:2026-10-01`)
+    // Two --pricing files with the same dated never share a draft.
+    const a = editsKey({ source: "file", path: "/etc/a.json", dated: "2026-10-01" })
+    const b = editsKey({ source: "file", path: "/etc/b.json", dated: "2026-10-01" })
+    expect(a).not.toBe(b)
+    expect(editsKey({ source: "default", dated: "2026-10-01" })).toBe("studio.pricing.edits:default::2026-10-01")
+  })
+
+  it("a rate is a decimal: JS's 0x10, 0b11, Infinity and 1_000 forms are refused, never rewritten", () => {
+    for (const bad of ["0x10", "0b11", "0o7", "Infinity", "1_000", ".5", "5.", " 1e"]) {
+      const d = draftOf(served)
+      d.rows[0].input = bad
+      expect(problems(d).map((p) => `${p.row}:${p.field}`), bad).toEqual(["0:input"])
+    }
+    for (const good of ["0", "3", "0.25", "1.5e-1", "2E3"]) {
+      const d = draftOf(served)
+      d.rows[0].input = good
+      expect(problems(d), good).toEqual([])
+      expect(pricingFile(d)!.models[0].input).toBe(Number(good))
+    }
   })
 })
 
 describe("globError is path.Match's ErrBadPattern", () => {
-  it.each(["*", "claude-*", "a/b?", "[abc]", "[^a-z]x", "\\*", "[\\]]"])("%s is good", (p) => {
+  // [z-a]: Go's path.Match("openai/[z-a]", "") is nil — out of order
+  // matches nothing, and is no ErrBadPattern.
+  it.each(["*", "claude-*", "a/b?", "[abc]", "[^a-z]x", "\\*", "[\\]]", "[z-a]"])("%s is good", (p) => {
     expect(globError(p)).toBe("")
   })
-  it.each(["[", "[]", "[a", "[z-a]", "[-a]", "ab\\", "[a-]"])("%s is bad", (p) => {
+  it.each(["[", "[]", "[a", "[-a]", "ab\\", "[a-]"])("%s is bad", (p) => {
     expect(globError(p)).not.toBe("")
   })
 })

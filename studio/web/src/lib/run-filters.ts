@@ -9,6 +9,7 @@
 import type { RunRow, RunsFilters, RunStatus, SearchFilters } from "./api"
 import { runTotal, sortByCost } from "./cost"
 import type { RunsSearch } from "./links"
+import { isDate } from "./settings"
 
 export const RUN_STATUSES: RunStatus[] = ["running", "succeeded", "failed", "interrupted"]
 export const RUN_SORTS = ["duration", "tokens", "cost"] as const
@@ -33,14 +34,37 @@ function num(v: unknown): number | undefined {
 }
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/
+/** RFC 3339 as Go's time.RFC3339 parses it: a zone is required. */
+const TIME = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-](\d{2}):(\d{2}))$/
 
-/** parseWhen is a since/until value: a day (YYYY-MM-DD) or a time
- * Date reads (RFC 3339), else undefined. */
+/** parseWhen is a since/until value as the server takes it: a real day
+ * (YYYY-MM-DD, round-tripped — never V8's 2026-02-30 → March 2) or an
+ * RFC 3339 time with its zone (a zone-less time would be read as local
+ * here and refused there), else undefined. */
 export function parseWhen(v: unknown): string | undefined {
   const s = str(v)
   if (!s) return undefined
-  if (DAY.test(s)) return Number.isNaN(Date.parse(`${s}T00:00:00Z`)) ? undefined : s
-  return s.includes("T") && !Number.isNaN(Date.parse(s)) ? s : undefined
+  if (DAY.test(s)) return isDate(s) ? s : undefined
+  const m = TIME.exec(s)
+  if (!m || !isDate(m[1])) return undefined
+  const [h, mi, sec] = [Number(m[2]), Number(m[3]), Number(m[4])]
+  if (h > 23 || mi > 59 || sec > 59) return undefined
+  if (m[6] !== "Z" && (Number(m[7]) > 23 || Number(m[8]) > 59)) return undefined
+  return s
+}
+
+/** whenNotes says each since/until the search carries that parseWhen
+ * refused: kept in the URL (the router drops a key validation leaves
+ * undefined, and the reader's text with it), ignored, never sent — the
+ * server would answer 400 and the list land in its error state. */
+export function whenNotes(raw: Record<string, unknown>): string[] {
+  const out: string[] = []
+  for (const k of ["since", "until"] as const) {
+    const s = str(raw[k])
+    if (s && parseWhen(s) === undefined)
+      out.push(`${k} “${s}” is ignored: not a real day (YYYY-MM-DD) or an RFC 3339 time with a zone`)
+  }
+  return out
 }
 
 /** A tag pair "k=v" with a key. */
@@ -65,8 +89,10 @@ export function validateRunsSearch(search: Record<string, unknown>): RunsSearch 
     tool: str(search.tool),
     model: str(search.model),
     error: str(search.error),
-    since: parseWhen(search.since),
-    until: parseWhen(search.until),
+    // Kept as typed; parseWhen decides, where each is used, whether it
+    // applies (usable) — a refused one is a not-applied chip and a note.
+    since: str(search.since),
+    until: str(search.until),
     min_duration: num(search.min_duration),
     min_tokens: num(search.min_tokens),
     min_cost: num(search.min_cost),
@@ -125,6 +151,13 @@ export function rangeTime(v: string, edge: "since" | "until"): string {
   return d.toISOString().replace(".000Z", "Z")
 }
 
+/** usable is the search with a since/until the server would refuse
+ * dropped: what the lists and the loaded rows are asked. */
+export function usable(s: RunsSearch): RunsSearch {
+  if (s.since === undefined && s.until === undefined) return s
+  return { ...s, since: parseWhen(s.since), until: parseWhen(s.until) }
+}
+
 /** The effective sort: cost needs pricing. */
 export function effectiveSort(s: RunsSearch, caps: FilterCaps): RunsSearch["sort"] {
   return s.sort === "cost" && !caps.pricing ? undefined : s.sort
@@ -135,15 +168,17 @@ const SEARCH_ONLY = ["q", "tool", "model", "error", "since", "until", "min_token
 
 /** viaSearch: the list is /api/search's — a text or search-only filter
  * or a non-default sort is set, and the Studio searches. */
-export function viaSearch(s: RunsSearch, caps: FilterCaps): boolean {
+export function viaSearch(search: RunsSearch, caps: FilterCaps): boolean {
   if (!caps.search) return false
+  const s = usable(search)
   if (effectiveSort(s, caps)) return true
   return SEARCH_ONLY.some((k) => k !== "min_cost" ? s[k] !== undefined : caps.pricing && s.min_cost !== undefined)
 }
 
 /** searchFiltersFrom is the search's /api/search filters (no time
  * cursor: a search pages by offset). */
-export function searchFiltersFrom(s: RunsSearch, caps: FilterCaps): SearchFilters {
+export function searchFiltersFrom(search: RunsSearch, caps: FilterCaps): SearchFilters {
+  const s = usable(search)
   const { before: _b, before_id: _bi, ...base } = filtersFromSearch(s)
   const out: SearchFilters = { ...base }
   if (s.q) out.q = s.q
@@ -170,7 +205,8 @@ const tokensOf = (r: RunRow) => r.usage.input_tokens + r.usage.output_tokens
 /** localKeys is the filters the loaded rows answer here: duration
  * always (the API has none), and search's own when the Studio cannot
  * search (text and tool cannot be: a row carries neither). */
-export function localKeys(s: RunsSearch, caps: FilterCaps): (keyof RunsSearch)[] {
+export function localKeys(search: RunsSearch, caps: FilterCaps): (keyof RunsSearch)[] {
+  const s = usable(search)
   const keys: (keyof RunsSearch)[] = []
   if (s.min_duration !== undefined) keys.push("min_duration")
   if (!caps.search) {
@@ -183,7 +219,8 @@ export function localKeys(s: RunsSearch, caps: FilterCaps): (keyof RunsSearch)[]
 /** applyLocal filters loaded rows by localKeys, and — when the list is
  * not search's — sorts them by the search's sort (the loaded rows
  * only). */
-export function applyLocal(runs: RunRow[], s: RunsSearch, caps: FilterCaps, now = Date.now()): RunRow[] {
+export function applyLocal(runs: RunRow[], search: RunsSearch, caps: FilterCaps, now = Date.now()): RunRow[] {
+  const s = usable(search)
   const keys = new Set(localKeys(s, caps))
   let out = runs
   if (keys.size) {
@@ -238,6 +275,7 @@ export interface RunChip {
 const ROWS_ONLY = "the loaded rows only"
 const NEEDS_SEARCH = "needs the search capability"
 const NEEDS_PRICING = "needs the pricing capability"
+const BAD_WHEN = "not a real day (YYYY-MM-DD) or an RFC 3339 time with a zone"
 
 /** runChips is every set filter as a chip, in the toolbar's order. */
 export function runChips(s: RunsSearch, caps: FilterCaps): RunChip[] {
@@ -251,8 +289,10 @@ export function runChips(s: RunsSearch, caps: FilterCaps): RunChip[] {
   if (s.tool) push("tool", `tool ${s.tool}`, caps.search ? {} : { applied: false, note: NEEDS_SEARCH })
   if (s.model) push("model", `model ${s.model}`)
   if (s.error) push("error", `error ~ ${s.error}`)
-  if (s.since) push("since", `since ${s.since}`)
-  if (s.until) push("until", `until ${s.until}`)
+  for (const k of ["since", "until"] as const) {
+    const v = s[k]
+    if (v) push(k, `${k} ${v}`, parseWhen(v) === undefined ? { applied: false, note: BAD_WHEN } : {})
+  }
   if (s.min_duration !== undefined) push("min_duration", `duration ≥ ${s.min_duration}s`)
   if (s.min_tokens !== undefined) push("min_tokens", `tokens ≥ ${s.min_tokens.toLocaleString("en-US")}`)
   if (s.min_cost !== undefined)

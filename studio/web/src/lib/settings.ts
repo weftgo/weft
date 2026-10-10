@@ -54,9 +54,11 @@ export function emptyRow(): DraftRow {
   return { provider: "", model_glob: "", input: "", output: "", cached_input: "", cache_write: "", reasoning: "" }
 }
 
-/** The localStorage key one served table's edits live under. */
-export function editsKey(s: Pick<PricingSettings, "source" | "dated">): string {
-  return `studio.pricing.edits:${s.source}:${s.dated}`
+/** The localStorage key one served table's edits live under: its
+ * source, the override file's path (two --pricing files sharing a
+ * dated never share a draft) and its dated. */
+export function editsKey(s: Pick<PricingSettings, "source" | "dated" | "path">): string {
+  return `studio.pricing.edits:${s.source}:${s.path ?? ""}:${s.dated}`
 }
 
 function isDraft(v: unknown): v is PricingDraft {
@@ -132,8 +134,9 @@ export function isDate(s: string): boolean {
 /**
  * globError is path.Match's ErrBadPattern check on a pattern (Go's
  * path.Match validates the whole pattern): an unclosed or empty
- * character class, a class range out of order, a '-' or ']' where a
- * class character belongs, a trailing backslash. "" when the pattern
+ * character class, a '-' or ']' where a class character belongs, a
+ * trailing backslash. An out-of-order range ([z-a]) is good: Go
+ * accepts it (it matches nothing). "" when the pattern
  * is good.
  */
 export function globError(p: string): string {
@@ -173,9 +176,9 @@ export function globError(p: string): string {
       if (lo === null) return "an unclosed or malformed character class"
       if (p[i] === "-") {
         i++
-        const hi = esc()
-        if (hi === null) return "a malformed character range"
-        if (hi < lo) return "a character range out of order"
+        // An out-of-order range ([z-a]) is legal to Go's path.Match:
+        // it matches nothing, and is never ErrBadPattern.
+        if (esc() === null) return "a malformed character range"
       }
       n++
     }
@@ -183,10 +186,16 @@ export function globError(p: string): string {
   return ""
 }
 
-/** A rate as the loader reads it: a finite, non-negative number. */
+/** A JSON number (decimal, an optional exponent): what the override
+ * file's encoder writes — never JS's 0x10 / 0b11 / Infinity forms,
+ * which Number reads and the file would carry rewritten. */
+const DECIMAL = /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/
+
+/** A rate as the loader reads it: a finite, non-negative decimal. */
 function rate(s: string): number | null {
   const t = s.trim()
   if (t === "") return null
+  if (!DECIMAL.test(t)) return NaN
   const n = Number(t)
   return Number.isFinite(n) && n >= 0 ? n : NaN
 }

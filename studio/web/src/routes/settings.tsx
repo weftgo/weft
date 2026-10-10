@@ -206,7 +206,18 @@ function StudioFacts({ meta }: { meta: Meta }) {
               ? meta.panel_version
               : `${meta.panel_version} (stale: the embedded panel predates this studio)`,
         ],
-        ["pid", meta.pid !== undefined ? String(meta.pid) : <HiddenByRule what="the pid, db.path and db.size" />],
+        [
+          "pid",
+          meta.pid !== undefined ? (
+            String(meta.pid)
+          ) : meta.db.path !== undefined ? (
+            // db.path reached this caller, so the pid's rule did too: a
+            // Studio older than the field, not a withheld one.
+            <Unreported field="pid" />
+          ) : (
+            <HiddenByRule what="the pid, db.path and db.size" />
+          ),
+        ],
         ["interrupted after", `${meta.interrupted_after_ms} ms of silence a running run reads interrupted`],
         [
           "ingest",
@@ -573,7 +584,12 @@ function Capabilities({ meta }: { meta: Meta }) {
         <h3 className="eyebrow" id="caps-off">
           off · {off.length}
         </h3>
-        {off.length === 0 ? (
+        {meta.capabilities_off === undefined && meta.manifest_sources === undefined ? (
+          // capabilities_off is omitted when nothing is off; a Studio
+          // without manifest_sources (always present, the same plan B4)
+          // predates both.
+          <Unreported field="capabilities_off" />
+        ) : off.length === 0 ? (
           <p className="text-xs text-muted-foreground">nothing is off</p>
         ) : (
           <ul aria-labelledby="caps-off" className="space-y-1" data-caps-off>

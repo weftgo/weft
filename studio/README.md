@@ -1298,7 +1298,9 @@ field `LoadPricing` would reject is wrong — to run Studio with through
 Search and the palette (plan H1): the Runs page has a free-text box
 (`?q=`, debounced; every term must match the prompt, answer, error or a
 tool name, a "quoted phrase" one term) and filters by agent, status,
-tool, model, error, date range (a day is UTC, until inclusive),
+tool, model, error, date range (a day is UTC, until inclusive; a
+day that does not exist or a time without its zone — RFC 3339 as the
+server parses it — stays a "not applied" chip with a note, never sent),
 duration, tokens, cost (with `pricing`) and any number of tags, plus
 column sorting on started, duration, tokens and cost — each filter a
 removable chip in the URL (`src/lib/run-filters.ts`). A text or

@@ -309,11 +309,13 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // and no otel Studio destination it dials the discovery file's Studio (block 6's
 //     // rule: WEFT_STUDIO_URL wins, WEFT_DISCOVERY=off, stale ignored); commands ack
 //     // before they run (at-most-once: validation, source fetch and resolver included,
-//     // is bounded at 25 s inside Studio's 30 s ack window; an accepted ack Studio answers
-//     // non-200 — 409 once it marked the command lost — runs nothing; one it never answered
-//     // runs nothing and is settled finished/failed "not run"; the accepted ack is re-posted
-//     // every minute while the command is held — heartbeat_ms at registration — and Studio
-//     // marks a heartbeating runtime's silent accepted command lost after max(10 min, 3 beats)), a never-class tool's call is substituted
+//     // is bounded at 25 s inside Studio's 30 s ack window; an accepted ack Studio did not
+//     // take runs nothing — a 409/404/400 (409 once it marked the command lost) posts nothing,
+//     // a transport error or 5xx is settled finished/failed "not run"; the accepted ack is
+//     // re-posted every minute while the command is held — heartbeat_ms at registration, the
+//     // beat stopped before the finished ack and on a refused beat — and Studio marks a
+//     // heartbeating runtime's silent accepted command lost after max(10 min, 3 beats), stream
+//     // open or not, the beat taken at most 10 min), a never-class tool's call is substituted
 //     // with its recorded result or parked (weft.Replay(weft.ReplaySafe) vouches a
 //     // read: it runs in every mode); side_effects substitute (default) | park |
 //     // allow — only allow runs the AllowSideEffects tools for real, and is refused

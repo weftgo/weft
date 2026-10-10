@@ -886,7 +886,11 @@ refused side-effect tool, 404 unknown runtime/agent/source run, 409 a
 reused command id, 503 with no runtime connected) and
 `GET /api/playground/commands/{id}`, plus the runtime link's own
 routes (`POST /api/runtime/register`, `GET /api/runtime/commands` SSE,
-`POST /api/runtime/acks`). Safety: off unless `WEFT_ENV=dev` or
+`POST /api/runtime/acks`). Registration carries `heartbeat_ms`;
+while a command is held the runtime re-posts its accepted ack at that
+cadence, and a repeated accepted ack is liveness: on an accepted row
+it restarts the finish watch (max(10 min, 3 beats)), on a lost one it
+is a 409, on a finished one a no-op. Safety: off unless `WEFT_ENV=dev` or
 `runtime.Enabled(true)`; overrides only narrow; a side-effect tool's
 call is substituted with its recorded result or parked
 (`weft.Replay(weft.ReplaySafe)` vouches a read, `AllowSideEffects`

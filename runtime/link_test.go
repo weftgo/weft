@@ -881,10 +881,14 @@ func TestLinkRunsNothingOnARefusedAcceptedAck(t *testing.T) {
 	close(gate)
 	calls := make(chan struct{}, 4)
 	model := &gatedModel{model: wefttest.Script(wefttest.Say("ran")), gate: gate, calls: calls}
-	newTestLink(t, ts.URL, model, Budget{MaxRunsPerExperiment: 1})
+	l := newTestLink(t, ts.URL, model, Budget{MaxRunsPerExperiment: 1})
 
 	fs.frames <- runFrame(late) // experiment exp_1
 	fs.waitAck(t, 1)
+	// The fake recorded the ack before the runtime read its 409: wait
+	// for the unreserve (the reserve precedes the ack, so a zero count
+	// is the run given back), or next races it.
+	waitRuns(t, l, "exp_1", 0)
 	fs.frames <- runFrame(next) // exp_1 again: admitted only if late's run went back
 	if a := fs.ackOf(t, next, "finished"); a.Status != "succeeded" {
 		t.Errorf("the next command's finished ack = %+v, want succeeded: the refused command's run was not given back", a)
@@ -902,6 +906,24 @@ func TestLinkRunsNothingOnARefusedAcceptedAck(t *testing.T) {
 	}
 	if n := len(calls); n != 1 {
 		t.Errorf("model calls = %d, want 1 (the next command's): a command Studio did not take as accepted ran", n)
+	}
+}
+
+// waitRuns blocks until experiment counts n runs or the deadline passes.
+func waitRuns(t *testing.T, l *link, experiment string, n int64) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		l.mu.Lock()
+		got := l.tally[experiment].runs
+		l.mu.Unlock()
+		if got == n {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s counts %d run(s), want %d", experiment, got, n)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
@@ -983,9 +1005,82 @@ func TestLinkHeartbeatsAnAcceptedCommand(t *testing.T) {
 	if a := fs.ackOf(t, cmd, "finished"); a.Status != "succeeded" {
 		t.Errorf("finished ack = %+v", a)
 	}
+	// The beat stops before the finished ack: five cadences on, still
+	// no accepted ack after it.
+	time.Sleep(5 * ackHeartbeat)
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
+	finished := false
+	for _, a := range fs.acks {
+		switch {
+		case a.CommandID != cmd:
+		case a.State == "finished":
+			finished = true
+		case finished && a.State == "accepted":
+			t.Errorf("an accepted ack after the finished one: %+v", a)
+		}
+	}
 	if got := fs.registrations[0].HeartbeatMS; got != 10 {
 		t.Errorf("registration heartbeat_ms = %d, want 10", got)
+	}
+}
+
+// TestLinkHeartbeatStopsWhenRefused pins the refused beat: once Studio
+// answers a heartbeat 409 (it marked the row lost) or 404 (it forgot
+// it), every later beat would be refused too, so the beating stops —
+// and nothing else changes: the run goes on and its finished ack is
+// posted.
+func TestLinkHeartbeatStopsWhenRefused(t *testing.T) {
+	defer func(d time.Duration) { ackHeartbeat = d }(ackHeartbeat)
+	ackHeartbeat = 5 * time.Millisecond
+	for _, code := range []int{http.StatusConflict, http.StatusNotFound} {
+		t.Run(http.StatusText(code), func(t *testing.T) {
+			const cmd = "cmd_01JTEST00000000000000LOST"
+			fs := newFakeStudio(t)
+			accepted := 0
+			fs.ackStatus = func(a ack) int {
+				fs.mu.Lock()
+				defer fs.mu.Unlock()
+				if a.State == "accepted" {
+					if accepted++; accepted > 1 {
+						return code // the first is taken, every beat refused
+					}
+				}
+				return http.StatusOK
+			}
+			ts := httptest.NewServer(fs.handler())
+			t.Cleanup(ts.Close)
+			gate := make(chan struct{})
+			calls := make(chan struct{}, 4)
+			model := &gatedModel{model: wefttest.Script(wefttest.Say("ran")), gate: gate, calls: calls}
+			newTestLink(t, ts.URL, model, Budget{})
+
+			fs.frames <- runFrame(cmd)
+			fs.ackOf(t, cmd, "accepted")
+			deadline := time.Now().Add(5 * time.Second)
+			for {
+				fs.mu.Lock()
+				n := accepted
+				fs.mu.Unlock()
+				if n >= 2 {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatal("no heartbeat")
+				}
+				time.Sleep(time.Millisecond)
+			}
+			time.Sleep(10 * ackHeartbeat) // ten cadences with the run held
+			fs.mu.Lock()
+			n := accepted
+			fs.mu.Unlock()
+			if n != 2 {
+				t.Errorf("%d accepted acks, want 2 (the ack and the one refused beat): beating went on after a %d", n, code)
+			}
+			close(gate)
+			if a := fs.ackOf(t, cmd, "finished"); a.Status != "succeeded" {
+				t.Errorf("finished ack = %+v, want succeeded: a refused beat changed the run", a)
+			}
+		})
 	}
 }

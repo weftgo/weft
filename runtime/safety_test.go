@@ -426,40 +426,130 @@ func TestRefusedDecisionAckRestoresThePark(t *testing.T) {
 // complete the set (two calls parked, one decided): its accepted ack
 // refused, the decision is not held either — no finished ack — so a
 // re-decision on the same call is taken, not refused "already
-// decided".
+// decided". Unconfirmed (the response lost), the same, plus a finished
+// ack, failed "not run …; decide again", settling the row Studio may
+// hold accepted.
 func TestRefusedHeldDecisionIsNotHeld(t *testing.T) {
-	l, f, pr := decisionLink(t, "c1", "c2")
-	f.mu.Lock()
-	f.ackStatus = func(a ack) int {
-		if a.CommandID == "cmd_d1" && a.State == "accepted" {
-			return http.StatusConflict
-		}
-		return http.StatusOK
+	for _, c := range []struct {
+		name   string
+		status int
+		settle string // the decision's finished ack error, "" none
+	}{
+		{"refused", http.StatusConflict, ""},
+		{"unconfirmed", dropResponse, notConfirmed + "; decide again"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			l, f, pr := decisionLink(t, "c1", "c2")
+			f.mu.Lock()
+			f.ackStatus = func(a ack) int {
+				if a.CommandID == "cmd_d1" && a.State == "accepted" {
+					return c.status
+				}
+				return http.StatusOK
+			}
+			f.mu.Unlock()
+			decide(t, l, nil, approvalDecision{CommandID: "cmd_d1", RunID: "pg_parked", CallID: "c1", Decision: "approve"})
+			l.mu.Lock()
+			held := len(pr.decisions)
+			l.mu.Unlock()
+			if held != 0 {
+				t.Errorf("the park holds %d decision(s) after a refused accepted ack, want none", held)
+			}
+			f.mu.Lock()
+			var fin []ack
+			for _, a := range f.acks {
+				if a.CommandID == "cmd_d1" && a.State == "finished" {
+					fin = append(fin, a)
+				}
+			}
+			f.mu.Unlock()
+			switch {
+			case c.settle == "" && len(fin) != 0:
+				t.Errorf("finished acks %+v after a 409, want none", fin)
+			case c.settle != "" && (len(fin) != 1 || fin[0].Status != "failed" || fin[0].Error != c.settle):
+				t.Errorf("finished acks %+v, want one failed %q", fin, c.settle)
+			}
+			decide(t, l, nil, approvalDecision{CommandID: "cmd_d2", RunID: "pg_parked", CallID: "c1", Decision: "deny"})
+			if a := f.ackOf(t, "cmd_d2", "finished"); a.Status != "succeeded" {
+				t.Errorf("the re-decision's finished ack = %+v, want succeeded (held)", a)
+			}
+			l.mu.Lock()
+			got := pr.decisions["c1"].Decision
+			l.mu.Unlock()
+			if got != "deny" {
+				t.Errorf("c1's held decision = %q, want the re-decision (deny)", got)
+			}
+		})
 	}
-	f.mu.Unlock()
-	decide(t, l, nil, approvalDecision{CommandID: "cmd_d1", RunID: "pg_parked", CallID: "c1", Decision: "approve"})
-	l.mu.Lock()
-	held := len(pr.decisions)
-	l.mu.Unlock()
-	if held != 0 {
-		t.Errorf("the park holds %d decision(s) after a refused accepted ack, want none", held)
-	}
-	f.mu.Lock()
-	for _, a := range f.acks {
-		if a.CommandID == "cmd_d1" && a.State == "finished" {
-			t.Errorf("a finished ack after a 409: %+v", a)
-		}
-	}
-	f.mu.Unlock()
-	decide(t, l, nil, approvalDecision{CommandID: "cmd_d2", RunID: "pg_parked", CallID: "c1", Decision: "deny"})
-	if a := f.ackOf(t, "cmd_d2", "finished"); a.Status != "succeeded" {
-		t.Errorf("the re-decision's finished ack = %+v, want succeeded (held)", a)
-	}
-	l.mu.Lock()
-	got := pr.decisions["c1"].Decision
-	l.mu.Unlock()
-	if got != "deny" {
-		t.Errorf("c1's held decision = %q, want the re-decision (deny)", got)
+}
+
+// TestHeldDecisionTakenByTheResumeSucceeds pins the race the held
+// decision's refused accepted ack can lose: while that ack is in
+// flight, the other call's decision completes the set and takes the
+// park with this decision in it — the resume applies it. The decision
+// is then not told "decide again" (it was applied): its finished ack
+// says succeeded, whether the ack was refused (the finished ack
+// overrides the lost row) or unconfirmed.
+func TestHeldDecisionTakenByTheResumeSucceeds(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		status int
+	}{
+		{"refused", http.StatusConflict},
+		{"unconfirmed", dropResponse},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			l, f, pr := decisionLink(t, "c1", "c2")
+			arrived, release := make(chan struct{}), make(chan struct{})
+			f.mu.Lock()
+			f.ackStatus = func(a ack) int {
+				if a.CommandID == "cmd_d1" && a.State == "accepted" {
+					close(arrived)
+					<-release
+					return c.status
+				}
+				return http.StatusOK
+			}
+			f.mu.Unlock()
+			d1 := approvalDecision{CommandID: "cmd_d1", RunID: "pg_parked", CallID: "c1", Decision: "approve"}
+			// decide's t.Fatalf belongs on the test goroutine: admit here,
+			// dispatch on others.
+			c1ctx, ok1 := l.admit(d1.CommandID)
+			c2ctx, ok2 := l.admit("cmd_d2")
+			if !ok1 || !ok2 {
+				t.Fatal("decisions not admitted")
+			}
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				l.dispatchDecision(c1ctx, d1)
+			}()
+			<-arrived
+			// c2's decision completes the set while d1's ack hangs: it
+			// takes the park, c1's approve in it.
+			go l.dispatchDecision(c2ctx, approvalDecision{CommandID: "cmd_d2", RunID: "pg_parked", CallID: "c2", Decision: "deny"})
+			f.ackOf(t, "cmd_d2", "accepted")
+			l.mu.Lock()
+			_, still := l.parked["pg_parked"]
+			got := pr.decisions["c1"]
+			l.mu.Unlock()
+			if still || got != d1 {
+				t.Fatalf("after the completing decision: parked %v, c1's decision %+v; want the park taken with d1 in it", still, got)
+			}
+			close(release)
+			<-done
+			f.mu.Lock()
+			var fin []ack
+			for _, a := range f.acks {
+				if a.CommandID == "cmd_d1" && a.State == "finished" {
+					fin = append(fin, a)
+				}
+			}
+			f.mu.Unlock()
+			if len(fin) != 1 || fin[0].Status != "succeeded" || fin[0].RunID != "pg_parked" {
+				t.Errorf("d1's finished acks = %+v, want one succeeded naming pg_parked: the resume applied it", fin)
+			}
+		})
 	}
 }
 

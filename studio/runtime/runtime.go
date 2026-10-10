@@ -20,6 +20,13 @@
 //	   ├──(reject)──► rejected
 //	   └──(no ack in 30 s, or the stream died before the ack)──► lost
 //	accepted ──(stream died, no finish in 10 min)──► lost
+//	accepted ──(stream open, no finish and no heartbeat in max(10 min, 3 beats))──► lost
+//
+// The second accepted edge is for a runtime that heartbeats
+// (Registration.HeartbeatMS): while it holds the command it re-posts
+// the accepted ack at that cadence, and each repeated accepted ack
+// restarts the watch — on an accepted row it is liveness, on a lost one
+// a 409, on a finished one a no-op.
 //
 // A late ack or finish still lands: the truth about a run wins over a
 // timer's guess.
@@ -493,8 +500,12 @@ type RuntimeServer struct {
 	// it is lost (§10.5: 30 s). A field so tests can tighten it.
 	AckDeadline time.Duration
 	// FinishDeadline is how long an accepted command may stay
-	// unfinished after its runtime's stream died before it is lost
-	// (§10.5: 10 min). A field so tests can tighten it.
+	// unfinished with no word from its runtime before it is lost
+	// (§10.5: 10 min): after its runtime's stream died, or — for a
+	// runtime that heartbeats (Registration.HeartbeatMS) — since its
+	// last accepted ack, stream open or not, the watch then being
+	// max(FinishDeadline, three heartbeats) with the heartbeat taken at
+	// most FinishDeadline. A field so tests can tighten it.
 	FinishDeadline time.Duration
 	// PingEvery is the SSE keep-alive cadence (15 s).
 	PingEvery time.Duration
@@ -963,20 +974,22 @@ func (rs *RuntimeServer) serveAcks(w http.ResponseWriter, r *http.Request) {
 			row.state = StateAccepted
 			row.runID = a.RunID
 			row.updated = rs.now()
-			if c := rs.runtimes[row.Runtime]; c == nil || c.feed == nil {
+			c := rs.runtimes[row.Runtime]
+			switch {
+			case c != nil && c.reg.HeartbeatMS > 0:
+				// A runtime that heartbeats is watched from the accepted
+				// ack on, stream open or not. Its own word keeps a long
+				// run accepted; silence — the ack's response lost and
+				// the runtime ran nothing, or a runtime gone without its
+				// stream noticing — ends it lost after the watch.
+				rs.armBeatLocked(row, c.reg.HeartbeatMS)
+			case c == nil || c.feed == nil:
 				// No sweep will arm the finish watch for this row: the
 				// runtime holds no stream — a feed dropped full ends
 				// without the disconnect sweep. Arm one now, or a
 				// runtime that never finishes leaves the row accepted
 				// forever (the audit's P2-10).
 				rs.armLostLocked(row, rs.FinishDeadline, "accepted while the runtime was disconnected, no finish")
-			} else {
-				// Connected: a runtime that heartbeats is watched from
-				// the accepted ack on. Its own word keeps a long run
-				// accepted; silence — the ack's response lost and the
-				// runtime ran nothing, or a runtime gone without its
-				// stream noticing — ends it lost after the watch.
-				rs.armBeatLocked(row, c.reg.HeartbeatMS)
 			}
 		case StateAccepted:
 			if row.runID == "" && a.RunID != "" {
@@ -987,11 +1000,17 @@ func (rs *RuntimeServer) serveAcks(w http.ResponseWriter, r *http.Request) {
 				row.runID = a.RunID
 				row.updated = rs.now()
 			}
-			if row.beat > 0 {
+			beatMS := row.beat.Milliseconds()
+			if c := rs.runtimes[row.Runtime]; beatMS == 0 && c != nil {
+				// A row armed before its runtime's registration said it
+				// beats: the registration's cadence.
+				beatMS = c.reg.HeartbeatMS
+			}
+			if beatMS > 0 {
 				// A heartbeat: the command is alive in the runtime's
 				// hands, so its watch starts over.
 				rs.stopTimersLocked(row)
-				rs.armBeatLocked(row, row.beat.Milliseconds())
+				rs.armBeatLocked(row, beatMS)
 			}
 		}
 	case "rejected":
@@ -1321,11 +1340,18 @@ func (rs *RuntimeServer) armLostLocked(row *commandRow, d time.Duration, why str
 // it takes, and a command nobody is running any more — its accepted
 // ack's response lost, the runtime ran nothing and its settling ack
 // failed too — is lost after it. Each heartbeat re-arms it.
+//
+// beatMS is the runtime's word, so it is taken at most FinishDeadline:
+// the watch is never longer than three FinishDeadlines, whatever a
+// registration claims (nor overflows into a negative duration).
 func (rs *RuntimeServer) armBeatLocked(row *commandRow, beatMS int64) {
 	if beatMS <= 0 || rs.FinishDeadline <= 0 {
 		return
 	}
-	beat := time.Duration(beatMS) * time.Millisecond
+	beat := rs.FinishDeadline
+	if beatMS < rs.FinishDeadline.Milliseconds() {
+		beat = time.Duration(beatMS) * time.Millisecond
+	}
 	d := max(rs.FinishDeadline, 3*beat)
 	rs.armLostLocked(row, d, fmt.Sprintf("accepted, but no finish and no heartbeat from the runtime in %s", d))
 	row.beat = beat

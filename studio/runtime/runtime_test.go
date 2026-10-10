@@ -3,6 +3,8 @@ package runtime
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -681,7 +683,10 @@ func TestLateAcceptedAckIsRefused(t *testing.T) {
 // the heartbeat (0) is not watched while connected, as before.
 func TestAcceptedRowWatchedByHeartbeat(t *testing.T) {
 	rs := fastServer()
-	rs.FinishDeadline = 40 * time.Millisecond // the watch: max(40 ms, 3 × 10 ms)
+	// The watch: max(200 ms, 3 × 10 ms) — a beat every 10 ms through a
+	// recorder (no server per ack) leaves a 190 ms margin for a stall.
+	rs.FinishDeadline = 200 * time.Millisecond
+	h := mux(rs)
 	ts := httptest.NewServer(mux(rs))
 	defer ts.Close()
 	beating := regBody("rt_beat")
@@ -698,7 +703,7 @@ func TestAcceptedRowWatchedByHeartbeat(t *testing.T) {
 	nextRun(t, rb)
 	ack(t, rs, Ack{CommandID: "cmd_silent", State: "accepted", RunID: "pg_silent"})
 	st := waitState(t, rs, "cmd_silent", StateLost)
-	if want := "accepted, but no finish and no heartbeat from the runtime in 40ms"; st.Error == nil || *st.Error != want {
+	if want := "accepted, but no finish and no heartbeat from the runtime in 200ms"; st.Error == nil || *st.Error != want {
 		t.Errorf("lost reason = %v, want %q", st.Error, want)
 	}
 	if !rs.Connected("rt_beat") {
@@ -711,7 +716,7 @@ func TestAcceptedRowWatchedByHeartbeat(t *testing.T) {
 	ack(t, rs, Ack{CommandID: "cmd_long", State: "accepted", RunID: "pg_long"})
 	for end := time.Now().Add(3 * rs.FinishDeadline); time.Now().Before(end); {
 		time.Sleep(10 * time.Millisecond)
-		ack(t, rs, Ack{CommandID: "cmd_long", State: "accepted", RunID: "pg_long"})
+		beat(t, h, "cmd_long", "pg_long")
 	}
 	if st, _ := rs.Command("cmd_long"); st.State != StateAccepted {
 		t.Fatalf("a heartbeating command is %+v, want accepted", st)
@@ -726,5 +731,84 @@ func TestAcceptedRowWatchedByHeartbeat(t *testing.T) {
 	time.Sleep(2 * rs.FinishDeadline)
 	if st, _ := rs.Command("cmd_old"); st.State != StateAccepted {
 		t.Errorf("an older runtime's connected command is %+v, want accepted (no heartbeat, no watch)", st)
+	}
+}
+
+// beat posts one heartbeat (a repeated accepted ack) through h with a
+// recorder: no server, no connection, so a beating loop does not stall
+// on one per ack.
+func beat(t *testing.T, h http.Handler, commandID, runID string) {
+	t.Helper()
+	body, _ := json.Marshal(Ack{CommandID: commandID, State: "accepted", RunID: runID})
+	req := httptest.NewRequest(http.MethodPost, "/api/runtime/acks", strings.NewReader(string(body)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("heartbeat for %s: %d %s", commandID, w.Code, w.Body.String())
+	}
+}
+
+// TestAcceptedWhileDisconnectedWatchedByHeartbeat: a row whose accepted
+// ack lands while its runtime holds no stream (here a stall drop) used
+// to get the plain FinishDeadline watch with no heartbeat cadence, so
+// the beats that followed never re-armed it and a run longer than
+// FinishDeadline was marked lost mid-run. A runtime that heartbeats gets
+// the beat watch, stream or not: beats keep the row accepted past
+// FinishDeadline, and silence ends it lost with the beat reason.
+func TestAcceptedWhileDisconnectedWatchedByHeartbeat(t *testing.T) {
+	rs := fastServer()
+	rs.AckDeadline = 30 * time.Second
+	rs.FinishDeadline = 100 * time.Millisecond // the watch: max(100 ms, 3 × 10 ms)
+	h := mux(rs)
+	reg := regBody("rt_gone")
+	reg.HeartbeatMS = 10
+	rs.mu.Lock()
+	stalled := make(chan Command, 1)
+	stalled <- Command{CommandID: "cmd_stuck"} // full: cap 1, nobody reads
+	rs.runtimes["rt_gone"] = &connected{reg: reg, feed: stalled}
+	rs.mu.Unlock()
+
+	queued := mustEnqueue(t, rs, "rt_gone", Command{CommandID: "cmd_queued"}) // drops the feed
+	if rs.Connected("rt_gone") {
+		t.Fatal("the full feed was not dropped")
+	}
+	beat(t, h, queued.CommandID, "pg_q") // the accepted ack, the stream down
+	for end := time.Now().Add(3 * rs.FinishDeadline); time.Now().Before(end); {
+		time.Sleep(10 * time.Millisecond)
+		beat(t, h, queued.CommandID, "pg_q")
+	}
+	if st, _ := rs.Command(queued.CommandID); st.State != StateAccepted {
+		t.Fatalf("a heartbeating command accepted while disconnected is %+v, want accepted past FinishDeadline", st)
+	}
+	st := waitState(t, rs, queued.CommandID, StateLost) // silence
+	if want := "accepted, but no finish and no heartbeat from the runtime in 100ms"; st.Error == nil || *st.Error != want {
+		t.Errorf("lost reason = %v, want %q", st.Error, want)
+	}
+}
+
+// TestHugeHeartbeatIsClamped: heartbeat_ms is the runtime's word. A
+// huge one armed a watch of three of them — days, or a negative
+// duration once 3× overflowed — that nothing shortened. The beat is
+// taken at most FinishDeadline: the watch is at most 3 × FinishDeadline.
+func TestHugeHeartbeatIsClamped(t *testing.T) {
+	rs := fastServer()
+	rs.FinishDeadline = 50 * time.Millisecond
+	ts := httptest.NewServer(mux(rs))
+	defer ts.Close()
+	for _, ms := range []int64{1 << 40, math.MaxInt64} {
+		id := fmt.Sprintf("rt_%d", ms)
+		reg := regBody(id)
+		reg.HeartbeatMS = ms
+		register(t, mux(rs), reg)
+		r, closeStream := subscribe(t, rs, ts.URL, id, "")
+		cmd := mustEnqueue(t, rs, id, Command{})
+		nextRun(t, r)
+		ack(t, rs, Ack{CommandID: cmd.CommandID, State: "accepted", RunID: "pg_" + id})
+		st := waitState(t, rs, cmd.CommandID, StateLost)
+		if want := "accepted, but no finish and no heartbeat from the runtime in 150ms"; st.Error == nil || *st.Error != want {
+			t.Errorf("heartbeat_ms %d: lost reason = %v, want %q", ms, st.Error, want)
+		}
+		closeStream()
 	}
 }

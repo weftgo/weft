@@ -558,17 +558,23 @@ func (l *link) dispatch(ctx context.Context, cmd command) {
 		return
 	}
 	accepted = true
-	defer l.heartbeat(cmd.CommandID, acked)()
+	// The beat stops before the finished ack is posted (and on every
+	// other way out, the deferred call): an accepted ack must never
+	// land after the finished one.
+	stopBeat := l.heartbeat(cmd.CommandID, acked)
+	defer stopBeat()
 
 	if !l.slot(ctx) {
 		// It never ran: its run goes back to the experiment's cap.
 		l.unreserve(cmd)
+		stopBeat()
 		l.postAck(ack{CommandID: cmd.CommandID, State: "finished", RunID: runID,
 			Status: "failed", Error: "canceled before it started"})
 		return
 	}
 	defer func() { <-l.slots }()
 	status, finalRun, errText := l.execute(ctx, cmd, runID)
+	stopBeat()
 	l.postAck(ack{CommandID: cmd.CommandID, State: "finished", RunID: finalRun, Status: status, Error: errText})
 }
 
@@ -660,12 +666,22 @@ func (l *link) dispatchDecision(ctx context.Context, d approvalDecision) {
 			// Not held accepted by Studio: the decision is not held here
 			// either, so deciding again is not told "already decided" —
 			// unless another decision completed the set meanwhile and
-			// its resume took this one with it (the park is gone).
+			// took the park with this one in it: then it was applied
+			// (or, should that resume not start, it is held in the park
+			// put back), and the finished ack says so — a finished ack
+			// overrides the lost row a 409 left.
 			l.mu.Lock()
-			if l.parked[d.RunID] == ps && ps.decisions[d.CallID] == d {
+			mine := ps.decisions[d.CallID] == d
+			dropped := mine && l.parked[d.RunID] == ps
+			if dropped {
 				delete(ps.decisions, d.CallID)
 			}
+			taken := mine && !dropped && len(ps.decisions) == len(ps.pending)
 			l.mu.Unlock()
+			if taken {
+				l.postAck(ack{CommandID: d.CommandID, State: "finished", RunID: d.RunID, Status: "succeeded"})
+				return
+			}
 			l.settleUnconfirmed(d.CommandID, res, notConfirmed+"; decide again")
 			slog.Warn("weft/runtime: the accepted ack was not taken; the decision is not held",
 				"command_id", d.CommandID)
@@ -690,12 +706,14 @@ func (l *link) dispatchDecision(ctx context.Context, d approvalDecision) {
 		return
 	}
 	accepted = true
-	defer l.heartbeat(d.CommandID, acked)()
+	stopBeat := l.heartbeat(d.CommandID, acked) // stopped before the finished ack (see dispatch)
+	defer stopBeat()
 
 	if !l.slot(ctx) {
 		// The resume never started: the park goes back, without this
 		// decision, so deciding again resumes it.
 		l.restorePark(d.RunID, ps, d.CallID)
+		stopBeat()
 		l.postAck(ack{CommandID: d.CommandID, State: "finished", RunID: runID,
 			Status: "failed", Error: "canceled before it started; decide again to resume"})
 		return
@@ -708,6 +726,7 @@ func (l *link) dispatchDecision(ctx context.Context, d approvalDecision) {
 		// park goes back as above.
 		l.restorePark(d.RunID, ps, d.CallID)
 	}
+	stopBeat()
 	l.postAck(ack{CommandID: d.CommandID, State: "finished", RunID: finalRun, Status: status, Error: errText})
 }
 
@@ -749,6 +768,12 @@ const notConfirmed = "not run: the accepted ack was not confirmed"
 // accepted, so its caller runs nothing (§5.3's at-most-once: a re-issue
 // would run it twice).
 func (l *link) postAck(a ack) ackResult {
+	return l.postAckCtx(context.Background(), a)
+}
+
+// postAckCtx is postAck under parent: canceling it abandons the POST
+// (a heartbeat's stop), quietly — the result is then ackUnconfirmed.
+func (l *link) postAckCtx(parent context.Context, a ack) ackResult {
 	if len(a.Error) > maxAckError {
 		a.Error = a.Error[:maxAckError] + "…"
 	}
@@ -756,7 +781,7 @@ func (l *link) postAck(a ack) ackResult {
 	if err != nil {
 		return ackRefused
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), ackTimeout)
+	ctx, cancel := context.WithTimeout(parent, ackTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, l.url("/api/runtime/acks"), bytes.NewReader(body))
 	if err != nil {
@@ -766,6 +791,10 @@ func (l *link) postAck(a ack) ackResult {
 	bearerAuth(req, l.token)
 	resp, err := l.client.Do(req)
 	if err != nil {
+		if parent.Err() != nil {
+			slog.Debug("weft/runtime: ack abandoned", "command_id", a.CommandID, "state", a.State)
+			return ackUnconfirmed
+		}
 		slog.Warn("weft/runtime: ack failed", "command_id", a.CommandID, "state", a.State, "err", err)
 		return ackUnconfirmed
 	}
@@ -810,29 +839,47 @@ var ackHeartbeat = time.Minute
 // heartbeat re-posts commandID's accepted ack (naming runID, as the
 // first did) every ackHeartbeat until the returned stop is called —
 // the runtime's word to Studio that the command is alive however long
-// it runs. Best effort: a missed beat is a late one, and an answer
-// other than 200 (the row already finished, or marked lost) changes
-// nothing here.
+// it runs. Best effort: a missed beat is a late one. A refused beat
+// (409: Studio marked the row lost; 404: it restarted or pruned it)
+// ends the beating — every later one would be refused too — and
+// changes nothing else: the run goes on and its finished ack is still
+// posted. An unconfirmed one keeps beating.
+//
+// stop is idempotent and returns only once the beating goroutine has
+// exited, its in-flight POST abandoned: called before the finished ack,
+// no accepted ack is sent after it.
 func (l *link) heartbeat(commandID, runID string) (stop func()) {
 	if l.beat <= 0 {
 		return func() {}
 	}
-	done := make(chan struct{})
+	ctx, cancel := context.WithCancel(l.ctx)
+	exited := make(chan struct{})
 	go func() {
+		defer close(exited)
 		t := time.NewTicker(l.beat)
 		defer t.Stop()
 		for {
 			select {
 			case <-t.C:
-				l.postAck(ack{CommandID: commandID, State: "accepted", RunID: runID})
-			case <-done:
-				return
-			case <-l.ctx.Done():
+				if ctx.Err() != nil {
+					return
+				}
+				if l.postAckCtx(ctx, ack{CommandID: commandID, State: "accepted", RunID: runID}) == ackRefused {
+					slog.Debug("weft/runtime: heartbeat refused; beating stops", "command_id", commandID)
+					return
+				}
+			case <-ctx.Done():
 				return
 			}
 		}
 	}()
-	return func() { close(done) }
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			cancel()
+			<-exited
+		})
+	}
 }
 
 // url resolves a server-relative Studio path against the link's base.

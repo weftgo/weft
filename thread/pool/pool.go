@@ -174,6 +174,11 @@ type Pool struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
+
+	// testHookParking, when set (by this package's tests only), runs
+	// in park between the parked receipt and the parked phase — the
+	// window a decision recorded there used to be lost in.
+	testHookParking func(*delegate)
 }
 
 // An Option configures a Pool at New.

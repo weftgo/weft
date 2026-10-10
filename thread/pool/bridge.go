@@ -156,13 +156,67 @@ func (p *Pool) park(ctx context.Context, d *delegate) error {
 		d.agent.Logger().Error("thread/pool: parked receipt not recorded; the ledger reads running",
 			"receipt", d.receipt, "child", d.child.ID(), "err", err)
 	}
+	if p.testHookParking != nil {
+		p.testHookParking(d)
+	}
 	p.mu.Lock()
 	d.phase = phaseParked
 	if d.wrapper != "" {
 		d.resolve = true
 	}
 	p.mu.Unlock()
+	// The mirrors were decidable before the phase read parked: a
+	// decision recorded in between met a pump that saw the run still
+	// in flight and left it — and no later pump comes unless someone
+	// calls. Read the parent's verdicts again now the phase is parked:
+	// a decision recorded before this read is armed here, one recorded
+	// after it meets a pump that reads parked. arm is once per park
+	// whichever of them gets there.
+	if mirrors, err := d.parent.MirroredRequests(ctx); err != nil {
+		d.agent.Logger().Error("thread/pool: parked child's decisions not re-read; the next Decide pumps it",
+			"receipt", d.receipt, "child", d.child.ID(), "err", err)
+	} else if replay, ready, _ := readiness(d.child.ID(), d.child.Pending(), heldMirrors(mirrors)); ready {
+		p.arm(d, replay)
+	}
 	return nil
+}
+
+// mirrorKey keys a mirrored request: its namespaced call id and the
+// child run that parked it.
+type mirrorKey [2]string
+
+// heldMirrors indexes the parent's mirrors in force by mirrorKey.
+func heldMirrors(mirrors []thread.MirroredRequest) map[mirrorKey]thread.MirroredRequest {
+	held := make(map[mirrorKey]thread.MirroredRequest, len(mirrors))
+	for _, m := range mirrors {
+		held[mirrorKey{m.Request.CallID, m.Request.RunID}] = m
+	}
+	return held
+}
+
+// readiness reads a parked child's boundary against the parent's
+// mirrors: ready when every call pending in the child holds an
+// effective verdict in the parent, with the decisions to replay under
+// the child's own call ids; unmirrored when a pending call has no
+// mirror at all (a crash between the child's park and the mirror).
+func readiness(childID string, pending []thread.Request, held map[mirrorKey]thread.MirroredRequest) (replay []thread.ApprovalDecisionEntry, ready, unmirrored bool) {
+	ready = true
+	for _, r := range pending {
+		m, ok := held[mirrorKey{mirrorCallID(childID, r.CallID), r.RunID}]
+		if !ok {
+			ready, unmirrored = false, true
+			continue
+		}
+		if !m.Decided {
+			ready = false
+			continue
+		}
+		for _, de := range m.Decisions {
+			de.CallID = r.CallID // the child's own key
+			replay = append(replay, de)
+		}
+	}
+	return replay, ready, unmirrored
 }
 
 // mirror appends the child's pending requests the parent holds no
@@ -368,13 +422,11 @@ func (p *Pool) pump(ctx context.Context, parent *thread.Session) error {
 	if err != nil {
 		return err
 	}
-	type key [2]string // namespaced call id, the child run that parked it
-	held := map[key]thread.MirroredRequest{}
+	held := heldMirrors(mirrors)
 	var order []string
 	wrappers := map[string]string{}
 	seen := map[string]bool{}
 	for _, m := range mirrors {
-		held[key{m.Request.CallID, m.Request.RunID}] = m
 		if !seen[m.Request.Child] {
 			seen[m.Request.Child] = true
 			order = append(order, m.Request.Child)
@@ -408,27 +460,9 @@ func (p *Pool) pump(ctx context.Context, parent *thread.Session) error {
 		parked := d.phase == phaseParked
 		p.mu.Unlock()
 		if !parked {
-			continue // queued, running or being canceled: not the pump's
+			continue // queued, running or being canceled: not the pump's (a park re-reads the verdicts itself)
 		}
-		pending := d.child.Pending()
-		ready := true
-		unmirrored := false
-		var replay []thread.ApprovalDecisionEntry
-		for _, r := range pending {
-			m, ok := held[key{mirrorCallID(childID, r.CallID), r.RunID}]
-			if !ok {
-				ready, unmirrored = false, true
-				continue
-			}
-			if !m.Decided {
-				ready = false
-				continue
-			}
-			for _, de := range m.Decisions {
-				de.CallID = r.CallID // the child's own key
-				replay = append(replay, de)
-			}
-		}
+		replay, ready, unmirrored := readiness(childID, d.child.Pending(), held)
 		if unmirrored {
 			// A pending call the parent was never shown (a crash
 			// between the child's park and the mirror): show it now.

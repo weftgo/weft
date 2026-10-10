@@ -127,6 +127,15 @@ func (s searchRun) span(n int) obsdb.Span {
 //     and the turn's question "Can I get a refund on order 2?", which is
 //     the prompt; a message steered in at index 1 ("Also check order 3")
 //     is not; no "failed" anywhere, so the gate stays three runs.
+//   - sr-resume (t0+4m40s): a resume that carries a new prompt — its
+//     input record ends at the assistant's tool call ("Cancel booking
+//     eleven" before it), and the next record holds the tool result,
+//     then the new prompt "Change it to booking twenty-two", then the
+//     answer: the new prompt is the prompt (written before the input
+//     record, so the two arrive out of order).
+//   - sr-resume-plain (t0+4m50s): a resume with no new prompt — the
+//     next record holds only the tool result and the answer: the input
+//     record's question "Cancel booking thirty" stays the prompt.
 //   - sr-refund/0/call_1 (a child of sr-refund, t0+10s): prompt
 //     "refund failed twice" — matches only when children are included.
 func searchFixture() []searchRun {
@@ -168,6 +177,16 @@ func searchFixture() []searchRun {
 				msgs(textMsg("user", "Also check order 3")),
 				msgs(textMsg("assistant", "Refund for order 2 is on its way.")),
 			}},
+		{id: "sr-resume", input: true, public: "pub_search", model: "small", start: 4*time.Minute + 40*time.Second, dur: time.Second, in: 10, out: 10,
+			messages: []string{
+				msgs(textMsg("user", "Cancel booking eleven"), `{"role":"assistant","content":[{"type":"tool_call","id":"c1","name":"cancel","args":{}}]}`),
+				msgs(`{"role":"tool","content":[{"type":"tool_result","call_id":"c1","content":"ok"}]}`, textMsg("user", "Change it to booking twenty-two"), textMsg("assistant", "Done.")),
+			}},
+		{id: "sr-resume-plain", input: true, public: "pub_search", model: "small", start: 4*time.Minute + 50*time.Second, dur: time.Second, in: 10, out: 10,
+			messages: []string{
+				msgs(textMsg("user", "Cancel booking thirty"), `{"role":"assistant","content":[{"type":"tool_call","id":"c1","name":"cancel","args":{}}]}`),
+				msgs(`{"role":"tool","content":[{"type":"tool_result","call_id":"c1","content":"ok"}]}`, textMsg("assistant", "Cancelled.")),
+			}},
 		{id: "sr-refund/0/call_1", input: true, parent: "sr-refund", public: "pub_search", model: "small", start: 10 * time.Second, dur: time.Second, in: 5, out: 5,
 			messages: []string{msgs(textMsg("user", "refund failed twice"))}},
 	}
@@ -185,6 +204,13 @@ func writeSearchFixture(t *testing.T, db obsdb.DB) {
 				t.Fatal(err)
 			}
 			messages = messages[:2]
+		}
+		if s.id == "sr-resume" {
+			// The next record first: the prompt converges either way.
+			if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{messages[1]}}); err != nil {
+				t.Fatal(err)
+			}
+			messages = messages[:1]
 		}
 		if err := db.Write(ctx(), obsdb.Batch{Records: append(events, messages...), Spans: []obsdb.Span{s.span(i)}}); err != nil {
 			t.Fatal(err)
@@ -224,11 +250,14 @@ func searchTable(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			{"the turn's own prompt", obsdb.SearchQuery{Text: `"order 2"`}, []string{"sr-turn2"}, 0},
 			{"never an earlier turn's prompt", obsdb.SearchQuery{Text: `"order 1"`}, nil, 0},
 			{"never a steered message", obsdb.SearchQuery{Text: `"order 3"`}, nil, 0},
+			{"a resume's new prompt", obsdb.SearchQuery{Text: `"booking twenty-two"`}, []string{"sr-resume"}, 0},
+			{"never the question a resume replaced", obsdb.SearchQuery{Text: `"booking eleven"`}, nil, 0},
+			{"a plain resume keeps its question", obsdb.SearchQuery{Text: `"booking thirty"`}, []string{"sr-resume-plain"}, 0},
 			{"a short term's % and _ are literal", obsdb.SearchQuery{Text: "%_"}, []string{"sr-hidden"}, 0},
 			{"a short term's % is literal", obsdb.SearchQuery{Text: "%x"}, nil, 0},
 			{"a short term's _ is literal", obsdb.SearchQuery{Text: "_r"}, []string{"sr-refund"}, 0},
 			{"nothing", obsdb.SearchQuery{Text: "zebra"}, nil, 0},
-			{"no text: every top-level run", obsdb.SearchQuery{}, []string{"sr-turn2", "sr-hidden", "sr-off", "sr-done", "sr-parcel", "sr-refund"}, 0},
+			{"no text: every top-level run", obsdb.SearchQuery{}, []string{"sr-resume-plain", "sr-resume", "sr-turn2", "sr-hidden", "sr-off", "sr-done", "sr-parcel", "sr-refund"}, 0},
 			{"tool, exact", obsdb.SearchQuery{Tool: "refund"}, []string{"sr-off"}, 0},
 			{"tool, exact (2)", obsdb.SearchQuery{Tool: "issue_refund"}, []string{"sr-refund"}, 0},
 			{"error substring", obsdb.SearchQuery{Error: "GATEWAY"}, []string{"sr-refund"}, 0},
@@ -287,6 +316,8 @@ func promptPreview(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			"sr-off":             "",
 			"sr-hidden":          "hello there",
 			"sr-turn2":           "Can I get a refund on order 2?",
+			"sr-resume":          "Change it to booking twenty-two",
+			"sr-resume-plain":    "Cancel booking thirty",
 			"sr-refund/0/call_1": "refund failed twice",
 		}
 		check := func(where string, rows []obsdb.RunRow) {

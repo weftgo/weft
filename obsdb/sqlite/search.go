@@ -21,33 +21,60 @@ var _ obsdb.Searcher = (*DB)(nil)
 
 // runSearch is what one batch learned about a run's search fields.
 type runSearch struct {
-	prompt    string
-	promptIdx int64 // -1: none this batch
+	prompt    string // "" none this batch
+	promptIdx int64  // its rank (promptRank)
 	answer    string
 	answerIdx int64 // -1: none this batch
 	tools     map[string]bool
+	// inputs are the indexes of input records whose prompt must be
+	// (re)resolved from the stored pair (TurnPrompt): an input record
+	// stored this batch, or the record before one stored this batch —
+	// its next record, which a resume's new prompt lands in.
+	inputs map[int64]bool
+}
+
+// inputRank offsets an input record's prompt candidate below every
+// other record's: run_search.prompt_idx is a rank, the lowest winning,
+// so a run's prompt is its input record's when that has one (the
+// lowest-index input record's), else the lowest-index other record's —
+// obsdb.PromptText's rule, and ClickHouse's expression.
+const inputRank = int64(1) << 40
+
+// see offers one prompt candidate at a rank; the lowest is kept.
+func (s *runSearch) see(text string, rank int64) {
+	if s.prompt == "" || rank < s.promptIdx {
+		s.prompt, s.promptIdx = text, rank
+	}
 }
 
 func (u *runUpdate) search() *runSearch {
 	if u.srch == nil {
-		u.srch = &runSearch{promptIdx: -1, answerIdx: -1}
+		u.srch = &runSearch{answerIdx: -1}
 	}
 	return u.srch
 }
 
 // seeSearch folds one newly stored durable record into the run's
-// search fields: a growth messages record's prompt text (PromptText:
-// the input record's last user text, another record's first; the
-// lowest index wins — the input record is index 0) and last assistant
-// text (the highest wins), and a
-// tool_start event's tool name. Applied only to records actually
-// inserted — a duplicate teaches nothing new.
+// search fields: a growth messages record's prompt candidate (another
+// record's first user text, at its index; an input record's is resolved
+// in updateSearch from the stored pair, as is the one before a record
+// stored now — the resume's next record) and last assistant text (the
+// highest index wins), and a tool_start event's tool name. Applied only
+// to records actually inserted — a duplicate teaches nothing new.
 func (u *runUpdate) seeSearch(r obsdb.Record, w obsdb.Weft) {
 	switch {
 	case w.Record == "messages":
 		s := u.search()
-		if t, ok := obsdb.PromptText([]byte(r.Body), w.Input); ok && (s.promptIdx < 0 || w.Pos < s.promptIdx) {
-			s.prompt, s.promptIdx = t, w.Pos
+		if s.inputs == nil {
+			s.inputs = map[int64]bool{}
+		}
+		if w.Input {
+			s.inputs[w.Pos] = true
+		} else if t, ok := obsdb.PromptText([]byte(r.Body), false); ok {
+			s.see(t, w.Pos)
+		}
+		if w.Pos >= 1 {
+			s.inputs[w.Pos-1] = true
 		}
 		if t, ok := obsdb.LastAssistantText([]byte(r.Body)); ok && w.Pos > s.answerIdx {
 			s.answer, s.answerIdx = t, w.Pos
@@ -74,13 +101,18 @@ func (u *runUpdate) seeSearch(r obsdb.Record, w obsdb.Weft) {
 func updateSearch(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) error {
 	dirty := u.errText != ""
 	if s := u.srch; s != nil {
-		if s.promptIdx >= 0 || s.answerIdx >= 0 {
+		for pos := range s.inputs {
+			if err := resolveInput(ctx, tx, runID, pos, s); err != nil {
+				return err
+			}
+		}
+		if s.prompt != "" || s.answerIdx >= 0 {
 			if _, err := tx.ExecContext(ctx, `INSERT INTO run_search (run_id, prompt, prompt_idx, answer, answer_idx)
 				VALUES (?, ?, ?, ?, ?)
 				ON CONFLICT (run_id) DO UPDATE SET
-				  prompt = CASE WHEN excluded.prompt_idx >= 0 AND (run_search.prompt_idx < 0 OR excluded.prompt_idx < run_search.prompt_idx)
+				  prompt = CASE WHEN excluded.prompt != '' AND (run_search.prompt = '' OR excluded.prompt_idx <= run_search.prompt_idx)
 				    THEN excluded.prompt ELSE run_search.prompt END,
-				  prompt_idx = CASE WHEN excluded.prompt_idx >= 0 AND (run_search.prompt_idx < 0 OR excluded.prompt_idx < run_search.prompt_idx)
+				  prompt_idx = CASE WHEN excluded.prompt != '' AND (run_search.prompt = '' OR excluded.prompt_idx <= run_search.prompt_idx)
 				    THEN excluded.prompt_idx ELSE run_search.prompt_idx END,
 				  answer = CASE WHEN excluded.answer_idx > run_search.answer_idx THEN excluded.answer ELSE run_search.answer END,
 				  answer_idx = MAX(run_search.answer_idx, excluded.answer_idx)`,
@@ -103,6 +135,42 @@ func updateSearch(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) e
 		return nil
 	}
 	return reindexRun(ctx, tx, runID)
+}
+
+// resolveInput offers the prompt of the input record at pos, if one is
+// stored there: obsdb.TurnPrompt over it and the growth record at pos+1
+// as the table holds them now, ranked pos − inputRank. The upsert takes
+// an equal rank (<=), so a resolution made once both records are stored
+// replaces one made before the second arrived — whichever came first.
+func resolveInput(ctx context.Context, tx *sql.Tx, runID string, pos int64, s *runSearch) error {
+	read := func(p int64) ([]byte, bool, bool, error) {
+		var body, attrs string
+		err := tx.QueryRowContext(ctx, `SELECT body, attrs FROM records WHERE run_id = ? AND kind = 'messages' AND pos = ?`,
+			runID, p).Scan(&body, &attrs)
+		if err == sql.ErrNoRows {
+			return nil, false, false, nil
+		}
+		if err != nil {
+			return nil, false, false, err
+		}
+		input, reason := messagesFlags([]byte(attrs))
+		return []byte(body), input, reason == "", nil
+	}
+	in, input, growth, err := read(pos)
+	if err != nil || in == nil || !input || !growth {
+		return err
+	}
+	next, _, growth, err := read(pos + 1)
+	if err != nil {
+		return err
+	}
+	if !growth {
+		next = nil
+	}
+	if t, ok := obsdb.TurnPrompt(in, next); ok {
+		s.see(t, pos-inputRank)
+	}
+	return nil
 }
 
 // reindexRun replaces a run's runs_fts row (rowid = its run_search id)

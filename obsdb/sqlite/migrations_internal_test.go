@@ -132,11 +132,14 @@ func TestUpgradeFrom0003IndexesStoredRuns(t *testing.T) {
 	for _, stmt := range []string{
 		`INSERT INTO runs (run_id, agent, started_ns, last_seen_ns, failed, err) VALUES ('old1', 'support', 100, 200, 1, 'card declined')`,
 		`INSERT INTO runs (run_id, agent, started_ns, last_seen_ns) VALUES ('old2', 'support', 300, 400)`,
+		`INSERT INTO runs (run_id, agent, started_ns, last_seen_ns) VALUES ('old3', 'support', 500, 600)`,
 		`INSERT INTO records (run_id, kind, pos, time_ns, event_type, step, body, attrs) VALUES
 			('old1', 'messages', 0, 100, '', 0, '[{"role":"user","content":[{"type":"text","text":"refund my order"}]}]', '{}'),
 			('old1', 'messages', 1, 110, '', 0, '[{"role":"assistant","content":[{"type":"text","text":"working on it"}]}]', '{}'),
 			('old1', 'messages', 2, 120, '', 0, '[{"role":"assistant","content":[{"type":"text","text":"a compacted summary"}]}]', '{"weft.messages.reason":"compacted"}'),
 			('old1', 'messages', 3, 130, '', 0, '[{"role":"assistant","content":[{"type":"text","text":"a numeric reason"}]}]', '{"weft.messages.reason":7}'),
+			('old3', 'messages', 1, 510, '', 0, '[{"role":"tool","content":[{"type":"tool_result","call_id":"c","content":"ok"}]},{"role":"user","content":[{"type":"text","text":"resumed question"}]}]', '{}'),
+			('old3', 'messages', 0, 500, '', 0, '[{"role":"user","content":[{"type":"text","text":"parked question"}]},{"role":"assistant","content":[{"type":"tool_call","id":"c","name":"x","args":{}}]}]', '{"weft.messages.input":true}'),
 			('old2', 'messages', 0, 300, '', 0, '[{"role":"user","content":[{"type":"text","text":"turn one question"}]},{"role":"assistant","content":[{"type":"text","text":"ok"}]},{"role":"user","content":[{"type":"text","text":"turn two question"}]}]', '{"weft.messages.input":true}'),
 			('old1', 'event', 1, 105, 'tool_start', 0, '{"type":"tool_start","name":"issue_refund"}', '{}'),
 			('old2', 'event', 0, 300, 'run_start', 0, '{"type":"run_start"}', '{}')`,
@@ -159,6 +162,7 @@ func TestUpgradeFrom0003IndexesStoredRuns(t *testing.T) {
 		"refund my": "old1", "working": "old1", "declined": "old1", "issue_refund": "old1", "compacted summary": "",
 		"numeric reason": "",                     // a reason of any type is a view: the writer's reading (obsdb.DeriveRecord)
 		"turn two":       "old2", "turn one": "", // the input record's last user message is the turn's prompt
+		"resumed question": "old3", "parked question": "", // a resume's new prompt, in the next record
 	} {
 		page, err := srch.Search(ctx, obsdb.SearchQuery{Text: `"` + text + `"`})
 		if err != nil {

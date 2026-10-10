@@ -125,3 +125,32 @@ func TestDeriveRecordMessagesFlags(t *testing.T) {
 		}
 	}
 }
+
+// TurnPrompt's resume rule: an input record cut at an assistant tool
+// call takes the next record's user text before its first assistant
+// message; otherwise — no cut, no next record, no such user text — the
+// input record's last user text.
+func TestTurnPrompt(t *testing.T) {
+	const (
+		cut   = `[{"role":"user","content":[{"type":"text","text":"Q1"}]},{"role":"assistant","content":[{"type":"tool_call","id":"c","name":"x","args":{}}]}]`
+		plain = `[{"role":"user","content":[{"type":"text","text":"Q1"}]},{"role":"assistant","content":[{"type":"text","text":"A"}]}]`
+		next  = `[{"role":"tool","content":[{"type":"tool_result","call_id":"c","content":"ok"}]},{"role":"user","content":[{"type":"text","text":"Q2"}]},{"role":"assistant","content":[{"type":"text","text":"A"}]}]`
+		bare  = `[{"role":"tool","content":[{"type":"tool_result","call_id":"c","content":"ok"}]},{"role":"assistant","content":[{"type":"text","text":"A"}]},{"role":"user","content":[{"type":"text","text":"steered"}]}]`
+	)
+	for _, c := range []struct {
+		name, input, next, want string
+	}{
+		{"a resume with a new prompt", cut, next, "Q2"},
+		{"a plain resume", cut, bare, "Q1"}, // user text after the first assistant message never qualifies
+		{"the next record not stored yet", cut, "", "Q1"},
+		{"no cut: the next record is growth", plain, next, "Q1"},
+	} {
+		var nb []byte
+		if c.next != "" {
+			nb = []byte(c.next)
+		}
+		if got, _ := obsdb.TurnPrompt([]byte(c.input), nb); got != c.want {
+			t.Errorf("%s: TurnPrompt = %q, want %q", c.name, got, c.want)
+		}
+	}
+}

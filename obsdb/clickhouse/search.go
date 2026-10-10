@@ -26,27 +26,47 @@ var _ obsdb.Searcher = (*DB)(nil)
 // extra condition leaves: its run, record index, place in the body,
 // whether the record is the run's input (IsIn: weft.messages.input,
 // inferred for index 0 on a row written before 0004 stored the flag —
-// Transcript's reading), role, and the text of its text parts joined by
-// "\n" — obsdb.MessagesText in SQL.
+// Transcript's reading), role, the text of its text parts joined by
+// "\n" and whether it carries a tool call — obsdb.MessagesText in SQL.
 func searchMessages(extra string) string {
 	return `SELECT RunId, Pos, I, IsIn, JSONExtractString(M, 'role') AS Role,
 		arrayStringConcat(arrayMap(p -> JSONExtractString(p, 'text'),
-			arrayFilter(p -> JSONExtractString(p, 'type') = 'text', JSONExtractArrayRaw(M, 'content'))), '\n') AS Txt
+			arrayFilter(p -> JSONExtractString(p, 'type') = 'text', JSONExtractArrayRaw(M, 'content'))), '\n') AS Txt,
+		arrayExists(p -> JSONExtractString(p, 'type') = 'tool_call', JSONExtractArrayRaw(M, 'content')) AS HasCall
 	FROM (SELECT RunId, Pos, (Input = 1 OR (Input = -1 AND Pos = 0)) AS IsIn, Body FROM weft_records
 		WHERE Kind = 'messages' AND Reason = '' AND Pos >= 0` + extra + `)
 	ARRAY JOIN JSONExtractArrayRaw(Body) AS M, arrayEnumerate(JSONExtractArrayRaw(Body)) AS I`
 }
 
-// The prompt, obsdb.PromptText's rule over a run's records: the input
-// record's last user message with text (of the lowest-index input
-// record, should there be two), else the first user message with text
-// by (record index, place). A transport duplicate repeats a row with
-// the same text, so no aggregate needs FINAL.
+// searchWindowed is searchMessages with what the prompt's resume rule
+// reads per row: InPos, the run's (lowest-index) input record's index;
+// FirstAsst, the place of the first assistant message in the row's
+// record (0: none — places count from 1); and Qual, the row is a user
+// message with text in the record right after the input record, before
+// that record's first assistant message — a resume's new prompt.
+func searchWindowed(extra string) string {
+	return `SELECT *, (Pos = InPos + 1 AND ` + userText + ` AND (FirstAsst = 0 OR I < FirstAsst)) AS Qual FROM (
+		SELECT *, minIf(Pos, IsIn) OVER (PARTITION BY RunId) AS InPos,
+			minIf(I, Role = 'assistant') OVER (PARTITION BY RunId, Pos) AS FirstAsst
+		FROM (` + searchMessages(extra) + `))`
+}
+
+// The prompt, obsdb.PromptText's and TurnPrompt's rule over a run's
+// records (searchWindowed's rows): on a resume — the input record's
+// last message is an assistant message with tool calls (Boundary) — the
+// next record's first qualifying user text when there is one; else the
+// input record's last user message with text; else, with no input
+// record holding one, the first user message with text by (record
+// index, place). A transport duplicate repeats a row with the same
+// text, so no aggregate needs FINAL.
 const (
 	userText    = `Role = 'user' AND Txt != ''`
-	inputPrompt = `argMaxIf(Txt, (-Pos, I), IsIn AND ` + userText + `)`
+	inRecord    = `IsIn AND Pos = InPos`
+	boundary    = `argMaxIf(Role = 'assistant' AND HasCall, I, ` + inRecord + `)`
+	resumed     = boundary + ` AND countIf(Qual) > 0`
+	inputHas    = `countIf(` + inRecord + ` AND ` + userText + `) > 0`
 	firstPrompt = `argMinIf(Txt, (Pos, I), ` + userText + `)`
-	promptExpr  = `if(countIf(IsIn AND ` + userText + `) > 0, ` + inputPrompt + `, ` + firstPrompt + `)`
+	promptExpr  = `multiIf(` + resumed + `, argMinIf(Txt, I, Qual), ` + inputHas + `, argMaxIf(Txt, I, ` + inRecord + ` AND ` + userText + `), ` + firstPrompt + `)`
 	answerExpr  = `argMaxIf(Txt, (Pos, I), Role = 'assistant' AND Txt != '')`
 )
 
@@ -119,7 +139,7 @@ func (d *DB) Search(ctx context.Context, q obsdb.SearchQuery) (_ obsdb.RunPage, 
 		cand := " AND RunId IN (SELECT RunId FROM (" + runs + "))"
 		from = "(SELECT " + joinedRunColumns + ", f.Prompt AS SPrompt, f.Answer AS SAnswer, t.Tools AS STools FROM (" + runs + ") AS r" +
 			" LEFT JOIN (SELECT RunId, " + promptExpr + " AS Prompt, " + answerExpr + " AS Answer FROM (" +
-			searchMessages(cand) + ") GROUP BY RunId) AS f ON f.RunId = r.RunId" +
+			searchWindowed(cand) + ") GROUP BY RunId) AS f ON f.RunId = r.RunId" +
 			" LEFT JOIN (SELECT RunId, groupUniqArray(JSONExtractString(Body, 'name')) AS Tools FROM weft_records" +
 			" WHERE Kind = 'event' AND EventType = 'tool_start'" + cand + " GROUP BY RunId) AS t ON t.RunId = r.RunId)"
 		args = append(append(append([]any{}, runsArgs...), runsArgs...), runsArgs...) // r, f's and t's candidates
@@ -194,22 +214,20 @@ func (d *DB) searchRows(ctx context.Context, now time.Time, sql string, args ...
 // fillPreviewsOf sets PromptPreview on the rows of ids — the prompt
 // Search derives, cut to obsdb.PromptPreviewRunes code points
 // (substringUTF8, as SQLite's substr counts them). Called beside the
-// counts, so every run row a read returns carries it. It reads the
-// input records first (index 0, one record per run) and scans a run's
-// other messages records only when its input record holds no user
-// text (a run written without the flag, or fed no user message).
+// counts, so every run row a read returns carries it. It reads each
+// run's input record and the record right after it (a resume's new
+// prompt) first, and scans a run's other messages records only when
+// those two give no prompt (a run written without the flag, or fed no
+// user message).
 func (d *DB) fillPreviewsOf(ctx context.Context, ids []string, byID map[string]*obsdb.RunRow) error {
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	idArgs := make([]any, len(ids))
+	for i, id := range ids {
+		idArgs[i] = id
+	}
 	found := map[string]bool{}
-	read := func(extra, expr string, ids []string) error {
-		placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
-		args := make([]any, len(ids))
-		for i, id := range ids {
-			args[i] = id
-		}
-		rs, err := d.conn.Query(ctx,
-			"SELECT RunId, substringUTF8("+expr+", 1, 200) FROM ("+
-				searchMessages(extra+" AND RunId IN ("+placeholders+")")+") GROUP BY RunId HAVING countIf("+userText+") > 0",
-			args...)
+	read := func(sql string, args []any) error {
+		rs, err := d.conn.Query(ctx, sql, args...)
 		if err != nil {
 			return err
 		}
@@ -226,17 +244,24 @@ func (d *DB) fillPreviewsOf(ctx context.Context, ids []string, byID map[string]*
 		}
 		return rs.Err()
 	}
-	if err := read(" AND (Input = 1 OR (Input = -1 AND Pos = 0))", inputPrompt, ids); err != nil {
+	const isInput = "(Input = 1 OR (Input = -1 AND Pos = 0))"
+	pair := " AND RunId IN (" + placeholders + ") AND (" + isInput + " OR (RunId, Pos) IN (SELECT RunId, Pos + 1 FROM weft_records" +
+		" WHERE Kind = 'messages' AND Reason = '' AND Pos >= 0 AND " + isInput + " AND RunId IN (" + placeholders + ")))"
+	if err := read("SELECT RunId, substringUTF8("+promptExpr+", 1, 200) FROM ("+searchWindowed(pair)+
+		") GROUP BY RunId HAVING ("+resumed+") OR "+inputHas, append(append([]any{}, idArgs...), idArgs...)); err != nil {
 		return err
 	}
-	var rest []string
+	var rest []any
+	var restMarks []string
 	for _, id := range ids {
 		if !found[id] {
 			rest = append(rest, id)
+			restMarks = append(restMarks, "?")
 		}
 	}
 	if len(rest) == 0 {
 		return nil
 	}
-	return read("", firstPrompt, rest)
+	return read("SELECT RunId, substringUTF8("+firstPrompt+", 1, 200) FROM ("+
+		searchMessages(" AND RunId IN ("+strings.Join(restMarks, ",")+")")+") GROUP BY RunId HAVING countIf("+userText+") > 0", rest)
 }

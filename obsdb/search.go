@@ -174,9 +174,11 @@ func PromptPreview(s string) string {
 
 // MessageText is one message of a messages record body reduced to what
 // search reads: its role and the text of its text parts, joined by
-// "\n" (every part of type "text", an empty one included, in order).
+// "\n" (every part of type "text", an empty one included, in order),
+// and whether it carries a tool call (a part of type "tool_call").
 type MessageText struct {
 	Role, Text string
+	ToolCall   bool
 }
 
 // MessagesText reads a messages record body — a JSON array of
@@ -197,12 +199,16 @@ func MessagesText(body []byte) []MessageText {
 	out := make([]MessageText, len(msgs))
 	for i, m := range msgs {
 		var parts []string
+		call := false
 		for _, p := range m.Content {
-			if p.Type == "text" {
+			switch p.Type {
+			case "text":
 				parts = append(parts, p.Text)
+			case "tool_call":
+				call = true
 			}
 		}
-		out[i] = MessageText{Role: m.Role, Text: strings.Join(parts, "\n")}
+		out[i] = MessageText{Role: m.Role, Text: strings.Join(parts, "\n"), ToolCall: call}
 	}
 	return out
 }
@@ -211,10 +217,18 @@ func MessagesText(body []byte) []MessageText {
 // holds it. The input record (weft.messages.input: what the run was
 // fed — on a continued conversation the whole history, the turn's
 // question last) gives its last user message with non-empty text; any
-// other record its first. A run's prompt is its input record's when
-// that holds user text, else the lowest-index record's that does — so
-// a message steered in at a later step is never the prompt. A record
-// with no user text gives none.
+// other record its first. A record with no user text gives none.
+//
+// A run's prompt (TurnPrompt) is its input record's when that holds
+// one, else the lowest-index record's that does — so a message steered
+// in at a later step is never the prompt — with one exception, the
+// resume: an input record that ends at an assistant message carrying
+// tool calls was cut there by the core (core/loop.go), and what the run
+// was fed after that message — the rebuilt tool message, then a new
+// prompt if the resume carried one — is the next growth record (index
+// + 1). Its user text before its first assistant message is the turn's
+// prompt when there is any; a plain resume (Approve or Deny, no new
+// prompt) keeps the input record's.
 func PromptText(body []byte, input bool) (string, bool) {
 	msgs := MessagesText(body)
 	if input {
@@ -231,6 +245,26 @@ func PromptText(body []byte, input bool) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// TurnPrompt is a run's prompt from its input record and the record
+// at the next index (nil when none is stored): PromptText's resume rule
+// over the pair — the next record's first user text before its first
+// assistant message when the input record ends at an assistant message
+// with tool calls, else the input record's last user text.
+func TurnPrompt(input, next []byte) (string, bool) {
+	in := MessagesText(input)
+	if n := len(in); n > 0 && in[n-1].Role == "assistant" && in[n-1].ToolCall && next != nil {
+		for _, m := range MessagesText(next) {
+			if m.Role == "assistant" {
+				break
+			}
+			if m.Role == "user" && m.Text != "" {
+				return m.Text, true
+			}
+		}
+	}
+	return PromptText(input, true)
 }
 
 // LastAssistantText is the text of a body's last assistant message

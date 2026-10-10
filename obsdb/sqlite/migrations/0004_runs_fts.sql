@@ -4,11 +4,15 @@
 --
 -- run_search holds each run's two content search fields as the writer
 -- learned them from its messages records (transcript growth only, never
--- a compaction view): prompt, the turn's own — the input record's
--- (weft.messages.input) last user message with text, another record's
--- first (obsdb.PromptText) — with prompt_idx the messages index it came
--- from, the lowest winning (the input record is index 0; an earlier
--- record arriving late replaces a later one's), and answer, the text of the last
+-- a compaction view): prompt, the turn's own (obsdb.PromptText and
+-- TurnPrompt: the input record's last user message with text — or, on a
+-- resume whose input record ends at an assistant message with tool
+-- calls, the next record's user text before its first assistant
+-- message — else another record's first user text), with prompt_idx its
+-- rank, the lowest winning: an input record's candidate ranks at its
+-- index − 2^40, below every other record's (ranked at its index), and is
+-- re-resolved from the stored pair whenever it or its next record
+-- arrives, so the order the two arrive in does not matter; and answer, the text of the last
 -- assistant message with text (answer_idx likewise, the highest index
 -- wins). A run indexed for its error or tool names alone (content-off:
 -- no messages are stored) has a row with both empty. Its id is the

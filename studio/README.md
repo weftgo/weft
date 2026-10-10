@@ -976,6 +976,16 @@ same-origin responses, or cross-origin ones between two loopback
 origins) — `examples/studio-local`'s tag names no
 scope, and its first `/run` scopes the panel to `pub_demo` and pins
 that run.
+`scope.Header` also learns the page the request came from — its
+`Referer`, else its `Origin` + "/" — sanitised (http/https with a host
+only; userinfo, query and fragment dropped; a URL over 1024 bytes dropped
+whole, never cut) and stamps it as `weft.page_url` on every run the handler
+starts: it puts the pairs on the request's context with `weft.WithMetadata`,
+so `Generate` and thread's `Send` under `r.Context()` carry it with no option
+passed (a run's own `weft.Metadata` wins). `scope.PageURLFromContext(ctx)`
+reads it in the handler; `scope.PageURL(r)` applies the rule to any request.
+Studio's run row serves it in `meta`, and the run page's "open in app"
+returns to that page with `#weft_scope=`.
 
 ## The playground (WEFT-PLAYGROUND.md)
 
@@ -1679,6 +1689,18 @@ read or playground, is 403 before anything is looked up. A live stream
 following a deleted run emits nothing more unless the app keeps writing;
 a later write starts a new run row; a later read is 404),
 `POST /api/panel-tokens`
+`GET /api/panel-handoff?to=<path>` (capability `handoff`; registered only
+with a `Token`, else `capabilities_off.handoff` says why): setup C's "open in
+Studio". A playground-scoped panel token gets a 303 to `<base><to>#token=<t>`,
+where `t` is a read-scoped panel token for the same public id, signed like
+`/api/panel-tokens`'s, expiring in 5 minutes or at the asking token's own
+expiry if sooner, logged as a hand-off without the token; `Accept:
+application/json` gets the same as `{"location","exp"}` for a fetch. The
+server token gets the 303 with no fragment. A read-scoped panel token is 403:
+it cannot widen, and its page links to Studio directly. `to` must be a path
+under the base — a single leading `/`, no scheme, host, fragment, backslash,
+white space or `.`/`..` segment (raw or `%2e`) — else 400: never an open
+redirect.
 
 (mint; the panel's scoped tokens — see the devtools panel above), and
 `GET /api/live` — the SSE

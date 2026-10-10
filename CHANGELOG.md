@@ -10,6 +10,19 @@ module, ADR 0005).
 
 ### Added
 
+- core: `WithMetadata(ctx, kv)` — context-carried run metadata: every run
+  started under ctx carries the pairs, merged under its own `weft.Metadata`
+  (the option wins; same limits; subagents inherit).
+- `scope.Header` stamps `weft.page_url` (plan G3) — the request's Referer,
+  else Origin + "/", sanitised — on every run under the handler through
+  `weft.WithMetadata`; `scope.PageURL`, `scope.PageURLFromContext`,
+  `scope.PageURLKey`. Studio's run meta serves it.
+- `GET /api/panel-handoff?to=<path>` (plan G3, capability `handoff`, with a
+  Token only): a playground-scoped panel token → 303 `<base><to>#token=` with
+  a 5-minute read-scoped token for its public id (capped at its own expiry;
+  `Accept: application/json` → `{location, exp}`); the server token → 303
+  with no fragment; a read token 403 (it cannot widen); `to` a path under the
+  base, else 400 — never an open redirect. Logged without the token.
 - Studio's run page scrolls a long run (plan H2): past 60 steps the story
   is virtualised (`@tanstack/react-virtual` 3.14.13, pinned), and past 200
   rows the waterfall and the raw events table are too — only the rows in

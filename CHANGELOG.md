@@ -393,10 +393,36 @@ module, ADR 0005).
   does; `stepPosition` is gone, `readStep` replaces it), and its token-scope reading is
   `lib/replay.ts`'s `tokenScopeOf` (one reading for both surfaces).
 - **The panel's ↻ Re-run no longer posts at once**: it opens the drawer
-  on the whole turn (the `rerun()` draft, the drawer's current edits
-  kept) with the ack preview; the command is posted by Run, as every
+  on the whole turn (the `rerun()` draft: the drawer's prompt, tools
+  and model kept, its transcript edits dropped) with the ack preview; the command is posted by Run, as every
   verb's. Escape on a drawer control closes the drawer and returns focus
   to the verb that opened it, instead of collapsing the panel.
+
+### Fixed — the devtools panel (phase 4 review)
+
+- **One preview per resting draft**: typing in the drawer posted one
+  `POST /api/playground/preview` per keystroke; a superseded debounce now
+  posts nothing.
+- **Edits are never dropped silently**: a draft holding transcript edits
+  at from_step 0 is refused with a line that holds Run, on both surfaces
+  (`lib/edits.ts`'s `editsProblem`, through Studio's `buildRunBody` too);
+  a thread switched fork → ephemeral returns to the step its edits
+  imply, and ↻ Re-run drops the edits (its title says what it keeps).
+- **An editor's refusal belongs to its drawer**: the editor's state is
+  keyed by run and cleared when the drawer closes, is replaced or the
+  conversation changes, so a stale refusal no longer holds Run elsewhere;
+  the first edit opens its editor once the drawer is there, so nothing
+  typed is lost while `/api/runtimes` answers.
+- **A steer's replay verb sits beside its editable note**, never inside
+  it (axe's nested-interactive; the a11y budget runs the steer fixture).
+- **"compare in Studio" carries the option lab and the transcript
+  edits** (`lab=` and `edits=` in the fragment; Studio's playground
+  adopts them), so the same experiment opens as the same command.
+- **The compacted-view pre-check is re-asked after a failed
+  `transcript?step` read** and forgotten on a scope change; **the step
+  compare draws a thin diff** (no steps, a side without its request
+  record) without a throw. Panel: +351 B gzip (ledger row "review fixes
+  (session 8)").
 
 ### Changed — breaking
 

@@ -639,6 +639,7 @@ export class PanelModel {
     this.pinTimer = null // clearTimers above dropped it
     this.userSelected = false
     this.compareWords.clear()
+    this.asOf.clear()
     this.emit()
     // Subscribe before the list is fetched: a run frame that lands
     // during the fetch is newer than the page and is applied over it
@@ -1667,7 +1668,7 @@ export class PanelModel {
           this.asOf.set(at, doc.compacted_at)
           this.emit()
         },
-        quiet
+        () => this.asOf.delete(at)
       )
     }
     if (!d || d.thread === "fork" || !(this.state.meta?.capabilities.includes("preview") ?? false)) {
@@ -1682,6 +1683,7 @@ export class PanelModel {
     if (!was) this.emit()
     const left = () => this.disposed || seq !== this.pvSeq
     this.after(PREVIEW_MS, () => {
+      if (left()) return
       void postPreview(this.ep, buildRunBody(d, this.publicId)).then(
         (doc) => !left() && this.setPreview({ doc }),
         (err: unknown) => !left() && this.setPreview({ error: messageOf(err), refused: err instanceof PanelApiError && err.status === 400 })
@@ -1719,10 +1721,10 @@ export class PanelModel {
     // The drawer open on this turn: its edits (prompt, tools, model,
     // modes) kept, reshaped as the rerun() draft — from step 0,
     // ephemeral, no input (the source turn's own, as Studio's rerun
-    // sends none) — and the ack preview drawn again before anything is
-    // posted.
+    // sends none), no transcript edits (step 0 keeps nothing to edit) —
+    // and the ack preview drawn again before anything is posted.
     const r = rerunDraft()
-    this.state.drawer = { ...d, verb: r.verb, step: r.fromStep, thread: r.thread, input: r.input }
+    this.state.drawer = { ...d, verb: r.verb, step: r.fromStep, thread: r.thread, input: r.input, edits: r.edits }
     this.schedulePreview()
     this.emit()
   }

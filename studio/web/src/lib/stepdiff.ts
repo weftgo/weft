@@ -126,11 +126,16 @@ export const CELL_REASONS: Record<CellState, string> = {
   missing: "one run has no such step",
 }
 
+/** list reads a list the response may have left out (a thin row, a
+ * side with no request record) as none: never a throw. */
+const list = <T>(v: T[] | undefined): T[] => v ?? []
+
 /** cellOf reads one column of one row as the server compared it. */
 export function cellOf(row: DiffRowDoc, col: DiffColumn): CellState {
-  if (!row.a || !row.b || row.changes.includes("missing")) return "missing"
-  if (row.unknown.includes(col)) return "unknown"
-  if (row.changes.includes(col)) return "changed"
+  const changes = list(row.changes)
+  if (!row.a || !row.b || changes.includes("missing")) return "missing"
+  if (list(row.unknown).includes(col)) return "unknown"
+  if (changes.includes(col)) return "changed"
   return "same"
 }
 
@@ -169,7 +174,7 @@ export function markChip(mark: string): MarkChip {
 /** sideHoles is a side's holes as badges: the server's words, in the
  * table's order. */
 export function sideHoles(side: DiffSide | null): HoleMark[] {
-  return side ? mergeHoles(side.holes) : []
+  return side ? mergeHoles(list(side.holes)) : []
 }
 
 /** docHoles is the response's own holes: a truncated diff is the
@@ -200,7 +205,7 @@ function argsText(args: unknown): string {
  * token (a read-scoped panel token: system null under hidden). Its
  * hash still compares, so the cell keeps the server's state. */
 export function systemHidden(side: DiffSide | null): boolean {
-  return !!side && side.system === null && side.holes.some((h) => h.hole === "hidden")
+  return !!side && side.system == null && list(side.holes).some((h) => h.hole === "hidden")
 }
 
 /** cellHole is the hole a compared cell carries beside its state: the
@@ -219,20 +224,20 @@ export function cellText(side: DiffSide | null, col: DiffColumn): string {
   if (!side) return "—"
   switch (col) {
     case "system":
-      if (side.system !== null) return side.system ? clip(side.system) : "(empty)"
+      if (side.system != null) return side.system ? clip(side.system) : "(empty)"
       if (systemHidden(side)) return HOLES.hidden.label
       return side.system_hash ? `#${side.system_hash.slice(0, 8)}` : "—"
     case "tool_calls":
-      return side.tool_calls.length ? clip(side.tool_calls.map((c) => `${c.name}(${argsText(c.args)})`).join(", ")) : "(none)"
+      return list(side.tool_calls).length ? clip(side.tool_calls.map((c) => `${c.name}(${argsText(c.args)})`).join(", ")) : "(none)"
     case "tool_results":
-      return side.tool_results.length
+      return list(side.tool_results).length
         ? clip(side.tool_results.map((r) => `${r.is_error ? "error: " : ""}${r.content}`).join(" · "))
         : "(none)"
     case "text":
       if (side.text === null) return "—"
       return side.text ? clip(side.text) : "(none)"
     case "usage":
-      return `${side.usage.input_tokens}→${side.usage.output_tokens}`
+      return (side.usage as Usage | undefined) ? `${side.usage.input_tokens}→${side.usage.output_tokens}` : "—"
   }
 }
 
@@ -286,7 +291,7 @@ function cellsOf(row: DiffRowDoc): Record<DiffColumn, CellState> {
 
 /** stepDiffView reads one response into the rows a renderer draws. */
 export function stepDiffView(doc: DiffDoc): StepDiffView {
-  const rows = [...doc.steps]
+  const rows = [...list(doc.steps)]
     .sort((x, y) => x.step - y.step)
     .map((r): StepRowView => {
       const cells = cellsOf(r)

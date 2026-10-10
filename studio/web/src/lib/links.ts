@@ -178,6 +178,11 @@ export interface PlaygroundHandoff {
   thread?: "ephemeral" | "fork"
   agent?: string
   runtime?: string
+  /** The option lab's set knobs, JSON (lib/experiment-body.ts's
+   * labHandoff). */
+  lab?: string
+  /** The transcript edits, JSON (editsHandoff). */
+  edits?: string
 }
 
 export interface PlaygroundSearch {

@@ -49,6 +49,8 @@ import { diffLines, diffSummary } from "@/lib/diff"
 import type { DiffRow } from "@/lib/diff"
 import {
   buildRunBody,
+  editsFromHandoff,
+  labFromHandoff,
   labProblems,
   overridesOf,
   pickTarget,
@@ -110,6 +112,10 @@ interface PlaygroundSearch {
   /** The runtime to send the command to (default: one registering
    * the agent). */
   runtime?: string
+  /** The option lab and the transcript edits, JSON (the panel's
+   * hand-off: lib/experiment-body.ts's labHandoff / editsHandoff). */
+  lab?: string
+  edits?: string
   /** A saved experiment to point at in the history (lib/links.ts's
    * experimentLink). */
   experiment?: string
@@ -155,6 +161,8 @@ function parseHandoff(search: Record<string, unknown>): PlaygroundSearch {
         : undefined,
     agent: str(search.agent),
     runtime: str(search.runtime),
+    lab: str(search.lab),
+    edits: str(search.edits),
     experiment: str(search.experiment),
   }
 }
@@ -305,6 +313,7 @@ function variantA(search: PlaygroundSearch): Variant {
     engine: search.engine ?? "live",
     sideEffects: search.side_effects ?? "substitute",
     thread: search.thread ?? "ephemeral",
+    lab: labFromHandoff(search.lab),
     result: null,
   }
 }
@@ -337,7 +346,7 @@ function Playground({ caps }: { caps: string[] }) {
   /** The kept prefix's edits (review fix 4b): patched tool results and
    * rewritten call-free replies — the counterfactual the fresh step
    * answers. Source-shaped, not variant-shaped, so they live here. */
-  const [editDrafts, setEditDrafts] = useState<EditDraft[]>([])
+  const [editDrafts, setEditDrafts] = useState<EditDraft[]>(() => editsFromHandoff(search.edits))
 
   // The target (§4's header): the source run's own agent on a runtime
   // that registers it — an app with several agents (any app with a

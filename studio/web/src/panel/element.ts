@@ -26,7 +26,7 @@ import type { CatalogTool, ReplayDraft } from "../lib/replay"
 import { checkArgs, editable, editKey, FORK_EDITS, impliedFromStep, kindOf, putEdit, schemaOf, userMessagesOf } from "../lib/edits"
 import type { ReplayEdit, UserMessage } from "../lib/edits"
 import { editList, marksBlock, previewBlock } from "./editor"
-import { compactedRefusal, emptyLab, LAB_LABELS, LAB_NEW, LAB_NUMBERS, LAB_PREDATES, labDefault, labLacksDefaults, labOn, replayBounds } from "../lib/experiment-body"
+import { compactedRefusal, editsHandoff, emptyLab, LAB_LABELS, LAB_NEW, LAB_NUMBERS, LAB_PREDATES, labDefault, labHandoff, labLacksDefaults, labOn, replayBounds } from "../lib/experiment-body"
 import type { LabFields } from "../lib/experiment-body"
 import { ackCatalogHole, badge, capLine, catalogCapped, catalogNotRecorded, catalogNotStored, catalogReadError, cutBadge, holeBadges, holeLine, noPublicIdWords, requestCapped, requestHole, turnChips } from "./badges"
 import { fetchSessionPublicId, MAX_REQUEST_PAGES, PanelApiError, panelGet, REQUEST_PAGE } from "./client"
@@ -1884,6 +1884,7 @@ export class WeftDevtools extends HTMLElement {
 
   private draw(s: PanelState) {
     const root = this.body
+    this.edSync(s.drawer?.key)
     // Build first, swap second: a throw while building leaves the dock
     // as it was.
     const next: Node[] = []
@@ -2674,6 +2675,13 @@ export class WeftDevtools extends HTMLElement {
    * field — the text is stale and the field follows the command. */
   private edText = new Map<string, { text: string; put: string }>()
   private edErr = new Map<string, string>()
+  /** The drawer opening the three maps belong to: another (or none)
+   * clears them, so a refusal never holds an unrelated drawer's Run. */
+  private edKey?: number
+  private edSync(key: number | undefined, always = false) {
+    if (always || key !== this.edKey) for (const m of [this.edOpen, this.edText, this.edErr]) m.clear()
+    this.edKey = key
+  }
 
   /** edCtx is the editor for a turn: the playground's verbs, a turn
    * that is over, its transcript read (the server's bounds). */
@@ -2691,10 +2699,12 @@ export class WeftDevtools extends HTMLElement {
   }
 
   private edBox(s: PanelState, t: TurnView, target: ReplayEdit, recorded: string, shown: HTMLElement, label: string, tool: string): HTMLElement {
-    const key = editKey(target)
+    const ek = editKey(target)
+    // By run too: wefttest's call ids (c1) repeat across runs.
+    const key = `${t.id}|${ek}`
     const k = kindOf(target)
     const d = s.drawer?.runId === t.id ? s.drawer : null
-    const cur = d?.edits.find((e) => editKey(e) === key)
+    const cur = d?.edits.find((e) => editKey(e) === ek)
     const err = this.edErr.get(key)
     const held = `${cur ? JSON.stringify(cur) : ""}\u0000${err ?? ""}`
     const mem = this.edText.get(key)
@@ -2705,11 +2715,18 @@ export class WeftDevtools extends HTMLElement {
     if (!this.edOpen.has(key) && !cur && !err) {
       const open = (e: Event) => {
         e.stopPropagation()
-        this.edOpen.add(key)
-        this.focusNext = `ed:${key}`
-        // The drawer opens with the editor: the edits are its command's.
-        if (!d) this.go(this.model?.openExperiment(t.id, editTranscript(impliedFromStep([target])), { under: t.id }))
-        this.render(this.last)
+        const go = () => {
+          const nd = this.model?.state.drawer
+          if (nd?.runId !== t.id) return
+          this.edSync(nd.key)
+          this.edOpen.add(key)
+          this.focusNext = `ed:${ek}`
+          this.render(this.last)
+        }
+        // The editor opens once the drawer is there: the edits are its
+        // command's, and nothing typed lands before it.
+        if (d) go()
+        else this.go(this.model?.openExperiment(t.id, editTranscript(impliedFromStep([target])), { under: t.id }).then(go))
       }
       shown.setAttribute("data-weft-editable", k)
       shown.setAttribute("role", "button")
@@ -2726,7 +2743,7 @@ export class WeftDevtools extends HTMLElement {
       })
       return shown
     }
-    const box = el("div", "weft-ed", undefined, { "data-weft-ed": k, "data-key": `ed:${key}` })
+    const box = el("div", "weft-ed", undefined, { "data-weft-ed": k, "data-key": `ed:${ek}` })
     const head = el("div", "weft-call-h", [el("span", "weft-name", k === "insert" ? "inserted · user" : `edit · ${label}`)])
     if (cur) head.appendChild(el("span", "weft-badge weft-err", k === "insert" ? "inserted" : "edited", { "data-weft-edited": "" }))
     const rv = el("button", "weft-btn", "revert", { type: "button", "aria-label": `revert ${label}` })
@@ -2739,7 +2756,7 @@ export class WeftDevtools extends HTMLElement {
     })
     head.appendChild(rv)
     box.appendChild(head)
-    const ta = this.field(el("textarea", "weft-input", undefined, { "aria-label": `edit ${label}` }) as HTMLTextAreaElement, `ed:${key}`)
+    const ta = this.field(el("textarea", "weft-input", undefined, { "aria-label": `edit ${label}` }) as HTMLTextAreaElement, `ed:${ek}`)
     ta.rows = k === "tool_args" ? 4 : 2
     ta.value = this.edText.get(key)?.text ?? (cur ? (k === "tool_args" ? JSON.stringify(cur.args, null, 2) : (cur.toolResult ?? cur.content ?? "")) : recorded)
     if (err) ta.setAttribute("aria-invalid", "true")
@@ -2811,7 +2828,7 @@ export class WeftDevtools extends HTMLElement {
     // prefix runs on engine live (the scripted turns answered the
     // recorded prompt).
     const list = editList(d.edits, (e) => {
-      const k = editKey(e)
+      const k = `${d.runId}|${editKey(e)}`
       this.edOpen.delete(k)
       this.edText.delete(k)
       this.edErr.delete(k)
@@ -3003,8 +3020,9 @@ export class WeftDevtools extends HTMLElement {
     thrSel.title = "fork continues the conversation in a new session (needs an input)"
     on(thrSel, "change", (_, n) => {
       const thread = (n as HTMLSelectElement).value as ExperimentDraft["thread"]
-      // A fork continues the conversation: it starts at step 0.
-      this.model?.setDraft(thread === "fork" ? { thread, step: 0 } : { thread })
+      // A fork continues the conversation: it starts at step 0; back to
+      // ephemeral, the step the edits imply returns.
+      this.model?.setDraft({ thread, step: thread === "fork" ? 0 : Math.max(d.step, impliedFromStep(d.edits)) })
     })
     seRow.appendChild(thrSel)
     body.appendChild(seRow)
@@ -3247,9 +3265,6 @@ export class WeftDevtools extends HTMLElement {
   private closeDrawer() {
     const back = this.opener
     this.opener = null
-    this.edOpen.clear()
-    this.edText.clear()
-    this.edErr.clear()
     this.model?.closeExperiment()
     if (back?.isConnected) back.focus({ preventScroll: true })
   }
@@ -3695,8 +3710,9 @@ export class WeftDevtools extends HTMLElement {
   }
 
   /** actions is §3's row: ✎ Experiment (the drawer), ↻ Re-run (the
-   * drawer as the rerun() draft — the whole turn, its current edits
-   * kept — posted only by Run after the ack preview), ⎇ Continue from
+   * drawer as the rerun() draft — the whole turn, its prompt, tools and
+   * model kept, its transcript edits dropped — posted only by Run after
+   * the ack preview), ⎇ Continue from
    * the step being read. */
   private actions(s: PanelState): HTMLElement {
     const t = s.turn
@@ -3708,9 +3724,12 @@ export class WeftDevtools extends HTMLElement {
     on(experiment, "click", () => this.go(this.model?.openExperiment(t.id, 0)))
     row.appendChild(experiment)
     const again = el("button", "weft-btn", "↻ Re-run", {
-      title: "re-run the whole turn: the drawer from step 0, with its current edits — Run after the ack",
+      title: "re-run the whole turn from step 0: the drawer keeps its prompt, tools and model, drops transcript edits — Run after the ack",
     })
-    on(again, "click", () => this.go(this.model?.rerun(t.id)))
+    on(again, "click", () => {
+      this.edSync(this.edKey, true)
+      this.go(this.model?.rerun(t.id))
+    })
     row.appendChild(again)
     // The step being read, by its ordinal (from_step's count).
     const from = readStep(t.folded, s.selectedStep)
@@ -4312,9 +4331,12 @@ function renderStep(
     // fresh (none after it: nothing to replay).
     const next = step.index + 1
     const max = ctx?.replay?.max
+    // The verbs beside the note, never inside it: an editable note is
+    // a button itself (the call head's rule).
+    const row = el("div", undefined, [u && ctx?.edit ? ctx.edit.box({ kind: "user", step: u.step, index: u.index }, words, note, `the steer after step ${step.index}`) : note])
     if (ctx?.replay && max != null && next <= max)
-      note.appendChild(verbs("steer", [verb(`replay from this steer (step ${next} runs fresh)`, "↦", replayFromStep(next), ctx.replay)]))
-    body.appendChild(u && ctx?.edit ? ctx.edit.box({ kind: "user", step: u.step, index: u.index }, words, note, `the steer after step ${step.index}`) : note)
+      row.appendChild(verbs("steer", [verb(`replay from this steer (step ${next} runs fresh)`, "↦", replayFromStep(next), ctx.replay)]))
+    body.appendChild(row)
   }
   for (const call of step.toolCalls) body.appendChild(renderCall(call, step.index, runStatus, t, open, ctx))
   card.appendChild(body)
@@ -4656,6 +4678,9 @@ export function studioPlaygroundLink(
     // …and who runs it: the agent and the runtime the drawer opened on.
     if (draft.agent) p.agent = draft.agent
     if (draft.runtimeId) p.runtime = draft.runtimeId
+    // …and the option lab and the edits: the same command, not a cousin.
+    p.lab = labHandoff(draft.lab)
+    p.edits = editsHandoff(draft.edits)
   }
   return href(endpoint, playgroundLink(p))
 }

@@ -4,7 +4,7 @@
 // Studio UI posts the same body to the same endpoint (V6).
 import type { AgentDefaults, Message, Part, PosEvent, RunRow, Transcript } from "../lib/api"
 import { labOverrides } from "../lib/experiment-body"
-import { wireEdits } from "../lib/edits"
+import { editsProblem, wireEdits } from "../lib/edits"
 import type { ReplayEdit } from "../lib/edits"
 import type { LabFields } from "../lib/experiment-body"
 import { splitTranscript, turnPrompt } from "../lib/events"
@@ -231,7 +231,7 @@ export function draftProblem(draft: ExperimentDraft): string | null {
   const names = Object.keys(draft.tools)
   if (names.length && !names.some((n) => draft.tools[n]))
     return "at least one tool must stay on — the command cannot express an empty tool set (it would run with every tool)"
-  return labOf(draft).problems[0]?.message ?? null
+  return editsProblem(draft.thread, draft.step, draft.edits) || (labOf(draft).problems[0]?.message ?? null)
 }
 
 /** labOf is the drawer's option lab through Studio's labOverrides: the

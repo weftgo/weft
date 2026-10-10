@@ -2,6 +2,7 @@
 // ids as one encoded segment, and never a token in a link.
 import { describe, expect, it } from "vitest"
 
+import { editsFromHandoff, editsHandoff, emptyLab, labFromHandoff, labHandoff } from "./experiment-body"
 import {
   canonical,
   compareLink,
@@ -126,6 +127,24 @@ describe("the other builders", () => {
       new URL(href(BASE, playgroundLink({ run: "r", step: -1, model: "" })))
         .hash
     ).toBe("#run=r")
+  })
+
+  it("the option lab and the transcript edits round-trip through the fragment (review fix 7)", () => {
+    const lab = { ...emptyLab(), max_steps: "6", stop: "END\nSTOP", park_on: ["refund"], tool_choice: "named" as const, tool_choice_name: "lookup" }
+    const edits = [
+      { kind: "tool_args" as const, step: 0, callID: "c1", args: { q: "c9" } },
+      { step: 1, callID: "c2", toolResult: "policy: none & more" },
+    ]
+    const u = new URL(href(BASE, playgroundLink({ run: "r_1", step: 2, lab: labHandoff(lab), edits: editsHandoff(edits) })))
+    const p = new URLSearchParams(u.hash.slice(1))
+    expect(labFromHandoff(p.get("lab") ?? undefined)).toEqual(lab)
+    expect(editsFromHandoff(p.get("edits") ?? undefined)).toEqual(edits)
+    // Unset is not carried; junk reads as nothing.
+    expect(labHandoff(emptyLab())).toBeUndefined()
+    expect(editsHandoff([])).toBeUndefined()
+    expect(labFromHandoff("{nope")).toBeUndefined()
+    expect(labFromHandoff('{"max_steps": 6, "x": "1"}')).toBeUndefined()
+    expect(editsFromHandoff('[{"step": -1}, null, {"step": 2, "content": "x"}]')).toEqual([{ step: 2, content: "x" }])
   })
 
   it("experimentLink is the saved experiment in the playground's history", () => {

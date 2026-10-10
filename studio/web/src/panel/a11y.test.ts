@@ -20,7 +20,7 @@ import { baseRoutes, DIFF_META, fakeStudio, META, mount, page, runEvents, runExp
 import type { Route } from "./testkit"
 import { FILTER_MS } from "./tree"
 import type { WeftDevtools } from "./element"
-import { EDIT_META, editRoutes, REPLAY_META, replayRoutes } from "./replaykit"
+import { EDIT_META, editRoutes, REPLAY_META, replayRoutes, RUN, steerBodies, steerEvents } from "./replaykit"
 
 beforeEach(() => {
   setup()
@@ -171,6 +171,20 @@ async function transcriptEditor(el: WeftDevtools) {
   await settle(400) // the preview's debounce
 }
 
+/** Review fix 5: editable steers beside their replay verb (never
+ * nested), and a tool result's editor open. */
+function steerRoutes(): Record<string, Route> {
+  const r = editRoutes()
+  r[`runs/${RUN}/events?after=0&limit=500`] = page(steerEvents)
+  r[`runs/${RUN}/transcript`] = transcript(...steerBodies)
+  return r
+}
+async function resultEditor(el: WeftDevtools) {
+  ;(el.shadowRoot!.querySelector('.weft-call[data-key="c2"] [data-weft-editable="tool_result"]') as HTMLElement).click()
+  await settle()
+  expect(el.shadowRoot!.querySelector('[data-key="steer"][data-weft-editable="user"] button')).toBeNull()
+}
+
 const MODES: { name: string; width: number; attrs: Record<string, string>; sel: string; act?: (el: WeftDevtools) => Promise<void>; routes?: () => Record<string, Route>; meta?: unknown }[] = [
   { name: "float, open", width: 1024, attrs: { "data-open": "true" }, sel: ".weft-dock.weft-float" },
   { name: "docked right", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: ".weft-dock.weft-docked" },
@@ -185,6 +199,7 @@ const MODES: { name: string; width: number; attrs: Record<string, string>; sel: 
   { name: "the experiment's step compare: markers, the table, marks and badges", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: '[data-weft-step-diff] table [data-hole="hidden"]', act: runExperiment, routes: () => stepDiffRoutes(golden("diff-hidden")), meta: DIFF_META },
   { name: "the option lab: defaults, an override, a refusal, the named tool picker", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: '.weft-drawer [data-weft-lab-problem="max_steps"]', act: optionLab, routes: labRoutes },
   { name: "the transcript editor: an edit, a refusal, the edit list and the preview", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: ".weft-drawer [data-weft-preview-op]", act: transcriptEditor, routes: editRoutes, meta: EDIT_META },
+  { name: "editable steers with their verb, a result's editor open", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: 'textarea[data-weft-k="ed:tool_result:1:c2:0"]', act: resultEditor, routes: steerRoutes, meta: EDIT_META },
   { name: "badges, the cap line and the chips", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: '[data-weft-chip="fork"]', act: badgesDrawn, routes: badgeRoutes },
 ]
 

@@ -7,7 +7,7 @@ import type { AgentDefaults, AgentView, Message, PlaygroundRunBody, RuntimeView,
 import { placeBatches } from "@/lib/events"
 import { endsInAnsweredCalls, maxFromStep, transcriptStepCount } from "@/lib/replay"
 import type { TranscriptBatch } from "@/lib/events"
-import { kindOf, wireEdits } from "@/lib/edits"
+import { editsProblem, kindOf, wireEdits } from "@/lib/edits"
 import type { ReplayEdit } from "@/lib/edits"
 
 export type Engine = "live" | "scripted"
@@ -132,6 +132,8 @@ export function buildRunBody(opts: {
     throw new Error(
       "fork continues the conversation in a new session: it needs a source run, an input, and step 0"
     )
+  const held = editsProblem(variant.thread, fromStep, opts.edits)
+  if (held) throw new Error(held)
   const body: PlaygroundRunBody = {
     runtime: opts.runtime,
     agent: opts.agent.name,
@@ -469,6 +471,49 @@ export interface LabProblem {
  * then the server's 400 is the one that says so, shown verbatim. */
 export function labLacksDefaults(agent: Pick<AgentView, "defaults">): boolean {
   return !agent.defaults?.tool_choice.mode
+}
+
+/** The hand-off's lab= and edits= (the panel's "compare in Studio",
+ * lib/links.ts): the lab's set knobs and the edit list as JSON, so the
+ * same experiment opens in Studio as the same command. */
+export function labHandoff(lab: LabFields | undefined): string | undefined {
+  const set = Object.entries(lab ?? {}).filter(([, v]) => (v as string | string[]).length)
+  return set.length ? JSON.stringify(Object.fromEntries(set)) : undefined
+}
+export const editsHandoff = (list: ReplayEdit[]): string | undefined => (list.length ? JSON.stringify(list) : undefined)
+
+function parseJSON(s: string | undefined): unknown {
+  try {
+    return s ? JSON.parse(s) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** labFromHandoff reads lab= back: known knobs of the right shape
+ * only; nothing usable is no lab. */
+export function labFromHandoff(s: string | undefined): LabFields | undefined {
+  const o = parseJSON(s)
+  if (!o || typeof o !== "object" || Array.isArray(o)) return undefined
+  const lab = emptyLab() as unknown as Record<string, unknown>
+  let any = false
+  for (const [k, want] of Object.entries(lab)) {
+    const v = (o as Record<string, unknown>)[k]
+    if (Array.isArray(want) ? Array.isArray(v) && v.every((x) => typeof x === "string") : typeof v === "string") {
+      lab[k] = v
+      any = true
+    }
+  }
+  return any ? (lab as unknown as LabFields) : undefined
+}
+
+/** editsFromHandoff reads edits= back: each an object with a step
+ * ordinal; the server stays the authority on the rest. */
+export function editsFromHandoff(s: string | undefined): ReplayEdit[] {
+  const o = parseJSON(s)
+  return Array.isArray(o)
+    ? o.filter((e): e is ReplayEdit => !!e && typeof e === "object" && Number.isInteger((e as ReplayEdit).step) && (e as ReplayEdit).step >= 0)
+    : []
 }
 
 /** labDefault is the agent's default for a knob as the form shows it,

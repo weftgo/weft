@@ -79,6 +79,15 @@ export function editable(target: ReplayEdit, max: number | null): boolean {
 export const FORK_EDITS =
   "transcript edits belong to an ephemeral replay; a fork starts at step 0 — switch thread to ephemeral or drop the edits"
 
+/** editsProblem holds Run while a draft's edits cannot travel: they go
+ * only with from_step > 0, so a draft at step 0 is refused, never sent
+ * without them (both surfaces). */
+export function editsProblem(thread: string, step: number, edits: ReplayEdit[] | undefined): string | null {
+  return edits?.length && step === 0
+    ? thread === "fork" ? FORK_EDITS : "transcript edits need from_step ≥ 1 (step 0 keeps nothing to edit) — pick a later step or drop the edits"
+    : null
+}
+
 /** The edit's line in the drawer's list: its kind and its place. */
 export function editLine(e: ReplayEdit): string {
   const k = kindOf(e)

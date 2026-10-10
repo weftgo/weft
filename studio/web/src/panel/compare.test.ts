@@ -6,6 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { golden } from "../test/fake-studio"
 import type { PanelState } from "./state"
 import { $, all, DIFF_META, fakeStudio, META, mount, runExperiment, setup, stepDiffRoutes, teardown, text } from "./testkit"
+import { stepDiffBlock } from "./compare"
+import type { DiffDoc, DiffSide } from "../lib/stepdiff"
 
 beforeEach(setup)
 afterEach(teardown)
@@ -123,5 +125,32 @@ describe("the result pane's step compare", () => {
     expect(text(el, ".weft-xres")).toContain("It is delayed until Friday.")
     expect(studio.gets("diff")).toHaveLength(0)
     expect($(el, "[data-weft-step-diff]")).toBeNull()
+  })
+})
+
+describe("a compare the response left thin (review 9)", () => {
+  const run = (run_id: string) => ({ run_id, steps: 1, status: "succeeded" })
+  it("steps: [] draws an empty table and no marker; no throw", () => {
+    const box = stepDiffBlock({ a: run("a1"), b: run("b1"), steps: [], summary: { changed_steps: [], first_changed: null }, holes: [] }, "http://studio.test/studio/")
+    expect(box.querySelectorAll("tbody tr")).toHaveLength(0)
+    expect(box.querySelector("[data-weft-diff-marker]")).toBeNull()
+    expect(box.querySelector(".weft-diff-h")!.textContent).toContain("no step changed of 0")
+  })
+  it("a side with no request record, steps/marks/holes/changes absent: cells and words, no throw", () => {
+    // The fields a side or row may lack on the wire (a run whose request record was never written).
+    const thin = { status: "succeeded", system: null } as unknown as DiffSide
+    const doc = {
+      a: run("a1"),
+      b: run("b1"),
+      steps: [{ step: 0, changed: true, a: thin, b: { ...thin, holes: [{ hole: "not_recorded" }] }, changes: ["system"] }],
+    } as unknown as DiffDoc
+    const box = stepDiffBlock(doc, "http://studio.test/studio/")
+    const sys = box.querySelector('[data-weft-diff-cell="system"]')!
+    expect(sys.getAttribute("data-state")).toBe("changed")
+    expect(sys.textContent).toContain("a —")
+    expect(box.querySelector('[data-weft-diff-cell="usage"]')!.getAttribute("data-state")).toBe("same")
+    expect(box.querySelectorAll("[data-weft-diff-marker]")).toHaveLength(1)
+    const noSteps = stepDiffBlock({ a: run("a1"), b: run("b1") } as unknown as DiffDoc, "http://studio.test/studio/")
+    expect(noSteps.querySelectorAll("tbody tr")).toHaveLength(0)
   })
 })

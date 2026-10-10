@@ -6,7 +6,7 @@
 // Studio hand-off (P2-17), and every refusal surfacing as words.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { tokenScope } from "./config"
-import { buildRunBody as studioBody } from "../lib/experiment-body"
+import { buildRunBody as studioBody, editsFromHandoff, emptyLab, labFromHandoff } from "../lib/experiment-body"
 import { rerun as rerunDraft } from "../lib/replay"
 import { readStep, studioPlaygroundLink } from "./element"
 import { pickRuntime } from "./playground"
@@ -804,6 +804,17 @@ describe("the Studio hand-off (P2-17)", () => {
     expect(plain.hash).toBe("#run=s_01-t2&instructions=changed&agent=acme-support&runtime=rt_01")
     expect(u.get("agent")).toBe("acme-support")
     expect(u.get("runtime")).toBe("rt_01")
+  })
+
+  it("carries the option lab and the transcript edits: the same command opens in Studio (review fix 7)", () => {
+    const lab = { ...emptyLab(), max_steps: "3", only_tools: ["refund"] }
+    const edits = [{ step: 1, callID: "c2", toolResult: "none" }]
+    const u = handoff(studioPlaygroundLink("http://studio.test/studio/", { ...draft, thread: "ephemeral", step: 2, lab, edits }, 2))
+    expect(labFromHandoff(u.get("lab") ?? undefined)).toEqual(lab)
+    expect(editsFromHandoff(u.get("edits") ?? undefined)).toEqual(edits)
+    expect(u.has("lab") || u.has("edits")).toBe(true)
+    const bare = handoff(studioPlaygroundLink("http://studio.test/studio/", draft, null))
+    expect(bare.has("lab") || bare.has("edits")).toBe(false)
   })
 
   it("a prompt too long for a request line still hands off whole (the fragment never reaches a server)", () => {

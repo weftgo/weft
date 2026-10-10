@@ -247,9 +247,11 @@ describe("the command body (§5.1, §10.4)", () => {
 
   it("sends input only for a whole-turn run, edits only for a continued one", () => {
     const edits = [{ step: 0, callID: "c1", toolResult: "429" }]
-    const whole = buildRunBody({ ...base, variant, input: "where is #4411?", edits })
+    const whole = buildRunBody({ ...base, variant, input: "where is #4411?" })
     expect(whole.input).toBe("where is #4411?")
     expect(whole.transcript_edits).toBeUndefined()
+    // Edits at from_step 0 are refused, never sent without them (lib/edits.ts's editsProblem).
+    expect(() => buildRunBody({ ...base, variant, input: "where is #4411?", edits })).toThrow(/from_step ≥ 1/)
     const cont = buildRunBody({ ...base, variant, fromStep: 2, input: "ignored", edits })
     expect(cont.input).toBeUndefined() // 400 otherwise: input with from_step > 0
     expect(cont.transcript_edits).toEqual([{ kind: "tool_result", step: 0, call_id: "c1", tool_result: "429" }])

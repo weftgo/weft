@@ -470,6 +470,16 @@ func unzipFixtures(body []byte, dir string) (int, error) {
 	if len(fixtures) == 0 {
 		return 0, errors.New("the wefttest export holds no fixtures")
 	}
+	if testDir != "" {
+		// F6's layout is all under testdata/<test>/: a flat fixture
+		// beside it would land in the same target, a same-named one
+		// overwriting the other silently.
+		for _, f := range fixtures {
+			if !strings.HasPrefix(f.Name, "testdata/") {
+				return 0, fmt.Errorf("the wefttest export mixes flat fixtures (%q) with testdata/%s/", f.Name, testDir)
+			}
+		}
+	}
 	var total uint64
 	for _, f := range fixtures {
 		total += f.UncompressedSize64

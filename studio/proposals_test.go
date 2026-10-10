@@ -155,3 +155,18 @@ func TestProposalsBound(t *testing.T) {
 		t.Errorf("a replacement changed the count to %d", len(p.snapshot()))
 	}
 }
+
+// TestProposalNotInServedFile: while a manifest file is served, an agent
+// only a registered runtime names is 409 — the proposal would not show.
+func TestProposalNotInServedFile(t *testing.T) {
+	ts := b4Studio(t, Manifest([]byte(proposalFile)))
+	entry, _ := b4Agent(t, "runtime_only", "You run.")
+	b4Register(t, ts, "", "rt_1", "shop", entry)
+	code, body := b4Do(t, http.MethodPut, ts.URL+"/api/agents/runtime_only/proposal", "", `{"instructions":"x"}`)
+	if code != http.StatusConflict || !strings.Contains(body, "the served manifest file does not name agent runtime_only") {
+		t.Errorf("PUT = %d %s, want 409", code, body)
+	}
+	if code, _ := b4Do(t, http.MethodPut, ts.URL+"/api/agents/support/proposal", "", `{"instructions":"x"}`); code != http.StatusOK {
+		t.Errorf("PUT for the file's agent = %d, want 200", code)
+	}
+}

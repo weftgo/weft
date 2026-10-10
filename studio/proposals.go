@@ -31,7 +31,9 @@ import (
 // 403, playground-scoped included: a proposed prompt is a system
 // prompt, and setting one is not an act inside a public id. The agent
 // must be one the manifest file or a registered runtime names (404
-// otherwise).
+// otherwise); while a manifest file is served, one the file does not
+// name is 409 — /api/manifest serves the file, so the proposal would
+// not show.
 
 // maxProposals bounds the proposals held: the registered-manifest
 // store's bound (studio/runtime's maxManifests).
@@ -131,14 +133,15 @@ type proposalDoc struct {
 const proposalNote = "held in studio's memory beside the registered instructions, forgotten on restart; " +
 	"nothing is sent to the app or written to your files"
 
-// knownAgent reports whether the manifest file or a registered runtime
-// names agent.
-func (s *Server) knownAgent(name string) bool {
+// agentSource reports which manifest names agent: "file" when the
+// manifest file does, "runtime" when only a registered manifest does,
+// "" when none does.
+func (s *Server) agentSource(name string) string {
 	if len(s.manifest) > 0 {
 		if hashes, err := manifestAgentHashes(s.manifest); err == nil {
 			for _, a := range hashes {
 				if a.name == name {
-					return true
+					return manifestSourceFile
 				}
 			}
 		}
@@ -146,11 +149,11 @@ func (s *Server) knownAgent(name string) bool {
 	for _, m := range s.registeredManifests() {
 		for _, a := range m.Agents {
 			if a.Name == name {
-				return true
+				return manifestSourceRuntime
 			}
 		}
 	}
-	return false
+	return ""
 }
 
 // servePutProposal answers PUT /api/agents/{name}/proposal.
@@ -169,8 +172,14 @@ func (s *Server) servePutProposal(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, r, "proposal body: instructions is required (an empty string proposes no system prompt)")
 		return
 	}
-	if !s.knownAgent(name) {
+	switch src := s.agentSource(name); {
+	case src == "":
 		notFound(w, r, "no agent "+name+" in the manifest file or any registered manifest")
+		return
+	case src == manifestSourceRuntime && len(s.manifest) > 0:
+		// A file manifest is what /api/manifest serves: a proposal for
+		// an agent only a runtime registered would never show.
+		conflict(w, r, "the served manifest file does not name agent "+name+"; the proposal would not show", badgeFields{})
 		return
 	}
 	sum := sha256.Sum256([]byte(*body.Instructions))

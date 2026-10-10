@@ -214,6 +214,8 @@ type fixtureStep struct {
 	step      int
 	key       fixtureKeyDoc
 	compacted *compactedNote
+	plain     []core.Message // the transcript before the step's reply (no view applied)
+	reply     core.Message   // the step's recorded assistant message
 }
 
 // runFixtures renders one file per step of the run that recorded an
@@ -372,7 +374,7 @@ func buildFixtures(src fixtureSource) (*fixtureSet, error) {
 		if len(set.steps) == 0 {
 			set.system = doc.Request.System
 		}
-		set.steps = append(set.steps, fixtureStep{step: step, key: key, compacted: doc.CompactedAt})
+		set.steps = append(set.steps, fixtureStep{step: step, key: key, compacted: doc.CompactedAt, plain: msgs[:i:i], reply: msg})
 		set.last = msg
 	}
 	set.files = files

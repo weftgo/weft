@@ -7,6 +7,9 @@
 // Recorded on: (date)
 // Steps:       3
 // Step 2 replays from the compacted view (compaction 5, made at step 2: seq [1, 3) replaced by 1 entries, hash f7f974691e358826798016f537798494fdc08c45bce009893a273b3cf26bd1c3).
+// The last step's tool calls never ran in the recording (parked, or ended by a stop
+// condition): their stubs answer with an error, and StepCountIs(3) ends the replay
+// right after, so no request sees those answers.
 //
 // Drop this file and testdata/ into the package that builds the agent, and rename
 // the package clause to that package's name plus _test. The fixtures live in
@@ -53,22 +56,33 @@ func TestReplay_r_fx(t *testing.T) {
 		return fx.Request.Messages, nil
 	}
 
-	// The results the run recorded, by call id: every tool result the
-	// fixtures' requests carried.
+	// The results the run recorded, by step and call id (a provider may
+	// reuse a call id across steps): fixture k+1's request ends with step
+	// k's reply and the tool results that answered it.
 	files, err := filepath.Glob(filepath.Join(fixtures, "*.json"))
 	if err != nil || len(files) == 0 {
 		t.Fatalf("no fixtures in %s: %v", fixtures, err)
 	}
-	recorded := map[string]weft.ToolResultPart{}
-	for _, f := range files {
+	type stepCall struct {
+		step int
+		id   string
+	}
+	recorded := map[stepCall]weft.ToolResultPart{}
+	for k, f := range files[1:] { // files sort in step order
 		msgs, err := requestMessages(f)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, m := range msgs {
+		last := -1
+		for i, m := range msgs {
+			if m.Role == weft.RoleAssistant {
+				last = i
+			}
+		}
+		for _, m := range msgs[last+1:] {
 			for _, part := range m.Content {
 				if r, ok := part.(weft.ToolResultPart); ok {
-					recorded[r.CallID] = r
+					recorded[stepCall{k, r.CallID}] = r
 				}
 			}
 		}
@@ -77,10 +91,10 @@ func TestReplay_r_fx(t *testing.T) {
 	// an error result exactly as the run recorded it.
 	answer := func(ctx context.Context, _ json.RawMessage) (string, error) {
 		call, _ := weft.CallFromContext(ctx)
-		r, ok := recorded[call.CallID]
+		r, ok := recorded[stepCall{call.Step, call.CallID}]
 		switch {
 		case !ok:
-			return "", errors.New("no recorded result for call " + call.CallID + " (the run ended before it had one)")
+			return "", errors.New("no recorded result for call " + call.CallID + " (the recording never ran it)")
 		case r.IsError:
 			return "", errors.New(r.Content)
 		}

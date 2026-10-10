@@ -3,16 +3,57 @@ package studio
 import (
 	"archive/zip"
 	"bytes"
+	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync/atomic"
 	"testing"
 
+	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/wefttest"
+	"github.com/weftgo/weft/otel"
 )
+
+// recordScriptedRun drives one scripted "orders" run through the real
+// pipeline (otel → OTLP ingest → obsdb): the lookup_order tool answers
+// "result <n>" for its n-th call, so a result is told apart from the
+// same call id's at another step.
+func recordScriptedRun(t *testing.T, url, runID string, model core.Model, runOpts ...core.RunOption) {
+	t.Helper()
+	ctx := context.Background()
+	p, err := otel.Start(ctx, otel.Studio(url, ""), otel.NoGlobal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	type orderIn struct {
+		OrderID string `json:"order_id"`
+	}
+	var n atomic.Int64
+	lookup := core.Tool("lookup_order", "Look up an order.", func(context.Context, orderIn) (string, error) {
+		return fmt.Sprintf("result %d", n.Add(1)), nil
+	})
+	agent := core.New(model, core.Name("orders"), core.Instructions("You are a support agent."), lookup,
+		core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()))
+	if _, err := agent.Generate(ctx, append([]core.RunOption{core.RunID(runID), core.Prompt("where is order 42?")}, runOpts...)...); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// settledRun is the condition a scripted run's row meets once its
+// records landed: succeeded, with n request records.
+func settledRun(n int) func(string) bool {
+	return func(b string) bool {
+		return strings.Contains(b, fmt.Sprintf(`"request_count":%d`, n)) && strings.Contains(b, `"status":"succeeded"`)
+	}
+}
 
 // unzipTo writes the export zip's entries under dir, returning them by
 // name.
@@ -60,6 +101,11 @@ func unzipTo(t *testing.T, body []byte, dir string) map[string]string {
 //   - r_req (recordRequestsRun): a ToolSource that grows a tool after
 //     step 0, so the steps offer different catalogs (the skeleton's
 //     PrepareStep sets step 0's), a retried step, a final text answer.
+//   - r_dup: call id call_1 at step 0 and again at step 1 (a provider
+//     that numbers ids per step), answered differently — the skeleton
+//     keys recorded results by (step, call id);
+//   - r_steer: a user message steered in after step 0 — the skeleton
+//     delivers it again through wefttest.NewSteers.
 //
 // The skeleton of r_fx is pinned byte for byte, and the same skeleton
 // with its prompt changed fails under `go test` naming the missing
@@ -76,6 +122,19 @@ func TestSaveAsTestPasses(t *testing.T) {
 	ts, _ := requestsServer(t)
 	recordStepsRun(t, ts.URL, "r_fx", nil)
 	recordRequestsRun(t, ts.URL, "r_req")
+	// r_dup: a provider that numbers call ids per step (Google's
+	// adapter fills a missing id as call_<n> from call_1 every step):
+	// call_1 at step 0 and at step 1, answered differently.
+	recordScriptedRun(t, ts.URL, "r_dup", wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"42"}`, ID: "call_1"}),
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"43"}`, ID: "call_1"}),
+		wefttest.Say("Both found."),
+	))
+	// r_steer: a user message steered in after step 0's tool batch.
+	recordScriptedRun(t, ts.URL, "r_steer", wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"42"}`, ID: "c1"}),
+		wefttest.Say("Shipped, quickly."),
+	), wefttest.NewSteers().At(0, core.User("be quick")).Option())
 
 	mod := t.TempDir()
 	write := func(name, body string) {
@@ -136,6 +195,16 @@ func TestSaveAsTestPasses(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	_, dup := exportGet(t, ts, "/api/runs/r_dup/export?format=wefttest", settledRun(3))
+	if s := unzipTo(t, dup, filepath.Join(mod, "dup"))["orders_replay_test.go"]; !strings.Contains(s, "recorded[stepCall{call.Step, call.CallID}]") {
+		t.Errorf("r_dup's skeleton does not key results by (step, call id):\n%s", s)
+	}
+	_, steer := exportGet(t, ts, "/api/runs/r_steer/export?format=wefttest", settledRun(2))
+	if s := unzipTo(t, steer, filepath.Join(mod, "steer"))["orders_replay_test.go"]; !strings.Contains(s, `At(0, weft.User("be quick"))`) ||
+		!strings.Contains(s, "steers.Option()") || !strings.Contains(s, "// Step 1's request carries 1 message(s) steered in after step 0") {
+		t.Errorf("r_steer's skeleton does not steer:\n%s", s)
+	}
+
 	goTest := func(pkgs ...string) (string, error) {
 		cmd := exec.Command(gobin, append([]string{"test", "-count=1"}, pkgs...)...)
 		cmd.Dir = mod
@@ -145,12 +214,12 @@ func TestSaveAsTestPasses(t *testing.T) {
 		out, err := cmd.CombinedOutput()
 		return string(out), err
 	}
-	out, err := goTest("./fx", "./req")
+	out, err := goTest("./fx", "./req", "./dup", "./steer")
 	if err != nil {
 		t.Fatalf("go test on the extracted skeletons: %v\n%s", err, out)
 	}
-	if strings.Count(out, "ok  \tsavetest.example/") != 2 {
-		t.Errorf("go test ran %q, want both packages ok", out)
+	if strings.Count(out, "ok  \tsavetest.example/") != 4 {
+		t.Errorf("go test ran %q, want the four packages ok", out)
 	}
 	if out, err := goTest("./neg"); err == nil || !strings.Contains(out, "no replay fixture for this request") {
 		t.Errorf("a changed prompt's replay = %v\n%s\nwant a failure naming the missing fixture", err, out)
@@ -163,4 +232,44 @@ func keys(m map[string]string) []string {
 		out = append(out, k)
 	}
 	return out
+}
+
+// TestPlanStepsDiverged: a step whose transcript is not the previous
+// step's plus its reply, tool results and steered user messages
+// diverged — it and every later step replay their recorded messages,
+// said in the header; steered user messages are planned as steers.
+func TestPlanStepsDiverged(t *testing.T) {
+	u, a := core.User("hi"), core.Message{Role: core.RoleAssistant, Content: []core.Part{core.TextPart{Text: "ok"}}}
+	steps := []fixtureStep{
+		{plain: []core.Message{u}, reply: a},
+		{plain: []core.Message{u, a, core.User("steered")}, reply: a},
+		{plain: []core.Message{core.User("rewritten")}, reply: a}, // not a continuation
+		{plain: []core.Message{core.User("rewritten"), a}, reply: a},
+	}
+	steers, rewritten := planSteps(steps)
+	if len(steers) != 1 || steers[0][0].Text() != "steered" {
+		t.Errorf("steers = %+v, want step 0's", steers)
+	}
+	if !rewritten[2] || !rewritten[3] || rewritten[1] {
+		t.Errorf("rewritten = %v, want steps 2 and 3", rewritten)
+	}
+	set := &fixtureSet{steps: steps, last: a}
+	for i := range steps {
+		steps[i].key.Messages = steps[i].plain
+		set.files = append(set.files, fixtureFile{Name: fmt.Sprintf("%05d-x.json", i+1)})
+	}
+	src, err := replaySkeleton{runID: "r", agent: "orders", set: set}.render()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"// Step 2 replays the recorded messages: the recorded run rewrote them.",
+		"// Step 3 replays the recorded messages: the recorded run rewrote them.",
+		`requestMessages("testdata/TestReplay_r/00003-x.json")`,
+		`At(0, weft.User("steered"))`,
+	} {
+		if !strings.Contains(string(src), want) {
+			t.Errorf("skeleton lacks %q:\n%s", want, src)
+		}
+	}
 }

@@ -688,4 +688,12 @@ func TestUnzipFixturesFlat(t *testing.T) {
 	if _, err := unzipFixtures(layout("testdata/A/00001-a.json", "testdata/B/00002-b.json"), t.TempDir()); err == nil {
 		t.Error("two test directories unzipped")
 	}
+	// A flat fixture beside testdata/<test>/ is refused, not merged.
+	mixed := filepath.Join(t.TempDir(), "target")
+	if _, err := unzipFixtures(layout("00001-a.json", "testdata/T/00001-a.json"), mixed); err == nil || !strings.Contains(err.Error(), "mixes flat fixtures") {
+		t.Errorf("a mixed zip: %v, want the refusal", err)
+	}
+	if _, err := os.Stat(mixed); !os.IsNotExist(err) {
+		t.Errorf("the mixed zip created the target (%v)", err)
+	}
 }

@@ -85,8 +85,11 @@ func TestAuthMatrix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The file manifest names acme-support, the agent the runtimes
+	// register: a proposal (plan F6) is only taken for an agent the
+	// served file names.
 	srv := New(Open(t.TempDir()+"/matrix.db"), Playground(true), Token(serverTok),
-		IngestToken(ingestTok), Manifest([]byte(`{"weft":1,"agents":[]}`)), Pricing(prices))
+		IngestToken(ingestTok), Manifest([]byte(`{"weft":1,"agents":[{"name":"acme-support"}]}`)), Pricing(prices))
 	t.Cleanup(func() { _ = srv.Close() })
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)

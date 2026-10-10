@@ -10,6 +10,16 @@ module, ADR 0005).
 
 ### Added
 
+- Studio: `/api/runs` and `/api/search` take `experiment_id=` (a narrowing
+  filter; a panel token stays inside its public id). A saved experiment keeps
+  its whole command — `engine`, `side_effects`, `thread`, `from_step`,
+  `source_run_id`, `transcript_edits`, and per variant its overrides plus its
+  own `engine`/`side_effects`/`thread` — and `/api/experiments` rows (and the
+  detail) carry `created`, `run_count` and the cost of its runs (own +
+  delegated). obsdb: `ExperimentCommand` (embedded in `Experiment`),
+  `ExperimentVariant.Engine/SideEffects/Thread`; migrations sqlite 0005 /
+  ClickHouse 0006 add the experiments table's command column (old rows read
+  back without it).
 - Studio: experiments you can come back to (plan F5). The playground keeps its
   whole form as a draft in this browser (`?exp=<draft id>`, IndexedDB) once it
   changes, and "copy share link" puts the form in the fragment (`#state=`,

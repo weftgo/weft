@@ -207,7 +207,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    {instructions, instructions_hash, since} when one is held; the weft.json, else the manifests runtimes registered with —
 //    //    remembered in memory by (service, manifest_hash), each in sources[] live or remembered; a
 //    //    Studio restart forgets them until the next registration; manifest_check.source file|runtime),
-//    //    runs (+session/public/playground filters; all=1 lists child
+//    //    runs (+session/public/playground/experiment_id filters; all=1 lists child
 //    //    runs too; each row's prompt_preview: the turn's own prompt (input record's last user text — a resume's new prompt when it carries one — else first), 200 runes, absent content-off),
 //    //    search (?q= terms over prompt/answer/error/tool names — substrings, AND, a "phrase" one
 //    //    term; agent/tool/status/model/error/since/until/min_tokens/sort=started|duration|tokens/
@@ -391,7 +391,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // their diff, pure assembly, no runtime needed; capability preview), /api/playground/
 //     // commands/{id}, /api/runs/{id}/approvals (a parked run's own verbs),
 //     // /api/playground/fixtures (wefttest replay fixtures from a run's records),
-//     // /api/experiments (the saved groups + the runs they label), /api/runtimes/
+//     // /api/experiments (the saved groups + the runs they label — each saved with its whole command: engine,
+//     // side_effects, thread, from_step, source_run_id, transcript_edits, per variant overrides + modes; listed with created,
+//     // run_count and cost; /api/runs and /api/search filter by experiment_id=; any experiment_id on a run command is
+//     // accepted, so a re-run joins the saved experiment), /api/runtimes/
 //     // {id}/breakpoints, /api/runs/{id}/steer, /api/runs/{id}/cancel (capability cancel: the link's cancel frame for the command
 //     // holding a runtime-started run; 202 cancelling, 409 app-owned/finished/parked — decide instead, 503 runtime gone; best effort; steer's auth); the panel drawer and /playground
 //     // (the Studio UI) render them, gated on capabilities — the option lab (plan F3.2)

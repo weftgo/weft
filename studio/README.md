@@ -1571,8 +1571,8 @@ duration as a Go duration string, `"720h0m0s"`, `null` when off, the
 default — and `pricing` {source, path?, dated, models}, the cost table;
 see Cost above), `settings/pricing` (the effective pricing table,
 capability `pricing`), `runs` (agent,
-status, session, public id, playground, parent and `tag.<k>=<v>`
-filters, cursor-paged; top-level only by default — `parent=<run id>`
+status, session, public id, playground, parent, experiment_id and
+`tag.<k>=<v>` filters, cursor-paged; top-level only by default — `parent=<run id>`
 lists one run's subagent children, `all=1` (or `parent=*`) every run,
 children included; every run row carries `prompt_preview` — the turn's
 own prompt: the input record's last user message with text (on a resume
@@ -1886,8 +1886,11 @@ ingest is `POST /v1/traces` and `/v1/logs` (protobuf and JSON, gzip,
 so the exporter retries). Under `Playground(true)` the playground's
 routes join (`GET /api/runtimes`, `POST /api/playground/runs`, `GET
 /api/playground/commands/{id}`, `POST /api/runs/{id}/approvals`,
-`POST /api/playground/fixtures`, `GET/POST /api/experiments`, `GET
-/api/experiments/{id}`, `PUT /api/runtimes/{id}/breakpoints`, `POST
+`POST /api/playground/fixtures`, `GET/POST /api/experiments` (each row with `created`, `run_count`,
+`cost_usd`/`cost_known`; a POST creates or replaces the whole definition —
+`engine`/`side_effects`/`thread`/`from_step`/`source_run_id`/`transcript_edits`
+kept as sent, per variant its overrides + modes), `GET
+/api/experiments/{id}` (the definition with its whole command and its runs), `PUT /api/runtimes/{id}/breakpoints`, `POST
 /api/runs/{id}/steer` — see the playground above) beside the runtime
 link's own (`POST /api/runtime/register`, `GET /api/runtime/commands`
 SSE, `POST /api/runtime/acks` — server token only, never a panel

@@ -32,6 +32,7 @@
   },
   "manifest_sources": 1,
   "auth_required": false,
+  "live_all": true,
   "content": {
     "ingest": "as_received",
     "latest": null

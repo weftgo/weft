@@ -72,12 +72,52 @@ module, ADR 0005).
   with `obsdb.TraceRow` and `obsdb.TraceRoot`, on both backends over
   the spans table (SQLite `spans`, ClickHouse `otel_traces`; no
   migration); the obsdbtest conformance table gains `Traces`.
+- `DELETE /api/runs/{id}` and `DELETE /api/sessions/{id}` (plan A7,
+  capability `delete`): a run with its subagent children, or every run
+  of a session (children included), removed from Studio's database —
+  run rows, records, the search index, the spans (the non-weft spans
+  below the runs' own too) and the app log lines under them. 200 with
+  `{deleted, run_id | session_id, note}`; the session's note says it:
+  the app's conversation store is untouched. Studio's tables only: a
+  SQLite file that also holds `thread`'s sessions keeps them
+  byte-identical (§13.13). The dev token's, or a loopback Host's in
+  setup A (no AllowOrigins widening); every panel token is 403, read or
+  playground, before anything is looked up; an unknown id is 404. A live
+  stream following a deleted run emits nothing more; a later read is
+  404. In the auth matrix for every identity and in
+  `/api/meta.capabilities`; CORS preflights allow `DELETE`.
+- `studio.Retain(d)`: a sweeper deletes (as above) the runs that are
+  not running — succeeded, failed, interrupted — whose `last_seen` is
+  older than `d`, once at `New` and then every `min(d/10, 1h)`, at least
+  a minute apart; one Debug line per sweep with its count, a failed
+  sweep one Warn line, never a stopped server. Off by default (`0`):
+  the local sink keeps everything. `/api/meta.retention` reports it as
+  a Go duration string (`"720h0m0s"`), `null` when off. `weft studio`
+  and `weft dev` take it as `--retain`, mirrored by `WEFT_RETAIN`.
+- `weft vacuum [--db sqlite://path|clickhouse://…] [--retain d]`: one
+  sweep when a retention is given (`--retain` / `WEFT_RETAIN`), then
+  VACUUM (SQLite) or `OPTIMIZE TABLE … FINAL` on the tables deletions
+  mutate (ClickHouse); `make vacuum` runs it on `$WEFT_DB`, else
+  `./.weft/weft.db`.
+- `obsdb.DeletedSpans`, `obsdb.SpanLink`, `obsdb.SpanKey`: the one rule
+  both backends delete spans and app log lines by (a run's own spans and
+  the non-weft spans below them — the rule its logs page attributes
+  lines by). The obsdbtest conformance table gains `DeleteRun`,
+  `DeleteSession`, `Sweep` and `Vacuum`. ClickHouse deletes with
+  lightweight `DELETE FROM … WHERE` (ClickHouse 23.3 or later); its
+  TTLs are unchanged, retention is additive. No migration on either
+  backend.
 
 ### Changed — breaking
 
 - `obsdb.DB` gains `Traces`: a third-party `obsdb.DB` implementation
   must add the method (group its spans by trace id; the obsdbtest
   `Traces` case pins the answer).
+- `obsdb.DB` gains `DeleteRun(ctx, id) error`, `DeleteSession(ctx, id)
+  error`, `Sweep(ctx, before) (int, error)` and `Vacuum(ctx) error`: a
+  third-party implementation must add them, touching its own tables
+  only (the obsdbtest `DeleteRun`, `DeleteSession`, `Sweep` and
+  `Vacuum` cases pin the answers).
 
 ### Fixed
 

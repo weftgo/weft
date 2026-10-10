@@ -36,6 +36,8 @@ type config struct {
 	manifest     []byte
 	capabilities []string
 	playground   bool
+	retain       time.Duration // Retain: 0 = off
+	sweepEvery   time.Duration // the sweeper's interval in tests; 0 = sweepInterval(retain)
 }
 
 // DB serves Studio over db (setup A: DB(otel.LocalDB()) — the same
@@ -186,6 +188,9 @@ type Server struct {
 	// grantKey signs the live stream's grants (livegrant.go): derived
 	// from the Token, else random per process.
 	grantKey []byte
+
+	// stopSweep stops Retain's sweeper (delete.go); nil without one.
+	stopSweep func()
 }
 
 // New builds a Studio server over one obsdb.DB (S4.1). Handler()
@@ -225,6 +230,7 @@ func New(opts ...Option) *Server {
 	s.prepareShell()
 	s.registerGroups()
 	s.mux.HandleFunc("/", s.serveUI)
+	s.startSweeper()
 	return s
 }
 
@@ -250,11 +256,15 @@ func Handler(opts ...Option) http.Handler {
 // routes do not exist either.
 func (s *Server) Runtime() *RuntimeServer { return s.runtimeSrv }
 
-// Close releases what the server owns: the database when New opened
-// it (Open or the default path). A DB passed through DB(...) stays
+// Close releases what the server owns: Retain's sweeper, and the
+// database when New opened it (Open or the default path). A DB passed through DB(...) stays
 // its owner's — closing otel's handle out from under the pipeline is
 // not Studio's call.
 func (s *Server) Close() error {
+	if s.stopSweep != nil {
+		s.stopSweep()
+		s.stopSweep = nil
+	}
 	if s.ownsDB {
 		return s.db.Close()
 	}

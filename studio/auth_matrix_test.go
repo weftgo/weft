@@ -64,6 +64,9 @@ var overrideNames = map[string]string{
 
 //   - what is not public-id-shaped is the server token's alone: the
 //     runtime link, breakpoints, experiments, the token mint;
+//   - deletion (DELETE /api/runs/{id}, /api/sessions/{id}) is the
+//     server token's alone: every panel token is 403, read or
+//     playground, its own public id included;
 //   - ingest takes the ingest token and nothing else.
 func TestAuthMatrix(t *testing.T) {
 
@@ -108,6 +111,17 @@ func TestAuthMatrix(t *testing.T) {
 	}
 	// B's subagent child: its own run, the parent's public id.
 	seedRun(t, srv.db, "run_b/0/call_1", "pub_b", "", "", map[string]any{"weft.parent.run.id": "run_b", "weft.parent.call.id": "call_1"})
+	// The deletion rows' own data (plan A7), so deleting it leaves every
+	// other row's: per public id a run with a subagent child, and a
+	// session of one turn.
+	delRun := map[string]string{"A": "del_run_a", "B": "del_run_b", "none": "del_run_none", "missing": "del_run_missing"}
+	delSession := map[string]string{"A": "del_s_a", "B": "del_s_b", "none": "del_s_none", "missing": "del_s_missing"}
+	for _, res := range []string{"A", "B", "none"} {
+		seedRun(t, srv.db, delRun[res], public[res], "", "", nil)
+		seedRun(t, srv.db, delRun[res]+"/0/call_1", public[res], "", "",
+			map[string]any{"weft.parent.run.id": delRun[res], "weft.parent.call.id": "call_1"})
+		seedRun(t, srv.db, "del_turn_"+res, public[res], delSession[res], "", nil)
+	}
 
 	// The identities.
 	sign := func(key string, c panelClaims) string {
@@ -281,6 +295,17 @@ func TestAuthMatrix(t *testing.T) {
 			}
 			return forbidden403
 		}
+	}
+	// deleting: the delete capability's rule — the server token's
+	// alone, 404 for an id never stored; every panel token 403.
+	deleting := func(kind, res string) int {
+		switch {
+		case kind != "server":
+			return forbidden403
+		case res == "missing":
+			return miss
+		}
+		return ok
 	}
 	runBody := func(pub, source string) string {
 		b := `{"runtime":"rt_test","agent":"acme-support","input":"go","public_id":"` + pub + `"`
@@ -641,6 +666,26 @@ func TestAuthMatrix(t *testing.T) {
 		{name: "POST /api/runtime/register", method: "POST", path: fixed("/api/runtime/register"), body: fixed(regBody("rt_link")), resources: one, want: serverOnly(ok)},
 		{name: "GET /api/runtime/commands", method: "GET", path: fixed("/api/runtime/commands?runtime=rt_link"), resources: one, want: serverOnly(ok)},
 		{name: "POST /api/runtime/acks", method: "POST", path: fixed("/api/runtime/acks"), body: fixed(`{"command_id":"cmd_a","state":"accepted","run_id":"pg_a"}`), resources: one, want: serverOnly(ok)},
+
+		// Deletion (plan A7): the dev token's alone — every panel token is
+		// 403 before anything is looked up, its own public id included
+		// (the refusal never says whether the run exists); the server
+		// token deletes (200) or finds nothing (404). A child first, then
+		// its parent (which takes nothing more), then the session; the
+		// rows run last, on data of their own. Another method on either
+		// subtree is no route: the API's 404, behind the wall.
+		{name: "DELETE /api/runs/{child}", method: "DELETE", path: func(res string) string { return "/api/runs/" + delRun[res] + "/0/call_1" }, resources: all, want: deleting},
+		{name: "DELETE /api/runs/{id}", method: "DELETE", path: func(res string) string { return "/api/runs/" + delRun[res] }, resources: all, want: deleting},
+		{name: "DELETE /api/sessions/{id}", method: "DELETE", path: func(res string) string { return "/api/sessions/" + delSession[res] }, resources: all, want: deleting},
+		{name: "DELETE /api/runs/{id} (deleted)", method: "DELETE", path: func(res string) string { return "/api/runs/" + delRun[res] }, resources: one,
+			want: func(kind, _ string) int {
+				if kind == "server" {
+					return miss
+				}
+				return forbidden403
+			}},
+		{name: "PATCH /api/runs/{id}", method: "PATCH", path: func(res string) string { return "/api/runs/" + run[res] }, resources: one, want: anyValid(miss)},
+		{name: "PUT /api/sessions/{id}", method: "PUT", path: func(res string) string { return "/api/sessions/" + session[res] }, resources: one, want: anyValid(miss)},
 
 		// Unknown API paths: walled like the rest, then 404.
 		{name: "GET /api/nope", method: "GET", path: fixed("/api/nope"), resources: one, want: anyValid(miss)},

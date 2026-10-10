@@ -82,6 +82,7 @@ func runDev(args []string, stdout, stderr io.Writer) error {
 		"turn the playground off (the app's runtime link then has nothing to register with)")
 	rotate := fs.Bool("rotate-token", false,
 		"write a new stable dev token beside the database (<db>.token) before serving; an action, so no environment mirror")
+	retain := retainFlag(fs, "to keep runs after they were last seen: older ones that are not running are deleted from studio's tables")
 	noWatch := fs.Bool("no-watch", false,
 		"do not restart the app on a .go change; weft dev exits with the app's exit code")
 	var roots []string
@@ -117,6 +118,11 @@ func runDev(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	opts = append(opts, studio.Playground(!*noPlayground))
+	retainOpts, _, err := retainOptions(*retain)
+	if err != nil {
+		return err
+	}
+	opts = append(opts, retainOpts...)
 
 	// Signals are ours from here on: Ctrl-C stops the app first, then
 	// Studio. Armed before anything starts, so none is lost.

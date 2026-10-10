@@ -14,7 +14,7 @@ RELEASE_DIR ?= studio/web/dist-release
 # reports from go.work.
 MODULES = $(shell $(GO) list -m -f '{{.Dir}}')
 
-.PHONY: build test vet fmt lint tidy generate live tools apidiff apidiff-core apidiff-all apidiff-selftest offline fuzz fuzz-thread soak-thread studio-build studio-bin studio-check studio-panel-asset devtools-npm devtools-vite-check
+.PHONY: build test vet fmt lint tidy generate vacuum live tools apidiff apidiff-core apidiff-all apidiff-selftest offline fuzz fuzz-thread soak-thread studio-build studio-bin studio-check studio-panel-asset devtools-npm devtools-vite-check
 
 build:
 	for m in $(MODULES); do (cd $$m && $(GO) build ./...) || exit 1; done
@@ -45,6 +45,10 @@ tidy:
 # when a committed facade is stale.
 generate:
 	$(GO) generate ./...
+
+# Studio's database, swept (with WEFT_RETAIN set, e.g. 720h) and vacuumed — studio's tables only: $WEFT_DB, else ./.weft/weft.db.
+vacuum:
+	$(GO) run ./cmd/weft vacuum --db "sqlite://$${WEFT_DB:-.weft/weft.db}"
 
 # Pinned tooling — the exact versions CI installs, so a local gate and
 # the remote gate can never disagree (TODO §1.2a, the §1 pre-flight of

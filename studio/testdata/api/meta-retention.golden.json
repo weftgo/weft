@@ -1,0 +1,50 @@
+{
+  "weft_version": "v0.13.0",
+  "studio_version": "v0.13.0",
+  "panel_version": "v0.13.0",
+  "db": {
+    "kind": "sqlite"
+  },
+  "title": "weft studio",
+  "has_manifest": true,
+  "ingest_open": true,
+  "interrupted_after_ms": 30000,
+  "capabilities": [
+    "requests",
+    "steps",
+    "export",
+    "logs",
+    "diff",
+    "traces",
+    "search",
+    "delete",
+    "live",
+    "ingest",
+    "panel-config"
+  ],
+  "capabilities_off": {
+    "auth": "no server token to sign panel tokens with: turn it on with studio.Token(tok); weft studio always sets one",
+    "breakpoints": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
+    "playground": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
+    "preview": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
+    "runtimes": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off",
+    "steer": "the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off"
+  },
+  "manifest_sources": 1,
+  "auth_required": false,
+  "content": {
+    "ingest": "as_received",
+    "latest": null
+  },
+  "pricing": false,
+  "retention": "720h0m0s",
+  "runtimes": 0,
+  "manifest_check": {
+    "source": "file",
+    "agents": 1,
+    "checked": 0,
+    "stale": []
+  },
+  "pid": 1234
+}
+

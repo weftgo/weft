@@ -3,12 +3,13 @@
 //
 //	go install github.com/weftgo/weft/cmd/weft@latest
 //
-//	weft studio [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--no-playground]
+//	weft studio [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--no-playground] [--retain]
 //	weft dev [studio's flags] [--no-watch] [--watch dir] [-- command args…]
 //	weft runs [--agent] [--since] [--failed] [--limit] [--json]
 //	weft open <run id> [--open] [--with-token]
 //	weft export <run id> [--wefttest dir [--test name] [--force]] [--format json|jsonl|otlp]
 //	weft doctor
+//	weft vacuum [--db] [--retain]
 //	weft version
 //
 // Every subcommand is a convenience over what an app or a script can
@@ -20,7 +21,7 @@
 // Every connection flag mirrors an environment variable one to one: --addr
 // WEFT_STUDIO_ADDR, --db WEFT_DB, --token WEFT_STUDIO_TOKEN, --manifest
 // WEFT_MANIFEST, --url WEFT_STUDIO_URL (the Studio the API clients talk
-// to, default http://127.0.0.1:7331).
+// to, default http://127.0.0.1:7331), --retain WEFT_RETAIN.
 //
 // # weft studio
 //
@@ -158,6 +159,21 @@
 // weft studio does. --watch and --no-watch have no environment mirror:
 // they are the dev loop's, not connection settings.
 //
+// # Retention and weft vacuum
+//
+// Studio keeps everything by default. --retain (or WEFT_RETAIN; a Go
+// duration, 720h) on weft studio and weft dev is studio.Retain: a
+// sweeper deletes the runs that are not running and were last seen
+// longer ago, with their subagent children, every min(retain/10, 1h)
+// (at least a minute apart), from Studio's own tables only — a SQLite
+// file that also holds the app's thread sessions keeps them untouched.
+// `weft vacuum [--db] [--retain]` is the one-shot form: one sweep
+// when a retention is given, then VACUUM (SQLite: the file shrinks;
+// it waits on the busy timeout while another process writes) or
+// OPTIMIZE TABLE … FINAL on the mutated tables (ClickHouse: merges
+// every part, heavy on a large database). `make vacuum` runs it on
+// $WEFT_DB, else ./.weft/weft.db.
+//
 // `weft version` prints the weft version (version.Runtime: the module
 // tag this binary was built from).
 //
@@ -214,16 +230,18 @@ func usageError(format string, args ...any) error {
 const usage = `weft — the weft framework's command line
 
 Usage:
-  weft studio  [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--no-playground]
+  weft studio  [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--no-playground] [--retain]
   weft dev     [studio's flags] [--no-watch] [--watch dir] [-- command args…]   (default: go run .)
   weft runs    [--url] [--token] [--agent] [--since] [--failed] [--limit] [--json]
   weft open    <run id> [--url] [--token] [--open] [--with-token]
   weft export  <run id> [--url] [--token] [--format json|jsonl|otlp] [--wefttest dir [--test name] [--force]]
   weft doctor  [--url] [--token]
+  weft vacuum  [--db] [--retain]
   weft version
 
-Environment (each mirrors a connection flag): WEFT_STUDIO_ADDR (--addr), WEFT_DB (--db),
-WEFT_STUDIO_TOKEN (--token), WEFT_MANIFEST (--manifest), WEFT_STUDIO_URL (--url).
+Environment (each mirrors a flag): WEFT_STUDIO_ADDR (--addr), WEFT_DB (--db),
+WEFT_STUDIO_TOKEN (--token), WEFT_MANIFEST (--manifest), WEFT_STUDIO_URL (--url),
+WEFT_RETAIN (--retain).
 Run "weft <command> -h" for a command's flags.
 `
 
@@ -288,6 +306,8 @@ func dispatch(args []string, stdout, stderr io.Writer) error {
 		return runExport(rest, stdout, stderr)
 	case "doctor":
 		return runDoctor(rest, stdout, stderr)
+	case "vacuum":
+		return runVacuum(rest, stdout, stderr)
 	case "version", "--version", "-version":
 		if len(rest) > 0 {
 			return usageError("version takes no arguments, got %q", rest)
@@ -330,11 +350,16 @@ func runStudio(args []string, stdout, stderr io.Writer) error {
 		"turn the playground off (it is inert until an app's runtime connects)")
 	rotate := fs.Bool("rotate-token", false,
 		"write a new stable dev token beside the database (<db>.token) before serving; an action, so no environment mirror")
+	retain := retainFlag(fs, "to keep runs after they were last seen: older ones that are not running are deleted from studio's tables")
 	if err := parse(fs, args); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
 		return usageError("studio takes no arguments, got %q", fs.Args())
+	}
+	retainOpts, retainNote, err := retainOptions(*retain)
+	if err != nil {
+		return err
 	}
 	wd, err := os.Getwd()
 	if err != nil {
@@ -345,8 +370,9 @@ func runStudio(args []string, stdout, stderr io.Writer) error {
 		return err
 	}
 	opts = append(opts, studio.Playground(!*noPlayground))
+	opts = append(opts, retainOpts...)
 	return serveWith(*db, wantAddr(*addr, defaultAddr), *token, stdout,
-		afterBoot{notes: []string{note}, open: *open, rotate: *rotate}, opts...)
+		afterBoot{notes: []string{note, retainNote}, open: *open, rotate: *rotate}, opts...)
 }
 
 // want is the address the command wants and whether it is pinned.

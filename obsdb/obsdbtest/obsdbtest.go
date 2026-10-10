@@ -62,6 +62,10 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("OtherLogs", otherLogs(open))
 	t.Run("Search", searchTable(open))
 	t.Run("PromptPreview", promptPreview(open))
+	t.Run("DeleteRun", deleteRun(open))
+	t.Run("DeleteSession", deleteSession(open))
+	t.Run("Sweep", sweep(open))
+	t.Run("Vacuum", vacuum(open))
 	t.Run("CloseRace", closeRace(open))
 }
 

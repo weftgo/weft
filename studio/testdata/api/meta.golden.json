@@ -17,6 +17,7 @@
     "diff",
     "traces",
     "search",
+    "delete",
     "live",
     "ingest",
     "panel-config"

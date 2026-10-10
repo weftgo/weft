@@ -1,0 +1,298 @@
+package sqlite
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/weftgo/weft/obsdb"
+)
+
+// Deletion and retention (plan A7, §13.13): every statement below names
+// one of obsdb's own tables — runs, records, spans, other_logs,
+// run_search, run_tools, runs_fts — and nothing else. A file that also
+// holds thread's sessions (sessions, entries, session_locks,
+// thread_migrations) keeps them byte-identical: Studio never writes the
+// app's conversation store.
+
+// deleteChunk bounds one IN list: far under SQLite's bind-variable
+// limit, so a sweep of many runs is many statements, never one too big.
+const deleteChunk = 400
+
+// DeleteRun removes a run and its subagent children (obsdb.DB).
+func (d *DB) DeleteRun(ctx context.Context, id string) (err error) {
+	if err := d.checkOpen(); err != nil {
+		return err
+	}
+	defer d.closedErr(&err)
+	return d.deleteTx(ctx, func(tx *sql.Tx) ([]string, error) {
+		var n int
+		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM runs WHERE run_id = ?`, id).Scan(&n); err != nil {
+			return nil, err
+		}
+		if n == 0 {
+			return nil, fmt.Errorf("%w: run %s", obsdb.ErrNotFound, id)
+		}
+		return closure(ctx, tx, []string{id}, false)
+	})
+}
+
+// DeleteSession removes every run of a session, children included
+// (obsdb.DB).
+func (d *DB) DeleteSession(ctx context.Context, id string) (err error) {
+	if err := d.checkOpen(); err != nil {
+		return err
+	}
+	defer d.closedErr(&err)
+	return d.deleteTx(ctx, func(tx *sql.Tx) ([]string, error) {
+		roots, err := queryIDs(ctx, tx, `SELECT run_id FROM runs WHERE session_id = ? AND session_id <> ''`, id)
+		if err != nil {
+			return nil, err
+		}
+		if len(roots) == 0 {
+			return nil, fmt.Errorf("%w: session %s", obsdb.ErrNotFound, id)
+		}
+		return closure(ctx, tx, roots, false)
+	})
+}
+
+// notRunning is the sweep's status test over a runs row: failed,
+// succeeded, or interrupted (last seen before the bound parameter, now -
+// InterruptedAfter) — statusExpr's rows other than running.
+const notRunning = `(failed = 1 OR finished_ok = 1 OR last_seen_ns < ?)`
+
+// Sweep deletes the runs not running whose last_seen is before the
+// cutoff, with their children that are not running (obsdb.DB). A run's
+// subtree is swept from its topmost not-running ancestor: a candidate
+// whose parent is a stored run is reached through it, or — when the
+// parent is running, or was never stored — is its own root.
+func (d *DB) Sweep(ctx context.Context, before time.Time) (n int, err error) {
+	if err := d.checkOpen(); err != nil {
+		return 0, err
+	}
+	defer d.closedErr(&err)
+	err = d.deleteTx(ctx, func(tx *sql.Tx) ([]string, error) {
+		cut := time.Now().Add(-obsdb.InterruptedAfter).UnixNano()
+		roots, err := queryIDs(ctx, tx, `SELECT run_id FROM runs AS r
+			WHERE last_seen_ns < ? AND `+notRunning+`
+			AND NOT EXISTS (SELECT 1 FROM runs AS p WHERE p.run_id = r.parent_run_id AND r.parent_run_id <> ''
+				AND p.last_seen_ns < ? AND (p.failed = 1 OR p.finished_ok = 1 OR p.last_seen_ns < ?))`,
+			unixNS(before), cut, unixNS(before), cut)
+		if err != nil {
+			return nil, err
+		}
+		ids, err := closure(ctx, tx, roots, true)
+		n = len(ids)
+		return ids, err
+	})
+	if err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+// Vacuum folds the search index's segments and runs VACUUM (obsdb.DB):
+// the whole file is rewritten, every table's contents unchanged —
+// thread's too, when it shares the file. VACUUM needs the file to
+// itself for its duration; a writer in another process waits on the
+// busy timeout.
+func (d *DB) Vacuum(ctx context.Context) (err error) {
+	if err := d.checkOpen(); err != nil {
+		return err
+	}
+	defer d.closedErr(&err)
+	if _, err := d.writer.ExecContext(ctx, `INSERT INTO runs_fts(runs_fts) VALUES ('optimize')`); err != nil {
+		return err
+	}
+	_, err = d.writer.ExecContext(ctx, `VACUUM`)
+	return err
+}
+
+// deleteTx runs one deletion in a writer transaction: pick chooses the
+// run ids (an error aborts, ErrNotFound included), deleteRuns removes
+// them.
+func (d *DB) deleteTx(ctx context.Context, pick func(*sql.Tx) ([]string, error)) error {
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	ids, err := pick(tx)
+	if err != nil {
+		return err
+	}
+	if err := deleteRuns(ctx, tx, ids); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// closure is roots and every run whose parent_run_id chain reaches one
+// of them. sweeping keeps a descendant out when it is running (and so
+// its subtree with it): the sweep never deletes a running run.
+func closure(ctx context.Context, tx *sql.Tx, roots []string, sweeping bool) ([]string, error) {
+	seen := map[string]bool{}
+	var out []string
+	frontier := roots
+	for _, id := range roots {
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	cut := time.Now().Add(-obsdb.InterruptedAfter).UnixNano()
+	for len(frontier) > 0 {
+		var next []string
+		err := inChunks(frontier, func(ph string, args []any) error {
+			q := `SELECT run_id FROM runs WHERE parent_run_id IN (` + ph + `)`
+			if sweeping {
+				q += ` AND ` + notRunning
+				args = append(args, cut)
+			}
+			kids, err := queryIDs(ctx, tx, q, args...)
+			for _, k := range kids {
+				if !seen[k] {
+					seen[k] = true
+					out = append(out, k)
+					next = append(next, k)
+				}
+			}
+			return err
+		})
+		if err != nil {
+			return nil, err
+		}
+		frontier = next
+	}
+	return out, nil
+}
+
+// deleteRuns removes the runs' rows from every obsdb table: the search
+// index first (runs_fts has no run_id: its rows go by run_search's ids),
+// then the records, the spans DeletedSpans names with the app log
+// records under them, and the run rows.
+func deleteRuns(ctx context.Context, tx *sql.Tx, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	deleted := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		deleted[id] = true
+	}
+	var traces []string
+	err := inChunks(ids, func(ph string, args []any) error {
+		got, err := queryIDs(ctx, tx, `SELECT DISTINCT trace_id FROM spans WHERE run_id IN (`+ph+`)`, args...)
+		traces = append(traces, got...)
+		return err
+	})
+	if err != nil {
+		return err
+	}
+	var links []obsdb.SpanLink
+	err = inChunks(dedup(traces), func(ph string, args []any) error {
+		rs, err := tx.QueryContext(ctx, `SELECT trace_id, span_id, parent_span_id, run_id FROM spans WHERE trace_id IN (`+ph+`)`, args...)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = rs.Close() }()
+		for rs.Next() {
+			var l obsdb.SpanLink
+			if err := rs.Scan(&l.TraceID, &l.SpanID, &l.ParentSpanID, &l.RunID); err != nil {
+				return err
+			}
+			links = append(links, l)
+		}
+		return rs.Err()
+	})
+	if err != nil {
+		return err
+	}
+	for _, stmt := range []string{
+		`DELETE FROM runs_fts WHERE rowid IN (SELECT id FROM run_search WHERE run_id IN (%s))`,
+		`DELETE FROM run_search WHERE run_id IN (%s)`,
+		`DELETE FROM run_tools WHERE run_id IN (%s)`,
+		`DELETE FROM records WHERE run_id IN (%s)`,
+	} {
+		if err := inChunks(ids, func(ph string, args []any) error {
+			_, err := tx.ExecContext(ctx, fmt.Sprintf(stmt, ph), args...)
+			return err
+		}); err != nil {
+			return err
+		}
+	}
+	keys := obsdb.DeletedSpans(links, deleted)
+	for start := 0; start < len(keys); start += deleteChunk / 2 {
+		chunk := keys[start:min(start+deleteChunk/2, len(keys))]
+		args := make([]any, 0, 2*len(chunk))
+		for _, k := range chunk {
+			args = append(args, k.TraceID, k.SpanID)
+		}
+		values := strings.TrimSuffix(strings.Repeat("(?,?),", len(chunk)), ",")
+		if _, err := tx.ExecContext(ctx, `DELETE FROM other_logs WHERE (trace_id, span_id) IN (VALUES `+values+`)`, args...); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM spans WHERE (trace_id, span_id) IN (VALUES `+values+`)`, args...); err != nil {
+			return err
+		}
+	}
+	// A run's own spans are all in keys; this catches a span whose
+	// trace id the first read did not see (none today) so no span of a
+	// deleted run outlives it.
+	if err := inChunks(ids, func(ph string, args []any) error {
+		_, err := tx.ExecContext(ctx, `DELETE FROM spans WHERE run_id IN (`+ph+`)`, args...)
+		return err
+	}); err != nil {
+		return err
+	}
+	return inChunks(ids, func(ph string, args []any) error {
+		_, err := tx.ExecContext(ctx, `DELETE FROM runs WHERE run_id IN (`+ph+`)`, args...)
+		return err
+	})
+}
+
+// inChunks calls fn for each deleteChunk-sized slice of ids with its
+// placeholder list and args.
+func inChunks(ids []string, fn func(placeholders string, args []any) error) error {
+	for start := 0; start < len(ids); start += deleteChunk {
+		chunk := ids[start:min(start+deleteChunk, len(ids))]
+		args := make([]any, len(chunk))
+		for i, id := range chunk {
+			args[i] = id
+		}
+		if err := fn(strings.TrimSuffix(strings.Repeat("?,", len(chunk)), ","), args); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func queryIDs(ctx context.Context, tx *sql.Tx, q string, args ...any) ([]string, error) {
+	rs, err := tx.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rs.Close() }()
+	var out []string
+	for rs.Next() {
+		var id string
+		if err := rs.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rs.Err()
+}
+
+func dedup(ids []string) []string {
+	seen := map[string]bool{}
+	out := ids[:0:0]
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	return out
+}

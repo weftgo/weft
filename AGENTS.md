@@ -186,10 +186,13 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    // or studio.New(opts...) *Server with Handler()/Close()/Runtime()
 //    //    (the runtime link's server under Playground(true), else nil),
 //    //    options DB/Open/Base/Manifest/Title/Capabilities/Token/Live/NoIngest/
-//    //    IngestToken/AllowOrigins/Playground; routes register through
+//    //    IngestToken/AllowOrigins/Playground/Retain (Retain(d): a sweeper deletes the runs not
+//    //    running last seen more than d ago, once at New then every min(d/10, 1h), floor 1 min,
+//    //    one Debug line per sweep; off by default; runs until Close); routes register through
 //    //    routes.go's groups (panel.go/playground.go add theirs in their own files).
 //    // API: meta (db {kind, path, size: path/size to loopback and the server token only},
-//    //    auth_required, content, runtimes, manifest_check, pricing, retention — `weft doctor` prints it
+//    //    auth_required, content, runtimes, manifest_check, pricing, retention (Retain's Go
+//    //    duration string, null when off) — `weft doctor` prints it
 //    //    line by line; capabilities_off {capability: why} names the option/flag that left one off;
 //    //    manifest_sources), manifest (the weft.json, else the manifests runtimes registered with —
 //    //    remembered in memory by (service, manifest_hash), each in sources[] live or remembered; a
@@ -225,7 +228,11 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    the traces every span of which is its public id's; capability "traces" — obsdb.DB.Traces,
 //    //    no migration), traces/{id},
 //    //    sessions, sessions/{id}, sessions/{id}/public_id (the reverse of public/{public_id}: the dev token's
-//    //    alone, every panel token 403 hidden), public/{public_id}, /api/live (SSE), /api/panel-tokens (with a Token),
+//    //    alone, every panel token 403 hidden), public/{public_id}, DELETE runs/{id} and DELETE
+//    //    sessions/{id} (capability "delete": a run with its subagent children, or a session's runs —
+//    //    rows, records, search index, spans, app logs — from obsdb's tables only, the app's
+//    //    conversation store and a shared file's thread tables untouched; the dev token or setup A's
+//    //    loopback Host, every panel token 403; obsdb.DB.DeleteRun/DeleteSession/Sweep/Vacuum), /api/live (SSE), /api/panel-tokens (with a Token),
 //    //    /panel.js (the devtools panel, WEFT-DEVTOOLS §5 — its host API, plan C4: the element's
 //    //    open/close/toggle/isOpen/scope/select/on/studioLink, window.weft.devtools while connected
 //    //    unless data-global="off", events weft:run|parked|error; its layout, plan D1: float, dock
@@ -288,7 +295,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    (prints the bare <url>/runs/<id>; the token only to the browser or on --with-token);
 //    //    weft export <run id> [--format json|jsonl|otlp | --wefttest ./testdata --test Name
 //    //    --force] (fixtures where wefttest.Replay reads them; --force replaces, never
-//    //    merges); weft version.
+//    //    merges); weft vacuum [--db --retain] (one sweep when a retention is given, then VACUUM
+//    //    / OPTIMIZE TABLE … FINAL; `make vacuum` on $WEFT_DB or ./.weft/weft.db); weft version.
+//    //    --retain (WEFT_RETAIN) on weft studio and weft dev is studio.Retain.
 //    //    weft dev [studio's flags --no-watch --watch dir] [-- go run ./cmd/app] (default: go run .):
 //    //    Studio in-process + the app with WEFT_ENV=dev (kept if set), WEFT_STUDIO_URL,
 //    //    WEFT_STUDIO_TOKEN, WEFT_DB set (plain env vars the app may set itself), restarted

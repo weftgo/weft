@@ -97,6 +97,27 @@ reads the agents' system prompts (`/api/manifest`, the runtimes'
 instructions) — and experiments (`experiment_id` included) are the
 server token's alone.
 
+**Retention.** Studio keeps everything until told otherwise.
+`studio.Retain(720*time.Hour)` — `--retain 720h` or `WEFT_RETAIN=720h`
+on `weft studio` and `weft dev` — starts a sweeper that deletes, as
+`DELETE /api/runs/{id}` does, every run that is not running
+(succeeded, failed, interrupted) last seen longer ago than the
+retention, with its children that are not running: once at start, then
+every `min(retention/10, 1h)`, at least a minute apart. Each sweep logs
+one Debug line with its count; a failed one logs a Warn line and the
+server keeps serving. The sweeper runs until `Server.Close`, so a Studio
+with `Retain` is built with `studio.New` and closed. `/api/meta`'s
+`retention` reports it. `weft vacuum [--db sqlite://path|clickhouse://…]
+[--retain d]` is the one-shot form — one sweep when a retention is
+given, then VACUUM (SQLite: the file shrinks; it waits on the busy
+timeout while another process writes) or `OPTIMIZE TABLE … FINAL` on
+the tables deletions mutate (ClickHouse: every part merged — heavy on a
+large database) — and `make vacuum` runs it on `$WEFT_DB`, else
+`./.weft/weft.db`. All of it touches Studio's tables only. On
+ClickHouse deletion is a lightweight `DELETE FROM … WHERE` (ClickHouse
+23.3 or later) and the tables' TTLs (`clickhouse.TTL`) stay as they are:
+retention is additive.
+
 ## The devtools panel (WEFT-DEVTOOLS.md)
 
 One script tag puts the run loop in the corner of your own page —
@@ -1250,7 +1271,9 @@ outside a text box.
 JSON under `{base}api/`: `meta` (versions, `db` {kind, path, size —
 path and size to loopback and the server token only}, `pid`,
 `ingest_open`, `interrupted_after_ms`, capabilities, `capabilities_off`
-{capability: why}, `manifest_sources`), `runs` (agent,
+{capability: why}, `manifest_sources`, `retention` — `studio.Retain`'s
+duration as a Go duration string, `"720h0m0s"`, `null` when off, the
+default), `runs` (agent,
 status, session, public id, playground, parent and `tag.<k>=<v>`
 filters, cursor-paged; top-level only by default — `parent=<run id>`
 lists one run's subagent children, `all=1` (or `parent=*`) every run,
@@ -1431,6 +1454,19 @@ setup A's alone — every panel token, read or playground, its own
 session included, is 403 with `badge: "hidden"`; session ids carry no
 `/`, so the sub-route shadows none), `public/{public_id}`, `manifest` (it carries the agents' system
 prompts: 403 with `badge: "hidden"` to a read-scoped panel token),
+`DELETE /api/runs/{id}` and `DELETE /api/sessions/{id}` (plan A7, the
+`delete` capability: a run with its subagent children, or every run of
+a session with theirs, removed from Studio's database — run rows,
+records, the search index, the spans, the non-weft spans below the
+runs' own and the app log lines under them; 200 with `{deleted: "run" |
+"session", run_id | session_id, note}`, 404 for an unknown id. Studio's
+tables only: the session verb removes the session's *observability*
+rows and says so — the app's conversation store is untouched, and a
+SQLite file that also holds `thread`'s sessions keeps them
+byte-identical. The dev token's, or a loopback `Host`'s in setup A —
+never an AllowOrigins host's, never a panel token's: every panel token,
+read or playground, is 403 before anything is looked up. A live stream
+following a deleted run emits nothing more; a later read is 404),
 `POST /api/panel-tokens`
 
 (mint; the panel's scoped tokens — see the devtools panel above), and

@@ -185,6 +185,10 @@ func (s *Server) registerGroups() {
 			},
 		})
 	}
+	// Deletion (plan A7, §13.13): DELETE /api/runs/{id} and
+	// /api/sessions/{id}, obsdb's tables only. Always present; the
+	// dev token's (or loopback's in setup A), never a panel token's.
+	s.addGroup(deleteGroup())
 	// The live stream (S4.5) and its grant (plan C5): the stream's
 	// credential is its other half, so one group, one capability.
 	s.addGroup(routeGroup{

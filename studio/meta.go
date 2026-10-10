@@ -56,8 +56,9 @@ type metaDoc struct {
 	// Pricing is whether Studio prices usage (false until a pricing
 	// table exists, plan A5).
 	Pricing bool `json:"pricing"`
-	// Retention is the configured retention; null: none configured
-	// (Studio has no retention setting yet). The key is always present.
+	// Retention is Retain's duration as a Go duration string
+	// ("720h0m0s"); null: none configured (the default — everything is
+	// kept). The key is always present.
 	Retention *string `json:"retention"`
 	// Runtimes is how many runtimes hold a live command stream now: 0
 	// when the playground is off (no runtime link) or none dialed in.
@@ -175,6 +176,10 @@ func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
 		AuthRequired:       s.token != "",
 		Content:            s.latestContent(r.Context(), id),
 		Runtimes:           s.connectedRuntimes(),
+	}
+	if s.retain > 0 {
+		r := s.retain.String()
+		doc.Retention = &r
 	}
 	if mayReadDBPath(s, r) {
 		doc.DB.Path, doc.DB.Size = dbFile(s.db)

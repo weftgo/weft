@@ -89,6 +89,39 @@ type DB interface {
 	Experiments(ctx context.Context) ([]Experiment, error)  // newest update first
 	Experiment(ctx context.Context, id string) (Experiment, error)
 
+	// Deletion and retention (plan A7, §13.13). Every one touches the
+	// observability tables alone — never another module's tables
+	// sharing the file (thread's sessions in one SQLite file stay
+	// byte-identical) and never the experiments table (its definitions
+	// name runs, they do not hold them).
+	//
+	// DeleteRun removes a run and its subagent children — every run
+	// whose ParentRunID chain reaches id — with everything stored under
+	// them: records (deltas kept by KeepDeltas included), the search
+	// index rows, the spans named by DeletedSpans and the app log
+	// records emitted under those spans. ErrNotFound for an unknown id.
+	// A run still being written is deleted as it stands: a later write
+	// for it starts a new run row from what that write carries.
+	DeleteRun(ctx context.Context, id string) error
+	// DeleteSession is DeleteRun for every run carrying the session id
+	// (weft.session.id), children included. The app's own conversation
+	// store is not obsdb's and is never touched. ErrNotFound when no
+	// run carries the id.
+	DeleteSession(ctx context.Context, id string) error
+	// Sweep deletes, as DeleteRun does, the runs whose LastSeen is
+	// before the cutoff and whose status is not running (succeeded,
+	// failed or interrupted), with their children that are not running
+	// either; a running child keeps its own subtree and is swept on its
+	// own once it ends. It returns how many runs it deleted, children
+	// counted.
+	Sweep(ctx context.Context, before time.Time) (int, error)
+	// Vacuum gives the space deletions freed back: SQLite runs VACUUM
+	// (the whole file is rewritten, other modules' tables with their
+	// contents unchanged); ClickHouse runs OPTIMIZE TABLE … FINAL on
+	// the tables deletions mutate, which merges every part — an
+	// operator's command, heavy on a large database.
+	Vacuum(ctx context.Context) error
+
 	Close() error
 }
 
@@ -388,8 +421,8 @@ type SessionDetail struct {
 }
 
 // ErrNotFound is returned by Run, Session, Events, Transcript,
-// RunSpans, OtherLogs, Requests, Prompt, Tools, Catalogs, Experiment and
-// ResolvePublicID for an id the database does not hold (Prompt and
+// RunSpans, OtherLogs, Requests, Prompt, Tools, Catalogs, Experiment,
+// DeleteRun, DeleteSession and ResolvePublicID for an id the database does not hold (Prompt and
 // Tools also for a hash, possibly as a *HoleError). Trace answers an
 // unknown trace with no spans instead: a trace is only ever the spans
 // that arrived.

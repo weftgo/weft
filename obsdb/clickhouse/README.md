@@ -41,6 +41,14 @@ Options: `TTL(content, meta)` overrides the retention windows (content
 default), `KeepDeltas()` stores delta rows in `weft_deltas` for
 debugging (counted, never stored by default).
 
+Deletion (`DeleteRun`, `DeleteSession`, `Sweep` — Studio's `DELETE`
+verbs and `studio.Retain`) is a lightweight `DELETE FROM … WHERE` on
+`otel_traces`, `otel_logs`, `weft_records`, `weft_deltas` and
+`weft_runs` (ClickHouse 23.3 or later): rows are masked at once and
+leave the parts at the next merge; `Vacuum` (`weft vacuum`) forces that
+with `OPTIMIZE TABLE … FINAL` on the same tables — heavy on a large
+database. The TTLs stay as they are: Studio's retention is additive.
+
 DSN forms: `clickhouse://user:pass@host:9000/database` (native
 protocol, the port is 9000 not 8123), `clickhouses://...` or
 `?secure=1` for TLS, extra query parameters become clickhouse-go

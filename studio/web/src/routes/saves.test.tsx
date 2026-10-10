@@ -12,12 +12,12 @@ import axe from "axe-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
-import type { Manifest, ManifestAgent, ManifestProposal, RunDoc, RunsPage } from "@/lib/api"
+import type { Manifest, ManifestAgent, ManifestProposal, RequestsPage, RunDoc, RunsPage } from "@/lib/api"
 import { resetNotices } from "@/lib/notify"
 import { keepPromptWords, PROPOSAL_NEEDS_DEV, PROPOSAL_POINTER, saveWords } from "@/lib/saves"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
-import { FakeStudio, apiError, golden, json, pagedEvents, transcriptOf } from "@/test/fake-studio"
+import { FakeStudio, apiError, golden, json, pagedEvents, pagedRequests, transcriptOf } from "@/test/fake-studio"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -200,9 +200,11 @@ describe("keep as prompt on the Request pane (F6.2)", () => {
     expect(studio.calls(`PUT agents/${rOK.agent}/proposal`)[0].body).toEqual({ instructions: copied[0] })
     expect(text.length).toBeGreaterThan(0)
     expect(copied[0]).toBe(text)
+    // No manifest to verify the agent: proposed as recorded, and said.
+    const line = keepPromptWords({ kind: "keep-prompt", agent: rOK.agent, copied: true, proposal: "proposed" }).title
     await waitFor(() =>
       expect(toastTitles()).toContain(
-        keepPromptWords({ kind: "keep-prompt", agent: rOK.agent, copied: true, proposal: "proposed" }).title
+        `${line} · proposed as recorded: may include the tools' snippets or a PrepareStep rewrite (the manifest does not verify this run's agent)`
       )
     )
   })
@@ -216,6 +218,57 @@ describe("keep as prompt on the Request pane (F6.2)", () => {
       .install()
     await keep()
     await waitFor(() => expect(toastTitles()).toContain(`copied · proposal refused: ${msg}`))
+  })
+
+  /** Step 0's recorded prompt: instructions plus lookup_order's snippet. */
+  function withSnippetPrompt(manifest: Manifest) {
+    const page = golden<RequestsPage>("requests-ok")
+    for (const r of page.requests)
+      if (r.step === 0 && r.prompt && "text" in r.prompt) r.prompt.text = "You help, tersely.\n\nLook orders up first."
+    studio.on(`GET runs/${RUN}/requests`, pagedRequests(page)).on("GET manifest", manifest)
+  }
+  const ordersManifest = (verified: boolean): Manifest => ({
+    weft: 1,
+    agents: [
+      {
+        name: rOK.agent,
+        ...(verified ? { manifest_hash: rOK.manifest_hash } : {}),
+        model: { provider: "wefttest", name: "script" },
+        instructions: "You help.",
+        policy: { parallelism: 4, max_steps: 10, max_result_bytes: 65536, max_model_retries: 3 },
+        tools: [{ name: "lookup_order", prompt_snippet: "Look orders up first." }, { name: "refund" }],
+      },
+    ],
+  })
+  const putOK = (req: { body: unknown }) =>
+    json({ agent: rOK.agent, proposed: { ...(req.body as object), instructions_hash: "h", since: "t" }, note: "" })
+
+  it("a verified agent: the tools' snippets are stripped from what is proposed", async () => {
+    serveRequests(["proposals"]).on(`PUT agents/${rOK.agent}/proposal`, putOK)
+    withSnippetPrompt(ordersManifest(true))
+    studio.install()
+    await keep()
+    await waitFor(() => expect(studio.calls(`PUT agents/${rOK.agent}/proposal`)).toHaveLength(1))
+    expect(studio.calls(`PUT agents/${rOK.agent}/proposal`)[0].body).toEqual({ instructions: "You help, tersely." })
+    await waitFor(() =>
+      expect(toastTitles()).toContain(
+        keepPromptWords({ kind: "keep-prompt", agent: rOK.agent, copied: true, proposal: "proposed" }).title
+      )
+    )
+  })
+
+  it("an unverified agent: proposed as recorded, the toast says what it may carry", async () => {
+    serveRequests(["proposals"]).on(`PUT agents/${rOK.agent}/proposal`, putOK)
+    withSnippetPrompt(ordersManifest(false))
+    studio.install()
+    await keep()
+    await waitFor(() => expect(studio.calls(`PUT agents/${rOK.agent}/proposal`)).toHaveLength(1))
+    expect(studio.calls(`PUT agents/${rOK.agent}/proposal`)[0].body).toEqual({
+      instructions: "You help, tersely.\n\nLook orders up first.",
+    })
+    await waitFor(() =>
+      expect(toastTitles().some((t) => t.includes("may include 1 tool snippet or a PrepareStep rewrite"))).toBe(true)
+    )
   })
 
   it("a panel token copies only and is told a proposal needs the dev token", async () => {
@@ -275,6 +328,8 @@ describe("the Agents page: proposed beside registered (F6.2)", () => {
     expect(pointers[0].textContent).toContain(PROPOSAL_POINTER)
     fireEvent.click(within(box).getByRole("button", { name: "copy proposed" }))
     await waitFor(() => expect(copied).toEqual(["You help, tersely."]))
+    await waitFor(() => expect(toastTitles()).toContain("copied"))
+    expect(toastTitles().some((t) => t.includes(PROPOSAL_NEEDS_DEV))).toBe(false)
   })
 
   it("withdraw DELETEs the proposal and toasts", async () => {
@@ -321,5 +376,65 @@ describe("the Agents page: proposed beside registered (F6.2)", () => {
     const main = box.parentElement!.parentElement!
     const res = await axe.run(main, { rules: { "color-contrast": { enabled: false } } })
     expect(res.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.html).join(" | ")}`)).toEqual([])
+  })
+})
+
+describe("the playground card's keep as prompt (F6.2 review)", () => {
+  it("copies the variant's instructions and proposes them for the agent", async () => {
+    const command = (state: string, run_id = "", status?: string) => ({
+      command_id: "cmd_1",
+      state,
+      run_id,
+      error: null,
+      created: rOK.started,
+      updated: rOK.started,
+      ...(status ? { status } : {}),
+    })
+    const s = new FakeStudio()
+      .on("GET meta", meta(["live", "playground", "runtimes", "proposals"]))
+      .on("GET runtimes", {
+        runtimes: [
+          {
+            id: "rt_1",
+            host: "laptop",
+            pid: 1,
+            service: "acme-api",
+            env: "dev",
+            connected_since: rOK.started,
+            last_seen: rOK.started,
+            agents: [{ name: "orders", models: ["glm"], tools: [], instructions: "You are support." }],
+          },
+        ],
+      })
+      .on("GET experiments", { experiments: [] })
+      .on("GET runs/r_ok", { ...rOK, children: [] })
+      .on("GET runs/r_ok/transcript", golden("transcript-ok"))
+      .on("POST playground/runs", command("queued"))
+      .on("GET playground/commands/cmd_1", command("finished", "pg_1", "succeeded"))
+      .on("GET runs/pg_1", { ...rOK, id: "pg_1", playground: true, children: [] })
+      .on("GET runs/pg_1/events", pagedEvents([]))
+      .on("GET runs/pg_1/transcript", { batches: [] })
+      .on("PUT agents/orders/proposal", (req) =>
+        json({ agent: "orders", proposed: { ...(req.body as object), instructions_hash: "h", since: "t" }, note: "" })
+      )
+      .install()
+    renderApp("/playground?run=r_ok")
+    const run = await screen.findByRole("button", { name: "Run A" })
+    await waitFor(() => expect(run).toHaveProperty("disabled", false))
+    fireEvent.click(run)
+    const keep = await waitFor(() => {
+      const b = document.querySelector<HTMLElement>("button[data-keep-prompt]")
+      expect(b).toBeTruthy()
+      return b!
+    })
+    fireEvent.click(keep)
+    await waitFor(() => expect(s.calls("PUT agents/orders/proposal")).toHaveLength(1))
+    expect(s.calls("PUT agents/orders/proposal")[0].body).toEqual({ instructions: copied[0] })
+    expect(copied[0]).toBe("You are support.")
+    await waitFor(() =>
+      expect(toastTitles()).toContain(
+        keepPromptWords({ kind: "keep-prompt", agent: "orders", copied: true, proposal: "proposed" }).title
+      )
+    )
   })
 })

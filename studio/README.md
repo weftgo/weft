@@ -1484,18 +1484,25 @@ under its `Content-Disposition` name (`<run>.zip`: a generated
 `<agent>_replay_test.go` beside `testdata/TestReplay_<run>/`); the toast
 says "saved <file> — unzip into a package directory and go test", or a
 refusal in the server's words. **Keep as prompt** beside a step's system
-prompt in the Request pane copies it and, under `proposals` and an
+prompt in the Request pane copies and, under `proposals` and an
 identity that may propose (the dev token, or setup A's loopback with no
-token), proposes it as the run's agent's instructions; the toast says
+token), proposes the run's agent's instructions: when the manifest
+verifies the agent (`weft.manifest.hash`) and its offered tools'
+PromptSnippets end the recorded prompt, they are stripped (adopting a
+composed prompt as Instructions would compose them twice); otherwise the
+text goes as recorded and the toast says what it may carry ("may include
+N tool snippets or a PrepareStep rewrite"). The proposal body is the
+text alone, so the Agents page cannot tell: a proposal kept from a step
+whose prompt was not verified may carry snippets. The toast says
 the outcome, a 404 ("no agent … in the manifest file or any registered
 manifest") or 409 ("the served manifest file does not name agent …") in
 the server's words, and a panel token copies only ("a proposal needs the
-dev token"). The playground card's keep as prompt is still the plain
-copy. The **Agents page** shows each agent's proposal beside its
+dev token"). The playground card's keep as prompt copies the variant's
+instructions and proposes them the same way. The **Agents page** shows each agent's proposal beside its
 registered prompt: a `registered → proposed` line with the proposal's
 `since` and hash (12 characters, the full one on hover), the line diff
 from registered to proposed (the Request pane's prompt-diff renderer),
-**copy proposed**, and **withdraw** (`DELETE`, the same gating — a panel
+**copy proposed** (toasting "copied"), and **withdraw** (`DELETE`, the same gating — a panel
 token sees it disabled with the hint); once on the page, the pointer
 "the durable path is WEFT-PROMPT.md P3: a propose command over the
 runtime link". A read-scoped panel token never reads the manifest (403,

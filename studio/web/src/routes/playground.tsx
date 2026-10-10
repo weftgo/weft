@@ -68,6 +68,8 @@ import {
 import type { EditDraft, Engine, SideEffects, ThreadMode, VariantFields } from "@/lib/experiment-body"
 import { relativeTime, spanMs } from "@/lib/format"
 import { copyText, download } from "@/lib/json"
+import { mayProposeWith, PROPOSAL_NEEDS_DEV } from "@/lib/saves"
+import { keepPrompt } from "@/components/studio/saves"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { RUNTIMES_POLL_MS } from "@/hooks/use-notices"
 import { canReplay } from "@/lib/replay"
@@ -1260,6 +1262,7 @@ function Playground({ caps }: { caps: string[] }) {
                     sourceText={sourceText}
                     sourceRunID={sourceRunID}
                     variant={v}
+                    agentName={agent?.name ?? ""}
                     tools={(agent?.tools ?? [])
                       .map((t) => t.name)
                       .filter((n) => !v.toolsOff.has(n))}
@@ -1431,6 +1434,7 @@ function ResultCard({
   sourceText,
   sourceRunID,
   variant,
+  agentName,
   tools,
   caps,
   mayRun,
@@ -1442,6 +1446,8 @@ function ResultCard({
   sourceText: string
   sourceRunID: string
   variant: Variant
+  /** The agent the card's run is of: keep as prompt proposes to it. */
+  agentName: string
   tools: string[]
   caps: string[]
   /** The bearer may act (canReplay, the run page's rule): else the
@@ -1460,6 +1466,7 @@ function ResultCard({
   const [transcriptText, setTranscriptText] = useState<string | null>(null)
   const [steerText, setSteerText] = useState("")
   const [cardErr, setCardErr] = useState("")
+  const qc = useQueryClient()
   const [deciding, setDeciding] = useState(false)
   const costCapable = useCostCapable()
 
@@ -1540,8 +1547,8 @@ function ResultCard({
         )}
         <span className="grow" />
         {/* P4's saves: the fixture is a wefttest replay test of this
-            run (D4); keep-as-prompt is the copy-the-text fallback
-            (PQ2: the weft/prompt version lands with that module). */}
+            run (D4); keep-as-prompt copies the variant's instructions
+            and, under proposals, proposes them (plan F6). */}
         {mayRun && (
           <button
             className="text-faint hover:underline disabled:opacity-50"
@@ -1559,8 +1566,17 @@ function ResultCard({
         )}
         <button
           className="text-faint hover:underline"
-          title="copy the edited prompt (weft/prompt versions are post-v1, PQ2)"
-          onClick={() => void copyText(variant.instructions)}
+          title={
+            agentName && mayProposeWith(caps, studioToken())
+              ? `copy the edited prompt and propose it as ${agentName}'s instructions (shown on the Agents page beside the registered ones)`
+              : `copy the edited prompt${caps.includes("proposals") ? ` — ${PROPOSAL_NEEDS_DEV}` : ""}`
+          }
+          data-keep-prompt
+          onClick={() => {
+            void keepPrompt(caps, agentName, variant.instructions).then((stored) => {
+              if (stored) void qc.invalidateQueries({ queryKey: ["manifest"] })
+            })
+          }}
         >
           keep as prompt
         </button>

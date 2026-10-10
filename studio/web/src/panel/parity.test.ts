@@ -30,7 +30,9 @@ import { stepDiffBlock } from "./compare"
 import { FakeEventSource as StudioEventSource } from "../test/fake-event-source"
 import { FakeStudio, golden, hiddenRefusal, pagedEvents, pagedRequests } from "../test/fake-studio"
 import type { FakePosEvent } from "../test/fake-studio"
-import { $, all, assistant, ATTRS, click, META, mount, runRow, SESSION, settle, setup, T0, teardown, transcript, user } from "./testkit"
+import { $, all, assistant, ATTRS, baseRoutes, button, click, fakeStudio as panelStudio, META, mount, runExperiment, runRow, SESSION, settle, setup, T0, teardown, transcript, user } from "./testkit"
+import { keepPromptWords, SAVE_TEST_LABEL, SAVE_TEST_TITLE } from "../lib/saves"
+import { resetNotices } from "../lib/notify"
 import type { WeftDevtools } from "./element"
 import { buildRunBody as studioBody, emptyLab } from "../lib/experiment-body"
 import type { VariantFields } from "../lib/experiment-body"
@@ -818,5 +820,70 @@ describe("the wire pair: the panel links where the run page draws it (A6.2)", ()
     expect(got.exchange).toBe(false)
     expect(got.hole?.getAttribute("data-hole")).toBe("not_recorded")
     expect(got.hole?.getAttribute("title")).toBe(`${CAUSES.not_recorded!.raw_off.reason} — fix: ${CAUSES.not_recorded!.raw_off.fix}`)
+  })
+})
+
+describe("the saves say the same words on both surfaces (F6.2)", () => {
+  const PLAY = `weft_pt.${btoa(JSON.stringify({ pid: "pub_orders", scope: "playground" })).replace(/=+$/, "")}.sig`
+  const CAPS = ["export", "proposals"]
+  const studioToasts = () =>
+    [...document.querySelectorAll<HTMLElement>("[data-sonner-toast]")].map((t) => t.querySelector("[data-title]")?.textContent ?? "")
+
+  it("save as test's label and title; keep as prompt's copy-only line under a panel token", async () => {
+    vi.stubGlobal("navigator", { clipboard: { writeText: () => Promise.resolve() } })
+    // The panel: the turn's link, then the result pane's keep as prompt.
+    panelStudio(baseRoutes(), { ...META, capabilities: [...META.capabilities, ...CAPS] })
+    const el = await mount({ ...ATTRS, "data-token": PLAY })
+    const link = $(el, "a[data-weft-save-test]")
+    expect(link?.textContent).toBe(SAVE_TEST_LABEL)
+    expect(link?.getAttribute("title")).toBe(SAVE_TEST_TITLE)
+    await runExperiment(el)
+    click(button(el, "keep as prompt ⤴"))
+    await settle(20)
+    const keepLine = keepPromptWords({ kind: "keep-prompt", agent: "acme-support", copied: true, proposal: "copy-only" }).title
+    expect($(el, ".weft-api-note")?.textContent).toBe(keepLine)
+    el.remove()
+    await settle()
+    vi.unstubAllGlobals()
+    // Studio: the run header's button, then the Request pane's keep as prompt.
+    cleanup()
+    document.body.innerHTML = ""
+    stubBrowser()
+    StudioEventSource.reset()
+    vi.stubGlobal("EventSource", StudioEventSource)
+    Object.defineProperty(window.navigator, "clipboard", { configurable: true, value: { writeText: () => Promise.resolve() } })
+    resetNotices()
+    setStudioToken(PLAY)
+    const evs: unknown[] = [{ type: "run_start", id: RUN, model: { provider: "wefttest", name: "script" } }]
+    for (let i = 0; i < 3; i++)
+      evs.push({ type: "step_start", run_id: RUN, index: i }, { type: "step_finish", run_id: RUN, index: i, reason: "stop", usage: { input_tokens: 1, output_tokens: 1 } })
+    evs.push({ type: "run_finish", run_id: RUN, usage: { input_tokens: 3, output_tokens: 3 }, steps: 3 })
+    new FakeStudio()
+      .on("GET meta", { ...golden<Record<string, unknown>>("meta"), capabilities: ["requests", ...CAPS] })
+      .on(`GET runs/${RUN}`, { ...runRow({ id: RUN }), steps: 3, children: [] })
+      .on(`GET runs/${RUN}/events`, pagedEvents(evs.map((event, pos) => ({ pos, time: T0, event }))))
+      .on(`GET runs/${RUN}/spans`, { spans: [] })
+      .on(`GET runs/${RUN}/transcript`, { batches: [] })
+      .withRequests(RUN, "ok")
+      .install()
+    renderApp(`/runs/${RUN}?view=story`)
+    const btn = await waitFor(() => {
+      const b = [...document.querySelectorAll("button")].find((x) => x.textContent === SAVE_TEST_LABEL)
+      expect(b).toBeTruthy()
+      return b!
+    })
+    expect(btn.getAttribute("title")).toBe(SAVE_TEST_TITLE)
+    await waitFor(() => expect(document.querySelector('[data-step="0"] [data-request="0"] button[aria-expanded]')).toBeTruthy())
+    ;(document.querySelector('[data-step="0"] [data-request="0"] button[aria-expanded]') as HTMLElement).click()
+    const keep = await waitFor(() => {
+      const b = document.querySelector<HTMLElement>("[data-keep-prompt]")
+      expect(b).toBeTruthy()
+      return b!
+    })
+    keep.click()
+    await waitFor(() => expect(studioToasts()).toContain(keepPromptWords({ kind: "keep-prompt", agent: "", copied: true, proposal: "copy-only" }).title))
+    // The line names no agent when copy-only: both surfaces say the same.
+    expect(keepLine).toBe(keepPromptWords({ kind: "keep-prompt", agent: "", copied: true, proposal: "copy-only" }).title)
+    setStudioToken("")
   })
 })

@@ -248,12 +248,15 @@ function PromptView({
   stripped,
   base,
   agent,
+  manifestHash,
 }: {
   row: RequestRow
   stripped?: Holed
   base?: PromptBaseline
   /** The run's agent: "keep as prompt" proposes to it (plan F6). */
   agent?: string
+  /** The run's weft.manifest.hash: verifies the agent's snippets. */
+  manifestHash?: string
 }) {
   const [all, setAll] = useState(false)
   const p = row.prompt
@@ -286,7 +289,7 @@ function PromptView({
       <span className="flex flex-wrap items-center gap-2">
         <Hash h={doc.hash} />
         {doc.truncated_bytes > 0 || doc.content === "derived" ? null : (
-          <KeepAsPrompt agent={agent} text={doc.text} />
+          <KeepAsPrompt agent={agent} text={doc.text} names={row.body.tools.names} manifestHash={manifestHash} />
         )}
         {long ? (
           <button
@@ -562,7 +565,7 @@ function AttemptView({
       ) : null}
       <div className="flex gap-2">
         <Label>system</Label>
-        <PromptView row={row} stripped={stripped} base={base} agent={ctx?.agent} />
+        <PromptView row={row} stripped={stripped} base={base} agent={ctx?.agent} manifestHash={ctx?.manifestHash} />
       </div>
       <div className="flex gap-2">
         <Label>tools</Label>

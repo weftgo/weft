@@ -233,7 +233,7 @@ function Proposed({
           className="text-thread hover:underline"
           onClick={() =>
             void copyText(p.instructions).then((ok) =>
-              notifySave({ kind: "keep-prompt", agent: agent.name, copied: ok, proposal: "copy-only" })
+              notifySave({ kind: "copy", ok })
             )
           }
         >

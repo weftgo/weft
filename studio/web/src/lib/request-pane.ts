@@ -142,6 +142,41 @@ export function snippetsOf(
   return names.map((n) => byName.get(n) ?? "")
 }
 
+/**
+ * proposalOf is what "keep as prompt" proposes from a step's recorded
+ * system prompt (plan F6): the agent's instructions, never the composed
+ * text — adopting a prompt that carries the tools' PromptSnippets as
+ * Instructions would compose them twice. With the verified agent's
+ * snippets known and a suffix of the recorded text, they are stripped;
+ * otherwise the text is proposed as recorded and `note` says what it
+ * may carry (the API body is the text alone, so this is said when it is
+ * proposed, never on the Agents page).
+ */
+export function proposalOf(
+  text: string,
+  names: string[],
+  reg: Registered | undefined
+): { text: string; note?: string } {
+  const known = snippetsOf(names, reg?.agent)
+  const parts = known?.filter(Boolean) ?? []
+  if (reg?.verified && known) {
+    if (parts.length === 0) return { text }
+    const suffix = parts.join("\n\n")
+    if (text === suffix) return { text: "" }
+    if (text.endsWith(`\n\n${suffix}`)) return { text: text.slice(0, text.length - suffix.length - 2) }
+    return { text, note: "proposed as recorded: it is not the instructions plus its tools' snippets — a PrepareStep rewrite" }
+  }
+  const what =
+    names.length === 0
+      ? "a PrepareStep rewrite"
+      : known
+        ? parts.length
+          ? `${parts.length} tool snippet${parts.length === 1 ? "" : "s"} or a PrepareStep rewrite`
+          : "a PrepareStep rewrite"
+        : "the tools' snippets or a PrepareStep rewrite"
+  return { text, note: `proposed as recorded: may include ${what} (the manifest does not verify this run's agent)` }
+}
+
 /** The prompt text a row carries, when the record is here — and
  * parsed: a derived record (its body did not parse; obsdb's
  * PromptRecordOf keeps the hash, not the text) is no text to diff. */

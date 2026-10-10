@@ -7,7 +7,8 @@ import { useQueryClient } from "@tanstack/react-query"
 import { Download } from "lucide-react"
 import { useState } from "react"
 
-import { fetchTestExport, putProposal, studioToken } from "@/lib/api"
+import { fetchTestExport, manifestQuery, putProposal, studioToken } from "@/lib/api"
+import { proposalOf, registeredAgent } from "@/lib/request-pane"
 import { copyText } from "@/lib/json"
 import { notifySave } from "@/lib/notify"
 import {
@@ -61,11 +62,14 @@ export function SaveAsTest({ runID }: { runID: string }) {
 
 /** keepPrompt copies text and, when the identity may propose, PUTs it
  * as agent's proposed instructions; the outcome is toasted, a refusal
- * in the server's own words. Answers whether a proposal was stored. */
+ * in the server's own words, with `note` (what the text may carry,
+ * lib/request-pane.ts's proposalOf) after it. Answers whether a
+ * proposal was stored. */
 export async function keepPrompt(
   caps: readonly string[],
   agent: string,
-  text: string
+  text: string,
+  note?: string
 ): Promise<boolean> {
   const copied = await copyText(text)
   if (!agent || !mayProposeWith(caps, studioToken())) {
@@ -74,7 +78,7 @@ export async function keepPrompt(
   }
   try {
     await putProposal(agent, text)
-    notifySave({ kind: "keep-prompt", agent, copied, proposal: "proposed" })
+    notifySave({ kind: "keep-prompt", agent, copied, proposal: "proposed", ...(note ? { note } : {}) })
     return true
   } catch (e) {
     notifySave({
@@ -89,8 +93,21 @@ export async function keepPrompt(
 }
 
 /** KeepAsPrompt is the Request pane's verb on a step's system prompt:
- * copy, and propose it as the run's agent's instructions. */
-export function KeepAsPrompt({ agent, text }: { agent?: string; text: string }) {
+ * copy, and propose the agent's instructions — the recorded text with
+ * the verified agent's tool snippets stripped, else as recorded with a
+ * note (proposalOf). `names` are the step's offered tools, `manifestHash`
+ * the run's weft.manifest.hash (the verification). */
+export function KeepAsPrompt({
+  agent,
+  text,
+  names = [],
+  manifestHash,
+}: {
+  agent?: string
+  text: string
+  names?: string[]
+  manifestHash?: string
+}) {
   const { caps } = useCapabilities()
   const qc = useQueryClient()
   const propose = !!agent && mayProposeWith(caps, studioToken())
@@ -101,13 +118,17 @@ export function KeepAsPrompt({ agent, text }: { agent?: string; text: string }) 
       data-keep-prompt
       title={
         propose
-          ? `copy this system prompt and propose it as ${agent}'s instructions (shown on the Agents page beside the registered ones)`
+          ? `copy this step's instructions and propose them as ${agent}'s (the tools' snippets stripped when the manifest verifies them; shown on the Agents page beside the registered ones)`
           : `copy this system prompt${caps.includes("proposals") ? ` — ${PROPOSAL_NEEDS_DEV}` : ""}`
       }
       onClick={() => {
-        void keepPrompt(caps, agent ?? "", text).then((stored) => {
-          if (stored) void qc.invalidateQueries({ queryKey: ["manifest"] })
-        })
+        void (async () => {
+          if (!propose) return keepPrompt(caps, agent ?? "", text)
+          const manifest = await qc.fetchQuery(manifestQuery()).catch(() => undefined)
+          const p = proposalOf(text, names, registeredAgent(manifest, agent, manifestHash))
+          const stored = await keepPrompt(caps, agent, p.text, p.note)
+          if (stored) await qc.invalidateQueries({ queryKey: ["manifest"] })
+        })()
       }}
     >
       {KEEP_PROMPT_LABEL}

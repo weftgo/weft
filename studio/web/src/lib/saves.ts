@@ -1,5 +1,6 @@
 // The two saves of plan F6, shared by Studio and the devtools panel
-// (one rule, one set of words — parity.test.ts holds both to them):
+// (one rule, one set of words — parity.test.ts holds both to them:
+// keep as prompt's line, the save-as-test label and title):
 //
 //   - "save as test": the run's wefttest zip (GET /api/runs/{id}/export
 //     ?format=wefttest, capability "export"; studio/export.go) — a
@@ -85,6 +86,8 @@ export type SaveOutcome =
   | { kind: "save-test"; ok: false; message: string }
   | KeepPrompt
   | { kind: "withdraw"; agent: string; ok: boolean; message?: string }
+  /** A plain copy (the Agents page's "copy proposed"). */
+  | { kind: "copy"; ok: boolean }
 
 /** keep as prompt's outcome: copied (or not), and the proposal's fate —
  * sent (the 200), refused (the server's words, verbatim), or not asked
@@ -95,6 +98,9 @@ export type KeepPrompt = {
   copied: boolean
   proposal: "proposed" | "refused" | "copy-only"
   message?: string
+  /** What the proposed text may carry (lib/request-pane.ts's
+   * proposalOf), said after the line — Studio's toast only. */
+  note?: string
 }
 
 export type SaveTone = "success" | "error" | "info"
@@ -105,8 +111,14 @@ export function saveWords(o: SaveOutcome): { title: string; tone: SaveTone } {
       return o.ok
         ? { title: `saved ${o.file} — unzip into a package directory and go test`, tone: "success" }
         : { title: `save as test refused: ${o.message}`, tone: "error" }
-    case "keep-prompt":
-      return keepPromptWords(o)
+    case "keep-prompt": {
+      const w = keepPromptWords(o)
+      return o.note ? { ...w, title: `${w.title} · ${o.note}` } : w
+    }
+    case "copy":
+      return o.ok
+        ? { title: "copied", tone: "success" }
+        : { title: "copy failed — the browser refused the clipboard", tone: "error" }
     case "withdraw":
       return o.ok
         ? { title: `proposal for ${o.agent} withdrawn`, tone: "success" }

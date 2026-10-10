@@ -219,9 +219,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    runs/{id}/steps/{n} (one step
 //    //    assembled: request, attempts, events, tool calls, children, holes, its own call's cost;
 //    //    capability "steps"), cost on every run row (plan A5, read time, never stored): cost_usd
-//    //    (own: usage minus the subagent children's, at its model's rates; null + cost_badge
-//    //    unpriced|unknown + cost_reason, never 0), cost_known, cache exact|unknown (no splits
-//    //    reported), delegated_cost_usd/_known/_reason (descendants' own, never folded); session rows
+//    //    (own: usage minus its core Subagent children's — `<id>/…` only; pool children and nested Generates are not
+//    //    subtracted — at its model's rates; null + cost_badge unpriced|unknown + cost_reason, never 0), cost_known,
+//    //    cache exact|not_reported (no cache split); running or end-never-arrived → own unknown, delegated_cost_usd/_known/_reason (descendants' own, never folded); session rows
 //    //    cost_usd = turns' own + delegated (no pool-child figure); settings/pricing (the effective
 //    //    table in the file's shape + source, path?; capability "pricing", every identity reads it), runs/{id}/export?format=json|jsonl|otlp|wefttest (the whole run as one
 //    //    download, capability "export"; otlp re-ingests through /v1/*, wefttest is a zip

@@ -172,12 +172,30 @@ children's (the core rolls them up), so `cost_usd` is its own model calls
 `delegated_cost_usd` (`delegated_cost_known`, `delegated_cost_reason`) is
 its descendants' own costs summed — null when any of them is unpriced,
 `0` with no children. A session row's `cost_usd` is its turns' own +
-delegated (the session's usage already includes them); a `thread/pool`
-child is another session, which obsdb's session row does not link, so
-no session carries a delegated figure. A step
+delegated, where a turn is every run of the session that is not a Subagent
+child of another of its runs; a `thread/pool` child session's run is a turn
+of the child session, not part of the parent session's row (obsdb groups
+sessions over top-level runs only, so a pool child's session does not
+appear in `/api/sessions` today). The run's own figure is priced at the
+run's model, so a step a Fallback or UseModel answered with another model
+is priced at the primary's rate there; the step route
 (`GET /api/runs/{id}/steps/{n}`) prices its own model call (step_finish's
-usage) at the model it requested, and its `children[]` carry own and
-delegated. An experiment's runs are priced one by one (each cell is a
+usage) at the model that answered it, else the requested one, and its
+`children[]` carry own and delegated. Only core Subagent children (run ids
+`<parent>/<step>/<call>`) are subtracted from a parent's own cost; a pool
+child's run and another agent's `Generate` inside a tool handler are
+linked to the parent but never rolled up, so they keep their own figures.
+`cache` is `exact` or `not_reported` (no cache split reported — every
+input token priced at the input rate, the figure possibly overstated); a
+running run's own cost, and one whose end never arrived, is unknown
+("running: usage arrives at run end"). `gcp.gemini`, the span's provider
+name, prices as `google`. The table's `cache_write` is the 5-minute rate
+(1.25× input), so a 1-hour cache write (2×) is understated; the Gemini
+rows have no `cached_input`, so cached Gemini prompts are priced at the
+input rate; Claude Opus 5.5 fast mode and long-context tiers are not
+modelled, and models with a long-context tier (Claude Haiku 5.5, Claude
+Sonnet 4.5, Gemini 2.5 Pro) are left out. `--pricing` / `WEFT_PRICING`
+paths are shown absolute in `/api/meta` and `/api/settings/pricing`. An experiment's runs are priced one by one (each cell is a
 run row); obsdb records no variant key on a run, so a per-variant total
 is the client's sum. `GET /api/settings/pricing` (capability `pricing`,
 read-only, every valid identity) answers the effective table in the

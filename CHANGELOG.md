@@ -151,7 +151,21 @@ module, ADR 0005).
   lightweight `DELETE FROM … WHERE` (ClickHouse 23.3 or later); its
   TTLs are unchanged, retention is additive. No migration on either
   backend.
-
+  `cache` is `exact` | `not_reported`: `not_reported` when the adapter
+  reported no cache split (no cached-input or cache-write tokens); every
+  input token is then priced at the input rate, and a known figure carries
+  `cost_reason` "no cache split reported; a cached prompt may be
+  overstated". A running run's own cost is unknown (`cost_usd` null,
+  `cost_badge` `unknown`, `cost_reason` "running: usage arrives at run
+  end"), as is one whose end never arrived; its delegated figure is still
+  computed. Only core Subagent children (run ids `<parent>/<step>/<call>`)
+  are subtracted from a parent's own cost and summed into
+  `delegated_cost_usd`; a thread/pool child session's run and another
+  agent's `Generate` inside a tool handler are linked to the parent but
+  never rolled up, so they keep their own figures on their own rows. A step
+  is priced at the model that answered it (`gen_ai.response.model`), else
+  the requested one; a run's own figure is priced at the run's model.
+  `gcp.gemini` (the span's provider name) prices as `google`.
 - Cost (plan A5.1): Studio prices usage at read time — never stored,
   nothing fetched. `studio.Pricing(table)` sets the table
   (`studio.PricingTable` / `studio.ModelPrice`: `{provider, model_glob,

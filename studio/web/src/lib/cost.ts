@@ -74,9 +74,32 @@ export function costView(f: CostFields | null | undefined): CostView {
   return view(f?.cost_usd, f?.cost_known, f?.cost_reason, f?.cost_badge, f?.cache)
 }
 
-/** delegatedView reads a run's delegated block (its subagents'). */
+/** The reason words studio/pricing.go gives a model no pricing row
+ * matches (or a run that names none): what makes a figure "unpriced"
+ * rather than "unknown". */
+const UNPRICED_WORDS = /\bno row\b.*\bmatches\b|reported no model to price/
+
+/** delegatedView reads a run's delegated block (its subagents'). The
+ * API sends no delegated badge, only delegated_cost_reason: the badge
+ * is "unpriced" when that reason names an unpriced model, else
+ * "unknown" — a child still running (usage arrives at its end), one
+ * whose end never arrived, children that could not be read — and the
+ * title is the API's reason either way. */
 export function delegatedView(f: DelegatedCostFields | null | undefined): CostView {
-  return view(f?.delegated_cost_usd, f?.delegated_cost_known, f?.delegated_cost_reason, f?.delegated_cost_known === false ? "unpriced" : undefined)
+  const known = f?.delegated_cost_known
+  const reason = f?.delegated_cost_reason
+  const badge = known === false ? (reason && !UNPRICED_WORDS.test(reason) ? "unknown" : "unpriced") : undefined
+  return view(f?.delegated_cost_usd, known, reason, badge)
+}
+
+/** The reason a lost matrix cell's cost carries: Studio stopped
+ * following its command, so the run it may have started is not read
+ * and the variant's total cannot be known. */
+export const LOST_CELL_REASON = "a lost cell has no cost: Studio stopped following its command, so the run it started is not read"
+
+/** lostCellCost is a lost cell's figure: unknown, its own reason. */
+export function lostCellCost(): CostView {
+  return view(null, false, LOST_CELL_REASON, "unknown")
 }
 
 /** runTotal is a run's whole bill, own + delegated — search's sort
@@ -109,16 +132,22 @@ export function sortByCost<T extends RunRow>(runs: readonly T[]): T[] {
 /** sumCost totals runs' whole bills (a playground variant's runs):
  * unknown — with the first reason — when any run is missing or
  * unknown; an empty list is unknown too (nothing to total). */
-export function sumCost(rows: readonly ((CostFields & DelegatedCostFields) | null | undefined)[]): CostView {
+export function sumCost(rows: readonly ((CostFields & DelegatedCostFields) | CostView | null | undefined)[]): CostView {
   if (!rows.length) return view(null, false, "no run to total")
   let usd = 0
   for (const r of rows) {
     if (!r) return view(null, false, "a run's cost is not read yet")
+    if ("text" in r) {
+      // An already drawn figure (lostCellCost): known adds, unknown is the total's reason.
+      if (!r.known) return view(null, false, r.title, r.badge)
+      usd += r.usd ?? 0
+      continue
+    }
     const t = runTotal(r)
     if (!t.known) {
       const own = costView(r)
-      const why = own.known ? delegatedView(r).title : own.title
-      return view(null, false, `a run is not priced: ${why}`, own.badge ?? "unpriced")
+      const part = own.known ? delegatedView(r) : own
+      return view(null, false, `a run is not priced: ${part.title}`, part.badge ?? "unpriced")
     }
     usd += t.usd
   }
@@ -147,10 +176,15 @@ export function costCell(
 /** The words and tooltip a compared cost cell carries: the step
  * compare's (CELL_WORDS, CELL_REASONS), the figure where it changed,
  * the side's reason where it is unknown. */
-export function costCellWords(state: CellState, side: CostFields | null | undefined): { text: string; title: string } {
+export function costCellWords(
+  state: CellState,
+  side: CostFields | null | undefined
+): { text: string; title: string; why: string } {
   const v = costView(side)
-  if (state === "changed") return { text: v.text, title: `${CELL_REASONS.changed} · ${v.title}` }
-  if (state === "unknown")
-    return { text: CELL_WORDS.unknown, title: `a side's cost is not known: ${v.known ? "the base run's is not" : v.title}` }
-  return { text: CELL_WORDS[state], title: CELL_REASONS[state] }
+  if (state === "changed") return { text: v.text, title: `${CELL_REASONS.changed} · ${v.title}`, why: "" }
+  if (state === "unknown") {
+    const why = v.known ? "the base run's is not" : v.title
+    return { text: CELL_WORDS.unknown, title: `a side's cost is not known: ${why}`, why }
+  }
+  return { text: CELL_WORDS[state], title: CELL_REASONS[state], why: "" }
 }

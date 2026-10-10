@@ -4,10 +4,13 @@
 // delegated figures, the step card, the compare table's cost column,
 // the playground matrix's per-variant total, the sessions list — and
 // none of it without capability "pricing".
-import { cleanup, configure, fireEvent, screen, waitFor, within } from "@testing-library/react"
+import { cleanup, configure, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import axe from "axe-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { CostText, RunCost } from "@/components/studio/cost"
 import { setStudioToken } from "@/lib/api"
+import { costView, LOST_CELL_REASON } from "@/lib/cost"
 import type { RunDoc, RunRow, RunsPage, SessionsPage, StepDoc } from "@/lib/api"
 import type { DiffDoc } from "@/lib/stepdiff"
 import { renderApp, stubBrowser } from "@/test/app"
@@ -56,6 +59,15 @@ afterEach(() => {
   setStudioToken("")
 })
 
+/** The words a sighted reader sees: the element's text less its
+ * visually hidden (sr-only) parts. */
+const visible = (el: Element | null | undefined): string => {
+  if (!el) return ""
+  const c = el.cloneNode(true) as Element
+  c.querySelectorAll(".sr-only").forEach((n) => n.remove())
+  return c.textContent
+}
+
 const costOf = (id: string) => {
   const tr = screen.getByText(id, { selector: "span" }).closest("tr")!
   return tr.querySelector<HTMLElement>("[data-cost-cell]")
@@ -100,6 +112,41 @@ describe("the runs table's Cost column", () => {
     await waitFor(() => expect(studio.calls("GET search")).toHaveLength(1))
     expect(studio.calls("GET search")[0].query.get("sort")).toBe("cost")
     await waitFor(() => expect(listed()).toEqual(["r_dear", "r_cheap", "r_stale"]))
+  })
+
+  it("the server sort keeps the page's filters on /api/search, pages by next_offset and says its cap", async () => {
+    studio
+      .on("GET meta", meta(["pricing", "search"]))
+      .on("GET runs", { total: 3, runs: list, next_before: null })
+      .on("GET search", (req) =>
+        req.query.get("offset") === "2"
+          ? { total: 3, runs: [rStale], sort: "cost", next_offset: null, cost_sort_cap: 2000 }
+          : { total: 3, runs: [list[1], list[0]], sort: "cost", next_offset: 2, cost_sort_cap: 2000 }
+      )
+    renderApp("/runs?agent=orders&status=succeeded&session=s_1&public_id=pub_1&tag=tier%3Dgold&sort=cost")
+    await waitFor(() => expect(listed()).toEqual(["r_dear", "r_cheap"]))
+    const q = studio.calls("GET search")[0].query
+    expect(Object.fromEntries(q)).toMatchObject({
+      sort: "cost",
+      agent: "orders",
+      status: "succeeded",
+      session: "s_1",
+      public_id: "pub_1",
+      "tag.tier": "gold",
+    })
+    expect(q.has("offset")).toBe(false)
+    expect(q.has("before")).toBe(false)
+    // The cap note.
+    const cap = document.querySelector<HTMLElement>("[data-cost-sort-cap]")!
+    expect(cap.textContent).toContain("sorted by cost among the newest 2,000 matching runs")
+    // The next page: offset 2, the same filters.
+    fireEvent.click(screen.getByRole("button", { name: "load more" }))
+    await waitFor(() => expect(listed()).toEqual(["r_dear", "r_cheap", "r_stale"]))
+    const q2 = studio.calls("GET search")[1].query
+    expect(q2.get("offset")).toBe("2")
+    expect(q2.get("agent")).toBe("orders")
+    expect(q2.get("tag.tier")).toBe("gold")
+    await waitFor(() => expect(screen.queryByRole("button", { name: "load more" })).toBeNull())
   })
 
   it("without search, the column sorts the loaded rows only and says so", async () => {
@@ -167,9 +214,28 @@ describe("the run header", () => {
       expect(el).toBeTruthy()
       return el!
     })
-    expect(within(cost).getByLabelText(/^own cost/).textContent).toBe("$0.01")
-    expect(within(cost).getByLabelText(/^delegated cost/).textContent).toBe("$0.0050")
+    expect(cost.querySelector('[data-cost-part="own"] [data-cost]')!.textContent).toBe("$0.01")
+    expect(cost.querySelector('[data-cost-part="delegated"] [data-cost]')!.textContent).toBe("$0.0050")
     expect(cost.textContent).toMatch(/own\s*\$0\.01\s*·\s*delegated\s*\$0\.0050/)
+  })
+
+  it("a delegated figure unknown because a child is running is badged unknown, the API's reason its words", async () => {
+    const running = "a subagent run is not priced: r_rd/0/call_1 (running: usage arrives at run end)"
+    const child = { ...priced("r_rd/0/call_1", 0, 0, { parent_run_id: "r_rd", parent_call_id: "call_1" }), status: "running" as const }
+    serveRun(
+      { ...priced("r_rd", 0.01, null, { steps: 1, event_count: 4 }), delegated_cost_reason: running, children: [child] },
+      ["pricing"]
+    )
+    renderApp("/runs/r_rd?view=story")
+    const del = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>('[data-run-cost] [data-cost-part="delegated"] [data-cost]')
+      expect(el).toBeTruthy()
+      return el!
+    })
+    expect(del.getAttribute("data-cost-badge")).toBe("unknown")
+    expect(del.getAttribute("title")).toBe(running)
+    expect(visible(del)).toBe("—")
+    expect(del.querySelector(".sr-only")!.textContent).toBe(` not known: ${running}`)
   })
 
   it("an unpriced run is — with the reason, never $0.00; cache not reported is a hint", async () => {
@@ -207,8 +273,11 @@ describe("the run header", () => {
       expect(el).toBeTruthy()
       return el!
     })
-    expect(cost.textContent).toBe("—")
+    expect(visible(cost)).toBe("—")
     expect(cost.getAttribute("title")).toBe(step0.cost_reason)
+    // The label and the reason ride in the accessible text, never an aria-label.
+    expect(cost.hasAttribute("aria-label")).toBe(false)
+    expect(cost.textContent).toBe(`step cost — not known: ${step0.cost_reason}`)
   })
 
   it("no cost without capability pricing", async () => {
@@ -253,8 +322,11 @@ describe("the compare table's cost column", () => {
     expect(costCell(0, "r_db")!.getAttribute("data-diff-state")).toBe("same")
     expect(costCell(1, "r_db")!.getAttribute("data-diff-state")).toBe("changed")
     expect(costCell(1, "r_db")!.textContent).toBe("$0.02")
-    expect(costCell(2, "r_db")!.textContent).toBe("not comparable")
+    expect(visible(costCell(2, "r_db"))).toBe("not comparable")
     expect(costCell(2, "r_db")!.getAttribute("title")).toContain("no row matches x/glm")
+    expect(costCell(2, "r_db")!.querySelector(".sr-only")!.textContent).toBe(" not known: no row matches x/glm")
+    // A different figure is drawn neutral: the cost column never marks a change.
+    expect(costCell(1, "r_db")!.className).not.toContain("bg-ev-error")
     // Cost is informational: only step 3 (tool results) is a change.
     expect([...document.querySelectorAll("[data-diff-marker]")].map((m) => m.getAttribute("data-diff-marker"))).toEqual(["3"])
   })
@@ -295,7 +367,7 @@ describe("the playground matrix's cost", () => {
     updated: rOK.started,
   })
 
-  async function runMatrix(caps: string[], b: RunRow) {
+  async function runMatrix(caps: string[], b: RunRow, bState = "finished") {
     let n = 0
     studio
       .on("GET meta", meta(["live", "playground", "runtimes", ...caps]))
@@ -306,7 +378,7 @@ describe("the playground matrix's cost", () => {
       .on("POST experiments", (req) => req.body)
       .on("POST playground/runs", () => command(`cmd_m${++n}`, "queued"))
       .on("GET playground/commands/cmd_m1", command("cmd_m1", "finished", "pg_m1"))
-      .on("GET playground/commands/cmd_m2", command("cmd_m2", "finished", "pg_m2"))
+      .on("GET playground/commands/cmd_m2", command("cmd_m2", bState, "pg_m2"))
       .on("GET runs/pg_m1", { ...priced("pg_m1", 0.03, 0.01, { playground: true }), children: [] })
       .on("GET runs/pg_m2", { ...b, children: [] })
     renderApp("/playground?run=r_ok")
@@ -336,8 +408,18 @@ describe("the playground matrix's cost", () => {
         ),
       { timeout: 10_000 }
     )
-    expect(total("B")!.textContent).toBe("—")
+    expect(visible(total("B"))).toBe("—")
     expect(total("B")!.querySelector("[data-cost]")!.getAttribute("data-cost")).toBe("unknown")
+    await waitFor(() => expect(total("A")?.textContent).toBe("$0.04"))
+  })
+
+  it("a lost cell that had started a run makes its variant's total unknown, in its own words", async () => {
+    await runMatrix(["pricing"], priced("pg_m2", 0.02, 0, { playground: true }), "lost")
+    await waitFor(() => expect(total("B")?.querySelector("[data-cost]")?.getAttribute("title")).toBe(LOST_CELL_REASON), {
+      timeout: 10_000,
+    })
+    expect(visible(total("B"))).toBe("—")
+    expect(total("B")!.querySelector("[data-cost]")!.getAttribute("data-cost-badge")).toBe("unknown")
     await waitFor(() => expect(total("A")?.textContent).toBe("$0.04"))
   })
 
@@ -348,5 +430,28 @@ describe("the playground matrix's cost", () => {
     })
     expect(total("A")).toBeNull()
     expect(document.querySelector("[data-cell-cost]")).toBeNull()
+  })
+})
+
+describe("the cost figures' accessibility", () => {
+  it("an unknown figure says its reason in the accessible text; axe finds nothing", async () => {
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null)
+    const { container } = render(
+      <div>
+        <RunCost run={{ ...rFail, delegated_cost_known: false, delegated_cost_reason: "running: usage arrives at run end" }} hasChildren />
+        <CostText v={costView(rStale)} label="step cost" />
+        <CostText v={costView(priced("r_k", 0.5))} />
+      </div>
+    )
+    const res = await axe.run(container)
+    expect(res.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.html).join(" | ")}`)).toEqual([])
+    expect(container.querySelectorAll("[aria-label]")).toHaveLength(0)
+    const words = [...container.querySelectorAll("[data-cost-words]")].map((n) => n.textContent)
+    expect(words).toEqual([
+      ` not known: ${rFail.cost_reason}`,
+      " not known: running: usage arrives at run end",
+      ` not known: ${rStale.cost_reason}`,
+    ])
+    vi.restoreAllMocks()
   })
 })

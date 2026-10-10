@@ -18,7 +18,7 @@ import type {
   SessionsPage,
   StepDoc,
 } from "./api"
-import { costCell, costCellWords, costView, delegatedView, formatUSD, runTotal, sortByCost, sumCost } from "./cost"
+import { costCell, costCellWords, costView, delegatedView, formatUSD, LOST_CELL_REASON, lostCellCost, runTotal, sortByCost, sumCost } from "./cost"
 import { CELL_REASONS, CELL_WORDS } from "./stepdiff"
 
 const API = resolve(process.cwd(), "../testdata/api")
@@ -148,7 +148,19 @@ describe("costView", () => {
   })
   it("delegated reads its own block", () => {
     expect(delegatedView(priced(1, 0.25)).text).toBe("$0.25")
-    expect(delegatedView(priced(1, null))).toMatchObject({ known: false, text: "—" })
+    expect(delegatedView(priced(1, null))).toMatchObject({ known: false, text: "—", badge: "unpriced" })
+  })
+  it("a delegated figure unknown for another cause than an unpriced model is badged unknown, the API's reason its title", () => {
+    const running = "a subagent run is not priced: r/0/c1 (running: usage arrives at run end)"
+    const v = delegatedView({ ...priced(1, null), delegated_cost_reason: running })
+    expect(v).toMatchObject({ known: false, text: "—", badge: "unknown", title: running })
+    const unread = "the run's subagent children could not be read, so its own usage cannot be told from theirs"
+    expect(delegatedView({ ...priced(1, null), delegated_cost_reason: unread }).badge).toBe("unknown")
+    // A mix names an unpriced model: unpriced.
+    const mixed = "a subagent run is not priced: c1 (running: usage arrives at run end); c2 (no row of the default pricing table matches x/y)"
+    expect(delegatedView({ ...priced(1, null), delegated_cost_reason: mixed }).badge).toBe("unpriced")
+    // A total over it says the same.
+    expect(sumCost([{ ...priced(1, null), delegated_cost_reason: running }])).toMatchObject({ known: false, badge: "unknown" })
   })
 })
 
@@ -171,6 +183,10 @@ describe("the cost order and totals", () => {
     expect(one.title).toContain("no row of the default pricing table matches wefttest/script")
     expect(sumCost([priced(0.01), undefined])).toMatchObject({ known: false, text: "—" })
   })
+  it("a lost cell is its own reason, and the total is unknown", () => {
+    const v = sumCost([priced(0.01), lostCellCost()])
+    expect(v).toMatchObject({ known: false, text: "—", badge: "unknown", title: LOST_CELL_REASON })
+  })
 })
 
 describe("the compare's cost cell (lib/stepdiff.ts's rule and words)", () => {
@@ -186,8 +202,9 @@ describe("the compare's cost cell (lib/stepdiff.ts's rule and words)", () => {
   it("draws the step compare's words: unknown reads not comparable, never same", () => {
     expect(costCellWords("unknown", unpriced).text).toBe(CELL_WORDS.unknown)
     expect(costCellWords("unknown", unpriced).title).toContain("no row matches x/y")
-    expect(costCellWords("same", known(0.1))).toEqual({ text: CELL_WORDS.same, title: CELL_REASONS.same })
-    expect(costCellWords("missing", null)).toEqual({ text: CELL_WORDS.missing, title: CELL_REASONS.missing })
+    expect(costCellWords("unknown", unpriced).why).toBe("no row matches x/y")
+    expect(costCellWords("same", known(0.1))).toEqual({ text: CELL_WORDS.same, title: CELL_REASONS.same, why: "" })
+    expect(costCellWords("missing", null)).toEqual({ text: CELL_WORDS.missing, title: CELL_REASONS.missing, why: "" })
     expect(costCellWords("changed", known(0.2)).text).toBe("$0.20")
   })
 })

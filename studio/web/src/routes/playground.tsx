@@ -84,7 +84,7 @@ import { useDocumentTitle } from "@/hooks/use-document-title"
 import { notify } from "@/lib/notify"
 import { StepCompare } from "@/components/studio/step-diff"
 import { CostText, useCostCapable } from "@/components/studio/cost"
-import { sumCost } from "@/lib/cost"
+import { lostCellCost, sumCost } from "@/lib/cost"
 
 // The command's pure halves and the form's controls live in shared
 // modules (plan F1: the run page's replay drawer renders the same
@@ -1662,11 +1662,15 @@ function Matrix({
   }
   const variantCost = (vk: string) =>
     sumCost(
-      inputKeys.flatMap((ik) => {
+      inputKeys.flatMap((ik): Parameters<typeof sumCost>[0][number][] => {
         const key = `${vk}\u0000${ik}`
         const c = cells[key] as Experiment | undefined
         // A cell that ran nothing (rejected, lost before a run) bills nothing.
         if (!c || (!c.runID && (c.state === "rejected" || c.state === "lost"))) return []
+        // A lost cell that had started a run may have billed: its own
+        // reason, and the variant's total unknown — never left at "not
+        // read yet", never dropped from the sum.
+        if (c.state === "lost") return [lostCellCost()]
         return [rowOf.get(key)]
       })
     )

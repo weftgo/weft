@@ -12,7 +12,12 @@ export function useCostCapable(): boolean {
   return useCapabilities().has("pricing")
 }
 
-/** CostText draws one figure: its words, its title, data-cost-known. */
+/** CostText draws one figure: its words, its title, data-cost-known.
+ * An unknown figure says its reason in the accessible text too (the
+ * hole badge's pattern: a visually hidden " not known: <reason>" beside
+ * the visible "—", the title kept) — never an aria-label, which a bare
+ * span may not carry (axe aria-prohibited-attr). label, for a figure
+ * with no visible words beside it, is a visually hidden prefix. */
 export function CostText({ v, className = "", label }: { v: CostView; className?: string; label?: string }) {
   return (
     <span
@@ -20,9 +25,14 @@ export function CostText({ v, className = "", label }: { v: CostView; className?
       title={v.title}
       data-cost={v.known ? String(v.usd) : "unknown"}
       data-cost-badge={v.known ? undefined : v.badge}
-      aria-label={label ? `${label} ${v.known ? v.text : `not known: ${v.title}`}` : undefined}
     >
+      {label ? <span className="sr-only" data-cost-label>{`${label} `}</span> : null}
       {v.text}
+      {v.known ? null : (
+        <span className="sr-only" data-cost-words>
+          {` not known: ${v.title}`}
+        </span>
+      )}
     </span>
   )
 }
@@ -58,17 +68,23 @@ export function RunCost({
     return (
       <span className="inline-flex items-center gap-1.5" data-run-cost>
         <span>cost</span>
-        <CostText v={own} label="cost" />
+        <span data-cost-part="own">
+          <CostText v={own} />
+        </span>
         <CacheHint fields={run} />
       </span>
     )
   return (
     <span className="inline-flex items-center gap-1.5" data-run-cost>
       <span>own</span>
-      <CostText v={own} label="own cost" />
+      <span data-cost-part="own">
+        <CostText v={own} />
+      </span>
       <span className="text-faint">·</span>
       <span>delegated</span>
-      <CostText v={delegatedView(run)} label="delegated cost" />
+      <span data-cost-part="delegated">
+        <CostText v={delegatedView(run)} />
+      </span>
       <CacheHint fields={run} />
     </span>
   )

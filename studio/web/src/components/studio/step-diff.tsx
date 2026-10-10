@@ -129,6 +129,21 @@ function costFieldsOf(r: StepCostRead | undefined): CostFields | null {
   return null
 }
 
+/** The cost column's tones: STATE_TONE less the change mark — cost is
+ * informational (it follows usage, already compared), so a different
+ * figure is drawn neutral, never as a change. */
+const COST_TONE: Record<CellState, string> = { ...STATE_TONE, changed: "text-foreground" }
+
+/** CostWords is an unknown cost's reason in the accessible text (the
+ * hole badge's pattern), beside the visible words and the title. */
+function CostWords({ why }: { why: string }) {
+  return (
+    <span className="sr-only" data-cost-words>
+      {` not known: ${why}`}
+    </span>
+  )
+}
+
 /** CostCellTd is one run's cost at one ordinal: the base's figure, or
  * a compared run's state against it (lib/cost.ts's costCell: an
  * unknown side is "not comparable"). */
@@ -165,6 +180,7 @@ function CostCellTd({
     return (
       <td className={`${cls} ${v.known ? "" : "text-faint"}`} data-diff-run={run} data-diff-cell="cost" title={v.title}>
         {v.text}
+        {v.known ? null : <CostWords why={v.title} />}
       </td>
     )
   }
@@ -172,13 +188,14 @@ function CostCellTd({
   const w = costCellWords(state, state === "unknown" && costView(side).known ? baseSide : side)
   return (
     <td
-      className={`${cls} ${STATE_TONE[state]}`}
+      className={`${cls} ${COST_TONE[state]}`}
       data-diff-run={run}
       data-diff-cell="cost"
       data-diff-state={state}
       title={w.title}
     >
       {w.text}
+      {state === "unknown" ? <CostWords why={w.why} /> : null}
     </td>
   )
 }

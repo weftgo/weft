@@ -151,13 +151,13 @@ describe("costView", () => {
     expect(delegatedView(priced(1, null))).toMatchObject({ known: false, text: "—", badge: "unpriced" })
   })
   it("a delegated figure unknown for another cause than an unpriced model is badged unknown, the API's reason its title", () => {
-    const running = "a subagent run is not priced: r/0/c1 (running: usage arrives at run end)"
+    const running = "a subagent run's cost is not known yet: r/0/c1 (running: usage arrives at run end)"
     const v = delegatedView({ ...priced(1, null), delegated_cost_reason: running })
     expect(v).toMatchObject({ known: false, text: "—", badge: "unknown", title: running })
     const unread = "the run's subagent children could not be read, so its own usage cannot be told from theirs"
     expect(delegatedView({ ...priced(1, null), delegated_cost_reason: unread }).badge).toBe("unknown")
     // A mix names an unpriced model: unpriced.
-    const mixed = "a subagent run is not priced: c1 (running: usage arrives at run end); c2 (no row of the default pricing table matches x/y)"
+    const mixed = "a subagent run's cost is not known yet: c1 (running: usage arrives at run end); c2 (no row of the default pricing table matches x/y)"
     expect(delegatedView({ ...priced(1, null), delegated_cost_reason: mixed }).badge).toBe("unpriced")
     // A total over it says the same.
     expect(sumCost([{ ...priced(1, null), delegated_cost_reason: running }])).toMatchObject({ known: false, badge: "unknown" })

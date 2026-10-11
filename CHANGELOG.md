@@ -545,6 +545,11 @@ breaking).
   records no longer forms a post over Studio's 16 MiB ingest limit, which
   was refused whole and lost every record in it (ADR 0028 §12).
 
+- studio: a cost whose badge is `unknown` (a subagent or turn still running,
+  or whose end never arrived) now says so in its reason — "a subagent run's
+  cost is not known yet: …", "a turn's cost is not known yet: …" — instead of
+  "… is not priced: …", which stays for an `unpriced` figure (no pricing row).
+
 ## 0.13.0 — 2026-10-10
 
 Phase 4 of the devtools plan (replay): replay from any step, call or

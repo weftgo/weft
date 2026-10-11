@@ -147,7 +147,9 @@ export function sumCost(rows: readonly ((CostFields & DelegatedCostFields) | Cos
     if (!t.known) {
       const own = costView(r)
       const part = own.known ? delegatedView(r) : own
-      return view(null, false, `a run is not priced: ${part.title}`, part.badge ?? "unpriced")
+      const badge = part.badge ?? "unpriced"
+      const what = badge === "unknown" ? "a run's cost is not known yet" : "a run is not priced"
+      return view(null, false, `${what}: ${part.title}`, badge)
     }
     usd += t.usd
   }

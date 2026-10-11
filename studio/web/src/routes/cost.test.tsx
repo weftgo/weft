@@ -220,7 +220,7 @@ describe("the run header", () => {
   })
 
   it("a delegated figure unknown because a child is running is badged unknown, the API's reason its words", async () => {
-    const running = "a subagent run is not priced: r_rd/0/call_1 (running: usage arrives at run end)"
+    const running = "a subagent run's cost is not known yet: r_rd/0/call_1 (running: usage arrives at run end)"
     const child = { ...priced("r_rd/0/call_1", 0, 0, { parent_run_id: "r_rd", parent_call_id: "call_1" }), status: "running" as const }
     serveRun(
       { ...priced("r_rd", 0.01, null, { steps: 1, event_count: 4 }), delegated_cost_reason: running, children: [child] },

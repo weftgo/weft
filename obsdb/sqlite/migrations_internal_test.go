@@ -73,9 +73,9 @@ func TestUpgradeFrom0002(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.InstructionsHash != "" || run.CatalogHash != "" || run.RequestCount != 0 || run.RequestsHole() != obsdb.HoleNotRecorded {
-		t.Errorf("upgraded run = %q %q %d hole %q; want the defaults, not_recorded",
-			run.InstructionsHash, run.CatalogHash, run.RequestCount, run.RequestsHole())
+	if run.InstructionsHash != "" || run.CatalogHash != "" || run.RequestCount != 0 || run.RequestsHole() != obsdb.HoleNotRecorded || run.Derived {
+		t.Errorf("upgraded run = %q %q %d hole %q derived %v; want the defaults, not_recorded, not derived (0008's default)",
+			run.InstructionsHash, run.CatalogHash, run.RequestCount, run.RequestsHole(), run.Derived)
 	}
 	var hole *obsdb.HoleError
 	if _, err := db.Tools(context.Background(), "old1", "any"); !errors.Is(err, obsdb.ErrNotFound) ||
@@ -96,8 +96,8 @@ func TestUpgradeFrom0002(t *testing.T) {
 	if err := raw.QueryRowContext(ctx, `SELECT MAX(version) FROM obsdb_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 7 {
-		t.Errorf("migration max = %d, want 7 (through 0007 the command store)", version)
+	if version != 8 {
+		t.Errorf("migration max = %d, want 8 (through 0008 the derived flag)", version)
 	}
 	var agent, instructions, catalog string
 	var steps, requests int
@@ -297,7 +297,7 @@ func TestUpgradeFrom0006AddsCommandStore(t *testing.T) {
 	if err := db.(*DB).reads.QueryRowContext(ctx, `SELECT MAX(version) FROM obsdb_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 7 {
-		t.Errorf("migration max after the upgrade = %d, want 7", version)
+	if version != 8 {
+		t.Errorf("migration max after the upgrade = %d, want 8 (through 0008 the derived flag)", version)
 	}
 }

@@ -66,7 +66,13 @@
   },
   {
     "hole": "derived",
-    "reason": "computed by the reader, not stored as emitted: the record that would say it is absent"
+    "reason": "computed by the reader, not stored as emitted: the record that would say it is absent",
+    "causes": {
+      "stock_spans": {
+        "reason": "derived from spans · no events",
+        "fix": "the producer exports stock OTel GenAI spans only: emit weft's records (docs/record-contract.md) for events, the transcript and requests"
+      }
+    }
   },
   {
     "hole": "hidden",

@@ -25,7 +25,7 @@ const runColumns = `run_id, parent_run_id, parent_call_id, trace_id, agent, prov
 	steps, pending, stop_reason,
 	input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens,
 	event_count, delta_count, message_count,
-	instructions_hash, catalog_hash, request_count`
+	instructions_hash, catalog_hash, request_count, derived`
 
 // promptPreviewColumn is the run row's prompt_preview (plan A7): the
 // prompt migration 0004's run_search holds, cut to
@@ -210,7 +210,7 @@ func (d *DB) runRowsQuery(ctx context.Context, where string, args []any) ([]runR
 			&r.Steps, &r.Pending, &r.StopReason,
 			&r.InTok, &r.OutTok, &r.CachedTok, &r.CacheWrite, &r.ReasonTok,
 			&r.EventCount, &r.DeltaCount, &r.MessageCount,
-			&r.InstructionsHash, &r.CatalogHash, &r.RequestCount, &r.PromptPreview); err != nil {
+			&r.InstructionsHash, &r.CatalogHash, &r.RequestCount, &r.Derived, &r.PromptPreview); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -234,6 +234,7 @@ type runRowScan struct {
 	EventCount, DeltaCount, MessageCount              int64
 	InstructionsHash, CatalogHash                     string
 	RequestCount                                      int64
+	Derived                                           bool
 	PromptPreview                                     string
 }
 
@@ -254,7 +255,7 @@ func scanRunRow(r runRowScan, now time.Time) (obsdb.RunRow, error) {
 		},
 		EventCount: r.EventCount, DeltaCount: r.DeltaCount, MessageCount: r.MessageCount,
 		InstructionsHash: r.InstructionsHash, CatalogHash: r.CatalogHash, RequestCount: r.RequestCount,
-		PromptPreview: r.PromptPreview,
+		PromptPreview: r.PromptPreview, Derived: r.Derived,
 	}
 	if r.Finished.Valid {
 		f := time.Unix(0, r.Finished.Int64).UTC()
@@ -527,6 +528,16 @@ func (d *DB) RunSpans(ctx context.Context, runID string) (_ []obsdb.Span, err er
 	if err := d.runExists(ctx, runID); err != nil {
 		return nil, err
 	}
+	if trace, _, ok := obsdb.ParseStockRunID(runID); ok {
+		// A derived run (docs/record-contract.md §9) names no span by
+		// run id: its spans are its root's subtree, read from the
+		// trace (obsdb.StockRunSpans).
+		spans, err := d.querySpans(ctx, `trace_id = ? ORDER BY start_ns, span_id`, trace)
+		if err != nil {
+			return nil, err
+		}
+		return obsdb.StockRunSpans(spans, runID), nil
+	}
 	return d.querySpans(ctx, `run_id = ? ORDER BY start_ns, span_id`, runID)
 }
 
@@ -698,7 +709,17 @@ func (d *DB) fillTraces(ctx context.Context, rows []obsdb.TraceRow) error {
 }
 
 func (d *DB) querySpans(ctx context.Context, where string, arg any) ([]obsdb.Span, error) {
-	rs, err := d.reads.QueryContext(ctx, `SELECT trace_id, span_id, parent_span_id, name, kind,
+	return querySpansOn(ctx, d.reads, where, arg)
+}
+
+// spanQueryer is what querySpansOn reads through: the read pool, or the
+// writer's transaction (Write re-derives a trace inside it).
+type spanQueryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+func querySpansOn(ctx context.Context, q spanQueryer, where string, arg any) ([]obsdb.Span, error) {
+	rs, err := q.QueryContext(ctx, `SELECT trace_id, span_id, parent_span_id, name, kind,
 		start_ns, end_ns, status_code, status_message, service, attrs, resource, events
 		FROM spans WHERE `+where, arg)
 	if err != nil {

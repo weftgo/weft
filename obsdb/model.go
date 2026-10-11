@@ -179,6 +179,16 @@ func DeriveRecord(r Record) Weft {
 		// messages count skip it; Compactions reports a view at -1 as
 		// an error.
 		w.Pos = -1
+	case w.Record == "event":
+		// An event without its position: only a malformed producer
+		// gets here. -1 — ClickHouse's records view has always read it
+		// so — never position 0, where it would collide with the run's
+		// run_start and one of the two be dropped. Events reads from
+		// position 0, so it is stored, counted and never shown. (A
+		// delta without its position stays at 0: it is never stored,
+		// its only effect is the delta high-water mark, and the
+		// ClickHouse runs view counts it at 0 too.)
+		w.Pos = -1
 	case w.Record == RecordCompaction:
 		// thread's session marker has no counter (ADR 0028 §8): its
 		// position is derived from its hash, so a retried batch lands on

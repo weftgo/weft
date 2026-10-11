@@ -108,8 +108,9 @@ type diffSide struct {
 	Holes       []stepHole       `json:"holes"`
 
 	// What the side could not record, for compareSides (never served:
-	// each is a hole in Holes).
-	eventsLost, contentLost, namesLost, textLost bool
+	// each is a hole in Holes). derived: the side's run was built from
+	// stock spans (derivedSide) — no column of it was recorded.
+	eventsLost, contentLost, namesLost, textLost, derived bool
 }
 
 // diffToolCall is a call as compared: its name and its arguments,
@@ -227,7 +228,11 @@ func (s *Server) diffSteps(r *http.Request, id string, prompts bool) (diffRunSte
 				return diffRunSteps{}, err
 			}
 		}
-		out.sides = append(out.sides, diffSideOf(doc, texts[n], readable))
+		side := diffSideOf(doc, texts[n], readable)
+		if sr.det.Derived {
+			derivedSide(side)
+		}
+		out.sides = append(out.sides, side)
 	}
 	// The run row's count when it says more (a truncated diff, a step
 	// the walk could not reach); a running run's row may lag its
@@ -343,6 +348,19 @@ func diffSideOf(doc stepDoc, text *string, readable bool) *diffSide {
 	return side
 }
 
+// derivedSide is a step of a derived run (obsdb.RunRow.Derived,
+// docs/record-contract.md §9) as the diff states it: no column was
+// recorded — no events, no transcript, no request record — so every
+// one is unknown against any other side (compareSides), and its one
+// hole is derivedBadge's, whatever the step assembly guessed from the
+// spans (a gap, an old weft) — those words would send its author to
+// the wrong fix. The status and the marks stay: the chat span says them.
+func derivedSide(side *diffSide) {
+	side.derived = true
+	b := derivedBadge()
+	side.Holes = []stepHole{{Hole: b.Badge, Reason: b.Reason, Fix: b.Fix}}
+}
+
 // compareSides lists what differs between two sides of one step
 // (changes) and what cannot be compared (unknown): a column either side
 // could not record — its hole says why — is never compared with the
@@ -354,12 +372,16 @@ func diffSideOf(doc stepDoc, text *string, readable bool) *diffSide {
 //   - tool_calls, tool_results, usage: unknown when a side's events
 //     are not all stored (eventsLost); tool_calls by name alone and
 //     tool_results unknown when a side's calls were content-off;
-//   - text: unknown when a side's text is null for a hole.
+//   - text: unknown when a side's text is null for a hole;
+//   - every column: unknown when a side is a derived run's (derivedSide).
 //
 // Marks, holes, status and timing are never compared: a compaction or
 // a subagent call marks its side and changes nothing by itself.
 func compareSides(a, b *diffSide) (changes, unknown []string) {
 	changes, unknown = []string{}, []string{}
+	if a.derived || b.derived {
+		return changes, []string{diffSystem, diffToolCalls, diffToolResults, diffText, diffUsage}
+	}
 	note := func(col string, known, same bool) {
 		switch {
 		case !known:

@@ -155,6 +155,12 @@ type runRow struct {
 	CatalogHash      string `json:"catalog_hash"`
 	RequestCount     int64  `json:"request_count"`
 	RequestsBadge    string `json:"requests_badge,omitempty"`
+	// Derived marks a run the reader built from stock OTel GenAI spans
+	// (obsdb.RunRow.Derived, docs/record-contract.md §9): its id is
+	// otel-<trace id>-<root span id>, it has no events, transcript or
+	// request records, and requests_badge reads "derived" (the run's
+	// holes carry the words, cause stock_spans). Absent on weft's runs.
+	Derived bool `json:"derived,omitempty"`
 	// PromptPreview is the run's prompt — the turn's own (obsdb.PromptText/TurnPrompt:
 	// the input record's last user text, a resume's new prompt when it
 	// carries one, else the first) — cut to 200 runes (obsdb.RunRow.PromptPreview, plan A7).
@@ -207,6 +213,7 @@ func row(rec obsdb.RunRow) runRow {
 		RequestCount:     rec.RequestCount,
 		RequestsBadge:    string(rec.RequestsHole()),
 		PromptPreview:    rec.PromptPreview,
+		Derived:          rec.Derived,
 	}
 	if out.Meta == nil {
 		out.Meta = map[string]string{}
@@ -389,6 +396,9 @@ type eventsPage struct {
 	// lost batch, never a delta (D3) — the fold's input stays
 	// contiguous unless something was dropped in transit.
 	Gaps []int64 `json:"gaps"`
+	// The badge, on a derived run's page alone (derivedBadge): it has
+	// no events by construction, and says so rather than read empty.
+	badgeFields
 }
 
 // transcriptBatch is one messages record: the body at its index, the
@@ -847,10 +857,15 @@ func (s *Server) childRows(ctx context.Context, c *coster, kids []obsdb.RunRow) 
 //     reader (a tracer without a logger records no events at all, so
 //     spans alone are no gap).
 //
-// Nothing for a run with events, or a running one (in flight).
+// Nothing for a run with events, or a running one (in flight). A
+// derived run (obsdb.RunRow.Derived) has none by construction: its one
+// badge is derivedBadge's, never a gap.
 func lostEvents(rec obsdb.RunRow, hasSpans bool) []badgeFields {
 	if rec.EventCount > 0 || rec.Status == obsdb.StatusRunning {
 		return nil
+	}
+	if rec.Derived {
+		return []badgeFields{derivedBadge()}
 	}
 	var out []badgeFields
 	if rec.RequestCount > 0 || (rec.Steps > 0 && !hasSpans) {
@@ -869,6 +884,9 @@ func lostEvents(rec obsdb.RunRow, hasSpans bool) []badgeFields {
 // runHoles is the run's own holes, from what obsdb can tell about the
 // whole run (ADR 0028 §11; plan A3):
 //
+//   - derived: a run built from stock spans (obsdb.RunRow.Derived,
+//     docs/record-contract.md §9) — derivedBadge's words, first, so
+//     every later reason for the badge yields to it;
 //   - not_recorded: RequestsHole — written before the request record;
 //   - interrupted: the derived status (obsdb.InterruptedAfter);
 //   - gap or derived: no stored event (lostEvents) — counted steps or
@@ -890,6 +908,10 @@ func lostEvents(rec obsdb.RunRow, hasSpans bool) []badgeFields {
 // there.
 func (s *Server) runHoles(ctx context.Context, rec obsdb.RunRow) ([]stepHole, error) {
 	holes := holeSet{}
+	if rec.Derived {
+		b := derivedBadge()
+		holes.add(obsdb.HoleDerived, b.Reason, b.Fix)
+	}
 	if h := rec.RequestsHole(); h != "" {
 		holes.note(h)
 	}
@@ -1029,7 +1051,38 @@ func (s *Server) serveRunEvents(w http.ResponseWriter, r *http.Request, id strin
 		next := *page.NextAfter + 1
 		out.NextAfter = &next
 	}
+	if len(out.Events) == 0 && isDerivedID(id) {
+		out.badgeFields = derivedBadge()
+	}
 	writeJSON(w, r, http.StatusOK, out)
+}
+
+// isDerivedID says an id is a derived run's (obsdb.ParseStockRunID: a
+// run built from stock spans, docs/record-contract.md §9). The routes
+// that do not read the run row badge an empty answer by it; the shape
+// is reserved, so a weft run never carries it (§2).
+func isDerivedID(id string) bool {
+	_, _, ok := obsdb.ParseStockRunID(id)
+	return ok
+}
+
+// derivedBadge is the badge every pane of a derived run carries in
+// place of the records it cannot have — events, the transcript, the
+// request records: derived, cause stock_spans ("derived from spans ·
+// no events"), its fix naming the record contract.
+func derivedBadge() badgeFields { return badgeFor(obsdb.HoleDerived, obsdb.CauseStockSpans) }
+
+// refuseDerived answers 400 with derivedBadge: a route that needs what
+// a derived run never recorded (a transcript to replay or fixture).
+func refuseDerived(w http.ResponseWriter, r *http.Request, msg string) {
+	type errBody struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	}
+	writeJSON(w, r, http.StatusBadRequest, struct {
+		Error errBody `json:"error"`
+		badgeFields
+	}{Error: errBody{"bad_request", msg}, badgeFields: derivedBadge()})
 }
 
 // serveRunTranscript answers api/runs/{id}/transcript (S4.3): the
@@ -1069,6 +1122,20 @@ func (s *Server) serveRunTranscript(w http.ResponseWriter, r *http.Request, id s
 			tb.Badge = string(obsdb.HoleDerived)
 		}
 		out.Batches = append(out.Batches, tb)
+	}
+	if len(out.Batches) == 0 && isDerivedID(id) {
+		// A derived run has no messages records by construction: the
+		// bare route says so; a step's messages are refused with the
+		// badge, as a step whose records are missing is (409).
+		if step >= 0 {
+			conflict(w, r, fmt.Sprintf("run %s was derived from stock spans: no messages record holds step %d's", id, step), derivedBadge())
+			return
+		}
+		writeJSON(w, r, http.StatusOK, struct {
+			transcript
+			badgeFields
+		}{out, derivedBadge()})
+		return
 	}
 	if step < 0 {
 		writeJSON(w, r, http.StatusOK, out)

@@ -369,6 +369,15 @@ type RunRow struct {
 	// PromptPreviewRunes runes; "" when the records carried no content
 	// (a content-off run stores no messages) or no user text.
 	PromptPreview string
+	// Derived marks a run the reader built from stock GenAI spans
+	// (DeriveStockRuns; docs/record-contract.md §9): an invoke_agent
+	// span with gen_ai.conversation.id and no weft.run.id, its id
+	// otel-<trace id>-<root span id>. Such a run has no events, no
+	// transcript and no request records (its counts and hashes are
+	// zero, its status succeeded or failed only); RequestsHole reads
+	// HoleDerived for it, and the API badges it "derived from spans ·
+	// no events" (HoleNoteFor(HoleDerived, CauseStockSpans)).
+	Derived bool
 }
 
 // RunPage is one Runs result, newest Started first (ties by ID,

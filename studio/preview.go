@@ -156,6 +156,9 @@ func (s *Server) servePlaygroundPreview(rs *linkruntime.RuntimeServer) http.Hand
 			badRequest(w, r, "the preview assembles an ephemeral replay: a fork continues the session in your app, whose context is the session's")
 			return
 		}
+		if s.refuseDerivedSource(w, r, req.Source.RunID) {
+			return
+		}
 		prompts := readsPrompts(r)
 		var agent *linkruntime.AgentRegistration
 		if req.Runtime != "" {
@@ -209,6 +212,25 @@ func (s *Server) servePlaygroundPreview(rs *linkruntime.RuntimeServer) http.Hand
 		}
 		writeJSON(w, r, http.StatusOK, doc)
 	}
+}
+
+// refuseDerivedSource answers 400 with derivedBadge, and reports true,
+// when the source run of a replay was derived from stock spans
+// (obsdb.RunRow.Derived, docs/record-contract.md §9): it recorded no
+// transcript and no request, so no replay of it can be assembled. Any
+// other run — an unknown one included, which the source check answers
+// — passes. The playground's run route refuses the same source with
+// the same call.
+func (s *Server) refuseDerivedSource(w http.ResponseWriter, r *http.Request, runID string) bool {
+	if !isDerivedID(runID) {
+		return false
+	}
+	det, err := s.db.Run(r.Context(), runID)
+	if err != nil || !det.Derived {
+		return false
+	}
+	refuseDerived(w, r, "the source run "+runID+" was derived from stock spans: it recorded no transcript and no request, so there is nothing to replay")
+	return true
 }
 
 // orDefault is v, or def when v is empty.

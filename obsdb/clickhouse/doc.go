@@ -39,7 +39,10 @@
 // retried batch's identical bytes cannot move a max. Event and message
 // counts are derived at read from weft_records (uniqExact over the
 // dedup key), which a retry cannot inflate. Sessions are a GROUP BY
-// SessionId over weft_runs.
+// SessionId over weft_runs. A run derived from stock GenAI spans
+// (docs/record-contract.md §9) has no view: Write derives it in Go from
+// the trace's stored spans (obsdb.DeriveStockRuns) and inserts its row
+// with Derived = 1 (migration 0009 says why a view cannot).
 //
 // # Open, writes, reads
 //

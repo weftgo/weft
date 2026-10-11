@@ -70,7 +70,7 @@ metadata rides every span and record verbatim):
 
 | Link | Attribute | Type | Minted by | Notes |
 |---|---|---|---|---|
-| run | `weft.run.id` | string | the core | 32 lowercase hex digits for a plain run; `<session>-t<n>` for a `thread` turn; `<parent>/<step>/<call id>` for a Subagent child (below); or the caller's own, through `core.RunID` (any string — it must not start with `otel-`, the derived-run prefix of §9; nothing enforces that today — the core accepts any id, and I1.2's reader may guard it) |
+| run | `weft.run.id` | string | the core | 32 lowercase hex digits for a plain run; `<session>-t<n>` for a `thread` turn; `<parent>/<step>/<call id>` for a Subagent child (below); or the caller's own, through `core.RunID` (any string — it must not start with `otel-`, the derived-run prefix of §9; nothing enforces that — the core accepts any id, and obsdb does not guard it either: a weft run whose id has the exact derived shape, `otel-<32 hex>-<16 hex>`, would have its spans read as a derived run's, by trace — `obsdb.ParseStockRunID`) |
 | parent run | `weft.parent.run.id` | string | the core | on a Subagent child's `invoke_agent` span and its `run_start` record only |
 | parent call | `weft.parent.call.id` | string | the core | the parent's tool call the child ran under (its `gen_ai.tool.call.id`) |
 | session | `weft.session.id` | string | `thread`, or the app via `Metadata` | mirrored as `gen_ai.conversation.id` and `session.id` on every span and record the core emits for the run (and so on the heartbeat, which copies `run_start`'s attributes) — not on `thread`'s session compaction marker, which carries `weft.session.id` alone (§4) |
@@ -259,12 +259,13 @@ anyway).
 a retried export is a no-op. Each kind has its own position attribute and
 its own per-run counter, contiguous from 0 — a hole below the high-water
 mark is a lost record (`gap`, §7). A record of a positioned kind without
-its position attribute comes only from a malformed producer: a
-`messages`, `request`, `prompt`, `tools` or `raw` record is stored at
-position -1 (duplicates collapse; the readers skip it), but an `event` or
-`delta` record without its position lands at position **0**, where it
-collides with the run's `run_start` (or first delta) — the shipped
-backends do not guard that case yet.
+its position attribute comes only from a malformed producer: an
+`event`, `messages`, `request`, `prompt`, `tools` or `raw` record is
+stored at position -1 (duplicates collapse; the readers skip it — an
+event there is counted in `event_count` and never shown), never at 0,
+where it would collide with the run's `run_start`. A `delta` without its
+position counts as position 0: deltas are never stored, so it only
+raises the delta high-water mark to 1, on both backends.
 
 | `weft.record` | EventName | Position | Count per run | Body |
 |---|---|---|---|---|
@@ -524,7 +525,7 @@ from ADR 0028 §11's closed table (`obsdb.Hole`; the words live in
 | `truncated` | an event record carries `weft.content.truncated_bytes` > 0 |
 | `gap` | the event counter has a hole below its high-water mark |
 | `compacted` | the run holds a run-scope view (`weft.messages.reason = compacted`) |
-| `derived` | the run was built from stock spans (§9) |
+| `derived` | the run was built from stock spans (`RunRow.Derived`, §9): "derived from spans · no events" |
 
 `redacted` (reserved: the pipeline does not yet mark a redaction) and
 `hidden` (a read-scoped token's view of a system prompt) are decided by
@@ -558,8 +559,11 @@ policy.
 An application that exports **stock** GenAI spans — a Python or
 TypeScript agent instrumented by the OTel GenAI conventions, with no
 `weft.*` attribute anywhere — gets runs too. This section is the contract
-devtools-plan item I1.2 implements; the `stock_genai` fixture is its
-executable form and is skipped (`"pending": "I1.2"`) until it lands.
+devtools-plan item I1.2 implemented: `obsdb.DeriveStockRuns` is the one
+derivation both backends write through, the `stock_genai` fixture its
+executable form and `obsdbtest`'s `DerivedStock` case its edges (nested
+roots, an agent without a conversation id, exports arriving children
+first, a retried export, deletion).
 
 **Which spans make a run.** A *root* is a span that has
 `gen_ai.operation.name = invoke_agent` (or, without the attribute, a name
@@ -572,7 +576,27 @@ root, wherever it sits: it opens no run, and the `chat` and
 (its steps, its tools, its usage fallback) as if the inner agent were
 part of it. A stock span tree with no conversation id anywhere stays a
 trace only (`/api/traces/{id}`), as today. A span that carries `weft.run.id` is never
-derived: weft's own rows always win.
+derived, and the subtree stops at it as at a nested root: weft's own rows
+always win, so a weft run's spans — which carry the GenAI mirrors,
+`gen_ai.conversation.id` among them — never make a derived twin.
+
+A span's operation is its `gen_ai.operation.name`; without the attribute,
+its name: starting with `invoke_agent` or `execute_tool`, or `chat` alone
+or followed by a space (the conventions' `{operation} {model}` name — a
+bare prefix would take a `chatbot` span for a model call). A span counts
+toward a root only through a complete chain of stored parents: one whose
+chain reaches a parent not stored (yet), or no parent at all, belongs to
+no run until the missing span arrives. So a run whose spans arrive over
+several exports — a `BatchSpanProcessor` exports children before the root
+that ends after them — converges: re-derived from more spans, its steps,
+usage and last-seen only grow, and the full tree's answer does not depend
+on the order the exports came in (one exception, ClickHouse's: a root
+that names no model takes its first `chat` span's, and should an earlier
+`chat` span naming another model arrive in a later export than the root,
+the table's `max` keeps the larger name where SQLite keeps the earlier
+span's). The writers re-derive a trace from all
+its stored spans whenever an export brings a span without `weft.run.id`
+whose operation is one of the three; a trace of other spans costs no read.
 
 **Derivable fields** (the run row of §6, filled from spans alone):
 
@@ -591,8 +615,18 @@ derived: weft's own rows always win.
 | `usage` | the run's **own** usage: the root's `gen_ai.usage.*` when present, taken as the root's own figure; else the sum over the subtree's `chat` spans — the subtree stops at nested roots, so a nested root's calls count toward it, never toward the parent (below) |
 | `steps` | the number of `chat` spans in the subtree |
 | `chat` (the waterfall) | the subtree's `chat` spans in start order; a span's step is its ordinal (0-based); model, response model, finish reason and usage from its `gen_ai.*` keys |
-| `tools` | the subtree's `execute_tool` spans in start order: `gen_ai.tool.name`, `gen_ai.tool.call.id`; `seq` the 1-based ordinal; `step` the step of the latest `chat` span that started before it |
+| `tools` | the subtree's `execute_tool` spans in start order: `gen_ai.tool.name`, `gen_ai.tool.call.id`; `seq` the 1-based ordinal; `step` the step of the latest `chat` span that started before it (none when no `chat` span did) |
 | `holes` | `derived` |
+
+A derived run's spans (`DB.RunSpans`) are its subtree, read from its trace
+at read time — no stored span names a derived run — in start order, with
+the reader's positions under weft's own keys: `weft.step.index` on each
+`chat` span (its step) and `execute_tool` span (its step, when it has
+one), `weft.tool.seq` on each `execute_tool` span. The producer's spans
+are stored as exported; the numbers are stamped on the copy a read
+returns, and the run's `derived` badge says who numbered them. Deleting a
+derived run deletes its subtree's spans (a nested root's run is its child,
+deleted with it).
 
 **Usage and cost of derived children.** A derived run's usage is
 own-only by contract. Studio's cost split subtracts from a parent's
@@ -624,7 +658,24 @@ the request, prompt and catalog (no `request`/`prompt`/`tools` records:
 `public_id`, `stop_reason`, `pending`. The run carries the `derived` badge
 ("derived from spans · no events") in place of `not_recorded`: the
 records are absent because the producer is not weft, which `derived`
-already says — "upgrade weft" would be the wrong fix.
+already says — "upgrade weft" would be the wrong fix. The words are the
+table's cause `stock_spans` of `derived` (`obsdb.HoleNoteFor(HoleDerived,
+CauseStockSpans)`), its fix naming this document; `RunRow.RequestsHole`
+reads `derived` for a derived row, so every reader of the reading table
+badges it so.
+
+**What Studio answers for a derived run.** `/api/runs` and `/api/search`
+list it (`derived: true`, `requests_badge: derived`; searchable by agent,
+model and error text); `/api/sessions` groups it under its conversation
+id; `/api/runs/{id}` is the row with one hole, `derived`, in the words
+above; `events` and `transcript` are empty with that badge (`transcript?step=N`
+is 409 with it); `spans` are the real spans (the waterfall);
+`requests` and `tools` are empty with the `derived` badge;
+`export` carries the row and the spans, every other block badged, and
+refuses `format=wefttest` 400 with the badge, as the playground's fixtures
+and preview refuse a derived source: there is no transcript to replay;
+`/api/diff` with a derived side marks every column `unknown`, never a
+change. A panel token never reaches a derived run: it has no public id.
 
 ## 10. The conformance fixtures
 
@@ -643,13 +694,15 @@ already says — "upgrade weft" would be the wrong fix.
 | `pre_upgrade` | a run without request, prompt or tools records or the `weft.instructions.hash` attribute; the `not_recorded` badge (the generator also removes `run_start`'s informational `instructions_hash` body field, for realism — readers never read it) |
 | `failed` | `MaxSteps(1)` against a model that keeps calling a tool: status `failed`, the error text, `steps`/`usage`/`stop_reason` from the span (no `run_finish`) |
 | `parked` | a `RequireApproval` tool's call parked: status `succeeded`, `pending` 1 (`run_finish.pending`, `weft.run.pending`) |
-| `stock_genai` | §9: stock spans, no `weft.*`; `derived` — pending I1.2 |
+| `stock_genai` | §9: stock spans, no `weft.*` (hand-written: the one case no weft code generates); two derived runs in one conversation, one with a tool call, one failed; `derived` |
 
 `expect.json` is `{case, description, pending?, derived?, runs: [...]}`;
 each run lists every row field of §6 and `derived` (§9's mark, omitted
-when false — every stored run until I1.2), its `chat` and `tools` lists, and
+when false — every weft run), its `chat` and `tools` lists, and
 its `holes` — the run-level badge set as the test reads it from the row,
-the events and the compactions (§7's rules; `derived` is I1.2's).
+the events and the compactions (§7's rules; `derived` from the row's mark).
+A case whose `expect.json` carries `pending` (the item that implements it)
+is ingested but not asserted; none does today.
 Runs are ordered by `started`, then id. Times are RFC 3339 UTC.
 
 **Normalisation.** The generated cases are real pipeline output, made

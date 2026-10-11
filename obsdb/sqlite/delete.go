@@ -221,6 +221,7 @@ func deleteRuns(ctx context.Context, tx *sql.Tx, ids []string) error {
 	if err != nil {
 		return err
 	}
+	traces = append(traces, obsdb.StockTraces(ids)...) // derived runs: their spans carry no run id
 	var links []obsdb.SpanLink
 	err = inChunks(dedup(traces), func(ph string, args []any) error {
 		rs, err := tx.QueryContext(ctx, `SELECT trace_id, span_id, parent_span_id, run_id FROM spans WHERE trace_id IN (`+ph+`)`, args...)

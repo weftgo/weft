@@ -28,7 +28,7 @@ const runColumns = `RunId, ParentRunID, ParentCallID, TraceID, Agent, Provider, 
 	ExperimentID, ForkedFrom, Meta, Started, Finished, LastSeen, FinishedOK,
 	Failed, Err, Steps, Pending, StopReason, InputTokens, OutputTokens,
 	CachedInputTokens, CacheWriteTokens, ReasoningTokens, DeltaCount,
-	InstructionsHash, CatalogHash, RequestCount`
+	InstructionsHash, CatalogHash, RequestCount, Derived`
 
 // runAggregates is the same list as a GROUP BY RunId select: max for
 // identity strings, flags, usage and last-seen; min for started — the
@@ -45,7 +45,7 @@ const runAggregates = `RunId, max(ParentRunID) AS ParentRunID, max(ParentCallID)
 	max(CachedInputTokens) AS CachedInputTokens, max(CacheWriteTokens) AS CacheWriteTokens,
 	max(ReasoningTokens) AS ReasoningTokens, max(DeltaCount) AS DeltaCount,
 	max(InstructionsHash) AS InstructionsHash, max(CatalogHash) AS CatalogHash,
-	max(RequestCount) AS RequestCount`
+	max(RequestCount) AS RequestCount, max(Derived) AS Derived`
 
 // statusCase is the four-row table in SQL over weft_runs' columns: it
 // must agree with obsdb.DeriveStatus, whose test pins the boundaries.
@@ -254,7 +254,7 @@ func (d *DB) queryRunRows(ctx context.Context, now time.Time, sql string, args .
 			&s.Meta, &s.Started, &s.Finished, &s.LastSeen, &s.FinishedOK, &s.Failed, &s.Err,
 			&s.Steps, &s.Pending, &s.StopReason,
 			&s.InTok, &s.OutTok, &s.CachedTok, &s.CacheWriteTok, &s.ReasonTok, &s.DeltaCount,
-			&s.InstructionsHash, &s.CatalogHash, &s.RequestCount); err != nil {
+			&s.InstructionsHash, &s.CatalogHash, &s.RequestCount, &s.Derived); err != nil {
 			return nil, err
 		}
 		row, err := s.row(now)
@@ -282,6 +282,7 @@ type runScan struct {
 	DeltaCount                                         int64
 	InstructionsHash, CatalogHash                      string
 	RequestCount                                       int64
+	Derived                                            bool
 }
 
 func (s *runScan) row(now time.Time) (obsdb.RunRow, error) {
@@ -300,6 +301,7 @@ func (s *runScan) row(now time.Time) (obsdb.RunRow, error) {
 		},
 		DeltaCount:       s.DeltaCount,
 		InstructionsHash: s.InstructionsHash, CatalogHash: s.CatalogHash, RequestCount: s.RequestCount,
+		Derived: s.Derived,
 	}
 	if s.Finished != nil {
 		f := s.Finished.UTC()
@@ -667,6 +669,17 @@ func (d *DB) RunSpans(ctx context.Context, runID string) (_ []obsdb.Span, err er
 	defer d.closedErr(&err)
 	if err := d.runExists(ctx, runID); err != nil {
 		return nil, err
+	}
+	if trace, _, ok := obsdb.ParseStockRunID(runID); ok {
+		// A derived run (docs/record-contract.md §9) names no span by
+		// run id: its spans are its root's subtree, read from the
+		// trace (obsdb.StockRunSpans).
+		spans, err := d.querySpans(ctx, "SELECT "+spanColumns+" FROM otel_traces WHERE TraceId = ?"+
+			spanDedup, trace)
+		if err != nil {
+			return nil, err
+		}
+		return obsdb.StockRunSpans(spans, runID), nil
 	}
 	return d.querySpans(ctx, "SELECT "+spanColumns+" FROM otel_traces WHERE RunId = ?"+
 		spanDedup, runID)

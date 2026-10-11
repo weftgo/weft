@@ -153,12 +153,12 @@ func TestReopenIsANoop(t *testing.T) {
 		t.Fatal(err)
 	}
 	// One row per migration: 0001 (init), 0002 (experiments), 0003
-	// (status spelling), 0004 (request record), 0005 (raw record), 0006 (experiment command), 0007 (the experiment index) and 0008 (the command store) — the same count TestMigrationPinsExporterVersion
+	// (status spelling), 0004 (request record), 0005 (raw record), 0006 (experiment command), 0007 (the experiment index), 0008 (the command store) and 0009 (the derived flag) — the same count TestMigrationPinsExporterVersion
 	// pins as the highest version. (Step 8b review fix 1: this read still
 	// wanted 1 after 0002 landed, failing only on a real server, where
 	// the gated suite first ran.)
-	if versions != 8 {
-		t.Errorf("obsdb_migrations rows after reopen = %d, want 8 (0001, 0002, 0003, 0004, 0005, 0006, 0007, 0008)", versions)
+	if versions != 9 {
+		t.Errorf("obsdb_migrations rows after reopen = %d, want 9 (0001, 0002, 0003, 0004, 0005, 0006, 0007, 0008, 0009)", versions)
 	}
 	// 0007's skip index is on weft_runs (M2: an experiment's run list).
 	var idx uint64

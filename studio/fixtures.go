@@ -65,6 +65,10 @@ type fixtureSource struct {
 	finishes    map[int]core.StepFinish // step_finish by step
 	tools       []string                // the fallback catalogue (no request record)
 	system      func(hash string) string
+	// derived: the run was built from stock spans (obsdb.RunRow.Derived,
+	// docs/record-contract.md §9) — no transcript was ever recorded, so
+	// both routes refuse it 400 with derivedBadge, before the builder.
+	derived bool
 }
 
 // fixtureError is the builder's refusal, with the hole that explains
@@ -96,6 +100,10 @@ func (s *Server) loadFixtureSource(ctx context.Context, id string, tools []strin
 	det, err := s.db.Run(ctx, id)
 	if err != nil {
 		return src, err
+	}
+	if det.Derived {
+		src.derived = true
+		return src, nil
 	}
 	if src.batches, err = s.db.TranscriptBatches(ctx, id); err != nil {
 		return src, err
@@ -563,8 +571,14 @@ func (s *Server) servePlaygroundFixture(w http.ResponseWriter, r *http.Request) 
 // stripped for a content-off run's missing transcript, the builder's
 // gap or derived otherwise. A run with a transcript but no recorded
 // answer (it failed before any step answered) is 409 without a badge:
-// nothing is missing, there is nothing to replay.
+// nothing is missing, there is nothing to replay. A derived run (built
+// from stock spans) is refused 400 with derivedBadge: the request
+// cannot be met by any run of that kind, not by this run's state.
 func fixturesOrConflict(w http.ResponseWriter, r *http.Request, src fixtureSource) (*fixtureSet, bool) {
+	if src.derived {
+		refuseDerived(w, r, "the run is derived from stock spans: it recorded no transcript, so there is nothing to replay (wefttest fixtures need weft's records, docs/record-contract.md)")
+		return nil, false
+	}
 	set, err := buildFixtures(src)
 	var fe *fixtureError
 	switch {

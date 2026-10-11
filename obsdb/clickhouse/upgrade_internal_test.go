@@ -239,7 +239,7 @@ func TestUpgradeFrom0007AddsCommandStore(t *testing.T) {
 	if err := db.(*DB).conn.QueryRow(ctx, `SELECT max(version) FROM obsdb_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 8 {
-		t.Errorf("migration max after the upgrade = %d, want 8", version)
+	if version != 9 {
+		t.Errorf("migration max after the upgrade = %d, want 9 (through 0009 the derived flag)", version)
 	}
 }

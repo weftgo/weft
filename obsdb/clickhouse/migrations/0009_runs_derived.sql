@@ -1,0 +1,16 @@
+-- 0009 · derived runs (devtools-plan I1.2; docs/record-contract.md §9),
+-- one logical schema with obsdb/sqlite's 0008. A run the reader built
+-- from stock OTel GenAI spans — an invoke_agent span with
+-- gen_ai.conversation.id and no weft.run.id — is a weft_runs row keyed
+-- otel-<trace id>-<root span id> with Derived = 1. No view feeds it:
+-- §9's rules (a subtree that stops at nested roots, a tool's step from
+-- the latest chat span started before it, usage summed over the
+-- subtree's chat spans only when the root reports none) read the span
+-- tree, which a materialized view — one inserted block at a time, no
+-- parent lookup — cannot see. Write derives the row in Go
+-- (obsdb.DeriveStockRuns over the trace's stored spans, whenever a batch
+-- brings a stock GenAI span of it) and inserts it under the same key;
+-- the max aggregates keep the latest, most complete derivation, since
+-- re-derived from more spans a row's steps, usage and last-seen only
+-- grow. Additive: every row written before it reads Derived = 0.
+ALTER TABLE weft_runs ADD COLUMN IF NOT EXISTS Derived SimpleAggregateFunction(max, UInt8);

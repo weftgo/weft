@@ -527,6 +527,8 @@ func (x *runExport) transcriptBlock() exportTranscript {
 	}
 	if len(x.batches) == 0 {
 		switch {
+		case x.run.Derived:
+			out.badgeFields = derivedBadge()
 		case x.stripped:
 			out.badgeFields = badgeOf(obsdb.HoleStripped)
 		case x.run.Steps > 0 || x.run.RequestCount > 0:
@@ -573,7 +575,7 @@ func (x *runExport) requestRows() []requestRow {
 
 func (x *runExport) requestsBlock() exportRequests {
 	out := exportRequests{Requests: x.requestRows(), Prompts: map[string]any{}, Catalogs: map[string]any{}}
-	out.badgeFields = badgeOf(x.reqHole)
+	out.badgeFields = x.reqBadge()
 	for _, p := range x.prompts {
 		out.Prompts[p.hash] = p.doc()
 	}
@@ -659,8 +661,17 @@ func (x *runExport) blocks() []exportBlock {
 	return []exportBlock{
 		{Block: "events", badgeFields: x.eventsBlock().badgeFields},
 		{Block: "transcript", badgeFields: x.transcriptBlock().badgeFields},
-		{Block: "requests", badgeFields: badgeOf(x.reqHole)},
+		{Block: "requests", badgeFields: x.reqBadge()},
 	}
+}
+
+// reqBadge is the requests block's badge: reqHole's, in a derived
+// run's words (derivedBadge) when the run was built from stock spans.
+func (x *runExport) reqBadge() badgeFields {
+	if x.run.Derived && x.reqHole == obsdb.HoleDerived {
+		return derivedBadge()
+	}
+	return badgeOf(x.reqHole)
 }
 
 func (x *runExport) doc() exportDoc {

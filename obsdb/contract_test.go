@@ -86,10 +86,8 @@ type expectDoc struct {
 // spans), and the run-level badges (ADR 0028 §11's words).
 type contractRun struct {
 	ID string `json:"id"`
-	// Derived is §9's mark: the reader built the row from stock spans.
-	// No stored run is derived before I1.2, so observeRuns leaves it
-	// false (omitted) for every run today; I1.2 fills it from the row,
-	// and un-pending stock_genai is then deleting its "pending" key.
+	// Derived is §9's mark: the reader built the row from stock spans
+	// (obsdb.RunRow.Derived); omitted for every weft run.
 	Derived          bool              `json:"derived,omitempty"`
 	ParentRunID      string            `json:"parent_run_id,omitempty"`
 	ParentCallID     string            `json:"parent_call_id,omitempty"`
@@ -281,7 +279,7 @@ func observeRuns(t *testing.T, db obsdb.DB) []contractRun {
 	out := make([]contractRun, 0, len(rows))
 	for _, r := range rows {
 		c := contractRun{
-			ID: r.ID, ParentRunID: r.ParentRunID, ParentCallID: r.ParentCallID,
+			ID: r.ID, Derived: r.Derived, ParentRunID: r.ParentRunID, ParentCallID: r.ParentCallID,
 			TraceID: r.TraceID, Service: r.Service,
 			Agent: r.Agent, Provider: r.Provider, Model: r.Model,
 			SessionID: r.SessionID, PublicID: r.PublicID, Turn: r.Turn,
@@ -368,7 +366,8 @@ func intAttr(m map[string]any, k string, def int64) int64 {
 
 // runHoles is the run-level badge set a reader shows (ADR 0028 §11),
 // sorted: not_recorded from the run row's reading table
-// (RunRow.RequestsHole), interrupted from the derived status,
+// (RunRow.RequestsHole), derived from the row's mark (§9),
+// interrupted from the derived status,
 // max_tokens from the stop reason, stripped and truncated from the
 // events' content marks, gap from the event counter's holes, compacted
 // from a run-scope view.
@@ -377,7 +376,10 @@ func runHoles(t *testing.T, db obsdb.DB, r obsdb.RunRow) []obsdb.Hole {
 	ctx := context.Background()
 	set := map[obsdb.Hole]bool{}
 	if h := r.RequestsHole(); h != "" {
-		set[h] = true
+		set[h] = true // derived for a derived run, in place of not_recorded (§9)
+	}
+	if r.Derived {
+		set[obsdb.HoleDerived] = true
 	}
 	if r.Status == obsdb.StatusInterrupted {
 		set[obsdb.HoleInterrupted] = true

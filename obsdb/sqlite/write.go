@@ -27,7 +27,9 @@ import (
 // terminal fields; the invoke_agent span sets trace, finish, usage,
 // steps and, on error, failed and err. A run first seen through a later
 // record (a reordered batch) gets a provisional started_ns, corrected
-// when the earlier rows land.
+// when the earlier rows land. A stock GenAI span (no weft.run.id,
+// obsdb.StockCandidate) re-derives its trace's derived runs
+// (deriveStock, docs/record-contract.md §9).
 //
 // After the commit, every frame the batch produced is published to the
 // DB's hub before Write returns — an in-process subscriber sees a
@@ -47,6 +49,8 @@ func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	var stockTraces []string
+	seenTrace := map[string]bool{}
 	for _, s := range b.Spans {
 		w := obsdb.DeriveSpan(s)
 		if _, err := insertSpan(ctx, tx, s, w); err != nil {
@@ -54,6 +58,9 @@ func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 		}
 		if w.RunID != "" {
 			runIDs.touch(w.RunID).applySpan(s, w)
+		} else if obsdb.StockCandidate(s) && !seenTrace[s.TraceID] {
+			seenTrace[s.TraceID] = true
+			stockTraces = append(stockTraces, s.TraceID)
 		}
 	}
 	for _, r := range b.Records {
@@ -135,17 +142,83 @@ func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 			return err
 		}
 	}
+	derived, err := deriveStock(ctx, tx, stockTraces)
+	if err != nil {
+		return err
+	}
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	d.publish(b, runIDs)
+	d.publish(b, runIDs, derived)
 	return nil
+}
+
+// deriveStock re-derives the runs of every trace the batch brought a
+// stock GenAI span of (docs/record-contract.md §9): the trace's stored
+// spans — this batch's included, read inside its transaction — through
+// obsdb.DeriveStockRuns, each run's row written whole (upsertDerived)
+// and its error indexed for search. Re-deriving the whole trace is
+// what makes a run whose spans arrive over several batches converge: a
+// later batch with more chat spans, or the root arriving after its
+// children, rewrites the row from everything stored. It returns the
+// derived run ids, for the hub.
+func deriveStock(ctx context.Context, tx *sql.Tx, traces []string) ([]string, error) {
+	var ids []string
+	for _, trace := range traces {
+		spans, err := querySpansOn(ctx, tx, `trace_id = ? ORDER BY start_ns, span_id`, trace)
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range obsdb.DeriveStockRuns(spans) {
+			if err := upsertDerived(ctx, tx, r.Row); err != nil {
+				return nil, err
+			}
+			if err := updateSearch(ctx, tx, r.Row.ID, &runUpdate{errText: r.Row.Err}); err != nil {
+				return nil, err
+			}
+			ids = append(ids, r.Row.ID)
+		}
+	}
+	return ids, nil
+}
+
+// upsertDerived writes a derived run's row whole: every column
+// DeriveStockRuns fills is replaced by the latest derivation (it reads
+// the whole stored trace, so the latest is the most complete), and the
+// columns it does not derive stay at their zero defaults.
+func upsertDerived(ctx context.Context, tx *sql.Tx, r obsdb.RunRow) error {
+	finished := sql.NullInt64{}
+	if r.Finished != nil {
+		finished = sql.NullInt64{Int64: unixNS(*r.Finished), Valid: true}
+	}
+	_, err := tx.ExecContext(ctx, `INSERT INTO runs
+		(run_id, parent_run_id, parent_call_id, trace_id, agent, provider, model, service, session_id,
+		 started_ns, finished_ns, last_seen_ns, finished_ok, failed, err, steps,
+		 input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens, derived)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
+		ON CONFLICT (run_id) DO UPDATE SET
+		  parent_run_id = excluded.parent_run_id, parent_call_id = excluded.parent_call_id,
+		  trace_id = excluded.trace_id, agent = excluded.agent, provider = excluded.provider,
+		  model = excluded.model, service = excluded.service, session_id = excluded.session_id,
+		  started_ns = excluded.started_ns, finished_ns = excluded.finished_ns,
+		  last_seen_ns = excluded.last_seen_ns, finished_ok = excluded.finished_ok,
+		  failed = excluded.failed, err = excluded.err, steps = excluded.steps,
+		  input_tokens = excluded.input_tokens, output_tokens = excluded.output_tokens,
+		  cached_input_tokens = excluded.cached_input_tokens,
+		  cache_write_tokens = excluded.cache_write_tokens,
+		  reasoning_tokens = excluded.reasoning_tokens, derived = 1`,
+		r.ID, r.ParentRunID, r.ParentCallID, r.TraceID, r.Agent, r.Provider, r.Model, r.Service, r.SessionID,
+		unixNS(r.Started), finished, unixNS(r.LastSeen),
+		boolInt(r.Status == obsdb.StatusSucceeded), boolInt(r.Status == obsdb.StatusFailed), r.Err, r.Steps,
+		r.Usage.InputTokens, r.Usage.OutputTokens, r.Usage.CachedInputTokens,
+		r.Usage.CacheWriteTokens, r.Usage.ReasoningTokens)
+	return err
 }
 
 // publish sends the batch's frames to the hub before Write returns:
 // every record as ingested (deltas included), then the run rows that
 // changed.
-func (d *DB) publish(b obsdb.Batch, ru *runUpdates) {
+func (d *DB) publish(b obsdb.Batch, ru *runUpdates, derived []string) {
 	if d.hub == nil {
 		return
 	}
@@ -153,7 +226,7 @@ func (d *DB) publish(b obsdb.Batch, ru *runUpdates) {
 	for _, r := range b.Records {
 		d.hub.Publish(ctx, obsdb.RecordFrame(r))
 	}
-	for _, id := range ru.order {
+	for _, id := range append(append([]string{}, ru.order...), derived...) {
 		if row, err := d.runRowByID(ctx, id); err == nil {
 			d.hub.Publish(ctx, obsdb.RunFrame(row))
 		}

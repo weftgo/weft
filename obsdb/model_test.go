@@ -93,6 +93,12 @@ func TestDeriveRecordKindAndPosition(t *testing.T) {
 		// record, -1 on both backends (never the input's position 0).
 		{"view without index", map[string]any{"weft.record": "messages", "weft.messages.reason": "compacted"}, "messages", -1},
 		{"growth without index", map[string]any{"weft.record": "messages"}, "messages", -1},
+		// An event without its position: -1 as ClickHouse's records
+		// view reads it, never run_start's 0. A delta without one stays
+		// at 0 (never stored; the high-water mark both backends count).
+		{"event without pos", map[string]any{"weft.record": "event", "weft.event.type": "step_start"}, "event", -1},
+		{"event with empty pos", map[string]any{"weft.record": "event", "weft.event.pos": ""}, "event", -1},
+		{"delta without pos", map[string]any{"weft.record": "delta", "weft.event.type": "text_delta"}, "delta", 0},
 	} {
 		attrs := map[string]any{}
 		for k, v := range base {

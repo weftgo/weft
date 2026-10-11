@@ -1,7 +1,6 @@
 {
   "case": "stock_genai",
   "description": "a stock OpenTelemetry GenAI app (no weft.* attribute anywhere): two invoke_agent traces sharing gen_ai.conversation.id, the first with two chat spans and one execute_tool, the second failed. Each root invoke_agent span is one derived run (docs/record-contract.md, \"Deriving a run from stock spans\"): no events, transcript or request records, badged derived.",
-  "pending": "I1.2",
   "derived": true,
   "runs": [
     {

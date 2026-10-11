@@ -17,7 +17,11 @@ type SpanKey struct {
 // DeletedSpans is the rule both backends delete spans by (DB.DeleteRun,
 // DeleteSession, Sweep): the deleted runs' own spans and, transitively,
 // the non-weft spans below them — a span carrying a run id stops the
-// walk, so a run that is kept keeps its spans. It is the rule a run's
+// walk, so a run that is kept keeps its spans. A derived run (§9 of
+// the record contract: no run id on any span) is named by its id: its
+// root span seeds the walk, which takes its subtree — a nested root's
+// too, which is its child run, deleted with it (StockTraces names the
+// traces to read). It is the rule a run's
 // app logs are attributed by (DB.OtherLogs), so a deleted run takes
 // exactly the log records its logs page showed: the backends delete the
 // non-weft log records emitted under the returned spans. all holds
@@ -34,7 +38,9 @@ func DeletedSpans(all []SpanLink, deleted map[string]bool) []SpanKey {
 	set := map[SpanKey]bool{}
 	var queue []SpanKey
 	for _, s := range all {
-		if s.RunID != "" && deleted[s.RunID] {
+		// A derived run's root carries no run id (docs/record-contract.md
+		// §9): it is named by its derived id, otel-<trace>-<span>.
+		if (s.RunID != "" && deleted[s.RunID]) || (s.RunID == "" && deleted[StockRunID(s.TraceID, s.SpanID)]) {
 			k := SpanKey{s.TraceID, s.SpanID}
 			if !set[k] {
 				set[k] = true

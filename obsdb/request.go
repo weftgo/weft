@@ -93,11 +93,16 @@ const (
 	// WEFT_ENV=dev, by an adapter that reports them (not_recorded: the
 	// requests row's raw, the wire tab).
 	CauseRawOff HoleCause = "raw_off"
+	// CauseStockSpans: the run was built by the reader from stock OTel
+	// GenAI spans (RunRow.Derived, docs/record-contract.md §9) — its
+	// producer is not weft, so it recorded no events, transcript or
+	// request records (derived: every pane those would fill).
+	CauseStockSpans HoleCause = "stock_spans"
 )
 
 // HoleCauses lists the causes the table words, in order.
 func HoleCauses() []HoleCause {
-	return []HoleCause{CauseNoSpans, CauseResultCap, CauseLogCap, CauseNoPublicID, CauseDevTokenOnly, CauseNotServed, CauseResponseCap, CauseRawOff}
+	return []HoleCause{CauseNoSpans, CauseResultCap, CauseLogCap, CauseNoPublicID, CauseDevTokenOnly, CauseNotServed, CauseResponseCap, CauseRawOff, CauseStockSpans}
 }
 
 var causeNotes = map[Hole]map[HoleCause]holeNote{
@@ -117,6 +122,12 @@ var causeNotes = map[Hole]map[HoleCause]holeNote{
 		CauseNotServed: {
 			"this Studio does not serve the request record (no requests capability): the run may hold one",
 			"open the run in a Studio that serves it (upgrade Studio, or enable the requests group)",
+		},
+	},
+	HoleDerived: {
+		CauseStockSpans: {
+			"derived from spans · no events",
+			"the producer exports stock OTel GenAI spans only: emit weft's records (docs/record-contract.md) for events, the transcript and requests",
 		},
 	},
 	HoleHidden: {
@@ -405,8 +416,15 @@ func (e *HoleError) Is(target error) bool { return target == ErrNotFound }
 // run_start (or has not received it yet): its requests are recorded,
 // and a prompt or catalog they name but the store lacks is a gap
 // (ExplainMissing), never not_recorded — "upgrade weft" would be the
-// wrong fix for a run this weft wrote.
+// wrong fix for a run this weft wrote. A derived run (RunRow.Derived:
+// built from stock spans, docs/record-contract.md §9) reads HoleDerived
+// instead: its records are absent because its producer is not weft, so
+// "upgrade weft" would be the wrong fix there too (the badge's words
+// are HoleNoteFor(HoleDerived, CauseStockSpans)).
 func (r RunRow) RequestsHole() Hole {
+	if r.Derived {
+		return HoleDerived
+	}
 	if r.InstructionsHash == "" && r.RequestCount == 0 {
 		return HoleNotRecorded
 	}
@@ -521,8 +539,8 @@ func ExplainMissing(ctx context.Context, db DB, runID, kind, hash string) error 
 	if err != nil {
 		return err
 	}
-	if run.RequestsHole() == HoleNotRecorded {
-		return &HoleError{Kind: kind, Hash: hash, Hole: HoleNotRecorded}
+	if h := run.RequestsHole(); h == HoleNotRecorded || h == HoleDerived {
+		return &HoleError{Kind: kind, Hash: hash, Hole: h}
 	}
 	if hash != "" {
 		named, stripped := false, false

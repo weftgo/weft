@@ -29,6 +29,10 @@ import (
 // min/max aggregates are unchanged by identical values, so a retried
 // transport's duplicate is a no-op once merged and never inflates a
 // count at read time (uniqExact over the key dedups pre-merge).
+//
+// A stock GenAI span (no weft.run.id, obsdb.StockCandidate) re-derives
+// its trace's derived runs after the spans are stored (deriveStock,
+// docs/record-contract.md §9): no view can, migration 0009 says why.
 func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 	if err := d.checkOpen(); err != nil {
 		return err
@@ -48,6 +52,9 @@ func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 		if err := d.insertSpans(ctx, b.Spans); err != nil {
 			return err
 		}
+		if err := d.deriveStock(ctx, b.Spans); err != nil {
+			return err
+		}
 	}
 	if len(b.Records) > 0 {
 		if err := d.insertRecords(ctx, b.Records); err != nil {
@@ -60,6 +67,69 @@ func (d *DB) Write(ctx context.Context, b obsdb.Batch) (err error) {
 		}
 	}
 	return nil
+}
+
+// deriveStock re-derives the runs of every trace the spans bring a
+// stock GenAI span of (obsdb.StockCandidate): the trace's stored spans
+// — the batch's own included, inserted just before — through
+// obsdb.DeriveStockRuns, each run's row inserted into weft_runs under
+// its id with Derived = 1. The table's max aggregates fold the
+// derivations together; re-derived from more spans a row's steps,
+// usage and last-seen only grow (DeriveStockRuns counts a span only
+// through a complete chain of stored parents), so the merged row is
+// the latest, most complete one. Provider and model are the exception
+// a fold cannot order: a run whose root names none takes its first chat
+// span's, and should an earlier chat span arrive in a later batch
+// naming another model, max keeps the larger name, where SQLite's
+// overwrite keeps the earlier span's.
+func (d *DB) deriveStock(ctx context.Context, spans []obsdb.Span) error {
+	var traces []string
+	seen := map[string]bool{}
+	for _, s := range spans {
+		if obsdb.StockCandidate(s) && !seen[s.TraceID] {
+			seen[s.TraceID] = true
+			traces = append(traces, s.TraceID)
+		}
+	}
+	var rows []obsdb.RunRow
+	for _, t := range traces {
+		stored, err := d.querySpans(ctx, "SELECT "+spanColumns+" FROM otel_traces WHERE TraceId = ?"+spanDedup, t)
+		if err != nil {
+			return err
+		}
+		for _, r := range obsdb.DeriveStockRuns(stored) {
+			rows = append(rows, r.Row)
+		}
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	batch, err := d.conn.PrepareBatch(ctx, `INSERT INTO weft_runs (
+		RunId, ParentRunID, ParentCallID, TraceID, Agent, Provider, Model, Service, SessionID,
+		Started, Finished, LastSeen, FinishedOK, Failed, Err, Steps,
+		InputTokens, OutputTokens, CachedInputTokens, CacheWriteTokens, ReasoningTokens, Derived)`)
+	if err != nil {
+		return err
+	}
+	for _, r := range rows {
+		if err := batch.Append(
+			r.ID, r.ParentRunID, r.ParentCallID, r.TraceID, r.Agent, r.Provider, r.Model, r.Service, r.SessionID,
+			r.Started, r.Finished, r.LastSeen,
+			boolUInt8(r.Status == obsdb.StatusSucceeded), boolUInt8(r.Status == obsdb.StatusFailed), r.Err, int32(r.Steps),
+			r.Usage.InputTokens, r.Usage.OutputTokens, r.Usage.CachedInputTokens,
+			r.Usage.CacheWriteTokens, r.Usage.ReasoningTokens, uint8(1),
+		); err != nil {
+			return err
+		}
+	}
+	return batch.Send()
+}
+
+func boolUInt8(b bool) uint8 {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // insertSpans writes spans with the collector's traces_insert.sql

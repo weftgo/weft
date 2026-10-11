@@ -199,7 +199,7 @@ func (d *DB) searchRows(ctx context.Context, now time.Time, sql string, args ...
 			&s.Meta, &s.Started, &s.Finished, &s.LastSeen, &s.FinishedOK, &s.Failed, &s.Err,
 			&s.Steps, &s.Pending, &s.StopReason,
 			&s.InTok, &s.OutTok, &s.CachedTok, &s.CacheWriteTok, &s.ReasonTok, &s.DeltaCount,
-			&s.InstructionsHash, &s.CatalogHash, &s.RequestCount, &total); err != nil {
+			&s.InstructionsHash, &s.CatalogHash, &s.RequestCount, &s.Derived, &total); err != nil {
 			return nil, 0, err
 		}
 		row, err := s.row(now)

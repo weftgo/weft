@@ -20,7 +20,7 @@ import (
 type dropLog struct {
 	mu      sync.Mutex
 	stopped []string
-	capped  int
+	capped  []int64 // each cap WARN's running total
 }
 
 func (h *dropLog) Enabled(context.Context, slog.Level) bool { return true }
@@ -39,7 +39,12 @@ func (h *dropLog) Handle(_ context.Context, r slog.Record) error {
 			return true
 		})
 	case strings.HasPrefix(r.Message, "studio/runtime: the command store writer's queue is full"):
-		h.capped++
+		r.Attrs(func(a slog.Attr) bool {
+			if a.Key == "total" {
+				h.capped = append(h.capped, a.Value.Int64())
+			}
+			return true
+		})
 	}
 	return nil
 }
@@ -190,10 +195,12 @@ func TestStoreDeadAtClose(t *testing.T) {
 }
 
 // TestStoreQueueCap: against a dead store the held queue never exceeds
-// its cap — the oldest finished commands' and routes' writes go first,
-// one WARN — the live commands', the runtime's and the breakpoint
-// set's writes are kept, and the memory prune forgets the writes of
-// the rows it removes.
+// its cap — route writes go first, then the oldest finished commands'
+// (documented: such a command may read lost or unknown after a
+// restart), with a WARN carrying the running total on the first drop
+// and each time it doubles — the live commands', the runtime's and the
+// breakpoint set's writes are kept, and the memory prune forgets the
+// writes of the rows it removes.
 func TestStoreQueueCap(t *testing.T) {
 	logs := captureDrops(t)
 	const capKeys = 40
@@ -253,10 +260,31 @@ func TestStoreQueueCap(t *testing.T) {
 			t.Errorf("%v's write was dropped", k)
 		}
 	}
+	// Routes before any finished command: finished commands were
+	// dropped (300 lifecycles under a cap of 40), so no route write may
+	// be held, while the newest finished commands' writes still are.
+	routes, finished := 0, 0
+	for _, k := range w.order {
+		switch {
+		case k.kind == "route":
+			routes++
+		case k.kind == "command" && !slices.Contains(live, k.id):
+			finished++
+		}
+	}
+	if routes != 0 || finished == 0 {
+		t.Errorf("held: %d route writes, %d finished commands' — want routes dropped before any finished command's", routes, finished)
+	}
 	w.mu.Unlock()
 	logs.mu.Lock()
-	if logs.capped != 1 {
-		t.Errorf("cap WARNs = %d, want one", logs.capped)
+	if n := len(logs.capped); n < 2 || n > 12 {
+		t.Errorf("cap WARNs = %v, want one per doubling of the running total", logs.capped)
+	}
+	for i := 1; i < len(logs.capped); i++ {
+		if logs.capped[i] < 2*logs.capped[i-1] {
+			t.Errorf("cap WARN totals %v: a WARN before the total doubled", logs.capped)
+			break
+		}
 	}
 	logs.mu.Unlock()
 

@@ -32,15 +32,20 @@ import (
 // obsdb.CommandStore.PruneCommands is honoured by construction). A
 // failed or timed-out call trips a breaker: for the pause (storeBreakerPause)
 // the writer holds the queue — still coalescing per key, bounded by the
-// live keys and a cap of 2×maxCommands keys (past it the oldest finished
-// rows' writes go, said once) — and then re-applies all of it, the
-// failed write included; one WARN when it first trips (and again only
-// after a write has succeeded since), Debug otherwise. Close ends the
-// pause and drains the queue once, bounded: a store still failing when
-// the Studio stops loses the writes still held (one WARN names how
-// many) — the only way a row goes absent. A store failure changes nothing a command does: its
-// fate is decided in memory exactly as without a store — observability
-// never changes behaviour.
+// live keys and a cap of 2×maxCommands keys (past it route writes go
+// first, then the oldest finished commands' — so under the cap a
+// finished command may read lost or unknown after a restart) — and then
+// re-applies all of it, the failed write included; one WARN when it
+// first trips (and again only after a write has succeeded since), Debug
+// otherwise. Close ends the pause and drains the queue once, bounded: a
+// store still failing when the Studio stops loses the writes still held
+// (one WARN names how many). Those are the two ways a row goes absent
+// rather than older: a Close over a still-failing store, and the
+// queue's cap. A third, minor edge: the memory prune also discards the
+// pending write of a row it removes, so that row's older stored state
+// stands until PruneCommands deletes it. A store failure changes nothing
+// a command does: its fate is decided in memory exactly as without a
+// store — observability never changes behaviour.
 //
 // What is written, and when:
 //
@@ -541,11 +546,13 @@ type storeWrite func(ctx context.Context, st obsdb.CommandStore) error
 // goroutine, in order, off the server's mutex: put only queues. The
 // queue holds the latest write per key at the key's first place in the
 // line, and the memory prune forgets the keys of what it prunes, so it
-// is bounded by the live keys — and by maxHeld besides: past it the
-// oldest droppable keys go first (a terminal command's row, a route —
-// load rebuilds a route from its command), never a queued or accepted
-// command's, a runtime's or a breakpoint set's; one WARN with the count,
-// then Debug. Each call is bounded at storeCallTimeout. A failed call
+// is bounded by the live keys — and by maxHeld besides: past it route
+// writes go first, oldest first (load rebuilds a route from its
+// command), then the oldest terminal commands' writes (such a command
+// may read lost or unknown after a restart), never a queued or accepted
+// command's, a runtime's or a breakpoint set's; a WARN with the running
+// total on the first drop of an outage and each time the total doubles,
+// Debug otherwise. Each call is bounded at storeCallTimeout. A failed call
 // trips the breaker: the write goes back to the head of the line (a
 // newer write of its key, queued meanwhile, moves to the head in its
 // place), and for the pause nothing is dequeued — the queue keeps
@@ -553,8 +560,9 @@ type storeWrite func(ctx context.Context, st obsdb.CommandStore) error
 // fails after the pause trips it again, so a dead store holds the queue
 // instead of spinning on it. Close ends the pause at once and applies
 // the queue once: a call failing then, or Close's bound running out,
-// drops what is left (one WARN naming how many keys) — the one way a
-// stored row can end up absent rather than older.
+// drops what is left (one WARN naming how many keys). With the cap,
+// those are the two ways a stored row can end up absent rather than
+// older.
 type storeWriter struct {
 	store   obsdb.CommandStore
 	timeout time.Duration
@@ -567,7 +575,8 @@ type storeWriter struct {
 	busy     bool // a write is in flight
 	stopping bool
 	abandon  bool
-	capped   int // keys dropped by the cap (the WARN said once)
+	capped   int // keys dropped by the cap in this outage
+	warnAt   int // the capped total that WARNs next (doubling)
 	wake     chan struct{}
 	done     chan struct{}
 
@@ -625,33 +634,43 @@ func (w *storeWriter) put(key writeKey, droppable bool, fn storeWrite) {
 	w.signal()
 }
 
-// capLocked drops the oldest droppable keys while the queue is over
-// maxHeld. Caller holds w.mu.
+// capLocked drops keys while the queue is over maxHeld: route writes
+// first, oldest first, then the oldest terminal commands' writes —
+// never a queued or accepted command's, a runtime's or a breakpoint
+// set's. Caller holds w.mu.
 func (w *storeWriter) capLocked() {
 	over := len(w.order) - w.maxHeld
 	if w.maxHeld <= 0 || over <= 0 {
 		return
 	}
-	kept := w.order[:0]
 	dropped := 0
-	for _, key := range w.order {
-		if dropped < over && w.pending[key].droppable {
-			delete(w.pending, key)
-			dropped++
-			continue
+	for _, pass := range []func(writeKey) bool{
+		func(k writeKey) bool { return k.kind == "route" },
+		func(k writeKey) bool { return k.kind == "command" && w.pending[k].droppable },
+	} {
+		if dropped == over {
+			break
 		}
-		kept = append(kept, key)
+		kept := w.order[:0]
+		for _, key := range w.order {
+			if dropped < over && pass(key) {
+				delete(w.pending, key)
+				dropped++
+				continue
+			}
+			kept = append(kept, key)
+		}
+		w.order = kept
 	}
-	w.order = kept
 	if dropped == 0 {
 		return
 	}
-	first := w.capped == 0
 	w.capped += dropped
-	if first {
-		slog.Warn("studio/runtime: the command store writer's queue is full; dropping the oldest finished rows' writes",
-			"dropped", dropped, "cap", w.maxHeld,
-			"hint", "the store has been failing for a long time; those rows read older (or absent) after a restart")
+	if w.capped >= w.warnAt {
+		w.warnAt = 2 * w.capped
+		slog.Warn("studio/runtime: the command store writer's queue is full; dropping route writes, then the oldest finished rows' writes",
+			"dropped", dropped, "total", w.capped, "cap", w.maxHeld,
+			"hint", "the store has been failing for a long time; a finished command may read lost or unknown after a restart")
 		return
 	}
 	slog.Debug("studio/runtime: the command store writer's queue is full; dropped writes", "dropped", dropped, "total", w.capped)
@@ -787,6 +806,9 @@ func (w *storeWriter) apply(key writeKey, fn storeWrite) error {
 	cancel()
 	if err == nil {
 		w.healthy = true
+		w.mu.Lock()
+		w.capped, w.warnAt = 0, 0 // the outage is over: the next drop WARNs again
+		w.mu.Unlock()
 		return nil
 	}
 	w.openUntil = time.Now().Add(w.pause)

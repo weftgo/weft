@@ -1760,9 +1760,12 @@ prune is a queue item, never beside a write), each call bounded at 2 s; a
 failure or timeout trips a breaker that holds the queue for 30 s — it keeps
 coalescing per key, so it is bounded by the live keys (the memory prune
 forgets the writes of the rows it removes) and a cap of 20 000 keys: a
-Studio whose store stays down for hours drops the oldest finished rows'
-and routes' writes past it, said once at WARN — and then re-applies all
-of it, the failed write included; a write that
+Studio whose store stays down for hours drops route writes past it first
+(a route is rebuilt from its command at load), then the oldest finished
+commands' writes — so under the cap a finished command may read lost or
+unknown after a restart; a WARN carries the running total on the first
+drop of an outage and each time it doubles — and then re-applies all of
+it, the failed write included; a write that
 fails again trips it again, so a dead store holds instead of spinning. One
 WARN, then Debug. A store failure changes no command's fate in this
 Studio. What it can do is leave the store older than the memory when
@@ -1773,8 +1776,11 @@ which refuses a frame it already admitted. `studio.Server.Close` ends the
 pause and drains the queue once (bounded at 5 s) before the database
 closes — a store that has recovered is written at once; a store still
 failing when the Studio stops loses the writes still held (one WARN names
-how many) — with the cap, the only way a row goes absent rather than
-older. The writer is
+how many). Those are the two ways a row goes absent rather than older: a
+Close over a still-failing store, and the queue's cap. A third, minor
+edge: the memory prune also discards the pending write of a row it
+removes, so that row's older stored state stands until `PruneCommands`
+deletes it. The writer is
 stopped by `studio.Server.Close` alone: a server built with
 `studio.Handler` is never closed and keeps that one goroutine for the
 process's life (harmless); a write it takes after its DB was closed fails

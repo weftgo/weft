@@ -504,7 +504,7 @@ breaking).
   returns without touching the element.
 - Studio: a panel token handed over in a link's `#token=` (the hand-off's
   5-minute read token) serves that tab alone, held in its `sessionStorage`
-  (kept across a reload, never shared with another tab). It no longer
+  (kept across a reload; a duplicated tab inherits it). It no longer
   replaces the browser's stored dev token in `localStorage`, which left
   every tab 401 five minutes later. Settings labels it "this tab only" and
   its clear drops it alone, leaving the stored token. A 401 under it drops
@@ -540,10 +540,11 @@ breaking).
 - The `weft.raw` record is encoded without HTML escaping: a body of `<`, `>`
   or `&` no longer grows sixfold, so a record of two full ordinary bodies
   stays ≈ 650 KiB. JSON's own escaping still makes a body of control bytes
-  six times its size (≈ 3 MiB a record), so under `otel.RawBodies` the Local
-  and Studio destinations now split each log export at 12 MiB: a burst of such
+  six times its size (≈ 3 MiB a record), so under `otel.RawBodies` a Studio
+  destination now also splits each log export at 12 MiB: a burst of such
   records no longer forms a post over Studio's 16 MiB ingest limit, which
-  was refused whole and lost every record in it (ADR 0028 §12).
+  was refused whole and lost every record in it (the Local sink writes each
+  record synchronously and needs no split; ADR 0028 §12).
 
 - studio: a cost whose badge is `unknown` (a subagent or turn still running,
   or whose end never arrived) now says so in its reason — "a subagent run's

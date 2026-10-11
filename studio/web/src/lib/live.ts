@@ -11,7 +11,7 @@
 // the stream URL carries the sig, never the token.
 import type { RunRow, WireEvent } from "./api"
 import type { ContentAttrs } from "./honesty"
-import { apiBase, studioToken } from "./api"
+import { apiBase, dropTabTokenIf, studioToken } from "./api"
 
 /** Exactly one of run, session, public_id or agent (S4.5), or every
  * run (plan A7: all=true, the dev token's and loopback's alone —
@@ -357,6 +357,11 @@ export function openLive(opts: LiveOptions): LiveHandle {
       (err: unknown) => {
         if (closed || n !== attempt) return
         lost()
+        if (err instanceof LiveGrantError && err.status === 401 && tok) {
+          // A refused hand-off token is dropped here too: the next
+          // attempt, with the stored token, needs no query to go first.
+          dropTabTokenIf(tok)
+        }
         if (err instanceof LiveGrantError && err.status === 403) {
           // Deterministic: asking again gets the same answer.
           refused = true

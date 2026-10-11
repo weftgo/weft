@@ -169,6 +169,27 @@ describe("a hand-off token refused", () => {
     expect(localStorage.getItem("studio.token")).toBe("dev-secret")
   })
 
+  it("two requests refused together under the tab token both retry with the stored token", async () => {
+    const claims = btoa(JSON.stringify({ scope: "read", pub: "pub_1" })).replace(/=+$/, "")
+    const panel = `weft_pt.${claims}.sig`
+    setStudioToken("dev-secret")
+    window.history.replaceState(null, "", `/runs#token=${panel}`)
+    adoptTokenFromLocation()
+    const fetchMock = vi.fn(async (_u: RequestInfo | URL, init?: RequestInit) =>
+      new Headers(init?.headers).get("Authorization") === "Bearer dev-secret"
+        ? ok({ total: 0, runs: [], next_before: null })
+        : ok({ error: { code: "unauthorized", message: "bad or expired token" } }, 401)
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    const settled = await Promise.allSettled([fetchRuns({}), fetchRuns({})])
+    expect(settled.map((s) => s.status)).toEqual(["fulfilled", "fulfilled"])
+    const auth = fetchMock.mock.calls.map((c) => new Headers(c[1]?.headers).get("Authorization"))
+    expect(auth.filter((a) => a === `Bearer ${panel}`)).toHaveLength(2)
+    expect(auth.filter((a) => a === "Bearer dev-secret")).toHaveLength(2)
+    expect(tabTokenActive()).toBe(false)
+    expect(studioToken()).toBe("dev-secret")
+  })
+
   it("with no stored token the 401 stands and the tab token is dropped", async () => {
     const claims = btoa(JSON.stringify({ scope: "read", pub: "pub_1" })).replace(/=+$/, "")
     const panel = `weft_pt.${claims}.sig`

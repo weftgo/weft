@@ -117,8 +117,8 @@ the bearer and `Accept: application/json` and opens the answer's
 the host page) — its fragment carries a 5-minute read token for the same
 public id, so the hosted Studio opens on the run without a token pasted.
 That handed-over token (any panel token in a `#token=`) serves its tab
-alone: it lives in that tab's `sessionStorage` (kept across a reload,
-this tab only) and never replaces the dev token a browser keeps in
+alone: it lives in that tab's `sessionStorage` (kept across a reload; a
+duplicated tab inherits it) and never replaces the dev token a browser keeps in
 `localStorage`, which every other tab goes on using. Settings shows it
 as "this tab only" and its clear drops it alone; when Studio refuses it
 (its 5 minutes are over) the tab falls back to the stored token, or the

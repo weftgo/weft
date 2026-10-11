@@ -591,7 +591,7 @@ export function studioToken(): string {
 let memoryToken = ""
 // A panel token handed over in the link (the hand-off's short-lived
 // read token) serves this tab alone: it is kept in sessionStorage —
-// per tab, surviving a reload, never shared with another tab — and
+// per tab, surviving a reload, a duplicated tab inheriting it — and
 // never in localStorage, so it never replaces the dev token every
 // other tab reads. The in-memory copy serves unwritable storage.
 const TAB_TOKEN_KEY = "studio.tab-token"
@@ -646,14 +646,26 @@ export function setStudioToken(tok: string) {
  * that (the hand-off's 5 minutes are over, the dev token is fine). */
 async function authorized(url: string, init: RequestInit & { headers: Record<string, string> }): Promise<Response> {
   const tok = studioToken()
+  // Decided from the token this request went out with, not from the
+  // state at its answer: of several requests refused together, the
+  // first drops the tab token and every one of them retries once.
+  const viaTab = tok !== "" && tok === tabToken()
   if (tok) init.headers.Authorization = `Bearer ${tok}`
   const res = await fetch(url, init)
-  if (res.status !== 401 || !tok || tok !== tabToken()) return res
+  if (res.status !== 401 || !viaTab) return res
+  dropTabTokenIf(tok)
+  const stored = studioToken()
+  if (!stored || stored === tok) return res
+  return fetch(url, { ...init, headers: { ...init.headers, Authorization: `Bearer ${stored}` } })
+}
+
+/** dropTabTokenIf drops the tab's hand-off token when it is `tok` (the
+ * one a refused request or stream went out with) and marks the drop for
+ * the wall; the stored token, if any, serves the next request. */
+export function dropTabTokenIf(tok: string) {
+  if (!tok || tok !== tabToken()) return
   clearTabToken()
   tabDropped = true
-  const stored = studioToken()
-  if (!stored) return res
-  return fetch(url, { ...init, headers: { ...init.headers, Authorization: `Bearer ${stored}` } })
 }
 
 /**

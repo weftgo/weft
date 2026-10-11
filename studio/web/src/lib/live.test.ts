@@ -10,7 +10,7 @@
 // on (run, kind, pos); close() ends it all.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { setStudioToken } from "./api"
+import { adoptTokenFromLocation, setStudioToken, tabTokenActive } from "./api"
 import { freshBearer, grantDeadline, LIVE_GRANT_TTL_MS, onLiveGaveUp, openLive, panelTokenExp, throttle } from "./live"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { setServerSkew } from "@/test/fake-live-grant"
@@ -113,6 +113,23 @@ describe("openLive", () => {
     expect(onOverflow).toHaveBeenCalledTimes(1) // lost: the caller's poll is the tail
     expect(live.refused()).toBe(true)
     expect(live.overflowed()).toBe(true)
+    live.close()
+  })
+
+  it("a 401 grant under the tab's hand-off token drops it: the next attempt carries the stored token", async () => {
+    setStudioToken("dev-secret")
+    studio.requireToken("dev-secret")
+    const tab = panelToken(Date.now() + 3600_000)
+    window.history.replaceState(null, "", `/runs#token=${tab}`)
+    adoptTokenFromLocation()
+    expect(tabTokenActive()).toBe(true)
+    const live = openLive({ selector: { run: "r1" } })
+    await vi.advanceTimersByTimeAsync(10 * 60_000)
+    const auth = studio.calls("POST live-grant").map((c) => c.headers.get("Authorization"))
+    expect(auth[0]).toBe(`Bearer ${tab}`)
+    expect(auth[1]).toBe("Bearer dev-secret")
+    expect(tabTokenActive()).toBe(false)
+    expect(FakeEventSource.instances.length).toBeGreaterThan(0)
     live.close()
   })
 

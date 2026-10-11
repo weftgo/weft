@@ -320,7 +320,7 @@ func TestAppTurnWithoutSessionsIsReadOnly(t *testing.T) {
 	} {
 		code, body := e.api(t, http.MethodPost, "/api/runs/"+parked.RunID()+verb.path, verb.body)
 		if code != http.StatusForbidden || !strings.Contains(body, "app-owned turn") ||
-			!strings.Contains(body, `"fix":"set runtime.Sessions(resolver)`) {
+			!strings.Contains(body, `"fix":"set runtime.Sessions(resolver)`) || !strings.Contains(body, `its turns then take approvals and steer"`) {
 			t.Errorf("%s on the app's turn = %d %s, want 403 app-owned turn with the runtime.Sessions fix", verb.path, code, body)
 		}
 	}

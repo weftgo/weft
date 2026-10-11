@@ -281,6 +281,10 @@ export interface RuntimeView {
   env: string
   connected_since: string
   last_seen: string
+  /** Holds its command stream now (absent on an older Studio: read as
+   * connected); sessions: it registered runtime.Sessions (plan F4). */
+  connected?: boolean
+  sessions?: boolean
   agents: AgentView[]
   /** The runtime's stored breakpoint set (§8.3): what PUT
    * …/breakpoints last delivered. Empty, never null. */

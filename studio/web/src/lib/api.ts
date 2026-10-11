@@ -1704,6 +1704,11 @@ export interface RuntimeView {
    * reconnect re-registers under the same id. Absent on a Studio older
    * than the field (read as connected: it listed only those). */
   connected?: boolean
+  /** It registered runtime.Sessions: the app's own turns of its
+   * service take approvals and steer (plan F4). */
+  sessions?: boolean
+  /** It registered breakpoints_own: runtime.Breakpoints() on an agent. */
+  breakpoints_own?: boolean
   agents: AgentView[]
   /** The debugger's stored tool set for this runtime (PUT
    * /api/runtimes/{id}/breakpoints): what it parks on every run it

@@ -100,7 +100,7 @@ import { notify } from "@/lib/notify"
 import { StepCompare } from "@/components/studio/step-diff"
 import { CostText, useCostCapable } from "@/components/studio/cost"
 import { formatUSD, lostCellCost, sumCost } from "@/lib/cost"
-import { OWN_RUNTIME } from "@/lib/honesty"
+import { OWN_RUNTIME, SCOPE_OWN, SCOPE_RUNTIME_ONLY } from "@/lib/honesty"
 
 // The command's pure halves and the form's controls live in shared
 // modules (plan F1: the run page's replay drawer renders the same
@@ -1096,9 +1096,7 @@ function Playground({ caps }: { caps: string[] }) {
         {meta.data?.debug_scope && (
           <span className="text-faint">
             · breakpoints &amp; steer act on{" "}
-            {meta.data.debug_scope === OWN_RUNTIME
-              ? "runtime-started runs and the app's own turns (runtime.Sessions)"
-              : `${meta.data.debug_scope} only (the app's own turns are viewer-only)`}
+            {meta.data.debug_scope === OWN_RUNTIME ? SCOPE_OWN : `${meta.data.debug_scope} ${SCOPE_RUNTIME_ONLY}`}
           </span>
         )}
       </header>

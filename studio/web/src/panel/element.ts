@@ -6,7 +6,7 @@
 // meta.capabilities reports the playground (§8.5 item 3).
 import type { Manifest, RunCompaction, RunRow, ToolCallPart, Transcript, Usage } from "../lib/api"
 import { isHoleRef } from "../lib/api"
-import { appVerbWords, DERIVED_HOLE, derivedUsageUnknown, isDerived, mergeHoles, parkedKind, refusalWords, rowHoles, statusHoles, USAGE_AT_FINISH, usageKnown } from "../lib/honesty"
+import { appVerbWords, DERIVED_HOLE, derivedUsageUnknown, isDerived, mergeHoles, nextTurn, parkedKind, refusalLine, refusalWords, rowHoles, statusHoles, USAGE_AT_FINISH, usageKnown } from "../lib/honesty"
 import type { HoleMark, ParkedKind } from "../lib/honesty"
 import { paramsLine, REQUEST_NO_RECORD_REASON, REQUEST_NOT_STORED, shortHash } from "../lib/requests"
 import {
@@ -21,6 +21,7 @@ import {
   replayFromStep,
   replayVerdicts,
   rerun,
+  tokenScopeOf,
 } from "../lib/replay"
 import type { CatalogTool, ReplayDraft } from "../lib/replay"
 import { checkArgs, editable, editKey, FORK_EDITS, impliedFromStep, kindOf, putEdit, schemaOf, userMessagesOf } from "../lib/edits"
@@ -3777,11 +3778,17 @@ export class WeftDevtools extends HTMLElement {
         }
       )
     )
-    const kind = parkedKind(row ?? t.doc, s.meta?.debug_scope)
-    if (t.folded.pending.length) wrap.appendChild(this.approvals(t.id, t.folded.pending, kind, s))
+    const at = row ?? t.doc
+    const kind = parkedKind(at, s.runtimes, nextTurn(at, s.turns))
+    const running = (row?.status ?? t.doc?.status) === "running"
+    // The gate reads the runtimes (a Sessions runtime of the run's
+    // service): asked here, at most every 10 s, for a parked or running
+    // app turn only.
+    if ((kind === "decide" || kind === "read-only") && (running || t.folded.pending.length) && this.canAct(s)) this.model?.wantRuntimes()
+    if (t.folded.pending.length && at) wrap.appendChild(this.approvals(at, t.folded.pending, kind, s))
     // Steer the app's turn running now (plan F4.3): the run id is this
     // turn's; the answer is a command, its refusal said verbatim.
-    if (kind === "decide" && this.canAct(s) && hasCapability(s, "steer") && (row?.status ?? t.doc?.status) === "running")
+    if (kind === "decide" && this.canAct(s) && hasCapability(s, "steer") && running)
       wrap.appendChild(this.steerBox("steer this turn", "app-steer", (m) => this.model?.steerApp(t.id, m), this.appSaid(s.app[`${t.id}:steer`], t.id)))
     if (this.canAct(s))
       wrap.appendChild(this.derived(t) ? el("div", "weft-actions", [refusedVerb("✎ Experiment"), refusedVerb("↻ Re-run")]) : this.actions(s))
@@ -3890,42 +3897,49 @@ export class WeftDevtools extends HTMLElement {
   /** approvals draws the open turn's parked calls (§2). An
    * experiment's are decided from the result pane that ran it (§8.2).
    * The app's own turn (plan F4.3) takes the same verbs, on the same
-   * route, while meta's debug_scope is own+runtime — the app set
-   * runtime.Sessions; each verb's command is polled and its refusal
-   * said verbatim. Otherwise the verbs are drawn refused with the
-   * server's words and fix (a 403 already answered, else
-   * lib/honesty.ts's), and a plain Generate's park says the app
-   * resumes it. */
-  private approvals(runID: string, pending: ToolCallPart[], kind: ParkedKind, s: PanelState): HTMLElement {
+   * route, while a connected runtime of its service registered
+   * runtime.Sessions and it is its session's latest turn; each verb's
+   * command is polled and its refusal said verbatim. Otherwise the
+   * verbs are drawn refused with the server's words and fix (a 403
+   * already answered, else lib/honesty.ts's — appturn.go's and
+   * auth.go's), a turn a later one resumed says so, and a plain
+   * Generate's park says the app resumes it. */
+  private approvals(run: RunRow, pending: ToolCallPart[], kind: ParkedKind, s: PanelState): HTMLElement {
+    const runID = run.id
     const sent = (id: string): AppVerb | undefined => s.app[`${runID}:${id}`]
     const refused = pending.map((c) => sent(c.id)).find((v) => v?.state === "refused" && v.fix)
-    if (kind === "decide" && this.canAct(s) && !refused) {
+    const act = this.canAct(s)
+    if (kind === "decide" && act && !refused) {
       const decided: Record<string, string> = {}
       for (const c of pending) if (sent(c.id)?.state === "finished") decided[c.id] = sent(c.id)!.decision ?? ""
       return this.decisions(pending, decided, (id, d, text) => this.go(this.model?.decideApp(runID, id, d, text)), (id) => this.appSaid(sent(id), runID))
     }
+    const next = kind === "resumed" ? nextTurn(run, s.turns) : undefined
     const box = el("div", "weft-step")
-    box.appendChild(el("div", "weft-step-h", [el("span", undefined, "awaiting decision (read-only)")]))
+    box.appendChild(el("div", "weft-step-h", [el("span", undefined, next ? "decided" : "awaiting decision (read-only)")]))
     const body = el("div", "weft-step-b")
-    const w = refusalWords(kind, refused, refused?.error)
-    const line = `${w.words} — fix: ${w.fix}`
+    const line = refusalLine(refusalWords(kind, run, s.runtimes, tokenScopeOf(this.cfg.token) === "read", refused))
+    const waiting = kind === "read-only" && act && !s.rtRead && !refused
     for (const call of pending) {
       const row = el("div", "weft-call", undefined, { "data-key": call.id })
       row.appendChild(
         el("div", "weft-call-h", [
           el("span", "weft-name", call.name),
           el("span", "weft-args", call.args === undefined ? "(…)" : fmtJSON(call.args)),
-          el("span", "weft-badge weft-info", "parked"),
+          el("span", "weft-badge weft-info", next ? "decided" : "parked"),
         ])
       )
-      row.appendChild(
-        kind === "experiment"
-          ? el("div", "weft-res", "an experiment's run — its decision controls are in the result pane of the turn that ran it")
-          : el("div", "weft-res", ["continue", "skip", "resolve…"].map((v) => refusedVerb(v, "button", line, "app-owned")))
-      )
+      if (kind === "experiment")
+        row.appendChild(el("div", "weft-res", "an experiment's run — its decision controls are in the result pane of the turn that ran it"))
+      else if (!next && !waiting) row.appendChild(el("div", "weft-res", ["continue", "skip", "resolve…"].map((v) => refusedVerb(v, "button", line, "app-owned"))))
       body.appendChild(row)
     }
-    if (kind !== "experiment") body.appendChild(el("div", "weft-note weft-warn", line, { "data-weft-app-owned": kind }))
+    if (next) {
+      const go = el("button", "weft-btn", `resumed as ${next}`, { "data-weft-resumed": next })
+      on(go, "click", () => this.go(this.model?.select(next, true)))
+      body.appendChild(el("div", "weft-note", [document.createTextNode("decided — "), go], { "data-weft-app-owned": "resumed" }))
+    } else if (waiting) body.appendChild(el("div", "weft-note", "checking for a runtime that acts on the app's sessions…"))
+    else if (kind !== "experiment") body.appendChild(el("div", "weft-note weft-warn", line, { "data-weft-app-owned": kind === "decide" ? "read-only" : kind }))
     box.appendChild(body)
     return box
   }

@@ -47,7 +47,7 @@ import { studioPlaygroundLink } from "./element"
 import { drawerHandoff } from "../components/studio/replay-drawer"
 import { playgroundLink } from "../lib/links"
 import { DERIVED, STOCK as DERIVED_STOCK, derivedBodies, serveDerived } from "../test/derived-fixture"
-import { APP_PUB, CALL as APP_CALL, PARKED as APP_PARKED, PLAIN as APP_PLAIN, serveAppTurn } from "../test/appturn-fixture"
+import { APP_PUB, CALL as APP_CALL, PARKED as APP_PARKED, PLAIN as APP_PLAIN, runtimeRow as appRuntime, serveAppTurn } from "../test/appturn-fixture"
 import type { AppTurnOptions } from "../test/appturn-fixture"
 
 configure({ asyncUtilTimeout: 10_000 })
@@ -1020,16 +1020,22 @@ describe("a derived run on both surfaces (I1.3)", () => {
 // The app's own turns (plan F4.3): the same gate, the same verbs and
 // the same words on both surfaces. One fake (src/test/appturn-fixture.ts,
 // studio/appturn.go's shapes) per case serves the panel, then the run
-// page: what kind of block each draws (decide, read-only, plain), its
-// read-only line, its refused verbs, and — after continue — the verb's
-// line (decided · resumed as …, the rejection, the 403's line).
+// page: what kind of block each draws (decide, read-only, resumed,
+// plain), its line, its refused verbs, and — after continue — the
+// verb's line. The gate is a Sessions runtime of the run's own service
+// (GET /api/runtimes), never meta's global debug_scope: breakpoints_own
+// alone, or another service's Sessions runtime, reads read-only.
 describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
-  const cases: { name: string; o: AppTurnOptions; run?: string; click?: boolean }[] = [
-    { name: "own+runtime: continue decides, the resumed turn named", o: {}, click: true },
-    { name: "own+runtime: the runtime's rejection verbatim", o: { outcome: "rejected" }, click: true },
-    { name: "own+runtime: a 403 becomes the read-only line with the server's fix", o: { outcome: "refused" }, click: true },
-    { name: "runtime-started runs: read-only with the one-line fix", o: { debugScope: "runtime-started runs" } },
-    { name: "a plain Generate's park", o: {}, run: APP_PLAIN },
+  const cases: { name: string; o: AppTurnOptions; run?: string; click?: boolean; kind: string }[] = [
+    { name: "a Sessions runtime of the service: continue decides, the parked turn reads resumed", o: {}, click: true, kind: "resumed" },
+    { name: "the runtime's rejection verbatim", o: { outcome: "rejected" }, click: true, kind: "decide" },
+    { name: "a 403 becomes the read-only line with the server's fix", o: { outcome: "refused" }, click: true, kind: "read-only" },
+    { name: "connected without Sessions: read-only", o: { runtimes: [appRuntime({ sessions: false, breakpoints_own: false })] }, kind: "read-only" },
+    { name: "breakpoints_own alone (debug_scope own+runtime): read-only", o: { runtimes: [appRuntime({ sessions: false, breakpoints_own: true })], debugScope: "own+runtime" }, kind: "read-only" },
+    { name: "another service's Sessions runtime: read-only for this service's turn", o: { runtimes: [appRuntime({ service: "billing" })], debugScope: "own+runtime" }, kind: "read-only" },
+    { name: "no runtime of the service connected: the link's fix", o: { runtimes: [] }, kind: "read-only" },
+    { name: "a turn already resumed: decided — resumed as the next run", o: { resumed: true }, kind: "resumed" },
+    { name: "a plain Generate's park", o: {}, run: APP_PLAIN, kind: "plain" },
   ]
   interface Seen {
     kind: string | null
@@ -1046,16 +1052,18 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
     click(all(el, ".weft-turn").find((b) => b.textContent.includes(id)))
     const callSel = `.weft-call[data-key="${APP_CALL.id}"]`
     await vi.waitFor(() => expect($(el, callSel)).toBeTruthy(), { timeout: 5_000 })
+    await vi.waitFor(() => expect($(el, ".weft-main")?.textContent ?? "").not.toContain("checking for a runtime"), { timeout: 5_000 })
     await settle()
-    const done = () => $(el, `${callSel} [data-weft-app-verb]:not([data-weft-app-verb="sending"]):not([data-weft-app-verb="queued"])`) ?? $(el, "[data-weft-app-owned]")
     if (c.click) {
       click(button(el, "continue"))
+      const done = () =>
+        $(el, `${callSel} [data-weft-app-verb="rejected"]`) ?? $(el, '[data-weft-app-owned="read-only"]') ?? $(el, '[data-weft-app-owned="resumed"]')
       await vi.waitFor(() => expect(done()).toBeTruthy(), { timeout: 5_000 })
       await settle()
     }
     const owned = $(el, "[data-weft-app-owned]")
     const seen = {
-      kind: owned?.getAttribute("data-weft-app-owned") === "plain" ? "plain" : owned ? "read-only" : "decide",
+      kind: owned?.getAttribute("data-weft-app-owned") ?? (button(el, "continue") ? "decide" : null),
       line: owned?.textContent ?? "",
       refused: all(el, '[data-weft-refused="app-owned"]').length,
       after: $(el, `${callSel} [data-weft-app-verb]`)?.textContent ?? "",
@@ -1075,20 +1083,19 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
     serveAppTurn(new FakeStudio(), { studioMeta: true, ...c.o }).install()
     renderApp(`/runs/${c.run ?? APP_PARKED}?view=story`)
     const box = () => document.querySelector<HTMLElement>("[data-parked]")
-    // meta lands after the first paint: wait for the gate's own answer.
-    await waitFor(() => expect(box()?.getAttribute("data-parked")).toBe(c.o.debugScope ? "read-only" : c.run ? "plain" : "decide"))
+    const first = c.click ? "decide" : c.kind
+    await waitFor(() => expect(box()?.getAttribute("data-parked")).toBe(first))
     if (c.click) {
-      const b = [...box()!.querySelectorAll("button")].find((n) => n.textContent === "continue")!
-      b.click()
+      ;[...box()!.querySelectorAll("button")].find((n) => n.textContent === "continue")!.click()
       await waitFor(() =>
         expect(
-          box()!.querySelector('[data-app-verb]:not([data-app-verb="sending"]):not([data-app-verb="queued"])') ?? box()!.querySelector("[data-app-owned]")
+          box()!.querySelector('[data-app-verb="rejected"]') ?? box()!.querySelector('[data-app-owned="read-only"]') ?? box()!.querySelector('[data-app-owned="resumed"]')
         ).toBeTruthy()
       )
     }
     const owned = box()!.querySelector("[data-app-owned]")
     const seen = {
-      kind: owned ? (owned.getAttribute("data-app-owned") === "plain" ? "plain" : "read-only") : "decide",
+      kind: owned?.getAttribute("data-app-owned") ?? ([...box()!.querySelectorAll("button")].some((n) => n.textContent === "continue") ? "decide" : null),
       line: owned?.textContent ?? "",
       refused: box()!.querySelectorAll('[data-refused="app-owned"]').length,
       after: box()!.querySelector("[data-app-verb]")?.textContent ?? "",
@@ -1101,51 +1108,6 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
       const panel = await panelSeen(c)
       const studio = await studioSeen(c)
       expect(studio).toEqual(panel)
-      expect(panel.kind).toBe(c.o.debugScope || c.o.outcome === "refused" ? "read-only" : c.run ? "plain" : "decide")
-    })
-})
-
-// Cost (plan A5.3): the panel's turn row and the run page's header read
-// the same figure and the same reason for the same row — lib/cost.ts's
-// words on both — own and delegated, two numbers on each.
-describe("a turn's cost on both surfaces (A5.3)", () => {
-  const WHY = "no row of the default pricing table matches wefttest/script"
-  const cases: { name: string; doc: Partial<RunDoc> }[] = [
-    { name: "priced, own + delegated", doc: { cost_usd: 0.0029, cost_known: true, cache: "exact", delegated_cost_usd: 0.0011, delegated_cost_known: true } },
-    { name: "an unpriced model: — with its reason", doc: { cost_usd: null, cost_known: false, cost_badge: "unpriced", cost_reason: WHY, delegated_cost_usd: 0.0011, delegated_cost_known: true } },
-    { name: "cache not reported: the hint in the title", doc: { cost_usd: 0.5, cost_known: true, cache: "not_reported", delegated_cost_usd: 0.25, delegated_cost_known: true } },
-  ]
-  const priced = (fx: Fixture, studioMeta: boolean) => {
-    const meta = studioMeta ? golden<Record<string, unknown>>("meta") : META
-    return serve(fx, studioMeta).on("GET meta", { ...meta, capabilities: ["ingest", "requests", "pricing"] })
-  }
-  const read = (n: Element | null | undefined) => ({ text: n?.firstChild?.textContent, title: n?.getAttribute("title") })
-
-  for (const c of cases)
-    it(`${c.name}: the panel's turn cost is the run page's header cost`, async () => {
-      const fx: Fixture = { doc: c.doc, events: events() }
-      priced(fx, false)
-      const el = await mount(ATTRS)
-      await vi.waitFor(() => expect($(el, ".weft-turn [data-weft-turn-cost]")).toBeTruthy(), { timeout: 5_000 })
-      const [pOwn, pDel] = all(el, ".weft-turn [data-weft-turn-cost] [data-weft-cost]").map(read)
-      el.remove()
-      await settle()
-      cleanup()
-      document.body.innerHTML = ""
-      stubBrowser()
-      vi.stubGlobal("scrollTo", vi.fn())
-      StudioEventSource.reset()
-      vi.stubGlobal("EventSource", StudioEventSource)
-      setStudioToken("")
-      priced(fx, true)
-      renderApp(`/runs/${RUN}`)
-      await waitFor(() => expect(document.querySelector("[data-run-cost] [data-cost-part='own'] [data-cost]")).toBeTruthy())
-      const sOwn = read(document.querySelector("[data-run-cost] [data-cost-part='own'] [data-cost]"))
-      const sDel = read(document.querySelector("[data-run-cost] [data-cost-part='delegated'] [data-cost]"))
-      expect(pOwn.text).toBeTruthy()
-      expect(pDel.text).toMatch(/^\$/)
-      expect(pOwn).toEqual(sOwn)
-      expect(pDel).toEqual(sDel)
-      if (c.doc.cost_known === false) expect(pOwn).toEqual({ text: "—", title: WHY })
+      expect(panel.kind).toBe(c.kind)
     })
 })

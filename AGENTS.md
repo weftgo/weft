@@ -261,8 +261,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    open/close/toggle/isOpen/scope/select/on/studioLink, window.weft.devtools while connected
 //    //    unless data-global="off", events weft:run|parked|error (a parked app turn is decided in the panel
 //    //    and on the run page — continue/skip/resolve, 202 + the command polled, a refusal verbatim; steer while
-//    //    it runs — when the app set runtime.Sessions, meta debug_scope own+runtime; else its verbs read
-//    //    refused, "app-owned turn · read-only" + the one-line fix, plan F4.3); its layout, plan D1: float, dock
+//    //    it runs — while a connected runtime of the run's service registered runtime.Sessions and it is
+//    //    its session's latest turn; else its verbs read refused in the server's words, "app-owned turn ·
+//    //    read-only: …" + the one-line fix, plan F4.3); its layout, plan D1: float, dock
 //    //    left|right|bottom|top, pill, hidden — data-position/data-mode/data-push (pads <html>)/
 //    //    data-z-index (--weft-z), remembered in localStorage["weft.devtools"], every key but Alt+W
 //    //    heard inside the panel only; its theme, plan D2: data-theme light|dark > the stored ◐ choice >

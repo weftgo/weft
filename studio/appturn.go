@@ -65,9 +65,19 @@ func appTurnRuntime(w http.ResponseWriter, r *http.Request, rs *linkruntime.Runt
 		if service == "" {
 			service = "(none recorded)"
 		}
+		// No runtime of the service connected at all — the app's link is
+		// closed (no WEFT_ENV=dev, no runtime.Enabled(true)) or it is not
+		// running — is told apart from one connected without Sessions:
+		// the fix differs.
+		if !serviceConnected(rs, row.Service) {
+			refuseAppOwned(w, r,
+				appOwned+" · read-only: no runtime of service "+service+" is connected",
+				"open the runtime link in the app: WEFT_ENV=dev (or runtime.Enabled(true)) at runtime.Install, with runtime.Sessions(resolver)")
+			return "", false
+		}
 		refuseAppOwned(w, r,
 			appOwned+" · read-only: run "+row.ID+" is the app's own, and no connected runtime of its service "+service+" acts on the app's sessions",
-			"set runtime.Sessions(resolver) at runtime.Install in the app (service "+service+"): its turns then take approvals, steer and cancel")
+			"set runtime.Sessions(resolver) at runtime.Install in the app (service "+service+"): its turns then take approvals and steer")
 		return "", false
 	}
 	if row.SessionID == "" || row.PublicID == "" {
@@ -77,6 +87,21 @@ func appTurnRuntime(w http.ResponseWriter, r *http.Request, rs *linkruntime.Runt
 		return "", false
 	}
 	return runtimeID, true
+}
+
+// serviceConnected reports whether any runtime of service holds its
+// command stream now (Sessions or not). A run with no service recorded
+// has none.
+func serviceConnected(rs *linkruntime.RuntimeServer, service string) bool {
+	if service == "" {
+		return false
+	}
+	for _, v := range rs.Snapshot() {
+		if v.Connected && v.Service == service {
+			return true
+		}
+	}
+	return false
 }
 
 // enqueueAppTurn hands the verb to the runtime and answers 202 with the

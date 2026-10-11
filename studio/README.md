@@ -1052,7 +1052,7 @@ running there, and the run the scope pins, are reported.
 | Event | `detail` | When |
 |---|---|---|
 | `run` | `{runId, status, publicId?, sessionId?, step?}` — `status` the turn list's word (`running`, `succeeded`, `failed`, `parked`, `interrupted`), `step` the run's last step ordinal the panel knows | a run starts, and each status change, once per transition |
-| `parked` | `{runId, callId, ackId, name}` — `ackId` is the id the approval names, the call id `weft.Approve`/`Deny`/`Resolve` and `POST /api/runs/{runId}/approvals` (`call_id`) take, so it equals `callId`. The app decides its own turns through its Session, `s.Decide(ctx, thread.Approve(ackId))` — or, when it set `runtime.Sessions(resolver)` at `runtime.Install` (`meta.debug_scope` `own+runtime`), the panel and the run page decide them through `POST /api/runs/{runId}/approvals` (plan F4.3, below); otherwise the route answers 403 "app-owned turn" with the fix | once per call a run parked on (read from its `run_finish`'s pending list) |
+| `parked` | `{runId, callId, ackId, name}` — `ackId` is the id the approval names, the call id `weft.Approve`/`Deny`/`Resolve` and `POST /api/runs/{runId}/approvals` (`call_id`) take, so it equals `callId`. The app decides its own turns through its Session, `s.Decide(ctx, thread.Approve(ackId))` — or, when it set `runtime.Sessions(resolver)` at `runtime.Install` and that runtime of the run's service is connected, the panel and the run page decide them through `POST /api/runs/{runId}/approvals` (plan F4.3, below); otherwise the route answers 403 "app-owned turn" with the fix | once per call a run parked on (read from its `run_finish`'s pending list) |
 | `error` | `{message, runId}` | a run of the conversation failed: its error, once per run — run errors only (the panel's own trouble, Studio not answering, is a line in the panel) |
 
 The global: while a `<weft-devtools>` from the script tag is connected,
@@ -1071,29 +1071,43 @@ turn parks on `refund_order`, a `weft.RequireApproval` tool).
 The app's own turns (plan F4.3). A parked turn the app started — no
 `weft.playground`, a turn of a thread session with a public id — takes
 the panel's continue / skip / resolve (the field is skip's reason or
-resolve's result) while `meta.debug_scope` reads `own+runtime`: the app
-set `runtime.Sessions(resolver)` at `runtime.Install` (and
-`runtime.Breakpoints()` on the agent, for breakpoints on its runs). The
-verbs post to the playground's own route, `POST /api/runs/{id}/approvals`;
-the 202's command is polled (`GET /api/playground/commands/{id}`) until it
-ends — "decided" with the resumed turn named (`resumed as <session>-tN`,
-a button that opens it; the turn list shows it as the session's next
-turn), or the runtime's rejection word for word (`rejected: the app is
-writing this session; fork instead`). A running app turn takes steer the
-same way, its own run id posted. Cancel is never offered on an app turn.
-Without the opt-in the block reads `awaiting decision (read-only)`: the
-verbs drawn disabled (`badges.ts`'s refused verb, `data-weft-refused="app-owned"`)
-and one line, `app-owned turn · read-only — fix: set runtime.Sessions(resolver)
-at runtime.Install in the app` — the server's own message and fix once a
-403 has answered (`lib/honesty.ts` holds the static words; a test pins
-them to `studio/appturn.go`). A plain Generate's park (no session or
-public id) reads `parked · app-owned run · the app resumes it
+resolve's result) while a connected runtime of the run's own service
+registered `runtime.Sessions(resolver)` (`GET /api/runtimes`' `sessions`
+— the rule the route itself applies; `meta.debug_scope` is global, so
+`breakpoints_own` alone, or another service's Sessions runtime, leaves
+the turn read-only) and the turn is its session's latest. The verbs post
+to the playground's own route, `POST /api/runs/{id}/approvals`; the
+202's command is polled (`GET /api/playground/commands/{id}`) until it
+ends — Studio settles a silent runtime's command as lost within
+max(10 min, 3 beats), so the poll is bounded — then the resumed turn
+shows as the session's next turn and the parked one reads `decided —
+resumed as <session>-tN` (a link; a reload says the same, with no verb),
+or the runtime's rejection word for word (`rejected: the app is writing
+this session; fork instead`). A running app turn takes steer the same
+way, its own run id posted; a steer that missed its turn reads `failed:
+no running turn to steer for run … (…)`. Cancel is never offered on an
+app turn. Otherwise the block reads `awaiting decision (read-only)`: the
+verbs drawn disabled (`badges.ts`'s refused verb,
+`data-weft-refused="app-owned"`) and one line in the server's words —
+`app-owned turn · read-only: no runtime of service <svc> is connected —
+fix: open the runtime link in the app: WEFT_ENV=dev (or
+runtime.Enabled(true)) at runtime.Install, with runtime.Sessions(resolver)`
+when the app's link is closed or it is not running, `… run <id> is the
+app's own, and no connected runtime of its service <svc> acts on the
+app's sessions — fix: set runtime.Sessions(resolver) …` when one is
+connected without it, auth.go's `this token is read-only: mint it with
+"playground": true to act` for a read-scoped token, and the 403's own
+once one has answered (`lib/honesty.ts` holds them; a test pins them to
+`studio/appturn.go` and `studio/auth.go`). A plain Generate's park (no
+session or public id) reads `parked · app-owned run · the app resumes it
 (weft.Approve)` with the `thread.PublicID(...)` fix. The run page draws
-the same block under the same gate, in the same words (`parity.test.ts`).
-The demo is `thread/examples/approvals -serve`: `WEFT_ENV=dev go run
-./thread/examples/approvals -serve 127.0.0.1:7331`, ask "deploy to prod",
-decide it in the panel docked on the page (without `WEFT_ENV=dev` the
-link stays closed and the panel shows the read-only line).
+the same block under the same gate, in the same words
+(`parity.test.ts`). The demo is `thread/examples/approvals -serve`:
+`WEFT_ENV=dev go run ./thread/examples/approvals -serve 127.0.0.1:7331`,
+ask "deploy to prod", decide it in the panel docked on the page.
+Without `WEFT_ENV=dev` the turn is read-only because the link is closed:
+the options are set, but no runtime of the service is connected, and the
+line says to open the link.
 
 The scope header (plan C3, rung 2, the development rung) is set by the
 app's own handler, since `thread` has no HTTP layer: one line,

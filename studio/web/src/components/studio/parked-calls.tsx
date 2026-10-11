@@ -14,11 +14,11 @@ import { useEffect, useRef, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
-import { ApiError, fetchCommand, metaQuery, postApproval, postSteer, studioToken } from "@/lib/api"
+import { ApiError, fetchCommand, metaQuery, postApproval, postSteer, runtimesQuery, sessionQuery, studioToken } from "@/lib/api"
 import type { CommandStatus, RunDoc } from "@/lib/api"
-import { appVerbWords, parkedKind, refusalWords } from "@/lib/honesty"
+import { appVerbWords, nextTurn, parkedKind, refusalLine, refusalWords } from "@/lib/honesty"
 import { runLink } from "@/lib/links"
-import { canReplay } from "@/lib/replay"
+import { canReplay, tokenScopeOf } from "@/lib/replay"
 
 interface Call {
   id: string
@@ -64,6 +64,8 @@ function useAppVerbs() {
     }
     const id = out.command_id
     if (!id) return set(key, { state: "finished" })
+    // Bounded: Studio settles a command whose runtime went silent as
+    // lost after max(10 min, 3 beats) (§10.5); 8 failed reads end it too.
     let fails = 0
     for (;;) {
       if (!alive.current) return
@@ -88,6 +90,7 @@ function useAppVerbs() {
       if (st.state === "finished") {
         void qc.invalidateQueries({ queryKey: ["runs"] })
         void qc.invalidateQueries({ queryKey: ["sessions"] })
+        void qc.invalidateQueries({ queryKey: ["session"] })
       }
       if (st.state === "finished" || st.state === "rejected" || st.state === "lost") return
       await new Promise((r) => setTimeout(r, 700))
@@ -147,32 +150,39 @@ function DecideRow({ call, onDecide }: { call: Call; onDecide: (d: "approve" | "
   )
 }
 
-/** The app's turn and what the page may do on it. */
+/** The app's turn and what the page may do on it: the gate reads the
+ * runtimes (a Sessions runtime of the run's service) and the session's
+ * turns (a later turn resumed this one), as the panel does. checking
+ * while either is still loading — never a verdict on half the facts. */
 function useAppTurn(doc: RunDoc) {
   const meta = useQuery(metaQuery())
   const caps = meta.data?.capabilities ?? []
-  return {
-    kind: parkedKind(doc, meta.data?.debug_scope),
-    mayAct: canReplay(caps, studioToken()),
-    steer: caps.includes("steer"),
-  }
+  const mayAct = canReplay(caps, studioToken())
+  const app = !doc.playground && !!doc.session_id && !!doc.public_id
+  const rts = useQuery({ ...runtimesQuery(), enabled: app && mayAct })
+  const sess = useQuery({ ...sessionQuery(doc.session_id), enabled: app })
+  const next = nextTurn(doc, sess.data?.runs)
+  const runtimes = rts.data?.runtimes ?? null
+  const kind = parkedKind(doc, runtimes, next)
+  const checking = app && (meta.isPending || sess.isPending || (mayAct && rts.isPending))
+  return { kind, next, runtimes, mayAct, checking, steer: caps.includes("steer") }
 }
 
 export function ParkedCalls({ doc, pending }: { doc: RunDoc; pending: Call[] }) {
-  const { kind, mayAct } = useAppTurn(doc)
+  const { kind, next, runtimes, mayAct, checking } = useAppTurn(doc)
   const { verbs, send } = useAppVerbs()
   const refused = pending.map((c) => verbs[c.id] as Verb | undefined).find((v) => v?.state === "refused" && v.fix)
-  const deciding = kind === "decide" && mayAct && !refused
-  const w = refusalWords(kind, refused, refused?.error)
-  const line = `${w.words} — fix: ${w.fix}`
+  const deciding = kind === "decide" && mayAct && !refused && !checking
+  const line = refusalLine(refusalWords(kind, doc, runtimes, tokenScopeOf(studioToken()) === "read", refused))
+  const shown = checking && !refused ? "checking" : kind
   return (
-    <div className="rounded-lg border border-ev-error/30 px-4 py-2 text-xs" data-parked={kind}>
-      <span className="eyebrow">pending approval</span>
+    <div className="rounded-lg border border-ev-error/30 px-4 py-2 text-xs" data-parked={shown}>
+      <span className="eyebrow">{shown === "resumed" ? "decided" : "pending approval"}</span>
       <ul className="mt-1 space-y-0.5">
         {pending.map((p) => (
           <li key={p.id} className="font-mono" data-pending-call={p.id}>
-            {p.name}({p.args == null ? "" : JSON.stringify(p.args)}) — awaiting a decision
-            {kind === "experiment" ? null : deciding ? (
+            {p.name}({p.args == null ? "" : JSON.stringify(p.args)}) — {shown === "resumed" ? "decided" : "awaiting a decision"}
+            {shown === "experiment" || shown === "resumed" || shown === "checking" ? null : deciding ? (
               <DecideRow
                 call={p}
                 onDecide={(decision, text) =>
@@ -203,8 +213,17 @@ export function ParkedCalls({ doc, pending }: { doc: RunDoc; pending: Call[] }) 
           </li>
         ))}
       </ul>
-      {kind === "experiment" || deciding ? null : (
-        <p className="mt-1 text-status-int" data-app-owned={kind}>
+      {shown === "resumed" && next ? (
+        <p className="mt-1 text-faint" data-app-owned="resumed">
+          {"decided — "}
+          <Link {...runLink(next)} className="text-thread-ink hover:underline" data-resumed={next}>
+            resumed as {next}
+          </Link>
+        </p>
+      ) : shown === "checking" ? (
+        <p className="mt-1 text-faint">checking for a runtime that acts on the app's sessions…</p>
+      ) : shown === "experiment" || deciding ? null : (
+        <p className="mt-1 text-status-int" data-app-owned={kind === "decide" ? "read-only" : kind}>
           {line}
         </p>
       )}

@@ -74,12 +74,42 @@ function transcript() {
 export type Outcome = "finished" | "rejected"
 export const REJECTED = "the app is writing this session; fork instead"
 
+/** The steer that missed its turn (runtime/sessions.go's refusedNoTurn
+ * with thread's ErrNotRunning words): finished, status failed. */
+export const STEER_FAILED = `no running turn to steer for run ${PARKED} (session ${APP_SESSION} is running ${RESUMED}, not ${PARKED})`
+
+/** A GET /api/runtimes row (studio/runtime's RuntimeView). */
+export function runtimeRow(over: { id?: string; service?: string; connected?: boolean; sessions?: boolean; breakpoints_own?: boolean } = {}) {
+  return {
+    id: "rt_01",
+    host: "laptop",
+    pid: 42,
+    service: "app",
+    env: "dev",
+    connected_since: T0,
+    last_seen: T0,
+    connected: true,
+    sessions: true,
+    breakpoints_own: true,
+    agents: [],
+    breakpoints: [],
+    ...over,
+  }
+}
+
 export interface AppTurnOptions {
-  /** meta.debug_scope: own+runtime (a runtime registered Sessions) or
-   * runtime-started runs. */
+  /** GET /api/runtimes' rows: by default one connected runtime of the
+   * turn's service with runtime.Sessions — the verbs' gate. */
+  runtimes?: ReturnType<typeof runtimeRow>[]
+  /** meta.debug_scope (global: own+runtime while any runtime has
+   * Sessions or breakpoints_own); defaults to what runtimes say. */
   debugScope?: string
   /** What the decision's command ends in; "refused" is the route's 403. */
   outcome?: Outcome | "refused"
+  /** The steer's command ends failed with STEER_FAILED. */
+  steerFailed?: boolean
+  /** The turn was already resumed: s_app-t2 is listed from the start. */
+  resumed?: boolean
   /** The page/panel meta: the Studio golden's (the run page) or the
    * panel's META. */
   studioMeta?: boolean
@@ -94,9 +124,10 @@ export function serveAppTurn(fake: FakeStudio, o: AppTurnOptions = {}): FakeStud
   const meta = {
     ...(o.studioMeta ? golden<Record<string, unknown>>("meta") : META),
     capabilities: caps,
-    debug_scope: o.debugScope ?? "own+runtime",
+    debug_scope:
+      o.debugScope ?? ((o.runtimes ?? [runtimeRow()]).some((r) => r.connected && (r.sessions || r.breakpoints_own)) ? "own+runtime" : "runtime-started runs"),
   }
-  let resumed = false
+  let resumed = !!o.resumed
   const parked = parkedRow(o.running ? { status: "running", pending: 0, finished: "" } : {})
   // Newest first, as GET /api/runs lists them.
   const rows = () => (resumed ? [resumedRow(), parked, plainRow()] : [parked, plainRow()])
@@ -114,7 +145,18 @@ export function serveAppTurn(fake: FakeStudio, o: AppTurnOptions = {}): FakeStud
       const runs = rows().filter((r) => !pub || r.public_id === pub)
       return { total: runs.length, runs, next_before: null }
     })
-    .on("GET runtimes", { runtimes: [] })
+    .on("GET runtimes", { runtimes: o.runtimes ?? [runtimeRow()] })
+    .on(`GET sessions/${APP_SESSION}`, () => ({
+      id: APP_SESSION,
+      public_id: APP_PUB,
+      agent: "approvals-example",
+      turns: resumed ? 2 : 1,
+      first_seen: T0,
+      last_seen: T0,
+      status: "succeeded",
+      usage: { input_tokens: 10, output_tokens: 5 },
+      runs: rows().filter((r) => r.session_id === APP_SESSION),
+    }))
     .on(`GET runs/${PARKED}`, () => doc(parked))
     .on(`GET runs/${PARKED}/events`, pagedEvents(events(PARKED, !o.running), { done: !o.running }))
     .on(`GET runs/${PARKED}/transcript`, transcript())
@@ -138,7 +180,8 @@ export function serveAppTurn(fake: FakeStudio, o: AppTurnOptions = {}): FakeStud
       const base = { command_id: "cmd_app", run_id: PARKED, created: T0, updated: T0, error: null }
       if (polls < 2) return { ...base, state: "queued" }
       if (o.outcome === "rejected") return { ...base, state: "rejected", error: REJECTED }
-      resumed = true
+      if (o.steerFailed) return { ...base, state: "finished", status: "failed", error: STEER_FAILED }
+      if (!o.running) resumed = true
       return { ...base, state: "finished", status: "succeeded", run_id: o.running ? PARKED : RESUMED }
     })
   return fake

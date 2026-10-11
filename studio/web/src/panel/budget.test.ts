@@ -120,20 +120,20 @@ describe("the size ledger (panel-budget.json)", () => {
     expect(lines.at(-1)).toBe("total 61,898 B (60.4 KiB) of 81,920 B · headroom 20,022 B (19.6 KiB)")
   })
 
-  it("prints the full ledger's table: the minified and later unbudgeted rows net into one line, 5,409 B of headroom", () => {
-    // The whole ledger at its last row (A5.3, 76,511 B): the "minified" row's −7,652 B against the
-    // earlier unbudgeted rows, I1.3's +578 B and F4.3's +1,217 B is the unbudgeted line's −1.4 KiB (U+2212, not a hyphen);
-    // A5.3 has its own line, within its estimate.
-    expect(ledger.rows.at(-1)!.label).toBe("A5.3")
-    const { lines, over } = budgetTable(ledger, 76511)
+  it("prints the full ledger's table: the minified and later unbudgeted rows net into one line, 4,810 B of headroom", () => {
+    // The whole ledger at its last row (F4.3 fixes, 77,110 B): the "minified" row's −7,652 B against the
+    // earlier unbudgeted rows, I1.3's +578 B, F4.3's +1,217 B and F4.3 fixes' +599 B is the unbudgeted
+    // line's −0.8 KiB (U+2212, not a hyphen); A5.3 has its own line, within its estimate.
+    expect(ledger.rows.at(-1)!.label).toBe("F4.3 fixes")
+    const { lines, over } = budgetTable(ledger, 77110)
     expect(over).toBe(false)
     const unbudgeted = lines.find((l) => l.includes("unbudgeted")) ?? ""
-    expect(unbudgeted).toMatch(/pre-release web fixes, minified, I1\.3, I1\.3 fixes, I1\.3 fixes 2, F4\.3\)/)
-    expect(unbudgeted.endsWith("\u22121.4 KiB")).toBe(true)
+    expect(unbudgeted).toMatch(/pre-release web fixes, minified, I1\.3, I1\.3 fixes, I1\.3 fixes 2, F4\.3, F4\.3 fixes\)/)
+    expect(unbudgeted.endsWith("\u22120.8 KiB")).toBe(true)
     const a53 = lines.find((l) => l.startsWith("A5.3".padEnd(6))) ?? ""
     expect(a53).toMatch(/panel cost per turn \/ experiment\s+\+1\.0 KiB\s+\+1\.0 KiB\s+ok$/)
     expect(76511 - 75501).toBeLessThanOrEqual(ledger.items.find((x) => x.id === "A5.3")!.estimate)
-    expect(lines.at(-1)).toBe("total 76,511 B (74.7 KiB) of 81,920 B · headroom 5,409 B (5.3 KiB)")
+    expect(lines.at(-1)).toBe("total 77,110 B (75.3 KiB) of 81,920 B · headroom 4,810 B (4.7 KiB)")
   })
 
   it("says when the build differs from the last row, and only the cap fails", () => {

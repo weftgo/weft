@@ -94,6 +94,8 @@ export const OVERFLOW_CALM_MS = 60_000
  * row end it. */
 const POLL_MS = 700
 const POLL_FAILS = 8
+/** How often the app turn's gate reads the runtimes again (plan F4.3). */
+const RT_MS = 10_000
 /** The dev list (no public id) is streamed on its newest run's agent
  * (agent=…, plan C3.4: S4.5 has no selector for everything); while no
  * stream is up (no agent known yet, the grant refused, the stream gone)
@@ -263,6 +265,9 @@ export interface PanelState {
   drawer: ExperimentDraft | null
   /** The connected runtimes the drawer picks from (§10.4). */
   runtimes: RuntimeView[]
+  /** runtimes has been read (GET /api/runtimes): the app turn's gate
+   * (plan F4.3) waits for it. */
+  rtRead: boolean
   /** The drawer's running or finished experiment (the result pane). */
   result: ExperimentResult | null
   /** The drawer's "will be sent" preview (plan F2, capability
@@ -317,6 +322,7 @@ export function emptyPanelState(): PanelState {
     turn: null,
     drawer: null,
     runtimes: [],
+    rtRead: false,
     result: null,
     preview: null,
     breakpoints: [],
@@ -1561,6 +1567,7 @@ export class PanelModel {
     }
     if (this.disposed || seq !== this.loadSeq) return
     this.state.runtimes = runtimes
+    this.state.rtRead = true
     const rt = pickRuntime(runtimes, agentName)
     const agent = rt?.agents.find((a) => a.name === agentName)
     if (!rt || !agent) {
@@ -2015,7 +2022,8 @@ export class PanelModel {
    * row says it is over (true), the poller's owner is gone (gone), or
    * the row cannot be read — a command a restarted Studio no longer
    * knows, an expired token, Studio gone: lost says why, instead of
-   * asking forever. */
+   * asking forever. It is bounded too: Studio settles a command whose
+   * runtime went silent as lost after max(10 min, 3 beats) (§10.5). */
   private poll(id: string, gone: () => boolean, row: (st: CommandStatus) => boolean | Promise<boolean>, lost: (why: string) => void) {
     let fails = 0
     const tick = async () => {
@@ -2056,6 +2064,7 @@ export class PanelModel {
       out = await send()
     } catch (err) {
       const fix = err instanceof PanelApiError ? (err.body as { fix?: unknown } | null)?.fix : undefined
+      this.rtAt = 0 // the gate was stale: read the runtimes again
       set({ state: "refused", error: messageOf(err), ...(typeof fix === "string" ? { fix } : {}) })
       return
     }
@@ -2076,6 +2085,24 @@ export class PanelModel {
       },
       (why) => set({ state: "lost", error: why })
     )
+  }
+
+  /** wantRuntimes reads GET /api/runtimes for the app turn's gate
+   * (plan F4.3: a Sessions runtime of the run's service), at most once
+   * every RT_MS while a parked or running app turn is drawn. */
+  private rtAt = 0
+  wantRuntimes() {
+    if (this.disposed || Date.now() - this.rtAt < RT_MS) return
+    this.rtAt = Date.now()
+    fetchRuntimes(this.ep)
+      .then((d) => {
+        this.state.runtimes = Array.isArray(d.runtimes) ? d.runtimes : []
+      })
+      .catch(quiet)
+      .finally(() => {
+        this.state.rtRead = true
+        this.emit()
+      })
   }
 
   /** decideApp answers one parked call of an app turn (plan F4.3):

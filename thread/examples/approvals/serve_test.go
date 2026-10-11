@@ -267,6 +267,31 @@ func TestServedWithoutSessionsIsReadOnly(t *testing.T) {
 	}
 }
 
+// TestServedWithLinkClosed: the example run without WEFT_ENV=dev — the
+// options are set but no runtime link is open, so no runtime of the
+// app's service is connected: the 403 names that and its fix opens the
+// link (never "set runtime.Sessions", which the app already did).
+func TestServedWithLinkClosed(t *testing.T) {
+	e := newServed(t, servedAgent)
+	answer, parked := e.ask(t, "deploy to prod")
+	if !strings.Contains(answer, "awaiting approval: deploy (call call_deploy_1)") {
+		t.Fatalf("deploy did not park: %q", answer)
+	}
+	e.stored(t, parked)
+	defer func() { _ = e.app.s.Close(context.Background()) }()
+	code, body := e.api(t, http.MethodPost, "/api/runs/"+parked+"/approvals", `{"call_id":"call_deploy_1","decision":"approve"}`)
+	var refusal struct {
+		Error struct{ Message string } `json:"error"`
+		Fix   string                   `json:"fix"`
+	}
+	if code != http.StatusForbidden || json.Unmarshal([]byte(body), &refusal) != nil ||
+		!strings.HasPrefix(refusal.Error.Message, "app-owned turn · read-only: no runtime of service ") ||
+		!strings.HasSuffix(refusal.Error.Message, " is connected") ||
+		refusal.Fix != "open the runtime link in the app: WEFT_ENV=dev (or runtime.Enabled(true)) at runtime.Install, with runtime.Sessions(resolver)" {
+		t.Fatalf("approvals with the link closed = %d %s, want the 403 naming the closed link", code, body)
+	}
+}
+
 // lastText is the transcript's last assistant text.
 func lastText(msgs []weft.Message) string {
 	for i := len(msgs) - 1; i >= 0; i-- {

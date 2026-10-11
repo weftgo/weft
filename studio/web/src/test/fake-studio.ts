@@ -193,7 +193,7 @@ export function appOwnedRefusal(run: string, service = "app") {
         code: "forbidden",
         message: `app-owned turn · read-only: run ${run} is the app's own, and no connected runtime of its service ${service} acts on the app's sessions`,
       },
-      fix: `set runtime.Sessions(resolver) at runtime.Install in the app (service ${service}): its turns then take approvals, steer and cancel`,
+      fix: `set runtime.Sessions(resolver) at runtime.Install in the app (service ${service}): its turns then take approvals and steer`,
     },
     403
   )

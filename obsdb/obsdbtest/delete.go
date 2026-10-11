@@ -144,6 +144,21 @@ func kept(t *testing.T, db obsdb.DB, r delRun) {
 	}
 }
 
+// alive writes a heartbeat stamped now for each run: it reads running
+// for the next obsdb.InterruptedAfter.
+func alive(t *testing.T, db obsdb.DB, ids ...string) {
+	t.Helper()
+	var b obsdb.Batch
+	for _, id := range ids {
+		hb := record(id, "heartbeat", "", 0, "", nil)
+		hb.Time = time.Now().UTC()
+		b.Records = append(b.Records, hb)
+	}
+	if err := db.Write(ctx(), b); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func allIDs(t *testing.T, db obsdb.DB) []string {
 	t.Helper()
 	page, err := db.Runs(ctx(), obsdb.RunQuery{ParentRunID: "*", Limit: 500})
@@ -310,6 +325,10 @@ func sweep(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		kept(t, db, running)
 
 		// A cutoff in the future takes every run that is not running.
+		// The two running runs heartbeat first, as live runs do: a run
+		// silent past obsdb.InterruptedAfter is interrupted and would go
+		// too, were this test slower than that.
+		alive(t, db, runningKid.id, running.id)
 		n, err = db.Sweep(ctx(), time.Now().Add(time.Hour))
 		if err != nil {
 			t.Fatal(err)
@@ -320,6 +339,7 @@ func sweep(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if got := allIDs(t, db); fmt.Sprint(got) != "[sw_parent/0/c1 sw_running]" {
 			t.Errorf("runs after the sweeps = %v, want the two running runs", got)
 		}
+		alive(t, db, runningKid.id, running.id)
 		if n, err := db.Sweep(ctx(), time.Now().Add(time.Hour)); err != nil || n != 0 {
 			t.Errorf("a sweep with nothing to take = %d, %v", n, err)
 		}
@@ -328,11 +348,16 @@ func sweep(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 
 // sweepBatched: a backlog of more roots than one pass takes
 // (obsdb.SweepBatch) is swept whole — every root and its child, the
-// count over every pass — and a running run among them stays.
+// count over every pass — and a running run among them stays. The
+// cutoff sits between the backlog (2 h old) and the running run
+// (started now), so the run stays whether the sweep reads it running
+// or, the write and the sweep having taken longer than
+// obsdb.InterruptedAfter on a slow machine, interrupted.
 func sweepBatched(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
 		db := open(t)
-		old := time.Now().UTC().Add(-2 * time.Hour)
+		now := time.Now().UTC()
+		old := now.Add(-2 * time.Hour)
 		const roots = obsdb.SweepBatch + 37
 		var b obsdb.Batch
 		for i := range roots {
@@ -346,13 +371,13 @@ func sweepBatched(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 				b.Spans = append(b.Spans, rb.Spans...)
 			}
 		}
-		running := delRun{id: "swb_running", t: time.Now().UTC()}
+		running := delRun{id: "swb_running", t: now}
 		rb := running.batch(running.id)
 		b.Records = append(b.Records, rb.Records...)
 		if err := db.Write(ctx(), b); err != nil {
 			t.Fatal(err)
 		}
-		n, err := db.Sweep(ctx(), time.Now().Add(time.Hour))
+		n, err := db.Sweep(ctx(), now.Add(-time.Hour))
 		if err != nil {
 			t.Fatal(err)
 		}

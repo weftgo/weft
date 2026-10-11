@@ -348,11 +348,10 @@ func sweep(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 
 // sweepBatched: a backlog of more roots than one pass takes
 // (obsdb.SweepBatch) is swept whole — every root and its child, the
-// count over every pass — and a running run among them stays. The
-// cutoff sits between the backlog (2 h old) and the running run
-// (started now), so the run stays whether the sweep reads it running
-// or, the write and the sweep having taken longer than
-// obsdb.InterruptedAfter on a slow machine, interrupted.
+// count over every pass — and a running run among them stays under a
+// cutoff in the future, kept by its status alone. It heartbeats just
+// before the sweep, as live runs do, so only the sweep — not the
+// backlog's write — has to fit inside obsdb.InterruptedAfter.
 func sweepBatched(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
 		db := open(t)
@@ -377,7 +376,8 @@ func sweepBatched(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if err := db.Write(ctx(), b); err != nil {
 			t.Fatal(err)
 		}
-		n, err := db.Sweep(ctx(), now.Add(-time.Hour))
+		alive(t, db, running.id)
+		n, err := db.Sweep(ctx(), time.Now().Add(time.Hour))
 		if err != nil {
 			t.Fatal(err)
 		}

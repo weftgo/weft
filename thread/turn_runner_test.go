@@ -1,10 +1,13 @@
 package thread_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"iter"
+	"runtime"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -192,6 +195,19 @@ func TestBusyInvariantUnderRaces(t *testing.T) {
 }
 
 // trip is a switch a test flips to make a session callback panic.
+// goroutineID returns the calling goroutine's id, parsed from its
+// stack header — a test's way to tell its own calls from the runner's.
+func goroutineID() uint64 {
+	var buf [64]byte
+	b := buf[:runtime.Stack(buf[:], false)]
+	b = bytes.TrimPrefix(b, []byte("goroutine "))
+	if i := bytes.IndexByte(b, ' '); i >= 0 {
+		b = b[:i]
+	}
+	n, _ := strconv.ParseUint(string(b), 10, 64)
+	return n
+}
+
 type trip struct {
 	armed atomic.Bool
 	at    atomic.Int64 // panic on the at-th call (1-based); 0 = on every call while armed
@@ -398,9 +414,19 @@ func TestCloseReturnsWhenTheRunnerExits(t *testing.T) {
 // it at the queue's head.
 func TestEpiloguePanicFreesTheRunner(t *testing.T) {
 	ctx := context.Background()
+	// The trip is armed before the Rollback Send and spares the ids the
+	// test's own goroutine mints (the Send's receipt and turn ids), so
+	// every id the runner mints after the interruption panics, however
+	// fast it runs: the interrupted turn's end, and then the rollback's
+	// branch at the item boundary. Arming after the Send raced the
+	// runner — it could write the interrupted turn's end first, and t1
+	// then ended with the bare cancel (CI run 38136174669).
 	var tr trip
+	testG := goroutineID()
 	ids := thread.IDs(func() string {
-		tr.hit("the ids function")
+		if goroutineID() != testG {
+			tr.hit("the ids function")
+		}
 		return thread.NewEntryID()
 	})
 	agent, _, started, rel := heldAgent("the follow-up's reply", "the last reply")
@@ -410,14 +436,14 @@ func TestEpiloguePanicFreesTheRunner(t *testing.T) {
 		t.Fatal(err)
 	}
 	t1, _ := s.Send(ctx, core.User("one"))
+	// The held turn's step is written before its tool starts: nothing
+	// the runner mints from here on precedes the interruption.
 	<-started
+	tr.armed.Store(true)
 	followUp, err := s.Send(ctx, core.User("instead, this"), thread.As(thread.Rollback))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// From here every id the session mints panics: the interrupted
-	// turn's end, and then the rollback's branch at the item boundary.
-	tr.armed.Store(true)
 	if _, err := t1.WaitContext(deadline(t, 5*time.Second)); !errors.Is(err, thread.ErrTurnPanicked) {
 		t.Fatalf("the interrupted turn: %v, want ErrTurnPanicked", err)
 	}

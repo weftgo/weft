@@ -102,6 +102,9 @@ the bearer and `Accept: application/json` and opens the answer's
 `location`, a path under the base resolved against the endpoint (never
 the host page) — its fragment carries a 5-minute read token for the same
 public id, so the hosted Studio opens on the run without a token pasted.
+That handed-over token (any panel token in a `#token=`) serves its tab
+alone: it is never stored and never replaces the dev token a browser
+keeps, which every other tab goes on using.
 The tab opens after the hand-off answers; a browser that blocks a popup
 after a slow answer leaves the plain link on the note line (put there
 once the answer takes over a second). Without the
@@ -454,7 +457,9 @@ one); each tool call, subagent badge, session and trace in the panel is
 a link. A turn's **save as test** (capability `export`, not under a
 read-scoped token) is one too: `runs/<id>?save=test`
 (`saveTestLink`), where the run page downloads the wefttest zip with
-Studio's own bearer — an in-panel fetch-and-save measured ~0.8 KiB of
+Studio's own bearer — under a panel token the chip still opens the run
+page, whose bearer must be able to export (the dev token): a read-scoped
+token there is refused with the notice — an in-panel fetch-and-save measured ~0.8 KiB of
 `panel.js`. The result pane's **keep as prompt ⤴** copies the drawer's
 prompt and, under `proposals` with the dev token (or none), also
 proposes it (`PUT /api/agents/{name}/proposal`), the outcome on the
@@ -851,8 +856,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 281,406 B raw / 81,344 B gzip
-(79.4 KiB, the ledger's last row; 576 B under the 81,920 B — 80 KiB — cap). The scope-detection ladder (C3: rungs
+committed `studio/dist/panel/panel.js`, 281,470 B raw / 81,358 B gzip
+(79.5 KiB, the ledger's last row; 562 B under the 81,920 B — 80 KiB — cap). The scope-detection ladder (C3: rungs
 2 to 5 and the activity pill) cost +6.0 KiB gzip against its +3 KiB
 estimate: nothing deferrable supplies the first scope and the
 deferrable remainder is under 1 KiB, so the overrun is accepted rather
@@ -871,7 +876,7 @@ rather than cut. The transcript editor and its preview (F2) measured
 review-driven honesty and correctness (the compacted-range pre-check,
 the pending and held Run states, steers by step, the int64 and 2^53
 refusals, the fork hold), nothing deferrable supplies the editor's
-first paint, and 2.2 KiB of headroom remain, so it is accepted.
+first paint, and 2.2 KiB of headroom remained at the time, so it is accepted.
 `make studio-panel-asset` stages it as `panel-<version>.js` + sha256
 for non-Go backends.
 

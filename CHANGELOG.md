@@ -502,6 +502,17 @@ breaking).
   a link to click.
 - Devtools panel: a start that settles after the element was removed
   returns without touching the element.
+- Studio: a panel token handed over in a link's `#token=` (the hand-off's
+  5-minute read token) serves that tab alone. It is no longer stored, so it
+  no longer replaces the browser's stored dev token, which left every tab
+  401 five minutes later. A dev token in the fragment is stored as before.
+- Studio: `/experiments/A` → `/experiments/B` (the palette) is a fresh
+  page. A's cell states, polls and pending "re-run all" toast no longer
+  carry onto B.
+- Devtools panel: a hand-off answer that lands after the element was
+  removed opens no tab and leaves no note.
+- The panel budget test asserts the committed `panel.js` is within the
+  80 KiB cap and pins every ledger row.
 
 ## 0.13.0 — 2026-10-10
 

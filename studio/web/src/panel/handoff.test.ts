@@ -190,6 +190,20 @@ describe("open in Studio under a playground panel token (setup C)", () => {
     expect($(el, ".weft-dock")?.textContent ?? "").not.toContain("open in Studio:")
   })
 
+  it("an answer landing after removal opens no tab and leaves no note", async () => {
+    let release: (v: unknown) => void = () => {}
+    studioWith(() => new Promise((r) => (release = r)))
+    const el = await mount({ ...ATTRS, "data-token": PLAYGROUND })
+    expand(el).dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
+    el.remove()
+    release({ location: LOCATION })
+    await settle()
+    expect(opened).toEqual([])
+    document.body.appendChild(el)
+    await settle()
+    expect($(el, ".weft-dock")?.textContent ?? "").not.toContain("open in Studio:")
+  })
+
   it("studioLink() stays the plain URL", async () => {
     studioWith({ location: LOCATION })
     const el = await mount({ ...ATTRS, "data-token": PLAYGROUND })

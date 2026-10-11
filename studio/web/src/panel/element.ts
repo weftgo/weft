@@ -1591,7 +1591,9 @@ export class WeftDevtools extends HTMLElement {
     if (tokenScope(this.cfg.token) !== "playground" || !hasCapability(this.last, "handoff")) return false
     const u = new URL(url)
     const origin = new URL(this.base).origin
+    const seq = this.startSeq
     const done = (to: string, why = "") => {
+      if (seq !== this.startSeq || !this.isConnected) return
       clearTimeout(this.slow)
       openTab(to)
       this.say(`open in Studio: ${why ? `${why} · ` : ""}${url}`)

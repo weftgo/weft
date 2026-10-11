@@ -5713,17 +5713,17 @@ var vs = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 	}
 	handoff(e) {
 		if (O(this.cfg.token) !== "playground" || !Jo(this.last, "handoff")) return !1;
-		let t = new URL(e), n = new URL(this.base).origin, r = (t, n = "") => {
-			clearTimeout(this.slow), Bs(t), this.say(`open in Studio: ${n ? `${n} · ` : ""}${e}`);
+		let t = new URL(e), n = new URL(this.base).origin, r = this.startSeq, i = (t, n = "") => {
+			r === this.startSeq && this.isConnected && (clearTimeout(this.slow), Bs(t), this.say(`open in Studio: ${n ? `${n} · ` : ""}${e}`));
 		};
 		return clearTimeout(this.slow), this.slow = setTimeout(() => this.say(`open in Studio: ${e}`), 1e3), Zr(this.ep, t.pathname.slice(new URL(this.base).pathname.length - 1) + t.search).then((t) => {
-			let i = e;
+			let r = e;
 			try {
 				let e = new URL(t.location, this.base);
-				t.location && e.origin === n && (i = e.toString());
+				t.location && e.origin === n && (r = e.toString());
 			} catch {}
-			r(i);
-		}, (t) => r(e, t instanceof V && (t.status === 403 || t.status === 404) ? "" : t.message)), !0;
+			i(r);
+		}, (t) => i(e, t instanceof V && (t.status === 403 || t.status === 404) ? "" : t.message)), !0;
 	}
 	cycle() {
 		let e = this.lay, t = ie[(ie.indexOf(e.mode === "float" ? "float" : e.side) + 1) % ie.length];

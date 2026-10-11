@@ -540,13 +540,15 @@ describe("verbs gate on the transcript's steps, not the fold's (review 1)", () =
       return el
     })
     expect(valueOf(picker)).toBe("3")
+    const edit = await waitFor(() => d.getByLabelText<HTMLInputElement>("edit the result of refund (c3) at step 2"))
+    expect(edit.value).toBe(ERR)
+    // The pre-filled field has focus (review: focus the verb's field) —
+    // read before the picker's options: opening and closing the select
+    // hands focus back to its trigger.
+    await waitFor(() => expect(document.activeElement).toBe(edit))
     expect((await optionsOf(picker)).map((o) => o.text).at(-1)).toBe(
       "3 · after the last step (answers its calls)"
     )
-    const edit = await waitFor(() => d.getByLabelText<HTMLInputElement>("edit the result of refund (c3) at step 2"))
-    expect(edit.value).toBe(ERR)
-    // The pre-filled field has focus (review: focus the verb's field).
-    await waitFor(() => expect(document.activeElement).toBe(edit))
     await waitFor(() => expect(verdict("refund")).toBe("substituted"))
     expect(verdict("search_kb")).toBe("runs")
     expect(drawer()!.querySelector("[data-replay-prefix]")!.textContent).toBe("steps 0–2 kept")

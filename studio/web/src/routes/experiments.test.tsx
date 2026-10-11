@@ -294,6 +294,25 @@ describe("/experiments/{id}", () => {
     expect(studio.calls("POST playground/runs")).toHaveLength(1)
   })
 
+  // The palette moves /experiments/A → /experiments/B: B is a fresh
+  // page, none of A's cell states, polls or batch carried over.
+  it("a different experiment is a fresh page: A's cell states do not follow onto B", async () => {
+    studio
+      .on("POST playground/runs", command("cmd_r1", "queued"))
+      .on("GET playground/commands/cmd_r1", command("cmd_r1", "finished", "pg_b2_again", "succeeded"))
+      .on("GET experiments/exp_other", { ...pricedExp, id: "exp_other", name: "exp_other" })
+    const { router } = renderApp("/experiments/exp_tone")
+    await waitFor(() => expect(cell("B×2").textContent).toContain("failed"))
+    const btn = within(cell("B×2")).getByRole("button", { name: "re-run cell B×2" })
+    await waitFor(() => expect(btn).toHaveProperty("disabled", false))
+    fireEvent.click(btn)
+    await waitFor(() => expect(cell("B×2").querySelector("[data-cell-rerun]")?.textContent).toBe("re-run finished"))
+    await router.navigate({ to: "/experiments/$id", params: { id: "exp_other" } })
+    await waitFor(() => expect(studio.calls("GET experiments/exp_other").length).toBeGreaterThan(0))
+    await waitFor(() => expect(cell("B×2").textContent).toContain("failed"))
+    expect(cell("B×2").querySelector("[data-cell-rerun]")).toBeNull()
+  })
+
   it("re-run all: a settled run never listed under the label holds the toast for COST_WAITS reads, then it goes without the cost", async () => {
     let n = 0
     let done = false

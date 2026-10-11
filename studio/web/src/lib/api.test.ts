@@ -57,6 +57,28 @@ describe("the token (S4.6, setup B)", () => {
     expect(window.location.hash).toBe("")
   })
 
+  // The hand-off (/api/panel-handoff) lands with a 5-minute read token
+  // scoped to one public id: it serves this tab alone and never
+  // replaces the stored dev token, which every other tab keeps using.
+  it("uses a panel token from the fragment for this tab only, the stored token kept", () => {
+    const claims = btoa(JSON.stringify({ scope: "read", pub: "pub_1" })).replace(/=+$/, "")
+    const panel = `weft_pt.${claims}.sig`
+    setStudioToken("dev-secret")
+    window.history.replaceState(null, "", `/runs/r1#token=${panel}`)
+    expect(adoptTokenFromLocation()).toBe(true)
+    expect(studioToken()).toBe(panel)
+    expect(localStorage.getItem("studio.token")).toBe("dev-secret")
+    expect(window.location.hash).toBe("")
+  })
+
+  it("stores a dev token from the fragment, replacing the stored one", () => {
+    setStudioToken("old-secret")
+    window.history.replaceState(null, "", "/runs#token=new-secret")
+    expect(adoptTokenFromLocation()).toBe(true)
+    expect(studioToken()).toBe("new-secret")
+    expect(localStorage.getItem("studio.token")).toBe("new-secret")
+  })
+
   it("leaves a URL without a token alone", () => {
     window.history.replaceState(null, "", "/playground?run=r1#t=3")
     expect(adoptTokenFromLocation()).toBe(false)

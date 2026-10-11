@@ -36,6 +36,10 @@ import { Button } from "@/components/ui/button"
 import { ExperimentsHidden, mayReadExperiments, NoExperiments } from "@/components/studio/no-experiments"
 
 export const Route = createFileRoute("/experiments/$id")({
+  // One page per experiment: /experiments/A → /experiments/B (the
+  // palette) is a fresh page, none of A's cell states, polls or batch
+  // carried onto B.
+  remountDeps: ({ params }) => params.id,
   component: ExperimentPage,
 })
 

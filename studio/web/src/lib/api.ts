@@ -11,6 +11,7 @@ import { queryOptions } from "@tanstack/react-query"
 import type { ContentAttrs } from "./honesty"
 import { diffPath } from "./stepdiff"
 import { dispositionName, testExportPath } from "./saves"
+import { tokenScopeOf } from "./replay"
 import type { DiffDoc } from "./stepdiff"
 
 // ── DTO mirrors (S4.3) ─────────────────────────────────────────────
@@ -576,6 +577,7 @@ export function apiBase(): string {
  */
 const TOKEN_KEY = "studio.token"
 export function studioToken(): string {
+  if (tabToken) return tabToken
   try {
     return localStorage.getItem(TOKEN_KEY) ?? memoryToken
   } catch {
@@ -586,7 +588,12 @@ export function studioToken(): string {
 // (the token then lasts this page only) and makes a paste effective
 // before the next read.
 let memoryToken = ""
+// A panel token handed over in the link (the hand-off's short-lived
+// read token) serves this tab alone: it is never stored, so it never
+// replaces the dev token every other tab reads.
+let tabToken = ""
 export function setStudioToken(tok: string) {
+  tabToken = ""
   memoryToken = tok
   try {
     if (tok) localStorage.setItem(TOKEN_KEY, tok)
@@ -605,7 +612,9 @@ export function setStudioToken(tok: string) {
  * one link; the shell's token prompt is the other way. A token in the
  * query (`?token=…`) is not adopted — loading that page already sent it
  * to Studio in a URL (plan C5) — only stripped from the address bar.
- * Reports whether a token was adopted.
+ * A panel token (tokenScopeOf "read"/"playground" — the hand-off's
+ * 5-minute read token) is used for this tab only and never replaces a
+ * stored token. Reports whether a token was adopted.
  */
 export function adoptTokenFromLocation(): boolean {
   let tok = ""
@@ -636,7 +645,8 @@ export function adoptTokenFromLocation(): boolean {
   } catch {
     return false
   }
-  setStudioToken(tok)
+  if (tokenScopeOf(tok) !== "") tabToken = tok
+  else setStudioToken(tok)
   return true
 }
 

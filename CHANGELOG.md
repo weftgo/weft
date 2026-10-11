@@ -6,7 +6,15 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
-## Unreleased
+## 0.14.2 — 2026-10-11
+
+A patch over 0.14.1 with the fixes CI surfaced after it: two races in
+`thread/pool`'s register/settle bookkeeping, the session store's failed
+sends and steers (a failed `Send` drops its receipt and moves the leaf
+back in one flushed append on every path; a drained or deferred steer is
+settled exactly once across a crash and reopen), and the conformance
+cases that depended on their own duration. Tags `core/v0.14.2` (the
+version literal only) and `v0.14.2`.
 
 ### Fixed
 

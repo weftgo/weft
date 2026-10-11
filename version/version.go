@@ -19,7 +19,7 @@ import (
 // core/observe.go's own version literal (the weft.version every run
 // stamps; core imports nothing of this module), which
 // otel/hardening_test.go pins against this one.
-const Version = "v0.14.1"
+const Version = "v0.14.2"
 
 // modulePath is the framework module, as build info names it.
 const modulePath = "github.com/weftgo/weft"

@@ -6,7 +6,26 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
-## Unreleased
+## 0.14.0 — 2026-10-11
+
+Phase 5 of the devtools plan (studio depth): search and filters over
+runs (`GET /api/search`, FTS5 on SQLite, a derivation per search on
+ClickHouse; `min_cost`, `sort=cost`), cost priced at read time from a
+dated table (own and delegated, `cache` exact or not reported, a
+`WEFT_PRICING` override, the Settings page), provider raw bodies under
+`otel.RawBodies(true)` and the step card's Wire tab, the trace list and
+a trace page whose every selection is a URL, the Live page on one
+`?all=1` stream with cancel, a run page that scrolls 5,000 steps,
+experiments you can come back to (`/api/experiments`, paged), save as
+test (a passing replay test in the export zip) and proposed prompts,
+open in app and the panel hand-off (`weft.page_url`, `core.WithMetadata`),
+deletion and retention (`DELETE /api/runs/{id}`, `studio.Retain`,
+`weft vacuum`), and a pre-release review of the whole phase (the Go,
+panel and Studio fix lines below). Tags `core/v0.14.0`
+(`WithMetadata` added) and `v0.14.0` — a minor bump: the export zip's
+layout, `otel.Pipeline.LoggerProvider()`'s type, `/api/meta`'s
+`pricing` shape and the five methods `obsdb.DB` gains (Changed —
+breaking).
 
 ### Added
 

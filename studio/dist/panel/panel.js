@@ -3240,7 +3240,7 @@ function xa(e, t) {
 //#endregion
 //#region src/panel/version.ts
 function Sa() {
-	return "v0.13.0";
+	return "v0.14.0";
 }
 function Ca(e) {
 	if (typeof e != "string") return null;

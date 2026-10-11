@@ -10,6 +10,22 @@ module, ADR 0005).
 
 ### Added
 
+- studio/runtime: `WithStore(obsdb.CommandStore)` option on `New` (and
+  `RuntimeServer.Close`): commands, run routes, breakpoint sets and
+  registrations are written through, under the server's mutex, and loaded
+  back on a Studio restart — a restarted Studio lists its runtimes
+  (`restored: true`, `connected: false`) with their breakpoints, answers
+  pre-restart commands, decides `lost` from the stored state (a queued
+  command past its ack window, an accepted one past max(10 min, 3 beats)
+  from its stored last beat) and never re-sends an accepted command.
+  `studio.New` passes its DB when it implements the interface (both
+  first-party backends); a store failure is logged and changes nothing.
+  `studio.Server.Close` stops the link server's timers before the DB
+  closes. (plan I3.2)
+- `/api/runtimes` rows gain `cwd` (db.path's rule: absent to panel tokens)
+  and `restored` (omitted when false).
+- studio/runtime: `Registration.Cwd`, `Registration.Instance`;
+  `RuntimeView.Cwd`, `RuntimeView.Restored`.
 - obsdb: runs derived from stock OTel GenAI spans (docs/record-contract.md §9).
   An `invoke_agent` span with `gen_ai.conversation.id` and no `weft.run.id`
   — a Python or TypeScript app's, exported over OTLP — is now a run row,
@@ -78,6 +94,16 @@ module, ADR 0005).
 - studio web: the derived-run badge on both surfaces (plan I1.3) — a run derived from stock OTel GenAI spans reads `derived` in the `stock_spans` words ("derived from spans · no events", the fix naming the record contract; mirrored in `lib/honesty.ts`) on its row (runs, search, session turns, live), the run header (no "0 events"), a story of per-step cards from `steps/{n}` (usage and cost as served, unknown with the API's reason), the raw view, and the panel's turn chip, notes, Request, Timeline and Raw tabs; the replay verbs, the editor and save as test are drawn disabled with those words; the compare page's cost follows its unknown usage. The panel's derived Story hands off ("2 steps · open in Studio ⤢"), and a derived run with no usage reads "—" with the API's reason on both surfaces; no "replay here", space-replay hint or "no events yet" on a derived run. Panel ledger rows `I1.3` 74,061 B and `I1.3 fixes` 74,221 B gzip (+515 B in all, 7,699 B of headroom).
 
 ### Changed
+
+- weft/runtime: the runtime id is stable per (service, cwd, agent set) —
+  `rt_` + 16 hex of sha256 — instead of a fresh ULID per process, so a
+  panel link `/runtimes/<id>` survives an app restart. A registration on
+  an id another process holds a live stream on is answered `<id>-<pid>`,
+  which the link adopts. The registration carries `cwd` and `instance`.
+- studio/runtime: `New()` becomes `New(opts ...Option)` — source compatible
+  for every call, but apidiff reports it incompatible (a func value of type
+  `func() *RuntimeServer` no longer matches): the breaking-change line for
+  the next minor tag of the framework module (pre-freeze).
 
 - **studio:** `POST /api/runs/{id}/approvals`, `/steer` and `/cancel` on an app-owned run (no runtime started it) now answer alike (plan H6.1): with a connected runtime of the run's service (`service.name` = the registration's service) that registered `runtime.Sessions`, the verb is forwarded as a session command and the route answers **202** `{command_id, state: "queued", run_id, runtime_id}` — the runtime's refusal (the locked sentence above all) lands on `GET /api/playground/commands/{id}` (`state: "rejected"`, `error` the sentence); without one, **403** `{"error":{"code":"forbidden","message":"app-owned turn · read-only: …"},"fix":"set runtime.Sessions(resolver) at runtime.Install in the app (service …): …"}`. A run that is not a turn of a thread session with a public id is 403 "app-owned turn" with the fix `thread.PublicID(...)`. **Breaking for clients:** cancel on an app-owned run was 409 ("cancel arrives with F4"); it is 403 now. The panel-token rule is unchanged (another public id's run 403, read tokens 403).
 - **studio:** `meta.debug_scope` is `"own+runtime"` while a connected runtime registered `runtime.Sessions`, else `"runtime-started runs"` as before (absent without the playground).

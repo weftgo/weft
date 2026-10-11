@@ -1699,6 +1699,79 @@ Keyboard: `⌘K` jumps to any recent run, `/` filters, `j`/`k` move,
 the page's link, `?` lists everything. Keys fire only on a bare press
 outside a text box.
 
+### After a Studio restart
+
+The runtime link's bookkeeping is written through to Studio's database
+when the backend implements `obsdb.CommandStore` (both first-party
+backends do: SQLite migration 0007, ClickHouse 0008); `studio.New`
+passes its DB itself. A backend without it keeps everything in memory,
+as before — a restart then forgets it.
+
+**What survives.** Every command (its wire body, state, run id, the
+accepted and last-heartbeat times, the last ack), every run → runtime
+route (cancel, steer and the debugger's verbs keep reaching the runtime
+that started a run), each runtime's breakpoint set and each runtime's
+latest registration. A restarted Studio lists the runtimes it knew as
+`connected: false, restored: true` — with their breakpoints and agents —
+until each registers again; it answers `GET /api/playground/commands/{id}`
+for a command issued before the restart with its stored state, and the
+experiments/runs joins as before.
+
+**What is decided lost, never re-run.** At load, with *now* the restart:
+
+- a `queued` command older than its ack window (30 s since it was
+  created) is lost — "Studio restarted; no ack since <created>"; one still
+  inside the window stays queued with its ack timer re-armed for what is
+  left, and is re-sent only to the same runtime process when it
+  reconnects (host, pid and the link's instance match the stored
+  registration — that process's at-most-once set refuses a frame it
+  already admitted). A different process registering under the id (the
+  app restarted) marks it lost: "the runtime's process changed before the
+  ack".
+- an `accepted` command is watched from its stored last word,
+  max(last heartbeat, accepted ack): lost max(10 min, 3 beats) after it
+  for a runtime that heartbeats (10 min otherwise), as if Studio had never
+  restarted. Already past: lost at load — "Studio restarted; no heartbeat
+  since <t>". An accepted command is never re-sent: the runtime, not
+  Studio, decides to run on an accepted ack Studio took (an accepted ack
+  Studio did not take runs nothing), and each one Studio took was written
+  through before its 200 left.
+- `finished`, `rejected` and `lost` commands are history.
+
+**Retention.** The command rows' only retention is
+`obsdb.CommandStore.PruneCommands`, run from the server's own prune
+(24 h for terminal commands, 10 000 kept at most; queued and accepted
+never), at most once a minute; run deletion, `Retain` and `weft vacuum`
+never touch these rows. A runtime's LastSeen from the stream's keep-alive
+pings is written at most once a minute (registration, stream open and
+stream end always write).
+
+**Stable runtime ids.** A runtime's id is `rt_` + the first 16 hex digits
+of sha256(service NUL cwd NUL sorted agent names joined by NUL) —
+service is `OTEL_SERVICE_NAME` or the binary's name, cwd the process's
+working directory — so an app restarted in the same place registers under
+the same id and a link to `/runtimes/<id>` survives the restart. When an
+id is held by another process's live stream (two replicas of one service
+in one cwd, or two links in one process), Studio answers the registration
+`<id>-<pid>` (then `<id>-<pid>-2`, …) in `runtime_id`, and the link adopts
+it; a reconnect of the same process keeps its id. A disconnected entry is
+reclaimed by whoever registers under its id next, Studio's breakpoint set
+kept.
+
+**The `cwd` field.** `/api/runtimes` rows carry `cwd`, the app's working
+directory — a filesystem path, so under `db.path`'s rule: the server token,
+or setup A's loopback without a Token; never a panel token (read or
+playground scope). `/api/meta`'s `runtimes` still counts connected runtimes
+only.
+
+**Wire (for the TS/Python runtime clients).** The registration gains
+`cwd` (string, optional) and `instance` (string, optional: a random value
+per link, kept across its reconnects — with host and pid it is what makes
+a re-registration "the same process"). A client must adopt
+`RegisterResponse.runtime_id` when it differs from the id it sent, and
+open `commands_url` (which names it). A client that sends no `instance` is
+told apart by host and pid alone.
+
 ## The API (S4.2/S4.3)
 
 JSON under `{base}api/`: `meta` (versions, `db` {kind, path, size —

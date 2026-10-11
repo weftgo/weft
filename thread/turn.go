@@ -1572,11 +1572,12 @@ func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, end turnEnd) error
 		parent = id
 	}
 	// handed stays set until the batch lands: a turn-end append that
-	// fails — or panics — leaves these steers delivered to a run whose
-	// messages are in no tree (the batch, them included, is neither
-	// written nor adopted), and the settle after recordTurnEnd defers
-	// them so their messages re-run instead of finishing as delivered
-	// into nothing.
+	// fails — or panics — is neither written nor adopted, and the
+	// settle after recordTurnEnd (settleSteersLocked) decides each
+	// steer by where its message is: on the line already (its step was
+	// written) it ends delivered, its receipt written on its own; in no
+	// tree it defers, so the message re-runs instead of finishing as
+	// delivered into nothing.
 	handed := s.handed
 	if chain := end.chain; chain != nil {
 		// The chain's entries join the turn's batch: ids and parents
@@ -1596,11 +1597,12 @@ func (s *Session) recordTurnEnd(ctx context.Context, t *Turn, end turnEnd) error
 		}
 	}
 	if appendErr := s.st.Append(ctx, s.header.ID, entries...); appendErr != nil {
-		// The batch — the steered messages included — is in no tree:
-		// written nowhere, adopted nowhere. The steers stay in handed
-		// and the settle after this defers them, so their messages
-		// re-run as follow-ups instead of finishing as delivered into
-		// nothing.
+		// The batch is in no tree: written nowhere, adopted nowhere.
+		// The steers stay in handed for the settle after this
+		// (settleSteersLocked): one whose message an earlier step wrote
+		// to the line ends delivered; one whose message was only in
+		// this batch defers, its message re-running as a follow-up
+		// instead of finishing as delivered into nothing.
 		return fail(appendErr)
 	}
 	s.handed = nil

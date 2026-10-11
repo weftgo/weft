@@ -993,8 +993,10 @@ func (f *failTurnEndStorage) Append(ctx context.Context, session string, entries
 // carries from Codex #40805. Here the step that carried it was written
 // before the turn's end (per-step persistence), so the message is on
 // the line: the steer is delivered, its receipt written on its own,
-// and the message is there once — not re-run by a follow-up.
-func TestSteerRedeliveredWhenTurnEndNotPersisted(t *testing.T) {
+// and the message is there once — not re-run by a follow-up. The steer
+// whose message is in no tree defers instead:
+// TestDrainedSteerInNoTreeIsDeferred.
+func TestDrainedSteerSettlesOnceWhenTurnEndNotPersisted(t *testing.T) {
 	ctx := context.Background()
 	st := &failTurnEndStorage{Storage: thread.Memory(), fail: true}
 	model := wefttest.Script(

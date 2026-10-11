@@ -452,7 +452,11 @@ type ReceiptEntry struct {
 	// and never answered (ADR 0019 §5): the run failed — a budget, a
 	// model error, a cancellation — before another model step
 	// completed. The message is in that run's recorded transcript, so
-	// the next turn's model sees it; no reply to it exists.
+	// the next turn's model sees it; no reply to it exists. When the
+	// turn's end batch was refused and the receipt is written on its
+	// own, it is read off the line instead: no assistant message
+	// follows the steered one there — a reply whose write was lost
+	// with the batch counts as none.
 	Unanswered bool `json:"unanswered,omitempty"`
 }
 

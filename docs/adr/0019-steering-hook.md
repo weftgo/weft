@@ -223,7 +223,11 @@ it, settles the earliest such receipt, the way a prompt entry settles an
 whose turn-end deferral could not be written at all runs from memory,
 and its follow-up's prompt append carries the `deferred` receipt that
 settles it — a reopen before the prompt landed restores the steer, one
-after it does not.
+after it does not. The live session reads a refused turn-end batch the
+same way: a drained steer whose message an earlier step wrote to the
+line ends delivered, its `delivered` receipt written on its own
+(`unanswered` read off the line: no assistant message after the steered
+one), and only a steer whose message is in no tree defers.
 
 **A steer on an idle session runs as a plain turn.** Steering is what a
 Send does *when the session is busy*. With no turn in flight and no

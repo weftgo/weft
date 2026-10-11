@@ -2,6 +2,7 @@ package thread_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -262,5 +263,78 @@ func TestDrainedSteerWithRefusedTurnEndIsNotDeferred(t *testing.T) {
 	}
 	if got := contextTexts(again); countText(got, "steer me") != 1 {
 		t.Errorf("the reopened Context = %v, want the steer once", got)
+	}
+}
+
+// A steer the running turn drained whose message is in no tree — the
+// step that carried it and the turn-end batch both refused — must not
+// finish as delivered into nothing: accepted input acknowledged then
+// lost is the scar ADR 0011 §1 carries from Codex #40805. It defers,
+// and its follow-up puts the message on the line once; a reopen agrees.
+func TestDrainedSteerInNoTreeIsDeferred(t *testing.T) {
+	ctx := context.Background()
+	tool, rel := blockingTool()
+	defer rel.open()
+	started := make(chan struct{})
+	var once sync.Once
+	agent := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "wait"}),
+		wefttest.Say("answered the steer"),
+		wefttest.Say("followed"),
+	), tool, core.Tap(func(_ context.Context, ev core.Event) {
+		if _, ok := ev.(core.ToolStart); ok {
+			once.Do(func() { close(started) })
+		}
+	}))
+	st := &faultStorage{Storage: thread.Memory()}
+	var turnEndRefused atomic.Bool
+	st.failAppend = func(es []thread.Entry) bool {
+		steered := hasEntry(es, isSteeredMessage) // the steered message's step, every time
+		if hasEntry(es, func(e thread.Entry) bool { _, ok := e.(thread.TurnEntry); return ok }) {
+			// The first turn's end — the batch that would carry the
+			// held steered message — is refused; later ones are not.
+			return turnEndRefused.CompareAndSwap(false, true) || steered
+		}
+		return steered
+	}
+	s, err := thread.Create(ctx, st, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.Send(ctx, core.User("long work"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	steer, err := s.Send(ctx, core.User("steer me"), thread.As(thread.Steer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel.open()
+	if _, err := first.Wait(); !errors.Is(err, thread.ErrNotPersisted) {
+		t.Fatalf("the first turn's Wait = %v, want ErrNotPersisted", err)
+	}
+	if steer.Outcome() != thread.TurnDeferred || steer.Next() == nil {
+		t.Fatalf("steer = %v, follow-up %v; want deferred with a follow-up", steer.Outcome(), steer.Next() != nil)
+	}
+	if _, err := steer.Next().Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WaitIdle(ctx); err != nil {
+		t.Fatal(err)
+	}
+	live := contextTexts(s)
+	if countText(live, "steer me") != 1 {
+		t.Fatalf("Context = %v, want the steer once", live)
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	again := reopenWith(t, ctx, st.Storage, s, agent)
+	if q := again.Queue(); len(q) != 0 {
+		t.Errorf("the reopened Queue = %+v, want nothing", q)
+	}
+	if got := contextTexts(again); !equalStrings(got, live) {
+		t.Errorf("the reopened Context = %v, want %v", got, live)
 	}
 }

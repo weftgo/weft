@@ -254,8 +254,12 @@ func (s *Session) settleSteerLocked(q queuedSteer) {
 // and deferring it would put the message on the line twice. It ends
 // delivered, and the delivered receipt the refused batch carried is
 // written again on its own — unanswered unless an assistant message
-// follows the steered one on the line. When that append fails too, the
-// message on the line still settles the receipt for a reopen.
+// follows the steered one on the line. That reading is deliberate and
+// differs from the turn-end batch's step count: Unanswered says no
+// reply to the steer exists in the recorded transcript, and a reply
+// the run made whose step was lost with the refused batch is in none.
+// When that append fails too, the message on the line still settles
+// the receipt for a reopen.
 func (s *Session) settleSteersLocked() {
 	for len(s.steerQueue) > 0 {
 		q := s.steerQueue[0]

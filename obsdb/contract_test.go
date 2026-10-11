@@ -742,7 +742,9 @@ func (c *otlpCapture) merged() (*coltracepb.ExportTraceServiceRequest, *collogsp
 //     records): trace ids 7ace…<n> (32 hex), span ids 5ba0…<n> (16 hex),
 //     weft's 32-hex run ids a110…<n> and thread's ULID session ids
 //     01K…<n> (26 Crockford characters) — the shapes kept, so a derived
-//     id (<parent>/<step>/<call>, <session>-t<n>) keeps its form.
+//     id (<parent>/<step>/<call>, <session>-t<n>) keeps its form; and
+//     weft.manifest.hash values (which embed tool definitions' file:line,
+//     so they move with this file) become 3a21f…<n> (64 hex).
 //
 // The returned replacer maps an original run or session id to its
 // fixture spelling.
@@ -768,7 +770,7 @@ func normaliseCase(tr *coltracepb.ExportTraceServiceRequest, lg *collogspb.Expor
 	seen := map[string]bool{}
 	runHex := regexp.MustCompile(`^[0-9a-f]{32}$`)
 	turnID := regexp.MustCompile(`^(.+)-t[0-9]+$`)
-	nRun, nSession := 0, 0
+	nRun, nSession, nManifest := 0, 0, 0
 	addRun := func(id string) {
 		base, _, _ := strings.Cut(id, "/")
 		if seen[base] {
@@ -790,6 +792,15 @@ func normaliseCase(tr *coltracepb.ExportTraceServiceRequest, lg *collogspb.Expor
 				addRun(kv.GetValue().GetStringValue())
 			case "weft.session.id":
 				addSession(kv.GetValue().GetStringValue(), &nSession, seen, &pairs)
+			case "weft.manifest.hash":
+				// The manifest names each tool's definition file:line
+				// (core/manifest.go toolSource), so it moves with this
+				// file's line numbers: renumbered like an id.
+				if h := kv.GetValue().GetStringValue(); h != "" && !seen[h] {
+					nManifest++
+					seen[h] = true
+					pairs = append(pairs, h, fmt.Sprintf("3a21f%059x", nManifest))
+				}
 			}
 		}
 	}

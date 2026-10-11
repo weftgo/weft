@@ -65,7 +65,7 @@
                 {
                   "key": "weft.manifest.hash",
                   "value": {
-                    "stringValue": "32cfa2e1b496401e4779f774e0ff81ead0b9aee791a2cad24b807a01a8d9ffe8"
+                    "stringValue": "3a21f00000000000000000000000000000000000000000000000000000000001"
                   }
                 },
                 {
@@ -307,7 +307,7 @@
                 {
                   "key": "weft.manifest.hash",
                   "value": {
-                    "stringValue": "6926e54a73e45a204c42ebf4655098d6cf83224f4c3c6f809b982eb57e6d0d18"
+                    "stringValue": "3a21f00000000000000000000000000000000000000000000000000000000002"
                   }
                 },
                 {

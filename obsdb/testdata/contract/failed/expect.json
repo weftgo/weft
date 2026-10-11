@@ -9,7 +9,7 @@
       "agent": "support",
       "provider": "wefttest",
       "model": "script",
-      "manifest_hash": "495a6b05b8d6d99a72866a7ce547cc084c9eef24c73c27d7695dcaa1fc2622b8",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
       "weft_version": "v0.0.0-contract",
       "started": "2026-10-01T09:09:00Z",
       "finished": "2026-10-01T09:09:00.006Z",

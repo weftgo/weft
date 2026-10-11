@@ -681,4 +681,14 @@ byte-stable so that `go test ./obsdb -run 'TestContract$'
 - ids are renumbered in first-seen order with their shapes kept: trace
   ids `7ace…<n>` (32 hex), span ids `5ba0…<n>` (16 hex), run ids
   `a110…<n>` (32 hex), `thread` session ids `01K…<n>` (26 characters),
-  so derived ids keep their form (`<run>/0/call_1`, `<session>-t2`).
+  so derived ids keep their form (`<run>/0/call_1`, `<session>-t2`);
+- `weft.manifest.hash` (span and record attributes, so `manifest_hash`)
+  is renumbered the same way, to `3a21f…<n>` (64 hex): the manifest names
+  each tool's definition `file:line`, so the real hash moves whenever the
+  generator's source does.
+
+Every generated case keeps each step to at most one tool call: a
+parallel batch's `tool_finish` order is the run's own race (the
+handlers finish in whatever order they finish), so a case with
+`Parallelism` > 1 and several calls in one step would churn on every
+regeneration.

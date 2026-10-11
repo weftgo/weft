@@ -166,6 +166,10 @@ type Pool struct {
 	// children record in their header metadata.
 	sessionAgents map[string]*core.Agent
 	nameAgents    map[string]*core.Agent
+	// retired counts the settlements that retired a delegate or dropped
+	// a registration: a lookup that read the ledger before one and its
+	// registers after reads the ledger again (delegateFor).
+	retired uint64
 	// calls holds the cancels of wrapped calls running outside any
 	// session (the bare path), so Close reaches them too.
 	calls    map[uint64]context.CancelFunc
@@ -183,6 +187,10 @@ type Pool struct {
 	// park between its boundary read and its arm — the window a resume
 	// armed by a pump can run and park again in.
 	testHookArming func(*delegate)
+	// testHookResolving, when set (by this package's tests only), runs
+	// in delegateFor between its ledger read and its agent lookup — the
+	// window a racing pump's settlement used to fall in.
+	testHookResolving func(Receipt)
 	// testHookCanceling, when set (by this package's tests only), runs
 	// in cancelParked with the delegate settling, before the child's
 	// boundary is closed; a non-nil error stands in for that close
@@ -446,6 +454,9 @@ func (p *Pool) Wait(ctx context.Context, parent *thread.Session, receiptID strin
 			rc, found := lookup(parent, receiptID)
 			if !found {
 				return Receipt{}, fmt.Errorf("%w: %s in session %s", ErrUnknownReceipt, receiptID, parent.ID())
+			}
+			if rc.Settled() {
+				p.forgetSettled(rc.Child)
 			}
 			return rc, nil
 		}
@@ -1054,6 +1065,7 @@ func (p *Pool) settle(ctx context.Context, d *delegate, state State, stop string
 		delete(p.byChild, d.child.ID())
 	}
 	delete(p.sessionAgents, d.child.ID())
+	p.retired++
 	p.mu.Unlock()
 	return true
 }

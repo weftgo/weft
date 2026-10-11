@@ -284,7 +284,9 @@ func (p *Pool) mirror(ctx context.Context, d *delegate) error {
 // among the pool's wrapped agents. Register is for the rest — Submit
 // children — and for wraps renamed between runs; it takes precedence
 // over the wrap name. The registration is dropped when the session's
-// delegation settles. An empty session id or a nil agent is an error.
+// delegation settles; one made after that is dropped the next time the
+// pool reads the settled receipt (Wait, Decide, Recover). An empty
+// session id or a nil agent is an error.
 // Register alone recovers nothing: Recover does, and Decide resumes.
 func (p *Pool) Register(sessionID string, agent *core.Agent) error {
 	if sessionID == "" {
@@ -467,6 +469,8 @@ func (p *Pool) pump(ctx context.Context, parent *thread.Session) error {
 	for _, r := range Receipts(parent) {
 		if !r.Settled() {
 			unsettled[r.Child] = r
+		} else {
+			p.forgetSettled(r.Child)
 		}
 	}
 	var errs []error
@@ -604,51 +608,97 @@ func wrapperLanded(parent *thread.Session, child, wrapper string) bool {
 // with ErrNoAgent when no agent can be found: the resume refuses
 // loudly rather than guess.
 func (p *Pool) delegateFor(ctx context.Context, parent *thread.Session, rc Receipt, wrapper string) (*delegate, error) {
-	p.mu.Lock()
-	if d, ok := p.byChild[rc.Child]; ok {
+	for {
+		p.mu.Lock()
+		if d, ok := p.byChild[rc.Child]; ok {
+			p.mu.Unlock()
+			return d, nil
+		}
+		retired := p.retired
+		p.mu.Unlock()
+		// No live delegate: the ledger is the truth, read after the miss.
+		// rc may be a step behind it — a delegation that settled between
+		// the caller's Receipts read and this lookup has retired its
+		// delegate and its Register'd agent (settle records the ledger
+		// first), and reopening it would report ErrNoAgent for a child
+		// that just finished, or resume one that is over.
+		if receiptSettled(parent, rc.ID) {
+			return nil, errSettled
+		}
+		if p.testHookResolving != nil {
+			p.testHookResolving(rc)
+		}
+		// A settlement can also land after that read — a racing pump
+		// (Decide's own beside the watch's) rebuilt this child, armed and
+		// ran it to its end — taking the registration with it, or leaving
+		// the delegate rebuilt here a bridge to a delegation that is over.
+		// Every retirement bumps p.retired: one seen since the miss sends
+		// the lookup round again, to the ledger that now holds it.
+		agent, name, err := p.agentForSession(ctx, parent, rc.Child)
+		if err != nil {
+			if p.retiredSince(retired) {
+				continue
+			}
+			return nil, err
+		}
+		child, err := thread.Open(ctx, parent.Storage(), rc.Child, agent, thread.InheritApprovals(parent))
+		if err != nil {
+			return nil, fmt.Errorf("thread/pool: child session %s not reopened: %w", rc.Child, err)
+		}
+		d := &delegate{
+			receipt: rc.ID, wrapper: wrapper, name: name,
+			child: child, parent: parent, agent: agent,
+			info:    p.lineageInfo(ctx, parent),
+			phase:   phaseParked,
+			resolve: wrapper != "",
+		}
+		p.mu.Lock()
+		if existing, ok := p.byChild[rc.Child]; ok {
+			p.mu.Unlock()
+			_ = child.Close(context.WithoutCancel(ctx)) // lost the race: one bridge per child
+			return existing, nil
+		}
+		if p.closed {
+			p.mu.Unlock()
+			_ = child.Close(context.WithoutCancel(ctx))
+			return nil, ErrClosed
+		}
+		if p.retired != retired {
+			p.mu.Unlock()
+			_ = child.Close(context.WithoutCancel(ctx))
+			continue
+		}
+		p.byChild[rc.Child] = d
+		p.delegates[rc.ID] = d
 		p.mu.Unlock()
 		return d, nil
 	}
-	p.mu.Unlock()
-	// No live delegate: the ledger is the truth, read after the miss.
-	// rc may be a step behind it — a delegation that settled between
-	// the caller's Receipts read and this lookup has retired its
-	// delegate and its Register'd agent (settle records the ledger
-	// first), and reopening it would report ErrNoAgent for a child
-	// that just finished, or resume one that is over.
-	if receiptSettled(parent, rc.ID) {
-		return nil, errSettled
-	}
-	agent, name, err := p.agentForSession(ctx, parent, rc.Child)
-	if err != nil {
-		return nil, err
-	}
-	child, err := thread.Open(ctx, parent.Storage(), rc.Child, agent, thread.InheritApprovals(parent))
-	if err != nil {
-		return nil, fmt.Errorf("thread/pool: child session %s not reopened: %w", rc.Child, err)
-	}
-	d := &delegate{
-		receipt: rc.ID, wrapper: wrapper, name: name,
-		child: child, parent: parent, agent: agent,
-		info:    p.lineageInfo(ctx, parent),
-		phase:   phaseParked,
-		resolve: wrapper != "",
-	}
+}
+
+// retiredSince reports whether a settlement retired a delegate or
+// dropped a registration since p.retired read seen.
+func (p *Pool) retiredSince(seen uint64) bool {
 	p.mu.Lock()
-	if existing, ok := p.byChild[rc.Child]; ok {
-		p.mu.Unlock()
-		_ = child.Close(context.WithoutCancel(ctx)) // lost the race: one bridge per child
-		return existing, nil
+	defer p.mu.Unlock()
+	return p.retired != seen
+}
+
+// forgetSettled drops the registration of a child whose delegation
+// the ledger holds settled: one made after the settlement retired the
+// delegate (Register racing a fast child's end) would otherwise stay
+// for the life of the pool. Called wherever the pool reads a settled
+// receipt for a child it holds no delegate for.
+func (p *Pool) forgetSettled(childID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, ok := p.sessionAgents[childID]; !ok {
+		return
 	}
-	if p.closed {
-		p.mu.Unlock()
-		_ = child.Close(context.WithoutCancel(ctx))
-		return nil, ErrClosed
+	if _, live := p.byChild[childID]; live {
+		return // the delegate's own settlement drops it
 	}
-	p.byChild[rc.Child] = d
-	p.delegates[rc.ID] = d
-	p.mu.Unlock()
-	return d, nil
+	delete(p.sessionAgents, childID)
+	p.retired++
 }
 
 // errSettled is delegateFor's answer for a delegation the ledger

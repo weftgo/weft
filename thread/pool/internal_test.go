@@ -137,6 +137,133 @@ func TestDelegateForReadsTheLedgerAfterTheMiss(t *testing.T) {
 	}
 }
 
+// A registration made after its session's delegation settled — Submit
+// returns, the child runs to its end and settles before the caller's
+// Register — has no settlement left to drop it. The pool drops it the
+// next time it reads the settled receipt; before, it stayed for the
+// life of the pool (TestRegistersPruned on CI: "sessionAgents=1").
+func TestRegisterAfterSettlementPruned(t *testing.T) {
+	ctx := context.Background()
+	p := New(1)
+	child := core.New(stubModel{})
+	parent, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
+	r, err := p.Submit(ctx, parent, child, "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rc, err := p.Wait(ctx, parent, r.ID); err != nil || rc.State != Done {
+		t.Fatalf("receipt = %+v, %v", rc, err)
+	}
+	p.mu.Lock()
+	_, live := p.byChild[r.Child]
+	p.mu.Unlock()
+	if live {
+		t.Fatal("the delegate outlived Wait's settled read")
+	}
+	// The interleaving CI hit, forced: the Register lands after the
+	// settlement retired the delegate.
+	if err := p.Register(r.Child, child); err != nil {
+		t.Fatal(err)
+	}
+	if rc, err := p.Wait(ctx, parent, r.ID); err != nil || rc.State != Done {
+		t.Fatalf("receipt = %+v, %v", rc, err)
+	}
+	p.mu.Lock()
+	n := len(p.sessionAgents)
+	p.mu.Unlock()
+	if n != 0 {
+		t.Errorf("sessionAgents after Wait read the settled receipt = %d, want 0 (a late Register is never dropped)", n)
+	}
+	if err := p.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Two pumps race over one restarted child — Decide's own and the
+// watch's the decision it records fires. Both miss the delegate and
+// read the ledger unsettled; one rebuilds the child, arms and runs it
+// to its end, and its settlement drops the Register'd agent. The
+// other then looked the agent up and reported ErrNoAgent for a child
+// that had just finished (TestRegisterResumesParkedSubmitChild on CI:
+// "no agent for child session … (a Submit child — Register the
+// session)", Decide failing at once). A settlement since the ledger
+// read now sends the lookup back to the ledger, which reports it
+// settled.
+func TestRacingPumpSettlementIsNoAgentFree(t *testing.T) {
+	ctx := context.Background()
+	st := thread.Memory()
+	refund := core.Tool("refund", "", func(_ context.Context, _ struct{ OrderID string }) (string, error) {
+		return "refunded", nil
+	}, core.RequireApproval())
+	p := New(1)
+	s, _ := thread.Create(ctx, st, core.New(wefttest.Script()))
+	r, err := p.Submit(ctx, s, core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"2"}`}),
+	), refund), "refund order 2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for len(s.Pending()) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if len(s.Pending()) != 1 {
+		t.Fatalf("the mirror never landed: %+v", s.Pending())
+	}
+	if err := p.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// The restart: a new pool holding a registration, the parent
+	// reopened and the approval recorded on it.
+	open, err := thread.Open(ctx, st, s.ID(), core.New(wefttest.Script()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2 := New(1)
+	if err := p2.Register(r.Child, core.New(wefttest.Script(wefttest.Say("resumed")), refund)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := open.Decide(ctx, thread.Approve(open.Pending()[0].CallID)); err != nil {
+		t.Fatal(err)
+	}
+	// The second pump runs whole inside the first one's window: after
+	// its ledger read, before its agent lookup.
+	var raced []error
+	entered := false
+	p2.testHookResolving = func(Receipt) {
+		if entered {
+			return // the racing pump's own lookup passes through
+		}
+		entered = true
+		raced = append(raced, p2.pump(ctx, open))
+		if rc, err := p2.Wait(ctx, open, r.ID); err != nil || rc.State != Done {
+			t.Errorf("the racing pump's run = %+v, %v", rc, err)
+		}
+	}
+	if err := p2.pump(ctx, open); err != nil {
+		t.Fatalf("the pump beside a racing one's settlement: %v", err)
+	}
+	if len(raced) != 1 || raced[0] != nil {
+		t.Fatalf("the racing pump = %v", raced)
+	}
+	rc, _ := lookup(open, r.ID)
+	if rc.State != Done || rc.Stop != "resumed" {
+		t.Errorf("receipt = %+v, want done \"resumed\"", rc)
+	}
+	p2.mu.Lock()
+	if len(p2.delegates) != 0 || len(p2.byChild) != 0 || len(p2.sessionAgents) != 0 {
+		t.Errorf("registers after the race: delegates=%d byChild=%d sessionAgents=%d, want all empty (a settled delegation rebuilt)",
+			len(p2.delegates), len(p2.byChild), len(p2.sessionAgents))
+	}
+	p2.mu.Unlock()
+	if err := p2.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A decision can land while the child is parking: its requests are
 // mirrored, the parked receipt written, but the phase still reads the
 // run in flight. Every pump there — the deciding Decide's own, the

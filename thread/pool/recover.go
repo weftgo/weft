@@ -70,6 +70,7 @@ func (p *Pool) Recover(ctx context.Context, parent *thread.Session) error {
 			}
 			continue
 		}
+		p.forgetSettled(rc.Child)
 		// A settlement whose aftermath a crash lost: requests still
 		// offered for a delegation that is over, a delegating call
 		// still parked beside it.
@@ -201,6 +202,7 @@ func (p *Pool) settleFromLedger(ctx context.Context, parent *thread.Session, rc 
 	}
 	p.mu.Lock()
 	delete(p.sessionAgents, rc.Child)
+	p.retired++
 	p.mu.Unlock()
 	if err := parent.DenyMirrored(ctx, rc.Child, endedReason(state)); err != nil {
 		return fmt.Errorf("thread/pool: requests of ended child %s: %w", rc.Child, err)

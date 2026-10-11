@@ -11,6 +11,10 @@ module, ADR 0005).
 ### Fixed
 
 - Studio's playground: an outside navigate (Back, Forward, a link followed while the page is open) adopted into an untouched form no longer counts as the reader's edit — its draft is not saved and no `?exp=` REPLACE is written back 400 ms later (G2: an outside navigate writes nothing back).
+- `thread/pool`: `Pool.Wait` for a sync delegation that settles after a park
+  returns only once the parent's parked call is resolved and its resume armed,
+  as documented — it could return in between, with the parked turn's `Next`
+  still nil (nightly soak: TestNestedSyncFullFlow, TestChildInheritsSigning).
 
 ## 0.14.2 — 2026-10-11
 

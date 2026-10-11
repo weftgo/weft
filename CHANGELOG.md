@@ -27,6 +27,10 @@ module, ADR 0005).
   it under ctx — a Local sink behind another process's write lock held `defer
   otel.Install()()` for SQLite's 30 s busy timeout per open run. A concurrent
   or later Shutdown returns the first's result, or its own ctx's error.
+- `thread/pool`: a child that was still parking at an approval when its pool
+  was closed has its session closed like any parked child — its writer lease
+  no longer outlives the pool, and the next process's resume of it no longer
+  fails "session is locked by another writer".
 
 ## 0.14.2 — 2026-10-11
 

@@ -626,8 +626,8 @@ func TestMCPPanelToken(t *testing.T) {
 
 // TestMCPCommand pins the command line: -h lists the tools (exit 0),
 // --read-only=false is refused (there is no write mode), arguments are
-// refused, and with no Studio answering /api/meta it exits 1 with the
-// line saying so.
+// refused, and with no Studio answering /api/meta it serves, WARNs
+// once, and a tool call isErrors with the line saying so.
 func TestMCPCommand(t *testing.T) {
 	t.Setenv("WEFT_STUDIO_URL", "")
 	t.Setenv("WEFT_STUDIO_TOKEN", "")
@@ -647,10 +647,120 @@ func TestMCPCommand(t *testing.T) {
 	if _, errb, code := weft("mcp", "extra"); code != 2 || !strings.Contains(errb, "mcp takes no arguments") {
 		t.Errorf("an argument = exit %d %q", code, errb)
 	}
-	out, errb, code := weft("mcp", "--url", "http://127.0.0.1:1", "--token", "secret-tok")
-	if code != 1 || out != "" || !strings.Contains(errb, "weft: mcp: no Studio answers /api/meta: studio not reachable at http://127.0.0.1:1") ||
-		strings.Contains(errb, "secret-tok") {
-		t.Errorf("no Studio = exit %d %q %q", code, out, errb)
+	// No Studio answering /api/meta: it serves anyway (an MCP client
+	// starts its servers once, maybe before the Studio), says so in one
+	// WARN, and each tool call isErrors with the line and its fix.
+	cmd := exec.Command(os.Args[0], "mcp", "--url", "http://127.0.0.1:1", "--token", "secret-tok")
+	cmd.Env = append(os.Environ(), "WEFT_MCP_HELPER=1", "WEFT_DISCOVERY=off", "WEFT_STUDIO_URL=", "WEFT_STUDIO_TOKEN=")
+	var stderr syncBuffer
+	cmd.Stderr = &stderr
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	cs, err := sdk.NewClient(&sdk.Implementation{Name: "test", Version: "0"}, nil).
+		Connect(ctx, &sdk.CommandTransport{Command: cmd}, nil)
+	if err != nil {
+		t.Fatalf("no Studio: connect: %v (stderr %q), want it to serve", err, stderr.String())
+	}
+	res, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: "run", Arguments: map[string]any{"id": "r_ok"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := texts(t, res); !res.IsError || !strings.Contains(got[0], "no Studio answers /api/meta: studio not reachable at http://127.0.0.1:1") ||
+		!strings.Contains(got[0], "the next call retries the --url given") || strings.Contains(got[0], "secret-tok") {
+		t.Errorf("a tool call with no Studio = %v %q, want the isError line with its fix", res.IsError, got)
+	}
+	_ = cs.Close()
+	if errb := stderr.String(); strings.Count(errb, "level=WARN") != 1 || !strings.Contains(errb, "no Studio answers /api/meta yet; tools will retry per call") ||
+		!strings.Contains(errb, "read-only tools over stdio") || strings.Contains(errb, "secret-tok") {
+		t.Errorf("no Studio: stderr %q, want one WARN and the start line, never the token", errb)
+	}
+}
+
+// TestMCPServesBeforeStudio pins the order an MCP client imposes: the
+// server starts first (nothing answers: a WARN, it serves), a Studio
+// comes up later on a port only the discovery file names (weft dev
+// on 7332–7340), and the next tool call finds it — no restart.
+func TestMCPServesBeforeStudio(t *testing.T) {
+	t.Setenv("WEFT_STUDIO_URL", "")
+	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	t.Setenv("WEFT_DISCOVERY", "")
+	// A file naming a dead port first, so the default address (maybe
+	// the developer's own Studio) is never the one read.
+	dead, err := discovery.Write(discovery.Info{URL: "http://127.0.0.1:1", PID: os.Getpid(), Started: time.Now().UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dead.Remove()
+	var stderr syncBuffer
+	srv, err := startMCP(context.Background(), "", "", &stderr)
+	if err != nil {
+		t.Fatalf("startMCP with no Studio: %v, want it to serve", err)
+	}
+	if s := stderr.String(); !strings.Contains(s, "level=WARN") || !strings.Contains(s, "tools will retry per call") {
+		t.Errorf("stderr %q, want the WARN", s)
+	}
+	cs := connect(t, srv)
+	ctx := context.Background()
+	res, err := cs.CallTool(ctx, &sdk.CallToolParams{Name: "run", Arguments: map[string]any{"id": "r_ok"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := texts(t, res); !res.IsError || !strings.Contains(got[0], "no Studio answers /api/meta") ||
+		!strings.Contains(got[0], "no restart needed") {
+		t.Errorf("before the Studio = %v %q, want the isError line", res.IsError, got)
+	}
+
+	base := mcpSeedStudio(t)
+	dead.Remove()
+	w, err := discovery.Write(discovery.Info{URL: base, Token: "tok", PID: os.Getpid(), Started: time.Now().UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer w.Remove()
+	res, err = cs.CallTool(ctx, &sdk.CallToolParams{Name: "run", Arguments: map[string]any{"id": "r_ok"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := texts(t, res); res.IsError || len(got) != 2 || got[1] != routeBody(t, base, "tok", "/api/runs/r_ok") {
+		t.Errorf("after the Studio came up = %v %q, want r_ok's row", res.IsError, got)
+	}
+	if s := stderr.String(); !strings.Contains(s, "now reading the Studio at "+base) || strings.Contains(s, "tok\n") {
+		t.Errorf("stderr %q, want the switch said once", s)
+	}
+	// explain_failure's link names the Studio found, not the dead one.
+	res, _ = cs.CallTool(ctx, &sdk.CallToolParams{Name: "explain_failure", Arguments: map[string]any{"id": "r_ok"}})
+	if got := texts(t, res); res.IsError || !strings.HasSuffix(got[0], base+"/runs/r_ok") {
+		t.Errorf("explain_failure after the switch = %q", got)
+	}
+}
+
+// TestMCPExplainTailSurvivesCut pins explain_failure's field order: a
+// step whose tool results run to ~100 KB, under the default max_bytes,
+// is cut in its bulk (attempts, tool calls, children) — next and
+// last_assistant_text, ahead of it, survive the cut.
+func TestMCPExplainTailSurvivesCut(t *testing.T) {
+	big := strings.Repeat("x", 1000)
+	var calls []string
+	for i := range 100 {
+		calls = append(calls, fmt.Sprintf(`{"call_id":"c%d","name":"lookup","result":{"content":%q}}`, i, big))
+	}
+	m := &mcpReader{s: fakeStudio{
+		"/api/runs/r":            {200, `{"id":"r","agent":"a","status":"failed","err":"boom","steps":1,"holes":[]}`},
+		"/api/runs/r/steps/1":    {200, `{"status":"error","tool_calls":[` + strings.Join(calls, ",") + `],"attempts":[],"children":[],"holes":[]}`},
+		"/api/runs/r/transcript": {200, `{"batches":[{"messages":[{"role":"assistant","content":[{"type":"text","text":"looking it up"}]}]}]}`},
+	}}
+	res, _, err := m.explainFailure(context.Background(), nil, mcpRunIn{ID: "r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := texts(t, res)
+	if len(got) != 3 || !strings.Contains(got[2], "truncated") {
+		t.Fatalf("want the body cut at the default bound: %d items, last %.200q", len(got), got[len(got)-1])
+	}
+	for _, want := range []string{`"last_assistant_text":"looking it up"`, `"next":["step {id:\"r\", n:1}`, `"step_holes":[]`} {
+		if !strings.Contains(got[1], want) {
+			t.Errorf("the cut body lacks %s", want)
+		}
 	}
 }
 
@@ -771,9 +881,10 @@ func TestMCPExplainBothStepsFail(t *testing.T) {
 }
 
 // TestMCPSourceOneClient guards the wall by source: the read-only
-// transport covers the one client runMCP builds, so mcp.go may build
+// transport covers the one client startMCP builds, so mcp.go may build
 // no other — no default client, no package-level request helper, no
-// second http.Client, exactly one newClient call.
+// second http.Client, exactly one newClient call (a re-resolved Studio
+// is a copy of that client, sharing its walled http.Client).
 func TestMCPSourceOneClient(t *testing.T) {
 	b, err := os.ReadFile("mcp.go")
 	if err != nil {
@@ -786,11 +897,11 @@ func TestMCPSourceOneClient(t *testing.T) {
 		}
 	}
 	if n := strings.Count(src, "newClient("); n != 1 {
-		t.Errorf("mcp.go calls newClient %d times, want the one in runMCP", n)
+		t.Errorf("mcp.go calls newClient %d times, want the one in startMCP", n)
 	}
-	i := strings.Index(src, "func runMCP(")
+	i := strings.Index(src, "func startMCP(")
 	j := strings.Index(src[i+1:], "\nfunc ")
 	if i < 0 || j < 0 || !strings.Contains(src[i:i+1+j], "newClient(") {
-		t.Error("the one newClient call is not in runMCP")
+		t.Error("the one newClient call is not in startMCP")
 	}
 }

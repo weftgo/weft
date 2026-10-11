@@ -369,7 +369,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //         runtime.Limits(runtime.Budget{MaxTokensPerExperiment: 200_000}),
 //         runtime.AllowSideEffects("send_email"), runtime.Threads(store),
 //         runtime.ModelResolver(resolve))() // a model outside Models: the app's func(ctx, name) decides, before the ack
-//     runtime.Sessions(resolve) // opt-in (plan F4): func(ctx, publicID) (*thread.Session, release, error) — the app's own turns take approvals/steer/cancel through the app's Session; the lease is claimed before the ack (ErrLocked → "the app is writing this session; fork instead"); registration sessions:true, meta.debug_scope own+runtime; without it the three verbs are 403 "app-owned turn" + fix
+//     runtime.Sessions(resolve) // opt-in (plan F4): func(ctx, publicID) (*thread.Session, release, error) — the app's own turns take approvals and steer (cancel is refused) through the app's Session; the lease is claimed before the ack (ErrLocked → "the app is writing this session; fork instead"); registration sessions:true, meta.debug_scope own+runtime; without it the three verbs are 403 "app-owned turn" + fix
 //     // WEFT_ENV=dev (or runtime.Enabled(true)) opens the link; with no Studio option
 //     // and no otel Studio destination it dials the discovery file's Studio (block 6's
 //     // rule: WEFT_STUDIO_URL wins, WEFT_DISCOVERY=off, stale ignored); commands ack
@@ -408,7 +408,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // core.ParkSource bound lazily to the live link (ADR 0030; inert with no link;
 //     // process-wide; skips weft.playground runs, whose fingerprint decides) —
 //     // the app's own runs (registration breakpoints_own; a plain Generate parked so is
-//     // the app's to resume, Studio decides session turns only, through runtime.Sessions);
+//     // the app's to resume, Studio decides session turns only, through runtime.Sessions;
+//     // a thread turn parks only when this process set runtime.Sessions — without it the
+//     // source answers nothing for weft.session.id runs, a park nobody could decide would
+//     // hold the session; a Subagent child parks itself, its parent sees SUBAGENT_PENDING);
 //     // meta debug_scope reads own+runtime while a connected runtime registered Sessions or
 //     // breakpoints_own. Steer acts on the runtime's runs (D7) and, with Sessions, the
 //     // app's turns. Studio side:

@@ -97,6 +97,21 @@ unchanged.
   through `runtime.Sessions` — resumes it. A plain `Generate` ends
   pending and only the app resumes it: Studio decides session turns
   only.
+- `runtime.Breakpoints()` parks a thread turn only when the process
+  also set `runtime.Sessions` (a live link holds a resolver): without
+  it the source answers nothing for a run carrying `weft.session.id`.
+  A park nobody but the app could decide would hold the session — every
+  later `Send` queues behind the open boundary (ADR 0021 §5), clearing
+  the breakpoint releases nothing, Studio refuses the app-owned turn —
+  until an app with perhaps no approval UI decides it; the same
+  reasoning as a stopped link's set parking nothing (a runtime that
+  cannot decide does not park). A plain `Generate` (no session id)
+  still parks: the app resumes it. Pinned by
+  `TestBreakpointWithoutSessionsSkipsThreadTurns`.
+- In a `Subagent`'s child run the source parks the child, not the
+  parent: the parent's call to the subagent is the existing
+  `SUBAGENT_PENDING` result, which the parent model sees and continues
+  past — core's rule for any park in a child run.
 - Observability still never changes behaviour: an app opts in at
   `New`, and `runtime.Breakpoints()` without a live link is inert. A
   configured breakpoint *is* behaviour — the app chose it by building

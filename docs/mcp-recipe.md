@@ -260,11 +260,19 @@ steps.
 
 ## 6. Troubleshooting
 
-**`weft: mcp: no Studio answers /api/meta: studio not reachable at
+**`no Studio answers /api/meta: studio not reachable at
 http://127.0.0.1:7331: Get "http://127.0.0.1:7331/api/meta": dial tcp
 127.0.0.1:7331: connect: connection refused (weft studio starts one;
---url or WEFT_STUDIO_URL points at another)`** — no Studio is running there. Start one
-(`weft studio` or `weft dev`), or point at yours: `--url`,
+--url or WEFT_STUDIO_URL points at another); the next call looks again
+(WEFT_STUDIO_URL, the discovery file): no restart needed`** as a tool's
+error (and a `level=WARN … no Studio answers /api/meta yet; tools will
+retry per call` line in the client's MCP log at startup) — no Studio is
+running there. `weft mcp` does not exit: it serves, and the next tool
+call after a failure looks again — with no `--url`, it re-reads
+`WEFT_STUDIO_URL` and the discovery file, so a Studio started after the
+coding session (or `weft dev` on 7332–7340) is found without
+restarting the client; an explicit `--url` is retried as given. Start
+one (`weft studio` or `weft dev`), or point at yours: `--url`,
 `WEFT_STUDIO_URL`. If a Studio *is* running elsewhere, the discovery
 file was not used: check that `WEFT_DISCOVERY` is not `off` and
 `WEFT_STUDIO_URL` is unset in the environment the client starts `weft

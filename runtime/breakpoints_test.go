@@ -251,3 +251,66 @@ func TestBreakpointOnPlainGenerate(t *testing.T) {
 		t.Errorf("after the app's Approve: ran %d, pending %+v, text %q", ran.Load(), res.Pending, res.Text())
 	}
 }
+
+// TestBreakpointWithoutSessionsSkipsThreadTurns is the wedge's
+// regression test: Breakpoints without runtime.Sessions. A thread turn
+// would park with nobody able to decide it — Studio refuses an
+// app-owned turn without Sessions, the app has no approval UI — and
+// every later Send would queue behind the open boundary (ADR 0021 §5),
+// clearing the breakpoint releasing nothing. So the source answers
+// nothing for a run carrying weft.session.id: the turn runs deploy,
+// nothing pending, nothing queued, and the next Send runs too. A plain
+// Generate (no session id) still parks: the app resumes it.
+func TestBreakpointWithoutSessionsSkipsThreadTurns(t *testing.T) {
+	e := newE2E(t)
+	var ran atomic.Int64
+	agent := breakAgent(e, &ran,
+		wefttest.ToolCalls(wefttest.Call{Name: "deploy", Args: `{"env":"prod"}`}),
+		wefttest.Say("Deployed."),
+		wefttest.ToolCalls(wefttest.Call{Name: "deploy", Args: `{"env":"prod"}`}),
+		wefttest.Say("Deployed again."),
+		wefttest.ToolCalls(wefttest.Call{Name: "deploy", Args: `{"env":"prod"}`}),
+	)
+	shutdown := runtime.Install(runtime.Local(e.srv), runtime.Agents(agent), runtime.Enabled(true))
+	defer shutdown()
+	e.waitRuntime(t)
+	e.setBreakpoints(t, e.runtimeID(t), "deploy")
+	ctx := context.Background()
+	if got := runtime.BreakpointSource(core.WithMetadata(ctx, map[string]string{"weft.session.id": "s1"})); got != nil {
+		t.Errorf("the source answers %v for a session run without Sessions, want nil", got)
+	}
+
+	s, err := thread.Create(ctx, e.store, agent, thread.PublicID("pub_wedge"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close(ctx) }()
+	for i, want := range []string{"Deployed.", "Deployed again."} {
+		turn, err := s.Send(ctx, core.User("Deploy to prod."))
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := turn.Wait()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(res.Pending) != 0 || res.Text() != want || int(ran.Load()) != i+1 {
+			t.Fatalf("turn %d: pending %+v, text %q, deploy ran %d; want no park", i+1, res.Pending, res.Text(), ran.Load())
+		}
+		if err := s.WaitIdle(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if p, q := s.Pending(), s.Queue(); len(p) != 0 || len(q) != 0 {
+			t.Fatalf("turn %d: the session holds pending %d, queue %d; want 0, 0", i+1, len(p), len(q))
+		}
+	}
+
+	// The app's plain Generate still parks: the app resumes it itself.
+	res, err := agent.Generate(ctx, core.Prompt("Deploy to prod."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Pending) != 1 || res.Pending[0].Name != "deploy" || ran.Load() != 2 {
+		t.Errorf("plain Generate: pending %+v, ran %d; want deploy parked", res.Pending, ran.Load())
+	}
+}

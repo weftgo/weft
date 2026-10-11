@@ -194,7 +194,9 @@ type SessionResolver func(ctx context.Context, publicID string) (s *thread.Sessi
 //
 //   - a decision is the session's own Decide (thread.Approve, Deny or
 //     Resolve), which resumes the turn under thread's rules (the parked
-//     turn's Next) — the resumed run is the app's run, with its own
+//     turn's Next) when the session auto-resumes; under
+//     thread.AutoResume(false) the app's Resume does — the resumed run
+//     is the app's run, with its own
 //     weft.session.id and weft.turn, never a playground run;
 //   - a steer is delivered only into the run it names, while that run
 //     is the turn running now (thread.Session.Steer with the command's

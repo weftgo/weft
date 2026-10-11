@@ -13,6 +13,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -87,6 +88,10 @@ func mcpToolTable() string {
 // runMCP is `weft mcp`: resolve the Studio (--url, WEFT_STUDIO_URL,
 // the discovery file, the default address), check it answers
 // /api/meta, then serve the read tools over stdio until stdin closes.
+// A Studio that does not answer yet is no reason to exit: an MCP
+// client starts its servers once, at session start, before the
+// developer's `weft studio`/`weft dev` may be up — so it WARNs and
+// serves, and each tool call looks again (startMCP).
 // stdout is the protocol: every line of ours goes to stderr.
 func runMCP(args []string, stdout, stderr io.Writer) error {
 	fs := newFlags("mcp", stderr)
@@ -128,20 +133,122 @@ Flags:
 	if !*readOnly {
 		return usageError("--read-only=false: weft mcp has no write mode (write verbs stay out until the approval story for agents exists)")
 	}
-	u, tok, from := mcpStudio(*base, *token)
-	c := newClient(u, tok)
-	ctx := context.Background()
-	if _, err := c.get(ctx, "/api/meta", nil); err != nil {
-		return fmt.Errorf("mcp: no Studio answers /api/meta: %w", err) // main prefixes "weft: "
+	srv, err := startMCP(context.Background(), *base, *token, stderr)
+	if err != nil {
+		return err
 	}
-	_, _ = fmt.Fprintf(stderr, "weft mcp: %d read-only tools over stdio for the Studio at %s (token %s)\n",
-		len(mcpTools), c.redacted(), from)
-	srv := newMCPServer(c, slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
 	t := &sdk.IOTransport{Reader: os.Stdin, Writer: nopWriteCloser{stdout}}
-	if err := srv.Run(ctx, t); err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
+	if err := srv.Run(context.Background(), t); err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
 		return fmt.Errorf("mcp: %w", err)
 	}
 	return nil
+}
+
+// startMCP resolves the Studio, checks /api/meta and builds the
+// server. Nothing answering is a WARN on stderr, not an exit: the
+// server serves, and each tool call re-resolves and checks again
+// (studioLink). A Studio that answers and refuses (a 401, a 404 from
+// something that is not a Studio) is still the command's error.
+func startMCP(ctx context.Context, urlFlag, tokenFlag string, stderr io.Writer) (*sdk.Server, error) {
+	u, tok, from := mcpStudio(urlFlag, tokenFlag)
+	c := newClient(u, tok)
+	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelWarn}))
+	var resolve func() (string, string)
+	if urlFlag == "" {
+		// No --url: every look re-reads WEFT_STUDIO_URL and the
+		// discovery file — a Studio started later, or `weft dev` on
+		// 7332–7340, is found without a restart. An explicit --url is
+		// retried as given.
+		resolve = func() (string, string) { u, tok, _ := mcpStudio("", tokenFlag); return u, tok }
+	}
+	down := false
+	if _, err := c.get(ctx, "/api/meta", nil); err != nil {
+		var se *statusError
+		if errors.As(err, &se) {
+			return nil, fmt.Errorf("mcp: no Studio answers /api/meta: %w", err) // main prefixes "weft: "
+		}
+		down = true
+		log.Warn("weft mcp: no Studio answers /api/meta yet; tools will retry per call", "err", err.Error())
+	}
+	_, _ = fmt.Fprintf(stderr, "weft mcp: %d read-only tools over stdio for the Studio at %s (token %s)\n",
+		len(mcpTools), c.redacted(), from)
+	return newMCPServerLink(newStudioLink(c, resolve, down, stderr), log), nil
+}
+
+// studioLink is the Studio the tools read: the one walled client, and
+// — when the last attempt failed with a transport error — a fresh
+// look before the next request: re-resolve (no --url), then GET
+// /api/meta. Nothing answering is the call's error, the startup line
+// with its fix; a Studio found again is said on stderr once.
+type studioLink struct {
+	mu      sync.Mutex
+	c       *client
+	resolve func() (base, token string) // nil: --url given, retried as given
+	down    bool                        // the last attempt failed with a transport error
+	stderr  io.Writer
+}
+
+// newStudioLink walls c's transport to GET and HEAD — every client the
+// link ever uses shares that http.Client.
+func newStudioLink(c *client, resolve func() (string, string), down bool, stderr io.Writer) *studioLink {
+	c.http.Transport = readOnlyTransport{next: c.http.Transport}
+	if stderr == nil {
+		stderr = io.Discard
+	}
+	return &studioLink{c: c, resolve: resolve, down: down, stderr: stderr}
+}
+
+// client is the client the next request goes through: the current one,
+// or — after a transport failure — the one a fresh look found
+// answering /api/meta; an error when none answers.
+func (l *studioLink) client(ctx context.Context) (*client, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !l.down {
+		return l.c, nil
+	}
+	c := l.c
+	if l.resolve != nil {
+		u, tok := l.resolve()
+		nc := *l.c // the same walled http.Client: never a second one
+		nc.base, nc.token = strings.TrimRight(u, "/"), tok
+		c = &nc
+	}
+	if _, err := c.get(ctx, "/api/meta", nil); err != nil {
+		var se *statusError
+		if !errors.As(err, &se) {
+			hint := "the next call retries the --url given"
+			if l.resolve != nil {
+				hint = "the next call looks again (WEFT_STUDIO_URL, the discovery file): no restart needed"
+			}
+			return nil, fmt.Errorf("no Studio answers /api/meta: %w; %s", err, hint)
+		}
+	}
+	if c.base != l.c.base {
+		_, _ = fmt.Fprintf(l.stderr, "weft mcp: now reading the Studio at %s\n", c.redacted())
+	}
+	l.c, l.down = c, false
+	return c, nil
+}
+
+// failed marks the link down after a transport error on c (a request
+// that got no answer), so the next call looks again.
+func (l *studioLink) failed(c *client, err error) {
+	var se *statusError
+	if err == nil || errors.As(err, &se) {
+		return
+	}
+	l.mu.Lock()
+	if l.c == c {
+		l.down = true
+	}
+	l.mu.Unlock()
+}
+
+func (l *studioLink) current() *client {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.c
 }
 
 type nopWriteCloser struct{ io.Writer }
@@ -214,12 +321,17 @@ type studioGetter interface {
 	redacted() string
 }
 
-// clientGetter is studioGetter over the API client.
-type clientGetter struct{ c *client }
+// linkGetter is studioGetter over the link's current client.
+type linkGetter struct{ l *studioLink }
 
-func (g clientGetter) get(ctx context.Context, path string, q url.Values) (int, []byte, error) {
-	b, err := g.c.get(ctx, path, q)
+func (g linkGetter) get(ctx context.Context, path string, q url.Values) (int, []byte, error) {
+	c, err := g.l.client(ctx)
 	if err != nil {
+		return 0, nil, err
+	}
+	b, err := c.get(ctx, path, q)
+	if err != nil {
+		g.l.failed(c, err)
 		var se *statusError
 		if errors.As(err, &se) {
 			return se.Status, se.Body, err
@@ -229,13 +341,18 @@ func (g clientGetter) get(ctx context.Context, path string, q url.Values) (int, 
 	return http.StatusOK, b, nil
 }
 
-func (g clientGetter) runLink(id string) string { return runLink(g.c.base, id, "") }
-func (g clientGetter) redacted() string         { return g.c.redacted() }
+func (g linkGetter) runLink(id string) string { return runLink(g.l.current().base, id, "") }
+func (g linkGetter) redacted() string         { return g.l.current().redacted() }
 
 // newMCPServer builds the server and registers the read tools over c,
-// its transport walled to GET and HEAD first.
+// its transport walled to GET and HEAD first, c answering or not.
 func newMCPServer(c *client, log *slog.Logger) *sdk.Server {
-	c.http.Transport = readOnlyTransport{next: c.http.Transport}
+	return newMCPServerLink(newStudioLink(c, nil, false, nil), log)
+}
+
+// newMCPServerLink builds the server and registers the read tools over
+// the link.
+func newMCPServerLink(link *studioLink, log *slog.Logger) *sdk.Server {
 	srv := sdk.NewServer(&sdk.Implementation{
 		Name:        "weft",
 		Title:       "weft Studio (read-only)",
@@ -251,7 +368,7 @@ func newMCPServer(c *client, log *slog.Logger) *sdk.Server {
 			Experimental: map[string]any{"weft": map[string]any{"read_only": true, "methods": []string{"GET"}}},
 		},
 	})
-	m := &mcpReader{s: clientGetter{c}}
+	m := &mcpReader{s: linkGetter{link}}
 	addTool(srv, "explain_failure", `Why did run X fail? Start here. A convenience over run + step + transcript (no new server logic): `+
 		`fetches the run row, picks the failing step (the step in flight when the run failed, else its last step), `+
 		`fetches that step assembled and the transcript, and answers {status, error, stop_reason, step, tool_calls `+
@@ -859,9 +976,6 @@ type explanation struct {
 	StepStatus string          `json:"step_status,omitempty"`
 	StepReason string          `json:"step_reason,omitempty"`
 	Model      json.RawMessage `json:"model,omitempty"`
-	Attempts   json.RawMessage `json:"attempts,omitempty"`
-	ToolCalls  json.RawMessage `json:"tool_calls,omitempty"`
-	Children   json.RawMessage `json:"children,omitempty"`
 	StepHoles  json.RawMessage `json:"step_holes,omitempty"`
 	// LastAssistantText is the transcript's last assistant text; null
 	// when there is none, TranscriptError when the transcript was not
@@ -870,6 +984,12 @@ type explanation struct {
 	TranscriptError   string  `json:"transcript_error,omitempty"`
 	// Next names the reads that go further.
 	Next []string `json:"next"`
+	// The step's bulk last — attempts, tool calls with their results,
+	// children — so a cut at max_bytes takes them and keeps the
+	// structured fields above (field order is the JSON's order).
+	Attempts  json.RawMessage `json:"attempts,omitempty"`
+	ToolCalls json.RawMessage `json:"tool_calls,omitempty"`
+	Children  json.RawMessage `json:"children,omitempty"`
 }
 
 func (m *mcpReader) explainFailure(ctx context.Context, _ *sdk.CallToolRequest, in mcpRunIn) (*sdk.CallToolResult, any, error) {

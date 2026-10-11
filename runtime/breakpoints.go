@@ -25,15 +25,24 @@ import (
 // /api/runtimes/{id}/breakpoints replaces and re-sends at every
 // registration. One link per process is the rule; should several be
 // live, a run parks on the union of their sets. A call to a breakpoint
-// tool parks at the approval boundary (ADR 0007) exactly as a
-// RequireApproval tool's does: its ToolStart and no ToolFinish, the run
-// ending successfully with the call on RunResult.Pending.
+// tool parks at the approval boundary (ADR 0007) as a RequireApproval
+// tool's does: its ToolStart and no ToolFinish, the run ending
+// successfully with the call on RunResult.Pending. In a Subagent's
+// child run (which inherits the parent's context) the child parks and
+// the parent's call to it is a SUBAGENT_PENDING result the parent
+// model sees and continues past — core's rule for any park in a child,
+// not a park of the parent.
 //
 // Who decides a parked app run:
 //
-//   - a thread turn (weft/thread) parks the turn, and with Sessions set
-//     the debugger's approve / deny / resolve reaches it through the
-//     app's own Session (Decide), which resumes the turn;
+//   - a thread turn (weft/thread) parks on a breakpoint only when this
+//     process also set runtime.Sessions — a park nobody could decide
+//     would hold the session (every later Send queues behind it, ADR
+//     0021 §5) until the app decides it; without Sessions the source
+//     answers nothing for session runs (those carrying
+//     weft.session.id). With Sessions the debugger's approve / deny /
+//     resolve reaches the turn through the app's own Session (Decide),
+//     which resumes it;
 //   - a plain Generate ends with res.Pending, and only the app can
 //     resume it (Generate again with Messages(res.Messages...) and
 //     weft.Approve / Deny / Resolve): Studio decides session turns
@@ -61,6 +70,10 @@ func Breakpoints() core.Option { return core.ParkSource(breakpointSource) }
 // playgroundKey is the metadata key every run this runtime starts
 // carries (runOptions); the source skips such runs.
 const playgroundKey = "weft.playground"
+
+// sessionKey is the metadata key a weft/thread turn carries: the
+// source parks such a run only when a live link has Sessions.
+const sessionKey = "weft.session.id"
 
 // liveLinks is the process's runtime links Breakpoints reads: a link
 // joins at Install (before it dials) and leaves at its stop.
@@ -95,15 +108,27 @@ func breakpointSource(ctx context.Context) []string {
 	// its own filtered ParkOn, written into its override fingerprint;
 	// the source adds nothing there, so the fingerprint alone decides
 	// what a playground run parks (ADR 0030).
-	if core.MetadataFromContext(ctx)[playgroundKey] == "true" {
+	md := core.MetadataFromContext(ctx)
+	if md[playgroundKey] == "true" {
 		return nil
 	}
 	liveLinks.mu.Lock()
 	links := make([]*link, 0, len(liveLinks.links))
+	decides := false
 	for l := range liveLinks.links {
 		links = append(links, l)
+		decides = decides || l.cfg.sessions != nil
 	}
 	liveLinks.mu.Unlock()
+	// A thread turn parks only where a decision can reach it: with no
+	// live link holding a Sessions resolver nobody but the app could
+	// decide the park, and under ADR 0021 §5 every later Send would
+	// queue behind it — a breakpoint must not wedge a session the app
+	// has no approval UI for (stop()'s reasoning: a runtime that cannot
+	// decide does not park).
+	if md[sessionKey] != "" && !decides {
+		return nil
+	}
 	var set map[string]bool
 	for _, l := range links {
 		for _, t := range l.breakpointSet() {

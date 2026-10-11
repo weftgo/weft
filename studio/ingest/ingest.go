@@ -173,12 +173,24 @@ func writeBatch(
 
 // publishRuns re-reads each run the batch touched and publishes its
 // row as a run frame. Best effort: a run that cannot be read yet is
-// simply not announced (its records already were).
+// simply not announced (its records already were). The derived runs
+// (docs/record-contract.md §9) of every trace the batch brought a stock
+// GenAI span of are among them: their ids are read from the trace's
+// stored spans (obsdb.DeriveStockRuns, the derivation the writer ran),
+// so a later batch that grows a run's steps announces it again.
 func publishRuns(ctx context.Context, db obsdb.DB, hub obsdb.Hub, batch obsdb.Batch) {
 	seen := map[string]struct{}{}
+	traces := map[string]bool{}
 	for _, s := range batch.Spans {
 		if id := obsdb.DeriveSpan(s).RunID; id != "" {
 			seen[id] = struct{}{}
+		} else if obsdb.StockCandidate(s) && !traces[s.TraceID] {
+			traces[s.TraceID] = true
+			if spans, err := db.Trace(ctx, s.TraceID); err == nil {
+				for _, r := range obsdb.DeriveStockRuns(spans) {
+					seen[r.Row.ID] = struct{}{}
+				}
+			}
 		}
 	}
 	for _, rec := range batch.Records {

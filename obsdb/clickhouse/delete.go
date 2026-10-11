@@ -236,7 +236,12 @@ func (d *DB) deleteRuns(ctx context.Context, ids []string) error {
 	}); err != nil {
 		return err
 	}
-	for _, c := range planSpanDeletes(links, obsdb.DeletedSpans(links, deleted)) {
+	keys := obsdb.DeletedSpans(links, deleted)
+	// A derived run whose root span goes with them goes too (the
+	// SQLite backend's rule): no row outlives every span it was
+	// derived from.
+	ids = append(ids, obsdb.StockRunsOf(links, keys, deleted)...)
+	for _, c := range planSpanDeletes(links, keys) {
 		if len(c.logs) > 0 {
 			args, tuples := keyTuples(c.logs)
 			if err := d.conn.Exec(ctx, `DELETE FROM otel_logs WHERE LogAttributes['weft.run.id'] = '' AND (TraceId, SpanId) IN (`+tuples+`)`, args...); err != nil {

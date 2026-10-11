@@ -22,6 +22,11 @@ import (
 // whose spans arrive over several batches converges on the same row —
 // and again at read time for a derived run's spans (StockRunSpans).
 
+// StockErrNoDescription is a failed derived run's error when its root
+// span's status is Error with no description (§9): a failed run never
+// reads an empty error.
+const StockErrNoDescription = "the root span's status is Error (no description)"
+
 // stockPrefix opens every derived run id: otel-<trace id>-<root span id>.
 const stockPrefix = "otel-"
 
@@ -78,13 +83,14 @@ func StockTraces(ids []string) []string {
 	return out
 }
 
-// stockOp is a span's GenAI operation: gen_ai.operation.name when set,
+// stockOp is a span's GenAI operation: gen_ai.operation.name when set
+// (an empty value is unset),
 // else read from the name — a name starting with invoke_agent or
 // execute_tool, or a name that is "chat" or starts with "chat " (the
 // conventions' "{operation} {model}" span name; a bare prefix would
 // take "chatbot" for a model call). "" for any other span.
 func stockOp(s Span) string {
-	if v, ok := s.Attrs["gen_ai.operation.name"].(string); ok {
+	if v, ok := s.Attrs["gen_ai.operation.name"].(string); ok && v != "" {
 		return v
 	}
 	switch {
@@ -134,7 +140,8 @@ func StockCandidate(s Span) bool {
 // gen_ai.request.model, else the first chat span's; Started and
 // Finished the root's start and end; LastSeen the latest time in the
 // subtree; Status StatusFailed with the root's status description as
-// Err when the root's status is Error, else StatusSucceeded — never
+// Err (StockErrNoDescription when it has none) when the root's status
+// is Error, else StatusSucceeded — never
 // running or interrupted: a span is exported only once it ended, so a
 // stored root is a finished run, and there is no heartbeat to read a
 // liveness from; Steps the subtree's chat span count; Usage the root's
@@ -296,6 +303,11 @@ func deriveRun(idx map[string]*Span, root *Span, members []*Span) StockRun {
 	}
 	if root.StatusCode == 2 {
 		row.Status, row.Err = StatusFailed, root.StatusMessage
+		if row.Err == "" {
+			// A failed run always says why; a producer that set no
+			// description says so in the reader's words.
+			row.Err = StockErrNoDescription
+		}
 	}
 	if w := walkUp(idx, root); w.root != nil {
 		row.ParentRunID = StockRunID(w.root.TraceID, w.root.SpanID)

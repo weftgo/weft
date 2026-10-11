@@ -141,3 +141,22 @@ func TestDeriveStockRunsRules(t *testing.T) {
 		t.Error("DeriveStockRuns stamped the caller's span")
 	}
 }
+
+// A failed root with no status description still says why (§9): the
+// reader's words, never an empty error. An empty gen_ai.operation.name
+// is unset: the span's name decides.
+func TestDeriveStockFailedNoDescriptionAndEmptyOp(t *testing.T) {
+	const tr = "0000000000000000000000000000000b"
+	root := obsdb.Span{TraceID: tr, SpanID: "0000000000000001", Name: "invoke_agent a", Start: stockAt(0), End: stockAt(10),
+		StatusCode: 2, Attrs: map[string]any{"gen_ai.operation.name": "", "gen_ai.conversation.id": "c"}}
+	runs := obsdb.DeriveStockRuns([]obsdb.Span{root})
+	if len(runs) != 1 {
+		t.Fatalf("runs = %d, want the root read by its name", len(runs))
+	}
+	if obsdb.StockErrNoDescription != "the root span's status is Error (no description)" {
+		t.Errorf("StockErrNoDescription = %q, docs/record-contract.md §9 words it otherwise", obsdb.StockErrNoDescription)
+	}
+	if r := runs[0].Row; r.Status != obsdb.StatusFailed || r.Err != obsdb.StockErrNoDescription {
+		t.Errorf("failed root without a description = %s %q", r.Status, r.Err)
+	}
+}

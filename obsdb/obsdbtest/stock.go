@@ -2,6 +2,7 @@ package obsdbtest
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -279,4 +280,135 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+// derivedMixed: weft spans and stock GenAI spans in one trace. A weft
+// span is never a root and stops a stock subtree (§9): a weft run with
+// a stock agent under its tool yields the weft row and the stock root's
+// derived row — top-level, since the walk stops at the weft span — and
+// a stock root with a weft run under it yields the derived row (its
+// steps its own chat spans only) beside the weft row, never a derived
+// twin of the weft run. Both weft spans carry the conversation id
+// mirror, as weft's do for a session's run.
+func derivedMixed(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		const (
+			weftInStock = "5d0c0ffee0000000000000000000b001" // a weft run under a stock root
+			stockInWeft = "5d0c0ffee0000000000000000000b002" // a stock agent under a weft run's tool
+		)
+		weftSpan := func(trace, id, parent, name, op, run string, start, end time.Duration) obsdb.Span {
+			sp := stockSpan(id, parent, name, start, end, map[string]any{
+				"gen_ai.operation.name": op, "weft.run.id": run, "gen_ai.conversation.id": "s_mix",
+				"gen_ai.agent.name": "weft-agent",
+			})
+			sp.TraceID = trace
+			return sp
+		}
+		inTrace := func(trace string, s obsdb.Span) obsdb.Span { s.TraceID = trace; return s }
+		stockRoot := func(trace, id, parent string, start, end time.Duration) obsdb.Span {
+			return inTrace(trace, stockSpan(id, parent, "invoke_agent stock", start, end, map[string]any{
+				"gen_ai.operation.name": "invoke_agent", "gen_ai.agent.name": "stock", "gen_ai.conversation.id": "conv_mix",
+			}))
+		}
+		spans := []obsdb.Span{
+			// A: stock root ⊃ stock chat, weft invoke_agent ⊃ weft chat.
+			stockRoot(weftInStock, "5d000000000000a1", "", 0, 10*time.Second),
+			inTrace(weftInStock, stockChat("5d000000000000a2", "5d000000000000a1", time.Second, 10, 1)),
+			weftSpan(weftInStock, "5d000000000000a3", "5d000000000000a1", "invoke_agent weft-agent", "invoke_agent", "weft_in_stock", 2*time.Second, 5*time.Second),
+			weftSpan(weftInStock, "5d000000000000a4", "5d000000000000a3", "chat m", "chat", "weft_in_stock", 3*time.Second, 4*time.Second),
+			// B: weft invoke_agent ⊃ weft execute_tool ⊃ stock root ⊃ stock chat.
+			weftSpan(stockInWeft, "5d000000000000b1", "", "invoke_agent weft-agent", "invoke_agent", "weft_with_stock", 0, 10*time.Second),
+			weftSpan(stockInWeft, "5d000000000000b2", "5d000000000000b1", "execute_tool ask", "execute_tool", "weft_with_stock", time.Second, 9*time.Second),
+			stockRoot(stockInWeft, "5d000000000000b3", "5d000000000000b2", 2*time.Second, 8*time.Second),
+			inTrace(stockInWeft, stockChat("5d000000000000b4", "5d000000000000b3", 3*time.Second, 20, 2)),
+		}
+		if err := db.Write(ctx(), obsdb.Batch{Spans: spans}); err != nil {
+			t.Fatal(err)
+		}
+		page, err := db.Runs(ctx(), obsdb.RunQuery{ParentRunID: "*"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := map[string]obsdb.RunRow{}
+		for _, r := range page.Runs {
+			got[r.ID] = r
+		}
+		a, b := obsdb.StockRunID(weftInStock, "5d000000000000a1"), obsdb.StockRunID(stockInWeft, "5d000000000000b3")
+		want := []string{"weft_in_stock", "weft_with_stock", a, b}
+		if len(got) != len(want) {
+			t.Fatalf("runs = %v, want exactly %v: no derived twin of a weft run", idsOf(page.Runs), want)
+		}
+		for _, id := range want {
+			r, ok := got[id]
+			if !ok {
+				t.Errorf("run %s missing from %v", id, idsOf(page.Runs))
+				continue
+			}
+			if r.Derived != strings.HasPrefix(id, "otel-") {
+				t.Errorf("run %s derived = %v", id, r.Derived)
+			}
+		}
+		if r := got[a]; r.Steps != 1 || r.Usage.InputTokens != 10 || r.ParentRunID != "" {
+			t.Errorf("stock root over a weft run = steps %d usage %+v parent %q; want its own chat alone, top-level", r.Steps, r.Usage, r.ParentRunID)
+		}
+		if r := got[b]; r.Steps != 1 || r.ParentRunID != "" || r.ParentCallID != "" {
+			t.Errorf("stock root under a weft tool = steps %d parent %q/%q; want 1 step, no parent (the walk stops at weft)", r.Steps, r.ParentRunID, r.ParentCallID)
+		}
+		// Deleting the weft run takes the stock agent under its tool —
+		// spans and derived row — and leaves the other trace alone.
+		if err := db.DeleteRun(ctx(), "weft_with_stock"); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Run(ctx(), b); !errors.Is(err, obsdb.ErrNotFound) {
+			t.Errorf("derived run under the deleted weft run: %v, want ErrNotFound", err)
+		}
+		if tr, err := db.Trace(ctx(), stockInWeft); err != nil || len(tr) != 0 {
+			t.Errorf("deleted weft run's trace = %d spans (%v), want none", len(tr), err)
+		}
+		if left, err := db.Runs(ctx(), obsdb.RunQuery{ParentRunID: "*"}); err != nil || left.Total != 2 {
+			t.Errorf("after DeleteRun = %v (%v), want the other trace's two runs", idsOf(left.Runs), err)
+		}
+	}
+}
+
+// derivedTwoRoots: two stock roots in one trace — sibling agents under
+// a generic request span — are two runs; deleting one keeps the other
+// with every span of its own.
+func derivedTwoRoots(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		root := func(id string, start time.Duration) obsdb.Span {
+			return stockSpan(id, "5d000000000000c0", "invoke_agent "+id, start, start+3*time.Second, map[string]any{
+				"gen_ai.operation.name": "invoke_agent", "gen_ai.conversation.id": "conv_two",
+			})
+		}
+		spans := []obsdb.Span{
+			stockSpan("5d000000000000c0", "", "POST /chat", 0, 10*time.Second, map[string]any{"http.request.method": "POST"}),
+			root("5d000000000000c1", time.Second),
+			stockChat("5d000000000000c2", "5d000000000000c1", 1500*time.Millisecond, 1, 1),
+			root("5d000000000000c3", 5*time.Second),
+			stockChat("5d000000000000c4", "5d000000000000c3", 5500*time.Millisecond, 2, 2),
+		}
+		if err := db.Write(ctx(), obsdb.Batch{Spans: spans}); err != nil {
+			t.Fatal(err)
+		}
+		first, second := obsdb.StockRunID(stockTrace, "5d000000000000c1"), obsdb.StockRunID(stockTrace, "5d000000000000c3")
+		if page, err := db.Runs(ctx(), obsdb.RunQuery{}); err != nil || page.Total != 2 {
+			t.Fatalf("two roots = %v (%v), want two top-level runs", idsOf(page.Runs), err)
+		}
+		if err := db.DeleteRun(ctx(), first); err != nil {
+			t.Fatal(err)
+		}
+		page, err := db.Runs(ctx(), obsdb.RunQuery{ParentRunID: "*"})
+		if err != nil || page.Total != 1 || page.Runs[0].ID != second || page.Runs[0].Steps != 1 {
+			t.Fatalf("after deleting one = %v (%v), want the other alone", idsOf(page.Runs), err)
+		}
+		if sp, err := db.RunSpans(ctx(), second); err != nil || len(sp) != 2 {
+			t.Errorf("the kept run's spans = %d (%v), want its root and chat", len(sp), err)
+		}
+		if tr, err := db.Trace(ctx(), stockTrace); err != nil || len(tr) != 3 {
+			t.Errorf("trace after deleting one root = %d spans (%v), want the request span and the kept run's two", len(tr), err)
+		}
+	}
 }

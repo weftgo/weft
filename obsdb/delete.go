@@ -72,3 +72,26 @@ func DeletedSpans(all []SpanLink, deleted map[string]bool) []SpanKey {
 	})
 	return out
 }
+
+// StockRunsOf is the derived run ids (StockRunID) of the deleted span
+// keys that are non-weft spans (no run id in all) and not already in
+// deleted: the derived runs whose root a deletion takes — a stock agent
+// under a deleted weft run's tool, whose row is no child of it (§9: the
+// walk stops at a weft span) yet would outlive every span it was
+// derived from. A key that is no root names no row; deleting by its id
+// deletes nothing.
+func StockRunsOf(all []SpanLink, keys []SpanKey, deleted map[string]bool) []string {
+	weft := map[SpanKey]bool{}
+	for _, l := range all {
+		if l.RunID != "" {
+			weft[SpanKey{l.TraceID, l.SpanID}] = true
+		}
+	}
+	var out []string
+	for _, k := range keys {
+		if id := StockRunID(k.TraceID, k.SpanID); !weft[k] && !deleted[id] {
+			out = append(out, id)
+		}
+	}
+	return out
+}

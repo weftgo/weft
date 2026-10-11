@@ -580,8 +580,8 @@ derived, and the subtree stops at it as at a nested root: weft's own rows
 always win, so a weft run's spans — which carry the GenAI mirrors,
 `gen_ai.conversation.id` among them — never make a derived twin.
 
-A span's operation is its `gen_ai.operation.name`; without the attribute,
-its name: starting with `invoke_agent` or `execute_tool`, or `chat` alone
+A span's operation is its `gen_ai.operation.name` (an empty value is
+unset); without the attribute, its name: starting with `invoke_agent` or `execute_tool`, or `chat` alone
 or followed by a space (the conventions' `{operation} {model}` name — a
 bare prefix would take a `chatbot` span for a model call). A span counts
 toward a root only through a complete chain of stored parents: one whose
@@ -611,7 +611,7 @@ whose operation is one of the three; a trace of other spans costs no read.
 | `parent_run_id`, `parent_call_id` | for a root nested under another root's subtree: that root's derived id, and the `gen_ai.tool.call.id` of the nearest `execute_tool` span above it |
 | `started`, `finished` | the root's start and end |
 | `last_seen` | the latest time of anything in the subtree: the root's end for a well-formed tree |
-| `status`, `error` | `failed` with the status description when the root's status is `Error`, else `succeeded` (a root span is exported only when it ended, so a derived run is never running or interrupted) |
+| `status`, `error` | `failed` with the status description when the root's status is `Error` (with no description, the error reads "the root span's status is Error (no description)": a failed run never has an empty error), else `succeeded` (a root span is exported only when it ended, so a derived run is never running or interrupted) |
 | `usage` | the run's **own** usage: the root's `gen_ai.usage.*` when present, taken as the root's own figure; else the sum over the subtree's `chat` spans — the subtree stops at nested roots, so a nested root's calls count toward it, never toward the parent (below) |
 | `steps` | the number of `chat` spans in the subtree |
 | `chat` (the waterfall) | the subtree's `chat` spans in start order; a span's step is its ordinal (0-based); model, response model, finish reason and usage from its `gen_ai.*` keys |
@@ -626,7 +626,10 @@ one), `weft.tool.seq` on each `execute_tool` span. The producer's spans
 are stored as exported; the numbers are stamped on the copy a read
 returns, and the run's `derived` badge says who numbered them. Deleting a
 derived run deletes its subtree's spans (a nested root's run is its child,
-deleted with it).
+deleted with it). Deleting a weft run deletes the non-weft spans under it,
+a stock agent under its tool among them — and that agent's derived row
+too (it is no child of the weft run, the walk stopping at weft spans, but
+it would otherwise outlive every span it was derived from).
 
 **Usage and cost of derived children.** A derived run's usage is
 own-only by contract. Studio's cost split subtracts from a parent's
@@ -670,12 +673,18 @@ model and error text); `/api/sessions` groups it under its conversation
 id; `/api/runs/{id}` is the row with one hole, `derived`, in the words
 above; `events` and `transcript` are empty with that badge (`transcript?step=N`
 is 409 with it); `spans` are the real spans (the waterfall);
-`requests` and `tools` are empty with the `derived` badge;
+`requests` and `tools` are empty with the `derived` badge in those words;
 `export` carries the row and the spans, every other block badged, and
 refuses `format=wefttest` 400 with the badge, as the playground's fixtures
-and preview refuse a derived source: there is no transcript to replay;
+preview and run routes refuse a derived source: there is no transcript to replay;
 `/api/diff` with a derived side marks every column `unknown`, never a
-change. A panel token never reaches a derived run: it has no public id.
+change except unequal step counts (`missing`).
+`steps/{n}` is the step's `chat` span: its usage (priced like any
+step's), its `execute_tool` spans as calls badged `derived` (no arguments
+or results), `request` and `messages_in` the badge, and one hole,
+`derived` — never a `gap` or `not_recorded`. A Studio over ClickHouse
+announces derived rows on the live lane as SQLite's hub does (the
+receiver re-reads the trace's derived runs after each export). A panel token never reaches a derived run: it has no public id.
 
 ## 10. The conformance fixtures
 

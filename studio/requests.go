@@ -238,6 +238,9 @@ func (s *Server) serveRunRequests(w http.ResponseWriter, r *http.Request, id str
 	out := requestsPage{Requests: []requestWire{}}
 	if h := det.RequestsHole(); h != "" {
 		out.badgeFields = badgeOf(h)
+		if det.Derived {
+			out.badgeFields = derivedBadge() // the stock_spans words: not weft's records to upgrade
+		}
 		writeJSON(w, r, http.StatusOK, out)
 		return
 	}
@@ -354,6 +357,9 @@ func (s *Server) serveRunTools(w http.ResponseWriter, r *http.Request, id string
 	out := toolsDoc{Catalogs: []catalogDoc{}}
 	if h := det.RequestsHole(); h != "" {
 		out.badgeFields = badgeOf(h)
+		if det.Derived {
+			out.badgeFields = derivedBadge() // the stock_spans words: not weft's records to upgrade
+		}
 		writeJSON(w, r, http.StatusOK, out)
 		return
 	}

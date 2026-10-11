@@ -162,8 +162,8 @@ func TestDerivedRunRoutes(t *testing.T) {
 		code, _, body = get(t, h, "/studio/api/runs/"+derivedOK+"/"+route)
 		var b badged
 		decode(t, body, &b)
-		if code != http.StatusOK || b.Badge != "derived" {
-			t.Errorf("%s = %d %s, want 200 badged derived", route, code, body)
+		if code != http.StatusOK || !b.derived() {
+			t.Errorf("%s = %d %s, want 200 badged derived in the stock_spans words", route, code, body)
 		}
 	}
 
@@ -331,8 +331,9 @@ func TestDerivedNoTwinForWeftRuns(t *testing.T) {
 }
 
 // The playground refuses a replay from a derived run with its words:
-// there is no transcript to replay (the preview route, and the
-// fixtures builder the playground's fixtures route shares).
+// there is no transcript to replay (the run route's checkSource, the
+// preview route, and the fixtures builder the playground's fixtures
+// route shares). No command reaches the runtime.
 func TestDerivedReplayRefused(t *testing.T) {
 	pt := newPlaygroundTestServer(t)
 	b, err := os.ReadFile("../obsdb/testdata/contract/stock_genai/traces.json")
@@ -342,16 +343,99 @@ func TestDerivedReplayRefused(t *testing.T) {
 	if code, out := previewPost(t, pt, "/v1/traces", "", string(b)); code != http.StatusOK {
 		t.Fatalf("ingest: %d %s", code, out)
 	}
+	run := func(engine string, from int, input string) string {
+		in := ""
+		if input != "" {
+			in = `"input":"` + input + `",`
+		}
+		return `{"runtime":"rt_test","agent":"acme-support",` + in + `"source":{"run_id":"` + derivedOK + `","from_step":` +
+			string(rune('0'+from)) + `},"engine":"` + engine + `","side_effects":"substitute","thread":"ephemeral"}`
+	}
 	for _, c := range []struct{ path, body string }{
 		{"/api/playground/preview", `{"agent":"support","source":{"run_id":"` + derivedOK + `","from_step":0}}`},
 		{"/api/playground/fixtures", `{"run_id":"` + derivedOK + `"}`},
+		// The run route: live and scripted, from step 0 and 1, and the
+		// input-only case that would otherwise spend a live model call.
+		{"/api/playground/runs", run("live", 0, "")},
+		{"/api/playground/runs", run("live", 1, "")},
+		{"/api/playground/runs", run("live", 0, "where is my order?")},
+		{"/api/playground/runs", run("scripted", 0, "")},
+		{"/api/playground/runs", run("scripted", 1, "")},
 	} {
 		code, out := previewPost(t, pt, c.path, "", c.body)
 		var refused badged
 		decode(t, out, &refused)
-		if code != http.StatusBadRequest || !refused.derived() || !strings.Contains(out, "derived from stock spans") {
-			t.Errorf("%s = %d %s, want 400 badged derived, naming why", c.path, code, out)
+		if code != http.StatusBadRequest || !refused.derived() || !strings.Contains(out, "derived from stock spans") ||
+			!strings.Contains(out, `"code":"bad_request"`) {
+			t.Errorf("%s %s = %d %s, want 400 bad_request badged derived, naming why", c.path, c.body, code, out)
 		}
+	}
+	select {
+	case cmd := <-pt.cmd:
+		t.Errorf("a command reached the runtime: %+v", cmd)
+	default:
+	}
+}
+
+// The step route for a derived run (docs/record-contract.md §9): the
+// step is its chat span — its usage, priced like any other, and its
+// tool calls from the execute_tool spans — and its one hole is derived,
+// in the stock_spans words: never a gap ("a destination dropped") or
+// not_recorded ("upgrade weft"), which would send the author to the
+// wrong fix.
+func TestDerivedSteps(t *testing.T) {
+	h := derivedFixture(t)
+	for _, c := range []struct {
+		n       string
+		in, out int64
+		calls   int
+	}{{"0", 812, 41, 1}, {"1", 905, 37, 0}} {
+		code, _, body := get(t, h, "/studio/api/runs/"+derivedOK+"/steps/"+c.n)
+		if code != http.StatusOK {
+			t.Fatalf("steps/%s: %d %s", c.n, code, body)
+		}
+		var st struct {
+			Status string `json:"status"`
+			Usage  struct {
+				In  int64 `json:"input_tokens"`
+				Out int64 `json:"output_tokens"`
+			} `json:"usage"`
+			CostUSD       *float64 `json:"cost_usd"`
+			CostKnown     bool     `json:"cost_known"`
+			Request       badged   `json:"request"`
+			MessagesIn    badged   `json:"messages_in"`
+			AttemptsBadge *badged  `json:"attempts_badge"`
+			ToolCalls     []struct {
+				CallID string `json:"call_id"`
+				Name   string `json:"name"`
+				Seq    int64  `json:"seq"`
+				Badge  string `json:"badge"`
+			} `json:"tool_calls"`
+			Holes []badge `json:"holes"`
+		}
+		decode(t, body, &st)
+		if st.Status != "ok" || st.Usage.In != c.in || st.Usage.Out != c.out {
+			t.Errorf("steps/%s = status %s usage %+v, want ok and the chat span's %d/%d", c.n, st.Status, st.Usage, c.in, c.out)
+		}
+		if st.CostUSD == nil || !st.CostKnown || *st.CostUSD <= 0 {
+			t.Errorf("steps/%s cost = %v known %v, want the chat span's usage priced (never a known $0)", c.n, st.CostUSD, st.CostKnown)
+		}
+		if len(st.Holes) != 1 || st.Holes[0] != (badge{"derived", derivedReason, derivedFix}) {
+			t.Errorf("steps/%s holes = %+v, want exactly the derived hole", c.n, st.Holes)
+		}
+		if !st.Request.derived() || !st.MessagesIn.derived() || st.AttemptsBadge != nil {
+			t.Errorf("steps/%s request %+v messages_in %+v attempts_badge %+v, want derived, derived, none", c.n, st.Request, st.MessagesIn, st.AttemptsBadge)
+		}
+		if len(st.ToolCalls) != c.calls || (c.calls == 1 && (st.ToolCalls[0].CallID != "call_abc" || st.ToolCalls[0].Name != "lookup_order" ||
+			st.ToolCalls[0].Seq != 1 || st.ToolCalls[0].Badge != "derived")) {
+			t.Errorf("steps/%s tool calls = %+v, want %d (call_abc, lookup_order, seq 1, derived)", c.n, st.ToolCalls, c.calls)
+		}
+	}
+	// The failed run's one step: its chat span ended ok, the run failed —
+	// the last step reads error, as a weft run's would.
+	_, _, body := get(t, h, "/studio/api/runs/"+derivedFail+"/steps/0")
+	if !strings.Contains(body, `"status":"error"`) {
+		t.Errorf("failed run's steps/0 = %s, want status error", body)
 	}
 }
 

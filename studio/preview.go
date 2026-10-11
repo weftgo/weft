@@ -219,8 +219,8 @@ func (s *Server) servePlaygroundPreview(rs *linkruntime.RuntimeServer) http.Hand
 // (obsdb.RunRow.Derived, docs/record-contract.md §9): it recorded no
 // transcript and no request, so no replay of it can be assembled. Any
 // other run — an unknown one included, which the source check answers
-// — passes. The playground's run route refuses the same source with
-// the same call.
+// — passes. The playground's run route refuses the same source in
+// checkSource, with the same sentence and badge.
 func (s *Server) refuseDerivedSource(w http.ResponseWriter, r *http.Request, runID string) bool {
 	if !isDerivedID(runID) {
 		return false
@@ -229,8 +229,13 @@ func (s *Server) refuseDerivedSource(w http.ResponseWriter, r *http.Request, run
 	if err != nil || !det.Derived {
 		return false
 	}
-	refuseDerived(w, r, "the source run "+runID+" was derived from stock spans: it recorded no transcript and no request, so there is nothing to replay")
+	refuseDerived(w, r, derivedSourceMsg(runID))
 	return true
+}
+
+// derivedSourceMsg is the refusal's sentence for a derived source run.
+func derivedSourceMsg(runID string) string {
+	return "the source run " + runID + " was derived from stock spans: it recorded no transcript and no request, so there is nothing to replay"
 }
 
 // orDefault is v, or def when v is empty.

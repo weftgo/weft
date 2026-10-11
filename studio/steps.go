@@ -586,6 +586,15 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 	}
 
 	holes := holeSet{}
+	// A derived run (obsdb.RunRow.Derived, docs/record-contract.md §9)
+	// recorded no event, request or messages record by construction:
+	// its one reason is derivedBadge's, added first so no later guess
+	// (a gap, an old weft) takes the badge's words.
+	derived := det.Derived
+	if derived {
+		b := derivedBadge()
+		holes.add(obsdb.HoleDerived, b.Reason, b.Fix)
+	}
 	doc := stepDoc{
 		RunID: id, Step: n,
 		Attempts: []stepAttempt{}, Events: []posEvent{}, ToolCalls: []stepToolCall{},
@@ -649,6 +658,14 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 	if doc.Started == nil && chat != nil {
 		t := chat.Start
 		doc.Started = &t
+	}
+	if derived && chat != nil {
+		// What the chat span says of its own call: its end and its
+		// usage (gen_ai.usage.*, the call's own — the step's figure,
+		// priced as any other).
+		t := chat.End
+		doc.Finished = &t
+		doc.Usage = spanUsage(chat.Attrs)
 	}
 
 	// Tool calls, in the order the step's events name them.
@@ -759,6 +776,28 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 			c.CallID = ""
 		}
 	}
+	if derived {
+		// No tool event names the step's calls: its execute_tool spans
+		// do, in the reader's seq order (their weft.tool.seq, stamped by
+		// obsdb.StockRunSpans). Arguments and results were never
+		// recorded: each call is badged derived.
+		var spans []obsdb.Span
+		for _, sp := range toolSpans {
+			spans = append(spans, sp)
+		}
+		slices.SortFunc(spans, func(a, b obsdb.Span) int {
+			x, _ := attrInt64(a.Attrs["weft.tool.seq"])
+			y, _ := attrInt64(b.Attrs["weft.tool.seq"])
+			return int(x - y)
+		})
+		for _, sp := range spans {
+			cid, _ := sp.Attrs["gen_ai.tool.call.id"].(string)
+			name, _ := sp.Attrs["gen_ai.tool.name"].(string)
+			c := callOf(cid, name)
+			c.Seq, _ = attrInt64(sp.Attrs["weft.tool.seq"])
+			c.Badge = string(obsdb.HoleDerived)
+		}
+	}
 	for _, cid := range order {
 		c := calls[cid]
 		if sp, ok := toolSpans[cid]; ok {
@@ -830,6 +869,13 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 		// Named by a request record of a running run whose step_start
 		// is not stored yet: in flight, not lost.
 		doc.Status = stepRunning
+	case !evs.found && derived:
+		// No event of a derived run exists: the chat span's status is
+		// the step's, the run's failure its last step's.
+		doc.Status = stepOK
+		if (chat != nil && chat.StatusCode == 2) || (det.Status == obsdb.StatusFailed && n == det.Steps-1) {
+			doc.Status = stepError
+		}
 	case !evs.found:
 		// Counted by the run row or named by a request, but no event
 		// records the step: the run's outcome, and the gap said.
@@ -888,6 +934,8 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 	case !prompts:
 		doc.Request = badgeOf(obsdb.HoleHidden)
 		holes.note(obsdb.HoleHidden)
+	case derived:
+		doc.Request = derivedBadge()
 	case reqHole != "":
 		doc.Request = badgeOf(reqHole)
 		holes.note(reqHole)
@@ -1051,6 +1099,9 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 	var attReason, attFix string
 	switch {
 	case doc.Status == stepRunning:
+	case derived:
+		// Its attempts are its chat span: there is no attempt reporting
+		// to miss in a producer that is not weft.
 	case chat == nil && len(allSpans) == 0 && (evs.finish != nil || modelCalled || !evs.found):
 		attBadge = obsdb.HoleNotRecorded
 		attReason, attFix = obsdb.HoleNoteFor(obsdb.HoleNotRecorded, obsdb.CauseNoSpans)
@@ -1087,6 +1138,8 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 
 	// Messages in: the request's messages_ref, resolved to a count.
 	switch {
+	case derived:
+		doc.MessagesIn.badgeFields = derivedBadge()
 	case reqHole != "":
 		doc.MessagesIn.badgeFields = badgeOf(reqHole)
 	case first == nil:
@@ -1158,6 +1211,17 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 	}
 	doc.Holes = holes.list()
 	return doc, nil
+}
+
+// spanUsage is a span's gen_ai.usage.* as a core.Usage (absent keys 0).
+func spanUsage(attrs map[string]any) core.Usage {
+	n := func(k string) int64 { v, _ := attrInt64(attrs[k]); return v }
+	return core.Usage{
+		InputTokens: n("gen_ai.usage.input_tokens"), OutputTokens: n("gen_ai.usage.output_tokens"),
+		CachedInputTokens: n("gen_ai.usage.cache_read.input_tokens"),
+		CacheWriteTokens:  n("gen_ai.usage.cache_creation.input_tokens"),
+		ReasoningTokens:   n("gen_ai.usage.reasoning.output_tokens"),
+	}
 }
 
 // spanStep is a span's weft.step.index, -1 when it has none.

@@ -241,6 +241,11 @@ func deleteRuns(ctx context.Context, tx *sql.Tx, ids []string) error {
 	if err != nil {
 		return err
 	}
+	keys := obsdb.DeletedSpans(links, deleted)
+	// A derived run whose root span goes with them — a stock agent
+	// under a deleted weft run's tool — goes too: its row would
+	// otherwise outlive every span it was derived from.
+	ids = append(ids, obsdb.StockRunsOf(links, keys, deleted)...)
 	for _, stmt := range []string{
 		`DELETE FROM runs_fts WHERE rowid IN (SELECT id FROM run_search WHERE run_id IN (%s))`,
 		`DELETE FROM run_search WHERE run_id IN (%s)`,
@@ -254,7 +259,6 @@ func deleteRuns(ctx context.Context, tx *sql.Tx, ids []string) error {
 			return err
 		}
 	}
-	keys := obsdb.DeletedSpans(links, deleted)
 	for start := 0; start < len(keys); start += deleteChunk / 2 {
 		chunk := keys[start:min(start+deleteChunk/2, len(keys))]
 		args := make([]any, 0, 2*len(chunk))

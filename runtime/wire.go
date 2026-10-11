@@ -30,8 +30,10 @@ type registration struct {
 	Cwd string `json:"cwd,omitempty"`
 	// Instance is this link's random tag, kept across its reconnects:
 	// with host and pid it tells Studio a reconnect of this link (which
-	// keeps its id) from another link colliding on the id (answered
-	// `<id>-<pid>`, which the link adopts).
+	// keeps its id) from another process holding the id (answered
+	// `<id>-<pid>`, which the link adopts) — and a restarted process,
+	// even one reusing a pid, from the one its old commands were queued
+	// for.
 	Instance    string     `json:"instance,omitempty"`
 	Service     string     `json:"service"`
 	Env         string     `json:"env"`

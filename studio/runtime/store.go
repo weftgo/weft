@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"sort"
+	"sync"
 	"time"
 
 	"github.com/weftgo/weft/obsdb"
@@ -18,14 +19,23 @@ import (
 //
 // The memory maps stay the working set: every read (the routes, the
 // timers, the backlog) answers from them, and the store is written,
-// never read, after New. Each write happens under the server's mutex,
-// so the store sees the writes in the order the maps changed and
-// PruneCommands never overlaps a Put (the ClickHouse caveat on
+// never read, after New. The writes leave the hot path: under the
+// server's mutex a change only queues its row (storeWriter) — the
+// in-memory transition and the HTTP answer never wait for the store —
+// and one writer goroutine per server applies the queue in order, each
+// call bounded at storeCallTimeout. The queue keeps the latest write per
+// key (a command id, a run id, a runtime id, a runtime's breakpoint set)
+// at the key's first place in the line — every write is an upsert of the
+// whole row, so the latest is the only one that matters and per-key
+// order holds — and PruneCommands is a queue item like any write, so it
+// never overlaps a Put (the ClickHouse caveat on
 // obsdb.CommandStore.PruneCommands is honoured by construction). A
-// failed write changes nothing: the command's fate is decided in
-// memory as without a store, and the error goes to the logger (one
-// WARN, then Debug until a write succeeds again) — observability never
-// changes behaviour.
+// failed or timed-out call trips a breaker: writes are dropped for
+// storeBreakerPause, one WARN when it first trips (and again only after
+// a write has succeeded since), Debug otherwise. Close drains what is
+// queued, bounded. A store failure changes nothing a command does: its
+// fate is decided in memory exactly as without a store — observability
+// never changes behaviour.
 //
 // What is written, and when:
 //
@@ -42,39 +52,49 @@ import (
 //   - PruneCommands, at most once per storePruneEvery, from the same
 //     prune pass that bounds memory (Retention, maxCommands).
 //
-// What a restart decides, at New (loadLocked), with now the load time:
+// What a restart decides, at New (load), with now the load time:
 //
+//   - a queued command whose runtime has no stored row (or when the
+//     runtimes could not be read) is lost: "Studio restarted; the
+//     runtime's identity is not stored" — nothing could tell its process
+//     from another;
 //   - a queued command whose ack window (AckDeadline since Created) has
 //     passed is lost: "Studio restarted; no ack since <created>". One
 //     still inside it stays queued with its ack timer re-armed for what
-//     is left of the window, and is re-sent by the backlog when — and
-//     only when — the same runtime process reconnects (the stored
-//     registration's host, pid and instance): that process's at-most-once
-//     set (weft/runtime's admit) refuses a frame it already admitted, so
-//     the re-send runs a command only if its frame never arrived. A
-//     different process registering under the id (the app restarted)
-//     marks those rows lost instead: "the runtime's process changed
-//     before the ack" — a fresh process has no seen-set to dedupe with.
+//     is left of the window. Its runtime's id stays the old process's
+//     while the row is live (serveRegister: another process registering
+//     under it gets `<id>-<pid>`), so the backlog re-sends it to that
+//     process alone, whose at-most-once set (weft/runtime's admit)
+//     refuses a frame it already admitted — the re-send runs a command
+//     only if its frame never arrived;
 //   - an accepted command is watched from its stored last word,
 //     max(LastBeat, AcceptedAt): lost at max(FinishDeadline, 3 beats)
 //     after it for a runtime that registered a heartbeat, FinishDeadline
 //     after it otherwise — as if Studio had never restarted. Already past:
 //     lost at load, "Studio restarted; no heartbeat since <t>". Not past:
 //     the watch is armed for the rest, and the runtime's next heartbeat
-//     restarts it as before. The backlog never re-sends an accepted row.
+//     restarts it as before. The backlog never re-sends an accepted row;
 //   - rejected, finished and lost rows are history: Command, CommandOf,
 //     GET /api/playground/commands/{id} answer them as before, and a late
-//     ack still lands on them by the same rules.
+//     ack still lands on them by the same rules;
+//   - each stored runtime is listed disconnected and restored, with its
+//     breakpoint set, until it registers again — for at least
+//     FinishDeadline after the load whatever its last-seen, then by the
+//     memory prune's rule.
 //
 // A command never runs twice across a restart because Studio never
 // decides that one runs: the runtime does, on an accepted ack Studio
 // took (AGENTS.md 7a — an accepted ack Studio did not take runs
-// nothing). Every accepted ack Studio took was written through before
-// its 200 left, so a restored row is accepted when the runtime may be
-// running it; a restored queued row is one the runtime either never
-// received, or received and will not run (its accepted ack was not
-// taken), and the only process that can be handed it again dedupes by
-// command id.
+// nothing). The store may lag the memory (a write still queued, or
+// dropped by the breaker, when Studio stopped), and that only ever
+// makes a row read older than it was: a queued row that was accepted,
+// an accepted one with an older beat. The older beat is decided lost
+// sooner, never re-run; the stale queued row reaches no process but the
+// one it was queued for, which dedupes by command id. The two holes left
+// are the runtime's: a client that sends no Registration.Instance and
+// comes back under a reused pid reads as the same process (so a client
+// must send one; Studio WARNs once without it), and a process's
+// at-most-once set is bounded (4096 ids in weft/runtime).
 
 // Option configures New.
 type Option func(*RuntimeServer)
@@ -88,9 +108,15 @@ func WithStore(s obsdb.CommandStore) Option {
 }
 
 const (
-	// storeTimeout bounds one store call (each runs under the server's
-	// mutex).
-	storeTimeout = 5 * time.Second
+	// storeCallTimeout bounds one store call on the writer.
+	storeCallTimeout = 2 * time.Second
+	// storeBreakerPause is how long writes are dropped after a failed
+	// or timed-out call.
+	storeBreakerPause = 30 * time.Second
+	// storeLoadTimeout bounds New's reads of the stored state.
+	storeLoadTimeout = 10 * time.Second
+	// storeCloseTimeout bounds Close's drain of the writer's queue.
+	storeCloseTimeout = 5 * time.Second
 	// runtimeSeenEvery throttles a runtime row's LastSeen writes from
 	// its stream's keep-alive pings.
 	runtimeSeenEvery = time.Minute
@@ -100,30 +126,8 @@ const (
 	storePruneEvery = time.Minute
 )
 
-// storeCtx is one store call's context.
-func storeCtx() (context.Context, context.CancelFunc) {
-	return context.WithTimeout(context.Background(), storeTimeout)
-}
-
-// storeErrLocked reports a failed store write: WARN on the first of a
-// run of failures, Debug after it until a write succeeds. Caller holds
-// mu.
-func (rs *RuntimeServer) storeErrLocked(what string, err error) {
-	if err == nil {
-		rs.storeFailing = false
-		return
-	}
-	if !rs.storeFailing {
-		rs.storeFailing = true
-		slog.Warn("studio/runtime: the command store refused a write; the playground carries on in memory",
-			"what", what, "err", err)
-		return
-	}
-	slog.Debug("studio/runtime: the command store refused a write", "what", what, "err", err)
-}
-
 // storing reports whether writes go through. Caller holds mu.
-func (rs *RuntimeServer) storing() bool { return rs.store != nil && !rs.closed }
+func (rs *RuntimeServer) storing() bool { return rs.writer != nil && !rs.closed }
 
 // kind is the row's frame kind, the store's Kind column.
 func (row *commandRow) kind() string {
@@ -180,9 +184,9 @@ func (rs *RuntimeServer) saveCommandLocked(row *commandRow) {
 	if row.Source != nil {
 		sc.SourceRunID = row.Source.RunID
 	}
-	ctx, cancel := storeCtx()
-	defer cancel()
-	rs.storeErrLocked("command "+row.CommandID, rs.store.PutCommand(ctx, sc))
+	rs.writer.put(writeKey{"command", sc.ID}, func(ctx context.Context, st obsdb.CommandStore) error {
+		return st.PutCommand(ctx, sc)
+	})
 }
 
 // saveRouteLocked writes runID's route as the maps hold it. Caller
@@ -199,9 +203,9 @@ func (rs *RuntimeServer) saveRouteLocked(runID, commandID string) {
 		Fork:      rs.runFork[runID],
 		Seen:      rs.runSeen[runID],
 	}
-	ctx, cancel := storeCtx()
-	defer cancel()
-	rs.storeErrLocked("route "+runID, rs.store.PutRoute(ctx, r))
+	rs.writer.put(writeKey{"route", runID}, func(ctx context.Context, st obsdb.CommandStore) error {
+		return st.PutRoute(ctx, r)
+	})
 }
 
 // saveBreakpointsLocked writes the runtime's set. Caller holds mu.
@@ -209,9 +213,10 @@ func (rs *RuntimeServer) saveBreakpointsLocked(id string, tools []string) {
 	if !rs.storing() {
 		return
 	}
-	ctx, cancel := storeCtx()
-	defer cancel()
-	rs.storeErrLocked("breakpoints "+id, rs.store.PutBreakpoints(ctx, id, append([]string{}, tools...)))
+	set := append([]string{}, tools...)
+	rs.writer.put(writeKey{"breakpoints", id}, func(ctx context.Context, st obsdb.CommandStore) error {
+		return st.PutBreakpoints(ctx, id, set)
+	})
 }
 
 // saveRuntimeLocked writes the runtime's row. Caller holds mu.
@@ -238,23 +243,24 @@ func (rs *RuntimeServer) saveRuntimeLocked(id string, c *connected) {
 		LastSeen:   c.lastSeen,
 		Body:       body,
 	}
-	ctx, cancel := storeCtx()
-	defer cancel()
 	c.stored = c.lastSeen
-	rs.storeErrLocked("runtime "+id, rs.store.PutRuntime(ctx, r))
+	rs.writer.put(writeKey{"runtime", id}, func(ctx context.Context, st obsdb.CommandStore) error {
+		return st.PutRuntime(ctx, r)
+	})
 }
 
 // pruneStoreLocked bounds the store by the memory's rule, at most once
-// per storePruneEvery. Caller holds mu (no Put overlaps it).
+// per storePruneEvery: a queue item like any write, so the writer never
+// runs it beside a Put. Caller holds mu.
 func (rs *RuntimeServer) pruneStoreLocked(now, cutoff time.Time) {
 	if !rs.storing() || (!rs.lastStorePrune.IsZero() && now.Sub(rs.lastStorePrune) < rs.pruneStoreEvery) {
 		return
 	}
 	rs.lastStorePrune = now
-	ctx, cancel := storeCtx()
-	defer cancel()
-	_, err := rs.store.PruneCommands(ctx, cutoff, maxCommands)
-	rs.storeErrLocked("prune", err)
+	rs.writer.put(writeKey{"prune", ""}, func(ctx context.Context, st obsdb.CommandStore) error {
+		_, err := st.PruneCommands(ctx, cutoff, maxCommands)
+		return err
+	})
 }
 
 // decodeCommand rebuilds a stored command's frame from its Kind and
@@ -308,13 +314,16 @@ func (rs *RuntimeServer) load() {
 	if rs.store == nil {
 		return
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 4*storeTimeout)
+	rs.writer = newStoreWriter(rs.store)
+	ctx, cancel := context.WithTimeout(context.Background(), storeLoadTimeout)
 	defer cancel()
 	now := rs.now()
+	rs.loadedAt = now
 
 	runtimes, err := rs.store.Runtimes(ctx)
+	runtimesKnown := err == nil
 	if err != nil {
-		slog.Warn("studio/runtime: could not load the stored runtimes; starting without them", "err", err)
+		slog.Warn("studio/runtime: could not load the stored runtimes; starting without them (their queued commands are lost)", "err", err)
 	}
 	for _, sr := range runtimes {
 		var reg Registration
@@ -359,7 +368,6 @@ func (rs *RuntimeServer) load() {
 			acceptedAt: sc.AcceptedAt,
 			lastBeat:   sc.LastBeat,
 			ack:        sc.Ack,
-			restored:   true,
 		}
 		rs.commands[sc.ID] = row
 		if sc.RunID != "" && row.session == nil {
@@ -367,6 +375,13 @@ func (rs *RuntimeServer) load() {
 		}
 		switch sc.State {
 		case StateQueued:
+			if c := rs.runtimes[sc.RuntimeID]; !runtimesKnown || c == nil {
+				// No stored registration: the process the row was
+				// queued for cannot be told from any other that
+				// registers under the id, so it is never handed out.
+				rs.transitionLocked(row, StateLost, "Studio restarted; the runtime's identity is not stored")
+				continue
+			}
 			left := sc.Created.Add(rs.AckDeadline).Sub(now)
 			if !readable || rs.AckDeadline <= 0 || left <= 0 {
 				rs.transitionLocked(row, StateLost,
@@ -455,14 +470,23 @@ func sameProcess(a, b Registration) bool {
 	return a.Host == b.Host && a.Pid == b.Pid && a.Instance == b.Instance
 }
 
-// Close stops the server's timers and its write-through: nothing it
-// holds changes the store from here on (a Studio closed before another
-// opens the same database must not mark that one's commands lost from
-// its stale timers). The memory state stays readable. Safe to call
-// more than once.
+// Close stops the server's timers and its write-through, then drains
+// the writer's queue (bounded at storeCloseTimeout): what was decided
+// before Close reaches the store, and nothing after it does (a Studio
+// closed before another opens the same database must not mark that
+// one's commands lost from its stale timers). The memory state stays
+// readable. Safe to call more than once.
 func (rs *RuntimeServer) Close() {
+	ctx, cancel := context.WithTimeout(context.Background(), storeCloseTimeout)
+	defer cancel()
+	_ = rs.Shutdown(ctx)
+}
+
+// Shutdown is Close with the drain bounded by ctx instead: ctx.Err()
+// when the queue could not be written in time (what was left is
+// dropped).
+func (rs *RuntimeServer) Shutdown(ctx context.Context) error {
 	rs.mu.Lock()
-	defer rs.mu.Unlock()
 	rs.closed = true
 	for _, row := range rs.commands {
 		rs.stopTimersLocked(row)
@@ -472,5 +496,172 @@ func (rs *RuntimeServer) Close() {
 			close(c.feed)
 			c.feed = nil
 		}
+	}
+	w := rs.writer
+	rs.mu.Unlock()
+	if w == nil {
+		return nil
+	}
+	return w.close(ctx)
+}
+
+// ── the ordered writer ────────────────────────────────────────────
+
+// writeKey names what a write replaces: a command id, a run id (its
+// route), a runtime id (its row, or its breakpoint set), or the prune.
+type writeKey struct{ kind, id string }
+
+// storeWrite is one queued write, applied by the writer goroutine.
+type storeWrite func(ctx context.Context, st obsdb.CommandStore) error
+
+// storeWriter applies a RuntimeServer's writes to its store on one
+// goroutine, in order, off the server's mutex: put only queues. The
+// queue holds the latest write per key at the key's first place in the
+// line; each call is bounded at timeout; a failure trips the breaker
+// (writes dropped for pause).
+type storeWriter struct {
+	store   obsdb.CommandStore
+	timeout time.Duration
+	pause   time.Duration
+
+	mu       sync.Mutex
+	order    []writeKey
+	pending  map[writeKey]storeWrite
+	busy     bool // a write is in flight
+	stopping bool
+	abandon  bool
+	wake     chan struct{}
+	done     chan struct{}
+
+	// The breaker (the writer goroutine's own state): writes dropped
+	// until openUntil; healthy is whether the last call succeeded (a
+	// trip from healthy WARNs, any other Debugs).
+	openUntil time.Time
+	healthy   bool
+}
+
+func newStoreWriter(st obsdb.CommandStore) *storeWriter {
+	w := &storeWriter{
+		store:   st,
+		timeout: storeCallTimeout,
+		pause:   storeBreakerPause,
+		pending: map[writeKey]storeWrite{},
+		wake:    make(chan struct{}, 1),
+		done:    make(chan struct{}),
+		healthy: true,
+	}
+	go w.run()
+	return w
+}
+
+// put queues fn under key, replacing a write of that key not yet
+// applied (in its place in the line). Never blocks on the store.
+func (w *storeWriter) put(key writeKey, fn storeWrite) {
+	w.mu.Lock()
+	if w.stopping {
+		w.mu.Unlock()
+		return
+	}
+	if _, queued := w.pending[key]; !queued {
+		w.order = append(w.order, key)
+	}
+	w.pending[key] = fn
+	w.mu.Unlock()
+	select {
+	case w.wake <- struct{}{}:
+	default:
+	}
+}
+
+// next takes the next write; false when the writer is stopping with an
+// empty queue (or told to abandon it).
+func (w *storeWriter) next() (writeKey, storeWrite, bool) {
+	for {
+		w.mu.Lock()
+		w.busy = false
+		if w.abandon || (w.stopping && len(w.order) == 0) {
+			w.mu.Unlock()
+			return writeKey{}, nil, false
+		}
+		if len(w.order) > 0 {
+			key := w.order[0]
+			w.order = w.order[1:]
+			fn := w.pending[key]
+			delete(w.pending, key)
+			w.busy = true
+			w.mu.Unlock()
+			return key, fn, true
+		}
+		w.mu.Unlock()
+		<-w.wake
+	}
+}
+
+func (w *storeWriter) run() {
+	defer close(w.done)
+	for {
+		key, fn, ok := w.next()
+		if !ok {
+			return
+		}
+		w.apply(key, fn)
+	}
+}
+
+// apply runs one write under its timeout, or drops it while the
+// breaker is open.
+func (w *storeWriter) apply(key writeKey, fn storeWrite) {
+	now := time.Now()
+	if now.Before(w.openUntil) {
+		slog.Debug("studio/runtime: the command store's breaker is open; a write is dropped",
+			"what", key.kind, "id", key.id, "until", w.openUntil)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), w.timeout)
+	err := fn(ctx, w.store)
+	cancel()
+	if err == nil {
+		w.healthy = true
+		return
+	}
+	w.openUntil = time.Now().Add(w.pause)
+	if w.healthy {
+		w.healthy = false
+		slog.Warn("studio/runtime: the command store refused a write; dropping its writes for a while (the playground carries on in memory)",
+			"what", key.kind, "id", key.id, "err", err, "pause", w.pause)
+		return
+	}
+	slog.Debug("studio/runtime: the command store refused a write", "what", key.kind, "id", key.id, "err", err)
+}
+
+// idle reports an empty queue with nothing in flight (tests).
+func (w *storeWriter) idle() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return len(w.order) == 0 && !w.busy
+}
+
+// close stops taking writes and drains the queue, bounded by ctx; past
+// it the rest is dropped (the call in flight ends at its own timeout).
+func (w *storeWriter) close(ctx context.Context) error {
+	w.mu.Lock()
+	w.stopping = true
+	w.mu.Unlock()
+	select {
+	case w.wake <- struct{}{}:
+	default:
+	}
+	select {
+	case <-w.done:
+		return nil
+	case <-ctx.Done():
+		w.mu.Lock()
+		w.abandon = true
+		w.mu.Unlock()
+		select {
+		case w.wake <- struct{}{}:
+		default:
+		}
+		return ctx.Err()
 	}
 }

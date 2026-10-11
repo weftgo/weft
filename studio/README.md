@@ -1713,32 +1713,50 @@ as before — a restart then forgets it.
 accepted and last-heartbeat times, the last ack), every run → runtime
 route (cancel, steer and the debugger's verbs keep reaching the runtime
 that started a run), each runtime's breakpoint set and each runtime's
-latest registration. A restarted Studio lists the runtimes it knew as
+latest registration. A restarted Studio lists the runtimes it stored as
 `connected: false, restored: true` — with their breakpoints and agents —
-until each registers again; it answers `GET /api/playground/commands/{id}`
+until each registers again, for at least 10 min (FinishDeadline) after the
+restart whatever their last-seen, then by the usual prune (a disconnected
+runtime with nothing pending and no breakpoint set goes); it answers `GET /api/playground/commands/{id}`
 for a command issued before the restart with its stored state, and the
 experiments/runs joins as before.
 
 **What is decided lost, never re-run.** At load, with *now* the restart:
 
+- a `queued` command whose runtime has no stored row (or when the stored
+  runtimes could not be read) is lost — "Studio restarted; the runtime's
+  identity is not stored";
 - a `queued` command older than its ack window (30 s since it was
   created) is lost — "Studio restarted; no ack since <created>"; one still
   inside the window stays queued with its ack timer re-armed for what is
-  left, and is re-sent only to the same runtime process when it
-  reconnects (host, pid and the link's instance match the stored
-  registration — that process's at-most-once set refuses a frame it
-  already admitted). A different process registering under the id (the
-  app restarted) marks it lost: "the runtime's process changed before the
-  ack".
+  left, and is re-sent only to the process it was queued for when that
+  process reconnects (that process's at-most-once set refuses a frame it
+  already admitted). Another process registering under the id meanwhile
+  (the app restarted) is given `<id>-<pid>` and never sees the row, which
+  ends lost by its ack window.
 - an `accepted` command is watched from its stored last word,
   max(last heartbeat, accepted ack): lost max(10 min, 3 beats) after it
   for a runtime that heartbeats (10 min otherwise), as if Studio had never
   restarted. Already past: lost at load — "Studio restarted; no heartbeat
   since <t>". An accepted command is never re-sent: the runtime, not
   Studio, decides to run on an accepted ack Studio took (an accepted ack
-  Studio did not take runs nothing), and each one Studio took was written
-  through before its 200 left.
+  Studio did not take runs nothing).
 - `finished`, `rejected` and `lost` commands are history.
+
+**When the store lags or fails.** The writes leave the request path: the
+in-memory transition and the HTTP answer never wait for the store. One
+writer goroutine applies them in order (the latest write per key; the
+prune is a queue item, never beside a write), each call bounded at 2 s; a
+failure or timeout trips a breaker that drops writes for 30 s — one WARN,
+then Debug. A store failure changes no command's fate in this Studio. What
+it can do is leave the store older than the memory when Studio stops, and
+an older row is always the safe one: an accepted command stored with an
+older beat is decided lost sooner, never re-run; one stored still queued
+reaches no process but the one it was queued for, which refuses a frame it
+already admitted. `studio.Server.Close` drains the queue (bounded at 5 s)
+before the database closes; a server built with `studio.Handler` is never
+closed, so when its DB is closed under it the writer's next write fails
+and logs that one WARN.
 
 **Retention.** The command rows' only retention is
 `obsdb.CommandStore.PruneCommands`, run from the server's own prune
@@ -1756,9 +1774,14 @@ the same id and a link to `/runtimes/<id>` survives the restart. When an
 id is held by another process's live stream (two replicas of one service
 in one cwd, or two links in one process), Studio answers the registration
 `<id>-<pid>` (then `<id>-<pid>-2`, …) in `runtime_id`, and the link adopts
-it; a reconnect of the same process keeps its id. A disconnected entry is
-reclaimed by whoever registers under its id next, Studio's breakpoint set
-kept.
+it; a reconnect of the same process keeps its id. A disconnected id
+whose process still holds work — a queued or accepted command, or a run
+an ack named within the last 10 min — stays that process's: another
+process registering under it is given `<id>-<pid>`, so the old process
+coming back finds its id, commands and run routes (cancel, steer and the
+debugger's verbs keep reaching the runtime that started a run). A
+disconnected entry holding no work is reclaimed by whoever registers
+under its id next, Studio's breakpoint set kept.
 
 **The `cwd` field.** `/api/runtimes` rows carry `cwd`, the app's working
 directory — a filesystem path, so under `db.path`'s rule: the server token,
@@ -1767,12 +1790,15 @@ playground scope). `/api/meta`'s `runtimes` still counts connected runtimes
 only.
 
 **Wire (for the TS/Python runtime clients).** The registration gains
-`cwd` (string, optional) and `instance` (string, optional: a random value
-per link, kept across its reconnects — with host and pid it is what makes
-a re-registration "the same process"). A client must adopt
+`cwd` (string, optional) and `instance` (string: a random value per link,
+kept across its reconnects — with host and pid it is what makes a
+re-registration "the same process"). A client **must** send `instance`
+to keep at-most-once across its own restarts: without it Studio tells
+processes apart by host and pid alone, and a restarted container reusing
+pid 1 would read as the process that held the old commands (Studio WARNs
+once per server on a registration without one). A client must adopt
 `RegisterResponse.runtime_id` when it differs from the id it sent, and
-open `commands_url` (which names it). A client that sends no `instance` is
-told apart by host and pid alone.
+open `commands_url` (which names it).
 
 ## The API (S4.2/S4.3)
 

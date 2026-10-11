@@ -79,8 +79,10 @@ type Registration struct {
 	// value per link, kept across its reconnects): with host and pid it
 	// is what makes a registration "the same process" — whose reconnect
 	// keeps its id — rather than a second one colliding on it
-	// (serveRegister). A client that sends none is told apart by host
-	// and pid alone.
+	// (serveRegister). A client must send one to keep at-most-once
+	// across its own restarts; one that does not is told apart by host
+	// and pid alone (a restarted container reusing pid 1 would then read
+	// as the old process), and Studio WARNs once.
 	Instance    string `json:"instance,omitempty"`
 	Service     string `json:"service"`
 	Env         string `json:"env"`

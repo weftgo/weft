@@ -34,21 +34,29 @@ module, ADR 0005).
   `meta.debug_scope` reads `"own+runtime"` while a connected runtime
   registered `runtime.Sessions` **or** `breakpoints_own`.
 - studio/runtime: `WithStore(obsdb.CommandStore)` option on `New` (and
-  `RuntimeServer.Close`): commands, run routes, breakpoint sets and
-  registrations are written through, under the server's mutex, and loaded
-  back on a Studio restart — a restarted Studio lists its runtimes
-  (`restored: true`, `connected: false`) with their breakpoints, answers
-  pre-restart commands, decides `lost` from the stored state (a queued
-  command past its ack window, an accepted one past max(10 min, 3 beats)
-  from its stored last beat) and never re-sends an accepted command.
-  `studio.New` passes its DB when it implements the interface (both
-  first-party backends); a store failure is logged and changes nothing.
-  `studio.Server.Close` stops the link server's timers before the DB
-  closes. (plan I3.2)
+  `RuntimeServer.Close` / `Shutdown(ctx)`): commands, run routes,
+  breakpoint sets and registrations are written through by one ordered
+  writer goroutine — the hot path only queues (the latest write per key;
+  the prune a queue item, never beside a Put), each store call bounded at
+  2 s, a failure tripping a 30 s breaker that drops writes (one WARN, then
+  Debug); Close drains the queue, bounded — and loaded back on a Studio
+  restart: a restarted Studio lists its runtimes (`restored: true`,
+  `connected: false`, for at least 10 min after the load) with their
+  breakpoints, answers pre-restart commands, decides `lost` from the
+  stored state (a queued command past its ack window or whose runtime has
+  no stored row, an accepted one past max(10 min, 3 beats) from its stored
+  last beat) and never re-sends an accepted command. A store that lags or
+  fails only makes rows read older (decided lost sooner, or a queued row
+  re-sent to its own process, which dedupes). `studio.New` passes its DB
+  when it implements the interface (both first-party backends);
+  `studio.Server.Close` stops the link server's timers and drains its
+  writes before the DB closes. (plan I3.2)
 - `/api/runtimes` rows gain `cwd` (db.path's rule: absent to panel tokens)
   and `restored` (omitted when false).
 - studio/runtime: `Registration.Cwd`, `Registration.Instance`;
-  `RuntimeView.Cwd`, `RuntimeView.Restored`.
+  `RuntimeView.Cwd`, `RuntimeView.Restored`. A runtime client must send
+  `instance` (random per link) to keep at-most-once across its own
+  restarts; Studio falls back to host+pid and WARNs once without it.
 - obsdb: runs derived from stock OTel GenAI spans (docs/record-contract.md §9).
   An `invoke_agent` span with `gen_ai.conversation.id` and no `weft.run.id`
   — a Python or TypeScript app's, exported over OTLP — is now a run row,

@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"slices"
@@ -41,6 +40,19 @@ func stored(t *testing.T, cs obsdb.CommandStore, id string) obsdb.StoredCommand 
 		t.Fatalf("stored command %s: %v %v", id, rows, err)
 	}
 	return rows[0]
+}
+
+// flush waits until the server's writer has applied every queued
+// write (the hot path only queues).
+func flush(t *testing.T, rs *RuntimeServer) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for !rs.writer.idle() {
+		if time.Now().After(deadline) {
+			t.Fatal("the store writer never drained")
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 // noRunWithin fails when a non-idle frame arrives within wait.
@@ -174,6 +186,7 @@ func TestRestartRestoresState(t *testing.T) {
 	beat(t, mux(rs2), held.CommandID, "pg_held")
 	ack(t, rs2, Ack{CommandID: held.CommandID, State: "finished", RunID: "pg_held", Status: "succeeded"})
 	waitState(t, rs2, held.CommandID, StateFinished)
+	flush(t, rs2)
 	if sc := stored(t, cs2, held.CommandID); sc.State != obsdb.CommandFinished || sc.LastBeat.IsZero() || sc.AcceptedAt.IsZero() {
 		t.Errorf("stored row after the finish = %+v, want finished with its accepted and beat times", sc)
 	}
@@ -224,6 +237,7 @@ func TestRestartLostDecidedFromStore(t *testing.T) {
 	if st.Error == nil || *st.Error != want {
 		t.Errorf("silent accepted command's reason = %v, want %q", st.Error, want)
 	}
+	flush(t, rs)
 	if sc := stored(t, cs, "cmd_silent"); sc.State != obsdb.CommandLost || sc.Error != want {
 		t.Errorf("the lost decision was not written back: %+v", sc)
 	}
@@ -260,28 +274,30 @@ func TestRestartLostDecidedFromStore(t *testing.T) {
 	waitState(t, rs, "cmd_other", StateLost)
 
 	// A different process: a restored queued row is never handed to
-	// it — lost, with the reason, and its stream re-sends nothing.
-	put("cmd_orphan", obsdb.CommandQueued, now, time.Time{}, time.Time{})
+	// it — the id stays the old process's while the row is live, the
+	// newcomer is told rt_old-9999 and its stream re-sends nothing; the
+	// row ends lost by its own ack window.
+	put("cmd_stranded", obsdb.CommandQueued, now, time.Time{}, time.Time{})
 	rs.Close()
-	rs2 := New(WithStore(cs))
+	rs2 := New(WithStore(cs), func(rs *RuntimeServer) { rs.AckDeadline = 300 * time.Millisecond })
 	t.Cleanup(rs2.Close)
-	if st, _ := rs2.Command("cmd_orphan"); st.State != StateQueued {
-		t.Fatalf("cmd_orphan at load = %s, want queued", st.State)
+	if st, _ := rs2.Command("cmd_stranded"); st.State != StateQueued {
+		t.Fatalf("cmd_stranded at load = %s, want queued", st.State)
 	}
 	ts2 := httptest.NewServer(mux(rs2))
 	t.Cleanup(ts2.Close)
 	other := reg
 	other.Pid, other.Instance = 9999, "inst_b"
-	if out := register(t, mux(rs2), other); out.RuntimeID != "rt_old" {
-		t.Errorf("a new process reclaiming a disconnected id got %q, want rt_old", out.RuntimeID)
+	if out := register(t, mux(rs2), other); out.RuntimeID != "rt_old-9999" {
+		t.Errorf("a new process on an id holding another's work got %q, want rt_old-9999", out.RuntimeID)
 	}
-	st = waitState(t, rs2, "cmd_orphan", StateLost)
-	if st.Error == nil || *st.Error != "the runtime's process changed before the ack" {
-		t.Errorf("orphaned queued command's reason = %v", st.Error)
-	}
-	r2, closeStream2 := subscribe(t, rs2, ts2.URL, "rt_old", "")
+	r2, closeStream2 := subscribe(t, rs2, ts2.URL, "rt_old-9999", "")
 	t.Cleanup(closeStream2)
 	noRunWithin(t, r2, 100*time.Millisecond)
+	st = waitState(t, rs2, "cmd_stranded", StateLost)
+	if st.Error == nil || *st.Error != "no ack in time" {
+		t.Errorf("stranded queued command's reason = %v", st.Error)
+	}
 }
 
 // TestRegisterCollisionSuffixesID: an id another process holds a live
@@ -323,7 +339,7 @@ func TestRegisterCollisionSuffixesID(t *testing.T) {
 	closeA()
 	waitDisconnected(t, rs, "rt_same")
 	if out := register(t, mux(rs), c); out.RuntimeID != "rt_same" {
-		t.Errorf("a disconnected entry reclaimed = %q, want rt_same", out.RuntimeID)
+		t.Errorf("a disconnected entry holding no work reclaimed = %q, want rt_same", out.RuntimeID)
 	}
 }
 
@@ -404,60 +420,6 @@ func (s *recordingStore) count(name string) int {
 		}
 	}
 	return n
-}
-
-// TestWriteThroughUnderTheMutex: concurrent acks, heartbeats, enqueues
-// and prunes against a store that records overlap — none, so
-// PruneCommands never runs beside a Put (run under -race).
-func TestWriteThroughUnderTheMutex(t *testing.T) {
-	store := &recordingStore{}
-	rs := New(WithStore(store), func(rs *RuntimeServer) { rs.pruneStoreEvery = 0 })
-	defer rs.Close()
-	h := mux(rs)
-	ts := httptest.NewServer(h)
-	defer ts.Close()
-	register(t, h, regBody("rt_race"))
-	r, closeStream := subscribe(t, rs, ts.URL, "rt_race", "")
-	defer closeStream()
-	go func() {
-		for {
-			if _, _, _, err := readEvent(r); err != nil {
-				return
-			}
-		}
-	}()
-
-	var wg sync.WaitGroup
-	for i := 0; i < 8; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for j := 0; j < 10; j++ {
-				cmd, err := rs.Enqueue("rt_race", Command{Agent: "acme-support"})
-				if err != nil {
-					continue
-				}
-				for _, a := range []Ack{
-					{CommandID: cmd.CommandID, State: "accepted", RunID: "pg_" + cmd.CommandID},
-					{CommandID: cmd.CommandID, State: "accepted", RunID: "pg_" + cmd.CommandID},
-					{CommandID: cmd.CommandID, State: "finished", RunID: "pg_" + cmd.CommandID, Status: "succeeded"},
-				} {
-					b, _ := json.Marshal(a)
-					req := httptest.NewRequest(http.MethodPost, "/api/runtime/acks", strings.NewReader(string(b)))
-					h.ServeHTTP(httptest.NewRecorder(), req)
-				}
-				rs.Snapshot() // a prune pass (lifted throttle: every time)
-			}
-		}()
-	}
-	wg.Wait()
-	if n := store.overlaps.Load(); n != 0 {
-		t.Errorf("%d store calls overlapped another", n)
-	}
-	if store.count("PruneCommands") == 0 || store.count("PutCommand") == 0 || store.count("PutRoute") == 0 {
-		t.Errorf("calls: prune %d, command %d, route %d — each expected", store.count("PruneCommands"),
-			store.count("PutCommand"), store.count("PutRoute"))
-	}
 }
 
 // TestNoStoreUnchanged: without a store (WithStore(nil), or no option)

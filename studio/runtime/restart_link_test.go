@@ -3,11 +3,13 @@ package runtime_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"iter"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -259,5 +261,142 @@ func TestRestartNeverRunsTwice(t *testing.T) {
 	var st linkruntime.CommandStatus
 	if resp.StatusCode != http.StatusOK || json.Unmarshal(body, &st) != nil || st.State != linkruntime.StateFinished {
 		t.Errorf("GET /api/playground/commands/%s = %d %s", a.CommandID, resp.StatusCode, body)
+	}
+}
+
+// TestRestartWithTheLink: Studio and the app restart together (a new
+// link, a new instance, the same stable id). The command stored
+// accepted is never re-sent; B, stored queued as a failed write-through
+// leaves it, is never delivered to the new link — the id stays the old
+// process's while A is live there, and the new link works under
+// <id>-<pid>. Each ran exactly once.
+func TestRestartWithTheLink(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "weft.db")
+	model := &countingModel{gate: make(chan struct{}), calls: map[string]int{}}
+	agent := core.New(model, core.Name("counter"))
+	sw := &swap{}
+	ts := httptest.NewServer(sw)
+	t.Cleanup(ts.Close)
+	srv1 := studio.New(studio.Open(path), studio.Playground(true))
+	sw.set(srv1.Handler())
+	stop1 := weftruntime.Install(weftruntime.Studio(ts.URL, ""), weftruntime.Enabled(true), weftruntime.Agents(agent))
+	var rtID string
+	waitFor(t, "the runtime", func() bool {
+		for _, v := range srv1.Runtime().Snapshot() {
+			if v.Connected {
+				rtID = v.ID
+				return true
+			}
+		}
+		return false
+	})
+	inA, inB := "command A", "command B"
+	b, err := srv1.Runtime().Enqueue(rtID, linkruntime.Command{Agent: "counter", Input: &inB, Engine: "live", Thread: "ephemeral"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := srv1.Runtime().Enqueue(rtID, linkruntime.Command{Agent: "counter", Input: &inA, Engine: "live", Thread: "ephemeral"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "both accepted", func() bool {
+		sa, _ := srv1.Runtime().Command(a.CommandID)
+		sb, _ := srv1.Runtime().Command(b.CommandID)
+		return sa.State == linkruntime.StateAccepted && sb.State == linkruntime.StateAccepted &&
+			model.count(inA) == 1 && model.count(inB) == 1
+	})
+	sw.set(nil)
+	if err := srv1.Close(); err != nil {
+		t.Fatal(err)
+	}
+	ts.CloseClientConnections()
+	stop1() // the app goes too: its runs are canceled with the link
+
+	db, err := sqlite.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs := db.(obsdb.CommandStore)
+	rows, err := cs.Commands(context.Background(), obsdb.CommandQuery{ID: b.CommandID})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("stored B = %v %v", rows, err)
+	}
+	row := rows[0]
+	row.State, row.RunID, row.AcceptedAt, row.Created, row.Updated = obsdb.CommandQueued, "", time.Time{}, time.Now(), time.Now()
+	if err := cs.PutCommand(context.Background(), row); err != nil {
+		t.Fatal(err)
+	}
+	_ = db.Close()
+
+	srv2 := studio.New(studio.Open(path), studio.Playground(true))
+	t.Cleanup(func() { _ = srv2.Close() })
+	sw.set(srv2.Handler())
+	close(model.gate)
+	stop2 := weftruntime.Install(weftruntime.Studio(ts.URL, ""), weftruntime.Enabled(true), weftruntime.Agents(agent))
+	t.Cleanup(stop2)
+	suffixed := fmt.Sprintf("%s-%d", rtID, os.Getpid())
+	waitFor(t, "the new link under "+suffixed, func() bool { return srv2.Runtime().Connected(suffixed) })
+	time.Sleep(300 * time.Millisecond)
+	if na, nb := model.count(inA), model.count(inB); na != 1 || nb != 1 {
+		t.Fatalf("executions: A %d, B %d — want exactly one each", na, nb)
+	}
+	if st, _ := srv2.Runtime().Command(b.CommandID); st.State != linkruntime.StateQueued {
+		t.Errorf("B = %s, want still queued for the old process (lost by its ack window)", st.State)
+	}
+	if st, _ := srv2.Runtime().Command(a.CommandID); st.State != linkruntime.StateAccepted {
+		t.Errorf("A = %s, want accepted (decided by its watch, never re-sent)", st.State)
+	}
+}
+
+// TestServerCloseStopsTheTimersWrites: studio.Server.Close drains what
+// was decided before it and stops the armed timers — a queued
+// command's ack window running out after Close writes nothing, so the
+// next Studio over the file decides from what this one stored.
+func TestServerCloseStopsTheTimersWrites(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "weft.db")
+	agent := core.New(&countingModel{gate: make(chan struct{}), calls: map[string]int{}}, core.Name("counter"))
+	sw := &swap{}
+	ts := httptest.NewServer(sw)
+	t.Cleanup(ts.Close)
+	srv := studio.New(studio.Open(path), studio.Playground(true))
+	sw.set(srv.Handler())
+	stop := weftruntime.Install(weftruntime.Studio(ts.URL, ""), weftruntime.Enabled(true), weftruntime.Agents(agent))
+	t.Cleanup(stop)
+	var rtID string
+	waitFor(t, "the runtime", func() bool {
+		for _, v := range srv.Runtime().Snapshot() {
+			if v.Connected {
+				rtID = v.ID
+				return true
+			}
+		}
+		return false
+	})
+	// Acks from here on answer 503 (the open stream still delivers):
+	// the runtime runs nothing on an accepted ack Studio did not take,
+	// and the row stays queued in Studio.
+	sw.set(nil)
+	srv.Runtime().AckDeadline = 100 * time.Millisecond
+	in := "never acked"
+	cmd, err := srv.Runtime().Enqueue(rtID, linkruntime.Command{Agent: "counter", Input: &in, Engine: "live"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := srv.Close(); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(300 * time.Millisecond) // past the ack window
+
+	db, err := sqlite.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	rows, err := db.(obsdb.CommandStore).Commands(context.Background(), obsdb.CommandQuery{ID: cmd.CommandID})
+	if err != nil || len(rows) != 1 {
+		t.Fatalf("the command was not drained to the store before Close returned: %v %v", rows, err)
+	}
+	if rows[0].State != obsdb.CommandQueued {
+		t.Errorf("stored state after Close and the ack window = %s, want queued (no timer write after Close)", rows[0].State)
 	}
 }

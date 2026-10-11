@@ -259,7 +259,11 @@ func (s *Server) Handler() http.Handler { return s }
 // Handler is New(opts...).Handler(): the one-liner for setups A and B
 // when the playground is not in play. Nothing can Close the server it
 // builds, so a Studio with Retain is built with New and closed: under
-// Handler the sweeper stops only when the DB is closed.
+// Handler the sweeper stops only when the DB is closed. So does a
+// playground's command store writer (plan I3): closing the DB under it
+// fails its next write, which logs one WARN and trips its breaker — a
+// Studio with Playground(true) is built with New and closed, so Close
+// drains the writer first.
 func Handler(opts ...Option) http.Handler {
 	return New(opts...).Handler()
 }

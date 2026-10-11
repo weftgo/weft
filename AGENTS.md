@@ -377,11 +377,13 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // {max_steps, parallelism, temperature}, params {top_p, max_tokens, stop, seed},
 //     // tool_choice {mode, name}, park_on, only_tools — narrowing or neutral, each refusal
 //     // naming its rule; runtime ids are stable per (service, cwd, agents) — rt_ + 16 hex of
-//     // sha256 — and `<id>-<pid>` on a live collision (register's runtime_id, adopted by the link);
-//     // commands, routes, breakpoints and registrations persist through obsdb.CommandStore (plan I3:
-//     // studio.New passes its DB), a restarted Studio deciding lost from the stored state (queued past
-//     // its ack window, accepted past its watch from the stored last beat) and never re-sending an
-//     // accepted command; /api/runtimes gives each runtime connected (a live stream now; a dropped
+//     // sha256 — and `<id>-<pid>` when another process holds the id (a live stream, or queued/accepted
+//     // work or a recent run route; register's runtime_id, adopted by the link; a client must send
+//     // `instance`); commands, routes, breakpoints and registrations persist through obsdb.CommandStore
+//     // (plan I3: studio.New passes its DB; one ordered writer off the request path, a 30 s breaker on
+//     // failure), a restarted Studio deciding lost from the stored state (queued past its ack window or
+//     // without a stored runtime, accepted past its watch from the stored last beat) and never
+//     // re-sending an accepted command; /api/runtimes gives each runtime connected (a live stream now; a dropped
 //     // one stays listed, false, until pruned; cwd under db.path's rule; restored after a Studio
 //     // restart until it re-registers) and each agent resolver + defaults (the form greys
 //     // them; absent for a runtime older than the option lab — Studio then refuses the option lab's

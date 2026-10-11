@@ -27,6 +27,13 @@ module, ADR 0005).
   loaded `-race` runner writing the 1,075-run backlog): their running runs
   heartbeat just before each future-cutoff sweep, as live runs do, so only the
   sweep itself has to fit in that window.
+- `thread`: a queued `Send` whose `accepted` receipt was written but not
+  flushed now moves the leaf back to where it stood (a `leaf` entry after the
+  `dropped` receipt), like the prompt path — a failed `Send` leaves the same
+  line whether it met an idle session or a busy one, the window right after a
+  turn's `Wait` included (the runner still between items, the `Send` queued).
+  `Turn.Wait`'s godoc and docs/thread-operations.md §8 name that window;
+  `Session.WaitIdle` waits it out.
 
 ## 0.14.1 — 2026-10-11
 

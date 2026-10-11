@@ -15,6 +15,12 @@ module, ADR 0005).
   returns only once the parent's parked call is resolved and its resume armed,
   as documented — it could return in between, with the parked turn's `Next`
   still nil (nightly soak: TestNestedSyncFullFlow, TestChildInheritsSigning).
+- `thread/pool`: a `Wait` or a second `Cancel` arriving while `Cancel` settles
+  a parked child now waits for it — `Wait` returns the receipt canceled with
+  the parent's resume armed, the second `Cancel` reports it settled — instead
+  of returning at once with the ledger still parked (or `nil`); a panic while
+  recording a settlement no longer leaves every later `Wait` on that receipt
+  blocked.
 
 ## 0.14.2 — 2026-10-11
 

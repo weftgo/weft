@@ -59,6 +59,12 @@ module, ADR 0005).
   the leaf back is itself refused, the log now says what happens on that path
   (the file's leaf stays on the failed entry until the next write; only an
   undropped accepted receipt without a prompt is restored).
+- `thread`: a steer the running turn drained is no longer deferred to a
+  follow-up when the storage refuses the turn's end batch after the step
+  carrying its message landed: the message on the line is its delivery (the
+  rule `Open` applies), so it ends `TurnDelivered` with its `delivered`
+  receipt written on its own (unanswered unless an assistant message follows
+  it on the line) and runs once instead of reaching the line twice.
 
 ## 0.14.1 — 2026-10-11
 

@@ -90,6 +90,44 @@ type markerBody struct {
 	TokensAfter    int64  `json:"tokens_after"`
 }
 
+// markerCarriesMessages reports whether a session marker's body
+// carries any of the manual test's message content.
+func markerCarriesMessages(body string) bool {
+	// The body decodes into exactly the marker's documented fields; any
+	// other field — a message list, a summary — is content it must not
+	// carry. Then the test's own texts, at a length no 64-character hex
+	// hash or id can hold by chance.
+	dec := json.NewDecoder(strings.NewReader(body))
+	dec.DisallowUnknownFields()
+	var b markerBody
+	if err := dec.Decode(&b); err != nil {
+		return true
+	}
+	return strings.Contains(body, "the summary text") || strings.Contains(body, strings.Repeat("b", 100))
+}
+
+// The content check reads the marker's message content, not its
+// metadata: the body's hash is lowercase hex, and a sha256 holds
+// "bbbb" about once in a thousand compactions — the soak's false
+// failure (run 38139587098). A body with such a hash carries no
+// messages; one with a message's text does.
+func TestMarkerContentCheckIgnoresTheHash(t *testing.T) {
+	clean := `{"scope":"session","hash":"0123bbbb4567cdef0123bbbb4567cdef0123bbbb4567cdef0123bbbb4567cdef",` +
+		`"entry":"e_01M4NFEABB512MA09MF4WNZ4BV","reason":"manual","replaced":1,"entries":1,` +
+		`"messages_before":3,"messages_after":3,"tokens_before":22542,"tokens_after":15000}`
+	if markerCarriesMessages(clean) {
+		t.Errorf("a marker whose hash holds \"bbbb\" reads as carrying messages: %s", clean)
+	}
+	for _, leak := range []string{
+		strings.Replace(clean, `"reason":"manual"`, `"reason":"manual","summary":"the summary text"`, 1),
+		strings.Replace(clean, `"reason":"manual"`, `"reason":"manual","messages":[{"role":"user","content":[{"type":"text","text":"`+strings.Repeat("b", 30_000)+`"}]}]`, 1),
+	} {
+		if !markerCarriesMessages(leak) {
+			t.Errorf("a marker with message content reads clean: %.120s…", leak)
+		}
+	}
+}
+
 func sendWait(t *testing.T, ctx context.Context, s *thread.Session, text string) *thread.Turn {
 	t.Helper()
 	turn, err := s.Send(ctx, core.User(text))
@@ -179,8 +217,8 @@ func TestCompactionMarkerManual(t *testing.T) {
 			body.TokensBefore != entry.TokensBefore || body.TokensAfter <= 0 || body.TokensAfter >= body.TokensBefore {
 			t.Errorf("marker body = %+v (before %d, after %d, entry %+v)", body, len(before), len(after), entry.TokensBefore)
 		}
-		if strings.Contains(m.body, "the summary text") || strings.Contains(m.body, "bbbb") {
-			t.Error("the session marker carries messages")
+		if markerCarriesMessages(m.body) {
+			t.Errorf("the session marker carries messages: %s", m.body)
 		}
 
 		// The run's own run_start (core's) went out before the marker:

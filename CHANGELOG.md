@@ -6,6 +6,15 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
+## Unreleased
+
+### Fixed
+
+- `make studio-panel-asset` measures the panel's gzip as the build and
+  the size ledger do (the pure-JS deflate over the normalized version
+  stamp) instead of node's zlib at its default level, which read ≈ 700 B
+  larger and refused the 0.14.0 bundle the build had passed.
+
 ## 0.14.0 — 2026-10-11
 
 Phase 5 of the devtools plan (studio depth): search and filters over

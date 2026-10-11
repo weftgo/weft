@@ -93,6 +93,12 @@ type Registration struct {
 	// `session` frame (EnqueueSession) instead of being refused. A
 	// runtime older than the option sends false.
 	Sessions bool `json:"sessions"`
+	// BreakpointsOwn says an agent the runtime exposes was built with
+	// runtime.Breakpoints(): the debugger's breakpoints park tools on
+	// the app's own runs of it (core.ParkSource, ADR 0030), not only on
+	// the runs the runtime starts. A runtime older than the option
+	// sends false.
+	BreakpointsOwn bool `json:"breakpoints_own"`
 	// Breakpoints is the debugger's tool set the runtime holds right
 	// now (WEFT-DEVTOOLS §8.3). The set lives in the runtime's process,
 	// so it outlives a Studio restart: a Studio that holds no set for
@@ -495,8 +501,12 @@ type RuntimeView struct {
 	// Sessions is the registration's: the runtime acts on the app's own
 	// turns (runtime.Sessions) — approvals, steer and cancel on an
 	// app-owned run of its service reach it.
-	Sessions bool        `json:"sessions"`
-	Agents   []AgentView `json:"agents"`
+	Sessions bool `json:"sessions"`
+	// BreakpointsOwn is the registration's: the runtime's breakpoints
+	// park tools on the app's own runs of an agent built with
+	// runtime.Breakpoints() (plan F4.2).
+	BreakpointsOwn bool        `json:"breakpoints_own"`
+	Agents         []AgentView `json:"agents"`
 	// Breakpoints is the debugger's stored tool set for this runtime
 	// (WEFT-DEVTOOLS §8.3) — what PUT …/breakpoints last delivered, so a
 	// reloaded UI shows the rule that is parking its runs. Empty, never
@@ -650,15 +660,19 @@ type RuntimeServer struct {
 	nextSeq   uint64
 	now       func() time.Time
 
-	// store is the write-through (WithStore; nil: memory only).
-	// storeFailing is the logger's state (one WARN per run of
-	// failures), closed stops the writes (Close), lastStorePrune
-	// throttles PruneCommands.
+	// store is the write-through (WithStore; nil: memory only) and
+	// writer the ordered goroutine its writes go through (store.go):
+	// the hot path only queues. closed stops the queueing (Close),
+	// lastStorePrune throttles PruneCommands, loadedAt starts the
+	// restored runtimes' grace (pruneLocked), noInstance is the one
+	// WARN for a registration without an instance.
 	store           obsdb.CommandStore
-	storeFailing    bool
+	writer          *storeWriter
 	closed          bool
 	lastStorePrune  time.Time
 	pruneStoreEvery time.Duration
+	loadedAt        time.Time
+	noInstance      sync.Once
 }
 
 // connected is one registered runtime and its live command stream.
@@ -697,12 +711,10 @@ type commandRow struct {
 	beat time.Duration
 	// acceptedAt and lastBeat are when the accepted ack, and the last
 	// heartbeat, arrived; ack the last ack as posted — the store's
-	// columns a restart decides from. restored marks a row loaded from
-	// the store: its queued re-send goes to the same process only.
+	// columns a restart decides from.
 	acceptedAt time.Time
 	lastBeat   time.Time
 	ack        json.RawMessage
-	restored   bool
 }
 
 // New builds a RuntimeServer with §10.5's timers: empty, or — WithStore
@@ -773,16 +785,18 @@ func (rs *RuntimeServer) MountGuarded(mux *http.ServeMux, guard func(http.Handle
 //
 // The id is the runtime's (weft/runtime derives it from service, cwd
 // and agents, so it is stable across app restarts), with one
-// exception: an id another process holds a live stream on — two
-// replicas of one service in one cwd, or two links in one process
-// (Registration.Instance) — is answered with `<id>-<pid>` (then
-// `<id>-<pid>-2`, …) in RegisterResponse.RuntimeID, which the runtime
-// adopts for its link. A reconnect of the same process keeps its id.
-// A disconnected entry under the id is reclaimed by whoever registers
-// next: its breakpoint set stays Studio's, and when the registering
-// process is a different one (the app restarted) the commands still
-// queued for the old one are lost — a new process never receives a
-// frame queued for another, whose at-most-once set it does not have.
+// exception: an id another process holds — a live stream on it, or,
+// disconnected, work still in that process's hands (a queued or
+// accepted command, or a run an ack named within FinishDeadline) — is
+// answered with `<id>-<pid>` (then `<id>-<pid>-2`, …) in
+// RegisterResponse.RuntimeID, which the runtime adopts for its link.
+// Two replicas of one service in one cwd, or two links in one process
+// (Registration.Instance), get distinct ids that way; a reconnect of
+// the same process keeps its id, and the old process coming back finds
+// its id, its commands and its run routes where it left them — a new
+// process never receives a frame queued for another, whose at-most-once
+// set it does not have. A disconnected entry holding no work is
+// reclaimed by whoever registers next, its breakpoint set Studio's.
 func (rs *RuntimeServer) serveRegister(w http.ResponseWriter, r *http.Request) {
 	var reg Registration
 	if !decodeBody(w, r, "register body", &reg) {
@@ -799,17 +813,17 @@ func (rs *RuntimeServer) serveRegister(w http.ResponseWriter, r *http.Request) {
 	src, hasManifest := registrationManifest(reg)
 	rs.mu.Lock()
 	rs.pruneLocked()
-	if held := rs.runtimes[reg.RuntimeID]; held != nil && held.feed != nil && !sameProcess(held.reg, reg) {
+	if reg.Instance == "" {
+		rs.noInstance.Do(func() {
+			slog.Warn("studio/runtime: a runtime registered without an instance; it is told from another process by host and pid alone",
+				"runtime_id", reg.RuntimeID,
+				"hint", "a runtime client must send `instance` (random per link) to keep at-most-once across its own restarts — a reused pid would otherwise read as the same process")
+		})
+	}
+	if rs.heldByOtherLocked(reg.RuntimeID, reg) {
 		reg.RuntimeID = rs.freeIDLocked(reg)
 	}
 	c := rs.runtimes[reg.RuntimeID]
-	if c != nil && c.feed == nil && !sameProcess(c.reg, reg) {
-		for _, row := range rs.commands {
-			if row.Runtime == reg.RuntimeID && row.state == StateQueued {
-				rs.transitionLocked(row, StateLost, "the runtime's process changed before the ack")
-			}
-		}
-	}
 	if c == nil {
 		// A runtime this Studio has not seen — a Studio restart, or an
 		// entry pruned while the runtime was away. Its breakpoint set
@@ -841,20 +855,43 @@ func (rs *RuntimeServer) serveRegister(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// freeIDLocked is the id a registration colliding with a live stream
-// of another process gets: `<id>-<pid>`, then `<id>-<pid>-2`, … — the
-// first that is free, disconnected, or this process's own. Caller
-// holds mu.
+// freeIDLocked is the id a registration colliding with another
+// process's entry gets: `<id>-<pid>`, then `<id>-<pid>-2`, … — the
+// first no other process holds (heldByOtherLocked). Caller holds mu.
 func (rs *RuntimeServer) freeIDLocked(reg Registration) string {
 	base := fmt.Sprintf("%s-%d", reg.RuntimeID, reg.Pid)
 	id := base
-	for n := 2; ; n++ {
-		c := rs.runtimes[id]
-		if c == nil || c.feed == nil || sameProcess(c.reg, reg) {
-			return id
-		}
+	for n := 2; rs.heldByOtherLocked(id, reg); n++ {
 		id = fmt.Sprintf("%s-%d", base, n)
 	}
+	return id
+}
+
+// heldByOtherLocked reports whether id belongs to a process other than
+// reg's: a live stream on it, or — disconnected — a queued or accepted
+// command addressed to it, or a run an ack named within FinishDeadline
+// routed to it (the old process may come back for them). Caller holds
+// mu.
+func (rs *RuntimeServer) heldByOtherLocked(id string, reg Registration) bool {
+	c := rs.runtimes[id]
+	if c == nil || sameProcess(c.reg, reg) {
+		return false
+	}
+	if c.feed != nil {
+		return true
+	}
+	for _, row := range rs.commands {
+		if row.Runtime == id && (row.state == StateQueued || row.state == StateAccepted) {
+			return true
+		}
+	}
+	recent := rs.now().Add(-rs.FinishDeadline)
+	for run, rt := range rs.runs {
+		if rt == id && rs.runSeen[run].After(recent) {
+			return true
+		}
+	}
+	return false
 }
 
 // touch notes the runtime was just seen (a keep-alive ping). The
@@ -1488,6 +1525,22 @@ func (rs *RuntimeServer) AnySessions() bool {
 	return false
 }
 
+// AnyOwnRuns reports whether any connected runtime acts on the app's
+// own runs: it registered runtime.Sessions (decisions, steer and cancel
+// on the app's turns) or an agent built with runtime.Breakpoints()
+// (breakpoints park the app's runs) — meta's debug_scope reads
+// own+runtime then (plan F4).
+func (rs *RuntimeServer) AnyOwnRuns() bool {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	for _, c := range rs.runtimes {
+		if c.feed != nil && (c.reg.Sessions || c.reg.BreakpointsOwn) {
+			return true
+		}
+	}
+	return false
+}
+
 // EnqueueSession hands a debugger verb on an app-owned turn to the
 // runtime that registered runtime.Sessions (an `event: session` frame),
 // minting the command id. The row carries sc.PublicID (a panel token
@@ -1602,6 +1655,7 @@ func (rs *RuntimeServer) Snapshot() []RuntimeView {
 			Connected:      c.feed != nil,
 			Restored:       c.restored,
 			Sessions:       c.reg.Sessions,
+			BreakpointsOwn: c.reg.BreakpointsOwn,
 			Breakpoints:    append([]string{}, c.breakpoints...),
 		}
 		for _, a := range c.reg.Agents {
@@ -1897,6 +1951,13 @@ func (rs *RuntimeServer) pruneLocked() {
 		keep := linger
 		if len(c.breakpoints) > 0 {
 			keep = rs.Retention
+		}
+		if c.restored && now.Before(rs.loadedAt.Add(linger)) {
+			// A runtime restored from the store is listed (disconnected,
+			// restored) for linger after the load whatever its last-seen:
+			// a Studio down longer than FinishDeadline still shows the
+			// runtimes it knew until they could have reconnected.
+			continue
 		}
 		if c.lastSeen.Before(now.Add(-keep)) {
 			delete(rs.runtimes, id)

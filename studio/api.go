@@ -618,12 +618,13 @@ type publicResolution struct {
 // debugScope names what the debugger's write verbs may act on, only
 // when those verbs are registered: "own+runtime" while a connected
 // runtime registered runtime.Sessions (the app's own turns take
-// approvals, steer and cancel through it, plan F4), else the
-// runtime-started runs alone.
+// approvals, steer and cancel through it, plan F4.1) or exposes an
+// agent built with runtime.Breakpoints() (breakpoints park the app's
+// own runs, F4.2), else the runtime-started runs alone.
 func (s *Server) debugScope() string {
 	for _, g := range s.groups {
 		if g.capability == "breakpoints" {
-			if s.runtimeSrv != nil && s.runtimeSrv.AnySessions() {
+			if s.runtimeSrv != nil && s.runtimeSrv.AnyOwnRuns() {
 				return debugScopeOwn
 			}
 			return debugScopeRuntime

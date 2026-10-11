@@ -10,6 +10,29 @@ module, ADR 0005).
 
 ### Added
 
+- core: `ParkSource(fn func(ctx context.Context) []string) Option` and
+  `(*Agent).ParkSources()` (ADR 0030, plan F4.2; additive, root facade
+  `weft.ParkSource`): a park set the loop reads once per run at its start
+  and merges into the run's park set exactly as `ParkOn(names...)` — the
+  same boundary (ADR 0007), nothing new to the model, not an override
+  (no `weft.override.*`). A nil/empty answer parks nothing; a panicking
+  source is contained (one Debug line); the function must return
+  promptly. A Subagent's child run reads its own agent's sources.
+- weft/runtime: `Breakpoints() core.Option` (plan F4.2): pass it to
+  `weft.New` and the debugger's breakpoints (`PUT
+  /api/runtimes/{id}/breakpoints`) park tools on the app's own runs of
+  that agent — thread turns (decided from the panel through
+  `runtime.Sessions`) and plain `Generate` runs (ending with
+  `res.Pending`; the app resumes them with `weft.Approve`). Bound lazily
+  to the links `Install` started and not yet stopped (their union);
+  inert — byte-identical — with no Install, an Install not enabled or
+  no breakpoint set (`TestBreakpointsOptionAbsentChangesNothing`). The
+  registration carries `breakpoints_own` (true when an agent given to
+  `Agents` carries the option).
+- studio/runtime: `Registration.BreakpointsOwn`, `RuntimeView.BreakpointsOwn`
+  (`/api/runtimes` … `"breakpoints_own": bool`), `RuntimeServer.AnyOwnRuns()`.
+  `meta.debug_scope` reads `"own+runtime"` while a connected runtime
+  registered `runtime.Sessions` **or** `breakpoints_own`.
 - studio/runtime: `WithStore(obsdb.CommandStore)` option on `New` (and
   `RuntimeServer.Close`): commands, run routes, breakpoint sets and
   registrations are written through, under the server's mutex, and loaded

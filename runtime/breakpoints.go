@@ -1,0 +1,120 @@
+package runtime
+
+import (
+	"context"
+	"reflect"
+	"sort"
+	"sync"
+
+	"github.com/weftgo/weft/core"
+)
+
+// Breakpoints makes the debugger's breakpoints (§8.3) park tools on the
+// runs the app starts itself — plain Generate/Stream calls and weft/
+// thread turns alike — not only on the runs this package starts (plan
+// F4, PQ7). Pass it to core.New (weft.New) with the agent's other
+// options:
+//
+//	agt := weft.New(model, tools…, runtime.Breakpoints())
+//	defer runtime.Install(runtime.Agents(agt), runtime.Sessions(resolve))()
+//
+// It is a core.ParkSource (ADR 0030) bound to the process's runtime
+// link lazily: the agent is built before Install runs, so each run
+// reads, once at its start, the breakpoint set of the links Install
+// has started and not yet stopped — the set Studio's PUT
+// /api/runtimes/{id}/breakpoints replaces and re-sends at every
+// registration. One link per process is the rule; should several be
+// live, a run parks on the union of their sets. A call to a breakpoint
+// tool parks at the approval boundary (ADR 0007) exactly as a
+// RequireApproval tool's does: its ToolStart and no ToolFinish, the run
+// ending successfully with the call on RunResult.Pending.
+//
+// Who decides a parked app run:
+//
+//   - a thread turn (weft/thread) parks the turn, and with Sessions set
+//     the debugger's approve / deny / resolve reaches it through the
+//     app's own Session (Decide), which resumes the turn;
+//   - a plain Generate ends with res.Pending, and only the app can
+//     resume it (Generate again with Messages(res.Messages...) and
+//     weft.Approve / Deny / Resolve): Studio decides session turns
+//     only (Sessions resolves by public id), so the run page shows such
+//     a run parked, read-only.
+//
+// The option is inert without a link: with no Install, or Install not
+// enabled (WEFT_ENV not dev, no Enabled(true)), or a link stopped, or
+// no breakpoint set, the source answers nothing and the run is
+// byte-identical to one built without it. The registration reports
+// breakpoints_own: true when any agent given to Agents carries it.
+func Breakpoints() core.Option { return core.ParkSource(breakpointSource) }
+
+// liveLinks is the process's runtime links Breakpoints reads: a link
+// joins at Install (before it dials) and leaves at its stop.
+var liveLinks struct {
+	mu    sync.Mutex
+	links map[*link]struct{}
+}
+
+func addLiveLink(l *link) {
+	liveLinks.mu.Lock()
+	defer liveLinks.mu.Unlock()
+	if liveLinks.links == nil {
+		liveLinks.links = map[*link]struct{}{}
+	}
+	liveLinks.links[l] = struct{}{}
+}
+
+func removeLiveLink(l *link) {
+	liveLinks.mu.Lock()
+	defer liveLinks.mu.Unlock()
+	delete(liveLinks.links, l)
+}
+
+// breakpointSource is the ParkSource behind Breakpoints: the union of
+// the live links' breakpoint sets, sorted, nil when there is none. It
+// takes two mutexes and copies a small map — prompt, as ParkSource
+// asks. A top-level function, so an agent's ParkSources can be
+// recognised as carrying it (carriesBreakpoints).
+func breakpointSource(context.Context) []string {
+	liveLinks.mu.Lock()
+	links := make([]*link, 0, len(liveLinks.links))
+	for l := range liveLinks.links {
+		links = append(links, l)
+	}
+	liveLinks.mu.Unlock()
+	var set map[string]bool
+	for _, l := range links {
+		for _, t := range l.breakpointSet() {
+			if set == nil {
+				set = map[string]bool{}
+			}
+			set[t] = true
+		}
+	}
+	if len(set) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(set))
+	for t := range set {
+		out = append(out, t)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// breakpointSourcePC identifies breakpointSource among an agent's
+// ParkSources: a top-level function's code pointer is the same for
+// every func value of it.
+var breakpointSourcePC = reflect.ValueOf(breakpointSource).Pointer()
+
+// carriesBreakpoints reports whether a was built with Breakpoints().
+func carriesBreakpoints(a *core.Agent) bool {
+	if a == nil {
+		return false
+	}
+	for _, fn := range a.ParkSources() {
+		if reflect.ValueOf(fn).Pointer() == breakpointSourcePC {
+			return true
+		}
+	}
+	return false
+}

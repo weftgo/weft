@@ -93,3 +93,30 @@ func ExampleSessions() {
 	fmt.Println(got == s)
 	// Output: true
 }
+
+// ExampleBreakpoints builds the agent with runtime.Breakpoints() so the
+// debugger's breakpoints park tools on the app's own runs too — here
+// inert: with no link open (Enabled(false)) there is no breakpoint set,
+// and the run is exactly what it would be without the option.
+func ExampleBreakpoints() {
+	refund := weft.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{}) (string, error) {
+		return "refunded", nil
+	})
+	support := weft.New(
+		wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "refund"}), wefttest.Say("Refunded.")),
+		weft.Name("acme-support"),
+		refund,
+		runtime.Breakpoints(), // the debugger's breakpoints reach this agent's own runs
+	)
+	shutdown := runtime.Install(runtime.Agents(support), runtime.Enabled(false))
+	defer shutdown()
+	res, err := support.Generate(context.Background(), weft.Prompt("Refund order 4411."))
+	if err != nil {
+		return
+	}
+	// With a breakpoint on refund, res.Pending would hold the call: a
+	// thread turn is decided from the panel (runtime.Sessions), a plain
+	// Generate by the app — Generate again with weft.Approve(id).
+	fmt.Println(res.Text(), len(res.Pending))
+	// Output: Refunded. 0
+}

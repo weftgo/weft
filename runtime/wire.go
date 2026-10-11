@@ -42,6 +42,10 @@ type registration struct {
 	// route the debugger's verbs on the app's own turns here (a
 	// `session` frame) instead of refusing them "app-owned turn".
 	Sessions bool `json:"sessions"`
+	// BreakpointsOwn says an exposed agent was built with Breakpoints():
+	// the debugger's breakpoints park tools on the app's own runs of
+	// it, not only on the runs this runtime starts (plan F4.2).
+	BreakpointsOwn bool `json:"breakpoints_own"`
 	// Breakpoints is the debugger's tool set this runtime holds right
 	// now (§8.3) — sorted, empty rather than null. The set lives in
 	// this process, so it outlives a Studio restart; reporting it at

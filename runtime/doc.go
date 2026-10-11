@@ -48,10 +48,15 @@
 // tools on every run this package starts, and steer (§8.4) delivers
 // into a run it holds: an ephemeral run's steering queue, or a fork
 // turn's session as a thread steer under that turn's run options — a
-// steer thread defers to a follow-up turn keeps the park rule; the
-// app's own turns are never breakable from here (D7, PQ7), and take
-// decisions and steers only when the app opted in with Sessions —
-// through the app's own Session, under its writer lease (plan F4).
+// steer thread defers to a follow-up turn keeps the park rule. The
+// app's own runs are the app's to opt in (PQ7, plan F4): breakpoints
+// park their tools on the app's own runs of an agent built with
+// Breakpoints() (core.ParkSource, ADR 0030 — read once per run, inert
+// without a live link), and the app's turns take decisions and steers
+// only when the app installed Sessions — through the app's own
+// Session, under its writer lease. A plain Generate parked by a
+// breakpoint is the app's to resume (weft.Approve); Studio decides
+// session turns only.
 //
 // The rule is default-deny (core.ParkAllExcept): a run lists the tools
 // that may execute — the vouched-safe ones, an Output agent's

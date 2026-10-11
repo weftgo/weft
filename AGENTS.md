@@ -72,6 +72,7 @@ agt := weft.New(model,                       // any weft.Model (adapters, or wef
     weft.Parallelism(4),                       // or weft.Sequential()
     weft.Thinking(weft.ThinkingConfig{Level: weft.ThinkOff}), // reasoning default (adapters map what they can)
     weft.ToolChoice(weft.ToolChoiceConfig{Mode: weft.ToolChoiceAny}), // force a tool call every step (Named/None too; PrepareStep can rewrite per step)
+    weft.ParkSource(func(ctx context.Context) []string {...}), // a park set read once per run at its start, merged as ParkOn (ADR 0030; return promptly — a cached set); runtime.Breakpoints() is one
     weft.Params(weft.RequestParams{Temperature: ptr(0.2)}), // per-run/step sampling (TopP, MaxTokens, Stop, Seed; nil = construction default; a negative MaxTokens fails the step)
     weft.Tap(func(ctx context.Context, ev weft.Event) {...}), // observer: sees every event, changes nothing
     weft.OnRunEnd(func(ctx context.Context, res *weft.RunResult, err error) {...}), // outcome observer: once per run, even on failure — the otel pipeline pairs it with Tap
@@ -388,8 +389,14 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // token gets no instructions, default tool_choice name or stop); runs carry weft.playground and never touch weft.session.id
 //     // (ephemeral). Engines live | scripted (the source
 //     // run's recorded turns, zero tokens); thread ephemeral | fork (a new session
-//     // with lineage, the panel keeps chatting in it). Breakpoints and steer act
-//     // on the runs this runtime starts only (D7). Studio side:
+//     // with lineage, the panel keeps chatting in it). Breakpoints park the runs this
+//     // runtime starts and, opted in at New — weft.New(m, …, runtime.Breakpoints()), a
+//     // core.ParkSource bound lazily to the live link (ADR 0030; inert with no link) —
+//     // the app's own runs (registration breakpoints_own; a plain Generate parked so is
+//     // the app's to resume, Studio decides session turns only, through runtime.Sessions);
+//     // meta debug_scope reads own+runtime while a connected runtime registered Sessions or
+//     // breakpoints_own. Steer acts on the runtime's runs (D7) and, with Sessions, the
+//     // app's turns. Studio side:
 //     // studio.New(..., studio.Playground(true)): /api/playground/runs (the §5.1
 //     // command, transcript_edits validated on both sides — kind tool_result | reply |
 //     // user | tool_args (schema-checked, obsdb.CheckToolArgs) | insert, absent = the

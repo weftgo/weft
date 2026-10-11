@@ -189,6 +189,9 @@ func (l *link) stop() {
 	l.mu.Lock()
 	l.stopped = true // no command is admitted from here on
 	l.mu.Unlock()
+	// The app's own runs stop parking on this link's breakpoints: a
+	// stopped runtime cannot decide them.
+	removeLiveLink(l)
 	l.cancel()
 	if l.started {
 		select {

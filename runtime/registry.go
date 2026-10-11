@@ -190,6 +190,9 @@ func (r *registry) registration(runtimeID string) registration {
 	}
 	for _, name := range r.order {
 		reg.Agents = append(reg.Agents, r.entries[name])
+		if carriesBreakpoints(r.agents[name]) {
+			reg.BreakpointsOwn = true
+		}
 	}
 	return reg
 }

@@ -6,7 +6,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"iter"
+	"log/slog"
 	"maps"
 	"slices"
 	"strconv"
@@ -268,6 +270,72 @@ func (o parkAllExceptOption) applyRun(c *runConfig) {
 // answer, not a side effect, so it never needs naming; ParkOn can
 // still park it.
 func ParkAllExcept(names ...string) RunOption { return parkAllExceptOption{names} }
+
+type parkSourceOption struct {
+	fn func(context.Context) []string
+}
+
+func (o parkSourceOption) apply(a *Agent) {
+	if o.fn != nil {
+		a.parkSources = append(a.parkSources, o.fn)
+	}
+}
+
+// ParkSource gives the agent a dynamic park set (ADR 0030): fn is read
+// once per run, at the run's start — after its run options apply,
+// before its first model call — and the names it returns are merged
+// into the run's park set exactly as a ParkOn(names...) run option
+// would be: a call to a named tool parks at the approval boundary (ADR
+// 0007), its ToolStart and no ToolFinish, the run ending successfully
+// with the call on RunResult.Pending, Approve/Deny/Resolve on a
+// resuming run deciding it. Names match the tool each call resolves to
+// in its step's dispatch snapshot, so a tool only a ToolSource supplies
+// parks like any other, and a Subagent tool's call parks before its
+// child runs. Like ParkOn, the set covers the run it was read for: a
+// Subagent's child run reads its own agent's sources, not this one's.
+// It is how the playground runtime's debugger breakpoints reach the
+// runs the app starts itself (runtime.Breakpoints, WEFT-PLAYGROUND §13.6).
+//
+// fn receives the run's context (its metadata placed) and must return
+// promptly — it runs on the loop's goroutine before the first model
+// call; read a cached set, never the network. A nil or empty answer
+// parks nothing; a panic is contained, parks nothing and is reported
+// as one Debug line. Several ParkSource options add up; a nil fn is
+// ignored. The answer is behaviour, not configuration the run carries:
+// it is not an override (no weft.override.* attribute) and a source
+// that answers nothing leaves the run byte-identical to one without it.
+func ParkSource(fn func(ctx context.Context) []string) Option { return parkSourceOption{fn} }
+
+// ParkSources returns the agent's ParkSource functions in the order
+// they were given — a fresh slice, empty when none was set. A satellite
+// that installed one reads it back to know the agent carries it (the
+// playground runtime reports breakpoints-on-own-runs at registration).
+func (a *Agent) ParkSources() []func(ctx context.Context) []string {
+	return slices.Clone(a.parkSources)
+}
+
+// readParkSources reads the agent's park sources for one run, each
+// under its own containment: a panicking source adds nothing.
+func (a *Agent) readParkSources(ctx context.Context, runID string) []string {
+	var names []string
+	for _, fn := range a.parkSources {
+		names = append(names, a.safeParkSource(ctx, runID, fn)...)
+	}
+	return names
+}
+
+func (a *Agent) safeParkSource(ctx context.Context, runID string, fn func(context.Context) []string) (names []string) {
+	defer func() {
+		if p := recover(); p != nil {
+			names = nil
+			if l := a.obs.logger(); l.Enabled(ctx, slog.LevelDebug) {
+				l.LogAttrs(ctx, slog.LevelDebug, "park source panicked",
+					slog.String(logRun, runID), slog.String(logErr, fmt.Sprint(p)))
+			}
+		}
+	}()
+	return fn(ctx)
+}
 
 // parkRule is a run's park rule, resolved once in execute: the ParkOn
 // names, and — when a ParkAllExcept is in force, the run's own or one

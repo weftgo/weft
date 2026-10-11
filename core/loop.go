@@ -332,6 +332,14 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// force goes onto the context here, before any tool call's context
 	// is derived from it, so the runs started inside this one inherit
 	// it; nothing else reads it.
+	//
+	// The agent's ParkSources (ADR 0030) are read here, once: their names
+	// join the run's ParkOn set. cfg is this run's copy, and the override
+	// attributes were taken above, so a source's answer is never an
+	// override.
+	if len(a.parkSources) > 0 {
+		cfg.parkOn = append(slices.Clone(cfg.parkOn), a.readParkSources(ctx, cfg.id)...)
+	}
 	ctx, parkSet := cfg.resolvePark(ctx)
 	if len(resume) > 0 {
 		results, pending, sub, err := a.resolvePending(ctx, cfg, resume, seq, emit, fetchTools, parkSet)

@@ -1326,6 +1326,31 @@ func ParkOn(tools ...string) RunOption { return core.ParkOn(tools...) }
 // still park it.
 func ParkAllExcept(names ...string) RunOption { return core.ParkAllExcept(names...) }
 
+// ParkSource gives the agent a dynamic park set (ADR 0030): fn is read
+// once per run, at the run's start — after its run options apply,
+// before its first model call — and the names it returns are merged
+// into the run's park set exactly as a ParkOn(names...) run option
+// would be: a call to a named tool parks at the approval boundary (ADR
+// 0007), its ToolStart and no ToolFinish, the run ending successfully
+// with the call on RunResult.Pending, Approve/Deny/Resolve on a
+// resuming run deciding it. Names match the tool each call resolves to
+// in its step's dispatch snapshot, so a tool only a ToolSource supplies
+// parks like any other, and a Subagent tool's call parks before its
+// child runs. Like ParkOn, the set covers the run it was read for: a
+// Subagent's child run reads its own agent's sources, not this one's.
+// It is how the playground runtime's debugger breakpoints reach the
+// runs the app starts itself (runtime.Breakpoints, WEFT-PLAYGROUND §13.6).
+//
+// fn receives the run's context (its metadata placed) and must return
+// promptly — it runs on the loop's goroutine before the first model
+// call; read a cached set, never the network. A nil or empty answer
+// parks nothing; a panic is contained, parks nothing and is reported
+// as one Debug line. Several ParkSource options add up; a nil fn is
+// ignored. The answer is behaviour, not configuration the run carries:
+// it is not an override (no weft.override.* attribute) and a source
+// that answers nothing leaves the run byte-identical to one without it.
+func ParkSource(fn func(ctx context.Context) []string) Option { return core.ParkSource(fn) }
+
 // OnMessages returns the RunOption registering an observer the loop
 // calls whenever messages join the run's transcript: the assistant
 // message a step produced (reasoning, text and calls in their final

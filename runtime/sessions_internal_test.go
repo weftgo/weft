@@ -273,17 +273,24 @@ type identityRun struct {
 	Context  string
 	Usage    core.Usage
 	Metadata map[string]string
+	// Spans is every ended span's name and weft.* attributes, in end
+	// order.
+	Spans []string
 }
 
 // runAppTurn runs one turn of a fresh thread session — deterministic
 // ids and clock — a lookup and an answer — and records it.
-func runAppTurn(t *testing.T, install func(agent *core.Agent) func()) identityRun {
+// opts are added to the agent's (runtime.Breakpoints' identity golden).
+func runAppTurn(t *testing.T, install func(agent *core.Agent) func(), opts ...core.Option) identityRun {
 	t.Helper()
 	ctx := context.Background()
 	var (
 		mu  sync.Mutex
 		out identityRun
 	)
+	rec := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec))
+	t.Cleanup(func() { _ = tp.Shutdown(ctx) })
 	lookup := core.Tool("lookup_order", "Look up an order by ID.", func(ctx context.Context, in struct {
 		OrderID string `json:"order_id"`
 	}) (string, error) {
@@ -295,6 +302,8 @@ func runAppTurn(t *testing.T, install func(agent *core.Agent) func()) identityRu
 			wefttest.Say("It shipped."),
 		),
 		core.Name("acme-support"),
+		core.TracerProvider(tp),
+		core.Options(opts...),
 		core.Tap(func(ctx context.Context, ev core.Event) {
 			b, err := json.Marshal(ev)
 			if err != nil {
@@ -342,6 +351,16 @@ func runAppTurn(t *testing.T, install func(agent *core.Agent) func()) identityRu
 	b, _ := json.Marshal(s.Context())
 	out.Context = string(b)
 	out.Usage = res.Usage
+	for _, sp := range rec.Ended() {
+		var kv []string
+		for _, a := range sp.Attributes() {
+			if strings.HasPrefix(string(a.Key), "weft.") {
+				kv = append(kv, string(a.Key)+"="+fmt.Sprint(a.Value.AsInterface()))
+			}
+		}
+		sort.Strings(kv)
+		out.Spans = append(out.Spans, sp.Name()+" "+strings.Join(kv, " "))
+	}
 	mu.Lock()
 	defer mu.Unlock()
 	return out
@@ -780,6 +799,24 @@ type decisionRun struct {
 // records the resumed turn's run.
 func parkAndDecide(t *testing.T, decide func(s *thread.Session, parked *thread.Turn, callID string) *thread.Turn) decisionRun {
 	t.Helper()
+	return parkAndDecideBy(t, false, decide)
+}
+
+// parkAndDecideBy is parkAndDecide with the park's cause chosen: the
+// gate (RequireApproval) or, with breakpoint set, an ungated deploy on
+// an agent built with Breakpoints() while a live link holds the
+// breakpoint set [deploy] (plan F4.2).
+func parkAndDecideBy(t *testing.T, breakpoint bool, decide func(s *thread.Session, parked *thread.Turn, callID string) *thread.Turn) decisionRun {
+	t.Helper()
+	gate := []core.ToolOption{core.RequireApproval()}
+	var extra []core.Option
+	if breakpoint {
+		gate, extra = nil, []core.Option{Breakpoints()}
+		l := newLink(&config{}, newRegistry(&config{}), "http://unused.invalid", "")
+		l.setBreakpoints([]string{"deploy"})
+		addLiveLink(l)
+		t.Cleanup(func() { removeLiveLink(l) })
+	}
 	ctx := context.Background()
 	var (
 		mu  sync.Mutex
@@ -806,7 +843,8 @@ func parkAndDecide(t *testing.T, decide func(s *thread.Session, parked *thread.T
 		}) (string, error) {
 			call, _ := core.CallFromContext(ctx)
 			return fmt.Sprintf("deployed to %s (approved: %v)", in.Env, call.Approved), nil
-		}, core.RequireApproval()),
+		}, gate...),
+		core.Options(extra...),
 	)
 	n := 0
 	ids := func() string { n++; return fmt.Sprintf("e%03d", n) }

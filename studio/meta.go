@@ -56,7 +56,8 @@ type metaDoc struct {
 	// the app's own turns viewer-only (D7, PQ7) — or "own+runtime"
 	// while a connected runtime registered runtime.Sessions, which
 	// takes approvals, steer and cancel on the app's own turns (plan
-	// F4). Meta says so plainly (WEFT-DEVTOOLS §8.5 item 6); absent
+	// F4.1), or exposes an agent built with runtime.Breakpoints(),
+	// whose breakpoints park the app's own runs (F4.2). Meta says so plainly (WEFT-DEVTOOLS §8.5 item 6); absent
 	// without the playground.
 	DebugScope string      `json:"debug_scope,omitempty"`
 	Content    metaContent `json:"content"`

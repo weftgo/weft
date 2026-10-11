@@ -11,6 +11,7 @@
       "last_seen": "2026-10-09T10:00:05Z",
       "connected": true,
       "sessions": false,
+      "breakpoints_own": false,
       "agents": [
         {
           "name": "acme-support",

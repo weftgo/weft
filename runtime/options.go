@@ -302,7 +302,11 @@ func Install(opts ...Option) (shutdown func()) {
 	}
 	reg := newRegistry(c)
 	l := newLink(c, reg, url, token)
+	// Breakpoints() agents read this link's set from here on (the
+	// agent was built before Install; the binding is lazy).
+	addLiveLink(l)
 	if err := l.start(); err != nil {
+		removeLiveLink(l)
 		slog.Warn("weft/runtime: link failed to start", "err", err)
 		return func() {}
 	}

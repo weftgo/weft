@@ -9,6 +9,7 @@ import (
 	"log"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -1173,4 +1174,33 @@ func ExampleWithMetadata() {
 	_, _ = agt.Generate(ctx, core.Metadata(map[string]string{"tenant": "acme"}), core.Prompt("hello"))
 	// Output:
 	// page = https://app.example/chat tenant = acme
+}
+
+// ParkSource gives the agent a park set read once per run, at its
+// start — a debugger's breakpoints the app's own runs honour. The
+// source must answer promptly from a cached set.
+func ExampleParkSource() {
+	var mu sync.Mutex
+	breakpoints := []string{"refund"} // set elsewhere, e.g. by a debugger
+	refund := core.Tool("refund", "Refund an order.", func(ctx context.Context, in struct{}) (string, error) {
+		return "refunded", nil
+	})
+	agt := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "c1"}),
+		wefttest.Say("refunded"),
+	), refund, core.ParkSource(func(context.Context) []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(breakpoints)
+	}))
+	res, err := agt.Generate(context.Background(), core.Prompt("refund order 4411"))
+	if err != nil {
+		return
+	}
+	fmt.Println("pending:", res.Pending[0].Name)
+	res, _ = agt.Generate(context.Background(), core.Messages(res.Messages...), core.Approve("c1"))
+	fmt.Println(res.Text())
+	// Output:
+	// pending: refund
+	// refunded
 }

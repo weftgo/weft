@@ -5105,3 +5105,39 @@ func TestWithMetadataReachesEveryRunUnderTheContext(t *testing.T) {
 		t.Error("WithMetadata(ctx, nil) must return ctx itself")
 	}
 }
+
+// ParkSource (ADR 0030): The source is read once per run — not per step — at the run's start,
+// and its names park as ParkOn's would; Approve on the resume runs the
+// call once, the resume reading the source again (its own run).
+func TestParkSourceReadOncePerRunAndParks(t *testing.T) {
+	var reads, ran atomic.Int64
+	agt := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup", ID: "c1"}),
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "c2"}),
+		wefttest.Say("refunded"),
+	), countedTool("lookup", new(atomic.Int64)), countedTool("refund", &ran),
+		core.ParkSource(func(context.Context) []string {
+			reads.Add(1)
+			return []string{"refund"}
+		}))
+	res, err := agt.Generate(context.Background(), core.Prompt("x"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reads.Load() != 1 {
+		t.Errorf("source read %d times over a two-step run, want 1", reads.Load())
+	}
+	if ran.Load() != 0 || len(res.Pending) != 1 || res.Pending[0].ID != "c2" {
+		t.Fatalf("ran = %d, pending = %v; want refund (c2) parked", ran.Load(), res.Pending)
+	}
+	res2, err := agt.Generate(context.Background(), core.Messages(res.Messages...), core.Approve("c2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ran.Load() != 1 || len(res2.Pending) != 0 || res2.Text() != "refunded" {
+		t.Errorf("after Approve: ran = %d, pending = %v, text %q; want the call run once and the run done", ran.Load(), res2.Pending, res2.Text())
+	}
+	if reads.Load() != 2 {
+		t.Errorf("source reads after the resume = %d, want 2 (one per run)", reads.Load())
+	}
+}

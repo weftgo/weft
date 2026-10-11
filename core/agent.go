@@ -605,6 +605,7 @@ type Agent struct {
 	tools           map[string]*ToolDef
 	toolList        []*ToolDef
 	toolSource      func() []*ToolDef
+	parkSources     []func(context.Context) []string
 	stops           []StopCondition
 	maxSteps        int
 	usageLimit      Usage

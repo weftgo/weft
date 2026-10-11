@@ -13,7 +13,7 @@ import { FakeStudio, golden } from "@/test/fake-studio"
 import { playgroundStateLink } from "@/lib/links"
 import { resetNotices } from "@/lib/notify"
 import { choose, valueOf } from "@/test/select"
-import { READ_ONLY_NOTE } from "@/routes/playground"
+import { DRAFT_SAVE_MS, READ_ONLY_NOTE } from "@/routes/playground"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -198,8 +198,13 @@ describe("the model field follows the agent", () => {
     await waitFor(() => expect(valueOf(agentSelect())).toBe("planner"))
     expect(valueOf(engineSelect())).toBe("scripted")
     await waitFor(() => expect(valueOf(stepSelect())).toBe("1"))
+    // Past the draft's rest (the slow runner's ordering, forced): the
+    // adopted form is not the reader's edit, so no draft joins the
+    // query — nothing is written back.
+    await new Promise((r) => setTimeout(r, DRAFT_SAVE_MS))
     await settle()
     expect(actions).toEqual(["PUSH"])
+    expect(router.state.location.search).not.toHaveProperty("exp")
   })
 
   it("Back and Forward round-trip the agent, the step and the engine", async () => {

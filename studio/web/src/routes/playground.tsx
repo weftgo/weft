@@ -475,6 +475,9 @@ function Playground({ caps }: { caps: string[] }) {
   /** The form changed since it was opened (or was restored): its draft
    * is kept. */
   const dirty = useRef(false)
+  /** An outside navigate was adopted into an untouched form: the draft
+   * baseline follows it instead of the form turning dirty. */
+  const adopted = useRef(false)
 
   const [sourceRunID, setSourceRunID] = useState(search.run ?? "")
   const [fromStep, setFromStep] = useState(search.step ?? 0)
@@ -548,7 +551,10 @@ function Playground({ caps }: { caps: string[] }) {
     }
     p.keys.clear()
     if (queryKey === pageStateKey(currentRef.current)) return
-    // An outside change: the controls follow the URL.
+    // An outside change: the controls follow the URL. It is not the
+    // reader's edit: an untouched form stays untouched (its draft is
+    // not kept, so no ?exp= is written back — G2).
+    if (!dirty.current) adopted.current = true
     setSourceRunID(queryState.run)
     setFromStep(queryState.step)
     setAgentChoice(queryState.agent)
@@ -704,7 +710,10 @@ function Playground({ caps }: { caps: string[] }) {
   // the share link carries.
   const form = formOfFields({
     variants,
-    registered,
+    // The prompt the variants were seeded with: between an adopted
+    // agent and its re-seed (one render) the old agent's prompt is
+    // still unedited, not an override.
+    registered: seeded.current?.registered ?? registered,
     agent: agentChoice || undefined,
     runtime: runtimeChoice || undefined,
     run: sourceRunID.trim() || undefined,
@@ -722,7 +731,8 @@ function Playground({ caps }: { caps: string[] }) {
   useEffect(() => {
     if (restoring) return
     if (!dirty.current) {
-      if (baseline.current === null) {
+      if (baseline.current === null || adopted.current) {
+        adopted.current = false
         baseline.current = formJSON
         return
       }

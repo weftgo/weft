@@ -268,48 +268,83 @@ func (d *DB) Runtimes(ctx context.Context) (_ []obsdb.StoredRuntime, err error) 
 // liveStates is the SQL list of the states PruneCommands never deletes.
 const liveStates = `('` + obsdb.CommandQueued + `', '` + obsdb.CommandAccepted + `')`
 
-// PruneCommands applies the store's retention in one transaction.
-func (d *DB) PruneCommands(ctx context.Context, before time.Time, keep int) (_ int, err error) {
+// PruneCommands applies the store's retention. The terminal commands
+// go in passes of at most obsdb.SweepBatch rows, each its own writer
+// transaction with ctx checked between them — the age rule's passes,
+// then the keep rule's, which recounts in each — so a large backlog
+// never holds the writer for the whole prune, as Sweep never does;
+// the routes, breakpoints and runtimes clean-up is one transaction
+// after them. On an error the passes before it stay deleted and are
+// counted.
+func (d *DB) PruneCommands(ctx context.Context, before time.Time, keep int) (n int, err error) {
 	if err := d.checkOpen(); err != nil {
 		return 0, err
 	}
 	defer d.closedErr(&err)
-	tx, err := d.writer.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, err
-	}
-	defer func() {
+	cut := before.UnixNano()
+	// pass runs one batch in its own transaction; it answers how many
+	// rows it deleted and whether another pass may find more.
+	pass := func(fn func(tx *sql.Tx) (int64, int64, error)) (bool, error) {
+		if err := ctx.Err(); err != nil {
+			return false, err
+		}
+		tx, err := d.writer.BeginTx(ctx, nil)
+		if err != nil {
+			return false, err
+		}
+		deleted, limit, err := fn(tx)
 		if err != nil {
 			_ = tx.Rollback()
+			return false, err
 		}
-	}()
-	cut := before.UnixNano()
-	res, err := tx.ExecContext(ctx, `DELETE FROM commands WHERE state NOT IN `+liveStates+` AND updated_ns < ?`, cut)
-	if err != nil {
-		return 0, err
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+		n += int(deleted)
+		return limit > 0 && deleted == limit, nil
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return 0, err
-	}
-	if keep > 0 {
-		var total int64
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM commands`).Scan(&total); err != nil {
+	exec := func(tx *sql.Tx, q string, args ...any) (int64, error) {
+		res, err := tx.ExecContext(ctx, q, args...)
+		if err != nil {
 			return 0, err
 		}
-		if over := total - int64(keep); over > 0 {
-			res, err := tx.ExecContext(ctx, `DELETE FROM commands WHERE id IN (
+		return res.RowsAffected()
+	}
+	for more := true; more; {
+		more, err = pass(func(tx *sql.Tx) (int64, int64, error) {
+			m, err := exec(tx, `DELETE FROM commands WHERE id IN (SELECT id FROM commands
+				WHERE state NOT IN `+liveStates+` AND updated_ns < ? LIMIT ?)`, cut, obsdb.SweepBatch)
+			return m, obsdb.SweepBatch, err
+		})
+		if err != nil {
+			return n, err
+		}
+	}
+	for more := keep > 0; more; {
+		more, err = pass(func(tx *sql.Tx) (int64, int64, error) {
+			var total int64
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM commands`).Scan(&total); err != nil {
+				return 0, 0, err
+			}
+			over := min(total-int64(keep), obsdb.SweepBatch)
+			if over <= 0 {
+				return 0, 0, nil
+			}
+			m, err := exec(tx, `DELETE FROM commands WHERE id IN (
 				SELECT id FROM commands WHERE state NOT IN `+liveStates+`
 				ORDER BY created_ns, id LIMIT ?)`, over)
-			if err != nil {
-				return 0, err
-			}
-			m, err := res.RowsAffected()
-			if err != nil {
-				return 0, err
-			}
-			n += m
+			return m, over, err
+		})
+		if err != nil {
+			return n, err
 		}
+	}
+	if err := ctx.Err(); err != nil {
+		return n, err
+	}
+	tx, err := d.writer.BeginTx(ctx, nil)
+	if err != nil {
+		return n, err
 	}
 	for _, stmt := range []struct {
 		q    string
@@ -325,13 +360,15 @@ func (d *DB) PruneCommands(ctx context.Context, before time.Time, keep int) (_ i
 		{`DELETE FROM runtimes WHERE last_seen_ns < ?
 			AND id NOT IN (SELECT runtime_id FROM commands WHERE state IN ` + liveStates + `)
 			AND id NOT IN (SELECT runtime_id FROM breakpoints)`, []any{cut}},
+		// A stale empty set no runtime row names goes too; a non-empty
+		// one stays, as a runtime holding one does.
+		{`DELETE FROM breakpoints WHERE tools = '[]' AND updated_ns < ?
+			AND runtime_id NOT IN (SELECT id FROM runtimes)`, []any{cut}},
 	} {
 		if _, err := tx.ExecContext(ctx, stmt.q, stmt.args...); err != nil {
-			return 0, err
+			_ = tx.Rollback()
+			return n, err
 		}
 	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return int(n), nil
+	return n, tx.Commit()
 }

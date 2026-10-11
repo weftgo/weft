@@ -99,7 +99,9 @@ type DB interface {
 	// whose ParentRunID chain reaches id — with everything stored under
 	// them: records (deltas kept by KeepDeltas included), the search
 	// index rows, the spans named by DeletedSpans and the app log
-	// records emitted under those spans. ErrNotFound for an unknown id.
+	// records emitted under those spans; the CommandStore rows
+	// (commands, run_routes, breakpoints, runtimes) are never touched.
+	// ErrNotFound for an unknown id.
 	// A run still being written is deleted as it stands: a later write
 	// for it starts a new run row from what that write carries.
 	DeleteRun(ctx context.Context, id string) error
@@ -128,6 +130,12 @@ type DB interface {
 	// the tables deletions mutate, which merges every part — an
 	// operator's command, heavy on a large database.
 	Vacuum(ctx context.Context) error
+	// DeleteRun, DeleteSession, Sweep and Vacuum are the run tables'
+	// alone. A CommandStore's rows — commands, run routes, breakpoints,
+	// runtimes — are Studio's record of what it asked a runtime to do,
+	// not run data: deleting a run leaves the commands and the route
+	// that name it, and CommandStore.PruneCommands is their only
+	// retention.
 
 	Close() error
 }

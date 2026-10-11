@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -143,6 +144,15 @@ func commandsTable(open func(t *testing.T) obsdb.DB) func(t *testing.T) {
 		wantIDs(t, cs, obsdb.CommandQuery{States: []string{obsdb.CommandQueued, obsdb.CommandAccepted}}, "cmd_5", "cmd_4")
 		wantIDs(t, cs, obsdb.CommandQuery{RuntimeID: "rt_1", States: []string{obsdb.CommandRejected}}, "cmd_2")
 		wantIDs(t, cs, obsdb.CommandQuery{Limit: 2}, "cmd_5", "cmd_4")
+		// nil and empty States both mean no filter.
+		wantIDs(t, cs, obsdb.CommandQuery{States: []string{}}, "cmd_5", "cmd_4", "cmd_3", "cmd_2", "cmd_1")
+		// An upsert carrying the row's Created keeps it: the order holds.
+		put(t, cs, obsdb.StoredCommand{ID: "cmd_3", RuntimeID: "rt_2", State: obsdb.CommandLost, Error: "no accepted ack",
+			Created: cmdAt(20 * time.Second), Updated: cmdAt(time.Hour)})
+		wantIDs(t, cs, obsdb.CommandQuery{}, "cmd_5", "cmd_4", "cmd_3", "cmd_2", "cmd_1")
+		if got := mustCommands(t, cs, obsdb.CommandQuery{ID: "cmd_3"}); len(got) != 1 || !got[0].Created.Equal(cmdAt(20*time.Second)) {
+			t.Errorf("cmd_3 after an upsert carrying Created = %+v; want Created %v kept", got, cmdAt(20*time.Second))
+		}
 		wantIDs(t, cs, obsdb.CommandQuery{ID: "cmd_missing"})
 		if got := mustCommands(t, cs, obsdb.CommandQuery{ID: "cmd_2"}); len(got) != 1 || got[0].Updated.IsZero() || got[0].Body != nil || got[0].Ack != nil {
 			t.Errorf("cmd_2 = %+v; want a stamped Updated, nil Body and Ack", got)
@@ -285,6 +295,10 @@ func commandsPrune(open func(t *testing.T) obsdb.DB) func(t *testing.T) {
 	return func(t *testing.T) {
 		cs := commandStore(t, open(t))
 		old := -48 * time.Hour
+		// t1 was queued before it finished: on a backend that keeps
+		// versions, pruning the finished row must not leave the queued
+		// one standing.
+		put(t, cs, obsdb.StoredCommand{ID: "t1", RuntimeID: "rt_new", State: obsdb.CommandQueued, Created: cmdAt(old), Updated: cmdAt(old)})
 		for _, c := range []obsdb.StoredCommand{
 			{ID: "t1", RuntimeID: "rt_new", State: obsdb.CommandFinished, RunID: "run_t1", Created: cmdAt(old), Updated: cmdAt(old)},
 			{ID: "t2", RuntimeID: "rt_new", State: obsdb.CommandLost, Created: cmdAt(old + time.Second), Updated: cmdAt(old + time.Second)},
@@ -376,6 +390,165 @@ func commandsPrune(open func(t *testing.T) obsdb.DB) func(t *testing.T) {
 		if n, err := cs.PruneCommands(ctx(), before, 0); err != nil || n != 0 {
 			t.Errorf("a third PruneCommands = %d, %v; want 0 (keep 0 bounds nothing)", n, err)
 		}
+		wantIDs(t, cs, obsdb.CommandQuery{ID: "t1"})
+
+		// An empty set no runtime row names goes once it is stale; a
+		// non-empty one stays. A prune at before keeps both (written
+		// now, they are not stale); one past now takes the empty one,
+		// and nothing else is left for it to take.
+		for rt, set := range map[string][]string{"rt_orphan_clear": nil, "rt_orphan_bp": {"refund"}} {
+			if err := cs.PutBreakpoints(ctx(), rt, set); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, cutoff := range []time.Time{before, time.Now().Add(time.Hour)} {
+			if n, err := cs.PruneCommands(ctx(), cutoff, 0); err != nil || n != 0 {
+				t.Errorf("PruneCommands(%v) = %d, %v; want 0", cutoff, n, err)
+			}
+		}
+		if _, ok, err := cs.Breakpoints(ctx(), "rt_orphan_clear"); err != nil || ok {
+			t.Errorf("a stale orphan empty set = %v, %v; want gone", ok, err)
+		}
+		if got, ok, err := cs.Breakpoints(ctx(), "rt_orphan_bp"); err != nil || !ok || len(got) != 1 {
+			t.Errorf("an orphan non-empty set = %v, %v, %v; want [refund] kept", got, ok, err)
+		}
+		wantIDs(t, cs, obsdb.CommandQuery{}, "q2", "a1", "q1")
+		if got, err := cs.Runtimes(ctx()); err != nil || len(got) != 3 {
+			t.Errorf("Runtimes after the orphan prune = %d, %v; want 3", len(got), err)
+		}
+
+		// A backlog past obsdb.SweepBatch goes whole, in passes: 550
+		// aged terminal rows, 547 fresh ones and 3 live ones under keep
+		// 40 — the age rule takes the 550, the keep rule the 510 oldest
+		// fresh ones, the live rows stay.
+		// The rows go in from 16 writers: on ClickHouse each insert
+		// waits for its async-insert flush, a minute one at a time.
+		big := commandStore(t, open(t))
+		var live []string
+		var rows []obsdb.StoredCommand
+		for i := range 1100 {
+			c := obsdb.StoredCommand{ID: fmt.Sprintf("b%04d", i), RuntimeID: "rt_big", State: obsdb.CommandFinished,
+				Created: cmdAt(time.Duration(i) * time.Second), Updated: cmdAt(time.Duration(i) * time.Second)}
+			switch {
+			case i < 550:
+				c.Created, c.Updated = cmdAt(old+time.Duration(i)*time.Second), cmdAt(old+time.Duration(i)*time.Second)
+			case i%200 == 1 && len(live) < 3:
+				c.State = obsdb.CommandQueued
+				c.Created, c.Updated = cmdAt(old), cmdAt(old)
+				live = append(live, c.ID)
+			}
+			rows = append(rows, c)
+		}
+		var wg sync.WaitGroup
+		next := make(chan obsdb.StoredCommand)
+		for range 16 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				for c := range next {
+					if err := big.PutCommand(ctx(), c); err != nil {
+						t.Errorf("PutCommand(%s): %v", c.ID, err)
+					}
+				}
+			}()
+		}
+		for _, c := range rows {
+			next <- c
+		}
+		close(next)
+		wg.Wait()
+		if t.Failed() {
+			t.FailNow()
+		}
+		n, err = big.PruneCommands(ctx(), before, 40)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != 1060 {
+			t.Errorf("a backlog prune deleted %d, want 1060", n)
+		}
+		rest := mustCommands(t, big, obsdb.CommandQuery{})
+		if len(rest) != 40 {
+			t.Errorf("after a backlog prune %d rows remain, want 40", len(rest))
+		}
+		wantIDs(t, big, obsdb.CommandQuery{States: []string{obsdb.CommandQueued}}, live[2], live[1], live[0])
+	}
+}
+
+// CommandsPruneRace holds obsdb.CommandStore.PruneCommands to its race
+// rule: a Put that lands after a prune rule chose its rows and before
+// it deleted them survives the prune with its own values. between
+// arranges for fn to run inside PruneCommands at that point, once per
+// rule — named "age", "keep", "routes", "runtimes" (fn ignores any
+// other name) — and returns what removes the arrangement. A backend
+// whose prune holds its writes off for the whole of each rule has no
+// such point: its between calls fn for each of the four names before
+// returning, and the Puts then precede the prune, which must keep them
+// too. It skips when the backend is not a CommandStore.
+func CommandsPruneRace(t *testing.T, db obsdb.DB, between func(fn func(rule string)) (remove func())) {
+	cs := commandStore(t, db)
+	now := time.Now().UTC()
+	before := now.Add(-time.Hour)
+	ago := func(d time.Duration) time.Time { return now.Add(-d) }
+	// c_age is aged out; c_keep is the oldest terminal under keep 2;
+	// c_new is the next one. run_x and rt_x are stale.
+	for _, c := range []obsdb.StoredCommand{
+		{ID: "c_keep", RuntimeID: "rt_y", State: obsdb.CommandFinished, Created: ago(5 * time.Hour), Updated: ago(time.Minute)},
+		{ID: "c_new", RuntimeID: "rt_y", State: obsdb.CommandFinished, Created: ago(4 * time.Hour), Updated: ago(time.Minute)},
+		{ID: "c_age", RuntimeID: "rt_y", State: obsdb.CommandFinished, Created: ago(3 * time.Hour), Updated: ago(2 * time.Hour)},
+	} {
+		put(t, cs, c)
+	}
+	if err := cs.PutRoute(ctx(), obsdb.RunRoute{RunID: "run_x", RuntimeID: "rt_x", Seen: ago(2 * time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cs.PutRuntime(ctx(), obsdb.StoredRuntime{ID: "rt_x", Registered: ago(3 * time.Hour), LastSeen: ago(2 * time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
+	// What lands between: c_age written again (a late ack), c_keep
+	// accepted again, run_x named by a fresh ack, rt_x re-registered.
+	ageAgain := obsdb.StoredCommand{ID: "c_age", RuntimeID: "rt_y", State: obsdb.CommandFinished, Status: "succeeded",
+		Created: ago(3 * time.Hour), Updated: now}
+	keepAgain := obsdb.StoredCommand{ID: "c_keep", RuntimeID: "rt_y", State: obsdb.CommandAccepted,
+		Created: ago(5 * time.Hour), Updated: now, AcceptedAt: now}
+	route := obsdb.RunRoute{RunID: "run_x", RuntimeID: "rt_x", Seen: now}
+	rt := obsdb.StoredRuntime{ID: "rt_x", Pid: 2, Registered: now, LastSeen: now}
+	remove := between(func(rule string) {
+		var err error
+		switch rule {
+		case "age":
+			err = cs.PutCommand(ctx(), ageAgain)
+		case "keep":
+			err = cs.PutCommand(ctx(), keepAgain)
+		case "routes":
+			err = cs.PutRoute(ctx(), route)
+		case "runtimes":
+			err = cs.PutRuntime(ctx(), rt)
+		}
+		if err != nil {
+			t.Errorf("the put between (%s): %v", rule, err)
+		}
+	})
+	_, err := cs.PruneCommands(ctx(), before, 2)
+	remove()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []obsdb.StoredCommand{ageAgain, keepAgain} {
+		got := mustCommands(t, cs, obsdb.CommandQuery{ID: want.ID})
+		if len(got) != 1 {
+			t.Errorf("%s written between the select and the delete: %d rows, want 1 (it survives)", want.ID, len(got))
+			continue
+		}
+		if err := sameCommand(got[0], want); err != nil {
+			t.Errorf("written between: %v", err)
+		}
+	}
+	if got, ok, err := cs.Route(ctx(), "run_x"); err != nil || !ok || !sameRoute(got, route) {
+		t.Errorf("route written between = %+v, %v, %v; want %+v (it survives)", got, ok, err, route)
+	}
+	if got, err := cs.Runtimes(ctx()); err != nil || len(got) != 1 || !sameRuntime(got[0], rt) {
+		t.Errorf("runtimes after a re-registration between = %+v, %v; want [%+v] (it survives)", got, err, rt)
 	}
 }
 

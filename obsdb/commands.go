@@ -34,15 +34,18 @@ import (
 type CommandStore interface {
 	// PutCommand writes c, replacing any row under c.ID whole (an
 	// upsert: the caller writes the row it holds). A zero Created or
-	// Updated is stamped with the current time. ErrInvalidCommand for
-	// an empty ID or a State outside the five.
+	// Updated is stamped with the current time — on every write, so
+	// the caller carries the Created it read back into each upsert; a
+	// zero one would move the row to the front of the newest-first
+	// order. ErrInvalidCommand for an empty ID or a State outside the
+	// five.
 	PutCommand(ctx context.Context, c StoredCommand) error
 	// Commands answers the rows q selects, newest Created first (ties
 	// by ID, descending). An empty query answers every row.
 	Commands(ctx context.Context, q CommandQuery) ([]StoredCommand, error)
 	// PutRoute writes r, replacing any route of r.RunID. ErrInvalidCommand
 	// for an empty RunID or RuntimeID. A zero Seen is stamped with the
-	// current time.
+	// current time on every write.
 	PutRoute(ctx context.Context, r RunRoute) error
 	// Route answers the route of runID; false when none is stored.
 	Route(ctx context.Context, runID string) (RunRoute, bool, error)
@@ -55,7 +58,8 @@ type CommandStore interface {
 	// empty set, which a registering runtime's own set must not replace.
 	Breakpoints(ctx context.Context, runtimeID string) ([]string, bool, error)
 	// PutRuntime writes r, replacing any row under r.ID whole. Zero
-	// Registered or LastSeen is stamped with the current time.
+	// Registered or LastSeen is stamped with the current time on every
+	// write, so the caller carries Registered into each upsert.
 	// ErrInvalidCommand for an empty ID.
 	PutRuntime(ctx context.Context, r StoredRuntime) error
 	// Runtimes answers every stored runtime, most recently seen first
@@ -75,7 +79,18 @@ type CommandStore interface {
 	//     accepted command names its run;
 	//   - a runtime goes when its LastSeen is before before, no queued
 	//     or accepted command is addressed to it and its breakpoint set
-	//     is absent or empty (that set goes with it).
+	//     is absent or empty (that set goes with it);
+	//   - an empty breakpoint set no runtime row names goes when it was
+	//     last written before before; a non-empty one stays, as a
+	//     runtime holding one does.
+	//
+	// The terminal commands go in bounded passes (SweepBatch rows on
+	// SQLite, each its own transaction, ctx checked between them); on
+	// an error the passes before it stay deleted and are counted. On
+	// ClickHouse the prune is not atomic with concurrent Put* calls —
+	// a Put racing it keeps its own version, but each rule decides
+	// from what it read — so the caller serialises PruneCommands with
+	// its own writes.
 	PruneCommands(ctx context.Context, before time.Time, keep int) (int, error)
 }
 
@@ -147,7 +162,7 @@ type CommandQuery struct {
 	ID        string
 	RuntimeID string
 	RunID     string
-	States    []string // any of these states
+	States    []string // any of these states; nil and empty both mean no filter
 	Limit     int
 }
 

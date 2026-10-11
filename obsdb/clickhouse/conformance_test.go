@@ -50,6 +50,16 @@ func TestCommandsRestart(t *testing.T) {
 	})
 }
 
+// A Put landing between a prune rule's select and its delete survives
+// the prune: the delete names the versions the select saw.
+func TestCommandsPruneRace(t *testing.T) {
+	if os.Getenv("WEFT_CLICKHOUSE_DSN") == "" {
+		t.Skip("WEFT_CLICKHOUSE_DSN not set: the command store prune race needs a clickhouse server (README has the one-line container recipe)")
+	}
+	db, _ := openFresh(t)
+	obsdbtest.CommandsPruneRace(t, db, clickhouse.SetPruneHook)
+}
+
 // openFresh opens the backend on a brand-new database derived from
 // WEFT_CLICKHOUSE_DSN, dropping it when the test ends. It returns the
 // backend and the DSN of the fresh database (raw-connection tests use

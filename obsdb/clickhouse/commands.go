@@ -284,8 +284,19 @@ func (d *DB) Runtimes(ctx context.Context) (_ []obsdb.StoredRuntime, err error) 
 	return out, rows.Err()
 }
 
-// PruneCommands applies the store's retention: each rule selects the
-// ids over the FINAL rows, then deletes every version of them.
+// PruneCommands applies the store's retention. Each rule selects its
+// keys over the FINAL rows and, in the same query, every stored version
+// of them (key, InsertTime); the DELETE then names exactly those
+// versions. A Put landing between the select and the DELETE writes a
+// version the select never saw, so its row survives with the newest
+// write — the runtime that re-registered, the route a live run's ack
+// just named. The rule's predicate is not what the DELETE filters by:
+// a lightweight DELETE filters per version, so a predicate would leave
+// an older version of a pruned row standing (a finished command's
+// queued version) for FINAL to read back. The prune is still not one
+// transaction (obsdb.CommandStore.PruneCommands): a version of a row
+// the select saw that commits with the same nanosecond InsertTime is
+// not told apart.
 func (d *DB) PruneCommands(ctx context.Context, before time.Time, keep int) (_ int, err error) {
 	if err := d.checkOpen(); err != nil {
 		return 0, err
@@ -293,61 +304,141 @@ func (d *DB) PruneCommands(ctx context.Context, before time.Time, keep int) (_ i
 	defer d.closedErr(&err)
 	ctx = ch.Context(ctx, ch.WithSettings(ch.Settings{"mutations_sync": 2}))
 	cut := before.UnixNano()
-	del := func(table, col string, ids []string) error {
-		return inChunks(dedup(ids), func(ph string, args []any) error {
-			return d.conn.Exec(ctx, `DELETE FROM `+table+` WHERE `+col+` IN (`+ph+`)`, args...)
-		})
+	// rule selects the versions of the keys sel answers, runs the test
+	// hook, and deletes exactly those versions; it answers how many
+	// keys it deleted.
+	rule := func(name, table, key, sel string, args ...any) (int, error) {
+		vs, err := d.versions(ctx, table, key, sel, args...)
+		if err != nil {
+			return 0, err
+		}
+		if pruneHook != nil {
+			pruneHook(name)
+		}
+		return vs.keys(), d.deleteVersions(ctx, table, key, vs)
 	}
-	aged, err := d.queryIDs(ctx, `SELECT Id FROM (SELECT Id, State, UpdatedNs FROM commands FINAL)
+	n, err := rule("age", "commands", "Id", `SELECT Id FROM (SELECT Id, State, UpdatedNs FROM commands FINAL)
 		WHERE State NOT IN `+liveStates+` AND UpdatedNs < ?`, cut)
 	if err != nil {
 		return 0, err
 	}
-	if err := del("commands", "Id", aged); err != nil {
-		return 0, err
-	}
-	n := len(aged)
 	if keep > 0 {
 		var total uint64
 		if err := d.conn.QueryRow(ctx, `SELECT count() FROM commands FINAL`).Scan(&total); err != nil {
-			return 0, err
+			return n, err
 		}
 		if over := int64(total) - int64(keep); over > 0 {
-			extra, err := d.queryIDs(ctx, fmt.Sprintf(`SELECT Id FROM (SELECT Id, State, CreatedNs FROM commands FINAL)
+			m, err := rule("keep", "commands", "Id", fmt.Sprintf(`SELECT Id FROM (SELECT Id, State, CreatedNs FROM commands FINAL)
 				WHERE State NOT IN `+liveStates+` ORDER BY CreatedNs, Id LIMIT %d`, over))
+			n += m
 			if err != nil {
-				return 0, err
+				return n, err
 			}
-			if err := del("commands", "Id", extra); err != nil {
-				return 0, err
-			}
-			n += len(extra)
 		}
 	}
-	routes, err := d.queryIDs(ctx, `SELECT RunId FROM (SELECT RunId, CommandId, SeenNs FROM run_routes FINAL)
+	if _, err := rule("routes", "run_routes", "RunId", `SELECT RunId FROM (SELECT RunId, CommandId, SeenNs FROM run_routes FINAL)
 		WHERE (CommandId != '' AND CommandId NOT IN (SELECT Id FROM commands FINAL))
 		   OR (SeenNs < ? AND RunId NOT IN (SELECT RunId FROM (SELECT RunId, State FROM commands FINAL)
-		        WHERE State IN `+liveStates+` AND RunId != ''))`, cut)
-	if err != nil {
-		return 0, err
-	}
-	if err := del("run_routes", "RunId", routes); err != nil {
-		return 0, err
+		        WHERE State IN `+liveStates+` AND RunId != ''))`, cut); err != nil {
+		return n, err
 	}
 	// A stale runtime goes unless it holds a non-empty breakpoint set;
-	// an empty set goes with it.
-	stale, err := d.queryIDs(ctx, `SELECT Id FROM (SELECT Id, LastSeenNs FROM runtimes FINAL)
+	// an empty set goes with it. Both tables' versions are chosen before
+	// either is deleted from.
+	stale := `SELECT Id FROM (SELECT Id, LastSeenNs FROM runtimes FINAL)
 		WHERE LastSeenNs < ? AND Id NOT IN (SELECT RuntimeId FROM (SELECT RuntimeId, State FROM commands FINAL)
-		  WHERE State IN `+liveStates+`)
-		AND Id NOT IN (SELECT RuntimeId FROM (SELECT RuntimeId, Tools FROM breakpoints FINAL) WHERE Tools != '[]')`, cut)
+		  WHERE State IN ` + liveStates + `)
+		AND Id NOT IN (SELECT RuntimeId FROM (SELECT RuntimeId, Tools FROM breakpoints FINAL) WHERE Tools != '[]')`
+	rts, err := d.versions(ctx, "runtimes", "Id", stale, cut)
 	if err != nil {
-		return 0, err
+		return n, err
 	}
-	if err := del("breakpoints", "RuntimeId", stale); err != nil {
-		return 0, err
+	var bps keyVersions
+	if err := inChunks(rts.ids(), func(ph string, args []any) error {
+		vs, err := d.versions(ctx, "breakpoints", "RuntimeId", ph, args...)
+		bps = append(bps, vs...)
+		return err
+	}); err != nil {
+		return n, err
 	}
-	if err := del("runtimes", "Id", stale); err != nil {
-		return 0, err
+	if pruneHook != nil {
+		pruneHook("runtimes")
+	}
+	if err := d.deleteVersions(ctx, "breakpoints", "RuntimeId", bps); err != nil {
+		return n, err
+	}
+	if err := d.deleteVersions(ctx, "runtimes", "Id", rts); err != nil {
+		return n, err
+	}
+	// An empty set no runtime row names (the runtime pruned before it,
+	// or never stored) goes once it is stale; a non-empty one stays, as
+	// a runtime holding one does.
+	if _, err := rule("breakpoints", "breakpoints", "RuntimeId", `SELECT RuntimeId FROM
+		(SELECT RuntimeId, Tools, UpdatedNs FROM breakpoints FINAL)
+		WHERE Tools = '[]' AND UpdatedNs < ? AND RuntimeId NOT IN (SELECT Id FROM runtimes FINAL)`, cut); err != nil {
+		return n, err
 	}
 	return n, nil
+}
+
+// pruneHook, when set (tests), runs inside PruneCommands after a rule
+// chose its versions and before it deletes them, named by the rule:
+// age, keep, routes, runtimes, breakpoints.
+var pruneHook func(rule string)
+
+// keyVersion is one stored version of a row: its key and its
+// InsertTime in nanoseconds.
+type keyVersion struct {
+	key string
+	ns  int64
+}
+
+type keyVersions []keyVersion
+
+// ids answers the distinct keys, in order.
+func (vs keyVersions) ids() []string {
+	out := make([]string, 0, len(vs))
+	for _, v := range vs {
+		out = append(out, v.key)
+	}
+	return dedup(out)
+}
+
+func (vs keyVersions) keys() int { return len(vs.ids()) }
+
+// versions answers every stored version of table's rows whose key is
+// in sel (a subquery, or a placeholder list with its args).
+func (d *DB) versions(ctx context.Context, table, key, sel string, args ...any) (keyVersions, error) {
+	rows, err := d.conn.Query(ctx, `SELECT `+key+`, toUnixTimestamp64Nano(InsertTime) FROM `+table+`
+		WHERE `+key+` IN (`+sel+`)`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	var out keyVersions
+	for rows.Next() {
+		var v keyVersion
+		if err := rows.Scan(&v.key, &v.ns); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+// deleteVersions deletes exactly the versions vs names, deleteChunk/2
+// pairs per statement.
+func (d *DB) deleteVersions(ctx context.Context, table, key string, vs keyVersions) error {
+	for start := 0; start < len(vs); start += deleteChunk / 2 {
+		chunk := vs[start:min(start+deleteChunk/2, len(vs))]
+		args := make([]any, 0, 2*len(chunk))
+		for _, v := range chunk {
+			args = append(args, v.key, v.ns)
+		}
+		ph := strings.TrimSuffix(strings.Repeat("(?, ?), ", len(chunk)), ", ")
+		if err := d.conn.Exec(ctx, `DELETE FROM `+table+` WHERE (`+key+`, toUnixTimestamp64Nano(InsertTime)) IN (`+ph+`)`, args...); err != nil {
+			return err
+		}
+	}
+	return nil
 }

@@ -49,3 +49,19 @@ func TestCommandsRestartFile(t *testing.T) {
 		return open(), open
 	})
 }
+
+// PruneCommands' rules each run in one writer transaction a Put waits
+// on: the Puts that would race it land before it, and it keeps them.
+func TestCommandsPruneRace(t *testing.T) {
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "race.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	obsdbtest.CommandsPruneRace(t, db, func(fn func(rule string)) func() {
+		for _, rule := range []string{"age", "keep", "routes", "runtimes"} {
+			fn(rule)
+		}
+		return func() {}
+	})
+}

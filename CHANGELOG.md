@@ -6,6 +6,30 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
+## Unreleased
+
+### Fixed
+
+- `thread/pool`: two pumps racing over one restarted child — `Decide`'s own
+  and the mirror watch's its decision fires — no longer report `ErrNoAgent`
+  for a child the other had just resumed and settled (its settlement drops the
+  `Register`ed agent between the loser's ledger read and its agent lookup); a
+  settlement since the read sends the lookup back to the ledger, which reads
+  it settled, and a settled delegation is never rebuilt as a live bridge (CI:
+  TestRegisterResumesParkedSubmitChild, TestDecideJoinsErrors, "no agent for
+  child session").
+- `thread/pool`: a `Register` landing after its session's delegation settled
+  (a fast Submit child ending before the call) is dropped the next time the
+  pool reads the settled receipt (`Wait`, `Decide`, `Recover`) instead of
+  staying for the life of the pool (CI: TestRegistersPruned,
+  "sessionAgents=1").
+- `obsdb/obsdbtest`: the `SweepBatched` conformance case no longer fails when
+  writing and sweeping its 1,075-run backlog takes longer than
+  `obsdb.InterruptedAfter` (a loaded `-race` runner): its cutoff sits between
+  the 2 h-old backlog and the running run, which stays whether it reads
+  running or interrupted; `Sweep`'s future-cutoff passes heartbeat their
+  running runs first.
+
 ## 0.14.1 — 2026-10-11
 
 A patch over 0.14.0 with the two fixes that followed its tag: the panel

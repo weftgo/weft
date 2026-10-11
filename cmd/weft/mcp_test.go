@@ -292,7 +292,8 @@ func TestMCPStdio(t *testing.T) {
 	_ = json.Unmarshal(ex.ToolCalls, &calls)
 	if ex.Status != "failed" || !strings.Contains(ex.Error, "maximum number of steps") || ex.StepRole != "last" || ex.Step == nil || *ex.Step != 0 ||
 		len(calls) != 1 || calls[0].Name != "lookup_order" || calls[0].Result.Content != "order 42 shipped" ||
-		!strings.Contains(line, "failed after step 0 (its last recorded step)") || !strings.Contains(line, "lookup_order ok") {
+		!strings.Contains(line, "failed before step 1 started (step 0, its last recorded step, finished): weft: run failed at step 1") ||
+		ex.StepNote != "" || strings.Contains(line, "in-flight") || !strings.Contains(line, "lookup_order ok") {
 		t.Errorf("explain_failure r_max = %q\n%+v\ncalls %+v", line, ex, calls)
 	}
 	line, ex = explain("r_park")
@@ -306,6 +307,7 @@ func TestMCPStdio(t *testing.T) {
 	}
 	line, ex = explain("r_ok")
 	if ex.Status != "succeeded" || ex.Step == nil || *ex.Step != 1 || ex.LastAssistantText == nil ||
+		ex.StepNote != "" || strings.Contains(line, "in-flight") ||
 		*ex.LastAssistantText != "Order 42 shipped." || !strings.Contains(line, "last step 1") {
 		t.Errorf("explain_failure r_ok = %q\n%+v", line, ex)
 	}
@@ -698,7 +700,7 @@ func TestMCPExplainInFlightHidden(t *testing.T) {
 	for _, c := range []struct {
 		status int
 		word   string
-	}{{http.StatusForbidden, "hidden"}, {http.StatusBadGateway, "unavailable"}} {
+	}{{http.StatusForbidden, "hidden (403)"}, {http.StatusBadGateway, "unavailable (502)"}} {
 		m := &mcpReader{s: fakeStudio{
 			"/api/runs/r":            {200, `{"id":"r","agent":"a","status":"failed","err":"boom","steps":1,"holes":[]}`},
 			"/api/runs/r/steps/1":    {c.status, `{"error":{"code":"x","message":"y"},"badge":"hidden"}`},
@@ -710,9 +712,68 @@ func TestMCPExplainInFlightHidden(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := texts(t, res)
-		want := fmt.Sprintf("the in-flight step 1 is %s (%d); showing the last recorded step", c.word, c.status)
+		want := fmt.Sprintf("the in-flight step 1 is %s; showing the last recorded step", c.word)
 		if !strings.Contains(got[0], want) || !strings.Contains(got[1], want) {
 			t.Errorf("%d: %q, want %q in the line and the step_note", c.status, got, want)
 		}
+	}
+}
+
+// failingStudio is fakeStudio with a transport failure (status 0) on
+// the listed paths.
+type failingStudio struct {
+	fakeStudio
+	down map[string]bool
+}
+
+func (f failingStudio) get(ctx context.Context, path string, q url.Values) (int, []byte, error) {
+	if f.down[path] {
+		return 0, nil, errors.New("studio not reachable")
+	}
+	return f.fakeStudio.get(ctx, path, q)
+}
+
+// TestMCPExplainBothStepsFail pins the note when the fallback fails
+// too: the in-flight note kept, the fallback's failure appended, and a
+// transport failure read "unreachable", never "(0)".
+func TestMCPExplainBothStepsFail(t *testing.T) {
+	m := &mcpReader{s: failingStudio{fakeStudio{
+		"/api/runs/r":            {200, `{"id":"r","agent":"a","status":"failed","err":"boom","steps":1,"holes":[]}`},
+		"/api/runs/r/steps/1":    {http.StatusForbidden, `{"error":{"code":"forbidden","message":"no"}}`},
+		"/api/runs/r/transcript": {200, `{"batches":[]}`},
+	}, map[string]bool{"/api/runs/r/steps/0": true}}}
+	res, _, err := m.explainFailure(context.Background(), nil, mcpRunIn{ID: "r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := texts(t, res)
+	want := "the in-flight step 1 is hidden (403); showing the last recorded step; step 0 is unreachable"
+	if !strings.Contains(got[0], want) || strings.Contains(got[0], "(0)") {
+		t.Errorf("%q, want %q", got[0], want)
+	}
+}
+
+// TestMCPSourceOneClient guards the wall by source: the read-only
+// transport covers the one client runMCP builds, so mcp.go may build
+// no other — no default client, no package-level request helper, no
+// second http.Client, exactly one newClient call.
+func TestMCPSourceOneClient(t *testing.T) {
+	b, err := os.ReadFile("mcp.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(b)
+	for _, banned := range []string{"http.DefaultClient", "http.Get(", "http.Post(", "http.PostForm(", "http.Head(", "&http.Client", "http.Client{", "http.DefaultTransport.RoundTrip", "net.Dial"} {
+		if strings.Contains(src, banned) {
+			t.Errorf("mcp.go uses %s: every request goes through the one walled client", banned)
+		}
+	}
+	if n := strings.Count(src, "newClient("); n != 1 {
+		t.Errorf("mcp.go calls newClient %d times, want the one in runMCP", n)
+	}
+	i := strings.Index(src, "func runMCP(")
+	j := strings.Index(src[i+1:], "\nfunc ")
+	if i < 0 || j < 0 || !strings.Contains(src[i:i+1+j], "newClient(") {
+		t.Error("the one newClient call is not in runMCP")
 	}
 }

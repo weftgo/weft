@@ -897,15 +897,22 @@ func (m *mcpReader) explainFailure(ctx context.Context, _ *sdk.CallToolRequest, 
 			return false
 		}
 		if err != nil {
-			what := "unavailable"
-			if status == http.StatusForbidden {
-				what = "hidden"
+			what := fmt.Sprintf("unavailable (%d)", status)
+			switch status {
+			case 0: // the request itself failed: no answer to name
+				what = "unreachable"
+			case http.StatusForbidden:
+				what = "hidden (403)"
 			}
+			note := fmt.Sprintf("step %d is %s", n, what)
 			if role == "in_flight" {
-				ex.StepNote = fmt.Sprintf("the in-flight step %d is %s (%d); showing the last recorded step", n, what, status)
-			} else {
-				ex.StepNote = fmt.Sprintf("step %d is %s (%d)", n, what, status)
+				note = fmt.Sprintf("the in-flight step %d is %s; showing the last recorded step", n, what)
 			}
+			// A failing fallback adds to the in-flight note, never replaces it.
+			if ex.StepNote != "" {
+				note = ex.StepNote + "; " + note
+			}
+			ex.StepNote = note
 			ex.Next = append(ex.Next, fmt.Sprintf("step %d not readable: %v", n, err))
 			return false
 		}
@@ -963,7 +970,7 @@ func explainLine(ex explanation, sh stepHead) string {
 		case ex.StepRole == "in_flight" || ex.StepStatus == "error":
 			s += fmt.Sprintf(" at step %d", *ex.Step)
 		case ex.Status == "failed" || ex.Status == "interrupted":
-			s += fmt.Sprintf(" after step %d (its last recorded step)", *ex.Step)
+			s += fmt.Sprintf(" before step %d started (step %d, its last recorded step, finished)", *ex.Step+1, *ex.Step)
 		default:
 			s += fmt.Sprintf(", last step %d", *ex.Step)
 		}

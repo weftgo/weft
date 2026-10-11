@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -58,6 +60,63 @@ func TestCommandsPruneRace(t *testing.T) {
 	}
 	db, _ := openFresh(t)
 	obsdbtest.CommandsPruneRace(t, db, clickhouse.SetPruneHook)
+}
+
+// A prune cut short counts what it deleted: cancelled after its first
+// DELETE statement (deleteChunk/2 versions, one per command here), the
+// age rule answers that statement's commands with the error, and the
+// rest stay.
+func TestCommandsPruneCountOnError(t *testing.T) {
+	if os.Getenv("WEFT_CLICKHOUSE_DSN") == "" {
+		t.Skip("WEFT_CLICKHOUSE_DSN not set: the command store prune count needs a clickhouse server (README has the one-line container recipe)")
+	}
+	db, _ := openFresh(t)
+	cs := db.(obsdb.CommandStore)
+	old := time.Now().Add(-48 * time.Hour)
+	var wg sync.WaitGroup
+	next := make(chan int)
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := range next {
+				at := old.Add(time.Duration(i) * time.Second)
+				if err := cs.PutCommand(context.Background(), obsdb.StoredCommand{ID: fmt.Sprintf("c%03d", i),
+					RuntimeID: "rt", State: obsdb.CommandFinished, Created: at, Updated: at}); err != nil {
+					t.Error(err)
+				}
+			}
+		}()
+	}
+	for i := range 250 {
+		next <- i
+	}
+	close(next)
+	wg.Wait()
+	if t.Failed() {
+		t.FailNow()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	defer clickhouse.SetPruneHook(func(rule string) {
+		if rule == "chunk" {
+			cancel()
+		}
+	})()
+	n, err := cs.PruneCommands(ctx, time.Now().Add(-time.Hour), 0)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("PruneCommands = %d, %v; want context.Canceled after the first statement", n, err)
+	}
+	if n != 200 {
+		t.Errorf("a prune cut short after one statement counted %d, want 200 (the first statement's commands)", n)
+	}
+	rest, err := cs.Commands(context.Background(), obsdb.CommandQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rest) != 50 {
+		t.Errorf("after a prune cut short %d commands remain, want 50", len(rest))
+	}
 }
 
 // openFresh opens the backend on a brand-new database derived from

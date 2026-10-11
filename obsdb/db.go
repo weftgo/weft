@@ -13,6 +13,12 @@ import (
 // default, clickhouse hosted). Implementations must be safe for
 // concurrent use: writers are rare (the local sink's synchronous
 // processors), readers many (Studio).
+//
+// DeleteRun, DeleteSession, Sweep and Vacuum are the run tables' alone.
+// A CommandStore's rows — commands, run routes, breakpoints, runtimes —
+// are Studio's record of what it asked a runtime to do, not run data:
+// deleting a run leaves the commands and the route that name it, and
+// CommandStore.PruneCommands is their only retention.
 type DB interface {
 	// Write stores one batch, idempotent on (run, record kind, pos)
 	// and (trace, span): a retried transport's duplicate is a no-op.
@@ -130,12 +136,6 @@ type DB interface {
 	// the tables deletions mutate, which merges every part — an
 	// operator's command, heavy on a large database.
 	Vacuum(ctx context.Context) error
-	// DeleteRun, DeleteSession, Sweep and Vacuum are the run tables'
-	// alone. A CommandStore's rows — commands, run routes, breakpoints,
-	// runtimes — are Studio's record of what it asked a runtime to do,
-	// not run data: deleting a run leaves the commands and the route
-	// that name it, and CommandStore.PruneCommands is their only
-	// retention.
 
 	Close() error
 }

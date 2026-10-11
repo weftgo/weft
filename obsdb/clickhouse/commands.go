@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -315,12 +316,12 @@ func (d *DB) PruneCommands(ctx context.Context, before time.Time, keep int) (_ i
 		if pruneHook != nil {
 			pruneHook(name)
 		}
-		return vs.keys(), d.deleteVersions(ctx, table, key, vs)
+		return d.deleteVersions(ctx, table, key, vs)
 	}
 	n, err := rule("age", "commands", "Id", `SELECT Id FROM (SELECT Id, State, UpdatedNs FROM commands FINAL)
 		WHERE State NOT IN `+liveStates+` AND UpdatedNs < ?`, cut)
 	if err != nil {
-		return 0, err
+		return n, err
 	}
 	if keep > 0 {
 		var total uint64
@@ -364,10 +365,10 @@ func (d *DB) PruneCommands(ctx context.Context, before time.Time, keep int) (_ i
 	if pruneHook != nil {
 		pruneHook("runtimes")
 	}
-	if err := d.deleteVersions(ctx, "breakpoints", "RuntimeId", bps); err != nil {
+	if _, err := d.deleteVersions(ctx, "breakpoints", "RuntimeId", bps); err != nil {
 		return n, err
 	}
-	if err := d.deleteVersions(ctx, "runtimes", "Id", rts); err != nil {
+	if _, err := d.deleteVersions(ctx, "runtimes", "Id", rts); err != nil {
 		return n, err
 	}
 	// An empty set no runtime row names (the runtime pruned before it,
@@ -383,7 +384,8 @@ func (d *DB) PruneCommands(ctx context.Context, before time.Time, keep int) (_ i
 
 // pruneHook, when set (tests), runs inside PruneCommands after a rule
 // chose its versions and before it deletes them, named by the rule:
-// age, keep, routes, runtimes, breakpoints.
+// age, keep, routes, runtimes, breakpoints; and, named chunk, after
+// each DELETE statement succeeded.
 var pruneHook func(rule string)
 
 // keyVersion is one stored version of a row: its key and its
@@ -403,8 +405,6 @@ func (vs keyVersions) ids() []string {
 	}
 	return dedup(out)
 }
-
-func (vs keyVersions) keys() int { return len(vs.ids()) }
 
 // versions answers every stored version of table's rows whose key is
 // in sel (a subquery, or a placeholder list with its args).
@@ -427,18 +427,35 @@ func (d *DB) versions(ctx context.Context, table, key, sel string, args ...any) 
 }
 
 // deleteVersions deletes exactly the versions vs names, deleteChunk/2
-// pairs per statement.
-func (d *DB) deleteVersions(ctx context.Context, table, key string, vs keyVersions) error {
+// pairs per statement, ctx checked between statements, and answers how
+// many keys it deleted: a key counts once the statement holding its
+// last version succeeded (vs is ordered by key, so a key's versions are
+// adjacent), so on an error the count is the keys already gone.
+func (d *DB) deleteVersions(ctx context.Context, table, key string, vs keyVersions) (deleted int, err error) {
+	vs = slices.Clone(vs)
+	slices.SortStableFunc(vs, func(a, b keyVersion) int { return strings.Compare(a.key, b.key) })
 	for start := 0; start < len(vs); start += deleteChunk / 2 {
-		chunk := vs[start:min(start+deleteChunk/2, len(vs))]
+		if err := ctx.Err(); err != nil {
+			return deleted, err
+		}
+		end := min(start+deleteChunk/2, len(vs))
+		chunk := vs[start:end]
 		args := make([]any, 0, 2*len(chunk))
 		for _, v := range chunk {
 			args = append(args, v.key, v.ns)
 		}
 		ph := strings.TrimSuffix(strings.Repeat("(?, ?), ", len(chunk)), ", ")
 		if err := d.conn.Exec(ctx, `DELETE FROM `+table+` WHERE (`+key+`, toUnixTimestamp64Nano(InsertTime)) IN (`+ph+`)`, args...); err != nil {
-			return err
+			return deleted, err
+		}
+		for i := start; i < end; i++ {
+			if i == len(vs)-1 || vs[i+1].key != vs[i].key {
+				deleted++
+			}
+		}
+		if pruneHook != nil {
+			pruneHook("chunk")
 		}
 	}
-	return nil
+	return deleted, nil
 }

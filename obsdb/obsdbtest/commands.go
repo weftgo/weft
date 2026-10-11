@@ -418,9 +418,10 @@ func commandsPrune(open func(t *testing.T) obsdb.DB) func(t *testing.T) {
 		}
 
 		// A backlog past obsdb.SweepBatch goes whole, in passes: 550
-		// aged terminal rows, 547 fresh ones and 3 live ones under keep
-		// 40 — the age rule takes the 550, the keep rule the 510 oldest
-		// fresh ones, the live rows stay.
+		// aged terminal rows, 547 fresh ones and 3 live ones. Under keep
+		// 0 the age rule alone takes the 550 (no keep rule to finish
+		// what a short age pass left); then under keep 40 the keep rule
+		// takes the 510 oldest fresh ones; the live rows stay.
 		// The rows go in from 16 writers: on ClickHouse each insert
 		// waits for its async-insert flush, a minute one at a time.
 		big := commandStore(t, open(t))
@@ -460,12 +461,23 @@ func commandsPrune(open func(t *testing.T) obsdb.DB) func(t *testing.T) {
 		if t.Failed() {
 			t.FailNow()
 		}
+		n, err = big.PruneCommands(ctx(), before, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n != 550 {
+			t.Errorf("an aged backlog prune (keep 0) deleted %d, want 550", n)
+		}
+		if rest := mustCommands(t, big, obsdb.CommandQuery{}); len(rest) != 550 {
+			t.Errorf("after an aged backlog prune %d rows remain, want 550 (547 fresh, 3 live)", len(rest))
+		}
+		wantIDs(t, big, obsdb.CommandQuery{States: []string{obsdb.CommandQueued}}, live[2], live[1], live[0])
 		n, err = big.PruneCommands(ctx(), before, 40)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if n != 1060 {
-			t.Errorf("a backlog prune deleted %d, want 1060", n)
+		if n != 510 {
+			t.Errorf("a keep backlog prune deleted %d, want 510", n)
 		}
 		rest := mustCommands(t, big, obsdb.CommandQuery{})
 		if len(rest) != 40 {

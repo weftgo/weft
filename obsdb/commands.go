@@ -90,7 +90,9 @@ type CommandStore interface {
 	// ClickHouse the prune is not atomic with concurrent Put* calls —
 	// a Put racing it keeps its own version, but each rule decides
 	// from what it read — so the caller serialises PruneCommands with
-	// its own writes.
+	// its own writes. On ClickHouse the count names the commands a
+	// rule selected; a command a racing Put rewrote is counted though
+	// it stays.
 	PruneCommands(ctx context.Context, before time.Time, keep int) (int, error)
 }
 

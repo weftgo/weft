@@ -892,10 +892,13 @@ func (p *panicOnceStorage) Append(ctx context.Context, session string, entries .
 
 // A steer handed to a run whose turn then dies on the session layer's
 // panic path (the turn's end batch never lands) must still reach a
-// final state and its message must still run: it defers to a
-// follow-up, like every undelivered steer — delivered-to-a-lost-
-// transcript is not a receipt state at all (the review's
-// every-receipt-final-state focus).
+// final state and its message must run exactly once (the review's
+// every-receipt-final-state focus). The step that carried the steered
+// message was written before the turn's end, so the message is on the
+// line already: the steer is delivered, its receipt written on its own
+// — deferring it would put the message on the line a second time. A
+// steer whose message is in no tree defers instead
+// (TestSteerFlushFailureStillSettles' kin; settleSteersLocked).
 func TestSteerSettlesWhenTurnEndPanics(t *testing.T) {
 	ctx := context.Background()
 	st := &panicOnceStorage{Storage: thread.Memory(), armed: true}
@@ -930,19 +933,39 @@ func TestSteerSettlesWhenTurnEndPanics(t *testing.T) {
 	if _, err := t1.Wait(); err == nil || !strings.Contains(err.Error(), "panicked") {
 		t.Fatalf("the panicked turn's Wait = %v, want the containment error", err)
 	}
-	// The steer defers (a queued receipt alone is not a final state)
-	// and its follow-up runs the message.
+	// A queued receipt alone is not a final state.
 	waitUntil(t, "the steer of a panicked turn never reached a final receipt state", func() bool {
-		for _, r := range receipts(s) {
-			if r.Status == thread.ReceiptDeferred {
-				return true
-			}
+		return steerSettledOnce(s)
+	})
+	if err := s.WaitIdle(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := steerCount(s, "steer the doomed turn"); n != 1 {
+		t.Fatalf("the steered message is on the line %d times, want once", n)
+	}
+}
+
+// steerSettledOnce reports whether the session's one steer has a
+// final receipt — delivered or deferred — and exactly one.
+func steerSettledOnce(s *thread.Session) bool {
+	n := 0
+	for _, r := range receipts(s) {
+		if r.Status == thread.ReceiptDelivered || r.Status == thread.ReceiptDeferred {
+			n++
 		}
-		return false
-	})
-	waitUntil(t, "the steer of a panicked turn never ran its message", func() bool {
-		return steerInContext(s, "steer the doomed turn")
-	})
+	}
+	return n == 1
+}
+
+// steerCount counts the user messages with text on the active context.
+func steerCount(s *thread.Session, text string) int {
+	n := 0
+	for _, m := range s.Context() {
+		if m.Role == core.RoleUser && m.Text() == text {
+			n++
+		}
+	}
+	return n
 }
 
 // failTurnEndStorage fails, once, the Append that carries a turn
@@ -965,11 +988,12 @@ func (f *failTurnEndStorage) Append(ctx context.Context, session string, entries
 }
 
 // A steer handed to a run whose turn-end batch the storage refuses
-// must not finish as delivered while its message is in no tree — not
-// in storage (the batch failed) and not in memory (nothing was
-// adopted). It defers and the follow-up re-runs the message: accepted
-// input acknowledged then lost is the exact scar ADR 0011 §1 carries
-// from Codex #40805.
+// must not finish as delivered while its message is in no tree:
+// accepted input acknowledged then lost is the exact scar ADR 0011 §1
+// carries from Codex #40805. Here the step that carried it was written
+// before the turn's end (per-step persistence), so the message is on
+// the line: the steer is delivered, its receipt written on its own,
+// and the message is there once — not re-run by a follow-up.
 func TestSteerRedeliveredWhenTurnEndNotPersisted(t *testing.T) {
 	ctx := context.Background()
 	st := &failTurnEndStorage{Storage: thread.Memory(), fail: true}
@@ -1006,18 +1030,15 @@ func TestSteerRedeliveredWhenTurnEndNotPersisted(t *testing.T) {
 	if res, err := t1.Wait(); !errors.Is(err, thread.ErrNotPersisted) || res == nil || res.Text() != "done" {
 		t.Fatalf("Wait = %v, %v; want the run's result and ErrNotPersisted", res, err)
 	}
-	// The message re-runs: it is in no tree until a follow-up carries it.
 	waitUntil(t, "the steer of an unpersisted turn never reached a final receipt state", func() bool {
-		for _, r := range receipts(s) {
-			if r.Status == thread.ReceiptDeferred {
-				return true
-			}
-		}
-		return false
+		return steerSettledOnce(s)
 	})
-	waitUntil(t, "the steer of an unpersisted turn never re-ran its message", func() bool {
-		return steerInContext(s, "steer the unpersisted turn")
-	})
+	if err := s.WaitIdle(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := steerCount(s, "steer the unpersisted turn"); n != 1 {
+		t.Fatalf("the steered message is on the line %d times, want once", n)
+	}
 }
 
 // flushFailStorage adds the Flusher capability to any storage, failing

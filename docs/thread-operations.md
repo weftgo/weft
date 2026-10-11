@@ -312,7 +312,11 @@ it, so a reopen before the prompt landed restores the steer once, and
 one after restores nothing. A steer the running turn drained
 is in that run's transcript at once, its `delivered` receipt at the
 turn's end: after a crash between the two, `Open` reads the message on
-the line as the delivery and does not restore the steer.
+the line as the delivery and does not restore the steer. The live
+session reads it the same way when the storage refuses the turn's end
+batch: a drained steer whose message is already on the line ends
+delivered, its `delivered` receipt written on its own, not deferred
+into a second copy.
 
 **Steer follow-ups inherit.** A steer that cannot join the running
 turn becomes a follow-up turn under that turn's run options (and the

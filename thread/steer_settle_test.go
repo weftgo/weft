@@ -188,3 +188,79 @@ func TestRefusedSteerDeferralSettlesWithTheFollowUpPrompt(t *testing.T) {
 		}
 	})
 }
+
+// A steer the running turn drained whose turn-end batch the storage
+// refused: the steered message is already on the line (written with
+// its step), so the steer is delivered — not deferred to a follow-up
+// that would put the message on the line a second time. Its delivered
+// receipt is written on its own (the read-side rule covers it when
+// that append fails too), and a reopen agrees.
+func TestDrainedSteerWithRefusedTurnEndIsNotDeferred(t *testing.T) {
+	ctx := context.Background()
+	tool, rel := blockingTool()
+	defer rel.open()
+	started := make(chan struct{})
+	var once sync.Once
+	agent := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "wait"}),
+		wefttest.Say("answered the steer"),
+		wefttest.Say("again"),
+		wefttest.Say("and again"),
+	), tool, core.Tap(func(_ context.Context, ev core.Event) {
+		if _, ok := ev.(core.ToolStart); ok {
+			once.Do(func() { close(started) })
+		}
+	}))
+	st := &faultStorage{Storage: thread.Memory()}
+	var stepped atomic.Bool
+	st.failAppend = func(es []thread.Entry) bool {
+		if hasEntry(es, isSteeredMessage) {
+			stepped.Store(true)
+		}
+		// Every turn-end batch is refused once the steered step landed.
+		return stepped.Load() && hasEntry(es, func(e thread.Entry) bool { _, ok := e.(thread.TurnEntry); return ok })
+	}
+	s, err := thread.Create(ctx, st, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.Send(ctx, core.User("long work"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	steer, err := s.Send(ctx, core.User("steer me"), thread.As(thread.Steer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel.open()
+	_, _ = first.Wait()
+	if err := s.WaitIdle(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !stepped.Load() {
+		t.Fatal("the steer was never drained into a persisted step")
+	}
+	if got := steer.Outcome(); got != thread.TurnDelivered || steer.Next() != nil {
+		t.Errorf("steer = %v, follow-up %v; want delivered with no follow-up", got, steer.Next() != nil)
+	}
+	if live := contextTexts(s); countText(live, "steer me") != 1 {
+		t.Errorf("Context = %v, want the steer once", live)
+	}
+	if q := s.Queue(); len(q) != 0 {
+		t.Errorf("Queue = %+v, want nothing", q)
+	}
+	if !steerSettledOnce(s) {
+		t.Errorf("receipts = %+v, want the steer's delivered receipt once", receipts(s))
+	}
+	st.mu.Lock()
+	st.failAppend = nil
+	st.mu.Unlock()
+	again := reopenWith(t, ctx, st.Storage, s, agent)
+	if q := again.Queue(); len(q) != 0 {
+		t.Errorf("the reopened Queue = %+v, want nothing", q)
+	}
+	if got := contextTexts(again); countText(got, "steer me") != 1 {
+		t.Errorf("the reopened Context = %v, want the steer once", got)
+	}
+}

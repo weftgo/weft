@@ -33,6 +33,10 @@ type queuedSteer struct {
 	aimCtx  context.Context
 	turn    *Turn
 	step    int
+	// runID names the run whose drain took the steer (steerSource): the
+	// delivered receipt a refused turn-end batch lost is written under
+	// it (settleSteersLocked).
+	runID string
 }
 
 // followUp is the pending send a deferred steer becomes: the aimed
@@ -100,9 +104,14 @@ func (s *Session) steerSource(_ context.Context, at core.SteerPoint) []core.Mess
 		return nil
 	}
 	msgs := make([]core.Message, 0, len(s.steerQueue))
+	runID := ""
+	if s.inFlight != nil {
+		runID = s.inFlight.RunID()
+	}
 	for _, q := range s.steerQueue {
 		msgs = append(msgs, q.msg)
 		q.step = at.Step
+		q.runID = runID
 		s.handed = append(s.handed, q)
 	}
 	s.steerQueue = s.steerQueue[:0]
@@ -238,17 +247,57 @@ func (s *Session) settleSteerLocked(q queuedSteer) {
 // whose turn never recorded its end (a panicked session path, a turn
 // batch the storage refused): handed-but-unrecorded is not a final
 // state, and the message re-runs rather than dying with a transcript
-// that is in no tree.
+// that is in no tree — unless the message is in the tree already. The
+// steered message is written with its step (perstep.go), before the
+// turn's end, so a refused turn-end batch can leave it on the line: by
+// the rule Open applies (drainedSteersLocked) that steer was delivered,
+// and deferring it would put the message on the line twice. It ends
+// delivered, and the delivered receipt the refused batch carried is
+// written again on its own — unanswered unless an assistant message
+// follows the steered one on the line. When that append fails too, the
+// message on the line still settles the receipt for a reopen.
 func (s *Session) settleSteersLocked() {
 	for len(s.steerQueue) > 0 {
 		q := s.steerQueue[0]
 		s.steerQueue = s.steerQueue[1:]
 		s.settleSteerLocked(q)
 	}
+	if len(s.handed) == 0 {
+		return
+	}
+	settled := map[string]bool{}
+	for _, e := range s.order {
+		if r, ok := e.(ReceiptEntry); ok && r.Receipt != "" {
+			settled[r.Receipt] = true
+		}
+	}
+	drained := s.drainedSteersLocked(settled)
+	line := s.lineLocked()
 	for len(s.handed) > 0 {
 		q := s.handed[0]
 		s.handed = s.handed[1:]
-		s.settleSteerLocked(q)
+		at, ok := drained[q.receipt]
+		if !ok {
+			s.settleSteerLocked(q)
+			continue
+		}
+		answered := false
+		for _, e := range s.order[at+1:] {
+			if m, ok := e.(MessageEntry); ok && m.Message.Role == core.RoleAssistant && line[m.ID] {
+				answered = true
+				break
+			}
+		}
+		if err := s.appendLocked(context.Background(), func(id, parent string, created time.Time) Entry {
+			return ReceiptEntry{ID: id, ParentID: parent, Created: created, Receipt: q.receipt,
+				Status: ReceiptDelivered, RunID: q.runID, Unanswered: !answered}
+		}); err != nil {
+			s.agent.Logger().Error("thread: a drained steer's delivered receipt not persisted; the steered message on the line settles it",
+				"session", s.header.ID, "receipt", q.receipt, "err", err)
+		}
+		if q.turn != nil {
+			q.turn.finishAs(TurnDelivered, nil, nil)
+		}
 	}
 }
 
@@ -447,6 +496,22 @@ func (s *Session) resurrectSteers(ctx context.Context) {
 	}
 }
 
+// lineLocked returns the ids on the active path. Callers hold s.mu.
+func (s *Session) lineLocked() map[string]bool {
+	out := map[string]bool{}
+	if s.leaf == "" {
+		return out
+	}
+	path, err := s.walkLocked(s.leaf)
+	if err != nil {
+		return out
+	}
+	for _, e := range path {
+		out[idOf(e)] = true
+	}
+	return out
+}
+
 // drainedSteersLocked returns the queued steer receipts a run drained
 // whose delivered receipt never landed: the steered message joins the
 // run's transcript with the step that carries it (perstep.go), while
@@ -459,28 +524,22 @@ func (s *Session) resurrectSteers(ctx context.Context) {
 // A steered message is a user message entry with no run id (a prompt
 // carries its run's) on the active path; it settles the earliest
 // unsettled queued receipt before it carrying the same message, the
-// drain's acceptance order. A message off the path — a failed overflow
+// drain's acceptance order; the map gives each settled receipt's
+// message position in the append order. A message off the path — a failed overflow
 // attempt's, branched back before its steers were re-delivered —
 // proves nothing: those steers still run. Callers hold s.mu.
-func (s *Session) drainedSteersLocked(settled map[string]bool) map[string]bool {
-	out := map[string]bool{}
-	if s.leaf == "" {
+func (s *Session) drainedSteersLocked(settled map[string]bool) map[string]int {
+	out := map[string]int{}
+	onPath := s.lineLocked()
+	if len(onPath) == 0 {
 		return out
-	}
-	path, err := s.walkLocked(s.leaf)
-	if err != nil {
-		return out
-	}
-	onPath := make(map[string]bool, len(path))
-	for _, e := range path {
-		onPath[idOf(e)] = true
 	}
 	type open struct {
 		id  string
 		msg []byte
 	}
 	var waiting []open
-	for _, e := range s.order {
+	for idx, e := range s.order {
 		switch e := e.(type) {
 		case ReceiptEntry:
 			if e.Status == ReceiptQueued && e.Msg != nil && !settled[e.ID] {
@@ -498,7 +557,7 @@ func (s *Session) drainedSteersLocked(settled map[string]bool) map[string]bool {
 			}
 			for i, w := range waiting {
 				if bytes.Equal(w.msg, b) {
-					out[w.id] = true
+					out[w.id] = idx
 					waiting = append(waiting[:i], waiting[i+1:]...)
 					break
 				}

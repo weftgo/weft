@@ -7,15 +7,21 @@ package otel
 import (
 	"bytes"
 	"context"
+	"io"
 	"iter"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/obsdb"
+	"go.opentelemetry.io/otel/attribute"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 )
 
@@ -328,5 +334,116 @@ func TestRawBodiesThroughTheGlobalProvider(t *testing.T) {
 	reqs, err := db.Requests(context.Background(), res.ID, obsdb.RequestQuery{})
 	if err != nil || len(reqs) != 1 || reqs[0].Wire == nil || reqs[0].Wire.Request.Body != `{"q":"wire"}` {
 		t.Fatalf("requests = %+v, %v; want one with its raw record", reqs, err)
+	}
+}
+
+// worstRawModel reports n exchanges whose bodies are the raw record's
+// worst case for its encoded size: C0 controls (six bytes each under
+// JSON's own escaping, \u0001) on both sides, past the 256 KiB cap.
+type worstRawModel struct {
+	next core.Model
+	n    int
+}
+
+func (m worstRawModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	r := core.ReportFromContext(ctx)
+	ctl := []byte(strings.Repeat("\x01", 300<<10))
+	for range m.n {
+		r.Raw(core.RawPair{Method: "POST", URL: "https://api.example/v1/messages", Request: ctl,
+			Status: 200, Response: ctl})
+		r.Attempt(core.AttemptInfo{Model: "m"})
+	}
+	return m.next.Stream(ctx, req)
+}
+
+// Under RawBodies a Studio destination's log export never posts a body
+// over Studio's 16 MiB ingest limit, whatever the raw records hold: a
+// burst of worst-case records (each ≈ 3 MiB encoded) is split by bytes
+// across posts, and every record still arrives.
+func TestRawBodiesBatchBoundedByBytes(t *testing.T) {
+	devEnv(t, map[string]string{"WEFT_ENV": "dev"})
+	const ingestMax = 16 << 20 // studio/ingest.MaxBody
+	var (
+		mu      sync.Mutex
+		largest int
+		total   int
+	)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		if r.URL.Path == "/v1/logs" {
+			mu.Lock()
+			largest = max(largest, len(b))
+			total += len(b)
+			mu.Unlock()
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	p, err := Start(testCtx(t), NoGlobal(), Heartbeat(0), Studio(srv.URL, "tok"), RawBodies(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	const n = 24
+	agt := core.New(wefttest.Script(wefttest.Say("done")),
+		core.WrapModel(func(next core.Model) core.Model { return worstRawModel{next: next, n: n} }),
+		core.LoggerProvider(p.LoggerProvider()), core.TracerProvider(p.TracerProvider()))
+	if _, err := agt.Generate(context.Background(), core.Prompt("hi")); err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Shutdown(testCtx(t)); err != nil {
+		t.Fatal(err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if largest > ingestMax {
+		t.Errorf("largest log export = %d bytes, over the %d-byte ingest limit", largest, ingestMax)
+	}
+	if want := n * 2 * (256 << 10); total < want {
+		t.Errorf("log exports total %d bytes, want at least %d (every raw record delivered)", total, want)
+	}
+}
+
+// callsExporter records each Export's record count.
+type callsExporter struct {
+	memExporter
+	calls []int
+}
+
+func (c *callsExporter) Export(ctx context.Context, recs []sdklog.Record) error {
+	c.calls = append(c.calls, len(recs))
+	return c.memExporter.Export(ctx, recs)
+}
+
+// The byte split leaves an ordinary raw batch (16 records of ≈ 650 KiB)
+// in one export, splits a worst-case one (16 × ≈ 3 MiB) into exports
+// under the limit, and keeps every record in order.
+func TestRawExportSplitByBytes(t *testing.T) {
+	batch := func(n, size int) []sdklog.Record {
+		recs := make([]sdklog.Record, n)
+		for i := range recs {
+			recs[i].SetEventName("weft.raw")
+			recs[i].SetBody(attribute.StringValue(strings.Repeat("x", size)))
+		}
+		return recs
+	}
+	for _, c := range []struct {
+		name      string
+		size      int
+		wantCalls []int
+	}{
+		{"ordinary", 650 << 10, []int{16}},
+		{"worst case", 3 << 20, []int{3, 3, 3, 3, 3, 1}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			inner := &callsExporter{}
+			e := byteSplitLogExporter{Exporter: inner, limit: rawExportBytes}
+			if err := e.Export(context.Background(), batch(16, c.size)); err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(inner.calls, c.wantCalls) || len(inner.snapshot()) != 16 {
+				t.Errorf("exports %v (%d records), want %v", inner.calls, len(inner.snapshot()), c.wantCalls)
+			}
+		})
 	}
 }

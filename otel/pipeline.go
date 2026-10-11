@@ -297,9 +297,96 @@ func (dropFailed) apply(c *config) { c.dropFailed = true }
 const defaultHeartbeat = 10 * time.Second
 
 // rawBatchSize is a raw-taking batch destination's log batch size under
-// RawBodies (ADR 0028 §12): 16 records of at most ≈ 650 KiB each stay
-// under Studio's 16 MiB ingest body limit.
+// RawBodies (ADR 0028 §12): 16 ordinary raw records (≈ 650 KiB each)
+// stay under Studio's 16 MiB ingest body limit in one export.
 const rawBatchSize = 16
+
+// rawExportBytes bounds one log export of a raw-taking batch
+// destination by bytes (ADR 0028 §12): a raw record's worst case is
+// ≈ 3 MiB (two 256 KiB bodies of control bytes, each escaped to six
+// bytes in JSON), so 16 of them would be ≈ 48 MiB and Studio's ingest
+// (studio/ingest.MaxBody, 16 MiB) would refuse the whole batch — every
+// record in it lost. A batch whose records sum past this is exported in
+// several calls; 4 MiB of margin covers the OTLP envelope. Ordinary
+// batches (16 × ≈ 650 KiB) fit in one call, as before.
+const rawExportBytes = 12 << 20
+
+// byteSplitLogExporter exports a batch in consecutive chunks of at most
+// limit estimated bytes (recordBytes); a record over the limit alone is
+// exported alone. Each chunk is its own Export, so a failure loses (and
+// the counting exporter beneath counts) only that chunk.
+type byteSplitLogExporter struct {
+	sdklog.Exporter
+	limit int
+}
+
+func (e byteSplitLogExporter) Export(ctx context.Context, recs []sdklog.Record) error {
+	var errs []error
+	start, size := 0, 0
+	for i := range recs {
+		n := recordBytes(&recs[i])
+		if i > start && size+n > e.limit {
+			if err := e.Exporter.Export(ctx, recs[start:i]); err != nil {
+				errs = append(errs, err)
+			}
+			start, size = i, 0
+		}
+		size += n
+	}
+	if start < len(recs) {
+		if err := e.Exporter.Export(ctx, recs[start:]); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// recordBytes estimates a log record's encoded size: its body's and
+// attributes' keys and values, plus a fixed allowance for the rest.
+func recordBytes(r *sdklog.Record) int {
+	n := 64 + len(r.EventName()) + valueBytes(r.Body())
+	r.WalkAttributes(func(kv attribute.KeyValue) bool {
+		n += 8 + len(kv.Key) + valueBytes(kv.Value)
+		return true
+	})
+	return n
+}
+
+// valueBytes estimates a value's encoded size.
+func valueBytes(v attribute.Value) int {
+	switch v.Type() {
+	case attribute.STRING:
+		return 4 + len(v.AsString())
+	case attribute.BYTESLICE:
+		return 4 + len(v.AsByteSlice())
+	case attribute.STRINGSLICE:
+		n := 4
+		for _, e := range v.AsStringSlice() {
+			n += 4 + len(e)
+		}
+		return n
+	case attribute.SLICE:
+		n := 4
+		for _, e := range v.AsSlice() {
+			n += valueBytes(e)
+		}
+		return n
+	case attribute.MAP:
+		n := 4
+		for _, kv := range v.AsMap() {
+			n += 8 + len(kv.Key) + valueBytes(kv.Value)
+		}
+		return n
+	case attribute.BOOLSLICE:
+		return 4 + 2*len(v.AsBoolSlice())
+	case attribute.INT64SLICE:
+		return 4 + 12*len(v.AsInt64Slice())
+	case attribute.FLOAT64SLICE:
+		return 4 + 12*len(v.AsFloat64Slice())
+	default:
+		return 12
+	}
+}
 
 // build assembles the pipeline from the config and destinations. On
 // failure nothing stays behind: every destination already built is
@@ -470,20 +557,22 @@ func buildDest(ctx context.Context, d dest, cfg config) (_ *destRuntime, err err
 		}
 	}
 	if logExp != nil {
-		counted := countingLogExporter{Exporter: logExp, drops: drops}
+		var exp sdklog.Exporter = countingLogExporter{Exporter: logExp, drops: drops}
 		var batch []sdklog.BatchProcessorOption
 		if logDelay > 0 {
 			batch = append(batch, sdklog.WithExportInterval(logDelay))
 		}
 		if cfg.rawBodies && d.rawOn() {
-			// A raw record is up to ≈ 650 KiB (two 256 KiB bodies,
-			// JSON-escaped, plus headers): the SDK's default 512-record
-			// batch would far exceed Studio's 16 MiB ingest limit
-			// (studio/ingest.MaxBody) and be refused whole. rawBatchSize
-			// records stay under it.
+			// A raw record is typically ≈ 650 KiB and at worst ≈ 3 MiB
+			// (two 256 KiB bodies of control bytes, JSON-escaped): the
+			// SDK's default 512-record batch would far exceed Studio's
+			// 16 MiB ingest limit (studio/ingest.MaxBody) and be refused
+			// whole. rawBatchSize bounds the batch by count, and the
+			// byte split each export by size, whatever the records hold.
 			batch = append(batch, sdklog.WithExportMaxBatchSize(rawBatchSize))
+			exp = byteSplitLogExporter{Exporter: exp, limit: rawExportBytes}
 		}
-		inner := sdklog.NewBatchProcessor(counted, batch...)
+		inner := sdklog.NewBatchProcessor(exp, batch...)
 		rt.logProc = &destProc{name: d.name, inner: inner,
 			content: content, contentC: contentCfg, noDeltas: d.noDeltas, drops: drops,
 			raw: cfg.rawBodies && d.rawOn()}

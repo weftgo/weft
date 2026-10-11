@@ -1,6 +1,7 @@
 package core
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -206,7 +207,7 @@ func (s *stepReport) raw(p RawPair) {
 		return
 	}
 	body, cut := buildRaw(s.step, s.n.Load()+1, p)
-	b, err := json.Marshal(body)
+	b, err := encodeRaw(body)
 	if err != nil {
 		s.rec.debug(s.Context, s.step, "raw", err)
 		return
@@ -217,6 +218,26 @@ func (s *stepReport) raw(p RawPair) {
 		return
 	}
 	s.rec.emitRaw(s.Context, s.step, body.Attempt, cut, b)
+}
+
+// encodeRaw encodes a raw record's body without HTML escaping, so the
+// record's size tracks the capped bodies: json.Marshal would spell each
+// '<', '>' and '&' in six bytes (\u003c), making a 256 KiB body of them
+// 1.5 MiB. JSON's own escaping remains — '"' and '\\' take two bytes,
+// a C0 control or U+2028/U+2029 six (\u0001) — so the real worst case
+// is six times each capped body: ≈ 3 MiB for the pair (two 256 KiB
+// bodies of control bytes) plus headers and the envelope. An ordinary
+// body (JSON, SSE) grows only by its quotes and newlines — a record of
+// two full ones is ≈ 650 KiB — and a binary one is base64, 4/3 of the
+// cap.
+func encodeRaw(body rawBody) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(body); err != nil {
+		return nil, err
+	}
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n")), nil
 }
 
 // emitRaw writes one raw record.

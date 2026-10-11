@@ -113,8 +113,10 @@ func NoEnv() Option {
 // pass Pipeline.LoggerProvider() to weft.LoggerProvider, or rely on
 // Install's global registration — a stock SDK provider never records
 // raw bodies. Under it a Studio destination's log batch is capped at 16
-// records, keeping each export under Studio's 16 MiB ingest limit (a
-// raw record is up to ≈ 650 KiB).
+// records and each export is split at 12 MiB, keeping every post under
+// Studio's 16 MiB ingest limit: a raw record is ≈ 650 KiB with two full
+// ordinary bodies and at worst ≈ 3 MiB (bodies of control bytes, each
+// six bytes in JSON; it is encoded without HTML escaping).
 func RawBodies(on bool) Option {
 	return optionFunc(func(c *config) { c.rawBodies = on })
 }

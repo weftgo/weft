@@ -253,6 +253,43 @@ func TestRawCapAndEncoding(t *testing.T) {
 	}
 }
 
+// The raw record is encoded without HTML escaping, so the record's size
+// tracks the capped bodies: a body of '<' and '&' (6 bytes each under
+// json.Marshal's HTML escaping) stays one byte per byte, and the record
+// is at most the two capped bodies plus a small envelope. JSON's own
+// escaping remains — a C0 control is six bytes (\u0001) — so the real
+// worst case is six times the capped bodies, also checked.
+func TestRawEncodingIsNotHTMLEscaped(t *testing.T) {
+	const envelope = 4 << 10
+	html := []byte(strings.Repeat("<&>", 100<<10)) // 300 KiB, cut to 256 KiB
+	p := newRecLogProvider()
+	recs := rawRun(t, p, func(ctx context.Context) {
+		core.ReportFromContext(ctx).Raw(core.RawPair{Request: html, Status: 200, Response: html})
+	})
+	if len(recs) != 1 {
+		t.Fatalf("raw records = %d", len(recs))
+	}
+	body := recs[0].body
+	if strings.Contains(body, `\u003c`) || strings.Contains(body, `\u0026`) {
+		t.Errorf("raw record is HTML-escaped (%d bytes)", len(body))
+	}
+	if bound := 2*256<<10 + envelope; len(body) > bound {
+		t.Errorf("raw record = %d bytes, want <= %d (two capped bodies + envelope)", len(body), bound)
+	}
+	if d := decodeRaw(t, recs[0]); d.Request.Body != string(html[:256<<10]) || d.Response.Body != d.Request.Body {
+		t.Errorf("bodies do not round-trip")
+	}
+
+	ctl := []byte(strings.Repeat("\x01", 300<<10))
+	p = newRecLogProvider()
+	recs = rawRun(t, p, func(ctx context.Context) {
+		core.ReportFromContext(ctx).Raw(core.RawPair{Request: ctl, Status: 200, Response: ctl})
+	})
+	if bound := 6*2*256<<10 + envelope; len(recs[0].body) > bound {
+		t.Errorf("control-byte raw record = %d bytes, want <= %d (the stated worst case)", len(recs[0].body), bound)
+	}
+}
+
 // Under mw.Retry the adapter's two exchanges land on attempts 1 and 2:
 // each Raw is reported before the retry layer reports its attempt.
 func TestRawAttemptsUnderRetry(t *testing.T) {

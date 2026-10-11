@@ -685,11 +685,16 @@ run whose adapter did not report shows `not_recorded` (cause `raw_off`).
 `core.ContentRaw`; `MaxBytes` does not apply (the 256 KiB cap is the
 core's). A content-off `Local` or `Studio` chain drops raw records.
 
-**Size.** A raw record is typically up to ≈ 650 KiB (two 256 KiB bodies,
-JSON-escaped, plus headers). Studio's OTLP ingest refuses a request body
-over 16 MiB (`studio/ingest.MaxBody`) whole, so under RawBodies a Studio
-destination's log batch is capped at 16 records (the SDK default is 512,
-which a burst of raw records would push past the limit and lose); the
+**Size.** The record is encoded without HTML escaping, so `<`, `>` and
+`&` take one byte each. A raw record with two full ordinary bodies (JSON,
+SSE, base64 at 4/3) is ≈ 650 KiB; JSON's own escaping still spells a C0
+control in six bytes (`\u0001`), so the worst case is ≈ 3 MiB (two
+256 KiB bodies of control bytes) plus headers. Studio's OTLP ingest
+refuses a request body over 16 MiB (`studio/ingest.MaxBody`) whole —
+every record in it lost — so under RawBodies a Studio destination's log
+batch is capped at 16 records (the SDK default is 512) and each export is
+split by bytes: a batch whose records sum past 12 MiB goes out in several
+posts, each under the limit (an ordinary batch of 16 stays one post). The
 Local sink writes each record synchronously and needs no cap.
 
 **obsdb.** `raw` is stored beside the other kinds on both backends

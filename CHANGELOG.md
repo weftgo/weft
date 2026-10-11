@@ -6,7 +6,13 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
-## Unreleased
+## 0.14.1 — 2026-10-11
+
+A patch over 0.14.0 with the two fixes that followed its tag: the panel
+asset script's gzip measure and `LoadPricing`'s error field under Go
+1.26 (the 0.14.0 CI run on 1.26 failed one test on the wording alone;
+behaviour is unchanged). Tags `core/v0.14.1` (the version literal only)
+and `v0.14.1`.
 
 ### Fixed
 

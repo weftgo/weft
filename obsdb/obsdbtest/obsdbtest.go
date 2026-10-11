@@ -72,6 +72,8 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("LastSeenAfter", lastSeenAfter(open))
 	t.Run("Vacuum", vacuum(open))
 	t.Run("CloseRace", closeRace(open))
+	t.Run("Commands", commandsTable(open))
+	t.Run("CommandsPrune", commandsPrune(open))
 }
 
 func ctx() context.Context { return context.Background() }

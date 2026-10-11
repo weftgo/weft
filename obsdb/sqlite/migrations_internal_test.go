@@ -96,8 +96,8 @@ func TestUpgradeFrom0002(t *testing.T) {
 	if err := raw.QueryRowContext(ctx, `SELECT MAX(version) FROM obsdb_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 6 {
-		t.Errorf("migration max = %d, want 6 (through 0006 the experiment index)", version)
+	if version != 7 {
+		t.Errorf("migration max = %d, want 7 (through 0007 the command store)", version)
 	}
 	var agent, instructions, catalog string
 	var steps, requests int
@@ -204,5 +204,100 @@ func TestUpgradeFrom0003IndexesStoredRuns(t *testing.T) {
 	page, err := srch.Search(ctx, obsdb.SearchQuery{Tool: "issue_refund"})
 	if err != nil || len(page.Runs) != 1 {
 		t.Errorf("tool filter after the upgrade = %v, %v", page.Runs, err)
+	}
+}
+
+// A file at 0006 — every migration before the command store applied
+// from the embedded bodies, a run and an experiment in it — opens
+// through 0007 in place: the rows survive, the four command store
+// tables exist and take a write, and the recorded version is 7.
+func TestUpgradeFrom0006AddsCommandStore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE obsdb_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	for v := 1; v <= 6; v++ {
+		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx, err := raw.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(string(body)); err != nil {
+			t.Fatalf("migration %d: %v", v, err)
+		}
+		if post := postMigrations[v]; post != nil {
+			if err := post(tx); err != nil {
+				t.Fatalf("migration %d: %v", v, err)
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO obsdb_migrations (version, applied_at) VALUES (?, '2026-10-01T00:00:00Z')`, v); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, stmt := range []string{
+		`INSERT INTO runs (run_id, agent, started_ns, last_seen_ns) VALUES ('old1', 'support', 100, 200)`,
+		`INSERT INTO experiments (id, name, created_ns, updated_ns) VALUES ('exp_1', 'tone', 100, 100)`,
+	} {
+		if _, err := raw.Exec(stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, table := range []string{"commands", "run_routes", "breakpoints", "runtimes"} {
+		var n int
+		if err := raw.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		if n != 0 {
+			t.Fatalf("a 0006 file already has %s", table)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("open a 0006 file: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+	if run, err := db.Run(ctx, "old1"); err != nil || run.Agent != "support" {
+		t.Errorf("upgraded run = %+v, %v", run, err)
+	}
+	if e, err := db.Experiment(ctx, "exp_1"); err != nil || e.Name != "tone" {
+		t.Errorf("upgraded experiment = %+v, %v", e, err)
+	}
+	cs := db.(obsdb.CommandStore)
+	if err := cs.PutCommand(ctx, obsdb.StoredCommand{ID: "cmd_1", RuntimeID: "rt_1", State: obsdb.CommandQueued}); err != nil {
+		t.Fatal(err)
+	}
+	if rows, err := cs.Commands(ctx, obsdb.CommandQuery{}); err != nil || len(rows) != 1 {
+		t.Errorf("Commands after the upgrade = %v, %v", rows, err)
+	}
+	if err := cs.PutRoute(ctx, obsdb.RunRoute{RunID: "run_1", RuntimeID: "rt_1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cs.PutBreakpoints(ctx, "rt_1", []string{"refund"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cs.PutRuntime(ctx, obsdb.StoredRuntime{ID: "rt_1"}); err != nil {
+		t.Fatal(err)
+	}
+	var version int
+	if err := db.(*DB).reads.QueryRowContext(ctx, `SELECT MAX(version) FROM obsdb_migrations`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != 7 {
+		t.Errorf("migration max after the upgrade = %d, want 7", version)
 	}
 }

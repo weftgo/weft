@@ -31,6 +31,25 @@ func TestConformance(t *testing.T) {
 	})
 }
 
+// The command store's restart property (plan I3): a second backend on
+// the same database, opened after the first closed, reads what it wrote.
+func TestCommandsRestart(t *testing.T) {
+	if os.Getenv("WEFT_CLICKHOUSE_DSN") == "" {
+		t.Skip("WEFT_CLICKHOUSE_DSN not set: the command store restart needs a clickhouse server (README has the one-line container recipe)")
+	}
+	obsdbtest.CommandsRestart(t, func(t *testing.T) (obsdb.DB, func() obsdb.DB) {
+		first, dsn := openFresh(t)
+		return first, func() obsdb.DB {
+			db, err := clickhouse.Open(dsn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+			return db
+		}
+	})
+}
+
 // openFresh opens the backend on a brand-new database derived from
 // WEFT_CLICKHOUSE_DSN, dropping it when the test ends. It returns the
 // backend and the DSN of the fresh database (raw-connection tests use

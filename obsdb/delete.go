@@ -2,6 +2,13 @@ package obsdb
 
 import "sort"
 
+// Deletion and retention (DB.DeleteRun, DB.DeleteSession, DB.Sweep,
+// DB.Vacuum) are the run tables' alone. A CommandStore's rows —
+// commands, run routes, breakpoints, runtimes — are Studio's record of
+// what it asked a runtime to do, not run data: deleting a run leaves
+// the commands and the route that name it, and PruneCommands is their
+// only retention.
+
 // SpanLink is one stored span's place in its trace, what DeletedSpans
 // walks: its key, its parent and the weft.run.id it carries ("" for a
 // non-weft span).

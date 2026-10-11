@@ -22,6 +22,13 @@
 //     storetest pattern); sqlite is the default backend, clickhouse the
 //     hosted one (its own module).
 //
+// Two capabilities are optional interfaces a backend implements beside
+// DB, both first-party backends included: Searcher (runs found by what
+// they said and did) and CommandStore (the playground link's commands,
+// run routes, breakpoints and runtimes, so Studio's runtime server
+// survives a restart; Studio's bookkeeping, never touched by the run
+// deletions).
+//
 // Deltas travel but are not stored (their own counter means their
 // absence never looks like a lost event); heartbeats are never stored,
 // they only move a run's last-seen. Both rules are Write's, shared by

@@ -32,3 +32,20 @@ func TestConformanceFile(t *testing.T) {
 		return db
 	})
 }
+
+// The command store's restart property (plan I3): a second handle on
+// the same file, opened after the first closed, reads what it wrote.
+func TestCommandsRestartFile(t *testing.T) {
+	obsdbtest.CommandsRestart(t, func(t *testing.T) (obsdb.DB, func() obsdb.DB) {
+		path := filepath.Join(t.TempDir(), "restart.db")
+		open := func() obsdb.DB {
+			db, err := sqlite.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+			return db
+		}
+		return open(), open
+	})
+}

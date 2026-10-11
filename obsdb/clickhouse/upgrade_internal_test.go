@@ -146,3 +146,100 @@ func rawConn(t *testing.T, dsn string) ch.Conn {
 	}
 	return conn
 }
+
+// A database at 0007 — every migration before the command store applied
+// from the embedded bodies, a saved experiment in it — opens through
+// 0008 in place on a live server: the experiment survives, the four
+// command store tables exist and take a write, and obsdb_migrations
+// records 0008.
+func TestUpgradeFrom0007AddsCommandStore(t *testing.T) {
+	base := os.Getenv("WEFT_CLICKHOUSE_DSN")
+	if base == "" {
+		t.Skip("WEFT_CLICKHOUSE_DSN not set: the 0007 upgrade needs a clickhouse server (README has the one-line container recipe)")
+	}
+	ctx := context.Background()
+	u, err := url.Parse(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	suffix := make([]byte, 6)
+	if _, err := rand.Read(suffix); err != nil {
+		t.Fatal(err)
+	}
+	name := "weft_up_" + hex.EncodeToString(suffix)
+	admin := rawConn(t, base)
+	if err := admin.Exec(ctx, fmt.Sprintf("CREATE DATABASE `%s`", name)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = admin.Exec(context.Background(), fmt.Sprintf("DROP DATABASE IF EXISTS `%s`", name))
+		_ = admin.Close()
+	})
+	u.Path = "/" + name
+	dsn := u.String()
+
+	conn := rawConn(t, dsn)
+	if err := conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS obsdb_migrations (
+		version UInt32, name String, applied_at DateTime DEFAULT now()
+	) ENGINE = MergeTree ORDER BY version`); err != nil {
+		t.Fatal(err)
+	}
+	for v := 1; v <= 7; v++ {
+		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, stmt := range splitStatements(string(body)) {
+			if err := conn.Exec(ctx, stmt); err != nil {
+				t.Fatalf("migration %d: %v", v, err)
+			}
+		}
+		if err := conn.Exec(ctx, `INSERT INTO obsdb_migrations (version, name) VALUES (?, ?)`, uint32(v), migrations[v]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := (&DB{conn: conn}).SaveExperiment(ctx, obsdb.Experiment{ID: "exp_1", Name: "tone"}); err != nil {
+		t.Fatal(err)
+	}
+	var tables uint64
+	if err := conn.QueryRow(ctx, `SELECT count() FROM system.tables WHERE database = currentDatabase()
+		AND name IN ('commands', 'run_routes', 'breakpoints', 'runtimes')`).Scan(&tables); err != nil {
+		t.Fatal(err)
+	}
+	if tables != 0 {
+		t.Fatalf("a 0007 database already has %d command store tables", tables)
+	}
+	_ = conn.Close()
+
+	db, err := Open(dsn)
+	if err != nil {
+		t.Fatalf("open a 0007 database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if e, err := db.Experiment(ctx, "exp_1"); err != nil || e.Name != "tone" {
+		t.Errorf("upgraded experiment = %+v, %v", e, err)
+	}
+	cs := db.(obsdb.CommandStore)
+	if err := cs.PutCommand(ctx, obsdb.StoredCommand{ID: "cmd_1", RuntimeID: "rt_1", State: obsdb.CommandQueued}); err != nil {
+		t.Fatal(err)
+	}
+	if rows, err := cs.Commands(ctx, obsdb.CommandQuery{}); err != nil || len(rows) != 1 {
+		t.Errorf("Commands after the upgrade = %v, %v", rows, err)
+	}
+	if err := cs.PutRoute(ctx, obsdb.RunRoute{RunID: "run_1", RuntimeID: "rt_1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cs.PutBreakpoints(ctx, "rt_1", []string{"refund"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cs.PutRuntime(ctx, obsdb.StoredRuntime{ID: "rt_1"}); err != nil {
+		t.Fatal(err)
+	}
+	var version uint32
+	if err := db.(*DB).conn.QueryRow(ctx, `SELECT max(version) FROM obsdb_migrations`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != 8 {
+		t.Errorf("migration max after the upgrade = %d, want 8", version)
+	}
+}

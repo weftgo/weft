@@ -8,7 +8,7 @@
 // the table's else. element.ts and the Request tab (E1.2) call these;
 // no other panel file spells a hole's words (badges.test.ts greps).
 import type { Meta, RunRow } from "../lib/api"
-import { HOLES, holeWords, kib, resultCapReason } from "../lib/honesty"
+import { DERIVED_HOLE, derivedWords, HOLES, holeWords, isDerived, kib, resultCapReason } from "../lib/honesty"
 import type { ContentAttrs, HoleMark } from "../lib/honesty"
 import { REQUEST_NOT_RECORDED_LABEL, REQUEST_NOT_STORED, requestCappedWords } from "../lib/requests"
 import { UNRUN_CALL_REASON } from "../lib/events"
@@ -218,7 +218,27 @@ export function turnChips(r: RunRow, label: (runId: string) => string): HTMLElem
       "experiment"
     )
   } else if (r.experiment_id) chip("experiment", `weft.experiment.id = ${r.experiment_id}`, "experiment")
+  // Built by the reader from stock OTel GenAI spans (plan I1.3): the
+  // derived badge in the stock_spans words, as Studio's row chip.
+  if (isDerived(r)) {
+    const b = badge(DERIVED_HOLE.hole, DERIVED_HOLE)
+    b.setAttribute("data-weft-chip", "derived")
+    out.push(b)
+  }
   return out
+}
+
+/** refused is a verb a derived turn cannot have (plan I1.3: no
+ * transcript to replay or export — Studio refuses the source 400 with
+ * the derived badge): drawn disabled, the stock_spans words its title
+ * and accessible text, so the reader learns why instead of a 400. */
+export function refusedVerb(label: string, tag = "button"): HTMLElement {
+  const words = derivedWords()
+  return el(tag, tag === "button" ? "weft-btn" : "weft-chip", [document.createTextNode(label), el("span", "weft-sr", ` — ${words}`)], {
+    title: words,
+    "data-weft-refused": "derived",
+    ...(tag === "button" ? { type: "button", disabled: "" } : { "aria-disabled": "true" }),
+  })
 }
 
 /** catalogReadError is the ack preview's hole when the step's catalog

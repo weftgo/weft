@@ -140,6 +140,12 @@ export const CAUSES: Partial<Record<Hole, Record<string, { reason: string; fix?:
       fix: "run under WEFT_ENV=dev with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)",
     },
   },
+  derived: {
+    stock_spans: {
+      reason: "derived from spans · no events",
+      fix: "the producer exports stock OTel GenAI spans only: emit weft's records (docs/record-contract.md) for events, the transcript and requests",
+    },
+  },
   hidden: {
     dev_token_only: {
       reason:
@@ -259,6 +265,43 @@ export function holeWords(m: HoleMark): {
   }
 }
 
+/** DERIVED_HOLE is a derived run's one hole (docs/record-contract.md
+ * §9, plan I1): derived, cause stock_spans — "derived from spans · no
+ * events", its fix naming the record contract. A list row carries no
+ * holes[]; its `derived: true` is this mark. */
+export const DERIVED_HOLE: HoleMark = { hole: "derived", cause: "stock_spans" }
+
+/** isDerived says a run row was built by the reader from stock OTel
+ * GenAI spans (api.go's runRow.Derived): no events, transcript or
+ * request records — every pane that would read them carries
+ * DERIVED_HOLE instead, and nothing replays it (there is no transcript;
+ * the playground refuses the source 400). requests_badge "derived"
+ * says the same on a Studio row that predates the field. */
+export function isDerived(row: { derived?: boolean; requests_badge?: string } | null | undefined): boolean {
+  return row?.derived === true || row?.requests_badge === "derived"
+}
+
+/** derivedUsageUnknown: a derived run (or step) whose spans reported
+ * no usage reads zero tokens, and Studio prices it unknown — the zeros
+ * are "not reported", never a known 0 (§9's usage row). The words are
+ * the API's cost_reason. */
+export function derivedUsageUnknown(
+  row: { derived?: boolean; requests_badge?: string; cost_known?: boolean; usage?: { input_tokens: number; output_tokens: number } },
+  derived = isDerived(row)
+): boolean {
+  if (!derived || row.cost_known === true) return false
+  const u = row.usage
+  return !u || (u.input_tokens === 0 && u.output_tokens === 0)
+}
+
+/** derivedWords is the stock_spans badge's reason and fix as one line
+ * — a disabled verb's title and accessible text (save as test, the
+ * replay verbs) on a derived run. */
+export function derivedWords(): string {
+  const w = holeWords(DERIVED_HOLE)
+  return `${w.reason}${w.fix ? ` — fix: ${w.fix}` : ""}`
+}
+
 /** rowHoles is a run row's holes: a run document's children[] row
  * carries the child's own (api.go's runHoles, A10 — stripped, gap,
  * derived…); beside them, what the row alone tells — a run older than
@@ -268,9 +311,11 @@ export function holeWords(m: HoleMark): {
 export function rowHoles(row: {
   status?: string
   requests_badge?: string
+  derived?: boolean
   holes?: HoleMark[]
 }): HoleMark[] {
   const out: HoleMark[] = Array.isArray(row.holes) ? [...row.holes] : []
+  if (isDerived(row)) out.push(DERIVED_HOLE)
   if (row.requests_badge === "not_recorded") out.push({ hole: "not_recorded" })
   if (row.status === "interrupted") out.push({ hole: "interrupted" })
   return mergeHoles(out)

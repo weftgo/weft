@@ -1,0 +1,56 @@
+{
+  "id": "otel-5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10-1a2b3c4d5e6f7081",
+  "parent_run_id": "",
+  "parent_call_id": "",
+  "trace_id": "5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10",
+  "agent": "support",
+  "model": {
+    "provider": "openai",
+    "name": "gpt-5"
+  },
+  "manifest_hash": "",
+  "weft_version": "",
+  "service": "py-support",
+  "session_id": "conv_7f3a",
+  "public_id": "",
+  "turn": 0,
+  "playground": false,
+  "experiment_id": "",
+  "forked_from": "",
+  "meta": {},
+  "started": "2026-10-01T10:01:00Z",
+  "finished": "2026-10-01T10:01:02Z",
+  "last_seen": "2026-10-01T10:01:02Z",
+  "status": "failed",
+  "err": "agent cancelled by the user",
+  "steps": 1,
+  "pending": 0,
+  "stop_reason": "",
+  "usage": {
+    "input_tokens": 1020,
+    "output_tokens": 25
+  },
+  "cost_usd": 0.001525,
+  "cost_known": true,
+  "cost_reason": "no cache split reported; a cached prompt may be overstated",
+  "cache": "not_reported",
+  "delegated_cost_usd": 0,
+  "delegated_cost_known": true,
+  "event_count": 0,
+  "message_count": 0,
+  "delta_count": 0,
+  "instructions_hash": "",
+  "catalog_hash": "",
+  "request_count": 0,
+  "requests_badge": "derived",
+  "derived": true,
+  "children": [],
+  "holes": [
+    {
+      "hole": "derived",
+      "reason": "derived from spans · no events",
+      "fix": "the producer exports stock OTel GenAI spans only: emit weft's records (docs/record-contract.md) for events, the transcript and requests"
+    }
+  ],
+  "compactions": []
+}

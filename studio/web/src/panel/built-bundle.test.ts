@@ -35,7 +35,7 @@ describe("the built panel.js (studio/dist/panel/panel.js)", () => {
     const words: string[] = [USAGE_AT_FINISH]
     for (const note of Object.values(HOLES)) words.push(note.label, note.reason, ...(note.fix ? [note.fix] : []))
     for (const causes of Object.values(CAUSES))
-      for (const c of Object.values(causes ?? {})) words.push(c.reason, ...(c.fix ? [c.fix] : []))
+      for (const c of Object.values(causes)) words.push(c.reason, ...(c.fix ? [c.fix] : []))
     expect(words.length).toBeGreaterThan(30)
     expect(words.filter((w) => !code.includes(w))).toEqual([])
   })

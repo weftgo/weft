@@ -95,6 +95,11 @@ export interface RunRow extends CostFields, DelegatedCostFields {
   catalog_hash?: string
   request_count?: number
   requests_badge?: string
+  /** A run the reader derived from stock OTel GenAI spans (plan I1,
+   * docs/record-contract.md §9): id otel-<trace>-<root span>, no
+   * events, transcript or request records, requests_badge "derived".
+   * Absent on weft's runs. */
+  derived?: boolean
   /** On a run document's children[] rows only (A10): the child's own
    * holes (api.go's runHoles), absent when it has none. */
   holes?: StepHole[]

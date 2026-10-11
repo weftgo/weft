@@ -153,12 +153,18 @@ function CostCellTd({
   base,
   missing,
   compared,
+  usageUnknown = false,
 }: {
   run: string
   read: StepCostRead | undefined
   base?: StepCostRead | undefined
   missing: boolean
   compared: boolean
+  /** The server marked this side's usage not comparable (a derived
+   * run's, plan I1.3): cost follows usage, so it is not compared
+   * either — two priced figures the usage column refused are no
+   * "changed". */
+  usageUnknown?: boolean
 }) {
   const cls = "border-l px-2 py-1 align-top whitespace-nowrap"
   if (missing && !compared)
@@ -184,8 +190,11 @@ function CostCellTd({
       </td>
     )
   }
-  const state = costCell(baseSide, side, missing)
-  const w = costCellWords(state, state === "unknown" && costView(side).known ? baseSide : side)
+  const state = usageUnknown && !missing ? "unknown" : costCell(baseSide, side, missing)
+  const w =
+    usageUnknown && !missing
+      ? { text: CELL_WORDS.unknown, title: `cost follows usage: ${CELL_REASONS.unknown}`, why: CELL_REASONS.unknown }
+      : costCellWords(state, state === "unknown" && costView(side).known ? baseSide : side)
   return (
     <td
       className={`${cls} ${COST_TONE[state]}`}
@@ -339,6 +348,7 @@ export function StepDiffTable({ view, focus, costs }: { view: NWayView; focus?: 
                         base={costs(view.base.run_id, row.step)}
                         missing={!row.base.side || !o.side.side}
                         compared
+                        usageUnknown={o.cells.usage === "unknown"}
                       />
                     ) : null}
                   </Fragment>

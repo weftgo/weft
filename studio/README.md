@@ -344,6 +344,27 @@ non-hole badges (parked, the attempt line, a tool error, …), and the
 greps for both. `weft.content: "redacted"` is reserved in Go and never
 emitted by weft's pipeline, so `redacted` comes only from a non-weft
 writer's records. Both surfaces still badge it.
+A run derived from stock OTel GenAI spans (plan I1.3, `derived: true`,
+docs/record-contract.md §9) reads `derived` in the `stock_spans` cause's
+words ("derived from spans · no events", its fix naming the record
+contract) everywhere it appears, never "0 events" or an empty pane: a
+chip on its row in the runs table, search results, a session's turns and
+the live page (from the live frame's `derived`), and on the panel's turn
+(`turnChips`); the run header's hole in full (no event count); the story
+a banner with the fix and one card per step from `runs/{id}/steps/{n}` —
+the `chat` span's model, usage and cost as served (priced, or "—" with
+the API's `cost_reason` when the spans reported none), its
+`execute_tool` calls badged `derived`, its request and messages blocks
+the badge; the raw view and the panel's Timeline and Raw tabs the badge
+above what they hold; the Request tab `request: derived`; the waterfall
+and the Timeline the real spans on the time axis (no event playhead). A
+derived source has no transcript, so the replay verbs, the editor, the
+drawer and save as test are not offered: they are drawn disabled with
+the badge's words (`derivedWords`), which is what the server's 400 would
+say. The compare page reads every column against a derived side "not
+comparable", cost too (it follows usage). `parity.test.ts` holds both
+surfaces to the same holes, chips and refusals on the server's own
+bodies (`src/test/derived-fixture.ts`).
 The footer's content line replaces the old suffix and is said only on
 evidence: "content on · 2 events shortened (24.6 KiB cut)" (a recorder
 cap cut the open turn's events, so content was there; on a capped walk,

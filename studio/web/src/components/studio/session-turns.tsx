@@ -8,7 +8,9 @@ import { FlaskConical } from "lucide-react"
 import type { RunRow } from "@/lib/api"
 import { forkSource } from "@/lib/experiments"
 import { absoluteTime, relativeTime, tokens } from "@/lib/format"
-import { StatusChip } from "@/components/studio/runs-table"
+import { StatusChip, UnknownTokens } from "@/components/studio/runs-table"
+import { DerivedChip } from "@/components/studio/hole-badge"
+import { derivedUsageUnknown } from "@/lib/honesty"
 import {
   Table,
   TableBody,
@@ -58,6 +60,7 @@ export function SessionTurns({
                 >
                   <span className="truncate">{r.id}</span>
                 </Link>
+                <DerivedChip row={r} />
                 {r.err ? (
                   <div
                     className="truncate font-mono text-[11px] text-status-bad/80"
@@ -74,7 +77,13 @@ export function SessionTurns({
                 {r.steps}
               </TableCell>
               <TableCell className="text-right font-mono tabular-nums">
-                {tokens(r.usage.input_tokens)} / {tokens(r.usage.output_tokens)}
+                {derivedUsageUnknown(r) ? (
+                  <UnknownTokens reason={r.cost_reason} />
+                ) : (
+                  <>
+                    {tokens(r.usage.input_tokens)} / {tokens(r.usage.output_tokens)}
+                  </>
+                )}
               </TableCell>
               <TableCell
                 className="text-right font-mono whitespace-nowrap tabular-nums"

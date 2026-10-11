@@ -1,0 +1,24 @@
+{
+  "total": 1,
+  "sessions": [
+    {
+      "id": "conv_7f3a",
+      "public_id": "",
+      "agent": "support",
+      "turns": 2,
+      "first_seen": "2026-10-01T10:00:00Z",
+      "last_seen": "2026-10-01T10:01:02Z",
+      "status": "failed",
+      "usage": {
+        "input_tokens": 2737,
+        "output_tokens": 103
+      },
+      "cost_usd": 0.004451,
+      "cost_known": true,
+      "cost_reason": "no cache split reported; a cached prompt may be overstated",
+      "cache": "not_reported"
+    }
+  ],
+  "next_before": null,
+  "next_before_id": null
+}

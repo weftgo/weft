@@ -51,6 +51,8 @@ import { saveTest } from "@/components/studio/saves"
 import { notifySave } from "@/lib/notify"
 import { mayExportTestWith } from "@/lib/saves"
 import { RawView } from "@/components/studio/raw-view"
+import { DerivedNote, DerivedStory } from "@/components/studio/derived-story"
+import { isDerived } from "@/lib/honesty"
 import { ReplayBar } from "@/components/studio/replay-bar"
 import { ReplayContext, ReplayDrawer } from "@/components/studio/replay-drawer"
 import type { ReplayRequest } from "@/components/studio/replay-drawer"
@@ -434,7 +436,10 @@ function RunPage() {
     [view, spans.data]
   )
   const haveTime = timed.length > 0
-  const axis: "events" | "time" = search.axis ?? (haveTime ? "time" : "events")
+  // A derived run (plan I1.3) has spans and no events: its one axis is
+  // time — the position axis and its playhead have nothing to show.
+  const derived = isDerived(run.data)
+  const axis: "events" | "time" = derived && haveTime ? "time" : (search.axis ?? (haveTime ? "time" : "events"))
 
   // The replay playhead: null = live. Seeks and pauses write t to the
   // URL (a paste reproduces the exact view, A3); playback ticks do
@@ -544,7 +549,7 @@ function RunPage() {
   const selKey =
     knownSel(search.sel, search.step, fullSpans, timeSpans) ??
     stepKey ??
-    defaultSelection(fullSpans)?.key
+    (derived && onTime ? timeSpans[0]?.key : defaultSelection(fullSpans)?.key)
   const selected = traceSpans.find((s) => s.key === selKey)
   const select = useCallback(
     (key: string) =>
@@ -659,8 +664,12 @@ function RunPage() {
   // The editor (plan F2): on the run's own steps, where a replay can
   // keep them — only with the drawer's verbs, never on a running run.
   const maxFrom = transcript.data ? replayBounds(transcript.data.batches).max : null
+  // A derived run has no transcript to replay (the playground refuses
+  // the source 400): no verbs, no editor, no drawer — its story says
+  // why where the verbs would be.
+  const replayOn = replayable && !derived
   const editor: Editor | null =
-    replayable && transcript.data && doc.status !== "running"
+    replayOn && transcript.data && doc.status !== "running"
       ? {
           edits: edits.list,
           invalid: edits.invalid,
@@ -688,7 +697,7 @@ function RunPage() {
       : null
 
   return (
-    <ReplayContext.Provider value={replayable ? openReplay : null}>
+    <ReplayContext.Provider value={replayOn ? openReplay : null}>
     <EditorContext.Provider value={editor}>
     <div className="space-y-4">
       <RunHeader
@@ -709,7 +718,7 @@ function RunPage() {
           /events?after=) — the story and the trace hold the whole run, replay needs the
           whole stream
         </p>
-      ) : axis === "events" ? (
+      ) : axis === "events" && !derived ? (
         <ReplayBar
           events={stream.events}
           eventCount={doc.event_count}
@@ -754,7 +763,7 @@ function RunPage() {
             <TabsTrigger value="story">story</TabsTrigger>
             <TabsTrigger value="raw">raw</TabsTrigger>
           </TabsList>
-          {view === "trace" && haveTime ? (
+          {view === "trace" && haveTime && !derived ? (
             <div className="flex gap-1">
               {(["events", "time"] as const).map((a) => (
                 <button
@@ -878,6 +887,9 @@ function RunPage() {
           ) : null}
         </TabsContent>
         <TabsContent value="story" className="mt-3">
+          {derived ? (
+            <DerivedStory doc={doc} replayable={replayable} />
+          ) : (
           <StepList
             events={stream.events}
             folded={foldedNow}
@@ -893,8 +905,10 @@ function RunPage() {
             onStep={onStep}
             stepInputRef={stepInput}
           />
+          )}
         </TabsContent>
-        <TabsContent value="raw" className="mt-3">
+        <TabsContent value="raw" className="mt-3 space-y-3">
+          {derived ? <DerivedNote what="events" /> : null}
           <RawView
             doc={doc}
             events={stream.events}
@@ -914,7 +928,7 @@ function RunPage() {
           />
         </TabsContent>
       </Tabs>
-      {replayable ? (
+      {replayOn ? (
         <ReplayDrawer
           request={replay.req}
           requestKey={replay.n}

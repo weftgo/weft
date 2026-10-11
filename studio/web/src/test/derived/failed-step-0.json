@@ -1,0 +1,52 @@
+{
+  "run_id": "otel-5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10-1a2b3c4d5e6f7081",
+  "step": 0,
+  "status": "error",
+  "started": "2026-10-01T10:01:00.04Z",
+  "finished": "2026-10-01T10:01:01.99Z",
+  "model": {
+    "provider": "openai",
+    "requested": "gpt-5",
+    "answered": "gpt-5-2025-08-07"
+  },
+  "request": {
+    "badge": "derived",
+    "reason": "derived from spans · no events",
+    "fix": "the producer exports stock OTel GenAI spans only: emit weft's records (docs/record-contract.md) for events, the transcript and requests"
+  },
+  "attempts": [
+    {
+      "attempt": 1,
+      "model": "gpt-5",
+      "provider": "openai",
+      "outcome": "ok",
+      "started": "2026-10-01T10:01:00.04Z",
+      "finished": "2026-10-01T10:01:01.99Z",
+      "span_id": "1a2b3c4d5e6f7082"
+    }
+  ],
+  "messages_in": {
+    "count": 0,
+    "badge": "derived",
+    "reason": "derived from spans · no events",
+    "fix": "the producer exports stock OTel GenAI spans only: emit weft's records (docs/record-contract.md) for events, the transcript and requests"
+  },
+  "events": [],
+  "tool_calls": [],
+  "children": [],
+  "usage": {
+    "input_tokens": 1020,
+    "output_tokens": 25
+  },
+  "cost_usd": 0.001525,
+  "cost_known": true,
+  "cost_reason": "no cache split reported; a cached prompt may be overstated",
+  "cache": "not_reported",
+  "holes": [
+    {
+      "hole": "derived",
+      "reason": "derived from spans · no events",
+      "fix": "the producer exports stock OTel GenAI spans only: emit weft's records (docs/record-contract.md) for events, the transcript and requests"
+    }
+  ]
+}

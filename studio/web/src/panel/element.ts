@@ -6,7 +6,7 @@
 // meta.capabilities reports the playground (§8.5 item 3).
 import type { Manifest, RunCompaction, RunRow, ToolCallPart, Transcript, Usage } from "../lib/api"
 import { isHoleRef } from "../lib/api"
-import { mergeHoles, rowHoles, statusHoles, USAGE_AT_FINISH, usageKnown } from "../lib/honesty"
+import { DERIVED_HOLE, isDerived, mergeHoles, rowHoles, statusHoles, USAGE_AT_FINISH, usageKnown } from "../lib/honesty"
 import type { HoleMark } from "../lib/honesty"
 import { paramsLine, REQUEST_NO_RECORD_REASON, REQUEST_NOT_STORED, shortHash } from "../lib/requests"
 import {
@@ -28,7 +28,7 @@ import type { ReplayEdit, UserMessage } from "../lib/edits"
 import { editList, marksBlock, previewBlock } from "./editor"
 import { compactedRefusal, editsHandoff, emptyLab, LAB_LABELS, LAB_NEW, LAB_NUMBERS, LAB_PREDATES, labDefault, labHandoff, labLacksDefaults, labOn, replayBounds } from "../lib/experiment-body"
 import type { LabFields } from "../lib/experiment-body"
-import { ackCatalogHole, badge, capLine, catalogCapped, catalogNotRecorded, catalogNotStored, catalogReadError, cutBadge, holeBadges, holeLine, noPublicIdWords, requestCapped, requestHole, turnChips } from "./badges"
+import { ackCatalogHole, badge, capLine, refusedVerb, catalogCapped, catalogNotRecorded, catalogNotStored, catalogReadError, cutBadge, holeBadges, holeLine, noPublicIdWords, requestCapped, requestHole, turnChips } from "./badges"
 import { fetchHandoff, fetchSessionPublicId, MAX_REQUEST_PAGES, PanelApiError, panelGet, putProposal, REQUEST_PAGE } from "./client"
 import { keepEditedTitle, keepPromptWords, mayExportTestWith, mayProposeWith, SAVE_TEST_LABEL, SAVE_TEST_TITLE } from "../lib/saves"
 import type { KeepPrompt } from "../lib/saves"
@@ -2650,6 +2650,8 @@ export class WeftDevtools extends HTMLElement {
     if (tab !== "story")
       panel(
         el("div", undefined, [
+          // A derived turn's Timeline and Raw say why no event is there.
+          ...(tab !== "request" && this.derived(t) ? [holeLine(DERIVED_HOLE)] : []),
           tab === "raw" ? this.rawView(t) : tab === "timeline" ? renderTimeline(t) : this.requestView(s, t),
         ]),
         tab
@@ -2739,9 +2741,15 @@ export class WeftDevtools extends HTMLElement {
 
   /** edCtx is the editor for a turn: the playground's verbs, a turn
    * that is over, its transcript read (the server's bounds). */
+  /** derived: the turn was built by the reader from stock spans (plan
+   * I1.3) — no transcript, so no replay verb, edit or export. */
+  private derived(t: TurnView): boolean {
+    return isDerived(this.rowOf(t.id) ?? t.doc)
+  }
+
   private edCtx(s: PanelState, t: TurnView): EdCtx | undefined {
     const tr = t.transcript
-    if (!this.canAct(s) || !tr || (this.rowOf(t.id)?.status ?? t.doc?.status ?? "running") === "running") return undefined
+    if (!this.canAct(s) || !tr || this.derived(t) || (this.rowOf(t.id)?.status ?? t.doc?.status ?? "running") === "running") return undefined
     const max = boundsOf(tr)?.max ?? null
     return {
       users: userMessagesOf(tr.batches),
@@ -3729,7 +3737,7 @@ export class WeftDevtools extends HTMLElement {
           endpoint: this.base,
           runId: t.id,
           ...(ed ? { edit: ed } : {}),
-          ...(this.canAct(s)
+          ...(this.canAct(s) && !this.derived(t)
             ? {
                 replay: {
                   runId: t.id,
@@ -3749,7 +3757,8 @@ export class WeftDevtools extends HTMLElement {
       )
     )
     if (t.folded.pending.length) wrap.appendChild(this.approvals(t.folded.pending, !!row?.playground))
-    if (this.canAct(s)) wrap.appendChild(this.actions(s))
+    if (this.canAct(s))
+      wrap.appendChild(this.derived(t) ? el("div", "weft-actions", [refusedVerb("✎ Experiment"), refusedVerb("↻ Re-run")]) : this.actions(s))
     return wrap
   }
 
@@ -3763,7 +3772,8 @@ export class WeftDevtools extends HTMLElement {
     const save = mayExportTestWith(s.meta?.capabilities ?? [], this.cfg.token)
     if (!session && !trace && !save) return null
     const box = el("div", "weft-row2")
-    if (save) {
+    if (save && this.derived(t)) box.appendChild(refusedVerb(SAVE_TEST_LABEL, "span"))
+    else if (save) {
       // A hand-off (G1 style): Studio's run page downloads it with its
       // own bearer — the measured in-panel fetch-and-save cost ~0.8 KiB.
       const a = el("a", "weft-chip", SAVE_TEST_LABEL, {

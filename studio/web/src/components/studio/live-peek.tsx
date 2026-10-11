@@ -14,6 +14,8 @@ import { runLink } from "@/lib/links"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { storyRunID, useRunEvents } from "@/hooks/use-run-events"
 import { StepList } from "@/components/studio/step-list"
+import { DerivedStory } from "@/components/studio/derived-story"
+import { isDerived } from "@/lib/honesty"
 import { StatusChip } from "@/components/studio/runs-table"
 import { Button } from "@/components/ui/button"
 
@@ -65,7 +67,13 @@ export function LivePeek({ id, onClose }: { id: string; onClose: () => void }) {
       ) : (
         <div className="min-w-0" data-peek-story>
           {stream.error ? <p className="font-mono text-xs text-status-bad">{stream.error}</p> : null}
-          <StepList events={stream.events} folded={stream.folded} doc={run.data} />
+          {/* A derived run (plan I1.3): no events to fold — its story
+              is the steps route's, under the derived badge. */}
+          {isDerived(run.data) ? (
+            <DerivedStory doc={run.data} replayable={false} />
+          ) : (
+            <StepList events={stream.events} folded={stream.folded} doc={run.data} />
+          )}
         </div>
       )}
     </aside>

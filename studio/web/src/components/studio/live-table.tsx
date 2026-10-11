@@ -20,8 +20,9 @@ import type { LiveRowView } from "@/lib/live-rows"
 import { runLink, sessionLink } from "@/lib/links"
 import { notify } from "@/lib/notify"
 import { Cost, useCostCapable } from "@/components/studio/cost"
-import { HoleBadge } from "@/components/studio/hole-badge"
-import { StatusChip } from "@/components/studio/runs-table"
+import { DerivedChip, HoleBadge } from "@/components/studio/hole-badge"
+import { StatusChip, UnknownTokens } from "@/components/studio/runs-table"
+import { derivedUsageUnknown } from "@/lib/honesty"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -248,6 +249,7 @@ export function LiveTable({
                   <Link {...runLink(r.id)} className="truncate font-mono text-[13px] hover:text-thread-ink">
                     {r.id}
                   </Link>
+                  <DerivedChip row={r} />
                   {v.unreadable.length ? (
                     <HoleBadge
                       hole="gap"
@@ -276,7 +278,13 @@ export function LiveTable({
                     : "no step has reported usage yet"
                 }
               >
-                {tok ? `${tok.partial ? "≥" : ""}${fmtTokens(tok.n)}` : "—"}
+                {derivedUsageUnknown(r) ? (
+                  <UnknownTokens reason={r.cost_reason} />
+                ) : tok ? (
+                  `${tok.partial ? "≥" : ""}${fmtTokens(tok.n)}`
+                ) : (
+                  "—"
+                )}
               </TableCell>
               {priced ? (
                 <TableCell className="text-right text-xs" data-cell="cost">

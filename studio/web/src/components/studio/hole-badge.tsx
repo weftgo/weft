@@ -4,7 +4,7 @@
 // reason and, where one exists, a fix. A pane with a hole shows the
 // badge and says why; it is never just empty. A response's own reason
 // and fix win over the table's words.
-import { holeWords } from "@/lib/honesty"
+import { DERIVED_HOLE, holeWords, isDerived } from "@/lib/honesty"
 import type { HoleMark } from "@/lib/honesty"
 import { Badge } from "@/components/ui/badge"
 
@@ -82,6 +82,19 @@ export function HoleBadge({
         {w.reason}
         {w.fix ? <span className="text-faint"> · fix: {w.fix}</span> : null}
       </span>
+    </span>
+  )
+}
+
+/** DerivedChip is a list row's mark for a run derived from stock OTel
+ * GenAI spans (plan I1.3): the derived badge in the stock_spans words
+ * (its reason and fix in the accessible text and the title) — so a row
+ * with no events reads "derived", never as one that lost them. */
+export function DerivedChip({ row }: { row: { derived?: boolean; requests_badge?: string } }) {
+  if (!isDerived(row)) return null
+  return (
+    <span className="inline-flex" data-derived-chip>
+      <HoleBadge {...DERIVED_HOLE} />
     </span>
   )
 }

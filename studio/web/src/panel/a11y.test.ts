@@ -16,6 +16,7 @@ import { resolve } from "node:path"
 import axe from "axe-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { golden } from "../test/fake-studio"
+import { DERIVED, derivedBodies, derivedDoc, derivedRows } from "../test/derived-fixture"
 import { baseRoutes, DIFF_META, fakeStudio, META, mount, page, runEvents, runExperiment, runRow, settle, setup, stepDiffRoutes, teardown, transcript } from "./testkit"
 import type { Route } from "./testkit"
 import { FILTER_MS } from "./tree"
@@ -185,6 +186,21 @@ async function resultEditor(el: WeftDevtools) {
   expect(el.shadowRoot!.querySelector('[data-key="steer"][data-weft-editable="user"] button')).toBeNull()
 }
 
+/** I1.3: a run derived from stock spans — its turn chip, its hole said
+ * in full, the refused verbs and save as test — on the server's own
+ * bodies (src/test/derived-fixture.ts). */
+function derivedRoutes(): Record<string, Route> {
+  const r = baseRoutes()
+  const row = derivedRows().runs.find((x) => x.id === DERIVED)!
+  r["runs?public_id=pub_orders&limit=50"] = { total: 1, runs: [row], next_before: null }
+  r[`runs/${DERIVED}`] = derivedDoc()
+  r[`runs/${DERIVED}/events?after=0&limit=500`] = golden("events-derived")
+  r[`runs/${DERIVED}/transcript`] = golden("transcript-derived")
+  r[`runs/${DERIVED}/spans`] = derivedBodies.spans
+  r[`runs/${DERIVED}/requests?limit=1000`] = derivedBodies.requests
+  return r
+}
+
 const MODES: { name: string; width: number; attrs: Record<string, string>; sel: string; act?: (el: WeftDevtools) => Promise<void>; routes?: () => Record<string, Route>; meta?: unknown }[] = [
   { name: "float, open", width: 1024, attrs: { "data-open": "true" }, sel: ".weft-dock.weft-float" },
   { name: "docked right", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: ".weft-dock.weft-docked" },
@@ -201,6 +217,9 @@ const MODES: { name: string; width: number; attrs: Record<string, string>; sel: 
   { name: "the transcript editor: an edit, a refusal, the edit list and the preview", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: ".weft-drawer [data-weft-preview-op]", act: transcriptEditor, routes: editRoutes, meta: EDIT_META },
   { name: "editable steers with their verb, a result's editor open", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: 'textarea[data-weft-k="ed:tool_result:1:c2:0"]', act: resultEditor, routes: steerRoutes, meta: EDIT_META },
   { name: "F6's save as test on the turn and keep as prompt in the result pane", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: "[data-weft-save-test]", act: runExperiment, meta: { ...META, capabilities: [...META.capabilities, "export", "proposals"] } },
+  { name: "a derived turn: its chip, its hole, the refused verbs", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: '[data-weft-chip="derived"]', routes: derivedRoutes, meta: { ...META, capabilities: [...META.capabilities, "requests", "export"] }, act: async (el) => {
+    await vi.waitFor(() => expect(el.shadowRoot!.querySelector('button[data-weft-refused="derived"]')).not.toBeNull())
+  } },
   { name: "badges, the cap line and the chips", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: '[data-weft-chip="fork"]', act: badgesDrawn, routes: badgeRoutes },
 ]
 

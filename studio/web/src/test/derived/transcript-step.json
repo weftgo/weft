@@ -1,0 +1,9 @@
+{
+  "error": {
+    "code": "conflict",
+    "message": "run otel-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7 was derived from stock spans: no messages record holds step 1's"
+  },
+  "badge": "derived",
+  "reason": "derived from spans · no events",
+  "fix": "the producer exports stock OTel GenAI spans only: emit weft's records (docs/record-contract.md) for events, the transcript and requests"
+}

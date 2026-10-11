@@ -36,6 +36,8 @@ import {
 import { forkSource } from "@/lib/experiments"
 import { costView, delegatedView } from "@/lib/cost"
 import { CacheHint, CostText } from "@/components/studio/cost"
+import { DerivedChip } from "@/components/studio/hole-badge"
+import { derivedUsageUnknown } from "@/lib/honesty"
 import { runLink, sessionLink } from "@/lib/links"
 
 const statusColor: Record<RunRow["status"], string> = {
@@ -112,6 +114,16 @@ function CopyId({ id }: { id: string }) {
     >
       {done ? <Check data-slot="icon" /> : <Copy data-slot="icon" />}
     </Button>
+  )
+}
+
+/** UnknownTokens is a derived row's usage when its spans reported none
+ * (plan I1.3): "—" with the API's cost reason, never "0 / 0". */
+export function UnknownTokens({ reason }: { reason?: string }) {
+  return (
+    <span className="font-mono text-faint" title={reason} data-usage="unknown">
+      —<span className="sr-only">{` usage not known: ${reason ?? ""}`}</span>
+    </span>
   )
 }
 
@@ -359,6 +371,7 @@ export function RunsTable({ runs, selectedId, now, showCost, sort }: RunsTablePr
                   </div>
                 ) : null}
                 <ReplayChip run={run} />
+                <DerivedChip row={run} />
                 {run.err ? (
                   <div
                     className="truncate font-mono text-[11px] text-status-bad/80"
@@ -397,7 +410,11 @@ export function RunsTable({ runs, selectedId, now, showCost, sort }: RunsTablePr
                 {run.steps}
               </TableCell>
               <TableCell className="text-right">
-                <TokensCell usage={run.usage} />
+                {derivedUsageUnknown(run) ? (
+                  <UnknownTokens reason={run.cost_reason} />
+                ) : (
+                  <TokensCell usage={run.usage} />
+                )}
               </TableCell>
               {showCost ? (
                 <TableCell className="text-right whitespace-nowrap" data-cost-cell>

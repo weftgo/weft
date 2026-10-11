@@ -21,6 +21,7 @@ import {
   saveBlob,
 } from "@/lib/saves"
 import { useCapabilities } from "@/hooks/use-capabilities"
+import { derivedWords } from "@/lib/honesty"
 import { Button } from "@/components/ui/button"
 
 /** saveTest fetches the run's wefttest zip with the bearer, saves it
@@ -37,10 +38,23 @@ export async function saveTest(runID: string): Promise<void> {
 
 /** SaveAsTest is the run page's verb (capability "export"; hidden to a
  * read-scoped panel token, which export.go refuses the format). */
-export function SaveAsTest({ runID }: { runID: string }) {
+export function SaveAsTest({ runID, derived = false }: { runID: string; derived?: boolean }) {
   const { caps } = useCapabilities()
   const [busy, setBusy] = useState(false)
   if (!mayExportTestWith(caps, studioToken())) return null
+  // A derived run (plan I1.3) recorded no transcript: the wefttest
+  // export refuses it 400 with the derived badge — the verb is shown
+  // greyed with those words, never offered.
+  if (derived) {
+    const words = derivedWords()
+    return (
+      <Button variant="outline" size="xs" className="font-mono" title={words} disabled data-save-test="derived">
+        <Download data-slot="icon" />
+        {SAVE_TEST_LABEL}
+        <span className="sr-only">{` — ${words}`}</span>
+      </Button>
+    )
+  }
   return (
     <Button
       variant="outline"

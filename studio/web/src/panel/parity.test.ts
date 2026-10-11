@@ -46,6 +46,7 @@ import type { ExperimentDraft } from "./playground"
 import { studioPlaygroundLink } from "./element"
 import { drawerHandoff } from "../components/studio/replay-drawer"
 import { playgroundLink } from "../lib/links"
+import { DERIVED, STOCK as DERIVED_STOCK, serveDerived } from "../test/derived-fixture"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -891,5 +892,79 @@ describe("the saves say the same words on both surfaces (F6.2)", () => {
     await waitFor(() => expect(studioToasts()).toContain(keepLine))
     expect(keepLine).toBe(`copied · ${PROPOSAL_NEEDS_DEV}`)
     setStudioToken("")
+  })
+})
+
+// I1.3: a run derived from stock OTel GenAI spans reads the same on
+// both surfaces — the same holes (derived alone, in the stock_spans
+// words), on the run header / turn notes, the row chip / turn chip and
+// the request section / Request tab; neither offers a replay verb or a
+// save-as-test link; both draw its spans. One fake (the server's own
+// bodies, src/test/derived-fixture.ts) serves the panel, then the page.
+describe("a derived run on both surfaces (I1.3)", () => {
+  const stock = (s: string | null | undefined) => {
+    expect(s).toContain(DERIVED_STOCK.reason)
+    expect(s).toContain(DERIVED_STOCK.fix)
+  }
+  const caps = [...golden<{ capabilities: string[] }>("meta").capabilities, "playground"]
+  const fake = (studioMeta: boolean) =>
+    serveDerived(
+      new FakeStudio().on("GET meta", studioMeta ? { ...golden<Record<string, unknown>>("meta"), capabilities: caps } : { ...META, capabilities: caps })
+    ).install()
+
+  it("the same holes, chips and refusals, the same words", async () => {
+    // The panel: dev mode (a derived run has no public id), the turn opened.
+    fake(false)
+    const el = await mount({ "data-endpoint": "http://studio.test/studio/", "data-open": "true" })
+    await vi.waitFor(() => expect(all(el, ".weft-turn").length).toBe(2), { timeout: 5_000 })
+    click(all(el, ".weft-turn").find((b) => b.textContent.includes(DERIVED)))
+    await vi.waitFor(() => expect($(el, '[data-weft-turn-holes] [data-hole="derived"]')).toBeTruthy(), { timeout: 5_000 })
+    click($(el, "#weft-tab-request"))
+    await vi.waitFor(() => expect($(el, '#weft-tp-request [data-hole="derived"]')).toBeTruthy(), { timeout: 5_000 })
+    const panel = {
+      holes: holeSet(all(el, "[data-hole]")),
+      header: $(el, '[data-weft-turn-holes] [data-hole="derived"]')!.parentElement!.textContent,
+      chip: $(el, `.weft-turn [data-weft-chip="derived"]`)!.getAttribute("title"),
+      request: $(el, "#weft-tp-request")!.textContent,
+      verbs: all(el, "[data-weft-verb]").length,
+      saveLink: all(el, "a[data-weft-save-test]").length,
+      refused: all(el, '[data-weft-refused="derived"]').length,
+    }
+    el.remove()
+    await settle()
+    cleanup()
+    document.body.innerHTML = ""
+
+    // The run page on the same bodies: its story, then its row.
+    stubBrowser()
+    vi.stubGlobal("scrollTo", vi.fn())
+    StudioEventSource.reset()
+    vi.stubGlobal("EventSource", StudioEventSource)
+    setStudioToken("")
+    fake(true)
+    renderApp(`/runs/${DERIVED}?view=story`)
+    await waitFor(() => expect(document.querySelectorAll("[data-step] [data-request] [data-hole='derived']").length).toBe(2))
+    const studio = {
+      holes: holeSet(Array.from(document.querySelectorAll("[data-hole]"))),
+      header: document.querySelector("[data-run-holes]")!.textContent,
+      request: document.querySelector("[data-request]")!.textContent,
+      verbs: document.querySelectorAll("[data-replay-verb]").length,
+      refused: document.querySelectorAll("[data-replay-refused='derived'], [data-save-test='derived']").length,
+    }
+    renderApp("/runs")
+    await waitFor(() => expect(document.querySelector("[data-derived-chip] [data-hole='derived']")).toBeTruthy())
+    const studioChip = document.querySelector("[data-derived-chip] [data-hole='derived']")!.getAttribute("title")
+
+    // The same rows: one hole, derived, on each surface.
+    expect(panel.holes).toEqual(["derived"])
+    expect(studio.holes).toEqual(panel.holes)
+    for (const s of [panel.header, panel.chip, panel.request, studio.header, studioChip, studio.request]) stock(s)
+    expect(panel.chip).toBe(studioChip)
+    // Neither offers what the server would refuse; both say why.
+    expect(panel.verbs).toBe(0)
+    expect(studio.verbs).toBe(0)
+    expect(panel.saveLink).toBe(0)
+    expect(panel.refused).toBe(3) // ✎ Experiment, ↻ Re-run, save as test
+    expect(studio.refused).toBe(2) // replay, save as test
   })
 })

@@ -1,0 +1,9 @@
+{
+  "error": {
+    "code": "bad_request",
+    "message": "the run is derived from stock spans: it recorded no transcript, so there is nothing to replay (wefttest fixtures need weft's records, docs/record-contract.md)"
+  },
+  "badge": "derived",
+  "reason": "derived from spans · no events",
+  "fix": "the producer exports stock OTel GenAI spans only: emit weft's records (docs/record-contract.md) for events, the transcript and requests"
+}

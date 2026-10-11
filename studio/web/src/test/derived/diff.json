@@ -1,0 +1,109 @@
+{
+  "a": {
+    "run_id": "otel-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7",
+    "steps": 2,
+    "status": "succeeded"
+  },
+  "b": {
+    "run_id": "otel-5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10-1a2b3c4d5e6f7081",
+    "steps": 1,
+    "status": "failed"
+  },
+  "steps": [
+    {
+      "step": 0,
+      "changed": false,
+      "a": {
+        "status": "ok",
+        "system_hash": "",
+        "system": null,
+        "tool_calls": [
+          {
+            "name": "lookup_order",
+            "args": null
+          }
+        ],
+        "tool_results": [],
+        "text": null,
+        "usage": {
+          "input_tokens": 812,
+          "output_tokens": 41
+        },
+        "marks": [],
+        "holes": [
+          {
+            "hole": "derived",
+            "reason": "derived from spans · no events",
+            "fix": "the producer exports stock OTel GenAI spans only: emit weft's records (docs/record-contract.md) for events, the transcript and requests"
+          }
+        ]
+      },
+      "b": {
+        "status": "error",
+        "system_hash": "",
+        "system": null,
+        "tool_calls": [],
+        "tool_results": [],
+        "text": null,
+        "usage": {
+          "input_tokens": 1020,
+          "output_tokens": 25
+        },
+        "marks": [
+          "error"
+        ],
+        "holes": [
+          {
+            "hole": "derived",
+            "reason": "derived from spans · no events",
+            "fix": "the producer exports stock OTel GenAI spans only: emit weft's records (docs/record-contract.md) for events, the transcript and requests"
+          }
+        ]
+      },
+      "changes": [],
+      "unknown": [
+        "system",
+        "tool_calls",
+        "tool_results",
+        "text",
+        "usage"
+      ]
+    },
+    {
+      "step": 1,
+      "changed": true,
+      "a": {
+        "status": "ok",
+        "system_hash": "",
+        "system": null,
+        "tool_calls": [],
+        "tool_results": [],
+        "text": null,
+        "usage": {
+          "input_tokens": 905,
+          "output_tokens": 37
+        },
+        "marks": [],
+        "holes": [
+          {
+            "hole": "derived",
+            "reason": "derived from spans · no events",
+            "fix": "the producer exports stock OTel GenAI spans only: emit weft's records (docs/record-contract.md) for events, the transcript and requests"
+          }
+        ]
+      },
+      "b": null,
+      "changes": [
+        "missing"
+      ],
+      "unknown": []
+    }
+  ],
+  "summary": {
+    "changed_steps": [
+      1
+    ],
+    "first_changed": 1
+  },
+  "holes": []
+}

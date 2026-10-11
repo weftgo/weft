@@ -9,7 +9,7 @@ import { useEffect, useState } from "react"
 import type { RunDoc, Transcript } from "@/lib/api"
 import { producedTexts, runHoles, turnPrompt } from "@/lib/events"
 import type { FoldedRun } from "@/lib/events"
-import { mergeHoles, statusHoles } from "@/lib/honesty"
+import { isDerived, mergeHoles, statusHoles } from "@/lib/honesty"
 import {
   absoluteTime,
   duration,
@@ -337,7 +337,7 @@ export function RunHeader({
         <CompareWith doc={doc} />
         <span className="ml-auto flex items-center gap-2">
           <OpenInApp doc={doc} />
-          <SaveAsTest runID={doc.id} />
+          <SaveAsTest runID={doc.id} derived={isDerived(doc)} />
           <CopyLink />
         </span>
       </div>
@@ -346,7 +346,9 @@ export function RunHeader({
         <span>
           {doc.steps} {doc.steps === 1 ? "step" : "steps"}
         </span>
-        <span>{eventCount.toLocaleString()} events</span>
+        {/* A derived run has no events to count: its derived badge
+            (below) says so — "0 events" would read as lost. */}
+        {isDerived(doc) ? null : <span>{eventCount.toLocaleString()} events</span>}
         <span title="input / output tokens, subagents included">
           {usageSummary(doc.usage)}
         </span>

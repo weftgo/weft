@@ -447,7 +447,6 @@ module, ADR 0005).
   An agent whose name is a Go keyword gets the package stem `replay_<name>`.
 - `weft vacuum` with no database at the path refuses with "no database at
   <path> (nothing to vacuum)", exit 1, and creates nothing.
-
 - thread/pool: an approval recorded while a nested child was still
   parking (requests mirrored, phase not yet parked) was skipped by every
   pump and the child stayed parked for good; `park` now reads the

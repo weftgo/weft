@@ -1,0 +1,54 @@
+{
+  "case": "failed",
+  "description": "a run that fails: MaxSteps(1) with a model that keeps calling a tool — the invoke_agent span ends with status Error, error.type max_steps and the error text as its description; no run_finish",
+  "runs": [
+    {
+      "id": "a1100000000000000000000000000001",
+      "trace_id": "7ace0000000000000000000000000001",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "manifest_hash": "f6e3ac1e6f340510a4225656f87973a8e6163b9500f516c9d0fa877ffeccb29b",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:09:00Z",
+      "finished": "2026-10-01T09:09:00.028Z",
+      "last_seen": "2026-10-01T09:09:00.028Z",
+      "status": "failed",
+      "error": "weft: run failed at step 1: weft: run exceeded the maximum number of steps",
+      "steps": 1,
+      "stop_reason": "tool_calls",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 5,
+      "message_count": 3,
+      "delta_count": 0,
+      "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "catalog_hash": "d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8",
+      "request_count": 1,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "lookup_order",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "ok"
+        }
+      ],
+      "holes": []
+    }
+  ]
+}

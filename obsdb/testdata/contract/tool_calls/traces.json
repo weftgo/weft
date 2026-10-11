@@ -12,7 +12,7 @@
           {
             "key": "weft.version",
             "value": {
-              "stringValue": "v0.14.2"
+              "stringValue": "v0.0.0-contract"
             }
           }
         ]
@@ -21,9 +21,143 @@
         {
           "scope": {
             "name": "github.com/weftgo/weft/core",
-            "version": "v0.14.2"
+            "version": "v0.0.0-contract"
           },
           "spans": [
+            {
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "invoke_agent"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "wefttest"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "weft.instructions.hash",
+                  "value": {
+                    "stringValue": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7"
+                  }
+                },
+                {
+                  "key": "weft.manifest.hash",
+                  "value": {
+                    "stringValue": "387d2cc1cd3dd582e5a4e8afeb1434c5a9ace143a6d17d41b9336611c35c2851"
+                  }
+                },
+                {
+                  "key": "weft.version",
+                  "value": {
+                    "stringValue": "v0.0.0-contract"
+                  }
+                },
+                {
+                  "key": "enduser.id",
+                  "value": {
+                    "stringValue": "user_42"
+                  }
+                },
+                {
+                  "key": "tenant",
+                  "value": {
+                    "stringValue": "acme"
+                  }
+                },
+                {
+                  "key": "weft.experiment.id",
+                  "value": {
+                    "stringValue": "exp_contract"
+                  }
+                },
+                {
+                  "key": "weft.forked_from",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000099#1"
+                  }
+                },
+                {
+                  "key": "weft.playground",
+                  "value": {
+                    "stringValue": "true"
+                  }
+                },
+                {
+                  "key": "weft.playground.command",
+                  "value": {
+                    "stringValue": "cmd_contract"
+                  }
+                },
+                {
+                  "key": "weft.replay.view",
+                  "value": {
+                    "stringValue": "transcript"
+                  }
+                },
+                {
+                  "key": "user.id",
+                  "value": {
+                    "stringValue": "user_42"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": {
+                    "intValue": "20"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": {
+                    "intValue": "10"
+                  }
+                },
+                {
+                  "key": "weft.run.steps",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "weft.run.stop_reason",
+                  "value": {
+                    "stringValue": "stop"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790845260041000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "invoke_agent support",
+              "spanId": "5ba0000000000001",
+              "startTimeUnixNano": "1790845260000000000",
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "traceId": "7ace0000000000000000000000000001"
+            },
             {
               "attributes": [
                 {
@@ -35,7 +169,7 @@
                 {
                   "key": "weft.run.id",
                   "value": {
-                    "stringValue": "3ce363332c548062702d56f15ddc2f77"
+                    "stringValue": "a1100000000000000000000000000001"
                   }
                 },
                 {
@@ -60,6 +194,54 @@
                   "key": "gen_ai.request.model",
                   "value": {
                     "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "enduser.id",
+                  "value": {
+                    "stringValue": "user_42"
+                  }
+                },
+                {
+                  "key": "tenant",
+                  "value": {
+                    "stringValue": "acme"
+                  }
+                },
+                {
+                  "key": "weft.experiment.id",
+                  "value": {
+                    "stringValue": "exp_contract"
+                  }
+                },
+                {
+                  "key": "weft.forked_from",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000099#1"
+                  }
+                },
+                {
+                  "key": "weft.playground",
+                  "value": {
+                    "stringValue": "true"
+                  }
+                },
+                {
+                  "key": "weft.playground.command",
+                  "value": {
+                    "stringValue": "cmd_contract"
+                  }
+                },
+                {
+                  "key": "weft.replay.view",
+                  "value": {
+                    "stringValue": "transcript"
+                  }
+                },
+                {
+                  "key": "user.id",
+                  "value": {
+                    "stringValue": "user_42"
                   }
                 },
                 {
@@ -99,17 +281,17 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790845260000198687",
+              "endTimeUnixNano": "1790845260014000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
-              "parentSpanId": "a76b161009b165de",
-              "spanId": "1019ef1c09af543a",
-              "startTimeUnixNano": "1790845260000093087",
+              "parentSpanId": "5ba0000000000001",
+              "spanId": "5ba0000000000002",
+              "startTimeUnixNano": "1790845260007000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
-              "traceId": "cd21f136d17a92b2d07575fe52f7e85d"
+              "traceId": "7ace0000000000000000000000000001"
             },
             {
               "attributes": [
@@ -134,7 +316,7 @@
                 {
                   "key": "weft.run.id",
                   "value": {
-                    "stringValue": "3ce363332c548062702d56f15ddc2f77"
+                    "stringValue": "a1100000000000000000000000000001"
                   }
                 },
                 {
@@ -150,23 +332,71 @@
                   }
                 },
                 {
+                  "key": "enduser.id",
+                  "value": {
+                    "stringValue": "user_42"
+                  }
+                },
+                {
+                  "key": "tenant",
+                  "value": {
+                    "stringValue": "acme"
+                  }
+                },
+                {
+                  "key": "weft.experiment.id",
+                  "value": {
+                    "stringValue": "exp_contract"
+                  }
+                },
+                {
+                  "key": "weft.forked_from",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000099#1"
+                  }
+                },
+                {
+                  "key": "weft.playground",
+                  "value": {
+                    "stringValue": "true"
+                  }
+                },
+                {
+                  "key": "weft.playground.command",
+                  "value": {
+                    "stringValue": "cmd_contract"
+                  }
+                },
+                {
+                  "key": "weft.replay.view",
+                  "value": {
+                    "stringValue": "transcript"
+                  }
+                },
+                {
+                  "key": "user.id",
+                  "value": {
+                    "stringValue": "user_42"
+                  }
+                },
+                {
                   "key": "weft.tool.result_bytes",
                   "value": {
                     "intValue": "19"
                   }
                 }
               ],
-              "endTimeUnixNano": "1790845260000306632",
+              "endTimeUnixNano": "1790845260020000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "execute_tool lookup_order",
-              "parentSpanId": "a76b161009b165de",
-              "spanId": "0c80d6ad05328e48",
-              "startTimeUnixNano": "1790845260000287616",
+              "parentSpanId": "5ba0000000000001",
+              "spanId": "5ba0000000000003",
+              "startTimeUnixNano": "1790845260019000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
-              "traceId": "cd21f136d17a92b2d07575fe52f7e85d"
+              "traceId": "7ace0000000000000000000000000001"
             },
             {
               "attributes": [
@@ -179,7 +409,7 @@
                 {
                   "key": "weft.run.id",
                   "value": {
-                    "stringValue": "3ce363332c548062702d56f15ddc2f77"
+                    "stringValue": "a1100000000000000000000000000001"
                   }
                 },
                 {
@@ -204,6 +434,54 @@
                   "key": "gen_ai.request.model",
                   "value": {
                     "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "enduser.id",
+                  "value": {
+                    "stringValue": "user_42"
+                  }
+                },
+                {
+                  "key": "tenant",
+                  "value": {
+                    "stringValue": "acme"
+                  }
+                },
+                {
+                  "key": "weft.experiment.id",
+                  "value": {
+                    "stringValue": "exp_contract"
+                  }
+                },
+                {
+                  "key": "weft.forked_from",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000099#1"
+                  }
+                },
+                {
+                  "key": "weft.playground",
+                  "value": {
+                    "stringValue": "true"
+                  }
+                },
+                {
+                  "key": "weft.playground.command",
+                  "value": {
+                    "stringValue": "cmd_contract"
+                  }
+                },
+                {
+                  "key": "weft.replay.view",
+                  "value": {
+                    "stringValue": "transcript"
+                  }
+                },
+                {
+                  "key": "user.id",
+                  "value": {
+                    "stringValue": "user_42"
                   }
                 },
                 {
@@ -249,103 +527,17 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790845260000424736",
+              "endTimeUnixNano": "1790845260034000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
-              "parentSpanId": "a76b161009b165de",
-              "spanId": "75165a6745616347",
-              "startTimeUnixNano": "1790845260000362227",
+              "parentSpanId": "5ba0000000000001",
+              "spanId": "5ba0000000000004",
+              "startTimeUnixNano": "1790845260029000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
-              "traceId": "cd21f136d17a92b2d07575fe52f7e85d"
-            },
-            {
-              "attributes": [
-                {
-                  "key": "gen_ai.operation.name",
-                  "value": {
-                    "stringValue": "invoke_agent"
-                  }
-                },
-                {
-                  "key": "weft.run.id",
-                  "value": {
-                    "stringValue": "3ce363332c548062702d56f15ddc2f77"
-                  }
-                },
-                {
-                  "key": "gen_ai.agent.name",
-                  "value": {
-                    "stringValue": "support"
-                  }
-                },
-                {
-                  "key": "gen_ai.provider.name",
-                  "value": {
-                    "stringValue": "wefttest"
-                  }
-                },
-                {
-                  "key": "gen_ai.request.model",
-                  "value": {
-                    "stringValue": "script"
-                  }
-                },
-                {
-                  "key": "weft.instructions.hash",
-                  "value": {
-                    "stringValue": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7"
-                  }
-                },
-                {
-                  "key": "weft.manifest.hash",
-                  "value": {
-                    "stringValue": "d6451b7cf13d4532a5978ffc453479ce08cadc906ccd7262afed3d68a22f99ce"
-                  }
-                },
-                {
-                  "key": "weft.version",
-                  "value": {
-                    "stringValue": "v0.14.2"
-                  }
-                },
-                {
-                  "key": "gen_ai.usage.input_tokens",
-                  "value": {
-                    "intValue": "20"
-                  }
-                },
-                {
-                  "key": "gen_ai.usage.output_tokens",
-                  "value": {
-                    "intValue": "10"
-                  }
-                },
-                {
-                  "key": "weft.run.steps",
-                  "value": {
-                    "intValue": "2"
-                  }
-                },
-                {
-                  "key": "weft.run.stop_reason",
-                  "value": {
-                    "stringValue": "stop"
-                  }
-                }
-              ],
-              "endTimeUnixNano": "1790845260000523644",
-              "flags": 257,
-              "kind": "SPAN_KIND_INTERNAL",
-              "name": "invoke_agent support",
-              "spanId": "a76b161009b165de",
-              "startTimeUnixNano": "1790845260000000000",
-              "status": {
-                "code": "STATUS_CODE_OK"
-              },
-              "traceId": "cd21f136d17a92b2d07575fe52f7e85d"
+              "traceId": "7ace0000000000000000000000000001"
             }
           ]
         }

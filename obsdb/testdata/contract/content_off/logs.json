@@ -12,7 +12,7 @@
           {
             "key": "weft.version",
             "value": {
-              "stringValue": "v0.14.2"
+              "stringValue": "v0.0.0-contract"
             }
           }
         ]
@@ -31,7 +31,7 @@
                 {
                   "key": "weft.run.id",
                   "value": {
-                    "stringValue": "1f620eee8a310555892855d1fbf7f77d"
+                    "stringValue": "a1100000000000000000000000000001"
                   }
                 },
                 {
@@ -55,7 +55,7 @@
                 {
                   "key": "weft.manifest.hash",
                   "value": {
-                    "stringValue": "d6451b7cf13d4532a5978ffc453479ce08cadc906ccd7262afed3d68a22f99ce"
+                    "stringValue": "387d2cc1cd3dd582e5a4e8afeb1434c5a9ace143a6d17d41b9336611c35c2851"
                   }
                 },
                 {
@@ -67,7 +67,7 @@
                 {
                   "key": "weft.version",
                   "value": {
-                    "stringValue": "v0.14.2"
+                    "stringValue": "v0.0.0-contract"
                   }
                 },
                 {
@@ -78,15 +78,15 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"type\":\"run_start\",\"id\":\"1f620eee8a310555892855d1fbf7f77d\",\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"agent\":\"support\",\"instructions_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\"}"
+                "stringValue": "{\"type\":\"run_start\",\"id\":\"a1100000000000000000000000000001\",\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"agent\":\"support\",\"instructions_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\"}"
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790845500000009418",
+              "observedTimeUnixNano": "1790845500002000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
-              "spanId": "afb4d9e9aae55336",
-              "timeUnixNano": "1790845500000005591",
-              "traceId": "2e92493157e980a1aed38f06c3f9d23d"
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790845500001000000",
+              "traceId": "7ace0000000000000000000000000001"
             },
             {
               "attributes": [
@@ -99,7 +99,7 @@
                 {
                   "key": "weft.run.id",
                   "value": {
-                    "stringValue": "1f620eee8a310555892855d1fbf7f77d"
+                    "stringValue": "a1100000000000000000000000000001"
                   }
                 },
                 {
@@ -134,15 +134,15 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"type\":\"step_start\",\"run_id\":\"1f620eee8a310555892855d1fbf7f77d\",\"index\":0}"
+                "stringValue": "{\"type\":\"step_start\",\"run_id\":\"a1100000000000000000000000000001\",\"index\":0}"
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790845500000042701",
+              "observedTimeUnixNano": "1790845500004000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
-              "spanId": "afb4d9e9aae55336",
-              "timeUnixNano": "1790845500000041008",
-              "traceId": "2e92493157e980a1aed38f06c3f9d23d"
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790845500003000000",
+              "traceId": "7ace0000000000000000000000000001"
             },
             {
               "attributes": [
@@ -155,7 +155,7 @@
                 {
                   "key": "weft.run.id",
                   "value": {
-                    "stringValue": "1f620eee8a310555892855d1fbf7f77d"
+                    "stringValue": "a1100000000000000000000000000001"
                   }
                 },
                 {
@@ -206,11 +206,11 @@
               },
               "eventName": "weft.request",
               "flags": 1,
-              "observedTimeUnixNano": "1790845500000077648",
+              "observedTimeUnixNano": "1790845500007000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
-              "spanId": "9bab6c2fa949d125",
-              "timeUnixNano": "1790845500000077047",
-              "traceId": "2e92493157e980a1aed38f06c3f9d23d"
+              "spanId": "5ba0000000000002",
+              "timeUnixNano": "1790845500006000000",
+              "traceId": "7ace0000000000000000000000000001"
             },
             {
               "attributes": [
@@ -223,7 +223,7 @@
                 {
                   "key": "weft.run.id",
                   "value": {
-                    "stringValue": "1f620eee8a310555892855d1fbf7f77d"
+                    "stringValue": "a1100000000000000000000000000001"
                   }
                 },
                 {
@@ -270,15 +270,15 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"type\":\"tool_start\",\"run_id\":\"1f620eee8a310555892855d1fbf7f77d\",\"seq\":1,\"call_id\":\"call_1\",\"name\":\"lookup_order\",\"args\":null}"
+                "stringValue": "{\"type\":\"tool_start\",\"run_id\":\"a1100000000000000000000000000001\",\"seq\":1,\"call_id\":\"call_1\",\"name\":\"lookup_order\",\"args\":null}"
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790845500000103757",
+              "observedTimeUnixNano": "1790845500010000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
-              "spanId": "afb4d9e9aae55336",
-              "timeUnixNano": "1790845500000101343",
-              "traceId": "2e92493157e980a1aed38f06c3f9d23d"
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790845500009000000",
+              "traceId": "7ace0000000000000000000000000001"
             },
             {
               "attributes": [
@@ -291,7 +291,7 @@
                 {
                   "key": "weft.run.id",
                   "value": {
-                    "stringValue": "1f620eee8a310555892855d1fbf7f77d"
+                    "stringValue": "a1100000000000000000000000000001"
                   }
                 },
                 {
@@ -338,15 +338,15 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"type\":\"tool_finish\",\"run_id\":\"1f620eee8a310555892855d1fbf7f77d\",\"seq\":2,\"call_id\":\"call_1\",\"name\":\"lookup_order\",\"content\":\"\",\"is_error\":false}"
+                "stringValue": "{\"type\":\"tool_finish\",\"run_id\":\"a1100000000000000000000000000001\",\"seq\":2,\"call_id\":\"call_1\",\"name\":\"lookup_order\",\"content\":\"\",\"is_error\":false}"
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790845500000125078",
+              "observedTimeUnixNano": "1790845500014000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
-              "spanId": "afb4d9e9aae55336",
-              "timeUnixNano": "1790845500000120289",
-              "traceId": "2e92493157e980a1aed38f06c3f9d23d"
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790845500013000000",
+              "traceId": "7ace0000000000000000000000000001"
             },
             {
               "attributes": [
@@ -359,7 +359,7 @@
                 {
                   "key": "weft.run.id",
                   "value": {
-                    "stringValue": "1f620eee8a310555892855d1fbf7f77d"
+                    "stringValue": "a1100000000000000000000000000001"
                   }
                 },
                 {
@@ -406,15 +406,15 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"type\":\"step_finish\",\"run_id\":\"1f620eee8a310555892855d1fbf7f77d\",\"index\":0,\"reason\":\"tool_calls\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"latency_ms\":1}"
+                "stringValue": "{\"type\":\"step_finish\",\"run_id\":\"a1100000000000000000000000000001\",\"index\":0,\"reason\":\"tool_calls\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"latency_ms\":1}"
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790845500000136239",
+              "observedTimeUnixNano": "1790845500016000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
-              "spanId": "afb4d9e9aae55336",
-              "timeUnixNano": "1790845500000133183",
-              "traceId": "2e92493157e980a1aed38f06c3f9d23d"
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790845500015000000",
+              "traceId": "7ace0000000000000000000000000001"
             },
             {
               "attributes": [
@@ -427,7 +427,7 @@
                 {
                   "key": "weft.run.id",
                   "value": {
-                    "stringValue": "1f620eee8a310555892855d1fbf7f77d"
+                    "stringValue": "a1100000000000000000000000000001"
                   }
                 },
                 {
@@ -462,15 +462,15 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"type\":\"step_start\",\"run_id\":\"1f620eee8a310555892855d1fbf7f77d\",\"index\":1}"
+                "stringValue": "{\"type\":\"step_start\",\"run_id\":\"a1100000000000000000000000000001\",\"index\":1}"
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790845500000150175",
+              "observedTimeUnixNano": "1790845500018000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
-              "spanId": "afb4d9e9aae55336",
-              "timeUnixNano": "1790845500000148843",
-              "traceId": "2e92493157e980a1aed38f06c3f9d23d"
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790845500017000000",
+              "traceId": "7ace0000000000000000000000000001"
             },
             {
               "attributes": [
@@ -483,7 +483,7 @@
                 {
                   "key": "weft.run.id",
                   "value": {
-                    "stringValue": "1f620eee8a310555892855d1fbf7f77d"
+                    "stringValue": "a1100000000000000000000000000001"
                   }
                 },
                 {
@@ -534,11 +534,11 @@
               },
               "eventName": "weft.request",
               "flags": 1,
-              "observedTimeUnixNano": "1790845500000159603",
+              "observedTimeUnixNano": "1790845500021000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
-              "spanId": "a31059e24fb1dfd9",
-              "timeUnixNano": "1790845500000157649",
-              "traceId": "2e92493157e980a1aed38f06c3f9d23d"
+              "spanId": "5ba0000000000004",
+              "timeUnixNano": "1790845500020000000",
+              "traceId": "7ace0000000000000000000000000001"
             },
             {
               "attributes": [
@@ -551,7 +551,7 @@
                 {
                   "key": "weft.run.id",
                   "value": {
-                    "stringValue": "1f620eee8a310555892855d1fbf7f77d"
+                    "stringValue": "a1100000000000000000000000000001"
                   }
                 },
                 {
@@ -580,15 +580,15 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"type\":\"text_delta\",\"run_id\":\"1f620eee8a310555892855d1fbf7f77d\",\"text\":\"\"}"
+                "stringValue": "{\"type\":\"text_delta\",\"run_id\":\"a1100000000000000000000000000001\",\"text\":\"\"}"
               },
               "eventName": "weft.delta",
               "flags": 1,
-              "observedTimeUnixNano": "1790845500000170844",
+              "observedTimeUnixNano": "1790845500023000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
-              "spanId": "afb4d9e9aae55336",
-              "timeUnixNano": "1790845500000169552",
-              "traceId": "2e92493157e980a1aed38f06c3f9d23d"
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790845500022000000",
+              "traceId": "7ace0000000000000000000000000001"
             },
             {
               "attributes": [
@@ -601,7 +601,7 @@
                 {
                   "key": "weft.run.id",
                   "value": {
-                    "stringValue": "1f620eee8a310555892855d1fbf7f77d"
+                    "stringValue": "a1100000000000000000000000000001"
                   }
                 },
                 {
@@ -654,15 +654,15 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"type\":\"step_finish\",\"run_id\":\"1f620eee8a310555892855d1fbf7f77d\",\"index\":1,\"reason\":\"stop\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"latency_ms\":1,\"ttft_ms\":1}"
+                "stringValue": "{\"type\":\"step_finish\",\"run_id\":\"a1100000000000000000000000000001\",\"index\":1,\"reason\":\"stop\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"latency_ms\":1,\"ttft_ms\":1}"
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790845500000182897",
+              "observedTimeUnixNano": "1790845500026000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
-              "spanId": "afb4d9e9aae55336",
-              "timeUnixNano": "1790845500000179972",
-              "traceId": "2e92493157e980a1aed38f06c3f9d23d"
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790845500025000000",
+              "traceId": "7ace0000000000000000000000000001"
             },
             {
               "attributes": [
@@ -675,7 +675,7 @@
                 {
                   "key": "weft.run.id",
                   "value": {
-                    "stringValue": "1f620eee8a310555892855d1fbf7f77d"
+                    "stringValue": "a1100000000000000000000000000001"
                   }
                 },
                 {
@@ -704,20 +704,20 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"type\":\"run_finish\",\"run_id\":\"1f620eee8a310555892855d1fbf7f77d\",\"usage\":{\"input_tokens\":20,\"output_tokens\":10},\"steps\":2}"
+                "stringValue": "{\"type\":\"run_finish\",\"run_id\":\"a1100000000000000000000000000001\",\"usage\":{\"input_tokens\":20,\"output_tokens\":10},\"steps\":2}"
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790845500000193417",
+              "observedTimeUnixNano": "1790845500028000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
-              "spanId": "afb4d9e9aae55336",
-              "timeUnixNano": "1790845500000191874",
-              "traceId": "2e92493157e980a1aed38f06c3f9d23d"
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790845500027000000",
+              "traceId": "7ace0000000000000000000000000001"
             }
           ],
           "scope": {
             "name": "github.com/weftgo/weft/core",
-            "version": "v0.14.2"
+            "version": "v0.0.0-contract"
           }
         }
       ]

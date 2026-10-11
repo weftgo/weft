@@ -3,20 +3,25 @@
   "description": "a process that died inside a tool call: what it had exported by then (no invoke_agent span, no run_finish), so the status is derived interrupted from a stale last-seen",
   "runs": [
     {
-      "id": "114b7be1bdf677693ab75bae13ea4c06",
-      "trace_id": "b385162638941df4fd2605eabf813a74",
+      "id": "a1100000000000000000000000000001",
+      "trace_id": "7ace0000000000000000000000000001",
       "service": "contract-app",
       "agent": "support",
       "provider": "wefttest",
       "model": "script",
+      "manifest_hash": "9d8252e43c5853d3b6d4016185280f1a3c21cb8e46a86f06f160a4db25240680",
+      "weft_version": "v0.0.0-contract",
       "started": "2026-10-01T09:07:00Z",
+      "last_seen": "2026-10-01T09:07:00.016Z",
       "status": "interrupted",
       "steps": 0,
       "usage": {
         "input_tokens": 0,
         "output_tokens": 0
       },
+      "event_count": 3,
       "message_count": 2,
+      "delta_count": 0,
       "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
       "catalog_hash": "d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8",
       "request_count": 1,

@@ -3,14 +3,17 @@
   "description": "the plain run as a weft before ADR 0028 wrote it: no request, prompt or tools records and no weft.instructions.hash — the not_recorded reading of ADR 0028 §10's table",
   "runs": [
     {
-      "id": "4c51bc9a9ae6e77e06f25dc67ff6431c",
-      "trace_id": "14f51317d4f13eef991fb7c0e739071b",
+      "id": "a1100000000000000000000000000001",
+      "trace_id": "7ace0000000000000000000000000001",
       "service": "contract-app",
       "agent": "support",
       "provider": "wefttest",
       "model": "script",
+      "manifest_hash": "1e890c5865ec32d458bc58b2ba84ed276bf8a24eb3784db46c70992cc85c5a68",
+      "weft_version": "v0.0.0-contract",
       "started": "2026-10-01T09:08:00Z",
-      "finished": "2026-10-01T09:08:00.000158751Z",
+      "finished": "2026-10-01T09:08:00.017Z",
+      "last_seen": "2026-10-01T09:08:00.017Z",
       "status": "succeeded",
       "steps": 1,
       "stop_reason": "stop",
@@ -18,7 +21,9 @@
         "input_tokens": 10,
         "output_tokens": 5
       },
+      "event_count": 4,
       "message_count": 2,
+      "delta_count": 1,
       "request_count": 0,
       "chat": [
         {

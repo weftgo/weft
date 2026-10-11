@@ -1,16 +1,28 @@
 {
   "case": "tool_calls",
-  "description": "two steps: a tool call (execute_tool lookup_order) then the answer",
+  "description": "two steps: a tool call (execute_tool lookup_order) then the answer; run metadata through core.Metadata — a caller key and enduser.id in meta (user.id, its mirror, not), and the playground marks weft/runtime stamps (weft.playground, weft.experiment.id and weft.forked_from as row columns; weft.playground.command and weft.replay.view in meta)",
   "runs": [
     {
-      "id": "3ce363332c548062702d56f15ddc2f77",
-      "trace_id": "cd21f136d17a92b2d07575fe52f7e85d",
+      "id": "a1100000000000000000000000000001",
+      "trace_id": "7ace0000000000000000000000000001",
       "service": "contract-app",
       "agent": "support",
       "provider": "wefttest",
       "model": "script",
+      "playground": true,
+      "experiment_id": "exp_contract",
+      "forked_from": "a1100000000000000000000000000099#1",
+      "manifest_hash": "387d2cc1cd3dd582e5a4e8afeb1434c5a9ace143a6d17d41b9336611c35c2851",
+      "weft_version": "v0.0.0-contract",
+      "meta": {
+        "enduser.id": "user_42",
+        "tenant": "acme",
+        "weft.playground.command": "cmd_contract",
+        "weft.replay.view": "transcript"
+      },
       "started": "2026-10-01T09:01:00Z",
-      "finished": "2026-10-01T09:01:00.000523644Z",
+      "finished": "2026-10-01T09:01:00.041Z",
+      "last_seen": "2026-10-01T09:01:00.041Z",
       "status": "succeeded",
       "steps": 2,
       "stop_reason": "stop",
@@ -18,7 +30,9 @@
         "input_tokens": 20,
         "output_tokens": 10
       },
+      "event_count": 8,
       "message_count": 4,
+      "delta_count": 1,
       "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
       "catalog_hash": "d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8",
       "request_count": 2,

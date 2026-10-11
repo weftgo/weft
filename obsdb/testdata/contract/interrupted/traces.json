@@ -12,7 +12,7 @@
           {
             "key": "weft.version",
             "value": {
-              "stringValue": "v0.14.2"
+              "stringValue": "v0.0.0-contract"
             }
           }
         ]
@@ -21,7 +21,7 @@
         {
           "scope": {
             "name": "github.com/weftgo/weft/core",
-            "version": "v0.14.2"
+            "version": "v0.0.0-contract"
           },
           "spans": [
             {
@@ -35,7 +35,7 @@
                 {
                   "key": "weft.run.id",
                   "value": {
-                    "stringValue": "114b7be1bdf677693ab75bae13ea4c06"
+                    "stringValue": "a1100000000000000000000000000001"
                   }
                 },
                 {
@@ -99,17 +99,17 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790845620000150515",
+              "endTimeUnixNano": "1790845620013000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
-              "parentSpanId": "b5d90bf06e2cdb98",
-              "spanId": "30774d57d8910405",
-              "startTimeUnixNano": "1790845620000054663",
+              "parentSpanId": "5ba0000000000002",
+              "spanId": "5ba0000000000001",
+              "startTimeUnixNano": "1790845620006000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
-              "traceId": "b385162638941df4fd2605eabf813a74"
+              "traceId": "7ace0000000000000000000000000001"
             }
           ]
         }

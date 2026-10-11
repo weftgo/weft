@@ -29,6 +29,8 @@ import (
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
+	logspb "go.opentelemetry.io/proto/otlp/logs/v1"
+	tracepb "go.opentelemetry.io/proto/otlp/trace/v1"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
@@ -51,22 +53,23 @@ import (
 // database when WEFT_CLICKHOUSE_DSN names a server.
 //
 // The inputs are what the pipeline really emits: `go test ./obsdb -run
-// TestContract -update` regenerates them from real runs (a
+// TestContract -update-contract` regenerates them from real runs (a
 // wefttest.Script agent under otel.Start, exporting OTLP/HTTP to a
-// loopback receiver), timestamps shifted to a fixed epoch so a case's
-// times are stable. Only the stock-GenAI case is hand-typed, and a case
+// loopback receiver), normalised so a regeneration with no code change
+// is byte-identical (normaliseCase: ids renumbered in first-seen order,
+// times ranked onto a fixed epoch, measured durations and the framework
+// version fixed). Only the stock-GenAI case is hand-typed, and a case
 // whose expect.json carries "pending" is skipped with that reason until
 // the item it names lands.
 
 const contractDir = "testdata/contract"
 
-// updating reports whether -update is set. wefttest registers the flag
-// (its Golden helper's), so this file reads it rather than defining
-// its own.
-func updating() bool {
-	f := flag.Lookup("update")
-	return f != nil && f.Value.String() == "true"
-}
+// updateContract regenerates the generated cases. It is this file's own
+// flag, not wefttest's shared -update (README's `go test ./... -update`
+// for weft.json): regenerating the conformance set is a deliberate act,
+// and its output is deterministic (normaliseCase), so a run with no code
+// change leaves `git diff` empty.
+var updateContract = flag.Bool("update-contract", false, "regenerate obsdb/testdata/contract from real pipeline runs")
 
 // expectDoc is expect.json.
 type expectDoc struct {
@@ -82,34 +85,41 @@ type expectDoc struct {
 // spans, the waterfall's steps) and tool calls (its execute_tool
 // spans), and the run-level badges (ADR 0028 §11's words).
 type contractRun struct {
-	ID               string        `json:"id"`
-	ParentRunID      string        `json:"parent_run_id,omitempty"`
-	ParentCallID     string        `json:"parent_call_id,omitempty"`
-	TraceID          string        `json:"trace_id,omitempty"`
-	Service          string        `json:"service,omitempty"`
-	Agent            string        `json:"agent,omitempty"`
-	Provider         string        `json:"provider,omitempty"`
-	Model            string        `json:"model,omitempty"`
-	SessionID        string        `json:"session_id,omitempty"`
-	PublicID         string        `json:"public_id,omitempty"`
-	Turn             int           `json:"turn,omitempty"`
-	Playground       bool          `json:"playground,omitempty"`
-	ForkedFrom       string        `json:"forked_from,omitempty"`
-	Started          string        `json:"started"`
-	Finished         string        `json:"finished,omitempty"`
-	Status           obsdb.Status  `json:"status"`
-	Error            string        `json:"error,omitempty"`
-	Steps            int           `json:"steps"`
-	Pending          int           `json:"pending,omitempty"`
-	StopReason       string        `json:"stop_reason,omitempty"`
-	Usage            core.Usage    `json:"usage"`
-	MessageCount     int64         `json:"message_count"`
-	InstructionsHash string        `json:"instructions_hash,omitempty"`
-	CatalogHash      string        `json:"catalog_hash,omitempty"`
-	RequestCount     int64         `json:"request_count"`
-	Chat             []contractLLM `json:"chat"`
-	Tools            []contractRPC `json:"tools"`
-	Holes            []obsdb.Hole  `json:"holes"`
+	ID               string            `json:"id"`
+	ParentRunID      string            `json:"parent_run_id,omitempty"`
+	ParentCallID     string            `json:"parent_call_id,omitempty"`
+	TraceID          string            `json:"trace_id,omitempty"`
+	Service          string            `json:"service,omitempty"`
+	Agent            string            `json:"agent,omitempty"`
+	Provider         string            `json:"provider,omitempty"`
+	Model            string            `json:"model,omitempty"`
+	SessionID        string            `json:"session_id,omitempty"`
+	PublicID         string            `json:"public_id,omitempty"`
+	Turn             int               `json:"turn,omitempty"`
+	Playground       bool              `json:"playground,omitempty"`
+	ExperimentID     string            `json:"experiment_id,omitempty"`
+	ForkedFrom       string            `json:"forked_from,omitempty"`
+	ManifestHash     string            `json:"manifest_hash,omitempty"`
+	WeftVersion      string            `json:"weft_version,omitempty"`
+	Meta             map[string]string `json:"meta,omitempty"`
+	Started          string            `json:"started"`
+	Finished         string            `json:"finished,omitempty"`
+	LastSeen         string            `json:"last_seen"`
+	Status           obsdb.Status      `json:"status"`
+	Error            string            `json:"error,omitempty"`
+	Steps            int               `json:"steps"`
+	Pending          int               `json:"pending,omitempty"`
+	StopReason       string            `json:"stop_reason,omitempty"`
+	Usage            core.Usage        `json:"usage"`
+	EventCount       int64             `json:"event_count"`
+	MessageCount     int64             `json:"message_count"`
+	DeltaCount       int64             `json:"delta_count"`
+	InstructionsHash string            `json:"instructions_hash,omitempty"`
+	CatalogHash      string            `json:"catalog_hash,omitempty"`
+	RequestCount     int64             `json:"request_count"`
+	Chat             []contractLLM     `json:"chat"`
+	Tools            []contractRPC     `json:"tools"`
+	Holes            []obsdb.Hole      `json:"holes"`
 }
 
 // contractLLM is one chat span: one model call.
@@ -133,7 +143,7 @@ type contractRPC struct {
 }
 
 func TestContract(t *testing.T) {
-	if updating() {
+	if *updateContract {
 		generateContract(t)
 	}
 	runContract(t, "sqlite", func(t *testing.T) obsdb.DB {
@@ -270,10 +280,11 @@ func observeRuns(t *testing.T, db obsdb.DB) []contractRun {
 			TraceID: r.TraceID, Service: r.Service,
 			Agent: r.Agent, Provider: r.Provider, Model: r.Model,
 			SessionID: r.SessionID, PublicID: r.PublicID, Turn: r.Turn,
-			Playground: r.Playground, ForkedFrom: r.ForkedFrom,
-			Started: stamp(r.Started), Status: r.Status, Error: r.Err,
+			Playground: r.Playground, ExperimentID: r.ExperimentID, ForkedFrom: r.ForkedFrom,
+			ManifestHash: r.ManifestHash, WeftVersion: r.WeftVersion, Meta: r.Meta,
+			Started: stamp(r.Started), LastSeen: stamp(r.LastSeen), Status: r.Status, Error: r.Err,
 			Steps: r.Steps, Pending: r.Pending, StopReason: r.StopReason,
-			Usage: r.Usage, MessageCount: r.MessageCount,
+			Usage: r.Usage, EventCount: r.EventCount, MessageCount: r.MessageCount, DeltaCount: r.DeltaCount,
 			InstructionsHash: r.InstructionsHash, CatalogHash: r.CatalogHash,
 			RequestCount: r.RequestCount,
 			Chat:         []contractLLM{}, Tools: []contractRPC{},
@@ -470,8 +481,10 @@ func openFreshClickHouse(t *testing.T) obsdb.DB {
 // TestRecordContractDocNames pins docs/record-contract.md to the code
 // both ways: every weft.* and gen_ai.* name the doc spells in
 // backticks is a string the emitters or obsdb spell (core, otel,
-// thread, runtime, scope, obsdb — non-test sources), and every
-// attribute name obsdb/model.go spells is in the doc. A `weft.x.*`
+// thread, runtime, scope, obsdb and every package under them —
+// non-test sources), and every attribute name obsdb/model.go spells is
+// in the doc. Names are matched in any case and with hyphens, so a
+// misspelt `weft.forked-from` is caught, not skipped. A `weft.x.*`
 // family needs one name under it.
 func TestRecordContractDocNames(t *testing.T) {
 	doc, err := os.ReadFile(filepath.Join("..", "docs", "record-contract.md"))
@@ -479,23 +492,32 @@ func TestRecordContractDocNames(t *testing.T) {
 		t.Fatal(err)
 	}
 	code := map[string]bool{}
-	lit := regexp.MustCompile(`"((?:weft|gen_ai)\.[a-z0-9_.]+)"`)
-	for _, dir := range []string{"../core", "../otel", "../thread", "../runtime", "../scope", "."} {
-		files, err := filepath.Glob(filepath.Join(dir, "*.go"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		for _, f := range files {
-			if strings.HasSuffix(f, "_test.go") {
-				continue
-			}
-			b, err := os.ReadFile(f)
+	lit := regexp.MustCompile(`"((?:weft|gen_ai)\.[A-Za-z0-9_.-]+)"`)
+	for _, root := range []string{"../core", "../otel", "../thread", "../runtime", "../scope", "."} {
+		err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if err != nil {
-				t.Fatal(err)
+				return err
+			}
+			if d.IsDir() {
+				if path != root && (d.Name() == "testdata" || d.Name() == "node_modules" || strings.HasPrefix(d.Name(), ".")) {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
+				return nil
+			}
+			b, err := os.ReadFile(path)
+			if err != nil {
+				return err
 			}
 			for _, m := range lit.FindAllSubmatch(b, -1) {
 				code[string(m[1])] = true
 			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
 		}
 	}
 	// The gen_ai.* keys the core writes through semconv constants
@@ -504,7 +526,7 @@ func TestRecordContractDocNames(t *testing.T) {
 	code["session.id"], code["user.id"] = true, true
 
 	tick := regexp.MustCompile("`([^`\n]+)`")
-	name := regexp.MustCompile(`^(?:weft|gen_ai)\.[a-z0-9_]+(?:\.[a-z0-9_]+)*(\.\*)?$`)
+	name := regexp.MustCompile(`^(?:weft|gen_ai)\.[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*(\.\*)?$`)
 	inDoc := map[string]bool{}
 	for _, m := range tick.FindAllSubmatch(doc, -1) {
 		s := strings.TrimSpace(string(m[1]))
@@ -544,7 +566,7 @@ func TestRecordContractDocNames(t *testing.T) {
 	}
 }
 
-// --- the generator (-update) ---
+// --- the generator (-update-contract) ---
 
 // genCase is one real-pipeline case: run drives agents under the
 // pipeline and returns the run ids it made (the generator's own check
@@ -612,9 +634,12 @@ func captureCase(t *testing.T, gc genCase, epoch time.Time, dir string) []string
 	if gc.edit != nil {
 		gc.edit(tr, lg)
 	}
-	shiftTimes(tr, lg, epoch)
+	ren := normaliseCase(tr, lg, epoch)
 	writeOTLP(t, filepath.Join(dir, "traces.json"), tr)
 	writeOTLP(t, filepath.Join(dir, "logs.json"), lg)
+	for i, id := range ids {
+		ids[i] = ren.Replace(id)
+	}
 	return ids
 }
 
@@ -694,25 +719,287 @@ func (c *otlpCapture) merged() (*coltracepb.ExportTraceServiceRequest, *collogsp
 	return tr, lg
 }
 
-// shiftTimes moves every timestamp so the earliest is epoch: the
-// durations between them are the run's own.
-func shiftTimes(tr *coltracepb.ExportTraceServiceRequest, lg *collogspb.ExportLogsServiceRequest, epoch time.Time) {
-	var minNS uint64
-	see := func(v uint64) {
-		if v != 0 && (minNS == 0 || v < minNS) {
-			minNS = v
-		}
-	}
-	walkTimes(tr, lg, func(p *uint64) { see(*p) })
-	if minNS == 0 {
-		return
-	}
-	delta := int64(epoch.UnixNano()) - int64(minNS)
+// normaliseCase makes a capture byte-stable across regenerations, so
+// `-update-contract` with no code change leaves `git diff` empty:
+//
+//   - the export is folded to one ResourceSpans/ResourceLogs per
+//     (resource, scope) and its spans sorted by (start, end, name), its
+//     records by time — batch boundaries and arrival order vary;
+//   - every distinct timestamp is replaced by its rank: the earliest is
+//     epoch, the next epoch + 1 ms, and so on, so every ordering (and so
+//     started, finished, last_seen) is the run's own while no measured
+//     duration survives;
+//   - the measured durations the core writes as numbers (weft.ttft_ms,
+//     weft.latency_ms, step_finish's latency_ms/ttft_ms) become 1 when
+//     set — ceilMS's floor, so presence is kept;
+//   - the framework version (resource and record weft.version, the
+//     instrumentation scope's version) becomes fixtureVersion;
+//   - ids are renumbered in first-seen order (spans first, then
+//     records): trace ids 7ace…<n> (32 hex), span ids 5ba0…<n> (16 hex),
+//     weft's 32-hex run ids a110…<n> and thread's ULID session ids
+//     01K…<n> (26 Crockford characters) — the shapes kept, so a derived
+//     id (<parent>/<step>/<call>, <session>-t<n>) keeps its form.
+//
+// The returned replacer maps an original run or session id to its
+// fixture spelling.
+func normaliseCase(tr *coltracepb.ExportTraceServiceRequest, lg *collogspb.ExportLogsServiceRequest, epoch time.Time) *strings.Replacer {
+	foldTraces(tr)
+	foldLogs(lg)
+
+	var all []uint64
 	walkTimes(tr, lg, func(p *uint64) {
 		if *p != 0 {
-			*p = uint64(int64(*p) + delta)
+			all = append(all, *p)
 		}
 	})
+	slices.Sort(all)
+	all = slices.Compact(all)
+	walkTimes(tr, lg, func(p *uint64) {
+		if *p != 0 {
+			i, _ := slices.BinarySearch(all, *p)
+			*p = uint64(epoch.Add(time.Duration(i) * time.Millisecond).UnixNano())
+		}
+	})
+
+	traceIDs, spanIDs := map[string][]byte{}, map[string][]byte{}
+	mapID := func(m map[string][]byte, id []byte, prefix string, width int) []byte {
+		if len(id) == 0 {
+			return id
+		}
+		if v, ok := m[string(id)]; ok {
+			return v
+		}
+		h := fmt.Sprintf("%s%0*x", prefix, width-len(prefix), len(m)+1)
+		v, _ := hex.DecodeString(h)
+		m[string(id)] = v
+		return v
+	}
+	var pairs []string
+	seen := map[string]bool{}
+	runHex := regexp.MustCompile(`^[0-9a-f]{32}$`)
+	turnID := regexp.MustCompile(`^(.+)-t[0-9]+$`)
+	nRun, nSession := 0, 0
+	addRun := func(id string) {
+		base, _, _ := strings.Cut(id, "/")
+		if seen[base] {
+			return
+		}
+		switch {
+		case runHex.MatchString(base):
+			nRun++
+			seen[base] = true
+			pairs = append(pairs, base, fmt.Sprintf("a110%028x", nRun))
+		case turnID.MatchString(base):
+			addSession(turnID.FindStringSubmatch(base)[1], &nSession, seen, &pairs)
+		}
+	}
+	idAttrs := func(kvs []*commonpb.KeyValue) {
+		for _, kv := range kvs {
+			switch kv.GetKey() {
+			case "weft.run.id", "weft.parent.run.id":
+				addRun(kv.GetValue().GetStringValue())
+			case "weft.session.id":
+				addSession(kv.GetValue().GetStringValue(), &nSession, seen, &pairs)
+			}
+		}
+	}
+	for _, rs := range tr.GetResourceSpans() {
+		for _, ss := range rs.GetScopeSpans() {
+			for _, s := range ss.GetSpans() {
+				s.TraceId = mapID(traceIDs, s.TraceId, "7ace", 32)
+				s.SpanId = mapID(spanIDs, s.SpanId, "5ba0", 16)
+				idAttrs(s.Attributes)
+			}
+			for _, s := range ss.GetSpans() {
+				s.ParentSpanId = mapID(spanIDs, s.ParentSpanId, "5ba0", 16)
+			}
+		}
+	}
+	for _, rl := range lg.GetResourceLogs() {
+		for _, sl := range rl.GetScopeLogs() {
+			for _, r := range sl.GetLogRecords() {
+				r.TraceId = mapID(traceIDs, r.TraceId, "7ace", 32)
+				r.SpanId = mapID(spanIDs, r.SpanId, "5ba0", 16)
+				idAttrs(r.Attributes)
+			}
+		}
+	}
+	ren := strings.NewReplacer(pairs...)
+
+	duration := regexp.MustCompile(`"(latency_ms|ttft_ms)":[1-9][0-9]*`)
+	var fix func(v *commonpb.AnyValue)
+	fix = func(v *commonpb.AnyValue) {
+		switch x := v.GetValue().(type) {
+		case *commonpb.AnyValue_StringValue:
+			x.StringValue = duration.ReplaceAllString(ren.Replace(x.StringValue), `"$1":1`)
+		case *commonpb.AnyValue_ArrayValue:
+			for _, e := range x.ArrayValue.GetValues() {
+				fix(e)
+			}
+		case *commonpb.AnyValue_KvlistValue:
+			for _, kv := range x.KvlistValue.GetValues() {
+				fix(kv.GetValue())
+			}
+		}
+	}
+	fixAttrs := func(kvs []*commonpb.KeyValue) {
+		for _, kv := range kvs {
+			switch kv.GetKey() {
+			case "weft.version":
+				kv.Value = &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: fixtureVersion}}
+			case "weft.ttft_ms", "weft.latency_ms":
+				if kv.GetValue().GetIntValue() > 0 {
+					kv.Value = &commonpb.AnyValue{Value: &commonpb.AnyValue_IntValue{IntValue: 1}}
+				}
+			default:
+				fix(kv.GetValue())
+			}
+		}
+	}
+	for _, rs := range tr.GetResourceSpans() {
+		fixAttrs(rs.GetResource().GetAttributes())
+		for _, ss := range rs.GetScopeSpans() {
+			if ss.GetScope().GetVersion() != "" {
+				ss.Scope.Version = fixtureVersion
+			}
+			for _, s := range ss.GetSpans() {
+				fixAttrs(s.Attributes)
+				for _, e := range s.GetEvents() {
+					fixAttrs(e.Attributes)
+				}
+				if s.GetStatus() != nil {
+					s.Status.Message = ren.Replace(s.Status.Message)
+				}
+			}
+		}
+	}
+	for _, rl := range lg.GetResourceLogs() {
+		fixAttrs(rl.GetResource().GetAttributes())
+		for _, sl := range rl.GetScopeLogs() {
+			if sl.GetScope().GetVersion() != "" {
+				sl.Scope.Version = fixtureVersion
+			}
+			for _, r := range sl.GetLogRecords() {
+				fixAttrs(r.Attributes)
+				if r.Body != nil {
+					fix(r.Body)
+				}
+			}
+		}
+	}
+	return ren
+}
+
+// fixtureVersion is the framework version the generated cases carry:
+// a release changes the real one, never the fixtures.
+const fixtureVersion = "v0.0.0-contract"
+
+// addSession numbers a thread session id (a ULID) in first-seen order.
+func addSession(id string, n *int, seen map[string]bool, pairs *[]string) {
+	if id == "" || seen[id] {
+		return
+	}
+	*n++
+	seen[id] = true
+	*pairs = append(*pairs, id, fmt.Sprintf("01K%023d", *n))
+}
+
+// foldTraces merges every ResourceSpans/ScopeSpans sharing a resource
+// and scope into one, in first-seen order, and sorts the spans by
+// (start, end, name).
+func foldTraces(tr *coltracepb.ExportTraceServiceRequest) {
+	type group struct {
+		rs *tracepb.ResourceSpans
+		ss map[string]*tracepb.ScopeSpans
+	}
+	var out []*tracepb.ResourceSpans
+	groups := map[string]*group{}
+	for _, rs := range tr.GetResourceSpans() {
+		rk := protoKey(rs.GetResource())
+		g, ok := groups[rk]
+		if !ok {
+			g = &group{rs: &tracepb.ResourceSpans{Resource: rs.GetResource(), SchemaUrl: rs.GetSchemaUrl()}, ss: map[string]*tracepb.ScopeSpans{}}
+			groups[rk] = g
+			out = append(out, g.rs)
+		}
+		for _, ss := range rs.GetScopeSpans() {
+			sk := protoKey(ss.GetScope()) + "\x00" + ss.GetSchemaUrl()
+			dst, ok := g.ss[sk]
+			if !ok {
+				dst = &tracepb.ScopeSpans{Scope: ss.GetScope(), SchemaUrl: ss.GetSchemaUrl()}
+				g.ss[sk] = dst
+				g.rs.ScopeSpans = append(g.rs.ScopeSpans, dst)
+			}
+			dst.Spans = append(dst.Spans, ss.GetSpans()...)
+		}
+	}
+	for _, rs := range out {
+		for _, ss := range rs.ScopeSpans {
+			slices.SortStableFunc(ss.Spans, func(a, b *tracepb.Span) int {
+				if c := cmpU64(a.StartTimeUnixNano, b.StartTimeUnixNano); c != 0 {
+					return c
+				}
+				if c := cmpU64(a.EndTimeUnixNano, b.EndTimeUnixNano); c != 0 {
+					return c
+				}
+				return strings.Compare(a.Name, b.Name)
+			})
+		}
+	}
+	tr.ResourceSpans = out
+}
+
+// foldLogs is foldTraces for log records, sorted by time.
+func foldLogs(lg *collogspb.ExportLogsServiceRequest) {
+	type group struct {
+		rl *logspb.ResourceLogs
+		sl map[string]*logspb.ScopeLogs
+	}
+	var out []*logspb.ResourceLogs
+	groups := map[string]*group{}
+	for _, rl := range lg.GetResourceLogs() {
+		rk := protoKey(rl.GetResource())
+		g, ok := groups[rk]
+		if !ok {
+			g = &group{rl: &logspb.ResourceLogs{Resource: rl.GetResource(), SchemaUrl: rl.GetSchemaUrl()}, sl: map[string]*logspb.ScopeLogs{}}
+			groups[rk] = g
+			out = append(out, g.rl)
+		}
+		for _, sl := range rl.GetScopeLogs() {
+			sk := protoKey(sl.GetScope()) + "\x00" + sl.GetSchemaUrl()
+			dst, ok := g.sl[sk]
+			if !ok {
+				dst = &logspb.ScopeLogs{Scope: sl.GetScope(), SchemaUrl: sl.GetSchemaUrl()}
+				g.sl[sk] = dst
+				g.rl.ScopeLogs = append(g.rl.ScopeLogs, dst)
+			}
+			dst.LogRecords = append(dst.LogRecords, sl.GetLogRecords()...)
+		}
+	}
+	for _, rl := range out {
+		for _, sl := range rl.ScopeLogs {
+			slices.SortStableFunc(sl.LogRecords, func(a, b *logspb.LogRecord) int {
+				return cmpU64(a.TimeUnixNano, b.TimeUnixNano)
+			})
+		}
+	}
+	lg.ResourceLogs = out
+}
+
+func cmpU64(a, b uint64) int {
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	}
+	return 0
+}
+
+// protoKey is a message's deterministic encoding, a grouping key.
+func protoKey(m proto.Message) string {
+	b, _ := proto.MarshalOptions{Deterministic: true}.Marshal(m)
+	return string(b)
 }
 
 func walkTimes(tr *coltracepb.ExportTraceServiceRequest, lg *collogspb.ExportLogsServiceRequest, f func(*uint64)) {
@@ -834,14 +1121,22 @@ func genCases() []genCase {
 		},
 		{
 			name: "tool_calls",
-			desc: "two steps: a tool call (execute_tool lookup_order) then the answer",
+			desc: "two steps: a tool call (execute_tool lookup_order) then the answer; run metadata through core.Metadata — a caller key and enduser.id in meta (user.id, its mirror, not), and the playground marks weft/runtime stamps (weft.playground, weft.experiment.id and weft.forked_from as row columns; weft.playground.command and weft.replay.view in meta)",
 			dest: content,
 			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
 				agt := pipelineAgent(p, "support", wefttest.Script(
 					wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"1234"}`}),
 					wefttest.Say("Order 1234 has shipped.")),
 					core.Instructions("You are a support agent."), lookupTool())
-				return []string{mustRun(t, ctx, agt, core.Prompt("Where is order 1234?")).ID}
+				return []string{mustRun(t, ctx, agt, core.Prompt("Where is order 1234?"), core.Metadata(map[string]string{
+					"tenant":                  "acme",
+					"enduser.id":              "user_42",
+					"weft.playground":         "true",
+					"weft.playground.command": "cmd_contract",
+					"weft.experiment.id":      "exp_contract",
+					"weft.forked_from":        "a1100000000000000000000000000099#1",
+					"weft.replay.view":        "transcript",
+				})).ID}
 			},
 		},
 		{
@@ -981,6 +1276,12 @@ func genCases() []genCase {
 								continue
 							}
 							r.Attributes = dropAttr(r.Attributes, "weft.instructions.hash")
+							if b := r.GetBody(); b != nil {
+								if sv, ok := b.GetValue().(*commonpb.AnyValue_StringValue); ok {
+									// run_start's body field, which pre-ADR 0028 cores never wrote.
+									sv.StringValue = instructionsHashField.ReplaceAllString(sv.StringValue, "")
+								}
+							}
 							kept = append(kept, r)
 						}
 						sl.LogRecords = kept
@@ -988,8 +1289,46 @@ func genCases() []genCase {
 				}
 			},
 		},
+		{
+			name: "failed",
+			desc: "a run that fails: MaxSteps(1) with a model that keeps calling a tool — the invoke_agent span ends with status Error, error.type max_steps and the error text as its description; no run_finish",
+			dest: content,
+			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+				agt := pipelineAgent(p, "support", wefttest.Script(
+					wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"1234"}`}),
+					wefttest.Say("Order 1234 has shipped.")),
+					core.Instructions("You are a support agent."), lookupTool(), core.MaxSteps(1))
+				_, err := agt.Generate(ctx, core.Prompt("Where is order 1234?"))
+				var re *core.RunError
+				if !errors.As(err, &re) || !errors.Is(err, core.ErrMaxSteps) {
+					t.Fatalf("want a max-steps *RunError, got %v", err)
+				}
+				return []string{re.Result.ID}
+			},
+		},
+		{
+			name: "parked",
+			desc: "a run parked at the approval boundary: a RequireApproval tool's call is pending, the run succeeds with run_finish.pending and weft.run.pending = 1, the execute_tool span marked weft.tool.pending",
+			dest: content,
+			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+				refund := core.Tool("refund_order", "Refund an order.", func(_ context.Context, in lookupIn) (string, error) {
+					return "refunded " + in.OrderID, nil
+				}, core.RequireApproval())
+				agt := pipelineAgent(p, "support", wefttest.Script(
+					wefttest.ToolCalls(wefttest.Call{Name: "refund_order", Args: `{"order_id":"1234"}`})),
+					core.Instructions("You are a support agent."), refund)
+				res := mustRun(t, ctx, agt, core.Prompt("Refund order 1234."))
+				if len(res.Pending) != 1 {
+					t.Fatalf("want one pending call, got %d", len(res.Pending))
+				}
+				return []string{res.ID}
+			},
+		},
 	}
 }
+
+// instructionsHashField is run_start's instructions_hash body field.
+var instructionsHashField = regexp.MustCompile(`,"instructions_hash":"[0-9a-f]*"`)
 
 func dropAttr(kvs []*commonpb.KeyValue, key string) []*commonpb.KeyValue {
 	return slices.DeleteFunc(kvs, func(kv *commonpb.KeyValue) bool { return kv.GetKey() == key })

@@ -44,6 +44,21 @@ module, ADR 0005).
   flushed — drops its receipt and moves the leaf back in one append, flushed
   (they were two unflushed appends, and the leaf stayed on the `dropped`
   receipt).
+- `thread`: a steer the running turn drained is no longer restored by `Open`
+  after a crash between its step (the steered message, written with the step)
+  and the turn's end (its `delivered` receipt): the message on the active path
+  settles the `queued` receipt, so the steer no longer runs twice and
+  `ClearQueue` finds nothing to drop (the crash matrix's `clear_queue` flake).
+  Read-side only; the format is unchanged (ADR 0019 amended).
+- `thread`: a steer whose turn-end deferral the storage refused outright still
+  runs from memory, and its follow-up's prompt append now carries the
+  `deferred` receipt that settles the steer's `queued` one — a reopen after
+  the follow-up ran no longer restores the steer and runs it again; one before
+  it ran still does.
+- `thread`: when the one append that drops a failed send's receipt and moves
+  the leaf back is itself refused, the log now says what happens on that path
+  (the file's leaf stays on the failed entry until the next write; only an
+  undropped accepted receipt without a prompt is restored).
 
 ## 0.14.1 — 2026-10-11
 

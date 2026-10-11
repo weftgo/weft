@@ -12,7 +12,7 @@ import { runQuery } from "@/lib/api"
 import type { RunRow } from "@/lib/api"
 import { runLink } from "@/lib/links"
 import { useCapabilities } from "@/hooks/use-capabilities"
-import { useRunEvents } from "@/hooks/use-run-events"
+import { storyRunID, useRunEvents } from "@/hooks/use-run-events"
 import { StepList } from "@/components/studio/step-list"
 import { StatusChip } from "@/components/studio/runs-table"
 import { Button } from "@/components/ui/button"
@@ -33,7 +33,7 @@ export function LivePeek({ id, onClose }: { id: string; onClose: () => void }) {
     },
     [id, queryClient]
   )
-  const stream = useRunEvents(loading ? "" : id, status, { live: has("live"), onRun })
+  const stream = useRunEvents(loading ? "" : storyRunID(id, run), status, { live: has("live"), onRun })
 
   return (
     <aside

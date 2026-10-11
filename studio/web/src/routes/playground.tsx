@@ -84,6 +84,7 @@ import type { Experiment } from "@/hooks/use-command-tracking"
 import { useRunEvents } from "@/hooks/use-run-events"
 import { ExperimentForm, StepPicker, useSourceEditFields } from "@/components/studio/experiment-form"
 import { EditList } from "@/components/studio/transcript-editor"
+import { mayReadExperiments } from "@/components/studio/no-experiments"
 import { editsProblem } from "@/lib/edits"
 import { Button } from "@/components/ui/button"
 import { SelectField } from "@/components/ui/select-field"
@@ -2395,7 +2396,11 @@ function Drafts({ current, saves, open }: { current: string; saves: number; open
  * saved definitions with their matrix sizes, each opening its own page
  * (plan F5: its grid, re-run, clone, compare). */
 function History({ selected }: { selected?: string }) {
-  const experiments = useQuery(experimentsQuery())
+  // Not under a panel token: the experiments routes refuse it (the
+  // history is the whole Studio's) — nothing drawn, nothing fetched.
+  const readable = mayReadExperiments(["playground"])
+  const experiments = useQuery({ ...experimentsQuery(), enabled: readable })
+  if (!readable) return null
   const list = experiments.data?.experiments ?? []
   if (experiments.isError)
     return (

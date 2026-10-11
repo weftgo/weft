@@ -24,10 +24,12 @@ import {
   SESSION,
   settle,
   setup,
+  create,
   T0,
   teardown,
   text,
   transcript,
+  trap,
   user,
 } from "./testkit"
 import { WeftDevtools } from "./element"
@@ -536,4 +538,33 @@ describe("the open turn", () => {
     await settle()
     expect($(el, ".weft-drawer")).toBeTruthy()
   })
+})
+
+describe("an element removed before its start settles", () => {
+  for (const [when, gate] of [
+    ["before meta answers", "meta"],
+    ["before the list answers, so before the stream's first frame", "runs?public_id=pub_orders&limit=50"],
+  ] as const)
+    it(`${when}: nothing thrown, no stream left open, nothing drawn`, async () => {
+      const t = trap()
+      let release: () => void = () => {}
+      const held = new Promise<void>((r) => (release = r))
+      const routes = baseRoutes()
+      const answer = gate === "meta" ? META : routes[gate]
+      const slow = async () => {
+        await held
+        return answer
+      }
+      fakeStudio(gate === "meta" ? routes : { ...routes, [gate]: slow }, gate === "meta" ? slow : META)
+      const el = create()
+      document.body.appendChild(el)
+      await pause(10)
+      el.remove()
+      release()
+      await settle(10)
+      t.release()
+      expect(t.escaped).toEqual([])
+      expect(FakeEventSource.live("")).toEqual([])
+      expect($(el, ".weft-turn")).toBeNull()
+    })
 })

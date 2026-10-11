@@ -1116,7 +1116,7 @@ function Rt(e, t) {
 }
 var zt = "save as test", Bt = "download this run as a wefttest replay test (a zip: <agent>_replay_test.go + testdata) — Studio writes nothing to your files";
 function Vt(e, t, n) {
-	return e && Lt(t, n) ? `copy the edited prompt and propose it as ${e}'s instructions (shown on the Agents page beside the registered ones)` : `copy the edited prompt${t.includes("proposals") ? ` — ${Ht}` : ""}`;
+	return e ? Lt(t, n) ? `copy the edited prompt and propose it as ${e}'s instructions (shown on the Agents page beside the registered ones)` : `copy the edited prompt${t.includes("proposals") ? ` — ${Ht}` : ""}` : "copy the edited prompt";
 }
 var Ht = "a proposal needs the dev token";
 function Ut(e) {
@@ -1127,9 +1127,12 @@ function Ut(e) {
 	} : e.proposal === "refused" ? {
 		title: `${t} · proposal refused: ${e.message ?? ""}`,
 		tone: "error"
-	} : {
+	} : e.agent ? {
 		title: `${t} · ${Ht}`,
 		tone: e.copied ? "info" : "error"
+	} : {
+		title: t,
+		tone: e.copied ? "success" : "error"
 	};
 }
 //#endregion
@@ -5710,18 +5713,17 @@ var vs = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 	}
 	handoff(e) {
 		if (O(this.cfg.token) !== "playground" || !Jo(this.last, "handoff")) return !1;
-		let t = new URL(e), n = new URL(this.base).origin;
+		let t = new URL(e), n = new URL(this.base).origin, r = (t, n = "") => {
+			clearTimeout(this.slow), Bs(t), this.say(`open in Studio: ${n ? `${n} · ` : ""}${e}`);
+		};
 		return clearTimeout(this.slow), this.slow = setTimeout(() => this.say(`open in Studio: ${e}`), 1e3), Zr(this.ep, t.pathname.slice(new URL(this.base).pathname.length - 1) + t.search).then((t) => {
-			clearTimeout(this.slow);
-			let r = e;
+			let i = e;
 			try {
 				let e = new URL(t.location, this.base);
-				t.location && e.origin === n && (r = e.toString());
+				t.location && e.origin === n && (i = e.toString());
 			} catch {}
-			Bs(r);
-		}, (t) => {
-			clearTimeout(this.slow), Bs(e), t instanceof V && (t.status === 403 || t.status === 404) || this.say(`open in Studio: ${t.message}`);
-		}), !0;
+			r(i);
+		}, (t) => r(e, t instanceof V && (t.status === 403 || t.status === 404) ? "" : t.message)), !0;
 	}
 	cycle() {
 		let e = this.lay, t = ie[(ie.indexOf(e.mode === "float" ? "float" : e.side) + 1) % ie.length];
@@ -5781,7 +5783,7 @@ var vs = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 			} finally {
 				clearTimeout(r), this.probe === e && (this.probe = null);
 			}
-			if (t !== this.startSeq) return;
+			if (t !== this.startSeq || !this.isConnected) return;
 		}
 		if (i) {
 			let e = this.scopeNow();
@@ -5800,7 +5802,7 @@ var vs = (e) => typeof e == "number" && Number.isInteger(e) && e >= 0 ? e : void
 			} catch {
 				r = !1;
 			}
-			if (t !== this.startSeq || this.model !== a) return;
+			if (t !== this.startSeq || this.model !== a || !this.isConnected) return;
 		}
 		if (this.checking = !1, r) {
 			this.ready = !0, this.dormant && (this.dormant = !1, this.unreachable = null), this.syncDetect(), x(this.scopeNow()) !== this.conn?.scope && this.schedule(), this.render(this.last);

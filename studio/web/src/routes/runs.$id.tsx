@@ -65,7 +65,7 @@ import { Kbd } from "@/components/ui/kbd"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useCapabilities } from "@/hooks/use-capabilities"
-import { useRunEvents } from "@/hooks/use-run-events"
+import { storyRunID, useRunEvents } from "@/hooks/use-run-events"
 
 type View = "trace" | "story" | "raw"
 
@@ -313,8 +313,9 @@ function RunPage() {
   // The walk waits for api/meta (the shell asks for it at the same
   // time): started without the live capability known, it would start
   // over from position 0 when the capability arrived — the whole
-  // stream read twice.
-  const stream = useRunEvents(capsLoading ? "" : id, runStatus, {
+  // stream read twice. It waits for the run's document too, and a
+  // deleted run (404) is never followed (storyRunID).
+  const stream = useRunEvents(capsLoading ? "" : storyRunID(id, run), runStatus, {
     live: liveCapable,
     onRun: onRunFrame,
   })

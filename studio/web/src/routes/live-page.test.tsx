@@ -78,6 +78,19 @@ const ev = (run_id: string, pos: number, event: unknown) => ({
 const rowOf = (id: string) => document.querySelector<HTMLElement>(`tr[data-run="${id}"]`)
 const cell = (id: string, name: string) =>
   rowOf(id)?.querySelector<HTMLElement>(`[data-cell="${name}"]`)?.textContent ?? null
+/** Every stream ever opened (closed ones too) on one run's selector. */
+function streamsOf(run: string): number {
+  let n = 0
+  for (let i = 0; ; i++) {
+    let es: FakeEventSource
+    try {
+      es = FakeEventSource.nth(i)
+    } catch {
+      return n
+    }
+    if (new URL(es.url).searchParams.get("run") === run) n++
+  }
+}
 const toastTitles = () =>
   [...document.querySelectorAll<HTMLElement>("[data-sonner-toast] [data-title]")].map((t) => t.textContent)
 
@@ -520,6 +533,29 @@ describe("click-to-peek", () => {
     // The route's validation drops it: no pane, no read of such a run.
     expect(screen.queryByRole("complementary")).toBeNull()
     expect(studio.requests.some((r) => r.path.includes("script"))).toBe(false)
+  })
+
+  it("a deleted run (404): the not-found copy, no stream opened, no events read, nothing polled", async () => {
+    studio.on("GET runs/r_gone", () => apiError(404, "not_found", "no run r_gone"))
+    renderApp("/live?peek=r_gone")
+    const pane = await screen.findByRole("complementary", { name: "story of run r_gone" })
+    await waitFor(() => expect(within(pane).getByText("no run r_gone")).toBeTruthy())
+    const runReads = studio.calls("GET runs/r_gone").length
+    // Past the run page's 2 s poll: still nothing followed.
+    await act(() => new Promise((r) => setTimeout(r, 2_500)))
+    expect(studio.calls("GET runs/r_gone/events")).toHaveLength(0)
+    expect(streamsOf("r_gone")).toBe(0)
+    expect(studio.calls("GET runs/r_gone").length).toBe(runReads)
+  })
+
+  it("the run page of a deleted run (404): the not-found copy, no stream, no events read", async () => {
+    studio.on("GET runs/r_gone", () => apiError(404, "not_found", "no run r_gone"))
+    renderApp("/runs/r_gone")
+    expect(await screen.findByText("no run r_gone")).toBeTruthy()
+    await act(() => new Promise((r) => setTimeout(r, 2_500)))
+    expect(studio.calls("GET runs/r_gone/events")).toHaveLength(0)
+    expect(streamsOf("r_gone")).toBe(0)
+    expect(studio.calls("POST live-grant").filter((c) => JSON.stringify(c.body ?? "").includes("r_gone"))).toHaveLength(0)
   })
 
   it("the close button closes it", async () => {

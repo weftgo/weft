@@ -71,6 +71,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar"
 import { CommandPalette } from "@/components/studio/command-palette"
+import { mayReadExperiments } from "@/components/studio/no-experiments"
 import { experimentsLink, playgroundLink, settingsLink, tracesLink } from "@/lib/links"
 
 function Nav() {
@@ -113,8 +114,9 @@ function Nav() {
               <FlaskConical data-slot="icon" />
             )}
           {/* The saved experiments (plan F5): the playground's history,
-              under the same capability. */}
-          {meta.data?.capabilities.includes("playground") &&
+              under the same capability — never under a panel token,
+              which the experiments routes refuse. */}
+          {meta.data && mayReadExperiments(meta.data.capabilities) &&
             item(experimentsLink().to, "Experiments", <Grid3x3 data-slot="icon" />)}
           {/* Settings (plan H4): every Studio has one. */}
           {item(settingsLink().to, "Settings", <Settings data-slot="icon" />)}

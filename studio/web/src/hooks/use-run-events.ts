@@ -22,7 +22,7 @@
 // base and total count positioned events only.
 import { useEffect, useRef, useState } from "react"
 
-import { fetchEventsPage, metaQuery, postApproval, runQuery, studioToken } from "@/lib/api"
+import { ApiError, fetchEventsPage, metaQuery, postApproval, runQuery, studioToken } from "@/lib/api"
 import { canReplay } from "@/lib/replay"
 import type { EventsPage, RunRow, ToolCallPart, WireEvent } from "@/lib/api"
 import { dismissNotice, notify } from "@/lib/notify"
@@ -172,6 +172,23 @@ async function noticeParked(
     }
   }
   notify({ kind: "parked", runID, tools, approve: verb })
+}
+
+/**
+ * The id a run's story reader follows — useRunEvents' first argument —
+ * given the query of the run's document: none until the document is
+ * read, and none once the read failed with nothing to show or answered
+ * 404 (a deleted run). With no id no stream opens and no page is
+ * polled: a run that is gone is never followed (its page and the Live
+ * peek keep their "not found" copy).
+ */
+export function storyRunID(
+  id: string,
+  run: { data?: unknown; isError: boolean; error: unknown }
+): string {
+  if (run.data === undefined) return ""
+  if (run.isError && run.error instanceof ApiError && run.error.status === 404) return ""
+  return id
 }
 
 export function useRunEvents(

@@ -363,7 +363,9 @@ describe("the Agents page: proposed beside registered (F6.2)", () => {
       .on("GET manifest", () => json({ error: { code: "forbidden", message: msg }, badge: "hidden" }, 403))
       .install()
     renderApp("/agents")
-    expect(await screen.findByText(msg)).toBeTruthy()
+    // The hidden badge (Settings' rule), the server's words after it.
+    await waitFor(() => expect(document.querySelector('[data-agents-hidden] [data-hole="hidden"]')).toBeTruthy())
+    expect(document.querySelector("[data-agents-hidden]")!.textContent).toContain(msg)
     expect(document.querySelector("[data-proposed]")).toBeNull()
     expect(document.body.textContent).not.toContain("You help, tersely.")
   })

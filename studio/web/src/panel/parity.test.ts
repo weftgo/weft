@@ -31,7 +31,7 @@ import { FakeEventSource as StudioEventSource } from "../test/fake-event-source"
 import { FakeStudio, golden, hiddenRefusal, pagedEvents, pagedRequests } from "../test/fake-studio"
 import type { FakePosEvent } from "../test/fake-studio"
 import { $, all, assistant, ATTRS, baseRoutes, button, click, fakeStudio as panelStudio, META, mount, runExperiment, runRow, SESSION, settle, setup, T0, teardown, transcript, user } from "./testkit"
-import { keepEditedTitle, keepPromptWords, SAVE_TEST_LABEL, SAVE_TEST_TITLE } from "../lib/saves"
+import { keepEditedTitle, keepPromptWords, PROPOSAL_NEEDS_DEV, SAVE_TEST_LABEL, SAVE_TEST_TITLE } from "../lib/saves"
 import { resetNotices } from "../lib/notify"
 import type { WeftDevtools } from "./element"
 import { buildRunBody as studioBody, emptyLab } from "../lib/experiment-body"
@@ -886,9 +886,10 @@ describe("the saves say the same words on both surfaces (F6.2)", () => {
       return b!
     })
     keep.click()
-    await waitFor(() => expect(studioToasts()).toContain(keepPromptWords({ kind: "keep-prompt", agent: "", copied: true, proposal: "copy-only" }).title))
-    // The line names no agent when copy-only: both surfaces say the same.
-    expect(keepLine).toBe(keepPromptWords({ kind: "keep-prompt", agent: "", copied: true, proposal: "copy-only" }).title)
+    // Both surfaces say the same copy-only line for the run's agent
+    // (the dev token named, never the agent).
+    await waitFor(() => expect(studioToasts()).toContain(keepLine))
+    expect(keepLine).toBe(`copied · ${PROPOSAL_NEEDS_DEV}`)
     setStudioToken("")
   })
 })

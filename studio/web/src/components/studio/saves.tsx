@@ -117,7 +117,9 @@ export function KeepAsPrompt({
       className="font-mono text-[11px] text-thread hover:underline"
       data-keep-prompt
       title={
-        propose
+        !agent
+          ? "copy this system prompt"
+          : propose
           ? `copy this step's instructions and propose them as ${agent}'s (the tools' snippets stripped when the manifest verifies them; shown on the Agents page beside the registered ones)`
           : `copy this system prompt${caps.includes("proposals") ? ` — ${PROPOSAL_NEEDS_DEV}` : ""}`
       }

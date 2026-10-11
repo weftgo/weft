@@ -7,7 +7,8 @@
 // page's ids, public ids and agents; traces over the newest page of
 // /api/traces (ids, root names, services — the API has no text
 // filter); experiments by name. Each group is there only under its
-// capability ("traces", "playground" for experiments). cmdk gives the
+// capability ("traces", "playground" for experiments — and no panel
+// token, which the experiments routes refuse). cmdk gives the
 // dialog, the combobox and the listbox: ↑↓ move, Enter opens, Escape
 // closes. Every jump is a links.ts link. No separator between the
 // groups: a listbox may hold only groups and options (axe's
@@ -52,6 +53,7 @@ import {
   tracesLink,
 } from "@/lib/links"
 import { cycleTheme } from "@/components/studio/theme"
+import { mayReadExperiments } from "@/components/studio/no-experiments"
 import { useDensity } from "@/components/studio/density-toggle"
 import { StatusDot } from "@/components/studio/runs-table"
 import { Kbd } from "@/components/ui/kbd"
@@ -117,7 +119,9 @@ export function CommandPalette({
     enabled: open && tracesOn,
   })
   const playgroundOn = has("playground")
-  const experiments = useQuery({ ...experimentsQuery(), enabled: open && playgroundOn })
+  // Never under a panel token: the experiments routes refuse it.
+  const experimentsOn = mayReadExperiments(playgroundOn ? ["playground"] : [])
+  const experiments = useQuery({ ...experimentsQuery(), enabled: open && experimentsOn })
 
   const close = () => onOpenChange(false)
   const go = (nav: () => Promise<unknown>) => {
@@ -213,7 +217,7 @@ export function CommandPalette({
               ))}
             </CommandGroup>
           ) : null}
-          {playgroundOn ? (
+          {experimentsOn ? (
             <CommandGroup heading="Experiments">
               {(experiments.data?.experiments ?? []).slice(0, 50).map((x) => (
                 <CommandItem

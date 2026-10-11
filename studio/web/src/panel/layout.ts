@@ -209,12 +209,13 @@ export function pillPlace(l: Layout): string {
   return l.side === "left" ? "bottom-left" : l.side === "top" ? "top-right" : "bottom-right"
 }
 
-/** Push is data-push's one write to the host document: padding on
- * the docked side of <html>, through --weft-devtools-inset, restored
- * exactly (value and priority, or removed) when it ends. */
+/** The custom property data-push's padding goes through. */
 const INSET = "--weft-devtools-inset"
 const INSET_VAR = `var(${INSET})`
 
+/** Push is data-push's one write to the host document: padding on
+ * the docked side of <html>, through --weft-devtools-inset, restored
+ * exactly (value and priority, or removed) when it ends. */
 export class Push {
   private prev: { prop: string; was: [string, string][] } | null = null
 

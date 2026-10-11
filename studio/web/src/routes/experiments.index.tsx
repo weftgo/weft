@@ -4,19 +4,23 @@
 // it holds and their whole bill, own + delegated, under capability
 // "pricing" — all on the list row itself (F5.1: created, run_count and
 // the cost block), no per-row read. Each row opens the experiment's
-// page. Capability-gated on "playground", whose routes these are.
-import { useQuery } from "@tanstack/react-query"
+// page. Capability-gated on "playground", whose routes these are, and
+// never read under a panel token (the routes refuse every one). The
+// list is the server's cut — the most recently updated, 50 by default,
+// 200 at most — and says so when total is larger, with a load-more.
+import { useState } from "react"
+import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 
-import { experimentsQuery } from "@/lib/api"
+import { EXPERIMENTS_MAX, EXPERIMENTS_PAGE, experimentsQuery } from "@/lib/api"
 import { absoluteTime, relativeTime } from "@/lib/format"
-import { costView } from "@/lib/cost"
+import { costView, sumCost } from "@/lib/cost"
 import { experimentLink, playgroundLink } from "@/lib/links"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { CostText, useCostCapable } from "@/components/studio/cost"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { NoExperiments } from "@/components/studio/no-experiments"
+import { ExperimentsHidden, mayReadExperiments, NoExperiments } from "@/components/studio/no-experiments"
 
 export const Route = createFileRoute("/experiments/")({
   component: ExperimentsPage,
@@ -27,12 +31,25 @@ function ExperimentsPage() {
   const caps = useCapabilities()
   if (caps.loading) return <p className="p-6 text-xs text-muted-foreground">loading…</p>
   if (!caps.has("playground")) return <NoExperiments why={caps.why("playground")} />
+  if (!mayReadExperiments(caps.caps)) return <ExperimentsHidden />
   return <ExperimentList />
 }
 
+/** The runs cell's dash when the row carries no run_count (a Studio
+ * older than F5.1's list row). */
+export const NO_RUN_COUNT = "the run count was not sent: this Studio predates the list row's summary"
+
 function ExperimentList() {
-  const list = useQuery(experimentsQuery())
+  // The cut asked for: the server's default first, a page more per
+  // load-more, up to the server's most.
+  const [limit, setLimit] = useState(EXPERIMENTS_PAGE)
+  const list = useQuery({
+    ...experimentsQuery(limit === EXPERIMENTS_PAGE ? undefined : limit),
+    placeholderData: keepPreviousData,
+  })
   const rows = list.data?.experiments ?? []
+  const total = list.data?.total
+  const cut = total !== undefined && total > rows.length
   const costCapable = useCostCapable()
   return (
     <section className="space-y-3 p-4" aria-labelledby="experiments-title">
@@ -40,9 +57,26 @@ function ExperimentList() {
         <h1 id="experiments-title" className="text-sm font-medium">
           Experiments
         </h1>
-        <span className="text-xs text-muted-foreground">
-          the playground's saved matrices · {rows.length}
+        <span className="text-xs text-muted-foreground" data-experiments-count>
+          the playground's saved matrices ·{" "}
+          {cut ? `newest ${rows.length} of ${total}` : rows.length}
         </span>
+        {cut ? (
+          limit < EXPERIMENTS_MAX ? (
+            <button
+              type="button"
+              className="text-xs hover:underline disabled:opacity-50"
+              disabled={list.isFetching}
+              onClick={() => setLimit((n) => Math.min(n + EXPERIMENTS_PAGE, EXPERIMENTS_MAX))}
+            >
+              load {Math.min(EXPERIMENTS_PAGE, EXPERIMENTS_MAX - limit, total - rows.length)} more
+            </button>
+          ) : (
+            <span className="text-xs text-faint" title="GET /api/experiments lists 200 at most, the most recently updated first">
+              the list stops at the newest {EXPERIMENTS_MAX}
+            </span>
+          )
+        ) : null}
         <Link {...playgroundLink()} className="ml-auto text-xs hover:underline">
           new in the playground
         </Link>
@@ -88,11 +122,15 @@ function ExperimentList() {
                       {e.variants.length} × {e.inputs.length}
                     </TableCell>
                     <TableCell className="text-right font-mono text-xs" data-experiment-runs>
-                      {e.run_count ?? "—"}
+                      {e.run_count ?? (
+                        <span className="text-faint" title={NO_RUN_COUNT}>
+                          —<span className="sr-only">{` ${NO_RUN_COUNT}`}</span>
+                        </span>
+                      )}
                     </TableCell>
                     {costCapable ? (
                       <TableCell className="text-right text-xs" data-experiment-cost>
-                        {e.run_count ? <CostText v={costView(e)} /> : <span className="text-faint">—</span>}
+                        <CostText v={e.run_count ? costView(e) : sumCost([])} />
                       </TableCell>
                     ) : null}
                   </TableRow>

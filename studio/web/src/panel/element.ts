@@ -1583,19 +1583,23 @@ export class WeftDevtools extends HTMLElement {
    * its fragment, so the hosted Studio opens on that conversation
    * without a token pasted. false (the caller follows the plain link)
    * otherwise; a refusal opens the plain link — a 403 or 404 silently
-   * (the server's rule), anything else with the note line. The tab
-   * opens after the hand-off answers; a browser that blocks a popup
-   * after a slow answer leaves the plain link on the note line (put
-   * there past 1 s). */
+   * (the server's rule), anything else with its words. The tab opens
+   * after the hand-off answers, so a browser may block it as a popup:
+   * the plain link (never the minted one) is on the note line past 1 s
+   * and, whatever the answer, once it came. */
   private handoff(url: string): boolean {
     if (tokenScope(this.cfg.token) !== "playground" || !hasCapability(this.last, "handoff")) return false
     const u = new URL(url)
     const origin = new URL(this.base).origin
+    const done = (to: string, why = "") => {
+      clearTimeout(this.slow)
+      openTab(to)
+      this.say(`open in Studio: ${why ? `${why} · ` : ""}${url}`)
+    }
     clearTimeout(this.slow)
     this.slow = setTimeout(() => this.say(`open in Studio: ${url}`), 1000)
     fetchHandoff(this.ep, u.pathname.slice(new URL(this.base).pathname.length - 1) + u.search).then(
       (r) => {
-        clearTimeout(this.slow)
         let to = url
         try {
           const l = new URL(r.location, this.base)
@@ -1605,13 +1609,9 @@ export class WeftDevtools extends HTMLElement {
         } catch {
           // malformed: the plain link
         }
-        openTab(to)
+        done(to)
       },
-      (e) => {
-        clearTimeout(this.slow)
-        openTab(url)
-        if (!(e instanceof PanelApiError && (e.status === 403 || e.status === 404))) this.say(`open in Studio: ${e.message}`)
-      }
+      (e) => done(url, e instanceof PanelApiError && (e.status === 403 || e.status === 404) ? "" : e.message)
     )
     return true
   }
@@ -1774,7 +1774,7 @@ export class WeftDevtools extends HTMLElement {
         clearTimeout(timer)
         if (this.probe === probe) this.probe = null
       }
-      if (seq !== this.startSeq) return
+      if (seq !== this.startSeq || !this.isConnected) return
     }
     if (endpoint) {
       const scope = this.scopeNow()
@@ -1794,7 +1794,10 @@ export class WeftDevtools extends HTMLElement {
       } catch {
         ok = false
       }
-      if (seq !== this.startSeq || this.model !== model) return
+      // Removed meanwhile (before the stream's first frame, say): the
+      // disconnect disposed the model; nothing here may touch a host
+      // that is gone.
+      if (seq !== this.startSeq || this.model !== model || !this.isConnected) return
     }
     this.checking = false
     if (ok) {

@@ -13,6 +13,7 @@ import type { ExperimentRow, PlaygroundRunBody, RunDoc, RunsPage } from "@/lib/a
 import { experimentDraftID, resetDrafts, saveDraft } from "@/lib/drafts"
 import { parseCellCommandID } from "@/lib/form-state"
 import { COST_WAITS } from "@/routes/experiments.$id"
+import { EXPERIMENTS_HIDDEN_REASON } from "@/components/studio/no-experiments"
 import type { FormState } from "@/lib/form-state"
 import { resetNotices } from "@/lib/notify"
 import { renderApp, stubBrowser } from "@/test/app"
@@ -64,6 +65,11 @@ function toastTitles(): string[] {
     (t) => t.querySelector("[data-title]")?.textContent ?? ""
   )
 }
+const panelToken = (scope: "read" | "playground") =>
+  `weft_pt.${btoa(JSON.stringify({ public_id: "pub_1", scope, exp: new Date(Date.now() + 3600_000).toISOString() }))
+    .replace(/=+$/, "")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")}.c2ln`
 const cell = (k: string) => document.querySelector<HTMLElement>(`[data-cell="${k}"]`)!
 
 let studio: FakeStudio
@@ -143,6 +149,43 @@ describe("/experiments", () => {
     renderApp("/experiments")
     expect(await screen.findByText("This Studio has no playground, so no experiments.")).toBeTruthy()
     expect(studio.calls("GET experiments")).toHaveLength(0)
+  })
+
+  it("past the server's cut: newest N of total, and load more asks for a page more, up to 200", async () => {
+    const row = (i: number) => ({
+      id: `exp_${i}`,
+      name: `exp_${i}`,
+      agent: "orders",
+      variants: experiment.variants,
+      inputs: experiment.inputs,
+      created: rOK.started,
+      run_count: 0,
+    })
+    studio.on("GET experiments", (req) => {
+      const n = Number(req.query.get("limit") || 50)
+      return { experiments: Array.from({ length: Math.min(n, 230) }, (_, i) => row(i)), total: 230 }
+    })
+    renderApp("/experiments")
+    const count = () => document.querySelector("[data-experiments-count]")?.textContent ?? ""
+    await waitFor(() => expect(count()).toContain("newest 50 of 230"))
+    // run_count 0: the cost cell says why there is no figure.
+    const first = document.querySelector<HTMLElement>('[data-experiment-row="exp_0"] [data-experiment-cost] [data-cost]')!
+    expect(first.getAttribute("title")).toBe("no run to total")
+    expect(studio.calls("GET experiments").at(-1)!.query.get("limit")).toBeNull()
+    for (const [label, n] of [["load 50 more", 100], ["load 50 more", 150], ["load 50 more", 200]] as const) {
+      fireEvent.click(await screen.findByRole("button", { name: label }))
+      await waitFor(() => expect(count()).toContain(`newest ${n} of 230`))
+      expect(studio.calls("GET experiments").at(-1)!.query.get("limit")).toBe(String(n))
+    }
+    expect(screen.queryByRole("button", { name: /^load/ })).toBeNull()
+    expect(screen.getByText("the list stops at the newest 200")).toBeTruthy()
+  })
+
+  it("a list within the cut says its size alone, no load-more", async () => {
+    renderApp("/experiments")
+    await waitFor(() => expect(document.querySelector("[data-experiment-row]")).toBeTruthy())
+    expect(document.querySelector("[data-experiments-count]")?.textContent).toBe("the playground's saved matrices · 1")
+    expect(screen.queryByRole("button", { name: /^load/ })).toBeNull()
   })
 
   it("the sidebar lists Experiments under the playground", async () => {
@@ -346,15 +389,41 @@ describe("/experiments/{id}", () => {
     expect(within(cell("B×1")).getByRole("link", { name: "pg_b1" })).toBeTruthy()
   })
 
-  it("a read-scoped token reads the grid, with no re-run", async () => {
-    const enc = btoa(JSON.stringify({ public_id: "pub_1", scope: "read", exp: new Date(Date.now() + 3600_000).toISOString() }))
-    setStudioToken(`weft_pt.${enc.replace(/=+$/, "").replace(/\+/g, "-").replace(/\//g, "_")}.c2ln`)
+  it("a panel token (read or playground) is refused by the routes: the hidden badge, dev token only, nothing fetched", async () => {
     studio.on("GET meta", meta(["playground", "runtimes"]))
-    renderApp("/experiments/exp_tone")
-    await waitFor(() => expect(cell("A×1").textContent).toContain("succeeded"))
-    expect(screen.queryByRole("button", { name: "re-run all" })).toBeNull()
-    expect(screen.queryByRole("button", { name: /^re-run cell/ })).toBeNull()
-    expect(screen.getByRole("button", { name: "clone into the form" })).toBeTruthy()
+    for (const scope of ["read", "playground"] as const) {
+      setStudioToken(panelToken(scope))
+      for (const url of ["/experiments/exp_tone", "/experiments"]) {
+        renderApp(url)
+        const page = await waitFor(() => {
+          const el = document.querySelector<HTMLElement>("[data-experiments-hidden]")
+          expect(el).toBeTruthy()
+          return el!
+        })
+        const badge = page.querySelector<HTMLElement>('[data-hole="hidden"]')!
+        expect(badge.textContent).toContain("dev token only")
+        expect(page.textContent).toContain(EXPERIMENTS_HIDDEN_REASON)
+        cleanup()
+      }
+    }
+    expect(studio.calls("GET experiments")).toHaveLength(0)
+    expect(studio.calls("GET experiments/exp_tone")).toHaveLength(0)
+  })
+
+  it("a panel token: no Experiments in the sidebar or the palette", async () => {
+    setStudioToken(panelToken("playground"))
+    studio
+      .on("GET meta", meta(["playground", "runtimes"]))
+      .on("GET runs", golden<RunsPage>("runs"))
+      .on("GET sessions", { sessions: [], next_before: null })
+    renderApp("/runs")
+    await screen.findByText("r_ok")
+    expect(screen.getByRole("link", { name: "Sessions" })).toBeTruthy()
+    expect(screen.queryByRole("link", { name: "Experiments" })).toBeNull()
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true })
+    await screen.findByRole("combobox")
+    expect(screen.queryByText("Experiments", { selector: "[cmdk-group-heading]" })).toBeNull()
+    expect(studio.calls("GET experiments")).toHaveLength(0)
   })
 })
 

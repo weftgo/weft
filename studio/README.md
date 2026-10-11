@@ -851,8 +851,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 216,640 B raw / 62,591 B gzip
-(61.1 KiB, the ledger's last row; 18.9 KiB under the 80 KiB cap). The scope-detection ladder (C3: rungs
+committed `studio/dist/panel/panel.js`, 281,406 B raw / 81,344 B gzip
+(79.4 KiB, the ledger's last row; 576 B under the 81,920 B — 80 KiB — cap). The scope-detection ladder (C3: rungs
 2 to 5 and the activity pill) cost +6.0 KiB gzip against its +3 KiB
 estimate: nothing deferrable supplies the first scope and the
 deferrable remainder is under 1 KiB, so the overrun is accepted rather
@@ -1429,7 +1429,8 @@ matches the loaded sessions' ids, public ids and agents — client-side:
 Ctrl+K) opens the palette anywhere: runs through `/api/search?q=` (by
 id over the recent runs without `search`), sessions, traces (the
 newest page's ids, root names, services) under `traces`, experiments
-by name under `playground`, the pages — Playground under `playground`,
+by name under `playground` (never under a panel token, which the
+experiments routes refuse), the pages — Playground under `playground`,
 Settings (plan H4's page) — and the Studio commands; ↑↓ move, Enter
 opens, Escape closes.
 
@@ -1440,7 +1441,12 @@ walks views, never cursor moves:
 
 | page | key | state | history |
 | --- | --- | --- | --- |
-| runs list | `agent`, `status`, … | the filters | push |
+| runs list | `q`, `agent`, `status`, `session`, `public_id`, `tool`, `model`, `error`, `since`, `until`, `tag` (repeatable `k=v`), `min_duration`, `min_tokens`, `min_cost`, `experiments=on\|off`, `experiment_id`, `subagents=all`, `parent` | the filters (a change drops `before`) | push |
+| runs list | `sort=duration\|tokens\|cost` | the order (search's; newest first without it) | push |
+| runs list | `before` | the first page's cursor | — (a link's landing) |
+| live | `peek` | the run whose story the side pane shows | push |
+| sessions | `agent`, `public_id`, `q` | the filters | push |
+| traces | `since`, `until`, `service` | the filters (a refused `since`/`until` kept, ignored and said) | push |
 | run | `view=story\|raw` | the view (trace is the default) | push |
 | run | `raw=doc` | the raw view's surface | push |
 | run | `step` | the step (its ordinal) | — (a link's landing) |
@@ -1450,7 +1456,7 @@ walks views, never cursor moves:
 | run | `q`, `hide`, `ev` | the raw view's search, hidden kinds (`hide=step,delta`), open event's position | replace |
 | run | `replay`, `from`, `of` | the replay drawer: its verb, its from_step, the child run it replays (a fresh load reopens it on that step, from the verb's draft — edits are not in the link) | replace |
 | run | `save=test` | download the run's wefttest zip on landing (the panel's save as test), then dropped | — (a link's landing; replace) |
-| experiments | `/experiments` | the saved experiments: agent, size, run count, cost | — |
+| experiments | `/experiments` | the saved experiments: agent, size, run count, cost — the newest 50, "newest N of total" past them with a load-more up to 200 (the API's cut); never under a panel token (the hidden badge, nothing fetched) | — |
 | experiment | `/experiments/{id}` | one experiment's variants × inputs grid: re-run a cell or all, clone into the form, compare two cells | — |
 | playground | `?exp=<draft id>` | a draft of the form in this browser's IndexedDB (never leaves the browser) | the drafts list |
 | playground | `#state=<compact>` | a shared form — deflated or base64url JSON, ≤ 8,000 characters, no token — restored on arrival, never run | "copy share link" |
@@ -1459,6 +1465,12 @@ walks views, never cursor moves:
 | playground | `run`, `step`, `agent`, `runtime`, `engine` | the source run, its step, the target, the first variant's engine — written back as they change | replace |
 | playground | `experiment` | a saved experiment, highlighted in the history | push |
 | compare | `a`, `b`, `step` | the base, the runs compared, the step | push |
+
+Two names that read like URL keys are not: `offset` is `/api/search`'s
+paging parameter (the runs list pages by `before`; search pages are
+asked by offset, never written to the URL), and the panel's `tab` is
+stored in `localStorage["weft.devtools"]` with the rest of its layout
+(D4), never in a URL.
 
 The panel hands the playground its prompt and other fields in the
 fragment (`playground#run=…&instructions=…`), read once and stripped.

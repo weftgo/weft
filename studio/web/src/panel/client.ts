@@ -36,7 +36,7 @@ export interface PanelEndpoint {
   token: string
 }
 
-/** apiBase: {endpoint}api/ — every request the panel makes stays
+/** apiUrl is path under {endpoint}api/ — every request the panel makes stays
  * under the Studio it was pointed at (V2: no CDN, nothing else). */
 export function apiUrl(ep: PanelEndpoint, path: string): string {
   return new URL(path, new URL("api/", ep.base)).toString()

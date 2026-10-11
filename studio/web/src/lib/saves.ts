@@ -78,9 +78,12 @@ export const KEEP_PROMPT_LABEL = "keep as prompt"
 /** keepEditedTitle is the title of keep as prompt over an edited
  * prompt — the playground card's and the panel drawer's alike: it
  * proposes to agent where the identity may (mayProposeWith), else it
- * copies, naming the dev token where Studio serves proposals. */
+ * copies, naming the dev token where Studio serves proposals — and
+ * with no agent registered, copy alone: there is nothing to propose
+ * to, whatever the token. */
 export function keepEditedTitle(agent: string, capabilities: readonly string[], token: string): string {
-  return agent && mayProposeWith(capabilities, token)
+  if (!agent) return "copy the edited prompt"
+  return mayProposeWith(capabilities, token)
     ? `copy the edited prompt and propose it as ${agent}'s instructions (shown on the Agents page beside the registered ones)`
     : `copy the edited prompt${capabilities.includes("proposals") ? ` — ${PROPOSAL_NEEDS_DEV}` : ""}`
 }
@@ -143,5 +146,7 @@ export function keepPromptWords(o: KeepPrompt): { title: string; tone: SaveTone 
   if (o.proposal === "proposed")
     return { title: `${copied} · proposed as ${o.agent}'s instructions (see Agents)`, tone: o.copied ? "success" : "info" }
   if (o.proposal === "refused") return { title: `${copied} · proposal refused: ${o.message ?? ""}`, tone: "error" }
+  // No agent: copy alone — no proposal to need a token for.
+  if (!o.agent) return { title: copied, tone: o.copied ? "success" : "error" }
   return { title: `${copied} · ${PROPOSAL_NEEDS_DEV}`, tone: o.copied ? "info" : "error" }
 }

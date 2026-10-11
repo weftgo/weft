@@ -23,6 +23,7 @@
 //                    openPanelLive — POST live-grant, then new EventSource
 //   panel/config.ts  discoverEndpoint — GET panel-config.json (no credential at all)
 //   lib/api.ts       request()   — every fetch*/post*/put* and *Query queryFn
+//                    fetchTestExport — the wefttest zip (its own fetch: a blob, not JSON)
 //   lib/live.ts      openLive    — POST live-grant (requestLiveGrant), then new EventSource
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative, resolve } from "node:path"
@@ -70,8 +71,11 @@ function install() {
 /** settle lets the grant requests travel and the streams construct. */
 const settle = () => new Promise((r) => setTimeout(r, 20))
 
+let sites: string[] = []
+
 async function drive(name: string, fn: () => unknown) {
   site = name
+  sites.push(name)
   try {
     await fn()
   } catch {
@@ -81,6 +85,9 @@ async function drive(name: string, fn: () => unknown) {
 
 function assertClean(token: string) {
   expect(seen.length).toBeGreaterThan(0)
+  // Every enumerated site made its request (none skipped by a throw
+  // before its fetch).
+  for (const name of new Set(sites)) expect(seen.map((s) => s.site), name).toContain(name)
   const enc = [token, encodeURIComponent(token), new URLSearchParams({ t: token }).toString().slice(2)]
   for (const s of seen) {
     expect(s.url, s.site).not.toContain("token=")
@@ -101,6 +108,7 @@ function assertClean(token: string) {
 
 beforeEach(() => {
   seen = []
+  sites = []
   FakeEventSource.reset()
   install()
 })
@@ -133,6 +141,7 @@ describe("no client request carries the token in a URL", () => {
       await drive("postExperiment", () => api.postExperiment({} as Parameters<typeof api.postExperiment>[0]))
       await drive("postApproval", () => api.postApproval("r1", { call_id: "c", decision: "approve" }))
       await drive("metaQuery", () => (api.metaQuery().queryFn as () => unknown)())
+      await drive("fetchTestExport", () => api.fetchTestExport("r/1"))
       site = "openLive"
       const live = openLive({ selector: { run: "r1" }, kinds: ["event", "delta", "run"] })
       await settle()

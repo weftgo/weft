@@ -1,6 +1,6 @@
 // The Agents page from registrations alone (plan B4), and the "why
 // off" empty states: the real route tree against a fake Studio.
-import { cleanup, configure, screen, within } from "@testing-library/react"
+import { cleanup, configure, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
@@ -214,6 +214,24 @@ describe("why off (B4)", () => {
     expect((await screen.findByTestId("agents-why")).textContent).toBe(
       "no manifest: no runtime has registered"
     )
+  })
+
+  it("a 403 is the hidden badge (Settings' rule), not plain text, and is not asked again", async () => {
+    const studio = new FakeStudio()
+      .on("GET meta", meta({ has_manifest: true, capabilities: ["live", "playground"] }))
+      .on("GET manifest", () => apiError(403, "forbidden", "a panel token may not read the manifest"))
+      .install()
+    renderApp("/agents")
+    const page = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>("[data-agents-hidden]")
+      expect(el).toBeTruthy()
+      return el!
+    })
+    expect(page.querySelector('[data-hole="hidden"]')).toBeTruthy()
+    expect(page.textContent).toContain("your token's scope may not read the agents: a panel token may not read the manifest")
+    const reads = studio.calls("GET manifest").length
+    await new Promise((r) => setTimeout(r, 5_500))
+    expect(studio.calls("GET manifest").length).toBe(reads)
   })
 
   it("the playground and debugger empty state shows the reason", async () => {

@@ -1787,13 +1787,27 @@ export interface ExperimentRow extends CostFields {
 }
 
 /** GET /api/experiments — the history. */
-export function experimentsQuery() {
+export function experimentsQuery(limit?: number) {
   return queryOptions({
-    queryKey: ["experiments"],
+    queryKey: limit === undefined ? ["experiments"] : ["experiments", limit],
     staleTime: 10_000,
-    queryFn: () => get<{ experiments: ExperimentRow[] }>("experiments"),
+    queryFn: () =>
+      get<ExperimentsPage>(limit === undefined ? "experiments" : `experiments?limit=${limit}`),
   })
 }
+
+/** GET /api/experiments: the most recently updated first, cut at
+ * ?limit= (default 50, at most 200 — studio/experiments.go); total
+ * counts every saved experiment (absent from a Studio older than the
+ * cut). */
+export interface ExperimentsPage {
+  experiments: ExperimentRow[]
+  total?: number
+}
+
+/** The experiments list's cut: the server's default and its most. */
+export const EXPERIMENTS_PAGE = 50
+export const EXPERIMENTS_MAX = 200
 
 /** POST /api/experiments — create or update a definition. */
 export function postExperiment(body: ExperimentRow) {

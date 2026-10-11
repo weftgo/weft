@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest"
 
 import type { ManifestAgent } from "./api"
 import { proposalOf } from "./request-pane"
-import { dispositionName, keepPromptWords, saveWords } from "./saves"
+import { dispositionName, keepEditedTitle, keepPromptWords, PROPOSAL_NEEDS_DEV, saveWords } from "./saves"
 
 describe("dispositionName", () => {
   it("reads the quoted filename", () => {
@@ -29,6 +29,14 @@ describe("the words", () => {
   it("a plain copy says copied, never the proposal hint", () => {
     expect(saveWords({ kind: "copy", ok: true })).toEqual({ title: "copied", tone: "success" })
     expect(saveWords({ kind: "copy", ok: false }).tone).toBe("error")
+  })
+  it("no agent registered: copy alone — the title and the outcome never offer or hint at a proposal", () => {
+    for (const tok of ["", "dev-token"])
+      expect(keepEditedTitle("", ["proposals"], tok)).toBe("copy the edited prompt")
+    expect(keepPromptWords({ kind: "keep-prompt", agent: "", copied: true, proposal: "copy-only" })).toEqual({ title: "copied", tone: "success" })
+    expect(keepPromptWords({ kind: "keep-prompt", agent: "", copied: false, proposal: "copy-only" }).title).not.toContain(PROPOSAL_NEEDS_DEV)
+    // With an agent, a panel token is still told what a proposal needs.
+    expect(keepPromptWords({ kind: "keep-prompt", agent: "orders", copied: true, proposal: "copy-only" }).title).toBe(`copied · ${PROPOSAL_NEEDS_DEV}`)
   })
   it("a proposal's note follows the keep-as-prompt line", () => {
     const o = { kind: "keep-prompt" as const, agent: "orders", copied: true, proposal: "proposed" as const }

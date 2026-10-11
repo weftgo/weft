@@ -17,6 +17,7 @@ import { mayProposeWith, PROPOSAL_NEEDS_DEV, PROPOSAL_POINTER } from "@/lib/save
 import { AgentCard } from "@/components/studio/agent-cards"
 import { TextDiff } from "@/components/studio/step-request"
 import { useCapabilities } from "@/hooks/use-capabilities"
+import { HoleBadge } from "@/components/studio/hole-badge"
 import { Spinner } from "@/components/ui/spinner"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 
@@ -28,9 +29,19 @@ export const Route = createFileRoute("/agents/")({
  * runtimes connect and go. */
 const REFRESH_MS = 5_000
 
+/** A 403: the bearer's scope may not read the manifest. */
+function refused(err: unknown): boolean {
+  return err instanceof ApiError && err.status === 403
+}
+
 function AgentsPage() {
   useDocumentTitle({ page: "agents" })
-  const manifest = useQuery({ ...manifestQuery(), refetchInterval: REFRESH_MS })
+  // A refusal (403: this token's scope) is not asked again: it will
+  // not change by asking.
+  const manifest = useQuery({
+    ...manifestQuery(),
+    refetchInterval: (q) => (refused(q.state.error) ? false : REFRESH_MS),
+  })
   const caps = useCapabilities()
   if (manifest.isPending) {
     return (
@@ -41,10 +52,21 @@ function AgentsPage() {
   }
   if (manifest.isError) {
     // 404 is "no manifest" (manifest.go's serveManifest says why);
-    // any other failure is said as it is, not dressed as an empty state.
+    // 403 is the hidden badge (Settings' rule); any other failure is
+    // said as it is, not dressed as an empty state.
     if (manifest.error instanceof ApiError && manifest.error.status === 404)
       return (
         <NoAgents reason={caps.why("playground") ?? manifest.error.message} />
+      )
+    if (refused(manifest.error))
+      return (
+        <div className="flex justify-center py-24" data-agents-hidden>
+          <HoleBadge
+            hole="hidden"
+            detail
+            reason={`your token's scope may not read the agents: ${manifest.error.message}`}
+          />
+        </div>
       )
     return (
       <p className="py-24 text-center text-sm text-status-bad">

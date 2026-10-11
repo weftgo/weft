@@ -33,7 +33,7 @@ import { useCapabilities } from "@/hooks/use-capabilities"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { CostText, useCostCapable } from "@/components/studio/cost"
 import { Button } from "@/components/ui/button"
-import { NoExperiments } from "@/components/studio/no-experiments"
+import { ExperimentsHidden, mayReadExperiments, NoExperiments } from "@/components/studio/no-experiments"
 
 export const Route = createFileRoute("/experiments/$id")({
   component: ExperimentPage,
@@ -45,6 +45,7 @@ function ExperimentPage() {
   const caps = useCapabilities()
   if (caps.loading) return <p className="p-6 text-xs text-muted-foreground">loading…</p>
   if (!caps.has("playground")) return <NoExperiments why={caps.why("playground")} />
+  if (!mayReadExperiments(caps.caps)) return <ExperimentsHidden />
   return <Experiment id={id} caps={caps.caps} />
 }
 

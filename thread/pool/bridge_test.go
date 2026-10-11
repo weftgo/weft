@@ -54,6 +54,19 @@ func waitFor(t *testing.T, p *pool.Pool, s *thread.Session, receiptID string, wa
 	return rc
 }
 
+// continuation is the parked turn's Next once Pool.Wait has returned
+// for its sync delegation — armed by then, Wait's promise; Next is nil
+// for a boundary not (yet) resumed, so a nil here fails the test
+// rather than panicking on the nil Turn.
+func continuation(t *testing.T, parked *thread.Turn) *thread.Turn {
+	t.Helper()
+	next := parked.Next()
+	if next == nil {
+		t.Fatal("no continuation: the parked turn's Next is nil after Wait returned")
+	}
+	return next
+}
+
 // park runs the parent's delegating turn and returns it with the
 // receipt of the child it parked on.
 func park(t *testing.T, s *thread.Session) (*thread.Turn, pool.Receipt) {
@@ -559,7 +572,7 @@ func TestChildInheritsSigning(t *testing.T) {
 		t.Fatalf("DecideSigned: %v", err)
 	}
 	waitFor(t, p, s, rc.ID, pool.Done)
-	if res, err := t1.Next().Wait(); err != nil || res.Text() != "all done" {
+	if res, err := continuation(t, t1).Wait(); err != nil || res.Text() != "all done" {
 		t.Fatalf("the parent's continuation: %v, %v", res, err)
 	}
 	// The child's record keeps the signer's key and names the channel

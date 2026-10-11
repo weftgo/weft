@@ -192,6 +192,11 @@ type Pool struct {
 	// in delegateFor between its ledger read and its agent lookup — the
 	// window a racing pump's settlement used to fall in.
 	testHookResolving func(Receipt)
+	// testHookConcluding, when set (by this package's tests only), runs
+	// in conclude after the settlement is recorded and before a sync
+	// delegation's parked call is resolved — the window a Wait used to
+	// return in, the parent's resume not yet armed.
+	testHookConcluding func(*delegate)
 	// testHookCanceling, when set (by this package's tests only), runs
 	// in cancelParked with the delegate settling, before the child's
 	// boundary is closed; a non-nil error stands in for that close
@@ -401,9 +406,9 @@ func (p *Pool) Cancel(ctx context.Context, parent *thread.Session, receiptID str
 				return p.cancelParked(ctx, d)
 			default:
 				// Settling: its run, or another Cancel, is writing
-				// the settlement. Once it is at rest the ledger says
-				// how it ended.
-				idle := d.idle
+				// the settlement. Once it is at rest and concluded the
+				// ledger says how it ended.
+				idle := d.restOrConclusion()
 				p.mu.Unlock()
 				if idle == nil {
 					return nil
@@ -435,10 +440,12 @@ func (p *Pool) Cancel(ctx context.Context, parent *thread.Session, receiptID str
 }
 
 // Wait blocks until the delegation behind receiptID is at rest in
-// this pool — settled, or parked at an approval — and returns its
+// this pool — concluded, or parked at an approval — and returns its
 // receipt as the ledger then reads. When it returns for a sync
 // delegation that settled after a park, the parent's parked call is
-// already resolved and its resume armed. A receipt no child of this
+// already resolved and its resume armed: the parked Turn's Next is the
+// continuation (nil only when the call was no longer there to resolve
+// — an interrupting Send denied it, the turn died before parking it). A receipt no child of this
 // pool is working returns at once, as it stands. ctx bounds the wait;
 // an id the ledger does not hold fails with ErrUnknownReceipt.
 func (p *Pool) Wait(ctx context.Context, parent *thread.Session, receiptID string) (Receipt, error) {
@@ -449,7 +456,7 @@ func (p *Pool) Wait(ctx context.Context, parent *thread.Session, receiptID strin
 		p.mu.Lock()
 		var idle chan struct{}
 		if d, ok := p.delegates[receiptID]; ok && d.parent.ID() == parent.ID() {
-			idle = d.idle
+			idle = d.restOrConclusion()
 		}
 		p.mu.Unlock()
 		if idle == nil {
@@ -1002,16 +1009,21 @@ func (p *Pool) concludeRun(runCtx, ledger context.Context, d *delegate, state St
 }
 
 // conclude settles a delegation and completes what hangs on it: the
-// receipt records the final state with its cause, the delegate
-// retires, the child session is closed, and — when a sync
-// delegation's call is parked in the parent — that call resolves with
-// text, the model-visible outcome (ADR 0022 §7): the child's answer,
-// or the failure as a resolve_error. The parent's own resume then
-// fires through the ordinary boundary machinery.
+// receipt records the final state with its cause, the child session is
+// closed, and — when a sync delegation's call is parked in the parent
+// — that call resolves with text, the model-visible outcome (ADR 0022
+// §7): the child's answer, or the failure as a resolve_error. The
+// parent's own resume then fires through the ordinary boundary
+// machinery, armed (and linked as the parked turn's Next) inside the
+// resolution. The delegate retires last, deferred so a panic in
+// between still retires it: whoever finds no delegate — Wait above
+// all, which promises the resume armed when it returns for a sync
+// delegation — finds the delegation concluded, not merely settled.
 func (p *Pool) conclude(ctx context.Context, d *delegate, state State, stop, text string, isErr bool) {
 	if !p.settle(ctx, d, state, stop) {
 		return
 	}
+	defer p.retire(d)
 	p.closeChild(ctx, d)
 	// Requests the delegation leaves undecided — a canceled child's, a
 	// failed one's — are denied on the parent, with the reason: nothing
@@ -1021,6 +1033,9 @@ func (p *Pool) conclude(ctx context.Context, d *delegate, state State, stop, tex
 		d.agent.Logger().Error("thread/pool: an ended delegation's requests still read pending; Recover denies them",
 			"receipt", d.receipt, "child", d.child.ID(), "err", err)
 	}
+	if p.testHookConcluding != nil {
+		p.testHookConcluding(d)
+	}
 	p.mu.Lock()
 	resolve := d.resolve
 	p.mu.Unlock()
@@ -1029,8 +1044,9 @@ func (p *Pool) conclude(ctx context.Context, d *delegate, state State, stop, tex
 	}
 }
 
-// settle records a delegation's one settlement and retires its
-// delegate; it reports whether this call was the one that settled.
+// settle records a delegation's one settlement; it reports whether
+// this call was the one that settled, and the caller then retires the
+// delegate (retire) once what hangs on the settlement is done.
 // It is idempotent per receipt: a second settle — a panic after the
 // first, a Cancel racing the run's own end — records nothing, so the
 // parent's Delegated bucket counts the child once. The usage is the
@@ -1045,6 +1061,7 @@ func (p *Pool) settle(ctx context.Context, d *delegate, state State, stop string
 	}
 	d.settled = true
 	d.phase = phaseSettled
+	d.concluded = make(chan struct{})
 	p.mu.Unlock()
 
 	u := d.child.Usage()
@@ -1056,9 +1073,14 @@ func (p *Pool) settle(ctx context.Context, d *delegate, state State, stop string
 		d.agent.Logger().Error("thread/pool: settlement receipt not recorded",
 			"receipt", d.receipt, "child", d.child.ID(), "state", state, "stop", stop, "err", err)
 	}
-	// The delegate retires only once the ledger holds the settlement:
-	// whoever finds no delegate reads the ledger, and must never read
-	// it a step behind.
+	return true
+}
+
+// retire removes a settled delegate from the pool's registers, drops
+// its session's registration and releases whoever waits on its
+// conclusion. Only after the ledger holds the settlement: whoever finds
+// no delegate reads the ledger, and must never read it a step behind.
+func (p *Pool) retire(d *delegate) {
 	p.mu.Lock()
 	if p.delegates[d.receipt] == d {
 		delete(p.delegates, d.receipt)
@@ -1068,8 +1090,8 @@ func (p *Pool) settle(ctx context.Context, d *delegate, state State, stop string
 	}
 	delete(p.sessionAgents, d.child.ID())
 	p.markRetired(d.child.ID())
+	close(d.concluded)
 	p.mu.Unlock()
-	return true
 }
 
 // endedReason is the deny reason recorded on the parent for a mirrored

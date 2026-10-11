@@ -296,6 +296,85 @@ func racingPumpSettlement(t *testing.T, lateRegister bool) {
 	}
 }
 
+// Wait's promise for a sync delegation that settles after a park: when
+// it returns, the parent's parked call is resolved and its resume armed
+// — Turn.Next of the parked turn is the continuation. The delegate used
+// to retire with the settlement, before the resolution: a Wait landing
+// in between found no delegate, read the settled ledger and returned,
+// and the parked turn's Next was nil (TestNestedSyncFullFlow and
+// TestChildInheritsSigning in the nightly soak; the latter called Wait
+// on the nil Turn and panicked). The delegate now retires after the
+// resolution, and Wait waits for a concluding delegate.
+func TestWaitReturnsWithTheResumeArmed(t *testing.T) {
+	ctx := context.Background()
+	p := New(1)
+	refund := core.Tool("refund", "", func(_ context.Context, _ struct{ OrderID string }) (string, error) {
+		return "refunded", nil
+	}, core.RequireApproval())
+	child := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"1"}`}),
+		wefttest.Say("approved"),
+	), refund)
+	parent, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research", ID: "c-wrapper", Args: `{"prompt":"refund order 1"}`}),
+		wefttest.Say("all done"),
+	), p.MustWrap("research", "", child)))
+	t1, err := parent.Send(ctx, core.User("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := t1.Wait(); err != nil || len(res.Pending) != 1 {
+		t.Fatalf("the parent's turn = %+v, %v; want parked on the wrapper", res, err)
+	}
+	rs := Receipts(parent)
+	if len(rs) != 1 {
+		t.Fatalf("receipts = %+v", rs)
+	}
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	p.testHookConcluding = func(*delegate) {
+		close(entered)
+		<-release
+	}
+	if err := p.Decide(ctx, parent, thread.Approve(parent.Pending()[0].CallID)); err != nil {
+		t.Fatal(err)
+	}
+	<-entered // settled in the ledger, the wrapper not yet resolved
+	type waited struct {
+		rc   Receipt
+		err  error
+		next *thread.Turn
+	}
+	done := make(chan waited, 1)
+	go func() {
+		rc, err := p.Wait(ctx, parent, rs[0].ID)
+		done <- waited{rc, err, t1.Next()}
+	}()
+	var w waited
+	select {
+	case w = <-done:
+		// Returned inside the window: the promise is broken when the
+		// continuation is not there.
+		if w.next == nil {
+			close(release)
+			t.Fatalf("Wait returned (%+v, %v) before the wrapper resolved: the parked turn's Next is nil", w.rc, w.err)
+		}
+		close(release)
+	case <-time.After(100 * time.Millisecond):
+		close(release)
+		w = <-done
+	}
+	if w.err != nil || w.rc.State != Done || w.next == nil {
+		t.Fatalf("Wait = %+v, %v, Next = %v; want done with the continuation armed", w.rc, w.err, w.next)
+	}
+	if res, err := w.next.Wait(); err != nil || res.Text() != "all done" {
+		t.Fatalf("the parent's continuation: %v, %v", res, err)
+	}
+	if err := p.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A decision can land while the child is parking: its requests are
 // mirrored, the parked receipt written, but the phase still reads the
 // run in flight. Every pump there — the deciding Decide's own, the

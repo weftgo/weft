@@ -95,7 +95,7 @@ func TestModelVisibleTexts(t *testing.T) {
 			t.Fatal(err)
 		}
 		waitFor(t, p, s, rc.ID, pool.Failed)
-		if _, err := t1.Next().Wait(); err != nil {
+		if _, err := continuation(t, t1).Wait(); err != nil {
 			t.Fatal(err)
 		}
 		// The same shape a first run's failure has, delivered as the

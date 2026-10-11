@@ -48,6 +48,11 @@ type delegate struct {
 	// park the delegating call — the moment a resolution can land.
 	wrapperSeen bool
 	settled     bool
+	// concluded is made by the settlement and closed when the delegate
+	// retires — once a sync delegation's parked call is resolved and
+	// the parent's resume armed. Wait and Cancel watch it for a
+	// delegate settled with no run in flight.
+	concluded chan struct{}
 	// parks counts the delegate's parks: each park's phase write takes
 	// the next number. A boundary read — the child's Pending and the
 	// replay built from it — belongs to the park whose number was read
@@ -65,6 +70,19 @@ const (
 	phaseSettling        // a parked child being canceled
 	phaseSettled         // retired
 )
+
+// restOrConclusion is what a waiter on the delegate watches: the run
+// in flight's rest, else — once settled — its conclusion; nil for a
+// delegate at rest and unsettled (parked). Callers hold p.mu.
+func (d *delegate) restOrConclusion() chan struct{} {
+	if d.idle != nil {
+		return d.idle
+	}
+	if d.settled {
+		return d.concluded
+	}
+	return nil
+}
 
 // label is the name the model-visible texts call the delegation by.
 func (d *delegate) label() string {

@@ -532,19 +532,29 @@ func (c *coster) compute(rec obsdb.RunRow) runCost {
 	own := rec.Usage
 	del := cost{known: true}
 	var unpriced []string
+	// The cause is carried: one child whose figure is unknown (running,
+	// its end never arrived, its children unreadable) makes the
+	// delegated figure unknown, not unpriced.
+	badge := costUnpriced
 	for _, k := range subagents(rec.ID, all) {
 		own = sub(own, k.Usage)
 		kc := c.cost(k)
 		del.usd += kc.own.usd + kc.delegated.usd
 		if !kc.own.known {
 			unpriced = append(unpriced, k.ID+" ("+kc.own.reason+")")
+			if kc.own.badge == costUnknown {
+				badge = costUnknown
+			}
 		}
 		if !kc.delegated.known {
 			unpriced = append(unpriced, k.ID+"'s subagents ("+kc.delegated.reason+")")
+			if kc.delegated.badge == costUnknown {
+				badge = costUnknown
+			}
 		}
 	}
 	if len(unpriced) > 0 {
-		del = cost{badge: costUnpriced, reason: "a subagent run is not priced: " + strings.Join(unpriced, "; ")}
+		del = cost{badge: badge, reason: "a subagent run is not priced: " + strings.Join(unpriced, "; ")}
 	}
 	if why := usagePending(rec); why != "" {
 		return runCost{own: cost{badge: costUnknown, reason: why, cache: cacheOf(own)}, delegated: del}
@@ -676,9 +686,17 @@ func (c *coster) setCost(runs []obsdb.RunRow, what string) cost {
 		}
 		if !rc.delegated.known {
 			unpriced = append(unpriced, r.ID+"'s subagents ("+rc.delegated.reason+")")
+			if rc.delegated.badge == costUnknown {
+				badge = costUnknown
+			}
 		}
 	}
 	out.cache = cacheOf(usage)
+	if usage == (core.Usage{}) {
+		// No usage at all (a run-less experiment): a $0 that nothing
+		// can have overstated, so no cache note.
+		out.cache = cacheExact
+	}
 	if len(unpriced) > 0 {
 		out.known, out.usd = false, 0
 		out.badge, out.reason = badge, what+" is not priced: "+strings.Join(unpriced, "; ")

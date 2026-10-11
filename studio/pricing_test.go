@@ -793,3 +793,56 @@ func TestCostSortCap(t *testing.T) {
 		t.Errorf("an uncapped match carries cost_sort_cap: %s", body)
 	}
 }
+
+// TestCostZeroUsageIsExact: a set with no usage — a run-less
+// experiment — is a known $0, and nothing about it is overstated: its
+// cache reads exact, with no cache note for a reason.
+func TestCostZeroUsageIsExact(t *testing.T) {
+	ts := httptest.NewServer(New(Open(filepath.Join(t.TempDir(), "w.db")), Playground(true)).Handler())
+	t.Cleanup(ts.Close)
+	def := `{"id":"exp_empty","name":"n","agent":"a","variants":[{"key":"A","overrides":{}}],"inputs":[{"key":"1","text":"x"}]}`
+	resp, err := http.Post(ts.URL+"/api/experiments", "application/json", strings.NewReader(def))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("save = %d %s", resp.StatusCode, b)
+	}
+	var r costRow
+	decode(t, string(b), &r)
+	if usd(r.CostUSD) != "0" || !r.CostKnown || r.Cache != cacheExact || r.CostReason != "" {
+		t.Errorf("run-less experiment: cost %s known %v cache %q reason %q; want 0, known, exact, no reason",
+			usd(r.CostUSD), r.CostKnown, r.Cache, r.CostReason)
+	}
+}
+
+// TestCostRunningChildIsUnknown: a turn whose subagent is still running
+// has a delegated figure that is unknown — not unpriced: the model is
+// in the table, its usage has not arrived — and the session's summed
+// badge says so.
+func TestCostRunningChildIsUnknown(t *testing.T) {
+	db := costDB(t)
+	t0 := time.Now().Add(-time.Minute).UTC()
+	own := core.Usage{InputTokens: 10_000, OutputTokens: 1_000}
+	costUsage(t, db, "p", "", "s_run", "anthropic", "claude-opus-5-5", t0, own, own)
+	b, _ := json.Marshal(map[string]any{"type": "run_start", "id": "p/0/c", "agent": "billing",
+		"model": map[string]string{"provider": "anthropic", "name": "claude-opus-5-5"}})
+	rec := obsdb.Record{Time: time.Now().UTC(), EventName: "weft.event", Severity: 9, Body: string(b), Service: "svc",
+		Attrs: map[string]any{"weft.record": "event", "weft.run.id": "p/0/c", "gen_ai.agent.name": "billing",
+			"weft.event.type": "run_start", "weft.event.pos": int64(0), "weft.session.id": "s_run",
+			"weft.parent.run.id": "p", "weft.parent.call.id": "call_c"},
+		Resource: map[string]any{"service.name": "svc"}}
+	if err := db.Write(context.Background(), obsdb.Batch{Records: []obsdb.Record{rec}}); err != nil {
+		t.Fatal(err)
+	}
+	h := Handler(DB(db))
+	_, _, body := get(t, h, "/studio/api/sessions/s_run")
+	var sess costRow
+	decode(t, body, &sess)
+	if sess.CostUSD != nil || sess.CostKnown || sess.CostBadge != costUnknown || !strings.Contains(sess.CostReason, "running") {
+		t.Errorf("session with a running subagent: cost %s known %v badge %q reason %q; want null, unknown, naming running",
+			usd(sess.CostUSD), sess.CostKnown, sess.CostBadge, sess.CostReason)
+	}
+}

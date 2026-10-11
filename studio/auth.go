@@ -175,6 +175,14 @@ func (s *Server) auth(next http.Handler) http.Handler {
 						"(e.g. \"http://"+r.Host+"\") or configure studio.Token")
 				return
 			}
+			if crossOriginWrite(s.origins, r) {
+				writeError(w, r, http.StatusForbidden, "forbidden",
+					"cross-origin write refused (setup A): with no studio.Token the API takes an unsafe "+
+						"method only from its own origin; this request's Origin is "+strconv.Quote(r.Header.Get("Origin"))+
+						" (Sec-Fetch-Site "+strconv.Quote(r.Header.Get("Sec-Fetch-Site"))+"): list the origin in "+
+						"studio.AllowOrigins or configure studio.Token")
+				return
+			}
 			if sig, ok := liveGrantRequest(r); ok {
 				s.identifyGrant(w, r, sig, identify)
 				return
@@ -494,6 +502,35 @@ func originAllowed(origins []string, defaults bool, origin string) bool {
 	}
 	host := u.Hostname()
 	return host == "localhost" || host == "127.0.0.1"
+}
+
+// crossOriginWrite is setup A's CSRF guard: the loopback Host proves
+// the request reached this machine, not that this origin's page sent it
+// — any site's page can POST text/plain with mode "no-cors" and no
+// preflight. An unsafe method (anything but GET, HEAD, OPTIONS) is
+// cross-origin when its Origin is neither scheme://Host nor an
+// AllowOrigins entry, or, with no Origin, when Sec-Fetch-Site says
+// cross-site. A client sending neither header (curl, the runtime link)
+// is not a browser page and passes.
+func crossOriginWrite(origins []string, r *http.Request) bool {
+	switch r.Method {
+	case http.MethodGet, http.MethodHead, http.MethodOptions:
+		return false
+	}
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return strings.EqualFold(r.Header.Get("Sec-Fetch-Site"), "cross-site")
+	}
+	for _, o := range origins {
+		if o == "*" || o == origin {
+			return false
+		}
+	}
+	u, err := url.Parse(origin)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return true // "null" (a sandboxed frame, file://) included
+	}
+	return !strings.EqualFold(u.Host, r.Host)
 }
 
 // hostAllowed is setup A's DNS-rebinding guard: the request's Host

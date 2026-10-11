@@ -1478,3 +1478,85 @@ func TestSpansHideOverrideTools(t *testing.T) {
 		}
 	}
 }
+
+// TestSetupACrossOriginWrites pins setup A's CSRF rule (no Token): the
+// loopback Host proves the request reached this machine, not that this
+// origin's page sent it — a page on any site can POST text/plain with
+// mode "no-cors" and no preflight. So an unsafe method whose Origin is
+// neither the request's own (scheme://Host) nor an AllowOrigins entry,
+// or that carries no Origin but Sec-Fetch-Site: cross-site, is 403 with
+// the reason in the body. A same-origin page, a client sending neither
+// header (curl, the runtime link) and an AllowOrigins origin keep
+// working; reads are unaffected (no ACAO in setup A: the browser hides
+// the answer).
+func TestSetupACrossOriginWrites(t *testing.T) {
+	plain := httptest.NewServer(New(Open(t.TempDir()+"/a.db"), Playground(true)).Handler())
+	t.Cleanup(plain.Close)
+	allowed := httptest.NewServer(New(Open(t.TempDir()+"/b.db"), Playground(true), AllowOrigins("http://myapp.internal:8080")).Handler())
+	t.Cleanup(allowed.Close)
+
+	def := `{"id":"exp_csrf","name":"n","agent":"acme-support","variants":[{"key":"A","overrides":{}}],"inputs":[{"key":"1","text":"x"}]}`
+	routes := []struct{ name, method, path, body string }{
+		{"save experiment", http.MethodPost, "/api/experiments", def},
+		{"cancel", http.MethodPost, "/api/runs/run_x/cancel", ""},
+		{"read runs", http.MethodGet, "/api/runs", ""},
+	}
+	do := func(ts *httptest.Server, method, path, body string, hdr map[string]string) (int, string) {
+		t.Helper()
+		req, err := http.NewRequest(method, ts.URL+path, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if body != "" {
+			req.Header.Set("Content-Type", "text/plain;charset=UTF-8") // the no-cors form
+		}
+		for k, v := range hdr {
+			req.Header.Set(k, v)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	for _, rt := range routes {
+		for _, ts := range []*httptest.Server{plain, allowed} {
+			// The usual answer: no Origin, no Sec-Fetch-Site (curl).
+			base, body := do(ts, rt.method, rt.path, rt.body, nil)
+			if base == http.StatusForbidden {
+				t.Fatalf("%s: baseline = 403 %s", rt.name, body)
+			}
+			self := "http://" + strings.TrimPrefix(ts.URL, "http://")
+			cases := []struct {
+				name    string
+				hdr     map[string]string
+				refused bool
+			}{
+				{"foreign origin", map[string]string{"Origin": "https://evil.example", "Sec-Fetch-Site": "cross-site"}, true},
+				{"foreign origin alone", map[string]string{"Origin": "https://evil.example"}, true},
+				{"null origin", map[string]string{"Origin": "null"}, true},
+				{"cross-site without origin", map[string]string{"Sec-Fetch-Site": "cross-site"}, true},
+				{"same origin", map[string]string{"Origin": self, "Sec-Fetch-Site": "same-origin"}, false},
+				{"same-origin fetch site", map[string]string{"Sec-Fetch-Site": "same-origin"}, false},
+				{"user-initiated", map[string]string{"Sec-Fetch-Site": "none"}, false},
+				{"AllowOrigins origin", map[string]string{"Origin": "http://myapp.internal:8080", "Sec-Fetch-Site": "cross-site"}, ts == plain},
+			}
+			for _, c := range cases {
+				want, refused := base, c.refused && rt.method != http.MethodGet
+				if refused {
+					want = http.StatusForbidden
+				}
+				code, body := do(ts, rt.method, rt.path, rt.body, c.hdr)
+				if code != want {
+					t.Errorf("%s / %s (allow=%v): status = %d, want %d: %s", rt.name, c.name, ts == allowed, code, want, body)
+					continue
+				}
+				if refused && !strings.Contains(body, "cross-origin write refused (setup A)") {
+					t.Errorf("%s / %s: refusal body does not name the reason: %s", rt.name, c.name, body)
+				}
+			}
+		}
+	}
+}

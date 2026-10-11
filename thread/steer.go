@@ -150,23 +150,36 @@ func (s *Session) steerSendLocked(ctx context.Context, msg core.Message, opts []
 	if !s.running && s.boundaryLocked() {
 		// Nothing runs to drain it, and the boundary holds the session:
 		// the steer defers now, its follow-up queued like any Send's.
-		if err := s.deferSteerLocked(q); err != nil {
+		ft, receipt, err := s.deferSteerLocked(q)
+		if err != nil {
+			// The Send fails, so nothing it wrote may run: the follow-up's
+			// accepted receipt, when written, is dropped (its deferred
+			// receipt settles the steer's), else the steer's own queued
+			// receipt is; the leaf goes back to before the steer.
+			drop := receipt
+			if drop == "" {
+				drop = t.id
+			}
+			s.abandonLocked(context.WithoutCancel(ctx), e.ParentID, drop)
 			return nil, err
 		}
+		s.queueFollowUpLocked(q, ft, receipt)
 		return t, nil
 	}
 	s.steerQueue = append(s.steerQueue, q)
 	return t, nil
 }
 
-// deferSteerLocked settles a steer as a deferred follow-up (called
-// under mu): the follow-up turn is minted, and one atomic append
-// records both halves — the deferred receipt naming it, and the
-// accepted receipt that makes the follow-up a durable queued send —
-// before it joins the queue in acceptance order. The steer's Turn is
-// linked to the follow-up through Next and ends deferred: the caller
-// following Next watches the follow-up run. Callers hold mu.
-func (s *Session) deferSteerLocked(q queuedSteer) error {
+// deferSteerLocked records a steer's deferral (called under mu): the
+// follow-up turn is minted, and one atomic append records both halves
+// — the deferred receipt naming it, and the accepted receipt that
+// makes the follow-up a durable queued send. It returns the follow-up
+// turn and its accepted receipt's id; the receipt id is set beside an
+// error when the entries were written but not flushed (acceptLocked
+// keeps a deferral's entries), and "" when nothing was written. The
+// caller queues the follow-up (queueFollowUpLocked) or abandons it.
+// Callers hold mu.
+func (s *Session) deferSteerLocked(q queuedSteer) (*Turn, string, error) {
 	ft := s.newTurnLocked()
 	ft.policy, ft.hasPolicy = Steer, true
 	ctx := context.WithoutCancel(q.ctx)
@@ -174,37 +187,39 @@ func (s *Session) deferSteerLocked(q queuedSteer) error {
 		return ReceiptEntry{ID: id, ParentID: parent, Created: created,
 			Receipt: q.receipt, Status: ReceiptDeferred, Turn: ft.id}
 	})
-	if err != nil {
-		return err
-	}
+	return ft, receipt, err
+}
+
+// queueFollowUpLocked queues a deferred steer's follow-up turn in
+// acceptance order, under its accepted receipt, and links the steer's
+// Turn to it through Next before ending it deferred: the caller
+// following Next watches the follow-up run. Callers hold mu.
+func (s *Session) queueFollowUpLocked(q queuedSteer, ft *Turn, receipt string) {
 	s.queue = append(s.queue, q.followUp(ft, receipt))
 	if q.turn != nil {
 		q.turn.setNext(ft)
 		q.turn.finishAs(TurnDeferred, nil, nil)
 	}
-	return nil
 }
 
 // settleSteerLocked settles one accepted steer as a deferred follow-up
-// (called under mu): the deferred receipt entry is appended, the
-// follow-up turn minted and queued in acceptance order, and the
-// steer's Turn linked to it through Next and finished. When the
-// receipts cannot be persisted the failure is logged, not raised — the
-// follow-up still runs from the in-memory queue, the message in hand:
-// the turn has landed, and only the receipt entry stays queued (a
-// reopen restores the steer from it).
+// (called under mu): the deferral is recorded (deferSteerLocked), the
+// follow-up queued in acceptance order, and the steer's Turn linked to
+// it through Next and finished. The steer's Send succeeded, so a
+// deferral the storage refused is logged, not raised, and the
+// follow-up runs regardless — under the turn and receipt the written
+// entries name when they were written but not flushed, so a reopen
+// before it runs restores it and one after it ran does not run it
+// again; from the in-memory queue alone when nothing was written (the
+// steer's queued receipt then stays, and a reopen restores the steer
+// from it).
 func (s *Session) settleSteerLocked(q queuedSteer) {
-	if err := s.deferSteerLocked(q); err != nil {
+	ft, receipt, err := s.deferSteerLocked(q)
+	if err != nil {
 		s.agent.Logger().Error("thread: steer deferral not persisted",
 			"session", s.header.ID, "receipt", q.receipt, "err", err)
-		ft := s.newTurnLocked()
-		ft.policy, ft.hasPolicy = Steer, true
-		s.queue = append(s.queue, q.followUp(ft, ""))
-		if q.turn != nil {
-			q.turn.setNext(ft)
-			q.turn.finishAs(TurnDeferred, nil, nil)
-		}
 	}
+	s.queueFollowUpLocked(q, ft, receipt)
 }
 
 // settleSteersLocked runs at the end of every turn (called under mu):

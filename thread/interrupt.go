@@ -103,15 +103,22 @@ func (s *Session) leafBeforeLocked(t *Turn) string {
 
 // dequeueLocked takes t back out of the send queue — an acceptance
 // that is being refused after all — and settles its accepted receipt
-// as dropped, so neither this session nor a reopened one runs it.
-// Callers hold s.mu.
+// as dropped, so neither this session nor a reopened one runs it, the
+// leaf moving back to where the Send found it (abandonLocked). Callers
+// hold s.mu.
 func (s *Session) dequeueLocked(ctx context.Context, t *Turn) {
 	for i, ps := range s.queue {
 		if ps.turn != t {
 			continue
 		}
+		// The leaf goes back to before the receipt — the line the
+		// refused Send found — unless something landed after it.
+		prev := s.leaf
+		if ps.receipt != "" && prev == ps.receipt {
+			prev = s.leafBeforeLocked(t)
+		}
 		s.queue = append(s.queue[:i], s.queue[i+1:]...)
-		s.dropAcceptedLocked(ctx, ps.receipt)
+		s.abandonLocked(ctx, prev, ps.receipt)
 		t.finishAs(TurnDropped, nil, fmt.Errorf("%w: session %s: the send was refused", ErrDropped, s.header.ID))
 		return
 	}

@@ -340,7 +340,7 @@ func (s *Session) Send(ctx context.Context, msg core.Message, opts ...SendOption
 	// The prompt is durable before anything else happens: appended
 	// under the caller's context and flushed, so a Send that returns
 	// without error has already survived a crash.
-	if err := s.appendPromptLocked(ctx, t, msg); err != nil {
+	if err := s.appendPromptLocked(ctx, t, msg, ""); err != nil {
 		return nil, err
 	}
 	t.setPromptDone()
@@ -377,14 +377,18 @@ func (s *Session) enqueueLocked(ctx context.Context, msg core.Message, opts []co
 
 // acceptLocked writes the accepted receipt entry for a queued send's
 // turn — after lead, the entry that must land in the same atomic
-// Append (a steer's deferred receipt) — and returns its id. A receipt
-// that was written but could not be flushed is dropped again, best
-// effort, so a reopen does not run a send its caller was told failed,
-// and the leaf moves back to where it stood — the prompt path's rule
-// (appendPromptLocked): a failed Send leaves the line as it found it
-// whether it met an idle session or a busy one, the window after a
-// turn's Wait included, where the runner is still between items and a
-// Send queues. Callers hold s.mu.
+// Append (a steer's deferred receipt) — and returns its id.
+//
+// A receipt that was written but could not be flushed is one of two
+// things. Without lead it is a Send's, and the Send fails: the receipt
+// is dropped again and the leaf moves back to where it stood
+// (abandonLocked, best effort), so a reopen does not run a send its
+// caller was told failed and the line reads as the prompt path's
+// failure leaves it (appendPromptLocked) — idle session or busy, the
+// window after a turn's Wait included. With lead it is a steer's
+// deferral, whose own Send already succeeded: the written entries
+// stay, and the id comes back beside the error so the caller queues
+// the follow-up under the turn the receipt names. Callers hold s.mu.
 func (s *Session) acceptLocked(ctx context.Context, t *Turn, msg core.Message, lead func(id, parent string, created time.Time) Entry) (string, error) {
 	if !ValidID(t.id) {
 		return "", fmt.Errorf("thread: invalid entry id %q", t.id)
@@ -421,8 +425,10 @@ func (s *Session) acceptLocked(ctx context.Context, t *Turn, msg core.Message, l
 	if err := s.appendEntriesLocked(ctx, entries...); err != nil {
 		if _, written := s.byID[id]; written {
 			// Appended, not flushed: the entry is in the file.
-			s.dropAcceptedLocked(context.WithoutCancel(ctx), id)
-			s.unwindLeafLocked(context.WithoutCancel(ctx), prev)
+			if lead != nil {
+				return id, fmt.Errorf("thread: accepted receipt flush: %w", err)
+			}
+			s.abandonLocked(context.WithoutCancel(ctx), prev, id)
 			return "", fmt.Errorf("thread: accepted receipt flush: %w", err)
 		}
 		return "", err
@@ -430,25 +436,54 @@ func (s *Session) acceptLocked(ctx context.Context, t *Turn, msg core.Message, l
 	return id, nil
 }
 
-// dropAcceptedLocked settles an accepted receipt as dropped, best
-// effort: the send it stood for will not run, and a reopen must not
-// restore it. A failure is logged — the receipt then stays accepted in
-// the file, and the next Open restores the send to the queue. Callers
-// hold s.mu.
-func (s *Session) dropAcceptedLocked(ctx context.Context, receipt string) {
-	if receipt == "" {
-		return
+// abandonLocked settles what a failed send left in the tree: every
+// receipt named is marked dropped — the send it stood for will not
+// run, and a reopen must not restore it — and a leaf entry moves the
+// leaf back to prev, so the failed send's entries sit on a line of
+// their own and the next one attaches where the failed one did. Both
+// go in one atomic Append, flushed: the drop is never durable without
+// the move, nor the move without the drop. It is best effort — a
+// refused Append still moves the in-memory leaf and the log says the
+// file disagrees (an undropped receipt is restored by the next Open);
+// a refused flush is logged. Callers hold s.mu.
+func (s *Session) abandonLocked(ctx context.Context, prev string, receipts ...string) {
+	var entries []Entry
+	parent, now := s.leaf, s.now()
+	var err error
+	for _, r := range receipts {
+		if r == "" {
+			continue
+		}
+		var id string
+		if id, err = s.mintCheckedLocked(entries); err != nil {
+			break
+		}
+		entries = append(entries, ReceiptEntry{ID: id, ParentID: parent, Created: now, Receipt: r, Status: ReceiptDropped})
+		parent = id
 	}
-	id, err := s.mintCheckedLocked(nil)
-	if err == nil {
-		e := ReceiptEntry{ID: id, ParentID: s.leaf, Created: s.now(), Receipt: receipt, Status: ReceiptDropped}
-		if err = s.st.Append(ctx, s.header.ID, e); err == nil {
-			s.adoptLocked(e)
+	if err == nil && parent != prev {
+		var id string
+		if id, err = s.mintCheckedLocked(entries); err == nil {
+			entries = append(entries, LeafEntry{ID: id, ParentID: parent, Created: now, Entry: prev})
+		}
+	}
+	if err == nil && len(entries) > 0 {
+		if err = s.st.Append(ctx, s.header.ID, entries...); err == nil {
+			for _, e := range entries {
+				s.adoptLocked(e)
+			}
+			if ferr := s.flushLocked(ctx); ferr != nil {
+				s.agent.Logger().Error("thread: a failed send's drop and leaf move not flushed",
+					"session", s.header.ID, "receipts", receipts, "err", ferr)
+			}
 			return
 		}
 	}
-	s.agent.Logger().Error("thread: accepted receipt not dropped; a reopen restores the send",
-		"session", s.header.ID, "receipt", receipt, "err", err)
+	s.leaf = prev
+	if err != nil {
+		s.agent.Logger().Error("thread: a failed send's drop and leaf move not recorded; a reopen restores an undropped send",
+			"session", s.header.ID, "receipts", receipts, "err", err)
+	}
 }
 
 // newTurnLocked mints the receipt — the prompt entry's id — and the
@@ -523,8 +558,11 @@ func recoverTurnSeq(session string, entries []Entry) int {
 // else has started. The leaf then moves back to where it was — a
 // recorded leaf entry, the prompt being in the file — so the failed
 // prompt sits on a line of its own and a retried Send leaves one
-// prompt in the context, not two. Callers hold s.mu.
-func (s *Session) appendPromptLocked(ctx context.Context, t *Turn, msg core.Message) error {
+// prompt in the context, not two. receipt is a queued send's accepted
+// receipt ("" for Send's idle path): on any failure it is dropped in
+// the same append as the leaf move (abandonLocked), the send will not
+// run. Callers hold s.mu.
+func (s *Session) appendPromptLocked(ctx context.Context, t *Turn, msg core.Message, receipt string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -537,34 +575,15 @@ func (s *Session) appendPromptLocked(ctx context.Context, t *Turn, msg core.Mess
 	prev := s.leaf
 	e := MessageEntry{ID: t.id, ParentID: prev, Created: s.now(), Message: cloneMessage(msg), RunID: t.runID}
 	if err := s.st.Append(ctx, s.header.ID, e); err != nil {
+		s.abandonLocked(context.WithoutCancel(ctx), prev, receipt)
 		return err
 	}
 	s.adoptLocked(e)
 	if err := s.flushLocked(ctx); err != nil {
-		s.unwindLeafLocked(context.WithoutCancel(ctx), prev)
+		s.abandonLocked(context.WithoutCancel(ctx), prev, receipt)
 		return fmt.Errorf("thread: prompt flush: %w", err)
 	}
 	return nil
-}
-
-// unwindLeafLocked moves the leaf back to prev after a prompt or an
-// accepted receipt that was written but not flushed: a leaf entry
-// records the move, so a reopen reads the same position; when even
-// that cannot be written the in-memory leaf still moves — a retry then
-// attaches beside the failed entry, never after it — and the log says
-// the file disagrees until the next entry lands. Callers hold s.mu.
-func (s *Session) unwindLeafLocked(ctx context.Context, prev string) {
-	id, err := s.mintCheckedLocked(nil)
-	if err == nil {
-		e := LeafEntry{ID: id, ParentID: s.leaf, Created: s.now(), Entry: prev}
-		if err = s.st.Append(ctx, s.header.ID, e); err == nil {
-			s.adoptLocked(e)
-			return
-		}
-	}
-	s.leaf = prev
-	s.agent.Logger().Error("thread: unflushed entry's leaf move not recorded",
-		"session", s.header.ID, "err", err)
 }
 
 // workItem is one unit of runner work: an accepted send, or a resume
@@ -879,10 +898,10 @@ func (s *Session) runOne(item workItem) {
 		if t.promptWritten() {
 			return
 		}
-		if promptErr = s.appendPromptLocked(persist, t, ps.msg); promptErr != nil {
-			// The send will not run: its accepted receipt must not
-			// bring it back on a reopen.
-			s.dropAcceptedLocked(persist, ps.receipt)
+		if promptErr = s.appendPromptLocked(persist, t, ps.msg, ps.receipt); promptErr != nil {
+			// The send will not run: its accepted receipt is dropped
+			// with the leaf move (appendPromptLocked), so a reopen does
+			// not bring it back.
 			return
 		}
 		t.setPromptDone()
@@ -1901,10 +1920,14 @@ func (t *Turn) Done() <-chan struct{} { return t.done }
 // When Wait returns the turn's entries have landed: Leaf, Context and
 // Entries show its end. The session's runner may still be between
 // items — the automatic compaction, the hand-off to the next queued
-// send — and a Send made there is accepted under every policy and
-// queued behind it, its accepted receipt on the line before its
-// prompt. WaitIdle waits that window out; Wait never does, so a
-// summarizer's model call never delays a turn's caller.
+// send. After a turn that did not park, a Send made there is accepted
+// under every policy and queued behind that work, its accepted receipt
+// on the line before its prompt. After a parked turn the approval
+// boundary holds the session instead, window or not, and Send applies
+// its boundary rules (Reject reads ErrBusy, a Steer defers, an
+// Interrupt denies the parked calls). WaitIdle waits the window out;
+// Wait never does, so a summarizer's model call never delays a turn's
+// caller.
 //
 // The error says what kind of end it was; match with errors.Is and
 // errors.As:

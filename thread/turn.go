@@ -223,6 +223,12 @@ type pendingSend struct {
 	opts    []core.RunOption
 	turn    *Turn
 	receipt string
+	// settles is the steer's queued receipt a follow-up stands for when
+	// its deferral could not be written (settleSteerLocked): the prompt
+	// entry's append carries the deferred receipt that settles it, so a
+	// reopen after the follow-up ran does not restore the steer, and one
+	// before it did still does (ADR 0011 §4).
+	settles string
 	// restored marks a send Open put back in the queue from its
 	// accepted receipt: its ctx is a detached placeholder — the Send
 	// that accepted it is gone — until Continue binds it to its own.
@@ -340,7 +346,7 @@ func (s *Session) Send(ctx context.Context, msg core.Message, opts ...SendOption
 	// The prompt is durable before anything else happens: appended
 	// under the caller's context and flushed, so a Send that returns
 	// without error has already survived a crash.
-	if err := s.appendPromptLocked(ctx, t, msg, ""); err != nil {
+	if err := s.appendPromptLocked(ctx, t, msg, "", ""); err != nil {
 		return nil, err
 	}
 	t.setPromptDone()
@@ -481,7 +487,7 @@ func (s *Session) abandonLocked(ctx context.Context, prev string, receipts ...st
 	}
 	s.leaf = prev
 	if err != nil {
-		s.agent.Logger().Error("thread: a failed send's drop and leaf move not recorded; a reopen restores an undropped send",
+		s.agent.Logger().Error("thread: a failed send's drop and leaf move not recorded; the file's leaf stays on the failed entry until the next write, and an undropped accepted receipt without a prompt is restored by a reopen",
 			"session", s.header.ID, "receipts", receipts, "err", err)
 	}
 }
@@ -561,8 +567,12 @@ func recoverTurnSeq(session string, entries []Entry) int {
 // prompt in the context, not two. receipt is a queued send's accepted
 // receipt ("" for Send's idle path): on any failure it is dropped in
 // the same append as the leaf move (abandonLocked), the send will not
-// run. Callers hold s.mu.
-func (s *Session) appendPromptLocked(ctx context.Context, t *Turn, msg core.Message, receipt string) error {
+// run. settles is a steer's queued receipt the prompt stands for
+// (pendingSend.settles): a deferred receipt naming the turn joins the
+// prompt's append, after it, so the steer is settled no later than the
+// entry that proves its follow-up started — and dropped with the leaf
+// move when nothing could be written. Callers hold s.mu.
+func (s *Session) appendPromptLocked(ctx context.Context, t *Turn, msg core.Message, receipt, settles string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -573,12 +583,24 @@ func (s *Session) appendPromptLocked(ctx context.Context, t *Turn, msg core.Mess
 		return fmt.Errorf("thread: entry id %q already held by session %s", t.id, s.header.ID)
 	}
 	prev := s.leaf
-	e := MessageEntry{ID: t.id, ParentID: prev, Created: s.now(), Message: cloneMessage(msg), RunID: t.runID}
-	if err := s.st.Append(ctx, s.header.ID, e); err != nil {
-		s.abandonLocked(context.WithoutCancel(ctx), prev, receipt)
+	now := s.now()
+	entries := []Entry{MessageEntry{ID: t.id, ParentID: prev, Created: now, Message: cloneMessage(msg), RunID: t.runID}}
+	if settles != "" {
+		id, err := s.mintCheckedLocked(entries)
+		if err != nil {
+			s.abandonLocked(context.WithoutCancel(ctx), prev, receipt, settles)
+			return err
+		}
+		entries = append(entries, ReceiptEntry{ID: id, ParentID: t.id, Created: now,
+			Receipt: settles, Status: ReceiptDeferred, Turn: t.id})
+	}
+	if err := s.st.Append(ctx, s.header.ID, entries...); err != nil {
+		s.abandonLocked(context.WithoutCancel(ctx), prev, receipt, settles)
 		return err
 	}
-	s.adoptLocked(e)
+	for _, e := range entries {
+		s.adoptLocked(e)
+	}
 	if err := s.flushLocked(ctx); err != nil {
 		s.abandonLocked(context.WithoutCancel(ctx), prev, receipt)
 		return fmt.Errorf("thread: prompt flush: %w", err)
@@ -898,7 +920,7 @@ func (s *Session) runOne(item workItem) {
 		if t.promptWritten() {
 			return
 		}
-		if promptErr = s.appendPromptLocked(persist, t, ps.msg, ps.receipt); promptErr != nil {
+		if promptErr = s.appendPromptLocked(persist, t, ps.msg, ps.receipt, ps.settles); promptErr != nil {
 			// The send will not run: its accepted receipt is dropped
 			// with the leaf move (appendPromptLocked), so a reopen does
 			// not bring it back.

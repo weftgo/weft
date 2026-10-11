@@ -210,6 +210,21 @@ receipt and the follow-up's `accepted` receipt land in one atomic
 append. A writer that stops between the deferral and the follow-up's
 turn loses nothing; `Open` restores the follow-up to the queue.
 
+**A drained steer's message settles its receipt (amended 2026-10-11).**
+The steered message joins the run's transcript with the step that
+carries it (ADR 0011 §7's per-step persistence); its `delivered` receipt
+joins the turn's end batch, where `unanswered` is known. A writer that
+dies between the two left a `queued` receipt with no fate beside the
+message it stands for, and `Open` restored the steer — it ran twice. The
+message is the proof it ran: a user message entry with no `run_id` on
+the active path, equal to an unsettled `queued` receipt's `msg` before
+it, settles the earliest such receipt, the way a prompt entry settles an
+`accepted` one. Nothing is written; the format is unchanged. A steer
+whose turn-end deferral could not be written at all runs from memory,
+and its follow-up's prompt append carries the `deferred` receipt that
+settles it — a reopen before the prompt landed restores the steer, one
+after it does not.
+
 **A steer on an idle session runs as a plain turn.** Steering is what a
 Send does *when the session is busy*. With no turn in flight and no
 approval boundary open there is nothing to steer into: the Send

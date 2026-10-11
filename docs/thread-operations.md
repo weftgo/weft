@@ -304,7 +304,15 @@ reopen would restore it, so the live session matches — the steer
 defers to a follow-up turn and runs. A steer whose deferral at its
 turn's end was written but not flushed keeps it the same way: its
 `Send` succeeded, the follow-up runs under the turn its `accepted`
-receipt names, and a reopen before it ran restores it, never after.
+receipt names, and a reopen before it ran restores it, never after. A
+deferral refused outright — nothing written — runs from memory too,
+and the steer's `queued` receipt is what a reopen sees: the follow-up's
+prompt is appended together with the `deferred` receipt that settles
+it, so a reopen before the prompt landed restores the steer once, and
+one after restores nothing. A steer the running turn drained
+is in that run's transcript at once, its `delivered` receipt at the
+turn's end: after a crash between the two, `Open` reads the message on
+the line as the delivery and does not restore the steer.
 
 **Steer follow-ups inherit.** A steer that cannot join the running
 turn becomes a follow-up turn under that turn's run options (and the

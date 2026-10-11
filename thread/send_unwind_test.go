@@ -358,3 +358,94 @@ func TestSteerAtABoundaryDeferralFlushFailureLeavesTheLeaf(t *testing.T) {
 		t.Errorf("the reopened Leaf = %q, want %q", again.Leaf(), leaf)
 	}
 }
+
+// commitStorage holds appends until a flush commits them to the
+// storage underneath — the durable state a reopen after a crash reads
+// (thread.FsyncOnFlush's shape). flushFailAfter arms one failed flush,
+// which commits nothing: the entries stay held for the next flush.
+type commitStorage struct {
+	thread.Storage
+	mu             sync.Mutex
+	held           []thread.Entry
+	flushFailAfter func([]thread.Entry) bool
+	flushArmed     bool
+}
+
+func (c *commitStorage) Append(_ context.Context, _ string, entries ...thread.Entry) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.held = append(c.held, entries...)
+	if c.flushFailAfter != nil && c.flushFailAfter(entries) {
+		c.flushFailAfter, c.flushArmed = nil, true
+	}
+	return nil
+}
+
+func (c *commitStorage) Flush(ctx context.Context, session string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.flushArmed {
+		c.flushArmed = false
+		return errors.New("fsync failed")
+	}
+	if len(c.held) == 0 {
+		return nil
+	}
+	if err := c.Storage.Append(ctx, session, c.held...); err != nil {
+		return err
+	}
+	c.held = nil
+	return nil
+}
+
+// A failed send's drop and leaf move are one append, flushed: under a
+// storage that makes only flushed entries durable, the crash right
+// after the failure reopens with the send dropped and the leaf back —
+// not with the accepted receipt alone, which would run a send its
+// caller was told failed.
+func TestFailedSendDropIsFlushedWithTheLeafMove(t *testing.T) {
+	ctx := context.Background()
+	st := &commitStorage{Storage: thread.Memory()}
+	agent, _, started, rel := heldAgent("answered", "never")
+	defer rel.open()
+	s, err := thread.Create(ctx, st, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.Send(ctx, core.User("long work"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	queued, err := s.Send(ctx, core.User("queued"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.mu.Lock()
+	st.flushFailAfter = func(es []thread.Entry) bool {
+		return hasEntry(es, func(e thread.Entry) bool { m, ok := e.(thread.MessageEntry); return ok && m.ID == queued.ID() })
+	}
+	st.mu.Unlock()
+	rel.open()
+	if _, err := first.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := queued.Wait(); !errors.Is(err, thread.ErrNotRun) {
+		t.Fatalf("the queued turn = %v, want ErrNotRun", err)
+	}
+	if err := s.WaitIdle(ctx); err != nil {
+		t.Fatal(err)
+	}
+	leaf := s.Leaf()
+	// The crash: what was never flushed is gone.
+	again := reopenWith(t, ctx, st.Storage, s, agent)
+	if q := again.Queue(); len(q) != 0 {
+		t.Fatalf("the reopened Queue = %+v, want nothing: the send failed", q)
+	}
+	if again.Leaf() != leaf {
+		t.Errorf("the reopened Leaf = %q, want %q", again.Leaf(), leaf)
+	}
+	if got := contextTexts(again); countText(got, "queued") != 0 {
+		t.Errorf("the reopened Context = %v: the failed prompt is on the line", got)
+	}
+}

@@ -424,7 +424,12 @@ type GrantRevokedEntry struct {
 // model answered it), "deferred" (it runs as the next turn instead — a
 // StopWhen end, an open approval boundary, or the run ended before the
 // drain; Turn names the follow-up turn's prompt entry), or "dropped"
-// (ClearQueue).
+// (ClearQueue). The delivered receipt joins the turn's end, while the
+// steered message joins the run's transcript with its step: a writer
+// that dies between the two leaves the queued receipt without a fate,
+// and the steered message — a user message entry with no RunID on the
+// active path, equal to the receipt's — settles it then, the way a
+// prompt entry settles an accepted receipt: Open does not restore it.
 //
 // A queued send — a Send that waits for a turn of its own: the Queue
 // policy on a busy session, an interrupting send, a deferred steer's

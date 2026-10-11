@@ -1,7 +1,9 @@
 package thread
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -45,7 +47,13 @@ func (q queuedSteer) followUp(ft *Turn, receipt string) pendingSend {
 	if len(q.aimOpts) > 0 {
 		opts = append(append([]core.RunOption(nil), q.aimOpts...), q.opts...)
 	}
-	return pendingSend{ctx: carry.Values(q.ctx, q.aimCtx), msg: q.msg, opts: opts, turn: ft, receipt: receipt}
+	ps := pendingSend{ctx: carry.Values(q.ctx, q.aimCtx), msg: q.msg, opts: opts, turn: ft, receipt: receipt}
+	if receipt == "" {
+		// No deferral was written: the follow-up's prompt settles the
+		// steer's queued receipt when it lands (appendPromptLocked).
+		ps.settles = q.receipt
+	}
+	return ps
 }
 
 // aimLocked returns what a steer accepted now inherits if it defers:
@@ -210,9 +218,10 @@ func (s *Session) queueFollowUpLocked(q queuedSteer, ft *Turn, receipt string) {
 // follow-up runs regardless — under the turn and receipt the written
 // entries name when they were written but not flushed, so a reopen
 // before it runs restores it and one after it ran does not run it
-// again; from the in-memory queue alone when nothing was written (the
-// steer's queued receipt then stays, and a reopen restores the steer
-// from it).
+// again; from the in-memory queue alone when nothing was written — the
+// steer's queued receipt then stays until the follow-up's prompt lands
+// with the deferred receipt that settles it (pendingSend.settles): a
+// reopen before that restores the steer, one after it does not.
 func (s *Session) settleSteerLocked(q queuedSteer) {
 	ft, receipt, err := s.deferSteerLocked(q)
 	if err != nil {
@@ -389,6 +398,9 @@ func (s *Session) resurrectSteers(ctx context.Context) {
 			settled[r.Receipt] = true
 		}
 	}
+	for id := range s.drainedSteersLocked(settled) {
+		settled[id] = true
+	}
 	// The entries a Fork copied sit at and before the fork point in
 	// append order. An accepted receipt among them is the origin
 	// session's queued send, not this one's: the origin runs it.
@@ -433,6 +445,67 @@ func (s *Session) resurrectSteers(ctx context.Context) {
 			})
 		}
 	}
+}
+
+// drainedSteersLocked returns the queued steer receipts a run drained
+// whose delivered receipt never landed: the steered message joins the
+// run's transcript with the step that carries it (perstep.go), while
+// the delivered receipt joins the turn's end (recordTurnEnd), so a
+// writer that dies between the two leaves the message on the line and
+// its receipt unsettled. The message is the proof it ran — restoring
+// the steer would run it twice — so it settles the receipt the way a
+// prompt entry settles an accepted one.
+//
+// A steered message is a user message entry with no run id (a prompt
+// carries its run's) on the active path; it settles the earliest
+// unsettled queued receipt before it carrying the same message, the
+// drain's acceptance order. A message off the path — a failed overflow
+// attempt's, branched back before its steers were re-delivered —
+// proves nothing: those steers still run. Callers hold s.mu.
+func (s *Session) drainedSteersLocked(settled map[string]bool) map[string]bool {
+	out := map[string]bool{}
+	if s.leaf == "" {
+		return out
+	}
+	path, err := s.walkLocked(s.leaf)
+	if err != nil {
+		return out
+	}
+	onPath := make(map[string]bool, len(path))
+	for _, e := range path {
+		onPath[idOf(e)] = true
+	}
+	type open struct {
+		id  string
+		msg []byte
+	}
+	var waiting []open
+	for _, e := range s.order {
+		switch e := e.(type) {
+		case ReceiptEntry:
+			if e.Status == ReceiptQueued && e.Msg != nil && !settled[e.ID] {
+				if b, err := json.Marshal(e.Msg); err == nil {
+					waiting = append(waiting, open{id: e.ID, msg: b})
+				}
+			}
+		case MessageEntry:
+			if e.RunID != "" || e.Message.Role != core.RoleUser || !onPath[e.ID] || len(waiting) == 0 {
+				continue
+			}
+			b, err := json.Marshal(e.Message)
+			if err != nil {
+				continue
+			}
+			for i, w := range waiting {
+				if bytes.Equal(w.msg, b) {
+					out[w.id] = true
+					waiting = append(waiting[:i], waiting[i+1:]...)
+					break
+				}
+			}
+		}
+	}
+	return out
 }
 
 // runSeq parses the n of a run id <session>-t<n>.

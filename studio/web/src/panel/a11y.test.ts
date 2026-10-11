@@ -201,6 +201,21 @@ function derivedRoutes(): Record<string, Route> {
   return r
 }
 
+/** A5.3: a priced turn with a delegated figure beside an unpriced one. */
+function costRoutes(): Record<string, Route> {
+  const r = baseRoutes()
+  const del = { delegated_cost_usd: 0.0011, delegated_cost_known: true }
+  r["runs?public_id=pub_orders&limit=50"] = {
+    total: 2,
+    runs: [
+      runRow({ id: "s_01-t2", turn: 2, cost_usd: 0.0029, cost_known: true, cache: "exact", ...del }),
+      runRow({ cost_usd: null, cost_known: false, cost_badge: "unpriced", cost_reason: "no row of the default pricing table matches wefttest/script", ...del }),
+    ],
+    next_before: null,
+  }
+  return r
+}
+
 const MODES: { name: string; width: number; attrs: Record<string, string>; sel: string; act?: (el: WeftDevtools) => Promise<void>; routes?: () => Record<string, Route>; meta?: unknown }[] = [
   { name: "float, open", width: 1024, attrs: { "data-open": "true" }, sel: ".weft-dock.weft-float" },
   { name: "docked right", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: ".weft-dock.weft-docked" },
@@ -220,6 +235,7 @@ const MODES: { name: string; width: number; attrs: Record<string, string>; sel: 
   { name: "a derived turn: its chip, its hole, the refused verbs", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: '[data-weft-chip="derived"]', routes: derivedRoutes, meta: { ...META, capabilities: [...META.capabilities, "requests", "export"] }, act: async (el) => {
     await vi.waitFor(() => expect(el.shadowRoot!.querySelector('button[data-weft-refused="derived"]')).not.toBeNull())
   } },
+  { name: "cost: a priced turn, own + delegated, an unpriced one, the header's partial sum (A5.3)", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: "[data-weft-cost-total]", routes: costRoutes, meta: { ...META, capabilities: [...META.capabilities, "pricing"] } },
   { name: "badges, the cap line and the chips", width: 1024, attrs: { "data-open": "true", "data-position": "right-dock" }, sel: '[data-weft-chip="fork"]', act: badgesDrawn, routes: badgeRoutes },
 ]
 

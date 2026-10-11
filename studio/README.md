@@ -327,6 +327,21 @@ so in them older turns load by the button — three clicks for 200
 turns. A refresh (the live lane reconnecting, a stale read) keeps the
 pages already read and adds new rows at the top.
 The dev list (no public id) stays the newest 10 runs.
+Cost (plan A5.3). Under capability `pricing` only — off, the panel draws no
+figure and no empty cell — each turn row carries its cost beside its tokens
+in the run page's words (`src/lib/cost.ts`, shared): `$0.0029`, and its
+subagents' as a second figure, `$0.0029 + $0.0011 delegated`, never folded;
+an unknown figure is "—" with the API's `cost_reason` as its title and in
+its accessible text (" not known: …"): an unpriced model ("no row of the …
+pricing table matches …"), a running turn ("running: usage arrives at run
+end"), a derived turn whose spans reported no usage. The header's total
+beside "N turns · T tok" sums the turns' own + delegated (`atLeastCost`):
+"≥ $x" with how many are priced and each reason when a turn's is unknown,
+"—" when none is. The experiment result pane shows the replayed run's
+whole bill and "experiment: $x over N runs" — the runs the panel lists
+from the same source turn, summed as the playground's matrix does
+(`sumCost`: one unknown run makes the total "—" with its reason).
+`parity.test.ts` holds a turn's figure and reason to the run header's.
 Honesty (plan D5). Every badge the panel draws is one of the A3
 table's ten (`src/lib/honesty.ts`, `obsdb.HoleNote`'s words, pinned by
 `studio/testdata/holes.golden.json`), drawn by one module,

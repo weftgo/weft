@@ -1104,3 +1104,48 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
       expect(panel.kind).toBe(c.o.debugScope || c.o.outcome === "refused" ? "read-only" : c.run ? "plain" : "decide")
     })
 })
+
+// Cost (plan A5.3): the panel's turn row and the run page's header read
+// the same figure and the same reason for the same row — lib/cost.ts's
+// words on both — own and delegated, two numbers on each.
+describe("a turn's cost on both surfaces (A5.3)", () => {
+  const WHY = "no row of the default pricing table matches wefttest/script"
+  const cases: { name: string; doc: Partial<RunDoc> }[] = [
+    { name: "priced, own + delegated", doc: { cost_usd: 0.0029, cost_known: true, cache: "exact", delegated_cost_usd: 0.0011, delegated_cost_known: true } },
+    { name: "an unpriced model: — with its reason", doc: { cost_usd: null, cost_known: false, cost_badge: "unpriced", cost_reason: WHY, delegated_cost_usd: 0.0011, delegated_cost_known: true } },
+    { name: "cache not reported: the hint in the title", doc: { cost_usd: 0.5, cost_known: true, cache: "not_reported", delegated_cost_usd: 0.25, delegated_cost_known: true } },
+  ]
+  const priced = (fx: Fixture, studioMeta: boolean) => {
+    const meta = studioMeta ? golden<Record<string, unknown>>("meta") : META
+    return serve(fx, studioMeta).on("GET meta", { ...meta, capabilities: ["ingest", "requests", "pricing"] })
+  }
+  const read = (n: Element | null | undefined) => ({ text: n?.firstChild?.textContent, title: n?.getAttribute("title") })
+
+  for (const c of cases)
+    it(`${c.name}: the panel's turn cost is the run page's header cost`, async () => {
+      const fx: Fixture = { doc: c.doc, events: events() }
+      priced(fx, false)
+      const el = await mount(ATTRS)
+      await vi.waitFor(() => expect($(el, ".weft-turn [data-weft-turn-cost]")).toBeTruthy(), { timeout: 5_000 })
+      const [pOwn, pDel] = all(el, ".weft-turn [data-weft-turn-cost] [data-weft-cost]").map(read)
+      el.remove()
+      await settle()
+      cleanup()
+      document.body.innerHTML = ""
+      stubBrowser()
+      vi.stubGlobal("scrollTo", vi.fn())
+      StudioEventSource.reset()
+      vi.stubGlobal("EventSource", StudioEventSource)
+      setStudioToken("")
+      priced(fx, true)
+      renderApp(`/runs/${RUN}`)
+      await waitFor(() => expect(document.querySelector("[data-run-cost] [data-cost-part='own'] [data-cost]")).toBeTruthy())
+      const sOwn = read(document.querySelector("[data-run-cost] [data-cost-part='own'] [data-cost]"))
+      const sDel = read(document.querySelector("[data-run-cost] [data-cost-part='delegated'] [data-cost]"))
+      expect(pOwn.text).toBeTruthy()
+      expect(pDel.text).toMatch(/^\$/)
+      expect(pOwn).toEqual(sOwn)
+      expect(pDel).toEqual(sDel)
+      if (c.doc.cost_known === false) expect(pOwn).toEqual({ text: "—", title: WHY })
+    })
+})

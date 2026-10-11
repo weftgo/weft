@@ -1,0 +1,166 @@
+// The panel's cost (plan A5.3): each turn's figure beside its tokens,
+// own + delegated as two numbers, "—" with its reason (unpriced, a
+// running run, unknown) — never a 0 — the header's summed cost ("≥"
+// when a turn's is not known), the replayed run's and its experiments'
+// figures in the result pane, all gated on capability "pricing".
+import { afterEach, beforeEach, describe, expect, it } from "vitest"
+import type { RunRow } from "../lib/api"
+import { $, all, assistant, ATTRS, baseRoutes, fakeStudio, META, mount, page, runEvents, runExperiment, runRow, T0, teardown, setup, transcript, user } from "./testkit"
+import type { Route } from "./testkit"
+
+beforeEach(setup)
+afterEach(teardown)
+
+const PRICED = { ...META, capabilities: [...META.capabilities, "pricing"] }
+const UNPRICED_WHY = "no row of the default pricing table matches wefttest/script"
+const RUNNING_WHY = "running: usage arrives at run end"
+
+/** priced is a run row's cost block as studio/pricing.go writes it. */
+const priced = (usd: number, delegated = 0): Partial<RunRow> => ({
+  cost_usd: usd,
+  cost_known: true,
+  cache: "exact",
+  delegated_cost_usd: delegated,
+  delegated_cost_known: true,
+})
+const unpriced: Partial<RunRow> = {
+  cost_usd: null,
+  cost_known: false,
+  cost_badge: "unpriced",
+  cost_reason: UNPRICED_WHY,
+  delegated_cost_usd: 0,
+  delegated_cost_known: true,
+}
+
+async function turns(rows: RunRow[], meta: Route = PRICED) {
+  const routes = baseRoutes()
+  routes["runs?public_id=pub_orders&limit=50"] = { total: rows.length, runs: rows, next_before: null }
+  // A running turn is followed: its row is re-read from the run's own doc.
+  for (const r of rows) routes[`runs/${r.id}`] = { ...r, children: [] }
+  fakeStudio(routes, meta)
+  const el = await mount(ATTRS)
+  return el
+}
+
+/** cost reads a figure's visible words and its title. */
+const cost = (n: Element | null | undefined) => ({ text: n?.firstChild?.textContent, title: n?.getAttribute("title") })
+
+describe("a turn's cost beside its tokens", () => {
+  it("a priced turn reads the API's figure in Studio's format, its exact figure the title", async () => {
+    const el = await turns([runRow(priced(0.0029))])
+    const c = $(el, ".weft-turn [data-weft-turn-cost]")!
+    expect(cost(c.querySelector("[data-weft-cost]"))).toEqual({ text: "$0.0029", title: "$0.002900 USD" })
+    expect(c.textContent).toBe("$0.0029")
+    // Beside the tokens, in the second line.
+    expect($(el, ".weft-turn .weft-row2")!.textContent).toContain("10→4")
+  })
+
+  it("an unpriced model: — with pricing.go's reason as the title and in the accessible text, never $0.00", async () => {
+    const el = await turns([runRow(unpriced)])
+    const c = $(el, ".weft-turn [data-weft-turn-cost] [data-weft-cost]")!
+    expect(c.getAttribute("data-weft-cost")).toBe("unknown")
+    expect(cost(c)).toEqual({ text: "—", title: UNPRICED_WHY })
+    expect(c.querySelector(".weft-sr")!.textContent).toBe(` not known: ${UNPRICED_WHY}`)
+    expect($(el, ".weft-turn")!.textContent).not.toContain("$0.00")
+  })
+
+  it("a running turn: — with the API's reason (usage arrives at run end)", async () => {
+    const el = await turns([
+      runRow({ status: "running", finished: null, cost_usd: null, cost_known: false, cost_badge: "unknown", cost_reason: RUNNING_WHY, delegated_cost_usd: 0, delegated_cost_known: true }),
+    ])
+    expect(cost($(el, ".weft-turn [data-weft-turn-cost] [data-weft-cost]"))).toEqual({ text: "—", title: RUNNING_WHY })
+  })
+
+  it("own + delegated: two figures, never folded — and an unknown delegated part says why", async () => {
+    const why = "a subagent run is still running: s_01-t1/c1 (running: usage arrives at run end)"
+    const el = await turns([
+      runRow({ id: "s_01-t2", turn: 2, ...priced(0.0029, 0.0011) }),
+      runRow({ id: "s_01-t1", ...priced(0.002), delegated_cost_usd: null, delegated_cost_known: false, delegated_cost_reason: why }),
+    ])
+    const rows = all(el, ".weft-turn [data-weft-turn-cost]")
+    expect(rows[0].textContent).toBe("$0.0029 + $0.0011 delegated")
+    const parts = rows[1].querySelectorAll("[data-weft-cost]")
+    expect(cost(parts[0])).toEqual({ text: "$0.0020", title: "$0.002000 USD" })
+    expect(cost(parts[1])).toEqual({ text: "—", title: why })
+  })
+})
+
+describe("the header's summed cost", () => {
+  it("every turn priced: the sum of own + delegated", async () => {
+    const el = await turns([runRow({ id: "s_01-t2", turn: 2, ...priced(0.0029, 0.0011) }), runRow(priced(0.006))])
+    expect(cost($(el, "[data-weft-cost-total] [data-weft-cost]"))).toEqual({ text: "$0.01", title: "$0.010000 USD" })
+  })
+
+  it("a turn not priced: ≥ the known part, how many are priced and the reason — never a whole figure", async () => {
+    const el = await turns([runRow({ id: "s_01-t2", turn: 2, ...priced(0.0029, 0.0011) }), runRow(unpriced)])
+    const c = $(el, "[data-weft-cost-total] [data-weft-cost]")!
+    expect(c.firstChild?.textContent).toBe("≥ $0.0040")
+    expect(c.getAttribute("title")).toBe(`1 of 2 runs priced — a run is not priced: ${UNPRICED_WHY}`)
+    expect(c.querySelector(".weft-sr")!.textContent).toContain(UNPRICED_WHY)
+    // The tokens' total beside it is untouched.
+    expect($(el, "[data-weft-stats]")!.textContent).toBe("2 turns · 20→8 tok")
+  })
+
+  it("no turn known: —, the reasons its title", async () => {
+    const el = await turns([runRow(unpriced)])
+    expect(cost($(el, "[data-weft-cost-total] [data-weft-cost]"))).toEqual({ text: "—", title: `a run is not priced: ${UNPRICED_WHY}` })
+  })
+})
+
+describe("the pricing capability gates every figure", () => {
+  it("off: no cost on a turn row nor in the header — no empty cell, no —", async () => {
+    const el = await turns([runRow(priced(0.0029)), runRow({ id: "s_01-t0", ...unpriced })], META)
+    expect(all(el, ".weft-turn").length).toBe(2)
+    expect(all(el, "[data-weft-turn-cost], [data-weft-cost-total], [data-weft-cost]")).toHaveLength(0)
+    expect($(el, ".weft-turn")!.textContent).not.toContain("$")
+  })
+})
+
+describe("the experiment's cost in the result pane", () => {
+  /** An experiment of s_01-t1 that ended before its command named it,
+   * beside an earlier one the turn list already holds. */
+  function routes(): Record<string, Route> {
+    const r = baseRoutes()
+    const pg = (id: string, over: Partial<RunRow>) => runRow({ id, playground: true, session_id: "", forked_from: "s_01-t1#0", ...over })
+    r["runs?public_id=pub_orders&limit=50"] = {
+      total: 3,
+      runs: [runRow(priced(0.0029)), pg("pg_old", { started: T0, ...priced(0.002) }), pg("pg_x1", priced(0.004, 0.001))],
+      next_before: null,
+    }
+    r["POST playground/runs"] = { command_id: "cmd_1", state: "queued" }
+    r["playground/commands/cmd_1"] = { command_id: "cmd_1", state: "finished", run_id: "pg_x1", status: "succeeded", error: null, created: T0, updated: T0 }
+    r["runs/pg_x1"] = { ...pg("pg_x1", priced(0.004, 0.001)), children: [] }
+    r["runs/pg_x1/events?after=0&limit=500"] = page(runEvents("pg_x1"))
+    r["runs/pg_x1/transcript"] = transcript([user("where is my order #4411?")], [assistant("It is delayed until Friday.")])
+    return r
+  }
+
+  it("the replayed run's whole bill beside its tokens, and the experiments' sum over the runs listed", async () => {
+    fakeStudio(routes(), PRICED)
+    const el = await mount(ATTRS)
+    await runExperiment(el)
+    const res = $(el, ".weft-xres [data-weft-result-cost] [data-weft-cost]")
+    expect(cost(res)).toEqual({ text: "$0.0050", title: "$0.005000 USD" })
+    const x = $(el, ".weft-xres [data-weft-experiment-cost]")!
+    expect(x.textContent).toBe("experiment: $0.0070 over 2 runs")
+  })
+
+  it("an experiment run not priced: the group's figure is — with sumCost's reason", async () => {
+    const r = routes()
+    const list = r["runs?public_id=pub_orders&limit=50"] as { runs: RunRow[] }
+    list.runs[1] = { ...list.runs[1], ...unpriced }
+    fakeStudio(r, PRICED)
+    const el = await mount(ATTRS)
+    await runExperiment(el)
+    const c = $(el, ".weft-xres [data-weft-experiment-cost] [data-weft-cost]")
+    expect(cost(c)).toEqual({ text: "—", title: `a run is not priced: ${UNPRICED_WHY}` })
+  })
+
+  it("pricing off: the pane draws no figure", async () => {
+    fakeStudio(routes(), META)
+    const el = await mount(ATTRS)
+    await runExperiment(el)
+    expect($(el, ".weft-xres")).toBeTruthy()
+    expect(all(el, ".weft-xres [data-weft-cost]")).toHaveLength(0)
+  })
+})

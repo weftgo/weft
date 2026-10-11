@@ -8,8 +8,8 @@
 //     and then one unknown part makes the total unknown;
 //   - cache other than "exact" is a hint: the adapter reported no
 //     cache splits, so every input token was priced at the input rate.
-// Kept out of src/panel's import graph: the panel's per-turn cost is
-// its own item (A5.3).
+// The devtools panel imports it too (A5.3: a turn's cost, the header's
+// sum, the result pane's): the same figures and words on both surfaces.
 import type { CostFields, DelegatedCostFields, RunRow } from "./api"
 import { CELL_REASONS, CELL_WORDS } from "./stepdiff"
 import type { CellState } from "./stepdiff"
@@ -144,16 +144,48 @@ export function sumCost(rows: readonly ((CostFields & DelegatedCostFields) | Cos
       continue
     }
     const t = runTotal(r)
-    if (!t.known) {
-      const own = costView(r)
-      const part = own.known ? delegatedView(r) : own
-      const badge = part.badge ?? "unpriced"
-      const what = badge === "unknown" ? "a run's cost is not known yet" : "a run is not priced"
-      return view(null, false, `${what}: ${part.title}`, badge)
-    }
+    if (!t.known) return totalUnknown(r)
     usd += t.usd
   }
   return view(usd, true, undefined)
+}
+
+/** totalUnknown is a run's whole bill when a part is not known: the
+ * part's reason, led by what it means for a total. */
+function totalUnknown(r: CostFields & DelegatedCostFields): CostView {
+  const own = costView(r)
+  const part = own.known ? delegatedView(r) : own
+  const badge = part.badge ?? "unpriced"
+  const what = badge === "unknown" ? "a run's cost is not known yet" : "a run is not priced"
+  return view(null, false, `${what}: ${part.title}`, badge)
+}
+
+/** atLeastCost totals runs' whole bills where an unknown run must not
+ * hide the known ones (the panel's header over its turns, A5.3): every
+ * run known → sumCost; some unknown → "≥ $x" (not known; usd the known
+ * part), how many runs are priced and each unknown run's reason
+ * (sumCost's words) as its title — never a figure claimed whole; none
+ * known → "—" with the reasons. */
+export function atLeastCost(rows: readonly (CostFields & DelegatedCostFields)[]): CostView {
+  let usd = 0
+  let n = 0
+  const why: string[] = []
+  let badge = ""
+  for (const r of rows) {
+    const t = runTotal(r)
+    if (t.known) {
+      usd += t.usd
+      n++
+      continue
+    }
+    const u = totalUnknown(r)
+    badge ||= u.badge ?? ""
+    if (!why.includes(u.title)) why.push(u.title)
+  }
+  if (!why.length) return sumCost(rows)
+  const reasons = why.join("; ")
+  if (!n) return view(null, false, reasons, badge)
+  return { known: false, text: `≥ ${formatUSD(usd)}`, title: `${n} of ${rows.length} runs priced — ${reasons}`, badge, usd }
 }
 
 // ── The compare table's cost column ───────────────────────────────

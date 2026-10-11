@@ -14,6 +14,8 @@ import { REQUEST_NOT_RECORDED_LABEL, REQUEST_NOT_STORED, requestCappedWords } fr
 import { UNRUN_CALL_REASON } from "../lib/events"
 import type { Truncation } from "../lib/events"
 import { el } from "./render"
+import { costView, delegatedView } from "../lib/cost"
+import type { CostView } from "../lib/cost"
 
 /** What a response (or the panel's own reading) says about one hole:
  * its words win over the table's; label replaces the badge's text
@@ -293,4 +295,26 @@ export function promptNotRecorded(): HoleMark {
 }
 export function promptReadError(error: string): HoleMark {
   return { hole: "derived", reason: `the step's prompt could not be read (${error}): the registered prompt is pre-filled` }
+}
+
+// ── Cost (A5.3) ──────────────────────────────────────────────────
+
+/** costText draws one figure as Studio's CostText does: lib/cost.ts's
+ * words and title; an unknown or partial one says its reason in the
+ * accessible text too (" not known: <reason>", the badge's pattern) —
+ * "—" is never a 0. */
+export function costText(v: CostView): HTMLElement {
+  const n = el("span", undefined, v.text, { title: v.title, "data-weft-cost": v.known ? String(v.usd) : "unknown" })
+  if (!v.known) n.appendChild(el("span", "weft-sr", ` not known: ${v.title}`))
+  return n
+}
+
+/** turnCost is a turn's own figure and, when its subagents cost
+ * anything or could not be priced, "+ $y delegated" — Studio's runs
+ * table: two numbers, never folded. */
+export function turnCost(r: RunRow): HTMLElement {
+  const n = el("span", undefined, [costText(costView(r))], { "data-weft-turn-cost": "" })
+  const d = delegatedView(r)
+  if (!d.known || d.usd! > 0) n.append(" + ", costText(d), " delegated")
+  return n
 }

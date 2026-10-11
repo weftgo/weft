@@ -18,7 +18,7 @@ import type {
   SessionsPage,
   StepDoc,
 } from "./api"
-import { costCell, costCellWords, costView, delegatedView, formatUSD, LOST_CELL_REASON, lostCellCost, runTotal, sortByCost, sumCost } from "./cost"
+import { atLeastCost, costCell, costCellWords, costView, delegatedView, formatUSD, LOST_CELL_REASON, lostCellCost, runTotal, sortByCost, sumCost } from "./cost"
 import { CELL_REASONS, CELL_WORDS } from "./stepdiff"
 
 const API = resolve(process.cwd(), "../testdata/api")
@@ -182,6 +182,16 @@ describe("the cost order and totals", () => {
     expect(one).toMatchObject({ known: false, text: "—" })
     expect(one.title).toContain("no row of the default pricing table matches wefttest/script")
     expect(sumCost([priced(0.01), undefined])).toMatchObject({ known: false, text: "—" })
+  })
+  it("atLeastCost (the panel's header, A5.3): ≥ the known part with the reasons; — when none is known; sumCost when all are", () => {
+    expect(atLeastCost([priced(0.01, 0.005), priced(0.02)])).toEqual(sumCost([priced(0.01, 0.005), priced(0.02)]))
+    const part = atLeastCost([priced(0.02, 0.01), rFail(), rFail()])
+    expect(part).toMatchObject({ known: false, text: "≥ $0.03", usd: 0.03, badge: "unpriced" })
+    // Each reason once, sumCost's words for it.
+    const why = sumCost([rFail()]).title
+    expect(part.title).toBe(`1 of 3 runs priced — ${why}`)
+    expect(atLeastCost([rFail()])).toMatchObject({ known: false, text: "—", title: why })
+    expect(atLeastCost([])).toMatchObject({ known: false, text: "—", title: "no run to total" })
   })
   it("a lost cell is its own reason, and the total is unknown", () => {
     const v = sumCost([priced(0.01), lostCellCost()])

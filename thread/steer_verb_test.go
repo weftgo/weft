@@ -95,13 +95,19 @@ func TestSteer(t *testing.T) {
 			t.Fatal(err)
 		}
 		<-m.held
+		// Released before the deferred Close (defers run last-in first):
+		// a failing assertion below must not leave Close waiting on a
+		// turn whose model holds on the gate.
+		var once sync.Once
+		release := func() { once.Do(func() { close(m.gate) }) }
+		defer release()
 		if err := s.Steer(ctx, "", core.Message{Role: core.RoleAssistant}); !errors.Is(err, core.ErrInvalidSteer) {
 			t.Errorf("a non-user steer = %v, want core.ErrInvalidSteer", err)
 		}
 		if err := s.Steer(ctx, "", core.User("and the refund")); err != nil {
 			t.Fatalf("Steer into the running turn = %v", err)
 		}
-		close(m.gate)
+		release()
 		if _, err := turn.Wait(); err != nil {
 			t.Fatal(err)
 		}
@@ -128,6 +134,12 @@ func TestSteer(t *testing.T) {
 			t.Fatal(err)
 		}
 		<-m.held
+		// Released before the deferred Close (defers run last-in first):
+		// a failing assertion below must not leave Close waiting on a
+		// turn whose model holds on the gate.
+		var once sync.Once
+		release := func() { once.Do(func() { close(m.gate) }) }
+		defer release()
 		before := len(s.Entries())
 		err = s.Steer(ctx, s.ID()+"-t9", core.User("meant for another run"))
 		if !errors.Is(err, thread.ErrNotRunning) || !strings.Contains(err.Error(), "is running "+turn.RunID()+", not "+s.ID()+"-t9") {
@@ -139,7 +151,7 @@ func TestSteer(t *testing.T) {
 		if err := s.Steer(ctx, turn.RunID(), core.User("meant for this run")); err != nil {
 			t.Fatalf("Steer naming the running run = %v", err)
 		}
-		close(m.gate)
+		release()
 		if _, err := turn.Wait(); err != nil {
 			t.Fatal(err)
 		}

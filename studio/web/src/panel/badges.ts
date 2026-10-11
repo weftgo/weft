@@ -300,12 +300,14 @@ export function promptReadError(error: string): HoleMark {
 // ── Cost (A5.3) ──────────────────────────────────────────────────
 
 /** costText draws one figure as Studio's CostText does: lib/cost.ts's
- * words and title; an unknown or partial one says its reason in the
- * accessible text too (" not known: <reason>", the badge's pattern) —
+ * words and title; an unknown one says its reason in the accessible
+ * text too (" not known: <reason>", the badge's pattern), a partial sum
+ * " partial: <title>" —
  * "—" is never a 0. */
 export function costText(v: CostView): HTMLElement {
   const n = el("span", undefined, v.text, { title: v.title, "data-weft-cost": v.known ? String(v.usd) : "unknown" })
-  if (!v.known) n.appendChild(el("span", "weft-sr", ` not known: ${v.title}`))
+  // A partial sum (atLeastCost's "≥ $x", usd its known part) is not "not known".
+  if (!v.known) n.appendChild(el("span", "weft-sr", `${v.usd === undefined ? " not known" : " partial"}: ${v.title}`))
   return n
 }
 

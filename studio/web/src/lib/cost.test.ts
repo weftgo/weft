@@ -20,6 +20,7 @@ import type {
 } from "./api"
 import { atLeastCost, costCell, costCellWords, costView, delegatedView, formatUSD, LOST_CELL_REASON, lostCellCost, runTotal, sortByCost, sumCost } from "./cost"
 import { CELL_REASONS, CELL_WORDS } from "./stepdiff"
+import { derivedBodies } from "../test/derived-fixture"
 
 const API = resolve(process.cwd(), "../testdata/api")
 const golden = <T>(name: string): T => JSON.parse(readFileSync(resolve(API, `${name}.golden.json`), "utf8")) as T
@@ -189,7 +190,7 @@ describe("the cost order and totals", () => {
     expect(part).toMatchObject({ known: false, text: "≥ $0.03", usd: 0.03, badge: "unpriced" })
     // Each reason once, sumCost's words for it.
     const why = sumCost([rFail()]).title
-    expect(part.title).toBe(`1 of 3 runs priced — ${why}`)
+    expect(part.title).toBe(`1 of 3 runs' own cost known — ${why}`)
     expect(atLeastCost([rFail()])).toMatchObject({ known: false, text: "—", title: why })
     expect(atLeastCost([])).toMatchObject({ known: false, text: "—", title: "no run to total" })
   })
@@ -197,20 +198,29 @@ describe("the cost order and totals", () => {
     const running = "a subagent run's cost is not known yet: r/0/c1 (running: usage arrives at run end)"
     const v = atLeastCost([priced(0.004), { ...priced(0.002, null), delegated_cost_reason: running }])
     expect(v).toMatchObject({ known: false, text: "≥ $0.0060", badge: "unknown" })
-    expect(v.title).toBe(`1 of 2 runs priced — a run's cost is not known yet: ${running}`)
-    // Own known, delegated unknown, nothing else: still ≥ its own, never —.
-    expect(atLeastCost([{ ...priced(0.002, null), delegated_cost_reason: running }]).text).toBe("≥ $0.0020")
+    // Both own figures are known: the count says so, beside the delegated part's reason.
+    expect(v.title).toBe(`2 of 2 runs' own cost known — delegated not known: ${running}`)
+    // Own known, delegated unknown, nothing else: still ≥ its own, never —, never "0 of 1".
+    expect(atLeastCost([{ ...priced(0.002, null), delegated_cost_reason: running }])).toMatchObject({
+      text: "≥ $0.0020",
+      title: `1 of 1 runs' own cost known — delegated not known: ${running}`,
+    })
   })
   it("atLeastCost over a paged list: ≥ even when every loaded row is known, the note its title's last words", () => {
     expect(atLeastCost([priced(0.01), priced(0.02)], "the 2 loaded turns only")).toMatchObject({ known: false, text: "≥ $0.03", title: "the 2 loaded turns only" })
     const why = sumCost([rFail()]).title
-    expect(atLeastCost([priced(0.01), rFail()], "loaded only").title).toBe(`1 of 2 runs priced — ${why} · loaded only`)
+    expect(atLeastCost([priced(0.01), rFail()], "loaded only").title).toBe(`1 of 2 runs' own cost known — ${why} · loaded only`)
     expect(atLeastCost([rFail()], "loaded only")).toMatchObject({ text: "—", title: `${why} · loaded only` })
   })
-  it("a derived run's no-usage cost is not known — never 'yet': it never arrives", () => {
-    const reason = "the stock spans report no (or zero) usage (gen_ai.usage.* absent or 0 on the root and its chat spans): the cost is unknown"
-    const derived: RunRow = { ...priced(0), cost_usd: null, cost_known: false, cost_badge: "unknown", cost_reason: reason }
-    expect(sumCost([derived]).title).toBe(`a run's cost is not known: ${reason}`)
+  it("a derived run's no-usage cost is not known — never 'yet': it never arrives; keyed on the row's derived mark, not the words", () => {
+    // The derived fixture's no-usage row, as Studio serves it.
+    const derived = derivedBodies.runNoUsage as RunRow
+    expect(derived.derived).toBe(true)
+    expect(sumCost([derived]).title).toBe(`a run's cost is not known: ${derived.cost_reason}`)
+    expect(atLeastCost([derived])).toMatchObject({ text: "—", title: `a run's cost is not known: ${derived.cost_reason}` })
+    // Another wording on a derived row: still no "yet"; the same words on a weft row: "yet".
+    expect(sumCost([{ ...derived, cost_reason: "reworded by a later Go" }]).title).toBe("a run's cost is not known: reworded by a later Go")
+    expect(sumCost([{ ...derived, derived: false, requests_badge: undefined }]).title).toMatch(/^a run's cost is not known yet: /)
     expect(sumCost([rStale()]).title).toMatch(/^a run's cost is not known yet: /)
   })
   it("a lost cell is its own reason, and the total is unknown", () => {

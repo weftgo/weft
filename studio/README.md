@@ -339,18 +339,22 @@ figure priced without cache splits. An unknown figure is "—" with the API's
 `cost_reason` as its title and in its accessible text (" not known: …"): an
 unpriced model ("no row of the … pricing table matches …"), a running turn
 ("running: usage arrives at run end"), a derived turn whose spans reported
-no usage (a total over it says "not known", never "not known yet"). The
+no usage. The
 header's total beside "N turns · T tok" sums the turns' own + delegated
-(`atLeastCost`): "≥ $x" with how many are priced and each reason when a
-turn's is unknown (a turn whose delegated part alone is unknown still adds
-its own figure), "—" when none is, and "≥" with "the N loaded turns only —
-load older turns for more" while older turns load on demand. The experiment
+(`atLeastCost`): "≥ $x" with how many turns' own cost is known and each
+reason when a turn's is unknown (a turn whose delegated part alone is
+unknown still adds its own figure: "delegated not known: …"), "—" when none
+is, and "≥" with "the N loaded turns only — load older turns for more"
+while older turns load on demand; a partial sum's accessible text says
+"partial: …", never "not known". The experiment
 result pane shows the replayed run's whole bill under the playground card's
 title ("the run's whole bill: its own model calls + its subagents'") and
 "N replays of this turn: $x" — every playground or forked run off this turn
 on the loaded page, not Studio's saved experiment ("the experiment's
 cost"), summed by `atLeastCost` so an unpriced (scripted) replay leaves the
-priced ones "≥". `parity.test.ts` holds a turn's figure, reason and cache
+priced ones "≥" — and, while older turns load on demand, "(loaded only)"
+with the header's words. A derived run's unknown figure reads "not known",
+never "not known yet", keyed on the row's `derived` mark. `parity.test.ts` holds a turn's figure, reason and cache
 mark to the run header's, and the result pane's figure and title to the
 playground's result card.
 Honesty (plan D5). Every badge the panel draws is one of the A3

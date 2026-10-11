@@ -2296,7 +2296,7 @@ export class WeftDevtools extends HTMLElement {
     // when a turn's is not known, "—" when none is, the reasons its title.
     // Older turns not loaded yet: the sum is the loaded turns' only, "≥".
     if (s.turns.length && hasCapability(s, "pricing"))
-      h.append(el("span", undefined, [costText(atLeastCost(s.turns, s.turnsCapped ? `the ${s.turns.length} loaded turns only — load older turns for more` : undefined))], { "data-weft-cost-total": "" }))
+      h.append(el("span", undefined, [costText(atLeastCost(s.turns, loadedOnly(s, s.turns.length, "turn")))], { "data-weft-cost-total": "" }))
     if (s.turns.length && s.selected) {
       const a = el("a", "weft-btn", "⤢", {
         href: studioLink(this.base, s.selected, this.stepNow(s)),
@@ -3448,8 +3448,10 @@ export class WeftDevtools extends HTMLElement {
       if (r.row) head.insertBefore(el("span", undefined, [costText(sumCost([r.row]))], { title: "the run's whole bill: its own model calls + its subagents'", "data-weft-result-cost": "" }), head.lastChild)
       const xs = s.experiments.get(r.sourceRunID) ?? []
       if (xs.length) {
-        const x = el("span", undefined, `${xs.length} replay${xs.length > 1 ? "s" : ""} of this turn: `, { "data-weft-experiment-cost": "" })
-        x.append(costText(atLeastCost(xs)))
+        // Older pages may hold more of them: the header's loaded-only words.
+        const more = loadedOnly(s, xs.length, "replay")
+        const x = el("span", undefined, `${xs.length} replay${xs.length > 1 ? "s" : ""} of this turn${more ? " (loaded only)" : ""}: `, { "data-weft-experiment-cost": "" })
+        x.append(costText(atLeastCost(xs, more)))
         head.insertBefore(x, head.lastChild)
       }
     }
@@ -4902,6 +4904,12 @@ function argsText(call: FoldedToolCall): string {
     }
   }
   return call.streamedArgs ? `(${call.streamedArgs}…)` : "(…)"
+}
+
+/** loadedOnly is a cost sum's note while older turns load on demand
+ * (A5.3): the sum covers the loaded page only, so it reads "≥". */
+function loadedOnly(s: PanelState, n: number, what: string): string | undefined {
+  return s.turnsCapped ? `the ${n} loaded ${what}${n > 1 ? "s" : ""} only — load older turns for more` : undefined
 }
 
 /** usageLine renders usage with the cached/reasoning splits §2 names. */

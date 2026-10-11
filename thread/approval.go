@@ -706,8 +706,12 @@ func (s *Session) armSettledLocked(ctx context.Context) (*Turn, error) {
 // and every other arming path runs. The parked boundary must still be
 // open: Resume with nothing to resume fails with ErrNotPending. The
 // returned Turn is the resume run's receipt and handle, like any
-// Send's; a Resume while the boundary's resume is already armed
-// returns that turn.
+// Send's; a Resume while the boundary's resume is armed — queued or
+// already running — returns that turn, until it lands. A Resume after
+// it landed finds the boundary resolved and fails with ErrNotPending
+// (or, when the resume failed without resolving it, arms a fresh one):
+// a caller that must share the first resume's Turn calls Resume before
+// that turn can end, or follows the parked turn's Next.
 //
 // A decision is spent by the resume that applies it: it resolves its
 // call on that resume's line of the tree only. After a Branch back to

@@ -1243,13 +1243,29 @@ func TestResolveErrorDecision(t *testing.T) {
 // TestResumeTwice: arming the resume twice before it lands must not
 // orphan the first caller's Turn — the second Resume returns the
 // already-armed turn, and both waits complete (one boundary, one
-// resume).
+// resume). The resume is held in its approved call, so the second
+// Resume meets it armed and running, never landed: a Resume after the
+// resume landed reads ErrNotPending (the boundary is gone), which the
+// test asserts last. An unheld resume raced the second call and could
+// land first (CI run 38137761142).
 func TestResumeTwice(t *testing.T) {
 	ctx := context.Background()
-	agent, ran := refundAgent(
+	running, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	ran := &ranLog{}
+	tool := core.Tool("refund", "Refund an order.",
+		func(ctx context.Context, in refundInput) (string, error) {
+			c, _ := core.CallFromContext(ctx)
+			ran.add(c.Approved)
+			once.Do(func() { close(running) })
+			<-release
+			return "refunded " + in.OrderID, nil
+		},
+		core.RequireApproval())
+	agent := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"8"}`}),
 		wefttest.Say("resumed"),
-	)
+	), core.Name("approvals-test"), tool)
 	s, err := thread.Create(ctx, thread.Memory(), agent, thread.AutoResume(false))
 	if err != nil {
 		t.Fatal(err)
@@ -1262,18 +1278,27 @@ func TestResumeTwice(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t2, err := s.Resume(ctx)
+	t2, err := s.Resume(ctx) // armed, perhaps not started yet
 	if err != nil {
 		t.Fatalf("second Resume: %v", err)
 	}
-	if t1 != t2 {
-		t.Fatalf("double Resume armed two turns: %p and %p", t1, t2)
+	<-running
+	t3, err := s.Resume(ctx) // armed and running
+	if err != nil {
+		t.Fatalf("Resume while the resume runs: %v", err)
 	}
+	if t1 != t2 || t1 != t3 {
+		t.Fatalf("Resume armed more than one turn: %p, %p, %p", t1, t2, t3)
+	}
+	close(release)
 	if _, err := t1.Wait(); err != nil {
 		t.Fatal(err)
 	}
 	if got := ran.snapshot(); len(got) != 1 || !got[0] {
 		t.Fatalf("executions: %v", got)
+	}
+	if late, err := s.Resume(ctx); !errors.Is(err, thread.ErrNotPending) || late != nil {
+		t.Fatalf("Resume after the resume landed = %v, %v; want ErrNotPending", late, err)
 	}
 }
 

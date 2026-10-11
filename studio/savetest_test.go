@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -329,6 +330,56 @@ func TestSaveAsTestHostileRunID(t *testing.T) {
 		}
 		return true
 	})
+}
+
+// TestSaveAsTestStringLiterals: run-derived texts that are valid
+// UTF-8 but cannot sit in a raw string (a NUL, a byte-order mark past
+// the start, "\r\n", a backquote beside "*/") still render — go/format
+// would reject a raw literal carrying the first two — and every one
+// reads back byte-identical from its literal.
+func TestSaveAsTestStringLiterals(t *testing.T) {
+	texts := []string{
+		"line one\nnul \x00 here",
+		"line one\nbom \ufeff mid-string",
+		"windows\r\nline endings\r\n",
+		"a `backquote`\n*/ and a close",
+		"\ufeffleading bom\nsecond line",
+		"plain\nmultiline\ntext",
+	}
+	for _, text := range texts {
+		u := core.User(text)
+		a := core.Message{Role: core.RoleAssistant, Content: []core.Part{core.TextPart{Text: text}}}
+		set := &fixtureSet{steps: []fixtureStep{{plain: []core.Message{u}, reply: a}}, last: a, system: text,
+			files: []fixtureFile{{Name: "00001-x.json"}}}
+		set.steps[0].key.Messages = set.steps[0].plain
+		src, err := replaySkeleton{runID: "r", agent: "orders", set: set}.render()
+		if err != nil {
+			t.Fatalf("render %q: %v", text, err)
+		}
+		f, err := goparser.ParseFile(gotoken.NewFileSet(), "x_test.go", src, 0)
+		if err != nil {
+			t.Fatalf("skeleton for %q does not parse: %v\n%s", text, err, src)
+		}
+		found := 0
+		ast.Inspect(f, func(n ast.Node) bool {
+			lit, ok := n.(*ast.BasicLit)
+			if !ok || lit.Kind != gotoken.STRING {
+				return true
+			}
+			got, err := strconv.Unquote(lit.Value)
+			if err != nil {
+				t.Errorf("literal %s: %v", lit.Value, err)
+			}
+			if got == text {
+				found++
+			}
+			return true
+		})
+		// The system prompt, the prompt and the final text.
+		if found < 3 {
+			t.Errorf("%q read back %d times, want ≥ 3:\n%s", text, found, src)
+		}
+	}
 }
 
 // TestReplayPackageKeyword: an agent named like a Go keyword gets a

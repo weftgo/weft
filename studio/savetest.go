@@ -103,9 +103,12 @@ type replaySkeleton struct {
 }
 
 // goString is s as a Go literal: a raw string when it spans lines and
-// can (no backquote, no carriage return, valid UTF-8), else quoted.
+// every other byte can sit in one (strconv.CanBackquote: no backquote,
+// no control character — a carriage return or a NUL —, no byte-order
+// mark, valid UTF-8; go/format rejects a file carrying a NUL or a BOM),
+// else quoted.
 func goString(s string) string {
-	if strings.Contains(s, "\n") && !strings.ContainsAny(s, "`\r") && utf8.ValidString(s) {
+	if strings.Contains(s, "\n") && strconv.CanBackquote(strings.ReplaceAll(s, "\n", "")) {
 		return "`" + s + "`"
 	}
 	return strconv.Quote(s)

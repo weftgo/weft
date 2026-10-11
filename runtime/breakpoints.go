@@ -36,11 +36,12 @@ import (
 // Who decides a parked app run:
 //
 //   - a thread turn (weft/thread) parks on a breakpoint only when this
-//     process also set runtime.Sessions — a park nobody could decide
-//     would hold the session (every later Send queues behind it, ADR
-//     0021 §5) until the app decides it; without Sessions the source
-//     answers nothing for session runs (those carrying
-//     weft.session.id). With Sessions the debugger's approve / deny /
+//     process set runtime.Sessions and the session has a public id
+//     (thread.PublicID) — Studio decides by public id, and a park
+//     nobody could decide would hold the session (every later Send
+//     queues behind it, ADR 0021 §5) until the app decides it; without
+//     both the source answers nothing for session runs (those carrying
+//     weft.session.id). With both the debugger's approve / deny /
 //     resolve reaches the turn through the app's own Session (Decide),
 //     which resumes it;
 //   - a plain Generate ends with res.Pending, and only the app can
@@ -71,9 +72,14 @@ func Breakpoints() core.Option { return core.ParkSource(breakpointSource) }
 // carries (runOptions); the source skips such runs.
 const playgroundKey = "weft.playground"
 
-// sessionKey is the metadata key a weft/thread turn carries: the
-// source parks such a run only when a live link has Sessions.
-const sessionKey = "weft.session.id"
+// sessionKey is the metadata key a weft/thread turn carries, and
+// publicIDKey the one a turn of a session with thread.PublicID carries:
+// the source parks a session run only when a live link has Sessions
+// and the run has a public id.
+const (
+	sessionKey  = "weft.session.id"
+	publicIDKey = "weft.public_id"
+)
 
 // liveLinks is the process's runtime links Breakpoints reads: a link
 // joins at Install (before it dials) and leaves at its stop.
@@ -120,13 +126,14 @@ func breakpointSource(ctx context.Context) []string {
 		decides = decides || l.cfg.sessions != nil
 	}
 	liveLinks.mu.Unlock()
-	// A thread turn parks only where a decision can reach it: with no
-	// live link holding a Sessions resolver nobody but the app could
-	// decide the park, and under ADR 0021 §5 every later Send would
-	// queue behind it — a breakpoint must not wedge a session the app
-	// has no approval UI for (stop()'s reasoning: a runtime that cannot
-	// decide does not park).
-	if md[sessionKey] != "" && !decides {
+	// A thread turn parks only where a decision can reach it: Studio
+	// decides an app turn through a live link's Sessions resolver, by
+	// public id. With no such link, or a session without a public id,
+	// nobody but the app could decide the park, and under ADR 0021 §5
+	// every later Send would queue behind it — a breakpoint must not
+	// wedge a session the app has no approval UI for (stop()'s
+	// reasoning: a runtime that cannot decide does not park).
+	if md[sessionKey] != "" && (!decides || md[publicIDKey] == "") {
 		return nil
 	}
 	var set map[string]bool

@@ -331,7 +331,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    merges); weft mcp [--url --token] (a stdio MCP server over these read routes, read verbs
 //    //    only — runs/search/run/step/request/events/tools/diff/export/sessions/session/meta +
 //    //    explain_failure (run + step + transcript composed); every tool a GET, outputs the route's
-//    //    JSON cut at max_bytes with a note; no --url: the discovery file; docs/mcp-recipe.md;
+//    //    JSON cut at max_bytes with a note; no --url: the discovery file; it serves before a
+//    //    Studio answers (one WARN; a call isErrors "no Studio answers /api/meta" until one does)
+//    //    and, after a transport failure, re-resolves per call (no --url: WEFT_STUDIO_URL, then
+//    //    the discovery file; --url retried as given); docs/mcp-recipe.md;
 //    //    make mcp-check — build tag livecheck, not in make test — proves it over stdio against a real
 //    //    weft studio seeded with the contract fixtures: the phase 6 gate's third clause);
 //    //    weft vacuum [--db --retain] (one sweep when a retention is given, then VACUUM
@@ -409,9 +412,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // process-wide; skips weft.playground runs, whose fingerprint decides) —
 //     // the app's own runs (registration breakpoints_own; a plain Generate parked so is
 //     // the app's to resume, Studio decides session turns only, through runtime.Sessions;
-//     // a thread turn parks only when this process set runtime.Sessions — without it the
-//     // source answers nothing for weft.session.id runs, a park nobody could decide would
-//     // hold the session; a Subagent child parks itself, its parent sees SUBAGENT_PENDING);
+//     // a thread turn parks only when this process set runtime.Sessions and the session
+//     // has a public id (thread.PublicID) — without both the source answers nothing for
+//     // weft.session.id runs, a park nobody could decide would hold the session; a Subagent child parks itself, its parent sees SUBAGENT_PENDING);
 //     // meta debug_scope reads own+runtime while a connected runtime registered Sessions or
 //     // breakpoints_own. Steer acts on the runtime's runs (D7) and, with Sessions, the
 //     // app's turns. Studio side:

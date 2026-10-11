@@ -98,8 +98,10 @@ unchanged.
   pending and only the app resumes it: Studio decides session turns
   only.
 - `runtime.Breakpoints()` parks a thread turn only when the process
-  also set `runtime.Sessions` (a live link holds a resolver): without
-  it the source answers nothing for a run carrying `weft.session.id`.
+  set `runtime.Sessions` (a live link holds a resolver) and the session
+  has a public id (`thread.PublicID`; Studio decides by public id):
+  without both the source answers nothing for a run carrying
+  `weft.session.id`.
   A park nobody but the app could decide would hold the session — every
   later `Send` queues behind the open boundary (ADR 0021 §5), clearing
   the breakpoint releases nothing, Studio refuses the app-owned turn —

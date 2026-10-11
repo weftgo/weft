@@ -253,7 +253,8 @@ func TestBreakpointOnPlainGenerate(t *testing.T) {
 }
 
 // TestBreakpointWithoutSessionsSkipsThreadTurns is the wedge's
-// regression test: Breakpoints without runtime.Sessions. A thread turn
+// regression test: Breakpoints without runtime.Sessions (and, below,
+// with Sessions but a session with no public id). A thread turn
 // would park with nobody able to decide it — Studio refuses an
 // app-owned turn without Sessions, the app has no approval UI — and
 // every later Send would queue behind the open boundary (ADR 0021 §5),
@@ -312,5 +313,69 @@ func TestBreakpointWithoutSessionsSkipsThreadTurns(t *testing.T) {
 	}
 	if len(res.Pending) != 1 || res.Pending[0].Name != "deploy" || ran.Load() != 2 {
 		t.Errorf("plain Generate: pending %+v, ran %d; want deploy parked", res.Pending, ran.Load())
+	}
+}
+
+// TestBreakpointSessionWithoutPublicIDSkipped: Sessions set, but the
+// session has no thread.PublicID — Studio decides app turns by public
+// id, so nobody outside the app could decide the park: the source
+// answers nothing and the turn runs deploy, nothing pending or queued.
+// The same process's session with a public id still parks (as in
+// TestBreakpointParksTheAppsOwnRun, which decides it through Sessions).
+func TestBreakpointSessionWithoutPublicIDSkipped(t *testing.T) {
+	e := newE2E(t)
+	var ran atomic.Int64
+	agent := breakAgent(e, &ran,
+		wefttest.ToolCalls(wefttest.Call{Name: "deploy", Args: `{"env":"prod"}`}),
+		wefttest.Say("Deployed."),
+		wefttest.ToolCalls(wefttest.Call{Name: "deploy", Args: `{"env":"prod"}`}),
+	)
+	resolve := func(context.Context, string) (*thread.Session, func(), error) { return nil, nil, nil }
+	shutdown := runtime.Install(runtime.Local(e.srv), runtime.Agents(agent), runtime.Sessions(resolve), runtime.Enabled(true))
+	defer shutdown()
+	e.waitRuntime(t)
+	e.setBreakpoints(t, e.runtimeID(t), "deploy")
+	ctx := context.Background()
+	if got := runtime.BreakpointSource(core.WithMetadata(ctx, map[string]string{"weft.session.id": "s1"})); got != nil {
+		t.Errorf("the source answers %v for a session run with no public id, want nil", got)
+	}
+	if got := runtime.BreakpointSource(core.WithMetadata(ctx, map[string]string{"weft.session.id": "s1", "weft.public_id": "pub_x"})); !slices.Equal(got, []string{"deploy"}) {
+		t.Errorf("the source answers %v for a session run with a public id under Sessions, want [deploy]", got)
+	}
+
+	s, err := thread.Create(ctx, e.store, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close(ctx) }()
+	turn, err := s.Send(ctx, core.User("Deploy to prod."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := turn.Wait()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WaitIdle(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if p, q := s.Pending(), s.Queue(); len(res.Pending) != 0 || res.Text() != "Deployed." || ran.Load() != 1 || len(p) != 0 || len(q) != 0 {
+		t.Fatalf("no public id: pending %+v, text %q, ran %d, session pending %d queue %d; want no park", res.Pending, res.Text(), ran.Load(), len(p), len(q))
+	}
+
+	pub, err := thread.Create(ctx, e.store, agent, thread.PublicID("pub_parks"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = pub.Close(ctx) }()
+	turn, err = pub.Send(ctx, core.User("Deploy to prod."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err = turn.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Pending) != 1 || res.Pending[0].Name != "deploy" || ran.Load() != 1 {
+		t.Errorf("with a public id: pending %+v, ran %d; want deploy parked", res.Pending, ran.Load())
 	}
 }

@@ -26,8 +26,9 @@ module, ADR 0005).
   `weft.New` and the debugger's breakpoints (`PUT
   /api/runtimes/{id}/breakpoints`) park tools on the app's own runs of
   that agent — thread turns (decided from the panel through
-  `runtime.Sessions`; parked only when the process set `Sessions` — without
-  it the source answers nothing for a `weft.session.id` run, so no park
+  `runtime.Sessions`; a thread turn parks only when the process set
+  `Sessions` and the session has a public id (`thread.PublicID`) — without
+  both the source answers nothing for a `weft.session.id` run, so no park
   nobody could decide holds the session) and plain `Generate` runs (ending with
   `res.Pending`; the app resumes them with `weft.Approve`). In a `Subagent`
   child the child parks and the parent's call reads `SUBAGENT_PENDING`. Bound lazily

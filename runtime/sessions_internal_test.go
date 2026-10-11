@@ -820,7 +820,8 @@ func parkAndDecideBy(t *testing.T, breakpoint bool, decide func(s *thread.Sessio
 	if breakpoint {
 		gate, extra = nil, []core.Option{Breakpoints()}
 		// A thread turn parks on a breakpoint only when a live link
-		// has Sessions: this link has one (it is never called here).
+		// has Sessions (this one has, never called here) and the
+		// session a public id (pub_park, below).
 		cfg := &config{sessions: func(context.Context, string) (*thread.Session, func(), error) { return nil, nil, nil }}
 		l := newLink(cfg, newRegistry(cfg), "http://unused.invalid", "")
 		l.setBreakpoints([]string{"deploy"})

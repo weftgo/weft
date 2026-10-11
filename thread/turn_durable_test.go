@@ -246,6 +246,74 @@ func TestPromptFlushFailureLeavesNoOrphanPrompt(t *testing.T) {
 	}
 }
 
+// A queued Send whose accepted receipt was written but could not be
+// flushed fails the same way as the prompt path: the receipt is
+// settled dropped and the leaf goes back to where it stood, so a busy
+// Send and an idle one leave the same line behind. The window right
+// after a turn's Wait — the runner still between items, a Send there
+// queued — is this path; TestPromptFlushFailureLeavesNoOrphanPrompt
+// meets it by timing, this test by holding the running turn.
+func TestQueuedFlushFailureLeavesTheLeaf(t *testing.T) {
+	ctx := context.Background()
+	st := &flushFailStorage{Storage: thread.Memory()}
+	agent, _, started, rel := heldAgent("answered", "queued")
+	defer rel.open()
+	s, err := thread.Create(ctx, st, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := s.Send(ctx, core.User("long work"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-started
+	leaf := s.Leaf()
+	st.failNext.Store(1)
+	if turn, err := s.Send(ctx, core.User("lost")); err == nil || turn != nil {
+		t.Fatalf("a queued Send over a failing flush = %v, %v; want an error", turn, err)
+	}
+	if got := s.Leaf(); got != leaf {
+		t.Errorf("the leaf after the failed queued Send = %q, want it back at %q", got, leaf)
+	}
+	if q := s.Queue(); len(q) != 0 {
+		t.Errorf("Queue = %+v, want nothing: the failed send must not run", q)
+	}
+	var dropped bool
+	for _, r := range receipts(s) {
+		dropped = dropped || r.Status == thread.ReceiptDropped
+	}
+	if !dropped {
+		t.Error("no dropped receipt settles the unflushed accepted one")
+	}
+	queued, err := s.Send(ctx, core.User("after"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rel.open()
+	if _, err := first.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := queued.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	got := contextTexts(s)
+	for _, txt := range got {
+		if txt == "lost" {
+			t.Fatalf("Context = %v: the failed send's message is on the line", got)
+		}
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s2 := reopenWith(t, ctx, st.Storage, s, agent)
+	if q := s2.Queue(); len(q) != 0 {
+		t.Errorf("the reopened Queue = %+v, want nothing", q)
+	}
+	if again := contextTexts(s2); !equalStrings(again, got) {
+		t.Errorf("the reopened Context = %v, want %v (live)", again, got)
+	}
+}
+
 // A failed Send with no retry reads the same after a reopen: the leaf
 // move is an entry, so the unflushed prompt is off the path there too.
 func TestPromptFlushFailureIsRecordedForAReopen(t *testing.T) {

@@ -379,8 +379,12 @@ func (s *Session) enqueueLocked(ctx context.Context, msg core.Message, opts []co
 // turn — after lead, the entry that must land in the same atomic
 // Append (a steer's deferred receipt) — and returns its id. A receipt
 // that was written but could not be flushed is dropped again, best
-// effort, so a reopen does not run a send its caller was told failed.
-// Callers hold s.mu.
+// effort, so a reopen does not run a send its caller was told failed,
+// and the leaf moves back to where it stood — the prompt path's rule
+// (appendPromptLocked): a failed Send leaves the line as it found it
+// whether it met an idle session or a busy one, the window after a
+// turn's Wait included, where the runner is still between items and a
+// Send queues. Callers hold s.mu.
 func (s *Session) acceptLocked(ctx context.Context, t *Turn, msg core.Message, lead func(id, parent string, created time.Time) Entry) (string, error) {
 	if !ValidID(t.id) {
 		return "", fmt.Errorf("thread: invalid entry id %q", t.id)
@@ -390,7 +394,8 @@ func (s *Session) acceptLocked(ctx context.Context, t *Turn, msg core.Message, l
 	}
 	now := s.now()
 	var entries []Entry
-	parent := s.leaf
+	prev := s.leaf
+	parent := prev
 	mint := func() (string, error) {
 		id, err := s.mintCheckedLocked(entries)
 		if err == nil && id == t.id {
@@ -417,6 +422,7 @@ func (s *Session) acceptLocked(ctx context.Context, t *Turn, msg core.Message, l
 		if _, written := s.byID[id]; written {
 			// Appended, not flushed: the entry is in the file.
 			s.dropAcceptedLocked(context.WithoutCancel(ctx), id)
+			s.unwindLeafLocked(context.WithoutCancel(ctx), prev)
 			return "", fmt.Errorf("thread: accepted receipt flush: %w", err)
 		}
 		return "", err
@@ -535,19 +541,19 @@ func (s *Session) appendPromptLocked(ctx context.Context, t *Turn, msg core.Mess
 	}
 	s.adoptLocked(e)
 	if err := s.flushLocked(ctx); err != nil {
-		s.unwindPromptLocked(context.WithoutCancel(ctx), prev)
+		s.unwindLeafLocked(context.WithoutCancel(ctx), prev)
 		return fmt.Errorf("thread: prompt flush: %w", err)
 	}
 	return nil
 }
 
-// unwindPromptLocked moves the leaf back to prev after a prompt that
-// was written but not flushed: a leaf entry records the move, so a
-// reopen reads the same position; when even that cannot be written the
-// in-memory leaf still moves — a retry then attaches beside the failed
-// prompt, never after it — and the log says the file disagrees until
-// the next entry lands. Callers hold s.mu.
-func (s *Session) unwindPromptLocked(ctx context.Context, prev string) {
+// unwindLeafLocked moves the leaf back to prev after a prompt or an
+// accepted receipt that was written but not flushed: a leaf entry
+// records the move, so a reopen reads the same position; when even
+// that cannot be written the in-memory leaf still moves — a retry then
+// attaches beside the failed entry, never after it — and the log says
+// the file disagrees until the next entry lands. Callers hold s.mu.
+func (s *Session) unwindLeafLocked(ctx context.Context, prev string) {
 	id, err := s.mintCheckedLocked(nil)
 	if err == nil {
 		e := LeafEntry{ID: id, ParentID: s.leaf, Created: s.now(), Entry: prev}
@@ -557,7 +563,7 @@ func (s *Session) unwindPromptLocked(ctx context.Context, prev string) {
 		}
 	}
 	s.leaf = prev
-	s.agent.Logger().Error("thread: unflushed prompt's leaf move not recorded",
+	s.agent.Logger().Error("thread: unflushed entry's leaf move not recorded",
 		"session", s.header.ID, "err", err)
 }
 
@@ -1891,6 +1897,14 @@ func (t *Turn) Done() <-chan struct{} { return t.done }
 // The result is the run's on success — including a run that ended at
 // an approval boundary (RunResult.Pending) — and nil for a turn with
 // no run of its own (a steer: see Outcome).
+//
+// When Wait returns the turn's entries have landed: Leaf, Context and
+// Entries show its end. The session's runner may still be between
+// items — the automatic compaction, the hand-off to the next queued
+// send — and a Send made there is accepted under every policy and
+// queued behind it, its accepted receipt on the line before its
+// prompt. WaitIdle waits that window out; Wait never does, so a
+// summarizer's model call never delays a turn's caller.
 //
 // The error says what kind of end it was; match with errors.Is and
 // errors.As:

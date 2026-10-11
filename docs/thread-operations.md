@@ -280,6 +280,18 @@ a crash or a `Close` that gave up, `thread.Open` restores both to
 - `s.Continue(ctx)` runs them now, with no new message;
 - `s.ClearQueue(ctx)` drops them, on the record.
 
+**A failed `Send` leaves the line as it found it.** When the prompt
+entry or the `accepted` receipt is written but its flush fails, `Send`
+returns the error, the receipt is settled `dropped` (a reopen does not
+run it) and a `leaf` entry moves the leaf back to where it stood. Both
+paths read the same after the failure, so it does not matter which one
+a `Send` took — and the one right after a turn's `Wait` can take
+either: `Wait` returns once the turn's entries have landed, while the
+runner is still between items (the automatic compaction runs there),
+and a `Send` in that window is accepted and queued behind it. Call
+`s.WaitIdle(ctx)` first when the next `Send` must find the session
+idle.
+
 **Steer follow-ups inherit.** A steer that cannot join the running
 turn becomes a follow-up turn under that turn's run options (and the
 values on its context), the steer's own options after them — a turn

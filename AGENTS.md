@@ -393,7 +393,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // run's recorded turns, zero tokens); thread ephemeral | fork (a new session
 //     // with lineage, the panel keeps chatting in it). Breakpoints park the runs this
 //     // runtime starts and, opted in at New — weft.New(m, …, runtime.Breakpoints()), a
-//     // core.ParkSource bound lazily to the live link (ADR 0030; inert with no link) —
+//     // core.ParkSource bound lazily to the live link (ADR 0030; inert with no link;
+//     // process-wide; skips weft.playground runs, whose fingerprint decides) —
 //     // the app's own runs (registration breakpoints_own; a plain Generate parked so is
 //     // the app's to resume, Studio decides session turns only, through runtime.Sessions);
 //     // meta debug_scope reads own+runtime while a connected runtime registered Sessions or

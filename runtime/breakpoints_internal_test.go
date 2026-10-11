@@ -5,6 +5,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -54,7 +55,7 @@ func TestBreakpointsOptionAbsentChangesNothing(t *testing.T) {
 		}
 	}
 	plain := runAppTurn(t, noInstall)
-	if len(plain.Events) == 0 || len(plain.Entries) == 0 || len(plain.Spans) == 0 {
+	if len(plain.Events) == 0 || len(plain.Entries) == 0 || len(plain.Spans) == 0 || plain.ToolMetadata == nil {
 		t.Fatalf("nothing recorded: %+v", plain)
 	}
 	for name, run := range map[string]identityRun{
@@ -143,4 +144,90 @@ func TestBreakpointsRegistration(t *testing.T) {
 	if carriesBreakpoints(nil) {
 		t.Error("a nil agent carries breakpoints")
 	}
+}
+
+// playgroundLink is a link (not started) exposing agent, with allow
+// opted in for the named tools, live in the registry with the
+// breakpoint set.
+func playgroundLink(t *testing.T, agent *core.Agent, allow []string, breaks ...string) *link {
+	t.Helper()
+	cfg := &config{agents: []*core.Agent{agent}, models: map[string]core.Model{}, allow: map[string]bool{}}
+	for _, a := range allow {
+		cfg.allow[a] = true
+	}
+	l := newLink(cfg, newRegistry(cfg), "http://unused.invalid", "")
+	l.setBreakpoints(breaks)
+	addLiveLink(l)
+	t.Cleanup(func() { removeLiveLink(l) })
+	return l
+}
+
+// allowCommand is a live ephemeral playground command under
+// side_effects allow.
+func allowCommand(t *testing.T, l *link, id string) command {
+	t.Helper()
+	in := "go"
+	cmd := command{CommandID: id, Agent: "acme-support", Input: &in, Engine: "live", SideEffects: "allow", Thread: "ephemeral"}
+	if reason, ok := l.validate(context.Background(), &cmd); !ok {
+		t.Fatalf("validate: %s", reason)
+	}
+	return cmd
+}
+
+// TestBreakpointSourceSkipsPlaygroundRuns: a playground run keeps its
+// pre-F4.2 breakpoint rule — the link's set filtered to the agent's
+// static tools, as a ParkOn on its override fingerprint — even when the
+// agent carries Breakpoints(): under allow, a breakpoint on a tool only
+// a ToolSource supplies does not park it (the source answers nothing
+// for a run carrying weft.playground), and neither does a Subagent
+// child built with the option re-read the set under a playground
+// parent.
+func TestBreakpointSourceSkipsPlaygroundRuns(t *testing.T) {
+	ctx := context.Background()
+	if got := breakpointSource(core.WithMetadata(ctx, map[string]string{"weft.playground": "true"})); got != nil {
+		t.Fatalf("source under weft.playground = %v, want nil", got)
+	}
+
+	t.Run("ToolSource tool", func(t *testing.T) {
+		var wired atomic.Int64
+		wire := core.Tool("wire_money", "Send a payment.", func(context.Context, struct{}) (string, error) {
+			wired.Add(1)
+			return "sent", nil
+		})
+		agent := core.New(wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "wire_money", ID: "c1"}),
+			wefttest.Say("paid"),
+		), core.Name("acme-support"), core.ToolSource(func() []*core.ToolDef { return []*core.ToolDef{wire} }), Breakpoints())
+		l := playgroundLink(t, agent, []string{"wire_money"}, "wire_money")
+		status, _, errText := l.execute(ctx, allowCommand(t, l, "cmd_ts"), "pg_ts")
+		if status != "succeeded" {
+			t.Fatalf("run = %s %s", status, errText)
+		}
+		if wired.Load() != 1 || l.parked["pg_ts"] != nil {
+			t.Errorf("wire_money ran %d times, parked %v; want it run (the playground's own rule, unchanged)", wired.Load(), l.parked["pg_ts"] != nil)
+		}
+	})
+
+	t.Run("Subagent child", func(t *testing.T) {
+		var wired atomic.Int64
+		child := core.New(wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "wire_money", ID: "k1"}),
+			wefttest.Say("wired"),
+		), core.Tool("wire_money", "Send a payment.", func(context.Context, struct{}) (string, error) {
+			wired.Add(1)
+			return "sent", nil
+		}), Breakpoints())
+		parent := core.New(wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "treasury", Args: `{"prompt":"pay"}`, ID: "c1"}),
+			wefttest.Say("paid"),
+		), core.Name("acme-support"), core.Subagent("treasury", "Moves money.", child))
+		l := playgroundLink(t, parent, []string{"treasury", "wire_money"}, "wire_money")
+		status, _, errText := l.execute(ctx, allowCommand(t, l, "cmd_sub"), "pg_sub")
+		if status != "succeeded" {
+			t.Fatalf("run = %s %s", status, errText)
+		}
+		if wired.Load() != 1 || l.parked["pg_sub"] != nil {
+			t.Errorf("the child's wire_money ran %d times, parked %v; want it run under the playground parent", wired.Load(), l.parked["pg_sub"] != nil)
+		}
+	})
 }

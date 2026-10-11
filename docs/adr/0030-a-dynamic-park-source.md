@@ -64,7 +64,12 @@ model-visible behaviour (AGENTS.md rule 5), hence this record.
    the agent is built before `runtime.Install` runs, so the source
    reads the breakpoint set of the links Install has started and not
    yet stopped (their union, should there be several). No Install, an
-   Install not enabled, a stopped link or an empty set answers nil.
+   Install not enabled, a stopped link or an empty set answers nil, and
+   so does a playground run (below). The set is process-wide — every
+   agent built with the option reads it, whether or not it was given to
+   `runtime.Agents` — and a link whose stream dropped but was not
+   stopped keeps its last set until it reconnects and Studio re-sends
+   it.
 
 ### Not a seam, not a hook
 
@@ -102,10 +107,25 @@ unchanged.
 ## What this does not change
 
 `ParkOn`, `ParkAllExcept`, `RequireApproval` and middleware parking
-keep their rules; the rules still only add up toward parking. The
-playground runtime's own runs keep receiving their breakpoints as
-`ParkOn` (with `weft.override.park_on`), whether or not the agent
-carries the option — an agent built with it parks such a run on the
-same names twice over, which is one park. Nothing new crosses the wire
-to Studio except the registration's `breakpoints_own` flag; no route is
-added.
+keep their rules; the rules still only add up toward parking.
+
+The playground runtime's own runs keep exactly their pre-F4.2 rule,
+whether or not the agent carries `runtime.Breakpoints()`: the runtime
+gives each run it starts the link's breakpoint set filtered to the
+agent's static tools, as a `ParkOn` written into its override
+fingerprint (`weft.override.park_on`, `weft.override.hash`), and the
+runtime's source answers **nothing** for a run carrying
+`weft.playground` metadata — every run the runtime starts, and every
+run started inside one (a Subagent child inherits the metadata). The
+rule follows from what the fingerprint is for: it must determine what
+an experiment run did. Were the source to answer there too, a
+breakpoint on a tool only a `ToolSource` supplies would park it (the
+filtered `ParkOn` lets it run), and a Subagent child built with the
+option would re-read the set and park a tool its playground parent
+vouched for or allowed — with the run's fingerprint byte-identical to
+one where nothing parked. So on a playground run the fingerprint alone
+decides; the source acts on the app's own runs only. Pinned by
+`TestBreakpointSourceSkipsPlaygroundRuns`.
+
+Nothing new crosses the wire to Studio except the registration's
+`breakpoints_own` flag; no route is added.

@@ -40,12 +40,27 @@ import (
 //     only (Sessions resolves by public id), so the run page shows such
 //     a run parked, read-only.
 //
+// The set is process-wide: every agent built with the option parks on
+// it, whether or not it was given to Agents — the registration's
+// breakpoints_own reports only the agents given to Agents. A link
+// whose stream dropped but that was not stopped keeps its last set: the
+// app's runs keep parking on it until the link reconnects and Studio
+// re-sends the set (or the link stops). The runs this runtime starts
+// itself — playground runs and the runs started inside them, which
+// carry weft.playground metadata — are left to their own breakpoint
+// rule (a ParkOn filtered to the agent's tools, on their override
+// fingerprint): the source answers nothing for them.
+//
 // The option is inert without a link: with no Install, or Install not
 // enabled (WEFT_ENV not dev, no Enabled(true)), or a link stopped, or
 // no breakpoint set, the source answers nothing and the run is
 // byte-identical to one built without it. The registration reports
 // breakpoints_own: true when any agent given to Agents carries it.
 func Breakpoints() core.Option { return core.ParkSource(breakpointSource) }
+
+// playgroundKey is the metadata key every run this runtime starts
+// carries (runOptions); the source skips such runs.
+const playgroundKey = "weft.playground"
 
 // liveLinks is the process's runtime links Breakpoints reads: a link
 // joins at Install (before it dials) and leaves at its stop.
@@ -74,7 +89,15 @@ func removeLiveLink(l *link) {
 // takes two mutexes and copies a small map — prompt, as ParkSource
 // asks. A top-level function, so an agent's ParkSources can be
 // recognised as carrying it (carriesBreakpoints).
-func breakpointSource(context.Context) []string {
+func breakpointSource(ctx context.Context) []string {
+	// A run this runtime started (or one started inside it — a Subagent
+	// child inherits the metadata) already carries its breakpoints as
+	// its own filtered ParkOn, written into its override fingerprint;
+	// the source adds nothing there, so the fingerprint alone decides
+	// what a playground run parks (ADR 0030).
+	if core.MetadataFromContext(ctx)[playgroundKey] == "true" {
+		return nil
+	}
 	liveLinks.mu.Lock()
 	links := make([]*link, 0, len(liveLinks.links))
 	for l := range liveLinks.links {

@@ -276,6 +276,10 @@ type identityRun struct {
 	// Spans is every ended span's name and weft.* attributes, in end
 	// order.
 	Spans []string
+	// ToolMetadata is the metadata the lookup handler's context
+	// carried — what a run passes on past its start (the handler, a
+	// child run), not only what RunStart saw.
+	ToolMetadata map[string]string
 }
 
 // runAppTurn runs one turn of a fresh thread session — deterministic
@@ -294,6 +298,9 @@ func runAppTurn(t *testing.T, install func(agent *core.Agent) func(), opts ...co
 	lookup := core.Tool("lookup_order", "Look up an order by ID.", func(ctx context.Context, in struct {
 		OrderID string `json:"order_id"`
 	}) (string, error) {
+		mu.Lock()
+		out.ToolMetadata = core.MetadataFromContext(ctx)
+		mu.Unlock()
 		return `{"status":"shipped"}`, nil
 	})
 	agent := core.New(

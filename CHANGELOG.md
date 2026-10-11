@@ -24,11 +24,16 @@ module, ADR 0005).
   that agent — thread turns (decided from the panel through
   `runtime.Sessions`) and plain `Generate` runs (ending with
   `res.Pending`; the app resumes them with `weft.Approve`). Bound lazily
-  to the links `Install` started and not yet stopped (their union);
-  inert — byte-identical — with no Install, an Install not enabled or
-  no breakpoint set (`TestBreakpointsOptionAbsentChangesNothing`). The
-  registration carries `breakpoints_own` (true when an agent given to
-  `Agents` carries the option).
+  to the links `Install` started and not yet stopped (their union; a
+  link whose stream dropped keeps its last set until it reconnects);
+  process-wide — every agent built with the option parks on it, given to
+  `Agents` or not; inert — byte-identical — with no Install, an Install
+  not enabled or no breakpoint set (`TestBreakpointsOptionAbsentChangesNothing`).
+  Playground runs (and runs started inside them: `weft.playground`
+  metadata) are skipped — they keep their own filtered `ParkOn` on the
+  override fingerprint, unchanged. The registration carries
+  `breakpoints_own` (true when an agent given to `Agents` carries the
+  option).
 - studio/runtime: `Registration.BreakpointsOwn`, `RuntimeView.BreakpointsOwn`
   (`/api/runtimes` … `"breakpoints_own": bool`), `RuntimeServer.AnyOwnRuns()`.
   `meta.debug_scope` reads `"own+runtime"` while a connected runtime

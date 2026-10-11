@@ -60,10 +60,19 @@ func TestParkSourceNothingChangesNothing(t *testing.T) {
 		t.Helper()
 		tp := newRecProvider()
 		var ran atomic.Int64
-		all := append([]core.Option{core.Name("demo"), core.TracerProvider(tp), core.Logger(logger), countedTool("refund", &ran)}, opts...)
+		var toolMD map[string]string
+		// The handler's metadata, not only RunStart's: what the run
+		// passes on past the source's read (handlers, child runs).
+		refund := core.Tool("refund", "refund.", func(ctx context.Context, _ struct{}) (string, error) {
+			ran.Add(1)
+			toolMD = core.MetadataFromContext(ctx)
+			return "refund done", nil
+		})
+		all := append([]core.Option{core.Name("demo"), core.TracerProvider(tp), core.Logger(logger), refund}, opts...)
 		agt := core.New(script(), all...)
 		var evs []string
-		for ev, err := range agt.Stream(context.Background(), core.RunID(id), core.Prompt("x")).Events() {
+		for ev, err := range agt.Stream(context.Background(), core.RunID(id), core.Prompt("x"),
+			core.Metadata(map[string]string{"tenant": "acme"})).Events() {
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -73,6 +82,8 @@ func TestParkSourceNothingChangesNothing(t *testing.T) {
 		if ran.Load() != 1 {
 			t.Errorf("%s: refund ran %d times, want 1", id, ran.Load())
 		}
+		b, _ := json.Marshal(toolMD)
+		evs = append(evs, "tool metadata "+string(b))
 		return strings.Join(evs, "\n"), spanAttrsByID(t, tp, id)
 	}
 	base, baseAttrs := run("r")

@@ -10,6 +10,39 @@ module, ADR 0005).
 
 ### Added
 
+- obsdb: runs derived from stock OTel GenAI spans (docs/record-contract.md §9).
+  An `invoke_agent` span with `gen_ai.conversation.id` and no `weft.run.id`
+  — a Python or TypeScript app's, exported over OTLP — is now a run row,
+  id `otel-<trace id>-<root span id>`, `RunRow.Derived` true: session the
+  conversation id, steps its `chat` spans, usage the root's
+  `gen_ai.usage.*` else its own chat spans' sum (own-only: a nested root is
+  a child run, linked by its enclosing `execute_tool`'s call id), status
+  succeeded or failed (never running/interrupted). New: `obsdb.DeriveStockRuns`,
+  `StockRun`, `StockRunID`, `ParseStockRunID`, `StockTraces`, `IsStockRoot`,
+  `StockCandidate`, `RunRow.Derived`, `HoleCause` `CauseStockSpans`
+  ("derived from spans · no events"). `RunRow.RequestsHole` reads `derived`
+  for a derived row; `ExplainMissing` answers its prompt/tools with the
+  derived hole. A derived run's `RunSpans` is its subtree read from the
+  trace, `weft.step.index`/`weft.tool.seq` stamped on the returned copies;
+  `DeleteRun`/`Sweep` delete its subtree's spans (`DeletedSpans` seeds a
+  derived id's root). Migrations: SQLite 0008 (`runs.derived`), ClickHouse
+  0009 (`weft_runs.Derived`; rows inserted by Write, no view). The
+  `stock_genai` contract fixture is un-pended and passes on both backends.
+- obsdb: an `event` record without `weft.event.pos` is stored at position
+  -1 on SQLite too (ClickHouse already did), never at 0 where it collided
+  with `run_start` (I1.1 review debt). A `delta` without its position still
+  counts as position 0 (both backends).
+- studio: run rows carry `derived` (omitted when false); a derived run's
+  page has the one `derived` hole (cause `stock_spans`), its `events` and
+  `transcript` answer empty with that badge (`transcript?step=N` 409), its
+  `spans` are the real spans, `requests`/`tools` empty with the `derived`
+  badge; `/api/runs`, `/api/search` (agent, model, error text) and
+  `/api/sessions` (grouped by conversation id) list it; the export carries
+  the row and spans and refuses `format=wefttest` 400 with the badge (as
+  `POST /api/playground/fixtures` and `/api/playground/preview` refuse a
+  derived source); `/api/diff` marks every column `unknown` against a
+  derived side. New goldens `run-derived`, `events-derived`,
+  `transcript-derived`; `holes.golden.json` gains `derived.causes.stock_spans`.
 - **weft/runtime:** `runtime.Sessions(resolver)` (plan F4.1): an opt-in Install option that makes the app's own turns targets for the debugger's write verbs. `type SessionResolver func(ctx context.Context, publicID string) (*thread.Session, func(), error)` answers the app's Session behind a public id — its own live Session (no release) or one it opens from its store (release closes it; called after each command); `(nil, nil, nil)` is refused "no session for this public id". Decisions go through the session's own `Decide` (approve | deny | resolve), which resumes the turn under thread's rules (the parked turn's `Next`); a steer is `Send(…, thread.As(thread.Steer))`, refused "no running turn to steer" unless the run is in flight on the session (a debugger never starts a turn); cancel is refused "cancel is not supported on an app turn" (thread has no per-turn cancel). The runtime claims the Session's writer lease before it acks: a Session that cannot write is refused with exactly "the app is writing this session; fork instead" and nothing is written; `thread.ErrStale` releases and resolves once more. Each resolve is bounded at 10 s ("session resolver timed out"; a late answer is released). The registration carries `sessions` (false without the option); an app that does not set it is byte-identical (`TestSessionsOptionAbsentChangesNothing`).
 - **weft/runtime ↔ Studio wire:** a new SSE frame, `event: session`, data `{command_id, verb: decide|steer|cancel, public_id, session_id, run_id, call_id?, decision?, reason?, content?, message?, actor?}` — acked like every command (accepted before the session is written, finished after; at-most-once unchanged). `studio/runtime`: `Registration.Sessions`, `RuntimeView.Sessions` (`/api/runtimes` … `"sessions": bool`), `SessionCommand`, `VerbDecide/VerbSteer/VerbCancel`, `RuntimeServer.EnqueueSession`, `SessionsRuntime(service)`, `AnySessions()`. A session command's acks never make the app's run a runtime-started one.
 - **weft/thread:** `(*Session).Claim(ctx) error` — takes the session's writer lease now without writing (nil for the holder, `ErrLocked` while another writer holds it — nothing taken —, `ErrStale` when the view fell behind, `ErrClosed` once sealed). Additive; what weft/runtime asks before it acks a debugger's decision.

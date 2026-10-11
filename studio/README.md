@@ -1154,6 +1154,27 @@ its public id; a read panel token is 403.
 
 The app's own turns (plan F4.1). A run no runtime started is the app's: its approvals, steer and cancel go through a connected runtime of the run's service (the run row's `service`, the registration's `service`) installed with `runtime.Sessions(resolver)` — `/api/runtimes` reports it as `"sessions": true`, and `meta.debug_scope` reads `"own+runtime"` while one is connected. The route then forwards the verb as an `event: session` command (`{command_id, verb: decide|steer|cancel, public_id, session_id, run_id, call_id?, decision?, reason?, content?, message?, actor?}`, addressed by the run row's `weft.public_id` and `weft.session.id`) and answers **202** `{command_id, state: "queued", run_id, runtime_id}` at once; the client polls `GET /api/playground/commands/{id}`. The runtime claims the app's Session writer lease before it acks, so its refusals arrive on the row as `state: "rejected"` with `error`: `the app is writing this session; fork instead` (another writer holds the session — nothing written), `no session for this public id`, `no running turn to steer (…)`, `cancel is not supported on an app turn` (thread has no per-turn cancel), or the resolver's / thread's own error (an unsigned decision on a `thread.RequireSigned` session fails with thread's error, after the ack, as `finished`/`failed`). A decision's finished ack names the resumed turn (`<session>-tN`, the app's run — never `weft.playground`). Without such a runtime the three verbs answer alike, **403** `{"error":{"code":"forbidden","message":"app-owned turn · read-only: …"},"fix":"set runtime.Sessions(resolver) at runtime.Install in the app …"}`; a run that is not a turn of a thread session with a public id is 403 "app-owned turn" with the fix `thread.PublicID(...)`. Identity rules are every playground verb's: the dev token or setup A loopback; a playground panel token inside its own public id (another's 403); a read token 403.
 
+**Derived runs.** A stock OTel app (no weft) that exports GenAI spans with
+`gen_ai.conversation.id` gets run rows (docs/record-contract.md §9): one per
+root `invoke_agent` span, id `otel-<trace id>-<root span id>`, `derived: true`
+on every run row (list, page, search, session), `requests_badge: "derived"`.
+Its page's `holes` is `[{"hole":"derived","reason":"derived from spans · no
+events","fix":"the producer exports stock OTel GenAI spans only: emit weft's
+records (docs/record-contract.md) for events, the transcript and requests"}]`.
+What each route answers for it: `runs/{id}/events` — `events: []`, `done:
+true` and that badge; `runs/{id}/transcript` — `batches: []` and the badge
+(`?step=N`: 409 with it); `runs/{id}/spans` — the real spans (the waterfall),
+`weft.step.index` / `weft.tool.seq` filled by the reader; `runs/{id}/requests`
+and `/tools` — empty, badge `derived`; `runs/{id}/steps/{n}` — the step
+assembled from its `chat` span (its holes include `derived`; steps.go is not
+yet derived-aware, see I1.2's open items); `runs/{id}/logs` — the app
+logs under its spans; `runs/{id}/export` — json/jsonl/otlp carry the row
+and spans with every other block badged, `wefttest` is 400 with the badge;
+`diff` — every column `unknown` against a derived side; the playground's
+fixtures and preview refuse a derived source 400 with the badge (there is no
+transcript to replay). A derived run has no public id, so a panel token never
+reads it (403).
+
 The Live page derives a running
 row from the event frames it already receives: step = the last
 step_finish's index, tokens = the sum of step_finish usage, TTFT = its

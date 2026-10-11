@@ -415,6 +415,16 @@ module, ADR 0005).
   path) on every run under the handler, on every destination. A secret in a
   page PATH would travel: strip it in your own middleware before
   `scope.Header`, or do not use `scope.Header` on such routes.
+- Studio: the experiments list follows `GET /api/experiments`' cut. It
+  shows the 50 most recently updated, says "newest N of total" when more
+  are saved, and loads 50 more at a time up to 200 (`?limit=`).
+- Studio: Experiments is not offered under a panel token (read or
+  playground) in the sidebar, the ⌘K palette or the playground's history,
+  because the experiments routes refuse every panel token. Opened by URL,
+  the page shows the hidden badge ("dev token only") and fetches nothing.
+- Studio and the devtools panel: "keep as prompt" with no agent registered
+  says "copy the edited prompt" / "copied" and no more. It no longer
+  mentions a proposal, since there is no agent to propose to.
 
 ### Changed — breaking
 
@@ -459,6 +469,20 @@ module, ADR 0005).
   parent's verdicts again once parked and arms the resume itself, and a
   park generation counter keeps a stale park's replay from reaching a
   re-parked run (the TestConcurrentDecide CI flake).
+- Studio: a peek (Live) or run page for a deleted run (404) kept
+  `/api/live?run=` open and polled its events every 2 s for good. The
+  story reader now waits for the run's document and follows nothing once
+  the run answers 404. The "not found" copy stays.
+- Studio: the Agents page draws a 403 as the hidden badge (as Settings
+  does) instead of plain red text, and stops re-asking every 5 s. An
+  experiment with no runs shows the cost cell's reason ("no run to total")
+  instead of a bare dash.
+- Devtools panel: after an "open in Studio" hand-off answers (opened,
+  refused or failed), the note line always carries the plain Studio link,
+  never the minted one. A browser that blocks the late popup still leaves
+  a link to click.
+- Devtools panel: a start that settles after the element was removed
+  returns without touching the element.
 
 ## 0.13.0 — 2026-10-10
 

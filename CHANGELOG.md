@@ -32,6 +32,12 @@ module, ADR 0005).
   -1 on SQLite too (ClickHouse already did), never at 0 where it collided
   with `run_start` (I1.1 review debt). A `delta` without its position still
   counts as position 0 (both backends).
+- studio: `GET /api/runs/{id}/steps/{n}` is honest for a derived run: the step is its `chat` span — usage from its `gen_ai.usage.*`, priced like any step (never a known $0), its `execute_tool` spans as calls badged `derived` — with `request`, `messages_in` and the one hole `derived` in the stock_spans words; no `gap` / `not_recorded` ("upgrade weft") holes or attempts badge.
+- studio: `POST /api/playground/runs` refuses a derived source run 400 (`bad_request`, badge `derived`, stock_spans words) in `checkSource`, as the preview and fixtures routes do — no command reaches the runtime (before: accepted, then failing with the wrong cause, or spending a live model call for an input-only replay).
+- studio/ingest: on a backend that publishes no run frames of its own (ClickHouse), the receiver announces derived runs on the live lane too — it re-reads the derived runs of every trace an export brought a stock GenAI span of, so a later export that grows a run's steps is announced again.
+- studio: `requests` and `tools` of a derived run carry the stock_spans words and fix ("derived from spans · no events").
+- obsdb: a failed derived run whose root has no status description reads `err` "the root span's status is Error (no description)" (`obsdb.StockErrNoDescription`); an empty `gen_ai.operation.name` is unset (the span name decides).
+- obsdb: deleting a weft run deletes the derived row of a stock agent under its tool along with its spans (`obsdb.StockRunsOf`), on both backends; new conformance cases `DerivedMixedTrace` (weft and stock spans in one trace, no twin) and `DerivedTwoRoots` (two roots in a trace, delete one).
 - studio: run rows carry `derived` (omitted when false); a derived run's
   page has the one `derived` hole (cause `stock_spans`), its `events` and
   `transcript` answer empty with that badge (`transcript?step=N` 409), its

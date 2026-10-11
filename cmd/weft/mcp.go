@@ -172,20 +172,39 @@ func startMCP(ctx context.Context, urlFlag, tokenFlag string, stderr io.Writer) 
 	}
 	_, _ = fmt.Fprintf(stderr, "weft mcp: %d read-only tools over stdio for the Studio at %s (token %s)\n",
 		len(mcpTools), c.redacted(), from)
-	return newMCPServerLink(newStudioLink(c, resolve, down, stderr), log), nil
+	link := newStudioLink(c, resolve, down, stderr)
+	// The token too comes from the discovery file when neither --token
+	// nor WEFT_STUDIO_TOKEN named one: a Studio restarted on the same
+	// port with a new token (a fileless DB's per-process one,
+	// --rotate-token) answers 401 to the old one, and the next call
+	// re-reads the file.
+	link.rereadToken = resolve != nil && tokenFlag == "" && os.Getenv("WEFT_STUDIO_TOKEN") == ""
+	return newMCPServerLink(link, log), nil
 }
 
 // studioLink is the Studio the tools read: the one walled client, and
-// — when the last attempt failed with a transport error — a fresh
-// look before the next request: re-resolve (no --url), then GET
-// /api/meta. Nothing answering is the call's error, the startup line
-// with its fix; a Studio found again is said on stderr once.
+// — when the last attempt failed with a transport error, or a 401
+// while the token is the discovery file's — a fresh look before the
+// next request: re-resolve (no --url), then GET /api/meta. Nothing
+// answering is the call's error, the startup line with its fix; a
+// Studio found again is said on stderr once.
 type studioLink struct {
 	mu      sync.Mutex
 	c       *client
 	resolve func() (base, token string) // nil: --url given, retried as given
-	down    bool                        // the last attempt failed with a transport error
-	stderr  io.Writer
+	down    bool                        // the next request looks again first
+	// rereadToken: no --token or WEFT_STUDIO_TOKEN with no --url — a
+	// 401 means the file's token may have changed, so it looks again.
+	rereadToken bool
+	stderr      io.Writer
+}
+
+// hint is what a failure that makes the next call look again says.
+func (l *studioLink) hint() string {
+	if l.resolve != nil {
+		return "the next call looks again (WEFT_STUDIO_URL, the discovery file): no restart needed"
+	}
+	return "the next call retries the --url given"
 }
 
 // newStudioLink walls c's transport to GET and HEAD — every client the
@@ -217,11 +236,7 @@ func (l *studioLink) client(ctx context.Context) (*client, error) {
 	if _, err := c.get(ctx, "/api/meta", nil); err != nil {
 		var se *statusError
 		if !errors.As(err, &se) {
-			hint := "the next call retries the --url given"
-			if l.resolve != nil {
-				hint = "the next call looks again (WEFT_STUDIO_URL, the discovery file): no restart needed"
-			}
-			return nil, fmt.Errorf("no Studio answers /api/meta: %w; %s", err, hint)
+			return nil, fmt.Errorf("no Studio answers /api/meta: %w; %s", err, l.hint())
 		}
 	}
 	if c.base != l.c.base {
@@ -231,18 +246,25 @@ func (l *studioLink) client(ctx context.Context) (*client, error) {
 	return c, nil
 }
 
-// failed marks the link down after a transport error on c (a request
-// that got no answer), so the next call looks again.
-func (l *studioLink) failed(c *client, err error) {
+// failed marks the link down after a failure on c that a fresh look
+// may cure — a transport error (a request that got no answer), or a
+// 401 while the token is the discovery file's (rereadToken) — and
+// reports whether it was one: the error then says the next call looks
+// again.
+func (l *studioLink) failed(c *client, err error) bool {
+	if err == nil {
+		return false
+	}
 	var se *statusError
-	if err == nil || errors.As(err, &se) {
-		return
+	if errors.As(err, &se) && (se.Status != http.StatusUnauthorized || !l.rereadToken) {
+		return false
 	}
 	l.mu.Lock()
 	if l.c == c {
 		l.down = true
 	}
 	l.mu.Unlock()
+	return true
 }
 
 func (l *studioLink) current() *client {
@@ -331,7 +353,9 @@ func (g linkGetter) get(ctx context.Context, path string, q url.Values) (int, []
 	}
 	b, err := c.get(ctx, path, q)
 	if err != nil {
-		g.l.failed(c, err)
+		if g.l.failed(c, err) {
+			err = fmt.Errorf("%w; %s", err, g.l.hint())
+		}
 		var se *statusError
 		if errors.As(err, &se) {
 			return se.Status, se.Body, err

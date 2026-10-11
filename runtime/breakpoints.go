@@ -31,7 +31,12 @@ import (
 // child run (which inherits the parent's context) the child parks and
 // the parent's call to it is a SUBAGENT_PENDING result the parent
 // model sees and continues past — core's rule for any park in a child,
-// not a park of the parent.
+// not a park of the parent. Under a thread turn with Sessions and a
+// public id, Studio accepts a decision on such a child's run (it
+// inherits the session id and public id) and answers 202, but the
+// runtime then rejects it ("no parked call": the session's Pending is
+// empty, the parent turn having completed) — the child's park is
+// decided by nobody, and the parent has continued past it.
 //
 // Who decides a parked app run:
 //
@@ -55,7 +60,12 @@ import (
 // breakpoints_own reports only the agents given to Agents. A link
 // whose stream dropped but that was not stopped keeps its last set: the
 // app's runs keep parking on it until the link reconnects and Studio
-// re-sends the set (or the link stops). The runs this runtime starts
+// re-sends the set (or the link stops), and a decision reaches a
+// parked turn once it reconnects. A link STOPPED while a turn is
+// already parked leaves that park with no decider until the app
+// decides it or a link with Sessions comes back: the park set is read
+// once per run, at its start, and the stop does not unpark what it
+// parked. The runs this runtime starts
 // itself — playground runs and the runs started inside them, which
 // carry weft.playground metadata — are left to their own breakpoint
 // rule (a ParkOn filtered to the agent's tools, on their override

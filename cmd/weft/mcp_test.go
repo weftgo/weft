@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -35,12 +36,29 @@ import (
 // the run at the continuation point).
 func mcpSeedStudio(t *testing.T) string {
 	t.Helper()
-	srv, err := newServer("sqlite://"+filepath.Join(t.TempDir(), "weft.db"), "tok")
+	return mcpSeed(t).base
+}
+
+// seededStudio is mcpSeedStudio's server with its database path and a
+// stop (idempotent; also at cleanup), for the tests that kill or
+// restart it.
+type seededStudio struct {
+	base, db string
+	stop     func()
+}
+
+// mcpSeed is mcpSeedStudio, the handle kept.
+func mcpSeed(t *testing.T) *seededStudio {
+	t.Helper()
+	db := "sqlite://" + filepath.Join(t.TempDir(), "weft.db")
+	srv, err := newServer(db, "tok")
 	if err != nil {
 		t.Fatal(err)
 	}
 	ts := httptest.NewServer(srv.Handler())
-	t.Cleanup(func() { ts.Close(); _ = srv.Close() })
+	var once sync.Once
+	stop := func() { once.Do(func() { ts.Close(); _ = srv.Close() }) }
+	t.Cleanup(stop)
 
 	ctx := context.Background()
 	p, err := otel.Start(ctx, otel.Studio(ts.URL, ""), otel.NoGlobal())
@@ -107,7 +125,114 @@ func mcpSeedStudio(t *testing.T) string {
 			}
 		}
 	}
-	return ts.URL
+	return &seededStudio{base: ts.URL, db: db, stop: stop}
+}
+
+// restartOn starts s's database again on s's own address under token —
+// the same Studio restarted with a new token (a fileless DB's
+// per-process one, --rotate-token) — after s stopped.
+func restartOn(t *testing.T, s *seededStudio, token string) {
+	t.Helper()
+	s.stop()
+	srv, err := newServer(s.db, token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ln, err := net.Listen("tcp", strings.TrimPrefix(s.base, "http://"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewUnstartedServer(srv.Handler())
+	_ = ts.Listener.Close()
+	ts.Listener = ln
+	ts.Start()
+	t.Cleanup(func() { ts.Close(); _ = srv.Close() })
+}
+
+// pointDiscovery replaces the discovery file with one naming base and
+// token, removed at cleanup.
+func pointDiscovery(t *testing.T, base, token string) {
+	t.Helper()
+	w, err := discovery.Write(discovery.Info{URL: base, Token: token, PID: os.Getpid(), Started: time.Now().UTC()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(w.Remove)
+}
+
+// mcpCallRun calls the run tool on r_ok: isError and the texts.
+func mcpCallRun(t *testing.T, cs *sdk.ClientSession) (bool, []string) {
+	t.Helper()
+	res, err := cs.CallTool(context.Background(), &sdk.CallToolParams{Name: "run", Arguments: map[string]any{"id": "r_ok"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return res.IsError, texts(t, res)
+}
+
+// TestMCPReresolvesAfterStudioMoves pins the mid-session re-resolve:
+// Studio A answers a call, A dies, the discovery file now names Studio
+// B on another port — the next call isErrors (the transport error with
+// the "looks again" hint), the one after reads B, and stderr says the
+// switch once.
+func TestMCPReresolvesAfterStudioMoves(t *testing.T) {
+	t.Setenv("WEFT_STUDIO_URL", "")
+	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	t.Setenv("WEFT_DISCOVERY", "")
+	a := mcpSeed(t)
+	pointDiscovery(t, a.base, "tok")
+	var stderr syncBuffer
+	srv, err := startMCP(context.Background(), "", "", &stderr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs := connect(t, srv)
+	if isErr, got := mcpCallRun(t, cs); isErr || got[1] != routeBody(t, a.base, "tok", "/api/runs/r_ok") {
+		t.Fatalf("on Studio A = %v %q", isErr, got)
+	}
+	b := mcpSeed(t)
+	a.stop()
+	pointDiscovery(t, b.base, "tok")
+	isErr, got := mcpCallRun(t, cs)
+	if !isErr || !strings.Contains(got[0], "studio not reachable at "+a.base) || !strings.Contains(got[0], "the next call looks again") ||
+		!strings.Contains(got[0], "no restart needed") {
+		t.Errorf("the call that finds A dead = %v %q, want the transport error with the hint", isErr, got)
+	}
+	if isErr, got := mcpCallRun(t, cs); isErr || got[1] != routeBody(t, b.base, "tok", "/api/runs/r_ok") {
+		t.Errorf("after the move = %v %q, want B's row", isErr, got)
+	}
+	if n := strings.Count(stderr.String(), "now reading the Studio at "+b.base); n != 1 {
+		t.Errorf("stderr %q: the switch said %d times, want once", stderr.String(), n)
+	}
+}
+
+// TestMCPReresolvesAfterTokenRotation: the same Studio restarted on its
+// port with a new token, the discovery file rewritten with it, and no
+// --token or WEFT_STUDIO_TOKEN — the next call is the 401 (with the
+// hint), the one after reads the row with the file's new token.
+func TestMCPReresolvesAfterTokenRotation(t *testing.T) {
+	t.Setenv("WEFT_STUDIO_URL", "")
+	t.Setenv("WEFT_STUDIO_TOKEN", "")
+	t.Setenv("WEFT_DISCOVERY", "")
+	s := mcpSeed(t)
+	pointDiscovery(t, s.base, "tok")
+	srv, err := startMCP(context.Background(), "", "", io.Discard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cs := connect(t, srv)
+	if isErr, got := mcpCallRun(t, cs); isErr {
+		t.Fatalf("before the restart = %q", got)
+	}
+	restartOn(t, s, "tok2")
+	pointDiscovery(t, s.base, "tok2")
+	isErr, got := mcpCallRun(t, cs)
+	if !isErr || !strings.Contains(got[0], "401") || !strings.Contains(got[0], "the next call looks again") {
+		t.Errorf("the first call after the rotation = %v %q, want the 401 with the hint", isErr, got)
+	}
+	if isErr, got := mcpCallRun(t, cs); isErr || got[1] != routeBody(t, s.base, "tok2", "/api/runs/r_ok") {
+		t.Errorf("after the file's new token = %v %q, want the row", isErr, got)
+	}
 }
 
 // derivedFailID is the stock_genai fixture's failed derived run

@@ -113,7 +113,19 @@ unchanged.
 - In a `Subagent`'s child run the source parks the child, not the
   parent: the parent's call to the subagent is the existing
   `SUBAGENT_PENDING` result, which the parent model sees and continues
-  past — core's rule for any park in a child run.
+  past — core's rule for any park in a child run. Under a thread turn
+  with `Sessions` and a public id, Studio accepts a decision on the
+  child's run (it inherits the session id and public id) and answers
+  202, but the runtime then rejects it ("no parked call": the
+  session's `Pending` is empty, the parent turn having completed) — the
+  child's park is decided by nobody, and the parent has continued past
+  it.
+- A link **stopped** while a turn is already parked leaves that park
+  with no decider until the app decides it or a link with `Sessions`
+  comes back: the park set is read once per run, at its start, and the
+  stop unparks nothing. A link whose stream merely **dropped** stays
+  live (it keeps its set), and Studio decides the park once it
+  reconnects.
 - Observability still never changes behaviour: an app opts in at
   `New`, and `runtime.Breakpoints()` without a live link is inert. A
   configured breakpoint *is* behaviour — the app chose it by building

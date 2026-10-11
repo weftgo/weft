@@ -283,7 +283,12 @@ requires a token: Authorization: Bearer <token> (--token or
 WEFT_STUDIO_TOKEN)`** — that Studio walls its API
 and no token reached it. Give `-e WEFT_STUDIO_TOKEN=…` or `--token`; with
 `--url`, the discovery file's token is used only when the file names
-the same URL (a token goes only to the Studio it belongs to).
+the same URL (a token goes only to the Studio it belongs to). A 401
+mid-session, with no `--url`, `--token` or `WEFT_STUDIO_TOKEN`, ends
+"…; the next call looks again (WEFT_STUDIO_URL, the discovery file): no
+restart needed": a Studio restarted with a new token (a fileless
+database's per-process one, `--rotate-token`) is read with the
+discovery file's new token on the next call.
 
 **The discovery file is ignored.** `studio.json` lives in `./.weft`
 (only from the directory the Studio was started in), then

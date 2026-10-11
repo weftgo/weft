@@ -55,7 +55,7 @@
                 {
                   "key": "weft.manifest.hash",
                   "value": {
-                    "stringValue": "387d2cc1cd3dd582e5a4e8afeb1434c5a9ace143a6d17d41b9336611c35c2851"
+                    "stringValue": "03550c91fa0f9be33ec4a70432d47edd82122699cfa834208bd9d1afeda77777"
                   }
                 },
                 {
@@ -82,10 +82,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790845500002000000",
+              "observedTimeUnixNano": "1790845500000000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000001",
-              "timeUnixNano": "1790845500001000000",
+              "timeUnixNano": "1790845500000000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -138,10 +138,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790845500004000000",
+              "observedTimeUnixNano": "1790845500001000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000001",
-              "timeUnixNano": "1790845500003000000",
+              "timeUnixNano": "1790845500001000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -206,10 +206,10 @@
               },
               "eventName": "weft.request",
               "flags": 1,
-              "observedTimeUnixNano": "1790845500007000000",
+              "observedTimeUnixNano": "1790845500002000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000002",
-              "timeUnixNano": "1790845500006000000",
+              "timeUnixNano": "1790845500002000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -274,10 +274,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790845500010000000",
+              "observedTimeUnixNano": "1790845500003000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000001",
-              "timeUnixNano": "1790845500009000000",
+              "timeUnixNano": "1790845500003000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -342,10 +342,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790845500014000000",
+              "observedTimeUnixNano": "1790845500004000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000001",
-              "timeUnixNano": "1790845500013000000",
+              "timeUnixNano": "1790845500004000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -410,10 +410,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790845500016000000",
+              "observedTimeUnixNano": "1790845500005000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000001",
-              "timeUnixNano": "1790845500015000000",
+              "timeUnixNano": "1790845500005000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -466,10 +466,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790845500018000000",
+              "observedTimeUnixNano": "1790845500006000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000001",
-              "timeUnixNano": "1790845500017000000",
+              "timeUnixNano": "1790845500006000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -534,10 +534,10 @@
               },
               "eventName": "weft.request",
               "flags": 1,
-              "observedTimeUnixNano": "1790845500021000000",
+              "observedTimeUnixNano": "1790845500007000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000004",
-              "timeUnixNano": "1790845500020000000",
+              "timeUnixNano": "1790845500007000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -584,10 +584,10 @@
               },
               "eventName": "weft.delta",
               "flags": 1,
-              "observedTimeUnixNano": "1790845500023000000",
+              "observedTimeUnixNano": "1790845500008000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000001",
-              "timeUnixNano": "1790845500022000000",
+              "timeUnixNano": "1790845500008000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -658,10 +658,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790845500026000000",
+              "observedTimeUnixNano": "1790845500009000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000001",
-              "timeUnixNano": "1790845500025000000",
+              "timeUnixNano": "1790845500009000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -708,10 +708,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790845500028000000",
+              "observedTimeUnixNano": "1790845500010000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000001",
-              "timeUnixNano": "1790845500027000000",
+              "timeUnixNano": "1790845500010000000",
               "traceId": "7ace0000000000000000000000000001"
             }
           ],

@@ -93,7 +93,7 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790845680017000000",
+              "endTimeUnixNano": "1790845680003000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "invoke_agent support",
@@ -185,13 +185,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790845680010000000",
+              "endTimeUnixNano": "1790845680002000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba0000000000002",
-              "startTimeUnixNano": "1790845680007000000",
+              "startTimeUnixNano": "1790845680001000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },

@@ -99,13 +99,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790845620013000000",
+              "endTimeUnixNano": "1790845620001000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba0000000000002",
               "spanId": "5ba0000000000001",
-              "startTimeUnixNano": "1790845620006000000",
+              "startTimeUnixNano": "1790845620000000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },

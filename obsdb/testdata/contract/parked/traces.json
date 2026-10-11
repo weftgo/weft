@@ -65,7 +65,7 @@
                 {
                   "key": "weft.manifest.hash",
                   "value": {
-                    "stringValue": "8be8625572ad563a76cd417d8d3320ce5d3fd016b2ec6d3f49fc2f6f6f96d875"
+                    "stringValue": "7e25d66bc211bdf153868edbf9b9b65a48a4b38043c2f34c3b18ad6171040138"
                   }
                 },
                 {
@@ -105,7 +105,7 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790845800025000000",
+              "endTimeUnixNano": "1790845800005000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "invoke_agent support",
@@ -191,13 +191,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790845800014000000",
+              "endTimeUnixNano": "1790845800002000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba0000000000002",
-              "startTimeUnixNano": "1790845800007000000",
+              "startTimeUnixNano": "1790845800001000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -248,13 +248,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790845800020000000",
+              "endTimeUnixNano": "1790845800004000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "execute_tool refund_order",
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba0000000000003",
-              "startTimeUnixNano": "1790845800019000000",
+              "startTimeUnixNano": "1790845800003000000",
               "status": {},
               "traceId": "7ace0000000000000000000000000001"
             }

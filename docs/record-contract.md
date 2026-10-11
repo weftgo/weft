@@ -70,7 +70,7 @@ metadata rides every span and record verbatim):
 
 | Link | Attribute | Type | Minted by | Notes |
 |---|---|---|---|---|
-| run | `weft.run.id` | string | the core | 32 lowercase hex digits for a plain run; `<session>-t<n>` for a `thread` turn; `<parent>/<step>/<call id>` for a Subagent child (below); or the caller's own, through `core.RunID` (any string — it must not start with `otel-`, the derived-run prefix of §9) |
+| run | `weft.run.id` | string | the core | 32 lowercase hex digits for a plain run; `<session>-t<n>` for a `thread` turn; `<parent>/<step>/<call id>` for a Subagent child (below); or the caller's own, through `core.RunID` (any string — it must not start with `otel-`, the derived-run prefix of §9; nothing enforces that today — the core accepts any id, and I1.2's reader may guard it) |
 | parent run | `weft.parent.run.id` | string | the core | on a Subagent child's `invoke_agent` span and its `run_start` record only |
 | parent call | `weft.parent.call.id` | string | the core | the parent's tool call the child ran under (its `gen_ai.tool.call.id`) |
 | session | `weft.session.id` | string | `thread`, or the app via `Metadata` | mirrored as `gen_ai.conversation.id` and `session.id` on every span and record the core emits for the run (and so on the heartbeat, which copies `run_start`'s attributes) — not on `thread`'s session compaction marker, which carries `weft.session.id` alone (§4) |
@@ -227,8 +227,10 @@ Name `execute_tool <tool>`, kind Internal, child of `invoke_agent`.
 | `weft.tool.pending` | bool `true` | at end: the call was parked for approval |
 | `error.type` | string | an error result: the `ToolError` code, `timeout`, `tool_error`, … |
 
-Status `Ok`, or `Error` with an empty description (the result text is
-content). Denied and undecided calls produce no span.
+Status: `Ok` for a result; `Error` with an empty description for an
+error result (the result text is content); **unset** for a call parked
+for approval (`weft.tool.pending`). Denied and undecided calls produce no
+span.
 
 ## 4. Log records
 
@@ -283,7 +285,7 @@ The body is the core's event wire (ADR 0004), discriminated by `type`;
 
 | `weft.event.type` | Body fields | Extra attributes |
 |---|---|---|
-| `run_start` | `id`, `model {provider, name}`, `agent`, `instructions_hash` | `weft.parent.run.id`, `weft.parent.call.id` (children), `weft.manifest.hash` (named agents), `weft.instructions.hash` (always, since ADR 0028), `weft.version` |
+| `run_start` | `id`, `model {provider, name}`, `agent`, `instructions_hash` (informational: readers take the `weft.instructions.hash` attribute, never this field) | `weft.parent.run.id`, `weft.parent.call.id` (children), `weft.manifest.hash` (named agents), `weft.instructions.hash` (always, since ADR 0028), `weft.version` |
 | `step_start` | `run_id`, `index` | `weft.step.index` |
 | `tool_start` | `run_id`, `seq`, `call_id`, `name`, `args` | `weft.tool.seq`, `gen_ai.tool.call.id`, `gen_ai.tool.name` |
 | `tool_finish` | `run_id`, `seq`, `call_id`, `name`, `content`, `is_error` | same as `tool_start` |
@@ -455,7 +457,7 @@ both shipped backends (`obsdb/sqlite`, `obsdb/clickhouse`).
 **What the fixtures pin.** Every field of this table is compared, on
 both backends, for every run of every generated case (§10) —
 `weft_version` as the fixtures' normalised `v0.0.0-contract`, the times
-on the fixtures' normalised clock. The rule branches they exercise:
+on the fixtures' normalised clock (§10: per signal, not across). The rule branches they exercise:
 `status` `succeeded` (most cases, `parked` with `pending` 1), `failed`
 (`failed`: the span's status and description, no `run_finish`, so
 `steps`, `usage` and `stop_reason` come from the span) and `interrupted`
@@ -584,6 +586,7 @@ derived: weft's own rows always win.
 | `session_id` | the root's `gen_ai.conversation.id`: the conversation is the session, its derived runs its turns |
 | `parent_run_id`, `parent_call_id` | for a root nested under another root's subtree: that root's derived id, and the `gen_ai.tool.call.id` of the nearest `execute_tool` span above it |
 | `started`, `finished` | the root's start and end |
+| `last_seen` | the latest time of anything in the subtree: the root's end for a well-formed tree |
 | `status`, `error` | `failed` with the status description when the root's status is `Error`, else `succeeded` (a root span is exported only when it ended, so a derived run is never running or interrupted) |
 | `usage` | the run's **own** usage: the root's `gen_ai.usage.*` when present, taken as the root's own figure; else the sum over the subtree's `chat` spans — the subtree stops at nested roots, so a nested root's calls count toward it, never toward the parent (below) |
 | `steps` | the number of `chat` spans in the subtree |
@@ -614,7 +617,7 @@ I1.2 implements:
    children from a parent, no roll-up of children into it.
 
 **Not derivable** — and shown so, never as an empty pane: events (no
-`event` records: `event_count` 0, no event stream), the transcript and
+`event` records: `event_count` 0 and `delta_count` 0, no event stream), the transcript and
 the chat view's message bodies (no `messages` records: `message_count` 0),
 the request, prompt and catalog (no `request`/`prompt`/`tools` records:
 `request_count` 0, `instructions_hash` and `catalog_hash` `""`), `turn`,
@@ -637,13 +640,14 @@ already says — "upgrade weft" would be the wrong fix.
 | `content_off` | a content-off destination: stripped events, no messages, request records kept; the `stripped` badge |
 | `max_tokens` | `stop_reason = max_tokens`; the `max_tokens` badge |
 | `interrupted` | what a process that died mid-tool had exported: no `invoke_agent`, no `run_finish`; status `interrupted` |
-| `pre_upgrade` | a run without request, prompt or tools records or `weft.instructions.hash` (attribute or `run_start` body field); the `not_recorded` badge |
+| `pre_upgrade` | a run without request, prompt or tools records or the `weft.instructions.hash` attribute; the `not_recorded` badge (the generator also removes `run_start`'s informational `instructions_hash` body field, for realism — readers never read it) |
 | `failed` | `MaxSteps(1)` against a model that keeps calling a tool: status `failed`, the error text, `steps`/`usage`/`stop_reason` from the span (no `run_finish`) |
 | `parked` | a `RequireApproval` tool's call parked: status `succeeded`, `pending` 1 (`run_finish.pending`, `weft.run.pending`) |
 | `stock_genai` | §9: stock spans, no `weft.*`; `derived` — pending I1.2 |
 
 `expect.json` is `{case, description, pending?, derived?, runs: [...]}`;
-each run lists every row field of §6, its `chat` and `tools` lists, and
+each run lists every row field of §6 and `derived` (§9's mark, omitted
+when false — every stored run until I1.2), its `chat` and `tools` lists, and
 its `holes` — the run-level badge set as the test reads it from the row,
 the events and the compactions (§7's rules; `derived` is I1.2's).
 Runs are ordered by `started`, then id. Times are RFC 3339 UTC.
@@ -652,13 +656,23 @@ Runs are ordered by `started`, then id. Times are RFC 3339 UTC.
 byte-stable so that `go test ./obsdb -run 'TestContract$'
 -update-contract` with no code change leaves `git diff` empty:
 
-- the export is folded to one resource and scope block, spans sorted by
-  start (then end, name), records by time;
-- every distinct timestamp is replaced by its rank on a 1 ms grid from
-  the case's epoch (2026-10-01T09:00Z plus one minute per case): every
-  ordering — and so `started`, `finished`, `last_seen` — is the run's
-  own, no measured duration is, and the status reads as it would long
-  after the run;
+- the export is folded to one resource and scope block;
+- no raw time decides a position — a span ended on a tool's goroutine
+  and the loop's `tool_finish` record race, so any ranking of raw times
+  (distinct values, or slots with a tiebreak) flips between
+  regenerations on a coarse clock such as macOS's µs one. Each signal
+  keeps the order it has by construction, on a 1 ms grid from the case's
+  epoch (2026-10-01T09:00Z plus one minute per case): records in arrival
+  order (the logs pipeline exports first in, first out), time and
+  observed time equal; spans depth-first from the roots, siblings in
+  structural order (run id shape, step, `chat` before `execute_tool`,
+  attempt, tool seq, name), each span's start, events, children, end
+  taking successive slots, and listed by start. Within a signal every
+  ordering is the run's own; across the two the times are not
+  comparable — a span and a record may share a time — so the timeline
+  is not the run's, while `started`, `finished` and `last_seen` (min and
+  max) are stable, no measured duration survives, and the status reads
+  as it would long after the run;
 - measured durations (`weft.ttft_ms`, `weft.latency_ms`, `step_finish`'s
   `latency_ms`/`ttft_ms`) read 1 where set;
 - `weft.version` and the instrumentation scope's version read

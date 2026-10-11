@@ -65,7 +65,7 @@
                 {
                   "key": "weft.manifest.hash",
                   "value": {
-                    "stringValue": "c28d2c2f1a0c67e7f4a4a972577a7ca208925238080f88353afc64ea4f4ebaef"
+                    "stringValue": "32cfa2e1b496401e4779f774e0ff81ead0b9aee791a2cad24b807a01a8d9ffe8"
                   }
                 },
                 {
@@ -99,7 +99,7 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790845320063000000",
+              "endTimeUnixNano": "1790845320011000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "invoke_agent support",
@@ -185,13 +185,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790845320014000000",
+              "endTimeUnixNano": "1790845320002000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba0000000000002",
-              "startTimeUnixNano": "1790845320007000000",
+              "startTimeUnixNano": "1790845320001000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -242,13 +242,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790845320042000000",
+              "endTimeUnixNano": "1790845320008000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "execute_tool research",
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba0000000000003",
-              "startTimeUnixNano": "1790845320019000000",
+              "startTimeUnixNano": "1790845320003000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -341,13 +341,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790845320041000000",
+              "endTimeUnixNano": "1790845320007000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "invoke_agent researcher",
               "parentSpanId": "5ba0000000000003",
               "spanId": "5ba0000000000004",
-              "startTimeUnixNano": "1790845320020000000",
+              "startTimeUnixNano": "1790845320004000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -434,13 +434,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790845320034000000",
+              "endTimeUnixNano": "1790845320006000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba0000000000004",
               "spanId": "5ba0000000000005",
-              "startTimeUnixNano": "1790845320027000000",
+              "startTimeUnixNano": "1790845320005000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -527,13 +527,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790845320056000000",
+              "endTimeUnixNano": "1790845320010000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba0000000000006",
-              "startTimeUnixNano": "1790845320051000000",
+              "startTimeUnixNano": "1790845320009000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },

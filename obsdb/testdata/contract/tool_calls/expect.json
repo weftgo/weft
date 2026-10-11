@@ -12,7 +12,7 @@
       "playground": true,
       "experiment_id": "exp_contract",
       "forked_from": "a1100000000000000000000000000099#1",
-      "manifest_hash": "387d2cc1cd3dd582e5a4e8afeb1434c5a9ace143a6d17d41b9336611c35c2851",
+      "manifest_hash": "03550c91fa0f9be33ec4a70432d47edd82122699cfa834208bd9d1afeda77777",
       "weft_version": "v0.0.0-contract",
       "meta": {
         "enduser.id": "user_42",
@@ -21,8 +21,8 @@
         "weft.replay.view": "transcript"
       },
       "started": "2026-10-01T09:01:00Z",
-      "finished": "2026-10-01T09:01:00.041Z",
-      "last_seen": "2026-10-01T09:01:00.041Z",
+      "finished": "2026-10-01T09:01:00.016Z",
+      "last_seen": "2026-10-01T09:01:00.016Z",
       "status": "succeeded",
       "steps": 2,
       "stop_reason": "stop",

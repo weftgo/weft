@@ -129,7 +129,7 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790845380021000000",
+              "endTimeUnixNano": "1790845380003000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "invoke_agent support",
@@ -251,13 +251,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790845380014000000",
+              "endTimeUnixNano": "1790845380002000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba0000000000001",
               "spanId": "5ba0000000000002",
-              "startTimeUnixNano": "1790845380007000000",
+              "startTimeUnixNano": "1790845380001000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -368,12 +368,12 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790845380043000000",
+              "endTimeUnixNano": "1790845380007000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "invoke_agent support",
               "spanId": "5ba0000000000003",
-              "startTimeUnixNano": "1790845380022000000",
+              "startTimeUnixNano": "1790845380004000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -490,13 +490,13 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790845380036000000",
+              "endTimeUnixNano": "1790845380006000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
               "parentSpanId": "5ba0000000000003",
               "spanId": "5ba0000000000004",
-              "startTimeUnixNano": "1790845380029000000",
+              "startTimeUnixNano": "1790845380005000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },

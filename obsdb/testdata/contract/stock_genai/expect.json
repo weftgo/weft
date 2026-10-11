@@ -15,13 +15,16 @@
       "session_id": "conv_7f3a",
       "started": "2026-10-01T10:00:00Z",
       "finished": "2026-10-01T10:00:03.2Z",
+      "last_seen": "2026-10-01T10:00:03.2Z",
       "status": "succeeded",
       "steps": 2,
       "usage": {
         "input_tokens": 1717,
         "output_tokens": 78
       },
+      "event_count": 0,
       "message_count": 0,
+      "delta_count": 0,
       "request_count": 0,
       "chat": [
         {
@@ -67,6 +70,7 @@
       "session_id": "conv_7f3a",
       "started": "2026-10-01T10:01:00Z",
       "finished": "2026-10-01T10:01:02Z",
+      "last_seen": "2026-10-01T10:01:02Z",
       "status": "failed",
       "error": "agent cancelled by the user",
       "steps": 1,
@@ -74,7 +78,9 @@
         "input_tokens": 1020,
         "output_tokens": 25
       },
+      "event_count": 0,
       "message_count": 0,
+      "delta_count": 0,
       "request_count": 0,
       "chat": [
         {

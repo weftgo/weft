@@ -85,7 +85,12 @@ type expectDoc struct {
 // spans, the waterfall's steps) and tool calls (its execute_tool
 // spans), and the run-level badges (ADR 0028 §11's words).
 type contractRun struct {
-	ID               string            `json:"id"`
+	ID string `json:"id"`
+	// Derived is §9's mark: the reader built the row from stock spans.
+	// No stored run is derived before I1.2, so observeRuns leaves it
+	// false (omitted) for every run today; I1.2 fills it from the row,
+	// and un-pending stock_genai is then deleting its "pending" key.
+	Derived          bool              `json:"derived,omitempty"`
 	ParentRunID      string            `json:"parent_run_id,omitempty"`
 	ParentCallID     string            `json:"parent_call_id,omitempty"`
 	TraceID          string            `json:"trace_id,omitempty"`
@@ -723,12 +728,11 @@ func (c *otlpCapture) merged() (*coltracepb.ExportTraceServiceRequest, *collogsp
 // `-update-contract` with no code change leaves `git diff` empty:
 //
 //   - the export is folded to one ResourceSpans/ResourceLogs per
-//     (resource, scope) and its spans sorted by (start, end, name), its
-//     records by time — batch boundaries and arrival order vary;
-//   - every distinct timestamp is replaced by its rank: the earliest is
-//     epoch, the next epoch + 1 ms, and so on, so every ordering (and so
-//     started, finished, last_seen) is the run's own while no measured
-//     duration survives;
+//     (resource, scope) — batch boundaries and arrival order vary;
+//   - every timestamp is replaced by its position in its signal's
+//     construction order (rankTimes): records by arrival, spans
+//     depth-first in structural order, 1 ms apart from epoch — no raw
+//     time decides a position, so no clock's resolution or race shows;
 //   - the measured durations the core writes as numbers (weft.ttft_ms,
 //     weft.latency_ms, step_finish's latency_ms/ttft_ms) become 1 when
 //     set — ceilMS's floor, so presence is kept;
@@ -745,21 +749,7 @@ func (c *otlpCapture) merged() (*coltracepb.ExportTraceServiceRequest, *collogsp
 func normaliseCase(tr *coltracepb.ExportTraceServiceRequest, lg *collogspb.ExportLogsServiceRequest, epoch time.Time) *strings.Replacer {
 	foldTraces(tr)
 	foldLogs(lg)
-
-	var all []uint64
-	walkTimes(tr, lg, func(p *uint64) {
-		if *p != 0 {
-			all = append(all, *p)
-		}
-	})
-	slices.Sort(all)
-	all = slices.Compact(all)
-	walkTimes(tr, lg, func(p *uint64) {
-		if *p != 0 {
-			i, _ := slices.BinarySearch(all, *p)
-			*p = uint64(epoch.Add(time.Duration(i) * time.Millisecond).UnixNano())
-		}
-	})
+	rankTimes(tr, lg, epoch)
 
 	traceIDs, spanIDs := map[string][]byte{}, map[string][]byte{}
 	mapID := func(m map[string][]byte, id []byte, prefix string, width int) []byte {
@@ -905,8 +895,7 @@ func addSession(id string, n *int, seen map[string]bool, pairs *[]string) {
 }
 
 // foldTraces merges every ResourceSpans/ScopeSpans sharing a resource
-// and scope into one, in first-seen order, and sorts the spans by
-// (start, end, name).
+// and scope into one, in first-seen order.
 func foldTraces(tr *coltracepb.ExportTraceServiceRequest) {
 	type group struct {
 		rs *tracepb.ResourceSpans
@@ -933,23 +922,10 @@ func foldTraces(tr *coltracepb.ExportTraceServiceRequest) {
 			dst.Spans = append(dst.Spans, ss.GetSpans()...)
 		}
 	}
-	for _, rs := range out {
-		for _, ss := range rs.ScopeSpans {
-			slices.SortStableFunc(ss.Spans, func(a, b *tracepb.Span) int {
-				if c := cmpU64(a.StartTimeUnixNano, b.StartTimeUnixNano); c != 0 {
-					return c
-				}
-				if c := cmpU64(a.EndTimeUnixNano, b.EndTimeUnixNano); c != 0 {
-					return c
-				}
-				return strings.Compare(a.Name, b.Name)
-			})
-		}
-	}
 	tr.ResourceSpans = out
 }
 
-// foldLogs is foldTraces for log records, sorted by time.
+// foldLogs is foldTraces for log records.
 func foldLogs(lg *collogspb.ExportLogsServiceRequest) {
 	type group struct {
 		rl *logspb.ResourceLogs
@@ -976,14 +952,168 @@ func foldLogs(lg *collogspb.ExportLogsServiceRequest) {
 			dst.LogRecords = append(dst.LogRecords, sl.GetLogRecords()...)
 		}
 	}
-	for _, rl := range out {
-		for _, sl := range rl.ScopeLogs {
-			slices.SortStableFunc(sl.LogRecords, func(a, b *logspb.LogRecord) int {
-				return cmpU64(a.TimeUnixNano, b.TimeUnixNano)
+	lg.ResourceLogs = out
+}
+
+// rankTimes replaces every timestamp by a position that no clock
+// decides. A span and a record emitted on different goroutines (a tool's
+// execute_tool end and the loop's tool_finish record) race, so any rank
+// taken from raw times — distinct values or slots with a tiebreak — flips
+// between regenerations on a coarse clock (macOS ticks in µs), and the
+// order of a tie cannot be told from the data. So each signal keeps the
+// order it has by construction:
+//
+//   - records keep their arrival order — the logs pipeline exports them
+//     first in, first out, in emission order — and the j-th gets epoch +
+//     j ms as its time and its observed time;
+//   - spans are walked depth-first from the roots (a span whose parent was
+//     not exported is a root), siblings in structural order (spanOrder:
+//     run id shape, step, chat before execute_tool, attempt, tool seq,
+//     name — no raw time unless all of those tie), each span's start, its
+//     events, its children, then its end taking the next slot, the i-th
+//     slot epoch + i ms; the spans are then listed by start.
+//
+// Within a signal every ordering is the run's own; across the two
+// signals the times are not comparable (a span's start and a record's
+// time may coincide), which no run-row rule the fixtures pin depends on
+// beyond min/max — started, finished, last_seen — and those are stable.
+func rankTimes(tr *coltracepb.ExportTraceServiceRequest, lg *collogspb.ExportLogsServiceRequest, epoch time.Time) {
+	at := func(i int) uint64 { return uint64(epoch.Add(time.Duration(i) * time.Millisecond).UnixNano()) }
+	for _, rl := range lg.GetResourceLogs() {
+		j := 0
+		for _, sl := range rl.GetScopeLogs() {
+			for _, r := range sl.GetLogRecords() {
+				r.TimeUnixNano, r.ObservedTimeUnixNano = at(j), at(j)
+				j++
+			}
+		}
+	}
+	for _, rs := range tr.GetResourceSpans() {
+		for _, ss := range rs.GetScopeSpans() {
+			byID := map[string]*tracepb.Span{}
+			for _, s := range ss.GetSpans() {
+				byID[string(s.SpanId)] = s
+			}
+			children := map[string][]*tracepb.Span{}
+			var roots []*tracepb.Span
+			for _, s := range ss.GetSpans() {
+				if _, ok := byID[string(s.ParentSpanId)]; ok && len(s.ParentSpanId) > 0 {
+					children[string(s.ParentSpanId)] = append(children[string(s.ParentSpanId)], s)
+				} else {
+					roots = append(roots, s)
+				}
+			}
+			i := 0
+			var walk func([]*tracepb.Span)
+			walk = func(level []*tracepb.Span) {
+				slices.SortStableFunc(level, spanOrder)
+				for _, s := range level {
+					s.StartTimeUnixNano = at(i)
+					i++
+					for _, e := range s.GetEvents() {
+						e.TimeUnixNano = at(i)
+						i++
+					}
+					walk(children[string(s.SpanId)])
+					s.EndTimeUnixNano = at(i)
+					i++
+				}
+			}
+			walk(roots)
+			slices.SortStableFunc(ss.Spans, func(a, b *tracepb.Span) int {
+				return cmpU64(a.StartTimeUnixNano, b.StartTimeUnixNano)
 			})
 		}
 	}
-	lg.ResourceLogs = out
+}
+
+// spanOrder orders sibling spans by what they are, never by when a
+// clock said they happened unless nothing else separates them: the run
+// id's shape (a thread turn's -t1 before -t2), the step, the operation
+// (an agent run, then a model call, then a tool call — a step's chat
+// span precedes its execute_tool spans), the attempt, the tool seq, the
+// name, and only then the raw start.
+func spanOrder(a, b *tracepb.Span) int {
+	op := func(s *tracepb.Span) int {
+		switch {
+		case strings.HasPrefix(s.GetName(), "invoke_agent"):
+			return 0
+		case strings.HasPrefix(s.GetName(), "chat"):
+			return 1
+		case s.GetName() == "attempt":
+			return 2
+		case strings.HasPrefix(s.GetName(), "execute_tool"):
+			return 3
+		}
+		return 4
+	}
+	num := func(s *tracepb.Span, k string) int64 {
+		var n int64 = -1
+		_, _ = fmt.Sscan(kvText(s.Attributes, k), &n)
+		return n
+	}
+	if c := strings.Compare(runShape(kvText(a.Attributes, "weft.run.id")), runShape(kvText(b.Attributes, "weft.run.id"))); c != 0 {
+		return c
+	}
+	for _, k := range []string{"weft.step.index"} {
+		if c := cmpI64(num(a, k), num(b, k)); c != 0 {
+			return c
+		}
+	}
+	if c := op(a) - op(b); c != 0 {
+		return c
+	}
+	for _, k := range []string{"weft.attempt.index", "weft.tool.seq"} {
+		if c := cmpI64(num(a, k), num(b, k)); c != 0 {
+			return c
+		}
+	}
+	if c := strings.Compare(a.GetName(), b.GetName()); c != 0 {
+		return c
+	}
+	return cmpU64(a.StartTimeUnixNano, b.StartTimeUnixNano)
+}
+
+func cmpI64(a, b int64) int {
+	switch {
+	case a < b:
+		return -1
+	case a > b:
+		return 1
+	}
+	return 0
+}
+
+// runShape is a run id with its random part removed — "" for a plain
+// run, "/0/call_1" for a Subagent child, "-t2" for a thread turn — a
+// tiebreak that is the same on every regeneration.
+func runShape(id string) string {
+	if i := strings.Index(id, "/"); i >= 0 {
+		return id[i:]
+	}
+	if i := strings.LastIndex(id, "-t"); i >= 0 {
+		return id[i:]
+	}
+	return ""
+}
+
+// kvText is an attribute's value as text: a string as itself, an int
+// in decimal, "" when absent.
+func kvText(kvs []*commonpb.KeyValue, key string) string {
+	for _, kv := range kvs {
+		if kv.GetKey() != key {
+			continue
+		}
+		switch v := kv.GetValue().GetValue().(type) {
+		case *commonpb.AnyValue_StringValue:
+			return v.StringValue
+		case *commonpb.AnyValue_IntValue:
+			return fmt.Sprint(v.IntValue)
+		case *commonpb.AnyValue_BoolValue:
+			return fmt.Sprint(v.BoolValue)
+		}
+	}
+	return ""
 }
 
 func cmpU64(a, b uint64) int {
@@ -1000,28 +1130,6 @@ func cmpU64(a, b uint64) int {
 func protoKey(m proto.Message) string {
 	b, _ := proto.MarshalOptions{Deterministic: true}.Marshal(m)
 	return string(b)
-}
-
-func walkTimes(tr *coltracepb.ExportTraceServiceRequest, lg *collogspb.ExportLogsServiceRequest, f func(*uint64)) {
-	for _, rs := range tr.GetResourceSpans() {
-		for _, ss := range rs.GetScopeSpans() {
-			for _, s := range ss.GetSpans() {
-				f(&s.StartTimeUnixNano)
-				f(&s.EndTimeUnixNano)
-				for _, e := range s.GetEvents() {
-					f(&e.TimeUnixNano)
-				}
-			}
-		}
-	}
-	for _, rl := range lg.GetResourceLogs() {
-		for _, sl := range rl.GetScopeLogs() {
-			for _, r := range sl.GetLogRecords() {
-				f(&r.TimeUnixNano)
-				f(&r.ObservedTimeUnixNano)
-			}
-		}
-	}
 }
 
 // writeOTLP writes a request as OTLP/JSON: protojson, then re-indented

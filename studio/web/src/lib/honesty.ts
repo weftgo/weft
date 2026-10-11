@@ -394,6 +394,9 @@ export const READ_TOKEN = 'this token is read-only: mint it with "playground": t
  * (/live's row) is drawn disabled with these words. */
 export const APP_CANCEL = "cancel is not supported on an app turn"
 
+/** A failed GET /api/runtimes, said as such (the error follows). */
+export const RUNTIMES_UNREAD = "could not read the runtimes"
+
 /** What a parked run's calls get: an experiment's verbs (its result
  * pane), the app turn's verbs, the app turn read-only, an app turn a
  * later turn of its session already resumed, or a plain Generate's
@@ -452,11 +455,14 @@ export function refusalWords(
   row: AppRow,
   runtimes: readonly RuntimeLike[] | null | undefined,
   readToken: boolean,
-  refused?: { error?: string; fix?: string }
+  refused?: { error?: string; fix?: string },
+  rtErr?: string
 ): { words: string; fix: string } {
   if (refused?.fix) return { words: refused.error ?? APP_OWNED, fix: refused.fix }
   if (kind === "plain") return { words: APP_RUN, fix: APP_RUN_FIX }
   if (readToken) return { words: READ_TOKEN, fix: "" }
+  // A failed read is no verdict: the server never said the link is closed.
+  if (rtErr) return { words: `${RUNTIMES_UNREAD}: ${rtErr}`, fix: "" }
   const svc = row.service || "(none recorded)"
   if (!live(runtimes, row.service, false)) return { words: `${APP_OWNED}: no runtime of service ${svc} is connected`, fix: APP_LINK_FIX }
   return {

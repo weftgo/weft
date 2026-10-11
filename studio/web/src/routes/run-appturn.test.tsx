@@ -15,11 +15,11 @@ import axe from "axe-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
-import { APP_LINK_FIX, APP_RUN, APP_RUN_FIX, READ_TOKEN } from "@/lib/honesty"
+import { APP_LINK_FIX, APP_RUN, APP_RUN_FIX, READ_TOKEN, RUNTIMES_UNREAD } from "@/lib/honesty"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { FakeStudio } from "@/test/fake-studio"
-import { APP_PUB, CALL, PARKED, PLAIN, REJECTED, RESUMED, runtimeRow, serveAppTurn, STEER_FAILED } from "@/test/appturn-fixture"
+import { APP_PUB, CALL, PARKED, PLAIN, REJECTED, RESUMED, RUNTIMES_500, runtimeRow, serveAppTurn, STEER_FAILED } from "@/test/appturn-fixture"
 import type { AppTurnOptions } from "@/test/appturn-fixture"
 
 configure({ asyncUtilTimeout: 10_000 })
@@ -118,6 +118,23 @@ describe("the run page decides an app turn its service's Sessions runtime acts o
     expect(parked().getAttribute("data-parked")).toBe("resumed")
     expect(line("resumed")).toBe(`decided — resumed as ${RESUMED}`)
     expect(verb("continue")).toBeUndefined()
+    expect(fake.calls(`POST runs/${PARKED}/approvals`)).toHaveLength(0)
+  })
+})
+
+describe("the run page when a read fails", () => {
+  it("a failed runtimes read: its error, no verdict, no verbs", async () => {
+    await open({ runtimesError: true })
+    await waitFor(() => expect(line("unread")).toBe(`${RUNTIMES_UNREAD}: ${RUNTIMES_500}`))
+    expect(parked().querySelectorAll("button")).toHaveLength(0)
+  })
+
+  it("a failed session read: an already-resumed turn offers no verb — checking the session", async () => {
+    const fake = serveAppTurn(new FakeStudio(), { studioMeta: true, resumed: true, sessionError: true }).install()
+    renderApp(`/runs/${PARKED}?view=story`)
+    await waitFor(() => expect(document.querySelector('[data-app-checking="session"]')?.textContent).toBe("checking the session…"))
+    expect(parked().getAttribute("data-parked")).toBe("checking")
+    expect(parked().querySelectorAll("button")).toHaveLength(0)
     expect(fake.calls(`POST runs/${PARKED}/approvals`)).toHaveLength(0)
   })
 })

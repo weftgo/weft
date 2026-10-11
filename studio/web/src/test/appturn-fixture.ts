@@ -9,7 +9,7 @@
 // appturn.go builds them.
 import type { RunDoc, RunRow } from "@/lib/api"
 import { META, runRow } from "@/panel/testkit"
-import { appOwnedRefusal, golden, json, pagedEvents } from "./fake-studio"
+import { apiError, appOwnedRefusal, golden, json, pagedEvents } from "./fake-studio"
 import type { FakeStudio } from "./fake-studio"
 
 export const APP_PUB = "pub_app"
@@ -115,7 +115,14 @@ export interface AppTurnOptions {
   studioMeta?: boolean
   /** The parked turn is still running (the steer case). */
   running?: boolean
+  /** GET /api/runtimes answers 500 (RUNTIMES_500). */
+  runtimesError?: boolean
+  /** GET /api/sessions/{id} answers 500. */
+  sessionError?: boolean
 }
+
+/** The 500 a failed runtimes read answers in these tests. */
+export const RUNTIMES_500 = "runtimes store unavailable"
 
 /** serveAppTurn serves the app turn's conversation and its verbs on
  * fake; fake.calls("POST runs/s_app-t1/approvals") is what was sent. */
@@ -145,8 +152,8 @@ export function serveAppTurn(fake: FakeStudio, o: AppTurnOptions = {}): FakeStud
       const runs = rows().filter((r) => !pub || r.public_id === pub)
       return { total: runs.length, runs, next_before: null }
     })
-    .on("GET runtimes", { runtimes: o.runtimes ?? [runtimeRow()] })
-    .on(`GET sessions/${APP_SESSION}`, () => ({
+    .on("GET runtimes", () => (o.runtimesError ? apiError(500, "internal", RUNTIMES_500) : { runtimes: o.runtimes ?? [runtimeRow()] }))
+    .on(`GET sessions/${APP_SESSION}`, () => o.sessionError ? apiError(500, "internal", "session store unavailable") : ({
       id: APP_SESSION,
       public_id: APP_PUB,
       agent: "approvals-example",

@@ -268,6 +268,9 @@ export interface PanelState {
   /** runtimes has been read (GET /api/runtimes): the app turn's gate
    * (plan F4.3) waits for it. */
   rtRead: boolean
+  /** The last runtimes read failed (its message): the gate gives no
+   * verdict then — never "no runtime connected". */
+  rtErr: string
   /** The drawer's running or finished experiment (the result pane). */
   result: ExperimentResult | null
   /** The drawer's "will be sent" preview (plan F2, capability
@@ -323,6 +326,7 @@ export function emptyPanelState(): PanelState {
     drawer: null,
     runtimes: [],
     rtRead: false,
+    rtErr: "",
     result: null,
     preview: null,
     breakpoints: [],
@@ -1568,6 +1572,7 @@ export class PanelModel {
     if (this.disposed || seq !== this.loadSeq) return
     this.state.runtimes = runtimes
     this.state.rtRead = true
+    this.state.rtErr = ""
     const rt = pickRuntime(runtimes, agentName)
     const agent = rt?.agents.find((a) => a.name === agentName)
     if (!rt || !agent) {
@@ -2097,8 +2102,11 @@ export class PanelModel {
     fetchRuntimes(this.ep)
       .then((d) => {
         this.state.runtimes = Array.isArray(d.runtimes) ? d.runtimes : []
+        this.state.rtErr = ""
       })
-      .catch(quiet)
+      .catch((err: unknown) => {
+        this.state.rtErr = messageOf(err)
+      })
       .finally(() => {
         this.state.rtRead = true
         this.emit()

@@ -19,7 +19,7 @@ import type { RunDoc, RunRow } from "../lib/api"
 import { UNRUN_CALL_REASON } from "../lib/events"
 import { REQUEST_NO_INDEX_REASON, REQUEST_NO_RECORD_REASON, REQUEST_NOT_RECORDED_LABEL } from "../lib/requests"
 import { badgeLabel } from "./badges"
-import { CAUSES, HOLES, isHole, resultCapReason } from "../lib/honesty"
+import { CAUSES, HOLES, isHole, resultCapReason, RUNTIMES_UNREAD } from "../lib/honesty"
 import { renderApp, stubBrowser } from "../test/app"
 import { renderWithRouter } from "../test/render"
 import { createElement } from "react"
@@ -47,7 +47,7 @@ import { studioPlaygroundLink } from "./element"
 import { drawerHandoff } from "../components/studio/replay-drawer"
 import { playgroundLink } from "../lib/links"
 import { DERIVED, STOCK as DERIVED_STOCK, derivedBodies, serveDerived } from "../test/derived-fixture"
-import { APP_PUB, CALL as APP_CALL, PARKED as APP_PARKED, PLAIN as APP_PLAIN, runtimeRow as appRuntime, serveAppTurn } from "../test/appturn-fixture"
+import { APP_PUB, CALL as APP_CALL, PARKED as APP_PARKED, PLAIN as APP_PLAIN, RUNTIMES_500 as APP_RUNTIMES_500, runtimeRow as appRuntime, serveAppTurn } from "../test/appturn-fixture"
 import type { AppTurnOptions } from "../test/appturn-fixture"
 
 configure({ asyncUtilTimeout: 10_000 })
@@ -1036,6 +1036,7 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
     { name: "no runtime of the service connected: the link's fix", o: { runtimes: [] }, kind: "read-only" },
     { name: "a turn already resumed: decided — resumed as the next run", o: { resumed: true }, kind: "resumed" },
     { name: "a plain Generate's park", o: {}, run: APP_PLAIN, kind: "plain" },
+    { name: "a failed runtimes read (500): its error, no verdict, no verbs", o: { runtimesError: true }, kind: "unread" },
   ]
   interface Seen {
     kind: string | null
@@ -1083,7 +1084,7 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
     serveAppTurn(new FakeStudio(), { studioMeta: true, ...c.o }).install()
     renderApp(`/runs/${c.run ?? APP_PARKED}?view=story`)
     const box = () => document.querySelector<HTMLElement>("[data-parked]")
-    const first = c.click ? "decide" : c.kind
+    const first = c.click ? "decide" : c.kind === "unread" ? "read-only" : c.kind
     await waitFor(() => expect(box()?.getAttribute("data-parked")).toBe(first))
     if (c.click) {
       ;[...box()!.querySelectorAll("button")].find((n) => n.textContent === "continue")!.click()
@@ -1109,6 +1110,8 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
       const studio = await studioSeen(c)
       expect(studio).toEqual(panel)
       expect(panel.kind).toBe(c.kind)
+      // A failed read is said as such: never the closed-link verdict.
+      if (c.kind === "unread") expect([panel.line, panel.refused]).toEqual([`${RUNTIMES_UNREAD}: ${APP_RUNTIMES_500}`, 0])
     })
 })
 

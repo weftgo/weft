@@ -3922,8 +3922,11 @@ export class WeftDevtools extends HTMLElement {
     const box = el("div", "weft-step")
     box.appendChild(el("div", "weft-step-h", [el("span", undefined, next ? "decided" : "awaiting decision (read-only)")]))
     const body = el("div", "weft-step-b")
-    const line = refusalLine(refusalWords(kind, run, s.runtimes, tokenScopeOf(this.cfg.token) === "read", refused))
+    const read = tokenScopeOf(this.cfg.token) === "read"
+    const line = refusalLine(refusalWords(kind, run, s.runtimes, read, refused, act && !read ? s.rtErr : ""))
     const waiting = kind === "read-only" && act && !s.rtRead && !refused
+    // A failed runtimes read: its error, no verdict, no verbs.
+    const unread = kind === "read-only" && act && !read && !!s.rtErr && !refused
     for (const call of pending) {
       const row = el("div", "weft-call", undefined, { "data-key": call.id })
       row.appendChild(
@@ -3935,7 +3938,7 @@ export class WeftDevtools extends HTMLElement {
       )
       if (kind === "experiment")
         row.appendChild(el("div", "weft-res", "an experiment's run — its decision controls are in the result pane of the turn that ran it"))
-      else if (!next && !waiting) row.appendChild(el("div", "weft-res", ["continue", "skip", "resolve…"].map((v) => refusedVerb(v, "button", line, "app-owned"))))
+      else if (!next && !waiting && !unread) row.appendChild(el("div", "weft-res", ["continue", "skip", "resolve…"].map((v) => refusedVerb(v, "button", line, "app-owned"))))
       body.appendChild(row)
     }
     if (next) {
@@ -3943,7 +3946,7 @@ export class WeftDevtools extends HTMLElement {
       on(go, "click", () => this.go(this.model?.select(next, true)))
       body.appendChild(el("div", "weft-note", [document.createTextNode("decided — "), go], { "data-weft-app-owned": "resumed" }))
     } else if (waiting) body.appendChild(el("div", "weft-note", "checking for a runtime that acts on the app's sessions…"))
-    else if (kind !== "experiment") body.appendChild(el("div", "weft-note weft-warn", line, { "data-weft-app-owned": kind === "decide" ? "read-only" : kind }))
+    else if (kind !== "experiment") body.appendChild(el("div", "weft-note weft-warn", line, { "data-weft-app-owned": unread ? "unread" : kind === "decide" ? "read-only" : kind }))
     box.appendChild(body)
     return box
   }

@@ -55,7 +55,7 @@ type metaDoc struct {
 	// steer, approvals, cancel) can act on: "runtime-started runs" —
 	// the app's own turns viewer-only (D7, PQ7) — or "own+runtime"
 	// while a connected runtime registered runtime.Sessions, which
-	// takes approvals, steer and cancel on the app's own turns (plan
+	// takes approvals and steer (cancel is refused) on the app's own turns (plan
 	// F4.1), or exposes an agent built with runtime.Breakpoints(),
 	// whose breakpoints park the app's own runs (F4.2). Meta says so plainly (WEFT-DEVTOOLS §8.5 item 6); absent
 	// without the playground.

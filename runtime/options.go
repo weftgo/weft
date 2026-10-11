@@ -187,7 +187,7 @@ func Threads(store thread.Storage) Option {
 type SessionResolver func(ctx context.Context, publicID string) (s *thread.Session, release func(), err error)
 
 // Sessions makes the app's own turns targets for the debugger's write
-// verbs (plan F4): Studio's approvals, steer and cancel on a run the
+// verbs (plan F4): Studio's approvals and steer (cancel is refused) on a run the
 // app started — a turn of a weft/thread session carrying a public id
 // (thread.PublicID) — reach this runtime as commands, and the runtime
 // acts through the Session resolve answers:

@@ -164,17 +164,24 @@ function useAppTurn(doc: RunDoc) {
   const next = nextTurn(doc, sess.data?.runs)
   const runtimes = rts.data?.runtimes ?? null
   const kind = parkedKind(doc, runtimes, next)
-  const checking = app && (meta.isPending || sess.isPending || (mayAct && rts.isPending))
-  return { kind, next, runtimes, mayAct, checking, steer: caps.includes("steer") }
+  // A failed session read is no answer to "is it the latest turn?":
+  // still checking (no verbs). A failed runtimes read is said as such.
+  const sessErr = app && sess.isError
+  const checking = app && (meta.isPending || sess.isPending || sessErr || (mayAct && rts.isPending))
+  const rtErr = app && mayAct && rts.isError ? rts.error.message : ""
+  return { kind, next, runtimes, mayAct, checking, sessErr, rtErr, steer: caps.includes("steer") }
 }
 
 export function ParkedCalls({ doc, pending }: { doc: RunDoc; pending: Call[] }) {
-  const { kind, next, runtimes, mayAct, checking } = useAppTurn(doc)
+  const { kind, next, runtimes, mayAct, checking, sessErr, rtErr } = useAppTurn(doc)
   const { verbs, send } = useAppVerbs()
   const refused = pending.map((c) => verbs[c.id] as Verb | undefined).find((v) => v?.state === "refused" && v.fix)
   const deciding = kind === "decide" && mayAct && !refused && !checking
-  const line = refusalLine(refusalWords(kind, doc, runtimes, tokenScopeOf(studioToken()) === "read", refused))
+  const read = tokenScopeOf(studioToken()) === "read"
+  const line = refusalLine(refusalWords(kind, doc, runtimes, read, refused, read ? "" : rtErr))
   const shown = checking && !refused ? "checking" : kind
+  // A failed runtimes read: its error, no verdict, no verbs.
+  const unread = shown === "read-only" && !read && !!rtErr && !refused
   return (
     <div className="rounded-lg border border-ev-error/30 px-4 py-2 text-xs" data-parked={shown}>
       <span className="eyebrow">{shown === "resumed" ? "decided" : "pending approval"}</span>
@@ -182,7 +189,7 @@ export function ParkedCalls({ doc, pending }: { doc: RunDoc; pending: Call[] }) 
         {pending.map((p) => (
           <li key={p.id} className="font-mono" data-pending-call={p.id}>
             {p.name}({p.args == null ? "" : JSON.stringify(p.args)}) — {shown === "resumed" ? "decided" : "awaiting a decision"}
-            {shown === "experiment" || shown === "resumed" || shown === "checking" ? null : deciding ? (
+            {shown === "experiment" || shown === "resumed" || shown === "checking" || unread ? null : deciding ? (
               <DecideRow
                 call={p}
                 onDecide={(decision, text) =>
@@ -221,9 +228,11 @@ export function ParkedCalls({ doc, pending }: { doc: RunDoc; pending: Call[] }) 
           </Link>
         </p>
       ) : shown === "checking" ? (
-        <p className="mt-1 text-faint">checking for a runtime that acts on the app's sessions…</p>
+        <p className="mt-1 text-faint" data-app-checking={sessErr ? "session" : "runtimes"}>
+          {sessErr ? "checking the session…" : "checking for a runtime that acts on the app's sessions…"}
+        </p>
       ) : shown === "experiment" || deciding ? null : (
-        <p className="mt-1 text-status-int" data-app-owned={kind === "decide" ? "read-only" : kind}>
+        <p className="mt-1 text-status-int" data-app-owned={unread ? "unread" : kind === "decide" ? "read-only" : kind}>
           {line}
         </p>
       )}
@@ -234,10 +243,10 @@ export function ParkedCalls({ doc, pending }: { doc: RunDoc; pending: Call[] }) 
 /** AppSteer is the running app turn's steer (ADR 0019): one user
  * message into the turn running now, the run id this page's. */
 export function AppSteer({ doc }: { doc: RunDoc }) {
-  const { kind, mayAct, steer } = useAppTurn(doc)
+  const { kind, mayAct, steer, checking } = useAppTurn(doc)
   const { verbs, send } = useAppVerbs()
   const [text, setText] = useState("")
-  if (kind !== "decide" || !mayAct || !steer || doc.status !== "running") return null
+  if (kind !== "decide" || checking || !mayAct || !steer || doc.status !== "running") return null
   return (
     <form
       className="flex flex-wrap items-center gap-2 rounded-lg border px-4 py-2 text-xs"

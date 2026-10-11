@@ -40,6 +40,17 @@ a proxy, the `Host` the proxy forwards is the one checked. The UI shell
 and `/panel.js` carry no data and are not checked; with a `Token` the
 bearer is the defence and the `Host` does not matter.
 
+The loopback `Host` stops a rebound page, not a cross-site one: any
+site's page can POST to `localhost` without a preflight. So setup A
+also refuses a **cross-origin write** — an unsafe method (anything but
+GET, HEAD, OPTIONS) whose `Origin` is neither the request's own
+(`scheme://Host`) nor an `AllowOrigins` entry, or that sends no
+`Origin` but `Sec-Fetch-Site: cross-site` — with a 403 "cross-origin
+write refused (setup A)" naming the Origin. Same-origin pages, clients
+that send neither header (curl, the runtime link) and `AllowOrigins`
+origins are let through; reads need no rule, since setup A sends no
+CORS headers and the browser hides a foreign page's answer.
+
 **B · local binary** — any language's app, several services:
 
 ```sh

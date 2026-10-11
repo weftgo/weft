@@ -4,7 +4,8 @@ package ingest
 // pipeline's Studio destination under RawBodies posts it to /v1/logs,
 // obsdb stores it, DB.Requests attaches it — and a burst of
 // near-maximal records arrives in batches every one of which stays under
-// MaxBody (the destination's batch size is lowered under RawBodies).
+// MaxBody (under RawBodies the destination splits each log export at
+// 12 MiB by its records' estimated size, ADR 0028 §12).
 
 import (
 	"context"

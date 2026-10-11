@@ -513,6 +513,32 @@ breaking).
   removed opens no tab and leaves no note.
 - The panel budget test asserts the committed `panel.js` is within the
   80 KiB cap and pins every ledger row.
+- Security: Studio's setup A (no `Token`) refuses a cross-origin write. The
+  loopback `Host` check proved a request reached this machine, not that this
+  origin's page sent it: any site's page could `fetch(…, {method: "POST",
+  mode: "no-cors"})` a text/plain body past it, with no preflight — saving an
+  experiment, cancelling a run, starting a playground run, deciding an
+  approval, steering. An unsafe method (anything but GET/HEAD/OPTIONS) whose
+  `Origin` is neither `scheme://Host` nor an `AllowOrigins` entry (`null`
+  included), or that carries no `Origin` but `Sec-Fetch-Site: cross-site`, is
+  now 403 "cross-origin write refused (setup A)", naming the Origin. Same-origin
+  pages, clients that send neither header (curl, the runtime link) and
+  `AllowOrigins` origins are unchanged; reads are unchanged (setup A sends no
+  CORS headers, so a foreign page cannot read the answer).
+- Studio's cost of a set with no usage at all (a run-less experiment) is a
+  known $0 with cache `exact` and no `cost_reason`; it carried the "no cache
+  split reported; a cached prompt may be overstated" note.
+- Studio's delegated cost carries its cause: a subagent whose figure is
+  unknown (running, its end never arrived, its children unreadable) makes the
+  parent's delegated figure — and a session's or experiment's summed
+  `cost_badge` — `unknown`, not `unpriced`.
+- The `weft.raw` record is encoded without HTML escaping: a body of `<`, `>`
+  or `&` no longer grows sixfold, so a record of two full ordinary bodies
+  stays ≈ 650 KiB. JSON's own escaping still makes a body of control bytes
+  six times its size (≈ 3 MiB a record), so under `otel.RawBodies` a Studio
+  destination now also splits each log export at 12 MiB: a burst of such
+  records no longer forms a post over Studio's 16 MiB ingest limit, which
+  was refused whole and lost every record in it (ADR 0028 §12).
 
 ## 0.13.0 — 2026-10-10
 

@@ -303,6 +303,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    EventSource opens /api/live with POST /api/live-grant's sig: ?<selector>&kinds=…&sig= — a 60 s
 //    //    window, reusable (a reconnect reuses it), each stream running until closed; a panel
 //    //    token's stream ends at its expiry with `event: expired`) — the UI shell and /panel.js are static,
+//    //    without a Token (setup A) the loopback Host is the wall and an unsafe method (not GET/HEAD/OPTIONS)
+//    //    whose Origin is neither scheme://Host nor an AllowOrigins entry, or with no Origin but
+//    //    Sec-Fetch-Site: cross-site, is 403 "cross-origin write refused (setup A)";
 //    //    OTLP ingest (/v1/traces, /v1/logs) carries its own IngestToken.
 //    // Setup B, any language (package cmd/weft — `go install github.com/weftgo/weft/cmd/weft@latest`;
 //    // the one place the clickhouse driver lives): weft studio --db sqlite://path |

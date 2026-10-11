@@ -322,7 +322,11 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    (prints the bare <url>/runs/<id>; the token only to the browser or on --with-token);
 //    //    weft export <run id> [--format json|jsonl|otlp | --wefttest ./testdata --test Name
 //    //    --force] (fixtures where wefttest.Replay reads them; --force replaces, never
-//    //    merges); weft vacuum [--db --retain] (one sweep when a retention is given, then VACUUM
+//    //    merges); weft mcp [--url --token] (a stdio MCP server over these read routes, read verbs
+//    //    only — runs/search/run/step/request/events/tools/diff/export/sessions/session/meta +
+//    //    explain_failure (run + step + transcript composed); every tool a GET, outputs the route's
+//    //    JSON cut at max_bytes with a note; no --url: the discovery file);
+//    //    weft vacuum [--db --retain] (one sweep when a retention is given, then VACUUM
 //    //    / OPTIMIZE TABLE … FINAL; `make vacuum` on $WEFT_DB or ./.weft/weft.db); weft version.
 //    //    --retain (WEFT_RETAIN) on weft studio and weft dev is studio.Retain (under 1h: exit 2);
 //    //    --pricing <path> (WEFT_PRICING; the flag wins) is studio.Pricing(studio.LoadPricing(path))

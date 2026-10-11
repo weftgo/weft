@@ -100,7 +100,14 @@ to the browser, or to stdout on `--with-token`), `weft export <run id>
 ./testdata [--test TestName] [--force]` (`GET /api/runs/{id}/export`,
 the fixtures unzipped where `wefttest.Replay(t, "testdata")` reads
 them; `--force` replaces a non-empty target's fixtures), `weft doctor`
-(`GET /api/meta`).
+(`GET /api/meta`), and `weft mcp` — the same read routes as a stdio MCP
+server for a coding agent, GET only (tools `runs`, `search`, `run`,
+`step`, `request`, `events`, `tools`, `diff`, `export`, `sessions`,
+`session`, `meta`, and `explain_failure`, a composition of `run` +
+`step` + the transcript; outputs the route's JSON, cut at `max_bytes`
+with a note; with no `--url` it reads the discovery file). `claude mcp
+add weft -- weft mcp --url http://127.0.0.1:7331`; Cursor's
+`.cursor/mcp.json`: `{"mcpServers":{"weft":{"command":"weft","args":["mcp","--url","http://127.0.0.1:7331"]}}}`.
 
 **C · hosted** — the same handler behind `studio.Token`: the panel's
 scoped tokens are HMAC-signed `{public_id, scope, exp}` minted by your

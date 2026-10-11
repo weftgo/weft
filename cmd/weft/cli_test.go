@@ -43,6 +43,11 @@ func TestMain(m *testing.M) {
 	if mode := os.Getenv("WEFT_DEV_HELPER"); mode != "" {
 		os.Exit(devHelper(mode))
 	}
+	// `weft mcp` over real stdio: this binary re-executed as the
+	// command, its arguments after the test binary's name.
+	if os.Getenv("WEFT_MCP_HELPER") == "1" {
+		os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
+	}
 	stdoutIsTTY = func() bool { return false }
 	// Every discovery file the tests' Studios write (and every read)
 	// goes to a directory of this process's own, never the developer's

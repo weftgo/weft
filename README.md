@@ -378,6 +378,7 @@ environment variable one to one (the table below).
 | `weft export <run id> [--format json\|jsonl\|otlp]` | `GET /api/runs/<id>/export` to stdout. |
 | `weft export <run id> --wefttest ./testdata [--test TestName] [--force]` | The run's wefttest replay fixtures unzipped into `./testdata/<TestName>/` (default: the run id), where `wefttest.Replay(t, "testdata")` reads them; a non-empty target needs `--force`, which replaces its `*.json` fixtures (never merges). |
 | `weft doctor` | One line per check of a running Studio, each read from `GET /api/meta`. |
+| `weft mcp [--url] [--token]` | A read-only MCP server over stdio for a coding agent (Claude Code, Cursor) to read runs while you debug: one tool per read route — `runs`, `search`, `run`, `step`, `request`, `events`, `tools`, `diff`, `export` (json/jsonl/otlp; not wefttest), `sessions`, `session`, `meta` — plus `explain_failure <run id>` (run + step + transcript composed: status, error, the failing step's tool calls and results, holes, last assistant text). Every tool is a GET; write verbs (approve, deny, steer, cancel, delete, …) are not offered. Outputs are the route's JSON, cut at `max_bytes` (default 64 KiB) with a note; a 403 is the tool's error. With no `--url`/`WEFT_STUDIO_URL` it reads the discovery file (`WEFT_DISCOVERY=off` skips it). `claude mcp add weft -- weft mcp --url http://127.0.0.1:7331`; Cursor: `.cursor/mcp.json` `{"mcpServers":{"weft":{"command":"weft","args":["mcp","--url","http://127.0.0.1:7331"]}}}`. |
 | `weft version` | The weft version this binary was built from. |
 
 | Flag | Environment | Default |
@@ -386,7 +387,7 @@ environment variable one to one (the table below).
 | `--db` | `WEFT_DB` | `./.weft/weft.db` |
 | `--token` | `WEFT_STUDIO_TOKEN` | `weft studio`, `weft dev`: the database's stable token, `<db>.token` (never printed); a generated one, printed, for a database with no file |
 | `--manifest` | `WEFT_MANIFEST` | the nearest `weft.json` upward |
-| `--url` (runs, open, export, doctor) | `WEFT_STUDIO_URL` | `http://127.0.0.1:7331` |
+| `--url` (runs, open, export, doctor, mcp) | `WEFT_STUDIO_URL` | `http://127.0.0.1:7331` (`weft mcp`: the discovery file's Studio first) |
 
 `weft dev`'s `--watch` and `--no-watch` shape the dev loop only and
 have no environment mirror; like `--open` and `--no-playground` they

@@ -114,12 +114,23 @@ func apiError(path string, status int, body []byte) error {
 	if json.Unmarshal(body, &e) == nil && e.Error.Message != "" {
 		msg = e.Error.Message
 	}
-	err := fmt.Errorf("GET %s: %d %s", path, status, msg)
+	var err error = &statusError{Status: status, Body: body, line: fmt.Sprintf("GET %s: %d %s", path, status, msg)}
 	if status == http.StatusUnauthorized {
 		err = fmt.Errorf("%w (--token or WEFT_STUDIO_TOKEN)", err)
 	}
 	return err
 }
+
+// statusError is a non-2xx answer: its one line, plus the status and
+// the body Studio sent (its error, and a badge with a reason when the
+// route gave one) for a caller that passes them on — weft mcp does.
+type statusError struct {
+	Status int
+	Body   []byte
+	line   string
+}
+
+func (e *statusError) Error() string { return e.line }
 
 // runPath is /api/runs/<id>: a run id may carry slashes (a subagent's
 // child id), escaped the way the UI escapes them.

@@ -250,6 +250,7 @@ Usage:
   weft open    <run id> [--url] [--token] [--open] [--with-token]
   weft export  <run id> [--url] [--token] [--format json|jsonl|otlp] [--wefttest dir [--test name] [--force]]
   weft doctor  [--url] [--token]
+  weft mcp     [--url] [--token]   (a read-only stdio MCP server over the Studio API; weft mcp -h lists its tools)
   weft vacuum  [--db] [--retain]
   weft version
 
@@ -320,6 +321,8 @@ func dispatch(args []string, stdout, stderr io.Writer) error {
 		return runExport(rest, stdout, stderr)
 	case "doctor":
 		return runDoctor(rest, stdout, stderr)
+	case "mcp":
+		return runMCP(rest, stdout, stderr)
 	case "vacuum":
 		return runVacuum(rest, stdout, stderr)
 	case "version", "--version", "-version":

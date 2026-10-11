@@ -11,7 +11,7 @@
 // Request tab says not_recorded on both surfaces.
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { cleanup, configure, waitFor } from "@testing-library/react"
+import { cleanup, configure, fireEvent, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "../lib/api"
@@ -30,7 +30,7 @@ import { stepDiffBlock } from "./compare"
 import { FakeEventSource as StudioEventSource } from "../test/fake-event-source"
 import { FakeStudio, golden, hiddenRefusal, pagedEvents, pagedRequests } from "../test/fake-studio"
 import type { FakePosEvent } from "../test/fake-studio"
-import { $, all, assistant, ATTRS, baseRoutes, button, click, fakeStudio as panelStudio, META, mount, runExperiment, runRow, SESSION, settle, setup, T0, teardown, transcript, user } from "./testkit"
+import { $, all, assistant, ATTRS, baseRoutes, button, click, fakeStudio as panelStudio, META, mount, runExperiment, runRow, RUNTIMES, SESSION, settle, setup, T0, teardown, transcript, user } from "./testkit"
 import { keepEditedTitle, keepPromptWords, PROPOSAL_NEEDS_DEV, SAVE_TEST_LABEL, SAVE_TEST_TITLE } from "../lib/saves"
 import { resetNotices } from "../lib/notify"
 import type { WeftDevtools } from "./element"
@@ -1110,4 +1110,121 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
       expect(studio).toEqual(panel)
       expect(panel.kind).toBe(c.kind)
     })
+})
+
+// Cost (plan A5.3): the panel's turn row and the run page's header read
+// the same figure and the same reason for the same row — lib/cost.ts's
+// words on both — own and delegated, two numbers on each.
+describe("a turn's cost on both surfaces (A5.3)", () => {
+  const WHY = "no row of the default pricing table matches wefttest/script"
+  const cases: { name: string; doc: Partial<RunDoc> }[] = [
+    { name: "priced, own + delegated", doc: { cost_usd: 0.0029, cost_known: true, cache: "exact", delegated_cost_usd: 0.0011, delegated_cost_known: true } },
+    { name: "an unpriced model: — with its reason", doc: { cost_usd: null, cost_known: false, cost_badge: "unpriced", cost_reason: WHY, delegated_cost_usd: 0.0011, delegated_cost_known: true } },
+    { name: "cache not reported: the visible mark and the hint in the title", doc: { cost_usd: 0.5, cost_known: true, cache: "not_reported", delegated_cost_usd: 0.25, delegated_cost_known: true } },
+  ]
+  const priced = (fx: Fixture, studioMeta: boolean) => {
+    const meta = studioMeta ? golden<Record<string, unknown>>("meta") : META
+    return serve(fx, studioMeta).on("GET meta", { ...meta, capabilities: ["ingest", "requests", "pricing"] })
+  }
+  const read = (n: Element | null | undefined) => ({ text: n?.firstChild?.textContent, title: n?.getAttribute("title") })
+
+  for (const c of cases)
+    it(`${c.name}: the panel's turn cost is the run page's header cost`, async () => {
+      const fx: Fixture = { doc: c.doc, events: events() }
+      priced(fx, false)
+      const el = await mount(ATTRS)
+      await vi.waitFor(() => expect($(el, ".weft-turn [data-weft-turn-cost]")).toBeTruthy(), { timeout: 5_000 })
+      const [pOwn, pDel] = all(el, ".weft-turn [data-weft-turn-cost] [data-weft-cost]").map(read)
+      const pHint = $(el, ".weft-turn [data-weft-cache-hint]")
+      const pCache = pHint && { text: pHint.textContent, title: pHint.getAttribute("title") }
+      el.remove()
+      await settle()
+      cleanup()
+      document.body.innerHTML = ""
+      stubBrowser()
+      vi.stubGlobal("scrollTo", vi.fn())
+      StudioEventSource.reset()
+      vi.stubGlobal("EventSource", StudioEventSource)
+      setStudioToken("")
+      priced(fx, true)
+      renderApp(`/runs/${RUN}`)
+      await waitFor(() => expect(document.querySelector("[data-run-cost] [data-cost-part='own'] [data-cost]")).toBeTruthy())
+      const sOwn = read(document.querySelector("[data-run-cost] [data-cost-part='own'] [data-cost]"))
+      const sDel = read(document.querySelector("[data-run-cost] [data-cost-part='delegated'] [data-cost]"))
+      expect(pOwn.text).toBeTruthy()
+      expect(pDel.text).toMatch(/^\$/)
+      expect(pOwn).toEqual(sOwn)
+      expect(pDel).toEqual(sDel)
+      // Studio's visible "cache not reported" mark (CacheHint), the same words and title — or neither.
+      const sHint = document.querySelector("[data-run-cost] [data-cache-hint]")
+      expect(pCache).toEqual(sHint && { text: sHint.textContent, title: sHint.getAttribute("title") })
+      if (c.doc.cache === "not_reported") expect(pCache?.text).toBe("cache not reported")
+      if (c.doc.cost_known === false) expect(pOwn).toEqual({ text: "—", title: WHY })
+    })
+})
+
+// The result pane's figure (A5.3 fixes): the replayed run's whole bill,
+// own + delegated folded, says so on both surfaces — the panel's result
+// pane and the playground's result card read the same figure, the same
+// title, the same wrapper words.
+describe("a replayed run's cost on both surfaces (A5.3)", () => {
+  const PG = "pg_x1"
+  const row = () => ({
+    ...runRow({ id: PG, playground: true, session_id: "", forked_from: `${RUN}#0` }),
+    cost_usd: 0.004,
+    cost_known: true,
+    cache: "exact" as const,
+    delegated_cost_usd: 0.001,
+    delegated_cost_known: true,
+  })
+  const cmd = (state: string) => ({ command_id: "cmd_1", state, run_id: state === "finished" ? PG : "", status: "succeeded", error: null, created: T0, updated: T0 })
+  const caps = ["live", "playground", "runtimes", "pricing"]
+  const read = (n: Element | null | undefined) => {
+    const f = n?.querySelector("[data-weft-cost], [data-cost]")
+    return { wrapper: n?.getAttribute("title"), text: f?.firstChild?.textContent, title: f?.getAttribute("title") }
+  }
+
+  it("the panel's result pane is the playground's result card: figure, title, the whole-bill wrapper", async () => {
+    const routes = baseRoutes()
+    routes["POST playground/runs"] = { command_id: "cmd_1", state: "queued" }
+    routes["playground/commands/cmd_1"] = cmd("finished")
+    routes[`runs/${PG}`] = { ...row(), children: [] }
+    routes[`runs/${PG}/events?after=0&limit=500`] = { events: [], next_after: null, done: true, gaps: [] }
+    routes[`runs/${PG}/transcript`] = transcript([user("where is my order #4411?")], [assistant("It is delayed.")])
+    panelStudio(routes, { ...META, capabilities: caps })
+    const el = await mount(ATTRS)
+    await runExperiment(el)
+    await vi.waitFor(() => expect($(el, ".weft-xres [data-weft-result-cost]")).toBeTruthy(), { timeout: 5_000 })
+    const panel = read($(el, ".weft-xres [data-weft-result-cost]"))
+    el.remove()
+    await settle()
+    cleanup()
+    document.body.innerHTML = ""
+    stubBrowser()
+    vi.stubGlobal("scrollTo", vi.fn())
+    StudioEventSource.reset()
+    vi.stubGlobal("EventSource", StudioEventSource)
+    setStudioToken("")
+    new FakeStudio()
+      .on("GET meta", { ...golden<Record<string, unknown>>("meta"), capabilities: caps })
+      .on("GET runtimes", RUNTIMES)
+      .on("GET experiments", { experiments: [] })
+      .on(`GET runs/${RUN}`, { ...runRow({ id: RUN }), children: [] })
+      .on(`GET runs/${RUN}/transcript`, transcript([user("where is my order #4411?")], [assistant("It shipped.")]))
+      .on("POST playground/runs", cmd("queued"))
+      .on("GET playground/commands/cmd_1", cmd("finished"))
+      .on(`GET runs/${PG}`, { ...row(), children: [] })
+      .on(`GET runs/${PG}/events`, pagedEvents([]))
+      .on(`GET runs/${PG}/transcript`, transcript([user("where is my order #4411?")], [assistant("It is delayed.")]))
+      .install()
+    renderApp(`/playground?run=${RUN}`)
+    const go = await screen.findByRole("button", { name: "Run A" })
+    await waitFor(() => expect(go).toHaveProperty("disabled", false))
+    fireEvent.click(go)
+    await waitFor(() => expect(document.querySelector("[data-result-cost]")).toBeTruthy(), { timeout: 10_000 })
+    const studio = read(document.querySelector("[data-result-cost]"))
+    expect(panel.text).toBe("$0.0050")
+    expect(panel).toEqual(studio)
+    expect(panel.wrapper).toBe("the run's whole bill: its own model calls + its subagents'")
+  })
 })

@@ -2294,7 +2294,9 @@ export class WeftDevtools extends HTMLElement {
     h.appendChild(el("span", undefined, stats, { title: unknown ? `${stats} — ${unknown.cost_reason ?? ""}` : stats, "data-weft-stats": "" }))
     // The turns' summed cost (A5.3), gated on capability pricing: "≥ $x"
     // when a turn's is not known, "—" when none is, the reasons its title.
-    if (s.turns.length && hasCapability(s, "pricing")) h.append(el("span", undefined, [costText(atLeastCost(s.turns))], { "data-weft-cost-total": "" }))
+    // Older turns not loaded yet: the sum is the loaded turns' only, "≥".
+    if (s.turns.length && hasCapability(s, "pricing"))
+      h.append(el("span", undefined, [costText(atLeastCost(s.turns, s.turnsCapped ? `the ${s.turns.length} loaded turns only — load older turns for more` : undefined))], { "data-weft-cost-total": "" }))
     if (s.turns.length && s.selected) {
       const a = el("a", "weft-btn", "⤢", {
         href: studioLink(this.base, s.selected, this.stepNow(s)),
@@ -3438,14 +3440,16 @@ export class WeftDevtools extends HTMLElement {
       el("span", undefined, stats),
       el("span", "weft-grow"),
     ])
-    // The replayed run's whole bill and its experiments' (A5.3, the
-    // playground's words): the runs the panel lists from its source turn.
+    // The replayed run's whole bill (the playground's wrapper title: it
+    // folds own + delegated), and every replay of this turn the panel's
+    // page lists — not Studio's saved experiment — summed by atLeastCost
+    // so one unpriced (scripted) replay leaves the priced ones "≥" (A5.3).
     if (hasCapability(s, "pricing")) {
-      if (r.row) head.insertBefore(el("span", undefined, [costText(sumCost([r.row]))], { "data-weft-result-cost": "" }), head.lastChild)
+      if (r.row) head.insertBefore(el("span", undefined, [costText(sumCost([r.row]))], { title: "the run's whole bill: its own model calls + its subagents'", "data-weft-result-cost": "" }), head.lastChild)
       const xs = s.experiments.get(r.sourceRunID) ?? []
       if (xs.length) {
-        const x = el("span", undefined, "experiment: ", { "data-weft-experiment-cost": "" })
-        x.append(costText(sumCost(xs)), ` over ${xs.length} run${xs.length > 1 ? "s" : ""}`)
+        const x = el("span", undefined, `${xs.length} replay${xs.length > 1 ? "s" : ""} of this turn: `, { "data-weft-experiment-cost": "" })
+        x.append(costText(atLeastCost(xs)))
         head.insertBefore(x, head.lastChild)
       }
     }

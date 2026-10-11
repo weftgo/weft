@@ -14,7 +14,7 @@ import { REQUEST_NOT_RECORDED_LABEL, REQUEST_NOT_STORED, requestCappedWords } fr
 import { UNRUN_CALL_REASON } from "../lib/events"
 import type { Truncation } from "../lib/events"
 import { el } from "./render"
-import { costView, delegatedView } from "../lib/cost"
+import { CACHE_HINT, cacheNotReported, costView, delegatedView } from "../lib/cost"
 import type { CostView } from "../lib/cost"
 
 /** What a response (or the panel's own reading) says about one hole:
@@ -311,10 +311,18 @@ export function costText(v: CostView): HTMLElement {
 
 /** turnCost is a turn's own figure and, when its subagents cost
  * anything or could not be priced, "+ $y delegated" — Studio's runs
- * table: two numbers, never folded. */
+ * table rule (unknown or > 0): two numbers, never folded. The run
+ * header also draws a known $0.00 delegated when the run has children;
+ * a run row carries no child count, so the panel's turn row (like the
+ * runs table) shows its own figure alone there — the same total. A row
+ * without the delegated fields reads as runTotal does: own alone. Then
+ * Studio's visible "cache not reported" mark (CacheHint) beside a known
+ * figure priced without cache splits. */
 export function turnCost(r: RunRow): HTMLElement {
-  const n = el("span", undefined, [costText(costView(r))], { "data-weft-turn-cost": "" })
+  const own = costView(r)
+  const n = el("span", undefined, [costText(own)], { "data-weft-turn-cost": "" })
   const d = delegatedView(r)
-  if (!d.known || d.usd! > 0) n.append(" + ", costText(d), " delegated")
+  if ("delegated_cost_known" in r && (!d.known || d.usd! > 0)) n.append(" + ", costText(d), " delegated")
+  if (own.known && cacheNotReported(r)) n.append(" ", el("span", undefined, "cache not reported", { title: CACHE_HINT, "data-weft-cache-hint": "" }))
   return n
 }

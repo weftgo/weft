@@ -156,19 +156,24 @@ function totalUnknown(r: CostFields & DelegatedCostFields): CostView {
   const own = costView(r)
   const part = own.known ? delegatedView(r) : own
   const badge = part.badge ?? "unpriced"
-  const what = badge === "unknown" ? "a run's cost is not known yet" : "a run is not priced"
+  // A derived run's no-usage reason never resolves: "not known", not "yet".
+  const what = badge === "unknown" ? `a run's cost is not known${/^the stock spans report/.test(part.title) ? "" : " yet"}` : "a run is not priced"
   return view(null, false, `${what}: ${part.title}`, badge)
 }
 
 /** atLeastCost totals runs' whole bills where an unknown run must not
- * hide the known ones (the panel's header over its turns, A5.3): every
- * run known → sumCost; some unknown → "≥ $x" (not known; usd the known
- * part), how many runs are priced and each unknown run's reason
- * (sumCost's words) as its title — never a figure claimed whole; none
- * known → "—" with the reasons. */
-export function atLeastCost(rows: readonly (CostFields & DelegatedCostFields)[]): CostView {
+ * hide the known ones (the panel's header over its turns, its replays
+ * of a turn — A5.3): every run known → sumCost; some unknown → "≥ $x"
+ * (not known; usd the known part — a run's known own figure counts
+ * when only its delegated part is unknown), how many runs are priced
+ * and each unknown run's reason (sumCost's words) as its title, never a
+ * figure claimed whole; nothing known → "—" with the reasons. more says
+ * the rows are not all there is (a paged list): the figure is then "≥"
+ * even when every row is known, more its title's last words. */
+export function atLeastCost(rows: readonly (CostFields & DelegatedCostFields)[], more?: string): CostView {
   let usd = 0
   let n = 0
+  let some = false
   const why: string[] = []
   let badge = ""
   for (const r of rows) {
@@ -176,16 +181,23 @@ export function atLeastCost(rows: readonly (CostFields & DelegatedCostFields)[])
     if (t.known) {
       usd += t.usd
       n++
+      some = true
       continue
+    }
+    const own = costView(r)
+    if (own.known) {
+      usd += own.usd!
+      some = true
     }
     const u = totalUnknown(r)
     badge ||= u.badge ?? ""
     if (!why.includes(u.title)) why.push(u.title)
   }
-  if (!why.length) return sumCost(rows)
+  if (!why.length && !more) return sumCost(rows)
   const reasons = why.join("; ")
-  if (!n) return view(null, false, reasons, badge)
-  return { known: false, text: `≥ ${formatUSD(usd)}`, title: `${n} of ${rows.length} runs priced — ${reasons}`, badge, usd }
+  const title = (lead: string) => [lead, more].filter(Boolean).join(" · ")
+  if (!some) return view(null, false, title(reasons), badge || "unknown")
+  return { known: false, text: `≥ ${formatUSD(usd)}`, title: title(why.length ? `${n} of ${rows.length} runs priced — ${reasons}` : ""), badge: badge || "unknown", usd }
 }
 
 // ── The compare table's cost column ───────────────────────────────

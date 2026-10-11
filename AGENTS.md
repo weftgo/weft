@@ -285,7 +285,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    the Request tab), the footer's content line, turn chips from the run row (model
 //    //    weft/runtime/scripted, weft.session.forked_from, weft.forked_from), parity.test.ts against the
 //    //    run page; its cost, plan A5.3, capability "pricing" only: per turn (own, "+ $y delegated", "—" with
-//    //    cost_reason), the header's sum ("≥" when one is unknown), the result pane's run and experiment, lib/cost.ts's
+//    //    cost_reason), the header's sum ("≥" when one is unknown or older turns are unloaded), the result pane's run and "N replays of this turn", lib/cost.ts's
 //    //    words; the build prints the per-item size table from
 //    //    studio/web/panel-budget.json; configured by a data-weft
 //    //    script tag, weft:* meta tags, or <base>/panel-config.json; studio/README.md

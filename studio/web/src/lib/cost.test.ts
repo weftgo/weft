@@ -193,6 +193,26 @@ describe("the cost order and totals", () => {
     expect(atLeastCost([rFail()])).toMatchObject({ known: false, text: "—", title: why })
     expect(atLeastCost([])).toMatchObject({ known: false, text: "—", title: "no run to total" })
   })
+  it("atLeastCost keeps a run's known own figure when only its delegated part is unknown", () => {
+    const running = "a subagent run's cost is not known yet: r/0/c1 (running: usage arrives at run end)"
+    const v = atLeastCost([priced(0.004), { ...priced(0.002, null), delegated_cost_reason: running }])
+    expect(v).toMatchObject({ known: false, text: "≥ $0.0060", badge: "unknown" })
+    expect(v.title).toBe(`1 of 2 runs priced — a run's cost is not known yet: ${running}`)
+    // Own known, delegated unknown, nothing else: still ≥ its own, never —.
+    expect(atLeastCost([{ ...priced(0.002, null), delegated_cost_reason: running }]).text).toBe("≥ $0.0020")
+  })
+  it("atLeastCost over a paged list: ≥ even when every loaded row is known, the note its title's last words", () => {
+    expect(atLeastCost([priced(0.01), priced(0.02)], "the 2 loaded turns only")).toMatchObject({ known: false, text: "≥ $0.03", title: "the 2 loaded turns only" })
+    const why = sumCost([rFail()]).title
+    expect(atLeastCost([priced(0.01), rFail()], "loaded only").title).toBe(`1 of 2 runs priced — ${why} · loaded only`)
+    expect(atLeastCost([rFail()], "loaded only")).toMatchObject({ text: "—", title: `${why} · loaded only` })
+  })
+  it("a derived run's no-usage cost is not known — never 'yet': it never arrives", () => {
+    const reason = "the stock spans report no (or zero) usage (gen_ai.usage.* absent or 0 on the root and its chat spans): the cost is unknown"
+    const derived: RunRow = { ...priced(0), cost_usd: null, cost_known: false, cost_badge: "unknown", cost_reason: reason }
+    expect(sumCost([derived]).title).toBe(`a run's cost is not known: ${reason}`)
+    expect(sumCost([rStale()]).title).toMatch(/^a run's cost is not known yet: /)
+  })
   it("a lost cell is its own reason, and the total is unknown", () => {
     const v = sumCost([priced(0.01), lostCellCost()])
     expect(v).toMatchObject({ known: false, text: "—", badge: "unknown", title: LOST_CELL_REASON })

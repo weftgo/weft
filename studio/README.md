@@ -330,18 +330,29 @@ The dev list (no public id) stays the newest 10 runs.
 Cost (plan A5.3). Under capability `pricing` only — off, the panel draws no
 figure and no empty cell — each turn row carries its cost beside its tokens
 in the run page's words (`src/lib/cost.ts`, shared): `$0.0029`, and its
-subagents' as a second figure, `$0.0029 + $0.0011 delegated`, never folded;
-an unknown figure is "—" with the API's `cost_reason` as its title and in
-its accessible text (" not known: …"): an unpriced model ("no row of the …
-pricing table matches …"), a running turn ("running: usage arrives at run
-end"), a derived turn whose spans reported no usage. The header's total
-beside "N turns · T tok" sums the turns' own + delegated (`atLeastCost`):
-"≥ $x" with how many are priced and each reason when a turn's is unknown,
-"—" when none is. The experiment result pane shows the replayed run's
-whole bill and "experiment: $x over N runs" — the runs the panel lists
-from the same source turn, summed as the playground's matrix does
-(`sumCost`: one unknown run makes the total "—" with its reason).
-`parity.test.ts` holds a turn's figure and reason to the run header's.
+subagents' as a second figure, `$0.0029 + $0.0011 delegated`, never folded,
+by the runs table's rule (shown when unknown or > 0; the run header also
+draws a known `$0.00` delegated when the run has children — a run row
+carries no child count, so the turn row shows its own figure alone there,
+the same total); Studio's visible "cache not reported" mark follows a known
+figure priced without cache splits. An unknown figure is "—" with the API's
+`cost_reason` as its title and in its accessible text (" not known: …"): an
+unpriced model ("no row of the … pricing table matches …"), a running turn
+("running: usage arrives at run end"), a derived turn whose spans reported
+no usage (a total over it says "not known", never "not known yet"). The
+header's total beside "N turns · T tok" sums the turns' own + delegated
+(`atLeastCost`): "≥ $x" with how many are priced and each reason when a
+turn's is unknown (a turn whose delegated part alone is unknown still adds
+its own figure), "—" when none is, and "≥" with "the N loaded turns only —
+load older turns for more" while older turns load on demand. The experiment
+result pane shows the replayed run's whole bill under the playground card's
+title ("the run's whole bill: its own model calls + its subagents'") and
+"N replays of this turn: $x" — every playground or forked run off this turn
+on the loaded page, not Studio's saved experiment ("the experiment's
+cost"), summed by `atLeastCost` so an unpriced (scripted) replay leaves the
+priced ones "≥". `parity.test.ts` holds a turn's figure, reason and cache
+mark to the run header's, and the result pane's figure and title to the
+playground's result card.
 Honesty (plan D5). Every badge the panel draws is one of the A3
 table's ten (`src/lib/honesty.ts`, `obsdb.HoleNote`'s words, pinned by
 `studio/testdata/holes.golden.json`), drawn by one module,

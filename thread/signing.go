@@ -394,6 +394,17 @@ func SignDecision(key []byte, r Request, d Decision) SignedDecision {
 	return sd
 }
 
+// RequiresSigned reports whether the session refuses unsigned
+// decisions (RequireSigned, or the header that carries it): Decide then
+// fails ErrSignatureRequired and only DecideSigned decides. A caller
+// that must know before it promises a decision — weft/runtime acks one
+// only for a session that can take it — asks here.
+func (s *Session) RequiresSigned() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.cfg.requireSigned
+}
+
 // Request returns the pending request for callID with a fresh
 // challenge minted under the keyring's active key: a nonce, the key's
 // id, and everything a signer needs to vouch for a decision over

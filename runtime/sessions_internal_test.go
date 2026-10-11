@@ -6,11 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"iter"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -21,6 +24,9 @@ import (
 	"github.com/weftgo/weft/studio"
 	linkruntime "github.com/weftgo/weft/studio/runtime"
 	"github.com/weftgo/weft/thread"
+	"github.com/weftgo/weft/thread/jsonl"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 // sessionFrame renders one `event: session` frame as Studio writes it.
@@ -411,5 +417,493 @@ func TestSessionsOptionAbsentChangesNothing(t *testing.T) {
 	delete(with, "sessions")
 	if !reflect.DeepEqual(without, with) {
 		t.Errorf("the option changed more of the registration than sessions:\nwithout %v\nwith    %v", without, with)
+	}
+}
+
+// holdFirstModel holds its first call until gate closes (held closes
+// once it waits); every call answers "answer".
+type holdFirstModel struct {
+	mu    sync.Mutex
+	calls int
+	held  chan struct{}
+	gate  chan struct{}
+	once  sync.Once
+}
+
+func (m *holdFirstModel) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: "wefttest", Name: "hold"}
+}
+
+func (m *holdFirstModel) Stream(ctx context.Context, _ core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	m.mu.Lock()
+	m.calls++
+	n := m.calls
+	m.mu.Unlock()
+	return func(yield func(core.ModelEvent, error) bool) {
+		if n == 1 {
+			m.once.Do(func() { close(m.held) })
+			select {
+			case <-m.gate:
+			case <-ctx.Done():
+				yield(nil, ctx.Err())
+				return
+			}
+		}
+		if !yield(core.ModelTextDelta{Text: "answer"}, nil) {
+			return
+		}
+		yield(core.ModelFinish{Reason: core.StopEndTurn}, nil)
+	}
+}
+
+// steerTrace counts a session's turn entries and the prompts carrying
+// text — what a steer that started a turn would leave.
+func steerTrace(s *thread.Session, text string) (turns, prompts int) {
+	for _, e := range s.Entries() {
+		switch e := e.(type) {
+		case thread.TurnEntry:
+			turns++
+		case thread.MessageEntry:
+			for _, p := range e.Message.Content {
+				if tp, ok := p.(core.TextPart); ok && tp.Text == text {
+					prompts++
+				}
+			}
+		}
+	}
+	return turns, prompts
+}
+
+// TestSessionSteerRaceStartsNoTurn is the review's first probe as a
+// regression: the app's turn is running when the steer command arrives
+// and lands while the runtime waits on its accepted ack — the window
+// between any "is it running?" check and the delivery. The steer must
+// not become a turn of its own: the command finishes failed "no running
+// turn to steer", the session holds one turn and no prompt with the
+// steer's text. (Under the entries check that preceded Session.Steer,
+// the delivery was Send(As(Steer)) on an idle session: a second turn
+// whose prompt was the debugger's text.)
+func TestSessionSteerRaceStartsNoTurn(t *testing.T) {
+	ctx := context.Background()
+	m := &holdFirstModel{held: make(chan struct{}), gate: make(chan struct{})}
+	s, err := thread.Create(ctx, thread.Memory(), core.New(m), thread.PublicID("pub_race"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close(ctx) }()
+	turn, err := s.Send(ctx, core.User("first"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-m.held
+
+	f := newFakeStudio(t)
+	f.ackStatus = func(a ack) int {
+		if a.CommandID == "cmd_race" && a.State == "accepted" {
+			// The turn lands while the accepted ack is in flight.
+			close(m.gate)
+			if _, err := turn.Wait(); err != nil {
+				t.Errorf("turn: %v", err)
+			}
+		}
+		return http.StatusOK
+	}
+	ts := httptest.NewServer(f.handler())
+	t.Cleanup(ts.Close)
+	newSessionsLink(t, ts.URL, func(context.Context, string) (*thread.Session, func(), error) { return s, nil, nil })
+
+	f.frames <- sessionFrame(sessionCommand{CommandID: "cmd_race", Verb: verbSteer, PublicID: "pub_race",
+		SessionID: s.ID(), RunID: turn.RunID(), Message: "too late"})
+	f.waitAck(t, 2)
+	f.mu.Lock()
+	fin := f.acks[1]
+	f.mu.Unlock()
+	if fin.State != "finished" || fin.Status != "failed" || !strings.HasPrefix(fin.Error, refusedNoTurn) {
+		t.Errorf("finished ack = %+v, want failed %q", fin, refusedNoTurn)
+	}
+	if err := s.WaitIdle(ctx); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if turns, prompts := steerTrace(s, "too late"); turns != 1 || prompts != 0 {
+		t.Errorf("turns = %d, prompts with the steer = %d; want 1, 0 (the steer started a turn)", turns, prompts)
+	}
+}
+
+// TestSessionSteerMidTurnSnapshotStartsNoTurn is the review's second
+// probe: the resolver opens the session from what a crash mid-turn
+// leaves — a prompt whose turn end never landed — so the entries read
+// "in flight" forever. Nothing runs in that Session: the steer finishes
+// failed "no running turn to steer" and the reopened session gains no
+// turn and no prompt.
+func TestSessionSteerMidTurnSnapshotStartsNoTurn(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	st, err := jsonl.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := &holdFirstModel{held: make(chan struct{}), gate: make(chan struct{})}
+	orig, err := thread.Create(ctx, st, core.New(m), thread.PublicID("pub_snap"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := orig.Send(ctx, core.User("first"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	<-m.held
+	t.Cleanup(func() { close(m.gate); _ = orig.Close(ctx) })
+	// What a restarted process finds: a fresh Storage on the directory.
+	st2, err := jsonl.Open(dir, thread.NoLock())
+	if err != nil {
+		t.Fatal(err)
+	}
+	re, err := thread.Open(ctx, st2, orig.ID(), core.New(wefttest.Script(wefttest.Say("a turn the debugger started"))))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = re.Close(ctx) }()
+	before := len(re.Entries())
+
+	f := newFakeStudio(t)
+	ts := httptest.NewServer(f.handler())
+	t.Cleanup(ts.Close)
+	newSessionsLink(t, ts.URL, func(context.Context, string) (*thread.Session, func(), error) { return re, nil, nil })
+	f.frames <- sessionFrame(sessionCommand{CommandID: "cmd_snap", Verb: verbSteer, PublicID: "pub_snap",
+		SessionID: re.ID(), RunID: turn.RunID(), Message: "anyone?"})
+	f.waitAck(t, 2)
+	f.mu.Lock()
+	fin := f.acks[1]
+	f.mu.Unlock()
+	if fin.State != "finished" || fin.Status != "failed" || !strings.HasPrefix(fin.Error, refusedNoTurn) {
+		t.Errorf("finished ack = %+v, want failed %q", fin, refusedNoTurn)
+	}
+	time.Sleep(20 * time.Millisecond)
+	if turns, prompts := steerTrace(re, "anyone?"); turns != 0 || prompts != 0 || len(re.Entries()) != before {
+		t.Errorf("the reopened session gained turns %d, steer prompts %d, entries %d → %d; want nothing written",
+			turns, prompts, before, len(re.Entries()))
+	}
+}
+
+// parkedSession creates a session on st whose first turn parks a gated
+// deploy call; it returns the Session, the parked turn and the call id.
+func parkedSession(t *testing.T, st thread.Storage, opts ...thread.SessionOption) (*thread.Session, *thread.Turn, string) {
+	t.Helper()
+	ctx := context.Background()
+	agent := core.New(
+		wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "deploy", Args: `{"env":"prod"}`}), wefttest.Say("done")),
+		core.Tool("deploy", "Deploy.", func(context.Context, struct {
+			Env string `json:"env"`
+		}) (string, error) {
+			return "deployed", nil
+		}, core.RequireApproval()),
+	)
+	s, err := thread.Create(ctx, st, agent, append([]thread.SessionOption{thread.PublicID("pub_park")}, opts...)...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := s.Send(ctx, core.User("deploy"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := turn.Wait()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Pending) != 1 {
+		t.Fatalf("no park: %+v", res.Pending)
+	}
+	return s, turn, res.Pending[0].ID
+}
+
+// decideFrame is a decide session frame for s's parked call.
+func decideFrame(id string, s *thread.Session, turn *thread.Turn, callID, decision string) string {
+	return sessionFrame(sessionCommand{CommandID: id, Verb: verbDecide, PublicID: "pub_park", SessionID: s.ID(),
+		RunID: turn.RunID(), CallID: callID, Decision: decision})
+}
+
+// storedEntries is the stored session's entry count.
+func storedEntries(t *testing.T, st thread.Storage, id string) int {
+	t.Helper()
+	_, entries, _, err := st.Load(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(entries)
+}
+
+// TestSessionDecideLeaseLostAfterClaim: the runtime claimed the lease
+// before its ack, and lost it before Decide wrote — the storage's hold
+// released and another writer claimed it in between. Decide fails
+// ErrLocked: the command finishes failed with exactly the locked
+// sentence, and nothing was written (T1).
+func TestSessionDecideLeaseLostAfterClaim(t *testing.T) {
+	ctx := context.Background()
+	st := thread.Memory()
+	app, turn, callID := parkedSession(t, st)
+	agent := core.New(wefttest.Script(wefttest.Say("done")))
+	if err := app.Close(ctx); err != nil { // the app's writer is gone: the lease is free
+		t.Fatal(err)
+	}
+	re, err := thread.Open(ctx, st, app.ID(), agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = re.Close(ctx) }()
+	var other *thread.Session
+	f := newFakeStudio(t)
+	f.ackStatus = func(a ack) int {
+		if a.CommandID == "cmd_lost" && a.State == "accepted" {
+			// Claimed by re; now the hold ends and another writer takes it.
+			if err := st.(thread.Releaser).Release(ctx, app.ID()); err != nil {
+				t.Errorf("release: %v", err)
+			}
+			o, err := thread.Open(ctx, st, app.ID(), agent)
+			if err != nil {
+				t.Errorf("open: %v", err)
+				return http.StatusOK
+			}
+			if err := o.Claim(ctx); err != nil {
+				t.Errorf("the other writer's claim: %v", err)
+			}
+			other = o
+		}
+		return http.StatusOK
+	}
+	ts := httptest.NewServer(f.handler())
+	t.Cleanup(ts.Close)
+	newSessionsLink(t, ts.URL, func(context.Context, string) (*thread.Session, func(), error) { return re, nil, nil })
+	before := storedEntries(t, st, app.ID())
+	f.frames <- decideFrame("cmd_lost", re, turn, callID, "approve")
+	f.waitAck(t, 2)
+	f.mu.Lock()
+	acc, fin := f.acks[0], f.acks[1]
+	f.mu.Unlock()
+	if acc.State != "accepted" || fin.State != "finished" || fin.Status != "failed" || fin.Error != refusedLocked {
+		t.Errorf("acks = %+v, %+v; want accepted, then finished failed %q", acc, fin, refusedLocked)
+	}
+	if after := storedEntries(t, st, app.ID()); after != before {
+		t.Errorf("a decision refused ErrLocked wrote: %d entries, had %d", after, before)
+	}
+	if other != nil {
+		_ = other.Close(ctx)
+	}
+}
+
+// TestSessionDecideRequiresSigned: a session under thread.RequireSigned
+// refuses an unsigned Decide at its door, so the runtime refuses the
+// decision before its ack — rejected, the reason naming signed
+// decisions — and writes nothing.
+func TestSessionDecideRequiresSigned(t *testing.T) {
+	ring, err := thread.NewKeyring(thread.Key{ID: "k1", Secret: []byte("a-test-keyring-secret-32-bytes!!"), Active: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := thread.Memory()
+	s, turn, callID := parkedSession(t, st, thread.WithKeyring(ring), thread.RequireSigned())
+	defer func() { _ = s.Close(context.Background()) }()
+	f := newFakeStudio(t)
+	ts := httptest.NewServer(f.handler())
+	t.Cleanup(ts.Close)
+	newSessionsLink(t, ts.URL, func(context.Context, string) (*thread.Session, func(), error) { return s, nil, nil })
+	before := storedEntries(t, st, s.ID())
+	f.frames <- decideFrame("cmd_signed", s, turn, callID, "approve")
+	f.waitAck(t, 1)
+	time.Sleep(20 * time.Millisecond)
+	f.mu.Lock()
+	acks := append([]ack(nil), f.acks...)
+	f.mu.Unlock()
+	if len(acks) != 1 || acks[0].State != "rejected" || acks[0].Error != refusedSigned {
+		t.Errorf("acks = %+v, want one rejected %q", acks, refusedSigned)
+	}
+	if after := storedEntries(t, st, s.ID()); after != before {
+		t.Errorf("a refused decision wrote: %d entries, had %d", after, before)
+	}
+	if len(s.Pending()) != 1 {
+		t.Error("the call is no longer pending")
+	}
+}
+
+// TestSessionDenyDefaultReason pins the one deny default: a deny sent
+// with no reason reaches the model as "DENIED: skipped from the devtools
+// panel" — the runtime-started path's words (executor.go), not a second
+// model-visible text.
+func TestSessionDenyDefaultReason(t *testing.T) {
+	ctx := context.Background()
+	st := thread.Memory()
+	s, turn, callID := parkedSession(t, st)
+	defer func() { _ = s.Close(ctx) }()
+	f := newFakeStudio(t)
+	ts := httptest.NewServer(f.handler())
+	t.Cleanup(ts.Close)
+	newSessionsLink(t, ts.URL, func(context.Context, string) (*thread.Session, func(), error) { return s, nil, nil })
+	f.frames <- decideFrame("cmd_deny", s, turn, callID, "deny")
+	f.waitAck(t, 2)
+	next := turn.Next()
+	if next == nil {
+		t.Fatal("the deny did not resume the turn")
+	}
+	if _, err := next.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if skippedReason != "skipped from the devtools panel" {
+		t.Errorf("skippedReason = %q", skippedReason)
+	}
+	for _, m := range s.Context() {
+		for _, p := range m.Content {
+			if tr, ok := p.(core.ToolResultPart); ok && tr.CallID == callID {
+				if !strings.Contains(tr.Content, "skipped from the devtools panel") {
+					t.Errorf("the denied call reads %q", tr.Content)
+				}
+				return
+			}
+		}
+	}
+	t.Error("no result for the denied call")
+}
+
+// decisionRun is what a resumed turn leaves that observers read: the
+// events of the session's runs (as the Tap saw them), the stored entries
+// with the audit's Who/Via removed (who decided is the one honest
+// difference), every run's metadata and the weft.* attributes of every
+// span, by span name, in end order.
+type decisionRun struct {
+	Events   []string
+	Entries  []string
+	Metadata []map[string]string
+	Spans    []string
+}
+
+// parkAndDecide parks a gated deploy in a fresh, deterministic session
+// (ids, clock) traced into its own recorder, lets decide resolve it, and
+// records the resumed turn's run.
+func parkAndDecide(t *testing.T, decide func(s *thread.Session, parked *thread.Turn, callID string) *thread.Turn) decisionRun {
+	t.Helper()
+	ctx := context.Background()
+	var (
+		mu  sync.Mutex
+		out decisionRun
+	)
+	rec := tracetest.NewSpanRecorder()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec))
+	t.Cleanup(func() { _ = tp.Shutdown(ctx) })
+	agent := core.New(
+		wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "deploy", Args: `{"env":"prod"}`}), wefttest.Say("Deployed.")),
+		core.Name("approvals-example"),
+		core.TracerProvider(tp),
+		core.Tap(func(ctx context.Context, ev core.Event) {
+			b, _ := json.Marshal(ev)
+			mu.Lock()
+			defer mu.Unlock()
+			out.Events = append(out.Events, string(b))
+			if _, ok := ev.(core.RunStart); ok {
+				out.Metadata = append(out.Metadata, core.MetadataFromContext(ctx))
+			}
+		}),
+		core.Tool("deploy", "Deploy the service.", func(ctx context.Context, in struct {
+			Env string `json:"env"`
+		}) (string, error) {
+			call, _ := core.CallFromContext(ctx)
+			return fmt.Sprintf("deployed to %s (approved: %v)", in.Env, call.Approved), nil
+		}, core.RequireApproval()),
+	)
+	n := 0
+	ids := func() string { n++; return fmt.Sprintf("e%03d", n) }
+	at := time.Date(2026, 10, 11, 9, 0, 0, 0, time.UTC)
+	st := thread.Memory()
+	s, err := thread.Create(ctx, st, agent, thread.IDs(ids), thread.Clock(func() time.Time { return at }),
+		thread.PublicID("pub_park"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close(ctx) }()
+	parked, err := s.Send(ctx, core.User("Deploy to prod."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := parked.Wait()
+	if err != nil || len(res.Pending) != 1 {
+		t.Fatalf("park: %v %+v", err, res)
+	}
+	resumed := decide(s, parked, res.Pending[0].ID)
+	if resumed == nil {
+		t.Fatal("no resumed turn")
+	}
+	if _, err := resumed.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WaitIdle(ctx); err != nil {
+		t.Fatal(err)
+	}
+	_, entries, _, err := st.Load(ctx, s.ID())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		b, _ := json.Marshal(e)
+		var m map[string]any
+		_ = json.Unmarshal(b, &m)
+		delete(m, "who")
+		delete(m, "via")
+		b, _ = json.Marshal(m)
+		out.Entries = append(out.Entries, string(b))
+	}
+	for _, sp := range rec.Ended() {
+		var kv []string
+		for _, a := range sp.Attributes() {
+			if strings.HasPrefix(string(a.Key), "weft.") {
+				kv = append(kv, string(a.Key)+"="+fmt.Sprint(a.Value.AsInterface()))
+			}
+		}
+		sort.Strings(kv)
+		out.Spans = append(out.Spans, sp.Name()+" "+strings.Join(kv, " "))
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	return out
+}
+
+// TestSessionsDecisionIsTheAppsDecision is the acting path's identity
+// golden: a parked turn approved through runtime.Sessions resumes
+// exactly as one the app approved itself with s.Decide — the same
+// events, the same entries (who decided aside), the same run metadata
+// and the same weft.* span attributes. Whatever the runtime adds on the
+// way (a context value, a metadata key) shows up here.
+func TestSessionsDecisionIsTheAppsDecision(t *testing.T) {
+	ctx := context.Background()
+	own := parkAndDecide(t, func(s *thread.Session, _ *thread.Turn, callID string) *thread.Turn {
+		turn, err := s.Decide(ctx, thread.Approve(callID))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return turn
+	})
+	viaRuntime := parkAndDecide(t, func(s *thread.Session, parked *thread.Turn, callID string) *thread.Turn {
+		f := newFakeStudio(t)
+		ts := httptest.NewServer(f.handler())
+		t.Cleanup(ts.Close)
+		newSessionsLink(t, ts.URL, func(context.Context, string) (*thread.Session, func(), error) { return s, nil, nil })
+		f.frames <- sessionFrame(sessionCommand{CommandID: "cmd_same", Verb: verbDecide, PublicID: "pub_park",
+			SessionID: s.ID(), RunID: parked.RunID(), CallID: callID, Decision: "approve", Actor: "devtools"})
+		f.waitAck(t, 2)
+		f.mu.Lock()
+		fin := f.acks[1]
+		f.mu.Unlock()
+		if fin.Status != "succeeded" {
+			t.Fatalf("decision ack = %+v", fin)
+		}
+		return parked.Next()
+	})
+	if len(own.Spans) == 0 || len(own.Metadata) != 2 {
+		t.Fatalf("nothing recorded: %+v", own)
+	}
+	for name, pair := range map[string][2]any{
+		"events": {own.Events, viaRuntime.Events}, "entries": {own.Entries, viaRuntime.Entries},
+		"metadata": {own.Metadata, viaRuntime.Metadata}, "spans": {own.Spans, viaRuntime.Spans},
+	} {
+		if !reflect.DeepEqual(pair[0], pair[1]) {
+			t.Errorf("the runtime's decision differs from the app's in its %s:\napp     %v\nruntime %v", name, pair[0], pair[1])
+		}
 	}
 }

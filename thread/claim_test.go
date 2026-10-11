@@ -8,6 +8,7 @@ import (
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
+	"github.com/weftgo/weft/thread/jsonl"
 )
 
 // Claim is the first write's lease check asked ahead of it: the writer
@@ -16,8 +17,18 @@ import (
 // closed, the second one is stale; a fresh Open claims, and from then
 // on the lease is its own (the old writer, closed, is ErrClosed).
 func TestClaim(t *testing.T) {
+	t.Run("memory", func(t *testing.T) { testClaim(t, thread.Memory()) })
+	t.Run("jsonl", func(t *testing.T) {
+		st, err := jsonl.Open(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		testClaim(t, st)
+	})
+}
+
+func testClaim(t *testing.T, st thread.Storage) {
 	ctx := context.Background()
-	st := thread.Memory()
 	agent := core.New(wefttest.Script())
 
 	writer, err := thread.Create(ctx, st, agent)
@@ -54,14 +65,17 @@ func TestClaim(t *testing.T) {
 	if err := reader.Claim(ctx); !errors.Is(err, thread.ErrStale) {
 		t.Fatalf("a stale Session's claim = %v, want ErrStale", err)
 	}
-	_ = reader.Close(ctx)
+	// The refused claim gave the lease back: a fresh Session claims
+	// while the stale one is still open (never closed — a resolver's
+	// cached Session with no release).
 	again, err := thread.Open(ctx, st, writer.ID(), agent)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := again.Claim(ctx); err != nil {
-		t.Fatalf("a fresh Open's claim = %v", err)
+		t.Fatalf("a fresh Open's claim after another's ErrStale = %v, want nil", err)
 	}
+	defer func() { _ = reader.Close(ctx) }()
 	third, err := thread.Open(ctx, st, writer.ID(), agent)
 	if err != nil {
 		t.Fatal(err)

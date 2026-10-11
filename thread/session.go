@@ -3,6 +3,7 @@ package thread
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -803,7 +804,8 @@ func (s *Session) Storage() Storage {
 // nil when this Session holds the lease (or the storage has no Leaser
 // to ask), ErrLocked while another writer holds the session (nothing
 // is taken, nothing changes), ErrStale when the stored session moved
-// past this Session's view (open it again), ErrClosed once Close
+// past this Session's view (open it again; the lease is given back, so
+// a fresh Session can claim it), ErrClosed once Close
 // sealed the Session. A Session that claimed holds the lease until
 // Close, as one that wrote does.
 //
@@ -821,7 +823,14 @@ func (s *Session) Claim(ctx context.Context) error {
 		return err
 	}
 	if w, ok := s.st.(*leased); ok {
-		return w.acquire(ctx)
+		err := w.acquire(ctx)
+		if errors.Is(err, ErrStale) {
+			// acquire took the lease before it compared the counts: give
+			// it back, so a refused Claim leaves the session as it found
+			// it — the next Session opened on it may write.
+			_ = w.lease.Yield(context.WithoutCancel(ctx), w.session, w)
+		}
+		return err
 	}
 	return nil
 }

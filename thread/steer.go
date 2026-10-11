@@ -118,6 +118,49 @@ func (s *Session) steerSource(_ context.Context, at core.SteerPoint) []core.Mess
 	return msgs
 }
 
+// Steer delivers msgs into the turn running now, exactly as Send under
+// the Steer policy does on a busy session (ADR 0019): each message is
+// accepted durably — its queued receipt entry appended and flushed — and
+// handed to the run's next drain point. The check and the acceptance
+// happen under the session's lock, with no window between them: when no
+// turn is running at that moment — the session idle, between turns, or
+// parked at an approval boundary — Steer returns ErrNotRunning and
+// writes nothing. Where Send(…, As(Steer)) on an idle session runs the
+// message as a plain turn, Steer never starts a turn of its own.
+//
+// A delivered steer keeps ADR 0019's rule for one that misses its drain
+// point: when the running turn meets an intended end (StopWhen), parks,
+// or ends before a drain point takes it, the steer becomes a deferred
+// follow-up turn. Every message must be RoleUser (core.ErrInvalidSteer,
+// checked before anything is written); a closed session is ErrClosed.
+// It is the verb for a caller that acts on a turn it does not own — the
+// devtools debugger through weft/runtime's Sessions.
+func (s *Session) Steer(ctx context.Context, msgs ...core.Message) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	for _, m := range msgs {
+		if m.Role != core.RoleUser {
+			return fmt.Errorf("thread: %w: a steered message must be RoleUser, got %q — the model's own turns come from the model",
+				core.ErrInvalidSteer, m.Role)
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.admitLocked(); err != nil {
+		return err
+	}
+	if !s.busyLocked() {
+		return fmt.Errorf("%w: session %s", ErrNotRunning, s.header.ID)
+	}
+	for _, m := range msgs {
+		if _, err := s.steerSendLocked(ctx, m, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // steerSendLocked is Send's Steer path (called under mu): the queued
 // receipt entry is appended and flushed — accepted input is durable
 // input (ADR 0011 §4) — and the message joins the live steer queue,

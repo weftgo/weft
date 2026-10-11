@@ -34,7 +34,14 @@ const (
 	refusedNoTurn    = "no running turn to steer"
 	refusedCancel    = "cancel is not supported on an app turn"
 	refusedNoOption  = "this runtime does not act on the app's sessions: runtime.Sessions(...) is not set"
+	refusedSigned    = "this session requires signed decisions: decide it in the app (thread.DecideSigned)"
 )
+
+// skippedReason is the deny reason a decision without one carries — the
+// text the model sees after "DENIED: ". One default for every deny the
+// devtools panel sends: a runtime-started run's (executor.go) and an app
+// turn's.
+const skippedReason = "skipped from the devtools panel"
 
 // sessionResolveTimeout bounds one SessionResolver call, as
 // resolveTimeout bounds a ModelResolver's: the resolve runs before the
@@ -80,16 +87,21 @@ func (l *link) dispatchSession(ctx context.Context, sc sessionCommand) {
 
 	switch sc.Verb {
 	case verbDecide:
+		if s.RequiresSigned() {
+			// thread refuses an unsigned Decide at its door: say so
+			// before the ack, not as a failure after it.
+			reject(refusedSigned)
+			return
+		}
 		if reason := checkPending(s, sc); reason != "" {
 			reject(reason)
 			return
 		}
-	case verbSteer:
-		if !runInFlight(s, sc.RunID) {
-			reject(fmt.Sprintf("%s (run %s is not in flight on session %s)", refusedNoTurn, sc.RunID, sc.SessionID))
-			return
-		}
 	}
+	// A steer has no check here: whether a turn is running is only true
+	// under the session's lock, so Session.Steer decides it atomically
+	// after the ack — ErrNotRunning is the finished/failed "no running
+	// turn to steer", and nothing was written.
 
 	if res := l.postAck(ack{CommandID: sc.CommandID, State: "accepted", RunID: sc.RunID}); res != ackTaken {
 		l.settleUnconfirmed(sc.CommandID, res, notConfirmed)
@@ -115,16 +127,21 @@ func (l *link) dispatchSession(ctx context.Context, sc sessionCommand) {
 			finalRun = turn.RunID() // the resume: the session's next turn, the app's run
 		}
 	case verbSteer:
-		_, err = s.Send(actx, core.User(sc.Message), thread.As(thread.Steer))
+		// Delivered only into the turn running now; never a turn of its
+		// own (thread.ErrNotRunning otherwise, nothing written).
+		err = s.Steer(actx, core.User(sc.Message))
 	}
 	stopBeat()
 	if err != nil {
 		text := err.Error()
-		if errors.Is(err, thread.ErrLocked) {
+		switch {
+		case errors.Is(err, thread.ErrLocked):
 			// Claimed above, lost since (another writer took the session
 			// in between): nothing was written — T1 — and the words are
 			// the refusal's.
 			text = refusedLocked
+		case errors.Is(err, thread.ErrNotRunning):
+			text = fmt.Sprintf("%s (session %s is not running a turn)", refusedNoTurn, sc.SessionID)
 		}
 		slog.Warn("weft/runtime: session command failed", "command_id", sc.CommandID,
 			"session", sc.SessionID, "verb", sc.Verb, "err", err)
@@ -170,7 +187,7 @@ func decisionOf(sc sessionCommand) thread.Decision {
 	case "approve":
 		d = thread.Approve(sc.CallID)
 	case "deny":
-		d = thread.Deny(sc.CallID, orDefault(sc.Reason, "denied from the devtools panel"))
+		d = thread.Deny(sc.CallID, orDefault(sc.Reason, skippedReason))
 	default: // resolve
 		d = thread.Resolve(sc.CallID, sc.Content)
 	}
@@ -200,7 +217,11 @@ func (l *link) resolveSession(ctx context.Context, sc sessionCommand) (s *thread
 				s.ID(), sc.PublicID, sc.SessionID)
 		}
 		if err == nil {
-			err = s.Claim(ctx)
+			// Bounded like the resolve: both run before the ack, inside
+			// Studio's ack window.
+			cctx, cancel := context.WithTimeout(ctx, sessionResolveTimeout)
+			err = s.Claim(cctx)
+			cancel()
 		}
 		switch {
 		case err == nil:
@@ -286,30 +307,4 @@ func checkPending(s *thread.Session, sc sessionCommand) string {
 		return fmt.Sprintf("session %s has no parked call: call %q is not pending", sc.SessionID, sc.CallID)
 	}
 	return fmt.Sprintf("call %q is not pending on session %s (pending: %s)", sc.CallID, sc.SessionID, strings.Join(ids, ", "))
-}
-
-// runInFlight reports whether runID is a turn of s that started and has
-// not ended, by the session's own entries: its prompt entry (or its
-// resume's "started" audit step) is there, its turn entry is not. A
-// turn that lands between this check and the steer's Send meets
-// thread's own rule for a steer that misses its turn.
-func runInFlight(s *thread.Session, runID string) bool {
-	started := false
-	for _, e := range s.Entries() {
-		switch e := e.(type) {
-		case thread.MessageEntry:
-			if e.RunID == runID {
-				started = true
-			}
-		case thread.ApprovalAuditEntry:
-			if e.RunID == runID && e.Step == thread.StepResume && e.Outcome == "started" {
-				started = true
-			}
-		case thread.TurnEntry:
-			if e.RunID == runID {
-				return false
-			}
-		}
-	}
-	return started
 }

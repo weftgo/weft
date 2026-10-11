@@ -418,7 +418,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    thread.As(p) per Send; queued sends and steers are receipt entries, durable at acceptance —
 //    s.Queue(), s.ClearQueue(ctx) (their Turns end ErrDropped), s.Continue(ctx) runs what Open restored.
 //    Tree: s.Context(), s.Entries(), s.Path(id), s.Branch(ctx, id[, thread.SummarizeLeft()]), s.Fork(ctx,
-//    id), s.Label, s.SetInfo (rejects "weft." keys), s.Custom, s.CustomMessage, s.Pin; s.Claim(ctx) (the writer lease now, no write: ErrLocked / ErrStale / ErrClosed).
+//    id), s.Label, s.SetInfo (rejects "weft." keys), s.Custom, s.CustomMessage, s.Pin; s.Claim(ctx) (the writer lease now, no write: ErrLocked / ErrStale — the lease given back — / ErrClosed); s.Steer(ctx, msgs...) (into the turn running now only, else ErrNotRunning, nothing written; never a turn of its own); s.RequiresSigned().
 //    Compaction (ADR 0020): thread.ContextWindow(n) arms it; s.Compact(ctx[, thread.SummaryInstructions(
 //    "…")]), s.PreviewCompaction, s.ApplyCompaction, s.Uncompact; thread.NoAutoCompact(), SummaryModel,
 //    ClearOldToolResults(n), BeforeCompact (thread.Proceed() | Cancel() | Replace(c)); overflow re-runs once.

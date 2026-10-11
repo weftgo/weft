@@ -150,7 +150,8 @@ Consequences for a deployment:
   with the one it loaded. It catches a writer that appended behind it
   and a session deleted and re-created under the same id; it is not a
   content comparison of the entries.
-- `s.Claim(ctx)` asks the lease question ahead of a write: it takes the lease for this Session (nil for the holder), or fails `ErrLocked` / `ErrStale` / `ErrClosed` and changes nothing — weft/runtime's `Sessions` asks it before acking a debugger's decision.
+- `s.Claim(ctx)` asks the lease question ahead of a write: it takes the lease for this Session (nil for the holder), or fails `ErrLocked` / `ErrStale` / `ErrClosed` and changes nothing — on `ErrStale` the lease the check took is given back, so the next Session opened on the session can claim it — weft/runtime's `Sessions` asks it before acking a debugger's decision.
+- `s.Steer(ctx, msgs...)` is the steer for a caller that does not own the turn (the devtools debugger): delivered into the turn running now, exactly as `Send(…, As(Steer))` on a busy session; `ErrNotRunning` and nothing written when none is — idle, between turns, parked, or a session reopened from a crash mid-turn (its prompt is durable, but nothing runs in the reopened value).
 - **A Session someone forgot to close** holds its lease for the life
   of the process. `st.(thread.Releaser).Release(ctx, id)` ends the
   hold whoever has it — the escape hatch, to be used only when that

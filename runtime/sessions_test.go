@@ -330,8 +330,8 @@ func TestAppTurnWithoutSessionsIsReadOnly(t *testing.T) {
 }
 
 // TestAppSessionSteerAndCancel: with runtime.Sessions, a steer on an
-// app turn that is not in flight is refused "no running turn to steer"
-// (a debugger never starts a turn), a steer on the running turn is
+// app turn with no turn running now fails "no running turn to steer"
+// (thread.Session.Steer: ErrNotRunning, nothing written), a steer on the running turn is
 // delivered through the app's Session (thread's Steer policy: the turn
 // sees the message and the command finishes), and cancel is refused
 // "cancel is not supported on an app turn" — thread has no per-turn
@@ -428,19 +428,21 @@ func TestAppSessionSteerAndCancel(t *testing.T) {
 	}
 
 	// The turn is over: a second steer has nothing to steer into.
+	// Session.Steer decides it under the session's lock, after the ack:
+	// the command finishes failed, and nothing was written.
 	e.waitStored(t, turn.RunID())
+	entries := len(s.Entries())
 	code, body = e.api(t, http.MethodPost, "/api/runs/"+turn.RunID()+"/steer", `{"message":"too late"}`)
 	if code != http.StatusAccepted {
 		t.Fatalf("late steer = %d %s", code, body)
 	}
-	row = e.waitCommand(t, commandOf(t, body), "rejected")
-	if !strings.Contains(row, "no running turn to steer") {
+	row = e.waitCommand(t, commandOf(t, body), "finished")
+	if !strings.Contains(row, `"status":"failed"`) || !strings.Contains(row, "no running turn to steer") {
 		t.Errorf("late steer's command = %s", row)
 	}
-	entries := len(s.Entries())
 	time.Sleep(20 * time.Millisecond)
 	if len(s.Entries()) != entries {
-		t.Error("a refused steer started a turn")
+		t.Error("a refused steer wrote to the session")
 	}
 
 	// A public id the resolver does not answer.

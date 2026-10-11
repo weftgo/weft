@@ -171,6 +171,15 @@ func Threads(store thread.Storage) Option {
 // public id is not this app's: the command is refused "no session for
 // this public id".
 //
+// Return the app's LIVE Session when it has one. An opened one works,
+// with two consequences: the runtime holds its writer lease through the
+// whole resumed turn (release is its Close, which drains that turn
+// first; the app's own writes to the session fail ErrLocked meanwhile),
+// and the resumed run's context carries none of the app's values — it
+// is the runtime's, detached from the command — so anything the app
+// puts on the context of its own turns (loggers, tenancy, deadlines) is
+// absent from that one.
+//
 // An error is the refusal's reason: thread.ErrLocked (wrapped or not)
 // is refused "the app is writing this session; fork instead", and
 // thread.ErrStale makes the runtime release and ask once more. Any
@@ -187,9 +196,12 @@ type SessionResolver func(ctx context.Context, publicID string) (s *thread.Sessi
 //     Resolve), which resumes the turn under thread's rules (the parked
 //     turn's Next) — the resumed run is the app's run, with its own
 //     weft.session.id and weft.turn, never a playground run;
-//   - a steer is a Send under thread.As(thread.Steer), refused "no
-//     running turn to steer" unless the run is in flight on the session
-//     (a debugger never starts a new turn);
+//   - a steer is delivered only into a turn running now
+//     (thread.Session.Steer; thread.ErrNotRunning otherwise — the command
+//     finishes failed "no running turn to steer", nothing written); a
+//     delivered steer that misses its drain point (StopWhen, a park, the
+//     run ending first) becomes a follow-up turn under ADR 0019's own
+//     rule;
 //   - cancel is refused "cancel is not supported on an app turn":
 //     thread has no per-turn cancel (Interrupt replaces the turn with a
 //     message), and the runtime does not invent one.
@@ -198,9 +210,13 @@ type SessionResolver func(ctx context.Context, publicID string) (s *thread.Sessi
 // Session's lease (Session.Claim) before it acks, so a Session that
 // cannot write — another writer holds the session — is refused "the
 // app is writing this session; fork instead" and nothing is written; a
-// stale one is released and resolved once more. A session that
-// requires signed decisions (thread.RequireSigned) refuses the
-// runtime's unsigned Decide with thread's own error.
+// stale one is released and resolved once more. The claim is bounded
+// like the resolve (10 s). A session that requires signed decisions
+// (thread.RequireSigned; Session.RequiresSigned) is refused before the
+// ack, "this session requires signed decisions": the runtime decides
+// unsigned only, and the app decides it with DecideSigned. A deny
+// without a reason reaches the model as "skipped from the devtools
+// panel", the runtime-started runs' words.
 //
 // Opt-in: without Sessions the app's turns stay viewer-only, the
 // registration says sessions: false, and nothing about the app's runs

@@ -553,6 +553,10 @@ func TestSentinelsAreMatchable(t *testing.T) {
 				core.Steering(func(context.Context, core.SteerPoint) []core.Message { return nil })))
 			return err
 		}},
+		{"ErrNotRunning/Steer on an idle session", thread.ErrNotRunning, func(t *testing.T) error {
+			s := sentinelCreate(t, thread.Memory(), core.New(wefttest.Script()))
+			return s.Steer(sentinelCtx(t), core.User("anyone there?"))
+		}},
 		{"core.ErrInvalidSteer/a steer that is not a user message", core.ErrInvalidSteer, func(t *testing.T) error {
 			h := sentinelHeld(t)
 			_, err := h.s.Send(sentinelCtx(t),
@@ -569,7 +573,7 @@ func TestSentinelsAreMatchable(t *testing.T) {
 		covered[row.sentinel] = true
 	}
 	for name, sentinel := range map[string]error{
-		"ErrBusy": thread.ErrBusy, "ErrNotFound": thread.ErrNotFound, "ErrExists": thread.ErrExists,
+		"ErrBusy": thread.ErrBusy, "ErrNotRunning": thread.ErrNotRunning, "ErrNotFound": thread.ErrNotFound, "ErrExists": thread.ErrExists,
 		"ErrLocked": thread.ErrLocked, "ErrStale": thread.ErrStale, "ErrCorrupt": thread.ErrCorrupt,
 		"ErrNewerFormat": thread.ErrNewerFormat, "ErrNotPending": thread.ErrNotPending,
 		"ErrUnknownKey": thread.ErrUnknownKey, "ErrBadSignature": thread.ErrBadSignature,

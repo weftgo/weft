@@ -279,3 +279,30 @@ same sentinel the loop raises for a source that returns one — before
 any receipt is written. `weft.Steering` passed through
 `thread.RunOptions` is refused with `weft.ErrInvalidRunOption`: the
 session owns the steering source of every run it starts.
+
+## Amendment 2026-10-11 — Steer (F4.1): a steer for a caller that does not own the turn
+
+`Send(…, As(Steer))` on a session with nothing running runs the message
+as a plain turn (above). That is right for the session's owner and
+wrong for a debugger acting on the app's turn from outside (weft/runtime's
+`Sessions`): its "is a turn running?" check, made before the Send,
+could never be atomic with it — a turn landing in between, or a session
+reopened from a crash mid-turn (its prompt durable, its end never
+written, nothing running in the reopened value), turned the debugger's
+steer into a turn of its own.
+
+`thread.Session.Steer(ctx, msgs...)` is that caller's verb. Under the
+session's lock it checks that a turn is running now and, in the same
+critical section, accepts the messages exactly as a Steer-policy Send
+does on a busy session — durable queued receipts, handed to the running
+turn's next drain point. When no turn is running (idle, between turns,
+or parked at an approval boundary — a parked turn has ended) it returns
+`thread.ErrNotRunning` and writes nothing. It never starts a turn.
+
+The caveat is this ADR's own rule, unchanged: a steer `Steer` delivered
+that then misses its drain point — the turn meets StopWhen, parks, or
+ends before a drain point takes it — defers to a follow-up turn under
+the aimed turn's options. "Never starts a turn" is about the call; the
+deferral is the delivered steer's fate, recorded on its receipt.
+Nothing here is model-visible: the message joins the transcript as any
+delivered steer does.

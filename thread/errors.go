@@ -14,6 +14,13 @@ var (
 	// same call succeeds once the turn has ended.
 	ErrBusy = errors.New("thread: session is busy with another turn")
 
+	// ErrNotRunning is returned by Session.Steer when no turn is running
+	// now — the session is idle, between turns, or parked at an approval
+	// boundary (a parked turn has ended): there is nothing to steer into,
+	// and nothing was written. Send under the Steer policy would run the
+	// message as a turn of its own; Steer never does.
+	ErrNotRunning = errors.New("thread: no turn is running")
+
 	// ErrNotFound is returned by Load, Append, and Delete for a session
 	// id the storage does not hold.
 	ErrNotFound = errors.New("thread: session not found")

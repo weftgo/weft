@@ -1251,7 +1251,7 @@ func (l *link) resume(ctx context.Context, pr *parkedRun, runID, commandID strin
 			case "approve":
 				td = thread.Approve(d.CallID)
 			case "deny":
-				td = thread.Deny(d.CallID, orDefault(d.Reason, "skipped from the devtools panel"))
+				td = thread.Deny(d.CallID, orDefault(d.Reason, skippedReason))
 			default: // resolve
 				td = thread.Resolve(d.CallID, d.Content)
 			}
@@ -1277,7 +1277,7 @@ func (l *link) resume(ctx context.Context, pr *parkedRun, runID, commandID strin
 		case "approve":
 			opts = append(opts, core.Approve(d.CallID))
 		case "deny":
-			opts = append(opts, core.Deny(d.CallID, orDefault(d.Reason, "skipped from the devtools panel")))
+			opts = append(opts, core.Deny(d.CallID, orDefault(d.Reason, skippedReason)))
 		default: // resolve
 			opts = append(opts, core.Resolve(d.CallID, d.Content))
 		}

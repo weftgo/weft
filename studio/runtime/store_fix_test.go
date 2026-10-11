@@ -24,6 +24,21 @@ func postAck(h http.Handler, a Ack) int {
 	return rec.Code
 }
 
+// shutdownWithin closes rs with its drain bounded by d, then waits for
+// the writer goroutine to be gone — so nothing it logs lands in a later
+// test's capture.
+func shutdownWithin(rs *RuntimeServer, d time.Duration) {
+	ctx, cancel := context.WithTimeout(context.Background(), d)
+	defer cancel()
+	_ = rs.Shutdown(ctx)
+	if rs.writer != nil {
+		select {
+		case <-rs.writer.done:
+		case <-time.After(5 * time.Second):
+		}
+	}
+}
+
 // orderStore records each command's stored states in write order, and
 // counts calls that overlapped another.
 type orderStore struct {
@@ -221,7 +236,7 @@ type levelCount struct {
 
 func (h *levelCount) Enabled(context.Context, slog.Level) bool { return true }
 func (h *levelCount) Handle(_ context.Context, r slog.Record) error {
-	if !strings.HasPrefix(r.Message, "studio/runtime: the command store") {
+	if !strings.HasPrefix(r.Message, "studio/runtime: the command store refused a write") {
 		return nil
 	}
 	h.mu.Lock()
@@ -244,10 +259,10 @@ func TestFailingStoreChangesNothing(t *testing.T) {
 	prev := slog.Default()
 	slog.SetDefault(slog.New(lc))
 	t.Cleanup(func() { slog.SetDefault(prev) })
-	rs := New(WithStore(failingStore{}), func(rs *RuntimeServer) { rs.pruneStoreEvery = 0 })
+	rs := New(WithStore(failingStore{}), func(rs *RuntimeServer) { rs.pruneStoreEvery, rs.breakerPause = 0, 20*time.Millisecond })
 	rs.AckDeadline = 40 * time.Millisecond
 	rs.FinishDeadline = 80 * time.Millisecond
-	defer rs.Close()
+	defer shutdownWithin(rs, 50*time.Millisecond)
 	h := mux(rs)
 	ts := httptest.NewServer(h)
 	defer ts.Close()
@@ -280,7 +295,7 @@ func TestFailingStoreChangesNothing(t *testing.T) {
 	postAck(h, Ack{CommandID: acc.CommandID, State: "accepted", RunID: "pg_acc"})
 	waitState(t, rs, acc.CommandID, StateLost)
 	rs.Snapshot()
-	flush(t, rs)
+	time.Sleep(100 * time.Millisecond) // the breaker re-applies, fails, holds again
 	lc.mu.Lock()
 	defer lc.mu.Unlock()
 	if lc.warns != 1 || lc.debug == 0 {

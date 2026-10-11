@@ -1756,16 +1756,23 @@ experiments/runs joins as before.
 in-memory transition and the HTTP answer never wait for the store. One
 writer goroutine applies them in order (the latest write per key; the
 prune is a queue item, never beside a write), each call bounded at 2 s; a
-failure or timeout trips a breaker that drops writes for 30 s — one WARN,
-then Debug. A store failure changes no command's fate in this Studio. What
-it can do is leave the store older than the memory when Studio stops, and
-an older row is always the safe one: an accepted command stored with an
-older beat is decided lost sooner, never re-run; one stored still queued
-reaches no process but the one it was queued for, which refuses a frame it
-already admitted. `studio.Server.Close` drains the queue (bounded at 5 s)
-before the database closes; a server built with `studio.Handler` is never
-closed, so when its DB is closed under it the writer's next write fails
-and logs that one WARN.
+failure or timeout trips a breaker that holds the queue for 30 s — it keeps
+coalescing per key, so it is bounded by the live keys, not the traffic —
+and then re-applies all of it, the failed write included; a write that
+fails again trips it again, so a dead store holds instead of spinning. One
+WARN, then Debug. A store failure changes no command's fate in this
+Studio. What it can do is leave the store older than the memory when
+Studio stops, and an older row is always the safe one: an accepted
+command stored with an older beat is decided lost sooner, never re-run;
+one stored still queued reaches no process but the one it was queued for,
+which refuses a frame it already admitted. `studio.Server.Close` drains
+the queue (bounded at 5 s) before the database closes; a store down longer
+than that bound loses the writes still held — one WARN names how many
+keys — the only way a row goes absent rather than older. The writer is
+stopped by `studio.Server.Close` alone: a server built with
+`studio.Handler` is never closed and keeps that one goroutine for the
+process's life (harmless); a write it takes after its DB was closed fails
+and logs the one WARN.
 
 **Retention.** The command rows' only retention is
 `obsdb.CommandStore.PruneCommands`, run from the server's own prune
@@ -1790,7 +1797,9 @@ process registering under it is given `<id>-<pid>`, so the old process
 coming back finds its id, commands and run routes (cancel, steer and the
 debugger's verbs keep reaching the runtime that started a run). A
 disconnected entry holding no work is reclaimed by whoever registers
-under its id next, Studio's breakpoint set kept.
+under its id next, Studio's breakpoint set kept. So an approval for a run
+parked more than 10 min on a runtime that went away may reach the process
+that took the id since, which refuses it ("no parked run …").
 
 **The `cwd` field.** `/api/runtimes` rows carry `cwd`, the app's working
 directory — a filesystem path, so under `db.path`'s rule: the server token,

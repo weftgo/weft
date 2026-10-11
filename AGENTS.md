@@ -384,8 +384,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // sha256 — and `<id>-<pid>` when another process holds the id (a live stream, or queued/accepted
 //     // work or a recent run route; register's runtime_id, adopted by the link; a client must send
 //     // `instance`); commands, routes, breakpoints and registrations persist through obsdb.CommandStore
-//     // (plan I3: studio.New passes its DB; one ordered writer off the request path, a 30 s breaker on
-//     // failure), a restarted Studio deciding lost from the stored state (queued past its ack window or
+//     // (plan I3: studio.New passes its DB; one ordered writer off the request path; a failure holds
+//     // its queue 30 s, then re-applies it), a restarted Studio deciding lost from the stored state (queued past its ack window or
 //     // without a stored runtime, accepted past its watch from the stored last beat) and never
 //     // re-sending an accepted command; /api/runtimes gives each runtime connected (a live stream now; a dropped
 //     // one stays listed, false, until pruned; cwd under db.path's rule; restored after a Studio

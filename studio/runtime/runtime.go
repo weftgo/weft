@@ -675,6 +675,10 @@ type RuntimeServer struct {
 	pruneStoreEvery time.Duration
 	loadedAt        time.Time
 	noInstance      sync.Once
+	// breakerPause is how long the writer holds its queue after a
+	// failed store call (storeBreakerPause; a field so a test can
+	// shorten it).
+	breakerPause time.Duration
 }
 
 // connected is one registered runtime and its live command stream.
@@ -739,6 +743,7 @@ func New(opts ...Option) *RuntimeServer {
 		manifests:       map[manifestKey]*ManifestSource{},
 		now:             time.Now,
 		pruneStoreEvery: storePruneEvery,
+		breakerPause:    storeBreakerPause,
 	}
 	for _, o := range opts {
 		if o != nil {
@@ -1187,7 +1192,10 @@ func (rs *RuntimeServer) serveAcks(w http.ResponseWriter, r *http.Request) {
 		if row.Thread == "fork" {
 			rs.runFork[a.RunID] = true
 		}
-		rs.saveRouteLocked(a.RunID, row.CommandID)
+		// The route is queued after the command's own write (below): a
+		// stop between the two must never leave a stored route whose
+		// command does not name the run (load rebuilds the reverse).
+		defer rs.saveRouteLocked(a.RunID, row.CommandID)
 	}
 	// changed: the ack moved the row, or was a heartbeat on it — the
 	// row is written through (with the ack) after the switch.

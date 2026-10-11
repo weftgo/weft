@@ -44,8 +44,11 @@ module, ADR 0005).
   breakpoint sets and registrations are written through by one ordered
   writer goroutine — the hot path only queues (the latest write per key;
   the prune a queue item, never beside a Put), each store call bounded at
-  2 s, a failure tripping a 30 s breaker that drops writes (one WARN, then
-  Debug); Close drains the queue, bounded — and loaded back on a Studio
+  2 s, a failure tripping a 30 s breaker that holds the queue (still
+  coalescing per key) and then re-applies it, the failed write included
+  (one WARN, then Debug); Close drains the queue, bounded — a store down
+  longer than that bound loses the writes still held, with a WARN naming
+  how many keys — and loaded back on a Studio
   restart: a restarted Studio lists its runtimes (`restored: true`,
   `connected: false`, for at least 10 min after the load) with their
   breakpoints, answers pre-restart commands, decides `lost` from the

@@ -205,11 +205,11 @@ func LoadPricing(file string) (PricingTable, error) {
 // pricingFileShape is what a file may hold: the table, plus the source
 // and path the settings route adds (so its export loads back).
 type pricingFileShape struct {
-	Dated  *string           `json:"dated"`
-	Note   string            `json:"note"`
-	Models *[]modelPriceFile `json:"models"`
-	Source string            `json:"source"`
-	Path   string            `json:"path"`
+	Dated  *string            `json:"dated"`
+	Note   string             `json:"note"`
+	Models *[]json.RawMessage `json:"models"`
+	Source string             `json:"source"`
+	Path   string             `json:"path"`
 }
 
 type modelPriceFile struct {
@@ -231,21 +231,32 @@ func parsePricing(b []byte, name string) (PricingTable, error) {
 	fail := func(field, format string, args ...any) (PricingTable, error) {
 		return PricingTable{}, fmt.Errorf("pricing %s: %s: "+format, append([]any{name, field}, args...)...)
 	}
-	dec := json.NewDecoder(bytes.NewReader(b))
-	dec.DisallowUnknownFields()
-	var f pricingFileShape
-	if err := dec.Decode(&f); err != nil {
-		var te *json.UnmarshalTypeError
-		if errors.As(err, &te) && te.Field != "" {
-			return fail(indexRe.ReplaceAllString(te.Field, "[$1]"), "want a %s, got %s", te.Type, te.Value)
+	// Each row is decoded on its own so the field an error names is
+	// "models[i].<field>" whatever encoding/json puts in its own Field
+	// (Go 1.26 names "models.input", 1.27 "models.0.input").
+	decode := func(raw []byte, v any, prefix string) (PricingTable, error, bool) {
+		dec := json.NewDecoder(bytes.NewReader(raw))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(v); err != nil {
+			var te *json.UnmarshalTypeError
+			if errors.As(err, &te) && te.Field != "" {
+				pt, e := fail(prefix+indexRe.ReplaceAllString(te.Field, "[$1]"), "want a %s, got %s", te.Type, te.Value)
+				return pt, e, true
+			}
+			if msg, ok := strings.CutPrefix(err.Error(), "json: unknown field "); ok {
+				pt, e := fail(prefix+strings.Trim(msg, `"`), "unknown field (the shape is {dated, note, models: [{provider, model_glob, input, output, cached_input, cache_write, reasoning}]})")
+				return pt, e, true
+			}
+			return PricingTable{}, fmt.Errorf("pricing %s: does not parse: %w", name, err), true
 		}
-		if msg, ok := strings.CutPrefix(err.Error(), "json: unknown field "); ok {
-			return fail(strings.Trim(msg, `"`), "unknown field (the shape is {dated, note, models: [{provider, model_glob, input, output, cached_input, cache_write, reasoning}]})")
+		if dec.More() {
+			return PricingTable{}, fmt.Errorf("pricing %s: does not parse: more than one JSON value", name), true
 		}
-		return PricingTable{}, fmt.Errorf("pricing %s: does not parse: %w", name, err)
+		return PricingTable{}, nil, false
 	}
-	if dec.More() {
-		return PricingTable{}, fmt.Errorf("pricing %s: does not parse: more than one JSON value", name)
+	var f pricingFileShape
+	if pt, err, bad := decode(b, &f, ""); bad {
+		return pt, err
 	}
 	if f.Dated == nil || *f.Dated == "" {
 		return fail("dated", "missing (the day the rates were read, YYYY-MM-DD)")
@@ -257,8 +268,12 @@ func parsePricing(b []byte, name string) (PricingTable, error) {
 		return fail("models", "missing (a list of rows; [] prices nothing)")
 	}
 	t := PricingTable{Dated: *f.Dated, Note: f.Note, Models: make([]ModelPrice, 0, len(*f.Models))}
-	for i, m := range *f.Models {
+	for i, raw := range *f.Models {
 		at := func(field string) string { return "models[" + strconv.Itoa(i) + "]." + field }
+		var m modelPriceFile
+		if pt, err, bad := decode(raw, &m, at("")); bad {
+			return pt, err
+		}
 		if m.Provider == nil || *m.Provider == "" {
 			return fail(at("provider"), "missing")
 		}

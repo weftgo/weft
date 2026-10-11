@@ -14,6 +14,11 @@ module, ADR 0005).
   the size ledger do (the pure-JS deflate over the normalized version
   stamp) instead of node's zlib at its default level, which read ≈ 700 B
   larger and refused the 0.14.0 bundle the build had passed.
+- `studio.LoadPricing` names the field of a wrong-typed rate the same
+  under every Go version (`models[0].input: want a float64`): each row is
+  decoded on its own, so the path no longer depends on what
+  encoding/json puts in its error (Go 1.26 said `models.input`, 1.27
+  `models.0.input`; CI on 1.26 failed TestPricingFile at 0.14.0).
 
 ## 0.14.0 — 2026-10-11
 

@@ -21,6 +21,12 @@ module, ADR 0005).
   of returning at once with the ledger still parked (or `nil`); a panic while
   recording a settlement no longer leaves every later `Wait` on that receipt
   blocked.
+- otel: `Pipeline.Shutdown` is bounded by its context: the heartbeat goroutine
+  stops between records instead of finishing its pass (one synchronous Local
+  write per open run, each queued behind every run's), and Shutdown waits for
+  it under ctx — a Local sink behind another process's write lock held `defer
+  otel.Install()()` for SQLite's 30 s busy timeout per open run. A concurrent
+  or later Shutdown returns the first's result, or its own ctx's error.
 
 ## 0.14.2 — 2026-10-11
 

@@ -3,6 +3,7 @@ package otel
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"errors"
 	"log/slog"
 	"math"
@@ -338,7 +339,7 @@ func TestHeartbeatCarriesNoEventContract(t *testing.T) {
 	capture := &recordCapture{}
 	provider := sdklog.NewLoggerProvider(sdklog.WithProcessor(sdklog.NewSimpleProcessor(capture)))
 	defer func() { _ = provider.Shutdown(context.Background()) }()
-	heartbeats(context.Background(), provider.Logger(instrumentationName), tr)
+	heartbeats(context.Background(), provider.Logger(instrumentationName), tr, nil)
 	if len(capture.records) != 1 {
 		t.Fatalf("%d heartbeats for one open run", len(capture.records))
 	}
@@ -657,11 +658,132 @@ func TestConcurrentRunsAcrossShutdown(t *testing.T) {
 				t.Errorf("Shutdown: %v", err)
 			}
 		case <-time.After(20 * time.Second):
-			t.Fatal("Shutdown deadlocked under concurrent runs")
+			t.Fatalf("Shutdown deadlocked under concurrent runs\n%s", goroutineDump())
 		}
 	}
 	wg.Wait()
 	_ = p.ForceFlush(context.Background()) // use after shutdown: an error at most, never a panic
+}
+
+// goroutineDump is every goroutine's stack: what a hang test prints on
+// its timeout, so a CI failure names the wait instead of only the test.
+func goroutineDump() string {
+	buf := make([]byte, 1<<20)
+	for {
+		n := runtime.Stack(buf, true)
+		if n < len(buf) {
+			return string(buf[:n])
+		}
+		buf = make([]byte, 2*len(buf))
+	}
+}
+
+// Shutdown is bounded by its context while a heartbeat is stuck in a
+// destination. The heartbeat goroutine emits one record per open run,
+// each through the Local sink's synchronous write, and Shutdown waited
+// for it with no bound: stopHeartbeat's <-p.beatDone ignored ctx, and
+// the pass ran to its end whatever stop said. With the database's write
+// lock held elsewhere (another process: Studio's delete, weft vacuum —
+// here a second connection), each heartbeat write waits out SQLite's
+// 30 s busy timeout, so `defer otel.Install()()` (a 5 s context) hung
+// for 30 s per open run; under concurrent runs on a slow disk the same
+// wait, a pass of open-runs × queued writes, is what blew the CI test
+// above's 20 s. Shutdown must return on its context, and a second
+// Shutdown returns the first's result.
+func TestShutdownBoundedWhileHeartbeatBlocked(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "hb.db")
+	p, err := Start(testCtx(t), NoGlobal(), NoEnv(), Local(path), Heartbeat(time.Millisecond))
+	if err != nil {
+		t.Fatal(err)
+	}
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(release) }) }
+	entered := make(chan struct{}, 3)
+	hold := core.Tool("hold", "Holds the run open.", func(context.Context, struct{}) (string, error) {
+		entered <- struct{}{}
+		<-release
+		return "ok", nil
+	})
+	const open = 3
+	var runs sync.WaitGroup
+	defer runs.Wait()
+	defer unblock()
+	for range open {
+		runs.Add(1)
+		go func() {
+			defer runs.Done()
+			agt := core.New(
+				wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "hold", Args: `{}`}), wefttest.Say("done")),
+				core.TracerProvider(p.TracerProvider()),
+				core.LoggerProvider(p.LoggerProvider()),
+				hold,
+			)
+			_, _ = agt.Generate(context.Background(), core.Prompt("go"))
+		}()
+	}
+	for range open {
+		<-entered
+	}
+
+	// Another connection takes the database's write lock: every Local
+	// write now waits in SQLite's busy handler.
+	locker, err := sql.Open("sqlite", "file:"+path+"?_pragma=busy_timeout(10000)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = locker.Close() }()
+	conn, err := locker.Conn(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = conn.Close() }()
+	if _, err := conn.ExecContext(context.Background(), "BEGIN IMMEDIATE"); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = conn.ExecContext(context.Background(), "ROLLBACK") }()
+
+	// Wait until the heartbeat goroutine is inside the Local chain's
+	// synchronous processor: blocked there until the lock goes.
+	deadline := time.Now().Add(10 * time.Second)
+	for !heartbeatInLocalWrite(goroutineDump()) {
+		if time.Now().After(deadline) {
+			t.Fatalf("the heartbeat never reached the Local write (test bug)\n%s", goroutineDump())
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- p.Shutdown(ctx) }()
+	var first error
+	select {
+	case first = <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatalf("Shutdown with a 200ms context blocked on a heartbeat stuck in a destination\n%s", goroutineDump())
+	}
+	second := make(chan error, 1)
+	go func() { second <- p.Shutdown(context.Background()) }()
+	select {
+	case err := <-second:
+		if !errors.Is(err, first) && (err != nil || first != nil) {
+			t.Errorf("second Shutdown = %v, want the first's result %v", err, first)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("a second Shutdown waited after the first returned\n%s", goroutineDump())
+	}
+}
+
+// heartbeatInLocalWrite reports whether a goroutine in dump is
+// emitting a heartbeat through a synchronous (Local) processor.
+func heartbeatInLocalWrite(dump string) bool {
+	for _, g := range strings.Split(dump, "\n\n") {
+		if strings.Contains(g, "otel.heartbeats(") && strings.Contains(g, "(*SimpleProcessor).OnEmit") {
+			return true
+		}
+	}
+	return false
 }
 
 // Redacted tool arguments stay redacted when the redactor's output is

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/weftgo/weft/obsdb"
@@ -55,8 +56,12 @@ type Pipeline struct {
 	beatDone chan struct{}
 	beatCfg  time.Duration
 
-	closeOnce sync.Once
-	closeErr  error
+	// Shutdown's once: the first call runs it and closes closed; every
+	// other call waits for that (or its own context) and returns
+	// closeErr, written before closed closes.
+	closing  atomic.Bool
+	closed   chan struct{}
+	closeErr error
 }
 
 // TracerProvider returns the pipeline's tracer provider.
@@ -130,40 +135,61 @@ func (p *Pipeline) ForceFlush(ctx context.Context) error {
 
 // Shutdown runs S2.4's order: stop heartbeats → flush every destination
 // in parallel (5 s budget) → shut down the providers → close the local
-// DB last.
+// DB last. Every wait in it is bounded by ctx: a destination stuck in a
+// write (the Local sink behind another process's lock, a hung
+// exporter) costs the caller its context, never more. Shutdown runs
+// once; a concurrent or later call returns the first's result, or its
+// own ctx's error should that come first.
 func (p *Pipeline) Shutdown(ctx context.Context) error {
-	p.closeOnce.Do(func() {
-		// The package accessors stop handing this pipeline out first: a
-		// LocalDB() after shutdown is nil, not a closed database.
-		installedMu.Lock()
-		if installedPipeline == p {
-			installedPipeline = nil
+	if !p.closing.CompareAndSwap(false, true) {
+		select {
+		case <-p.closed:
+			return p.closeErr
+		case <-ctx.Done():
+			return ctx.Err()
 		}
-		installedMu.Unlock()
-		p.stopHeartbeat()
-		flushCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		_ = p.ForceFlush(flushCtx)
-		cancel()
-		if p.lp != nil {
-			_ = p.lp.Shutdown(ctx)
-		}
-		if p.tp != nil {
-			_ = p.tp.Shutdown(ctx)
-		}
-		for _, db := range p.locals {
-			p.closeErr = errors.Join(p.closeErr, db.Close())
-		}
-	})
+	}
+	defer close(p.closed)
+	// The package accessors stop handing this pipeline out first: a
+	// LocalDB() after shutdown is nil, not a closed database.
+	installedMu.Lock()
+	if installedPipeline == p {
+		installedPipeline = nil
+	}
+	installedMu.Unlock()
+	p.stopHeartbeat(ctx)
+	flushCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	_ = p.ForceFlush(flushCtx)
+	cancel()
+	if p.lp != nil {
+		_ = p.lp.Shutdown(ctx)
+	}
+	if p.tp != nil {
+		_ = p.tp.Shutdown(ctx)
+	}
+	for _, db := range p.locals {
+		p.closeErr = errors.Join(p.closeErr, db.Close())
+	}
 	return p.closeErr
 }
 
-func (p *Pipeline) stopHeartbeat() {
+// stopHeartbeat stops the heartbeat goroutine and waits for it under
+// ctx. The goroutine checks stop between records, so the wait is at
+// most the one emit in flight — and no longer than ctx even when that
+// emit is stuck in a destination: an emit is a provider operation,
+// which the provider's own Shutdown bounds by the same ctx.
+func (p *Pipeline) stopHeartbeat(ctx context.Context) {
 	p.beatMu.Lock()
-	defer p.beatMu.Unlock()
-	if p.beatStop != nil {
-		close(p.beatStop)
-		<-p.beatDone
-		p.beatStop, p.beatDone = nil, nil
+	stop, done := p.beatStop, p.beatDone
+	p.beatStop, p.beatDone = nil, nil
+	p.beatMu.Unlock()
+	if stop == nil {
+		return
+	}
+	close(stop)
+	select {
+	case <-done:
+	case <-ctx.Done():
 	}
 }
 
@@ -392,7 +418,7 @@ func valueBytes(v attribute.Value) int {
 // failure nothing stays behind: every destination already built is
 // released (its processors' goroutines, its exporters, its database).
 func build(ctx context.Context, cfg config, dests []dest) (p *Pipeline, failed error) {
-	p = &Pipeline{tracker: newRunTracker()}
+	p = &Pipeline{tracker: newRunTracker(), closed: make(chan struct{})}
 	p.beatCfg = cfg.heartbeat
 
 	res, err := buildResource(cfg)
@@ -798,7 +824,14 @@ func (p *Pipeline) startHeartbeat() {
 			case <-stop:
 				return
 			case <-ticker.C:
-				heartbeats(context.Background(), logger, p.tracker)
+				// A tick and stop both ready: select picks either,
+				// so stop is asked again before another pass.
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				heartbeats(context.Background(), logger, p.tracker, stop)
 			}
 		}
 	}()

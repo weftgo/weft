@@ -179,9 +179,17 @@ func isInvokeAgentName(name string) bool {
 
 // heartbeats emits one weft.heartbeat record per open run through the
 // provider's logger: weft.run.id plus the run's metadata, no body, no
-// position. Sinks never store it; it only moves last_seen.
-func heartbeats(ctx context.Context, emit log.Logger, t *runTracker) {
+// position. Sinks never store it; it only moves last_seen. A closed
+// stop ends the pass before its next record: each emit may be a
+// synchronous write (the Local sink) queued behind every run's, and
+// Shutdown waits for this goroutine.
+func heartbeats(ctx context.Context, emit log.Logger, t *runTracker, stop <-chan struct{}) {
 	for runID, meta := range t.snapshot() {
+		select {
+		case <-stop:
+			return
+		default:
+		}
 		var r log.Record
 		r.SetTimestamp(time.Now())
 		r.SetEventName("weft.heartbeat")

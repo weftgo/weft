@@ -12,23 +12,21 @@ module, ADR 0005).
 
 - `thread/pool`: two pumps racing over one restarted child — `Decide`'s own
   and the mirror watch's its decision fires — no longer report `ErrNoAgent`
-  for a child the other had just resumed and settled (its settlement drops the
-  `Register`ed agent between the loser's ledger read and its agent lookup); a
-  settlement since the read sends the lookup back to the ledger, which reads
-  it settled, and a settled delegation is never rebuilt as a live bridge (CI:
-  TestRegisterResumesParkedSubmitChild, TestDecideJoinsErrors, "no agent for
-  child session").
+  for a child the other had just resumed and settled, nor install a live
+  bridge for the finished delegation (a wrapped child, whose agent no
+  settlement drops); the check is per child, so unrelated settlements cost a
+  lookup nothing (CI: TestRegisterResumesParkedSubmitChild,
+  TestDecideJoinsErrors, "no agent for child session").
 - `thread/pool`: a `Register` landing after its session's delegation settled
-  (a fast Submit child ending before the call) is dropped the next time the
-  pool reads the settled receipt (`Wait`, `Decide`, `Recover`) instead of
-  staying for the life of the pool (CI: TestRegistersPruned,
-  "sessionAgents=1").
-- `obsdb/obsdbtest`: the `SweepBatched` conformance case no longer fails when
-  writing and sweeping its 1,075-run backlog takes longer than
-  `obsdb.InterruptedAfter` (a loaded `-race` runner): its cutoff sits between
-  the 2 h-old backlog and the running run, which stays whether it reads
-  running or interrupted; `Sweep`'s future-cutoff passes heartbeat their
-  running runs first.
+  (a fast Submit child ending before the call) is dropped when the pool next
+  reads that settled receipt — `Wait`, `Recover`, or a pump reaching the
+  session through a mirror still in force — instead of staying for the life of
+  the pool (CI: TestRegistersPruned, "sessionAgents=1").
+- `obsdb/obsdbtest`: the `Sweep` and `SweepBatched` conformance cases no
+  longer fail when the test runs longer than `obsdb.InterruptedAfter` (a
+  loaded `-race` runner writing the 1,075-run backlog): their running runs
+  heartbeat just before each future-cutoff sweep, as live runs do, so only the
+  sweep itself has to fit in that window.
 
 ## 0.14.1 — 2026-10-11
 

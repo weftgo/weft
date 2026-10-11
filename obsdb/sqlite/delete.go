@@ -102,7 +102,7 @@ var sweepPassHook func()
 // not-running subtrees, in one writer transaction. It returns how many
 // roots it found and how many runs it deleted.
 func (d *DB) sweepPass(ctx context.Context, before time.Time) (roots, deleted int, err error) {
-	err = d.deleteTx(ctx, func(tx *sql.Tx) ([]string, error) {
+	extra, err := d.deleteTxCount(ctx, func(tx *sql.Tx) ([]string, error) {
 		cut := time.Now().Add(-obsdb.InterruptedAfter).UnixNano()
 		ids, err := queryIDs(ctx, tx, `SELECT run_id FROM runs AS r
 			WHERE last_seen_ns < ? AND `+notRunning+`
@@ -121,7 +121,7 @@ func (d *DB) sweepPass(ctx context.Context, before time.Time) (roots, deleted in
 	if err != nil {
 		return 0, 0, err
 	}
-	return roots, deleted, nil
+	return roots, deleted + extra, nil
 }
 
 // Vacuum folds the search index's segments and runs VACUUM (obsdb.DB):
@@ -145,19 +145,27 @@ func (d *DB) Vacuum(ctx context.Context) (err error) {
 // run ids (an error aborts, ErrNotFound included), deleteRuns removes
 // them.
 func (d *DB) deleteTx(ctx context.Context, pick func(*sql.Tx) ([]string, error)) error {
+	_, err := d.deleteTxCount(ctx, pick)
+	return err
+}
+
+// deleteTxCount is deleteTx reporting how many derived rows went beside
+// the picked ids (deleteRuns: a stock agent under a deleted run's tool).
+func (d *DB) deleteTxCount(ctx context.Context, pick func(*sql.Tx) ([]string, error)) (int, error) {
 	tx, err := d.writer.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer func() { _ = tx.Rollback() }()
 	ids, err := pick(tx)
 	if err != nil {
-		return err
+		return 0, err
 	}
-	if err := deleteRuns(ctx, tx, ids); err != nil {
-		return err
+	extra, err := deleteRuns(ctx, tx, ids)
+	if err != nil {
+		return 0, err
 	}
-	return tx.Commit()
+	return extra, tx.Commit()
 }
 
 // closure is roots and every run whose parent_run_id chain reaches one
@@ -203,23 +211,25 @@ func closure(ctx context.Context, tx *sql.Tx, roots []string, sweeping bool) ([]
 // deleteRuns removes the runs' rows from every obsdb table: the search
 // index first (runs_fts has no run_id: its rows go by run_search's ids),
 // then the records, the spans DeletedSpans names with the app log
-// records under them, and the run rows.
-func deleteRuns(ctx context.Context, tx *sql.Tx, ids []string) error {
+// records under them, and the run rows — and the rows of the derived
+// runs whose roots those spans take (obsdb.StockRunsOf), whose number
+// it returns as extra.
+func deleteRuns(ctx context.Context, tx *sql.Tx, ids []string) (extra int, err error) {
 	if len(ids) == 0 {
-		return nil
+		return 0, nil
 	}
 	deleted := make(map[string]bool, len(ids))
 	for _, id := range ids {
 		deleted[id] = true
 	}
 	var traces []string
-	err := inChunks(ids, func(ph string, args []any) error {
+	err = inChunks(ids, func(ph string, args []any) error {
 		got, err := queryIDs(ctx, tx, `SELECT DISTINCT trace_id FROM spans WHERE run_id IN (`+ph+`)`, args...)
 		traces = append(traces, got...)
 		return err
 	})
 	if err != nil {
-		return err
+		return 0, err
 	}
 	traces = append(traces, obsdb.StockTraces(ids)...) // derived runs: their spans carry no run id
 	var links []obsdb.SpanLink
@@ -239,13 +249,21 @@ func deleteRuns(ctx context.Context, tx *sql.Tx, ids []string) error {
 		return rs.Err()
 	})
 	if err != nil {
-		return err
+		return 0, err
 	}
 	keys := obsdb.DeletedSpans(links, deleted)
 	// A derived run whose root span goes with them — a stock agent
 	// under a deleted weft run's tool — goes too: its row would
 	// otherwise outlive every span it was derived from.
-	ids = append(ids, obsdb.StockRunsOf(links, keys, deleted)...)
+	derivedIDs := obsdb.StockRunsOf(links, keys, deleted)
+	if err := inChunks(derivedIDs, func(ph string, args []any) error {
+		got, err := queryIDs(ctx, tx, `SELECT run_id FROM runs WHERE run_id IN (`+ph+`)`, args...)
+		extra += len(got)
+		return err
+	}); err != nil {
+		return 0, err
+	}
+	ids = append(ids, derivedIDs...)
 	for _, stmt := range []string{
 		`DELETE FROM runs_fts WHERE rowid IN (SELECT id FROM run_search WHERE run_id IN (%s))`,
 		`DELETE FROM run_search WHERE run_id IN (%s)`,
@@ -256,7 +274,7 @@ func deleteRuns(ctx context.Context, tx *sql.Tx, ids []string) error {
 			_, err := tx.ExecContext(ctx, fmt.Sprintf(stmt, ph), args...)
 			return err
 		}); err != nil {
-			return err
+			return 0, err
 		}
 	}
 	for start := 0; start < len(keys); start += deleteChunk / 2 {
@@ -267,10 +285,10 @@ func deleteRuns(ctx context.Context, tx *sql.Tx, ids []string) error {
 		}
 		values := strings.TrimSuffix(strings.Repeat("(?,?),", len(chunk)), ",")
 		if _, err := tx.ExecContext(ctx, `DELETE FROM other_logs WHERE (trace_id, span_id) IN (VALUES `+values+`)`, args...); err != nil {
-			return err
+			return 0, err
 		}
 		if _, err := tx.ExecContext(ctx, `DELETE FROM spans WHERE (trace_id, span_id) IN (VALUES `+values+`)`, args...); err != nil {
-			return err
+			return 0, err
 		}
 	}
 	// A run's own spans are all in keys; this catches a span whose
@@ -280,9 +298,9 @@ func deleteRuns(ctx context.Context, tx *sql.Tx, ids []string) error {
 		_, err := tx.ExecContext(ctx, `DELETE FROM spans WHERE run_id IN (`+ph+`)`, args...)
 		return err
 	}); err != nil {
-		return err
+		return 0, err
 	}
-	return inChunks(ids, func(ph string, args []any) error {
+	return extra, inChunks(ids, func(ph string, args []any) error {
 		_, err := tx.ExecContext(ctx, `DELETE FROM runs WHERE run_id IN (`+ph+`)`, args...)
 		return err
 	})

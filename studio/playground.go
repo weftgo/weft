@@ -223,6 +223,13 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 			return
 		}
 
+		// A source derived from stock spans has nothing to replay: 400
+		// with the derived badge, before any other check of the command
+		// — the preview's position, so both routes answer one body alike.
+		if req.Source != nil && s.refuseDerivedSource(w, r, req.Source.RunID) {
+			return
+		}
+
 		// The registered agent when the runtime holds it: its manifest's
 		// schemas are what a tool_args edit is checked against (the
 		// runtime's own). Its absence is refused below, in order.
@@ -330,16 +337,7 @@ type cmdError struct {
 	code, msg string
 }
 
-// codeDerivedSource marks checkSource's refusal of a derived source: it
-// is written as refuseDerived writes it — code bad_request, with
-// derivedBadge beside the error.
-const codeDerivedSource = "derived_source"
-
 func (e *cmdError) write(w http.ResponseWriter, r *http.Request) {
-	if e.code == codeDerivedSource {
-		refuseDerived(w, r, e.msg)
-		return
-	}
 	writeError(w, r, e.status, e.code, e.msg)
 }
 
@@ -566,11 +564,10 @@ func (s *Server) editSchemas(ctx context.Context, runID string, agent *linkrunti
 }
 
 // checkSource checks the source turn: from_step is 0+ and input may not
-// replace a continued turn's message (both 400, body-shape errors), the
-// run must exist (404), and it must not be a run derived from stock
-// spans (400 with derivedBadge: it recorded no transcript and no
-// request, so there is nothing to replay — the preview's refusal,
-// refuseDerivedSource, in the run route's shape).
+// replace a continued turn's message (both 400, body-shape errors), and
+// the run must exist (404). A run derived from stock spans was refused
+// before it (refuseDerivedSource, the preview's check at the preview's
+// position).
 func (s *Server) checkSource(ctx context.Context, req *runRequest) *cmdError {
 	if req.Source == nil || req.Source.RunID == "" {
 		return nil
@@ -581,15 +578,11 @@ func (s *Server) checkSource(ctx context.Context, req *runRequest) *cmdError {
 	if req.Input != nil && *req.Input != "" && req.Source.FromStep > 0 {
 		return refuse(`input replaces the turn's user message only when from_step is 0: with from_step > 0, edit step 0's user message instead (a transcript edit of kind "user")`)
 	}
-	det, err := s.db.Run(ctx, req.Source.RunID)
-	if err != nil {
+	if _, err := s.db.Run(ctx, req.Source.RunID); err != nil {
 		if errors.Is(err, obsdb.ErrNotFound) {
 			return &cmdError{http.StatusNotFound, "not_found", "unknown source run " + req.Source.RunID}
 		}
 		return &cmdError{http.StatusInternalServerError, "internal", "read source run " + req.Source.RunID + " failed"}
-	}
-	if det.Derived {
-		return &cmdError{http.StatusBadRequest, codeDerivedSource, derivedSourceMsg(req.Source.RunID)}
 	}
 	return nil
 }

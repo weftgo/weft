@@ -45,7 +45,8 @@ func (d *DB) DeleteRun(ctx context.Context, id string) (err error) {
 	if err != nil {
 		return err
 	}
-	return d.deleteRuns(ctx, ids)
+	_, err = d.deleteRuns(ctx, ids)
+	return err
 }
 
 // DeleteSession removes every run of a session, children included
@@ -69,7 +70,8 @@ func (d *DB) DeleteSession(ctx context.Context, id string) (err error) {
 	if err != nil {
 		return err
 	}
-	return d.deleteRuns(ctx, ids)
+	_, err = d.deleteRuns(ctx, ids)
+	return err
 }
 
 // Sweep deletes the runs not running whose LastSeen is before the
@@ -121,10 +123,11 @@ func (d *DB) Sweep(ctx context.Context, before time.Time) (n int, err error) {
 		if err != nil {
 			return n, err
 		}
-		if err := d.deleteRuns(ctx, ids); err != nil {
+		extra, err := d.deleteRuns(ctx, ids)
+		if err != nil {
 			return n, err
 		}
-		n += len(ids)
+		n += len(ids) + extra
 	}
 	return n, nil
 }
@@ -199,10 +202,12 @@ func (d *DB) closure(ctx context.Context, roots []string, sweeping bool) ([]stri
 // its own spans still there, so the retry's trace lookup (RunId IN …)
 // still reaches the non-weft spans it has yet to delete. Each chunk is
 // up to seven synchronous lightweight DELETE mutations (clickhouse
-// README): a large sweep is many mutations.
-func (d *DB) deleteRuns(ctx context.Context, ids []string) error {
+// README): a large sweep is many mutations. The rows of the derived
+// runs whose roots those spans take (obsdb.StockRunsOf) go too; extra
+// is how many there were.
+func (d *DB) deleteRuns(ctx context.Context, ids []string) (extra int, err error) {
 	if len(ids) == 0 {
-		return nil
+		return 0, nil
 	}
 	ctx = ch.Context(ctx, ch.WithSettings(ch.Settings{"mutations_sync": 2}))
 	deleted := make(map[string]bool, len(ids))
@@ -215,7 +220,7 @@ func (d *DB) deleteRuns(ctx context.Context, ids []string) error {
 		traces = append(traces, got...)
 		return err
 	}); err != nil {
-		return err
+		return 0, err
 	}
 	traces = append(traces, obsdb.StockTraces(ids)...) // derived runs: their spans carry no run id
 	var links []obsdb.SpanLink
@@ -234,24 +239,32 @@ func (d *DB) deleteRuns(ctx context.Context, ids []string) error {
 		}
 		return rs.Err()
 	}); err != nil {
-		return err
+		return 0, err
 	}
 	keys := obsdb.DeletedSpans(links, deleted)
 	// A derived run whose root span goes with them goes too (the
 	// SQLite backend's rule): no row outlives every span it was
 	// derived from.
-	ids = append(ids, obsdb.StockRunsOf(links, keys, deleted)...)
+	derivedIDs := obsdb.StockRunsOf(links, keys, deleted)
+	if err := inChunks(derivedIDs, func(ph string, args []any) error {
+		got, err := d.queryIDs(ctx, `SELECT DISTINCT RunId FROM weft_runs WHERE RunId IN (`+ph+`)`, args...)
+		extra += len(got)
+		return err
+	}); err != nil {
+		return 0, err
+	}
+	ids = append(ids, derivedIDs...)
 	for _, c := range planSpanDeletes(links, keys) {
 		if len(c.logs) > 0 {
 			args, tuples := keyTuples(c.logs)
 			if err := d.conn.Exec(ctx, `DELETE FROM otel_logs WHERE LogAttributes['weft.run.id'] = '' AND (TraceId, SpanId) IN (`+tuples+`)`, args...); err != nil {
-				return fmt.Errorf("clickhouse: delete app logs: %w", err)
+				return 0, fmt.Errorf("clickhouse: delete app logs: %w", err)
 			}
 		}
 		if len(c.spans) > 0 {
 			args, tuples := keyTuples(c.spans)
 			if err := d.conn.Exec(ctx, `DELETE FROM otel_traces WHERE (TraceId, SpanId) IN (`+tuples+`)`, args...); err != nil {
-				return fmt.Errorf("clickhouse: delete spans: %w", err)
+				return 0, fmt.Errorf("clickhouse: delete spans: %w", err)
 			}
 		}
 	}
@@ -265,10 +278,10 @@ func (d *DB) deleteRuns(ctx context.Context, ids []string) error {
 		if err := inChunks(ids, func(ph string, args []any) error {
 			return d.conn.Exec(ctx, fmt.Sprintf(stmt, ph), args...)
 		}); err != nil {
-			return fmt.Errorf("clickhouse: delete runs: %w", err)
+			return 0, fmt.Errorf("clickhouse: delete runs: %w", err)
 		}
 	}
-	return nil
+	return extra, nil
 }
 
 // spanChunk is one round of the key loop: the app log lines under

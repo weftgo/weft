@@ -1,6 +1,7 @@
 package studio
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"slices"
@@ -444,4 +445,168 @@ type badge struct {
 	Hole   string `json:"hole"`
 	Reason string `json:"reason"`
 	Fix    string `json:"fix"`
+}
+
+// stockVariant is the stock_genai export with every span attribute for
+// which drop answers true removed (or, under empty, set to ""): the
+// producers §9 still reads — no gen_ai.operation.name (the span name
+// decides), no gen_ai.tool.call.id (only recommended), no usage.
+func stockVariant(t *testing.T, drop func(key string) bool, empty bool) string {
+	t.Helper()
+	b, err := os.ReadFile("../obsdb/testdata/contract/stock_genai/traces.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var doc map[string]any
+	decode(t, string(b), &doc)
+	for _, rs := range doc["resourceSpans"].([]any) {
+		for _, ss := range rs.(map[string]any)["scopeSpans"].([]any) {
+			for _, sp := range ss.(map[string]any)["spans"].([]any) {
+				span := sp.(map[string]any)
+				var kept []any
+				for _, a := range span["attributes"].([]any) {
+					kv := a.(map[string]any)
+					if !drop(kv["key"].(string)) {
+						kept = append(kept, kv)
+					} else if empty {
+						kept = append(kept, map[string]any{"key": kv["key"], "value": map[string]any{"stringValue": ""}})
+					}
+				}
+				span["attributes"] = kept
+			}
+		}
+	}
+	out, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
+}
+
+// variantFixture ingests a stock_genai variant into a fresh server.
+func variantFixture(t *testing.T, body string) http.Handler {
+	t.Helper()
+	srv := New(Open(t.TempDir() + "/variant.db"))
+	t.Cleanup(func() { _ = srv.Close() })
+	h := srv.Handler()
+	if code, _, out := post(t, h, "/studio/v1/traces", "application/json", body); code != http.StatusOK {
+		t.Fatalf("ingest: %d %s", code, out)
+	}
+	return h
+}
+
+// §9's name fallback and its optional call id reach the step route: a
+// producer that sets no gen_ai.operation.name (or sets it empty) and no
+// gen_ai.tool.call.id still gets each step's usage, times and its call
+// (call_id "", keyed by its span, badged derived).
+func TestDerivedStepsNameOnly(t *testing.T) {
+	for name, body := range map[string]string{
+		"no operation attribute": stockVariant(t, func(k string) bool { return k == "gen_ai.operation.name" || k == "gen_ai.tool.call.id" }, false),
+		"empty operation":        stockVariant(t, func(k string) bool { return k == "gen_ai.operation.name" || k == "gen_ai.tool.call.id" }, true),
+	} {
+		h := variantFixture(t, body)
+		_, _, row := get(t, h, "/studio/api/runs/"+derivedOK)
+		if !strings.Contains(row, `"steps":2`) || !strings.Contains(row, `"input_tokens":1717`) {
+			t.Errorf("%s: run row = %s, want 2 steps, 1717 input", name, row)
+		}
+		for _, c := range []struct {
+			n       string
+			in      int64
+			calls   int
+			started bool
+		}{{"0", 812, 1, true}, {"1", 905, 0, true}} {
+			_, _, body := get(t, h, "/studio/api/runs/"+derivedOK+"/steps/"+c.n)
+			var st struct {
+				Started  *string `json:"started"`
+				Finished *string `json:"finished"`
+				Usage    struct {
+					In int64 `json:"input_tokens"`
+				} `json:"usage"`
+				CostKnown bool `json:"cost_known"`
+				ToolCalls []struct {
+					CallID string `json:"call_id"`
+					Name   string `json:"name"`
+					Seq    int64  `json:"seq"`
+					Badge  string `json:"badge"`
+					Span   *struct {
+						ID string `json:"id"`
+					} `json:"span"`
+				} `json:"tool_calls"`
+			}
+			decode(t, body, &st)
+			if st.Usage.In != c.in || !st.CostKnown || st.Started == nil || st.Finished == nil {
+				t.Errorf("%s: steps/%s = usage %d known %v times %v/%v, want %d priced, timed", name, c.n, st.Usage.In, st.CostKnown, st.Started, st.Finished, c.in)
+			}
+			if len(st.ToolCalls) != c.calls {
+				t.Errorf("%s: steps/%s calls = %+v, want %d", name, c.n, st.ToolCalls, c.calls)
+				continue
+			}
+			if c.calls == 1 {
+				tc := st.ToolCalls[0]
+				if tc.CallID != "" || tc.Name != "lookup_order" || tc.Seq != 1 || tc.Badge != "derived" || tc.Span == nil || tc.Span.ID != "a1b2c3d4e5f60002" {
+					t.Errorf("%s: steps/0 call = %+v, want call_id \"\", lookup_order, seq 1, derived, its span", name, tc)
+				}
+			}
+		}
+	}
+}
+
+// A stock producer that reports no usage anywhere: the run row's and
+// every step's cost is unknown, with the reason — never a known $0.
+func TestDerivedNoUsageCostUnknown(t *testing.T) {
+	h := variantFixture(t, stockVariant(t, func(k string) bool { return strings.HasPrefix(k, "gen_ai.usage.") }, false))
+	type costed struct {
+		CostUSD    *float64 `json:"cost_usd"`
+		CostKnown  bool     `json:"cost_known"`
+		CostBadge  string   `json:"cost_badge"`
+		CostReason string   `json:"cost_reason"`
+	}
+	unknown := func(c costed) bool {
+		return c.CostUSD == nil && !c.CostKnown && c.CostBadge == "unknown" && strings.Contains(c.CostReason, "no usage")
+	}
+	for _, p := range []string{"/runs/" + derivedOK, "/runs/" + derivedFail, "/runs/" + derivedOK + "/steps/0", "/runs/" + derivedOK + "/steps/1"} {
+		_, _, body := get(t, h, "/studio/api"+p)
+		var c costed
+		decode(t, body, &c)
+		if !unknown(c) {
+			t.Errorf("%s cost = %+v, want unknown with the no-usage reason", p, c)
+		}
+	}
+}
+
+// The preview and the run route answer one body with a derived source
+// alike — the derived refusal, whatever else the body gets wrong (an
+// unknown runtime, a fork) — and a command refusal's body is still the
+// bare error shape, no badge.
+func TestDerivedRefusalParity(t *testing.T) {
+	pt := newPlaygroundTestServer(t)
+	b, err := os.ReadFile("../obsdb/testdata/contract/stock_genai/traces.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, out := previewPost(t, pt, "/v1/traces", "", string(b)); code != http.StatusOK {
+		t.Fatalf("ingest: %d %s", code, out)
+	}
+	body := `{"runtime":"rt_nope","agent":"nobody","thread":"fork","source":{"run_id":"` + derivedOK + `","from_step":0}}`
+	var answers []string
+	for _, path := range []string{"/api/playground/preview", "/api/playground/runs"} {
+		code, out := previewPost(t, pt, path, "", body)
+		var refused badged
+		decode(t, out, &refused)
+		if code != http.StatusBadRequest || !refused.derived() {
+			t.Errorf("%s = %d %s, want the derived refusal", path, code, out)
+		}
+		answers = append(answers, out)
+	}
+	if len(answers) == 2 && answers[0] != answers[1] {
+		t.Errorf("the two routes answer one body differently:\n%s\n%s", answers[0], answers[1])
+	}
+	code, out := previewPost(t, pt, "/api/playground/runs", "",
+		`{"runtime":"rt_test","agent":"acme-support","source":{"run_id":"r_unknown","from_step":-1},"engine":"live","side_effects":"substitute","thread":"ephemeral"}`)
+	var shape map[string]any
+	decode(t, out, &shape)
+	errObj, _ := shape["error"].(map[string]any)
+	if code != http.StatusBadRequest || len(shape) != 1 || len(errObj) != 2 || errObj["code"] != "bad_request" || errObj["message"] == nil {
+		t.Errorf("a command refusal = %d %s, want the bare {error: {code, message}} shape", code, out)
+	}
 }

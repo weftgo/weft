@@ -31,7 +31,7 @@ func deleteGroup() routeGroup {
 // Notes the two verbs answer with: what was deleted, said plainly.
 const (
 	deleteRunNote = "the run's observability rows (spans, records, app logs, search index) and its subagent children's " +
-		"are deleted from studio's database"
+		"are deleted from studio's database, with the runs derived from stock spans under its tools"
 	deleteSessionNote = "the session's observability rows (every run's spans, records, app logs, search index, " +
 		"children included) are deleted from studio's database; the app's conversation store is untouched"
 )

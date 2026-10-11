@@ -152,11 +152,13 @@ func (s *Server) servePlaygroundPreview(rs *linkruntime.RuntimeServer) http.Hand
 		if idFrom(r).panel != nil && !s.scopeRunID(w, r, req.Source.RunID) {
 			return
 		}
-		if req.Thread == "fork" {
-			badRequest(w, r, "the preview assembles an ephemeral replay: a fork continues the session in your app, whose context is the session's")
+		// A derived source first, at the run route's position: both
+		// answer one body alike.
+		if s.refuseDerivedSource(w, r, req.Source.RunID) {
 			return
 		}
-		if s.refuseDerivedSource(w, r, req.Source.RunID) {
+		if req.Thread == "fork" {
+			badRequest(w, r, "the preview assembles an ephemeral replay: a fork continues the session in your app, whose context is the session's")
 			return
 		}
 		prompts := readsPrompts(r)
@@ -219,8 +221,9 @@ func (s *Server) servePlaygroundPreview(rs *linkruntime.RuntimeServer) http.Hand
 // (obsdb.RunRow.Derived, docs/record-contract.md §9): it recorded no
 // transcript and no request, so no replay of it can be assembled. Any
 // other run — an unknown one included, which the source check answers
-// — passes. The playground's run route refuses the same source in
-// checkSource, with the same sentence and badge.
+// — passes. The playground's run route calls it at the same position
+// (after the panel token's scope, before every check of the command),
+// so both routes answer one body with the same refusal.
 func (s *Server) refuseDerivedSource(w http.ResponseWriter, r *http.Request, runID string) bool {
 	if !isDerivedID(runID) {
 		return false

@@ -608,11 +608,11 @@ whose operation is one of the three; a trace of other spans costs no read.
 | `agent` | the root's `gen_ai.agent.name` |
 | `provider`, `model` | the root's `gen_ai.provider.name` and `gen_ai.request.model`, else the first `chat` span's |
 | `session_id` | the root's `gen_ai.conversation.id`: the conversation is the session, its derived runs its turns |
-| `parent_run_id`, `parent_call_id` | for a root nested under another root's subtree: that root's derived id, and the `gen_ai.tool.call.id` of the nearest `execute_tool` span above it |
+| `parent_run_id`, `parent_call_id` | for a root nested under another root's subtree: that root's derived id, and the `gen_ai.tool.call.id` of the nearest `execute_tool` span above it. A stock root under a weft run's tool is top-level — the walk stops at weft spans, so it has no parent — and its session is its own `gen_ai.conversation.id`, not the weft run's: Studio lists it as a conversation of its own |
 | `started`, `finished` | the root's start and end |
 | `last_seen` | the latest time of anything in the subtree: the root's end for a well-formed tree |
 | `status`, `error` | `failed` with the status description when the root's status is `Error` (with no description, the error reads "the root span's status is Error (no description)": a failed run never has an empty error), else `succeeded` (a root span is exported only when it ended, so a derived run is never running or interrupted) |
-| `usage` | the run's **own** usage: the root's `gen_ai.usage.*` when present, taken as the root's own figure; else the sum over the subtree's `chat` spans — the subtree stops at nested roots, so a nested root's calls count toward it, never toward the parent (below) |
+| `usage` | the run's **own** usage (when no root or `chat` span of it carries any `gen_ai.usage.*` key, the row reads zero and Studio reads its cost **unknown**, "the stock spans report no usage", never a known $0 — the fold cannot tell such a run from one whose spans report zero tokens, which reads the same): the root's `gen_ai.usage.*` when present, taken as the root's own figure; else the sum over the subtree's `chat` spans — the subtree stops at nested roots, so a nested root's calls count toward it, never toward the parent (below) |
 | `steps` | the number of `chat` spans in the subtree |
 | `chat` (the waterfall) | the subtree's `chat` spans in start order; a span's step is its ordinal (0-based); model, response model, finish reason and usage from its `gen_ai.*` keys |
 | `tools` | the subtree's `execute_tool` spans in start order: `gen_ai.tool.name`, `gen_ai.tool.call.id`; `seq` the 1-based ordinal; `step` the step of the latest `chat` span that started before it (none when no `chat` span did) |
@@ -622,14 +622,18 @@ A derived run's spans (`DB.RunSpans`) are its subtree, read from its trace
 at read time — no stored span names a derived run — in start order, with
 the reader's positions under weft's own keys: `weft.step.index` on each
 `chat` span (its step) and `execute_tool` span (its step, when it has
-one), `weft.tool.seq` on each `execute_tool` span. The producer's spans
+one), `weft.tool.seq` on each `execute_tool` span, and
+`gen_ai.operation.name` on both — the operation the derivation resolved,
+from the span's name when the producer set none or set it empty — so a
+reader that switches on the attribute sees what the derivation saw. The producer's spans
 are stored as exported; the numbers are stamped on the copy a read
 returns, and the run's `derived` badge says who numbered them. Deleting a
 derived run deletes its subtree's spans (a nested root's run is its child,
 deleted with it). Deleting a weft run deletes the non-weft spans under it,
 a stock agent under its tool among them — and that agent's derived row
 too (it is no child of the weft run, the walk stopping at weft spans, but
-it would otherwise outlive every span it was derived from).
+it would otherwise outlive every span it was derived from); a retention
+sweep counts it among the runs it deleted.
 
 **Usage and cost of derived children.** A derived run's usage is
 own-only by contract. Studio's cost split subtracts from a parent's
@@ -675,13 +679,16 @@ above; `events` and `transcript` are empty with that badge (`transcript?step=N`
 is 409 with it); `spans` are the real spans (the waterfall);
 `requests` and `tools` are empty with the `derived` badge in those words;
 `export` carries the row and the spans, every other block badged, and
-refuses `format=wefttest` 400 with the badge, as the playground's fixtures
-preview and run routes refuse a derived source: there is no transcript to replay;
+refuses `format=wefttest` 400 with the badge, as the playground's fixtures,
+preview and run routes refuse a derived source (the preview and run routes
+before any other check of the command, so one body gets one answer): there is no transcript to replay;
 `/api/diff` with a derived side marks every column `unknown`, never a
 change except unequal step counts (`missing`).
-`steps/{n}` is the step's `chat` span: its usage (priced like any
-step's), its `execute_tool` spans as calls badged `derived` (no arguments
-or results), `request` and `messages_in` the badge, and one hole,
+`steps/{n}` is the step's `chat` span: its times and usage (priced like
+any step's; unknown when the span carries no `gen_ai.usage.*`), its
+`execute_tool` spans as calls badged `derived` (no arguments or results;
+`call_id` `""` for a span without `gen_ai.tool.call.id`, which is only
+recommended), `request` and `messages_in` the badge, and one hole,
 `derived` — never a `gap` or `not_recorded`. A Studio over ClickHouse
 announces derived rows on the live lane as SQLite's hub does (the
 receiver re-reads the trace's derived runs after each export). A panel token never reaches a derived run: it has no public id.

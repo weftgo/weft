@@ -412,3 +412,38 @@ func derivedTwoRoots(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		}
 	}
 }
+
+// derivedSweep: a retention sweep takes a weft run with a stock agent
+// under its tool and counts the agent's derived row among the runs it
+// deleted (DB.Sweep's count).
+func derivedSweep(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		const trace = "5d0c0ffee0000000000000000000d001"
+		in := func(s obsdb.Span) obsdb.Span { s.TraceID = trace; return s }
+		weft := in(stockSpan("5d000000000000d1", "", "invoke_agent w", 0, 10*time.Second, map[string]any{
+			"gen_ai.operation.name": "invoke_agent", "weft.run.id": "weft_swept"}))
+		weft.StatusCode, weft.StatusMessage = 2, "boom" // failed: not running, so sweepable
+		spans := []obsdb.Span{
+			weft,
+			in(stockSpan("5d000000000000d2", "5d000000000000d1", "execute_tool ask", time.Second, 9*time.Second, map[string]any{
+				"gen_ai.operation.name": "execute_tool", "weft.run.id": "weft_swept"})),
+			in(stockSpan("5d000000000000d3", "5d000000000000d2", "invoke_agent stock", 2*time.Second, 8*time.Second, map[string]any{
+				"gen_ai.operation.name": "invoke_agent", "gen_ai.conversation.id": "conv_sweep"})),
+			in(stockChat("5d000000000000d4", "5d000000000000d3", 3*time.Second, 1, 1)),
+		}
+		if err := db.Write(ctx(), obsdb.Batch{Spans: spans}); err != nil {
+			t.Fatal(err)
+		}
+		n, err := db.Sweep(ctx(), at(time.Hour))
+		if err != nil || n != 2 {
+			t.Fatalf("Sweep = %d, %v; want 2 (the weft run and the derived run under its tool)", n, err)
+		}
+		if left, err := db.Runs(ctx(), obsdb.RunQuery{ParentRunID: "*"}); err != nil || left.Total != 0 {
+			t.Errorf("after the sweep = %v (%v), want none", idsOf(left.Runs), err)
+		}
+		if tr, err := db.Trace(ctx(), trace); err != nil || len(tr) != 0 {
+			t.Errorf("swept trace = %d spans (%v), want none", len(tr), err)
+		}
+	}
+}

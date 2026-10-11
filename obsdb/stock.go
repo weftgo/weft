@@ -30,6 +30,9 @@ const StockErrNoDescription = "the root span's status is Error (no description)"
 // stockPrefix opens every derived run id: otel-<trace id>-<root span id>.
 const stockPrefix = "otel-"
 
+// attrOperation is the GenAI conventions' operation attribute.
+const attrOperation = "gen_ai.operation.name"
+
 // The GenAI operation names a derivation reads.
 const (
 	opInvokeAgent = "invoke_agent"
@@ -160,7 +163,10 @@ func StockCandidate(s Span) bool {
 // weft.step.index (the latest chat span that started before them;
 // absent when none did): the reader's positions under weft's own keys,
 // so every consumer of a run's spans (the waterfall, the tools list)
-// reads one shape. The producer's attributes are otherwise as stored;
+// reads one shape — and gen_ai.operation.name on both, the operation
+// stockOp resolved (from the span name when the producer set none or
+// set it empty), so a reader that switches on the attribute sees what
+// the derivation saw. The producer's attributes are otherwise as stored;
 // the row's Derived flag (the derived badge) says who numbered them.
 type StockRun struct {
 	Row   RunRow
@@ -333,12 +339,12 @@ func deriveRun(idx map[string]*Span, root *Span, members []*Span) StockRun {
 				row.Provider = firstSet(row.Provider, attr(s.Attrs, "gen_ai.provider.name"))
 				row.Model = firstSet(row.Model, attr(s.Attrs, "gen_ai.request.model"))
 			}
-			c.Attrs = withAttrs(s.Attrs, map[string]any{attrStepIndex: int64(len(chats))})
+			c.Attrs = withAttrs(s.Attrs, map[string]any{attrStepIndex: int64(len(chats)), attrOperation: opChat})
 			chats = append(chats, s.Start)
 			addUsage(&sum, s.Attrs)
 		case opExecuteTool:
 			tools++
-			stamp := map[string]any{attrToolSeq: tools}
+			stamp := map[string]any{attrToolSeq: tools, attrOperation: opExecuteTool}
 			// The latest chat span that started before it: chats holds
 			// the starts in order.
 			for i := len(chats) - 1; i >= 0; i-- {

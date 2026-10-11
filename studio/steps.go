@@ -101,6 +101,9 @@ type stepDoc struct {
 	// never arrived, or positions inside it are missing once the run
 	// stopped), so its calls, results and usage may be incomplete.
 	eventsLost bool
+	// usageUnreported: a derived run's step whose chat span carries no
+	// gen_ai.usage.* — its cost is unknown (priceStep), never a known $0.
+	usageUnreported bool
 }
 
 // stepModel is the model the step asked for and the one that answered
@@ -550,6 +553,9 @@ func (s *Server) priceStep(ctx context.Context, doc *stepDoc, det obsdb.RunDetai
 		provider = det.Provider
 	}
 	f := s.pricing.price(provider, model, doc.Usage).fields()
+	if doc.usageUnreported {
+		f = cost{badge: costUnknown, reason: derivedUsageUnknown, cache: cacheOf(doc.Usage)}.fields()
+	}
 	doc.costFields = &f
 	c := s.coster(ctx)
 	for i := range doc.Children {
@@ -645,6 +651,11 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 		case "execute_tool":
 			if cid, _ := sp.Attrs["gen_ai.tool.call.id"].(string); cid != "" {
 				toolSpans[cid] = sp
+			} else if derived {
+				// gen_ai.tool.call.id is only recommended: a stock call
+				// without one is keyed by its span (derivedSpanKey) and
+				// served with call_id "".
+				toolSpans[derivedSpanKey+sp.SpanID] = sp
 			}
 		}
 	}
@@ -665,7 +676,9 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 		// priced as any other).
 		t := chat.End
 		doc.Finished = &t
-		doc.Usage = spanUsage(chat.Attrs)
+		doc.Usage, doc.usageUnreported = spanUsage(chat.Attrs)
+	} else if derived {
+		doc.usageUnreported = true // no chat span: no usage reported for the step
 	}
 
 	// Tool calls, in the order the step's events name them.
@@ -792,8 +805,13 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 		})
 		for _, sp := range spans {
 			cid, _ := sp.Attrs["gen_ai.tool.call.id"].(string)
+			key := cid
+			if key == "" {
+				key = derivedSpanKey + sp.SpanID
+			}
 			name, _ := sp.Attrs["gen_ai.tool.name"].(string)
-			c := callOf(cid, name)
+			c := callOf(key, name)
+			c.CallID = cid
 			c.Seq, _ = attrInt64(sp.Attrs["weft.tool.seq"])
 			c.Badge = string(obsdb.HoleDerived)
 		}
@@ -1213,15 +1231,28 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 	return doc, nil
 }
 
-// spanUsage is a span's gen_ai.usage.* as a core.Usage (absent keys 0).
-func spanUsage(attrs map[string]any) core.Usage {
-	n := func(k string) int64 { v, _ := attrInt64(attrs[k]); return v }
+// derivedSpanKey prefixes the key of a derived run's tool call whose
+// execute_tool span carries no gen_ai.tool.call.id: the span id keys it
+// (no call id can collide: the prefix is not one a producer writes).
+const derivedSpanKey = "\x00span:"
+
+// spanUsage is a span's gen_ai.usage.* as a core.Usage (absent keys
+// 0); unreported is true when it carries none of the keys.
+func spanUsage(attrs map[string]any) (u core.Usage, unreported bool) {
+	unreported = true
+	n := func(k string) int64 {
+		if _, ok := attrs[k]; ok {
+			unreported = false
+		}
+		v, _ := attrInt64(attrs[k])
+		return v
+	}
 	return core.Usage{
 		InputTokens: n("gen_ai.usage.input_tokens"), OutputTokens: n("gen_ai.usage.output_tokens"),
 		CachedInputTokens: n("gen_ai.usage.cache_read.input_tokens"),
 		CacheWriteTokens:  n("gen_ai.usage.cache_creation.input_tokens"),
 		ReasoningTokens:   n("gen_ai.usage.reasoning.output_tokens"),
-	}
+	}, unreported
 }
 
 // spanStep is a span's weft.step.index, -1 when it has none.

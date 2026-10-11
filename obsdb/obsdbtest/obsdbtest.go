@@ -38,6 +38,7 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("DerivedStock", derivedStock(open))
 	t.Run("DerivedMixedTrace", derivedMixed(open))
 	t.Run("DerivedTwoRoots", derivedTwoRoots(open))
+	t.Run("DerivedSweep", derivedSweep(open))
 	t.Run("Traces", traces(open))
 	t.Run("TracesBigTie", tracesBigTie(open))
 	t.Run("TracesScopedPaging", tracesScopedPaging(open))

@@ -607,17 +607,27 @@ func subagents(id string, kids []obsdb.RunRow) []obsdb.RunRow {
 // usagePending says why a run's usage is not its bill yet: the core
 // reports a run's usage once, at its end (run_finish, the invoke_agent
 // span), so a running run — or one whose end never arrived (Finished
-// unset: the same records set both) — carries none to price. "" when
-// the usage is recorded.
+// unset: the same records set both) — carries none to price; a derived
+// run whose stock spans report no usage has none either
+// (derivedUsageUnknown). "" when the usage is recorded.
 func usagePending(rec obsdb.RunRow) string {
 	switch {
 	case rec.Status == obsdb.StatusRunning:
 		return "running: usage arrives at run end"
 	case rec.Finished == nil:
 		return "the run's end (run_finish or its invoke_agent span) never arrived: its usage is not recorded"
+	case rec.Derived && rec.Usage == (core.Usage{}):
+		return derivedUsageUnknown
 	}
 	return ""
 }
+
+// derivedUsageUnknown is the cost reason of a derived run (or step)
+// whose stock spans report no usage (docs/record-contract.md §9): no
+// gen_ai.usage.* on its root or its chat spans, so its cost is unknown,
+// never a known $0. A derived run's row holds the fold, so one whose
+// spans report 0 tokens reads the same way.
+const derivedUsageUnknown = "the stock spans report no usage (no gen_ai.usage.* on the root or its chat spans): the cost is unknown"
 
 // row is row(rec) with its cost.
 func (c *coster) row(rec obsdb.RunRow) runRow {

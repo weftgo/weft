@@ -107,6 +107,11 @@ type DB interface {
 	// index rows, the spans named by DeletedSpans and the app log
 	// records emitted under those spans; the CommandStore rows
 	// (commands, run_routes, breakpoints, runtimes) are never touched.
+	// The derived run of a stock agent under the run's tool goes too
+	// (docs/record-contract.md §9): it is no child of the run — the
+	// derivation stops at weft spans — but its root is among the spans
+	// deleted, and its row would otherwise outlive every span it was
+	// derived from (StockRunsOf).
 	// ErrNotFound for an unknown id.
 	// A run still being written is deleted as it stands: a later write
 	// for it starts a new run row from what that write carries.
@@ -127,8 +132,9 @@ type DB interface {
 	// top-level runs. It works in passes of at most SweepBatch roots
 	// (each with its subtree), so a large backlog never holds the
 	// writer for the whole sweep; ctx is checked between passes. It
-	// returns how many runs it deleted, children counted, over every
-	// pass — on an error, the passes before it stay deleted.
+	// returns how many runs it deleted, children and the derived runs
+	// DeleteRun takes beside them counted, over every pass — on an
+	// error, the passes before it stay deleted.
 	Sweep(ctx context.Context, before time.Time) (int, error)
 	// Vacuum gives the space deletions freed back: SQLite runs VACUUM
 	// (the whole file is rewritten, other modules' tables with their

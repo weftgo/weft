@@ -34,6 +34,16 @@ module, ADR 0005).
   turn's `Wait` included (the runner still between items, the `Send` queued).
   `Turn.Wait`'s godoc and docs/thread-operations.md §8 name that window;
   `Session.WaitIdle` waits it out.
+- `thread`: a steer whose deferral at its turn's end was written but not
+  flushed keeps its receipts: the follow-up runs under the turn its `accepted`
+  receipt names instead of a fresh one, so a reopen before it ran restores it
+  (it was lost) and one after it ran no longer runs it a second time.
+- `thread`: every failed send that will not run — a queued prompt the runner
+  could not flush, an `Interrupt` whose denial of the parked calls could not
+  be recorded, a `Steer` at a parked boundary whose deferral could not be
+  flushed — drops its receipt and moves the leaf back in one append, flushed
+  (they were two unflushed appends, and the leaf stayed on the `dropped`
+  receipt).
 
 ## 0.14.1 — 2026-10-11
 

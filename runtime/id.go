@@ -53,7 +53,7 @@ func newULID() string {
 	return string(id[:])
 }
 
-// newID prefixes a ULID: "rt_" a runtime, "cmd_" a command, "pg_" a
+// newID prefixes a ULID: "cmd_" a command, "pg_" a
 // playground run.
 func newID(prefix string) string { return prefix + newULID() }
 

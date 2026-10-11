@@ -4,6 +4,7 @@
       "id": "rt_01K7Q2W3E4R5T6Y7U8I9O0PABC",
       "host": "dev-laptop",
       "pid": 41237,
+      "cwd": "/home/dev/acme-api",
       "service": "acme-api",
       "env": "dev",
       "connected_since": "2026-10-09T10:00:00Z",

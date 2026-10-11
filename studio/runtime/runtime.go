@@ -5,10 +5,11 @@
 // studio/playground.go enqueue commands against a registered agent);
 // the runtime in your app executes.
 //
-// The package is self-contained on purpose: it holds no database and
-// reads nothing — a command's validation data is the runtime's own
-// registration, refreshed on every reconnect, because the runtime's
-// copy is the authoritative one (§10.4). Commands are at-most-once:
+// The package is self-contained on purpose: it reads no run data — a
+// command's validation data is the runtime's own registration,
+// refreshed on every reconnect, because the runtime's copy is the
+// authoritative one (§10.4). Its one database touch is the optional
+// write-through of its own bookkeeping (WithStore, below). Commands are at-most-once:
 // the runtime acks before executing and ignores repeated ids; Studio
 // refuses a reused command id outright (409) and never re-sends a
 // lost one — the user re-issues it (§10.5).
@@ -30,6 +31,21 @@
 //
 // A late ack or finish still lands: the truth about a run wins over a
 // timer's guess.
+//
+// Built WithStore (studio.New passes its database when it implements
+// obsdb.CommandStore), the server writes all of it through and a
+// restarted Studio loads it back, deciding "lost" from the stored
+// state — never re-sending an accepted command (store.go has the
+// rules). Without a store everything lives in memory and a restart
+// forgets it.
+//
+// Runtime ids are the runtime's to choose: weft/runtime derives one
+// stable per (service, cwd, agent set), so an app restarted in the same
+// place registers under the same id and a link to /runtimes/<id>
+// survives it. A registration under an id another process holds a live
+// stream on is answered with `<id>-<pid>` (RegisterResponse.RuntimeID,
+// which the runtime adopts): two replicas of one service in one cwd get
+// distinct ids, a reconnect of the same process keeps its own.
 package runtime
 
 import (
@@ -42,6 +58,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/weftgo/weft/obsdb"
 )
 
 // The wire vocabulary (§10.3). Mirrored — deliberately, with the JSON
@@ -50,9 +68,20 @@ import (
 
 // Registration is the POST /api/runtime/register body.
 type Registration struct {
-	RuntimeID   string `json:"runtime_id"`
-	Host        string `json:"host"`
-	Pid         int    `json:"pid"`
+	RuntimeID string `json:"runtime_id"`
+	Host      string `json:"host"`
+	Pid       int    `json:"pid"`
+	// Cwd is the app's working directory ("" when the runtime could not
+	// read it, or is older than the field): one of the inputs of its
+	// stable id, and shown in GET /api/runtimes under db.path's rule.
+	Cwd string `json:"cwd,omitempty"`
+	// Instance tells two runtime links of one process apart (a random
+	// value per link, kept across its reconnects): with host and pid it
+	// is what makes a registration "the same process" — whose reconnect
+	// keeps its id — rather than a second one colliding on it
+	// (serveRegister). A client that sends none is told apart by host
+	// and pid alone.
+	Instance    string `json:"instance,omitempty"`
 	Service     string `json:"service"`
 	Env         string `json:"env"`
 	WeftVersion string `json:"weft_version"`
@@ -442,9 +471,13 @@ type CommandStatus struct {
 // shape, pinned): identity, liveness, and per agent the alternate
 // models and every tool with its side-effect class and allow flag.
 type RuntimeView struct {
-	ID             string    `json:"id"`
-	Host           string    `json:"host"`
-	Pid            int       `json:"pid"`
+	ID   string `json:"id"`
+	Host string `json:"host"`
+	Pid  int    `json:"pid"`
+	// Cwd is the registration's working directory — a filesystem path,
+	// so Studio's route serves it under db.path's rule (absent to a
+	// panel token).
+	Cwd            string    `json:"cwd,omitempty"`
 	Service        string    `json:"service"`
 	Env            string    `json:"env"`
 	ConnectedSince time.Time `json:"connected_since"`
@@ -454,6 +487,11 @@ type RuntimeView struct {
 	// commands resolve, pruneLocked) with Connected false; a reconnect
 	// re-registers under the same id and reads true again.
 	Connected bool `json:"connected"`
+	// Restored marks a runtime listed from the command store after a
+	// Studio restart that has not registered since: its stream is gone
+	// with the old Studio (Connected false) until it reconnects. Absent
+	// otherwise.
+	Restored bool `json:"restored,omitempty"`
 	// Sessions is the registration's: the runtime acts on the app's own
 	// turns (runtime.Sessions) — approvals, steer and cancel on an
 	// app-owned run of its service reach it.
@@ -568,9 +606,10 @@ type RuntimeServer struct {
 	// Retention is how long a terminal command (finished, rejected,
 	// lost), a run's route and a disconnected runtime that still holds
 	// a breakpoint set stay in memory (24 h). A disconnected runtime
-	// with nothing pending goes after FinishDeadline: a runtime id
-	// lives one process, so every app restart would otherwise leave an
-	// entry in GET /api/runtimes forever. A field so tests can tighten
+	// with nothing pending goes after FinishDeadline: replicas and
+	// services come and go, and each would otherwise leave an entry in
+	// GET /api/runtimes forever (an app restarted in the same place
+	// re-registers under its stable id and reclaims its entry). A field so tests can tighten
 	// it.
 	Retention time.Duration
 	// WriteTimeout bounds one frame's write to the command stream
@@ -610,6 +649,16 @@ type RuntimeServer struct {
 	manifests map[manifestKey]*ManifestSource
 	nextSeq   uint64
 	now       func() time.Time
+
+	// store is the write-through (WithStore; nil: memory only).
+	// storeFailing is the logger's state (one WARN per run of
+	// failures), closed stops the writes (Close), lastStorePrune
+	// throttles PruneCommands.
+	store           obsdb.CommandStore
+	storeFailing    bool
+	closed          bool
+	lastStorePrune  time.Time
+	pruneStoreEvery time.Duration
 }
 
 // connected is one registered runtime and its live command stream.
@@ -623,6 +672,11 @@ type connected struct {
 	breakpoints []string
 	// manifest keys the manifest its latest registration carried.
 	manifest manifestKey
+	// stored is the LastSeen last written to the store (the ping
+	// throttle); restored marks an entry loaded from the store that has
+	// not registered since.
+	stored   time.Time
+	restored bool
 }
 
 // commandRow is one command's lifecycle state.
@@ -641,26 +695,44 @@ type commandRow struct {
 	// the watch. Zero, the watch (if any) is the disconnect sweep's and
 	// keeps its deadline.
 	beat time.Duration
+	// acceptedAt and lastBeat are when the accepted ack, and the last
+	// heartbeat, arrived; ack the last ack as posted — the store's
+	// columns a restart decides from. restored marks a row loaded from
+	// the store: its queued re-send goes to the same process only.
+	acceptedAt time.Time
+	lastBeat   time.Time
+	ack        json.RawMessage
+	restored   bool
 }
 
-// New builds an empty RuntimeServer with §10.5's timers.
-func New() *RuntimeServer {
-	return &RuntimeServer{
-		AckDeadline:    30 * time.Second,
-		FinishDeadline: 10 * time.Minute,
-		PingEvery:      15 * time.Second,
-		Retention:      24 * time.Hour,
-		WriteTimeout:   30 * time.Second,
-		feedSize:       256,
-		runtimes:       map[string]*connected{},
-		commands:       map[string]*commandRow{},
-		runs:           map[string]string{},
-		runPub:         map[string]string{},
-		runFork:        map[string]bool{},
-		runSeen:        map[string]time.Time{},
-		manifests:      map[manifestKey]*ManifestSource{},
-		now:            time.Now,
+// New builds a RuntimeServer with §10.5's timers: empty, or — WithStore
+// — holding what the store kept from before a restart, decided as
+// store.go says.
+func New(opts ...Option) *RuntimeServer {
+	rs := &RuntimeServer{
+		AckDeadline:     30 * time.Second,
+		FinishDeadline:  10 * time.Minute,
+		PingEvery:       15 * time.Second,
+		Retention:       24 * time.Hour,
+		WriteTimeout:    30 * time.Second,
+		feedSize:        256,
+		runtimes:        map[string]*connected{},
+		commands:        map[string]*commandRow{},
+		runs:            map[string]string{},
+		runPub:          map[string]string{},
+		runFork:         map[string]bool{},
+		runSeen:         map[string]time.Time{},
+		manifests:       map[manifestKey]*ManifestSource{},
+		now:             time.Now,
+		pruneStoreEvery: storePruneEvery,
 	}
+	for _, o := range opts {
+		if o != nil {
+			o(rs)
+		}
+	}
+	rs.load()
+	return rs
 }
 
 // Mount registers the three runtime-link routes (§10.3) on mux. The
@@ -698,6 +770,19 @@ func (rs *RuntimeServer) MountGuarded(mux *http.ServeMux, guard func(http.Handle
 // serveRegister is POST /api/runtime/register: a runtime's current
 // self-description. Sent on connect and after every reconnect, so
 // this handler may overwrite a previous registration freely.
+//
+// The id is the runtime's (weft/runtime derives it from service, cwd
+// and agents, so it is stable across app restarts), with one
+// exception: an id another process holds a live stream on — two
+// replicas of one service in one cwd, or two links in one process
+// (Registration.Instance) — is answered with `<id>-<pid>` (then
+// `<id>-<pid>-2`, …) in RegisterResponse.RuntimeID, which the runtime
+// adopts for its link. A reconnect of the same process keeps its id.
+// A disconnected entry under the id is reclaimed by whoever registers
+// next: its breakpoint set stays Studio's, and when the registering
+// process is a different one (the app restarted) the commands still
+// queued for the old one are lost — a new process never receives a
+// frame queued for another, whose at-most-once set it does not have.
 func (rs *RuntimeServer) serveRegister(w http.ResponseWriter, r *http.Request) {
 	var reg Registration
 	if !decodeBody(w, r, "register body", &reg) {
@@ -714,7 +799,17 @@ func (rs *RuntimeServer) serveRegister(w http.ResponseWriter, r *http.Request) {
 	src, hasManifest := registrationManifest(reg)
 	rs.mu.Lock()
 	rs.pruneLocked()
+	if held := rs.runtimes[reg.RuntimeID]; held != nil && held.feed != nil && !sameProcess(held.reg, reg) {
+		reg.RuntimeID = rs.freeIDLocked(reg)
+	}
 	c := rs.runtimes[reg.RuntimeID]
+	if c != nil && c.feed == nil && !sameProcess(c.reg, reg) {
+		for _, row := range rs.commands {
+			if row.Runtime == reg.RuntimeID && row.state == StateQueued {
+				rs.transitionLocked(row, StateLost, "the runtime's process changed before the ack")
+			}
+		}
+	}
 	if c == nil {
 		// A runtime this Studio has not seen — a Studio restart, or an
 		// entry pruned while the runtime was away. Its breakpoint set
@@ -724,12 +819,15 @@ func (rs *RuntimeServer) serveRegister(w http.ResponseWriter, r *http.Request) {
 		// authority and every stream open sends it (serveCommands).
 		c = &connected{breakpoints: append([]string(nil), reg.Breakpoints...)}
 		rs.runtimes[reg.RuntimeID] = c
+		rs.saveBreakpointsLocked(reg.RuntimeID, c.breakpoints)
 	}
 	c.reg = reg
+	c.restored = false
 	c.lastSeen = rs.now()
 	if c.connectedSince.IsZero() {
 		c.connectedSince = c.lastSeen
 	}
+	rs.saveRuntimeLocked(reg.RuntimeID, c)
 	if hasManifest {
 		rs.rememberLocked(c, src, c.lastSeen)
 	} else {
@@ -743,12 +841,32 @@ func (rs *RuntimeServer) serveRegister(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// touch notes the runtime was just seen.
+// freeIDLocked is the id a registration colliding with a live stream
+// of another process gets: `<id>-<pid>`, then `<id>-<pid>-2`, … — the
+// first that is free, disconnected, or this process's own. Caller
+// holds mu.
+func (rs *RuntimeServer) freeIDLocked(reg Registration) string {
+	base := fmt.Sprintf("%s-%d", reg.RuntimeID, reg.Pid)
+	id := base
+	for n := 2; ; n++ {
+		c := rs.runtimes[id]
+		if c == nil || c.feed == nil || sameProcess(c.reg, reg) {
+			return id
+		}
+		id = fmt.Sprintf("%s-%d", base, n)
+	}
+}
+
+// touch notes the runtime was just seen (a keep-alive ping). The
+// store's LastSeen follows at most once per runtimeSeenEvery.
 func (rs *RuntimeServer) touch(id string) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
 	if c := rs.runtimes[id]; c != nil {
 		c.lastSeen = rs.now()
+		if c.lastSeen.Sub(c.stored) >= runtimeSeenEvery {
+			rs.saveRuntimeLocked(id, c)
+		}
 	}
 }
 
@@ -798,6 +916,7 @@ func (rs *RuntimeServer) serveCommands(w http.ResponseWriter, r *http.Request) {
 	if c.connectedSince.IsZero() {
 		c.connectedSince = c.lastSeen
 	}
+	rs.saveRuntimeLocked(id, c)
 	backlog := rs.backlogLocked(id, r.Header.Get("Last-Event-ID"))
 	// The stored breakpoint set is what GET /api/runtimes reports, so
 	// every stream is told it — the empty set too (the runtime replaces
@@ -963,6 +1082,7 @@ func (rs *RuntimeServer) streamEnded(id string, feed chan Command) {
 	}
 	c.feed = nil
 	c.lastSeen = rs.now()
+	rs.saveRuntimeLocked(id, c)
 	for _, row := range rs.commands {
 		if row.Runtime != id {
 			continue
@@ -1028,7 +1148,11 @@ func (rs *RuntimeServer) serveAcks(w http.ResponseWriter, r *http.Request) {
 		if row.Thread == "fork" {
 			rs.runFork[a.RunID] = true
 		}
+		rs.saveRouteLocked(a.RunID, row.CommandID)
 	}
+	// changed: the ack moved the row, or was a heartbeat on it — the
+	// row is written through (with the ack) after the switch.
+	changed := false
 	// The timers stop only when the ack moves the row: a repeated ack
 	// (a retried POST) on an accepted row must not cancel the finish
 	// watch the disconnect sweep armed, or the row stays accepted
@@ -1042,6 +1166,8 @@ func (rs *RuntimeServer) serveAcks(w http.ResponseWriter, r *http.Request) {
 			row.state = StateAccepted
 			row.runID = a.RunID
 			row.updated = rs.now()
+			row.acceptedAt = row.updated
+			changed = true
 			c := rs.runtimes[row.Runtime]
 			switch {
 			case c != nil && c.reg.HeartbeatMS > 0:
@@ -1068,6 +1194,11 @@ func (rs *RuntimeServer) serveAcks(w http.ResponseWriter, r *http.Request) {
 				row.runID = a.RunID
 				row.updated = rs.now()
 			}
+			// A repeated accepted ack is the runtime's word that the
+			// command is alive: the stored last beat a restarted Studio
+			// re-arms the watch from.
+			row.lastBeat = rs.now()
+			changed = true
 			beatMS := row.beat.Milliseconds()
 			if c := rs.runtimes[row.Runtime]; beatMS == 0 && c != nil {
 				// A row armed before its runtime's registration said it
@@ -1087,6 +1218,7 @@ func (rs *RuntimeServer) serveAcks(w http.ResponseWriter, r *http.Request) {
 			row.state = StateRejected
 			row.errText = a.Error
 			row.updated = rs.now()
+			changed = true
 		}
 	case "finished":
 		rs.stopTimersLocked(row)
@@ -1097,6 +1229,16 @@ func (rs *RuntimeServer) serveAcks(w http.ResponseWriter, r *http.Request) {
 		// when it guessed the command lost is not the outcome.
 		row.errText = a.Error
 		row.updated = rs.now()
+		changed = true
+	}
+	if changed {
+		if b, err := json.Marshal(a); err == nil {
+			row.ack = b
+		}
+		// Written before the 200 leaves: an accepted ack the runtime
+		// was told Studio took is on the store before the runtime runs
+		// anything (store.go's never-twice argument).
+		rs.saveCommandLocked(row)
 	}
 	w.WriteHeader(http.StatusOK)
 }
@@ -1136,6 +1278,7 @@ func (rs *RuntimeServer) Enqueue(runtimeID string, cmd Command) (Command, error)
 	now := rs.now()
 	row := &commandRow{Command: cmd, state: StateQueued, created: now, updated: now}
 	rs.commands[cmd.CommandID] = row
+	rs.saveCommandLocked(row)
 	select {
 	case c.feed <- cmd:
 	default:
@@ -1163,6 +1306,7 @@ func (rs *RuntimeServer) dropFeedLocked(runtimeID string, c *connected) {
 	close(c.feed)
 	c.feed = nil
 	c.lastSeen = rs.now()
+	rs.saveRuntimeLocked(runtimeID, c)
 	for _, row := range rs.commands {
 		if row.Runtime == runtimeID && row.state == StateAccepted {
 			rs.armLostLocked(row, rs.FinishDeadline, "runtime stalled, no finish")
@@ -1297,6 +1441,7 @@ func (rs *RuntimeServer) EnqueueApproval(runtimeID string, d ApprovalDecision) (
 	rs.nextSeq = cmd.seq
 	now := rs.now()
 	rs.commands[cmd.CommandID] = &commandRow{Command: cmd, state: StateQueued, created: now, updated: now}
+	rs.saveCommandLocked(rs.commands[cmd.CommandID])
 	select {
 	case c.feed <- cmd:
 	default:
@@ -1379,6 +1524,7 @@ func (rs *RuntimeServer) EnqueueSession(runtimeID string, sc SessionCommand) (Se
 	now := rs.now()
 	row := &commandRow{Command: cmd, state: StateQueued, created: now, updated: now}
 	rs.commands[cmd.CommandID] = row
+	rs.saveCommandLocked(row)
 	select {
 	case c.feed <- cmd:
 	default:
@@ -1448,11 +1594,13 @@ func (rs *RuntimeServer) Snapshot() []RuntimeView {
 			ID:             id,
 			Host:           c.reg.Host,
 			Pid:            c.reg.Pid,
+			Cwd:            c.reg.Cwd,
 			Service:        c.reg.Service,
 			Env:            c.reg.Env,
 			ConnectedSince: c.connectedSince,
 			LastSeen:       c.lastSeen,
 			Connected:      c.feed != nil,
+			Restored:       c.restored,
 			Sessions:       c.reg.Sessions,
 			Breakpoints:    append([]string{}, c.breakpoints...),
 		}
@@ -1566,6 +1714,7 @@ func (rs *RuntimeServer) transitionLocked(row *commandRow, state, why string) {
 	row.state = state
 	row.errText = why
 	row.updated = rs.now()
+	rs.saveCommandLocked(row)
 }
 
 // stopTimersLocked cancels both timers.
@@ -1632,6 +1781,7 @@ func (rs *RuntimeServer) SetBreakpoints(runtimeID string, tools []string) error 
 		return ErrNotConnected
 	}
 	c.breakpoints = append([]string(nil), tools...)
+	rs.saveBreakpointsLocked(runtimeID, c.breakpoints)
 	return nil
 }
 
@@ -1695,6 +1845,7 @@ func (rs *RuntimeServer) pruneLocked() {
 	}
 	now := rs.now()
 	cutoff := now.Add(-rs.Retention)
+	rs.pruneStoreLocked(now, cutoff)
 	terminal := func(row *commandRow) bool {
 		return row.state == StateFinished || row.state == StateRejected || row.state == StateLost
 	}

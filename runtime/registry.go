@@ -1,11 +1,14 @@
 package runtime
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/weftgo/weft/core"
 )
@@ -174,6 +177,7 @@ func (r *registry) registration(runtimeID string) registration {
 		RuntimeID:   runtimeID,
 		Host:        host,
 		Pid:         os.Getpid(),
+		Cwd:         workingDir(),
 		Service:     serviceName(),
 		Env:         os.Getenv("WEFT_ENV"),
 		WeftVersion: weftVersion(),
@@ -188,6 +192,36 @@ func (r *registry) registration(runtimeID string) registration {
 		reg.Agents = append(reg.Agents, r.entries[name])
 	}
 	return reg
+}
+
+// workingDir is the process's working directory, "" when it cannot be
+// read.
+func workingDir() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return wd
+}
+
+// stableID is this runtime's id before Studio answers it
+// (stableRuntimeID over the service, the working directory and the
+// registered agents' names).
+func (r *registry) stableID() string {
+	return stableRuntimeID(serviceName(), workingDir(), r.order)
+}
+
+// stableRuntimeID is "rt_" + the first 16 hex digits of
+// sha256(service NUL cwd NUL sorted agent names joined by NUL): the
+// same app restarted in the same place registers under the same id, so
+// a Studio link to /runtimes/<id> survives the restart. Two processes
+// with the same inputs live at once are told apart by Studio, which
+// answers the second `<id>-<pid>` (the link adopts it).
+func stableRuntimeID(service, cwd string, agents []string) string {
+	names := append([]string(nil), agents...)
+	sort.Strings(names)
+	sum := sha256.Sum256([]byte(service + "\x00" + cwd + "\x00" + strings.Join(names, "\x00")))
+	return "rt_" + hex.EncodeToString(sum[:])[:16]
 }
 
 // serviceName names the process the way observability would:

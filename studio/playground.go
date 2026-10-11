@@ -55,9 +55,17 @@ var _ = playgroundGroupInstalled
 // registerPlayground mounts the playground routes and the runtime
 // link. The link server is per-Server (a Studio embeds one), built
 // here on Playground(true); Server.Runtime — the accessor S4.1 names
-// for it — returns it.
+// for it — returns it. Over a DB that implements obsdb.CommandStore
+// (both first-party backends do) the link server writes its commands,
+// routes, breakpoint sets and registrations through and loads them
+// back after a restart (plan I3); over one that does not it keeps them
+// in memory, as before.
 func registerPlayground(mux *http.ServeMux, s *Server) {
-	rs := linkruntime.New()
+	var opts []linkruntime.Option
+	if cs, ok := s.db.(obsdb.CommandStore); ok {
+		opts = append(opts, linkruntime.WithStore(cs))
+	}
+	rs := linkruntime.New(opts...)
 	s.runtimeSrv = rs
 	mux.HandleFunc("GET /api/runtimes", s.serveRuntimes(rs))
 	mux.HandleFunc("POST /api/playground/runs", s.servePlaygroundRun(rs))
@@ -126,10 +134,18 @@ func registerPlayground(mux *http.ServeMux, s *Server) {
 // registered system prompt, which only an identity that may start
 // experiments needs (the drawer pre-fills from it). A read-scoped
 // panel token lives in a page that only views: it gets the picker
-// without the prompts.
+// without the prompts. Each row's cwd follows db.path's rule.
 func (s *Server) serveRuntimes(rs *linkruntime.RuntimeServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		views := rs.Snapshot()
+		if !mayReadDBPath(s, r) {
+			// The app's working directory is a filesystem path: db.path's
+			// rule (the server token, or setup A's loopback), never a
+			// panel token's.
+			for i := range views {
+				views[i].Cwd = ""
+			}
+		}
 		if !readsPrompts(r) {
 			// A read-scoped panel token reads no prompt-adjacent value:
 			// the system prompt, a named default tool choice's tool (the

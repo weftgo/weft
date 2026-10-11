@@ -74,7 +74,15 @@ type link struct {
 	// command (a field so a test aims it at its own sink).
 	localDB func() obsdb.DB
 
-	id string // this runtime's id, stable for the link's lifetime
+	// id is this runtime's id: stable per (service, cwd, agents)
+	// across app restarts (stableRuntimeID), or the `<id>-<pid>` Studio
+	// answered a registration colliding with another live process with
+	// — adopted for the rest of the link's life.
+	id string
+	// instance is this link's random tag on every registration: Studio
+	// tells a reconnect of this link from another process (or another
+	// link of this one) by host, pid and instance.
+	instance string
 
 	ctx    context.Context // the link's life: every run this link starts hangs off it
 	cancel context.CancelFunc
@@ -119,7 +127,8 @@ func newLink(c *config, reg *registry, url, token string) *link {
 		reg:         reg,
 		localDB:     otel.LocalDB,
 		token:       token,
-		id:          newID("rt_"),
+		id:          reg.stableID(),
+		instance:    newULID(),
 		done:        make(chan struct{}),
 		slots:       make(chan struct{}, maxRunning),
 		seen:        map[string]bool{},
@@ -240,6 +249,7 @@ func (l *link) connect(ctx context.Context) error {
 // caps is always the runtime's own (§10.3).
 func (l *link) register(ctx context.Context) error {
 	reg := l.reg.registration(l.id)
+	reg.Instance = l.instance
 	reg.Breakpoints = l.breakpointSet()
 	reg.HeartbeatMS = l.beat.Milliseconds()
 	body, err := json.Marshal(reg)
@@ -278,7 +288,10 @@ func (l *link) register(ctx context.Context) error {
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out); err != nil {
 		return err
 	}
-	if out.RuntimeID != "" {
+	if out.RuntimeID != "" && out.RuntimeID != l.id {
+		// Studio answered another id: this one is held by another
+		// process's live stream (`<id>-<pid>`). Kept from here on, so a
+		// reconnect of this link registers under it.
 		l.id = out.RuntimeID
 	}
 	return nil

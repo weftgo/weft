@@ -21,9 +21,18 @@ import (
 // command is validated against. Sent on connect and again after every
 // reconnect — the copy Studio holds must always be the runtime's own.
 type registration struct {
-	RuntimeID   string     `json:"runtime_id"`
-	Host        string     `json:"host"`
-	Pid         int        `json:"pid"`
+	RuntimeID string `json:"runtime_id"`
+	Host      string `json:"host"`
+	Pid       int    `json:"pid"`
+	// Cwd is the process's working directory ("" when os.Getwd fails):
+	// an input of the stable runtime id (stableRuntimeID), shown in
+	// Studio's runtime list to the identities that may read paths.
+	Cwd string `json:"cwd,omitempty"`
+	// Instance is this link's random tag, kept across its reconnects:
+	// with host and pid it tells Studio a reconnect of this link (which
+	// keeps its id) from another link colliding on the id (answered
+	// `<id>-<pid>`, which the link adopts).
+	Instance    string     `json:"instance,omitempty"`
 	Service     string     `json:"service"`
 	Env         string     `json:"env"`
 	WeftVersion string     `json:"weft_version"`

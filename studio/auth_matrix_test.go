@@ -267,7 +267,7 @@ func TestAuthMatrix(t *testing.T) {
 	// here), rt_link is the one the link routes of the matrix touch.
 	manifest := `{\"weft\":1,\"agents\":[{\"name\":\"acme-support\",\"instructions\":\"THE SYSTEM PROMPT\",\"model\":{\"provider\":\"p\",\"name\":\"m\"},\"policy\":{},\"tools\":[{\"name\":\"refund\"}]}]}`
 	regBody := func(id string) string {
-		return `{"runtime_id":"` + id + `","agents":[{"name":"acme-support","manifest":"` + manifest + `","limits":{"max_steps":10,"parallelism":4},` +
+		return `{"runtime_id":"` + id + `","cwd":"/THE/CWD","agents":[{"name":"acme-support","manifest":"` + manifest + `","limits":{"max_steps":10,"parallelism":4},` +
 			`"defaults":{"tool_choice":{"mode":"named","name":"refund"},"stop":["THE STOP"]}}]}`
 	}
 	for _, id := range []string{"rt_test", "rt_link"} {
@@ -1002,6 +1002,11 @@ func TestAuthMatrix(t *testing.T) {
 		}
 		if got, want := strings.Contains(string(b), "THE STOP"), id.kind != "read"; got != want {
 			t.Errorf("GET /api/runtimes as %s: default stop present = %v, want %v", id.name, got, want)
+		}
+		// The app's working directory is a filesystem path: db.path's
+		// rule — the server token alone here (no panel token reads it).
+		if got, want := strings.Contains(string(b), `"cwd":"/THE/CWD"`), id.kind == "server"; got != want {
+			t.Errorf("GET /api/runtimes as %s: cwd present = %v, want %v", id.name, got, want)
 		}
 	}
 

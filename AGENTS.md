@@ -375,8 +375,14 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // experiment; overrides: instructions, tools_enabled, model, thinking, options
 //     // {max_steps, parallelism, temperature}, params {top_p, max_tokens, stop, seed},
 //     // tool_choice {mode, name}, park_on, only_tools — narrowing or neutral, each refusal
-//     // naming its rule; /api/runtimes gives each runtime connected (a live stream now; a dropped
-//     // one stays listed, false, until pruned) and each agent resolver + defaults (the form greys
+//     // naming its rule; runtime ids are stable per (service, cwd, agents) — rt_ + 16 hex of
+//     // sha256 — and `<id>-<pid>` on a live collision (register's runtime_id, adopted by the link);
+//     // commands, routes, breakpoints and registrations persist through obsdb.CommandStore (plan I3:
+//     // studio.New passes its DB), a restarted Studio deciding lost from the stored state (queued past
+//     // its ack window, accepted past its watch from the stored last beat) and never re-sending an
+//     // accepted command; /api/runtimes gives each runtime connected (a live stream now; a dropped
+//     // one stays listed, false, until pruned; cwd under db.path's rule; restored after a Studio
+//     // restart until it re-registers) and each agent resolver + defaults (the form greys
 //     // them; absent for a runtime older than the option lab — Studio then refuses the option lab's
 //     // knobs, the user/tool_args/insert edit kinds and a replay across a compaction view; a read
 //     // token gets no instructions, default tool_choice name or stop); runs carry weft.playground and never touch weft.session.id

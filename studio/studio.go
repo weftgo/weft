@@ -282,6 +282,12 @@ func (s *Server) Close() error {
 	if stop != nil {
 		stop()
 	}
+	if s.runtimeSrv != nil {
+		// The link server's timers and write-through stop before the
+		// database closes: a Studio opened next over the same file
+		// decides from what this one stored, not from its stale timers.
+		s.runtimeSrv.Close()
+	}
 	if s.ownsDB {
 		return s.db.Close()
 	}

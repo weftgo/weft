@@ -48,10 +48,13 @@ type delegate struct {
 	// park the delegating call — the moment a resolution can land.
 	wrapperSeen bool
 	settled     bool
-	// concluded is made by the settlement and closed when the delegate
-	// retires — once a sync delegation's parked call is resolved and
-	// the parent's resume armed. Wait and Cancel watch it for a
-	// delegate settled with no run in flight.
+	// concluded is made when the delegate starts to settle — a Cancel
+	// moving a parked child to settling, else the settlement itself —
+	// and closed when the delegate retires, once a sync delegation's
+	// parked call is resolved and the parent's resume armed (or by a
+	// cancel that could not close the child's boundary, the child
+	// parked again). Wait and Cancel watch it while no run is in
+	// flight; nil when nothing is settling.
 	concluded chan struct{}
 	// parks counts the delegate's parks: each park's phase write takes
 	// the next number. A boundary read — the child's Pending and the
@@ -72,16 +75,14 @@ const (
 )
 
 // restOrConclusion is what a waiter on the delegate watches: the run
-// in flight's rest, else — once settled — its conclusion; nil for a
-// delegate at rest and unsettled (parked). Callers hold p.mu.
+// in flight's rest, else — once a Cancel moved it to settling, or it
+// settled — its conclusion; nil for a delegate at rest and parked.
+// Callers hold p.mu.
 func (d *delegate) restOrConclusion() chan struct{} {
 	if d.idle != nil {
 		return d.idle
 	}
-	if d.settled {
-		return d.concluded
-	}
-	return nil
+	return d.concluded
 }
 
 // label is the name the model-visible texts call the delegation by.
@@ -865,6 +866,12 @@ func (p *Pool) cancelParked(ctx context.Context, d *delegate) error {
 		p.mu.Lock()
 		d.phase = phaseParked
 		gen := d.parks
+		// Release whoever waited on the settlement that did not come:
+		// they read the child parked again.
+		if d.concluded != nil {
+			close(d.concluded)
+			d.concluded = nil
+		}
 		p.mu.Unlock()
 		p.rearm(context.WithoutCancel(ctx), d, gen)
 		return fmt.Errorf("thread/pool: child session %s: %w", d.child.ID(), err)

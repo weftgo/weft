@@ -378,7 +378,9 @@ func (p *Pool) Submit(ctx context.Context, parent *thread.Session, agent *core.A
 //     and then canceled if recovery left it parked.
 //
 // A settled receipt fails with a *StateError (ErrNotRunning under
-// errors.Is) carrying its state; an id the ledger does not hold with
+// errors.Is) carrying its state — also for a Cancel arriving while
+// another settles the same delegation, which waits for that one to
+// conclude first; an id the ledger does not hold with
 // ErrUnknownReceipt.
 func (p *Pool) Cancel(ctx context.Context, parent *thread.Session, receiptID string) error {
 	if parent == nil {
@@ -401,7 +403,10 @@ func (p *Pool) Cancel(ctx context.Context, parent *thread.Session, receiptID str
 				}
 				return nil
 			case phaseParked:
+				// Settling from here: a Wait or a second Cancel waits
+				// for the conclusion, not the ledger's parked.
 				d.phase = phaseSettling
+				d.concluded = make(chan struct{})
 				p.mu.Unlock()
 				return p.cancelParked(ctx, d)
 			default:
@@ -440,7 +445,9 @@ func (p *Pool) Cancel(ctx context.Context, parent *thread.Session, receiptID str
 }
 
 // Wait blocks until the delegation behind receiptID is at rest in
-// this pool — concluded, or parked at an approval — and returns its
+// this pool — concluded, or parked at an approval (a parked child a
+// Cancel is settling is waited for: it rests concluded, or parked
+// again when its boundary could not be closed) — and returns its
 // receipt as the ledger then reads. When it returns for a sync
 // delegation that settled after a park, the parent's parked call is
 // already resolved and its resume armed: the parked Turn's Next is the
@@ -1061,8 +1068,21 @@ func (p *Pool) settle(ctx context.Context, d *delegate, state State, stop string
 	}
 	d.settled = true
 	d.phase = phaseSettled
-	d.concluded = make(chan struct{})
+	if d.concluded == nil {
+		d.concluded = make(chan struct{})
+	}
 	p.mu.Unlock()
+	// From here the caller retires the delegate — unless settle dies
+	// on the way (a panicking storage): then nobody would, the run's
+	// recover finding the delegate settled, and every waiter on the
+	// conclusion would block for good. Retire on the way out of a
+	// panic; the unrecorded settlement is Recover's to make.
+	recorded := false
+	defer func() {
+		if !recorded {
+			p.retire(d)
+		}
+	}()
 
 	u := d.child.Usage()
 	_, err := d.parent.AppendPoolReceipt(ctx, thread.PoolReceiptEntry{
@@ -1073,6 +1093,7 @@ func (p *Pool) settle(ctx context.Context, d *delegate, state State, stop string
 		d.agent.Logger().Error("thread/pool: settlement receipt not recorded",
 			"receipt", d.receipt, "child", d.child.ID(), "state", state, "stop", stop, "err", err)
 	}
+	recorded = true
 	return true
 }
 
@@ -1090,7 +1111,10 @@ func (p *Pool) retire(d *delegate) {
 	}
 	delete(p.sessionAgents, d.child.ID())
 	p.markRetired(d.child.ID())
-	close(d.concluded)
+	if d.concluded != nil { // retire is idempotent
+		close(d.concluded)
+		d.concluded = nil
+	}
 	p.mu.Unlock()
 }
 

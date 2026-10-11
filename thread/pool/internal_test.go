@@ -375,6 +375,235 @@ func TestWaitReturnsWithTheResumeArmed(t *testing.T) {
 	}
 }
 
+// parkedSyncDelegation runs a parent turn that delegates through a
+// wrap to a child that parks at an approval, and returns the parked
+// parent turn and the receipt.
+func parkedSyncDelegation(t *testing.T, ctx context.Context, p *Pool, st thread.Storage) (*thread.Session, *thread.Turn, Receipt) {
+	t.Helper()
+	refund := core.Tool("refund", "", func(_ context.Context, _ struct{ OrderID string }) (string, error) {
+		return "refunded", nil
+	}, core.RequireApproval())
+	child := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"1"}`}),
+		wefttest.Say("approved"),
+	), refund)
+	parent, err := thread.Create(ctx, st, core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "research", ID: "c-wrapper", Args: `{"prompt":"refund order 1"}`}),
+		wefttest.Say("all done"),
+	), p.MustWrap("research", "", child)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t1, err := parent.Send(ctx, core.User("go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := t1.Wait(); err != nil || len(res.Pending) != 1 {
+		t.Fatalf("the parent's turn = %+v, %v; want parked on the wrapper", res, err)
+	}
+	rs := Receipts(parent)
+	if len(rs) != 1 || rs[0].State != Parked {
+		t.Fatalf("receipts = %+v", rs)
+	}
+	return parent, t1, rs[0]
+}
+
+// A waited Wait: what it returned and the parked turn's Next then.
+type waited struct {
+	rc   Receipt
+	err  error
+	next *thread.Turn
+}
+
+// waitInWindow runs Wait on its own goroutine while a hook holds the
+// pool inside a window, and reports what it returned if it returned
+// inside the window (early: Next is then the promise's test), then
+// releases the window and returns Wait's answer.
+func waitInWindow(t *testing.T, p *Pool, parent *thread.Session, t1 *thread.Turn, id string, release chan struct{}) (w waited, early bool) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	done := make(chan waited, 1)
+	go func() {
+		rc, err := p.Wait(ctx, parent, id)
+		done <- waited{rc, err, t1.Next()}
+	}()
+	select {
+	case w = <-done:
+		early = true
+		close(release)
+	case <-time.After(100 * time.Millisecond):
+		close(release)
+		w = <-done
+	}
+	return w, early
+}
+
+// Wait's promise on the cancel path: Cancel concludes a parked child on
+// its own goroutine with no run in flight, so Wait has no run's rest to
+// watch — it watches the conclusion, closed when the delegate retires
+// after the parent's call is resolved (SUBAGENT_CANCELED) and its
+// resume armed. Without the conclusion arm Wait returned at once with
+// the receipt canceled and Next nil; without its close it never
+// returned.
+func TestWaitDuringCancelParkedReturnsWithTheResumeArmed(t *testing.T) {
+	ctx := context.Background()
+	p := New(1)
+	parent, t1, rc := parkedSyncDelegation(t, ctx, p, thread.Memory())
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	p.testHookConcluding = func(*delegate) {
+		close(entered)
+		<-release
+	}
+	canceled := make(chan error, 1)
+	go func() { canceled <- p.Cancel(ctx, parent, rc.ID) }()
+	<-entered // settled canceled in the ledger, the wrapper not yet resolved
+	w, early := waitInWindow(t, p, parent, t1, rc.ID, release)
+	if early && w.next == nil {
+		t.Fatalf("Wait returned (%+v, %v) before the wrapper resolved: the parked turn's Next is nil", w.rc, w.err)
+	}
+	if err := <-canceled; err != nil {
+		t.Fatalf("Cancel: %v", err)
+	}
+	if w.err != nil || w.rc.State != Canceled || w.next == nil {
+		t.Fatalf("Wait = %+v, %v, armed = %v; want canceled with the continuation armed", w.rc, w.err, w.next != nil)
+	}
+	if res, err := w.next.Wait(); err != nil || res.Text() != "all done" {
+		t.Fatalf("the parent's continuation: %v, %v", res, err)
+	}
+	if err := p.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Cancel moves a parked delegate to settling before it closes the
+// child's boundary; until the settlement the delegate has no run and
+// was not settled, so a Wait there returned at once — the ledger still
+// parked, Next nil — and a second Cancel returned nil before the
+// cancellation was settled. Both now wait for the conclusion: Wait
+// returns canceled with the resume armed, the second Cancel reports the
+// receipt settled. A cancel whose boundary cannot be closed releases
+// them with the child parked again.
+func TestCancelParkedSettlingWindowHeld(t *testing.T) {
+	ctx := context.Background()
+	t.Run("closed", func(t *testing.T) {
+		p := New(1)
+		parent, t1, rc := parkedSyncDelegation(t, ctx, p, thread.Memory())
+		entered := make(chan struct{})
+		release := make(chan struct{})
+		p.testHookCanceling = func(*delegate) error {
+			close(entered)
+			<-release
+			return nil
+		}
+		canceled := make(chan error, 1)
+		go func() { canceled <- p.Cancel(ctx, parent, rc.ID) }()
+		<-entered // settling, not settled
+		again := make(chan error, 1)
+		go func() { again <- p.Cancel(ctx, parent, rc.ID) }()
+		w, early := waitInWindow(t, p, parent, t1, rc.ID, release)
+		if early && (w.next == nil || w.rc.State != Canceled) {
+			t.Fatalf("Wait returned (%+v, %v) inside the settling window: armed = %v", w.rc, w.err, w.next != nil)
+		}
+		if err := <-canceled; err != nil {
+			t.Fatalf("Cancel: %v", err)
+		}
+		if err := <-again; !errors.Is(err, ErrNotRunning) {
+			t.Errorf("a second Cancel during the first = %v, want ErrNotRunning once it settled", err)
+		}
+		if w.err != nil || w.rc.State != Canceled || w.next == nil {
+			t.Fatalf("Wait = %+v, %v, armed = %v; want canceled with the continuation armed", w.rc, w.err, w.next != nil)
+		}
+		if res, err := w.next.Wait(); err != nil || res.Text() != "all done" {
+			t.Fatalf("the parent's continuation: %v, %v", res, err)
+		}
+		if err := p.Close(ctx); err != nil {
+			t.Fatal(err)
+		}
+	})
+	t.Run("not closed", func(t *testing.T) {
+		p := New(1)
+		parent, t1, rc := parkedSyncDelegation(t, ctx, p, thread.Memory())
+		entered := make(chan struct{})
+		release := make(chan struct{})
+		errClose := errors.New("boundary not closed")
+		p.testHookCanceling = func(*delegate) error {
+			close(entered)
+			<-release
+			return errClose
+		}
+		canceled := make(chan error, 1)
+		go func() { canceled <- p.Cancel(ctx, parent, rc.ID) }()
+		<-entered
+		w, _ := waitInWindow(t, p, parent, t1, rc.ID, release)
+		if err := <-canceled; !errors.Is(err, errClose) {
+			t.Fatalf("Cancel = %v, want the close's failure", err)
+		}
+		if w.err != nil || w.rc.State != Parked {
+			t.Fatalf("Wait after a failed cancel = %+v, %v; want parked", w.rc, w.err)
+		}
+		if err := p.Close(ctx); err != nil {
+			t.Fatal(err)
+		}
+	})
+}
+
+// panicOnSettle is a storage whose first append of a settled pool
+// receipt panics — a settlement that dies inside settle.
+type panicOnSettle struct {
+	thread.Storage
+	fired atomic.Bool
+}
+
+func (s *panicOnSettle) Append(ctx context.Context, session string, entries ...thread.Entry) error {
+	for _, e := range entries {
+		if pr, ok := e.(thread.PoolReceiptEntry); ok && State(pr.Status).Settled() && s.fired.CompareAndSwap(false, true) {
+			panic("storage died appending the settlement")
+		}
+	}
+	return s.Storage.Append(ctx, session, entries...)
+}
+
+// A panic inside settle — after it marked the delegate settled, before
+// the conclusion's retire was deferred — left the delegate unretired
+// and its conclusion never closed: the run's recover re-entered
+// conclude, settle answered "already settled", and every Wait after
+// blocked for good. settle now retires on its way out of a panic; Wait
+// returns the receipt as the ledger reads it (the settlement was not
+// recorded: Recover settles it from the child).
+func TestPanicInSettleRetires(t *testing.T) {
+	ctx := context.Background()
+	st := &panicOnSettle{Storage: thread.Memory()}
+	p := New(1)
+	parent, _ := thread.Create(ctx, st, core.New(wefttest.Script()))
+	r, err := p.Submit(ctx, parent, core.New(stubModel{}), "go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	rc, err := p.Wait(wctx, parent, r.ID)
+	if err != nil {
+		t.Fatalf("Wait after a panic in settle: %v (the conclusion never closed)", err)
+	}
+	if !st.fired.Load() {
+		t.Fatal("the settlement's append never panicked")
+	}
+	if rc.Settled() {
+		t.Errorf("receipt = %+v; the panicked settlement was not recorded", rc)
+	}
+	p.mu.Lock()
+	n := len(p.delegates) + len(p.byChild)
+	p.mu.Unlock()
+	if n != 0 {
+		t.Errorf("the delegate outlived its panicked settlement: %d entries", n)
+	}
+	if err := p.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A decision can land while the child is parking: its requests are
 // mirrored, the parked receipt written, but the phase still reads the
 // run in flight. Every pump there — the deciding Decide's own, the

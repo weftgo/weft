@@ -222,8 +222,9 @@ func (s *Server) servePlaygroundPreview(rs *linkruntime.RuntimeServer) http.Hand
 // transcript and no request, so no replay of it can be assembled. Any
 // other run — an unknown one included, which the source check answers
 // — passes. The playground's run route calls it at the same position
-// (after the panel token's scope, before every check of the command),
-// so both routes answer one body with the same refusal.
+// (after the panel token's rules, before every check of the command's
+// content, its command_id and experiment_id included), so both routes
+// answer one body with the same refusal.
 func (s *Server) refuseDerivedSource(w http.ResponseWriter, r *http.Request, runID string) bool {
 	if !isDerivedID(runID) {
 		return false

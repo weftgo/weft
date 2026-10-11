@@ -1237,22 +1237,21 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 const derivedSpanKey = "\x00span:"
 
 // spanUsage is a span's gen_ai.usage.* as a core.Usage (absent keys
-// 0); unreported is true when it carries none of the keys.
+// 0); unreported is true when it carries none of the keys or they are
+// all zero — the run row's rule (usagePending), so a step never reads a
+// known $0 where its run reads unknown.
 func spanUsage(attrs map[string]any) (u core.Usage, unreported bool) {
-	unreported = true
 	n := func(k string) int64 {
-		if _, ok := attrs[k]; ok {
-			unreported = false
-		}
 		v, _ := attrInt64(attrs[k])
 		return v
 	}
-	return core.Usage{
+	u = core.Usage{
 		InputTokens: n("gen_ai.usage.input_tokens"), OutputTokens: n("gen_ai.usage.output_tokens"),
 		CachedInputTokens: n("gen_ai.usage.cache_read.input_tokens"),
 		CacheWriteTokens:  n("gen_ai.usage.cache_creation.input_tokens"),
 		ReasoningTokens:   n("gen_ai.usage.reasoning.output_tokens"),
-	}, unreported
+	}
+	return u, u == (core.Usage{})
 }
 
 // spanStep is a span's weft.step.index, -1 when it has none.

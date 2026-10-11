@@ -129,6 +129,10 @@ func TestDeriveStockRunsRules(t *testing.T) {
 	}
 	if r.Steps != 1 || len(runs[0].Spans) != 2 {
 		t.Errorf("steps = %d, spans = %d; want the one chat, the orphan and the cycle left out", r.Steps, len(runs[0].Spans))
+	} else if op := runs[0].Spans[1].Attrs["gen_ai.operation.name"]; op != "chat" {
+		// The chat span carries no operation attribute — its name decided;
+		// the copy says what the derivation resolved.
+		t.Errorf("the chat span copy's gen_ai.operation.name = %v, want the resolved \"chat\"", op)
 	}
 	delete(root.Attrs, "gen_ai.usage.input_tokens")
 	delete(root.Attrs, "gen_ai.usage.cache_read.input_tokens")

@@ -415,7 +415,9 @@ func derivedTwoRoots(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 
 // derivedSweep: a retention sweep takes a weft run with a stock agent
 // under its tool and counts the agent's derived row among the runs it
-// deleted (DB.Sweep's count).
+// deleted (DB.Sweep's count). The agent's spans end after the cutoff,
+// so its row is no sweep candidate of its own: it goes, and is counted,
+// only through the weft run's deletion (StockRunsOf).
 func derivedSweep(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
 		db := open(t)
@@ -428,12 +430,15 @@ func derivedSweep(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			weft,
 			in(stockSpan("5d000000000000d2", "5d000000000000d1", "execute_tool ask", time.Second, 9*time.Second, map[string]any{
 				"gen_ai.operation.name": "execute_tool", "weft.run.id": "weft_swept"})),
-			in(stockSpan("5d000000000000d3", "5d000000000000d2", "invoke_agent stock", 2*time.Second, 8*time.Second, map[string]any{
+			in(stockSpan("5d000000000000d3", "5d000000000000d2", "invoke_agent stock", 2*time.Second, 2*time.Hour, map[string]any{
 				"gen_ai.operation.name": "invoke_agent", "gen_ai.conversation.id": "conv_sweep"})),
-			in(stockChat("5d000000000000d4", "5d000000000000d3", 3*time.Second, 1, 1)),
+			in(stockChat("5d000000000000d4", "5d000000000000d3", 90*time.Minute, 1, 1)),
 		}
 		if err := db.Write(ctx(), obsdb.Batch{Spans: spans}); err != nil {
 			t.Fatal(err)
+		}
+		if r, err := db.Run(ctx(), obsdb.StockRunID(trace, "5d000000000000d3")); err != nil || !r.LastSeen.After(at(time.Hour)) {
+			t.Fatalf("the derived row = %+v, %v; want it seen after the cutoff (no candidate of its own)", r.RunRow, err)
 		}
 		n, err := db.Sweep(ctx(), at(time.Hour))
 		if err != nil || n != 2 {

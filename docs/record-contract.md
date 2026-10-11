@@ -681,7 +681,8 @@ is 409 with it); `spans` are the real spans (the waterfall);
 `export` carries the row and the spans, every other block badged, and
 refuses `format=wefttest` 400 with the badge, as the playground's fixtures,
 preview and run routes refuse a derived source (the preview and run routes
-before any other check of the command, so one body gets one answer): there is no transcript to replay;
+after the panel token's rules and before any check of the command's
+content — its ids included — so one body gets one answer): there is no transcript to replay;
 `/api/diff` with a derived side marks every column `unknown`, never a
 change except unequal step counts (`missing`).
 `steps/{n}` is the step's `chat` span: its times and usage (priced like

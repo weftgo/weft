@@ -208,6 +208,14 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 				return
 			}
 		}
+		// A source derived from stock spans has nothing to replay: 400
+		// with the derived badge. After the panel token's rules (who may
+		// ask), before every check of the command's content — its ids
+		// included — the preview's position, so both routes answer one
+		// body alike.
+		if req.Source != nil && s.refuseDerivedSource(w, r, req.Source.RunID) {
+			return
+		}
 		// The caller's command id is written as the SSE frame id on the
 		// runtime's stream: anything that could break a line there is
 		// refused (linkruntime.ValidCommandID).
@@ -220,13 +228,6 @@ func (s *Server) servePlaygroundRun(rs *linkruntime.RuntimeServer) http.HandlerF
 		// run, keys the runtime's budget and is a URL path segment.
 		if req.ExperimentID != "" && !linkruntime.ValidCommandID(req.ExperimentID) {
 			badRequest(w, r, "experiment_id must be 1 to 128 characters of [A-Za-z0-9._:-]")
-			return
-		}
-
-		// A source derived from stock spans has nothing to replay: 400
-		// with the derived badge, before any other check of the command
-		// — the preview's position, so both routes answer one body alike.
-		if req.Source != nil && s.refuseDerivedSource(w, r, req.Source.RunID) {
 			return
 		}
 

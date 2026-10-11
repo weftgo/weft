@@ -452,6 +452,17 @@ type badge struct {
 // producers §9 still reads — no gen_ai.operation.name (the span name
 // decides), no gen_ai.tool.call.id (only recommended), no usage.
 func stockVariant(t *testing.T, drop func(key string) bool, empty bool) string {
+	return stockVariantWith(t, drop, func(kv map[string]any) map[string]any {
+		if empty {
+			return map[string]any{"key": kv["key"], "value": map[string]any{"stringValue": ""}}
+		}
+		return nil
+	})
+}
+
+// stockVariantWith is stockVariant with the replacement of each
+// matched attribute spelled out: nil drops it.
+func stockVariantWith(t *testing.T, match func(key string) bool, replace func(kv map[string]any) map[string]any) string {
 	t.Helper()
 	b, err := os.ReadFile("../obsdb/testdata/contract/stock_genai/traces.json")
 	if err != nil {
@@ -466,10 +477,10 @@ func stockVariant(t *testing.T, drop func(key string) bool, empty bool) string {
 				var kept []any
 				for _, a := range span["attributes"].([]any) {
 					kv := a.(map[string]any)
-					if !drop(kv["key"].(string)) {
+					if !match(kv["key"].(string)) {
 						kept = append(kept, kv)
-					} else if empty {
-						kept = append(kept, map[string]any{"key": kv["key"], "value": map[string]any{"stringValue": ""}})
+					} else if r := replace(kv); r != nil {
+						kept = append(kept, r)
 					}
 				}
 				span["attributes"] = kept
@@ -551,10 +562,24 @@ func TestDerivedStepsNameOnly(t *testing.T) {
 	}
 }
 
-// A stock producer that reports no usage anywhere: the run row's and
-// every step's cost is unknown, with the reason — never a known $0.
+// A stock producer that reports no usage anywhere, or only zeros: the
+// run row's and every step's cost is unknown, with the reason — never a
+// known $0.
 func TestDerivedNoUsageCostUnknown(t *testing.T) {
-	h := variantFixture(t, stockVariant(t, func(k string) bool { return strings.HasPrefix(k, "gen_ai.usage.") }, false))
+	usage := func(k string) bool { return strings.HasPrefix(k, "gen_ai.usage.") }
+	zero := func(kv map[string]any) map[string]any {
+		return map[string]any{"key": kv["key"], "value": map[string]any{"intValue": "0"}}
+	}
+	for name, body := range map[string]string{
+		"absent": stockVariant(t, usage, false),
+		"zero":   stockVariantWith(t, usage, zero),
+	} {
+		t.Run(name, func(t *testing.T) { noUsageCostUnknown(t, variantFixture(t, body)) })
+	}
+}
+
+func noUsageCostUnknown(t *testing.T, h http.Handler) {
+	t.Helper()
 	type costed struct {
 		CostUSD    *float64 `json:"cost_usd"`
 		CostKnown  bool     `json:"cost_known"`
@@ -562,7 +587,7 @@ func TestDerivedNoUsageCostUnknown(t *testing.T) {
 		CostReason string   `json:"cost_reason"`
 	}
 	unknown := func(c costed) bool {
-		return c.CostUSD == nil && !c.CostKnown && c.CostBadge == "unknown" && strings.Contains(c.CostReason, "no usage")
+		return c.CostUSD == nil && !c.CostKnown && c.CostBadge == "unknown" && strings.Contains(c.CostReason, "no (or zero) usage")
 	}
 	for _, p := range []string{"/runs/" + derivedOK, "/runs/" + derivedFail, "/runs/" + derivedOK + "/steps/0", "/runs/" + derivedOK + "/steps/1"} {
 		_, _, body := get(t, h, "/studio/api"+p)
@@ -576,7 +601,7 @@ func TestDerivedNoUsageCostUnknown(t *testing.T) {
 
 // The preview and the run route answer one body with a derived source
 // alike — the derived refusal, whatever else the body gets wrong (an
-// unknown runtime, a fork) — and a command refusal's body is still the
+// unknown runtime, a fork, malformed command and experiment ids) — and a command refusal's body is still the
 // bare error shape, no badge.
 func TestDerivedRefusalParity(t *testing.T) {
 	pt := newPlaygroundTestServer(t)
@@ -587,7 +612,8 @@ func TestDerivedRefusalParity(t *testing.T) {
 	if code, out := previewPost(t, pt, "/v1/traces", "", string(b)); code != http.StatusOK {
 		t.Fatalf("ingest: %d %s", code, out)
 	}
-	body := `{"runtime":"rt_nope","agent":"nobody","thread":"fork","source":{"run_id":"` + derivedOK + `","from_step":0}}`
+	body := `{"runtime":"rt_nope","agent":"nobody","thread":"fork","command_id":"bad id!","experiment_id":"bad id!",` +
+		`"source":{"run_id":"` + derivedOK + `","from_step":0}}`
 	var answers []string
 	for _, path := range []string{"/api/playground/preview", "/api/playground/runs"} {
 		code, out := previewPost(t, pt, path, "", body)

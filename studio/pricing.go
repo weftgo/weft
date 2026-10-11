@@ -623,11 +623,11 @@ func usagePending(rec obsdb.RunRow) string {
 }
 
 // derivedUsageUnknown is the cost reason of a derived run (or step)
-// whose stock spans report no usage (docs/record-contract.md §9): no
-// gen_ai.usage.* on its root or its chat spans, so its cost is unknown,
-// never a known $0. A derived run's row holds the fold, so one whose
-// spans report 0 tokens reads the same way.
-const derivedUsageUnknown = "the stock spans report no usage (no gen_ai.usage.* on the root or its chat spans): the cost is unknown"
+// whose stock spans report no usage, or only zeros (docs/record-contract.md
+// §9): its cost is unknown, never a known $0. A derived run's row holds
+// the fold, which cannot tell absent keys from zero ones, so both read
+// this way — on the row and on its steps alike.
+const derivedUsageUnknown = "the stock spans report no (or zero) usage (gen_ai.usage.* absent or 0 on the root and its chat spans): the cost is unknown"
 
 // row is row(rec) with its cost.
 func (c *coster) row(rec obsdb.RunRow) runRow {

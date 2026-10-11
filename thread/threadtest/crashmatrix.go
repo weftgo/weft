@@ -300,26 +300,45 @@ func assertCrashPoint(t *testing.T, point string, st thread.Storage) {
 		}
 		continueTurn(t, st, CrashMatrixForkID, 3) // the copied prompt and answer + the follow-up
 	case "clear_queue":
-		// ClearQueue drops the queued steer's receipt in one batch: the
-		// drop is durable (a second receipt entry) and the queue reads
-		// empty after the reopen. The drained shape is the steer
-		// point's second timing: steerSource handed the steer to the
-		// blocked call between steps, so the queue ClearQueue meets is
-		// already empty — nothing to drop, the steer's message
-		// persisted instead. Both trees are the point's crash state.
+		// Three timings, each the point's crash state:
+		//   - dropped ("…,receipt,receipt"): ClearQueue met the steer
+		//     queued and dropped its receipt in one batch — durable, the
+		//     queue reads empty after the reopen;
+		//   - drained ("…,receipt,message"): steerSource handed the steer
+		//     to the blocked call between steps, so the queue ClearQueue
+		//     met was empty — nothing to drop — and the steer's message
+		//     persisted; the message on the line settles its receipt;
+		//   - in flight ("…,receipt"): steerSource had handed the steer
+		//     but the drain's message had not reached the tree when the
+		//     child died (ClearQueue again found nothing to drop). The
+		//     steer was given to no recorded transcript, so the reopen
+		//     restores it (its Send was accepted, T4): ClearQueue drops
+		//     exactly that one, and the continued turn runs without it.
 		_, entries, _, err := st.Load(ctx, CrashMatrixSteerID)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if k := kindsOf(entries); k != "message,message,message,receipt,receipt" &&
-			k != "message,message,message,receipt,message" {
+		k := kindsOf(entries)
+		want := 0
+		switch k {
+		case "message,message,message,receipt,receipt", "message,message,message,receipt,message":
+		case "message,message,message,receipt":
+			want = 1
+		default:
 			t.Fatalf("clear_queue kinds = %q", k)
 		}
 		s := openMatrixSession(t, st, CrashMatrixSteerID)
-		if n, err := s.ClearQueue(ctx); err != nil || n != 0 {
-			t.Fatalf("ClearQueue after the crash: %d, %v", n, err)
+		if n, err := s.ClearQueue(ctx); err != nil || n != want {
+			t.Fatalf("ClearQueue after the crash (%s): %d, %v; want %d", k, n, err, want)
 		}
-		continueTurn(t, st, CrashMatrixSteerID, -1)
+		if err := s.Close(ctx); err != nil {
+			t.Fatalf("Close after ClearQueue: %v", err)
+		}
+		if want == 1 {
+			continueTurnWithout(t, st, CrashMatrixSteerID, "steer it")
+		} else {
+			continueTurn(t, st, CrashMatrixSteerID, -1)
+		}
 	case "resume_arm":
 		// Resume's arm entry is durable; the boundary it arms reads
 		// decided, and the reopen continues.
@@ -729,6 +748,33 @@ func continueTurn(t *testing.T, st thread.Storage, id string, minFed int) {
 		last := reqs[len(reqs)-1]
 		if len(last.Messages) < minFed || last.Messages[len(last.Messages)-1].Text() != "continue" {
 			t.Fatalf("fed %d messages, last %q", len(last.Messages), last.Messages[len(last.Messages)-1].Text())
+		}
+	}
+}
+
+// continueTurnWithout is continueTurn for a point whose crash state
+// lost a message on the way: the follow-up completes and no model call
+// it made was fed text.
+func continueTurnWithout(t *testing.T, st thread.Storage, id, text string) {
+	t.Helper()
+	ctx := context.Background()
+	m := &countingModel{}
+	s, err := thread.Open(ctx, st, id, core.New(m, plainSpend(), matrixNote()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	turn, err := s.Send(ctx, core.User("continue"))
+	if err != nil {
+		t.Fatalf("the follow-up Send: %v", err)
+	}
+	if _, err := turn.Wait(); err != nil {
+		t.Fatalf("the follow-up turn: %v", err)
+	}
+	for _, req := range m.Requests() {
+		for _, msg := range req.Messages {
+			if msg.Text() == text {
+				t.Fatalf("the follow-up was fed %q, which the crash state dropped", text)
+			}
 		}
 	}
 }

@@ -8,7 +8,7 @@ import { cleanup, configure, fireEvent, screen, waitFor, within } from "@testing
 import axe from "axe-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { setStudioToken, studioToken } from "@/lib/api"
+import { adoptTokenFromLocation, setStudioToken, studioToken, tabTokenActive } from "@/lib/api"
 import type { PricingSettings } from "@/lib/api"
 import { editsKey } from "@/lib/settings"
 import { renderApp, stubBrowser } from "@/test/app"
@@ -277,6 +277,29 @@ describe("the token", () => {
     expect(studioToken()).toBe("")
     expect(localStorage.getItem("studio.token")).toBeNull()
     await waitFor(() => expect(section("token").querySelector("[data-token-view]")).toBeNull())
+  })
+
+  // A hand-off tab (setup C's #token=): the section names the token
+  // this tab's alone, and clear drops it only — the stored dev token
+  // every other tab reads stays in localStorage.
+  it("a hand-off tab's token: shown as this tab's only, cleared alone, the stored token kept", async () => {
+    setStudioToken("dev-secret-token-1234")
+    const pt = panelToken("read")
+    window.history.replaceState(null, "", `/settings#token=${pt}`)
+    expect(adoptTokenFromLocation()).toBe(true)
+    window.history.replaceState(null, "", "/")
+    studio.on("GET meta", panelMeta())
+    await openSettings()
+    expect(section("token").querySelector('[data-fact="stored"]')).toBeNull()
+    expect(fact("token", "this tab only").textContent).toBe("••••••••")
+    expect(section("token").textContent).toContain("hand-off")
+    expect(section("token").textContent).toContain("pub_orders")
+    fireEvent.click(within(section("token")).getByRole("button", { name: "clear" }))
+    expect(tabTokenActive()).toBe(false)
+    expect(studioToken()).toBe("dev-secret-token-1234")
+    expect(localStorage.getItem("studio.token")).toBe("dev-secret-token-1234")
+    await waitFor(() => expect(section("token").querySelector('[data-fact="stored"]')).toBeTruthy())
+    expect(section("token").querySelector('[data-fact="this tab only"]')).toBeNull()
   })
 
   it("a panel token's meta: the database's path and size badged hidden, runtimes refused as hidden", async () => {

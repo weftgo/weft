@@ -36,15 +36,18 @@ An app served on a real hostname (`http://myapp.internal:8080/studio/`)
 either lists that origin — `studio.AllowOrigins("http://myapp.internal:8080")`,
 whose `host:port` must equal the request's `Host` — or sets
 `studio.Token`. `X-Forwarded-Host`/`Forwarded` are never trusted; behind
-a proxy, the `Host` the proxy forwards is the one checked. The UI shell
+a proxy, the `Host` the proxy forwards is the one checked. A proxy that
+rewrites `Host` (Vite's `changeOrigin: true`) must list its front origin
+in `AllowOrigins`, since the `Origin`'s `host:port` is compared with the
+`Host`. The UI shell
 and `/panel.js` carry no data and are not checked; with a `Token` the
 bearer is the defence and the `Host` does not matter.
 
 The loopback `Host` stops a rebound page, not a cross-site one: any
 site's page can POST to `localhost` without a preflight. So setup A
 also refuses a **cross-origin write** — an unsafe method (anything but
-GET, HEAD, OPTIONS) whose `Origin` is neither the request's own
-(`scheme://Host`) nor an `AllowOrigins` entry, or that sends no
+GET, HEAD, OPTIONS) whose `Origin` is neither one whose `host:port` is
+the request's `Host` nor an `AllowOrigins` entry, or that sends no
 `Origin` but `Sec-Fetch-Site: cross-site` — with a 403 "cross-origin
 write refused (setup A)" naming the Origin. Same-origin pages, clients
 that send neither header (curl, the runtime link) and `AllowOrigins`
@@ -114,8 +117,12 @@ the bearer and `Accept: application/json` and opens the answer's
 the host page) — its fragment carries a 5-minute read token for the same
 public id, so the hosted Studio opens on the run without a token pasted.
 That handed-over token (any panel token in a `#token=`) serves its tab
-alone: it is never stored and never replaces the dev token a browser
-keeps, which every other tab goes on using.
+alone: it lives in that tab's `sessionStorage` (kept across a reload,
+this tab only) and never replaces the dev token a browser keeps in
+`localStorage`, which every other tab goes on using. Settings shows it
+as "this tab only" and its clear drops it alone; when Studio refuses it
+(its 5 minutes are over) the tab falls back to the stored token, or the
+token prompt says the hand-off token expired.
 The tab opens after the hand-off answers; a browser that blocks a popup
 after a slow answer leaves the plain link on the note line (put there
 once the answer takes over a second). Without the

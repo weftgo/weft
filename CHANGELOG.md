@@ -503,9 +503,14 @@ breaking).
 - Devtools panel: a start that settles after the element was removed
   returns without touching the element.
 - Studio: a panel token handed over in a link's `#token=` (the hand-off's
-  5-minute read token) serves that tab alone. It is no longer stored, so it
-  no longer replaces the browser's stored dev token, which left every tab
-  401 five minutes later. A dev token in the fragment is stored as before.
+  5-minute read token) serves that tab alone, held in its `sessionStorage`
+  (kept across a reload, never shared with another tab). It no longer
+  replaces the browser's stored dev token in `localStorage`, which left
+  every tab 401 five minutes later. Settings labels it "this tab only" and
+  its clear drops it alone, leaving the stored token. A 401 under it drops
+  it and retries with the stored token; with none stored, the token prompt
+  says the hand-off token expired instead of "the stored token was
+  refused". A dev token in the fragment is stored as before.
 - Studio: `/experiments/A` → `/experiments/B` (the palette) is a fresh
   page. A's cell states, polls and pending "re-run all" toast no longer
   carry onto B.
@@ -519,8 +524,8 @@ breaking).
   mode: "no-cors"})` a text/plain body past it, with no preflight — saving an
   experiment, cancelling a run, starting a playground run, deciding an
   approval, steering. An unsafe method (anything but GET/HEAD/OPTIONS) whose
-  `Origin` is neither `scheme://Host` nor an `AllowOrigins` entry (`null`
-  included), or that carries no `Origin` but `Sec-Fetch-Site: cross-site`, is
+  `Origin` is neither one whose `host:port` is the request's `Host` nor an
+  `AllowOrigins` entry (`null` included), or that carries no `Origin` but `Sec-Fetch-Site: cross-site`, is
   now 403 "cross-origin write refused (setup A)", naming the Origin. Same-origin
   pages, clients that send neither header (curl, the runtime link) and
   `AllowOrigins` origins are unchanged; reads are unchanged (setup A sends no
@@ -535,8 +540,8 @@ breaking).
 - The `weft.raw` record is encoded without HTML escaping: a body of `<`, `>`
   or `&` no longer grows sixfold, so a record of two full ordinary bodies
   stays ≈ 650 KiB. JSON's own escaping still makes a body of control bytes
-  six times its size (≈ 3 MiB a record), so under `otel.RawBodies` a Studio
-  destination now also splits each log export at 12 MiB: a burst of such
+  six times its size (≈ 3 MiB a record), so under `otel.RawBodies` the Local
+  and Studio destinations now split each log export at 12 MiB: a burst of such
   records no longer forms a post over Studio's 16 MiB ingest limit, which
   was refused whole and lost every record in it (ADR 0028 §12).
 

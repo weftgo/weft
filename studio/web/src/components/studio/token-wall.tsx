@@ -9,7 +9,7 @@
 import { useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
-import { ApiError, metaQuery, setStudioToken, studioToken } from "@/lib/api"
+import { ApiError, metaQuery, setStudioToken, studioToken, tabTokenDropped } from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
@@ -27,6 +27,9 @@ export function TokenWall({ children }: { children: React.ReactNode }) {
   if (!isUnauthorized(meta.error)) return <>{children}</>
 
   const had = studioToken() !== ""
+  // A refused hand-off token (lib/api dropped it, and no stored token
+  // was left to fall back to) is its own case: nothing stored was refused.
+  const handoffExpired = !had && tabTokenDropped()
   const unlock = () => {
     const tok = draft.trim()
     if (!tok) return
@@ -48,7 +51,9 @@ export function TokenWall({ children }: { children: React.ReactNode }) {
       <p className="text-xs text-muted-foreground">
         {had
           ? "The stored token was refused — it expired, or this Studio restarted with a new one."
-          : "The API behind this page is token-walled."}{" "}
+          : handoffExpired
+            ? "The hand-off token this tab's link carried expired; paste a token or ask for a new link."
+            : "The API behind this page is token-walled."}{" "}
         The <span className="font-mono">studio</span> binary prints its dev
         token at start (<span className="font-mono">WEFT_STUDIO_TOKEN</span>{" "}
         or <span className="font-mono">--token</span> fixes it); a hosted

@@ -9,7 +9,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { setStudioToken, studioToken } from "@/lib/api"
+import { adoptTokenFromLocation, setStudioToken, studioToken, tabTokenActive } from "@/lib/api"
 import { noRetryOnRefusal } from "@/lib/query"
 import { TokenWall } from "@/components/studio/token-wall"
 
@@ -62,6 +62,7 @@ describe("TokenWall", () => {
     cleanup()
     vi.unstubAllGlobals()
     setStudioToken("")
+    window.history.replaceState(null, "", "/")
   })
 
   it("renders the app when the API is open (setup A)", async () => {
@@ -101,4 +102,35 @@ describe("TokenWall", () => {
     expect(screen.getByLabelText("API token")).toBeTruthy()
     expect(screen.queryByText("the app")).toBeNull()
   })
+
+  // The hand-off's 5-minute read token expired: the stored dev token is
+  // fine, so the tab falls back to it — no wall.
+  it("falls back to the stored token when the hand-off token is refused", async () => {
+    const pt = handoffToken()
+    setStudioToken("dev-secret")
+    window.history.replaceState(null, "", `/runs#token=${pt}`)
+    adoptTokenFromLocation()
+    const fetchMock = walled("dev-secret")
+    vi.stubGlobal("fetch", fetchMock)
+    renderWall()
+    expect(await screen.findByText("the app")).toBeTruthy()
+    expect(tabTokenActive()).toBe(false)
+    expect(new Headers(fetchMock.mock.calls.at(-1)![1]?.headers).get("Authorization")).toBe("Bearer dev-secret")
+  })
+
+  it("words the wall for an expired hand-off token when nothing is stored", async () => {
+    const pt = handoffToken()
+    window.history.replaceState(null, "", `/runs#token=${pt}`)
+    adoptTokenFromLocation()
+    vi.stubGlobal("fetch", walled("dev-secret"))
+    renderWall()
+    await screen.findByLabelText("API token")
+    expect(screen.getByText(/hand-off token this tab.s link carried expired/)).toBeTruthy()
+    expect(screen.queryByText(/The stored token was refused/)).toBeNull()
+  })
 })
+
+function handoffToken(): string {
+  const claims = btoa(JSON.stringify({ scope: "read", public_id: "pub_1" })).replace(/=+$/, "")
+  return `weft_pt.${claims}.sig`
+}

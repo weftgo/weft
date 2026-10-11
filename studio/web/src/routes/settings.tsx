@@ -13,7 +13,17 @@ import { useEffect, useMemo, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 
-import { ApiError, apiBase, metaQuery, pricingQuery, runtimesQuery, setStudioToken, studioToken } from "@/lib/api"
+import {
+  ApiError,
+  apiBase,
+  clearTabToken,
+  metaQuery,
+  pricingQuery,
+  runtimesQuery,
+  setStudioToken,
+  studioToken,
+  tabTokenActive,
+} from "@/lib/api"
 import type { Meta, PricingSettings, RuntimeView } from "@/lib/api"
 import { copyText, download } from "@/lib/json"
 import { playgroundLink, runLink } from "@/lib/links"
@@ -235,24 +245,38 @@ function StudioFacts({ meta }: { meta: Meta }) {
 function TokenSection({ meta }: { meta: Meta }) {
   const queryClient = useQueryClient()
   const [tok, setTok] = useState(() => studioToken())
+  // A hand-off tab (the link fragment /api/panel-handoff hands over) runs on its own
+  // panel token, held in this tab's sessionStorage: shown as this tab's,
+  // and cleared alone — the stored token every other tab reads stays.
+  const [tab, setTab] = useState(() => tabTokenActive())
   const [shown, setShown] = useState(false)
   const [draft, setDraft] = useState("")
   const [note, setNote] = useState("")
   const id = tokenIdentity(tok, meta)
-  const change = (next: string, said: string) => {
-    setStudioToken(next)
-    setTok(next)
+  const refetch = (said: string) => {
+    setTok(studioToken())
+    setTab(tabTokenActive())
     setShown(false)
     setNote(said)
     // Everything is refetched with the new bearer (or none); meta first,
     // which decides whether the wall comes down or goes up.
     void queryClient.resetQueries()
   }
+  const change = (next: string, said: string) => {
+    setStudioToken(next)
+    refetch(said)
+  }
+  const clear = () => {
+    if (tab) {
+      clearTabToken()
+      refetch("this tab's hand-off token cleared: the stored token serves again")
+    } else change("", "token cleared")
+  }
   return (
     <div className="space-y-3">
       <Facts
         rows={[
-          ["stored", tok ? <span data-token-view>{shown ? tok : maskToken(tok)}</span> : "(none)"],
+          [tab ? "this tab only" : "stored", tok ? <span data-token-view>{shown ? tok : maskToken(tok)}</span> : "(none)"],
           ["identity", <span data-identity={id.kind}>{id.words}</span>],
           ...(id.exp ? ([["expires", id.exp]] as [string, React.ReactNode][]) : []),
           ["walled", meta.auth_required ? "yes: every /api request carries the bearer" : "no: this Studio has no Token"],
@@ -270,7 +294,7 @@ function TokenSection({ meta }: { meta: Meta }) {
           >
             copy
           </Button>
-          <Button size="sm" variant="outline" onClick={() => change("", "token cleared")}>
+          <Button size="sm" variant="outline" onClick={clear}>
             clear
           </Button>
         </div>
@@ -299,7 +323,10 @@ function TokenSection({ meta }: { meta: Meta }) {
         </Button>
       </form>
       <p className="text-[11px] text-faint">
-        The token stays in this browser (localStorage) and travels only as the Authorization header — never in a URL.
+        {tab
+          ? "This tab runs on the hand-off token its link carried: it stays in this tab (sessionStorage, kept across a reload) and never replaces the stored token; clear drops it alone."
+          : "The token stays in this browser (localStorage)."}{" "}
+        It travels only as the Authorization header — never in a URL.
       </p>
       <p className="font-mono text-[11px] text-thread-ink" role="status">
         {note}

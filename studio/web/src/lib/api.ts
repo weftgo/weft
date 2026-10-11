@@ -577,7 +577,8 @@ export function apiBase(): string {
  */
 const TOKEN_KEY = "studio.token"
 export function studioToken(): string {
-  if (tabToken) return tabToken
+  const tab = tabToken()
+  if (tab) return tab
   try {
     return localStorage.getItem(TOKEN_KEY) ?? memoryToken
   } catch {
@@ -589,11 +590,48 @@ export function studioToken(): string {
 // before the next read.
 let memoryToken = ""
 // A panel token handed over in the link (the hand-off's short-lived
-// read token) serves this tab alone: it is never stored, so it never
-// replaces the dev token every other tab reads.
-let tabToken = ""
+// read token) serves this tab alone: it is kept in sessionStorage —
+// per tab, surviving a reload, never shared with another tab — and
+// never in localStorage, so it never replaces the dev token every
+// other tab reads. The in-memory copy serves unwritable storage.
+const TAB_TOKEN_KEY = "studio.tab-token"
+let tabMemory = ""
+// Set when a refused (401) hand-off token was dropped: the wall words
+// its prompt for an expired hand-off rather than a refused stored token.
+let tabDropped = false
+function tabToken(): string {
+  try {
+    return sessionStorage.getItem(TAB_TOKEN_KEY) ?? tabMemory
+  } catch {
+    return tabMemory
+  }
+}
+function setTabToken(tok: string) {
+  tabMemory = tok
+  try {
+    if (tok) sessionStorage.setItem(TAB_TOKEN_KEY, tok)
+    else sessionStorage.removeItem(TAB_TOKEN_KEY)
+  } catch {
+    // unwritable storage: this page only
+  }
+}
+/** True while this tab runs on a hand-off token (a panel token from
+ * the link's fragment) rather than the stored one. */
+export function tabTokenActive(): boolean {
+  return tabToken() !== ""
+}
+/** Drops this tab's hand-off token alone; the stored token (every
+ * other tab's) is untouched and serves again. */
+export function clearTabToken() {
+  setTabToken("")
+}
+/** True once a hand-off token Studio refused (401) was dropped. */
+export function tabTokenDropped(): boolean {
+  return tabDropped
+}
 export function setStudioToken(tok: string) {
-  tabToken = ""
+  setTabToken("")
+  tabDropped = false
   memoryToken = tok
   try {
     if (tok) localStorage.setItem(TOKEN_KEY, tok)
@@ -601,6 +639,21 @@ export function setStudioToken(tok: string) {
   } catch {
     // unwritable storage: this page only
   }
+}
+
+/** authorize fetches with the bearer; a 401 under the tab's hand-off
+ * token drops it and, when a stored token remains, asks once more with
+ * that (the hand-off's 5 minutes are over, the dev token is fine). */
+async function authorized(url: string, init: RequestInit & { headers: Record<string, string> }): Promise<Response> {
+  const tok = studioToken()
+  if (tok) init.headers.Authorization = `Bearer ${tok}`
+  const res = await fetch(url, init)
+  if (res.status !== 401 || !tok || tok !== tabToken()) return res
+  clearTabToken()
+  tabDropped = true
+  const stored = studioToken()
+  if (!stored) return res
+  return fetch(url, { ...init, headers: { ...init.headers, Authorization: `Bearer ${stored}` } })
 }
 
 /**
@@ -645,8 +698,10 @@ export function adoptTokenFromLocation(): boolean {
   } catch {
     return false
   }
-  if (tokenScopeOf(tok) !== "") tabToken = tok
-  else setStudioToken(tok)
+  if (tokenScopeOf(tok) !== "") {
+    setTabToken(tok)
+    tabDropped = false
+  } else setStudioToken(tok)
   return true
 }
 
@@ -674,9 +729,7 @@ async function request<T>(
 ): Promise<T> {
   const headers: Record<string, string> = { Accept: "application/json" }
   if (body !== undefined) headers["Content-Type"] = "application/json"
-  const tok = studioToken()
-  if (tok) headers.Authorization = `Bearer ${tok}`
-  const res = await fetch(new URL(path, apiBase()).toString(), {
+  const res = await authorized(new URL(path, apiBase()).toString(), {
     method,
     headers,
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
@@ -1392,9 +1445,7 @@ export function diffQuery(a: string, b: string) {
  * recorded answer). */
 export async function fetchTestExport(runID: string): Promise<{ blob: Blob; name: string }> {
   const headers: Record<string, string> = { Accept: "application/zip" }
-  const tok = studioToken()
-  if (tok) headers.Authorization = `Bearer ${tok}`
-  const res = await fetch(new URL(testExportPath(runID), apiBase()).toString(), { headers })
+  const res = await authorized(new URL(testExportPath(runID), apiBase()).toString(), { headers })
   if (!res.ok) {
     let code = "network"
     let message = `${res.status} ${res.statusText}`

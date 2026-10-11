@@ -7,6 +7,9 @@ import { FakeStudio } from "../test/fake-studio"
 import {
   adoptTokenFromLocation,
   ApiError,
+  clearTabToken,
+  tabTokenActive,
+  tabTokenDropped,
   asTranscript,
   fetchRuns,
   fetchStep,
@@ -71,6 +74,54 @@ describe("the token (S4.6, setup B)", () => {
     expect(window.location.hash).toBe("")
   })
 
+  // Setup C's reader reloads within the token's 5 minutes: the tab
+  // token is in this tab's sessionStorage, so a fresh module (a reload:
+  // the fragment already stripped) still reads it; localStorage keeps
+  // the dev token untouched.
+  it("keeps a panel token from the fragment across a reload (sessionStorage), the stored token untouched", async () => {
+    const claims = btoa(JSON.stringify({ scope: "read", pub: "pub_1" })).replace(/=+$/, "")
+    const panel = `weft_pt.${claims}.sig`
+    setStudioToken("dev-secret")
+    window.history.replaceState(null, "", `/runs/r1#token=${panel}`)
+    expect(adoptTokenFromLocation()).toBe(true)
+    vi.resetModules()
+    const reloaded = await import("./api")
+    expect(reloaded.adoptTokenFromLocation()).toBe(false)
+    expect(reloaded.studioToken()).toBe(panel)
+    expect(reloaded.tabTokenActive()).toBe(true)
+    expect(localStorage.getItem("studio.token")).toBe("dev-secret")
+    // Dropping it leaves the stored token serving.
+    reloaded.clearTabToken()
+    expect(reloaded.studioToken()).toBe("dev-secret")
+    expect(sessionStorage.length).toBe(0)
+  })
+
+  it("holds the panel token in memory when sessionStorage throws", () => {
+    const claims = btoa(JSON.stringify({ scope: "read", pub: "pub_1" })).replace(/=+$/, "")
+    const panel = `weft_pt.${claims}.sig`
+    const origGet = Storage.prototype.getItem
+    const origSet = Storage.prototype.setItem
+    const get = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, k: string) {
+      if (this === sessionStorage) throw new Error("denied")
+      return origGet.call(this, k)
+    })
+    const set = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, k: string, v: string) {
+      if (this === sessionStorage) throw new Error("denied")
+      origSet.call(this, k, v)
+    })
+    try {
+      window.history.replaceState(null, "", `/runs/r1#token=${panel}`)
+      expect(adoptTokenFromLocation()).toBe(true)
+      expect(studioToken()).toBe(panel)
+      expect(tabTokenActive()).toBe(true)
+      clearTabToken()
+      expect(tabTokenActive()).toBe(false)
+    } finally {
+      get.mockRestore()
+      set.mockRestore()
+    }
+  })
+
   it("stores a dev token from the fragment, replacing the stored one", () => {
     setStudioToken("old-secret")
     window.history.replaceState(null, "", "/runs#token=new-secret")
@@ -84,6 +135,53 @@ describe("the token (S4.6, setup B)", () => {
     expect(adoptTokenFromLocation()).toBe(false)
     expect(studioToken()).toBe("")
     expect(window.location.search + window.location.hash).toBe("?run=r1#t=3")
+  })
+})
+
+describe("a hand-off token refused", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    setStudioToken("")
+    window.history.replaceState(null, "", "/")
+  })
+
+  // The hand-off's read token lives 5 minutes; when Studio refuses it,
+  // the tab falls back to the stored dev token instead of walling a
+  // reader whose stored token is fine.
+  it("a 401 under an active tab token drops it and retries with the stored dev token", async () => {
+    const claims = btoa(JSON.stringify({ scope: "read", pub: "pub_1" })).replace(/=+$/, "")
+    const panel = `weft_pt.${claims}.sig`
+    setStudioToken("dev-secret")
+    window.history.replaceState(null, "", `/runs#token=${panel}`)
+    adoptTokenFromLocation()
+    const fetchMock = vi.fn(async (_u: RequestInfo | URL, init?: RequestInit) =>
+      new Headers(init?.headers).get("Authorization") === "Bearer dev-secret"
+        ? ok({ total: 0, runs: [], next_before: null })
+        : ok({ error: { code: "unauthorized", message: "bad or expired token" } }, 401)
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    await fetchRuns({})
+    const auth = fetchMock.mock.calls.map((c) => new Headers(c[1]?.headers).get("Authorization"))
+    expect(auth).toEqual([`Bearer ${panel}`, "Bearer dev-secret"])
+    expect(tabTokenActive()).toBe(false)
+    expect(tabTokenDropped()).toBe(true)
+    expect(studioToken()).toBe("dev-secret")
+    expect(localStorage.getItem("studio.token")).toBe("dev-secret")
+  })
+
+  it("with no stored token the 401 stands and the tab token is dropped", async () => {
+    const claims = btoa(JSON.stringify({ scope: "read", pub: "pub_1" })).replace(/=+$/, "")
+    const panel = `weft_pt.${claims}.sig`
+    window.history.replaceState(null, "", `/runs#token=${panel}`)
+    adoptTokenFromLocation()
+    const fetchMock = vi.fn(async () =>
+      ok({ error: { code: "unauthorized", message: "bad or expired token" } }, 401)
+    )
+    vi.stubGlobal("fetch", fetchMock)
+    await expect(fetchRuns({})).rejects.toMatchObject({ status: 401 })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(tabTokenActive()).toBe(false)
+    expect(tabTokenDropped()).toBe(true)
   })
 })
 

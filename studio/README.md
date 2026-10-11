@@ -874,8 +874,16 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 281,470 B raw / 81,358 B gzip
-(79.5 KiB, the ledger's last row; 562 B under the 81,920 B — 80 KiB — cap). The scope-detection ladder (C3: rungs
+committed `studio/dist/panel/panel.js`, 230,920 B raw / 73,706 B gzip
+(72.0 KiB, the ledger's last row; 8,214 B — 8.0 KiB — of headroom under
+the 81,920 B, 80 KiB, cap). It ships fully minified — whitespace,
+identifiers and syntax (plan A5.3.0; before it the es-format library
+build kept its indentation and newlines: 281,470 B raw / 81,358 B gzip,
+562 B under the cap) — and with no sourcemap, so it is unreadable in a
+host page's devtools: that is the accepted cost of the headroom. To
+read the panel, read its source, `studio/web/src/panel`; a sourcemap
+is deliberately not shipped (it would be a second file, against the
+one-file artifact, and the npm package carries the same bytes). The scope-detection ladder (C3: rungs
 2 to 5 and the activity pill) cost +6.0 KiB gzip against its +3 KiB
 estimate: nothing deferrable supplies the first scope and the
 deferrable remainder is under 1 KiB, so the overrun is accepted rather
@@ -888,7 +896,7 @@ the JSON tree and its filter, the turn filter, paging) +5.2 KiB against
 against its +4 KiB estimate (with its review fixes): the overrun is the
 review's honesty work (derived records, the manifest asked again, the
 unreachable child, `not_served`), nothing in it is deferrable at first
-paint, and minifying the bundle is held in reserve, so it is accepted
+paint, and minifying the bundle was held in reserve (since pulled), so it is accepted
 rather than cut. The transcript editor and its preview (F2) measured
 +6.3 KiB against +4 KiB with its review fixes: the overrun is
 review-driven honesty and correctness (the compacted-range pre-check,
@@ -920,7 +928,11 @@ edited. An item appends its row in the same commit as its rebuilt
 `studio/dist/panel/panel.js`: the build says when the built file
 differs from the last row, and `src/panel/budget.test.ts` — run by
 `make studio-check` — fails until the last row is the committed file,
-so a rebuild that forgets its row fails studio-check. The per-item
+so a rebuild that forgets its row fails studio-check. The row
+`"minified"` (73,706 B) is the minify lever, not an item: from it on,
+every row is measured on the minified bundle and is not comparable
+byte for byte with the rows before it, which stay as history (the
+table's unbudgeted line carries its −7.5 KiB). The per-item
 marks are evidence, not a gate; the build itself fails only over the
 cap (`vite.panel.config.ts`).
 

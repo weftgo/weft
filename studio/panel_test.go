@@ -137,7 +137,9 @@ func TestPanelEmbedMatchesCommitted(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := string(b)
-	if !strings.Contains(body, `"`+Version+`"`) {
+	// JSON-quoted as the define writes it, or a template literal as the
+	// minifier reprints it (plan A5.3.0).
+	if !strings.Contains(body, `"`+Version+`"`) && !strings.Contains(body, "`"+Version+"`") {
 		t.Errorf("panel.js does not carry the studio version %q it was built against", Version)
 	}
 	if strings.Contains(body, "react") {

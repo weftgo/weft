@@ -384,8 +384,12 @@ func manifestAgentHashes(manifest []byte) ([]agentHash, error) {
 
 // panelStampRe finds panelStudioVersion's body in the built bundle:
 // the define folds it to a single returned string literal. The
-// minifier may name it with a $ ("$e"), a valid JS identifier.
-var panelStampRe = regexp.MustCompile(`//#region src/panel/version\.ts\s*function [\w$]+\(\)\s*\{\s*return "([^"]*)";?\s*\}`)
+// minifier may name it with a $ ("$e"), a valid JS identifier. The
+// bundle ships fully minified (plan A5.3.0): no //#region comment (an
+// unminified build's is optional here), and oxc reprints the literal
+// as a template literal (`v0.14.2`), so either quote is the stamp and
+// the literal must read as a version — the one such function.
+var panelStampRe = regexp.MustCompile(`(?://#region src/panel/version\.ts\s*)?function [\w$]+\(\)\s*\{\s*return\s*["\x60](v\d[^"\x60]*)["\x60];?\s*\}`)
 
 var (
 	panelVersionOnce sync.Once

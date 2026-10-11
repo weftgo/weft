@@ -90,6 +90,7 @@ export default defineConfig({
     outDir: "dist/panel-tmp",
     emptyOutDir: true,
     sourcemap: false,
+    // "oxc" (Vite 8's default); output.minify below makes it full.
     minify: true,
     lib: {
       entry: new URL("./src/panel/main.ts", import.meta.url).pathname,
@@ -106,6 +107,20 @@ export default defineConfig({
         // Library mode emits no chunk for a side-effect entry; the
         // assetFileNames keep any stray emission honest.
         assetFileNames: "panel[extname]",
+        // The minify lever (plan A5.3.0, Decisions log 2026-10-11):
+        // panel.js ships fully minified — whitespace, identifiers and
+        // syntax. `build.minify: true` alone is not that: for a `lib`
+        // build in the `es` format Vite 8 hands rolldown
+        // `{ compress: true, mangle: true, codegen: false }`, which keeps
+        // indentation and newlines (so a library's consumer can read it).
+        // Vite spreads rolldownOptions.output after its own defaults, so
+        // this `true` (oxc's full minifier, codegen included) wins. The
+        // `/* @__PURE__ */` annotations are kept as Vite keeps them for an
+        // es lib (output.comments). No sourcemap is shipped
+        // (`sourcemap: false` above): the bundle is unreadable in a host
+        // page's devtools — the accepted cost; the source is
+        // studio/web/src/panel.
+        minify: true,
       },
     },
   },

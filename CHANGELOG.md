@@ -26,6 +26,10 @@ module, ADR 0005).
 - obsdbtest: the `Commands` and `CommandsPrune` conformance cases (skipped for a backend that is not a CommandStore), and `obsdbtest.CommandsRestart` — the restart property (a second handle on the same storage reads what the first wrote), run on a sqlite file and on ClickHouse.
 - obsdb: `CommandStore.PruneCommands` on ClickHouse deletes exactly the row versions each rule selected, so a `PutRuntime`/`PutRoute`/`PutCommand` landing mid-prune keeps its row (the caller still serialises the prune with its writes: it is not atomic there); on SQLite the terminal commands go in `obsdb.SweepBatch` passes, each its own transaction, ctx checked between. A stale empty breakpoint set no runtime row names is now pruned on both backends. `obsdbtest.CommandsPruneRace` is the new conformance case for the race rule.
 
+### Changed
+
+- The devtools panel ships fully minified (plan A5.3.0): `studio/dist/panel/panel.js` — served as `/studio/panel.js` and, the same bytes, the npm package's `panel.js` — goes from 281,470 B raw / 81,358 B gzip (562 B under the 80 KiB cap) to 230,920 B / 73,706 B (8,214 B of headroom), whitespace, identifiers and syntax minified (`rolldownOptions.output.minify: true` overriding Vite's keep-the-whitespace rule for an es library build). No sourcemap ships, so the panel is unreadable in a host page's devtools — its source is `studio/web/src/panel`. The size ledger gains one `"minified"` row, the baseline every later row is measured against; earlier rows stay as history. The minifier reprints the version stamp as a template literal, so `normalizeStamp`, Studio's `panel_version` reader and its pin accept either quote.
+
 ### Fixed
 
 - Studio's playground: an outside navigate (Back, Forward, a link followed while the page is open) adopted into an untouched form no longer counts as the reader's edit — its draft is not saved and no `?exp=` REPLACE is written back 400 ms later (G2: an outside navigate writes nothing back).

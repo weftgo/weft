@@ -62,6 +62,8 @@ describe("the size ledger (panel-budget.json)", () => {
       ["final web round", "", 81344],
       ["pre-release web fixes", "", 81358],
     ])
+    // The minify lever (plan A5.3.0): one row, the new baseline every later row is measured against.
+    expect([ledger.rows[49].label, ledger.rows[49].item, ledger.rows[49].gzip]).toEqual(["minified", "", 73706])
     for (let i = 1; i < ledger.rows.length; i++) expect(ledger.items.some((x) => x.id === ledger.rows[i].item) || ledger.rows[i].item === "").toBe(true)
   })
 
@@ -75,18 +77,33 @@ describe("the size ledger (panel-budget.json)", () => {
     expect(built).toBeLessThanOrEqual(80 * 1024)
   })
 
+  it("ships minified (plan A5.3.0): no indented line, the newlines left are inside template literals", () => {
+    const code = readFileSync(resolve(process.cwd(), "../dist/panel/panel.js"), "utf8")
+    const lines = code.split("\n")
+    // The unminified es-lib build indented every nested line with a tab (6,443 of its 7,567 lines);
+    // the stylesheet's template literal, the only multi-line text left, indents with spaces.
+    expect(lines.filter((l) => l.startsWith("\t"))).toEqual([])
+    expect(lines.length).toBeLessThan(1000)
+  })
+
   it("a version bump moves no measured byte: the stamp is normalized to a fixed-length placeholder", () => {
     const code = readFileSync(resolve(process.cwd(), "../dist/panel/panel.js"), "utf8")
-    const stamp = JSON.stringify(weftVersion())
-    const measure = (v: string) => gzipSize(normalizeStamp(code.split(stamp).join(JSON.stringify(v)), v))
+    // The minifier reprints the define's literal as a template literal.
+    const tpl = (v: string) => `\`${v}\``
+    const stamp = tpl(weftVersion())
+    expect(code.split(stamp).length).toBe(2) // exactly once
+    const measure = (v: string) => gzipSize(normalizeStamp(code.split(stamp).join(tpl(v)), v))
     const at = measure(weftVersion())
     for (const v of ["v0.12.0", "v0.100.0", "v1.0.0", "v0.12.0-rc.1"]) expect(measure(v)).toBe(at)
-    expect(normalizeStamp(`x=${stamp}`, weftVersion())).toBe(`x=${JSON.stringify(STAMP_PLACEHOLDER)}`)
+    expect(normalizeStamp(`x=${stamp}`, weftVersion())).toBe(`x=${tpl(STAMP_PLACEHOLDER)}`)
+    // The define's JSON-quoted form (an unminified build) is the stamp too.
+    expect(normalizeStamp(`x=${JSON.stringify(weftVersion())}`, weftVersion())).toBe(`x=${JSON.stringify(STAMP_PLACEHOLDER)}`)
     expect(() => normalizeStamp("no stamp here", weftVersion())).toThrow(/version stamp/)
   })
 
   it("prints one line per item: estimate, measured delta, over past half again its estimate; the total and headroom", () => {
-    const { lines, over } = budgetTable(ledger, 61898)
+    // Over the 49 unminified-era rows: the "minified" row's −7.5 KiB would land in the unbudgeted sum.
+    const { lines, over } = budgetTable({ ...ledger, rows: ledger.rows.slice(0, 49) }, 61898)
     expect(over).toBe(false)
     const row = (id: string) => lines.find((l) => l.startsWith(id.padEnd(6))) ?? ""
     expect(row("D1")).toMatch(/drag\/resize\/dock\/persist\s+\+4\.0 KiB\s+\+3\.6 KiB\s+ok$/) // D1 + its fixes

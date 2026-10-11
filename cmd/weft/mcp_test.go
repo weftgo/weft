@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -66,11 +68,35 @@ func mcpSeedStudio(t *testing.T) string {
 	if _, err := maxed.Generate(ctx, core.RunID("r_max"), core.Prompt("where is order 7?")); !errors.Is(err, core.ErrMaxSteps) {
 		t.Fatalf("r_max = %v, want ErrMaxSteps", err)
 	}
+	refund := core.Tool("refund", "Refund an order.", func(context.Context, orderIn) (string, error) {
+		return "refunded", nil
+	}, core.RequireApproval())
+	parker := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"9"}`, ID: "p1"}),
+	), append([]core.Option{core.Name("refunds"), refund}, prov...)...)
+	if res, err := parker.Generate(ctx, core.RunID("r_park"), core.Prompt("refund order 9")); err != nil || len(res.Pending) != 1 {
+		t.Fatalf("r_park = %v, want one parked call", err)
+	}
 	if err := p.Shutdown(ctx); err != nil {
 		t.Fatal(err)
 	}
+	// The record contract's stock_genai fixture through Studio's own
+	// OTLP ingest: a stock GenAI app's spans, two derived runs, one failed.
+	traces, err := os.ReadFile("../../obsdb/testdata/contract/stock_genai/traces.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Post(ts.URL+"/v1/traces", "application/json", strings.NewReader(string(traces)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("ingest stock_genai: %s", resp.Status)
+	}
 	c := newClient(ts.URL, "tok")
-	for id, status := range map[string]string{"r_ok": `"status":"succeeded"`, "r_fail": `"status":"failed"`, "r_max": `"status":"failed"`} {
+	for id, status := range map[string]string{"r_ok": `"status":"succeeded"`, "r_fail": `"status":"failed"`, "r_max": `"status":"failed"`,
+		"r_park": `"pending":1`, derivedFailID: `"status":"failed"`} {
 		for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
 			b, err := c.get(ctx, runPath(id), nil)
 			if err == nil && strings.Contains(string(b), status) {
@@ -83,6 +109,10 @@ func mcpSeedStudio(t *testing.T) string {
 	}
 	return ts.URL
 }
+
+// derivedFailID is the stock_genai fixture's failed derived run
+// (docs/record-contract.md §9).
+const derivedFailID = "otel-5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10-1a2b3c4d5e6f7081"
 
 // mcpCall is one tool call of the tests: the arguments and the route
 // whose body the answer must carry.
@@ -143,6 +173,20 @@ func routeBody(t *testing.T, base, token, route string) string {
 		t.Fatalf("GET %s = %d %s", route, resp.StatusCode, b)
 	}
 	return string(compact(b))
+}
+
+// directBody is GET route's raw body, whatever the status.
+func directBody(t *testing.T, base, token, route string) []byte {
+	t.Helper()
+	req, _ := http.NewRequest(http.MethodGet, base+route, nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	b, _ := io.ReadAll(resp.Body)
+	return b
 }
 
 // TestMCPStdio pins `weft mcp` over real stdio: this binary re-executed
@@ -229,6 +273,7 @@ func TestMCPStdio(t *testing.T) {
 		if err := json.Unmarshal([]byte(got[1]), &ex); err != nil {
 			t.Fatalf("explain_failure %s: %v\n%s", id, err, got[1])
 		}
+		t.Logf("explain_failure %s: %s", id, got[0])
 		return got[0], ex
 	}
 	line, ex := explain("r_fail")
@@ -249,6 +294,15 @@ func TestMCPStdio(t *testing.T) {
 		len(calls) != 1 || calls[0].Name != "lookup_order" || calls[0].Result.Content != "order 42 shipped" ||
 		!strings.Contains(line, "failed after step 0 (its last recorded step)") || !strings.Contains(line, "lookup_order ok") {
 		t.Errorf("explain_failure r_max = %q\n%+v\ncalls %+v", line, ex, calls)
+	}
+	line, ex = explain("r_park")
+	if ex.Pending != 1 || ex.StepStatus != "parked" || !strings.Contains(line, "; parked: 1 calls awaiting approval (refund)") {
+		t.Errorf("explain_failure r_park = %q\n%+v", line, ex)
+	}
+	line, ex = explain(derivedFailID)
+	if ex.Status != "failed" || ex.StepStatus != "error" || ex.Step == nil || !strings.Contains(line, "failed at step ") ||
+		strings.Contains(line, "after step") {
+		t.Errorf("explain_failure %s (derived) = %q\n%+v", derivedFailID, line, ex)
 	}
 	line, ex = explain("r_ok")
 	if ex.Status != "succeeded" || ex.Step == nil || *ex.Step != 1 || ex.LastAssistantText == nil ||
@@ -285,8 +339,13 @@ func (r *recorder) RoundTrip(req *http.Request) (*http.Response, error) {
 // inProcess connects an SDK client to newMCPServer over c, in memory.
 func inProcess(t *testing.T, c *client) *sdk.ClientSession {
 	t.Helper()
+	return connect(t, newMCPServer(c, slog.New(slog.DiscardHandler)))
+}
+
+// connect is an SDK client over srv, in memory.
+func connect(t *testing.T, srv *sdk.Server) *sdk.ClientSession {
+	t.Helper()
 	ctx := context.Background()
-	srv := newMCPServer(c, slog.New(slog.DiscardHandler))
 	st, ct := sdk.NewInMemoryTransports()
 	ss, err := srv.Connect(ctx, st, nil)
 	if err != nil {
@@ -368,6 +427,59 @@ func TestMCPReadOnlyMethods(t *testing.T) {
 	}
 }
 
+// TestMCPTransportRefusesWrites pins the wall under the tools: the
+// client newMCPServer serves over cannot send anything but GET or HEAD.
+// A tool mutated to POST — a branch no other test reaches, written here
+// as a tool registered beside the real ones that reaches the client's
+// http.Client directly — is refused in the process, and Studio sees
+// nothing.
+func TestMCPTransportRefusesWrites(t *testing.T) {
+	var hits []string
+	var mu sync.Mutex
+	studio := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		hits = append(hits, r.Method)
+		mu.Unlock()
+		_, _ = io.WriteString(w, "{}")
+	}))
+	defer studio.Close()
+	c := newClient(studio.URL, "tok")
+	srv := newMCPServer(c, slog.New(slog.DiscardHandler))
+	addTool(srv, "mutant", "a tool mutated to write", func(ctx context.Context, _ *sdk.CallToolRequest, in mcpRunIn) (*sdk.CallToolResult, any, error) {
+		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/api/runs/"+in.ID+"/cancel", strings.NewReader("{}"))
+		resp, err := c.http.Do(req)
+		if err != nil {
+			return nil, nil, err
+		}
+		_ = resp.Body.Close()
+		return out(0, "sent")
+	})
+	cs := connect(t, srv)
+	res, err := cs.CallTool(context.Background(), &sdk.CallToolParams{Name: "mutant", Arguments: map[string]any{"id": "r"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := texts(t, res)
+	t.Logf("mutated tool: isError=%v %q", res.IsError, got)
+	if !res.IsError || !strings.Contains(got[0], "weft mcp is read-only: POST refused") {
+		t.Errorf("a POST through the tools' client = %v %q, want the refusal", res.IsError, got)
+	}
+	for _, m := range []string{http.MethodPut, http.MethodDelete, http.MethodPatch} {
+		req, _ := http.NewRequest(m, studio.URL+"/api/runs/r", nil)
+		if _, err := c.http.Do(req); err == nil || !strings.Contains(err.Error(), "weft mcp is read-only: "+m+" refused") {
+			t.Errorf("%s through the transport = %v, want the refusal", m, err)
+		}
+	}
+	if _, err := c.get(context.Background(), "/api/meta", nil); err != nil {
+		t.Errorf("a GET through the transport = %v", err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(hits) != 1 || hits[0] != http.MethodGet {
+		t.Errorf("Studio saw %v, want the one GET", hits)
+	}
+}
+
 // TestMCPNoWriteVerbs pins the read-only promise by name and by
 // declaration: no tool's name carries a write verb (run and runs are
 // the reads of /api/runs — the verb "run" as starting one is the
@@ -410,6 +522,11 @@ func TestMCPTruncation(t *testing.T) {
 	if len(got) != 3 || len(got[1]) > 100 || !strings.HasPrefix(string(body), got[1]) ||
 		!strings.Contains(got[2], "truncated: showing") || !strings.Contains(got[2], "raise max_bytes") {
 		t.Errorf("cut = %q", got)
+	}
+	// A bound smaller than nothing useful: no empty item, the note stays.
+	res, _, _ = out(1, "s", []byte(`{"a":1}`), []byte(`{"b":2}`))
+	if got := texts(t, res); len(got) != 3 || got[1] != "{" || !strings.Contains(got[2], "truncated") {
+		t.Errorf("max_bytes 1 = %q, want the summary, one byte, the note", got)
 	}
 	res, _, _ = out(0, "s", body)
 	if got := texts(t, res); len(got) != 2 || got[1] != string(body) {
@@ -455,13 +572,35 @@ func TestMCPPanelToken(t *testing.T) {
 	for _, c := range []struct {
 		tool string
 		args map[string]any
+		fix  bool // the route's 403 carries the badge's fix
 	}{
-		{"request", map[string]any{"id": "r_ok"}},
-		{"run", map[string]any{"id": "r_fail"}},
+		{"request", map[string]any{"id": "r_ok"}, true},
+		{"run", map[string]any{"id": "r_fail"}, false},
 	} {
 		isErr, got := call(c.tool, c.args)
 		if !isErr || !strings.Contains(got[0], "403") {
 			t.Errorf("%s %v under a read token = %v %q, want the 403 as an error", c.tool, c.args, isErr, got)
+		}
+		if c.fix {
+			var body struct {
+				Fix string `json:"fix"`
+			}
+			raw := directBody(t, base, minted.Token, "/api/runs/r_ok/requests")
+			if err := json.Unmarshal(raw, &body); err != nil || body.Fix == "" || !strings.Contains(got[0], body.Fix) {
+				t.Errorf("%s: the 403 error %q lacks Studio's fix %q (body %s)", c.tool, got[0], body.Fix, raw)
+			}
+		}
+	}
+	// explain_failure under the read token: the step's request block is
+	// the hidden badge, so no request hint the token would be refused.
+	isErr, got := call("explain_failure", map[string]any{"id": "r_ok"})
+	var ex explanation
+	if isErr || json.Unmarshal([]byte(got[1]), &ex) != nil || ex.Step == nil {
+		t.Fatalf("explain_failure under a read token = %v %q", isErr, got)
+	}
+	for _, n := range ex.Next {
+		if strings.HasPrefix(n, "request ") {
+			t.Errorf("next %q offers the request tool to a read token", ex.Next)
 		}
 	}
 }
@@ -479,7 +618,8 @@ func TestMCPCommand(t *testing.T) {
 			t.Errorf("mcp -h lacks %s", tool.name)
 		}
 	}
-	if code != 0 || !strings.Contains(errb, "claude mcp add weft -- weft mcp --url http://127.0.0.1:7331") {
+	if code != 0 || !strings.Contains(errb, "claude mcp add weft -- weft mcp\n") || !strings.Contains(errb, `"args":["mcp"]`) ||
+		!strings.Contains(errb, "claude mcp add weft -- weft mcp --url http://127.0.0.1:7331") {
 		t.Errorf("mcp -h = exit %d\n%s", code, errb)
 	}
 	if _, errb, code := weft("mcp", "--read-only=false"); code != 2 || !strings.Contains(errb, "no write mode") {
@@ -529,5 +669,50 @@ func TestMCPStudioResolution(t *testing.T) {
 				t.Errorf("mcpStudio(%q, %q) = %q %q %q, want %q %q %q", c.url, c.tok, u, tok, from, c.wantURL, c.wantTok, c.wantFrom)
 			}
 		})
+	}
+}
+
+// fakeStudio is a studioGetter answering fixed bodies per path.
+type fakeStudio map[string]struct {
+	status int
+	body   string
+}
+
+func (f fakeStudio) get(_ context.Context, path string, _ url.Values) (int, []byte, error) {
+	a, ok := f[path]
+	if !ok {
+		return http.StatusNotFound, []byte(`{"error":{"code":"not_found","message":"no"}}`), &statusError{Status: 404, line: "GET " + path + ": 404"}
+	}
+	if a.status != http.StatusOK {
+		return a.status, []byte(a.body), &statusError{Status: a.status, Body: []byte(a.body), line: fmt.Sprintf("GET %s: %d", path, a.status)}
+	}
+	return a.status, []byte(a.body), nil
+}
+func (fakeStudio) runLink(id string) string { return "http://s/runs/" + id }
+func (fakeStudio) redacted() string         { return "http://s" }
+
+// TestMCPExplainInFlightHidden pins the fallback's honesty: an
+// in-flight step that answers 403 or 5xx is said, never a silent
+// switch to the last recorded step.
+func TestMCPExplainInFlightHidden(t *testing.T) {
+	for _, c := range []struct {
+		status int
+		word   string
+	}{{http.StatusForbidden, "hidden"}, {http.StatusBadGateway, "unavailable"}} {
+		m := &mcpReader{s: fakeStudio{
+			"/api/runs/r":            {200, `{"id":"r","agent":"a","status":"failed","err":"boom","steps":1,"holes":[]}`},
+			"/api/runs/r/steps/1":    {c.status, `{"error":{"code":"x","message":"y"},"badge":"hidden"}`},
+			"/api/runs/r/steps/0":    {200, `{"status":"ok","tool_calls":[],"holes":[]}`},
+			"/api/runs/r/transcript": {200, `{"batches":[]}`},
+		}}
+		res, _, err := m.explainFailure(context.Background(), nil, mcpRunIn{ID: "r"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got := texts(t, res)
+		want := fmt.Sprintf("the in-flight step 1 is %s (%d); showing the last recorded step", c.word, c.status)
+		if !strings.Contains(got[0], want) || !strings.Contains(got[1], want) {
+			t.Errorf("%d: %q, want %q in the line and the step_note", c.status, got, want)
+		}
 	}
 }

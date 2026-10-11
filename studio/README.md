@@ -106,8 +106,10 @@ server for a coding agent, GET only (tools `runs`, `search`, `run`,
 `session`, `meta`, and `explain_failure`, a composition of `run` +
 `step` + the transcript; outputs the route's JSON, cut at `max_bytes`
 with a note; with no `--url` it reads the discovery file). `claude mcp
-add weft -- weft mcp --url http://127.0.0.1:7331`; Cursor's
-`.cursor/mcp.json`: `{"mcpServers":{"weft":{"command":"weft","args":["mcp","--url","http://127.0.0.1:7331"]}}}`.
+add weft -- weft mcp`; Cursor's `.cursor/mcp.json`:
+`{"mcpServers":{"weft":{"command":"weft","args":["mcp"]}}}` — the
+discovery file finds the running Studio; `--url http://127.0.0.1:7331`
+names another.
 
 **C · hosted** — the same handler behind `studio.Token`: the panel's
 scoped tokens are HMAC-signed `{public_id, scope, exp}` minted by your

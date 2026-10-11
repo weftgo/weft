@@ -100,6 +100,10 @@ A stdio MCP server over a running Studio's read API, for a coding agent
 (Claude Code, Cursor) to read runs while you debug. Read only: every tool
 is a GET; nothing is approved, denied, steered, cancelled or deleted.
 
+  claude mcp add weft -- weft mcp
+  .cursor/mcp.json: {"mcpServers":{"weft":{"command":"weft","args":["mcp"]}}}
+
+The running Studio is found through its discovery file; to name another:
   claude mcp add weft -- weft mcp --url http://127.0.0.1:7331
   .cursor/mcp.json: {"mcpServers":{"weft":{"command":"weft","args":["mcp","--url","http://127.0.0.1:7331"]}}}
 
@@ -182,8 +186,56 @@ func mcpStudio(urlFlag, tokenFlag string) (base, token, from string) {
 	return base, "", "none"
 }
 
-// newMCPServer builds the server and registers the read tools over c.
+// readOnlyTransport is the wall under every tool: a request with any
+// method but GET or HEAD never leaves the process — whatever a handler
+// does, a write cannot reach Studio.
+type readOnlyTransport struct{ next http.RoundTripper }
+
+func (t readOnlyTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
+		if r.Body != nil {
+			_ = r.Body.Close()
+		}
+		return nil, fmt.Errorf("weft mcp is read-only: %s refused", r.Method)
+	}
+	next := t.next
+	if next == nil {
+		next = http.DefaultTransport
+	}
+	return next.RoundTrip(r)
+}
+
+// studioGetter is all a tool can do with Studio: GET a path (the status
+// it answered, its body, and an error for a non-2xx answer or a failed
+// request), and name the UI's pages. The tools never hold the client.
+type studioGetter interface {
+	get(ctx context.Context, path string, q url.Values) (status int, body []byte, err error)
+	runLink(id string) string
+	redacted() string
+}
+
+// clientGetter is studioGetter over the API client.
+type clientGetter struct{ c *client }
+
+func (g clientGetter) get(ctx context.Context, path string, q url.Values) (int, []byte, error) {
+	b, err := g.c.get(ctx, path, q)
+	if err != nil {
+		var se *statusError
+		if errors.As(err, &se) {
+			return se.Status, se.Body, err
+		}
+		return 0, nil, err
+	}
+	return http.StatusOK, b, nil
+}
+
+func (g clientGetter) runLink(id string) string { return runLink(g.c.base, id, "") }
+func (g clientGetter) redacted() string         { return g.c.redacted() }
+
+// newMCPServer builds the server and registers the read tools over c,
+// its transport walled to GET and HEAD first.
 func newMCPServer(c *client, log *slog.Logger) *sdk.Server {
+	c.http.Transport = readOnlyTransport{next: c.http.Transport}
 	srv := sdk.NewServer(&sdk.Implementation{
 		Name:        "weft",
 		Title:       "weft Studio (read-only)",
@@ -199,7 +251,7 @@ func newMCPServer(c *client, log *slog.Logger) *sdk.Server {
 			Experimental: map[string]any{"weft": map[string]any{"read_only": true, "methods": []string{"GET"}}},
 		},
 	})
-	m := &mcpReader{c: c}
+	m := &mcpReader{s: clientGetter{c}}
 	addTool(srv, "explain_failure", `Why did run X fail? Start here. A convenience over run + step + transcript (no new server logic): `+
 		`fetches the run row, picks the failing step (the step in flight when the run failed, else its last step), `+
 		`fetches that step assembled and the transcript, and answers {status, error, stop_reason, step, tool_calls `+
@@ -359,26 +411,34 @@ type mcpSessionIn struct {
 
 // ── the reader ─────────────────────────────────────────────────────
 
-// mcpReader holds the client every tool reads through.
-type mcpReader struct{ c *client }
+// mcpReader is what every tool reads through: GET only.
+type mcpReader struct{ s studioGetter }
 
-// get is the one way a tool reaches Studio: client.get, a GET. A
-// non-2xx answer is the tool's error, Studio's own line plus the body
-// it sent (its error and any badge, reason and fix), bounded.
-func (m *mcpReader) get(ctx context.Context, path string, q url.Values) ([]byte, error) {
-	body, err := m.c.get(ctx, path, q)
+// mcpErrBytes bounds the Studio body an error carries.
+const mcpErrBytes = 2048
+
+// fetch is the one way a tool reaches Studio. A non-2xx answer is the
+// tool's error: Studio's own line plus the body it sent (its error and
+// any badge, reason and fix), bounded with the same visible note.
+func (m *mcpReader) fetch(ctx context.Context, path string, q url.Values) (int, []byte, error) {
+	status, body, err := m.s.get(ctx, path, q)
 	if err != nil {
-		var se *statusError
-		if errors.As(err, &se) && len(se.Body) > 0 {
-			b := compact(se.Body)
-			if len(b) > 2048 {
-				b = append(cut(b, 2048), "…"...)
+		if len(body) > 0 {
+			b := compact(body)
+			if len(b) > mcpErrBytes {
+				b = append(cut(b, mcpErrBytes), fmt.Sprintf("\n[truncated: showing %d of %d bytes of Studio's answer]", len(cut(b, mcpErrBytes)), len(b))...)
 			}
-			return nil, fmt.Errorf("%w\n%s", err, b)
+			return status, nil, fmt.Errorf("%w\n%s", err, b)
 		}
-		return nil, err
+		return status, nil, err
 	}
-	return body, nil
+	return status, body, nil
+}
+
+// get is fetch without the status.
+func (m *mcpReader) get(ctx context.Context, path string, q url.Values) ([]byte, error) {
+	_, b, err := m.fetch(ctx, path, q)
+	return b, err
 }
 
 // out is a tool's answer: the summary line, then each body (the
@@ -400,6 +460,9 @@ func out(maxBytes int, summary string, bodies ...[]byte) (*sdk.CallToolResult, a
 		}
 		left -= len(b)
 		shown += len(b)
+		if len(b) == 0 {
+			continue // cut to nothing: the note says so
+		}
 		res.Content = append(res.Content, &sdk.TextContent{Text: string(b)})
 	}
 	if shown < total {
@@ -460,7 +523,7 @@ func (m *mcpReader) meta(ctx context.Context, _ *sdk.CallToolRequest, in mcpMeta
 		Capabilities []string `json:"capabilities"`
 	}
 	_ = json.Unmarshal(b, &meta)
-	return out(in.MaxBytes, fmt.Sprintf("Studio at %s: capabilities %s", m.c.redacted(), strings.Join(meta.Capabilities, ", ")), b)
+	return out(in.MaxBytes, fmt.Sprintf("Studio at %s: capabilities %s", m.s.redacted(), strings.Join(meta.Capabilities, ", ")), b)
 }
 
 // pageSummary names how many rows a page holds and how to get the next.
@@ -569,7 +632,7 @@ func (m *mcpReader) run(ctx context.Context, _ *sdk.CallToolRequest, in mcpRunIn
 	}
 	var h runHead
 	_ = json.Unmarshal(b, &h)
-	return out(in.MaxBytes, h.line(runLink(m.c.base, in.ID, "")), b)
+	return out(in.MaxBytes, h.line(m.s.runLink(in.ID)), b)
 }
 
 // stepHead is the part of a step document a summary names.
@@ -785,7 +848,10 @@ type explanation struct {
 	// it ended — a model or tool failure inside it) or "last" (the
 	// run's last recorded step: it ended between steps — a budget at
 	// the continuation point, a success).
-	StepRole   string          `json:"step_role,omitempty"`
+	StepRole string `json:"step_role,omitempty"`
+	// StepNote says why the in-flight step is not the one shown: it
+	// answered 403 (hidden) or 5xx (unavailable).
+	StepNote   string          `json:"step_note,omitempty"`
 	StepStatus string          `json:"step_status,omitempty"`
 	StepReason string          `json:"step_reason,omitempty"`
 	Model      json.RawMessage `json:"model,omitempty"`
@@ -815,7 +881,7 @@ func (m *mcpReader) explainFailure(ctx context.Context, _ *sdk.CallToolRequest, 
 		return nil, nil, fmt.Errorf("GET %s: %w", runPath(in.ID), err)
 	}
 	ex := explanation{
-		RunID: in.ID, URL: runLink(m.c.base, in.ID, ""), Agent: h.Agent, Status: h.Status, Error: h.Err,
+		RunID: in.ID, URL: m.s.runLink(in.ID), Agent: h.Agent, Status: h.Status, Error: h.Err,
 		StopReason: h.StopReason, Pending: h.Pending, Steps: h.Steps, RunHoles: h.Holes,
 	}
 	// The step: the one in flight when the run ended (ordinal = the
@@ -826,12 +892,20 @@ func (m *mcpReader) explainFailure(ctx context.Context, _ *sdk.CallToolRequest, 
 		if n < 0 {
 			return false
 		}
-		b, err := m.get(ctx, stepPath(in.ID, n), nil)
-		var se *statusError
-		if errors.As(err, &se) && se.Status == http.StatusNotFound {
+		status, b, err := m.fetch(ctx, stepPath(in.ID, n), nil)
+		if status == http.StatusNotFound {
 			return false
 		}
 		if err != nil {
+			what := "unavailable"
+			if status == http.StatusForbidden {
+				what = "hidden"
+			}
+			if role == "in_flight" {
+				ex.StepNote = fmt.Sprintf("the in-flight step %d is %s (%d); showing the last recorded step", n, what, status)
+			} else {
+				ex.StepNote = fmt.Sprintf("step %d is %s (%d)", n, what, status)
+			}
 			ex.Next = append(ex.Next, fmt.Sprintf("step %d not readable: %v", n, err))
 			return false
 		}
@@ -842,6 +916,7 @@ func (m *mcpReader) explainFailure(ctx context.Context, _ *sdk.CallToolRequest, 
 		tryStep(h.Steps-1, "last")
 	}
 	var sh stepHead
+	requestHidden := false
 	if sb != nil {
 		var sd struct {
 			Status    string          `json:"status"`
@@ -851,11 +926,15 @@ func (m *mcpReader) explainFailure(ctx context.Context, _ *sdk.CallToolRequest, 
 			ToolCalls json.RawMessage `json:"tool_calls"`
 			Children  json.RawMessage `json:"children"`
 			Holes     json.RawMessage `json:"holes"`
+			Request   struct {
+				Badge string `json:"badge"`
+			} `json:"request"`
 		}
 		_ = json.Unmarshal(sb, &sd)
 		_ = json.Unmarshal(sb, &sh)
 		ex.StepStatus, ex.StepReason, ex.Model, ex.Attempts = sd.Status, sd.Reason, sd.Model, sd.Attempts
 		ex.ToolCalls, ex.Children, ex.StepHoles = sd.ToolCalls, sd.Children, sd.Holes
+		requestHidden = sd.Request.Badge == "hidden"
 	}
 	if tb, err := m.get(ctx, runPath(in.ID)+"/transcript", nil); err != nil {
 		ex.TranscriptError = err.Error()
@@ -863,9 +942,10 @@ func (m *mcpReader) explainFailure(ctx context.Context, _ *sdk.CallToolRequest, 
 		ex.LastAssistantText = lastAssistantText(tb)
 	}
 	if ex.Step != nil {
-		ex.Next = append(ex.Next,
-			fmt.Sprintf("step {id:%q, n:%d} for the step whole", in.ID, *ex.Step),
-			fmt.Sprintf("request {id:%q, step:%d, transcript:true} for the exact model input", in.ID, *ex.Step))
+		ex.Next = append(ex.Next, fmt.Sprintf("step {id:%q, n:%d} for the step whole", in.ID, *ex.Step))
+		if !requestHidden { // a read token's request block is the hidden badge: the request tool would 403
+			ex.Next = append(ex.Next, fmt.Sprintf("request {id:%q, step:%d, transcript:true} for the exact model input", in.ID, *ex.Step))
+		}
 	}
 	ex.Next = append(ex.Next, fmt.Sprintf("events {id:%q} for the event stream", in.ID))
 	b, err := json.Marshal(ex)
@@ -880,7 +960,7 @@ func explainLine(ex explanation, sh stepHead) string {
 	s := fmt.Sprintf("run %s (%s): %s", ex.RunID, orDash(ex.Agent), ex.Status)
 	if ex.Step != nil {
 		switch {
-		case ex.StepRole == "in_flight":
+		case ex.StepRole == "in_flight" || ex.StepStatus == "error":
 			s += fmt.Sprintf(" at step %d", *ex.Step)
 		case ex.Status == "failed" || ex.Status == "interrupted":
 			s += fmt.Sprintf(" after step %d (its last recorded step)", *ex.Step)
@@ -895,6 +975,18 @@ func explainLine(ex explanation, sh stepHead) string {
 	}
 	if ex.StopReason != "" {
 		s += "; stop_reason " + ex.StopReason
+	}
+	if ex.StepNote != "" {
+		s += "; " + ex.StepNote
+	}
+	if ex.Pending > 0 {
+		var names []string
+		for _, c := range sh.ToolCalls {
+			if c.Pending {
+				names = append(names, c.Name)
+			}
+		}
+		s += fmt.Sprintf("; parked: %d calls awaiting approval (%s)", ex.Pending, strings.Join(names, ", "))
 	}
 	if ex.Step != nil {
 		if d := sh.line(ex.RunID, *ex.Step); strings.Contains(d, "; ") {

@@ -113,8 +113,9 @@ export default defineConfig({
         // build in the `es` format Vite 8 hands rolldown
         // `{ compress: true, mangle: true, codegen: false }`, which keeps
         // indentation and newlines (so a library's consumer can read it).
-        // Vite spreads rolldownOptions.output after its own defaults, so
-        // this `true` (oxc's full minifier, codegen included) wins. The
+        // Vite spreads rollupOptions.output (the rolldown alias in Vite 8)
+        // after its own defaults, so this `true` (oxc's full minifier,
+        // codegen included) wins. The
         // `/* @__PURE__ */` annotations are kept as Vite keeps them for an
         // es lib (output.comments). No sourcemap is shipped
         // (`sourcemap: false` above): the bundle is unreadable in a host

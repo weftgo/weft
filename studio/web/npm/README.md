@@ -129,6 +129,8 @@ const weft = useWeftDevtools(() => ({ scope: { publicId: id.value } }))
 
 `@weftgo/devtools/panel.js` is the side-effect bundle on its own. It is
 the same file as `/studio/panel.js`, with `panel.js.sha256` beside it.
+It is minified and no sourcemap ships; its source is `studio/web/src/panel`
+in the weft repository.
 It is built in the weft repository by `make devtools-npm`, which runs
 the build, checks the hash and lists the tarball. Publishing is done by
 hand at release time.

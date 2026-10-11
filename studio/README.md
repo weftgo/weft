@@ -932,7 +932,7 @@ so a rebuild that forgets its row fails studio-check. The row
 `"minified"` (73,706 B) is the minify lever, not an item: from it on,
 every row is measured on the minified bundle and is not comparable
 byte for byte with the rows before it, which stay as history (the
-table's unbudgeted line carries its −7.5 KiB). The per-item
+table folds its −7.5 KiB into the unbudgeted line, −3.1 KiB net). The per-item
 marks are evidence, not a gate; the build itself fails only over the
 cap (`vite.panel.config.ts`).
 

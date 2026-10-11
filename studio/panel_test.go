@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -160,12 +161,40 @@ func TestVersionIsTheModules(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m := panelStampRe.FindAllSubmatch(b, -1)
+	m := panelStamps(b)
 	if len(m) != 1 {
-		t.Fatalf("panel.js: want exactly one version.ts region with a returned literal, found %d", len(m))
+		t.Fatalf("panel.js: want exactly one version-stamp function (a zero-argument function returning a quoted vX.Y.Z literal), found %d: %q", len(m), m)
 	}
-	if got := string(m[0][1]); got != version.Version {
+	if got := m[0]; got != version.Version {
 		t.Errorf("panel.js is stamped %q, version.Version is %q: run 'make studio-build' and commit", got, version.Version)
+	}
+}
+
+// TestPanelStampRe pins the stamp reader's shapes (plan A5.3.0's
+// review): the minified template literal, the unminified //#region
+// form and a double-quoted minified form each match once; a function
+// returning a non-semver literal, mismatched quotes or any other
+// string does not.
+func TestPanelStampRe(t *testing.T) {
+	for _, c := range []struct {
+		name, src string
+		want      []string
+	}{
+		{"minified template literal", "let a=1;function Sa(){return`v0.14.2`}var b=2;", []string{"v0.14.2"}},
+		{"unminified region", "//#region src/panel/version.ts\nfunction panelStudioVersion() {\n\treturn \"v0.14.2\";\n}\n", []string{"v0.14.2"}},
+		{"minified double quote", `function $e(){return"v0.14.2"}`, []string{"v0.14.2"}},
+		{"pre-release suffix", "function Sa(){return`v0.15.0-rc.1`}", []string{"v0.15.0-rc.1"}},
+		{"not semver", "function Ze(){return`v2`}", nil},
+		{"mismatched quotes", "function Ze(){return\"v1.0.0`}", nil},
+		{"mismatched quotes, short", "function Ze(){return\"v1`}", nil},
+		{"not a version", "function Ze(){return`dark`}", nil},
+		{"two stamps", "function Sa(){return`v0.14.2`}function Sb(){return\"v0.14.3\"}", []string{"v0.14.2", "v0.14.3"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := panelStamps([]byte(c.src)); !slices.Equal(got, c.want) {
+				t.Errorf("panelStamps(%q) = %q, want %q", c.src, got, c.want)
+			}
+		})
 	}
 }
 

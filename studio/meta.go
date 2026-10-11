@@ -1,7 +1,6 @@
 package studio
 
 import (
-	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -390,9 +389,26 @@ func manifestAgentHashes(manifest []byte) ([]agentHash, error) {
 // minifier may name it with a $ ("$e"), a valid JS identifier. The
 // bundle ships fully minified (plan A5.3.0): no //#region comment (an
 // unminified build's is optional here), and oxc reprints the literal
-// as a template literal (`v0.14.2`), so either quote is the stamp and
-// the literal must read as a version — the one such function.
-var panelStampRe = regexp.MustCompile(`(?://#region src/panel/version\.ts\s*)?function [\w$]+\(\)\s*\{\s*return\s*["\x60](v\d[^"\x60]*)["\x60];?\s*\}`)
+// as a template literal (`v0.14.2`), so the stamp is either quote —
+// the same one at both ends — around a full semver (vX.Y.Z, then any
+// pre-release or build suffix): a minified `function Ze(){return`v2`}`
+// is not the stamp. Group 1 is the "…" form, group 2 the `…` form
+// (panelStamp); the reader takes exactly one match, never the first.
+var panelStampRe = regexp.MustCompile(`(?://#region src/panel/version\.ts\s*)?function [\w$]+\(\)\s*\{\s*return\s*(?:"(v\d+\.\d+\.\d+[^"\x60]*)"|\x60(v\d+\.\d+\.\d+[^"\x60]*)\x60);?\s*\}`)
+
+// panelStamps is every stamp panelStampRe finds in b, whichever quote
+// carried it.
+func panelStamps(b []byte) []string {
+	var out []string
+	for _, m := range panelStampRe.FindAllSubmatch(b, -1) {
+		if m[1] != nil {
+			out = append(out, string(m[1]))
+		} else {
+			out = append(out, string(m[2]))
+		}
+	}
+	return out
+}
 
 var (
 	panelVersionOnce sync.Once
@@ -406,8 +422,8 @@ func panelVersion() string {
 		if err != nil {
 			return
 		}
-		if m := panelStampRe.FindAllSubmatch(b, -1); len(m) == 1 {
-			panelVersionVal = string(bytes.Clone(m[0][1]))
+		if m := panelStamps(b); len(m) == 1 {
+			panelVersionVal = m[0]
 		}
 	})
 	return panelVersionVal

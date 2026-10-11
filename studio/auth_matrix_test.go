@@ -116,6 +116,14 @@ func TestAuthMatrix(t *testing.T) {
 		seedRun(t, srv.db, parkRun[res], public[res], "",
 			`{"type":"run_finish","run_id":"`+parkRun[res]+`","usage":{},"steps":1,"pending":[{"type":"tool_call","id":"call_1","name":"refund","args":{}}]}`, nil)
 	}
+	// App-owned turns of the service a runtime.Sessions runtime
+	// registers (plan F4): thread session turns parked on call_1, each
+	// with its public id but "none". Seeded early, like the parked runs.
+	sessRun := map[string]string{"A": "app_sess_a", "B": "app_sess_b", "none": "app_sess_none", "missing": "app_sess_missing"}
+	for _, res := range []string{"A", "B", "none"} {
+		seedRunAs(t, srv.db, "svc_sessions", sessRun[res], public[res], "s_sess_"+res,
+			`{"type":"run_finish","run_id":"`+sessRun[res]+`","usage":{},"steps":1,"pending":[{"type":"tool_call","id":"call_1","name":"refund","args":{}}]}`, nil)
+	}
 	// One experiment's runs across the public ids (plan F5.1): the
 	// experiment_id filter narrows, it never widens a panel token's
 	// public id (pinned below). Seeded before the runs below, so none
@@ -267,16 +275,25 @@ func TestAuthMatrix(t *testing.T) {
 			t.Fatalf("register %s: %d", id, code)
 		}
 	}
-	stream, err := func() (*http.Response, error) {
-		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/runtime/commands?runtime=rt_test", nil)
-		req.Header.Set("Authorization", "Bearer "+serverTok)
-		return http.DefaultClient.Do(req)
-	}()
-	if err != nil || stream.StatusCode != http.StatusOK {
-		t.Fatalf("commands stream: %v", err)
+	// rt_sessions registered runtime.Sessions for svc_sessions: the app's
+	// own turns of that service route to it (plan F4).
+	sessReg := strings.Replace(regBody("rt_sessions"), `{"runtime_id":"rt_sessions",`,
+		`{"runtime_id":"rt_sessions","service":"svc_sessions","sessions":true,`, 1)
+	if code := do(http.MethodPost, "/api/runtime/register", sessReg, server); code != http.StatusOK {
+		t.Fatalf("register rt_sessions: %d", code)
 	}
-	t.Cleanup(func() { _ = stream.Body.Close() })
-	go func() { _, _ = io.Copy(io.Discard, stream.Body) }()
+	for _, rtID := range []string{"rt_test", "rt_sessions"} {
+		stream, err := func() (*http.Response, error) {
+			req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/runtime/commands?runtime="+rtID, nil)
+			req.Header.Set("Authorization", "Bearer "+serverTok)
+			return http.DefaultClient.Do(req)
+		}()
+		if err != nil || stream.StatusCode != http.StatusOK {
+			t.Fatalf("commands stream %s: %v", rtID, err)
+		}
+		t.Cleanup(func() { _ = stream.Body.Close() })
+		go func() { _, _ = io.Copy(io.Discard, stream.Body) }()
+	}
 
 	// Runtime-started runs (what approvals and steer route) and the
 	// commands that started them, one per public id.
@@ -776,7 +793,25 @@ func TestAuthMatrix(t *testing.T) {
 		{name: "POST /api/runs/{id}/cancel", method: "POST", path: func(res string) string { return "/api/runs/" + rtRun[res] + "/cancel" },
 			resources: all, want: acting(accepted)},
 		{name: "POST /api/runs/{app's own run}/cancel", method: "POST", path: func(res string) string { return "/api/runs/" + run[res] + "/cancel" },
-			resources: []string{"A", "B", "none"}, want: acting(http.StatusConflict)},
+			resources: []string{"A", "B", "none"}, want: acting(forbidden403)},
+		// The app's own turns with a runtime.Sessions runtime of their
+		// service connected (plan F4): the three verbs are forwarded as
+		// session commands — 202 for whoever may act inside the run's
+		// public id; a read token 403, a panel token for another public
+		// id 403; a turn with no public id 403 "app-owned turn" (nothing
+		// to resolve it by) — and an unknown id 404.
+		{name: "POST /api/runs/{app session turn}/approvals", method: "POST", path: func(res string) string { return "/api/runs/" + sessRun[res] + "/approvals" },
+			body: fixed(`{"call_id":"call_1","decision":"approve"}`), resources: []string{"A", "B", "missing"}, want: acting(accepted)},
+		{name: "POST /api/runs/{app session turn}/steer", method: "POST", path: func(res string) string { return "/api/runs/" + sessRun[res] + "/steer" },
+			body: fixed(`{"message":"hi"}`), resources: []string{"A", "B", "missing"}, want: acting(accepted)},
+		{name: "POST /api/runs/{app session turn}/cancel", method: "POST", path: func(res string) string { return "/api/runs/" + sessRun[res] + "/cancel" },
+			resources: []string{"A", "B", "missing"}, want: acting(accepted)},
+		{name: "POST /api/runs/{app session turn, no public id}/approvals", method: "POST", path: func(res string) string { return "/api/runs/" + sessRun[res] + "/approvals" },
+			body: fixed(`{"call_id":"call_1","decision":"approve"}`), resources: []string{"none"}, want: anyValid(forbidden403)},
+		{name: "POST /api/runs/{app session turn, no public id}/steer", method: "POST", path: func(res string) string { return "/api/runs/" + sessRun[res] + "/steer" },
+			body: fixed(`{"message":"hi"}`), resources: []string{"none"}, want: anyValid(forbidden403)},
+		{name: "POST /api/runs/{app session turn, no public id}/cancel", method: "POST", path: func(res string) string { return "/api/runs/" + sessRun[res] + "/cancel" },
+			resources: []string{"none"}, want: anyValid(forbidden403)},
 		{name: "POST /api/runs/{finished}/cancel", method: "POST", path: func(res string) string { return "/api/runs/" + finRun[res] + "/cancel" },
 			resources: []string{"A", "B", "none"}, want: acting(http.StatusConflict)},
 		{name: "POST /api/runs/{parked}/cancel", method: "POST", path: func(res string) string { return "/api/runs/" + parkRun[res] + "/cancel" },

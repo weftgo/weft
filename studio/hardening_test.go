@@ -30,6 +30,13 @@ import (
 // run_finish body; "" writes a plain one.
 func seedRun(t *testing.T, db obsdb.DB, runID, publicID, sessionID, finish string, extra map[string]any) {
 	t.Helper()
+	seedRunAs(t, db, "svc", runID, publicID, sessionID, finish, extra)
+}
+
+// seedRunAs is seedRun under another service.name: an app-owned run of
+// the service a runtime.Sessions runtime registered (plan F4).
+func seedRunAs(t *testing.T, db obsdb.DB, service, runID, publicID, sessionID, finish string, extra map[string]any) {
+	t.Helper()
 	if finish == "" {
 		finish = `{"type":"run_finish","run_id":"` + runID + `","usage":{"input_tokens":1,"output_tokens":1},"steps":1}`
 	}
@@ -58,8 +65,8 @@ func seedRun(t *testing.T, db obsdb.DB, runID, publicID, sessionID, finish strin
 		}
 		return obsdb.Record{
 			Time:      now.Add(time.Duration(pos) * time.Millisecond),
-			EventName: "weft." + kind, Severity: 9, Body: body, Service: "svc",
-			Attrs: attrs, Resource: map[string]any{"service.name": "svc"},
+			EventName: "weft." + kind, Severity: 9, Body: body, Service: service,
+			Attrs: attrs, Resource: map[string]any{"service.name": service},
 		}
 	}
 	recs := []obsdb.Record{

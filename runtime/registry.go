@@ -181,7 +181,8 @@ func (r *registry) registration(runtimeID string) registration {
 			MaxTokensPerExperiment: r.cfg.budget.MaxTokensPerExperiment,
 			MaxRunsPerExperiment:   r.cfg.budget.MaxRunsPerExperiment,
 		},
-		Threads: r.cfg.threads != nil,
+		Threads:  r.cfg.threads != nil,
+		Sessions: r.cfg.sessions != nil,
 	}
 	for _, name := range r.order {
 		reg.Agents = append(reg.Agents, r.entries[name])

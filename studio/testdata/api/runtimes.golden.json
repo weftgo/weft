@@ -9,6 +9,7 @@
       "connected_since": "2026-10-09T10:00:00Z",
       "last_seen": "2026-10-09T10:00:05Z",
       "connected": true,
+      "sessions": false,
       "agents": [
         {
           "name": "acme-support",

@@ -1,0 +1,13 @@
+{
+  "command_id": "cmd_01K7Q2W3E4R5T6Y7U8I9O0PABC",
+  "verb": "decide",
+  "public_id": "pub_7Hk2",
+  "session_id": "s_01K7",
+  "run_id": "s_01K7-t1",
+  "call_id": "call_1",
+  "decision": "resolve",
+  "reason": "r",
+  "content": "c",
+  "message": "m",
+  "actor": "devtools"
+}

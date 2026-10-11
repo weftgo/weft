@@ -889,8 +889,9 @@ type approvalRequest struct {
 
 // servePlaygroundApproval forwards one decision on one parked call of
 // a runtime-started run (P1's approval controls; WEFT-DEVTOOLS §8.2).
-// The app's own turns are viewer-only (D7, PQ7): a run no runtime
-// started is refused here, and meta/both UIs say so.
+// An app-owned turn is decided through a runtime that registered
+// runtime.Sessions (plan F4, appturn.go: 202 with the command to poll)
+// and refused 403 "app-owned turn" otherwise.
 func (s *Server) servePlaygroundApproval(rs *linkruntime.RuntimeServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		runID := r.PathValue("id")
@@ -915,26 +916,23 @@ func (s *Server) servePlaygroundApproval(rs *linkruntime.RuntimeServer) http.Han
 		}
 		row, dbErr := s.db.Run(r.Context(), runID)
 		runtimeID, started := rs.RuntimeOf(runID)
-		if !started {
-			// Not a runtime-started run. An unknown id is a 404; the
-			// app's own turns exist and stay viewer-only (D7, PQ7).
-			if dbErr != nil {
-				if errors.Is(dbErr, obsdb.ErrNotFound) {
-					notFound(w, r, "unknown run "+runID)
-					return
-				}
-				dbError(w, r, "run", runID, dbErr)
+		if !started && dbErr != nil {
+			// Not a runtime-started run, and not stored: a 404.
+			if errors.Is(dbErr, obsdb.ErrNotFound) {
+				notFound(w, r, "unknown run "+runID)
 				return
 			}
-			writeError(w, r, http.StatusForbidden, "forbidden",
-				"only runs a runtime started can be decided — the app's own turns are viewer-only (PQ7)")
+			dbError(w, r, "run", runID, dbErr)
 			return
 		}
 		// A panel token decides inside its public id only (S4.6): the
 		// scope the command carried, or the row's when it has landed.
 		// The decision's own command carries the same scope — the page
 		// polls it, and its acks name the resumed run.
-		publicID, _ := rs.PublicOf(runID)
+		publicID := ""
+		if started {
+			publicID, _ = rs.PublicOf(runID)
+		}
 		if publicID == "" && dbErr == nil {
 			publicID = row.PublicID
 		}
@@ -942,13 +940,26 @@ func (s *Server) servePlaygroundApproval(rs *linkruntime.RuntimeServer) http.Han
 			forbidden(w, r)
 			return
 		}
+		appTarget := ""
+		if !started {
+			// The app's own turn (plan F4): decided through a runtime
+			// installed with runtime.Sessions — the app's Session records
+			// the decision and resumes the turn — else 403 "app-owned
+			// turn" before the call is looked at.
+			target, ok := appTurnRuntime(w, r, rs, row.RunRow)
+			if !ok {
+				return
+			}
+			appTarget = target
+		}
 		// The call must be one the parked run is waiting on (the
 		// audit's P2-16): the core resumes with exactly the decisions it
 		// is handed and answers every other pending call "DENIED: no
 		// decision", so a stale or mistyped id would silently deny the
 		// call the human meant to decide. The run's own run_finish names
 		// the pending set; until it has landed there is nothing to check
-		// against and the runtime's own check is the only one.
+		// against and the runtime's own check is the only one (for an
+		// app turn, the session's own Pending).
 		if dbErr == nil {
 			pending, known, err := s.pendingCalls(r.Context(), runID)
 			if err != nil {
@@ -964,6 +975,12 @@ func (s *Server) servePlaygroundApproval(rs *linkruntime.RuntimeServer) http.Han
 					" (pending: "+strings.Join(pending, ", ")+")")
 				return
 			}
+		}
+		if appTarget != "" {
+			sc := appSessionCommand(r, linkruntime.VerbDecide, row.RunRow)
+			sc.CallID, sc.Decision, sc.Reason, sc.Content = req.CallID, req.Decision, req.Reason, req.Content
+			enqueueAppTurn(w, r, rs, appTarget, sc)
+			return
 		}
 		if !rs.Connected(runtimeID) {
 			writeError(w, r, http.StatusServiceUnavailable, "unavailable",

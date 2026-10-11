@@ -53,9 +53,12 @@ type metaDoc struct {
 	// panel token. Always present.
 	LiveAll bool `json:"live_all"`
 	// DebugScope says what the debugger's write verbs (breakpoints,
-	// steer) can act on — the runtime-started runs only. The app's
-	// own turns are viewer-only (D7, PQ7); meta says so plainly
-	// (WEFT-DEVTOOLS §8.5 item 6).
+	// steer, approvals, cancel) can act on: "runtime-started runs" —
+	// the app's own turns viewer-only (D7, PQ7) — or "own+runtime"
+	// while a connected runtime registered runtime.Sessions, which
+	// takes approvals, steer and cancel on the app's own turns (plan
+	// F4). Meta says so plainly (WEFT-DEVTOOLS §8.5 item 6); absent
+	// without the playground.
 	DebugScope string      `json:"debug_scope,omitempty"`
 	Content    metaContent `json:"content"`
 	// Pricing is the table Studio prices usage with (plan A5): its

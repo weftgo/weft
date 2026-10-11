@@ -49,8 +49,9 @@
 // into a run it holds: an ephemeral run's steering queue, or a fork
 // turn's session as a thread steer under that turn's run options — a
 // steer thread defers to a follow-up turn keeps the park rule; the
-// app's own turns are never breakable or steerable
-// from here (D7, PQ7).
+// app's own turns are never breakable from here (D7, PQ7), and take
+// decisions and steers only when the app opted in with Sessions —
+// through the app's own Session, under its writer lease (plan F4).
 //
 // The rule is default-deny (core.ParkAllExcept): a run lists the tools
 // that may execute — the vouched-safe ones, an Output agent's

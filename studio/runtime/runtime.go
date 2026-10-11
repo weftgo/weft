@@ -58,6 +58,12 @@ type Registration struct {
 	WeftVersion string `json:"weft_version"`
 	Budget      Budget `json:"budget"`
 	Threads     bool   `json:"threads"`
+	// Sessions says the runtime was installed with runtime.Sessions: it
+	// resolves the app's own sessions by public id, so the debugger's
+	// verbs on an app-owned turn of its service route to it as a
+	// `session` frame (EnqueueSession) instead of being refused. A
+	// runtime older than the option sends false.
+	Sessions bool `json:"sessions"`
 	// Breakpoints is the debugger's tool set the runtime holds right
 	// now (WEFT-DEVTOOLS §8.3). The set lives in the runtime's process,
 	// so it outlives a Studio restart: a Studio that holds no set for
@@ -252,6 +258,10 @@ type Command struct {
 	// steer marks a steer frame instead of a run (§8.4): a message
 	// delivered into a run the runtime started, mid-flight.
 	steer *SteerMessage `json:"-"`
+	// session marks a session frame instead of a run (plan F4): a
+	// debugger verb on one of the app's own turns, acted on through the
+	// app's Session (EnqueueSession).
+	session *SessionCommand `json:"-"`
 	// seq orders commands within this server (a monotonic counter,
 	// independent of the id's own ordering).
 	seq uint64
@@ -351,11 +361,46 @@ type Breakpoints struct {
 // SteerMessage is an `event: steer` frame's data (§8.4): a user
 // message delivered into a runtime-started run — core.Steering on an
 // ephemeral run, thread's Steer policy on a fork the runtime owns.
-// The app's own turns are never steerable from here (PQ7).
+// The app's own turns are steered through a SessionCommand instead,
+// on a runtime that registered Sessions (plan F4).
 type SteerMessage struct {
 	RunID   string `json:"run_id"`
 	Message string `json:"message"`
 }
+
+// SessionCommand is an `event: session` frame's data (plan F4): a
+// debugger verb on one of the app's own turns — a run no runtime
+// started — addressed by the session behind it: PublicID (what the
+// app's runtime.Sessions resolver answers), SessionID (checked against
+// the Session it answers) and RunID (the app's run). Verb decide
+// carries CallID, Decision (approve | deny | resolve), Reason and
+// Content as ApprovalDecision does; steer carries Message; cancel
+// nothing more. The runtime acks it like every command — accepted
+// before it writes the session, finished after — and refuses it, before
+// any write, with the reason: "the app is writing this session; fork
+// instead" when the Session it was handed cannot take the writer lease,
+// "no session for this public id", "no running turn to steer", "cancel
+// is not supported on an app turn".
+type SessionCommand struct {
+	CommandID string `json:"command_id"`
+	Verb      string `json:"verb"` // decide | steer | cancel
+	PublicID  string `json:"public_id"`
+	SessionID string `json:"session_id"`
+	RunID     string `json:"run_id"`
+	CallID    string `json:"call_id,omitempty"`
+	Decision  string `json:"decision,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	Content   string `json:"content,omitempty"`
+	Message   string `json:"message,omitempty"`
+	Actor     string `json:"actor,omitempty"`
+}
+
+// The session frame's verbs.
+const (
+	VerbDecide = "decide"
+	VerbSteer  = "steer"
+	VerbCancel = "cancel"
+)
 
 // Ack is the POST /api/runtime/acks body: accepted/rejected before
 // execution, finished at the run's end — Status succeeded | failed,
@@ -408,8 +453,12 @@ type RuntimeView struct {
 	// now. A runtime whose stream dropped stays listed (until its
 	// commands resolve, pruneLocked) with Connected false; a reconnect
 	// re-registers under the same id and reads true again.
-	Connected bool        `json:"connected"`
-	Agents    []AgentView `json:"agents"`
+	Connected bool `json:"connected"`
+	// Sessions is the registration's: the runtime acts on the app's own
+	// turns (runtime.Sessions) — approvals, steer and cancel on an
+	// app-owned run of its service reach it.
+	Sessions bool        `json:"sessions"`
+	Agents   []AgentView `json:"agents"`
 	// Breakpoints is the debugger's stored tool set for this runtime
 	// (WEFT-DEVTOOLS §8.3) — what PUT …/breakpoints last delivered, so a
 	// reloaded UI shows the rule that is parking its runs. Empty, never
@@ -885,6 +934,15 @@ func writeRunFrame(w http.ResponseWriter, flusher http.Flusher, cmd Command) {
 		flusher.Flush()
 		return
 	}
+	if cmd.session != nil {
+		data, err := json.Marshal(cmd.session)
+		if err != nil {
+			return
+		}
+		_, _ = fmt.Fprintf(w, "id: %s\nevent: session\ndata: %s\n\n", cmd.CommandID, data)
+		flusher.Flush()
+		return
+	}
 	data, err := json.Marshal(cmd)
 	if err != nil {
 		return
@@ -958,7 +1016,10 @@ func (rs *RuntimeServer) serveAcks(w http.ResponseWriter, r *http.Request) {
 			"command "+a.CommandID+" was marked lost before this accepted ack ("+row.errText+"): it must not run")
 		return
 	}
-	if a.RunID != "" {
+	if a.RunID != "" && row.session == nil {
+		// A session command's acks name the app's own run (or its
+		// resumed turn): never a run the runtime started, so they route
+		// no steer, approval or cancel of their own.
 		rs.runs[a.RunID] = row.Runtime
 		rs.runSeen[a.RunID] = rs.now()
 		if row.PublicID != "" {
@@ -1153,7 +1214,7 @@ func (rs *RuntimeServer) CancelRun(runID string) (CancelTarget, error) {
 	}
 	var row *commandRow
 	for _, r := range rs.commands {
-		if r.runID == runID && r.state == StateAccepted && (row == nil || r.seq > row.seq) {
+		if r.runID == runID && r.state == StateAccepted && r.session == nil && (row == nil || r.seq > row.seq) {
 			row = r
 		}
 	}
@@ -1176,7 +1237,8 @@ func (rs *RuntimeServer) CancelRun(runID string) (CancelTarget, error) {
 
 // RuntimeOf names the runtime that started runID (learned from its
 // acks). ok is false for a run no runtime started — the app's own
-// turns, which stay viewer-only (D7, PQ7).
+// turns, viewer-only unless a runtime registered Sessions
+// (SessionsRuntime, plan F4).
 func (rs *RuntimeServer) RuntimeOf(runID string) (string, bool) {
 	rs.mu.Lock()
 	defer rs.mu.Unlock()
@@ -1244,6 +1306,88 @@ func (rs *RuntimeServer) EnqueueApproval(runtimeID string, d ApprovalDecision) (
 	return d, nil
 }
 
+// SessionsRuntime names the connected runtime of service that
+// registered runtime.Sessions — the one an app-owned run of that
+// service is acted on through (the newest seen when several are). ok is
+// false when none is connected: the app's turns are then read-only.
+// An empty service matches no runtime: a run whose records name no
+// service cannot be told apart from another app's.
+func (rs *RuntimeServer) SessionsRuntime(service string) (string, bool) {
+	if service == "" {
+		return "", false
+	}
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	best, bestSeen := "", time.Time{}
+	for id, c := range rs.runtimes {
+		if c.feed == nil || !c.reg.Sessions || c.reg.Service != service {
+			continue
+		}
+		if best == "" || c.lastSeen.After(bestSeen) || (c.lastSeen.Equal(bestSeen) && id < best) {
+			best, bestSeen = id, c.lastSeen
+		}
+	}
+	return best, best != ""
+}
+
+// AnySessions reports whether any connected runtime registered
+// runtime.Sessions — meta's debug_scope reads own+runtime then.
+func (rs *RuntimeServer) AnySessions() bool {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	for _, c := range rs.runtimes {
+		if c.feed != nil && c.reg.Sessions {
+			return true
+		}
+	}
+	return false
+}
+
+// EnqueueSession hands a debugger verb on an app-owned turn to the
+// runtime that registered runtime.Sessions (an `event: session` frame),
+// minting the command id. The row carries sc.PublicID (a panel token
+// polls its own command); its acks name the app's run, and never make
+// it a run the runtime started (serveAcks). Errors match Enqueue's.
+func (rs *RuntimeServer) EnqueueSession(runtimeID string, sc SessionCommand) (SessionCommand, error) {
+	rs.mu.Lock()
+	defer rs.mu.Unlock()
+	rs.pruneLocked()
+	c := rs.runtimes[runtimeID]
+	if c == nil {
+		return sc, ErrUnknownRuntime
+	}
+	if sc.CommandID == "" {
+		sc.CommandID = newCommandID()
+	} else if !ValidCommandID(sc.CommandID) {
+		return sc, ErrInvalidCommandID
+	}
+	if _, dup := rs.commands[sc.CommandID]; dup {
+		return sc, ErrDuplicateCommand
+	}
+	if c.feed == nil {
+		return sc, ErrNotConnected
+	}
+	frame := sc
+	cmd := Command{
+		CommandID: sc.CommandID,
+		Runtime:   runtimeID,
+		PublicID:  sc.PublicID,
+		session:   &frame,
+		seq:       rs.nextSeq + 1,
+	}
+	rs.nextSeq = cmd.seq
+	now := rs.now()
+	row := &commandRow{Command: cmd, state: StateQueued, created: now, updated: now}
+	rs.commands[cmd.CommandID] = row
+	select {
+	case c.feed <- cmd:
+	default:
+		rs.dropFeedLocked(runtimeID, c)
+	}
+	rs.armAckLocked(row)
+	return sc, nil
+}
+
 // Command returns the command's lifecycle row; ErrUnknownCommand
 // otherwise.
 func (rs *RuntimeServer) Command(id string) (CommandStatus, error) {
@@ -1309,6 +1453,7 @@ func (rs *RuntimeServer) Snapshot() []RuntimeView {
 			ConnectedSince: c.connectedSince,
 			LastSeen:       c.lastSeen,
 			Connected:      c.feed != nil,
+			Sessions:       c.reg.Sessions,
 			Breakpoints:    append([]string{}, c.breakpoints...),
 		}
 		for _, a := range c.reg.Agents {

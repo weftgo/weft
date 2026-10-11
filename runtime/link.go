@@ -324,7 +324,7 @@ func (l *link) readStream(ctx context.Context, r io.Reader) error {
 	events := scanSSE(bufio.NewReaderSize(r, 16<<10))
 	for {
 		ev, err := events()
-		if errors.Is(err, errFrameTooLarge) && (ev.event == "run" || ev.event == "approve") {
+		if errors.Is(err, errFrameTooLarge) && (ev.event == "run" || ev.event == "approve" || ev.event == "session") {
 			// The stream ends (the rest of the frame cannot be skipped
 			// safely), but the command it carried is answered rejected:
 			// left queued, Studio would re-send it on every reconnect and
@@ -376,6 +376,25 @@ func (l *link) readStream(ctx context.Context, r io.Reader) error {
 			}
 			if cctx, ok := l.admit(d.CommandID); ok {
 				go l.dispatchDecision(cctx, d)
+			}
+		case "session":
+			var sc sessionCommand
+			if err := json.Unmarshal(ev.data, &sc); err != nil {
+				// As an undecodable run frame: the id still names a command
+				// Studio waits on — answer it once.
+				if _, ok := l.admit(ev.id); ok {
+					go func(id string) {
+						defer l.release(id)
+						l.postAck(ack{CommandID: id, State: "rejected", Error: "undecodable command"})
+					}(ev.id)
+				}
+				continue
+			}
+			if sc.CommandID == "" {
+				sc.CommandID = ev.id
+			}
+			if cctx, ok := l.admit(sc.CommandID); ok {
+				go l.dispatchSession(cctx, sc)
 			}
 		case "breakpoints":
 			var b breakpointsFrame
@@ -1045,8 +1064,9 @@ type forkSteer struct {
 // steer delivers one user message into a runtime-started run (§8.4):
 // the ephemeral run's steering queue (core.Steering's source drains it
 // at the loop's two fixed points), or a fork turn's session as a
-// thread steer. The app's own turns are never steerable from here
-// (PQ7): this link holds no handle to them.
+// thread steer. The app's own turns are not steered here — this link
+// holds no handle to them — but through the Session the app's
+// SessionResolver answers, as a session command (sessions.go).
 func (l *link) steer(st steerFrame) {
 	l.mu.Lock()
 	q := l.steerQ[st.RunID]

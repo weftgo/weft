@@ -10,10 +10,13 @@ package studio
 // route registers with the playground group (playground.go), under
 // its own capability, "cancel".
 //
-// Runtime-started runs only. The app's own turns hold no handle Studio
-// could reach (an agent is immutable after New, a session's writer is
-// the app's): they are refused with a 409 until plan F4 gives the app
-// a way to opt in.
+// Runtime-started runs are cancelled through the link's cancel frame.
+// The app's own turns hold no handle Studio could reach (an agent is
+// immutable after New, a session's writer is the app's): they are
+// refused 403 "app-owned turn" — as steer and approvals are — unless a
+// runtime of the run's service registered runtime.Sessions (plan F4);
+// then the cancel goes to it as a session command, which today's
+// runtime refuses on the command's row: thread has no per-turn cancel.
 
 import (
 	"errors"
@@ -82,8 +85,17 @@ func (s *Server) serveCancel(rs *linkruntime.RuntimeServer) http.HandlerFunc {
 			}
 		}
 		if !started {
-			writeError(w, r, http.StatusConflict, "conflict",
-				"run "+runID+" is the app's own run, not one a runtime started: cancel arrives with F4")
+			// The app's own run (stored: !started && !stored is the 404
+			// above): through a runtime installed with runtime.Sessions,
+			// else 403 "app-owned turn" — the steer and approvals answer
+			// (plan F4, appturn.go). The runtime refuses it today, "cancel
+			// is not supported on an app turn" (thread has no per-turn
+			// cancel), on the command's row.
+			target, ok := appTurnRuntime(w, r, rs, row.RunRow)
+			if !ok {
+				return
+			}
+			enqueueAppTurn(w, r, rs, target, appSessionCommand(r, linkruntime.VerbCancel, row.RunRow))
 			return
 		}
 		if stored && row.Pending > 0 {

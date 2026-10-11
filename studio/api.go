@@ -605,16 +605,28 @@ type publicResolution struct {
 
 // ── Handlers ───────────────────────────────────────────────────────
 
-// debugScope names what the debugger's write verbs may act on: the
-// runtime-started runs, only when those verbs are registered.
+// debugScope names what the debugger's write verbs may act on, only
+// when those verbs are registered: "own+runtime" while a connected
+// runtime registered runtime.Sessions (the app's own turns take
+// approvals, steer and cancel through it, plan F4), else the
+// runtime-started runs alone.
 func (s *Server) debugScope() string {
 	for _, g := range s.groups {
 		if g.capability == "breakpoints" {
-			return "runtime-started runs"
+			if s.runtimeSrv != nil && s.runtimeSrv.AnySessions() {
+				return debugScopeOwn
+			}
+			return debugScopeRuntime
 		}
 	}
 	return ""
 }
+
+// meta's debug_scope values.
+const (
+	debugScopeRuntime = "runtime-started runs"
+	debugScopeOwn     = "own+runtime"
+)
 
 // serveRuns answers api/runs (S4.2): agent, status, session,
 // public_id, playground, experiment_id (the runs one playground

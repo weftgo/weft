@@ -30,6 +30,7 @@ type config struct {
 	budget      Budget
 	allow       map[string]bool
 	threads     thread.Storage
+	sessions    SessionResolver
 	enabled     *bool
 }
 
@@ -158,6 +159,60 @@ func AllowSideEffects(tools ...string) Option {
 // ignored.
 func Threads(store thread.Storage) Option {
 	return func(c *config) { c.threads = store }
+}
+
+// SessionResolver answers the app's Session behind a public id — the
+// one a debugger's decision, steer or cancel on one of the app's own
+// turns acts through (Sessions). It returns the app's own live Session
+// value (the runtime then acts through the app's writer: no lease
+// question arises) or one it opens from its store, with release
+// closing what it opened (nil when there is nothing to close; the
+// runtime calls it once the command is done). (nil, nil, nil) says the
+// public id is not this app's: the command is refused "no session for
+// this public id".
+//
+// An error is the refusal's reason: thread.ErrLocked (wrapped or not)
+// is refused "the app is writing this session; fork instead", and
+// thread.ErrStale makes the runtime release and ask once more. Any
+// other error's text reaches whoever acted, so it must carry no secret.
+type SessionResolver func(ctx context.Context, publicID string) (s *thread.Session, release func(), err error)
+
+// Sessions makes the app's own turns targets for the debugger's write
+// verbs (plan F4): Studio's approvals, steer and cancel on a run the
+// app started — a turn of a weft/thread session carrying a public id
+// (thread.PublicID) — reach this runtime as commands, and the runtime
+// acts through the Session resolve answers:
+//
+//   - a decision is the session's own Decide (thread.Approve, Deny or
+//     Resolve), which resumes the turn under thread's rules (the parked
+//     turn's Next) — the resumed run is the app's run, with its own
+//     weft.session.id and weft.turn, never a playground run;
+//   - a steer is a Send under thread.As(thread.Steer), refused "no
+//     running turn to steer" unless the run is in flight on the session
+//     (a debugger never starts a new turn);
+//   - cancel is refused "cancel is not supported on an app turn":
+//     thread has no per-turn cancel (Interrupt replaces the turn with a
+//     message), and the runtime does not invent one.
+//
+// The writer lease is law (thread's T1): the runtime claims the
+// Session's lease (Session.Claim) before it acks, so a Session that
+// cannot write — another writer holds the session — is refused "the
+// app is writing this session; fork instead" and nothing is written; a
+// stale one is released and resolved once more. A session that
+// requires signed decisions (thread.RequireSigned) refuses the
+// runtime's unsigned Decide with thread's own error.
+//
+// Opt-in: without Sessions the app's turns stay viewer-only, the
+// registration says sessions: false, and nothing about the app's runs
+// changes. Each resolve call is bounded like ModelResolver's (10 s,
+// then refused "session resolver timed out"; a late answer is
+// released); honour ctx. A nil resolve is ignored.
+func Sessions(resolve SessionResolver) Option {
+	return func(c *config) {
+		if resolve != nil {
+			c.sessions = resolve
+		}
+	}
 }
 
 // Enabled opens (or forbids) the link explicitly. The default — no

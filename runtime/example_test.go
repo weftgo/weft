@@ -8,6 +8,7 @@ import (
 
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/runtime"
+	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/wefttest"
 )
 
@@ -57,4 +58,38 @@ func ExampleModelResolver() {
 	_, err := resolve(context.Background(), "openai/gpt-9")
 	fmt.Println(err)
 	// Output: this app serves anthropic/claude-* models only
+}
+
+// ExampleSessions makes the app's own turns targets for the debugger:
+// approvals, steer and cancel on a turn of a session the app created
+// with thread.PublicID reach the runtime, which acts through the
+// Session the resolver answers. Here the app hands its own live
+// Session (no release: the app keeps writing it); an app that keeps
+// none in memory opens one from its store and returns its Close —
+// the runtime claims the writer lease before it acks, so while the
+// app's own writer holds the session the command is refused "the app
+// is writing this session; fork instead" and nothing is written.
+func ExampleSessions() {
+	ctx := context.Background()
+	support := weft.New(wefttest.Script(wefttest.Say("ok")), weft.Name("acme-support"))
+	live := map[string]*thread.Session{} // the app's open sessions, by public id
+	s, _ := thread.Create(ctx, thread.Memory(), support, thread.PublicID("pub_7Hk2"))
+	defer func() { _ = s.Close(ctx) }()
+	live["pub_7Hk2"] = s
+
+	resolve := func(ctx context.Context, publicID string) (*thread.Session, func(), error) {
+		if s, ok := live[publicID]; ok {
+			return s, nil, nil
+		}
+		return nil, nil, nil // not this app's: refused "no session for this public id"
+	}
+	shutdown := runtime.Install(
+		runtime.Agents(support),
+		runtime.Sessions(resolve),
+		runtime.Enabled(false), // dev-only by default: WEFT_ENV=dev
+	)
+	defer shutdown()
+	got, _, _ := resolve(ctx, "pub_7Hk2")
+	fmt.Println(got == s)
+	// Output: true
 }

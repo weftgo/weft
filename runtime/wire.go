@@ -29,6 +29,10 @@ type registration struct {
 	WeftVersion string     `json:"weft_version"`
 	Budget      budgetWire `json:"budget"`
 	Threads     bool       `json:"threads"`
+	// Sessions says the runtime holds a SessionResolver: Studio may
+	// route the debugger's verbs on the app's own turns here (a
+	// `session` frame) instead of refusing them "app-owned turn".
+	Sessions bool `json:"sessions"`
 	// Breakpoints is the debugger's tool set this runtime holds right
 	// now (§8.3) — sorted, empty rather than null. The set lives in
 	// this process, so it outlives a Studio restart; reporting it at
@@ -240,6 +244,29 @@ type breakpointsFrame struct {
 type steerFrame struct {
 	RunID   string `json:"run_id"`
 	Message string `json:"message"`
+}
+
+// sessionCommand is an `event: session` frame's data (plan F4): a
+// debugger verb on one of the app's own turns, addressed by the
+// session behind it — public_id (what the app's SessionResolver
+// answers), session_id (checked against the Session it answers) and
+// run_id (the app's run) — instead of a run this runtime started. Verb
+// decide carries call_id, decision (approve | deny | resolve), reason
+// and content as the approve frame does; steer carries message; cancel
+// nothing more. Acked like every command: accepted before the Session
+// is written, finished after.
+type sessionCommand struct {
+	CommandID string `json:"command_id"`
+	Verb      string `json:"verb"` // decide | steer | cancel
+	PublicID  string `json:"public_id"`
+	SessionID string `json:"session_id"`
+	RunID     string `json:"run_id"`
+	CallID    string `json:"call_id,omitempty"`
+	Decision  string `json:"decision,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+	Content   string `json:"content,omitempty"`
+	Message   string `json:"message,omitempty"`
+	Actor     string `json:"actor,omitempty"`
 }
 
 // ack is the POST /api/runtime/acks body, sent before execution

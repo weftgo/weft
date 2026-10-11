@@ -798,6 +798,34 @@ func (s *Session) Storage() Storage {
 	return s.storageLocked()
 }
 
+// Claim takes the session's writer lease now, without writing an
+// entry — what the Session's first write would do, asked ahead of it:
+// nil when this Session holds the lease (or the storage has no Leaser
+// to ask), ErrLocked while another writer holds the session (nothing
+// is taken, nothing changes), ErrStale when the stored session moved
+// past this Session's view (open it again), ErrClosed once Close
+// sealed the Session. A Session that claimed holds the lease until
+// Close, as one that wrote does.
+//
+// It is for a caller that must know it can write before it promises
+// to — weft/runtime acks a debugger's decision only once the Session
+// it was handed is the writer — and costs the holder nothing: the
+// backend answers from memory.
+func (s *Session) Claim(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.writableLocked(); err != nil {
+		return err
+	}
+	if w, ok := s.st.(*leased); ok {
+		return w.acquire(ctx)
+	}
+	return nil
+}
+
 // storageLocked is the storage beneath the seal Close puts on the
 // write path. Callers hold s.mu.
 func (s *Session) storageLocked() Storage {

@@ -81,8 +81,11 @@ func TestCancelRoute(t *testing.T) {
 
 	// The app's own run, and an unknown id.
 	seedRun(t, pt.db, "app_run", "", "", "", nil)
-	if code, body := cancel("app_run"); code != http.StatusConflict || !strings.Contains(body, "F4") {
-		t.Errorf("cancel of the app's own run = %d %s, want 409 naming F4", code, body)
+	// No runtime acts on the app's sessions: 403 "app-owned turn" with
+	// the fix (plan F4: the three verbs answer alike).
+	if code, body := cancel("app_run"); code != http.StatusForbidden || !strings.Contains(body, "app-owned turn") ||
+		!strings.Contains(body, `"fix":"set runtime.Sessions(resolver)`) {
+		t.Errorf("cancel of the app's own run = %d %s, want 403 app-owned turn with the runtime.Sessions fix", code, body)
 	}
 	if code, body := cancel("nope"); code != http.StatusNotFound {
 		t.Errorf("cancel of an unknown run = %d %s, want 404", code, body)

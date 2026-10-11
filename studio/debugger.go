@@ -5,9 +5,11 @@ package studio
 // every run the runtime starts from then on, and steer delivers one
 // user message into a run it holds — core.Steering on an ephemeral
 // run, thread's Steer policy on a fork it owns. The app's own turns
-// are viewer-only: an agent is immutable after New and a session's
-// writer is the app's, so a run no runtime started is refused here,
-// and meta (and both UIs) say so (PQ7).
+// are viewer-only unless the app opted in (plan F4): an agent is
+// immutable after New and a session's writer is the app's, so a run no
+// runtime started is steered only through a runtime installed with
+// runtime.Sessions — the app's own Session does the writing — and is
+// refused 403 "app-owned turn" otherwise; meta's debug_scope says which.
 
 import (
 	"errors"
@@ -81,9 +83,10 @@ type steerRequest struct {
 	Message string `json:"message"`
 }
 
-// serveSteer is the rung-4 verb (capability `steer`). The run must be
-// one a runtime started; the app's own turns are refused — viewer-only
-// (D7, PQ7).
+// serveSteer is the rung-4 verb (capability `steer`). A run a runtime
+// started is steered through that runtime (202 {steered}); an app-owned
+// turn through a runtime that registered runtime.Sessions (202 with the
+// command to poll, appturn.go), else 403 "app-owned turn" (plan F4).
 func (s *Server) serveSteer(rs *linkruntime.RuntimeServer) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		runID := r.PathValue("id")
@@ -103,8 +106,11 @@ func (s *Server) serveSteer(rs *linkruntime.RuntimeServer) http.HandlerFunc {
 		runtimeID, ok := rs.RuntimeOf(runID)
 		if !ok {
 			// Not a runtime-started run. An unknown id is a 404; the
-			// app's own turns exist and stay viewer-only (D7, PQ7).
-			if _, err := s.db.Run(r.Context(), runID); err != nil {
+			// app's own turns are steered only through a runtime that
+			// registered runtime.Sessions (plan F4, appturn.go), inside
+			// a panel token's public id like every other verb.
+			row, err := s.db.Run(r.Context(), runID)
+			if err != nil {
 				if errors.Is(err, obsdb.ErrNotFound) {
 					notFound(w, r, "unknown run "+runID)
 					return
@@ -112,8 +118,17 @@ func (s *Server) serveSteer(rs *linkruntime.RuntimeServer) http.HandlerFunc {
 				dbError(w, r, "run", runID, err)
 				return
 			}
-			writeError(w, r, http.StatusForbidden, "forbidden",
-				"only runs a runtime started can be steered — the app's own turns are viewer-only (PQ7)")
+			if pid := idFrom(r).panel; pid != nil && row.PublicID != pid.PublicID {
+				forbidden(w, r)
+				return
+			}
+			target, ok := appTurnRuntime(w, r, rs, row.RunRow)
+			if !ok {
+				return
+			}
+			sc := appSessionCommand(r, linkruntime.VerbSteer, row.RunRow)
+			sc.Message = req.Message
+			enqueueAppTurn(w, r, rs, target, sc)
 			return
 		}
 		// A panel token steers inside its public id only (S4.6) — the

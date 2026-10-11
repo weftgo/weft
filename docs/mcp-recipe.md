@@ -9,10 +9,15 @@ nothing Studio does not serve, and never writes: every tool is a GET.
 ## 1. Set it up: three commands
 
 ```sh
-go install github.com/weftgo/weft/cmd/weft@latest   # the one binary: studio, dev, mcp, …
+go install github.com/weftgo/weft/cmd/weft@main     # the one binary: studio, dev, mcp, …
 weft studio                                          # or: weft dev -- go run ./cmd/app
 claude mcp add weft -- weft mcp                      # Claude Code: the tools appear as mcp__weft__*
 ```
+
+`weft mcp` ships from v0.15.0 (unreleased at the time of writing:
+`go install github.com/weftgo/weft/cmd/weft@main` until then, or `go
+install ./cmd/weft` from a checkout; `@latest` resolves to v0.14.2, which
+has no `weft mcp`). Once v0.15.0 is tagged, `@latest` is the line.
 
 `weft studio` (or `weft dev`, which runs Studio and your app together)
 listens on `127.0.0.1:7331` and writes the discovery file `studio.json`
@@ -28,9 +33,16 @@ claude mcp add weft -- weft mcp --url http://127.0.0.1:7331
 claude mcp add weft -e WEFT_STUDIO_TOKEN=<token> -- weft mcp --url http://127.0.0.1:7331
 ```
 
-`--token <token>` works too, but the arguments are stored in the
-client's config in clear; prefer the environment variable, and never
-put a token in a project-scoped `.mcp.json` you commit.
+`--token <token>` works too. Both forms land in the client's config in
+clear (`claude mcp add` stores the `-e` value as it stores the
+arguments); the difference is at run time: an argument shows in `ps`
+to every user of the machine, an environment value does not — so
+prefer `-e WEFT_STUDIO_TOKEN=…`. Keep the token out of a file you
+commit: Claude Code expands `${VAR}` in a project-scoped `.mcp.json`,
+so a shared one reads
+`"env": {"WEFT_STUDIO_TOKEN": "${WEFT_STUDIO_TOKEN}"}` and each
+developer exports their own. With the discovery file (no `--url`, no
+token anywhere) there is nothing to store at all.
 
 **Cursor**, `.cursor/mcp.json` (Claude Code's project-scoped `.mcp.json`
 is the same shape):
@@ -74,7 +86,8 @@ cut.
 |---|---|---|
 | Why did run X fail? | `explain_failure {"id": X}` | follow its `next`: `step`, `request`, `events` |
 | What did the model see at step N? | `request {"id": X, "step": N, "transcript": true}` | `step {"id": X, "n": N}` for the step whole |
-| Find the runs where the refund tool errored | `search {"tool": "refund", "status": "failed"}` (or `"q": "<error text>"`) | `explain_failure` on a hit |
+| Find the runs that called refund and failed | `search {"tool": "refund", "status": "failed"}` (or `"q": "<run error text>"`) | `explain_failure` on a hit |
+| Where did the refund tool return an error? | `step {"id": X, "n": N}` (each call's `result.is_error`) or `events {"id": X}` (`tool_finish` with `is_error`) | — search does not filter on tool results |
 | Compare run A and B | `diff {"a": A, "b": B}` | `step` on the first changed step |
 | What can this Studio do? | `meta {}` | a 404 or 403 elsewhere: is the capability off, and why |
 | Which runs just happened? | `runs {"agent": "…", "status": "failed", "limit": 10}` | `explain_failure` |
@@ -87,7 +100,7 @@ record contract's fixtures (`obsdb/testdata/contract/`, real recorded
 pipeline output, renumbered per case so they share one database), and
 the real `weft mcp` binary driven over stdio by the MCP Go SDK's client,
 the way Claude Code drives it. The Studio sat on a free port
-(`127.0.0.1:46455`); yours is `127.0.0.1:7331`. Each example is the call,
+(`127.0.0.1:33933`); yours is `127.0.0.1:7331`. Each example is the call,
 the summary line, and the start of the JSON (cut here with `…`).
 
 **Why did run X fail?** The `failed` fixture: `MaxSteps(1)` against a
@@ -95,8 +108,8 @@ model that keeps calling a tool.
 
 ```text
 > explain_failure {"id":"a1100000000000000000000000000001"}
-run a1100000000000000000000000000001 (support): failed before step 1 started (step 0, its last recorded step, finished): weft: run failed at step 1: weft: run exceeded the maximum number of steps; stop_reason tool_calls; tool calls: lookup_order ok — http://127.0.0.1:46455/runs/a1100000000000000000000000000001
-{"run_id":"a1100000000000000000000000000001","url":"http://127.0.0.1:46455/runs/a1100000000000000000000000000001","agent":"support","status":"failed","error":"weft: run failed at step 1: weft: run exceeded the maximum number of steps","stop…
+run a1100000000000000000000000000001 (support): failed before step 1 started (step 0, its last recorded step, finished): weft: run failed at step 1: weft: run exceeded the maximum number of steps; stop_reason tool_calls; tool calls: lookup_order ok — http://127.0.0.1:33933/runs/a1100000000000000000000000000001
+{"run_id":"a1100000000000000000000000000001","url":"http://127.0.0.1:33933/runs/a1100000000000000000000000000001","agent":"support","status":"failed","error":"weft: run failed at step 1: weft: run exceeded the maximum number of steps","stop…
 next: step {id:"a1100000000000000000000000000001", n:0} for the step whole | request {id:"a1100000000000000000000000000001", step:0, transcript:true} for the exact model input | events {id:"a1100000000000000000000000000001"} for the event stream
 ```
 
@@ -116,7 +129,15 @@ A parked run is not a failure, and says so:
 
 ```text
 > explain_failure {"id":"a1100002000000000000000000000001"}
-run a1100002000000000000000000000001 (support): succeeded, last step 0; stop_reason tool_calls; parked: 1 calls awaiting approval (refund_order); tool calls: refund_order pending — http://127.0.0.1:46455/runs/a1100002000000000000000000000001
+run a1100002000000000000000000000001 (support): succeeded, last step 0; stop_reason tool_calls; parked: 1 calls awaiting approval (refund_order); tool calls: refund_order pending — http://127.0.0.1:33933/runs/a1100002000000000000000000000001
+```
+
+A run whose process died mid-tool (no end ever arrived) reads
+interrupted, the call it was in listed without a result:
+
+```text
+> explain_failure {"id":"a1100003000000000000000000000001"}
+run a1100003000000000000000000000001 (support): interrupted at step 0; tool calls: lookup_order no result; holes: interrupted — http://127.0.0.1:33933/runs/a1100003000000000000000000000001
 ```
 
 A run derived from a stock OpenTelemetry GenAI app (no weft
@@ -125,7 +146,7 @@ absent:
 
 ```text
 > explain_failure {"id":"otel-5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10-1a2b3c4d5e6f7081"}
-run otel-5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10-1a2b3c4d5e6f7081 (support): failed at step 0: agent cancelled by the user; holes: derived — http://127.0.0.1:46455/runs/otel-5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10-1a2b3c4d5e6f7081
+run otel-5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10-1a2b3c4d5e6f7081 (support): failed at step 0: agent cancelled by the user; holes: derived — http://127.0.0.1:33933/runs/otel-5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10-1a2b3c4d5e6f7081
 ```
 
 **What did the model see at step N?** The request records (prompt hash,
@@ -138,9 +159,15 @@ run a1100000000000000000000000000001 requests: 1 requests; then the transcript o
 {"requests":[{"index":0,"step":0,"attempt":1,"time":"2026-10-01T09:09:00.005Z","system_hash":"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7","catalog_hash":"d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8…
 ```
 
-**Find the runs where a tool errored.** `search` takes text (`q`, over
-prompt, answer, error and tool names) and filters (`tool`, `status`,
-`agent`, `model`, `since`/`until`, `min_tokens`, `min_cost`, `sort`):
+**Find the runs that called a tool and failed.** `search` takes text
+(`q`, over the run's prompt, answer and error and the names of the tools
+it called) and filters (`tool` — a tool the run called —, `status`,
+`agent`, `model`, `since`/`until`, `min_tokens`, `min_cost`, `sort`).
+It finds runs, not tool results: a tool's error is data the model sees
+(the run usually goes on and succeeds), so `q`/`error` match the *run's*
+error, never a tool result's. To see a tool's error result, read the
+step (`step`: each call's `result` with `is_error`) or the event stream
+(`events`: `tool_finish` with `is_error`).
 
 ```text
 > search {"q":"exceeded"}
@@ -157,20 +184,16 @@ side did not record is "not comparable", never a change:
 
 ```text
 > diff {"a":"a1100000000000000000000000000001","b":"a1100004000000000000000000000001"}
-diff a1100000000000000000000000000001 → a1100004000000000000000000000001: 0 changed steps, first at step 1
+diff a1100000000000000000000000000001 → a1100004000000000000000000000001: 1 changed steps, first at step 1
 {"a":{"run_id":"a1100000000000000000000000000001","steps":1,"status":"failed"},"b":{"run_id":"a1100004000000000000000000000001","steps":2,"status":"succeeded"},"steps":[{"step":0,"changed":false,"a":{"status":"ok","system_hash":"57e8f485cbb…
 ```
-
-(The summary line's count is wrong in this build — it reads `0 changed
-steps` beside `first at step 1`; the JSON's `summary.changed_steps`
-list is the truth. A known issue of the `diff` tool's summary.)
 
 **What can this Studio do?**
 
 ```text
 > meta {}
-Studio at http://127.0.0.1:46455: capabilities requests, steps, export, logs, diff, traces, search, pricing, delete, proposals, live, ingest, auth, handoff, panel-config
-{"weft_version":"v0.14.2","studio_version":"v0.14.2","panel_version":"v0.14.2","db":{"kind":"sqlite","path":"/tmp/TestMCPLiveCheck3722668053/001/weft.db","size":774568},"title":"weft studio","has_manifest":false,"ingest_open":true,"interrup…
+Studio at http://127.0.0.1:33933: capabilities requests, steps, export, logs, diff, traces, search, pricing, delete, proposals, live, ingest, auth, handoff, panel-config
+{"weft_version":"v0.14.2","studio_version":"v0.14.2","panel_version":"v0.14.2","db":{"kind":"sqlite","path":"/tmp/TestMCPLiveCheck3582215505/001/weft.db","size":922888},"title":"weft studio","has_manifest":false,"ingest_open":true,"interrup…
 ```
 
 `capabilities_off` in the JSON names each capability that is off and
@@ -237,16 +260,19 @@ steps.
 
 ## 6. Troubleshooting
 
-**`weft mcp: no Studio answers /api/meta: studio not reachable at
-http://127.0.0.1:7331 …`** — no Studio is running there. Start one
+**`weft: mcp: no Studio answers /api/meta: studio not reachable at
+http://127.0.0.1:7331: Get "http://127.0.0.1:7331/api/meta": dial tcp
+127.0.0.1:7331: connect: connection refused (weft studio starts one;
+--url or WEFT_STUDIO_URL points at another)`** — no Studio is running there. Start one
 (`weft studio` or `weft dev`), or point at yours: `--url`,
 `WEFT_STUDIO_URL`. If a Studio *is* running elsewhere, the discovery
 file was not used: check that `WEFT_DISCOVERY` is not `off` and
 `WEFT_STUDIO_URL` is unset in the environment the client starts `weft
 mcp` in (Claude Code passes its own environment, plus `-e` pairs).
 
-**`… GET /api/meta: 401 the API requires a token: Authorization: Bearer
-<token> (--token or WEFT_STUDIO_TOKEN)`** — that Studio walls its API
+**`weft: mcp: no Studio answers /api/meta: GET /api/meta: 401 the API
+requires a token: Authorization: Bearer <token> (--token or
+WEFT_STUDIO_TOKEN)`** — that Studio walls its API
 and no token reached it. Give `-e WEFT_STUDIO_TOKEN=…` or `--token`; with
 `--url`, the discovery file's token is used only when the file names
 the same URL (a token goes only to the Studio it belongs to).
@@ -268,17 +294,27 @@ subagent child), or the route's capability is off — ask `meta`.
 `make mcp-check` (`cmd/weft/mcp_check_test.go`, build tag `livecheck`)
 proves "`weft mcp` answers 'why did run X fail'" end to end without a
 model: it builds `weft`, starts `weft studio --db sqlite://<tmp>
---addr 127.0.0.1:<free port> --no-playground` with `WEFT_DISCOVERY=off`
-and the discovery locations inside a scratch directory (your own
-`studio.json` and Studio are never touched), POSTs the `failed`,
-`parked`, `interrupted`, `tool_calls` and `stock_genai` fixtures to
-`/v1/traces` and `/v1/logs` with the dev token read from `<db>.token`,
-then spawns `weft mcp --url … --token …` over the MCP SDK's
-`CommandTransport` and calls `meta`, `runs`, `explain_failure`, `step`,
-`request`, `search`, `diff`, `export` and `explain_failure` again on the
-parked and derived runs, asserting each answer. It prints each summary
-line and ends `MCP CHECK PASS`. It is not part of `make test`: it
-listens on a port.
+--addr 127.0.0.1:<free port> --no-playground` in a scratch directory
+with `HOME`, `XDG_RUNTIME_DIR` and `XDG_CACHE_HOME` inside it (so its
+`studio.json` lands there; your own discovery files are compared before
+and after and must not change), POSTs the `failed`, `parked`,
+`interrupted`, `tool_calls`, `session_turns` and `stock_genai` fixtures
+to `/v1/traces` and `/v1/logs` with the dev token read from
+`<db>.token`, then:
+
+- spawns `weft mcp --url …` with the token in `WEFT_STUDIO_TOKEN` and
+  `WEFT_DISCOVERY=off`, over the MCP SDK's `CommandTransport`, and calls
+  every tool — `meta`, `runs`, `explain_failure`, `run`, `step`,
+  `request`, `events`, `tools`, `search`, `diff`, `export`,
+  `explain_failure` on the parked, interrupted and derived runs,
+  `sessions`, `session` — asserting each summary line;
+- spawns `weft mcp` with no flag and no token (the `claude mcp add weft
+  -- weft mcp` path), which finds the scratch Studio through its
+  discovery file, and asserts `meta` and the stderr line `token from the
+  discovery file`.
+
+It prints each summary line and ends `MCP CHECK PASS`. It is not part
+of `make test`: it listens on a port.
 
 What it does not prove is Claude Code itself: the check speaks the same
 MCP protocol over stdio that Claude Code speaks, through the official

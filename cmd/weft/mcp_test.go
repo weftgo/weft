@@ -260,6 +260,23 @@ func TestMCPStdio(t *testing.T) {
 				t.Errorf("%s: body %d =\n%.400s\nwant GET %s's\n%.400s", c.tool, i, got[1+i], c.route, w)
 			}
 		}
+		if c.tool == "diff" {
+			// The summary line counts Studio's changed_steps list and
+			// names its first_changed (a list, never an int: I4.2's fix).
+			var d struct {
+				Summary struct {
+					ChangedSteps []int `json:"changed_steps"`
+					FirstChanged *int  `json:"first_changed"`
+				} `json:"summary"`
+			}
+			if err := json.Unmarshal([]byte(want[0]), &d); err != nil || len(d.Summary.ChangedSteps) == 0 || d.Summary.FirstChanged == nil {
+				t.Fatalf("diff r_ok r_max: %v %s, want changed steps to count", err, want[0])
+			}
+			line := fmt.Sprintf("diff r_ok → r_max: %d changed steps, first at step %d", len(d.Summary.ChangedSteps), *d.Summary.FirstChanged)
+			if got[0] != line {
+				t.Errorf("diff summary %q, want %q", got[0], line)
+			}
+		}
 	}
 
 	explain := func(id string) (string, explanation) {
@@ -631,7 +648,7 @@ func TestMCPCommand(t *testing.T) {
 		t.Errorf("an argument = exit %d %q", code, errb)
 	}
 	out, errb, code := weft("mcp", "--url", "http://127.0.0.1:1", "--token", "secret-tok")
-	if code != 1 || out != "" || !strings.Contains(errb, "weft: weft mcp: no Studio answers /api/meta: studio not reachable at http://127.0.0.1:1") ||
+	if code != 1 || out != "" || !strings.Contains(errb, "weft: mcp: no Studio answers /api/meta: studio not reachable at http://127.0.0.1:1") ||
 		strings.Contains(errb, "secret-tok") {
 		t.Errorf("no Studio = exit %d %q %q", code, out, errb)
 	}

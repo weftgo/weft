@@ -132,14 +132,14 @@ Flags:
 	c := newClient(u, tok)
 	ctx := context.Background()
 	if _, err := c.get(ctx, "/api/meta", nil); err != nil {
-		return fmt.Errorf("weft mcp: no Studio answers /api/meta: %w", err)
+		return fmt.Errorf("mcp: no Studio answers /api/meta: %w", err) // main prefixes "weft: "
 	}
 	_, _ = fmt.Fprintf(stderr, "weft mcp: %d read-only tools over stdio for the Studio at %s (token %s)\n",
 		len(mcpTools), c.redacted(), from)
 	srv := newMCPServer(c, slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
 	t := &sdk.IOTransport{Reader: os.Stdin, Writer: nopWriteCloser{stdout}}
 	if err := srv.Run(ctx, t); err != nil && !errors.Is(err, io.EOF) && !errors.Is(err, context.Canceled) {
-		return fmt.Errorf("weft mcp: %w", err)
+		return fmt.Errorf("mcp: %w", err)
 	}
 	return nil
 }
@@ -519,7 +519,6 @@ func (m *mcpReader) meta(ctx context.Context, _ *sdk.CallToolRequest, in mcpMeta
 		return nil, nil, err
 	}
 	var meta struct {
-		Version      string   `json:"version"`
 		Capabilities []string `json:"capabilities"`
 	}
 	_ = json.Unmarshal(b, &meta)
@@ -767,16 +766,21 @@ func (m *mcpReader) diff(ctx context.Context, _ *sdk.CallToolRequest, in mcpDiff
 	if err != nil {
 		return nil, nil, err
 	}
+	// Studio's diffSummary (studio/diff.go): changed_steps is the list
+	// of changed ordinals. A body that does not decode gets the plain
+	// line — never a count it did not read.
 	var d struct {
 		Summary struct {
-			ChangedSteps int  `json:"changed_steps"`
-			FirstChanged *int `json:"first_changed"`
+			ChangedSteps []int `json:"changed_steps"`
+			FirstChanged *int  `json:"first_changed"`
 		} `json:"summary"`
 	}
-	_ = json.Unmarshal(b, &d)
-	s := fmt.Sprintf("diff %s → %s: %d changed steps", in.A, in.B, d.Summary.ChangedSteps)
-	if d.Summary.FirstChanged != nil {
-		s += fmt.Sprintf(", first at step %d", *d.Summary.FirstChanged)
+	s := fmt.Sprintf("diff %s → %s", in.A, in.B)
+	if err := json.Unmarshal(b, &d); err == nil {
+		s += fmt.Sprintf(": %d changed steps", len(d.Summary.ChangedSteps))
+		if d.Summary.FirstChanged != nil {
+			s += fmt.Sprintf(", first at step %d", *d.Summary.FirstChanged)
+		}
 	}
 	return out(in.MaxBytes, s, b)
 }

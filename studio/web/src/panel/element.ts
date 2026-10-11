@@ -6,7 +6,7 @@
 // meta.capabilities reports the playground (§8.5 item 3).
 import type { Manifest, RunCompaction, RunRow, ToolCallPart, Transcript, Usage } from "../lib/api"
 import { isHoleRef } from "../lib/api"
-import { DERIVED_HOLE, isDerived, mergeHoles, rowHoles, statusHoles, USAGE_AT_FINISH, usageKnown } from "../lib/honesty"
+import { DERIVED_HOLE, derivedUsageUnknown, isDerived, mergeHoles, rowHoles, statusHoles, USAGE_AT_FINISH, usageKnown } from "../lib/honesty"
 import type { HoleMark } from "../lib/honesty"
 import { paramsLine, REQUEST_NO_RECORD_REASON, REQUEST_NOT_STORED, shortHash } from "../lib/requests"
 import {
@@ -2528,7 +2528,11 @@ export class WeftDevtools extends HTMLElement {
     const row2 = el("div", "weft-row2", [
       el("span", undefined, r.model.name ? `${r.model.provider}/${r.model.name}` : ""),
       el("span", undefined, `${r.steps} steps`),
-      el("span", undefined, `${tokens(usage.input_tokens)}→${tokens(usage.output_tokens)}`),
+      // A derived run whose spans reported no usage: "—" with the API's
+      // reason (Studio's UnknownTokens), never 0→0 as known.
+      derivedUsageUnknown(r)
+        ? el("span", undefined, "—", { title: r.cost_reason ?? "", "data-weft-usage": "unknown" })
+        : el("span", undefined, `${tokens(usage.input_tokens)}→${tokens(usage.output_tokens)}`),
       el("span", undefined, duration(r.started, r.finished) || "…"),
     ])
     row.append(row1, row2)
@@ -3706,6 +3710,12 @@ export class WeftDevtools extends HTMLElement {
     if (!t) return el("div")
     const wrap = el("div")
     wrap.appendChild(this.notes(t))
+    // A derived turn (plan I1.3): no events to fold here — its steps
+    // (the chat spans' usage, the tool spans) are Studio's story.
+    if (this.derived(t)) {
+      const a = el("a", undefined, `${this.rowOf(t.id)?.steps ?? t.doc?.steps ?? 0} steps · open in Studio ⤢`, { href: studioLink(this.base, t.id, 0), target: "_blank", rel: "noopener", "data-weft-derived-handoff": t.id })
+      wrap.appendChild(el("div", "weft-note", [a]))
+    }
     const ids = this.turnLinks(t, s)
     if (ids) wrap.appendChild(ids)
     const prompt = turnPromptOf(t.transcript)

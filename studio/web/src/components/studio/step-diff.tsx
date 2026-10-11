@@ -16,6 +16,7 @@ import { runLink } from "@/lib/links"
 import {
   CELL_REASONS,
   CELL_WORDS,
+  COST_FOLLOWS_USAGE,
   COLUMN_LABELS,
   DIFF_COLUMNS,
   cellHole,
@@ -193,7 +194,7 @@ function CostCellTd({
   const state = usageUnknown && !missing ? "unknown" : costCell(baseSide, side, missing)
   const w =
     usageUnknown && !missing
-      ? { text: CELL_WORDS.unknown, title: `cost follows usage: ${CELL_REASONS.unknown}`, why: CELL_REASONS.unknown }
+      ? { text: CELL_WORDS.unknown, title: COST_FOLLOWS_USAGE, why: CELL_REASONS.unknown }
       : costCellWords(state, state === "unknown" && costView(side).known ? baseSide : side)
   return (
     <td

@@ -15,7 +15,7 @@ import { cleanup, configure, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "../lib/api"
-import type { RunDoc } from "../lib/api"
+import type { RunDoc, RunRow } from "../lib/api"
 import { UNRUN_CALL_REASON } from "../lib/events"
 import { REQUEST_NO_INDEX_REASON, REQUEST_NO_RECORD_REASON, REQUEST_NOT_RECORDED_LABEL } from "../lib/requests"
 import { badgeLabel } from "./badges"
@@ -46,7 +46,7 @@ import type { ExperimentDraft } from "./playground"
 import { studioPlaygroundLink } from "./element"
 import { drawerHandoff } from "../components/studio/replay-drawer"
 import { playgroundLink } from "../lib/links"
-import { DERIVED, STOCK as DERIVED_STOCK, serveDerived } from "../test/derived-fixture"
+import { DERIVED, STOCK as DERIVED_STOCK, derivedBodies, serveDerived } from "../test/derived-fixture"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -929,7 +929,12 @@ describe("a derived run on both surfaces (I1.3)", () => {
       verbs: all(el, "[data-weft-verb]").length,
       saveLink: all(el, "a[data-weft-save-test]").length,
       refused: all(el, '[data-weft-refused="derived"]').length,
+      handoff: $(el, "[data-weft-derived-handoff]")!.textContent,
+      timeline: [] as (string | null)[],
     }
+    click($(el, "#weft-tab-timeline"))
+    await vi.waitFor(() => expect($(el, "#weft-tp-timeline .weft-wf .weft-wf-name")).toBeTruthy(), { timeout: 5_000 })
+    panel.timeline = all(el, "#weft-tp-timeline .weft-wf .weft-wf-name").map((n) => n.textContent)
     el.remove()
     await settle()
     cleanup()
@@ -949,11 +954,15 @@ describe("a derived run on both surfaces (I1.3)", () => {
       header: document.querySelector("[data-run-holes]")!.textContent,
       request: document.querySelector("[data-request]")!.textContent,
       verbs: document.querySelectorAll("[data-replay-verb]").length,
+      steps: document.querySelectorAll("[data-derived-story] [data-step]").length,
       refused: document.querySelectorAll("[data-replay-refused='derived'], [data-save-test='derived']").length,
     }
     renderApp("/runs")
     await waitFor(() => expect(document.querySelector("[data-derived-chip] [data-hole='derived']")).toBeTruthy())
     const studioChip = document.querySelector("[data-derived-chip] [data-hole='derived']")!.getAttribute("title")
+    renderApp(`/runs/${DERIVED}`)
+    await waitFor(() => expect(document.querySelectorAll("[data-span]").length).toBe(4))
+    const waterfall = [...document.querySelectorAll("[data-span] > div[title]")].map((n) => n.getAttribute("title")!.split(" — ")[0])
 
     // The same rows: one hole, derived, on each surface.
     expect(panel.holes).toEqual(["derived"])
@@ -966,5 +975,37 @@ describe("a derived run on both surfaces (I1.3)", () => {
     expect(panel.saveLink).toBe(0)
     expect(panel.refused).toBe(3) // ✎ Experiment, ↻ Re-run, save as test
     expect(studio.refused).toBe(2) // replay, save as test
+    // The steps: the panel hands off with the count the page draws cards for.
+    expect(panel.handoff).toBe(`${studio.steps} steps · open in Studio ⤢`)
+    expect(studio.steps).toBe(2)
+    // The spans: the Timeline lists what the waterfall lists.
+    expect(panel.timeline).toEqual(["invoke_agent support", "chat gpt-5", "execute_tool lookup_order", "chat gpt-5"])
+    expect(waterfall).toEqual(panel.timeline)
+  })
+
+  it("no usage reported: both surfaces read the row's tokens as unknown, in the API's reason", async () => {
+    const row = derivedBodies.runNoUsage as RunRow
+    const reason = row.cost_reason!
+    fake(false).on("GET runs", { total: 1, runs: [row], next_before: null })
+    const el = await mount({ "data-endpoint": "http://studio.test/studio/", "data-open": "true" })
+    await vi.waitFor(() => expect($(el, '.weft-turn [data-weft-usage="unknown"]')).toBeTruthy(), { timeout: 5_000 })
+    const p = $(el, '.weft-turn [data-weft-usage="unknown"]')!
+    el.remove()
+    await settle()
+    cleanup()
+    document.body.innerHTML = ""
+    stubBrowser()
+    vi.stubGlobal("scrollTo", vi.fn())
+    StudioEventSource.reset()
+    vi.stubGlobal("EventSource", StudioEventSource)
+    setStudioToken("")
+    fake(true).on("GET runs", { total: 1, runs: [row], next_before: null })
+    renderApp("/runs")
+    await waitFor(() => expect(document.querySelector("tbody tr [data-usage='unknown']")).toBeTruthy())
+    const s = document.querySelector("tbody tr [data-usage='unknown']")!
+    expect(p.textContent).toBe("—")
+    expect(s.firstChild?.textContent).toBe("—")
+    expect(p.getAttribute("title")).toBe(reason)
+    expect(s.getAttribute("title")).toBe(reason)
   })
 })

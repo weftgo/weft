@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { derivedWords } from "../lib/honesty"
 import { SAVE_TEST_LABEL } from "../lib/saves"
 import { FakeStudio } from "../test/fake-studio"
-import { DERIVED, STOCK, serveDerived } from "../test/derived-fixture"
+import { DERIVED, STOCK, derivedBodies, serveDerived } from "../test/derived-fixture"
 import { $, all, click, META, mount, settle, setup, teardown } from "./testkit"
 import { badgeLabel } from "./badges"
 import type { WeftDevtools } from "./element"
@@ -86,6 +86,27 @@ describe("a derived turn in the panel", () => {
     expect(save.tagName).not.toBe("A")
     saysStock(save.getAttribute("title"), "save as test")
     expect(story.querySelector("a[data-weft-save-test]")).toBeNull()
+    // The steps the spans tell are Studio's story: the hand-off says how
+    // many and lands on the run page's story at step 0.
+    const off = story.querySelector<HTMLAnchorElement>("[data-weft-derived-handoff]")!
+    expect(off.textContent).toBe("2 steps · open in Studio ⤢")
+    const url = new URL(off.href)
+    expect(url.pathname).toBe(`/studio/runs/${DERIVED}`)
+    expect(url.searchParams.get("step")).toBe("0")
+    expect(url.searchParams.get("view")).toBe("story")
+  })
+
+  it("no usage reported: the turn's tokens read — with the API's reason, never 0→0", async () => {
+    const reason = (derivedBodies.runNoUsage as { cost_reason: string }).cost_reason
+    serveDerived(new FakeStudio().on("GET meta", { ...META, capabilities: [...META.capabilities, "requests", "pricing"] }))
+      .on("GET runs", { total: 1, runs: [derivedBodies.runNoUsage], next_before: null })
+      .install()
+    const el = await mount({ "data-endpoint": "http://studio.test/studio/", "data-open": "true" })
+    await vi.waitFor(() => expect($(el, '.weft-turn [data-weft-usage="unknown"]')).toBeTruthy(), { timeout: 5_000 })
+    const u = $(el, '.weft-turn [data-weft-usage="unknown"]')!
+    expect(u.textContent).toBe("—")
+    expect(u.getAttribute("title")).toBe(reason)
+    expect($(el, ".weft-turn")!.textContent).not.toContain("0→0")
   })
 
   it("Request: the request badged derived with its reason and fix, no prompt claimed", async () => {

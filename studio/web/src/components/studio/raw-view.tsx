@@ -15,6 +15,7 @@
 // (G2): ?q= the search, ?hide= the hidden kinds, ?ev= the open row's
 // position (lib/links.ts's rawSearch) — written in place, cursor-like:
 // back walks the run page's views, never a keystroke.
+import { isDerived } from "@/lib/honesty"
 import { useNavigate, useSearch } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { shared } from "@/lib/virtual"
@@ -189,6 +190,7 @@ export function EventsExplorer({
   eventHoles,
   state,
   onState,
+  derived = false,
 }: {
   events: WireEvent[]
   /** The stream index of events[0] (the ring's evicted count, plan
@@ -206,6 +208,9 @@ export function EventsExplorer({
    * raw view: the URL); absent, the explorer holds its own. */
   state?: RawLinkState
   onState?: (s: RawLinkState) => void
+  /** A run derived from stock spans (plan I1.3): no events by nature —
+   * the owner's derived note says why, so no empty line is drawn. */
+  derived?: boolean
 }) {
   const [ownHidden, setOwnHidden] = useState<Set<EventKind>>(() => new Set())
   const hidden = useMemo(
@@ -387,7 +392,9 @@ export function EventsExplorer({
           <span>summary</span>
           <span />
         </div>
-        {rows.length === 0 ? (
+        {rows.length === 0 && events.length === 0 && derived ? null : rows.length === 0 ? (
+          // A derived run's empty list says nothing: the derived note
+          // above it (the run page's) says why there are no events.
           <p className="py-8 text-center font-mono text-xs text-faint">
             {events.length === 0
               ? "no events yet"
@@ -546,6 +553,7 @@ export function RawView({
           onJump={onJump}
           state={linked}
           onState={setLinked}
+          derived={isDerived(doc)}
         />
       ) : (
         <div className="codewin">

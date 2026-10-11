@@ -11,11 +11,12 @@ import axe from "axe-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
-import type { RunRow } from "@/lib/api"
+import type { RunDoc } from "@/lib/api"
 import { CAUSES, DERIVED_HOLE, derivedWords, holeWords, rowHoles } from "@/lib/honesty"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
-import { FakeStudio, golden } from "@/test/fake-studio"
+import { FakeStudio, golden, pagedEvents } from "@/test/fake-studio"
+import type { FakePosEvent } from "@/test/fake-studio"
 import {
   DERIVED,
   DERIVED_FAILED,
@@ -171,6 +172,11 @@ describe("a derived run's page (the Done line)", () => {
       expect(document.body.textContent).toContain(name)
     expect(document.body.textContent).not.toContain("past the playhead")
     expect(document.body.textContent).not.toContain("press space or click the bar to replay")
+    // A span is selected, and its detail offers no playhead jump: there
+    // are no events to replay (nor a "space replay" key hint).
+    await waitFor(() => expect(document.body.textContent).toContain("span id"))
+    expect(document.body.textContent).not.toContain("replay here")
+    expect(document.body.textContent).not.toMatch(/space\s*replay/)
   })
 
   it("the raw view says derived above the empty event list", async () => {
@@ -178,13 +184,31 @@ describe("a derived run's page (the Done line)", () => {
     renderApp(`/runs/${DERIVED}?view=raw`)
     await waitFor(() => expect(document.querySelector("[data-derived-note='events']")).toBeTruthy())
     saysStock(document.querySelector("[data-derived-note='events']")!.textContent, "raw")
+    // The empty list under the note says nothing of its own.
+    expect(document.body.textContent).not.toContain("no events yet")
   })
 
-  it("a weft run is untouched: no derived chip, banner or refusal", async () => {
-    // The v0.9.0 run (not derived): the derived rules never fire on it.
-    const doc = golden<RunRow>("run-v090")
+  it("a weft run is untouched: no derived note, refusal or chip on its page", async () => {
+    // The run v0.9.0 wrote (not derived), served as Go reads it.
+    const doc = golden<RunDoc>("run-v090")
     expect(doc.derived).toBeUndefined()
-    expect(rowHoles(doc).some((m) => m.hole === "derived")).toBe(false)
+    const RUN = doc.id
+    new FakeStudio()
+      .on("GET meta", meta(CAPS))
+      .on(`GET runs/${RUN}`, doc)
+      .on(`GET runs/${RUN}/events`, pagedEvents(golden<{ events: FakePosEvent[] }>("run-v090-events").events))
+      .on(`GET runs/${RUN}/transcript`, golden("run-v090-transcript"))
+      .on(`GET runs/${RUN}/spans`, { spans: [] })
+      .withRequests(RUN, "not-recorded")
+      .install()
+    for (const view of ["story", "raw", "trace"]) {
+      renderApp(`/runs/${RUN}?view=${view}`)
+      await waitFor(() => expect(document.querySelector("[data-run-holes]")).toBeTruthy())
+      if (view === "story") await waitFor(() => expect(document.querySelectorAll("[data-step]").length).toBe(doc.steps))
+      for (const sel of ["[data-derived-note]", "[data-replay-refused]", "[data-derived-chip]", "[data-derived-story]", "[data-save-test='derived']"])
+        expect(document.querySelector(sel), `${view} ${sel}`).toBeNull()
+      expect(document.querySelector("[data-hole='derived']"), view).toBeNull()
+    }
   })
 })
 

@@ -4,6 +4,7 @@
 // stream) and json (the folded node). Everything renders from the
 // fold AT THE PLAYHEAD, so scrubbing replays inside the panel too:
 // a call reads "running…" until its finish is revealed.
+import { isDerived } from "@/lib/honesty"
 import { ArrowUpRight } from "lucide-react"
 import { Link } from "@tanstack/react-router"
 
@@ -314,6 +315,9 @@ export function SpanDetail({
           <span className="ml-auto flex items-center gap-2 pr-1 font-mono text-[11px] text-faint">
             <span className="uppercase">{span.kind}</span>
             <span className="text-foreground">{span.label}</span>
+            {/* A derived run (plan I1.3) has no events: no playhead to
+                put at a span's start. */}
+            {isDerived(doc) ? null : (
             <Button
               variant="ghost"
               size="xs"
@@ -323,6 +327,7 @@ export function SpanDetail({
             >
               ▶ replay here
             </Button>
+            )}
           </span>
         ) : null}
       </div>
@@ -339,6 +344,7 @@ export function SpanDetail({
             onJump={onJump}
             range={[span.from, rangeEnd]}
             compact
+            derived={isDerived(doc)}
           />
         ) : mode === "json" ? (
           <div className="codewin">

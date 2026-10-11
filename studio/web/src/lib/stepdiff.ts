@@ -126,6 +126,11 @@ export const CELL_REASONS: Record<CellState, string> = {
   missing: "one run has no such step",
 }
 
+/** The cost cell's reason when the server marked a side's usage not
+ * comparable (a derived run's, a pre-A1 run's, a gap's): cost follows
+ * usage, so two priced figures are not compared either. */
+export const COST_FOLLOWS_USAGE = `cost follows usage: ${CELL_REASONS.unknown}`
+
 /** list reads a list the response may have left out (a thin row, a
  * side with no request record) as none: never a throw. */
 const list = <T>(v: T[] | undefined): T[] => v ?? []

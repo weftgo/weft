@@ -355,8 +355,10 @@ a banner with the fix and one card per step from `runs/{id}/steps/{n}` —
 the `chat` span's model, usage and cost as served (priced, or "—" with
 the API's `cost_reason` when the spans reported none), its
 `execute_tool` calls badged `derived`, its request and messages blocks
-the badge; the raw view and the panel's Timeline and Raw tabs the badge
-above what they hold; the Request tab `request: derived`; the waterfall
+the badge (the panel's Story hands off: "2 steps · open in Studio ⤢",
+the run page's story at step 0); the raw view and the panel's Timeline
+and Raw tabs the badge above what they hold, with no "no events yet"
+line and no "replay here" or space-replay hint; the Request tab `request: derived`; the waterfall
 and the Timeline the real spans on the time axis (no event playhead). A
 derived source has no transcript, so the replay verbs, the editor, the
 drawer and save as test are not offered: they are drawn disabled with

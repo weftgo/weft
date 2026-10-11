@@ -799,7 +799,13 @@ function RunPage() {
             <Kbd>e</Kbd>
             <Kbd>s</Kbd>
             <Kbd>r</Kbd> views · <Kbd>j</Kbd>
-            <Kbd>k</Kbd> spans · <Kbd>space</Kbd> replay · <Kbd>[</Kbd>
+            <Kbd>k</Kbd> spans ·{" "}
+            {derived ? null : (
+              <>
+                <Kbd>space</Kbd> replay ·{" "}
+              </>
+            )}
+            <Kbd>[</Kbd>
             <Kbd>]</Kbd> step · <Kbd>n</Kbd> jump to step · <Kbd>?</Kbd> all keys
           </span>
           {stream.loading ? (

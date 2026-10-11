@@ -17,6 +17,9 @@ module, ADR 0005).
   `obsdb/model.go` and a conformance fixture set, `obsdb/testdata/contract`
   (real pipeline output; `TestContract` on SQLite, `TestContractClickHouse`
   with `WEFT_CLICKHOUSE_DSN`; the stock-GenAI case pending I1.2).
+- `obsdb.CommandStore` (plan I3.1): an optional interface beside `obsdb.Searcher` that persists the playground link's records — commands (`StoredCommand`: state, run id, public id, fork, the wire body and last ack verbatim, `Created`/`Updated`/`AcceptedAt`/`LastBeat`), run → runtime routes (`RunRoute`), per-runtime breakpoint sets (replaced whole; a stored clear is distinct from none) and runtime registrations (`StoredRuntime`, with a `Cwd` column) — with `Commands(CommandQuery)`, `CommandByRun`, `CommandTerminal`, `CheckStoredCommand`, `ErrInvalidCommand`, the five `Command*` state constants and `PruneCommands(before, keep)` (terminal rows by age and count, never a queued or accepted one; routes and stale runtimes with them). `DeleteRun`, `DeleteSession`, `Sweep` and `Vacuum` never touch these rows. Nothing uses it yet: studio/runtime's write-through is I3.2.
+- obsdb/sqlite migration 0007 (`commands`, `run_routes`, `breakpoints`, `runtimes`); obsdb/clickhouse migration 0008 (the same four as ReplacingMergeTree tables versioned by `InsertTime`, read FINAL). Both upgrade in place; the version pins read 7 and 8.
+- obsdbtest: the `Commands` and `CommandsPrune` conformance cases (skipped for a backend that is not a CommandStore), and `obsdbtest.CommandsRestart` — the restart property (a second handle on the same storage reads what the first wrote), run on a sqlite file and on ClickHouse.
 
 ### Fixed
 

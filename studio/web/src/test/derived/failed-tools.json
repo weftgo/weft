@@ -1,0 +1,6 @@
+{
+  "catalogs": [],
+  "badge": "derived",
+  "reason": "derived from spans · no events",
+  "fix": "the producer exports stock OTel GenAI spans only: emit weft's records (docs/record-contract.md) for events, the transcript and requests"
+}

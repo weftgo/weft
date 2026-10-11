@@ -816,6 +816,13 @@ function RunPage() {
         </div>
 
         <TabsContent value="trace" className="@container/trace mt-3 space-y-3">
+          {/* A derived run's trace is its spans: until they are here (or
+              if they cannot be read) the derived note stands in — never
+              the position axis's words over a fold of zero events. */}
+          {derived && !haveTime ? (
+            <DerivedNote what="trace" />
+          ) : (
+          <>
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1">
               <FlowStrip
@@ -891,6 +898,8 @@ function RunPage() {
               or press End for live
             </p>
           ) : null}
+          </>
+          )}
         </TabsContent>
         <TabsContent value="story" className="mt-3">
           {derived ? (

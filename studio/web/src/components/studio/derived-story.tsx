@@ -23,7 +23,7 @@ import { Button } from "@/components/ui/button"
 
 /** DerivedNote is the banner a pane draws in place of what a derived
  * run cannot have: the badge, its reason and its fix, in full. */
-export function DerivedNote({ what }: { what: "story" | "events" }) {
+export function DerivedNote({ what }: { what: "story" | "events" | "trace" }) {
   return (
     <div
       role="note"

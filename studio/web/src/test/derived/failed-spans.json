@@ -1,0 +1,53 @@
+{
+  "spans": [
+    {
+      "trace_id": "5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10",
+      "span_id": "1a2b3c4d5e6f7081",
+      "parent_span_id": "",
+      "name": "invoke_agent support",
+      "kind": "internal",
+      "start": "2026-10-01T10:01:00Z",
+      "end": "2026-10-01T10:01:02Z",
+      "status": "error",
+      "status_message": "agent cancelled by the user",
+      "service": "py-support",
+      "attrs": {
+        "error.type": "AgentCancelled",
+        "gen_ai.agent.name": "support",
+        "gen_ai.conversation.id": "conv_7f3a",
+        "gen_ai.operation.name": "invoke_agent",
+        "gen_ai.provider.name": "openai",
+        "gen_ai.request.model": "gpt-5",
+        "gen_ai.usage.input_tokens": 1020,
+        "gen_ai.usage.output_tokens": 25
+      },
+      "events": []
+    },
+    {
+      "trace_id": "5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10",
+      "span_id": "1a2b3c4d5e6f7082",
+      "parent_span_id": "1a2b3c4d5e6f7081",
+      "name": "chat gpt-5",
+      "kind": "client",
+      "start": "2026-10-01T10:01:00.04Z",
+      "end": "2026-10-01T10:01:01.99Z",
+      "status": "ok",
+      "status_message": "",
+      "service": "py-support",
+      "attrs": {
+        "gen_ai.conversation.id": "conv_7f3a",
+        "gen_ai.operation.name": "chat",
+        "gen_ai.provider.name": "openai",
+        "gen_ai.request.model": "gpt-5",
+        "gen_ai.response.finish_reasons": [
+          "stop"
+        ],
+        "gen_ai.response.model": "gpt-5-2025-08-07",
+        "gen_ai.usage.input_tokens": 1020,
+        "gen_ai.usage.output_tokens": 25,
+        "weft.step.index": 0
+      },
+      "events": []
+    }
+  ]
+}

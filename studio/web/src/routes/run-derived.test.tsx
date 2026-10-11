@@ -15,7 +15,7 @@ import type { RunDoc } from "@/lib/api"
 import { CAUSES, DERIVED_HOLE, derivedWords, holeWords, rowHoles } from "@/lib/honesty"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
-import { FakeStudio, golden, pagedEvents } from "@/test/fake-studio"
+import { FakeStudio, apiError, golden, pagedEvents } from "@/test/fake-studio"
 import type { FakePosEvent } from "@/test/fake-studio"
 import {
   DERIVED,
@@ -209,6 +209,39 @@ describe("a derived run's page (the Done line)", () => {
         expect(document.querySelector(sel), `${view} ${sel}`).toBeNull()
       expect(document.querySelector("[data-hole='derived']"), view).toBeNull()
     }
+  })
+})
+
+describe("the failed derived run (one step, its root span in error)", () => {
+  it("its page: failed with the error text, 1 step, the derived note; the trace its spans — no false 'did not finish'", async () => {
+    serve()
+    renderApp(`/runs/${DERIVED_FAILED}`)
+    await waitFor(() => expect(document.querySelectorAll("[data-span]").length).toBe(2))
+    const top = document.querySelector("h1")!.closest(".space-y-2\\.5")!.textContent
+    expect(top).toContain("failed")
+    expect(top).toContain("1 step")
+    expect(top).not.toContain("1 steps")
+    expect(document.body.textContent).toContain("agent cancelled by the user")
+    saysStock(document.querySelector("[data-run-holes]")!.textContent, "header")
+    for (const words of ["did not finish", "no steps yet", "past the playhead"])
+      expect(document.body.textContent, words).not.toContain(words)
+
+    renderApp(`/runs/${DERIVED_FAILED}?view=story`)
+    await waitFor(() => expect(document.querySelector("[data-step='0'] [data-derived-block='request']")).toBeTruthy())
+    expect(document.querySelectorAll("[data-derived-story] [data-step]")).toHaveLength(1)
+    expect(document.querySelector("[data-step='0']")!.textContent).toContain("error")
+    saysStock(document.querySelector("[data-derived-note='story']")!.textContent, "story")
+  })
+
+  it("spans not (yet) readable: the trace tab is the derived note, never the position axis's words", async () => {
+    serve()
+    studio.on(`GET runs/${DERIVED_FAILED}/spans`, () => apiError(500, "internal", "spans unreadable"))
+    renderApp(`/runs/${DERIVED_FAILED}`)
+    await waitFor(() => expect(document.querySelector("[data-derived-note='trace']")).toBeTruthy())
+    saysStock(document.querySelector("[data-derived-note='trace']")!.textContent, "trace note")
+    expect(document.querySelector("[data-span]")).toBeNull()
+    for (const words of ["did not finish", "no steps yet", "steps 0"])
+      expect(document.body.textContent, words).not.toContain(words)
   })
 })
 

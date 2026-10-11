@@ -35,6 +35,13 @@ const step1 = capture("step-1")
 const tools = capture("tools")
 const transcriptStep = capture("transcript-step")
 const failedStep0 = capture("failed-step-0")
+const failed = {
+  spans: capture("failed-spans"),
+  events: capture("failed-events"),
+  transcript: capture("failed-transcript"),
+  requests: capture("failed-requests"),
+  tools: capture("failed-tools"),
+}
 const runNoUsage = capture("run-nousage")
 const step0NoUsage = capture("step-0-nousage")
 
@@ -97,6 +104,12 @@ export function serveDerived(fake: FakeStudio): FakeStudio {
     .on(`GET runs/${R}/steps/1`, step1)
     .on(`GET runs/${R}/steps/2`, () => apiError(404, "not_found", `no step 2 of run ${R}`))
     .on(`GET runs/${DERIVED_FAILED}/steps/0`, failedStep0)
+    .on(`GET runs/${DERIVED_FAILED}/steps/1`, () => apiError(404, "not_found", `no step 1 of run ${DERIVED_FAILED}`))
+    .on(`GET runs/${DERIVED_FAILED}/spans`, failed.spans)
+    .on(`GET runs/${DERIVED_FAILED}/events`, failed.events)
+    .on(`GET runs/${DERIVED_FAILED}/transcript`, failed.transcript)
+    .on(`GET runs/${DERIVED_FAILED}/requests`, failed.requests)
+    .on(`GET runs/${DERIVED_FAILED}/tools`, failed.tools)
     .on(`GET runs/${R}/logs`, logs)
     .on(`GET runs/${R}/export`, (req) =>
       req.query.get("format") === "wefttest" ? jsonAt(400, exportWefttest) : { run: derivedDoc() }

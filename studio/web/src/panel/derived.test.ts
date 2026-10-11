@@ -11,7 +11,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { derivedWords } from "../lib/honesty"
 import { SAVE_TEST_LABEL } from "../lib/saves"
 import { FakeStudio } from "../test/fake-studio"
-import { DERIVED, STOCK, derivedBodies, serveDerived } from "../test/derived-fixture"
+import { DERIVED, DERIVED_FAILED, STOCK, derivedBodies, serveDerived } from "../test/derived-fixture"
 import { $, all, click, META, mount, settle, setup, teardown } from "./testkit"
 import { badgeLabel } from "./badges"
 import type { WeftDevtools } from "./element"
@@ -107,6 +107,24 @@ describe("a derived turn in the panel", () => {
     expect(u.textContent).toBe("—")
     expect(u.getAttribute("title")).toBe(reason)
     expect($(el, ".weft-turn")!.textContent).not.toContain("0→0")
+    // The header's total leaves the unknown turn out: "—", the reason its title.
+    const stats = $(el, "[data-weft-stats]")!
+    expect(stats.textContent).toBe("1 turns · — tok")
+    expect(stats.getAttribute("title")).toContain(reason)
+  })
+
+  it("the failed derived turn: one step said singular, its Request tab derived — never 'could not be read'", async () => {
+    serveDerived(new FakeStudio().on("GET meta", { ...META, capabilities: [...META.capabilities, "requests"] })).install()
+    const el = await mount({ "data-endpoint": "http://studio.test/studio/", "data-open": "true" })
+    await vi.waitFor(() => expect(all(el, ".weft-turn").length).toBe(2), { timeout: 5_000 })
+    click(all(el, ".weft-turn").find((b) => b.textContent.includes(DERIVED_FAILED)))
+    await vi.waitFor(() => expect($(el, "[data-weft-derived-handoff]")?.textContent).toBe("1 step · open in Studio ⤢"), { timeout: 5_000 })
+    const tp = await tab(el, "request")
+    await vi.waitFor(() => expect(tp.querySelector('[data-hole="derived"]')).toBeTruthy())
+    saysStock(tp.textContent, "failed request tab")
+    expect(tp.textContent).not.toContain("could not be read")
+    const tl = await tab(el, "timeline")
+    expect([...tl.querySelectorAll(".weft-wf .weft-wf-name")].map((n) => n.textContent)).toEqual(["invoke_agent support", "chat gpt-5"])
   })
 
   it("Request: the request badged derived with its reason and fix, no prompt claimed", async () => {

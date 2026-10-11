@@ -2280,10 +2280,16 @@ export class WeftDevtools extends HTMLElement {
     if (narrowing.flow)
       h.appendChild(el("span", "weft-chip weft-scope-chip", `flow ${narrowing.flow}`, { title: "the scope's flow — carried, filters nothing yet" }))
     h.appendChild(el("span", "weft-grow"))
-    const inTok = s.turns.reduce((n, r) => n + r.usage.input_tokens, 0)
-    const outTok = s.turns.reduce((n, r) => n + r.usage.output_tokens, 0)
-    const stats = `${s.turns.length}${s.turnsCapped ? "+" : ""} turns · ${tokens(inTok)}→${tokens(outTok)} tok`
-    h.appendChild(el("span", undefined, stats, { title: stats }))
+    // A derived turn whose spans reported no usage is left out of the
+    // total (its zeros are "not reported"): the total then reads "≥",
+    // or "—" when no turn's usage is known, titled with the API's reason.
+    const known = s.turns.filter((r) => !derivedUsageUnknown(r))
+    const unknown = s.turns.find((r) => derivedUsageUnknown(r))
+    const inTok = known.reduce((n, r) => n + r.usage.input_tokens, 0)
+    const outTok = known.reduce((n, r) => n + r.usage.output_tokens, 0)
+    const tok = unknown && !known.length ? "—" : `${unknown ? "≥" : ""}${tokens(inTok)}→${tokens(outTok)}`
+    const stats = `${s.turns.length}${s.turnsCapped ? "+" : ""} turns · ${tok} tok`
+    h.appendChild(el("span", undefined, stats, { title: unknown ? `${stats} — ${unknown.cost_reason ?? ""}` : stats, "data-weft-stats": "" }))
     if (s.turns.length && s.selected) {
       const a = el("a", "weft-btn", "⤢", {
         href: studioLink(this.base, s.selected, this.stepNow(s)),
@@ -3713,7 +3719,8 @@ export class WeftDevtools extends HTMLElement {
     // A derived turn (plan I1.3): no events to fold here — its steps
     // (the chat spans' usage, the tool spans) are Studio's story.
     if (this.derived(t)) {
-      const a = el("a", undefined, `${this.rowOf(t.id)?.steps ?? t.doc?.steps ?? 0} steps · open in Studio ⤢`, { href: studioLink(this.base, t.id, 0), target: "_blank", rel: "noopener", "data-weft-derived-handoff": t.id })
+      const n = this.rowOf(t.id)?.steps ?? t.doc?.steps ?? 0
+      const a = el("a", undefined, `${n} ${n === 1 ? "step" : "steps"} · open in Studio ⤢`, { href: studioLink(this.base, t.id, 0), target: "_blank", rel: "noopener", "data-weft-derived-handoff": t.id })
       wrap.appendChild(el("div", "weft-note", [a]))
     }
     const ids = this.turnLinks(t, s)

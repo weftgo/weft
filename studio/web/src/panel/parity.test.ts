@@ -990,6 +990,11 @@ describe("a derived run on both surfaces (I1.3)", () => {
     const el = await mount({ "data-endpoint": "http://studio.test/studio/", "data-open": "true" })
     await vi.waitFor(() => expect($(el, '.weft-turn [data-weft-usage="unknown"]')).toBeTruthy(), { timeout: 5_000 })
     const p = $(el, '.weft-turn [data-weft-usage="unknown"]')!
+    // The header's total leaves the unknown turn out (Studio's session
+    // and list totals read the row the same way: "—", the API's reason).
+    const stats = $(el, "[data-weft-stats]")!
+    expect(stats.textContent).toBe("1 turns · — tok")
+    expect(stats.getAttribute("title")).toContain(reason)
     el.remove()
     await settle()
     cleanup()

@@ -454,6 +454,14 @@ func TestNestedExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, p, s, rc.ID, pool.Parked)
+	// The parent's runner outlives its parked turn's Wait by a step,
+	// and that step sweeps expiry (its post-turn pickup): moved past
+	// the expiry before it ends, the clock lets the runner deny the
+	// request first, and the approval below reads "not pending"
+	// instead of ErrExpired. Let it end before the clock moves.
+	if err := s.WaitIdle(ctx); err != nil {
+		t.Fatal(err)
+	}
 
 	mu.Lock()
 	now = now.Add(2 * time.Hour)

@@ -128,9 +128,20 @@ func TestDelegateForReadsTheLedgerAfterTheMiss(t *testing.T) {
 	if rc, err := p.Wait(ctx, parent, r.ID); err != nil || rc.State != Done {
 		t.Fatalf("receipt = %+v, %v", rc, err)
 	}
+	// A registration landing after the settlement, before the lookup
+	// answers: the settled answer drops it.
+	if err := p.Register(r.Child, core.New(stubModel{})); err != nil {
+		t.Fatal(err)
+	}
 	d, err := p.delegateFor(ctx, parent, stale, "")
 	if !errors.Is(err, errSettled) || d != nil {
 		t.Fatalf("delegateFor on a delegation settled since the read = %v, %v; want errSettled", d, err)
+	}
+	p.mu.Lock()
+	n := len(p.sessionAgents)
+	p.mu.Unlock()
+	if n != 0 {
+		t.Errorf("sessionAgents after delegateFor answered settled = %d, want 0", n)
 	}
 	if err := p.Close(ctx); err != nil {
 		t.Fatal(err)
@@ -190,6 +201,20 @@ func TestRegisterAfterSettlementPruned(t *testing.T) {
 // read now sends the lookup back to the ledger, which reports it
 // settled.
 func TestRacingPumpSettlementIsNoAgentFree(t *testing.T) {
+	racingPumpSettlement(t, false)
+}
+
+// The same race where the losing pump's agent lookup succeeds — a
+// wrapped child, whose wrap-name agent no settlement drops, or a
+// registration made again in the window, as here. It used to go on to
+// install a parked delegate for the finished delegation, alive in
+// delegates and byChild for the life of the pool; a settlement of the
+// child seen at the insert now answers settled instead.
+func TestRacingPumpSettlementNotRebuilt(t *testing.T) {
+	racingPumpSettlement(t, true)
+}
+
+func racingPumpSettlement(t *testing.T, lateRegister bool) {
 	ctx := context.Background()
 	st := thread.Memory()
 	refund := core.Tool("refund", "", func(_ context.Context, _ struct{ OrderID string }) (string, error) {
@@ -223,7 +248,8 @@ func TestRacingPumpSettlementIsNoAgentFree(t *testing.T) {
 		t.Fatal(err)
 	}
 	p2 := New(1)
-	if err := p2.Register(r.Child, core.New(wefttest.Script(wefttest.Say("resumed")), refund)); err != nil {
+	resumed := core.New(wefttest.Script(wefttest.Say("resumed")), refund)
+	if err := p2.Register(r.Child, resumed); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := open.Decide(ctx, thread.Approve(open.Pending()[0].CallID)); err != nil {
@@ -241,6 +267,12 @@ func TestRacingPumpSettlementIsNoAgentFree(t *testing.T) {
 		raced = append(raced, p2.pump(ctx, open))
 		if rc, err := p2.Wait(ctx, open, r.ID); err != nil || rc.State != Done {
 			t.Errorf("the racing pump's run = %+v, %v", rc, err)
+		}
+		if lateRegister {
+			// The first pump's agent lookup now succeeds.
+			if err := p2.Register(r.Child, resumed); err != nil {
+				t.Error(err)
+			}
 		}
 	}
 	if err := p2.pump(ctx, open); err != nil {

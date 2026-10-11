@@ -202,7 +202,7 @@ func (p *Pool) settleFromLedger(ctx context.Context, parent *thread.Session, rc 
 	}
 	p.mu.Lock()
 	delete(p.sessionAgents, rc.Child)
-	p.retired++
+	p.markRetired(rc.Child)
 	p.mu.Unlock()
 	if err := parent.DenyMirrored(ctx, rc.Child, endedReason(state)); err != nil {
 		return fmt.Errorf("thread/pool: requests of ended child %s: %w", rc.Child, err)

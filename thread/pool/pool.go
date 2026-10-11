@@ -166,10 +166,11 @@ type Pool struct {
 	// children record in their header metadata.
 	sessionAgents map[string]*core.Agent
 	nameAgents    map[string]*core.Agent
-	// retired counts the settlements that retired a delegate or dropped
-	// a registration: a lookup that read the ledger before one and its
-	// registers after reads the ledger again (delegateFor).
-	retired uint64
+	// resolving holds delegateFor's in-flight marks by child session
+	// id: a settlement of a child marks the lookups running on it, so a
+	// lookup that read the ledger before the settlement never answers
+	// with its registers after.
+	resolving map[string]*lookupMark
 	// calls holds the cancels of wrapped calls running outside any
 	// session (the bare path), so Close reaches them too.
 	calls    map[uint64]context.CancelFunc
@@ -243,6 +244,7 @@ func New(max int, opts ...Option) *Pool {
 		delegates:     map[string]*delegate{},
 		byChild:       map[string]*delegate{},
 		sessionAgents: map[string]*core.Agent{},
+		resolving:     map[string]*lookupMark{},
 		nameAgents:    map[string]*core.Agent{},
 		calls:         map[uint64]context.CancelFunc{},
 	}
@@ -1065,7 +1067,7 @@ func (p *Pool) settle(ctx context.Context, d *delegate, state State, stop string
 		delete(p.byChild, d.child.ID())
 	}
 	delete(p.sessionAgents, d.child.ID())
-	p.retired++
+	p.markRetired(d.child.ID())
 	p.mu.Unlock()
 	return true
 }

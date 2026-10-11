@@ -6,8 +6,8 @@
 // meta.capabilities reports the playground (§8.5 item 3).
 import type { Manifest, RunCompaction, RunRow, ToolCallPart, Transcript, Usage } from "../lib/api"
 import { isHoleRef } from "../lib/api"
-import { DERIVED_HOLE, derivedUsageUnknown, isDerived, mergeHoles, rowHoles, statusHoles, USAGE_AT_FINISH, usageKnown } from "../lib/honesty"
-import type { HoleMark } from "../lib/honesty"
+import { appVerbWords, DERIVED_HOLE, derivedUsageUnknown, isDerived, mergeHoles, parkedKind, refusalWords, rowHoles, statusHoles, USAGE_AT_FINISH, usageKnown } from "../lib/honesty"
+import type { HoleMark, ParkedKind } from "../lib/honesty"
 import { paramsLine, REQUEST_NO_RECORD_REASON, REQUEST_NOT_STORED, shortHash } from "../lib/requests"
 import {
   allowRefusals,
@@ -68,7 +68,7 @@ import {
   DEV_LIMIT,
   PanelModel,
 } from "./state"
-import type { ChildView, PanelRequests, PanelState, TurnView } from "./state"
+import type { AppVerb, ChildView, PanelRequests, PanelState, TurnView } from "./state"
 import { foldedWords, labOf, turnPromptOf } from "./playground"
 import type { ExperimentDraft, TurnWords } from "./playground"
 import { panelStudioVersion } from "./version"
@@ -3103,15 +3103,16 @@ export class WeftDevtools extends HTMLElement {
     // Rung 3 in the panel (§8.3, review fix 4c — "all in the panel"
     // per WEFT-DEVTOOLS §10's rung-3 gate): the tools every run the
     // runtime starts parks on. Rendered only when meta reports the
-    // breakpoints capability. The rule is the runtime's: the app's own
-    // turns are not touched by it (PQ7), and the label says so.
+    // breakpoints capability. The rule is the runtime's: it parks the
+    // runs the runtime starts, and the app's own runs of an agent built
+    // with runtime.Breakpoints() (plan F4.2) — the label says so.
     // Runtime-wide, so no panel token may set it (the server token, or
     // setup A's open API).
     if (hasCapability(s, "breakpoints") && tokenScope(this.cfg.token) === "" && agent?.tools.length) {
       const brkRow = el("div", "weft-field")
       brkRow.appendChild(
         el("span", undefined, "Break on (parks every run)", {
-          title: "applies to runs this runtime starts — the app's own turns are viewer-only (PQ7)",
+          title: "applies to runs this runtime starts and the app's own runs of agents built with runtime.Breakpoints()",
         })
       )
       for (const t of agent.tools) {
@@ -3598,26 +3599,8 @@ export class WeftDevtools extends HTMLElement {
     // Rung 4 (§8.4): steer the running experiment — one user message
     // delivered mid-flight into the run the runtime holds (an ephemeral
     // run, or a fork's turn once the runtime's ack names it).
-    if (hasCapability(s, "steer") && this.canAct(s) && r.state === "accepted" && r.runID) {
-      const box = el("div", "weft-step")
-      box.appendChild(el("div", "weft-step-h", [el("span", undefined, "steer this run")]))
-      const b = el("div", "weft-step-b")
-      const input = this.field(el("input", "weft-input") as HTMLInputElement, "steer")
-      input.placeholder = "a message delivered mid-flight"
-      input.value = this.scratch.get("steer") ?? ""
-      on(input, "input", (_, n) => this.scratch.set("steer", (n as HTMLInputElement).value))
-      const send = el("button", "weft-btn", "steer", { title: "POST /api/runs/{id}/steer (ADR 0019)" })
-      on(send, "click", (_, btn) => {
-        const field = btn.parentElement?.querySelector<HTMLInputElement>("input")
-        if (!field?.value) return
-        this.go(this.model?.steer(field.value))
-        this.scratch.delete("steer")
-        field.value = ""
-      })
-      b.append(input, send)
-      box.appendChild(b)
-      body.appendChild(box)
-    }
+    if (hasCapability(s, "steer") && this.canAct(s) && r.state === "accepted" && r.runID)
+      body.appendChild(this.steerBox("steer this run", "steer", (m) => this.model?.steer(m)))
     card.appendChild(body)
     return card
   }
@@ -3647,7 +3630,12 @@ export class WeftDevtools extends HTMLElement {
    * decisions until every parked call has one, then resumes the run
    * once: the pane shows which are in and how many it still waits
    * for. A held decision can be changed until the last one lands. */
-  private decisions(pending: ToolCallPart[], decided: Record<string, string>): HTMLElement {
+  private decisions(
+    pending: ToolCallPart[],
+    decided: Record<string, string>,
+    act = (id: string, d: "approve" | "deny" | "resolve", text: string) => this.go(this.model?.decide(id, d, d === "resolve" ? text : undefined)),
+    status?: (id: string) => HTMLElement | null
+  ): HTMLElement {
     const approvals = el("div", "weft-step")
     approvals.appendChild(el("div", "weft-step-h", [el("span", undefined, "awaiting decision")]))
     const abody = el("div", "weft-step-b")
@@ -3671,32 +3659,31 @@ export class WeftDevtools extends HTMLElement {
       if (decided[call.id])
         head.appendChild(el("span", "weft-badge weft-info", `decided: ${verbs[decided[call.id]] ?? decided[call.id]}`))
       line.appendChild(head)
+      const said = status?.(call.id)
+      if (said) line.appendChild(said)
       const ctl = el("div", "weft-res")
       const key = `resolve:${call.id}`
       const paste = this.field(el("input", "weft-input weft-resolve") as HTMLInputElement, key)
-      paste.placeholder = "the result to resolve with"
+      paste.placeholder = status ? "result to resolve with · reason to skip" : "the result to resolve with"
       paste.value = this.scratch.get(key) ?? ""
       on(paste, "input", (_, n) => this.scratch.set(key, (n as HTMLInputElement).value))
-      const mk = (label: string, title: string, act: (b: HTMLElement) => void) => {
+      const mk = (label: string, title: string, fn: (b: HTMLElement) => void) => {
         const b = el("button", "weft-btn", label, { title })
-        on(b, "click", (_, n) => act(n))
+        on(b, "click", (_, n) => fn(n))
         return b
       }
+      const typed = (b: HTMLElement) => b.parentElement?.querySelector<HTMLInputElement>(".weft-resolve")
       ctl.append(
-        mk("continue", "Approve: the handler runs for real", () =>
-          this.go(this.model?.decide(call.id, "approve"))
-        ),
-        mk("skip", "Deny: the model sees a denied result", () =>
-          this.go(this.model?.decide(call.id, "deny"))
-        ),
+        mk("continue", "Approve: the handler runs for real", () => act(call.id, "approve", "")),
+        mk("skip", "Deny: the model sees a denied result", (b) => act(call.id, "deny", typed(b)?.value ?? "")),
         paste,
         mk("resolve…", "Resolve: the model sees the result typed here; the handler never runs", (b) => {
-          const field = b.parentElement?.querySelector<HTMLInputElement>(".weft-resolve")
+          const field = typed(b)
           if (!field?.value) {
             field?.focus()
             return
           }
-          this.go(this.model?.decide(call.id, "resolve", field.value))
+          act(call.id, "resolve", field.value)
         })
       )
       line.appendChild(ctl)
@@ -3773,7 +3760,12 @@ export class WeftDevtools extends HTMLElement {
         }
       )
     )
-    if (t.folded.pending.length) wrap.appendChild(this.approvals(t.folded.pending, !!row?.playground))
+    const kind = parkedKind(row ?? t.doc, s.meta?.debug_scope)
+    if (t.folded.pending.length) wrap.appendChild(this.approvals(t.id, t.folded.pending, kind, s))
+    // Steer the app's turn running now (plan F4.3): the run id is this
+    // turn's; the answer is a command, its refusal said verbatim.
+    if (kind === "decide" && this.canAct(s) && hasCapability(s, "steer") && (row?.status ?? t.doc?.status) === "running")
+      wrap.appendChild(this.steerBox("steer this turn", "app-steer", (m) => this.model?.steerApp(t.id, m), this.appSaid(s.app[`${t.id}:steer`], t.id)))
     if (this.canAct(s))
       wrap.appendChild(this.derived(t) ? el("div", "weft-actions", [refusedVerb("✎ Experiment"), refusedVerb("↻ Re-run")]) : this.actions(s))
     return wrap
@@ -3878,35 +3870,86 @@ export class WeftDevtools extends HTMLElement {
     return box
   }
 
-  /** approvals shows the open turn's parked calls read-only (§2): the
-   * decision verbs act on runs a runtime started (§8.2), from the
-   * result pane that ran them — the app's own turns are viewer-only
-   * (D7, PQ7), and the note says so. */
-  private approvals(pending: { id: string; name: string; args?: unknown }[], experiment: boolean): HTMLElement {
+  /** approvals draws the open turn's parked calls (§2). An
+   * experiment's are decided from the result pane that ran it (§8.2).
+   * The app's own turn (plan F4.3) takes the same verbs, on the same
+   * route, while meta's debug_scope is own+runtime — the app set
+   * runtime.Sessions; each verb's command is polled and its refusal
+   * said verbatim. Otherwise the verbs are drawn refused with the
+   * server's words and fix (a 403 already answered, else
+   * lib/honesty.ts's), and a plain Generate's park says the app
+   * resumes it. */
+  private approvals(runID: string, pending: ToolCallPart[], kind: ParkedKind, s: PanelState): HTMLElement {
+    const sent = (id: string): AppVerb | undefined => s.app[`${runID}:${id}`]
+    const refused = pending.map((c) => sent(c.id)).find((v) => v?.state === "refused" && v.fix)
+    if (kind === "decide" && this.canAct(s) && !refused) {
+      const decided: Record<string, string> = {}
+      for (const c of pending) if (sent(c.id)?.state === "finished") decided[c.id] = sent(c.id)!.decision ?? ""
+      return this.decisions(pending, decided, (id, d, text) => this.go(this.model?.decideApp(runID, id, d, text)), (id) => this.appSaid(sent(id), runID))
+    }
     const box = el("div", "weft-step")
     box.appendChild(el("div", "weft-step-h", [el("span", undefined, "awaiting decision (read-only)")]))
     const body = el("div", "weft-step-b")
+    const w = refusalWords(kind, refused, refused?.error)
+    const line = `${w.words} — fix: ${w.fix}`
     for (const call of pending) {
-      const line = el("div", "weft-call", undefined, { "data-key": call.id })
-      line.appendChild(
+      const row = el("div", "weft-call", undefined, { "data-key": call.id })
+      row.appendChild(
         el("div", "weft-call-h", [
           el("span", "weft-name", call.name),
           el("span", "weft-args", call.args === undefined ? "(…)" : fmtJSON(call.args)),
           el("span", "weft-badge weft-info", "parked"),
         ])
       )
-      line.appendChild(
-        el(
-          "div",
-          "weft-res",
-          experiment
-            ? "an experiment's run — its decision controls are in the result pane of the turn that ran it"
-            : "the app's own turns are viewer-only (PQ7) — decide from your app"
-        )
+      row.appendChild(
+        kind === "experiment"
+          ? el("div", "weft-res", "an experiment's run — its decision controls are in the result pane of the turn that ran it")
+          : el("div", "weft-res", ["continue", "skip", "resolve…"].map((v) => refusedVerb(v, "button", line, "app-owned")))
       )
-      body.appendChild(line)
+      body.appendChild(row)
     }
+    if (kind !== "experiment") body.appendChild(el("div", "weft-note weft-warn", line, { "data-weft-app-owned": kind }))
     box.appendChild(body)
+    return box
+  }
+
+  /** appSaid is one app-turn verb's state under its call: in flight,
+   * decided (and the resumed turn, a link that opens it), or the
+   * runtime's rejection / the route's refusal word for word. */
+  private appSaid(v: AppVerb | undefined, runID: string): HTMLElement | null {
+    if (!v) return null
+    const w = appVerbWords(v, runID)
+    const box = el("div", w.bad ? "weft-note weft-warn" : "weft-note", w.text, { "data-weft-app-verb": v.state })
+    if (w.resumed) {
+      const go = el("button", "weft-btn", `resumed as ${w.resumed}`, { "data-weft-resumed": w.resumed })
+      on(go, "click", () => this.go(this.model?.select(w.resumed!, true)))
+      box.append(" · ", go)
+    }
+    return box
+  }
+
+  /** steerBox is rung 4's box (§8.4): one message, delivered by send
+   * — the experiment's run, or the app turn running now (plan F4.3,
+   * its command's line under it). */
+  private steerBox(title: string, key: string, send: (m: string) => Promise<unknown> | undefined, said?: HTMLElement | null): HTMLElement {
+    const box = el("div", "weft-step", undefined, { [`data-weft-${key}`]: "" })
+    box.appendChild(el("div", "weft-step-h", [el("span", undefined, title)]))
+    const b = el("div", "weft-step-b")
+    const input = this.field(el("input", "weft-input") as HTMLInputElement, key)
+    input.placeholder = "a message delivered mid-flight"
+    input.value = this.scratch.get(key) ?? ""
+    on(input, "input", (_, n) => this.scratch.set(key, (n as HTMLInputElement).value))
+    const btn = el("button", "weft-btn", "steer", { title: "POST /api/runs/{id}/steer (ADR 0019)" })
+    on(btn, "click", (_, n) => {
+      const field = n.parentElement?.querySelector<HTMLInputElement>("input")
+      if (!field?.value) return
+      this.go(send(field.value))
+      this.scratch.delete(key)
+      field.value = ""
+    })
+    b.append(input, btn)
+    if (said) b.appendChild(said)
+    box.appendChild(b)
     return box
   }
 

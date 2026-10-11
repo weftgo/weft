@@ -344,8 +344,9 @@ export function putBreakpoints(
 }
 
 /** POST /api/runs/{id}/steer — the rung-4 verb (§8.4): one user
- * message delivered into a runtime-started run mid-flight. */
-export function postSteer(ep: PanelEndpoint, runID: string, message: string): Promise<{ steered: boolean }> {
+ * message delivered into a runtime-started run mid-flight; on an app
+ * turn (plan F4.3) a 202 with the command to poll. */
+export function postSteer(ep: PanelEndpoint, runID: string, message: string): Promise<{ steered?: boolean; command_id?: string }> {
   return panelPost(ep, `runs/${encodeURIComponent(runID)}/steer`, { message })
 }
 

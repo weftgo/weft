@@ -120,16 +120,16 @@ describe("the size ledger (panel-budget.json)", () => {
     expect(lines.at(-1)).toBe("total 61,898 B (60.4 KiB) of 81,920 B · headroom 20,022 B (19.6 KiB)")
   })
 
-  it("prints the full ledger's table: the minified and later unbudgeted rows net into one line, 7,636 B of headroom", () => {
-    // The whole ledger at its last row (I1.3 fixes 2, 74,284 B): the "minified" row's −7,652 B against the
-    // earlier unbudgeted rows and I1.3's +578 B is the unbudgeted line's −2.6 KiB (U+2212, not a hyphen).
-    expect(ledger.rows.at(-1)!.label).toBe("I1.3 fixes 2")
-    const { lines, over } = budgetTable(ledger, 74284)
+  it("prints the full ledger's table: the minified and later unbudgeted rows net into one line, 6,419 B of headroom", () => {
+    // The whole ledger at its last row (F4.3, 75,501 B): the "minified" row's −7,652 B against the
+    // earlier unbudgeted rows, I1.3's +578 B and F4.3's +1,217 B is the unbudgeted line's −1.4 KiB (U+2212, not a hyphen).
+    expect(ledger.rows.at(-1)!.label).toBe("F4.3")
+    const { lines, over } = budgetTable(ledger, 75501)
     expect(over).toBe(false)
     const unbudgeted = lines.find((l) => l.includes("unbudgeted")) ?? ""
-    expect(unbudgeted).toMatch(/pre-release web fixes, minified, I1\.3, I1\.3 fixes, I1\.3 fixes 2\)/)
-    expect(unbudgeted.endsWith("\u22122.6 KiB")).toBe(true)
-    expect(lines.at(-1)).toBe("total 74,284 B (72.5 KiB) of 81,920 B · headroom 7,636 B (7.5 KiB)")
+    expect(unbudgeted).toMatch(/pre-release web fixes, minified, I1\.3, I1\.3 fixes, I1\.3 fixes 2, F4\.3\)/)
+    expect(unbudgeted.endsWith("\u22121.4 KiB")).toBe(true)
+    expect(lines.at(-1)).toBe("total 75,501 B (73.7 KiB) of 81,920 B · headroom 6,419 B (6.3 KiB)")
   })
 
   it("says when the build differs from the last row, and only the cap fails", () => {

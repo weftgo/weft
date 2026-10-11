@@ -180,6 +180,25 @@ export function hiddenRefusal(): Response {
   )
 }
 
+/** The app-owned 403 (plan F4.3, studio/appturn.go's appTurnRuntime:
+ * no connected runtime of the run's service registered
+ * runtime.Sessions): the error shape with fix beside it, the words as
+ * appturn.go builds them. The verbs that do reach a runtime answer 202
+ * {command_id, state: "queued", run_id, runtime_id} and the command's
+ * row is polled (src/test/appturn-fixture.ts). */
+export function appOwnedRefusal(run: string, service = "app") {
+  return json(
+    {
+      error: {
+        code: "forbidden",
+        message: `app-owned turn · read-only: run ${run} is the app's own, and no connected runtime of its service ${service} acts on the app's sessions`,
+      },
+      fix: `set runtime.Sessions(resolver) at runtime.Install in the app (service ${service}): its turns then take approvals, steer and cancel`,
+    },
+    403
+  )
+}
+
 /** The request record's goldens (A1.3's TestRequestsRoutes and
  * friends) by variant: "ok" (a PrepareStep rewrite at step 1, a retry
  * there, the catalog grown), "stripped" (content-off), "not-recorded"

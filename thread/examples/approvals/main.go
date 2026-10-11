@@ -5,6 +5,12 @@
 // and the conversation resumes under it. The session requires signed
 // decisions, a rule its header keeps across the restart. Everything
 // offline through a scripted model; every id deterministic.
+//
+// With -serve addr the same gate runs as a small web app whose parked
+// turns are decided from the devtools panel (serve.go, plan F4): the
+// agent carries runtime.Breakpoints() and runtime.Install carries
+// runtime.Sessions(resolver) — the two opt-ins that light the panel's
+// verbs up on the app's own turns.
 package main
 
 import (
@@ -28,7 +34,15 @@ var secret = []byte("example-keyring-secret-32-bytes-ok!")
 
 func main() {
 	dir := flag.String("dir", filepath.Join(os.TempDir(), "weft-approvals-example"), "directory for the session files")
+	addr := flag.String("serve", "", "serve the panel demo on this address (e.g. 127.0.0.1:7331) instead of the walk-through")
 	flag.Parse()
+	if *addr != "" {
+		if err := serve(*addr, *dir); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(os.Stdout, *dir); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

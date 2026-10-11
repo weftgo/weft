@@ -20,6 +20,7 @@ import { createContext, useCallback, useContext, useEffect, useLayoutEffect, use
 
 import { stepQuery } from "@/lib/api"
 import { CacheHint, Cost, useCostCapable } from "@/components/studio/cost"
+import { AppSteer, ParkedCalls } from "@/components/studio/parked-calls"
 import type { RunCompaction, RunDoc, StepChild, Transcript, WireEvent } from "@/lib/api"
 import { compactionsOf, isSessionMarker } from "@/lib/compaction"
 import {
@@ -1067,18 +1068,8 @@ export function StepList({
                 : null}
         </p>
       )}
-      {view.pending.length > 0 && (
-        <div className="rounded-lg border border-ev-error/30 px-4 py-2 text-xs">
-          <span className="eyebrow">pending approval</span>
-          <ul className="mt-1 space-y-0.5">
-            {view.pending.map((p) => (
-              <li key={p.id} className="font-mono">
-                {p.name}({p.args == null ? "" : JSON.stringify(p.args)}) — awaiting a decision
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
+      {view.pending.length > 0 && <ParkedCalls doc={doc} pending={view.pending} />}
+      <AppSteer doc={doc} />
     </div>
     </StoryMemory.Provider>
   )

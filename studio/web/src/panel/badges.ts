@@ -231,12 +231,13 @@ export function turnChips(r: RunRow, label: (runId: string) => string): HTMLElem
 /** refused is a verb a derived turn cannot have (plan I1.3: no
  * transcript to replay or export — Studio refuses the source 400 with
  * the derived badge): drawn disabled, the stock_spans words its title
- * and accessible text, so the reader learns why instead of a 400. */
-export function refusedVerb(label: string, tag = "button"): HTMLElement {
-  const words = derivedWords()
+ * and accessible text, so the reader learns why instead of a 400. An
+ * app-owned turn's decision verbs (plan F4.3) are drawn the same way,
+ * with the server's refusal and fix as words, why "app-owned". */
+export function refusedVerb(label: string, tag = "button", words = derivedWords(), why = "derived"): HTMLElement {
   return el(tag, tag === "button" ? "weft-btn" : "weft-chip", [document.createTextNode(label), el("span", "weft-sr", ` — ${words}`)], {
     title: words,
-    "data-weft-refused": "derived",
+    "data-weft-refused": why,
     ...(tag === "button" ? { type: "button", disabled: "" } : { "aria-disabled": "true" }),
   })
 }

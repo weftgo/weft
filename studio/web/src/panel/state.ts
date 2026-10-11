@@ -216,6 +216,19 @@ export interface Lane {
   loading: boolean
 }
 
+/** One verb sent on an app turn (plan F4.3): sending until the 202,
+ * then the command's state (failed: finished with a failed run);
+ * refused is the route's own 403/4xx — error its message, fix the
+ * server's fix. run is the run the finished command names (a
+ * decision's resumed turn). */
+export interface AppVerb {
+  state: "sending" | "refused" | "failed" | CommandStatus["state"]
+  decision?: string
+  error?: string
+  fix?: string
+  run?: string
+}
+
 export interface PanelState {
   /** meta answered; null until then. */
   meta: Meta | null
@@ -258,6 +271,10 @@ export interface PanelState {
   /** The drawer's runtime's breakpoint set (§8.3): the stored set
    * GET /api/runtimes reports, then what PUT …/breakpoints answered. */
   breakpoints: string[]
+  /** The verbs sent on the app's own turns (plan F4.3), by
+   * "<run>:<call id>" (a decision) or "<run>:steer": the command's
+   * state as polled, a rejection's or a 403's words verbatim. */
+  app: Record<string, AppVerb>
   /** The scope subscription (or, with no public id, the fallback's
    * agent stream) is open (the live dot). */
   live: boolean
@@ -303,6 +320,7 @@ export function emptyPanelState(): PanelState {
     result: null,
     preview: null,
     breakpoints: [],
+    app: {},
     live: false,
     devAgent: "",
     devRefused: false,
@@ -1963,47 +1981,120 @@ export class PanelModel {
    * the token expired, Studio is gone) ends the poll instead of asking
    * forever. */
   private trackCommand(res: ExperimentResult) {
+    this.poll(
+      res.commandID,
+      () => this.left(res),
+      async (st) => {
+        res.state = st.state
+        res.error = st.error ?? null
+        if (st.run_id && st.run_id !== res.runID) this.followExperiment(res, st.run_id)
+        this.emit()
+        if (st.state === "finished" || st.state === "rejected" || st.state === "lost") {
+          // A decision that finished under the parked run's own id is
+          // one the runtime holds: the run resumes once, when every
+          // pending call has a decision — this one is recorded, the park
+          // stands, and the remaining calls are still to decide.
+          if (st.state === "finished" && res.deciding && !st.error) {
+            res.decided = { ...res.decided, [res.deciding.callID]: res.deciding.decision }
+          }
+          res.deciding = null
+          if (res.runID) await this.settleExperiment(res, 0)
+          return true
+        }
+        return false
+      },
+      (why) => {
+        res.state = "lost"
+        res.error = why
+        this.emit()
+      }
+    )
+  }
+
+  /** poll reads a command's lifecycle row (§10.5) every POLL_MS until
+   * row says it is over (true), the poller's owner is gone (gone), or
+   * the row cannot be read — a command a restarted Studio no longer
+   * knows, an expired token, Studio gone: lost says why, instead of
+   * asking forever. */
+  private poll(id: string, gone: () => boolean, row: (st: CommandStatus) => boolean | Promise<boolean>, lost: (why: string) => void) {
     let fails = 0
     const tick = async () => {
-      if (this.left(res)) return // replaced or discarded
+      if (gone() || this.disposed) return
       let st: CommandStatus
       try {
-        st = await fetchCommand(this.ep, res.commandID)
+        st = await fetchCommand(this.ep, id)
       } catch (err) {
-        if (this.left(res)) return
+        if (gone()) return
         const refused = err instanceof PanelApiError && [401, 403, 404, 410].includes(err.status)
         if (refused || ++fails >= POLL_FAILS) {
-          res.state = "lost"
-          res.error = refused
-            ? messageOf(err)
-            : "Studio stopped answering — the command's state is unknown"
-          this.emit()
+          lost(refused ? messageOf(err) : "Studio stopped answering — the command's state is unknown")
           return
         }
         this.after(POLL_MS, () => void tick().catch(quiet))
         return
       }
-      if (this.left(res)) return
+      if (gone()) return
       fails = 0
-      res.state = st.state
-      res.error = st.error ?? null
-      if (st.run_id && st.run_id !== res.runID) this.followExperiment(res, st.run_id)
-      this.emit()
-      if (st.state === "finished" || st.state === "rejected" || st.state === "lost") {
-        // A decision that finished under the parked run's own id is
-        // one the runtime holds: the run resumes once, when every
-        // pending call has a decision — this one is recorded, the park
-        // stands, and the remaining calls are still to decide.
-        if (st.state === "finished" && res.deciding && !st.error) {
-          res.decided = { ...res.decided, [res.deciding.callID]: res.deciding.decision }
-        }
-        res.deciding = null
-        if (res.runID) await this.settleExperiment(res, 0)
-        return
-      }
-      this.after(POLL_MS, () => void tick().catch(quiet))
+      if (!(await row(st))) this.after(POLL_MS, () => void tick().catch(quiet))
     }
     void tick().catch(quiet)
+  }
+
+  /** appVerb sends one verb on an app turn (plan F4.3) and follows its
+   * command: the 202's command polled to its end, a rejection's words
+   * kept verbatim, a 403 kept with the server's fix. A finished
+   * decision names the resumed turn; the list is read again so the
+   * turn shows (the live frames bring it too). */
+  private async appVerb(key: string, send: () => Promise<{ command_id?: string }>, decision?: string) {
+    const set = (v: AppVerb) => {
+      this.state.app = { ...this.state.app, [key]: { decision, ...v } }
+      this.emit()
+    }
+    set({ state: "sending" })
+    let out: { command_id?: string }
+    try {
+      out = await send()
+    } catch (err) {
+      const fix = err instanceof PanelApiError ? (err.body as { fix?: unknown } | null)?.fix : undefined
+      set({ state: "refused", error: messageOf(err), ...(typeof fix === "string" ? { fix } : {}) })
+      return
+    }
+    if (this.disposed) return
+    if (!out.command_id) return set({ state: "finished" })
+    this.poll(
+      out.command_id,
+      () => this.disposed,
+      (st) => {
+        const done = st.state === "finished" || st.state === "rejected" || st.state === "lost"
+        set({
+          state: st.state === "finished" && st.status === "failed" ? "failed" : st.state,
+          ...(st.error ? { error: st.error } : {}),
+          ...(st.run_id ? { run: st.run_id } : {}),
+        })
+        if (done && st.state === "finished") void this.refresh().catch(quiet)
+        return done
+      },
+      (why) => set({ state: "lost", error: why })
+    )
+  }
+
+  /** decideApp answers one parked call of an app turn (plan F4.3):
+   * the same route and verbs as an experiment's, text the deny's
+   * reason or the resolve's result. */
+  decideApp(runID: string, callID: string, decision: "approve" | "deny" | "resolve", text = "") {
+    return this.appVerb(`${runID}:${callID}`, () =>
+      postApproval(this.ep, runID, {
+        call_id: callID,
+        decision,
+        ...(decision === "deny" && text ? { reason: text } : {}),
+        ...(decision === "resolve" ? { content: text } : {}),
+      }), decision)
+  }
+
+  /** steerApp delivers one user message into the app turn running now
+   * (plan F4.3): the run id is the turn's — a newer turn is refused. */
+  steerApp(runID: string, message: string) {
+    return this.appVerb(`${runID}:steer`, () => postSteer(this.ep, runID, message))
   }
 
   /** followExperiment points the pane at one run and streams it in

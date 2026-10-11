@@ -337,9 +337,10 @@ export interface Meta {
   manifest_sources?: number
   /** Whether a Token is configured (the API reads the bearer). */
   auth_required?: boolean
-  /** What the debugger's write verbs (breakpoints, steer) may act on
-   * — "runtime-started runs" (PQ7: the app's own turns are
-   * viewer-only). */
+  /** What the debugger's write verbs (breakpoints, approvals, steer)
+   * may act on — "runtime-started runs", or "own+runtime" while a
+   * connected runtime registered runtime.Sessions or breakpoints_own
+   * (plan F4: the app's own turns too). Absent without the playground. */
   debug_scope?: string
   /** Studio's ingest policy and the latest run's content mark (B5). */
   content?: {
@@ -1802,7 +1803,8 @@ export function postFixtures(runID: string, tools: string[]) {
 /** POST /api/runs/{id}/steer — the rung-4 verb (WEFT-DEVTOOLS §8.4):
  * one user message delivered into a runtime-started run mid-flight. */
 export function postSteer(runID: string, message: string) {
-  return post<{ steered: boolean }>(`runs/${encodeURIComponent(runID)}/steer`, { message })
+  // An app turn's steer (plan F4.3) answers 202 with the command to poll.
+  return post<{ steered?: boolean; command_id?: string }>(`runs/${encodeURIComponent(runID)}/steer`, { message })
 }
 
 /** POST /api/runs/{id}/cancel's 202 (studio/cancel.go): the frame is

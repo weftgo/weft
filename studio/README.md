@@ -268,8 +268,8 @@ One script tag puts the run loop in the corner of your own page —
 Rung 1 is a viewer scoped to that conversation: the turns (parked
 shown), the step story with tool calls, usage splits, each step's
 attempts and timing ("attempt 4 of 4 · fallback to glm-b", "1.2 s ·
-ttft 180 ms"), approvals
-read-only, truncation/gap/stripped honesty, the raw JSON, a live tail,
+ttft 180 ms"), approvals (read-only — or decided from the panel on
+the app's own turns, below), truncation/gap/stripped honesty, the raw JSON, a live tail,
 ⤢ deep links into Studio, lazy subagents (one level inline, with the
 child's request line and an "open in Studio" hand-off; a grandchild is
 the hand-off only) and a spans waterfall.
@@ -1037,7 +1037,7 @@ running there, and the run the scope pins, are reported.
 | Event | `detail` | When |
 |---|---|---|
 | `run` | `{runId, status, publicId?, sessionId?, step?}` — `status` the turn list's word (`running`, `succeeded`, `failed`, `parked`, `interrupted`), `step` the run's last step ordinal the panel knows | a run starts, and each status change, once per transition |
-| `parked` | `{runId, callId, ackId, name}` — `ackId` is the id the approval names, the call id `weft.Approve`/`Deny`/`Resolve` and `POST /api/runs/{runId}/approvals` (`call_id`) take, so it equals `callId`. The app approves its own turns through its Session, `s.Decide(ctx, thread.Approve(ackId))`; the Studio route is for playground runs only (403 for a run no runtime started) | once per call a run parked on (read from its `run_finish`'s pending list) |
+| `parked` | `{runId, callId, ackId, name}` — `ackId` is the id the approval names, the call id `weft.Approve`/`Deny`/`Resolve` and `POST /api/runs/{runId}/approvals` (`call_id`) take, so it equals `callId`. The app decides its own turns through its Session, `s.Decide(ctx, thread.Approve(ackId))` — or, when it set `runtime.Sessions(resolver)` at `runtime.Install` (`meta.debug_scope` `own+runtime`), the panel and the run page decide them through `POST /api/runs/{runId}/approvals` (plan F4.3, below); otherwise the route answers 403 "app-owned turn" with the fix | once per call a run parked on (read from its `run_finish`'s pending list) |
 | `error` | `{message, runId}` | a run of the conversation failed: its error, once per run — run errors only (the panel's own trouble, Studio not answering, is a line in the panel) |
 
 The global: while a `<weft-devtools>` from the script tag is connected,
@@ -1052,6 +1052,33 @@ none. `examples/studio-local`'s page uses it: "debug this" per reply,
 "report this run" from `on("run")` and `studioLink`, and `on("parked")`
 counted into `<body data-parked-count>` (ask it about a refund: the
 turn parks on `refund_order`, a `weft.RequireApproval` tool).
+
+The app's own turns (plan F4.3). A parked turn the app started — no
+`weft.playground`, a turn of a thread session with a public id — takes
+the panel's continue / skip / resolve (the field is skip's reason or
+resolve's result) while `meta.debug_scope` reads `own+runtime`: the app
+set `runtime.Sessions(resolver)` at `runtime.Install` (and
+`runtime.Breakpoints()` on the agent, for breakpoints on its runs). The
+verbs post to the playground's own route, `POST /api/runs/{id}/approvals`;
+the 202's command is polled (`GET /api/playground/commands/{id}`) until it
+ends — "decided" with the resumed turn named (`resumed as <session>-tN`,
+a button that opens it; the turn list shows it as the session's next
+turn), or the runtime's rejection word for word (`rejected: the app is
+writing this session; fork instead`). A running app turn takes steer the
+same way, its own run id posted. Cancel is never offered on an app turn.
+Without the opt-in the block reads `awaiting decision (read-only)`: the
+verbs drawn disabled (`badges.ts`'s refused verb, `data-weft-refused="app-owned"`)
+and one line, `app-owned turn · read-only — fix: set runtime.Sessions(resolver)
+at runtime.Install in the app` — the server's own message and fix once a
+403 has answered (`lib/honesty.ts` holds the static words; a test pins
+them to `studio/appturn.go`). A plain Generate's park (no session or
+public id) reads `parked · app-owned run · the app resumes it
+(weft.Approve)` with the `thread.PublicID(...)` fix. The run page draws
+the same block under the same gate, in the same words (`parity.test.ts`).
+The demo is `thread/examples/approvals -serve`: `WEFT_ENV=dev go run
+./thread/examples/approvals -serve 127.0.0.1:7331`, ask "deploy to prod",
+decide it in the panel docked on the page (without `WEFT_ENV=dev` the
+link stays closed and the panel shows the read-only line).
 
 The scope header (plan C3, rung 2, the development rung) is set by the
 app's own handler, since `thread` has no HTTP layer: one line,
@@ -1441,7 +1468,7 @@ positioned events only:
 ![run page with the trace, light theme](screenshots/run-light.png)
 
 Sessions list a thread's turns in order with usage and the newest
-status; `/live` shows everything streaming right now (plan H6 — one `/api/live?all=1&kinds=event,run` stream opened with a grant `{"all":true}` when `/api/meta`'s `live_all` is true, the dev token or setup A's loopback: run frames add and refresh the rows, event frames keep each row's step — the newest step index, "…" while a step runs — tokens so far (input + output from step_finish usage, one figure per step index so a re-delivered frame replaces rather than adds, "≥" when the page joined mid-run) and TTFT; cost is the row's own, "—" with "running: usage arrives at run end" until the final run frame prices it; the running list seeds the rows since run frames are never backfilled; the header shows the stream's state — connecting, live, reconnecting, overflow, stopped with a retry; a reconnect resumes with `Last-Event-ID` and the footer states the bound, runs running or seen in the last hour, newest 500; a run the resume could not read gets a "could not read" `gap` badge; finished runs stay 30 s then drop unless peeked; a filter box narrows by agent or status; without `live_all` — any panel token — the page polls the running list every 5 s and says "live: polling every 5 s — the all stream needs the dev token or loopback"; under capability `cancel` a runtime-started run's row gets a cancel button — the first click arms it for 3 s, the second posts `POST /api/runs/{id}/cancel` and the row reads "cancelling…" until the run's row ends — looked for among every row, the filter aside — or 30 s pass without an end, when the button is back titled "no end seen — cancel again" (a cancel is best effort); the end is toasted as "run X cancelled · ended failed", or "run X ended <status>" when it ended otherwise, and a refusal in the server's own words; an app-owned run's button is disabled, "cancel arrives with F4", a parked run's says "parked — decide instead" and links to the run page; clicking a row or its peek button opens that run's story beside the list in a resizable pane remembered per device as split `live-peek`, its run id in `?peek=`, Escape or the close button closing it); `/traces` lists
+status; `/live` shows everything streaming right now (plan H6 — one `/api/live?all=1&kinds=event,run` stream opened with a grant `{"all":true}` when `/api/meta`'s `live_all` is true, the dev token or setup A's loopback: run frames add and refresh the rows, event frames keep each row's step — the newest step index, "…" while a step runs — tokens so far (input + output from step_finish usage, one figure per step index so a re-delivered frame replaces rather than adds, "≥" when the page joined mid-run) and TTFT; cost is the row's own, "—" with "running: usage arrives at run end" until the final run frame prices it; the running list seeds the rows since run frames are never backfilled; the header shows the stream's state — connecting, live, reconnecting, overflow, stopped with a retry; a reconnect resumes with `Last-Event-ID` and the footer states the bound, runs running or seen in the last hour, newest 500; a run the resume could not read gets a "could not read" `gap` badge; finished runs stay 30 s then drop unless peeked; a filter box narrows by agent or status; without `live_all` — any panel token — the page polls the running list every 5 s and says "live: polling every 5 s — the all stream needs the dev token or loopback"; under capability `cancel` a runtime-started run's row gets a cancel button — the first click arms it for 3 s, the second posts `POST /api/runs/{id}/cancel` and the row reads "cancelling…" until the run's row ends — looked for among every row, the filter aside — or 30 s pass without an end, when the button is back titled "no end seen — cancel again" (a cancel is best effort); the end is toasted as "run X cancelled · ended failed", or "run X ended <status>" when it ended otherwise, and a refusal in the server's own words; an app-owned run's button is disabled, "cancel is not supported on an app turn" (the runtime refuses it: thread has no per-turn cancel), a parked run's says "parked — decide instead" and links to the run page; clicking a row or its peek button opens that run's story beside the list in a resizable pane remembered per device as split `live-peek`, its run id in `?peek=`, Escape or the close button closing it); `/traces` lists
 every trace the database holds (`GET /api/traces`, capability `traces`:
 root span, service, start, duration, span count, error, the runs it
 holds linked; since/until/service chips, paged by the exact cursor and

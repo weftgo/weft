@@ -6,7 +6,7 @@
 // raw toggle, the footer — and §5.3's fail-silent mounting.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { RunRow, SessionRow } from "../lib/api"
-import { HOLES } from "../lib/honesty"
+import { APP_OWNED, APP_OWNED_FIX, HOLES } from "../lib/honesty"
 import { statusChip, studioLink, turnHoles, WeftDevtools } from "./element"
 import { fold } from "../lib/events"
 import { partitionRuns, strippedContent } from "./state"
@@ -426,7 +426,10 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     expect(main).toContain("awaiting decision (read-only)")
     expect(main).toContain("refund")
     expect(main).toContain('{"order_id":"42"}')
-    expect(main).toContain("the app's own turns are viewer-only (PQ7)")
+    // No runtime acts on the app's sessions (no debug_scope own+runtime):
+    // the verbs drawn refused, the line with the one-line fix (F4.3).
+    expect(main).toContain(`${APP_OWNED} — fix: ${APP_OWNED_FIX}`)
+    expect(all(el, '[data-weft-refused="app-owned"]')).toHaveLength(3)
   })
 
   it("the raw toggle shows the JSON of the same pages", async () => {

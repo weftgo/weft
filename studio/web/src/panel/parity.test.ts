@@ -47,6 +47,8 @@ import { studioPlaygroundLink } from "./element"
 import { drawerHandoff } from "../components/studio/replay-drawer"
 import { playgroundLink } from "../lib/links"
 import { DERIVED, STOCK as DERIVED_STOCK, derivedBodies, serveDerived } from "../test/derived-fixture"
+import { APP_PUB, CALL as APP_CALL, PARKED as APP_PARKED, PLAIN as APP_PLAIN, serveAppTurn } from "../test/appturn-fixture"
+import type { AppTurnOptions } from "../test/appturn-fixture"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -1013,4 +1015,92 @@ describe("a derived run on both surfaces (I1.3)", () => {
     expect(p.getAttribute("title")).toBe(reason)
     expect(s.getAttribute("title")).toBe(reason)
   })
+})
+
+// The app's own turns (plan F4.3): the same gate, the same verbs and
+// the same words on both surfaces. One fake (src/test/appturn-fixture.ts,
+// studio/appturn.go's shapes) per case serves the panel, then the run
+// page: what kind of block each draws (decide, read-only, plain), its
+// read-only line, its refused verbs, and — after continue — the verb's
+// line (decided · resumed as …, the rejection, the 403's line).
+describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
+  const cases: { name: string; o: AppTurnOptions; run?: string; click?: boolean }[] = [
+    { name: "own+runtime: continue decides, the resumed turn named", o: {}, click: true },
+    { name: "own+runtime: the runtime's rejection verbatim", o: { outcome: "rejected" }, click: true },
+    { name: "own+runtime: a 403 becomes the read-only line with the server's fix", o: { outcome: "refused" }, click: true },
+    { name: "runtime-started runs: read-only with the one-line fix", o: { debugScope: "runtime-started runs" } },
+    { name: "a plain Generate's park", o: {}, run: APP_PLAIN },
+  ]
+  interface Seen {
+    kind: string | null
+    line: string
+    refused: number
+    after: string
+  }
+  async function panelSeen(c: (typeof cases)[number]): Promise<Seen> {
+    serveAppTurn(new FakeStudio(), c.o).install()
+    const plain = c.run === APP_PLAIN
+    const el = await mount({ "data-endpoint": "http://studio.test/studio/", "data-open": "true", ...(plain ? {} : { "data-public-id": APP_PUB }) })
+    const id = c.run ?? APP_PARKED
+    await vi.waitFor(() => expect(all(el, ".weft-turn").some((b) => b.textContent.includes(id))).toBe(true), { timeout: 5_000 })
+    click(all(el, ".weft-turn").find((b) => b.textContent.includes(id)))
+    const callSel = `.weft-call[data-key="${APP_CALL.id}"]`
+    await vi.waitFor(() => expect($(el, callSel)).toBeTruthy(), { timeout: 5_000 })
+    await settle()
+    const done = () => $(el, `${callSel} [data-weft-app-verb]:not([data-weft-app-verb="sending"]):not([data-weft-app-verb="queued"])`) ?? $(el, "[data-weft-app-owned]")
+    if (c.click) {
+      click(button(el, "continue"))
+      await vi.waitFor(() => expect(done()).toBeTruthy(), { timeout: 5_000 })
+      await settle()
+    }
+    const owned = $(el, "[data-weft-app-owned]")
+    const seen = {
+      kind: owned?.getAttribute("data-weft-app-owned") === "plain" ? "plain" : owned ? "read-only" : "decide",
+      line: owned?.textContent ?? "",
+      refused: all(el, '[data-weft-refused="app-owned"]').length,
+      after: $(el, `${callSel} [data-weft-app-verb]`)?.textContent ?? "",
+    }
+    el.remove()
+    await settle()
+    cleanup()
+    document.body.innerHTML = ""
+    return seen
+  }
+  async function studioSeen(c: (typeof cases)[number]): Promise<Seen> {
+    stubBrowser()
+    vi.stubGlobal("scrollTo", vi.fn())
+    StudioEventSource.reset()
+    vi.stubGlobal("EventSource", StudioEventSource)
+    setStudioToken("")
+    serveAppTurn(new FakeStudio(), { studioMeta: true, ...c.o }).install()
+    renderApp(`/runs/${c.run ?? APP_PARKED}?view=story`)
+    const box = () => document.querySelector<HTMLElement>("[data-parked]")
+    // meta lands after the first paint: wait for the gate's own answer.
+    await waitFor(() => expect(box()?.getAttribute("data-parked")).toBe(c.o.debugScope ? "read-only" : c.run ? "plain" : "decide"))
+    if (c.click) {
+      const b = [...box()!.querySelectorAll("button")].find((n) => n.textContent === "continue")!
+      b.click()
+      await waitFor(() =>
+        expect(
+          box()!.querySelector('[data-app-verb]:not([data-app-verb="sending"]):not([data-app-verb="queued"])') ?? box()!.querySelector("[data-app-owned]")
+        ).toBeTruthy()
+      )
+    }
+    const owned = box()!.querySelector("[data-app-owned]")
+    const seen = {
+      kind: owned ? (owned.getAttribute("data-app-owned") === "plain" ? "plain" : "read-only") : "decide",
+      line: owned?.textContent ?? "",
+      refused: box()!.querySelectorAll('[data-refused="app-owned"]').length,
+      after: box()!.querySelector("[data-app-verb]")?.textContent ?? "",
+    }
+    cleanup()
+    return seen
+  }
+  for (const c of cases)
+    it(c.name, async () => {
+      const panel = await panelSeen(c)
+      const studio = await studioSeen(c)
+      expect(studio).toEqual(panel)
+      expect(panel.kind).toBe(c.o.debugScope || c.o.outcome === "refused" ? "read-only" : c.run ? "plain" : "decide")
+    })
 })

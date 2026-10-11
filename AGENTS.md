@@ -259,7 +259,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    `to` a path under the base, else 400),
 //    //    /panel.js (the devtools panel, WEFT-DEVTOOLS §5 — its host API, plan C4: the element's
 //    //    open/close/toggle/isOpen/scope/select/on/studioLink, window.weft.devtools while connected
-//    //    unless data-global="off", events weft:run|parked|error; its layout, plan D1: float, dock
+//    //    unless data-global="off", events weft:run|parked|error (a parked app turn is decided in the panel
+//    //    and on the run page — continue/skip/resolve, 202 + the command polled, a refusal verbatim; steer while
+//    //    it runs — when the app set runtime.Sessions, meta debug_scope own+runtime; else its verbs read
+//    //    refused, "app-owned turn · read-only" + the one-line fix, plan F4.3); its layout, plan D1: float, dock
 //    //    left|right|bottom|top, pill, hidden — data-position/data-mode/data-push (pads <html>)/
 //    //    data-z-index (--weft-z), remembered in localStorage["weft.devtools"], every key but Alt+W
 //    //    heard inside the panel only; its theme, plan D2: data-theme light|dark > the stored ◐ choice >

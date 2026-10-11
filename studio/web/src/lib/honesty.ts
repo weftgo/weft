@@ -357,3 +357,71 @@ export function usageKnown(status: string): boolean {
 
 /** USAGE_AT_FINISH is what a running child's usage reads. */
 export const USAGE_AT_FINISH = "usage at finish"
+
+// ── The app's own turns (plan F4.3) ───────────────────────────────
+// A parked run no runtime started is the app's. Its approval verbs (and
+// steer while it runs) are offered when meta's debug_scope is
+// own+runtime — a connected runtime registered runtime.Sessions (or
+// breakpoints) — and the run is a turn of a thread session with a
+// public id; they post to the playground's own routes and answer 202 +
+// a command to poll. Otherwise the verbs are drawn refused, in the
+// server's words (studio/appturn.go; appturn.test.ts pins them to it):
+// a refusal of a verb, never a hole. Cancel is never offered on an app
+// turn (the runtime refuses it: thread has no per-turn cancel).
+
+/** OWN_RUNTIME is meta.debug_scope while the app's own turns take the
+ * debugger's verbs. */
+export const OWN_RUNTIME = "own+runtime"
+/** The app-owned refusal's head, and the fix's line the static copy
+ * shows before a 403 has given the server's own (which names the
+ * service). */
+export const APP_OWNED = "app-owned turn · read-only"
+export const APP_OWNED_FIX = "set runtime.Sessions(resolver) at runtime.Install in the app"
+/** A parked run outside a thread session (a plain Generate): the app
+ * resumes it itself; the fix is the server's 403 fix word for word. */
+export const APP_RUN = "parked · app-owned run · the app resumes it (weft.Approve)"
+export const APP_RUN_FIX =
+  "run the agent through weft/thread with thread.PublicID(...): runtime.Sessions resolves a session by its public id"
+
+/** Cancel on an app turn, in the runtime's words: thread has no
+ * per-turn cancel. A cancel verb that would show on an app-owned run
+ * (/live's row) is drawn disabled with these words. */
+export const APP_CANCEL = "cancel is not supported on an app turn"
+
+/** What a parked run's calls get: an experiment's verbs (its result
+ * pane), the app turn's verbs, the app turn read-only, or a plain
+ * Generate's line. */
+export type ParkedKind = "experiment" | "decide" | "read-only" | "plain"
+
+export function parkedKind(
+  row: { playground?: boolean; session_id?: string; public_id?: string } | null | undefined,
+  debugScope: string | undefined
+): ParkedKind {
+  if (row?.playground) return "experiment"
+  if (!row?.session_id || !row.public_id) return "plain"
+  return debugScope === OWN_RUNTIME ? "decide" : "read-only"
+}
+
+/** refusalWords reads the app-owned 403's message and fix (the error
+ * shape with fix beside it); the static words when the body has none. */
+export function refusalWords(kind: ParkedKind, body?: unknown, message?: string): { words: string; fix: string } {
+  const b = body as { fix?: unknown } | null | undefined
+  if (typeof b?.fix === "string" && b.fix) return { words: message || APP_OWNED, fix: b.fix }
+  if (kind === "plain") return { words: APP_RUN, fix: APP_RUN_FIX }
+  // Sessions is set, but this bearer may not act (a read-scoped token).
+  if (kind === "decide") return { words: `${APP_OWNED}: a read-scoped token does not decide`, fix: "use a playground-scoped token" }
+  return { words: APP_OWNED, fix: APP_OWNED_FIX }
+}
+
+/** appVerbWords is one app-turn verb's line under its call, the same
+ * on both surfaces: in flight ("queued…"), "decided" (resumed: the
+ * turn the finished command names, when it is another run), or the
+ * runtime's rejection / the route's refusal word for word (bad). */
+export function appVerbWords(
+  v: { state: string; error?: string; fix?: string; run?: string },
+  runID: string
+): { text: string; bad: boolean; resumed?: string } {
+  if (v.state === "finished") return { text: "decided", bad: false, ...(v.run && v.run !== runID ? { resumed: v.run } : {}) }
+  const bad = ["refused", "rejected", "failed", "lost"].includes(v.state)
+  return { text: bad ? `${v.state}: ${v.error ?? ""}${v.fix ? ` — fix: ${v.fix}` : ""}` : `${v.state}…`, bad }
+}

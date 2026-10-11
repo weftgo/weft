@@ -22,7 +22,7 @@ import { notify } from "@/lib/notify"
 import { Cost, useCostCapable } from "@/components/studio/cost"
 import { DerivedChip, HoleBadge } from "@/components/studio/hole-badge"
 import { StatusChip, UnknownTokens } from "@/components/studio/runs-table"
-import { derivedUsageUnknown } from "@/lib/honesty"
+import { APP_CANCEL, derivedUsageUnknown } from "@/lib/honesty"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -33,8 +33,8 @@ import {
   TableRow,
 } from "@/components/ui/table"
 
-/** The disabled cancel's words on an app-owned run. */
-export const APP_RUN_CANCEL = "the app's own run: cancel arrives with F4"
+/** The disabled cancel's words on an app-owned run (plan F4.3: the runtime refuses it). */
+export const APP_RUN_CANCEL = `the app's own run: ${APP_CANCEL}`
 
 /** The ready button's title once a sent cancel saw no end in
  * CANCEL_WAIT_MS. */

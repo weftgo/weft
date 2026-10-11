@@ -14,7 +14,7 @@ RELEASE_DIR ?= studio/web/dist-release
 # reports from go.work.
 MODULES = $(shell $(GO) list -m -f '{{.Dir}}')
 
-.PHONY: build test vet fmt lint tidy generate vacuum live tools apidiff apidiff-core apidiff-all apidiff-selftest offline fuzz fuzz-thread soak-thread stress studio-build studio-bin studio-check studio-panel-asset devtools-npm devtools-vite-check
+.PHONY: build test vet fmt lint tidy generate vacuum live tools apidiff apidiff-core apidiff-all apidiff-selftest offline fuzz fuzz-thread soak-thread stress studio-build studio-bin studio-check studio-panel-asset devtools-npm devtools-vite-check mcp-check
 
 build:
 	for m in $(MODULES); do (cd $$m && $(GO) build ./...) || exit 1; done
@@ -49,6 +49,17 @@ generate:
 # Studio's database, swept (with WEFT_RETAIN set, e.g. 720h) and vacuumed — studio's tables only: $WEFT_DB, else ./.weft/weft.db.
 vacuum:
 	$(GO) run ./cmd/weft vacuum --db "sqlite://$${WEFT_DB:-.weft/weft.db}"
+
+# The phase 6 gate's third clause (plan I4.2): `weft mcp` answers "why
+# did run X fail" over stdio. Builds weft, starts a real `weft studio`
+# on a free loopback port over a scratch SQLite file (WEFT_DISCOVERY=off,
+# the discovery locations in the scratch directory), seeds it with the
+# record-contract fixtures through /v1/traces and /v1/logs, drives
+# `weft mcp` with the MCP SDK's client and prints each tool's summary
+# line, ending "MCP CHECK PASS". No model calls. Not part of `make test`:
+# it listens on a port (cmd/weft/mcp_check_test.go, tag livecheck).
+mcp-check:
+	WEFT_MODEL_REQUESTS=deny $(GO) test -tags livecheck -run '^TestMCPLiveCheck$$' -count=1 -v ./cmd/weft/
 
 # Pinned tooling — the exact versions CI installs, so a local gate and
 # the remote gate can never disagree (TODO §1.2a, the §1 pre-flight of

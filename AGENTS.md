@@ -325,7 +325,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    merges); weft mcp [--url --token] (a stdio MCP server over these read routes, read verbs
 //    //    only — runs/search/run/step/request/events/tools/diff/export/sessions/session/meta +
 //    //    explain_failure (run + step + transcript composed); every tool a GET, outputs the route's
-//    //    JSON cut at max_bytes with a note; no --url: the discovery file);
+//    //    JSON cut at max_bytes with a note; no --url: the discovery file; docs/mcp-recipe.md;
+//    //    make mcp-check — build tag livecheck, not in make test — proves it over stdio against a real
+//    //    weft studio seeded with the contract fixtures: the phase 6 gate's third clause);
 //    //    weft vacuum [--db --retain] (one sweep when a retention is given, then VACUUM
 //    //    / OPTIMIZE TABLE … FINAL; `make vacuum` on $WEFT_DB or ./.weft/weft.db); weft version.
 //    //    --retain (WEFT_RETAIN) on weft studio and weft dev is studio.Retain (under 1h: exit 2);
@@ -607,5 +609,6 @@ ignore it.
   facades; `TestFacadesAreComplete` (root) fails otherwise.
 - Docs: `README.md` (usage), `docs/adr/` (why), this file (map),
   `docs/thread-operations.md` (running `weft/thread` in production),
-  `docs/record-contract.md` (what the pipeline emits and `obsdb` reads).
+  `docs/record-contract.md` (what the pipeline emits and `obsdb` reads),
+  `docs/mcp-recipe.md` (`weft mcp` from Claude Code and Cursor).
   Update the one that applies in the same change.

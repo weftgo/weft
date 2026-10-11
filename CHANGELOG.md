@@ -11,6 +11,7 @@ module, ADR 0005).
 ### Added
 
 - cmd/weft: `weft mcp [--url] [--token]` (plan I4.1): a read-only stdio MCP server over the Studio read API — tools `runs`, `search`, `run`, `step`, `request`, `events`, `tools`, `diff`, `export` (json/jsonl/otlp), `sessions`, `session`, `meta` and `explain_failure` (run + step + transcript composed); every tool a GET, write verbs refused by construction; outputs the route's JSON cut at `max_bytes` (default 64 KiB) with a visible note; with no `--url`/`WEFT_STUDIO_URL` it reads the discovery file (`WEFT_DISCOVERY=off` skips it).
+- docs/mcp-recipe.md and `make mcp-check` (plan I4.2): the `weft mcp` recipe for Claude Code, Cursor and VS Code (setup, the question-to-tool table with worked examples from a real session, the read-only contract, tokens, limits, troubleshooting), and a build-tagged live check (`cmd/weft/mcp_check_test.go`, tag `livecheck`, not in `make test`) that starts a real `weft studio` seeded with the record-contract fixtures and drives `weft mcp` over stdio, ending `MCP CHECK PASS`.
 - core: `ParkSource(fn func(ctx context.Context) []string) Option` and
   `(*Agent).ParkSources()` (ADR 0030, plan F4.2; additive, root facade
   `weft.ParkSource`): a park set the loop reads once per run at its start

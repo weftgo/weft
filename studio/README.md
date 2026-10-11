@@ -109,7 +109,8 @@ with a note; with no `--url` it reads the discovery file). `claude mcp
 add weft -- weft mcp`; Cursor's `.cursor/mcp.json`:
 `{"mcpServers":{"weft":{"command":"weft","args":["mcp"]}}}` — the
 discovery file finds the running Studio; `--url http://127.0.0.1:7331`
-names another.
+names another. The recipe, with worked examples and troubleshooting:
+[docs/mcp-recipe.md](../docs/mcp-recipe.md).
 
 **C · hosted** — the same handler behind `studio.Token`: the panel's
 scoped tokens are HMAC-signed `{public_id, scope, exp}` minted by your

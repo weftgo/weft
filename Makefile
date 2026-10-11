@@ -14,7 +14,7 @@ RELEASE_DIR ?= studio/web/dist-release
 # reports from go.work.
 MODULES = $(shell $(GO) list -m -f '{{.Dir}}')
 
-.PHONY: build test vet fmt lint tidy generate vacuum live tools apidiff apidiff-core apidiff-all apidiff-selftest offline fuzz fuzz-thread soak-thread studio-build studio-bin studio-check studio-panel-asset devtools-npm devtools-vite-check
+.PHONY: build test vet fmt lint tidy generate vacuum live tools apidiff apidiff-core apidiff-all apidiff-selftest offline fuzz fuzz-thread soak-thread stress studio-build studio-bin studio-check studio-panel-asset devtools-npm devtools-vite-check
 
 build:
 	for m in $(MODULES); do (cd $$m && $(GO) build ./...) || exit 1; done
@@ -115,6 +115,19 @@ fuzz-thread:
 soak-thread:
 	cd thread && $(GO) test -race -count=10 -timeout 45m ./...
 	cd thread/sqlite && $(GO) test -race -count=3 -timeout 30m ./...
+
+# The loaded stress (the pre-push gate for anything concurrent): CI's
+# runner is slow and shared, so timing windows that never open on a
+# quiet workstation open there once in a few hundred runs. Two busy
+# loops beside the race-detected suites, GOMAXPROCS=2 and -cpu 1,2
+# approximate it. STRESS_PKGS and STRESS_COUNT are overridable:
+#   make stress STRESS_PKGS=./thread/pool STRESS_COUNT=100
+STRESS_PKGS ?= ./thread/... ./obsdb/sqlite ./studio/runtime ./runtime
+STRESS_COUNT ?= 10
+stress:
+	@sh -c '(while :; do :; done) & h1=$$!; (while :; do :; done) & h2=$$!; \
+	  trap "kill $$h1 $$h2 2>/dev/null" EXIT INT TERM; \
+	  GOMAXPROCS=2 $(GO) test -race -count=$(STRESS_COUNT) -cpu 1,2 -timeout 60m $(STRESS_PKGS)'
 
 # Live adapter tests behind the `live` build tag; never in CI (no keys).
 live:

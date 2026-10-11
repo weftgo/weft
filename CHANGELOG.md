@@ -445,6 +445,12 @@ module, ADR 0005).
   its header as a quoted string. Run ids are not validated on ingest, and an
   id built to close the comment could inject code into the generated test.
   An agent whose name is a Go keyword gets the package stem `replay_<name>`.
+- Studio's "save as test" skeleton writes a multi-line text (a prompt, a
+  system prompt, the final text) as a raw string only when every byte can
+  sit in one (`strconv.CanBackquote`); a text carrying a NUL or a byte-order
+  mark past its start is quoted instead. Before, `go/format` rejected the
+  generated file and `GET /api/runs/{id}/export?format=wefttest` answered
+  500 for the whole run.
 - `weft vacuum` with no database at the path refuses with "no database at
   <path> (nothing to vacuum)", exit 1, and creates nothing.
 - thread/pool: an approval recorded while a nested child was still

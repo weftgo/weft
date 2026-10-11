@@ -554,12 +554,23 @@ func (c *coster) compute(rec obsdb.RunRow) runCost {
 		}
 	}
 	if len(unpriced) > 0 {
-		del = cost{badge: badge, reason: "a subagent run is not priced: " + strings.Join(unpriced, "; ")}
+		del = cost{badge: badge, reason: notPriced("a subagent run", badge) + strings.Join(unpriced, "; ")}
 	}
 	if why := usagePending(rec); why != "" {
 		return runCost{own: cost{badge: costUnknown, reason: why, cache: cacheOf(own)}, delegated: del}
 	}
 	return runCost{own: c.table.price(rec.Provider, rec.Model, own), delegated: del}
+}
+
+// notPriced is the lead of a figure's reason when a part of it has no
+// price: an unknown part (a run still running, its end never arrived)
+// is not known yet — it has a price, its usage has not arrived — and
+// only an unpriced one is "not priced".
+func notPriced(what, badge string) string {
+	if badge == costUnknown {
+		return what + "'s cost is not known yet: "
+	}
+	return what + " is not priced: "
 }
 
 // subagents is the core Subagent children among a run's parent-linked
@@ -699,7 +710,7 @@ func (c *coster) setCost(runs []obsdb.RunRow, what string) cost {
 	}
 	if len(unpriced) > 0 {
 		out.known, out.usd = false, 0
-		out.badge, out.reason = badge, what+" is not priced: "+strings.Join(unpriced, "; ")
+		out.badge, out.reason = badge, notPriced(what, badge)+strings.Join(unpriced, "; ")
 	}
 	return out
 }

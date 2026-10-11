@@ -458,6 +458,11 @@ type destRuntime struct {
 	spanProc sdktrace.SpanProcessor
 	logProc  sdklog.Processor
 	localDB  obsdb.DB
+	// logExp is the exporter the log batch processor exports through
+	// (nil for Local, whose simple processor writes the database) —
+	// kept so a test can pin the chain's shape (the raw byte split)
+	// without depending on how a batch happens to form.
+	logExp sdklog.Exporter
 }
 
 // release shuts a built destination down outside a provider — the
@@ -572,6 +577,7 @@ func buildDest(ctx context.Context, d dest, cfg config) (_ *destRuntime, err err
 			batch = append(batch, sdklog.WithExportMaxBatchSize(rawBatchSize))
 			exp = byteSplitLogExporter{Exporter: exp, limit: rawExportBytes}
 		}
+		rt.logExp = exp
 		inner := sdklog.NewBatchProcessor(exp, batch...)
 		rt.logProc = &destProc{name: d.name, inner: inner,
 			content: content, contentC: contentCfg, noDeltas: d.noDeltas, drops: drops,

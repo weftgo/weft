@@ -845,4 +845,15 @@ func TestCostRunningChildIsUnknown(t *testing.T) {
 		t.Errorf("session with a running subagent: cost %s known %v badge %q reason %q; want null, unknown, naming running",
 			usd(sess.CostUSD), sess.CostKnown, sess.CostBadge, sess.CostReason)
 	}
+	// An unknown figure says it is not known yet, never "not priced":
+	// the running child has a price, its usage has not arrived.
+	if want := "a turn's cost is not known yet: p's subagents (a subagent run's cost is not known yet: p/0/c (running: "; !strings.HasPrefix(sess.CostReason, want) {
+		t.Errorf("session cost reason = %q, want prefix %q", sess.CostReason, want)
+	}
+	_, _, body = get(t, h, "/studio/api/runs/p")
+	var run costRow
+	decode(t, body, &run)
+	if want := "a subagent run's cost is not known yet: p/0/c (running: "; run.DelegatedCostKnown || !strings.HasPrefix(run.DelegatedCostReason, want) {
+		t.Errorf("run's delegated cost: known %v reason %q; want unknown, prefix %q", run.DelegatedCostKnown, run.DelegatedCostReason, want)
+	}
 }

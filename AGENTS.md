@@ -304,7 +304,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    window, reusable (a reconnect reuses it), each stream running until closed; a panel
 //    //    token's stream ends at its expiry with `event: expired`) — the UI shell and /panel.js are static,
 //    //    without a Token (setup A) the loopback Host is the wall and an unsafe method (not GET/HEAD/OPTIONS)
-//    //    whose Origin is neither scheme://Host nor an AllowOrigins entry, or with no Origin but
+//    //    whose Origin's host:port is not the request's Host and not an AllowOrigins entry, or with no Origin but
 //    //    Sec-Fetch-Site: cross-site, is 403 "cross-origin write refused (setup A)";
 //    //    OTLP ingest (/v1/traces, /v1/logs) carries its own IngestToken.
 //    // Setup B, any language (package cmd/weft — `go install github.com/weftgo/weft/cmd/weft@latest`;

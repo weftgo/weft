@@ -13,7 +13,7 @@
   "cost_usd": null,
   "cost_known": false,
   "cost_badge": "unknown",
-  "cost_reason": "a turn is not priced: r_stale (the run's end (run_finish or its invoke_agent span) never arrived: its usage is not recorded); r_fail (no row of the default pricing table matches wefttest/script); r_ok (no row of the default pricing table matches wefttest/script)",
+  "cost_reason": "a turn's cost is not known yet: r_stale (the run's end (run_finish or its invoke_agent span) never arrived: its usage is not recorded); r_fail (no row of the default pricing table matches wefttest/script); r_ok (no row of the default pricing table matches wefttest/script)",
   "cache": "not_reported",
   "runs": [
     {

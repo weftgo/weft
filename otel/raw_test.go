@@ -214,6 +214,61 @@ func TestRawBodiesPerDestination(t *testing.T) {
 	}
 }
 
+// The byte split is wired into every batch chain that takes raw
+// records, and only those — pinned on the chain itself, not on how a
+// batch forms (under -race emission is slow and batches stay small, so
+// TestRawBodiesBatchBoundedByBytes alone would not notice the split
+// dropped). Local has no batch chain: its simple processor writes the
+// database, with no ingest limit to respect.
+func TestRawBodiesSplitWired(t *testing.T) {
+	ctx := testCtx(t)
+	remote := func(kind destKind, name string, opts ...DestOption) dest {
+		d := newDest(kind, name)
+		d.url, d.host, d.token = "http://127.0.0.1:1", "http://127.0.0.1:1", "tok"
+		d.apply(opts)
+		return d
+	}
+	local := newDest(destLocal, "local")
+	local.path = filepath.Join(t.TempDir(), "weft.db")
+	for _, c := range []struct {
+		name  string
+		d     dest
+		raw   bool
+		split bool
+	}{
+		{"studio", remote(destStudio, "studio"), true, true},
+		{"studio without RawBodies", remote(destStudio, "studio"), false, false},
+		{"studio NoContent", remote(destStudio, "studio", NoContent()), true, false},
+		{"otlp WithContent", remote(destOTLP, "otlp", WithContent()), true, false},
+		{"datadog WithContent", remote(destDatadog, "datadog", WithContent()), true, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			rt, err := buildDest(ctx, c.d, config{rawBodies: c.raw})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer rt.release(ctx)
+			split, isSplit := rt.logExp.(byteSplitLogExporter)
+			if isSplit != c.split {
+				t.Fatalf("log exporter = %T, byte split %v; want %v", rt.logExp, isSplit, c.split)
+			}
+			if isSplit && split.limit != rawExportBytes {
+				t.Errorf("byte split limit = %d, want %d", split.limit, rawExportBytes)
+			}
+		})
+	}
+	t.Run("local", func(t *testing.T) {
+		rt, err := buildDest(ctx, local, config{rawBodies: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rt.release(ctx)
+		if rt.logExp != nil {
+			t.Errorf("Local has a batch exporter %T; want its simple processor alone", rt.logExp)
+		}
+	})
+}
+
 // End to end under dev: the Local sink stores the raw record, a
 // content-on Exporters destination beside it receives none (counted as
 // filtered), and the record shows on the Local side only.

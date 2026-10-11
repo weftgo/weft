@@ -196,9 +196,11 @@ type SessionResolver func(ctx context.Context, publicID string) (s *thread.Sessi
 //     Resolve), which resumes the turn under thread's rules (the parked
 //     turn's Next) — the resumed run is the app's run, with its own
 //     weft.session.id and weft.turn, never a playground run;
-//   - a steer is delivered only into a turn running now
-//     (thread.Session.Steer; thread.ErrNotRunning otherwise — the command
-//     finishes failed "no running turn to steer", nothing written); a
+//   - a steer is delivered only into the run it names, while that run
+//     is the turn running now (thread.Session.Steer with the command's
+//     run id; thread.ErrNotRunning otherwise — no turn running, or a
+//     newer one — and the command finishes failed "no running turn to
+//     steer for run <id> (…)" naming both runs, nothing written); a
 //     delivered steer that misses its drain point (StopWhen, a park, the
 //     run ending first) becomes a follow-up turn under ADR 0019's own
 //     rule;
@@ -211,7 +213,7 @@ type SessionResolver func(ctx context.Context, publicID string) (s *thread.Sessi
 // cannot write — another writer holds the session — is refused "the
 // app is writing this session; fork instead" and nothing is written; a
 // stale one is released and resolved once more. The claim is bounded
-// like the resolve (10 s). A session that requires signed decisions
+// like the resolve (10 s, then refused "session claim timed out"). A session that requires signed decisions
 // (thread.RequireSigned; Session.RequiresSigned) is refused before the
 // ack, "this session requires signed decisions": the runtime decides
 // unsigned only, and the app decides it with DecideSigned. A deny

@@ -555,7 +555,7 @@ func TestSentinelsAreMatchable(t *testing.T) {
 		}},
 		{"ErrNotRunning/Steer on an idle session", thread.ErrNotRunning, func(t *testing.T) error {
 			s := sentinelCreate(t, thread.Memory(), core.New(wefttest.Script()))
-			return s.Steer(sentinelCtx(t), core.User("anyone there?"))
+			return s.Steer(sentinelCtx(t), "", core.User("anyone there?"))
 		}},
 		{"core.ErrInvalidSteer/a steer that is not a user message", core.ErrInvalidSteer, func(t *testing.T) error {
 			h := sentinelHeld(t)

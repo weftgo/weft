@@ -291,13 +291,17 @@ reopened from a crash mid-turn (its prompt durable, its end never
 written, nothing running in the reopened value), turned the debugger's
 steer into a turn of its own.
 
-`thread.Session.Steer(ctx, msgs...)` is that caller's verb. Under the
-session's lock it checks that a turn is running now and, in the same
-critical section, accepts the messages exactly as a Steer-policy Send
-does on a busy session — durable queued receipts, handed to the running
-turn's next drain point. When no turn is running (idle, between turns,
-or parked at an approval boundary — a parked turn has ended) it returns
-`thread.ErrNotRunning` and writes nothing. It never starts a turn.
+`thread.Session.Steer(ctx, runID, msgs...)` is that caller's verb.
+`runID` names the run the caller means ("" accepts whichever turn is
+running — a caller that owns the session). Under the session's lock it
+checks that a turn is running now and that it is `runID`, and, in the
+same critical section, accepts the messages exactly as a Steer-policy
+Send does on a busy session — durable queued receipts, handed to the
+running turn's next drain point. When no turn is running (idle, between
+turns, or parked at an approval boundary — a parked turn has ended), or
+the running turn is another run (the user steered t1 while t2 runs), it
+returns `thread.ErrNotRunning` — naming both runs in the second case —
+and writes nothing. The call itself never starts a turn.
 
 The caveat is this ADR's own rule, unchanged: a steer `Steer` delivered
 that then misses its drain point — the turn meets StopWhen, parks, or

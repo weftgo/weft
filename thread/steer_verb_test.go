@@ -74,7 +74,9 @@ func (m *steerHeldModel) fed() string {
 }
 
 // TestSteer pins Session.Steer: into a turn running now it is
-// delivered — the model sees it, no second turn starts; on an idle
+// delivered — the model sees it, no second turn starts — with runID ""
+// (any running turn) or the running turn's own id; naming another run
+// is ErrNotRunning naming both, nothing written; on an idle
 // session, a parked one, and one reopened from what a crash mid-turn
 // leaves (a prompt with no turn end) it is ErrNotRunning and writes
 // nothing; a non-user message is refused before anything is written.
@@ -93,10 +95,10 @@ func TestSteer(t *testing.T) {
 			t.Fatal(err)
 		}
 		<-m.held
-		if err := s.Steer(ctx, core.Message{Role: core.RoleAssistant}); !errors.Is(err, core.ErrInvalidSteer) {
+		if err := s.Steer(ctx, "", core.Message{Role: core.RoleAssistant}); !errors.Is(err, core.ErrInvalidSteer) {
 			t.Errorf("a non-user steer = %v, want core.ErrInvalidSteer", err)
 		}
-		if err := s.Steer(ctx, core.User("and the refund")); err != nil {
+		if err := s.Steer(ctx, "", core.User("and the refund")); err != nil {
 			t.Fatalf("Steer into the running turn = %v", err)
 		}
 		close(m.gate)
@@ -114,6 +116,39 @@ func TestSteer(t *testing.T) {
 		}
 	})
 
+	t.Run("named run", func(t *testing.T) {
+		m := newSteerHeld()
+		s, err := thread.Create(ctx, thread.Memory(), core.New(m))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = s.Close(ctx) }()
+		turn, err := s.Send(ctx, core.User("first"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		<-m.held
+		before := len(s.Entries())
+		err = s.Steer(ctx, s.ID()+"-t9", core.User("meant for another run"))
+		if !errors.Is(err, thread.ErrNotRunning) || !strings.Contains(err.Error(), "is running "+turn.RunID()+", not "+s.ID()+"-t9") {
+			t.Fatalf("Steer naming another run = %v, want ErrNotRunning naming both runs", err)
+		}
+		if after := len(s.Entries()); after != before {
+			t.Errorf("a refused Steer wrote: %d entries, had %d", after, before)
+		}
+		if err := s.Steer(ctx, turn.RunID(), core.User("meant for this run")); err != nil {
+			t.Fatalf("Steer naming the running run = %v", err)
+		}
+		close(m.gate)
+		if _, err := turn.Wait(); err != nil {
+			t.Fatal(err)
+		}
+		_ = s.WaitIdle(ctx)
+		if fed := m.fed(); strings.Contains(fed, "meant for another run") || !strings.Contains(fed, "meant for this run") {
+			t.Errorf("the model was fed %s", fed)
+		}
+	})
+
 	t.Run("idle", func(t *testing.T) {
 		s, err := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script(wefttest.Say("hi"))))
 		if err != nil {
@@ -126,7 +161,7 @@ func TestSteer(t *testing.T) {
 		}
 		_ = s.WaitIdle(ctx)
 		before := len(s.Entries())
-		if err := s.Steer(ctx, core.User("late")); !errors.Is(err, thread.ErrNotRunning) {
+		if err := s.Steer(ctx, "", core.User("late")); !errors.Is(err, thread.ErrNotRunning) {
 			t.Fatalf("Steer on an idle session = %v, want ErrNotRunning", err)
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -150,7 +185,7 @@ func TestSteer(t *testing.T) {
 			t.Fatal(err)
 		}
 		before := len(s.Entries())
-		if err := s.Steer(ctx, core.User("while parked")); !errors.Is(err, thread.ErrNotRunning) {
+		if err := s.Steer(ctx, "", core.User("while parked")); !errors.Is(err, thread.ErrNotRunning) {
 			t.Fatalf("Steer on a parked session = %v, want ErrNotRunning", err)
 		}
 		if after := len(s.Entries()); after != before {
@@ -160,7 +195,7 @@ func TestSteer(t *testing.T) {
 
 	t.Run("crash snapshot", func(t *testing.T) {
 		s, before := midTurnSnapshot(t)
-		if err := s.Steer(ctx, core.User("anyone?")); !errors.Is(err, thread.ErrNotRunning) {
+		if err := s.Steer(ctx, "", core.User("anyone?")); !errors.Is(err, thread.ErrNotRunning) {
 			t.Fatalf("Steer on a reopened mid-turn snapshot = %v, want ErrNotRunning", err)
 		}
 		if after := len(s.Entries()); after != before {

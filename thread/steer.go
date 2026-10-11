@@ -121,21 +121,28 @@ func (s *Session) steerSource(_ context.Context, at core.SteerPoint) []core.Mess
 // Steer delivers msgs into the turn running now, exactly as Send under
 // the Steer policy does on a busy session (ADR 0019): each message is
 // accepted durably — its queued receipt entry appended and flushed — and
-// handed to the run's next drain point. The check and the acceptance
-// happen under the session's lock, with no window between them: when no
-// turn is running at that moment — the session idle, between turns, or
-// parked at an approval boundary — Steer returns ErrNotRunning and
-// writes nothing. Where Send(…, As(Steer)) on an idle session runs the
-// message as a plain turn, Steer never starts a turn of its own.
+// handed to the run's next drain point. runID names the run the caller
+// means; "" accepts whichever turn is running (a caller that owns the
+// session). The checks and the acceptance happen under the session's
+// lock, with no window between them: when no turn is running at that
+// moment — the session idle, between turns, or parked at an approval
+// boundary — or the running turn is not runID, Steer returns
+// ErrNotRunning and writes nothing. Where Send(…, As(Steer)) on an idle
+// session runs the message as a plain turn, Steer itself never starts a
+// turn.
 //
 // A delivered steer keeps ADR 0019's rule for one that misses its drain
 // point: when the running turn meets an intended end (StopWhen), parks,
 // or ends before a drain point takes it, the steer becomes a deferred
 // follow-up turn. Every message must be RoleUser (core.ErrInvalidSteer,
 // checked before anything is written); a closed session is ErrClosed.
+// "Nothing written" holds for every refusal checked before the first
+// append — ErrNotRunning, core.ErrInvalidSteer, ErrClosed; a
+// multi-message Steer whose later append fails returns that error with
+// the earlier messages already accepted (each one durable on its own).
 // It is the verb for a caller that acts on a turn it does not own — the
 // devtools debugger through weft/runtime's Sessions.
-func (s *Session) Steer(ctx context.Context, msgs ...core.Message) error {
+func (s *Session) Steer(ctx context.Context, runID string, msgs ...core.Message) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -152,6 +159,9 @@ func (s *Session) Steer(ctx context.Context, msgs ...core.Message) error {
 	}
 	if !s.busyLocked() {
 		return fmt.Errorf("%w: session %s", ErrNotRunning, s.header.ID)
+	}
+	if running := s.inFlight.RunID(); runID != "" && running != runID {
+		return fmt.Errorf("%w: session %s is running %s, not %s", ErrNotRunning, s.header.ID, running, runID)
 	}
 	for _, m := range msgs {
 		if _, err := s.steerSendLocked(ctx, m, nil); err != nil {

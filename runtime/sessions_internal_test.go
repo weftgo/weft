@@ -907,3 +907,140 @@ func TestSessionsDecisionIsTheAppsDecision(t *testing.T) {
 		}
 	}
 }
+
+// holdSecondModel answers its first call at once and holds its second
+// until gate closes (held closes once it waits); it records the user
+// texts of every call.
+type holdSecondModel struct {
+	mu    sync.Mutex
+	calls int
+	seen  []string
+	held  chan struct{}
+	gate  chan struct{}
+}
+
+func (m *holdSecondModel) Info() core.ModelInfo {
+	return core.ModelInfo{Provider: "wefttest", Name: "hold2"}
+}
+
+func (m *holdSecondModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
+	m.mu.Lock()
+	m.calls++
+	n := m.calls
+	for _, msg := range req.Messages {
+		if msg.Role != core.RoleUser {
+			continue
+		}
+		for _, p := range msg.Content {
+			if tp, ok := p.(core.TextPart); ok {
+				m.seen = append(m.seen, tp.Text)
+			}
+		}
+	}
+	m.mu.Unlock()
+	return func(yield func(core.ModelEvent, error) bool) {
+		if n == 2 {
+			close(m.held)
+			select {
+			case <-m.gate:
+			case <-ctx.Done():
+				yield(nil, ctx.Err())
+				return
+			}
+		}
+		if !yield(core.ModelTextDelta{Text: "answer"}, nil) {
+			return
+		}
+		yield(core.ModelFinish{Reason: core.StopEndTurn}, nil)
+	}
+}
+
+// TestSessionSteerNamedRunNotTheRunningOne is the re-review's probe as
+// a regression: the user steers t1 (finished) while t2 runs. The steer
+// names t1, so it is not delivered into t2: the command finishes failed
+// naming both runs, and no model call sees the text. (With Steer
+// accepting any running turn, it landed in t2's next model call and the
+// command finished succeeded.)
+func TestSessionSteerNamedRunNotTheRunningOne(t *testing.T) {
+	ctx := context.Background()
+	m := &holdSecondModel{held: make(chan struct{}), gate: make(chan struct{})}
+	s, err := thread.Create(ctx, thread.Memory(), core.New(m), thread.PublicID("pub_named"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close(ctx) }()
+	t1, _ := s.Send(ctx, core.User("first"))
+	if _, err := t1.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	t2, _ := s.Send(ctx, core.User("second"))
+	<-m.held
+
+	f := newFakeStudio(t)
+	ts := httptest.NewServer(f.handler())
+	t.Cleanup(ts.Close)
+	newSessionsLink(t, ts.URL, func(context.Context, string) (*thread.Session, func(), error) { return s, nil, nil })
+	f.frames <- sessionFrame(sessionCommand{CommandID: "cmd_named", Verb: verbSteer, PublicID: "pub_named",
+		SessionID: s.ID(), RunID: t1.RunID(), Message: "meant for t1"})
+	f.waitAck(t, 2)
+	close(m.gate)
+	if _, err := t2.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	_ = s.WaitIdle(ctx)
+	f.mu.Lock()
+	fin := f.acks[1]
+	f.mu.Unlock()
+	want := refusedNoTurn + " for run " + t1.RunID() + " (session " + s.ID() + " is running " + t2.RunID() + ", not " + t1.RunID() + ")"
+	if fin.State != "finished" || fin.Status != "failed" || fin.Error != want {
+		t.Errorf("finished ack = %+v\nwant failed %q", fin, want)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, text := range m.seen {
+		if text == "meant for t1" {
+			t.Errorf("a model call saw the steer meant for t1: %v", m.seen)
+		}
+	}
+}
+
+// blockingLease is a Storage whose lease never answers: Acquire waits
+// for its context — a backend's lock stuck behind a dead holder.
+type blockingLease struct{ thread.Storage }
+
+func (blockingLease) Acquire(ctx context.Context, _ string, _ any) (int, time.Time, error) {
+	<-ctx.Done()
+	return 0, time.Time{}, ctx.Err()
+}
+
+func (blockingLease) Yield(context.Context, string, any) error { return nil }
+
+// TestSessionClaimTimeout: a Claim bounded by the resolve's deadline
+// that hits it is refused in its own words, "session claim timed out" —
+// not the context's "context deadline exceeded" — before any ack.
+func TestSessionClaimTimeout(t *testing.T) {
+	ctx := context.Background()
+	st := thread.Memory()
+	app, turn, callID := parkedSession(t, st)
+	if err := app.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	stuck, err := thread.Open(ctx, blockingLease{st}, app.ID(), core.New(wefttest.Script()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func(d time.Duration) { sessionResolveTimeout = d }(sessionResolveTimeout)
+	sessionResolveTimeout = 50 * time.Millisecond
+	f := newFakeStudio(t)
+	ts := httptest.NewServer(f.handler())
+	t.Cleanup(ts.Close)
+	newSessionsLink(t, ts.URL, func(context.Context, string) (*thread.Session, func(), error) { return stuck, nil, nil })
+	f.frames <- decideFrame("cmd_stuck", stuck, turn, callID, "approve")
+	f.waitAck(t, 1)
+	f.mu.Lock()
+	a := f.acks[0]
+	f.mu.Unlock()
+	if a.State != "rejected" || a.Error != "session claim timed out" {
+		t.Errorf("ack = %+v, want rejected %q", a, "session claim timed out")
+	}
+}

@@ -129,7 +129,7 @@ func (l *link) dispatchSession(ctx context.Context, sc sessionCommand) {
 	case verbSteer:
 		// Delivered only into the turn running now; never a turn of its
 		// own (thread.ErrNotRunning otherwise, nothing written).
-		err = s.Steer(actx, core.User(sc.Message))
+		err = s.Steer(actx, sc.RunID, core.User(sc.Message))
 	}
 	stopBeat()
 	if err != nil {
@@ -141,7 +141,9 @@ func (l *link) dispatchSession(ctx context.Context, sc sessionCommand) {
 			// the refusal's.
 			text = refusedLocked
 		case errors.Is(err, thread.ErrNotRunning):
-			text = fmt.Sprintf("%s (session %s is not running a turn)", refusedNoTurn, sc.SessionID)
+			// thread's words name the session and, for a newer turn, both
+			// runs: "session S is running <t2>, not <t1>".
+			text = fmt.Sprintf("%s for run %s (%s)", refusedNoTurn, sc.RunID, strings.TrimPrefix(err.Error(), thread.ErrNotRunning.Error()+": "))
 		}
 		slog.Warn("weft/runtime: session command failed", "command_id", sc.CommandID,
 			"session", sc.SessionID, "verb", sc.Verb, "err", err)
@@ -221,6 +223,9 @@ func (l *link) resolveSession(ctx context.Context, sc sessionCommand) (s *thread
 			// Studio's ack window.
 			cctx, cancel := context.WithTimeout(ctx, sessionResolveTimeout)
 			err = s.Claim(cctx)
+			if err != nil && errors.Is(cctx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
+				err = errClaimTimeout // its own words, not "context deadline exceeded"
+			}
 			cancel()
 		}
 		switch {
@@ -239,8 +244,13 @@ func (l *link) resolveSession(ctx context.Context, sc sessionCommand) (s *thread
 	}
 }
 
-// errResolverTimeout is a resolver call that outlived its bound.
-var errResolverTimeout = errors.New("session resolver timed out")
+// errResolverTimeout is a resolver call that outlived its bound;
+// errClaimTimeout a Session.Claim that did (a backend's lock that never
+// answered).
+var (
+	errResolverTimeout = errors.New("session resolver timed out")
+	errClaimTimeout    = errors.New("session claim timed out")
+)
 
 // callResolver is one bounded SessionResolver call (resolveModel's
 // shape): canceled after sessionResolveTimeout, abandoned at the bound

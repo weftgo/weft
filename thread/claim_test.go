@@ -3,12 +3,14 @@ package thread_test
 import (
 	"context"
 	"errors"
+	"path/filepath"
 	"testing"
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/jsonl"
+	"github.com/weftgo/weft/thread/sqlite"
 )
 
 // Claim is the first write's lease check asked ahead of it: the writer
@@ -23,6 +25,20 @@ func TestClaim(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		testClaim(t, st)
+	})
+	// The lock-row backend thread-operations §4 calls different: its
+	// cross-instance lock is a row, not a file lock.
+	t.Run("sqlite", func(t *testing.T) {
+		st, err := sqlite.Open(filepath.Join(t.TempDir(), "s.db"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			if c, ok := st.(interface{ Close() error }); ok {
+				_ = c.Close()
+			}
+		})
 		testClaim(t, st)
 	})
 }

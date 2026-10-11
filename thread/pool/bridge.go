@@ -193,7 +193,21 @@ func (p *Pool) park(ctx context.Context, d *delegate) error {
 	if d.wrapper != "" {
 		d.resolve = true
 	}
+	// A Close that ran while this child was parking took it for a
+	// running one — canceled its context, left its session open — and
+	// its census of parked children is done. Close what Close would
+	// have: the session's writer lease must not outlive the pool, or
+	// the process that resumes the child finds it locked. Under the
+	// same lock Close sets closed by, so exactly one of them closes it.
+	closing := p.closed
 	p.mu.Unlock()
+	if closing {
+		if err := d.child.Close(context.WithoutCancel(ctx)); err != nil {
+			d.agent.Logger().Warn("thread/pool: parked child session not closed",
+				"child", d.child.ID(), "receipt", d.receipt, "err", err)
+		}
+		return nil
+	}
 	// The mirrors were decidable before the phase read parked: a
 	// decision recorded in between met a pump that saw the run still
 	// in flight and left it — and no later pump comes unless someone

@@ -604,6 +604,79 @@ func TestPanicInSettleRetires(t *testing.T) {
 	}
 }
 
+// Close closes the session of a child parked at an approval, letting
+// its writer lease go for the process that resumes it. A child still
+// parking when Close ran — its requests mirrored and its parked receipt
+// written, its phase not yet parked — was taken for a running one:
+// Close canceled its context (nothing to cancel: the turn had ended),
+// the park completed, and nobody closed the session. Its lease outlived
+// the pool, and the next process's resume failed with "session is
+// locked by another writer" (TestRacingPumpSettlementNotRebuilt in the
+// nightly soak, whose restart closes the old pool as soon as the
+// mirror lands). park now closes the child itself when it finds the
+// pool closed as it reaches parked.
+func TestCloseWhileParkingReleasesTheChild(t *testing.T) {
+	ctx := context.Background()
+	st := thread.Memory()
+	refund := core.Tool("refund", "", func(_ context.Context, _ struct{ OrderID string }) (string, error) {
+		return "refunded", nil
+	}, core.RequireApproval())
+	p := New(1)
+	closed := make(chan error, 1)
+	p.testHookParking = func(*delegate) {
+		// Close inside the window, and hold the park until it has
+		// marked the pool closed and taken its census of parked
+		// children (the drain then waits for this run).
+		go func() { closed <- p.Close(ctx) }()
+		for {
+			p.mu.Lock()
+			c := p.closed
+			p.mu.Unlock()
+			if c {
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	s, _ := thread.Create(ctx, st, core.New(wefttest.Script()))
+	r, err := p.Submit(ctx, s, core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"2"}`}),
+	), refund), "refund order 2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := <-closed; err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if rc, _ := lookup(s, r.ID); rc.State != Parked {
+		t.Fatalf("receipt after the close = %+v, want parked", rc)
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// The next process: the child resumes under a new pool.
+	open, err := thread.Open(ctx, st, s.ID(), core.New(wefttest.Script()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p2 := New(1)
+	if err := p2.Register(r.Child, core.New(wefttest.Script(wefttest.Say("resumed")), refund)); err != nil {
+		t.Fatal(err)
+	}
+	if err := p2.Decide(ctx, open, thread.Approve(open.Pending()[0].CallID)); err != nil {
+		t.Fatal(err)
+	}
+	wctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	rc, err := p2.Wait(wctx, open, r.ID)
+	if err != nil || rc.State != Done || rc.Stop != "resumed" {
+		t.Fatalf("the resume after the restart = %+v, %v; want done \"resumed\" (the old pool's child kept its lease)", rc, err)
+	}
+	if err := p2.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A decision can land while the child is parking: its requests are
 // mirrored, the parked receipt written, but the phase still reads the
 // run in flight. Every pump there — the deciding Decide's own, the
@@ -757,6 +830,13 @@ func TestStaleParkReplayRefused(t *testing.T) {
 	), refund)
 	parent, _ := thread.Create(ctx, thread.Memory(), core.New(wefttest.Script()))
 	var parking, arming atomic.Int32
+	// armed closes once the hook's pump has armed the resume: the
+	// test's Wait starts only then, so it watches the resume's run, not
+	// the first park's — it returns at the re-park while the hook still
+	// holds the first park's arm, and the test goes on to decide the new
+	// call and run the child to its end inside that hold (the ordering
+	// CI hit when the test goroutine was slow to reach Wait).
+	armed := make(chan struct{})
 	p.testHookParking = func(d *delegate) {
 		if parking.Add(1) != 1 {
 			return
@@ -784,10 +864,15 @@ func TestStaleParkReplayRefused(t *testing.T) {
 		if err := p.pump(ctx, parent); err != nil {
 			t.Errorf("pump: %v", err)
 		}
+		close(armed)
+		// Re-parked is parks reaching 2, which only grows; the phase
+		// is no witness — Wait returns at the re-park, the test decides
+		// the new call and the child runs on and settles, all while
+		// this hook still holds the first park's arm.
 		deadline := time.Now().Add(5 * time.Second)
 		for {
 			p.mu.Lock()
-			reparked := d.phase == phaseParked && d.parks == 2
+			reparked := d.parks >= 2
 			p.mu.Unlock()
 			if reparked {
 				return
@@ -803,6 +888,7 @@ func TestStaleParkReplayRefused(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	<-armed
 	rc, err := p.Wait(ctx, parent, r.ID)
 	if err != nil || rc.State != Parked {
 		t.Fatalf("receipt after the re-park = %+v, %v; want parked", rc, err)

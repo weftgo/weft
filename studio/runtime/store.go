@@ -31,12 +31,14 @@ import (
 // never overlaps a Put (the ClickHouse caveat on
 // obsdb.CommandStore.PruneCommands is honoured by construction). A
 // failed or timed-out call trips a breaker: for the pause (storeBreakerPause)
-// the writer holds the queue — still coalescing per key — and then
-// re-applies all of it, the failed write included; one WARN when it
-// first trips (and again only after a write has succeeded since), Debug
-// otherwise. Close drains what is queued, bounded: a store down longer
-// than that bound loses the writes still held (one WARN naming how many
-// keys) — the only way a row goes absent. A store failure changes nothing a command does: its
+// the writer holds the queue — still coalescing per key, bounded by the
+// live keys and a cap of 2×maxCommands keys (past it the oldest finished
+// rows' writes go, said once) — and then re-applies all of it, the
+// failed write included; one WARN when it first trips (and again only
+// after a write has succeeded since), Debug otherwise. Close ends the
+// pause and drains the queue once, bounded: a store still failing when
+// the Studio stops loses the writes still held (one WARN names how
+// many) — the only way a row goes absent. A store failure changes nothing a command does: its
 // fate is decided in memory exactly as without a store — observability
 // never changes behaviour.
 //
@@ -90,7 +92,8 @@ import (
 // took (AGENTS.md 7a — an accepted ack Studio did not take runs
 // nothing). The store may lag the memory (a write still queued, or held
 // by the breaker, when Studio stopped), and that only ever makes a row
-// read older than it was — absent only for what Close's bound dropped:
+// read older than it was — absent only for what a Close over a still-
+// failing store, or the queue's cap, dropped:
 // a queued row that was accepted, an accepted one with an older beat. The older beat is decided lost
 // sooner, never re-run; the stale queued row reaches no process but the
 // one it was queued for, which dedupes by command id. The two holes left
@@ -187,7 +190,7 @@ func (rs *RuntimeServer) saveCommandLocked(row *commandRow) {
 	if row.Source != nil {
 		sc.SourceRunID = row.Source.RunID
 	}
-	rs.writer.put(writeKey{"command", sc.ID}, func(ctx context.Context, st obsdb.CommandStore) error {
+	rs.writer.put(writeKey{"command", sc.ID}, obsdb.CommandTerminal(sc.State), func(ctx context.Context, st obsdb.CommandStore) error {
 		return st.PutCommand(ctx, sc)
 	})
 }
@@ -206,7 +209,7 @@ func (rs *RuntimeServer) saveRouteLocked(runID, commandID string) {
 		Fork:      rs.runFork[runID],
 		Seen:      rs.runSeen[runID],
 	}
-	rs.writer.put(writeKey{"route", runID}, func(ctx context.Context, st obsdb.CommandStore) error {
+	rs.writer.put(writeKey{"route", runID}, true, func(ctx context.Context, st obsdb.CommandStore) error {
 		return st.PutRoute(ctx, r)
 	})
 }
@@ -217,7 +220,7 @@ func (rs *RuntimeServer) saveBreakpointsLocked(id string, tools []string) {
 		return
 	}
 	set := append([]string{}, tools...)
-	rs.writer.put(writeKey{"breakpoints", id}, func(ctx context.Context, st obsdb.CommandStore) error {
+	rs.writer.put(writeKey{"breakpoints", id}, false, func(ctx context.Context, st obsdb.CommandStore) error {
 		return st.PutBreakpoints(ctx, id, set)
 	})
 }
@@ -247,9 +250,18 @@ func (rs *RuntimeServer) saveRuntimeLocked(id string, c *connected) {
 		Body:       body,
 	}
 	c.stored = c.lastSeen
-	rs.writer.put(writeKey{"runtime", id}, func(ctx context.Context, st obsdb.CommandStore) error {
+	rs.writer.put(writeKey{"runtime", id}, false, func(ctx context.Context, st obsdb.CommandStore) error {
 		return st.PutRuntime(ctx, r)
 	})
+}
+
+// forgetLocked drops the writer's pending write of a row the memory
+// prune removed, so the queue is bounded by the live keys. Caller holds
+// mu.
+func (rs *RuntimeServer) forgetLocked(kind, id string) {
+	if rs.writer != nil {
+		rs.writer.forget(writeKey{kind, id})
+	}
 }
 
 // pruneStoreLocked bounds the store by the memory's rule, at most once
@@ -260,7 +272,7 @@ func (rs *RuntimeServer) pruneStoreLocked(now, cutoff time.Time) {
 		return
 	}
 	rs.lastStorePrune = now
-	rs.writer.put(writeKey{"prune", ""}, func(ctx context.Context, st obsdb.CommandStore) error {
+	rs.writer.put(writeKey{"prune", ""}, false, func(ctx context.Context, st obsdb.CommandStore) error {
 		_, err := st.PruneCommands(ctx, cutoff, maxCommands)
 		return err
 	})
@@ -317,7 +329,7 @@ func (rs *RuntimeServer) load() {
 	if rs.store == nil {
 		return
 	}
-	rs.writer = newStoreWriter(rs.store, rs.breakerPause)
+	rs.writer = newStoreWriter(rs.store, rs.breakerPause, rs.maxHeld)
 	ctx, cancel := context.WithTimeout(context.Background(), storeLoadTimeout)
 	defer cancel()
 	now := rs.now()
@@ -528,42 +540,57 @@ type storeWrite func(ctx context.Context, st obsdb.CommandStore) error
 // storeWriter applies a RuntimeServer's writes to its store on one
 // goroutine, in order, off the server's mutex: put only queues. The
 // queue holds the latest write per key at the key's first place in the
-// line, so it is bounded by the keys live at once, never by traffic.
-// Each call is bounded at storeCallTimeout. A failed call trips the
-// breaker: the write goes back to the head of its key (unless a newer
-// one is queued), and for the pause nothing is dequeued — the queue
-// keeps coalescing — then everything held is applied in order. A write
-// that fails after the pause trips it again, so a dead store holds the
-// queue instead of spinning on it. Only Close's bound running out drops
-// what is held (one WARN naming how many keys): the one way a stored
-// row can end up absent rather than older.
+// line, and the memory prune forgets the keys of what it prunes, so it
+// is bounded by the live keys — and by maxHeld besides: past it the
+// oldest droppable keys go first (a terminal command's row, a route —
+// load rebuilds a route from its command), never a queued or accepted
+// command's, a runtime's or a breakpoint set's; one WARN with the count,
+// then Debug. Each call is bounded at storeCallTimeout. A failed call
+// trips the breaker: the write goes back to the head of the line (a
+// newer write of its key, queued meanwhile, moves to the head in its
+// place), and for the pause nothing is dequeued — the queue keeps
+// coalescing — then everything held is applied in order. A write that
+// fails after the pause trips it again, so a dead store holds the queue
+// instead of spinning on it. Close ends the pause at once and applies
+// the queue once: a call failing then, or Close's bound running out,
+// drops what is left (one WARN naming how many keys) — the one way a
+// stored row can end up absent rather than older.
 type storeWriter struct {
 	store   obsdb.CommandStore
 	timeout time.Duration
 	pause   time.Duration
+	maxHeld int
 
 	mu       sync.Mutex
 	order    []writeKey
-	pending  map[writeKey]storeWrite
+	pending  map[writeKey]pendingWrite
 	busy     bool // a write is in flight
 	stopping bool
 	abandon  bool
+	capped   int // keys dropped by the cap (the WARN said once)
 	wake     chan struct{}
 	done     chan struct{}
 
 	// The breaker (the writer goroutine's own state): nothing is
-	// dequeued until openUntil; healthy is whether the last call
-	// succeeded (a trip from healthy WARNs, any other Debugs).
+	// dequeued until openUntil, unless stopping; healthy is whether the
+	// last call succeeded (a trip from healthy WARNs, any other Debugs).
 	openUntil time.Time
 	healthy   bool
 }
 
-func newStoreWriter(st obsdb.CommandStore, pause time.Duration) *storeWriter {
+// pendingWrite is a queued write and whether the cap may drop it.
+type pendingWrite struct {
+	fn        storeWrite
+	droppable bool
+}
+
+func newStoreWriter(st obsdb.CommandStore, pause time.Duration, maxHeld int) *storeWriter {
 	w := &storeWriter{
 		store:   st,
 		timeout: storeCallTimeout,
 		pause:   pause,
-		pending: map[writeKey]storeWrite{},
+		maxHeld: maxHeld,
+		pending: map[writeKey]pendingWrite{},
 		wake:    make(chan struct{}, 1),
 		done:    make(chan struct{}),
 		healthy: true,
@@ -581,8 +608,9 @@ func (w *storeWriter) signal() {
 }
 
 // put queues fn under key, replacing a write of that key not yet
-// applied (in its place in the line). Never blocks on the store.
-func (w *storeWriter) put(key writeKey, fn storeWrite) {
+// applied (in its place in the line). droppable says the cap may drop
+// it. Never blocks on the store.
+func (w *storeWriter) put(key writeKey, droppable bool, fn storeWrite) {
 	w.mu.Lock()
 	if w.stopping {
 		w.mu.Unlock()
@@ -591,52 +619,122 @@ func (w *storeWriter) put(key writeKey, fn storeWrite) {
 	if _, queued := w.pending[key]; !queued {
 		w.order = append(w.order, key)
 	}
-	w.pending[key] = fn
+	w.pending[key] = pendingWrite{fn: fn, droppable: droppable}
+	w.capLocked()
 	w.mu.Unlock()
 	w.signal()
 }
 
-// requeue puts a failed write back at the head of the line, unless a
-// newer write of its key was queued meanwhile (that one supersedes it).
-func (w *storeWriter) requeue(key writeKey, fn storeWrite) {
+// capLocked drops the oldest droppable keys while the queue is over
+// maxHeld. Caller holds w.mu.
+func (w *storeWriter) capLocked() {
+	over := len(w.order) - w.maxHeld
+	if w.maxHeld <= 0 || over <= 0 {
+		return
+	}
+	kept := w.order[:0]
+	dropped := 0
+	for _, key := range w.order {
+		if dropped < over && w.pending[key].droppable {
+			delete(w.pending, key)
+			dropped++
+			continue
+		}
+		kept = append(kept, key)
+	}
+	w.order = kept
+	if dropped == 0 {
+		return
+	}
+	first := w.capped == 0
+	w.capped += dropped
+	if first {
+		slog.Warn("studio/runtime: the command store writer's queue is full; dropping the oldest finished rows' writes",
+			"dropped", dropped, "cap", w.maxHeld,
+			"hint", "the store has been failing for a long time; those rows read older (or absent) after a restart")
+		return
+	}
+	slog.Debug("studio/runtime: the command store writer's queue is full; dropped writes", "dropped", dropped, "total", w.capped)
+}
+
+// forget drops key's pending write (the memory prune removed its row).
+func (w *storeWriter) forget(key writeKey) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if _, queued := w.pending[key]; !queued {
+		return
+	}
+	delete(w.pending, key)
+	for i, k := range w.order {
+		if k == key {
+			w.order = append(w.order[:i], w.order[i+1:]...)
+			break
+		}
+	}
+}
+
+// requeue puts a failed write back at the head of the line. When a
+// newer write of its key was queued meanwhile, that one supersedes it
+// and is moved to the head instead — so the keys queued behind the
+// failed write (its command's route) still apply after it.
+func (w *storeWriter) requeue(key writeKey, pw pendingWrite) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if _, newer := w.pending[key]; newer {
-		return
+		for i, k := range w.order {
+			if k == key {
+				w.order = append(w.order[:i], w.order[i+1:]...)
+				break
+			}
+		}
+	} else {
+		w.pending[key] = pw
 	}
 	w.order = append([]writeKey{key}, w.order...)
-	w.pending[key] = fn
 }
 
 // next takes the next write; false when the writer is stopping with an
 // empty queue, or told to abandon it.
-func (w *storeWriter) next() (writeKey, storeWrite, bool) {
+func (w *storeWriter) next() (writeKey, pendingWrite, bool) {
 	for {
 		w.mu.Lock()
 		w.busy = false
 		if w.abandon || (w.stopping && len(w.order) == 0) {
 			w.mu.Unlock()
-			return writeKey{}, nil, false
+			return writeKey{}, pendingWrite{}, false
 		}
 		if len(w.order) > 0 {
 			key := w.order[0]
 			w.order = w.order[1:]
-			fn := w.pending[key]
+			pw := w.pending[key]
 			delete(w.pending, key)
 			w.busy = true
 			w.mu.Unlock()
-			return key, fn, true
+			return key, pw, true
 		}
 		w.mu.Unlock()
 		<-w.wake
 	}
 }
 
-// hold waits out an open breaker; false when told to abandon meanwhile.
+// state reads the stop flags.
+func (w *storeWriter) state() (stopping, abandon bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.stopping, w.abandon
+}
+
+// hold waits out an open breaker — unless the writer is stopping, when
+// it returns at once (Close's drain does not wait out the pause); false
+// when told to abandon.
 func (w *storeWriter) hold() bool {
 	for {
+		stopping, abandon := w.state()
+		if abandon {
+			return false
+		}
 		d := time.Until(w.openUntil)
-		if d <= 0 {
+		if stopping || d <= 0 {
 			return true
 		}
 		t := time.NewTimer(d)
@@ -644,12 +742,6 @@ func (w *storeWriter) hold() bool {
 		case <-t.C:
 		case <-w.wake:
 			t.Stop()
-		}
-		w.mu.Lock()
-		abandon := w.abandon
-		w.mu.Unlock()
-		if abandon {
-			return false
 		}
 	}
 }
@@ -661,25 +753,30 @@ func (w *storeWriter) run() {
 		if !w.hold() {
 			return
 		}
-		key, fn, ok := w.next()
+		key, pw, ok := w.next()
 		if !ok {
 			return
 		}
-		if err := w.apply(key, fn); err != nil {
-			w.requeue(key, fn)
+		if err := w.apply(key, pw.fn); err != nil {
+			w.requeue(key, pw)
+			if stopping, _ := w.state(); stopping {
+				// Close's drain: the store is still failing, so what is
+				// left is dropped now rather than at the bound.
+				return
+			}
 		}
 	}
 }
 
-// dropHeld reports what an abandoned writer leaves unwritten.
+// dropHeld reports what a stopped writer leaves unwritten.
 func (w *storeWriter) dropHeld() {
 	w.mu.Lock()
 	n := len(w.order)
-	w.order, w.pending = nil, map[writeKey]storeWrite{}
+	w.order, w.pending = nil, map[writeKey]pendingWrite{}
 	w.mu.Unlock()
 	if n > 0 {
 		slog.Warn("studio/runtime: the command store writer stopped with writes still held; they are dropped",
-			"keys", n, "hint", "the store was unavailable longer than Close's drain bound")
+			"keys", n, "hint", "the store was still failing when the Studio stopped")
 	}
 }
 

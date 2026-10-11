@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -20,6 +21,11 @@ type blipStore struct {
 	obsdb.CommandStore
 	mu       sync.Mutex
 	failNext bool
+	// failOn, when set, blips the first write it matches instead (once);
+	// block, when set, holds that failing call until it is closed.
+	failOn   func(what string) bool
+	block    chan struct{}
+	failing  chan struct{} // closed when the matched call is in flight
 	failedAt time.Time
 	landed   []time.Time
 	order    []string // "command:<id>:<state>:<run>" | "route:<run>" | …
@@ -27,15 +33,30 @@ type blipStore struct {
 
 func (b *blipStore) gate(what string) error {
 	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.failNext {
-		b.failNext = false
+	if b.failNext || (b.failOn != nil && b.failOn(what)) {
+		b.failNext, b.failOn = false, nil
 		b.failedAt = time.Now()
+		block, failing := b.block, b.failing
+		b.mu.Unlock()
+		if failing != nil {
+			close(failing)
+		}
+		if block != nil {
+			<-block
+		}
 		return errors.New("blip")
 	}
+	defer b.mu.Unlock()
 	b.landed = append(b.landed, time.Now())
 	b.order = append(b.order, what)
 	return nil
+}
+
+// tripped reports whether the blip happened.
+func (b *blipStore) tripped() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return !b.failedAt.IsZero()
 }
 
 func (b *blipStore) PutCommand(ctx context.Context, c obsdb.StoredCommand) error {
@@ -73,6 +94,18 @@ func (b *blipStore) PruneCommands(ctx context.Context, before time.Time, keep in
 	return b.CommandStore.PruneCommands(ctx, before, keep)
 }
 
+// waitTrip waits for b's blip.
+func waitTrip(t *testing.T, b *blipStore) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for !b.tripped() {
+		if time.Now().After(deadline) {
+			t.Fatal("the blip never happened")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // TestStoreBreaker: one failed store call holds the writer's queue for
 // the pause — nothing reaches the store meanwhile, the queue still
 // coalescing — and then every key's latest write lands, the failed one
@@ -97,19 +130,7 @@ func TestStoreBreaker(t *testing.T) {
 	reg := regBody("rt_b")
 	reg.Instance = "inst_b"
 	register(t, h, reg)
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		blip.mu.Lock()
-		tripped := !blip.failedAt.IsZero()
-		blip.mu.Unlock()
-		if tripped {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the blip never happened")
-		}
-		time.Sleep(time.Millisecond)
-	}
+	waitTrip(t, blip)
 	// Inside the pause from here on: the whole lifecycle.
 	r, closeStream := subscribe(t, rs, ts.URL, "rt_b", "")
 	defer closeStream()
@@ -252,6 +273,33 @@ func TestRouteAfterCommand(t *testing.T) {
 	ci, ri := slices.Index(order, "command:"+cmd.CommandID+":accepted:pg_o"), slices.Index(order, "route:pg_o")
 	if ci < 0 || ri < 0 || ci > ri {
 		t.Fatalf("write order = %v, want the accepted command before its route", order)
+	}
+
+	// Under a blip: the command's write fails while a newer one (a
+	// heartbeat) is queued behind its route — the newer write moves to
+	// the head, so the command still lands before the route.
+	cmd2 := mustEnqueue(t, rs, "rt_o", Command{Agent: "acme-support", PublicID: "pub_o"})
+	nextRun(t, r)
+	flush(t, rs)
+	rs.writer.pause = 100 * time.Millisecond
+	blip.mu.Lock()
+	blip.failOn = func(what string) bool { return strings.HasPrefix(what, "command:"+cmd2.CommandID+":accepted") }
+	blip.block, blip.failing = make(chan struct{}), make(chan struct{})
+	failing, block := blip.failing, blip.block
+	blip.order = nil
+	blip.mu.Unlock()
+	ack(t, rs, Ack{CommandID: cmd2.CommandID, State: "accepted", RunID: "pg_o2"})
+	<-failing                                                                     // the command's write is in flight, failing; its route waits behind it
+	ack(t, rs, Ack{CommandID: cmd2.CommandID, State: "accepted", RunID: "pg_o2"}) // a heartbeat: newer write, queued after the route
+	close(block)
+	waitTrip(t, blip)
+	flush(t, rs)
+	blip.mu.Lock()
+	order = append([]string{}, blip.order...)
+	blip.mu.Unlock()
+	ci, ri = slices.Index(order, "command:"+cmd2.CommandID+":accepted:pg_o2"), slices.Index(order, "route:pg_o2")
+	if ci < 0 || ri < 0 || ci > ri {
+		t.Fatalf("write order under a blip = %v, want the command before its route", order)
 	}
 	rs.Close()
 

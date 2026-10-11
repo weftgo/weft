@@ -46,10 +46,12 @@ module, ADR 0005).
   writer goroutine — the hot path only queues (the latest write per key;
   the prune a queue item, never beside a Put), each store call bounded at
   2 s, a failure tripping a 30 s breaker that holds the queue (still
-  coalescing per key) and then re-applies it, the failed write included
-  (one WARN, then Debug); Close drains the queue, bounded — a store down
-  longer than that bound loses the writes still held, with a WARN naming
-  how many keys — and loaded back on a Studio
+  coalescing per key, capped at 20 000 keys — past it the oldest finished
+  rows' and routes' writes go, said once) and then re-applies it, the
+  failed write included (one WARN, then Debug); Close ends the pause and
+  drains the queue once, bounded — a store still failing when the Studio
+  stops loses the writes still held (one WARN names how many) — and loaded
+  back on a Studio
   restart: a restarted Studio lists its runtimes (`restored: true`,
   `connected: false`, for at least 10 min after the load) with their
   breakpoints, answers pre-restart commands, decides `lost` from the

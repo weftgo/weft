@@ -679,6 +679,9 @@ type RuntimeServer struct {
 	// failed store call (storeBreakerPause; a field so a test can
 	// shorten it).
 	breakerPause time.Duration
+	// maxHeld caps the writer's queue in keys (2×maxCommands; a field
+	// so a test can lower it).
+	maxHeld int
 }
 
 // connected is one registered runtime and its live command stream.
@@ -744,6 +747,7 @@ func New(opts ...Option) *RuntimeServer {
 		now:             time.Now,
 		pruneStoreEvery: storePruneEvery,
 		breakerPause:    storeBreakerPause,
+		maxHeld:         2 * maxCommands,
 	}
 	for _, o := range opts {
 		if o != nil {
@@ -1917,6 +1921,7 @@ func (rs *RuntimeServer) pruneLocked() {
 		if terminal(row) && row.updated.Before(cutoff) {
 			rs.stopTimersLocked(row)
 			delete(rs.commands, id)
+			rs.forgetLocked("command", id)
 		}
 	}
 	if over := len(rs.commands) - maxCommands; over > 0 {
@@ -1930,6 +1935,7 @@ func (rs *RuntimeServer) pruneLocked() {
 		for _, row := range done[:min(over, len(done))] {
 			rs.stopTimersLocked(row)
 			delete(rs.commands, row.CommandID)
+			rs.forgetLocked("command", row.CommandID)
 		}
 	}
 	liveRun := map[string]bool{}
@@ -1948,6 +1954,7 @@ func (rs *RuntimeServer) pruneLocked() {
 			delete(rs.runs, run)
 			delete(rs.runPub, run)
 			delete(rs.runFork, run)
+			rs.forgetLocked("route", run)
 		}
 	}
 	linger := rs.FinishDeadline

@@ -356,6 +356,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //         runtime.Limits(runtime.Budget{MaxTokensPerExperiment: 200_000}),
 //         runtime.AllowSideEffects("send_email"), runtime.Threads(store),
 //         runtime.ModelResolver(resolve))() // a model outside Models: the app's func(ctx, name) decides, before the ack
+//     runtime.Sessions(resolve) // opt-in (plan F4): func(ctx, publicID) (*thread.Session, release, error) — the app's own turns take approvals/steer/cancel through the app's Session; the lease is claimed before the ack (ErrLocked → "the app is writing this session; fork instead"); registration sessions:true, meta.debug_scope own+runtime; without it the three verbs are 403 "app-owned turn" + fix
 //     // WEFT_ENV=dev (or runtime.Enabled(true)) opens the link; with no Studio option
 //     // and no otel Studio destination it dials the discovery file's Studio (block 6's
 //     // rule: WEFT_STUDIO_URL wins, WEFT_DISCOVERY=off, stale ignored); commands ack
@@ -417,7 +418,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    thread.As(p) per Send; queued sends and steers are receipt entries, durable at acceptance —
 //    s.Queue(), s.ClearQueue(ctx) (their Turns end ErrDropped), s.Continue(ctx) runs what Open restored.
 //    Tree: s.Context(), s.Entries(), s.Path(id), s.Branch(ctx, id[, thread.SummarizeLeft()]), s.Fork(ctx,
-//    id), s.Label, s.SetInfo (rejects "weft." keys), s.Custom, s.CustomMessage, s.Pin.
+//    id), s.Label, s.SetInfo (rejects "weft." keys), s.Custom, s.CustomMessage, s.Pin; s.Claim(ctx) (the writer lease now, no write: ErrLocked / ErrStale / ErrClosed).
 //    Compaction (ADR 0020): thread.ContextWindow(n) arms it; s.Compact(ctx[, thread.SummaryInstructions(
 //    "…")]), s.PreviewCompaction, s.ApplyCompaction, s.Uncompact; thread.NoAutoCompact(), SummaryModel,
 //    ClearOldToolResults(n), BeforeCompact (thread.Proceed() | Cancel() | Replace(c)); overflow re-runs once.

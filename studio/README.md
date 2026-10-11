@@ -1145,12 +1145,16 @@ command's own context, never kills, and the run ends failed with `context
 canceled` and its partial transcript, its command finished failed; the
 live stream carries the failed run row (a cancelled run has no run_finish).
 202 `{run_id, command_id, runtime_id, state: "cancelling"}`; 404 an unknown
-run; 409 the app's own run (cancel arrives with F4) or one already finished
+run; 403 "app-owned turn" the app's own run with no Sessions runtime (plan F4.1, the paragraph below), 409 one already finished
 (a parked run answers 409 "decide its pending calls instead"); 503 its
 runtime is disconnected; best effort — a cancel lost to a stream reconnect
 is not retried, cancel again. Auth is steer's:
 the dev token or setup A's loopback, a playground-scoped panel token inside
-its public id; a read panel token is 403. The Live page derives a running
+its public id; a read panel token is 403.
+
+The app's own turns (plan F4.1). A run no runtime started is the app's: its approvals, steer and cancel go through a connected runtime of the run's service (the run row's `service`, the registration's `service`) installed with `runtime.Sessions(resolver)` — `/api/runtimes` reports it as `"sessions": true`, and `meta.debug_scope` reads `"own+runtime"` while one is connected. The route then forwards the verb as an `event: session` command (`{command_id, verb: decide|steer|cancel, public_id, session_id, run_id, call_id?, decision?, reason?, content?, message?, actor?}`, addressed by the run row's `weft.public_id` and `weft.session.id`) and answers **202** `{command_id, state: "queued", run_id, runtime_id}` at once; the client polls `GET /api/playground/commands/{id}`. The runtime claims the app's Session writer lease before it acks, so its refusals arrive on the row as `state: "rejected"` with `error`: `the app is writing this session; fork instead` (another writer holds the session — nothing written), `no session for this public id`, `no running turn to steer (…)`, `cancel is not supported on an app turn` (thread has no per-turn cancel), or the resolver's / thread's own error (an unsigned decision on a `thread.RequireSigned` session fails with thread's error, after the ack, as `finished`/`failed`). A decision's finished ack names the resumed turn (`<session>-tN`, the app's run — never `weft.playground`). Without such a runtime the three verbs answer alike, **403** `{"error":{"code":"forbidden","message":"app-owned turn · read-only: …"},"fix":"set runtime.Sessions(resolver) at runtime.Install in the app …"}`; a run that is not a turn of a thread session with a public id is 403 "app-owned turn" with the fix `thread.PublicID(...)`. Identity rules are every playground verb's: the dev token or setup A loopback; a playground panel token inside its own public id (another's 403); a read token 403.
+
+The Live page derives a running
 row from the event frames it already receives: step = the last
 step_finish's index, tokens = the sum of step_finish usage, TTFT = its
 ttft_ms; cost stays unknown while running. The panel's experiment drawer (the §3 form, the live result

@@ -150,6 +150,7 @@ Consequences for a deployment:
   with the one it loaded. It catches a writer that appended behind it
   and a session deleted and re-created under the same id; it is not a
   content comparison of the entries.
+- `s.Claim(ctx)` asks the lease question ahead of a write: it takes the lease for this Session (nil for the holder), or fails `ErrLocked` / `ErrStale` / `ErrClosed` and changes nothing — weft/runtime's `Sessions` asks it before acking a debugger's decision.
 - **A Session someone forgot to close** holds its lease for the life
   of the process. `st.(thread.Releaser).Release(ctx, id)` ends the
   hold whoever has it — the escape hatch, to be used only when that

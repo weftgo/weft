@@ -1,0 +1,78 @@
+{
+  "case": "session_turns",
+  "description": "two turns of a thread session created with thread.PublicID: run ids <session>-t<n>, weft.session.id, weft.public_id and weft.turn on every record and span",
+  "runs": [
+    {
+      "id": "s_01M4NT0PS4XY74C62H96V3ZSEQ-t1",
+      "trace_id": "baad17fb46fc031bdf59cfe0ba2346e7",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "s_01M4NT0PS4XY74C62H96V3ZSEQ",
+      "public_id": "pub_contract",
+      "turn": 1,
+      "started": "2026-10-01T09:03:00Z",
+      "finished": "2026-10-01T09:03:00.000123624Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "message_count": 2,
+      "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "request_count": 1,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": []
+    },
+    {
+      "id": "s_01M4NT0PS4XY74C62H96V3ZSEQ-t2",
+      "trace_id": "aeadbaa1541802611e85ebc73055de96",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "s_01M4NT0PS4XY74C62H96V3ZSEQ",
+      "public_id": "pub_contract",
+      "turn": 2,
+      "started": "2026-10-01T09:03:00.000199508Z",
+      "finished": "2026-10-01T09:03:00.000309066Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "message_count": 2,
+      "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "request_count": 1,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": []
+    }
+  ]
+}

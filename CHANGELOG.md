@@ -8,6 +8,16 @@ module, ADR 0005).
 
 ## Unreleased
 
+### Added
+
+- Docs: `docs/record-contract.md`, the record contract as one spec — the
+  identity chain, every `weft.*` span attribute and log-record kind, the
+  GenAI semconv mapping, the run row a reader derives and the rules for
+  deriving a run from stock GenAI spans (devtools plan I1.1) — pinned by
+  `obsdb/model.go` and a conformance fixture set, `obsdb/testdata/contract`
+  (real pipeline output; `TestContract` on SQLite, `TestContractClickHouse`
+  with `WEFT_CLICKHOUSE_DSN`; the stock-GenAI case pending I1.2).
+
 ### Fixed
 
 - Studio's playground: an outside navigate (Back, Forward, a link followed while the page is open) adopted into an untouched form no longer counts as the reader's edit — its draft is not saved and no `?exp=` REPLACE is written back 400 ms later (G2: an outside navigate writes nothing back).

@@ -585,5 +585,6 @@ ignore it.
 - After changing core's exported API, `make generate` regenerates the
   facades; `TestFacadesAreComplete` (root) fails otherwise.
 - Docs: `README.md` (usage), `docs/adr/` (why), this file (map),
-  `docs/thread-operations.md` (running `weft/thread` in production).
+  `docs/thread-operations.md` (running `weft/thread` in production),
+  `docs/record-contract.md` (what the pipeline emits and `obsdb` reads).
   Update the one that applies in the same change.

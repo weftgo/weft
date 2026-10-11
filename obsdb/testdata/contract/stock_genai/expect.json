@@ -1,0 +1,96 @@
+{
+  "case": "stock_genai",
+  "description": "a stock OpenTelemetry GenAI app (no weft.* attribute anywhere): two invoke_agent traces sharing gen_ai.conversation.id, the first with two chat spans and one execute_tool, the second failed. Each root invoke_agent span is one derived run (docs/record-contract.md, \"Deriving a run from stock spans\"): no events, transcript or request records, badged derived.",
+  "pending": "I1.2",
+  "derived": true,
+  "runs": [
+    {
+      "id": "otel-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7",
+      "derived": true,
+      "trace_id": "4bf92f3577b34da6a3ce929d0e0e4736",
+      "service": "py-support",
+      "agent": "support",
+      "provider": "openai",
+      "model": "gpt-5",
+      "session_id": "conv_7f3a",
+      "started": "2026-10-01T10:00:00Z",
+      "finished": "2026-10-01T10:00:03.2Z",
+      "status": "succeeded",
+      "steps": 2,
+      "usage": {
+        "input_tokens": 1717,
+        "output_tokens": 78
+      },
+      "message_count": 0,
+      "request_count": 0,
+      "chat": [
+        {
+          "step": 0,
+          "model": "gpt-5",
+          "response_model": "gpt-5-2025-08-07",
+          "finish_reason": "tool_calls",
+          "input_tokens": 812,
+          "output_tokens": 41,
+          "status": "ok"
+        },
+        {
+          "step": 1,
+          "model": "gpt-5",
+          "response_model": "gpt-5-2025-08-07",
+          "finish_reason": "stop",
+          "input_tokens": 905,
+          "output_tokens": 37,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "lookup_order",
+          "call_id": "call_abc",
+          "step": 0,
+          "seq": 1,
+          "status": "ok"
+        }
+      ],
+      "holes": [
+        "derived"
+      ]
+    },
+    {
+      "id": "otel-5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10-1a2b3c4d5e6f7081",
+      "derived": true,
+      "trace_id": "5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10",
+      "service": "py-support",
+      "agent": "support",
+      "provider": "openai",
+      "model": "gpt-5",
+      "session_id": "conv_7f3a",
+      "started": "2026-10-01T10:01:00Z",
+      "finished": "2026-10-01T10:01:02Z",
+      "status": "failed",
+      "error": "agent cancelled by the user",
+      "steps": 1,
+      "usage": {
+        "input_tokens": 1020,
+        "output_tokens": 25
+      },
+      "message_count": 0,
+      "request_count": 0,
+      "chat": [
+        {
+          "step": 0,
+          "model": "gpt-5",
+          "response_model": "gpt-5-2025-08-07",
+          "finish_reason": "stop",
+          "input_tokens": 1020,
+          "output_tokens": 25,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": [
+        "derived"
+      ]
+    }
+  ]
+}

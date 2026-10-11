@@ -1,0 +1,40 @@
+{
+  "case": "pre_upgrade",
+  "description": "the plain run as a weft before ADR 0028 wrote it: no request, prompt or tools records and no weft.instructions.hash — the not_recorded reading of ADR 0028 §10's table",
+  "runs": [
+    {
+      "id": "4c51bc9a9ae6e77e06f25dc67ff6431c",
+      "trace_id": "14f51317d4f13eef991fb7c0e739071b",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "started": "2026-10-01T09:08:00Z",
+      "finished": "2026-10-01T09:08:00.000158751Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "message_count": 2,
+      "request_count": 0,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": [
+        "not_recorded"
+      ]
+    }
+  ]
+}

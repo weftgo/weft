@@ -1,0 +1,59 @@
+{
+  "case": "content_off",
+  "description": "the tool_calls run through a content-off destination (otel.OTLP's default): event bodies stripped (weft.content = stripped), no messages, prompt or tools records, request records kept with their hashes",
+  "runs": [
+    {
+      "id": "1f620eee8a310555892855d1fbf7f77d",
+      "trace_id": "2e92493157e980a1aed38f06c3f9d23d",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "started": "2026-10-01T09:05:00Z",
+      "finished": "2026-10-01T09:05:00.000199829Z",
+      "status": "succeeded",
+      "steps": 2,
+      "stop_reason": "stop",
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "message_count": 0,
+      "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "catalog_hash": "d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8",
+      "request_count": 2,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        },
+        {
+          "step": 1,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "lookup_order",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "ok"
+        }
+      ],
+      "holes": [
+        "stripped"
+      ]
+    }
+  ]
+}

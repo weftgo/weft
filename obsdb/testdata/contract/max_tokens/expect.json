@@ -1,0 +1,41 @@
+{
+  "case": "max_tokens",
+  "description": "a step that finished on the output token limit: weft.run.stop_reason = max_tokens, gen_ai.response.finish_reasons [max_tokens], the max_tokens badge",
+  "runs": [
+    {
+      "id": "3719f15366816e0079656cb33970efbe",
+      "trace_id": "a9c46a7bfdf47b174f5b9293a519b423",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "started": "2026-10-01T09:06:00Z",
+      "finished": "2026-10-01T09:06:00.00024226Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "max_tokens",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "message_count": 2,
+      "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "request_count": 1,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "max_tokens",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": [
+        "max_tokens"
+      ]
+    }
+  ]
+}

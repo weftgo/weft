@@ -1,0 +1,57 @@
+{
+  "case": "tool_calls",
+  "description": "two steps: a tool call (execute_tool lookup_order) then the answer",
+  "runs": [
+    {
+      "id": "3ce363332c548062702d56f15ddc2f77",
+      "trace_id": "cd21f136d17a92b2d07575fe52f7e85d",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "started": "2026-10-01T09:01:00Z",
+      "finished": "2026-10-01T09:01:00.000523644Z",
+      "status": "succeeded",
+      "steps": 2,
+      "stop_reason": "stop",
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "message_count": 4,
+      "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "catalog_hash": "d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8",
+      "request_count": 2,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        },
+        {
+          "step": 1,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "lookup_order",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "ok"
+        }
+      ],
+      "holes": []
+    }
+  ]
+}

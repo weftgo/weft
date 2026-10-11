@@ -1,0 +1,40 @@
+{
+  "case": "interrupted",
+  "description": "a process that died inside a tool call: what it had exported by then (no invoke_agent span, no run_finish), so the status is derived interrupted from a stale last-seen",
+  "runs": [
+    {
+      "id": "114b7be1bdf677693ab75bae13ea4c06",
+      "trace_id": "b385162638941df4fd2605eabf813a74",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "started": "2026-10-01T09:07:00Z",
+      "status": "interrupted",
+      "steps": 0,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
+      "message_count": 2,
+      "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "catalog_hash": "d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8",
+      "request_count": 1,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": [
+        "interrupted"
+      ]
+    }
+  ]
+}

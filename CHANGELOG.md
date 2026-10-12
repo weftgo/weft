@@ -10,9 +10,53 @@ module, ADR 0005).
 
 ### Fixed
 
+- obsdb: an identity value sent empty is no value on both backends —
+  `MetaOf` drops an empty string (a `weft.session.parent = ""` is not in
+  the row's `meta`), and `ResolvePublicID("")` is `ErrNotFound` (it
+  resolved the newest session whose turns carried no public id).
+
 - studio (web): the shell's `GET /api/runtimes` poll costs what the page needs (0.15.1 debt): every 5 s only while a surface needs the runtimes now — the playground, the open replay drawer, an experiment's run controls, a parked or running app turn's block (`useRuntimesNeeded`, one shared signal; their own observers still carry no interval) — and otherwise a quiet poll doubling per read that changed nothing, 5 s up to 60 s, back to 5 s on a change in the list, a key or pointer press, or a surface letting go of the runtimes; never while the tab is hidden. "Changed" is the runtimes' state, not the JSON: a connected runtime's `last_seen`, advanced by its stream's 15 s keep-alive, is no change. A quiet page reads it 4 times in two minutes, not 24, whether or not a runtime is connected; a runtime's toast on a quiet page comes up to a minute late.
 - studio (web): the run page's parked block no longer flickers `checking` under a failed meta read: the failure is held in the query cache until meta answers (`lib/query.ts`'s `heldError`), so a block mounted again, or a refetch with its second of retry backoff, reads the failure throughout; `checking` only before the first answer. The capability pages' failed-meta line (`useCapabilities`) reads the same held failure.
 - studio (web): the touched sources are `prettier`-clean (`src/components/studio`, `src/hooks`, `src/lib`, `src/panel`, `src/routes`, `src/test`; the captured `src/test/derived/*.json` bodies left byte for byte); the panel badge scan in `badges.test.ts` follows a badge call wrapped over three lines. The panel bundle is byte-identical.
+
+### Changed
+
+- core: a metadata pair with an empty value means "none" (`Metadata`,
+  `WithMetadata`; additive, no API change): it removes the key the run
+  would otherwise inherit from its parent run or a `WithMetadata`
+  context, is never stored, never on a span or record, and is not
+  counted in `weft.metadata.dropped`. Pairs without an empty value
+  inherit exactly as before; reporting only, nothing model-visible
+  (`TestMetadataEmptyValueRemovesInherited`).
+- thread: a session's run carries its own identity, never an
+  enclosing run's: every key a session owns — `weft.public_id`,
+  `weft.session.forked_from`, `weft.session.parent`,
+  `weft.session.parent_call` — is stamped with the session's value, or
+  `""` (none) when it has none. A session created without
+  `thread.PublicID` whose `Send` runs inside another session's tool
+  handler no longer reads as that session's turn (Studio scoped it to
+  the enclosing public id, the panel offered its verbs, and the
+  runtime refused them: "the session resolver answered session s for
+  public id pub_s, not the run's session s2"); a session's turn sent
+  from inside a pool child's turn no longer reads as a pool child. A
+  plain `Generate` in the same handler still inherits every pair (it is
+  the enclosing turn's work). The session's keys win over a caller's
+  `thread.RunOptions(weft.Metadata(...))` as before, now including the
+  ones it has no value for: a thread session's public id is
+  `thread.PublicID`'s alone.
+- obsdb: `SessionQuery.PublicID` scopes the runs before the grouping
+  (a `WHERE`, both backends — it was a `HAVING MAX(public_id)` over the
+  whole session): a session is listed when one of its turns carries
+  the public id, and its turns, usage, first/last seen, agent, status,
+  the page's order, `Total` and the cursor are those turns' alone; a
+  run of another app sharing the session id moves none of them.
+- studio: a panel token's `GET /api/sessions` is that scoped query —
+  ordering, `total` and `next_before` are the token's view (a newer
+  colliding derived run no longer sorts the session or becomes the
+  cursor), and a page holds `limit` rows while more match. A row whose
+  runs the cost walk cannot read is served with its scoped aggregates
+  and an unknown cost (as the server token's is) instead of being
+  skipped. The server token's list is unchanged.
 
 ## 0.15.0 — 2026-10-12
 

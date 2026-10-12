@@ -187,8 +187,8 @@ describe("the app turn's kinds and refusal words", () => {
     expect(parkedKind(sub, [rt()], "s_sub-t2")).toBe("pool-child")
     const w = refusalWords("pool-child", sub, [rt()], false)
     expect(w).toEqual({ words: `${POOL_CHILD} s`, fix: "" })
-    // Whatever its id: the meta decides, not the `<session>-tN` shape.
-    expect(parkedKind({ ...sub, id: "r_any", parent_run_id: "s-t1" }, [rt()])).toBe("pool-child")
+    // Without a parent run id, whatever its id: the meta decides, not the `<session>-tN` shape.
+    expect(parkedKind({ ...sub, id: "r_any" }, [rt()])).toBe("pool-child")
     expect(appTurn(sub)).toBe(false)
   })
 
@@ -213,6 +213,19 @@ describe("the app turn's kinds and refusal words", () => {
     expect(parkedKind(nested, [rt()])).toBe("plain")
     expect(refusalLine(refusalWords(parkedKind(nested, [rt()]), nested, [rt()], false))).toBe(`${APP_RUN} — fix: ${APP_RUN_FIX}`)
     expect(go("pricing.go")).toContain(`strings.HasPrefix(k.ID, id+"/")`)
+  })
+
+  it("a Generate nested under a pool child's turn (weft.session.parent, session and public id inherited through core's ctx metadata, an id of its own): the plain line, never pool-child", () => {
+    // core/metadata.go mergeMetadata: a run's ctx metadata reaches every
+    // run started under it, weft.session.parent included.
+    const meta = { "weft.session.parent": "s" }
+    const nested = { id: "r_nested", session_id: "s_pool", public_id: "pub_s", service: "app", parent_run_id: "s_pool-t1", meta }
+    expect(parkedKind(nested, [rt()])).toBe("plain")
+    expect(parkedKind(nested, [rt()], "s_pool-t2")).toBe("plain")
+    expect(refusalLine(refusalWords(parkedKind(nested, [rt()]), nested, [rt()], false))).toBe(`${APP_RUN} — fix: ${APP_RUN_FIX}`)
+    expect(appTurn(nested)).toBe(false)
+    // The pool child's own turn under the delegating call stays pool-child.
+    expect(parkedKind({ ...nested, id: "s_pool-t1", parent_run_id: "s-t1" }, [rt()])).toBe("pool-child")
   })
 
   it("a session turn without a public id: appturn.go's 403 words and fix", () => {

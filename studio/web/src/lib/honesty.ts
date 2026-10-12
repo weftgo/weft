@@ -481,13 +481,19 @@ const live = (rts: readonly RuntimeLike[] | null | undefined, service: string | 
  *   Subagent child: id `<parent_run_id>/…`      child — the parent turn's
  *                                               SUBAGENT_PENDING call
  *   pool child: meta weft.session.parent set    pool-child — the parent session
- *     (with or without a parent run id —        (ADR 0022 §7), never its own;
- *     p.Submit outside a run stamps none —      no verb, no fix
- *     whatever its id)
+ *     and either no parent run id (p.Submit     (ADR 0022 §7), never its own;
+ *     outside a run stamps none; then           no verb, no fix
+ *     whatever its id) or its own session's
+ *     `<session>-tN` (the delegating call's
+ *     child)
  *   nested Generate: a parent run id, no        plain — the app resumes it
- *     `<parent>/` prefix, no session.parent,      (under a session turn it
- *     not its own session's `<session>-tN`         inherits the session and
- *                                                  public id through ctx)
+ *     `<parent>/` prefix, not its own             (core merges a run's ctx
+ *     session's `<session>-tN` — with or          metadata into every run
+ *     without weft.session.parent: under a        started under it, so a
+ *     pool child's turn it inherits that key      run nested in a pool
+ *     too, and is still no pool child            child's tool handler
+ *                                                  inherits weft.session.parent,
+ *                                                  session and public id)
  *   ordinary turn: no parent run id, or its     the session path below (a
  *     own session's `<session>-tN` (a Send       session's Send inside a tool
  *     inside a tool handler)                     handler is decidable there)
@@ -503,7 +509,10 @@ export function parkedKind(row: AppRow | null | undefined, runtimes: readonly Ru
   // Only core's Subagent child parks onto its parent as SUBAGENT_PENDING
   // (pricing.go's subagents() tells it apart the same way).
   if (row?.parent_run_id && row.id.startsWith(`${row.parent_run_id}/`)) return "child"
-  if (poolParent(row)) return "pool-child"
+  // weft.session.parent rides ctx like any run metadata (core's
+  // mergeMetadata): a run that merely inherited it under a pool child's
+  // turn has a parent run id and an id that is not its own session's turn.
+  if (poolParent(row) && (!row?.parent_run_id || ownTurn(row))) return "pool-child"
   if (row?.parent_run_id && !ownTurn(row)) return "plain"
   if (!row?.session_id) return "plain"
   if (!row.public_id) return "no-public-id"

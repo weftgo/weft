@@ -29,6 +29,14 @@ export const POOL = "s_pool-t1"
  * Background, thread/pool's ExamplePool_Submit): weft.session.parent
  * (s_app) but no parent run id, no public id. */
 export const POOL_SUBMIT = "s_submit-t1"
+/** A session's own Send inside a tool handler of the parked turn: a
+ * turn of its own session s2 (`<s2>-t1`), which has its own public id;
+ * core stamps the parked turn as its parent run id; no
+ * weft.session.parent (no pool child). */
+export const SEND_SESSION = "s2"
+export const SEND_PUB = "pub_s2"
+export const SEND = `${SEND_SESSION}-t1`
+export const SEND_NEXT = `${SEND_SESSION}-t2`
 /** A turn of a thread session created without thread.PublicID. */
 export const NOPUB = "s_nopub-t1"
 export const CALL = { type: "tool_call", id: "call_deploy_1", name: "deploy", args: { env: "prod" } }
@@ -68,6 +76,10 @@ export function poolRow(): RunRow {
 
 export function poolSubmitRow(): RunRow {
   return parkedRow({ id: POOL_SUBMIT, session_id: "s_submit", public_id: "", meta: { "weft.session.parent": APP_SESSION } })
+}
+
+export function sendRow(over: Partial<RunRow> = {}): RunRow {
+  return parkedRow({ id: SEND, session_id: SEND_SESSION, public_id: SEND_PUB, parent_run_id: PARKED, ...over })
 }
 
 export function noPubRow(): RunRow {
@@ -148,6 +160,9 @@ export interface AppTurnOptions {
   /** The page/panel meta: the Studio golden's (the run page) or the
    * panel's META. */
   studioMeta?: boolean
+  /** s2's next turn (SEND_NEXT) is listed by GET /api/sessions/s2 (read
+   * on every request, so a test may set it later). */
+  sendResumed?: boolean
   /** The parked turn is still running (the steer case). */
   running?: boolean
   /** GET /api/runtimes answers 500 (RUNTIMES_500). */
@@ -223,12 +238,23 @@ export function serveAppTurn(fake: FakeStudio, o: AppTurnOptions = {}): FakeStud
     .on(`GET runs/${PLAIN}/events`, pagedEvents(events(PLAIN, true)))
     .on(`GET runs/${PLAIN}/transcript`, transcript())
     .on(`GET runs/${PLAIN}/spans`, { spans: [] })
-  for (const r of [childRow(), poolRow(), poolSubmitRow(), noPubRow()])
+  for (const r of [childRow(), poolRow(), poolSubmitRow(), noPubRow(), sendRow()])
     fake
       .on(`GET runs/${r.id}`, doc(r))
       .on(`GET runs/${r.id}/events`, pagedEvents(events(r.id, true)))
       .on(`GET runs/${r.id}/transcript`, transcript())
       .on(`GET runs/${r.id}/spans`, { spans: [] })
+  fake.on(`GET sessions/${SEND_SESSION}`, () => ({
+    id: SEND_SESSION,
+    public_id: SEND_PUB,
+    agent: "approvals-example",
+    turns: o.sendResumed ? 2 : 1,
+    first_seen: T0,
+    last_seen: T0,
+    status: "succeeded",
+    usage: { input_tokens: 10, output_tokens: 5 },
+    runs: o.sendResumed ? [sendRow({ id: SEND_NEXT, turn: 2, pending: 0, stop_reason: "stop" }), sendRow()] : [sendRow()],
+  }))
   const verb = (run: string) => () => {
     if (o.outcome !== "refused") return json({ command_id: "cmd_app", state: "queued", run_id: run, runtime_id: "rt_01" }, 202)
     refused = true

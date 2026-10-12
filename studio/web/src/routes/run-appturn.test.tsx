@@ -20,7 +20,7 @@ import { APP_LINK_FIX, APP_RUN, APP_RUN_FIX, CAPS_UNREAD, PLAYGROUND_OFF, POOL_C
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { apiError, FakeStudio } from "@/test/fake-studio"
-import { APP_PUB, APP_SESSION, CALL, CHILD, NOPUB, PARKED, PLAIN, POOL, POOL_SUBMIT, REJECTED, RESUMED, RUNTIMES_500, runtimeRow, serveAppTurn, STEER_FAILED } from "@/test/appturn-fixture"
+import { APP_PUB, APP_SESSION, CALL, CHILD, NOPUB, PARKED, PLAIN, POOL, POOL_SUBMIT, REJECTED, RESUMED, RUNTIMES_500, runtimeRow, SEND, SEND_NEXT, SEND_SESSION, serveAppTurn, STEER_FAILED } from "@/test/appturn-fixture"
 import type { AppTurnOptions } from "@/test/appturn-fixture"
 
 configure({ asyncUtilTimeout: 10_000 })
@@ -270,6 +270,22 @@ describe("the run page when no Sessions runtime of the run's service acts", () =
     // page): the block asks for none of its own (appTurn is false).
     expect(fake.calls(`POST runs/${POOL_SUBMIT}/approvals`)).toHaveLength(0)
     await axeClean(parked())
+  })
+
+  it("a session's own Send inside a tool handler (a parent run id, `<s2>-t1`, s2's own public id, no weft.session.parent): gated as a turn of s2 — verbs, its session read, resumed once s2 lists its next turn", async () => {
+    // lib/honesty.ts's appTurn: the gate's facts are read for exactly the
+    // rows parkedKind sends down the session path, a parent run id or not.
+    const o: AppTurnOptions = {}
+    const fake = await open(o, SEND)
+    expect(parked().getAttribute("data-parked")).toBe("decide")
+    expect(verb("continue")?.hasAttribute("disabled")).toBe(false)
+    expect(parked().querySelector("[data-app-owned]")).toBeNull()
+    expect(fake.calls(`GET sessions/${SEND_SESSION}`).length).toBeGreaterThan(0)
+    expect(fake.calls(`GET sessions/${APP_SESSION}`)).toHaveLength(0)
+    o.sendResumed = true
+    await waitFor(() => expect(line("resumed")).toBe(`decided — resumed as ${SEND_NEXT}`), { timeout: 15_000 })
+    expect(verb("continue")).toBeUndefined()
+    expect(fake.calls(`POST runs/${SEND}/approvals`)).toHaveLength(0)
   })
 
   it("a plain Generate's park: the app resumes it, the thread.PublicID fix", async () => {

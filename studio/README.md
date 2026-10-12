@@ -939,8 +939,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 243,059 B raw / 78,094 B gzip
-(76.3 KiB, the ledger's last row, "phase 6 review fixes (H)"; 3,826 B — 3.7 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 243,087 B raw / 78,098 B gzip
+(76.3 KiB, the ledger's last row, "phase 6 review fixes (I)"; 3,822 B — 3.7 KiB — of headroom under
 the 81,920 B, 80 KiB, cap). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
 build kept its indentation and newlines: 281,470 B raw / 81,358 B gzip,
@@ -1130,7 +1130,8 @@ reads `parked · a subagent's call — decide on the parent turn <parent>`
 (a link on the run page), no verb — only the parent's SUBAGENT_PENDING
 call is pending on the session; a `thread/pool` child, recognised by
 the `weft.session.parent` thread stamps on every pool child's run (in
-the run row's `meta`), not by its id or its parent run id, reads
+the run row's `meta`) when the run has no parent run id or is its own
+session's turn (`<session>-tN`), reads
 `parked · a delegated session's turn — decide on the parent session
 <session>` — and, when it ran under a delegating tool call, `· delegated
 by turn <parent>` — no verb and no fix: its requests are mirrored onto
@@ -1141,10 +1142,19 @@ running call's context) and reads the same, the session alone. On the
 run page the session is a link to `/sessions/<session>` and the turn a
 link to its run; the block reads neither the child's session nor the
 runtimes for it. Another agent's `Generate` inside a tool handler (a
-parent run id, an id of its own, whatever session id it inherited)
-never parks onto the parent and reads the plain Generate's line; a
-session's own `Send` inside a tool handler (`<session>-tN`, no
-`weft.session.parent`) is a turn of that session, gated as any other.
+parent run id, an id of its own, whatever session id, public id and
+`weft.session.parent` it inherited — core merges a run's context
+metadata into every run started under it, so one nested under a pool
+child's turn carries that key too) never parks onto the parent and
+reads the plain Generate's line; a session's own `Send` inside a tool
+handler (`<session>-tN`, no `weft.session.parent`) is a turn of that
+session, gated as any other. A known caveat: a session created without
+`thread.PublicID` whose `Send` runs inside another session's tool
+handler inherits that session's public id through core's context
+metadata and reads decidable; the runtime refuses the decision in its
+own words (`the session resolver answered session … for public id …, not
+the run's session …`, shown verbatim) — give such a session its own
+`thread.PublicID`.
 The panel's turn lists are top-level runs, so it draws none of these
 children; reached another way, it reads the same words through the same
 `parkedKind`/`refusalWords`, without the links. On a

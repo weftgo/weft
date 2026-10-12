@@ -129,8 +129,9 @@ func MetadataFromContext(ctx context.Context) map[string]string {
 // crowd out — then the rest, each group in sorted key order. An entry
 // with an empty key, an over-long key, or an over-long value is dropped
 // and counted, never truncated; an own entry with an empty value removes
-// the key (inherited or set) and is not counted. nil when nothing
-// survives.
+// the key (inherited or set) and is not counted — removals apply before
+// any addition, so a slot a removal frees is there for every key under
+// the cap. nil when nothing survives.
 func mergeMetadata(inherited, own map[string]string) (map[string]string, int) {
 	if len(inherited) == 0 && len(own) == 0 {
 		return nil, 0
@@ -139,6 +140,14 @@ func mergeMetadata(inherited, own map[string]string) (map[string]string, int) {
 	maps.Copy(out, inherited)
 	dropped := 0
 	keys := slices.Sorted(maps.Keys(own))
+	// Removals first: an empty value ("none" — the inherited pair is not
+	// this run's) frees its slot before any addition is weighed against
+	// the cap, whatever the two keys' order.
+	for _, k := range keys {
+		if k != "" && own[k] == "" && len(k) <= metadataMaxKeyLen {
+			delete(out, k)
+		}
+	}
 	for _, reserved := range []bool{true, false} {
 		for _, k := range keys {
 			if strings.HasPrefix(k, metadataReservedPrefix) != reserved {
@@ -149,8 +158,7 @@ func mergeMetadata(inherited, own map[string]string) (map[string]string, int) {
 				dropped++
 				continue
 			}
-			if v == "" { // "none": the inherited pair is not this run's
-				delete(out, k)
+			if v == "" { // removed above
 				continue
 			}
 			if _, exists := out[k]; !exists && len(out) >= metadataMaxKeys {

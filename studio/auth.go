@@ -302,8 +302,13 @@ func (s *Server) scopeRunID(w http.ResponseWriter, r *http.Request, runID string
 	return true
 }
 
-// scopeSessionID checks a session's public id, resolving it through
-// the database.
+// scopeSessionID checks a session lands inside the token's public id,
+// resolving it through the database: the session passes when any of its
+// top-level turns carries the public id — the sessions list's rule (a
+// WHERE before the grouping), so a session the list shows is one the
+// token may open. Its readers then serve the token's turns alone (the
+// session view filters its runs and re-scopes its row; the live stream
+// checks every frame).
 func (s *Server) scopeSessionID(w http.ResponseWriter, r *http.Request, sessionID string) bool {
 	id := idFrom(r)
 	if id.panel == nil {
@@ -317,7 +322,7 @@ func (s *Server) scopeSessionID(w http.ResponseWriter, r *http.Request, sessionI
 		dbError(w, r, "session", sessionID, err)
 		return false
 	}
-	if det.PublicID != id.panel.PublicID {
+	if len(withPublicID(det.Runs, id.panel.PublicID)) == 0 {
 		forbidden(w, r)
 		return false
 	}

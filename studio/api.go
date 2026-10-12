@@ -1257,9 +1257,11 @@ func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 	// cursor are its public id's runs alone — a run of another app
 	// sharing the session id (a colliding derived run) is in none of
 	// them (docs/record-contract.md §9). The cost walk reads the same
-	// scope.
+	// scope — the query's public id, the panel token's or the server
+	// token's ?public_id= — so a row is one scope throughout: turns,
+	// usage and cost.
 	out := sessionsPage{Total: page.Total, Sessions: make([]sessionRow, 0, len(page.Sessions))}
-	pub := panelPublicID(r)
+	pub := query.PublicID
 	for _, sr := range page.Sessions {
 		sc, _, _ := s.sessionCost(r.Context(), sr.ID, pub)
 		srow := sessRow(sr)

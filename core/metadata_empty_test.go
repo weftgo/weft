@@ -2,6 +2,7 @@ package core_test
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/weftgo/weft/core"
@@ -85,5 +86,43 @@ func TestMetadataEmptyValueEmptiesContext(t *testing.T) {
 	}
 	if !seen || got != nil {
 		t.Fatalf("run metadata = %v (seen %v), want nil: its empty pair removed the only inherited one", got, seen)
+	}
+}
+
+// At the 64-key cap a run's own removal frees its slot before any of its
+// additions is weighed: own {"a_new": "x", "zz_old": ""} over 64
+// inherited pairs (zz_old among them) keeps a_new, removes zz_old and
+// drops nothing — although a_new sorts first, which once found the map
+// still full and dropped it.
+func TestMetadataEmptyValueFreesSlotAtCap(t *testing.T) {
+	inherited := map[string]string{"zz_old": "v"}
+	for i := 0; len(inherited) < 64; i++ {
+		inherited[fmt.Sprintf("k%02d", i)] = "v"
+	}
+	ctx := core.WithMetadata(context.Background(), inherited)
+	if got := core.MetadataFromContext(ctx); len(got) != 64 {
+		t.Fatalf("inherited = %d pairs, want 64", len(got))
+	}
+	tp := newRecProvider()
+	var got map[string]string
+	seen := false
+	agt := core.New(wefttest.Script(wefttest.Say("ok")), core.Name("capped"), core.TracerProvider(tp),
+		core.Tap(func(ctx context.Context, _ core.Event) {
+			if !seen {
+				seen = true
+				got = core.MetadataFromContext(ctx)
+			}
+		}))
+	if _, err := agt.Generate(ctx, core.Metadata(map[string]string{"a_new": "x", "zz_old": ""})); err != nil {
+		t.Fatal(err)
+	}
+	if !seen || got["a_new"] != "x" || len(got) != 64 {
+		t.Fatalf("run metadata = %d pairs, a_new %q; want 64 with a_new kept", len(got), got["a_new"])
+	}
+	if _, ok := got["zz_old"]; ok {
+		t.Error("zz_old present, want removed")
+	}
+	if d, ok := tp.find(t, "invoke_agent capped").attrsMap()["weft.metadata.dropped"]; ok {
+		t.Errorf("weft.metadata.dropped = %q, want absent: nothing was dropped", d)
 	}
 }

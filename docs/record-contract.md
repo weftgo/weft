@@ -110,6 +110,11 @@ reads them from:
 | `weft.playground.command` | `weft/runtime` | the playground command id | `meta` |
 | `weft.playground.actor` | `weft/runtime` | who issued it, when known | `meta` |
 | `weft.experiment.id` | `weft/runtime` | the saved experiment the run belongs to | column `experiment_id` |
+| `weft.forked_from` | `weft/runtime` | `<source run>#<from step>`: the run this replay continues | column `forked_from` |
+| `weft.replay.view` | `weft/runtime` | a replay from step N > 0: `transcript`, `compacted:<index>`, `derived` or `unknown` | `meta` |
+| `weft.edits` | `weft/runtime` | the transcript edits a replay applied | `meta` |
+| `weft.page_url` | `weft/scope` | the app page the run was started from (sanitised) | `meta` |
+| `enduser.id` | the app via `Metadata` | the end user (§2's table) | `meta` (its mirror `user.id` is not) |
 
 **A session stamps its own identity, empty = none.** Run metadata
 rides the context into every run started under it, so a session's turn
@@ -131,11 +136,6 @@ Readers hold the same rule for
 producers that send an empty value anyway: obsdb's `MetaOf` drops an
 empty string, the `public_id` column's `""` is no public id (no scope
 matches it; `ResolvePublicID("")` is `ErrNotFound`).
-| `weft.forked_from` | `weft/runtime` | `<source run>#<from step>`: the run this replay continues | column `forked_from` |
-| `weft.replay.view` | `weft/runtime` | a replay from step N > 0: `transcript`, `compacted:<index>`, `derived` or `unknown` | `meta` |
-| `weft.edits` | `weft/runtime` | the transcript edits a replay applied | `meta` |
-| `weft.page_url` | `weft/scope` | the app page the run was started from (sanitised) | `meta` |
-| `enduser.id` | the app via `Metadata` | the end user (§2's table) | `meta` (its mirror `user.id` is not) |
 
 **What lands in `meta`.** `obsdb.MetaOf` keeps every **string**-valued
 attribute of any span or record of the run (merged) whose key is not on
@@ -158,6 +158,17 @@ non-string attribute outside the list is dropped from `meta` on SQLite
 and stringified on ClickHouse, which is why every non-string contract
 key is on the list. `weft.metadata.dropped` (int, `invoke_agent` span)
 says how many pairs the metadata limits dropped.
+
+A known limit on ClickHouse (debt, not changed yet): a run's `meta` there
+is the greatest of its contributing rows' JSON maps compared as strings
+(`max(Meta)` in the runs view) — one row's map wins, the maps are not
+merged as on SQLite. The spans and records the core emits for a run
+carry the same map, so this is invisible for them, with one exception:
+the compaction marker a reopened `thread` session emits for a run it did
+not see (a forked or pool session's `Compact` after a reopen) carries
+only that session's `weft.session.*` keys, whose JSON sorts above a map
+starting `{"tenant…`, so it can win and drop the caller's pairs from that
+run's ClickHouse `meta`.
 
 ## 3. Spans
 
@@ -727,6 +738,22 @@ becomes the cursor, and a page holds `limit` rows while more match. A
 row whose runs the cost walk cannot read whole (a read error, past the
 10,000-run walk) is served with its scoped aggregates and an unknown
 cost, as the server token's is.
+A session a panel token lists is one it may open: the session view (and
+the live stream's `session=` selector) admits the token when **any** of
+the session's top-level turns carries its public id — the list's
+`WHERE` — and serves those turns alone, so a session whose turns carry
+two public ids (hand-set session metadata, a colliding app) is each
+public id's own view of it. The server token's `/api/sessions?public_id=`
+row is the same one scope throughout: its turns, usage and cost are that
+public id's runs.
+
+A known gap, left for a later decision: a session's turn sent from
+inside another run's tool handler is recorded as a child run of the
+enclosing run (`parent_run_id` is that run, through the core's
+parent-run linkage, as every run started under a run's context is), and
+the session views list top-level turns only — so that turn appears in no
+session view (its session has no page of its own); the enclosing run's
+page reaches it.
 
 ## 10. The conformance fixtures
 

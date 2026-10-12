@@ -491,10 +491,14 @@ both shipped backends (`obsdb/sqlite`, `obsdb/clickhouse`).
 both backends, for every run of every generated case (§10) —
 `weft_version` as the fixtures' normalised `v0.0.0-contract`, the times
 on the fixtures' normalised clock (§10: per signal, not across). The rule branches they exercise:
-`status` `succeeded` (most cases, `parked` with `pending` 1), `failed`
-(`failed`: the span's status and description, no `run_finish`, so
-`steps`, `usage` and `stop_reason` come from the span) and `interrupted`
-(`interrupted`: no span, no `run_finish`; `trace_id` from the records);
+`status` `succeeded` (most cases, `parked` with `pending` 1; from the
+root span alone, no `run_finish`, in `tracer_only` and `tail_lost`),
+`failed` (`failed` and `tracer_only_failed`: the span's status and
+description, no `run_finish`, so `steps`, `usage` and `stop_reason` come
+from the span) and `interrupted` (`interrupted`: no `invoke_agent` span,
+no `run_finish`; `trace_id` from the records); `weft_version` and
+`manifest_hash` from the span when no record carries them
+(`tracer_only`);
 `meta`, `playground`, `experiment_id` and `forked_from` (`tool_calls`);
 `session_id`, `public_id`, `turn` (`session_turns`); the parent link
 (`subagent`). Not exercised by any fixture: `running` (a fixed-epoch
@@ -513,12 +517,13 @@ backends' own tests' to pin.
 | `provider`, `model` | `run_start`'s `model.provider`/`model.name`, or the `invoke_agent` span's `gen_ai.provider.name`/`gen_ai.request.model` (the span spells the provider in semconv form: `gcp.gemini` for the core's `google`) |
 | `session_id`, `public_id`, `turn` | `weft.session.id`, `weft.public_id`, `weft.turn` |
 | `playground`, `experiment_id`, `forked_from` | `weft.playground`, `weft.experiment.id`, `weft.forked_from` |
-| `manifest_hash`, `weft_version` | `weft.manifest.hash`, `weft.version` |
+| `manifest_hash`, `weft_version` | `weft.manifest.hash`, `weft.version` — from any record or span of the run that carries them (the `invoke_agent` span does), `weft_version` falling back to a span's resource `weft.version` (`otel.Install` stamps it there): a run whose records were lost, or never emitted, still names both |
 | `meta` | every string attribute outside the contract (`obsdb.MetaOf`) |
 | `started` | the earliest time of anything of the run: span starts, record times |
 | `last_seen` | the latest time of anything of the run, heartbeats included |
 | `finished` | the `invoke_agent` span's end, or `run_finish`'s time — the later; absent while neither arrived |
-| `status` | `failed` if the `invoke_agent` span's status is `Error`; else `succeeded` if a `run_finish` exists; else `running` if last-seen is at most 30 s old; else `interrupted` — derived at read time, never stored. There is no parked status: a run parked at an approval is `succeeded` with `pending` > 0 |
+| `root_ended` | the `invoke_agent` span is stored (any status) — kept by both backends (`runs.root_ended`, `weft_runs.RootEnded`; `RunRow.RootEnded`), not served by Studio's API |
+| `status` | `failed` if the `invoke_agent` span's status is `Error`; else `succeeded` if a `run_finish` exists **or** the `invoke_agent` span is stored (`root_ended`: a span is exported only once it ended, so the run is over even when its `run_finish` was lost — a tracer-only app's run, a run whose record tail a destination dropped); else `running` if last-seen is at most 30 s old; else `interrupted` — derived at read time, never stored. There is no parked status: a run parked at an approval is `succeeded` with `pending` > 0 (from `run_finish`, else the span's `weft.run.pending`) |
 | `error` | the `invoke_agent` span's status description |
 | `steps`, `pending` | `run_finish`'s `steps` and `len(pending)`, or the span's `weft.run.steps` / `weft.run.pending` |
 | `stop_reason` | `weft.run.stop_reason` |
@@ -557,7 +562,8 @@ from ADR 0028 §11's closed table (`obsdb.Hole`; the words live in
 | `truncated` | an event record carries `weft.content.truncated_bytes` > 0 |
 | `gap` | the event counter has a hole below its high-water mark |
 | `compacted` | the run holds a run-scope view (`weft.messages.reason = compacted`) |
-| `derived` | the run was built from stock spans (`RunRow.Derived`, §9): "derived from spans · no events" |
+| `derived` | the run was built from stock spans (`RunRow.Derived`, §9): "derived from spans · no events" — that run's alone, never a weft run whose records are missing |
+| `not_recorded`, cause `no_logger` | a weft run (not `derived`, not `running`) whose spans are stored and none of its records — no event, `messages` or `request` record (`obsdb.LostRecordsHole`): "the app exported spans only"; the fix names the agent option LoggerProvider (`core.LoggerProvider`, the root package's alias) and `otel.Install`. Today a reader cannot tell an app with no logger from one whose every record was lost on the way, and reads the commoner; once a later item puts the number of records the core emitted on the root span, a root that says some were emitted while none was stored reads `gap` ("every record was lost") instead — `LostRecordsHole` is that seam |
 
 `redacted` (reserved: the pipeline does not yet mark a redaction) and
 `hidden` (a read-scoped token's view of a system prompt) are decided by
@@ -643,7 +649,7 @@ whose operation is one of the three; a trace of other spans costs no read.
 | `parent_run_id`, `parent_call_id` | for a root nested under another root's subtree: that root's derived id, and the `gen_ai.tool.call.id` of the nearest `execute_tool` span above it. A stock root under a weft run's tool is top-level — the walk stops at weft spans, so it has no parent — and its session is its own `gen_ai.conversation.id`, not the weft run's: Studio lists it as a conversation of its own |
 | `started`, `finished` | the root's start and end |
 | `last_seen` | the latest time of anything in the subtree: the root's end for a well-formed tree |
-| `status`, `error` | `failed` with the status description when the root's status is `Error` (with no description, the error reads "the root span's status is Error (no description)": a failed run never has an empty error), else `succeeded` (a root span is exported only when it ended, so a derived run is never running or interrupted) |
+| `status`, `error` | `failed` with the status description when the root's status is `Error` (with no description, the error reads "the root span's status is Error (no description)": a failed run never has an empty error), else `succeeded` (a root span is exported only when it ended, so a derived run is never running or interrupted — §6's root-span rule for weft runs, which a derived run meets by construction) |
 | `usage` | the run's **own** usage (when no root or `chat` span of it carries any `gen_ai.usage.*` key, the row reads zero and Studio reads its cost **unknown**, "the stock spans report no usage", never a known $0 — the fold cannot tell such a run from one whose spans report zero tokens, which reads the same): the root's `gen_ai.usage.*` when present, taken as the root's own figure; else the sum over the subtree's `chat` spans — the subtree stops at nested roots, so a nested root's calls count toward it, never toward the parent (below) |
 | `steps` | the number of `chat` spans in the subtree |
 | `chat` (the waterfall) | the subtree's `chat` spans in start order; a span's step is its ordinal (0-based); model, response model, finish reason and usage from its `gen_ai.*` keys |
@@ -774,6 +780,9 @@ page reaches it.
 | `failed` | `MaxSteps(1)` against a model that keeps calling a tool: status `failed`, the error text, `steps`/`usage`/`stop_reason` from the span (no `run_finish`) |
 | `parked` | a `RequireApproval` tool's call parked: status `succeeded`, `pending` 1 (`run_finish.pending`, `weft.run.pending`) |
 | `stock_genai` | §9: stock spans, no `weft.*` (hand-written: the one case no weft code generates); two derived runs in one conversation, one with a tool call, one failed; `derived` |
+| `tracer_only` | the `tool_calls` run from an app that wired a tracer and no logger: spans only — `succeeded` from the `Ok` root alone, `steps`/`usage`/`stop_reason` from the span, `weft_version` and `manifest_hash` from the span; `not_recorded` (cause `no_logger`) |
+| `tracer_only_failed` | the `failed` run, spans only: `failed` with the span's description from the `Error` root alone; `not_recorded` (cause `no_logger`) |
+| `tail_lost` | the `tool_calls` run with every record after its `tool_finish` dropped (step 1's records and `run_finish`), every span kept: `succeeded` from the `Ok` root, not `interrupted` |
 
 `expect.json` is `{case, description, pending?, derived?, runs: [...]}`;
 each run lists every row field of §6 and `derived` (§9's mark, omitted

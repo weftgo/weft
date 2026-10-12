@@ -27,8 +27,8 @@ func TestMigrationPinsExporterVersion(t *testing.T) {
 	if !strings.Contains(string(body), pinnedExporterVersion) {
 		t.Errorf("migration 0001 does not name the pinned exporter version %s", pinnedExporterVersion)
 	}
-	if highestMigration() != 9 {
-		t.Errorf("highest migration = %d, want 9 (0001 init, 0002 experiments, 0003 status spelling, 0004 request record, 0005 raw record, 0006 experiment command, 0007 the experiment index, 0008 the command store, 0009 the derived flag)", highestMigration())
+	if highestMigration() != 10 {
+		t.Errorf("highest migration = %d, want 10 (0001 init, 0002 experiments, 0003 status spelling, 0004 request record, 0005 raw record, 0006 experiment command, 0007 the experiment index, 0008 the command store, 0009 the derived flag, 0010 root ended)", highestMigration())
 	}
 }
 
@@ -421,7 +421,7 @@ func TestMigrationContractTuple(t *testing.T) {
 	for _, c := range []struct {
 		version, tuples int
 		keys            []string
-	}{{1, 2, before}, {3, 1, before}, {4, 2, at0004}, {5, 1, contractKeys}} {
+	}{{1, 2, before}, {3, 1, before}, {4, 2, at0004}, {5, 1, contractKeys}, {10, 1, at0004}} {
 		body, err := migrationsFS.ReadFile("migrations/" + migrations[c.version])
 		if err != nil {
 			t.Fatal(err)
@@ -489,6 +489,45 @@ func TestMigration0003RestatesTracesView(t *testing.T) {
 	stmts := splitStatements(string(fix))
 	if len(stmts) != 1 || !strings.HasPrefix(stmts[0], alter) {
 		t.Errorf("0003 must be the one ALTER statement, got %d", len(stmts))
+	}
+}
+
+// Migration 0010 restates 0004's traces view with two changes —
+// RootEnded from isInvoke, and WeftVersion falling back to the span's
+// resource — then backfills from the spans already stored. Pinned
+// offline against 0004's text so the restated select cannot drift.
+func TestMigration0010RestatesTracesView(t *testing.T) {
+	read := func(v int) []string {
+		b, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return splitStatements(string(b))
+	}
+	const alter = "ALTER TABLE weft_runs_traces_mv MODIFY QUERY"
+	var was string
+	for _, st := range read(4) {
+		if strings.HasPrefix(st, alter) {
+			was = st
+		}
+	}
+	now := read(10)
+	if was == "" || len(now) != 3 {
+		t.Fatalf("0004's traces view found %v; 0010 has %d statements, want 3 (add column, view, backfill)", was != "", len(now))
+	}
+	if now[0] != "ALTER TABLE weft_runs ADD COLUMN IF NOT EXISTS RootEnded SimpleAggregateFunction(max, UInt8)" {
+		t.Errorf("0010's first statement = %q", now[0])
+	}
+	want := strings.NewReplacer(
+		"SpanAttributes['weft.version'] AS WeftVersion,",
+		"if(SpanAttributes['weft.version'] != '', SpanAttributes['weft.version'], ResourceAttributes['weft.version']) AS WeftVersion,",
+		"toInt64(0) AS RequestCount\n", "toInt64(0) AS RequestCount,\n    toUInt8(isInvoke) AS RootEnded\n",
+	).Replace(was)
+	if now[1] != want {
+		t.Errorf("0010's select is not 0004's with RootEnded and the version fallback:\n%s", now[1])
+	}
+	if !strings.HasPrefix(now[2], "INSERT INTO weft_runs (RunId, Started, LastSeen, ManifestHash, WeftVersion, RootEnded)") {
+		t.Errorf("0010's third statement is not the backfill: %q", now[2])
 	}
 }
 

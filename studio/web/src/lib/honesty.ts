@@ -143,6 +143,11 @@ export const CAUSES: Partial<
         "no wire bodies were recorded for this attempt: otel.RawBodies is off (the default, and refused outside WEFT_ENV=dev), or the adapter does not report them",
       fix: "run under WEFT_ENV=dev with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)",
     },
+    no_logger: {
+      reason:
+        "the app exported spans only: this run's spans arrived but none of its records did, so it has no events, transcript or request records",
+      fix: "wire the logs too: pass weft.LoggerProvider(lp) beside weft.TracerProvider, or use otel.Install (it wires both)",
+    },
   },
   derived: {
     stock_spans: {

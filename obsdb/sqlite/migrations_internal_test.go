@@ -96,8 +96,8 @@ func TestUpgradeFrom0002(t *testing.T) {
 	if err := raw.QueryRowContext(ctx, `SELECT MAX(version) FROM obsdb_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 8 {
-		t.Errorf("migration max = %d, want 8 (through 0008 the derived flag)", version)
+	if version != 9 {
+		t.Errorf("migration max = %d, want 9 (through 0009 root_ended)", version)
 	}
 	var agent, instructions, catalog string
 	var steps, requests int
@@ -297,7 +297,102 @@ func TestUpgradeFrom0006AddsCommandStore(t *testing.T) {
 	if err := db.(*DB).reads.QueryRowContext(ctx, `SELECT MAX(version) FROM obsdb_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 8 {
-		t.Errorf("migration max after the upgrade = %d, want 8 (through 0008 the derived flag)", version)
+	if version != 9 {
+		t.Errorf("migration max after the upgrade = %d, want 9 (through 0009 root_ended)", version)
+	}
+}
+
+// A file written at 0008 opens through 0009, which backfills from the
+// spans already stored (docs/record-contract.md §6): a weft run whose
+// invoke_agent span was stored and whose records never were reads
+// succeeded (root_ended), with weft_version from the span's resource and
+// manifest_hash from its attributes; a run whose root failed stays
+// failed; a run with only a chat span and a stale last-seen stays
+// interrupted; a version the records gave is kept.
+func TestUpgradeTo0009BackfillsRootEnded(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "at8.db")
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE obsdb_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	for v := 1; v <= 8; v++ {
+		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx, err := raw.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(string(body)); err != nil {
+			t.Fatalf("migration %d: %v", v, err)
+		}
+		if post := postMigrations[v]; post != nil {
+			if err := post(tx); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO obsdb_migrations (version, applied_at) VALUES (?, '2026-10-01T00:00:00Z')`, v); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, q := range []string{
+		`INSERT INTO runs (run_id, agent, started_ns, last_seen_ns, steps) VALUES
+			('r_tracer', 'a', 100, 200, 2), ('r_err', 'a', 100, 200, 1), ('r_chat', 'a', 100, 200, 0), ('r_kept', 'a', 100, 200, 1)`,
+		`UPDATE runs SET failed = 1, err = 'boom' WHERE run_id = 'r_err'`,
+		`UPDATE runs SET weft_version = 'v0.14.0' WHERE run_id = 'r_kept'`,
+		`INSERT INTO spans (trace_id, span_id, parent_span_id, name, kind, start_ns, end_ns, status_code, status_message,
+			service, run_id, step, tool_seq, session_id, attrs, resource, events) VALUES
+			('t1', 's1', '', 'invoke_agent a', 1, 100, 200, 1, '', 'svc', 'r_tracer', -1, -1, '',
+			 '{"gen_ai.operation.name":"invoke_agent","weft.run.id":"r_tracer","weft.manifest.hash":"mh1"}', '{"weft.version":"v0.15.0"}', '[]'),
+			('t2', 's2', '', 'invoke_agent a', 1, 100, 200, 2, 'boom', 'svc', 'r_err', -1, -1, '',
+			 '{"weft.run.id":"r_err","weft.version":"v0.15.0"}', '{}', '[]'),
+			('t3', 's3', '', 'chat m', 1, 100, 200, 0, '', 'svc', 'r_chat', 0, -1, '',
+			 '{"gen_ai.operation.name":"chat","weft.run.id":"r_chat"}', '{}', '[]'),
+			('t4', 's4', '', 'invoke_agent a', 1, 100, 200, 0, '', 'svc', 'r_kept', -1, -1, '',
+			 '{"gen_ai.operation.name":"invoke_agent","weft.run.id":"r_kept","weft.version":"v0.15.0"}', '{}', '[]')`,
+	} {
+		if _, err := raw.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("open a 0008 file: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+	for _, c := range []struct {
+		id, version, manifest string
+		rootEnded             bool
+		status                obsdb.Status
+	}{
+		{"r_tracer", "v0.15.0", "mh1", true, obsdb.StatusSucceeded},
+		{"r_err", "v0.15.0", "", true, obsdb.StatusFailed}, // the name decides when the attribute is absent
+		{"r_chat", "", "", false, obsdb.StatusInterrupted},
+		{"r_kept", "v0.14.0", "", true, obsdb.StatusSucceeded},
+	} {
+		run, err := db.Run(ctx, c.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run.RootEnded != c.rootEnded || run.Status != c.status || run.WeftVersion != c.version || run.ManifestHash != c.manifest {
+			t.Errorf("%s after 0009 = root_ended %v, %s, version %q, manifest %q; want %v, %s, %q, %q",
+				c.id, run.RootEnded, run.Status, run.WeftVersion, run.ManifestHash, c.rootEnded, c.status, c.version, c.manifest)
+		}
+	}
+	page, err := db.Runs(ctx, obsdb.RunQuery{Status: obsdb.StatusSucceeded})
+	if err != nil || page.Total != 2 {
+		t.Errorf("succeeded filter after 0009 = %d, %v; want r_tracer and r_kept (statusExpr reads root_ended)", page.Total, err)
 	}
 }

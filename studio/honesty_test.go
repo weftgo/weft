@@ -202,8 +202,12 @@ func TestRunHolesPreA1(t *testing.T) {
 
 // TestRunHolesInterrupted: a run that stopped reporting reads
 // interrupted, and the event position its lost batch left reads gap —
-// in the table's order. A run with spans and no events reads derived:
-// its row was built from the spans.
+// in the table's order. A run whose invoke_agent span arrived and no
+// record did is over — succeeded, never interrupted (contract §6) — and
+// reads not_recorded in no_logger's words (the app exported spans
+// only); a run with a chat span alone and no record never ended
+// (interrupted) and reads the same not_recorded. Derived is a stock-span
+// run's badge alone.
 func TestRunHolesInterrupted(t *testing.T) {
 	db, err := sqlite.Open(":memory:")
 	if err != nil {
@@ -214,20 +218,30 @@ func TestRunHolesInterrupted(t *testing.T) {
 	sp := fxSpanRec("r_ok", old, old.Add(time.Second), 0, "", 1, 1)
 	sp.Attrs["weft.run.id"] = "r_spans"
 	sp.SpanID = "0a0b0c0d0e0f1011"
+	chat := fxSpanRec("r_ok", old, old.Add(time.Second), 0, "", 1, 1)
+	chat.Attrs["weft.run.id"] = "r_chat"
+	chat.Attrs["gen_ai.operation.name"] = "chat"
+	chat.Name, chat.SpanID = "chat script", "0a0b0c0d0e0f1012"
 	if err := db.Write(context.Background(), obsdb.Batch{
 		Records: []obsdb.Record{
 			fxRecord("r_int", "event", "run_start", 0, old, `{"type":"run_start","id":"r_int"}`),
 			fxRecord("r_int", "event", "step_start", 2, old, `{"type":"step_start","run_id":"r_int","index":0}`),
 		},
-		Spans: []obsdb.Span{sp},
+		Spans: []obsdb.Span{sp, chat},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	h := Handler(DB(db))
-	for run, want := range map[string][]obsdb.Hole{
-		"r_int":   {obsdb.HoleInterrupted, obsdb.HoleGap},
-		"r_spans": {obsdb.HoleInterrupted, obsdb.HoleNotRecorded, obsdb.HoleDerived},
+	noLogger, noLoggerFix := obsdb.HoleNoteFor(obsdb.HoleNotRecorded, obsdb.CauseNoLogger)
+	for run, c := range map[string]struct {
+		status string
+		holes  []obsdb.Hole
+	}{
+		"r_int":   {"interrupted", []obsdb.Hole{obsdb.HoleInterrupted, obsdb.HoleGap}},
+		"r_spans": {"succeeded", []obsdb.Hole{obsdb.HoleNotRecorded}},
+		"r_chat":  {"interrupted", []obsdb.Hole{obsdb.HoleInterrupted, obsdb.HoleNotRecorded}},
 	} {
+		want := c.holes
 		code, _, body := get(t, h, "/studio/api/runs/"+run)
 		if code != http.StatusOK {
 			t.Fatalf("%s: %d %s", run, code, body)
@@ -240,13 +254,16 @@ func TestRunHolesInterrupted(t *testing.T) {
 			if hl.Reason == "" {
 				t.Errorf("%s: hole %s has no reason", run, hl.Hole)
 			}
+			if hl.Hole == string(obsdb.HoleNotRecorded) && (hl.Reason != noLogger || hl.Fix != noLoggerFix) {
+				t.Errorf("%s: not_recorded = %q / %q, want no_logger's words", run, hl.Reason, hl.Fix)
+			}
 		}
 		var wantS []string
 		for _, w := range want {
 			wantS = append(wantS, string(w))
 		}
-		if strings.Join(got, " ") != strings.Join(wantS, " ") || doc.Status != "interrupted" {
-			t.Errorf("%s (%s) holes = %v, want %v", run, doc.Status, got, wantS)
+		if strings.Join(got, " ") != strings.Join(wantS, " ") || doc.Status != c.status {
+			t.Errorf("%s (%s) holes = %v, want %v (%s)", run, doc.Status, got, wantS, c.status)
 		}
 	}
 }

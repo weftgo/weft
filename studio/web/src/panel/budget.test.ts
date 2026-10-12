@@ -196,8 +196,11 @@ describe("the size ledger (panel-budget.json)", () => {
     // earlier unbudgeted rows, I1.3's +578 B, F4.3's +1,217 B, F4.3 fixes' +599 B, F4.3 fixes 2's +80 B and the
     // phase 6 review fixes' +80 B (D), +366 B (E), +16 B (F), +54 B (G), +98 B (H) and +4 B (I) is the unbudgeted line's −0.1 KiB (U+2212, not a hyphen); A5.3 has its own line: A5.3's +1,010 B, its fixes' +196 B and
     // its fixes 2's +94 B against the raised +1,536 B (its accepted note).
-    expect(ledger.rows.at(-1)!.label).toBe("A5.4 cap raised to 96 KiB")
-    const { lines, over } = budgetTable(ledger, 78098)
+    // Pinned at that row: the ledger as it stood then (later rows have their own tests).
+    const at = ledger.rows.findIndex((r) => r.label === "A5.4 cap raised to 96 KiB")
+    const atA54 = { ...ledger, rows: ledger.rows.slice(0, at + 1) }
+    expect(atA54.rows.at(-1)!.label).toBe("A5.4 cap raised to 96 KiB")
+    const { lines, over } = budgetTable(atA54, 78098)
     expect(over).toBe(false)
     const unbudgeted = lines.find((l) => l.includes("unbudgeted")) ?? ""
     expect(unbudgeted).toMatch(

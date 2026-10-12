@@ -61,7 +61,7 @@ func (d *DB) DeleteSession(ctx context.Context, id string) (err error) {
 // notRunning is the sweep's status test over a runs row: failed,
 // succeeded, or interrupted (last seen before the bound parameter, now -
 // InterruptedAfter) — statusExpr's rows other than running.
-const notRunning = `(failed = 1 OR finished_ok = 1 OR last_seen_ns < ?)`
+const notRunning = `(failed = 1 OR finished_ok = 1 OR root_ended = 1 OR last_seen_ns < ?)`
 
 // Sweep deletes the runs not running whose last_seen is before the
 // cutoff, with their children that are not running (obsdb.DB). A run's
@@ -107,7 +107,7 @@ func (d *DB) sweepPass(ctx context.Context, before time.Time) (roots, deleted in
 		ids, err := queryIDs(ctx, tx, `SELECT run_id FROM runs AS r
 			WHERE last_seen_ns < ? AND `+notRunning+`
 			AND NOT EXISTS (SELECT 1 FROM runs AS p WHERE p.run_id = r.parent_run_id AND r.parent_run_id <> ''
-				AND p.last_seen_ns < ? AND (p.failed = 1 OR p.finished_ok = 1 OR p.last_seen_ns < ?))
+				AND p.last_seen_ns < ? AND (p.failed = 1 OR p.finished_ok = 1 OR p.root_ended = 1 OR p.last_seen_ns < ?))
 			LIMIT ?`,
 			unixNS(before), cut, unixNS(before), cut, obsdb.SweepBatch)
 		if err != nil {

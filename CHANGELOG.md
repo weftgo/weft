@@ -8,6 +8,11 @@ module, ADR 0005).
 
 ## Unreleased
 
+### Fixed
+
+- obsdb: a run whose `invoke_agent` span is stored is over — `succeeded` (or `failed` on an `Error` root) without a `run_finish`, never `interrupted` (UX-E-01). A tracer-only app's runs and runs whose record tail a destination dropped read the crash signal 30 s after they ended. New column `root_ended`, set at span ingest and backfilled from the stored spans (SQLite migration 0009, ClickHouse 0010; `RunRow.RootEnded`); the status filter, sessions and the sweep read the same rule. The run row's `weft_version` and `manifest_hash` now fill from the span (the version also from its resource) when no record names them (UX-E-02). Record contract §6 and §7, fixtures `tracer_only`, `tracer_only_failed`, `tail_lost`; ADR 0024 amended.
+- Studio: a weft run with spans and no stored record badges `not_recorded`, cause `no_logger` ("the app exported spans only", the fix naming `weft.LoggerProvider` / `otel.Install`) instead of `derived`, which is the stock-span run's badge alone (UX-E-03; `obsdb.LostRecordsHole`, `obsdb.CauseNoLogger`, `lib/honesty.ts`). Panel +103 B (78,201 B).
+
 ### Changed
 
 - Devtools panel: the panel's size cap is 96 KiB (98,304 B), up from 80 KiB (audit decision 1); every delta still appends a ledger row. The ledger's `cap` (`studio/web/panel-budget.json`) is now the one source the build (`vite.panel.config.ts`) and `scripts/panel-asset.ts` fail on — the build still fails over it; one row, "A5.4 cap raised to 96 KiB", records the change at the unchanged 78,098 B (20,206 B of headroom).

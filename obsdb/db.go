@@ -384,6 +384,12 @@ type RunRow struct {
 	// HoleDerived for it, and the API badges it "derived from spans ·
 	// no events" (HoleNoteFor(HoleDerived, CauseStockSpans)).
 	Derived bool
+	// RootEnded marks a run whose invoke_agent span was stored: the span
+	// is exported only once it ended, so the run is over whatever records
+	// are missing (docs/record-contract.md §6). Its error status is
+	// failed; any other status reads succeeded with or without a
+	// run_finish (DeriveStatus's ended). LostRecordsHole reads it too.
+	RootEnded bool
 }
 
 // RunPage is one Runs result, newest Started first (ties by ID,
@@ -514,22 +520,26 @@ const SweepBatch = 500
 
 // DeriveStatus applies the four-row table every backend reads through:
 //
-//	the invoke_agent span ended with status error  →  failed
-//	a run_finish record exists (and no error span) →  succeeded
-//	neither, and now - LastSeen ≤ InterruptedAfter →  running
-//	neither, and older                             →  interrupted
+//	the invoke_agent span ended with status error          →  failed
+//	a run_finish record exists, or the invoke_agent span
+//	ended with any other status (Ok, Unset)                 →  succeeded
+//	neither, and now - LastSeen ≤ InterruptedAfter          →  running
+//	neither, and older                                      →  interrupted
 //
-// spanFailed is the invoke_agent span's error status; runFinished is
-// the run_finish record's presence. LastSeen is the newest record or
-// span time for the run, heartbeats included. failed outranks
-// succeeded: a run whose span errored failed, whatever records raced
-// behind it. Pending > 0 on a succeeded run means parked at an
-// approval, not stuck.
-func DeriveStatus(spanFailed, runFinished bool, lastSeen, now time.Time) Status {
+// spanFailed is the invoke_agent span's error status; ended is the
+// run_finish record's presence or the invoke_agent span's
+// (RunRow.RootEnded) — a span is exported only once it ended, so a run
+// whose root arrived is over even when its run_finish was lost (a
+// tracer-only app's run, or one whose record tail a destination
+// dropped). LastSeen is the newest record or span time for the run,
+// heartbeats included. failed outranks succeeded: a run whose span
+// errored failed, whatever records raced behind it. Pending > 0 on a
+// succeeded run means parked at an approval, not stuck.
+func DeriveStatus(spanFailed, ended bool, lastSeen, now time.Time) Status {
 	switch {
 	case spanFailed:
 		return StatusFailed
-	case runFinished:
+	case ended:
 		return StatusSucceeded
 	case !lastSeen.IsZero() && now.Sub(lastSeen) > InterruptedAfter:
 		return StatusInterrupted

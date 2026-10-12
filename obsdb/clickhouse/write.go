@@ -107,7 +107,7 @@ func (d *DB) deriveStock(ctx context.Context, spans []obsdb.Span) error {
 	batch, err := d.conn.PrepareBatch(ctx, `INSERT INTO weft_runs (
 		RunId, ParentRunID, ParentCallID, TraceID, Agent, Provider, Model, Service, SessionID,
 		Started, Finished, LastSeen, FinishedOK, Failed, Err, Steps,
-		InputTokens, OutputTokens, CachedInputTokens, CacheWriteTokens, ReasoningTokens, Derived)`)
+		InputTokens, OutputTokens, CachedInputTokens, CacheWriteTokens, ReasoningTokens, Derived, RootEnded)`)
 	if err != nil {
 		return err
 	}
@@ -117,7 +117,7 @@ func (d *DB) deriveStock(ctx context.Context, spans []obsdb.Span) error {
 			r.Started, r.Finished, r.LastSeen,
 			boolUInt8(r.Status == obsdb.StatusSucceeded), boolUInt8(r.Status == obsdb.StatusFailed), r.Err, int32(r.Steps),
 			r.Usage.InputTokens, r.Usage.OutputTokens, r.Usage.CachedInputTokens,
-			r.Usage.CacheWriteTokens, r.Usage.ReasoningTokens, uint8(1),
+			r.Usage.CacheWriteTokens, r.Usage.ReasoningTokens, uint8(1), uint8(1),
 		); err != nil {
 			return err
 		}

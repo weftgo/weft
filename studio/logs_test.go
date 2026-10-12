@@ -129,7 +129,11 @@ func TestLogsLiveGapTruncated(t *testing.T) {
 	// one under a tool span still open.
 	now := time.Now().UTC()
 	const liveTrace = "11111111111111111111111111111111"
-	write(obsdb.Batch{Spans: []obsdb.Span{span("r_live", liveTrace, "1111111111111111", now)}, Records: []obsdb.Record{
+	// Its span is a chat span: a stored invoke_agent span ends the run
+	// (contract §6), and r_live is still running.
+	liveSpan := span("r_live", liveTrace, "1111111111111111", now)
+	liveSpan.Name, liveSpan.Attrs["gen_ai.operation.name"] = "chat script", "chat"
+	write(obsdb.Batch{Spans: []obsdb.Span{liveSpan}, Records: []obsdb.Record{
 		fxRecord("r_live", "event", "run_start", 0, now, `{"type":"run_start","id":"r_live"}`),
 		line(liveTrace, "1111111111111111", now.Add(time.Millisecond), "started"),
 		line(liveTrace, "1111111111111112", now.Add(2*time.Millisecond), "inside the open tool"),

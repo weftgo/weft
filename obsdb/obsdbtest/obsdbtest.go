@@ -29,6 +29,7 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("Gaps", gaps(open))
 	t.Run("EventContentAttrs", eventContentAttrs(open))
 	t.Run("StatusAtBoundaries", status(open))
+	t.Run("RootSpanEndsTheRun", rootSpanEndsTheRun(open))
 	t.Run("Sessions", sessions(open))
 	t.Run("Children", children(open))
 	t.Run("Paging", paging(open))
@@ -387,6 +388,108 @@ func eventContentAttrs(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			if g := (got{ev.Content, ev.TruncatedBytes}); g != want[i] {
 				t.Errorf("event %d content attrs = %+v, want %+v", i, g, want[i])
 			}
+		}
+	}
+}
+
+// rootSpanEndsTheRun pins docs/record-contract.md §6's status rule's
+// root-span branch on every backend: a stored invoke_agent span ends the
+// run (RunRow.RootEnded) — its Error status is failed, any other status
+// succeeded with or without a run_finish, whatever the last-seen says —
+// and the row takes weft_version from the span's resource when neither
+// the span nor a record names it, manifest_hash from the span. A chat
+// span alone ends nothing. The status filter, a session's status (its
+// newest turn's) and the sweep's not-running test read the same rule.
+func rootSpanEndsTheRun(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		now := time.Now().UTC()
+		session := map[string]any{"weft.session.id": "s_root", "weft.public_id": "pub_root"}
+		// A tracer-only run: the root alone, Ok, the version on the
+		// resource only (otel.Install's), fresh.
+		tracer := invokeSpan("r_tracer", 1, map[string]any{"weft.manifest.hash": "sha256:span"})
+		tracer.TraceID, tracer.SpanID = "e1"+tracer.TraceID[2:], "5000000000000001"
+		tracer.Start, tracer.End = now.Add(-time.Second), now
+		tracer.Resource = map[string]any{"service.name": "conf-svc", "weft.version": "v0.15.0"}
+		// A run whose record tail was lost: run_start a minute ago, an
+		// Unset root, no run_finish — the newest turn of s_root.
+		tailStart := record("r_tail", "event", "run_start", 0, `{"type":"run_start","id":"r_tail"}`, session)
+		tailStart.Time = now.Add(-time.Minute)
+		tail := invokeSpan("r_tail", 0, session)
+		tail.TraceID, tail.SpanID = "e2"+tail.TraceID[2:], "5000000000000002"
+		tail.Start, tail.End = tailStart.Time, tailStart.Time.Add(time.Second)
+		// A failed root and no record.
+		bad := invokeSpan("r_bad", 2, nil)
+		bad.TraceID, bad.SpanID = "e3"+bad.TraceID[2:], "5000000000000003"
+		bad.StatusMessage = "boom"
+		bad.Start, bad.End = now.Add(-time.Minute), now.Add(-time.Minute+time.Second)
+		// A chat span alone, stale: the run never ended.
+		chat := invokeSpan("r_chat", 0, map[string]any{"gen_ai.operation.name": "chat"})
+		chat.Name = "chat conf"
+		chat.TraceID, chat.SpanID = "e4"+chat.TraceID[2:], "5000000000000004"
+		chat.Start, chat.End = now.Add(-time.Minute), now.Add(-time.Minute+time.Second)
+		if err := db.Write(ctx(), obsdb.Batch{Spans: []obsdb.Span{tracer, tail, bad, chat}, Records: []obsdb.Record{tailStart}}); err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range []struct {
+			id                string
+			status            obsdb.Status
+			rootEnded         bool
+			version, manifest string
+		}{
+			{"r_tracer", obsdb.StatusSucceeded, true, "v0.15.0", "sha256:span"},
+			{"r_tail", obsdb.StatusSucceeded, true, "v0.6.0", "sha256:conf"}, // the record's values
+			{"r_bad", obsdb.StatusFailed, true, "", ""},
+			{"r_chat", obsdb.StatusInterrupted, false, "", ""},
+		} {
+			r, err := db.Run(ctx(), c.id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.Status != c.status || r.RootEnded != c.rootEnded || r.WeftVersion != c.version || r.ManifestHash != c.manifest {
+				t.Errorf("%s = %s, root_ended %v, version %q, manifest %q; want %s, %v, %q, %q",
+					c.id, r.Status, r.RootEnded, r.WeftVersion, r.ManifestHash, c.status, c.rootEnded, c.version, c.manifest)
+			}
+		}
+		if r, _ := db.Run(ctx(), "r_bad"); r.Err != "boom" {
+			t.Errorf("failed root's error = %q, want the span's description", r.Err)
+		}
+		for st, want := range map[obsdb.Status]string{
+			obsdb.StatusSucceeded: "r_tail,r_tracer", obsdb.StatusFailed: "r_bad",
+			obsdb.StatusInterrupted: "r_chat", obsdb.StatusRunning: "",
+		} {
+			page, err := db.Runs(ctx(), obsdb.RunQuery{Status: st})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := idsOf(page.Runs)
+			sort.Strings(got)
+			if strings.Join(got, ",") != want {
+				t.Errorf("status filter %s = %v, want %s", st, got, want)
+			}
+		}
+		sp, err := db.Sessions(ctx(), obsdb.SessionQuery{PublicID: "pub_root"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(sp.Sessions) != 1 || sp.Sessions[0].Status != obsdb.StatusSucceeded {
+			t.Errorf("session of a root-ended turn = %+v, want one session, succeeded", sp.Sessions)
+		}
+		// The sweep's not-running test: a fresh root-ended run is
+		// sweepable (it ended), a run that never ended is not while fresh.
+		fresh := record("r_fresh", "event", "run_start", 0, `{"type":"run_start","id":"r_fresh"}`, nil)
+		fresh.Time = now
+		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{fresh}}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Sweep(ctx(), now.Add(time.Hour)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Run(ctx(), "r_tracer"); !errors.Is(err, obsdb.ErrNotFound) {
+			t.Errorf("sweep left the root-ended r_tracer: %v", err)
+		}
+		if _, err := db.Run(ctx(), "r_fresh"); err != nil {
+			t.Errorf("sweep removed the running r_fresh: %v", err)
 		}
 	}
 }

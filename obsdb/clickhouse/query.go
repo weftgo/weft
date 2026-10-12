@@ -28,7 +28,7 @@ const runColumns = `RunId, ParentRunID, ParentCallID, TraceID, Agent, Provider, 
 	ExperimentID, ForkedFrom, Meta, Started, Finished, LastSeen, FinishedOK,
 	Failed, Err, Steps, Pending, StopReason, InputTokens, OutputTokens,
 	CachedInputTokens, CacheWriteTokens, ReasoningTokens, DeltaCount,
-	InstructionsHash, CatalogHash, RequestCount, Derived`
+	InstructionsHash, CatalogHash, RequestCount, Derived, RootEnded`
 
 // runAggregates is the same list as a GROUP BY RunId select: max for
 // identity strings, flags, usage and last-seen; min for started — the
@@ -45,16 +45,18 @@ const runAggregates = `RunId, max(ParentRunID) AS ParentRunID, max(ParentCallID)
 	max(CachedInputTokens) AS CachedInputTokens, max(CacheWriteTokens) AS CacheWriteTokens,
 	max(ReasoningTokens) AS ReasoningTokens, max(DeltaCount) AS DeltaCount,
 	max(InstructionsHash) AS InstructionsHash, max(CatalogHash) AS CatalogHash,
-	max(RequestCount) AS RequestCount, max(Derived) AS Derived`
+	max(RequestCount) AS RequestCount, max(Derived) AS Derived, max(RootEnded) AS RootEnded`
 
 // statusCase is the four-row table in SQL over weft_runs' columns: it
-// must agree with obsdb.DeriveStatus, whose test pins the boundaries.
+// must agree with obsdb.DeriveStatus, whose test pins the boundaries —
+// succeeded on a run_finish or on the stored invoke_agent span
+// (RootEnded, migration 0010).
 // One bind parameter precedes it: the interrupted cutoff
 // (now - InterruptedAfter) as integer nanoseconds — a positional
 // time.Time bind renders at Seconds scale (clickhouse-go's bind.go),
 // which would widen the running band by up to a second.
 const statusCase = `CASE WHEN Failed = 1 THEN 'failed'
-	WHEN FinishedOK = 1 THEN 'succeeded'
+	WHEN FinishedOK = 1 OR RootEnded = 1 THEN 'succeeded'
 	WHEN toUnixTimestamp64Nano(LastSeen) >= ? THEN 'running'
 	ELSE 'interrupted' END`
 
@@ -254,7 +256,7 @@ func (d *DB) queryRunRows(ctx context.Context, now time.Time, sql string, args .
 			&s.Meta, &s.Started, &s.Finished, &s.LastSeen, &s.FinishedOK, &s.Failed, &s.Err,
 			&s.Steps, &s.Pending, &s.StopReason,
 			&s.InTok, &s.OutTok, &s.CachedTok, &s.CacheWriteTok, &s.ReasonTok, &s.DeltaCount,
-			&s.InstructionsHash, &s.CatalogHash, &s.RequestCount, &s.Derived); err != nil {
+			&s.InstructionsHash, &s.CatalogHash, &s.RequestCount, &s.Derived, &s.RootEnded); err != nil {
 			return nil, err
 		}
 		row, err := s.row(now)
@@ -282,7 +284,7 @@ type runScan struct {
 	DeltaCount                                         int64
 	InstructionsHash, CatalogHash                      string
 	RequestCount                                       int64
-	Derived                                            bool
+	Derived, RootEnded                                 bool
 }
 
 func (s *runScan) row(now time.Time) (obsdb.RunRow, error) {
@@ -301,7 +303,7 @@ func (s *runScan) row(now time.Time) (obsdb.RunRow, error) {
 		},
 		DeltaCount:       s.DeltaCount,
 		InstructionsHash: s.InstructionsHash, CatalogHash: s.CatalogHash, RequestCount: s.RequestCount,
-		Derived: s.Derived,
+		Derived: s.Derived, RootEnded: s.RootEnded,
 	}
 	if s.Finished != nil {
 		f := s.Finished.UTC()
@@ -314,7 +316,7 @@ func (s *runScan) row(now time.Time) (obsdb.RunRow, error) {
 		}
 		row.Meta = obsdb.MetaOf(attrs)
 	}
-	row.Status = obsdb.DeriveStatus(s.Failed, s.FinishedOK, row.LastSeen, now)
+	row.Status = obsdb.DeriveStatus(s.Failed, s.FinishedOK || s.RootEnded, row.LastSeen, now)
 	return row, nil
 }
 
@@ -1016,7 +1018,7 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		sum(InputTokens) AS sInputTokens, sum(OutputTokens) AS sOutputTokens,
 		sum(CachedInputTokens) AS sCachedInputTokens, sum(CacheWriteTokens) AS sCacheWriteTokens,
 		sum(ReasoningTokens) AS sReasoningTokens,
-		argMax(FinishedOK, (Turn, Started)) AS sNewestOK, argMax(Failed, (Turn, Started)) AS sNewestFailed,
+		argMax(greatest(FinishedOK, RootEnded), (Turn, Started)) AS sNewestOK, argMax(Failed, (Turn, Started)) AS sNewestFailed,
 		argMax(LastSeen, (Turn, Started)) AS sNewestLastSeen
 		FROM `+runs+` GROUP BY SessionID`+havingSQL(having)+
 		` ORDER BY sLastSeen DESC LIMIT ? WITH TIES) ORDER BY sLastSeen DESC, SessionID DESC LIMIT ?`, append(pageArgs, limit, limit+obsdb.MaxTies)...)
@@ -1070,7 +1072,7 @@ func sessionRuns(narrow, cond string) string {
 	return `(SELECT * FROM (SELECT RunId, max(SessionID) AS SessionID, max(PublicID) AS PublicID,
 				max(Agent) AS Agent, max(ParentRunID) AS ParentRunID, max(Playground) AS Playground,
 				max(Turn) AS Turn, min(Started) AS Started, max(LastSeen) AS LastSeen,
-				max(FinishedOK) AS FinishedOK, max(Failed) AS Failed,
+				max(FinishedOK) AS FinishedOK, max(Failed) AS Failed, max(RootEnded) AS RootEnded,
 				max(InputTokens) AS InputTokens, max(OutputTokens) AS OutputTokens,
 				max(CachedInputTokens) AS CachedInputTokens, max(CacheWriteTokens) AS CacheWriteTokens,
 				max(ReasoningTokens) AS ReasoningTokens
@@ -1093,7 +1095,7 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 		sum(InputTokens) AS sInputTokens, sum(OutputTokens) AS sOutputTokens,
 		sum(CachedInputTokens) AS sCachedInputTokens, sum(CacheWriteTokens) AS sCacheWriteTokens,
 		sum(ReasoningTokens) AS sReasoningTokens,
-		argMax(FinishedOK, (Turn, Started)) AS sNewestOK, argMax(Failed, (Turn, Started)) AS sNewestFailed,
+		argMax(greatest(FinishedOK, RootEnded), (Turn, Started)) AS sNewestOK, argMax(Failed, (Turn, Started)) AS sNewestFailed,
 		argMax(LastSeen, (Turn, Started)) AS sNewestLastSeen
 		FROM `+sessionRuns(
 		" WHERE RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.SessionID = ?)",

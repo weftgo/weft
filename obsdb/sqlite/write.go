@@ -25,7 +25,9 @@ import (
 // earliest winning: run_start's time, or the invoke_agent span's just
 // before it) and fills empty identity columns; run_finish sets the
 // terminal fields; the invoke_agent span sets trace, finish, usage,
-// steps and, on error, failed and err. A run first seen through a later
+// steps, root_ended and, on error, failed and err; any weft span fills an
+// empty weft_version (its attribute, else its resource's) and
+// manifest_hash. A run first seen through a later
 // record (a reordered batch) gets a provisional started_ns, corrected
 // when the earlier rows land. A stock GenAI span (no weft.run.id,
 // obsdb.StockCandidate) re-derives its trace's derived runs
@@ -194,8 +196,8 @@ func upsertDerived(ctx context.Context, tx *sql.Tx, r obsdb.RunRow) error {
 	_, err := tx.ExecContext(ctx, `INSERT INTO runs
 		(run_id, parent_run_id, parent_call_id, trace_id, agent, provider, model, service, session_id,
 		 started_ns, finished_ns, last_seen_ns, finished_ok, failed, err, steps,
-		 input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens, derived)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)
+		 input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens, derived, root_ended)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,1)
 		ON CONFLICT (run_id) DO UPDATE SET
 		  parent_run_id = excluded.parent_run_id, parent_call_id = excluded.parent_call_id,
 		  trace_id = excluded.trace_id, agent = excluded.agent, provider = excluded.provider,
@@ -206,7 +208,7 @@ func upsertDerived(ctx context.Context, tx *sql.Tx, r obsdb.RunRow) error {
 		  input_tokens = excluded.input_tokens, output_tokens = excluded.output_tokens,
 		  cached_input_tokens = excluded.cached_input_tokens,
 		  cache_write_tokens = excluded.cache_write_tokens,
-		  reasoning_tokens = excluded.reasoning_tokens, derived = 1`,
+		  reasoning_tokens = excluded.reasoning_tokens, derived = 1, root_ended = 1`,
 		r.ID, r.ParentRunID, r.ParentCallID, r.TraceID, r.Agent, r.Provider, r.Model, r.Service, r.SessionID,
 		unixNS(r.Started), finished, unixNS(r.LastSeen),
 		boolInt(r.Status == obsdb.StatusSucceeded), boolInt(r.Status == obsdb.StatusFailed), r.Err, r.Steps,
@@ -398,6 +400,7 @@ type runUpdate struct {
 	finished     int64
 	setFinished  bool
 	finishedOK   bool
+	rootEnded    bool // the invoke_agent span arrived (runs.root_ended)
 	failed       bool
 	errText      string
 	traceID      string
@@ -498,9 +501,28 @@ func (u *runUpdate) applySpan(s obsdb.Span, w obsdb.Weft) {
 			u.mergeMeta(k, v)
 		}
 	}
+	// The identity a span carries beside the records' (contract §6): the
+	// manifest hash from its attributes, the version from its attributes,
+	// else its resource's (otel.Install stamps weft.version there) — so
+	// a run whose records were lost, or never emitted, still names both.
+	// Fill-if-empty like every identity column: a record's value, equal
+	// by construction, is as good.
+	if v := attrString(s.Attrs, "weft.manifest.hash"); v != "" && u.manifestHash == "" {
+		u.manifestHash = v
+	}
+	if u.weftVersion == "" {
+		if v := attrString(s.Attrs, "weft.version"); v != "" {
+			u.weftVersion = v
+		} else if v := attrString(s.Resource, "weft.version"); v != "" {
+			u.weftVersion = v
+		}
+	}
 	if !isInvokeAgent(s) {
 		return
 	}
+	// The root is exported only once it ended: the run is over, whatever
+	// records are missing (DeriveStatus's ended; an Error status is failed).
+	u.rootEnded = true
 	if s.TraceID != "" {
 		u.traceID = s.TraceID
 	}
@@ -681,6 +703,12 @@ func (u *runUpdate) applyDurable(ctx context.Context, tx *sql.Tx, r obsdb.Record
 	return nil
 }
 
+// attrString is m[k] when it is a non-empty string, else "".
+func attrString(m map[string]any, k string) string {
+	v, _ := m[k].(string)
+	return v
+}
+
 func attrInt64(m map[string]any, k string) (int64, bool) {
 	switch v := m[k].(type) {
 	case int64:
@@ -713,6 +741,7 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 	var ex struct {
 		started, lastSeen, finished sql.NullInt64
 		finishedOK, failed          bool
+		rootEnded                   bool
 		parentRun, parentC, traceID string
 		agent, provider, model      string
 		manifest, version, service  string
@@ -726,13 +755,13 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 		cachedTok, cacheWrite       int64
 		reasoningTok                int64
 	}
-	err := tx.QueryRowContext(ctx, `SELECT started_ns, last_seen_ns, finished_ns, finished_ok, failed,
+	err := tx.QueryRowContext(ctx, `SELECT started_ns, last_seen_ns, finished_ns, finished_ok, failed, root_ended,
 		parent_run_id, parent_call_id, trace_id, agent, provider, model, manifest_hash, weft_version,
 		service, session_id, public_id, turn, playground, experiment_id, forked_from, meta, err,
 		steps, pending, stop_reason,
 		input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens
 		FROM runs WHERE run_id = ?`, runID).
-		Scan(&ex.started, &ex.lastSeen, &ex.finished, &ex.finishedOK, &ex.failed,
+		Scan(&ex.started, &ex.lastSeen, &ex.finished, &ex.finishedOK, &ex.failed, &ex.rootEnded,
 			&ex.parentRun, &ex.parentC, &ex.traceID, &ex.agent, &ex.provider, &ex.model,
 			&ex.manifest, &ex.version, &ex.service, &ex.sessionID, &ex.publicID, &ex.turn,
 			&ex.playground, &ex.experiment, &ex.forked, &ex.meta, &ex.err,
@@ -758,16 +787,16 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 			(run_id, parent_run_id, parent_call_id, trace_id, agent, provider, model,
 			 manifest_hash, weft_version, service, session_id, public_id, turn,
 			 playground, experiment_id, forked_from, meta,
-			 started_ns, finished_ns, last_seen_ns, finished_ok, failed, err,
+			 started_ns, finished_ns, last_seen_ns, finished_ok, failed, root_ended, err,
 			 steps, pending, stop_reason,
 			 input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens,
 			 event_count, delta_count, message_count,
 			 instructions_hash, catalog_hash, request_count)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			runID, u.parentRunID, u.parentCallID, u.traceID, u.agent, u.provider, u.model,
 			u.manifestHash, u.weftVersion, u.service, u.sessionID, u.publicID, u.turn,
 			boolInt(u.playground), u.experimentID, u.forkedFrom, meta,
-			started, finished, lastSeen, boolInt(u.finishedOK), boolInt(u.failed), u.errText,
+			started, finished, lastSeen, boolInt(u.finishedOK), boolInt(u.failed), boolInt(u.rootEnded), u.errText,
 			u.steps, u.pending, u.stopReason,
 			u.usage.InputTokens, u.usage.OutputTokens, u.usage.CachedInputTokens,
 			u.usage.CacheWriteTokens, u.usage.ReasoningTokens,
@@ -790,6 +819,7 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 	}
 	finishedOK := ex.finishedOK || u.finishedOK
 	failed := ex.failed || u.failed
+	rootEnded := ex.rootEnded || u.rootEnded
 	usage := core.Usage{
 		InputTokens: ex.inTok, OutputTokens: ex.outTok,
 		CachedInputTokens: ex.cachedTok, CacheWriteTokens: ex.cacheWrite,
@@ -812,7 +842,7 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 		parent_run_id = ?, parent_call_id = ?, trace_id = ?, agent = ?, provider = ?, model = ?,
 		manifest_hash = ?, weft_version = ?, service = ?, session_id = ?, public_id = ?, turn = ?,
 		playground = ?, experiment_id = ?, forked_from = ?, meta = ?,
-		started_ns = ?, finished_ns = ?, last_seen_ns = ?, finished_ok = ?, failed = ?, err = ?,
+		started_ns = ?, finished_ns = ?, last_seen_ns = ?, finished_ok = ?, failed = ?, root_ended = ?, err = ?,
 		steps = ?, pending = ?, stop_reason = ?,
 		input_tokens = ?, output_tokens = ?, cached_input_tokens = ?, cache_write_tokens = ?, reasoning_tokens = ?,
 		event_count = event_count + ?, delta_count = MAX(delta_count, ?), message_count = message_count + ?,
@@ -829,7 +859,7 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 		boolInt(ex.playground || u.playground),
 		coalesce(ex.experiment, u.experimentID), coalesce(ex.forked, u.forkedFrom),
 		mergeMetaJSON(ex.meta, u.meta),
-		started, finished, lastSeen, boolInt(finishedOK), boolInt(failed), coalesce(ex.err, u.errText),
+		started, finished, lastSeen, boolInt(finishedOK), boolInt(failed), boolInt(rootEnded), coalesce(ex.err, u.errText),
 		steps, pending, stopReason,
 		usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens,
 		usage.CacheWriteTokens, usage.ReasoningTokens,

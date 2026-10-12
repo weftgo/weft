@@ -46,6 +46,10 @@
     "reason": "the record did not exist in the weft that wrote this run (v0.9.0 or earlier keeps no request, prompt or tools records, ADR 0028): nothing was lost, there was nothing to keep",
     "fix": "upgrade weft and re-run",
     "causes": {
+      "no_logger": {
+        "reason": "the app exported spans only: this run's spans arrived but none of its records did, so it has no events, transcript or request records",
+        "fix": "wire the logs too: pass weft.LoggerProvider(lp) beside weft.TracerProvider, or use otel.Install (it wires both)"
+      },
       "no_public_id": {
         "reason": "the session's turns carry no weft.public_id (a thread session is created without thread.PublicID)",
         "fix": "thread.Create(…, thread.PublicID(id)), or set weft.public_id on every turn"

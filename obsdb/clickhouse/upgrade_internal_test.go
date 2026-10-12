@@ -239,7 +239,101 @@ func TestUpgradeFrom0007AddsCommandStore(t *testing.T) {
 	if err := db.(*DB).conn.QueryRow(ctx, `SELECT max(version) FROM obsdb_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 9 {
-		t.Errorf("migration max after the upgrade = %d, want 9 (through 0009 the derived flag)", version)
+	if version != 10 {
+		t.Errorf("migration max after the upgrade = %d, want 10 (through 0010 root ended)", version)
+	}
+}
+
+// A database at 0009 — spans of a tracer-only run already stored, so
+// weft_runs holds the 0004 view's rows without RootEnded — opens through
+// 0010 on a live server, whose backfill marks the run root-ended from
+// its stored invoke_agent span: it reads succeeded, not interrupted,
+// with weft_version from the span's resource (docs/record-contract.md
+// §6). A run with a chat span alone stays interrupted.
+func TestUpgradeTo0010BackfillsRootEnded(t *testing.T) {
+	base := os.Getenv("WEFT_CLICKHOUSE_DSN")
+	if base == "" {
+		t.Skip("WEFT_CLICKHOUSE_DSN not set: the 0010 upgrade needs a clickhouse server (README has the one-line container recipe)")
+	}
+	ctx := context.Background()
+	u, err := url.Parse(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	suffix := make([]byte, 6)
+	if _, err := rand.Read(suffix); err != nil {
+		t.Fatal(err)
+	}
+	name := "weft_up_" + hex.EncodeToString(suffix)
+	admin := rawConn(t, base)
+	if err := admin.Exec(ctx, fmt.Sprintf("CREATE DATABASE `%s`", name)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = admin.Exec(context.Background(), fmt.Sprintf("DROP DATABASE IF EXISTS `%s`", name))
+		_ = admin.Close()
+	})
+	u.Path = "/" + name
+	dsn := u.String()
+
+	conn := rawConn(t, dsn)
+	if err := conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS obsdb_migrations (
+		version UInt32, name String, applied_at DateTime DEFAULT now()
+	) ENGINE = MergeTree ORDER BY version`); err != nil {
+		t.Fatal(err)
+	}
+	for v := 1; v <= 9; v++ {
+		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, stmt := range splitStatements(string(body)) {
+			if err := conn.Exec(ctx, stmt); err != nil {
+				t.Fatalf("migration %d: %v", v, err)
+			}
+		}
+		if err := conn.Exec(ctx, `INSERT INTO obsdb_migrations (version, name) VALUES (?, ?)`, uint32(v), migrations[v]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	old := time.Now().UTC().Add(-time.Hour)
+	span := func(run, id, name, op string) obsdb.Span {
+		return obsdb.Span{TraceID: "0102030405060708090a0b0c0d0e0f10", SpanID: id, Name: name, Kind: 1,
+			Start: old, End: old.Add(time.Second), StatusCode: 1, Service: "svc",
+			Attrs:    map[string]any{"gen_ai.operation.name": op, "weft.run.id": run, "weft.manifest.hash": "sha256:mh"},
+			Resource: map[string]any{"service.name": "svc", "weft.version": "v0.15.0"}}
+	}
+	if err := (&DB{conn: conn}).Write(ctx, obsdb.Batch{Spans: []obsdb.Span{
+		span("r_tracer", "0a0b0c0d0e0f0101", "invoke_agent a", "invoke_agent"),
+		span("r_chat", "0a0b0c0d0e0f0102", "chat m", "chat"),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.Close()
+
+	db, err := Open(dsn)
+	if err != nil {
+		t.Fatalf("open a 0009 database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	for _, c := range []struct {
+		id      string
+		ended   bool
+		status  obsdb.Status
+		version string
+	}{
+		{"r_tracer", true, obsdb.StatusSucceeded, "v0.15.0"},
+		// The 0004 view never read the resource; 0010's backfill reads it
+		// from every weft span, as obsdb/sqlite's 0009 does.
+		{"r_chat", false, obsdb.StatusInterrupted, "v0.15.0"},
+	} {
+		r, err := db.Run(ctx, c.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.RootEnded != c.ended || r.Status != c.status || r.WeftVersion != c.version || r.ManifestHash != "sha256:mh" {
+			t.Errorf("%s after 0010 = root_ended %v, %s, version %q, manifest %q; want %v, %s, %q, sha256:mh",
+				c.id, r.RootEnded, r.Status, r.WeftVersion, r.ManifestHash, c.ended, c.status, c.version)
+		}
 	}
 }

@@ -98,11 +98,16 @@ const (
 	// producer is not weft, so it recorded no events, transcript or
 	// request records (derived: every pane those would fill).
 	CauseStockSpans HoleCause = "stock_spans"
+	// CauseNoLogger: a weft run's spans were stored and none of its
+	// records was — the app exported spans only, a tracer wired and no
+	// logger (not_recorded: events, the transcript and the request
+	// records; LostRecordsHole decides it).
+	CauseNoLogger HoleCause = "no_logger"
 )
 
 // HoleCauses lists the causes the table words, in order.
 func HoleCauses() []HoleCause {
-	return []HoleCause{CauseNoSpans, CauseResultCap, CauseLogCap, CauseNoPublicID, CauseDevTokenOnly, CauseNotServed, CauseResponseCap, CauseRawOff, CauseStockSpans}
+	return []HoleCause{CauseNoSpans, CauseResultCap, CauseLogCap, CauseNoPublicID, CauseDevTokenOnly, CauseNotServed, CauseResponseCap, CauseRawOff, CauseStockSpans, CauseNoLogger}
 }
 
 var causeNotes = map[Hole]map[HoleCause]holeNote{
@@ -122,6 +127,10 @@ var causeNotes = map[Hole]map[HoleCause]holeNote{
 		CauseNotServed: {
 			"this Studio does not serve the request record (no requests capability): the run may hold one",
 			"open the run in a Studio that serves it (upgrade Studio, or enable the requests group)",
+		},
+		CauseNoLogger: {
+			"the app exported spans only: this run's spans arrived but none of its records did, so it has no events, transcript or request records",
+			"wire the logs too: pass weft.LoggerProvider(lp) beside weft.TracerProvider, or use otel.Install (it wires both)",
 		},
 	},
 	HoleDerived: {
@@ -429,6 +438,30 @@ func (r RunRow) RequestsHole() Hole {
 		return HoleNotRecorded
 	}
 	return ""
+}
+
+// LostRecordsHole is the hole of a weft run whose spans were stored
+// and none of whose records was (no event, messages or request record):
+// not_recorded with CauseNoLogger — the app exported spans only. "" for
+// any other run: one with a record, one with no span (hasSpans false:
+// the reader's, from DB.RunSpans), a running one (its records may be in
+// flight) and a derived run (RunRow.Derived: stock spans are no weft
+// app, its badge is derived's own, docs/record-contract.md §9).
+//
+// The seam U5 widens (weft.run.events on the invoke_agent span, the
+// number of event records the core emitted): a root that says N > 0
+// were emitted while none was stored is every record lost on the way,
+// a gap ("every record was lost"), not an app without a logger. Until
+// the root carries that count the two read alike, and this answers the
+// commoner one.
+func LostRecordsHole(r RunRow, hasSpans bool) (Hole, HoleCause) {
+	if r.Derived || !hasSpans || r.Status == StatusRunning {
+		return "", CauseDefault
+	}
+	if r.EventCount > 0 || r.MessageCount > 0 || r.RequestCount > 0 {
+		return "", CauseDefault
+	}
+	return HoleNotRecorded, CauseNoLogger
 }
 
 // StoredRecord is one request, prompt or tools record as a backend

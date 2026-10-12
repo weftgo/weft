@@ -169,7 +169,10 @@ func otherLogs(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		}
 		// A running run with spans: partial, and a line under a span not
 		// stored yet is no gap (the span may still arrive).
-		live := invokeSpan("r_live", 1, nil)
+		live := invokeSpan("r_live", 1, map[string]any{"gen_ai.operation.name": "chat"})
+		// A chat span, not the root: a stored invoke_agent span ends
+		// the run (DeriveStatus's ended), and this one is still running.
+		live.Name = "chat conf"
 		live.TraceID, live.SpanID = "c1"+trace[2:], "3000000000000001"
 		start := record("r_live", "event", "run_start", 0, `{"type":"run_start","id":"r_live"}`, nil)
 		start.Time = time.Now().UTC()

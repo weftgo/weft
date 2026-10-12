@@ -300,7 +300,7 @@ func observeRuns(t *testing.T, db obsdb.DB) []contractRun {
 			t.Fatal(err)
 		}
 		c.Chat, c.Tools = spanSteps(spans)
-		c.Holes = runHoles(t, db, r)
+		c.Holes = runHoles(t, db, r, len(spans) > 0)
 		out = append(out, c)
 	}
 	return out
@@ -371,10 +371,13 @@ func intAttr(m map[string]any, k string, def int64) int64 {
 // max_tokens from the stop reason, stripped and truncated from the
 // events' content marks, gap from the event counter's holes, compacted
 // from a run-scope view.
-func runHoles(t *testing.T, db obsdb.DB, r obsdb.RunRow) []obsdb.Hole {
+func runHoles(t *testing.T, db obsdb.DB, r obsdb.RunRow, hasSpans bool) []obsdb.Hole {
 	t.Helper()
 	ctx := context.Background()
 	set := map[obsdb.Hole]bool{}
+	if h, _ := obsdb.LostRecordsHole(r, hasSpans); h != "" {
+		set[h] = true // not_recorded, cause no_logger: spans stored, no record (§7)
+	}
 	if h := r.RequestsHole(); h != "" {
 		set[h] = true // derived for a derived run, in place of not_recorded (§9)
 	}
@@ -1445,7 +1448,99 @@ func genCases() []genCase {
 				return []string{res.ID}
 			},
 		},
+		{
+			name: "tracer_only",
+			desc: "the tool_calls run from an app that wired a tracer and no logger: spans only, no record at all — the stored invoke_agent span (status Ok) ends the run, so it reads succeeded, never interrupted; steps, usage and stop_reason from the span, weft_version and manifest_hash from the span's attributes; the not_recorded badge (cause no_logger)",
+			dest: content,
+			run:  tracerOnly(false),
+			edit: dropLogs,
+		},
+		{
+			name: "tracer_only_failed",
+			desc: "the failed run (MaxSteps(1)) from an app that wired a tracer and no logger: spans only — the invoke_agent span's Error status reads failed with its description, no run_finish needed; the not_recorded badge (cause no_logger)",
+			dest: content,
+			run:  tracerOnly(true),
+			edit: dropLogs,
+		},
+		{
+			name: "tail_lost",
+			desc: "the tool_calls run whose record tail a destination dropped: every record after the tool_finish lost (step 1's records and run_finish), every span kept — the stored invoke_agent span (status Ok) ends the run, so it reads succeeded, not interrupted; steps, usage and stop_reason from the span",
+			dest: content,
+			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+				agt := pipelineAgent(p, "support", wefttest.Script(
+					wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"1234"}`}),
+					wefttest.Say("Order 1234 has shipped.")),
+					core.Instructions("You are a support agent."), lookupTool())
+				return []string{mustRun(t, ctx, agt, core.Prompt("Where is order 1234?")).ID}
+			},
+			edit: func(_ *coltracepb.ExportTraceServiceRequest, lg *collogspb.ExportLogsServiceRequest) {
+				// The records in arrival order; everything after the last
+				// tool_finish is the lost tail.
+				last, n := -1, 0
+				for _, rl := range lg.GetResourceLogs() {
+					for _, sl := range rl.GetScopeLogs() {
+						for _, r := range sl.GetLogRecords() {
+							if kvString(r.Attributes, "weft.event.type") == "tool_finish" {
+								last = n
+							}
+							n++
+						}
+					}
+				}
+				if last < 0 {
+					panic("tail_lost: the run emitted no tool_finish record")
+				}
+				n = 0
+				for _, rl := range lg.GetResourceLogs() {
+					for _, sl := range rl.GetScopeLogs() {
+						kept := sl.LogRecords[:0]
+						for _, r := range sl.GetLogRecords() {
+							if n <= last {
+								kept = append(kept, r)
+							}
+							n++
+						}
+						sl.LogRecords = kept
+					}
+				}
+			},
+		},
 	}
+}
+
+// tracerOnly runs the tool_calls run (failing at MaxSteps(1) when
+// failed) on an agent wired to the pipeline's tracer and no logger:
+// core.LoggerProvider is not passed (the global one, a no-op under
+// otel.NoGlobal), so the core emits no record — dropLogs makes that
+// exact whatever the global holds.
+func tracerOnly(failed bool) func(*testing.T, context.Context, *otel.Pipeline, *otlpCapture) []string {
+	return func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+		opts := []core.Option{core.Name("support"), core.TracerProvider(p.TracerProvider()),
+			core.Instructions("You are a support agent."), lookupTool()}
+		if failed {
+			opts = append(opts, core.MaxSteps(1))
+		}
+		agt := core.New(wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"1234"}`}),
+			wefttest.Say("Order 1234 has shipped.")), opts...)
+		res, err := agt.Generate(ctx, core.Prompt("Where is order 1234?"))
+		if !failed {
+			if err != nil {
+				t.Fatal(err)
+			}
+			return []string{res.ID}
+		}
+		var re *core.RunError
+		if !errors.As(err, &re) || !errors.Is(err, core.ErrMaxSteps) {
+			t.Fatalf("want a max-steps *RunError, got %v", err)
+		}
+		return []string{re.Result.ID}
+	}
+}
+
+// dropLogs removes every log record: what a tracer-only app exports.
+func dropLogs(_ *coltracepb.ExportTraceServiceRequest, lg *collogspb.ExportLogsServiceRequest) {
+	lg.ResourceLogs = nil
 }
 
 // instructionsHashField is run_start's instructions_hash body field.

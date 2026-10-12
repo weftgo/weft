@@ -26,7 +26,7 @@ const deleteChunk = 400
 // runGroup is weft_runs as one row per run: the four columns deletion
 // and the sweep read.
 const runGroup = `(SELECT RunId, max(ParentRunID) AS P, max(LastSeen) AS L,
-	max(FinishedOK) AS F, max(Failed) AS X FROM weft_runs GROUP BY RunId)`
+	max(greatest(FinishedOK, RootEnded)) AS F, max(Failed) AS X FROM weft_runs GROUP BY RunId)`
 
 // notRunning is the sweep's status test over runGroup (statusCase's
 // rows other than running); one bind: now - InterruptedAfter in ns.

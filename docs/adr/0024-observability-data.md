@@ -311,6 +311,28 @@ heartbeats keep a quiet run "running" and are themselves never stored
 as rows, they only move last-seen); writes are idempotent on (run id,
 record kind, position); reads are loud on the unknown.
 
+Amendment, 2026-10-12 — the status table reads the root span as an end
+(UX audit D1; findings UX-E-01..03). A run whose `invoke_agent` span is
+stored is over: the span is exported only once it ended, which is
+stock OTel's own meaning of a finished operation, so `run_finish` is no
+longer the one witness of success. The table is now: `failed` if the
+root's status is `Error`; else `succeeded` if a `run_finish` exists
+**or** the root is stored (any other status); else `running` or
+`interrupted` by last-seen, the 30 s window unchanged. Both backends
+keep the fact as a column set at ingest (`obsdb/sqlite` migration 0009
+`runs.root_ended`, `obsdb/clickhouse` 0010 `weft_runs.RootEnded`, each
+backfilled from the spans already stored) and `obsdb.DeriveStatus`'s
+second argument is "ended" (a `run_finish` or the root). Before it, a
+tracer-only app's runs and every run whose record tail a destination
+dropped read `interrupted` — the crash signal — 30 s after they ended.
+In the same change the run row's `weft_version` and `manifest_hash` fill
+from the span (its attributes, the version also from its resource) when
+no record names them, and a weft run with spans and no record badges
+`not_recorded`, cause `no_logger` — never `derived`, which stays the
+stock-span run's (ADR 0028 §11's table gains a cause, not a badge).
+`docs/record-contract.md` §6, §7 and the `tracer_only`,
+`tracer_only_failed` and `tail_lost` fixtures are the contract.
+
 ### Content: off by default, on through `Install`
 
 Content (text, args, results, messages) is off by default in the core —

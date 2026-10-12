@@ -854,13 +854,14 @@ func (s *Server) childRows(ctx context.Context, c *coster, kids []obsdb.RunRow) 
 //   - gap: the row counts request records (the records arrived, the
 //     events beside them did not), or counts steps with no span to
 //     have counted them (a row whose events were dropped);
-//   - derived: spans hold the run — its row was built from them by the
-//     reader (a tracer without a logger records no events at all, so
-//     spans alone are no gap).
+//   - not_recorded, cause no_logger: spans hold the run and no record of
+//     it was stored — the app exported spans only
+//     (obsdb.LostRecordsHole, docs/record-contract.md §7).
 //
 // Nothing for a run with events, or a running one (in flight). A
 // derived run (obsdb.RunRow.Derived) has none by construction: its one
-// badge is derivedBadge's, never a gap.
+// badge is derivedBadge's — derived is a stock-span run's alone, never
+// a weft run's whose records are missing.
 func lostEvents(rec obsdb.RunRow, hasSpans bool) []badgeFields {
 	if rec.EventCount > 0 || rec.Status == obsdb.StatusRunning {
 		return nil
@@ -874,10 +875,8 @@ func lostEvents(rec obsdb.RunRow, hasSpans bool) []badgeFields {
 			Reason: "the run counts steps or model calls, but none of its events was stored: a destination dropped them",
 			Fix:    holeFix(obsdb.HoleGap)})
 	}
-	if hasSpans {
-		out = append(out, badgeFields{Badge: string(obsdb.HoleDerived),
-			Reason: "this run has spans but no stored events: its row was built from its spans by the reader",
-			Fix:    holeFix(obsdb.HoleDerived)})
+	if h, cause := obsdb.LostRecordsHole(rec, hasSpans); h != "" {
+		out = append(out, badgeFor(h, cause))
 	}
 	return out
 }
@@ -888,11 +887,13 @@ func lostEvents(rec obsdb.RunRow, hasSpans bool) []badgeFields {
 //   - derived: a run built from stock spans (obsdb.RunRow.Derived,
 //     docs/record-contract.md §9) — derivedBadge's words, first, so
 //     every later reason for the badge yields to it;
-//   - not_recorded: RequestsHole — written before the request record;
+//   - not_recorded: no stored record beside its spans (lostEvents,
+//     cause no_logger: the app exported spans only) — read first, so
+//     its words win over RequestsHole's for the same badge; else
+//     RequestsHole — written before the request record;
 //   - interrupted: the derived status (obsdb.InterruptedAfter);
-//   - gap or derived: no stored event (lostEvents) — counted steps or
-//     requests whose events were dropped, or a row built from its
-//     spans alone;
+//   - gap: no stored event (lostEvents) — counted steps or requests
+//     whose events were dropped;
 //   - stripped: its events came through a content-off chain, or the
 //     core captured none (the run_start's weft.content: stripped or
 //     none);
@@ -913,15 +914,6 @@ func (s *Server) runHoles(ctx context.Context, rec obsdb.RunRow) ([]stepHole, er
 		b := derivedBadge()
 		holes.add(obsdb.HoleDerived, b.Reason, b.Fix)
 	}
-	if h := rec.RequestsHole(); h != "" {
-		holes.note(h)
-	}
-	if rec.Status == obsdb.StatusInterrupted {
-		holes.note(obsdb.HoleInterrupted)
-	}
-	if reason, fix := replayViewHole(rec); reason != "" {
-		holes.also(obsdb.HoleDerived, reason, fix)
-	}
 	if rec.EventCount == 0 && rec.Status != obsdb.StatusRunning {
 		sp, err := s.db.RunSpans(ctx, rec.ID)
 		if err != nil {
@@ -930,6 +922,15 @@ func (s *Server) runHoles(ctx context.Context, rec obsdb.RunRow) ([]stepHole, er
 		for _, b := range lostEvents(rec, len(sp) > 0) {
 			holes.add(obsdb.Hole(b.Badge), b.Reason, b.Fix)
 		}
+	}
+	if h := rec.RequestsHole(); h != "" {
+		holes.note(h)
+	}
+	if rec.Status == obsdb.StatusInterrupted {
+		holes.note(obsdb.HoleInterrupted)
+	}
+	if reason, fix := replayViewHole(rec); reason != "" {
+		holes.also(obsdb.HoleDerived, reason, fix)
 	}
 
 	if rec.EventCount > 0 {

@@ -1038,9 +1038,9 @@ func TestChildHoles(t *testing.T) {
 // TestLostEventsOneRule: the run document's holes and the export's
 // events block read a run with no stored event by one rule
 // (lostEvents): request records but no event is a gap, with the same
-// reason on both; spans alone are derived (the row built from them);
-// neither — a row whose only record is a messages batch — is nothing,
-// never "built from its spans".
+// reason on both; spans alone are not_recorded in no_logger's words (the
+// app exported spans only — never derived, a stock-span run's badge);
+// neither — a row whose only record is a messages batch — is nothing.
 func TestLostEventsOneRule(t *testing.T) {
 	ts, srv := requestsServer(t)
 	old := time.Now().UTC().Add(-time.Hour)
@@ -1060,7 +1060,7 @@ func TestLostEventsOneRule(t *testing.T) {
 	type holeT struct{ Hole, Reason, Fix string }
 	for _, c := range []struct {
 		run, want string // the lost-events badge, "" for none
-	}{{"r_reqonly", "gap"}, {"r_spanonly", "derived"}, {"r_msgonly", ""}} {
+	}{{"r_reqonly", "gap"}, {"r_spanonly", "not_recorded"}, {"r_msgonly", ""}} {
 		var doc struct {
 			Holes []holeT `json:"holes"`
 		}
@@ -1074,7 +1074,10 @@ func TestLostEventsOneRule(t *testing.T) {
 		decode(t, string(body), &x)
 		var runHole *holeT
 		for i := range doc.Holes {
-			if h := doc.Holes[i].Hole; h == "gap" || h == "derived" {
+			// not_recorded in no_logger's words only: RequestsHole's own
+			// (a row with no request record) is not the lost-events rule.
+			noLogger, _ := obsdb.HoleNoteFor(obsdb.HoleNotRecorded, obsdb.CauseNoLogger)
+			if h := doc.Holes[i].Hole; h == "gap" || h == "derived" || (h == "not_recorded" && doc.Holes[i].Reason == noLogger) {
 				runHole = &doc.Holes[i]
 			}
 		}

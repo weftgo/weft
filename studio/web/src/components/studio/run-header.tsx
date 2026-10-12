@@ -13,6 +13,8 @@ import {
   derivedUsageUnknown,
   isDerived,
   mergeHoles,
+  SETTLING_HINT,
+  SETTLING_WORD,
   statusHoles,
 } from "@/lib/honesty"
 import {
@@ -386,6 +388,17 @@ export function RunHeader({
           />
         </h1>
         <StatusChip status={doc.status} />
+        {/* Settling: the status word stays (it is the root's), the note
+            says the story may stop short while its records trail. */}
+        {doc.settling ? (
+          <span
+            className="rounded-sm border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+            title={SETTLING_HINT}
+            data-settling
+          >
+            {SETTLING_WORD}
+          </span>
+        ) : null}
         <StoppedByChip doc={doc} />
         <span className="text-sm font-medium">
           {doc.agent || (

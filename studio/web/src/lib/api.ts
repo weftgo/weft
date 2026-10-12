@@ -81,6 +81,12 @@ export interface RunRow extends CostFields, DelegatedCostFields {
   finished: string | null
   last_seen: string
   status: RunStatus
+  /** The root span is stored (status reads succeeded or failed from
+   * it), the run_finish record is not, and the run was heard from
+   * within 30 s (api.go's runRow.settling): its records may still
+   * arrive — lib/honesty.ts's isLive keeps it followed. Absent
+   * otherwise, and from a Studio older than the field. */
+  settling?: boolean
   err: string
   steps: number
   pending: number

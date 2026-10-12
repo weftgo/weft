@@ -42,6 +42,11 @@ export function stoppedByWords(by?: string, cause?: string): StopWords | null {
       word: `stopped by the tool call ${arg}`,
       hint: `${SW}HasToolCall(${arg})`,
     }
+  if (k === "step_count_is" && i > 0 && !arg)
+    return {
+      word: "stopped by a step count (StopWhen)",
+      hint: `${SW}StepCountIs()`,
+    }
   if (k === "step_count_is" && arg)
     return {
       word: `stopped after ${arg} steps`,

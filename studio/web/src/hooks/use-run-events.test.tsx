@@ -325,6 +325,34 @@ describe("useRunEvents walk and tail", () => {
     expect(onRun).toHaveBeenCalledWith({ id: "r1", status: "succeeded" })
   })
 
+  // A settling run (lib/honesty.ts's isLive, U2-fix2): its status is
+  // already terminal from its root, its records still trail — it is
+  // followed like a running one, and drained once it stops settling.
+  it("follows a settling run and drains it when it settles", async () => {
+    const fetchMock = vi.fn(async () => json(pageOf([0], null)))
+    vi.stubGlobal("fetch", withLiveGrant(fetchMock))
+    const { rerender } = renderHook(
+      ({ settling }: { settling: boolean }) =>
+        useRunEvents("r1", "succeeded", { live: true, settling }),
+      { initialProps: { settling: true } }
+    )
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1))
+    rerender({ settling: false })
+    await waitFor(() => expect(FakeEventSource.open()).toHaveLength(0))
+  })
+
+  it("opens no tail for a terminal run that is not settling", async () => {
+    vi.stubGlobal(
+      "fetch",
+      withLiveGrant(vi.fn(async () => json(pageOf([0], null, true))))
+    )
+    const { result } = renderHook(() =>
+      useRunEvents("r1", "succeeded", { live: true })
+    )
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(FakeEventSource.instances).toHaveLength(0)
+  })
+
   it("closes its stream and stops polling on unmount", async () => {
     const fetchMock = vi.fn(async () => json(pageOf([0], null)))
     vi.stubGlobal("fetch", withLiveGrant(fetchMock))

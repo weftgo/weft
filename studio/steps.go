@@ -883,11 +883,12 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 				doc.Status = stepParked
 			}
 		}
-	case !evs.found && (det.Status == obsdb.StatusRunning || det.Settling):
+	case !evs.found && (det.Status == obsdb.StatusRunning || (det.Settling && det.Status != obsdb.StatusFailed)):
 		// Named by a request record of a running run whose step_start
 		// is not stored yet, or counted by a settling run's root span
 		// (obsdb.RunRow.Settling: the records behind it may still
-		// land): in flight, not lost.
+		// land): in flight, not lost. Not a failed root's: its steps
+		// read the run's outcome, as the found-events branch does.
 		doc.Status = stepRunning
 	case !evs.found && derived:
 		// No event of a derived run exists: the chat span's status is
@@ -905,7 +906,9 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 		if h, cause := obsdb.LostRecordsHole(det.RunRow, len(allSpans) > 0); h != "" {
 			b := badgeFor(h, cause)
 			holes.add(h, b.Reason, b.Fix)
-		} else {
+		} else if !det.Settling {
+			// A settling (failed) run's events may still land: no gap
+			// until the window has passed, LostRecordsHole's rule.
 			holes.add(obsdb.HoleGap, "the run counts this step, but no event of it was stored: a destination dropped its records", holeFix(obsdb.HoleGap))
 		}
 		doc.Status = stepOK
@@ -1022,7 +1025,9 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 				}
 			}
 		}
-	case modelCalled:
+	case modelCalled && doc.Status != stepRunning && !det.Settling:
+		// Not while the step runs or the run settles: the record may
+		// still land (Messages in's rule below).
 		gap := badgeFields{Badge: string(obsdb.HoleGap), Reason: "the step called the model, but no request record of it was stored", Fix: holeFix(obsdb.HoleGap)}
 		doc.Request = gap
 		holes.add(obsdb.HoleGap, gap.Reason, gap.Fix)
@@ -1187,7 +1192,10 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 	case reqHole != "":
 		doc.MessagesIn.badgeFields = badgeFor(reqHole, reqCause)
 	case first == nil:
-		if modelCalled {
+		// A running step, or any step of a settling run (its records
+		// may trail its stored root span), is not missing its request
+		// record yet: no gap until the window has passed.
+		if modelCalled && doc.Status != stepRunning && !det.Settling {
 			doc.MessagesIn.badgeFields = badgeFields{Badge: string(obsdb.HoleGap), Reason: "no request record of the step was stored", Fix: holeFix(obsdb.HoleGap)}
 		}
 	default:

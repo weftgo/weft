@@ -16,6 +16,8 @@ import {
   isDerived,
   kib,
   resultCapReason,
+  SETTLING_HINT,
+  SETTLING_WORD,
 } from "../lib/honesty"
 import type { ContentAttrs, HoleMark } from "../lib/honesty"
 import {
@@ -295,6 +297,9 @@ export function turnChips(
     )
   } else if (r.experiment_id)
     chip("experiment", `weft.experiment.id = ${r.experiment_id}`, "experiment")
+  // Settling (U2-fix2): the root is stored, its records may still
+  // trail — the run page's header note, its words.
+  if (r.settling) chip(SETTLING_WORD, SETTLING_HINT, "settling")
   // What ended the turn (U3.2): the run page's header chip, its words.
   const stop = stopChip(r)
   if (stop) chip(stop.text, stop.title, "stopped-by")

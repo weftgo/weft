@@ -3,6 +3,7 @@ package studio
 import (
 	"context"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -151,5 +152,141 @@ func TestTailLostAndSpansOnly(t *testing.T) {
 	decode(t, body, &reqs)
 	if reqs.Badge != string(obsdb.HoleNotRecorded) || reqs.Reason != noLogger || reqs.Fix != noLoggerFix {
 		t.Errorf("spans-only requests = %+v, want not_recorded in no_logger's words", reqs)
+	}
+}
+
+// TestSettlingServed: the settling window reaches the API — the run
+// document and the run rows carry settling while a root-ended run's
+// records may still land, a failed spans-only root's steps read error
+// (never running under a failed header) with no record called lost,
+// and a settling spans-only step's Messages-in pane names no gap (the
+// U2 re-review's findings 1–3).
+func TestSettlingServed(t *testing.T) {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	now := time.Now().UTC()
+	ok := fxSpanRec("r_ok", now.Add(-time.Second), now, 1, "", 1, 1)
+	chat := fxSpanRec("r_ok", now.Add(-time.Second), now, 1, "", 1, 1)
+	chat.SpanID, chat.ParentSpanID, chat.Name = "0a0b0c0d0e0f1020", ok.SpanID, "chat script"
+	chat.Attrs["gen_ai.operation.name"] = "chat"
+	chat.Attrs["weft.step.index"] = int64(0)
+	failed := fxSpanRec("r_fail", now.Add(-time.Second), now, 2, "model exploded", 1, 1)
+	if err := db.Write(context.Background(), obsdb.Batch{Spans: []obsdb.Span{ok, chat, failed}}); err != nil {
+		t.Fatal(err)
+	}
+	h := Handler(DB(db))
+
+	var doc struct {
+		Status   string `json:"status"`
+		Settling bool   `json:"settling"`
+	}
+	_, _, body := get(t, h, "/studio/api/runs/r_ok")
+	decode(t, body, &doc)
+	if doc.Status != "succeeded" || !doc.Settling {
+		t.Errorf("run doc = %s settling %v, want succeeded and settling: %s", doc.Status, doc.Settling, body)
+	}
+	var list struct {
+		Runs []struct {
+			ID       string `json:"id"`
+			Settling bool   `json:"settling"`
+		} `json:"runs"`
+	}
+	_, _, body = get(t, h, "/studio/api/runs")
+	decode(t, body, &list)
+	if len(list.Runs) != 2 {
+		t.Fatalf("runs = %s, want two rows", body)
+	}
+	for _, r := range list.Runs {
+		if !r.Settling {
+			t.Errorf("run row %s: settling false, want true", r.ID)
+		}
+	}
+
+	// Finding 2: a failed root decides its steps' outcome at once.
+	var step struct {
+		holesDoc
+		MessagesIn struct {
+			Badge  string `json:"badge"`
+			Reason string `json:"reason"`
+		} `json:"messages_in"`
+	}
+	code, _, body := get(t, h, "/studio/api/runs/r_fail/steps/0")
+	if code != http.StatusOK {
+		t.Fatalf("failed step 0: %d %s", code, body)
+	}
+	decode(t, body, &step)
+	if step.Status != stepError {
+		t.Errorf("failed settling step 0 = %s, want error", step.Status)
+	}
+	for _, hl := range step.Holes {
+		if hl.Hole == string(obsdb.HoleGap) || hl.Hole == string(obsdb.HoleNotRecorded) {
+			t.Errorf("failed settling step 0 calls a record lost: %+v", hl)
+		}
+	}
+
+	// Finding 3: a settling step whose chat span arrived and request
+	// record not yet names no gap in its Messages-in pane.
+	step.holesDoc, step.MessagesIn.Badge = holesDoc{}, ""
+	code, _, body = get(t, h, "/studio/api/runs/r_ok/steps/0")
+	if code != http.StatusOK {
+		t.Fatalf("settling step 0: %d %s", code, body)
+	}
+	decode(t, body, &step)
+	if step.MessagesIn.Badge != "" {
+		t.Errorf("settling step 0 messages_in = %+v, want no badge", step.MessagesIn)
+	}
+	for _, hl := range step.Holes {
+		if hl.Hole == string(obsdb.HoleGap) {
+			t.Errorf("settling step 0 holes = %+v, want no gap", step.Holes)
+		}
+	}
+
+	// Past the window the field is gone (omitempty).
+	old := now.Add(-time.Hour)
+	stale := fxSpanRec("r_sub", old.Add(-time.Second), old, 1, "", 1, 1)
+	if err := db.Write(context.Background(), obsdb.Batch{Spans: []obsdb.Span{stale}}); err != nil {
+		t.Fatal(err)
+	}
+	_, _, body = get(t, h, "/studio/api/runs/r_sub")
+	if strings.Contains(string(body), `"settling"`) {
+		t.Errorf("run doc past the window carries settling: %s", body)
+	}
+}
+
+// TestTailLostAndCounterGap: a run that lost a mid-run batch (a hole
+// below its high-water mark) and its record tail says both reasons on
+// its one gap badge (the U2 re-review's finding 4).
+func TestTailLostAndCounterGap(t *testing.T) {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	old := time.Now().Add(-time.Hour).UTC()
+	if err := db.Write(context.Background(), obsdb.Batch{
+		Records: []obsdb.Record{
+			fxRecord("r_ok", "event", "run_start", 0, old, `{"type":"run_start","id":"r_ok"}`),
+			fxRecord("r_ok", "event", "step_start", 2, old, `{"type":"step_start","run_id":"r_ok","index":0}`),
+		},
+		Spans: []obsdb.Span{fxSpanRec("r_ok", old, old.Add(time.Second), 1, "", 1, 1)},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h := Handler(DB(db))
+	var doc holesDoc
+	_, _, body := get(t, h, "/studio/api/runs/r_ok")
+	decode(t, body, &doc)
+	tailReason, _ := obsdb.HoleNoteFor(obsdb.HoleGap, obsdb.CauseTailLost)
+	var gap string
+	for _, hl := range doc.Holes {
+		if hl.Hole == string(obsdb.HoleGap) {
+			gap = hl.Reason
+		}
+	}
+	if !strings.Contains(gap, tailReason) || !strings.Contains(gap, "event positions are missing") {
+		t.Errorf("gap reason = %q, want tail_lost's words and the counter's", gap)
 	}
 }

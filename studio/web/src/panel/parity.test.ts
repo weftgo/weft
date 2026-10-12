@@ -33,9 +33,12 @@ import {
   CAUSES,
   HOLES,
   isHole,
+  isLive,
   PLAYGROUND_OFF,
   resultCapReason,
   RUNTIMES_UNREAD,
+  SETTLING_HINT,
+  SETTLING_WORD,
 } from "../lib/honesty"
 import { renderApp, stubBrowser } from "../test/app"
 import { renderWithRouter } from "../test/render"
@@ -2436,5 +2439,48 @@ describe("stopped by on both surfaces (U3.2)", () => {
       )
     )
     expect(document.querySelector("[data-story-end]")).toBeNull()
+  })
+})
+
+// A settling run (U2-fix2): its root span stored — the status reads
+// succeeded — its run_finish not yet. Both surfaces keep the status
+// word and draw the same settling note, lib/honesty.ts's words, and
+// both keep following it (isLive), never "ended without run_finish".
+describe("a settling run on both surfaces (U2-fix2)", () => {
+  it("the panel's settling chip is the run page's header note", async () => {
+    const fx: Fixture = {
+      doc: { status: "succeeded", settling: true, stop_reason: "stop" },
+      events: events({ finish: false }),
+    }
+    serve(fx, false)
+    const el = await mount(ATTRS)
+    await vi.waitFor(
+      () =>
+        expect($(el, '.weft-turn [data-weft-chip="settling"]')).toBeTruthy(),
+      { timeout: 5_000 }
+    )
+    const p = $(el, '.weft-turn [data-weft-chip="settling"]')!
+    const panel = { text: p.textContent, title: p.getAttribute("title") }
+    el.remove()
+    await settle()
+    cleanup()
+    document.body.innerHTML = ""
+    stubBrowser()
+    vi.stubGlobal("scrollTo", vi.fn())
+    StudioEventSource.reset()
+    vi.stubGlobal("EventSource", StudioEventSource)
+    setStudioToken("")
+    serve(fx, true)
+    renderApp(`/runs/${RUN}?view=story`)
+    await waitFor(() =>
+      expect(document.querySelector("[data-settling]")).toBeTruthy()
+    )
+    const s = document.querySelector("[data-settling]")!
+    expect(panel).toEqual({ text: SETTLING_WORD, title: SETTLING_HINT })
+    expect({ text: s.textContent, title: s.getAttribute("title") }).toEqual(
+      panel
+    )
+    expect(isLive(fx.doc)).toBe(true)
+    expect(isLive({ status: "succeeded" })).toBe(false)
   })
 })

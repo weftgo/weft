@@ -30,6 +30,7 @@ describe("stoppedByWords: one word per vocabulary value (U3.2)", () => {
     ["step_count_is", "step_count_is"],
     ["has_tool_call", "has_tool_call"],
     ["has_tool_call:", "stopped by a tool call (StopWhen)"],
+    ["step_count_is:", "stopped by a step count (StopWhen)"],
     ["business_hours_over", "business_hours_over"],
   ])("%s → %s", (by, word) => {
     expect(stoppedByWords(by)?.word).toBe(word)

@@ -2003,7 +2003,10 @@ status, session, public id, playground, parent, experiment_id,
 ends in `:`: `has_tool_call:` is every tool-call stop; `/api/search`
 takes it too) and `tag.<k>=<v>` filters, cursor-paged; every run row
 carries `stopped_by` and a canceled run's `cancel_cause`, omitted when
-none was recorded (docs/record-contract.md §6); top-level only by default — `parent=<run id>`
+none was recorded (docs/record-contract.md §6), and `settling: true`
+while its root span is stored and its `run_finish` is not, heard from
+within 30 s — its records may still arrive, so the UI follows it as it
+follows a running run (omitted otherwise; §6); top-level only by default — `parent=<run id>`
 lists one run's subagent children, `all=1` (or `parent=*`) every run,
 children included; every run row carries `prompt_preview` — the turn's
 own prompt: the input record's last user message with text (on a resume

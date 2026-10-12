@@ -129,10 +129,17 @@ type runRow struct {
 	Finished     *time.Time        `json:"finished"`
 	LastSeen     time.Time         `json:"last_seen"`
 	Status       string            `json:"status"` // derived: a stale running row reads "interrupted"
-	Err          string            `json:"err"`
-	Steps        int               `json:"steps"`
-	Pending      int               `json:"pending"`
-	StopReason   string            `json:"stop_reason"`
+	// Settling marks a run whose root span is stored (status already
+	// succeeded or failed from it) but whose run_finish record is not,
+	// heard from within 30 s by its own timestamps (obsdb.RunRow.Settling,
+	// docs/record-contract.md §6): its records may still arrive, so a
+	// client keeps following it as it follows a running one. Absent
+	// otherwise. Derived at read time, never stored.
+	Settling   bool   `json:"settling,omitempty"`
+	Err        string `json:"err"`
+	Steps      int    `json:"steps"`
+	Pending    int    `json:"pending"`
+	StopReason string `json:"stop_reason"`
 	// StoppedBy names what ended the run (obsdb.RunRow.StoppedBy, U3.2):
 	// the fired StopWhen condition's manifest name (has_tool_call:submit,
 	// step_count_is:3, output_submitted, a custom name), final_answer,
@@ -211,6 +218,7 @@ func row(rec obsdb.RunRow) runRow {
 		Started:      rec.Started,
 		LastSeen:     rec.LastSeen,
 		Status:       string(rec.Status),
+		Settling:     rec.Settling,
 		Err:          rec.Err,
 		Steps:        rec.Steps,
 		Pending:      rec.Pending,
@@ -975,7 +983,9 @@ func (s *Server) runHoles(ctx context.Context, rec obsdb.RunRow) ([]stepHole, er
 			if len(page.Gaps) >= obsdb.MaxGaps {
 				n += "+"
 			}
-			holes.add(obsdb.HoleGap, n+" of the run's event positions are missing: a destination dropped a batch", holeFix(obsdb.HoleGap))
+			// also: a run that lost its record tail (TailLostHole's gap,
+			// added above) and a mid-run batch says both reasons.
+			holes.also(obsdb.HoleGap, n+" of the run's event positions are missing: a destination dropped a batch", holeFix(obsdb.HoleGap))
 		}
 	}
 	return holes.list(), nil
@@ -1062,7 +1072,8 @@ func (s *Server) serveRunEvents(w http.ResponseWriter, r *http.Request, id strin
 		// its run_finish not yet, heard from within
 		// obsdb.InterruptedAfter) reads succeeded or failed already,
 		// but the records behind its root may still land: done stays
-		// false so the client keeps tailing them.
+		// false, and the run row's settling (served on the run doc and
+		// every row) is what the UI's isLive reads to keep tailing.
 		det, err := s.db.Run(r.Context(), id)
 		if err != nil {
 			dbError(w, r, "events of run", id, err)

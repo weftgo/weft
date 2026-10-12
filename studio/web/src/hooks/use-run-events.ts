@@ -38,7 +38,7 @@ import { openLive } from "@/lib/live"
 import type { LiveHandle, LiveRecord } from "@/lib/live"
 import { newFold } from "@/lib/events"
 import type { FoldedRun, FoldFeed } from "@/lib/events"
-import type { ContentAttrs } from "@/lib/honesty"
+import { isLive, type ContentAttrs } from "@/lib/honesty"
 import { EVENT_RING_CAPACITY, Ring } from "@/lib/ring"
 
 export interface RunStream {
@@ -217,6 +217,11 @@ export function useRunEvents(
     /** The parked notice's "approve" (see noticeParked). */
     approve?: (runID: string, callID: string) => Promise<void>
     live?: boolean
+    /** The run's row reads settling (lib/honesty.ts's isLive): its
+     * status is already terminal, but its records may still arrive —
+     * the tail is kept as for a running run until the row stops
+     * settling. */
+    settling?: boolean
     /** Run frames of this run, off the same stream (the row that
      * changed: usage, status, counts). Asking for them adds the run
      * kind to the one subscription — a page needs no second stream. */
@@ -234,8 +239,10 @@ export function useRunEvents(
   const capacity = opts?.capacity ?? EVENT_RING_CAPACITY
   const walk = useRef<Walk | null>(null)
   if (walk.current === null) walk.current = newWalk(capacity)
-  const statusRef = useRef(status)
-  statusRef.current = status
+  // Live: running, or settling (its root stored, records trailing).
+  const live = isLive({ status, settling: opts?.settling })
+  const liveRef = useRef(live)
+  liveRef.current = live
   const onRunRef = useRef(opts?.onRun)
   onRunRef.current = opts?.onRun
   const wantRun = Boolean(opts?.onRun)
@@ -454,7 +461,7 @@ export function useRunEvents(
       live?.close()
       live = null
     }
-    if (opts?.live && statusRef.current === "running") {
+    if (opts?.live && liveRef.current) {
       live = openLive({
         selector: { run: id },
         kinds: wantRun ? ["event", "delta", "run"] : ["event", "delta"],
@@ -496,7 +503,7 @@ export function useRunEvents(
     void readPages(true)
 
     const timer = setInterval(() => {
-      if (isCancelled() || reading || statusRef.current !== "running") return
+      if (isCancelled() || reading || !liveRef.current) return
       // A first walk that failed is retried while the run is live.
       if (!walked) {
         void readPages(true)
@@ -519,7 +526,8 @@ export function useRunEvents(
     }
   }, [id, opts?.live, wantRun, capacity])
 
-  // When the run's status leaves "running", drain what is left: the
+  // When the run stops being live (its status leaves "running" and it
+  // does not settle, or it stops settling), drain what is left: the
   // closing events (run_finish) can land between the last tail probe
   // and the status flip, and a burst at the end can span more than one
   // page — the reader follows next_after until the stream says there
@@ -527,10 +535,10 @@ export function useRunEvents(
   // The tail has nothing more to carry: the stream is
   // closed, the pages finish the story.
   useEffect(() => {
-    if (!id || status === "running") return
+    if (!id || live) return
     endTail.current()
     catchUp.current()
-  }, [id, status])
+  }, [id, live])
 
   return stream
 }

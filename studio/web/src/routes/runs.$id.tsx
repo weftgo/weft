@@ -59,7 +59,7 @@ import { notifySave } from "@/lib/notify"
 import { mayExportTestWith } from "@/lib/saves"
 import { RawView } from "@/components/studio/raw-view"
 import { DerivedNote, DerivedStory } from "@/components/studio/derived-story"
-import { derivedWords, isDerived } from "@/lib/honesty"
+import { derivedWords, isDerived, isLive } from "@/lib/honesty"
 import { ReplayBar } from "@/components/studio/replay-bar"
 import { ReplayContext, ReplayDrawer } from "@/components/studio/replay-drawer"
 import type { ReplayRequest } from "@/components/studio/replay-drawer"
@@ -279,7 +279,9 @@ function RunPage() {
   const queryClient = useQueryClient()
   const run = useQuery({
     ...runQuery(id),
-    refetchInterval: (q) => (q.state.data?.status === "running" ? 2000 : false),
+    // Running or settling (lib/honesty.ts's isLive): a run opened while
+    // its records trail its root is read again until it settles.
+    refetchInterval: (q) => (isLive(q.state.data) ? 2000 : false),
   })
 
   // ?save=test (plan F6: the devtools panel's "save as test" hands off
@@ -365,9 +367,9 @@ function RunPage() {
   }, [capsLoading, replayable, search, id, writeReplay])
   const transcript = useQuery({
     ...transcriptQuery(id),
-    // The transcript is the finished words: refresh while running,
-    // settle when terminal.
-    refetchInterval: () => (run.data?.status === "running" ? 2000 : false),
+    // The transcript is the finished words: refresh while live
+    // (running or settling), settle when terminal.
+    refetchInterval: () => (isLive(run.data) ? 2000 : false),
   })
   const runStatus = run.data?.status ?? "running"
   // Run frames refresh the document (usage, status, counts) without
@@ -399,6 +401,7 @@ function RunPage() {
     runStatus,
     {
       live: liveCapable,
+      settling: run.data?.settling === true,
       onRun: onRunFrame,
     }
   )
@@ -410,7 +413,7 @@ function RunPage() {
   const requestsQ = useQuery({
     ...requestsQuery(id),
     enabled: requestsCapable && Boolean(run.data),
-    refetchInterval: runStatus === "running" ? 2000 : false,
+    refetchInterval: isLive(run.data) ? 2000 : false,
   })
   // The run ended (a live frame, or the 2 s poll of the row): read the
   // record once more — a request stored after the last poll must not
@@ -460,6 +463,22 @@ function RunPage() {
       void queryClient.invalidateQueries({ queryKey: ["step", id] })
     }
   }, [loadedStatus, loadedFinished, id, queryClient])
+  // A settling run (lib/honesty.ts's isLive) that stops settling: its
+  // trailing records landed or the window passed (a tail_lost gap) —
+  // the requests and every cached step are read once more, as at the
+  // end of a run the page saw running.
+  const loadedSettling = run.data?.settling === true
+  const seenSettling = useRef<{ id: string; settling: boolean }>({
+    id,
+    settling: false,
+  })
+  useEffect(() => {
+    const was = seenSettling.current.id === id && seenSettling.current.settling
+    seenSettling.current = { id, settling: loadedSettling }
+    if (!was || loadedSettling) return
+    void queryClient.invalidateQueries({ queryKey: ["requests", id] })
+    void queryClient.invalidateQueries({ queryKey: ["step", id] })
+  }, [loadedSettling, id, queryClient])
   // The run's timed spans (the time axis's rows, S4.7), fetched when
   // the trace view is on and the run has a trace — and, under the
   // requests capability, for the Request pane's "overridden by

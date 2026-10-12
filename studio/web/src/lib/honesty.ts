@@ -373,6 +373,24 @@ export function statusHoles(r: {
   return out
 }
 
+/** isLive says a run's records may still arrive: it reads running, or
+ * it is settling (api.go's runRow.settling, docs/record-contract.md §6
+ * — its root span stored, so its status already reads succeeded or
+ * failed, its run_finish not, heard from within 30 s). Every tail,
+ * poll and done check on both surfaces reads it, never status ===
+ * "running" alone: a run opened in that window is still followed. */
+export function isLive(
+  r: { status?: string; settling?: boolean } | null | undefined
+): boolean {
+  return !!r && (r.status === "running" || r.settling === true)
+}
+
+/** The header's note while a run settles (both surfaces): its status
+ * word stays, and this says why the story may stop short. */
+export const SETTLING_WORD = "settling"
+export const SETTLING_HINT =
+  "the run's root span is stored and its last records may still arrive (up to 30 s): the story can stop short until they land"
+
 /** usageKnown says whether a run row's usage is a number to show: the
  * record sets it only when the run ends (run_finish, the run span's
  * end), so a running row's zeros are "not yet" and an interrupted

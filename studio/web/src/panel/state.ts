@@ -23,7 +23,7 @@ import type {
   ToolCallPart,
   Transcript,
 } from "../lib/api"
-import { HOLES } from "../lib/honesty"
+import { HOLES, isLive } from "../lib/honesty"
 import { byStep } from "../lib/requests"
 import type { StepRequests } from "../lib/requests"
 import { serializeScope } from "../lib/scope"
@@ -905,7 +905,9 @@ export class PanelModel {
       ...this.state.turns,
       ...[...this.state.experiments.values()].flat(),
     ]
-    if (!rows.some((r) => r.status === "running")) return
+    // Running or settling (isLive): a settling row stops settling with
+    // no frame when its window passes — the list read says so.
+    if (!rows.some(isLive)) return
     const ia = this.state.meta?.interrupted_after_ms
     const ms =
       (typeof ia === "number" && ia > 0 ? Math.min(ia, 10 * 60_000) : 30_000) +
@@ -1104,9 +1106,8 @@ export class PanelModel {
     // run that read interrupted only now): its tail is done.
     const open = this.state.turn
     if (open && !open.done && !open.loading) {
-      const status = this.rowOf(open.id)?.status
-      if (status && status !== "running")
-        void this.settleTurn(open).catch(quiet)
+      const row = this.rowOf(open.id)
+      if (row && !isLive(row)) void this.settleTurn(open).catch(quiet)
     }
     const pin = this.takePin()
     if (pin) {
@@ -1195,7 +1196,7 @@ export class PanelModel {
     }
     const view = this.state.turn
     if (view && view.id === run.id) {
-      if (run.status !== "running") void this.settleTurn(view).catch(quiet)
+      if (!isLive(run)) void this.settleTurn(view).catch(quiet)
       else if (view.done && !this.runSub && !view.loading) {
         // A row that read ended and runs again (a stale read, a
         // heartbeat after an interruption): its tail is followed.
@@ -1279,12 +1280,13 @@ export class PanelModel {
    * published between the last page and the subscription is lost until
    * the run ends. */
   private async resumeTurn(view: TurnView) {
-    const followed = !view.done && this.rowOf(view.id)?.status === "running"
+    // Live: running, or settling (its root stored, its records still
+    // trailing it — lib/honesty.ts's isLive): followed alike.
+    const followed = !view.done && isLive(this.rowOf(view.id))
     if (followed) this.follow(view)
     await this.loadTurn(view)
     if (this.state.turn !== view || this.disposed || view.done) return
-    const status = this.rowOf(view.id)?.status ?? view.doc?.status
-    if (status === "running") {
+    if (isLive(this.rowOf(view.id) ?? view.doc)) {
       // A run the list did not know as running (no row yet): its tail
       // opens now, and its open reads the pages past what was folded.
       if (!followed) this.follow(view)
@@ -1329,7 +1331,12 @@ export class PanelModel {
       // still read running for a run that has since ended. The row moves
       // only ever forward: a doc read before a run frame can land after
       // it, and must not take a finished row back to running.
-      if (this.rowOf(id)?.status === "running" && doc.status !== "running") {
+      const was = this.rowOf(id)
+      if (
+        was &&
+        ((was.status === "running" && doc.status !== "running") ||
+          (was.settling && !doc.settling))
+      ) {
         const { children: _children, ...row } = doc
         this.upsertRun(row)
       }
@@ -1499,11 +1506,11 @@ export class PanelModel {
    * the subagent links on it. */
   private dress(view: TurnView) {
     view.stale = false
-    const status = this.rowOf(view.id)?.status ?? view.doc?.status
+    const row = this.rowOf(view.id) ?? view.doc
     view.folded = overlay(
       viewOf(view.feed),
       view.transcript,
-      view.done || (!!status && status !== "running")
+      view.done || (!!row?.status && !isLive(row))
     )
     if (view.doc && Array.isArray(view.doc.children)) {
       try {
@@ -1553,7 +1560,7 @@ export class PanelModel {
       onRun: (f) => {
         if (f.run.id !== id || this.state.turn !== view) return
         if (this.rowOf(id)) this.upsertRun(f.run)
-        if (f.run.status !== "running") void this.settleTurn(view).catch(quiet)
+        if (!isLive(f.run)) void this.settleTurn(view).catch(quiet)
         this.emit()
       },
       onOverflow: (why) => {

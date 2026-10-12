@@ -49,7 +49,8 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		mdDropped += n
 		ctx = context.WithValue(ctx, metadataDroppedKey{}, 0)
 	}
-	if md != nil {
+	if md != nil || metadataFromCtx(ctx) != nil {
+		// nil too when an own empty value removed every inherited pair.
 		ctx = withMetadata(ctx, md)
 	}
 	// The run's model: the agent's, or — when UseModel replaced it — the

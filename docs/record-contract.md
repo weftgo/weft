@@ -110,6 +110,27 @@ reads them from:
 | `weft.playground.command` | `weft/runtime` | the playground command id | `meta` |
 | `weft.playground.actor` | `weft/runtime` | who issued it, when known | `meta` |
 | `weft.experiment.id` | `weft/runtime` | the saved experiment the run belongs to | column `experiment_id` |
+
+**A session stamps its own identity, empty = none.** Run metadata
+rides the context into every run started under it, so a session's turn
+started inside another run (another session's tool handler, a pool
+child's turn) would inherit that run's pairs. `thread` therefore sets
+every key a session owns on each of its runs — `weft.public_id`,
+`weft.session.forked_from`, `weft.session.parent`,
+`weft.session.parent_call` — to the session's own value, `""` when it
+has none, and the core reads an empty value as *none*: it removes the
+inherited pair and is never stored, never on a span or record
+(`core.Metadata`). A session without `thread.PublicID` nested in pub_s's
+turn is not pub_s's: no panel token of pub_s lists or reads it, and the
+playground's app-turn verbs refuse it as not a turn of a session with a
+public id. A plain `Generate` in the same tool handler is the enclosing
+turn's work and inherits everything. A session's keys win over the
+caller's, so a `thread` session's public id is `thread.PublicID`'s
+alone (`weft.Metadata` sets one on runs a session does not start).
+Readers hold the same rule for
+producers that send an empty value anyway: obsdb's `MetaOf` drops an
+empty string, the `public_id` column's `""` is no public id (no scope
+matches it; `ResolvePublicID("")` is `ErrNotFound`).
 | `weft.forked_from` | `weft/runtime` | `<source run>#<from step>`: the run this replay continues | column `forked_from` |
 | `weft.replay.view` | `weft/runtime` | a replay from step N > 0: `transcript`, `compacted:<index>`, `derived` or `unknown` | `meta` |
 | `weft.edits` | `weft/runtime` | the transcript edits a replay applied | `meta` |
@@ -696,14 +717,16 @@ receiver re-reads the trace's derived runs after each export). A panel token nev
 is the stock app's `gen_ai.conversation.id`, which may collide with a weft
 session's id; a panel token's session view, sessions list and session cost
 are then its public id's turns alone (the runs list's rule), never the
-derived rows sharing the id — the server token sees them all. A session
-row the panel token's runs cannot be read whole for (a read error, past
-the 10,000-run walk) is left out of its sessions list, never served
-unscoped, and so is one with no turn of its public id. The list's
-ordering, `total` and paging cursor (`before`, `next_before`) are the
-session's, not the token's view: a newer colliding derived run sorts
-the session and its last-seen time may be the cursor (a timestamp, no
-content), and a page may hold fewer rows than `limit`.
+derived rows sharing the id — the server token sees them all. The
+sessions list is scoped in the query (`obsdb.SessionQuery.PublicID`, a
+`WHERE` on the runs before the grouping, both backends): each row's
+turns, usage, first/last seen, agent and status, the list's ordering,
+`total` and paging cursor (`before`, `next_before`) are the token's
+view — a newer colliding derived run neither sorts the session nor
+becomes the cursor, and a page holds `limit` rows while more match. A
+row whose runs the cost walk cannot read whole (a read error, past the
+10,000-run walk) is served with its scoped aggregates and an unknown
+cost, as the server token's is.
 
 ## 10. The conformance fixtures
 

@@ -373,14 +373,17 @@ var nonMetaAttr = map[string]struct{}{
 // string value under a key outside the record/span contract (what
 // core.Metadata put there, enduser.id included). Keys under "weft."
 // that are not part of the contract — thread's weft.session.parent, a
-// future module's own — are metadata and are kept.
+// future module's own — are metadata and are kept. An empty string is
+// "none" (core.Metadata's rule: a session stamps its own identity keys,
+// "" when it has none) and is never kept: a weft.session.parent = ""
+// names no parent.
 func MetaOf(attrs map[string]any) map[string]string {
 	var meta map[string]string
 	for k, v := range attrs {
 		if _, contract := nonMetaAttr[k]; contract {
 			continue
 		}
-		if s, ok := v.(string); ok {
+		if s, ok := v.(string); ok && s != "" {
 			if meta == nil {
 				meta = map[string]string{}
 			}

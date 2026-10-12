@@ -828,7 +828,9 @@ const sessionScope = `parent_run_id = '' AND playground = 0 AND session_id <> ''
 
 // Sessions is a GROUP BY session_id over top-level, non-playground
 // runs (S3.4): turns, first/last seen, summed usage, and the newest
-// turn's derived status.
+// turn's derived status. A PublicID scopes the runs before the GROUP BY
+// (RunQuery.PublicID's WHERE): every aggregate, the order, Total and the
+// cursor are that public id's runs alone.
 func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.SessionPage, err error) {
 	if err := d.checkOpen(); err != nil {
 		return obsdb.SessionPage{}, err
@@ -841,16 +843,17 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		having = append(having, "MAX(agent) = ?")
 		hargs = append(hargs, q.Agent)
 	}
+	scope, sargs := sessionScope, []any(nil)
 	if q.PublicID != "" {
-		having = append(having, "MAX(public_id) = ?")
-		hargs = append(hargs, q.PublicID)
+		scope += ` AND public_id = ?`
+		sargs = []any{q.PublicID}
 	}
 	// Total is the whole match, as Runs' is: the cursor pages through
 	// it and never narrows it.
 	var total int
 	if err := d.reads.QueryRowContext(ctx,
-		`SELECT COUNT(*) FROM (SELECT session_id FROM runs WHERE `+sessionScope+
-			` GROUP BY session_id`+havingSQL(having)+`)`, hargs...).Scan(&total); err != nil {
+		`SELECT COUNT(*) FROM (SELECT session_id FROM runs WHERE `+scope+
+			` GROUP BY session_id`+havingSQL(having)+`)`, append(append([]any{}, sargs...), hargs...)...).Scan(&total); err != nil {
 		return obsdb.SessionPage{}, err
 	}
 	limit := obsdb.LimitOf(q.Limit)
@@ -865,7 +868,7 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 			pargs = append(append([]any{}, hargs...), ns)
 		}
 	}
-	rows, err := d.sessionRows(ctx, cutoff, sessionScope, nil, paged,
+	rows, err := d.sessionRows(ctx, cutoff, q.PublicID, scope, sargs, paged,
 		append(append([]any{}, pargs...), limit), ` ORDER BY MAX(last_seen_ns) DESC, session_id DESC LIMIT ?`)
 	if err != nil {
 		return obsdb.SessionPage{}, err
@@ -876,7 +879,7 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		// along (at most MaxTies) instead of being skipped by a next
 		// page that reads strictly older.
 		last := rows[len(rows)-1]
-		ties, err := d.sessionRows(ctx, cutoff, sessionScope, nil,
+		ties, err := d.sessionRows(ctx, cutoff, q.PublicID, scope, sargs,
 			append(append([]string{}, having...), "MAX(last_seen_ns) = ?", "session_id < ?"),
 			append(append([]any{}, hargs...), last.LastSeen.UnixNano(), last.ID, obsdb.MaxTies),
 			` ORDER BY session_id DESC LIMIT ?`)
@@ -900,15 +903,22 @@ func havingSQL(having []string) string {
 // sessionRows selects grouped session rows: where (with wargs) scopes
 // the runs, having (with hargs, which also carry tail's parameters)
 // filters the groups, tail orders and limits. cutoff is statusExpr's
-// parameter, the first in text order.
-func (d *DB) sessionRows(ctx context.Context, cutoff int64, where string, wargs []any,
+// parameter, the first in text order; pub, when set, scopes the newest
+// turn the status is read from as where scopes the rest.
+func (d *DB) sessionRows(ctx context.Context, cutoff int64, pub, where string, wargs []any,
 	having []string, hargs []any, tail string) ([]obsdb.SessionRow, error) {
-	args := append(append([]any{cutoff}, wargs...), hargs...)
+	args := []any{cutoff}
+	statusScope := ""
+	if pub != "" {
+		statusScope = ` AND r2.public_id = ?`
+		args = append(args, pub)
+	}
+	args = append(append(args, wargs...), hargs...)
 	rs, err := d.reads.QueryContext(ctx, `SELECT session_id, MAX(public_id), MAX(agent), COUNT(*),
 		MIN(started_ns), MAX(last_seen_ns),
 		SUM(input_tokens), SUM(output_tokens), SUM(cached_input_tokens), SUM(cache_write_tokens), SUM(reasoning_tokens),
 		(SELECT `+statusExpr+` FROM runs r2 WHERE r2.session_id = runs.session_id
-		 AND r2.parent_run_id = '' AND r2.playground = 0
+		 AND r2.parent_run_id = '' AND r2.playground = 0`+statusScope+`
 		 ORDER BY r2.turn DESC, r2.started_ns DESC LIMIT 1)
 		FROM runs WHERE `+where+` GROUP BY session_id`+havingSQL(having)+tail, args...)
 	if err != nil {
@@ -948,7 +958,7 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 	// while the list still showed it (the audit's P2-1). Same shape as
 	// Sessions' select, scoped to the one session_id.
 	now := time.Now()
-	rows, err := d.sessionRows(ctx, now.Add(-obsdb.InterruptedAfter).UnixNano(),
+	rows, err := d.sessionRows(ctx, now.Add(-obsdb.InterruptedAfter).UnixNano(), "",
 		sessionScope+` AND session_id = ?`, []any{id}, nil, nil, ``)
 	if err != nil {
 		return obsdb.SessionDetail{}, err
@@ -971,6 +981,9 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 func (d *DB) ResolvePublicID(ctx context.Context, publicID string) (_ string, err error) {
 	if err := d.checkOpen(); err != nil {
 		return "", err
+	}
+	if publicID == "" { // "" is no public id: the runs without one are nobody's
+		return "", fmt.Errorf("%w: empty public id", obsdb.ErrNotFound)
 	}
 	defer d.closedErr(&err)
 	var sessionID string

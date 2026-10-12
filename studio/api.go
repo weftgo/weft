@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"maps"
 	"net/http"
 	"strconv"
@@ -1252,27 +1251,17 @@ func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 		dbError(w, r, "sessions", "", err)
 		return
 	}
+	// A panel token's page is scoped in the query (SessionQuery.PublicID
+	// is a WHERE on the runs, before the grouping): each row's turns,
+	// usage, first/last seen and status, the order, Total and the
+	// cursor are its public id's runs alone — a run of another app
+	// sharing the session id (a colliding derived run) is in none of
+	// them (docs/record-contract.md §9). The cost walk reads the same
+	// scope.
 	out := sessionsPage{Total: page.Total, Sessions: make([]sessionRow, 0, len(page.Sessions))}
 	pub := panelPublicID(r)
 	for _, sr := range page.Sessions {
-		sc, _, runs := s.sessionCost(r.Context(), sr.ID, pub)
-		if pub != "" {
-			// A panel row is its public id's turns or nothing: a row
-			// whose runs could not be read whole (a read error, past
-			// sessionCost's bound) is skipped — never served unscoped,
-			// its aggregates summed over runs the token may not see —
-			// and so is one with no turn of the token's (deleted since
-			// the list was read). The other rows still answer.
-			if runs == nil {
-				slog.DebugContext(r.Context(), "studio: panel session row skipped: its runs could not be read to scope it", "session", sr.ID, "reason", sc.reason)
-				continue
-			}
-			turns := topLevel(runs)
-			if len(turns) == 0 {
-				continue
-			}
-			sr = scopedSessionRow(sr, turns, pub)
-		}
+		sc, _, _ := s.sessionCost(r.Context(), sr.ID, pub)
 		srow := sessRow(sr)
 		srow.costFields = sc.fields()
 		out.Sessions = append(out.Sessions, srow)
@@ -1342,17 +1331,6 @@ func withPublicID(runs []obsdb.RunRow, pub string) []obsdb.RunRow {
 	out := make([]obsdb.RunRow, 0, len(runs))
 	for _, rr := range runs {
 		if rr.PublicID == pub {
-			out = append(out, rr)
-		}
-	}
-	return out
-}
-
-// topLevel keeps the top-level runs (a session row's turns).
-func topLevel(runs []obsdb.RunRow) []obsdb.RunRow {
-	out := make([]obsdb.RunRow, 0, len(runs))
-	for _, rr := range runs {
-		if rr.ParentRunID == "" && !rr.Playground {
 			out = append(out, rr)
 		}
 	}

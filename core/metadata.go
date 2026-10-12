@@ -27,6 +27,14 @@ const (
 // the core does not police callers. Pairs a context carries
 // (WithMetadata) merge under the run's own: the option wins.
 //
+// An empty value means "none": it is never stored, and it removes the
+// key the run would otherwise inherit (from its parent run or a
+// WithMetadata context) — how a run that is not the enclosing run's work
+// says so. thread stamps a session's own weft.public_id and
+// weft.session.parent this way, "" when the session has none, so a
+// session's turn started inside another session's tool handler never
+// reads as that session's. An empty value is not counted as dropped.
+//
 // Limits, because metadata rides every span and record: at most 64 keys,
 // a key at most 128 bytes, a value at most 1024 bytes. An entry over a
 // limit — or with an empty key — is dropped, never truncated, and
@@ -69,7 +77,7 @@ func WithMetadata(ctx context.Context, kv map[string]string) context.Context {
 	if dropped > 0 {
 		ctx = context.WithValue(ctx, metadataDroppedKey{}, metadataDroppedFromCtx(ctx)+dropped)
 	}
-	if md == nil {
+	if md == nil && metadataFromCtx(ctx) == nil {
 		return ctx
 	}
 	return withMetadata(ctx, md)
@@ -120,7 +128,9 @@ func MetadataFromContext(ctx context.Context) map[string]string {
 // weft.public_id, weft.turn), which a caller's large tag set must not
 // crowd out — then the rest, each group in sorted key order. An entry
 // with an empty key, an over-long key, or an over-long value is dropped
-// and counted, never truncated. nil when nothing survives.
+// and counted, never truncated; an own entry with an empty value removes
+// the key (inherited or set) and is not counted. nil when nothing
+// survives.
 func mergeMetadata(inherited, own map[string]string) (map[string]string, int) {
 	if len(inherited) == 0 && len(own) == 0 {
 		return nil, 0
@@ -137,6 +147,10 @@ func mergeMetadata(inherited, own map[string]string) (map[string]string, int) {
 			v := own[k]
 			if k == "" || len(k) > metadataMaxKeyLen || len(v) > metadataMaxValueLen {
 				dropped++
+				continue
+			}
+			if v == "" { // "none": the inherited pair is not this run's
+				delete(out, k)
 				continue
 			}
 			if _, exists := out[k]; !exists && len(out) >= metadataMaxKeys {

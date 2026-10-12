@@ -134,7 +134,10 @@
 // one, and weft.public_id when the session was created with PublicID
 // — an opaque handle safe to show a browser (ADR 0024 S5). The public
 // id lives in the header, is matched by List's Query.Meta, and cannot
-// be changed after Create.
+// be changed after Create. A key the session has no value for is
+// stamped "" (none, to the core), so a turn sent from inside another
+// run — another session's tool handler, a pool child's turn — never
+// carries that run's public id, fork origin or lineage as its own.
 //
 // # Concurrency
 //

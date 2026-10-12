@@ -1311,8 +1311,29 @@ func joinErrs(err, perr error) error {
 // the header, finds the session by it. Caller-side, a run built by
 // hand (not through a session) carries none of this: the session is
 // the only minter.
+//
+// Every key the session owns is set, to "" when the session has none:
+// core removes an inherited pair a run's own empty value names, so a
+// session's turn started inside another run — another session's tool
+// handler, a pool child's turn — never carries that run's public id,
+// pool lineage or fork origin as its own (a run of a session without
+// PublicID read as the enclosing session's, and Studio scoped it there).
+// The caller's other pairs still ride in.
 func (s *Session) runMetadata(t *Turn) map[string]string {
-	return s.identityMetadata(t.turn)
+	md := s.identityMetadata(t.turn)
+	for _, k := range sessionOwnedKeys {
+		if _, ok := md[k]; !ok {
+			md[k] = "" // none: removes the enclosing run's pair
+		}
+	}
+	return md
+}
+
+// sessionOwnedKeys are the identity keys a session stamps only when it
+// has a value; runMetadata sets the rest to "" so none is inherited.
+// weft.session.id and weft.turn are always set.
+var sessionOwnedKeys = []string{
+	publicIDKey, "weft.session.forked_from", "weft.session.parent", "weft.session.parent_call",
 }
 
 // identityMetadata is runMetadata for the run minted as turn n (the

@@ -107,7 +107,7 @@ res, err := agt.Generate(ctx, weft.Prompt("Where is order 1234?"))
 //       weft.UseModel(alt),                    // the WrapModel chain rebuilt over alt, this run alone
 //       weft.ParkOn("refund"),                 // park at the approval boundary (ADR 0007 per run); Approve resumes
 //       weft.ParkAllExcept("lookup"),          // default-deny: every other call parks — ToolSource tools and Subagent child runs included
-//       weft.Metadata(map[string]string{"tenant": "acme"})) // on every span and record; subagent runs inherit
+//       weft.Metadata(map[string]string{"tenant": "acme"})) // on every span and record; subagent runs inherit ("" = none: removes an inherited key)
 //   weft.MetadataFromContext(ctx)   // read the merged pairs back (Tap, tool handler, child run)
 //   weft.WithMetadata(ctx, kv)      // the context-carried twin of weft.Metadata: pairs for every run started under ctx, the run option winning
 //   weft.StripContent(ev)           // the one content-shaping table: what a content-off destination receives

@@ -47,6 +47,8 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("PipelineSpellings", pipelineSpellings(open))
 	t.Run("PagingTies", pagingTies(open))
 	t.Run("SessionPaging", sessionPaging(open))
+	t.Run("SessionsScoped", sessionsScoped(open))
+	t.Run("EmptyIdentity", emptyIdentity(open))
 	t.Run("TranscriptRebuilt", transcriptRebuilt(open))
 	t.Run("TranscriptSteps", transcriptSteps(open))
 	t.Run("Compactions", compactions(open))

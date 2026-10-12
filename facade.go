@@ -853,6 +853,14 @@ type FilePart = core.FilePart
 // the core does not police callers. Pairs a context carries
 // (WithMetadata) merge under the run's own: the option wins.
 //
+// An empty value means "none": it is never stored, and it removes the
+// key the run would otherwise inherit (from its parent run or a
+// WithMetadata context) — how a run that is not the enclosing run's work
+// says so. thread stamps a session's own weft.public_id and
+// weft.session.parent this way, "" when the session has none, so a
+// session's turn started inside another session's tool handler never
+// reads as that session's. An empty value is not counted as dropped.
+//
 // Limits, because metadata rides every span and record: at most 64 keys,
 // a key at most 128 bytes, a value at most 1024 bytes. An entry over a
 // limit — or with an empty key — is dropped, never truncated, and

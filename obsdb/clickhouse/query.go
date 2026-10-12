@@ -969,13 +969,18 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 	runs := sessionRuns("", "")
 	var having []string
 	var hargs []any
+	if q.PublicID != "" {
+		// The scope is on the runs, before the GROUP BY (the SQLite
+		// backend's rule, RunQuery.PublicID's): every aggregate, the
+		// order, Total and the cursor are the public id's runs alone.
+		// The narrow prunes the collapse by primary key, the cond keeps
+		// the collapsed rows whose public id is it.
+		runs = sessionRuns(" WHERE RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.PublicID = ?)", " AND PublicID = ?")
+		hargs = append(hargs, q.PublicID, q.PublicID)
+	}
 	if q.Agent != "" {
 		having = append(having, "max(Agent) = ?")
 		hargs = append(hargs, q.Agent)
-	}
-	if q.PublicID != "" {
-		having = append(having, "max(PublicID) = ?")
-		hargs = append(hargs, q.PublicID)
 	}
 	havingSQL := func(conds []string) string {
 		if len(conds) == 0 {
@@ -1145,6 +1150,9 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 func (d *DB) ResolvePublicID(ctx context.Context, publicID string) (_ string, err error) {
 	if err := d.checkOpen(); err != nil {
 		return "", err
+	}
+	if publicID == "" { // "" is no public id: the runs without one are nobody's
+		return "", fmt.Errorf("%w: empty public id", obsdb.ErrNotFound)
 	}
 	defer d.closedErr(&err)
 	var sessionID string

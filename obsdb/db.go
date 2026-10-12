@@ -446,7 +446,12 @@ type EventPage struct {
 const MaxGaps = 1000
 
 // SessionQuery selects sessions. The zero value lists them newest
-// activity first, 50 at a time.
+// activity first, 50 at a time. PublicID scopes the runs a session is
+// grouped over, before the grouping (RunQuery.PublicID's rule): a
+// session is listed when one of its turns carries the public id, and
+// its turns, usage, first/last seen, agent, status, the page's order,
+// Total and the cursor are those turns' alone — a run of another app
+// sharing the session id (a colliding derived run) moves none of them.
 type SessionQuery struct {
 	Agent, PublicID string
 	Before          time.Time // cursor on LastSeen; zero = newest

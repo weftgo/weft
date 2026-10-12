@@ -490,7 +490,12 @@ span and every log record of the run (ADR 0024):
 | `weft.session.parent`, `weft.session.parent_call` | the parent session and delegating call, on a pool child |
 
 The session's keys win over a caller's colliding
-`thread.RunOptions(weft.Metadata(...))`; other keys pass through.
+`thread.RunOptions(weft.Metadata(...))`; other keys pass through. A
+key the session has no value for is set to `""`, which the core reads
+as none: a session's turn sent from inside another session's tool
+handler (or a pool child's turn) never carries the enclosing run's
+public id, fork origin or pool lineage as its own
+(`docs/record-contract.md` §2).
 
 One record of its own: every compaction that lands (threshold,
 `Compact`, `ApplyCompaction`, a trim, the overflow re-run) emits a

@@ -667,12 +667,14 @@ const sessionCostPages = 20
 // it — the runs list's rule (scopeRunsQuery): a run of another app
 // that shares the session id (a derived run's gen_ai.conversation.id)
 // is never priced into a panel token's session. The runs it read come
-// back too (nil when the walk failed), for sessionFor's row.
+// back too, for a panel token's session row: nil when the walk failed
+// or passed its bound (the row cannot be scoped), non-nil and maybe
+// empty when it read the whole set.
 func (s *Server) sessionCost(ctx context.Context, id, publicID string) (cost, *coster, []obsdb.RunRow) {
 	c := s.coster(ctx)
 	f := false
 	q := obsdb.RunQuery{SessionID: id, PublicID: publicID, ParentRunID: "*", Playground: &f, Limit: 500}
-	var runs []obsdb.RunRow
+	runs := []obsdb.RunRow{} // non-nil: a whole walk, even of no run
 	for pages := 0; ; pages++ {
 		if pages == sessionCostPages {
 			return cost{badge: costUnknown, reason: fmt.Sprintf("the session holds more than %d runs: too many to price at read time", sessionCostPages*500)}, c, nil

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 	"net/http"
 	"strconv"
@@ -1256,13 +1257,21 @@ func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 	for _, sr := range page.Sessions {
 		sc, _, runs := s.sessionCost(r.Context(), sr.ID, pub)
 		if pub != "" {
+			// A panel row is its public id's turns or nothing: a row
+			// whose runs could not be read whole (a read error, past
+			// sessionCost's bound) is skipped — never served unscoped,
+			// its aggregates summed over runs the token may not see —
+			// and so is one with no turn of the token's (deleted since
+			// the list was read). The other rows still answer.
 			if runs == nil {
-				// The panel row could not be scoped: a row summed over
-				// runs the token may not see is never served.
-				dbError(w, r, "session", sr.ID, errSessionScope)
-				return
+				slog.DebugContext(r.Context(), "studio: panel session row skipped: its runs could not be read to scope it", "session", sr.ID)
+				continue
 			}
-			sr = scopedSessionRow(sr, topLevel(runs), pub)
+			turns := topLevel(runs)
+			if len(turns) == 0 {
+				continue
+			}
+			sr = scopedSessionRow(sr, turns, pub)
 		}
 		srow := sessRow(sr)
 		srow.costFields = sc.fields()
@@ -1318,10 +1327,6 @@ func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, r, http.StatusOK, doc)
 }
-
-// errSessionScope is a panel session row whose runs could not be read
-// to scope it.
-var errSessionScope = errors.New("the session's runs could not be read to scope it to the panel token")
 
 // panelPublicID is the request's panel token's public id, "" for any
 // other identity.

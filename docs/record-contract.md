@@ -696,7 +696,14 @@ receiver re-reads the trace's derived runs after each export). A panel token nev
 is the stock app's `gen_ai.conversation.id`, which may collide with a weft
 session's id; a panel token's session view, sessions list and session cost
 are then its public id's turns alone (the runs list's rule), never the
-derived rows sharing the id — the server token sees them all.
+derived rows sharing the id — the server token sees them all. A session
+row the panel token's runs cannot be read whole for (a read error, past
+the 10,000-run walk) is left out of its sessions list, never served
+unscoped, and so is one with no turn of its public id. The list's
+ordering, `total` and paging cursor (`before`, `next_before`) are the
+session's, not the token's view: a newer colliding derived run sorts
+the session and its last-seen time may be the cursor (a timestamp, no
+content), and a page may hold fewer rows than `limit`.
 
 ## 10. The conformance fixtures
 

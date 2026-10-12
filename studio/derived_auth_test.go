@@ -1,13 +1,17 @@
 package studio
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
 
+	"github.com/weftgo/weft/obsdb"
 	"github.com/weftgo/weft/obsdb/sqlite"
 )
 
@@ -90,7 +94,12 @@ func TestDerivedRunSessionCollision(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	srv := New(DB(db), Token(serverTok), IngestToken(ingestTok))
+	// Every model priced (wefttest/script and gpt-5 alike, $1000 per 1M
+	// either way), so a session cost that summed the derived runs would
+	// differ from r_mine's own: the cost scoping is pinned, not only the
+	// rows.
+	srv := New(DB(db), Token(serverTok), IngestToken(ingestTok),
+		Pricing(PricingTable{Dated: "2026-10-01", Models: []ModelPrice{{Provider: "*", ModelGlob: "*", Input: 1000, Output: 1000}}}))
 	t.Cleanup(func() { _ = srv.Close() })
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
@@ -120,10 +129,15 @@ func TestDerivedRunSessionCollision(t *testing.T) {
 		Usage struct {
 			InputTokens int64 `json:"input_tokens"`
 		} `json:"usage"`
-		Runs []struct {
-			ID string `json:"id"`
+		CostUSD *float64 `json:"cost_usd"`
+		Runs    []struct {
+			ID      string   `json:"id"`
+			CostUSD *float64 `json:"cost_usd"`
 		} `json:"runs"`
 	}
+	// r_mine's own cost: 1 input + 1 output token at $1000 per 1M.
+	const mine = 0.002
+	costIs := func(c *float64) bool { return c != nil && math.Abs(*c-mine) < 1e-12 }
 	read := func(bearer, path string, into any) string {
 		t.Helper()
 		code, out := b4Do(t, http.MethodGet, ts.URL+path, bearer, "")
@@ -142,12 +156,18 @@ func TestDerivedRunSessionCollision(t *testing.T) {
 		panel.Turns != 1 || len(panel.Runs) != 1 || panel.Runs[0].ID != "r_mine" || panel.Usage.InputTokens != 1 {
 		t.Errorf("panel GET /api/sessions/conv_7f3a = %s, want r_mine alone: 1 turn, input 1", out)
 	}
+	if !costIs(panel.CostUSD) || len(panel.Runs) != 1 || !costIs(panel.Runs[0].CostUSD) {
+		t.Errorf("panel GET /api/sessions/conv_7f3a = %s, want the session's cost_usd r_mine's own, %v", out, mine)
+	}
 	var list struct {
 		Sessions []sess `json:"sessions"`
 	}
 	out = read(m.Token, "/api/sessions", &list)
 	if len(list.Sessions) != 1 || list.Sessions[0].Turns != 1 || list.Sessions[0].Usage.InputTokens != 1 {
 		t.Errorf("panel GET /api/sessions = %s, want conv_7f3a with 1 turn, input 1", out)
+	}
+	if len(list.Sessions) != 1 || !costIs(list.Sessions[0].CostUSD) {
+		t.Errorf("panel GET /api/sessions = %s, want conv_7f3a's cost_usd r_mine's own, %v", out, mine)
 	}
 	var runs struct {
 		Runs []struct {
@@ -163,5 +183,85 @@ func TestDerivedRunSessionCollision(t *testing.T) {
 	out = read(serverTok, "/api/sessions/conv_7f3a", &dev)
 	if dev.Turns != 3 || len(dev.Runs) != 3 || !strings.Contains(out, "otel-") {
 		t.Errorf("server GET /api/sessions/conv_7f3a = %s, want the weft turn and both derived runs", out)
+	}
+	if dev.CostUSD == nil || *dev.CostUSD <= mine {
+		t.Errorf("server GET /api/sessions/conv_7f3a = %s, want a cost_usd above r_mine's own (the derived runs summed)", out)
+	}
+}
+
+// sessionRunsDB fails the runs walk of one session and finds no run of
+// another, as a read error or a session deleted between the sessions
+// list and the walk would.
+type sessionRunsDB struct {
+	obsdb.DB
+	fail, empty string
+}
+
+func (d sessionRunsDB) Runs(ctx context.Context, q obsdb.RunQuery) (obsdb.RunPage, error) {
+	switch q.SessionID {
+	case d.fail:
+		return obsdb.RunPage{}, errors.New("disk on fire")
+	case d.empty:
+		return obsdb.RunPage{}, nil
+	}
+	return d.DB.Runs(ctx, q)
+}
+
+// A panel token's sessions list skips a row it cannot scope — its runs
+// walk failed (or passed its bound) — and a row with no turn of the
+// token's, rather than failing the whole list with a 500 or serving the
+// row's unscoped aggregates: the other sessions still answer. The
+// server token's list is unchanged: every row, the unreadable one with
+// an unknown cost.
+func TestPanelSessionsSkipUnscopable(t *testing.T) {
+	const serverTok = "srv-token"
+	db, err := sqlite.Open(t.TempDir() + "/skip.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	seedRun(t, db, "r_ok", "pub_a", "conv_ok", "", nil)
+	seedRun(t, db, "r_bad", "pub_a", "conv_bad", "", nil)
+	seedRun(t, db, "r_gone", "pub_a", "conv_gone", "", nil)
+	srv := New(DB(sessionRunsDB{DB: db, fail: "conv_bad", empty: "conv_gone"}), Token(serverTok))
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	code, out := b4Do(t, http.MethodPost, ts.URL+"/api/panel-tokens", serverTok, `{"public_id":"pub_a"}`)
+	if code != http.StatusOK {
+		t.Fatalf("mint: %d %s", code, out)
+	}
+	var m struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal([]byte(out), &m); err != nil {
+		t.Fatal(err)
+	}
+	ids := func(bearer string) []string {
+		t.Helper()
+		code, out := b4Do(t, http.MethodGet, ts.URL+"/api/sessions", bearer, "")
+		if code != http.StatusOK {
+			t.Fatalf("GET /api/sessions = %d %s, want 200", code, out)
+		}
+		var list struct {
+			Sessions []struct {
+				ID string `json:"id"`
+			} `json:"sessions"`
+		}
+		if err := json.Unmarshal([]byte(out), &list); err != nil {
+			t.Fatal(err)
+		}
+		var got []string
+		for _, s := range list.Sessions {
+			got = append(got, s.ID)
+		}
+		return got
+	}
+	if got := ids(m.Token); len(got) != 1 || got[0] != "conv_ok" {
+		t.Errorf("panel GET /api/sessions lists %v, want [conv_ok]: the unscopable and empty rows skipped", got)
+	}
+	if got := ids(serverTok); len(got) != 3 {
+		t.Errorf("server GET /api/sessions lists %v, want all three sessions", got)
 	}
 }

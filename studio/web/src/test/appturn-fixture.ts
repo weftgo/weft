@@ -22,8 +22,13 @@ export const PLAIN = "r_plain"
 export const CHILD = `${PARKED}/0/call_sub_1`
 /** A thread/pool child's turn (ADR 0022): a turn of its own session
  * (s_pool-t1), run under the parked turn's delegating call, so its
- * parent run id is the parked turn's with no `<parent>/` prefix. */
+ * parent run id is the parked turn's with no `<parent>/` prefix; thread
+ * stamps weft.session.parent (s_app) on it. */
 export const POOL = "s_pool-t1"
+/** A pool child p.Submit started from app code outside a run (ctx =
+ * Background, thread/pool's ExamplePool_Submit): weft.session.parent
+ * (s_app) but no parent run id, no public id. */
+export const POOL_SUBMIT = "s_submit-t1"
 /** A turn of a thread session created without thread.PublicID. */
 export const NOPUB = "s_nopub-t1"
 export const CALL = { type: "tool_call", id: "call_deploy_1", name: "deploy", args: { env: "prod" } }
@@ -59,6 +64,10 @@ export function childRow(): RunRow {
 
 export function poolRow(): RunRow {
   return parkedRow({ id: POOL, session_id: "s_pool", public_id: "", parent_run_id: PARKED, meta: { "weft.session.parent": APP_SESSION } })
+}
+
+export function poolSubmitRow(): RunRow {
+  return parkedRow({ id: POOL_SUBMIT, session_id: "s_submit", public_id: "", meta: { "weft.session.parent": APP_SESSION } })
 }
 
 export function noPubRow(): RunRow {
@@ -214,7 +223,7 @@ export function serveAppTurn(fake: FakeStudio, o: AppTurnOptions = {}): FakeStud
     .on(`GET runs/${PLAIN}/events`, pagedEvents(events(PLAIN, true)))
     .on(`GET runs/${PLAIN}/transcript`, transcript())
     .on(`GET runs/${PLAIN}/spans`, { spans: [] })
-  for (const r of [childRow(), poolRow(), noPubRow()])
+  for (const r of [childRow(), poolRow(), poolSubmitRow(), noPubRow()])
     fake
       .on(`GET runs/${r.id}`, doc(r))
       .on(`GET runs/${r.id}/events`, pagedEvents(events(r.id, true)))

@@ -16,11 +16,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
 import { queryClient } from "@/lib/query"
-import { APP_LINK_FIX, APP_RUN, APP_RUN_FIX, CAPS_UNREAD, PLAYGROUND_OFF, POOL_CHILD, READ_TOKEN, RUNTIMES_UNREAD, SESSION_UNREAD, SUBAGENT_CALL } from "@/lib/honesty"
+import { APP_LINK_FIX, APP_RUN, APP_RUN_FIX, CAPS_UNREAD, PLAYGROUND_OFF, POOL_CHILD, POOL_CHILD_TURN, READ_TOKEN, RUNTIMES_UNREAD, SESSION_UNREAD, SUBAGENT_CALL } from "@/lib/honesty"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { apiError, FakeStudio } from "@/test/fake-studio"
-import { APP_PUB, APP_SESSION, CALL, CHILD, NOPUB, PARKED, PLAIN, POOL, REJECTED, RESUMED, RUNTIMES_500, runtimeRow, serveAppTurn, STEER_FAILED } from "@/test/appturn-fixture"
+import { APP_PUB, APP_SESSION, CALL, CHILD, NOPUB, PARKED, PLAIN, POOL, POOL_SUBMIT, REJECTED, RESUMED, RUNTIMES_500, runtimeRow, serveAppTurn, STEER_FAILED } from "@/test/appturn-fixture"
 import type { AppTurnOptions } from "@/test/appturn-fixture"
 
 configure({ asyncUtilTimeout: 10_000 })
@@ -234,18 +234,41 @@ describe("the run page when no Sessions runtime of the run's service acts", () =
     await axeClean(parked())
   })
 
-  it("a thread/pool child's turn: decided on the parent session (ADR 0022 §7), a link to the parent turn, no verb, never the plain line", async () => {
+  it("a thread/pool child's turn: decided on the parent session (ADR 0022 §7), links to it and to the delegating turn, no verb, never the plain line", async () => {
     const fake = await open({}, POOL)
     expect(parked().getAttribute("data-parked")).toBe("pool-child")
-    expect(line("pool-child")).toBe(`${POOL_CHILD} ${PARKED}`)
+    expect(line("pool-child")).toBe(`${POOL_CHILD} ${APP_SESSION} ${POOL_CHILD_TURN} ${PARKED}`)
     expect(parked().textContent).not.toContain(APP_RUN)
     expect(parked().textContent).not.toContain(APP_RUN_FIX)
+    const sess = parked().querySelector<HTMLAnchorElement>("[data-parent-session]")!
+    expect(new URL(sess.href).pathname).toContain(`/sessions/${APP_SESSION}`)
     const link = parked().querySelector<HTMLAnchorElement>("[data-parent-turn]")!
     expect(new URL(link.href).pathname).toContain(`/runs/${PARKED}`)
     expect([...parked().querySelectorAll<HTMLButtonElement>('[data-refused="app-owned"]')].every((b) => b.disabled)).toBe(true)
     expect(parked().querySelector("input")).toBeNull()
     expect(fake.calls("GET sessions/s_pool")).toHaveLength(0)
     expect(fake.calls(`POST runs/${POOL}/approvals`)).toHaveLength(0)
+    await axeClean(parked())
+  })
+
+  it("a pool child p.Submit started outside a run (weft.session.parent, no parent run id): the parent session's words and link, no verb, no gate read", async () => {
+    // core stamps weft.parent.run.id only from a running call's ctx
+    // (core/loop.go); thread stamps weft.session.parent on every pool
+    // child (thread/turn.go) — the one mark this row has.
+    const fake = await open({}, POOL_SUBMIT)
+    expect(parked().getAttribute("data-parked")).toBe("pool-child")
+    expect(line("pool-child")).toBe(`${POOL_CHILD} ${APP_SESSION}`)
+    const sess = parked().querySelector<HTMLAnchorElement>("[data-parent-session]")!
+    expect(new URL(sess.href).pathname).toContain(`/sessions/${APP_SESSION}`)
+    expect(parked().querySelector("[data-parent-turn]")).toBeNull()
+    expect(parked().textContent).not.toContain(APP_RUN)
+    expect([...parked().querySelectorAll<HTMLButtonElement>('[data-refused="app-owned"]')].every((b) => b.disabled)).toBe(true)
+    expect(parked().querySelector("input")).toBeNull()
+    expect(fake.calls("GET sessions/s_submit")).toHaveLength(0)
+    expect(fake.calls(`GET sessions/${APP_SESSION}`)).toHaveLength(0)
+    // The runtimes stay on the shell's own poll (use-notices.ts, every
+    // page): the block asks for none of its own (appTurn is false).
+    expect(fake.calls(`POST runs/${POOL_SUBMIT}/approvals`)).toHaveLength(0)
     await axeClean(parked())
   })
 

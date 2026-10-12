@@ -10,7 +10,7 @@
 // plain Generate's park says the app resumes it, a session turn
 // without a public id says why runtime.Sessions cannot reach it, a
 // subagent's child run points at its parent turn, a thread/pool child's
-// turn at the parent session's turn (ADR 0022 §7), and a Studio without
+// turn at the parent session (weft.session.parent; ADR 0022 §7), and a Studio without
 // the playground says so in meta.capabilities_off's words. Steer on the
 // running app turn sits beside (AppSteer). Cancel is never offered on
 // an app turn: the runtime refuses it.
@@ -20,9 +20,9 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { ApiError, fetchCommand, metaQuery, postApproval, postSteer, runtimesQuery, sessionQuery, studioToken } from "@/lib/api"
 import type { CommandStatus, RunDoc, SessionDoc } from "@/lib/api"
-import { appVerbWords, nextTurn, parkedKind, POOL_CHILD, refusalLine, refusalWords, SUBAGENT_CALL } from "@/lib/honesty"
+import { appTurn, appVerbWords, nextTurn, parkedKind, POOL_CHILD, POOL_CHILD_TURN, poolParent, refusalLine, refusalWords, SUBAGENT_CALL } from "@/lib/honesty"
 import type { AppGateFacts } from "@/lib/honesty"
-import { runLink } from "@/lib/links"
+import { runLink, sessionLink } from "@/lib/links"
 import { canReplay, tokenScopeOf } from "@/lib/replay"
 
 interface Call {
@@ -185,8 +185,9 @@ function useAppTurn(doc: RunDoc) {
   const meta = useQuery(metaQuery())
   const caps = meta.data?.capabilities ?? []
   const mayAct = canReplay(caps, studioToken())
-  // A subagent's or a pool's child run is decided on its parent: no gate.
-  const app = !doc.playground && !doc.parent_run_id && !!doc.session_id && !!doc.public_id
+  // A subagent's or a pool's child run is decided on its parent, a
+  // nested Generate by the app: no gate (lib/honesty.ts's table).
+  const app = appTurn(doc)
   const poll = doc.pending > 0 || doc.status === "running" ? APP_GATE_POLL_MS : false
   const settled = (data: SessionDoc | undefined, err: Error | null) =>
     !!nextTurn(doc, data?.runs) || (err instanceof ApiError && [401, 403, 404, 410].includes(err.status))
@@ -286,13 +287,22 @@ export function ParkedCalls({ doc, pending }: { doc: RunDoc; pending: Call[] }) 
             {doc.parent_run_id}
           </Link>
         </p>
-      ) : shown === "pool-child" && doc.parent_run_id ? (
-        // ADR 0022 §7: the request is mirrored onto the parent session.
+      ) : shown === "pool-child" && poolParent(doc) ? (
+        // ADR 0022 §7: the request is mirrored onto the parent session
+        // (weft.session.parent); the delegating turn too when known.
         <p className="mt-1 text-status-int" data-app-owned="pool-child">
           {`${POOL_CHILD} `}
-          <Link {...runLink(doc.parent_run_id)} className="text-thread-ink hover:underline" data-parent-turn={doc.parent_run_id}>
-            {doc.parent_run_id}
+          <Link {...sessionLink(poolParent(doc))} className="text-thread-ink hover:underline" data-parent-session={poolParent(doc)}>
+            {poolParent(doc)}
           </Link>
+          {doc.parent_run_id ? (
+            <>
+              {` ${POOL_CHILD_TURN} `}
+              <Link {...runLink(doc.parent_run_id)} className="text-thread-ink hover:underline" data-parent-turn={doc.parent_run_id}>
+                {doc.parent_run_id}
+              </Link>
+            </>
+          ) : null}
         </p>
       ) : shown === "experiment" || deciding ? null : (
         <p className="mt-1 text-status-int" data-app-owned={shown === "unread" ? "unread" : kind === "decide" ? "read-only" : kind}>

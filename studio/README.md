@@ -939,8 +939,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 242,821 B raw / 77,996 B gzip
-(76.2 KiB, the ledger's last row, "phase 6 review fixes (G)"; 3,924 B — 3.8 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 243,059 B raw / 78,094 B gzip
+(76.3 KiB, the ledger's last row, "phase 6 review fixes (H)"; 3,826 B — 3.7 KiB — of headroom under
 the 81,920 B, 80 KiB, cap). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
 build kept its indentation and newlines: 281,470 B raw / 81,358 B gzip,
@@ -997,7 +997,7 @@ so a rebuild that forgets its row fails studio-check. The row
 `"minified"` (73,706 B) is the minify lever, not an item: from it on,
 every row is measured on the minified bundle and is not comparable
 byte for byte with the rows before it, which stay as history (the
-table folds its −7.5 KiB into the unbudgeted line, −0.2 KiB net with
+table folds its −7.5 KiB into the unbudgeted line, −0.1 KiB net with
 the unbudgeted rows after it, as `budget.test.ts` pins). The per-item
 marks are evidence, not a gate; the build itself fails only over the
 cap (`vite.panel.config.ts`).
@@ -1123,21 +1123,31 @@ quiet parked turn follows the link opening without a click. A plain Generate's p
 session) reads `parked · app-owned run · the app resumes it
 (weft.Approve)` with the `thread.PublicID(...)` fix; a turn of a session
 created without a public id reads appturn.go's `… run <id> is not a turn
-of a thread session with a public id` with the same fix. A run with a
-parent run id is one of three: a `weft.Subagent` child
-(`<parent>/<step>/<call>`) reads `parked · a subagent's call — decide on
-the parent turn <parent>` (a link on the run page), no verb — only the
-parent's SUBAGENT_PENDING call is pending on the session; a
-`thread/pool` child (a turn of its own session, `<session>-tN`, run
-under the delegating tool call) reads `parked · a delegated session's
-turn — decide on the parent session <parent>` (a link on the run page),
-no verb and no fix — its requests are mirrored onto the parent
-session's `Pending()` and decided there (`p.Decide`, ADR 0022 §7); and
-another agent's `Generate` inside a tool handler (an id of its own,
-whatever session id it inherited) never parks onto the parent and reads
-the plain Generate's line. The panel's turn lists are top-level runs, so
-it draws neither child's turn; reached another way, it reads the same
-words through the same `parkedKind`/`refusalWords`. On a
+of a thread session with a public id` with the same fix. A child run
+is one of three, told apart in this order (`parkedKind`'s table, in
+`lib/honesty.ts`): a `weft.Subagent` child (`<parent>/<step>/<call>`)
+reads `parked · a subagent's call — decide on the parent turn <parent>`
+(a link on the run page), no verb — only the parent's SUBAGENT_PENDING
+call is pending on the session; a `thread/pool` child, recognised by
+the `weft.session.parent` thread stamps on every pool child's run (in
+the run row's `meta`), not by its id or its parent run id, reads
+`parked · a delegated session's turn — decide on the parent session
+<session>` — and, when it ran under a delegating tool call, `· delegated
+by turn <parent>` — no verb and no fix: its requests are mirrored onto
+the parent session's `Pending()` and decided there (`p.Decide`, ADR 0022
+§7). A child `p.Submit` started from app code outside a run carries no
+parent run id at all (core stamps `weft.parent.run.id` only from a
+running call's context) and reads the same, the session alone. On the
+run page the session is a link to `/sessions/<session>` and the turn a
+link to its run; the block reads neither the child's session nor the
+runtimes for it. Another agent's `Generate` inside a tool handler (a
+parent run id, an id of its own, whatever session id it inherited)
+never parks onto the parent and reads the plain Generate's line; a
+session's own `Send` inside a tool handler (`<session>-tN`, no
+`weft.session.parent`) is a turn of that session, gated as any other.
+The panel's turn lists are top-level runs, so it draws none of these
+children; reached another way, it reads the same words through the same
+`parkedKind`/`refusalWords`, without the links. On a
 Studio without the playground the line is `… the playground is off on
 this Studio` with `meta.capabilities_off`'s fix (both surfaces hand
 their meta to `refusalWords`), and a failed read — meta, the session,

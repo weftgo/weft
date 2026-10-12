@@ -26,8 +26,11 @@ import {
   READ_TOKEN,
   SESSION_UNREAD,
   POOL_CHILD,
+  POOL_CHILD_TURN,
   SUBAGENT_CALL,
+  appTurn,
   appVerbWords,
+  nextTurn,
   noPublicIDWords,
   parkedKind,
   refusalLine,
@@ -167,13 +170,36 @@ describe("the app turn's kinds and refusal words", () => {
     // ADR 0022 §7: the child's requests surface on the parent session's
     // Pending() and p.Decide decides them there; pool.go runs the child
     // under the delegating call's ctx, so core stamps weft.parent.run.id.
-    const child = { id: "s_pool-t1", session_id: "s_pool", public_id: "", service: "app", parent_run_id: "s-t1" }
+    // thread stamps weft.session.parent on every pool child's run.
+    const meta = { "weft.session.parent": "s" }
+    const child = { id: "s_pool-t1", session_id: "s_pool", public_id: "", service: "app", parent_run_id: "s-t1", meta }
     expect(parkedKind(child, [rt()])).toBe("pool-child")
     const w = refusalWords(parkedKind(child, [rt()]), child, [rt()], false)
-    expect(refusalLine(w)).toBe(`${POOL_CHILD} s-t1`)
+    expect(refusalLine(w)).toBe(`${POOL_CHILD} s ${POOL_CHILD_TURN} s-t1`)
     expect(w.fix).toBe("")
     expect(refusalLine(w)).not.toContain(APP_RUN)
-    expect(go("../thread/turn.go")).toContain(`t.runID = fmt.Sprintf("%s-t%d", s.header.ID, s.turnSeq)`)
+    expect(go("../thread/turn.go")).toMatch(/"weft\.session\.parent"/)
+  })
+
+  it("a pool child p.Submit started outside a run (no parent run id — core stamps it only from a running call's ctx): still pool-child, the parent session named", () => {
+    const sub = { id: "s_sub-t1", session_id: "s_sub", public_id: "", service: "app", meta: { "weft.session.parent": "s" } }
+    expect(parkedKind(sub, [rt()])).toBe("pool-child")
+    expect(parkedKind(sub, [rt()], "s_sub-t2")).toBe("pool-child")
+    const w = refusalWords("pool-child", sub, [rt()], false)
+    expect(w).toEqual({ words: `${POOL_CHILD} s`, fix: "" })
+    // Whatever its id: the meta decides, not the `<session>-tN` shape.
+    expect(parkedKind({ ...sub, id: "r_any", parent_run_id: "s-t1" }, [rt()])).toBe("pool-child")
+    expect(appTurn(sub)).toBe(false)
+  })
+
+  it("a non-pool Send inside a tool handler (a parent run id, its own session and public id, no weft.session.parent): its own session's turn, never pool-child", () => {
+    const send = { id: "s2-t1", session_id: "s2", public_id: "pub_s2", service: "app", parent_run_id: "s-t1" }
+    expect(parkedKind(send, [rt()])).toBe("decide")
+    expect(parkedKind(send, [rt({ sessions: false })])).toBe("read-only")
+    expect(parkedKind(send, [rt()], "s2-t2")).toBe("resumed")
+    expect(nextTurn(send, [send, { id: "s2-t2", session_id: "s2", turn: 2 }, { id: "s2-t1/0/c", session_id: "s2", turn: 3, parent_run_id: "s2-t1" }])).toBe("s2-t2")
+    expect(appTurn(send)).toBe(true)
+    expect(parkedKind({ ...send, public_id: "" }, [rt()])).toBe("no-public-id")
   })
 
   it("another agent's Generate inside a tool handler (weft.parent.run.id, its own id): the plain line, never the parent's", () => {

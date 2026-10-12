@@ -417,12 +417,17 @@ export const noPublicIDWords = (runID: string) => `${APP_OWNED}: run ${runID} is
  * SUBAGENT_PENDING call, and only that call is pending on the session
  * (runtime/sessions.go's checkPending) — the parent id follows. */
 export const SUBAGENT_CALL = "parked · a subagent's call — decide on the parent turn"
-/** A thread/pool child's turn (its own session's `<session>-tN`, run
- * under the delegating tool call, so core stamps the parent run id on
- * it): its requests are mirrored onto the parent session's Pending()
- * and decided there (p.Decide; ADR 0022 §7) — never on the child's own
- * session. The parent run id follows. */
+/** A thread/pool child's turn (a turn of its own session, which
+ * thread stamps weft.session.parent on — turn.go, every pool child,
+ * Submit inside a run or outside one): its requests are mirrored onto
+ * the parent session's Pending() and decided there (p.Decide; ADR 0022
+ * §7) — never on the child's own session. The parent session's id
+ * follows; then, when the child ran under a delegating call (core
+ * stamps weft.parent.run.id only from a running call's ctx),
+ * POOL_CHILD_TURN and that turn. */
 export const POOL_CHILD = "parked · a delegated session's turn — decide on the parent session"
+/** After POOL_CHILD's session id: the parent turn whose call delegated it. */
+export const POOL_CHILD_TURN = "· delegated by turn"
 
 /** What a parked run's calls get: an experiment's verbs (its result
  * pane), the app turn's verbs, the app turn read-only, an app turn a
@@ -447,31 +452,59 @@ interface AppRow {
   public_id?: string
   service?: string
   parent_run_id?: string
+  /** The run row's meta (api.go's runRow: obsdb.MetaOf's pairs). */
+  meta?: Record<string, string>
+}
+
+/** The parent session thread stamps on every thread/pool child's run
+ * (turn.go: weft.session.parent), "" on any other run. */
+export const poolParent = (row: { meta?: Record<string, string> } | null | undefined) => row?.meta?.["weft.session.parent"] ?? ""
+
+/** ownTurn: the row's id is a turn of its own session — thread/turn.go's
+ * `<session>-t<n>`, nothing after it. A Subagent child
+ * (`<session>-t1/0/call`) and a Generate that inherited the session id
+ * through core's ctx metadata (an id of its own) are not. */
+export function ownTurn(row: { id: string; session_id?: string } | null | undefined): boolean {
+  const s = row?.session_id
+  if (!s || !row.id.startsWith(`${s}-t`)) return false
+  const n = row.id.slice(s.length + 2)
+  return /^\d+$/.test(n)
 }
 
 const live = (rts: readonly RuntimeLike[] | null | undefined, service: string | undefined, sessions: boolean) =>
   !!service && !!rts?.some((r) => r.connected !== false && r.service === service && (!sessions || r.sessions === true))
 
-/** parkedKind gates the verbs: a subagent's child run is decided on its
- * parent turn; outside a thread session the app resumes the run; a
- * session without a public id cannot be resolved by runtime.Sessions;
- * else decide only while a connected runtime of the run's own service
- * registered runtime.Sessions (what appturn.go routes by) and no later
- * turn of its session exists (next). */
+/** parkedKind gates the verbs. Its decision table, first match wins:
+ *
+ *   row                                         kind and where it is decided
+ *   weft.playground                             experiment — its result pane
+ *   Subagent child: id `<parent_run_id>/…`      child — the parent turn's
+ *                                               SUBAGENT_PENDING call
+ *   pool child: meta weft.session.parent set    pool-child — the parent session
+ *     (with or without a parent run id —        (ADR 0022 §7), never its own;
+ *     p.Submit outside a run stamps none —      no verb, no fix
+ *     whatever its id)
+ *   nested Generate: a parent run id, no        plain — the app resumes it
+ *     `<parent>/` prefix, no session.parent,      (under a session turn it
+ *     not its own session's `<session>-tN`         inherits the session and
+ *                                                  public id through ctx)
+ *   ordinary turn: no parent run id, or its     the session path below (a
+ *     own session's `<session>-tN` (a Send       session's Send inside a tool
+ *     inside a tool handler)                     handler is decidable there)
+ *
+ * The session path: outside a thread session the app resumes the run
+ * (plain); a session without a public id cannot be resolved by
+ * runtime.Sessions (no-public-id); a later turn of its session resumed
+ * it (resumed, next); else decide only while a connected runtime of the
+ * run's own service registered runtime.Sessions (what appturn.go routes
+ * by), read-only otherwise. */
 export function parkedKind(row: AppRow | null | undefined, runtimes: readonly RuntimeLike[] | null | undefined, next?: string): ParkedKind {
   if (row?.playground) return "experiment"
-  // Only core's Subagent child (`<parent>/<step>/<call>`) parks onto its
-  // parent as SUBAGENT_PENDING (pricing.go's subagents() tells it apart
-  // the same way). A thread/pool child runs under the delegating call
-  // too, but as a turn of its own session (`<session>-tN`): its park is
-  // mirrored onto the parent session and decided there (ADR 0022 §7).
-  // Another agent's Generate inside a tool handler carries the parent
-  // run id (and, under a session turn, its inherited session id) with an
-  // id of its own: its park is the app's to resume.
-  if (row?.parent_run_id) {
-    if (row.id.startsWith(`${row.parent_run_id}/`)) return "child"
-    return row.session_id && row.id.startsWith(`${row.session_id}-t`) ? "pool-child" : "plain"
-  }
+  // Only core's Subagent child parks onto its parent as SUBAGENT_PENDING
+  // (pricing.go's subagents() tells it apart the same way).
+  if (row?.parent_run_id && row.id.startsWith(`${row.parent_run_id}/`)) return "child"
+  if (poolParent(row)) return "pool-child"
+  if (row?.parent_run_id && !ownTurn(row)) return "plain"
   if (!row?.session_id) return "plain"
   if (!row.public_id) return "no-public-id"
   if (next) return "resumed"
@@ -481,13 +514,15 @@ export function parkedKind(row: AppRow | null | undefined, runtimes: readonly Ru
 /** nextTurn is the turn after row in its session (the smallest later
  * turn number among runs): a parked turn with one was resumed. */
 export function nextTurn(
-  row: { session_id?: string; turn?: number; parent_run_id?: string } | null | undefined,
+  row: { id: string; session_id?: string; turn?: number; parent_run_id?: string } | null | undefined,
   runs: readonly ({ id: string; session_id?: string; turn?: number; parent_run_id?: string } | null)[] | null | undefined
 ): string | undefined {
   let best: { id: string; turn?: number } | undefined
-  if (!row?.session_id || row.parent_run_id || runs == null) return undefined
+  // A child run (a parent run id that is not its own session's turn —
+  // a Subagent child, a nested Generate) is no turn of the session.
+  if (!row?.session_id || (row.parent_run_id && !ownTurn(row)) || runs == null) return undefined
   for (const r of runs)
-    if (r && r.session_id === row.session_id && !r.parent_run_id && (r.turn ?? 0) > (row.turn ?? 0) && (!best || (r.turn ?? 0) < (best.turn ?? 0)))
+    if (r && r.session_id === row.session_id && (!r.parent_run_id || ownTurn(r)) && (r.turn ?? 0) > (row.turn ?? 0) && (!best || (r.turn ?? 0) < (best.turn ?? 0)))
       best = r
   return best?.id
 }
@@ -501,6 +536,22 @@ export interface AppGateFacts {
   metaError?: string
   sessionError?: string
 }
+
+/** appTurn: the run page reads the gate's facts (the session, the
+ * runtimes) for this row — a turn parkedKind sends down the session
+ * path, with a session and a public id; never a child of either kind,
+ * a nested Generate or an experiment. */
+export const appTurn = (row: AppRow) => {
+  const k = parkedKind(row, null)
+  return (k === "read-only" || k === "decide") && !!row.session_id && !!row.public_id
+}
+
+/** A pool child's line: POOL_CHILD, the parent session's id and, when
+ * it ran under a delegating call, POOL_CHILD_TURN and that turn. Never
+ * POOL_CHILD alone: the kind is weft.session.parent's, so a session id
+ * always follows. */
+export const poolChildWords = (row: AppRow) =>
+  `${POOL_CHILD} ${poolParent(row)}${row.parent_run_id ? ` ${POOL_CHILD_TURN} ${row.parent_run_id}` : ""}`
 
 /** refusalWords is the read-only line's message and fix in the
  * server's words: a 403 already answered (refused), a plain Generate,
@@ -523,7 +574,7 @@ export function refusalWords(
   if (refused?.fix) return { words: refused.error ?? APP_OWNED, fix: refused.fix }
   if (kind === "plain") return { words: APP_RUN, fix: APP_RUN_FIX }
   if (kind === "child") return { words: `${SUBAGENT_CALL} ${row.parent_run_id ?? ""}`.trimEnd(), fix: "" }
-  if (kind === "pool-child") return { words: `${POOL_CHILD} ${row.parent_run_id ?? ""}`.trimEnd(), fix: "" }
+  if (kind === "pool-child") return { words: poolChildWords(row), fix: "" }
   if (kind === "no-public-id") return { words: noPublicIDWords(row.id), fix: APP_RUN_FIX }
   if (readToken) return { words: READ_TOKEN, fix: "" }
   // A failed read is no verdict: the server never said the link is closed.

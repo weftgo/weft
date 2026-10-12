@@ -267,6 +267,24 @@ func TestSessionWireShape(t *testing.T) {
 // identityRun is everything one app turn produces that observability
 // must leave alone: its events (as the Tap saw them), the session's
 // entries and context, the run's usage and its metadata.
+// identityEventJSON is an event as the identity goldens compare it:
+// its wire JSON with the wall-clock fields (step_finish's latency_ms
+// and ttft_ms) dropped — they measure the machine, not the loop, and
+// differed by a millisecond once under `make stress`.
+func identityEventJSON(ev core.Event) ([]byte, error) {
+	b, err := json.Marshal(ev)
+	if err != nil {
+		return nil, err
+	}
+	var m map[string]any
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, err
+	}
+	delete(m, "latency_ms")
+	delete(m, "ttft_ms")
+	return json.Marshal(m)
+}
+
 type identityRun struct {
 	Events   []string
 	Entries  []string
@@ -312,7 +330,7 @@ func runAppTurn(t *testing.T, install func(agent *core.Agent) func(), opts ...co
 		core.TracerProvider(tp),
 		core.Options(opts...),
 		core.Tap(func(ctx context.Context, ev core.Event) {
-			b, err := json.Marshal(ev)
+			b, err := identityEventJSON(ev)
 			if err != nil {
 				t.Errorf("event: %v", err)
 			}
@@ -841,7 +859,7 @@ func parkAndDecideBy(t *testing.T, breakpoint bool, decide func(s *thread.Sessio
 		core.Name("approvals-example"),
 		core.TracerProvider(tp),
 		core.Tap(func(ctx context.Context, ev core.Event) {
-			b, _ := json.Marshal(ev)
+			b, _ := identityEventJSON(ev)
 			mu.Lock()
 			defer mu.Unlock()
 			out.Events = append(out.Events, string(b))

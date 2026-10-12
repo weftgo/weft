@@ -185,6 +185,13 @@ func (s *Server) registerGroups() {
 			},
 		})
 	}
+	// The manifest store (U27): GET /api/manifests/{hash}, the agent
+	// configuration a run's manifest_hash names. Present when the
+	// database stores manifests (obsdb.ManifestStore — both first-party
+	// backends); otherwise meta.capabilities_off says why.
+	if _, ok := s.db.(obsdb.ManifestStore); ok {
+		s.addGroup(manifestsGroup())
+	}
 	// The pricing table (plan A5): GET /api/settings/pricing, the
 	// effective table read-only. Always present; cost itself rides the
 	// rows, priced at read time.

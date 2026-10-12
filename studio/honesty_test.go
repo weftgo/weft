@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -321,8 +322,16 @@ func TestRunHolesV090(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := migrationMax(t, path); got != len(migs) {
-		t.Errorf("after open: migration %d, want the current %d", got, len(migs))
+	// The highest file's number, not the count: numbering may skip
+	// (migrations land renumbered across branches).
+	want := 0
+	for _, m := range migs {
+		if n, err := strconv.Atoi(strings.SplitN(filepath.Base(m), "_", 2)[0]); err == nil && n > want {
+			want = n
+		}
+	}
+	if got := migrationMax(t, path); got != want {
+		t.Errorf("after open: migration %d, want the current %d", got, want)
 	}
 	golden(t, "run-v090.golden.json", body)
 	var doc struct {

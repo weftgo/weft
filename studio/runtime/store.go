@@ -264,6 +264,35 @@ func (rs *RuntimeServer) saveRuntimeLocked(id string, c *connected) {
 	})
 }
 
+// saveManifestsLocked writes each registered agent's one-agent
+// manifest by its hash (U27): the bytes the runtime registered, whose
+// sha256 is the weft.manifest.hash the agent's runs carry, so a run
+// still resolves the configuration it ran with after the runtime moved
+// on. Only when the store is also an obsdb.ManifestStore (both
+// first-party backends are); a manifest that is not a JSON object is
+// skipped, as registrationManifest skips it. Content-addressed, so a
+// re-registration's write is a no-op in the store. Caller holds mu.
+func (rs *RuntimeServer) saveManifestsLocked(reg Registration) {
+	if !rs.storing() {
+		return
+	}
+	if _, ok := rs.writer.store.(obsdb.ManifestStore); !ok {
+		return
+	}
+	for _, a := range reg.Agents {
+		m := obsdb.StoredManifest{
+			Hash: obsdb.ManifestHash([]byte(a.Manifest)), Body: json.RawMessage(a.Manifest),
+			Source: obsdb.ManifestSourceRuntime,
+		}
+		if obsdb.CheckStoredManifest(m) != nil {
+			continue
+		}
+		rs.writer.put(writeKey{"manifest", m.Hash}, false, func(ctx context.Context, st obsdb.CommandStore) error {
+			return st.(obsdb.ManifestStore).PutManifest(ctx, m)
+		})
+	}
+}
+
 // forgetLocked drops the writer's pending write of a row the memory
 // prune removed, so the queue is bounded by the live keys. Caller holds
 // mu.

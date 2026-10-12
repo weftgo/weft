@@ -20,6 +20,7 @@
     "diff",
     "traces",
     "search",
+    "manifests",
     "pricing",
     "delete",
     "proposals",

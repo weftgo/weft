@@ -325,6 +325,10 @@ type runDoc struct {
 type runPage struct {
 	runDoc
 	Compactions []runCompaction `json:"compactions"`
+	// ManifestAvailable: the run's manifest_hash resolves in the
+	// manifest store — GET /api/manifests/{manifest_hash} answers the
+	// configuration it ran with (U27). Absent when it does not.
+	ManifestAvailable bool `json:"manifest_available,omitempty"`
 }
 
 // runCompaction is one compaction a run's records name, counts and
@@ -917,7 +921,8 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 		dbError(w, r, "compactions of run", id, err)
 		return
 	}
-	writeJSON(w, r, http.StatusOK, runPage{runDoc: doc, Compactions: runCompactions(comps)})
+	writeJSON(w, r, http.StatusOK, runPage{runDoc: doc, Compactions: runCompactions(comps),
+		ManifestAvailable: s.manifestAvailable(r.Context(), det.ManifestHash)})
 }
 
 // childRows is a run document's children[] rows, each with its own

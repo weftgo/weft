@@ -246,6 +246,7 @@ func New(opts ...Option) *Server {
 	}
 	s.prepareShell()
 	s.registerGroups()
+	s.storeFileManifest()
 	s.mux.HandleFunc("/", s.serveUI)
 	s.startSweeper()
 	return s

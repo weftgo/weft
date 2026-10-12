@@ -28,8 +28,8 @@ func TestMigrationPinsExporterVersion(t *testing.T) {
 	if !strings.Contains(string(body), pinnedExporterVersion) {
 		t.Errorf("migration 0001 does not name the pinned exporter version %s", pinnedExporterVersion)
 	}
-	if highestMigration() != 15 {
-		t.Errorf("highest migration = %d, want 15 (0001 init, 0002 experiments, 0003 status spelling, 0004 request record, 0005 raw record, 0006 experiment command, 0007 the experiment index, 0008 the command store, 0009 the derived flag, 0010 root ended, 0011 stopped by, 0012 the root's version, 0013 the emitted counts, 0014 records.dropped out of meta, 0015 the problem counters)", highestMigration())
+	if highestMigration() != WantSchemaVersion {
+		t.Errorf("highest migration = %d, want %d (%s)", highestMigration(), WantSchemaVersion, WantSchemaThrough)
 	}
 }
 

@@ -2274,6 +2274,21 @@ never sent to the app or written to files; 200 `{agent, proposed, note}`,
 when a manifest file is served and does not name the agent; the
 dev token's and setup A's loopback alone, every panel token 403; it carries the agents' system
 prompts: 403 with `badge: "hidden"` to a read-scoped panel token),
+`manifests/{hash}` (U27, the `manifests` capability, present when the
+database is an `obsdb.ManifestStore` — both first-party backends: the
+agent configuration a run's `manifest_hash` names, after it stopped
+being the current one — `{manifest_hash, agent, source, first_seen,
+current_manifest_hash, manifest}`, `source` `file` or `runtime` (where
+Studio first saw it), `current_manifest_hash` the hash the current
+manifest gives the same agent (`""` when it names none; equal to
+`manifest_hash` when the run's configuration is current), `manifest`
+the one-agent `core.Manifest` document; Studio stores each agent of the
+weft.json it serves at `New` and every runtime registration's agents,
+content-addressed (the hash is the document's sha256, the first write
+kept) and kept forever — deletion and `Retain` never touch them; 404
+for a hash never stored; `/api/manifest`'s rule: 403 with `badge:
+"hidden"` to a read-scoped panel token; the run document carries
+`manifest_available: true` when its hash resolves),
 `DELETE /api/runs/{id}` and `DELETE /api/sessions/{id}` (plan A7, the
 `delete` capability: a run with its subagent children, or every run of
 a session with theirs, removed from Studio's database — run rows,

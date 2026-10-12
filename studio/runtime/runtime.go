@@ -853,6 +853,7 @@ func (rs *RuntimeServer) serveRegister(w http.ResponseWriter, r *http.Request) {
 		c.connectedSince = c.lastSeen
 	}
 	rs.saveRuntimeLocked(reg.RuntimeID, c)
+	rs.saveManifestsLocked(reg)
 	if hasManifest {
 		rs.rememberLocked(c, src, c.lastSeen)
 	} else {

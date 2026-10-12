@@ -2,8 +2,6 @@ package studio
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -364,6 +362,30 @@ type agentHash struct{ name, hash string }
 // the one-agent document re-encoded through the same MarshalIndent,
 // which reproduces core's bytes for any agent core.Manifest wrote.
 func manifestAgentHashes(manifest []byte) ([]agentHash, error) {
+	docs, err := manifestAgentDocs(manifest)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]agentHash, 0, len(docs))
+	for _, d := range docs {
+		out = append(out, agentHash{d.name, obsdb.ManifestHash(d.body)})
+	}
+	return out, nil
+}
+
+// agentDoc is one agent of a manifest as its own one-agent document:
+// the bytes weft.Manifest writes for that agent alone, whose sha256 is
+// the weft.manifest.hash its runs carry.
+type agentDoc struct {
+	name string
+	body []byte
+}
+
+// manifestAgentDocs splits a manifest into its agents' one-agent
+// documents, each re-encoded as core.Manifest encodes it (two-space
+// indent, a trailing newline) — what manifestAgentHashes hashes and
+// the manifest store keeps (U27).
+func manifestAgentDocs(manifest []byte) ([]agentDoc, error) {
 	var doc struct {
 		Version int               `json:"weft"`
 		Agents  []json.RawMessage `json:"agents"`
@@ -371,7 +393,7 @@ func manifestAgentHashes(manifest []byte) ([]agentHash, error) {
 	if err := json.Unmarshal(manifest, &doc); err != nil {
 		return nil, err
 	}
-	out := make([]agentHash, 0, len(doc.Agents))
+	out := make([]agentDoc, 0, len(doc.Agents))
 	for _, raw := range doc.Agents {
 		var named struct {
 			Name string `json:"name"`
@@ -387,8 +409,7 @@ func manifestAgentHashes(manifest []byte) ([]agentHash, error) {
 		if err != nil {
 			return nil, err
 		}
-		sum := sha256.Sum256(append(b, '\n'))
-		out = append(out, agentHash{named.Name, hex.EncodeToString(sum[:])})
+		out = append(out, agentDoc{named.Name, append(b, '\n')})
 	}
 	return out, nil
 }

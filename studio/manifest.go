@@ -51,6 +51,7 @@ var optionalCapabilities = map[string]string{
 	"auth":        offAuth,
 	"handoff":     offHandoff,
 	"search":      offSearch,
+	"manifests":   offManifests,
 }
 
 // manifestSourceView is one entry of api/manifest's sources.

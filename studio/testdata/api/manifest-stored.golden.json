@@ -1,0 +1,28 @@
+{
+  "manifest_hash": "fc4f4a659b11301b012963cdab04f1d47d677407275fa6aac364d7c8e860e194",
+  "agent": "support",
+  "source": "runtime",
+  "first_seen": "(time)",
+  "current_manifest_hash": "fc4f4a659b11301b012963cdab04f1d47d677407275fa6aac364d7c8e860e194",
+  "manifest": {
+    "weft": 1,
+    "agents": [
+      {
+        "name": "support",
+        "model": {
+          "provider": "wefttest",
+          "name": "script"
+        },
+        "instructions": "Be brief.",
+        "policy": {
+          "parallelism": 4,
+          "max_steps": 10,
+          "max_result_bytes": 65536,
+          "max_model_retries": 3
+        },
+        "tools": []
+      }
+    ]
+  }
+}
+

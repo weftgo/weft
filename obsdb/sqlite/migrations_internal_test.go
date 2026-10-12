@@ -98,8 +98,8 @@ func TestUpgradeFrom0002(t *testing.T) {
 	if err := raw.QueryRowContext(ctx, `SELECT MAX(version) FROM obsdb_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 13 {
-		t.Errorf("migration max = %d, want 13 (through 0013 the problem counters)", version)
+	if version != WantSchemaVersion {
+		t.Errorf("migration max = %d, want %d (%s)", version, WantSchemaVersion, WantSchemaThrough)
 	}
 	var agent, instructions, catalog string
 	var steps, requests int
@@ -299,8 +299,8 @@ func TestUpgradeFrom0006AddsCommandStore(t *testing.T) {
 	if err := db.(*DB).reads.QueryRowContext(ctx, `SELECT MAX(version) FROM obsdb_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 13 {
-		t.Errorf("migration max after the upgrade = %d, want 13 (through 0013 the problem counters)", version)
+	if version != WantSchemaVersion {
+		t.Errorf("migration max after the upgrade = %d, want %d (%s)", version, WantSchemaVersion, WantSchemaThrough)
 	}
 }
 

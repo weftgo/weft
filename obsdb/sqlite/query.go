@@ -107,6 +107,17 @@ func runWhere(q obsdb.RunQuery, now time.Time) (string, []any) {
 		cutoff := now.Add(-obsdb.InterruptedAfter).UnixNano()
 		conds = append(conds, "("+statusExpr+") = ?")
 		args = append(args, cutoff, string(q.Status))
+		// Each condition below is implied by the CASE (redundant), and
+		// is there for the planner: the CASE, with its bind parameter,
+		// can be served by no index, while these name the columns of
+		// runs_last_seen and runs_failed (0014).
+		switch q.Status {
+		case obsdb.StatusRunning:
+			conds = append(conds, "last_seen_ns >= ?")
+			args = append(args, cutoff)
+		case obsdb.StatusFailed:
+			conds = append(conds, "failed = 1")
+		}
 	}
 	conds = append(conds, "1=1")
 	if q.Agent != "" {
@@ -114,7 +125,10 @@ func runWhere(q obsdb.RunQuery, now time.Time) (string, []any) {
 		args = append(args, q.Agent)
 	}
 	if q.SessionID != "" {
-		conds = append(conds, "session_id = ?")
+		// The literal <> '' (redundant: the value is not empty) lets
+		// the planner use the partial index runs_session (0001), as
+		// for runs_experiment below.
+		conds = append(conds, "session_id = ? AND session_id <> ''")
 		args = append(args, q.SessionID)
 	}
 	if q.ExperimentID != "" {
@@ -125,7 +139,7 @@ func runWhere(q obsdb.RunQuery, now time.Time) (string, []any) {
 		args = append(args, q.ExperimentID)
 	}
 	if q.PublicID != "" {
-		conds = append(conds, "public_id = ?")
+		conds = append(conds, "public_id = ? AND public_id <> ''") // runs_public (rebuilt in 0014)
 		args = append(args, q.PublicID)
 	}
 	if q.ErrorType != "" {
@@ -892,7 +906,7 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 	}
 	scope, sargs := sessionScope, []any(nil)
 	if q.PublicID != "" {
-		scope += ` AND public_id = ?`
+		scope += ` AND public_id = ? AND public_id <> ''`
 		sargs = []any{q.PublicID}
 	}
 	// Total is the whole match, as Runs' is: the cursor pages through
@@ -947,11 +961,11 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 func sessionTitleExpr(pub string) (string, []any) {
 	scope, args := "", []any(nil)
 	if pub != "" {
-		scope, args = ` AND r3.public_id = ?`, []any{pub}
+		scope, args = ` AND r3.public_id = ? AND r3.public_id <> ''`, []any{pub}
 	}
 	const title = `json_extract(r3.meta, '$."` + obsdb.SessionTitleKey + `"')`
 	return `COALESCE((SELECT ` + title + ` FROM runs r3
-		WHERE r3.session_id = runs.session_id AND r3.parent_run_id = '' AND r3.playground = 0` + scope + `
+		WHERE r3.session_id = runs.session_id AND r3.session_id <> '' AND r3.parent_run_id = '' AND r3.playground = 0` + scope + `
 		AND COALESCE(` + title + `, '') <> ''
 		ORDER BY r3.turn DESC, r3.started_ns DESC LIMIT 1), '')`, args
 }
@@ -963,10 +977,10 @@ func sessionTitleExpr(pub string) (string, []any) {
 func sessionPromptExpr(pub string) (string, []any) {
 	scope, args := "", []any(nil)
 	if pub != "" {
-		scope, args = ` AND r4.public_id = ?`, []any{pub}
+		scope, args = ` AND r4.public_id = ? AND r4.public_id <> ''`, []any{pub}
 	}
 	return `COALESCE((SELECT rs.prompt FROM run_search rs WHERE rs.run_id = (SELECT r4.run_id FROM runs r4
-		WHERE r4.session_id = runs.session_id AND r4.parent_run_id = '' AND r4.playground = 0` + scope + `
+		WHERE r4.session_id = runs.session_id AND r4.session_id <> '' AND r4.parent_run_id = '' AND r4.playground = 0` + scope + `
 		ORDER BY r4.turn, r4.started_ns, r4.run_id LIMIT 1)), '')`, args
 }
 
@@ -977,10 +991,10 @@ func sessionPromptExpr(pub string) (string, []any) {
 func sessionContentOffExpr(pub string) (string, []any) {
 	scope, args := "", []any(nil)
 	if pub != "" {
-		scope, args = ` AND r5.public_id = ?`, []any{pub}
+		scope, args = ` AND r5.public_id = ? AND r5.public_id <> ''`, []any{pub}
 	}
 	return `COALESCE((SELECT r5.derived = 0 AND r5.message_count = 0 AND r5.event_count > 0 FROM runs r5
-		WHERE r5.session_id = runs.session_id AND r5.parent_run_id = '' AND r5.playground = 0` + scope + `
+		WHERE r5.session_id = runs.session_id AND r5.session_id <> '' AND r5.parent_run_id = '' AND r5.playground = 0` + scope + `
 		ORDER BY r5.turn, r5.started_ns, r5.run_id LIMIT 1), 0)`, args
 }
 
@@ -998,25 +1012,8 @@ func havingSQL(having []string) string {
 // turn the status is read from as where scopes the rest.
 func (d *DB) sessionRows(ctx context.Context, cutoff int64, pub, where string, wargs []any,
 	having []string, hargs []any, tail string) ([]obsdb.SessionRow, error) {
-	args := []any{cutoff}
-	statusScope := ""
-	if pub != "" {
-		statusScope = ` AND r2.public_id = ?`
-		args = append(args, pub)
-	}
-	title, targs := sessionTitleExpr(pub)
-	prompt, pargs := sessionPromptExpr(pub)
-	off, oargs := sessionContentOffExpr(pub)
-	args = append(append(append(args, targs...), pargs...), oargs...)
-	args = append(append(args, wargs...), hargs...)
-	rs, err := d.reads.QueryContext(ctx, `SELECT session_id, MAX(public_id), MAX(agent), COUNT(*),
-		MIN(started_ns), MAX(last_seen_ns),
-		SUM(input_tokens), SUM(output_tokens), SUM(cached_input_tokens), SUM(cache_write_tokens), SUM(reasoning_tokens),
-		(SELECT `+statusExpr+` FROM runs r2 WHERE r2.session_id = runs.session_id
-		 AND r2.parent_run_id = '' AND r2.playground = 0`+statusScope+`
-		 ORDER BY r2.turn DESC, r2.started_ns DESC LIMIT 1),
-		`+title+`, substr(`+prompt+`, 1, `+fmt.Sprint(obsdb.PromptPreviewRunes)+`), `+off+`
-		FROM runs WHERE `+where+` GROUP BY session_id`+havingSQL(having)+tail, args...)
+	query, args := sessionRowsSQL(cutoff, pub, where, wargs, having, hargs, tail)
+	rs, err := d.reads.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1045,6 +1042,35 @@ func (d *DB) sessionRows(ctx context.Context, cutoff int64, pub, where string, w
 	return out, rs.Err()
 }
 
+// sessionRowsSQL is sessionRows' statement with its arguments in text
+// order (a function of its own so a test can EXPLAIN it). Every
+// correlated subquery states r.session_id <> ” beside its equality,
+// which lets sqlite use the partial index runs_session (0001): without
+// it each session's newest turn was looked up by walking every
+// top-level run.
+func sessionRowsSQL(cutoff int64, pub, where string, wargs []any,
+	having []string, hargs []any, tail string) (string, []any) {
+	args := []any{cutoff}
+	statusScope := ""
+	if pub != "" {
+		statusScope = ` AND r2.public_id = ? AND r2.public_id <> ''`
+		args = append(args, pub)
+	}
+	title, targs := sessionTitleExpr(pub)
+	prompt, pargs := sessionPromptExpr(pub)
+	off, oargs := sessionContentOffExpr(pub)
+	args = append(append(append(args, targs...), pargs...), oargs...)
+	args = append(append(args, wargs...), hargs...)
+	return `SELECT session_id, MAX(public_id), MAX(agent), COUNT(*),
+		MIN(started_ns), MAX(last_seen_ns),
+		SUM(input_tokens), SUM(output_tokens), SUM(cached_input_tokens), SUM(cache_write_tokens), SUM(reasoning_tokens),
+		(SELECT ` + statusExpr + ` FROM runs r2 WHERE r2.session_id = runs.session_id AND r2.session_id <> ''
+		 AND r2.parent_run_id = '' AND r2.playground = 0` + statusScope + `
+		 ORDER BY r2.turn DESC, r2.started_ns DESC LIMIT 1),
+		` + title + `, substr(` + prompt + `, 1, ` + fmt.Sprint(obsdb.PromptPreviewRunes) + `), ` + off + `
+		FROM runs WHERE ` + where + ` GROUP BY session_id` + havingSQL(having) + tail, args
+}
+
 func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err error) {
 	if err := d.checkOpen(); err != nil {
 		return obsdb.SessionDetail{}, err
@@ -1067,7 +1093,7 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 	// the newest — the ones a session view is opened for. A caller that
 	// wants pages reads Runs with RunQuery.SessionID.
 	runs, err := d.queryRunRows(ctx,
-		`session_id = ? AND parent_run_id = '' AND playground = 0 ORDER BY turn, started_ns, run_id`,
+		`session_id = ? AND session_id <> '' AND parent_run_id = '' AND playground = 0 ORDER BY turn, started_ns, run_id`,
 		[]any{id}, now)
 	if err != nil {
 		return obsdb.SessionDetail{}, err
@@ -1085,7 +1111,7 @@ func (d *DB) ResolvePublicID(ctx context.Context, publicID string) (_ string, er
 	defer d.closedErr(&err)
 	var sessionID string
 	err = d.reads.QueryRowContext(ctx,
-		`SELECT session_id FROM runs WHERE public_id = ? AND session_id <> '' ORDER BY turn DESC, started_ns DESC, run_id DESC LIMIT 1`,
+		`SELECT session_id FROM runs WHERE public_id = ? AND public_id <> '' AND session_id <> '' ORDER BY turn DESC, started_ns DESC, run_id DESC LIMIT 1`,
 		publicID).Scan(&sessionID)
 	if err == sql.ErrNoRows {
 		return "", fmt.Errorf("%w: public id %s", obsdb.ErrNotFound, publicID)

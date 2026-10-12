@@ -595,6 +595,18 @@ and absent otherwise, so a list titles an untitled content-off session
 `sessions`). `SessionQuery.Q` matches a term against the title, the
 first turn's whole prompt, the session id, the public id and the agent.
 
+**Manifests** (U27) are not derived from the records: a row's
+`manifest_hash` is the root span's `weft.manifest.hash` (§2), and a
+store that implements `obsdb.ManifestStore` (both shipped backends:
+SQLite's `manifests`, migration 0014; ClickHouse's, 0016) keeps the
+one-agent `core.Manifest` document under that sha256 — Studio writes it
+from the weft.json it serves and from runtime registrations, never from
+ingest. Content-addressed, the first write kept, and kept forever: the
+run deletions and the sweep never touch it, so a run that remains
+resolves its hash. The contract fixtures are record-driven and carry no
+manifest; the obsdbtest `Manifests` case and Studio's
+`TestRunResolvesItsRegisteredManifest` are its proof.
+
 ## 7. Badges
 
 Every place a record is missing, cut or derived is shown with a badge

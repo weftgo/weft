@@ -92,11 +92,17 @@ func TestAuthMatrix(t *testing.T) {
 	// The file manifest names acme-support, the agent the runtimes
 	// register: a proposal (plan F6) is only taken for an agent the
 	// served file names.
+	matrixManifest := []byte(`{"weft":1,"agents":[{"name":"acme-support"}]}`)
 	srv := New(Open(t.TempDir()+"/matrix.db"), Playground(true), Token(serverTok),
-		IngestToken(ingestTok), Manifest([]byte(`{"weft":1,"agents":[{"name":"acme-support"}]}`)), Pricing(prices))
+		IngestToken(ingestTok), Manifest(matrixManifest), Pricing(prices))
 	t.Cleanup(func() { _ = srv.Close() })
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
+	fileHashes, err := manifestAgentHashes(matrixManifest)
+	if err != nil || len(fileHashes) != 1 {
+		t.Fatalf("the matrix manifest's agent hashes = %v, %v", fileHashes, err)
+	}
+	fileAgentHash := fileHashes[0].hash
 
 	// The data: one run, session and trace per public id (A is the
 	// panel tokens'), one with none, and B's subagent child.
@@ -439,6 +445,25 @@ func TestAuthMatrix(t *testing.T) {
 		{name: "GET /api/manifest", method: "GET", path: fixed("/api/manifest"), resources: one, want: func(kind, _ string) int {
 			if kind == "read" {
 				return forbidden403
+			}
+			return ok
+		}},
+		// A stored manifest by hash (U27) carries the agent's system
+		// prompt: /api/manifest's rule — a read-scoped token's page is
+		// refused before the lookup, every other identity reads it (a
+		// hash is not public-id-shaped); an unknown hash is 404. A is
+		// the served weft.json's one agent, stored at New.
+		{name: "GET /api/manifests/{hash}", method: "GET", path: func(res string) string {
+			if res == "missing" {
+				return "/api/manifests/" + strings.Repeat("0", 64)
+			}
+			return "/api/manifests/" + fileAgentHash
+		}, resources: []string{"A", "missing"}, want: func(kind, res string) int {
+			switch {
+			case kind == "read":
+				return forbidden403
+			case res == "missing":
+				return miss
 			}
 			return ok
 		}},

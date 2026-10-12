@@ -700,7 +700,8 @@ func (d *DB) RunSpans(ctx context.Context, runID string) (_ []obsdb.Span, err er
 		return nil, err
 	}
 	defer d.closedErr(&err)
-	if err := d.runExists(ctx, runID); err != nil {
+	runTrace, err := d.runTrace(ctx, runID)
+	if err != nil {
 		return nil, err
 	}
 	if trace, _, ok := obsdb.ParseStockRunID(runID); ok {
@@ -714,8 +715,40 @@ func (d *DB) RunSpans(ctx context.Context, runID string) (_ []obsdb.Span, err er
 		}
 		return obsdb.StockRunSpans(spans, runID), nil
 	}
-	return d.querySpans(ctx, "SELECT "+spanColumns+" FROM otel_traces WHERE RunId = ?"+
-		spanDedup, runID)
+	if runTrace != "" {
+		// The run row names its trace: the bloom-indexed TraceId
+		// (idx_trace_id) narrows the granules before RunId is tested.
+		// A run whose spans are not under that trace (its records
+		// carried a trace its spans did not) falls through to RunId
+		// alone, which idx_weft_run_id (0016) serves.
+		spans, err := d.querySpans(ctx, runSpansByTrace, runTrace, runID)
+		if err != nil || len(spans) > 0 {
+			return spans, err
+		}
+	}
+	return d.querySpans(ctx, runSpansByRun, runID)
+}
+
+// RunSpans' two statements: by the run row's trace and run id, and by
+// run id alone.
+const (
+	runSpansByTrace = "SELECT " + spanColumns + " FROM otel_traces WHERE TraceId = ? AND RunId = ?" + spanDedup
+	runSpansByRun   = "SELECT " + spanColumns + " FROM otel_traces WHERE RunId = ?" + spanDedup
+)
+
+// runTrace is runExists answering the run row's trace id too ("" when
+// the row names none). ErrNotFound for a run with no row.
+func (d *DB) runTrace(ctx context.Context, runID string) (string, error) {
+	var n uint64
+	var trace string
+	if err := d.conn.QueryRow(ctx,
+		`SELECT count(), max(TraceID) FROM weft_runs WHERE RunId = ?`, runID).Scan(&n, &trace); err != nil {
+		return "", err
+	}
+	if n == 0 {
+		return "", fmt.Errorf("%w: run %s", obsdb.ErrNotFound, runID)
+	}
+	return trace, nil
 }
 
 // Trace returns any trace's spans — weft and non-weft alike (the
@@ -874,8 +907,8 @@ func traceInner(q obsdb.TraceQuery) (string, []any) {
 // identity pair is exact and never hides a real second version.
 const spanDedup = " ORDER BY Timestamp, SpanId LIMIT 1 BY TraceId, SpanId"
 
-func (d *DB) querySpans(ctx context.Context, sql string, arg any) ([]obsdb.Span, error) {
-	rs, err := d.conn.Query(ctx, sql, arg)
+func (d *DB) querySpans(ctx context.Context, sql string, args ...any) ([]obsdb.Span, error) {
+	rs, err := d.conn.Query(ctx, sql, args...)
 	if err != nil {
 		return nil, err
 	}

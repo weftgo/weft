@@ -211,6 +211,12 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    {instructions, instructions_hash, since} when one is held; the weft.json, else the manifests runtimes registered with —
 //    //    remembered in memory by (service, manifest_hash), each in sources[] live or remembered; a
 //    //    Studio restart forgets them until the next registration; manifest_check.source file|runtime),
+//    //    manifests/{hash} (U27, capability "manifests" — the DB an obsdb.ManifestStore, both backends: the
+//    //    one-agent manifest a run's manifest_hash names, {manifest_hash, agent, source file|runtime, first_seen,
+//    //    current_manifest_hash ("" when the current manifest names no such agent), manifest}; written from the
+//    //    weft.json at New and from every runtime registration (the link's ordered writer); content-addressed,
+//    //    the first write kept, kept forever — DELETE runs/sessions and Retain never touch them; /api/manifest's
+//    //    rule: a read token 403 hidden; the run document carries manifest_available: true when its hash resolves),
 //    //    runs (+session/public/playground/experiment_id/stopped_by/error_type filters — stopped_by exact, or a
 //    //    prefix ending ":" (has_tool_call:); all=1 lists child
 //    //    runs too; each row's stopped_by/cancel_cause (what ended it, U3.2; omitted when none); error_type (a failed run's kind, context errors read cancelled) and the problem counters attempts_retried/fallbacks/tool_errors/denied/truncated/repaired (U4, ingest time; log_warn/log_error on the run document, read time; each omitted when 0); each row's prompt_preview: the turn's own prompt (input record's last user text — a resume's new prompt when it carries one — else first), 200 runes, absent content-off; settling: true while its root is stored and its run_finish not, within 30 s — the UI's isLive follows it, record contract §6),
@@ -261,7 +267,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    sessions/{id} (capability "delete": a run with its subagent children, or a session's runs —
 //    //    rows, records, search index, spans, app logs — from obsdb's tables only, the app's
 //    //    conversation store and a shared file's thread tables untouched; the dev token or setup A's
-//    //    loopback Host, every panel token 403; obsdb.DB.DeleteRun/DeleteSession/Sweep/Vacuum), /api/live (SSE; ?all=1 every run, dev token/loopback only — meta live_all; its resume
+//    //    loopback Host, every panel token 403; obsdb.DB.DeleteRun/DeleteSession/Sweep/Vacuum; stored manifests stay), /api/live (SSE; ?all=1 every run, dev token/loopback only — meta live_all; its resume
 //    //    backfills the last hour / running runs, ≤ 500 — obsdb.RunQuery.LastSeenAfter), /api/panel-tokens (with a Token), /api/panel-handoff?to= (setup C hand-off, capability handoff, with a Token only:
 //    //    a playground panel token → 303 <base><to>#token= with a 5-minute read token for its public id (capped at its own exp;
 //    //    Accept: application/json → {location, exp}); the server token → 303 with no fragment; a read token 403, it cannot widen;

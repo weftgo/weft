@@ -10,6 +10,15 @@ module, ADR 0005).
 
 ### Fixed
 
+- studio: a panel token opens every session its list shows — the
+  session view (`GET /api/sessions/{id}`) and the live stream's
+  `session=` selector admit it when any of the session's turns carries
+  its public id (the list's rule), not only when it is the session's
+  greatest; the view serves the token's turns alone. A session whose
+  turns carry two public ids (hand-set session metadata, a colliding
+  app) was listed for both and opened only for one
+  (`TestPanelSessionTwoPublicIDsListedAndOpened`).
+
 - obsdb: an identity value sent empty is no value on both backends —
   `MetaOf` drops an empty string (a `weft.session.parent = ""` is not in
   the row's `meta`), and `ResolvePublicID("")` is `ErrNotFound` (it
@@ -21,13 +30,20 @@ module, ADR 0005).
 
 ### Changed
 
-- core: a metadata pair with an empty value means "none" (`Metadata`,
-  `WithMetadata`; additive, no API change): it removes the key the run
-  would otherwise inherit from its parent run or a `WithMetadata`
-  context, is never stored, never on a span or record, and is not
-  counted in `weft.metadata.dropped`. Pairs without an empty value
-  inherit exactly as before; reporting only, nothing model-visible
-  (`TestMetadataEmptyValueRemovesInherited`).
+- core: a metadata pair with an empty value now means "none"
+  (`Metadata`, `WithMetadata`; no API change, but a behaviour change):
+  it removes the key the run would otherwise inherit from its parent run
+  or a `WithMetadata` context, is never stored, never on a span or
+  record, and is not counted in `weft.metadata.dropped`. A caller who
+  passed `Metadata(map[string]string{"k": ""})` deliberately got an
+  empty `k` attribute on every span and record before; now there is no
+  `k` at all (and an inherited `k` is removed) — set a non-empty value
+  to keep one. Pairs without an empty value inherit exactly as before;
+  reporting only, nothing model-visible
+  (`TestMetadataEmptyValueRemovesInherited`). At the 64-key cap a run's
+  removals apply before its additions, so a slot an empty value frees is
+  there for a new key whatever their order
+  (`TestMetadataEmptyValueFreesSlotAtCap`).
 - thread: a session's run carries its own identity, never an
   enclosing run's: every key a session owns — `weft.public_id`,
   `weft.session.forked_from`, `weft.session.parent`,
@@ -50,14 +66,18 @@ module, ADR 0005).
   the public id, and its turns, usage, first/last seen, agent, status,
   the page's order, `Total` and the cursor are those turns' alone; a
   run of another app sharing the session id moves none of them.
-- studio: a panel token's `GET /api/sessions` is that scoped query —
+- studio: `GET /api/sessions?public_id=` is that scoped query, for every
+  identity, and its row is one scope throughout — turns, usage, first/last
+  seen, status and cost (`cost_usd`, `cost_reason`) are that public id's
+  runs alone. For the server token the cost was the whole session's
+  before (a session whose turns carry two public ids priced both); its
+  unfiltered list is unchanged. A panel token's list is always scoped:
   ordering, `total` and `next_before` are the token's view (a newer
   colliding derived run no longer sorts the session or becomes the
   cursor), and a page holds `limit` rows while more match. A row whose
   runs the cost walk cannot read is served with its scoped aggregates
   and an unknown cost (as the server token's is) instead of being
-  skipped. The server token's list is unchanged.
-
+  skipped (`TestServerSessionsPublicIDRowCostScoped`).
 ## 0.15.0 — 2026-10-12
 
 ### Added

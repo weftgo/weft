@@ -14,10 +14,9 @@ weft studio                                          # or: weft dev -- go run ./
 claude mcp add weft -- weft mcp                      # Claude Code: the tools appear as mcp__weft__*
 ```
 
-`weft mcp` ships from v0.15.0 (unreleased at the time of writing:
-`go install github.com/weftgo/weft/cmd/weft@main` until then, or `go
-install ./cmd/weft` from a checkout; `@latest` resolves to v0.15.0, which
-has no `weft mcp`). Once v0.15.0 is tagged, `@latest` is the line.
+`weft mcp` ships since v0.15.0: `go install github.com/weftgo/weft/cmd/weft@latest`
+(v0.15.1 at the time of writing) has it, as does `go install ./cmd/weft`
+from a checkout.
 
 `weft studio` (or `weft dev`, which runs Studio and your app together)
 listens on `127.0.0.1:7331` and writes the discovery file `studio.json`
@@ -193,7 +192,7 @@ diff a1100000000000000000000000000001 → a1100004000000000000000000000001: 1 ch
 ```text
 > meta {}
 Studio at http://127.0.0.1:33933: capabilities requests, steps, export, logs, diff, traces, search, pricing, delete, proposals, live, ingest, auth, handoff, panel-config
-{"weft_version":"v0.15.0","studio_version":"v0.15.0","panel_version":"v0.15.0","db":{"kind":"sqlite","path":"/tmp/TestMCPLiveCheck3582215505/001/weft.db","size":922888},"title":"weft studio","has_manifest":false,"ingest_open":true,"interrup…
+{"weft_version":"v0.15.1","studio_version":"v0.15.1","panel_version":"v0.15.1","db":{"kind":"sqlite","path":"/tmp/TestMCPLiveCheck3582215505/001/weft.db","size":922888},"title":"weft studio","has_manifest":false,"ingest_open":true,"interrup…
 ```
 
 `capabilities_off` in the JSON names each capability that is off and

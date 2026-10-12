@@ -100,7 +100,7 @@ describe("RunsTable problem badges (U4)", () => {
     ])
     expect(
       container.querySelector('[data-problem="retried"]')!.getAttribute("aria-label")
-    ).toBe("2 model attempts failed and retried")
+    ).toBe("2 model attempts retried")
     expect(
       container.querySelector('[data-error-type="cancelled"]')!.getAttribute("data-tone")
     ).toBe("cancelled")

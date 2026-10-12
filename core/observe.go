@@ -851,6 +851,13 @@ func (r *recorder) recordEvent(ctx context.Context, ev Event) {
 	default:
 		return
 	}
+	// A call's noted cut is taken before the Enabled question: with no
+	// destination enabling event records the entry must still go, or it
+	// stays in the map until the run ends.
+	var cut int
+	if tf, ok := ev.(ToolFinish); ok {
+		cut = r.takeTruncated(tf.CallID)
+	}
 	if !r.elog.Enabled(ctx, log.EnabledParameters{EventName: eventName}) {
 		return
 	}
@@ -912,8 +919,8 @@ func (r *recorder) recordEvent(ctx context.Context, ev Event) {
 		attrs = append(attrs, attrToolSeq.Int64(e.Seq), semconv.GenAIToolCallID(e.CallID), semconv.GenAIToolName(e.Name))
 	case ToolFinish:
 		attrs = append(attrs, attrToolSeq.Int64(e.Seq), semconv.GenAIToolCallID(e.CallID), semconv.GenAIToolName(e.Name))
-		if n := r.takeTruncated(e.CallID); n > 0 {
-			attrs = append(attrs, attrToolTruncated.Int(n))
+		if cut > 0 {
+			attrs = append(attrs, attrToolTruncated.Int(cut))
 		}
 	case RunStart:
 		// The linkage a child run reports: the parent's ids from the call

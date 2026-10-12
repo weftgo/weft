@@ -37,9 +37,12 @@ func (h *attemptLines) Handle(_ context.Context, r slog.Record) error {
 
 // One attempt per provider request, however Retry and Fallback
 // compose: only the layer next to the real model reports, and the
-// reporter numbers the attempts 1..n.
+// reporter numbers the attempts 1..n. A request Fallback sends to a
+// backup carries layer fallback (AttemptInfo.Layer; the attempt span's
+// weft.attempt.layer, what a reader's fallbacks counter keys on); a
+// primary's try, first or retried, carries none.
 func TestRetryAndFallbackReportOneAttemptPerRequest(t *testing.T) {
-	type want struct{ attempt, err, retryAfter string }
+	type want struct{ attempt, err, retryAfter, layer string }
 	cases := []struct {
 		name  string
 		build func(backup core.Model) core.ModelMiddleware
@@ -52,7 +55,7 @@ func TestRetryAndFallbackReportOneAttemptPerRequest(t *testing.T) {
 				fb, rt := mw.Fallback(backup), mw.Retry(mw.BaseDelay(0), mw.MaxRetries(2))
 				return func(next core.Model) core.Model { return fb(rt(next)) }
 			},
-			want: []want{{"1", "429: boom", "1ms"}, {"2", "503: boom", ""}, {"3", "503: boom", ""}, {"4", "", ""}},
+			want: []want{{"1", "429: boom", "1ms", ""}, {"2", "503: boom", "", ""}, {"3", "503: boom", "", ""}, {"4", "", "", "fallback"}},
 		},
 		{
 			// Retry outside Fallback: each try runs the chain — primary
@@ -62,7 +65,7 @@ func TestRetryAndFallbackReportOneAttemptPerRequest(t *testing.T) {
 				fb, rt := mw.Fallback(backup), mw.Retry(mw.BaseDelay(0), mw.MaxRetries(2))
 				return func(next core.Model) core.Model { return rt(fb(next)) }
 			},
-			want: []want{{"1", "429: boom", "1ms"}, {"2", "", ""}},
+			want: []want{{"1", "429: boom", "1ms", ""}, {"2", "", "", "fallback"}},
 		},
 	}
 	for _, c := range cases {
@@ -88,8 +91,8 @@ func TestRetryAndFallbackReportOneAttemptPerRequest(t *testing.T) {
 			for i, w := range c.want {
 				got := h.lines[i]
 				if got["attempt"] != w.attempt || got["err"] != w.err || got["retry_after"] != w.retryAfter ||
-					got["provider"] != "wefttest" || got["step"] != "0" || got["dur"] == "" {
-					t.Errorf("line %d = %v, want attempt=%s err=%q retry_after=%q", i, got, w.attempt, w.err, w.retryAfter)
+					got["layer"] != w.layer || got["provider"] != "wefttest" || got["step"] != "0" || got["dur"] == "" {
+					t.Errorf("line %d = %v, want attempt=%s err=%q retry_after=%q layer=%q", i, got, w.attempt, w.err, w.retryAfter, w.layer)
 				}
 			}
 		})

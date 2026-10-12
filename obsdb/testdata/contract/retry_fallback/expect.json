@@ -1,6 +1,6 @@
 {
   "case": "retry_fallback",
-  "description": "two runs through model middleware: mw.Retry over a model whose first two requests fail (two attempt spans Error, the third Ok — problems attempts_retried 2), and mw.Fallback over a model that fails once, the backup answering (the chat span asked script, answered backup — problems attempts_retried 1, fallbacks 1)",
+  "description": "four runs through model middleware: mw.Retry over a model whose first two requests fail (two attempt spans Error, the third Ok — problems attempts_retried 2); mw.Fallback over a model that fails once, the backup answering (the backup's attempt carries weft.attempt.layer fallback — problems attempts_retried 1, fallbacks 1); mw.Retry exhausted, three attempts all failing (the run fails stream_idle — attempts_retried 2: the last attempt was not retried); and mw.Fallback to a backup of the primary's model name on another provider (fallbacks 1: the layer marks it, no name comparison — attempts_retried 1)",
   "runs": [
     {
       "id": "a1100000000000000000000000000001",
@@ -82,6 +82,93 @@
           "step": 0,
           "model": "script",
           "response_model": "backup",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": []
+    },
+    {
+      "id": "a1100000000000000000000000000003",
+      "trace_id": "7ace0000000000000000000000000003",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:18:00.018Z",
+      "finished": "2026-10-01T09:18:00.029Z",
+      "last_seen": "2026-10-01T09:18:00.029Z",
+      "status": "failed",
+      "error": "weft: run failed at step 0: model stream: mw: giving up after 2 retries: weft: model stream idle timeout",
+      "steps": 0,
+      "usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
+      "event_count": 2,
+      "message_count": 1,
+      "delta_count": 0,
+      "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "request_count": 3,
+      "events_emitted": 2,
+      "messages_emitted": 1,
+      "error_type": "stream_idle",
+      "problems": {
+        "attempts_retried": 2
+      },
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "status": "error"
+        }
+      ],
+      "tools": [],
+      "holes": []
+    },
+    {
+      "id": "a1100000000000000000000000000004",
+      "trace_id": "7ace0000000000000000000000000004",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:18:00.028Z",
+      "finished": "2026-10-01T09:18:00.037Z",
+      "last_seen": "2026-10-01T09:18:00.037Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 4,
+      "message_count": 2,
+      "delta_count": 1,
+      "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "request_count": 2,
+      "events_emitted": 4,
+      "messages_emitted": 2,
+      "problems": {
+        "attempts_retried": 1,
+        "fallbacks": 1
+      },
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
           "finish_reason": "stop",
           "input_tokens": 10,
           "output_tokens": 5,

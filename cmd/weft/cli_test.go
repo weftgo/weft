@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/mw"
 	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/internal/discovery"
 	"github.com/weftgo/weft/otel"
@@ -769,5 +770,83 @@ func TestUnzipFixturesFlat(t *testing.T) {
 	}
 	if _, err := os.Stat(mixed); !os.IsNotExist(err) {
 		t.Errorf("the mixed zip created the target (%v)", err)
+	}
+}
+
+// TestRunsJSONCarriesProblems pins `weft runs --json` (U4-fix): the rows
+// are Studio's, so a failed run's error_type and a run's problem
+// counters ride them — a Fallback answering both steps after the
+// primary's failed try (attempts_retried 2, fallbacks 2, keyed on the
+// attempt's weft.attempt.layer), a call to an unknown tool (tool_errors
+// 1) beside a ModelRetry repair (no tool error) — and a clean field is
+// omitted.
+func TestRunsJSONCarriesProblems(t *testing.T) {
+	srv, err := newServer("sqlite://"+filepath.Join(t.TempDir(), "weft.db"), "tok")
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(func() { ts.Close(); _ = srv.Close() })
+	ctx := context.Background()
+	p, err := otel.Start(ctx, otel.Studio(ts.URL, ""), otel.NoGlobal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	prov := []core.Option{core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider())}
+	fix := core.Tool("fix", "Asks for a repair.", func(context.Context, orderIn) (string, error) {
+		return "", core.ModelRetry("order_id must be numeric")
+	})
+	backup := wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "nope", Args: `{}`, ID: "c1"}, wefttest.Call{Name: "fix", Args: `{"order_id":"x"}`, ID: "c2"}),
+		wefttest.Say("done"))
+	primary := wefttest.Script(wefttest.Fail(errors.New("503: down")))
+	prob := core.New(primary, append([]core.Option{core.Name("orders"), fix, core.WrapModel(mw.Fallback(backup))}, prov...)...)
+	if _, err := prob.Generate(ctx, core.RunID("r_prob"), core.Prompt("go")); err != nil {
+		t.Fatal(err)
+	}
+	down := core.New(wefttest.Script(wefttest.Fail(errors.New("upstream down"))), append([]core.Option{core.Name("triage")}, prov...)...)
+	if _, err := down.Generate(ctx, core.RunID("r_fail"), core.Prompt("triage")); err == nil {
+		t.Fatal("the failing run succeeded")
+	}
+	if err := p.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("WEFT_STUDIO_URL", ts.URL)
+	t.Setenv("WEFT_STUDIO_TOKEN", "tok")
+	var rows []map[string]any
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		out, errb, code := weft("runs", "--json")
+		if code != 0 {
+			t.Fatalf("weft runs --json = exit %d %s", code, errb)
+		}
+		rows = nil
+		if err := json.Unmarshal([]byte(out), &rows); err != nil {
+			t.Fatalf("--json: %v\n%s", err, out)
+		}
+		if len(rows) == 2 && rows[0]["status"] == "failed" && rows[1]["tool_errors"] != nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("rows never settled: %s", out)
+		}
+	}
+	byID := map[string]map[string]any{}
+	for _, r := range rows {
+		byID[r["id"].(string)] = r
+	}
+	if r := byID["r_fail"]; r["error_type"] != "model_error" {
+		t.Errorf("r_fail error_type = %v, want model_error", r["error_type"])
+	}
+	want := map[string]any{"attempts_retried": float64(2), "fallbacks": float64(2), "tool_errors": float64(1)}
+	r := byID["r_prob"]
+	for k, v := range want {
+		if r[k] != v {
+			t.Errorf("r_prob %s = %v, want %v", k, r[k], v)
+		}
+	}
+	for _, k := range []string{"error_type", "denied", "truncated", "repaired", "log_warn", "log_error"} {
+		if v, ok := r[k]; ok {
+			t.Errorf("r_prob carries %s = %v; a clean field is omitted", k, v)
+		}
 	}
 }

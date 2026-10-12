@@ -433,8 +433,10 @@ func TestRunsInnerFiltersAfterGrouping(t *testing.T) {
 // emitted counts — span attributes, so the logs view keeps 0011's; 0014
 // (U5U7-fix) the logs view with the set through weft.records.dropped
 // (droppedKeys) — a record attribute, so the traces view keeps 0013's;
-// 0015 (U4) both views with the whole set, the four problem keys
-// (problemKeys) appended.
+// 0015 (U4) both views with the set through the four problem keys
+// (problemKeys); 0017 (U4-fix) the traces view with the whole set, the
+// fallback layer's key (layerKeys) appended — a span attribute, so the
+// logs view keeps 0015's.
 const (
 	adr0028Keys   = 12 + 4 + 1 + 10
 	rawKeys       = 1
@@ -442,10 +444,12 @@ const (
 	emittedKeys   = 2
 	droppedKeys   = 1
 	problemKeys   = 4
+	layerKeys     = 1
 )
 
 func TestMigrationContractTuple(t *testing.T) {
-	at0014 := contractKeys[:len(contractKeys)-problemKeys]
+	at0015 := contractKeys[:len(contractKeys)-layerKeys]
+	at0014 := at0015[:len(at0015)-problemKeys]
 	at0013 := at0014[:len(at0014)-droppedKeys]
 	at0011 := at0013[:len(at0013)-emittedKeys]
 	at0005 := at0011[:len(at0011)-stoppedByKeys]
@@ -454,7 +458,7 @@ func TestMigrationContractTuple(t *testing.T) {
 	for _, c := range []struct {
 		version, tuples int
 		keys            []string
-	}{{1, 2, before}, {3, 1, before}, {4, 2, at0004}, {5, 1, at0005}, {10, 1, at0004}, {11, 2, at0011}, {12, 1, at0011}, {13, 1, at0013}, {14, 1, at0014}, {15, 2, contractKeys}} {
+	}{{1, 2, before}, {3, 1, before}, {4, 2, at0004}, {5, 1, at0005}, {10, 1, at0004}, {11, 2, at0011}, {12, 1, at0011}, {13, 1, at0013}, {14, 1, at0014}, {15, 2, at0015}, {17, 1, contractKeys}} {
 		body, err := migrationsFS.ReadFile("migrations/" + migrations[c.version])
 		if err != nil {
 			t.Fatal(err)

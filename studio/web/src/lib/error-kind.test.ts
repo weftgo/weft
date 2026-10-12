@@ -40,13 +40,17 @@ describe("error kinds (U4)", () => {
         log_error: 2,
       }).map((b) => b.glyph)
     ).toEqual(["✗2", "✋", "✂1", "E2", "W1"])
+    // Past the reader's cap the log counts are floors (U4-fix).
+    const capped = problemBadges({ log_warn: 10000, log_error: 3, logs_capped: true })
+    expect(capped.map((b) => b.glyph)).toEqual(["E≥3", "W≥10000"])
+    expect(capped.map((b) => b.label)).toEqual(["≥3 app log errors", "≥10000 app log warnings"])
   })
 
   it("the stats strip: steps, then the problems in words", () => {
     expect(statsStrip({ steps: 1 })).toEqual(["1 step"])
     expect(statsStrip({ steps: 2, attempts_retried: 2, tool_errors: 1 })).toEqual([
       "2 steps",
-      "↻2 2 model attempts failed and retried",
+      "↻2 2 model attempts retried",
       "✗1 1 tool error",
     ])
   })

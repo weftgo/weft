@@ -730,11 +730,16 @@ func emittedCounts(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 // errorTypeAndProblems pins docs/record-contract.md §6's error_type and
 // problem counters on every backend (U4): error_type is the root's
 // error.type with the context errors read as "cancelled"; the counters
-// come from the run's spans — a failed attempt, a chat span answered by
-// another model, a tool error (DENIED counted as denied instead), a cut
-// result, the root's weft.run.denied — each span once however often it
-// is written (the batch is written twice); none of the new keys is
-// caller metadata; the error_type filter is exact on Runs and Search.
+// come from the run's spans — a failed attempt a later attempt of its
+// call followed (the last attempt of a call never counts: nothing
+// retried it), an attempt a fallback layer answered (weft.attempt.layer;
+// a chat span answered by another model name is no fallback), a tool
+// error (DENIED counted as denied instead; RETRY not at all), a cut
+// result, each root's weft.run.denied (two roots of one run id with
+// the same count both count) — each span once however often it is
+// written (the batch is written twice); none of the new keys is caller
+// metadata; the error_type filter is exact on Runs and Search (U4,
+// U4-fix).
 func errorTypeAndProblems(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
 		db := open(t)
@@ -746,6 +751,15 @@ func errorTypeAndProblems(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 				Service: "conf-svc", Attrs: attrs, Resource: map[string]any{"service.name": "conf-svc"},
 			}
 		}
+		under := func(s obsdb.Span, parent byte) obsdb.Span {
+			s.ParentSpanID = "0a0b0c0d0e0f070" + string(parent)
+			return s
+		}
+		mk2 := func(run string, n byte, name string, status int, attrs map[string]any) obsdb.Span {
+			s := mk(run, n, name, status, attrs)
+			s.SpanID = "0a0b0c0d0e0f090" + string(n)
+			return s
+		}
 		root := func(id string, n byte, status int, extra map[string]any) obsdb.Span {
 			s := invokeSpan(id, status, extra)
 			s.TraceID, s.SpanID = "0102030405060708090a0b0c0d0e0f2"+string(n), "0a0b0c0d0e0f080"+string(n)
@@ -756,13 +770,30 @@ func errorTypeAndProblems(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			root("p_deadline", '2', 2, map[string]any{"error.type": "context.DeadlineExceeded"}),
 			root("p_steps", '3', 2, map[string]any{"error.type": "max_steps"}),
 			root("p_ok", '4', 1, map[string]any{"weft.run.denied": int64(2)}),
-			mk("p_ok", '5', "attempt", 2, map[string]any{"weft.attempt.index": int64(1), "error.type": "model_error"}),
-			mk("p_ok", '6', "attempt", 2, map[string]any{"weft.attempt.index": int64(2), "error.type": "model_error"}),
-			mk("p_ok", '7', "attempt", 1, map[string]any{"weft.attempt.index": int64(3)}),
+			// Call 8: two failed attempts retried, the third answers (2).
+			under(mk("p_ok", '5', "attempt", 2, map[string]any{"weft.attempt.index": int64(1), "error.type": "model_error"}), '8'),
+			under(mk("p_ok", '6', "attempt", 2, map[string]any{"weft.attempt.index": int64(2), "error.type": "model_error"}), '8'),
+			under(mk("p_ok", '7', "attempt", 1, map[string]any{"weft.attempt.index": int64(3)}), '8'),
 			mk("p_ok", '8', "chat a", 1, map[string]any{"gen_ai.operation.name": "chat",
 				"gen_ai.request.model": "primary", "gen_ai.response.model": "backup"}),
-			mk("p_ok", '9', "chat a", 1, map[string]any{"gen_ai.operation.name": "chat",
+			// Call 9: two failed attempts, the call exhausted — only the
+			// first was retried (1).
+			mk("p_ok", '9', "chat a", 2, map[string]any{"gen_ai.operation.name": "chat",
 				"gen_ai.request.model": "primary", "gen_ai.response.model": "primary"}),
+			under(mk2("p_ok", '1', "attempt", 2, map[string]any{"weft.attempt.index": int64(1), "error.type": "model_error"}), '9'),
+			under(mk2("p_ok", '2', "attempt", 2, map[string]any{"weft.attempt.index": int64(2), "error.type": "model_error"}), '9'),
+			// Call e: the primary fails, the backup — the same model name —
+			// answers under weft.attempt.layer fallback (1 retried, 1 fallback).
+			mk("p_ok", 'e', "chat a", 1, map[string]any{"gen_ai.operation.name": "chat",
+				"gen_ai.request.model": "primary", "gen_ai.response.model": "primary"}),
+			under(mk2("p_ok", '3', "attempt", 2, map[string]any{"weft.attempt.index": int64(1), "gen_ai.request.model": "primary",
+				"error.type": "model_error"}), 'e'),
+			under(mk2("p_ok", '4', "attempt", 1, map[string]any{"weft.attempt.index": int64(2), "gen_ai.request.model": "primary",
+				"weft.attempt.layer": "fallback"}), 'e'),
+			// A ModelRetry result: the repair loop, no tool error.
+			mk2("p_ok", '5', "execute_tool fix", 2, map[string]any{"gen_ai.operation.name": "execute_tool", "error.type": "RETRY"}),
+			// A second root of the same run id denying as many calls.
+			mk2("p_ok", '6', "invoke_agent a", 1, map[string]any{"gen_ai.operation.name": "invoke_agent", "weft.run.denied": int64(2)}),
 			mk("p_ok", 'a', "execute_tool boom", 2, map[string]any{"gen_ai.operation.name": "execute_tool",
 				"error.type": "panic", "weft.panic.layer": "middleware"}),
 			mk("p_ok", 'b', "execute_tool rm", 2, map[string]any{"gen_ai.operation.name": "execute_tool", "error.type": "DENIED"}),
@@ -783,7 +814,7 @@ func errorTypeAndProblems(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			{"p_cancel", "cancelled", obsdb.Problems{}},
 			{"p_deadline", "cancelled", obsdb.Problems{}},
 			{"p_steps", "max_steps", obsdb.Problems{}},
-			{"p_ok", "", obsdb.Problems{AttemptsRetried: 2, Fallbacks: 1, ToolErrors: 2, Denied: 3, Truncated: 1}},
+			{"p_ok", "", obsdb.Problems{AttemptsRetried: 4, Fallbacks: 1, ToolErrors: 2, Denied: 5, Truncated: 1}},
 		} {
 			r, err := db.Run(ctx(), c.id)
 			if err != nil {
@@ -792,7 +823,7 @@ func errorTypeAndProblems(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			if r.ErrorType != c.errType || r.Problems != c.p {
 				t.Errorf("%s = error_type %q, problems %+v; want %q, %+v", c.id, r.ErrorType, r.Problems, c.errType, c.p)
 			}
-			for _, k := range []string{"weft.run.denied", "weft.tool.truncated_bytes", "weft.tool.input_error", "weft.panic.layer", "error.type"} {
+			for _, k := range []string{"weft.run.denied", "weft.tool.truncated_bytes", "weft.tool.input_error", "weft.panic.layer", "weft.attempt.layer", "error.type"} {
 				if v, ok := r.Meta[k]; ok {
 					t.Errorf("%s meta carries %s = %q: a contract key, not caller metadata", c.id, k, v)
 				}

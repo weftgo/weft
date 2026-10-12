@@ -20,7 +20,10 @@ import (
 // through. A max_tokens finish is a successful stream, not a failure —
 // Fallback does not switch on it. Info reports the primary model. Each
 // model tried is reported as one attempt on the run's record
-// (core.ReportFromContext) — reporting only, a no-op outside a run.
+// (core.ReportFromContext) — reporting only, a no-op outside a run —
+// a backup's with AttemptInfo.Layer core.AttemptLayerFallback, the
+// marker a reader's fallbacks counter keys on. A backup that reports
+// its own attempts (a Retry around it) reports them itself, unmarked.
 func Fallback(models ...core.Model) core.ModelMiddleware {
 	return FallbackWhen(defaultFallback, models...)
 }
@@ -65,7 +68,11 @@ func (m *fallbackModel) Unwrap() core.Model { return m.chain[0] }
 func (m *fallbackModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	return func(yield func(core.ModelEvent, error) bool) {
 		for i, model := range m.chain {
-			yielded, failed := replay(ctx, model, req, yield)
+			layer := ""
+			if i > 0 {
+				layer = core.AttemptLayerFallback
+			}
+			yielded, failed := replay(ctx, model, req, layer, yield)
 			if failed == nil {
 				return
 			}
@@ -86,8 +93,9 @@ func (m *fallbackModel) Stream(ctx context.Context, req core.ModelRequest) iter.
 // request, however Retry, Fallback and reporting adapters compose. It
 // returns whether any event reached the consumer and the stream error,
 // if one ended it. A consumer that stops early is reported as yielded
-// with no error.
-func replay(ctx context.Context, model core.Model, req core.ModelRequest, yield func(core.ModelEvent, error) bool) (bool, error) {
+// with no error. layer is the report's AttemptInfo.Layer ("" for the
+// primary).
+func replay(ctx context.Context, model core.Model, req core.ModelRequest, layer string, yield func(core.ModelEvent, error) bool) (bool, error) {
 	if reportsItself(model) {
 		return stream(ctx, model, req, yield)
 	}
@@ -96,7 +104,7 @@ func replay(ctx context.Context, model core.Model, req core.ModelRequest, yield 
 	end := time.Now()
 	ask, _ := RetryAfter(failed, end)
 	core.ReportFromContext(ctx).Attempt(core.AttemptInfo{Model: info.Name, Provider: info.Provider,
-		Start: start, End: end, Err: failed, RetryAfter: ask})
+		Start: start, End: end, Err: failed, RetryAfter: ask, Layer: layer})
 	return yielded, failed
 }
 

@@ -8,7 +8,7 @@
     "provider": "wefttest",
     "name": "glm-a"
   },
-  "manifest_hash": "76cee32382c74a07c29a01fcf4a6b72963a8758856a04615dd089ab5e06b7607",
+  "manifest_hash": "1acd820333177924a5e34a529c977412c4f745decee55f739cab2ea9a5a65e25",
   "weft_version": "(test)",
   "service": "studio.test",
   "session_id": "",
@@ -31,6 +31,7 @@
   "messages_emitted": 6,
   "attempts_retried": 3,
   "fallbacks": 1,
+  "log_warn": 1,
   "usage": {
     "input_tokens": 40,
     "output_tokens": 20

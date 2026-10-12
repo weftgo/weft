@@ -4,6 +4,6 @@ package sqlite
 // new migration bumps — every test that pins the version (the internal
 // upgrade tests and sqlite_test's) reads it.
 const (
-	WantSchemaVersion = 15
-	WantSchemaThrough = "through 0014 the run-list indexes and the manifests, 0015 the all-runs failed index"
+	WantSchemaVersion = 16
+	WantSchemaThrough = "through 0014 the run-list indexes and the manifests, 0015 the all-runs failed index, 0016 the problem tokens re-derived"
 )

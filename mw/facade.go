@@ -22,7 +22,10 @@ import (
 // through. A max_tokens finish is a successful stream, not a failure —
 // Fallback does not switch on it. Info reports the primary model. Each
 // model tried is reported as one attempt on the run's record
-// (core.ReportFromContext) — reporting only, a no-op outside a run.
+// (core.ReportFromContext) — reporting only, a no-op outside a run —
+// a backup's with AttemptInfo.Layer core.AttemptLayerFallback, the
+// marker a reader's fallbacks counter keys on. A backup that reports
+// its own attempts (a Retry around it) reports them itself, unmarked.
 func Fallback(models ...weft.Model) weft.ModelMiddleware { return coremw.Fallback(models...) }
 
 // FallbackWhen is Fallback with a predicate: the next model is tried

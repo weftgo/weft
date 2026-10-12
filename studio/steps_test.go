@@ -17,6 +17,9 @@ import (
 
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	otellog "go.opentelemetry.io/otel/log"
+
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/mw"
 	"github.com/weftgo/weft/core/wefttest"
@@ -55,7 +58,16 @@ func recordStepsRun(t *testing.T, url, runID string, meta map[string]string, des
 	type orderIn struct {
 		OrderID string `json:"order_id" jsonschema:"the order"`
 	}
-	lookup := core.Tool("lookup_order", "Look up an order.", func(context.Context, orderIn) (string, error) {
+	// The app's own WARN line under the lookup's span (what an slog
+	// bridge emits): the run document's log_warn (U4-fix's CountLogs).
+	appLog := p.LoggerProvider().Logger("orders-app")
+	lookup := core.Tool("lookup_order", "Look up an order.", func(ctx context.Context, _ orderIn) (string, error) {
+		var rec otellog.Record
+		rec.SetTimestamp(time.Now())
+		rec.SetSeverity(otellog.SeverityWarn)
+		rec.SetSeverityText("WARN")
+		rec.SetBody(attribute.StringValue("orders cache miss"))
+		appLog.Emit(ctx, rec)
 		return "order 42 shipped", nil
 	})
 	refund := core.Tool("refund", "Refund an order.", func(context.Context, orderIn) (string, error) {

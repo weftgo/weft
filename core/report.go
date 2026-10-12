@@ -34,7 +34,18 @@ type AttemptInfo struct {
 	// RetryAfter is the wait the provider asked for on a failed attempt
 	// (a retry-after header), zero when it asked for none.
 	RetryAfter time.Duration
+	// Layer names the role of the request in the model chain when it is
+	// not the primary's: AttemptLayerFallback for a request mw.Fallback
+	// sent to a backup. Empty for a primary attempt (a first try or a
+	// retry of the model asked). The attempt span carries it as
+	// weft.attempt.layer — what a reader's fallbacks counter keys on
+	// (docs/record-contract.md §3, §6), never a model-name comparison.
+	Layer string
 }
+
+// AttemptLayerFallback is AttemptInfo.Layer for a request a fallback
+// layer sent to a backup model rather than the one asked.
+const AttemptLayerFallback = "fallback"
 
 // RawPair is one attempt's wire exchange: the request as sent and the
 // response as received, as the reporter holds them (ADR 0028 §12). The
@@ -287,8 +298,10 @@ func maskReport(ctx context.Context) context.Context {
 const (
 	attrAttemptIndex        = attribute.Key("weft.attempt.index")
 	attrAttemptRetryAfterMS = attribute.Key("weft.attempt.retry_after_ms")
+	attrAttemptLayer        = attribute.Key("weft.attempt.layer")
 	logAttempt              = "attempt"
 	logRetryAfter           = "retry_after"
+	logLayer                = "layer"
 	logMediaType            = "media_type"
 	logRequestBytes         = "request_bytes"
 	logResponseBytes        = "response_bytes"
@@ -329,6 +342,9 @@ func (s *stepReport) attempt(a AttemptInfo) {
 		if a.RetryAfter > 0 {
 			attrs = append(attrs, attrAttemptRetryAfterMS.Int64(a.RetryAfter.Milliseconds()))
 		}
+		if a.Layer != "" {
+			attrs = append(attrs, attrAttemptLayer.String(a.Layer))
+		}
 		attrs = append(attrs, metadataAttrs(ctx)...)
 		span.SetAttributes(attrs...)
 		if a.Err != nil {
@@ -367,6 +383,9 @@ func (s *stepReport) attempt(a AttemptInfo) {
 		}
 		if a.RetryAfter > 0 {
 			attrs = append(attrs, slog.Duration(logRetryAfter, a.RetryAfter))
+		}
+		if a.Layer != "" {
+			attrs = append(attrs, slog.String(logLayer, a.Layer))
 		}
 		if a.Err != nil {
 			attrs = append(attrs, slog.String(logErr, a.Err.Error()))

@@ -727,7 +727,10 @@ func TestUpgradeTo0015BackfillsProblems(t *testing.T) {
 	if err := db.Write(ctx, obsdb.Batch{Spans: spans("r_new", '2')}); err != nil {
 		t.Fatal(err)
 	}
-	want := obsdb.Problems{AttemptsRetried: 1, Fallbacks: 1, ToolErrors: 2, Denied: 2, Truncated: 1}
+	// Open applies 0017 on the way: U4's tokens stay in the set and
+	// count nowhere, the re-derived ones count — the chat span answered
+	// by another model name is no fallback (U4-fix).
+	want := obsdb.Problems{AttemptsRetried: 1, ToolErrors: 2, Denied: 2, Truncated: 1}
 	for _, id := range []string{"r_old", "r_new"} {
 		r, err := db.Run(ctx, id)
 		if err != nil {
@@ -749,5 +752,128 @@ func TestUpgradeTo0015BackfillsProblems(t *testing.T) {
 	}
 	if len(page.Runs) != 2 {
 		t.Errorf("error_type=cancelled = %d runs, want 2", len(page.Runs))
+	}
+}
+
+// A database at 0016 — U4-fix's span shapes stored through 0015's view,
+// whose tokens over-count (every failed attempt retried, a model-name
+// fallback, RETRY a tool error, a count-keyed denied_approval that two
+// roots of one run collapse) — opens through 0017 on a live server: the
+// backfill adds the re-derived tokens, U4's stay in the set and count
+// nowhere, and the same spans written after the upgrade through the
+// restated view read the same counters (docs/record-contract.md §6).
+func TestUpgradeTo0017RederivesProblems(t *testing.T) {
+	base := os.Getenv("WEFT_CLICKHOUSE_DSN")
+	if base == "" {
+		t.Skip("WEFT_CLICKHOUSE_DSN not set: the 0017 upgrade needs a clickhouse server (README has the one-line container recipe)")
+	}
+	ctx := context.Background()
+	u, err := url.Parse(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	suffix := make([]byte, 6)
+	if _, err := rand.Read(suffix); err != nil {
+		t.Fatal(err)
+	}
+	name := "weft_up_" + hex.EncodeToString(suffix)
+	admin := rawConn(t, base)
+	if err := admin.Exec(ctx, fmt.Sprintf("CREATE DATABASE `%s`", name)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = admin.Exec(context.Background(), fmt.Sprintf("DROP DATABASE IF EXISTS `%s`", name))
+		_ = admin.Close()
+	})
+	u.Path = "/" + name
+	dsn := u.String()
+
+	conn := rawConn(t, dsn)
+	if err := conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS obsdb_migrations (
+		version UInt32, name String, applied_at DateTime DEFAULT now()
+	) ENGINE = MergeTree ORDER BY version`); err != nil {
+		t.Fatal(err)
+	}
+	for v := 1; v <= 16; v++ {
+		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, stmt := range splitStatements(string(body)) {
+			if err := conn.Exec(ctx, stmt); err != nil {
+				t.Fatalf("migration %d: %v", v, err)
+			}
+		}
+		if err := conn.Exec(ctx, `INSERT INTO obsdb_migrations (version, name) VALUES (?, ?)`, uint32(v), migrations[v]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	at := time.Now().UTC().Add(-time.Hour)
+	spans := func(run string, trace byte) []obsdb.Span {
+		id := func(n byte) string { return "0a0b0c0d0e0f06" + string(trace) + string(n) }
+		mk := func(n, parent byte, spanName string, status int, attrs map[string]any) obsdb.Span {
+			attrs["weft.run.id"] = run
+			s := obsdb.Span{
+				TraceID: "0102030405060708090a0b0c0d0e0f2" + string(trace), SpanID: id(n),
+				Name: spanName, Kind: 1, Start: at, End: at.Add(time.Second), StatusCode: status, Service: "svc",
+				Attrs: attrs, Resource: map[string]any{"service.name": "svc"},
+			}
+			if parent != 0 {
+				s.ParentSpanID = id(parent)
+			}
+			return s
+		}
+		chat := func(n byte, status int) obsdb.Span {
+			return mk(n, '0', "chat m", status, map[string]any{"gen_ai.operation.name": "chat",
+				"gen_ai.request.model": "m", "gen_ai.response.model": "other"})
+		}
+		try := func(n, parent byte, index int64, failed bool, layer string) obsdb.Span {
+			attrs := map[string]any{"weft.attempt.index": index, "gen_ai.request.model": "m"}
+			status := 1
+			if failed {
+				status, attrs["error.type"] = 2, "model_error"
+			}
+			if layer != "" {
+				attrs["weft.attempt.layer"] = layer
+			}
+			return mk(n, parent, "attempt", status, attrs)
+		}
+		return []obsdb.Span{
+			mk('0', 0, "invoke_agent a", 1, map[string]any{"gen_ai.operation.name": "invoke_agent", "weft.run.denied": int64(1)}),
+			mk('9', 0, "invoke_agent a", 1, map[string]any{"gen_ai.operation.name": "invoke_agent", "weft.run.denied": int64(1)}),
+			chat('1', 1), try('a', '1', 1, true, ""), try('b', '1', 2, true, ""), try('c', '1', 3, false, ""),
+			chat('2', 2), try('d', '2', 1, true, ""), try('e', '2', 2, true, ""),
+			chat('3', 1), try('f', '3', 1, true, ""), try('4', '3', 2, false, "fallback"),
+			mk('5', '0', "execute_tool fix", 2, map[string]any{"gen_ai.operation.name": "execute_tool", "error.type": "RETRY"}),
+			mk('6', '0', "execute_tool nope", 2, map[string]any{"gen_ai.operation.name": "execute_tool", "error.type": "NO_SUCH_TOOL"}),
+		}
+	}
+	if err := (&DB{conn: conn}).Write(ctx, obsdb.Batch{Spans: spans("r_old", '1')}); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.Close()
+
+	db, err := Open(dsn)
+	if err != nil {
+		t.Fatalf("open a 0016 database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := db.Write(ctx, obsdb.Batch{Spans: spans("r_new", '2')}); err != nil {
+		t.Fatal(err)
+	}
+	// Retried 2 + 1 + 1, one fallback answer, one tool error
+	// (NO_SUCH_TOOL; RETRY none), two denied (one per root).
+	want := obsdb.Problems{AttemptsRetried: 4, Fallbacks: 1, ToolErrors: 1, Denied: 2}
+	for _, id := range []string{"r_old", "r_new"} {
+		r, err := db.Run(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Problems != want {
+			t.Errorf("%s after 0017 = problems %+v; want %+v", id, r.Problems, want)
+		}
+		if id == "r_new" && len(r.Meta) != 0 {
+			t.Errorf("%s's meta after 0017 = %v, want none (weft.attempt.layer is contract)", id, r.Meta)
+		}
 	}
 }

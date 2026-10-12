@@ -128,6 +128,8 @@ export interface RunRow extends CostFields, DelegatedCostFields {
   repaired?: number
   log_warn?: number
   log_error?: number
+  /** log_warn / log_error stopped at the reader's cap (floors, "≥"). */
+  logs_capped?: boolean
   usage: Usage
   event_count: number
   message_count: number

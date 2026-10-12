@@ -182,20 +182,83 @@ type LogCandidates func(ctx context.Context, traceIDs []string, from, to time.Ti
 // in the backends' SQL, so the cap counts this run's lines only.
 // Lines naming a span never stored are counted, not shown (Gap).
 func ReadOtherLogs(ctx context.Context, db DB, runID string, q LogQuery, candidates LogCandidates) (LogPage, error) {
-	det, err := db.Run(ctx, runID)
+	page, logs, err := attributeLogs(ctx, db, runID, candidates)
 	if err != nil {
 		return LogPage{}, err
+	}
+	out := page.Logs
+	limit := q.PageLimit()
+	for i := range logs {
+		l := logs[i]
+		l.Index = int64(i)
+		if l.Index < q.From || (q.MinSeverity > 0 && l.Severity < q.MinSeverity) {
+			continue
+		}
+		out = append(out, l)
+		if len(out) == limit {
+			break
+		}
+	}
+	page.Logs = out
+	return page, nil
+}
+
+// LogCounts is one DB.CountLogs answer: the run's app log records at or
+// above the asked severity (Total), split into WARN (13–16) and ERROR
+// or above (17–24). Capped says the scan stopped at MaxLogCandidates
+// lines (LogPage.Truncated's rule, over the asked severity's lines
+// only): every count is then a floor — a reader marks it "≥".
+type LogCounts struct {
+	Total, Warn, Error int64
+	Capped             bool
+}
+
+// CountOtherLogs is DB.CountLogs for every backend: ReadOtherLogs'
+// attribution and deduplication over the candidates at or above
+// minSeverity, which the backend selects in its query (candidates is
+// that filtered scan), counted rather than paged — one scan, no
+// indexing, no page walk. Its errors are ReadOtherLogs': an unknown run
+// is ErrNotFound, a run with no span a *HoleError (nothing to attribute
+// through); a running run counts what is attributable now.
+func CountOtherLogs(ctx context.Context, db DB, runID string, minSeverity int, candidates LogCandidates) (LogCounts, error) {
+	page, logs, err := attributeLogs(ctx, db, runID, candidates)
+	if err != nil {
+		return LogCounts{}, err
+	}
+	c := LogCounts{Capped: page.Truncated}
+	for _, l := range logs {
+		if l.Severity < minSeverity {
+			continue
+		}
+		c.Total++
+		switch {
+		case l.Severity >= 17:
+			c.Error++
+		case l.Severity >= 13:
+			c.Warn++
+		}
+	}
+	return c, nil
+}
+
+// attributeLogs is the half ReadOtherLogs and CountOtherLogs share: the
+// run's app log records — attributed, deduplicated, in the read order —
+// and the page's flags (Partial, Gap, Truncated; Logs empty, never nil).
+func attributeLogs(ctx context.Context, db DB, runID string, candidates LogCandidates) (LogPage, []OtherLog, error) {
+	det, err := db.Run(ctx, runID)
+	if err != nil {
+		return LogPage{}, nil, err
 	}
 	page := LogPage{Logs: []OtherLog{}, Partial: det.Status == StatusRunning}
 	own, err := db.RunSpans(ctx, runID)
 	if err != nil {
-		return LogPage{}, err
+		return LogPage{}, nil, err
 	}
 	if len(own) == 0 {
 		if page.Partial {
-			return page, nil
+			return page, nil, nil
 		}
-		return LogPage{}, &HoleError{Kind: "logs", Hole: HoleNotRecorded}
+		return LogPage{}, nil, &HoleError{Kind: "logs", Hole: HoleNotRecorded}
 	}
 	var traces []string
 	seenTrace := map[string]bool{}
@@ -209,7 +272,7 @@ func ReadOtherLogs(ctx context.Context, db DB, runID string, q LogQuery, candida
 	for _, id := range traces {
 		spans, err := db.Trace(ctx, id)
 		if err != nil {
-			return LogPage{}, err
+			return LogPage{}, nil, err
 		}
 		all = append(all, spans...)
 	}
@@ -218,7 +281,7 @@ func ReadOtherLogs(ctx context.Context, db DB, runID string, q LogQuery, candida
 	from, to := det.Started.Add(-LogSkew), det.LastSeen.Add(LogSkew)
 	cands, err := candidates(ctx, traces, from, to, MaxLogCandidates+1)
 	if err != nil {
-		return LogPage{}, err
+		return LogPage{}, nil, err
 	}
 	if len(cands) > MaxLogCandidates {
 		// The candidates arrive in time order (LogCandidates), so the
@@ -289,21 +352,7 @@ func ReadOtherLogs(ctx context.Context, db DB, runID string, q LogQuery, candida
 	for i, k := range kept {
 		logs[i] = k.l
 	}
-	out := page.Logs
-	limit := q.PageLimit()
-	for i := range logs {
-		l := logs[i]
-		l.Index = int64(i)
-		if l.Index < q.From || (q.MinSeverity > 0 && l.Severity < q.MinSeverity) {
-			continue
-		}
-		out = append(out, l)
-		if len(out) == limit {
-			break
-		}
-	}
-	page.Logs = out
-	return page, nil
+	return page, logs, nil
 }
 
 type spanKey struct{ trace, span string }

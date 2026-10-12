@@ -5351,3 +5351,68 @@ func TestRunSpanCountsDeniedCalls(t *testing.T) {
 		t.Errorf("weft.run.denied per run = %q, want [\"\" \"2\"] (the parked run denied nothing; the resume denied c1 and left c2 undecided)", got)
 	}
 }
+
+// TestPanicLayerAfterRecoveredHandlerPanic pins weft.panic.layer's
+// reset (record contract §3, U4-fix): a middleware that recovers the
+// handler's panic and then panics with a value of its own is the
+// middleware's panic; one that recovers and re-raises the handler's
+// value is still the handler's.
+func TestPanicLayerAfterRecoveredHandlerPanic(t *testing.T) {
+	boom := func(context.Context, struct{}) (string, error) { panic("handler boom") }
+	recoverThen := func(again func(p any)) core.ToolMiddleware {
+		return func(next core.ToolCaller) core.ToolCaller {
+			return func(ctx context.Context, call core.ToolCallPart) (out string, err error) {
+				defer func() {
+					if p := recover(); p != nil {
+						again(p)
+					}
+				}()
+				return next(ctx, call)
+			}
+		}
+	}
+	later := core.Tool("later", "Panics; the middleware recovers, then panics itself.", boom,
+		core.WrapTools(recoverThen(func(any) { panic("middleware boom") })))
+	rethrown := core.Tool("rethrown", "Panics; the middleware recovers and re-raises.", boom,
+		core.WrapTools(recoverThen(func(p any) { panic(p) })))
+	tp := newRecProvider()
+	agt := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "later"}, wefttest.Call{Name: "rethrown"}),
+		wefttest.Say("done"),
+	), core.TracerProvider(tp), core.Sequential(), later, rethrown)
+	if _, err := agt.Generate(context.Background(), core.Prompt("x")); err != nil {
+		t.Fatal(err)
+	}
+	for tool, want := range map[string]string{"later": "middleware", "rethrown": "handler"} {
+		attrs := tp.find(t, "execute_tool "+tool).attrsMap()
+		if attrs["error.type"] != "panic" || attrs["weft.panic.layer"] != want {
+			t.Errorf("%s: error.type %q, weft.panic.layer %q; want panic, %s", tool, attrs["error.type"], attrs["weft.panic.layer"], want)
+		}
+	}
+}
+
+// TestFallbackAttemptCarriesLayer pins weft.attempt.layer (record
+// contract §3, U4-fix): mw.Fallback marks the request it sends to a
+// backup — the marker a reader's fallbacks counter keys on, never a
+// comparison of model names — and leaves the primary's unmarked, even
+// when the backup shares the primary's model name.
+func TestFallbackAttemptCarriesLayer(t *testing.T) {
+	tp := newRecProvider()
+	primary := wefttest.Script(wefttest.Fail(errors.New("503: down")))
+	backup := wefttest.Script(wefttest.Say("from backup")) // same Info as the primary
+	agt := core.New(primary, core.TracerProvider(tp), core.WrapModel(mw.Fallback(backup)))
+	if _, err := agt.Generate(context.Background(), core.Prompt("x")); err != nil {
+		t.Fatal(err)
+	}
+	tp.mu.Lock()
+	var layers []string
+	for _, s := range tp.spans {
+		if s.name == "attempt" {
+			layers = append(layers, s.attrsMap()["weft.attempt.layer"])
+		}
+	}
+	tp.mu.Unlock()
+	if !slices.Equal(layers, []string{"", "fallback"}) {
+		t.Errorf("attempt layers = %q, want [\"\" \"fallback\"]", layers)
+	}
+}

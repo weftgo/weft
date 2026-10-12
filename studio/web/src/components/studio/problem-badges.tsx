@@ -65,8 +65,8 @@ export function ProblemBadges({
 }
 
 /** ProblemStrip is the run header's loop summary beside the step count
- * (UX-A-40): each problem in words — "↻2 2 model attempts failed and
- * retried" — nothing on a clean run. */
+ * (UX-A-40): each problem in words — "↻2 2 model attempts retried" —
+ * nothing on a clean run. */
 export function ProblemStrip({ row }: { row: ProblemRow }) {
   const bs = problemBadges(row)
   if (bs.length === 0) return null

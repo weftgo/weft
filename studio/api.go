@@ -272,7 +272,10 @@ func row(rec obsdb.RunRow) runRow {
 // approvals), truncated (results the cap cut) and repaired (0 until the
 // core reports repaired arguments). log_warn / log_error count the
 // app's own log records under the run's spans by severity — read time,
-// on the run document only (GET /api/runs/{id}), never a list row.
+// on the run document only (GET /api/runs/{id}), never a list row —
+// and logs_capped says the count stopped at the reader's cap
+// (obsdb.MaxLogCandidates WARN-or-above lines): both are floors, drawn
+// "≥".
 type problemFields struct {
 	AttemptsRetried int64 `json:"attempts_retried,omitempty"`
 	Fallbacks       int64 `json:"fallbacks,omitempty"`
@@ -282,6 +285,7 @@ type problemFields struct {
 	Repaired        int64 `json:"repaired,omitempty"`
 	LogWarn         int64 `json:"log_warn,omitempty"`
 	LogError        int64 `json:"log_error,omitempty"`
+	LogsCapped      bool  `json:"logs_capped,omitempty"`
 }
 
 func problemsOf(p obsdb.Problems) problemFields {
@@ -909,7 +913,7 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 	c := s.coster(r.Context())
 	c.prime(det.ID, det.Children)
 	doc := runDoc{runRow: c.row(det.RunRow), Children: s.childRows(r.Context(), c, det.Children)}
-	doc.LogWarn, doc.LogError = s.logCounts(r.Context(), id)
+	doc.LogWarn, doc.LogError, doc.LogsCapped = s.logCounts(r.Context(), id)
 	holes, err := s.runHoles(r.Context(), det.RunRow)
 	if err != nil {
 		dbError(w, r, "run", id, err)

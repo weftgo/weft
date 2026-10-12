@@ -1370,6 +1370,10 @@ var contractKeys = []string{
 	// (migration 0015's restatement of both views).
 	"weft.run.denied", "weft.tool.truncated_bytes", "weft.tool.input_error",
 	"weft.panic.layer",
+	// U4-fix: a fallback layer's attempt, the fallbacks counter's key
+	// (migration 0017's restatement of the traces view; a span
+	// attribute only, so the logs view keeps 0015's).
+	"weft.attempt.layer",
 }
 
 // unmarshalAttrs decodes a JSON column keeping integral numbers as

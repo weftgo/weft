@@ -77,6 +77,9 @@ export interface ProblemRow {
   repaired?: number
   log_warn?: number
   log_error?: number
+  /** The log counts stopped at the reader's cap: each is a floor,
+   * drawn "≥". */
+  logs_capped?: boolean
   pending?: number
 }
 
@@ -103,7 +106,7 @@ export function problemBadges(r: ProblemRow): ProblemBadge[] {
     add(
       "retried",
       `↻${r.attempts_retried}`,
-      `${plural(n(r.attempts_retried), "model attempt")} failed and retried`
+      `${plural(n(r.attempts_retried), "model attempt")} retried`
     )
   if (n(r.fallbacks) > 0)
     add(
@@ -128,16 +131,18 @@ export function problemBadges(r: ProblemRow): ProblemBadge[] {
     )
   if (n(r.repaired) > 0)
     add("repaired", `⚒${r.repaired}`, `${plural(n(r.repaired), "tool call")} repaired`)
+  // Past the reader's cap the log counts are floors: "≥" on both.
+  const ge = r.logs_capped ? "≥" : ""
   if (n(r.log_error) > 0)
-    add("log_error", `E${r.log_error}`, plural(n(r.log_error), "app log error"))
+    add("log_error", `E${ge}${r.log_error}`, ge + plural(n(r.log_error), "app log error"))
   if (n(r.log_warn) > 0)
-    add("log_warn", `W${r.log_warn}`, plural(n(r.log_warn), "app log warning"))
+    add("log_warn", `W${ge}${r.log_warn}`, ge + plural(n(r.log_warn), "app log warning"))
   return out
 }
 
 /** statsStrip is the run header's loop summary (UX-A-40): the steps,
- * then the problems in words — "2 steps · ↻2 2 model attempts failed
- * and retried · ✗1 1 tool error". Badges only on problems: a clean run
+ * then the problems in words — "2 steps · ↻2 2 model attempts retried ·
+ * ✗1 1 tool error". Badges only on problems: a clean run
  * reads its steps alone. */
 export function statsStrip(r: ProblemRow & { steps: number }): string[] {
   return [

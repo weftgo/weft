@@ -15,19 +15,24 @@ import (
 // the set into runs.problems, ClickHouse into weft_runs.Problems
 // (groupUniqArrayArray).
 type Problems struct {
-	// AttemptsRetried counts the model attempts that failed: attempt
-	// spans with status Error (mw.Retry, mw.Fallback, an adapter
-	// reporting its SDK's retries) — each one retried, fallen back
-	// from, or, the last of its call, failing the call.
+	// AttemptsRetried counts the model attempts that failed and were
+	// followed by another attempt of the same model call: attempt spans
+	// with status Error whose weft.attempt.index is below the highest
+	// index among their chat span's attempts (mw.Retry's retries,
+	// mw.Fallback's fallen-back-from tries, an adapter's reported SDK
+	// retries). The last attempt of a call is never counted — failed, it
+	// failed the call, and nothing retried it.
 	AttemptsRetried int64
-	// Fallbacks counts the model calls answered by a model other than
-	// the one asked: chat spans whose gen_ai.response.model differs
-	// from their gen_ai.request.model (both set).
+	// Fallbacks counts the model calls a fallback layer answered:
+	// attempt spans that succeeded carrying weft.attempt.layer
+	// "fallback" (mw.Fallback's report for a backup). Never a comparison
+	// of model names.
 	Fallbacks int64
 	// ToolErrors counts the tool calls that ended in an error result:
-	// execute_tool spans with status Error, except DENIED (Denied) and
-	// a context error (the run's cancellation reaching the call — the
-	// run's error_type, not the tool's failure).
+	// execute_tool spans with status Error, except DENIED (Denied),
+	// RETRY (core.ModelRetry: the intended repair loop) and a context
+	// error (the run's cancellation reaching the call — the run's
+	// error_type, not the tool's failure). NO_SUCH_TOOL counts.
 	ToolErrors int64
 	// Denied counts the refused tool calls: execute_tool spans whose
 	// error.type is DENIED (a policy middleware, mw.Allow), plus the
@@ -44,7 +49,7 @@ type Problems struct {
 	// run's spans at WARN (13–16) and at ERROR or above (17–24). They
 	// are read time, not ingest time — an app log carries the trace and
 	// span ids, not the run id, so it can only be attributed once the
-	// run's spans are known (DB.OtherLogs) — and filled on the run
+	// run's spans are known (DB.CountLogs) — and filled on the run
 	// document alone (Studio's run route), never on a list row.
 	LogWarn, LogError int64
 }
@@ -52,15 +57,28 @@ type Problems struct {
 // Any reports whether any counter is non-zero.
 func (p Problems) Any() bool { return p != Problems{} }
 
-// The problem token kinds SpanProblems derives, "<kind>:<key>".
+// The problem token kinds SpanProblems derives, "<kind>:<span id>[:…]".
+// The rules U4 first stored under "retried", "fallback", "tool_error"
+// and a one-field "denied_approval:<n>" were replaced (U4-fix): those
+// tokens count nowhere, and the stores re-derive the set from the
+// stored spans (SQLite 0016, ClickHouse 0017).
 const (
-	problemRetried        = "retried"
-	problemFallback       = "fallback"
-	problemToolError      = "tool_error"
+	// "attempt:<span>:<chat span>:<index>:<1 failed|0>": every attempt
+	// span, so the fold sees each call's highest index.
+	problemAttempt = "attempt"
+	// "fallback_answer:<span>": an attempt a fallback layer answered.
+	problemFallbackAnswer = "fallback_answer"
+	problemToolFailed     = "tool_failed"
 	problemDenied         = "denied"
 	problemTruncated      = "truncated"
-	problemDeniedApproval = "denied_approval" // key: the count, not a span id
+	// "denied_approval:<span>:<n>": an invoke_agent span's
+	// weft.run.denied, keyed by its span like every other token.
+	problemDeniedApproval = "denied_approval"
 )
+
+// attemptLayerFallback is weft.attempt.layer's value on a request a
+// fallback layer sent to a backup (core.AttemptLayerFallback).
+const attemptLayerFallback = "fallback"
 
 // ErrorTypeCancelled is the run row's error_type for a run whose
 // invoke_agent span names a context error (context.Canceled,
@@ -83,40 +101,42 @@ func RunErrorType(errorType string) string {
 }
 
 // SpanProblems derives the problem tokens one weft span contributes to
-// its run's Problems (record contract §6): a failed attempt, a chat
-// span answered by another model, an execute_tool span that failed
-// (tool_error, or denied for error.type DENIED) or whose result the cap
-// cut, and an invoke_agent span's weft.run.denied. Nil for a span that
-// shows no problem. A call the run's cancellation ended
-// (context.Canceled, context.DeadlineExceeded) is no tool error. The
-// rules are restated in ClickHouse's traces view
-// (migration 0015) and SQLite's backfill (0013); the conformance suite
-// pins all three agree.
+// its run's Problems (record contract §6): an attempt (every one, keyed
+// by its chat span and index, so the fold counts the failed ones a later
+// attempt followed), a fallback layer's answer, an execute_tool span
+// that failed (tool_failed, or denied for error.type DENIED; none for
+// RETRY or a context error) or whose result the cap cut, and an
+// invoke_agent span's weft.run.denied. Nil for a span that contributes
+// none. The rules are restated in ClickHouse's traces view (migration
+// 0017) and SQLite's backfill (0016); the conformance suite pins all
+// three agree.
 func SpanProblems(s Span) []string {
 	var out []string
 	key := func(kind string) string { return kind + ":" + s.SpanID }
 	op, _ := s.Attrs["gen_ai.operation.name"].(string)
 	switch {
 	case s.Name == "attempt" && op == "":
+		failed := "0"
 		if s.StatusCode == 2 {
-			out = append(out, key(problemRetried))
+			failed = "1"
 		}
-	case op == "chat":
-		asked, _ := s.Attrs["gen_ai.request.model"].(string)
-		answered, _ := s.Attrs["gen_ai.response.model"].(string)
-		if asked != "" && answered != "" && asked != answered {
-			out = append(out, key(problemFallback))
+		out = append(out, key(problemAttempt)+":"+s.ParentSpanID+":"+
+			strconv.Itoa(attrInt(s.Attrs, "weft.attempt.index"))+":"+failed)
+		if layer, _ := s.Attrs["weft.attempt.layer"].(string); layer == attemptLayerFallback && s.StatusCode != 2 {
+			out = append(out, key(problemFallbackAnswer))
 		}
 	case op == "execute_tool":
 		if s.StatusCode == 2 {
 			switch et, _ := s.Attrs["error.type"].(string); et {
 			case "DENIED":
 				out = append(out, key(problemDenied))
-			case "context.Canceled", "context.DeadlineExceeded":
-				// The run's cancellation reached the call: the run's
-				// error_type says so; the tool did not fail.
+			case "RETRY", "context.Canceled", "context.DeadlineExceeded":
+				// RETRY is the intended repair loop (core.ModelRetry);
+				// a context error is the run's cancellation reaching the
+				// call — the run's error_type says so. Neither is the
+				// tool failing.
 			default:
-				out = append(out, key(problemToolError))
+				out = append(out, key(problemToolFailed))
 			}
 		}
 		if attrInt(s.Attrs, "weft.tool.truncated_bytes") > 0 {
@@ -124,7 +144,7 @@ func SpanProblems(s Span) []string {
 		}
 	case op == "invoke_agent":
 		if n := attrInt(s.Attrs, "weft.run.denied"); n > 0 {
-			out = append(out, problemDeniedApproval+":"+strconv.Itoa(n))
+			out = append(out, key(problemDeniedApproval)+":"+strconv.Itoa(n))
 		}
 	}
 	return out
@@ -132,31 +152,58 @@ func SpanProblems(s Span) []string {
 
 // CountProblems folds a run's problem tokens into its counters
 // (LogWarn and LogError stay 0: read time). Duplicate tokens count
-// once; an unknown kind counts nowhere (a newer writer's).
+// once; an unknown kind counts nowhere (a newer writer's, or one of
+// U4's replaced kinds). A failed attempt counts when its chat span has
+// an attempt of a higher index in the set.
 func CountProblems(tokens []string) Problems {
 	var p Problems
 	seen := make(map[string]bool, len(tokens))
+	type try struct {
+		chat   string
+		index  int64
+		failed bool
+	}
+	var tries []try
+	highest := map[string]int64{}
 	for _, tok := range tokens {
 		if seen[tok] {
 			continue
 		}
 		seen[tok] = true
-		kind, rest, _ := strings.Cut(tok, ":")
-		switch kind {
-		case problemRetried:
-			p.AttemptsRetried++
-		case problemFallback:
+		f := strings.Split(tok, ":")
+		switch f[0] {
+		case problemAttempt:
+			if len(f) != 5 {
+				continue
+			}
+			i, err := strconv.ParseInt(f[3], 10, 64)
+			if err != nil {
+				continue
+			}
+			tries = append(tries, try{chat: f[2], index: i, failed: f[4] == "1"})
+			if h, ok := highest[f[2]]; !ok || i > h {
+				highest[f[2]] = i
+			}
+		case problemFallbackAnswer:
 			p.Fallbacks++
-		case problemToolError:
+		case problemToolFailed:
 			p.ToolErrors++
 		case problemDenied:
 			p.Denied++
 		case problemTruncated:
 			p.Truncated++
 		case problemDeniedApproval:
-			if n, err := strconv.ParseInt(rest, 10, 64); err == nil && n > 0 {
+			if len(f) != 3 {
+				continue // U4's one-field form: re-derived, never counted
+			}
+			if n, err := strconv.ParseInt(f[2], 10, 64); err == nil && n > 0 {
 				p.Denied += n
 			}
+		}
+	}
+	for _, t := range tries {
+		if t.failed && t.index < highest[t.chat] {
+			p.AttemptsRetried++
 		}
 	}
 	return p

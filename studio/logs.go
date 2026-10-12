@@ -213,37 +213,21 @@ func gapReason(n int) string {
 	return strconv.Itoa(n) + " log lines in this run's trace and time window name a span that is not stored (dropped, or still open): they may belong to this run or to another in the same trace"
 }
 
-// logCountCap bounds the app log records logCounts reads for one run
-// document: past it the counts read as at least what was counted.
-const logCountCap = 10_000
-
 // logCounts is the run document's log_warn / log_error (U4,
 // docs/record-contract.md §6): the app's own log records under the
 // run's spans at WARN (13–16) and at ERROR or above (17–24), counted at
 // read time — an app log carries trace and span ids, not the run id,
-// so it is attributed through the run's spans (obsdb.DB.OtherLogs).
-// Counts, never content, so every scope that reads the run reads them.
-// A read failure counts nothing: the counters are a summary, never the
-// reason a run page fails.
-func (s *Server) logCounts(ctx context.Context, runID string) (warn, errs int64) {
-	q := obsdb.LogQuery{MinSeverity: 13, Limit: 1000}
-	for read := 0; read < logCountCap; {
-		page, err := s.db.OtherLogs(ctx, runID, q)
-		if err != nil {
-			return warn, errs
-		}
-		for _, l := range page.Logs {
-			if l.Severity >= 17 {
-				errs++
-			} else {
-				warn++
-			}
-			q.From = l.Index + 1
-		}
-		read += len(page.Logs)
-		if len(page.Logs) < q.PageLimit() {
-			break
-		}
+// so it is attributed through the run's spans — in one scan the
+// backend narrows to WARN and above (obsdb.DB.CountLogs), never a walk
+// over every line's page. capped is the scan's cap
+// (obsdb.MaxLogCandidates such lines): the counts are then floors, the
+// document's logs_capped, drawn "≥". Counts, never content, so every
+// scope that reads the run reads them. A read failure counts nothing:
+// the counters are a summary, never the reason a run page fails.
+func (s *Server) logCounts(ctx context.Context, runID string) (warn, errs int64, capped bool) {
+	c, err := s.db.CountLogs(ctx, runID, 13)
+	if err != nil {
+		return 0, 0, false
 	}
-	return warn, errs
+	return c.Warn, c.Error, c.Capped
 }

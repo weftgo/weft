@@ -125,6 +125,19 @@ func otherLogs(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			t.Fatalf("severity >= 17 from 2 = %+v, %v", rows(errOnly.Logs), err)
 		}
 
+		// CountLogs (U4-fix): the same attribution, counted in one
+		// severity-narrowed scan — the duplicate once, the child's,
+		// the spanless and the other trace's lines never.
+		if c, err := db.CountLogs(ctx(), "r_logs", 13); err != nil || c != (obsdb.LogCounts{Total: 2, Warn: 1, Error: 1}) {
+			t.Errorf("CountLogs(r_logs, 13) = %+v, %v; want 2 lines: 1 WARN, 1 ERROR", c, err)
+		}
+		if c, err := db.CountLogs(ctx(), "r_logs", 17); err != nil || c != (obsdb.LogCounts{Total: 1, Error: 1}) {
+			t.Errorf("CountLogs(r_logs, 17) = %+v, %v; want the 1 ERROR", c, err)
+		}
+		if _, err := db.CountLogs(ctx(), "nope", 13); !errors.Is(err, obsdb.ErrNotFound) {
+			t.Errorf("CountLogs of an unknown run = %v, want ErrNotFound", err)
+		}
+
 		// The subagent's line is the child's.
 		kid, err := db.OtherLogs(ctx(), "r_logs/0/c1", obsdb.LogQuery{})
 		if err != nil || !equalRows(rows(kid.Logs), []row{{0, 17, "the child's line", child}}) {
@@ -201,6 +214,14 @@ func otherLogs(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if err != nil || !last.Truncated || len(last.Logs) != 1 || last.Logs[0].Index != obsdb.MaxLogCandidates-1 ||
 			last.Logs[0].Body != fmt.Sprintf("line %d", obsdb.MaxLogCandidates-1) {
 			t.Errorf("past the cap = truncated %v, %d rows %+v, %v; want the first %d lines and truncated", last.Truncated, len(last.Logs), last.Logs, err, obsdb.MaxLogCandidates)
+		}
+		// Counting: the cap's lines, capped (a floor); none at WARN — the
+		// severity narrows the scan, so INFO lines never reach the cap.
+		if c, err := db.CountLogs(ctx(), "r_many", 1); err != nil || c != (obsdb.LogCounts{Total: obsdb.MaxLogCandidates, Capped: true}) {
+			t.Errorf("CountLogs(r_many, 1) = %+v, %v; want %d, capped", c, err, obsdb.MaxLogCandidates)
+		}
+		if c, err := db.CountLogs(ctx(), "r_many", 13); err != nil || c != (obsdb.LogCounts{}) {
+			t.Errorf("CountLogs(r_many, 13) = %+v, %v; want none, not capped", c, err)
 		}
 
 		// The cap applies before attribution: a subagent flooding the

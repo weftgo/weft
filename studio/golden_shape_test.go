@@ -152,6 +152,12 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		!strings.HasPrefix(spanOf[line(1)["span_id"].(string)], "execute_tool") || logsDoc["partial"] != nil || logsDoc["badge"] != nil {
 		t.Errorf("the real run's app logs = %v (spans %v), want the Tap's line under invoke_agent, then the tool's two under execute_tool, nothing partial or badged", logsDoc, spanOf)
 	}
+	// The run document counts them by severity (U4-fix: one
+	// severity-narrowed scan, obsdb.DB.CountLogs): the tool's WARN, no
+	// ERROR, nothing capped — the INFO lines are not counted.
+	if d := fetch("/api/runs/" + res.ID).(map[string]any); d["log_warn"] != float64(1) || d["log_error"] != nil || d["logs_capped"] != nil {
+		t.Errorf("the real run's log counts = warn %v, error %v, capped %v; want 1, absent, absent", d["log_warn"], d["log_error"], d["logs_capped"])
+	}
 	// api/meta reads the real run's content mark (full: the pipeline's
 	// Studio destination is content-on) and, on loopback, the file.
 	meta := fetch("/api/meta").(map[string]any)

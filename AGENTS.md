@@ -94,7 +94,9 @@ agt := weft.New(model,                       // any weft.Model (adapters, or wef
 // shows where every phase sits — phases are docs, seams are code.
 // Inside the model chain, weft.ReportFromContext(ctx).Attempt(weft.AttemptInfo{…}) / .Raw(…)
 // reports an attempt (an `attempt` span under `chat`) — reporting, not a seam;
-// a no-op outside a run's model call; mw.Retry/mw.Fallback use it, adapters may.
+// a no-op outside a run's model call; mw.Retry/mw.Fallback use it, adapters may
+// (AttemptInfo.Layer: weft.AttemptLayerFallback on mw.Fallback's backup request,
+// the span's weft.attempt.layer — what a reader's fallbacks counter keys on).
 
 // 3. Run it.
 res, err := agt.Generate(ctx, weft.Prompt("Where is order 1234?"))
@@ -219,7 +221,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    rule: a read token 403 hidden; the run document carries manifest_available: true when its hash resolves),
 //    //    runs (+session/public/playground/experiment_id/stopped_by/error_type filters — stopped_by exact, or a
 //    //    prefix ending ":" (has_tool_call:); all=1 lists child
-//    //    runs too; each row's stopped_by/cancel_cause (what ended it, U3.2; omitted when none); error_type (a failed run's kind, context errors read cancelled) and the problem counters attempts_retried/fallbacks/tool_errors/denied/truncated/repaired (U4, ingest time; log_warn/log_error on the run document, read time; each omitted when 0); each row's prompt_preview: the turn's own prompt (input record's last user text — a resume's new prompt when it carries one — else first), 200 runes, absent content-off; settling: true while its root is stored and its run_finish not, within 30 s — the UI's isLive follows it, record contract §6),
+//    //    runs too; each row's stopped_by/cancel_cause (what ended it, U3.2; omitted when none); error_type (a failed run's kind, context errors read cancelled) and the problem counters attempts_retried/fallbacks/tool_errors/denied/truncated/repaired (U4, ingest time — retried counts a failed attempt a later one of its call followed, fallbacks the attempts weft.attempt.layer marks, tool_errors skips RETRY; log_warn/log_error on the run document, read time through obsdb.DB.CountLogs, logs_capped when they are floors (drawn ≥); each omitted when 0); each row's prompt_preview: the turn's own prompt (input record's last user text — a resume's new prompt when it carries one — else first), 200 runes, absent content-off; settling: true while its root is stored and its run_finish not, within 30 s — the UI's isLive follows it, record contract §6),
 //    //    search (?q= terms over prompt/answer/error/tool names — substrings, AND, a "phrase" one
 //    //    term; agent/tool/status/model/error/since/until/min_tokens/sort=started|duration|tokens/
 //    //    limit/offset + runs' filters; min_cost (USD, own + delegated; unpriced never matches) and

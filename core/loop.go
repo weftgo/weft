@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"maps"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -1382,11 +1383,11 @@ func (a *Agent) CallTool(ctx context.Context, call ToolCallPart) (string, error)
 // unknown tool — the chain still runs, so Allow/Audit see the attempt,
 // and the base returns the NO_SUCH_TOOL error.
 //
-// inHandler, when not nil, is set while the handler itself runs: a
-// panic that unwinds with it still set came from the handler, one that
-// unwinds with it clear from the middleware around it (the observer's
-// weft.panic.layer; nothing else reads it).
-func (a *Agent) chain(def *ToolDef, strict bool, parkSet *parkRule, inHandler *bool) ToolCaller {
+// mark, when not nil, notes a panic out of the handler itself as it
+// unwinds through the base (handlerMark): the containment then tells a
+// handler's panic from one the middleware around it raised (the
+// observer's weft.panic.layer; nothing else reads it).
+func (a *Agent) chain(def *ToolDef, strict bool, parkSet *parkRule, mark *handlerMark) ToolCaller {
 	base := func(ctx context.Context, call ToolCallPart) (string, error) {
 		if def == nil {
 			return "", noSuchTool(call.Name)
@@ -1400,13 +1401,20 @@ func (a *Agent) chain(def *ToolDef, strict bool, parkSet *parkRule, inHandler *b
 				return "", fmt.Errorf("%w: tool %q", ErrApprovalRequired, call.Name)
 			}
 		}
-		if inHandler == nil {
+		if mark == nil {
 			return def.invoke(ctx, call.Args, strict)
 		}
-		*inHandler = true
-		out, err := def.invoke(ctx, call.Args, strict)
-		*inHandler = false
-		return out, err
+		// Every return path leaves the mark right: a normal return
+		// notes nothing; a panic is noted with its value and goes on
+		// unwinding unchanged (the same value re-raised), so a
+		// middleware that recovers it sees what the handler threw.
+		defer func() {
+			if p := recover(); p != nil {
+				mark.note(p)
+				panic(p)
+			}
+		}()
+		return def.invoke(ctx, call.Args, strict)
 	}
 	c := base
 	if def != nil {
@@ -1451,15 +1459,15 @@ func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef, p
 	}
 	defer func() { res.Content, cut = capResultN(res.Content, resultCap) }()
 
-	// inHandler belongs to this call's chain alone: the goroutine that
-	// runs the chain writes it and the same goroutine's recover reads it.
-	inHandler := new(bool)
-	fn := a.chain(def, strict, parkSet, inHandler)
+	// mark belongs to this call's chain alone: the goroutine that runs
+	// the chain writes it and the same goroutine's recover reads it.
+	mark := new(handlerMark)
+	fn := a.chain(def, strict, parkSet, mark)
 	var out string
 	if timeout <= 0 {
-		out, err = invokeContained(ctx, fn, call, inHandler)
+		out, err = invokeContained(ctx, fn, call, mark)
 	} else {
-		out, err = invokeWithTimeout(ctx, fn, call, timeout, inHandler)
+		out, err = invokeWithTimeout(ctx, fn, call, timeout, mark)
 	}
 	if err != nil {
 		if errors.Is(err, ErrApprovalRequired) {
@@ -1516,14 +1524,14 @@ const (
 
 // invokeContained runs the chain, turning a panic — in the handler or
 // in middleware — into an error. Containment sits outside the chain by
-// design: no middleware can turn a panic into a run failure. inHandler
+// design: no middleware can turn a panic into a run failure. mark
 // is the chain's handler mark (chain): set when the panic unwound
 // through the handler; nil reads as middleware.
-func invokeContained(ctx context.Context, fn ToolCaller, call ToolCallPart, inHandler *bool) (out string, err error) {
+func invokeContained(ctx context.Context, fn ToolCaller, call ToolCallPart, mark *handlerMark) (out string, err error) {
 	defer func() {
 		if p := recover(); p != nil {
 			layer := panicLayerMiddleware
-			if inHandler != nil && *inHandler {
+			if mark.from(p) {
 				layer = panicLayerHandler
 			}
 			err = &toolPanicError{name: call.Name, value: p, layer: layer}
@@ -1532,12 +1540,56 @@ func invokeContained(ctx context.Context, fn ToolCaller, call ToolCallPart, inHa
 	return fn(ctx, call)
 }
 
+// handlerMark is one call's record of a panic out of its handler
+// (chain's base notes it while unwinding). invokeContained reads the
+// layer from it: the panic it recovered is the handler's when the
+// handler panicked with that same value — still unwinding, or
+// recovered and re-raised by a middleware — and the middleware's
+// otherwise, including a middleware that recovered the handler's panic
+// and later panicked with a value of its own.
+type handlerMark struct {
+	panicked bool
+	value    any
+}
+
+func (m *handlerMark) note(p any) { m.panicked, m.value = true, p }
+
+// from reports whether the recovered value p is the handler's panic.
+// A value of an uncomparable type (a slice, a map) cannot be compared:
+// it reads as the handler's when the handler panicked with one of the
+// same type.
+func (m *handlerMark) from(p any) bool {
+	if m == nil || !m.panicked {
+		return false
+	}
+	tp, tv := reflect.TypeOf(p), reflect.TypeOf(m.value)
+	if tp != tv {
+		return false
+	}
+	if tp != nil && !tp.Comparable() {
+		return true
+	}
+	return samePanicValue(p, m.value)
+}
+
+// samePanicValue is p == q, true when the comparison itself panics (a
+// comparable struct holding an uncomparable value): same type, so the
+// handler's by the rule above.
+func samePanicValue(p, q any) (same bool) {
+	defer func() {
+		if recover() != nil {
+			same = true
+		}
+	}()
+	return p == q
+}
+
 // invokeWithTimeout runs the tool under a per-call deadline. The handler
 // sees the deadline on its ctx; if it has not returned when the deadline
 // passes, the call is recorded as timed out and the handler's goroutine
 // is abandoned — a hung tool must not hang the run. A cancellation of
 // the run's own ctx is reported as that cancellation, not as a timeout.
-func invokeWithTimeout(ctx context.Context, fn ToolCaller, call ToolCallPart, timeout time.Duration, inHandler *bool) (string, error) {
+func invokeWithTimeout(ctx context.Context, fn ToolCaller, call ToolCallPart, timeout time.Duration, mark *handlerMark) (string, error) {
 	tctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	type outcome struct {
@@ -1546,7 +1598,7 @@ func invokeWithTimeout(ctx context.Context, fn ToolCaller, call ToolCallPart, ti
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		out, err := invokeContained(tctx, fn, call, inHandler)
+		out, err := invokeContained(tctx, fn, call, mark)
 		done <- outcome{out, err}
 	}()
 	timedOut := func() error {

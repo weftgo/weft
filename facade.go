@@ -1184,6 +1184,10 @@ func Repair(msgs []Message) []Message { return core.Repair(msgs) }
 // numbers stay unique however many layers report.
 type AttemptInfo = core.AttemptInfo
 
+// AttemptLayerFallback is AttemptInfo.Layer for a request a fallback
+// layer sent to a backup model rather than the one asked.
+const AttemptLayerFallback = core.AttemptLayerFallback
+
 // RawPair is one attempt's wire exchange: the request as sent and the
 // response as received, as the reporter holds them (ADR 0028 §12). The
 // bytes are content (the request carries the prompt). A reporter fills

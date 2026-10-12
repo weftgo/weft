@@ -77,6 +77,13 @@ type DB interface {
 	// with no app logs; a *HoleError (Kind "logs", HoleNotRecorded) for
 	// a finished run with no span to attribute them through.
 	OtherLogs(ctx context.Context, runID string, q LogQuery) (LogPage, error)
+	// CountLogs counts a run's app log records at or above minSeverity
+	// (an OTLP severity number; 13 is WARN) with OtherLogs'
+	// attribution, in one scan the backend narrows by severity
+	// (CountOtherLogs): the run document's log_warn / log_error without
+	// paging every line's body. Capped past MaxLogCandidates such lines
+	// (the counts are floors). OtherLogs' errors.
+	CountLogs(ctx context.Context, runID string, minSeverity int) (LogCounts, error)
 	Trace(ctx context.Context, traceID string) ([]Span, error) // empty, not an error, for an unknown trace
 	// Traces lists traces — weft and non-weft alike, one row per trace
 	// id the spans table holds — newest first (TraceQuery, TracePage):

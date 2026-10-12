@@ -18,6 +18,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/log"
 	"go.opentelemetry.io/otel/log/embedded"
+	lognoop "go.opentelemetry.io/otel/log/noop"
 	"go.opentelemetry.io/otel/trace"
 )
 
@@ -259,5 +260,22 @@ func TestLateReportAddsNoRequestRecord(t *testing.T) {
 		if got := lg.emitted.Load(); got != final {
 			t.Fatalf("request records after end returned: %d, then %d", final, got)
 		}
+	}
+}
+
+// U4-fix: a call's noted result-cap cut is taken when its ToolFinish
+// passes the recorder even when no destination enables event records
+// (no LoggerProvider): the map holds no entry past the call's finish,
+// rather than every cut call's until the run ends.
+func TestTruncatedNoteTakenWithoutLogger(t *testing.T) {
+	r := &recorder{elog: lognoop.NewLoggerProvider().Logger("t"), runID: "r"}
+	for _, id := range []string{"c1", "c2"} {
+		r.noteTruncated(id, 90)
+		r.recordEvent(context.Background(), ToolFinish{RunID: "r", CallID: id, Name: "big"})
+	}
+	r.truncMu.Lock()
+	defer r.truncMu.Unlock()
+	if len(r.truncated) != 0 {
+		t.Errorf("truncated after the finishes = %v, want empty (records off)", r.truncated)
 	}
 }

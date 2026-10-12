@@ -646,7 +646,8 @@ func TestUpgradeTo0012BackfillsEmitted(t *testing.T) {
 // cancelled) and the problem tokens by the same rules the writer applies
 // (obsdb.SpanProblems: the same spans written after the upgrade give the
 // same set), and leaves a derived run alone (docs/record-contract.md §6,
-// U4).
+// U4). Open applies 0016 on the way, so the counts read are U4-fix's:
+// the chat span answered by another model name is no fallback.
 func TestMigration0013BackfillsProblems(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "at12.db")
 	raw, err := sql.Open("sqlite", "file:"+path)
@@ -734,7 +735,7 @@ func TestMigration0013BackfillsProblems(t *testing.T) {
 	if err := db.Write(ctx, obsdb.Batch{Spans: spans("r_new", "t2")}); err != nil {
 		t.Fatal(err)
 	}
-	want := obsdb.Problems{AttemptsRetried: 1, Fallbacks: 1, ToolErrors: 1, Denied: 2, Truncated: 1}
+	want := obsdb.Problems{AttemptsRetried: 1, ToolErrors: 1, Denied: 2, Truncated: 1}
 	stored := map[string]string{}
 	for _, c := range []struct {
 		id, errType string
@@ -772,6 +773,137 @@ func idsOf(rows []obsdb.RunRow) []string {
 		out[i] = r.ID
 	}
 	return out
+}
+
+// problemShapes are U4-fix's span shapes (docs/record-contract.md §6):
+// a call retried twice that answers, a call exhausted after two failed
+// attempts (only the first retried), a fallback layer's answer on the
+// same model name, a RETRY result (no tool error), a NO_SUCH_TOOL
+// result (one), and two roots of one run id denying as many calls.
+func problemShapes(run, trace string) []obsdb.Span {
+	at := time.Unix(0, 100).UTC()
+	mk := func(id, parent, name string, status int, attrs map[string]any) obsdb.Span {
+		attrs["weft.run.id"] = run
+		return obsdb.Span{TraceID: trace, SpanID: id, ParentSpanID: parent, Name: name, Kind: 1, Start: at,
+			End: at.Add(time.Millisecond), StatusCode: status, Service: "svc", Attrs: attrs}
+	}
+	chat := func(id string, status int) obsdb.Span {
+		return mk(id, "b0", "chat m", status, map[string]any{"gen_ai.operation.name": "chat",
+			"gen_ai.request.model": "m", "gen_ai.response.model": "other"})
+	}
+	try := func(id, parent string, index int64, failed bool, layer string) obsdb.Span {
+		attrs := map[string]any{"weft.attempt.index": index, "gen_ai.request.model": "m"}
+		status := 1
+		if failed {
+			status, attrs["error.type"] = 2, "model_error"
+		}
+		if layer != "" {
+			attrs["weft.attempt.layer"] = layer
+		}
+		return mk(id, parent, "attempt", status, attrs)
+	}
+	return []obsdb.Span{
+		mk("b0", "", "invoke_agent a", 1, map[string]any{"gen_ai.operation.name": "invoke_agent", "weft.run.denied": int64(1)}),
+		mk("b9", "", "invoke_agent a", 1, map[string]any{"gen_ai.operation.name": "invoke_agent", "weft.run.denied": int64(1)}),
+		chat("c1", 1), try("d1", "c1", 1, true, ""), try("d2", "c1", 2, true, ""), try("d3", "c1", 3, false, ""),
+		chat("c2", 2), try("d4", "c2", 1, true, ""), try("d5", "c2", 2, true, ""),
+		chat("c3", 1), try("d6", "c3", 1, true, ""), try("d7", "c3", 2, false, "fallback"),
+		mk("e1", "b0", "execute_tool fix", 2, map[string]any{"gen_ai.operation.name": "execute_tool", "error.type": "RETRY"}),
+		mk("e2", "b0", "execute_tool nope", 2, map[string]any{"gen_ai.operation.name": "execute_tool", "error.type": "NO_SUCH_TOOL"}),
+	}
+}
+
+// problemShapesWant is problemShapes' counters: retried 2 + 1 + 1, one
+// fallback, one tool error (NO_SUCH_TOOL; RETRY none), two denied.
+var problemShapesWant = obsdb.Problems{AttemptsRetried: 4, Fallbacks: 1, ToolErrors: 1, Denied: 2}
+
+// A file at 0014 holding U4's problem tokens (0013's rules: every failed
+// attempt retried, a model-name fallback, RETRY a tool error, the
+// count-keyed denied_approval) opens through 0016: runs.problems is
+// re-derived from the stored spans by obsdb.SpanProblems' rules — token
+// for token what the writer stores for the same spans — and the old
+// tokens are gone (docs/record-contract.md §6, U4-fix).
+func TestMigration0016RederivesProblems(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "at14.db")
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE obsdb_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range sortedVersions() {
+		if v > 14 {
+			break
+		}
+		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx, err := raw.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(string(body)); err != nil {
+			t.Fatalf("migration %d: %v", v, err)
+		}
+		if post := postMigrations[v]; post != nil {
+			if err := post(tx); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO obsdb_migrations (version, applied_at) VALUES (?, '2026-10-01T00:00:00Z')`, v); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// U4's tokens for these spans, as 0013's rules stored them.
+	if _, err := raw.Exec(`INSERT INTO runs (run_id, agent, started_ns, last_seen_ns, root_ended, meta, problems) VALUES
+		('r_old', 'a', 100, 200, 1, '{}', '["denied_approval:1","fallback:c1","fallback:c2","fallback:c3","retried:d1","retried:d2","retried:d4","retried:d5","retried:d6","tool_error:e1","tool_error:e2"]')`); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range problemShapes("r_old", "t1") {
+		attrs, _ := json.Marshal(s.Attrs)
+		if _, err := raw.Exec(`INSERT INTO spans (trace_id, span_id, parent_span_id, name, kind, start_ns, end_ns, status_code,
+			status_message, service, run_id, step, tool_seq, session_id, attrs, resource, events)
+			VALUES (?, ?, ?, ?, 1, 100, 200, ?, '', 'svc', 'r_old', -1, -1, '', ?, '{}', '[]')`,
+			s.TraceID, s.SpanID, s.ParentSpanID, s.Name, s.StatusCode, string(attrs)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("open a 0014 file: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+	if err := db.Write(ctx, obsdb.Batch{Spans: problemShapes("r_new", "t2")}); err != nil {
+		t.Fatal(err)
+	}
+	stored := map[string]string{}
+	for _, id := range []string{"r_old", "r_new"} {
+		run, err := db.Run(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run.Problems != problemShapesWant {
+			t.Errorf("%s after 0016 = problems %+v; want %+v", id, run.Problems, problemShapesWant)
+		}
+		var tokens string
+		if err := db.(*DB).reads.QueryRowContext(ctx, `SELECT problems FROM runs WHERE run_id = ?`, id).Scan(&tokens); err != nil {
+			t.Fatal(err)
+		}
+		stored[id] = tokens
+	}
+	if stored["r_old"] != stored["r_new"] {
+		t.Errorf("re-derived problems %s, written %s: the two rule sets disagree", stored["r_old"], stored["r_new"])
+	}
 }
 
 // The embedded migration files are numbered 1..N with no gap, N the

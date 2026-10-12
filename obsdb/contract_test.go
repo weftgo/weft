@@ -1703,7 +1703,7 @@ func genCases() []genCase {
 		},
 		{
 			name: "retry_fallback",
-			desc: "two runs through model middleware: mw.Retry over a model whose first two requests fail (two attempt spans Error, the third Ok — problems attempts_retried 2), and mw.Fallback over a model that fails once, the backup answering (the chat span asked script, answered backup — problems attempts_retried 1, fallbacks 1)",
+			desc: "four runs through model middleware: mw.Retry over a model whose first two requests fail (two attempt spans Error, the third Ok — problems attempts_retried 2); mw.Fallback over a model that fails once, the backup answering (the backup's attempt carries weft.attempt.layer fallback — problems attempts_retried 1, fallbacks 1); mw.Retry exhausted, three attempts all failing (the run fails stream_idle — attempts_retried 2: the last attempt was not retried); and mw.Fallback to a backup of the primary's model name on another provider (fallbacks 1: the layer marks it, no name comparison — attempts_retried 1)",
 			dest: content,
 			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
 				flaky := wefttest.Script(wefttest.Fail(core.ErrStreamIdle), wefttest.Fail(core.ErrStreamIdle),
@@ -1714,10 +1714,22 @@ func genCases() []genCase {
 				backup := namedModel{wefttest.Script(wefttest.Say("Hello from the backup.")), core.ModelInfo{Provider: "wefttest", Name: "backup"}}
 				fell := pipelineAgent(p, "support", down, core.Instructions("You are a support agent."),
 					core.WrapModel(mw.Fallback(backup)))
-				return []string{
+				ids := []string{
 					mustRun(t, ctx, retried, core.Prompt("hi")).ID,
 					mustRun(t, ctx, fell, core.Prompt("hi")).ID,
 				}
+				dead := wefttest.Script(wefttest.Fail(core.ErrStreamIdle), wefttest.Fail(core.ErrStreamIdle), wefttest.Fail(core.ErrStreamIdle))
+				exhausted := pipelineAgent(p, "support", dead, core.Instructions("You are a support agent."),
+					core.WrapModel(mw.Retry(mw.MaxRetries(2), mw.BaseDelay(time.Millisecond))))
+				_, err := exhausted.Generate(ctx, core.Prompt("hi"))
+				var re *core.RunError
+				if !errors.As(err, &re) {
+					t.Fatalf("want the exhausted run to fail, got %v", err)
+				}
+				twin := namedModel{wefttest.Script(wefttest.Say("Hello from the twin.")), core.ModelInfo{Provider: "other", Name: "script"}}
+				sameName := pipelineAgent(p, "support", wefttest.Script(wefttest.Fail(core.ErrStreamIdle)),
+					core.Instructions("You are a support agent."), core.WrapModel(mw.Fallback(twin)))
+				return append(ids, re.Result.ID, mustRun(t, ctx, sameName, core.Prompt("hi")).ID)
 			},
 		},
 		{

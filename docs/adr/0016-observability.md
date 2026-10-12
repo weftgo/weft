@@ -459,11 +459,12 @@ no index. An `Attempt` becomes, with a tracer recording, an `attempt`
 span (Client) child of the step's `chat` span — `weft.run.id`,
 `weft.step.index`, `weft.attempt.index`, `gen_ai.provider.name`,
 `gen_ai.request.model`, `weft.attempt.retry_after_ms` (when asked),
-the run's metadata, status `Ok` or `Error` + `error.type` (the chat
+`weft.attempt.layer` (`AttemptInfo.Layer`, when set: `fallback` on
+`mw.Fallback`'s backup request, U4-fix), the run's metadata, status `Ok` or `Error` + `error.type` (the chat
 span's classification), start and end at the reported times when both
 are given and ordered (otherwise neither) — and, with the logger at
 Debug, a `model attempt` line (`run`, `step`, `attempt`, `provider`,
-`model`, `dur`, `retry_after`, `err`). `Raw` becomes a `raw`
+`model`, `dur`, `retry_after`, `layer`, `err`). `Raw` becomes a `raw`
 record when a destination asks for `weft.raw` (ADR 0028 §12:
 `otel.RawBodies`, dev only; `Reporter.WantsRaw` asks first); nobody
 asking, it is discarded and a Debug `model raw dropped` line carries the

@@ -318,6 +318,7 @@ var nonMetaAttr = map[string]struct{}{
 	"weft.tool.truncated_bytes":    {}, // U4: the truncated counter, the call's badge
 	"weft.tool.input_error":        {}, // U4: which input rule an INVALID_INPUT broke
 	"weft.panic.layer":             {}, // U4: a panic's layer, handler or middleware
+	"weft.attempt.layer":           {}, // U4-fix: a fallback layer's attempt (the fallbacks counter)
 	"weft.stop.raw":                {},
 	"weft.model.tool_calls":        {},
 	"weft.tool.approved":           {},

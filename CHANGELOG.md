@@ -164,6 +164,12 @@ module, ADR 0005).
 
 ### Fixed
 
+- `thread/examples/approvals -serve`: a restart over the same `-dir` resumes the session stored under the served public id (`thread.List` by `weft.public_id`, then `thread.Open`) instead of creating a second session with the same public id — whose old parked turn the panel offered live verbs on, every decision ending "rejected: the session resolver answered session … for public id …, not the run's session …". The `runtime.Sessions` resolver opens that stored session too, so a turn parked before the restart is decided before any new question.
+- studio (web): the devtools panel's app turn gives its continue / skip / resolve back once a later `GET /api/runtimes` read says the gate holds again (the runtime reconnected, the fix applied) — a 403 answered on a stale gate no longer leaves the block read-only with the old refusal until a reload.
+- studio (web): a quiet parked (or running) app turn reads `GET /api/runtimes` again on its own as the 10 s window ends — one timer, cleared on dispose — so "app-owned turn · read-only: no runtime of service … is connected" follows the link opening without a click.
+- studio: `make studio-panel-asset`'s stamp check accepts only the stamp's two exact forms (`"vX"` or `` `vX` ``, matching quotes — `normalizeStamp`'s, the Go reader's rule), not any quote pair anywhere.
+- studio/README.md: the panel's size sentence reads the committed bundle (241,541 B raw / 77,560 B gzip, the ledger's "phase 6 review fixes (D)" row, 4,360 B of headroom) and the unbudgeted line's net as `budget.test.ts` pins it (−0.6 KiB); the app-turn rejection list names the resolver-mismatch refusal.
+
 - Studio's playground: an outside navigate (Back, Forward, a link followed while the page is open) adopted into an untouched form no longer counts as the reader's edit — its draft is not saved and no `?exp=` REPLACE is written back 400 ms later (G2: an outside navigate writes nothing back).
 - `thread/pool`: `Pool.Wait` for a sync delegation that settles after a park
   returns only once the parent's parked call is resolved and its resume armed,

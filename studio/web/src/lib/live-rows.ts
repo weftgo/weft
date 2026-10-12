@@ -17,6 +17,7 @@
 // the reader is peeking at it).
 import type { RunRow } from "./api"
 import type { LiveRecord } from "./live"
+import { statusOf } from "./status"
 
 /** How long a finished run stays listed. */
 export const LIVE_GRACE_MS = 30_000
@@ -357,12 +358,13 @@ export function validPeek(v: unknown): string | undefined {
     : undefined
 }
 
-/** Matches a row against the filter box (agent or status, case-folded;
+/** Matches a row against the filter box (agent or status — the stored
+ * word and lib/status.ts's: parked, cancelled — case-folded;
  * every word must match one of them). */
 export function matchesFilter(run: RunRow, q: string): boolean {
   const words = q.toLowerCase().split(/\s+/).filter(Boolean)
   if (!words.length) return true
-  const hay = [run.agent, run.status, run.pending > 0 ? "parked" : ""]
+  const hay = [run.agent, run.status, statusOf(run).word]
     .join(" ")
     .toLowerCase()
   return words.every((w) => hay.includes(w))

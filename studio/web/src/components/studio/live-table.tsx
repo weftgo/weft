@@ -199,6 +199,8 @@ export function LiveTable({
   // the cancel raced: the cell lets go, and the toast says how it ended.
   // Every row is looked at, not the filtered ones only.
   const watched = allRows ?? rows
+  // Where a parked row's resume is looked for (U1's statusOf).
+  const runsAll = watched.map((v) => v.run)
   useEffect(() => {
     for (const r of watched) {
       if (cancelling[r.run.id] !== undefined && ended(r.run)) {
@@ -307,7 +309,7 @@ export function LiveTable({
               </TableCell>
               <TableCell className="text-xs">{r.agent || "—"}</TableCell>
               <TableCell>
-                <StatusChip status={r.status} />
+                <StatusChip row={r} runs={runsAll} />
               </TableCell>
               <TableCell
                 className="text-right font-mono text-xs tabular-nums"

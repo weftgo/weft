@@ -6,7 +6,10 @@
 // equals; palette.test.ts parses styles.css and fails on any drift.
 // A token with no Studio name is the panel's own: faint text that
 // clears 4.5:1 (Studio's --faint is for eyebrow labels and does not),
-// the parked status, the shortcuts overlay's scrim, the dock's shadow.
+// the shortcuts overlay's scrim, the dock's shadow. ROLE (U1) names, for
+// each status word lib/status.ts draws and the live dot, the one token
+// it is drawn in — and so, through STUDIO_NAMES, Studio's variable: a
+// status reads the same colour on both surfaces, never a literal.
 
 export type Theme = "light" | "dark"
 
@@ -27,6 +30,7 @@ export const PALETTE: Record<Theme, Record<string, string>> = {
     info: "#2f5bd3",
     ok: "#1f7a45",
     parked: "#8a3fb0",
+    "status-run": "#ef4d21",
     scrim: "rgba(251,250,247,.92)",
     shadow: "rgba(25,23,19,.18)",
   },
@@ -45,6 +49,7 @@ export const PALETTE: Record<Theme, Record<string, string>> = {
     info: "#7aa2ff",
     ok: "#4ade80",
     parked: "#c678dd",
+    "status-run": "#ff5c2b",
     scrim: "rgba(19,18,17,.92)",
     shadow: "rgba(0,0,0,.45)",
   },
@@ -66,6 +71,8 @@ export const STUDIO_NAMES: Record<Theme, Record<string, string>> = {
     err: "status-bad",
     info: "ev-tool",
     ok: "status-ok",
+    parked: "status-parked",
+    "status-run": "status-run",
   },
   dark: {
     bg: "background",
@@ -81,5 +88,23 @@ export const STUDIO_NAMES: Record<Theme, Record<string, string>> = {
     err: "status-bad",
     info: "ev-tool",
     ok: "status-ok",
+    parked: "status-parked",
+    "status-run": "status-run",
   },
 }
+
+/** A status's colour role (U1): the panel token it is drawn in;
+ * Studio draws the variable STUDIO_NAMES gives that token — the same
+ * hex per theme (lib/status-class.ts; palette.test.ts holds them). */
+export const ROLE = {
+  running: "status-run",
+  succeeded: "ok",
+  failed: "err",
+  interrupted: "warn",
+  parked: "parked",
+  cancelled: "warn",
+  resumed: "dim",
+  live: "ok",
+} as const
+
+export type Role = keyof typeof ROLE

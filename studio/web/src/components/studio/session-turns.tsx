@@ -64,7 +64,7 @@ export function SessionTurns({
           <Fragment key={r.id}>
             <TableRow className="h-9" data-turn={r.id}>
               <TableCell>
-                <StatusChip status={r.status} />
+                <StatusChip row={r} runs={turns} />
               </TableCell>
               <TableCell className="max-w-[min(24rem,60vw)]">
                 <RunTitle
@@ -114,7 +114,7 @@ export function SessionTurns({
                   data-experiment-of={r.id}
                 >
                   <TableCell className="pl-6">
-                    <StatusChip status={x.status} />
+                    <StatusChip row={x} />
                   </TableCell>
                   <TableCell className="max-w-[min(24rem,60vw)]">
                     <span className="flex items-center gap-1.5 pl-3">

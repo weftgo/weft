@@ -415,6 +415,11 @@ describe("contrast (D2; D3's axe run confirms it)", () => {
         ["info", "bg3", 3],
         ["faint", "bg2", 3],
         ["faint", "bg3", 3],
+        // The running role (U1): Studio's --status-run, a UI mark (the
+        // live dot, the pill's border) and the running chip's word — the
+        // colour Studio's own running word is drawn in, 3:1 on paper.
+        ["status-run", "bg", 3],
+        ["status-run", "bg2", 3],
       ]
       for (const [f, b, min] of pairs)
         expect(

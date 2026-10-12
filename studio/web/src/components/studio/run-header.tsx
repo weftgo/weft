@@ -2,10 +2,12 @@
 // — identity, status, model, usage, timing, provenance. A debugger's
 // first three questions are answered above the fold: what was the
 // prompt, did it succeed, and what did it say.
+import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ArrowUpRight, Check, ChevronRight, Link2 } from "lucide-react"
 import { useEffect, useState } from "react"
 
+import { sessionQuery } from "@/lib/api"
 import type { RunDoc, Transcript } from "@/lib/api"
 import { producedTexts, runHoles, turnPrompt } from "@/lib/events"
 import type { FoldedRun } from "@/lib/events"
@@ -13,6 +15,7 @@ import {
   derivedUsageUnknown,
   isDerived,
   mergeHoles,
+  parkedKind,
   SETTLING_HINT,
   SETTLING_WORD,
   statusHoles,
@@ -340,6 +343,16 @@ export function RunHeader({
   const now = useNow(doc.status === "running")
   const title = runTitle(doc)
   const costCapable = useCostCapable()
+  // A parked turn's resume (U1): its session's turns — the query the
+  // parked-calls block polls — say whether a later turn resumed it.
+  // Only a turn of its own session is looked up: a child of either
+  // kind, a nested Generate or an experiment is decided elsewhere.
+  const sess = useQuery({
+    ...sessionQuery(doc.session_id),
+    enabled:
+      doc.pending > 0 &&
+      ["decide", "read-only", "no-public-id"].includes(parkedKind(doc, null)),
+  })
   useDocumentTitle(runPlace(doc))
   // The words this run was asked: the last user message it was fed
   // (in a thread the first one is an earlier turn's).
@@ -434,7 +447,7 @@ export function RunHeader({
             />
           </div>
         </div>
-        <StatusChip status={doc.status} />
+        <StatusChip row={doc} runs={sess.data?.runs} detail />
         {/* Settling: the status word stays (it is the root's), the note
             says the story may stop short while its records trail. */}
         {doc.settling ? (
@@ -608,7 +621,7 @@ export function RunHeader({
               className="flex items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono text-[11px] text-thread-ink hover:bg-secondary"
               title={`open the child run (${c.status})`}
             >
-              <StatusChip status={c.status} dotOnly />
+              <StatusChip row={c} dotOnly />
               {c.agent}
               <ChevronRight className="size-3 text-faint" />
               {c.id}

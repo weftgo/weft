@@ -244,7 +244,7 @@ function SessionsPage() {
                   return (
                     <TableRow key={s.id} className="group h-9">
                       <TableCell>
-                        <StatusChip status={s.status} />
+                        <StatusChip row={s} />
                       </TableCell>
                       <TableCell className="max-w-80">
                         <Link

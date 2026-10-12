@@ -632,6 +632,21 @@ from ADR 0028 §11's closed table (`obsdb.Hole`; the words live in
 `hidden` (a read-scoped token's view of a system prompt) are decided by
 the reader's scope, not by the data.
 
+**Status words are read-time (U1).** The stored `status` is one of
+`running`, `succeeded`, `failed`, `interrupted` (§6) and nothing else:
+there is no stored `parked` or `cancelled`. A reader words a row with
+two more, from fields it already has: **cancelled** is `failed` with
+`error_type` `cancelled` (its `cancel_cause` beside it); **parked** is
+`succeeded` with `pending` > 0 while nothing is known to have resumed
+the run — and **parked → tN** once a later turn of the same thread
+session exists (the next turn in that session is the resume: a thread
+resume always is). A plain `Generate` resumed by a later run carries no
+link to it yet, so it reads parked until core stamps one
+(`weft.resumed_from`, planned). Studio and the devtools panel draw these
+words from one table (`studio/web/src/lib/status.ts`), each in one
+colour role (`lib/palette.ts`'s `ROLE`); the `run` host event keeps the
+plain words (`parked` = succeeded with pending calls).
+
 ## 8. The GenAI semantic conventions
 
 weft writes the OTel GenAI conventions (semconv v1.41.0) beside its own

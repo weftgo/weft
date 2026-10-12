@@ -49,7 +49,7 @@ export function LivePeek({ id, onClose }: { id: string; onClose: () => void }) {
       className="flex min-w-0 flex-col gap-2 rounded-lg border bg-background p-3"
     >
       <div className="flex flex-wrap items-center gap-2">
-        {run.data ? <StatusChip status={run.data.status} /> : null}
+        {run.data ? <StatusChip row={run.data} /> : null}
         <Link
           {...runLink(id)}
           className="font-mono text-[13px] hover:text-thread-ink"

@@ -43,66 +43,78 @@ import { CacheHint, CostText } from "@/components/studio/cost"
 import { DerivedChip } from "@/components/studio/hole-badge"
 import { derivedUsageUnknown } from "@/lib/honesty"
 import { runLink, sessionLink } from "@/lib/links"
+import { statusClass } from "@/lib/status-class"
+import { statusOf } from "@/lib/status"
+import type { Status, StatusRow } from "@/lib/status"
 import { runTitle, shortId } from "@/lib/title"
 import type { Title } from "@/lib/title"
 
-const statusColor: Record<RunRow["status"], string> = {
-  running: "bg-status-run",
-  succeeded: "bg-status-ok",
-  failed: "bg-status-bad",
-  interrupted: "bg-status-int",
-}
-const statusText: Record<RunRow["status"], string> = {
-  running: "text-status-run",
-  succeeded: "text-status-ok",
-  failed: "text-status-bad",
-  interrupted: "text-status-int",
-}
-const statusHint: Record<RunRow["status"], string> = {
-  running: "the recorder's heartbeat is fresh",
-  succeeded: "finished with a result",
-  failed: "the loop returned an error",
-  interrupted:
-    "stored as running, but the heartbeat went stale — a crash or kill",
-}
+const roleClass = (s: Status) => statusClass(s.role)
 
 export function StatusDot({
-  status,
+  row,
+  runs,
   decorative,
 }: {
-  status: RunRow["status"]
+  row: StatusRow
+  runs?: readonly StatusRow[] | null
   decorative?: boolean
 }) {
+  const s = statusOf(row, runs)
   // Alone, the dot is an image named for the status (a bare span may not
   // carry aria-label: axe aria-prohibited-attr); beside the status word
   // it is decoration.
   return (
     <span
-      title={status}
+      title={s.word}
       {...(decorative
         ? { "aria-hidden": true }
-        : { role: "img", "aria-label": status })}
-      className={`inline-block size-2 shrink-0 rounded-full ${statusColor[status]} ${status === "running" ? "pulse-dot" : ""}`}
+        : { role: "img", "aria-label": s.word })}
+      className={`inline-block size-2 shrink-0 rounded-full ${roleClass(s).dot} ${s.key === "running" ? "pulse-dot" : ""}`}
     />
   )
 }
 
-/** Dot + word. dotOnly keeps just the dot (with a title) for tight spots. */
+/** Dot + word, in lib/status.ts's words (U1): parked while calls await
+ * a decision and nothing resumed them, "parked → tN" — a link to the
+ * resume — once a turn in runs did, cancelled for a cancelled failure.
+ * dotOnly keeps just the dot (with a title) for tight spots; detail
+ * adds the header's "· 1 call awaiting a decision". */
 export function StatusChip({
-  status,
+  row,
+  runs,
   dotOnly,
+  detail,
 }: {
-  status: RunRow["status"]
+  row: StatusRow
+  runs?: readonly StatusRow[] | null
   dotOnly?: boolean
+  detail?: boolean
 }) {
-  if (dotOnly) return <StatusDot status={status} />
+  if (dotOnly) return <StatusDot row={row} runs={runs} />
+  const s = statusOf(row, runs)
+  const word = s.resumedBy ? (
+    <Link
+      {...runLink(s.resumedBy)}
+      className="hover:text-thread-ink hover:underline"
+      data-resumed-by={s.resumedBy}
+    >
+      {s.word}
+    </Link>
+  ) : (
+    s.word
+  )
   return (
     <span
-      className={`inline-flex items-center gap-1.5 font-mono text-xs ${statusText[status]}`}
-      title={statusHint[status]}
+      className={`inline-flex items-center gap-1.5 font-mono text-xs ${roleClass(s).text}`}
+      title={s.hint}
+      data-status={s.key}
     >
-      <StatusDot status={status} decorative />
-      {status}
+      <StatusDot row={row} runs={runs} decorative />
+      {word}
+      {detail && s.detail ? (
+        <span className="text-muted-foreground">· {s.detail}</span>
+      ) : null}
     </span>
   )
 }
@@ -471,7 +483,7 @@ export function RunsTable({
               }}
             >
               <TableCell>
-                <StatusChip status={run.status} />
+                <StatusChip row={run} runs={runs} />
               </TableCell>
               <TableCell className="max-w-80">
                 <RunTitle run={run} extra={run.public_id || undefined} />

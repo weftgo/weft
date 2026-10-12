@@ -336,7 +336,7 @@ as `<run id>.json` (a `/` in a child's id becomes `_`). The turn list
 has its own filter above it — text over the run id, the error and each
 loaded row's `prompt_preview` (every run row carries one since 0.14.0,
 absent for a content-off run) — a status (`running`, `succeeded`,
-`failed`, `parked`) and has error — over the loaded rows, never stored, "n of m turns" while it
+`failed`, `interrupted`, `parked` — an open park only — `cancelled`) and has error — over the loaded rows, never stored, "n of m turns" while it
 narrows ("n of m loaded · the filter applies to the loaded turns" while
 older pages remain, and then nothing loads by itself: the button does;
 the narrow dropdown keeps the selected turn listed).
@@ -1104,7 +1104,7 @@ running there, and the run the scope pins, are reported.
 
 | Event | `detail` | When |
 |---|---|---|
-| `run` | `{runId, status, publicId?, sessionId?, step?}` — `status` the turn list's word (`running`, `succeeded`, `failed`, `parked`, `interrupted`), `step` the run's last step ordinal the panel knows | a run starts, and each status change, once per transition |
+| `run` | `{runId, status, publicId?, sessionId?, step?}` — `status` the plain word (`running`, `succeeded`, `failed`, `parked` — succeeded with pending calls, a later resume does not unsay it — `interrupted`; the turn list itself reads `parked → tN` and `cancelled`, U1), `step` the run's last step ordinal the panel knows | a run starts, and each status change, once per transition |
 | `parked` | `{runId, callId, ackId, name}` — `ackId` is the id the approval names, the call id `weft.Approve`/`Deny`/`Resolve` and `POST /api/runs/{runId}/approvals` (`call_id`) take, so it equals `callId`. The app decides its own turns through its Session, `s.Decide(ctx, thread.Approve(ackId))` — or, when it set `runtime.Sessions(resolver)` at `runtime.Install` and that runtime of the run's service is connected, the panel and the run page decide them through `POST /api/runs/{runId}/approvals` (plan F4.3, below); otherwise the route answers 403 "app-owned turn" with the fix | once per call a run parked on (read from its `run_finish`'s pending list) |
 | `error` | `{message, runId}` | a run of the conversation failed: its error, once per run — run errors only (the panel's own trouble, Studio not answering, is a line in the panel) |
 
@@ -1551,6 +1551,21 @@ to its step — with a ⤢ hand-off to the same compare page at the first
 changed step.
 `src/panel/parity.test.ts` holds both to the same rows, markers and
 badges from the same goldens (`studio/testdata/api/diff*.golden.json`).
+
+Status words (U1) are one table, `src/lib/status.ts`, on every surface
+— the runs list, the run header, a session's turns and its header, the
+live table, the panel's turn list, picker and filter: `running`,
+`succeeded`, `failed`, `interrupted`, and two read-time words over the
+stored four — `cancelled` (failed with `error_type` cancelled, the cancel
+cause in its title) and `parked` (succeeded with calls awaiting a
+decision, "parked · 1 call awaiting a decision" in the run header) while
+nothing resumed it; once a later turn of its thread session exists it
+reads `parked → t2`, a link to that turn. A plain `Generate` resumed by
+another run has no link yet and reads parked. Each word has one colour
+role (`src/lib/palette.ts`'s `ROLE`), the same hex on both surfaces:
+running `--status-run`, succeeded `--status-ok`, failed `--status-bad`,
+interrupted and cancelled `--status-int`, parked `--status-parked`, a
+decided park muted; the live dot is the succeeded colour.
 
 The runs list (light): status as a dot and a word, the error under a
 failed run's id, session/public-id/experiment filters that mirror the

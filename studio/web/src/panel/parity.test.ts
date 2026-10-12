@@ -21,6 +21,10 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "../lib/api"
+import { ROLE } from "../lib/palette"
+import { STATUS, statusOf } from "../lib/status"
+import { statusClass } from "../lib/status-class"
+import { PANEL_CSS } from "./styles"
 import { clip, NO_CONTENT } from "../lib/title"
 import type { RunDoc, RunRow } from "../lib/api"
 import { UNRUN_CALL_REASON } from "../lib/events"
@@ -2787,7 +2791,8 @@ describe("a resume and an experiment on both surfaces (U6-fix)", () => {
     )
     expect(opts).toEqual({
       "s_01-t4": `● succeeded t4 ${RESUME} · 1 steps · 811ms`,
-      "s_01-t3": `● parked t3 ${PROMPT} · 1 steps · 1.0s`,
+      // t4 resumed t3 (U1): its word is the decided park's.
+      "s_01-t3": `● parked → t4 t3 ${PROMPT} · 1 steps · 1.0s`,
       pg_x1: "↳ replay of t3 · scripted · ● failed · 1 steps · 2.5s",
     })
     const rows = Object.fromEntries(
@@ -2942,7 +2947,7 @@ describe("error kinds and problems on both surfaces (U4)", () => {
       )
       const strip = [...document.querySelectorAll("[data-strip]")]
       const studio = {
-        glyphs: strip.map((s) => s.textContent!.split(" ")[0]).join(" "),
+        glyphs: strip.map((s) => s.textContent.split(" ")[0]).join(" "),
         labels: strip.map((s) => s.getAttribute("title")).join("; "),
         kind:
           document.querySelector("[data-error-type]")?.textContent ?? undefined,
@@ -2958,4 +2963,152 @@ describe("error kinds and problems on both surfaces (U4)", () => {
           "denied",
         ])
     })
+})
+
+// One status vocabulary (U1; UX-A-06, UX-B-04, UX-D-16, UX-F-07,
+// UX-S3-03): a parked t1 its t2 resumed, a cancelled t3 and an open
+// park t4 read the same words, in the same colour role, on the panel's
+// turn list and picker and on Studio's session page; the panel's
+// "parked" filter returns the open park only.
+describe("one status vocabulary on both surfaces (U1)", () => {
+  const turn = (n: number, o: Partial<RunRow>) =>
+    runRow({
+      id: `s_01-t${n}`,
+      turn: n,
+      started: AT(n * 10_000),
+      finished: AT(n * 10_000 + 1_000),
+      last_seen: AT(n * 10_000 + 1_000),
+      ...o,
+    })
+  const t1 = turn(1, { pending: 1 })
+  const t2 = turn(2, {})
+  const t3 = turn(3, {
+    status: "failed",
+    error_type: "cancelled",
+    cancel_cause: "studio.cancel",
+    stopped_by: "canceled",
+    err: "weft: run failed at step 0: context canceled",
+  })
+  const t4 = turn(4, { pending: 2 })
+  const WORDS = {
+    "s_01-t1": "parked → t2",
+    "s_01-t2": "succeeded",
+    "s_01-t3": "cancelled",
+    "s_01-t4": "parked",
+  }
+  const KEYS = {
+    "s_01-t1": "resumed",
+    "s_01-t2": "succeeded",
+    "s_01-t3": "cancelled",
+    "s_01-t4": "parked",
+  } as const
+
+  it("the six words and their roles are pinned", () => {
+    expect(
+      Object.fromEntries(
+        Object.entries(STATUS).map(([k, w]) => [k, [w.word, w.role]])
+      )
+    ).toEqual({
+      running: ["running", "running"],
+      succeeded: ["succeeded", "succeeded"],
+      failed: ["failed", "failed"],
+      interrupted: ["interrupted", "interrupted"],
+      parked: ["parked", "parked"],
+      cancelled: ["cancelled", "cancelled"],
+      resumed: ["parked →", "resumed"],
+    })
+    // The transition: t1 reads parked until t2 exists.
+    expect(statusOf(t1, [t1]).word).toBe("parked")
+    expect(statusOf(t1, [t1]).detail).toBe("1 call awaiting a decision")
+    expect(statusOf(t1, [t1, t2])).toMatchObject({
+      key: "resumed",
+      word: "parked → t2",
+      resumedBy: "s_01-t2",
+      detail: "1 call decided · resumed in t2",
+    })
+    expect(statusOf(t3).hint).toContain("cancelled · studio.cancel")
+    // The stored status is the contract's: the row still says failed.
+    expect(t3.status).toBe("failed")
+  })
+
+  it("the panel's turn list, picker and filter say what Studio's session page says", async () => {
+    const fake = new FakeStudio()
+      .on("GET meta", { ...META, capabilities: ["ingest"] })
+      .on("GET sessions", { total: 1, sessions: [SESSION], next_before: null })
+      .on("GET runs", { total: 4, runs: [t4, t3, t2, t1], next_before: null })
+    for (const r of [t1, t2, t3, t4])
+      fake
+        .on(`GET runs/${r.id}`, { ...r, children: [], holes: [] })
+        .on(`GET runs/${r.id}/events`, pagedEvents(events(), { done: true }))
+        .on(
+          `GET runs/${r.id}/transcript`,
+          transcript([user("where is 42?")], [assistant("It shipped.")])
+        )
+        .on(`GET runs/${r.id}/spans`, { spans: [] })
+        .on(`GET runs/${r.id}/requests`, pagedRequests(OK_REQUESTS()))
+        .on(`GET runs/${r.id}/tools`, golden<object>("tools-ok"))
+    fake.install()
+    const el = await mount(ATTRS)
+    await vi.waitFor(() => expect(all(el, ".weft-turn")).toHaveLength(4), {
+      timeout: 5_000,
+    })
+    const chips = Object.fromEntries(
+      all(el, ".weft-turn").map((r) => [
+        r.getAttribute("data-weft-run"),
+        r.querySelector(".weft-row1 > .weft-chip")!,
+      ])
+    )
+    for (const [id, word] of Object.entries(WORDS)) {
+      const c = chips[id]
+      expect(c.textContent, id).toBe(word)
+      const key = KEYS[id as keyof typeof KEYS]
+      expect(c.classList.contains(`weft-${key}`), id).toBe(true)
+      // The chip's colour is its role's panel token (UX-F-07).
+      expect(PANEL_CSS).toContain(
+        `.weft-chip.weft-${key} { color: var(--weft-${ROLE[STATUS[key].role]}); border: 1px solid; }`
+      )
+    }
+    // The picker leads with the same word.
+    for (const o of all(el, ".weft-turn-pick option"))
+      expect(o.textContent).toContain(
+        `● ${WORDS[o.getAttribute("value") as keyof typeof WORDS]} `
+      )
+    // The "parked" filter: open parks only — t1 was decided.
+    const st = $(el, ".weft-tq-status") as HTMLSelectElement
+    st.value = "parked"
+    st.dispatchEvent(new Event("change", { bubbles: true }))
+    await settle()
+    expect(
+      all(el, ".weft-turn").map((r) => r.getAttribute("data-weft-run"))
+    ).toEqual(["s_01-t4"])
+    st.value = "cancelled"
+    st.dispatchEvent(new Event("change", { bubbles: true }))
+    await settle()
+    expect(
+      all(el, ".weft-turn").map((r) => r.getAttribute("data-weft-run"))
+    ).toEqual(["s_01-t3"])
+    el.remove()
+    await settle()
+    cleanup()
+    // Studio's session page: the same words, the same role, t1's word a
+    // link to t2.
+    const { container } = await renderWithRouter(
+      createElement(SessionTurns, {
+        turns: [t1, t2, t3, t4],
+        experiments: new Map(),
+      })
+    )
+    for (const [id, word] of Object.entries(WORDS)) {
+      const c = container.querySelector(`[data-turn="${id}"] [data-status]`)!
+      expect(c.textContent, id).toBe(word)
+      const key = KEYS[id as keyof typeof KEYS]
+      expect(c.getAttribute("data-status"), id).toBe(key)
+      expect(c.className, id).toContain(statusClass(STATUS[key].role).text)
+    }
+    expect(
+      container
+        .querySelector('[data-turn="s_01-t1"] [data-resumed-by]')!
+        .getAttribute("data-resumed-by")
+    ).toBe("s_01-t2")
+  })
 })

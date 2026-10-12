@@ -160,7 +160,7 @@ export function CommandPalette({
       data-palette-kind="run"
       data-palette-id={r.id}
     >
-      <StatusDot status={r.status} />
+      <StatusDot row={r} />
       <PaletteTitle t={runTitle(r)} id={r.id} />
       <span className="ml-auto shrink-0 text-xs text-muted-foreground">
         {r.agent}

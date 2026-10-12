@@ -4,8 +4,9 @@
 // the host page's CSS and the panel's never meet (§5.4). No webfonts
 // — the mono stack is the machine's own voice, and a dock must not
 // fetch fonts (V2: served by your backend, works offline).
-import { PALETTE } from "../lib/palette"
+import { PALETTE, ROLE } from "../lib/palette"
 import type { Theme } from "../lib/palette"
+import { STATUS } from "../lib/status"
 
 /** The system mono stack every code-ish surface in the panel uses. */
 export const MONO_STACK =
@@ -16,6 +17,16 @@ const tokens = (t: Theme) =>
   Object.entries(PALETTE[t])
     .map(([k, v]) => `--weft-${k}: ${v};`)
     .join(" ")
+
+/** statusRules draws each status chip in its role's token (U1, lib/
+ * status.ts × lib/palette.ts's ROLE): the colour Studio's chip uses. */
+const statusRules = () =>
+  Object.entries(STATUS)
+    .map(
+      ([k, w]) =>
+        `.weft-chip.weft-${k} { color: var(--weft-${ROLE[w.role]}); border: 1px solid; }`
+    )
+    .join("\n")
 
 /** The tokens a host page may override (D2): every colour, radius and
  * font the panel draws with, declared on :host — dark by default, the
@@ -103,11 +114,11 @@ export const PANEL_CSS = `
   white-space: nowrap; overflow: hidden;
 }
 .weft-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--weft-faint); flex: none; }
-.weft-dot.weft-on { background: var(--weft-accent); }
-.weft-dot.weft-run { background: var(--weft-warn); animation: weft-pulse 1.2s infinite; }
+.weft-dot.weft-on { background: var(--weft-ok); }
+.weft-dot.weft-run { background: var(--weft-status-run); animation: weft-pulse 1.2s infinite; }
 @keyframes weft-pulse { 50% { opacity: .35; } }
-.weft-fab-running { border-color: var(--weft-warn); }
-.weft-fab-count { color: var(--weft-warn); font-variant-numeric: tabular-nums; }
+.weft-fab-running { border-color: var(--weft-status-run); }
+.weft-fab-count { color: var(--weft-status-run); font-variant-numeric: tabular-nums; }
 .weft-fab-pulse { animation: weft-pulse 1.2s infinite; }
 .weft-howto { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-bottom: 1px solid var(--weft-line); color: var(--weft-dim); }
 @media (prefers-reduced-motion: reduce) { .weft-dot.weft-run, .weft-fab-pulse { animation: none; } }
@@ -143,11 +154,8 @@ export const PANEL_CSS = `
 .weft-turn .weft-when { margin-left: auto; color: var(--weft-faint); flex: none; }
 .weft-turn .weft-row2 { display: flex; gap: 8px; color: var(--weft-dim); margin-top: 2px; }
 .weft-chip { border-radius: var(--weft-radius-sm); background: var(--weft-bg); padding: 0 4px; font-size: 10px; line-height: 16px; flex: none; }
-.weft-chip.weft-running { color: var(--weft-warn); border: 1px solid var(--weft-warn); }
-.weft-chip.weft-succeeded { color: var(--weft-ok); border: 1px solid var(--weft-ok); }
-.weft-chip.weft-failed { color: var(--weft-err); border: 1px solid var(--weft-err); }
-.weft-chip.weft-interrupted { color: var(--weft-info); border: 1px solid var(--weft-info); }
-.weft-chip.weft-parked { color: var(--weft-parked); border: 1px solid var(--weft-parked); }
+${statusRules()}
+.weft-st::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 3px; }
 .weft-expts { margin: 0 0 4px 18px; }
 .weft-expts .weft-turn { border-bottom: none; border-left: 1px solid var(--weft-line); }
 
@@ -177,7 +185,7 @@ details.weft-collapsible[open] > summary::before { content: "\\25BE "; }
 .weft-chip.weft-tag { border: 1px solid var(--weft-line); color: var(--weft-dim); }
 .weft-unp { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--weft-dim); }
 .weft-tag[data-tone=bad] { color: var(--weft-err); }
-.weft-tag[data-tone=cancelled] { color: var(--weft-warn); }
+.weft-tag[data-tone=cancelled] { color: var(--weft-${ROLE.cancelled}); }
 .weft-note { color: var(--weft-dim); border: 1px dashed var(--weft-line); border-radius: var(--weft-radius);
   padding: 6px 9px; margin-bottom: 8px; }
 .weft-note.weft-warn { color: var(--weft-warn); border-color: var(--weft-warn); }

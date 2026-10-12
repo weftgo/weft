@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { RunRow, SessionRow } from "../lib/api"
 import { APP_OWNED, HOLES } from "../lib/honesty"
-import { statusChip, studioLink, turnHoles, WeftDevtools } from "./element"
+import { eventStatus, studioLink, turnHoles, WeftDevtools } from "./element"
 import { fold } from "../lib/events"
 import { partitionRuns, strippedContent } from "./state"
 import type { TurnView } from "./state"
@@ -351,7 +351,7 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     )
   })
 
-  it("turn list: statuses, parked for succeeded-with-pending, model, steps, tokens, duration", async () => {
+  it("turn list: statuses, parked for succeeded-with-pending (→ the later turn that resumed it, U1), model, steps, tokens, duration", async () => {
     const runs = [
       runRow({ id: "r_run", status: "running", finished: null }),
       runRow({ id: "r_park", pending: 2, turn: 2 }),
@@ -374,7 +374,8 @@ describe("the rung-1 surfaces against a fake Studio", () => {
       (n) => n.textContent
     )
     expect(chips).toContain("running")
-    expect(chips).toContain("parked")
+    // r_park's session has a later turn (t3): decided, resumed there.
+    expect(chips).toContain("parked → t3")
     expect(chips).toContain("failed")
     const row = all(el, ".weft-turn").find((n) =>
       (n.getAttribute("data-weft-run") ?? "").includes("r_park")
@@ -819,14 +820,14 @@ describe("§5.3: fail silent, one request, no retries", () => {
 })
 
 describe("pure helpers", () => {
-  it("statusChip: parked is succeeded with pending calls (§2)", () => {
-    expect(statusChip(runRow({ status: "succeeded", pending: 1 }))).toBe(
+  it("eventStatus (host events): parked is succeeded with pending calls (§2)", () => {
+    expect(eventStatus(runRow({ status: "succeeded", pending: 1 }))).toBe(
       "parked"
     )
-    expect(statusChip(runRow({ status: "succeeded", pending: 0 }))).toBe(
+    expect(eventStatus(runRow({ status: "succeeded", pending: 0 }))).toBe(
       "succeeded"
     )
-    expect(statusChip(runRow({ status: "interrupted" }))).toBe("interrupted")
+    expect(eventStatus(runRow({ status: "interrupted" }))).toBe("interrupted")
   })
 
   it("partitionRuns: experiments nest under their source turn (§2)", () => {

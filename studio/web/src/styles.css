@@ -76,6 +76,7 @@
   --status-bad: #b42318;
   --status-run: #ef4d21; /* the thread, darkened to clear 3:1 on paper */
   --status-int: #9a6a06;
+  --status-parked: #8a3fb0; /* a run parked on an approval (U1) */
 }
 
 .dark {
@@ -132,6 +133,7 @@
   --status-bad: #f87171;
   --status-run: #ff5c2b;
   --status-int: #e3b341;
+  --status-parked: #c678dd;
 }
 
 /* A stacked split (plan H3, components/studio/split-pane.tsx): the group
@@ -220,6 +222,7 @@ html[data-density="compact"] {
   --color-status-bad: var(--status-bad);
   --color-status-run: var(--status-run);
   --color-status-int: var(--status-int);
+  --color-status-parked: var(--status-parked);
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: calc(var(--radius) * 1.2); /* 12px cards, like .codewin */

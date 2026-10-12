@@ -29,6 +29,7 @@ import {
   usageKnown,
 } from "../lib/honesty"
 import type { HoleMark, ParkedKind } from "../lib/honesty"
+import { FILTER_KEYS, statusOf } from "../lib/status"
 import {
   paramsLine,
   REQUEST_NO_RECORD_REASON,
@@ -212,9 +213,11 @@ export function hasCapability(s: PanelState, name: string): boolean {
   return s.meta?.capabilities.includes(name) ?? false
 }
 
-/** statusChip maps a row to the §2 turn-list status word: parked is
- * how the panel shows succeeded with pending calls. */
-export function statusChip(r: RunRow): string {
+/** eventStatus is a run's status as the host events say it (plan C4,
+ * §2): parked is succeeded with pending calls — a later resume does not
+ * unsay a transition already fired. The turn list, picker and filter
+ * read lib/status.ts's statusOf instead (U1). */
+export function eventStatus(r: RunRow): string {
   return r.status === "succeeded" && r.pending > 0 ? "parked" : r.status
 }
 
@@ -1358,7 +1361,7 @@ export class WeftDevtools extends HTMLElement {
     this.evBaseline = false
     const pin = m.narrowing.run ?? ""
     for (const r of [...s.turns, ...[...s.experiments.values()].flat()]) {
-      const status = statusChip(r)
+      const status = eventStatus(r)
       const prev = this.evStatus.get(r.id)
       if (prev === status) continue
       this.evStatus.set(r.id, status)
@@ -1401,7 +1404,7 @@ export class WeftDevtools extends HTMLElement {
       .then((calls) => {
         this.evParking.delete(runId)
         const row = m.rowOf(runId)
-        if (this.model !== m || !row || statusChip(row) !== "parked") return
+        if (this.model !== m || !row || eventStatus(row) !== "parked") return
         if (!calls.length) {
           if (tries < PARKED_TRIES)
             setTimeout(() => {
@@ -2666,8 +2669,8 @@ export class WeftDevtools extends HTMLElement {
         "option",
         undefined,
         r.forked_from
-          ? `↳ replay of ${src ? turnLabel(src) || shortId(src.id) : "a turn"} · ${engineWord(r)} · ● ${statusChip(r)} · ${tail}`
-          : `${["●", statusChip(r), turnLabel(r), clipTitle(t.text)].filter(Boolean).join(" ")} · ${tail}`,
+          ? `↳ replay of ${src ? turnLabel(src) || shortId(src.id) : "a turn"} · ${engineWord(r)} · ● ${statusOf(r, s.turns).word} · ${tail}`
+          : `${["●", statusOf(r, s.turns).word, turnLabel(r), clipTitle(t.text)].filter(Boolean).join(" ")} · ${tail}`,
         { value: r.id, "data-key": r.id, title: `${r.id}\n${t.full}` }
       ) as HTMLOptionElement
       o.selected = r.id === s.selected
@@ -3144,7 +3147,7 @@ export class WeftDevtools extends HTMLElement {
     const st = el("select", "weft-input weft-tq-status", undefined, {
       "aria-label": "status",
     }) as HTMLSelectElement
-    for (const v of ["", "running", "succeeded", "failed", "parked"]) {
+    for (const v of ["", ...FILTER_KEYS]) {
       const o = el("option", undefined, v || "any status", {
         value: v,
       }) as HTMLOptionElement
@@ -3180,7 +3183,8 @@ export class WeftDevtools extends HTMLElement {
   /** match is the turn filter's test of one row. */
   private match(r: RunRow): boolean {
     const f = this.tq
-    if (f.status && statusChip(r) !== f.status) return false
+    // "parked" is an open park only (U1): a decided one reads parked → tN.
+    if (f.status && statusOf(r, this.last.turns).key !== f.status) return false
     if (f.err && !r.err && r.status !== "failed") return false
     const q = f.text.trim().toLowerCase()
     return (
@@ -3233,7 +3237,7 @@ export class WeftDevtools extends HTMLElement {
     tab: string,
     turns: readonly RunRow[]
   ): HTMLElement {
-    const chip = statusChip(r)
+    const chip = statusOf(r, turns)
     const row = el(
       "button",
       `weft-turn${r.id === selected ? " weft-sel" : ""}`,
@@ -3251,7 +3255,9 @@ export class WeftDevtools extends HTMLElement {
     // session page reads it.
     const t = turnTitle(prevTurn(r, turns), r)
     const row1 = el("div", "weft-row1", [
-      el("span", `weft-chip weft-${chip}`, chip),
+      el("span", `weft-chip weft-st weft-${chip.key}`, chip.word, {
+        title: chip.hint,
+      }),
       el("span", "weft-ttl", `${turnLabel(r)} ${clipTitle(t.text)}`.trim(), {
         title: `${r.id}\n${t.full}`,
         "data-weft-title": t.kind,

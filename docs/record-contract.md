@@ -126,7 +126,7 @@ playground's app-turn verbs refuse it as not a turn of a session with a
 public id. A plain `Generate` in the same tool handler is the enclosing
 turn's work and inherits everything. A session's keys win over the
 caller's, so a `thread` session's public id is `thread.PublicID`'s
-alone (`weft.Metadata` sets one on runs a session does not start).
+alone (the `Metadata` run option sets one on runs a session does not start).
 Readers hold the same rule for
 producers that send an empty value anyway: obsdb's `MetaOf` drops an
 empty string, the `public_id` column's `""` is no public id (no scope

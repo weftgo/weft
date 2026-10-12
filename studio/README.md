@@ -940,8 +940,8 @@ reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
 committed `studio/dist/panel/panel.js`, 243,087 B raw / 78,098 B gzip
-(76.3 KiB, the ledger's last row, "phase 6 review fixes (I)"; 3,822 B — 3.7 KiB — of headroom under
-the 81,920 B, 80 KiB, cap). It ships fully minified — whitespace,
+(76.3 KiB, the bundle of the ledger's row "phase 6 review fixes (I)"; 20,206 B — 19.7 KiB — of headroom under
+the 98,304 B, 96 KiB, cap; 3,822 B under the 80 KiB cap before A5.4 raised it). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
 build kept its indentation and newlines: 281,470 B raw / 81,358 B gzip,
 562 B under the cap) — and with no sourcemap, so it is unreadable in a
@@ -984,7 +984,13 @@ the host Node versions vite and vitest run under (the ledger's
 each plan item's estimate beside its measured gzip delta, `over` when
 the delta is more than half again the estimate (`over (accepted)` when
 the plan recorded why it was not split), the unbudgeted items, the
-baseline, and the total against the 80 KiB cap with the headroom left.
+baseline, and the total against the cap with the headroom left. The
+cap is 96 KiB (98,304 B) since phase 7, by the UX audit's decision 1
+(§10, 2026-10-12; item A5.4, the ledger's row "A5.4 cap raised to
+96 KiB", the bundle unchanged); it was 80 KiB (81,920 B) before. The
+ledger's `cap` is the one source: the build's failure
+(`vite.panel.config.ts`), the printed table and
+`scripts/panel-asset.ts` all read it, and `budget.test.ts` pins it.
 The deltas come from `studio/web/panel-budget.json`, a committed,
 append-only ledger: one row per landed item — `{"label": "D1", "item":
 "D1", "gzip": <panel.js's gzip bytes after it>}`, `item` the budget

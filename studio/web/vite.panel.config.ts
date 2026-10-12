@@ -19,8 +19,12 @@ import { weftVersion } from "./scripts/weft-version.ts"
 import { budgetTable, gzipSize, normalizeStamp } from "./scripts/panel-budget.ts"
 import type { Ledger } from "./scripts/panel-budget.ts"
 
-/** §5.1's budget: panel.js is ≤ 80 KiB gzip. */
-const PANEL_GZIP_BUDGET = 80 * 1024
+/** §5.1's budget: panel.js is ≤ the ledger's cap in gzip bytes —
+ * panel-budget.json's "cap", 96 KiB (98,304 B) since phase 7 (audit §10
+ * decision 1, A5.4; 80 KiB before). The ledger is the one source: the
+ * printed table, this build's failure and scripts/panel-asset.ts read it. */
+const ledger = JSON.parse(readFileSync(new URL("./panel-budget.json", import.meta.url), "utf8")) as Ledger
+const PANEL_GZIP_BUDGET = ledger.cap
 
 /** panelBudget fails the build — loudly, before anything is copied
  * into the committed dist — when the artifact is not the one file
@@ -57,9 +61,10 @@ function panelBudget(): Plugin {
       const gz = gzipSize(normalizeStamp(code, studioVersion))
       // The per-item table (plan phase 3): the ledger's items against
       // this build — printed, never a failure of its own.
-      const ledger = JSON.parse(readFileSync(new URL("./panel-budget.json", import.meta.url), "utf8")) as Ledger
-      for (const line of budgetTable({ ...ledger, cap: PANEL_GZIP_BUDGET }, gz).lines) console.log(line)
-      if (gz > PANEL_GZIP_BUDGET)
+      const table = budgetTable(ledger, gz)
+      for (const line of table.lines) console.log(line)
+      // The only failure: budgetTable's over is gz > the cap (budget.test.ts pins it).
+      if (table.over)
         this.error(`panel.js is ${gz} bytes gzipped, over the ${PANEL_GZIP_BUDGET} budget (WEFT-DEVTOOLS §5.1)`)
     },
   }

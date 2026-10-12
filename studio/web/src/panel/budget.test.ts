@@ -92,9 +92,10 @@ describe("the size ledger (panel-budget.json)", () => {
     // gzipSize, as the build measures: a pure-JS deflate, the same bytes under any host Node.
     const built = gzipSize(normalizeStamp(code, weftVersion()))
     expect(ledger.rows.at(-1)?.gzip).toBe(built)
-    // The committed bundle is within the cap, and the cap is 80 KiB.
-    expect(ledger.cap).toBe(80 * 1024)
-    expect(built).toBeLessThanOrEqual(80 * 1024)
+    // The committed bundle is within the cap, and the cap is 96 KiB (A5.4, audit §10 decision 1; 80 KiB before).
+    expect(ledger.cap).toBe(96 * 1024)
+    expect(ledger.cap).toBe(98304)
+    expect(built).toBeLessThanOrEqual(ledger.cap)
   })
 
   it("ships minified (plan A5.3.0): no indented line, the newlines left are inside template literals", () => {
@@ -138,7 +139,7 @@ describe("the size ledger (panel-budget.json)", () => {
   it("prints one line per item: estimate, measured delta, over past half again its estimate; the total and headroom", () => {
     // Over the 49 unminified-era rows: the "minified" row's −7.5 KiB would land in the unbudgeted sum.
     const { lines, over } = budgetTable(
-      { ...ledger, rows: ledger.rows.slice(0, 49) },
+      { ...ledger, cap: 81920, rows: ledger.rows.slice(0, 49) }, // the cap of that era (80 KiB, before A5.4)
       61898
     )
     expect(over).toBe(false)
@@ -174,17 +175,33 @@ describe("the size ledger (panel-budget.json)", () => {
     )
   })
 
-  it("prints the full ledger's table: the minified and later unbudgeted rows net into one line, 3,822 B of headroom", () => {
-    // The whole ledger at its last row (phase 6 review fixes (I), 78,098 B): the "minified" row's −7,652 B against the
+  it("raised the cap to 96 KiB in one row (A5.4, audit §10 decision 1): the bundle unchanged, the headroom 16 KiB larger", () => {
+    const i = ledger.rows.findIndex((r) => r.label === "A5.4 cap raised to 96 KiB")
+    expect(i).toBeGreaterThan(0)
+    const row = ledger.rows[i]
+    expect([row.item, row.gzip]).toEqual(["", 78098])
+    expect(ledger.rows[i - 1].label).toBe("phase 6 review fixes (I)")
+    expect(row.gzip).toBe(ledger.rows[i - 1].gzip) // the bundle is unchanged
+    expect(row.note).toContain("cap raised from 81,920 B to 98,304 B (audit §10 decision 1, 2026-10-12)")
+    expect(row.note).toContain("the build still fails on the cap")
+    const before = budgetTable({ ...ledger, cap: 81920, rows: ledger.rows.slice(0, i) }, 78098)
+    expect(before.lines.at(-1)).toBe("total 78,098 B (76.3 KiB) of 81,920 B · headroom 3,822 B (3.7 KiB)")
+    expect(budgetTable(ledger, 78098).lines.at(-1)).toBe(
+      "total 78,098 B (76.3 KiB) of 98,304 B · headroom 20,206 B (19.7 KiB)"
+    )
+  })
+
+  it("prints the full ledger's table: the minified and later unbudgeted rows net into one line, 20,206 B of headroom", () => {
+    // The whole ledger at its last row (A5.4's cap row, 78,098 B, the bundle of phase 6 review fixes (I)): the "minified" row's −7,652 B against the
     // earlier unbudgeted rows, I1.3's +578 B, F4.3's +1,217 B, F4.3 fixes' +599 B, F4.3 fixes 2's +80 B and the
     // phase 6 review fixes' +80 B (D), +366 B (E), +16 B (F), +54 B (G), +98 B (H) and +4 B (I) is the unbudgeted line's −0.1 KiB (U+2212, not a hyphen); A5.3 has its own line: A5.3's +1,010 B, its fixes' +196 B and
     // its fixes 2's +94 B against the raised +1,536 B (its accepted note).
-    expect(ledger.rows.at(-1)!.label).toBe("phase 6 review fixes (I)")
+    expect(ledger.rows.at(-1)!.label).toBe("A5.4 cap raised to 96 KiB")
     const { lines, over } = budgetTable(ledger, 78098)
     expect(over).toBe(false)
     const unbudgeted = lines.find((l) => l.includes("unbudgeted")) ?? ""
     expect(unbudgeted).toMatch(
-      /pre-release web fixes, minified, I1\.3, I1\.3 fixes, I1\.3 fixes 2, F4\.3, F4\.3 fixes, F4\.3 fixes 2, phase 6 review fixes \(D\), phase 6 review fixes \(E\), phase 6 review fixes \(F\), phase 6 review fixes \(G\), phase 6 review fixes \(H\), phase 6 review fixes \(I\)\)/
+      /pre-release web fixes, minified, I1\.3, I1\.3 fixes, I1\.3 fixes 2, F4\.3, F4\.3 fixes, F4\.3 fixes 2, phase 6 review fixes \(D\), phase 6 review fixes \(E\), phase 6 review fixes \(F\), phase 6 review fixes \(G\), phase 6 review fixes \(H\), phase 6 review fixes \(I\), A5\.4 cap raised to 96 KiB\)/
     )
     expect(unbudgeted.endsWith("\u22120.1 KiB")).toBe(true)
     const a53 = lines.find((l) => l.startsWith("A5.3".padEnd(6))) ?? ""
@@ -197,7 +214,7 @@ describe("the size ledger (panel-budget.json)", () => {
       76511 - 75501 + (77306 - 77110) + (77480 - 77386)
     ).toBeLessThanOrEqual(item.estimate)
     expect(lines.at(-1)).toBe(
-      "total 78,098 B (76.3 KiB) of 81,920 B · headroom 3,822 B (3.7 KiB)"
+      "total 78,098 B (76.3 KiB) of 98,304 B · headroom 20,206 B (19.7 KiB)"
     )
   })
 
@@ -212,8 +229,14 @@ describe("the size ledger (panel-budget.json)", () => {
         )
       )
     ).toBe(true)
-    const big = budgetTable(ledger, 81921)
+    // The build fails on budgetTable's over (vite.panel.config.ts): at the cap passes, one byte over fails.
+    const at = budgetTable(ledger, ledger.cap)
+    expect(at.over).toBe(false)
+    expect(at.lines.at(-1)).toBe("total 98,304 B (96.0 KiB) of 98,304 B · headroom 0 B (0.0 KiB)")
+    const big = budgetTable(ledger, ledger.cap + 1)
     expect(big.over).toBe(true)
-    expect(big.lines.at(-1)).toContain("OVER THE CAP")
+    expect(big.lines.at(-1)).toBe("total 98,305 B (96.0 KiB) of 98,304 B · headroom none · OVER THE CAP")
+    // The old cap's overrun is no longer one: the cap is the ledger's.
+    expect(budgetTable(ledger, 81921).over).toBe(false)
   })
 })

@@ -41,7 +41,7 @@ import (
 // stale again (it sat at v0.3.6 through the v0.5.0 release once).
 const (
 	instrumentationName = "github.com/weftgo/weft/core"
-	version             = "v0.14.2"
+	version             = "v0.15.0"
 )
 
 // The weft.* span attributes and the slog line keys, pinned by tests and

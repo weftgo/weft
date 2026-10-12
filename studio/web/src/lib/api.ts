@@ -37,9 +37,10 @@ export type RunStatus = "running" | "succeeded" | "failed" | "interrupted"
  * model — and cost_badge says why: "unpriced" (no row matches the
  * model) or "unknown" (the figure could not be computed), with
  * cost_reason naming it in one line; "scripted" marks a known, exact
- * $0 (a scripted model: wefttest, weftarena, weft/runtime scripted —
- * U7). unpriced_models are the provider/model pairs without a price
- * behind the figure (absent when none). cache says whether the adapter reported the
+ * $0 (a scripted model: wefttest, weft/runtime scripted — U7).
+ * unpriced_models are the provider/model pairs without a price behind
+ * the figure (absent when none), five at most: a sixth and more are one
+ * last element "(+n)" (lib/cost.ts's unpricedLine reads it). cache says whether the adapter reported the
  * cache splits ("exact") or not (then every input token was priced at
  * the input rate). All absent from a Studio older than A5. */
 export interface CostFields {

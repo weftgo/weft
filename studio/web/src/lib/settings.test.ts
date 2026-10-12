@@ -10,12 +10,14 @@ import {
   editsKey,
   emptyRow,
   globError,
+  globEscape,
   isDate,
   maskToken,
   pricingFile,
   pricingFileText,
   problems,
   tokenIdentity,
+  withPriceRow,
 } from "./settings"
 
 const served = golden<PricingSettings>("settings-pricing")
@@ -179,5 +181,29 @@ describe("tokenIdentity", () => {
   it("masks without a character of the token", () => {
     expect(maskToken("dev-secret-1234")).not.toMatch(/[a-z0-9]/)
     expect(maskToken("")).toBe("")
+  })
+})
+
+describe("the ?price= prefill (U5U7-fix 8d)", () => {
+  it("escapes path.Match's metacharacters: the row prices the name alone, a good pattern", () => {
+    expect(globEscape("a*b?c[d]\\e")).toBe("a\\*b\\?c\\[d]\\\\e")
+    const d = withPriceRow(draftOf(served), "acme/model[v2]*")
+    expect(d.rows[0]).toMatchObject({
+      provider: "acme",
+      model_glob: "model\\[v2]\\*",
+    })
+    expect(
+      problems(d).filter((p) => p.row === 0 && p.field === "model_glob")
+    ).toEqual([])
+    expect(globError(`acme/${d.rows[0].model_glob}`)).toBe("")
+    // A plain name is unchanged, and a second prefill adds nothing.
+    const plain = withPriceRow(draftOf(served), "openai/kimi-k2.7-code")
+    expect(plain.rows[0]).toMatchObject({
+      provider: "openai",
+      model_glob: "kimi-k2.7-code",
+    })
+    expect(withPriceRow(plain, "openai/kimi-k2.7-code").rows.length).toBe(
+      plain.rows.length
+    )
   })
 })

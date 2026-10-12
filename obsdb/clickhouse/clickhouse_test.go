@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -27,8 +28,8 @@ func TestMigrationPinsExporterVersion(t *testing.T) {
 	if !strings.Contains(string(body), pinnedExporterVersion) {
 		t.Errorf("migration 0001 does not name the pinned exporter version %s", pinnedExporterVersion)
 	}
-	if highestMigration() != 13 {
-		t.Errorf("highest migration = %d, want 13 (0001 init, 0002 experiments, 0003 status spelling, 0004 request record, 0005 raw record, 0006 experiment command, 0007 the experiment index, 0008 the command store, 0009 the derived flag, 0010 root ended, 0011 stopped by, 0012 the root's version, 0013 the emitted counts)", highestMigration())
+	if highestMigration() != 14 {
+		t.Errorf("highest migration = %d, want 14 (0001 init, 0002 experiments, 0003 status spelling, 0004 request record, 0005 raw record, 0006 experiment command, 0007 the experiment index, 0008 the command store, 0009 the derived flag, 0010 root ended, 0011 stopped by, 0012 the root's version, 0013 the emitted counts, 0014 records.dropped out of meta)", highestMigration())
 	}
 }
 
@@ -414,23 +415,27 @@ func TestRunsInnerFiltersAfterGrouping(t *testing.T) {
 // whole set: stopped_by's two keys (stoppedByKeys) appended, the traces
 // tuple gaining weft.raw.index on the way; 0012 the traces view again
 // with the same set; 0013 (U5) the traces view again with the two
-// emitted counts — span attributes, so the logs view keeps 0011's.
+// emitted counts — span attributes, so the logs view keeps 0011's; 0014
+// (U5U7-fix) the logs view with the whole set, weft.records.dropped last
+// (droppedKeys) — a record attribute, so the traces view keeps 0013's.
 const (
 	adr0028Keys   = 12 + 4 + 1 + 10
 	rawKeys       = 1
 	stoppedByKeys = 2
 	emittedKeys   = 2
+	droppedKeys   = 1
 )
 
 func TestMigrationContractTuple(t *testing.T) {
-	at0011 := contractKeys[:len(contractKeys)-emittedKeys]
+	at0013 := contractKeys[:len(contractKeys)-droppedKeys]
+	at0011 := at0013[:len(at0013)-emittedKeys]
 	at0005 := at0011[:len(at0011)-stoppedByKeys]
 	at0004 := at0005[:len(at0005)-rawKeys]
 	before := at0004[:len(at0004)-adr0028Keys]
 	for _, c := range []struct {
 		version, tuples int
 		keys            []string
-	}{{1, 2, before}, {3, 1, before}, {4, 2, at0004}, {5, 1, at0005}, {10, 1, at0004}, {11, 2, at0011}, {12, 1, at0011}, {13, 1, contractKeys}} {
+	}{{1, 2, before}, {3, 1, before}, {4, 2, at0004}, {5, 1, at0005}, {10, 1, at0004}, {11, 2, at0011}, {12, 1, at0011}, {13, 1, at0013}, {14, 1, contractKeys}} {
 		body, err := migrationsFS.ReadFile("migrations/" + migrations[c.version])
 		if err != nil {
 			t.Fatal(err)
@@ -674,6 +679,55 @@ func TestMigration0013RestatesTracesView(t *testing.T) {
 	).Replace(was)
 	if want == was || now[2] != want {
 		t.Errorf("0013's select is not 0012's with the two counts:\n%s", now[2])
+	}
+}
+
+// Migration 0014 (U5U7-fix 6) restates 0011's logs view with one change:
+// weft.records.dropped (and 0013's two emitted counts) in its contract
+// tuple, so ClickHouse's stored Meta no longer keeps a destination's
+// loss count. Pinned offline against 0011's select.
+func TestMigration0014RestatesLogsView(t *testing.T) {
+	read := func(v int) []string {
+		b, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return splitStatements(string(b))
+	}
+	const alter = "ALTER TABLE weft_runs_logs_mv MODIFY QUERY"
+	var was string
+	for _, st := range read(11) {
+		if strings.HasPrefix(st, alter) {
+			was = st
+		}
+	}
+	now := read(14)
+	if was == "" || len(now) != 1 {
+		t.Fatalf("0011's logs view found %v; 0014 has %d statements, want 1 (the view)", was != "", len(now))
+	}
+	want := strings.Replace(was, `'weft.run.stopped_by', 'weft.cancel.cause'], k)`, `'weft.run.stopped_by', 'weft.cancel.cause',
+        'weft.run.events', 'weft.run.messages',
+        'weft.records.dropped'], k)`, 1)
+	if want == was || now[0] != want {
+		t.Errorf("0014's select is not 0011's with weft.records.dropped:\n%s", now[0])
+	}
+}
+
+// TestContractKeysCoverNonMeta is TestContractKeysMatchMetaOf's reverse
+// (U5U7-fix 6): every key obsdb.MetaOf excludes is in contractKeys, so
+// the SQL filters keep no contract key in stored Meta — or it is
+// exempt here, with the reason. obsdb.NonMetaKeys lists them.
+func TestContractKeysCoverNonMeta(t *testing.T) {
+	exempt := map[string]string{}
+	for _, k := range obsdb.NonMetaKeys() {
+		if slices.Contains(contractKeys, k) {
+			continue
+		}
+		if why, ok := exempt[k]; ok {
+			t.Logf("%s exempt: %s", k, why)
+			continue
+		}
+		t.Errorf("MetaOf excludes %q but contractKeys lacks it: ClickHouse's stored Meta keeps it", k)
 	}
 }
 

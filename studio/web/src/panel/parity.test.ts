@@ -2029,8 +2029,7 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
 // the same figure and the same reason for the same row — lib/cost.ts's
 // words on both — own and delegated, two numbers on each.
 describe("a turn's cost on both surfaces (A5.3)", () => {
-  const WHY =
-    "openai/kimi-k2.7-code has no price (no row of the default pricing table matches it)"
+  const WHY = "openai/kimi-k2.7-code has no price"
   const SCRIPTED = "a scripted model: nothing bills it, an exact $0"
   const cases: { name: string; doc: Partial<RunDoc> }[] = [
     {
@@ -2178,7 +2177,13 @@ describe("a turn's cost on both surfaces (A5.3)", () => {
 // title, the same wrapper words.
 describe("a replayed run's cost on both surfaces (A5.3)", () => {
   const PG = "pg_x1"
-  const row = () => ({
+  type Bill = Partial<
+    Pick<
+      RunDoc,
+      "cost_usd" | "cost_badge" | "cost_reason" | "delegated_cost_usd"
+    >
+  >
+  const row = (bill: Bill = {}) => ({
     ...runRow({
       id: PG,
       playground: true,
@@ -2190,6 +2195,7 @@ describe("a replayed run's cost on both surfaces (A5.3)", () => {
     cache: "exact" as const,
     delegated_cost_usd: 0.001,
     delegated_cost_known: true,
+    ...bill,
   })
   const cmd = (state: string) => ({
     command_id: "cmd_1",
@@ -2210,80 +2216,95 @@ describe("a replayed run's cost on both surfaces (A5.3)", () => {
     }
   }
 
-  it("the panel's result pane is the playground's result card: figure, title, the whole-bill wrapper", async () => {
-    const routes = baseRoutes()
-    routes["POST playground/runs"] = { command_id: "cmd_1", state: "queued" }
-    routes["playground/commands/cmd_1"] = cmd("finished")
-    routes[`runs/${PG}`] = { ...row(), children: [] }
-    routes[`runs/${PG}/events?after=0&limit=500`] = {
-      events: [],
-      next_after: null,
-      done: true,
-      gaps: [],
-    }
-    routes[`runs/${PG}/transcript`] = transcript(
-      [user("where is my order #4411?")],
-      [assistant("It is delayed.")]
-    )
-    panelStudio(routes, { ...META, capabilities: caps })
-    const el = await mount(ATTRS)
-    await runExperiment(el)
-    await vi.waitFor(
-      () => expect($(el, ".weft-xres [data-weft-result-cost]")).toBeTruthy(),
-      { timeout: 5_000 }
-    )
-    const panel = read($(el, ".weft-xres [data-weft-result-cost]"))
-    el.remove()
-    await settle()
-    cleanup()
-    document.body.innerHTML = ""
-    stubBrowser()
-    vi.stubGlobal("scrollTo", vi.fn())
-    StudioEventSource.reset()
-    vi.stubGlobal("EventSource", StudioEventSource)
-    setStudioToken("")
-    new FakeStudio()
-      .on("GET meta", {
-        ...golden<Record<string, unknown>>("meta"),
-        capabilities: caps,
-      })
-      .on("GET runtimes", RUNTIMES)
-      .on("GET experiments", { experiments: [] })
-      .on(`GET runs/${RUN}`, { ...runRow({ id: RUN }), children: [] })
-      .on(
-        `GET runs/${RUN}/transcript`,
-        transcript(
-          [user("where is my order #4411?")],
-          [assistant("It shipped.")]
-        )
+  const bills: { name: string; bill: Bill; text: string }[] = [
+    { name: "priced", bill: {}, text: "$0.0050" },
+    {
+      // U5U7-fix 1: a scripted parent whose subagents bill is not "$0 · scripted".
+      name: "a scripted parent with paid subagents",
+      bill: {
+        cost_usd: 0,
+        cost_badge: "scripted",
+        cost_reason: "a scripted model: nothing bills it, an exact $0",
+        delegated_cost_usd: 0.5,
+      },
+      text: "$0.50",
+    },
+  ]
+  for (const { name, bill, text } of bills)
+    it(`${name}: the panel's result pane is the playground's result card: figure, title, the whole-bill wrapper`, async () => {
+      const routes = baseRoutes()
+      routes["POST playground/runs"] = { command_id: "cmd_1", state: "queued" }
+      routes["playground/commands/cmd_1"] = cmd("finished")
+      routes[`runs/${PG}`] = { ...row(bill), children: [] }
+      routes[`runs/${PG}/events?after=0&limit=500`] = {
+        events: [],
+        next_after: null,
+        done: true,
+        gaps: [],
+      }
+      routes[`runs/${PG}/transcript`] = transcript(
+        [user("where is my order #4411?")],
+        [assistant("It is delayed.")]
       )
-      .on("POST playground/runs", cmd("queued"))
-      .on("GET playground/commands/cmd_1", cmd("finished"))
-      .on(`GET runs/${PG}`, { ...row(), children: [] })
-      .on(`GET runs/${PG}/events`, pagedEvents([]))
-      .on(
-        `GET runs/${PG}/transcript`,
-        transcript(
-          [user("where is my order #4411?")],
-          [assistant("It is delayed.")]
-        )
+      panelStudio(routes, { ...META, capabilities: caps })
+      const el = await mount(ATTRS)
+      await runExperiment(el)
+      await vi.waitFor(
+        () => expect($(el, ".weft-xres [data-weft-result-cost]")).toBeTruthy(),
+        { timeout: 5_000 }
       )
-      .install()
-    renderApp(`/playground?run=${RUN}`)
-    const go = await screen.findByRole("button", { name: "Run A" })
-    await waitFor(() => expect(go).toHaveProperty("disabled", false))
-    fireEvent.click(go)
-    await waitFor(
-      () => expect(document.querySelector("[data-result-cost]")).toBeTruthy(),
-      { timeout: 10_000 }
-    )
-    const studio = read(document.querySelector("[data-result-cost]"))
-    expect(panel.text).toBe("$0.0050")
-    expect(panel).toEqual(studio)
-    expect(panel.wrapper).toBe(
-      "the run's whole bill: its own model calls + its subagents'"
-    )
-  })
+      const panel = read($(el, ".weft-xres [data-weft-result-cost]"))
+      el.remove()
+      await settle()
+      cleanup()
+      document.body.innerHTML = ""
+      stubBrowser()
+      vi.stubGlobal("scrollTo", vi.fn())
+      StudioEventSource.reset()
+      vi.stubGlobal("EventSource", StudioEventSource)
+      setStudioToken("")
+      new FakeStudio()
+        .on("GET meta", {
+          ...golden<Record<string, unknown>>("meta"),
+          capabilities: caps,
+        })
+        .on("GET runtimes", RUNTIMES)
+        .on("GET experiments", { experiments: [] })
+        .on(`GET runs/${RUN}`, { ...runRow({ id: RUN }), children: [] })
+        .on(
+          `GET runs/${RUN}/transcript`,
+          transcript(
+            [user("where is my order #4411?")],
+            [assistant("It shipped.")]
+          )
+        )
+        .on("POST playground/runs", cmd("queued"))
+        .on("GET playground/commands/cmd_1", cmd("finished"))
+        .on(`GET runs/${PG}`, { ...row(bill), children: [] })
+        .on(`GET runs/${PG}/events`, pagedEvents([]))
+        .on(
+          `GET runs/${PG}/transcript`,
+          transcript(
+            [user("where is my order #4411?")],
+            [assistant("It is delayed.")]
+          )
+        )
+        .install()
+      renderApp(`/playground?run=${RUN}`)
+      const go = await screen.findByRole("button", { name: "Run A" })
+      await waitFor(() => expect(go).toHaveProperty("disabled", false))
+      fireEvent.click(go)
+      await waitFor(
+        () => expect(document.querySelector("[data-result-cost]")).toBeTruthy(),
+        { timeout: 10_000 }
+      )
+      const studio = read(document.querySelector("[data-result-cost]"))
+      expect(panel.text).toBe(text)
+      expect(panel).toEqual(studio)
+      expect(panel.wrapper).toBe(
+        "the run's whole bill: its own model calls + its subagents'"
+      )
+    })
 })
 
 // What ended a run (U3.2): the five seeded shapes show the same chip on

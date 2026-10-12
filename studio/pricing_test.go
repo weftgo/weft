@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -239,7 +240,9 @@ func TestCostHandCalculation(t *testing.T) {
 	}
 	_, _, body = get(t, h2, "/studio/api/runs/r_unpriced")
 	decode(t, body, &r)
-	if r.CostUSD != nil || !strings.Contains(r.CostReason, "option pricing table") {
+	// The reason names the model only (UX-A-12); the table's source is
+	// api/meta's pricing.source.
+	if r.CostUSD != nil || r.CostReason != "acme/mystery-1 has no price" {
 		t.Errorf("unpriced under a Go table: %s", body)
 	}
 }
@@ -851,7 +854,9 @@ func TestCostRunningChildIsUnknown(t *testing.T) {
 	}
 	// An unknown figure says it is not known yet, never "not priced":
 	// the running child has a price, its usage has not arrived.
-	if want := "1 of 1 turns' cost not known yet (p/0/c: running: "; !strings.HasPrefix(sess.CostReason, want) {
+	// The session's reason names no run id (UX-B-27): its turns are the
+	// rows beside it; the run's delegated reason names the child.
+	if want := "1 of 1 turns' cost not known yet (running: "; !strings.HasPrefix(sess.CostReason, want) {
 		t.Errorf("session cost reason = %q, want prefix %q", sess.CostReason, want)
 	}
 	_, _, body = get(t, h, "/studio/api/runs/p")
@@ -863,20 +868,22 @@ func TestCostRunningChildIsUnknown(t *testing.T) {
 }
 
 // TestCostScripted (U7: UX-D-21, UX-C-17): a scripted model — wefttest's,
-// weftarena's, the playground's weft/runtime scripted engine — that no
-// row matches is an exact $0 with the scripted badge, never "unpriced";
-// a set of scripted turns is scripted too; a row that matches wins.
+// the playground's weft/runtime scripted engine — that no row matches is
+// an exact $0 with the scripted badge, never "unpriced"; a set of
+// scripted turns is scripted too; a row that matches wins. A provider
+// outside this repository (weftarena wraps any model) is never assumed
+// $0: without a row of its own it is unpriced.
 func TestCostScripted(t *testing.T) {
 	db := costDB(t)
 	t0 := time.Now().Add(-time.Hour).UTC()
 	u := core.Usage{InputTokens: 60, OutputTokens: 30}
 	costUsage(t, db, "r_test", "", "s_scripted", "wefttest", "script", t0, u, u)
-	costUsage(t, db, "r_arena", "", "s_scripted", "weftarena", "any-model", t0.Add(time.Second), u, u)
+	costUsage(t, db, "r_arena", "", "", "weftarena", "any-model", t0.Add(time.Second), u, u)
 	costUsage(t, db, "r_replay", "", "", "weft/runtime", "scripted", t0.Add(2*time.Second), u, u)
 	costUsage(t, db, "r_other", "", "", "weft/runtime", "live", t0.Add(3*time.Second), u, u)
 
 	h := Handler(DB(db))
-	for _, id := range []string{"r_test", "r_arena", "r_replay"} {
+	for _, id := range []string{"r_test", "r_replay"} {
 		_, _, body := get(t, h, "/studio/api/runs/"+id)
 		var r costRow
 		decode(t, body, &r)
@@ -885,12 +892,18 @@ func TestCostScripted(t *testing.T) {
 			t.Errorf("%s: %s; want an exact $0, badge scripted", id, body)
 		}
 	}
+	_, _, body := get(t, h, "/studio/api/runs/r_arena")
+	var arena costRow
+	decode(t, body, &arena)
+	if arena.CostKnown || arena.CostBadge != costUnpriced || !slices.Equal(arena.UnpricedModels, []string{"weftarena/any-model"}) {
+		t.Errorf("weftarena/any-model: %s; want unpriced (the arena ships its own row)", body)
+	}
 	// Only the scripted engine of weft/runtime is scripted.
-	_, _, body := get(t, h, "/studio/api/runs/r_other")
+	_, _, body = get(t, h, "/studio/api/runs/r_other")
 	var r costRow
 	decode(t, body, &r)
 	if r.CostKnown || r.CostBadge != costUnpriced || !slices.Equal(r.UnpricedModels, []string{"weft/runtime/live"}) ||
-		r.CostReason != "weft/runtime/live has no price (no row of the default pricing table matches it)" {
+		r.CostReason != "weft/runtime/live has no price" {
 		t.Errorf("weft/runtime/live: %s; want unpriced, one model, one line", body)
 	}
 	_, _, body = get(t, h, "/studio/api/sessions/s_scripted")
@@ -982,4 +995,65 @@ func writeFile(t *testing.T, dir, name, body string) string {
 		t.Fatal(err)
 	}
 	return p
+}
+
+// TestCostScriptedEngineSet (U5U7-fix 4): the playground's scripted
+// engine reports zero usage, so a set made only of its runs — a session,
+// an experiment — is the scripted badge's exact $0, never a bare "$0.00".
+func TestCostScriptedEngineSet(t *testing.T) {
+	db := costDB(t)
+	t0 := time.Now().Add(-time.Hour).UTC()
+	var zero core.Usage
+	costUsage(t, db, "e1", "", "s_engine", "weft/runtime", "scripted", t0, zero, zero)
+	costUsage(t, db, "e2", "", "s_engine", "weft/runtime", "scripted", t0.Add(time.Second), zero, zero)
+	_, _, body := get(t, Handler(DB(db)), "/studio/api/sessions/s_engine")
+	var sess costRow
+	decode(t, body, &sess)
+	if usd(sess.CostUSD) != "0" || !sess.CostKnown || sess.CostBadge != costScripted || sess.Cache != cacheExact {
+		t.Errorf("a session of scripted-engine turns: %s; want an exact $0, badge scripted", body)
+	}
+	// Directly over setCost: no run at all stays a plain exact $0.
+	s := New(DB(db))
+	defer func() { _ = s.Close() }()
+	if c := s.coster(context.Background()).setCost(nil, "run"); c.badge != "" || !c.known || c.cache != cacheExact {
+		t.Errorf("an empty set: %+v; want a known $0 with no badge", c)
+	}
+}
+
+// TestPricingGoRowWithoutProvider (U5U7-fix 8a): a Go-built row with no
+// provider is the any-provider row, as a file's missing provider loads.
+func TestPricingGoRowWithoutProvider(t *testing.T) {
+	db := costDB(t)
+	t0 := time.Now().Add(-time.Hour).UTC()
+	u := core.Usage{InputTokens: 1_000_000}
+	costUsage(t, db, "r_kimi", "", "", "openai", "kimi-k2.7-code", t0, u, u)
+	h := Handler(DB(db), Pricing(PricingTable{Dated: "2026-10-13", Models: []ModelPrice{
+		{ModelGlob: "kimi-k2.7-*", Input: 2, Output: 3},
+	}}))
+	_, _, body := get(t, h, "/studio/api/runs/r_kimi")
+	var r costRow
+	decode(t, body, &r)
+	if !r.CostKnown || usd(r.CostUSD) != "2" {
+		t.Errorf("a provider-less Go row: %s; want $2 (matched on the model glob alone)", body)
+	}
+}
+
+// TestCostModelsCapped (U5U7-fix 8b): unpriced_models and the reason's
+// list stop at five models, the rest one "(+n)" — said, never silent.
+func TestCostModelsCapped(t *testing.T) {
+	db := costDB(t)
+	t0 := time.Now().Add(-time.Hour).UTC()
+	u := core.Usage{InputTokens: 10, OutputTokens: 5}
+	for i := range 7 {
+		costUsage(t, db, fmt.Sprintf("m%d", i), "", "s_many", "acme", fmt.Sprintf("model-%d", i), t0.Add(time.Duration(i)*time.Second), u, u)
+	}
+	_, _, body := get(t, Handler(DB(db)), "/studio/api/sessions/s_many")
+	var r costRow
+	decode(t, body, &r)
+	if len(r.UnpricedModels) != 6 || r.UnpricedModels[5] != "(+2)" {
+		t.Errorf("unpriced_models = %q; want five models and (+2)", r.UnpricedModels)
+	}
+	if !strings.HasSuffix(r.CostReason, ", (+2)") || strings.Count(r.CostReason, "acme/") != 5 {
+		t.Errorf("reason = %q; want five models then (+2)", r.CostReason)
+	}
 }

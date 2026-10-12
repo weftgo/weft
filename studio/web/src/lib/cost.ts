@@ -112,7 +112,8 @@ export function costView(f: CostFields | null | undefined): CostView {
  * matches (or a run that names none): what makes a figure "unpriced"
  * rather than "unknown" (tally's "n of m subagent runs unpriced", a
  * Studio before U7's "no row … matches"). */
-const UNPRICED_WORDS = /unpriced|\bno row\b.*\bmatches\b|reported no model/
+const UNPRICED_WORDS =
+  /unpriced|has no price|\bno row\b.*\bmatches\b|reported no model/
 
 /** The words studio/pricing.go's tally gives a delegated reason when
  * any child's part is unknown ("1 of 3 subagent runs' cost not known
@@ -202,22 +203,25 @@ export function sumCost(
       // An already drawn figure (lostCellCost): known adds, unknown is the total's reason.
       if (!r.known) return view(null, false, r.title, r.badge)
       usd += r.usd ?? 0
-      scripted &&= r.badge === "scripted"
+      scripted &&= r.badge === "scripted" && !r.usd
       continue
     }
     const t = runTotal(r)
     if (!t.known) return totalUnknown(r)
     usd += t.usd
-    scripted &&= r.cost_badge === "scripted"
+    // A scripted parent whose subagents bill is not scripted: its whole
+    // bill (runTotal, delegated included) must be an exact $0 too —
+    // pricing.go's setCost rule (U5U7-fix 1).
+    scripted &&= r.cost_badge === "scripted" && t.usd === 0
   }
   return scripted
-    ? view(
-        0,
-        true,
-        rows.length > 1 ? "every run a scripted model's" : undefined,
-        "scripted"
-      )
+    ? view(0, true, scriptedTitle(rows) || undefined, "scripted")
     : view(usd, true, undefined)
+}
+
+/** scriptedTitle is a scripted sum's title: sumCost's words. */
+function scriptedTitle(rows: readonly unknown[]): string {
+  return rows.length > 1 ? "every run a scripted model's" : ""
 }
 
 /** A row sumCost and atLeastCost read: its cost blocks and, on a run
@@ -247,10 +251,13 @@ function totalUnknown(r: CostRow): CostView {
  * own figure counts when only its delegated part is unknown; never
  * "<" under "≥"), the reasons in its title only, deduped; a partial
  * figure of $0 (nothing priced, or only scripted $0s) is "—", never
- * "≥ $0.00" (U7). more says the rows are not all there is (a paged
- * list): the figure is then "≥" even when every row is known, more its
- * title's last words. noun is what a row is ("run", the panel's
- * "turn"). */
+ * "≥ $0.00" (U7); a known part under $0.0001 is "> $0 · …", never a
+ * "≥ $0.0001" above the real figure (U5U7-fix 3). more says the rows are
+ * not all there is (a paged list): the figure is then "≥" even when
+ * every row is known, more its title's last words — and when every
+ * loaded row is known at $0, "$0 · scripted" (all scripted) or "$0 · k
+ * of n runs priced", never "—" (U5U7-fix 8e). noun is what a row is
+ * ("run", the panel's "turn"). */
 export function atLeastCost(
   rows: readonly CostRow[],
   more?: string,
@@ -260,8 +267,10 @@ export function atLeastCost(
   let k = 0
   const why: string[] = []
   let badge = ""
+  let scripted = rows.length > 0
   for (const r of rows) {
     const t = runTotal(r)
+    scripted &&= t.known && t.usd === 0 && r.cost_badge === "scripted"
     const own = costView(r)
     if (own.known) usd += t.known ? t.usd : own.usd!
     if (t.known) {
@@ -275,13 +284,37 @@ export function atLeastCost(
   }
   if (!why.length && !more) return sumCost(rows)
   // "k of n runs priced": plural always, as pricing.go's tally counts.
-  const priced = why.length ? `${k} of ${rows.length} ${noun}s priced` : ""
+  const counted = `${k} of ${rows.length} ${noun}s priced`
+  const priced = why.length ? counted : ""
   const title = [priced, ...why, more].filter(Boolean).join(" · ")
+  if (!usd && !why.length) {
+    // Every loaded row known at $0, more not loaded: the loaded rows'
+    // exact words, the title saying what is missing — a partial figure
+    // (not known, usd its known part).
+    if (scripted)
+      return {
+        known: false,
+        text: SCRIPTED_TEXT,
+        title: [scriptedTitle(rows), more].filter(Boolean).join(" · "),
+        badge: "scripted",
+        usd: 0,
+      }
+    return {
+      known: false,
+      text: `$0 · ${counted}`,
+      title: [counted, more].filter(Boolean).join(" · "),
+      badge: "unknown",
+      usd: 0,
+    }
+  }
   if (!usd) return view(null, false, title, badge || "unknown")
+  // Under $0.0001 formatUSD says "<$0.0001": "≥" over it would claim
+  // more than is known, so the known part reads "> $0" (exact in the title).
+  const tiny = usd < 0.0001
   return {
     known: false,
-    text: `≥ ${formatUSD(usd).replace("<", "")}${priced ? ` · ${priced}` : ""}`,
-    title,
+    text: `${tiny ? "> $0" : `≥ ${formatUSD(usd)}`}${priced ? ` · ${priced}` : ""}`,
+    title: tiny ? `known part $${usd.toFixed(6)} USD · ${title}` : title,
     badge: badge || "unknown",
     usd,
   }
@@ -297,6 +330,9 @@ export interface UnpricedLine {
   models: string[]
 }
 
+/** The API's "(+n)": a model list cut at five (pricing.go's capModels). */
+const CUT_MARK = /^\(\+\d+\)$/
+
 /** unpricedLine is the one line a page draws over its rows (the runs
  * list, the sessions list, a run header, the panel's header) when any
  * is unpriced: "N runs unpriced: no row for openai/x, acme/y (+2)" —
@@ -304,12 +340,15 @@ export interface UnpricedLine {
  * delegated_unpriced_models, two shown, every one in the title. A row
  * counts when its own or its delegated figure is unpriced; a row not
  * known yet (running) does not. null when no row is unpriced. noun is
- * what a row is ("run", "turn", "session"). */
+ * what a row is ("run", "turn", "session"). The API lists five models
+ * per field, a sixth and more as a last "(+n)" (pricing.go's capModels):
+ * such a mark is never a model — the line then says "and more". */
 export function unpricedLine(
   rows: readonly (CostFields & DelegatedCostFields)[],
   noun = "run"
 ): UnpricedLine | null {
   let n = 0
+  let cut = false
   const models: string[] = []
   for (const r of rows) {
     const ms = [
@@ -323,14 +362,22 @@ export function unpricedLine(
     )
       continue
     n++
-    for (const m of ms) if (!models.includes(m)) models.push(m)
+    for (const m of ms) {
+      if (CUT_MARK.test(m)) cut = true
+      else if (!models.includes(m)) models.push(m)
+    }
   }
   if (!n) return null
-  const more = models.length > 2 ? ` (+${models.length - 2})` : ""
+  const extra = models.length > 2 ? `+${models.length - 2}` : ""
+  const more = cut
+    ? ` (${extra ? `${extra} ` : ""}and more)`
+    : extra
+      ? ` (${extra})`
+      : ""
   return {
     text: `${n} ${noun}${n > 1 ? "s" : ""} unpriced${models.length ? `: no row for ${models.slice(0, 2).join(", ")}${more}` : ""}`,
     title: models.length
-      ? `no row of the pricing table matches ${models.join(", ")}`
+      ? `no row of the pricing table matches ${models.join(", ")}${cut ? " and more" : ""}`
       : "no model reported to price",
     models,
   }

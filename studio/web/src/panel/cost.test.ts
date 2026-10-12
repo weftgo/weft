@@ -32,8 +32,7 @@ beforeEach(setup)
 afterEach(teardown)
 
 const PRICED = { ...META, capabilities: [...META.capabilities, "pricing"] }
-const UNPRICED_WHY =
-  "openai/kimi-k2.7-code has no price (no row of the default pricing table matches it)"
+const UNPRICED_WHY = "openai/kimi-k2.7-code has no price"
 const RUNNING_WHY = "running: usage arrives at run end"
 
 /** priced is a run row's cost block as studio/pricing.go writes it. */
@@ -287,6 +286,40 @@ describe("the header's summed cost", () => {
       "$0 · scripted"
     )
     expect(all(el, "[data-weft-unpriced]")).toHaveLength(0)
+  })
+
+  it("a known part under $0.0001 (U5U7-fix 3): > $0, never a ≥ $0.0001 above the real figure", async () => {
+    const el = await turns([
+      runRow({ id: "s_01-t2", turn: 2, ...priced(0.00003) }),
+      runRow(unpriced),
+    ])
+    expect(cost($(el, "[data-weft-cost-total] [data-weft-cost]"))).toEqual({
+      text: "> $0 · 1 of 2 turns priced",
+      title: `known part $0.000030 USD · 1 of 2 turns priced · ${UNPRICED_WHY}`,
+    })
+  })
+
+  it("a scripted turn whose subagents bill (U5U7-fix 1): the header sums its whole bill, never $0 · scripted", async () => {
+    const el = await turns([
+      runRow({ id: "s_01-t2", turn: 2, ...scripted, delegated_cost_usd: 0.5 }),
+      runRow(scripted),
+    ])
+    expect(cost($(el, "[data-weft-cost-total] [data-weft-cost]")).text).toBe(
+      "$0.50"
+    )
+  })
+
+  it("scripted turns, older not loaded (U5U7-fix 8e): $0 · scripted, the title says loaded only — never —", async () => {
+    const el = await turns(
+      [runRow({ id: "s_01-t2", turn: 2, ...scripted }), runRow(scripted)],
+      PRICED,
+      { next_before: T0, next_before_id: "s_01-t1" }
+    )
+    expect(cost($(el, "[data-weft-cost-total] [data-weft-cost]"))).toEqual({
+      text: "$0 · scripted",
+      title:
+        "every run a scripted model's · the 2 loaded turns only — load older turns for more",
+    })
   })
 
   it("only scripted turns priced beside an unpriced one (U7): —, never ≥ $0.00", async () => {

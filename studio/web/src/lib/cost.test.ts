@@ -195,6 +195,20 @@ describe("costView", () => {
     // Beside a priced run the total is a plain figure.
     expect(sumCost([rScripted(), priced(0.02)]).text).toBe("$0.02")
   })
+  it("a scripted parent whose subagents bill is not scripted: its whole bill counts (U5U7-fix 1)", () => {
+    const parent: RunRow = {
+      ...rScripted(),
+      delegated_cost_usd: 0.5,
+      delegated_cost_known: true,
+      delegated_cost_reason: undefined,
+    }
+    expect(sumCost([parent])).toMatchObject({ known: true, text: "$0.50" })
+    expect(sumCost([parent, rScripted()]).text).toBe("$0.50")
+    // A $0 delegated part keeps the scripted words.
+    expect(sumCost([{ ...parent, delegated_cost_usd: 0 }]).text).toBe(
+      "$0 · scripted"
+    )
+  })
   it("a run whose end never arrived is — too, badged unknown with its reason", () => {
     const r = rStale()
     const v = costView(r)
@@ -326,9 +340,13 @@ describe("the cost order and totals", () => {
       text: "—",
       title: `1 of 2 runs priced · ${why}`,
     })
-    expect(
-      atLeastCost([priced(0.00002), rFail()], undefined, "turn").text
-    ).toBe("≥ $0.0001 · 1 of 2 turns priced")
+    // U5U7-fix 3: a known part under $0.0001 is "> $0", never a "≥
+    // $0.0001" above the real figure; the exact figure leads the title.
+    const tiny = atLeastCost([priced(0.00003), rFail()], undefined, "turn")
+    expect(tiny.text).toBe("> $0 · 1 of 2 turns priced")
+    expect(tiny.title).toBe(
+      `known part $0.000030 USD · 1 of 2 turns priced · ${why}`
+    )
     expect(atLeastCost([])).toMatchObject({
       known: false,
       text: "—",
@@ -372,6 +390,25 @@ describe("the cost order and totals", () => {
     expect(atLeastCost([rFail()], "loaded only")).toMatchObject({
       text: "—",
       title: `0 of 1 runs priced · ${why} · loaded only`,
+    })
+    // U5U7-fix 8e: every loaded row known at $0 — the scripted words when
+    // all are scripted, else "$0 · k of n priced"; never "—".
+    expect(
+      atLeastCost([rScripted(), rScripted()], "loaded only", "turn")
+    ).toMatchObject({
+      known: false,
+      text: "$0 · scripted",
+      title: "every run a scripted model's · loaded only",
+      badge: "scripted",
+      usd: 0,
+    })
+    expect(
+      atLeastCost([rScripted(), priced(0)], "loaded only", "turn")
+    ).toMatchObject({
+      known: false,
+      text: "$0 · 2 of 2 turns priced",
+      title: "2 of 2 turns priced · loaded only",
+      usd: 0,
     })
   })
   it("a derived run's no-usage cost is not known — never 'yet': it never arrives; keyed on the row's derived mark, not the words", () => {
@@ -466,6 +503,18 @@ describe("a page's one unpriced line (U7)", () => {
     expect(line.text).toBe("4 turns unpriced: no row for a/x, b/y (+1)")
     expect(line.title).toBe("no row of the pricing table matches a/x, b/y, c/z")
     expect(unpricedLine([rScripted(), priced(1), rStale()])).toBeNull()
+  })
+  it('the API\'s cut list (five models, then "(+n)") is never a model: the line says "and more" (U5U7-fix 8b)', () => {
+    const cut: RunRow = {
+      ...rFail(),
+      unpriced_models: ["a/1", "a/2", "a/3", "a/4", "a/5", "(+2)"],
+    }
+    const line = unpricedLine([cut])!
+    expect(line.models).toEqual(["a/1", "a/2", "a/3", "a/4", "a/5"])
+    expect(line.text).toBe("1 run unpriced: no row for a/1, a/2 (+3 and more)")
+    expect(line.title).toBe(
+      "no row of the pricing table matches a/1, a/2, a/3, a/4, a/5 and more"
+    )
   })
   it("delegatedView badges pricing.go's one-line tally words", () => {
     const d = (reason: string) =>

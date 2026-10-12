@@ -14,7 +14,7 @@
   "cost_usd": null,
   "cost_known": false,
   "cost_badge": "unknown",
-  "cost_reason": "1 of 3 turns' cost not known yet (r_stale: the run's end (run_finish or its invoke_agent span) never arrived: its usage is not recorded)",
+  "cost_reason": "1 of 3 turns' cost not known yet (the run's end (run_finish or its invoke_agent span) never arrived: its usage is not recorded)",
   "cache": "not_reported",
   "runs": [
     {

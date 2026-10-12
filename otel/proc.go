@@ -594,6 +594,8 @@ type dropCounter struct {
 	// condition, not a line per record or per minute.
 	overflow       atomic.Int64
 	overflowWarned atomic.Bool
+	// stallWarned makes the Blocking latch's WARN once per destination.
+	stallWarned atomic.Bool
 }
 
 func newDropCounter(name string) *dropCounter {
@@ -630,6 +632,16 @@ func (d *dropCounter) overflowed(n, queue int64) {
 		d.log.Warn("weft/otel: destination queue full, records dropped",
 			"dest", d.name, "queue", queue,
 			"hint", "raise it with otel.QueueSize(n) on the destination, or use otel.Blocking() under WEFT_ENV=dev; deltas are shed first, a run's run_start and run_finish last; the count rides weft.records.dropped on the heartbeat and each run's run_start/run_finish")
+	}
+}
+
+// stalled logs, once for the destination's lifetime, that a Blocking
+// chain's exporter stopped: no export began for a whole wait, so its
+// records are refused at once until one does (admission.go's latch).
+func (d *dropCounter) stalled() {
+	if d.stallWarned.CompareAndSwap(false, true) {
+		d.log.Warn("weft/otel: destination "+d.name+": exporter stalled — records are refused until it recovers (Blocking)",
+			"dest", d.name)
 	}
 }
 

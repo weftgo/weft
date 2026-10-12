@@ -55,15 +55,25 @@ export function draftOf(s: PricingSettings): PricingDraft {
   }
 }
 
+/** globEscape is s matched literally under path.Match: its
+ * metacharacters (*, ?, [ and the escape \ itself) backslash-escaped,
+ * so a model name carrying one prefills a row matching that name alone
+ * (U5U7-fix 8d). */
+export function globEscape(s: string): string {
+  return s.replace(/[*?[\\]/g, "\\$&")
+}
+
 /** withPriceRow is the draft with a row for an unpriced provider/model
  * first (U7's "price this model…": the first match wins, so a new row
  * leads), its rates left to fill — or the draft as it is when a row
  * for it is there already. The provider is the text before the first
- * "/", the model glob the rest. */
+ * "/", the model glob the rest, each glob-escaped (globEscape): the row
+ * prices the name it was opened for, never a pattern it happens to
+ * spell. */
 export function withPriceRow(d: PricingDraft, price: string): PricingDraft {
   const at = price.indexOf("/")
-  const provider = at < 0 ? "*" : price.slice(0, at)
-  const model_glob = at < 0 ? price : price.slice(at + 1)
+  const provider = at < 0 ? "*" : globEscape(price.slice(0, at))
+  const model_glob = globEscape(at < 0 ? price : price.slice(at + 1))
   if (!model_glob) return d
   if (
     d.rows.some(

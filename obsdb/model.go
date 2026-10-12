@@ -3,6 +3,7 @@ package obsdb
 import (
 	"fmt"
 	"hash/fnv"
+	"slices"
 	"strconv"
 	"time"
 )
@@ -372,6 +373,19 @@ var nonMetaAttr = map[string]struct{}{
 	"session.id":                               {},
 	"user.id":                                  {},
 	"error.type":                               {},
+}
+
+// NonMetaKeys lists, sorted, the record/span contract keys MetaOf
+// excludes from a run row's metadata — for a backend that must copy the
+// set into its own query language (the ClickHouse views' filter) and
+// test its copy whole.
+func NonMetaKeys() []string {
+	out := make([]string, 0, len(nonMetaAttr))
+	for k := range nonMetaAttr {
+		out = append(out, k)
+	}
+	slices.Sort(out)
+	return out
 }
 
 // MetaOf returns the caller metadata a set of attributes carries: every

@@ -42,7 +42,9 @@ import (
 // stall, not per record: once one wait times out, the chain refuses at
 // once (counted, as without Blocking) until an export begins and gives
 // places back — a hung exporter costs the app one blockMax, not one per
-// record.
+// record. The latch's first setting logs one WARN per destination
+// (dropCounter.stalled): the overflow WARN says the queue is full, this
+// one that the exporter stopped.
 
 // Default queue sizes: the SDK's 2,048 for third-party destinations,
 // sixteen thousand for Studio — a dev loop's event storm (thousands of
@@ -90,6 +92,9 @@ type admission struct {
 	// stalled latches a timed-out Blocking wait: until the next release
 	// a Blocking chain refuses at once instead of waiting again.
 	stalled atomic.Bool
+	// onStall, when set, is told each time the latch sets (the
+	// destination's once-only WARN).
+	onStall func()
 	// space is signalled (never blocking) on every release, so a
 	// Blocking waiter re-tries; one waiter wakes per signal and passes
 	// the baton on when room is left.
@@ -162,8 +167,13 @@ func (a *admission) admitOrWait(ctx context.Context, t tier) bool {
 			}
 		case <-timer.C:
 			// No export began for a whole wait: the exporter is stuck.
-			// Every later record is refused at once until one does.
-			a.stalled.Store(true)
+			// Every later record is refused at once until one does. The
+			// timer is the only bound of the chain's own making — a span
+			// End's context has no deadline (admittedSpanProc.OnEnd) —
+			// so a hung exporter always reaches this branch.
+			if a.stalled.CompareAndSwap(false, true) && a.onStall != nil {
+				a.onStall()
+			}
 			return false
 		case <-ctx.Done():
 			return false
@@ -190,6 +200,19 @@ func (a *admission) signal() {
 
 // close wakes every Blocking waiter for good (the chain shut down).
 func (a *admission) close() { a.once.Do(func() { close(a.done) }) }
+
+// newAdmittedLogBatch is a batch log chain's SDK processor over exp:
+// admission sized queue, the SDK queue the same size, each export
+// releasing its records' places, a stall warned through drops. The
+// destination's destProc admits ahead of it (buildDest; the tests'
+// logChain).
+func newAdmittedLogBatch(exp sdklog.Exporter, queue int, blocking bool, drops *dropCounter,
+	opts ...sdklog.BatchProcessorOption) (*sdklog.BatchProcessor, *admission) {
+	adm := newAdmission(queue, blocking)
+	adm.onStall = drops.stalled
+	opts = append([]sdklog.BatchProcessorOption{sdklog.WithMaxQueueSize(int(adm.size))}, opts...)
+	return sdklog.NewBatchProcessor(releasingLogExporter{Exporter: exp, adm: adm}, opts...), adm
+}
 
 // releasingLogExporter is the exporter a batch log chain hands the
 // SDK's BatchProcessor: each Export call releases its records' places
@@ -233,6 +256,7 @@ type admittedSpanProc struct {
 func newAdmittedSpanProc(exp sdktrace.SpanExporter, queue int, blocking bool, drops *dropCounter,
 	opts ...sdktrace.BatchSpanProcessorOption) admittedSpanProc {
 	adm := newAdmission(queue, blocking)
+	adm.onStall = drops.stalled
 	opts = append([]sdktrace.BatchSpanProcessorOption{sdktrace.WithMaxQueueSize(int(adm.size) + spanQueueHeadroom)}, opts...)
 	bsp := sdktrace.NewBatchSpanProcessor(releasingSpanExporter{SpanExporter: exp, adm: adm}, opts...)
 	return admittedSpanProc{SpanProcessor: bsp, adm: adm, drops: drops}
@@ -241,14 +265,11 @@ func newAdmittedSpanProc(exp sdktrace.SpanExporter, queue int, blocking bool, dr
 func (p admittedSpanProc) OnEnd(s sdktrace.ReadOnlySpan) {
 	if s.SpanContext().IsSampled() {
 		// A span's End carries no context: a Blocking wait is bounded
-		// by its own deadline (the record side waits under the run's).
-		ctx := context.Background()
-		if p.adm.blocking {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, p.adm.wait)
-			defer cancel()
-		}
-		if !p.adm.admit(ctx, spanTier(s)) {
+		// by admission's own timer alone (the record side waits under
+		// the run's context too). No deadline of its own here: one set
+		// to the same wait fires first and returns without the latch,
+		// so every later End would pay the wait again.
+		if !p.adm.admit(context.Background(), spanTier(s)) {
 			p.drops.overflowed(1, p.adm.size)
 			return
 		}

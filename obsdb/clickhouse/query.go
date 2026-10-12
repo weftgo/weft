@@ -1319,6 +1319,9 @@ var contractKeys = []string{
 	// messages_emitted columns (migration 0013's restatement of the
 	// traces view; span attributes only, so the logs view keeps 0011's).
 	"weft.run.events", "weft.run.messages",
+	// U5-fix: a destination's loss count on run_start / run_finish
+	// (ingest health; migration 0014's restatement of the logs view).
+	"weft.records.dropped",
 }
 
 // unmarshalAttrs decodes a JSON column keeping integral numbers as

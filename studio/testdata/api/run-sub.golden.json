@@ -88,7 +88,7 @@
       "cost_usd": null,
       "cost_known": false,
       "cost_badge": "unpriced",
-      "cost_reason": "openai/kimi-k2.7-code has no price (no row of the default pricing table matches it)",
+      "cost_reason": "openai/kimi-k2.7-code has no price",
       "cache": "not_reported",
       "unpriced_models": [
         "openai/kimi-k2.7-code"

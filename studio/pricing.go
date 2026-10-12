@@ -80,20 +80,23 @@ import (
 // an unpriced model), cost_known, cache ("exact" | "not_reported"), and
 // when unknown cost_badge ("unpriced": no row matches the model;
 // "unknown": the figure cannot be computed yet or at all) with
-// cost_reason naming why in one short line ("openai/x has no price …";
+// cost_reason naming why in one short line ("openai/x has no price";
 // a set's "2 of 9 turns unpriced: no price for openai/x, acme/y" — never
 // one clause per run), and unpriced_models: the provider/model pairs
 // without a price behind the figure, deduped (a run row's
 // delegated_unpriced_models the same for its subagents), so a page can
-// say it once over its rows.
+// say it once over its rows. Both lists, and the reason's, stop at five
+// models: a sixth and more read as one last element "(+n)".
 //
-// A scripted model — every model of the wefttest and weftarena
-// providers, and the playground's scripted engine (weft/runtime +
-// scripted) — that no row of the table matches is priced by a built-in
+// A scripted model — every model of the wefttest provider, and the
+// playground's scripted engine (weft/runtime + scripted) — that no row
+// of the table matches is priced by a built-in
 // rule: an exact $0 (cost_known true, cache "exact") with cost_badge
 // "scripted". Nothing bills it; the rule is Go code, not a pricing.json
 // row, so an override file cannot lose it (a row that matches — a test
-// pricing its scripted model — wins, as every first match does).
+// pricing its scripted model — wins, as every first match does). Any
+// other provider that wraps a scripted model ships its own row: the rule
+// covers only the models this repository knows nothing bills.
 //
 // A running run is "unknown" ("running: usage
 // arrives at run end" — the core reports a run's usage once, at its
@@ -334,6 +337,13 @@ func parsePricing(b []byte, name string) (PricingTable, error) {
 // else the default.
 func resolvePricing(c *config) {
 	if c.pricing != nil {
+		// A Go-built row without a provider is the any-provider row, as
+		// a file's missing provider loads.
+		for i := range c.pricing.Models {
+			if c.pricing.Models[i].Provider == "" {
+				c.pricing.Models[i].Provider = anyProvider
+			}
+		}
 		return
 	}
 	if file := os.Getenv("WEFT_PRICING"); file != "" {
@@ -377,8 +387,10 @@ func (t *PricingTable) lookup(provider, model string) (ModelPrice, bool) {
 }
 
 // scriptedProviders are the providers whose every model is scripted:
-// wefttest's Script and Replay models, the arena's.
-var scriptedProviders = map[string]bool{"wefttest": true, "weftarena": true}
+// wefttest's Script and Replay models. A provider outside this
+// repository (a wrapper that may wrap any model) is never assumed $0:
+// it ships its own pricing row.
+var scriptedProviders = map[string]bool{"wefttest": true}
 
 // scripted says provider/model is a scripted model nothing bills: the
 // scriptedProviders' models and the playground's scripted engine
@@ -450,10 +462,10 @@ type cost struct {
 	// models are the unpriced models behind the figure (deduped). A
 	// tally's figure also counts its runs, those not known yet and
 	// those without a price; why is its first unknown part's reason
-	// ("<run id>: running: …").
+	// ("<run id>: running: …"), cause the same without the run id.
 	models                  []string
 	runs, unknown, unpriced int
-	why                     string
+	why, cause              string
 }
 
 // addModels appends ms to the deduped list.
@@ -466,9 +478,22 @@ func addModels(list []string, ms ...string) []string {
 	return list
 }
 
+// maxModels caps a model list on the wire and in a reason: the first
+// maxModels, then "(+n)" for the rest — the truncation said, never
+// silent.
+const maxModels = 5
+
+// capModels is list cut at maxModels, its last element "(+n)" when cut.
+func capModels(list []string) []string {
+	if len(list) <= maxModels {
+		return list
+	}
+	return append(slices.Clone(list[:maxModels]), fmt.Sprintf("(+%d)", len(list)-maxModels))
+}
+
 // fields is c on the wire: rounded, null when unknown.
 func (c cost) fields() costFields {
-	out := costFields{CostKnown: c.known, CostBadge: c.badge, CostReason: c.reason, Cache: c.cache, UnpricedModels: c.models}
+	out := costFields{CostKnown: c.known, CostBadge: c.badge, CostReason: c.reason, Cache: c.cache, UnpricedModels: capModels(c.models)}
 	if c.known && c.cache == cacheNotReported && out.CostReason == "" {
 		out.CostReason = cacheNote
 	}
@@ -513,7 +538,7 @@ func (t *PricingTable) price(provider, model string, u core.Usage) cost {
 	}
 	if !ok {
 		out.badge = costUnpriced
-		out.reason = provider + "/" + model + " has no price (no row of the " + t.source + " pricing table matches it)"
+		out.reason = provider + "/" + model + " has no price"
 		out.models = []string{provider + "/" + model}
 		return out
 	}
@@ -626,7 +651,7 @@ func (c *coster) compute(rec obsdb.RunRow) runCost {
 		why := "the run's subagent children could not be read, so its own usage cannot be told from theirs"
 		return runCost{
 			own:       cost{badge: costUnknown, reason: why, cache: cacheOf(rec.Usage)},
-			delegated: cost{badge: costUnknown, reason: why, why: rec.ID + ": " + why},
+			delegated: cost{badge: costUnknown, reason: why, why: rec.ID + ": " + why, cause: why},
 		}
 	}
 	own := rec.Usage
@@ -667,10 +692,10 @@ func tally(parts []runCost, noun string, nested bool) cost {
 		out.models = addModels(out.models, p.delegated.models...)
 		out.runs++
 		if p.own.badge == costUnknown && out.why == "" {
-			out.why = p.id + ": " + p.own.reason
+			out.why, out.cause = p.id+": "+p.own.reason, p.own.reason
 		}
 		if out.why == "" {
-			out.why = p.delegated.why
+			out.why, out.cause = p.delegated.why, p.delegated.cause
 		}
 		switch {
 		case p.own.badge == costUnknown, !nested && !p.delegated.known && p.delegated.badge == costUnknown:
@@ -693,7 +718,14 @@ func tally(parts []runCost, noun string, nested bool) cost {
 	out.known, out.usd = false, 0
 	if out.unknown > 0 {
 		out.badge = costUnknown
-		out.reason = fmt.Sprintf("%d of %d %ss' cost not known yet (%s)", out.unknown, out.runs, noun, out.why)
+		// A subagent's reason names the child (one run of a tree the
+		// page does not list); a session's or an experiment's names
+		// none — its turns are the rows beside it (UX-B-27).
+		why := out.cause
+		if nested {
+			why = out.why
+		}
+		out.reason = fmt.Sprintf("%d of %d %ss' cost not known yet (%s)", out.unknown, out.runs, noun, why)
 		if out.unpriced > 0 {
 			out.reason += fmt.Sprintf("; %d unpriced", out.unpriced)
 		}
@@ -702,7 +734,7 @@ func tally(parts []runCost, noun string, nested bool) cost {
 		out.reason = fmt.Sprintf("%d of %d %ss unpriced", out.unpriced, out.runs, noun)
 	}
 	if len(out.models) > 0 {
-		out.reason += ": no price for " + strings.Join(out.models, ", ")
+		out.reason += ": no price for " + strings.Join(capModels(out.models), ", ")
 	}
 	return out
 }
@@ -763,7 +795,7 @@ func (c *coster) fill(out *runRow, rec obsdb.RunRow) {
 }
 
 func (c cost) delegatedFields() delegatedFields {
-	out := delegatedFields{DelegatedCostKnown: c.known, DelegatedCostReason: c.reason, DelegatedUnpricedModels: c.models}
+	out := delegatedFields{DelegatedCostKnown: c.known, DelegatedCostReason: c.reason, DelegatedUnpricedModels: capModels(c.models)}
 	if c.known {
 		v := round6(c.usd)
 		out.DelegatedCostUSD = &v
@@ -847,13 +879,15 @@ func (c *coster) setCost(runs []obsdb.RunRow, noun string) cost {
 	out := tally(parts, noun, false)
 	out.cache = cacheOf(usage)
 	switch {
+	case len(parts) > 0 && allScripted:
+		// Every root a scripted model's — the playground's scripted
+		// engine reports zero usage, so this precedes the zero case:
+		// the set's $0 is exact too.
+		out.badge, out.reason, out.cache = costScripted, scriptedReason, cacheExact
 	case usage == (core.Usage{}):
 		// No usage at all (a run-less experiment): a $0 that nothing
 		// can have overstated, so no cache note.
 		out.cache = cacheExact
-	case allScripted:
-		// Every root a scripted model's: the set's $0 is exact too.
-		out.badge, out.reason, out.cache = costScripted, scriptedReason, cacheExact
 	}
 	return out
 }

@@ -609,7 +609,7 @@ func buildDest(ctx context.Context, d dest, cfg config) (_ *destRuntime, err err
 	}
 	if logExp != nil {
 		var exp sdklog.Exporter = countingLogExporter{Exporter: logExp, drops: drops}
-		batch := []sdklog.BatchProcessorOption{sdklog.WithMaxQueueSize(queue)}
+		var batch []sdklog.BatchProcessorOption
 		if logDelay > 0 {
 			batch = append(batch, sdklog.WithExportInterval(logDelay))
 		}
@@ -624,8 +624,7 @@ func buildDest(ctx context.Context, d dest, cfg config) (_ *destRuntime, err err
 			exp = byteSplitLogExporter{Exporter: exp, limit: rawExportBytes}
 		}
 		rt.logExp = exp
-		adm := newAdmission(queue, d.blocking)
-		inner := sdklog.NewBatchProcessor(releasingLogExporter{Exporter: exp, adm: adm}, batch...)
+		inner, adm := newAdmittedLogBatch(exp, queue, d.blocking, drops, batch...)
 		rt.logProc = &destProc{name: d.name, inner: inner,
 			content: content, contentC: contentCfg, noDeltas: d.noDeltas, drops: drops,
 			raw: cfg.rawBodies && d.rawOn(), adm: adm}

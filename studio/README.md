@@ -189,9 +189,10 @@ so the most specific row comes first. A row with no `provider` (or
 transport — `{"model_glob": "kimi-k2.7-code", …}` prices that model reached
 through the openai adapter at an OpenAI-compatible base URL, or under any
 provider name (a `*` in the glob never crosses a `/`). A scripted model no
-row matches — every `wefttest` and `weftarena` model and the playground's
-scripted engine (`weft/runtime` + `scripted`) — is an exact `$0` by a rule
-in Studio, not a row (so an override file cannot lose it): `cost_known`
+row matches — every `wefttest` model and the playground's scripted engine
+(`weft/runtime` + `scripted`), nothing else (a provider that wraps other
+models ships its own row) — is an exact `$0` by a rule in Studio, not a
+row (so an override file cannot lose it): `cost_known`
 true, `cache` `exact`, `cost_badge` `scripted`. `input` and `output` are required;
 a missing `cached_input`, `cache_write` or `reasoning` prices those
 tokens at the input (or output) rate. The default is `pricing.json`
@@ -217,14 +218,18 @@ no cache split reported every input token prices at the input rate and
 the row says `cache: "not_reported"`. Every priced object carries `cost_usd` (null when
 unknown, never 0), `cost_known`, `cache` (`exact` | `not_reported`) and, when
 unknown, `cost_badge` (`unpriced`: no row matches — the reason is one line
-naming `provider/model`, "openai/x has no price (…)"; `unknown`: the figure
+naming `provider/model` alone, "openai/x has no price"; `unknown`: the figure
 could not be computed) with `cost_reason`; `scripted` marks a known `$0`
 (above). A figure that sums runs — a delegated figure, a session's, an
 experiment's — says why it is unknown in one line counting them ("2 of 9
 turns unpriced: no price for openai/x, acme/y", "1 of 3 subagent runs'
 cost not known yet (…)"), never a clause per run, and `unpriced_models`
 (a run row's `delegated_unpriced_models` for its subagents) lists the
-models without a price behind a figure, deduped, so a page can say it once. Run rows — lists, documents and their `children[]`,
+models without a price behind a figure, deduped, so a page can say it once
+— five at most, a sixth and more one last element `"(+n)"` (the reason's
+list is cut the same way). A session's or an experiment's reason names no
+run id (its turns are the rows beside it); a delegated reason names the
+child. Run rows — lists, documents and their `children[]`,
 search hits, live `run` frames, experiment runs, the export's run block —
 split the bill in two, never folded: a run's usage includes its subagent
 children's (the core rolls them up), so `cost_usd` is its own model calls
@@ -359,7 +364,7 @@ carries no child count, so the turn row shows its own figure alone there,
 the same total); Studio's visible "cache not reported" mark follows a known
 figure priced without cache splits. An unknown figure is "—" with the API's
 `cost_reason` as its title and in its accessible text (" not known: …"): an
-unpriced model ("openai/x has no price (…)"), a running turn
+unpriced model ("openai/x has no price"), a running turn
 ("running: usage arrives at run end"), a derived turn whose spans reported
 no usage. The
 header's total beside "N turns · T tok" sums the turns' own + delegated

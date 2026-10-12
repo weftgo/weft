@@ -234,13 +234,17 @@ func (s sleepySpanExporter) ExportSpans(context.Context, []sdktrace.ReadOnlySpan
 }
 func (sleepySpanExporter) Shutdown(context.Context) error { return nil }
 
-// logChain is a batch log chain as buildDest assembles it, over exp,
-// with the SDK options given.
+// logChain is a batch log chain as buildDest assembles it (the same
+// newAdmittedLogBatch), over exp, with the SDK options given.
 func logChain(exp sdklog.Exporter, queue int, blocking bool, opts ...sdklog.BatchProcessorOption) *destProc {
-	adm := newAdmission(queue, blocking)
-	opts = append([]sdklog.BatchProcessorOption{sdklog.WithMaxQueueSize(queue)}, opts...)
-	return &destProc{name: "t", content: true, drops: newDropCounter("t"), adm: adm,
-		inner: sdklog.NewBatchProcessor(releasingLogExporter{Exporter: exp, adm: adm}, opts...)}
+	return logChainDrops(exp, queue, blocking, newDropCounter("t"), opts...)
+}
+
+// logChainDrops is logChain counting into drops (a destination's
+// counter, shared with its span chain).
+func logChainDrops(exp sdklog.Exporter, queue int, blocking bool, drops *dropCounter, opts ...sdklog.BatchProcessorOption) *destProc {
+	inner, adm := newAdmittedLogBatch(exp, queue, blocking, drops, opts...)
+	return &destProc{name: drops.name, content: true, drops: drops, adm: adm, inner: inner}
 }
 
 // TestNoPlaceLeaked (finding 5b): a failing exporter, a timing-out one,
@@ -413,18 +417,22 @@ func TestBlockingLatch(t *testing.T) {
 	}
 }
 
-// TestBlockingBoundPerStall (finding 3): a hung exporter under Blocking
-// costs the app one wait, not one per record — on the record chain
-// (bounded by the wait and the emitting context) and the span chain
-// (whose End has no context: its own deadline bounds it).
+// TestBlockingBoundPerStall (finding 3; U5U7-fix 2): a hung exporter
+// under Blocking costs the app one wait, not one per record — on the
+// record chain (bounded by the wait and the emitting context) and the
+// span chain (whose End has no context: admission's timer bounds it, and
+// latches) — under two waits in all, each chain. The latch's first
+// setting logs one WARN for the destination, both chains sharing it.
 func TestBlockingBoundPerStall(t *testing.T) {
-	const wait = 50 * time.Millisecond
-	const n = 60 // unbounded per record: n × wait = 3 s
+	logBuf := captureSlogSafe(t)
+	const wait = 100 * time.Millisecond
+	const n = 60 // unbounded per record: n × wait = 6 s
+	drops := newDropCounter("dev")
 	gate := &gateExporter{open: make(chan struct{}), mem: newMemExporter()}
-	lp := logChain(gate, 4, true, sdklog.WithExportInterval(time.Hour), sdklog.WithExportMaxBatchSize(4))
+	lp := logChainDrops(gate, 4, true, drops, sdklog.WithExportInterval(time.Hour), sdklog.WithExportMaxBatchSize(4))
 	lp.adm.wait = wait
 	spans := newGateSpanExporter()
-	sp := newAdmittedSpanProc(spans, 4, true, newDropCounter("t"),
+	sp := newAdmittedSpanProc(spans, 4, true, drops,
 		sdktrace.WithBatchTimeout(time.Hour), sdktrace.WithMaxExportBatchSize(4))
 	sp.adm.wait = wait
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sp))
@@ -439,8 +447,8 @@ func TestBlockingBoundPerStall(t *testing.T) {
 	for range n {
 		_ = lp.OnEmit(context.Background(), eventRecord(t, "step_start"))
 	}
-	if el := time.Since(start); el > 20*wait {
-		t.Errorf("%d records through a hung Blocking chain took %v, want about one wait (%v)", n, el, wait)
+	if el := time.Since(start); el >= 2*wait {
+		t.Errorf("%d records through a hung Blocking chain took %v, want under two waits (%v each)", n, el, wait)
 	}
 	if lp.adm.refused.Load() == 0 || !lp.adm.stalled.Load() {
 		t.Errorf("record chain: refused %d, stalled %v; want refusals and the latch", lp.adm.refused.Load(), lp.adm.stalled.Load())
@@ -448,11 +456,15 @@ func TestBlockingBoundPerStall(t *testing.T) {
 
 	start = time.Now()
 	endSpans(tp.Tracer("t"), n, false)
-	if el := time.Since(start); el > 20*wait {
-		t.Errorf("%d span ends through a hung Blocking chain took %v, want about one wait (%v)", n, el, wait)
+	if el := time.Since(start); el >= 2*wait {
+		t.Errorf("%d span ends through a hung Blocking chain took %v, want under two waits (%v each)", n, el, wait)
 	}
 	if sp.adm.refused.Load() == 0 || !sp.adm.stalled.Load() {
 		t.Errorf("span chain: refused %d, stalled %v; want refusals and the latch", sp.adm.refused.Load(), sp.adm.stalled.Load())
+	}
+	const warn = "destination dev: exporter stalled — records are refused until it recovers (Blocking)"
+	if got := strings.Count(logBuf.String(), warn); got != 1 {
+		t.Errorf("stall WARN lines = %d, want 1 for the destination; log:\n%s", got, logBuf.String())
 	}
 }
 

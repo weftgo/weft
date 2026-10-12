@@ -46,7 +46,7 @@ const rStale = runs.runs.find((r) => r.id === "r_stale")!
 /** A finished run on wefttest/script: scripted, an exact $0 (U7). */
 const rScripted = runs.runs.find((r) => r.id === "r_fail")!
 const KIMI_WHY =
-  "openai/kimi-k2.7-code has no price (no row of the default pricing table matches it)"
+  "openai/kimi-k2.7-code has no price"
 /** A finished run on a model no pricing row matches: unpriced — the
  * fixture's run on an OpenAI-compatible model, as pricing.go writes it. */
 const rFail: RunRow = {

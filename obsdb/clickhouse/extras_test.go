@@ -157,8 +157,8 @@ func TestReopenIsANoop(t *testing.T) {
 	// pins as the highest version. (Step 8b review fix 1: this read still
 	// wanted 1 after 0002 landed, failing only on a real server, where
 	// the gated suite first ran.)
-	if versions != 13 {
-		t.Errorf("obsdb_migrations rows after reopen = %d, want 13 (0001 through 0013)", versions)
+	if versions != 14 {
+		t.Errorf("obsdb_migrations rows after reopen = %d, want 14 (0001 through 0014)", versions)
 	}
 	// 0007's skip index is on weft_runs (M2: an experiment's run list).
 	var idx uint64
@@ -621,5 +621,30 @@ func inputRecs() []obsdb.Record {
 		rec("c_in", 0, user, map[string]any{"weft.messages.input": true}),
 		rec("c_in", 1, reply, nil),
 		rec("c_none", 0, reply, nil),
+	}
+}
+
+// TestRecordsDroppedNotStoredInMeta (U5U7-fix 6): a destination's loss
+// count on run_start / run_finish (weft.records.dropped) stays out of
+// the stored weft_runs.Meta — the logs view's tuple (migration 0014) —
+// not only out of the row MetaOf reads back.
+func TestRecordsDroppedNotStoredInMeta(t *testing.T) {
+	db, dsn := openFresh(t)
+	at := time.Now().UTC().Add(-time.Minute)
+	extra := map[string]any{"weft.records.dropped": int64(7), "tenant": "acme"}
+	if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{
+		eventRec("rd1", "run_start", 0, at, `{"type":"run_start","id":"rd1","agent":"conf"}`, extra),
+		eventRec("rd1", "run_finish", 1, at.Add(time.Second), `{"type":"run_finish","steps":1}`, extra),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	conn := openRaw(t, dsn)
+	defer func() { _ = conn.Close() }()
+	var meta string
+	if err := conn.QueryRow(ctx(), `SELECT max(Meta) FROM weft_runs WHERE RunId = 'rd1'`).Scan(&meta); err != nil {
+		t.Fatal(err)
+	}
+	if meta != `{"tenant":"acme"}` {
+		t.Errorf("stored meta = %s; weft.records.dropped must stay out of it", meta)
 	}
 }

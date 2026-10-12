@@ -64,3 +64,45 @@ describe("RunsTable", () => {
     ])
   })
 })
+
+// The seeded shapes the U4 Done line names: badges only on problems.
+describe("RunsTable problem badges (U4)", () => {
+  it("↻2 on mw.retry, ⇄ on rw.flaky-infra, ✋ on appr.deny, [max_steps] on opt.max-steps, nothing on a clean run", async () => {
+    const [base] = goldenRuns()
+    const clean = {
+      ...base,
+      attempts_retried: undefined,
+      fallbacks: undefined,
+      error_type: undefined,
+      pending: 0,
+    }
+    const runs = [
+      { ...clean, id: "mw_retry", attempts_retried: 2 },
+      { ...clean, id: "rw_flaky", attempts_retried: 1, fallbacks: 1 },
+      { ...clean, id: "appr_deny", denied: 1 },
+      { ...clean, id: "appr_park", pending: 1 },
+      { ...clean, id: "opt_max", status: "failed" as const, error_type: "max_steps" },
+      { ...clean, id: "cancel", status: "failed" as const, error_type: "cancelled" },
+      { ...clean, id: "plain" },
+    ]
+    const { container } = await renderWithRouter(<RunsTable runs={runs} now={NOW} />)
+    const rows = [...container.querySelectorAll("tbody tr")].map((tr) =>
+      [...tr.querySelectorAll("[data-problems] > span")].map((e) => e.textContent)
+    )
+    expect(rows).toEqual([
+      ["↻2"],
+      ["↻1", "⇄"],
+      ["✋"],
+      ["✋"],
+      ["[max_steps]"],
+      ["[cancelled]"],
+      [],
+    ])
+    expect(
+      container.querySelector('[data-problem="retried"]')!.getAttribute("aria-label")
+    ).toBe("2 model attempts failed and retried")
+    expect(
+      container.querySelector('[data-error-type="cancelled"]')!.getAttribute("data-tone")
+    ).toBe("cancelled")
+  })
+})

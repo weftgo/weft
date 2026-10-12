@@ -1,0 +1,95 @@
+{
+  "case": "retry_fallback",
+  "description": "two runs through model middleware: mw.Retry over a model whose first two requests fail (two attempt spans Error, the third Ok — problems attempts_retried 2), and mw.Fallback over a model that fails once, the backup answering (the chat span asked script, answered backup — problems attempts_retried 1, fallbacks 1)",
+  "runs": [
+    {
+      "id": "a1100000000000000000000000000001",
+      "trace_id": "7ace0000000000000000000000000001",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:18:00Z",
+      "finished": "2026-10-01T09:18:00.01Z",
+      "last_seen": "2026-10-01T09:18:00.01Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 4,
+      "message_count": 2,
+      "delta_count": 1,
+      "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "request_count": 3,
+      "events_emitted": 4,
+      "messages_emitted": 2,
+      "problems": {
+        "attempts_retried": 2
+      },
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": []
+    },
+    {
+      "id": "a1100000000000000000000000000002",
+      "trace_id": "7ace0000000000000000000000000002",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:18:00.01Z",
+      "finished": "2026-10-01T09:18:00.02Z",
+      "last_seen": "2026-10-01T09:18:00.02Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 4,
+      "message_count": 2,
+      "delta_count": 1,
+      "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "request_count": 2,
+      "events_emitted": 4,
+      "messages_emitted": 2,
+      "problems": {
+        "attempts_retried": 1,
+        "fallbacks": 1
+      },
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "backup",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": []
+    }
+  ]
+}

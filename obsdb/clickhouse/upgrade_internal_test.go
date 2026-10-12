@@ -240,8 +240,8 @@ func TestUpgradeFrom0007AddsCommandStore(t *testing.T) {
 	if err := db.(*DB).conn.QueryRow(ctx, `SELECT max(version) FROM obsdb_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 14 {
-		t.Errorf("migration max after the upgrade = %d, want 14 (through 0014 records.dropped out of meta)", version)
+	if version != 15 {
+		t.Errorf("migration max after the upgrade = %d, want 15 (through 0015 the problem counters)", version)
 	}
 }
 
@@ -631,5 +631,123 @@ func TestUpgradeTo0013BackfillsEmitted(t *testing.T) {
 		if len(r.Meta) != 1 || r.Meta["tenant"] != "acme" {
 			t.Errorf("%s's meta after 0013 = %v, want only the caller's {tenant: acme}", c.id, r.Meta)
 		}
+	}
+}
+
+// A database at 0014 — a failed run's spans already stored through views
+// that read no error type and no problem: a cancelled root denying one
+// call, a failed attempt, a chat span answered by another model, a tool
+// error, a policy denial and a cut result — opens through 0015 on a
+// live server: the backfill fills ErrorType (context.Canceled read as
+// cancelled) and the problem set by obsdb.SpanProblems' rules, the same
+// spans written after the upgrade give the same counters through the
+// restated view, meta keeps none of the new keys, and the error_type
+// filter finds both (docs/record-contract.md §6, U4).
+func TestUpgradeTo0015BackfillsProblems(t *testing.T) {
+	base := os.Getenv("WEFT_CLICKHOUSE_DSN")
+	if base == "" {
+		t.Skip("WEFT_CLICKHOUSE_DSN not set: the 0015 upgrade needs a clickhouse server (README has the one-line container recipe)")
+	}
+	ctx := context.Background()
+	u, err := url.Parse(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	suffix := make([]byte, 6)
+	if _, err := rand.Read(suffix); err != nil {
+		t.Fatal(err)
+	}
+	name := "weft_up_" + hex.EncodeToString(suffix)
+	admin := rawConn(t, base)
+	if err := admin.Exec(ctx, fmt.Sprintf("CREATE DATABASE `%s`", name)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = admin.Exec(context.Background(), fmt.Sprintf("DROP DATABASE IF EXISTS `%s`", name))
+		_ = admin.Close()
+	})
+	u.Path = "/" + name
+	dsn := u.String()
+
+	conn := rawConn(t, dsn)
+	if err := conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS obsdb_migrations (
+		version UInt32, name String, applied_at DateTime DEFAULT now()
+	) ENGINE = MergeTree ORDER BY version`); err != nil {
+		t.Fatal(err)
+	}
+	for v := 1; v <= 14; v++ {
+		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, stmt := range splitStatements(string(body)) {
+			if err := conn.Exec(ctx, stmt); err != nil {
+				t.Fatalf("migration %d: %v", v, err)
+			}
+		}
+		if err := conn.Exec(ctx, `INSERT INTO obsdb_migrations (version, name) VALUES (?, ?)`, uint32(v), migrations[v]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	at := time.Now().UTC().Add(-time.Hour)
+	spans := func(run string, trace byte) []obsdb.Span {
+		mk := func(n byte, spanName string, status int, attrs map[string]any) obsdb.Span {
+			attrs["weft.run.id"] = run
+			return obsdb.Span{
+				TraceID: "0102030405060708090a0b0c0d0e0f1" + string(trace), SpanID: "0a0b0c0d0e0f05" + string(trace) + string(n),
+				Name: spanName, Kind: 1, Start: at, End: at.Add(time.Second), StatusCode: status, Service: "svc",
+				Attrs: attrs, Resource: map[string]any{"service.name": "svc"},
+			}
+		}
+		return []obsdb.Span{
+			mk('1', "invoke_agent a", 2, map[string]any{"gen_ai.operation.name": "invoke_agent", "tenant": "acme",
+				"error.type": "context.Canceled", "weft.run.denied": int64(1)}),
+			mk('2', "attempt", 2, map[string]any{"weft.attempt.index": int64(1), "error.type": "model_error"}),
+			mk('3', "attempt", 1, map[string]any{"weft.attempt.index": int64(2)}),
+			mk('4', "chat primary", 1, map[string]any{"gen_ai.operation.name": "chat",
+				"gen_ai.request.model": "primary", "gen_ai.response.model": "backup"}),
+			mk('5', "execute_tool boom", 2, map[string]any{"gen_ai.operation.name": "execute_tool",
+				"error.type": "panic", "weft.panic.layer": "handler"}),
+			mk('6', "execute_tool rm", 2, map[string]any{"gen_ai.operation.name": "execute_tool", "error.type": "DENIED"}),
+			mk('7', "execute_tool big", 1, map[string]any{"gen_ai.operation.name": "execute_tool", "weft.tool.truncated_bytes": int64(90)}),
+			mk('8', "execute_tool strict", 2, map[string]any{"gen_ai.operation.name": "execute_tool",
+				"error.type": "INVALID_INPUT", "weft.tool.input_error": "strict"}),
+		}
+	}
+	if err := (&DB{conn: conn}).Write(ctx, obsdb.Batch{Spans: spans("r_old", '1')}); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.Close()
+
+	db, err := Open(dsn)
+	if err != nil {
+		t.Fatalf("open a 0014 database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := db.Write(ctx, obsdb.Batch{Spans: spans("r_new", '2')}); err != nil {
+		t.Fatal(err)
+	}
+	want := obsdb.Problems{AttemptsRetried: 1, Fallbacks: 1, ToolErrors: 2, Denied: 2, Truncated: 1}
+	for _, id := range []string{"r_old", "r_new"} {
+		r, err := db.Run(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.ErrorType != "cancelled" || r.Problems != want {
+			t.Errorf("%s after 0015 = error_type %q, problems %+v; want cancelled, %+v", id, r.ErrorType, r.Problems, want)
+		}
+		// Meta through the restated view only: rows the pre-0015 traces view (0013's) wrote
+		// carry U4's keys in their meta (no producer wrote them before
+		// U4; this fixture does), and max(Meta) may pick such a row.
+		if id == "r_new" && (len(r.Meta) != 1 || r.Meta["tenant"] != "acme") {
+			t.Errorf("%s's meta after 0015 = %v, want only the caller's {tenant: acme}", id, r.Meta)
+		}
+	}
+	page, err := db.Runs(ctx, obsdb.RunQuery{ErrorType: "cancelled"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Runs) != 2 {
+		t.Errorf("error_type=cancelled = %d runs, want 2", len(page.Runs))
 	}
 }

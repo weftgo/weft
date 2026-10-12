@@ -29,6 +29,8 @@
   "stopped_by": "parked",
   "events_emitted": 13,
   "messages_emitted": 6,
+  "attempts_retried": 3,
+  "fallbacks": 1,
   "usage": {
     "input_tokens": 40,
     "output_tokens": 20

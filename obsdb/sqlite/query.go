@@ -26,7 +26,7 @@ const runColumns = `run_id, parent_run_id, parent_call_id, trace_id, agent, prov
 	input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens,
 	event_count, delta_count, message_count,
 	instructions_hash, catalog_hash, request_count, derived, root_ended,
-	stopped_by, cancel_cause, events_emitted, messages_emitted`
+	stopped_by, cancel_cause, events_emitted, messages_emitted, error_type, problems`
 
 // promptPreviewColumn is the run row's prompt_preview (plan A7): the
 // prompt migration 0004's run_search holds, cut to
@@ -127,6 +127,10 @@ func runWhere(q obsdb.RunQuery, now time.Time) (string, []any) {
 	if q.PublicID != "" {
 		conds = append(conds, "public_id = ?")
 		args = append(args, q.PublicID)
+	}
+	if q.ErrorType != "" {
+		conds = append(conds, "error_type = ?")
+		args = append(args, q.ErrorType)
 	}
 	if q.StoppedBy != "" {
 		cond, cargs := stoppedByCond(q.StoppedBy)
@@ -229,7 +233,8 @@ func (d *DB) runRowsQuery(ctx context.Context, where string, args []any) ([]runR
 			&r.InTok, &r.OutTok, &r.CachedTok, &r.CacheWrite, &r.ReasonTok,
 			&r.EventCount, &r.DeltaCount, &r.MessageCount,
 			&r.InstructionsHash, &r.CatalogHash, &r.RequestCount, &r.Derived, &r.RootEnded,
-			&r.StoppedBy, &r.CancelCause, &r.EventsEmitted, &r.MessagesEmitted, &r.PromptPreview); err != nil {
+			&r.StoppedBy, &r.CancelCause, &r.EventsEmitted, &r.MessagesEmitted,
+			&r.ErrorType, &r.Problems, &r.PromptPreview); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -256,6 +261,7 @@ type runRowScan struct {
 	Derived, RootEnded                                bool
 	StoppedBy, CancelCause                            string
 	EventsEmitted, MessagesEmitted                    int64
+	ErrorType, Problems                               string
 	PromptPreview                                     string
 }
 
@@ -280,6 +286,7 @@ func scanRunRow(r runRowScan, now time.Time) (obsdb.RunRow, error) {
 		FinishRecorded: r.FinishedOK,
 		StoppedBy:      r.StoppedBy, CancelCause: r.CancelCause,
 		EventsEmitted: r.EventsEmitted, MessagesEmitted: r.MessagesEmitted,
+		ErrorType: r.ErrorType, Problems: problemsOf(r.Problems),
 	}
 	if r.Finished.Valid {
 		f := time.Unix(0, r.Finished.Int64).UTC()
@@ -1084,4 +1091,14 @@ func (d *DB) ResolvePublicID(ctx context.Context, publicID string) (_ string, er
 		return "", fmt.Errorf("%w: public id %s", obsdb.ErrNotFound, publicID)
 	}
 	return sessionID, err
+}
+
+// problemsOf folds runs.problems — a JSON array of obsdb.SpanProblems
+// tokens — into the row's counters; a malformed value reads none.
+func problemsOf(stored string) obsdb.Problems {
+	var tokens []string
+	if stored != "" {
+		_ = json.Unmarshal([]byte(stored), &tokens)
+	}
+	return obsdb.CountProblems(tokens)
 }

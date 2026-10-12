@@ -13,6 +13,7 @@ import { Link, useNavigate } from "@tanstack/react-router"
 
 import type { RunRow } from "@/lib/api"
 import { stoppedByWords } from "@/lib/stopped-by"
+import { ProblemBadges } from "@/components/studio/problem-badges"
 import {
   absoluteTime,
   duration,
@@ -492,6 +493,7 @@ export function RunsTable({
                 <ReplayChip run={run} />
                 <DerivedChip row={run} />
                 <StoppedByLine run={run} />
+                <ProblemBadges run={run} />
                 {run.err ? (
                   <div
                     className="truncate font-mono text-[11px] text-status-bad/80"

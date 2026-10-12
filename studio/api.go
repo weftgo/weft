@@ -156,9 +156,18 @@ type runRow struct {
 	// root span's weft.run.events / weft.run.messages, U5): beside
 	// event_count / message_count, the denominator of a counted gap.
 	// Omitted when 0 (no root yet, a weft before U5, or nothing emitted).
-	EventsEmitted   int64      `json:"events_emitted,omitempty"`
-	MessagesEmitted int64      `json:"messages_emitted,omitempty"`
-	Usage           core.Usage `json:"usage"`
+	EventsEmitted   int64 `json:"events_emitted,omitempty"`
+	MessagesEmitted int64 `json:"messages_emitted,omitempty"`
+	// ErrorType is a failed run's kind (obsdb.RunRow.ErrorType, U4): the
+	// root's error.type — max_steps, usage_limit, loop_detected,
+	// model_retries_exceeded, model_contract, model_error, … — with the
+	// context errors read as "cancelled"; absent when the run did not
+	// fail. The status stays failed: cancelled is a kind, never a status.
+	ErrorType string `json:"error_type,omitempty"`
+	// The problem counters (obsdb.Problems, U4), each omitted when 0:
+	// what went wrong inside a run that may still have succeeded.
+	problemFields
+	Usage core.Usage `json:"usage"`
 	// The run's cost (plan A5, pricing.go): its own model calls
 	// (cost_usd: its usage minus its subagent children's, at its own
 	// model's rates) and its descendants' (delegated_cost_usd), two
@@ -232,10 +241,12 @@ func row(rec obsdb.RunRow) runRow {
 		StoppedBy:     rec.StoppedBy,
 		CancelCause:   rec.CancelCause,
 		EventsEmitted: rec.EventsEmitted, MessagesEmitted: rec.MessagesEmitted,
-		Usage:        rec.Usage,
-		EventCount:   rec.EventCount,
-		MessageCount: rec.MessageCount,
-		DeltaCount:   rec.DeltaCount,
+		ErrorType:     rec.ErrorType,
+		problemFields: problemsOf(rec.Problems),
+		Usage:         rec.Usage,
+		EventCount:    rec.EventCount,
+		MessageCount:  rec.MessageCount,
+		DeltaCount:    rec.DeltaCount,
 
 		InstructionsHash: rec.InstructionsHash,
 		CatalogHash:      rec.CatalogHash,
@@ -252,6 +263,33 @@ func row(rec obsdb.RunRow) runRow {
 		out.Finished = &f
 	}
 	return out
+}
+
+// problemFields are a run row's problem counters on the wire
+// (obsdb.Problems, docs/record-contract.md §6), each omitted when 0:
+// attempts_retried (failed model attempts), fallbacks (calls another
+// model answered), tool_errors, denied (policy refusals and denied
+// approvals), truncated (results the cap cut) and repaired (0 until the
+// core reports repaired arguments). log_warn / log_error count the
+// app's own log records under the run's spans by severity — read time,
+// on the run document only (GET /api/runs/{id}), never a list row.
+type problemFields struct {
+	AttemptsRetried int64 `json:"attempts_retried,omitempty"`
+	Fallbacks       int64 `json:"fallbacks,omitempty"`
+	ToolErrors      int64 `json:"tool_errors,omitempty"`
+	Denied          int64 `json:"denied,omitempty"`
+	Truncated       int64 `json:"truncated,omitempty"`
+	Repaired        int64 `json:"repaired,omitempty"`
+	LogWarn         int64 `json:"log_warn,omitempty"`
+	LogError        int64 `json:"log_error,omitempty"`
+}
+
+func problemsOf(p obsdb.Problems) problemFields {
+	return problemFields{
+		AttemptsRetried: p.AttemptsRetried, Fallbacks: p.Fallbacks, ToolErrors: p.ToolErrors,
+		Denied: p.Denied, Truncated: p.Truncated, Repaired: p.Repaired,
+		LogWarn: p.LogWarn, LogError: p.LogError,
+	}
 }
 
 type runsPage struct {
@@ -693,7 +731,8 @@ const (
 // subagent children included — a parent id given beside it wins),
 // stopped_by (what ended the run, exact — has_tool_call:submit — or, a
 // value ending in ':', a prefix: has_tool_call: is every tool-call
-// stop), tag.<k>=<v> metadata matches, before (the
+// stop), error_type (a failed run's kind, exact: max_steps, cancelled,
+// model_error, …), tag.<k>=<v> metadata matches, before (the
 // RFC 3339 paging cursor on started) with before_id (the cursor's run
 // id: exact inside a tie) and limit. next_before / next_before_id are
 // the next page's before / before_id, null on the last page.
@@ -706,6 +745,7 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 		PublicID:     q.Get("public_id"),
 		ExperimentID: q.Get("experiment_id"),
 		StoppedBy:    q.Get("stopped_by"),
+		ErrorType:    q.Get("error_type"),
 		ParentRunID:  parentParam(q),
 		Meta:         tagParams(q),
 	}
@@ -865,6 +905,7 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 	c := s.coster(r.Context())
 	c.prime(det.ID, det.Children)
 	doc := runDoc{runRow: c.row(det.RunRow), Children: s.childRows(r.Context(), c, det.Children)}
+	doc.LogWarn, doc.LogError = s.logCounts(r.Context(), id)
 	holes, err := s.runHoles(r.Context(), det.RunRow)
 	if err != nil {
 		dbError(w, r, "run", id, err)

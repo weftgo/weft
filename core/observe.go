@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"maps"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -65,6 +66,10 @@ const (
 	attrToolApproved    = attribute.Key("weft.tool.approved")
 	attrToolPending     = attribute.Key("weft.tool.pending")
 	attrToolResultBytes = attribute.Key("weft.tool.result_bytes")
+	attrToolTruncated   = attribute.Key("weft.tool.truncated_bytes")
+	attrToolInputError  = attribute.Key("weft.tool.input_error")
+	attrPanicLayer      = attribute.Key("weft.panic.layer")
+	attrRunDenied       = attribute.Key("weft.run.denied")
 	attrStream          = attribute.Key("weft.stream")
 	attrTTFTMS          = attribute.Key("weft.ttft_ms")
 	attrLatencyMS       = attribute.Key("weft.latency_ms")
@@ -272,6 +277,11 @@ func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo,
 			if n := len(res.Pending); n > 0 {
 				attrs = append(attrs, attrRunPending.Int(n))
 			}
+			if rec != nil {
+				if n := rec.denied.Load(); n > 0 {
+					attrs = append(attrs, attrRunDenied.Int64(n))
+				}
+			}
 			if res.StopReason != "" {
 				attrs = append(attrs, attrRunStopReason.String(string(res.StopReason)))
 			}
@@ -473,8 +483,11 @@ func ceilMS(d time.Duration) int64 {
 // error result sets Error status with error.type only — never the result
 // text, which is model-visible content (ADR 0016). A timed-out call ends
 // when the call does: the span reports the call, which is over, not the
-// abandoned handler goroutine.
-func (o *observer) tool(ctx context.Context, c Call, seq int64) (context.Context, func(res ToolResultPart, pending bool, err error)) {
+// abandoned handler goroutine. cut is the bytes the result cap removed
+// (weft.tool.truncated_bytes, on a result or an error result alike); a
+// panic names its layer (weft.panic.layer) and an INVALID_INPUT result
+// the rule it broke (weft.tool.input_error).
+func (o *observer) tool(ctx context.Context, c Call, seq int64) (context.Context, func(res ToolResultPart, pending bool, err error, cut int)) {
 	ctx, span := o.tracer.Start(ctx, spanName(semconv.GenAIOperationNameExecuteTool, c.Name),
 		trace.WithSpanKind(trace.SpanKindInternal))
 	start := time.Now()
@@ -493,7 +506,7 @@ func (o *observer) tool(ctx context.Context, c Call, seq int64) (context.Context
 		attrs = append(attrs, metadataAttrs(ctx)...)
 		span.SetAttributes(attrs...)
 	}
-	return ctx, func(res ToolResultPart, pending bool, err error) {
+	return ctx, func(res ToolResultPart, pending bool, err error, cut int) {
 		dur := time.Since(start)
 		if span.IsRecording() {
 			switch {
@@ -501,10 +514,20 @@ func (o *observer) tool(ctx context.Context, c Call, seq int64) (context.Context
 				span.SetAttributes(attrToolPending.Bool(true))
 			case err != nil:
 				span.SetAttributes(semconv.ErrorTypeKey.String(toolErrorType(err)))
+				var pe *toolPanicError
+				if errors.As(err, &pe) {
+					span.SetAttributes(attrPanicLayer.String(pe.layer))
+				}
+				if k := inputErrorKind(err); k != "" {
+					span.SetAttributes(attrToolInputError.String(k))
+				}
 				span.SetStatus(codes.Error, "")
 			default:
 				span.SetAttributes(attrToolResultBytes.Int(len(res.Content)))
 				span.SetStatus(codes.Ok, "")
+			}
+			if cut > 0 && !pending {
+				span.SetAttributes(attrToolTruncated.Int(cut))
 			}
 		}
 		if l := o.logger(); l.Enabled(ctx, slog.LevelDebug) {
@@ -651,10 +674,14 @@ func ctxErrorType(err error) (string, bool) {
 
 // toolErrorType classifies a tool error result for error.type: the
 // ToolError's code when the chain produced one, "timeout" for a
-// timed-out call (the typed error), the context error's name when the
-// run's cancellation reached the handler — the same name the run span
-// reports — and "tool_error" otherwise. The result text never becomes
-// a span attribute (ADR 0016).
+// timed-out call (the typed error), "panic" for a contained panic in
+// the handler or its middleware (the typed error; weft.panic.layer says
+// which), the context error's name when the run's cancellation reached
+// the handler — the same name the run span reports — the error's own
+// ErrorType() string when one in its chain declares it (a convention,
+// like a cancel cause's Kind(): weft/mcp's mcp_transport and
+// mcp_tool_error), and "tool_error" otherwise. The result text never
+// becomes a span attribute (ADR 0016).
 func toolErrorType(err error) string {
 	var te *ToolError
 	if errors.As(err, &te) && te.Code != "" {
@@ -664,8 +691,18 @@ func toolErrorType(err error) string {
 	if errors.As(err, &timeout) {
 		return "timeout"
 	}
+	var pe *toolPanicError
+	if errors.As(err, &pe) {
+		return "panic"
+	}
 	if name, ok := ctxErrorType(err); ok {
 		return name
+	}
+	var typed interface{ ErrorType() string }
+	if errors.As(err, &typed) {
+		if t := typed.ErrorType(); t != "" {
+			return t
+		}
 	}
 	return "tool_error"
 }
@@ -737,6 +774,18 @@ type recorder struct {
 	obs    *observer
 	panics *atomic.Int64
 
+	// truncated holds each call's result-cap cut (call id → bytes) from
+	// its tool goroutine until its ToolFinish is recorded — the
+	// tool_finish record's weft.tool.truncated_bytes. Written before the
+	// ToolFinish emit and read inside it, on the same goroutine; the
+	// mutex orders concurrent calls. Nil until a call is cut.
+	truncMu   sync.Mutex
+	truncated map[string]int
+	// denied counts the calls a resume denied (Deny, or no decision):
+	// they have no span and no event (ADR 0007), so the invoke_agent
+	// span's weft.run.denied is their one carrier.
+	denied atomic.Int64
+
 	// stepModel is the model that answered the step whose StepFinish is
 	// being emitted (callTiming.answered): set by the loop goroutine
 	// right before that emit, read by recordEvent on the same goroutine
@@ -754,6 +803,38 @@ func (r *recorder) captureOn(ctx context.Context) bool {
 		return *r.capture
 	}
 	return r.elog.Enabled(ctx, log.EnabledParameters{EventName: eventNameMessages})
+}
+
+// noteTruncated remembers a call's result-cap cut for its tool_finish
+// record. Nil-safe: execTools may run without a recorder.
+func (r *recorder) noteTruncated(callID string, cut int) {
+	if r == nil {
+		return
+	}
+	r.truncMu.Lock()
+	if r.truncated == nil {
+		r.truncated = map[string]int{}
+	}
+	r.truncated[callID] = cut
+	r.truncMu.Unlock()
+}
+
+// takeTruncated returns and forgets a call's cut, 0 when none.
+func (r *recorder) takeTruncated(callID string) int {
+	r.truncMu.Lock()
+	defer r.truncMu.Unlock()
+	n, ok := r.truncated[callID]
+	if ok {
+		delete(r.truncated, callID)
+	}
+	return n
+}
+
+// noteDenied counts one call a resume denied. Nil-safe.
+func (r *recorder) noteDenied() {
+	if r != nil {
+		r.denied.Add(1)
+	}
 }
 
 // recordEvent reports one event from deliver, after the taps and before
@@ -831,6 +912,9 @@ func (r *recorder) recordEvent(ctx context.Context, ev Event) {
 		attrs = append(attrs, attrToolSeq.Int64(e.Seq), semconv.GenAIToolCallID(e.CallID), semconv.GenAIToolName(e.Name))
 	case ToolFinish:
 		attrs = append(attrs, attrToolSeq.Int64(e.Seq), semconv.GenAIToolCallID(e.CallID), semconv.GenAIToolName(e.Name))
+		if n := r.takeTruncated(e.CallID); n > 0 {
+			attrs = append(attrs, attrToolTruncated.Int(n))
+		}
 	case RunStart:
 		// The linkage a child run reports: the parent's ids from the call
 		// its context carries (CallFromContext is the parent's tool call

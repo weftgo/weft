@@ -176,6 +176,8 @@ details.weft-collapsible[open] > summary::before { content: "\\25BE "; }
 .weft-holes { display: inline-flex; flex-wrap: wrap; gap: 4px; }
 .weft-chip.weft-tag { border: 1px solid var(--weft-line); color: var(--weft-dim); }
 .weft-unp { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--weft-dim); }
+.weft-tag[data-tone=bad] { color: var(--weft-err); }
+.weft-tag[data-tone=cancelled] { color: var(--weft-warn); }
 .weft-note { color: var(--weft-dim); border: 1px dashed var(--weft-line); border-radius: var(--weft-radius);
   padding: 6px 9px; margin-bottom: 8px; }
 .weft-note.weft-warn { color: var(--weft-warn); border-color: var(--weft-warn); }

@@ -28,6 +28,8 @@
   "stop_reason": "tool_calls",
   "stopped_by": "parked",
   "events_emitted": 13,
+  "attempts_retried": 3,
+  "fallbacks": 1,
   "usage": {
     "input_tokens": 40,
     "output_tokens": 20

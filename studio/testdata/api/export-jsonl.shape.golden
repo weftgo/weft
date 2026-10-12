@@ -127,6 +127,7 @@
 <run>.holes[]{}
 <run>.record=string
 <run>.run.agent=string
+<run>.run.attempts_retried=float64
 <run>.run.cache=string
 <run>.run.catalog_hash=string
 <run>.run.children[]
@@ -188,6 +189,7 @@
 <run>.run.event_count=float64
 <run>.run.events_emitted=float64
 <run>.run.experiment_id=string
+<run>.run.fallbacks=float64
 <run>.run.finished=string
 <run>.run.forked_from=string
 <run>.run.holes[]

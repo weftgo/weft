@@ -215,6 +215,9 @@ type RunQuery struct {
 	// ("" any); a value ending in ':' is a prefix ("has_tool_call:"
 	// matches every has_tool_call:<tools> value).
 	StoppedBy string
+	// ErrorType keeps the runs whose RunRow.ErrorType is exactly this
+	// ("" any): max_steps, cancelled, model_error, …
+	ErrorType string
 }
 
 // TraceQuery selects traces for Traces. The zero value lists every
@@ -435,6 +438,19 @@ type RunRow struct {
 	// destination legitimately stores no messages record (contract §5),
 	// so no reader calls that difference lost.
 	EventsEmitted, MessagesEmitted int64
+	// ErrorType is a failed run's kind (U4): the invoke_agent span's
+	// error.type — max_steps, usage_limit, loop_detected,
+	// model_retries_exceeded, model_contract, model_error, … (the
+	// core's closed table, record contract §3) — with the context
+	// errors read as "cancelled" (RunErrorType); "" for a run that did
+	// not fail, a failure whose root carried none, or a run still
+	// going. The larger when several roots differ (both backends).
+	ErrorType string
+	// Problems are the run's problem counters (U4; Problems): failed
+	// attempts, fallbacks, tool errors, denials, truncated results —
+	// derived at ingest from its spans; the log counters are filled on
+	// the run document only.
+	Problems Problems
 }
 
 // RunPage is one Runs result, newest Started first (ties by ID,

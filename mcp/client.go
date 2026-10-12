@@ -29,7 +29,8 @@ var ErrToolError = errors.New("mcp: tool returned an error")
 // carrying the server's text verbatim (errors.Is ErrToolError; an
 // empty one reads ErrToolError's own text); a
 // transport failure is a tool error reading "mcp: <err>". Both are
-// data the model sees, never run errors.
+// data the model sees, never run errors; their execute_tool spans tell
+// them apart by error.type — mcp_tool_error and mcp_transport.
 //
 // Imported tools are ordinary weft tools: register them with New or
 // serve them through ToolSource; Timeout, MaxResultBytes,
@@ -255,7 +256,7 @@ func callHandler(sess *sdk.ClientSession, remoteName string) func(context.Contex
 			// Transport and protocol failures are data too: the tool
 			// failed, the model stops calling it (deep dive ch. 5's
 			// two channels, one boundary).
-			return "", fmt.Errorf("mcp: %w", err)
+			return "", &transportError{err: err}
 		}
 		text := renderContent(res)
 		if res.IsError {
@@ -277,6 +278,23 @@ type remoteError struct{ text string }
 
 func (e *remoteError) Error() string { return e.text }
 func (e *remoteError) Unwrap() error { return ErrToolError }
+
+// ErrorType names the execute_tool span's error.type through core's
+// ErrorType() convention (record contract §3): the server answered and
+// said its tool failed.
+func (e *remoteError) ErrorType() string { return "mcp_tool_error" }
+
+// transportError is a tools/call that did not complete — the
+// connection, the JSON-RPC exchange, a protocol error — reading
+// "mcp: <err>" as before, the cause unwrapped for errors.Is (a
+// cancelled call still reads as the context's error, and core names it
+// so). ErrorType is error.type mcp_transport: the server never
+// answered with a result.
+type transportError struct{ err error }
+
+func (e *transportError) Error() string     { return "mcp: " + e.err.Error() }
+func (e *transportError) Unwrap() error     { return e.err }
+func (e *transportError) ErrorType() string { return "mcp_transport" }
 
 // renderContent is the result rendering, pinned by test (ADR 0015):
 // structuredContent's JSON when the server sends it (the spec says

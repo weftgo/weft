@@ -33,6 +33,7 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("RootBeforeRecords", rootBeforeRecords(open))
 	t.Run("StoppedBy", stoppedBy(open))
 	t.Run("EmittedCounts", emittedCounts(open))
+	t.Run("ErrorTypeAndProblems", errorTypeAndProblems(open))
 	t.Run("Sessions", sessions(open))
 	t.Run("Children", children(open))
 	t.Run("Paging", paging(open))
@@ -720,6 +721,105 @@ func emittedCounts(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			}
 			if got := obsdb.EventsLostReason(r.RunRow, len(page.Gaps)); !strings.HasPrefix(got, c.reason) {
 				t.Errorf("%s reason = %q, want prefix %q", c.id, got, c.reason)
+			}
+		}
+	}
+}
+
+// errorTypeAndProblems pins docs/record-contract.md §6's error_type and
+// problem counters on every backend (U4): error_type is the root's
+// error.type with the context errors read as "cancelled"; the counters
+// come from the run's spans — a failed attempt, a chat span answered by
+// another model, a tool error (DENIED counted as denied instead), a cut
+// result, the root's weft.run.denied — each span once however often it
+// is written (the batch is written twice); none of the new keys is
+// caller metadata; the error_type filter is exact on Runs and Search.
+func errorTypeAndProblems(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		mk := func(run string, n byte, name string, status int, attrs map[string]any) obsdb.Span {
+			attrs["weft.run.id"] = run
+			return obsdb.Span{
+				TraceID: "0102030405060708090a0b0c0d0e0f2" + string(n), SpanID: "0a0b0c0d0e0f070" + string(n),
+				Name: name, Kind: 1, Start: at(0), End: at(time.Second), StatusCode: status,
+				Service: "conf-svc", Attrs: attrs, Resource: map[string]any{"service.name": "conf-svc"},
+			}
+		}
+		root := func(id string, n byte, status int, extra map[string]any) obsdb.Span {
+			s := invokeSpan(id, status, extra)
+			s.TraceID, s.SpanID = "0102030405060708090a0b0c0d0e0f2"+string(n), "0a0b0c0d0e0f080"+string(n)
+			return s
+		}
+		b := obsdb.Batch{Spans: []obsdb.Span{
+			root("p_cancel", '1', 2, map[string]any{"error.type": "context.Canceled"}),
+			root("p_deadline", '2', 2, map[string]any{"error.type": "context.DeadlineExceeded"}),
+			root("p_steps", '3', 2, map[string]any{"error.type": "max_steps"}),
+			root("p_ok", '4', 1, map[string]any{"weft.run.denied": int64(2)}),
+			mk("p_ok", '5', "attempt", 2, map[string]any{"weft.attempt.index": int64(1), "error.type": "model_error"}),
+			mk("p_ok", '6', "attempt", 2, map[string]any{"weft.attempt.index": int64(2), "error.type": "model_error"}),
+			mk("p_ok", '7', "attempt", 1, map[string]any{"weft.attempt.index": int64(3)}),
+			mk("p_ok", '8', "chat a", 1, map[string]any{"gen_ai.operation.name": "chat",
+				"gen_ai.request.model": "primary", "gen_ai.response.model": "backup"}),
+			mk("p_ok", '9', "chat a", 1, map[string]any{"gen_ai.operation.name": "chat",
+				"gen_ai.request.model": "primary", "gen_ai.response.model": "primary"}),
+			mk("p_ok", 'a', "execute_tool boom", 2, map[string]any{"gen_ai.operation.name": "execute_tool",
+				"error.type": "panic", "weft.panic.layer": "middleware"}),
+			mk("p_ok", 'b', "execute_tool rm", 2, map[string]any{"gen_ai.operation.name": "execute_tool", "error.type": "DENIED"}),
+			mk("p_ok", 'c', "execute_tool big", 1, map[string]any{"gen_ai.operation.name": "execute_tool",
+				"weft.tool.truncated_bytes": int64(90)}),
+			mk("p_ok", 'd', "execute_tool strict", 2, map[string]any{"gen_ai.operation.name": "execute_tool",
+				"error.type": "INVALID_INPUT", "weft.tool.input_error": "strict"}),
+		}}
+		for range 2 { // a retried batch: every span stored twice counts once
+			if err := db.Write(ctx(), b); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, c := range []struct {
+			id, errType string
+			p           obsdb.Problems
+		}{
+			{"p_cancel", "cancelled", obsdb.Problems{}},
+			{"p_deadline", "cancelled", obsdb.Problems{}},
+			{"p_steps", "max_steps", obsdb.Problems{}},
+			{"p_ok", "", obsdb.Problems{AttemptsRetried: 2, Fallbacks: 1, ToolErrors: 2, Denied: 3, Truncated: 1}},
+		} {
+			r, err := db.Run(ctx(), c.id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.ErrorType != c.errType || r.Problems != c.p {
+				t.Errorf("%s = error_type %q, problems %+v; want %q, %+v", c.id, r.ErrorType, r.Problems, c.errType, c.p)
+			}
+			for _, k := range []string{"weft.run.denied", "weft.tool.truncated_bytes", "weft.tool.input_error", "weft.panic.layer", "error.type"} {
+				if v, ok := r.Meta[k]; ok {
+					t.Errorf("%s meta carries %s = %q: a contract key, not caller metadata", c.id, k, v)
+				}
+			}
+		}
+		filters := map[string]string{"cancelled": "p_cancel,p_deadline", "max_steps": "p_steps", "context.Canceled": "", "panic": ""}
+		for f, want := range filters {
+			page, err := db.Runs(ctx(), obsdb.RunQuery{ErrorType: f})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := idsOf(page.Runs)
+			sort.Strings(got)
+			if strings.Join(got, ",") != want || page.Total != len(got) {
+				t.Errorf("Runs error_type=%q = %v (total %d), want %s", f, got, page.Total, want)
+			}
+		}
+		if srch, ok := db.(obsdb.Searcher); ok {
+			for f, want := range filters {
+				page, err := srch.Search(ctx(), obsdb.SearchQuery{RunQuery: obsdb.RunQuery{ErrorType: f}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				got := idsOf(page.Runs)
+				sort.Strings(got)
+				if strings.Join(got, ",") != want {
+					t.Errorf("Search error_type=%q = %v, want %s", f, got, want)
+				}
 			}
 		}
 	}

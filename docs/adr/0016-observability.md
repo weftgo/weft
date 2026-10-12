@@ -582,3 +582,26 @@ Readers compare them with what they stored (`docs/record-contract.md`
 emitted 0 with nothing stored is `not_recorded`/`no_logger`. The core
 imports nothing new; the two counters are the recorder's own.
 `TestRunSpanCountsEmittedRecords` pins both, with and without a logger.
+
+## Amendment (2026-10-12 — failure kinds on the tool span; UX plan U4)
+
+`execute_tool`'s `error.type` lumped a handler panic, a middleware
+panic and an MCP transport failure into `tool_error`, and an
+INVALID_INPUT result did not say which rule it broke; a cut result was
+visible only in the text. The tool span now types them — attributes and
+values, never content; the model-visible result text is unchanged
+(`TestToolFailureKinds` pins both):
+
+| where | key | value |
+|---|---|---|
+| `execute_tool` span | `error.type` | gains `panic` (a contained panic — a typed error whose text is the pinned `tool "x" panicked: <v>`) and the error's own `ErrorType()` string when one in its chain declares it (a convention like a cancel cause's `Kind()`; `weft/mcp`'s `mcp_transport` and `mcp_tool_error`), checked after the context errors; `tool_error` stays the default |
+| `execute_tool` span | `weft.panic.layer` | `error.type` `panic`: `handler` or `middleware` — the chain's base marks the handler's span of execution, so a panic that unwinds through it is the handler's |
+| `execute_tool` span | `weft.tool.input_error` | `error.type` `INVALID_INPUT` from the loop's decode: `strict` (an undeclared field under `StrictInput`), `schema`, `syntax`. The code stays `error.type`; the cause is a typed error that reads and matches as `ErrInvalidToolInput` |
+| `execute_tool` span, `tool_finish` record | `weft.tool.truncated_bytes` | the bytes the result cap removed, when it cut |
+| `invoke_agent` span | `weft.run.denied` | at end, when a resume denied calls (`Deny`, or no decision): they have no span and no event, so the root counts them (`TestRunSpanCountsDeniedCalls`) |
+
+The run span's `error.type` table is unchanged; a reader's run row reads
+`context.Canceled` and `context.DeadlineExceeded` as one kind,
+`cancelled` (`docs/record-contract.md` §6). The core imports nothing
+new. The stack of a panic is recorded nowhere yet: it belongs behind a
+development detail switch (`otel.DevDetail`, U23.1), as raw bodies are.

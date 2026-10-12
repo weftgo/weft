@@ -204,13 +204,57 @@ func decodeInput[In any](name string, args json.RawMessage, strict bool) (In, er
 		// deriving it here, on the failure path only, keeps the hot
 		// path free of reflection (schemaFor is what Tool used at
 		// construction, so the two cannot disagree).
-		return in, invalidInput(name, describeDecodeError(err, schemaFor(reflect.TypeFor[In]())))
+		return in, invalidInput(name, describeDecodeError(err, schemaFor(reflect.TypeFor[In]())), decodeErrorKind(err, strict))
 	}
 	var extra json.RawMessage
 	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
-		return in, invalidInput(name, "trailing data after the JSON arguments")
+		return in, invalidInput(name, "trailing data after the JSON arguments", inputErrorSyntax)
 	}
 	return in, nil
+}
+
+// The weft.tool.input_error values (record contract §3, O4): which rule
+// an INVALID_INPUT result broke. The error.type stays the ToolError's
+// code, INVALID_INPUT; this attribute says why, so a reader tells a
+// StrictInput refusal from a schema mismatch without reading the
+// result text.
+const (
+	inputErrorSyntax = "syntax" // not one JSON value: malformed, truncated, or trailing data
+	inputErrorSchema = "schema" // a value of the wrong type or shape for the schema
+	inputErrorStrict = "strict" // an argument field the schema does not declare, under StrictInput
+)
+
+// decodeErrorKind classifies a decode failure for weft.tool.input_error:
+// the rules describeDecodeError words, by the same tests.
+func decodeErrorKind(err error, strict bool) string {
+	var syntaxErr *json.SyntaxError
+	switch {
+	case errors.As(err, &syntaxErr), errors.Is(err, io.ErrUnexpectedEOF), errors.Is(err, io.EOF):
+		return inputErrorSyntax
+	case strict && strings.HasPrefix(err.Error(), "json: unknown field "):
+		return inputErrorStrict
+	}
+	return inputErrorSchema
+}
+
+// inputError is an INVALID_INPUT result's cause, typed so the observer
+// reads which rule failed (weft.tool.input_error) without matching
+// text. It reads and matches as ErrInvalidToolInput — Error is the
+// sentinel's text and Unwrap returns it — so errors.Is, middleware and
+// audit logs see what they saw before the kind existed.
+type inputError struct{ kind string }
+
+func (e *inputError) Error() string { return ErrInvalidToolInput.Error() }
+func (e *inputError) Unwrap() error { return ErrInvalidToolInput }
+
+// inputErrorKind names the weft.tool.input_error of a tool error, ""
+// when it is not an INVALID_INPUT failure the loop decoded.
+func inputErrorKind(err error) string {
+	var ie *inputError
+	if errors.As(err, &ie) {
+		return ie.kind
+	}
+	return ""
 }
 
 // Codes the loop renders its own tool failures with — model-visible
@@ -236,8 +280,10 @@ const (
 // a coded ToolError whose cause is the sentinel, so errors.Is still
 // matches and the result reads `INVALID_INPUT: tool "x": field "days":
 // expected integer, got string`.
-func invalidInput(name, detail string) error {
-	return &ToolError{Code: CodeInvalidInput, Message: fmt.Sprintf("tool %q: %s", name, detail), Err: ErrInvalidToolInput}
+// kind is the rule it broke, carried on the cause (inputError) for the
+// observer's weft.tool.input_error.
+func invalidInput(name, detail, kind string) error {
+	return &ToolError{Code: CodeInvalidInput, Message: fmt.Sprintf("tool %q: %s", name, detail), Err: &inputError{kind: kind}}
 }
 
 // noSuchTool is the ErrNoSuchTool failure, coded the same way.

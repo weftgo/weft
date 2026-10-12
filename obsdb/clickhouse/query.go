@@ -29,7 +29,7 @@ const runColumns = `RunId, ParentRunID, ParentCallID, TraceID, Agent, Provider, 
 	Failed, Err, Steps, Pending, StopReason, InputTokens, OutputTokens,
 	CachedInputTokens, CacheWriteTokens, ReasoningTokens, DeltaCount,
 	InstructionsHash, CatalogHash, RequestCount, Derived, RootEnded,
-	StoppedBy, CancelCause, EventsEmitted, MessagesEmitted`
+	StoppedBy, CancelCause, EventsEmitted, MessagesEmitted, ErrorType, Problems`
 
 // runAggregates is the same list as a GROUP BY RunId select: max for
 // identity strings, flags, usage and last-seen; min for started — the
@@ -48,7 +48,8 @@ const runAggregates = `RunId, max(ParentRunID) AS ParentRunID, max(ParentCallID)
 	max(InstructionsHash) AS InstructionsHash, max(CatalogHash) AS CatalogHash,
 	max(RequestCount) AS RequestCount, max(Derived) AS Derived, max(RootEnded) AS RootEnded,
 	max(StoppedBy) AS StoppedBy, max(CancelCause) AS CancelCause,
-	max(EventsEmitted) AS EventsEmitted, max(MessagesEmitted) AS MessagesEmitted`
+	max(EventsEmitted) AS EventsEmitted, max(MessagesEmitted) AS MessagesEmitted,
+	max(ErrorType) AS ErrorType, groupUniqArrayArray(Problems) AS Problems`
 
 // statusCase is the four-row table in SQL over weft_runs' columns: it
 // must agree with obsdb.DeriveStatus, whose test pins the boundaries —
@@ -176,6 +177,9 @@ func runsInner(q obsdb.RunQuery) (string, []any) {
 	if q.ExperimentID != "" {
 		eq("ExperimentID", q.ExperimentID)
 	}
+	if q.ErrorType != "" {
+		eq("ErrorType", q.ErrorType)
+	}
 	switch {
 	case q.StoppedBy == "":
 	case strings.HasSuffix(q.StoppedBy, ":"):
@@ -270,7 +274,8 @@ func (d *DB) queryRunRows(ctx context.Context, now time.Time, sql string, args .
 			&s.Steps, &s.Pending, &s.StopReason,
 			&s.InTok, &s.OutTok, &s.CachedTok, &s.CacheWriteTok, &s.ReasonTok, &s.DeltaCount,
 			&s.InstructionsHash, &s.CatalogHash, &s.RequestCount, &s.Derived, &s.RootEnded,
-			&s.StoppedBy, &s.CancelCause, &s.EventsEmitted, &s.MessagesEmitted); err != nil {
+			&s.StoppedBy, &s.CancelCause, &s.EventsEmitted, &s.MessagesEmitted,
+			&s.ErrorType, &s.Problems); err != nil {
 			return nil, err
 		}
 		row, err := s.row(now)
@@ -301,6 +306,8 @@ type runScan struct {
 	Derived, RootEnded                                 bool
 	StoppedBy, CancelCause                             string
 	EventsEmitted, MessagesEmitted                     int64
+	ErrorType                                          string
+	Problems                                           []string
 }
 
 func (s *runScan) row(now time.Time) (obsdb.RunRow, error) {
@@ -322,6 +329,7 @@ func (s *runScan) row(now time.Time) (obsdb.RunRow, error) {
 		Derived: s.Derived, RootEnded: s.RootEnded, FinishRecorded: s.FinishedOK,
 		StoppedBy: s.StoppedBy, CancelCause: s.CancelCause,
 		EventsEmitted: s.EventsEmitted, MessagesEmitted: s.MessagesEmitted,
+		ErrorType: s.ErrorType, Problems: obsdb.CountProblems(s.Problems),
 	}
 	if s.Finished != nil {
 		f := s.Finished.UTC()
@@ -1322,6 +1330,10 @@ var contractKeys = []string{
 	// U5-fix: a destination's loss count on run_start / run_finish
 	// (ingest health; migration 0014's restatement of the logs view).
 	"weft.records.dropped",
+	// U4: the run row's problem counters and the call's badges
+	// (migration 0015's restatement of both views).
+	"weft.run.denied", "weft.tool.truncated_bytes", "weft.tool.input_error",
+	"weft.panic.layer",
 }
 
 // unmarshalAttrs decodes a JSON column keeping integral numbers as

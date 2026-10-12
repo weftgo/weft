@@ -3,6 +3,7 @@ package sqlite
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -97,8 +98,8 @@ func TestUpgradeFrom0002(t *testing.T) {
 	if err := raw.QueryRowContext(ctx, `SELECT MAX(version) FROM obsdb_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 12 {
-		t.Errorf("migration max = %d, want 12 (through 0012 the emitted counts)", version)
+	if version != 13 {
+		t.Errorf("migration max = %d, want 13 (through 0013 the problem counters)", version)
 	}
 	var agent, instructions, catalog string
 	var steps, requests int
@@ -298,8 +299,8 @@ func TestUpgradeFrom0006AddsCommandStore(t *testing.T) {
 	if err := db.(*DB).reads.QueryRowContext(ctx, `SELECT MAX(version) FROM obsdb_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 12 {
-		t.Errorf("migration max after the upgrade = %d, want 12 (through 0012 the emitted counts)", version)
+	if version != 13 {
+		t.Errorf("migration max after the upgrade = %d, want 13 (through 0013 the problem counters)", version)
 	}
 }
 
@@ -636,4 +637,139 @@ func TestUpgradeTo0012BackfillsEmitted(t *testing.T) {
 			t.Errorf("%s's meta carries weft.run.events: %v", c.id, run.Meta)
 		}
 	}
+}
+
+// A file at 0012 — a failed run's spans already stored: a cancelled
+// root denying one call, a failed attempt, a chat span answered by
+// another model, a tool error, a policy denial and a cut result — opens
+// through 0013: the backfill fills error_type (context.Canceled read as
+// cancelled) and the problem tokens by the same rules the writer applies
+// (obsdb.SpanProblems: the same spans written after the upgrade give the
+// same set), and leaves a derived run alone (docs/record-contract.md §6,
+// U4).
+func TestMigration0013BackfillsProblems(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "at12.db")
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE obsdb_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	for v := 1; v <= 12; v++ {
+		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx, err := raw.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(string(body)); err != nil {
+			t.Fatalf("migration %d: %v", v, err)
+		}
+		if post := postMigrations[v]; post != nil {
+			if err := post(tx); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO obsdb_migrations (version, applied_at) VALUES (?, '2026-10-01T00:00:00Z')`, v); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	spans := func(run, trace string) []obsdb.Span {
+		at := time.Unix(0, 100).UTC()
+		mk := func(id, name string, status int, attrs map[string]any) obsdb.Span {
+			attrs["weft.run.id"] = run
+			return obsdb.Span{TraceID: trace, SpanID: id, Name: name, Kind: 1, Start: at, End: at.Add(time.Millisecond),
+				StatusCode: status, Service: "svc", Attrs: attrs}
+		}
+		return []obsdb.Span{
+			mk("a1", "invoke_agent a", 2, map[string]any{"gen_ai.operation.name": "invoke_agent",
+				"error.type": "context.Canceled", "weft.run.denied": int64(1)}),
+			mk("a2", "attempt", 2, map[string]any{"weft.attempt.index": int64(1), "error.type": "model_error"}),
+			mk("a3", "attempt", 1, map[string]any{"weft.attempt.index": int64(2)}),
+			mk("a4", "chat primary", 1, map[string]any{"gen_ai.operation.name": "chat",
+				"gen_ai.request.model": "primary", "gen_ai.response.model": "backup"}),
+			mk("a5", "chat primary", 1, map[string]any{"gen_ai.operation.name": "chat",
+				"gen_ai.request.model": "primary", "gen_ai.response.model": "primary"}),
+			mk("a6", "execute_tool boom", 2, map[string]any{"gen_ai.operation.name": "execute_tool", "error.type": "panic"}),
+			mk("a7", "execute_tool rm", 2, map[string]any{"gen_ai.operation.name": "execute_tool", "error.type": "DENIED"}),
+			mk("a8", "execute_tool big", 1, map[string]any{"gen_ai.operation.name": "execute_tool", "weft.tool.truncated_bytes": int64(90)}),
+			mk("a9", "execute_tool fine", 1, map[string]any{"gen_ai.operation.name": "execute_tool", "weft.tool.result_bytes": int64(4)}),
+		}
+	}
+	for _, q := range []string{
+		`INSERT INTO runs (run_id, agent, started_ns, last_seen_ns, root_ended, failed, meta) VALUES
+			('r_old', 'a', 100, 200, 1, 1, '{}')`,
+		`INSERT INTO runs (run_id, agent, started_ns, last_seen_ns, root_ended, derived, meta) VALUES
+			('otel-d', 'a', 100, 200, 1, 1, '{}')`,
+	} {
+		if _, err := raw.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	for _, s := range spans("r_old", "t1") {
+		attrs, _ := json.Marshal(s.Attrs)
+		if _, err := raw.Exec(`INSERT INTO spans (trace_id, span_id, parent_span_id, name, kind, start_ns, end_ns, status_code,
+			status_message, service, run_id, step, tool_seq, session_id, attrs, resource, events)
+			VALUES (?, ?, '', ?, 1, 100, 200, ?, '', 'svc', 'r_old', -1, -1, '', ?, '{}', '[]')`,
+			s.TraceID, s.SpanID, s.Name, s.StatusCode, string(attrs)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("open a 0012 file: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+	if err := db.Write(ctx, obsdb.Batch{Spans: spans("r_new", "t2")}); err != nil {
+		t.Fatal(err)
+	}
+	want := obsdb.Problems{AttemptsRetried: 1, Fallbacks: 1, ToolErrors: 1, Denied: 2, Truncated: 1}
+	stored := map[string]string{}
+	for _, c := range []struct {
+		id, errType string
+		problems    obsdb.Problems
+	}{{"r_old", "cancelled", want}, {"otel-d", "", obsdb.Problems{}}, {"r_new", "cancelled", want}} {
+		run, err := db.Run(ctx, c.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run.ErrorType != c.errType || run.Problems != c.problems {
+			t.Errorf("%s after 0013 = error_type %q, problems %+v; want %q, %+v", c.id, run.ErrorType, run.Problems, c.errType, c.problems)
+		}
+		var tokens string
+		if err := db.(*DB).reads.QueryRowContext(ctx, `SELECT problems FROM runs WHERE run_id = ?`, c.id).Scan(&tokens); err != nil {
+			t.Fatal(err)
+		}
+		stored[c.id] = tokens
+	}
+	// The SQL restatement and the writer agree token for token.
+	if stored["r_old"] != stored["r_new"] {
+		t.Errorf("backfilled problems %s, written %s: the two rule sets disagree", stored["r_old"], stored["r_new"])
+	}
+	page, err := db.Runs(ctx, obsdb.RunQuery{ErrorType: "cancelled"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := idsOf(page.Runs); len(got) != 2 {
+		t.Errorf("error_type=cancelled = %v, want r_old and r_new", got)
+	}
+}
+
+func idsOf(rows []obsdb.RunRow) []string {
+	out := make([]string, len(rows))
+	for i, r := range rows {
+		out[i] = r.ID
+	}
+	return out
 }

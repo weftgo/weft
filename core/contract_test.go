@@ -5196,3 +5196,158 @@ func TestRunSpanCountsEmittedRecords(t *testing.T) {
 		})
 	}
 }
+
+// typedToolErr declares its own error.type through the ErrorType()
+// convention (weft/mcp's transport and isError failures use it).
+type typedToolErr struct{ kind, text string }
+
+func (e *typedToolErr) Error() string     { return e.text }
+func (e *typedToolErr) ErrorType() string { return e.kind }
+
+// TestToolFailureKinds pins O3/O4 (record contract §3, U4): a tool
+// failure's error.type and the attributes beside it, with the
+// model-visible result text unchanged (rule 5). A panic is "panic"
+// with weft.panic.layer naming the handler or the middleware around
+// it; an INVALID_INPUT result keeps its code as error.type and names
+// the rule it broke in weft.tool.input_error (strict under StrictInput,
+// schema for a wrong type, syntax for bytes that are not one JSON
+// value); an error declaring ErrorType() reports it; a result the cap
+// cut carries weft.tool.truncated_bytes on its span and its
+// tool_finish record — the number the marker names.
+func TestToolFailureKinds(t *testing.T) {
+	type nIn struct {
+		N int `json:"n"`
+	}
+	handlerPanics := core.Tool("handler_panics", "Panics.", func(context.Context, struct{}) (string, error) {
+		panic("kaboom")
+	})
+	mwPanics := core.Tool("mw_panics", "Fine, under a middleware that panics.", func(context.Context, struct{}) (string, error) {
+		return "never", nil
+	}, core.WrapTools(func(next core.ToolCaller) core.ToolCaller {
+		return func(ctx context.Context, call core.ToolCallPart) (string, error) {
+			panic("middleware exploded")
+		}
+	}))
+	strict := core.Tool("strict", "Strict input.", func(context.Context, nIn) (string, error) { return "ok", nil }, core.StrictInput())
+	schema := core.Tool("schema", "Typed input.", func(context.Context, nIn) (string, error) { return "ok", nil })
+	syntax := core.Tool("syntax", "Typed input.", func(context.Context, nIn) (string, error) { return "ok", nil })
+	typed := core.Tool("typed", "Declares its kind.", func(context.Context, struct{}) (string, error) {
+		return "", &typedToolErr{kind: "mcp_transport", text: "mcp: connection reset"}
+	})
+	big := core.Tool("big", "Returns too much.", func(context.Context, struct{}) (string, error) {
+		return strings.Repeat("x", 100), nil
+	}, core.MaxResultBytes(10))
+	tp := newRecProvider()
+	lp := newRecLogProvider()
+	agt := core.New(wefttest.Script(
+		wefttest.ToolCalls(
+			wefttest.Call{Name: "handler_panics"},
+			wefttest.Call{Name: "mw_panics"},
+			wefttest.Call{Name: "strict", Args: `{"n":1,"extra":2}`},
+			wefttest.Call{Name: "schema", Args: `{"n":"one"}`},
+			wefttest.Call{Name: "syntax", Args: `{"n":1} {}`},
+			wefttest.Call{Name: "typed"},
+			wefttest.Call{Name: "big"},
+		),
+		wefttest.Say("done"),
+	), core.TracerProvider(tp), core.LoggerProvider(lp), handlerPanics, mwPanics, strict, schema, syntax, typed, big)
+	res, err := agt.Generate(context.Background(), core.Prompt("x"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	results := map[string]string{}
+	for _, m := range res.Messages {
+		for _, p := range m.Content {
+			if r, ok := p.(core.ToolResultPart); ok {
+				results[r.Name] = r.Content
+			}
+		}
+	}
+	for _, c := range []struct {
+		tool, errType, layer, input, text string
+	}{
+		{"handler_panics", "panic", "handler", "", `tool "handler_panics" panicked: kaboom`},
+		{"mw_panics", "panic", "middleware", "", `tool "mw_panics" panicked: middleware exploded`},
+		{"strict", "INVALID_INPUT", "", "strict", `INVALID_INPUT: tool "strict": unknown field "extra": not in the schema`},
+		{"schema", "INVALID_INPUT", "", "schema", ""},
+		{"syntax", "INVALID_INPUT", "", "syntax", `INVALID_INPUT: tool "syntax": trailing data after the JSON arguments`},
+		{"typed", "mcp_transport", "", "", "mcp: connection reset"},
+	} {
+		attrs := tp.find(t, "execute_tool "+c.tool).attrsMap()
+		if got := attrs["error.type"]; got != c.errType {
+			t.Errorf("%s: error.type = %q, want %q", c.tool, got, c.errType)
+		}
+		if got := attrs["weft.panic.layer"]; got != c.layer {
+			t.Errorf("%s: weft.panic.layer = %q, want %q", c.tool, got, c.layer)
+		}
+		if got := attrs["weft.tool.input_error"]; got != c.input {
+			t.Errorf("%s: weft.tool.input_error = %q, want %q", c.tool, got, c.input)
+		}
+		if c.text != "" && results[c.tool] != c.text {
+			t.Errorf("%s: the model sees %q, want %q (model-visible text is a contract)", c.tool, results[c.tool], c.text)
+		}
+	}
+	bigSpan := tp.find(t, "execute_tool big").attrsMap()
+	if bigSpan["weft.tool.truncated_bytes"] != "90" || bigSpan["error.type"] != "" {
+		t.Errorf("big span = truncated %q, error.type %q; want 90, none", bigSpan["weft.tool.truncated_bytes"], bigSpan["error.type"])
+	}
+	if want := strings.Repeat("x", 10) + "\n…[truncated 90 bytes]"; results["big"] != want {
+		t.Errorf("big result = %q, want %q", results["big"], want)
+	}
+	for _, s := range []string{"handler_panics", "strict", "typed"} {
+		if _, ok := tp.find(t, "execute_tool "+s).attrsMap()["weft.tool.truncated_bytes"]; ok {
+			t.Errorf("%s: weft.tool.truncated_bytes set on a result the cap did not cut", s)
+		}
+	}
+	var finishes int
+	for _, r := range lp.ofKind(t, "event") {
+		if r.attr("weft.event.type") != "tool_finish" {
+			continue
+		}
+		finishes++
+		n, ok := r.intAttr("weft.tool.truncated_bytes")
+		switch name := r.attr("gen_ai.tool.name"); {
+		case name == "big" && (!ok || n != 90):
+			t.Errorf("big tool_finish weft.tool.truncated_bytes = %d (%v), want 90", n, ok)
+		case name != "big" && ok:
+			t.Errorf("%s tool_finish carries weft.tool.truncated_bytes %d", name, n)
+		}
+	}
+	if finishes != 7 {
+		t.Errorf("tool_finish records = %d, want 7", finishes)
+	}
+}
+
+// TestRunSpanCountsDeniedCalls pins weft.run.denied (record contract
+// §3, U4): a resume's denied calls — an explicit Deny and a call left
+// undecided — have no span and no event (ADR 0007), so the resumed
+// run's invoke_agent span counts them; a run that denied nothing
+// carries no attribute.
+func TestRunSpanCountsDeniedCalls(t *testing.T) {
+	gated := core.Tool("gated", "Needs approval.", func(context.Context, struct{}) (string, error) {
+		return "ran", nil
+	}, core.RequireApproval())
+	tp := newRecProvider()
+	agt := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "gated", ID: "c1"}, wefttest.Call{Name: "gated", ID: "c2"}),
+		wefttest.Say("ok"),
+	), core.TracerProvider(tp), core.Name("appr"), gated)
+	first, err := agt.Generate(context.Background(), core.Prompt("x"))
+	if err != nil || len(first.Pending) != 2 {
+		t.Fatalf("first run: pending %d, err %v; want 2 parked", len(first.Pending), err)
+	}
+	if _, err := agt.Generate(context.Background(), core.Messages(first.Messages...), core.Deny("c1", "not today")); err != nil {
+		t.Fatal(err)
+	}
+	tp.mu.Lock()
+	var got []string
+	for _, s := range tp.spans {
+		if s.name == "invoke_agent appr" {
+			got = append(got, s.attrsMap()["weft.run.denied"])
+		}
+	}
+	tp.mu.Unlock()
+	if !slices.Equal(got, []string{"", "2"}) {
+		t.Errorf("weft.run.denied per run = %q, want [\"\" \"2\"] (the parked run denied nothing; the resume denied c1 and left c2 undecided)", got)
+	}
+}

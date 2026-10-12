@@ -134,6 +134,7 @@
 .requests.requests[]{}
 .requests{}
 .run.agent=string
+.run.attempts_retried=float64
 .run.cache=string
 .run.catalog_hash=string
 .run.children[]
@@ -195,6 +196,7 @@
 .run.event_count=float64
 .run.events_emitted=float64
 .run.experiment_id=string
+.run.fallbacks=float64
 .run.finished=string
 .run.forked_from=string
 .run.holes[]

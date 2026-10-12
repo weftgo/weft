@@ -2864,3 +2864,98 @@ describe("a resume and an experiment on both surfaces (U6-fix)", () => {
     expect(head!.textContent).toBe(`t5${RESUME}`)
   })
 })
+
+// A failed run's kind and its problems (U4): the Done line's seeded
+// shapes show the same words on both surfaces — the panel's turn chips
+// and the run page's header kind chip and stats strip, lib/error-kind.ts's
+// table — and agentic.chaos's strip names its four failure shapes.
+describe("error kinds and problems on both surfaces (U4)", () => {
+  const shapes: {
+    name: string
+    doc: Partial<RunDoc>
+    kind?: string
+    glyphs: string
+  }[] = [
+    { name: "mw.retry", doc: { attempts_retried: 2 }, glyphs: "↻2" },
+    {
+      name: "rw.flaky-infra",
+      doc: { attempts_retried: 1, fallbacks: 1 },
+      glyphs: "↻1 ⇄",
+    },
+    { name: "appr.deny", doc: { denied: 1 }, glyphs: "✋" },
+    {
+      name: "opt.max-steps",
+      doc: {
+        status: "failed",
+        error_type: "max_steps",
+        stopped_by: "max_steps",
+        err: "weft: run failed at step 1: weft: max steps reached",
+      },
+      kind: "[max_steps]",
+      glyphs: "",
+    },
+    {
+      name: "agentic.chaos",
+      doc: { attempts_retried: 2, fallbacks: 1, tool_errors: 2, denied: 1 },
+      glyphs: "↻2 ⇄ ✗2 ✋",
+    },
+  ]
+  for (const c of shapes)
+    it(`${c.name}: the panel's chips are the run page's chip and strip`, async () => {
+      const fx: Fixture = {
+        doc: c.doc,
+        events: events({ finish: c.doc.status !== "failed" }),
+      }
+      serve(fx, false)
+      const el = await mount(ATTRS)
+      await vi.waitFor(() => expect($(el, ".weft-turn")).toBeTruthy(), {
+        timeout: 5_000,
+      })
+      await vi.waitFor(
+        () =>
+          expect(
+            $(el, '.weft-turn [data-weft-chip="problems"]') ??
+              $(el, '.weft-turn [data-weft-chip="error-type"]')
+          ).toBeTruthy(),
+        { timeout: 5_000 }
+      )
+      const probs = $(el, '.weft-turn [data-weft-chip="problems"]')
+      const kind = $(el, '.weft-turn [data-weft-chip="error-type"]')
+      const panel = {
+        glyphs: probs?.textContent ?? "",
+        labels: probs?.getAttribute("title") ?? "",
+        kind: kind?.textContent ?? undefined,
+      }
+      el.remove()
+      await settle()
+      cleanup()
+      document.body.innerHTML = ""
+      stubBrowser()
+      vi.stubGlobal("scrollTo", vi.fn())
+      StudioEventSource.reset()
+      vi.stubGlobal("EventSource", StudioEventSource)
+      setStudioToken("")
+      serve(fx, true)
+      renderApp(`/runs/${RUN}?view=story`)
+      await waitFor(() =>
+        expect(document.querySelector("[data-header-usage]")).toBeTruthy()
+      )
+      const strip = [...document.querySelectorAll("[data-strip]")]
+      const studio = {
+        glyphs: strip.map((s) => s.textContent!.split(" ")[0]).join(" "),
+        labels: strip.map((s) => s.getAttribute("title")).join("; "),
+        kind:
+          document.querySelector("[data-error-type]")?.textContent ?? undefined,
+      }
+      expect(panel.glyphs).toBe(c.glyphs)
+      expect(panel.kind).toBe(c.kind)
+      expect(studio).toEqual(panel)
+      if (c.name === "agentic.chaos")
+        expect(strip.map((s) => s.getAttribute("data-strip"))).toEqual([
+          "retried",
+          "fallback",
+          "tool_errors",
+          "denied",
+        ])
+    })
+})

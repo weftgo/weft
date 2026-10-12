@@ -314,6 +314,10 @@ var nonMetaAttr = map[string]struct{}{
 	"weft.run.events":              {}, // U5: the run row's events_emitted column
 	"weft.run.messages":            {}, // U5: the run row's messages_emitted column
 	"weft.records.dropped":         {}, // U5-fix: a destination's loss count on run_start/run_finish (ingest health)
+	"weft.run.denied":              {}, // U4: the run row's denied counter (Problems)
+	"weft.tool.truncated_bytes":    {}, // U4: the truncated counter, the call's badge
+	"weft.tool.input_error":        {}, // U4: which input rule an INVALID_INPUT broke
+	"weft.panic.layer":             {}, // U4: a panic's layer, handler or middleware
 	"weft.stop.raw":                {},
 	"weft.model.tool_calls":        {},
 	"weft.tool.approved":           {},

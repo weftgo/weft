@@ -29,6 +29,7 @@ import { UNRUN_CALL_REASON } from "../lib/events"
 import type { Truncation } from "../lib/events"
 import { el } from "./render"
 import { stopChip } from "../lib/stopped-by"
+import { kindChip, problemBadges } from "../lib/error-kind"
 import {
   CACHE_HINT,
   cacheNotReported,
@@ -303,6 +304,20 @@ export function turnChips(
   // What ended the turn (U3.2): the run page's header chip, its words.
   const stop = stopChip(r)
   if (stop) chip(stop.text, stop.title, "stopped-by")
+  // The failed run's kind and its problems (U4): the runs table's
+  // badges, one chip each, lib/error-kind.ts's words.
+  const kind = kindChip(r.error_type)
+  if (kind) {
+    chip(kind.text, kind.title, "error-type")
+    out[out.length - 1].setAttribute("data-tone", kind.tone)
+  }
+  const probs = problemBadges(r)
+  if (probs.length)
+    chip(
+      probs.map((b) => b.glyph).join(" "),
+      probs.map((b) => b.label).join("; "),
+      "problems"
+    )
   // Built by the reader from stock OTel GenAI spans (plan I1.3): the
   // derived badge in the stock_spans words, as Studio's row chip.
   if (isDerived(r)) {

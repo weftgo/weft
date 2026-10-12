@@ -350,7 +350,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	}
 	ctx, parkSet := cfg.resolvePark(ctx)
 	if len(resume) > 0 {
-		results, pending, sub, err := a.resolvePending(ctx, cfg, resume, seq, emit, fetchTools, parkSet)
+		results, pending, sub, err := a.resolvePending(ctx, cfg, resume, seq, emit, fetchTools, parkSet, &records)
 		if err != nil {
 			return fail(0, err)
 		}
@@ -641,7 +641,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			}
 		default:
 			var retried []string
-			rec.Results, pending, sub, retried = a.execTools(ctx, cfg.id, step, tools, calls, seq, emit, false, parallelism, parkSet)
+			rec.Results, pending, sub, retried = a.execTools(ctx, cfg.id, step, tools, calls, seq, emit, false, parallelism, parkSet, &records)
 			for _, name := range retried {
 				state.retries[name]++
 			}
@@ -986,7 +986,11 @@ func (a *Agent) modelInfo() ModelInfo { return InfoOf(a.model) }
 // its child run's events (wrapped in Nested, numbered from this run's
 // counter under emitMu) and usage (the returned per-call map, keyed by
 // call id). The dispatcher otherwise knows nothing about subagents.
-func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*ToolDef, calls []ToolCallPart, seq *atomic.Int64, emit func(Event), approved bool, parallelism int, parkSet *parkRule) (results []ToolResultPart, pending []ToolCallPart, subagents map[string]Usage, retried []string) {
+//
+// rec is the run's recorder, told each call's truncation before its
+// ToolFinish is emitted (the tool_finish record's
+// weft.tool.truncated_bytes); nil records nothing.
+func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*ToolDef, calls []ToolCallPart, seq *atomic.Int64, emit func(Event), approved bool, parallelism int, parkSet *parkRule, rec *recorder) (results []ToolResultPart, pending []ToolCallPart, subagents map[string]Usage, retried []string) {
 	outcomes := make([]ToolResultPart, len(calls))
 	parked := make([]bool, len(calls))
 	sem := make(chan struct{}, parallelism)
@@ -1085,15 +1089,19 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 			callCtx, endTool := a.obs.tool(callCtx, c, startSeq)
 			var retry bool
 			var callErr error
-			outcomes[i], parked[i], retry, callErr = a.callTool(callCtx, call, def, parkSet)
+			var cut int
+			outcomes[i], parked[i], retry, cut, callErr = a.callTool(callCtx, call, def, parkSet)
 			if retry {
 				retryMu.Lock()
 				retried = append(retried, call.Name)
 				retryMu.Unlock()
 			}
-			endTool(outcomes[i], parked[i], callErr)
+			endTool(outcomes[i], parked[i], callErr, cut)
 			if parked[i] {
 				return
+			}
+			if cut > 0 {
+				rec.noteTruncated(call.ID, cut)
 			}
 			ordered(func(s int64) Event {
 				// The late-event rule (ADR 0004): the close rides under
@@ -1135,7 +1143,7 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 // resumed calls is reported as 0: the original index is not recoverable
 // from the transcript, and there is no StepRecord for them (ADR 0007).
 // Audit lines should key on the CallID, not the step.
-func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolCallPart, seq *atomic.Int64, emit func(Event), fetchTools func() ([]*ToolDef, error), parkSet *parkRule) ([]ToolResultPart, []ToolCallPart, map[string]Usage, error) {
+func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolCallPart, seq *atomic.Int64, emit func(Event), fetchTools func() ([]*ToolDef, error), parkSet *parkRule, rec *recorder) ([]ToolResultPart, []ToolCallPart, map[string]Usage, error) {
 	// Resumed calls run before any step exists, so they fetch their own
 	// snapshot — a separate consultation, like CallTool's, through the
 	// run's (possibly narrowed) fetch.
@@ -1149,7 +1157,7 @@ func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolC
 			approved = append(approved, c)
 		}
 	}
-	ran, pending, sub, _ := a.execTools(ctx, cfg.id, 0, tools, approved, seq, emit, true, cfg.effectiveParallelism(a.parallelism), parkSet)
+	ran, pending, sub, _ := a.execTools(ctx, cfg.id, 0, tools, approved, seq, emit, true, cfg.effectiveParallelism(a.parallelism), parkSet, rec)
 	byID := make(map[string]ToolResultPart, len(ran))
 	for _, r := range ran {
 		byID[r.CallID] = r
@@ -1196,6 +1204,9 @@ func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolC
 			IsError: true,
 			Content: deniedResult(reason),
 		})
+		// A denied call has no span and no event (ADR 0007): the run's
+		// root counts it (weft.run.denied).
+		rec.noteDenied()
 	}
 	return results, pending, sub, nil
 }
@@ -1361,7 +1372,7 @@ func (a *Agent) CallTool(ctx context.Context, call ToolCallPart) (string, error)
 	if outer, ok := CallFromContext(ctx); ok {
 		ctx = withCall(ctx, Call{RunID: outer.RunID, Step: outer.Step, CallID: call.ID, Name: call.Name})
 	}
-	return a.chain(def, strict, nil)(ctx, call)
+	return a.chain(def, strict, nil, nil)(ctx, call)
 }
 
 // chain builds the tool-call chain for one call: agent middleware
@@ -1370,7 +1381,12 @@ func (a *Agent) CallTool(ctx context.Context, call ToolCallPart) (string, error)
 // RequireApproval, decodes, and runs the handler. def is nil for an
 // unknown tool — the chain still runs, so Allow/Audit see the attempt,
 // and the base returns the NO_SUCH_TOOL error.
-func (a *Agent) chain(def *ToolDef, strict bool, parkSet *parkRule) ToolCaller {
+//
+// inHandler, when not nil, is set while the handler itself runs: a
+// panic that unwinds with it still set came from the handler, one that
+// unwinds with it clear from the middleware around it (the observer's
+// weft.panic.layer; nothing else reads it).
+func (a *Agent) chain(def *ToolDef, strict bool, parkSet *parkRule, inHandler *bool) ToolCaller {
 	base := func(ctx context.Context, call ToolCallPart) (string, error) {
 		if def == nil {
 			return "", noSuchTool(call.Name)
@@ -1384,7 +1400,13 @@ func (a *Agent) chain(def *ToolDef, strict bool, parkSet *parkRule) ToolCaller {
 				return "", fmt.Errorf("%w: tool %q", ErrApprovalRequired, call.Name)
 			}
 		}
-		return def.invoke(ctx, call.Args, strict)
+		if inHandler == nil {
+			return def.invoke(ctx, call.Args, strict)
+		}
+		*inHandler = true
+		out, err := def.invoke(ctx, call.Args, strict)
+		*inHandler = false
+		return out, err
 	}
 	c := base
 	if def != nil {
@@ -1410,7 +1432,10 @@ func (a *Agent) chain(def *ToolDef, strict bool, parkSet *parkRule) ToolCaller {
 // folded into the result's text for the model, but typed for the
 // observer's error.type (ADR 0016) — and is nil on success and on a
 // parked call's pending report.
-func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef, parkSet *parkRule) (res ToolResultPart, pending, retry bool, err error) {
+//
+// cut is the bytes the result cap removed from the content (0 when it
+// cut nothing): the observer's weft.tool.truncated_bytes.
+func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef, parkSet *parkRule) (res ToolResultPart, pending, retry bool, cut int, err error) {
 	res = ToolResultPart{CallID: call.ID, Name: call.Name}
 	resultCap := a.resultCap
 	timeout := a.toolTimeout
@@ -1424,18 +1449,21 @@ func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef, p
 		}
 		strict = strict || def.strict
 	}
-	defer func() { res.Content = capResult(res.Content, resultCap) }()
+	defer func() { res.Content, cut = capResultN(res.Content, resultCap) }()
 
-	fn := a.chain(def, strict, parkSet)
+	// inHandler belongs to this call's chain alone: the goroutine that
+	// runs the chain writes it and the same goroutine's recover reads it.
+	inHandler := new(bool)
+	fn := a.chain(def, strict, parkSet, inHandler)
 	var out string
 	if timeout <= 0 {
-		out, err = invokeContained(ctx, fn, call)
+		out, err = invokeContained(ctx, fn, call, inHandler)
 	} else {
-		out, err = invokeWithTimeout(ctx, fn, call, timeout)
+		out, err = invokeWithTimeout(ctx, fn, call, timeout, inHandler)
 	}
 	if err != nil {
 		if errors.Is(err, ErrApprovalRequired) {
-			return res, true, false, nil
+			return res, true, false, 0, nil
 		}
 		res.IsError = true
 		res.Content = err.Error()
@@ -1444,12 +1472,12 @@ func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef, p
 		// handler's (the chain's outcome is what the loop sees).
 		var te *ToolError
 		if errors.As(err, &te) && te.Code == CodeRetry {
-			return res, false, true, err
+			return res, false, true, 0, err
 		}
-		return res, false, false, err
+		return res, false, false, 0, err
 	}
 	res.Content = out
-	return res, false, false, nil
+	return res, false, false, 0, nil
 }
 
 // toolTimeoutError is a per-call timeout, typed so the observer can
@@ -1464,13 +1492,41 @@ func (e *toolTimeoutError) Error() string {
 	return fmt.Sprintf("tool %q timed out after %s", e.name, e.d)
 }
 
+// toolPanicError is a contained tool panic, typed so the observer
+// classifies it as error.type "panic" with the layer it came from
+// (weft.panic.layer: "handler" or "middleware") without matching text;
+// Error preserves the pinned model-visible string (ADR 0002). It wraps
+// nothing: the panic value is reported, not unwrapped, exactly as the
+// untyped error before it.
+type toolPanicError struct {
+	name  string
+	value any
+	layer string
+}
+
+func (e *toolPanicError) Error() string {
+	return fmt.Sprintf("tool %q panicked: %v", e.name, e.value)
+}
+
+// The weft.panic.layer values.
+const (
+	panicLayerHandler    = "handler"
+	panicLayerMiddleware = "middleware"
+)
+
 // invokeContained runs the chain, turning a panic — in the handler or
 // in middleware — into an error. Containment sits outside the chain by
-// design: no middleware can turn a panic into a run failure.
-func invokeContained(ctx context.Context, fn ToolCaller, call ToolCallPart) (out string, err error) {
+// design: no middleware can turn a panic into a run failure. inHandler
+// is the chain's handler mark (chain): set when the panic unwound
+// through the handler; nil reads as middleware.
+func invokeContained(ctx context.Context, fn ToolCaller, call ToolCallPart, inHandler *bool) (out string, err error) {
 	defer func() {
 		if p := recover(); p != nil {
-			err = fmt.Errorf("tool %q panicked: %v", call.Name, p)
+			layer := panicLayerMiddleware
+			if inHandler != nil && *inHandler {
+				layer = panicLayerHandler
+			}
+			err = &toolPanicError{name: call.Name, value: p, layer: layer}
 		}
 	}()
 	return fn(ctx, call)
@@ -1481,7 +1537,7 @@ func invokeContained(ctx context.Context, fn ToolCaller, call ToolCallPart) (out
 // passes, the call is recorded as timed out and the handler's goroutine
 // is abandoned — a hung tool must not hang the run. A cancellation of
 // the run's own ctx is reported as that cancellation, not as a timeout.
-func invokeWithTimeout(ctx context.Context, fn ToolCaller, call ToolCallPart, timeout time.Duration) (string, error) {
+func invokeWithTimeout(ctx context.Context, fn ToolCaller, call ToolCallPart, timeout time.Duration, inHandler *bool) (string, error) {
 	tctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	type outcome struct {
@@ -1490,7 +1546,7 @@ func invokeWithTimeout(ctx context.Context, fn ToolCaller, call ToolCallPart, ti
 	}
 	done := make(chan outcome, 1)
 	go func() {
-		out, err := invokeContained(tctx, fn, call)
+		out, err := invokeContained(tctx, fn, call, inHandler)
 		done <- outcome{out, err}
 	}()
 	timedOut := func() error {
@@ -1518,12 +1574,19 @@ func invokeWithTimeout(ctx context.Context, fn ToolCaller, call ToolCallPart, ti
 // not receive, so the model knows the output is partial and how much of
 // it is missing rather than silently receiving a prefix.
 func capResult(s string, resultCap int) string {
+	out, _ := capResultN(s, resultCap)
+	return out
+}
+
+// capResultN is capResult reporting the bytes it removed (0 when it cut
+// nothing) — the number its marker names, weft.tool.truncated_bytes.
+func capResultN(s string, resultCap int) (string, int) {
 	if resultCap <= 0 || len(s) <= resultCap {
-		return s
+		return s, 0
 	}
 	cut := resultCap
 	for cut > 0 && !utf8.RuneStart(s[cut]) {
 		cut--
 	}
-	return s[:cut] + fmt.Sprintf("\n…[truncated %d bytes]", len(s)-cut)
+	return s[:cut] + fmt.Sprintf("\n…[truncated %d bytes]", len(s)-cut), len(s) - cut
 }

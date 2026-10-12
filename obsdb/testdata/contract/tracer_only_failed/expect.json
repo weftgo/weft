@@ -30,6 +30,7 @@
       "request_count": 0,
       "events_emitted": 0,
       "messages_emitted": 0,
+      "error_type": "max_steps",
       "chat": [
         {
           "step": 0,

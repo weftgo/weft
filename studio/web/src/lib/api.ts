@@ -112,6 +112,22 @@ export interface RunRow extends CostFields, DelegatedCostFields {
    * before U5, or nothing emitted) and from an older Studio. */
   events_emitted?: number
   messages_emitted?: number
+  /** A failed run's kind (U4): the root's error.type, the context
+   * errors read as "cancelled" — lib/error-kind.ts words it. Absent
+   * when the run did not fail, and from an older Studio. */
+  error_type?: string
+  /** The problem counters (U4, docs/record-contract.md §6), each
+   * absent when 0: failed model attempts, calls a fallback answered,
+   * tool errors, denials, results the cap cut, repaired calls; the app's
+   * WARN / ERROR log lines on the run document only. */
+  attempts_retried?: number
+  fallbacks?: number
+  tool_errors?: number
+  denied?: number
+  truncated?: number
+  repaired?: number
+  log_warn?: number
+  log_error?: number
   usage: Usage
   event_count: number
   message_count: number
@@ -894,6 +910,8 @@ export interface RunsFilters {
   /** What ended the run (U3.2): exact, or a prefix when it ends in ":"
    * (has_tool_call: every tool-call stop). */
   stopped_by?: string
+  /** A failed run's kind (U4), exact: max_steps, cancelled, … */
+  error_type?: string
 }
 
 export function runsSearch(filters: RunsFilters): string {
@@ -914,6 +932,7 @@ export function runsSearch(filters: RunsFilters): string {
   if (filters.limit) params.set("limit", String(filters.limit))
   if (filters.experiment_id) params.set("experiment_id", filters.experiment_id)
   if (filters.stopped_by) params.set("stopped_by", filters.stopped_by)
+  if (filters.error_type) params.set("error_type", filters.error_type)
   const qs = params.toString()
   return qs ? `?${qs}` : ""
 }

@@ -62,6 +62,7 @@ import {
   stopStep,
 } from "@/lib/stopped-by"
 import { Button, buttonVariants } from "@/components/ui/button"
+import { KindChip, ProblemStrip } from "@/components/studio/problem-badges"
 
 /** StoppedByChip is what ended the run (U3.2), in lib/stopped-by.ts's
  * words, linking to the step where it fired; on every status. */
@@ -445,6 +446,7 @@ export function RunHeader({
             {SETTLING_WORD}
           </span>
         ) : null}
+        <KindChip errorType={doc.error_type} />
         <StoppedByChip doc={doc} />
         <Badge variant="outline" className="font-mono text-[11px] font-normal">
           {doc.model.provider}/{doc.model.name}
@@ -467,6 +469,7 @@ export function RunHeader({
         <span>
           {doc.steps} {doc.steps === 1 ? "step" : "steps"}
         </span>
+        <ProblemStrip row={doc} />
         {/* A derived run has no events to count: its derived badge
             (below) says so — "0 events" would read as lost. */}
         {isDerived(doc) ? null : (

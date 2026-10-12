@@ -30,6 +30,8 @@
       "delta_count": 1,
       "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
       "request_count": 1,
+      "events_emitted": 4,
+      "messages_emitted": 0,
       "chat": [
         {
           "step": 0,
@@ -77,6 +79,8 @@
       "delta_count": 1,
       "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
       "request_count": 1,
+      "events_emitted": 4,
+      "messages_emitted": 0,
       "chat": [
         {
           "step": 0,

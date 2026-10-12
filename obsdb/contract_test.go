@@ -35,6 +35,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/mw"
 	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/obsdb"
 	"github.com/weftgo/weft/obsdb/clickhouse"
@@ -139,14 +140,30 @@ type contractRun struct {
 	RequestCount     int64             `json:"request_count"`
 	// EventsEmitted / MessagesEmitted are the root span's weft.run.events
 	// / weft.run.messages (§3, §6; U5): 0 where it carried none.
-	EventsEmitted   int64         `json:"events_emitted"`
-	MessagesEmitted int64         `json:"messages_emitted"`
-	Chat            []contractLLM `json:"chat"`
-	Tools           []contractRPC `json:"tools"`
-	Holes           []obsdb.Hole  `json:"holes"`
+	EventsEmitted   int64 `json:"events_emitted"`
+	MessagesEmitted int64 `json:"messages_emitted"`
+	// ErrorType is a failed run's kind (§6, U4): the root's error.type,
+	// the context errors read as cancelled; Problems its problem
+	// counters, omitted when every one is 0.
+	ErrorType string            `json:"error_type,omitempty"`
+	Problems  *contractProblems `json:"problems,omitempty"`
+	Chat      []contractLLM     `json:"chat"`
+	Tools     []contractRPC     `json:"tools"`
+	Holes     []obsdb.Hole      `json:"holes"`
 	// HoleCauses names the cause of each run-level hole the row's rules
 	// decide (§7: LostRecordsHole, TailLostHole), "<hole>:<cause>".
 	HoleCauses []string `json:"hole_causes,omitempty"`
+}
+
+// contractProblems is obsdb.Problems' ingest-time counters (§6, U4);
+// the log counters are read time, on the run document, so not here.
+type contractProblems struct {
+	AttemptsRetried int64 `json:"attempts_retried,omitempty"`
+	Fallbacks       int64 `json:"fallbacks,omitempty"`
+	ToolErrors      int64 `json:"tool_errors,omitempty"`
+	Denied          int64 `json:"denied,omitempty"`
+	Truncated       int64 `json:"truncated,omitempty"`
+	Repaired        int64 `json:"repaired,omitempty"`
 }
 
 // contractLLM is one chat span: one model call.
@@ -167,6 +184,11 @@ type contractRPC struct {
 	Step   int    `json:"step"`
 	Seq    int64  `json:"seq"`
 	Status string `json:"status"`
+	// The failure's kind and the attributes beside it (§3, U4).
+	ErrorType      string `json:"error_type,omitempty"`
+	PanicLayer     string `json:"panic_layer,omitempty"`
+	InputError     string `json:"input_error,omitempty"`
+	TruncatedBytes int64  `json:"truncated_bytes,omitempty"`
 }
 
 func TestContract(t *testing.T) {
@@ -321,7 +343,12 @@ func observeRuns(t *testing.T, db obsdb.DB) []contractRun {
 			InstructionsHash: r.InstructionsHash, CatalogHash: r.CatalogHash,
 			RequestCount:  r.RequestCount,
 			EventsEmitted: r.EventsEmitted, MessagesEmitted: r.MessagesEmitted,
-			Chat: []contractLLM{}, Tools: []contractRPC{},
+			ErrorType: r.ErrorType,
+			Chat:      []contractLLM{}, Tools: []contractRPC{},
+		}
+		if p := r.Problems; p.Any() {
+			c.Problems = &contractProblems{AttemptsRetried: p.AttemptsRetried, Fallbacks: p.Fallbacks,
+				ToolErrors: p.ToolErrors, Denied: p.Denied, Truncated: p.Truncated, Repaired: p.Repaired}
 		}
 		if r.Finished != nil {
 			c.Finished = stamp(*r.Finished)
@@ -382,6 +409,11 @@ func spanSteps(spans []obsdb.Span) ([]contractLLM, []contractRPC) {
 				Step:   int(intAttr(s.Attrs, "weft.step.index", -1)),
 				Seq:    intAttr(s.Attrs, "weft.tool.seq", -1),
 				Status: statusWord(s.StatusCode),
+
+				ErrorType:      strAttr(s.Attrs, "error.type"),
+				PanicLayer:     strAttr(s.Attrs, "weft.panic.layer"),
+				InputError:     strAttr(s.Attrs, "weft.tool.input_error"),
+				TruncatedBytes: intAttr(s.Attrs, "weft.tool.truncated_bytes", 0),
 			})
 		}
 	}
@@ -1641,8 +1673,84 @@ func genCases() []genCase {
 				return ids
 			},
 		},
+		{
+			name: "tool_problems",
+			desc: "a run whose tool calls fail four ways, one per step: a handler panic (error.type panic, weft.panic.layer handler), a StrictInput refusal (error.type INVALID_INPUT, weft.tool.input_error strict), a result the cap cut (status ok, weft.tool.truncated_bytes 90) and an mw.Allow refusal (error.type DENIED); the run succeeds with problems tool_errors 2, truncated 1, denied 1",
+			dest: content,
+			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+				boom := core.Tool("charge_card", "Charge a card.", func(context.Context, lookupIn) (string, error) {
+					panic("card service exploded")
+				})
+				strict := core.Tool("lookup_order", "Look up an order by ID.", func(_ context.Context, in lookupIn) (string, error) {
+					return "order " + in.OrderID + ": shipped", nil
+				}, core.StrictInput())
+				big := core.Tool("order_history", "An order's history.", func(context.Context, lookupIn) (string, error) {
+					return strings.Repeat("event; ", 15), nil
+				}, core.MaxResultBytes(15))
+				rm := core.Tool("delete_order", "Delete an order.", func(context.Context, lookupIn) (string, error) {
+					return "deleted", nil
+				})
+				agt := pipelineAgent(p, "support", wefttest.Script(
+					wefttest.ToolCalls(wefttest.Call{Name: "charge_card", Args: `{"order_id":"1234"}`}),
+					wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"1234","verbose":true}`}),
+					wefttest.ToolCalls(wefttest.Call{Name: "order_history", Args: `{"order_id":"1234"}`}),
+					wefttest.ToolCalls(wefttest.Call{Name: "delete_order", Args: `{"order_id":"1234"}`}),
+					wefttest.Say("I could not finish that.")),
+					core.Instructions("You are a support agent."), core.MaxSteps(5), boom, strict, big, rm,
+					core.WrapTools(mw.Allow(func(c core.Call) bool { return c.Name != "delete_order" })))
+				return []string{mustRun(t, ctx, agt, core.Prompt("Charge, check and clean up order 1234.")).ID}
+			},
+		},
+		{
+			name: "retry_fallback",
+			desc: "two runs through model middleware: mw.Retry over a model whose first two requests fail (two attempt spans Error, the third Ok — problems attempts_retried 2), and mw.Fallback over a model that fails once, the backup answering (the chat span asked script, answered backup — problems attempts_retried 1, fallbacks 1)",
+			dest: content,
+			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+				flaky := wefttest.Script(wefttest.Fail(core.ErrStreamIdle), wefttest.Fail(core.ErrStreamIdle),
+					wefttest.Say("Hello! How can I help?"))
+				retried := pipelineAgent(p, "support", flaky, core.Instructions("You are a support agent."),
+					core.WrapModel(mw.Retry(mw.MaxRetries(2), mw.BaseDelay(time.Millisecond))))
+				down := wefttest.Script(wefttest.Fail(core.ErrStreamIdle))
+				backup := namedModel{wefttest.Script(wefttest.Say("Hello from the backup.")), core.ModelInfo{Provider: "wefttest", Name: "backup"}}
+				fell := pipelineAgent(p, "support", down, core.Instructions("You are a support agent."),
+					core.WrapModel(mw.Fallback(backup)))
+				return []string{
+					mustRun(t, ctx, retried, core.Prompt("hi")).ID,
+					mustRun(t, ctx, fell, core.Prompt("hi")).ID,
+				}
+			},
+		},
+		{
+			name: "approval_denied",
+			desc: "a RequireApproval call parked, then the resume denies it (core.Deny): the parked run reads pending 1; the resumed run has no execute_tool span for the denied call (ADR 0007) and its invoke_agent span carries weft.run.denied 1 — problems denied 1",
+			dest: content,
+			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+				refund := core.Tool("refund_order", "Refund an order.", func(_ context.Context, in lookupIn) (string, error) {
+					return "refunded " + in.OrderID, nil
+				}, core.RequireApproval())
+				agt := pipelineAgent(p, "support", wefttest.Script(
+					wefttest.ToolCalls(wefttest.Call{Name: "refund_order", Args: `{"order_id":"1234"}`}),
+					wefttest.Say("The refund was declined.")),
+					core.Instructions("You are a support agent."), refund)
+				first := mustRun(t, ctx, agt, core.Prompt("Refund order 1234."))
+				if len(first.Pending) != 1 {
+					t.Fatalf("want one pending call, got %d", len(first.Pending))
+				}
+				second := mustRun(t, ctx, agt, core.Messages(first.Messages...), core.Deny(first.Pending[0].ID, "over the limit"))
+				return []string{first.ID, second.ID}
+			},
+		},
 	}
 }
+
+// namedModel gives a scripted model its own identity: the fallback's
+// backup must answer under a name other than the primary's.
+type namedModel struct {
+	core.Model
+	info core.ModelInfo
+}
+
+func (m namedModel) Info() core.ModelInfo { return m.info }
 
 // tracerOnly runs the tool_calls run (failing at MaxSteps(1) when
 // failed) on an agent wired to the pipeline's tracer and no logger:

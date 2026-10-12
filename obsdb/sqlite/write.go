@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/weftgo/weft/core"
@@ -438,9 +439,15 @@ type runUpdate struct {
 	// ClickHouse's SimpleAggregateFunction(max).
 	eventsEmitted   int64
 	messagesEmitted int64
-	eventCount      int64
-	deltaCount      int64
-	messageCount    int64
+	// errorType (contract §6, U4): the root's error.type as the row
+	// reads it (obsdb.RunErrorType), the larger when they differ;
+	// problems the batch's problem tokens (obsdb.SpanProblems), merged
+	// into runs.problems as a set.
+	errorType    string
+	problems     []string
+	eventCount   int64
+	deltaCount   int64
+	messageCount int64
 	// ADR 0028 §10: instructions_hash (run_start or the invoke_agent
 	// span), catalog_hash (request index 0) and request_count (the
 	// request high-water mark).
@@ -520,6 +527,7 @@ func (u *runUpdate) applySpan(s obsdb.Span, w obsdb.Weft) {
 	if v := attrString(s.Attrs, "weft.manifest.hash"); v != "" && u.manifestHash == "" {
 		u.manifestHash = v
 	}
+	u.problems = append(u.problems, obsdb.SpanProblems(s)...)
 	if !isInvokeAgent(s) {
 		return
 	}
@@ -585,6 +593,7 @@ func (u *runUpdate) applySpan(s obsdb.Span, w obsdb.Weft) {
 			u.errText = s.StatusMessage
 		}
 	}
+	u.errorType = maxString(u.errorType, obsdb.RunErrorType(attrString(s.Attrs, "error.type")))
 	u.seeInstructions(s.Attrs)
 	if p, ok := s.Attrs["gen_ai.provider.name"].(string); ok && p != "" {
 		u.provider = p
@@ -785,6 +794,7 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 		experiment, forked, meta    string
 		err, stopReason             string
 		stoppedBy, cancelCause      string
+		errorType, problems         string
 		steps, pending              int
 		inTok, outTok               int64
 		cachedTok, cacheWrite       int64
@@ -793,7 +803,7 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 	err := tx.QueryRowContext(ctx, `SELECT started_ns, last_seen_ns, finished_ns, finished_ok, failed, root_ended,
 		parent_run_id, parent_call_id, trace_id, agent, provider, model, manifest_hash, weft_version,
 		service, session_id, public_id, turn, playground, experiment_id, forked_from, meta, err,
-		steps, pending, stop_reason, stopped_by, cancel_cause,
+		steps, pending, stop_reason, stopped_by, cancel_cause, error_type, problems,
 		input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens
 		FROM runs WHERE run_id = ?`, runID).
 		Scan(&ex.started, &ex.lastSeen, &ex.finished, &ex.finishedOK, &ex.failed, &ex.rootEnded,
@@ -801,6 +811,7 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 			&ex.manifest, &ex.version, &ex.service, &ex.sessionID, &ex.publicID, &ex.turn,
 			&ex.playground, &ex.experiment, &ex.forked, &ex.meta, &ex.err,
 			&ex.steps, &ex.pending, &ex.stopReason, &ex.stoppedBy, &ex.cancelCause,
+			&ex.errorType, &ex.problems,
 			&ex.inTok, &ex.outTok, &ex.cachedTok, &ex.cacheWrite, &ex.reasoningTok)
 	switch {
 	case err == sql.ErrNoRows:
@@ -826,8 +837,9 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 			 steps, pending, stop_reason, stopped_by, cancel_cause,
 			 input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens,
 			 event_count, delta_count, message_count,
-			 instructions_hash, catalog_hash, request_count, events_emitted, messages_emitted)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			 instructions_hash, catalog_hash, request_count, events_emitted, messages_emitted,
+			 error_type, problems)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			runID, u.parentRunID, u.parentCallID, u.traceID, u.agent, u.provider, u.model,
 			u.manifestHash, u.weftVersion, u.service, u.sessionID, u.publicID, u.turn,
 			boolInt(u.playground), u.experimentID, u.forkedFrom, meta,
@@ -836,7 +848,8 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 			u.usage.InputTokens, u.usage.OutputTokens, u.usage.CachedInputTokens,
 			u.usage.CacheWriteTokens, u.usage.ReasoningTokens,
 			u.eventCount, u.deltaCount, u.messageCount,
-			u.instructionsHash, u.catalogHash, u.requestCount, u.eventsEmitted, u.messagesEmitted)
+			u.instructionsHash, u.catalogHash, u.requestCount, u.eventsEmitted, u.messagesEmitted,
+			u.errorType, mergeProblems("", u.problems))
 		return err
 	case err != nil:
 		return err
@@ -884,7 +897,8 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 		instructions_hash = MAX(instructions_hash, ?),
 		catalog_hash = CASE WHEN catalog_hash = '' THEN ? ELSE catalog_hash END,
 		request_count = MAX(request_count, ?),
-		events_emitted = MAX(events_emitted, ?), messages_emitted = MAX(messages_emitted, ?)
+		events_emitted = MAX(events_emitted, ?), messages_emitted = MAX(messages_emitted, ?),
+		error_type = ?, problems = ?
 		WHERE run_id = ?`,
 		coalesce(ex.parentRun, u.parentRunID), coalesce(ex.parentC, u.parentCallID),
 		coalesce(ex.traceID, u.traceID), coalesce(ex.agent, u.agent),
@@ -902,8 +916,31 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 		u.eventCount, u.deltaCount, u.messageCount,
 		u.instructionsHash, u.catalogHash, u.requestCount,
 		u.eventsEmitted, u.messagesEmitted,
+		maxString(ex.errorType, u.errorType), mergeProblems(ex.problems, u.problems),
 		runID)
 	return err
+}
+
+// mergeProblems is runs.problems after a batch (contract §6, U4): the
+// stored JSON array's tokens and the batch's, as one sorted set — so a
+// span stored twice, or a retried batch, adds nothing. A malformed
+// stored value is replaced by the batch's set.
+func mergeProblems(stored string, add []string) string {
+	var set []string
+	if stored != "" {
+		_ = json.Unmarshal([]byte(stored), &set)
+	}
+	if len(add) == 0 && stored != "" && set != nil {
+		return stored
+	}
+	set = append(set, add...)
+	slices.Sort(set)
+	set = slices.Compact(set)
+	if set == nil {
+		set = []string{}
+	}
+	b, _ := json.Marshal(set)
+	return string(b)
 }
 
 func boolInt(b bool) int {

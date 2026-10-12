@@ -28,8 +28,8 @@ func TestMigrationPinsExporterVersion(t *testing.T) {
 	if !strings.Contains(string(body), pinnedExporterVersion) {
 		t.Errorf("migration 0001 does not name the pinned exporter version %s", pinnedExporterVersion)
 	}
-	if highestMigration() != 14 {
-		t.Errorf("highest migration = %d, want 14 (0001 init, 0002 experiments, 0003 status spelling, 0004 request record, 0005 raw record, 0006 experiment command, 0007 the experiment index, 0008 the command store, 0009 the derived flag, 0010 root ended, 0011 stopped by, 0012 the root's version, 0013 the emitted counts, 0014 records.dropped out of meta)", highestMigration())
+	if highestMigration() != 15 {
+		t.Errorf("highest migration = %d, want 15 (0001 init, 0002 experiments, 0003 status spelling, 0004 request record, 0005 raw record, 0006 experiment command, 0007 the experiment index, 0008 the command store, 0009 the derived flag, 0010 root ended, 0011 stopped by, 0012 the root's version, 0013 the emitted counts, 0014 records.dropped out of meta, 0015 the problem counters)", highestMigration())
 	}
 }
 
@@ -416,18 +416,22 @@ func TestRunsInnerFiltersAfterGrouping(t *testing.T) {
 // tuple gaining weft.raw.index on the way; 0012 the traces view again
 // with the same set; 0013 (U5) the traces view again with the two
 // emitted counts — span attributes, so the logs view keeps 0011's; 0014
-// (U5U7-fix) the logs view with the whole set, weft.records.dropped last
-// (droppedKeys) — a record attribute, so the traces view keeps 0013's.
+// (U5U7-fix) the logs view with the set through weft.records.dropped
+// (droppedKeys) — a record attribute, so the traces view keeps 0013's;
+// 0015 (U4) both views with the whole set, the four problem keys
+// (problemKeys) appended.
 const (
 	adr0028Keys   = 12 + 4 + 1 + 10
 	rawKeys       = 1
 	stoppedByKeys = 2
 	emittedKeys   = 2
 	droppedKeys   = 1
+	problemKeys   = 4
 )
 
 func TestMigrationContractTuple(t *testing.T) {
-	at0013 := contractKeys[:len(contractKeys)-droppedKeys]
+	at0014 := contractKeys[:len(contractKeys)-problemKeys]
+	at0013 := at0014[:len(at0014)-droppedKeys]
 	at0011 := at0013[:len(at0013)-emittedKeys]
 	at0005 := at0011[:len(at0011)-stoppedByKeys]
 	at0004 := at0005[:len(at0005)-rawKeys]
@@ -435,7 +439,7 @@ func TestMigrationContractTuple(t *testing.T) {
 	for _, c := range []struct {
 		version, tuples int
 		keys            []string
-	}{{1, 2, before}, {3, 1, before}, {4, 2, at0004}, {5, 1, at0005}, {10, 1, at0004}, {11, 2, at0011}, {12, 1, at0011}, {13, 1, at0013}, {14, 1, contractKeys}} {
+	}{{1, 2, before}, {3, 1, before}, {4, 2, at0004}, {5, 1, at0005}, {10, 1, at0004}, {11, 2, at0011}, {12, 1, at0011}, {13, 1, at0013}, {14, 1, at0014}, {15, 2, contractKeys}} {
 		body, err := migrationsFS.ReadFile("migrations/" + migrations[c.version])
 		if err != nil {
 			t.Fatal(err)
@@ -728,6 +732,62 @@ func TestContractKeysCoverNonMeta(t *testing.T) {
 			continue
 		}
 		t.Errorf("MetaOf excludes %q but contractKeys lacks it: ClickHouse's stored Meta keeps it", k)
+	}
+}
+
+// Migration 0015 (U4) restates both run views: the logs view is 0014's
+// with the whole contract tuple (U4's four keys appended), the traces
+// view 0013's with the same tuple (0014's weft.records.dropped and U4's
+// four), an `op` alias and the two columns — nothing else.
+func TestMigration0015RestatesRunViews(t *testing.T) {
+	read := func(v int) []string {
+		b, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return splitStatements(string(b))
+	}
+	now := read(15)
+	if len(now) != 5 {
+		t.Fatalf("0015 has %d statements, want 5 (two columns, two views, backfill)", len(now))
+	}
+	for i, p := range []string{
+		"ALTER TABLE weft_runs ADD COLUMN IF NOT EXISTS ErrorType SimpleAggregateFunction(max, String)",
+		"ALTER TABLE weft_runs ADD COLUMN IF NOT EXISTS Problems SimpleAggregateFunction(groupUniqArrayArray, Array(String))",
+		"ALTER TABLE weft_runs_logs_mv MODIFY QUERY",
+		"ALTER TABLE weft_runs_traces_mv MODIFY QUERY",
+		"INSERT INTO weft_runs (RunId, Started, LastSeen, ErrorType, Problems)",
+	} {
+		if !strings.HasPrefix(now[i], p) {
+			t.Errorf("0015 statement %d = %q, want prefix %q", i, now[i], p)
+		}
+	}
+	const keys = `'weft.run.stopped_by', 'weft.cancel.cause',
+        'weft.run.events', 'weft.run.messages',
+        'weft.records.dropped',
+        'weft.run.denied', 'weft.tool.truncated_bytes', 'weft.tool.input_error',
+        'weft.panic.layer'], k)`
+	logsWas := read(14)[0]
+	if want := strings.Replace(logsWas, `'weft.run.stopped_by', 'weft.cancel.cause',
+        'weft.run.events', 'weft.run.messages',
+        'weft.records.dropped'], k)`, keys, 1); want == logsWas || now[2] != want {
+		t.Errorf("0015's logs select is not 0014's with the whole tuple:\n%s", now[2])
+	}
+	tracesWas := read(13)[2]
+	want := strings.NewReplacer(
+		`'weft.run.stopped_by', 'weft.cancel.cause',
+        'weft.run.events', 'weft.run.messages'], k)`, keys,
+		"     StatusCode IN ('Error', 'STATUS_CODE_ERROR') AS isError,\n",
+		"     StatusCode IN ('Error', 'STATUS_CODE_ERROR') AS isError,\n     SpanAttributes['gen_ai.operation.name'] AS op,\n",
+		"    if(isInvoke, toInt64OrZero(SpanAttributes['weft.run.messages']), 0) AS MessagesEmitted\n",
+		"    if(isInvoke, toInt64OrZero(SpanAttributes['weft.run.messages']), 0) AS MessagesEmitted,\n",
+	).Replace(tracesWas)
+	got, _, ok := strings.Cut(now[3], "    if(isInvoke, multiIf(")
+	if !ok || got != want[:strings.Index(want, "FROM otel_traces")] {
+		t.Errorf("0015's traces select is not 0013's with the tuple, the op alias and two columns:\n%s", now[3])
+	}
+	if !strings.HasSuffix(now[3], "AS Problems\nFROM otel_traces\nWHERE SpanAttributes['weft.run.id'] != ''") {
+		t.Errorf("0015's traces select ends otherwise than 0013's:\n%s", now[3])
 	}
 }
 

@@ -297,6 +297,19 @@ func TestToolsRemoteErrorIsData(t *testing.T) {
 	if !errors.Is(err, ErrToolError) {
 		t.Errorf("errors.Is(ErrToolError) = false")
 	}
+	if got := errorTypeOf(err); got != "mcp_tool_error" {
+		t.Errorf("ErrorType = %q, want mcp_tool_error (the execute_tool span's error.type)", got)
+	}
+}
+
+// errorTypeOf reads core's ErrorType() convention off an error chain,
+// as the loop's observer does for error.type.
+func errorTypeOf(err error) string {
+	var typed interface{ ErrorType() string }
+	if errors.As(err, &typed) {
+		return typed.ErrorType()
+	}
+	return ""
 }
 
 // C4: a transport failure is a tool error result ("mcp: <err>"),
@@ -324,6 +337,9 @@ func TestToolsTransportFailureIsData(t *testing.T) {
 	_, err = tools[0].Invoke(ctx, json.RawMessage(`{}`))
 	if err == nil || !strings.HasPrefix(err.Error(), "mcp: ") {
 		t.Fatalf("transport failure = %v, want an mcp:-prefixed tool error", err)
+	}
+	if got := errorTypeOf(err); got != "mcp_transport" {
+		t.Errorf("ErrorType = %q, want mcp_transport (the execute_tool span's error.type)", got)
 	}
 }
 

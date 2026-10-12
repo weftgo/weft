@@ -10,6 +10,7 @@ import { Link } from "@tanstack/react-router"
 
 import type { RunDoc, Span as TimedSpan, WireEvent } from "@/lib/api"
 import { attemptLine, msText } from "@/lib/attempts"
+import { toolFailure } from "@/lib/error-kind"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "@/lib/events"
 import { spanMs, usageSummary } from "@/lib/format"
 import type { Span } from "@/lib/trace"
@@ -451,6 +452,7 @@ function TimedDetail({
               : `${spanMs(t.fromMs)}–${spanMs(t.toMs)} (${spanMs(t.toMs - t.fromMs)})`,
           ],
           ...(chat ?? []),
+          ...toolFacts(sp),
         ]}
       />
       {chat && step !== undefined ? (
@@ -483,6 +485,28 @@ function TimedDetail({
       ) : null}
     </div>
   )
+}
+
+/** An execute_tool span's failure kind and cut (U4), in
+ * lib/error-kind.ts's words: error.type with weft.panic.layer /
+ * weft.tool.input_error, and weft.tool.truncated_bytes. */
+function toolFacts(sp: TimedSpan): [string, React.ReactNode][] {
+  if (sp.attrs["gen_ai.operation.name"] !== "execute_tool") return []
+  const rows: [string, React.ReactNode][] = []
+  const f = toolFailure(str(sp.attrs["error.type"]), {
+    panic_layer: str(sp.attrs["weft.panic.layer"]),
+    input_error: str(sp.attrs["weft.tool.input_error"]),
+  })
+  if (f)
+    rows.push([
+      "failure",
+      <span key="f" title={f.hint} data-tool-failure>
+        {f.word}
+      </span>,
+    ])
+  const cut = num(sp.attrs["weft.tool.truncated_bytes"])
+  if (cut) rows.push(["truncated", `${cut} bytes cut by the result cap`])
+  return rows
 }
 
 function str(v: unknown): string {

@@ -3,6 +3,7 @@ package studio_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -18,6 +19,7 @@ import (
 	otellog "go.opentelemetry.io/otel/log"
 
 	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/mw"
 	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/otel"
 	"github.com/weftgo/weft/studio"
@@ -171,7 +173,10 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		// The run documents A9.2 pins from runs that compacted (a
 		// PrepareStep trim, thread's session marker): every field but the
 		// compactions themselves is the plain run's.
-		{"run-compacted.golden.json", "/api/runs/" + res.ID, []string{".children[]", ".compactions[]", ".holes[]", ".delegated_cost_reason", ".delegated_cost_usd=<nil>"}},
+		// The fixture's run reports attempts and a fallback (U4's
+		// problem counters); TestProblemCountersFromARealRun pins those
+		// fields from real runs that have them.
+		{"run-compacted.golden.json", "/api/runs/" + res.ID, []string{".children[]", ".compactions[]", ".holes[]", ".delegated_cost_reason", ".delegated_cost_usd=<nil>", ".attempts_retried", ".fallbacks"}},
 		{"run-session-compacted.golden.json", "/api/runs/" + res.ID, []string{".compactions[]"}},
 		{"runs.golden.json", "/api/runs", []string{".runs[].finished=<nil>", ".runs[].meta.cwd", ".runs[].delegated_cost_reason", ".runs[].delegated_cost_usd=<nil>", ".runs[].cost_usd=<nil>", ".runs[].delegated_unpriced_models[]"}},
 		{"runs-children.golden.json", "/api/runs?all=1", []string{".runs[].meta.cwd", ".runs[].cost_usd=<nil>", ".runs[].unpriced_models[]"}},
@@ -622,3 +627,106 @@ func TestReplayViewGoldenMatchesARealRun(t *testing.T) {
 		t.Errorf("the real run's holes lack the golden's derived reason: %s", raw)
 	}
 }
+
+// TestProblemCountersFromARealRun pins U4's run-row fields from real
+// runs through the real pipeline (otel → OTLP ingest → obsdb): a run
+// whose model call is retried twice then falls back, whose tools panic,
+// are cut by the result cap and refused by policy, and which then fails
+// at MaxSteps — error_type, the counters, the ?error_type= filter; and
+// a resume that denies a parked call (denied from weft.run.denied).
+// Every field the web's RunRow type reads is served with its JSON type.
+func TestProblemCountersFromARealRun(t *testing.T) {
+	dir := t.TempDir()
+	srv := studio.New(studio.Open(filepath.Join(dir, "weft.db")))
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	t.Cleanup(func() { _ = srv.Close() })
+	ctx := context.Background()
+	p, err := otel.Start(ctx, otel.Studio(ts.URL, ""), otel.NoGlobal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	type in struct {
+		OrderID string `json:"order_id"`
+	}
+	boom := core.Tool("charge", "Charge.", func(context.Context, in) (string, error) { panic("card service exploded") })
+	big := core.Tool("history", "History.", func(context.Context, in) (string, error) {
+		return strings.Repeat("event; ", 20), nil
+	}, core.MaxResultBytes(10))
+	rm := core.Tool("delete", "Delete.", func(context.Context, in) (string, error) { return "deleted", nil })
+	backup := backupModel{wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "charge", Args: `{"order_id":"1"}`}),
+		wefttest.ToolCalls(wefttest.Call{Name: "history", Args: `{"order_id":"1"}`}),
+		wefttest.ToolCalls(wefttest.Call{Name: "delete", Args: `{"order_id":"1"}`}),
+	)}
+	flaky := wefttest.Script(wefttest.Fail(core.ErrStreamIdle), wefttest.Fail(core.ErrStreamIdle))
+	agt := core.New(flaky, core.Name("orders"), core.TracerProvider(p.TracerProvider()),
+		core.LoggerProvider(p.LoggerProvider()), core.MaxSteps(3), boom, big, rm,
+		core.WrapModel(mw.Fallback(backup), mw.Retry(mw.MaxRetries(1), mw.BaseDelay(time.Millisecond))),
+		core.WrapTools(mw.Allow(func(c core.Call) bool { return c.Name != "delete" })))
+	_, runErr := agt.Generate(ctx, core.Prompt("charge, check, delete order 1"))
+	var re *core.RunError
+	if !errors.As(runErr, &re) || !errors.Is(runErr, core.ErrMaxSteps) {
+		t.Fatalf("want a max-steps failure, got %v", runErr)
+	}
+	gated := core.Tool("refund", "Refund.", func(context.Context, in) (string, error) { return "refunded", nil }, core.RequireApproval())
+	appr := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", Args: `{"order_id":"1"}`}),
+		wefttest.Say("Declined.")), core.Name("appr"), core.TracerProvider(p.TracerProvider()),
+		core.LoggerProvider(p.LoggerProvider()), gated)
+	first, err := appr.Generate(ctx, core.Prompt("refund order 1"))
+	if err != nil || len(first.Pending) != 1 {
+		t.Fatalf("parked run: %v, pending %d", err, len(first.Pending))
+	}
+	second, err := appr.Generate(ctx, core.Messages(first.Messages...), core.Deny(first.Pending[0].ID, "no"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := p.Shutdown(ctx); err != nil {
+		t.Fatal(err)
+	}
+	get := func(path string) map[string]any {
+		t.Helper()
+		resp, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var doc map[string]any
+		if err := json.NewDecoder(resp.Body).Decode(&doc); err != nil {
+			t.Fatal(err)
+		}
+		return doc
+	}
+	doc := get("/api/runs/" + re.Result.ID)
+	// Step 0's primary fails twice (Retry gives up) and the backup
+	// answers; steps 1 and 2 find the primary's script spent — one
+	// failed attempt each, not retryable — and fall back again: four
+	// failed attempts, three calls the backup answered.
+	want := map[string]any{"status": "failed", "error_type": "max_steps", "attempts_retried": float64(4),
+		"fallbacks": float64(3), "tool_errors": float64(1), "truncated": float64(1), "denied": float64(1)}
+	for k, v := range want {
+		if doc[k] != v {
+			t.Errorf("failed run %s = %v (%T), want %v", k, doc[k], doc[k], v)
+		}
+	}
+	if d := get("/api/runs/" + second.ID); d["denied"] != float64(1) || d["error_type"] != nil {
+		t.Errorf("denied resume = denied %v, error_type %v; want 1, absent", d["denied"], d["error_type"])
+	}
+	if d := get("/api/runs/" + first.ID); d["pending"] != float64(1) || d["denied"] != nil {
+		t.Errorf("parked run = pending %v, denied %v; want 1, absent", d["pending"], d["denied"])
+	}
+	for path, n := range map[string]int{"/api/runs?error_type=max_steps": 1, "/api/runs?error_type=cancelled": 0,
+		"/api/search?error_type=max_steps": 1} {
+		runs, _ := get(path)["runs"].([]any)
+		if len(runs) != n {
+			t.Errorf("%s = %d runs, want %d", path, len(runs), n)
+		}
+	}
+}
+
+// backupModel answers under its own name: the fallback the chat span
+// reports as gen_ai.response.model.
+type backupModel struct{ core.Model }
+
+func (backupModel) Info() core.ModelInfo { return core.ModelInfo{Provider: "wefttest", Name: "backup"} }

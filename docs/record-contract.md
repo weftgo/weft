@@ -738,6 +738,7 @@ becomes the cursor, and a page holds `limit` rows while more match. A
 row whose runs the cost walk cannot read whole (a read error, past the
 10,000-run walk) is served with its scoped aggregates and an unknown
 cost, as the server token's is.
+
 A session a panel token lists is one it may open: the session view (and
 the live stream's `session=` selector) admits the token when **any** of
 the session's top-level turns carries its public id — the list's

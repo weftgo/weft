@@ -78,6 +78,7 @@ module, ADR 0005).
   runs the cost walk cannot read is served with its scoped aggregates
   and an unknown cost (as the server token's is) instead of being
   skipped (`TestServerSessionsPublicIDRowCostScoped`).
+
 ## 0.15.0 — 2026-10-12
 
 ### Added

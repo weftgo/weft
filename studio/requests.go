@@ -45,6 +45,14 @@ type badgeFields struct {
 
 func badgeOf(h obsdb.Hole) badgeFields { return badgeFor(h, obsdb.CauseDefault) }
 
+// requestsBadge is the run's request-record hole (RunRow.RequestsHoleCause)
+// in its cause's words: derived's stock_spans for a derived run,
+// not_recorded's no_logger for a weft run whose spans arrived alone,
+// not_recorded's own for a run older than the record; empty for none.
+func requestsBadge(det obsdb.RunRow) badgeFields {
+	return badgeFor(det.RequestsHoleCause())
+}
+
 // badgeFor is badgeOf for a hole whose cause the route knows: the
 // table's own words for that cause (obsdb.HoleNoteFor).
 func badgeFor(h obsdb.Hole, cause obsdb.HoleCause) badgeFields {
@@ -236,11 +244,8 @@ func (s *Server) serveRunRequests(w http.ResponseWriter, r *http.Request, id str
 		return
 	}
 	out := requestsPage{Requests: []requestWire{}}
-	if h := det.RequestsHole(); h != "" {
-		out.badgeFields = badgeOf(h)
-		if det.Derived {
-			out.badgeFields = derivedBadge() // the stock_spans words: not weft's records to upgrade
-		}
+	if b := requestsBadge(det.RunRow); b.Badge != "" {
+		out.badgeFields = b // derived: the stock_spans words, not weft's records to upgrade
 		writeJSON(w, r, http.StatusOK, out)
 		return
 	}
@@ -355,11 +360,8 @@ func (s *Server) serveRunTools(w http.ResponseWriter, r *http.Request, id string
 		return
 	}
 	out := toolsDoc{Catalogs: []catalogDoc{}}
-	if h := det.RequestsHole(); h != "" {
-		out.badgeFields = badgeOf(h)
-		if det.Derived {
-			out.badgeFields = derivedBadge() // the stock_spans words: not weft's records to upgrade
-		}
+	if b := requestsBadge(det.RunRow); b.Badge != "" {
+		out.badgeFields = b // derived: the stock_spans words, not weft's records to upgrade
 		writeJSON(w, r, http.StatusOK, out)
 		return
 	}

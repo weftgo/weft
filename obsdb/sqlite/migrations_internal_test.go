@@ -96,8 +96,8 @@ func TestUpgradeFrom0002(t *testing.T) {
 	if err := raw.QueryRowContext(ctx, `SELECT MAX(version) FROM obsdb_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 10 {
-		t.Errorf("migration max = %d, want 10 (through 0010 stopped_by)", version)
+	if version != 11 {
+		t.Errorf("migration max = %d, want 11 (through 0011 derived root_ended)", version)
 	}
 	var agent, instructions, catalog string
 	var steps, requests int
@@ -297,8 +297,8 @@ func TestUpgradeFrom0006AddsCommandStore(t *testing.T) {
 	if err := db.(*DB).reads.QueryRowContext(ctx, `SELECT MAX(version) FROM obsdb_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 10 {
-		t.Errorf("migration max after the upgrade = %d, want 10 (through 0010 stopped_by)", version)
+	if version != 11 {
+		t.Errorf("migration max after the upgrade = %d, want 11 (through 0011 derived root_ended)", version)
 	}
 }
 
@@ -485,5 +485,65 @@ func TestUpgradeTo0010BackfillsStoppedBy(t *testing.T) {
 	page, err := db.Runs(ctx, obsdb.RunQuery{StoppedBy: "has_tool_call:"})
 	if err != nil || page.Total != 1 || page.Runs[0].ID != "r_record" {
 		t.Errorf("stopped_by=has_tool_call: after 0010 = %+v, %v; want r_record (the prefix form)", page, err)
+	}
+}
+
+// A file written at 0010 opens through 0011, which sets root_ended on
+// the derived rows 0009's backfill skipped (docs/record-contract.md §6's
+// root_ended row): every derived run reads it, whenever it was written;
+// a weft run's flag is untouched.
+func TestUpgradeTo0011DerivedRootEnded(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "at10.db")
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE obsdb_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	for v := 1; v <= 10; v++ {
+		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx, err := raw.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(string(body)); err != nil {
+			t.Fatalf("migration %d: %v", v, err)
+		}
+		if post := postMigrations[v]; post != nil {
+			if err := post(tx); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO obsdb_migrations (version, applied_at) VALUES (?, '2026-10-01T00:00:00Z')`, v); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := raw.Exec(`INSERT INTO runs (run_id, agent, started_ns, last_seen_ns, finished_ok, derived, root_ended) VALUES
+		('otel-old', 'a', 100, 200, 1, 1, 0), ('r_weft', 'a', 100, 200, 0, 0, 0)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("open a 0010 file: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	for id, want := range map[string]bool{"otel-old": true, "r_weft": false} {
+		run, err := db.Run(context.Background(), id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run.RootEnded != want {
+			t.Errorf("%s after 0011: root_ended %v, want %v", id, run.RootEnded, want)
+		}
 	}
 }

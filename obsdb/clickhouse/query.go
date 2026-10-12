@@ -317,7 +317,7 @@ func (s *runScan) row(now time.Time) (obsdb.RunRow, error) {
 		},
 		DeltaCount:       s.DeltaCount,
 		InstructionsHash: s.InstructionsHash, CatalogHash: s.CatalogHash, RequestCount: s.RequestCount,
-		Derived: s.Derived, RootEnded: s.RootEnded,
+		Derived: s.Derived, RootEnded: s.RootEnded, FinishRecorded: s.FinishedOK,
 		StoppedBy: s.StoppedBy, CancelCause: s.CancelCause,
 	}
 	if s.Finished != nil {
@@ -332,6 +332,7 @@ func (s *runScan) row(now time.Time) (obsdb.RunRow, error) {
 		row.Meta = obsdb.MetaOf(attrs)
 	}
 	row.Status = obsdb.DeriveStatus(s.Failed, s.FinishedOK || s.RootEnded, row.LastSeen, now)
+	row.Settling = obsdb.DeriveSettling(s.RootEnded && !s.Derived, s.FinishedOK, row.LastSeen, now)
 	return row, nil
 }
 
@@ -417,11 +418,12 @@ func (d *DB) Events(ctx context.Context, runID string, after int64, limit int) (
 	// this order, Done only ever says "the run was already terminal
 	// when these events were read". The same row count is the
 	// existence check.
-	var finishedOK, failed bool
+	var finishedOK, failed, rootEnded, derived bool
+	var lastSeen time.Time
 	var stored uint64
 	if err := d.conn.QueryRow(ctx,
-		`SELECT max(FinishedOK), max(Failed), count() FROM weft_runs WHERE RunId = ?`, runID).
-		Scan(&finishedOK, &failed, &stored); err != nil {
+		`SELECT max(FinishedOK), max(Failed), max(RootEnded), max(Derived), max(LastSeen), count() FROM weft_runs WHERE RunId = ?`, runID).
+		Scan(&finishedOK, &failed, &rootEnded, &derived, &lastSeen, &stored); err != nil {
 		return obsdb.EventPage{}, err
 	}
 	if stored == 0 {
@@ -460,8 +462,11 @@ func (d *DB) Events(ctx context.Context, runID string, after int64, limit int) (
 		page.NextAfter = &last
 	} else {
 		// Every stored event returned: done only when the run is
-		// terminal — a running run may still emit more.
-		page.Done = finishedOK || failed
+		// terminal — a running run may still emit more, and a root-ended
+		// one's trailing records are waited for while it settles
+		// (obsdb.EventPage.Done).
+		page.Done = finishedOK || failed ||
+			(rootEnded && !obsdb.DeriveSettling(rootEnded && !derived, finishedOK, lastSeen, time.Now()))
 	}
 	gaps, err := d.eventGaps(ctx, runID)
 	if err != nil {

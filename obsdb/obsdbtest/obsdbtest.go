@@ -30,6 +30,7 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("EventContentAttrs", eventContentAttrs(open))
 	t.Run("StatusAtBoundaries", status(open))
 	t.Run("RootSpanEndsTheRun", rootSpanEndsTheRun(open))
+	t.Run("RootBeforeRecords", rootBeforeRecords(open))
 	t.Run("StoppedBy", stoppedBy(open))
 	t.Run("Sessions", sessions(open))
 	t.Run("Children", children(open))
@@ -491,6 +492,146 @@ func rootSpanEndsTheRun(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		}
 		if _, err := db.Run(ctx(), "r_fresh"); err != nil {
 			t.Errorf("sweep removed the running r_fresh: %v", err)
+		}
+	}
+}
+
+// rootBeforeRecords pins docs/record-contract.md §6's settling window
+// and EventPage.Done for a root-ended run on every backend (the U2
+// review's findings 2, 3 and 5):
+//
+//   - a root span stored before the records that trail it: the run
+//     reads succeeded from its root, Settling, and neither
+//     LostRecordsHole, TailLostHole nor RequestsHoleCause calls a record
+//     missing; its event page is not Done until the records land, then
+//     it is (run_finish);
+//   - past the window, a root-ended run with events and no run_finish
+//     is Done (a poll that waits for Done stops) and reads TailLostHole's
+//     gap; a spans-only run is Done and reads no_logger, on its requests
+//     too;
+//   - weft_version comes from the run_start record and the root span
+//     alone (the larger when they differ), the root's resource only when
+//     it carries no attribute, never another span's resource.
+func rootBeforeRecords(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		now := time.Now().UTC()
+		root := func(id string, n byte, end time.Time, extra map[string]any) obsdb.Span {
+			s := invokeSpan(id, 1, extra)
+			s.TraceID, s.SpanID = "a"+string(n)+s.TraceID[2:], "700000000000000"+string(n)
+			s.Start, s.End = end.Add(-time.Second), end
+			return s
+		}
+		// The fresh root, alone.
+		if err := db.Write(ctx(), obsdb.Batch{Spans: []obsdb.Span{
+			root("r_settle", '1', now, map[string]any{"weft.instructions.hash": "sha256:i"}),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		r, err := db.Run(ctx(), "r_settle")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Status != obsdb.StatusSucceeded || !r.RootEnded || r.FinishRecorded || !r.Settling {
+			t.Errorf("fresh root = %s, root_ended %v, finish %v, settling %v; want succeeded, true, false, true",
+				r.Status, r.RootEnded, r.FinishRecorded, r.Settling)
+		}
+		if h, _ := obsdb.LostRecordsHole(r.RunRow, true); h != "" {
+			t.Errorf("settling LostRecordsHole = %s, want none", h)
+		}
+		if h, _ := obsdb.TailLostHole(r.RunRow); h != "" {
+			t.Errorf("settling TailLostHole = %s, want none", h)
+		}
+		if h, _ := r.RequestsHoleCause(); h != "" {
+			t.Errorf("settling RequestsHoleCause = %s, want none", h)
+		}
+		page, err := db.Events(ctx(), "r_settle", -1, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if page.Done {
+			t.Error("settling run's event page is Done before its records landed")
+		}
+		// The records land behind it.
+		start := record("r_settle", "event", "run_start", 0, `{"type":"run_start","id":"r_settle"}`, nil)
+		start.Time = now.Add(-time.Second)
+		finish := record("r_settle", "event", "run_finish", 1, `{"type":"run_finish","run_id":"r_settle","steps":1}`, nil)
+		finish.Time = now
+		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{start, finish}}); err != nil {
+			t.Fatal(err)
+		}
+		if page, err = db.Events(ctx(), "r_settle", -1, 100); err != nil {
+			t.Fatal(err)
+		}
+		if !page.Done || len(page.Events) != 2 {
+			t.Errorf("after the records landed: %d events, Done %v; want 2, Done", len(page.Events), page.Done)
+		}
+		if r, err = db.Run(ctx(), "r_settle"); err != nil {
+			t.Fatal(err)
+		}
+		if !r.FinishRecorded || r.Settling || r.EventCount != 2 {
+			t.Errorf("after the records landed: finish %v, settling %v, events %d; want true, false, 2", r.FinishRecorded, r.Settling, r.EventCount)
+		}
+
+		// Past the window: a lost tail, and spans alone. The version
+		// test rides along: a chat span whose resource names an older
+		// weft ("v0.9.0" > "v0.15.0" as strings) never decides it.
+		old := now.Add(-2 * obsdb.InterruptedAfter)
+		chat := root("r_tail", '2', old, map[string]any{"gen_ai.operation.name": "chat"})
+		chat.Name, chat.SpanID = "chat conf", "7000000000000009"
+		chat.Resource = map[string]any{"service.name": "conf-svc", "weft.version": "v0.9.0"}
+		tailRoot := root("r_tail", '2', old, map[string]any{"weft.version": "v0.15.0", "weft.instructions.hash": "sha256:i"})
+		tailStart := record("r_tail", "event", "run_start", 0, `{"type":"run_start","id":"r_tail"}`, map[string]any{"weft.version": "v0.15.0"})
+		tailStart.Time = old.Add(-time.Second)
+		spansRoot := root("r_spans", '3', old, map[string]any{"weft.instructions.hash": "sha256:i"})
+		spansRoot.Resource = map[string]any{"service.name": "conf-svc", "weft.version": "v0.15.0"}
+		spansChat := root("r_spans", '3', old, map[string]any{"gen_ai.operation.name": "chat"})
+		spansChat.Name, spansChat.SpanID = "chat conf", "7000000000000008"
+		spansChat.Resource = map[string]any{"service.name": "conf-svc", "weft.version": "v0.9.0"}
+		// The chat spans first: an arrival order that would let a
+		// first-wins writer keep their resource's version.
+		if err := db.Write(ctx(), obsdb.Batch{Spans: []obsdb.Span{chat, spansChat}}); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Write(ctx(), obsdb.Batch{Spans: []obsdb.Span{tailRoot, spansRoot}, Records: []obsdb.Record{tailStart}}); err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range []struct {
+			id      string
+			hole    obsdb.Hole
+			cause   obsdb.HoleCause
+			reqHole obsdb.Hole
+		}{
+			{"r_tail", obsdb.HoleGap, obsdb.CauseTailLost, ""},
+			{"r_spans", obsdb.HoleNotRecorded, obsdb.CauseNoLogger, obsdb.HoleNotRecorded},
+		} {
+			r, err := db.Run(ctx(), c.id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.Status != obsdb.StatusSucceeded || r.Settling || r.FinishRecorded {
+				t.Errorf("%s = %s, settling %v, finish %v; want succeeded, false, false", c.id, r.Status, r.Settling, r.FinishRecorded)
+			}
+			if r.WeftVersion != "v0.15.0" {
+				t.Errorf("%s weft_version = %q, want the record's and the root's v0.15.0, never a chat span's resource", c.id, r.WeftVersion)
+			}
+			h, cause := obsdb.TailLostHole(r.RunRow)
+			if h == "" {
+				h, cause = obsdb.LostRecordsHole(r.RunRow, true)
+			}
+			if h != c.hole || cause != c.cause {
+				t.Errorf("%s hole = %s/%s, want %s/%s", c.id, h, cause, c.hole, c.cause)
+			}
+			if h, _ := r.RequestsHoleCause(); h != c.reqHole {
+				t.Errorf("%s requests hole = %q, want %q", c.id, h, c.reqHole)
+			}
+			page, err := db.Events(ctx(), c.id, -1, 100)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !page.Done {
+				t.Errorf("%s: a root-ended run past the window is not Done: a poll waiting for Done never stops", c.id)
+			}
 		}
 	}
 }

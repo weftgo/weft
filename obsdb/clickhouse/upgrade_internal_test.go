@@ -240,8 +240,8 @@ func TestUpgradeFrom0007AddsCommandStore(t *testing.T) {
 	if err := db.(*DB).conn.QueryRow(ctx, `SELECT max(version) FROM obsdb_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 11 {
-		t.Errorf("migration max after the upgrade = %d, want 11 (through 0011 stopped by)", version)
+	if version != 12 {
+		t.Errorf("migration max after the upgrade = %d, want 12 (through 0012 the root's version)", version)
 	}
 }
 
@@ -438,5 +438,106 @@ func TestUpgradeTo0011BackfillsStoppedBy(t *testing.T) {
 	page, err := db.Runs(ctx, obsdb.RunQuery{StoppedBy: "has_tool_call:"})
 	if err != nil || page.Total != 1 || page.Runs[0].ID != "r_submit" {
 		t.Errorf("stopped_by=has_tool_call: after 0011 = %+v, %v; want r_submit", page, err)
+	}
+}
+
+// A database at 0011 — a derived row written before 0010 set RootEnded
+// on derived writes, and a weft run whose chat span's resource names
+// another weft — opens through 0012 on a live server: the backfill sets
+// RootEnded on the derived run alone, and the restated traces view takes
+// the version from the run's root span alone from then on
+// (docs/record-contract.md §6's weft_version and root_ended rows).
+func TestUpgradeTo0012RootVersionAndDerived(t *testing.T) {
+	base := os.Getenv("WEFT_CLICKHOUSE_DSN")
+	if base == "" {
+		t.Skip("WEFT_CLICKHOUSE_DSN not set: the 0012 upgrade needs a clickhouse server (README has the one-line container recipe)")
+	}
+	ctx := context.Background()
+	u, err := url.Parse(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	suffix := make([]byte, 6)
+	if _, err := rand.Read(suffix); err != nil {
+		t.Fatal(err)
+	}
+	name := "weft_up_" + hex.EncodeToString(suffix)
+	admin := rawConn(t, base)
+	if err := admin.Exec(ctx, fmt.Sprintf("CREATE DATABASE `%s`", name)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = admin.Exec(context.Background(), fmt.Sprintf("DROP DATABASE IF EXISTS `%s`", name))
+		_ = admin.Close()
+	})
+	u.Path = "/" + name
+	dsn := u.String()
+
+	conn := rawConn(t, dsn)
+	if err := conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS obsdb_migrations (
+		version UInt32, name String, applied_at DateTime DEFAULT now()
+	) ENGINE = MergeTree ORDER BY version`); err != nil {
+		t.Fatal(err)
+	}
+	for v := 1; v <= 11; v++ {
+		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, stmt := range splitStatements(string(body)) {
+			if err := conn.Exec(ctx, stmt); err != nil {
+				t.Fatalf("migration %d: %v", v, err)
+			}
+		}
+		if err := conn.Exec(ctx, `INSERT INTO obsdb_migrations (version, name) VALUES (?, ?)`, uint32(v), migrations[v]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	at := time.Now().UTC().Add(-time.Hour)
+	if err := conn.Exec(ctx, `INSERT INTO weft_runs (RunId, Started, LastSeen, FinishedOK, Derived, RootEnded)
+		VALUES ('otel-old', ?, ?, 1, 1, 0), ('r_plain', ?, ?, 0, 0, 0)`, at, at, at, at); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.Close()
+
+	db, err := Open(dsn)
+	if err != nil {
+		t.Fatalf("open a 0011 database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	for id, want := range map[string]bool{"otel-old": true, "r_plain": false} {
+		r, err := db.Run(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.RootEnded != want {
+			t.Errorf("%s after 0012: RootEnded %v, want %v", id, r.RootEnded, want)
+		}
+	}
+	span := func(id, op string, n byte, attrs, res map[string]any) obsdb.Span {
+		a := map[string]any{"gen_ai.operation.name": op, "weft.run.id": id}
+		for k, v := range attrs {
+			a[k] = v
+		}
+		r := map[string]any{"service.name": "svc"}
+		for k, v := range res {
+			r[k] = v
+		}
+		return obsdb.Span{TraceID: "0102030405060708090a0b0c0d0e0f12", SpanID: "0a0b0c0d0e0f030" + string(n),
+			Name: op + " a", Kind: 1, Start: at, End: at.Add(time.Second), StatusCode: 1, Service: "svc",
+			Attrs: a, Resource: r}
+	}
+	if err := db.Write(ctx, obsdb.Batch{Spans: []obsdb.Span{
+		span("r_ver", "chat", '1', nil, map[string]any{"weft.version": "v0.9.0"}),
+		span("r_ver", "invoke_agent", '2', nil, map[string]any{"weft.version": "v0.15.0"}),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	r, err := db.Run(ctx, "r_ver")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.WeftVersion != "v0.15.0" {
+		t.Errorf("weft_version after 0012 = %q, want the root's resource v0.15.0, never the chat span's", r.WeftVersion)
 	}
 }

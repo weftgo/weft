@@ -404,7 +404,10 @@ type eventsPage struct {
 	// (succeeded, failed, or interrupted — never running), even on a
 	// partial page with next_after set: it says the poll cadence can
 	// stop, not that every event has been returned. next_after is the
-	// paging cursor — follow it (not done) until it reads null.
+	// paging cursor — follow it (not done) until it reads null. A
+	// settling run (its root span stored, its run_finish not, heard
+	// from within 30 s: obsdb.RunRow.Settling) is not done yet — the
+	// records behind its root may still land.
 	Done bool `json:"done"`
 	// Gaps are durable positions missing below the high-water mark: a
 	// lost batch, never a delta (D3) — the fold's input stays
@@ -875,12 +878,13 @@ func (s *Server) childRows(ctx context.Context, c *coster, kids []obsdb.RunRow) 
 //     it was stored — the app exported spans only
 //     (obsdb.LostRecordsHole, docs/record-contract.md §7).
 //
-// Nothing for a run with events, or a running one (in flight). A
-// derived run (obsdb.RunRow.Derived) has none by construction: its one
+// Nothing for a run with events, a running one (in flight) or a
+// settling one (obsdb.RunRow.Settling: its records may trail its stored
+// root span — decided once the window has passed). A derived run (obsdb.RunRow.Derived) has none by construction: its one
 // badge is derivedBadge's — derived is a stock-span run's alone, never
 // a weft run's whose records are missing.
 func lostEvents(rec obsdb.RunRow, hasSpans bool) []badgeFields {
-	if rec.EventCount > 0 || rec.Status == obsdb.StatusRunning {
+	if rec.EventCount > 0 || rec.Status == obsdb.StatusRunning || rec.Settling {
 		return nil
 	}
 	if rec.Derived {
@@ -911,6 +915,10 @@ func lostEvents(rec obsdb.RunRow, hasSpans bool) []badgeFields {
 //   - interrupted: the derived status (obsdb.InterruptedAfter);
 //   - gap: no stored event (lostEvents) — counted steps or requests
 //     whose events were dropped;
+//   - gap, cause tail_lost: the root span ended (succeeded) with events
+//     stored and no run_finish — a destination dropped the record tail
+//     (obsdb.TailLostHole; raised once the run stopped settling, the
+//     U5 seam for "N of M");
 //   - stripped: its events came through a content-off chain, or the
 //     core captured none (the run_start's weft.content: stripped or
 //     none);
@@ -939,6 +947,10 @@ func (s *Server) runHoles(ctx context.Context, rec obsdb.RunRow) ([]stepHole, er
 		for _, b := range lostEvents(rec, len(sp) > 0) {
 			holes.add(obsdb.Hole(b.Badge), b.Reason, b.Fix)
 		}
+	}
+	if h, cause := obsdb.TailLostHole(rec); h != "" {
+		b := badgeFor(h, cause)
+		holes.add(h, b.Reason, b.Fix)
 	}
 	if h := rec.RequestsHole(); h != "" {
 		holes.note(h)
@@ -1045,13 +1057,18 @@ func (s *Server) serveRunEvents(w http.ResponseWriter, r *http.Request, id strin
 		// A row that reads interrupted at derivation time is terminal
 		// in effect: its tail must report done, or a polling client
 		// never stops. Queried only when the database itself did not
-		// answer done (a running or interrupted row).
+		// answer done (a running, settling or interrupted row). A
+		// settling row (obsdb.RunRow.Settling: its root span stored,
+		// its run_finish not yet, heard from within
+		// obsdb.InterruptedAfter) reads succeeded or failed already,
+		// but the records behind its root may still land: done stays
+		// false so the client keeps tailing them.
 		det, err := s.db.Run(r.Context(), id)
 		if err != nil {
 			dbError(w, r, "events of run", id, err)
 			return
 		}
-		if det.Status != obsdb.StatusRunning {
+		if det.Status != obsdb.StatusRunning && !det.Settling {
 			done = true
 		}
 	}

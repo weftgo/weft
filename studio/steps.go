@@ -576,7 +576,7 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 	if err != nil {
 		return stepDoc{}, err
 	}
-	reqHole := det.RequestsHole()
+	reqHole, reqCause := det.RequestsHoleCause()
 	var reqs []obsdb.RequestRecord
 	if reqHole == "" {
 		if reqs, err = sr.db.Requests(ctx, id, obsdb.RequestQuery{Step: &n, Limit: maxRequestsLimit}); err != nil {
@@ -883,9 +883,11 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 				doc.Status = stepParked
 			}
 		}
-	case !evs.found && det.Status == obsdb.StatusRunning:
+	case !evs.found && (det.Status == obsdb.StatusRunning || det.Settling):
 		// Named by a request record of a running run whose step_start
-		// is not stored yet: in flight, not lost.
+		// is not stored yet, or counted by a settling run's root span
+		// (obsdb.RunRow.Settling: the records behind it may still
+		// land): in flight, not lost.
 		doc.Status = stepRunning
 	case !evs.found && derived:
 		// No event of a derived run exists: the chat span's status is
@@ -896,8 +898,16 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 		}
 	case !evs.found:
 		// Counted by the run row or named by a request, but no event
-		// records the step: the run's outcome, and the gap said.
-		holes.add(obsdb.HoleGap, "the run counts this step, but no event of it was stored: a destination dropped its records", holeFix(obsdb.HoleGap))
+		// records the step: the run's outcome, and the gap said — or,
+		// for a weft run whose spans arrived and none of its records
+		// did, not_recorded (cause no_logger: the app exported spans
+		// only, obsdb.LostRecordsHole), the run's own reading.
+		if h, cause := obsdb.LostRecordsHole(det.RunRow, len(allSpans) > 0); h != "" {
+			b := badgeFor(h, cause)
+			holes.add(h, b.Reason, b.Fix)
+		} else {
+			holes.add(obsdb.HoleGap, "the run counts this step, but no event of it was stored: a destination dropped its records", holeFix(obsdb.HoleGap))
+		}
 		doc.Status = stepOK
 		if det.Status == obsdb.StatusFailed && n == det.Steps-1 {
 			doc.Status = stepError
@@ -908,8 +918,23 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 	case det.Status == obsdb.StatusInterrupted:
 		doc.Status = stepError
 		holes.note(obsdb.HoleInterrupted)
+	case det.Settling && det.Status != obsdb.StatusFailed:
+		// The step's events arrived, its step_finish not yet, and the
+		// run's root span (not an Error one: a failed run's last step
+		// ends without one) was stored moments ago: the rest may still
+		// land.
+		doc.Status = stepRunning
 	default:
 		doc.Status = stepError
+		if h, cause := obsdb.TailLostHole(det.RunRow); h != "" {
+			// The step began, its step_finish never arrived, and the
+			// run's root span says it succeeded: the step ran to its
+			// end and the record tail was dropped on the way — the
+			// run's own gap, not a step that failed.
+			b := badgeFor(h, cause)
+			holes.add(h, b.Reason, b.Fix)
+			doc.Status = stepOK
+		}
 	}
 
 	// The model: asked for (the request's, else the chat span's, else
@@ -955,8 +980,9 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 	case derived:
 		doc.Request = derivedBadge()
 	case reqHole != "":
-		doc.Request = badgeOf(reqHole)
-		holes.note(reqHole)
+		b := badgeFor(reqHole, reqCause)
+		doc.Request = b
+		holes.add(reqHole, b.Reason, b.Fix)
 	case first != nil:
 		res := resolver{ctx: ctx, db: sr.db, run: id, prompts: map[string]any{}, catalogs: map[string]any{}}
 		row := requestRow{
@@ -1159,7 +1185,7 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 	case derived:
 		doc.MessagesIn.badgeFields = derivedBadge()
 	case reqHole != "":
-		doc.MessagesIn.badgeFields = badgeOf(reqHole)
+		doc.MessagesIn.badgeFields = badgeFor(reqHole, reqCause)
 	case first == nil:
 		if modelCalled {
 			doc.MessagesIn.badgeFields = badgeFields{Badge: string(obsdb.HoleGap), Reason: "no request record of the step was stored", Fix: holeFix(obsdb.HoleGap)}

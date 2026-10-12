@@ -149,6 +149,13 @@ export const CAUSES: Partial<
       fix: "wire the logs too: pass weft.LoggerProvider(lp) beside weft.TracerProvider, or use otel.Install (it wires both)",
     },
   },
+  gap: {
+    tail_lost: {
+      reason:
+        "the run's root span ended but its run_finish record never arrived: a destination dropped the record tail, so the last steps' records are missing",
+      fix: "check the log exporter's drops (its queue, batch and retry limits): the spans arrived, the records behind them did not",
+    },
+  },
   derived: {
     stock_spans: {
       reason: "derived from spans · no events",

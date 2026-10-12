@@ -27,8 +27,8 @@ func TestMigrationPinsExporterVersion(t *testing.T) {
 	if !strings.Contains(string(body), pinnedExporterVersion) {
 		t.Errorf("migration 0001 does not name the pinned exporter version %s", pinnedExporterVersion)
 	}
-	if highestMigration() != 11 {
-		t.Errorf("highest migration = %d, want 11 (0001 init, 0002 experiments, 0003 status spelling, 0004 request record, 0005 raw record, 0006 experiment command, 0007 the experiment index, 0008 the command store, 0009 the derived flag, 0010 root ended, 0011 stopped by)", highestMigration())
+	if highestMigration() != 12 {
+		t.Errorf("highest migration = %d, want 12 (0001 init, 0002 experiments, 0003 status spelling, 0004 request record, 0005 raw record, 0006 experiment command, 0007 the experiment index, 0008 the command store, 0009 the derived flag, 0010 root ended, 0011 stopped by, 0012 the root's version)", highestMigration())
 	}
 }
 
@@ -412,7 +412,8 @@ func TestRunsInnerFiltersAfterGrouping(t *testing.T) {
 // view alone with the raw record's weft.raw.index (rawKeys) appended;
 // 0010 the traces view with 0004's tuple. 0011 restates both with the
 // whole set: stopped_by's two keys (stoppedByKeys) appended, the traces
-// tuple gaining weft.raw.index on the way.
+// tuple gaining weft.raw.index on the way; 0012 the traces view again
+// with the same set.
 const (
 	adr0028Keys   = 12 + 4 + 1 + 10
 	rawKeys       = 1
@@ -426,7 +427,7 @@ func TestMigrationContractTuple(t *testing.T) {
 	for _, c := range []struct {
 		version, tuples int
 		keys            []string
-	}{{1, 2, before}, {3, 1, before}, {4, 2, at0004}, {5, 1, at0005}, {10, 1, at0004}, {11, 2, contractKeys}} {
+	}{{1, 2, before}, {3, 1, before}, {4, 2, at0004}, {5, 1, at0005}, {10, 1, at0004}, {11, 2, contractKeys}, {12, 1, contractKeys}} {
 		body, err := migrationsFS.ReadFile("migrations/" + migrations[c.version])
 		if err != nil {
 			t.Fatal(err)
@@ -597,6 +598,41 @@ func TestMigration0011RestatesRunViews(t *testing.T) {
 	).Replace(find(read(10), tracesAlter))
 	if now[3] != traces {
 		t.Errorf("0011's traces select is not 0010's with StoppedBy and CancelCause:\n%s\nwant:\n%s", now[3], traces)
+	}
+}
+
+// Migration 0012 (the U2 review) restates 0011's traces view with one
+// change — WeftVersion from the invoke_agent span alone, its attribute
+// else its resource's — then backfills RootEnded for derived runs.
+// Pinned offline against 0011's select so the restatement cannot drift.
+func TestMigration0012RestatesTracesView(t *testing.T) {
+	read := func(v int) []string {
+		b, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return splitStatements(string(b))
+	}
+	const alter = "ALTER TABLE weft_runs_traces_mv MODIFY QUERY"
+	var was string
+	for _, st := range read(11) {
+		if strings.HasPrefix(st, alter) {
+			was = st
+		}
+	}
+	now := read(12)
+	if was == "" || len(now) != 2 {
+		t.Fatalf("0011's traces view found %v; 0012 has %d statements, want 2 (view, backfill)", was != "", len(now))
+	}
+	want := strings.Replace(was,
+		"    if(SpanAttributes['weft.version'] != '', SpanAttributes['weft.version'], ResourceAttributes['weft.version']) AS WeftVersion,",
+		"    if(isInvoke, if(SpanAttributes['weft.version'] != '', SpanAttributes['weft.version'], ResourceAttributes['weft.version']), '') AS WeftVersion,", 1)
+	if want == was || now[0] != want {
+		t.Errorf("0012's select is not 0011's with the version from the root alone:\n%s", now[0])
+	}
+	if !strings.HasPrefix(now[1], "INSERT INTO weft_runs (RunId, Started, LastSeen, RootEnded)") ||
+		!strings.Contains(now[1], "HAVING max(Derived) = 1 AND max(RootEnded) = 0") {
+		t.Errorf("0012's second statement is not the derived RootEnded backfill: %q", now[1])
 	}
 }
 

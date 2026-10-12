@@ -276,7 +276,8 @@ func scanRunRow(r runRowScan, now time.Time) (obsdb.RunRow, error) {
 		EventCount: r.EventCount, DeltaCount: r.DeltaCount, MessageCount: r.MessageCount,
 		InstructionsHash: r.InstructionsHash, CatalogHash: r.CatalogHash, RequestCount: r.RequestCount,
 		PromptPreview: r.PromptPreview, Derived: r.Derived, RootEnded: r.RootEnded,
-		StoppedBy: r.StoppedBy, CancelCause: r.CancelCause,
+		FinishRecorded: r.FinishedOK,
+		StoppedBy:      r.StoppedBy, CancelCause: r.CancelCause,
 	}
 	if r.Finished.Valid {
 		f := time.Unix(0, r.Finished.Int64).UTC()
@@ -288,6 +289,7 @@ func scanRunRow(r runRowScan, now time.Time) (obsdb.RunRow, error) {
 		}
 	}
 	row.Status = obsdb.DeriveStatus(r.Failed, r.FinishedOK || r.RootEnded, row.LastSeen, now)
+	row.Settling = obsdb.DeriveSettling(r.RootEnded && !r.Derived, r.FinishedOK, row.LastSeen, now)
 	return row, nil
 }
 
@@ -302,11 +304,11 @@ func (d *DB) Events(ctx context.Context, runID string, after int64, limit int) (
 	// those events, and a reader following the run to Done would stop
 	// short of its tail. Read in this order, Done only ever says "the
 	// run was already terminal when these events were read".
-	var finishedOK, failed bool
-	var eventCount int64
+	var finishedOK, failed, rootEnded, derived bool
+	var eventCount, lastSeen int64
 	err = d.reads.QueryRowContext(ctx,
-		`SELECT finished_ok, failed, event_count FROM runs WHERE run_id = ?`, runID).
-		Scan(&finishedOK, &failed, &eventCount)
+		`SELECT finished_ok, failed, root_ended, derived, last_seen_ns, event_count FROM runs WHERE run_id = ?`, runID).
+		Scan(&finishedOK, &failed, &rootEnded, &derived, &lastSeen, &eventCount)
 	if err == sql.ErrNoRows {
 		return obsdb.EventPage{}, fmt.Errorf("%w: run %s", obsdb.ErrNotFound, runID)
 	}
@@ -353,8 +355,11 @@ func (d *DB) Events(ctx context.Context, runID string, after int64, limit int) (
 		page.NextAfter = &last
 	} else {
 		// Every stored event returned: done only when the run is
-		// terminal — a running run may still emit more.
-		page.Done = finishedOK || failed
+		// terminal — a running run may still emit more, and a root-ended
+		// one's trailing records are waited for while it settles
+		// (obsdb.EventPage.Done).
+		page.Done = finishedOK || failed ||
+			(rootEnded && !obsdb.DeriveSettling(rootEnded && !derived, finishedOK, time.Unix(0, lastSeen), time.Now()))
 	}
 	gaps, err := d.eventGaps(ctx, runID, eventCount)
 	if err != nil {

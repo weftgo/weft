@@ -665,11 +665,12 @@ func (x *runExport) blocks() []exportBlock {
 	}
 }
 
-// reqBadge is the requests block's badge: reqHole's, in a derived
-// run's words (derivedBadge) when the run was built from stock spans.
+// reqBadge is the requests block's badge: reqHole's, in its cause's
+// words (requestsBadge: a derived run's stock_spans, a spans-only run's
+// no_logger) when it is the run's own reading table, not hidden.
 func (x *runExport) reqBadge() badgeFields {
-	if x.run.Derived && x.reqHole == obsdb.HoleDerived {
-		return derivedBadge()
+	if h, _ := x.run.RequestsHoleCause(); h != "" && h == x.reqHole {
+		return requestsBadge(x.run.RunRow)
 	}
 	return badgeOf(x.reqHole)
 }

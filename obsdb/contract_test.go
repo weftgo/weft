@@ -369,7 +369,8 @@ func intAttr(m map[string]any, k string, def int64) int64 {
 
 // runHoles is the run-level badge set a reader shows (ADR 0028 §11),
 // sorted: not_recorded from the run row's reading table
-// (RunRow.RequestsHole), derived from the row's mark (§9),
+// (RunRow.RequestsHole) or a spans-only run (LostRecordsHole), gap from
+// a dropped record tail (TailLostHole), derived from the row's mark (§9),
 // interrupted from the derived status,
 // max_tokens from the stop reason, stripped and truncated from the
 // events' content marks, gap from the event counter's holes, compacted
@@ -380,6 +381,9 @@ func runHoles(t *testing.T, db obsdb.DB, r obsdb.RunRow, hasSpans bool) []obsdb.
 	set := map[obsdb.Hole]bool{}
 	if h, _ := obsdb.LostRecordsHole(r, hasSpans); h != "" {
 		set[h] = true // not_recorded, cause no_logger: spans stored, no record (§7)
+	}
+	if h, _ := obsdb.TailLostHole(r); h != "" {
+		set[h] = true // gap, cause tail_lost: an ended root, events, no run_finish (§7)
 	}
 	if h := r.RequestsHole(); h != "" {
 		set[h] = true // derived for a derived run, in place of not_recorded (§9)
@@ -1470,7 +1474,7 @@ func genCases() []genCase {
 		},
 		{
 			name: "tail_lost",
-			desc: "the tool_calls run whose record tail a destination dropped: every record after the tool_finish lost (step 1's records and run_finish), every span kept — the stored invoke_agent span (status Ok) ends the run, so it reads succeeded, not interrupted; steps, usage and stop_reason from the span",
+			desc: "the tool_calls run whose record tail a destination dropped: every record after the tool_finish lost (step 1's records and run_finish), every span kept — the stored invoke_agent span (status Ok) ends the run, so it reads succeeded, not interrupted; steps, usage and stop_reason from the span; the gap badge (cause tail_lost): the record tail is visibly missing, not a clean success",
 			dest: content,
 			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
 				agt := pipelineAgent(p, "support", wefttest.Script(

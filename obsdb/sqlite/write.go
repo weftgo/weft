@@ -25,9 +25,10 @@ import (
 // earliest winning: run_start's time, or the invoke_agent span's just
 // before it) and fills empty identity columns; run_finish sets the
 // terminal fields; the invoke_agent span sets trace, finish, usage,
-// steps, root_ended and, on error, failed and err; any weft span fills an
-// empty weft_version (its attribute, else its resource's) and
-// manifest_hash. A run first seen through a later
+// steps, root_ended, weft_version (its attribute, else its resource's;
+// the larger beside run_start's, ClickHouse's max) and, on error, failed
+// and err; any weft span fills an empty manifest_hash. A run first seen
+// through a later
 // record (a reordered batch) gets a provisional started_ns, corrected
 // when the earlier rows land. A stock GenAI span (no weft.run.id,
 // obsdb.StockCandidate) re-derives its trace's derived runs
@@ -507,23 +508,27 @@ func (u *runUpdate) applySpan(s obsdb.Span, w obsdb.Weft) {
 		}
 	}
 	// The identity a span carries beside the records' (contract §6): the
-	// manifest hash from its attributes, the version from its attributes,
-	// else its resource's (otel.Install stamps weft.version there) — so
-	// a run whose records were lost, or never emitted, still names both.
-	// Fill-if-empty like every identity column: a record's value, equal
-	// by construction, is as good.
+	// manifest hash from its attributes — so a run whose records were
+	// lost, or never emitted, still names it. Fill-if-empty like every
+	// identity column: a record's value, equal by construction, is as
+	// good.
 	if v := attrString(s.Attrs, "weft.manifest.hash"); v != "" && u.manifestHash == "" {
 		u.manifestHash = v
 	}
-	if u.weftVersion == "" {
-		if v := attrString(s.Attrs, "weft.version"); v != "" {
-			u.weftVersion = v
-		} else if v := attrString(s.Resource, "weft.version"); v != "" {
-			u.weftVersion = v
-		}
-	}
 	if !isInvokeAgent(s) {
 		return
+	}
+	// The version from the root span alone (contract §6's precedence):
+	// its weft.version attribute, else its resource's (otel.Install
+	// stamps it there) — never another span's resource. Beside the
+	// run_start record's value the larger string is kept, ClickHouse's
+	// max(String) over the same two values, so both backends agree
+	// whatever arrives first (equal by construction: one literal,
+	// TestWeftVersionMatchesRoot).
+	if v := attrString(s.Attrs, "weft.version"); v != "" {
+		u.weftVersion = maxString(u.weftVersion, v)
+	} else if v := attrString(s.Resource, "weft.version"); v != "" {
+		u.weftVersion = maxString(u.weftVersion, v)
 	}
 	// The root is exported only once it ended: the run is over, whatever
 	// records are missing (DeriveStatus's ended; an Error status is failed).
@@ -613,7 +618,7 @@ func (u *runUpdate) applyIdentity(w obsdb.Weft, r obsdb.Record) {
 			u.manifestHash = v
 		}
 		if v, ok := r.Attrs["weft.version"].(string); ok && v != "" {
-			u.weftVersion = v
+			u.weftVersion = maxString(u.weftVersion, v)
 		}
 	}
 	if r.TraceID != "" {
@@ -872,7 +877,7 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 		coalesce(ex.parentRun, u.parentRunID), coalesce(ex.parentC, u.parentCallID),
 		coalesce(ex.traceID, u.traceID), coalesce(ex.agent, u.agent),
 		coalesce(ex.provider, u.provider), coalesce(ex.model, u.model),
-		coalesce(ex.manifest, u.manifestHash), coalesce(ex.version, u.weftVersion),
+		coalesce(ex.manifest, u.manifestHash), maxString(ex.version, u.weftVersion),
 		coalesce(ex.service, u.service), coalesce(ex.sessionID, u.sessionID),
 		coalesce(ex.publicID, u.publicID), turnOr(ex.turn, u.turn, u.setTurn),
 		boolInt(ex.playground || u.playground),

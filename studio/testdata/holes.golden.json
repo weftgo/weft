@@ -39,7 +39,13 @@
   {
     "hole": "gap",
     "reason": "a record the run counts is missing: a destination dropped it on the way",
-    "fix": "check the exporter's drops"
+    "fix": "check the exporter's drops",
+    "causes": {
+      "tail_lost": {
+        "reason": "the run's root span ended but its run_finish record never arrived: a destination dropped the record tail, so the last steps' records are missing",
+        "fix": "check the log exporter's drops (its queue, batch and retry limits): the spans arrived, the records behind them did not"
+      }
+    }
   },
   {
     "hole": "not_recorded",

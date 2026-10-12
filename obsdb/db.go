@@ -394,6 +394,21 @@ type RunRow struct {
 	// failed; any other status reads succeeded with or without a
 	// run_finish (DeriveStatus's ended). LostRecordsHole reads it too.
 	RootEnded bool
+	// FinishRecorded marks a run whose run_finish record is stored (the
+	// column both backends already keep: runs.finished_ok,
+	// weft_runs.FinishedOK; a derived run's reads its succeeded status).
+	// A RootEnded run without it lost its record tail on the way
+	// (TailLostHole) or never had records (LostRecordsHole).
+	FinishRecorded bool
+	// Settling marks a RootEnded weft run (not Derived) whose run_finish
+	// is not stored and that was heard from within InterruptedAfter
+	// (DeriveSettling): a destination may store the root span before the
+	// records that trail it (a log exporter's retry or backlog), so for
+	// that window the reader neither calls the records lost
+	// (LostRecordsHole, TailLostHole) nor the event stream done
+	// (EventPage.Done). Derived at read time with Status, never stored;
+	// Status itself already reads succeeded or failed from the root.
+	Settling bool
 	// StoppedBy names what ended the run, in the manifest's stop_when
 	// vocabulary (has_tool_call:<tools>, step_count_is:N,
 	// output_submitted, final_answer, parked, max_steps, usage_limit,
@@ -461,8 +476,17 @@ type PosEvent struct {
 type EventPage struct {
 	Events    []PosEvent
 	NextAfter *int64
-	Done      bool // the run is terminal and every stored event was returned
-	Gaps      []int64
+	// Done: every stored event was returned and the run is terminal —
+	// its run_finish is stored, its invoke_agent span ended with Error,
+	// or its invoke_agent span is stored (RunRow.RootEnded) and nothing
+	// was heard from the run for over InterruptedAfter (the settling
+	// window, DeriveSettling: records that trail a stored root are given
+	// that long to land, so a run whose run_finish was lost still ends
+	// a poll that waits for Done). An interrupted run (no root, stale)
+	// is not Done here: a reader that follows it decides from the row's
+	// derived Status.
+	Done bool
+	Gaps []int64
 }
 
 // MaxGaps bounds EventPage.Gaps: positions are the sender's numbers, and
@@ -565,6 +589,19 @@ func DeriveStatus(spanFailed, ended bool, lastSeen, now time.Time) Status {
 	default:
 		return StatusRunning
 	}
+}
+
+// DeriveSettling is RunRow.Settling's rule: the invoke_agent span is
+// stored (rootEnded), the run_finish record is not (finishRecorded
+// false), and now - lastSeen ≤ InterruptedAfter — the window in which a
+// destination that stored the root before the records behind it (a
+// log exporter's retry or backlog; Studio's destination batches logs
+// faster than spans, but a user's Exporters pair need not) may still
+// deliver them. Pass rootEnded false for a derived run: stock spans have
+// no records to wait for. A backend derives it at read time beside
+// DeriveStatus, with the same clock.
+func DeriveSettling(rootEnded, finishRecorded bool, lastSeen, now time.Time) bool {
+	return rootEnded && !finishRecorded && !lastSeen.IsZero() && now.Sub(lastSeen) <= InterruptedAfter
 }
 
 // LimitOf normalizes a query limit: 0 means the default 50, values

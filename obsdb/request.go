@@ -103,11 +103,17 @@ const (
 	// logger (not_recorded: events, the transcript and the request
 	// records; LostRecordsHole decides it).
 	CauseNoLogger HoleCause = "no_logger"
+	// CauseTailLost: a weft run's invoke_agent span was stored and its
+	// run_finish record was not, though earlier records of it were — a
+	// destination dropped the run's record tail (gap: the run reads
+	// succeeded from its root, its last steps' records missing;
+	// TailLostHole decides it).
+	CauseTailLost HoleCause = "tail_lost"
 )
 
 // HoleCauses lists the causes the table words, in order.
 func HoleCauses() []HoleCause {
-	return []HoleCause{CauseNoSpans, CauseResultCap, CauseLogCap, CauseNoPublicID, CauseDevTokenOnly, CauseNotServed, CauseResponseCap, CauseRawOff, CauseStockSpans, CauseNoLogger}
+	return []HoleCause{CauseNoSpans, CauseResultCap, CauseLogCap, CauseNoPublicID, CauseDevTokenOnly, CauseNotServed, CauseResponseCap, CauseRawOff, CauseStockSpans, CauseNoLogger, CauseTailLost}
 }
 
 var causeNotes = map[Hole]map[HoleCause]holeNote{
@@ -137,6 +143,12 @@ var causeNotes = map[Hole]map[HoleCause]holeNote{
 		CauseStockSpans: {
 			"derived from spans · no events",
 			"the producer exports stock OTel GenAI spans only: emit weft's records (docs/record-contract.md) for events, the transcript and requests",
+		},
+	},
+	HoleGap: {
+		CauseTailLost: {
+			"the run's root span ended but its run_finish record never arrived: a destination dropped the record tail, so the last steps' records are missing",
+			"check the log exporter's drops (its queue, batch and retry limits): the spans arrived, the records behind them did not",
 		},
 	},
 	HoleHidden: {
@@ -429,15 +441,39 @@ func (e *HoleError) Is(target error) bool { return target == ErrNotFound }
 // built from stock spans, docs/record-contract.md §9) reads HoleDerived
 // instead: its records are absent because its producer is not weft, so
 // "upgrade weft" would be the wrong fix there too (the badge's words
-// are HoleNoteFor(HoleDerived, CauseStockSpans)).
+// are HoleNoteFor(HoleDerived, CauseStockSpans)). A weft run whose root
+// span is stored and none of whose records is reads HoleNotRecorded
+// too — its InstructionsHash comes from the span — with the cause
+// RequestsHoleCause names (CauseNoLogger).
 func (r RunRow) RequestsHole() Hole {
+	h, _ := r.RequestsHoleCause()
+	return h
+}
+
+// RequestsHoleCause is RequestsHole with the cause a reader words it
+// by (HoleNoteFor): CauseStockSpans for a derived run; CauseNoLogger for
+// a weft run whose invoke_agent span is stored (RootEnded) and no record
+// of it is (LostRecordsHole: the app exported spans only — its
+// requests pane would otherwise list empty with no badge, the hash the
+// span carries reading as recorded); CauseDefault for a run written
+// before the request record. A settling run (RunRow.Settling) has no
+// hole yet: the records behind its root may still land.
+func (r RunRow) RequestsHoleCause() (Hole, HoleCause) {
 	if r.Derived {
-		return HoleDerived
+		return HoleDerived, CauseStockSpans
+	}
+	if r.Settling {
+		// The root arrived moments ago and the records behind it may
+		// still land: nothing is called missing yet.
+		return "", CauseDefault
+	}
+	if h, cause := LostRecordsHole(r, r.RootEnded); h != "" {
+		return h, cause
 	}
 	if r.InstructionsHash == "" && r.RequestCount == 0 {
-		return HoleNotRecorded
+		return HoleNotRecorded, CauseDefault
 	}
-	return ""
+	return "", CauseDefault
 }
 
 // LostRecordsHole is the hole of a weft run whose spans were stored
@@ -445,8 +481,11 @@ func (r RunRow) RequestsHole() Hole {
 // not_recorded with CauseNoLogger — the app exported spans only. "" for
 // any other run: one with a record, one with no span (hasSpans false:
 // the reader's, from DB.RunSpans), a running one (its records may be in
-// flight) and a derived run (RunRow.Derived: stock spans are no weft
-// app, its badge is derived's own, docs/record-contract.md §9).
+// flight), a settling one (RunRow.Settling: its root span was stored
+// moments ago and its records may still be on the way — decided once
+// InterruptedAfter has passed) and a derived run (RunRow.Derived: stock
+// spans are no weft app, its badge is derived's own,
+// docs/record-contract.md §9).
 //
 // The seam U5 widens (weft.run.events on the invoke_agent span, the
 // number of event records the core emitted): a root that says N > 0
@@ -455,13 +494,38 @@ func (r RunRow) RequestsHole() Hole {
 // the root carries that count the two read alike, and this answers the
 // commoner one.
 func LostRecordsHole(r RunRow, hasSpans bool) (Hole, HoleCause) {
-	if r.Derived || !hasSpans || r.Status == StatusRunning {
+	if r.Derived || !hasSpans || r.Status == StatusRunning || r.Settling {
 		return "", CauseDefault
 	}
 	if r.EventCount > 0 || r.MessageCount > 0 || r.RequestCount > 0 {
 		return "", CauseDefault
 	}
 	return HoleNotRecorded, CauseNoLogger
+}
+
+// TailLostHole is the hole of a weft run whose record tail a
+// destination dropped: its invoke_agent span is stored (RootEnded, an
+// Ok or Unset root — the run reads succeeded), some of its events are
+// (EventCount > 0) and its run_finish is not (FinishRecorded false) —
+// HoleGap with CauseTailLost. Without it such a run would read a clean
+// succeeded: the status comes from the root, and the event counter has
+// no hole below its high-water mark when the tail itself is what was
+// lost. "" for any other run: a failed one (its root's Error says how it
+// ended, and a failed run writes no run_finish), a derived one, a
+// settling one (RunRow.Settling: its tail may still be on the way — the
+// gap is raised once InterruptedAfter has passed), one whose run_finish
+// arrived, and one with no event at all (LostRecordsHole's).
+//
+// The seam U5 widens: once the invoke_agent span carries
+// weft.run.events (the number of event records the core emitted), the
+// gap can say how many were lost — "N of M" — and catch a lost tail
+// that run_finish outlived.
+func TailLostHole(r RunRow) (Hole, HoleCause) {
+	if r.Derived || !r.RootEnded || r.FinishRecorded || r.Settling ||
+		r.Status != StatusSucceeded || r.EventCount == 0 {
+		return "", CauseDefault
+	}
+	return HoleGap, CauseTailLost
 }
 
 // StoredRecord is one request, prompt or tools record as a backend

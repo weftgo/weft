@@ -136,7 +136,7 @@
 <run>.run.children[].cost_badge=string
 <run>.run.children[].cost_known=bool
 <run>.run.children[].cost_reason=string
-<run>.run.children[].cost_usd=<nil>
+<run>.run.children[].cost_usd=float64
 <run>.run.children[].delegated_cost_known=bool
 <run>.run.children[].delegated_cost_usd=float64
 <run>.run.children[].delta_count=float64
@@ -180,10 +180,9 @@
 <run>.run.cost_badge=string
 <run>.run.cost_known=bool
 <run>.run.cost_reason=string
-<run>.run.cost_usd=<nil>
+<run>.run.cost_usd=float64
 <run>.run.delegated_cost_known=bool
-<run>.run.delegated_cost_reason=string
-<run>.run.delegated_cost_usd=<nil>
+<run>.run.delegated_cost_usd=float64
 <run>.run.delta_count=float64
 <run>.run.err=string
 <run>.run.event_count=float64

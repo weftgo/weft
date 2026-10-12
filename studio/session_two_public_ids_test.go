@@ -23,7 +23,10 @@ func twoPublicIDSession(t *testing.T) (*httptest.Server, http.Handler, string) {
 	t.Cleanup(func() { _ = db.Close() })
 	seedRun(t, db, "r_a", "pub_a", "conv_s", "", nil)
 	seedRun(t, db, "r_b", "pub_b", "conv_s", "", nil)
-	srv := New(DB(db), Token(serverTok))
+	// Each run's 1 + 1 tokens cost $2 at these rates: a row's cost says
+	// how many runs it priced.
+	perToken := PricingTable{Dated: "2026-10-12", Models: []ModelPrice{{Provider: "wefttest", ModelGlob: "script", Input: 1e6, Output: 1e6}}}
+	srv := New(DB(db), Token(serverTok), Pricing(perToken))
 	t.Cleanup(func() { _ = srv.Close() })
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
@@ -31,11 +34,11 @@ func twoPublicIDSession(t *testing.T) (*httptest.Server, http.Handler, string) {
 }
 
 type scopedSessRow struct {
-	ID         string `json:"id"`
-	PublicID   string `json:"public_id"`
-	Turns      int    `json:"turns"`
-	CostReason string `json:"cost_reason"`
-	Runs       []struct {
+	ID       string   `json:"id"`
+	PublicID string   `json:"public_id"`
+	Turns    int      `json:"turns"`
+	CostUSD  *float64 `json:"cost_usd"`
+	Runs     []struct {
 		ID string `json:"id"`
 	} `json:"runs"`
 }
@@ -61,8 +64,8 @@ func TestServerSessionsPublicIDRowCostScoped(t *testing.T) {
 			t.Fatalf("?public_id=%s = %+v, want conv_s with %s's one turn", c.pub, page.Sessions, c.pub)
 		}
 		r := page.Sessions[0]
-		if !strings.Contains(r.CostReason, c.own) || strings.Contains(r.CostReason, c.other) {
-			t.Errorf("?public_id=%s cost_reason = %q, want %s's run %s alone, never %s", c.pub, r.CostReason, c.pub, c.own, c.other)
+		if r.CostUSD == nil || *r.CostUSD != 2 {
+			t.Errorf("?public_id=%s cost_usd = %v, want 2: %s's run %s alone, never %s", c.pub, r.CostUSD, c.pub, c.own, c.other)
 		}
 	}
 }

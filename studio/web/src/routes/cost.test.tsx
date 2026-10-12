@@ -43,8 +43,22 @@ const runs = golden<RunsPage>("runs")
 const rOK = runs.runs.find((r) => r.id === "r_ok")!
 /** A run whose end never arrived: cost unknown (badge "unknown"). */
 const rStale = runs.runs.find((r) => r.id === "r_stale")!
-/** A finished run on a model no pricing row matches: unpriced. */
-const rFail = runs.runs.find((r) => r.id === "r_fail")!
+/** A finished run on wefttest/script: scripted, an exact $0 (U7). */
+const rScripted = runs.runs.find((r) => r.id === "r_fail")!
+const KIMI_WHY =
+  "openai/kimi-k2.7-code has no price (no row of the default pricing table matches it)"
+/** A finished run on a model no pricing row matches: unpriced — the
+ * fixture's run on an OpenAI-compatible model, as pricing.go writes it. */
+const rFail: RunRow = {
+  ...rScripted,
+  model: { provider: "openai", name: "kimi-k2.7-code" },
+  cost_usd: null,
+  cost_known: false,
+  cost_badge: "unpriced",
+  cost_reason: KIMI_WHY,
+  unpriced_models: ["openai/kimi-k2.7-code"],
+  cache: "not_reported",
+}
 const row = (over: Partial<RunRow>): RunRow => ({ ...rOK, ...over })
 /** A run priced at usd (own) and del (its subagents'; null: unpriced). */
 const priced = (
@@ -130,6 +144,34 @@ describe("the runs table's Cost column", () => {
     expect(unknown.getAttribute("title")).toBe(rStale.cost_reason)
     expect(unknown.getAttribute("title")).toContain("never arrived")
     expect(costOf("r_stale")!.textContent).not.toContain("$0.00")
+    // U7: the unpriced cell carries its small chip; the reason is said
+    // once over the list — one line, the model, the pricing link.
+    expect(
+      costOf("r_fail")!.querySelector("[data-cost-chip]")!.textContent
+    ).toBe("unpriced")
+    const lines = document.querySelectorAll("[data-unpriced-line]")
+    expect(lines).toHaveLength(1)
+    expect(lines[0].firstElementChild!.textContent).toBe(
+      "1 run unpriced: no row for openai/kimi-k2.7-code"
+    )
+    expect(lines[0].querySelector("[data-pricing-link]")!.textContent).toBe(
+      "price this model…"
+    )
+    expect(
+      lines[0].querySelector("[data-pricing-link]")!.getAttribute("href")
+    ).toContain("/settings?price=")
+  })
+
+  it("a scripted run reads $0 · scripted; no unpriced line (U7)", async () => {
+    studio
+      .on("GET meta", meta(["pricing", "search"]))
+      .on("GET runs", { total: 2, runs: [rScripted, rOK], next_before: null })
+    renderApp("/runs")
+    await screen.findByText("r_ok")
+    const v = within(costOf("r_fail")!).getByText("$0 · scripted")
+    expect(v.getAttribute("data-cost-badge")).toBe("scripted")
+    expect(v.getAttribute("data-cost")).toBe("0")
+    expect(document.querySelector("[data-unpriced-line]")).toBeNull()
   })
 
   it("sorting by cost asks /api/search?sort=cost when the Studio searches and prices", async () => {
@@ -258,6 +300,41 @@ describe("the sessions list", () => {
     renderApp("/sessions")
     await screen.findByText("s_orders")
     expect(document.querySelector("[data-cost-cell]")).toBeNull()
+  })
+
+  it("U7: the cost cell is a number or —; the unpriced turns are said once over the list, with the pricing link", async () => {
+    const sessions = golden<SessionsPage>("sessions")
+    const unpriced = {
+      ...sessions.sessions[0],
+      cost_usd: null,
+      cost_known: false,
+      cost_badge: "unpriced" as const,
+      cost_reason:
+        "9 of 9 turns unpriced: no price for openai/kimi-k2.7-code, acme/x, acme/y",
+      unpriced_models: ["openai/kimi-k2.7-code", "acme/x", "acme/y"],
+    }
+    studio
+      .on("GET meta", meta(["pricing"]))
+      .on("GET sessions", {
+        ...sessions,
+        sessions: [unpriced, sessions.sessions[1]],
+      })
+    renderApp("/sessions")
+    await screen.findByText("s_orders")
+    const cell = document.querySelectorAll("[data-cost-cell]")[0]
+    expect(visible(cell)).toBe("—")
+    expect(cell.querySelector("[data-cost-chip]")).toBeNull()
+    const lines = document.querySelectorAll("[data-unpriced-line]")
+    expect(lines).toHaveLength(1)
+    expect(lines[0].firstElementChild!.textContent).toBe(
+      "1 session unpriced: no row for openai/kimi-k2.7-code, acme/x (+1)"
+    )
+    expect(lines[0].firstElementChild!.getAttribute("title")).toBe(
+      "no row of the pricing table matches openai/kimi-k2.7-code, acme/x, acme/y"
+    )
+    expect(lines[0].querySelector("[data-pricing-link]")!.textContent).toBe(
+      "price these models…"
+    )
   })
 })
 
@@ -392,7 +469,13 @@ describe("the run header", () => {
       },
       ["pricing", "steps"]
     )
-    const step0 = golden<StepDoc>("step-0")
+    const step0: StepDoc = {
+      ...golden<StepDoc>("step-0"),
+      cost_usd: null,
+      cost_known: false,
+      cost_badge: "unpriced",
+      cost_reason: KIMI_WHY,
+    }
     studio.on("GET runs/r_st/steps/0", { ...step0, run_id: "r_st" })
     renderApp("/runs/r_st?view=story")
     const card = await waitFor(() => {
@@ -412,11 +495,14 @@ describe("the run header", () => {
       expect(el).toBeTruthy()
       return el!
     })
-    expect(visible(cost)).toBe("—")
+    expect(visible(cost)).toBe("—unpriced")
     expect(cost.getAttribute("title")).toBe(step0.cost_reason)
-    // The label and the reason ride in the accessible text, never an aria-label.
+    // The label and the reason ride in the accessible text, never an
+    // aria-label; the chip is aria-hidden (the words say it).
     expect(cost.hasAttribute("aria-label")).toBe(false)
-    expect(cost.textContent).toBe(`step cost — not known: ${step0.cost_reason}`)
+    expect(cost.textContent).toBe(
+      `step cost — not known: ${step0.cost_reason}unpriced`
+    )
   })
 
   it("no cost without capability pricing", async () => {
@@ -622,12 +708,10 @@ describe("the playground matrix's cost", () => {
       () =>
         expect(
           total("B")?.querySelector("[data-cost]")?.getAttribute("title")
-        ).toContain(
-          "no row of the default pricing table matches wefttest/script"
-        ),
+        ).toBe(KIMI_WHY),
       { timeout: 10_000 }
     )
-    expect(visible(total("B"))).toBe("—")
+    expect(visible(total("B"))).toBe("—unpriced")
     expect(
       total("B")!.querySelector("[data-cost]")!.getAttribute("data-cost")
     ).toBe("unknown")

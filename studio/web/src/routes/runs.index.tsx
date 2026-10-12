@@ -41,6 +41,7 @@ import {
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { EmptyState } from "@/components/studio/empty-state"
 import { RunsTable } from "@/components/studio/runs-table"
+import { UnpricedNote } from "@/components/studio/cost"
 import type { RunSortKey } from "@/components/studio/runs-table"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -699,6 +700,8 @@ function RunsPage() {
         )
       ) : (
         <>
+          {/* U7: what is unpriced, once over the rows, not per cell. */}
+          {costCapable ? <UnpricedNote rows={runs} /> : null}
           <div className="overflow-x-auto rounded-lg border bg-background">
             <RunsTable
               runs={runs}

@@ -78,7 +78,7 @@ import {
   replayBounds,
 } from "../lib/experiment-body"
 import type { LabFields } from "../lib/experiment-body"
-import { atLeastCost, sumCost } from "../lib/cost"
+import { atLeastCost, sumCost, unpricedLine } from "../lib/cost"
 import {
   ackCatalogHole,
   badge,
@@ -201,6 +201,7 @@ import {
   runLink,
   saveTestLink,
   sessionLink,
+  settingsLink,
   traceLink,
 } from "../lib/links"
 import type { PlaygroundHandoff } from "../lib/links"
@@ -219,16 +220,24 @@ export function statusChip(r: RunRow): string {
 
 /** prevTurn is the turn before r in its session among the loaded
  * turns (turnTitle's prev: Studio's session page reads the turn above;
- * the panel's list is newest first and may span sessions). */
+ * the panel's list is newest first and may span sessions): the highest
+ * loaded non-fork turn below r's — turn numbers can have gaps (a queued
+ * turn's number is taken at Send and dropped by ClearQueue). */
 export function prevTurn(
   r: RunRow,
   turns: readonly RunRow[]
 ): RunRow | undefined {
   if (r.forked_from || !r.session_id || !(r.turn > 1)) return undefined
-  return turns.find(
-    (x) =>
-      x.session_id === r.session_id && x.turn === r.turn - 1 && !x.forked_from
-  )
+  let p: RunRow | undefined
+  for (const x of turns)
+    if (
+      x.session_id === r.session_id &&
+      !x.forked_from &&
+      x.turn < r.turn &&
+      x.turn > (p?.turn ?? 0)
+    )
+      p = x
+  return p
 }
 
 /** engineWord is an experiment's engine as its chips say it: scripted
@@ -2850,22 +2859,43 @@ export class WeftDevtools extends HTMLElement {
         "data-weft-stats": "",
       })
     )
-    // The turns' summed cost (A5.3), gated on capability pricing: "≥ $x"
-    // when a turn's is not known, "—" when none is, the reasons its title.
-    // Older turns not loaded yet: the sum is the loaded turns' only, "≥".
-    if (s.turns.length && hasCapability(s, "pricing"))
+    // The turns' summed cost (A5.3), gated on capability pricing: "≥ $x ·
+    // k of n turns priced" when a turn's is not known, "—" when none is,
+    // the reasons its title. Older turns not loaded yet: the sum is the
+    // loaded turns' only, "≥". Then what is unpriced, once (U7: lib/
+    // cost.ts's unpricedLine), a link to Studio's pricing table.
+    if (s.turns.length && hasCapability(s, "pricing")) {
       h.append(
         el(
           "span",
           undefined,
           [
             costText(
-              atLeastCost(s.turns, loadedOnly(s, s.turns.length, "turn"))
+              atLeastCost(
+                s.turns,
+                loadedOnly(s, s.turns.length, "turn"),
+                "turn"
+              )
             ),
           ],
           { "data-weft-cost-total": "" }
         )
       )
+      const u = unpricedLine(s.turns, "turn")
+      if (u) {
+        const a = el("a", "weft-chip weft-tag weft-unp", u.text, {
+          href: href(this.base, settingsLink(u.models[0])),
+          target: "_blank",
+          rel: "noopener",
+          title: `${u.title} · price in Studio`,
+          "data-weft-unpriced": "",
+        })
+        on(a, "click", (e, n) => {
+          if (this.handoff((n as HTMLAnchorElement).href)) e.preventDefault()
+        })
+        h.append(a)
+      }
+    }
     if (s.turns.length && s.selected) {
       const a = el("a", "weft-btn", "⤢", {
         href: studioLink(this.base, s.selected, this.stepNow(s)),

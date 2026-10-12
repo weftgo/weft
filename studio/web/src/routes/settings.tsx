@@ -44,6 +44,7 @@ import {
   sameDraft,
   saveEdits,
   tokenIdentity,
+  withPriceRow,
 } from "@/lib/settings"
 import type { DraftProblem, PricingDraft, RowField } from "@/lib/settings"
 import { useCapabilities } from "@/hooks/use-capabilities"
@@ -67,6 +68,12 @@ import {
 } from "@/components/ui/table"
 
 export const Route = createFileRoute("/settings")({
+  // ?price=<provider/model>: the pricing table opens with a row for it
+  // (U7, an unpriced model's "price this model…" link).
+  validateSearch: (search: Record<string, unknown>): { price?: string } =>
+    typeof search.price === "string" && search.price
+      ? { price: search.price }
+      : {},
   component: SettingsPage,
 })
 
@@ -556,11 +563,22 @@ const FIELD_HEAD: Record<RowField, string> = {
 function PricingTable({ settings }: { settings: PricingSettings }) {
   const key = editsKey(settings)
   const served = useMemo(() => draftOf(settings), [settings])
-  const [draft, setDraft] = useState<PricingDraft>(
-    () => loadEdits(key) ?? served
-  )
+  const { price } = Route.useSearch()
+  // A ?price= link (U7) leads the draft with a row for that model, its
+  // rates to fill — an edit like any other, kept in this browser.
+  const initial = () => {
+    const d = loadEdits(key) ?? served
+    return price ? withPriceRow(d, price) : d
+  }
+  const [draft, setDraft] = useState<PricingDraft>(initial)
   // Another table served (a restart with another file): its own edits.
-  useEffect(() => setDraft(loadEdits(key) ?? served), [key, served])
+  useEffect(() => setDraft(initial()), [key, served, price])
+  useEffect(() => {
+    if (price)
+      document
+        .getElementById("settings-pricing")
+        ?.scrollIntoView({ block: "start" })
+  }, [price])
   const edited = !sameDraft(draft, served)
   const update = (next: PricingDraft) => {
     setDraft(next)
@@ -600,8 +618,10 @@ function PricingTable({ settings }: { settings: PricingSettings }) {
       />
       <p className="text-xs text-muted-foreground" data-pricing-note>
         Rates are USD per 1M tokens; first match wins; an empty optional rate
-        prices that kind at the base rate. Edits stay in this browser; to apply
-        them, download the file and run Studio with{" "}
+        prices that kind at the base rate; an empty provider (or{" "}
+        <span className="font-mono">*</span>) matches the model on any
+        transport. Edits stay in this browser; to apply them, download the file
+        and run Studio with{" "}
         <span className="font-mono">--pricing &lt;file&gt;</span> or{" "}
         <span className="font-mono">WEFT_PRICING</span>.
       </p>

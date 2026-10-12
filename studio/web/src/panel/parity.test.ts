@@ -2029,7 +2029,9 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
 // the same figure and the same reason for the same row — lib/cost.ts's
 // words on both — own and delegated, two numbers on each.
 describe("a turn's cost on both surfaces (A5.3)", () => {
-  const WHY = "no row of the default pricing table matches wefttest/script"
+  const WHY =
+    "openai/kimi-k2.7-code has no price (no row of the default pricing table matches it)"
+  const SCRIPTED = "a scripted model: nothing bills it, an exact $0"
   const cases: { name: string; doc: Partial<RunDoc> }[] = [
     {
       name: "priced, own + delegated",
@@ -2048,6 +2050,19 @@ describe("a turn's cost on both surfaces (A5.3)", () => {
         cost_known: false,
         cost_badge: "unpriced",
         cost_reason: WHY,
+        unpriced_models: ["openai/kimi-k2.7-code"],
+        delegated_cost_usd: 0.0011,
+        delegated_cost_known: true,
+      },
+    },
+    {
+      name: "a scripted model (U7): $0 · scripted, exact",
+      doc: {
+        cost_usd: 0,
+        cost_known: true,
+        cost_badge: "scripted",
+        cost_reason: SCRIPTED,
+        cache: "exact",
         delegated_cost_usd: 0.0011,
         delegated_cost_known: true,
       },
@@ -2093,6 +2108,12 @@ describe("a turn's cost on both surfaces (A5.3)", () => {
         text: pHint.textContent,
         title: pHint.getAttribute("title"),
       }
+      // U7: the header's one unpriced line (the panel counts turns).
+      const pLine = $(el, "[data-weft-unpriced]")
+      const pUnpriced = pLine && {
+        text: pLine.textContent,
+        title: pLine.getAttribute("title"),
+      }
       el.remove()
       await settle()
       cleanup()
@@ -2134,6 +2155,20 @@ describe("a turn's cost on both surfaces (A5.3)", () => {
         expect(pCache?.text).toBe("cache not reported")
       if (c.doc.cost_known === false)
         expect(pOwn).toEqual({ text: "—", title: WHY })
+      if (c.doc.cost_badge === "scripted")
+        expect(pOwn).toEqual({ text: "$0 · scripted", title: SCRIPTED })
+      // The one unpriced line: the same models, the same title, on both
+      // (the panel's says "turn" and adds where the link goes) — or neither.
+      const sLine = document.querySelector("[data-unpriced-line] > span")
+      const sUnpriced = sLine && {
+        text: sLine.textContent.replace(/\brun\b/, "turn"),
+        title: `${sLine.getAttribute("title")} · price in Studio`,
+      }
+      expect(pUnpriced).toEqual(sUnpriced)
+      if (c.doc.cost_badge === "unpriced")
+        expect(pUnpriced?.text).toBe(
+          "1 turn unpriced: no row for openai/kimi-k2.7-code"
+        )
     })
 })
 
@@ -2761,5 +2796,50 @@ describe("a resume and an experiment on both surfaces (U6-fix)", () => {
     )
     expect(heads["s_01-t4"]).toBe(`t4${RESUME}`)
     expect(heads["s_01-t3"]).toBe(`t3${PROMPT}`)
+  })
+
+  // U7 (c1): turn numbers can have gaps — a queued turn's number is
+  // taken at Send and dropped by ClearQueue — so t5 resumes t3 with no
+  // t4 loaded: the panel takes the highest loaded turn below, as
+  // Studio's session page takes the turn above.
+  it("a gap in the turn numbers: t5 resumes t3 on both surfaces", async () => {
+    const t5 = { ...t4, id: "s_01-t5", turn: 5 }
+    const fake = new FakeStudio()
+      .on("GET meta", { ...META, capabilities: ["ingest", "playground"] })
+      .on("GET sessions", { total: 1, sessions: [SESSION], next_before: null })
+      .on("GET runs", { total: 2, runs: [t5, t3], next_before: null })
+    for (const r of [t3, t5])
+      fake
+        .on(`GET runs/${r.id}`, { ...r, children: [], holes: [] })
+        .on(`GET runs/${r.id}/events`, pagedEvents(events(), { done: true }))
+        .on(
+          `GET runs/${r.id}/transcript`,
+          transcript([user("where is 42?")], [assistant("It shipped.")])
+        )
+        .on(`GET runs/${r.id}/spans`, { spans: [] })
+        .on(`GET runs/${r.id}/requests`, pagedRequests(OK_REQUESTS()))
+        .on(`GET runs/${r.id}/tools`, golden<object>("tools-ok"))
+    fake.install()
+    const el = await mount(ATTRS)
+    await vi.waitFor(() => expect(all(el, ".weft-turn")).toHaveLength(2), {
+      timeout: 5_000,
+    })
+    const rows = Object.fromEntries(
+      all(el, ".weft-turn").map((r) => [
+        r.getAttribute("data-weft-run"),
+        r.querySelector(".weft-ttl")!.textContent,
+      ])
+    )
+    expect(rows["s_01-t5"]).toBe(`t5 ${RESUME}`)
+    el.remove()
+    await settle()
+    cleanup()
+    const { container } = await renderWithRouter(
+      createElement(SessionTurns, { turns: [t3, t5], experiments: new Map() })
+    )
+    const head = container.querySelector(
+      '[data-turn="s_01-t5"] [data-run-link]'
+    )
+    expect(head!.textContent).toBe(`t5${RESUME}`)
   })
 })

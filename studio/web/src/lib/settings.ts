@@ -55,6 +55,26 @@ export function draftOf(s: PricingSettings): PricingDraft {
   }
 }
 
+/** withPriceRow is the draft with a row for an unpriced provider/model
+ * first (U7's "price this model…": the first match wins, so a new row
+ * leads), its rates left to fill — or the draft as it is when a row
+ * for it is there already. The provider is the text before the first
+ * "/", the model glob the rest. */
+export function withPriceRow(d: PricingDraft, price: string): PricingDraft {
+  const at = price.indexOf("/")
+  const provider = at < 0 ? "*" : price.slice(0, at)
+  const model_glob = at < 0 ? price : price.slice(at + 1)
+  if (!model_glob) return d
+  if (
+    d.rows.some(
+      (r) =>
+        r.provider.trim() === provider && r.model_glob.trim() === model_glob
+    )
+  )
+    return d
+  return { ...d, rows: [{ ...emptyRow(), provider, model_glob }, ...d.rows] }
+}
+
 /** An empty row (the editor's "add row"). */
 export function emptyRow(): DraftRow {
   return {
@@ -240,12 +260,15 @@ export function problems(d: PricingDraft): DraftProblem[] {
       message: `"${d.dated}" is not a YYYY-MM-DD date`,
     })
   d.rows.forEach((r, i) => {
-    if (!r.provider.trim())
-      out.push({ row: i, field: "provider", message: "missing" })
+    // An empty provider is "*" (U7): the row matches on its model glob
+    // alone, any transport — the loader's own rule.
     if (!r.model_glob.trim())
       out.push({ row: i, field: "model_glob", message: "missing" })
-    if (r.provider.trim() && r.model_glob.trim()) {
-      const bad = globError(`${r.provider.trim()}/${r.model_glob.trim()}`)
+    else {
+      const p = r.provider.trim() || "*"
+      const bad = globError(
+        p === "*" ? r.model_glob.trim() : `${p}/${r.model_glob.trim()}`
+      )
       if (bad)
         out.push({
           row: i,
@@ -287,7 +310,7 @@ export function pricingFile(
   if (problems(d).length > 0) return null
   const models = d.rows.map((r) => {
     const m: ModelPrice = {
-      provider: r.provider.trim(),
+      provider: r.provider.trim() || "*",
       model_glob: r.model_glob.trim(),
       input: Number(r.input.trim()),
       output: Number(r.output.trim()),

@@ -30,6 +30,7 @@ import {
   runTotal,
   sortByCost,
   sumCost,
+  unpricedLine,
 } from "./cost"
 import { CELL_REASONS, CELL_WORDS } from "./stepdiff"
 import { derivedBodies } from "../test/derived-fixture"
@@ -44,10 +45,12 @@ const COST_KEYS: Record<keyof CostFields, true> = {
   cost_badge: true,
   cost_reason: true,
   cache: true,
+  unpriced_models: true,
 }
 const DELEGATED_KEYS: Record<keyof DelegatedCostFields, true> = {
   delegated_cost_usd: true,
   delegated_cost_known: true,
+  delegated_unpriced_models: true,
   delegated_cost_reason: true,
 }
 const META_PRICING_KEYS: Record<keyof MetaPricing, true> = {
@@ -145,8 +148,13 @@ describe("formatUSD", () => {
 
 const goldenRun = (id: string): RunRow =>
   golden<RunsPage>("runs").runs.find((r) => r.id === id)!
-/** A finished run on a model no row matches: unpriced. */
-const rFail = () => goldenRun("r_fail")
+/** A finished run on a model no row matches: unpriced (the fixture's
+ * subagent, openai/kimi-k2.7-code). */
+const rFail = (): RunRow =>
+  golden<RunsPage>("runs-children").runs.find((r) => r.id === "r_sub/0/call_3")!
+/** A finished run on wefttest/script: scripted, an exact $0 (U7). */
+const rScripted = () => goldenRun("r_fail")
+const KIMI = "openai/kimi-k2.7-code has no price"
 /** A run whose end never arrived: its cost is unknown, not unpriced. */
 const rStale = () => goldenRun("r_stale")
 
@@ -171,9 +179,21 @@ describe("costView", () => {
     const v = costView(r)
     expect(v).toMatchObject({ known: false, text: "—", badge: "unpriced" })
     expect(v.title).toBe(r.cost_reason)
-    expect(v.title).toContain(
-      "no row of the default pricing table matches wefttest/script"
-    )
+    expect(v.title).toContain(KIMI)
+  })
+  it("a scripted model's figure is an exact $0 · scripted (U7)", () => {
+    expect(costView(rScripted())).toMatchObject({
+      known: true,
+      text: "$0 · scripted",
+      badge: "scripted",
+      usd: 0,
+    })
+    expect(sumCost([rScripted(), rScripted()])).toMatchObject({
+      known: true,
+      text: "$0 · scripted",
+    })
+    // Beside a priced run the total is a plain figure.
+    expect(sumCost([rScripted(), priced(0.02)]).text).toBe("$0.02")
   })
   it("a run whose end never arrived is — too, badged unknown with its reason", () => {
     const r = rStale()
@@ -275,9 +295,7 @@ describe("the cost order and totals", () => {
     })
     const one = sumCost([priced(0.01), rFail()])
     expect(one).toMatchObject({ known: false, text: "—" })
-    expect(one.title).toContain(
-      "no row of the default pricing table matches wefttest/script"
-    )
+    expect(one.title).toBe(rFail().cost_reason)
     expect(sumCost([priced(0.01), undefined])).toMatchObject({
       known: false,
       text: "—",
@@ -290,18 +308,27 @@ describe("the cost order and totals", () => {
     const part = atLeastCost([priced(0.02, 0.01), rFail(), rFail()])
     expect(part).toMatchObject({
       known: false,
-      text: "≥ $0.03",
+      text: "≥ $0.03 · 1 of 3 runs priced",
       usd: 0.03,
       badge: "unpriced",
     })
-    // Each reason once, sumCost's words for it.
+    // Each reason once, sumCost's words for it, in the title only.
     const why = sumCost([rFail()]).title
-    expect(part.title).toBe(`1 of 3 runs' own cost known — ${why}`)
+    expect(part.title).toBe(`1 of 3 runs priced · ${why}`)
     expect(atLeastCost([rFail()])).toMatchObject({
       known: false,
       text: "—",
-      title: why,
+      title: `0 of 1 runs priced · ${why}`,
     })
+    // U7: a partial $0 (only scripted runs priced) is "—", never "≥ $0.00";
+    // "<" never follows "≥".
+    expect(atLeastCost([rScripted(), rFail()])).toMatchObject({
+      text: "—",
+      title: `1 of 2 runs priced · ${why}`,
+    })
+    expect(
+      atLeastCost([priced(0.00002), rFail()], undefined, "turn").text
+    ).toBe("≥ $0.0001 · 1 of 2 turns priced")
     expect(atLeastCost([])).toMatchObject({
       known: false,
       text: "—",
@@ -317,19 +344,17 @@ describe("the cost order and totals", () => {
     ])
     expect(v).toMatchObject({
       known: false,
-      text: "≥ $0.0060",
+      text: "≥ $0.0060 · 1 of 2 runs priced",
       badge: "unknown",
     })
-    // Both own figures are known: the count says so, beside the delegated part's reason.
-    expect(v.title).toBe(
-      `2 of 2 runs' own cost known — delegated not known: ${running}`
-    )
-    // Own known, delegated unknown, nothing else: still ≥ its own, never —, never "0 of 1".
+    // The whole bill of one is known: the count says so, beside the delegated part's reason.
+    expect(v.title).toBe(`1 of 2 runs priced · delegated: ${running}`)
+    // Own known, delegated unknown, nothing else: still ≥ its own, never —.
     expect(
       atLeastCost([{ ...priced(0.002, null), delegated_cost_reason: running }])
     ).toMatchObject({
-      text: "≥ $0.0020",
-      title: `1 of 1 runs' own cost known — delegated not known: ${running}`,
+      text: "≥ $0.0020 · 0 of 1 runs priced",
+      title: `0 of 1 runs priced · delegated: ${running}`,
     })
   })
   it("atLeastCost over a paged list: ≥ even when every loaded row is known, the note its title's last words", () => {
@@ -342,11 +367,11 @@ describe("the cost order and totals", () => {
     })
     const why = sumCost([rFail()]).title
     expect(atLeastCost([priced(0.01), rFail()], "loaded only").title).toBe(
-      `1 of 2 runs' own cost known — ${why} · loaded only`
+      `1 of 2 runs priced · ${why} · loaded only`
     )
     expect(atLeastCost([rFail()], "loaded only")).toMatchObject({
       text: "—",
-      title: `${why} · loaded only`,
+      title: `0 of 1 runs priced · ${why} · loaded only`,
     })
   })
   it("a derived run's no-usage cost is not known — never 'yet': it never arrives; keyed on the row's derived mark, not the words", () => {
@@ -358,7 +383,7 @@ describe("the cost order and totals", () => {
     )
     expect(atLeastCost([derived])).toMatchObject({
       text: "—",
-      title: `a run's cost is not known: ${derived.cost_reason}`,
+      title: `0 of 1 runs priced · a run's cost is not known: ${derived.cost_reason}`,
     })
     // Another wording on a derived row: still no "yet"; the same words on a weft row: "yet".
     expect(
@@ -418,5 +443,40 @@ describe("the compare's cost cell (lib/stepdiff.ts's rule and words)", () => {
       why: "",
     })
     expect(costCellWords("changed", known(0.2)).text).toBe("$0.20")
+  })
+})
+
+describe("a page's one unpriced line (U7)", () => {
+  it("counts the rows unpriced, own or delegated; the models deduped, two shown, all in the title", () => {
+    const sub = golden<RunsPage>("runs").runs.find((r) => r.id === "r_sub")!
+    expect(sub.delegated_unpriced_models).toEqual(["openai/kimi-k2.7-code"])
+    expect(unpricedLine(golden<RunsPage>("runs").runs)).toEqual({
+      text: "1 run unpriced: no row for openai/kimi-k2.7-code",
+      title: "no row of the pricing table matches openai/kimi-k2.7-code",
+      models: ["openai/kimi-k2.7-code"],
+    })
+    const m = (x: string): RunRow => ({
+      ...rFail(),
+      unpriced_models: [x],
+    })
+    const line = unpricedLine(
+      [m("a/x"), m("b/y"), m("a/x"), m("c/z"), rScripted(), rStale()],
+      "turn"
+    )!
+    expect(line.text).toBe("4 turns unpriced: no row for a/x, b/y (+1)")
+    expect(line.title).toBe("no row of the pricing table matches a/x, b/y, c/z")
+    expect(unpricedLine([rScripted(), priced(1), rStale()])).toBeNull()
+  })
+  it("delegatedView badges pricing.go's one-line tally words", () => {
+    const d = (reason: string) =>
+      delegatedView({ ...priced(1, null), delegated_cost_reason: reason }).badge
+    expect(d("2 of 3 subagent runs unpriced: no price for x/y")).toBe(
+      "unpriced"
+    )
+    expect(
+      d(
+        "1 of 3 subagent runs' cost not known yet (r/0/c1: running: usage arrives at run end); 1 unpriced: no price for x/y"
+      )
+    ).toBe("unknown")
   })
 })

@@ -17,7 +17,12 @@ import { fetchSessions, nextCursor } from "@/lib/api"
 import type { PageCursor } from "@/lib/api"
 import { absoluteTime, relativeTime, tokens } from "@/lib/format"
 import { EmptyState } from "@/components/studio/empty-state"
-import { CacheHint, Cost, useCostCapable } from "@/components/studio/cost"
+import {
+  CacheHint,
+  Cost,
+  UnpricedNote,
+  useCostCapable,
+} from "@/components/studio/cost"
 import {
   CopyId,
   IdChip,
@@ -205,6 +210,9 @@ function SessionsPage() {
         )
       ) : (
         <>
+          {/* U7: the cost cell is a number or "—"; what is unpriced is
+              said once, here, with the pricing link. */}
+          {costCapable ? <UnpricedNote rows={sessions} noun="session" /> : null}
           <div className="overflow-x-auto rounded-lg border bg-background">
             <Table>
               <TableHeader>
@@ -280,7 +288,7 @@ function SessionsPage() {
                           data-cost-cell
                         >
                           <div className="flex flex-col items-end">
-                            <Cost fields={s} />
+                            <Cost fields={s} chip={false} />
                             <CacheHint fields={s} />
                           </div>
                         </TableCell>

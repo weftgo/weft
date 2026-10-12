@@ -7,7 +7,11 @@
 //     except where a total is asked for (a sort, a variant's sum) —
 //     and then one unknown part makes the total unknown;
 //   - cache other than "exact" is a hint: the adapter reported no
-//     cache splits, so every input token was priced at the input rate.
+//     cache splits, so every input token was priced at the input rate;
+//   - a scripted model's figure (badge "scripted") is an exact $0 and
+//     reads "$0 · scripted"; an unpriced one is "—", its title the model
+//     alone, and a page says what is unpriced once over its rows
+//     (unpricedLine), never a sentence per row (U7).
 // The devtools panel imports it too (A5.3: a turn's cost, the header's
 // sum, the result pane's): the same figures and words on both surfaces.
 import type { CostFields, DelegatedCostFields, RunRow } from "./api"
@@ -47,12 +51,15 @@ export interface CostView {
   text: string
   /** The exact figure (known) or why there is none (unknown). */
   title: string
-  /** unpriced | unknown when not known. */
+  /** unpriced | unknown when not known; scripted on a known $0. */
   badge?: string
   usd?: number
 }
 
 const UNKNOWN_WHY = "this Studio did not price it"
+
+/** A scripted model's figure: an exact $0 nothing bills. */
+export const SCRIPTED_TEXT = "$0 · scripted"
 
 function view(
   usd: number | null | undefined,
@@ -62,6 +69,14 @@ function view(
   cache?: string
 ): CostView {
   if (known && typeof usd === "number") {
+    if (badge === "scripted" && !usd)
+      return {
+        known: true,
+        text: SCRIPTED_TEXT,
+        title: reason || "",
+        badge,
+        usd,
+      }
     const exact = `$${usd.toFixed(6)} USD`
     return {
       known: true,
@@ -95,14 +110,15 @@ export function costView(f: CostFields | null | undefined): CostView {
 
 /** The reason words studio/pricing.go gives a model no pricing row
  * matches (or a run that names none): what makes a figure "unpriced"
- * rather than "unknown". */
-const UNPRICED_WORDS = /\bno row\b.*\bmatches\b|reported no model to price/
+ * rather than "unknown" (tally's "n of m subagent runs unpriced", a
+ * Studio before U7's "no row … matches"). */
+const UNPRICED_WORDS = /unpriced|\bno row\b.*\bmatches\b|reported no model/
 
-/** The lead studio/pricing.go's notPriced gives a delegated reason when
- * any child's part is unknown ("a subagent run's cost is not known
- * yet: …"): the whole is unknown then, whatever unpriced child the
- * list goes on to name. */
-const UNKNOWN_LEAD = /^[^:]*'s cost is not known yet:/
+/** The words studio/pricing.go's tally gives a delegated reason when
+ * any child's part is unknown ("1 of 3 subagent runs' cost not known
+ * yet (…)"; before U7 "…'s cost is not known yet: …"): the whole is
+ * unknown then, whatever unpriced child it goes on to count. */
+const UNKNOWN_LEAD = /not known yet/
 
 /** delegatedView reads a run's delegated block (its subagents'). The
  * API sends no delegated badge, only delegated_cost_reason: the badge
@@ -178,19 +194,30 @@ export function sumCost(
 ): CostView {
   if (!rows.length) return view(null, false, "no run to total")
   let usd = 0
+  // Every run a scripted model's $0: the total is "$0 · scripted" too.
+  let scripted = true
   for (const r of rows) {
     if (!r) return view(null, false, "a run's cost is not read yet")
     if ("text" in r) {
       // An already drawn figure (lostCellCost): known adds, unknown is the total's reason.
       if (!r.known) return view(null, false, r.title, r.badge)
       usd += r.usd ?? 0
+      scripted &&= r.badge === "scripted"
       continue
     }
     const t = runTotal(r)
     if (!t.known) return totalUnknown(r)
     usd += t.usd
+    scripted &&= r.cost_badge === "scripted"
   }
-  return view(usd, true, undefined)
+  return scripted
+    ? view(
+        0,
+        true,
+        rows.length > 1 ? "every run a scripted model's" : undefined,
+        "scripted"
+      )
+    : view(usd, true, undefined)
 }
 
 /** A row sumCost and atLeastCost read: its cost blocks and, on a run
@@ -207,24 +234,28 @@ function totalUnknown(r: CostRow): CostView {
   // A derived run's own figure never resolves (its spans carry what usage
   // there is): "not known", never "not known yet" — keyed on the row's
   // derived mark, not on the API's words.
-  const what =
-    badge === "unknown"
-      ? `a run's cost is not known${!own.known && isDerived(r) ? "" : " yet"}`
-      : "a run is not priced"
+  // An unpriced part's title names its model already: no lead.
+  if (badge !== "unknown") return view(null, false, part.title, badge)
+  const what = `a run's cost is not known${!own.known && isDerived(r) ? "" : " yet"}`
   return view(null, false, `${what}: ${part.title}`, badge)
 }
 
 /** atLeastCost totals runs' whole bills where an unknown run must not
  * hide the known ones (the panel's header over its turns, its replays
- * of a turn — A5.3): every run known → sumCost; some unknown → "≥ $x"
- * (not known; usd the known part — a run's known own figure counts
- * when only its delegated part is unknown), its title how many runs'
- * own cost is known and each unknown part's reason (sumCost's words; a
- * known own figure's "delegated not known: …"), never a figure claimed
- * whole; nothing known → "—" with the reasons. more says the rows are
- * not all there is (a paged list): the figure is then "≥" even when
- * every row is known, more its title's last words. */
-export function atLeastCost(rows: readonly CostRow[], more?: string): CostView {
+ * of a turn — A5.3): every run known → sumCost; some unknown → "≥ $x ·
+ * k of n runs priced" (not known; usd the known part — a run's known
+ * own figure counts when only its delegated part is unknown; never
+ * "<" under "≥"), the reasons in its title only, deduped; a partial
+ * figure of $0 (nothing priced, or only scripted $0s) is "—", never
+ * "≥ $0.00" (U7). more says the rows are not all there is (a paged
+ * list): the figure is then "≥" even when every row is known, more its
+ * title's last words. noun is what a row is ("run", the panel's
+ * "turn"). */
+export function atLeastCost(
+  rows: readonly CostRow[],
+  more?: string,
+  noun = "run"
+): CostView {
   let usd = 0
   let k = 0
   const why: string[] = []
@@ -232,30 +263,76 @@ export function atLeastCost(rows: readonly CostRow[], more?: string): CostView {
   for (const r of rows) {
     const t = runTotal(r)
     const own = costView(r)
-    if (own.known) {
-      usd += t.known ? t.usd : own.usd!
+    if (own.known) usd += t.known ? t.usd : own.usd!
+    if (t.known) {
       k++
+      continue
     }
-    if (t.known) continue
     const u = own.known ? delegatedView(r) : totalUnknown(r)
     badge ||= u.badge ?? ""
-    const w = own.known ? `delegated not known: ${u.title}` : u.title
+    const w = own.known ? `delegated: ${u.title}` : u.title
     if (!why.includes(w)) why.push(w)
   }
   if (!why.length && !more) return sumCost(rows)
-  const reasons = why.join("; ")
-  const title = (lead: string) => [lead, more].filter(Boolean).join(" · ")
-  if (!k) return view(null, false, title(reasons), badge || "unknown")
+  // "k of n runs priced": plural always, as pricing.go's tally counts.
+  const priced = why.length ? `${k} of ${rows.length} ${noun}s priced` : ""
+  const title = [priced, ...why, more].filter(Boolean).join(" · ")
+  if (!usd) return view(null, false, title, badge || "unknown")
   return {
     known: false,
-    text: `≥ ${formatUSD(usd)}`,
-    title: title(
-      why.length
-        ? `${k} of ${rows.length} runs' own cost known — ${reasons}`
-        : ""
-    ),
+    text: `≥ ${formatUSD(usd).replace("<", "")}${priced ? ` · ${priced}` : ""}`,
+    title,
     badge: badge || "unknown",
     usd,
+  }
+}
+
+// ── A page's one unpriced line (U7) ───────────────────────────────
+
+/** A page's unpriced line: its words, the full model list as title,
+ * the first model (the pricing link's prefill). */
+export interface UnpricedLine {
+  text: string
+  title: string
+  models: string[]
+}
+
+/** unpricedLine is the one line a page draws over its rows (the runs
+ * list, the sessions list, a run header, the panel's header) when any
+ * is unpriced: "N runs unpriced: no row for openai/x, acme/y (+2)" —
+ * the models deduped from each row's unpriced_models and
+ * delegated_unpriced_models, two shown, every one in the title. A row
+ * counts when its own or its delegated figure is unpriced; a row not
+ * known yet (running) does not. null when no row is unpriced. noun is
+ * what a row is ("run", "turn", "session"). */
+export function unpricedLine(
+  rows: readonly (CostFields & DelegatedCostFields)[],
+  noun = "run"
+): UnpricedLine | null {
+  let n = 0
+  const models: string[] = []
+  for (const r of rows) {
+    const ms = [
+      ...(r.unpriced_models ?? []),
+      ...(r.delegated_unpriced_models ?? []),
+    ]
+    if (
+      !ms.length &&
+      r.cost_badge !== "unpriced" &&
+      delegatedView(r).badge !== "unpriced"
+    )
+      continue
+    n++
+    for (const m of ms) if (!models.includes(m)) models.push(m)
+  }
+  if (!n) return null
+  const more = models.length > 2 ? ` (+${models.length - 2})` : ""
+  return {
+    text: `${n} ${noun}${n > 1 ? "s" : ""} unpriced${models.length ? `: no row for ${models.slice(0, 2).join(", ")}${more}` : ""}`,
+    title: models.length
+      ? `no row of the pricing table matches ${models.join(", ")}`
+      : "no model reported to price",
+    models,
   }
 }
 

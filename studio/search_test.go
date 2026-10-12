@@ -96,11 +96,14 @@ func TestSearchRoute(t *testing.T) {
 		{"q=order&offset=9", nil, 3, -1},
 		{"", []string{"r_stale", "r_sub", "r_fail", "r_ok"}, 4, -1},
 		// Cost (plan A5) under the default table: the fixture's
-		// wefttest/script is unpriced, so min_cost matches nothing and
-		// sort=cost keeps the unpriced runs newest first.
-		{"min_cost=0", nil, 0, -1},
-		{"sort=cost", []string{"r_stale", "r_sub", "r_fail", "r_ok"}, 4, -1},
-		{"sort=cost&limit=1&offset=1", []string{"r_sub"}, 4, 2},
+		// wefttest/script is scripted (an exact $0, U7), so min_cost=0
+		// matches those runs; r_sub's subagent (openai/kimi-k2.7-code) is
+		// unpriced and r_stale's end never arrived, so sort=cost keeps
+		// the two newest first after the priced ones.
+		{"min_cost=0", []string{"r_fail", "r_ok"}, 2, -1},
+		{"min_cost=0.000001", nil, 0, -1},
+		{"sort=cost", []string{"r_fail", "r_ok", "r_stale", "r_sub"}, 4, -1},
+		{"sort=cost&limit=1&offset=1", []string{"r_ok"}, 4, 2},
 	} {
 		ids, total, next := searchIDs(t, h, "/studio/api/search?"+c.path)
 		if strings.Join(ids, ",") != strings.Join(c.want, ",") || total != c.total {

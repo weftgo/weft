@@ -196,7 +196,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    ModelGlob (path.Match over provider/model, first match wins), Input, Output, CachedInput?,
 //    //    CacheWrite?, Reasoning?}}}) — USD per 1M; default studio.DefaultPricing() = studio/pricing.json,
 //    //    dated, go generate ./studio/... from internal/pricingdata; else WEFT_PRICING=<path>
-//    //    (studio.LoadPricing; replaces the table whole; malformed → New panics naming path + field)); routes register through
+//    //    (studio.LoadPricing; replaces the table whole; malformed → New panics naming path + field; a row with no provider,
+//    //    or "*", matches its model glob alone on any transport)); routes register through
 //    //    routes.go's groups (panel.go/playground.go add theirs in their own files).
 //    // API: meta (db {kind, path, size: path/size to loopback and the server token only},
 //    //    auth_required, content, runtimes, manifest_check, pricing {source default|file|option, path?
@@ -227,8 +228,11 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    assembled: request, attempts, events, tool calls, children, holes, its own call's cost;
 //    //    capability "steps"), cost on every run row (plan A5, read time, never stored): cost_usd
 //    //    (own: usage minus its core Subagent children's — `<id>/…` only; pool children and nested Generates are not
-//    //    subtracted — at its model's rates; null + cost_badge unpriced|unknown + cost_reason, never 0), cost_known,
-//    //    cache exact|not_reported (no cache split); running or end-never-arrived → own unknown, delegated_cost_usd/_known/_reason (descendants' own, never folded); session rows
+//    //    subtracted — at its model's rates; null + cost_badge unpriced|unknown + cost_reason, never 0; a scripted model no
+//    //    row matches — wefttest/*, weftarena/*, weft/runtime/scripted — an exact 0 + cost_badge scripted, a Go rule, not a row), cost_known,
+//    //    cache exact|not_reported (no cache split); running or end-never-arrived → own unknown, delegated_cost_usd/_known/_reason (descendants' own, never folded;
+//    //    a summed reason one line: "2 of 3 subagent runs unpriced: no price for …"); unpriced_models / delegated_unpriced_models (deduped; a page says
+//    //    them once — lib/cost.ts unpricedLine, "N runs unpriced: no row for …" + a /settings?price= link prefilling a row); session rows
 //    //    cost_usd = turns' own + delegated (no pool-child figure); settings/pricing (the effective
 //    //    table in the file's shape + source, path?; capability "pricing", every identity reads it), runs/{id}/export?format=json|jsonl|otlp|wefttest (the whole run as one
 //    //    download, capability "export"; otlp re-ingests through /v1/*, wefttest is a zip:

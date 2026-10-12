@@ -33,7 +33,7 @@ afterEach(teardown)
 
 const PRICED = { ...META, capabilities: [...META.capabilities, "pricing"] }
 const UNPRICED_WHY =
-  "no row of the default pricing table matches wefttest/script"
+  "openai/kimi-k2.7-code has no price (no row of the default pricing table matches it)"
 const RUNNING_WHY = "running: usage arrives at run end"
 
 /** priced is a run row's cost block as studio/pricing.go writes it. */
@@ -49,6 +49,17 @@ const unpriced: Partial<RunRow> = {
   cost_known: false,
   cost_badge: "unpriced",
   cost_reason: UNPRICED_WHY,
+  unpriced_models: ["openai/kimi-k2.7-code"],
+  delegated_cost_usd: 0,
+  delegated_cost_known: true,
+}
+/** A scripted model's figure (U7): an exact $0, badge scripted. */
+const scripted: Partial<RunRow> = {
+  cost_usd: 0,
+  cost_known: true,
+  cost_badge: "scripted",
+  cost_reason: "a scripted model: nothing bills it, an exact $0",
+  cache: "exact",
   delegated_cost_usd: 0,
   delegated_cost_known: true,
 }
@@ -181,11 +192,24 @@ describe("the header's summed cost", () => {
       runRow(unpriced),
     ])
     const c = $(el, "[data-weft-cost-total] [data-weft-cost]")!
-    expect(c.firstChild?.textContent).toBe("≥ $0.0040")
+    expect(c.firstChild?.textContent).toBe("≥ $0.0040 · 1 of 2 turns priced")
     expect(c.getAttribute("title")).toBe(
-      `1 of 2 runs' own cost known — a run is not priced: ${UNPRICED_WHY}`
+      `1 of 2 turns priced · ${UNPRICED_WHY}`
     )
     expect(c.querySelector(".weft-sr")!.textContent).toContain(UNPRICED_WHY)
+    // U7's Done line: the header carries one unpriced line — the model
+    // once, a link to Studio's pricing table prefilled for it.
+    const u = all(el, "[data-weft-unpriced]")
+    expect(u).toHaveLength(1)
+    expect(u[0].textContent).toBe(
+      "1 turn unpriced: no row for openai/kimi-k2.7-code"
+    )
+    expect(u[0].getAttribute("title")).toBe(
+      "no row of the pricing table matches openai/kimi-k2.7-code · price in Studio"
+    )
+    expect(u[0].getAttribute("href")).toContain(
+      `/settings?price=${encodeURIComponent("openai/kimi-k2.7-code")}`
+    )
     // The tokens' total beside it is untouched.
     expect($(el, "[data-weft-stats]")!.textContent).toBe("2 turns · 20→8 tok")
   })
@@ -235,17 +259,44 @@ describe("the header's summed cost", () => {
       }),
     ])
     const c = $(el, "[data-weft-cost-total] [data-weft-cost]")!
-    expect(c.firstChild?.textContent).toBe("≥ $0.0060")
+    expect(c.firstChild?.textContent).toBe("≥ $0.0060 · 1 of 2 turns priced")
     expect(c.getAttribute("title")).toBe(
-      `2 of 2 runs' own cost known — delegated not known: ${why}`
+      `1 of 2 turns priced · delegated: ${why}`
     )
+    // Not known yet is not unpriced: no unpriced line.
+    expect(all(el, "[data-weft-unpriced]")).toHaveLength(0)
   })
 
   it("no turn known: —, the reasons its title", async () => {
     const el = await turns([runRow(unpriced)])
     expect(cost($(el, "[data-weft-cost-total] [data-weft-cost]"))).toEqual({
       text: "—",
-      title: `a run is not priced: ${UNPRICED_WHY}`,
+      title: `0 of 1 turns priced · ${UNPRICED_WHY}`,
+    })
+  })
+
+  it("scripted turns (U7): $0 · scripted on each row and in the header, no unpriced line", async () => {
+    const el = await turns([
+      runRow({ id: "s_01-t2", turn: 2, ...scripted }),
+      runRow(scripted),
+    ])
+    expect(
+      all(el, ".weft-turn [data-weft-turn-cost]").map((n) => n.textContent)
+    ).toEqual(["$0 · scripted", "$0 · scripted"])
+    expect(cost($(el, "[data-weft-cost-total] [data-weft-cost]")).text).toBe(
+      "$0 · scripted"
+    )
+    expect(all(el, "[data-weft-unpriced]")).toHaveLength(0)
+  })
+
+  it("only scripted turns priced beside an unpriced one (U7): —, never ≥ $0.00", async () => {
+    const el = await turns([
+      runRow({ id: "s_01-t2", turn: 2, ...scripted }),
+      runRow(unpriced),
+    ])
+    expect(cost($(el, "[data-weft-cost-total] [data-weft-cost]"))).toEqual({
+      text: "—",
+      title: `1 of 2 turns priced · ${UNPRICED_WHY}`,
     })
   })
 })
@@ -328,8 +379,8 @@ describe("the experiment's cost in the result pane", () => {
     await runExperiment(el)
     const c = $(el, ".weft-xres [data-weft-experiment-cost] [data-weft-cost]")
     expect(cost(c)).toEqual({
-      text: "≥ $0.0050",
-      title: `1 of 2 runs' own cost known — a run is not priced: ${UNPRICED_WHY}`,
+      text: "≥ $0.0050 · 1 of 2 runs priced",
+      title: `1 of 2 runs priced · ${UNPRICED_WHY}`,
     })
   })
 

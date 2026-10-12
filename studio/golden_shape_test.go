@@ -165,17 +165,19 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		// open finish, a metadata key of its own.
 		absent []string
 	}{
-		{"run-sub.golden.json", "/api/runs/" + res.ID, []string{".children[]", ".meta.cwd", ".delegated_cost_reason", ".delegated_cost_usd=<nil>"}},
+		// U7: the fixture's subagent is unpriced (openai/kimi-k2.7-code);
+		// the real run's models are wefttest's, scripted: an exact $0.
+		{"run-sub.golden.json", "/api/runs/" + res.ID, []string{".children[]", ".meta.cwd", ".delegated_cost_reason", ".delegated_cost_usd=<nil>", ".delegated_unpriced_models[]"}},
 		// The run documents A9.2 pins from runs that compacted (a
 		// PrepareStep trim, thread's session marker): every field but the
 		// compactions themselves is the plain run's.
 		{"run-compacted.golden.json", "/api/runs/" + res.ID, []string{".children[]", ".compactions[]", ".holes[]", ".delegated_cost_reason", ".delegated_cost_usd=<nil>"}},
 		{"run-session-compacted.golden.json", "/api/runs/" + res.ID, []string{".compactions[]"}},
-		{"runs.golden.json", "/api/runs", []string{".runs[].finished=<nil>", ".runs[].meta.cwd", ".runs[].delegated_cost_reason", ".runs[].delegated_cost_usd=<nil>"}},
-		{"runs-children.golden.json", "/api/runs?all=1", []string{".runs[].meta.cwd"}},
+		{"runs.golden.json", "/api/runs", []string{".runs[].finished=<nil>", ".runs[].meta.cwd", ".runs[].delegated_cost_reason", ".runs[].delegated_cost_usd=<nil>", ".runs[].cost_usd=<nil>", ".runs[].delegated_unpriced_models[]"}},
+		{"runs-children.golden.json", "/api/runs?all=1", []string{".runs[].meta.cwd", ".runs[].cost_usd=<nil>", ".runs[].unpriced_models[]"}},
 		// Search (plan A7): run rows, prompt_preview included, from the
 		// real run's prompt "where is order 42?".
-		{"search.golden.json", "/api/search?q=order&sort=tokens", []string{".runs[].meta.cwd", ".runs[].delegated_cost_reason", ".runs[].delegated_cost_usd=<nil>"}},
+		{"search.golden.json", "/api/search?q=order&sort=tokens", []string{".runs[].meta.cwd", ".runs[].delegated_cost_reason", ".runs[].delegated_cost_usd=<nil>", ".runs[].delegated_unpriced_models[]"}},
 		{"events-ok.golden.json", "/api/runs/" + res.ID + "/events", nil},
 		{"events-ok-paged.golden.json", "/api/runs/" + res.ID + "/events?after=2&limit=3", nil},
 		{"transcript-ok.golden.json", "/api/runs/" + res.ID + "/transcript", nil},
@@ -188,8 +190,8 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		// The trace list (plan A7): the real run's trace has its root; the
 		// fixture's orphan trace pins the missing root's null and badge.
 		{"traces.golden.json", "/api/traces", []string{".traces[].root=<nil>", ".traces[].badge", ".traces[].reason", ".traces[].fix"}},
-		{"sessions.golden.json", "/api/sessions", nil},
-		{"session-orders.golden.json", "/api/sessions/s_x", []string{".runs[].finished=<nil>", ".runs[].meta.cwd"}},
+		{"sessions.golden.json", "/api/sessions", []string{".sessions[].cost_usd=<nil>"}},
+		{"session-orders.golden.json", "/api/sessions/s_x", []string{".runs[].finished=<nil>", ".runs[].meta.cwd", ".cost_usd=<nil>", ".runs[].cost_usd=<nil>"}},
 		{"public.golden.json", "/api/public/pub_x", nil},
 		{"session-public-id.golden.json", "/api/sessions/s_x/public_id", nil},
 		// The step goldens are recorded from TestStepRoute's real run;

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -132,6 +133,9 @@ type costRow struct {
 	DelegatedCostUSD    *float64 `json:"delegated_cost_usd"`
 	DelegatedCostKnown  bool     `json:"delegated_cost_known"`
 	DelegatedCostReason string   `json:"delegated_cost_reason"`
+	// U7: the models without a price behind each figure.
+	UnpricedModels          []string `json:"unpriced_models"`
+	DelegatedUnpricedModels []string `json:"delegated_unpriced_models"`
 }
 
 func usd(p *float64) string {
@@ -302,8 +306,9 @@ func TestCostSubagents(t *testing.T) {
 	_, _, body = get(t, h, "/studio/api/runs/p2")
 	decode(t, body, &doc)
 	if usd(doc.CostUSD) != "0.06" || doc.DelegatedCostUSD != nil || doc.DelegatedCostKnown ||
-		!strings.Contains(doc.DelegatedCostReason, "p2/0/x") || !strings.Contains(doc.DelegatedCostReason, "acme/mystery-1") {
-		t.Errorf("p2: own %s delegated %s known %v reason %q; want own 0.06, delegated null and unknown naming p2/0/x's acme/mystery-1",
+		doc.DelegatedCostReason != "1 of 1 subagent runs unpriced: no price for acme/mystery-1" ||
+		!slices.Equal(doc.DelegatedUnpricedModels, []string{"acme/mystery-1"}) {
+		t.Errorf("p2: own %s delegated %s known %v reason %q; want own 0.06, delegated null and unknown, one line naming acme/mystery-1",
 			usd(doc.CostUSD), usd(doc.DelegatedCostUSD), doc.DelegatedCostKnown, doc.DelegatedCostReason)
 	}
 
@@ -395,7 +400,6 @@ func TestPricingFile(t *testing.T) {
 		{"noinput.json", `{"dated":"2026-10-10","models":[{"provider":"a","model_glob":"b","output":1}]}`, "models[0].input: missing"},
 		{"negative.json", `{"dated":"2026-10-10","models":[{"provider":"a","model_glob":"b","input":1,"output":1,"cache_write":-1}]}`, "models[0].cache_write: -1 is not a non-negative rate"},
 		{"badglob.json", `{"dated":"2026-10-10","models":[{"provider":"a","model_glob":"[","input":1,"output":1}]}`, "models[0].model_glob"},
-		{"noprovider.json", `{"dated":"2026-10-10","models":[{"model_glob":"b","input":1,"output":1}]}`, "models[0].provider: missing"},
 		{"type.json", `{"dated":"2026-10-10","models":[{"provider":"a","model_glob":"b","input":"1","output":1}]}`, "models[0].input: want a float64"},
 	} {
 		p := write(c.name, c.body)
@@ -847,13 +851,135 @@ func TestCostRunningChildIsUnknown(t *testing.T) {
 	}
 	// An unknown figure says it is not known yet, never "not priced":
 	// the running child has a price, its usage has not arrived.
-	if want := "a turn's cost is not known yet: p's subagents (a subagent run's cost is not known yet: p/0/c (running: "; !strings.HasPrefix(sess.CostReason, want) {
+	if want := "1 of 1 turns' cost not known yet (p/0/c: running: "; !strings.HasPrefix(sess.CostReason, want) {
 		t.Errorf("session cost reason = %q, want prefix %q", sess.CostReason, want)
 	}
 	_, _, body = get(t, h, "/studio/api/runs/p")
 	var run costRow
 	decode(t, body, &run)
-	if want := "a subagent run's cost is not known yet: p/0/c (running: "; run.DelegatedCostKnown || !strings.HasPrefix(run.DelegatedCostReason, want) {
+	if want := "1 of 1 subagent runs' cost not known yet (p/0/c: running: "; run.DelegatedCostKnown || !strings.HasPrefix(run.DelegatedCostReason, want) {
 		t.Errorf("run's delegated cost: known %v reason %q; want unknown, prefix %q", run.DelegatedCostKnown, run.DelegatedCostReason, want)
 	}
+}
+
+// TestCostScripted (U7: UX-D-21, UX-C-17): a scripted model — wefttest's,
+// weftarena's, the playground's weft/runtime scripted engine — that no
+// row matches is an exact $0 with the scripted badge, never "unpriced";
+// a set of scripted turns is scripted too; a row that matches wins.
+func TestCostScripted(t *testing.T) {
+	db := costDB(t)
+	t0 := time.Now().Add(-time.Hour).UTC()
+	u := core.Usage{InputTokens: 60, OutputTokens: 30}
+	costUsage(t, db, "r_test", "", "s_scripted", "wefttest", "script", t0, u, u)
+	costUsage(t, db, "r_arena", "", "s_scripted", "weftarena", "any-model", t0.Add(time.Second), u, u)
+	costUsage(t, db, "r_replay", "", "", "weft/runtime", "scripted", t0.Add(2*time.Second), u, u)
+	costUsage(t, db, "r_other", "", "", "weft/runtime", "live", t0.Add(3*time.Second), u, u)
+
+	h := Handler(DB(db))
+	for _, id := range []string{"r_test", "r_arena", "r_replay"} {
+		_, _, body := get(t, h, "/studio/api/runs/"+id)
+		var r costRow
+		decode(t, body, &r)
+		if usd(r.CostUSD) != "0" || !r.CostKnown || r.CostBadge != costScripted || r.Cache != cacheExact ||
+			r.CostReason != scriptedReason || len(r.UnpricedModels) != 0 {
+			t.Errorf("%s: %s; want an exact $0, badge scripted", id, body)
+		}
+	}
+	// Only the scripted engine of weft/runtime is scripted.
+	_, _, body := get(t, h, "/studio/api/runs/r_other")
+	var r costRow
+	decode(t, body, &r)
+	if r.CostKnown || r.CostBadge != costUnpriced || !slices.Equal(r.UnpricedModels, []string{"weft/runtime/live"}) ||
+		r.CostReason != "weft/runtime/live has no price (no row of the default pricing table matches it)" {
+		t.Errorf("weft/runtime/live: %s; want unpriced, one model, one line", body)
+	}
+	_, _, body = get(t, h, "/studio/api/sessions/s_scripted")
+	var sess costRow
+	decode(t, body, &sess)
+	if usd(sess.CostUSD) != "0" || !sess.CostKnown || sess.CostBadge != costScripted || sess.Cache != cacheExact {
+		t.Errorf("an all-scripted session: %s; want an exact $0, badge scripted", body)
+	}
+	// A row that matches the scripted model wins over the rule.
+	h2 := Handler(DB(db), Pricing(PricingTable{Dated: "2026-10-12", Models: []ModelPrice{
+		{Provider: "wefttest", ModelGlob: "script", Input: 1e6, Output: 1e6},
+	}}))
+	_, _, body = get(t, h2, "/studio/api/runs/r_test")
+	var rowed costRow
+	decode(t, body, &rowed)
+	if usd(rowed.CostUSD) != "90" || rowed.CostBadge != "" {
+		t.Errorf("wefttest/script under a row of its own: %s; want $90, no badge", body)
+	}
+}
+
+// TestCostUnpricedOneLine (U7: UX-A-12, UX-B-27): a set's unknown figure
+// is one line counting its runs and naming the models, deduped — never
+// a clause per run — and unpriced_models carries them for a page's line.
+func TestCostUnpricedOneLine(t *testing.T) {
+	db := costDB(t)
+	t0 := time.Now().Add(-time.Hour).UTC()
+	u := core.Usage{InputTokens: 10, OutputTokens: 5}
+	costUsage(t, db, "t1", "", "s_mix", "openai", "kimi-k2.7-code", t0, u, u)
+	costUsage(t, db, "t2", "", "s_mix", "openai", "kimi-k2.7-code", t0.Add(time.Second), u, u)
+	costUsage(t, db, "t3", "", "s_mix", "wefttest", "script", t0.Add(2*time.Second), u, u)
+	costUsage(t, db, "t4", "", "s_mix", "acme", "mystery-1", t0.Add(3*time.Second), u, u)
+	h := Handler(DB(db))
+	_, _, body := get(t, h, "/studio/api/sessions/s_mix")
+	var r costRow
+	decode(t, body, &r)
+	if r.CostKnown || r.CostBadge != costUnpriced ||
+		r.CostReason != "3 of 4 turns unpriced: no price for acme/mystery-1, openai/kimi-k2.7-code" &&
+			r.CostReason != "3 of 4 turns unpriced: no price for openai/kimi-k2.7-code, acme/mystery-1" ||
+		len(r.UnpricedModels) != 2 {
+		t.Errorf("a mixed session: %s; want one line, 3 of 4 turns, two models", body)
+	}
+}
+
+// TestPricingAnyProvider (U7: UX-A-12's "base_url-aware" half): a row
+// without a provider (or with provider "*") matches on its model glob
+// alone, whatever the transport — an OpenAI-compatible endpoint reached
+// through the openai adapter, a provider spelled with a "/".
+func TestPricingAnyProvider(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "any.json")
+	if err := os.WriteFile(file, []byte(`{"dated":"2026-10-12","models":[
+		{"model_glob":"kimi-k2.7-*","input":1,"output":2},
+		{"provider":"*","model_glob":"glm-5","input":3,"output":4}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tbl, err := LoadPricing(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tbl.Models[0].Provider != anyProvider {
+		t.Errorf("a row without a provider loads as %q, want %q", tbl.Models[0].Provider, anyProvider)
+	}
+	for _, c := range []struct {
+		provider, model string
+		input           float64
+		ok              bool
+	}{
+		{"openai", "kimi-k2.7-code", 1, true},
+		{"moonshot/proxy", "kimi-k2.7-code", 1, true},
+		{"openrouter", "glm-5", 3, true},
+		{"openai", "gpt-4o", 0, false},
+		{"openai", "vendor/kimi-k2.7-code", 0, false}, // "*" never crosses "/"
+	} {
+		m, ok := tbl.lookup(c.provider, c.model)
+		if ok != c.ok || ok && m.Input != c.input {
+			t.Errorf("lookup(%s, %s) = %+v %v, want input %v %v", c.provider, c.model, m, ok, c.input, c.ok)
+		}
+	}
+	if _, err := LoadPricing(writeFile(t, dir, "bad.json", `{"dated":"2026-10-12","models":[{"model_glob":"[","input":1,"output":1}]}`)); err == nil ||
+		!strings.Contains(err.Error(), "models[0].model_glob") {
+		t.Errorf("a bad glob on an any-provider row: %v", err)
+	}
+}
+
+func writeFile(t *testing.T, dir, name, body string) string {
+	t.Helper()
+	p := filepath.Join(dir, name)
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return p
 }

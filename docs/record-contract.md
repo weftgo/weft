@@ -103,7 +103,7 @@ reads them from:
 
 | Attribute | Set by | Meaning | Run row |
 |---|---|---|---|
-| `weft.session.title` | `thread` (`SetInfo`'s title) | the session's title (`Session.Title`) as the turn started, absent before one was set — a label, not content: it survives a content-off destination (the `session_title` fixture). A `Fork` stamps the origin's title until the fork's own `SetInfo`; the title is the newest across the whole entry tree, so a `Branch` back past a `SetInfo` keeps the newer title; the compaction marker's fallback (no run of the session produced the context) stamps the title current when it is emitted | `meta`; the session row's `title` (§6) |
+| `weft.session.title` | `thread` (`SetInfo`'s title) | the session's title (`Session.Title`) as the turn started, absent before one was set — a label, not content: it survives a content-off destination (the `session_title` fixture). A fork carries the newest title on the copied path at the fork point (a title set after the fork point, or on another branch, is not carried); the title is the newest across the whole entry tree, so a `Branch` back past a `SetInfo` keeps the newer title; a held compaction marker (no run of the session produced the context) goes out under the next run's own metadata, and the fallback for a run this Session did not see (before a reopen, or past its recent-runs list) stamps the title current when emitted | `meta`; the session row's `title` (§6) |
 | `weft.session.forked_from` | `thread` (`Fork`) | `<origin session>#<entry id>` | `meta` |
 | `weft.session.parent` | `thread/pool` | the parent session of a pool child | `meta` |
 | `weft.session.parent_call` | `thread/pool` | the parent's tool call that spawned it, when known | `meta` |

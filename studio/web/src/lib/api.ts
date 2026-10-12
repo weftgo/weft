@@ -36,14 +36,18 @@ export type RunStatus = "running" | "succeeded" | "failed" | "interrupted"
  * table. cost_usd is null when unknown — never 0 for an unpriced
  * model — and cost_badge says why: "unpriced" (no row matches the
  * model) or "unknown" (the figure could not be computed), with
- * cost_reason naming it. cache says whether the adapter reported the
+ * cost_reason naming it in one line; "scripted" marks a known, exact
+ * $0 (a scripted model: wefttest, weftarena, weft/runtime scripted —
+ * U7). unpriced_models are the provider/model pairs without a price
+ * behind the figure (absent when none). cache says whether the adapter reported the
  * cache splits ("exact") or not (then every input token was priced at
  * the input rate). All absent from a Studio older than A5. */
 export interface CostFields {
   cost_usd?: number | null
   cost_known?: boolean
-  cost_badge?: "unpriced" | "unknown"
+  cost_badge?: "unpriced" | "unknown" | "scripted"
   cost_reason?: string
+  unpriced_models?: string[]
   /** "exact" | "not_reported" ("unknown" from a Studio before the
    * rename) — compared against "exact" only. */
   cache?: string
@@ -56,6 +60,8 @@ export interface DelegatedCostFields {
   delegated_cost_usd?: number | null
   delegated_cost_known?: boolean
   delegated_cost_reason?: string
+  /** The subagents' unpriced models (U7). */
+  delegated_unpriced_models?: string[]
 }
 
 /** RunRow — every list and detail (S4.3); its cost is the run's own

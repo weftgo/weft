@@ -337,10 +337,11 @@ export interface TracesLink {
   search: TracesSearch
 }
 
-/** The Settings page (plan H4). */
+/** The Settings page (plan H4); price prefills a pricing row for an
+ * unpriced provider/model (U7). */
 export interface SettingsLink {
   to: "/settings"
-  search: Record<string, never>
+  search: { price?: string }
 }
 
 export type StudioLink =
@@ -476,9 +477,11 @@ export function tracesLink(search: TracesSearch = {}): TracesLink {
   return { to: "/traces", search: out }
 }
 
-/** settingsLink is the Settings page (plan H4). */
-export function settingsLink(): SettingsLink {
-  return { to: "/settings", search: {} }
+/** settingsLink is the Settings page (plan H4); with a provider/model,
+ * its pricing table with a row prefilled for it (U7's "price this
+ * model…"). */
+export function settingsLink(price?: string): SettingsLink {
+  return { to: "/settings", search: price ? { price } : {} }
 }
 
 /** playgroundLink is the playground with the hand-off carried over

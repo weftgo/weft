@@ -174,6 +174,7 @@ const STEP_DOC_KEYS: Record<keyof StepDoc, true> = {
   cost_badge: true,
   cost_reason: true,
   cache: true,
+  unpriced_models: true,
 }
 const STEP_ATTEMPT_KEYS: Record<keyof StepAttempt, true> = {
   attempt: true,

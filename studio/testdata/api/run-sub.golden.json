@@ -32,14 +32,17 @@
     "input_tokens": 12,
     "output_tokens": 6
   },
-  "cost_usd": null,
-  "cost_known": false,
-  "cost_badge": "unpriced",
-  "cost_reason": "no row of the default pricing table matches wefttest/script",
-  "cache": "not_reported",
+  "cost_usd": 0,
+  "cost_known": true,
+  "cost_badge": "scripted",
+  "cost_reason": "a scripted model: nothing bills it, an exact $0",
+  "cache": "exact",
   "delegated_cost_usd": null,
   "delegated_cost_known": false,
-  "delegated_cost_reason": "a subagent run is not priced: r_sub/0/call_3 (no row of the default pricing table matches wefttest/script)",
+  "delegated_cost_reason": "1 of 1 subagent runs unpriced: no price for openai/kimi-k2.7-code",
+  "delegated_unpriced_models": [
+    "openai/kimi-k2.7-code"
+  ],
   "event_count": 6,
   "message_count": 2,
   "delta_count": 0,
@@ -55,8 +58,8 @@
       "trace_id": "0102030405060708090a0b0c0d0e0f10",
       "agent": "researcher",
       "model": {
-        "provider": "wefttest",
-        "name": "script"
+        "provider": "openai",
+        "name": "kimi-k2.7-code"
       },
       "manifest_hash": "sha256:demo-fleet",
       "weft_version": "(test)",
@@ -85,8 +88,11 @@
       "cost_usd": null,
       "cost_known": false,
       "cost_badge": "unpriced",
-      "cost_reason": "no row of the default pricing table matches wefttest/script",
+      "cost_reason": "openai/kimi-k2.7-code has no price (no row of the default pricing table matches it)",
       "cache": "not_reported",
+      "unpriced_models": [
+        "openai/kimi-k2.7-code"
+      ],
       "delegated_cost_usd": 0,
       "delegated_cost_known": true,
       "event_count": 4,

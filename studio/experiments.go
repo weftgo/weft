@@ -340,5 +340,5 @@ func (s *Server) experimentSummary(ctx context.Context, c *coster, id string) (e
 			n++
 		}
 	}
-	return experimentSummary{RunCount: n, costFields: c.setCost(runs, "a run").fields()}, nil
+	return experimentSummary{RunCount: n, costFields: c.setCost(runs, "run").fields()}, nil
 }

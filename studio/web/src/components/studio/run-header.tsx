@@ -25,7 +25,7 @@ import {
   usageSummary,
 } from "@/lib/format"
 import { CopyButton } from "@/components/studio/codewin"
-import { RunCost, useCostCapable } from "@/components/studio/cost"
+import { RunCost, UnpricedNote, useCostCapable } from "@/components/studio/cost"
 import { SaveAsTest } from "@/components/studio/saves"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import {
@@ -496,6 +496,7 @@ export function RunHeader({
             }
           />
         ) : null}
+        {costCapable ? <UnpricedNote rows={[doc]} /> : null}
         <span title={absoluteTime(doc.started)}>
           started {relativeTime(doc.started, now)} · {absoluteTime(doc.started)}
         </span>

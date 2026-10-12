@@ -8,8 +8,8 @@
       "trace_id": "0102030405060708090a0b0c0d0e0f10",
       "agent": "researcher",
       "model": {
-        "provider": "wefttest",
-        "name": "script"
+        "provider": "openai",
+        "name": "kimi-k2.7-code"
       },
       "manifest_hash": "sha256:demo-fleet",
       "weft_version": "(test)",
@@ -38,8 +38,11 @@
       "cost_usd": null,
       "cost_known": false,
       "cost_badge": "unpriced",
-      "cost_reason": "no row of the default pricing table matches wefttest/script",
+      "cost_reason": "openai/kimi-k2.7-code has no price (no row of the default pricing table matches it)",
       "cache": "not_reported",
+      "unpriced_models": [
+        "openai/kimi-k2.7-code"
+      ],
       "delegated_cost_usd": 0,
       "delegated_cost_known": true,
       "event_count": 4,

@@ -225,11 +225,11 @@
         "input_tokens": 10,
         "output_tokens": 5
       },
-      "cost_usd": null,
-      "cost_known": false,
-      "cost_badge": "unpriced",
-      "cost_reason": "no row of the default pricing table matches wefttest/script",
-      "cache": "not_reported",
+      "cost_usd": 0,
+      "cost_known": true,
+      "cost_badge": "scripted",
+      "cost_reason": "a scripted model: nothing bills it, an exact $0",
+      "cache": "exact",
       "delegated_cost_usd": 0,
       "delegated_cost_known": true
     }
@@ -238,11 +238,11 @@
     "input_tokens": 10,
     "output_tokens": 5
   },
-  "cost_usd": null,
-  "cost_known": false,
-  "cost_badge": "unpriced",
-  "cost_reason": "no row of the default pricing table matches wefttest/glm-a",
-  "cache": "not_reported",
+  "cost_usd": 0,
+  "cost_known": true,
+  "cost_badge": "scripted",
+  "cost_reason": "a scripted model: nothing bills it, an exact $0",
+  "cache": "exact",
   "holes": []
 }
 

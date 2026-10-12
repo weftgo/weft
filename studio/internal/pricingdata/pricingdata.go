@@ -42,7 +42,9 @@ const Dated = "2026-10-10"
 
 // Note is the JSON file's own comment (JSON has none of its own).
 const Note = "Prices are the vendors' public per-1M-token list rates in USD (first-party APIs), read on the dated day. " +
-	"model_glob is a path.Match pattern over provider/model; the first match wins. A missing cached_input, " +
+	"model_glob is a path.Match pattern over provider/model; the first match wins. A row with no provider (or provider \"*\") " +
+	"matches on model_glob alone, any transport (an OpenAI-compatible endpoint behind the openai adapter). " +
+	"A scripted model no row matches (wefttest/*, weftarena/*, weft/runtime/scripted) is an exact $0, badge scripted: a rule in Studio, not a row. A missing cached_input, " +
 	"cache_write or reasoning rate prices those tokens at the input or output rate. " +
 	"cache_write is the 5-minute-TTL rate (1.25x input): a 1-hour cache write (2x) is understated. " +
 	"The Gemini rows have no cached_input: a cached Gemini prompt is priced at the input rate. " +

@@ -274,6 +274,27 @@ describe("the pricing table, edited per browser", () => {
     expect(localStorage.getItem(editsKey(pricingG))).toBeNull()
   })
 
+  it("?price= (U7's price this model…) leads the table with a row for it, its rates to fill, nothing stored", async () => {
+    renderApp(
+      `/settings?price=${encodeURIComponent('"openai/kimi-k2.7-code"')}`
+    )
+    await screen.findByRole("heading", { level: 1, name: "Settings" })
+    expect(
+      (await screen.findByLabelText<HTMLInputElement>("row 1 provider")).value
+    ).toBe("openai")
+    expect(
+      screen.getByLabelText<HTMLInputElement>("row 1 model glob").value
+    ).toBe("kimi-k2.7-code")
+    expect(screen.getByLabelText<HTMLInputElement>("row 1 input").value).toBe(
+      ""
+    )
+    expect(
+      section("pricing").querySelector("[data-pricing-problems]")!.textContent
+    ).toContain("models[0].input: missing")
+    // A prefill is not an edit until one is made.
+    expect(localStorage.getItem(editsKey(pricingG))).toBeNull()
+  })
+
   it("download pricing.json is the override file's exact shape, the edits applied", async () => {
     const blobs: Blob[] = []
     // jsdom has no blob URLs: capture the Blob the download hands over.
@@ -317,7 +338,7 @@ describe("the pricing table, edited per browser", () => {
     ).toHaveProperty("disabled", true)
     expect(
       section("pricing").querySelector("[data-pricing-problems]")!.textContent
-    ).toContain("models[2].provider: missing")
+    ).toContain("models[2].model_glob: missing")
     fireEvent.change(screen.getByLabelText("row 3 provider"), {
       target: { value: "openai" },
     })

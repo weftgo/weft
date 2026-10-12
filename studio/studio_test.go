@@ -296,7 +296,7 @@ func fixtureDB(t *testing.T) obsdb.DB {
 	}
 	childEvents := []obsdb.Record{
 		fxRecord(childID, "event", "run_start", 0, subAt(3*time.Second),
-			`{"type":"run_start","id":"`+childID+`","model":{"provider":"wefttest","name":"script"},"agent":"researcher"}`),
+			`{"type":"run_start","id":"`+childID+`","model":{"provider":"openai","name":"kimi-k2.7-code"},"agent":"researcher"}`),
 		fxRecord(childID, "event", "step_start", 1, subAt(3200*time.Millisecond),
 			`{"type":"step_start","run_id":"`+childID+`","index":0}`),
 		fxRecord(childID, "event", "step_finish", 2, subAt(3700*time.Millisecond),
@@ -325,8 +325,8 @@ func fixtureDB(t *testing.T) obsdb.DB {
 				"weft.parent.run.id":         "r_sub",
 				"weft.parent.call.id":        "call_3",
 				"gen_ai.agent.name":          "researcher",
-				"gen_ai.provider.name":       "wefttest",
-				"gen_ai.request.model":       "script",
+				"gen_ai.provider.name":       "openai",
+				"gen_ai.request.model":       "kimi-k2.7-code",
 				"gen_ai.usage.input_tokens":  int64(9),
 				"gen_ai.usage.output_tokens": int64(5),
 				"weft.run.steps":             int64(1),

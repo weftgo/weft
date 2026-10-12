@@ -709,6 +709,7 @@ describe("the turn list's filter", () => {
       status: "failed",
       err: "model: boom",
       started: "2026-10-01T09:01:00Z",
+      prompt_preview: "question 2",
     })
     const t3 = runRow({
       id: "s_01-t3",
@@ -716,6 +717,7 @@ describe("the turn list's filter", () => {
       status: "succeeded",
       pending: 1,
       started: "2026-10-01T09:02:00Z",
+      prompt_preview: "question 3",
     })
     routes["runs?public_id=pub_orders&limit=50"] = {
       total: 3,
@@ -734,9 +736,9 @@ describe("the turn list's filter", () => {
     return routes
   }
   const ids = (el: WeftDevtools) =>
-    all(el, ".weft-turn .weft-id").map((n) => n.textContent)
+    all(el, ".weft-turn").map((n) => n.getAttribute("data-weft-run"))
 
-  it("text (id, error, an opened turn's prompt), status and has error narrow the loaded rows; the count says so", async () => {
+  it("text (id, error, the row's prompt_preview), status and has error narrow the loaded rows; the count says so", async () => {
     fakeStudio(three())
     const el = await mount(BASE)
     expect(ids(el)).toEqual(["s_01-t3", "s_01-t2", "s_01-t1"])
@@ -747,7 +749,9 @@ describe("the turn list's filter", () => {
     expect(text(el, ".weft-tq-n")).toBe("1 of 3 turns")
     await type(q, "t1")
     expect(ids(el)).toEqual(["s_01-t1"])
-    // The opened turn's prompt (s_01-t3 was selected first).
+    // Each row's prompt_preview (U6), opened or not: s_01-t2 never was.
+    await type(q, "question 2")
+    expect(ids(el)).toEqual(["s_01-t2"])
     await type(q, "question 3")
     expect(ids(el)).toEqual(["s_01-t3"])
     await type(q, "")
@@ -906,7 +910,9 @@ describe("paging (before= / before_id=, no cap)", () => {
       io.fire()
       await settle()
     }
-    const rows = all(el, ".weft-turn .weft-id").map((n) => n.textContent)
+    const rows = all(el, ".weft-turn").map((n) =>
+      n.getAttribute("data-weft-run")
+    )
     expect(rows).toHaveLength(N)
     expect(rows[0]).toBe("t200")
     expect(rows.at(-1)).toBe("t1") // the first turn
@@ -933,16 +939,22 @@ describe("paging (before= / before_id=, no cap)", () => {
     FakeIO.all.at(-1)!.fire()
     await settle()
     expect(all(el, ".weft-turn")).toHaveLength(100)
-    click(all(el, ".weft-turn").find((n) => n.textContent.includes("t151")))
+    click(
+      all(el, ".weft-turn").find((n) =>
+        (n.getAttribute("data-weft-run") ?? "").includes("t151")
+      )
+    )
     await settle()
     dock(el).focus()
     key(dock(el), { key: "j" })
     await settle()
-    expect(text(el, ".weft-turn.weft-sel .weft-id")).toBe("t150") // page two
+    expect(
+      $(el, ".weft-turn.weft-sel")?.getAttribute("data-weft-run") ?? ""
+    ).toBe("t150") // page two
     const row = $(el, ".weft-turn.weft-sel") as HTMLElement
     row.focus()
     key(row, { key: "ArrowDown" })
-    expect(active(el)?.querySelector(".weft-id")?.textContent).toBe("t149")
+    expect(active(el)?.getAttribute("data-weft-run")).toBe("t149")
     // A refresh (a reconnect, a stale read) reads the first page again:
     // what was paged in stays, and so does the older cursor.
     await (
@@ -1078,7 +1090,9 @@ describe("paging (before= / before_id=, no cap)", () => {
       el as unknown as { model: { refresh: () => Promise<void> } }
     ).model.refresh()
     await settle()
-    const ids = all(el, ".weft-turn .weft-id").map((n) => n.textContent)
+    const ids = all(el, ".weft-turn").map((n) =>
+      n.getAttribute("data-weft-run")
+    )
     expect(ids).toHaveLength(101)
     expect(ids[0]).toBe("t201")
     expect(ids.at(-1)).toBe("t101")
@@ -1105,7 +1119,9 @@ describe("paging (before= / before_id=, no cap)", () => {
       el as unknown as { model: { refresh: () => Promise<void> } }
     ).model.refresh()
     await settle()
-    const ids = all(el, ".weft-turn .weft-id").map((n) => n.textContent)
+    const ids = all(el, ".weft-turn").map((n) =>
+      n.getAttribute("data-weft-run")
+    )
     expect(ids).toHaveLength(100)
     expect(ids).toEqual(expect.arrayContaining(["t151", "t150"]))
     expect(new Set(ids).size).toBe(100)

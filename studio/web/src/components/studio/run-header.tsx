@@ -28,7 +28,11 @@ import { CopyButton } from "@/components/studio/codewin"
 import { RunCost, useCostCapable } from "@/components/studio/cost"
 import { SaveAsTest } from "@/components/studio/saves"
 import { HoleBadge } from "@/components/studio/hole-badge"
-import { StatusChip, UnknownTokens } from "@/components/studio/runs-table"
+import {
+  StatusChip,
+  TitleText,
+  UnknownTokens,
+} from "@/components/studio/runs-table"
 import { Badge } from "@/components/ui/badge"
 import {
   Breadcrumb,
@@ -49,6 +53,8 @@ import {
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { useCopyLink } from "@/hooks/use-copy-link"
 import { useDocumentTitle } from "@/hooks/use-document-title"
+import { runTitle, shortId } from "@/lib/title"
+import type { TitlePlace } from "@/lib/title"
 import {
   contradicts,
   stopChip,
@@ -331,8 +337,9 @@ export function RunHeader({
   transcript?: Transcript
 }) {
   const now = useNow(doc.status === "running")
+  const title = runTitle(doc)
   const costCapable = useCostCapable()
-  useDocumentTitle({ page: "run", id: doc.id, status: doc.status })
+  useDocumentTitle(runPlace(doc))
   // The words this run was asked: the last user message it was fed
   // (in a thread the first one is an earlier turn's).
   const prompt = turnPrompt(transcript?.batches ?? [])
@@ -373,20 +380,46 @@ export function RunHeader({
           ) : null}
           <BreadcrumbSeparator />
           <BreadcrumbItem>
-            <span className="text-foreground">{doc.id}</span>
+            <span className="text-foreground" title={doc.id}>
+              {shortId(doc.id)}
+            </span>
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
 
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <h1 className="flex items-center gap-1 font-mono text-base font-medium tracking-tight">
-          {doc.id}
-          <CopyButton
-            text={doc.id}
-            label="copy run id"
-            className="text-faint hover:text-foreground"
-          />
-        </h1>
+        {/* The page's title (U6): agent · the prompt (lib/title.ts's
+            runTitle); the id is the copyable mono line under it. */}
+        <div className="max-w-full min-w-0">
+          <h1
+            className="flex min-w-0 items-baseline gap-1.5 text-base font-medium tracking-tight"
+            data-run-title
+          >
+            <span className="shrink-0">
+              {doc.agent || (
+                <span className="text-muted-foreground">unnamed agent</span>
+              )}
+            </span>
+            {title.kind === "id" || title.text === doc.agent ? null : (
+              <>
+                <span className="shrink-0 text-faint" aria-hidden>
+                  ·
+                </span>
+                <TitleText t={title} />
+              </>
+            )}
+          </h1>
+          <div className="flex items-center gap-1 font-mono text-[11px] text-faint">
+            <span className="truncate" data-run-id>
+              {doc.id}
+            </span>
+            <CopyButton
+              text={doc.id}
+              label="copy run id"
+              className="text-faint hover:text-foreground"
+            />
+          </div>
+        </div>
         <StatusChip status={doc.status} />
         {/* Settling: the status word stays (it is the root's), the note
             says the story may stop short while its records trail. */}
@@ -400,11 +433,6 @@ export function RunHeader({
           </span>
         ) : null}
         <StoppedByChip doc={doc} />
-        <span className="text-sm font-medium">
-          {doc.agent || (
-            <span className="text-muted-foreground">unnamed agent</span>
-          )}
-        </span>
         <Badge variant="outline" className="font-mono text-[11px] font-normal">
           {doc.model.provider}/{doc.model.name}
         </Badge>
@@ -574,4 +602,25 @@ export function RunHeader({
       )}
     </div>
   )
+}
+
+/** runPlace is a run page's tab title (U6): "agent · the prompt ·
+ * status", the id until the run is read — the route and the header
+ * write the same one. */
+export function runPlace(
+  doc: { id: string } & Partial<Pick<RunDoc, "status" | "agent">> &
+    Parameters<typeof runTitle>[0],
+  loaded = true
+): TitlePlace {
+  if (!loaded) return { page: "run", id: doc.id }
+  const t = runTitle(doc)
+  if (t.kind === "id") return { page: "run", id: doc.id, status: doc.status }
+  return {
+    page: "run",
+    id: doc.id,
+    status: doc.status,
+    // An agent-kind title already names the agent.
+    agent: t.kind === "agent" ? undefined : doc.agent || undefined,
+    title: t.text,
+  }
 }

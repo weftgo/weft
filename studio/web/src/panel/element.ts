@@ -154,6 +154,7 @@ import type { HeaderRung } from "./detect"
 import { installMarkerRung, markerOf } from "./markers"
 import type { Marker, MarkerRung } from "./markers"
 import { parseScope, serializeScope } from "../lib/scope"
+import { clip as clipTitle, runTitle, turnLabel } from "../lib/title"
 import type { Scope } from "../lib/scope"
 import { el, fmtJSON, on, patch, spanWindow, waterfall } from "./render"
 import { PANEL_CSS } from "./styles"
@@ -665,9 +666,6 @@ export class WeftDevtools extends HTMLElement {
   } | null = null
   /** The turn list's filter (D4), this session only. */
   private tq = { text: "", status: "", err: false }
-  /** The prompts of the turns opened so far, by run id: what the
-   * filter's text matches beyond the id and the error. */
-  private prompts = new Map<string, string>()
   /** The older-turns sentinel watched, and its observer (D4). */
   private io: IntersectionObserver | null = null
   private ioAt: Element | null = null
@@ -2100,8 +2098,6 @@ export class WeftDevtools extends HTMLElement {
         // a resolve result) is not offered under the next one.
         if (this.model.publicId !== next.publicId) {
           this.scratch.clear()
-          // The turn filter's prompts were the previous conversation's.
-          this.prompts.clear()
         }
         conn.scope = form
         // An explicit scope's run (or the user's switcher choice) pins
@@ -2142,7 +2138,6 @@ export class WeftDevtools extends HTMLElement {
     // remembers nothing of the old one (dropRung clears byPath with its
     // rung; this clears it without one too).
     this.byPath.clear()
-    this.prompts.clear()
     this.evParked.clear()
     this.evErrored.clear()
     // A retry keeps the not-reachable line up while it probes: no fab
@@ -2626,11 +2621,18 @@ export class WeftDevtools extends HTMLElement {
       "data-weft-k": "turnpick",
     }) as HTMLSelectElement
     for (const r of rows) {
+      // What the user recognises (U6): "● parked t3 How many units… ·
+      // 2 steps"; an experiment "↳ ● succeeded replay of t3 · 2 steps".
+      // The id is the option's title only.
+      const t = runTitle(r)
+      const src = r.forked_from && this.rowOf(r.forked_from.split("#")[0])
       const o = el(
         "option",
         undefined,
-        `${statusChip(r)} · ${r.id} · ${r.steps} steps`,
-        { value: r.id, "data-key": r.id }
+        r.forked_from
+          ? `↳ ● ${statusChip(r)} replay of ${src ? turnLabel(src) || shortId(src.id) : "a turn"} · ${r.steps} steps`
+          : `${["●", statusChip(r), turnLabel(r), clipTitle(t.text)].filter(Boolean).join(" ")} · ${r.steps} steps`,
+        { value: r.id, "data-key": r.id, title: `${r.id}\n${t.full}` }
       ) as HTMLOptionElement
       o.selected = r.id === s.selected
       sel.appendChild(o)
@@ -2984,8 +2986,8 @@ export class WeftDevtools extends HTMLElement {
       list.appendChild(el("div", "weft-splash", empty))
       return list
     }
-    // The filter (D4): text over the id, the error and the prompts the
-    // panel has read; a status; has error. Applied to the loaded rows.
+    // The filter (D4): text over the id, the error and the row's
+    // prompt_preview; a status; has error. Applied to the loaded rows.
     list.appendChild(this.turnFilter())
     const turns = s.turns.filter((r) => this.match(r))
     const filtered = this.filtering()
@@ -3126,9 +3128,7 @@ export class WeftDevtools extends HTMLElement {
     const q = f.text.trim().toLowerCase()
     return (
       !q ||
-      `${r.id}\n${r.err}\n${this.prompts.get(r.id) ?? ""}`
-        .toLowerCase()
-        .includes(q)
+      `${r.id}\n${r.err}\n${r.prompt_preview ?? ""}`.toLowerCase().includes(q)
     )
   }
 
@@ -3179,12 +3179,19 @@ export class WeftDevtools extends HTMLElement {
       {
         type: "button",
         tabindex: r.id === tab ? "0" : "-1",
+        "data-weft-run": r.id,
         ...(r.id === selected ? { "aria-current": "true" } : {}),
       }
     )
+    // Titled, not id'd (U6): "t3 How many units…", the id in the
+    // title and on the row (data-weft-run).
+    const t = runTitle(r)
     const row1 = el("div", "weft-row1", [
       el("span", `weft-chip weft-${chip}`, chip),
-      el("span", "weft-id", r.id, { title: r.id }),
+      el("span", "weft-ttl", `${turnLabel(r)} ${clipTitle(t.text)}`.trim(), {
+        title: `${r.id}\n${t.full}`,
+        "data-weft-title": t.kind,
+      }),
       // What the record says this turn is (D5): scripted, a fork, an
       // experiment of a turn the list names.
       ...turnChips(r, (id) => {
@@ -5096,7 +5103,6 @@ export class WeftDevtools extends HTMLElement {
     const ids = this.turnLinks(t, s)
     if (ids) wrap.appendChild(ids)
     const prompt = turnPromptOf(t.transcript)
-    if (prompt) capSet(this.prompts, t.id, prompt, RUN_MEMO_LIMIT)
     const ed = this.edCtx(s, t)
     // Step 0's prompt is a user edit's (plan F2): editable in place.
     const first = ed?.users.find((u) => u.step === 0 && u.index === 0)

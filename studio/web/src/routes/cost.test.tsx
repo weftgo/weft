@@ -99,7 +99,7 @@ const costOf = (id: string) => {
 }
 const listed = () =>
   [...document.querySelectorAll("tbody tr")].map((tr) =>
-    tr.querySelector("a span[title]")?.getAttribute("title")
+    tr.querySelector("[data-run-link]")?.getAttribute("data-run-link")
   )
 
 describe("the runs table's Cost column", () => {

@@ -120,6 +120,10 @@ export interface RunRow extends CostFields, DelegatedCostFields {
   /** The run's streamed deltas: counted, never stored. Absent on a
    * Studio older than the field. */
   delta_count?: number
+  /** The run's own prompt cut to 200 runes (obsdb.RunRow.PromptPreview):
+   * absent when its records carried no content (content-off) or no
+   * user text. lib/title.ts's runTitle leads with it. */
+  prompt_preview?: string
 }
 
 /** GET /api/runs → RunsPage. */
@@ -302,6 +306,11 @@ export interface SessionRow extends CostFields {
   last_seen: string
   status: RunStatus
   usage: Usage
+  /** thread's title (weft.session.title, the newest turn's): metadata,
+   * so present under content-off too. Absent when none was set. */
+  title?: string
+  /** The first turn's prompt_preview; absent when it stored none. */
+  first_prompt?: string
 }
 
 /** GET /api/sessions → SessionsPage. */
@@ -1679,6 +1688,9 @@ export function traceQuery(traceId: string) {
 export interface SessionFilters {
   agent?: string
   public_id?: string
+  /** Text: every term in the title, first prompt, id, public id or
+   * agent (obsdb.SessionQuery.Q). */
+  q?: string
   before?: string
   /** The cursor's tie-breaker (RunsFilters.before_id). */
   before_id?: string
@@ -1692,6 +1704,7 @@ export function fetchSessions(
   const params = new URLSearchParams()
   if (filters.agent) params.set("agent", filters.agent)
   if (filters.public_id) params.set("public_id", filters.public_id)
+  if (filters.q) params.set("q", filters.q)
   if (filters.before) params.set("before", filters.before)
   if (filters.before && filters.before_id)
     params.set("before_id", filters.before_id)

@@ -309,12 +309,14 @@ describe("scope", () => {
     await settle()
     expect(node.options?.scope).toEqual({ publicId: "pub_orders", session: "s_01", flow: "f_1", run: "s_01-t1" })
     const q = (sel: string) => Array.from(node.shadowRoot?.querySelectorAll(sel) ?? []).map((n) => n.textContent)
-    expect(q(".weft-turn .weft-id")).toEqual(["s_01-t1"]) // s_02's turn narrowed away
-    expect(q(".weft-sel .weft-id")).toEqual(["s_01-t1"])
+    const runs = (sel: string) =>
+      Array.from(node.shadowRoot?.querySelectorAll(sel) ?? []).map((n) => n.getAttribute("data-weft-run"))
+    expect(runs(".weft-turn")).toEqual(["s_01-t1"]) // s_02's turn narrowed away
+    expect(runs(".weft-turn.weft-sel")).toEqual(["s_01-t1"])
     expect(q(".weft-scope-chip")).toEqual(["session s_01", "flow f_1"])
     api.scope({ publicId: "pub_orders" }) // the same conversation, unnarrowed
     await settle()
-    expect(q(".weft-turn .weft-id")).toEqual(["s_01-t2", "s_01-t1"])
+    expect(runs(".weft-turn")).toEqual(["s_01-t2", "s_01-t1"])
     expect(q(".weft-scope-chip")).toEqual([])
   })
 
@@ -445,10 +447,10 @@ describe("select, isOpen, studioLink, scope(null) (C4)", () => {
     const api = await load()
     api.mount({ endpoint: STUDIO, publicId: "pub_orders", token: "dev_tok", open: true })
     await settle()
-    expect(shadow(".weft-sel .weft-id")?.textContent).toBe("s_01-t2")
+    expect(shadow(".weft-turn.weft-sel")?.getAttribute("data-weft-run")).toBe("s_01-t2")
     api.select("s_01-t1", 0)
     await settle()
-    expect(shadow(".weft-sel .weft-id")?.textContent).toBe("s_01-t1")
+    expect(shadow(".weft-turn.weft-sel")?.getAttribute("data-weft-run")).toBe("s_01-t1")
     const link = api.studioLink("s_01-t1", 0)
     expect(link).toBe(`${STUDIO}runs/s_01-t1?step=0&view=story`)
     expect(link).not.toContain("dev_tok")

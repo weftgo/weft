@@ -1,6 +1,10 @@
 // A session's turns (S4.7): the thread's runs in order, each a row,
 // with the experiments forked from a turn nested under it — playground
-// runs join their source on forked_from (lib/experiments).
+// runs join their source on forked_from (lib/experiments). A row leads
+// with "t3" and the turn's title (U6, lib/title.ts's turnTitle: its
+// prompt, or "resume of t1 · 1 decided call" for a resume — the
+// session id is the page's header), the run id a copyable line under
+// it. Narrow, the agent and started columns fold away.
 import { Fragment } from "react"
 import { Link } from "@tanstack/react-router"
 import { FlaskConical } from "lucide-react"
@@ -8,7 +12,13 @@ import { FlaskConical } from "lucide-react"
 import type { RunRow } from "@/lib/api"
 import { forkSource } from "@/lib/experiments"
 import { absoluteTime, relativeTime, tokens } from "@/lib/format"
-import { StatusChip, UnknownTokens } from "@/components/studio/runs-table"
+import {
+  IdChip,
+  RunTitle,
+  StatusChip,
+  TitleText,
+  UnknownTokens,
+} from "@/components/studio/runs-table"
 import { DerivedChip } from "@/components/studio/hole-badge"
 import { derivedUsageUnknown } from "@/lib/honesty"
 import {
@@ -20,6 +30,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { runLink } from "@/lib/links"
+import { runTitle, turnLabel, turnTitle } from "@/lib/title"
 
 export function SessionTurns({
   turns,
@@ -38,28 +49,29 @@ export function SessionTurns({
         <TableRow className="hover:bg-transparent">
           <TableHead className="w-28">status</TableHead>
           <TableHead>turn</TableHead>
-          <TableHead>agent</TableHead>
+          <TableHead className="hidden sm:table-cell">agent</TableHead>
           <TableHead className="text-right">steps</TableHead>
           <TableHead className="text-right" title="input / output tokens">
             tokens in / out
           </TableHead>
-          <TableHead className="text-right">started</TableHead>
+          <TableHead className="hidden text-right sm:table-cell">
+            started
+          </TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {turns.map((r) => (
+        {turns.map((r, i) => (
           <Fragment key={r.id}>
             <TableRow className="h-9" data-turn={r.id}>
               <TableCell>
                 <StatusChip status={r.status} />
               </TableCell>
-              <TableCell className="max-w-72">
-                <Link
-                  {...runLink(r.id)}
-                  className="font-mono text-[13px] hover:text-thread-ink"
-                >
-                  <span className="truncate">{r.id}</span>
-                </Link>
+              <TableCell className="max-w-[min(24rem,60vw)]">
+                <RunTitle
+                  run={r}
+                  lead={turnLabel(r) || undefined}
+                  t={turnTitle(turns[i - 1], r)}
+                />
                 <DerivedChip row={r} />
                 {r.err ? (
                   <div
@@ -70,7 +82,7 @@ export function SessionTurns({
                   </div>
                 ) : null}
               </TableCell>
-              <TableCell className="whitespace-nowrap">
+              <TableCell className="hidden whitespace-nowrap sm:table-cell">
                 {r.agent || <span className="text-faint">—</span>}
               </TableCell>
               <TableCell className="text-right font-mono tabular-nums">
@@ -87,7 +99,7 @@ export function SessionTurns({
                 )}
               </TableCell>
               <TableCell
-                className="text-right font-mono whitespace-nowrap tabular-nums"
+                className="hidden text-right font-mono whitespace-nowrap tabular-nums sm:table-cell"
                 title={absoluteTime(r.started)}
               >
                 {relativeTime(r.started, clock)}
@@ -104,7 +116,7 @@ export function SessionTurns({
                   <TableCell className="pl-6">
                     <StatusChip status={x.status} />
                   </TableCell>
-                  <TableCell className="max-w-72">
+                  <TableCell className="max-w-[min(24rem,60vw)]">
                     <span className="flex items-center gap-1.5 pl-3">
                       <FlaskConical
                         className="size-3 shrink-0 text-faint"
@@ -112,10 +124,10 @@ export function SessionTurns({
                       />
                       <Link
                         {...runLink(x.id)}
-                        className="truncate font-mono text-[12px] hover:text-thread-ink"
+                        className="flex min-w-0 text-[12px] hover:text-thread-ink"
                         title={`an experiment forked from this turn (${x.forked_from})`}
                       >
-                        {x.id}
+                        <TitleText t={runTitle(x)} />
                       </Link>
                       <span className="shrink-0 font-mono text-[11px] text-faint">
                         {src && src.fromStep > 0
@@ -125,8 +137,11 @@ export function SessionTurns({
                         {x.session_id ? " · fork" : ""}
                       </span>
                     </span>
+                    <div className="pl-7">
+                      <IdChip id={x.id} />
+                    </div>
                   </TableCell>
-                  <TableCell className="whitespace-nowrap text-muted-foreground">
+                  <TableCell className="hidden whitespace-nowrap text-muted-foreground sm:table-cell">
                     {x.model.name || x.agent || "—"}
                   </TableCell>
                   <TableCell className="text-right font-mono tabular-nums">
@@ -137,7 +152,7 @@ export function SessionTurns({
                     {tokens(x.usage.output_tokens)}
                   </TableCell>
                   <TableCell
-                    className="text-right font-mono whitespace-nowrap tabular-nums"
+                    className="hidden text-right font-mono whitespace-nowrap tabular-nums sm:table-cell"
                     title={absoluteTime(x.started)}
                   >
                     {relativeTime(x.started, clock)}

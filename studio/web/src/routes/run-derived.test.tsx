@@ -411,7 +411,9 @@ describe("a derived run in the lists", () => {
     await waitFor(() =>
       expect(document.querySelector(`tr [data-derived-chip]`)).toBeTruthy()
     )
-    expect(document.body.textContent).toContain(DERIVED_FAILED)
+    expect(
+      document.querySelector(`[data-run-link="${DERIVED_FAILED}"]`)
+    ).toBeTruthy()
   })
 
   it("a derived session: its turns are derived rows", async () => {

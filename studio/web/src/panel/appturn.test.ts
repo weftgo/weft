@@ -74,11 +74,17 @@ async function open(
   await vi.waitFor(
     () =>
       expect(
-        all(el, ".weft-turn").some((b) => b.textContent.includes(id))
+        all(el, ".weft-turn").some((b) =>
+          (b.getAttribute("data-weft-run") ?? "").includes(id)
+        )
       ).toBe(true),
     { timeout: 5_000 }
   )
-  click(all(el, ".weft-turn").find((b) => b.textContent.includes(id)))
+  click(
+    all(el, ".weft-turn").find((b) =>
+      (b.getAttribute("data-weft-run") ?? "").includes(id)
+    )
+  )
   await vi.waitFor(
     () =>
       expect(
@@ -159,7 +165,9 @@ describe("an app turn whose service has a Sessions runtime connected", () => {
     ).toBeGreaterThanOrEqual(2)
     // No verb is left on a decided turn; the resumed run tops the list.
     expect(button(el, "continue")).toBeUndefined()
-    expect(all(el, ".weft-turn")[0]?.textContent).toContain(RESUMED)
+    expect(all(el, ".weft-turn")[0]?.getAttribute("data-weft-run")).toBe(
+      RESUMED
+    )
     click($(el, `[data-weft-resumed="${RESUMED}"]`))
     await vi.waitFor(
       () =>
@@ -167,7 +175,7 @@ describe("an app turn whose service has a Sessions runtime connected", () => {
           $(
             el,
             ".weft-turn[aria-current], .weft-turn.weft-on, .weft-turn[aria-selected='true']"
-          )?.textContent ?? ""
+          )?.getAttribute("data-weft-run") ?? ""
         ).toContain(RESUMED),
       { timeout: 5_000 }
     )

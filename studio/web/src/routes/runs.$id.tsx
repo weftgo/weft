@@ -53,7 +53,7 @@ import {
   timeDomain,
 } from "@/lib/trace"
 import { FlowStrip } from "@/components/studio/flow-strip"
-import { RunHeader } from "@/components/studio/run-header"
+import { RunHeader, runPlace } from "@/components/studio/run-header"
 import { saveTest } from "@/components/studio/saves"
 import { notifySave } from "@/lib/notify"
 import { mayExportTestWith } from "@/lib/saves"
@@ -328,7 +328,7 @@ function RunPage() {
     navigate,
   ])
   // The tab is titled while the run loads too (lib/title.ts).
-  useDocumentTitle({ page: "run", id, status: run.data?.status })
+  useDocumentTitle(runPlace(run.data ?? { id }, !!run.data))
   // A link with the drawer's state reopens it once, on that step, from
   // the verb's own draft (the edits were never in the link).
   // Once per run id: an in-app navigation to another run's link

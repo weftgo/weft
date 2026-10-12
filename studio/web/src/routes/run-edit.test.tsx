@@ -813,7 +813,7 @@ describe("run → run navigation keeps nothing of the first run's (phase 4 revie
   }
   const onB = async () =>
     waitFor(() => {
-      expect(document.title).toContain(B)
+      expect(document.querySelector("[data-run-id]")?.textContent).toBe(B)
       expect(
         document.querySelector('[data-call="c3"] [data-editable="tool_result"]')
       ).toBeTruthy()

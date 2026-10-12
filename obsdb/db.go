@@ -501,8 +501,16 @@ const MaxGaps = 1000
 // its turns, usage, first/last seen, agent, status, the page's order,
 // Total and the cursor are those turns' alone — a run of another app
 // sharing the session id (a colliding derived run) moves none of them.
+//
+// Q finds sessions by text: every whitespace-separated term must be a
+// case-insensitive substring of one of the session's title, its first
+// turn's prompt (the whole prompt, not the preview's cut), its id, its
+// public id or its agent — terms AND, fields OR. Case folding is
+// ASCII-only on SQLite (lower()), Unicode on ClickHouse
+// (positionCaseInsensitiveUTF8).
 type SessionQuery struct {
 	Agent, PublicID string
+	Q               string
 	Before          time.Time // cursor on LastSeen; zero = newest
 	BeforeID        string    // with Before: the (LastSeen, ID) pair, as RunQuery.BeforeID
 	Limit           int       // 0 = 50, max 500
@@ -516,7 +524,20 @@ type SessionRow struct {
 	FirstSeen, LastSeen time.Time
 	Status              Status // the newest turn's
 	Usage               core.Usage
+	// Title is the newest turn's (by turn, then start) non-empty
+	// SessionTitleKey — thread's Title as that turn started, a label
+	// that survives content-off — "" when no turn carried one.
+	Title string
+	// FirstPrompt is the first turn's (lowest turn, then earliest
+	// start) RunRow.PromptPreview: "" when that turn's records carried
+	// no content (content-off) or no user text — never a later turn's.
+	FirstPrompt string
 }
+
+// SessionTitleKey is the run metadata a thread session stamps with its
+// current title (docs/record-contract.md §2): it lands in RunRow.Meta
+// and is read back as SessionRow.Title.
+const SessionTitleKey = "weft.session.title"
 
 // SessionPage is one Sessions result, paged as RunPage is: newest
 // LastSeen first (ties by ID, descending), NextBefore/NextBeforeID are

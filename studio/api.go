@@ -602,6 +602,13 @@ type sessionRow struct {
 	LastSeen  time.Time  `json:"last_seen"`
 	Status    string     `json:"status"`
 	Usage     core.Usage `json:"usage"`
+	// Title is the newest turn's weft.session.title (thread's Title, a
+	// label that survives content-off; obsdb.SessionRow.Title), absent
+	// when none was set. FirstPrompt is the first turn's prompt_preview,
+	// absent when that turn stored no content. The UI titles the row
+	// with the first present of the two, else the id (lib/title.ts).
+	Title       string `json:"title,omitempty"`
+	FirstPrompt string `json:"first_prompt,omitempty"`
 	// The session's cost (plan A5): its turns' own + delegated — the
 	// session's usage already includes their subagents. A thread/pool
 	// child is another session, which this row does not link: no
@@ -614,6 +621,7 @@ func sessRow(r obsdb.SessionRow) sessionRow {
 		ID: r.ID, PublicID: r.PublicID, Agent: r.Agent, Turns: r.Turns,
 		FirstSeen: r.FirstSeen, LastSeen: r.LastSeen,
 		Status: string(r.Status), Usage: r.Usage,
+		Title: r.Title, FirstPrompt: r.FirstPrompt,
 	}
 }
 
@@ -1266,11 +1274,13 @@ func (s *Server) serveTrace(w http.ResponseWriter, r *http.Request) {
 }
 
 // serveSessions answers api/sessions (S4.2): public_id and agent
-// filters, before (RFC 3339, on last-seen) with before_id (the
-// cursor's session id) and limit.
+// filters, q (obsdb.SessionQuery.Q: every term in the title, the first
+// turn's prompt, the id, the public id or the agent), before (RFC
+// 3339, on last-seen) with before_id (the cursor's session id) and
+// limit.
 func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
-	query := obsdb.SessionQuery{Agent: q.Get("agent"), PublicID: q.Get("public_id")}
+	query := obsdb.SessionQuery{Agent: q.Get("agent"), PublicID: q.Get("public_id"), Q: strings.TrimSpace(q.Get("q"))}
 	if id := idFrom(r); id.panel != nil {
 		if asked := q.Get("public_id"); asked != "" && asked != id.panel.PublicID {
 			forbidden(w, r)
@@ -1390,10 +1400,14 @@ func withPublicID(runs []obsdb.RunRow, pub string) []obsdb.RunRow {
 // GROUP BY over every run of the session id, which a run of another
 // app can share. The same aggregates as the database's: the turn
 // count, first/last seen, summed usage, MAX(agent), and the newest
-// turn's status (by turn, then start).
+// turn's status (by turn, then start), the newest titled turn's title
+// and the first turn's prompt preview.
 func scopedSessionRow(row obsdb.SessionRow, turns []obsdb.RunRow, pub string) obsdb.SessionRow {
 	out := obsdb.SessionRow{ID: row.ID, PublicID: pub}
-	var newest *obsdb.RunRow
+	var newest, first, titled *obsdb.RunRow
+	later := func(a, b *obsdb.RunRow) bool { // a after b, by turn then start
+		return a.Turn > b.Turn || (a.Turn == b.Turn && a.Started.After(b.Started))
+	}
 	for i := range turns {
 		t := &turns[i]
 		if t.PublicID != pub {
@@ -1410,12 +1424,24 @@ func scopedSessionRow(row obsdb.SessionRow, turns []obsdb.RunRow, pub string) ob
 		if t.LastSeen.After(out.LastSeen) {
 			out.LastSeen = t.LastSeen
 		}
-		if newest == nil || t.Turn > newest.Turn || (t.Turn == newest.Turn && t.Started.After(newest.Started)) {
+		if newest == nil || later(t, newest) {
 			newest = t
+		}
+		if first == nil || later(first, t) {
+			first = t
+		}
+		if t.Meta[obsdb.SessionTitleKey] != "" && (titled == nil || later(t, titled)) {
+			titled = t
 		}
 	}
 	if newest != nil {
 		out.Status = newest.Status
+	}
+	if first != nil {
+		out.FirstPrompt = first.PromptPreview
+	}
+	if titled != nil {
+		out.Title = titled.Meta[obsdb.SessionTitleKey]
 	}
 	return out
 }

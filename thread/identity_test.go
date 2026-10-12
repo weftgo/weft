@@ -575,3 +575,51 @@ func TestListByPublicID(t *testing.T) {
 		}
 	})
 }
+
+// The session's title rides its turns as weft.session.title (metadata,
+// so it survives a content-off destination): absent before SetInfo
+// names one, the current title on every turn after — a title set after
+// the first turn reaches the later ones, a replaced one the turns that
+// follow it.
+func TestRunIdentitySessionTitle(t *testing.T) {
+	eachBackend(t, func(t *testing.T, st thread.Storage) {
+		ctx := context.Background()
+		col := &mdCollector{}
+		agent := core.New(wefttest.Script(wefttest.Say("one"), wefttest.Say("two"), wefttest.Say("three")), col.tap())
+		s, err := thread.Create(ctx, st, agent)
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		defer func() { _ = s.Close(ctx) }()
+		send := func(text string) {
+			t.Helper()
+			turn, err := s.Send(ctx, core.User(text))
+			if err != nil {
+				t.Fatalf("Send: %v", err)
+			}
+			if _, err := turn.Wait(); err != nil {
+				t.Fatalf("Wait: %v", err)
+			}
+		}
+		send("first")
+		if err := s.SetInfo(ctx, "Acme support desk", nil); err != nil {
+			t.Fatalf("SetInfo: %v", err)
+		}
+		send("second")
+		if err := s.SetInfo(ctx, "Trip planner", nil); err != nil {
+			t.Fatalf("SetInfo: %v", err)
+		}
+		send("third")
+		mds := col.snapshot()
+		if len(mds) != 3 {
+			t.Fatalf("runs = %d, want 3", len(mds))
+		}
+		if v, ok := mds[0]["weft.session.title"]; ok {
+			t.Errorf("turn 1 carries weft.session.title %q before any SetInfo named one", v)
+		}
+		if mds[1]["weft.session.title"] != "Acme support desk" || mds[2]["weft.session.title"] != "Trip planner" {
+			t.Errorf("titles = %q, %q; want the title current at each turn's start",
+				mds[1]["weft.session.title"], mds[2]["weft.session.title"])
+		}
+	})
+}

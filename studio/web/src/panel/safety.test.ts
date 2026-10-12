@@ -87,11 +87,19 @@ describe("the element's lifecycle", () => {
     }
     const studio = fakeStudio(routes)
     const el = await mount()
-    expect(text(el, ".weft-turns")).toContain("s_01-t1")
+    expect(
+      all(el, ".weft-turn")
+        .map((n) => n.getAttribute("data-weft-run"))
+        .join(" ")
+    ).toContain("s_01-t1")
     el.setAttribute("data-public-id", "pub_other")
     await settle()
     expect(metaCalls(studio)).toBe(1)
-    expect(text(el, ".weft-turns")).not.toContain("s_01-t1")
+    expect(
+      all(el, ".weft-turn")
+        .map((n) => n.getAttribute("data-weft-run"))
+        .join(" ")
+    ).not.toContain("s_01-t1")
     expect(FakeEventSource.live("public_id=pub_orders")).toHaveLength(0)
     expect(FakeEventSource.live("public_id=pub_other")).toHaveLength(1)
     // data-position re-places the dock (D1), and asks the server nothing.
@@ -656,13 +664,21 @@ describe("the live streams end", () => {
     )
     fakeStudio(routes)
     const el = await mount()
-    expect(text(el, ".weft-sel")).toContain("s_01-t2") // the running turn opens
+    expect(
+      $(el, ".weft-turn.weft-sel")?.getAttribute("data-weft-run") ?? ""
+    ).toContain("s_01-t2") // the running turn opens
     vi.useFakeTimers()
     FakeEventSource.last("run=s_01-t2")!.fail(FakeEventSource.CONNECTING) // a blip: the browser retries
     await vi.advanceTimersByTimeAsync(2_000)
-    click(all(el, ".weft-turn").find((n) => n.textContent.includes("s_01-t1")))
+    click(
+      all(el, ".weft-turn").find((n) =>
+        (n.getAttribute("data-weft-run") ?? "").includes("s_01-t1")
+      )
+    )
     await vi.advanceTimersByTimeAsync(30_000)
-    expect(text(el, ".weft-sel")).toContain("s_01-t1")
+    expect(
+      $(el, ".weft-turn.weft-sel")?.getAttribute("data-weft-run") ?? ""
+    ).toContain("s_01-t1")
     expect(FakeEventSource.live("run=s_01-t2")).toHaveLength(0)
   })
 

@@ -1,16 +1,19 @@
 // A session page (S4.7): the thread's turns in order, each a run
-// card; experiments nest under their source turn via forked_from.
+// card; experiments nest under their source turn via forked_from. The
+// header and the tab lead with the session's title (U6, lib/title.ts's
+// sessionTitle), the id a copyable line under it.
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, Link } from "@tanstack/react-router"
 
 import { sessionQuery } from "@/lib/api"
 import { fetchSessionForks, nestExperiments } from "@/lib/experiments"
 import { absoluteTime, relativeTime, tokens } from "@/lib/format"
-import { StatusChip } from "@/components/studio/runs-table"
+import { IdChip, StatusChip, TitleText } from "@/components/studio/runs-table"
 import { SessionTurns } from "@/components/studio/session-turns"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
 import { useDocumentTitle } from "@/hooks/use-document-title"
+import { sessionTitle } from "@/lib/title"
 
 export const Route = createFileRoute("/sessions/$id")({
   component: SessionPage,
@@ -18,8 +21,14 @@ export const Route = createFileRoute("/sessions/$id")({
 
 function SessionPage() {
   const { id } = Route.useParams()
-  useDocumentTitle({ page: "session", id })
   const q = useQuery(sessionQuery(id))
+  const title = q.data ? sessionTitle(q.data, q.data.runs[0]) : undefined
+  useDocumentTitle({
+    page: "session",
+    id,
+    title: title && title.kind !== "id" ? title.text : undefined,
+    turns: q.data?.turns,
+  })
   // The experiments that forked this thread's turns: playground runs
   // are not turns of the session (an ephemeral one has no session id),
   // so they are read beside it and joined on forked_from.
@@ -64,9 +73,12 @@ function SessionPage() {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-3">
-        <h1 className="font-mono text-base font-medium tracking-tight">
-          {s.id}
-        </h1>
+        <div className="min-w-0">
+          <h1 className="flex min-w-0 text-base font-medium tracking-tight">
+            <TitleText t={sessionTitle(s, turns[0])} />
+          </h1>
+          <IdChip id={s.id} noun="session id" />
+        </div>
         <StatusChip status={s.status} />
         <span className="text-xs text-muted-foreground">{s.agent}</span>
         <span className="font-mono text-[11px] text-faint">

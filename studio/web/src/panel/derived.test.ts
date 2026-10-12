@@ -52,7 +52,11 @@ async function open(): Promise<WeftDevtools> {
   await vi.waitFor(() => expect(all(el, ".weft-turn").length).toBe(2), {
     timeout: 5_000,
   })
-  click(all(el, ".weft-turn").find((b) => b.textContent.includes(DERIVED)))
+  click(
+    all(el, ".weft-turn").find((b) =>
+      (b.getAttribute("data-weft-run") ?? "").includes(DERIVED)
+    )
+  )
   await vi.waitFor(
     () =>
       expect(
@@ -181,7 +185,9 @@ describe("a derived turn in the panel", () => {
       timeout: 5_000,
     })
     click(
-      all(el, ".weft-turn").find((b) => b.textContent.includes(DERIVED_FAILED))
+      all(el, ".weft-turn").find((b) =>
+        (b.getAttribute("data-weft-run") ?? "").includes(DERIVED_FAILED)
+      )
     )
     await vi.waitFor(
       () =>

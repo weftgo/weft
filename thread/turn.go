@@ -1333,8 +1333,15 @@ func (s *Session) runMetadata(t *Turn) map[string]string {
 // has a value; runMetadata sets the rest to "" so none is inherited.
 // weft.session.id and weft.turn are always set.
 var sessionOwnedKeys = []string{
-	publicIDKey, "weft.session.forked_from", "weft.session.parent", "weft.session.parent_call",
+	publicIDKey, sessionTitleKey, "weft.session.forked_from", "weft.session.parent", "weft.session.parent_call",
 }
+
+// sessionTitleKey is the run metadata carrying the session's current
+// title (Title: the last SetInfo that named one) as the turn starts —
+// a label, not content (it survives a content-off destination), so a
+// title set after the first turn reaches every later turn and a reader
+// takes the newest turn's.
+const sessionTitleKey = "weft.session.title"
 
 // identityMetadata is runMetadata for the run minted as turn n (the
 // turnSeq its id carries): the session's identity pairs, without the
@@ -1347,6 +1354,9 @@ func (s *Session) identityMetadata(n int) map[string]string {
 	}
 	if v := s.Meta()[publicIDKey]; v != "" {
 		md[publicIDKey] = v
+	}
+	if v := s.Title(); v != "" {
+		md[sessionTitleKey] = v
 	}
 	if p := s.header.Parent; p != nil { // a fork
 		md["weft.session.forked_from"] = p.Session + "#" + p.Entry

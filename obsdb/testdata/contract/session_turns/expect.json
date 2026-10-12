@@ -86,5 +86,14 @@
       "tools": [],
       "holes": []
     }
+  ],
+  "sessions": [
+    {
+      "id": "01K00000000000000000000001",
+      "public_id": "pub_contract",
+      "agent": "support",
+      "turns": 2,
+      "first_prompt": "hi"
+    }
   ]
 }

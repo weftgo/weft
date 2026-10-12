@@ -1004,6 +1004,23 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		having = append(having, "max(Agent) = ?")
 		hargs = append(hargs, q.Agent)
 	}
+	if q.Q != "" {
+		// The first turn's whole prompt, derived as Search derives it,
+		// for the scoped sessions' first turns only; one derivation per
+		// term (a term may match another field instead).
+		var pubArgs []any // the runs subquery's parameters, as the FROM's
+		if q.PublicID != "" {
+			pubArgs = []any{q.PublicID, q.PublicID}
+		}
+		cand := " AND RunId IN (SELECT argMin(RunId, (Turn, Started, RunId)) FROM " + runs + " GROUP BY SessionID)"
+		for _, t := range strings.Fields(q.Q) {
+			having = append(having, "(positionCaseInsensitiveUTF8(sTitle, ?) > 0"+
+				" OR sFirstRun IN (SELECT RunId FROM ("+searchWindowed(cand)+") GROUP BY RunId HAVING positionCaseInsensitiveUTF8("+promptExpr+", ?) > 0)"+
+				" OR positionCaseInsensitiveUTF8(SessionID, ?) > 0 OR positionCaseInsensitiveUTF8(sPublicID, ?) > 0"+
+				" OR positionCaseInsensitiveUTF8(sAgent, ?) > 0)")
+			hargs = append(append(append(hargs, t), pubArgs...), t, t, t, t)
+		}
+	}
 	havingSQL := func(conds []string) string {
 		if len(conds) == 0 {
 			return ""
@@ -1013,7 +1030,7 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 	// Total is the whole match: the cursor pages it, never narrows it.
 	var total uint64
 	if err := d.conn.QueryRow(ctx,
-		"SELECT count() FROM (SELECT SessionID FROM "+runs+" GROUP BY SessionID"+havingSQL(having)+")", hargs...).Scan(&total); err != nil {
+		"SELECT count() FROM (SELECT SessionID, "+sessionAggs+" FROM "+runs+" GROUP BY SessionID"+havingSQL(having)+")", hargs...).Scan(&total); err != nil {
 		return obsdb.SessionPage{}, err
 	}
 	pageArgs := append([]any{}, hargs...)
@@ -1033,13 +1050,7 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 	// WITH TIES, then the total order capped at MaxTies past the limit —
 	// the Runs page's rule: sessions sharing one LastSeen ride along
 	// instead of being skipped by a next page read on Before alone.
-	rs, err := d.conn.Query(ctx, `SELECT * FROM (SELECT SessionID, max(PublicID) AS sPublicID, max(Agent) AS sAgent,
-		uniqExact(RunId) AS sTurns, min(Started) AS sFirstSeen, max(LastSeen) AS sLastSeen,
-		sum(InputTokens) AS sInputTokens, sum(OutputTokens) AS sOutputTokens,
-		sum(CachedInputTokens) AS sCachedInputTokens, sum(CacheWriteTokens) AS sCacheWriteTokens,
-		sum(ReasoningTokens) AS sReasoningTokens,
-		argMax(greatest(FinishedOK, RootEnded), (Turn, Started)) AS sNewestOK, argMax(Failed, (Turn, Started)) AS sNewestFailed,
-		argMax(LastSeen, (Turn, Started)) AS sNewestLastSeen
+	rs, err := d.conn.Query(ctx, `SELECT * FROM (SELECT SessionID, `+sessionAggs+`
 		FROM `+runs+` GROUP BY SessionID`+havingSQL(having)+
 		` ORDER BY sLastSeen DESC LIMIT ? WITH TIES) ORDER BY sLastSeen DESC, SessionID DESC LIMIT ?`, append(pageArgs, limit, limit+obsdb.MaxTies)...)
 	if err != nil {
@@ -1048,17 +1059,20 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 	defer func() { _ = rs.Close() }()
 	now := time.Now()
 	page := obsdb.SessionPage{Total: int(total)}
+	var firstRuns []string
 	for rs.Next() {
 		var row obsdb.SessionRow
 		var turns uint64
 		var inTok, outTok, cached, cacheW, reason int64
 		var ok, failed bool
 		var newestSeen time.Time
+		var firstRun string
 		if err := rs.Scan(&row.ID, &row.PublicID, &row.Agent, &turns,
 			&row.FirstSeen, &row.LastSeen, &inTok, &outTok, &cached, &cacheW, &reason,
-			&ok, &failed, &newestSeen); err != nil {
+			&ok, &failed, &newestSeen, &row.Title, &firstRun); err != nil {
 			return obsdb.SessionPage{}, err
 		}
+		firstRuns = append(firstRuns, firstRun)
 		row.Turns = int(turns)
 		row.FirstSeen, row.LastSeen = row.FirstSeen.UTC(), row.LastSeen.UTC()
 		row.Usage = core.Usage{
@@ -1072,11 +1086,48 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 	if err := rs.Err(); err != nil {
 		return obsdb.SessionPage{}, err
 	}
+	if err := d.fillFirstPrompts(ctx, page.Sessions, firstRuns); err != nil {
+		return obsdb.SessionPage{}, err
+	}
 	if len(page.Sessions) >= limit {
 		end := page.Sessions[len(page.Sessions)-1]
 		page.NextBefore, page.NextBeforeID = &end.LastSeen, end.ID
 	}
 	return page, nil
+}
+
+// sessionAggs is a session row's aggregates over sessionRuns' rows,
+// every alias s-prefixed: the newest turn's status inputs and title
+// (argMax on (Turn, Started), SQLite's ORDER BY ... LIMIT 1), and the
+// first turn's run id (argMin), whose prompt fillFirstPrompts reads.
+const sessionAggs = `max(PublicID) AS sPublicID, max(Agent) AS sAgent,
+		uniqExact(RunId) AS sTurns, min(Started) AS sFirstSeen, max(LastSeen) AS sLastSeen,
+		sum(InputTokens) AS sInputTokens, sum(OutputTokens) AS sOutputTokens,
+		sum(CachedInputTokens) AS sCachedInputTokens, sum(CacheWriteTokens) AS sCacheWriteTokens,
+		sum(ReasoningTokens) AS sReasoningTokens,
+		argMax(greatest(FinishedOK, RootEnded), (Turn, Started)) AS sNewestOK, argMax(Failed, (Turn, Started)) AS sNewestFailed,
+		argMax(LastSeen, (Turn, Started)) AS sNewestLastSeen,
+		argMaxIf(Title, (Turn, Started), Title != '') AS sTitle,
+		argMin(RunId, (Turn, Started, RunId)) AS sFirstRun`
+
+// fillFirstPrompts sets each row's FirstPrompt to its first turn's
+// prompt preview (firstRuns[i] is rows[i]'s first turn): the run rows'
+// own derivation (fillPreviewsOf), "" for a turn that has none.
+func (d *DB) fillFirstPrompts(ctx context.Context, rows []obsdb.SessionRow, firstRuns []string) error {
+	if len(firstRuns) == 0 {
+		return nil
+	}
+	byID := make(map[string]*obsdb.RunRow, len(firstRuns))
+	for _, id := range firstRuns {
+		byID[id] = &obsdb.RunRow{ID: id}
+	}
+	if err := d.fillPreviewsOf(ctx, firstRuns, byID); err != nil {
+		return err
+	}
+	for i := range rows {
+		rows[i].FirstPrompt = byID[firstRuns[i]].PromptPreview
+	}
+	return nil
 }
 
 // sessionRuns builds the per-run subquery both Sessions and Session
@@ -1095,7 +1146,8 @@ func sessionRuns(narrow, cond string) string {
 				max(FinishedOK) AS FinishedOK, max(Failed) AS Failed, max(RootEnded) AS RootEnded,
 				max(InputTokens) AS InputTokens, max(OutputTokens) AS OutputTokens,
 				max(CachedInputTokens) AS CachedInputTokens, max(CacheWriteTokens) AS CacheWriteTokens,
-				max(ReasoningTokens) AS ReasoningTokens
+				max(ReasoningTokens) AS ReasoningTokens,
+				max(JSONExtractString(Meta, '` + obsdb.SessionTitleKey + `')) AS Title
 			FROM weft_runs` + narrow + `
 			GROUP BY RunId)
 		WHERE ParentRunID = '' AND Playground = 0 AND SessionID != ''` + cond + `)`
@@ -1110,13 +1162,7 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 	// backend's P2-1 fix): the old read scanned the newest 500
 	// sessions, so an older session 404'd here while the list still
 	// showed it.
-	rs, err := d.conn.Query(ctx, `SELECT SessionID, max(PublicID) AS sPublicID, max(Agent) AS sAgent,
-		uniqExact(RunId) AS sTurns, min(Started) AS sFirstSeen, max(LastSeen) AS sLastSeen,
-		sum(InputTokens) AS sInputTokens, sum(OutputTokens) AS sOutputTokens,
-		sum(CachedInputTokens) AS sCachedInputTokens, sum(CacheWriteTokens) AS sCacheWriteTokens,
-		sum(ReasoningTokens) AS sReasoningTokens,
-		argMax(greatest(FinishedOK, RootEnded), (Turn, Started)) AS sNewestOK, argMax(Failed, (Turn, Started)) AS sNewestFailed,
-		argMax(LastSeen, (Turn, Started)) AS sNewestLastSeen
+	rs, err := d.conn.Query(ctx, `SELECT SessionID, `+sessionAggs+`
 		FROM `+sessionRuns(
 		" WHERE RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.SessionID = ?)",
 		" AND SessionID = ?")+` GROUP BY SessionID`, id, id)
@@ -1135,9 +1181,10 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 		}
 		return obsdb.SessionDetail{}, fmt.Errorf("%w: session %s", obsdb.ErrNotFound, id)
 	}
+	var firstRun string
 	if err := rs.Scan(&row.ID, &row.PublicID, &row.Agent, &turns,
 		&row.FirstSeen, &row.LastSeen, &inTok, &outTok, &cached, &cacheW, &reason,
-		&ok, &failed, &newestSeen); err != nil {
+		&ok, &failed, &newestSeen, &row.Title, &firstRun); err != nil {
 		return obsdb.SessionDetail{}, err
 	}
 	if err := rs.Err(); err != nil {
@@ -1165,6 +1212,11 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 	}
 	if err := d.fillCounts(ctx, rowPtrs(runs)); err != nil {
 		return obsdb.SessionDetail{}, err
+	}
+	for _, r := range runs { // the first turn's preview, filled with the counts
+		if r.ID == firstRun {
+			row.FirstPrompt = r.PromptPreview
+		}
 	}
 	return obsdb.SessionDetail{SessionRow: row, Runs: runs}, nil
 }

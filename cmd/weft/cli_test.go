@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"syscall"
@@ -359,11 +360,23 @@ func TestRunsCommand(t *testing.T) {
 	}
 	// STOPPED BY is the last column: what ended the run (U3.2) — r_ok's
 	// model answered; r_fail's model failed, which no control decided.
-	if !strings.HasSuffix(strings.TrimSpace(lines[0]), "STEPS  STOPPED BY") {
-		t.Errorf("header = %q, want STOPPED BY after STEPS", lines[0])
+	// PROMPT sits before it (U6): the prompt preview's first 40 runes.
+	if !regexp.MustCompile(`STEPS +PROMPT +STOPPED BY$`).MatchString(strings.TrimSpace(lines[0])) {
+		t.Errorf("header = %q, want STEPS, PROMPT, STOPPED BY last", lines[0])
 	}
-	if fs := strings.Fields(lines[2]); fs[len(fs)-2] != "2" || fs[len(fs)-1] != "final_answer" {
-		t.Errorf("r_ok's steps / stopped by columns = %q, want 2 final_answer", fs[len(fs)-2:])
+	if !regexp.MustCompile(` 2 +where is order 42\? +final_answer$`).MatchString(strings.TrimSpace(lines[2])) {
+		t.Errorf("r_ok's steps / prompt / stopped by columns = %q, want 2, its prompt, final_answer", lines[2])
+	}
+	for _, c := range []struct{ in, want string }{
+		{"", "-"},
+		{"  line one\nline two", "line one"},
+		{"a\tb", "a b"},
+		{strings.Repeat("é", 41), strings.Repeat("é", 39) + "…"},
+		{strings.Repeat("x", 40), strings.Repeat("x", 40)},
+	} {
+		if got := (runRow{Prompt: c.in}).prompt(); got != c.want {
+			t.Errorf("prompt cell of %q = %q, want %q", c.in, got, c.want)
+		}
 	}
 	if fs := strings.Fields(lines[1]); fs[len(fs)-1] != "-" {
 		t.Errorf("r_fail's stopped by column = %q, want - (a model error: no control decided)", fs[len(fs)-1])

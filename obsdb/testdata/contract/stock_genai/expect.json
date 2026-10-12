@@ -97,5 +97,12 @@
         "derived"
       ]
     }
+  ],
+  "sessions": [
+    {
+      "id": "conv_7f3a",
+      "agent": "support",
+      "turns": 2
+    }
   ]
 }

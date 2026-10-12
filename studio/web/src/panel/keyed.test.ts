@@ -236,7 +236,7 @@ describe("focus on a turn row", () => {
     fakeStudio(twoTurns())
     const el = await mount(BASE)
     const byId = (id: string) =>
-      rows(el).find((r) => r.textContent.includes(id))!
+      rows(el).find((r) => r.getAttribute("data-weft-run") === id)!
     const second = byId("s_01-t1")
     second.focus()
     const focus = vi.spyOn(HTMLElement.prototype, "focus")

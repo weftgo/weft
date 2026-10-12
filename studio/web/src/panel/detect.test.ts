@@ -106,9 +106,10 @@ function script(
 }
 
 /** The selected turn's id ("" when none). */
-const selected = (el: WeftDevtools) => text(el, ".weft-sel .weft-id")
+const selected = (el: WeftDevtools) =>
+  $(el, ".weft-turn.weft-sel")?.getAttribute("data-weft-run") ?? ""
 const ids = (el: WeftDevtools) =>
-  all(el, ".weft-turn .weft-id").map((n) => n.textContent)
+  all(el, ".weft-turn").map((n) => n.getAttribute("data-weft-run"))
 
 beforeEach(setup)
 afterEach(() => {
@@ -630,7 +631,11 @@ describe("the panel's detected scopes", () => {
     const el = await mountWith({ "data-endpoint": LOCAL, "data-open": "true" })
     await window.fetch("/run", { method: "POST" })
     await settle()
-    click(all(el, ".weft-turn").find((n) => n.textContent.includes("r_2")))
+    click(
+      all(el, ".weft-turn").find((n) =>
+        (n.getAttribute("data-weft-run") ?? "").includes("r_2")
+      )
+    )
     await settle()
     expect(selected(el)).toBe("r_2")
     addRun(routes, "r_3", 10)
@@ -764,7 +769,9 @@ describe("the panel follows the scope (rung 1)", () => {
     })
     expect(selected(el)).toBe("r_1")
     expect(studio.gets("runs/r_2/transcript")).toHaveLength(0) // never opened the newest first
-    const r2 = all(el, ".weft-turn").find((n) => n.textContent.includes("r_2"))
+    const r2 = all(el, ".weft-turn").find((n) =>
+      (n.getAttribute("data-weft-run") ?? "").includes("r_2")
+    )
     click(r2)
     await settle()
     expect(selected(el)).toBe("r_2")

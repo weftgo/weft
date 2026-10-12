@@ -55,7 +55,9 @@ import {
 import { cycleTheme } from "@/components/studio/theme"
 import { mayReadExperiments } from "@/components/studio/no-experiments"
 import { useDensity } from "@/components/studio/density-toggle"
-import { StatusDot } from "@/components/studio/runs-table"
+import { StatusDot, TitleText } from "@/components/studio/runs-table"
+import { runTitle, sessionTitle, shortId } from "@/lib/title"
+import type { Title } from "@/lib/title"
 import { Kbd } from "@/components/ui/kbd"
 import {
   Command,
@@ -150,10 +152,13 @@ export function CommandPalette({
       keywords={hit && term === input.trim() ? [input] : undefined}
       onSelect={() => go(() => router.navigate(runLink(r.id)))}
       data-palette-kind="run"
+      data-palette-id={r.id}
     >
       <StatusDot status={r.status} />
-      <span className="truncate font-mono text-xs">{r.id}</span>
-      <span className="ml-auto text-xs text-muted-foreground">{r.agent}</span>
+      <PaletteTitle t={runTitle(r)} id={r.id} />
+      <span className="ml-auto shrink-0 text-xs text-muted-foreground">
+        {r.agent}
+      </span>
     </CommandItem>
   )
 
@@ -207,9 +212,10 @@ export function CommandPalette({
                 value={`session:${s.id} ${s.public_id} ${s.agent}`}
                 onSelect={() => go(() => router.navigate(sessionLink(s.id)))}
                 data-palette-kind="session"
+                data-palette-id={s.id}
               >
                 <MessagesSquare data-slot="icon" />
-                <span className="truncate font-mono text-xs">{s.id}</span>
+                <PaletteTitle t={sessionTitle(s)} id={s.id} />
                 <span className="ml-auto truncate font-mono text-[11px] text-muted-foreground">
                   {s.public_id || s.agent}
                 </span>
@@ -374,5 +380,21 @@ export function CommandPalette({
         </CommandList>
       </Command>
     </CommandDialog>
+  )
+}
+
+/** PaletteTitle is a run's or a session's line in the palette (U6):
+ * its title (lib/title.ts), the short id beside it in mono — the id
+ * itself when it is all there is. */
+function PaletteTitle({ t, id }: { t: Title; id: string }) {
+  return (
+    <span className="flex min-w-0 items-baseline gap-1.5 text-xs">
+      <TitleText t={t} />
+      {t.kind === "id" ? null : (
+        <span className="shrink-0 font-mono text-[11px] text-faint">
+          {shortId(id)}
+        </span>
+      )}
+    </span>
   )
 }

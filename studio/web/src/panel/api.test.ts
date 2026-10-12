@@ -148,7 +148,9 @@ describe("scope", () => {
     await settle()
     expect(following(el)).toEqual({ publicId: "pub_b", run: "r_b" })
     expect(el.getAttribute("data-weft-scope")).toBe("pub_b;run=r_b")
-    expect(text(el, ".weft-sel .weft-id")).toBe("r_b")
+    expect(
+      $(el, ".weft-turn.weft-sel")?.getAttribute("data-weft-run") ?? ""
+    ).toBe("r_b")
     el.scope({ publicId: "pub_orders", flow: "f_1" })
     await settle()
     expect(following(el)).toEqual({ publicId: "pub_orders", flow: "f_1" })
@@ -369,7 +371,6 @@ describe("select", () => {
 
 describe("review: the per-run bookkeeping is bounded and starts empty", () => {
   type Books = {
-    prompts: Map<string, string>
     evParked: Set<string>
     evErrored: Set<string>
     byPath: Map<string, Scope>
@@ -377,7 +378,7 @@ describe("review: the per-run bookkeeping is bounded and starts empty", () => {
   }
   const books = (el: WeftDevtools) => el as unknown as Books
 
-  it("prompts, evErrored and byPath stay at their caps (the oldest goes); a new start clears prompts, evParked and evErrored", async () => {
+  it("evErrored and byPath stay at their caps (the oldest goes); a new start clears evParked and evErrored", async () => {
     fakeStudio(baseRoutes())
     const el = create()
     const errors: DevtoolsEvents["error"][] = []
@@ -403,12 +404,6 @@ describe("review: the per-run bookkeeping is bounded and starts empty", () => {
     expect(b.evErrored.size).toBe(RUN_MEMO_LIMIT)
     expect(b.evErrored.has("s_01-t2")).toBe(true)
     expect(b.evErrored.has("r_old0")).toBe(false)
-    // The turn filter's prompts: the turn opened is the newest.
-    for (let i = 0; i < RUN_MEMO_LIMIT; i++) b.prompts.set(`r_old${i}`, "q")
-    el.select("s_01-t1")
-    await settle()
-    expect(b.prompts.size).toBe(RUN_MEMO_LIMIT)
-    expect(b.prompts.get("s_01-t1")).toBe("where is my order #4411?")
     // The header rung's paths: one per response path, bounded.
     for (let i = 0; i < PATHS_LIMIT + 10; i++)
       b.onDetected({ publicId: "pub_orders" }, `/api/chat/${i}`)
@@ -422,20 +417,6 @@ describe("review: the per-run bookkeeping is bounded and starts empty", () => {
     expect(b.evParked.size).toBe(0)
     expect(b.evErrored.size).toBe(0)
     expect(b.byPath.size).toBe(0)
-    expect([...b.prompts.keys()].every((k) => !k.startsWith("r_old"))).toBe(
-      true
-    )
-  })
-
-  it("a rescope to another conversation forgets the previous one's prompts", async () => {
-    fakeStudio(baseRoutes())
-    const el = create()
-    document.body.appendChild(el)
-    await settle()
-    books(el).prompts.set("r_elsewhere", "an old question")
-    el.scope("pub_other")
-    await settle()
-    expect(books(el).prompts.has("r_elsewhere")).toBe(false)
   })
 })
 

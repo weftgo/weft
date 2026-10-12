@@ -54,4 +54,48 @@ describe("SessionTurns", () => {
     expect(screen.getByText(/whole turn · exp_prompt/)).toBeTruthy()
     expect(screen.getByText(/from step 1 · exp_prompt/)).toBeTruthy()
   })
+
+  it("titles each turn (U6): t<n> and its prompt, a resume of a parked turn, content-off said; the id a mono line", async () => {
+    const [first] = session.runs
+    const turns: RunRow[] = [
+      {
+        ...first,
+        id: "s_x-t1",
+        turn: 1,
+        pending: 1,
+        prompt_preview: "Book the 9:40 to Lyon",
+      },
+      {
+        ...first,
+        id: "s_x-t2",
+        turn: 2,
+        pending: 0,
+        prompt_preview: "Book the 9:40 to Lyon",
+      },
+      {
+        ...first,
+        id: "s_x-t3",
+        turn: 3,
+        prompt_preview: undefined,
+        message_count: 0,
+        event_count: 4,
+      },
+    ]
+    const { container } = await renderWithRouter(
+      <SessionTurns turns={turns} experiments={new Map()} />
+    )
+    const heads = [...container.querySelectorAll("[data-run-link]")].map(
+      (a) => a.textContent
+    )
+    expect(heads).toEqual([
+      "t1Book the 9:40 to Lyon",
+      "t2resume of t1 · 1 decided call",
+      `t3${first.agent} · (content not captured)`,
+    ])
+    expect(
+      [...container.querySelectorAll("[data-id-chip]")].map((n) =>
+        n.getAttribute("data-id-chip")
+      )
+    ).toEqual(["s_x-t1", "s_x-t2", "s_x-t3"])
+  })
 })

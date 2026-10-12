@@ -13,6 +13,7 @@
         "input_tokens": 18,
         "output_tokens": 6
       },
+      "first_prompt": "Where is order 42?",
       "cost_usd": null,
       "cost_known": false,
       "cost_badge": "unknown",
@@ -31,6 +32,7 @@
         "input_tokens": 12,
         "output_tokens": 6
       },
+      "first_prompt": "Where is order 42?",
       "cost_usd": null,
       "cost_known": false,
       "cost_badge": "unpriced",

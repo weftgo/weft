@@ -21,6 +21,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "../lib/api"
+import { clip, NO_CONTENT } from "../lib/title"
 import type { RunDoc, RunRow } from "../lib/api"
 import { UNRUN_CALL_REASON } from "../lib/events"
 import {
@@ -1480,7 +1481,11 @@ describe("a derived run on both surfaces (I1.3)", () => {
     await vi.waitFor(() => expect(all(el, ".weft-turn").length).toBe(2), {
       timeout: 5_000,
     })
-    click(all(el, ".weft-turn").find((b) => b.textContent.includes(DERIVED)))
+    click(
+      all(el, ".weft-turn").find((b) =>
+        (b.getAttribute("data-weft-run") ?? "").includes(DERIVED)
+      )
+    )
     await vi.waitFor(
       () =>
         expect(
@@ -1749,11 +1754,17 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
     await vi.waitFor(
       () =>
         expect(
-          all(el, ".weft-turn").some((b) => b.textContent.includes(id))
+          all(el, ".weft-turn").some((b) =>
+            (b.getAttribute("data-weft-run") ?? "").includes(id)
+          )
         ).toBe(true),
       { timeout: 5_000 }
     )
-    click(all(el, ".weft-turn").find((b) => b.textContent.includes(id)))
+    click(
+      all(el, ".weft-turn").find((b) =>
+        (b.getAttribute("data-weft-run") ?? "").includes(id)
+      )
+    )
     const callSel = `.weft-call[data-key="${APP_CALL.id}"]`
     await vi.waitFor(() => expect($(el, callSel)).toBeTruthy(), {
       timeout: 5_000,
@@ -1902,11 +1913,17 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
     await vi.waitFor(
       () =>
         expect(
-          all(el, ".weft-turn").some((b) => b.textContent.includes(APP_PARKED))
+          all(el, ".weft-turn").some((b) =>
+            (b.getAttribute("data-weft-run") ?? "").includes(APP_PARKED)
+          )
         ).toBe(true),
       { timeout: 5_000 }
     )
-    click(all(el, ".weft-turn").find((b) => b.textContent.includes(APP_PARKED)))
+    click(
+      all(el, ".weft-turn").find((b) =>
+        (b.getAttribute("data-weft-run") ?? "").includes(APP_PARKED)
+      )
+    )
     await vi.waitFor(
       () => expect($(el, "[data-weft-app-steer] input")).toBeTruthy(),
       { timeout: 5_000 }
@@ -1962,11 +1979,17 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
     await vi.waitFor(
       () =>
         expect(
-          all(el, ".weft-turn").some((b) => b.textContent.includes(APP_PARKED))
+          all(el, ".weft-turn").some((b) =>
+            (b.getAttribute("data-weft-run") ?? "").includes(APP_PARKED)
+          )
         ).toBe(true),
       { timeout: 5_000 }
     )
-    click(all(el, ".weft-turn").find((b) => b.textContent.includes(APP_PARKED)))
+    click(
+      all(el, ".weft-turn").find((b) =>
+        (b.getAttribute("data-weft-run") ?? "").includes(APP_PARKED)
+      )
+    )
     await vi.waitFor(
       () => expect($(el, "[data-weft-app-owned]")).toBeTruthy(),
       { timeout: 5_000 }
@@ -2483,4 +2506,83 @@ describe("a settling run on both surfaces (U2-fix2)", () => {
     expect(isLive(fx.doc)).toBe(true)
     expect(isLive({ status: "succeeded" })).toBe(false)
   })
+})
+
+// Titles, not ids (U6): one row, both surfaces, one helper
+// (lib/title.ts). The panel's narrow picker reads "● parked t3 How many
+// units… · 1 steps", its turn row "t3 How many units…"; the run page's
+// heading is "agent · the prompt" and the tab "agent · How many units…
+// · succeeded · weft studio"; the id rides in a title / a mono line,
+// never as the label. A content-off row reads "(content not captured)"
+// on both.
+describe("titles, not ids, on both surfaces (U6)", () => {
+  const PROMPT = "How many units of SKU A-17 are in stock right now, please?"
+  const CUT = clip(PROMPT)
+  const shapes: {
+    name: string
+    doc: Partial<RunDoc>
+    option: string
+    row: string
+    heading: string
+    tab: string
+    full: string
+  }[] = [
+    {
+      name: "a parked turn with a prompt",
+      doc: { prompt_preview: PROMPT, pending: 1, turn: 3 },
+      option: `● parked t3 ${CUT} · 1 steps`,
+      row: `t3 ${CUT}`,
+      heading: `acme-support·${PROMPT}`,
+      tab: `acme-support · ${CUT} · succeeded · weft studio`,
+      full: PROMPT,
+    },
+    {
+      name: "a content-off turn of an unnamed agent",
+      doc: { agent: "", message_count: 0, event_count: 6, turn: 3 },
+      option: `● succeeded t3 ${NO_CONTENT} · 1 steps`,
+      row: `t3 ${NO_CONTENT}`,
+      heading: `unnamed agent·${NO_CONTENT}`,
+      tab: `${NO_CONTENT} · succeeded · weft studio`,
+      full: NO_CONTENT,
+    },
+  ]
+  for (const c of shapes)
+    it(`${c.name}: the panel's picker and row, the run page's heading and tab`, async () => {
+      expect(CUT).toBe("How many units of SKU A-17 are in stock…")
+      const fx: Fixture = { doc: c.doc, events: events() }
+      serve(fx, false)
+      const el = await mount(ATTRS) // the 520 px float: the picker
+      await vi.waitFor(
+        () => expect($(el, ".weft-turn-pick option")).toBeTruthy(),
+        { timeout: 5_000 }
+      )
+      const opt = $(el, ".weft-turn-pick option")!
+      expect(opt.textContent).toBe(c.option)
+      expect(opt.getAttribute("title")).toBe(`${RUN}\n${c.full}`)
+      const row = $(el, ".weft-turn .weft-ttl")!
+      expect(row.textContent).toBe(c.row)
+      expect(row.getAttribute("title")).toBe(`${RUN}\n${c.full}`)
+      expect($(el, ".weft-turn")!.getAttribute("data-weft-run")).toBe(RUN)
+      el.remove()
+      await settle()
+      cleanup()
+      document.body.innerHTML = ""
+      stubBrowser()
+      vi.stubGlobal("scrollTo", vi.fn())
+      StudioEventSource.reset()
+      vi.stubGlobal("EventSource", StudioEventSource)
+      setStudioToken("")
+      serve(fx, true)
+      renderApp(`/runs/${RUN}?view=story`)
+      await waitFor(() =>
+        expect(document.querySelector("[data-run-title]")).toBeTruthy()
+      )
+      const h1 = document.querySelector("[data-run-title]")!
+      expect(h1.textContent).toBe(c.heading)
+      expect(h1.querySelector("[data-title-kind]")!.getAttribute("title")).toBe(
+        c.full
+      )
+      expect(document.querySelector("[data-run-id]")!.textContent).toBe(RUN)
+      await waitFor(() => expect(document.title).toBe(c.tab))
+    })
 })

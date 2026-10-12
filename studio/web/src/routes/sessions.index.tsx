@@ -1,9 +1,11 @@
 // The sessions list (S4.7): threads as rows — turns, newest status,
 // usage, first/last seen — with public-id and agent filters, and a
-// text box (plan H1, ?q=) over the loaded sessions' ids, public ids
-// and agents: client-side, since /api/sessions has no text filter
-// (obsdb.SessionQuery) and a session row carries no label. Every view
-// is in the URL (A3).
+// text box (plan H1, ?q=) that is /api/sessions?q= (obsdb.SessionQuery.Q:
+// every term in the title, the first turn's prompt, the id, the public
+// id or the agent). A row leads with its title (U6, lib/title.ts's
+// sessionTitle: thread's title, else the first prompt, else the id),
+// the id and public id a copyable line under it. Every view is in the
+// URL (A3).
 import { useEffect, useState } from "react"
 import { useInfiniteQuery } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
@@ -14,7 +16,7 @@ import type { PageCursor } from "@/lib/api"
 import { absoluteTime, relativeTime, tokens } from "@/lib/format"
 import { EmptyState } from "@/components/studio/empty-state"
 import { CacheHint, Cost, useCostCapable } from "@/components/studio/cost"
-import { StatusChip } from "@/components/studio/runs-table"
+import { IdChip, StatusChip, TitleText } from "@/components/studio/runs-table"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -25,27 +27,14 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { sessionLink } from "@/lib/links"
+import { sessionTitle } from "@/lib/title"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 
 interface SessionsSearch {
   agent?: string
   public_id?: string
-  /** Text over the loaded sessions' ids, public ids and agents. */
+  /** Text: /api/sessions?q= — title, first prompt, id, public id, agent. */
   q?: string
-}
-
-/** matchSession: every whitespace-separated term is a case-insensitive
- * substring of the session's id, public id or agent. */
-function matchSession(
-  s: { id: string; public_id: string; agent: string },
-  q: string
-): boolean {
-  const hay = `${s.id} ${s.public_id} ${s.agent}`.toLowerCase()
-  return q
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(Boolean)
-    .every((t) => hay.includes(t))
 }
 
 export const Route = createFileRoute("/sessions/")({
@@ -105,7 +94,11 @@ function SessionsPage() {
   const costCapable = useCostCapable()
   const search = Route.useSearch()
   const navigate = useNavigate({ from: "/sessions/" })
-  const filters = { agent: search.agent, public_id: search.public_id }
+  const filters = {
+    agent: search.agent,
+    public_id: search.public_id,
+    q: search.q,
+  }
   const filtered = Boolean(search.agent || search.public_id || search.q)
   // Pages accumulate through the next_before cursor (S4.3): the first
   // page is the newest 50 threads, never the whole list.
@@ -123,11 +116,7 @@ function SessionsPage() {
     // not move ends the list (never a page loop).
     getNextPageParam: (last, _all, lastParam) => nextCursor(last, lastParam),
   })
-  const loadedSessions = q.data?.pages.flatMap((p) => p.sessions) ?? []
-  const text = search.q ?? ""
-  const sessions = text
-    ? loadedSessions.filter((s) => matchSession(s, text))
-    : loadedSessions
+  const sessions = q.data?.pages.flatMap((p) => p.sessions) ?? []
   const total = q.data?.pages[0]?.total ?? 0
 
   const set = (patch: Partial<SessionsSearch>) =>
@@ -158,7 +147,7 @@ function SessionsPage() {
         />
         <FilterBox
           value={search.q ?? ""}
-          placeholder="find id, public id, agent"
+          placeholder="find title, prompt, id"
           label="find sessions"
           onApply={(v) => set({ q: v || undefined })}
         />
@@ -170,11 +159,10 @@ function SessionsPage() {
             data-chip="q"
             className="flex items-center gap-1 rounded-full border bg-secondary px-2 py-px font-mono text-[11px] hover:bg-accent"
             onClick={() => set({ q: undefined })}
-            aria-label={`clear “${search.q}” (the loaded sessions only)`}
-            title="matches the loaded sessions' ids, public ids and agents only: the API has no text filter"
+            aria-label={`clear “${search.q}”`}
+            title="every term in a session's title, first prompt, id, public id or agent"
           >
-            “{search.q}”{" "}
-            <span className="text-faint">· the loaded sessions only</span>
+            “{search.q}”
             <X className="size-3 text-faint" />
           </button>
         </div>
@@ -241,22 +229,18 @@ function SessionsPage() {
                     <TableCell>
                       <StatusChip status={s.status} />
                     </TableCell>
-                    <TableCell className="max-w-72">
+                    <TableCell className="max-w-80">
                       <Link
                         {...sessionLink(s.id)}
-                        className="font-mono text-[13px] hover:text-thread-ink"
-                        title={absoluteTime(s.first_seen)}
+                        className="flex min-w-0 text-[13px] hover:text-thread-ink"
                       >
-                        <span className="truncate">{s.id}</span>
+                        <TitleText t={sessionTitle(s)} />
                       </Link>
-                      {s.public_id ? (
-                        <div
-                          className="font-mono text-[11px] text-faint"
-                          title="the public id (the browser-safe handle)"
-                        >
-                          {s.public_id}
-                        </div>
-                      ) : null}
+                      <IdChip
+                        id={s.id}
+                        extra={s.public_id || undefined}
+                        noun="session id"
+                      />
                     </TableCell>
                     <TableCell className="whitespace-nowrap">
                       {s.agent || <span className="text-faint">—</span>}
@@ -292,9 +276,7 @@ function SessionsPage() {
           </div>
           <div className="flex items-center justify-center gap-3">
             <span className="font-mono text-[11px] text-faint tabular-nums">
-              {text
-                ? `${sessions.length.toLocaleString()} of ${loadedSessions.length.toLocaleString()} loaded match (${total.toLocaleString()} listed)`
-                : `showing ${sessions.length.toLocaleString()} of ${total.toLocaleString()}`}
+              {`showing ${sessions.length.toLocaleString()} of ${total.toLocaleString()}`}
             </span>
             {q.hasNextPage && (
               <Button

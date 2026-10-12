@@ -305,11 +305,10 @@ the Timeline's axis is the waterfall's own window, and spans it cannot
 place (unreadable times, an end before the start) are counted in a
 note. `download` saves the document
 as `<run id>.json` (a `/` in a child's id becomes `_`). The turn list
-has its own filter above it — text over the run id, the error and the
-prompts of the turns the panel has opened — it cannot search the
-prompts of turns not opened, because `/api/runs` rows carry no prompt
-preview — a status (`running`, `succeeded`, `failed`, `parked`) and has
-error — over the loaded rows, never stored, "n of m turns" while it
+has its own filter above it — text over the run id, the error and each
+loaded row's `prompt_preview` (every run row carries one since 0.14.0,
+absent for a content-off run) — a status (`running`, `succeeded`,
+`failed`, `parked`) and has error — over the loaded rows, never stored, "n of m turns" while it
 narrows ("n of m loaded · the filter applies to the loaded turns" while
 older pages remain, and then nothing loads by itself: the button does;
 the narrow dropdown keeps the selected turn listed).
@@ -1665,8 +1664,18 @@ otherwise `/api/runs`. Duration is always applied to the loaded rows
 (`capabilities_off.search`), model, error, the range and the minimums
 filter the loaded rows and say so, and text and tool chips are drawn
 struck through as not applied. The sessions list's text box (`?q=`)
-matches the loaded sessions' ids, public ids and agents — client-side:
-`/api/sessions` has no text filter and a session row no label. ⌘K (or
+is `/api/sessions?q=` (`obsdb.SessionQuery.Q`): every term in the
+session's title, its first turn's prompt, its id, public id or agent.
+Titles, not ids (U6): a run row, a session's turn and the run page are
+titled by `prompt_preview` (else the agent, else "(content not
+captured)" for a content-off run, else the id), a session by its
+`title` — `thread`'s `weft.session.title`, metadata that survives
+content-off — else its first turn's prompt (`first_prompt`), else the
+id; the id rides under the title as a copyable mono line, and the
+browser tab reads `director · How many units… · succeeded`. One helper,
+`src/lib/title.ts` (`runTitle`, `sessionTitle`), words both Studio and
+the panel's turn list and its narrow dropdown
+(`● parked t3 How many units… · 2 steps`). ⌘K (or
 Ctrl+K) opens the palette anywhere: runs through `/api/search?q=` (by
 id over the recent runs without `search`), sessions, traces (the
 newest page's ids, root names, services) under `traces`, experiments

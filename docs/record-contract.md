@@ -103,6 +103,7 @@ reads them from:
 
 | Attribute | Set by | Meaning | Run row |
 |---|---|---|---|
+| `weft.session.title` | `thread` (`SetInfo`'s title) | the session's title (`Session.Title`) as the turn started, absent before one was set — a label, not content: it survives a content-off destination (the `session_title` fixture) | `meta`; the session row's `title` (§6) |
 | `weft.session.forked_from` | `thread` (`Fork`) | `<origin session>#<entry id>` | `meta` |
 | `weft.session.parent` | `thread/pool` | the parent session of a pool child | `meta` |
 | `weft.session.parent_call` | `thread/pool` | the parent's tool call that spawned it, when known | `meta` |
@@ -121,7 +122,7 @@ rides the context into every run started under it, so a session's turn
 started inside another run (another session's tool handler, a pool
 child's turn) would inherit that run's pairs. `thread` therefore sets
 every key a session owns on each of its runs — `weft.public_id`,
-`weft.session.forked_from`, `weft.session.parent`,
+`weft.session.title`, `weft.session.forked_from`, `weft.session.parent`,
 `weft.session.parent_call` — to the session's own value, `""` when it
 has none, and the core reads an empty value as *none*: it removes the
 inherited pair and is never stored, never on a span or record
@@ -554,7 +555,13 @@ transcript is the growth `messages` records concatenated in index order.
 **A session** is the runs sharing `weft.session.id` that are top-level
 (no parent) and not playground runs, ordered by `weft.turn`, then
 `started`; the public id resolves to its session through
-`weft.public_id`.
+`weft.public_id`. Its row's `title` is the newest turn's (by
+`weft.turn`, then `started`) non-empty `weft.session.title`, `""` when
+no turn carried one; its `first_prompt` is the first turn's
+`prompt_preview` — `""` when that turn stored no content, never a later
+turn's (`obsdb.SessionRow.Title`/`FirstPrompt`; the fixtures'
+`sessions`). `SessionQuery.Q` matches a term against the title, the
+first turn's whole prompt, the session id, the public id and the agent.
 
 ## 7. Badges
 

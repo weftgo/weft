@@ -168,6 +168,27 @@ type runRow struct {
 	Steps       int       `json:"steps"`
 	StoppedBy   string    `json:"stopped_by"`
 	CancelCause string    `json:"cancel_cause"`
+	Prompt      string    `json:"prompt_preview"`
+}
+
+// promptCells is the PROMPT cell's width: the preview's first line cut
+// to this many runes, "…" marking the cut.
+const promptCells = 40
+
+// prompt is the PROMPT cell: the run's prompt_preview — its first line,
+// tabs as spaces, cut to promptCells runes with "…" — or "-" when the
+// row carries none (a content-off run stores no prompt; Studio's run
+// page badges why).
+func (r runRow) prompt() string {
+	line, _, _ := strings.Cut(strings.TrimSpace(r.Prompt), "\n")
+	line = strings.TrimSpace(strings.ReplaceAll(line, "\t", " "))
+	if line == "" {
+		return "-"
+	}
+	if rs := []rune(line); len(rs) > promptCells {
+		return strings.TrimSpace(string(rs[:promptCells-1])) + "…"
+	}
+	return line
 }
 
 // stoppedBy is the STOPPED BY cell: what ended the run as Studio names
@@ -296,14 +317,14 @@ pages:
 		return nil
 	}
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "ID\tAGENT\tSTATUS\tSTARTED\tSTEPS\tSTOPPED BY")
+	_, _ = fmt.Fprintln(tw, "ID\tAGENT\tSTATUS\tSTARTED\tSTEPS\tPROMPT\tSTOPPED BY")
 	for _, r := range rows {
 		agent := r.Agent
 		if agent == "" {
 			agent = "-"
 		}
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\n", r.ID, agent, r.Status,
-			r.Started.Local().Format("2006-01-02 15:04:05"), r.Steps, r.stoppedBy())
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\t%s\n", r.ID, agent, r.Status,
+			r.Started.Local().Format("2006-01-02 15:04:05"), r.Steps, r.prompt(), r.stoppedBy())
 	}
 	return tw.Flush()
 }

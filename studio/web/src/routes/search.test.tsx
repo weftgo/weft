@@ -63,7 +63,7 @@ afterEach(() => {
 
 const listed = () =>
   [...document.querySelectorAll("tbody tr")].map((tr) =>
-    tr.querySelector("a span[title]")?.getAttribute("title")
+    tr.querySelector("[data-run-link]")?.getAttribute("data-run-link")
   )
 const chipKeys = () =>
   [...document.querySelectorAll<HTMLElement>("[data-chip]")].map(
@@ -372,22 +372,40 @@ describe("the Runs search box and its URL chips", () => {
 })
 
 describe("the sessions text filter", () => {
-  it("filters the loaded sessions by id, public id or agent — a URL chip", async () => {
-    studio.on("GET meta", meta([])).on("GET sessions", sessions)
+  it("asks /api/sessions?q= (title, first prompt, id, public id, agent) — a URL chip; rows lead with their titles", async () => {
+    studio.on("GET meta", meta([])).on("GET sessions", (req) => {
+      const q = req.query.get("q")
+      return q
+        ? {
+            ...sessions,
+            total: 1,
+            sessions: sessions.sessions.filter((s) => s.id === "s_research"),
+          }
+        : sessions
+    })
     const { router } = renderApp("/sessions")
+    // Titled by the first prompt (no thread title), the id under it.
     await screen.findByText("s_orders")
+    expect(
+      document.querySelector('[data-id-chip="s_orders"]')?.textContent
+    ).toContain("s_orders · pub_orders")
+    expect(
+      [...document.querySelectorAll('[data-title-kind="prompt"]')].map(
+        (n) => n.textContent
+      )
+    ).toEqual(["Where is order 42?", "Where is order 42?"])
     const box = screen.getByRole("textbox", { name: "find sessions" })
-    fireEvent.change(box, { target: { value: "pub_research" } })
+    fireEvent.change(box, { target: { value: "order 42" } })
     fireEvent.keyDown(box, { key: "Enter" })
     await waitFor(() =>
-      expect(router.state.location.search).toMatchObject({ q: "pub_research" })
+      expect(router.state.location.search).toMatchObject({ q: "order 42" })
     )
     await waitFor(() => expect(screen.queryByText("s_orders")).toBeNull())
     expect(screen.getByText("s_research")).toBeTruthy()
-    // Client-side: the API was never asked for the text.
-    expect(studio.calls("GET sessions").every((r) => !r.query.has("q"))).toBe(
-      true
-    )
+    // Server-side: the API was asked for the text.
+    expect(
+      studio.calls("GET sessions").some((r) => r.query.get("q") === "order 42")
+    ).toBe(true)
     fireEvent.click(document.querySelector<HTMLElement>('[data-chip="q"]')!)
     await waitFor(() => expect(router.state.location.search.q).toBeUndefined())
     expect(await screen.findByText("s_orders")).toBeTruthy()
@@ -543,7 +561,9 @@ describe("the ⌘K palette", () => {
       ...document.querySelectorAll<HTMLElement>(
         "[cmdk-item][data-palette-kind]"
       ),
-    ].map((i) => `${i.dataset.paletteKind}:${i.textContent}`)
+    ].map(
+      (i) => `${i.dataset.paletteKind}:${i.dataset.paletteId ?? i.textContent}`
+    )
 
   function full() {
     studio
@@ -556,7 +576,12 @@ describe("the ⌘K palette", () => {
         req.query.get("q") === "refund failed"
           ? {
               total: 1,
-              runs: [row("r_refund", { agent: "billing" })],
+              runs: [
+                row("r_refund", {
+                  agent: "billing",
+                  prompt_preview: "Refund order 8812, the payment failed",
+                }),
+              ],
               sort: "started",
               next_offset: null,
             }
@@ -571,7 +596,11 @@ describe("the ⌘K palette", () => {
     const input = await open()
     // A run, by what it said: /api/search?q=.
     type(input, "refund failed")
-    await waitFor(() => expect(kinds()).toContain("run:r_refundbilling"))
+    await waitFor(() => expect(kinds()).toContain("run:r_refund"))
+    // Titled by its prompt (U6), the id a mono line beside it.
+    expect(
+      document.querySelector('[data-palette-id="r_refund"]')!.textContent
+    ).toBe("Refund order 8812, the payment failedr_refundbilling")
     expect(studio.calls("GET search").at(-1)!.query.get("q")).toBe(
       "refund failed"
     )
@@ -612,7 +641,7 @@ describe("the ⌘K palette", () => {
     const input = await open()
     type(input, "refund")
     type(input, "refund failed")
-    await waitFor(() => expect(kinds()).toContain("run:r_refundbilling"))
+    await waitFor(() => expect(kinds()).toContain("run:r_refund"))
     expect(studio.calls("GET search").map((r) => r.query.get("q"))).toEqual([
       "refund failed",
     ])
@@ -624,11 +653,11 @@ describe("the ⌘K palette", () => {
     await screen.findByText("r_ok")
     const input = await open()
     type(input, "refund failed")
-    await waitFor(() => expect(kinds()).toContain("run:r_refundbilling"))
+    await waitFor(() => expect(kinds()).toContain("run:r_refund"))
     // New text, before its own search settles: the stale hit is matched
     // by cmdk like any row — "zzqx" matches nothing in it.
     type(input, "zzqx")
-    expect(kinds()).not.toContain("run:r_refundbilling")
+    expect(kinds()).not.toContain("run:r_refund")
   })
 
   it("is keyboard-operable: ↑↓ move, Enter opens the item, Escape closes", async () => {
@@ -709,7 +738,7 @@ describe("the ⌘K palette", () => {
       screen.getByPlaceholderText<HTMLInputElement>(PALETTE_PLACEHOLDER),
       "r_fail"
     )
-    await waitFor(() => expect(kinds()).toEqual(["run:r_failorders"]))
+    await waitFor(() => expect(kinds()).toEqual(["run:r_fail"]))
     expect(studio.calls("GET search")).toHaveLength(0)
     expect(studio.calls("GET traces")).toHaveLength(0)
     expect(studio.calls("GET experiments")).toHaveLength(0)

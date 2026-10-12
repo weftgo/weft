@@ -78,6 +78,20 @@ type expectDoc struct {
 	Pending     string        `json:"pending,omitempty"`
 	Derived     bool          `json:"derived,omitempty"`
 	Runs        []contractRun `json:"runs"`
+	// Sessions are the case's session rows (§6's "A session"), by id:
+	// identity, turns, and the title and first prompt Studio titles a
+	// session with. Omitted for a case with no session.
+	Sessions []contractSession `json:"sessions,omitempty"`
+}
+
+// contractSession is one session row as the contract states it.
+type contractSession struct {
+	ID          string `json:"id"`
+	PublicID    string `json:"public_id,omitempty"`
+	Agent       string `json:"agent,omitempty"`
+	Turns       int    `json:"turns"`
+	Title       string `json:"title,omitempty"`
+	FirstPrompt string `json:"first_prompt,omitempty"`
 }
 
 // contractRun is one run row as the contract states it: the run row's
@@ -197,6 +211,11 @@ func runContract(t *testing.T, backend string, open func(*testing.T) obsdb.DB) {
 				w, _ := json.MarshalIndent(want.Runs, "", "  ")
 				t.Errorf("%s: run rows differ from %s/expect.json\n got: %s\nwant: %s", backend, dir, g, w)
 			}
+			if gs := observeSessions(t, db); !equalJSON(t, gs, want.Sessions) {
+				g, _ := json.MarshalIndent(gs, "", "  ")
+				w, _ := json.MarshalIndent(want.Sessions, "", "  ")
+				t.Errorf("%s: session rows differ from %s/expect.json\n got: %s\nwant: %s", backend, dir, g, w)
+			}
 		})
 	}
 	if n < 10 {
@@ -306,6 +325,23 @@ func observeRuns(t *testing.T, db obsdb.DB) []contractRun {
 		c.Holes = runHoles(t, db, r, len(spans) > 0)
 		out = append(out, c)
 	}
+	return out
+}
+
+// observeSessions reads every session row back, by id; nil when the
+// case has none.
+func observeSessions(t *testing.T, db obsdb.DB) []contractSession {
+	t.Helper()
+	page, err := db.Sessions(context.Background(), obsdb.SessionQuery{Limit: 500})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []contractSession
+	for _, s := range page.Sessions {
+		out = append(out, contractSession{ID: s.ID, PublicID: s.PublicID, Agent: s.Agent, Turns: s.Turns,
+			Title: s.Title, FirstPrompt: s.FirstPrompt})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }
 
@@ -614,6 +650,7 @@ func generateContract(t *testing.T) {
 		}
 		ingestCase(t, db, dir)
 		runs := observeRuns(t, db)
+		sessions := observeSessions(t, db)
 		_ = db.Close()
 		var got []string
 		for _, r := range runs {
@@ -624,7 +661,7 @@ func generateContract(t *testing.T) {
 		if !slices.Equal(got, ids) {
 			t.Fatalf("%s: the store read back runs %v, the pipeline ran %v", gc.name, got, ids)
 		}
-		doc := expectDoc{Case: gc.name, Description: gc.desc, Runs: runs}
+		doc := expectDoc{Case: gc.name, Description: gc.desc, Runs: runs, Sessions: sessions}
 		writeJSON(t, filepath.Join(dir, "expect.json"), doc)
 		t.Logf("regenerated %s (%d runs)", dir, len(runs))
 	}
@@ -1551,6 +1588,41 @@ func genCases() []genCase {
 					t.Fatalf("want a canceled *RunError, got %v", err)
 				}
 				return []string{re.Result.ID}
+			},
+		},
+		{
+			name: "session_title",
+			desc: "a thread session through a content-off destination, titled with SetInfo after its first turn: weft.session.title (metadata, so it survives content-off) on the second turn and its run row's meta; the session row's title is the newest turn's, its first prompt empty (no messages stored)",
+			dest: nil,
+			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+				agt := pipelineAgent(p, "support", wefttest.Script(
+					wefttest.Say("Hello! How can I help?"), wefttest.Say("Order 1234 has shipped.")),
+					core.Instructions("You are a support agent."))
+				s, err := thread.Create(ctx, thread.Memory(), agt, thread.PublicID("pub_title"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				var ids []string
+				for i, text := range []string{"hi", "Where is order 1234?"} {
+					if i == 1 {
+						if err := s.SetInfo(ctx, "Order desk", nil); err != nil {
+							t.Fatal(err)
+						}
+					}
+					turn, err := s.Send(ctx, core.User(text))
+					if err != nil {
+						t.Fatal(err)
+					}
+					res, err := turn.Wait()
+					if err != nil {
+						t.Fatal(err)
+					}
+					ids = append(ids, res.ID)
+				}
+				if err := s.Close(ctx); err != nil {
+					t.Fatal(err)
+				}
+				return ids
 			},
 		},
 	}

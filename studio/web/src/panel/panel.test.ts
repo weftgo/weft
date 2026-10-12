@@ -377,7 +377,7 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     expect(chips).toContain("parked")
     expect(chips).toContain("failed")
     const row = all(el, ".weft-turn").find((n) =>
-      n.textContent.includes("r_park")
+      (n.getAttribute("data-weft-run") ?? "").includes("r_park")
     )
     expect(row?.textContent).toContain("script")
     expect(row?.textContent).toContain("1 steps")
@@ -711,7 +711,7 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     )
     const rowsFor = (id: string) =>
       all(el, ".weft-turn").filter(
-        (n) => n.querySelector(".weft-id")?.textContent === id
+        (n) => n.getAttribute("data-weft-run") === id
       )
     const chipOf = (id: string) =>
       rowsFor(id)[0]?.querySelector(".weft-row1 > .weft-chip")?.textContent ??

@@ -869,6 +869,18 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		having = append(having, "MAX(agent) = ?")
 		hargs = append(hargs, q.Agent)
 	}
+	if q.Q != "" {
+		title, targs := sessionTitleExpr(q.PublicID)
+		prompt, pargs := sessionPromptExpr(q.PublicID)
+		for _, t := range strings.Fields(q.Q) {
+			having = append(having, `(instr(lower(`+title+`), lower(?)) > 0
+				OR instr(lower(`+prompt+`), lower(?)) > 0
+				OR instr(lower(session_id), lower(?)) > 0
+				OR instr(lower(MAX(public_id)), lower(?)) > 0
+				OR instr(lower(MAX(agent)), lower(?)) > 0)`)
+			hargs = append(append(append(append(hargs, targs...), t), pargs...), t, t, t, t)
+		}
+	}
 	scope, sargs := sessionScope, []any(nil)
 	if q.PublicID != "" {
 		scope += ` AND public_id = ?`
@@ -919,6 +931,36 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 	return page, nil
 }
 
+// sessionTitleExpr is a grouped session's title (SessionRow.Title):
+// the newest turn's (by turn, then start) non-empty
+// weft.session.title, from the run's meta. pub, when set, scopes the
+// turns read as the grouping's WHERE does; the args are its parameters.
+func sessionTitleExpr(pub string) (string, []any) {
+	scope, args := "", []any(nil)
+	if pub != "" {
+		scope, args = ` AND r3.public_id = ?`, []any{pub}
+	}
+	const title = `json_extract(r3.meta, '$."` + obsdb.SessionTitleKey + `"')`
+	return `COALESCE((SELECT ` + title + ` FROM runs r3
+		WHERE r3.session_id = runs.session_id AND r3.parent_run_id = '' AND r3.playground = 0` + scope + `
+		AND COALESCE(` + title + `, '') <> ''
+		ORDER BY r3.turn DESC, r3.started_ns DESC LIMIT 1), '')`, args
+}
+
+// sessionPromptExpr is a grouped session's first turn's prompt, whole
+// (SessionRow.FirstPrompt is its first PromptPreviewRunes): the
+// lowest turn's (then the earliest), "" when that turn has none —
+// never a later turn's. pub scopes as in sessionTitleExpr.
+func sessionPromptExpr(pub string) (string, []any) {
+	scope, args := "", []any(nil)
+	if pub != "" {
+		scope, args = ` AND r4.public_id = ?`, []any{pub}
+	}
+	return `COALESCE((SELECT rs.prompt FROM run_search rs WHERE rs.run_id = (SELECT r4.run_id FROM runs r4
+		WHERE r4.session_id = runs.session_id AND r4.parent_run_id = '' AND r4.playground = 0` + scope + `
+		ORDER BY r4.turn, r4.started_ns, r4.run_id LIMIT 1)), '')`, args
+}
+
 func havingSQL(having []string) string {
 	if len(having) == 0 {
 		return ""
@@ -939,13 +981,17 @@ func (d *DB) sessionRows(ctx context.Context, cutoff int64, pub, where string, w
 		statusScope = ` AND r2.public_id = ?`
 		args = append(args, pub)
 	}
+	title, targs := sessionTitleExpr(pub)
+	prompt, pargs := sessionPromptExpr(pub)
+	args = append(append(args, targs...), pargs...)
 	args = append(append(args, wargs...), hargs...)
 	rs, err := d.reads.QueryContext(ctx, `SELECT session_id, MAX(public_id), MAX(agent), COUNT(*),
 		MIN(started_ns), MAX(last_seen_ns),
 		SUM(input_tokens), SUM(output_tokens), SUM(cached_input_tokens), SUM(cache_write_tokens), SUM(reasoning_tokens),
 		(SELECT `+statusExpr+` FROM runs r2 WHERE r2.session_id = runs.session_id
 		 AND r2.parent_run_id = '' AND r2.playground = 0`+statusScope+`
-		 ORDER BY r2.turn DESC, r2.started_ns DESC LIMIT 1)
+		 ORDER BY r2.turn DESC, r2.started_ns DESC LIMIT 1),
+		`+title+`, substr(`+prompt+`, 1, `+fmt.Sprint(obsdb.PromptPreviewRunes)+`)
 		FROM runs WHERE `+where+` GROUP BY session_id`+havingSQL(having)+tail, args...)
 	if err != nil {
 		return nil, err
@@ -958,7 +1004,8 @@ func (d *DB) sessionRows(ctx context.Context, cutoff int64, pub, where string, w
 		var inTok, outTok, cached, cacheW, reason sql.NullInt64
 		var status string
 		if err := rs.Scan(&row.ID, &row.PublicID, &row.Agent, &row.Turns,
-			&first, &last, &inTok, &outTok, &cached, &cacheW, &reason, &status); err != nil {
+			&first, &last, &inTok, &outTok, &cached, &cacheW, &reason, &status,
+			&row.Title, &row.FirstPrompt); err != nil {
 			return nil, err
 		}
 		row.FirstSeen = time.Unix(0, first).UTC()

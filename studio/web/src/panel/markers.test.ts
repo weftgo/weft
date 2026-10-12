@@ -232,11 +232,15 @@ describe("C3's Done line: a page with two chats shows a scope switcher", () => {
     fakeStudio(routes)
     const a = chat("pub_a;run=r_pub_a")
     const el = await mountWith({ "data-endpoint": REMOTE, "data-open": "true" })
-    expect(text(el, ".weft-sel .weft-id")).toBe("r_pub_a") // pinned, though r_2 is newer
+    expect(
+      $(el, ".weft-turn.weft-sel")?.getAttribute("data-weft-run") ?? ""
+    ).toBe("r_pub_a") // pinned, though r_2 is newer
     expect(switcher(el)).toBeNull()
     a.box.setAttribute(MARKER_ATTR, "pub_a;run=r_2")
     await settleScan()
-    expect(text(el, ".weft-sel .weft-id")).toBe("r_2") // same conversation: narrowed, no restart
+    expect(
+      $(el, ".weft-turn.weft-sel")?.getAttribute("data-weft-run") ?? ""
+    ).toBe("r_2") // same conversation: narrowed, no restart
   })
 })
 
@@ -668,15 +672,25 @@ describe("the marker rung, review fixes", () => {
       "data-scope": "pub_a",
       "data-open": "true",
     })
-    expect(text(el, ".weft-sel .weft-id")).toBe("r_2") // the newest
-    click(all(el, ".weft-turn").find((n) => n.textContent.includes("r_pub_a")))
+    expect(
+      $(el, ".weft-turn.weft-sel")?.getAttribute("data-weft-run") ?? ""
+    ).toBe("r_2") // the newest
+    click(
+      all(el, ".weft-turn").find((n) =>
+        (n.getAttribute("data-weft-run") ?? "").includes("r_pub_a")
+      )
+    )
     await settle()
-    expect(text(el, ".weft-sel .weft-id")).toBe("r_pub_a") // the user's click
+    expect(
+      $(el, ".weft-turn.weft-sel")?.getAttribute("data-weft-run") ?? ""
+    ).toBe("r_pub_a") // the user's click
     // The helper: the marker and scope() together; the scan has not run.
     a.box.setAttribute(MARKER_ATTR, "pub_a;run=r_2")
     el.setAttribute("data-scope", "pub_a;run=r_2")
     await settle()
-    expect(text(el, ".weft-sel .weft-id")).toBe("r_2") // pinned over the click
+    expect(
+      $(el, ".weft-turn.weft-sel")?.getAttribute("data-weft-run") ?? ""
+    ).toBe("r_2") // pinned over the click
     expect(text(el, ".weft-detect")).toBe(" · detect: markers")
   })
 

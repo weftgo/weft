@@ -41,9 +41,7 @@ afterEach(teardown)
 const running = (id: string, over = {}) =>
   runRow({ id, status: "running", finished: null, ...over })
 const row = (el: Parameters<typeof all>[0], id: string) =>
-  all(el, ".weft-turn").find(
-    (n) => n.querySelector(".weft-id")?.textContent === id
-  )
+  all(el, ".weft-turn").find((n) => n.getAttribute("data-weft-run") === id)
 
 describe("a turn of a longer conversation", () => {
   // Turn 2 as the sink stores it: the input record is everything the
@@ -550,7 +548,9 @@ describe("the live tail", () => {
     click(row(el, "s_01-t0"))
     click(row(el, "s_01-t1"))
     await settle(60)
-    expect(text(el, ".weft-sel")).toContain("s_01-t1")
+    expect(
+      $(el, ".weft-turn.weft-sel")?.getAttribute("data-weft-run") ?? ""
+    ).toContain("s_01-t1")
     expect(FakeEventSource.live("run=s_01-t1")).toHaveLength(1)
   })
 })

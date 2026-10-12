@@ -1,7 +1,8 @@
 // G2 on the run page: the raw view's filters and its open event are
 // the URL's (written in place: cursor moves), the views are pushed,
 // the header's copy link copies the page as it stands — never a token
-// — and the tab is titled `run s_…-t3 · succeeded · weft studio`.
+// — and the tab is titled `orders · Where is order 42? · succeeded ·
+// weft studio` (U6: agent · the prompt), `run s_…-t3` while it loads.
 import {
   cleanup,
   configure,
@@ -185,10 +186,12 @@ describe("the run page's URL (G2)", () => {
     expect(prompt).toHaveBeenCalledTimes(1)
   })
 
-  it("titles the tab with the run, its status and Studio", async () => {
+  it("titles the tab with the run's agent and prompt, its status and Studio", async () => {
     renderApp(`/runs/${RUN}`)
     await waitFor(() =>
-      expect(document.title).toBe("run s_…-t3 · succeeded · weft studio")
+      expect(document.title).toBe(
+        "orders · Where is order 42? · succeeded · weft studio"
+      )
     )
   })
 

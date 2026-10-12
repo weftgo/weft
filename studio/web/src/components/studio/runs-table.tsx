@@ -1,10 +1,12 @@
-// The runs list (A1): status, id, agent, model, steps, tokens,
+// The runs list (A1): status, run, agent, model, steps, tokens,
 // started, duration. Interrupted rows are shown, never hidden — a
 // crash leaves evidence. Status is a dot AND a word (colour alone is
-// not a signal); a failed row carries its error under the id, so the
-// list already answers "what broke". Numbers are tabular mono; ids
-// are mono and copyable; the whole row opens the run. The running dot
-// pulses once per 2 s (reduced motion stops it, styles.css).
+// not a signal). The run cell leads with its title — the prompt
+// (lib/title.ts's runTitle, U6) — the id a mono, copyable line under
+// it; a failed row carries its error below, so the list already
+// answers "what broke". Numbers are tabular mono; the whole row opens
+// the run. The running dot pulses once per 2 s (reduced motion stops
+// it, styles.css).
 import { Check, Copy } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "@tanstack/react-router"
@@ -40,6 +42,8 @@ import { CacheHint, CostText } from "@/components/studio/cost"
 import { DerivedChip } from "@/components/studio/hole-badge"
 import { derivedUsageUnknown } from "@/lib/honesty"
 import { runLink, sessionLink } from "@/lib/links"
+import { runTitle, shortId } from "@/lib/title"
+import type { Title } from "@/lib/title"
 
 const statusColor: Record<RunRow["status"], string> = {
   running: "bg-status-run",
@@ -102,15 +106,15 @@ export function StatusChip({
   )
 }
 
-function CopyId({ id }: { id: string }) {
+function CopyId({ id, noun = "run id" }: { id: string; noun?: string }) {
   const [done, setDone] = useState(false)
   return (
     <Button
       variant="ghost"
       size="icon-xs"
       className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
-      aria-label={`copy run id ${id}`}
-      title="copy run id"
+      aria-label={`copy ${noun} ${id}`}
+      title={`copy ${noun}`}
       onClick={(e) => {
         e.preventDefault()
         e.stopPropagation()
@@ -123,6 +127,90 @@ function CopyId({ id }: { id: string }) {
     >
       {done ? <Check data-slot="icon" /> : <Copy data-slot="icon" />}
     </Button>
+  )
+}
+
+/** TitleText is a title's words, styled by what they are: the prompt
+ * or the session's title plain, an agent name or the content-off
+ * placeholder muted, a bare id mono. */
+export function TitleText({ t }: { t: Title }) {
+  return (
+    <span
+      className={`truncate ${t.kind === "id" ? "font-mono" : t.kind === "absent" || t.kind === "agent" || t.kind === "resume" ? "text-muted-foreground" : ""}`}
+      title={t.full}
+      data-title-kind={t.kind}
+    >
+      {t.text}
+    </span>
+  )
+}
+
+/** IdChip is the id under a title (U6): mono, shortened (the full id
+ * in its title attribute), what rides beside it (a public id), and a
+ * copy button for the whole id. */
+export function IdChip({
+  id,
+  extra,
+  noun = "run id",
+}: {
+  id: string
+  extra?: string
+  noun?: string
+}) {
+  return (
+    <div
+      className="flex items-center gap-1 font-mono text-[11px] text-faint"
+      data-id-chip={id}
+    >
+      <span className="truncate" title={id}>
+        <span>{shortId(id)}</span>
+        {extra ? <span> · {extra}</span> : null}
+      </span>
+      <CopyId id={id} noun={noun} />
+    </div>
+  )
+}
+
+/** RunTitle is a run row's head (U6): its title linking to the run,
+ * the id chip under it — or, when the id is all there is, the id with
+ * its copy button. */
+export function RunTitle({
+  run,
+  extra,
+  lead,
+  t = runTitle(run),
+}: {
+  run: RunRow
+  extra?: string
+  /** Words before the title inside the link (a session's "t3"). */
+  lead?: string
+  t?: Title
+}) {
+  return (
+    <>
+      <Link
+        {...runLink(run.id)}
+        className="flex min-w-0 items-center gap-1.5 text-[13px] hover:text-thread-ink"
+        data-run-link={run.id}
+      >
+        {lead ? (
+          <span className="shrink-0 font-mono text-muted-foreground">
+            {lead}
+          </span>
+        ) : null}
+        <TitleText t={t} />
+        {t.kind === "id" ? <CopyId id={run.id} /> : null}
+      </Link>
+      {t.kind === "id" ? (
+        extra ? (
+          <div className="truncate font-mono text-[11px] text-faint">
+            {extra}
+          </div>
+        ) : null
+      ) : (
+        <IdChip id={run.id} extra={extra} />
+      )}
+    </>
   )
 }
 
@@ -384,16 +472,8 @@ export function RunsTable({
               <TableCell>
                 <StatusChip status={run.status} />
               </TableCell>
-              <TableCell className="max-w-64">
-                <Link
-                  {...runLink(run.id)}
-                  className="flex items-center gap-1 font-mono text-[13px] hover:text-thread-ink"
-                >
-                  <span className="truncate" title={run.id}>
-                    {run.id}
-                  </span>
-                  <CopyId id={run.id} />
-                </Link>
+              <TableCell className="max-w-80">
+                <RunTitle run={run} extra={run.public_id || undefined} />
                 {run.parent_run_id ? (
                   <div
                     className="flex items-center gap-1 truncate font-mono text-[11px] text-faint"
@@ -429,9 +509,9 @@ export function RunsTable({
                   <Link
                     {...sessionLink(run.session_id)}
                     className="font-mono text-[11px] text-muted-foreground hover:text-thread-ink hover:underline"
-                    title={`the session (${run.public_id || "no public id"})`}
+                    title={`the session ${run.session_id} (${run.public_id || "no public id"})`}
                   >
-                    {run.session_id}
+                    {shortId(run.session_id)}
                     {run.turn ? ` ·t${run.turn}` : ""}
                   </Link>
                 ) : (

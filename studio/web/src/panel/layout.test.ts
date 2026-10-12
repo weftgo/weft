@@ -397,7 +397,9 @@ describe('remembered per origin (localStorage["weft.devtools"])', () => {
     let el = await mount({ ...BASE })
     key(window, { code: "KeyW", altKey: true }) // the user opens it: a placement
     await settle()
-    expect(text(el, ".weft-turn.weft-sel .weft-id")).toBe("s_01-t2")
+    expect(
+      $(el, ".weft-turn.weft-sel")?.getAttribute("data-weft-run") ?? ""
+    ).toBe("s_01-t2")
     key(dock(el), { key: "j" })
     await settle()
     key(dock(el), { key: "r" })
@@ -406,7 +408,9 @@ describe('remembered per origin (localStorage["weft.devtools"])', () => {
     await settle()
     el = await mount({ ...BASE, "data-open": "false" })
     expect(dock(el)).toBeTruthy()
-    expect(text(el, ".weft-turn.weft-sel .weft-id")).toBe("s_01-t1")
+    expect(
+      $(el, ".weft-turn.weft-sel")?.getAttribute("data-weft-run") ?? ""
+    ).toBe("s_01-t1")
     expect($(el, ".weft-raw")).toBeTruthy()
     expect(stored()).toMatchObject({
       v: 1,
@@ -438,7 +442,9 @@ describe('remembered per origin (localStorage["weft.devtools"])', () => {
       "data-position": "left-dock",
     })
     expect(dock(el).classList.contains("weft-side-left")).toBe(true)
-    expect(text(el, ".weft-turn.weft-sel .weft-id")).toBe("s_01-t1")
+    expect(
+      $(el, ".weft-turn.weft-sel")?.getAttribute("data-weft-run") ?? ""
+    ).toBe("s_01-t1")
   })
 
   it("a running turn outranks the remembered one on reload", async () => {
@@ -460,7 +466,9 @@ describe('remembered per origin (localStorage["weft.devtools"])', () => {
     fakeStudio(routes)
     localStorage.setItem(STORE_KEY, JSON.stringify({ v: 1, run: "s_01-t1" }))
     const el = await open()
-    expect(text(el, ".weft-turn.weft-sel .weft-id")).toBe("s_01-t2")
+    expect(
+      $(el, ".weft-turn.weft-sel")?.getAttribute("data-weft-run") ?? ""
+    ).toBe("s_01-t2")
   })
 
   it("an explicit data-mode float|dock wins over what data-position implies", async () => {
@@ -631,7 +639,9 @@ describe("narrow panels and small viewports", () => {
     pick.value = "s_01-t1"
     pick.dispatchEvent(new Event("change"))
     await settle()
-    expect(text(el, ".weft-turn.weft-sel .weft-id")).toBe("s_01-t1")
+    expect(
+      $(el, ".weft-turn.weft-sel")?.getAttribute("data-weft-run") ?? ""
+    ).toBe("s_01-t1")
     await drag($(el, ".weft-grip")!, 900, 700, 200, 0)
     expect(dock(el).classList.contains("weft-narrow")).toBe(false)
     expect($(el, "select.weft-turn-pick")).toBeNull()
@@ -817,13 +827,19 @@ describe("the keyboard (only inside the panel, except Alt+W)", () => {
     expect($(el, ".weft-head a")!.getAttribute("href")).toContain("step=0")
     key(d(), { key: "j" })
     await settle()
-    expect(text(el, ".weft-turn.weft-sel .weft-id")).toBe("s_01-t1")
+    expect(
+      $(el, ".weft-turn.weft-sel")?.getAttribute("data-weft-run") ?? ""
+    ).toBe("s_01-t1")
     key(d(), { key: "j" }) // the end of the list stays
     await settle()
-    expect(text(el, ".weft-turn.weft-sel .weft-id")).toBe("s_01-t1")
+    expect(
+      $(el, ".weft-turn.weft-sel")?.getAttribute("data-weft-run") ?? ""
+    ).toBe("s_01-t1")
     key(d(), { key: "k" })
     await settle()
-    expect(text(el, ".weft-turn.weft-sel .weft-id")).toBe("s_01-t2")
+    expect(
+      $(el, ".weft-turn.weft-sel")?.getAttribute("data-weft-run") ?? ""
+    ).toBe("s_01-t2")
     // Focus stayed in the panel across the redraws.
     expect(el.shadowRoot!.activeElement).toBe(d())
   })
@@ -919,7 +935,9 @@ describe("the keyboard (only inside the panel, except Alt+W)", () => {
     for (const k of ["j", "r", "Escape"])
       expect(key(document.body, { key: k }).defaultPrevented, k).toBe(false)
     await settle()
-    expect(text(el, ".weft-turn.weft-sel .weft-id")).toBe("s_01-t2")
+    expect(
+      $(el, ".weft-turn.weft-sel")?.getAttribute("data-weft-run") ?? ""
+    ).toBe("s_01-t2")
     expect($(el, ".weft-raw, .weft-keys")).toBeNull()
     expect(dock(el)).toBeTruthy()
     // The window hears keydown for Alt+W alone; the document never.

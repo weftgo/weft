@@ -248,7 +248,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    its earliest span)/service (exact, any span)/public_id, paged as runs; a panel token lists
 //    //    the traces every span of which is its public id's; capability "traces" — obsdb.DB.Traces,
 //    //    no migration), traces/{id},
-//    //    sessions, sessions/{id}, sessions/{id}/public_id (the reverse of public/{public_id}: the dev token's
+//    //    sessions (?q= — every term in the title, first turn's prompt, id, public id or agent; each row's title
+//    (weft.session.title, the newest turn's) and first_prompt; obsdb.SessionQuery.Q), sessions/{id}, sessions/{id}/public_id (the reverse of public/{public_id}: the dev token's
 //    //    alone, every panel token 403 hidden), public/{public_id}, DELETE runs/{id} and DELETE
 //    //    sessions/{id} (capability "delete": a run with its subagent children, or a session's runs —
 //    //    rows, records, search index, spans, app logs — from obsdb's tables only, the app's
@@ -448,7 +449,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    | thread.Open(ctx, st, id, agent); defer s.Close(ctx); thread.List(ctx, st, thread.Query{…}); thread.Delete.
 //    Turns: turn, _ := s.Send(ctx, weft.User("…")[, thread.As(p), thread.RunOptions(…)]) — prompt durable
 //    before the run; turn.Wait() | WaitContext(ctx) | Done() | Events() | Outcome() | Next(); s.WaitIdle(ctx).
-//    Runs carry weft.session.id, weft.turn and, with thread.PublicID(id) (Create only), weft.public_id.
+//    Runs carry weft.session.id, weft.turn and, with thread.PublicID(id) (Create only), weft.public_id;
+//    once SetInfo named a title, weft.session.title (metadata: survives content-off; Studio titles the session with it).
 //    Busy (ADR 0019): thread.BusyPolicy(Queue | Reject → ErrBusy | Steer | Interrupt | Rollback), or
 //    thread.As(p) per Send; queued sends and steers are receipt entries, durable at acceptance —
 //    s.Queue(), s.ClearQueue(ctx) (their Turns end ErrDropped), s.Continue(ctx) runs what Open restored.

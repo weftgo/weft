@@ -493,8 +493,8 @@ describe("the fallback: no conversation detected", () => {
     await settle()
     expect(reads()).toBe(1)
     expect(
-      all(el, ".weft-turn .weft-id")
-        .map((n) => n.textContent)
+      all(el, ".weft-turn")
+        .map((n) => n.getAttribute("data-weft-run"))
         .slice(0, 2)
     ).toEqual(["r_new6", "r_new5"])
     expect($(el, ".weft-dot.weft-on")).toBeTruthy() // the live dot
@@ -524,9 +524,9 @@ describe("the fallback: no conversation detected", () => {
     await vi.advanceTimersByTimeAsync(30_500)
     await settle()
     expect(studio.gets("runs?limit=10").length).toBe(2)
-    expect(all(el, ".weft-turn .weft-id").map((n) => n.textContent)).toContain(
-      "r_bill"
-    )
+    expect(
+      all(el, ".weft-turn").map((n) => n.getAttribute("data-weft-run"))
+    ).toContain("r_bill")
     expect(text(el, ".weft-dev-poll")).toBe(
       "live: agent acme-support · the other agents' runs every 30 s"
     )

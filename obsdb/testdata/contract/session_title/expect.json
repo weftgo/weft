@@ -1,0 +1,106 @@
+{
+  "case": "session_title",
+  "description": "a thread session through a content-off destination, titled with SetInfo after its first turn: weft.session.title (metadata, so it survives content-off) on the second turn and its run row's meta; the session row's title is the newest turn's, its first prompt empty (no messages stored)",
+  "runs": [
+    {
+      "id": "01K00000000000000000000001-t1",
+      "trace_id": "7ace0000000000000000000000000001",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "public_id": "pub_title",
+      "turn": 1,
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:16:00Z",
+      "finished": "2026-10-01T09:16:00.005Z",
+      "last_seen": "2026-10-01T09:16:00.005Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 4,
+      "message_count": 0,
+      "delta_count": 1,
+      "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "request_count": 1,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": [
+        "stripped"
+      ]
+    },
+    {
+      "id": "01K00000000000000000000001-t2",
+      "trace_id": "7ace0000000000000000000000000002",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "session_id": "01K00000000000000000000001",
+      "public_id": "pub_title",
+      "turn": 2,
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "meta": {
+        "weft.session.title": "Order desk"
+      },
+      "started": "2026-10-01T09:16:00.004Z",
+      "finished": "2026-10-01T09:16:00.011Z",
+      "last_seen": "2026-10-01T09:16:00.011Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 4,
+      "message_count": 0,
+      "delta_count": 1,
+      "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "request_count": 1,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": [
+        "stripped"
+      ]
+    }
+  ],
+  "sessions": [
+    {
+      "id": "01K00000000000000000000001",
+      "public_id": "pub_title",
+      "agent": "support",
+      "turns": 2,
+      "title": "Order desk"
+    }
+  ]
+}

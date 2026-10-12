@@ -15,6 +15,7 @@ import axe from "axe-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
+import { queryClient } from "@/lib/query"
 import { APP_LINK_FIX, APP_RUN, APP_RUN_FIX, CAPS_UNREAD, PLAYGROUND_OFF, READ_TOKEN, RUNTIMES_UNREAD, SESSION_UNREAD, SUBAGENT_CALL } from "@/lib/honesty"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
@@ -157,6 +158,26 @@ describe("the run page when a read fails", () => {
     expect(parked().querySelectorAll("button")).toHaveLength(0)
     expect(fake.calls(`POST runs/${PARKED}/approvals`)).toHaveLength(0)
   })
+
+  it("a failed meta read again by a new observer keeps the read's error: never checking, never a verdict", async () => {
+    serveAppTurn(new FakeStudio(), { studioMeta: true })
+      .on("GET meta", () => apiError(500, "internal", "meta store unavailable"))
+      .install()
+    renderApp(`/runs/${PARKED}?view=story`)
+    await waitFor(() => expect(line("unread")).toBe(`${CAPS_UNREAD}: meta store unavailable`))
+    const seen: string[] = []
+    const watch = new MutationObserver(() => seen.push(parked().getAttribute("data-parked") ?? ""))
+    watch.observe(document.body, { subtree: true, attributes: true, attributeFilter: ["data-parked"] })
+    try {
+      // The read again puts the failed query back to pending, its error gone.
+      await queryClient.refetchQueries({ queryKey: ["meta"] })
+      await new Promise((r) => setTimeout(r, 100))
+    } finally {
+      watch.disconnect()
+    }
+    expect(seen.filter((k) => k !== "unread")).toEqual([])
+    expect(line("unread")).toBe(`${CAPS_UNREAD}: meta store unavailable`)
+  })
 })
 
 describe("the run page when no Sessions runtime of the run's service acts", () => {
@@ -240,18 +261,68 @@ describe("the run page's gate follows the facts while the turn is parked", () =>
     expect(fake.calls(`POST runs/${PARKED}/approvals`)).toHaveLength(0)
   })
 
-  it("a 403 holds while the gate reads the same; a later gate that changed clears it", async () => {
+  it("a 403 a later runtimes read re-gates to decide gives the verbs back — the same gate, the same runtime id (a restarted app)", async () => {
     // reconnects: the runtimes read after the 403 still names rt_01 with
-    // Sessions — the same gate the refusal answered.
+    // Sessions — runtime ids are stable per (service, cwd, agents), so a
+    // restarted app comes back with the gate the refusal answered.
     const o: AppTurnOptions = { outcome: "refused", reconnects: true }
-    await open(o)
+    const fake = await open(o)
+    const reads = fake.calls("GET runtimes").length
     fireEvent.click(verb("continue")!)
-    await waitFor(() => expect(line()).toBe(SVC_WORDS))
-    // The app registers again (a restart): another runtime, Sessions set.
-    o.outcome = undefined
-    o.runtimes = [runtimeRow({ id: "rt_02" })]
-    await waitFor(() => expect(verb("continue")?.hasAttribute("disabled")).toBe(false), { timeout: 15_000 })
+    await waitFor(() => expect(fake.calls(`POST runs/${PARKED}/approvals`)).toHaveLength(1))
+    await waitFor(() => expect(fake.calls("GET runtimes").length).toBeGreaterThan(reads))
+    await waitFor(() => expect(verb("continue")?.hasAttribute("disabled")).toBe(false))
+    expect(parked().getAttribute("data-parked")).toBe("decide")
     expect(parked().querySelector("[data-app-owned]")).toBeNull()
     expect(parked().querySelector('[data-app-verb="refused"]')).toBeNull()
+    expect(parked().querySelectorAll('[data-refused="app-owned"]')).toHaveLength(0)
+  })
+
+  it("a 403 stays while the runtimes read after it fails: only a read that applied re-gates", async () => {
+    const o: AppTurnOptions = { outcome: "refused", reconnects: true }
+    const fake = await open(o)
+    const reads = fake.calls("GET runtimes").length
+    // The read the refusal asks for answers 500: the runtimes the page
+    // holds still say decide, but no read past the refusal applied.
+    o.runtimesError = true
+    fireEvent.click(verb("continue")!)
+    await waitFor(() => expect(fake.calls("GET runtimes").length).toBeGreaterThan(reads))
+    await waitFor(() => expect(line()).toBe(SVC_WORDS))
+    await new Promise((r) => setTimeout(r, 1_500))
+    expect(line()).toBe(SVC_WORDS)
+    expect([...parked().querySelectorAll<HTMLButtonElement>('[data-refused="app-owned"]')].map((b) => b.disabled)).toEqual([true, true, true])
+  })
+
+  it("a turn already resumed stops re-reading the session: resumed is final", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const fake = await open({ resumed: true })
+      expect(parked().getAttribute("data-parked")).toBe("resumed")
+      await vi.advanceTimersByTimeAsync(500)
+      // (GET /api/runtimes goes on at the shell's own 5 s poll, use-notices.ts,
+      // the one poller of that key: the parked block adds none once resumed.)
+      const before = fake.calls(`GET sessions/${APP_SESSION}`).length
+      await vi.advanceTimersByTimeAsync(11_000)
+      expect(fake.calls(`GET sessions/${APP_SESSION}`).length).toBe(before)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("a session read answering 404 is not asked again: the read's error, no poll", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    try {
+      const fake = serveAppTurn(new FakeStudio(), { studioMeta: true })
+        .on(`GET sessions/${APP_SESSION}`, () => apiError(404, "not_found", `session ${APP_SESSION} not found`))
+        .install()
+      renderApp(`/runs/${PARKED}?view=story`)
+      await waitFor(() => expect(line("unread")).toBe(`${SESSION_UNREAD}: session ${APP_SESSION} not found`))
+      await vi.advanceTimersByTimeAsync(500)
+      const before = fake.calls(`GET sessions/${APP_SESSION}`).length
+      await vi.advanceTimersByTimeAsync(11_000)
+      expect(fake.calls(`GET sessions/${APP_SESSION}`).length).toBe(before)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

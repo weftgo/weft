@@ -72,6 +72,7 @@ import { keepEditedTitle } from "@/lib/saves"
 import { mintExperimentID, validExperimentID } from "@/lib/experiments"
 import { keepPrompt } from "@/components/studio/saves"
 import { useCapabilities } from "@/hooks/use-capabilities"
+import { CapsUnread } from "@/components/studio/caps-unread"
 import { RUNTIMES_POLL_MS } from "@/hooks/use-notices"
 import { canReplay } from "@/lib/replay"
 import {
@@ -305,6 +306,7 @@ function PlaygroundPage() {
   useDocumentTitle({ page: "playground", experiment })
   const caps = useCapabilities()
   if (caps.loading) return <p className="p-6 text-xs text-muted-foreground">loading…</p>
+  if (caps.error) return <CapsUnread error={caps.error} />
   if (!caps.has("playground")) return <NoPlayground why={caps.why("playground")} />
   return <Playground caps={caps.caps} />
 }

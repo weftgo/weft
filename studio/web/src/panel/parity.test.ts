@@ -1026,10 +1026,13 @@ describe("a derived run on both surfaces (I1.3)", () => {
 // (GET /api/runtimes), never meta's global debug_scope: breakpoints_own
 // alone, or another service's Sessions runtime, reads read-only.
 describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
-  const cases: { name: string; o: AppTurnOptions; run?: string; click?: boolean; kind: string }[] = [
+  const cases: { name: string; o: AppTurnOptions; run?: string; click?: boolean; regated?: boolean; kind: string }[] = [
     { name: "a Sessions runtime of the service: continue decides, the parked turn reads resumed", o: {}, click: true, kind: "resumed" },
     { name: "the runtime's rejection verbatim", o: { outcome: "rejected" }, click: true, kind: "decide" },
     { name: "a 403 becomes the read-only line with the server's fix", o: { outcome: "refused" }, click: true, kind: "read-only" },
+    // The panel's rule on both: a 403 is live until a runtimes read
+    // started after it has applied and says decide — then the verbs are back.
+    { name: "a 403 a later runtimes read re-gates to decide gives the verbs back", o: { outcome: "refused", reconnects: true }, click: true, regated: true, kind: "decide" },
     { name: "connected without Sessions: read-only", o: { runtimes: [appRuntime({ sessions: false, breakpoints_own: false })] }, kind: "read-only" },
     { name: "breakpoints_own alone (debug_scope own+runtime): read-only", o: { runtimes: [appRuntime({ sessions: false, breakpoints_own: true })], debugScope: "own+runtime" }, kind: "read-only" },
     { name: "another service's Sessions runtime: read-only for this service's turn", o: { runtimes: [appRuntime({ service: "billing" })], debugScope: "own+runtime" }, kind: "read-only" },
@@ -1046,7 +1049,7 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
     after: string
   }
   async function panelSeen(c: (typeof cases)[number]): Promise<Seen> {
-    serveAppTurn(new FakeStudio(), c.o).install()
+    const fake = serveAppTurn(new FakeStudio(), c.o).install()
     // A run outside the public id's conversation: the panel's fallback list.
     const plain = c.run === APP_PLAIN || c.run === APP_NOPUB
     const el = await mount({ "data-endpoint": "http://studio.test/studio/", "data-open": "true", ...(plain ? {} : { "data-public-id": APP_PUB }) })
@@ -1057,7 +1060,14 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
     await vi.waitFor(() => expect($(el, callSel)).toBeTruthy(), { timeout: 5_000 })
     await vi.waitFor(() => expect($(el, ".weft-main")?.textContent ?? "").not.toContain("checking for a runtime"), { timeout: 5_000 })
     await settle()
-    if (c.click) {
+    if (c.click && c.regated) {
+      const reads = fake.calls("GET runtimes").length
+      click(button(el, "continue"))
+      await vi.waitFor(() => expect(fake.calls(`POST runs/${APP_PARKED}/approvals`)).toHaveLength(1), { timeout: 5_000 })
+      await vi.waitFor(() => expect(fake.calls("GET runtimes").length).toBeGreaterThan(reads), { timeout: 5_000 })
+      await vi.waitFor(() => expect((button(el, "continue") as HTMLButtonElement | undefined)?.disabled).toBe(false), { timeout: 5_000 })
+      await settle()
+    } else if (c.click) {
       click(button(el, "continue"))
       const done = () =>
         $(el, `${callSel} [data-weft-app-verb="rejected"]`) ?? $(el, '[data-weft-app-owned="read-only"]') ?? $(el, '[data-weft-app-owned="resumed"]')
@@ -1083,12 +1093,18 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
     StudioEventSource.reset()
     vi.stubGlobal("EventSource", StudioEventSource)
     setStudioToken("")
-    serveAppTurn(new FakeStudio(), { studioMeta: true, ...c.o }).install()
+    const fake = serveAppTurn(new FakeStudio(), { studioMeta: true, ...c.o }).install()
     renderApp(`/runs/${c.run ?? APP_PARKED}?view=story`)
     const box = () => document.querySelector<HTMLElement>("[data-parked]")
     const first = c.click ? "decide" : c.kind
     await waitFor(() => expect(box()?.getAttribute("data-parked")).toBe(first))
-    if (c.click) {
+    if (c.click && c.regated) {
+      const reads = fake.calls("GET runtimes").length
+      ;[...box()!.querySelectorAll("button")].find((n) => n.textContent === "continue")!.click()
+      await waitFor(() => expect(fake.calls(`POST runs/${APP_PARKED}/approvals`)).toHaveLength(1))
+      await waitFor(() => expect(fake.calls("GET runtimes").length).toBeGreaterThan(reads))
+      await waitFor(() => expect([...box()!.querySelectorAll("button")].find((n) => n.textContent === "continue")?.disabled).toBe(false))
+    } else if (c.click) {
       ;[...box()!.querySelectorAll("button")].find((n) => n.textContent === "continue")!.click()
       await waitFor(() =>
         expect(

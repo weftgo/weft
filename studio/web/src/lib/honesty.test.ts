@@ -18,6 +18,7 @@ import {
   kib,
   mergeHoles,
   APP_OWNED,
+  APP_RUN,
   APP_RUN_FIX,
   CAPS_UNREAD,
   PLAYGROUND_OFF,
@@ -25,7 +26,6 @@ import {
   READ_TOKEN,
   SESSION_UNREAD,
   SUBAGENT_CALL,
-  appGate,
   appVerbWords,
   noPublicIDWords,
   parkedKind,
@@ -162,6 +162,15 @@ describe("the app turn's kinds and refusal words", () => {
     expect(refusalLine(refusalWords("child", child, [rt()], false))).toBe(`${SUBAGENT_CALL} s-t1`)
   })
 
+  it("another agent's Generate inside a tool handler (weft.parent.run.id, its own id): the plain line, never the parent's", () => {
+    // Core stamps the parent id on every run under a tool call's context;
+    // only a Subagent child's id is `<parent>/<step>/<call>` (pricing.go's subagents()).
+    const nested = { ...turn, id: "r_nested", parent_run_id: "s-t1" }
+    expect(parkedKind(nested, [rt()])).toBe("plain")
+    expect(refusalLine(refusalWords(parkedKind(nested, [rt()]), nested, [rt()], false))).toBe(`${APP_RUN} — fix: ${APP_RUN_FIX}`)
+    expect(go("pricing.go")).toContain(`strings.HasPrefix(k.ID, id+"/")`)
+  })
+
   it("a session turn without a public id: appturn.go's 403 words and fix", () => {
     const row = { ...turn, public_id: "" }
     expect(parkedKind(row, [rt()])).toBe("no-public-id")
@@ -188,13 +197,6 @@ describe("the app turn's kinds and refusal words", () => {
       words: `${SESSION_UNREAD}: 500`,
       fix: "",
     })
-  })
-
-  it("the gate changes when the service's runtimes do; a refusal holds only while it reads the same", () => {
-    const a = appGate(turn, [rt()])
-    expect(appGate(turn, [rt(), { id: "rt_9", service: "billing", connected: true, sessions: true }])).toBe(a)
-    expect(appGate(turn, [rt({ id: "rt_2" })])).not.toBe(a)
-    expect(appGate(turn, [rt()], "s-t2")).not.toBe(a)
   })
 
   it("a finished steer reads steered, a finished decision decided", () => {

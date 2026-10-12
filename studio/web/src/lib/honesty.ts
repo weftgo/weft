@@ -453,23 +453,15 @@ const live = (rts: readonly RuntimeLike[] | null | undefined, service: string | 
  * turn of its session exists (next). */
 export function parkedKind(row: AppRow | null | undefined, runtimes: readonly RuntimeLike[] | null | undefined, next?: string): ParkedKind {
   if (row?.playground) return "experiment"
-  if (row?.parent_run_id) return "child"
+  // Only core's Subagent child (`<parent>/<step>/<call>`) parks onto its
+  // parent as SUBAGENT_PENDING; another agent's Generate inside a tool
+  // handler carries weft.parent.run.id too (pricing.go's subagents()
+  // tells them apart the same way) and its park is the app's to resume.
+  if (row?.parent_run_id) return row.id.startsWith(`${row.parent_run_id}/`) ? "child" : "plain"
   if (!row?.session_id) return "plain"
   if (!row.public_id) return "no-public-id"
   if (next) return "resumed"
   return live(runtimes, row.service, true) ? "decide" : "read-only"
-}
-
-/** appGate is what the verbs' gate rests on — the kind, the next turn,
- * the run's service's runtimes — as one string: a 403 refusal holds
- * while the gate reads the same, and a later gate that changed (a
- * runtime connected, a new registration) clears it. */
-export function appGate(row: AppRow | null | undefined, runtimes: readonly RuntimeLike[] | null | undefined, next?: string): string {
-  const own = (runtimes ?? [])
-    .filter((r) => r.service === row?.service)
-    .map((r) => `${r.id ?? ""}:${r.connected !== false}:${r.sessions === true}`)
-    .sort()
-  return `${parkedKind(row, runtimes, next)}|${next ?? ""}|${own.join(",")}`
 }
 
 /** nextTurn is the turn after row in its session (the smallest later

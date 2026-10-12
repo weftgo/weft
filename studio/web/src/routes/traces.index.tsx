@@ -18,6 +18,7 @@ import { dedupeTraces, parseWhen, rangeTime, whenNotes } from "@/lib/run-filters
 import { runLink, traceLink } from "@/lib/links"
 import type { TracesSearch } from "@/lib/links"
 import { useCapabilities } from "@/hooks/use-capabilities"
+import { CapsUnread } from "@/components/studio/caps-unread"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { Button } from "@/components/ui/button"
@@ -83,7 +84,7 @@ function TracesPage() {
   useDocumentTitle({ page: "traces" })
   const search = Route.useSearch()
   const navigate = useNavigate({ from: "/traces/" })
-  const { has, why, loading } = useCapabilities()
+  const { has, why, loading, error } = useCapabilities()
   const capable = has("traces")
   // A since/until the server would refuse: dropped, and said.
   const badWhen = whenNotes(search)
@@ -114,6 +115,7 @@ function TracesPage() {
         <Spinner />
       </div>
     )
+  if (error) return <CapsUnread error={error} />
   if (!capable)
     return (
       <div className="mx-auto max-w-md space-y-2 py-24 text-center" data-traces-off>

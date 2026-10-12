@@ -17,6 +17,7 @@ import { absoluteTime, relativeTime } from "@/lib/format"
 import { costView, sumCost } from "@/lib/cost"
 import { experimentLink, playgroundLink } from "@/lib/links"
 import { useCapabilities } from "@/hooks/use-capabilities"
+import { CapsUnread } from "@/components/studio/caps-unread"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { CostText, useCostCapable } from "@/components/studio/cost"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -30,6 +31,7 @@ function ExperimentsPage() {
   useDocumentTitle({ page: "experiments" })
   const caps = useCapabilities()
   if (caps.loading) return <p className="p-6 text-xs text-muted-foreground">loading…</p>
+  if (caps.error) return <CapsUnread error={caps.error} />
   if (!caps.has("playground")) return <NoExperiments why={caps.why("playground")} />
   if (!mayReadExperiments(caps.caps)) return <ExperimentsHidden />
   return <ExperimentList />

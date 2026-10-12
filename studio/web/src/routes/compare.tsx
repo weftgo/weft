@@ -9,6 +9,7 @@ import { useState } from "react"
 import { compareLink } from "@/lib/links"
 import type { CompareSearch } from "@/lib/links"
 import { useCapabilities } from "@/hooks/use-capabilities"
+import { CapsUnread } from "@/components/studio/caps-unread"
 import { StepCompare } from "@/components/studio/step-diff"
 import { Button } from "@/components/ui/button"
 import { useDocumentTitle } from "@/hooks/use-document-title"
@@ -48,6 +49,7 @@ function ComparePage() {
     setAdd("")
     void navigate(a ? compareLink(a, [...others, id], step) : compareLink(id))
   }
+  if (caps.error) return <CapsUnread error={caps.error} />
   if (!caps.loading && !caps.has("diff"))
     return (
       <div className="mx-auto max-w-lg space-y-2 py-24 text-center">

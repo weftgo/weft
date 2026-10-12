@@ -6,6 +6,7 @@ import { cleanup, configure, fireEvent, screen, waitFor, within } from "@testing
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
+import { CAPS_UNREAD } from "@/lib/honesty"
 import { queryClient } from "@/lib/query"
 import type { RunDoc, RunRow, RunsPage, SessionDoc, SessionsPage } from "@/lib/api"
 import { renderApp, stubBrowser } from "@/test/app"
@@ -896,4 +897,17 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
       "rejected (runtime rt_1 is not connected)"
     )
   })
+})
+
+// A failed GET /api/meta is no verdict about what the Studio serves:
+// the capability-gated pages say the read failed (lib/honesty.ts's
+// CAPS_UNREAD), never "this Studio does not list traces" and its kin.
+describe("a failed meta read on the capability-gated pages", () => {
+  for (const url of ["/traces", "/live", "/experiments", "/playground", "/compare?a=r_ok&b=r_err"])
+    it(`${url}: could not read the Studio's capabilities, never "off"`, async () => {
+      studio.on("GET meta", () => apiError(500, "internal", "meta store unavailable"))
+      renderApp(url)
+      await waitFor(() => expect(document.querySelector("[data-caps-unread]")?.textContent).toBe(`${CAPS_UNREAD}: meta store unavailable`))
+      expect(document.body.textContent).not.toMatch(/does not list traces|reports no live capability|has no playground|does not serve the step compare/)
+    })
 })

@@ -18,8 +18,8 @@ import { Link } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { ApiError, fetchCommand, metaQuery, postApproval, postSteer, runtimesQuery, sessionQuery, studioToken } from "@/lib/api"
-import type { CommandStatus, RunDoc } from "@/lib/api"
-import { appGate, appVerbWords, nextTurn, parkedKind, refusalLine, refusalWords, SUBAGENT_CALL } from "@/lib/honesty"
+import type { CommandStatus, RunDoc, SessionDoc } from "@/lib/api"
+import { appVerbWords, nextTurn, parkedKind, refusalLine, refusalWords, SUBAGENT_CALL } from "@/lib/honesty"
 import type { AppGateFacts } from "@/lib/honesty"
 import { runLink } from "@/lib/links"
 import { canReplay, tokenScopeOf } from "@/lib/replay"
@@ -37,15 +37,18 @@ interface Verb {
   error?: string
   fix?: string
   run?: string
-  /** A refusal's gate (lib/honesty.ts's appGate) when it was answered:
-   * it holds while the gate reads the same. */
-  gate?: string
+  /** A refusal: how many runtimes reads had applied when it came (the
+   * panel's rt stamp) — a later read that applied and says decide
+   * re-gates the turn. */
+  rt?: number
 }
 
 /** useAppVerbs sends verbs and follows their commands (§10.5): the
  * 202's command polled every 700 ms until finished, rejected or lost;
- * a refused POST kept with the server's fix and the gate it answered
- * (the runtimes read again: the gate was stale). A finished one
+ * a refused POST kept with the server's fix, stamped with the runtimes
+ * reads applied so far, and the runtimes read again (the gate was
+ * stale; the invalidation cancels a read already in flight, so only a
+ * read started after the refusal applies past the stamp). A finished one
  * re-reads the run and session lists, where the resumed turn shows. */
 function useAppVerbs() {
   const [verbs, setVerbs] = useState<Record<string, Verb>>({})
@@ -60,15 +63,16 @@ function useAppVerbs() {
   const set = (key: string, v: Verb) => {
     if (alive.current) setVerbs((cur) => ({ ...cur, [key]: { decision: (cur[key] as Verb | undefined)?.decision, ...v } }))
   }
-  const send = async (key: string, post: () => Promise<{ command_id?: string }>, decision?: string, gate?: string) => {
+  const send = async (key: string, post: () => Promise<{ command_id?: string }>, decision?: string) => {
     set(key, { state: "sending", decision })
     let out: { command_id?: string }
     try {
       out = await post()
     } catch (e) {
       const fix = e instanceof ApiError ? (e.doc as { fix?: unknown } | undefined)?.fix : undefined
-      set(key, { state: "refused", error: e instanceof Error ? e.message : String(e), ...(typeof fix === "string" ? { fix } : {}), gate })
-      void qc.invalidateQueries({ queryKey: ["runtimes"] })
+      const rt = qc.getQueryState(runtimesQuery().queryKey)?.dataUpdateCount ?? 0
+      set(key, { state: "refused", error: e instanceof Error ? e.message : String(e), ...(typeof fix === "string" ? { fix } : {}), rt })
+      void qc.invalidateQueries({ queryKey: runtimesQuery().queryKey })
       return
     }
     const id = out.command_id
@@ -161,7 +165,9 @@ function DecideRow({ call, onDecide }: { call: Call; onDecide: (d: "approve" | "
 }
 
 /** How often the gate's reads are taken again while the turn is parked
- * or running: another surface may resume it, a runtime may connect. */
+ * or running: another surface may resume it, a runtime may connect.
+ * Not once the next turn is known (resumed is final) or the session
+ * read was refused for good (a 4xx: the same answer every time). */
 export const APP_GATE_POLL_MS = 5_000
 
 /** The app's turn and what the page may do on it: the gate reads the
@@ -171,21 +177,31 @@ export const APP_GATE_POLL_MS = 5_000
  * while either is still loading — never a verdict on half the facts; a
  * failed read is said as such (unread), never a spinner. */
 function useAppTurn(doc: RunDoc) {
+  const qc = useQueryClient()
   const meta = useQuery(metaQuery())
   const caps = meta.data?.capabilities ?? []
   const mayAct = canReplay(caps, studioToken())
   // A subagent's child run is decided on its parent turn: no gate.
   const app = !doc.playground && !doc.parent_run_id && !!doc.session_id && !!doc.public_id
   const poll = doc.pending > 0 || doc.status === "running" ? APP_GATE_POLL_MS : false
-  const rts = useQuery({ ...runtimesQuery(), enabled: app && mayAct, refetchInterval: poll })
-  const sess = useQuery({ ...sessionQuery(doc.session_id), enabled: app, refetchInterval: poll })
+  const settled = (data: SessionDoc | undefined, err: Error | null) =>
+    !!nextTurn(doc, data?.runs) || (err instanceof ApiError && [401, 403, 404, 410].includes(err.status))
+  const sess = useQuery({ ...sessionQuery(doc.session_id), enabled: app, refetchInterval: (q) => (settled(q.state.data, q.state.error) ? false : poll) })
+  const rts = useQuery({ ...runtimesQuery(), enabled: app && mayAct, refetchInterval: settled(sess.data, sess.error) ? false : poll })
   const next = nextTurn(doc, sess.data?.runs)
   const runtimes = rts.data?.runtimes ?? null
   const kind = parkedKind(doc, runtimes, next)
-  const gate = appGate(doc, runtimes, next)
+  // The runtimes reads applied so far (a refusal's rt is compared to it);
+  // dataUpdatedAt is read so a read that applied re-renders the page.
+  const rtN = rts.dataUpdatedAt ? (qc.getQueryState(runtimesQuery().queryKey)?.dataUpdateCount ?? 0) : 0
   const sessErr = app && sess.isError ? sess.error.message : ""
-  const metaErr = app && meta.isError ? meta.error.message : ""
-  const checking = app && (meta.isPending || (sess.isPending && !sessErr) || (mayAct && rts.isPending))
+  // A failed meta read again by a new observer goes back to pending with
+  // no error: the failure it last answered is held — never "checking",
+  // never a verdict on a capability list that never came.
+  const [lastMetaErr, setLastMetaErr] = useState("")
+  if (meta.error && meta.error.message !== lastMetaErr) setLastMetaErr(meta.error.message)
+  const metaErr = !app ? "" : meta.isError ? meta.error.message : meta.isPending && meta.errorUpdateCount > 0 ? lastMetaErr : ""
+  const checking = app && ((meta.isPending && !metaErr) || (sess.isPending && !sessErr) || (mayAct && rts.isPending))
   const rtErr = app && mayAct && rts.isError ? rts.error.message : ""
   const facts: AppGateFacts = meta.data
     ? { capabilities: caps, capabilities_off: meta.data.capabilities_off, sessionError: sessErr }
@@ -193,14 +209,16 @@ function useAppTurn(doc: RunDoc) {
   // A failed read (meta, the session, the runtimes) is no verdict: no
   // verbs, its error said.
   const unread = app && !!(metaErr || sessErr || (mayAct && rtErr))
-  return { kind, gate, next, runtimes, mayAct, checking, unread, rtErr, facts, steer: caps.includes("steer") }
+  return { kind, rtN, next, runtimes, mayAct, checking, unread, rtErr, facts, steer: caps.includes("steer") }
 }
 
 export function ParkedCalls({ doc, pending }: { doc: RunDoc; pending: Call[] }) {
-  const { kind, gate, next, runtimes, mayAct, checking, unread: failed, rtErr, facts } = useAppTurn(doc)
+  const { kind, rtN, next, runtimes, mayAct, checking, unread: failed, rtErr, facts } = useAppTurn(doc)
   const { verbs, send } = useAppVerbs()
-  // A 403 holds while the gate reads what it read when it was answered.
-  const live = (v: Verb | undefined) => !(v?.state === "refused" && v.gate !== undefined && v.gate !== gate)
+  // A 403 is live until a runtimes read started after it has applied
+  // and the gate says decide — the panel's rule, strict: a failed or an
+  // in-flight read keeps it.
+  const live = (v: Verb | undefined) => !(kind === "decide" && v?.state === "refused" && (v.rt ?? 0) < rtN)
   const refused = pending.map((c) => verbs[c.id] as Verb | undefined).find((v) => v?.state === "refused" && v.fix && live(v))
   const read = tokenScopeOf(studioToken()) === "read"
   const unread = failed && !read && !refused && (kind === "decide" || kind === "read-only")
@@ -227,8 +245,7 @@ export function ParkedCalls({ doc, pending }: { doc: RunDoc; pending: Call[] }) 
                         ...(decision === "deny" && text ? { reason: text } : {}),
                         ...(decision === "resolve" ? { content: text } : {}),
                       }),
-                    decision,
-                    gate
+                    decision
                   )
                 }
               />

@@ -3915,7 +3915,7 @@ export class WeftDevtools extends HTMLElement {
     // A refusal a later runtimes read re-gated to decide is history:
     // the verbs come back (the runtime reconnected, the fix applied).
     const sent = (id: string): AppVerb | undefined => {
-      const v = s.app[`${runID}:${id}`]
+      const v = s.app[`${runID}:${id}`] as AppVerb | undefined
       return kind === "decide" && v?.state === "refused" && (v.rt ?? 0) < s.rtN ? undefined : v
     }
     const refused = pending.map((c) => sent(c.id)).find((v) => v?.state === "refused" && v.fix)

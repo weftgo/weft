@@ -39,6 +39,7 @@ import { LivePeek } from "@/components/studio/live-peek"
 import { LiveTable } from "@/components/studio/live-table"
 import { SplitPane } from "@/components/studio/split-pane"
 import { useCapabilities } from "@/hooks/use-capabilities"
+import { CapsUnread } from "@/components/studio/caps-unread"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
@@ -61,7 +62,7 @@ export const POLLING_LINE = "live: polling every 5 s — the all stream needs th
 
 function LivePage() {
   useDocumentTitle({ page: "live" })
-  const { has, loading } = useCapabilities()
+  const { has, loading, error } = useCapabilities()
   if (loading) {
     return (
       <div className="flex justify-center py-24">
@@ -69,6 +70,7 @@ function LivePage() {
       </div>
     )
   }
+  if (error) return <CapsUnread error={error} />
   if (!has("live")) {
     return (
       <div className="mx-auto max-w-md space-y-2 py-24 text-center">

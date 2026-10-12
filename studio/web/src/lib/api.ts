@@ -99,6 +99,12 @@ export interface RunRow extends CostFields, DelegatedCostFields {
   /** A canceled run's weft.cancel.cause (studio.cancel,
    * thread.interrupted, deadline, …). Absent otherwise. */
   cancel_cause?: string
+  /** What the core emitted (U5): the root span's weft.run.events /
+   * weft.run.messages — event_count's denominator for a counted gap
+   * ("N of M events were lost"). Absent when 0 (no root yet, a weft
+   * before U5, or nothing emitted) and from an older Studio. */
+  events_emitted?: number
+  messages_emitted?: number
   usage: Usage
   event_count: number
   message_count: number
@@ -353,6 +359,12 @@ export interface Meta {
   live_all?: boolean
   has_manifest: boolean
   ingest_open: boolean
+  /** Ingest health (U5): the services whose heartbeats reported
+   * records their destination lost on the way here
+   * (weft.records.dropped), most first. Absent from an older Studio. */
+  ingest?: {
+    dropped: { service: string; records: number; last_heard: string }[]
+  }
   interrupted_after_ms: number
   capabilities: string[]
   /** Why each capability an option left off is off (plan B4): the

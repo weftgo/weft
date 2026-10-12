@@ -18,10 +18,14 @@ import (
 // The attribute names the chain heads read and set. They mirror the
 // core's (observe.go); pinned by the pipeline tests.
 const (
-	attrRecordKey   = "weft.record"
-	attrContentKey  = "weft.content"
-	attrTruncated   = "weft.content.truncated_bytes"
-	contentStripped = "stripped"
+	attrRecordKey  = "weft.record"
+	attrContentKey = "weft.content"
+	attrTruncated  = "weft.content.truncated_bytes"
+	// attrEventTypeKey is weft.event.type (admission's tiers);
+	// attrRecordsDropped the heartbeat's loss count (U5).
+	attrEventTypeKey   = "weft.event.type"
+	attrRecordsDropped = "weft.records.dropped"
+	contentStripped    = "stripped"
 
 	eventNameMessages = "weft.messages"
 	eventNamePrompt   = "weft.prompt"
@@ -82,6 +86,9 @@ type destProc struct {
 	// buffer no body; a raw record that reaches a chain without it is
 	// dropped.
 	raw bool
+	// adm admits records ahead of a batch chain's SDK queue (nil for
+	// Local, written synchronously: no queue to overflow).
+	adm *admission
 }
 
 var _ sdklog.Processor = (*destProc)(nil)
@@ -147,13 +154,60 @@ func (p *destProc) OnEmit(ctx context.Context, r *sdklog.Record) error {
 			return nil // never sent unredacted
 		}
 	case "heartbeat":
-		// No body, no content: through unchanged.
+		// No body, no content. It carries this destination's own loss
+		// so far (weft.records.dropped, record contract §4): Studio's
+		// ingest health hears what the app lost on the way to it.
+		if n := p.drops.lost(); n > 0 {
+			setAttr(&clone, attrRecordsDropped, attribute.Int64Value(n))
+		}
+	}
+	if p.adm != nil {
+		if !p.adm.admit(ctx, recordTier(&clone, kind)) {
+			p.drops.overflowed(1, p.adm.size)
+			return nil
+		}
 	}
 	return p.inner.OnEmit(ctx, &clone)
 }
 
-func (p *destProc) Shutdown(ctx context.Context) error   { return p.inner.Shutdown(ctx) }
-func (p *destProc) ForceFlush(ctx context.Context) error { return p.inner.ForceFlush(ctx) }
+func (p *destProc) Shutdown(ctx context.Context) error {
+	if p.adm != nil {
+		p.adm.close()
+	}
+	return p.inner.Shutdown(ctx)
+}
+
+func (p *destProc) ForceFlush(ctx context.Context) error {
+	if p.adm != nil {
+		return flushDetached(ctx, p.inner.ForceFlush)
+	}
+	return p.inner.ForceFlush(ctx)
+}
+
+// recordTier is a record's shedding class (admission.go): deltas first,
+// the run's bracket (run_start, run_finish) and the heartbeat last,
+// everything else between.
+func recordTier(r *sdklog.Record, kind string) tier {
+	switch kind {
+	case "delta":
+		return tierDelta
+	case "heartbeat":
+		return tierPriority
+	case "event":
+		var typ string
+		r.WalkAttributes(func(kv attribute.KeyValue) bool {
+			if string(kv.Key) == attrEventTypeKey {
+				typ = kv.Value.AsString()
+				return false
+			}
+			return true
+		})
+		if typ == "run_start" || typ == "run_finish" {
+			return tierPriority
+		}
+	}
+	return tierDurable
+}
 
 // recordKind reads weft.record off a record ("" for non-weft).
 func recordKind(r *sdklog.Record) string {
@@ -528,6 +582,11 @@ type dropCounter struct {
 	policy atomic.Int64 // the filtered share of count
 	last   atomic.Int64 // unix nano of the last WARN
 	log    *slog.Logger
+	// overflow is the share of count a full queue refused (admission.go);
+	// overflowWarned makes its WARN once per destination: a storm is one
+	// condition, not a line per record or per minute.
+	overflow       atomic.Int64
+	overflowWarned atomic.Bool
 }
 
 func newDropCounter(name string) *dropCounter {
@@ -551,6 +610,26 @@ func (d *dropCounter) filtered(n int64) {
 	d.policy.Add(n)
 	d.count.Add(n)
 }
+
+// overflowed counts n records the destination's full queue refused
+// (admission.go). The first overflow logs one WARN for the
+// destination's lifetime, naming the queue and the knobs; the running
+// total rides every later heartbeat (weft.records.dropped) and the
+// export-failure WARN's count.
+func (d *dropCounter) overflowed(n, queue int64) {
+	d.count.Add(n)
+	d.overflow.Add(n)
+	if d.overflowWarned.CompareAndSwap(false, true) {
+		d.log.Warn("weft/otel: destination queue full, records dropped",
+			"dest", d.name, "queue", queue,
+			"hint", "raise it with otel.QueueSize(n) on the destination, or use otel.Blocking() under WEFT_ENV=dev; deltas are shed first, a run's run_start and run_finish last; the count rides weft.records.dropped on the heartbeat")
+	}
+}
+
+// lost is every record this destination lost — failed exports and
+// writes, redaction failures, queue overflow — the policy filters
+// excepted: what weft.records.dropped reports.
+func (d *dropCounter) lost() int64 { return d.count.Load() - d.policy.Load() }
 
 // throttle reports whether a minute has passed since it last said yes.
 func throttle(last *atomic.Int64) bool {

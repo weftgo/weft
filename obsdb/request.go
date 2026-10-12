@@ -109,11 +109,23 @@ const (
 	// succeeded from its root, its last steps' records missing;
 	// TailLostHole decides it).
 	CauseTailLost HoleCause = "tail_lost"
+	// CauseEventsLost: a weft run's invoke_agent span says how many
+	// event records the core emitted (weft.run.events, U5) and fewer
+	// were stored — a destination dropped them (gap: EventsLostHole
+	// decides it, EventsLostReason counts them, "N of M events were
+	// lost"). It replaces tail_lost and no_logger's guess wherever the
+	// root carries the count.
+	CauseEventsLost HoleCause = "events_lost"
 )
+
+// queueFix is the knob every gap's fix names (UX-A-41): the destination
+// queue the records waited in, the dev-only wait, the app's own WARN
+// and the counter Studio heard.
+const queueFix = "raise the destination's queue: otel.QueueSize(n) on it (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names the destination, and weft doctor prints the drops Studio heard of (weft.records.dropped)"
 
 // HoleCauses lists the causes the table words, in order.
 func HoleCauses() []HoleCause {
-	return []HoleCause{CauseNoSpans, CauseResultCap, CauseLogCap, CauseNoPublicID, CauseDevTokenOnly, CauseNotServed, CauseResponseCap, CauseRawOff, CauseStockSpans, CauseNoLogger, CauseTailLost}
+	return []HoleCause{CauseNoSpans, CauseResultCap, CauseLogCap, CauseNoPublicID, CauseDevTokenOnly, CauseNotServed, CauseResponseCap, CauseRawOff, CauseStockSpans, CauseNoLogger, CauseTailLost, CauseEventsLost}
 }
 
 var causeNotes = map[Hole]map[HoleCause]holeNote{
@@ -148,7 +160,11 @@ var causeNotes = map[Hole]map[HoleCause]holeNote{
 	HoleGap: {
 		CauseTailLost: {
 			"the run's root span ended but its run_finish record never arrived: a destination dropped the record tail, so the last steps' records are missing",
-			"check the log exporter's drops (its queue, batch and retry limits): the spans arrived, the records behind them did not",
+			"the spans arrived, the records behind them did not: " + queueFix,
+		},
+		CauseEventsLost: {
+			"the core emitted more event records than were stored (weft.run.events on the run's root span): a destination dropped them on the way, its queue full or an export failed",
+			queueFix,
 		},
 	},
 	HoleHidden: {
@@ -207,7 +223,7 @@ var holeNotes = map[Hole]holeNote{
 	},
 	HoleGap: {
 		"a record the run counts is missing: a destination dropped it on the way",
-		"check the exporter's drops",
+		queueFix,
 	},
 	HoleNotRecorded: {
 		"the record did not exist in the weft that wrote this run (v0.9.0 or earlier keeps no request, prompt or tools records, ADR 0028): nothing was lost, there was nothing to keep",
@@ -477,22 +493,18 @@ func (r RunRow) RequestsHoleCause() (Hole, HoleCause) {
 }
 
 // LostRecordsHole is the hole of a weft run whose spans were stored
-// and none of whose records was (no event, messages or request record):
-// not_recorded with CauseNoLogger — the app exported spans only. "" for
-// any other run: one with a record, one with no span (hasSpans false:
-// the reader's, from DB.RunSpans), a running one (its records may be in
-// flight), a settling one (RunRow.Settling: its root span was stored
-// moments ago and its records may still be on the way — decided once
-// InterruptedAfter has passed) and a derived run (RunRow.Derived: stock
-// spans are no weft app, its badge is derived's own,
-// docs/record-contract.md §9).
-//
-// The seam U5 widens (weft.run.events on the invoke_agent span, the
-// number of event records the core emitted): a root that says N > 0
-// were emitted while none was stored is every record lost on the way,
-// a gap ("every record was lost"), not an app without a logger. Until
-// the root carries that count the two read alike, and this answers the
-// commoner one.
+// and none of whose records was (no event, messages or request record).
+// When the root says the core emitted records (EventsEmitted or
+// MessagesEmitted > 0, U5) every one of them was lost on the way: HoleGap
+// with CauseEventsLost. Otherwise — the root says it emitted none, or
+// predates the count — the app exported spans only: not_recorded with
+// CauseNoLogger. "" for any other run: one with a record, one with no
+// span (hasSpans false: the reader's, from DB.RunSpans), a running one
+// (its records may be in flight), a settling one (RunRow.Settling: its
+// root span was stored moments ago and its records may still be on the
+// way — decided once InterruptedAfter has passed) and a derived run
+// (RunRow.Derived: stock spans are no weft app, its badge is derived's
+// own, docs/record-contract.md §9).
 func LostRecordsHole(r RunRow, hasSpans bool) (Hole, HoleCause) {
 	if r.Derived || !hasSpans || r.Status == StatusRunning || r.Settling {
 		return "", CauseDefault
@@ -500,32 +512,78 @@ func LostRecordsHole(r RunRow, hasSpans bool) (Hole, HoleCause) {
 	if r.EventCount > 0 || r.MessageCount > 0 || r.RequestCount > 0 {
 		return "", CauseDefault
 	}
+	if r.EventsEmitted > 0 || r.MessagesEmitted > 0 {
+		return HoleGap, CauseEventsLost
+	}
 	return HoleNotRecorded, CauseNoLogger
 }
 
-// TailLostHole is the hole of a weft run whose record tail a
-// destination dropped: its invoke_agent span is stored (RootEnded, an
-// Ok or Unset root — the run reads succeeded), some of its events are
-// (EventCount > 0) and its run_finish is not (FinishRecorded false) —
-// HoleGap with CauseTailLost. Without it such a run would read a clean
-// succeeded: the status comes from the root, and the event counter has
-// no hole below its high-water mark when the tail itself is what was
-// lost. "" for any other run: a failed one (its root's Error says how it
-// ended, and a failed run writes no run_finish), a derived one, a
-// settling one (RunRow.Settling: its tail may still be on the way — the
-// gap is raised once InterruptedAfter has passed), one whose run_finish
-// arrived, and one with no event at all (LostRecordsHole's).
-//
-// The seam U5 widens: once the invoke_agent span carries
-// weft.run.events (the number of event records the core emitted), the
-// gap can say how many were lost — "N of M" — and catch a lost tail
-// that run_finish outlived.
+// TailLostHole is the hole of a weft run whose event records a
+// destination dropped, read from its row alone. Where the root span
+// carries the count (EventsEmitted > 0, U5) the rule is the count's:
+// fewer events stored than emitted is HoleGap with CauseEventsLost
+// (EventsLostHole) — a lost tail, a lost middle, a failed run's lost
+// records alike. Where it does not (a weft before U5), the old reading:
+// its invoke_agent span is stored (RootEnded, an Ok or Unset root — the
+// run reads succeeded), some of its events are (EventCount > 0) and its
+// run_finish is not (FinishRecorded false) — HoleGap with CauseTailLost.
+// "" for any other run: a derived one, a settling one (RunRow.Settling:
+// its tail may still be on the way — the gap is raised once
+// InterruptedAfter has passed), one whose events all arrived, and one
+// with no record at all (LostRecordsHole's).
 func TailLostHole(r RunRow) (Hole, HoleCause) {
+	if r.EventsEmitted > 0 {
+		return EventsLostHole(r)
+	}
 	if r.Derived || !r.RootEnded || r.FinishRecorded || r.Settling ||
 		r.Status != StatusSucceeded || r.EventCount == 0 {
 		return "", CauseDefault
 	}
 	return HoleGap, CauseTailLost
+}
+
+// EventsLostHole is the counted gap (U5): a weft run whose root span is
+// stored and says it emitted EventsEmitted event records, of which the
+// store holds fewer — HoleGap with CauseEventsLost, worded by
+// EventsLostReason. "" while the run settles (its records may still
+// land), for a derived run, a run whose root is not stored or carries
+// no count, and a run whose events all arrived.
+func EventsLostHole(r RunRow) (Hole, HoleCause) {
+	if r.Derived || !r.RootEnded || r.Settling || r.EventsEmitted == 0 || r.EventCount >= r.EventsEmitted {
+		return "", CauseDefault
+	}
+	return HoleGap, CauseEventsLost
+}
+
+// EventsLostReason words a counted gap (EventsLostHole) with its
+// numbers: "N of M events were lost", and how many of them are the
+// run's tail — positions above the highest one stored, which no
+// counter-hole reader can see. below is the number of positions
+// missing below the highest stored one (EventPage.Gaps' length; a
+// reader that did not walk them passes -1 and the split is omitted).
+// "" when nothing is lost.
+func EventsLostReason(r RunRow, below int) string {
+	lost := r.EventsEmitted - r.EventCount
+	if lost <= 0 || r.EventsEmitted <= 0 {
+		return ""
+	}
+	const why = ": a destination dropped them before they were stored (its queue full, or an export failed)"
+	head := fmt.Sprintf("%d of %d events were lost", lost, r.EventsEmitted)
+	if r.EventCount == 0 {
+		return head + " — every one" + why
+	}
+	if below < 0 {
+		return head + why
+	}
+	tail := lost - int64(below)
+	switch {
+	case tail <= 0:
+		return fmt.Sprintf("%s — %d positions missing below the last stored one%s", head, below, why)
+	case below == 0:
+		return fmt.Sprintf("%s — the last %d events were lost%s", head, tail, why)
+	default:
+		return fmt.Sprintf("%s — %d below the last stored position, and the last %d events were lost%s", head, below, tail, why)
+	}
 }
 
 // StoredRecord is one request, prompt or tools record as a backend

@@ -28,6 +28,8 @@
       "delta_count": 0,
       "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
       "request_count": 0,
+      "events_emitted": 0,
+      "messages_emitted": 0,
       "chat": [
         {
           "step": 0,
@@ -50,6 +52,9 @@
       ],
       "holes": [
         "not_recorded"
+      ],
+      "hole_causes": [
+        "not_recorded:no_logger"
       ]
     }
   ]

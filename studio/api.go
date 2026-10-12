@@ -150,9 +150,15 @@ type runRow struct {
 	// run recorded before the field. CancelCause is a canceled run's
 	// cause (thread.interrupted, thread.closed, studio.cancel, deadline,
 	// or the caller's own), absent on a plain cancel.
-	StoppedBy   string     `json:"stopped_by,omitempty"`
-	CancelCause string     `json:"cancel_cause,omitempty"`
-	Usage       core.Usage `json:"usage"`
+	StoppedBy   string `json:"stopped_by,omitempty"`
+	CancelCause string `json:"cancel_cause,omitempty"`
+	// EventsEmitted / MessagesEmitted are what the core emitted (the
+	// root span's weft.run.events / weft.run.messages, U5): beside
+	// event_count / message_count, the denominator of a counted gap.
+	// Omitted when 0 (no root yet, a weft before U5, or nothing emitted).
+	EventsEmitted   int64      `json:"events_emitted,omitempty"`
+	MessagesEmitted int64      `json:"messages_emitted,omitempty"`
+	Usage           core.Usage `json:"usage"`
 	// The run's cost (plan A5, pricing.go): its own model calls
 	// (cost_usd: its usage minus its subagent children's, at its own
 	// model's rates) and its descendants' (delegated_cost_usd), two
@@ -199,32 +205,33 @@ type runRow struct {
 // interrupted and is shown, never hidden (A1).
 func row(rec obsdb.RunRow) runRow {
 	out := runRow{
-		ID:           rec.ID,
-		ParentRunID:  rec.ParentRunID,
-		ParentCallID: rec.ParentCallID,
-		TraceID:      rec.TraceID,
-		Agent:        rec.Agent,
-		Model:        core.ModelInfo{Provider: rec.Provider, Name: rec.Model},
-		ManifestHash: rec.ManifestHash,
-		WeftVersion:  rec.WeftVersion,
-		Service:      rec.Service,
-		SessionID:    rec.SessionID,
-		PublicID:     rec.PublicID,
-		Turn:         rec.Turn,
-		Playground:   rec.Playground,
-		ExperimentID: rec.ExperimentID,
-		ForkedFrom:   rec.ForkedFrom,
-		Meta:         rec.Meta,
-		Started:      rec.Started,
-		LastSeen:     rec.LastSeen,
-		Status:       string(rec.Status),
-		Settling:     rec.Settling,
-		Err:          rec.Err,
-		Steps:        rec.Steps,
-		Pending:      rec.Pending,
-		StopReason:   rec.StopReason,
-		StoppedBy:    rec.StoppedBy,
-		CancelCause:  rec.CancelCause,
+		ID:            rec.ID,
+		ParentRunID:   rec.ParentRunID,
+		ParentCallID:  rec.ParentCallID,
+		TraceID:       rec.TraceID,
+		Agent:         rec.Agent,
+		Model:         core.ModelInfo{Provider: rec.Provider, Name: rec.Model},
+		ManifestHash:  rec.ManifestHash,
+		WeftVersion:   rec.WeftVersion,
+		Service:       rec.Service,
+		SessionID:     rec.SessionID,
+		PublicID:      rec.PublicID,
+		Turn:          rec.Turn,
+		Playground:    rec.Playground,
+		ExperimentID:  rec.ExperimentID,
+		ForkedFrom:    rec.ForkedFrom,
+		Meta:          rec.Meta,
+		Started:       rec.Started,
+		LastSeen:      rec.LastSeen,
+		Status:        string(rec.Status),
+		Settling:      rec.Settling,
+		Err:           rec.Err,
+		Steps:         rec.Steps,
+		Pending:       rec.Pending,
+		StopReason:    rec.StopReason,
+		StoppedBy:     rec.StoppedBy,
+		CancelCause:   rec.CancelCause,
+		EventsEmitted: rec.EventsEmitted, MessagesEmitted: rec.MessagesEmitted,
 		Usage:        rec.Usage,
 		EventCount:   rec.EventCount,
 		MessageCount: rec.MessageCount,
@@ -892,6 +899,9 @@ func (s *Server) childRows(ctx context.Context, c *coster, kids []obsdb.RunRow) 
 // (EventCount 0) — the run document's holes and the export's events
 // block (its first) alike, in the table's order:
 //
+//   - gap, cause events_lost: the root span says the core emitted M
+//     events (weft.run.events, U5) — "M of M events were lost — every
+//     one", the counted words in place of the two guesses below;
 //   - gap: the row counts request records (the records arrived, the
 //     events beside them did not), or counts steps with no span to
 //     have counted them (a row whose events were dropped);
@@ -912,6 +922,12 @@ func lostEvents(rec obsdb.RunRow, hasSpans bool) []badgeFields {
 		return []badgeFields{derivedBadge()}
 	}
 	var out []badgeFields
+	if h, cause := obsdb.EventsLostHole(rec); h != "" {
+		// The root counts what was emitted (U5): every one was lost, in
+		// numbers — the counted words replace the guesses below.
+		b := badgeFor(h, cause)
+		return []badgeFields{{Badge: string(h), Reason: obsdb.EventsLostReason(rec, 0), Fix: b.Fix}}
+	}
 	if rec.RequestCount > 0 || (rec.Steps > 0 && !hasSpans) {
 		out = append(out, badgeFields{Badge: string(obsdb.HoleGap),
 			Reason: "the run counts steps or model calls, but none of its events was stored: a destination dropped them",
@@ -936,16 +952,24 @@ func lostEvents(rec obsdb.RunRow, hasSpans bool) []badgeFields {
 //   - interrupted: the derived status (obsdb.InterruptedAfter);
 //   - gap: no stored event (lostEvents) — counted steps or requests
 //     whose events were dropped;
-//   - gap, cause tail_lost: the root span ended (succeeded) with events
-//     stored and no run_finish — a destination dropped the record tail
-//     (obsdb.TailLostHole; raised once the run stopped settling, the
-//     U5 seam for "N of M");
+//   - gap, cause events_lost: the root span says the core emitted M
+//     events (weft.run.events, U5) and fewer are stored — "N of M events
+//     were lost", split into positions missing below the last stored
+//     one and the run's tail ("the last K events were lost"), the
+//     counter-hole words below folded in (obsdb.EventsLostHole through
+//     TailLostHole, obsdb.EventsLostReason; raised once the run stopped
+//     settling);
+//   - gap, cause tail_lost: a root without the count (a weft before U5)
+//     ended (succeeded) with events stored and no run_finish — a
+//     destination dropped the record tail (obsdb.TailLostHole's
+//     fallback; raised once the run stopped settling);
 //   - stripped: its events came through a content-off chain, or the
 //     core captured none (the run_start's weft.content: stripped or
 //     none);
 //   - gap: event positions missing below the run's high-water mark
-//     (EventPage.Gaps) once the run is no longer running — a running
-//     run's missing positions may still be in flight;
+//     (EventPage.Gaps) once the run is no longer running or settling —
+//     a live run's missing positions may still be in flight — and only
+//     where the root carries no count (the counted gap says them);
 //   - derived: a playground replay whose prefix no request record
 //     placed — its weft.replay.view metadata (ADR 0029 §2) is derived
 //     or unknown (replayViewHole); never a child run, which inherits
@@ -969,9 +993,12 @@ func (s *Server) runHoles(ctx context.Context, rec obsdb.RunRow) ([]stepHole, er
 			holes.add(obsdb.Hole(b.Badge), b.Reason, b.Fix)
 		}
 	}
-	if h, cause := obsdb.TailLostHole(rec); h != "" {
-		b := badgeFor(h, cause)
-		holes.add(h, b.Reason, b.Fix)
+	// The counted gap (U5, cause events_lost) is worded below, where the
+	// event walk gives the positions missing under the high-water mark.
+	tailHole, tailCause := obsdb.TailLostHole(rec)
+	if tailHole != "" && tailCause != obsdb.CauseEventsLost {
+		b := badgeFor(tailHole, tailCause)
+		holes.add(tailHole, b.Reason, b.Fix)
 	}
 	if h := rec.RequestsHole(); h != "" {
 		holes.note(h)
@@ -991,7 +1018,17 @@ func (s *Server) runHoles(ctx context.Context, rec obsdb.RunRow) ([]stepHole, er
 		if len(page.Events) > 0 && (page.Events[0].Content == "stripped" || page.Events[0].Content == "none") {
 			holes.note(obsdb.HoleStripped)
 		}
-		if len(page.Gaps) > 0 && rec.Status != obsdb.StatusRunning {
+		if tailCause == obsdb.CauseEventsLost {
+			// "N of M events were lost", split into the positions missing
+			// below the last stored one and the run's tail above it — one
+			// badge, the counter-hole words folded in.
+			below := len(page.Gaps)
+			if below >= obsdb.MaxGaps {
+				below = -1 // the walk was cut: the split is not known
+			}
+			b := badgeFor(tailHole, tailCause)
+			holes.add(tailHole, obsdb.EventsLostReason(rec, below), b.Fix)
+		} else if len(page.Gaps) > 0 && rec.Status != obsdb.StatusRunning && !rec.Settling {
 			n := strconv.Itoa(len(page.Gaps))
 			if len(page.Gaps) >= obsdb.MaxGaps {
 				n += "+"

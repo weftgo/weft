@@ -29,7 +29,7 @@
       "run_ids": [],
       "badge": "gap",
       "reason": "the trace's root span never arrived here (dropped, or recorded by a service that does not export to this database)",
-      "fix": "check the exporter's drops"
+      "fix": "raise the destination's queue: otel.QueueSize(n) on it (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names the destination, and weft doctor prints the drops Studio heard of (weft.records.dropped)"
     },
     {
       "trace_id": "2b000000000000000000000000000002",

@@ -341,6 +341,29 @@ describe("useRunEvents walk and tail", () => {
     await waitFor(() => expect(FakeEventSource.open()).toHaveLength(0))
   })
 
+  // U5's carried c3: a run that fails while its records still trail —
+  // running, then failed and settling (its Error root stored), then
+  // settled — is one drain: the tail opened while it ran stays open
+  // across the status change (no second stream, no early close) and
+  // closes only once it stops settling.
+  it("drains running → failed+settling → settled on one stream", async () => {
+    const fetchMock = vi.fn(async () => json(pageOf([0], null)))
+    vi.stubGlobal("fetch", withLiveGrant(fetchMock))
+    const { rerender } = renderHook(
+      ({ status, settling }: { status: string; settling: boolean }) =>
+        useRunEvents("r1", status, { live: true, settling }),
+      { initialProps: { status: "running", settling: false } }
+    )
+    await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1))
+    rerender({ status: "failed", settling: true })
+    await new Promise((r) => setTimeout(r, 50))
+    expect(FakeEventSource.instances).toHaveLength(1)
+    expect(FakeEventSource.open()).toHaveLength(1)
+    rerender({ status: "failed", settling: false })
+    await waitFor(() => expect(FakeEventSource.open()).toHaveLength(0))
+    expect(FakeEventSource.instances).toHaveLength(1)
+  })
+
   it("opens no tail for a terminal run that is not settling", async () => {
     vi.stubGlobal(
       "fetch",

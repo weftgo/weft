@@ -94,6 +94,7 @@ import {
   SAVE_TEST_TITLE,
 } from "../lib/saves"
 import { resetNotices } from "../lib/notify"
+import { NO_RUN_FINISH } from "../lib/stopped-by"
 import type { WeftDevtools } from "./element"
 import { buildRunBody as studioBody, emptyLab } from "../lib/experiment-body"
 import type { VariantFields } from "../lib/experiment-body"
@@ -2507,6 +2508,66 @@ describe("a settling run on both surfaces (U2-fix2)", () => {
     expect(isLive(fx.doc)).toBe(true)
     expect(isLive({ status: "succeeded" })).toBe(false)
   })
+
+  // U5's carried c2/c3: while it settles the story's foot reads "stream
+  // in progress…", never "ended without run_finish"; once it settles
+  // (the root's window passed, the poll answers settling absent) the
+  // note goes on both surfaces.
+  it("reads in progress while settling, and drops the note once settled", async () => {
+    const fx: Fixture = {
+      doc: { status: "succeeded", settling: true, stop_reason: "stop" },
+      events: events({ finish: false }),
+    }
+    const settled = {
+      ...runRow({ id: RUN, request_count: 1, status: "succeeded" }),
+      children: [],
+      holes: [],
+      stop_reason: "stop",
+    }
+    const fake = serve(fx, true)
+    stubBrowser()
+    vi.stubGlobal("scrollTo", vi.fn())
+    renderApp(`/runs/${RUN}?view=story`)
+    await waitFor(() =>
+      expect(document.querySelector("[data-settling]")).toBeTruthy()
+    )
+    await waitFor(() =>
+      expect(document.body.textContent).toContain("stream in progress…")
+    )
+    expect(document.body.textContent).not.toContain(NO_RUN_FINISH)
+    fake.on(`GET runs/${RUN}`, settled)
+    await waitFor(
+      () => expect(document.querySelector("[data-settling]")).toBeNull(),
+      { timeout: 5_000 }
+    )
+    cleanup()
+    document.body.innerHTML = ""
+
+    // The panel reads its list again once a live row's window would
+    // have passed (meta.interrupted_after_ms): shortened here.
+    const pfake = serve(fx, false).on("GET meta", {
+      ...META,
+      capabilities: ["ingest", "requests"],
+      interrupted_after_ms: 200,
+    })
+    const el = await mount(ATTRS)
+    await vi.waitFor(
+      () =>
+        expect($(el, '.weft-turn [data-weft-chip="settling"]')).toBeTruthy(),
+      { timeout: 5_000 }
+    )
+    pfake.on(`GET runs/${RUN}`, settled)
+    pfake.on("GET runs", {
+      total: 1,
+      runs: [runRow({ id: RUN, request_count: 1, status: "succeeded" })],
+      next_before: null,
+    })
+    await vi.waitFor(
+      () => expect($(el, '.weft-turn [data-weft-chip="settling"]')).toBeNull(),
+      { timeout: 8_000 }
+    )
+    el.remove()
+  }, 20_000)
 })
 
 // Titles, not ids (U6): one row, both surfaces, one helper

@@ -29,7 +29,7 @@
           {
             "hole": "gap",
             "reason": "the run counts this step, but no event of it was stored: a destination dropped its records",
-            "fix": "check the exporter's drops"
+            "fix": "raise the destination's queue: otel.QueueSize(n) on it (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names the destination, and weft doctor prints the drops Studio heard of (weft.records.dropped)"
           },
           {
             "hole": "not_recorded",
@@ -58,7 +58,7 @@
           {
             "hole": "gap",
             "reason": "the run counts this step, but no event of it was stored: a destination dropped its records",
-            "fix": "check the exporter's drops"
+            "fix": "raise the destination's queue: otel.QueueSize(n) on it (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names the destination, and weft doctor prints the drops Studio heard of (weft.records.dropped)"
           },
           {
             "hole": "not_recorded",
@@ -99,7 +99,7 @@
           {
             "hole": "gap",
             "reason": "the run counts this step, but no event of it was stored: a destination dropped its records",
-            "fix": "check the exporter's drops"
+            "fix": "raise the destination's queue: otel.QueueSize(n) on it (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names the destination, and weft doctor prints the drops Studio heard of (weft.records.dropped)"
           },
           {
             "hole": "not_recorded",
@@ -128,7 +128,7 @@
           {
             "hole": "gap",
             "reason": "the run counts this step, but no event of it was stored: a destination dropped its records",
-            "fix": "check the exporter's drops"
+            "fix": "raise the destination's queue: otel.QueueSize(n) on it (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names the destination, and weft doctor prints the drops Studio heard of (weft.records.dropped)"
           },
           {
             "hole": "not_recorded",

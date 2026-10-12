@@ -28,6 +28,8 @@
       "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
       "catalog_hash": "a2fe3b8644b1c9e739661805cf4d54f54f1e9b8432a2d97dc6ca1b439ce7520f",
       "request_count": 1,
+      "events_emitted": 6,
+      "messages_emitted": 3,
       "chat": [
         {
           "step": 0,

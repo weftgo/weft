@@ -231,6 +231,10 @@ func TestSpansRunTree(t *testing.T) {
 		"weft.run.steps":             "2",
 		"weft.run.stop_reason":       "stop",
 		"weft.run.stopped_by":        "final_answer",
+		// No LoggerProvider: nothing was emitted, so both counts are 0
+		// (record contract §3; a reader's no_logger).
+		"weft.run.events":   "0",
+		"weft.run.messages": "0",
 	}
 	got := run.attrsMap()
 	for k, v := range want {

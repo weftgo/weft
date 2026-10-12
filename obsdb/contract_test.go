@@ -137,9 +137,16 @@ type contractRun struct {
 	InstructionsHash string            `json:"instructions_hash,omitempty"`
 	CatalogHash      string            `json:"catalog_hash,omitempty"`
 	RequestCount     int64             `json:"request_count"`
-	Chat             []contractLLM     `json:"chat"`
-	Tools            []contractRPC     `json:"tools"`
-	Holes            []obsdb.Hole      `json:"holes"`
+	// EventsEmitted / MessagesEmitted are the root span's weft.run.events
+	// / weft.run.messages (§3, §6; U5): 0 where it carried none.
+	EventsEmitted   int64         `json:"events_emitted"`
+	MessagesEmitted int64         `json:"messages_emitted"`
+	Chat            []contractLLM `json:"chat"`
+	Tools           []contractRPC `json:"tools"`
+	Holes           []obsdb.Hole  `json:"holes"`
+	// HoleCauses names the cause of each run-level hole the row's rules
+	// decide (§7: LostRecordsHole, TailLostHole), "<hole>:<cause>".
+	HoleCauses []string `json:"hole_causes,omitempty"`
 }
 
 // contractLLM is one chat span: one model call.
@@ -312,8 +319,9 @@ func observeRuns(t *testing.T, db obsdb.DB) []contractRun {
 			StoppedBy: r.StoppedBy, CancelCause: r.CancelCause,
 			Usage: r.Usage, EventCount: r.EventCount, MessageCount: r.MessageCount, DeltaCount: r.DeltaCount,
 			InstructionsHash: r.InstructionsHash, CatalogHash: r.CatalogHash,
-			RequestCount: r.RequestCount,
-			Chat:         []contractLLM{}, Tools: []contractRPC{},
+			RequestCount:  r.RequestCount,
+			EventsEmitted: r.EventsEmitted, MessagesEmitted: r.MessagesEmitted,
+			Chat: []contractLLM{}, Tools: []contractRPC{},
 		}
 		if r.Finished != nil {
 			c.Finished = stamp(*r.Finished)
@@ -323,7 +331,7 @@ func observeRuns(t *testing.T, db obsdb.DB) []contractRun {
 			t.Fatal(err)
 		}
 		c.Chat, c.Tools = spanSteps(spans)
-		c.Holes = runHoles(t, db, r, len(spans) > 0)
+		c.Holes, c.HoleCauses = runHoles(t, db, r, len(spans) > 0)
 		out = append(out, c)
 	}
 	return out
@@ -412,15 +420,22 @@ func intAttr(m map[string]any, k string, def int64) int64 {
 // max_tokens from the stop reason, stripped and truncated from the
 // events' content marks, gap from the event counter's holes, compacted
 // from a run-scope view.
-func runHoles(t *testing.T, db obsdb.DB, r obsdb.RunRow, hasSpans bool) []obsdb.Hole {
+func runHoles(t *testing.T, db obsdb.DB, r obsdb.RunRow, hasSpans bool) ([]obsdb.Hole, []string) {
 	t.Helper()
 	ctx := context.Background()
 	set := map[obsdb.Hole]bool{}
-	if h, _ := obsdb.LostRecordsHole(r, hasSpans); h != "" {
-		set[h] = true // not_recorded, cause no_logger: spans stored, no record (§7)
+	var causes []string
+	if h, cause := obsdb.LostRecordsHole(r, hasSpans); h != "" {
+		// not_recorded, cause no_logger: spans stored, no record, nothing
+		// emitted; gap, cause events_lost: the root says some were (§7)
+		set[h] = true
+		causes = append(causes, string(h)+":"+string(cause))
 	}
-	if h, _ := obsdb.TailLostHole(r); h != "" {
-		set[h] = true // gap, cause tail_lost: an ended root, events, no run_finish (§7)
+	if h, cause := obsdb.TailLostHole(r); h != "" {
+		// gap, cause events_lost: fewer stored than the root's
+		// weft.run.events; tail_lost before the count (§7)
+		set[h] = true
+		causes = append(causes, string(h)+":"+string(cause))
 	}
 	if h := r.RequestsHole(); h != "" {
 		set[h] = true // derived for a derived run, in place of not_recorded (§9)
@@ -470,7 +485,7 @@ func runHoles(t *testing.T, db obsdb.DB, r obsdb.RunRow, hasSpans bool) []obsdb.
 			out = append(out, h)
 		}
 	}
-	return out
+	return out, slices.Compact(causes)
 }
 
 // equalJSON compares two values by their JSON encodings.
@@ -1498,7 +1513,7 @@ func genCases() []genCase {
 		},
 		{
 			name: "tracer_only",
-			desc: "the tool_calls run from an app that wired a tracer and no logger: spans only, no record at all — the stored invoke_agent span (status Ok) ends the run, so it reads succeeded, never interrupted; steps, usage and stop_reason from the span, weft_version and manifest_hash from the span's attributes; the not_recorded badge (cause no_logger)",
+			desc: "the tool_calls run from an app that wired a tracer and no logger: spans only, no record at all — the stored invoke_agent span (status Ok) ends the run, so it reads succeeded, never interrupted; steps, usage and stop_reason from the span, weft_version and manifest_hash from the span's attributes; the root says it emitted no record (weft.run.events 0): the not_recorded badge (cause no_logger), never a gap",
 			dest: content,
 			run:  tracerOnly(false),
 			edit: dropLogs,
@@ -1512,7 +1527,7 @@ func genCases() []genCase {
 		},
 		{
 			name: "tail_lost",
-			desc: "the tool_calls run whose record tail a destination dropped: every record after the tool_finish lost (step 1's records and run_finish), every span kept — the stored invoke_agent span (status Ok) ends the run, so it reads succeeded, not interrupted; steps, usage and stop_reason from the span; the gap badge (cause tail_lost): the record tail is visibly missing, not a clean success",
+			desc: "the tool_calls run whose record tail a destination dropped: every record after the tool_finish lost (step 1's records and run_finish), every span kept — the stored invoke_agent span (status Ok) ends the run, so it reads succeeded, not interrupted; steps, usage and stop_reason from the span; the root says it emitted 8 events (weft.run.events) and 4 are stored: the gap badge (cause events_lost: 4 of 8 events were lost — the last 4 events were lost): the record tail is visibly missing and counted, not a clean success",
 			dest: content,
 			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
 				agt := pipelineAgent(p, "support", wefttest.Script(

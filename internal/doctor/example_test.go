@@ -39,6 +39,7 @@ func ExampleRun() {
 	// ok token
 	// ok db
 	// ok content
+	// ok ingest
 	// warn runtimes
 	//   names WEFT_ENV
 	// ok panel

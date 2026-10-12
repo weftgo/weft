@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/weftgo/weft/obsdb"
 )
@@ -96,8 +97,8 @@ func TestUpgradeFrom0002(t *testing.T) {
 	if err := raw.QueryRowContext(ctx, `SELECT MAX(version) FROM obsdb_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 11 {
-		t.Errorf("migration max = %d, want 11 (through 0011 derived root_ended)", version)
+	if version != 12 {
+		t.Errorf("migration max = %d, want 12 (through 0012 the emitted counts)", version)
 	}
 	var agent, instructions, catalog string
 	var steps, requests int
@@ -297,8 +298,8 @@ func TestUpgradeFrom0006AddsCommandStore(t *testing.T) {
 	if err := db.(*DB).reads.QueryRowContext(ctx, `SELECT MAX(version) FROM obsdb_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 11 {
-		t.Errorf("migration max after the upgrade = %d, want 11 (through 0011 derived root_ended)", version)
+	if version != 12 {
+		t.Errorf("migration max after the upgrade = %d, want 12 (through 0012 the emitted counts)", version)
 	}
 }
 
@@ -544,6 +545,95 @@ func TestUpgradeTo0011DerivedRootEnded(t *testing.T) {
 		}
 		if run.RootEnded != want {
 			t.Errorf("%s after 0011: root_ended %v, want %v", id, run.RootEnded, want)
+		}
+	}
+}
+
+// A file at 0011 — a root span carrying weft.run.events and
+// weft.run.messages already stored, and a derived run — opens through
+// 0012: the backfill fills events_emitted and messages_emitted from the
+// weft root, leaves the derived run at 0, and a root written after the
+// upgrade fills them through the writer (docs/record-contract.md §6,
+// U5).
+func TestUpgradeTo0012BackfillsEmitted(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "at11.db")
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE obsdb_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	for v := 1; v <= 11; v++ {
+		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx, err := raw.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(string(body)); err != nil {
+			t.Fatalf("migration %d: %v", v, err)
+		}
+		if post := postMigrations[v]; post != nil {
+			if err := post(tx); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO obsdb_migrations (version, applied_at) VALUES (?, '2026-10-01T00:00:00Z')`, v); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, q := range []string{
+		`INSERT INTO runs (run_id, agent, started_ns, last_seen_ns, root_ended, meta) VALUES
+			('r_old', 'a', 100, 200, 1, '{"tenant":"acme"}')`,
+		`INSERT INTO runs (run_id, agent, started_ns, last_seen_ns, root_ended, derived, meta) VALUES
+			('otel-d', 'a', 100, 200, 1, 1, '{}')`,
+		`INSERT INTO spans (trace_id, span_id, parent_span_id, name, kind, start_ns, end_ns, status_code, status_message,
+			service, run_id, step, tool_seq, session_id, attrs, resource, events) VALUES
+			('t1', 's1', '', 'invoke_agent a', 1, 100, 200, 1, '', 'svc', 'r_old', -1, -1, '',
+			 '{"gen_ai.operation.name":"invoke_agent","weft.run.id":"r_old","weft.run.events":9,"weft.run.messages":4}', '{}', '[]')`,
+	} {
+		if _, err := raw.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("open a 0011 file: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+	at := time.Unix(0, 300).UTC()
+	if err := db.Write(ctx, obsdb.Batch{Spans: []obsdb.Span{{
+		TraceID: "t2", SpanID: "s2", Name: "invoke_agent a", Kind: 1, Start: at, End: at.Add(time.Second),
+		StatusCode: 1, Service: "svc",
+		Attrs: map[string]any{"gen_ai.operation.name": "invoke_agent", "weft.run.id": "r_new",
+			"weft.run.events": int64(12), "weft.run.messages": int64(5)},
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		id           string
+		events, msgs int64
+	}{{"r_old", 9, 4}, {"otel-d", 0, 0}, {"r_new", 12, 5}} {
+		run, err := db.Run(ctx, c.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run.EventsEmitted != c.events || run.MessagesEmitted != c.msgs {
+			t.Errorf("%s after 0012 = emitted %d / %d, want %d / %d", c.id, run.EventsEmitted, run.MessagesEmitted, c.events, c.msgs)
+		}
+		if _, ok := run.Meta["weft.run.events"]; ok {
+			t.Errorf("%s's meta carries weft.run.events: %v", c.id, run.Meta)
 		}
 	}
 }

@@ -240,8 +240,8 @@ func TestUpgradeFrom0007AddsCommandStore(t *testing.T) {
 	if err := db.(*DB).conn.QueryRow(ctx, `SELECT max(version) FROM obsdb_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 12 {
-		t.Errorf("migration max after the upgrade = %d, want 12 (through 0012 the root's version)", version)
+	if version != 13 {
+		t.Errorf("migration max after the upgrade = %d, want 13 (through 0013 the emitted counts)", version)
 	}
 }
 
@@ -539,5 +539,97 @@ func TestUpgradeTo0012RootVersionAndDerived(t *testing.T) {
 	}
 	if r.WeftVersion != "v0.15.0" {
 		t.Errorf("weft_version after 0012 = %q, want the root's resource v0.15.0, never the chat span's", r.WeftVersion)
+	}
+}
+
+// A database at 0012 — a root span carrying weft.run.events and
+// weft.run.messages already stored, through a view that read neither —
+// opens through 0013 on a live server: the backfill fills EventsEmitted
+// and MessagesEmitted, meta keeps neither key, and a root written after
+// the upgrade fills them through the restated view
+// (docs/record-contract.md §6, U5).
+func TestUpgradeTo0013BackfillsEmitted(t *testing.T) {
+	base := os.Getenv("WEFT_CLICKHOUSE_DSN")
+	if base == "" {
+		t.Skip("WEFT_CLICKHOUSE_DSN not set: the 0013 upgrade needs a clickhouse server (README has the one-line container recipe)")
+	}
+	ctx := context.Background()
+	u, err := url.Parse(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	suffix := make([]byte, 6)
+	if _, err := rand.Read(suffix); err != nil {
+		t.Fatal(err)
+	}
+	name := "weft_up_" + hex.EncodeToString(suffix)
+	admin := rawConn(t, base)
+	if err := admin.Exec(ctx, fmt.Sprintf("CREATE DATABASE `%s`", name)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = admin.Exec(context.Background(), fmt.Sprintf("DROP DATABASE IF EXISTS `%s`", name))
+		_ = admin.Close()
+	})
+	u.Path = "/" + name
+	dsn := u.String()
+
+	conn := rawConn(t, dsn)
+	if err := conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS obsdb_migrations (
+		version UInt32, name String, applied_at DateTime DEFAULT now()
+	) ENGINE = MergeTree ORDER BY version`); err != nil {
+		t.Fatal(err)
+	}
+	for v := 1; v <= 12; v++ {
+		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, stmt := range splitStatements(string(body)) {
+			if err := conn.Exec(ctx, stmt); err != nil {
+				t.Fatalf("migration %d: %v", v, err)
+			}
+		}
+		if err := conn.Exec(ctx, `INSERT INTO obsdb_migrations (version, name) VALUES (?, ?)`, uint32(v), migrations[v]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	at := time.Now().UTC().Add(-time.Hour)
+	root := func(id string, n byte, events, messages int64) obsdb.Span {
+		return obsdb.Span{
+			TraceID: "0102030405060708090a0b0c0d0e0f13", SpanID: "0a0b0c0d0e0f040" + string(n), Name: "invoke_agent a", Kind: 1,
+			Start: at, End: at.Add(time.Second), StatusCode: 1, Service: "svc",
+			Attrs: map[string]any{"gen_ai.operation.name": "invoke_agent", "weft.run.id": id,
+				"weft.run.events": events, "weft.run.messages": messages, "tenant": "acme"},
+			Resource: map[string]any{"service.name": "svc"},
+		}
+	}
+	if err := (&DB{conn: conn}).Write(ctx, obsdb.Batch{Spans: []obsdb.Span{root("r_old", '1', 9, 4)}}); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.Close()
+
+	db, err := Open(dsn)
+	if err != nil {
+		t.Fatalf("open a 0012 database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := db.Write(ctx, obsdb.Batch{Spans: []obsdb.Span{root("r_new", '2', 12, 5)}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		id           string
+		events, msgs int64
+	}{{"r_old", 9, 4}, {"r_new", 12, 5}} {
+		r, err := db.Run(ctx, c.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.EventsEmitted != c.events || r.MessagesEmitted != c.msgs {
+			t.Errorf("%s after 0013 = emitted %d events / %d messages, want %d / %d", c.id, r.EventsEmitted, r.MessagesEmitted, c.events, c.msgs)
+		}
+		if len(r.Meta) != 1 || r.Meta["tenant"] != "acme" {
+			t.Errorf("%s's meta after 0013 = %v, want only the caller's {tenant: acme}", c.id, r.Meta)
+		}
 	}
 }

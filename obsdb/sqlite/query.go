@@ -26,7 +26,7 @@ const runColumns = `run_id, parent_run_id, parent_call_id, trace_id, agent, prov
 	input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens,
 	event_count, delta_count, message_count,
 	instructions_hash, catalog_hash, request_count, derived, root_ended,
-	stopped_by, cancel_cause`
+	stopped_by, cancel_cause, events_emitted, messages_emitted`
 
 // promptPreviewColumn is the run row's prompt_preview (plan A7): the
 // prompt migration 0004's run_search holds, cut to
@@ -229,7 +229,7 @@ func (d *DB) runRowsQuery(ctx context.Context, where string, args []any) ([]runR
 			&r.InTok, &r.OutTok, &r.CachedTok, &r.CacheWrite, &r.ReasonTok,
 			&r.EventCount, &r.DeltaCount, &r.MessageCount,
 			&r.InstructionsHash, &r.CatalogHash, &r.RequestCount, &r.Derived, &r.RootEnded,
-			&r.StoppedBy, &r.CancelCause, &r.PromptPreview); err != nil {
+			&r.StoppedBy, &r.CancelCause, &r.EventsEmitted, &r.MessagesEmitted, &r.PromptPreview); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -255,6 +255,7 @@ type runRowScan struct {
 	RequestCount                                      int64
 	Derived, RootEnded                                bool
 	StoppedBy, CancelCause                            string
+	EventsEmitted, MessagesEmitted                    int64
 	PromptPreview                                     string
 }
 
@@ -278,6 +279,7 @@ func scanRunRow(r runRowScan, now time.Time) (obsdb.RunRow, error) {
 		PromptPreview: r.PromptPreview, Derived: r.Derived, RootEnded: r.RootEnded,
 		FinishRecorded: r.FinishedOK,
 		StoppedBy:      r.StoppedBy, CancelCause: r.CancelCause,
+		EventsEmitted: r.EventsEmitted, MessagesEmitted: r.MessagesEmitted,
 	}
 	if r.Finished.Valid {
 		f := time.Unix(0, r.Finished.Int64).UTC()

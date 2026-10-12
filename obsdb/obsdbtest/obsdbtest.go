@@ -32,6 +32,7 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("RootSpanEndsTheRun", rootSpanEndsTheRun(open))
 	t.Run("RootBeforeRecords", rootBeforeRecords(open))
 	t.Run("StoppedBy", stoppedBy(open))
+	t.Run("EmittedCounts", emittedCounts(open))
 	t.Run("Sessions", sessions(open))
 	t.Run("Children", children(open))
 	t.Run("Paging", paging(open))
@@ -632,6 +633,93 @@ func rootBeforeRecords(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			}
 			if !page.Done {
 				t.Errorf("%s: a root-ended run past the window is not Done: a poll waiting for Done never stops", c.id)
+			}
+		}
+	}
+}
+
+// emittedCounts pins docs/record-contract.md §6's events_emitted /
+// messages_emitted rows and §7's counted gap on every backend (U5): the
+// root's weft.run.events and weft.run.messages fill the row; past the
+// settling window fewer events stored than emitted is gap/events_lost
+// with its numbers — a lost tail ("the last K events were lost") and a
+// lost middle alike, on a failed run too — a root that emitted records
+// none of which was stored is gap/events_lost ("every one"), and one
+// that emitted none is not_recorded/no_logger. A run whose events all
+// arrived has no hole; a settling one none yet.
+func emittedCounts(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		old := time.Now().UTC().Add(-2 * obsdb.InterruptedAfter)
+		root := func(id string, n byte, status int, end time.Time, events, msgs int64) obsdb.Span {
+			s := invokeSpan(id, status, map[string]any{"weft.run.events": events, "weft.run.messages": msgs})
+			s.TraceID, s.SpanID = "b"+string(n)+s.TraceID[2:], "710000000000000"+string(n)
+			s.Start, s.End = end.Add(-time.Second), end
+			return s
+		}
+		ev := func(id string, pos int64, typ string) obsdb.Record {
+			r := record(id, "event", typ, pos, `{"type":"`+typ+`"}`, nil)
+			r.Time = old.Add(-time.Second)
+			return r
+		}
+		batch := obsdb.Batch{
+			Spans: []obsdb.Span{
+				root("e_tail", '1', 1, old, 6, 3),
+				root("e_mid", '2', 2, old, 5, 0),
+				root("e_all", '3', 1, old, 4, 2),
+				root("e_none", '4', 1, old, 0, 0),
+				root("e_whole", '5', 1, old, 3, 1),
+				root("e_settle", '6', 1, time.Now().UTC(), 7, 0),
+			},
+			Records: []obsdb.Record{
+				ev("e_tail", 0, "run_start"), ev("e_tail", 1, "step_start"), ev("e_tail", 2, "step_finish"),
+				ev("e_mid", 0, "run_start"), ev("e_mid", 3, "step_finish"),
+				ev("e_whole", 0, "run_start"), ev("e_whole", 1, "step_start"), ev("e_whole", 2, "run_finish"),
+			},
+		}
+		if err := db.Write(ctx(), batch); err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range []struct {
+			id           string
+			events, msgs int64
+			hole         obsdb.Hole
+			cause        obsdb.HoleCause
+			reason       string // EventsLostReason's prefix, with the gaps below
+		}{
+			{"e_tail", 6, 3, obsdb.HoleGap, obsdb.CauseEventsLost, "3 of 6 events were lost — the last 3 events were lost"},
+			{"e_mid", 5, 0, obsdb.HoleGap, obsdb.CauseEventsLost, "3 of 5 events were lost — 2 below the last stored position, and the last 1 events were lost"},
+			{"e_all", 4, 2, obsdb.HoleGap, obsdb.CauseEventsLost, "4 of 4 events were lost — every one"},
+			{"e_none", 0, 0, obsdb.HoleNotRecorded, obsdb.CauseNoLogger, ""},
+			{"e_whole", 3, 1, "", obsdb.CauseDefault, ""},
+			{"e_settle", 7, 0, "", obsdb.CauseDefault, ""},
+		} {
+			r, err := db.Run(ctx(), c.id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.EventsEmitted != c.events || r.MessagesEmitted != c.msgs {
+				t.Errorf("%s emitted = %d/%d, want %d/%d", c.id, r.EventsEmitted, r.MessagesEmitted, c.events, c.msgs)
+			}
+			if _, ok := r.Meta["weft.run.events"]; ok {
+				t.Errorf("%s meta carries weft.run.events: %v", c.id, r.Meta)
+			}
+			h, cause := obsdb.TailLostHole(r.RunRow)
+			if h == "" {
+				h, cause = obsdb.LostRecordsHole(r.RunRow, true)
+			}
+			if h != c.hole || cause != c.cause {
+				t.Errorf("%s hole = %q/%q, want %q/%q", c.id, h, cause, c.hole, c.cause)
+			}
+			if c.reason == "" {
+				continue
+			}
+			page, err := db.Events(ctx(), c.id, -1, 100)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := obsdb.EventsLostReason(r.RunRow, len(page.Gaps)); !strings.HasPrefix(got, c.reason) {
+				t.Errorf("%s reason = %q, want prefix %q", c.id, got, c.reason)
 			}
 		}
 	}

@@ -40,6 +40,7 @@ var Lines = []Line{
 	{"token", []string{"status", "auth_required"}},
 	{"db", []string{"db.kind", "db.path", "db.size"}},
 	{"content", []string{"content.ingest", "content.latest.run_id", "content.latest.mark", "content.latest.note", "content.latest.fix", "content.error"}},
+	{"ingest", []string{"ingest.dropped"}},
 	{"runtimes", []string{"runtimes", "capabilities", "env:WEFT_ENV", "env:WEFT_STUDIO_URL"}},
 	{"panel", []string{"panel_version", "studio_version"}},
 	{"weft.json", []string{"has_manifest", "manifest_check.source", "manifest_check.agents", "manifest_check.checked", "manifest_check.stale", "manifest_check.error"}},
@@ -64,6 +65,15 @@ type meta struct {
 			Fix   string `json:"fix"`
 		} `json:"latest"`
 	} `json:"content"`
+	// Ingest is the ingest health (U5): absent from a Studio older
+	// than it.
+	Ingest *struct {
+		Dropped []struct {
+			Service   string    `json:"service"`
+			Records   int64     `json:"records"`
+			LastHeard time.Time `json:"last_heard"`
+		} `json:"dropped"`
+	} `json:"ingest"`
 	Runtimes      int `json:"runtimes"`
 	ManifestCheck *struct {
 		Source  string   `json:"source"` // file | runtime (registered, no weft.json)
@@ -149,6 +159,7 @@ func Run(ctx context.Context, w io.Writer, url, token string, getenv func(string
 	}
 	p.db(m.DB)
 	p.content(m)
+	p.ingest(m)
 	p.runtimes(m, url, getenv)
 	p.panel(m)
 	p.manifest(m)
@@ -234,6 +245,29 @@ func (p *printer) content(m meta) {
 	p.line(status, "content", "%s; latest run %s: %s — %s", policy, l.RunID, l.Mark, l.Note)
 	if l.Fix != "" {
 		p.sub("fix: %s", l.Fix)
+	}
+}
+
+// ingest prints the ingest health: the services whose heartbeats said
+// their destination lost records on the way (weft.records.dropped). A
+// warning, not a failure: the runs say which of theirs are missing (the
+// gap badge, "N of M events were lost").
+func (p *printer) ingest(m meta) {
+	switch {
+	case m.Ingest == nil:
+		p.line(ok, "ingest", "this studio predates ingest health (no ingest.dropped)")
+	case len(m.Ingest.Dropped) == 0:
+		p.line(ok, "ingest", "no app reported lost records (weft.records.dropped on its heartbeats)")
+	default:
+		p.line(warn, "ingest", "%d service(s) reported records lost on the way here", len(m.Ingest.Dropped))
+		for _, d := range m.Ingest.Dropped {
+			svc := d.Service
+			if svc == "" {
+				svc = "(no service.name)"
+			}
+			p.sub("%s: %d records dropped by its destination (last heard %s)", svc, d.Records, d.LastHeard.Format(time.RFC3339))
+		}
+		p.sub("fix: raise the destination's queue with otel.QueueSize(n), or use otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names it")
 	}
 }
 

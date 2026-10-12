@@ -431,11 +431,16 @@ type runUpdate struct {
 	// stoppedBy and cancelCause (contract §6, U3.2): what ended the run,
 	// from the invoke_agent span or run_finish — the larger when they
 	// differ, ClickHouse's max, so both backends agree.
-	stoppedBy    string
-	cancelCause  string
-	eventCount   int64
-	deltaCount   int64
-	messageCount int64
+	stoppedBy   string
+	cancelCause string
+	// eventsEmitted / messagesEmitted (contract §6, U5): the root
+	// span's weft.run.events / weft.run.messages, merged by max like
+	// ClickHouse's SimpleAggregateFunction(max).
+	eventsEmitted   int64
+	messagesEmitted int64
+	eventCount      int64
+	deltaCount      int64
+	messageCount    int64
 	// ADR 0028 §10: instructions_hash (run_start or the invoke_agent
 	// span), catalog_hash (request index 0) and request_count (the
 	// request high-water mark).
@@ -568,6 +573,12 @@ func (u *runUpdate) applySpan(s obsdb.Span, w obsdb.Weft) {
 	}
 	u.stoppedBy = maxString(u.stoppedBy, attrString(s.Attrs, "weft.run.stopped_by"))
 	u.cancelCause = maxString(u.cancelCause, attrString(s.Attrs, "weft.cancel.cause"))
+	if n, ok := attrInt64(s.Attrs, "weft.run.events"); ok {
+		u.eventsEmitted = max(u.eventsEmitted, n)
+	}
+	if n, ok := attrInt64(s.Attrs, "weft.run.messages"); ok {
+		u.messagesEmitted = max(u.messagesEmitted, n)
+	}
 	if s.StatusCode == 2 { // error
 		u.failed = true
 		if s.StatusMessage != "" {
@@ -815,8 +826,8 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 			 steps, pending, stop_reason, stopped_by, cancel_cause,
 			 input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens,
 			 event_count, delta_count, message_count,
-			 instructions_hash, catalog_hash, request_count)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			 instructions_hash, catalog_hash, request_count, events_emitted, messages_emitted)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			runID, u.parentRunID, u.parentCallID, u.traceID, u.agent, u.provider, u.model,
 			u.manifestHash, u.weftVersion, u.service, u.sessionID, u.publicID, u.turn,
 			boolInt(u.playground), u.experimentID, u.forkedFrom, meta,
@@ -825,7 +836,7 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 			u.usage.InputTokens, u.usage.OutputTokens, u.usage.CachedInputTokens,
 			u.usage.CacheWriteTokens, u.usage.ReasoningTokens,
 			u.eventCount, u.deltaCount, u.messageCount,
-			u.instructionsHash, u.catalogHash, u.requestCount)
+			u.instructionsHash, u.catalogHash, u.requestCount, u.eventsEmitted, u.messagesEmitted)
 		return err
 	case err != nil:
 		return err
@@ -872,7 +883,8 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 		event_count = event_count + ?, delta_count = MAX(delta_count, ?), message_count = message_count + ?,
 		instructions_hash = MAX(instructions_hash, ?),
 		catalog_hash = CASE WHEN catalog_hash = '' THEN ? ELSE catalog_hash END,
-		request_count = MAX(request_count, ?)
+		request_count = MAX(request_count, ?),
+		events_emitted = MAX(events_emitted, ?), messages_emitted = MAX(messages_emitted, ?)
 		WHERE run_id = ?`,
 		coalesce(ex.parentRun, u.parentRunID), coalesce(ex.parentC, u.parentCallID),
 		coalesce(ex.traceID, u.traceID), coalesce(ex.agent, u.agent),
@@ -889,6 +901,7 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 		usage.CacheWriteTokens, usage.ReasoningTokens,
 		u.eventCount, u.deltaCount, u.messageCount,
 		u.instructionsHash, u.catalogHash, u.requestCount,
+		u.eventsEmitted, u.messagesEmitted,
 		runID)
 	return err
 }

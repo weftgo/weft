@@ -276,7 +276,9 @@ func registerReadAPI(mux *http.ServeMux, s *Server) {
 func registerIngest(mux *http.ServeMux, s *Server) {
 	ok := s.ingestAuthorized
 	mux.HandleFunc("POST /v1/traces", ingest.Traces(s.db, s.live, ok))
-	mux.HandleFunc("POST /v1/logs", ingest.Logs(s.db, s.live, ok))
+	// The logs receiver publishes through healthHub: heartbeats' drop
+	// counts feed api/meta's ingest health (ingesthealth.go).
+	mux.HandleFunc("POST /v1/logs", ingest.Logs(s.db, healthHub{Hub: s.live, h: &s.ingestHealth}, ok))
 }
 
 // RuntimeServer is the runtime link server's in-process side

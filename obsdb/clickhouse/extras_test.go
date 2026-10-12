@@ -157,8 +157,8 @@ func TestReopenIsANoop(t *testing.T) {
 	// pins as the highest version. (Step 8b review fix 1: this read still
 	// wanted 1 after 0002 landed, failing only on a real server, where
 	// the gated suite first ran.)
-	if versions != 12 {
-		t.Errorf("obsdb_migrations rows after reopen = %d, want 12 (0001 through 0012)", versions)
+	if versions != 13 {
+		t.Errorf("obsdb_migrations rows after reopen = %d, want 13 (0001 through 0013)", versions)
 	}
 	// 0007's skip index is on weft_runs (M2: an experiment's run list).
 	var idx uint64

@@ -297,3 +297,32 @@ func Insecure() DestOption {
 func DatadogEndpoint(url string) DestOption {
 	return destOptionFunc(func(d *dest) { d.url = url })
 }
+
+// QueueSize sets how many records (and, separately, spans) the
+// destination holds between emission and export — its batch queue
+// (default 16,384 for Studio, the SDK's 2,048 for the rest; n <= 0
+// keeps the default). A full queue never blocks the app: it refuses the
+// record, deltas first (at half full), then ordinary records (at seven
+// eighths), a run's run_start and run_finish last. Every refusal is
+// counted: one WARN per destination ("weft/otel: destination queue
+// full"), the count on the heartbeat (weft.records.dropped, which
+// Studio's ingest health shows), and the run's gap badge, which counts
+// the events lost against weft.run.events. Local has no queue (it writes
+// synchronously) and ignores it. The OTEL_BLRP_MAX_QUEUE_SIZE and
+// OTEL_BSP_MAX_QUEUE_SIZE variables do not apply to weft's
+// destinations.
+func QueueSize(n int) DestOption {
+	return destOptionFunc(func(d *dest) { d.queueSize = n })
+}
+
+// Blocking makes a full queue wait for room instead of refusing a
+// durable record — up to 5 s per record and never past the emitting
+// run's context; deltas are still shed. Development only, like
+// RawBodies: it takes effect only when WEFT_ENV is "dev" when the
+// pipeline starts; otherwise (and always under NoEnv) Start logs one
+// WARN ("otel: Blocking ignored: WEFT_ENV is not dev") and the
+// destination refuses as without it — observability never slows a
+// production app. Local ignores it (no queue).
+func Blocking() DestOption {
+	return destOptionFunc(func(d *dest) { d.blocking = true })
+}

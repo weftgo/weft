@@ -562,3 +562,23 @@ alters a step, a retry or a tool call. `TestStoppedByEveryExit` pins
 every value on the span and in `run_finish`;
 `TestInterruptCancelsWithTypedCause` and `TestCancelRuntimeStartedRun`
 pin the thread and runtime causes.
+
+## Amendment (2026-10-12 — what the run emitted; UX plan U5)
+
+A reader could tell a lost record below the run's high-water mark from
+the counter's holes, but not a lost tail (the missing positions are
+above the highest stored one), nor an app with no logger from one whose
+every record was lost on the way. The loop already numbers every record
+it hands the LoggerProvider; it now says how many at the run's end —
+counts, never content:
+
+| where | key | value |
+|---|---|---|
+| `invoke_agent` span | `weft.run.events` | at end, always: the durable `event` records emitted (`weft.event.pos`'s final value). A record is numbered only after the logger's `Enabled` said yes, so a run with no LoggerProvider — or one whose provider enables nothing — reports 0 |
+| `invoke_agent` span | `weft.run.messages` | at end, always: the growth `messages` records emitted (compaction views excluded); 0 when content capture was off or no logger was wired |
+
+Readers compare them with what they stored (`docs/record-contract.md`
+§6, §7): fewer events is a `gap` that says "N of M events were lost";
+emitted 0 with nothing stored is `not_recorded`/`no_logger`. The core
+imports nothing new; the two counters are the recorder's own.
+`TestRunSpanCountsEmittedRecords` pins both, with and without a logger.

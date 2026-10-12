@@ -39,11 +39,15 @@
   {
     "hole": "gap",
     "reason": "a record the run counts is missing: a destination dropped it on the way",
-    "fix": "check the exporter's drops",
+    "fix": "raise the destination's queue: otel.QueueSize(n) on it (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names the destination, and weft doctor prints the drops Studio heard of (weft.records.dropped)",
     "causes": {
+      "events_lost": {
+        "reason": "the core emitted more event records than were stored (weft.run.events on the run's root span): a destination dropped them on the way, its queue full or an export failed",
+        "fix": "raise the destination's queue: otel.QueueSize(n) on it (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names the destination, and weft doctor prints the drops Studio heard of (weft.records.dropped)"
+      },
       "tail_lost": {
         "reason": "the run's root span ended but its run_finish record never arrived: a destination dropped the record tail, so the last steps' records are missing",
-        "fix": "check the log exporter's drops (its queue, batch and retry limits): the spans arrived, the records behind them did not"
+        "fix": "the spans arrived, the records behind them did not: raise the destination's queue: otel.QueueSize(n) on it (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names the destination, and weft doctor prints the drops Studio heard of (weft.records.dropped)"
       }
     }
   },

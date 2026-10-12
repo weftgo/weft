@@ -5982,6 +5982,7 @@ export function turnHoles(t: TurnView, row?: RunRow): HoleMark[] {
       status: row?.status ?? t.doc?.status,
       stop_reason: row?.stop_reason ?? t.doc?.stop_reason,
       gaps: t.gaps,
+      settling: row?.settling ?? t.doc?.settling,
     })
   )
 }

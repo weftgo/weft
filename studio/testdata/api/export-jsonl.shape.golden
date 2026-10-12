@@ -142,6 +142,7 @@
 <run>.run.children[].delta_count=float64
 <run>.run.children[].err=string
 <run>.run.children[].event_count=float64
+<run>.run.children[].events_emitted=float64
 <run>.run.children[].experiment_id=string
 <run>.run.children[].finished=string
 <run>.run.children[].forked_from=string
@@ -150,6 +151,7 @@
 <run>.run.children[].last_seen=string
 <run>.run.children[].manifest_hash=string
 <run>.run.children[].message_count=float64
+<run>.run.children[].messages_emitted=float64
 <run>.run.children[].meta{}
 <run>.run.children[].model.name=string
 <run>.run.children[].model.provider=string
@@ -185,6 +187,7 @@
 <run>.run.delta_count=float64
 <run>.run.err=string
 <run>.run.event_count=float64
+<run>.run.events_emitted=float64
 <run>.run.experiment_id=string
 <run>.run.finished=string
 <run>.run.forked_from=string
@@ -194,6 +197,7 @@
 <run>.run.last_seen=string
 <run>.run.manifest_hash=string
 <run>.run.message_count=float64
+<run>.run.messages_emitted=float64
 <run>.run.meta{}
 <run>.run.model.name=string
 <run>.run.model.provider=string

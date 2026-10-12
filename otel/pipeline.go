@@ -229,6 +229,16 @@ func Start(ctx context.Context, opts ...Option) (*Pipeline, error) {
 	if rawRefused {
 		cfg.rawBodies = false
 	}
+	// Blocking is the same kind of switch (U5): a destination that waits
+	// for queue room slows the app, which only development may ask for.
+	blockingRefused := false
+	if cfg.noEnv || envGetenv("WEFT_ENV") != "dev" {
+		for i := range dests {
+			if dests[i].blocking {
+				dests[i].blocking, blockingRefused = false, true
+			}
+		}
+	}
 	p, failed := build(ctx, cfg, dests)
 	if failed != nil {
 		return nil, failed
@@ -243,6 +253,10 @@ func Start(ctx context.Context, opts ...Option) (*Pipeline, error) {
 	if rawRefused {
 		slog.Warn("otel: RawBodies ignored: WEFT_ENV is not dev",
 			"hint", "set WEFT_ENV=dev (and drop otel.NoEnv) to record provider wire bodies")
+	}
+	if blockingRefused {
+		slog.Warn("otel: Blocking ignored: WEFT_ENV is not dev",
+			"hint", "a full queue refuses records (counted, warned); set WEFT_ENV=dev (and drop otel.NoEnv) to wait instead, or raise otel.QueueSize")
 	}
 	if !cfg.noGlobal {
 		registerGlobals(p)
@@ -579,17 +593,25 @@ func buildDest(ctx context.Context, d dest, cfg config) (_ *destRuntime, err err
 	// The batch chains (every kind but Local). The exporters are
 	// wrapped to count what a failed export lost — the destination's
 	// own drops (S2.4).
+	//
+	// Each batch chain admits its records ahead of the SDK's queue
+	// (admission.go), the SDK queue sized to match, so a full queue is
+	// weft's counted refusal — never the SDK's silent drop.
+	queue := d.queueSizeOf()
 	if spanExp != nil {
-		counted := countingSpanExporter{SpanExporter: spanExp, drops: drops}
+		adm := newAdmission(queue, d.blocking)
+		var exp sdktrace.SpanExporter = releasingSpanExporter{
+			SpanExporter: countingSpanExporter{SpanExporter: spanExp, drops: drops}, adm: adm}
+		spanOpts := []sdktrace.BatchSpanProcessorOption{sdktrace.WithMaxQueueSize(queue)}
 		if spanDelay > 0 {
-			rt.spanProc = sdktrace.NewBatchSpanProcessor(counted, sdktrace.WithBatchTimeout(spanDelay))
-		} else {
-			rt.spanProc = sdktrace.NewBatchSpanProcessor(counted)
+			spanOpts = append(spanOpts, sdktrace.WithBatchTimeout(spanDelay))
 		}
+		rt.spanProc = admittedSpanProc{SpanProcessor: sdktrace.NewBatchSpanProcessor(exp, spanOpts...),
+			adm: adm, drops: drops}
 	}
 	if logExp != nil {
 		var exp sdklog.Exporter = countingLogExporter{Exporter: logExp, drops: drops}
-		var batch []sdklog.BatchProcessorOption
+		batch := []sdklog.BatchProcessorOption{sdklog.WithMaxQueueSize(queue)}
 		if logDelay > 0 {
 			batch = append(batch, sdklog.WithExportInterval(logDelay))
 		}
@@ -604,10 +626,11 @@ func buildDest(ctx context.Context, d dest, cfg config) (_ *destRuntime, err err
 			exp = byteSplitLogExporter{Exporter: exp, limit: rawExportBytes}
 		}
 		rt.logExp = exp
-		inner := sdklog.NewBatchProcessor(exp, batch...)
+		adm := newAdmission(queue, d.blocking)
+		inner := sdklog.NewBatchProcessor(releasingLogExporter{Exporter: exp, adm: adm}, batch...)
 		rt.logProc = &destProc{name: d.name, inner: inner,
 			content: content, contentC: contentCfg, noDeltas: d.noDeltas, drops: drops,
-			raw: cfg.rawBodies && d.rawOn()}
+			raw: cfg.rawBodies && d.rawOn(), adm: adm}
 	}
 	if rt.spanProc == nil && rt.logProc == nil {
 		return nil, errors.New("neither signal enabled")

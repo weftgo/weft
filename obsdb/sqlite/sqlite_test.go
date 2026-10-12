@@ -1323,8 +1323,8 @@ func TestRequestRecordSchema(t *testing.T) {
 	if err := raw.QueryRow(`SELECT MAX(version) FROM obsdb_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 11 {
-		t.Errorf("obsdb_migrations max = %d, want 11 (0003 request record, 0004 search, 0005 experiment command, 0006 the experiment index, 0007 the command store, 0008 the derived flag, 0009 root_ended, 0010 stopped_by, then 0011 derived root_ended)", version)
+	if version != 12 {
+		t.Errorf("obsdb_migrations max = %d, want 12 (0003 request record, 0004 search, 0005 experiment command, 0006 the experiment index, 0007 the command store, 0008 the derived flag, 0009 root_ended, 0010 stopped_by, 0011 derived root_ended, then 0012 the emitted counts)", version)
 	}
 	var instructions, catalog string
 	var requests int

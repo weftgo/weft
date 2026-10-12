@@ -162,6 +162,20 @@ describe("statusHoles", () => {
       { hole: "interrupted" },
     ])
   })
+  // A settling run (its root stored, its records trailing): the walk's
+  // missing positions may still land — no gap until it settles (U5's
+  // carried c1, the server's runHoles rule).
+  it("no walk gap while the run settles", () => {
+    expect(
+      statusHoles({ status: "succeeded", settling: true, gaps: [2] })
+    ).toEqual([])
+    expect(
+      statusHoles({ status: "failed", settling: true, gaps: [2] })
+    ).toEqual([])
+    expect(
+      statusHoles({ status: "succeeded", settling: false, gaps: [2] })
+    ).toHaveLength(1)
+  })
 })
 
 // The app turn's gate and words (plan F4.3) — the run page's and the

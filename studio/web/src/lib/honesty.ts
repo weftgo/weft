@@ -67,7 +67,7 @@ export const HOLES: Record<Hole, HoleNote> = {
     label: "gap",
     reason:
       "a record the run counts is missing: a destination dropped it on the way",
-    fix: "check the exporter's drops",
+    fix: "raise the destination's queue: otel.QueueSize(n) on it (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names the destination, and weft doctor prints the drops Studio heard of (weft.records.dropped)",
     tone: "loss",
   },
   not_recorded: {
@@ -153,7 +153,12 @@ export const CAUSES: Partial<
     tail_lost: {
       reason:
         "the run's root span ended but its run_finish record never arrived: a destination dropped the record tail, so the last steps' records are missing",
-      fix: "check the log exporter's drops (its queue, batch and retry limits): the spans arrived, the records behind them did not",
+      fix: "the spans arrived, the records behind them did not: raise the destination's queue: otel.QueueSize(n) on it (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names the destination, and weft doctor prints the drops Studio heard of (weft.records.dropped)",
+    },
+    events_lost: {
+      reason:
+        "the core emitted more event records than were stored (weft.run.events on the run's root span): a destination dropped them on the way, its queue full or an export failed",
+      fix: "raise the destination's queue: otel.QueueSize(n) on it (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names the destination, and weft doctor prints the drops Studio heard of (weft.records.dropped)",
     },
   },
   derived: {
@@ -352,19 +357,22 @@ export function rowHoles(row: {
  * one rule on both surfaces (the run page's header, the panel's turn):
  * interrupted from the row's status, max_tokens from its stop reason,
  * and the event positions the walk found missing — a gap only once the
- * run is over (status known and not running): while it runs a missing
- * position may still be in flight, and the run page says so in a
- * banner instead.
+ * run is over and settled (status known and not isLive): while it runs
+ * or settles a missing position may still be in flight, and the run
+ * page says so in a banner instead. The run document's own counted gap
+ * (cause events_lost, "N of M events were lost") is listed first by
+ * the callers, so its words win the merge.
  */
 export function statusHoles(r: {
   status?: string
   stop_reason?: string
   gaps?: number[]
+  settling?: boolean
 }): HoleMark[] {
   const out: HoleMark[] = []
   if (r.status === "interrupted") out.push({ hole: "interrupted" })
   const gaps = Array.isArray(r.gaps) ? r.gaps : []
-  if (gaps.length && r.status && r.status !== "running")
+  if (gaps.length && r.status && !isLive(r))
     out.push({
       hole: "gap",
       reason: `${gaps.length} ${gaps.length === 1 ? "event" : "events"} missing (${gaps.length === 1 ? "position" : "positions"} ${gaps.slice(0, 8).join(", ")}${gaps.length > 8 ? ", …" : ""}): a destination dropped a batch`,

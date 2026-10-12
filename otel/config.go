@@ -55,6 +55,10 @@ type dest struct {
 	headers                    map[string]string
 	timeout                    time.Duration
 	insecure                   bool
+	// queueSize is QueueSize's ask (0: the kind's default, queueSizeOf);
+	// blocking is Blocking's, kept by Start only under WEFT_ENV=dev.
+	queueSize int
+	blocking  bool
 }
 
 func newDest(kind destKind, name string) dest {
@@ -103,6 +107,21 @@ func (d dest) batchDelays() (logs, spans time.Duration) {
 		return 200 * time.Millisecond, time.Second
 	}
 	return 0, 0
+}
+
+// queueSizeOf is the destination's batch queue size, for its log and
+// its span chain each: QueueSize's when given, else 16,384 for Studio
+// (a dev loop's storm fits) and the SDK's 2,048 for the rest. Local has
+// no queue (written synchronously).
+func (d dest) queueSizeOf() int {
+	switch {
+	case d.queueSize > 0:
+		return d.queueSize
+	case d.kind == destStudio:
+		return defaultStudioQueueSize
+	default:
+		return defaultQueueSize
+	}
 }
 
 // datadogDefaultURL is the Datadog Agent's OTLP/HTTP intake.

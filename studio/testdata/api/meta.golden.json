@@ -8,6 +8,9 @@
   "title": "weft studio",
   "has_manifest": true,
   "ingest_open": true,
+  "ingest": {
+    "dropped": []
+  },
   "interrupted_after_ms": 30000,
   "capabilities": [
     "requests",

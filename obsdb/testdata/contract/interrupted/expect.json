@@ -25,6 +25,8 @@
       "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
       "catalog_hash": "d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8",
       "request_count": 1,
+      "events_emitted": 0,
+      "messages_emitted": 0,
       "chat": [
         {
           "step": 0,

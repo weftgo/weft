@@ -290,3 +290,80 @@ func TestTailLostAndCounterGap(t *testing.T) {
 		t.Errorf("gap reason = %q, want tail_lost's words and the counter's", gap)
 	}
 }
+
+// TestFailedRootPastWindow (U5's carried c3): a failed root whose clock
+// is 31 s old — no record of the run ever arrived, and its root says it
+// emitted none (weft.run.events 0) — is past the settling window at
+// once: the run reads failed and not settling, its step 0 reads error,
+// and both carry not_recorded in no_logger's words — never a gap, which
+// is reserved for a root that says records were emitted. The same root
+// saying it emitted 5 reads gap/events_lost ("every one") instead.
+func TestFailedRootPastWindow(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		emitted int64
+		hole    obsdb.Hole
+		cause   obsdb.HoleCause
+	}{
+		{"no_logger", 0, obsdb.HoleNotRecorded, obsdb.CauseNoLogger},
+		{"all_lost", 5, obsdb.HoleGap, obsdb.CauseEventsLost},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			db, err := sqlite.Open(":memory:")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+			end := time.Now().UTC().Add(-31 * time.Second)
+			failed := fxSpanRec("r_fail", end.Add(-time.Second), end, 2, "model exploded", 1, 1)
+			failed.Attrs["weft.run.events"] = c.emitted
+			if err := db.Write(context.Background(), obsdb.Batch{Spans: []obsdb.Span{failed}}); err != nil {
+				t.Fatal(err)
+			}
+			h := Handler(DB(db))
+			reason, fix := obsdb.HoleNoteFor(c.hole, c.cause)
+			var doc struct {
+				holesDoc
+				Settling bool `json:"settling"`
+			}
+			_, _, body := get(t, h, "/studio/api/runs/r_fail")
+			decode(t, body, &doc)
+			if doc.Status != "failed" || doc.Settling {
+				t.Errorf("run = %s settling %v, want failed and settled: %s", doc.Status, doc.Settling, body)
+			}
+			found := false
+			for _, hl := range doc.Holes {
+				if hl.Hole == string(c.hole) {
+					found = true
+					if c.cause == obsdb.CauseNoLogger && (hl.Reason != reason || hl.Fix != fix) {
+						t.Errorf("run hole = %+v, want %s's words", hl, c.cause)
+					}
+					if c.cause == obsdb.CauseEventsLost && !strings.HasPrefix(hl.Reason, "5 of 5 events were lost — every one") {
+						t.Errorf("run hole reason = %q, want the counted words", hl.Reason)
+					}
+				}
+				if c.cause == obsdb.CauseNoLogger && hl.Hole == string(obsdb.HoleGap) {
+					t.Errorf("a root that emitted nothing reads a gap: %+v", hl)
+				}
+			}
+			if !found {
+				t.Errorf("run holes = %+v, want %s", doc.Holes, c.hole)
+			}
+			var step holesDoc
+			_, _, body = get(t, h, "/studio/api/runs/r_fail/steps/0")
+			decode(t, body, &step)
+			if step.Status != stepError {
+				t.Errorf("step 0 = %s, want error", step.Status)
+			}
+			found = false
+			for _, hl := range step.Holes {
+				if hl.Hole == string(c.hole) && hl.Reason == reason && hl.Fix == fix {
+					found = true
+				}
+			}
+			if !found {
+				t.Errorf("step 0 holes = %+v, want %s/%s's words", step.Holes, c.hole, c.cause)
+			}
+		})
+	}
+}

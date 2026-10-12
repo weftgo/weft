@@ -5141,3 +5141,58 @@ func TestParkSourceReadOncePerRunAndParks(t *testing.T) {
 		t.Errorf("source reads after the resume = %d, want 2 (one per run)", reads.Load())
 	}
 }
+
+// TestRunSpanCountsEmittedRecords pins weft.run.events and
+// weft.run.messages (record contract §3, U5): at the run's end the
+// invoke_agent span carries how many durable event records and growth
+// messages records the run handed to its LoggerProvider — the numbers a
+// reader compares with what it stored ("N of M events lost"). Deltas
+// and compaction views are not counted (their own counters); a run with
+// no LoggerProvider, or one whose provider enables nothing, reports 0 —
+// the reader's no_logger, never a loss.
+func TestRunSpanCountsEmittedRecords(t *testing.T) {
+	cases := []struct {
+		name    string
+		lp      *recLogProvider
+		enabled func(string) bool
+	}{
+		{name: "logger", lp: newRecLogProvider()},
+		{name: "logger_disabled", lp: newRecLogProvider(), enabled: func(string) bool { return false }},
+		{name: "no_logger"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tp := newRecProvider()
+			opts := []core.Option{reqEcho("echo"), trimMiddleAt(3), core.Name("demo"), core.TracerProvider(tp)}
+			if c.lp != nil {
+				c.lp.enabled = c.enabled
+				opts = append(opts, core.LoggerProvider(c.lp))
+			}
+			model := wefttest.Script(toolTurns(4)...)
+			if _, err := core.New(model, opts...).Generate(context.Background(), core.Prompt("go")); err != nil {
+				t.Fatal(err)
+			}
+			attrs := tp.find(t, "invoke_agent demo").attrsMap()
+			wantEvents, wantMessages := "0", "0"
+			if c.lp != nil && c.enabled == nil {
+				growth := 0
+				for _, m := range c.lp.ofKind(t, "messages") {
+					if m.attr("weft.messages.reason") == "" {
+						growth++
+					}
+				}
+				if len(views(t, c.lp)) == 0 {
+					t.Fatal("the case wants a compaction view beside the growth records")
+				}
+				wantEvents = strconv.Itoa(len(c.lp.ofKind(t, "event")))
+				wantMessages = strconv.Itoa(growth)
+			}
+			if got := attrs["weft.run.events"]; got != wantEvents {
+				t.Errorf("weft.run.events = %q, want %s", got, wantEvents)
+			}
+			if got := attrs["weft.run.messages"]; got != wantMessages {
+				t.Errorf("weft.run.messages = %q, want %s", got, wantMessages)
+			}
+		})
+	}
+}

@@ -356,7 +356,12 @@ export function RunHeader({
   // status and stop reason, and the walk's gaps once the run is over.
   const holes = mergeHoles(
     runHoles(doc, folded),
-    statusHoles({ status: doc.status, stop_reason: doc.stop_reason, gaps })
+    statusHoles({
+      status: doc.status,
+      stop_reason: doc.stop_reason,
+      gaps,
+      settling: doc.settling,
+    })
   )
   return (
     <div className="space-y-2.5">

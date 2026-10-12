@@ -424,6 +424,17 @@ type RunRow struct {
 	// caller's own core.CancelCause kind); "" on a plain cancel and on
 	// every other run.
 	CancelCause string
+	// EventsEmitted and MessagesEmitted are what the core emitted (U5):
+	// the invoke_agent span's weft.run.events and weft.run.messages — the
+	// durable event records and growth messages records the run handed
+	// to its LoggerProvider. 0 when the root carried neither (not stored
+	// yet, or a weft before them) and when the run emitted none (no
+	// logger). Fewer stored than emitted is a loss (EventsLost,
+	// TailLostHole, LostRecordsHole); emitted 0 with nothing stored is
+	// no_logger. MessagesEmitted is informational: a content-off
+	// destination legitimately stores no messages record (contract §5),
+	// so no reader calls that difference lost.
+	EventsEmitted, MessagesEmitted int64
 }
 
 // RunPage is one Runs result, newest Started first (ties by ID,

@@ -936,7 +936,12 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 			// run's own gap, not a step that failed.
 			b := badgeFor(h, cause)
 			holes.add(h, b.Reason, b.Fix)
-			doc.Status = stepOK
+			// A failed run's last step stays an error: the counted gap
+			// (events_lost) reads failed runs too, and their root says
+			// how it ended.
+			if det.Status != obsdb.StatusFailed || n != det.Steps-1 {
+				doc.Status = stepOK
+			}
 		}
 	}
 

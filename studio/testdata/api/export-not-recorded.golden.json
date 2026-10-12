@@ -51,7 +51,7 @@
       {
         "hole": "gap",
         "reason": "the run counts steps or model calls, but none of its events was stored: a destination dropped them",
-        "fix": "check the exporter's drops"
+        "fix": "raise the destination's queue: otel.QueueSize(n) on it (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names the destination, and weft doctor prints the drops Studio heard of (weft.records.dropped)"
       },
       {
         "hole": "not_recorded",
@@ -65,13 +65,13 @@
     "gaps": [],
     "badge": "gap",
     "reason": "the run counts steps or model calls, but none of its events was stored: a destination dropped them",
-    "fix": "check the exporter's drops"
+    "fix": "raise the destination's queue: otel.QueueSize(n) on it (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names the destination, and weft doctor prints the drops Studio heard of (weft.records.dropped)"
   },
   "transcript": {
     "batches": [],
     "badge": "gap",
     "reason": "a record the run counts is missing: a destination dropped it on the way",
-    "fix": "check the exporter's drops"
+    "fix": "raise the destination's queue: otel.QueueSize(n) on it (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names the destination, and weft doctor prints the drops Studio heard of (weft.records.dropped)"
   },
   "compactions": [],
   "requests": {
@@ -87,7 +87,7 @@
     {
       "hole": "gap",
       "reason": "the run counts steps or model calls, but none of its events was stored: a destination dropped them",
-      "fix": "check the exporter's drops"
+      "fix": "raise the destination's queue: otel.QueueSize(n) on it (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names the destination, and weft doctor prints the drops Studio heard of (weft.records.dropped)"
     },
     {
       "hole": "not_recorded",

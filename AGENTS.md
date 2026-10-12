@@ -201,7 +201,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    // API: meta (db {kind, path, size: path/size to loopback and the server token only},
 //    //    auth_required, content, runtimes, manifest_check, pricing {source default|file|option, path?
 //    //    (db.path's rule), dated, models}, retention (Retain's Go
-//    //    duration string, null when off) — `weft doctor` prints it
+//    //    duration string, null when off), ingest {dropped: [{service, records, last_heard}]} (U5: the largest
+//    //    weft.records.dropped each service's heartbeats reported on the OTLP path; in memory) — `weft doctor` prints it
 //    //    line by line; capabilities_off {capability: why} names the option/flag that left one off;
 //    //    manifest_sources), agents/{name}/proposal (PUT {instructions} / DELETE, plan F6: proposed prompts in memory, 64, lost
 //    //    on restart; dev token or setup A loopback only; capability proposals), manifest (each agent with `proposed`
@@ -477,7 +478,12 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    each with its own content policy; defer on exit):
 //    defer otel.Install(
 //        otel.Local("weft.db"),                       // local sink: replay-grade, content on
-//        otel.Studio("https://studio.example", token), // OTLP/HTTP, content on
+//        otel.Studio("https://studio.example", token,  // OTLP/HTTP, content on
+//            otel.QueueSize(16384), otel.Blocking()),   // per destination (U5): the batch queue (Studio 16,384, others 2,048;
+//                               // Local has none — synchronous); a full queue never blocks: it refuses deltas first (½ full),
+//                               // records at ⅞, run_start/run_finish/the root span/heartbeats last — counted, one WARN per
+//                               // destination ("weft/otel: destination queue full"), weft.records.dropped on its heartbeats;
+//                               // Blocking() waits instead (≤ 5 s), dev only like RawBodies (WEFT_ENV=dev, else one WARN)
 //        otel.Datadog(),                               // the Agent's OTLP intake, content off
 //        otel.Exporters(spanExporter, logExporter),    // your own exporters (either may be nil)
 //        otel.Content(otel.ContentConfig{MaxBytes: 32 << 10, Redact: redact}),

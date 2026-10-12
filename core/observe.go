@@ -55,6 +55,8 @@ const (
 	attrRunPending      = attribute.Key("weft.run.pending")
 	attrRunStopReason   = attribute.Key("weft.run.stop_reason")
 	attrRunStoppedBy    = attribute.Key("weft.run.stopped_by")
+	attrRunEvents       = attribute.Key("weft.run.events")
+	attrRunMessages     = attribute.Key("weft.run.messages")
 	attrCancelCause     = attribute.Key("weft.cancel.cause")
 	attrStepIndex       = attribute.Key("weft.step.index")
 	attrStopRaw         = attribute.Key("weft.stop.raw")
@@ -212,7 +214,16 @@ func usageSplits(u Usage) []attribute.KeyValue {
 // dropped pairs. The metadata in force on ctx lands on every span of
 // the run — this one and the model and tool spans below — verbatim,
 // with the semconv mirrors (metadataAttrs).
-func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo, extra []attribute.KeyValue) (context.Context, func(res *RunResult, err error, end runEnd)) {
+//
+// rec is the run's recorder (nil in observer-only tests): at the end the
+// span reports its two counters as weft.run.events and
+// weft.run.messages — the durable event records and the growth messages
+// records the run handed to its LoggerProvider. Both count only records
+// actually emitted (a record is numbered after Enabled said yes), so a
+// run with no logger, or one whose provider enabled nothing, reports 0:
+// a reader tells "no logger" (0) from "emitted M, stored fewer" (a
+// destination lost them) by them. Counts, never content (ADR 0016).
+func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo, extra []attribute.KeyValue, rec *recorder) (context.Context, func(res *RunResult, err error, end runEnd)) {
 	ctx, span := o.tracer.Start(ctx, spanName(semconv.GenAIOperationNameInvokeAgent, agent),
 		trace.WithSpanKind(trace.SpanKindInternal))
 	start := time.Now()
@@ -251,6 +262,11 @@ func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo,
 				semconv.GenAIUsageInputTokens(int(res.Usage.InputTokens)),
 				semconv.GenAIUsageOutputTokens(int(res.Usage.OutputTokens)),
 				attrRunSteps.Int(len(res.Steps)),
+			}
+			if rec != nil {
+				attrs = append(attrs,
+					attrRunEvents.Int64(rec.eventPos.Load()),
+					attrRunMessages.Int64(rec.growthCount.Load()))
 			}
 			attrs = append(attrs, usageSplits(res.Usage)...)
 			if n := len(res.Pending); n > 0 {
@@ -689,6 +705,11 @@ type recorder struct {
 	// transcript points at. A compaction view takes an index on the
 	// same counter but never moves it (ADR 0028 §8).
 	growthTop atomic.Int64
+	// growthCount is how many growth messages records were emitted (views
+	// excluded: they take an index on messagesIdx but are not transcript)
+	// — the invoke_agent span's weft.run.messages, comparable with a
+	// store's message_count.
+	growthCount atomic.Int64
 
 	// The request record's state (ADR 0028, request.go): one counter
 	// per kind, the per-run dedupe sets of the prompt and catalog
@@ -862,6 +883,7 @@ func (r *recorder) recordMessages(ctx context.Context, step int, msgs []Message,
 
 	idx := r.messagesIdx.Add(1) - 1
 	r.growthTop.Store(idx + 1)
+	r.growthCount.Add(1)
 	var rec log.Record
 	rec.SetTimestamp(time.Now())
 	rec.SetEventName(eventNameMessages)

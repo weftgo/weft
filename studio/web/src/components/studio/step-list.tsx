@@ -45,7 +45,7 @@ import type {
   FoldedToolCall,
   PlacedBatch,
 } from "@/lib/events"
-import { mergeHoles } from "@/lib/honesty"
+import { isLive, mergeHoles } from "@/lib/honesty"
 import {
   endCard,
   endedWithoutFinish,
@@ -1148,8 +1148,10 @@ export function StepList({
           <p className="text-center font-mono text-xs text-faint">
             {replaying
               ? `replay · ${upTo} of ${events.length} events shown`
-              : doc.status === "running"
-                ? "stream in progress…"
+              : isLive(doc)
+                ? // running, or settling (its last records may still
+                  // land): never "ended without run_finish" yet.
+                  "stream in progress…"
                 : events.length > 0 &&
                     endedWithoutFinish(
                       view.finished,

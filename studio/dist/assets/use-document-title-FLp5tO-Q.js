@@ -1,1 +1,0 @@
-import{ii as e,ni as t,t as n}from"./title-bbwYf0lN.js";var r=e(t(),1);function i(e){let t=n(e);(0,r.useEffect)(()=>{typeof document<`u`&&(document.title=t)},[t])}export{i as t};

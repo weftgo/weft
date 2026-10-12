@@ -28,6 +28,8 @@
       "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
       "catalog_hash": "b7bf030db67c9877a90f377c5bbdac868c3105d23b13bc5e753a13a1f0adae25",
       "request_count": 2,
+      "events_emitted": 8,
+      "messages_emitted": 4,
       "chat": [
         {
           "step": 0,
@@ -86,6 +88,8 @@
       "delta_count": 1,
       "instructions_hash": "85f7fc2d7601d943c660c7969a4cc4a4c5838d7cdff1f2f56350587c70f58d13",
       "request_count": 1,
+      "events_emitted": 4,
+      "messages_emitted": 2,
       "chat": [
         {
           "step": 0,

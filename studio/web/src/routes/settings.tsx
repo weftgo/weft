@@ -250,8 +250,37 @@ function StudioFacts({ meta }: { meta: Meta }) {
             ? "open: /v1/traces and /v1/logs take OTLP without a token"
             : "walled: OTLP ingest needs its IngestToken",
         ],
+        ["ingest health", <IngestHealth meta={meta} />],
       ]}
     />
+  )
+}
+
+// IngestHealth is meta.ingest.dropped (U5): what the exporting apps'
+// heartbeats said their destination lost on the way here — the
+// counter behind a run's "N of M events were lost" gap, and its knob.
+function IngestHealth({ meta }: { meta: Meta }) {
+  const dropped = meta.ingest?.dropped
+  if (!dropped) return <Unreported field="ingest" />
+  if (dropped.length === 0)
+    return (
+      <span data-ingest-health="ok">
+        no app reported lost records (weft.records.dropped on its heartbeats)
+      </span>
+    )
+  return (
+    <span data-ingest-health="dropped" className="space-y-0.5">
+      {dropped.map((d) => (
+        <span key={d.service} className="block" data-ingest-service={d.service}>
+          {d.service || "(no service.name)"}: {d.records.toLocaleString("en-US")}{" "}
+          records dropped by its destination
+        </span>
+      ))}
+      <span className="block text-muted-foreground">
+        raise the destination&apos;s queue with otel.QueueSize(n), or use
+        otel.Blocking() under WEFT_ENV=dev
+      </span>
+    </span>
   )
 }
 

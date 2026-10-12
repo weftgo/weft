@@ -29,7 +29,7 @@ const runColumns = `RunId, ParentRunID, ParentCallID, TraceID, Agent, Provider, 
 	Failed, Err, Steps, Pending, StopReason, InputTokens, OutputTokens,
 	CachedInputTokens, CacheWriteTokens, ReasoningTokens, DeltaCount,
 	InstructionsHash, CatalogHash, RequestCount, Derived, RootEnded,
-	StoppedBy, CancelCause`
+	StoppedBy, CancelCause, EventsEmitted, MessagesEmitted`
 
 // runAggregates is the same list as a GROUP BY RunId select: max for
 // identity strings, flags, usage and last-seen; min for started — the
@@ -47,7 +47,8 @@ const runAggregates = `RunId, max(ParentRunID) AS ParentRunID, max(ParentCallID)
 	max(ReasoningTokens) AS ReasoningTokens, max(DeltaCount) AS DeltaCount,
 	max(InstructionsHash) AS InstructionsHash, max(CatalogHash) AS CatalogHash,
 	max(RequestCount) AS RequestCount, max(Derived) AS Derived, max(RootEnded) AS RootEnded,
-	max(StoppedBy) AS StoppedBy, max(CancelCause) AS CancelCause`
+	max(StoppedBy) AS StoppedBy, max(CancelCause) AS CancelCause,
+	max(EventsEmitted) AS EventsEmitted, max(MessagesEmitted) AS MessagesEmitted`
 
 // statusCase is the four-row table in SQL over weft_runs' columns: it
 // must agree with obsdb.DeriveStatus, whose test pins the boundaries —
@@ -269,7 +270,7 @@ func (d *DB) queryRunRows(ctx context.Context, now time.Time, sql string, args .
 			&s.Steps, &s.Pending, &s.StopReason,
 			&s.InTok, &s.OutTok, &s.CachedTok, &s.CacheWriteTok, &s.ReasonTok, &s.DeltaCount,
 			&s.InstructionsHash, &s.CatalogHash, &s.RequestCount, &s.Derived, &s.RootEnded,
-			&s.StoppedBy, &s.CancelCause); err != nil {
+			&s.StoppedBy, &s.CancelCause, &s.EventsEmitted, &s.MessagesEmitted); err != nil {
 			return nil, err
 		}
 		row, err := s.row(now)
@@ -299,6 +300,7 @@ type runScan struct {
 	RequestCount                                       int64
 	Derived, RootEnded                                 bool
 	StoppedBy, CancelCause                             string
+	EventsEmitted, MessagesEmitted                     int64
 }
 
 func (s *runScan) row(now time.Time) (obsdb.RunRow, error) {
@@ -319,6 +321,7 @@ func (s *runScan) row(now time.Time) (obsdb.RunRow, error) {
 		InstructionsHash: s.InstructionsHash, CatalogHash: s.CatalogHash, RequestCount: s.RequestCount,
 		Derived: s.Derived, RootEnded: s.RootEnded, FinishRecorded: s.FinishedOK,
 		StoppedBy: s.StoppedBy, CancelCause: s.CancelCause,
+		EventsEmitted: s.EventsEmitted, MessagesEmitted: s.MessagesEmitted,
 	}
 	if s.Finished != nil {
 		f := s.Finished.UTC()
@@ -1312,6 +1315,10 @@ var contractKeys = []string{
 	// U3.2: what ended the run, the run row's stopped_by and
 	// cancel_cause columns (migration 0011's restatement of both views).
 	"weft.run.stopped_by", "weft.cancel.cause",
+	// U5: what the core emitted, the run row's events_emitted and
+	// messages_emitted columns (migration 0013's restatement of the
+	// traces view; span attributes only, so the logs view keeps 0011's).
+	"weft.run.events", "weft.run.messages",
 }
 
 // unmarshalAttrs decodes a JSON column keeping integral numbers as

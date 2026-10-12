@@ -101,7 +101,19 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// context, so every chat, execute_tool and tap below parents under
 	// it, ended by every exit with the outcome decided — including
 	// cancellation, which no event reports (ADR 0016).
-	ctx, endSpan := a.obs.run(ctx, cfg.id, a.name, InfoOf(model), runExtra)
+	// The recorder is built before the span so the span's end reads its
+	// counters: weft.run.events / weft.run.messages, the records it
+	// handed to the LoggerProvider (record contract §3).
+	records := recorder{
+		elog:         a.obs.elog,
+		capture:      a.content,
+		runID:        cfg.id,
+		agent:        a.name,
+		manifestHash: a.manifestHash,
+		obs:          &a.obs,
+		panics:       &a.tapPanics,
+	}
+	ctx, endSpan := a.obs.run(ctx, cfg.id, a.name, InfoOf(model), runExtra, &records)
 	// A panic nothing contains — PrepareStep functions are arbitrary
 	// user code; model, tool, and tap panics are contained further down
 	// — must not leak the run span: this guard ends it with the panic
@@ -137,15 +149,6 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// emit can never produce a success without its RunFinish, or a
 	// RunFinish followed by an error (rule 4; Run.Events'
 	// one-terminal-element promise).
-	records := recorder{
-		elog:         a.obs.elog,
-		capture:      a.content,
-		runID:        cfg.id,
-		agent:        a.name,
-		manifestHash: a.manifestHash,
-		obs:          &a.obs,
-		panics:       &a.tapPanics,
-	}
 	deliver := func(ev Event) bool {
 		if ctx.Err() != nil {
 			return false

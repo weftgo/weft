@@ -27,8 +27,8 @@ func TestMigrationPinsExporterVersion(t *testing.T) {
 	if !strings.Contains(string(body), pinnedExporterVersion) {
 		t.Errorf("migration 0001 does not name the pinned exporter version %s", pinnedExporterVersion)
 	}
-	if highestMigration() != 12 {
-		t.Errorf("highest migration = %d, want 12 (0001 init, 0002 experiments, 0003 status spelling, 0004 request record, 0005 raw record, 0006 experiment command, 0007 the experiment index, 0008 the command store, 0009 the derived flag, 0010 root ended, 0011 stopped by, 0012 the root's version)", highestMigration())
+	if highestMigration() != 13 {
+		t.Errorf("highest migration = %d, want 13 (0001 init, 0002 experiments, 0003 status spelling, 0004 request record, 0005 raw record, 0006 experiment command, 0007 the experiment index, 0008 the command store, 0009 the derived flag, 0010 root ended, 0011 stopped by, 0012 the root's version, 0013 the emitted counts)", highestMigration())
 	}
 }
 
@@ -413,21 +413,24 @@ func TestRunsInnerFiltersAfterGrouping(t *testing.T) {
 // 0010 the traces view with 0004's tuple. 0011 restates both with the
 // whole set: stopped_by's two keys (stoppedByKeys) appended, the traces
 // tuple gaining weft.raw.index on the way; 0012 the traces view again
-// with the same set.
+// with the same set; 0013 (U5) the traces view again with the two
+// emitted counts — span attributes, so the logs view keeps 0011's.
 const (
 	adr0028Keys   = 12 + 4 + 1 + 10
 	rawKeys       = 1
 	stoppedByKeys = 2
+	emittedKeys   = 2
 )
 
 func TestMigrationContractTuple(t *testing.T) {
-	at0005 := contractKeys[:len(contractKeys)-stoppedByKeys]
+	at0011 := contractKeys[:len(contractKeys)-emittedKeys]
+	at0005 := at0011[:len(at0011)-stoppedByKeys]
 	at0004 := at0005[:len(at0005)-rawKeys]
 	before := at0004[:len(at0004)-adr0028Keys]
 	for _, c := range []struct {
 		version, tuples int
 		keys            []string
-	}{{1, 2, before}, {3, 1, before}, {4, 2, at0004}, {5, 1, at0005}, {10, 1, at0004}, {11, 2, contractKeys}, {12, 1, contractKeys}} {
+	}{{1, 2, before}, {3, 1, before}, {4, 2, at0004}, {5, 1, at0005}, {10, 1, at0004}, {11, 2, at0011}, {12, 1, at0011}, {13, 1, contractKeys}} {
 		body, err := migrationsFS.ReadFile("migrations/" + migrations[c.version])
 		if err != nil {
 			t.Fatal(err)
@@ -633,6 +636,44 @@ func TestMigration0012RestatesTracesView(t *testing.T) {
 	if !strings.HasPrefix(now[1], "INSERT INTO weft_runs (RunId, Started, LastSeen, RootEnded)") ||
 		!strings.Contains(now[1], "HAVING max(Derived) = 1 AND max(RootEnded) = 0") {
 		t.Errorf("0012's second statement is not the derived RootEnded backfill: %q", now[1])
+	}
+}
+
+// Migration 0013 (U5) adds the two columns, restates 0012's traces view
+// with EventsEmitted and MessagesEmitted from the invoke_agent span and
+// the two keys in its tuple, then backfills from the roots stored.
+// Pinned offline against 0012's select so the restatement cannot drift.
+func TestMigration0013RestatesTracesView(t *testing.T) {
+	read := func(v int) []string {
+		b, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return splitStatements(string(b))
+	}
+	was := read(12)[0]
+	now := read(13)
+	if len(now) != 4 {
+		t.Fatalf("0013 has %d statements, want 4 (two columns, view, backfill)", len(now))
+	}
+	for i, p := range []string{
+		"ALTER TABLE weft_runs ADD COLUMN IF NOT EXISTS EventsEmitted SimpleAggregateFunction(max, Int64)",
+		"ALTER TABLE weft_runs ADD COLUMN IF NOT EXISTS MessagesEmitted SimpleAggregateFunction(max, Int64)",
+		"ALTER TABLE weft_runs_traces_mv MODIFY QUERY",
+		"INSERT INTO weft_runs (RunId, Started, LastSeen, EventsEmitted, MessagesEmitted)",
+	} {
+		if !strings.HasPrefix(now[i], p) {
+			t.Errorf("0013 statement %d = %q, want prefix %q", i, now[i], p)
+		}
+	}
+	want := strings.NewReplacer(
+		`'weft.run.stopped_by', 'weft.cancel.cause'], k)`, `'weft.run.stopped_by', 'weft.cancel.cause',
+        'weft.run.events', 'weft.run.messages'], k)`,
+		"    if(isInvoke, SpanAttributes['weft.cancel.cause'], '') AS CancelCause\n",
+		"    if(isInvoke, SpanAttributes['weft.cancel.cause'], '') AS CancelCause,\n    if(isInvoke, toInt64OrZero(SpanAttributes['weft.run.events']), 0) AS EventsEmitted,\n    if(isInvoke, toInt64OrZero(SpanAttributes['weft.run.messages']), 0) AS MessagesEmitted\n",
+	).Replace(was)
+	if want == was || now[2] != want {
+		t.Errorf("0013's select is not 0012's with the two counts:\n%s", now[2])
 	}
 }
 

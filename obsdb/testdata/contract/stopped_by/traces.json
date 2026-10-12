@@ -93,6 +93,18 @@
                   }
                 },
                 {
+                  "key": "weft.run.events",
+                  "value": {
+                    "intValue": "6"
+                  }
+                },
+                {
+                  "key": "weft.run.messages",
+                  "value": {
+                    "intValue": "3"
+                  }
+                },
+                {
                   "key": "weft.run.stop_reason",
                   "value": {
                     "stringValue": "tool_calls"

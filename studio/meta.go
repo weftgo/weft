@@ -28,13 +28,16 @@ type metaDoc struct {
 	// PanelVersion is the studio version stamped into the embedded
 	// /panel.js ("" when the bundle is missing or carries no stamp):
 	// equal to studio_version unless the committed dist is stale.
-	PanelVersion       string   `json:"panel_version"`
-	DB                 metaDB   `json:"db"`
-	Title              string   `json:"title"`
-	HasManifest        bool     `json:"has_manifest"`
-	IngestOpen         bool     `json:"ingest_open"`
-	InterruptedAfterMs int64    `json:"interrupted_after_ms"`
-	Capabilities       []string `json:"capabilities"`
+	PanelVersion string `json:"panel_version"`
+	DB           metaDB `json:"db"`
+	Title        string `json:"title"`
+	HasManifest  bool   `json:"has_manifest"`
+	IngestOpen   bool   `json:"ingest_open"`
+	// Ingest is the ingest health (U5): the services whose heartbeats
+	// reported records their destination lost on the way here.
+	Ingest             metaIngest `json:"ingest"`
+	InterruptedAfterMs int64      `json:"interrupted_after_ms"`
+	Capabilities       []string   `json:"capabilities"`
 	// CapabilitiesOff names each capability an option left off, with
 	// the option (and CLI flag) that did (plan B4): the UI's empty
 	// states say it. Omitted when nothing is off.
@@ -178,6 +181,7 @@ func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
 		HasManifest:        len(s.manifest) > 0 || len(reg) > 0,
 		ManifestSources:    len(s.manifestSources(reg)),
 		IngestOpen:         !s.noIngest && s.ingestToken == "",
+		Ingest:             s.ingestHealth.snapshot(),
 		InterruptedAfterMs: obsdb.InterruptedAfter.Milliseconds(),
 		Capabilities:       s.capabilityList(),
 		CapabilitiesOff:    s.capabilitiesOff(),

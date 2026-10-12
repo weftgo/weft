@@ -184,6 +184,10 @@ type Server struct {
 	// do not exist.
 	runtimeSrv *RuntimeServer
 
+	// ingestHealth is what the exporting apps reported losing
+	// (weft.records.dropped on their heartbeats; ingesthealth.go).
+	ingestHealth ingestHealth
+
 	shell []byte
 	csp   string
 

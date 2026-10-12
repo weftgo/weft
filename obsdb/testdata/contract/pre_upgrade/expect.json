@@ -25,6 +25,8 @@
       "message_count": 2,
       "delta_count": 1,
       "request_count": 0,
+      "events_emitted": 4,
+      "messages_emitted": 2,
       "chat": [
         {
           "step": 0,

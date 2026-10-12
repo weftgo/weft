@@ -720,7 +720,10 @@ func (d *DB) RunSpans(ctx context.Context, runID string) (_ []obsdb.Span, err er
 		// (idx_trace_id) narrows the granules before RunId is tested.
 		// A run whose spans are not under that trace (its records
 		// carried a trace its spans did not) falls through to RunId
-		// alone, which idx_weft_run_id (0016) serves.
+		// alone, which idx_weft_run_id (0016) serves. A non-empty
+		// by-trace answer is trusted as the whole run: no writer path
+		// splits one run id across traces, so the fallback fires only
+		// on an empty result.
 		spans, err := d.querySpans(ctx, runSpansByTrace, runTrace, runID)
 		if err != nil || len(spans) > 0 {
 			return spans, err

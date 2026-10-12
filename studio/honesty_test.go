@@ -322,13 +322,17 @@ func TestRunHolesV090(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The highest file's number, not the count: numbering may skip
-	// (migrations land renumbered across branches).
+	// The highest file's number; the files are 1..N with no gap
+	// (obsdb/sqlite's TestMigrationFilesAreContiguous), so it is also
+	// the count — a dropped file fails here too.
 	want := 0
 	for _, m := range migs {
 		if n, err := strconv.Atoi(strings.SplitN(filepath.Base(m), "_", 2)[0]); err == nil && n > want {
 			want = n
 		}
+	}
+	if want != len(migs) {
+		t.Errorf("sqlite migration files: %d, highest %d; want 1..N with no gap", len(migs), want)
 	}
 	if got := migrationMax(t, path); got != want {
 		t.Errorf("after open: migration %d, want the current %d", got, want)

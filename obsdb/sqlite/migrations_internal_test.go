@@ -773,3 +773,99 @@ func idsOf(rows []obsdb.RunRow) []string {
 	}
 	return out
 }
+
+// The embedded migration files are numbered 1..N with no gap, N the
+// version a fresh file reaches (WantSchemaVersion): a dropped or
+// misnumbered file fails here, where a pin on the highest number alone
+// would not see it (U27-fix).
+func TestMigrationFilesAreContiguous(t *testing.T) {
+	for v := 1; v <= len(migrations); v++ {
+		if migrations[v] == "" {
+			t.Errorf("migration %04d missing: the embedded files are %v, want 1..%d with no gap", v, sortedVersions(), len(migrations))
+		}
+	}
+	if len(migrations) != WantSchemaVersion || highestMigration() != WantSchemaVersion {
+		t.Errorf("%d migration files, highest %d; want exactly 1..%d (%s)", len(migrations), highestMigration(), WantSchemaVersion, WantSchemaThrough)
+	}
+}
+
+// A file at 0014 — a failed child run and a top-level one stored —
+// opens through 0015: runs_failed_all exists, the all-runs failed page
+// lists both newest first through it, and the version recorded is the
+// current one (U27-fix).
+func TestUpgradeTo0015AddsFailedAllIndex(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "at14.db")
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE obsdb_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	for v := 1; v <= 14; v++ {
+		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx, err := raw.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(string(body)); err != nil {
+			t.Fatalf("migration %d: %v", v, err)
+		}
+		if post := postMigrations[v]; post != nil {
+			if err := post(tx); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO obsdb_migrations (version, applied_at) VALUES (?, '2026-10-01T00:00:00Z')`, v); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := raw.Exec(`INSERT INTO runs (run_id, parent_run_id, agent, started_ns, last_seen_ns, failed, err, meta) VALUES
+		('r_top', '', 'a', 100, 200, 1, 'boom', '{}'),
+		('r_child', 'r_top', 'a', 150, 200, 1, 'boom', '{}'),
+		('r_ok', '', 'a', 120, 200, 0, '', '{}')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("open a 0014 file: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+	d := db.(*DB)
+	var n int
+	if err := d.reads.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'runs_failed_all'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("runs_failed_all after 0015: %d indexes, want 1", n)
+	}
+	var version int
+	if err := d.reads.QueryRowContext(ctx, `SELECT MAX(version) FROM obsdb_migrations`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != WantSchemaVersion {
+		t.Errorf("migration max after the upgrade = %d, want %d (%s)", version, WantSchemaVersion, WantSchemaThrough)
+	}
+	page, err := db.Runs(ctx, obsdb.RunQuery{Status: obsdb.StatusFailed, ParentRunID: "*"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, r := range page.Runs {
+		ids = append(ids, r.ID)
+	}
+	if page.Total != 2 || len(ids) != 2 || ids[0] != "r_child" || ids[1] != "r_top" {
+		t.Errorf("failed, all after 0015 = %v (total %d), want [r_child r_top]", ids, page.Total)
+	}
+}

@@ -67,7 +67,7 @@ func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (_ obsdb.RunPage, err e
 			qargs = append(qargs, ns)
 		}
 	}
-	frag += ` ORDER BY started_ns DESC, run_id DESC LIMIT ?`
+	frag += runOrder(q) + ` LIMIT ?`
 	qargs = append(qargs, limit)
 	rows, err := d.queryRunRows(ctx, frag, qargs, now)
 	if err != nil {
@@ -95,6 +95,22 @@ func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (_ obsdb.RunPage, err e
 	return page, nil
 }
 
+// runOrder is the Runs page's ORDER BY. The order is always newest
+// first, run id breaking ties; only its spelling changes. On the
+// all-runs list (ParentRunID "*") narrowed by last_seen_ns — the
+// running filter or LastSeenAfter, the live backfill — the matches are
+// few and runs_last_seen finds them, but sqlite prefers runs_all's
+// order and walks every row until the LIMIT fills. The unary plus
+// makes started_ns an expression no index orders, so the plan is
+// SEARCH runs USING INDEX runs_last_seen (last_seen_ns>?) and a temp
+// B-tree over the matches (TestRunListsUseTheirIndexes pins both).
+func runOrder(q obsdb.RunQuery) string {
+	if q.ParentRunID == "*" && (q.Status == obsdb.StatusRunning || !q.LastSeenAfter.IsZero()) {
+		return ` ORDER BY +started_ns DESC, run_id DESC`
+	}
+	return ` ORDER BY started_ns DESC, run_id DESC`
+}
+
 // runWhere builds the Runs WHERE fragment with its bind arguments, in
 // text order. The status filter's condition carries statusExpr, whose
 // own cutoff parameter binds first, so it is added before everything
@@ -110,7 +126,8 @@ func runWhere(q obsdb.RunQuery, now time.Time) (string, []any) {
 		// Each condition below is implied by the CASE (redundant), and
 		// is there for the planner: the CASE, with its bind parameter,
 		// can be served by no index, while these name the columns of
-		// runs_last_seen and runs_failed (0014).
+		// runs_last_seen and runs_failed (0014), and runs_failed_all
+		// (0015) for the all-runs failed page.
 		switch q.Status {
 		case obsdb.StatusRunning:
 			conds = append(conds, "last_seen_ns >= ?")

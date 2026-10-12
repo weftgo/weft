@@ -1,0 +1,11 @@
+-- 0015 · the all-runs failed page's index (U27-fix; sqlite only — the
+-- ClickHouse side orders by its sorting key and needs none).
+--
+-- runs_failed (0014) leads with parent_run_id, so it orders a failed
+-- page only under a parent equality (the top-level list). The all-runs
+-- failed page (RunQuery.ParentRunID "*", status=failed&all=1) had no
+-- index to order it and walked runs_all, testing every row until the
+-- LIMIT filled — and failed runs are few. runs_failed_all is the
+-- page's whole order over the failed rows alone: a partial index
+-- runWhere's `failed = 1` beside statusExpr's CASE matches.
+CREATE INDEX IF NOT EXISTS runs_failed_all ON runs(started_ns DESC, run_id DESC) WHERE failed = 1;

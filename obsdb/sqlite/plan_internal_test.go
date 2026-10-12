@@ -47,7 +47,7 @@ func planDB(t *testing.T) *DB {
 func runListSQL(q obsdb.RunQuery) (count, page string, args []any) {
 	where, args := runWhere(q, time.Now())
 	return `SELECT COUNT(*) FROM runs WHERE ` + where,
-		`SELECT run_id FROM runs WHERE ` + where + ` ORDER BY started_ns DESC, run_id DESC LIMIT 50`, args
+		`SELECT run_id FROM runs WHERE ` + where + runOrder(q) + ` LIMIT 50`, args
 }
 
 // TestExperimentRunsUseTheIndex (M2): an experiment's run list — the
@@ -76,15 +76,21 @@ func TestExperimentRunsUseTheIndex(t *testing.T) {
 //   - the all-runs list (all=1) in runs_all's order, no temp B-tree;
 //   - the top-level list in runs_started's whole order (run_id
 //     included), no temp B-tree;
-//   - the live backfill's LastSeenAfter window on runs_last_seen.
+//   - the live backfill's LastSeenAfter window on runs_last_seen, the
+//     page too: runOrder spells its order +started_ns so runs_all's
+//     order cannot win, and the few matches sort in a temp B-tree (the
+//     finding, U27-fix: the page walked runs_all, testing every row
+//     until the LIMIT filled).
 //
 // The status filter, honestly: statusExpr's CASE takes a bind parameter
 // (the interrupted cutoff), so no index serves it as such. runWhere
 // adds the condition each status implies where an index can use it —
-// failed: failed = 1, the partial index runs_failed; running:
-// last_seen_ns >= cutoff, runs_last_seen (chosen when no parent_run_id
-// equality competes; the top-level running list stays on runs_started,
-// testing the CASE per row in order). succeeded and interrupted are
+// failed: failed = 1, the partial index runs_failed (top-level, under
+// the parent equality it leads with) and runs_failed_all (0015, the
+// all-runs page's whole order over the failed rows alone); running:
+// last_seen_ns >= cutoff, runs_last_seen (the all-runs page through
+// runOrder's +started_ns as for LastSeenAfter; the top-level running
+// list stays on runs_started, testing the CASE per row in order). succeeded and interrupted are
 // most rows and imply nothing narrower: their lists walk the order
 // index (runs_all / runs_started) and test the CASE per row — no
 // covering index helps a CASE over four columns, and their counts read
@@ -99,26 +105,30 @@ func TestRunListsUseTheirIndexes(t *testing.T) {
 		page      string
 		noTempBy  bool // the page's order is the index's: no temp B-tree
 		countScan bool // the count reads every row (pinned honestly)
+		search    bool // the page is a SEARCH on its index (a range, not a walk)
 	}{
 		{name: "public id", q: obsdb.RunQuery{PublicID: "pub_1"}, count: "runs_public", page: "runs_public", noTempBy: true},
 		{name: "public id, all", q: obsdb.RunQuery{PublicID: "pub_1", ParentRunID: "*"}, count: "runs_public", page: "runs_public"},
 		{name: "session", q: obsdb.RunQuery{SessionID: "s_1"}, count: "runs_session_started", page: "runs_session_started", noTempBy: true},
 		{name: "all runs", q: obsdb.RunQuery{ParentRunID: "*"}, page: "runs_all", noTempBy: true},
 		{name: "top-level", q: obsdb.RunQuery{}, count: "runs_started", page: "runs_started", noTempBy: true},
-		{name: "last seen after", q: obsdb.RunQuery{ParentRunID: "*", LastSeenAfter: time.Now()}, count: "runs_last_seen", page: "runs_all"},
+		{name: "last seen after", q: obsdb.RunQuery{ParentRunID: "*", LastSeenAfter: time.Now()}, count: "runs_last_seen", page: "runs_last_seen", search: true},
 		{name: "failed", q: obsdb.RunQuery{Status: obsdb.StatusFailed}, count: "runs_failed", page: "runs_failed", noTempBy: true},
-		{name: "failed, all", q: obsdb.RunQuery{Status: obsdb.StatusFailed, ParentRunID: "*"}, count: "runs_failed"},
-		{name: "running, all", q: obsdb.RunQuery{Status: obsdb.StatusRunning, ParentRunID: "*"}, count: "runs_last_seen", page: "runs_all"},
+		{name: "failed, all", q: obsdb.RunQuery{Status: obsdb.StatusFailed, ParentRunID: "*"}, count: "runs_failed_all", page: "runs_failed_all", noTempBy: true},
+		{name: "running, all", q: obsdb.RunQuery{Status: obsdb.StatusRunning, ParentRunID: "*"}, count: "runs_last_seen", page: "runs_last_seen", search: true},
 		{name: "running", q: obsdb.RunQuery{Status: obsdb.StatusRunning}, count: "runs_started", page: "runs_started", noTempBy: true},
 		{name: "succeeded, all", q: obsdb.RunQuery{Status: obsdb.StatusSucceeded, ParentRunID: "*"}, page: "runs_all", countScan: true},
 	} {
 		count, page, args := runListSQL(c.q)
 		cp, pp := queryPlan(t, d, count, args...), queryPlan(t, d, page, args...)
-		if c.count != "" && !strings.Contains(cp, "INDEX "+c.count) {
+		if c.count != "" && !usesIndex(cp, c.count) {
 			t.Errorf("%s: count plan = %s, want the %s index", c.name, cp, c.count)
 		}
-		if c.page != "" && !strings.Contains(pp, "INDEX "+c.page) {
+		if c.page != "" && !usesIndex(pp, c.page) {
 			t.Errorf("%s: page plan = %s, want the %s index", c.name, pp, c.page)
+		}
+		if c.search && !strings.HasPrefix(pp, "SEARCH runs USING INDEX "+c.page+" (") {
+			t.Errorf("%s: page plan = %s, want a SEARCH on %s", c.name, pp, c.page)
 		}
 		if c.noTempBy && strings.Contains(pp, "TEMP B-TREE") {
 			t.Errorf("%s: page plan = %s, want the index's order (no temp B-tree)", c.name, pp)
@@ -127,6 +137,17 @@ func TestRunListsUseTheirIndexes(t *testing.T) {
 			t.Errorf("%s: count plan = %s; the pin says it reads every row — update the doc above if an index now serves it", c.name, cp)
 		}
 	}
+}
+
+// usesIndex reports whether plan names index whole — runs_failed is not
+// runs_failed_all.
+func usesIndex(plan, index string) bool {
+	for _, step := range strings.Split(plan, "; ") {
+		if strings.Contains(step+" ", "INDEX "+index+" ") {
+			return true
+		}
+	}
+	return false
 }
 
 // TestSessionListUsesTheSessionIndex (U27; UX-E-23): the session list's

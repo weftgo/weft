@@ -192,7 +192,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    running (interrupted included) last seen more than d ago, once at New then every
 //    //    min(d/10, 1h), floor 1 min, one Debug line per sweep; off by default; d ≥ 1h (New panics
 //    //    below: a 30 s silence reads interrupted); runs until Close — New + Close, not Handler — or a
-//    //    closed DB)/Pricing (Pricing(studio.PricingTable{Dated, Models: []studio.ModelPrice{{Provider,
+//    //    closed DB; stored manifests are never swept)/Pricing (Pricing(studio.PricingTable{Dated, Models: []studio.ModelPrice{{Provider,
 //    //    ModelGlob (path.Match over provider/model, first match wins), Input, Output, CachedInput?,
 //    //    CacheWrite?, Reasoning?}}}) — USD per 1M; default studio.DefaultPricing() = studio/pricing.json,
 //    //    dated, go generate ./studio/... from internal/pricingdata; else WEFT_PRICING=<path>
@@ -353,7 +353,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    make mcp-check — build tag livecheck, not in make test — proves it over stdio against a real
 //    //    weft studio seeded with the contract fixtures: the phase 6 gate's third clause);
 //    //    weft vacuum [--db --retain] (one sweep when a retention is given, then VACUUM
-//    //    / OPTIMIZE TABLE … FINAL; `make vacuum` on $WEFT_DB or ./.weft/weft.db); weft version.
+//    //    / OPTIMIZE TABLE … FINAL; stored manifests are never swept; `make vacuum` on $WEFT_DB or
+//    //    ./.weft/weft.db); weft version.
 //    //    --retain (WEFT_RETAIN) on weft studio and weft dev is studio.Retain (under 1h: exit 2);
 //    //    --pricing <path> (WEFT_PRICING; the flag wins) is studio.Pricing(studio.LoadPricing(path))
 //    //    (a malformed file: exit 1 naming the path and the field).

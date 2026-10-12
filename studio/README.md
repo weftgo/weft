@@ -2283,8 +2283,12 @@ Studio first saw it), `current_manifest_hash` the hash the current
 manifest gives the same agent (`""` when it names none; equal to
 `manifest_hash` when the run's configuration is current), `manifest`
 the one-agent `core.Manifest` document; Studio stores each agent of the
-weft.json it serves at `New` and every runtime registration's agents,
-content-addressed (the hash is the document's sha256, the first write
+weft.json it serves once, at `New` (a weft.json rewritten while Studio
+runs is stored after the next restart — or by the next registration of
+an app running that configuration: under `weft dev` an app with
+`runtime.Install` re-registers its agents on every save-and-restart, so
+the dev loop is covered) and every runtime
+registration's agents, content-addressed (the hash is the document's sha256, the first write
 kept) and kept forever — deletion and `Retain` never touch them; 404
 for a hash never stored; `/api/manifest`'s rule: 403 with `badge:
 "hidden"` to a read-scoped panel token; the run document carries

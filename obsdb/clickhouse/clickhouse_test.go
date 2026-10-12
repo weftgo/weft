@@ -33,6 +33,21 @@ func TestMigrationPinsExporterVersion(t *testing.T) {
 	}
 }
 
+// The embedded migration files are numbered 1..N with no gap, N the
+// version a fresh database reaches (WantSchemaVersion): a dropped or
+// misnumbered file fails here — WantMigrationRows, derived from the
+// files, would follow a drop silently (U27-fix).
+func TestMigrationFilesAreContiguous(t *testing.T) {
+	for v := 1; v <= len(migrations); v++ {
+		if migrations[v] == "" {
+			t.Errorf("migration %04d missing: the embedded files are %v, want 1..%d with no gap", v, sortedVersions(), len(migrations))
+		}
+	}
+	if len(migrations) != WantSchemaVersion || highestMigration() != WantSchemaVersion {
+		t.Errorf("%d migration files, highest %d; want exactly 1..%d (%s)", len(migrations), highestMigration(), WantSchemaVersion, WantSchemaThrough)
+	}
+}
+
 // The collector-shape columns must exist in our DDL: every column the
 // pinned exporter's INSERT names (its traces_insert.sql and
 // logs_insert.sql at that tag, plus the EventName feature column it

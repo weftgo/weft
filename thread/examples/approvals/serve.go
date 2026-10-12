@@ -33,6 +33,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"iter"
@@ -149,10 +150,24 @@ func (a *app) load(ctx context.Context, create bool) (*thread.Session, error) {
 	return s, nil
 }
 
+// drop closes the cached Session after thread.ErrStale — another
+// process over the same -dir wrote the session behind it, so the value
+// is done writing (thread's Reopen class) — and forgets it, so the next
+// load opens the session again from what it now holds. a.mu is held.
+func (a *app) drop(ctx context.Context, s *thread.Session) {
+	if a.s == s {
+		a.s = nil
+	}
+	_ = s.Close(context.WithoutCancel(ctx))
+}
+
 // resolve is the runtime.Sessions resolver: the app's LIVE Session
 // behind its public id (nothing to release) — the stored one opened
 // when no question has yet, so a turn parked before a restart is
 // decided — or (nil, nil, nil), not this app's, when none is stored.
+// The Session claims the writer lease first (what the runtime does
+// next): a stale one is dropped and the session opened again, so the
+// runtime's one retry after ErrStale is not handed the same value.
 func (a *app) resolve(ctx context.Context, publicID string) (*thread.Session, func(), error) {
 	if publicID != servePublicID {
 		return nil, nil, nil
@@ -162,6 +177,12 @@ func (a *app) resolve(ctx context.Context, publicID string) (*thread.Session, fu
 	s, err := a.load(ctx, false)
 	if err != nil || s == nil {
 		return nil, nil, err
+	}
+	if err := s.Claim(ctx); errors.Is(err, thread.ErrStale) {
+		a.drop(ctx, s)
+		if s, err = a.load(ctx, false); err != nil || s == nil {
+			return nil, nil, err
+		}
 	}
 	return s, nil, nil
 }
@@ -197,21 +218,33 @@ func (a *app) ask(w http.ResponseWriter, r *http.Request) {
 	// runner; the timeout bounds it.
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), time.Minute)
 	defer cancel()
-	s, err := a.session(ctx)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	// A parked call holds the session's next turn behind it: say so
-	// instead of queueing the question behind a decision.
-	if p := s.Pending(); len(p) > 0 {
-		http.Error(w, "call "+p[0].CallID+" ("+p[0].Tool+") is awaiting its decision: decide it in the panel", http.StatusConflict)
-		return
-	}
-	turn, err := s.Send(ctx, weft.User(question))
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+	var turn *thread.Turn
+	for attempt := 0; ; attempt++ {
+		s, err := a.session(ctx)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		// A parked call holds the session's next turn behind it: say so
+		// instead of queueing the question behind a decision.
+		if p := s.Pending(); len(p) > 0 {
+			http.Error(w, "call "+p[0].CallID+" ("+p[0].Tool+") is awaiting its decision: decide it in the panel", http.StatusConflict)
+			return
+		}
+		turn, err = s.Send(ctx, weft.User(question))
+		if errors.Is(err, thread.ErrStale) && attempt == 0 {
+			// Another serve over the same -dir wrote the session: open
+			// it again (its pending calls read afresh), ask once more.
+			a.mu.Lock()
+			a.drop(ctx, s)
+			a.mu.Unlock()
+			continue
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		break
 	}
 	scope.Set(w, scope.Scope{PublicID: servePublicID, RunID: turn.RunID()})
 	res, err := turn.Wait()

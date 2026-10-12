@@ -16,7 +16,7 @@ import { cleanup } from "@testing-library/react"
 import axe from "axe-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { APP_LINK_FIX, APP_RUN, APP_RUN_FIX, READ_TOKEN } from "../lib/honesty"
+import { APP_LINK_FIX, APP_RUN, APP_RUN_FIX, PLAYGROUND_OFF, PLAYGROUND_OFF_FIX, READ_TOKEN } from "../lib/honesty"
 import { FakeStudio } from "../test/fake-studio"
 import { APP_PUB, CALL, PARKED, PLAIN, REJECTED, RESUMED, runtimeRow, serveAppTurn, STEER_FAILED } from "../test/appturn-fixture"
 import type { AppTurnOptions } from "../test/appturn-fixture"
@@ -146,6 +146,23 @@ describe("an app turn whose service has a Sessions runtime connected", () => {
     expect($(el, "[data-weft-app-owned]")).toBeNull()
   })
 
+  it("a 403 stays while the runtimes read after it fails: only a read that applied re-gates", async () => {
+    const o: AppTurnOptions = { outcome: "refused", reconnects: true }
+    const { el, fake } = await open(o)
+    const reads = fake.calls("GET runtimes").length
+    // The read the refusal asks for answers 500: the runtimes the panel
+    // holds still say decide, but no read past the refusal applied.
+    o.runtimesError = true
+    click(button(el, "continue"))
+    await vi.waitFor(() => expect(fake.calls("GET runtimes").length).toBeGreaterThan(reads), { timeout: 5_000 })
+    await settle()
+    expect(line(el)).toBe(
+      `app-owned turn · read-only: run ${PARKED} is the app's own, and no connected runtime of its service app acts on the app's sessions — fix: set runtime.Sessions(resolver) at runtime.Install in the app (service app): its turns then take approvals and steer`
+    )
+    expect(refusedVerbs(el)).toHaveLength(3)
+    expect(refusedVerbs(el).every((b) => b.disabled)).toBe(true)
+  })
+
   it("steer on the running app turn posts its run id; cancel is never offered", async () => {
     const { el, fake } = await open({ running: true })
     const input = $(el, "[data-weft-app-steer] input") as HTMLInputElement
@@ -185,6 +202,13 @@ describe("an app turn no Sessions runtime of its service acts on", () => {
     expect(fake.calls(`POST runs/${PARKED}/approvals`)).toHaveLength(0)
     expect($(el, "[data-weft-app-steer]")).toBeNull()
     await axeClean(el)
+  })
+
+  it("a Studio without the playground: meta.capabilities_off's words, never the closed link, nothing posted", async () => {
+    const { el, fake } = await open({ noPlayground: true })
+    expect(line(el)).toBe(`app-owned turn · read-only: ${PLAYGROUND_OFF} — fix: ${PLAYGROUND_OFF_FIX}`)
+    expect(refusedVerbs(el)).toHaveLength(3)
+    expect(fake.calls(`POST runs/${PARKED}/approvals`)).toHaveLength(0)
   })
 
   it("no runtime of the service connected (the link closed): the fix opens the link", async () => {

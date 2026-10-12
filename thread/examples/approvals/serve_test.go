@@ -363,4 +363,95 @@ func TestServedRestartResumesTheSession(t *testing.T) {
 	if err != nil || len(page.Sessions) != 1 {
 		t.Fatalf("sessions under %s = %d (%v), want 1", servePublicID, len(page.Sessions), err)
 	}
+
+	// The user asks first (no resolve before it): session() with create
+	// opens the stored session too, never a second one.
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	third := serveOnce()
+	s3, err := third.session(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s3.Close(ctx) }()
+	if s3.ID() != id {
+		t.Fatalf("the user's first ask after the restart opened session %s, want the stored %s", s3.ID(), id)
+	}
+	if run := ask(third, "status?"); !strings.HasPrefix(run, id+"-") {
+		t.Errorf("the third serve's turn %s is not session %s's", run, id)
+	}
+	page, err = thread.List(ctx, third.st, thread.Query{Meta: map[string]string{"weft.public_id": servePublicID}})
+	if err != nil || len(page.Sessions) != 1 {
+		t.Fatalf("sessions under %s after the user asked first = %d (%v), want 1", servePublicID, len(page.Sessions), err)
+	}
+}
+
+// TestServedStaleSessionReopens: two serves over one -dir. b's cached
+// Session is opened while a writes; once a stopped, b's view is stale
+// (thread.ErrStale). b's ask and b's resolver open the session again
+// instead of handing back the stale value for the process's life.
+func TestServedStaleSessionReopens(t *testing.T) {
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "served")
+	serveOnce := func() *app {
+		st, err := jsonl.Open(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &app{st: st, agent: servedAgent()}
+	}
+	ask := func(a *app, question string) (int, string) {
+		rec := httptest.NewRecorder()
+		a.handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/ask", strings.NewReader(question)))
+		return rec.Code, rec.Body.String()
+	}
+
+	a := serveOnce()
+	if code, body := ask(a, "status?"); code != http.StatusOK {
+		t.Fatalf("a's first ask = %d %q", code, body)
+	}
+	id := a.s.ID()
+	// b and c read the session now (no write: no lease).
+	b, c := serveOnce(), serveOnce()
+	if s, _, err := b.resolve(ctx, servePublicID); err != nil || s == nil {
+		t.Fatalf("b's resolve = %v, %v", s, err)
+	}
+	if s, _, err := c.resolve(ctx, servePublicID); err != nil || s == nil {
+		t.Fatalf("c's resolve = %v, %v", s, err)
+	}
+	// a writes past their views and stops.
+	if code, body := ask(a, "status?"); code != http.StatusOK {
+		t.Fatalf("a's second ask = %d %q", code, body)
+	}
+	if err := a.s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// b's ask: the stale Session is dropped and the session opened again.
+	code, body := ask(b, "status?")
+	if code != http.StatusOK || !strings.Contains(body, "Done: all green.") {
+		t.Fatalf("b's ask over a stale Session = %d %q, want the turn answered", code, body)
+	}
+	if !strings.Contains(body, id+"-t3") {
+		t.Errorf("b's turn is not the session's third: %q", body)
+	}
+	if err := b.s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	// c's resolver: stale behind b's write — the runtime's claim then
+	// holds a fresh Session, not the stale value again.
+	stale := c.s
+	s, _, err := c.resolve(ctx, servePublicID)
+	if err != nil || s == nil {
+		t.Fatalf("c's resolve after b wrote = %v, %v", s, err)
+	}
+	defer func() { _ = s.Close(ctx) }()
+	if s == stale {
+		t.Fatal("c's resolver handed back the stale Session")
+	}
+	if err := s.Claim(ctx); err != nil {
+		t.Fatalf("the runtime's claim on c's resolved Session = %v, want nil", err)
+	}
 }

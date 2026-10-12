@@ -15,10 +15,10 @@ import axe from "axe-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
-import { APP_LINK_FIX, APP_RUN, APP_RUN_FIX, PLAYGROUND_OFF, READ_TOKEN, RUNTIMES_UNREAD, SESSION_UNREAD, SUBAGENT_CALL } from "@/lib/honesty"
+import { APP_LINK_FIX, APP_RUN, APP_RUN_FIX, CAPS_UNREAD, PLAYGROUND_OFF, READ_TOKEN, RUNTIMES_UNREAD, SESSION_UNREAD, SUBAGENT_CALL } from "@/lib/honesty"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
-import { FakeStudio } from "@/test/fake-studio"
+import { apiError, FakeStudio } from "@/test/fake-studio"
 import { APP_PUB, APP_SESSION, CALL, CHILD, NOPUB, PARKED, PLAIN, REJECTED, RESUMED, RUNTIMES_500, runtimeRow, serveAppTurn, STEER_FAILED } from "@/test/appturn-fixture"
 import type { AppTurnOptions } from "@/test/appturn-fixture"
 
@@ -143,6 +143,20 @@ describe("the run page when a read fails", () => {
     expect(fake.calls(`POST runs/${PARKED}/approvals`)).toHaveLength(0)
     await axeClean(parked())
   })
+
+  it("a failed meta read: the events are drawn and the parked block says the read failed, no verb", async () => {
+    // Each new observer of the failed meta reads it again (pending
+    // once more): the walk must not start over per read.
+    const fake = serveAppTurn(new FakeStudio(), { studioMeta: true })
+      .on("GET meta", () => apiError(500, "internal", "meta store unavailable"))
+      .install()
+    renderApp(`/runs/${PARKED}?view=story`)
+    await waitFor(() => expect(line("unread")).toBe(`${CAPS_UNREAD}: meta store unavailable`))
+    expect(document.body.textContent).not.toContain("no events were recorded for this run")
+    expect(document.querySelector(`[data-pending-call="${CALL.id}"]`)).toBeTruthy()
+    expect(parked().querySelectorAll("button")).toHaveLength(0)
+    expect(fake.calls(`POST runs/${PARKED}/approvals`)).toHaveLength(0)
+  })
 })
 
 describe("the run page when no Sessions runtime of the run's service acts", () => {
@@ -227,7 +241,9 @@ describe("the run page's gate follows the facts while the turn is parked", () =>
   })
 
   it("a 403 holds while the gate reads the same; a later gate that changed clears it", async () => {
-    const o: AppTurnOptions = { outcome: "refused" }
+    // reconnects: the runtimes read after the 403 still names rt_01 with
+    // Sessions — the same gate the refusal answered.
+    const o: AppTurnOptions = { outcome: "refused", reconnects: true }
     await open(o)
     fireEvent.click(verb("continue")!)
     await waitFor(() => expect(line()).toBe(SVC_WORDS))

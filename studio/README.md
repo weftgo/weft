@@ -939,8 +939,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 241,541 B raw / 77,560 B gzip
-(75.7 KiB, the ledger's last row, "phase 6 review fixes (D)"; 4,360 B — 4.3 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 242,553 B raw / 77,926 B gzip
+(76.1 KiB, the ledger's last row, "phase 6 review fixes (E)"; 3,994 B — 3.9 KiB — of headroom under
 the 81,920 B, 80 KiB, cap). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
 build kept its indentation and newlines: 281,470 B raw / 81,358 B gzip,
@@ -997,7 +997,7 @@ so a rebuild that forgets its row fails studio-check. The row
 `"minified"` (73,706 B) is the minify lever, not an item: from it on,
 every row is measured on the minified bundle and is not comparable
 byte for byte with the rows before it, which stay as history (the
-table folds its −7.5 KiB into the unbudgeted line, −0.6 KiB net with
+table folds its −7.5 KiB into the unbudgeted line, −0.3 KiB net with
 the unbudgeted rows after it, as `budget.test.ts` pins). The per-item
 marks are evidence, not a gate; the build itself fails only over the
 cap (`vite.panel.config.ts`).
@@ -1128,10 +1128,14 @@ child run (`<parent>/<step>/<call>`) reads `parked · a subagent's call —
 decide on the parent turn <parent>` (a link on the run page), no verb:
 only the parent's SUBAGENT_PENDING call is pending on the session. On a
 Studio without the playground the line is `… the playground is off on
-this Studio` with `meta.capabilities_off`'s fix (the run page; the panel
-reads it once it hands its meta to `refusalWords`), and a failed read —
-meta, the session, the runtimes — is said as such (`could not read the
-session: …`), never a verdict and never an endless check. While the turn
+this Studio` with `meta.capabilities_off`'s fix (both surfaces hand
+their meta to `refusalWords`), and a failed read — meta, the session,
+the runtimes — is said as such (`could not read the session: …`), never
+a verdict and never an endless check; under a failed meta the run page
+still draws the run's events and the parked block (`could not read the
+Studio's capabilities: …`). A refusal in the panel holds until a
+runtimes read started after it applies — a read that fails, or one
+still in flight, keeps it. While the turn
 is parked or running the run page reads the session and the runtimes
 again every 5 s: a turn another surface resumed reads `decided`, and a
 403 holds only until the gate it answered changes (a runtime
@@ -1140,7 +1144,9 @@ gate, in the same words (`parity.test.ts`). The demo is `thread/examples/approva
 `WEFT_ENV=dev go run ./thread/examples/approvals -serve 127.0.0.1:7331`,
 ask "deploy to prod", decide it in the panel docked on the page; a
 restart over the same `-dir` resumes the session stored under its
-public id (one public id, one session).
+public id (one public id, one session), and a serve whose cached Session
+another serve's write left stale (`thread.ErrStale`) closes it and opens
+the session again, in its ask and its resolver.
 Without `WEFT_ENV=dev` the turn is read-only because the link is closed:
 the options are set, but no runtime of the service is connected, and the
 line says to open the link.

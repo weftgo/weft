@@ -1150,16 +1150,10 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
     expect([panel, studio]).toEqual(["steered", "steered"])
   })
 
-  // A Studio without Playground(true): the run page says so in
+  // A Studio without Playground(true): both say so in
   // meta.capabilities_off's words through lib/honesty.ts's refusalWords
-  // (its AppGateFacts argument). The panel calls the same function but
-  // does not pass its meta yet (src/panel/element.ts's approvals(): a
-  // panel-side edit outside this change), so it still reads "no runtime
-  // of service app is connected". it.fails pins that divergence: once the
-  // panel passes `s.meta ? { capabilities: s.meta.capabilities,
-  // capabilities_off: s.meta.capabilities_off } : undefined` this turns
-  // red — make it a plain `it` then.
-  it.fails("a Studio without the playground: the same line on both (fails until the panel passes its meta to refusalWords)", async () => {
+  // (its AppGateFacts argument, the meta each surface read).
+  it("a Studio without the playground: the same line on both", async () => {
     serveAppTurn(new FakeStudio(), { noPlayground: true }).install()
     const el = await mount({ "data-endpoint": "http://studio.test/studio/", "data-open": "true", "data-public-id": APP_PUB })
     await vi.waitFor(() => expect(all(el, ".weft-turn").some((b) => b.textContent.includes(APP_PARKED))).toBe(true), { timeout: 5_000 })

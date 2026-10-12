@@ -3930,7 +3930,9 @@ export class WeftDevtools extends HTMLElement {
     box.appendChild(el("div", "weft-step-h", [el("span", undefined, next ? "decided" : "awaiting decision (read-only)")]))
     const body = el("div", "weft-step-b")
     const read = tokenScopeOf(this.cfg.token) === "read"
-    const line = refusalLine(refusalWords(kind, run, s.runtimes, read, refused, act && !read ? s.rtErr : ""))
+    const line = refusalLine(
+      refusalWords(kind, run, s.runtimes, read, refused, act && !read ? s.rtErr : "", s.meta ? { capabilities: s.meta.capabilities, capabilities_off: s.meta.capabilities_off } : undefined)
+    )
     const waiting = kind === "read-only" && act && !s.rtRead && !refused
     // A failed runtimes read: its error, no verdict, no verbs.
     const unread = kind === "read-only" && act && !read && !!s.rtErr && !refused

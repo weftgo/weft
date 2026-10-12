@@ -14,5 +14,14 @@ export function useCapabilities() {
   const has = (name: string) => caps.includes(name)
   const why = (name: string): string | undefined =>
     has(name) ? undefined : meta.data?.capabilities_off?.[name]
-  return { caps, has, why, loading: meta.isPending }
+  // loading is the first read only: a meta that failed is read again
+  // by every new observer (its data never came), and each refetch puts
+  // the query back to pending — never loading again then, or a page
+  // that waits on it (the run page's event walk) starts over per mount.
+  return {
+    caps,
+    has,
+    why,
+    loading: meta.isPending && meta.errorUpdateCount === 0,
+  }
 }

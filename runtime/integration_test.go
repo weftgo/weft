@@ -1360,8 +1360,12 @@ func TestDebuggerBreakpointsAndSteer(t *testing.T) {
 	if err := e.p.ForceFlush(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	// The records arrive through the pipeline (otel → OTLP ingest →
+	// obsdb), not the loop: CI's shared runner once took longer than
+	// 5 s here (0.15.1's offline job, green on the next commit), so
+	// the wait is generous — the assertion is on presence, not speed.
 	found := false
-	deadline = time.Now().Add(5 * time.Second)
+	deadline = time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) && !found {
 		_, body := e.api(t, http.MethodGet, "/api/runs/"+steeredAt+"/events?after=-1&limit=100", "")
 		if strings.Contains(body, "steered") && strings.Contains(body, "tracking link") {

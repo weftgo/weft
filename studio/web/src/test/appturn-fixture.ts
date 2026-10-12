@@ -106,6 +106,10 @@ export interface AppTurnOptions {
   debugScope?: string
   /** What the decision's command ends in; "refused" is the route's 403. */
   outcome?: Outcome | "refused"
+  /** After a 403 GET /api/runtimes answers as before (a Sessions runtime
+   * connected again); by default it then agrees with the 403 (the
+   * runtime connected without Sessions). */
+  reconnects?: boolean
   /** The steer's command ends failed with STEER_FAILED. */
   steerFailed?: boolean
   /** The turn was already resumed: s_app-t2 is listed from the start. */
@@ -140,6 +144,7 @@ export function serveAppTurn(fake: FakeStudio, o: AppTurnOptions = {}): FakeStud
   const rows = () => (resumed ? [resumedRow(), parked, plainRow()] : [parked, plainRow()])
   const doc = (r: RunRow): RunDoc => ({ ...r, children: [], holes: [] })
   let polls = 0
+  let refused = false
   fake
     .on("GET meta", meta)
     .on("GET sessions", () => ({
@@ -152,7 +157,11 @@ export function serveAppTurn(fake: FakeStudio, o: AppTurnOptions = {}): FakeStud
       const runs = rows().filter((r) => !pub || r.public_id === pub)
       return { total: runs.length, runs, next_before: null }
     })
-    .on("GET runtimes", () => (o.runtimesError ? apiError(500, "internal", RUNTIMES_500) : { runtimes: o.runtimes ?? [runtimeRow()] }))
+    .on("GET runtimes", () =>
+      o.runtimesError
+        ? apiError(500, "internal", RUNTIMES_500)
+        : { runtimes: refused && !o.reconnects ? [runtimeRow({ sessions: false })] : (o.runtimes ?? [runtimeRow()]) }
+    )
     .on(`GET sessions/${APP_SESSION}`, () => o.sessionError ? apiError(500, "internal", "session store unavailable") : ({
       id: APP_SESSION,
       public_id: APP_PUB,
@@ -176,8 +185,11 @@ export function serveAppTurn(fake: FakeStudio, o: AppTurnOptions = {}): FakeStud
     .on(`GET runs/${PLAIN}/events`, pagedEvents(events(PLAIN, true)))
     .on(`GET runs/${PLAIN}/transcript`, transcript())
     .on(`GET runs/${PLAIN}/spans`, { spans: [] })
-  const verb = (run: string) => () =>
-    o.outcome === "refused" ? appOwnedRefusal(run) : json({ command_id: "cmd_app", state: "queued", run_id: run, runtime_id: "rt_01" }, 202)
+  const verb = (run: string) => () => {
+    if (o.outcome !== "refused") return json({ command_id: "cmd_app", state: "queued", run_id: run, runtime_id: "rt_01" }, 202)
+    refused = true
+    return appOwnedRefusal(run)
+  }
   fake
     .on(`POST runs/${PARKED}/approvals`, verb(PARKED))
     .on(`POST runs/${PARKED}/steer`, verb(PARKED))

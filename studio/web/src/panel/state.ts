@@ -229,6 +229,9 @@ export interface AppVerb {
   error?: string
   fix?: string
   run?: string
+  /** A refusal: the runtimes read started last when it came — a
+   * later read (rtN past it) re-gates the turn. */
+  rt?: number
 }
 
 export interface PanelState {
@@ -271,6 +274,8 @@ export interface PanelState {
   /** The last runtimes read failed (its message): the gate gives no
    * verdict then — never "no runtime connected". */
   rtErr: string
+  /** The newest runtimes read applied (its sequence number). */
+  rtN: number
   /** The drawer's running or finished experiment (the result pane). */
   result: ExperimentResult | null
   /** The drawer's "will be sent" preview (plan F2, capability
@@ -327,6 +332,7 @@ export function emptyPanelState(): PanelState {
     runtimes: [],
     rtRead: false,
     rtErr: "",
+    rtN: 0,
     result: null,
     preview: null,
     breakpoints: [],
@@ -910,7 +916,7 @@ export class PanelModel {
   private clearTimers() {
     for (const t of this.timers) clearTimeout(t)
     this.timers.clear()
-    this.devTimer = this.staleTimer = this.liveTimer = this.pinTimer = null
+    this.devTimer = this.staleTimer = this.liveTimer = this.pinTimer = this.rtTimer = null
   }
 
   /** refresh reloads the header and the turn list. */
@@ -2070,7 +2076,9 @@ export class PanelModel {
     } catch (err) {
       const fix = err instanceof PanelApiError ? (err.body as { fix?: unknown } | null)?.fix : undefined
       this.rtAt = 0 // the gate was stale: read the runtimes again
-      set({ state: "refused", error: messageOf(err), ...(typeof fix === "string" ? { fix } : {}) })
+      this.cancel(this.rtTimer)
+      this.rtTimer = null
+      set({ state: "refused", error: messageOf(err), rt: this.rtSeq, ...(typeof fix === "string" ? { fix } : {}) })
       return
     }
     if (this.disposed) return
@@ -2094,15 +2102,29 @@ export class PanelModel {
 
   /** wantRuntimes reads GET /api/runtimes for the app turn's gate
    * (plan F4.3: a Sessions runtime of the run's service), at most once
-   * every RT_MS while a parked or running app turn is drawn. */
+   * every RT_MS while a parked or running app turn is drawn — a
+   * quiet parked turn too: a throttled ask leaves one timer that draws
+   * again when the window ends, and that draw asks again. */
   private rtAt = 0
+  private rtSeq = 0
+  private rtTimer: ReturnType<typeof setTimeout> | null = null
   wantRuntimes() {
-    if (this.disposed || Date.now() - this.rtAt < RT_MS) return
+    const wait = this.rtAt + RT_MS - Date.now()
+    if (this.disposed || this.rtTimer) return
+    if (wait > 0) {
+      this.rtTimer = this.after(wait, () => {
+        this.rtTimer = null
+        this.emit()
+      })
+      return
+    }
     this.rtAt = Date.now()
+    const n = ++this.rtSeq
     fetchRuntimes(this.ep)
       .then((d) => {
         this.state.runtimes = Array.isArray(d.runtimes) ? d.runtimes : []
         this.state.rtErr = ""
+        this.state.rtN = Math.max(this.state.rtN, n)
       })
       .catch((err: unknown) => {
         this.state.rtErr = messageOf(err)

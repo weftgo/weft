@@ -939,8 +939,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 230,920 B raw / 73,706 B gzip
-(72.0 KiB, the ledger's last row; 8,214 B — 8.0 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 241,541 B raw / 77,560 B gzip
+(75.7 KiB, the ledger's last row, "phase 6 review fixes (D)"; 4,360 B — 4.3 KiB — of headroom under
 the 81,920 B, 80 KiB, cap). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
 build kept its indentation and newlines: 281,470 B raw / 81,358 B gzip,
@@ -997,7 +997,8 @@ so a rebuild that forgets its row fails studio-check. The row
 `"minified"` (73,706 B) is the minify lever, not an item: from it on,
 every row is measured on the minified bundle and is not comparable
 byte for byte with the rows before it, which stay as history (the
-table folds its −7.5 KiB into the unbudgeted line, −3.1 KiB net). The per-item
+table folds its −7.5 KiB into the unbudgeted line, −0.6 KiB net with
+the unbudgeted rows after it, as `budget.test.ts` pins). The per-item
 marks are evidence, not a gate; the build itself fails only over the
 cap (`vite.panel.config.ts`).
 
@@ -1113,13 +1114,19 @@ app's sessions — fix: set runtime.Sessions(resolver) …` when one is
 connected without it, auth.go's `this token is read-only: mint it with
 "playground": true to act` for a read-scoped token, and the 403's own
 once one has answered (`lib/honesty.ts` holds them; a test pins them to
-`studio/appturn.go` and `studio/auth.go`). A plain Generate's park (no
+`studio/appturn.go` and `studio/auth.go`) — until a later runtimes read
+says the verbs' gate holds again (the runtime reconnected, the fix
+applied), which gives them back. The gate reads `GET /api/runtimes`
+at most every 10 s while such a turn is drawn, on a timer too, so a
+quiet parked turn follows the link opening without a click. A plain Generate's park (no
 session or public id) reads `parked · app-owned run · the app resumes it
 (weft.Approve)` with the `thread.PublicID(...)` fix. The run page draws
 the same block under the same gate, in the same words
 (`parity.test.ts`). The demo is `thread/examples/approvals -serve`:
 `WEFT_ENV=dev go run ./thread/examples/approvals -serve 127.0.0.1:7331`,
-ask "deploy to prod", decide it in the panel docked on the page.
+ask "deploy to prod", decide it in the panel docked on the page; a
+restart over the same `-dir` resumes the session stored under its
+public id (one public id, one session).
 Without `WEFT_ENV=dev` the turn is read-only because the link is closed:
 the options are set, but no runtime of the service is connected, and the
 line says to open the link.
@@ -1258,7 +1265,7 @@ is not retried, cancel again. Auth is steer's:
 the dev token or setup A's loopback, a playground-scoped panel token inside
 its public id; a read panel token is 403.
 
-The app's own turns (plan F4.1). A run no runtime started is the app's: its approvals, steer and cancel go through a connected runtime of the run's service (the run row's `service`, the registration's `service`) installed with `runtime.Sessions(resolver)` — `/api/runtimes` reports it as `"sessions": true`, and `meta.debug_scope` reads `"own+runtime"` while one is connected. The route then forwards the verb as an `event: session` command (`{command_id, verb: decide|steer|cancel, public_id, session_id, run_id, call_id?, decision?, reason?, content?, message?, actor?}`, addressed by the run row's `weft.public_id` and `weft.session.id`) and answers **202** `{command_id, state: "queued", run_id, runtime_id}` at once; the client polls `GET /api/playground/commands/{id}`. The runtime claims the app's Session writer lease before it acks, so its refusals arrive on the row as `state: "rejected"` with `error`: `the app is writing this session; fork instead` (another writer holds the session — nothing written), `no session for this public id`, `this session requires signed decisions: …` (a `thread.RequireSigned` session — the app decides it with `DecideSigned`), `cancel is not supported on an app turn` (thread has no per-turn cancel), or the resolver's own error. Two answers arrive after the ack, as `state: "finished"`, `status: "failed"`, nothing written: a steer whose run is not the turn running now (`no running turn to steer for run <id> (…)`, naming the run running instead when there is one — `thread.Session.Steer` decides it under the session's lock with the run's id, so the call never starts a turn and never lands in a newer one; a delivered steer that misses its drain point — StopWhen, a park, the run ending first — still becomes a follow-up turn under ADR 0019's rule: the finished ack then reads `succeeded` for the named run, and the follow-up turn shows up later as the session's next run), and a lease lost between the claim and the write (the locked sentence). With several replicas of one service, Studio picks the Sessions runtime seen most recently, which may not be the process holding the session: it answers `the app is writing this session; fork instead` (a shared store) or `no session for this public id` (per-process stores) — misleading, but safe: nothing is written. A decision's finished ack names the resumed turn (`<session>-tN`, the app's run — never `weft.playground`). Without such a runtime the three verbs answer alike, **403** `{"error":{"code":"forbidden","message":"app-owned turn · read-only: …"},"fix":"set runtime.Sessions(resolver) at runtime.Install in the app …"}`; a run that is not a turn of a thread session with a public id is 403 "app-owned turn" with the fix `thread.PublicID(...)`. Identity rules are every playground verb's: the dev token or setup A loopback; a playground panel token inside its own public id (another's 403); a read token 403.
+The app's own turns (plan F4.1). A run no runtime started is the app's: its approvals, steer and cancel go through a connected runtime of the run's service (the run row's `service`, the registration's `service`) installed with `runtime.Sessions(resolver)` — `/api/runtimes` reports it as `"sessions": true`, and `meta.debug_scope` reads `"own+runtime"` while one is connected. The route then forwards the verb as an `event: session` command (`{command_id, verb: decide|steer|cancel, public_id, session_id, run_id, call_id?, decision?, reason?, content?, message?, actor?}`, addressed by the run row's `weft.public_id` and `weft.session.id`) and answers **202** `{command_id, state: "queued", run_id, runtime_id}` at once; the client polls `GET /api/playground/commands/{id}`. The runtime claims the app's Session writer lease before it acks, so its refusals arrive on the row as `state: "rejected"` with `error`: `the app is writing this session; fork instead` (another writer holds the session — nothing written), `no session for this public id`, `the session resolver answered session <id> for public id <pub>, not the run's session <id>` (the resolver handed back another session under that public id — one public id naming two sessions, e.g. an app that creates a new session per process start; nothing written), `this session requires signed decisions: …` (a `thread.RequireSigned` session — the app decides it with `DecideSigned`), `cancel is not supported on an app turn` (thread has no per-turn cancel), or the resolver's own error. Two answers arrive after the ack, as `state: "finished"`, `status: "failed"`, nothing written: a steer whose run is not the turn running now (`no running turn to steer for run <id> (…)`, naming the run running instead when there is one — `thread.Session.Steer` decides it under the session's lock with the run's id, so the call never starts a turn and never lands in a newer one; a delivered steer that misses its drain point — StopWhen, a park, the run ending first — still becomes a follow-up turn under ADR 0019's rule: the finished ack then reads `succeeded` for the named run, and the follow-up turn shows up later as the session's next run), and a lease lost between the claim and the write (the locked sentence). With several replicas of one service, Studio picks the Sessions runtime seen most recently, which may not be the process holding the session: it answers `the app is writing this session; fork instead` (a shared store) or `no session for this public id` (per-process stores) — misleading, but safe: nothing is written. A decision's finished ack names the resumed turn (`<session>-tN`, the app's run — never `weft.playground`). Without such a runtime the three verbs answer alike, **403** `{"error":{"code":"forbidden","message":"app-owned turn · read-only: …"},"fix":"set runtime.Sessions(resolver) at runtime.Install in the app …"}`; a run that is not a turn of a thread session with a public id is 403 "app-owned turn" with the fix `thread.PublicID(...)`. Identity rules are every playground verb's: the dev token or setup A loopback; a playground panel token inside its own public id (another's 403); a read token 403.
 
 **Derived runs.** A stock OTel app (no weft) that exports GenAI spans with
 `gen_ai.conversation.id` gets run rows (docs/record-contract.md §9): one per

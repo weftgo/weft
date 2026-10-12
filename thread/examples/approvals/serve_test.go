@@ -16,6 +16,7 @@ import (
 	"github.com/weftgo/weft/runtime"
 	"github.com/weftgo/weft/scope"
 	"github.com/weftgo/weft/studio"
+	"github.com/weftgo/weft/thread"
 	"github.com/weftgo/weft/thread/jsonl"
 )
 
@@ -302,4 +303,64 @@ func lastText(msgs []weft.Message) string {
 		}
 	}
 	return ""
+}
+
+// TestServedRestartResumesTheSession: two serves over one -dir, one
+// after the other, are one session — the second opens the session
+// stored under the public id instead of creating a second one, so the
+// panel's scope never lists another session's parked turn; and a turn
+// parked before the restart is the resolver's to decide before any new
+// question.
+func TestServedRestartResumesTheSession(t *testing.T) {
+	ctx := context.Background()
+	dir := filepath.Join(t.TempDir(), "served")
+	serveOnce := func() *app {
+		st, err := jsonl.Open(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return &app{st: st, agent: servedAgent()}
+	}
+	ask := func(a *app, question string) string {
+		rec := httptest.NewRecorder()
+		a.handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/ask", strings.NewReader(question)))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("ask %q = %d %q", question, rec.Code, rec.Body.String())
+		}
+		return scope.Parse(rec.Header().Get(scope.HeaderName)).RunID
+	}
+
+	first := serveOnce()
+	ask(first, "status?")
+	ask(first, "deploy to prod")
+	id := first.s.ID()
+	if err := first.s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	second := serveOnce()
+	s, release, err := second.resolve(ctx, servePublicID)
+	if err != nil || s == nil || release != nil {
+		t.Fatalf("resolve after the restart = %v, %v (want the stored session)", s, err)
+	}
+	defer func() { _ = s.Close(ctx) }()
+	if s.ID() != id {
+		t.Fatalf("the restart resolves session %s, want the stored %s", s.ID(), id)
+	}
+	if p := s.Pending(); len(p) != 1 || p[0].CallID != "call_deploy_2" {
+		t.Fatalf("the parked deploy is not restored: %+v", p)
+	}
+	if _, err := s.Decide(ctx, thread.Deny("call_deploy_2", "not today")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.WaitIdle(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if run := ask(second, "status?"); !strings.HasPrefix(run, id+"-") {
+		t.Errorf("the restarted serve's turn %s is not session %s's", run, id)
+	}
+	page, err := thread.List(ctx, second.st, thread.Query{Meta: map[string]string{"weft.public_id": servePublicID}})
+	if err != nil || len(page.Sessions) != 1 {
+		t.Fatalf("sessions under %s = %d (%v), want 1", servePublicID, len(page.Sessions), err)
+	}
 }

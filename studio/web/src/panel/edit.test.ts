@@ -490,5 +490,5 @@ describe("review fixes (session 8)", () => {
     fail()
     await settle()
     expect(asOf.has(`${RUN}#2`)).toBe(false)
-  })
+  }, 15_000) // a mount, two edits and a rescope: 5 s timed out under a loaded full run (passes alone)
 })

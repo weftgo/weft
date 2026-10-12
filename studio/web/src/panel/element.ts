@@ -3912,7 +3912,12 @@ export class WeftDevtools extends HTMLElement {
    * Generate's park says the app resumes it. */
   private approvals(run: RunRow, pending: ToolCallPart[], kind: ParkedKind, s: PanelState): HTMLElement {
     const runID = run.id
-    const sent = (id: string): AppVerb | undefined => s.app[`${runID}:${id}`]
+    // A refusal a later runtimes read re-gated to decide is history:
+    // the verbs come back (the runtime reconnected, the fix applied).
+    const sent = (id: string): AppVerb | undefined => {
+      const v = s.app[`${runID}:${id}`]
+      return kind === "decide" && v?.state === "refused" && (v.rt ?? 0) < s.rtN ? undefined : v
+    }
     const refused = pending.map((c) => sent(c.id)).find((v) => v?.state === "refused" && v.fix)
     const act = this.canAct(s)
     if (kind === "decide" && act && !refused) {

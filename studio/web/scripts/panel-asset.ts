@@ -31,8 +31,12 @@ const bytes = await readFile(src)
 // panel refuses a newer Studio, §5.1). An asset named for one version
 // and stamped with another is a stale dist: fail here, not in a
 // user's page.
-const stamp = new RegExp(`["'\`]${version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["'\`]`)
-if (!stamp.test(bytes.toString("utf8"))) {
+// The stamp's two exact forms are normalizeStamp's ("vX" or `vX`,
+// matching quotes — the Go reader's rule): it throws without either.
+let normalized: string
+try {
+  normalized = normalizeStamp(bytes.toString("utf8"), version)
+} catch {
   console.error(
     `studio: dist/panel/panel.js is not stamped ${version} — rebuild it ('make studio-build') before staging the asset`
   )
@@ -43,7 +47,7 @@ if (!stamp.test(bytes.toString("utf8"))) {
 // normalized, so the asset's figure is the ledger's row — node:zlib at
 // its default level reads ≈ 700 B larger and would refuse a bundle the
 // build passed.
-const gz = gzipSize(normalizeStamp(bytes.toString("utf8"), version))
+const gz = gzipSize(normalized)
 if (gz > 80 * 1024) {
   console.error(`studio: panel.js is ${gz} bytes gzipped, over the 81920 budget (WEFT-DEVTOOLS §5.1)`)
   process.exit(1)

@@ -134,6 +134,18 @@ describe("an app turn whose service has a Sessions runtime connected", () => {
     }
   })
 
+  it("a 403 a later runtimes read re-gates to decide gives the verbs back (the runtime reconnected)", async () => {
+    const { el, fake } = await open({ outcome: "refused", reconnects: true })
+    const reads = fake.calls("GET runtimes").length
+    click(button(el, "continue"))
+    // The refusal reads the runtimes again; they still say a Sessions
+    // runtime of the service is connected: the verbs are live again.
+    await vi.waitFor(() => expect(fake.calls("GET runtimes").length).toBeGreaterThan(reads), { timeout: 5_000 })
+    await vi.waitFor(() => expect((button(el, "continue") as HTMLButtonElement | undefined)?.disabled).toBe(false), { timeout: 5_000 })
+    expect(refusedVerbs(el)).toHaveLength(0)
+    expect($(el, "[data-weft-app-owned]")).toBeNull()
+  })
+
   it("steer on the running app turn posts its run id; cancel is never offered", async () => {
     const { el, fake } = await open({ running: true })
     const input = $(el, "[data-weft-app-steer] input") as HTMLInputElement
@@ -178,6 +190,24 @@ describe("an app turn no Sessions runtime of its service acts on", () => {
   it("no runtime of the service connected (the link closed): the fix opens the link", async () => {
     const { el } = await open({ runtimes: [runtimeRow({ connected: false })] })
     expect(line(el)).toBe(LINK_WORDS)
+  })
+
+  it("a quiet parked turn reads the runtimes again on its own: the link opened, the verbs come", async () => {
+    // Timers run in real time, and 10 s more on demand: no frame and
+    // no click arrives after the first read.
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ["setTimeout", "clearTimeout", "Date"] })
+    try {
+      const o: AppTurnOptions = { runtimes: [runtimeRow({ connected: false })] }
+      const { el, fake } = await open(o)
+      expect(line(el)).toBe(LINK_WORDS)
+      const reads = fake.calls("GET runtimes").length
+      o.runtimes = [runtimeRow()]
+      vi.advanceTimersByTime(10_000)
+      await vi.waitFor(() => expect(fake.calls("GET runtimes").length).toBeGreaterThan(reads), { timeout: 5_000 })
+      await vi.waitFor(() => expect((button(el, "continue") as HTMLButtonElement | undefined)?.disabled).toBe(false), { timeout: 5_000 })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("breakpoints_own alone (debug_scope own+runtime): still read-only", async () => {

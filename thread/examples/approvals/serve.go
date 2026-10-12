@@ -105,7 +105,9 @@ func opsAgent(opts ...weft.Option) *weft.Agent {
 }
 
 // app holds the served session: one Session for the process's life
-// (thread's writer lease), created on the first question.
+// (thread's writer lease): the stored session under the public id when
+// one exists — a restart over the same -dir resumes it, so one public
+// id never names two sessions — else created on the first question.
 type app struct {
 	st    thread.Storage
 	agent *weft.Agent
@@ -113,30 +115,55 @@ type app struct {
 	s     *thread.Session
 }
 
-// session answers the app's live Session, creating it once.
+// session answers the app's live Session, opening or creating it once.
 func (a *app) session(ctx context.Context) (*thread.Session, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.s == nil {
-		s, err := thread.Create(ctx, a.st, a.agent, thread.PublicID(servePublicID))
-		if err != nil {
-			return nil, err
-		}
-		a.s = s
+	return a.load(ctx, true)
+}
+
+// load opens the newest stored session whose create-time meta carries
+// the served public id or, with create and none stored, creates it;
+// (nil, nil) without create when none is stored. a.mu is held.
+func (a *app) load(ctx context.Context, create bool) (*thread.Session, error) {
+	if a.s != nil {
+		return a.s, nil
 	}
-	return a.s, nil
+	page, err := thread.List(ctx, a.st, thread.Query{Limit: 1, Meta: map[string]string{"weft.public_id": servePublicID}})
+	if err != nil {
+		return nil, err
+	}
+	var s *thread.Session
+	switch {
+	case len(page.Sessions) > 0:
+		s, err = thread.Open(ctx, a.st, page.Sessions[0].ID, a.agent)
+	case create:
+		s, err = thread.Create(ctx, a.st, a.agent, thread.PublicID(servePublicID))
+	default:
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	a.s = s
+	return s, nil
 }
 
 // resolve is the runtime.Sessions resolver: the app's LIVE Session
-// behind its public id (nothing to release), or (nil, nil, nil) — not
-// this app's — before the first question created it.
-func (a *app) resolve(_ context.Context, publicID string) (*thread.Session, func(), error) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if publicID != servePublicID || a.s == nil {
+// behind its public id (nothing to release) — the stored one opened
+// when no question has yet, so a turn parked before a restart is
+// decided — or (nil, nil, nil), not this app's, when none is stored.
+func (a *app) resolve(ctx context.Context, publicID string) (*thread.Session, func(), error) {
+	if publicID != servePublicID {
 		return nil, nil, nil
 	}
-	return a.s, nil, nil
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	s, err := a.load(ctx, false)
+	if err != nil || s == nil {
+		return nil, nil, err
+	}
+	return s, nil, nil
 }
 
 // install is the app's runtime.Install: its agent, its store for

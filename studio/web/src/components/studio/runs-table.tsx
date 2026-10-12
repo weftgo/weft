@@ -488,9 +488,15 @@ export function RunsTable({
 }
 
 /** StoppedByLine is what ended the run (U3.2), lib/stopped-by.ts's
- * word under the id; the error line beside it carries the detail. */
+ * word under the id; the error line beside it carries the detail. The
+ * default exit — a succeeded run the model answered — gets no line (the
+ * run header's chip still names it): the table's line is for the
+ * non-default exits. */
 function StoppedByLine({ run }: { run: RunRow }) {
-  const w = stoppedByWords(run.stopped_by, run.cancel_cause)
+  const w =
+    run.stopped_by === "final_answer" && run.status === "succeeded"
+      ? null
+      : stoppedByWords(run.stopped_by, run.cancel_cause)
   return w ? (
     <div
       className="truncate font-mono text-[11px] text-faint"

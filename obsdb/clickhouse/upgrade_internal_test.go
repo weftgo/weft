@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -396,7 +397,10 @@ func TestUpgradeTo0011BackfillsStoppedBy(t *testing.T) {
 			TraceID: "0102030405060708090a0b0c0d0e0f10", SpanID: "0a0b0c0d0e0f0201", Name: "invoke_agent a", Kind: 1,
 			Start: at, End: at.Add(time.Second), StatusCode: 2, StatusMessage: "context canceled", Service: "svc",
 			Attrs: map[string]any{"gen_ai.operation.name": "invoke_agent", "weft.run.id": "r_cancel",
-				"weft.run.stopped_by": "canceled", "weft.cancel.cause": "thread.interrupted"},
+				"weft.run.stopped_by": "canceled", "weft.cancel.cause": "thread.interrupted",
+				// Caller metadata beside the keys U3.1 leaked into Meta: the
+				// reader drops the leaked keys and keeps this one.
+				"tenant": "acme"},
 			Resource: map[string]any{"service.name": "svc"},
 		}},
 		Records: []obsdb.Record{{
@@ -426,6 +430,9 @@ func TestUpgradeTo0011BackfillsStoppedBy(t *testing.T) {
 		}
 		if r.StoppedBy != c.by || r.CancelCause != c.cause {
 			t.Errorf("%s after 0011 = stopped_by %q, cancel_cause %q; want %q, %q", c.id, r.StoppedBy, r.CancelCause, c.by, c.cause)
+		}
+		if c.id == "r_cancel" && !reflect.DeepEqual(r.Meta, map[string]string{"tenant": "acme"}) {
+			t.Errorf("r_cancel's meta after 0011 = %v, want only the caller's {tenant: acme} (the leaked stopped_by/cancel.cause dropped)", r.Meta)
 		}
 	}
 	page, err := db.Runs(ctx, obsdb.RunQuery{StoppedBy: "has_tool_call:"})

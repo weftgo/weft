@@ -2252,7 +2252,7 @@ describe("stopped by on both surfaces (U3.2)", () => {
         status: "failed",
         stopped_by: "max_steps",
         stop_reason: "tool_calls",
-        err: "weft: run failed at step 1: weft: max steps reached",
+        err: "weft: run failed at step 1: weft: run exceeded the maximum number of steps",
         steps: 1,
       },
       chip: "max steps reached",
@@ -2276,11 +2276,11 @@ describe("stopped by on both surfaces (U3.2)", () => {
         status: "failed",
         stopped_by: "loop_detected",
         stop_reason: "tool_calls",
-        err: "weft: run failed at step 1: weft: the model repeated the same tool calls too many times",
+        err: "weft: run failed at step 1: weft: the model repeated the same tool calls too many times: 3 identical steps in a row",
         steps: 1,
       },
-      chip: "loop detected",
-      end: "■ loop detected at step 0",
+      chip: "loop detected (3 identical steps in a row)",
+      end: "■ loop detected at step 0 (3 identical steps in a row)",
     },
     {
       name: "a cancelled run",
@@ -2289,7 +2289,7 @@ describe("stopped by on both surfaces (U3.2)", () => {
         stopped_by: "canceled",
         cancel_cause: "studio.cancel",
         stop_reason: "tool_calls",
-        err: "context canceled",
+        err: "weft: run failed at step 0: context canceled",
         steps: 1,
       },
       chip: "cancelled · studio.cancel",
@@ -2388,7 +2388,7 @@ describe("stopped by on both surfaces (U3.2)", () => {
     expect(document.querySelector("[data-stop-reason]")).toBeNull()
   })
 
-  it("a failed run with no stopped_by and no run_finish: the old note, the old label", async () => {
+  it("a failed run with no stopped_by and no run_finish ends on its error, the old label", async () => {
     serve(
       {
         doc: {
@@ -2404,14 +2404,37 @@ describe("stopped by on both surfaces (U3.2)", () => {
     vi.stubGlobal("scrollTo", vi.fn())
     renderApp(`/runs/${RUN}?view=story`)
     await waitFor(() =>
+      expect(document.querySelector("[data-story-end]")).toBeTruthy()
+    )
+    // Its Error root span is the terminal record: no "without run_finish".
+    expect(document.querySelector("[data-story-end]")!.textContent).toBe(
+      "■ failed · upstream down"
+    )
+    expect(document.body.textContent).not.toContain(
+      "the stream ended without run_finish"
+    )
+    expect(document.querySelector("a[data-stopped-by]")).toBeNull()
+    expect(document.querySelector("[data-stop-reason]")!.textContent).toBe(
+      "stop reason: tool_calls"
+    )
+  })
+
+  it("an interrupted run with no stopped_by and no run_finish: the old note", async () => {
+    serve(
+      {
+        doc: { status: "interrupted", stop_reason: "tool_calls" },
+        events: events({ finish: false, reason: "tool_calls" }),
+      },
+      true
+    )
+    stubBrowser()
+    vi.stubGlobal("scrollTo", vi.fn())
+    renderApp(`/runs/${RUN}?view=story`)
+    await waitFor(() =>
       expect(document.body.textContent).toContain(
         "the stream ended without run_finish"
       )
     )
     expect(document.querySelector("[data-story-end]")).toBeNull()
-    expect(document.querySelector("a[data-stopped-by]")).toBeNull()
-    expect(document.querySelector("[data-stop-reason]")!.textContent).toBe(
-      "stop reason: tool_calls"
-    )
   })
 })

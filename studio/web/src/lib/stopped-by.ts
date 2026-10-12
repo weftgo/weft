@@ -28,7 +28,15 @@ const LOOP: Record<string, [string, string]> = {
  * cancel cause) to its words; null when the run recorded none. */
 export function stoppedByWords(by?: string, cause?: string): StopWords | null {
   if (!by) return null
-  const [k, arg] = [by.split(":")[0], by.slice(by.indexOf(":") + 1)]
+  // Only a value with a "name:" prefix carries an argument: a bare
+  // custom name ("step_count_is" from a String()) is the name whole.
+  const i = by.indexOf(":")
+  const [k, arg] = i > 0 ? [by.slice(0, i), by.slice(i + 1)] : [by, ""]
+  if (k === "has_tool_call" && i > 0 && !arg)
+    return {
+      word: "stopped by a tool call (StopWhen)",
+      hint: `${SW}HasToolCall()`,
+    }
   if (k === "has_tool_call" && arg)
     return {
       word: `stopped by the tool call ${arg}`,
@@ -50,12 +58,24 @@ export function stoppedByWords(by?: string, cause?: string): StopWords | null {
     : { word: by, hint: "a custom stop condition" }
 }
 
-/** stopDetail is the trailing parenthesised group of a run's error
- * text ("… usage limit (input 300/250, output 150/250)" → "input
- * 300/250, output 150/250"), "" when it has none: the detail is the
- * record's, never invented. */
-export function stopDetail(err?: string): string {
-  return /\(([^()]+)\)\s*$/.exec(err ?? "")?.[1] ?? ""
+/** stopDetail is the detail core's error text carries for a stop, ""
+ * when it has none: the detail is the record's, never invented.
+ *
+ *   - loop_detected, model_retries_exceeded: the text after the
+ *     sentinel's "too many times: " ("… too many times: 3 identical
+ *     steps in a row" → "3 identical steps in a row"; "… : tool "x"
+ *     retried 4 times" → `tool "x" retried 4 times`);
+ *   - canceled: none — the cancel cause is the chip's word, and a
+ *     provider's parenthesised text is not what cancelled the run;
+ *   - otherwise the trailing parenthesised group ("… usage limit
+ *     (input 300/250, output 150/250)" → "input 300/250, output
+ *     150/250"). */
+export function stopDetail(err?: string, by?: string): string {
+  const e = err ?? ""
+  if (by === "canceled") return ""
+  if (by === "loop_detected" || by === "model_retries_exceeded")
+    return /too many times: (.+)$/s.exec(e)?.[1].trim() ?? ""
+  return /\(([^()]+)\)\s*$/.exec(e)?.[1] ?? ""
 }
 
 /** The fields the chip reads off a run row or document. */
@@ -64,6 +84,7 @@ export interface StopRow {
   cancel_cause?: string
   err?: string
   steps?: number
+  status?: string
 }
 
 /** stopChip is the chip's text (the word, the error's detail in
@@ -72,7 +93,7 @@ export interface StopRow {
 export function stopChip(r: StopRow): { text: string; title: string } | null {
   const w = stoppedByWords(r.stopped_by, r.cancel_cause)
   if (!w) return null
-  const d = stopDetail(r.err)
+  const d = stopDetail(r.err, r.stopped_by)
   return {
     text: w.word + (d ? ` (${d})` : ""),
     title: `${w.hint} — stopped_by ${r.stopped_by}`,
@@ -85,12 +106,19 @@ export function stopStep(steps?: number): number | undefined {
   return steps && steps > 0 ? steps - 1 : undefined
 }
 
-/** endCard is the story's last line: "■ <word> at step N (detail)". */
+export const FAILED_WORD = "failed"
+
+/** endCard is the story's last line: "■ <word> at step N (detail)";
+ * for a failed run that named no stop (a model error), "■ failed ·
+ * <err>" — its stored Error root span is the terminal record. */
 export function endCard(r: StopRow): string | null {
   const w = stoppedByWords(r.stopped_by, r.cancel_cause)
-  if (!w) return null
+  if (!w)
+    return r.status === "failed"
+      ? `■ ${FAILED_WORD}${r.err ? ` · ${r.err}` : ""}`
+      : null
   const n = stopStep(r.steps)
-  const d = stopDetail(r.err)
+  const d = stopDetail(r.err, r.stopped_by)
   return `■ ${w.word}${n === undefined ? "" : ` at step ${n}`}${d ? ` (${d})` : ""}`
 }
 
@@ -114,7 +142,13 @@ export function stopReasonLabel(by?: string, stopReason?: string): string {
 export const NO_RUN_FINISH = "the stream ended without run_finish"
 
 /** endedWithoutFinish: say "ended without run_finish" only when no
- * terminal event arrived and the run's span named no stopped_by. */
-export function endedWithoutFinish(finished: boolean, by?: string): boolean {
-  return !finished && !by
+ * terminal event arrived, the run's span named no stopped_by and the
+ * run is not failed — a failed status is derived only from a stored
+ * Error root span, which is terminal (its end card says so). */
+export function endedWithoutFinish(
+  finished: boolean,
+  by?: string,
+  status?: string
+): boolean {
+  return !finished && !by && status !== "failed"
 }

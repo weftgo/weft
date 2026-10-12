@@ -85,7 +85,7 @@ type link struct {
 	instance string
 
 	ctx    context.Context // the link's life: every run this link starts hangs off it
-	cancel context.CancelFunc
+	cancel context.CancelCauseFunc
 	done   chan struct{}
 	// beat is ackHeartbeat as the link was built: the heartbeat cadence
 	// and the registration's heartbeat_ms (one read, so a test that
@@ -141,7 +141,7 @@ func newLink(c *config, reg *registry, url, token string) *link {
 		steerQ:      map[string]chan core.Message{},
 		steerSess:   map[string]forkSteer{},
 	}
-	l.ctx, l.cancel = context.WithCancel(context.Background())
+	l.ctx, l.cancel = context.WithCancelCause(context.Background())
 	if c.local != nil {
 		l.client = inProcessClient(c.local)
 	} else {
@@ -192,7 +192,9 @@ func (l *link) stop() {
 	// The app's own runs stop parking on this link's breakpoints: a
 	// stopped runtime cannot decide them.
 	removeLiveLink(l)
-	l.cancel()
+	// The typed cause names the shutdown on every run still in flight:
+	// its invoke_agent span reads weft.cancel.cause = app.shutdown.
+	l.cancel(causeAppShutdown)
 	if l.started {
 		select {
 		case <-l.done:
@@ -632,6 +634,11 @@ func (l *link) cancelCommand(id string) {
 // with: the run's invoke_agent span reads weft.cancel.cause =
 // studio.cancel (ADR 0016, amendment 2026-10-12).
 const causeStudioCancel = core.CancelCause("studio.cancel")
+
+// causeAppShutdown is the cause the link's own shutdown fells the runs
+// it started with (runtime.Install's shutdown func): weft.cancel.cause =
+// app.shutdown (UX-E-41).
+const causeAppShutdown = core.CancelCause("app.shutdown")
 
 // dispatchDecision is one admitted approval decision's whole life: the
 // parked-run lookup and the check against its pending calls (the

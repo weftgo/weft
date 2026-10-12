@@ -213,3 +213,64 @@ func TestCancelRuntimeStartedRun(t *testing.T) {
 		t.Errorf("second cancel = %d %s, want 409", code, resp)
 	}
 }
+
+// TestCancelAppShutdownCause: a runtime-started run still in flight
+// when the app shuts the runtime down (runtime.Install's shutdown func)
+// ends canceled with the link's own cause — its invoke_agent span reads
+// weft.cancel.cause = app.shutdown, the third control UX-E-41 names
+// beside studio.cancel and thread.interrupted.
+func TestCancelAppShutdownCause(t *testing.T) {
+	e := newE2E(t)
+	model := &holdModel{held: make(chan struct{})}
+	lookup := core.Tool("lookup_order", "Look up an order.", func(ctx context.Context, in struct {
+		OrderID string `json:"order_id"`
+	}) (string, error) {
+		return "shipped", nil
+	}, core.Replay(core.ReplaySafe))
+	e.agent = core.New(model, core.Name("acme-support"),
+		core.TracerProvider(e.p.TracerProvider()), core.LoggerProvider(e.p.LoggerProvider()), lookup)
+
+	shutdown := runtime.Install(runtime.Studio(e.ts.URL, ""), runtime.Agents(e.agent), runtime.Enabled(true))
+	rt := e.runtimeID(t)
+	if code, resp := e.api(t, http.MethodPost, "/api/playground/runs", fmt.Sprintf(
+		`{"command_id":"cmd_shutdown","runtime":%q,"agent":"acme-support","input":"a slow question",
+		  "engine":"live","side_effects":"substitute","thread":"ephemeral"}`, rt)); code != http.StatusAccepted {
+		shutdown()
+		t.Fatalf("command = %d %s", code, resp)
+	}
+	row := e.waitCommand(t, "cmd_shutdown", "accepted")
+	var st struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.Unmarshal([]byte(row), &st); err != nil || !strings.HasPrefix(st.RunID, "pg_") {
+		shutdown()
+		t.Fatalf("accepted row = %s (%v)", row, err)
+	}
+	select {
+	case <-model.held:
+	case <-time.After(5 * time.Second):
+		shutdown()
+		t.Fatal("the run never reached its held model call")
+	}
+
+	shutdown() // the app exits: the link cancels every run it started
+	if err := e.p.ForceFlush(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{`"weft.run.stopped_by":"canceled"`, `"weft.cancel.cause":"app.shutdown"`}
+	spans := ""
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		_, spans = e.api(t, http.MethodGet, "/api/runs/"+st.RunID+"/spans", "")
+		spans = strings.ReplaceAll(spans, " ", "")
+		if strings.Contains(spans, want[0]) && strings.Contains(spans, want[1]) {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	for _, w := range want {
+		if !strings.Contains(spans, w) {
+			t.Errorf("the run dropped at shutdown: spans lack %s: %s", w, spans)
+		}
+	}
+}

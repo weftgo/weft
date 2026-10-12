@@ -46,4 +46,21 @@ describe("RunsTable", () => {
     await renderWithRouter(<RunsTable runs={[]} now={NOW} />)
     expect(screen.queryByTitle("succeeded")).toBeNull()
   })
+
+  it("a stopped-by line for the non-default exits only (U3-fix)", async () => {
+    const [base] = goldenRuns()
+    const runs = [
+      { ...base, id: "r_answer", status: "succeeded" as const, stopped_by: "final_answer" },
+      { ...base, id: "r_submit", status: "succeeded" as const, stopped_by: "has_tool_call:submit" },
+      { ...base, id: "r_cancel", status: "failed" as const, stopped_by: "canceled", cancel_cause: "studio.cancel" },
+    ]
+    const { container } = await renderWithRouter(<RunsTable runs={runs} now={NOW} />)
+    const lines = [...container.querySelectorAll("div[data-stopped-by]")].map(
+      (e) => e.textContent
+    )
+    expect(lines).toEqual([
+      "stopped by the tool call submit",
+      "cancelled · studio.cancel",
+    ])
+  })
 })

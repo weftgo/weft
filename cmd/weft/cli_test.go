@@ -446,6 +446,48 @@ func TestRunsCommand(t *testing.T) {
 	if _, errb, code := weft("runs", "--since", "yesterday"); code != 2 || !strings.Contains(errb, "--since") {
 		t.Errorf("bad --since = exit %d %q, want 2", code, errb)
 	}
+	// A canceled run carries its cause on both outputs (U3-fix): the
+	// table's STOPPED BY cell names it, --json carries stopped_by and
+	// cancel_cause.
+	runsPageSize = 50
+	p, err := otel.Start(context.Background(), otel.Studio(url, ""), otel.NoGlobal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cctx, cancel := context.WithCancelCause(context.Background())
+	cancel(core.CancelCause("studio.cancel"))
+	canceled := core.New(wefttest.Script(wefttest.Say("never")), core.Name("support"),
+		core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()))
+	if _, err := canceled.Generate(cctx, core.RunID("r_cancel"), core.Prompt("stop")); !errors.Is(err, context.Canceled) {
+		t.Fatalf("the canceled run = %v, want context.Canceled", err)
+	}
+	if err := p.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	c := newClient(url, "tok")
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		b, err := c.get(context.Background(), runPath("r_cancel"), nil)
+		if err == nil && strings.Contains(string(b), `"cancel_cause":"studio.cancel"`) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("r_cancel never settled with its cause: %s %v", b, err)
+		}
+	}
+	out, errb, code = weft("runs", "--agent", "support")
+	lines = strings.Split(strings.TrimSpace(out), "\n")
+	if code != 0 || len(lines) != 2 || !strings.HasPrefix(lines[1], "r_cancel") ||
+		!strings.HasSuffix(strings.TrimSpace(lines[1]), "canceled (studio.cancel)") {
+		t.Errorf("weft runs --agent support = exit %d, want r_cancel's STOPPED BY \"canceled (studio.cancel)\"\n%s%s", code, out, errb)
+	}
+	out, _, _ = weft("runs", "--agent", "support", "--json")
+	var cr []runRow
+	if err := json.Unmarshal([]byte(out), &cr); err != nil || len(cr) != 1 ||
+		cr[0].StoppedBy != "canceled" || cr[0].CancelCause != "studio.cancel" ||
+		!strings.Contains(out, `"stopped_by": "canceled"`) || !strings.Contains(out, `"cancel_cause": "studio.cancel"`) {
+		t.Errorf("--json for r_cancel = %v\n%s, want stopped_by canceled and cancel_cause studio.cancel", err, out)
+	}
+
 	t.Setenv("WEFT_STUDIO_TOKEN", "")
 	if _, errb, code := weft("runs"); code != 1 || !strings.Contains(errb, "401") || !strings.Contains(errb, "WEFT_STUDIO_TOKEN") {
 		t.Errorf("no token = exit %d %q, want 1 and Studio's 401", code, errb)

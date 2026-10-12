@@ -1133,7 +1133,9 @@ export function StepList({
           </p>
         ) : null}
         {/* What ended the run (U3.2): the end card mirrors the header's
-          chip, on every status the record names one for. */}
+          chip, on every status the record names one for; a failed run
+          that named none ends on its error (its Error root span is the
+          terminal record). */}
         {!replaying && doc.status !== "running" && endCard(doc) ? (
           <p
             className="text-center font-mono text-xs text-muted-foreground"
@@ -1149,7 +1151,11 @@ export function StepList({
               : doc.status === "running"
                 ? "stream in progress…"
                 : events.length > 0 &&
-                    endedWithoutFinish(view.finished, doc.stopped_by)
+                    endedWithoutFinish(
+                      view.finished,
+                      doc.stopped_by,
+                      doc.status
+                    )
                   ? NO_RUN_FINISH
                   : null}
           </p>

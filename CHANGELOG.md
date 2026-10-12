@@ -6,6 +6,14 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
+## Unreleased
+
+### Fixed
+
+- studio (web): the shell's `GET /api/runtimes` poll costs what the page needs (0.15.1 debt): every 5 s only while a surface needs the runtimes now — the playground, the open replay drawer, an experiment's run controls, a parked or running app turn's block (`useRuntimesNeeded`, one shared signal; their own observers still carry no interval) — and otherwise a quiet poll doubling per read that changed nothing, 5 s up to 60 s, back to 5 s on a change in the list or a key or pointer press; never while the tab is hidden. An idle page reads it 4 times in two minutes, not 24; a runtime's toast on a quiet page comes up to a minute late.
+- studio (web): the run page's parked block no longer flickers `checking` under a failed meta read: the failure is held in the query cache until meta answers (`lib/query.ts`'s `heldError`), so a block mounted again, or a refetch with its second of retry backoff, reads the failure throughout; `checking` only before the first answer. The capability pages' failed-meta line (`useCapabilities`) reads the same held failure.
+- studio (web): the touched sources are `prettier`-clean (`src/components/studio`, `src/hooks`, `src/lib`, `src/panel`, `src/routes`, `src/test`; the captured `src/test/derived/*.json` bodies left byte for byte); the panel badge scan in `badges.test.ts` follows a badge call wrapped over three lines. The panel bundle is byte-identical.
+
 ## 0.15.0 — 2026-10-12
 
 ### Added

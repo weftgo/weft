@@ -27,8 +27,8 @@ func TestMigrationPinsExporterVersion(t *testing.T) {
 	if !strings.Contains(string(body), pinnedExporterVersion) {
 		t.Errorf("migration 0001 does not name the pinned exporter version %s", pinnedExporterVersion)
 	}
-	if highestMigration() != 10 {
-		t.Errorf("highest migration = %d, want 10 (0001 init, 0002 experiments, 0003 status spelling, 0004 request record, 0005 raw record, 0006 experiment command, 0007 the experiment index, 0008 the command store, 0009 the derived flag, 0010 root ended)", highestMigration())
+	if highestMigration() != 11 {
+		t.Errorf("highest migration = %d, want 11 (0001 init, 0002 experiments, 0003 status spelling, 0004 request record, 0005 raw record, 0006 experiment command, 0007 the experiment index, 0008 the command store, 0009 the derived flag, 0010 root ended, 0011 stopped by)", highestMigration())
 	}
 }
 
@@ -409,19 +409,24 @@ func TestRunsInnerFiltersAfterGrouping(t *testing.T) {
 // contractKeys without its last adr0028Keys entries (ADR 0028's twelve,
 // plan A4's four, the attempt span's retry-after and the ten
 // weft.override.* fields, all added by 0004). 0005 restates the logs
-// view alone with the raw record's weft.raw.index (rawKeys) appended.
+// view alone with the raw record's weft.raw.index (rawKeys) appended;
+// 0010 the traces view with 0004's tuple. 0011 restates both with the
+// whole set: stopped_by's two keys (stoppedByKeys) appended, the traces
+// tuple gaining weft.raw.index on the way.
 const (
-	adr0028Keys = 12 + 4 + 1 + 10
-	rawKeys     = 1
+	adr0028Keys   = 12 + 4 + 1 + 10
+	rawKeys       = 1
+	stoppedByKeys = 2
 )
 
 func TestMigrationContractTuple(t *testing.T) {
-	at0004 := contractKeys[:len(contractKeys)-rawKeys]
+	at0005 := contractKeys[:len(contractKeys)-stoppedByKeys]
+	at0004 := at0005[:len(at0005)-rawKeys]
 	before := at0004[:len(at0004)-adr0028Keys]
 	for _, c := range []struct {
 		version, tuples int
 		keys            []string
-	}{{1, 2, before}, {3, 1, before}, {4, 2, at0004}, {5, 1, contractKeys}, {10, 1, at0004}} {
+	}{{1, 2, before}, {3, 1, before}, {4, 2, at0004}, {5, 1, at0005}, {10, 1, at0004}, {11, 2, contractKeys}} {
 		body, err := migrationsFS.ReadFile("migrations/" + migrations[c.version])
 		if err != nil {
 			t.Fatal(err)
@@ -528,6 +533,70 @@ func TestMigration0010RestatesTracesView(t *testing.T) {
 	}
 	if !strings.HasPrefix(now[2], "INSERT INTO weft_runs (RunId, Started, LastSeen, ManifestHash, WeftVersion, RootEnded)") {
 		t.Errorf("0010's third statement is not the backfill: %q", now[2])
+	}
+}
+
+// Migration 0011 (U3.2) adds the two columns, restates 0005's logs
+// view with StoppedBy from a run_finish body and 0010's traces view with
+// StoppedBy and CancelCause from the invoke_agent span — each tuple
+// gaining the two keys, the traces one weft.raw.index too — then
+// backfills from both signals. Pinned offline against the selects it
+// replaces.
+func TestMigration0011RestatesRunViews(t *testing.T) {
+	read := func(v int) []string {
+		b, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		return splitStatements(string(b))
+	}
+	const (
+		logsAlter   = "ALTER TABLE weft_runs_logs_mv MODIFY QUERY"
+		tracesAlter = "ALTER TABLE weft_runs_traces_mv MODIFY QUERY"
+	)
+	find := func(stmts []string, prefix string) string {
+		for _, s := range stmts {
+			if strings.HasPrefix(s, prefix) {
+				return s
+			}
+		}
+		t.Fatalf("no %q", prefix)
+		return ""
+	}
+	now := read(11)
+	wantPrefixes := []string{
+		"ALTER TABLE weft_runs ADD COLUMN IF NOT EXISTS StoppedBy SimpleAggregateFunction(max, String)",
+		"ALTER TABLE weft_runs ADD COLUMN IF NOT EXISTS CancelCause SimpleAggregateFunction(max, String)",
+		logsAlter, tracesAlter,
+		"INSERT INTO weft_runs (RunId, Started, LastSeen, StoppedBy, CancelCause)",
+		"INSERT INTO weft_runs (RunId, Started, LastSeen, StoppedBy)",
+	}
+	if len(now) != len(wantPrefixes) {
+		t.Fatalf("0011 has %d statements, want %d", len(now), len(wantPrefixes))
+	}
+	for i, p := range wantPrefixes {
+		if !strings.HasPrefix(now[i], p) {
+			t.Errorf("0011 statement %d = %q, want prefix %q", i, now[i], p)
+		}
+	}
+	logs := strings.NewReplacer(
+		`'weft.raw.index'], k)`, `'weft.raw.index',
+        'weft.run.stopped_by', 'weft.cancel.cause'], k)`,
+		"toInt64OrZero(LogAttributes['weft.request.index']) + 1, 0) AS RequestCount\n",
+		"toInt64OrZero(LogAttributes['weft.request.index']) + 1, 0) AS RequestCount,\n    if(LogAttributes['weft.event.type'] = 'run_finish', JSONExtractString(Body, 'stopped_by'), '') AS StoppedBy\n",
+	).Replace(find(read(5), logsAlter))
+	if now[2] != logs {
+		t.Errorf("0011's logs select is not 0005's with StoppedBy:\n%s\nwant:\n%s", now[2], logs)
+	}
+	traces := strings.NewReplacer(
+		`'weft.override.tools'], k)`, `'weft.override.tools',
+        'weft.raw.index',
+        'weft.run.stopped_by', 'weft.cancel.cause'], k)`,
+		"    toUInt8(isInvoke) AS RootEnded\n",
+		"    toUInt8(isInvoke) AS RootEnded,\n    if(isInvoke, SpanAttributes['weft.run.stopped_by'], '') AS StoppedBy,\n    if(isInvoke, SpanAttributes['weft.cancel.cause'], '') AS CancelCause\n",
+	).Replace(find(read(10), tracesAlter))
+	if now[3] != traces {
+		t.Errorf("0011's traces select is not 0010's with StoppedBy and CancelCause:\n%s\nwant:\n%s", now[3], traces)
 	}
 }
 

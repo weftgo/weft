@@ -427,6 +427,11 @@ type runUpdate struct {
 	pending      int
 	setPending   bool
 	stopReason   string
+	// stoppedBy and cancelCause (contract §6, U3.2): what ended the run,
+	// from the invoke_agent span or run_finish — the larger when they
+	// differ, ClickHouse's max, so both backends agree.
+	stoppedBy    string
+	cancelCause  string
 	eventCount   int64
 	deltaCount   int64
 	messageCount int64
@@ -556,6 +561,8 @@ func (u *runUpdate) applySpan(s obsdb.Span, w obsdb.Weft) {
 	if v, ok := s.Attrs["weft.run.stop_reason"].(string); ok {
 		u.stopReason = v
 	}
+	u.stoppedBy = maxString(u.stoppedBy, attrString(s.Attrs, "weft.run.stopped_by"))
+	u.cancelCause = maxString(u.cancelCause, attrString(s.Attrs, "weft.cancel.cause"))
 	if s.StatusCode == 2 { // error
 		u.failed = true
 		if s.StatusMessage != "" {
@@ -690,17 +697,28 @@ func (u *runUpdate) applyDurable(ctx context.Context, tx *sql.Tx, r obsdb.Record
 		u.finishedOK = true
 		u.setFinishedAt(r.Time)
 		var body struct {
-			Usage   core.Usage `json:"usage"`
-			Steps   int        `json:"steps"`
-			Pending []struct{} `json:"pending"`
+			Usage     core.Usage `json:"usage"`
+			Steps     int        `json:"steps"`
+			Pending   []struct{} `json:"pending"`
+			StoppedBy string     `json:"stopped_by"`
 		}
 		if err := json.Unmarshal([]byte(r.Body), &body); err == nil {
 			u.usage, u.setUsage = body.Usage, true
 			u.steps, u.setSteps = body.Steps, true
 			u.pending, u.setPending = len(body.Pending), true
+			u.stoppedBy = maxString(u.stoppedBy, body.StoppedBy)
 		}
 	}
 	return nil
+}
+
+// maxString is the larger of a and b: the stopped_by / cancel_cause
+// merge, ClickHouse's max over the same values ("" loses to any).
+func maxString(a, b string) string {
+	if b > a {
+		return b
+	}
+	return a
 }
 
 // attrString is m[k] when it is a non-empty string, else "".
@@ -750,6 +768,7 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 		playground                  bool
 		experiment, forked, meta    string
 		err, stopReason             string
+		stoppedBy, cancelCause      string
 		steps, pending              int
 		inTok, outTok               int64
 		cachedTok, cacheWrite       int64
@@ -758,14 +777,14 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 	err := tx.QueryRowContext(ctx, `SELECT started_ns, last_seen_ns, finished_ns, finished_ok, failed, root_ended,
 		parent_run_id, parent_call_id, trace_id, agent, provider, model, manifest_hash, weft_version,
 		service, session_id, public_id, turn, playground, experiment_id, forked_from, meta, err,
-		steps, pending, stop_reason,
+		steps, pending, stop_reason, stopped_by, cancel_cause,
 		input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens
 		FROM runs WHERE run_id = ?`, runID).
 		Scan(&ex.started, &ex.lastSeen, &ex.finished, &ex.finishedOK, &ex.failed, &ex.rootEnded,
 			&ex.parentRun, &ex.parentC, &ex.traceID, &ex.agent, &ex.provider, &ex.model,
 			&ex.manifest, &ex.version, &ex.service, &ex.sessionID, &ex.publicID, &ex.turn,
 			&ex.playground, &ex.experiment, &ex.forked, &ex.meta, &ex.err,
-			&ex.steps, &ex.pending, &ex.stopReason,
+			&ex.steps, &ex.pending, &ex.stopReason, &ex.stoppedBy, &ex.cancelCause,
 			&ex.inTok, &ex.outTok, &ex.cachedTok, &ex.cacheWrite, &ex.reasoningTok)
 	switch {
 	case err == sql.ErrNoRows:
@@ -788,16 +807,16 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 			 manifest_hash, weft_version, service, session_id, public_id, turn,
 			 playground, experiment_id, forked_from, meta,
 			 started_ns, finished_ns, last_seen_ns, finished_ok, failed, root_ended, err,
-			 steps, pending, stop_reason,
+			 steps, pending, stop_reason, stopped_by, cancel_cause,
 			 input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens,
 			 event_count, delta_count, message_count,
 			 instructions_hash, catalog_hash, request_count)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			runID, u.parentRunID, u.parentCallID, u.traceID, u.agent, u.provider, u.model,
 			u.manifestHash, u.weftVersion, u.service, u.sessionID, u.publicID, u.turn,
 			boolInt(u.playground), u.experimentID, u.forkedFrom, meta,
 			started, finished, lastSeen, boolInt(u.finishedOK), boolInt(u.failed), boolInt(u.rootEnded), u.errText,
-			u.steps, u.pending, u.stopReason,
+			u.steps, u.pending, u.stopReason, u.stoppedBy, u.cancelCause,
 			u.usage.InputTokens, u.usage.OutputTokens, u.usage.CachedInputTokens,
 			u.usage.CacheWriteTokens, u.usage.ReasoningTokens,
 			u.eventCount, u.deltaCount, u.messageCount,
@@ -843,7 +862,7 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 		manifest_hash = ?, weft_version = ?, service = ?, session_id = ?, public_id = ?, turn = ?,
 		playground = ?, experiment_id = ?, forked_from = ?, meta = ?,
 		started_ns = ?, finished_ns = ?, last_seen_ns = ?, finished_ok = ?, failed = ?, root_ended = ?, err = ?,
-		steps = ?, pending = ?, stop_reason = ?,
+		steps = ?, pending = ?, stop_reason = ?, stopped_by = ?, cancel_cause = ?,
 		input_tokens = ?, output_tokens = ?, cached_input_tokens = ?, cache_write_tokens = ?, reasoning_tokens = ?,
 		event_count = event_count + ?, delta_count = MAX(delta_count, ?), message_count = message_count + ?,
 		instructions_hash = MAX(instructions_hash, ?),
@@ -860,7 +879,7 @@ func upsertRun(ctx context.Context, tx *sql.Tx, runID string, u *runUpdate) erro
 		coalesce(ex.experiment, u.experimentID), coalesce(ex.forked, u.forkedFrom),
 		mergeMetaJSON(ex.meta, u.meta),
 		started, finished, lastSeen, boolInt(finishedOK), boolInt(failed), boolInt(rootEnded), coalesce(ex.err, u.errText),
-		steps, pending, stopReason,
+		steps, pending, stopReason, maxString(ex.stoppedBy, u.stoppedBy), maxString(ex.cancelCause, u.cancelCause),
 		usage.InputTokens, usage.OutputTokens, usage.CachedInputTokens,
 		usage.CacheWriteTokens, usage.ReasoningTokens,
 		u.eventCount, u.deltaCount, u.messageCount,

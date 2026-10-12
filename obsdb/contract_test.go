@@ -113,6 +113,8 @@ type contractRun struct {
 	Steps            int               `json:"steps"`
 	Pending          int               `json:"pending,omitempty"`
 	StopReason       string            `json:"stop_reason,omitempty"`
+	StoppedBy        string            `json:"stopped_by,omitempty"`
+	CancelCause      string            `json:"cancel_cause,omitempty"`
 	Usage            core.Usage        `json:"usage"`
 	EventCount       int64             `json:"event_count"`
 	MessageCount     int64             `json:"message_count"`
@@ -287,6 +289,7 @@ func observeRuns(t *testing.T, db obsdb.DB) []contractRun {
 			ManifestHash: r.ManifestHash, WeftVersion: r.WeftVersion, Meta: r.Meta,
 			Started: stamp(r.Started), LastSeen: stamp(r.LastSeen), Status: r.Status, Error: r.Err,
 			Steps: r.Steps, Pending: r.Pending, StopReason: r.StopReason,
+			StoppedBy: r.StoppedBy, CancelCause: r.CancelCause,
 			Usage: r.Usage, EventCount: r.EventCount, MessageCount: r.MessageCount, DeltaCount: r.DeltaCount,
 			InstructionsHash: r.InstructionsHash, CatalogHash: r.CatalogHash,
 			RequestCount: r.RequestCount,

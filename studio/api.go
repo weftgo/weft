@@ -133,7 +133,19 @@ type runRow struct {
 	Steps        int               `json:"steps"`
 	Pending      int               `json:"pending"`
 	StopReason   string            `json:"stop_reason"`
-	Usage        core.Usage        `json:"usage"`
+	// StoppedBy names what ended the run (obsdb.RunRow.StoppedBy, U3.2):
+	// the fired StopWhen condition's manifest name (has_tool_call:submit,
+	// step_count_is:3, output_submitted, a custom name), final_answer,
+	// parked, max_steps, usage_limit, loop_detected,
+	// model_retries_exceeded or canceled — the control, where stop_reason
+	// is the last model call's finish. Absent when nothing recorded one: a
+	// failure no control decided (error names it), a run still going, a
+	// run recorded before the field. CancelCause is a canceled run's
+	// cause (thread.interrupted, thread.closed, studio.cancel, deadline,
+	// or the caller's own), absent on a plain cancel.
+	StoppedBy   string     `json:"stopped_by,omitempty"`
+	CancelCause string     `json:"cancel_cause,omitempty"`
+	Usage       core.Usage `json:"usage"`
 	// The run's cost (plan A5, pricing.go): its own model calls
 	// (cost_usd: its usage minus its subagent children's, at its own
 	// model's rates) and its descendants' (delegated_cost_usd), two
@@ -203,6 +215,8 @@ func row(rec obsdb.RunRow) runRow {
 		Steps:        rec.Steps,
 		Pending:      rec.Pending,
 		StopReason:   rec.StopReason,
+		StoppedBy:    rec.StoppedBy,
+		CancelCause:  rec.CancelCause,
 		Usage:        rec.Usage,
 		EventCount:   rec.EventCount,
 		MessageCount: rec.MessageCount,
@@ -646,7 +660,9 @@ const (
 // id, which it scopes on top), parent ("" top-level only, "*" all, or a run
 // id for its children), all (a boolean: true is parent=*, every run,
 // subagent children included — a parent id given beside it wins),
-// tag.<k>=<v> metadata matches, before (the
+// stopped_by (what ended the run, exact — has_tool_call:submit — or, a
+// value ending in ':', a prefix: has_tool_call: is every tool-call
+// stop), tag.<k>=<v> metadata matches, before (the
 // RFC 3339 paging cursor on started) with before_id (the cursor's run
 // id: exact inside a tie) and limit. next_before / next_before_id are
 // the next page's before / before_id, null on the last page.
@@ -658,6 +674,7 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 		SessionID:    q.Get("session"),
 		PublicID:     q.Get("public_id"),
 		ExperimentID: q.Get("experiment_id"),
+		StoppedBy:    q.Get("stopped_by"),
 		ParentRunID:  parentParam(q),
 		Meta:         tagParams(q),
 	}

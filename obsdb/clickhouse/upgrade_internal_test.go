@@ -239,8 +239,8 @@ func TestUpgradeFrom0007AddsCommandStore(t *testing.T) {
 	if err := db.(*DB).conn.QueryRow(ctx, `SELECT max(version) FROM obsdb_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 10 {
-		t.Errorf("migration max after the upgrade = %d, want 10 (through 0010 root ended)", version)
+	if version != 11 {
+		t.Errorf("migration max after the upgrade = %d, want 11 (through 0011 stopped by)", version)
 	}
 }
 
@@ -335,5 +335,101 @@ func TestUpgradeTo0010BackfillsRootEnded(t *testing.T) {
 			t.Errorf("%s after 0010 = root_ended %v, %s, version %q, manifest %q; want %v, %s, %q, sha256:mh",
 				c.id, r.RootEnded, r.Status, r.WeftVersion, r.ManifestHash, c.ended, c.status, c.version)
 		}
+	}
+}
+
+// A database at 0010 — a canceled run's invoke_agent span and a
+// succeeded run's run_finish already stored, through views that read
+// neither value — opens through 0011 on a live server, whose backfill
+// fills StoppedBy and CancelCause from both signals
+// (docs/record-contract.md §6, U3.2), and the stopped_by filter reads
+// them, the prefix form included.
+func TestUpgradeTo0011BackfillsStoppedBy(t *testing.T) {
+	base := os.Getenv("WEFT_CLICKHOUSE_DSN")
+	if base == "" {
+		t.Skip("WEFT_CLICKHOUSE_DSN not set: the 0011 upgrade needs a clickhouse server (README has the one-line container recipe)")
+	}
+	ctx := context.Background()
+	u, err := url.Parse(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	suffix := make([]byte, 6)
+	if _, err := rand.Read(suffix); err != nil {
+		t.Fatal(err)
+	}
+	name := "weft_up_" + hex.EncodeToString(suffix)
+	admin := rawConn(t, base)
+	if err := admin.Exec(ctx, fmt.Sprintf("CREATE DATABASE `%s`", name)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = admin.Exec(context.Background(), fmt.Sprintf("DROP DATABASE IF EXISTS `%s`", name))
+		_ = admin.Close()
+	})
+	u.Path = "/" + name
+	dsn := u.String()
+
+	conn := rawConn(t, dsn)
+	if err := conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS obsdb_migrations (
+		version UInt32, name String, applied_at DateTime DEFAULT now()
+	) ENGINE = MergeTree ORDER BY version`); err != nil {
+		t.Fatal(err)
+	}
+	for v := 1; v <= 10; v++ {
+		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, stmt := range splitStatements(string(body)) {
+			if err := conn.Exec(ctx, stmt); err != nil {
+				t.Fatalf("migration %d: %v", v, err)
+			}
+		}
+		if err := conn.Exec(ctx, `INSERT INTO obsdb_migrations (version, name) VALUES (?, ?)`, uint32(v), migrations[v]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	at := time.Now().UTC().Add(-time.Hour)
+	if err := (&DB{conn: conn}).Write(ctx, obsdb.Batch{
+		Spans: []obsdb.Span{{
+			TraceID: "0102030405060708090a0b0c0d0e0f10", SpanID: "0a0b0c0d0e0f0201", Name: "invoke_agent a", Kind: 1,
+			Start: at, End: at.Add(time.Second), StatusCode: 2, StatusMessage: "context canceled", Service: "svc",
+			Attrs: map[string]any{"gen_ai.operation.name": "invoke_agent", "weft.run.id": "r_cancel",
+				"weft.run.stopped_by": "canceled", "weft.cancel.cause": "thread.interrupted"},
+			Resource: map[string]any{"service.name": "svc"},
+		}},
+		Records: []obsdb.Record{{
+			Time: at, EventName: "weft.event", TraceID: "0102030405060708090a0b0c0d0e0f11", SpanID: "0102030405060708",
+			Severity: 9, Service: "svc", Resource: map[string]any{"service.name": "svc"},
+			Body: `{"type":"run_finish","run_id":"r_submit","steps":1,"stopped_by":"has_tool_call:submit"}`,
+			Attrs: map[string]any{"weft.record": "event", "weft.run.id": "r_submit",
+				"weft.event.type": "run_finish", "weft.event.pos": int64(1)},
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.Close()
+
+	db, err := Open(dsn)
+	if err != nil {
+		t.Fatalf("open a 0010 database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	for _, c := range []struct{ id, by, cause string }{
+		{"r_cancel", "canceled", "thread.interrupted"},
+		{"r_submit", "has_tool_call:submit", ""},
+	} {
+		r, err := db.Run(ctx, c.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.StoppedBy != c.by || r.CancelCause != c.cause {
+			t.Errorf("%s after 0011 = stopped_by %q, cancel_cause %q; want %q, %q", c.id, r.StoppedBy, r.CancelCause, c.by, c.cause)
+		}
+	}
+	page, err := db.Runs(ctx, obsdb.RunQuery{StoppedBy: "has_tool_call:"})
+	if err != nil || page.Total != 1 || page.Runs[0].ID != "r_submit" {
+		t.Errorf("stopped_by=has_tool_call: after 0011 = %+v, %v; want r_submit", page, err)
 	}
 }

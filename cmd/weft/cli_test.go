@@ -357,8 +357,16 @@ func TestRunsCommand(t *testing.T) {
 		!strings.HasPrefix(lines[2], "r_ok") || !strings.Contains(lines[2], "orders") || !strings.Contains(lines[2], "succeeded") {
 		t.Errorf("weft runs = exit %d\n%s%s", code, out, errb)
 	}
-	if fs := strings.Fields(lines[2]); fs[len(fs)-1] != "2" {
-		t.Errorf("r_ok's steps column = %q, want 2", fs[len(fs)-1])
+	// STOPPED BY is the last column: what ended the run (U3.2) — r_ok's
+	// model answered; r_fail's model failed, which no control decided.
+	if !strings.HasSuffix(strings.TrimSpace(lines[0]), "STEPS  STOPPED BY") {
+		t.Errorf("header = %q, want STOPPED BY after STEPS", lines[0])
+	}
+	if fs := strings.Fields(lines[2]); fs[len(fs)-2] != "2" || fs[len(fs)-1] != "final_answer" {
+		t.Errorf("r_ok's steps / stopped by columns = %q, want 2 final_answer", fs[len(fs)-2:])
+	}
+	if fs := strings.Fields(lines[1]); fs[len(fs)-1] != "-" {
+		t.Errorf("r_fail's stopped by column = %q, want - (a model error: no control decided)", fs[len(fs)-1])
 	}
 
 	t.Setenv("WEFT_STUDIO_URL", url) // the env mirrors --url
@@ -399,6 +407,12 @@ func TestRunsCommand(t *testing.T) {
 	var both []runRow
 	if err := json.Unmarshal([]byte(out), &both); err != nil || len(both) != 2 || !both[0].Started.After(both[1].Started) {
 		t.Fatalf("rows %s: %v, want two runs started apart", out, err)
+	}
+	// --json carries Studio's stopped_by (U3.2), omitted when none was
+	// recorded: r_ok's final_answer, nothing on r_fail.
+	if both[1].ID != "r_ok" || both[1].StoppedBy != "final_answer" || both[0].StoppedBy != "" ||
+		!strings.Contains(out, `"stopped_by": "final_answer"`) || strings.Count(out, `"stopped_by"`) != 1 || strings.Contains(out, `"cancel_cause"`) {
+		t.Errorf("--json stopped_by = %q / %q, want final_answer on r_ok alone and no cancel_cause\n%s", both[1].StoppedBy, both[0].StoppedBy, out)
 	}
 	cutoff := both[1].Started.Add(both[0].Started.Sub(both[1].Started) / 2).Format(time.RFC3339Nano)
 	if got := strings.Join(rows("--since", cutoff), ","); got != "r_fail" {

@@ -2222,3 +2222,196 @@ describe("a replayed run's cost on both surfaces (A5.3)", () => {
     )
   })
 })
+
+// What ended a run (U3.2): the five seeded shapes show the same chip on
+// both surfaces — the panel's turn chip and the run page's header chip,
+// lib/stopped-by.ts's words — and the run page's story ends on the same
+// words, never "ended without run_finish" when the span named a stop.
+describe("stopped by on both surfaces (U3.2)", () => {
+  const USAGE =
+    "weft: run failed at step 2: weft: run exceeded its usage limit (input 300/250, output 150/250)"
+  const shapes: {
+    name: string
+    doc: Partial<RunDoc>
+    chip: string
+    end: string
+  }[] = [
+    {
+      name: "opt.stop-when",
+      doc: {
+        stopped_by: "has_tool_call:submit",
+        stop_reason: "tool_calls",
+        steps: 1,
+      },
+      chip: "stopped by the tool call submit",
+      end: "■ stopped by the tool call submit at step 0",
+    },
+    {
+      name: "opt.max-steps",
+      doc: {
+        status: "failed",
+        stopped_by: "max_steps",
+        stop_reason: "tool_calls",
+        err: "weft: run failed at step 1: weft: max steps reached",
+        steps: 1,
+      },
+      chip: "max steps reached",
+      end: "■ max steps reached at step 0",
+    },
+    {
+      name: "opt.usage-limit",
+      doc: {
+        status: "failed",
+        stopped_by: "usage_limit",
+        stop_reason: "tool_calls",
+        err: USAGE,
+        steps: 1,
+      },
+      chip: "usage limit reached (input 300/250, output 150/250)",
+      end: "■ usage limit reached at step 0 (input 300/250, output 150/250)",
+    },
+    {
+      name: "opt.detect-loops",
+      doc: {
+        status: "failed",
+        stopped_by: "loop_detected",
+        stop_reason: "tool_calls",
+        err: "weft: run failed at step 1: weft: the model repeated the same tool calls too many times",
+        steps: 1,
+      },
+      chip: "loop detected",
+      end: "■ loop detected at step 0",
+    },
+    {
+      name: "a cancelled run",
+      doc: {
+        status: "failed",
+        stopped_by: "canceled",
+        cancel_cause: "studio.cancel",
+        stop_reason: "tool_calls",
+        err: "context canceled",
+        steps: 1,
+      },
+      chip: "cancelled · studio.cancel",
+      end: "■ cancelled · studio.cancel at step 0",
+    },
+  ]
+  for (const c of shapes)
+    it(`${c.name}: the panel's turn chip is the run page's header chip`, async () => {
+      const fx: Fixture = {
+        doc: c.doc,
+        events: events({
+          finish: c.doc.status !== "failed",
+          reason: c.doc.stop_reason,
+        }),
+      }
+      serve(fx, false)
+      const el = await mount(ATTRS)
+      await vi.waitFor(
+        () =>
+          expect(
+            $(el, '.weft-turn [data-weft-chip="stopped-by"]')
+          ).toBeTruthy(),
+        { timeout: 5_000 }
+      )
+      const p = $(el, '.weft-turn [data-weft-chip="stopped-by"]')!
+      const panel = { text: p.textContent, title: p.getAttribute("title") }
+      el.remove()
+      await settle()
+      cleanup()
+      document.body.innerHTML = ""
+      stubBrowser()
+      vi.stubGlobal("scrollTo", vi.fn())
+      StudioEventSource.reset()
+      vi.stubGlobal("EventSource", StudioEventSource)
+      setStudioToken("")
+      serve(fx, true)
+      renderApp(`/runs/${RUN}?view=story`)
+      await waitFor(() =>
+        expect(document.querySelector("[data-story-end]")).toBeTruthy()
+      )
+      const s = document.querySelector("a[data-stopped-by]")!
+      expect(panel.text).toBe(c.chip)
+      expect({ text: s.textContent, title: s.getAttribute("title") }).toEqual(
+        panel
+      )
+      // The chip links to the step where the stop fired.
+      expect(s.getAttribute("href")).toContain("step=0")
+      expect(document.querySelector("[data-story-end]")!.textContent).toBe(
+        c.end
+      )
+      expect(document.body.textContent).not.toContain(
+        "the stream ended without run_finish"
+      )
+      // tool_calls contradicts every one of these stops: relabelled.
+      expect(document.querySelector("[data-stop-reason]")!.textContent).toBe(
+        "last step stopped on: tool_calls"
+      )
+    })
+
+  it("a succeeded final answer: the chip on both, no relabel, the end card; a run with none says without run_finish", async () => {
+    const fx: Fixture = {
+      doc: { stopped_by: "final_answer", stop_reason: "stop" },
+      events: events(),
+    }
+    serve(fx, false)
+    const el = await mount(ATTRS)
+    await vi.waitFor(
+      () =>
+        expect($(el, '.weft-turn [data-weft-chip="stopped-by"]')).toBeTruthy(),
+      { timeout: 5_000 }
+    )
+    expect($(el, '.weft-turn [data-weft-chip="stopped-by"]')!.textContent).toBe(
+      "the model answered"
+    )
+    el.remove()
+    await settle()
+    cleanup()
+    document.body.innerHTML = ""
+    stubBrowser()
+    vi.stubGlobal("scrollTo", vi.fn())
+    StudioEventSource.reset()
+    vi.stubGlobal("EventSource", StudioEventSource)
+    setStudioToken("")
+    serve(fx, true)
+    renderApp(`/runs/${RUN}?view=story`)
+    await waitFor(() =>
+      expect(document.querySelector("[data-story-end]")).toBeTruthy()
+    )
+    expect(document.querySelector("a[data-stopped-by]")!.textContent).toBe(
+      "the model answered"
+    )
+    expect(document.querySelector("[data-story-end]")!.textContent).toBe(
+      "■ the model answered at step 0"
+    )
+    // stop agrees with final_answer, and the run succeeded: no stop line.
+    expect(document.querySelector("[data-stop-reason]")).toBeNull()
+  })
+
+  it("a failed run with no stopped_by and no run_finish: the old note, the old label", async () => {
+    serve(
+      {
+        doc: {
+          status: "failed",
+          err: "upstream down",
+          stop_reason: "tool_calls",
+        },
+        events: events({ finish: false, reason: "tool_calls" }),
+      },
+      true
+    )
+    stubBrowser()
+    vi.stubGlobal("scrollTo", vi.fn())
+    renderApp(`/runs/${RUN}?view=story`)
+    await waitFor(() =>
+      expect(document.body.textContent).toContain(
+        "the stream ended without run_finish"
+      )
+    )
+    expect(document.querySelector("[data-story-end]")).toBeNull()
+    expect(document.querySelector("a[data-stopped-by]")).toBeNull()
+    expect(document.querySelector("[data-stop-reason]")!.textContent).toBe(
+      "stop reason: tool_calls"
+    )
+  })
+})

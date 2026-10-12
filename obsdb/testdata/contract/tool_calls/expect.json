@@ -18,8 +18,7 @@
         "enduser.id": "user_42",
         "tenant": "acme",
         "weft.playground.command": "cmd_contract",
-        "weft.replay.view": "transcript",
-        "weft.run.stopped_by": "final_answer"
+        "weft.replay.view": "transcript"
       },
       "started": "2026-10-01T09:01:00Z",
       "finished": "2026-10-01T09:01:00.016Z",
@@ -27,6 +26,7 @@
       "status": "succeeded",
       "steps": 2,
       "stop_reason": "stop",
+      "stopped_by": "final_answer",
       "usage": {
         "input_tokens": 20,
         "output_tokens": 10

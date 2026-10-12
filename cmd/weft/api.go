@@ -161,11 +161,26 @@ func parseArgs(fs *flag.FlagSet, args []string) ([]string, error) {
 // runRow is the part of GET /api/runs' row the table prints; --json
 // prints the row as Studio serves it.
 type runRow struct {
-	ID      string    `json:"id"`
-	Agent   string    `json:"agent"`
-	Status  string    `json:"status"`
-	Started time.Time `json:"started"`
-	Steps   int       `json:"steps"`
+	ID          string    `json:"id"`
+	Agent       string    `json:"agent"`
+	Status      string    `json:"status"`
+	Started     time.Time `json:"started"`
+	Steps       int       `json:"steps"`
+	StoppedBy   string    `json:"stopped_by"`
+	CancelCause string    `json:"cancel_cause"`
+}
+
+// stoppedBy is the STOPPED BY cell: what ended the run as Studio names
+// it (stopped_by), a canceled run's cause beside it, "-" when nothing
+// recorded one (a model error, a run still going, an older run).
+func (r runRow) stoppedBy() string {
+	switch {
+	case r.StoppedBy == "":
+		return "-"
+	case r.CancelCause != "":
+		return r.StoppedBy + " (" + r.CancelCause + ")"
+	}
+	return r.StoppedBy
 }
 
 // runsPageSize is the page each GET /api/runs asks for (a variable so
@@ -281,14 +296,14 @@ pages:
 		return nil
 	}
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
-	_, _ = fmt.Fprintln(tw, "ID\tAGENT\tSTATUS\tSTARTED\tSTEPS")
+	_, _ = fmt.Fprintln(tw, "ID\tAGENT\tSTATUS\tSTARTED\tSTEPS\tSTOPPED BY")
 	for _, r := range rows {
 		agent := r.Agent
 		if agent == "" {
 			agent = "-"
 		}
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\n", r.ID, agent, r.Status,
-			r.Started.Local().Format("2006-01-02 15:04:05"), r.Steps)
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\n", r.ID, agent, r.Status,
+			r.Started.Local().Format("2006-01-02 15:04:05"), r.Steps, r.stoppedBy())
 	}
 	return tw.Flush()
 }

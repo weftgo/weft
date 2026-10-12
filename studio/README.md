@@ -1998,8 +1998,12 @@ duration as a Go duration string, `"720h0m0s"`, `null` when off, the
 default — and `pricing` {source, path?, dated, models}, the cost table;
 see Cost above), `settings/pricing` (the effective pricing table,
 capability `pricing`), `runs` (agent,
-status, session, public id, playground, parent, experiment_id and
-`tag.<k>=<v>` filters, cursor-paged; top-level only by default — `parent=<run id>`
+status, session, public id, playground, parent, experiment_id,
+`stopped_by` (what ended the run — exact, or a prefix when the value
+ends in `:`: `has_tool_call:` is every tool-call stop; `/api/search`
+takes it too) and `tag.<k>=<v>` filters, cursor-paged; every run row
+carries `stopped_by` and a canceled run's `cancel_cause`, omitted when
+none was recorded (docs/record-contract.md §6); top-level only by default — `parent=<run id>`
 lists one run's subagent children, `all=1` (or `parent=*`) every run,
 children included; every run row carries `prompt_preview` — the turn's
 own prompt: the input record's last user message with text (on a resume

@@ -308,6 +308,8 @@ var nonMetaAttr = map[string]struct{}{
 	"weft.run.steps":               {},
 	"weft.run.pending":             {},
 	"weft.run.stop_reason":         {},
+	"weft.run.stopped_by":          {}, // U3.2: the run row's stopped_by column
+	"weft.cancel.cause":            {}, // U3.2: the run row's cancel_cause column
 	"weft.stop.raw":                {},
 	"weft.model.tool_calls":        {},
 	"weft.tool.approved":           {},

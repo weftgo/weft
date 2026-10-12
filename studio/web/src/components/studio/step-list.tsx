@@ -46,6 +46,12 @@ import type {
   PlacedBatch,
 } from "@/lib/events"
 import { mergeHoles } from "@/lib/honesty"
+import {
+  endCard,
+  endedWithoutFinish,
+  NO_RUN_FINISH,
+  stopChip,
+} from "@/lib/stopped-by"
 import type { HoleMark } from "@/lib/honesty"
 import { tokens } from "@/lib/format"
 import { replayBounds } from "@/lib/experiment-body"
@@ -1126,14 +1132,25 @@ export function StepList({
                 : "no steps yet"}
           </p>
         ) : null}
-        {view.finished ? null : (
+        {/* What ended the run (U3.2): the end card mirrors the header's
+          chip, on every status the record names one for. */}
+        {!replaying && doc.status !== "running" && endCard(doc) ? (
+          <p
+            className="text-center font-mono text-xs text-muted-foreground"
+            data-story-end
+            title={stopChip(doc)?.title}
+          >
+            {endCard(doc)}
+          </p>
+        ) : view.finished ? null : (
           <p className="text-center font-mono text-xs text-faint">
             {replaying
               ? `replay · ${upTo} of ${events.length} events shown`
               : doc.status === "running"
                 ? "stream in progress…"
-                : events.length > 0
-                  ? "the stream ended without run_finish"
+                : events.length > 0 &&
+                    endedWithoutFinish(view.finished, doc.stopped_by)
+                  ? NO_RUN_FINISH
                   : null}
           </p>
         )}

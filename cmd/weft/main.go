@@ -90,11 +90,13 @@
 // The API over a terminal. Each takes --url (default $WEFT_STUDIO_URL,
 // else http://127.0.0.1:7331) and --token (default $WEFT_STUDIO_TOKEN).
 // `weft runs` prints one row per top-level run (id, agent, status,
-// started, steps), newest first, from GET /api/runs; --agent and
-// --failed filter on the server, --since (a duration such as 2h, or an
+// started, steps, stopped by — what ended it, a canceled run's cause in
+// parentheses, "-" when none was recorded), newest first, from GET
+// /api/runs; --agent and --failed filter on the server, --since (a duration such as 2h, or an
 // RFC 3339 time) stops the paging at the first older run, --limit
 // (default 50, 0 for all) caps the rows and says so on stderr when it
-// hid any, --json prints the rows as Studio serves them. `weft open
+// hid any, --json prints the rows as Studio serves them (stopped_by and
+// cancel_cause included when set). `weft open
 // <id>` checks the run exists and prints its page, <url>/runs/<id>,
 // bare: --with-token prints the #token= fragment too, --open hands
 // the browser the link with the token. `weft export <id>`

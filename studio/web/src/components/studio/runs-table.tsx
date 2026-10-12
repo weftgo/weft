@@ -10,6 +10,7 @@ import { useEffect, useRef, useState } from "react"
 import { Link, useNavigate } from "@tanstack/react-router"
 
 import type { RunRow } from "@/lib/api"
+import { stoppedByWords } from "@/lib/stopped-by"
 import {
   absoluteTime,
   duration,
@@ -410,6 +411,7 @@ export function RunsTable({
                 ) : null}
                 <ReplayChip run={run} />
                 <DerivedChip row={run} />
+                <StoppedByLine run={run} />
                 {run.err ? (
                   <div
                     className="truncate font-mono text-[11px] text-status-bad/80"
@@ -483,4 +485,19 @@ export function RunsTable({
       </TableBody>
     </Table>
   )
+}
+
+/** StoppedByLine is what ended the run (U3.2), lib/stopped-by.ts's
+ * word under the id; the error line beside it carries the detail. */
+function StoppedByLine({ run }: { run: RunRow }) {
+  const w = stoppedByWords(run.stopped_by, run.cancel_cause)
+  return w ? (
+    <div
+      className="truncate font-mono text-[11px] text-faint"
+      title={w.hint}
+      data-stopped-by={run.stopped_by}
+    >
+      {w.word}
+    </div>
+  ) : null
 }

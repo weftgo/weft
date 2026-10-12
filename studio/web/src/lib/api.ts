@@ -85,6 +85,14 @@ export interface RunRow extends CostFields, DelegatedCostFields {
   steps: number
   pending: number
   stop_reason: string
+  /** What ended the run (U3.2): the invoke_agent span's
+   * weft.run.stopped_by, else run_finish's — has_tool_call:<t>,
+   * final_answer, max_steps, usage_limit, canceled, … (lib/stopped-by.ts
+   * words it). Absent when none was recorded. */
+  stopped_by?: string
+  /** A canceled run's weft.cancel.cause (studio.cancel,
+   * thread.interrupted, deadline, …). Absent otherwise. */
+  cancel_cause?: string
   usage: Usage
   event_count: number
   message_count: number
@@ -844,6 +852,9 @@ export interface RunsFilters {
   /** One experiment's runs (plan F5): /api/runs and /api/search
    * filter by weft.experiment.id (F5.1). */
   experiment_id?: string
+  /** What ended the run (U3.2): exact, or a prefix when it ends in ":"
+   * (has_tool_call: every tool-call stop). */
+  stopped_by?: string
 }
 
 export function runsSearch(filters: RunsFilters): string {
@@ -863,6 +874,7 @@ export function runsSearch(filters: RunsFilters): string {
     params.set(`tag.${k}`, v)
   if (filters.limit) params.set("limit", String(filters.limit))
   if (filters.experiment_id) params.set("experiment_id", filters.experiment_id)
+  if (filters.stopped_by) params.set("stopped_by", filters.stopped_by)
   const qs = params.toString()
   return qs ? `?${qs}` : ""
 }

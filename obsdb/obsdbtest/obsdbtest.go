@@ -30,6 +30,7 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("EventContentAttrs", eventContentAttrs(open))
 	t.Run("StatusAtBoundaries", status(open))
 	t.Run("RootSpanEndsTheRun", rootSpanEndsTheRun(open))
+	t.Run("StoppedBy", stoppedBy(open))
 	t.Run("Sessions", sessions(open))
 	t.Run("Children", children(open))
 	t.Run("Paging", paging(open))
@@ -490,6 +491,109 @@ func rootSpanEndsTheRun(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		}
 		if _, err := db.Run(ctx(), "r_fresh"); err != nil {
 			t.Errorf("sweep removed the running r_fresh: %v", err)
+		}
+	}
+}
+
+// stoppedBy pins docs/record-contract.md §6's stopped_by and
+// cancel_cause rows on every backend (U3.2): a failed run's from its
+// invoke_agent span alone (no run_finish), a succeeded run's from either
+// carrier — run_finish alone, the span alone, both — and none on a
+// failure no control decided. Neither key is caller metadata. The
+// stopped_by filter is an exact match, or a prefix for a value ending in
+// ':', on Runs and, where the backend searches, on Search.
+func stoppedBy(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		span := func(id string, status int, n byte, extra map[string]any) obsdb.Span {
+			s := invokeSpan(id, status, extra)
+			s.TraceID, s.SpanID = "f"+string(n)+s.TraceID[2:], "600000000000000"+string(n)
+			return s
+		}
+		finish := func(id, by string) obsdb.Record {
+			body := `{"type":"run_finish","run_id":"` + id + `","steps":1`
+			if by != "" {
+				body += `,"stopped_by":"` + by + `"`
+			}
+			return record(id, "event", "run_finish", 1, body+`}`, nil)
+		}
+		start := func(id string) obsdb.Record {
+			return record(id, "event", "run_start", 0, `{"type":"run_start","id":"`+id+`"}`, nil)
+		}
+		b := obsdb.Batch{
+			Spans: []obsdb.Span{
+				span("r_cancel", 2, '1', map[string]any{"weft.run.stopped_by": "canceled", "weft.cancel.cause": "studio.cancel"}),
+				span("r_limit", 2, '2', map[string]any{"weft.run.stopped_by": "usage_limit"}),
+				span("r_both", 1, '3', map[string]any{"weft.run.stopped_by": "has_tool_call:submit"}),
+				span("r_span", 1, '4', map[string]any{"weft.run.stopped_by": "has_tool_call:lookup,refund"}),
+				span("r_err", 2, '5', nil),
+			},
+			Records: []obsdb.Record{
+				start("r_cancel"), start("r_limit"), start("r_both"), start("r_span"), start("r_err"), start("r_record"),
+				finish("r_both", "has_tool_call:submit"), finish("r_record", "final_answer"),
+			},
+		}
+		if err := db.Write(ctx(), b); err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range []struct {
+			id, by, cause string
+			status        obsdb.Status
+		}{
+			{"r_cancel", "canceled", "studio.cancel", obsdb.StatusFailed},
+			{"r_limit", "usage_limit", "", obsdb.StatusFailed},
+			{"r_both", "has_tool_call:submit", "", obsdb.StatusSucceeded},
+			{"r_span", "has_tool_call:lookup,refund", "", obsdb.StatusSucceeded},
+			{"r_err", "", "", obsdb.StatusFailed},
+			{"r_record", "final_answer", "", obsdb.StatusSucceeded},
+		} {
+			r, err := db.Run(ctx(), c.id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.StoppedBy != c.by || r.CancelCause != c.cause || r.Status != c.status {
+				t.Errorf("%s = stopped_by %q, cancel_cause %q, %s; want %q, %q, %s",
+					c.id, r.StoppedBy, r.CancelCause, r.Status, c.by, c.cause, c.status)
+			}
+			for _, k := range []string{"weft.run.stopped_by", "weft.cancel.cause"} {
+				if v, ok := r.Meta[k]; ok {
+					t.Errorf("%s meta carries %s = %q: a contract key, not caller metadata", c.id, k, v)
+				}
+			}
+		}
+		filters := map[string]string{
+			"canceled":                    "r_cancel",
+			"has_tool_call:":              "r_both,r_span",
+			"has_tool_call:submit":        "r_both",
+			"has_tool_call:lookup,refund": "r_span",
+			"has_tool_call":               "", // exact: no run stopped by the bare name
+			"usage_limit":                 "r_limit",
+			"final_answer":                "r_record",
+			"_":                           "",
+		}
+		for f, want := range filters {
+			page, err := db.Runs(ctx(), obsdb.RunQuery{StoppedBy: f})
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := idsOf(page.Runs)
+			sort.Strings(got)
+			if strings.Join(got, ",") != want || page.Total != len(got) {
+				t.Errorf("Runs stopped_by=%q = %v (total %d), want %s", f, got, page.Total, want)
+			}
+		}
+		if srch, ok := db.(obsdb.Searcher); ok {
+			for f, want := range filters {
+				page, err := srch.Search(ctx(), obsdb.SearchQuery{RunQuery: obsdb.RunQuery{StoppedBy: f}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				got := idsOf(page.Runs)
+				sort.Strings(got)
+				if strings.Join(got, ",") != want {
+					t.Errorf("Search stopped_by=%q = %v, want %s", f, got, want)
+				}
+			}
 		}
 	}
 }

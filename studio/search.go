@@ -28,6 +28,8 @@ import (
 //	since       RFC 3339: started at or after
 //	until       RFC 3339: started before
 //	min_tokens  input + output tokens at least (a non-negative integer)
+//	stopped_by  what ended the run, exact (has_tool_call:submit, usage_limit,
+//	            canceled, …), or a prefix when it ends in ':' (has_tool_call:)
 //	min_cost    USD at least (a non-negative number): the run's whole bill,
 //	            own + delegated (pricing.go); an unpriced run never matches
 //	sort        started (default, newest first) | duration (longest first) |
@@ -88,6 +90,7 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 			SessionID:    q.Get("session"),
 			PublicID:     q.Get("public_id"),
 			ExperimentID: q.Get("experiment_id"),
+			StoppedBy:    q.Get("stopped_by"),
 			ParentRunID:  parentParam(q),
 			Meta:         tagParams(q),
 		},

@@ -25,7 +25,8 @@ const runColumns = `run_id, parent_run_id, parent_call_id, trace_id, agent, prov
 	steps, pending, stop_reason,
 	input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens,
 	event_count, delta_count, message_count,
-	instructions_hash, catalog_hash, request_count, derived, root_ended`
+	instructions_hash, catalog_hash, request_count, derived, root_ended,
+	stopped_by, cancel_cause`
 
 // promptPreviewColumn is the run row's prompt_preview (plan A7): the
 // prompt migration 0004's run_search holds, cut to
@@ -127,6 +128,11 @@ func runWhere(q obsdb.RunQuery, now time.Time) (string, []any) {
 		conds = append(conds, "public_id = ?")
 		args = append(args, q.PublicID)
 	}
+	if q.StoppedBy != "" {
+		cond, cargs := stoppedByCond(q.StoppedBy)
+		conds = append(conds, cond)
+		args = append(args, cargs...)
+	}
 	switch q.ParentRunID {
 	case "":
 		conds = append(conds, "parent_run_id = ''")
@@ -150,6 +156,17 @@ func runWhere(q obsdb.RunQuery, now time.Time) (string, []any) {
 		args = append(args, k, v)
 	}
 	return strings.Join(conds, " AND "), args
+}
+
+// stoppedByCond is RunQuery.StoppedBy's condition with its binds: an
+// exact match, or — for a filter ending in ':' (has_tool_call:) — a
+// prefix, compared with substr so neither LIKE's wildcards nor its
+// ASCII case folding apply.
+func stoppedByCond(filter string) (string, []any) {
+	if strings.HasSuffix(filter, ":") {
+		return "substr(stopped_by, 1, length(?)) = ?", []any{filter, filter}
+	}
+	return "stopped_by = ?", []any{filter}
 }
 
 func (d *DB) Run(ctx context.Context, id string) (_ obsdb.RunDetail, err error) {
@@ -211,7 +228,8 @@ func (d *DB) runRowsQuery(ctx context.Context, where string, args []any) ([]runR
 			&r.Steps, &r.Pending, &r.StopReason,
 			&r.InTok, &r.OutTok, &r.CachedTok, &r.CacheWrite, &r.ReasonTok,
 			&r.EventCount, &r.DeltaCount, &r.MessageCount,
-			&r.InstructionsHash, &r.CatalogHash, &r.RequestCount, &r.Derived, &r.RootEnded, &r.PromptPreview); err != nil {
+			&r.InstructionsHash, &r.CatalogHash, &r.RequestCount, &r.Derived, &r.RootEnded,
+			&r.StoppedBy, &r.CancelCause, &r.PromptPreview); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -236,6 +254,7 @@ type runRowScan struct {
 	InstructionsHash, CatalogHash                     string
 	RequestCount                                      int64
 	Derived, RootEnded                                bool
+	StoppedBy, CancelCause                            string
 	PromptPreview                                     string
 }
 
@@ -257,6 +276,7 @@ func scanRunRow(r runRowScan, now time.Time) (obsdb.RunRow, error) {
 		EventCount: r.EventCount, DeltaCount: r.DeltaCount, MessageCount: r.MessageCount,
 		InstructionsHash: r.InstructionsHash, CatalogHash: r.CatalogHash, RequestCount: r.RequestCount,
 		PromptPreview: r.PromptPreview, Derived: r.Derived, RootEnded: r.RootEnded,
+		StoppedBy: r.StoppedBy, CancelCause: r.CancelCause,
 	}
 	if r.Finished.Valid {
 		f := time.Unix(0, r.Finished.Int64).UTC()

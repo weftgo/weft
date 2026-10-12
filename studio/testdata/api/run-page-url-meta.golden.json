@@ -1,4 +1,3 @@
 {
-  "weft.page_url": "https://app.example/support/chat",
-  "weft.run.stopped_by": "final_answer"
+  "weft.page_url": "https://app.example/support/chat"
 }

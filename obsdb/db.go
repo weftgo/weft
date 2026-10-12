@@ -211,6 +211,10 @@ type RunQuery struct {
 	// sharing one Started. Pass RunPage.NextBeforeID.
 	BeforeID string
 	Limit    int // 0 = 50, max 500
+	// StoppedBy keeps the runs whose RunRow.StoppedBy is exactly this
+	// ("" any); a value ending in ':' is a prefix ("has_tool_call:"
+	// matches every has_tool_call:<tools> value).
+	StoppedBy string
 }
 
 // TraceQuery selects traces for Traces. The zero value lists every
@@ -390,6 +394,21 @@ type RunRow struct {
 	// failed; any other status reads succeeded with or without a
 	// run_finish (DeriveStatus's ended). LostRecordsHole reads it too.
 	RootEnded bool
+	// StoppedBy names what ended the run, in the manifest's stop_when
+	// vocabulary (has_tool_call:<tools>, step_count_is:N,
+	// output_submitted, final_answer, parked, max_steps, usage_limit,
+	// loop_detected, model_retries_exceeded, canceled, a custom
+	// condition's name): the invoke_agent span's weft.run.stopped_by, or
+	// run_finish's stopped_by — one core value on both carriers, so a
+	// failed run (no run_finish) still names it from its span. "" when
+	// neither carried one: a failure no control decided (a model error),
+	// a run still going, or one recorded before the field existed.
+	StoppedBy string
+	// CancelCause is a canceled run's weft.cancel.cause
+	// (thread.interrupted, thread.closed, studio.cancel, deadline, or a
+	// caller's own core.CancelCause kind); "" on a plain cancel and on
+	// every other run.
+	CancelCause string
 }
 
 // RunPage is one Runs result, newest Started first (ties by ID,

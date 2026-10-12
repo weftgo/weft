@@ -96,8 +96,8 @@ func TestUpgradeFrom0002(t *testing.T) {
 	if err := raw.QueryRowContext(ctx, `SELECT MAX(version) FROM obsdb_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 9 {
-		t.Errorf("migration max = %d, want 9 (through 0009 root_ended)", version)
+	if version != 10 {
+		t.Errorf("migration max = %d, want 10 (through 0010 stopped_by)", version)
 	}
 	var agent, instructions, catalog string
 	var steps, requests int
@@ -297,8 +297,8 @@ func TestUpgradeFrom0006AddsCommandStore(t *testing.T) {
 	if err := db.(*DB).reads.QueryRowContext(ctx, `SELECT MAX(version) FROM obsdb_migrations`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 9 {
-		t.Errorf("migration max after the upgrade = %d, want 9 (through 0009 root_ended)", version)
+	if version != 10 {
+		t.Errorf("migration max after the upgrade = %d, want 10 (through 0010 stopped_by)", version)
 	}
 }
 
@@ -394,5 +394,96 @@ func TestUpgradeTo0009BackfillsRootEnded(t *testing.T) {
 	page, err := db.Runs(ctx, obsdb.RunQuery{Status: obsdb.StatusSucceeded})
 	if err != nil || page.Total != 2 {
 		t.Errorf("succeeded filter after 0009 = %d, %v; want r_tracer and r_kept (statusExpr reads root_ended)", page.Total, err)
+	}
+}
+
+// A file written at 0009 opens through 0010, which backfills stopped_by
+// and cancel_cause from what is already stored (docs/record-contract.md
+// §6, U3.2): a failed run's from its invoke_agent span alone, a
+// succeeded run's from its run_finish body when its span carries none,
+// the larger when the two differ; and takes the two keys out of meta,
+// where MetaOf's catch-all had put them, leaving caller metadata alone.
+func TestUpgradeTo0010BackfillsStoppedBy(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "at9.db")
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE obsdb_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	for v := 1; v <= 9; v++ {
+		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx, err := raw.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(string(body)); err != nil {
+			t.Fatalf("migration %d: %v", v, err)
+		}
+		if post := postMigrations[v]; post != nil {
+			if err := post(tx); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO obsdb_migrations (version, applied_at) VALUES (?, '2026-10-01T00:00:00Z')`, v); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, q := range []string{
+		`INSERT INTO runs (run_id, agent, started_ns, last_seen_ns, root_ended, failed, meta) VALUES
+			('r_cancel', 'a', 100, 200, 1, 1, '{"weft.run.stopped_by":"canceled","weft.cancel.cause":"studio.cancel","tenant":"acme"}'),
+			('r_record', 'a', 100, 200, 0, 0, '{}'),
+			('r_none', 'a', 100, 200, 1, 1, '{"tenant":"acme"}')`,
+		`UPDATE runs SET finished_ok = 1 WHERE run_id = 'r_record'`,
+		`INSERT INTO spans (trace_id, span_id, parent_span_id, name, kind, start_ns, end_ns, status_code, status_message,
+			service, run_id, step, tool_seq, session_id, attrs, resource, events) VALUES
+			('t1', 's1', '', 'invoke_agent a', 1, 100, 200, 2, 'context canceled', 'svc', 'r_cancel', -1, -1, '',
+			 '{"gen_ai.operation.name":"invoke_agent","weft.run.id":"r_cancel","weft.run.stopped_by":"canceled","weft.cancel.cause":"studio.cancel"}', '{}', '[]'),
+			('t3', 's3', '', 'invoke_agent a', 1, 100, 200, 2, 'upstream down', 'svc', 'r_none', -1, -1, '',
+			 '{"gen_ai.operation.name":"invoke_agent","weft.run.id":"r_none"}', '{}', '[]')`,
+		`INSERT INTO records (run_id, kind, pos, time_ns, event_type, body, attrs) VALUES
+			('r_record', 'event', 3, 150, 'run_finish', '{"type":"run_finish","steps":1,"stopped_by":"has_tool_call:submit"}', '{}')`,
+	} {
+		if _, err := raw.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("open a 0009 file: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+	for _, c := range []struct {
+		id, stoppedBy, cause string
+		meta                 map[string]string
+	}{
+		{"r_cancel", "canceled", "studio.cancel", map[string]string{"tenant": "acme"}},
+		{"r_record", "has_tool_call:submit", "", nil},
+		{"r_none", "", "", map[string]string{"tenant": "acme"}},
+	} {
+		run, err := db.Run(ctx, c.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run.StoppedBy != c.stoppedBy || run.CancelCause != c.cause || len(run.Meta) != len(c.meta) || run.Meta["tenant"] != c.meta["tenant"] {
+			t.Errorf("%s after 0010 = stopped_by %q, cancel_cause %q, meta %v; want %q, %q, %v",
+				c.id, run.StoppedBy, run.CancelCause, run.Meta, c.stoppedBy, c.cause, c.meta)
+		}
+	}
+	page, err := db.Runs(ctx, obsdb.RunQuery{StoppedBy: "has_tool_call:"})
+	if err != nil || page.Total != 1 || page.Runs[0].ID != "r_record" {
+		t.Errorf("stopped_by=has_tool_call: after 0010 = %+v, %v; want r_record (the prefix form)", page, err)
 	}
 }

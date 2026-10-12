@@ -502,6 +502,11 @@ no `run_finish`; `trace_id` from the records); `weft_version` and
 `manifest_hash` from the span when no record carries them
 (`tracer_only`);
 `meta`, `playground`, `experiment_id` and `forked_from` (`tool_calls`);
+`stopped_by` from `run_finish` and the span (`stopped_by`, `parked`, every
+succeeded case), from the span alone on a failed run (`failed`:
+`max_steps`; `canceled`: `canceled` with `cancel_cause` `studio.cancel`),
+absent where no control decided (`interrupted`, `stock_genai`,
+`pre_upgrade`);
 `session_id`, `public_id`, `turn` (`session_turns`); the parent link
 (`subagent`). Not exercised by any fixture: `running` (a fixed-epoch
 fixture's last-seen is always older than 30 s), the span fallback for
@@ -520,7 +525,7 @@ backends' own tests' to pin.
 | `session_id`, `public_id`, `turn` | `weft.session.id`, `weft.public_id`, `weft.turn` |
 | `playground`, `experiment_id`, `forked_from` | `weft.playground`, `weft.experiment.id`, `weft.forked_from` |
 | `manifest_hash`, `weft_version` | `weft.manifest.hash`, `weft.version` — from any record or span of the run that carries them (the `invoke_agent` span does), `weft_version` falling back to a span's resource `weft.version` (`otel.Install` stamps it there): a run whose records were lost, or never emitted, still names both |
-| `meta` | every string attribute outside the contract (`obsdb.MetaOf`) |
+| `meta` | every string attribute outside the contract (`obsdb.MetaOf`; `weft.run.stopped_by` and `weft.cancel.cause` are contract — their columns above — and SQLite's 0010 removes them from rows written between U3.1 and U3.2) |
 | `started` | the earliest time of anything of the run: span starts, record times |
 | `last_seen` | the latest time of anything of the run, heartbeats included |
 | `finished` | the `invoke_agent` span's end, or `run_finish`'s time — the later; absent while neither arrived |
@@ -528,7 +533,9 @@ backends' own tests' to pin.
 | `status` | `failed` if the `invoke_agent` span's status is `Error`; else `succeeded` if a `run_finish` exists **or** the `invoke_agent` span is stored (`root_ended`: a span is exported only once it ended, so the run is over even when its `run_finish` was lost — a tracer-only app's run, a run whose record tail a destination dropped); else `running` if last-seen is at most 30 s old; else `interrupted` — derived at read time, never stored. There is no parked status: a run parked at an approval is `succeeded` with `pending` > 0 (from `run_finish`, else the span's `weft.run.pending`) |
 | `error` | the `invoke_agent` span's status description |
 | `steps`, `pending` | `run_finish`'s `steps` and `len(pending)`, or the span's `weft.run.steps` / `weft.run.pending` |
-| `stop_reason` | `weft.run.stop_reason` |
+| `stop_reason` | `weft.run.stop_reason` — the last model call's finish, not what ended the run |
+| `stopped_by` | what ended the run: the `invoke_agent` span's `weft.run.stopped_by`, or `run_finish`'s `stopped_by` — one core value on both carriers, so either fills the column; **the larger string when they differ** (both backends: SQLite's merge, ClickHouse's `max`), the rule `instructions_hash` follows. A failed run has no `run_finish`, so its span is the only carrier; `""` when neither carried one (a failure no control decided, a run still going, one recorded before U3.1). Columns `runs.stopped_by` (SQLite 0010) / `weft_runs.StoppedBy` (ClickHouse 0011), backfilled from both signals; served as the run row's `stopped_by` (omitted when empty) and filtered by `?stopped_by=` on `/api/runs` and `/api/search` — an exact match, or a prefix when the value ends in `:` (`has_tool_call:` matches every `has_tool_call:<tools>`) |
+| `cancel_cause` | the `invoke_agent` span's `weft.cancel.cause` (`thread.interrupted`, `thread.closed`, `studio.cancel`, `deadline`, a caller's own kind); `""` on a plain cancel and every other run. `runs.cancel_cause` / `weft_runs.CancelCause`; served as `cancel_cause`, omitted when empty |
 | `usage` | `run_finish`'s `usage`, or the span's `gen_ai.usage.*` (the cache and reasoning splits from the span) |
 | `event_count` | stored `event` records |
 | `message_count` | stored growth `messages` records (views excluded) |
@@ -781,8 +788,8 @@ page reaches it.
 | `pre_upgrade` | a run without request, prompt or tools records or the `weft.instructions.hash` attribute; the `not_recorded` badge (the generator also removes `run_start`'s informational `instructions_hash` body field, and `weft.run.stopped_by` with `run_finish.stopped_by`, for realism — readers never read the first) |
 | `failed` | `MaxSteps(1)` against a model that keeps calling a tool: status `failed`, the error text, `steps`/`usage`/`stop_reason` from the span (no `run_finish`) |
 | `parked` | a `RequireApproval` tool's call parked: status `succeeded`, `pending` 1 (`run_finish.pending`, `weft.run.pending`); `weft.run.stopped_by` and `run_finish.stopped_by` `parked` |
-| `stopped_by` | `StopWhen(HasToolCall("submit_ticket"))` ends the run after its tool call: `stop_reason` `tool_calls`, while `weft.run.stopped_by` and `run_finish.stopped_by` read `has_tool_call:submit_ticket` (every generated case carries its own value: `final_answer`, `parked`, `max_steps` in `failed`) |
-| `canceled` | a run canceled mid-tool with `core.CancelCause("studio.cancel")`: status `failed`, `error.type` `context.Canceled`, `weft.run.stopped_by` `canceled`, `weft.cancel.cause` `studio.cancel`; no `run_finish` |
+| `stopped_by` | `StopWhen(HasToolCall("submit_ticket"))` ends the run after its tool call: `stop_reason` `tool_calls`, while `weft.run.stopped_by` and `run_finish.stopped_by` read `has_tool_call:submit_ticket`, the run row's `stopped_by` (every generated case carries its own value: `final_answer`, `parked`, `max_steps` in `failed`) |
+| `canceled` | a run canceled mid-tool with `core.CancelCause("studio.cancel")`: status `failed`, `error.type` `context.Canceled`, `weft.run.stopped_by` `canceled`, `weft.cancel.cause` `studio.cancel`; no `run_finish` — the row's `stopped_by` and `cancel_cause` from the span alone |
 | `stock_genai` | §9: stock spans, no `weft.*` (hand-written: the one case no weft code generates); two derived runs in one conversation, one with a tool call, one failed; `derived` |
 | `tracer_only` | the `tool_calls` run from an app that wired a tracer and no logger: spans only — `succeeded` from the `Ok` root alone, `steps`/`usage`/`stop_reason` from the span, `weft_version` and `manifest_hash` from the span; `not_recorded` (cause `no_logger`) |
 | `tracer_only_failed` | the `failed` run, spans only: `failed` with the span's description from the `Error` root alone; `not_recorded` (cause `no_logger`) |

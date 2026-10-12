@@ -26,6 +26,7 @@ import {
 import { UNRUN_CALL_REASON } from "../lib/events"
 import type { Truncation } from "../lib/events"
 import { el } from "./render"
+import { stopChip } from "../lib/stopped-by"
 import {
   CACHE_HINT,
   cacheNotReported,
@@ -294,6 +295,9 @@ export function turnChips(
     )
   } else if (r.experiment_id)
     chip("experiment", `weft.experiment.id = ${r.experiment_id}`, "experiment")
+  // What ended the turn (U3.2): the run page's header chip, its words.
+  const stop = stopChip(r)
+  if (stop) chip(stop.text, stop.title, "stopped-by")
   // Built by the reader from stock OTel GenAI spans (plan I1.3): the
   // derived badge in the stock_spans words, as Studio's row chip.
   if (isDerived(r)) {

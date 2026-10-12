@@ -208,8 +208,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    {instructions, instructions_hash, since} when one is held; the weft.json, else the manifests runtimes registered with —
 //    //    remembered in memory by (service, manifest_hash), each in sources[] live or remembered; a
 //    //    Studio restart forgets them until the next registration; manifest_check.source file|runtime),
-//    //    runs (+session/public/playground/experiment_id filters; all=1 lists child
-//    //    runs too; each row's prompt_preview: the turn's own prompt (input record's last user text — a resume's new prompt when it carries one — else first), 200 runes, absent content-off),
+//    //    runs (+session/public/playground/experiment_id/stopped_by filters — stopped_by exact, or a
+//    //    prefix ending ":" (has_tool_call:); all=1 lists child
+//    //    runs too; each row's stopped_by/cancel_cause (what ended it, U3.2; omitted when none); each row's prompt_preview: the turn's own prompt (input record's last user text — a resume's new prompt when it carries one — else first), 200 runes, absent content-off),
 //    //    search (?q= terms over prompt/answer/error/tool names — substrings, AND, a "phrase" one
 //    //    term; agent/tool/status/model/error/since/until/min_tokens/sort=started|duration|tokens/
 //    //    limit/offset + runs' filters; min_cost (USD, own + delegated; unpriced never matches) and
@@ -324,7 +325,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    one); studio.json {url, token, db, pid, started, version} (0600, removed on exit)
 //    //    is the discovery file apps find it through (block 6). The API over a terminal (--url
 //    //    WEFT_STUDIO_URL, --token WEFT_STUDIO_TOKEN): weft doctor checks one; weft runs
-//    //    [--agent --since --failed --limit --json]; weft open <run id> [--open --with-token]
+//    //    [--agent --since --failed --limit --json] (a STOPPED BY column; --json carries stopped_by/cancel_cause); weft open <run id> [--open --with-token]
 //    //    (prints the bare <url>/runs/<id>; the token only to the browser or on --with-token);
 //    //    weft export <run id> [--format json|jsonl|otlp | --wefttest ./testdata --test Name
 //    //    --force] (fixtures where wefttest.Replay reads them; --force replaces, never

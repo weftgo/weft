@@ -47,7 +47,30 @@ import {
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { useCopyLink } from "@/hooks/use-copy-link"
 import { useDocumentTitle } from "@/hooks/use-document-title"
+import {
+  contradicts,
+  stopChip,
+  stopReasonLabel,
+  stopStep,
+} from "@/lib/stopped-by"
 import { Button, buttonVariants } from "@/components/ui/button"
+
+/** StoppedByChip is what ended the run (U3.2), in lib/stopped-by.ts's
+ * words, linking to the step where it fired; on every status. */
+function StoppedByChip({ doc }: { doc: RunDoc }) {
+  const chip = stopChip(doc)
+  if (!chip) return null
+  return (
+    <Link
+      {...runLink(doc.id, { step: stopStep(doc.steps), view: "story" })}
+      className="rounded-sm border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground hover:bg-secondary hover:text-foreground"
+      title={chip.title}
+      data-stopped-by={doc.stopped_by}
+    >
+      {chip.text}
+    </Link>
+  )
+}
 
 /**
  * CopyLink copies this page's link as it stands (plan G2): the run,
@@ -363,6 +386,7 @@ export function RunHeader({
           />
         </h1>
         <StatusChip status={doc.status} />
+        <StoppedByChip doc={doc} />
         <span className="text-sm font-medium">
           {doc.agent || (
             <span className="text-muted-foreground">unnamed agent</span>
@@ -460,9 +484,16 @@ export function RunHeader({
       {answer && !doc.err ? (
         <Quote label="answer" text={answer} tone="answer" />
       ) : null}
-      {doc.stop_reason && doc.status !== "succeeded" ? (
-        <div className="font-mono text-xs text-muted-foreground">
-          stop reason: {doc.stop_reason}
+      {/* The model's last finish reason, relabelled where it reads
+          otherwise than what ended the run (UX-A-08). */}
+      {doc.stop_reason &&
+      (doc.status !== "succeeded" ||
+        contradicts(doc.stopped_by, doc.stop_reason)) ? (
+        <div
+          className="font-mono text-xs text-muted-foreground"
+          data-stop-reason
+        >
+          {stopReasonLabel(doc.stopped_by, doc.stop_reason)}: {doc.stop_reason}
         </div>
       ) : null}
 

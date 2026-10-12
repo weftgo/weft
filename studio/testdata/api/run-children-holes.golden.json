@@ -17,9 +17,7 @@
   "playground": false,
   "experiment_id": "",
   "forked_from": "",
-  "meta": {
-    "weft.run.stopped_by": "parked"
-  },
+  "meta": {},
   "started": "(time)",
   "finished": "(time)",
   "last_seen": "(norm)",
@@ -28,6 +26,7 @@
   "steps": 3,
   "pending": 1,
   "stop_reason": "tool_calls",
+  "stopped_by": "parked",
   "usage": {
     "input_tokens": 40,
     "output_tokens": 20
@@ -66,9 +65,7 @@
       "playground": false,
       "experiment_id": "",
       "forked_from": "",
-      "meta": {
-        "weft.run.stopped_by": "final_answer"
-      },
+      "meta": {},
       "started": "(time)",
       "finished": "(time)",
       "last_seen": "(norm)",
@@ -77,6 +74,7 @@
       "steps": 1,
       "pending": 0,
       "stop_reason": "stop",
+      "stopped_by": "final_answer",
       "usage": {
         "input_tokens": 10,
         "output_tokens": 5

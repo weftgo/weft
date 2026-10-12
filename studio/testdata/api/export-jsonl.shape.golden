@@ -150,7 +150,6 @@
 <run>.run.children[].last_seen=string
 <run>.run.children[].manifest_hash=string
 <run>.run.children[].message_count=float64
-<run>.run.children[].meta.<key>=string
 <run>.run.children[].meta{}
 <run>.run.children[].model.name=string
 <run>.run.children[].model.provider=string
@@ -168,6 +167,7 @@
 <run>.run.children[].status=string
 <run>.run.children[].steps=float64
 <run>.run.children[].stop_reason=string
+<run>.run.children[].stopped_by=string
 <run>.run.children[].trace_id=string
 <run>.run.children[].turn=float64
 <run>.run.children[].usage.input_tokens=float64
@@ -194,7 +194,6 @@
 <run>.run.last_seen=string
 <run>.run.manifest_hash=string
 <run>.run.message_count=float64
-<run>.run.meta.<key>=string
 <run>.run.meta{}
 <run>.run.model.name=string
 <run>.run.model.provider=string
@@ -212,6 +211,7 @@
 <run>.run.status=string
 <run>.run.steps=float64
 <run>.run.stop_reason=string
+<run>.run.stopped_by=string
 <run>.run.trace_id=string
 <run>.run.turn=float64
 <run>.run.usage.input_tokens=float64

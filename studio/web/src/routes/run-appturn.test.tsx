@@ -16,11 +16,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
 import { queryClient } from "@/lib/query"
-import { APP_LINK_FIX, APP_RUN, APP_RUN_FIX, CAPS_UNREAD, PLAYGROUND_OFF, READ_TOKEN, RUNTIMES_UNREAD, SESSION_UNREAD, SUBAGENT_CALL } from "@/lib/honesty"
+import { APP_LINK_FIX, APP_RUN, APP_RUN_FIX, CAPS_UNREAD, PLAYGROUND_OFF, POOL_CHILD, READ_TOKEN, RUNTIMES_UNREAD, SESSION_UNREAD, SUBAGENT_CALL } from "@/lib/honesty"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { apiError, FakeStudio } from "@/test/fake-studio"
-import { APP_PUB, APP_SESSION, CALL, CHILD, NOPUB, PARKED, PLAIN, REJECTED, RESUMED, RUNTIMES_500, runtimeRow, serveAppTurn, STEER_FAILED } from "@/test/appturn-fixture"
+import { APP_PUB, APP_SESSION, CALL, CHILD, NOPUB, PARKED, PLAIN, POOL, REJECTED, RESUMED, RUNTIMES_500, runtimeRow, serveAppTurn, STEER_FAILED } from "@/test/appturn-fixture"
 import type { AppTurnOptions } from "@/test/appturn-fixture"
 
 configure({ asyncUtilTimeout: 10_000 })
@@ -231,6 +231,21 @@ describe("the run page when no Sessions runtime of the run's service acts", () =
     expect([...parked().querySelectorAll<HTMLButtonElement>('[data-refused="app-owned"]')].every((b) => b.disabled)).toBe(true)
     expect(parked().querySelector("input")).toBeNull()
     expect(fake.calls(`GET sessions/${APP_SESSION}`)).toHaveLength(0)
+    await axeClean(parked())
+  })
+
+  it("a thread/pool child's turn: decided on the parent session (ADR 0022 §7), a link to the parent turn, no verb, never the plain line", async () => {
+    const fake = await open({}, POOL)
+    expect(parked().getAttribute("data-parked")).toBe("pool-child")
+    expect(line("pool-child")).toBe(`${POOL_CHILD} ${PARKED}`)
+    expect(parked().textContent).not.toContain(APP_RUN)
+    expect(parked().textContent).not.toContain(APP_RUN_FIX)
+    const link = parked().querySelector<HTMLAnchorElement>("[data-parent-turn]")!
+    expect(new URL(link.href).pathname).toContain(`/runs/${PARKED}`)
+    expect([...parked().querySelectorAll<HTMLButtonElement>('[data-refused="app-owned"]')].every((b) => b.disabled)).toBe(true)
+    expect(parked().querySelector("input")).toBeNull()
+    expect(fake.calls("GET sessions/s_pool")).toHaveLength(0)
+    expect(fake.calls(`POST runs/${POOL}/approvals`)).toHaveLength(0)
     await axeClean(parked())
   })
 

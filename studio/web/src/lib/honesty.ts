@@ -417,13 +417,20 @@ export const noPublicIDWords = (runID: string) => `${APP_OWNED}: run ${runID} is
  * SUBAGENT_PENDING call, and only that call is pending on the session
  * (runtime/sessions.go's checkPending) — the parent id follows. */
 export const SUBAGENT_CALL = "parked · a subagent's call — decide on the parent turn"
+/** A thread/pool child's turn (its own session's `<session>-tN`, run
+ * under the delegating tool call, so core stamps the parent run id on
+ * it): its requests are mirrored onto the parent session's Pending()
+ * and decided there (p.Decide; ADR 0022 §7) — never on the child's own
+ * session. The parent run id follows. */
+export const POOL_CHILD = "parked · a delegated session's turn — decide on the parent session"
 
 /** What a parked run's calls get: an experiment's verbs (its result
  * pane), the app turn's verbs, the app turn read-only, an app turn a
  * later turn of its session already resumed, a plain Generate's line,
- * a session turn without a public id, or a subagent's child run
- * (decided on its parent turn). */
-export type ParkedKind = "experiment" | "decide" | "read-only" | "resumed" | "plain" | "no-public-id" | "child"
+ * a session turn without a public id, a subagent's child run (decided
+ * on its parent turn), or a thread/pool child's turn (decided on the
+ * parent session). */
+export type ParkedKind = "experiment" | "decide" | "read-only" | "resumed" | "plain" | "no-public-id" | "child" | "pool-child"
 
 /** A GET /api/runtimes row, as far as the gate reads it. */
 export interface RuntimeLike {
@@ -454,10 +461,17 @@ const live = (rts: readonly RuntimeLike[] | null | undefined, service: string | 
 export function parkedKind(row: AppRow | null | undefined, runtimes: readonly RuntimeLike[] | null | undefined, next?: string): ParkedKind {
   if (row?.playground) return "experiment"
   // Only core's Subagent child (`<parent>/<step>/<call>`) parks onto its
-  // parent as SUBAGENT_PENDING; another agent's Generate inside a tool
-  // handler carries weft.parent.run.id too (pricing.go's subagents()
-  // tells them apart the same way) and its park is the app's to resume.
-  if (row?.parent_run_id) return row.id.startsWith(`${row.parent_run_id}/`) ? "child" : "plain"
+  // parent as SUBAGENT_PENDING (pricing.go's subagents() tells it apart
+  // the same way). A thread/pool child runs under the delegating call
+  // too, but as a turn of its own session (`<session>-tN`): its park is
+  // mirrored onto the parent session and decided there (ADR 0022 §7).
+  // Another agent's Generate inside a tool handler carries the parent
+  // run id (and, under a session turn, its inherited session id) with an
+  // id of its own: its park is the app's to resume.
+  if (row?.parent_run_id) {
+    if (row.id.startsWith(`${row.parent_run_id}/`)) return "child"
+    return row.session_id && row.id.startsWith(`${row.session_id}-t`) ? "pool-child" : "plain"
+  }
   if (!row?.session_id) return "plain"
   if (!row.public_id) return "no-public-id"
   if (next) return "resumed"
@@ -490,7 +504,8 @@ export interface AppGateFacts {
 
 /** refusalWords is the read-only line's message and fix in the
  * server's words: a 403 already answered (refused), a plain Generate,
- * a subagent's child run, a session without a public id (appturn.go),
+ * a subagent's child run, a thread/pool child's turn, a session
+ * without a public id (appturn.go),
  * a read-scoped token (auth.go), a failed meta read, a Studio without
  * the playground (meta.capabilities_off's reason), a failed session or
  * runtimes read — said as such, never a verdict — else appturn.go's two
@@ -508,6 +523,7 @@ export function refusalWords(
   if (refused?.fix) return { words: refused.error ?? APP_OWNED, fix: refused.fix }
   if (kind === "plain") return { words: APP_RUN, fix: APP_RUN_FIX }
   if (kind === "child") return { words: `${SUBAGENT_CALL} ${row.parent_run_id ?? ""}`.trimEnd(), fix: "" }
+  if (kind === "pool-child") return { words: `${POOL_CHILD} ${row.parent_run_id ?? ""}`.trimEnd(), fix: "" }
   if (kind === "no-public-id") return { words: noPublicIDWords(row.id), fix: APP_RUN_FIX }
   if (readToken) return { words: READ_TOKEN, fix: "" }
   // A failed read is no verdict: the server never said the link is closed.

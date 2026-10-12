@@ -25,6 +25,7 @@ import {
   PLAYGROUND_OFF_FIX,
   READ_TOKEN,
   SESSION_UNREAD,
+  POOL_CHILD,
   SUBAGENT_CALL,
   appVerbWords,
   noPublicIDWords,
@@ -162,10 +163,27 @@ describe("the app turn's kinds and refusal words", () => {
     expect(refusalLine(refusalWords("child", child, [rt()], false))).toBe(`${SUBAGENT_CALL} s-t1`)
   })
 
+  it("a thread/pool child's turn (its own session's turn under the delegating call): decided on the parent session, never the plain line", () => {
+    // ADR 0022 §7: the child's requests surface on the parent session's
+    // Pending() and p.Decide decides them there; pool.go runs the child
+    // under the delegating call's ctx, so core stamps weft.parent.run.id.
+    const child = { id: "s_pool-t1", session_id: "s_pool", public_id: "", service: "app", parent_run_id: "s-t1" }
+    expect(parkedKind(child, [rt()])).toBe("pool-child")
+    const w = refusalWords(parkedKind(child, [rt()]), child, [rt()], false)
+    expect(refusalLine(w)).toBe(`${POOL_CHILD} s-t1`)
+    expect(w.fix).toBe("")
+    expect(refusalLine(w)).not.toContain(APP_RUN)
+    expect(go("../thread/turn.go")).toContain(`t.runID = fmt.Sprintf("%s-t%d", s.header.ID, s.turnSeq)`)
+  })
+
   it("another agent's Generate inside a tool handler (weft.parent.run.id, its own id): the plain line, never the parent's", () => {
     // Core stamps the parent id on every run under a tool call's context;
     // only a Subagent child's id is `<parent>/<step>/<call>` (pricing.go's subagents()).
-    const nested = { ...turn, id: "r_nested", parent_run_id: "s-t1" }
+    // Under a session turn it inherits the session id (core's run
+    // metadata rides ctx), but its id is not that session's turn.
+    const inherited = { ...turn, id: "r_nested", parent_run_id: "s-t1" }
+    expect(parkedKind(inherited, [rt()])).toBe("plain")
+    const nested = { id: "r_nested", service: "app", parent_run_id: "s-t1" }
     expect(parkedKind(nested, [rt()])).toBe("plain")
     expect(refusalLine(refusalWords(parkedKind(nested, [rt()]), nested, [rt()], false))).toBe(`${APP_RUN} — fix: ${APP_RUN_FIX}`)
     expect(go("pricing.go")).toContain(`strings.HasPrefix(k.ID, id+"/")`)

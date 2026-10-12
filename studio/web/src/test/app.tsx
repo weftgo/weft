@@ -9,10 +9,25 @@ import {
 } from "@tanstack/react-router"
 import { cleanup, render } from "@testing-library/react"
 import { StrictMode } from "react"
-import { vi } from "vitest"
+import { afterAll, vi } from "vitest"
 
 import { queryClient } from "@/lib/query"
 import { routeTree } from "@/routeTree.gen"
+
+// Every file that renders the app ends with the singleton client
+// emptied while jsdom still stands: unmounted, its queries removed (each
+// one's gcTime timer — 5 min, past the file's end on a loaded suite —
+// cleared with it, in-flight reads cancelled), and the notifications
+// already queued (notifyManager's setTimeout(0) batches) flushed. A
+// batch left queued ran after jsdom's teardown, where React's update
+// priority reads window.event: "ReferenceError: window is not defined",
+// unhandled, the suite's exit 2.
+afterAll(async () => {
+  cleanup()
+  await queryClient.cancelQueries()
+  queryClient.clear()
+  if (!vi.isFakeTimers()) for (let i = 0; i < 2; i++) await new Promise((r) => setTimeout(r, 0))
+})
 
 /** jsdom lacks these; the shell and the tables call them. */
 export function stubBrowser() {

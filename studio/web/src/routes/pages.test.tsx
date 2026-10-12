@@ -911,3 +911,21 @@ describe("a failed meta read on the capability-gated pages", () => {
       expect(document.body.textContent).not.toMatch(/does not list traces|reports no live capability|has no playground|does not serve the step compare/)
     })
 })
+
+// useCapabilities holds a failed meta read's error only until meta
+// answers: a later read that succeeds clears it, and a meta that
+// answers without the capability gets the page's off words — never
+// "could not read".
+describe("a meta read that answers after a failed one", () => {
+  it("/traces: the held error clears and a meta without traces reads off, never could-not-read", async () => {
+    let fail = true
+    studio.on("GET meta", () => (fail ? apiError(500, "internal", "meta store unavailable") : meta(["live", "ingest"])))
+    renderApp("/traces")
+    await waitFor(() => expect(document.querySelector("[data-caps-unread]")?.textContent).toBe(`${CAPS_UNREAD}: meta store unavailable`))
+    fail = false
+    await queryClient.invalidateQueries({ queryKey: ["meta"] })
+    await waitFor(() => expect(document.querySelector("[data-traces-off]")).toBeTruthy())
+    expect(document.querySelector("[data-caps-unread]")).toBeNull()
+    expect(document.body.textContent).not.toContain(CAPS_UNREAD)
+  })
+})

@@ -939,8 +939,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 242,600 B raw / 77,942 B gzip
-(76.1 KiB, the ledger's last row, "phase 6 review fixes (F)"; 3,978 B — 3.9 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 242,821 B raw / 77,996 B gzip
+(76.2 KiB, the ledger's last row, "phase 6 review fixes (G)"; 3,924 B — 3.8 KiB — of headroom under
 the 81,920 B, 80 KiB, cap). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
 build kept its indentation and newlines: 281,470 B raw / 81,358 B gzip,
@@ -1123,13 +1123,21 @@ quiet parked turn follows the link opening without a click. A plain Generate's p
 session) reads `parked · app-owned run · the app resumes it
 (weft.Approve)` with the `thread.PublicID(...)` fix; a turn of a session
 created without a public id reads appturn.go's `… run <id> is not a turn
-of a thread session with a public id` with the same fix; a subagent's
-child run (`<parent>/<step>/<call>`) reads `parked · a subagent's call —
-decide on the parent turn <parent>` (a link on the run page), no verb:
-only the parent's SUBAGENT_PENDING call is pending on the session —
-another agent's `Generate` inside a tool handler carries the parent run
-id too but not that id prefix, never parks onto the parent, and reads
-the plain Generate's line. On a
+of a thread session with a public id` with the same fix. A run with a
+parent run id is one of three: a `weft.Subagent` child
+(`<parent>/<step>/<call>`) reads `parked · a subagent's call — decide on
+the parent turn <parent>` (a link on the run page), no verb — only the
+parent's SUBAGENT_PENDING call is pending on the session; a
+`thread/pool` child (a turn of its own session, `<session>-tN`, run
+under the delegating tool call) reads `parked · a delegated session's
+turn — decide on the parent session <parent>` (a link on the run page),
+no verb and no fix — its requests are mirrored onto the parent
+session's `Pending()` and decided there (`p.Decide`, ADR 0022 §7); and
+another agent's `Generate` inside a tool handler (an id of its own,
+whatever session id it inherited) never parks onto the parent and reads
+the plain Generate's line. The panel's turn lists are top-level runs, so
+it draws neither child's turn; reached another way, it reads the same
+words through the same `parkedKind`/`refusalWords`. On a
 Studio without the playground the line is `… the playground is off on
 this Studio` with `meta.capabilities_off`'s fix (both surfaces hand
 their meta to `refusalWords`), and a failed read — meta, the session,
@@ -1141,10 +1149,12 @@ a runtimes read started after it has applied and the gate says decide —
 then the verbs are back, even when the runtimes read the same as before
 (runtime ids are stable per service, cwd and agents, so a restarted app
 registers under the same id); a read that fails, or one still in flight,
-keeps it. While the turn is parked or running the run page reads the
-session and the runtimes again every 5 s — not once the next turn is
-known (resumed is final) or the session read was refused (a 4xx): a
-turn another surface resumed reads `decided`. The run page draws the
+keeps it. While the turn is parked or running the parked block reads
+the session again every 5 s — not once the next turn is known (resumed
+is final) or the session read was refused (a 4xx): a turn another
+surface resumed reads `decided`. The runtimes need no poll of the
+block's own: they stay on the shell's 5 s poll of the same query
+(`use-notices.ts`, every page). The run page draws the
 same block under the same gate, in the same words, the 403's lifetime
 included (`parity.test.ts`). Studio's other capability-gated pages
 (traces, live, experiments, playground, compare) say a failed meta read

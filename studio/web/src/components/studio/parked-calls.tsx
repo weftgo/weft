@@ -9,7 +9,8 @@
 // words and fix (lib/honesty.ts's, or the 403's own once answered); a
 // plain Generate's park says the app resumes it, a session turn
 // without a public id says why runtime.Sessions cannot reach it, a
-// subagent's child run points at its parent turn, and a Studio without
+// subagent's child run points at its parent turn, a thread/pool child's
+// turn at the parent session's turn (ADR 0022 §7), and a Studio without
 // the playground says so in meta.capabilities_off's words. Steer on the
 // running app turn sits beside (AppSteer). Cancel is never offered on
 // an app turn: the runtime refuses it.
@@ -19,7 +20,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { ApiError, fetchCommand, metaQuery, postApproval, postSteer, runtimesQuery, sessionQuery, studioToken } from "@/lib/api"
 import type { CommandStatus, RunDoc, SessionDoc } from "@/lib/api"
-import { appVerbWords, nextTurn, parkedKind, refusalLine, refusalWords, SUBAGENT_CALL } from "@/lib/honesty"
+import { appVerbWords, nextTurn, parkedKind, POOL_CHILD, refusalLine, refusalWords, SUBAGENT_CALL } from "@/lib/honesty"
 import type { AppGateFacts } from "@/lib/honesty"
 import { runLink } from "@/lib/links"
 import { canReplay, tokenScopeOf } from "@/lib/replay"
@@ -164,16 +165,19 @@ function DecideRow({ call, onDecide }: { call: Call; onDecide: (d: "approve" | "
   )
 }
 
-/** How often the gate's reads are taken again while the turn is parked
- * or running: another surface may resume it, a runtime may connect.
- * Not once the next turn is known (resumed is final) or the session
- * read was refused for good (a 4xx: the same answer every time). */
+/** How often the session read is taken again while the turn is parked
+ * or running: another surface may resume it. Not once the next turn is
+ * known (resumed is final) or the session read was refused for good (a
+ * 4xx: the same answer every time). The runtimes need no interval here:
+ * the shell's use-notices.ts polls the same query key every 5 s on
+ * every page, under the same canReplay gate. */
 export const APP_GATE_POLL_MS = 5_000
 
 /** The app's turn and what the page may do on it: the gate reads the
  * runtimes (a Sessions runtime of the run's service) and the session's
- * turns (a later turn resumed this one), as the panel does — again
- * every APP_GATE_POLL_MS while the turn is parked or running. checking
+ * turns (a later turn resumed this one), as the panel does — the
+ * session again every APP_GATE_POLL_MS while the turn is parked or
+ * running, the runtimes on the shell's own poll. checking
  * while either is still loading — never a verdict on half the facts; a
  * failed read is said as such (unread), never a spinner. */
 function useAppTurn(doc: RunDoc) {
@@ -181,13 +185,13 @@ function useAppTurn(doc: RunDoc) {
   const meta = useQuery(metaQuery())
   const caps = meta.data?.capabilities ?? []
   const mayAct = canReplay(caps, studioToken())
-  // A subagent's child run is decided on its parent turn: no gate.
+  // A subagent's or a pool's child run is decided on its parent: no gate.
   const app = !doc.playground && !doc.parent_run_id && !!doc.session_id && !!doc.public_id
   const poll = doc.pending > 0 || doc.status === "running" ? APP_GATE_POLL_MS : false
   const settled = (data: SessionDoc | undefined, err: Error | null) =>
     !!nextTurn(doc, data?.runs) || (err instanceof ApiError && [401, 403, 404, 410].includes(err.status))
   const sess = useQuery({ ...sessionQuery(doc.session_id), enabled: app, refetchInterval: (q) => (settled(q.state.data, q.state.error) ? false : poll) })
-  const rts = useQuery({ ...runtimesQuery(), enabled: app && mayAct, refetchInterval: settled(sess.data, sess.error) ? false : poll })
+  const rts = useQuery({ ...runtimesQuery(), enabled: app && mayAct })
   const next = nextTurn(doc, sess.data?.runs)
   const runtimes = rts.data?.runtimes ?? null
   const kind = parkedKind(doc, runtimes, next)
@@ -278,6 +282,14 @@ export function ParkedCalls({ doc, pending }: { doc: RunDoc; pending: Call[] }) 
         // lib/honesty.ts's words, the parent id a link to its turn.
         <p className="mt-1 text-status-int" data-app-owned="child">
           {`${SUBAGENT_CALL} `}
+          <Link {...runLink(doc.parent_run_id)} className="text-thread-ink hover:underline" data-parent-turn={doc.parent_run_id}>
+            {doc.parent_run_id}
+          </Link>
+        </p>
+      ) : shown === "pool-child" && doc.parent_run_id ? (
+        // ADR 0022 §7: the request is mirrored onto the parent session.
+        <p className="mt-1 text-status-int" data-app-owned="pool-child">
+          {`${POOL_CHILD} `}
           <Link {...runLink(doc.parent_run_id)} className="text-thread-ink hover:underline" data-parent-turn={doc.parent_run_id}>
             {doc.parent_run_id}
           </Link>

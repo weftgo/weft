@@ -20,6 +20,10 @@ export const PLAIN = "r_plain"
 /** A subagent's child run of the parked turn (core's childRunID:
  * <parent>/<step>/<call>), its session and public id inherited. */
 export const CHILD = `${PARKED}/0/call_sub_1`
+/** A thread/pool child's turn (ADR 0022): a turn of its own session
+ * (s_pool-t1), run under the parked turn's delegating call, so its
+ * parent run id is the parked turn's with no `<parent>/` prefix. */
+export const POOL = "s_pool-t1"
 /** A turn of a thread session created without thread.PublicID. */
 export const NOPUB = "s_nopub-t1"
 export const CALL = { type: "tool_call", id: "call_deploy_1", name: "deploy", args: { env: "prod" } }
@@ -51,6 +55,10 @@ export function plainRow(): RunRow {
 
 export function childRow(): RunRow {
   return parkedRow({ id: CHILD, parent_run_id: PARKED, turn: 0 })
+}
+
+export function poolRow(): RunRow {
+  return parkedRow({ id: POOL, session_id: "s_pool", public_id: "", parent_run_id: PARKED, meta: { "weft.session.parent": APP_SESSION } })
 }
 
 export function noPubRow(): RunRow {
@@ -206,7 +214,7 @@ export function serveAppTurn(fake: FakeStudio, o: AppTurnOptions = {}): FakeStud
     .on(`GET runs/${PLAIN}/events`, pagedEvents(events(PLAIN, true)))
     .on(`GET runs/${PLAIN}/transcript`, transcript())
     .on(`GET runs/${PLAIN}/spans`, { spans: [] })
-  for (const r of [childRow(), noPubRow()])
+  for (const r of [childRow(), poolRow(), noPubRow()])
     fake
       .on(`GET runs/${r.id}`, doc(r))
       .on(`GET runs/${r.id}/events`, pagedEvents(events(r.id, true)))

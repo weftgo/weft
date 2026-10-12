@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
 import type { Manifest, ManifestAgent, ManifestProposal, RequestsPage, RunDoc, RunsPage } from "@/lib/api"
+import { derivedWords } from "@/lib/honesty"
 import { resetNotices } from "@/lib/notify"
 import { keepPromptWords, PROPOSAL_NEEDS_DEV, PROPOSAL_POINTER, saveWords } from "@/lib/saves"
 import { renderApp, stubBrowser } from "@/test/app"
@@ -141,6 +142,16 @@ describe("save as test on the run page (F6.2)", () => {
     await waitFor(() => expect(router.state.location.search).not.toHaveProperty("save"))
     await new Promise((r) => setTimeout(r, 100))
     expect(studio.calls(`GET runs/${RUN}/export`)).toHaveLength(1)
+  })
+
+  it("?save=test on a derived run is refused in the disabled button's words, never fetched", async () => {
+    serveRun(["export"]).on(`GET runs/${RUN}`, { ...rOK, derived: true, children: [] }).install()
+    const { router } = renderApp(`/runs/${RUN}?save=test`)
+    await waitFor(() => expect(toastTitles()).toContain(`save as test refused: ${derivedWords()}`))
+    await waitFor(() => expect(router.state.location.search).not.toHaveProperty("save"))
+    await new Promise((r) => setTimeout(r, 100))
+    expect(studio.calls(`GET runs/${RUN}/export`)).toHaveLength(0)
+    expect(saved).toEqual([])
   })
 
   it("the header's verbs are axe-clean", async () => {

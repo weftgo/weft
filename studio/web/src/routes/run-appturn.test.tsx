@@ -15,11 +15,11 @@ import axe from "axe-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
-import { APP_LINK_FIX, APP_RUN, APP_RUN_FIX, READ_TOKEN, RUNTIMES_UNREAD } from "@/lib/honesty"
+import { APP_LINK_FIX, APP_RUN, APP_RUN_FIX, PLAYGROUND_OFF, READ_TOKEN, RUNTIMES_UNREAD, SESSION_UNREAD, SUBAGENT_CALL } from "@/lib/honesty"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { FakeStudio } from "@/test/fake-studio"
-import { APP_PUB, CALL, PARKED, PLAIN, REJECTED, RESUMED, RUNTIMES_500, runtimeRow, serveAppTurn, STEER_FAILED } from "@/test/appturn-fixture"
+import { APP_PUB, APP_SESSION, CALL, CHILD, NOPUB, PARKED, PLAIN, REJECTED, RESUMED, RUNTIMES_500, runtimeRow, serveAppTurn, STEER_FAILED } from "@/test/appturn-fixture"
 import type { AppTurnOptions } from "@/test/appturn-fixture"
 
 configure({ asyncUtilTimeout: 10_000 })
@@ -41,8 +41,10 @@ afterEach(() => {
 const READ = `weft_pt.${btoa(JSON.stringify({ public_id: APP_PUB, pid: APP_PUB })).replace(/=+$/, "")}.sig`
 
 async function open(o: AppTurnOptions = {}, run = PARKED) {
-  const fake = serveAppTurn(new FakeStudio(), { studioMeta: true, ...o }).install()
-  renderApp(`/runs/${run}?view=story`)
+  // o itself is served: a test may change its runtimes or outcome later.
+  o.studioMeta = true
+  const fake = serveAppTurn(new FakeStudio(), o).install()
+  renderApp(`/runs/${encodeURIComponent(run)}?view=story`)
   await waitFor(() => expect(document.querySelector(o.running ? "[data-app-steer]" : `[data-pending-call="${CALL.id}"]`)).toBeTruthy())
   if (!o.running) await waitFor(() => expect(parked().getAttribute("data-parked")).not.toBe("checking"))
   return fake
@@ -103,6 +105,8 @@ describe("the run page decides an app turn its service's Sessions runtime acts o
     fireEvent.submit(form)
     await waitFor(() => expect(fake.calls(`POST runs/${PARKED}/steer`).map((r) => r.body)).toEqual([{ message: "use staging instead" }]))
     await waitFor(() => expect(form.querySelector('[data-app-verb="finished"]')).toBeTruthy())
+    // A steer's line says steered, never "decided".
+    expect(form.querySelector('[data-app-verb="finished"]')!.textContent).toBe("steered")
     expect([...document.querySelectorAll("button")].some((b) => /^cancel/i.test(b.textContent))).toBe(false)
     cleanup()
 
@@ -129,13 +133,15 @@ describe("the run page when a read fails", () => {
     expect(parked().querySelectorAll("button")).toHaveLength(0)
   })
 
-  it("a failed session read: an already-resumed turn offers no verb — checking the session", async () => {
+  it("a failed session read: an already-resumed turn offers no verb — the read's error, never an endless check", async () => {
     const fake = serveAppTurn(new FakeStudio(), { studioMeta: true, resumed: true, sessionError: true }).install()
     renderApp(`/runs/${PARKED}?view=story`)
-    await waitFor(() => expect(document.querySelector('[data-app-checking="session"]')?.textContent).toBe("checking the session…"))
-    expect(parked().getAttribute("data-parked")).toBe("checking")
+    await waitFor(() => expect(line("unread")).toBe(`${SESSION_UNREAD}: session store unavailable`))
+    expect(parked().getAttribute("data-parked")).toBe("unread")
+    expect(document.querySelector("[data-app-checking]")).toBeNull()
     expect(parked().querySelectorAll("button")).toHaveLength(0)
     expect(fake.calls(`POST runs/${PARKED}/approvals`)).toHaveLength(0)
+    await axeClean(parked())
   })
 })
 
@@ -161,9 +167,75 @@ describe("the run page when no Sessions runtime of the run's service acts", () =
     expect(line()).toBe(READ_TOKEN)
   })
 
+  it("a Studio without the playground: capabilities_off's words, the runtimes never asked", async () => {
+    const fake = await open({ noPlayground: true })
+    // Go's offPlayground (the golden meta's capabilities_off), its lead dropped.
+    const off = "turn it on with studio.Playground(true); weft studio --no-playground turns it off"
+    expect(parked().getAttribute("data-parked")).toBe("read-only")
+    expect(line()).toBe(`app-owned turn · read-only: ${PLAYGROUND_OFF} — fix: ${off}`)
+    expect(parked().textContent).not.toContain("is connected")
+    expect(parked().querySelectorAll('[data-refused="app-owned"]')).toHaveLength(3)
+    expect(fake.calls("GET runtimes")).toHaveLength(0)
+    await axeClean(parked())
+  })
+
+  it("a session turn without a public id: appturn.go's words, the thread.PublicID fix", async () => {
+    const fake = await open({}, NOPUB)
+    expect(parked().getAttribute("data-parked")).toBe("no-public-id")
+    expect(line("no-public-id")).toBe(`app-owned turn · read-only: run ${NOPUB} is not a turn of a thread session with a public id — fix: ${APP_RUN_FIX}`)
+    expect(verb("continue")?.hasAttribute("disabled")).toBe(true)
+    expect(fake.calls(`POST runs/${NOPUB}/approvals`)).toHaveLength(0)
+  })
+
+  it("a subagent's child run: decided on its parent turn, a link to it, no verb and no session gate", async () => {
+    const fake = await open({}, CHILD)
+    expect(parked().getAttribute("data-parked")).toBe("child")
+    expect(line("child")).toBe(`${SUBAGENT_CALL} ${PARKED}`)
+    const link = parked().querySelector<HTMLAnchorElement>("[data-parent-turn]")!
+    expect(new URL(link.href).pathname).toContain(`/runs/${PARKED}`)
+    expect([...parked().querySelectorAll<HTMLButtonElement>('[data-refused="app-owned"]')].every((b) => b.disabled)).toBe(true)
+    expect(parked().querySelector("input")).toBeNull()
+    expect(fake.calls(`GET sessions/${APP_SESSION}`)).toHaveLength(0)
+    await axeClean(parked())
+  })
+
   it("a plain Generate's park: the app resumes it, the thread.PublicID fix", async () => {
     await open({}, PLAIN)
     expect(parked().getAttribute("data-parked")).toBe("plain")
     expect(line("plain")).toBe(`${APP_RUN} — fix: ${APP_RUN_FIX}`)
+  })
+})
+
+describe("the run page's gate follows the facts while the turn is parked", () => {
+  it("a runtime that connects later turns the read-only line into the verbs, no reload", async () => {
+    const o: AppTurnOptions = { runtimes: [] }
+    await open(o)
+    expect(parked().getAttribute("data-parked")).toBe("read-only")
+    o.runtimes = [runtimeRow()]
+    await waitFor(() => expect(parked().getAttribute("data-parked")).toBe("decide"), { timeout: 15_000 })
+    expect(verb("continue")?.hasAttribute("disabled")).toBe(false)
+  })
+
+  it("another surface resumes the turn: the page stops offering the verbs and reads resumed, no reload", async () => {
+    const o: AppTurnOptions = {}
+    const fake = await open(o)
+    expect(parked().getAttribute("data-parked")).toBe("decide")
+    o.resumed = true
+    await waitFor(() => expect(line("resumed")).toBe(`decided — resumed as ${RESUMED}`), { timeout: 15_000 })
+    expect(verb("continue")).toBeUndefined()
+    expect(fake.calls(`POST runs/${PARKED}/approvals`)).toHaveLength(0)
+  })
+
+  it("a 403 holds while the gate reads the same; a later gate that changed clears it", async () => {
+    const o: AppTurnOptions = { outcome: "refused" }
+    await open(o)
+    fireEvent.click(verb("continue")!)
+    await waitFor(() => expect(line()).toBe(SVC_WORDS))
+    // The app registers again (a restart): another runtime, Sessions set.
+    o.outcome = undefined
+    o.runtimes = [runtimeRow({ id: "rt_02" })]
+    await waitFor(() => expect(verb("continue")?.hasAttribute("disabled")).toBe(false), { timeout: 15_000 })
+    expect(parked().querySelector("[data-app-owned]")).toBeNull()
+    expect(parked().querySelector('[data-app-verb="refused"]')).toBeNull()
   })
 })

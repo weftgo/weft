@@ -157,9 +157,20 @@ describe("costView", () => {
     expect(v).toMatchObject({ known: false, text: "—", badge: "unknown", title: running })
     const unread = "the run's subagent children could not be read, so its own usage cannot be told from theirs"
     expect(delegatedView({ ...priced(1, null), delegated_cost_reason: unread }).badge).toBe("unknown")
-    // A mix names an unpriced model: unpriced.
+    // A mix: pricing.go's compute leads with notPriced's unknown words
+    // whenever any child is unknown, and the badge it carries is
+    // unknown — the unpriced child named inside the list does not make
+    // the whole unpriced.
     const mixed = "a subagent run's cost is not known yet: c1 (running: usage arrives at run end); c2 (no row of the default pricing table matches x/y)"
-    expect(delegatedView({ ...priced(1, null), delegated_cost_reason: mixed }).badge).toBe("unpriced")
+    expect(delegatedView({ ...priced(1, null), delegated_cost_reason: mixed }).badge).toBe("unknown")
+    // The same, the unpriced child first (the list's order is the children's).
+    const goMixed =
+      "a subagent run's cost is not known yet: " +
+      ["r/0/c1 (no row of the default pricing table matches demo/ops)", "r/0/c2 (running: usage arrives at run end)"].join("; ")
+    expect(delegatedView({ ...priced(1, null), delegated_cost_reason: goMixed })).toMatchObject({ badge: "unknown", title: goMixed })
+    // Every child unpriced: notPriced's other lead, unpriced.
+    const allUnpriced = "a subagent run is not priced: r/0/c1 (no row of the default pricing table matches demo/ops)"
+    expect(delegatedView({ ...priced(1, null), delegated_cost_reason: allUnpriced }).badge).toBe("unpriced")
     // A total over it says the same.
     expect(sumCost([{ ...priced(1, null), delegated_cost_reason: running }])).toMatchObject({ known: false, badge: "unknown" })
   })

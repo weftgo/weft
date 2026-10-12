@@ -52,7 +52,7 @@ import { notifySave } from "@/lib/notify"
 import { mayExportTestWith } from "@/lib/saves"
 import { RawView } from "@/components/studio/raw-view"
 import { DerivedNote, DerivedStory } from "@/components/studio/derived-story"
-import { isDerived } from "@/lib/honesty"
+import { derivedWords, isDerived } from "@/lib/honesty"
 import { ReplayBar } from "@/components/studio/replay-bar"
 import { ReplayContext, ReplayDrawer } from "@/components/studio/replay-drawer"
 import type { ReplayRequest } from "@/components/studio/replay-drawer"
@@ -234,15 +234,27 @@ function RunPage() {
         ? ""
         : "@3xl/trace:sticky @3xl/trace:top-3 @3xl/trace:max-h-[calc(100vh-8rem)]"
 
+  const queryClient = useQueryClient()
+  const run = useQuery({
+    ...runQuery(id),
+    refetchInterval: (q) => (q.state.data?.status === "running" ? 2000 : false),
+  })
+
   // ?save=test (plan F6: the devtools panel's "save as test" hands off
   // here): the zip downloads once with this page's bearer, and the key
-  // is dropped so a reload or a copied link does not save again.
+  // is dropped so a reload or a copied link does not save again. It
+  // waits for the run: a derived run (plan I1.3) recorded no transcript
+  // and the export refuses it, so it is refused here in the disabled
+  // button's words and never fetched.
   const saved = useRef("")
+  const runPending = run.isPending
+  const runDerived = isDerived(run.data)
   useEffect(() => {
-    if (search.save !== "test" || capsLoading || saved.current === id) return
+    if (search.save !== "test" || capsLoading || runPending || saved.current === id) return
     saved.current = id
     void navigate({ search: (prev) => ({ ...prev, save: undefined }), replace: true })
-    if (mayExportTestWith(caps, studioToken())) void saveTest(id)
+    if (runDerived) notifySave({ kind: "save-test", ok: false, message: derivedWords() })
+    else if (mayExportTestWith(caps, studioToken())) void saveTest(id)
     else
       notifySave({
         kind: "save-test",
@@ -251,13 +263,7 @@ function RunPage() {
           ? "a read-scoped panel token does not read the run's prompts"
           : `this Studio has no export capability${capsWhy("export") ? `: ${capsWhy("export")}` : ""}`,
       })
-  }, [search.save, capsLoading, caps, capsWhy, id, navigate])
-
-  const queryClient = useQueryClient()
-  const run = useQuery({
-    ...runQuery(id),
-    refetchInterval: (q) => (q.state.data?.status === "running" ? 2000 : false),
-  })
+  }, [search.save, capsLoading, runPending, runDerived, caps, capsWhy, id, navigate])
   // The tab is titled while the run loads too (lib/title.ts).
   useDocumentTitle({ page: "run", id, status: run.data?.status })
   // A link with the drawer's state reopens it once, on that step, from

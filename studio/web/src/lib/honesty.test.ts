@@ -17,6 +17,20 @@ import {
   statusHoles,
   kib,
   mergeHoles,
+  APP_OWNED,
+  APP_RUN_FIX,
+  CAPS_UNREAD,
+  PLAYGROUND_OFF,
+  PLAYGROUND_OFF_FIX,
+  READ_TOKEN,
+  SESSION_UNREAD,
+  SUBAGENT_CALL,
+  appGate,
+  appVerbWords,
+  noPublicIDWords,
+  parkedKind,
+  refusalLine,
+  refusalWords,
 } from "./honesty"
 
 interface GoHole {
@@ -131,5 +145,62 @@ describe("statusHoles", () => {
       { hole: "max_tokens" },
     ])
     expect(statusHoles({ status: "interrupted" })).toEqual([{ hole: "interrupted" }])
+  })
+})
+
+// The app turn's gate and words (plan F4.3) — the run page's and the
+// panel's one module; studio/appturn.go and studio/manifest.go are the
+// words' source, read here so the two cannot drift.
+describe("the app turn's kinds and refusal words", () => {
+  const turn = { id: "s-t1", session_id: "s", public_id: "pub_s", service: "app" }
+  const rt = (o: Partial<{ id: string; connected: boolean; sessions: boolean }> = {}) => ({ id: "rt_1", service: "app", connected: true, sessions: true, ...o })
+  const go = (f: string) => readFileSync(resolve(process.cwd(), `../${f}`), "utf8")
+
+  it("a subagent's child run is decided on its parent turn: no verb, the parent named", () => {
+    const child = { ...turn, id: "s-t1/0/call_1", parent_run_id: "s-t1" }
+    expect(parkedKind(child, [rt()])).toBe("child")
+    expect(refusalLine(refusalWords("child", child, [rt()], false))).toBe(`${SUBAGENT_CALL} s-t1`)
+  })
+
+  it("a session turn without a public id: appturn.go's 403 words and fix", () => {
+    const row = { ...turn, public_id: "" }
+    expect(parkedKind(row, [rt()])).toBe("no-public-id")
+    expect(refusalWords("no-public-id", row, [rt()], false)).toEqual({ words: noPublicIDWords("s-t1"), fix: APP_RUN_FIX })
+    expect(go("appturn.go")).toContain(`appOwned+" · read-only: run "+row.ID+" is not a turn of a thread session with a public id"`)
+    // Outside a session it stays the plain Generate's line.
+    expect(parkedKind({ ...turn, session_id: "", public_id: "" }, [rt()])).toBe("plain")
+  })
+
+  it("a Studio without the playground: capabilities_off's reason, never the closed-link line; a failed meta read said as such", () => {
+    const off = /offPlayground\s*=\s*"([^"]+)"/.exec(go("manifest.go"))![1]
+    const w = refusalWords("read-only", turn, null, false, undefined, "", { capabilities: ["live"], capabilities_off: { playground: off } })
+    expect(w).toEqual({ words: `${APP_OWNED}: ${PLAYGROUND_OFF}`, fix: off.replace(/^the playground is off:\s*/, "") })
+    expect(`the playground is off: ${PLAYGROUND_OFF_FIX}`).toBe(off)
+    // No capabilities_off sent: the same words, Go's fix.
+    expect(refusalWords("read-only", turn, null, false, undefined, "", { capabilities: [] }).fix).toBe(PLAYGROUND_OFF_FIX)
+    expect(refusalWords("read-only", turn, null, false, undefined, "", { metaError: "boom" })).toEqual({ words: `${CAPS_UNREAD}: boom`, fix: "" })
+    // A read token is told about its token first.
+    expect(refusalWords("read-only", turn, null, true, undefined, "", { capabilities: [] }).words).toBe(READ_TOKEN)
+  })
+
+  it("a failed session read is said as such, never a verdict", () => {
+    expect(refusalWords("decide", turn, [rt()], false, undefined, "", { capabilities: ["playground"], sessionError: "500" })).toEqual({
+      words: `${SESSION_UNREAD}: 500`,
+      fix: "",
+    })
+  })
+
+  it("the gate changes when the service's runtimes do; a refusal holds only while it reads the same", () => {
+    const a = appGate(turn, [rt()])
+    expect(appGate(turn, [rt(), { id: "rt_9", service: "billing", connected: true, sessions: true }])).toBe(a)
+    expect(appGate(turn, [rt({ id: "rt_2" })])).not.toBe(a)
+    expect(appGate(turn, [rt()], "s-t2")).not.toBe(a)
+  })
+
+  it("a finished steer reads steered, a finished decision decided", () => {
+    expect(appVerbWords({ state: "finished" }, "r", "steer").text).toBe("steered")
+    expect(appVerbWords({ state: "finished", decision: "approve" }, "r").text).toBe("decided")
+    // The panel's steer carries no decision: steered without the argument.
+    expect(appVerbWords({ state: "finished" }, "r").text).toBe("steered")
   })
 })

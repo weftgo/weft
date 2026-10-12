@@ -1100,8 +1100,9 @@ shows as the session's next turn and the parked one reads `decided —
 resumed as <session>-tN` (a link; a reload says the same, with no verb),
 or the runtime's rejection word for word (`rejected: the app is writing
 this session; fork instead`). A running app turn takes steer the same
-way, its own run id posted; a steer that missed its turn reads `failed:
-no running turn to steer for run … (…)`. Cancel is never offered on an
+way, its own run id posted — a delivered one reads `steered`; a steer
+that missed its turn reads `failed: no running turn to steer for run …
+(…)`. Cancel is never offered on an
 app turn. Otherwise the block reads `awaiting decision (read-only)`: the
 verbs drawn disabled (`badges.ts`'s refused verb,
 `data-weft-refused="app-owned"`) and one line in the server's words —
@@ -1116,13 +1117,26 @@ connected without it, auth.go's `this token is read-only: mint it with
 once one has answered (`lib/honesty.ts` holds them; a test pins them to
 `studio/appturn.go` and `studio/auth.go`) — until a later runtimes read
 says the verbs' gate holds again (the runtime reconnected, the fix
-applied), which gives them back. The gate reads `GET /api/runtimes`
+applied), which gives them back; the panel reads `GET /api/runtimes`
 at most every 10 s while such a turn is drawn, on a timer too, so a
 quiet parked turn follows the link opening without a click. A plain Generate's park (no
-session or public id) reads `parked · app-owned run · the app resumes it
-(weft.Approve)` with the `thread.PublicID(...)` fix. The run page draws
-the same block under the same gate, in the same words
-(`parity.test.ts`). The demo is `thread/examples/approvals -serve`:
+session) reads `parked · app-owned run · the app resumes it
+(weft.Approve)` with the `thread.PublicID(...)` fix; a turn of a session
+created without a public id reads appturn.go's `… run <id> is not a turn
+of a thread session with a public id` with the same fix; a subagent's
+child run (`<parent>/<step>/<call>`) reads `parked · a subagent's call —
+decide on the parent turn <parent>` (a link on the run page), no verb:
+only the parent's SUBAGENT_PENDING call is pending on the session. On a
+Studio without the playground the line is `… the playground is off on
+this Studio` with `meta.capabilities_off`'s fix (the run page; the panel
+reads it once it hands its meta to `refusalWords`), and a failed read —
+meta, the session, the runtimes — is said as such (`could not read the
+session: …`), never a verdict and never an endless check. While the turn
+is parked or running the run page reads the session and the runtimes
+again every 5 s: a turn another surface resumed reads `decided`, and a
+403 holds only until the gate it answered changes (a runtime
+registering again). The run page draws the same block under the same
+gate, in the same words (`parity.test.ts`). The demo is `thread/examples/approvals -serve`:
 `WEFT_ENV=dev go run ./thread/examples/approvals -serve 127.0.0.1:7331`,
 ask "deploy to prod", decide it in the panel docked on the page; a
 restart over the same `-dir` resumes the session stored under its

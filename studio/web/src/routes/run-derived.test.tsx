@@ -156,6 +156,14 @@ describe("a derived run's page (the Done line)", () => {
     expect(card.querySelector("[data-usage='unknown']")!.getAttribute("title")).toBe(reason)
     expect(card.querySelector("[data-cost]")!.getAttribute("data-cost")).toBe("unknown")
     expect(card.textContent).not.toContain("0 in / 0 out")
+    // The header too: the run's own figure is "—" in the run's reason.
+    const runReason = (derivedBodies.runNoUsage as { cost_reason: string }).cost_reason
+    expect(runReason).toMatch(/report no \(or zero\) usage/)
+    expect(document.body.textContent).not.toContain("0 in / 0 out")
+    const head = document.querySelector<HTMLElement>("[data-header-usage]")!
+    expect(head.getAttribute("data-header-usage")).toBe("unknown")
+    expect(head.querySelector("[data-usage='unknown']")!.getAttribute("title")).toBe(runReason)
+    expect(head.textContent).not.toContain("0 in / 0 out")
 
     renderApp("/runs")
     await waitFor(() => expect(document.querySelector("[data-derived-chip]")).toBeTruthy())

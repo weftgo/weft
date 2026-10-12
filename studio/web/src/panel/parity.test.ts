@@ -19,7 +19,7 @@ import type { RunDoc, RunRow } from "../lib/api"
 import { UNRUN_CALL_REASON } from "../lib/events"
 import { REQUEST_NO_INDEX_REASON, REQUEST_NO_RECORD_REASON, REQUEST_NOT_RECORDED_LABEL } from "../lib/requests"
 import { badgeLabel } from "./badges"
-import { CAUSES, HOLES, isHole, resultCapReason, RUNTIMES_UNREAD } from "../lib/honesty"
+import { CAUSES, HOLES, isHole, PLAYGROUND_OFF, resultCapReason, RUNTIMES_UNREAD } from "../lib/honesty"
 import { renderApp, stubBrowser } from "../test/app"
 import { renderWithRouter } from "../test/render"
 import { createElement } from "react"
@@ -47,7 +47,7 @@ import { studioPlaygroundLink } from "./element"
 import { drawerHandoff } from "../components/studio/replay-drawer"
 import { playgroundLink } from "../lib/links"
 import { DERIVED, STOCK as DERIVED_STOCK, derivedBodies, serveDerived } from "../test/derived-fixture"
-import { APP_PUB, CALL as APP_CALL, PARKED as APP_PARKED, PLAIN as APP_PLAIN, RUNTIMES_500 as APP_RUNTIMES_500, runtimeRow as appRuntime, serveAppTurn } from "../test/appturn-fixture"
+import { APP_PUB, CALL as APP_CALL, NOPUB as APP_NOPUB, PARKED as APP_PARKED, PLAIN as APP_PLAIN, RUNTIMES_500 as APP_RUNTIMES_500, runtimeRow as appRuntime, serveAppTurn } from "../test/appturn-fixture"
 import type { AppTurnOptions } from "../test/appturn-fixture"
 
 configure({ asyncUtilTimeout: 10_000 })
@@ -1036,6 +1036,7 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
     { name: "no runtime of the service connected: the link's fix", o: { runtimes: [] }, kind: "read-only" },
     { name: "a turn already resumed: decided — resumed as the next run", o: { resumed: true }, kind: "resumed" },
     { name: "a plain Generate's park", o: {}, run: APP_PLAIN, kind: "plain" },
+    { name: "a session turn without a public id: appturn.go's words, the thread.PublicID fix", o: {}, run: APP_NOPUB, kind: "no-public-id" },
     { name: "a failed runtimes read (500): its error, no verdict, no verbs", o: { runtimesError: true }, kind: "unread" },
   ]
   interface Seen {
@@ -1046,7 +1047,8 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
   }
   async function panelSeen(c: (typeof cases)[number]): Promise<Seen> {
     serveAppTurn(new FakeStudio(), c.o).install()
-    const plain = c.run === APP_PLAIN
+    // A run outside the public id's conversation: the panel's fallback list.
+    const plain = c.run === APP_PLAIN || c.run === APP_NOPUB
     const el = await mount({ "data-endpoint": "http://studio.test/studio/", "data-open": "true", ...(plain ? {} : { "data-public-id": APP_PUB }) })
     const id = c.run ?? APP_PARKED
     await vi.waitFor(() => expect(all(el, ".weft-turn").some((b) => b.textContent.includes(id))).toBe(true), { timeout: 5_000 })
@@ -1084,7 +1086,7 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
     serveAppTurn(new FakeStudio(), { studioMeta: true, ...c.o }).install()
     renderApp(`/runs/${c.run ?? APP_PARKED}?view=story`)
     const box = () => document.querySelector<HTMLElement>("[data-parked]")
-    const first = c.click ? "decide" : c.kind === "unread" ? "read-only" : c.kind
+    const first = c.click ? "decide" : c.kind
     await waitFor(() => expect(box()?.getAttribute("data-parked")).toBe(first))
     if (c.click) {
       ;[...box()!.querySelectorAll("button")].find((n) => n.textContent === "continue")!.click()
@@ -1112,7 +1114,75 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
       expect(panel.kind).toBe(c.kind)
       // A failed read is said as such: never the closed-link verdict.
       if (c.kind === "unread") expect([panel.line, panel.refused]).toEqual([`${RUNTIMES_UNREAD}: ${APP_RUNTIMES_500}`, 0])
+      if (c.kind === "no-public-id") expect(panel.line).toContain(`run ${APP_NOPUB} is not a turn of a thread session with a public id`)
     })
+
+  // A finished steer reads "steered" on both (lib/honesty.ts's
+  // appVerbWords: the panel's steer carries no decision).
+  it("a finished steer reads steered on both surfaces, never decided", async () => {
+    serveAppTurn(new FakeStudio(), { running: true }).install()
+    const el = await mount({ "data-endpoint": "http://studio.test/studio/", "data-open": "true", "data-public-id": APP_PUB })
+    await vi.waitFor(() => expect(all(el, ".weft-turn").some((b) => b.textContent.includes(APP_PARKED))).toBe(true), { timeout: 5_000 })
+    click(all(el, ".weft-turn").find((b) => b.textContent.includes(APP_PARKED)))
+    await vi.waitFor(() => expect($(el, "[data-weft-app-steer] input")).toBeTruthy(), { timeout: 5_000 })
+    ;($(el, "[data-weft-app-steer] input") as HTMLInputElement).value = "use staging instead"
+    click(button(el, "steer"))
+    await vi.waitFor(() => expect($(el, '[data-weft-app-verb="finished"]')).toBeTruthy(), { timeout: 5_000 })
+    const panel = $(el, '[data-weft-app-verb="finished"]')!.textContent
+    el.remove()
+    await settle()
+    cleanup()
+    document.body.innerHTML = ""
+    stubBrowser()
+    vi.stubGlobal("scrollTo", vi.fn())
+    StudioEventSource.reset()
+    vi.stubGlobal("EventSource", StudioEventSource)
+    setStudioToken("")
+    serveAppTurn(new FakeStudio(), { studioMeta: true, running: true }).install()
+    renderApp(`/runs/${APP_PARKED}?view=story`)
+    await waitFor(() => expect(document.querySelector("[data-app-steer]")).toBeTruthy())
+    const form = document.querySelector<HTMLFormElement>("[data-app-steer]")!
+    fireEvent.change(form.querySelector("input")!, { target: { value: "use staging instead" } })
+    fireEvent.submit(form)
+    await waitFor(() => expect(form.querySelector('[data-app-verb="finished"]')).toBeTruthy())
+    const studio = form.querySelector('[data-app-verb="finished"]')!.textContent
+    cleanup()
+    expect([panel, studio]).toEqual(["steered", "steered"])
+  })
+
+  // A Studio without Playground(true): the run page says so in
+  // meta.capabilities_off's words through lib/honesty.ts's refusalWords
+  // (its AppGateFacts argument). The panel calls the same function but
+  // does not pass its meta yet (src/panel/element.ts's approvals(): a
+  // panel-side edit outside this change), so it still reads "no runtime
+  // of service app is connected". it.fails pins that divergence: once the
+  // panel passes `s.meta ? { capabilities: s.meta.capabilities,
+  // capabilities_off: s.meta.capabilities_off } : undefined` this turns
+  // red — make it a plain `it` then.
+  it.fails("a Studio without the playground: the same line on both (fails until the panel passes its meta to refusalWords)", async () => {
+    serveAppTurn(new FakeStudio(), { noPlayground: true }).install()
+    const el = await mount({ "data-endpoint": "http://studio.test/studio/", "data-open": "true", "data-public-id": APP_PUB })
+    await vi.waitFor(() => expect(all(el, ".weft-turn").some((b) => b.textContent.includes(APP_PARKED))).toBe(true), { timeout: 5_000 })
+    click(all(el, ".weft-turn").find((b) => b.textContent.includes(APP_PARKED)))
+    await vi.waitFor(() => expect($(el, "[data-weft-app-owned]")).toBeTruthy(), { timeout: 5_000 })
+    const panel = $(el, "[data-weft-app-owned]")!.textContent
+    el.remove()
+    await settle()
+    cleanup()
+    document.body.innerHTML = ""
+    stubBrowser()
+    vi.stubGlobal("scrollTo", vi.fn())
+    StudioEventSource.reset()
+    vi.stubGlobal("EventSource", StudioEventSource)
+    setStudioToken("")
+    serveAppTurn(new FakeStudio(), { studioMeta: true, noPlayground: true }).install()
+    renderApp(`/runs/${APP_PARKED}?view=story`)
+    await waitFor(() => expect(document.querySelector("[data-parked] [data-app-owned]")).toBeTruthy())
+    const studio = document.querySelector("[data-parked] [data-app-owned]")!.textContent
+    cleanup()
+    expect(studio).toContain(PLAYGROUND_OFF)
+    expect(panel).toBe(studio)
+  })
 })
 
 // Cost (plan A5.3): the panel's turn row and the run page's header read

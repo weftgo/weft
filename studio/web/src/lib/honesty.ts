@@ -396,15 +396,38 @@ export const APP_CANCEL = "cancel is not supported on an app turn"
 
 /** A failed GET /api/runtimes, said as such (the error follows). */
 export const RUNTIMES_UNREAD = "could not read the runtimes"
+/** A failed GET /api/sessions/{id}: no answer to "is it the latest
+ * turn?" — said as such (the error follows), never a spinner. */
+export const SESSION_UNREAD = "could not read the session"
+/** A failed GET /api/meta: no capabilities to gate on — said as such
+ * (the error follows), never a verdict about the runtime link. */
+export const CAPS_UNREAD = "could not read the Studio's capabilities"
+/** A Studio without Playground(true) (weft studio --no-playground, or
+ * setup A without the option): the approvals route is not registered,
+ * so no runtime is asked; the reason is meta.capabilities_off's. */
+export const PLAYGROUND_OFF = "the playground is off on this Studio"
+/** studio/manifest.go's offPlayground after its lead ("the playground
+ * is off: "), for a Studio whose meta names no capabilities_off. */
+export const PLAYGROUND_OFF_FIX = "turn it on with studio.Playground(true); weft studio --no-playground turns it off"
+/** A session turn of a thread session created without thread.PublicID:
+ * appturn.go's 403 words (its fix is APP_RUN_FIX, which names it). */
+export const noPublicIDWords = (runID: string) => `${APP_OWNED}: run ${runID} is not a turn of a thread session with a public id`
+/** A subagent's child run (`<parent>/<step>/<call>`, its session and
+ * public id inherited): its park surfaces on the parent turn as a
+ * SUBAGENT_PENDING call, and only that call is pending on the session
+ * (runtime/sessions.go's checkPending) — the parent id follows. */
+export const SUBAGENT_CALL = "parked · a subagent's call — decide on the parent turn"
 
 /** What a parked run's calls get: an experiment's verbs (its result
  * pane), the app turn's verbs, the app turn read-only, an app turn a
- * later turn of its session already resumed, or a plain Generate's
- * line. */
-export type ParkedKind = "experiment" | "decide" | "read-only" | "resumed" | "plain"
+ * later turn of its session already resumed, a plain Generate's line,
+ * a session turn without a public id, or a subagent's child run
+ * (decided on its parent turn). */
+export type ParkedKind = "experiment" | "decide" | "read-only" | "resumed" | "plain" | "no-public-id" | "child"
 
 /** A GET /api/runtimes row, as far as the gate reads it. */
 export interface RuntimeLike {
+  id?: string
   service: string
   connected?: boolean
   sessions?: boolean
@@ -416,19 +439,37 @@ interface AppRow {
   session_id?: string
   public_id?: string
   service?: string
+  parent_run_id?: string
 }
 
 const live = (rts: readonly RuntimeLike[] | null | undefined, service: string | undefined, sessions: boolean) =>
   !!service && !!rts?.some((r) => r.connected !== false && r.service === service && (!sessions || r.sessions === true))
 
-/** parkedKind gates the verbs: decide only while a connected runtime of
- * the run's own service registered runtime.Sessions (what appturn.go
- * routes by) and no later turn of its session exists (next). */
+/** parkedKind gates the verbs: a subagent's child run is decided on its
+ * parent turn; outside a thread session the app resumes the run; a
+ * session without a public id cannot be resolved by runtime.Sessions;
+ * else decide only while a connected runtime of the run's own service
+ * registered runtime.Sessions (what appturn.go routes by) and no later
+ * turn of its session exists (next). */
 export function parkedKind(row: AppRow | null | undefined, runtimes: readonly RuntimeLike[] | null | undefined, next?: string): ParkedKind {
   if (row?.playground) return "experiment"
-  if (!row?.session_id || !row.public_id) return "plain"
+  if (row?.parent_run_id) return "child"
+  if (!row?.session_id) return "plain"
+  if (!row.public_id) return "no-public-id"
   if (next) return "resumed"
   return live(runtimes, row.service, true) ? "decide" : "read-only"
+}
+
+/** appGate is what the verbs' gate rests on — the kind, the next turn,
+ * the run's service's runtimes — as one string: a 403 refusal holds
+ * while the gate reads the same, and a later gate that changed (a
+ * runtime connected, a new registration) clears it. */
+export function appGate(row: AppRow | null | undefined, runtimes: readonly RuntimeLike[] | null | undefined, next?: string): string {
+  const own = (runtimes ?? [])
+    .filter((r) => r.service === row?.service)
+    .map((r) => `${r.id ?? ""}:${r.connected !== false}:${r.sessions === true}`)
+    .sort()
+  return `${parkedKind(row, runtimes, next)}|${next ?? ""}|${own.join(",")}`
 }
 
 /** nextTurn is the turn after row in its session (the smallest later
@@ -445,23 +486,45 @@ export function nextTurn(
   return best?.id
 }
 
+/** What the surface knows of the Studio and the session beyond the
+ * runtimes: meta's capabilities (absent while unread: no verdict), its
+ * capabilities_off, and a failed meta or session read. */
+export interface AppGateFacts {
+  capabilities?: readonly string[]
+  capabilities_off?: Record<string, string>
+  metaError?: string
+  sessionError?: string
+}
+
 /** refusalWords is the read-only line's message and fix in the
- * server's words: a 403 already answered (refused), a read-scoped
- * token (auth.go), a plain Generate, else appturn.go's two cases — no
- * runtime of the service connected (the link is closed), or one
- * connected without Sessions. */
+ * server's words: a 403 already answered (refused), a plain Generate,
+ * a subagent's child run, a session without a public id (appturn.go),
+ * a read-scoped token (auth.go), a failed meta read, a Studio without
+ * the playground (meta.capabilities_off's reason), a failed session or
+ * runtimes read — said as such, never a verdict — else appturn.go's two
+ * cases: no runtime of the service connected (the link is closed), or
+ * one connected without Sessions. */
 export function refusalWords(
   kind: ParkedKind,
   row: AppRow,
   runtimes: readonly RuntimeLike[] | null | undefined,
   readToken: boolean,
   refused?: { error?: string; fix?: string },
-  rtErr?: string
+  rtErr?: string,
+  facts?: AppGateFacts
 ): { words: string; fix: string } {
   if (refused?.fix) return { words: refused.error ?? APP_OWNED, fix: refused.fix }
   if (kind === "plain") return { words: APP_RUN, fix: APP_RUN_FIX }
+  if (kind === "child") return { words: `${SUBAGENT_CALL} ${row.parent_run_id ?? ""}`.trimEnd(), fix: "" }
+  if (kind === "no-public-id") return { words: noPublicIDWords(row.id), fix: APP_RUN_FIX }
   if (readToken) return { words: READ_TOKEN, fix: "" }
   // A failed read is no verdict: the server never said the link is closed.
+  if (facts?.metaError) return { words: `${CAPS_UNREAD}: ${facts.metaError}`, fix: "" }
+  if (facts?.capabilities && !facts.capabilities.includes("playground")) {
+    const off = facts.capabilities_off?.playground
+    return { words: `${APP_OWNED}: ${PLAYGROUND_OFF}`, fix: off ? off.replace(/^the playground is off:\s*/, "") : PLAYGROUND_OFF_FIX }
+  }
+  if (facts?.sessionError) return { words: `${SESSION_UNREAD}: ${facts.sessionError}`, fix: "" }
   if (rtErr) return { words: `${RUNTIMES_UNREAD}: ${rtErr}`, fix: "" }
   const svc = row.service || "(none recorded)"
   if (!live(runtimes, row.service, false)) return { words: `${APP_OWNED}: no runtime of service ${svc} is connected`, fix: APP_LINK_FIX }
@@ -475,15 +538,19 @@ export function refusalWords(
 export const refusalLine = (w: { words: string; fix: string }) => (w.fix ? `${w.words} — fix: ${w.fix}` : w.words)
 
 /** appVerbWords is one app-turn verb's line under its call, the same
- * on both surfaces: in flight ("queued…"), "decided" (resumed: the
- * turn the finished command names, when it is another run), or the
- * runtime's rejection / the route's refusal word for word (bad) — "(no
- * reason given)" when the row carries none. */
+ * on both surfaces: in flight ("queued…"), "decided" for a decision or
+ * "steered" for a steer (with the turn the finished command names, when
+ * it is another run), or the runtime's rejection / the route's refusal
+ * word for word (bad) — "(no reason given)" when the row carries none.
+ * verb names which; absent, a verb that carries a decision is one (both
+ * surfaces send every decision with it, a steer never). */
 export function appVerbWords(
-  v: { state: string; error?: string; fix?: string; run?: string },
-  runID: string
+  v: { state: string; decision?: string; error?: string; fix?: string; run?: string },
+  runID: string,
+  verb: "decide" | "steer" = v.decision ? "decide" : "steer"
 ): { text: string; bad: boolean; resumed?: string } {
-  if (v.state === "finished") return { text: "decided", bad: false, ...(v.run && v.run !== runID ? { resumed: v.run } : {}) }
+  if (v.state === "finished")
+    return { text: verb === "steer" ? "steered" : "decided", bad: false, ...(v.run && v.run !== runID ? { resumed: v.run } : {}) }
   const bad = ["refused", "rejected", "failed", "lost"].includes(v.state)
   if (!bad) return { text: `${v.state}…`, bad }
   return { text: `${v.state}${v.error ? `: ${v.error}` : " (no reason given)"}${v.fix ? ` — fix: ${v.fix}` : ""}`, bad }

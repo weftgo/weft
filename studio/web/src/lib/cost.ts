@@ -80,16 +80,24 @@ export function costView(f: CostFields | null | undefined): CostView {
  * rather than "unknown". */
 const UNPRICED_WORDS = /\bno row\b.*\bmatches\b|reported no model to price/
 
+/** The lead studio/pricing.go's notPriced gives a delegated reason when
+ * any child's part is unknown ("a subagent run's cost is not known
+ * yet: …"): the whole is unknown then, whatever unpriced child the
+ * list goes on to name. */
+const UNKNOWN_LEAD = /^[^:]*'s cost is not known yet:/
+
 /** delegatedView reads a run's delegated block (its subagents'). The
  * API sends no delegated badge, only delegated_cost_reason: the badge
- * is "unpriced" when that reason names an unpriced model, else
- * "unknown" — a child still running (usage arrives at its end), one
- * whose end never arrived, children that could not be read — and the
- * title is the API's reason either way. */
+ * is "unknown" when the reason leads with pricing.go's unknown words —
+ * a child still running (usage arrives at its end), one whose end never
+ * arrived, children that could not be read — even when the list names
+ * an unpriced child too; else "unpriced" when it names an unpriced
+ * model, else "unknown". The title is the API's reason either way. */
 export function delegatedView(f: DelegatedCostFields | null | undefined): CostView {
   const known = f?.delegated_cost_known
   const reason = f?.delegated_cost_reason
-  const badge = known === false ? (reason && !UNPRICED_WORDS.test(reason) ? "unknown" : "unpriced") : undefined
+  const badge =
+    known === false ? (reason && (UNKNOWN_LEAD.test(reason) || !UNPRICED_WORDS.test(reason)) ? "unknown" : "unpriced") : undefined
   return view(f?.delegated_cost_usd, known, reason, badge)
 }
 

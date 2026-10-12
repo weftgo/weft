@@ -7,16 +7,20 @@
 // run's take: 202 + a command, polled to its end, its rejection said
 // verbatim. Otherwise the verbs are drawn refused with the server's
 // words and fix (lib/honesty.ts's, or the 403's own once answered); a
-// plain Generate's park says the app resumes it. Steer on the running
-// app turn sits beside (AppSteer). Cancel is never offered on an app
-// turn: the runtime refuses it.
+// plain Generate's park says the app resumes it, a session turn
+// without a public id says why runtime.Sessions cannot reach it, a
+// subagent's child run points at its parent turn, and a Studio without
+// the playground says so in meta.capabilities_off's words. Steer on the
+// running app turn sits beside (AppSteer). Cancel is never offered on
+// an app turn: the runtime refuses it.
 import { useEffect, useRef, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
 import { ApiError, fetchCommand, metaQuery, postApproval, postSteer, runtimesQuery, sessionQuery, studioToken } from "@/lib/api"
 import type { CommandStatus, RunDoc } from "@/lib/api"
-import { appVerbWords, nextTurn, parkedKind, refusalLine, refusalWords } from "@/lib/honesty"
+import { appGate, appVerbWords, nextTurn, parkedKind, refusalLine, refusalWords, SUBAGENT_CALL } from "@/lib/honesty"
+import type { AppGateFacts } from "@/lib/honesty"
 import { runLink } from "@/lib/links"
 import { canReplay, tokenScopeOf } from "@/lib/replay"
 
@@ -33,12 +37,16 @@ interface Verb {
   error?: string
   fix?: string
   run?: string
+  /** A refusal's gate (lib/honesty.ts's appGate) when it was answered:
+   * it holds while the gate reads the same. */
+  gate?: string
 }
 
 /** useAppVerbs sends verbs and follows their commands (§10.5): the
  * 202's command polled every 700 ms until finished, rejected or lost;
- * a refused POST kept with the server's fix. A finished one re-reads
- * the run and session lists, where the resumed turn shows. */
+ * a refused POST kept with the server's fix and the gate it answered
+ * (the runtimes read again: the gate was stale). A finished one
+ * re-reads the run and session lists, where the resumed turn shows. */
 function useAppVerbs() {
   const [verbs, setVerbs] = useState<Record<string, Verb>>({})
   const qc = useQueryClient()
@@ -52,14 +60,15 @@ function useAppVerbs() {
   const set = (key: string, v: Verb) => {
     if (alive.current) setVerbs((cur) => ({ ...cur, [key]: { decision: (cur[key] as Verb | undefined)?.decision, ...v } }))
   }
-  const send = async (key: string, post: () => Promise<{ command_id?: string }>, decision?: string) => {
+  const send = async (key: string, post: () => Promise<{ command_id?: string }>, decision?: string, gate?: string) => {
     set(key, { state: "sending", decision })
     let out: { command_id?: string }
     try {
       out = await post()
     } catch (e) {
       const fix = e instanceof ApiError ? (e.doc as { fix?: unknown } | undefined)?.fix : undefined
-      set(key, { state: "refused", error: e instanceof Error ? e.message : String(e), ...(typeof fix === "string" ? { fix } : {}) })
+      set(key, { state: "refused", error: e instanceof Error ? e.message : String(e), ...(typeof fix === "string" ? { fix } : {}), gate })
+      void qc.invalidateQueries({ queryKey: ["runtimes"] })
       return
     }
     const id = out.command_id
@@ -99,10 +108,11 @@ function useAppVerbs() {
   return { verbs, send }
 }
 
-/** The verb's line under its call (lib/honesty.ts's appVerbWords). */
-function VerbLine({ v, runID }: { v: Verb | undefined; runID: string }) {
+/** The verb's line under its call (lib/honesty.ts's appVerbWords): a
+ * decision reads "decided", a steer "steered". */
+function VerbLine({ v, runID, verb }: { v: Verb | undefined; runID: string; verb?: "decide" | "steer" }) {
   if (!v) return null
-  const w = appVerbWords(v, runID)
+  const w = appVerbWords(v, runID, verb)
   return (
     <div className={w.bad ? "text-ev-error" : "text-faint"} data-app-verb={v.state}>
       {w.text}
@@ -150,38 +160,53 @@ function DecideRow({ call, onDecide }: { call: Call; onDecide: (d: "approve" | "
   )
 }
 
+/** How often the gate's reads are taken again while the turn is parked
+ * or running: another surface may resume it, a runtime may connect. */
+export const APP_GATE_POLL_MS = 5_000
+
 /** The app's turn and what the page may do on it: the gate reads the
  * runtimes (a Sessions runtime of the run's service) and the session's
- * turns (a later turn resumed this one), as the panel does. checking
- * while either is still loading — never a verdict on half the facts. */
+ * turns (a later turn resumed this one), as the panel does — again
+ * every APP_GATE_POLL_MS while the turn is parked or running. checking
+ * while either is still loading — never a verdict on half the facts; a
+ * failed read is said as such (unread), never a spinner. */
 function useAppTurn(doc: RunDoc) {
   const meta = useQuery(metaQuery())
   const caps = meta.data?.capabilities ?? []
   const mayAct = canReplay(caps, studioToken())
-  const app = !doc.playground && !!doc.session_id && !!doc.public_id
-  const rts = useQuery({ ...runtimesQuery(), enabled: app && mayAct })
-  const sess = useQuery({ ...sessionQuery(doc.session_id), enabled: app })
+  // A subagent's child run is decided on its parent turn: no gate.
+  const app = !doc.playground && !doc.parent_run_id && !!doc.session_id && !!doc.public_id
+  const poll = doc.pending > 0 || doc.status === "running" ? APP_GATE_POLL_MS : false
+  const rts = useQuery({ ...runtimesQuery(), enabled: app && mayAct, refetchInterval: poll })
+  const sess = useQuery({ ...sessionQuery(doc.session_id), enabled: app, refetchInterval: poll })
   const next = nextTurn(doc, sess.data?.runs)
   const runtimes = rts.data?.runtimes ?? null
   const kind = parkedKind(doc, runtimes, next)
-  // A failed session read is no answer to "is it the latest turn?":
-  // still checking (no verbs). A failed runtimes read is said as such.
-  const sessErr = app && sess.isError
-  const checking = app && (meta.isPending || sess.isPending || sessErr || (mayAct && rts.isPending))
+  const gate = appGate(doc, runtimes, next)
+  const sessErr = app && sess.isError ? sess.error.message : ""
+  const metaErr = app && meta.isError ? meta.error.message : ""
+  const checking = app && (meta.isPending || (sess.isPending && !sessErr) || (mayAct && rts.isPending))
   const rtErr = app && mayAct && rts.isError ? rts.error.message : ""
-  return { kind, next, runtimes, mayAct, checking, sessErr, rtErr, steer: caps.includes("steer") }
+  const facts: AppGateFacts = meta.data
+    ? { capabilities: caps, capabilities_off: meta.data.capabilities_off, sessionError: sessErr }
+    : { metaError: metaErr, sessionError: sessErr }
+  // A failed read (meta, the session, the runtimes) is no verdict: no
+  // verbs, its error said.
+  const unread = app && !!(metaErr || sessErr || (mayAct && rtErr))
+  return { kind, gate, next, runtimes, mayAct, checking, unread, rtErr, facts, steer: caps.includes("steer") }
 }
 
 export function ParkedCalls({ doc, pending }: { doc: RunDoc; pending: Call[] }) {
-  const { kind, next, runtimes, mayAct, checking, sessErr, rtErr } = useAppTurn(doc)
+  const { kind, gate, next, runtimes, mayAct, checking, unread: failed, rtErr, facts } = useAppTurn(doc)
   const { verbs, send } = useAppVerbs()
-  const refused = pending.map((c) => verbs[c.id] as Verb | undefined).find((v) => v?.state === "refused" && v.fix)
-  const deciding = kind === "decide" && mayAct && !refused && !checking
+  // A 403 holds while the gate reads what it read when it was answered.
+  const live = (v: Verb | undefined) => !(v?.state === "refused" && v.gate !== undefined && v.gate !== gate)
+  const refused = pending.map((c) => verbs[c.id] as Verb | undefined).find((v) => v?.state === "refused" && v.fix && live(v))
   const read = tokenScopeOf(studioToken()) === "read"
-  const line = refusalLine(refusalWords(kind, doc, runtimes, read, refused, read ? "" : rtErr))
-  const shown = checking && !refused ? "checking" : kind
-  // A failed runtimes read: its error, no verdict, no verbs.
-  const unread = shown === "read-only" && !read && !!rtErr && !refused
+  const unread = failed && !read && !refused && (kind === "decide" || kind === "read-only")
+  const deciding = kind === "decide" && mayAct && !refused && !checking && !unread
+  const line = refusalLine(refusalWords(kind, doc, runtimes, read, refused, read ? "" : rtErr, facts))
+  const shown = checking && !refused ? "checking" : unread ? "unread" : kind
   return (
     <div className="rounded-lg border border-ev-error/30 px-4 py-2 text-xs" data-parked={shown}>
       <span className="eyebrow">{shown === "resumed" ? "decided" : "pending approval"}</span>
@@ -189,7 +214,7 @@ export function ParkedCalls({ doc, pending }: { doc: RunDoc; pending: Call[] }) 
         {pending.map((p) => (
           <li key={p.id} className="font-mono" data-pending-call={p.id}>
             {p.name}({p.args == null ? "" : JSON.stringify(p.args)}) — {shown === "resumed" ? "decided" : "awaiting a decision"}
-            {shown === "experiment" || shown === "resumed" || shown === "checking" || unread ? null : deciding ? (
+            {shown === "experiment" || shown === "resumed" || shown === "checking" || shown === "unread" ? null : deciding ? (
               <DecideRow
                 call={p}
                 onDecide={(decision, text) =>
@@ -202,7 +227,8 @@ export function ParkedCalls({ doc, pending }: { doc: RunDoc; pending: Call[] }) 
                         ...(decision === "deny" && text ? { reason: text } : {}),
                         ...(decision === "resolve" ? { content: text } : {}),
                       }),
-                    decision
+                    decision,
+                    gate
                   )
                 }
               />
@@ -216,7 +242,7 @@ export function ParkedCalls({ doc, pending }: { doc: RunDoc; pending: Call[] }) 
                 ))}
               </div>
             )}
-            {deciding ? <VerbLine v={verbs[p.id]} runID={doc.id} /> : null}
+            {deciding && live(verbs[p.id]) ? <VerbLine v={verbs[p.id]} runID={doc.id} verb="decide" /> : null}
           </li>
         ))}
       </ul>
@@ -228,11 +254,19 @@ export function ParkedCalls({ doc, pending }: { doc: RunDoc; pending: Call[] }) 
           </Link>
         </p>
       ) : shown === "checking" ? (
-        <p className="mt-1 text-faint" data-app-checking={sessErr ? "session" : "runtimes"}>
-          {sessErr ? "checking the session…" : "checking for a runtime that acts on the app's sessions…"}
+        <p className="mt-1 text-faint" data-app-checking="runtimes">
+          checking for a runtime that acts on the app's sessions…
+        </p>
+      ) : shown === "child" && doc.parent_run_id ? (
+        // lib/honesty.ts's words, the parent id a link to its turn.
+        <p className="mt-1 text-status-int" data-app-owned="child">
+          {`${SUBAGENT_CALL} `}
+          <Link {...runLink(doc.parent_run_id)} className="text-thread-ink hover:underline" data-parent-turn={doc.parent_run_id}>
+            {doc.parent_run_id}
+          </Link>
         </p>
       ) : shown === "experiment" || deciding ? null : (
-        <p className="mt-1 text-status-int" data-app-owned={unread ? "unread" : kind === "decide" ? "read-only" : kind}>
+        <p className="mt-1 text-status-int" data-app-owned={shown === "unread" ? "unread" : kind === "decide" ? "read-only" : kind}>
           {line}
         </p>
       )}
@@ -243,10 +277,10 @@ export function ParkedCalls({ doc, pending }: { doc: RunDoc; pending: Call[] }) 
 /** AppSteer is the running app turn's steer (ADR 0019): one user
  * message into the turn running now, the run id this page's. */
 export function AppSteer({ doc }: { doc: RunDoc }) {
-  const { kind, mayAct, steer, checking } = useAppTurn(doc)
+  const { kind, mayAct, steer, checking, unread } = useAppTurn(doc)
   const { verbs, send } = useAppVerbs()
   const [text, setText] = useState("")
-  if (kind !== "decide" || checking || !mayAct || !steer || doc.status !== "running") return null
+  if (kind !== "decide" || checking || unread || !mayAct || !steer || doc.status !== "running") return null
   return (
     <form
       className="flex flex-wrap items-center gap-2 rounded-lg border px-4 py-2 text-xs"
@@ -269,7 +303,7 @@ export function AppSteer({ doc }: { doc: RunDoc }) {
       <button type="submit" className="text-faint hover:underline">
         steer
       </button>
-      <VerbLine v={verbs.steer} runID={doc.id} />
+      <VerbLine v={verbs.steer} runID={doc.id} verb="steer" />
     </form>
   )
 }

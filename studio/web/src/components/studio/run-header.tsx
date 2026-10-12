@@ -9,7 +9,7 @@ import { useEffect, useState } from "react"
 import type { RunDoc, Transcript } from "@/lib/api"
 import { producedTexts, runHoles, turnPrompt } from "@/lib/events"
 import type { FoldedRun } from "@/lib/events"
-import { isDerived, mergeHoles, statusHoles } from "@/lib/honesty"
+import { derivedUsageUnknown, isDerived, mergeHoles, statusHoles } from "@/lib/honesty"
 import {
   absoluteTime,
   duration,
@@ -21,7 +21,7 @@ import { CopyButton } from "@/components/studio/codewin"
 import { RunCost, useCostCapable } from "@/components/studio/cost"
 import { SaveAsTest } from "@/components/studio/saves"
 import { HoleBadge } from "@/components/studio/hole-badge"
-import { StatusChip } from "@/components/studio/runs-table"
+import { StatusChip, UnknownTokens } from "@/components/studio/runs-table"
 import { Badge } from "@/components/ui/badge"
 import {
   Breadcrumb,
@@ -349,9 +349,17 @@ export function RunHeader({
         {/* A derived run has no events to count: its derived badge
             (below) says so — "0 events" would read as lost. */}
         {isDerived(doc) ? null : <span>{eventCount.toLocaleString()} events</span>}
-        <span title="input / output tokens, subagents included">
-          {usageSummary(doc.usage)}
-        </span>
+        {/* A derived run whose stock spans reported no usage reads "—"
+            in the API's reason, never "0 in / 0 out" as a known figure. */}
+        {derivedUsageUnknown(doc) ? (
+          <span data-header-usage="unknown">
+            <UnknownTokens reason={doc.cost_reason} />
+          </span>
+        ) : (
+          <span title="input / output tokens, subagents included" data-header-usage="">
+            {usageSummary(doc.usage)}
+          </span>
+        )}
         {costCapable ? (
           <RunCost
             run={doc}

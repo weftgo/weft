@@ -17,6 +17,11 @@ export const APP_SESSION = "s_app"
 export const PARKED = "s_app-t1"
 export const RESUMED = "s_app-t2"
 export const PLAIN = "r_plain"
+/** A subagent's child run of the parked turn (core's childRunID:
+ * <parent>/<step>/<call>), its session and public id inherited. */
+export const CHILD = `${PARKED}/0/call_sub_1`
+/** A turn of a thread session created without thread.PublicID. */
+export const NOPUB = "s_nopub-t1"
 export const CALL = { type: "tool_call", id: "call_deploy_1", name: "deploy", args: { env: "prod" } }
 const T0 = "2026-10-01T09:00:00Z"
 
@@ -42,6 +47,14 @@ export function resumedRow(): RunRow {
 
 export function plainRow(): RunRow {
   return parkedRow({ id: PLAIN, session_id: "", public_id: "", turn: 0 })
+}
+
+export function childRow(): RunRow {
+  return parkedRow({ id: CHILD, parent_run_id: PARKED, turn: 0 })
+}
+
+export function noPubRow(): RunRow {
+  return parkedRow({ id: NOPUB, session_id: "s_nopub", public_id: "" })
 }
 
 function events(id: string, pending: boolean) {
@@ -112,7 +125,8 @@ export interface AppTurnOptions {
   reconnects?: boolean
   /** The steer's command ends failed with STEER_FAILED. */
   steerFailed?: boolean
-  /** The turn was already resumed: s_app-t2 is listed from the start. */
+  /** The turn was resumed: s_app-t2 is listed (read on every request,
+   * so a test may set it later: another surface resumed it). */
   resumed?: boolean
   /** The page/panel meta: the Studio golden's (the run page) or the
    * panel's META. */
@@ -123,6 +137,9 @@ export interface AppTurnOptions {
   runtimesError?: boolean
   /** GET /api/sessions/{id} answers 500. */
   sessionError?: boolean
+  /** A Studio without Playground(true): the golden meta's capabilities
+   * (no playground) and its capabilities_off, Go's words. */
+  noPlayground?: boolean
 }
 
 /** The 500 a failed runtimes read answers in these tests. */
@@ -131,17 +148,21 @@ export const RUNTIMES_500 = "runtimes store unavailable"
 /** serveAppTurn serves the app turn's conversation and its verbs on
  * fake; fake.calls("POST runs/s_app-t1/approvals") is what was sent. */
 export function serveAppTurn(fake: FakeStudio, o: AppTurnOptions = {}): FakeStudio {
-  const caps = [...golden<{ capabilities: string[] }>("meta").capabilities, "playground", "steer", "breakpoints", "runtimes"]
+  const g = golden<{ capabilities: string[]; capabilities_off: Record<string, string> }>("meta")
+  const caps = o.noPlayground ? g.capabilities : [...g.capabilities, "playground", "steer", "breakpoints", "runtimes"]
   const meta = {
     ...(o.studioMeta ? golden<Record<string, unknown>>("meta") : META),
     capabilities: caps,
+    ...(o.noPlayground ? { capabilities_off: g.capabilities_off } : {}),
     debug_scope:
       o.debugScope ?? ((o.runtimes ?? [runtimeRow()]).some((r) => r.connected && (r.sessions || r.breakpoints_own)) ? "own+runtime" : "runtime-started runs"),
   }
-  let resumed = !!o.resumed
+  // Resumed by a verb here, or (o.resumed, read on every request) by another surface.
+  let resumedHere = false
+  const resumed = () => resumedHere || !!o.resumed
   const parked = parkedRow(o.running ? { status: "running", pending: 0, finished: "" } : {})
   // Newest first, as GET /api/runs lists them.
-  const rows = () => (resumed ? [resumedRow(), parked, plainRow()] : [parked, plainRow()])
+  const rows = () => (resumed() ? [resumedRow(), parked, plainRow(), noPubRow()] : [parked, plainRow(), noPubRow()])
   const doc = (r: RunRow): RunDoc => ({ ...r, children: [], holes: [] })
   let polls = 0
   let refused = false
@@ -149,7 +170,7 @@ export function serveAppTurn(fake: FakeStudio, o: AppTurnOptions = {}): FakeStud
     .on("GET meta", meta)
     .on("GET sessions", () => ({
       total: 1,
-      sessions: [{ id: APP_SESSION, public_id: APP_PUB, agent: "approvals-example", turns: resumed ? 2 : 1, first_seen: T0, last_seen: T0, status: "succeeded", usage: { input_tokens: 10, output_tokens: 5 } }],
+      sessions: [{ id: APP_SESSION, public_id: APP_PUB, agent: "approvals-example", turns: resumed() ? 2 : 1, first_seen: T0, last_seen: T0, status: "succeeded", usage: { input_tokens: 10, output_tokens: 5 } }],
       next_before: null,
     }))
     .on("GET runs", (req) => {
@@ -166,7 +187,7 @@ export function serveAppTurn(fake: FakeStudio, o: AppTurnOptions = {}): FakeStud
       id: APP_SESSION,
       public_id: APP_PUB,
       agent: "approvals-example",
-      turns: resumed ? 2 : 1,
+      turns: resumed() ? 2 : 1,
       first_seen: T0,
       last_seen: T0,
       status: "succeeded",
@@ -185,6 +206,12 @@ export function serveAppTurn(fake: FakeStudio, o: AppTurnOptions = {}): FakeStud
     .on(`GET runs/${PLAIN}/events`, pagedEvents(events(PLAIN, true)))
     .on(`GET runs/${PLAIN}/transcript`, transcript())
     .on(`GET runs/${PLAIN}/spans`, { spans: [] })
+  for (const r of [childRow(), noPubRow()])
+    fake
+      .on(`GET runs/${r.id}`, doc(r))
+      .on(`GET runs/${r.id}/events`, pagedEvents(events(r.id, true)))
+      .on(`GET runs/${r.id}/transcript`, transcript())
+      .on(`GET runs/${r.id}/spans`, { spans: [] })
   const verb = (run: string) => () => {
     if (o.outcome !== "refused") return json({ command_id: "cmd_app", state: "queued", run_id: run, runtime_id: "rt_01" }, 202)
     refused = true
@@ -200,7 +227,7 @@ export function serveAppTurn(fake: FakeStudio, o: AppTurnOptions = {}): FakeStud
       if (polls < 2) return { ...base, state: "queued" }
       if (o.outcome === "rejected") return { ...base, state: "rejected", error: REJECTED }
       if (o.steerFailed) return { ...base, state: "finished", status: "failed", error: STEER_FAILED }
-      if (!o.running) resumed = true
+      if (!o.running) resumedHere = true
       return { ...base, state: "finished", status: "succeeded", run_id: o.running ? PARKED : RESUMED }
     })
   return fake

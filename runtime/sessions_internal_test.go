@@ -264,9 +264,6 @@ func TestSessionWireShape(t *testing.T) {
 	t.Fatalf("the session command never came back rejected: %+v", st)
 }
 
-// identityRun is everything one app turn produces that observability
-// must leave alone: its events (as the Tap saw them), the session's
-// entries and context, the run's usage and its metadata.
 // identityEventJSON is an event as the identity goldens compare it:
 // its wire JSON with the wall-clock fields (step_finish's latency_ms
 // and ttft_ms) dropped — they measure the machine, not the loop, and
@@ -285,6 +282,9 @@ func identityEventJSON(ev core.Event) ([]byte, error) {
 	return json.Marshal(m)
 }
 
+// identityRun is everything one app turn produces that observability
+// must leave alone: its events (as the Tap saw them), the session's
+// entries and context, the run's usage and its metadata.
 type identityRun struct {
 	Events   []string
 	Entries  []string
@@ -379,7 +379,7 @@ func runAppTurn(t *testing.T, install func(agent *core.Agent) func(), opts ...co
 	for _, sp := range rec.Ended() {
 		var kv []string
 		for _, a := range sp.Attributes() {
-			if strings.HasPrefix(string(a.Key), "weft.") {
+			if k := string(a.Key); strings.HasPrefix(k, "weft.") && k != "weft.ttft_ms" && k != "weft.latency_ms" { // the wall-clock ones measure the machine
 				kv = append(kv, string(a.Key)+"="+fmt.Sprint(a.Value.AsInterface()))
 			}
 		}
@@ -919,7 +919,7 @@ func parkAndDecideBy(t *testing.T, breakpoint bool, decide func(s *thread.Sessio
 	for _, sp := range rec.Ended() {
 		var kv []string
 		for _, a := range sp.Attributes() {
-			if strings.HasPrefix(string(a.Key), "weft.") {
+			if k := string(a.Key); strings.HasPrefix(k, "weft.") && k != "weft.ttft_ms" && k != "weft.latency_ms" { // the wall-clock ones measure the machine
 				kv = append(kv, string(a.Key)+"="+fmt.Sprint(a.Value.AsInterface()))
 			}
 		}

@@ -56,6 +56,15 @@ export function useRuntimesNeeded(on: boolean) {
   }, [on])
 }
 
+/** runtimesState is what a read of /api/runtimes says that a surface
+ * acts on — every field of every runtime (id, connected, service, cwd,
+ * sessions, breakpoints_own, breakpoints, its agents and their tools)
+ * but last_seen, which Studio advances on every keep-alive of a
+ * connected runtime's stream while nothing changed. */
+export function runtimesState(runtimes: RuntimeView[]): string {
+  return JSON.stringify(runtimes.map(({ last_seen, ...rest }) => rest))
+}
+
 /**
  * useRuntimeNotices says when a runtime connects or disconnects. The
  * live stream carries no runtime kind (event, delta, run only), so the
@@ -77,8 +86,8 @@ export function useRuntimesNeeded(on: boolean) {
  * RUNTIMES_POLL_MS while a surface holds useRuntimesNeeded; else a
  * quiet poll that doubles per read that changed nothing, up to
  * RUNTIMES_QUIET_MAX_MS, and starts over at RUNTIMES_POLL_MS on a change
- * in the list or a user action (a key, a pointer, the tab shown again).
- * Never while the tab is hidden: react-query's interval skips a hidden
+ * in the list (runtimesState: last_seen is no change), a user action (a
+ * key, a pointer, the tab shown again) or a holder letting go. Never while the tab is hidden: react-query's interval skips a hidden
  * document.
  */
 export function useRuntimeNotices(enabled: boolean) {
@@ -115,18 +124,24 @@ export function useRuntimeNotices(enabled: boolean) {
   const flips = useRef(new Map<string, number>())
   const data = runtimes.data
   const readAt = runtimes.dataUpdatedAt
-  // Each read that changed nothing lengthens the quiet poll (data is
-  // structurally shared: a new object only when the list changed); a
-  // change, or a surface needing the runtimes, starts it over.
-  const lastData = useRef<typeof data>(undefined)
+  // Each read that changed nothing lengthens the quiet poll; a change
+  // starts it over. "Changed" is the runtimes' state (runtimesState), not
+  // the JSON: a connected runtime's last_seen moves on every keep-alive
+  // of its stream, and that is not news. While a surface needs the
+  // runtimes the reads are not counted, and either edge of needed starts
+  // the quiet poll over — a holder let go without a user action (its gate
+  // decided, the run ended) is followed at 5 s, not at the ceiling.
+  const lastState = useRef<string | undefined>(undefined)
   useEffect(() => {
-    if (!readAt) return
-    const same = lastData.current === data
-    lastData.current = data
-    setQuiet((q) => (same ? Math.min(q + 1, QUIET_STEPS) : 0))
+    if (!readAt || !data) return
+    const state = runtimesState(data.runtimes)
+    const same = lastState.current === state
+    lastState.current = state
+    if (!needed) setQuiet((q) => (same ? Math.min(q + 1, QUIET_STEPS) : 0))
+    // needed is read, not followed: its edges have their own effect.
   }, [readAt, data])
   useEffect(() => {
-    if (needed) setQuiet(0)
+    setQuiet(0)
   }, [needed])
   useEffect(() => {
     if (!data) return

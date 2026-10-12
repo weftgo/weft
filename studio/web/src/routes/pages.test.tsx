@@ -1339,3 +1339,46 @@ describe("a meta read that answers after a failed one", () => {
     expect(document.body.textContent).not.toContain(CAPS_UNREAD)
   })
 })
+
+// A capability page mounted anew while a failed meta is read again: the
+// read is pending once more, its error gone from the query — the page
+// reads the held failure (lib/query.ts's heldError) at once, never a
+// spinner or the off words, until meta answers.
+describe("a capability page mounted anew while a failed meta is read again", () => {
+  it("/traces: could-not-read at once on the way back, cleared by the answer", async () => {
+    let answer: "fail" | "hold" = "fail"
+    let release: (r: unknown) => void = () => {}
+    studio.on("GET runs", runs).on("GET meta", () =>
+      answer === "fail"
+        ? apiError(500, "internal", "meta store unavailable")
+        : new Promise((r) => {
+            release = r
+          })
+    )
+    const { router } = renderApp("/traces")
+    const unread = () =>
+      document.querySelector("[data-caps-unread]")?.textContent
+    await waitFor(() =>
+      expect(unread()).toBe(`${CAPS_UNREAD}: meta store unavailable`)
+    )
+    await router.navigate({ to: "/runs" })
+    await screen.findByText("r_ok")
+    answer = "hold"
+    const reads = studio.calls("GET meta").length
+    await router.navigate({ to: "/traces" })
+    // The page back, meta read again and not answered yet.
+    await waitFor(() =>
+      expect(studio.calls("GET meta").length).toBeGreaterThan(reads)
+    )
+    await waitFor(() => expect(screen.queryByText("r_ok")).toBeNull())
+    expect(queryClient.getQueryState(["meta"])?.fetchStatus).toBe("fetching")
+    expect(unread()).toBe(`${CAPS_UNREAD}: meta store unavailable`)
+    expect(document.querySelector("[data-traces-off]")).toBeNull()
+    expect(document.body.textContent).not.toContain("does not list traces")
+    release(meta(["live", "ingest"]))
+    await waitFor(() =>
+      expect(document.querySelector("[data-traces-off]")).toBeTruthy()
+    )
+    expect(document.querySelector("[data-caps-unread]")).toBeNull()
+  })
+})

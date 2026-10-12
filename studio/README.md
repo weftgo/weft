@@ -1794,9 +1794,11 @@ kind, so the shell reads `GET /api/runtimes` (playground capability;
 never under a read-scoped panel token) every 5 s while a surface needs
 it now — the playground, the replay drawer, an experiment's run
 controls, a parked or running app turn's block — and otherwise on a
-quiet poll that doubles per read that changed nothing, 5 s up to 60 s,
-back to 5 s on a change or a key or pointer press; never while the tab
-is hidden. It raises one toast per transition of a runtime's
+quiet poll that doubles per read that changed nothing, 5 s up to 60 s
+(a connected runtime's `last_seen`, moved by its stream's keep-alive,
+is no change), back to 5 s on a change, a key or pointer press, or a
+surface letting go of it; never while the tab is hidden. A quiet page
+reads it 4 times in two minutes, a runtime connected or not. It raises one toast per transition of a runtime's
 `connected` (a runtime gone from the list counts as disconnected, once;
 a failed read says nothing; each flap of the same id is its own toast).
 A runtime that goes down and comes back inside one poll interval is not

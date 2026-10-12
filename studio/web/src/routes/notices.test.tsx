@@ -868,6 +868,69 @@ describe("runtime notices", () => {
     await waitFor(() => expect(shellInterval()).toBe(5_000))
   })
 
+  it("a connected runtime's keep-alive is not a change: last_seen moving every 15 s still backs off, 4 reads in 2 minutes", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    // Studio advances last_seen on every 15 s keep-alive of a connected
+    // runtime's stream: the JSON differs read to read, the state does not.
+    const beat = () =>
+      new Date(Math.floor(Date.now() / 15_000) * 15_000).toISOString()
+    serveQuiet().on("GET runtimes", () => ({
+      runtimes: [
+        {
+          id: "rt_1",
+          host: "laptop",
+          pid: 1,
+          service: "acme-api",
+          env: "dev",
+          connected_since: rOK.started,
+          last_seen: beat(),
+          connected: true,
+          sessions: true,
+          breakpoints_own: false,
+          agents: [{ name: "support", models: [], tools: [] }],
+          breakpoints: [],
+        },
+      ],
+    }))
+    renderApp("/runs")
+    await screen.findByText("r_ok")
+    await waitFor(() =>
+      expect(studio.calls("GET runtimes").length).toBeGreaterThan(0)
+    )
+    const start = studio.calls("GET runtimes").length
+    for (let i = 0; i < 24; i++) await vi.advanceTimersByTimeAsync(5_000)
+    expect(studio.calls("GET runtimes").length - start).toBe(4)
+    expect(shellInterval()).toBe(60_000)
+    expect(toastTitles()).toEqual([])
+  })
+
+  it("a surface that needed the runtimes, let go with no user action, leaves the quiet poll at 5 s, not the ceiling", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    serveQuiet()
+      .on("GET experiments", { experiments: [] })
+      .on("GET runs/r_ok", { ...rOK, children: [] })
+    const { router } = renderApp("/playground?run=r_ok")
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Run A" })).toBeTruthy()
+    )
+    await waitFor(() =>
+      expect(studio.calls("GET runtimes").length).toBeGreaterThan(0)
+    )
+    // Two minutes held: every read the same list.
+    for (let i = 0; i < 24; i++) await vi.advanceTimersByTimeAsync(5_000)
+    expect(shellInterval()).toBe(5_000)
+    // The holder goes with no key, pointer or visibility event (here a
+    // navigation the app makes itself; in the app, a parked block's gate
+    // decided or its run ended).
+    await router.navigate({ to: "/runs" })
+    await screen.findByText("r_ok")
+    await waitFor(() =>
+      expect(document.querySelector("[data-replay-drawer]")).toBeNull()
+    )
+    expect(screen.queryByRole("button", { name: "Run A" })).toBeNull()
+    expect(shellInterval()).toBe(5_000)
+  })
+
   it("reads no runtimes without the playground capability", async () => {
     studio.on("GET runs", runs).on("GET runtimes", { runtimes: [] })
     renderApp("/runs")

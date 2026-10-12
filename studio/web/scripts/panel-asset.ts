@@ -12,11 +12,9 @@
 // an absolute path.) It refuses a dist that is not stamped with the
 // version it names the asset after, or that is over §5.1's budget.
 
-import { readFileSync } from "node:fs"
 import { copyFile, mkdir, readFile, writeFile } from "node:fs/promises"
 import { createHash } from "node:crypto"
-import { gzipSize, normalizeStamp } from "./panel-budget"
-import type { Ledger } from "./panel-budget"
+import { budgetTable, gzipSize, normalizeStamp, readLedger } from "./panel-budget"
 import { weftVersion } from "./weft-version"
 
 const outDir = process.argv[2]
@@ -49,11 +47,13 @@ try {
 // normalized, so the asset's figure is the ledger's row — node:zlib at
 // its default level reads ≈ 700 B larger and would refuse a bundle the
 // build passed.
-// The cap is the ledger's (panel-budget.json), the one the build fails on.
-const cap = (JSON.parse(readFileSync(new URL("../panel-budget.json", import.meta.url), "utf8")) as Ledger).cap
+// The cap is the ledger's (panel-budget.json, through readLedger — a
+// cap that is not a positive integer throws), and the gate is
+// budgetTable's over, the one the build fails on and budget.test.ts pins.
+const ledger = readLedger()
 const gz = gzipSize(normalized)
-if (gz > cap) {
-  console.error(`studio: panel.js is ${gz} bytes gzipped, over the ${cap} budget (WEFT-DEVTOOLS §5.1)`)
+if (budgetTable(ledger, gz).over) {
+  console.error(`studio: panel.js is ${gz} bytes gzipped, over the ${ledger.cap} budget (WEFT-DEVTOOLS §5.1)`)
   process.exit(1)
 }
 await mkdir(outDir, { recursive: true })

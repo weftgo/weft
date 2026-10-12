@@ -6,15 +6,14 @@ import { describe, expect, it } from "vitest"
 import {
   budgetTable,
   gzipSize,
+  ledgerFrom,
   normalizeStamp,
+  readLedger,
   STAMP_PLACEHOLDER,
 } from "../../scripts/panel-budget"
 import { weftVersion } from "../../scripts/weft-version"
-import type { Ledger } from "../../scripts/panel-budget"
 
-const ledger = JSON.parse(
-  readFileSync(resolve(process.cwd(), "panel-budget.json"), "utf8")
-) as Ledger
+const ledger = readLedger()
 
 describe("the size ledger (panel-budget.json)", () => {
   it("is append-only: the recorded rows stay as recorded", () => {
@@ -77,6 +76,29 @@ describe("the size ledger (panel-budget.json)", () => {
       ledger.rows[49].item,
       ledger.rows[49].gzip,
     ]).toEqual(["minified", "", 73706])
+    // Every row after it, through the last one recorded when this list was
+    // last extended: a new item appends its row here, never edits one above.
+    expect(
+      ledger.rows.slice(50, 67).map((r) => [r.label, r.item, r.gzip])
+    ).toEqual([
+      ["I1.3", "", 74061],
+      ["I1.3 fixes", "", 74221],
+      ["I1.3 fixes 2", "", 74284],
+      ["F4.3", "", 75501],
+      ["A5.3", "A5.3", 76511],
+      ["F4.3 fixes", "", 77110],
+      ["A5.3 fixes", "A5.3", 77306],
+      ["F4.3 fixes 2", "", 77386],
+      ["A5.3 fixes 2", "A5.3", 77480],
+      ["phase 6 review fixes (D)", "", 77560],
+      ["phase 6 review fixes (E)", "", 77926],
+      ["phase 6 review fixes (F)", "", 77942],
+      ["phase 6 review fixes (G)", "", 77996],
+      ["phase 6 review fixes (H)", "", 78094],
+      ["phase 6 review fixes (I)", "", 78098],
+      ["A5.4 cap raised to 96 KiB", "", 78098],
+      ["U2 no_logger cause", "", 78201],
+    ])
     for (let i = 1; i < ledger.rows.length; i++)
       expect(
         ledger.items.some((x) => x.id === ledger.rows[i].item) ||
@@ -219,6 +241,16 @@ describe("the size ledger (panel-budget.json)", () => {
     expect(lines.at(-1)).toBe(
       "total 78,098 B (76.3 KiB) of 98,304 B · headroom 20,206 B (19.7 KiB)"
     )
+  })
+
+  it("refuses a cap that is not a positive integer: the cap check fails closed", () => {
+    // JSON.stringify drops an undefined key: that case is the cap missing.
+    const text = (cap: unknown) => JSON.stringify({ ...ledger, cap })
+    expect(text(undefined)).not.toContain('"cap"')
+    expect(ledgerFrom(text(98304)).cap).toBe(98304)
+    for (const cap of [undefined, null, "98304", "", true, 0, -1, 98304.5])
+      expect(() => ledgerFrom(text(cap))).toThrow("panel-budget.json: cap must be a positive integer")
+    expect(readLedger().cap).toBe(98304)
   })
 
   it("says when the build differs from the last row, and only the cap fails", () => {

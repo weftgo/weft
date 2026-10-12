@@ -10,6 +10,8 @@
 // bump moves no byte. The table is evidence, not a gate: only the cap
 // fails the build.
 
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
 import { gzip } from "pako"
 
 /** gzipSize is panel.js's gzip bytes as the ledger counts them, in the
@@ -47,6 +49,28 @@ export interface Ledger {
   cap: number
   items: BudgetItem[]
   rows: BudgetRow[]
+}
+
+/** ledgerFrom parses panel-budget.json's text, failing closed on the
+ * cap: a missing, non-numeric, fractional, zero or negative cap throws
+ * rather than reading as "never over" (`gz > undefined` is false, and a
+ * string cap compares as a string). budget.test.ts pins the refusals. */
+export function ledgerFrom(text: string): Ledger {
+  const raw: unknown = JSON.parse(text)
+  const cap = raw !== null && typeof raw === "object" ? (raw as { cap?: unknown }).cap : undefined
+  if (typeof cap !== "number" || !Number.isInteger(cap) || cap <= 0)
+    throw new Error("panel-budget.json: cap must be a positive integer")
+  return raw as Ledger
+}
+
+/** readLedger is the committed ledger (studio/web/panel-budget.json),
+ * read through ledgerFrom: the one reader of the cap for the panel
+ * build (vite.panel.config.ts) and the release asset stager
+ * (scripts/panel-asset.ts), both of which gate on budgetTable's over. */
+export function readLedger(): Ledger {
+  // import.meta.dirname, not new URL(…, import.meta.url): under
+  // vitest's jsdom environment import.meta.url is not a file: URL.
+  return ledgerFrom(readFileSync(resolve(import.meta.dirname, "../panel-budget.json"), "utf8"))
 }
 
 /** The placeholder the version stamp is measured as: fixed length, so a

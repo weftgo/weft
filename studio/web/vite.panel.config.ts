@@ -12,18 +12,18 @@
 // version/version.go (scripts/weft-version.ts); panel.js refuses to
 // render against a newer Studio (§5.1 Versioning).
 // studio/panel_test.go pins the stamp to version.Version.
-import { readFileSync } from "node:fs"
 import { defineConfig } from "vite"
 import type { Plugin } from "vite"
 import { weftVersion } from "./scripts/weft-version.ts"
-import { budgetTable, gzipSize, normalizeStamp } from "./scripts/panel-budget.ts"
-import type { Ledger } from "./scripts/panel-budget.ts"
+import { budgetTable, gzipSize, normalizeStamp, readLedger } from "./scripts/panel-budget.ts"
 
 /** §5.1's budget: panel.js is ≤ the ledger's cap in gzip bytes —
  * panel-budget.json's "cap", 96 KiB (98,304 B) since phase 7 (audit §10
  * decision 1, A5.4; 80 KiB before). The ledger is the one source: the
- * printed table, this build's failure and scripts/panel-asset.ts read it. */
-const ledger = JSON.parse(readFileSync(new URL("./panel-budget.json", import.meta.url), "utf8")) as Ledger
+ * printed table, this build's failure and scripts/panel-asset.ts read it,
+ * all through readLedger, which throws on a cap that is not a positive
+ * integer (the check fails closed). */
+const ledger = readLedger()
 const PANEL_GZIP_BUDGET = ledger.cap
 
 /** panelBudget fails the build — loudly, before anything is copied

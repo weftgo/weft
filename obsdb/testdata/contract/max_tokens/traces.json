@@ -97,6 +97,12 @@
                   "value": {
                     "stringValue": "max_tokens"
                   }
+                },
+                {
+                  "key": "weft.run.stopped_by",
+                  "value": {
+                    "stringValue": "final_answer"
+                  }
                 }
               ],
               "endTimeUnixNano": "1790845560003000000",

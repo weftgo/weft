@@ -18,7 +18,8 @@
         "enduser.id": "user_42",
         "tenant": "acme",
         "weft.playground.command": "cmd_contract",
-        "weft.replay.view": "transcript"
+        "weft.replay.view": "transcript",
+        "weft.run.stopped_by": "final_answer"
       },
       "started": "2026-10-01T09:01:00Z",
       "finished": "2026-10-01T09:01:00.016Z",

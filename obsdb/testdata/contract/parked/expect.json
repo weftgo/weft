@@ -11,6 +11,9 @@
       "model": "script",
       "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
       "weft_version": "v0.0.0-contract",
+      "meta": {
+        "weft.run.stopped_by": "parked"
+      },
       "started": "2026-10-01T09:10:00Z",
       "finished": "2026-10-01T09:10:00.009Z",
       "last_seen": "2026-10-01T09:10:00.009Z",

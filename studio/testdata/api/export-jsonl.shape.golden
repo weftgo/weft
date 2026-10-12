@@ -28,6 +28,7 @@
 <event>.event[run_finish].pending[]{}
 <event>.event[run_finish].run_id=string
 <event>.event[run_finish].steps=float64
+<event>.event[run_finish].stopped_by=string
 <event>.event[run_finish].usage.input_tokens=float64
 <event>.event[run_finish].usage.output_tokens=float64
 <event>.event[run_finish].usage{}
@@ -149,6 +150,7 @@
 <run>.run.children[].last_seen=string
 <run>.run.children[].manifest_hash=string
 <run>.run.children[].message_count=float64
+<run>.run.children[].meta.<key>=string
 <run>.run.children[].meta{}
 <run>.run.children[].model.name=string
 <run>.run.children[].model.provider=string
@@ -192,6 +194,7 @@
 <run>.run.last_seen=string
 <run>.run.manifest_hash=string
 <run>.run.message_count=float64
+<run>.run.meta.<key>=string
 <run>.run.meta{}
 <run>.run.model.name=string
 <run>.run.model.provider=string

@@ -808,7 +808,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"type\":\"run_finish\",\"run_id\":\"01K00000000000000000000001-t1\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"steps\":1}"
+                "stringValue": "{\"type\":\"run_finish\",\"run_id\":\"01K00000000000000000000001-t1\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"steps\":1,\"stopped_by\":\"final_answer\"}"
               },
               "eventName": "weft.event",
               "flags": 1,
@@ -1606,7 +1606,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"type\":\"run_finish\",\"run_id\":\"01K00000000000000000000001-t2\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"steps\":1}"
+                "stringValue": "{\"type\":\"run_finish\",\"run_id\":\"01K00000000000000000000001-t2\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"steps\":1,\"stopped_by\":\"final_answer\"}"
               },
               "eventName": "weft.event",
               "flags": 1,

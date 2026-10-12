@@ -102,7 +102,7 @@ type link struct {
 	seen        map[string]bool // command ids already admitted (at-most-once)
 	seenOrder   []string        // the same ids, oldest first — the eviction order
 	lastID      string          // the newest command frame received: the resume cursor
-	inFlight    map[string]context.CancelFunc
+	inFlight    map[string]context.CancelCauseFunc
 	tally       map[string]*budgetState      // per experiment_id
 	parked      map[string]*parkedRun        // run id → the parked run this runtime started
 	parkOrder   []string                     // parked run ids, oldest first
@@ -132,7 +132,7 @@ func newLink(c *config, reg *registry, url, token string) *link {
 		done:        make(chan struct{}),
 		slots:       make(chan struct{}, maxRunning),
 		seen:        map[string]bool{},
-		inFlight:    map[string]context.CancelFunc{},
+		inFlight:    map[string]context.CancelCauseFunc{},
 		tally:       map[string]*budgetState{},
 		parked:      map[string]*parkedRun{},
 		forks:       map[string]*thread.Session{},
@@ -477,7 +477,7 @@ func (l *link) admit(id string) (context.Context, bool) {
 		}()
 		return nil, false
 	}
-	ctx, cancel := context.WithCancel(l.ctx)
+	ctx, cancel := context.WithCancelCause(l.ctx)
 	l.inFlight[id] = cancel
 	l.runs.Add(1) // under mu and before stopped is set: never races stop's Wait
 	l.mu.Unlock()
@@ -512,7 +512,7 @@ func (l *link) release(id string) {
 	delete(l.inFlight, id)
 	l.mu.Unlock()
 	if cancel != nil {
-		cancel()
+		cancel(nil)
 	}
 	l.runs.Done()
 }
@@ -621,10 +621,17 @@ func (l *link) cancelCommand(id string) {
 	cancel, ok := l.inFlight[id]
 	l.mu.Unlock()
 	if ok {
-		cancel()
+		// The typed cause names Studio's cancel on the run's span
+		// (weft.cancel.cause), apart from a shutdown or an interrupt.
+		cancel(causeStudioCancel)
 		slog.Debug("weft/runtime: command canceled", "command_id", id)
 	}
 }
+
+// causeStudioCancel is the cause a Studio cancel command fells its run
+// with: the run's invoke_agent span reads weft.cancel.cause =
+// studio.cancel (ADR 0016, amendment 2026-10-12).
+const causeStudioCancel = core.CancelCause("studio.cancel")
 
 // dispatchDecision is one admitted approval decision's whole life: the
 // parked-run lookup and the check against its pending calls (the

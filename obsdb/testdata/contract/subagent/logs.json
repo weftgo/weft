@@ -1028,7 +1028,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"type\":\"run_finish\",\"run_id\":\"a1100000000000000000000000000001/0/call_1\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"steps\":1}"
+                "stringValue": "{\"type\":\"run_finish\",\"run_id\":\"a1100000000000000000000000000001/0/call_1\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"steps\":1,\"stopped_by\":\"final_answer\"}"
               },
               "eventName": "weft.event",
               "flags": 1,
@@ -1574,7 +1574,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"type\":\"run_finish\",\"run_id\":\"a1100000000000000000000000000001\",\"usage\":{\"input_tokens\":30,\"output_tokens\":15},\"steps\":2}"
+                "stringValue": "{\"type\":\"run_finish\",\"run_id\":\"a1100000000000000000000000000001\",\"usage\":{\"input_tokens\":30,\"output_tokens\":15},\"steps\":2,\"stopped_by\":\"final_answer\"}"
               },
               "eventName": "weft.event",
               "flags": 1,

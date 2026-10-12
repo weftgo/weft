@@ -119,7 +119,8 @@
           "input_tokens": 20,
           "output_tokens": 10
         },
-        "steps": 2
+        "steps": 2,
+        "stopped_by": "final_answer"
       },
       "attrs": {
         "weft.content": "stripped"

@@ -119,7 +119,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			r = &RunResult{}
 		}
 		spanEnded = true
-		endSpan(r, fmt.Errorf("%w: %v", errRunPanicked, p))
+		endSpan(r, fmt.Errorf("%w: %v", errRunPanicked, p), runEnd{})
 		if p != nil {
 			panic(p)
 		}
@@ -203,7 +203,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		}
 		spanEnded = true
 		re := &RunError{Step: step, Err: err, Result: res}
-		endSpan(res, re)
+		endSpan(res, re, failEnd(ctx, err))
 		observeRunEnd(re)
 		return nil, re
 	}
@@ -216,12 +216,16 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// success at the approval boundary too (ADR 0007). The caller sets
 	// res.Pending first; snapshotPending(nil) is nil, so ordinary exits
 	// carry no pending list.
-	endRun := func(step int) (*RunResult, error) {
-		if !deliver(RunFinish{RunID: cfg.id, Usage: res.Usage, Steps: len(res.Steps), Pending: snapshotPending(res.Pending)}) {
+	//
+	// by names what ended the run (RunFinish.StoppedBy,
+	// weft.run.stopped_by): a fired StopWhen condition's manifest name,
+	// stoppedFinalAnswer or stoppedParked.
+	endRun := func(step int, by string) (*RunResult, error) {
+		if !deliver(RunFinish{RunID: cfg.id, Usage: res.Usage, Steps: len(res.Steps), Pending: snapshotPending(res.Pending), StoppedBy: by}) {
 			return fail(step, ctx.Err())
 		}
 		spanEnded = true
-		endSpan(res, nil)
+		endSpan(res, nil, runEnd{stoppedBy: by})
 		observeRunEnd(nil)
 		return res, nil
 	}
@@ -380,7 +384,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		res.Usage = rollUp(res.Usage, sub)
 		if len(pending) > 0 {
 			res.Pending = pending
-			return endRun(0)
+			return endRun(0, stoppedParked)
 		}
 	}
 
@@ -676,18 +680,18 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			// fails with the ctx error, the parked calls riding on
 			// RunError.Result.Pending so the transcript stays resumable.
 			res.Pending = pending
-			return endRun(step)
+			return endRun(step, stoppedParked)
 		}
 		// final marks the step the run would otherwise end on: the model
 		// made no tool calls (a max_tokens finish with calls is not
 		// final — its calls all carry error results and the loop
 		// continues).
 		final := len(calls) == 0
-		if a.stopped(res.Steps) {
+		if by, ok := a.stopped(res.Steps); ok {
 			// An intended end stays an end: a StopWhen condition firing
 			// ends the run here in every case, before the steering
 			// drain below — a steer cannot un-end it (ADR 0019 §2).
-			return endRun(step)
+			return endRun(step, by)
 		}
 		// The steering drain points (ADR 0019 §2): after a step's tool
 		// batch, when every call of the batch has its result — success,
@@ -709,7 +713,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			}
 		}
 		if final && len(steered) == 0 {
-			return endRun(step)
+			return endRun(step, stoppedFinalAnswer)
 		}
 		if len(steered) > 0 {
 			// Delivered messages are transcript (ADR 0019 §3): appended
@@ -863,14 +867,16 @@ func cloneTools(tools []*ToolDef) []*ToolDef {
 	return out
 }
 
-// stopped reports whether any StopWhen condition is met.
-func (a *Agent) stopped(steps []StepRecord) bool {
+// stopped reports whether any StopWhen condition is met and, when one
+// is, the first in StopWhen order that fired, by its manifest name
+// (stopName): the run's weft.run.stopped_by.
+func (a *Agent) stopped(steps []StepRecord) (string, bool) {
 	for _, cond := range a.stops {
 		if cond.Stop(steps) {
-			return true
+			return stopName(cond), true
 		}
 	}
-	return false
+	return "", false
 }
 
 // loopState is the run-scoped state the guard carries between steps.

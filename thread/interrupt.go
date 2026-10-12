@@ -49,6 +49,10 @@ func (s *Session) interruptSendLocked(ctx context.Context, msg core.Message, opt
 		it := s.inFlight
 		it.mu.Lock()
 		it.interrupted = true
+		if it.cause == nil {
+			it.cause = causeInterrupted
+		}
+		cause := it.cause
 		if policy == Rollback {
 			it.rollback = true
 			if i, ok := s.byID[it.id]; ok {
@@ -73,8 +77,9 @@ func (s *Session) interruptSendLocked(ctx context.Context, msg core.Message, opt
 		if cancel != nil {
 			// Safe under mu: cancel closes a channel; the woken run
 			// goroutines that need mu (the turn's own persistence) block
-			// until this Send returns.
-			cancel()
+			// until this Send returns. The cause names the interrupt on
+			// the run's span (weft.cancel.cause).
+			cancel(cause)
 		}
 		return t, nil
 	}

@@ -137,7 +137,7 @@ for ev, err := range agt.Stream(ctx, weft.Prompt("...")).Events() {
     case weft.Nested:        // Seq, CallID, Event — a subagent's event, numbered from this run's counter
     case weft.StepFinish:    // Index, Reason, Usage
     case weft.Steered:       // Seq, Step, Messages — delivered by the run's steering source
-    case weft.RunFinish:     // Usage, Steps, Pending (calls awaiting Approve/Deny)
+    case weft.RunFinish:     // Usage, Steps, Pending (calls awaiting Approve/Deny), StoppedBy (has_tool_call:submit, final_answer, parked, …)
     }
 }
 

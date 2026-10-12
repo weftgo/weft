@@ -388,6 +388,20 @@ func New(m Model, opts ...Option) *Agent { return core.New(m, opts...) }
 // set: a manifest describes the code, not the registry behind a source.
 func ToolSource(fn func() []*ToolDef) Option { return core.ToolSource(fn) }
 
+// CancelCause is a typed cancellation cause: what a layer passes to the
+// CancelCauseFunc of a context.WithCancelCause it fells a run with, so
+// the run's record says who cancelled it. Its value is a short,
+// low-cardinality dotted name — "thread.interrupted", "studio.cancel" —
+// recorded as the invoke_agent span's weft.cancel.cause when the run
+// ends canceled (ADR 0016, amendment 2026-10-12).
+//
+// The loop reads context.Cause(ctx) and records any cause with a
+// Kind() string method, so a layer may bring its own type; CancelCause
+// is the one weft's own layers use. A cause the loop cannot name is
+// not recorded, except a deadline, which reads "deadline". It matches
+// context.Canceled under errors.Is: a CancelCause is a cancellation.
+type CancelCause = core.CancelCause
+
 // ContentKind names what a content field holds. weft/otel's Redact
 // receives it — for event fields, deltas, and each part of a
 // transcript batch; the core only uses it in StripContent's table, to
@@ -440,7 +454,7 @@ func Content(capture bool) Option { return core.Content(capture) }
 //	tool_start        args (becomes null)           seq, call_id, name
 //	tool_finish       content                       seq, call_id, name, is_error
 //	steered           messages (becomes [])         seq, step
-//	run_finish        each pending call's args      usage, steps, pending ids and names
+//	run_finish        each pending call's args      usage, steps, pending ids and names, stopped_by
 //	run_start         nothing (no content)          all, instructions_hash included
 //	step_start        nothing (no content)          all
 //	step_finish       nothing (no content)          all

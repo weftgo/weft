@@ -1380,7 +1380,7 @@ func genCases() []genCase {
 		},
 		{
 			name: "pre_upgrade",
-			desc: "the plain run as a weft before ADR 0028 wrote it: no request, prompt or tools records and no weft.instructions.hash — the not_recorded reading of ADR 0028 §10's table",
+			desc: "the plain run as a weft before ADR 0028 wrote it: no request, prompt or tools records and no weft.instructions.hash — the not_recorded reading of ADR 0028 §10's table (nor weft.run.stopped_by / run_finish.stopped_by, younger still)",
 			dest: content,
 			run:  plain,
 			edit: func(tr *coltracepb.ExportTraceServiceRequest, lg *collogspb.ExportLogsServiceRequest) {
@@ -1388,6 +1388,7 @@ func genCases() []genCase {
 					for _, ss := range rs.GetScopeSpans() {
 						for _, s := range ss.GetSpans() {
 							s.Attributes = dropAttr(s.Attributes, "weft.instructions.hash")
+							s.Attributes = dropAttr(s.Attributes, "weft.run.stopped_by") // older still: U3.1
 						}
 					}
 				}
@@ -1404,6 +1405,8 @@ func genCases() []genCase {
 								if sv, ok := b.GetValue().(*commonpb.AnyValue_StringValue); ok {
 									// run_start's body field, which pre-ADR 0028 cores never wrote.
 									sv.StringValue = instructionsHashField.ReplaceAllString(sv.StringValue, "")
+									// run_finish's stopped_by, which pre-U3.1 cores never wrote.
+									sv.StringValue = stoppedByField.ReplaceAllString(sv.StringValue, "")
 								}
 							}
 							kept = append(kept, r)
@@ -1505,6 +1508,44 @@ func genCases() []genCase {
 				}
 			},
 		},
+		{
+			name: "stopped_by",
+			desc: "a run StopWhen ends: HasToolCall(\"submit_ticket\") fires after the tool call, so stop_reason reads tool_calls while weft.run.stopped_by and run_finish.stopped_by read has_tool_call:submit_ticket",
+			dest: content,
+			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+				submit := core.Tool("submit_ticket", "File a support ticket.", func(_ context.Context, in lookupIn) (string, error) {
+					return "ticket filed for " + in.OrderID, nil
+				})
+				agt := pipelineAgent(p, "support", wefttest.Script(
+					wefttest.ToolCalls(wefttest.Call{Name: "submit_ticket", Args: `{"order_id":"1234"}`})),
+					core.Instructions("You are a support agent."), submit, core.StopWhen(core.HasToolCall("submit_ticket")))
+				return []string{mustRun(t, ctx, agt, core.Prompt("Order 1234 never arrived.")).ID}
+			},
+		},
+		{
+			name: "canceled",
+			desc: "a run canceled mid-tool with a typed cause (core.CancelCause(\"studio.cancel\"), what weft/runtime's cancel command passes): status failed, error.type context.Canceled, weft.run.stopped_by canceled and weft.cancel.cause studio.cancel on the invoke_agent span; no run_finish",
+			dest: content,
+			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+				rctx, cancel := context.WithCancelCause(ctx)
+				defer cancel(nil)
+				slow := core.Tool("lookup_order", "Look up an order.", func(ctx context.Context, _ lookupIn) (string, error) {
+					cancel(core.CancelCause("studio.cancel"))
+					<-ctx.Done()
+					return "", ctx.Err()
+				})
+				agt := pipelineAgent(p, "support", wefttest.Script(
+					wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"1234"}`}),
+					wefttest.Say("Order 1234 has shipped.")),
+					core.Instructions("You are a support agent."), slow)
+				_, err := agt.Generate(rctx, core.Prompt("Where is order 1234?"))
+				var re *core.RunError
+				if !errors.As(err, &re) || !errors.Is(err, context.Canceled) {
+					t.Fatalf("want a canceled *RunError, got %v", err)
+				}
+				return []string{re.Result.ID}
+			},
+		},
 	}
 }
 
@@ -1545,6 +1586,9 @@ func dropLogs(_ *coltracepb.ExportTraceServiceRequest, lg *collogspb.ExportLogsS
 
 // instructionsHashField is run_start's instructions_hash body field.
 var instructionsHashField = regexp.MustCompile(`,"instructions_hash":"[0-9a-f]*"`)
+
+// stoppedByField is run_finish's stopped_by body field.
+var stoppedByField = regexp.MustCompile(`,"stopped_by":"[^"]*"`)
 
 func dropAttr(kvs []*commonpb.KeyValue, key string) []*commonpb.KeyValue {
 	return slices.DeleteFunc(kvs, func(kv *commonpb.KeyValue) bool { return kv.GetKey() == key })

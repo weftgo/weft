@@ -8,6 +8,11 @@ module, ADR 0005).
 
 ## Unreleased
 
+### Added
+
+- core: what stopped a run is on its record (U3.1; UX-E-11, UX-A-08, UX-S1-02). The `invoke_agent` span carries `weft.run.stopped_by` and the `run_finish` event `stopped_by` (`RunFinish.StoppedBy`): the fired `StopWhen` condition's manifest name (`has_tool_call:submit`, `step_count_is:2`, `output_submitted`, a custom condition's `String()`, else `custom`), `final_answer`, `parked`, or — on the span alone, a failed run having no `run_finish` — `max_steps`, `usage_limit`, `loop_detected`, `model_retries_exceeded`, `canceled`. ADR 0016 amendment 2026-10-12; `docs/record-contract.md` §3/§4; contract cases `stopped_by` and `canceled`.
+- core: `CancelCause`, a typed cancellation cause (UX-E-41): a run canceled through `context.WithCancelCause` with a cause that has a `Kind() string` records it as `weft.cancel.cause` on its `invoke_agent` span (`deadline` for a deadline). `thread` fells a turn with `thread.interrupted` (an `Interrupt`/`Rollback` send) or `thread.closed` (a `Close` that gave up); `runtime`'s cancel command with `studio.cancel`. The run's error is unchanged (`ctx.Err()`).
+
 ### Fixed
 
 - obsdb: a run whose `invoke_agent` span is stored is over — `succeeded` (or `failed` on an `Error` root) without a `run_finish`, never `interrupted` (UX-E-01). A tracer-only app's runs and runs whose record tail a destination dropped read the crash signal 30 s after they ended. New column `root_ended`, set at span ingest and backfilled from the stored spans (SQLite migration 0009, ClickHouse 0010; `RunRow.RootEnded`); the status filter, sessions and the sweep read the same rule. The run row's `weft_version` and `manifest_hash` now fill from the span (the version also from its resource) when no record names them (UX-E-02). Record contract §6 and §7, fixtures `tracer_only`, `tracer_only_failed`, `tail_lost`; ADR 0024 amended.

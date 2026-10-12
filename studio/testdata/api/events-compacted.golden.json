@@ -174,7 +174,8 @@
               "order_id": "42"
             }
           }
-        ]
+        ],
+        "stopped_by": "parked"
       }
     }
   ],

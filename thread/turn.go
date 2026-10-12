@@ -951,15 +951,15 @@ func (s *Session) runOne(item workItem) {
 	// The run flies under a cancelable child of the caller's context:
 	// an Interrupt or Rollback send fells it without touching the
 	// caller's own.
-	rctx, cancel := context.WithCancel(ps.ctx)
-	defer cancel()
+	rctx, cancel := context.WithCancelCause(ps.ctx)
+	defer cancel(nil)
 	t.setRunCancel(cancel)
 	defer t.clearRunCancel()
 	if t.wasInterrupted() {
 		// An Interrupt or Rollback arrived before the run armed its
 		// cancel — between Send and here. The run dies at birth: the
 		// interrupting Send's follow-up is already queued.
-		cancel()
+		cancel(t.interruptCause())
 	}
 	s.runTurn(persist, rctx, item, ps.opts)
 }
@@ -1020,12 +1020,12 @@ func (s *Session) runResume(item workItem) {
 	// parks again hands them on to the next one.
 	persist = context.WithoutCancel(ctx)
 	// A resume is as interruptible as a send's turn.
-	rctx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	rctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
 	t.setRunCancel(cancel)
 	defer t.clearRunCancel()
 	if t.wasInterrupted() {
-		cancel()
+		cancel(t.interruptCause())
 	}
 	s.runTurn(persist, rctx, item, opts)
 }
@@ -1755,7 +1755,12 @@ type Turn struct {
 	// receipt entry — where a rollback branches back to. Written by a
 	// Send under mu while the run flies; read by the runner under mu
 	// at the turn's end.
-	cancel      context.CancelFunc
+	// cause is why the run was felled — causeInterrupted for an
+	// Interrupt/Rollback send, causeClosed for Close — passed to the
+	// run context's CancelCauseFunc, so the run's invoke_agent span
+	// names it as weft.cancel.cause (ADR 0016, amendment 2026-10-12).
+	cancel      context.CancelCauseFunc
+	cause       error
 	interrupted bool
 	rollback    bool
 	preTurn     string
@@ -1829,7 +1834,7 @@ func (t *Turn) remintRunID(id string, turn int) {
 // setRunCancel arms the cancel that fells this turn's run; the runner
 // calls it when the run starts and clears it when the run ends, so a
 // late Interrupt cannot cancel a context nobody runs on.
-func (t *Turn) setRunCancel(cancel context.CancelFunc) {
+func (t *Turn) setRunCancel(cancel context.CancelCauseFunc) {
 	t.mu.Lock()
 	t.cancel = cancel
 	t.mu.Unlock()
@@ -1849,6 +1854,24 @@ func (t *Turn) wasInterrupted() bool {
 	defer t.mu.Unlock()
 	return t.interrupted
 }
+
+// interruptCause is the cause the turn's run is felled with: the one
+// its interrupter recorded under mu, else causeInterrupted.
+func (t *Turn) interruptCause() error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.cause == nil {
+		return causeInterrupted
+	}
+	return t.cause
+}
+
+// The typed causes a session fells its running turn with (core.CancelCause):
+// an Interrupt or Rollback send, or Close.
+const (
+	causeInterrupted = core.CancelCause("thread.interrupted")
+	causeClosed      = core.CancelCause("thread.closed")
+)
 
 // rollbackTarget reports the rollback mark and its branch target.
 func (t *Turn) rollbackTarget() (bool, string) {

@@ -210,7 +210,7 @@ func TestSteeringEventOrderAndSeq(t *testing.T) {
 		core.StepStart{RunID: "r1", Index: 2},
 		core.TextDelta{RunID: "r1", Text: "done"},
 		core.StepFinish{RunID: "r1", Index: 2, Reason: core.StopEndTurn, Usage: core.Usage{InputTokens: 10, OutputTokens: 5}},
-		core.RunFinish{RunID: "r1", Usage: core.Usage{InputTokens: 30, OutputTokens: 15}, Steps: 3},
+		core.RunFinish{RunID: "r1", Usage: core.Usage{InputTokens: 30, OutputTokens: 15}, Steps: 3, StoppedBy: "final_answer"},
 	}
 	if got := stripStepTiming(got); !reflect.DeepEqual(got, want) {
 		t.Fatalf("events:\n got  %s\n want %s", renderEvents(got), renderEvents(want))

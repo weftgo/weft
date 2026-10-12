@@ -103,6 +103,12 @@
                   "value": {
                     "stringValue": "tool_calls"
                   }
+                },
+                {
+                  "key": "weft.run.stopped_by",
+                  "value": {
+                    "stringValue": "parked"
+                  }
                 }
               ],
               "endTimeUnixNano": "1790845800005000000",

@@ -99,6 +99,12 @@
                   }
                 },
                 {
+                  "key": "weft.run.stopped_by",
+                  "value": {
+                    "stringValue": "max_steps"
+                  }
+                },
+                {
                   "key": "error.type",
                   "value": {
                     "stringValue": "max_steps"

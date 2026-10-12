@@ -799,3 +799,65 @@ func TestInterruptingSendKeepsItsRunOptions(t *testing.T) {
 		t.Errorf("the interrupting send's run carried tenant %q, want its own run options (acme)", got)
 	}
 }
+
+// An Interrupt or Rollback send fells the running turn with a typed
+// cause, and a Close that gives up with its own: the run's context.Cause names it, so
+// the run's invoke_agent span records weft.cancel.cause (UX-E-41).
+func TestInterruptCancelsWithTypedCause(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		policy thread.Policy
+		close  bool
+		want   string
+	}{
+		{"interrupt", thread.Interrupt, false, "thread.interrupted"},
+		{"rollback", thread.Rollback, false, "thread.interrupted"},
+		{"close", thread.Queue, true, "thread.closed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			started := make(chan struct{})
+			causes := make(chan error, 1)
+			wait := core.Tool("wait", "Waits until canceled.", func(ctx context.Context, _ struct{}) (string, error) {
+				close(started)
+				<-ctx.Done()
+				causes <- context.Cause(ctx)
+				return "", ctx.Err()
+			})
+			model := wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "wait"}), wefttest.Say("next"))
+			s, err := thread.Create(ctx, thread.Memory(), core.New(model, wait), thread.BusyPolicy(tc.policy))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t1, err := s.Send(ctx, core.User("start"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			<-started
+			if tc.close {
+				// A Close whose ctx ends while the turn runs gives up
+				// and fells it; a second Close finishes.
+				cctx, cancel := context.WithTimeout(ctx, 20*time.Millisecond)
+				defer cancel()
+				if err := s.Close(cctx); !errors.Is(err, context.DeadlineExceeded) {
+					t.Fatalf("Close = %v, want it to give up", err)
+				}
+				defer func() { _ = s.Close(ctx) }()
+			} else {
+				t2, err := s.Send(ctx, core.User("instead"))
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer func() { _, _ = t2.Wait(); _ = s.Close(ctx) }()
+			}
+			if _, err := t1.Wait(); !errors.Is(err, context.Canceled) {
+				t.Fatalf("felled turn err = %v, want context.Canceled", err)
+			}
+			cause := <-causes
+			var k interface{ Kind() string }
+			if !errors.As(cause, &k) || k.Kind() != tc.want {
+				t.Errorf("context.Cause = %v, want kind %s", cause, tc.want)
+			}
+		})
+	}
+}

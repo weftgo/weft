@@ -97,6 +97,12 @@
                   "value": {
                     "stringValue": "stop"
                   }
+                },
+                {
+                  "key": "weft.run.stopped_by",
+                  "value": {
+                    "stringValue": "final_answer"
+                  }
                 }
               ],
               "endTimeUnixNano": "1790845200003000000",

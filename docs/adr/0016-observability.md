@@ -533,3 +533,32 @@ under one `chat` span, the answering model on the step, model-visible
 output byte-identical with the reporting on and off, with and without
 a tracer); `TestStepTimingWithoutADelta` pins the absent TTFT.
 `BenchmarkWholeRunNoSDK` stays at 130 allocs/op.
+
+## Amendment (2026-10-12 — what stopped the run, and who cancelled it; UX plan U3.1)
+
+`weft.run.stop_reason` is the last step's finish reason, so a run that
+`StopWhen` ended after a tool call read `tool_calls`, exactly like a
+run cut off mid-loop, and a run failed by a budget said nothing of the
+budget beyond `error.type`. The loop now names the control that ended
+the run — configuration, never content — and, for a canceled run, the
+cancellation's typed cause:
+
+| where | key | value |
+|---|---|---|
+| `invoke_agent` span | `weft.run.stopped_by` | at end, every exit the loop decides: the `StopWhen` condition that fired, by its manifest name (`has_tool_call:<tools>`, `step_count_is:N`, `output_submitted`, a custom condition's `String()`, else `custom` — `stopName`, so the span and `policy.stop_when` share one vocabulary; the first condition in `StopWhen` order wins when several fire), `final_answer` (a step with no tool calls), `parked` (the approval boundary), `max_steps`, `usage_limit`, `loop_detected`, `model_retries_exceeded` (the continuation point's budgets, rule 13), `canceled` (the run's context ended, deadline included). Absent on a failure no control decided — a model error, a contract breach, a malformed tool source, an invalid steer, a panic: `error.type` names those |
+| `invoke_agent` span | `weft.cancel.cause` | at end, a `canceled` run whose `context.Cause` names itself: a cause with a `Kind() string` method reports it (`core.CancelCause`: `thread.interrupted` — an `Interrupt` or `Rollback` send; `thread.closed` — a `Close` that gave up; `studio.cancel` — the runtime link's cancel command), a deadline reports `deadline`; a plain cancel is absent |
+| `run_finish` event | `stopped_by` | `RunFinish.StoppedBy`, the span's value on a successful run (`omitempty`) |
+
+A failed run has no `run_finish` (rule 4, unchanged): its span is the
+carrier of `max_steps`, `usage_limit`, `loop_detected`,
+`model_retries_exceeded` and `canceled`. The core reads
+`context.Cause` structurally — it imports no layer that cancels — and
+`core.CancelCause` (a string type: `Kind`, `Error`, and `errors.Is`
+`context.Canceled`) is the one type weft's own layers cancel with;
+`thread` and `runtime` now use `context.WithCancelCause`. The run
+error is unchanged: still `ctx.Err()`, so `errors.Is(err,
+context.Canceled)` and the error text read as before. Nothing here
+alters a step, a retry or a tool call. `TestStoppedByEveryExit` pins
+every value on the span and in `run_finish`;
+`TestInterruptCancelsWithTypedCause` and `TestCancelRuntimeStartedRun`
+pin the thread and runtime causes.

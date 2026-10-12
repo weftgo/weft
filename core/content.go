@@ -63,7 +63,7 @@ func Content(capture bool) Option { return contentOption{capture} }
 //	tool_start        args (becomes null)           seq, call_id, name
 //	tool_finish       content                       seq, call_id, name, is_error
 //	steered           messages (becomes [])         seq, step
-//	run_finish        each pending call's args      usage, steps, pending ids and names
+//	run_finish        each pending call's args      usage, steps, pending ids and names, stopped_by
 //	run_start         nothing (no content)          all, instructions_hash included
 //	step_start        nothing (no content)          all
 //	step_finish       nothing (no content)          all

@@ -54,6 +54,8 @@ const (
 	attrRunSteps        = attribute.Key("weft.run.steps")
 	attrRunPending      = attribute.Key("weft.run.pending")
 	attrRunStopReason   = attribute.Key("weft.run.stop_reason")
+	attrRunStoppedBy    = attribute.Key("weft.run.stopped_by")
+	attrCancelCause     = attribute.Key("weft.cancel.cause")
 	attrStepIndex       = attribute.Key("weft.step.index")
 	attrStopRaw         = attribute.Key("weft.stop.raw")
 	attrModelToolCalls  = attribute.Key("weft.model.tool_calls")
@@ -210,7 +212,7 @@ func usageSplits(u Usage) []attribute.KeyValue {
 // dropped pairs. The metadata in force on ctx lands on every span of
 // the run — this one and the model and tool spans below — verbatim,
 // with the semconv mirrors (metadataAttrs).
-func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo, extra []attribute.KeyValue) (context.Context, func(res *RunResult, err error)) {
+func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo, extra []attribute.KeyValue) (context.Context, func(res *RunResult, err error, end runEnd)) {
 	ctx, span := o.tracer.Start(ctx, spanName(semconv.GenAIOperationNameInvokeAgent, agent),
 		trace.WithSpanKind(trace.SpanKindInternal))
 	start := time.Now()
@@ -242,7 +244,7 @@ func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo,
 		}
 		l.LogAttrs(ctx, slog.LevelDebug, "run start", attrs...)
 	}
-	return ctx, func(res *RunResult, err error) {
+	return ctx, func(res *RunResult, err error, end runEnd) {
 		dur := time.Since(start)
 		if span.IsRecording() {
 			attrs := []attribute.KeyValue{
@@ -256,6 +258,12 @@ func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo,
 			}
 			if res.StopReason != "" {
 				attrs = append(attrs, attrRunStopReason.String(string(res.StopReason)))
+			}
+			if end.stoppedBy != "" {
+				attrs = append(attrs, attrRunStoppedBy.String(end.stoppedBy))
+			}
+			if end.cancelCause != "" {
+				attrs = append(attrs, attrCancelCause.String(end.cancelCause))
 			}
 			span.SetAttributes(attrs...)
 		}
@@ -503,6 +511,69 @@ func (o *observer) tool(ctx context.Context, c Call, seq int64) (context.Context
 		}
 		span.End()
 	}
+}
+
+// runEnd is what the loop knows about a run's end beyond its result
+// and error: the control that stopped it and, for a canceled run, the
+// cancellation's typed cause — the invoke_agent span's
+// weft.run.stopped_by and weft.cancel.cause (ADR 0016, amendment
+// 2026-10-12). Either may be empty: a panicked run, or a failure no
+// control decided (a model error), has no stopped_by.
+type runEnd struct {
+	stoppedBy   string
+	cancelCause string
+}
+
+// The loop's own weft.run.stopped_by values — the exits no StopWhen
+// condition names. A condition that fired reports its manifest name
+// (stopName), so the attribute, RunFinish.StoppedBy and the manifest's
+// policy.stop_when share one vocabulary.
+const (
+	stoppedFinalAnswer  = "final_answer"
+	stoppedParked       = "parked"
+	stoppedMaxSteps     = "max_steps"
+	stoppedUsageLimit   = "usage_limit"
+	stoppedLoopDetected = "loop_detected"
+	stoppedRetries      = "model_retries_exceeded"
+	stoppedCanceled     = "canceled"
+)
+
+// failEnd classifies a failed run's end: "canceled" (with the typed
+// cause, when context.Cause names one) when the run's own context
+// ended and the failure is that ending, the budget's name for a budget
+// breach at the continuation point (rule 13), and nothing for any other
+// failure — error.type names those.
+func failEnd(ctx context.Context, err error) runEnd {
+	if ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+		return runEnd{stoppedBy: stoppedCanceled, cancelCause: cancelCause(ctx)}
+	}
+	switch {
+	case errors.Is(err, ErrMaxSteps):
+		return runEnd{stoppedBy: stoppedMaxSteps}
+	case errors.Is(err, ErrUsageLimit):
+		return runEnd{stoppedBy: stoppedUsageLimit}
+	case errors.Is(err, ErrLoopDetected):
+		return runEnd{stoppedBy: stoppedLoopDetected}
+	case errors.Is(err, ErrModelRetriesExceeded):
+		return runEnd{stoppedBy: stoppedRetries}
+	}
+	return runEnd{}
+}
+
+// cancelCause names a canceled context's cause for weft.cancel.cause:
+// a cause with a Kind() string method (CancelCause, or a layer's own
+// type) reports its kind, a deadline reports "deadline", and a plain
+// cancel — no cause given — reports nothing.
+func cancelCause(ctx context.Context) string {
+	cause := context.Cause(ctx)
+	var k interface{ Kind() string }
+	if errors.As(cause, &k) {
+		return k.Kind()
+	}
+	if errors.Is(cause, context.DeadlineExceeded) {
+		return "deadline"
+	}
+	return ""
 }
 
 // errRunPanicked types the run span's outcome when a panic nothing

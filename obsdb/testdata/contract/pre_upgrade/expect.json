@@ -1,6 +1,6 @@
 {
   "case": "pre_upgrade",
-  "description": "the plain run as a weft before ADR 0028 wrote it: no request, prompt or tools records and no weft.instructions.hash — the not_recorded reading of ADR 0028 §10's table",
+  "description": "the plain run as a weft before ADR 0028 wrote it: no request, prompt or tools records and no weft.instructions.hash — the not_recorded reading of ADR 0028 §10's table (nor weft.run.stopped_by / run_finish.stopped_by, younger still)",
   "runs": [
     {
       "id": "a1100000000000000000000000000001",

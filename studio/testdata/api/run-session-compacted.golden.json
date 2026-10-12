@@ -17,7 +17,9 @@
   "playground": false,
   "experiment_id": "",
   "forked_from": "",
-  "meta": {},
+  "meta": {
+    "weft.run.stopped_by": "final_answer"
+  },
   "started": "(time)",
   "finished": "(time)",
   "last_seen": "(norm)",

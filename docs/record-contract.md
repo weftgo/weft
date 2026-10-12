@@ -209,6 +209,8 @@ child). It ends when the run does, however the run ends.
 | `weft.run.steps` | int | at end |
 | `weft.run.pending` | int | at end, when calls are parked for approval |
 | `weft.run.stop_reason` | string | at end: the last step's `stop`, `tool_calls`, `max_tokens` |
+| `weft.run.stopped_by` | string | at end, what ended the run: a fired `StopWhen` condition's manifest name (`has_tool_call:<tools>`, `step_count_is:N`, `output_submitted`, a custom condition's `String()`, else `custom`), `final_answer`, `parked`, `max_steps`, `usage_limit`, `loop_detected`, `model_retries_exceeded`, `canceled`; absent on a failure no control decided (a model error, …: `error.type` names it). On a failed run this span is its only carrier (no `run_finish`) |
+| `weft.cancel.cause` | string | at end, a `canceled` run whose cause names itself: `thread.interrupted`, `thread.closed`, `studio.cancel` (a `core.CancelCause` — any cause with a `Kind()`), `deadline`; absent for a plain cancel |
 | `error.type` | string | on failure: `max_steps`, `usage_limit`, `context.Canceled`, … (ADR 0016's table) |
 
 Status: `Ok` on success (a run parked at an approval succeeded), `Error`
@@ -324,7 +326,7 @@ The body is the core's event wire (ADR 0004), discriminated by `type`;
 | `tool_finish` | `run_id`, `seq`, `call_id`, `name`, `content`, `is_error` | same as `tool_start` |
 | `step_finish` | `run_id`, `index`, `reason`, `usage`, `raw`, `latency_ms`, `ttft_ms` | `weft.step.index`, `weft.latency_ms`, `weft.ttft_ms` (when known), `gen_ai.response.model` (the model that answered) |
 | `steered` | `run_id`, `seq`, `step`, `messages` | `weft.step.index` |
-| `run_finish` | `run_id`, `usage`, `steps`, `pending` (parked calls) | — |
+| `run_finish` | `run_id`, `usage`, `steps`, `pending` (parked calls), `stopped_by` (the span's `weft.run.stopped_by`; absent on runs recorded before it) | — |
 
 `usage` is `{input_tokens, output_tokens, cached_input_tokens?,
 cache_write_tokens?, reasoning_tokens?}`. Deltas (`text_delta`,
@@ -776,9 +778,11 @@ page reaches it.
 | `content_off` | a content-off destination: stripped events, no messages, request records kept; the `stripped` badge |
 | `max_tokens` | `stop_reason = max_tokens`; the `max_tokens` badge |
 | `interrupted` | what a process that died mid-tool had exported: no `invoke_agent`, no `run_finish`; status `interrupted` |
-| `pre_upgrade` | a run without request, prompt or tools records or the `weft.instructions.hash` attribute; the `not_recorded` badge (the generator also removes `run_start`'s informational `instructions_hash` body field, for realism — readers never read it) |
+| `pre_upgrade` | a run without request, prompt or tools records or the `weft.instructions.hash` attribute; the `not_recorded` badge (the generator also removes `run_start`'s informational `instructions_hash` body field, and `weft.run.stopped_by` with `run_finish.stopped_by`, for realism — readers never read the first) |
 | `failed` | `MaxSteps(1)` against a model that keeps calling a tool: status `failed`, the error text, `steps`/`usage`/`stop_reason` from the span (no `run_finish`) |
-| `parked` | a `RequireApproval` tool's call parked: status `succeeded`, `pending` 1 (`run_finish.pending`, `weft.run.pending`) |
+| `parked` | a `RequireApproval` tool's call parked: status `succeeded`, `pending` 1 (`run_finish.pending`, `weft.run.pending`); `weft.run.stopped_by` and `run_finish.stopped_by` `parked` |
+| `stopped_by` | `StopWhen(HasToolCall("submit_ticket"))` ends the run after its tool call: `stop_reason` `tool_calls`, while `weft.run.stopped_by` and `run_finish.stopped_by` read `has_tool_call:submit_ticket` (every generated case carries its own value: `final_answer`, `parked`, `max_steps` in `failed`) |
+| `canceled` | a run canceled mid-tool with `core.CancelCause("studio.cancel")`: status `failed`, `error.type` `context.Canceled`, `weft.run.stopped_by` `canceled`, `weft.cancel.cause` `studio.cancel`; no `run_finish` |
 | `stock_genai` | §9: stock spans, no `weft.*` (hand-written: the one case no weft code generates); two derived runs in one conversation, one with a tool call, one failed; `derived` |
 | `tracer_only` | the `tool_calls` run from an app that wired a tracer and no logger: spans only — `succeeded` from the `Ok` root alone, `steps`/`usage`/`stop_reason` from the span, `weft_version` and `manifest_hash` from the span; `not_recorded` (cause `no_logger`) |
 | `tracer_only_failed` | the `failed` run, spans only: `failed` with the span's description from the `Error` root alone; `not_recorded` (cause `no_logger`) |

@@ -1783,10 +1783,13 @@ func (s *Session) abandon() {
 func (t *Turn) fell() {
 	t.mu.Lock()
 	t.interrupted = true
-	cancel := t.cancel
+	if t.cause == nil {
+		t.cause = causeClosed
+	}
+	cause, cancel := t.cause, t.cancel
 	t.mu.Unlock()
 	if cancel != nil {
-		cancel()
+		cancel(cause)
 	}
 }
 

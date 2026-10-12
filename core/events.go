@@ -155,6 +155,15 @@ type RunFinish struct {
 	// executing, awaiting Approve/Deny. Such a call had its ToolStart
 	// and no ToolFinish.
 	Pending []ToolCallPart `json:"pending,omitempty"`
+	// StoppedBy names what ended the run, in the manifest's stop_when
+	// vocabulary: the StopWhen condition that fired (has_tool_call:<tool>,
+	// step_count_is:N, output_submitted, a custom condition's String(),
+	// else "custom"), "final_answer" for a step with no tool calls, or
+	// "parked" for the approval boundary. Configuration, never content;
+	// the invoke_agent span carries the same value as weft.run.stopped_by,
+	// and on a failed run — which has no RunFinish — the span alone names
+	// the control that stopped it (ADR 0016, amendment 2026-10-12).
+	StoppedBy string `json:"stopped_by,omitempty"`
 }
 
 // Nested wraps one event of a child run started by a Subagent tool.

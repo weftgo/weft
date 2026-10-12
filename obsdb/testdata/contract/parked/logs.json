@@ -606,7 +606,7 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"type\":\"run_finish\",\"run_id\":\"a1100000000000000000000000000001\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"steps\":1,\"pending\":[{\"type\":\"tool_call\",\"id\":\"call_1\",\"name\":\"refund_order\",\"args\":{\"order_id\":\"1234\"}}]}"
+                "stringValue": "{\"type\":\"run_finish\",\"run_id\":\"a1100000000000000000000000000001\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"steps\":1,\"pending\":[{\"type\":\"tool_call\",\"id\":\"call_1\",\"name\":\"refund_order\",\"args\":{\"order_id\":\"1234\"}}],\"stopped_by\":\"parked\"}"
               },
               "eventName": "weft.event",
               "flags": 1,

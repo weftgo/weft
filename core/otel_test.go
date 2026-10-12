@@ -230,6 +230,7 @@ func TestSpansRunTree(t *testing.T) {
 		"gen_ai.usage.output_tokens": "10",
 		"weft.run.steps":             "2",
 		"weft.run.stop_reason":       "stop",
+		"weft.run.stopped_by":        "final_answer",
 	}
 	got := run.attrsMap()
 	for k, v := range want {

@@ -14,6 +14,9 @@
       "turn": 1,
       "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
       "weft_version": "v0.0.0-contract",
+      "meta": {
+        "weft.run.stopped_by": "final_answer"
+      },
       "started": "2026-10-01T09:03:00Z",
       "finished": "2026-10-01T09:03:00.008Z",
       "last_seen": "2026-10-01T09:03:00.008Z",
@@ -55,6 +58,9 @@
       "turn": 2,
       "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
       "weft_version": "v0.0.0-contract",
+      "meta": {
+        "weft.run.stopped_by": "final_answer"
+      },
       "started": "2026-10-01T09:03:00.004Z",
       "finished": "2026-10-01T09:03:00.017Z",
       "last_seen": "2026-10-01T09:03:00.017Z",

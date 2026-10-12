@@ -191,6 +191,14 @@ func TestCancelRuntimeStartedRun(t *testing.T) {
 	if !strings.Contains(events, `"step_finish"`) || !strings.Contains(events, "lookup_order") {
 		t.Errorf("the canceled run's records lost its first step: %s", events)
 	}
+	// The run's invoke_agent span names the control and its cause: a
+	// Studio cancel, not a shutdown or an interrupt (UX-E-41).
+	_, spans := e.api(t, http.MethodGet, "/api/runs/"+runID+"/spans", "")
+	for _, want := range []string{`"weft.run.stopped_by":"canceled"`, `"weft.cancel.cause":"studio.cancel"`} {
+		if !strings.Contains(strings.ReplaceAll(spans, " ", ""), want) {
+			t.Errorf("the canceled run's spans lack %s: %s", want, spans)
+		}
+	}
 	select {
 	case data := <-failedFrame:
 		if !strings.Contains(data, runID) {

@@ -1264,7 +1264,7 @@ func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 			// and so is one with no turn of the token's (deleted since
 			// the list was read). The other rows still answer.
 			if runs == nil {
-				slog.DebugContext(r.Context(), "studio: panel session row skipped: its runs could not be read to scope it", "session", sr.ID)
+				slog.DebugContext(r.Context(), "studio: panel session row skipped: its runs could not be read to scope it", "session", sr.ID, "reason", sc.reason)
 				continue
 			}
 			turns := topLevel(runs)

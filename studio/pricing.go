@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"net/http"
 	"os"
@@ -681,6 +682,7 @@ func (s *Server) sessionCost(ctx context.Context, id, publicID string) (cost, *c
 		}
 		page, err := s.db.Runs(ctx, q)
 		if err != nil {
+			slog.DebugContext(ctx, "studio: a session's runs could not be read to price it", "session", id, "err", err)
 			return cost{badge: costUnknown, reason: "the session's runs could not be read"}, c, nil
 		}
 		runs = append(runs, page.Runs...)

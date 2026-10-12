@@ -27,12 +27,7 @@ import type { HoleMark } from "@/lib/honesty"
 import { copyText, download, pretty } from "@/lib/json"
 import { rawFromSearch, rawSearch } from "@/lib/links"
 import type { RawLinkState } from "@/lib/links"
-import {
-  eventKind,
-  eventSummary,
-  eventType,
-  kindClass,
-} from "@/lib/summarize"
+import { eventKind, eventSummary, eventType, kindClass } from "@/lib/summarize"
 import type { EventKind } from "@/lib/summarize"
 import { CopyButton, JsonText } from "@/components/studio/codewin"
 import { HoleBadges } from "@/components/studio/hole-badge"
@@ -243,7 +238,9 @@ export function EventsExplorer({
       emit({ q: v })
     }
   }
-  const setHidden = (f: Set<EventKind> | ((h: Set<EventKind>) => Set<EventKind>)) => {
+  const setHidden = (
+    f: Set<EventKind> | ((h: Set<EventKind>) => Set<EventKind>)
+  ) => {
     const next = typeof f === "function" ? f(hidden) : f
     if (state) emit({ hide: [...next] })
     else setOwnHidden(next)
@@ -392,7 +389,9 @@ export function EventsExplorer({
           <span>summary</span>
           <span />
         </div>
-        {rows.length === 0 && events.length === 0 && derived ? null : rows.length === 0 ? (
+        {rows.length === 0 &&
+        events.length === 0 &&
+        derived ? null : rows.length === 0 ? (
           // A derived run's empty list says nothing: the derived note
           // above it (the run page's) says why there are no events.
           <p className="py-8 text-center font-mono text-xs text-faint">
@@ -411,7 +410,10 @@ export function EventsExplorer({
             aria-label={`events, ${rows.length.toLocaleString()} rows`}
             data-virtual
           >
-            <div className="relative w-full" style={{ height: virt.getTotalSize() }}>
+            <div
+              className="relative w-full"
+              style={{ height: virt.getTotalSize() }}
+            >
               {virt.getVirtualItems().map((item) => {
                 const r = rows[item.index]
                 return (

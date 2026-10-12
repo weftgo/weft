@@ -35,39 +35,91 @@ const PARENT_PROMPT = "You are a support agent."
 const CHILD_PROMPT = "You research orders." // requests-child.golden.json
 const U = { input_tokens: 10, output_tokens: 5 }
 
-const metaWithRequests = { ...META, capabilities: [...META.capabilities, "requests"] }
+const metaWithRequests = {
+  ...META,
+  capabilities: [...META.capabilities, "requests"],
+}
 const claims = (scope: string) =>
   `weft_pt.${btoa(JSON.stringify({ public_id: "pub_orders", scope, exp: "2099-01-01T00:00:00Z" })).replace(/=+$/, "")}.c2ln`
 
 /** One step that delegates (call `call` to `tool`), then a stop. */
 function delegating(id: string, call: string, tool: string): unknown[] {
   return [
-    { type: "run_start", id, model: { provider: "wefttest", name: "script" }, agent: "a" },
+    {
+      type: "run_start",
+      id,
+      model: { provider: "wefttest", name: "script" },
+      agent: "a",
+    },
     { type: "step_start", run_id: id, index: 0 },
-    { type: "tool_start", run_id: id, seq: 1, call_id: call, name: tool, args: { prompt: "dig" } },
-    { type: "tool_finish", run_id: id, seq: 1, call_id: call, name: tool, content: "found it", is_error: false },
-    { type: "step_finish", run_id: id, index: 0, reason: "tool_calls", usage: U },
+    {
+      type: "tool_start",
+      run_id: id,
+      seq: 1,
+      call_id: call,
+      name: tool,
+      args: { prompt: "dig" },
+    },
+    {
+      type: "tool_finish",
+      run_id: id,
+      seq: 1,
+      call_id: call,
+      name: tool,
+      content: "found it",
+      is_error: false,
+    },
+    {
+      type: "step_finish",
+      run_id: id,
+      index: 0,
+      reason: "tool_calls",
+      usage: U,
+    },
     { type: "run_finish", run_id: id, usage: U, steps: 1 },
   ]
 }
 
 function routes() {
   const r = baseRoutes()
-  const childRow = runRow({ id: CHILD, parent_run_id: RUN, parent_call_id: "c_sub", agent: "researcher", session_id: "", usage: U })
-  const grandRow = runRow({ id: GRAND, parent_run_id: CHILD, parent_call_id: "c_deep", agent: "digger", session_id: "" })
+  const childRow = runRow({
+    id: CHILD,
+    parent_run_id: RUN,
+    parent_call_id: "c_sub",
+    agent: "researcher",
+    session_id: "",
+    usage: U,
+  })
+  const grandRow = runRow({
+    id: GRAND,
+    parent_run_id: CHILD,
+    parent_call_id: "c_deep",
+    agent: "digger",
+    session_id: "",
+  })
   r[`runs/${RUN}`] = { ...runRow({}), children: [childRow] }
-  r[`runs/${RUN}/events?after=0&limit=500`] = page(delegating(RUN, "c_sub", "research"))
+  r[`runs/${RUN}/events?after=0&limit=500`] = page(
+    delegating(RUN, "c_sub", "research")
+  )
   r[`runs/${RUN}/requests?limit=1000`] = {
     requests: [
       {
-        ...golden<{ requests: Record<string, unknown>[] }>("requests-child").requests[0],
+        ...golden<{ requests: Record<string, unknown>[] }>("requests-child")
+          .requests[0],
         system_hash: "p",
-        prompt: { hash: "p", text: PARENT_PROMPT, content: "", truncated_bytes: 0 },
+        prompt: {
+          hash: "p",
+          text: PARENT_PROMPT,
+          content: "",
+          truncated_bytes: 0,
+        },
       },
     ],
   }
   r[`runs/${CHILD}`] = { ...childRow, children: [grandRow] }
-  r[`runs/${CHILD}/events?after=0&limit=500`] = page(delegating(CHILD, "c_deep", "deeper"))
+  r[`runs/${CHILD}/events?after=0&limit=500`] = page(
+    delegating(CHILD, "c_deep", "deeper")
+  )
   r[`runs/${CHILD}/transcript`] = { batches: [] }
   r[`runs/${CHILD}/requests?limit=1000`] = golden("requests-child")
   return r
@@ -88,11 +140,17 @@ describe("the panel's subagent badge (A10)", () => {
     const el = await mount({ ...ATTRS, "data-token": claims("playground") })
     const closed = $(el, `[data-weft-child="${CHILD}"]`)!
     // The nested row, before it is opened: agent, status, usage.
-    expect(closed.querySelector("summary")?.textContent).toBe("subagent researcher · succeeded · 10→5 tok")
-    expect(closed.querySelector("summary")?.getAttribute("aria-expanded")).toBe("false") // D3
+    expect(closed.querySelector("summary")?.textContent).toBe(
+      "subagent researcher · succeeded · 10→5 tok"
+    )
+    expect(closed.querySelector("summary")?.getAttribute("aria-expanded")).toBe(
+      "false"
+    ) // D3
 
     const block = await openChild(el)
-    expect(block.querySelector("summary")?.getAttribute("aria-expanded")).toBe("true")
+    expect(block.querySelector("summary")?.getAttribute("aria-expanded")).toBe(
+      "true"
+    )
     // The child's request line, read by the child's id: its prompt.
     const line = block.querySelector('[data-weft-request="0"]')!
     expect(line.textContent).toContain(CHILD_PROMPT)
@@ -100,12 +158,16 @@ describe("the panel's subagent badge (A10)", () => {
     expect(studio.gets(`runs/${CHILD}/requests`).length).toBe(1)
     // The hand-off: today's runs/<id> page, the child's id one segment.
     const hand = block.querySelector(`[data-weft-handoff="${CHILD}"]`)!
-    expect(hand.getAttribute("href")).toBe(`http://studio.test/studio/runs/${encodeURIComponent(CHILD)}`)
+    expect(hand.getAttribute("href")).toBe(
+      `http://studio.test/studio/runs/${encodeURIComponent(CHILD)}`
+    )
     // The grandchild: a badge and the hand-off, no expander, no reads.
     expect($(el, `[data-weft-child="${GRAND}"]`)).toBeNull()
-    expect(block.querySelector(`[data-weft-handoff="${GRAND}"]`)?.getAttribute("href")).toBe(
-      `http://studio.test/studio/runs/${encodeURIComponent(GRAND)}`
-    )
+    expect(
+      block
+        .querySelector(`[data-weft-handoff="${GRAND}"]`)
+        ?.getAttribute("href")
+    ).toBe(`http://studio.test/studio/runs/${encodeURIComponent(GRAND)}`)
     expect(studio.gets(`runs/${GRAND}`)).toEqual([])
   })
 
@@ -114,17 +176,25 @@ describe("the panel's subagent badge (A10)", () => {
     const el = await mount({ ...ATTRS, "data-token": claims("read") })
     const block = await openChild(el)
     const line = block.querySelector('[data-weft-request="0"]')!
-    expect(line.querySelector(".weft-badge")?.textContent).toBe("request: hidden by your token scope")
+    expect(line.querySelector(".weft-badge")?.textContent).toBe(
+      "request: hidden by your token scope"
+    )
     expect(studio.gets(`runs/${CHILD}/requests`)).toEqual([])
     expect(el.shadowRoot!.innerHTML).not.toContain(CHILD_PROMPT)
     // The child's steps are still folded under the parent's.
-    expect(all(el, `[data-weft-child="${CHILD}"] [data-weft-step]`).length).toBe(1)
+    expect(
+      all(el, `[data-weft-child="${CHILD}"] [data-weft-step]`).length
+    ).toBe(1)
   })
 
   it("a running child reads 'usage at finish', and refreshes — status, request line — once the parent's reload finds it finished", async () => {
     let finished = false
     const r = routes()
-    const parentRow = () => runRow({ status: finished ? "succeeded" : "running", finished: finished ? T0 : null })
+    const parentRow = () =>
+      runRow({
+        status: finished ? "succeeded" : "running",
+        finished: finished ? T0 : null,
+      })
     const childRow = () =>
       runRow({
         id: CHILD,
@@ -136,17 +206,24 @@ describe("the panel's subagent badge (A10)", () => {
         finished: finished ? T0 : null,
         usage: finished ? U : { input_tokens: 0, output_tokens: 0 },
       })
-    r["runs?public_id=pub_orders&limit=50"] = () => ({ total: 1, runs: [parentRow()], next_before: null })
+    r["runs?public_id=pub_orders&limit=50"] = () => ({
+      total: 1,
+      runs: [parentRow()],
+      next_before: null,
+    })
     r[`runs/${RUN}`] = () => ({ ...parentRow(), children: [childRow()] })
     r[`runs/${CHILD}`] = () => ({ ...childRow(), children: [] })
-    r[`runs/${CHILD}/requests?limit=1000`] = () => (finished ? golden("requests-child") : { requests: [] })
+    r[`runs/${CHILD}/requests?limit=1000`] = () =>
+      finished ? golden("requests-child") : { requests: [] }
     const studio = fakeStudio(r, metaWithRequests)
     const el = await mount({ ...ATTRS, "data-token": claims("playground") })
     expect($(el, `[data-weft-child="${CHILD}"] summary`)?.textContent).toBe(
       "subagent researcher · running · usage at finish"
     )
     let block = await openChild(el)
-    expect(block.querySelector('[data-weft-request="0"]')?.textContent).toContain("not stored yet")
+    expect(
+      block.querySelector('[data-weft-request="0"]')?.textContent
+    ).toContain("not stored yet")
     expect(block.textContent).not.toContain(CHILD_PROMPT)
     const reads = studio.gets(`runs/${CHILD}/requests`).length
 
@@ -157,8 +234,12 @@ describe("the panel's subagent badge (A10)", () => {
     await settle()
     block = $(el, `[data-weft-child="${CHILD}"]`)!
     expect(block.getAttribute("open")).toBe("")
-    expect(block.querySelector("summary")?.textContent).toBe("subagent researcher · succeeded · 10→5 tok")
-    expect(block.querySelector('[data-weft-request="0"]')?.textContent).toContain(CHILD_PROMPT)
+    expect(block.querySelector("summary")?.textContent).toBe(
+      "subagent researcher · succeeded · 10→5 tok"
+    )
+    expect(
+      block.querySelector('[data-weft-request="0"]')?.textContent
+    ).toContain(CHILD_PROMPT)
     expect(studio.gets(`runs/${CHILD}/requests`).length).toBe(reads + 1)
   })
 })

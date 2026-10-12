@@ -4,7 +4,14 @@
 // only node the panel will ever remove.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { WeftDevtools } from "./element"
-import { baseRoutes, FakeEventSource, fakeStudio, settle, setup, teardown } from "./testkit"
+import {
+  baseRoutes,
+  FakeEventSource,
+  fakeStudio,
+  settle,
+  setup,
+  teardown,
+} from "./testkit"
 
 type Weft = { publicId?: string; build?: string }
 const page = window as unknown as { __WEFT__?: Weft }
@@ -51,14 +58,24 @@ describe("window.__WEFT__ (§5.2)", () => {
     // The endpoint is the script's own directory — origin and path, not
     // the page's (the fake Studio routes on the path alone, so only the
     // URL itself can tell).
-    const metas = studio.fetchMock.mock.calls.map((c) => String(c[0])).filter((u) => u.includes("/api/meta"))
+    const metas = studio.fetchMock.mock.calls
+      .map((c) => String(c[0]))
+      .filter((u) => u.includes("/api/meta"))
     expect(metas).toEqual(["http://studio.test/studio/api/meta"])
   })
 
   it("rescopes on reassignment and on setting publicId on the object; none returns to the default", async () => {
     const routes = baseRoutes()
-    routes["runs?public_id=pub_b&limit=50"] = { total: 0, runs: [], next_before: null }
-    routes["runs?public_id=pub_c&limit=50"] = { total: 0, runs: [], next_before: null }
+    routes["runs?public_id=pub_b&limit=50"] = {
+      total: 0,
+      runs: [],
+      next_before: null,
+    }
+    routes["runs?public_id=pub_c&limit=50"] = {
+      total: 0,
+      runs: [],
+      next_before: null,
+    }
     const studio = fakeStudio(routes)
     await import("./main")
     await settle()
@@ -81,7 +98,11 @@ describe("window.__WEFT__ (§5.2)", () => {
 
   it("window.__WEFT__ = {scope} (C3.2) rescopes too, and setting scope on the object does", async () => {
     const routes = baseRoutes()
-    routes["runs?public_id=pub_b&limit=50"] = { total: 0, runs: [], next_before: null }
+    routes["runs?public_id=pub_b&limit=50"] = {
+      total: 0,
+      runs: [],
+      next_before: null,
+    }
     fakeStudio(routes)
     await import("./main")
     await settle()
@@ -89,7 +110,9 @@ describe("window.__WEFT__ (§5.2)", () => {
     await settle()
     expect(scopes()).toEqual(["pub_b"])
     const chips = () =>
-      Array.from(dock()?.shadowRoot?.querySelectorAll(".weft-scope-chip") ?? []).map((n) => n.textContent)
+      Array.from(
+        dock()?.shadowRoot?.querySelectorAll(".weft-scope-chip") ?? []
+      ).map((n) => n.textContent)
     dock()?.toggle()
     await settle()
     expect(chips()).toEqual(["flow f_1"])
@@ -101,8 +124,16 @@ describe("window.__WEFT__ (§5.2)", () => {
 
   it("markup the page re-renders (a framework remount) follows __WEFT__ too; an explicit data-public-id is never overridden", async () => {
     const routes = baseRoutes()
-    routes["runs?public_id=pub_b&limit=50"] = { total: 0, runs: [], next_before: null }
-    routes["runs?public_id=pub_c&limit=50"] = { total: 0, runs: [], next_before: null }
+    routes["runs?public_id=pub_b&limit=50"] = {
+      total: 0,
+      runs: [],
+      next_before: null,
+    }
+    routes["runs?public_id=pub_c&limit=50"] = {
+      total: 0,
+      runs: [],
+      next_before: null,
+    }
     fakeStudio(routes)
     const markup = () => {
       const n = document.createElement("weft-devtools")
@@ -137,7 +168,10 @@ describe("window.__WEFT__ (§5.2)", () => {
   it("a script that runs while the page is still parsing (async, or included twice) mounts one panel, after the markup", async () => {
     fakeStudio(baseRoutes())
     const state = Object.getOwnPropertyDescriptor(document, "readyState")
-    Object.defineProperty(document, "readyState", { configurable: true, get: () => "loading" })
+    Object.defineProperty(document, "readyState", {
+      configurable: true,
+      get: () => "loading",
+    })
     try {
       await import("./main")
       vi.resetModules()

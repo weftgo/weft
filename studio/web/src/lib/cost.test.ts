@@ -18,12 +18,25 @@ import type {
   SessionsPage,
   StepDoc,
 } from "./api"
-import { atLeastCost, costCell, costCellWords, costView, delegatedView, formatUSD, LOST_CELL_REASON, lostCellCost, runTotal, sortByCost, sumCost } from "./cost"
+import {
+  atLeastCost,
+  costCell,
+  costCellWords,
+  costView,
+  delegatedView,
+  formatUSD,
+  LOST_CELL_REASON,
+  lostCellCost,
+  runTotal,
+  sortByCost,
+  sumCost,
+} from "./cost"
 import { CELL_REASONS, CELL_WORDS } from "./stepdiff"
 import { derivedBodies } from "../test/derived-fixture"
 
 const API = resolve(process.cwd(), "../testdata/api")
-const golden = <T>(name: string): T => JSON.parse(readFileSync(resolve(API, `${name}.golden.json`), "utf8")) as T
+const golden = <T>(name: string): T =>
+  JSON.parse(readFileSync(resolve(API, `${name}.golden.json`), "utf8")) as T
 
 const COST_KEYS: Record<keyof CostFields, true> = {
   cost_usd: true,
@@ -37,8 +50,19 @@ const DELEGATED_KEYS: Record<keyof DelegatedCostFields, true> = {
   delegated_cost_known: true,
   delegated_cost_reason: true,
 }
-const META_PRICING_KEYS: Record<keyof MetaPricing, true> = { source: true, path: true, dated: true, models: true }
-const SETTINGS_KEYS: Record<keyof PricingSettings, true> = { source: true, path: true, dated: true, note: true, models: true }
+const META_PRICING_KEYS: Record<keyof MetaPricing, true> = {
+  source: true,
+  path: true,
+  dated: true,
+  models: true,
+}
+const SETTINGS_KEYS: Record<keyof PricingSettings, true> = {
+  source: true,
+  path: true,
+  dated: true,
+  note: true,
+  models: true,
+}
 const PRICE_KEYS: Record<keyof ModelPrice, true> = {
   provider: true,
   model_glob: true,
@@ -48,7 +72,13 @@ const PRICE_KEYS: Record<keyof ModelPrice, true> = {
   cache_write: true,
   reasoning: true,
 }
-const SEARCH_KEYS: Record<keyof SearchPage, true> = { total: true, runs: true, sort: true, next_offset: true, cost_sort_cap: true }
+const SEARCH_KEYS: Record<keyof SearchPage, true> = {
+  total: true,
+  runs: true,
+  sort: true,
+  next_offset: true,
+  cost_sort_cap: true,
+}
 
 /** The cost-ish keys an object carries that the mirror does not know. */
 function unknownCostKeys(obj: object, known: Record<string, true>): string[] {
@@ -90,12 +120,15 @@ describe("the TS mirrors know every cost key the Go goldens carry", () => {
     }
   })
   it("meta.pricing, the settings route and search's body", () => {
-    const meta = golden<{ pricing: MetaPricing; capabilities: string[] }>("meta")
+    const meta = golden<{ pricing: MetaPricing; capabilities: string[] }>(
+      "meta"
+    )
     expect(unknownKeys(meta.pricing, META_PRICING_KEYS)).toEqual([])
     expect(meta.capabilities).toContain("pricing")
     const settings = golden<PricingSettings>("settings-pricing")
     expect(unknownKeys(settings, SETTINGS_KEYS)).toEqual([])
-    for (const m of settings.models) expect(unknownKeys(m, PRICE_KEYS)).toEqual([])
+    for (const m of settings.models)
+      expect(unknownKeys(m, PRICE_KEYS)).toEqual([])
     expect(unknownKeys(golden<SearchPage>("search"), SEARCH_KEYS)).toEqual([])
   })
 })
@@ -110,7 +143,8 @@ describe("formatUSD", () => {
   })
 })
 
-const goldenRun = (id: string): RunRow => golden<RunsPage>("runs").runs.find((r) => r.id === id)!
+const goldenRun = (id: string): RunRow =>
+  golden<RunsPage>("runs").runs.find((r) => r.id === id)!
 /** A finished run on a model no row matches: unpriced. */
 const rFail = () => goldenRun("r_fail")
 /** A run whose end never arrived: its cost is unknown, not unpriced. */
@@ -125,7 +159,10 @@ const priced = (usd: number, del: number | null = 0): RunRow => ({
   cache: "exact",
   delegated_cost_usd: del,
   delegated_cost_known: del !== null,
-  delegated_cost_reason: del === null ? "a subagent run is not priced: c1 (no row matches x/y)" : undefined,
+  delegated_cost_reason:
+    del === null
+      ? "a subagent run is not priced: c1 (no row matches x/y)"
+      : undefined,
 })
 
 describe("costView", () => {
@@ -134,7 +171,9 @@ describe("costView", () => {
     const v = costView(r)
     expect(v).toMatchObject({ known: false, text: "—", badge: "unpriced" })
     expect(v.title).toBe(r.cost_reason)
-    expect(v.title).toContain("no row of the default pricing table matches wefttest/script")
+    expect(v.title).toContain(
+      "no row of the default pricing table matches wefttest/script"
+    )
   })
   it("a run whose end never arrived is — too, badged unknown with its reason", () => {
     const r = rStale()
@@ -144,35 +183,71 @@ describe("costView", () => {
     expect(v.title).toContain("never arrived")
   })
   it("a priced figure is formatted, the exact USD its title; cache not reported is said", () => {
-    expect(costView(priced(0.0042))).toMatchObject({ known: true, text: "$0.0042", title: "$0.004200 USD" })
-    expect(costView({ ...priced(0.5), cache: "not_reported" }).title).toContain("no cache splits")
+    expect(costView(priced(0.0042))).toMatchObject({
+      known: true,
+      text: "$0.0042",
+      title: "$0.004200 USD",
+    })
+    expect(costView({ ...priced(0.5), cache: "not_reported" }).title).toContain(
+      "no cache splits"
+    )
   })
   it("delegated reads its own block", () => {
     expect(delegatedView(priced(1, 0.25)).text).toBe("$0.25")
-    expect(delegatedView(priced(1, null))).toMatchObject({ known: false, text: "—", badge: "unpriced" })
+    expect(delegatedView(priced(1, null))).toMatchObject({
+      known: false,
+      text: "—",
+      badge: "unpriced",
+    })
   })
   it("a delegated figure unknown for another cause than an unpriced model is badged unknown, the API's reason its title", () => {
-    const running = "a subagent run's cost is not known yet: r/0/c1 (running: usage arrives at run end)"
-    const v = delegatedView({ ...priced(1, null), delegated_cost_reason: running })
-    expect(v).toMatchObject({ known: false, text: "—", badge: "unknown", title: running })
-    const unread = "the run's subagent children could not be read, so its own usage cannot be told from theirs"
-    expect(delegatedView({ ...priced(1, null), delegated_cost_reason: unread }).badge).toBe("unknown")
+    const running =
+      "a subagent run's cost is not known yet: r/0/c1 (running: usage arrives at run end)"
+    const v = delegatedView({
+      ...priced(1, null),
+      delegated_cost_reason: running,
+    })
+    expect(v).toMatchObject({
+      known: false,
+      text: "—",
+      badge: "unknown",
+      title: running,
+    })
+    const unread =
+      "the run's subagent children could not be read, so its own usage cannot be told from theirs"
+    expect(
+      delegatedView({ ...priced(1, null), delegated_cost_reason: unread }).badge
+    ).toBe("unknown")
     // A mix: pricing.go's compute leads with notPriced's unknown words
     // whenever any child is unknown, and the badge it carries is
     // unknown — the unpriced child named inside the list does not make
     // the whole unpriced.
-    const mixed = "a subagent run's cost is not known yet: c1 (running: usage arrives at run end); c2 (no row of the default pricing table matches x/y)"
-    expect(delegatedView({ ...priced(1, null), delegated_cost_reason: mixed }).badge).toBe("unknown")
+    const mixed =
+      "a subagent run's cost is not known yet: c1 (running: usage arrives at run end); c2 (no row of the default pricing table matches x/y)"
+    expect(
+      delegatedView({ ...priced(1, null), delegated_cost_reason: mixed }).badge
+    ).toBe("unknown")
     // The same, the unpriced child first (the list's order is the children's).
     const goMixed =
       "a subagent run's cost is not known yet: " +
-      ["r/0/c1 (no row of the default pricing table matches demo/ops)", "r/0/c2 (running: usage arrives at run end)"].join("; ")
-    expect(delegatedView({ ...priced(1, null), delegated_cost_reason: goMixed })).toMatchObject({ badge: "unknown", title: goMixed })
+      [
+        "r/0/c1 (no row of the default pricing table matches demo/ops)",
+        "r/0/c2 (running: usage arrives at run end)",
+      ].join("; ")
+    expect(
+      delegatedView({ ...priced(1, null), delegated_cost_reason: goMixed })
+    ).toMatchObject({ badge: "unknown", title: goMixed })
     // Every child unpriced: notPriced's other lead, unpriced.
-    const allUnpriced = "a subagent run is not priced: r/0/c1 (no row of the default pricing table matches demo/ops)"
-    expect(delegatedView({ ...priced(1, null), delegated_cost_reason: allUnpriced }).badge).toBe("unpriced")
+    const allUnpriced =
+      "a subagent run is not priced: r/0/c1 (no row of the default pricing table matches demo/ops)"
+    expect(
+      delegatedView({ ...priced(1, null), delegated_cost_reason: allUnpriced })
+        .badge
+    ).toBe("unpriced")
     // A total over it says the same.
-    expect(sumCost([{ ...priced(1, null), delegated_cost_reason: running }])).toMatchObject({ known: false, badge: "unknown" })
+    expect(
+      sumCost([{ ...priced(1, null), delegated_cost_reason: running }])
+    ).toMatchObject({ known: false, badge: "unknown" })
   })
 })
 
@@ -186,63 +261,139 @@ describe("the cost order and totals", () => {
     const b = { ...priced(0.2, 2), id: "b" }
     const u1 = { ...rFail(), id: "u1" }
     const u2 = { ...rStale(), id: "u2" }
-    expect(sortByCost([u1, a, u2, b]).map((r) => r.id)).toEqual(["b", "a", "u1", "u2"])
+    expect(sortByCost([u1, a, u2, b]).map((r) => r.id)).toEqual([
+      "b",
+      "a",
+      "u1",
+      "u2",
+    ])
   })
   it("sumCost totals a variant's runs and is — when any is unknown or unread", () => {
-    expect(sumCost([priced(0.01, 0.005), priced(0.02)])).toMatchObject({ known: true, text: "$0.04" })
+    expect(sumCost([priced(0.01, 0.005), priced(0.02)])).toMatchObject({
+      known: true,
+      text: "$0.04",
+    })
     const one = sumCost([priced(0.01), rFail()])
     expect(one).toMatchObject({ known: false, text: "—" })
-    expect(one.title).toContain("no row of the default pricing table matches wefttest/script")
-    expect(sumCost([priced(0.01), undefined])).toMatchObject({ known: false, text: "—" })
+    expect(one.title).toContain(
+      "no row of the default pricing table matches wefttest/script"
+    )
+    expect(sumCost([priced(0.01), undefined])).toMatchObject({
+      known: false,
+      text: "—",
+    })
   })
   it("atLeastCost (the panel's header, A5.3): ≥ the known part with the reasons; — when none is known; sumCost when all are", () => {
-    expect(atLeastCost([priced(0.01, 0.005), priced(0.02)])).toEqual(sumCost([priced(0.01, 0.005), priced(0.02)]))
+    expect(atLeastCost([priced(0.01, 0.005), priced(0.02)])).toEqual(
+      sumCost([priced(0.01, 0.005), priced(0.02)])
+    )
     const part = atLeastCost([priced(0.02, 0.01), rFail(), rFail()])
-    expect(part).toMatchObject({ known: false, text: "≥ $0.03", usd: 0.03, badge: "unpriced" })
+    expect(part).toMatchObject({
+      known: false,
+      text: "≥ $0.03",
+      usd: 0.03,
+      badge: "unpriced",
+    })
     // Each reason once, sumCost's words for it.
     const why = sumCost([rFail()]).title
     expect(part.title).toBe(`1 of 3 runs' own cost known — ${why}`)
-    expect(atLeastCost([rFail()])).toMatchObject({ known: false, text: "—", title: why })
-    expect(atLeastCost([])).toMatchObject({ known: false, text: "—", title: "no run to total" })
+    expect(atLeastCost([rFail()])).toMatchObject({
+      known: false,
+      text: "—",
+      title: why,
+    })
+    expect(atLeastCost([])).toMatchObject({
+      known: false,
+      text: "—",
+      title: "no run to total",
+    })
   })
   it("atLeastCost keeps a run's known own figure when only its delegated part is unknown", () => {
-    const running = "a subagent run's cost is not known yet: r/0/c1 (running: usage arrives at run end)"
-    const v = atLeastCost([priced(0.004), { ...priced(0.002, null), delegated_cost_reason: running }])
-    expect(v).toMatchObject({ known: false, text: "≥ $0.0060", badge: "unknown" })
+    const running =
+      "a subagent run's cost is not known yet: r/0/c1 (running: usage arrives at run end)"
+    const v = atLeastCost([
+      priced(0.004),
+      { ...priced(0.002, null), delegated_cost_reason: running },
+    ])
+    expect(v).toMatchObject({
+      known: false,
+      text: "≥ $0.0060",
+      badge: "unknown",
+    })
     // Both own figures are known: the count says so, beside the delegated part's reason.
-    expect(v.title).toBe(`2 of 2 runs' own cost known — delegated not known: ${running}`)
+    expect(v.title).toBe(
+      `2 of 2 runs' own cost known — delegated not known: ${running}`
+    )
     // Own known, delegated unknown, nothing else: still ≥ its own, never —, never "0 of 1".
-    expect(atLeastCost([{ ...priced(0.002, null), delegated_cost_reason: running }])).toMatchObject({
+    expect(
+      atLeastCost([{ ...priced(0.002, null), delegated_cost_reason: running }])
+    ).toMatchObject({
       text: "≥ $0.0020",
       title: `1 of 1 runs' own cost known — delegated not known: ${running}`,
     })
   })
   it("atLeastCost over a paged list: ≥ even when every loaded row is known, the note its title's last words", () => {
-    expect(atLeastCost([priced(0.01), priced(0.02)], "the 2 loaded turns only")).toMatchObject({ known: false, text: "≥ $0.03", title: "the 2 loaded turns only" })
+    expect(
+      atLeastCost([priced(0.01), priced(0.02)], "the 2 loaded turns only")
+    ).toMatchObject({
+      known: false,
+      text: "≥ $0.03",
+      title: "the 2 loaded turns only",
+    })
     const why = sumCost([rFail()]).title
-    expect(atLeastCost([priced(0.01), rFail()], "loaded only").title).toBe(`1 of 2 runs' own cost known — ${why} · loaded only`)
-    expect(atLeastCost([rFail()], "loaded only")).toMatchObject({ text: "—", title: `${why} · loaded only` })
+    expect(atLeastCost([priced(0.01), rFail()], "loaded only").title).toBe(
+      `1 of 2 runs' own cost known — ${why} · loaded only`
+    )
+    expect(atLeastCost([rFail()], "loaded only")).toMatchObject({
+      text: "—",
+      title: `${why} · loaded only`,
+    })
   })
   it("a derived run's no-usage cost is not known — never 'yet': it never arrives; keyed on the row's derived mark, not the words", () => {
     // The derived fixture's no-usage row, as Studio serves it.
     const derived = derivedBodies.runNoUsage as RunRow
     expect(derived.derived).toBe(true)
-    expect(sumCost([derived]).title).toBe(`a run's cost is not known: ${derived.cost_reason}`)
-    expect(atLeastCost([derived])).toMatchObject({ text: "—", title: `a run's cost is not known: ${derived.cost_reason}` })
+    expect(sumCost([derived]).title).toBe(
+      `a run's cost is not known: ${derived.cost_reason}`
+    )
+    expect(atLeastCost([derived])).toMatchObject({
+      text: "—",
+      title: `a run's cost is not known: ${derived.cost_reason}`,
+    })
     // Another wording on a derived row: still no "yet"; the same words on a weft row: "yet".
-    expect(sumCost([{ ...derived, cost_reason: "reworded by a later Go" }]).title).toBe("a run's cost is not known: reworded by a later Go")
-    expect(sumCost([{ ...derived, derived: false, requests_badge: undefined }]).title).toMatch(/^a run's cost is not known yet: /)
-    expect(sumCost([rStale()]).title).toMatch(/^a run's cost is not known yet: /)
+    expect(
+      sumCost([{ ...derived, cost_reason: "reworded by a later Go" }]).title
+    ).toBe("a run's cost is not known: reworded by a later Go")
+    expect(
+      sumCost([{ ...derived, derived: false, requests_badge: undefined }]).title
+    ).toMatch(/^a run's cost is not known yet: /)
+    expect(sumCost([rStale()]).title).toMatch(
+      /^a run's cost is not known yet: /
+    )
   })
   it("a lost cell is its own reason, and the total is unknown", () => {
     const v = sumCost([priced(0.01), lostCellCost()])
-    expect(v).toMatchObject({ known: false, text: "—", badge: "unknown", title: LOST_CELL_REASON })
+    expect(v).toMatchObject({
+      known: false,
+      text: "—",
+      badge: "unknown",
+      title: LOST_CELL_REASON,
+    })
   })
 })
 
 describe("the compare's cost cell (lib/stepdiff.ts's rule and words)", () => {
-  const known = (usd: number): CostFields => ({ cost_usd: usd, cost_known: true, cache: "exact" })
-  const unpriced: CostFields = { cost_usd: null, cost_known: false, cost_badge: "unpriced", cost_reason: "no row matches x/y" }
+  const known = (usd: number): CostFields => ({
+    cost_usd: usd,
+    cost_known: true,
+    cache: "exact",
+  })
+  const unpriced: CostFields = {
+    cost_usd: null,
+    cost_known: false,
+    cost_badge: "unpriced",
+    cost_reason: "no row matches x/y",
+  }
   it("same, changed, not comparable, missing", () => {
     expect(costCell(known(0.1), known(0.1))).toBe("same")
     expect(costCell(known(0.1), known(0.2))).toBe("changed")
@@ -252,10 +403,20 @@ describe("the compare's cost cell (lib/stepdiff.ts's rule and words)", () => {
   })
   it("draws the step compare's words: unknown reads not comparable, never same", () => {
     expect(costCellWords("unknown", unpriced).text).toBe(CELL_WORDS.unknown)
-    expect(costCellWords("unknown", unpriced).title).toContain("no row matches x/y")
+    expect(costCellWords("unknown", unpriced).title).toContain(
+      "no row matches x/y"
+    )
     expect(costCellWords("unknown", unpriced).why).toBe("no row matches x/y")
-    expect(costCellWords("same", known(0.1))).toEqual({ text: CELL_WORDS.same, title: CELL_REASONS.same, why: "" })
-    expect(costCellWords("missing", null)).toEqual({ text: CELL_WORDS.missing, title: CELL_REASONS.missing, why: "" })
+    expect(costCellWords("same", known(0.1))).toEqual({
+      text: CELL_WORDS.same,
+      title: CELL_REASONS.same,
+      why: "",
+    })
+    expect(costCellWords("missing", null)).toEqual({
+      text: CELL_WORDS.missing,
+      title: CELL_REASONS.missing,
+      why: "",
+    })
     expect(costCellWords("changed", known(0.2)).text).toBe("$0.20")
   })
 })

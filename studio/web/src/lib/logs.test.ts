@@ -11,7 +11,10 @@ import type { LogRow, LogsPage, StepAttempt, StepDoc } from "./api"
 
 const API = resolve(process.cwd(), "../testdata/api")
 const golden = (name: string): Record<string, unknown> =>
-  JSON.parse(readFileSync(resolve(API, name), "utf8")) as Record<string, unknown>
+  JSON.parse(readFileSync(resolve(API, name), "utf8")) as Record<
+    string,
+    unknown
+  >
 
 const reply = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -102,7 +105,10 @@ describe("fetchLogs over the Go goldens", () => {
   for (const name of ["logs-ok", "logs-ok-paged", "logs-not-recorded"]) {
     it(`returns ${name} as written`, async () => {
       const page = golden(`${name}.golden.json`)
-      vi.stubGlobal("fetch", vi.fn(async () => reply(page)))
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => reply(page))
+      )
       const got = await fetchLogs("r_ok")
       expect(got).toEqual(page)
       expect(Array.isArray(got.logs)).toBe(true)
@@ -123,12 +129,18 @@ describe("fetchLogs over the Go goldens", () => {
     const page: LogsPage = {
       ...(golden("logs-ok.golden.json") as unknown as LogsPage),
       partial: true,
-      partial_reason: "spans are exported when they end: lines under in-flight spans appear once they do, and indexes may shift",
+      partial_reason:
+        "spans are exported when they end: lines under in-flight spans appear once they do, and indexes may shift",
     }
-    vi.stubGlobal("fetch", vi.fn(async () => reply(page)))
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => reply(page))
+    )
     const got = await fetchLogs("r_live")
     expect(got.partial).toBe(true)
-    expect(got.partial_reason).toBe("spans are exported when they end: lines under in-flight spans appear once they do, and indexes may shift")
+    expect(got.partial_reason).toBe(
+      "spans are exported when they end: lines under in-flight spans appear once they do, and indexes may shift"
+    )
     expect(got.badge).toBeUndefined()
   })
 })

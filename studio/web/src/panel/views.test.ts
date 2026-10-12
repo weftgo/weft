@@ -33,7 +33,9 @@ let logs: ReturnType<typeof vi.spyOn>[] = []
 beforeEach(() => {
   setup()
   localStorage.clear()
-  logs = (["log", "info", "warn", "error", "debug"] as const).map((m) => vi.spyOn(console, m))
+  logs = (["log", "info", "warn", "error", "debug"] as const).map((m) =>
+    vi.spyOn(console, m)
+  )
 })
 afterEach(() => {
   // No console output, ever (§5.3).
@@ -43,19 +45,34 @@ afterEach(() => {
   localStorage.clear()
 })
 
-const BASE = { "data-endpoint": "http://studio.test/studio/", "data-public-id": "pub_orders", "data-open": "true" }
+const BASE = {
+  "data-endpoint": "http://studio.test/studio/",
+  "data-public-id": "pub_orders",
+  "data-open": "true",
+}
 /** Docked at the bottom: wide enough for the turn column (not the dropdown). */
 const WIDE = { ...BASE, "data-position": "bottom-dock" }
 const dock = (el: WeftDevtools) => $(el, ".weft-dock") as HTMLElement
-const active = (el: WeftDevtools) => el.shadowRoot!.activeElement as HTMLElement | null
-const stored = () => JSON.parse(localStorage.getItem(STORE_KEY) ?? "null") as Record<string, unknown> | null
+const active = (el: WeftDevtools) =>
+  el.shadowRoot!.activeElement as HTMLElement | null
+const stored = () =>
+  JSON.parse(localStorage.getItem(STORE_KEY) ?? "null") as Record<
+    string,
+    unknown
+  > | null
 
 function key(target: EventTarget, init: KeyboardEventInit) {
-  const e = new KeyboardEvent("keydown", { bubbles: true, composed: true, cancelable: true, ...init })
+  const e = new KeyboardEvent("keydown", {
+    bubbles: true,
+    composed: true,
+    cancelable: true,
+    ...init,
+  })
   target.dispatchEvent(e)
   return e
 }
-const tab = (el: WeftDevtools, name: string) => $(el, `#weft-tab-${name}`) as HTMLElement
+const tab = (el: WeftDevtools, name: string) =>
+  $(el, `#weft-tab-${name}`) as HTMLElement
 const type = async (input: HTMLInputElement, value: string) => {
   input.value = value
   input.dispatchEvent(new Event("input", { bubbles: true }))
@@ -64,7 +81,10 @@ const type = async (input: HTMLInputElement, value: string) => {
 
 /** A fake clipboard; null takes it away. */
 function clipboard(writeText: ((t: string) => Promise<void>) | null) {
-  Object.defineProperty(navigator, "clipboard", { value: writeText ? { writeText } : undefined, configurable: true })
+  Object.defineProperty(navigator, "clipboard", {
+    value: writeText ? { writeText } : undefined,
+    configurable: true,
+  })
 }
 
 describe("the tabs", () => {
@@ -73,17 +93,36 @@ describe("the tabs", () => {
     let el = await mount(BASE)
     const list = $(el, "[role=tablist]")!
     const tabs = all(el, "[role=tab]")
-    expect(tabs.map((t) => t.textContent)).toEqual(["Story", "Request", "Timeline", "Raw"])
-    expect(tabs.map((t) => t.getAttribute("aria-selected"))).toEqual(["true", "false", "false", "false"])
-    expect(tabs.map((t) => t.getAttribute("tabindex"))).toEqual(["0", "-1", "-1", "-1"])
+    expect(tabs.map((t) => t.textContent)).toEqual([
+      "Story",
+      "Request",
+      "Timeline",
+      "Raw",
+    ])
+    expect(tabs.map((t) => t.getAttribute("aria-selected"))).toEqual([
+      "true",
+      "false",
+      "false",
+      "false",
+    ])
+    expect(tabs.map((t) => t.getAttribute("tabindex"))).toEqual([
+      "0",
+      "-1",
+      "-1",
+      "-1",
+    ])
     // Only the drawn panel is controlled; it is labelled by its tab.
     expect(tab(el, "story").getAttribute("aria-controls")).toBe("weft-tp-story")
     expect(tab(el, "raw").hasAttribute("aria-controls")).toBe(false)
     expect($(el, "#weft-tp-story")?.getAttribute("role")).toBe("tabpanel")
-    expect($(el, "#weft-tp-story")?.getAttribute("aria-labelledby")).toBe("weft-tab-story")
+    expect($(el, "#weft-tp-story")?.getAttribute("aria-labelledby")).toBe(
+      "weft-tab-story"
+    )
     expect(list.getAttribute("aria-label")).toBe("turn views")
     tab(el, "story").focus()
-    expect(key(tab(el, "story"), { key: "ArrowRight" }).defaultPrevented).toBe(true)
+    expect(key(tab(el, "story"), { key: "ArrowRight" }).defaultPrevented).toBe(
+      true
+    )
     await settle()
     expect(tab(el, "request").getAttribute("aria-selected")).toBe("true")
     expect(active(el)).toBe(tab(el, "request"))
@@ -124,13 +163,16 @@ describe("the tabs", () => {
     const el = await mount(BASE)
     click(tab(el, "request"))
     await settle()
-    expect(text(el, "#weft-tp-request")).toContain("this Studio does not serve the request record")
+    expect(text(el, "#weft-tp-request")).toContain(
+      "this Studio does not serve the request record"
+    )
   })
 
   it("r opens Raw and again goes back to the tab before it; the raw button is a toggle (aria-pressed)", async () => {
     fakeStudio(baseRoutes())
     const el = await mount(BASE)
-    const raw = () => all(el, ".weft-head button").find((b) => b.textContent === "raw")!
+    const raw = () =>
+      all(el, ".weft-head button").find((b) => b.textContent === "raw")!
     expect(raw().getAttribute("aria-pressed")).toBe("false")
     dock(el).focus()
     key(dock(el), { key: "r" })
@@ -171,8 +213,16 @@ describe("the timeline", () => {
     const routes = baseRoutes()
     routes["runs/s_01-t1/spans"] = {
       spans: [
-        { name: "invoke_agent", start: "2026-10-01T09:00:00.000Z", end: "2026-10-01T09:00:02.000Z" },
-        { name: "chat", start: "2026-10-01T09:00:00.500Z", end: "2026-10-01T09:00:01.500Z" },
+        {
+          name: "invoke_agent",
+          start: "2026-10-01T09:00:00.000Z",
+          end: "2026-10-01T09:00:02.000Z",
+        },
+        {
+          name: "chat",
+          start: "2026-10-01T09:00:00.500Z",
+          end: "2026-10-01T09:00:01.500Z",
+        },
       ],
     }
     fakeStudio(routes)
@@ -183,17 +233,43 @@ describe("the timeline", () => {
     await settle()
     const tl = $(el, ".weft-timeline")!
     expect(tl.getAttribute("data-axis")).toBe("time")
-    expect(all(el, ".weft-tick").map((n) => n.textContent)).toEqual(["0 ms", "500 ms", "1000 ms", "1500 ms", "2000 ms"])
-    expect(all(el, ".weft-wf .weft-wf-name").map((n) => n.textContent)).toEqual(["invoke_agent", "chat"])
-    expect(all(el, ".weft-wf .weft-wf-ms").map((n) => n.textContent)).toEqual(["2000ms", "1000ms"])
+    expect(all(el, ".weft-tick").map((n) => n.textContent)).toEqual([
+      "0 ms",
+      "500 ms",
+      "1000 ms",
+      "1500 ms",
+      "2000 ms",
+    ])
+    expect(all(el, ".weft-wf .weft-wf-name").map((n) => n.textContent)).toEqual(
+      ["invoke_agent", "chat"]
+    )
+    expect(all(el, ".weft-wf .weft-wf-ms").map((n) => n.textContent)).toEqual([
+      "2000ms",
+      "1000ms",
+    ])
   })
 
   it("a run without spans: its steps and tool calls over the event sequence (seq)", async () => {
     const routes = baseRoutes()
     routes["runs/s_01-t1/events?after=0&limit=500"] = page([
       ...runEvents("s_01-t1").slice(0, 2),
-      { type: "tool_start", run_id: "s_01-t1", seq: 1, call_id: "c1", name: "lookup_order", args: {} },
-      { type: "tool_finish", run_id: "s_01-t1", seq: 1, call_id: "c1", name: "lookup_order", content: "ok", is_error: false },
+      {
+        type: "tool_start",
+        run_id: "s_01-t1",
+        seq: 1,
+        call_id: "c1",
+        name: "lookup_order",
+        args: {},
+      },
+      {
+        type: "tool_finish",
+        run_id: "s_01-t1",
+        seq: 1,
+        call_id: "c1",
+        name: "lookup_order",
+        content: "ok",
+        is_error: false,
+      },
       ...runEvents("s_01-t1").slice(2),
     ])
     fakeStudio(routes)
@@ -201,18 +277,37 @@ describe("the timeline", () => {
     click(tab(el, "timeline"))
     await settle()
     expect($(el, ".weft-timeline")!.getAttribute("data-axis")).toBe("seq")
-    expect(all(el, ".weft-tick").map((n) => n.textContent)).toEqual(["seq 0", "seq 1", "seq 3", "seq 4", "seq 5"])
-    expect(all(el, ".weft-wf .weft-wf-name").map((n) => n.textContent)).toEqual(["lookup_order", "step 0"])
-    expect(all(el, ".weft-wf .weft-wf-ms").map((n) => n.textContent)).toEqual(["#2–3", "#1–4"])
+    expect(all(el, ".weft-tick").map((n) => n.textContent)).toEqual([
+      "seq 0",
+      "seq 1",
+      "seq 3",
+      "seq 4",
+      "seq 5",
+    ])
+    expect(all(el, ".weft-wf .weft-wf-name").map((n) => n.textContent)).toEqual(
+      ["lookup_order", "step 0"]
+    )
+    expect(all(el, ".weft-wf .weft-wf-ms").map((n) => n.textContent)).toEqual([
+      "#2–3",
+      "#1–4",
+    ])
   })
 
   it("review: the axis is the waterfall's own window, and a span it cannot place is said", async () => {
     const routes = baseRoutes()
     routes["runs/s_01-t1/spans"] = {
       spans: [
-        { name: "chat", start: "2026-10-01T09:00:00.000Z", end: "2026-10-01T09:00:01.000Z" },
+        {
+          name: "chat",
+          start: "2026-10-01T09:00:00.000Z",
+          end: "2026-10-01T09:00:01.000Z",
+        },
         // Ends before it starts: waterfall drops it, so the axis must too.
-        { name: "bent", start: "2026-10-01T09:00:05.000Z", end: "2026-10-01T09:00:04.000Z" },
+        {
+          name: "bent",
+          start: "2026-10-01T09:00:05.000Z",
+          end: "2026-10-01T09:00:04.000Z",
+        },
         { name: "garbled", start: "yesterday", end: "today" },
       ],
     }
@@ -220,9 +315,19 @@ describe("the timeline", () => {
     const el = await mount(BASE)
     click(tab(el, "timeline"))
     await settle()
-    expect(all(el, ".weft-tick").map((n) => n.textContent)).toEqual(["0 ms", "250 ms", "500 ms", "750 ms", "1000 ms"])
-    expect(all(el, ".weft-wf .weft-wf-name").map((n) => n.textContent)).toEqual(["chat"])
-    expect(text(el, ".weft-timeline .weft-warn")).toBe("2 spans not placed: unreadable times, or an end before the start")
+    expect(all(el, ".weft-tick").map((n) => n.textContent)).toEqual([
+      "0 ms",
+      "250 ms",
+      "500 ms",
+      "750 ms",
+      "1000 ms",
+    ])
+    expect(all(el, ".weft-wf .weft-wf-name").map((n) => n.textContent)).toEqual(
+      ["chat"]
+    )
+    expect(text(el, ".weft-timeline .weft-warn")).toBe(
+      "2 spans not placed: unreadable times, or an end before the start"
+    )
   })
 })
 
@@ -231,8 +336,23 @@ describe("the tabs keep the story (review)", () => {
     const routes = baseRoutes()
     routes["runs/s_01-t1/events?after=0&limit=500"] = page([
       ...runEvents("s_01-t1").slice(0, 2),
-      { type: "tool_start", run_id: "s_01-t1", seq: 1, call_id: "c1", name: "lookup_order", args: {} },
-      { type: "tool_finish", run_id: "s_01-t1", seq: 1, call_id: "c1", name: "lookup_order", content: "ok", is_error: false },
+      {
+        type: "tool_start",
+        run_id: "s_01-t1",
+        seq: 1,
+        call_id: "c1",
+        name: "lookup_order",
+        args: {},
+      },
+      {
+        type: "tool_finish",
+        run_id: "s_01-t1",
+        seq: 1,
+        call_id: "c1",
+        name: "lookup_order",
+        content: "ok",
+        is_error: false,
+      },
       ...runEvents("s_01-t1").slice(2),
     ])
     fakeStudio(routes)
@@ -258,14 +378,26 @@ describe("the tabs keep the story (review)", () => {
     dock(el).focus()
     key(dock(el), { key: "J" })
     await settle()
-    expect(all(el, ".weft-head a").find((n) => n.textContent === "⤢")!.getAttribute("href")).toContain("step=0")
+    expect(
+      all(el, ".weft-head a")
+        .find((n) => n.textContent === "⤢")!
+        .getAttribute("href")
+    ).toContain("step=0")
   })
 })
 
 describe("the raw tree", () => {
   function rawRoutes() {
     const routes = baseRoutes()
-    routes["runs/s_01-t1"] = { ...runRow({ meta: { tenant: { name: "acme", tier: "gold" } } as unknown as Record<string, string> }), children: [] }
+    routes["runs/s_01-t1"] = {
+      ...runRow({
+        meta: { tenant: { name: "acme", tier: "gold" } } as unknown as Record<
+          string,
+          string
+        >,
+      }),
+      children: [],
+    }
     return routes
   }
   async function openRaw() {
@@ -284,12 +416,16 @@ describe("the raw tree", () => {
     expect(top).toEqual(["doc: ", "events: ", "transcript: ", "spans: "])
   })
 
-  it("/ finds a key: the path opens, the row is marked, \"1 match\"; copy-node puts that node's JSON on the clipboard", async () => {
+  it('/ finds a key: the path opens, the row is marked, "1 match"; copy-node puts that node\'s JSON on the clipboard', async () => {
     const writeText = vi.fn<(t: string) => Promise<void>>(async () => {})
     clipboard(writeText)
     const el = await openRaw()
     // Collapse doc first: the filter must open the path itself.
-    click(all(el, ".weft-tt").find((b) => b.getAttribute("aria-label") === "collapse doc"))
+    click(
+      all(el, ".weft-tt").find(
+        (b) => b.getAttribute("aria-label") === "collapse doc"
+      )
+    )
     await settle()
     expect(text(el, ".weft-tree")).not.toContain("tenant")
     dock(el).focus()
@@ -303,11 +439,17 @@ describe("the raw tree", () => {
     expect(hits[0].querySelector(".weft-tk")?.textContent).toBe("tenant: ")
     // The path to it is open: doc and meta say so.
     for (const k of ["doc", "meta"])
-      expect(all(el, ".weft-tt").find((b) => b.getAttribute("aria-label")?.endsWith(` ${k}`))?.getAttribute("aria-expanded")).toBe("true")
+      expect(
+        all(el, ".weft-tt")
+          .find((b) => b.getAttribute("aria-label")?.endsWith(` ${k}`))
+          ?.getAttribute("aria-expanded")
+      ).toBe("true")
     expect(active(el)).toBe(q) // the caret stays in the box
     click(hits[0].querySelector(".weft-tc"))
     await settle()
-    expect(writeText).toHaveBeenCalledWith(JSON.stringify({ name: "acme", tier: "gold" }, null, 2))
+    expect(writeText).toHaveBeenCalledWith(
+      JSON.stringify({ name: "acme", tier: "gold" }, null, 2)
+    )
     expect(text(el, ".weft-tree-said")).toBe("copied")
     // A value matches too, case-insensitively.
     await type(q, "GOLD")
@@ -319,19 +461,30 @@ describe("the raw tree", () => {
     const writeText = vi.fn<(t: string) => Promise<void>>(async () => {})
     clipboard(writeText)
     const el = await openRaw()
-    click(all(el, ".weft-tbar button").find((b) => b.textContent === "copy all"))
+    click(
+      all(el, ".weft-tbar button").find((b) => b.textContent === "copy all")
+    )
     await settle()
-    const doc = JSON.parse(String(writeText.mock.calls[0]?.[0])) as Record<string, unknown>
+    const doc = JSON.parse(String(writeText.mock.calls[0]?.[0])) as Record<
+      string,
+      unknown
+    >
     expect(Object.keys(doc)).toEqual(["doc", "events", "transcript", "spans"])
     clipboard(() => Promise.reject(new Error("denied")))
-    click(all(el, ".weft-tbar button").find((b) => b.textContent === "copy all"))
+    click(
+      all(el, ".weft-tbar button").find((b) => b.textContent === "copy all")
+    )
     await settle()
     expect(text(el, ".weft-tree-said")).toContain("refused")
-    expect(($(el, ".weft-copybox") as HTMLTextAreaElement).value).toContain('"transcript"')
+    expect(($(el, ".weft-copybox") as HTMLTextAreaElement).value).toContain(
+      '"transcript"'
+    )
     clipboard(null) // no clipboard at all: the same fallback, nothing thrown
     click(all(el, ".weft-tc")[0])
     await settle()
-    expect(($(el, ".weft-copybox") as HTMLTextAreaElement).value).toContain('"id"')
+    expect(($(el, ".weft-copybox") as HTMLTextAreaElement).value).toContain(
+      '"id"'
+    )
   })
 
   it("download is an <a download> named <run id>.json whose href is the document", async () => {
@@ -340,12 +493,20 @@ describe("the raw tree", () => {
     expect(a.getAttribute("download")).toBe("s_01-t1.json")
     const stop = (e: Event) => e.preventDefault()
     document.addEventListener("click", stop)
-    a.dispatchEvent(new MouseEvent("click", { bubbles: true, composed: true, cancelable: true }))
+    a.dispatchEvent(
+      new MouseEvent("click", {
+        bubbles: true,
+        composed: true,
+        cancelable: true,
+      })
+    )
     document.removeEventListener("click", stop)
     const href = a.getAttribute("href") ?? ""
     // jsdom has no createObjectURL: the data: form (a browser gets a blob: URL).
     expect(href.startsWith("data:application/json;charset=utf-8,")).toBe(true)
-    const doc = JSON.parse(decodeURIComponent(href.slice(href.indexOf(",") + 1))) as Record<string, unknown>
+    const doc = JSON.parse(
+      decodeURIComponent(href.slice(href.indexOf(",") + 1))
+    ) as Record<string, unknown>
     expect(Object.keys(doc)).toEqual(["doc", "events", "transcript", "spans"])
   })
 
@@ -353,7 +514,8 @@ describe("the raw tree", () => {
   function draw(doc: unknown) {
     const box = document.createElement("div")
     const st = newTree()
-    const redraw = () => patch(box, [treeView(doc, st, "x", { redraw, root: () => box })])
+    const redraw = () =>
+      patch(box, [treeView(doc, st, "x", { redraw, root: () => box })])
     redraw()
     return { box, st, redraw }
   }
@@ -375,8 +537,13 @@ describe("the raw tree", () => {
   })
 
   it("keyboard: ArrowRight opens a node, ArrowLeft closes it (Enter/Space are the button's)", () => {
-    const { box } = draw({ a: { b: 1 }, big: Array.from({ length: 400 }, (_, i) => i) })
-    const t = Array.from(box.querySelectorAll<HTMLElement>(".weft-tt")).find((b) => b.getAttribute("aria-label") === "expand big")!
+    const { box } = draw({
+      a: { b: 1 },
+      big: Array.from({ length: 400 }, (_, i) => i),
+    })
+    const t = Array.from(box.querySelectorAll<HTMLElement>(".weft-tt")).find(
+      (b) => b.getAttribute("aria-label") === "expand big"
+    )!
     key(t, { key: "ArrowRight" })
     expect(t.getAttribute("aria-expanded")).toBe("true")
     key(t, { key: "ArrowLeft" })
@@ -393,39 +560,56 @@ describe("the raw tree", () => {
     expect(box.querySelectorAll(".weft-tn.weft-hit")).toHaveLength(2)
   })
 
-  it("a string over 2 KiB shows its head and \"+N bytes\" (UTF-8), the rest on a click", () => {
-    const { box } = draw({ s: "a".repeat(STR_CAP) + "é".repeat(1000), t: "short" })
+  it('a string over 2 KiB shows its head and "+N bytes" (UTF-8), the rest on a click', () => {
+    const { box } = draw({
+      s: "a".repeat(STR_CAP) + "é".repeat(1000),
+      t: "short",
+    })
     const v = box.querySelector(".weft-tn .weft-tv")!
     expect(v.textContent).toBe(`"${"a".repeat(STR_CAP)}…`)
     const more = box.querySelector(".weft-tmore") as HTMLElement
     expect(more.textContent).toBe("… +2000 bytes")
     click(more)
-    expect(box.querySelector(".weft-tn .weft-tv")!.textContent).toBe(JSON.stringify("a".repeat(STR_CAP) + "é".repeat(1000)))
+    expect(box.querySelector(".weft-tn .weft-tv")!.textContent).toBe(
+      JSON.stringify("a".repeat(STR_CAP) + "é".repeat(1000))
+    )
     expect(box.querySelector(".weft-tmore")).toBeNull()
   })
 
   it("review: past OPEN_HITS matches the count says only the first 200 are opened", () => {
-    const { box, st, redraw } = draw({ a: Array.from({ length: 300 }, () => "x") })
+    const { box, st, redraw } = draw({
+      a: Array.from({ length: 300 }, () => "x"),
+    })
     st.q = st.applied = "x"
     redraw()
-    expect(box.querySelector(".weft-tree-n")?.textContent).toBe("300 matches · first 200 opened")
+    expect(box.querySelector(".weft-tree-n")?.textContent).toBe(
+      "300 matches · first 200 opened"
+    )
     expect(box.querySelectorAll(".weft-tn.weft-hit")).toHaveLength(200)
   })
 
   it("review: the cap is 2,048 characters and never splits a surrogate pair; bytes counted without allocating", () => {
     const s = "a".repeat(STR_CAP - 1) + "😀" + "b".repeat(10)
     const { box } = draw({ s, cjk: "中".repeat(3000) })
-    const [v1, v2] = Array.from(box.querySelectorAll(".weft-tn .weft-tv"), (n) => n.textContent)
+    const [v1, v2] = Array.from(
+      box.querySelectorAll(".weft-tn .weft-tv"),
+      (n) => n.textContent
+    )
     expect(v1).toBe(`"${"a".repeat(STR_CAP - 1)}…`)
     expect(/[\ud800-\udbff](?![\udc00-\udfff])/.test(v1)).toBe(false)
     expect(v2).toBe(`"${"中".repeat(STR_CAP)}…`)
-    expect(Array.from(box.querySelectorAll(".weft-tmore"), (n) => n.textContent)).toEqual(["… +14 bytes", `… +${(3000 - STR_CAP) * 3} bytes`])
+    expect(
+      Array.from(box.querySelectorAll(".weft-tmore"), (n) => n.textContent)
+    ).toEqual(["… +14 bytes", `… +${(3000 - STR_CAP) * 3} bytes`])
     const mixed = "aé中😀\u{1F600}x"
     expect(utf8(mixed)).toBe(new TextEncoder().encode(mixed).length)
   })
 
   it("review: a redraw re-walks nothing — the byte count, the search and the default opening are kept per document", () => {
-    const { box, st, redraw } = draw({ s: "z".repeat(STR_CAP + 5), o: { k: 1 } })
+    const { box, st, redraw } = draw({
+      s: "z".repeat(STR_CAP + 5),
+      o: { k: 1 },
+    })
     st.q = st.applied = "k"
     redraw()
     const memo = st.memo
@@ -459,7 +643,8 @@ describe("the raw tree", () => {
     click(tab(el, "raw"))
     await settle()
     await type($(el, ".weft-tree-q") as HTMLInputElement, "run_start")
-    const tree = (el as unknown as { tree: { memo?: unknown; auto?: unknown } }).tree
+    const tree = (el as unknown as { tree: { memo?: unknown; auto?: unknown } })
+      .tree
     const memo = tree.memo
     const auto = tree.auto
     // Two redraws that change no record (the ? list opened and closed).
@@ -472,7 +657,7 @@ describe("the raw tree", () => {
     expect(tree.auto).toBe(auto)
   })
 
-  it("review: \"copied\" goes after 2 s or with the next action; the hand-copy box goes on blur or Esc", async () => {
+  it('review: "copied" goes after 2 s or with the next action; the hand-copy box goes on blur or Esc', async () => {
     vi.useFakeTimers()
     const writeText = vi.fn<(t: string) => Promise<void>>(async () => {})
     clipboard(writeText)
@@ -505,7 +690,11 @@ describe("the raw tree", () => {
     clipboard(writeText)
     const big = Array.from({ length: 500 }, (_, i) => i)
     const { box } = draw({ big })
-    click(Array.from(box.querySelectorAll(".weft-tc")).find((b) => b.getAttribute("aria-label") === "copy big"))
+    click(
+      Array.from(box.querySelectorAll(".weft-tc")).find(
+        (b) => b.getAttribute("aria-label") === "copy big"
+      )
+    )
     expect(JSON.parse(String(writeText.mock.calls[0]?.[0]))).toEqual(big)
   })
 })
@@ -514,18 +703,38 @@ describe("the turn list's filter", () => {
   function three() {
     const routes = baseRoutes()
     const t1 = runRow({})
-    const t2 = runRow({ id: "s_01-t2", turn: 2, status: "failed", err: "model: boom", started: "2026-10-01T09:01:00Z" })
-    const t3 = runRow({ id: "s_01-t3", turn: 3, status: "succeeded", pending: 1, started: "2026-10-01T09:02:00Z" })
-    routes["runs?public_id=pub_orders&limit=50"] = { total: 3, runs: [t3, t2, t1], next_before: null }
+    const t2 = runRow({
+      id: "s_01-t2",
+      turn: 2,
+      status: "failed",
+      err: "model: boom",
+      started: "2026-10-01T09:01:00Z",
+    })
+    const t3 = runRow({
+      id: "s_01-t3",
+      turn: 3,
+      status: "succeeded",
+      pending: 1,
+      started: "2026-10-01T09:02:00Z",
+    })
+    routes["runs?public_id=pub_orders&limit=50"] = {
+      total: 3,
+      runs: [t3, t2, t1],
+      next_before: null,
+    }
     for (const r of [t2, t3]) {
       routes[`runs/${r.id}`] = { ...r, children: [] }
       routes[`runs/${r.id}/events?after=0&limit=500`] = page(runEvents(r.id))
-      routes[`runs/${r.id}/transcript`] = transcript([user(`question ${r.turn}`)], [assistant("answer")])
+      routes[`runs/${r.id}/transcript`] = transcript(
+        [user(`question ${r.turn}`)],
+        [assistant("answer")]
+      )
       routes[`runs/${r.id}/spans`] = { spans: [] }
     }
     return routes
   }
-  const ids = (el: WeftDevtools) => all(el, ".weft-turn .weft-id").map((n) => n.textContent)
+  const ids = (el: WeftDevtools) =>
+    all(el, ".weft-turn .weft-id").map((n) => n.textContent)
 
   it("text (id, error, an opened turn's prompt), status and has error narrow the loaded rows; the count says so", async () => {
     fakeStudio(three())
@@ -561,8 +770,16 @@ describe("the turn list's filter", () => {
 
   it("review: the narrow dropdown keeps the selected turn listed and runs experiments through the filter too", async () => {
     const routes = three()
-    const x1 = runRow({ id: "x1", playground: true, session_id: "", forked_from: "s_01-t1#0", started: "2026-10-01T09:03:00Z" })
-    const page0 = routes["runs?public_id=pub_orders&limit=50"] as { runs: unknown[] }
+    const x1 = runRow({
+      id: "x1",
+      playground: true,
+      session_id: "",
+      forked_from: "s_01-t1#0",
+      started: "2026-10-01T09:03:00Z",
+    })
+    const page0 = routes["runs?public_id=pub_orders&limit=50"] as {
+      runs: unknown[]
+    }
     page0.runs.push(x1)
     fakeStudio(routes)
     const el = await mount(BASE) // 520 px: the dropdown
@@ -570,14 +787,21 @@ describe("the turn list's filter", () => {
     expect(pick().value).toBe("s_01-t3")
     expect(Array.from(pick().options, (o) => o.value)).toContain("x1")
     await type($(el, ".weft-turn-q") as HTMLInputElement, "boom")
-    expect(Array.from(pick().options, (o) => o.value)).toEqual(["s_01-t3", "s_01-t2"])
+    expect(Array.from(pick().options, (o) => o.value)).toEqual([
+      "s_01-t3",
+      "s_01-t2",
+    ])
     expect(pick().value).toBe("s_01-t3") // still what the column shows
     expect(Array.from(pick().options, (o) => o.value)).not.toContain("x1")
   })
 
   it("review: / with no filter box to focus (an empty list) is left to the page", async () => {
     const routes = baseRoutes()
-    routes["runs?public_id=pub_orders&limit=50"] = { total: 0, runs: [], next_before: null }
+    routes["runs?public_id=pub_orders&limit=50"] = {
+      total: 0,
+      runs: [],
+      next_before: null,
+    }
     fakeStudio(routes)
     const el = await mount(BASE)
     dock(el).focus()
@@ -589,7 +813,15 @@ describe("the turn list's filter", () => {
 describe("paging (before= / before_id=, no cap)", () => {
   const N = 200
   const at = (n: number) => new Date(Date.parse(T0) + n * 60_000).toISOString()
-  const turn = (n: number) => runRow({ id: `t${n}`, turn: n, session_id: "s_01", started: at(n), last_seen: at(n), finished: at(n) })
+  const turn = (n: number) =>
+    runRow({
+      id: `t${n}`,
+      turn: n,
+      session_id: "s_01",
+      started: at(n),
+      last_seen: at(n),
+      finished: at(n),
+    })
 
   /** A 200-turn conversation, paged 50 at a time newest first, as
    * studio/api.go's runs route pages it (next_before, next_before_id). */
@@ -601,7 +833,11 @@ describe("paging (before= / before_id=, no cap)", () => {
       const last = rows.at(-1)!
       const more = p * 50 + 50 < N
       const q: Record<string, string> = { public_id: "pub_orders", limit: "50" }
-      if (p > 0) Object.assign(q, { before: runs[p * 50 - 1].started, before_id: runs[p * 50 - 1].id })
+      if (p > 0)
+        Object.assign(q, {
+          before: runs[p * 50 - 1].started,
+          before_id: runs[p * 50 - 1].id,
+        })
       routes[`runs?${new URLSearchParams(q)}`] = {
         total: N,
         runs: rows,
@@ -612,7 +848,10 @@ describe("paging (before= / before_id=, no cap)", () => {
     for (const r of runs) {
       routes[`runs/${r.id}`] = { ...r, children: [] }
       routes[`runs/${r.id}/events?after=0&limit=500`] = page(runEvents(r.id))
-      routes[`runs/${r.id}/transcript`] = transcript([user(`question ${r.turn}`)], [assistant("answer")])
+      routes[`runs/${r.id}/transcript`] = transcript(
+        [user(`question ${r.turn}`)],
+        [assistant("answer")]
+      )
       routes[`runs/${r.id}/spans`] = { spans: [] }
     }
     return routes
@@ -641,11 +880,17 @@ describe("paging (before= / before_id=, no cap)", () => {
     }
     /** The sentinel scrolled into view. */
     fire() {
-      this.cb(this.targets.map((target) => ({ isIntersecting: true, target }) as IntersectionObserverEntry), this as unknown as IntersectionObserver)
+      this.cb(
+        this.targets.map(
+          (target) =>
+            ({ isIntersecting: true, target }) as IntersectionObserverEntry
+        ),
+        this as unknown as IntersectionObserver
+      )
     }
   }
 
-  it("a 200-turn session scrolls to its first turn: each sentinel loads the next older page, then \"all 200 turns loaded\"", async () => {
+  it('a 200-turn session scrolls to its first turn: each sentinel loads the next older page, then "all 200 turns loaded"', async () => {
     FakeIO.all = []
     vi.stubGlobal("IntersectionObserver", FakeIO)
     const studio = fakeStudio(long())
@@ -700,7 +945,9 @@ describe("paging (before= / before_id=, no cap)", () => {
     expect(active(el)?.querySelector(".weft-id")?.textContent).toBe("t149")
     // A refresh (a reconnect, a stale read) reads the first page again:
     // what was paged in stays, and so does the older cursor.
-    await (el as unknown as { model: { refresh: () => Promise<void> } }).model.refresh()
+    await (
+      el as unknown as { model: { refresh: () => Promise<void> } }
+    ).model.refresh()
     await settle()
     expect(all(el, ".weft-turn")).toHaveLength(100)
     expect($(el, ".weft-older")).not.toBeNull()
@@ -712,10 +959,14 @@ describe("paging (before= / before_id=, no cap)", () => {
     fakeStudio(long())
     const el = await mount(BASE) // the 520 px float: narrow
     expect(FakeIO.all).toHaveLength(0)
-    expect(($(el, ".weft-turn-pick") as HTMLSelectElement).options).toHaveLength(50)
+    expect(
+      ($(el, ".weft-turn-pick") as HTMLSelectElement).options
+    ).toHaveLength(50)
     click($(el, ".weft-older"))
     await settle()
-    expect(($(el, ".weft-turn-pick") as HTMLSelectElement).options).toHaveLength(100)
+    expect(
+      ($(el, ".weft-turn-pick") as HTMLSelectElement).options
+    ).toHaveLength(100)
     el.remove()
     await settle()
     vi.stubGlobal("IntersectionObserver", undefined)
@@ -733,8 +984,19 @@ describe("paging (before= / before_id=, no cap)", () => {
     vi.stubGlobal("IntersectionObserver", FakeIO)
     const routes = long()
     const k2 = `runs?${new URLSearchParams({ public_id: "pub_orders", limit: "50", before: at(151), before_id: "t151" })}`
-    const real2 = routes[k2] as { runs: unknown[]; next_before: string; next_before_id: string }
-    routes[k2] = { total: N, runs: (routes["runs?public_id=pub_orders&limit=50"] as { runs: unknown[] }).runs, next_before: real2.next_before, next_before_id: real2.next_before_id }
+    const real2 = routes[k2] as {
+      runs: unknown[]
+      next_before: string
+      next_before_id: string
+    }
+    routes[k2] = {
+      total: N,
+      runs: (
+        routes["runs?public_id=pub_orders&limit=50"] as { runs: unknown[] }
+      ).runs,
+      next_before: real2.next_before,
+      next_before_id: real2.next_before_id,
+    }
     fakeStudio(routes)
     const el = await mount(WIDE)
     FakeIO.all.at(-1)!.fire()
@@ -761,7 +1023,9 @@ describe("paging (before= / before_id=, no cap)", () => {
     FakeIO.all.at(-1)!.fire()
     await pause(60)
     expect(text(el, ".weft-older")).toBe("loading older turns…")
-    await (el as unknown as { model: { refresh: () => Promise<void> } }).model.refresh()
+    await (
+      el as unknown as { model: { refresh: () => Promise<void> } }
+    ).model.refresh()
     release()
     await settle()
     expect(all(el, ".weft-turn")).toHaveLength(100)
@@ -776,11 +1040,15 @@ describe("paging (before= / before_id=, no cap)", () => {
     await type($(el, ".weft-turn-q") as HTMLInputElement, "t15")
     expect(io.off).toBe(true)
     expect(FakeIO.all).toHaveLength(1)
-    expect(text(el, ".weft-tq-n")).toBe("9 of 50 loaded · the filter applies to the loaded turns")
+    expect(text(el, ".weft-tq-n")).toBe(
+      "9 of 50 loaded · the filter applies to the loaded turns"
+    )
     expect(text(el, ".weft-older")).toBe("older turns ↓")
     click($(el, ".weft-older")) // the button still pages
     await settle()
-    expect(text(el, ".weft-tq-n")).toBe("10 of 100 loaded · the filter applies to the loaded turns")
+    expect(text(el, ".weft-tq-n")).toBe(
+      "10 of 100 loaded · the filter applies to the loaded turns"
+    )
     await type($(el, ".weft-turn-q") as HTMLInputElement, "")
     expect(FakeIO.all.at(-1)!.off).toBe(false) // watched again
   })
@@ -795,11 +1063,20 @@ describe("paging (before= / before_id=, no cap)", () => {
     await settle()
     expect(all(el, ".weft-turn")).toHaveLength(100)
     const fresh = turn(201)
-    const first = routes["runs?public_id=pub_orders&limit=50"] as { runs: ReturnType<typeof turn>[] }
+    const first = routes["runs?public_id=pub_orders&limit=50"] as {
+      runs: ReturnType<typeof turn>[]
+    }
     const rows = [fresh, ...first.runs.slice(0, 49)]
-    routes["runs?public_id=pub_orders&limit=50"] = { total: N + 1, runs: rows, next_before: rows[49].started, next_before_id: rows[49].id }
+    routes["runs?public_id=pub_orders&limit=50"] = {
+      total: N + 1,
+      runs: rows,
+      next_before: rows[49].started,
+      next_before_id: rows[49].id,
+    }
     routes["runs/t201"] = { ...fresh, children: [] }
-    await (el as unknown as { model: { refresh: () => Promise<void> } }).model.refresh()
+    await (
+      el as unknown as { model: { refresh: () => Promise<void> } }
+    ).model.refresh()
     await settle()
     const ids = all(el, ".weft-turn .weft-id").map((n) => n.textContent)
     expect(ids).toHaveLength(101)
@@ -821,8 +1098,12 @@ describe("paging (before= / before_id=, no cap)", () => {
     const el = await mount(WIDE)
     FakeIO.all.at(-1)!.fire()
     await settle()
-    expect(studio.gets("runs?public_id=pub_orders&limit=50&before=").at(-1)?.path).toContain("before_id=t151")
-    await (el as unknown as { model: { refresh: () => Promise<void> } }).model.refresh()
+    expect(
+      studio.gets("runs?public_id=pub_orders&limit=50&before=").at(-1)?.path
+    ).toContain("before_id=t151")
+    await (
+      el as unknown as { model: { refresh: () => Promise<void> } }
+    ).model.refresh()
     await settle()
     const ids = all(el, ".weft-turn .weft-id").map((n) => n.textContent)
     expect(ids).toHaveLength(100)
@@ -841,7 +1122,11 @@ describe("paging (before= / before_id=, no cap)", () => {
     const q = $(el, ".weft-tree-q") as HTMLInputElement
     q.value = "run_start"
     q.dispatchEvent(new Event("input", { bubbles: true })) // the debounce is pending
-    type Inner = { tree: { timer?: unknown; saidTimer?: unknown; applied: string }; render: (s: unknown) => void; last: unknown }
+    type Inner = {
+      tree: { timer?: unknown; saidTimer?: unknown; applied: string }
+      render: (s: unknown) => void
+      last: unknown
+    }
     const inner = el as unknown as Inner
     expect(inner.tree.timer).toBeDefined()
     el.remove()

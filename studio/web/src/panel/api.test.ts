@@ -48,22 +48,33 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-async function mountWith(attrs: Record<string, string> = ATTRS): Promise<WeftDevtools> {
+async function mountWith(
+  attrs: Record<string, string> = ATTRS
+): Promise<WeftDevtools> {
   const el = create(attrs)
   document.body.appendChild(el)
   await settle()
   return el
 }
 
-const following = (el: WeftDevtools): Scope => (el as unknown as { model: PanelModel }).model.following
-const state = (el: WeftDevtools) => (el as unknown as { model: PanelModel }).model.state
+const following = (el: WeftDevtools): Scope =>
+  (el as unknown as { model: PanelModel }).model.following
+const state = (el: WeftDevtools) =>
+  (el as unknown as { model: PanelModel }).model.state
 
 /** A run of pub_orders, with its routes. */
-function addRun(routes: Record<string, Route>, id: string, over: Parameters<typeof runRow>[0] = {}) {
+function addRun(
+  routes: Record<string, Route>,
+  id: string,
+  over: Parameters<typeof runRow>[0] = {}
+) {
   const r = runRow({ id, ...over })
   routes[`runs/${id}`] = { ...r, children: [] }
   routes[`runs/${id}/events?after=0&limit=500`] = page(runEvents(id))
-  routes[`runs/${id}/transcript`] = transcript([user(`q ${id}`)], [assistant(`a ${id}`)])
+  routes[`runs/${id}/transcript`] = transcript(
+    [user(`q ${id}`)],
+    [assistant(`a ${id}`)]
+  )
   routes[`runs/${id}/spans`] = { spans: [] }
   return r
 }
@@ -72,7 +83,9 @@ function addRun(routes: Record<string, Route>, id: string, over: Parameters<type
 function record(el: WeftDevtools) {
   const seen: { type: string; detail: unknown }[] = []
   for (const k of ["run", "parked", "error"] as const)
-    el.addEventListener(`weft:${k}`, (e) => seen.push({ type: k, detail: (e as CustomEvent).detail }))
+    el.addEventListener(`weft:${k}`, (e) =>
+      seen.push({ type: k, detail: (e as CustomEvent).detail })
+    )
   return seen
 }
 
@@ -81,7 +94,10 @@ const lane = () => FakeEventSource.last("public_id=")!
 describe("open, close, toggle, isOpen", () => {
   it("drive the dock, and the getter reads it", async () => {
     fakeStudio(baseRoutes())
-    const el = await mountWith({ "data-endpoint": STUDIO, "data-public-id": "pub_orders" })
+    const el = await mountWith({
+      "data-endpoint": STUDIO,
+      "data-public-id": "pub_orders",
+    })
     expect(el.isOpen).toBe(false)
     expect($(el, ".weft-fab")).not.toBeNull()
     el.open()
@@ -105,11 +121,22 @@ describe("scope", () => {
   function twoConversations() {
     const routes = baseRoutes()
     const b = runRow({ id: "r_b", public_id: "pub_b", session_id: "s_b" })
-    routes["sessions?public_id=pub_b"] = { total: 0, sessions: [], next_before: null }
-    routes["runs?public_id=pub_b&limit=50"] = { total: 1, runs: [b], next_before: null }
+    routes["sessions?public_id=pub_b"] = {
+      total: 0,
+      sessions: [],
+      next_before: null,
+    }
+    routes["runs?public_id=pub_b&limit=50"] = {
+      total: 1,
+      runs: [b],
+      next_before: null,
+    }
     routes["runs/r_b"] = { ...b, children: [] }
     routes["runs/r_b/events?after=0&limit=500"] = page(runEvents("r_b"))
-    routes["runs/r_b/transcript"] = transcript([user("q b")], [assistant("a b")])
+    routes["runs/r_b/transcript"] = transcript(
+      [user("q b")],
+      [assistant("a b")]
+    )
     routes["runs/r_b/spans"] = { spans: [] }
     return routes
   }
@@ -146,9 +173,16 @@ describe("scope", () => {
   describe("a session and no public id: resolved through sessions/{id}/public_id", () => {
     it("200: follows the public id it names, narrowed to the session", async () => {
       const routes = twoConversations()
-      routes["sessions/s_b/public_id"] = { session_id: "s_b", public_id: "pub_b" }
+      routes["sessions/s_b/public_id"] = {
+        session_id: "s_b",
+        public_id: "pub_b",
+      }
       const studio = fakeStudio(routes)
-      const el = await mountWith({ "data-endpoint": STUDIO, "data-open": "true", "data-public-id": "pub_orders" })
+      const el = await mountWith({
+        "data-endpoint": STUDIO,
+        "data-open": "true",
+        "data-public-id": "pub_orders",
+      })
       el.scope({ publicId: "", session: "s_b" })
       await settle()
       expect(studio.gets("sessions/s_b/public_id")).toHaveLength(1)
@@ -158,7 +192,10 @@ describe("scope", () => {
 
     it("the string form too, before Studio has answered (the lookup waits for the start)", async () => {
       const routes = twoConversations()
-      routes["sessions/s_b/public_id"] = { session_id: "s_b", public_id: "pub_b" }
+      routes["sessions/s_b/public_id"] = {
+        session_id: "s_b",
+        public_id: "pub_b",
+      }
       fakeStudio(routes)
       const el = create({ "data-endpoint": STUDIO, "data-open": "true" })
       document.body.appendChild(el)
@@ -168,55 +205,103 @@ describe("scope", () => {
     })
 
     it.each([
-      ["not_recorded", () => ({ session_id: "s_b", public_id: "", badge: "not_recorded" }), "session s_b has no public id · not recorded"],
+      [
+        "not_recorded",
+        () => ({ session_id: "s_b", public_id: "", badge: "not_recorded" }),
+        "session s_b has no public id · not recorded",
+      ],
       // The response's reason and fix win over the cause's (D5 review).
       [
         "not_recorded with the response's words",
-        () => ({ session_id: "s_b", public_id: "", badge: "not_recorded", reason: "the server's reason", fix: "the server's fix" }),
+        () => ({
+          session_id: "s_b",
+          public_id: "",
+          badge: "not_recorded",
+          reason: "the server's reason",
+          fix: "the server's fix",
+        }),
         "not recorded: the server's reason · fix: the server's fix",
       ],
-      ["403", () => json403(), "session s_b: the session lookup needs the dev token"],
-      ["404", () => apiError(404, "not_found", "no such session"), "session s_b has no public id · unknown session"],
-    ])("%s: says so in one line and keeps its scope", async (_name, answer, line) => {
-      const routes = twoConversations()
-      routes["sessions/s_b/public_id"] = answer
-      const t = trap()
-      fakeStudio(routes)
-      const el = await mountWith({ "data-endpoint": STUDIO, "data-open": "true", "data-public-id": "pub_orders" })
-      expect(() => el.scope({ publicId: "", session: "s_b" })).not.toThrow()
-      await settle()
-      expect(following(el).publicId).toBe("pub_orders")
-      expect(text(el, ".weft-api-note")).toContain(line)
-      t.release()
-      expect(t.escaped).toEqual([])
-    })
+      [
+        "403",
+        () => json403(),
+        "session s_b: the session lookup needs the dev token",
+      ],
+      [
+        "404",
+        () => apiError(404, "not_found", "no such session"),
+        "session s_b has no public id · unknown session",
+      ],
+    ])(
+      "%s: says so in one line and keeps its scope",
+      async (_name, answer, line) => {
+        const routes = twoConversations()
+        routes["sessions/s_b/public_id"] = answer
+        const t = trap()
+        fakeStudio(routes)
+        const el = await mountWith({
+          "data-endpoint": STUDIO,
+          "data-open": "true",
+          "data-public-id": "pub_orders",
+        })
+        expect(() => el.scope({ publicId: "", session: "s_b" })).not.toThrow()
+        await settle()
+        expect(following(el).publicId).toBe("pub_orders")
+        expect(text(el, ".weft-api-note")).toContain(line)
+        t.release()
+        expect(t.escaped).toEqual([])
+      }
+    )
 
     it("under a panel token the lookup is not asked: the line says it needs the dev token", async () => {
       const routes = twoConversations()
-      routes["sessions/s_b/public_id"] = { session_id: "s_b", public_id: "pub_b" }
+      routes["sessions/s_b/public_id"] = {
+        session_id: "s_b",
+        public_id: "pub_b",
+      }
       const studio = fakeStudio(routes)
-      const el = await mountWith({ "data-endpoint": STUDIO, "data-open": "true", "data-public-id": "pub_orders", "data-token": PANEL_TOKEN })
+      const el = await mountWith({
+        "data-endpoint": STUDIO,
+        "data-open": "true",
+        "data-public-id": "pub_orders",
+        "data-token": PANEL_TOKEN,
+      })
       el.scope({ publicId: "", session: "s_b" })
       await settle()
       expect(studio.gets("sessions/s_b")).toHaveLength(0)
       expect(following(el).publicId).toBe("pub_orders")
-      expect(text(el, ".weft-api-note")).toBe("session s_b: the session lookup needs the dev token")
+      expect(text(el, ".weft-api-note")).toBe(
+        "session s_b: the session lookup needs the dev token"
+      )
     })
   })
 })
 
 const json403 = () =>
-  new Response(JSON.stringify({ error: { code: "forbidden", message: "hidden" }, badge: "hidden" }), {
-    status: 403,
-    headers: { "content-type": "application/json" },
-  })
+  new Response(
+    JSON.stringify({
+      error: { code: "forbidden", message: "hidden" },
+      badge: "hidden",
+    }),
+    {
+      status: 403,
+      headers: { "content-type": "application/json" },
+    }
+  )
 
 describe("select", () => {
   function conversation() {
     const routes = baseRoutes()
     const t1 = runRow({})
-    const t2 = addRun(routes, "s_01-t2", { started: "2026-10-01T09:05:00Z", steps: 3 })
-    routes["runs?public_id=pub_orders&limit=50"] = { total: 2, runs: [t2, t1], next_before: null }
+    const t2 = addRun(routes, "s_01-t2", {
+      started: "2026-10-01T09:05:00Z",
+      steps: 3,
+    })
+    routes["runs?public_id=pub_orders&limit=50"] = {
+      total: 2,
+      runs: [t2, t1],
+      next_before: null,
+    }
     return routes
   }
 
@@ -228,8 +313,12 @@ describe("select", () => {
     await settle()
     expect(state(el).selected).toBe("s_01-t1")
     expect(state(el).selectedStep).toBe(0)
-    const a = Array.from(el.shadowRoot!.querySelectorAll("a")).find((n) => n.textContent === "⤢")!
-    expect(a.getAttribute("href")).toBe(href(STUDIO, runLink("s_01-t1", { step: 0, view: "story" })))
+    const a = Array.from(el.shadowRoot!.querySelectorAll("a")).find(
+      (n) => n.textContent === "⤢"
+    )!
+    expect(a.getAttribute("href")).toBe(
+      href(STUDIO, runLink("s_01-t1", { step: 0, view: "story" }))
+    )
   })
 
   it("right after scope(): acts in the new scope's list", async () => {
@@ -264,10 +353,14 @@ describe("select", () => {
     el.select("r_other")
     await settle()
     expect(state(el).selected).toBe("s_01-t2")
-    expect(text(el, ".weft-api-note")).toBe("run r_other not in this conversation")
+    expect(text(el, ".weft-api-note")).toBe(
+      "run r_other not in this conversation"
+    )
     el.select("r_gone")
     await settle()
-    expect(text(el, ".weft-api-note")).toBe("run r_gone not in this conversation")
+    expect(text(el, ".weft-api-note")).toBe(
+      "run r_gone not in this conversation"
+    )
     el.select("s_01-t1")
     await settle()
     expect($(el, ".weft-api-note")).toBeNull()
@@ -294,10 +387,17 @@ describe("review: the per-run bookkeeping is bounded and starts empty", () => {
     const b = books(el)
     // A long-lived page: more failures than the memo holds.
     for (let i = 0; i < RUN_MEMO_LIMIT; i++) b.evErrored.add(`r_old${i}`)
-    const t2 = runRow({ id: "s_01-t2", status: "running", finished: null, started: "2026-10-01T09:05:00Z" })
+    const t2 = runRow({
+      id: "s_01-t2",
+      status: "running",
+      finished: null,
+      started: "2026-10-01T09:05:00Z",
+    })
     lane().emit("run", { run: t2 })
     await settle()
-    lane().emit("run", { run: { ...t2, status: "failed" as const, err: "boom" } })
+    lane().emit("run", {
+      run: { ...t2, status: "failed" as const, err: "boom" },
+    })
     await settle()
     expect(errors).toEqual([{ message: "boom", runId: "s_01-t2" }])
     expect(b.evErrored.size).toBe(RUN_MEMO_LIMIT)
@@ -310,7 +410,8 @@ describe("review: the per-run bookkeeping is bounded and starts empty", () => {
     expect(b.prompts.size).toBe(RUN_MEMO_LIMIT)
     expect(b.prompts.get("s_01-t1")).toBe("where is my order #4411?")
     // The header rung's paths: one per response path, bounded.
-    for (let i = 0; i < PATHS_LIMIT + 10; i++) b.onDetected({ publicId: "pub_orders" }, `/api/chat/${i}`)
+    for (let i = 0; i < PATHS_LIMIT + 10; i++)
+      b.onDetected({ publicId: "pub_orders" }, `/api/chat/${i}`)
     expect(b.byPath.size).toBe(PATHS_LIMIT)
     expect(b.byPath.has(`/api/chat/${PATHS_LIMIT + 9}`)).toBe(true)
     expect(b.byPath.has("/api/chat/0")).toBe(false)
@@ -321,7 +422,9 @@ describe("review: the per-run bookkeeping is bounded and starts empty", () => {
     expect(b.evParked.size).toBe(0)
     expect(b.evErrored.size).toBe(0)
     expect(b.byPath.size).toBe(0)
-    expect([...b.prompts.keys()].every((k) => !k.startsWith("r_old"))).toBe(true)
+    expect([...b.prompts.keys()].every((k) => !k.startsWith("r_old"))).toBe(
+      true
+    )
   })
 
   it("a rescope to another conversation forgets the previous one's prompts", async () => {
@@ -347,21 +450,52 @@ describe("on and the events", () => {
     await settle()
     // The pinned run, first seen finished: reported once.
     expect(seen).toEqual([
-      { type: "run", detail: { runId: "s_01-t1", status: "succeeded", publicId: "pub_orders", sessionId: "s_01", step: 0 } },
+      {
+        type: "run",
+        detail: {
+          runId: "s_01-t1",
+          status: "succeeded",
+          publicId: "pub_orders",
+          sessionId: "s_01",
+          step: 0,
+        },
+      },
     ])
-    const running = runRow({ id: "s_01-t2", status: "running", finished: null, started: "2026-10-01T09:05:00Z", steps: 1 })
+    const running = runRow({
+      id: "s_01-t2",
+      status: "running",
+      finished: null,
+      started: "2026-10-01T09:05:00Z",
+      steps: 1,
+    })
     lane().emit("run", { run: running })
     await settle()
     lane().emit("run", { run: running }) // the same status again: nothing
     await settle()
-    lane().emit("run", { run: { ...running, status: "succeeded", finished: "2026-10-01T09:06:00Z", steps: 2 } })
+    lane().emit("run", {
+      run: {
+        ...running,
+        status: "succeeded",
+        finished: "2026-10-01T09:06:00Z",
+        steps: 2,
+      },
+    })
     await settle()
-    expect(seen.slice(1).map((e) => [(e.detail as DevtoolsEvents["run"]).runId, (e.detail as DevtoolsEvents["run"]).status])).toEqual([
+    expect(
+      seen
+        .slice(1)
+        .map((e) => [
+          (e.detail as DevtoolsEvents["run"]).runId,
+          (e.detail as DevtoolsEvents["run"]).status,
+        ])
+    ).toEqual([
       ["s_01-t2", "running"],
       ["s_01-t2", "succeeded"],
     ])
     // Another conversation's run on the lane is not this one's.
-    lane().emit("run", { run: runRow({ id: "r_x", public_id: "pub_other", status: "running" }) })
+    lane().emit("run", {
+      run: runRow({ id: "r_x", public_id: "pub_other", status: "running" }),
+    })
     await settle()
     expect(seen).toHaveLength(3)
   })
@@ -378,11 +512,18 @@ describe("on and the events", () => {
   it('"parked": once per parked call, with the ack id the approval takes', async () => {
     const routes = baseRoutes()
     const calls = [
-      { type: "tool_call", id: "call_refund", name: "refund", args: { order: "4411" } },
+      {
+        type: "tool_call",
+        id: "call_refund",
+        name: "refund",
+        args: { order: "4411" },
+      },
       { type: "tool_call", id: "call_mail", name: "send_email", args: {} },
     ]
     addRun(routes, "s_01-t2")
-    routes["runs/s_01-t2/events?after=0&limit=500"] = page(runEvents("s_01-t2", { pending: calls }))
+    routes["runs/s_01-t2/events?after=0&limit=500"] = page(
+      runEvents("s_01-t2", { pending: calls })
+    )
     const studio = fakeStudio(routes)
     const el = create()
     const seen = record(el)
@@ -390,19 +531,43 @@ describe("on and the events", () => {
     el.on("parked", (d) => got.push(d))
     document.body.appendChild(el)
     await settle()
-    const t2 = runRow({ id: "s_01-t2", status: "running", finished: null, started: "2026-10-01T09:05:00Z" })
+    const t2 = runRow({
+      id: "s_01-t2",
+      status: "running",
+      finished: null,
+      started: "2026-10-01T09:05:00Z",
+    })
     lane().emit("run", { run: t2 })
     await settle()
-    const parked = { ...t2, status: "succeeded" as const, finished: "2026-10-01T09:06:00Z", pending: 2 }
+    const parked = {
+      ...t2,
+      status: "succeeded" as const,
+      finished: "2026-10-01T09:06:00Z",
+      pending: 2,
+    }
     lane().emit("run", { run: parked })
     await settle()
     lane().emit("run", { run: parked }) // the same parked row again
     await settle()
     expect(got).toEqual([
-      { runId: "s_01-t2", callId: "call_refund", ackId: "call_refund", name: "refund" },
-      { runId: "s_01-t2", callId: "call_mail", ackId: "call_mail", name: "send_email" },
+      {
+        runId: "s_01-t2",
+        callId: "call_refund",
+        ackId: "call_refund",
+        name: "refund",
+      },
+      {
+        runId: "s_01-t2",
+        callId: "call_mail",
+        ackId: "call_mail",
+        name: "send_email",
+      },
     ])
-    expect(seen.filter((e) => e.type === "run").map((e) => (e.detail as DevtoolsEvents["run"]).status)).toEqual(["running", "parked"])
+    expect(
+      seen
+        .filter((e) => e.type === "run")
+        .map((e) => (e.detail as DevtoolsEvents["run"]).status)
+    ).toEqual(["running", "parked"])
     // Read from the run's stored events once (its run_finish's pending).
     expect(studio.gets("runs/s_01-t2/events")).toHaveLength(1)
   })
@@ -414,31 +579,56 @@ describe("on and the events", () => {
     el.on("error", (d) => errors.push(d))
     document.body.appendChild(el)
     await settle()
-    const t2 = runRow({ id: "s_01-t2", status: "running", finished: null, started: "2026-10-01T09:05:00Z" })
+    const t2 = runRow({
+      id: "s_01-t2",
+      status: "running",
+      finished: null,
+      started: "2026-10-01T09:05:00Z",
+    })
     lane().emit("run", { run: t2 })
     await settle()
-    const failed = { ...t2, status: "failed" as const, err: "model: 503 overloaded" }
+    const failed = {
+      ...t2,
+      status: "failed" as const,
+      err: "model: 503 overloaded",
+    }
     lane().emit("run", { run: failed })
     await settle()
     lane().emit("run", { run: { ...failed, steps: 2 } })
     await settle()
-    expect(errors).toEqual([{ message: "model: 503 overloaded", runId: "s_01-t2" }])
+    expect(errors).toEqual([
+      { message: "model: 503 overloaded", runId: "s_01-t2" },
+    ])
   })
 
   it("events bubble from the element to document, asynchronously; on() unsubscribes", async () => {
     fakeStudio(baseRoutes())
     const el = await mountWith()
     const onDoc: unknown[] = []
-    document.addEventListener("weft:run", (e) => onDoc.push((e as CustomEvent).detail))
+    document.addEventListener("weft:run", (e) =>
+      onDoc.push((e as CustomEvent).detail)
+    )
     const viaOn: unknown[] = []
     const off = el.on("run", (d) => viaOn.push(d))
-    lane().emit("run", { run: runRow({ id: "s_01-t2", status: "running", started: "2026-10-01T09:05:00Z" }) })
+    lane().emit("run", {
+      run: runRow({
+        id: "s_01-t2",
+        status: "running",
+        started: "2026-10-01T09:05:00Z",
+      }),
+    })
     expect(onDoc).toEqual([]) // not inside the panel's own work
     await settle()
     expect(onDoc).toHaveLength(1)
     expect(viaOn).toHaveLength(1)
     off()
-    lane().emit("run", { run: runRow({ id: "s_01-t2", status: "succeeded", started: "2026-10-01T09:05:00Z" }) })
+    lane().emit("run", {
+      run: runRow({
+        id: "s_01-t2",
+        status: "succeeded",
+        started: "2026-10-01T09:05:00Z",
+      }),
+    })
     await settle()
     expect(onDoc).toHaveLength(2)
     expect(viaOn).toHaveLength(1)
@@ -446,7 +636,9 @@ describe("on and the events", () => {
   })
 
   it("a throwing listener does not break the panel and prints nothing", async () => {
-    const spies = (["log", "info", "warn", "error", "debug"] as const).map((m) => vi.spyOn(console, m).mockImplementation(() => {}))
+    const spies = (["log", "info", "warn", "error", "debug"] as const).map(
+      (m) => vi.spyOn(console, m).mockImplementation(() => {})
+    )
     const t = trap()
     fakeStudio(baseRoutes())
     const el = await mountWith()
@@ -455,7 +647,14 @@ describe("on and the events", () => {
     })
     const after: unknown[] = []
     el.on("run", (d) => after.push(d))
-    lane().emit("run", { run: runRow({ id: "s_01-t2", status: "running", started: "2026-10-01T09:05:00Z", steps: 4 }) })
+    lane().emit("run", {
+      run: runRow({
+        id: "s_01-t2",
+        status: "running",
+        started: "2026-10-01T09:05:00Z",
+        steps: 4,
+      }),
+    })
     await settle()
     expect(after).toHaveLength(1)
     expect(text(el, ".weft-turns")).toContain("4 steps") // the panel drew on
@@ -466,7 +665,8 @@ describe("on and the events", () => {
 })
 
 describe("window.weft.devtools (the script-tag install's one global)", () => {
-  const api = () => (win().weft as { devtools?: DevtoolsAPI } | undefined)?.devtools
+  const api = () =>
+    (win().weft as { devtools?: DevtoolsAPI } | undefined)?.devtools
 
   it("is present only while a panel is connected, and is that panel's API", async () => {
     fakeStudio(baseRoutes())
@@ -536,13 +736,17 @@ describe("studioLink", () => {
     fakeStudio(baseRoutes())
     const el = await mountWith({ ...ATTRS, "data-token": "dev_secret" })
     const link = el.studioLink("s_01-t1", 2)
-    expect(link).toBe(href(STUDIO, runLink("s_01-t1", { step: 2, view: "story" })))
+    expect(link).toBe(
+      href(STUDIO, runLink("s_01-t1", { step: 2, view: "story" }))
+    )
     expect(link).toContain("step=2")
     expect(link).not.toContain("dev_secret")
     expect(el.studioLink("s_01-t1")).toBe(href(STUDIO, runLink("s_01-t1")))
     expect(el.studioLink("a/b?c#d")).toContain("a%2Fb%3Fc%23d")
     expect(el.studioLink("")).toBe("")
-    expect(el.api.studioLink("s_01-t1", -1)).toBe(href(STUDIO, runLink("s_01-t1")))
+    expect(el.api.studioLink("s_01-t1", -1)).toBe(
+      href(STUDIO, runLink("s_01-t1"))
+    )
   })
 })
 
@@ -552,13 +756,25 @@ describe("review fixes", () => {
   function two() {
     const routes = baseRoutes()
     const b = runRow({ id: "r_b", public_id: "pub_b", session_id: "s_b" })
-    routes["sessions?public_id=pub_b"] = { total: 0, sessions: [], next_before: null }
-    routes["runs?public_id=pub_b&limit=50"] = { total: 1, runs: [b], next_before: null }
+    routes["sessions?public_id=pub_b"] = {
+      total: 0,
+      sessions: [],
+      next_before: null,
+    }
+    routes["runs?public_id=pub_b&limit=50"] = {
+      total: 1,
+      runs: [b],
+      next_before: null,
+    }
     routes["runs/r_b"] = { ...b, children: [] }
     routes["runs/r_b/events?after=0&limit=500"] = page(runEvents("r_b"))
-    routes["runs/r_b/transcript"] = transcript([user("q b")], [assistant("a b")])
+    routes["runs/r_b/transcript"] = transcript(
+      [user("q b")],
+      [assistant("a b")]
+    )
     routes["runs/r_b/spans"] = { spans: [] }
-    routes["runs?public_id=pub_b&session_id=s_b&limit=50"] = routes["runs?public_id=pub_b&limit=50"]
+    routes["runs?public_id=pub_b&session_id=s_b&limit=50"] =
+      routes["runs?public_id=pub_b&limit=50"]
     return routes
   }
 
@@ -566,7 +782,11 @@ describe("review fixes", () => {
     const routes = two()
     routes["sessions/s_b/public_id"] = { session_id: "s_b", public_id: "pub_b" }
     const studio = fakeStudio(routes)
-    const el = await mountWith({ "data-endpoint": STUDIO, "data-open": "true", "data-public-id": "pub_orders" })
+    const el = await mountWith({
+      "data-endpoint": STUDIO,
+      "data-open": "true",
+      "data-public-id": "pub_orders",
+    })
     el.scope({ session: "s_b" } as unknown as Scope)
     await settle()
     expect(studio.gets("sessions/s_b/public_id")).toHaveLength(1)
@@ -576,9 +796,17 @@ describe("review fixes", () => {
   it("1. a run event's detail fed back (sessionId, runId) keeps the narrowing", async () => {
     fakeStudio(two())
     const el = await mountWith({ "data-endpoint": STUDIO, "data-open": "true" })
-    el.scope({ publicId: "pub_b", sessionId: "s_b", runId: "r_b" } as unknown as Scope)
+    el.scope({
+      publicId: "pub_b",
+      sessionId: "s_b",
+      runId: "r_b",
+    } as unknown as Scope)
     await settle()
-    expect(following(el)).toEqual({ publicId: "pub_b", session: "s_b", run: "r_b" })
+    expect(following(el)).toEqual({
+      publicId: "pub_b",
+      session: "s_b",
+      run: "r_b",
+    })
   })
 
   it("1. a scope naming neither a public id nor a session is said, not dropped", async () => {
@@ -617,16 +845,35 @@ describe("review fixes", () => {
     t.release()
     expect(t.escaped).toEqual([])
     expect(win().weft).toBe(theirs)
-    expect(text(el, ".weft-global")).toContain("window.weft is the page's: no window.weft.devtools")
+    expect(text(el, ".weft-global")).toContain(
+      "window.weft is the page's: no window.weft.devtools"
+    )
   })
 
   it("4. returning to a conversation is not a new sighting: A→B→A→B→A reports a running run once", async () => {
     const routes = two()
-    const t2 = runRow({ id: "s_01-t2", status: "running", finished: null, started: "2026-10-01T09:05:00Z" })
-    routes["runs?public_id=pub_orders&limit=50"] = { total: 2, runs: [t2, runRow({})], next_before: null }
-    addRun(routes, "s_01-t2", { status: "running", finished: null, started: "2026-10-01T09:05:00Z" })
+    const t2 = runRow({
+      id: "s_01-t2",
+      status: "running",
+      finished: null,
+      started: "2026-10-01T09:05:00Z",
+    })
+    routes["runs?public_id=pub_orders&limit=50"] = {
+      total: 2,
+      runs: [t2, runRow({})],
+      next_before: null,
+    }
+    addRun(routes, "s_01-t2", {
+      status: "running",
+      finished: null,
+      started: "2026-10-01T09:05:00Z",
+    })
     fakeStudio(routes)
-    const el = create({ "data-endpoint": STUDIO, "data-open": "true", "data-public-id": "pub_orders" })
+    const el = create({
+      "data-endpoint": STUDIO,
+      "data-open": "true",
+      "data-public-id": "pub_orders",
+    })
     const seen = record(el)
     document.body.appendChild(el)
     await settle()
@@ -634,7 +881,9 @@ describe("review fixes", () => {
       el.scope(pub)
       await settle()
     }
-    const runs = seen.map((e) => e.detail as DevtoolsEvents["run"]).filter((d) => d.runId === "s_01-t2")
+    const runs = seen
+      .map((e) => e.detail as DevtoolsEvents["run"])
+      .filter((d) => d.runId === "s_01-t2")
     expect(runs.map((d) => d.status)).toEqual(["running"])
   })
 
@@ -644,8 +893,12 @@ describe("review fixes", () => {
     el.select("s_01-t1", 99)
     await settle()
     expect(state(el).selectedStep).toBe(0)
-    expect(text(el, ".weft-api-note")).toBe("step 99 not in run s_01-t1 · showing step 0")
-    const a = Array.from(el.shadowRoot!.querySelectorAll("a")).find((n) => n.textContent === "⤢")!
+    expect(text(el, ".weft-api-note")).toBe(
+      "step 99 not in run s_01-t1 · showing step 0"
+    )
+    const a = Array.from(el.shadowRoot!.querySelectorAll("a")).find(
+      (n) => n.textContent === "⤢"
+    )!
     expect(a.getAttribute("href")).toContain("step=0")
   })
 
@@ -656,7 +909,9 @@ describe("review fixes", () => {
     const el = await mountWith()
     el.scope({ publicId: "", session: "s_b" })
     await settle()
-    expect(text(el, ".weft-api-note")).toBe("session s_b: Studio did not answer the lookup")
+    expect(text(el, ".weft-api-note")).toBe(
+      "session s_b: Studio did not answer the lookup"
+    )
   })
 
   it("6. select over a run read that failed in transport is not 'not in this conversation'", async () => {
@@ -683,6 +938,8 @@ describe("review fixes", () => {
     await vi.advanceTimersByTimeAsync(SETTLE_MS - 100)
     expect($(el, ".weft-api-note")).toBeNull()
     await vi.advanceTimersByTimeAsync(200)
-    expect(text(el, ".weft-api-note")).toBe("select s_01-t1: the panel is not connected")
+    expect(text(el, ".weft-api-note")).toBe(
+      "select s_01-t1: the panel is not connected"
+    )
   })
 })

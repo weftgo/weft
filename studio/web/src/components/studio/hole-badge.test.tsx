@@ -37,10 +37,16 @@ describe("HoleBadge", () => {
   })
 
   it("a note stays visible between the label and the hidden words", () => {
-    const { container } = render(<HoleBadge hole="truncated" note="2.0 KiB cut" />)
+    const { container } = render(
+      <HoleBadge hole="truncated" note="2.0 KiB cut" />
+    )
     const b = container.querySelector<HTMLElement>('[data-hole="truncated"]')!
-    expect(b.querySelector("[data-hole-note]")!.textContent).toBe(" · 2.0 KiB cut")
-    expect(b.textContent.startsWith(`${HOLES.truncated.label} · 2.0 KiB cut — `)).toBe(true)
+    expect(b.querySelector("[data-hole-note]")!.textContent).toBe(
+      " · 2.0 KiB cut"
+    )
+    expect(
+      b.textContent.startsWith(`${HOLES.truncated.label} · 2.0 KiB cut — `)
+    ).toBe(true)
   })
 
   it("axe: zero violations, plain and with a note", async () => {
@@ -63,20 +69,30 @@ describe("HoleBadge", () => {
   })
 
   it("a cause's words win over the badge's", () => {
-    const { container } = render(<HoleBadge hole="not_recorded" cause="no_public_id" />)
+    const { container } = render(
+      <HoleBadge hole="not_recorded" cause="no_public_id" />
+    )
     const c = CAUSES.not_recorded!.no_public_id
-    expect(container.querySelector("[data-hole]")!.getAttribute("title")).toBe(`${c.reason} — fix: ${c.fix}`)
+    expect(container.querySelector("[data-hole]")!.getAttribute("title")).toBe(
+      `${c.reason} — fix: ${c.fix}`
+    )
   })
 })
 
 describe("TruncationBadge (the loop's cuts as the table's badges)", () => {
   it("a result cap's cut is truncated, cause result_cap, the bytes named", () => {
-    const { container } = render(<TruncationBadge content={"ok\n…[truncated 2048 bytes]"} />)
+    const { container } = render(
+      <TruncationBadge content={"ok\n…[truncated 2048 bytes]"} />
+    )
     const b = container.querySelector('[data-hole="truncated"]')!
-    expect(b.getAttribute("title")).toBe(`${resultCapReason(2048)} — fix: ${CAUSES.truncated!.result_cap.fix}`)
+    expect(b.getAttribute("title")).toBe(
+      `${resultCapReason(2048)} — fix: ${CAUSES.truncated!.result_cap.fix}`
+    )
     // The bytes cut are visible, the table's label first.
     expect(b.firstChild?.textContent).toBe(HOLES.truncated.label)
-    expect(b.querySelector("[data-hole-note]")?.textContent).toBe(" · 2.0 KiB cut")
+    expect(b.querySelector("[data-hole-note]")?.textContent).toBe(
+      " · 2.0 KiB cut"
+    )
   })
 
   it("an unrun call is max_tokens with no fix (the loop already retried)", () => {
@@ -86,6 +102,8 @@ describe("TruncationBadge (the loop's cuts as the table's badges)", () => {
     const b = container.querySelector('[data-hole="max_tokens"]')!
     expect(b.getAttribute("title")).toBe(UNRUN_CALL_REASON)
     expect(b.firstChild?.textContent).toBe(HOLES.max_tokens.label)
-    expect(b.querySelector("[data-hole-note]")?.textContent).toBe(" · call never executed")
+    expect(b.querySelector("[data-hole-note]")?.textContent).toBe(
+      " · call never executed"
+    )
   })
 })

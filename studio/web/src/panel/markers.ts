@@ -69,7 +69,8 @@ export function markerOf(n: unknown): Element | null {
     // Inside untrusted HTML: the nearest marker outside it, if any — the
     // chat element around a rendered message still names its chat.
     let m = n.closest(`[${MARKER_ATTR}]`)
-    while (m && untrusted(m)) m = m.parentElement?.closest(`[${MARKER_ATTR}]`) ?? null
+    while (m && untrusted(m))
+      m = m.parentElement?.closest(`[${MARKER_ATTR}]`) ?? null
     return m
   } catch {
     return null
@@ -84,9 +85,14 @@ export const MAX_WAIT_MS = 500
  * marker list: an attribute change outside the panel, or an added or
  * removed element that is or holds a marker. */
 function touchesMarkers(r: MutationRecord): boolean {
-  if (r.type === "attributes") return !(r.target instanceof Element && r.target.closest(PANEL))
+  if (r.type === "attributes")
+    return !(r.target instanceof Element && r.target.closest(PANEL))
   for (const n of [...Array.from(r.addedNodes), ...Array.from(r.removedNodes)])
-    if (n instanceof Element && (n.hasAttribute(MARKER_ATTR) || n.querySelector(`[${MARKER_ATTR}]`))) return true
+    if (
+      n instanceof Element &&
+      (n.hasAttribute(MARKER_ATTR) || n.querySelector(`[${MARKER_ATTR}]`))
+    )
+      return true
   // (An untrusted mark set or lifted is an attribute record: above.)
   return false
 }
@@ -149,9 +155,17 @@ export function installMarkerRung(opts: MarkerRungOptions): MarkerRung | null {
       const now = Date.now()
       since ||= now
       if (timer) clearTimeout(timer)
-      timer = setTimeout(scan, Math.max(0, Math.min(opts.debounceMs ?? 100, since + MAX_WAIT_MS - now)))
+      timer = setTimeout(
+        scan,
+        Math.max(0, Math.min(opts.debounceMs ?? 100, since + MAX_WAIT_MS - now))
+      )
     })
-    obs.observe(root.documentElement, { subtree: true, childList: true, attributes: true, attributeFilter: [MARKER_ATTR, UNTRUSTED_ATTR] })
+    obs.observe(root.documentElement, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: [MARKER_ATTR, UNTRUSTED_ATTR],
+    })
     root.addEventListener("focusin", focus, { capture: true, passive: true })
     root.addEventListener("visibilitychange", shown, { passive: true })
   } catch {

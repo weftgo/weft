@@ -102,7 +102,9 @@ export const HOLES: Record<Hole, HoleNote> = {
 /** The causes the table words more precisely (obsdb.HoleNoteFor's
  * keyed notes, the golden's causes): the same badge, the words of one
  * known cause — honesty.test.ts checks them against the golden too. */
-export const CAUSES: Partial<Record<Hole, Record<string, { reason: string; fix?: string }>>> = {
+export const CAUSES: Partial<
+  Record<Hole, Record<string, { reason: string; fix?: string }>>
+> = {
   truncated: {
     log_cap: {
       reason:
@@ -110,7 +112,8 @@ export const CAUSES: Partial<Record<Hole, Record<string, { reason: string; fix?:
       fix: "log less in the run's trace (a busy subagent or sibling run counts too); phase 2 filters by span before the cap",
     },
     result_cap: {
-      reason: "a tool result was cut by its result cap: the model saw a prefix and the marker",
+      reason:
+        "a tool result was cut by its result cap: the model saw a prefix and the marker",
       fix: "raise the tool's weft.MaxResultBytes",
     },
     response_cap: {
@@ -131,7 +134,8 @@ export const CAUSES: Partial<Record<Hole, Record<string, { reason: string; fix?:
       fix: "install a tracer (otel.Install records spans)",
     },
     not_served: {
-      reason: "this Studio does not serve the request record (no requests capability): the run may hold one",
+      reason:
+        "this Studio does not serve the request record (no requests capability): the run may hold one",
       fix: "open the run in a Studio that serves it (upgrade Studio, or enable the requests group)",
     },
     raw_off: {
@@ -250,7 +254,10 @@ export function holeWords(m: HoleMark): {
   const note = isHole(m.hole) ? HOLES[m.hole] : undefined
   // Own keys only: the cause is the record's ("constructor" names none).
   const causes = isHole(m.hole) ? CAUSES[m.hole] : undefined
-  const why = m.cause && causes && Object.hasOwn(causes, m.cause) ? causes[m.cause] : undefined
+  const why =
+    m.cause && causes && Object.hasOwn(causes, m.cause)
+      ? causes[m.cause]
+      : undefined
   const label =
     m.hole === "truncated" && m.bytes && !m.cause
       ? `shortened by the recorder: ${kib(m.bytes)} cut`
@@ -277,7 +284,9 @@ export const DERIVED_HOLE: HoleMark = { hole: "derived", cause: "stock_spans" }
  * DERIVED_HOLE instead, and nothing replays it (there is no transcript;
  * the playground refuses the source 400). requests_badge "derived"
  * says the same on a Studio row that predates the field. */
-export function isDerived(row: { derived?: boolean; requests_badge?: string } | null | undefined): boolean {
+export function isDerived(
+  row: { derived?: boolean; requests_badge?: string } | null | undefined
+): boolean {
   return row?.derived === true || row?.requests_badge === "derived"
 }
 
@@ -286,7 +295,12 @@ export function isDerived(row: { derived?: boolean; requests_badge?: string } | 
  * are "not reported", never a known 0 (§9's usage row). The words are
  * the API's cost_reason. */
 export function derivedUsageUnknown(
-  row: { derived?: boolean; requests_badge?: string; cost_known?: boolean; usage?: { input_tokens: number; output_tokens: number } },
+  row: {
+    derived?: boolean
+    requests_badge?: string
+    cost_known?: boolean
+    usage?: { input_tokens: number; output_tokens: number }
+  },
   derived = isDerived(row)
 ): boolean {
   if (!derived || row.cost_known === true) return false
@@ -375,7 +389,8 @@ export const USAGE_AT_FINISH = "usage at finish"
  * word: the verbs gate on the run's own service (appTurnRuntime). */
 export const OWN_RUNTIME = "own+runtime"
 /** The playground header's two readings of debug_scope. */
-export const SCOPE_OWN = "runtime-started runs and the app's own turns (runtime.Sessions or runtime.Breakpoints)"
+export const SCOPE_OWN =
+  "runtime-started runs and the app's own turns (runtime.Sessions or runtime.Breakpoints)"
 export const SCOPE_RUNTIME_ONLY = "only (the app's own turns are viewer-only)"
 /** The app-owned refusal's head (appturn.go's appOwned + " · read-only"). */
 export const APP_OWNED = "app-owned turn · read-only"
@@ -384,11 +399,13 @@ export const APP_LINK_FIX =
   "open the runtime link in the app: WEFT_ENV=dev (or runtime.Enabled(true)) at runtime.Install, with runtime.Sessions(resolver)"
 /** A parked run outside a thread session (a plain Generate): the app
  * resumes it itself; the fix is the server's 403 fix word for word. */
-export const APP_RUN = "parked · app-owned run · the app resumes it (weft.Approve)"
+export const APP_RUN =
+  "parked · app-owned run · the app resumes it (weft.Approve)"
 export const APP_RUN_FIX =
   "run the agent through weft/thread with thread.PublicID(...): runtime.Sessions resolves a session by its public id"
 /** auth.go's mayAct: a read-scoped panel token never acts. */
-export const READ_TOKEN = 'this token is read-only: mint it with "playground": true to act'
+export const READ_TOKEN =
+  'this token is read-only: mint it with "playground": true to act'
 /** Cancel on an app turn, in the runtime's words: thread has no
  * per-turn cancel. A cancel verb that would show on an app-owned run
  * (/live's row) is drawn disabled with these words. */
@@ -408,15 +425,18 @@ export const CAPS_UNREAD = "could not read the Studio's capabilities"
 export const PLAYGROUND_OFF = "the playground is off on this Studio"
 /** studio/manifest.go's offPlayground after its lead ("the playground
  * is off: "), for a Studio whose meta names no capabilities_off. */
-export const PLAYGROUND_OFF_FIX = "turn it on with studio.Playground(true); weft studio --no-playground turns it off"
+export const PLAYGROUND_OFF_FIX =
+  "turn it on with studio.Playground(true); weft studio --no-playground turns it off"
 /** A session turn of a thread session created without thread.PublicID:
  * appturn.go's 403 words (its fix is APP_RUN_FIX, which names it). */
-export const noPublicIDWords = (runID: string) => `${APP_OWNED}: run ${runID} is not a turn of a thread session with a public id`
+export const noPublicIDWords = (runID: string) =>
+  `${APP_OWNED}: run ${runID} is not a turn of a thread session with a public id`
 /** A subagent's child run (`<parent>/<step>/<call>`, its session and
  * public id inherited): its park surfaces on the parent turn as a
  * SUBAGENT_PENDING call, and only that call is pending on the session
  * (runtime/sessions.go's checkPending) — the parent id follows. */
-export const SUBAGENT_CALL = "parked · a subagent's call — decide on the parent turn"
+export const SUBAGENT_CALL =
+  "parked · a subagent's call — decide on the parent turn"
 /** A thread/pool child's turn (a turn of its own session, which
  * thread stamps weft.session.parent on — turn.go, every pool child,
  * Submit inside a run or outside one): its requests are mirrored onto
@@ -425,7 +445,8 @@ export const SUBAGENT_CALL = "parked · a subagent's call — decide on the pare
  * follows; then, when the child ran under a delegating call (core
  * stamps weft.parent.run.id only from a running call's ctx),
  * POOL_CHILD_TURN and that turn. */
-export const POOL_CHILD = "parked · a delegated session's turn — decide on the parent session"
+export const POOL_CHILD =
+  "parked · a delegated session's turn — decide on the parent session"
 /** After POOL_CHILD's session id: the parent turn whose call delegated it. */
 export const POOL_CHILD_TURN = "· delegated by turn"
 
@@ -435,7 +456,15 @@ export const POOL_CHILD_TURN = "· delegated by turn"
  * a session turn without a public id, a subagent's child run (decided
  * on its parent turn), or a thread/pool child's turn (decided on the
  * parent session). */
-export type ParkedKind = "experiment" | "decide" | "read-only" | "resumed" | "plain" | "no-public-id" | "child" | "pool-child"
+export type ParkedKind =
+  | "experiment"
+  | "decide"
+  | "read-only"
+  | "resumed"
+  | "plain"
+  | "no-public-id"
+  | "child"
+  | "pool-child"
 
 /** A GET /api/runtimes row, as far as the gate reads it. */
 export interface RuntimeLike {
@@ -458,21 +487,35 @@ interface AppRow {
 
 /** The parent session thread stamps on every thread/pool child's run
  * (turn.go: weft.session.parent), "" on any other run. */
-export const poolParent = (row: { meta?: Record<string, string> } | null | undefined) => row?.meta?.["weft.session.parent"] ?? ""
+export const poolParent = (
+  row: { meta?: Record<string, string> } | null | undefined
+) => row?.meta?.["weft.session.parent"] ?? ""
 
 /** ownTurn: the row's id is a turn of its own session — thread/turn.go's
  * `<session>-t<n>`, nothing after it. A Subagent child
  * (`<session>-t1/0/call`) and a Generate that inherited the session id
  * through core's ctx metadata (an id of its own) are not. */
-export function ownTurn(row: { id: string; session_id?: string } | null | undefined): boolean {
+export function ownTurn(
+  row: { id: string; session_id?: string } | null | undefined
+): boolean {
   const s = row?.session_id
   if (!s || !row.id.startsWith(`${s}-t`)) return false
   const n = row.id.slice(s.length + 2)
   return /^\d+$/.test(n)
 }
 
-const live = (rts: readonly RuntimeLike[] | null | undefined, service: string | undefined, sessions: boolean) =>
-  !!service && !!rts?.some((r) => r.connected !== false && r.service === service && (!sessions || r.sessions === true))
+const live = (
+  rts: readonly RuntimeLike[] | null | undefined,
+  service: string | undefined,
+  sessions: boolean
+) =>
+  !!service &&
+  !!rts?.some(
+    (r) =>
+      r.connected !== false &&
+      r.service === service &&
+      (!sessions || r.sessions === true)
+  )
 
 /** parkedKind gates the verbs. Its decision table, first match wins:
  *
@@ -504,15 +547,21 @@ const live = (rts: readonly RuntimeLike[] | null | undefined, service: string | 
  * it (resumed, next); else decide only while a connected runtime of the
  * run's own service registered runtime.Sessions (what appturn.go routes
  * by), read-only otherwise. */
-export function parkedKind(row: AppRow | null | undefined, runtimes: readonly RuntimeLike[] | null | undefined, next?: string): ParkedKind {
+export function parkedKind(
+  row: AppRow | null | undefined,
+  runtimes: readonly RuntimeLike[] | null | undefined,
+  next?: string
+): ParkedKind {
   if (row?.playground) return "experiment"
   // Only core's Subagent child parks onto its parent as SUBAGENT_PENDING
   // (pricing.go's subagents() tells it apart the same way).
-  if (row?.parent_run_id && row.id.startsWith(`${row.parent_run_id}/`)) return "child"
+  if (row?.parent_run_id && row.id.startsWith(`${row.parent_run_id}/`))
+    return "child"
   // weft.session.parent rides ctx like any run metadata (core's
   // mergeMetadata): a run that merely inherited it under a pool child's
   // turn has a parent run id and an id that is not its own session's turn.
-  if (poolParent(row) && (!row?.parent_run_id || ownTurn(row))) return "pool-child"
+  if (poolParent(row) && (!row?.parent_run_id || ownTurn(row)))
+    return "pool-child"
   if (row?.parent_run_id && !ownTurn(row)) return "plain"
   if (!row?.session_id) return "plain"
   if (!row.public_id) return "no-public-id"
@@ -523,15 +572,33 @@ export function parkedKind(row: AppRow | null | undefined, runtimes: readonly Ru
 /** nextTurn is the turn after row in its session (the smallest later
  * turn number among runs): a parked turn with one was resumed. */
 export function nextTurn(
-  row: { id: string; session_id?: string; turn?: number; parent_run_id?: string } | null | undefined,
-  runs: readonly ({ id: string; session_id?: string; turn?: number; parent_run_id?: string } | null)[] | null | undefined
+  row:
+    | { id: string; session_id?: string; turn?: number; parent_run_id?: string }
+    | null
+    | undefined,
+  runs:
+    | readonly ({
+        id: string
+        session_id?: string
+        turn?: number
+        parent_run_id?: string
+      } | null)[]
+    | null
+    | undefined
 ): string | undefined {
   let best: { id: string; turn?: number } | undefined
   // A child run (a parent run id that is not its own session's turn —
   // a Subagent child, a nested Generate) is no turn of the session.
-  if (!row?.session_id || (row.parent_run_id && !ownTurn(row)) || runs == null) return undefined
+  if (!row?.session_id || (row.parent_run_id && !ownTurn(row)) || runs == null)
+    return undefined
   for (const r of runs)
-    if (r && r.session_id === row.session_id && (!r.parent_run_id || ownTurn(r)) && (r.turn ?? 0) > (row.turn ?? 0) && (!best || (r.turn ?? 0) < (best.turn ?? 0)))
+    if (
+      r &&
+      r.session_id === row.session_id &&
+      (!r.parent_run_id || ownTurn(r)) &&
+      (r.turn ?? 0) > (row.turn ?? 0) &&
+      (!best || (r.turn ?? 0) < (best.turn ?? 0))
+    )
       best = r
   return best?.id
 }
@@ -552,7 +619,9 @@ export interface AppGateFacts {
  * a nested Generate or an experiment. */
 export const appTurn = (row: AppRow) => {
   const k = parkedKind(row, null)
-  return (k === "read-only" || k === "decide") && !!row.session_id && !!row.public_id
+  return (
+    (k === "read-only" || k === "decide") && !!row.session_id && !!row.public_id
+  )
 }
 
 /** A pool child's line: POOL_CHILD, the parent session's id and, when
@@ -580,22 +649,39 @@ export function refusalWords(
   rtErr?: string,
   facts?: AppGateFacts
 ): { words: string; fix: string } {
-  if (refused?.fix) return { words: refused.error ?? APP_OWNED, fix: refused.fix }
+  if (refused?.fix)
+    return { words: refused.error ?? APP_OWNED, fix: refused.fix }
   if (kind === "plain") return { words: APP_RUN, fix: APP_RUN_FIX }
-  if (kind === "child") return { words: `${SUBAGENT_CALL} ${row.parent_run_id ?? ""}`.trimEnd(), fix: "" }
+  if (kind === "child")
+    return {
+      words: `${SUBAGENT_CALL} ${row.parent_run_id ?? ""}`.trimEnd(),
+      fix: "",
+    }
   if (kind === "pool-child") return { words: poolChildWords(row), fix: "" }
-  if (kind === "no-public-id") return { words: noPublicIDWords(row.id), fix: APP_RUN_FIX }
+  if (kind === "no-public-id")
+    return { words: noPublicIDWords(row.id), fix: APP_RUN_FIX }
   if (readToken) return { words: READ_TOKEN, fix: "" }
   // A failed read is no verdict: the server never said the link is closed.
-  if (facts?.metaError) return { words: `${CAPS_UNREAD}: ${facts.metaError}`, fix: "" }
+  if (facts?.metaError)
+    return { words: `${CAPS_UNREAD}: ${facts.metaError}`, fix: "" }
   if (facts?.capabilities && !facts.capabilities.includes("playground")) {
     const off = facts.capabilities_off?.playground
-    return { words: `${APP_OWNED}: ${PLAYGROUND_OFF}`, fix: off ? off.replace(/^the playground is off:\s*/, "") : PLAYGROUND_OFF_FIX }
+    return {
+      words: `${APP_OWNED}: ${PLAYGROUND_OFF}`,
+      fix: off
+        ? off.replace(/^the playground is off:\s*/, "")
+        : PLAYGROUND_OFF_FIX,
+    }
   }
-  if (facts?.sessionError) return { words: `${SESSION_UNREAD}: ${facts.sessionError}`, fix: "" }
+  if (facts?.sessionError)
+    return { words: `${SESSION_UNREAD}: ${facts.sessionError}`, fix: "" }
   if (rtErr) return { words: `${RUNTIMES_UNREAD}: ${rtErr}`, fix: "" }
   const svc = row.service || "(none recorded)"
-  if (!live(runtimes, row.service, false)) return { words: `${APP_OWNED}: no runtime of service ${svc} is connected`, fix: APP_LINK_FIX }
+  if (!live(runtimes, row.service, false))
+    return {
+      words: `${APP_OWNED}: no runtime of service ${svc} is connected`,
+      fix: APP_LINK_FIX,
+    }
   return {
     words: `${APP_OWNED}: run ${row.id} is the app's own, and no connected runtime of its service ${svc} acts on the app's sessions`,
     fix: `set runtime.Sessions(resolver) at runtime.Install in the app (service ${svc}): its turns then take approvals and steer`,
@@ -603,7 +689,8 @@ export function refusalWords(
 }
 
 /** The line the read-only block draws. */
-export const refusalLine = (w: { words: string; fix: string }) => (w.fix ? `${w.words} — fix: ${w.fix}` : w.words)
+export const refusalLine = (w: { words: string; fix: string }) =>
+  w.fix ? `${w.words} — fix: ${w.fix}` : w.words
 
 /** appVerbWords is one app-turn verb's line under its call, the same
  * on both surfaces: in flight ("queued…"), "decided" for a decision or
@@ -613,13 +700,26 @@ export const refusalLine = (w: { words: string; fix: string }) => (w.fix ? `${w.
  * verb names which; absent, a verb that carries a decision is one (both
  * surfaces send every decision with it, a steer never). */
 export function appVerbWords(
-  v: { state: string; decision?: string; error?: string; fix?: string; run?: string },
+  v: {
+    state: string
+    decision?: string
+    error?: string
+    fix?: string
+    run?: string
+  },
   runID: string,
   verb: "decide" | "steer" = v.decision ? "decide" : "steer"
 ): { text: string; bad: boolean; resumed?: string } {
   if (v.state === "finished")
-    return { text: verb === "steer" ? "steered" : "decided", bad: false, ...(v.run && v.run !== runID ? { resumed: v.run } : {}) }
+    return {
+      text: verb === "steer" ? "steered" : "decided",
+      bad: false,
+      ...(v.run && v.run !== runID ? { resumed: v.run } : {}),
+    }
   const bad = ["refused", "rejected", "failed", "lost"].includes(v.state)
   if (!bad) return { text: `${v.state}…`, bad }
-  return { text: `${v.state}${v.error ? `: ${v.error}` : " (no reason given)"}${v.fix ? ` — fix: ${v.fix}` : ""}`, bad }
+  return {
+    text: `${v.state}${v.error ? `: ${v.error}` : " (no reason given)"}${v.fix ? ` — fix: ${v.fix}` : ""}`,
+    bad,
+  }
 }

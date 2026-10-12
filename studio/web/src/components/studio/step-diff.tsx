@@ -24,7 +24,14 @@ import {
   markerWords,
   nWayView,
 } from "@/lib/stepdiff"
-import type { CellState, DiffColumn, DiffDoc, DiffSide, NWayView, SideView } from "@/lib/stepdiff"
+import type {
+  CellState,
+  DiffColumn,
+  DiffDoc,
+  DiffSide,
+  NWayView,
+  SideView,
+} from "@/lib/stepdiff"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { HoleBadge, HoleBadges } from "@/components/studio/hole-badge"
 import { Badge } from "@/components/ui/badge"
@@ -49,16 +56,16 @@ function SideMarks({ side }: { side: SideView }) {
         m.hole ? (
           <HoleBadge key={m.mark} hole={m.hole} />
         ) : (
-        <Badge
-          key={m.mark}
-          variant="outline"
-          className="font-mono text-[10px] font-normal text-muted-foreground"
-          title={m.title}
-          data-diff-mark={m.mark}
-        >
-          {m.label}
-          <span className="sr-only">{` — ${m.title}`}</span>
-        </Badge>
+          <Badge
+            key={m.mark}
+            variant="outline"
+            className="font-mono text-[10px] font-normal text-muted-foreground"
+            title={m.title}
+            data-diff-mark={m.mark}
+          >
+            {m.label}
+            <span className="sr-only">{` — ${m.title}`}</span>
+          </Badge>
         )
       )}
       <HoleBadges holes={side.holes} />
@@ -82,13 +89,19 @@ function Cell({
   state?: CellState
 }) {
   const text = cellText(side.side, col)
-  const hole = state ? cellHole(col, base ?? null, side.side) : cellHole(col, side.side)
+  const hole = state
+    ? cellHole(col, base ?? null, side.side)
+    : cellHole(col, side.side)
   // The base column holds the values; a compared run's cell says its
   // state, and the value where it differs from the base. A withheld
   // system prompt is the hidden badge, its state still the hashes'.
   if (!state)
     return (
-      <td className="max-w-[18rem] border-l px-2 py-1 align-top break-words" data-diff-run={run} data-diff-cell={col}>
+      <td
+        className="max-w-[18rem] border-l px-2 py-1 align-top break-words"
+        data-diff-run={run}
+        data-diff-cell={col}
+      >
         {hole ? <HoleBadge hole={hole} /> : text}
       </td>
     )
@@ -113,7 +126,8 @@ function Cell({
 
 /** A step's cost as the compare reads it (plan A5): the step route's
  * cost block, "loading" while it is read, or the read's error. */
-export type StepCostRead = { fields: CostFields } | { loading: true } | { error: string }
+export type StepCostRead =
+  { fields: CostFields } | { loading: true } | { error: string }
 
 /** The compare's cost lookup: run id and step ordinal → its read;
  * absent (no capability "pricing") → no cost column at all. */
@@ -124,16 +138,29 @@ export type StepCosts = (run: string, step: number) => StepCostRead | undefined
 export const COST_STEPS = 50
 
 function costFieldsOf(r: StepCostRead | undefined): CostFields | null {
-  if (!r) return { cost_known: false, cost_badge: "unknown", cost_reason: `the cost is read for the first ${COST_STEPS} steps only` }
+  if (!r)
+    return {
+      cost_known: false,
+      cost_badge: "unknown",
+      cost_reason: `the cost is read for the first ${COST_STEPS} steps only`,
+    }
   if ("fields" in r) return r.fields
-  if ("error" in r) return { cost_known: false, cost_badge: "unknown", cost_reason: `the step could not be read: ${r.error}` }
+  if ("error" in r)
+    return {
+      cost_known: false,
+      cost_badge: "unknown",
+      cost_reason: `the step could not be read: ${r.error}`,
+    }
   return null
 }
 
 /** The cost column's tones: STATE_TONE less the change mark — cost is
  * informational (it follows usage, already compared), so a different
  * figure is drawn neutral, never as a change. */
-const COST_TONE: Record<CellState, string> = { ...STATE_TONE, changed: "text-foreground" }
+const COST_TONE: Record<CellState, string> = {
+  ...STATE_TONE,
+  changed: "text-foreground",
+}
 
 /** CostWords is an unknown cost's reason in the accessible text (the
  * hole badge's pattern), beside the visible words and the title. */
@@ -170,7 +197,11 @@ function CostCellTd({
   const cls = "border-l px-2 py-1 align-top whitespace-nowrap"
   if (missing && !compared)
     return (
-      <td className={`${cls} text-muted-foreground`} data-diff-run={run} data-diff-cell="cost">
+      <td
+        className={`${cls} text-muted-foreground`}
+        data-diff-run={run}
+        data-diff-cell="cost"
+      >
         —
       </td>
     )
@@ -178,24 +209,41 @@ function CostCellTd({
   const baseSide = costFieldsOf(base)
   if (!missing && (side === null || (compared && baseSide === null)))
     return (
-      <td className={`${cls} text-faint`} data-diff-run={run} data-diff-cell="cost">
+      <td
+        className={`${cls} text-faint`}
+        data-diff-run={run}
+        data-diff-cell="cost"
+      >
         …
       </td>
     )
   if (!compared) {
     const v = costView(side)
     return (
-      <td className={`${cls} ${v.known ? "" : "text-faint"}`} data-diff-run={run} data-diff-cell="cost" title={v.title}>
+      <td
+        className={`${cls} ${v.known ? "" : "text-faint"}`}
+        data-diff-run={run}
+        data-diff-cell="cost"
+        title={v.title}
+      >
         {v.text}
         {v.known ? null : <CostWords why={v.title} />}
       </td>
     )
   }
-  const state = usageUnknown && !missing ? "unknown" : costCell(baseSide, side, missing)
+  const state =
+    usageUnknown && !missing ? "unknown" : costCell(baseSide, side, missing)
   const w =
     usageUnknown && !missing
-      ? { text: CELL_WORDS.unknown, title: COST_FOLLOWS_USAGE, why: CELL_REASONS.unknown }
-      : costCellWords(state, state === "unknown" && costView(side).known ? baseSide : side)
+      ? {
+          text: CELL_WORDS.unknown,
+          title: COST_FOLLOWS_USAGE,
+          why: CELL_REASONS.unknown,
+        }
+      : costCellWords(
+          state,
+          state === "unknown" && costView(side).known ? baseSide : side
+        )
   return (
     <td
       className={`${cls} ${COST_TONE[state]}`}
@@ -214,7 +262,15 @@ function CostCellTd({
  * compared run beside it, one row per step ordinal. With costs, each
  * run gains a cost column (plan A5) — informational: it never marks a
  * step changed (cost follows usage, already compared). */
-export function StepDiffTable({ view, focus, costs }: { view: NWayView; focus?: number; costs?: StepCosts }) {
+export function StepDiffTable({
+  view,
+  focus,
+  costs,
+}: {
+  view: NWayView
+  focus?: number
+  costs?: StepCosts
+}) {
   const width = DIFF_COLUMNS.length + 1 + (costs ? 1 : 0)
   // The step a link landed on (compareLink's step): scrolled to once.
   const target = useRef<HTMLTableRowElement>(null)
@@ -231,7 +287,16 @@ export function StepDiffTable({ view, focus, costs }: { view: NWayView; focus?: 
   const markers = view.others.flatMap((o, i) =>
     view.rows
       .filter((r) => r.others[i].changed)
-      .map((r) => ({ run: o.run_id, step: r.step, words: markerWords({ step: r.step, ...r.others[i], a: r.base, b: r.others[i].side }) }))
+      .map((r) => ({
+        run: o.run_id,
+        step: r.step,
+        words: markerWords({
+          step: r.step,
+          ...r.others[i],
+          a: r.base,
+          b: r.others[i].side,
+        }),
+      }))
   )
   return (
     <div className="space-y-2" data-step-diff>
@@ -247,25 +312,37 @@ export function StepDiffTable({ view, focus, costs }: { view: NWayView; focus?: 
           view.markers[i].length === 0 ? (
             <li key={o.run_id} className="text-faint" data-diff-none={o.run_id}>
               {o.run_id}: no step changed
-              {view.rows.some((r) => DIFF_COLUMNS.some((c) => r.others[i].cells[c] === "unknown"))
+              {view.rows.some((r) =>
+                DIFF_COLUMNS.some((c) => r.others[i].cells[c] === "unknown")
+              )
                 ? " among the columns both runs recorded"
                 : ""}
             </li>
           ) : null
         )}
         {markers.map((m) => (
-          <li key={`${m.run}#${m.step}`} data-diff-marker={m.step} data-diff-run={m.run}>
-            <Link {...runLink(m.run, { step: m.step })} className="text-thread-ink hover:underline">
+          <li
+            key={`${m.run}#${m.step}`}
+            data-diff-marker={m.step}
+            data-diff-run={m.run}
+          >
+            <Link
+              {...runLink(m.run, { step: m.step })}
+              className="text-thread-ink hover:underline"
+            >
               {m.words}
             </Link>
-            {view.others.length > 1 ? <span className="text-faint"> · {m.run}</span> : null}
+            {view.others.length > 1 ? (
+              <span className="text-faint"> · {m.run}</span>
+            ) : null}
           </li>
         ))}
       </ul>
       <div className="overflow-x-auto rounded border">
         <table className="w-full font-mono text-[11px]">
           <caption className="sr-only">
-            steps of {runs.join(", ")} aligned by step ordinal; {view.base.run_id} is the base
+            steps of {runs.join(", ")} aligned by step ordinal;{" "}
+            {view.base.run_id} is the base
           </caption>
           <thead>
             <tr className="text-left text-faint">
@@ -273,8 +350,16 @@ export function StepDiffTable({ view, focus, costs }: { view: NWayView; focus?: 
                 step
               </th>
               {runs.map((r, i) => (
-                <th key={r} scope="colgroup" colSpan={width} className="border-l px-2 py-1 font-normal">
-                  <Link {...runLink(r)} className="hover:text-foreground hover:underline">
+                <th
+                  key={r}
+                  scope="colgroup"
+                  colSpan={width}
+                  className="border-l px-2 py-1 font-normal"
+                >
+                  <Link
+                    {...runLink(r)}
+                    className="hover:text-foreground hover:underline"
+                  >
                     {r}
                   </Link>
                   {i === 0 ? " · base" : ""}
@@ -288,7 +373,11 @@ export function StepDiffTable({ view, focus, costs }: { view: NWayView; focus?: 
                     marks
                   </th>
                   {DIFF_COLUMNS.map((c) => (
-                    <th key={c} scope="col" className="border-l px-2 py-1 font-normal">
+                    <th
+                      key={c}
+                      scope="col"
+                      className="border-l px-2 py-1 font-normal"
+                    >
                       {COLUMN_LABELS[c]}
                     </th>
                   ))}
@@ -315,16 +404,35 @@ export function StepDiffTable({ view, focus, costs }: { view: NWayView; focus?: 
                 data-diff-target={row.step === focus ? "" : undefined}
                 data-changed={row.changed ? "" : undefined}
               >
-                <th scope="row" className="px-2 py-1 text-left align-top font-normal">
-                  <Link {...runLink(view.base.run_id, { step: row.step })} className="hover:underline">
+                <th
+                  scope="row"
+                  className="px-2 py-1 text-left align-top font-normal"
+                >
+                  <Link
+                    {...runLink(view.base.run_id, { step: row.step })}
+                    className="hover:underline"
+                  >
                     {row.step}
                   </Link>
                 </th>
-                <td className="border-l px-2 py-1 align-top" data-diff-run={view.base.run_id} data-diff-marks>
-                  {row.base.side ? <SideMarks side={row.base} /> : <span className="text-muted-foreground">missing</span>}
+                <td
+                  className="border-l px-2 py-1 align-top"
+                  data-diff-run={view.base.run_id}
+                  data-diff-marks
+                >
+                  {row.base.side ? (
+                    <SideMarks side={row.base} />
+                  ) : (
+                    <span className="text-muted-foreground">missing</span>
+                  )}
                 </td>
                 {DIFF_COLUMNS.map((c) => (
-                  <Cell key={c} run={view.base.run_id} col={c} side={row.base} />
+                  <Cell
+                    key={c}
+                    run={view.base.run_id}
+                    col={c}
+                    side={row.base}
+                  />
                 ))}
                 {costs ? (
                   <CostCellTd
@@ -336,11 +444,22 @@ export function StepDiffTable({ view, focus, costs }: { view: NWayView; focus?: 
                 ) : null}
                 {row.others.map((o) => (
                   <Fragment key={o.run_id}>
-                    <td className="border-l px-2 py-1 align-top" data-diff-run={o.run_id} data-diff-marks>
+                    <td
+                      className="border-l px-2 py-1 align-top"
+                      data-diff-run={o.run_id}
+                      data-diff-marks
+                    >
                       <SideMarks side={o.side} />
                     </td>
                     {DIFF_COLUMNS.map((c) => (
-                      <Cell key={c} run={o.run_id} col={c} side={o.side} base={row.base.side} state={o.cells[c]} />
+                      <Cell
+                        key={c}
+                        run={o.run_id}
+                        col={c}
+                        side={o.side}
+                        base={row.base.side}
+                        state={o.cells[c]}
+                      />
                     ))}
                     {costs ? (
                       <CostCellTd
@@ -371,11 +490,21 @@ export function StepDiffTable({ view, focus, costs }: { view: NWayView; focus?: 
  * badged with its error, never blanking the sides that answered; only
  * when none answered is the error the whole compare.
  */
-export function StepCompare({ base, others, focus }: { base: string; others: string[]; focus?: number }) {
+export function StepCompare({
+  base,
+  others,
+  focus,
+}: {
+  base: string
+  others: string[]
+  focus?: number
+}) {
   const { has } = useCapabilities()
   const ids = [...new Set(others.filter((x) => x && x !== base))]
   const on = has("diff") && !!base && ids.length > 0
-  const qs = useQueries({ queries: ids.map((b) => ({ ...diffQuery(base, b), enabled: on })) })
+  const qs = useQueries({
+    queries: ids.map((b) => ({ ...diffQuery(base, b), enabled: on })),
+  })
   // The cost column (plan A5): each side's step docs (the step route
   // prices a step's own model call), the first COST_STEPS of each run.
   const costOn = on && has("pricing") && has("steps")
@@ -385,7 +514,10 @@ export function StepCompare({ base, others, focus }: { base: string; others: str
     const seen = new Set<string>()
     for (const d of answeredDocs)
       for (const r of (d.steps as DiffDoc["steps"] | undefined) ?? [])
-        for (const [run, side] of [[d.a.run_id, r.a], [d.b.run_id, r.b]] as const) {
+        for (const [run, side] of [
+          [d.a.run_id, r.a],
+          [d.b.run_id, r.b],
+        ] as const) {
           const k = `${run}#${r.step}`
           if (side && r.step < COST_STEPS && !seen.has(k)) {
             seen.add(k)
@@ -393,16 +525,24 @@ export function StepCompare({ base, others, focus }: { base: string; others: str
           }
         }
   }
-  const stepQs = useQueries({ queries: keys.map((k) => ({ ...stepQuery(k.run, k.step), retry: false })) })
+  const stepQs = useQueries({
+    queries: keys.map((k) => ({ ...stepQuery(k.run, k.step), retry: false })),
+  })
   const reads = new Map<string, StepCostRead>()
   keys.forEach((k, i) => {
     const q = stepQs[i]
     reads.set(
       `${k.run}#${k.step}`,
-      q.data ? { fields: q.data } : q.isError ? { error: q.error.message } : { loading: true }
+      q.data
+        ? { fields: q.data }
+        : q.isError
+          ? { error: q.error.message }
+          : { loading: true }
     )
   })
-  const costs: StepCosts | undefined = costOn ? (run, step) => reads.get(`${run}#${step}`) : undefined
+  const costs: StepCosts | undefined = costOn
+    ? (run, step) => reads.get(`${run}#${step}`)
+    : undefined
   if (!on) return null
   // A failed background re-read keeps what was drawn: a side with data
   // is drawn whatever its last read said.
@@ -418,12 +558,23 @@ export function StepCompare({ base, others, focus }: { base: string; others: str
   const errors = failed.length ? (
     <ul className="space-y-0.5 text-xs" aria-label="runs not compared">
       {failed.map(({ id, q }) => (
-        <li key={id} className="flex flex-wrap items-center gap-1.5" role="alert" data-step-diff-error data-step-diff-side-error={id}>
-          <Badge variant="outline" className="border-status-bad/40 font-mono text-[10px] font-normal text-status-bad">
+        <li
+          key={id}
+          className="flex flex-wrap items-center gap-1.5"
+          role="alert"
+          data-step-diff-error
+          data-step-diff-side-error={id}
+        >
+          <Badge
+            variant="outline"
+            className="border-status-bad/40 font-mono text-[10px] font-normal text-status-bad"
+          >
             not compared
           </Badge>
           <span className="font-mono">{id}</span>
-          <span className="text-status-bad">the step compare could not be read: {q.error?.message}</span>
+          <span className="text-status-bad">
+            the step compare could not be read: {q.error?.message}
+          </span>
         </li>
       ))}
     </ul>
@@ -432,7 +583,11 @@ export function StepCompare({ base, others, focus }: { base: string; others: str
   return (
     <div className="space-y-2">
       {errors}
-      <StepDiffTable view={nWayView(answered.map(({ q }) => q.data as DiffDoc))} focus={focus} costs={costs} />
+      <StepDiffTable
+        view={nWayView(answered.map(({ q }) => q.data as DiffDoc))}
+        focus={focus}
+        costs={costs}
+      />
     </div>
   )
 }

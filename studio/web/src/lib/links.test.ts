@@ -2,7 +2,14 @@
 // ids as one encoded segment, and never a token in a link.
 import { describe, expect, it } from "vitest"
 
-import { editsFromHandoff, editsHandoff, emptyLab, HANDOFF_EDITS_MAX, labFromHandoff, labHandoff } from "./experiment-body"
+import {
+  editsFromHandoff,
+  editsHandoff,
+  emptyLab,
+  HANDOFF_EDITS_MAX,
+  labFromHandoff,
+  labHandoff,
+} from "./experiment-body"
 import {
   canonical,
   compareLink,
@@ -40,9 +47,13 @@ describe("runLink", () => {
     expect(path(runLink("r_1", { step: 3, view: "story", pane: "wire" }))).toBe(
       "runs/r_1?step=3&view=story&pane=wire"
     )
-    expect(path(runLink("r_1", { step: 0, pane: "request" }))).toBe("runs/r_1?step=0&pane=request")
+    expect(path(runLink("r_1", { step: 0, pane: "request" }))).toBe(
+      "runs/r_1?step=0&pane=request"
+    )
     expect(path(runLink("r_1", { pane: "wire" }))).toBe("runs/r_1")
-    expect(path(runLink("r_1", { step: 1, pane: "bogus" as never }))).toBe("runs/r_1?step=1")
+    expect(path(runLink("r_1", { step: 1, pane: "bogus" as never }))).toBe(
+      "runs/r_1?step=1"
+    )
   })
 
   it("carries the step as the ordinal, then the view", () => {
@@ -142,12 +153,29 @@ describe("the other builders", () => {
   })
 
   it("the option lab and the transcript edits round-trip through the fragment (review fix 7)", () => {
-    const lab = { ...emptyLab(), max_steps: "6", stop: "END\nSTOP", park_on: ["refund"], tool_choice: "named" as const, tool_choice_name: "lookup" }
+    const lab = {
+      ...emptyLab(),
+      max_steps: "6",
+      stop: "END\nSTOP",
+      park_on: ["refund"],
+      tool_choice: "named" as const,
+      tool_choice_name: "lookup",
+    }
     const edits = [
       { kind: "tool_args" as const, step: 0, callID: "c1", args: { q: "c9" } },
       { step: 1, callID: "c2", toolResult: "policy: none & more" },
     ]
-    const u = new URL(href(BASE, playgroundLink({ run: "r_1", step: 2, lab: labHandoff(lab), edits: editsHandoff(edits) })))
+    const u = new URL(
+      href(
+        BASE,
+        playgroundLink({
+          run: "r_1",
+          step: 2,
+          lab: labHandoff(lab),
+          edits: editsHandoff(edits),
+        })
+      )
+    )
     const p = new URLSearchParams(u.hash.slice(1))
     expect(labFromHandoff(p.get("lab") ?? undefined)).toEqual(lab)
     expect(editsFromHandoff(p.get("edits") ?? undefined)).toEqual(edits)
@@ -156,7 +184,9 @@ describe("the other builders", () => {
     expect(editsHandoff([])).toBeUndefined()
     expect(labFromHandoff("{nope")).toBeUndefined()
     expect(labFromHandoff('{"max_steps": 6, "x": "1"}')).toBeUndefined()
-    expect(editsFromHandoff('[{"step": -1}, null, {"step": 2, "content": "x"}]')).toEqual([{ step: 2, content: "x" }])
+    expect(
+      editsFromHandoff('[{"step": -1}, null, {"step": 2, "content": "x"}]')
+    ).toEqual([{ step: 2, content: "x" }])
   })
 
   it("editsFromHandoff drops an edit whose fields are of the wrong type (final web review)", () => {
@@ -182,10 +212,18 @@ describe("the other builders", () => {
     expect(editsFromHandoff(JSON.stringify([...junk, ...ok]))).toEqual(ok)
     // A tool_args edit without args is kept (its args are absent, not
     // wrong); its line still draws (editLine, edits.test.ts).
-    expect(editsFromHandoff('[{"kind":"tool_args","step":0}]')).toEqual([{ kind: "tool_args", step: 0 }])
+    expect(editsFromHandoff('[{"kind":"tool_args","step":0}]')).toEqual([
+      { kind: "tool_args", step: 0 },
+    ])
     // A huge list is cut, never walked into the page whole.
-    const many = Array.from({ length: HANDOFF_EDITS_MAX + 50 }, (_, i) => ({ step: 1, callID: `c${i}`, toolResult: "x" }))
-    expect(editsFromHandoff(JSON.stringify(many))).toHaveLength(HANDOFF_EDITS_MAX)
+    const many = Array.from({ length: HANDOFF_EDITS_MAX + 50 }, (_, i) => ({
+      step: 1,
+      callID: `c${i}`,
+      toolResult: "x",
+    }))
+    expect(editsFromHandoff(JSON.stringify(many))).toHaveLength(
+      HANDOFF_EDITS_MAX
+    )
   })
 
   it("editsFromHandoff keeps one edit per target, the last (as putEdit does)", () => {
@@ -193,10 +231,20 @@ describe("the other builders", () => {
       { step: 1, callID: "c2", toolResult: "first" },
       { step: 0, content: "reply" },
       { step: 1, callID: "c2", toolResult: "last" },
-      { kind: "tool_result", step: 1, callID: "c2", toolResult: "kind spelled out" },
+      {
+        kind: "tool_result",
+        step: 1,
+        callID: "c2",
+        toolResult: "kind spelled out",
+      },
     ]
     expect(editsFromHandoff(JSON.stringify(list))).toEqual([
-      { kind: "tool_result", step: 1, callID: "c2", toolResult: "kind spelled out" },
+      {
+        kind: "tool_result",
+        step: 1,
+        callID: "c2",
+        toolResult: "kind spelled out",
+      },
       { step: 0, content: "reply" },
     ])
   })
@@ -209,15 +257,23 @@ describe("the other builders", () => {
     })
     expect(href(BASE, experimentLink("exp_1"))).toBe(`${BASE}experiments/exp_1`)
     // An id is one encoded segment.
-    expect(href(BASE, experimentLink("a/b?c"))).toBe(`${BASE}experiments/a%2Fb%3Fc`)
+    expect(href(BASE, experimentLink("a/b?c"))).toBe(
+      `${BASE}experiments/a%2Fb%3Fc`
+    )
     expect(href(BASE, experimentsLink())).toBe(`${BASE}experiments`)
   })
 
   it("a draft is ?exp=, a shared form the fragment's state= (plan F5)", () => {
-    expect(href(BASE, playgroundDraftLink("d_1"))).toBe(`${BASE}playground?exp=d_1`)
-    expect(href(BASE, playgroundShareLink("zAbC-_"))).toBe(`${BASE}playground#state=zAbC-_`)
+    expect(href(BASE, playgroundDraftLink("d_1"))).toBe(
+      `${BASE}playground?exp=d_1`
+    )
+    expect(href(BASE, playgroundShareLink("zAbC-_"))).toBe(
+      `${BASE}playground#state=zAbC-_`
+    )
     // A copied page link never carries the form: the fragment is dropped.
-    expect(canonical(href(BASE, playgroundShareLink("zAbC")))).toBe(`${BASE}playground`)
+    expect(canonical(href(BASE, playgroundShareLink("zAbC")))).toBe(
+      `${BASE}playground`
+    )
   })
 })
 
@@ -235,10 +291,20 @@ describe("compareLink", () => {
   })
 
   it("lands on a step: the ordinal, dropped when it is not one", () => {
-    expect(compareLink("r_1", ["r_2"], 3)).toEqual({ to: "/compare", search: { a: "r_1", b: ["r_2"], step: 3 } })
-    expect(compareLink("r_1", ["r_2"], -1).search).toEqual({ a: "r_1", b: ["r_2"] })
+    expect(compareLink("r_1", ["r_2"], 3)).toEqual({
+      to: "/compare",
+      search: { a: "r_1", b: ["r_2"], step: 3 },
+    })
+    expect(compareLink("r_1", ["r_2"], -1).search).toEqual({
+      a: "r_1",
+      b: ["r_2"],
+    })
     expect(compareLink("r_1", [], 1.5).search).toEqual({ a: "r_1" })
-    expect(new URL(href(BASE, compareLink("r_1", ["r_2"], 3))).searchParams.get("step")).toBe("3")
+    expect(
+      new URL(href(BASE, compareLink("r_1", ["r_2"], 3))).searchParams.get(
+        "step"
+      )
+    ).toBe("3")
   })
 })
 
@@ -287,12 +353,23 @@ describe("G2: page state as search keys", () => {
 
   it("the raw view's filters and open event", () => {
     expect(
-      path(runLink("r_1", { view: "raw", raw: { q: "refund", hide: ["delta", "step"], ev: 4 } }))
+      path(
+        runLink("r_1", {
+          view: "raw",
+          raw: { q: "refund", hide: ["delta", "step"], ev: 4 },
+        })
+      )
     ).toBe("runs/r_1?view=raw&q=refund&hide=step%2Cdelta&ev=4")
     // Empty state writes nothing; a bad position is dropped.
-    expect(runLink("r_1", { raw: { q: "", hide: [], ev: -1 } }).search).toEqual({})
+    expect(runLink("r_1", { raw: { q: "", hide: [], ev: -1 } }).search).toEqual(
+      {}
+    )
     // rawSearch names every key, so a merge clears what was turned off.
-    expect(rawSearch({})).toEqual({ q: undefined, hide: undefined, ev: undefined })
+    expect(rawSearch({})).toEqual({
+      q: undefined,
+      hide: undefined,
+      ev: undefined,
+    })
   })
 
   it("reads the raw state back as the router parsed it", () => {
@@ -301,35 +378,71 @@ describe("G2: page state as search keys", () => {
       hide: ["step", "delta"],
       ev: 3,
     })
-    expect(rawFromSearch({ ev: 1.5 })).toEqual({ q: "", hide: [], ev: undefined })
+    expect(rawFromSearch({ ev: 1.5 })).toEqual({
+      q: "",
+      hide: [],
+      ev: undefined,
+    })
     // A search of digits survives the router's JSON round trip.
     const u = new URL(href(BASE, runLink("r_1", { raw: { q: "123" } })))
     expect(u.searchParams.get("q")).toBe('"123"')
   })
 
   it("the replay drawer's verb, step and source run", () => {
-    expect(path(runLink("r_1", { view: "story", replay: { verb: "edit_prompt", from: 2 } }))).toBe(
-      "runs/r_1?view=story&replay=edit_prompt&from=2"
-    )
-    expect(path(runLink("r_1", { replay: { verb: "rerun", from: 0, of: "r_1/1/c2" } }))).toBe(
-      "runs/r_1?replay=rerun&from=0&of=r_1%2F1%2Fc2"
-    )
+    expect(
+      path(
+        runLink("r_1", {
+          view: "story",
+          replay: { verb: "edit_prompt", from: 2 },
+        })
+      )
+    ).toBe("runs/r_1?view=story&replay=edit_prompt&from=2")
+    expect(
+      path(
+        runLink("r_1", { replay: { verb: "rerun", from: 0, of: "r_1/1/c2" } })
+      )
+    ).toBe("runs/r_1?replay=rerun&from=0&of=r_1%2F1%2Fc2")
     // replaySearch names every key: a closed drawer clears them all.
-    expect(replaySearch(null)).toEqual({ replay: undefined, from: undefined, of: undefined })
-    expect(replaySearch({ verb: "from_step", from: -3 })).toEqual({ replay: "from_step", from: 0, of: undefined })
+    expect(replaySearch(null)).toEqual({
+      replay: undefined,
+      from: undefined,
+      of: undefined,
+    })
+    expect(replaySearch({ verb: "from_step", from: -3 })).toEqual({
+      replay: "from_step",
+      from: 0,
+      of: undefined,
+    })
     // Read back as the router parsed it; an unknown verb is no drawer.
-    expect(replayFromSearch({ replay: "from_step", from: 3 })).toEqual({ verb: "from_step", from: 3 })
-    expect(replayFromSearch({ replay: "continue", from: 1.5, of: 42 })).toEqual({ verb: "continue", from: 0, of: "42" })
+    expect(replayFromSearch({ replay: "from_step", from: 3 })).toEqual({
+      verb: "from_step",
+      from: 3,
+    })
+    expect(replayFromSearch({ replay: "continue", from: 1.5, of: 42 })).toEqual(
+      { verb: "continue", from: 0, of: "42" }
+    )
     expect(replayFromSearch({ replay: "explode", from: 1 })).toBeNull()
     expect(replayFromSearch({})).toBeNull()
   })
 
   it("the playground's own state rides the query, never a prompt", () => {
     expect(
-      path(playgroundStateLink({ run: "r_1", step: 2, agent: "orders", runtime: "rt_1", engine: "scripted" }))
-    ).toBe("playground?run=r_1&step=2&agent=orders&runtime=rt_1&engine=scripted")
+      path(
+        playgroundStateLink({
+          run: "r_1",
+          step: 2,
+          agent: "orders",
+          runtime: "rt_1",
+          engine: "scripted",
+        })
+      )
+    ).toBe(
+      "playground?run=r_1&step=2&agent=orders&runtime=rt_1&engine=scripted"
+    )
     // Step 0 and the live engine are the defaults: never written.
-    expect(playgroundSearch({ run: "r_1", step: 0, engine: "live" })).toEqual({ run: "r_1" })
+    expect(playgroundSearch({ run: "r_1", step: 0, engine: "live" })).toEqual({
+      run: "r_1",
+    })
     expect(playgroundSearch({}, "exp_1")).toEqual({ experiment: "exp_1" })
     expect(playgroundStateLink({ run: "r_1" })).not.toHaveProperty("hash")
   })
@@ -343,7 +456,9 @@ describe("canonical (the copy link)", () => {
   })
 
   it("never carries a token or a panel scope", () => {
-    const u = canonical(`${BASE}runs/r_1?token=sekrit&view=raw&sig=x&weft_scope=pub_1&access_token=y`)
+    const u = canonical(
+      `${BASE}runs/r_1?token=sekrit&view=raw&sig=x&weft_scope=pub_1&access_token=y`
+    )
     expect(u).toBe(`${BASE}runs/r_1?view=raw`)
   })
 
@@ -355,9 +470,13 @@ describe("canonical (the copy link)", () => {
   })
 
   it("never carries a hand-off's edits= or lab= from a hand-built query", () => {
-    const edits = encodeURIComponent(JSON.stringify([{ kind: "user", step: 0, content: "my card is 4111" }]))
+    const edits = encodeURIComponent(
+      JSON.stringify([{ kind: "user", step: 0, content: "my card is 4111" }])
+    )
     const lab = encodeURIComponent(JSON.stringify({ temperature: "0.2" }))
-    const u = canonical(`${BASE}playground?run=r_1&edits=${edits}&lab=${lab}&agent=orders`)
+    const u = canonical(
+      `${BASE}playground?run=r_1&edits=${edits}&lab=${lab}&agent=orders`
+    )
     expect(u).toBe(`${BASE}playground?run=r_1&agent=orders`)
   })
 

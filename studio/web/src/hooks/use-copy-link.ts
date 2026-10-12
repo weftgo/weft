@@ -27,7 +27,8 @@ export const COPIED_MS = 1500
 export function useCurrentLink(): () => string {
   const router = useRouter()
   return useCallback(
-    () => canonical(new URL(router.history.location.href, window.location.origin)),
+    () =>
+      canonical(new URL(router.history.location.href, window.location.origin)),
     [router]
   )
 }

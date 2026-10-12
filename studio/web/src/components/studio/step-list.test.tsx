@@ -97,7 +97,9 @@ describe("StepList", () => {
     // The table's badge (D5): truncated, cause result_cap, the bytes cut.
     const cut = document.querySelector<HTMLElement>('[data-hole="truncated"]')!
     expect(cut.getAttribute("title")).toContain(resultCapReason(130000))
-    expect(cut.getAttribute("title")).toContain("raise the tool's weft.MaxResultBytes")
+    expect(cut.getAttribute("title")).toContain(
+      "raise the tool's weft.MaxResultBytes"
+    )
   })
 
   it("says a failed run's open step failed, not that it is in flight", async () => {
@@ -149,69 +151,70 @@ describe("StepList", () => {
   })
 })
 
-  it("renders a steered user turn between the steps (ADR 0019)", async () => {
-    const events: WireEvent[] = [
-      { type: "run_start", id: "r_st", model: { provider: "p", name: "m" } },
-      { type: "step_start", run_id: "r_st", index: 0 },
-      { type: "text_delta", run_id: "r_st", text: "on it" },
-      {
-        type: "step_finish",
-        run_id: "r_st",
-        index: 0,
-        reason: "stop",
-        usage: { input_tokens: 1, output_tokens: 1 },
-      },
-      {
-        type: "steered",
-        run_id: "r_st",
-        seq: 1,
-        step: 0,
-        messages: [
-          { role: "user", content: [{ type: "text", text: "metric units" }] },
-        ],
-      },
-      { type: "step_start", run_id: "r_st", index: 1 },
-      { type: "text_delta", run_id: "r_st", text: "done in metres" },
-      {
-        type: "step_finish",
-        run_id: "r_st",
-        index: 1,
-        reason: "stop",
-        usage: { input_tokens: 1, output_tokens: 1 },
-      },
-      {
-        type: "run_finish",
-        run_id: "r_st",
-        usage: { input_tokens: 2, output_tokens: 2 },
-        steps: 2,
-      },
-    ]
-    const doc = {
-      ...subDoc,
-      id: "r_st",
-      children: [],
-      status: "succeeded",
-    } as RunDoc
-    await renderWithRouter(
-      <StepList events={events} folded={fold(events)} doc={doc} />
-    )
-    // The delivered words, labelled as the user's steer.
-    expect(screen.getByText("metric units")).toBeTruthy()
-    expect(screen.getByText("steered · user")).toBeTruthy()
-    // The DOM order: step 0's card, the steer, step 1's card.
-    const order = [
-      document.querySelector("[data-step='0']"),
-      document.querySelector("[data-steer]"),
-      document.querySelector("[data-step='1']"),
-    ]
-    expect(order.every(Boolean)).toBe(true)
-    expect(
-      order[0]!.compareDocumentPosition(order[1]!) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
-    expect(
-      order[1]!.compareDocumentPosition(order[2]!) & Node.DOCUMENT_POSITION_FOLLOWING
-    ).toBeTruthy()
-  
+it("renders a steered user turn between the steps (ADR 0019)", async () => {
+  const events: WireEvent[] = [
+    { type: "run_start", id: "r_st", model: { provider: "p", name: "m" } },
+    { type: "step_start", run_id: "r_st", index: 0 },
+    { type: "text_delta", run_id: "r_st", text: "on it" },
+    {
+      type: "step_finish",
+      run_id: "r_st",
+      index: 0,
+      reason: "stop",
+      usage: { input_tokens: 1, output_tokens: 1 },
+    },
+    {
+      type: "steered",
+      run_id: "r_st",
+      seq: 1,
+      step: 0,
+      messages: [
+        { role: "user", content: [{ type: "text", text: "metric units" }] },
+      ],
+    },
+    { type: "step_start", run_id: "r_st", index: 1 },
+    { type: "text_delta", run_id: "r_st", text: "done in metres" },
+    {
+      type: "step_finish",
+      run_id: "r_st",
+      index: 1,
+      reason: "stop",
+      usage: { input_tokens: 1, output_tokens: 1 },
+    },
+    {
+      type: "run_finish",
+      run_id: "r_st",
+      usage: { input_tokens: 2, output_tokens: 2 },
+      steps: 2,
+    },
+  ]
+  const doc = {
+    ...subDoc,
+    id: "r_st",
+    children: [],
+    status: "succeeded",
+  } as RunDoc
+  await renderWithRouter(
+    <StepList events={events} folded={fold(events)} doc={doc} />
+  )
+  // The delivered words, labelled as the user's steer.
+  expect(screen.getByText("metric units")).toBeTruthy()
+  expect(screen.getByText("steered · user")).toBeTruthy()
+  // The DOM order: step 0's card, the steer, step 1's card.
+  const order = [
+    document.querySelector("[data-step='0']"),
+    document.querySelector("[data-steer]"),
+    document.querySelector("[data-step='1']"),
+  ]
+  expect(order.every(Boolean)).toBe(true)
+  expect(
+    order[0]!.compareDocumentPosition(order[1]!) &
+      Node.DOCUMENT_POSITION_FOLLOWING
+  ).toBeTruthy()
+  expect(
+    order[1]!.compareDocumentPosition(order[2]!) &
+      Node.DOCUMENT_POSITION_FOLLOWING
+  ).toBeTruthy()
 })
 
 describe("StepList's subagent child rows (A10)", () => {
@@ -226,15 +229,24 @@ describe("StepList's subagent child rows (A10)", () => {
     ] as const) {
       const doc: RunDoc = {
         ...subDoc,
-        children: subDoc.children.map((c) => ({ ...c, status, usage: zero, finished: null })),
+        children: subDoc.children.map((c) => ({
+          ...c,
+          status,
+          usage: zero,
+          finished: null,
+        })),
       }
       const { unmount } = await renderWithRouter(
         <StepList events={subEvents} folded={fold(subEvents)} doc={doc} />
       )
-      const row = document.querySelector(`[data-child-row="${subDoc.children[0].id}"]`)!
+      const row = document.querySelector(
+        `[data-child-row="${subDoc.children[0].id}"]`
+      )!
       expect(row.querySelector("[data-child-usage]")?.textContent).toBe(want)
       expect(row.textContent).not.toContain("0 in / 0 out")
-      expect(Boolean(row.querySelector('[data-hole="interrupted"]'))).toBe(status === "interrupted")
+      expect(Boolean(row.querySelector('[data-hole="interrupted"]'))).toBe(
+        status === "interrupted"
+      )
       unmount()
     }
   })
@@ -243,15 +255,34 @@ describe("StepList's subagent child rows (A10)", () => {
   // its row from the step route's children[] when that is cached.
   it("falls back to the cached step route's children[] for a child the run document does not list", async () => {
     const kid = subDoc.children[0]
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
     client.setQueryData(stepQuery(subDoc.id, 0).queryKey, {
-      children: [{ id: kid.id, call_id: kid.parent_call_id, agent: "researcher", status: "succeeded", usage: kid.usage }],
+      children: [
+        {
+          id: kid.id,
+          call_id: kid.parent_call_id,
+          agent: "researcher",
+          status: "succeeded",
+          usage: kid.usage,
+        },
+      ],
     } as unknown as StepDoc)
     const doc: RunDoc = { ...subDoc, children: [] }
-    await renderWithRouter(<StepList events={subEvents} folded={fold(subEvents)} doc={doc} />, client)
-    const row = document.querySelector(`[data-step="0"] [data-child-row="${kid.id}"]`)
-    expect(row?.querySelector("[data-child-agent]")?.textContent).toBe("researcher")
-    expect(row?.querySelector("[data-child-usage]")?.textContent).toBe("9 in / 5 out")
+    await renderWithRouter(
+      <StepList events={subEvents} folded={fold(subEvents)} doc={doc} />,
+      client
+    )
+    const row = document.querySelector(
+      `[data-step="0"] [data-child-row="${kid.id}"]`
+    )
+    expect(row?.querySelector("[data-child-agent]")?.textContent).toBe(
+      "researcher"
+    )
+    expect(row?.querySelector("[data-child-usage]")?.textContent).toBe(
+      "9 in / 5 out"
+    )
   })
 
   // A10: call ids may repeat across steps (core/loop.go); the child's
@@ -262,8 +293,23 @@ describe("StepList's subagent child rows (A10)", () => {
     const U = { input_tokens: 1, output_tokens: 1 }
     const call = (index: number, name: string): WireEvent[] => [
       { type: "step_start", run_id: R, index },
-      { type: "tool_start", run_id: R, seq: index + 1, call_id: "c1", name, args: {} },
-      { type: "tool_finish", run_id: R, seq: index + 1, call_id: "c1", name, content: "ok", is_error: false },
+      {
+        type: "tool_start",
+        run_id: R,
+        seq: index + 1,
+        call_id: "c1",
+        name,
+        args: {},
+      },
+      {
+        type: "tool_finish",
+        run_id: R,
+        seq: index + 1,
+        call_id: "c1",
+        name,
+        content: "ok",
+        is_error: false,
+      },
       { type: "step_finish", run_id: R, index, reason: "tool_calls", usage: U },
     ]
     const events: WireEvent[] = [
@@ -272,11 +318,22 @@ describe("StepList's subagent child rows (A10)", () => {
       ...call(1, "research"),
       { type: "run_finish", run_id: R, usage: U, steps: 2 },
     ]
-    const kid = { ...subDoc.children[0], id: `${R}/1/c1`, parent_run_id: R, parent_call_id: "c1" }
+    const kid = {
+      ...subDoc.children[0],
+      id: `${R}/1/c1`,
+      parent_run_id: R,
+      parent_call_id: "c1",
+    }
     const doc: RunDoc = { ...subDoc, id: R, children: [kid] }
-    await renderWithRouter(<StepList events={events} folded={fold(events)} doc={doc} />)
-    expect(document.querySelector(`[data-step="1"] [data-child-row="${kid.id}"]`)).toBeTruthy()
-    expect(document.querySelector(`[data-step="0"] [data-child-row]`)).toBeNull()
+    await renderWithRouter(
+      <StepList events={events} folded={fold(events)} doc={doc} />
+    )
+    expect(
+      document.querySelector(`[data-step="1"] [data-child-row="${kid.id}"]`)
+    ).toBeTruthy()
+    expect(
+      document.querySelector(`[data-step="0"] [data-child-row]`)
+    ).toBeNull()
   })
 
   // A10: a resumed run's step 0 holds two calls with one id (the
@@ -288,41 +345,107 @@ describe("StepList's subagent child rows (A10)", () => {
     const U = { input_tokens: 1, output_tokens: 1 }
     const events: WireEvent[] = [
       { type: "run_start", id: R, model: { provider: "p", name: "m" } },
-      { type: "tool_start", run_id: R, seq: 1, call_id: "c1", name: "research", args: {} },
-      { type: "tool_finish", run_id: R, seq: 1, call_id: "c1", name: "research", content: "resumed", is_error: false },
+      {
+        type: "tool_start",
+        run_id: R,
+        seq: 1,
+        call_id: "c1",
+        name: "research",
+        args: {},
+      },
+      {
+        type: "tool_finish",
+        run_id: R,
+        seq: 1,
+        call_id: "c1",
+        name: "research",
+        content: "resumed",
+        is_error: false,
+      },
       { type: "step_start", run_id: R, index: 0 },
-      { type: "tool_start", run_id: R, seq: 2, call_id: "c1", name: "research", args: {} },
-      { type: "tool_finish", run_id: R, seq: 2, call_id: "c1", name: "research", content: "own", is_error: false },
-      { type: "step_finish", run_id: R, index: 0, reason: "tool_calls", usage: U },
+      {
+        type: "tool_start",
+        run_id: R,
+        seq: 2,
+        call_id: "c1",
+        name: "research",
+        args: {},
+      },
+      {
+        type: "tool_finish",
+        run_id: R,
+        seq: 2,
+        call_id: "c1",
+        name: "research",
+        content: "own",
+        is_error: false,
+      },
+      {
+        type: "step_finish",
+        run_id: R,
+        index: 0,
+        reason: "tool_calls",
+        usage: U,
+      },
       { type: "run_finish", run_id: R, usage: U, steps: 1 },
     ]
     const base = subDoc.children[0]
-    const resumed = { ...base, id: `${R}/resume/c1`, parent_run_id: R, parent_call_id: "c1" }
-    const own = { ...base, id: `${R}/0/c1`, parent_run_id: R, parent_call_id: "c1" }
-    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const resumed = {
+      ...base,
+      id: `${R}/resume/c1`,
+      parent_run_id: R,
+      parent_call_id: "c1",
+    }
+    const own = {
+      ...base,
+      id: `${R}/0/c1`,
+      parent_run_id: R,
+      parent_call_id: "c1",
+    }
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
     client.setQueryData(stepQuery(R, 0).queryKey, {
-      children: [resumed, own].map((k) => ({ id: k.id, call_id: "c1", agent: "researcher", status: "succeeded", usage: k.usage })),
+      children: [resumed, own].map((k) => ({
+        id: k.id,
+        call_id: "c1",
+        agent: "researcher",
+        status: "succeeded",
+        usage: k.usage,
+      })),
     } as unknown as StepDoc)
     const errors = vi.spyOn(console, "error").mockImplementation(() => {})
     try {
       // The run document lists neither: the step route's two c1
       // children are ambiguous, so no call draws one.
       const { unmount } = await renderWithRouter(
-        <StepList events={events} folded={fold(events)} doc={{ ...subDoc, id: R, children: [] }} />,
+        <StepList
+          events={events}
+          folded={fold(events)}
+          doc={{ ...subDoc, id: R, children: [] }}
+        />,
         client
       )
-      expect(document.querySelectorAll(`[data-step="0"] [data-child-row]`).length).toBe(0)
+      expect(
+        document.querySelectorAll(`[data-step="0"] [data-child-row]`).length
+      ).toBe(0)
       unmount()
       // The run document lists both: each call its own.
       await renderWithRouter(
-        <StepList events={events} folded={fold(events)} doc={{ ...subDoc, id: R, children: [resumed, own] }} />,
+        <StepList
+          events={events}
+          folded={fold(events)}
+          doc={{ ...subDoc, id: R, children: [resumed, own] }}
+        />,
         client
       )
-      const rows = [...document.querySelectorAll(`[data-step="0"] [data-child-row]`)].map((r) =>
-        r.getAttribute("data-child-row")
-      )
+      const rows = [
+        ...document.querySelectorAll(`[data-step="0"] [data-child-row]`),
+      ].map((r) => r.getAttribute("data-child-row"))
       expect(rows).toEqual([resumed.id, own.id])
-      const dup = errors.mock.calls.filter((c) => String(c[0]).includes("same key"))
+      const dup = errors.mock.calls.filter((c) =>
+        String(c[0]).includes("same key")
+      )
       expect(dup).toEqual([])
     } finally {
       errors.mockRestore()

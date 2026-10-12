@@ -34,7 +34,9 @@ export const CACHE_HINT =
   "the adapter reported no cache splits: every input token was priced at the input rate, which may overstate a cached prompt"
 
 /** cacheNotReported: the figure was priced without cache splits. */
-export function cacheNotReported(f: Pick<CostFields, "cache"> | null | undefined): boolean {
+export function cacheNotReported(
+  f: Pick<CostFields, "cache"> | null | undefined
+): boolean {
   return !!f?.cache && f.cache !== "exact"
 }
 
@@ -52,7 +54,13 @@ export interface CostView {
 
 const UNKNOWN_WHY = "this Studio did not price it"
 
-function view(usd: number | null | undefined, known: boolean | undefined, reason: string | undefined, badge?: string, cache?: string): CostView {
+function view(
+  usd: number | null | undefined,
+  known: boolean | undefined,
+  reason: string | undefined,
+  badge?: string,
+  cache?: string
+): CostView {
   if (known && typeof usd === "number") {
     const exact = `$${usd.toFixed(6)} USD`
     return {
@@ -65,14 +73,24 @@ function view(usd: number | null | undefined, known: boolean | undefined, reason
   return {
     known: false,
     text: "—",
-    title: reason || (badge === "unpriced" ? "no row of the pricing table matches the model" : UNKNOWN_WHY),
+    title:
+      reason ||
+      (badge === "unpriced"
+        ? "no row of the pricing table matches the model"
+        : UNKNOWN_WHY),
     badge: badge || "unknown",
   }
 }
 
 /** costView reads an object's own cost block. */
 export function costView(f: CostFields | null | undefined): CostView {
-  return view(f?.cost_usd, f?.cost_known, f?.cost_reason, f?.cost_badge, f?.cache)
+  return view(
+    f?.cost_usd,
+    f?.cost_known,
+    f?.cost_reason,
+    f?.cost_badge,
+    f?.cache
+  )
 }
 
 /** The reason words studio/pricing.go gives a model no pricing row
@@ -93,18 +111,25 @@ const UNKNOWN_LEAD = /^[^:]*'s cost is not known yet:/
  * arrived, children that could not be read — even when the list names
  * an unpriced child too; else "unpriced" when it names an unpriced
  * model, else "unknown". The title is the API's reason either way. */
-export function delegatedView(f: DelegatedCostFields | null | undefined): CostView {
+export function delegatedView(
+  f: DelegatedCostFields | null | undefined
+): CostView {
   const known = f?.delegated_cost_known
   const reason = f?.delegated_cost_reason
   const badge =
-    known === false ? (reason && (UNKNOWN_LEAD.test(reason) || !UNPRICED_WORDS.test(reason)) ? "unknown" : "unpriced") : undefined
+    known === false
+      ? reason && (UNKNOWN_LEAD.test(reason) || !UNPRICED_WORDS.test(reason))
+        ? "unknown"
+        : "unpriced"
+      : undefined
   return view(f?.delegated_cost_usd, known, reason, badge)
 }
 
 /** The reason a lost matrix cell's cost carries: Studio stopped
  * following its command, so the run it may have started is not read
  * and the variant's total cannot be known. */
-export const LOST_CELL_REASON = "a lost cell has no cost: Studio stopped following its command, so the run it started is not read"
+export const LOST_CELL_REASON =
+  "a lost cell has no cost: Studio stopped following its command, so the run it started is not read"
 
 /** lostCellCost is a lost cell's figure: unknown, its own reason. */
 export function lostCellCost(): CostView {
@@ -115,10 +140,17 @@ export function lostCellCost(): CostView {
  * key (pricing.go's runCost.total): unknown when either part is. A
  * row without a delegated block (a Studio that sent none) counts own
  * alone only when it carries no delegated fields at all. */
-export function runTotal(r: CostFields & DelegatedCostFields): { usd: number; known: boolean } {
+export function runTotal(r: CostFields & DelegatedCostFields): {
+  usd: number
+  known: boolean
+} {
   const own = costView(r)
   if (!own.known) return { usd: 0, known: false }
-  if (r.delegated_cost_known === undefined && r.delegated_cost_usd === undefined) return { usd: own.usd ?? 0, known: true }
+  if (
+    r.delegated_cost_known === undefined &&
+    r.delegated_cost_usd === undefined
+  )
+    return { usd: own.usd ?? 0, known: true }
   const del = delegatedView(r)
   if (!del.known) return { usd: 0, known: false }
   return { usd: (own.usd ?? 0) + (del.usd ?? 0), known: true }
@@ -141,7 +173,9 @@ export function sortByCost<T extends RunRow>(runs: readonly T[]): T[] {
 /** sumCost totals runs' whole bills (a playground variant's runs):
  * unknown — with the first reason — when any run is missing or
  * unknown; an empty list is unknown too (nothing to total). */
-export function sumCost(rows: readonly (CostRow | CostView | null | undefined)[]): CostView {
+export function sumCost(
+  rows: readonly (CostRow | CostView | null | undefined)[]
+): CostView {
   if (!rows.length) return view(null, false, "no run to total")
   let usd = 0
   for (const r of rows) {
@@ -161,7 +195,8 @@ export function sumCost(rows: readonly (CostRow | CostView | null | undefined)[]
 
 /** A row sumCost and atLeastCost read: its cost blocks and, on a run
  * row, its derived mark (lib/honesty.ts's isDerived). */
-type CostRow = CostFields & DelegatedCostFields & { derived?: boolean; requests_badge?: string }
+type CostRow = CostFields &
+  DelegatedCostFields & { derived?: boolean; requests_badge?: string }
 
 /** totalUnknown is a run's whole bill when a part is not known: the
  * part's reason, led by what it means for a total. */
@@ -172,7 +207,10 @@ function totalUnknown(r: CostRow): CostView {
   // A derived run's own figure never resolves (its spans carry what usage
   // there is): "not known", never "not known yet" — keyed on the row's
   // derived mark, not on the API's words.
-  const what = badge === "unknown" ? `a run's cost is not known${!own.known && isDerived(r) ? "" : " yet"}` : "a run is not priced"
+  const what =
+    badge === "unknown"
+      ? `a run's cost is not known${!own.known && isDerived(r) ? "" : " yet"}`
+      : "a run is not priced"
   return view(null, false, `${what}: ${part.title}`, badge)
 }
 
@@ -208,7 +246,17 @@ export function atLeastCost(rows: readonly CostRow[], more?: string): CostView {
   const reasons = why.join("; ")
   const title = (lead: string) => [lead, more].filter(Boolean).join(" · ")
   if (!k) return view(null, false, title(reasons), badge || "unknown")
-  return { known: false, text: `≥ ${formatUSD(usd)}`, title: title(why.length ? `${k} of ${rows.length} runs' own cost known — ${reasons}` : ""), badge: badge || "unknown", usd }
+  return {
+    known: false,
+    text: `≥ ${formatUSD(usd)}`,
+    title: title(
+      why.length
+        ? `${k} of ${rows.length} runs' own cost known — ${reasons}`
+        : ""
+    ),
+    badge: badge || "unknown",
+    usd,
+  }
 }
 
 // ── The compare table's cost column ───────────────────────────────
@@ -238,10 +286,19 @@ export function costCellWords(
   side: CostFields | null | undefined
 ): { text: string; title: string; why: string } {
   const v = costView(side)
-  if (state === "changed") return { text: v.text, title: `${CELL_REASONS.changed} · ${v.title}`, why: "" }
+  if (state === "changed")
+    return {
+      text: v.text,
+      title: `${CELL_REASONS.changed} · ${v.title}`,
+      why: "",
+    }
   if (state === "unknown") {
     const why = v.known ? "the base run's is not" : v.title
-    return { text: CELL_WORDS.unknown, title: `a side's cost is not known: ${why}`, why }
+    return {
+      text: CELL_WORDS.unknown,
+      title: `a side's cost is not known: ${why}`,
+      why,
+    }
   }
   return { text: CELL_WORDS[state], title: CELL_REASONS[state], why: "" }
 }

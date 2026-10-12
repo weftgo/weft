@@ -7,7 +7,12 @@
 // call of a playground run offers "replay from this step" in the run
 // page's own drawer.
 import { useQuery } from "@tanstack/react-query"
-import { createFileRoute, Link, useNavigate, useRouter } from "@tanstack/react-router"
+import {
+  createFileRoute,
+  Link,
+  useNavigate,
+  useRouter,
+} from "@tanstack/react-router"
 import { ChevronRight } from "lucide-react"
 import { useCallback, useMemo, useState } from "react"
 
@@ -76,7 +81,10 @@ function TracePage() {
   // The replay drawer (plan F1's, as the run page mounts it): offered
   // when the server has the playground and the bearer may act.
   const replayable = canReplay(caps, studioToken())
-  const [replay, setReplay] = useState<{ req: ReplayRequest | null; n: number }>({ req: null, n: 0 })
+  const [replay, setReplay] = useState<{
+    req: ReplayRequest | null
+    n: number
+  }>({ req: null, n: 0 })
   const openReplay = useCallback(
     (req: ReplayRequest) => setReplay((cur) => ({ req, n: cur.n + 1 })),
     []
@@ -91,12 +99,18 @@ function TracePage() {
   // history entry, so back walks it — and the selection a cursor move,
   // replaced in place.
   const setView = (v: "tree" | "chat") =>
-    void navigate({ ...traceSelectionLink(id, { sel: resolved.key ?? wanted, view: v }) })
+    void navigate({
+      ...traceSelectionLink(id, { sel: resolved.key ?? wanted, view: v }),
+    })
   const setSel = (row: TraceRow) =>
-    void navigate({ ...traceSelectionLink(id, { sel: row.key, view }), replace: true })
+    void navigate({
+      ...traceSelectionLink(id, { sel: row.key, view }),
+      replace: true,
+    })
   const hrefOf = (row: TraceRow) =>
     router.history.createHref(
-      router.buildLocation(traceSelectionLink(id, { sel: row.key, view })).publicHref
+      router.buildLocation(traceSelectionLink(id, { sel: row.key, view }))
+        .publicHref
     )
 
   if (q.isPending) {
@@ -120,7 +134,9 @@ function TracePage() {
   const genai = spans.filter(isGenAISpan)
   const facts = traceFacts(spans)
   const runs = traceRuns(spans)
-  const selected = resolved.id ? rows.find((r) => r.id === resolved.id)?.timed?.span : undefined
+  const selected = resolved.id
+    ? rows.find((r) => r.id === resolved.id)?.timed?.span
+    : undefined
 
   return (
     <div className="space-y-3">
@@ -130,10 +146,14 @@ function TracePage() {
           {id.length > 16 ? "…" : ""}
         </h1>
         <span className="font-mono text-[11px] text-faint">
-          {spans.length} {spans.length === 1 ? "span" : "spans"} · {spanMs(facts.durationMs)}
+          {spans.length} {spans.length === 1 ? "span" : "spans"} ·{" "}
+          {spanMs(facts.durationMs)}
         </span>
         {has("traces") ? (
-          <Link {...tracesLink()} className="font-mono text-[11px] text-thread-ink hover:underline">
+          <Link
+            {...tracesLink()}
+            className="font-mono text-[11px] text-thread-ink hover:underline"
+          >
             all traces
           </Link>
         ) : null}
@@ -166,10 +186,17 @@ function TracePage() {
 
       {/* The trace as the list shows it (routes/traces.index.tsx), and
           the runs it holds. */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px]" data-trace-facts>
+      <div
+        className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px]"
+        data-trace-facts
+      >
         <span>
           <span className="text-faint">root </span>
-          {facts.root ? facts.root.name : <span className="text-muted-foreground">(no root span)</span>}
+          {facts.root ? (
+            facts.root.name
+          ) : (
+            <span className="text-muted-foreground">(no root span)</span>
+          )}
         </span>
         <span>
           <span className="text-faint">service </span>
@@ -186,10 +213,17 @@ function TracePage() {
             error
           </span>
         ) : null}
-        <nav aria-label="runs in this trace" className="flex flex-wrap items-center gap-x-2" data-trace-runs>
+        <nav
+          aria-label="runs in this trace"
+          className="flex flex-wrap items-center gap-x-2"
+          data-trace-runs
+        >
           <span className="text-faint">runs</span>
           {runs.length === 0 ? (
-            <span className="text-faint" title="no weft run: a trace of non-weft spans only">
+            <span
+              className="text-faint"
+              title="no weft run: a trace of non-weft spans only"
+            >
               —
             </span>
           ) : (
@@ -208,7 +242,11 @@ function TracePage() {
       </div>
 
       {resolved.ambiguous ? (
-        <p className="font-mono text-[11px] text-muted-foreground" role="status" data-sel-note>
+        <p
+          className="font-mono text-[11px] text-muted-foreground"
+          role="status"
+          data-sel-note
+        >
           {OLD_KEY_NOTE}
         </p>
       ) : null}
@@ -272,8 +310,14 @@ function TracePage() {
 function runStepOf(span: TimedSpan): { run: string; step: number } | null {
   const run = span.attrs["weft.run.id"]
   const raw = span.attrs["weft.step.index"]
-  const step = typeof raw === "number" ? raw : typeof raw === "string" && /^\d+$/.test(raw) ? Number(raw) : NaN
-  if (typeof run !== "string" || !run || !Number.isInteger(step) || step < 0) return null
+  const step =
+    typeof raw === "number"
+      ? raw
+      : typeof raw === "string" && /^\d+$/.test(raw)
+        ? Number(raw)
+        : NaN
+  if (typeof run !== "string" || !run || !Number.isInteger(step) || step < 0)
+    return null
   return { run, step }
 }
 
@@ -308,7 +352,13 @@ function ReplayFromHere({
       variant="outline"
       size="sm"
       data-replay-from-here={`${run}#${step}`}
-      onClick={(e) => onReplay({ runID: run, draft: replayFromStep(step), opener: e.currentTarget })}
+      onClick={(e) =>
+        onReplay({
+          runID: run,
+          draft: replayFromStep(step),
+          opener: e.currentTarget,
+        })
+      }
     >
       replay from this step
     </Button>
@@ -333,7 +383,10 @@ function SelectedSpan({
   }
   const chat = genaiChat(span.attrs)
   const modelCall = isModelCall(span.attrs)
-  const at = span.status === "error" && span.attrs["gen_ai.operation.name"] === "chat" ? runStepOf(span) : null
+  const at =
+    span.status === "error" && span.attrs["gen_ai.operation.name"] === "chat"
+      ? runStepOf(span)
+      : null
   return (
     <div className="grid min-w-0 gap-3">
       {at && onReplay ? (
@@ -345,17 +398,28 @@ function SelectedSpan({
         </div>
       ) : null}
       {chat.family || modelCall ? (
-        <section className="codewin" aria-label="chat" data-span-chat={chat.family ?? "not_recorded"}>
+        <section
+          className="codewin"
+          aria-label="chat"
+          data-span-chat={chat.family ?? "not_recorded"}
+        >
           <div className="codewin-bar">
             <span className="font-mono text-[11px] text-code-mut">
-              chat{chat.family === "legacy" ? " · legacy gen_ai.prompt / completion keys" : ""}
+              chat
+              {chat.family === "legacy"
+                ? " · legacy gen_ai.prompt / completion keys"
+                : ""}
             </span>
           </div>
           <div className="overflow-auto px-3 py-3">
             {chat.family ? (
               <ChatMessages messages={chat.messages} problems={chat.problems} />
             ) : (
-              <HoleBadge hole="not_recorded" reason={NO_MESSAGES_REASON} detail />
+              <HoleBadge
+                hole="not_recorded"
+                reason={NO_MESSAGES_REASON}
+                detail
+              />
             )}
           </div>
         </section>
@@ -398,13 +462,22 @@ function PartView({ part }: { part: ChatPart }) {
     case "text":
       return <div className="text-xs whitespace-pre-wrap">{part.text}</div>
     case "reasoning":
-      return <div className="text-xs whitespace-pre-wrap text-muted-foreground italic">{part.text}</div>
+      return (
+        <div className="text-xs whitespace-pre-wrap text-muted-foreground italic">
+          {part.text}
+        </div>
+      )
     case "tool_call":
       // As the run page's calls: the name, the arguments folded.
       return (
-        <details className="font-mono text-[11px]" data-chat-tool-call={part.name}>
+        <details
+          className="font-mono text-[11px]"
+          data-chat-tool-call={part.name}
+        >
           <summary className="cursor-pointer">
-            <span className="text-ev-tool">⚙ {part.name || "(unnamed tool)"}</span>
+            <span className="text-ev-tool">
+              ⚙ {part.name || "(unnamed tool)"}
+            </span>
             {part.id ? <span className="text-faint"> · {part.id}</span> : null}
           </summary>
           <div className="pt-1">
@@ -415,7 +488,9 @@ function PartView({ part }: { part: ChatPart }) {
     case "tool_result":
       return (
         <div className="font-mono text-[11px]">
-          <span className="text-faint">result{part.id ? ` · ${part.id}` : ""}</span>
+          <span className="text-faint">
+            result{part.id ? ` · ${part.id}` : ""}
+          </span>
           {typeof part.response === "string" ? (
             <div className="text-xs whitespace-pre-wrap">{part.response}</div>
           ) : (
@@ -445,7 +520,10 @@ function ChatMessages({
   fold?: boolean
 }) {
   const [open, setOpen] = useState(false)
-  const lastInput = messages.reduce((n, m, i) => (m.side === "input" ? i : n), -1)
+  const lastInput = messages.reduce(
+    (n, m, i) => (m.side === "input" ? i : n),
+    -1
+  )
   const hidden = fold && !open ? Math.max(0, lastInput) : 0
   return (
     <div className="space-y-2">
@@ -470,12 +548,16 @@ function ChatMessages({
           >
             <div className="flex items-center gap-2 font-mono text-[10px] tracking-wide text-muted-foreground uppercase">
               <span>{m.role}</span>
-              {m.finishReason ? <span className="normal-case">· {m.finishReason}</span> : null}
+              {m.finishReason ? (
+                <span className="normal-case">· {m.finishReason}</span>
+              ) : null}
             </div>
             {m.parts.length ? (
               m.parts.map((p, j) => <PartView key={j} part={p} />)
             ) : (
-              <span className="font-mono text-[11px] text-faint">(no parts)</span>
+              <span className="font-mono text-[11px] text-faint">
+                (no parts)
+              </span>
             )}
           </li>
         ))}
@@ -500,21 +582,36 @@ function GenAIConversation({ spans }: { spans: TimedSpan[] }) {
       {rows.map((sp) => {
         const chat = genaiChat(sp.attrs)
         if (!chat.family && !isModelCall(sp.attrs)) return null
-        const runID = typeof sp.attrs["weft.run.id"] === "string" ? sp.attrs["weft.run.id"] : null
+        const runID =
+          typeof sp.attrs["weft.run.id"] === "string"
+            ? sp.attrs["weft.run.id"]
+            : null
         return (
-          <section key={sp.span_id} className="space-y-1" aria-label={sp.name} data-chat-span={sp.span_id}>
+          <section
+            key={sp.span_id}
+            className="space-y-1"
+            aria-label={sp.name}
+            data-chat-span={sp.span_id}
+          >
             <div className="flex flex-wrap items-center gap-2 font-mono text-[11px] text-faint">
               <span className="text-foreground">{sp.name}</span>
               <span>{String(sp.attrs["gen_ai.operation.name"] ?? "")}</span>
               <span>{spanMs(Date.parse(sp.end) - Date.parse(sp.start))}</span>
               {runID ? (
-                <Link {...runLink(runID)} className="text-thread-ink hover:underline">
+                <Link
+                  {...runLink(runID)}
+                  className="text-thread-ink hover:underline"
+                >
                   {runID}
                 </Link>
               ) : null}
             </div>
             {chat.family ? (
-              <ChatMessages messages={chat.messages} problems={chat.problems} fold />
+              <ChatMessages
+                messages={chat.messages}
+                problems={chat.problems}
+                fold
+              />
             ) : (
               <HoleBadge hole="not_recorded" reason={NO_MESSAGES_REASON} />
             )}

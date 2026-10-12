@@ -2,7 +2,14 @@
 // §8.2): the experiment drawer's draft, the command body it becomes,
 // and the result slot the live lane fills. One API, two clients — the
 // Studio UI posts the same body to the same endpoint (V6).
-import type { AgentDefaults, Message, Part, PosEvent, RunRow, Transcript } from "../lib/api"
+import type {
+  AgentDefaults,
+  Message,
+  Part,
+  PosEvent,
+  RunRow,
+  Transcript,
+} from "../lib/api"
 import { labOverrides } from "../lib/experiment-body"
 import { editsProblem, wireEdits } from "../lib/edits"
 import type { ReplayEdit } from "../lib/edits"
@@ -157,7 +164,10 @@ export interface TurnWords {
 
 function textOf(m: Message): string {
   return m.content
-    .filter((p: Part | null): p is Extract<Part, { type: "text" }> => p?.type === "text")
+    .filter(
+      (p: Part | null): p is Extract<Part, { type: "text" }> =>
+        p?.type === "text"
+    )
     .map((p) => p.text)
     .join("")
 }
@@ -195,7 +205,9 @@ export function turnWordsOf(t: Transcript | null): TurnWords | null {
     if (input[i].role === "user") break
     from = i
   }
-  const said = [...input.slice(from), ...produced].filter((m) => m.role === "assistant")
+  const said = [...input.slice(from), ...produced].filter(
+    (m) => m.role === "assistant"
+  )
   const calls: string[] = []
   for (const m of said)
     for (const p of m.content as (Part | null)[])
@@ -206,15 +218,23 @@ export function turnWordsOf(t: Transcript | null): TurnWords | null {
 /** foldedWords reads the same words off a fold (no transcript). */
 export function foldedWords(f: FoldedRun): TurnWords {
   return {
-    text: f.steps.map((s) => s.text).filter(Boolean).join("\n"),
-    calls: f.steps.flatMap((s) => s.toolCalls).map((c) => callLine(c.name, c.args)),
+    text: f.steps
+      .map((s) => s.text)
+      .filter(Boolean)
+      .join("\n"),
+    calls: f.steps
+      .flatMap((s) => s.toolCalls)
+      .map((c) => callLine(c.name, c.args)),
   }
 }
 
 /** experimentLabel builds `t3·x1`: the source turn's t-number from its
  * run id (`<session>-t3`), the experiment's 1-based index among the
  * runs that forked from it. */
-export function experimentLabel(sourceRunID: string, forkedCount: number): string {
+export function experimentLabel(
+  sourceRunID: string,
+  forkedCount: number
+): string {
   const m = /-t(\d+)$/.exec(sourceRunID)
   const turn = m ? `t${m[1]}` : sourceRunID.slice(-8)
   return `${turn}·x${forkedCount + 1}`
@@ -226,12 +246,18 @@ export function experimentLabel(sourceRunID: string, forkedCount: number): strin
  * opposite of what the drawer shows. */
 export function draftProblem(draft: ExperimentDraft): string | null {
   // Studio's buildRunBody refuses the same (lib/experiment-body.ts).
-  if (draft.thread === "fork" && !(draft.runId && draft.input.trim() && draft.step === 0))
+  if (
+    draft.thread === "fork" &&
+    !(draft.runId && draft.input.trim() && draft.step === 0)
+  )
     return "fork continues the conversation in a new session: it needs a source run, an input, and step 0"
   const names = Object.keys(draft.tools)
   if (names.length && !names.some((n) => draft.tools[n]))
     return "at least one tool must stay on — the command cannot express an empty tool set (it would run with every tool)"
-  return editsProblem(draft.thread, draft.step, draft.edits) || (labOf(draft).problems[0]?.message ?? null)
+  return (
+    editsProblem(draft.thread, draft.step, draft.edits) ||
+    (labOf(draft).problems[0]?.message ?? null)
+  )
 }
 
 /** labOf is the drawer's option lab through Studio's labOverrides: the
@@ -241,7 +267,11 @@ export function labOf(draft: ExperimentDraft) {
   const on = names.filter((n) => draft.tools[n])
   return labOverrides(
     draft.lab,
-    { name: draft.agent, defaults: draft.defaults, tools: names.map((name) => ({ name })) },
+    {
+      name: draft.agent,
+      defaults: draft.defaults,
+      tools: names.map((name) => ({ name })),
+    },
     on.length < names.length ? on : []
   )
 }
@@ -251,7 +281,10 @@ export function labOf(draft: ExperimentDraft) {
  * something changed — an ordinary run has none of them). The body is
  * Studio's (lib/experiment-body.ts's buildRunBody) for the same draft,
  * key for key and in the same order — replay.test.ts builds both. */
-export function buildRunBody(draft: ExperimentDraft, publicId: string): Record<string, unknown> {
+export function buildRunBody(
+  draft: ExperimentDraft,
+  publicId: string
+): Record<string, unknown> {
   const toolsEnabled = Object.entries(draft.tools)
     .filter(([, on]) => on)
     .map(([name]) => name)
@@ -260,7 +293,10 @@ export function buildRunBody(draft: ExperimentDraft, publicId: string): Record<s
   // Studio's playground applies: variant.instructions !== registered).
   if (draft.instructions && draft.instructions !== draft.registeredInstructions)
     overrides.instructions = draft.instructions
-  if (toolsEnabled.length && toolsEnabled.length < Object.keys(draft.tools).length)
+  if (
+    toolsEnabled.length &&
+    toolsEnabled.length < Object.keys(draft.tools).length
+  )
     overrides.tools_enabled = toolsEnabled
   if (draft.model) overrides.model = draft.model
   if (draft.thinking) overrides.thinking = draft.thinking
@@ -287,7 +323,10 @@ export function buildRunBody(draft: ExperimentDraft, publicId: string): Record<s
  * exposing the source run's agent — the one seen last when several do
  * (a restarted app registers again under a new id, and the old
  * registration lingers) — else the first listed. */
-export function pickRuntime(runtimes: RuntimeView[], agent: string): RuntimeView | null {
+export function pickRuntime(
+  runtimes: RuntimeView[],
+  agent: string
+): RuntimeView | null {
   const live = runtimes.filter((r) => r.agents.some((a) => a.name === agent))
   if (!live.length) return runtimes[0] ?? null
   const seen = (r: RuntimeView) => Date.parse(r.last_seen) || 0

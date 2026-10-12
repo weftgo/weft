@@ -42,7 +42,8 @@ export type PanelPosition = "bottom-right" | "bottom-left" | "right-dock"
 
 /** data-position's values (D1): the float's corner, or a dock's side —
  * the initial value; the stored layout wins once there is one. */
-export type PanelPlacement = PanelPosition | "left-dock" | "top-dock" | "bottom-dock"
+export type PanelPlacement =
+  PanelPosition | "left-dock" | "top-dock" | "bottom-dock"
 
 export interface PanelConfig {
   /** Studio base URL, trailing slash included (default: the script's
@@ -114,14 +115,21 @@ export interface MountOptions {
 }
 
 /** data-detect's values; "" is unset. */
-export type DetectSetting = "" | "headers" | "markers" | "headers,markers" | "off"
+export type DetectSetting =
+  "" | "headers" | "markers" | "headers,markers" | "off"
 
 /** detectSetting reads a data-detect value: "off" wherever it is
  * named (the author asked for less), else the rungs it names (headers,
  * markers, comma-separated, either order, empty words skipped); a
  * value naming anything else is unset — the defaults apply. */
 export function detectSetting(v: string | null | undefined): DetectSetting {
-  const words = new Set(String(v ?? "").toLowerCase().split(",").map((w) => w.trim()).filter(Boolean))
+  const words = new Set(
+    String(v ?? "")
+      .toLowerCase()
+      .split(",")
+      .map((w) => w.trim())
+      .filter(Boolean)
+  )
   if (words.has("off")) return "off"
   const h = words.delete("headers")
   const m = words.delete("markers")
@@ -129,11 +137,32 @@ export function detectSetting(v: string | null | undefined): DetectSetting {
   return h && m ? "headers,markers" : h ? "headers" : m ? "markers" : ""
 }
 
-const POSITIONS: PanelPlacement[] = ["bottom-right", "bottom-left", "right-dock", "left-dock", "top-dock", "bottom-dock"]
+const POSITIONS: PanelPlacement[] = [
+  "bottom-right",
+  "bottom-left",
+  "right-dock",
+  "left-dock",
+  "top-dock",
+  "bottom-dock",
+]
 
 /** The fields, by their attribute stem: data-<stem> on the element and
  * the script tag, weft:<stem> on a meta tag. */
-export const FIELDS = ["endpoint", "scope", "public-id", "token", "detect", "position", "open", "auto", "global", "mode", "push", "z-index", "theme"] as const
+export const FIELDS = [
+  "endpoint",
+  "scope",
+  "public-id",
+  "token",
+  "detect",
+  "position",
+  "open",
+  "auto",
+  "global",
+  "mode",
+  "push",
+  "z-index",
+  "theme",
+] as const
 type Field = (typeof FIELDS)[number]
 
 /** The script running now, captured while the bundle evaluates: a
@@ -211,12 +240,19 @@ export function findPanelScript(): HTMLScriptElement | null {
   const npm = entry.npm
   if (!npm && bootScript?.isConnected) return bootScript
   try {
-    const tagged = document.querySelector<HTMLScriptElement>("script[data-weft]")
+    const tagged =
+      document.querySelector<HTMLScriptElement>("script[data-weft]")
     if (tagged) return tagged
     if (npm || !selfURL) return null
-    for (const s of Array.from(document.querySelectorAll<HTMLScriptElement>("script[src]"))) {
+    for (const s of Array.from(
+      document.querySelectorAll<HTMLScriptElement>("script[src]")
+    )) {
       try {
-        if (new URL(s.getAttribute("src") ?? "", document.baseURI).href === selfURL) return s
+        if (
+          new URL(s.getAttribute("src") ?? "", document.baseURI).href ===
+          selfURL
+        )
+          return s
       } catch {
         // an unparsable src is not the panel's
       }
@@ -299,21 +335,35 @@ function scopeOption(v: unknown): string | undefined {
 function metaRung(): Rung {
   return (f) => {
     try {
-      return document.querySelector(`meta[name="weft:${f}"]`)?.getAttribute("content") ?? null
+      return (
+        document
+          .querySelector(`meta[name="weft:${f}"]`)
+          ?.getAttribute("content") ?? null
+      )
     } catch {
       return null
     }
   }
 }
 
-const attrRung = (n: Element | null | undefined): Rung => (f) => n?.getAttribute(`data-${f}`) ?? null
+const attrRung =
+  (n: Element | null | undefined): Rung =>
+  (f) =>
+    n?.getAttribute(`data-${f}`) ?? null
 
 /** readConfig resolves every field through the ladder; el is the
  * <weft-devtools> element (its attributes are rung 2, its mount
  * options rung 1). */
-export function readConfig(el?: HTMLElement & { options?: MountOptions | null }): PanelConfig {
+export function readConfig(
+  el?: HTMLElement & { options?: MountOptions | null }
+): PanelConfig {
   const script = findPanelScript()
-  const rungs: Rung[] = [optionsRung(el?.options), attrRung(el), metaRung(), attrRung(script)]
+  const rungs: Rung[] = [
+    optionsRung(el?.options),
+    attrRung(el),
+    metaRung(),
+    attrRung(script),
+  ]
   /** pick: the first rung that sets f. For the endpoint an empty value
    * (data-endpoint="", content="") sets nothing — it falls through, so
    * it neither resolves to the page's own URL nor skips rung 5. */
@@ -328,9 +378,10 @@ export function readConfig(el?: HTMLElement & { options?: MountOptions | null })
   const raw = pick("endpoint")
   // A given endpoint that cannot be used is no endpoint — never some
   // other origin: the token goes where the endpoint says, or nowhere.
-  const endpoint = raw !== null
-    ? normalize(raw, document.baseURI)
-    : dir || normalize("./", document.baseURI)
+  const endpoint =
+    raw !== null
+      ? normalize(raw, document.baseURI)
+      : dir || normalize("./", document.baseURI)
   const position = pick("position")
   const open = pick("open")
   // The scope: at each rung data-scope, then data-public-id; the first
@@ -360,7 +411,12 @@ export function readConfig(el?: HTMLElement & { options?: MountOptions | null })
     configURL: raw === null && dir ? dir + "panel-config.json" : "",
     publicId: scope.publicId,
     scope,
-    scopeExplicit: !!(scope.publicId || scope.session || scope.flow || scope.run),
+    scopeExplicit: !!(
+      scope.publicId ||
+      scope.session ||
+      scope.flow ||
+      scope.run
+    ),
     urlScope: urlScope(),
     token: pick("token") ?? "",
     detect: detectSetting(detect),
@@ -373,7 +429,9 @@ export function readConfig(el?: HTMLElement & { options?: MountOptions | null })
     zIndex: /^-?\d+$/.test(z) ? z : "",
     theme: themeSetting(pick("theme")),
     auto: pick("auto") !== "false",
-    global: !["off", "false"].includes((pick("global") ?? "").trim().toLowerCase()),
+    global: !["off", "false"].includes(
+      (pick("global") ?? "").trim().toLowerCase()
+    ),
   }
 }
 
@@ -385,7 +443,10 @@ export function readConfig(el?: HTMLElement & { options?: MountOptions | null })
  * somewhere the page did not name. "" on anything else (a 404, not
  * JSON, no answer): the caller falls through to rung 6. No token and
  * no credentials go with the request. */
-export async function discoverEndpoint(configURL: string, signal?: AbortSignal): Promise<string> {
+export async function discoverEndpoint(
+  configURL: string,
+  signal?: AbortSignal
+): Promise<string> {
   if (signal?.aborted) return ""
   try {
     const res = await fetch(configURL, {
@@ -409,7 +470,8 @@ export async function discoverEndpoint(configURL: string, signal?: AbortSignal):
  * getter of the page's that throws is not the panel's to surface). */
 export function weftPublicId(): string {
   try {
-    const id = (window as { __WEFT__?: { publicId?: unknown } | null }).__WEFT__?.publicId
+    const id = (window as { __WEFT__?: { publicId?: unknown } | null }).__WEFT__
+      ?.publicId
     return id == null ? "" : String(id)
   } catch {
     return ""
@@ -422,7 +484,9 @@ export function weftPublicId(): string {
  * (a getter of the page's that throws is not the panel's to surface). */
 export function weftScope(): Scope {
   try {
-    const w = (window as { __WEFT__?: { scope?: unknown; publicId?: unknown } | null }).__WEFT__
+    const w = (
+      window as { __WEFT__?: { scope?: unknown; publicId?: unknown } | null }
+    ).__WEFT__
     const sc = w?.scope
     if (typeof sc === "string") return parseScope(sc)
     const form = scopeOption(sc)
@@ -498,7 +562,11 @@ export function headerRungOn(
 ): boolean {
   if (cfg.detect === "off") return false
   if (cfg.detect.includes("headers")) return true
-  return isLoopback(page) && isLoopback(cfg.endpoint) && !cfg.token.startsWith("weft_pt.")
+  return (
+    isLoopback(page) &&
+    isLoopback(cfg.endpoint) &&
+    !cfg.token.startsWith("weft_pt.")
+  )
 }
 
 /** markerRungOn is the DOM-marker rung's switch (plan C3.3): it reads
@@ -536,7 +604,8 @@ export const tokenScope = tokenScopeOf
  * and dropped (D1); removing that key turns the switch off. */
 export function debugForced(): boolean {
   try {
-    if (new URLSearchParams(location.search).get("weft") === "debug") return true
+    if (new URLSearchParams(location.search).get("weft") === "debug")
+      return true
     if (migrateDebug()) return true
   } catch {
     // about:blank and friends: not forced

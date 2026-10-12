@@ -16,14 +16,22 @@ import { runQuery, transcriptQuery } from "@/lib/api"
 import { compactionsOf } from "@/lib/compaction"
 import { applyTranscript, linkView } from "@/lib/events"
 import { usageSummary } from "@/lib/format"
-import { mergeHoles, rowHoles, USAGE_AT_FINISH, usageKnown } from "@/lib/honesty"
+import {
+  mergeHoles,
+  rowHoles,
+  USAGE_AT_FINISH,
+  usageKnown,
+} from "@/lib/honesty"
 import { useRunEvents } from "@/hooks/use-run-events"
 
 import { HoleBadges } from "@/components/studio/hole-badge"
 import { ChildVerb, StepVerbs } from "@/components/studio/replay-verbs"
 import { replayBounds } from "@/lib/experiment-body"
 import { StepBody } from "@/components/studio/step-list"
-import { RequestSection, useRunRequests } from "@/components/studio/step-request"
+import {
+  RequestSection,
+  useRunRequests,
+} from "@/components/studio/step-request"
 import { runLink } from "@/lib/links"
 
 /** A child run as the parent's page knows it: the run document's
@@ -33,7 +41,9 @@ import { runLink } from "@/lib/links"
 export type ChildRow = Pick<RunRow, "id" | "agent" | "parent_call_id"> & {
   status: RunStatus
   usage: Usage
-} & Partial<Omit<RunRow, "id" | "agent" | "parent_call_id" | "status" | "usage">>
+} & Partial<
+    Omit<RunRow, "id" | "agent" | "parent_call_id" | "status" | "usage">
+  >
 
 /** childOfStep reads a step route child (A7's children[]) as a row. */
 export function childOfStep(c: StepChild): ChildRow {
@@ -68,7 +78,9 @@ export function SubagentBlock({
   // terminal (the run page refreshes it); the block's own document was
   // read on expand and is not polled.
   const childStatus =
-    child.status !== "running" ? child.status : (doc.data?.status ?? child.status)
+    child.status !== "running"
+      ? child.status
+      : (doc.data?.status ?? child.status)
   // A child that ends while open: its words are in the transcript
   // (deltas are not stored), read again now — the copy read on expand
   // holds only what the child had said by then.
@@ -78,8 +90,12 @@ export function SubagentBlock({
     const was = wasStatus.current
     wasStatus.current = childStatus
     if (!open || was !== "running" || childStatus === "running") return
-    void queryClient.invalidateQueries({ queryKey: runQuery(child.id).queryKey })
-    void queryClient.invalidateQueries({ queryKey: transcriptQuery(child.id).queryKey })
+    void queryClient.invalidateQueries({
+      queryKey: runQuery(child.id).queryKey,
+    })
+    void queryClient.invalidateQueries({
+      queryKey: transcriptQuery(child.id).queryKey,
+    })
   }, [open, childStatus, child.id, queryClient])
   const stream = useRunEvents(open ? child.id : "", childStatus)
   // The child's own request record, by the child's id (A10): each of
@@ -102,10 +118,7 @@ export function SubagentBlock({
   // The child's holes: its document's once read, its row's before.
   const holes = mergeHoles(doc.data?.holes ?? rowHoles(child))
 
-  const folded =
-    stream.events.length > 0
-      ? stream.folded
-      : null
+  const folded = stream.events.length > 0 ? stream.folded : null
   const overlaid =
     folded && transcript.data
       ? applyTranscript(folded, transcript.data.batches, {
@@ -121,7 +134,9 @@ export function SubagentBlock({
   const childAt = {
     runID: child.id,
     agent: child.agent,
-    maxFromStep: transcript.data ? replayBounds(transcript.data.batches).max : null,
+    maxFromStep: transcript.data
+      ? replayBounds(transcript.data.batches).max
+      : null,
     canFork: false,
   }
 
@@ -199,7 +214,11 @@ export function SubagentBlock({
         <div className="space-y-2 border-l border-ev-tool/25 pl-3">
           {view ? (
             view.steps.map((step) => (
-              <div key={step.index} className="group/row space-y-1.5" data-child-step={step.index}>
+              <div
+                key={step.index}
+                className="group/row space-y-1.5"
+                data-child-step={step.index}
+              >
                 <div className="flex items-center gap-2">
                   <span className="eyebrow">step {step.index}</span>
                   {step.finish ? (

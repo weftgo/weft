@@ -82,7 +82,14 @@ export interface ReplayLinkState {
   of?: string
 }
 
-const REPLAY_VERBS: readonly ReplayVerb[] = ["from_step", "edit_result", "edit_prompt", "rerun", "continue", "edit"]
+const REPLAY_VERBS: readonly ReplayVerb[] = [
+  "from_step",
+  "edit_result",
+  "edit_prompt",
+  "rerun",
+  "continue",
+  "edit",
+]
 
 /** replaySearch is the drawer's state as search keys, every one present
  * (undefined clears it — a closed drawer). */
@@ -97,17 +104,31 @@ export function replaySearch(r: ReplayLinkState | null): {
 
 /** replayFromSearch reads the drawer's state back from a run page's
  * search (null: no drawer, or a verb this Studio does not know). */
-export function replayFromSearch(search: Record<string, unknown>): ReplayLinkState | null {
+export function replayFromSearch(
+  search: Record<string, unknown>
+): ReplayLinkState | null {
   const verb = REPLAY_VERBS.find((v) => v === search.replay)
   if (!verb) return null
   const from = ordinal(search.from as number | undefined) ?? 0
-  const of = typeof search.of === "string" && search.of ? search.of : typeof search.of === "number" ? String(search.of) : undefined
+  const of =
+    typeof search.of === "string" && search.of
+      ? search.of
+      : typeof search.of === "number"
+        ? String(search.of)
+        : undefined
   return of ? { verb, from, of } : { verb, from }
 }
 
 /** The raw view's event kinds (lib/summarize.ts's EventKind), as a
  * link's ?hide= names them. */
-export const RAW_KINDS = ["step", "tool", "result", "error", "reasoning", "delta"] as const
+export const RAW_KINDS = [
+  "step",
+  "tool",
+  "result",
+  "error",
+  "reasoning",
+  "delta",
+] as const
 export type RawKind = (typeof RAW_KINDS)[number]
 
 /** The raw view's state a link carries (G2). */
@@ -348,7 +369,8 @@ export function runLink(id: string, opts: RunLinkOptions = {}): RunLink {
   // Key order is the URL's order: step first, then the view.
   if (step !== undefined) search.step = step
   if (opts.view && opts.view !== "trace") search.view = opts.view
-  if (step !== undefined && (opts.pane === "request" || opts.pane === "wire")) search.pane = opts.pane
+  if (step !== undefined && (opts.pane === "request" || opts.pane === "wire"))
+    search.pane = opts.pane
   if (opts.call && (opts.resumed || step !== undefined))
     search.sel = `c:${opts.resumed ? "resume" : String(step)}:${opts.call}`
   else if (opts.span) search.sel = `t:${opts.span}`
@@ -394,7 +416,11 @@ export function rawSearch(raw: RawLinkState): {
  * Unknown kinds and a position that is not an ordinal are dropped. */
 export function rawFromSearch(search: Record<string, unknown>): RawLinkState {
   const q =
-    typeof search.q === "string" ? search.q : typeof search.q === "number" ? String(search.q) : ""
+    typeof search.q === "string"
+      ? search.q
+      : typeof search.q === "number"
+        ? String(search.q)
+        : ""
   const hide =
     typeof search.hide === "string"
       ? RAW_KINDS.filter((k) => (search.hide as string).split(",").includes(k))
@@ -426,7 +452,9 @@ export function traceSelectionLink(
   opts: { sel?: string; view?: "tree" | "chat" } = {}
 ): TraceLink {
   const link = traceLink(id, { view: opts.view })
-  return opts.sel ? { ...link, search: { sel: opts.sel, ...link.search } } : link
+  return opts.sel
+    ? { ...link, search: { sel: opts.sel, ...link.search } }
+    : link
 }
 
 /** runsLink is the runs list under these filters (empty values are
@@ -434,7 +462,8 @@ export function traceSelectionLink(
 export function runsLink(search: RunsSearch = {}): RunsLink {
   const out: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(search))
-    if (v !== undefined && v !== "" && !(Array.isArray(v) && v.length === 0)) out[k] = v
+    if (v !== undefined && v !== "" && !(Array.isArray(v) && v.length === 0))
+      out[k] = v
   return { to: "/runs", search: out }
 }
 
@@ -542,7 +571,11 @@ export function playgroundShareLink(state: string): PlaygroundLink {
  * (rows by step ordinal; N-way is N−1 diffs against a), optionally
  * landing on one step (its ordinal). Empty ids and the base itself are
  * dropped from others, duplicates kept once. */
-export function compareLink(a: string, others: string[] = [], step?: number): CompareLink {
+export function compareLink(
+  a: string,
+  others: string[] = [],
+  step?: number
+): CompareLink {
   const b = [...new Set(others.filter((x) => x && x !== a))]
   const search: CompareSearch = { a }
   if (b.length) search.b = b
@@ -586,7 +619,16 @@ export function path(link: StudioLink): string {
  * hand-off rides the fragment).
  * Studio's own pages strip a handed-over token on arrival (adoptTokenFromLocation); this is the second wall, so a
  * "copy link" can never leak one. */
-const STRIPPED_KEYS = ["token", "access_token", "sig", "weft_scope", "input", "instructions", "edits", "lab"]
+const STRIPPED_KEYS = [
+  "token",
+  "access_token",
+  "sig",
+  "weft_scope",
+  "input",
+  "instructions",
+  "edits",
+  "lab",
+]
 
 /**
  * canonical is the page's link as a reader copies it (G2's copy link):
@@ -599,7 +641,8 @@ export function canonical(url: string | URL): string {
   const u = new URL(url)
   u.hash = ""
   // Only a present key is deleted: a delete re-serializes the query.
-  for (const k of STRIPPED_KEYS) if (u.searchParams.has(k)) u.searchParams.delete(k)
+  for (const k of STRIPPED_KEYS)
+    if (u.searchParams.has(k)) u.searchParams.delete(k)
   return u.toString()
 }
 
@@ -638,5 +681,7 @@ export function appLink(page: string, scope: Scope): string | null {
   if (u.protocol !== "http:" && u.protocol !== "https:") return null
   u.hash = ""
   const base = u.toString()
-  return scope.publicId ? `${base}#weft_scope=${encodeURIComponent(serializeScope(scope))}` : base
+  return scope.publicId
+    ? `${base}#weft_scope=${encodeURIComponent(serializeScope(scope))}`
+    : base
 }

@@ -328,15 +328,14 @@ export function spansFromTimed(timed: TimedSpan[]): Span[] {
     const endMs = Date.parse(sp.end)
     const toMs =
       Number.isFinite(endMs) && Number.isFinite(t0) ? endMs - t0 : null
-    const runID = typeof sp.attrs["weft.run.id"] === "string"
-      ? (sp.attrs["weft.run.id"])
-      : ""
+    const runID =
+      typeof sp.attrs["weft.run.id"] === "string" ? sp.attrs["weft.run.id"] : ""
     // The core names a span "<operation> <name>" ("invoke_agent
     // planner"): the operation attribute says what it is, the name's
     // first word is the fallback for spans that carry none.
     const op =
       typeof sp.attrs["gen_ai.operation.name"] === "string"
-        ? (sp.attrs["gen_ai.operation.name"])
+        ? sp.attrs["gen_ai.operation.name"]
         : sp.name.split(" ")[0]
     out.push({
       id: `t:${sp.span_id}`,
@@ -346,8 +345,10 @@ export function spansFromTimed(timed: TimedSpan[]): Span[] {
       kind: op === "invoke_agent" ? "run" : "tool",
       label: sp.name,
       sub: sp.service || undefined,
-      badge: sp.status === "error" ? "error" : sp.status === "ok" ? "ok" : undefined,
-      tone: sp.status === "error" ? "bad" : sp.status === "ok" ? "tool" : "step",
+      badge:
+        sp.status === "error" ? "error" : sp.status === "ok" ? "ok" : undefined,
+      tone:
+        sp.status === "error" ? "bad" : sp.status === "ok" ? "tool" : "step",
       from: fromMs,
       to: toMs,
       timed: { span: sp, fromMs, toMs },
@@ -357,8 +358,14 @@ export function spansFromTimed(timed: TimedSpan[]): Span[] {
   // Depth-first without recursion (a deep trace must not overflow the
   // stack): the work list holds a span with the row it hangs under.
   const walk = (start: TimedSpan[]) => {
-    const stack: { sp: TimedSpan; parent: string | undefined; depth: number }[] =
-      [...start].sort(byStart).reverse().map((sp) => ({ sp, parent: undefined, depth: 0 }))
+    const stack: {
+      sp: TimedSpan
+      parent: string | undefined
+      depth: number
+    }[] = [...start]
+      .sort(byStart)
+      .reverse()
+      .map((sp) => ({ sp, parent: undefined, depth: 0 }))
     for (let item = stack.pop(); item; item = stack.pop()) {
       const { sp, parent, depth } = item
       if (placed.has(sp)) continue
@@ -366,7 +373,11 @@ export function spansFromTimed(timed: TimedSpan[]): Span[] {
       row(sp, parent, depth)
       const children = (kids.get(sp.span_id) ?? []).slice().sort(byStart)
       for (let i = children.length - 1; i >= 0; i--)
-        stack.push({ sp: children[i], parent: `t:${sp.span_id}`, depth: depth + 1 })
+        stack.push({
+          sp: children[i],
+          parent: `t:${sp.span_id}`,
+          depth: depth + 1,
+        })
     }
   }
   walk(roots)

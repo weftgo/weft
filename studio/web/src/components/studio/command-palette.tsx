@@ -67,7 +67,8 @@ import {
   CommandList,
 } from "@/components/ui/command"
 
-export const PALETTE_PLACEHOLDER = "Search runs, sessions, traces, experiments… or a command"
+export const PALETTE_PLACEHOLDER =
+  "Search runs, sessions, traces, experiments… or a command"
 
 /** The input's settled text: what the run search asks for. */
 function useDebounced(value: string, ms: number): string {
@@ -121,7 +122,10 @@ export function CommandPalette({
   const playgroundOn = has("playground")
   // Never under a panel token: the experiments routes refuse it.
   const experimentsOn = mayReadExperiments(playgroundOn ? ["playground"] : [])
-  const experiments = useQuery({ ...experimentsQuery(), enabled: open && experimentsOn })
+  const experiments = useQuery({
+    ...experimentsQuery(),
+    enabled: open && experimentsOn,
+  })
 
   const close = () => onOpenChange(false)
   const go = (nav: () => Promise<unknown>) => {
@@ -136,7 +140,9 @@ export function CommandPalette({
   // matches by id and agent.
   const hitRows = term && searchable ? (hits.data?.runs ?? []) : []
   const hitIDs = new Set(hitRows.map((r) => r.id))
-  const recentRows = (recent.data?.runs ?? []).filter((r) => !hitIDs.has(r.id)).slice(0, 25)
+  const recentRows = (recent.data?.runs ?? [])
+    .filter((r) => !hitIDs.has(r.id))
+    .slice(0, 25)
   const runItem = (r: RunRow, hit: boolean) => (
     <CommandItem
       key={r.id}
@@ -161,13 +167,22 @@ export function CommandPalette({
       {/* The dialog is the frame; cmdk's root (its store) is Command —
           without it every item throws on open. */}
       <Command>
-        <CommandInput placeholder={PALETTE_PLACEHOLDER} value={input} onValueChange={setInput} />
+        <CommandInput
+          placeholder={PALETTE_PLACEHOLDER}
+          value={input}
+          onValueChange={setInput}
+        />
         <CommandList>
           <CommandEmpty>Nothing matches.</CommandEmpty>
-          <CommandGroup heading={searchable ? "Runs" : "Runs (by id: this Studio cannot search)"}>
+          <CommandGroup
+            heading={
+              searchable ? "Runs" : "Runs (by id: this Studio cannot search)"
+            }
+          >
             {hitRows.map((r) => runItem(r, true))}
             {recentRows.map((r) => runItem(r, false))}
-            {(recent.isPending || (searchable && term && hits.isPending)) && open ? (
+            {(recent.isPending || (searchable && term && hits.isPending)) &&
+            open ? (
               <CommandItem disabled value="loading runs">
                 loading…
               </CommandItem>
@@ -176,7 +191,9 @@ export function CommandPalette({
               <CommandItem
                 value={`run:all matches ${input}`}
                 keywords={term === input.trim() ? [input] : undefined}
-                onSelect={() => go(() => router.navigate(runsLink({ q: term })))}
+                onSelect={() =>
+                  go(() => router.navigate(runsLink({ q: term })))
+                }
               >
                 <List data-slot="icon" />
                 All runs matching “{term}”
@@ -205,11 +222,15 @@ export function CommandPalette({
                 <CommandItem
                   key={t.trace_id}
                   value={`trace:${t.trace_id} ${t.root?.name ?? ""} ${t.service}`}
-                  onSelect={() => go(() => router.navigate(traceLink(t.trace_id)))}
+                  onSelect={() =>
+                    go(() => router.navigate(traceLink(t.trace_id)))
+                  }
                   data-palette-kind="trace"
                 >
                   <Network data-slot="icon" />
-                  <span className="truncate text-xs">{t.root?.name ?? "(no root span)"}</span>
+                  <span className="truncate text-xs">
+                    {t.root?.name ?? "(no root span)"}
+                  </span>
                   <span className="ml-auto truncate font-mono text-[11px] text-muted-foreground">
                     {t.trace_id.slice(0, 12)} · {t.service}
                   </span>
@@ -223,43 +244,65 @@ export function CommandPalette({
                 <CommandItem
                   key={x.id}
                   value={`experiment:${x.name} ${x.id} ${x.agent}`}
-                  onSelect={() => go(() => router.navigate(experimentLink(x.id)))}
+                  onSelect={() =>
+                    go(() => router.navigate(experimentLink(x.id)))
+                  }
                   data-palette-kind="experiment"
                 >
                   <FlaskConical data-slot="icon" />
                   <span className="truncate text-xs">{x.name || x.id}</span>
-                  <span className="ml-auto text-xs text-muted-foreground">{x.agent}</span>
+                  <span className="ml-auto text-xs text-muted-foreground">
+                    {x.agent}
+                  </span>
                 </CommandItem>
               ))}
             </CommandGroup>
           ) : null}
           <CommandGroup heading="Go to">
-            <CommandItem value="runs list" onSelect={() => go(() => router.navigate(runsLink()))}>
+            <CommandItem
+              value="runs list"
+              onSelect={() => go(() => router.navigate(runsLink()))}
+            >
               <List data-slot="icon" />
               Runs
             </CommandItem>
-            <CommandItem value="sessions threads" onSelect={() => go(() => router.navigate({ to: "/sessions" }))}>
+            <CommandItem
+              value="sessions threads"
+              onSelect={() => go(() => router.navigate({ to: "/sessions" }))}
+            >
               <MessagesSquare data-slot="icon" />
               Sessions
             </CommandItem>
             {tracesOn ? (
-              <CommandItem value="traces list spans" onSelect={() => go(() => router.navigate(tracesLink()))}>
+              <CommandItem
+                value="traces list spans"
+                onSelect={() => go(() => router.navigate(tracesLink()))}
+              >
                 <Network data-slot="icon" />
                 Traces
               </CommandItem>
             ) : null}
-            <CommandItem value="live streaming" onSelect={() => go(() => router.navigate({ to: "/live" }))}>
+            <CommandItem
+              value="live streaming"
+              onSelect={() => go(() => router.navigate({ to: "/live" }))}
+            >
               <Activity data-slot="icon" />
               Live
             </CommandItem>
             {meta.data?.has_manifest || playgroundOn ? (
-              <CommandItem value="agents manifest" onSelect={() => go(() => router.navigate({ to: "/agents" }))}>
+              <CommandItem
+                value="agents manifest"
+                onSelect={() => go(() => router.navigate({ to: "/agents" }))}
+              >
                 <Bot data-slot="icon" />
                 Agents
               </CommandItem>
             ) : null}
             {playgroundOn ? (
-              <CommandItem value="playground experiment" onSelect={() => go(() => router.navigate(playgroundLink()))}>
+              <CommandItem
+                value="playground experiment"
+                onSelect={() => go(() => router.navigate(playgroundLink()))}
+              >
                 <FlaskConical data-slot="icon" />
                 Playground
               </CommandItem>
@@ -303,7 +346,9 @@ export function CommandPalette({
               }}
             >
               <Rows3 data-slot="icon" />
-              {density === "compact" ? "Comfortable density" : "Compact density"}
+              {density === "compact"
+                ? "Comfortable density"
+                : "Compact density"}
             </CommandItem>
             <CommandItem
               value="reset pane layout split sizes"

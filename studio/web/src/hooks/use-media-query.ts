@@ -4,7 +4,8 @@
 import { useSyncExternalStore } from "react"
 
 function mql(query: string): MediaQueryList | null {
-  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return null
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function")
+    return null
   try {
     return window.matchMedia(query)
   } catch {

@@ -12,7 +12,11 @@ import { fold } from "../lib/events"
 import { partitionRuns, strippedContent } from "./state"
 import type { TurnView } from "./state"
 import { idle } from "./testkit"
-import { answerLiveGrant, checkLiveURL, resetGrants } from "../test/fake-live-grant"
+import {
+  answerLiveGrant,
+  checkLiveURL,
+  resetGrants,
+} from "../test/fake-live-grant"
 import { badgeLabel } from "./badges"
 
 // ── The fake Studio ───────────────────────────────────────────────
@@ -54,14 +58,79 @@ function runRow(over: Partial<RunRow>): RunRow {
   }
 }
 
-const EVENTS: { events: unknown[]; next_after: number | null; done: boolean; gaps: number[] } = {
+const EVENTS: {
+  events: unknown[]
+  next_after: number | null
+  done: boolean
+  gaps: number[]
+} = {
   events: [
-    { pos: 0, time: T0, event: { type: "run_start", id: "r_ok", model: { provider: "wefttest", name: "script" }, agent: "orders" } },
-    { pos: 1, time: T0, event: { type: "step_start", run_id: "r_ok", index: 0 } },
-    { pos: 2, time: T0, event: { type: "tool_start", run_id: "r_ok", seq: 1, call_id: "call_1", name: "lookup_order", args: { order_id: "42" } } },
-    { pos: 3, time: T0, event: { type: "tool_finish", run_id: "r_ok", seq: 1, call_id: "call_1", name: "lookup_order", content: "…[truncated 8192 bytes]", is_error: false } },
-    { pos: 4, time: T0, event: { type: "step_finish", run_id: "r_ok", index: 0, reason: "tool_calls", usage: { input_tokens: 10, output_tokens: 4, cached_input_tokens: 6, reasoning_tokens: 2 } } },
-    { pos: 5, time: T0, event: { type: "run_finish", run_id: "r_ok", usage: { input_tokens: 10, output_tokens: 4 }, steps: 1 } },
+    {
+      pos: 0,
+      time: T0,
+      event: {
+        type: "run_start",
+        id: "r_ok",
+        model: { provider: "wefttest", name: "script" },
+        agent: "orders",
+      },
+    },
+    {
+      pos: 1,
+      time: T0,
+      event: { type: "step_start", run_id: "r_ok", index: 0 },
+    },
+    {
+      pos: 2,
+      time: T0,
+      event: {
+        type: "tool_start",
+        run_id: "r_ok",
+        seq: 1,
+        call_id: "call_1",
+        name: "lookup_order",
+        args: { order_id: "42" },
+      },
+    },
+    {
+      pos: 3,
+      time: T0,
+      event: {
+        type: "tool_finish",
+        run_id: "r_ok",
+        seq: 1,
+        call_id: "call_1",
+        name: "lookup_order",
+        content: "…[truncated 8192 bytes]",
+        is_error: false,
+      },
+    },
+    {
+      pos: 4,
+      time: T0,
+      event: {
+        type: "step_finish",
+        run_id: "r_ok",
+        index: 0,
+        reason: "tool_calls",
+        usage: {
+          input_tokens: 10,
+          output_tokens: 4,
+          cached_input_tokens: 6,
+          reasoning_tokens: 2,
+        },
+      },
+    },
+    {
+      pos: 5,
+      time: T0,
+      event: {
+        type: "run_finish",
+        run_id: "r_ok",
+        usage: { input_tokens: 10, output_tokens: 4 },
+        steps: 1,
+      },
+    },
   ],
   next_after: null,
   done: true,
@@ -70,7 +139,16 @@ const EVENTS: { events: unknown[]; next_after: number | null; done: boolean; gap
 
 const TRANSCRIPT = {
   batches: [
-    { index: 0, step: 0, messages: [{ role: "user", content: [{ type: "text", text: "Where is order 42?" }] }] },
+    {
+      index: 0,
+      step: 0,
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "Where is order 42?" }],
+        },
+      ],
+    },
     {
       index: 1,
       step: 0,
@@ -101,27 +179,37 @@ const SESSION: SessionRow = {
 /** routes: the fake Studio's answers. Meta is set per test. */
 function fakeStudio(routes: Record<string, unknown>, meta: unknown = metaOK) {
   const calls: string[] = []
-  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(String(input), "http://studio.test/studio/api/")
-    // Run ids carry slashes and travel percent-encoded; Go's mux
-    // decodes them before routing, so the fake keys the decoded path.
-    const path =
-      decodeURIComponent(url.pathname).replace(/^.*\/api\//, "") + (url.search || "")
-    calls.push(path)
-    if (url.pathname.endsWith("/meta")) return json(meta)
-    // The live grant (plan C5): the shared fake mints the sig the
-    // stream below must carry.
-    if (path === "live-grant" && init?.method === "POST") {
-      const auth = new Headers(init.headers).get("Authorization") ?? ""
-      return answerLiveGrant(url, auth.replace(/^Bearer /, ""), init.body ? String(init.body) : undefined)
+  const fetchMock = vi.fn(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), "http://studio.test/studio/api/")
+      // Run ids carry slashes and travel percent-encoded; Go's mux
+      // decodes them before routing, so the fake keys the decoded path.
+      const path =
+        decodeURIComponent(url.pathname).replace(/^.*\/api\//, "") +
+        (url.search || "")
+      calls.push(path)
+      if (url.pathname.endsWith("/meta")) return json(meta)
+      // The live grant (plan C5): the shared fake mints the sig the
+      // stream below must carry.
+      if (path === "live-grant" && init?.method === "POST") {
+        const auth = new Headers(init.headers).get("Authorization") ?? ""
+        return answerLiveGrant(
+          url,
+          auth.replace(/^Bearer /, ""),
+          init.body ? String(init.body) : undefined
+        )
+      }
+      const hit = routes[path]
+      if (hit) return json(hit)
+      return new Response(
+        JSON.stringify({ error: { code: "not_found", message: path } }),
+        {
+          status: 404,
+          headers: { "content-type": "application/json" },
+        }
+      )
     }
-    const hit = routes[path]
-    if (hit) return json(hit)
-    return new Response(JSON.stringify({ error: { code: "not_found", message: path } }), {
-      status: 404,
-      headers: { "content-type": "application/json" },
-    })
-  })
+  )
   return { fetchMock, calls }
 }
 
@@ -137,7 +225,9 @@ const metaOK = {
 }
 
 function json(v: unknown): Response {
-  return new Response(JSON.stringify(v), { headers: { "content-type": "application/json" } })
+  return new Response(JSON.stringify(v), {
+    headers: { "content-type": "application/json" },
+  })
 }
 
 /** A recording EventSource stub: never connects until told. */
@@ -149,7 +239,10 @@ class FakeEventSource {
   readyState = 0
   url: string
   onerror: ((e: unknown) => void) | null = null
-  private listeners = new Map<string, Set<(e: { data: string; lastEventId?: string }) => void>>()
+  private listeners = new Map<
+    string,
+    Set<(e: { data: string; lastEventId?: string }) => void>
+  >()
   constructor(url: string) {
     this.url = url
     FakeEventSource.instances.push(this)
@@ -161,12 +254,17 @@ class FakeEventSource {
       })
     }
   }
-  addEventListener(type: string, cb: (e: { data: string; lastEventId?: string }) => void) {
+  addEventListener(
+    type: string,
+    cb: (e: { data: string; lastEventId?: string }) => void
+  ) {
     if (!this.listeners.has(type)) this.listeners.set(type, new Set())
     this.listeners.get(type)!.add(cb)
   }
   emit(type: string, data: unknown, id = "1") {
-    this.listeners.get(type)?.forEach((cb) => cb({ data: JSON.stringify(data), lastEventId: id }))
+    this.listeners
+      .get(type)
+      ?.forEach((cb) => cb({ data: JSON.stringify(data), lastEventId: id }))
   }
   close() {
     this.readyState = 2
@@ -174,8 +272,16 @@ class FakeEventSource {
 }
 
 const runRoutes = (runs: RunRow[]): Record<string, unknown> => ({
-  "sessions?public_id=pub_orders": { total: 1, sessions: [SESSION], next_before: null },
-  "runs?public_id=pub_orders&limit=50": { total: runs.length, runs, next_before: null },
+  "sessions?public_id=pub_orders": {
+    total: 1,
+    sessions: [SESSION],
+    next_before: null,
+  },
+  "runs?public_id=pub_orders&limit=50": {
+    total: runs.length,
+    runs,
+    next_before: null,
+  },
   "runs/r_ok": { ...runRow({}), children: [] },
   "runs/r_ok/events?after=0&limit=500": EVENTS,
   "runs/r_ok/transcript": TRANSCRIPT,
@@ -188,11 +294,13 @@ beforeEach(() => {
   vi.stubGlobal("EventSource", FakeEventSource)
   // The unbundled sources have no build-time define: the global seam
   // says the panel was built against the same studio the fake serves.
-  ;(globalThis as { __WEFT_PANEL_VERSION__?: string }).__WEFT_PANEL_VERSION__ = "v0.2.1"
+  ;(globalThis as { __WEFT_PANEL_VERSION__?: string }).__WEFT_PANEL_VERSION__ =
+    "v0.2.1"
 })
 
 afterEach(() => {
-  delete (globalThis as { __WEFT_PANEL_VERSION__?: string }).__WEFT_PANEL_VERSION__
+  delete (globalThis as { __WEFT_PANEL_VERSION__?: string })
+    .__WEFT_PANEL_VERSION__
 })
 
 afterEach(() => {
@@ -201,7 +309,8 @@ afterEach(() => {
 })
 
 async function mount(attrs: Record<string, string>): Promise<WeftDevtools> {
-  if (!customElements.get("weft-devtools")) customElements.define("weft-devtools", WeftDevtools)
+  if (!customElements.get("weft-devtools"))
+    customElements.define("weft-devtools", WeftDevtools)
   const el = document.createElement("weft-devtools")
   for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v)
   document.body.appendChild(el)
@@ -215,12 +324,16 @@ const $ = (el: WeftDevtools, sel: string): Element | null =>
   el.shadowRoot?.querySelector(sel) ?? null
 const all = (el: WeftDevtools, sel: string): Element[] =>
   Array.from(el.shadowRoot?.querySelectorAll(sel) ?? [])
-const text = (el: WeftDevtools, sel: string): string => $(el, sel)?.textContent ?? ""
+const text = (el: WeftDevtools, sel: string): string =>
+  $(el, sel)?.textContent ?? ""
 
 describe("the rung-1 surfaces against a fake Studio", () => {
   it("header: agent, public id, live dot, turn count, total tokens, and the ⤢ deep link", async () => {
     const { fetchMock } = fakeStudio(
-      runRoutes([runRow({}), runRow({ id: "r_fail", status: "failed", turn: 2 })])
+      runRoutes([
+        runRow({}),
+        runRow({ id: "r_fail", status: "failed", turn: 2 }),
+      ])
     )
     vi.stubGlobal("fetch", fetchMock)
     const el = await mount({
@@ -233,7 +346,9 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     expect(text(el, ".weft-head")).toContain("2 turns")
     expect(text(el, ".weft-head")).toContain("→")
     const link = $(el, ".weft-head a") as HTMLAnchorElement
-    expect(link.getAttribute("href")).toBe("http://studio.test/studio/runs/r_ok")
+    expect(link.getAttribute("href")).toBe(
+      "http://studio.test/studio/runs/r_ok"
+    )
   })
 
   it("turn list: statuses, parked for succeeded-with-pending, model, steps, tokens, duration", async () => {
@@ -244,7 +359,10 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     ]
     const { fetchMock } = fakeStudio({
       ...runRoutes(runs),
-      "runs/r_run": { ...runRow({ id: "r_run", status: "running", finished: null }), children: [] },
+      "runs/r_run": {
+        ...runRow({ id: "r_run", status: "running", finished: null }),
+        children: [],
+      },
     })
     vi.stubGlobal("fetch", fetchMock)
     const el = await mount({
@@ -252,11 +370,15 @@ describe("the rung-1 surfaces against a fake Studio", () => {
       "data-public-id": "pub_orders",
       "data-open": "true",
     })
-    const chips = all(el, ".weft-turn > .weft-row1 > .weft-chip").map((n) => n.textContent)
+    const chips = all(el, ".weft-turn > .weft-row1 > .weft-chip").map(
+      (n) => n.textContent
+    )
     expect(chips).toContain("running")
     expect(chips).toContain("parked")
     expect(chips).toContain("failed")
-    const row = all(el, ".weft-turn").find((n) => n.textContent.includes("r_park"))
+    const row = all(el, ".weft-turn").find((n) =>
+      n.textContent.includes("r_park")
+    )
     expect(row?.textContent).toContain("script")
     expect(row?.textContent).toContain("1 steps")
   })
@@ -299,8 +421,31 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     }
     routes["runs/r_page/events?after=5&limit=500"] = {
       events: [
-        { pos: 5, time: T0, event: { type: "tool_start", run_id: "r_page", seq: 2, call_id: "call_2", name: "refund", args: { order_id: "43" } } },
-        { pos: 6, time: T0, event: { type: "tool_finish", run_id: "r_page", seq: 2, call_id: "call_2", name: "refund", content: "refunded", is_error: false } },
+        {
+          pos: 5,
+          time: T0,
+          event: {
+            type: "tool_start",
+            run_id: "r_page",
+            seq: 2,
+            call_id: "call_2",
+            name: "refund",
+            args: { order_id: "43" },
+          },
+        },
+        {
+          pos: 6,
+          time: T0,
+          event: {
+            type: "tool_finish",
+            run_id: "r_page",
+            seq: 2,
+            call_id: "call_2",
+            name: "refund",
+            content: "refunded",
+            is_error: false,
+          },
+        },
       ],
       next_after: null,
       done: true,
@@ -314,24 +459,29 @@ describe("the rung-1 surfaces against a fake Studio", () => {
       "data-open": "true",
     })
     // The second page was fetched …
-    const second = fetchMock.mock.calls.some((c) => String(c[0]).includes("after=5"))
+    const second = fetchMock.mock.calls.some((c) =>
+      String(c[0]).includes("after=5")
+    )
     expect(second).toBe(true)
     // … and its events render: the tool pair only page two carries.
     expect(text(el, ".weft-main")).toContain('refund({"order_id":"43"})')
     expect(text(el, ".weft-main")).toContain("refunded")
   })
 
-  it("honesty: gaps badge, interrupted note, stripped footer note", async () => {    const routes = runRoutes([
-      runRow({ id: "r_int", status: "interrupted" }),
-    ])
-    routes["runs/r_int"] = { ...runRow({ id: "r_int", status: "interrupted" }), children: [] }
+  it("honesty: gaps badge, interrupted note, stripped footer note", async () => {
+    const routes = runRoutes([runRow({ id: "r_int", status: "interrupted" })])
+    routes["runs/r_int"] = {
+      ...runRow({ id: "r_int", status: "interrupted" }),
+      children: [],
+    }
     // A content-off chain marks the events (weft.content = stripped),
     // never the spans.
     routes["runs/r_int/events?after=0&limit=500"] = {
       ...EVENTS,
-      events: EVENTS.events
-        .slice(0, 2)
-        .map((pe) => ({ ...(pe as object), attrs: { "weft.content": "stripped" } })),
+      events: EVENTS.events.slice(0, 2).map((pe) => ({
+        ...(pe as object),
+        attrs: { "weft.content": "stripped" },
+      })),
       gaps: [2, 3],
     }
     const { fetchMock } = fakeStudio(routes)
@@ -343,7 +493,9 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     })
     const main = text(el, ".weft-main")
     expect(main).toContain("interrupted — the run stopped reporting")
-    expect(el.shadowRoot?.querySelector(`[data-hole="interrupted"]`)).toBeTruthy()
+    expect(
+      el.shadowRoot?.querySelector(`[data-hole="interrupted"]`)
+    ).toBeTruthy()
     expect(main).toContain("2 events missing")
     expect(main).toContain("content not captured by this app")
     expect(text(el, ".weft-footer")).toContain(
@@ -358,7 +510,13 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     routes["runs/r_cap"] = {
       ...runRow({ id: "r_cap" }),
       children: [],
-      holes: [{ hole: "not_recorded", reason: HOLES.not_recorded.reason, fix: HOLES.not_recorded.fix }],
+      holes: [
+        {
+          hole: "not_recorded",
+          reason: HOLES.not_recorded.reason,
+          fix: HOLES.not_recorded.fix,
+        },
+      ],
     }
     routes["runs/r_cap/events?after=0&limit=500"] = {
       ...EVENTS,
@@ -378,22 +536,38 @@ describe("the rung-1 surfaces against a fake Studio", () => {
       "data-public-id": "pub_orders",
       "data-open": "true",
     })
-    await vi.waitFor(() => expect($(el, '[data-weft-step="0"] [data-hole="truncated"]')).toBeTruthy())
+    await vi.waitFor(() =>
+      expect($(el, '[data-weft-step="0"] [data-hole="truncated"]')).toBeTruthy()
+    )
     // The step line: the recorder's cut in bytes, the table's reason and
     // fix as its title; the run's not_recorded holds for the step too.
-    const cut = $(el, '[data-weft-step="0"] .weft-step-h [data-hole="truncated"]')!
+    const cut = $(
+      el,
+      '[data-weft-step="0"] .weft-step-h [data-hole="truncated"]'
+    )!
     expect(badgeLabel(cut)).toBe("shortened by the recorder: 12.3 KiB cut")
     // The title's words are in the accessible text too (D5 review).
-    expect(cut.querySelector(".weft-sr")?.textContent).toBe(` — ${HOLES.truncated.reason} — fix: ${HOLES.truncated.fix}`)
-    expect(cut.getAttribute("title")).toBe(`${HOLES.truncated.reason} — fix: ${HOLES.truncated.fix}`)
-    expect(badgeLabel($(el, '[data-weft-step="0"] .weft-step-h [data-hole="not_recorded"]'))).toBe(
-      HOLES.not_recorded.label
+    expect(cut.querySelector(".weft-sr")?.textContent).toBe(
+      ` — ${HOLES.truncated.reason} — fix: ${HOLES.truncated.fix}`
     )
+    expect(cut.getAttribute("title")).toBe(
+      `${HOLES.truncated.reason} — fix: ${HOLES.truncated.fix}`
+    )
+    expect(
+      badgeLabel(
+        $(el, '[data-weft-step="0"] .weft-step-h [data-hole="not_recorded"]')
+      )
+    ).toBe(HOLES.not_recorded.label)
     // The call that was cut carries it too.
-    expect($(el, '[data-weft-step="0"] .weft-call-h [data-hole="truncated"]')).toBeTruthy()
+    expect(
+      $(el, '[data-weft-step="0"] .weft-call-h [data-hole="truncated"]')
+    ).toBeTruthy()
     // The turn header: every hole of the turn, with the table's words.
     const notes = all(el, "[data-weft-turn-holes] [data-hole]")
-    expect(notes.map((n) => n.getAttribute("data-hole"))).toEqual(["truncated", "not_recorded"])
+    expect(notes.map((n) => n.getAttribute("data-hole"))).toEqual([
+      "truncated",
+      "not_recorded",
+    ])
     expect(notes[1].parentElement!.textContent).toBe(
       `${HOLES.not_recorded.label} — ${HOLES.not_recorded.reason} · fix: ${HOLES.not_recorded.fix}`
     )
@@ -405,14 +579,24 @@ describe("the rung-1 surfaces against a fake Studio", () => {
       ...EVENTS,
       events: [
         ...EVENTS.events.slice(0, 5),
-        ({
-          pos: 5, time: T0,
+        {
+          pos: 5,
+          time: T0,
           event: {
-            type: "run_finish", run_id: "r_ok", usage: { input_tokens: 10, output_tokens: 4 },
+            type: "run_finish",
+            run_id: "r_ok",
+            usage: { input_tokens: 10, output_tokens: 4 },
             steps: 1,
-            pending: [{ type: "tool_call", id: "call_9", name: "refund", args: { order_id: "42" } }],
+            pending: [
+              {
+                type: "tool_call",
+                id: "call_9",
+                name: "refund",
+                args: { order_id: "42" },
+              },
+            ],
           },
-        } as never),
+        } as never,
       ],
     }
     const { fetchMock } = fakeStudio(routes)
@@ -428,7 +612,9 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     expect(main).toContain('{"order_id":"42"}')
     // No runtime of the run's service acts on the app's sessions: the
     // verbs drawn refused, appturn.go's words with the fix (F4.3).
-    await vi.waitFor(() => expect(text(el, ".weft-main")).toContain(`${APP_OWNED}: `))
+    await vi.waitFor(() =>
+      expect(text(el, ".weft-main")).toContain(`${APP_OWNED}: `)
+    )
     expect(all(el, '[data-weft-refused="app-owned"]')).toHaveLength(3)
   })
 
@@ -440,7 +626,9 @@ describe("the rung-1 surfaces against a fake Studio", () => {
       "data-public-id": "pub_orders",
       "data-open": "true",
     })
-    const rawBtn = all(el, ".weft-head .weft-btn").find((b) => b.textContent === "raw") as HTMLElement
+    const rawBtn = all(el, ".weft-head .weft-btn").find(
+      (b) => b.textContent === "raw"
+    ) as HTMLElement
     rawBtn.click()
     await idle()
     const raw = $(el, ".weft-raw")?.textContent ?? ""
@@ -451,7 +639,10 @@ describe("the rung-1 surfaces against a fake Studio", () => {
   it("the live tail: a run frame refreshes the row; a record frame folds a delta in", async () => {
     const runs = [runRow({ id: "r_live", status: "running", finished: null })]
     const routes = runRoutes(runs)
-    routes["runs/r_live"] = { ...runRow({ id: "r_live", status: "running", finished: null }), children: [] }
+    routes["runs/r_live"] = {
+      ...runRow({ id: "r_live", status: "running", finished: null }),
+      children: [],
+    }
     routes["runs/r_live/events?after=0&limit=500"] = {
       ...EVENTS,
       events: EVENTS.events.slice(0, 2),
@@ -468,15 +659,23 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     const urls = FakeEventSource.instances.map((i) => i.url)
     expect(urls.some((u) => u.includes("public_id=pub_orders"))).toBe(true)
     expect(urls.some((u) => u.includes("run=r_live"))).toBe(true)
-    const tail = FakeEventSource.instances.find((i) => i.url.includes("run=r_live"))
+    const tail = FakeEventSource.instances.find((i) =>
+      i.url.includes("run=r_live")
+    )
     tail?.emit("record", {
-      run_id: "r_live", session_id: "s_orders", public_id: "pub_orders",
-      kind: "delta", pos: 0, time: T0,
+      run_id: "r_live",
+      session_id: "s_orders",
+      public_id: "pub_orders",
+      kind: "delta",
+      pos: 0,
+      time: T0,
       event: { type: "text_delta", run_id: "r_live", text: "streaming in…" },
     })
     await idle()
     expect(text(el, ".weft-step-b")).toContain("streaming in…")
-    const scope = FakeEventSource.instances.find((i) => i.url.includes("public_id="))
+    const scope = FakeEventSource.instances.find((i) =>
+      i.url.includes("public_id=")
+    )
     scope?.emit("run", { run: runRow({ id: "r_live", steps: 1 }) })
     await idle()
     expect(text(el, ".weft-turns")).toContain("1 steps")
@@ -491,8 +690,15 @@ describe("the rung-1 surfaces against a fake Studio", () => {
       runRow({ id: "r_old", turn: 2 }),
     ]
     const routes = runRoutes(runs)
-    routes["runs/r_live"] = { ...runRow({ id: "r_live", status: "running", finished: null }), children: [] }
-    routes["runs/r_live/events?after=0&limit=500"] = { ...EVENTS, events: EVENTS.events.slice(0, 2), gaps: [] }
+    routes["runs/r_live"] = {
+      ...runRow({ id: "r_live", status: "running", finished: null }),
+      children: [],
+    }
+    routes["runs/r_live/events?after=0&limit=500"] = {
+      ...EVENTS,
+      events: EVENTS.events.slice(0, 2),
+      gaps: [],
+    }
     const { fetchMock } = fakeStudio(routes)
     vi.stubGlobal("fetch", fetchMock)
     const el = await mount({
@@ -500,12 +706,19 @@ describe("the rung-1 surfaces against a fake Studio", () => {
       "data-public-id": "pub_orders",
       "data-open": "true",
     })
-    const scope = FakeEventSource.instances.find((i) => i.url.includes("public_id="))
+    const scope = FakeEventSource.instances.find((i) =>
+      i.url.includes("public_id=")
+    )
     const rowsFor = (id: string) =>
-      all(el, ".weft-turn").filter((n) => n.querySelector(".weft-id")?.textContent === id)
+      all(el, ".weft-turn").filter(
+        (n) => n.querySelector(".weft-id")?.textContent === id
+      )
     const chipOf = (id: string) =>
-      rowsFor(id)[0]?.querySelector(".weft-row1 > .weft-chip")?.textContent ?? ""
-    scope?.emit("run", { run: runRow({ id: "r_live", status: "running", finished: null }) })
+      rowsFor(id)[0]?.querySelector(".weft-row1 > .weft-chip")?.textContent ??
+      ""
+    scope?.emit("run", {
+      run: runRow({ id: "r_live", status: "running", finished: null }),
+    })
     await idle()
     expect(all(el, ".weft-turn")).toHaveLength(2)
     expect(rowsFor("r_live")).toHaveLength(1)
@@ -522,8 +735,14 @@ describe("the rung-1 surfaces against a fake Studio", () => {
   it("subagents load lazily: the expander fetches the child's own events on open (Dv3)", async () => {
     const child = { id: "r_ok/0/call_1", parent_call_id: "call_1" }
     const routes = runRoutes([runRow({})])
-    routes["runs/r_ok"] = { ...runRow({}), children: [runRow({ ...child, session_id: "" })] }
-    routes["runs/r_ok/0/call_1"] = { ...runRow({ ...child, session_id: "" }), children: [] }
+    routes["runs/r_ok"] = {
+      ...runRow({}),
+      children: [runRow({ ...child, session_id: "" })],
+    }
+    routes["runs/r_ok/0/call_1"] = {
+      ...runRow({ ...child, session_id: "" }),
+      children: [],
+    }
     routes["runs/r_ok/0/call_1/events?after=0&limit=500"] = EVENTS
     routes["runs/r_ok/0/call_1/transcript"] = TRANSCRIPT
     routes["runs/r_ok/0/call_1/spans"] = { spans: [] }
@@ -534,15 +753,18 @@ describe("the rung-1 surfaces against a fake Studio", () => {
       "data-public-id": "pub_orders",
       "data-open": "true",
     })
-    const expander = $(el, '[data-weft-child="r_ok/0/call_1"]') as HTMLDetailsElement | null
+    const expander = $(
+      el,
+      '[data-weft-child="r_ok/0/call_1"]'
+    ) as HTMLDetailsElement | null
     expect(expander).toBeTruthy() // the slot exists, collapsed
     expect(expander?.textContent).toContain("loading the subagent's turn")
     expander?.setAttribute("open", "")
     expander?.dispatchEvent(new Event("toggle", { bubbles: true }))
     await idle()
-    const childCalls = fetchMock.mock.calls.map((c) => String(c[0])).filter((u) =>
-      u.includes(encodeURIComponent("r_ok/0/call_1"))
-    )
+    const childCalls = fetchMock.mock.calls
+      .map((c) => String(c[0]))
+      .filter((u) => u.includes(encodeURIComponent("r_ok/0/call_1")))
     expect(childCalls.some((u) => u.includes("/events"))).toBe(true)
     const reloaded = $(el, '[data-weft-child="r_ok/0/call_1"]')
     expect(reloaded?.getAttribute("open")).toBe("") // the open state survived
@@ -554,13 +776,15 @@ describe("§5.3: fail silent, one request, no retries", () => {
   it("a failed meta removes the auto-mounted panel with no console noise and exactly one request", async () => {
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {})
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {})
-    const fetchMock = vi.fn(async (_input: RequestInfo | URL) =>
-      new Response("no studio", { status: 404 })
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL) =>
+        new Response("no studio", { status: 404 })
     )
     vi.stubGlobal("fetch", fetchMock)
     // The dock main.ts mounts (mountDock marks it autoMounted): the
     // panel's own node, so the panel's to remove.
-    if (!customElements.get("weft-devtools")) customElements.define("weft-devtools", WeftDevtools)
+    if (!customElements.get("weft-devtools"))
+      customElements.define("weft-devtools", WeftDevtools)
     const el = document.createElement("weft-devtools") as WeftDevtools
     el.autoMounted = true
     el.setAttribute("data-endpoint", "http://studio.test/studio/")
@@ -569,17 +793,19 @@ describe("§5.3: fail silent, one request, no retries", () => {
     document.body.appendChild(el)
     await idle()
     expect(el.isConnected).toBe(false)
-    const metaCalls = fetchMock.mock.calls.filter((c) => String(c[0]).includes("/meta"))
+    const metaCalls = fetchMock.mock.calls.filter((c) =>
+      String(c[0]).includes("/meta")
+    )
     expect(metaCalls).toHaveLength(1)
     expect(errSpy).not.toHaveBeenCalled()
     expect(warnSpy).not.toHaveBeenCalled()
   })
 
   it("a newer Studio draws the update note instead of the app (§5.1)", async () => {
-    const { fetchMock } = fakeStudio(
-      runRoutes([runRow({})]),
-      { ...metaOK, studio_version: "v99.0.0" }
-    )
+    const { fetchMock } = fakeStudio(runRoutes([runRow({})]), {
+      ...metaOK,
+      studio_version: "v99.0.0",
+    })
     vi.stubGlobal("fetch", fetchMock)
     const el = await mount({
       "data-endpoint": "http://studio.test/studio/",
@@ -594,15 +820,22 @@ describe("§5.3: fail silent, one request, no retries", () => {
 
 describe("pure helpers", () => {
   it("statusChip: parked is succeeded with pending calls (§2)", () => {
-    expect(statusChip(runRow({ status: "succeeded", pending: 1 }))).toBe("parked")
-    expect(statusChip(runRow({ status: "succeeded", pending: 0 }))).toBe("succeeded")
+    expect(statusChip(runRow({ status: "succeeded", pending: 1 }))).toBe(
+      "parked"
+    )
+    expect(statusChip(runRow({ status: "succeeded", pending: 0 }))).toBe(
+      "succeeded"
+    )
     expect(statusChip(runRow({ status: "interrupted" }))).toBe("interrupted")
   })
 
   it("partitionRuns: experiments nest under their source turn (§2)", () => {
     const turn = runRow({ id: "r_ok" })
     const expt = runRow({
-      id: "r_x1", playground: true, session_id: "", forked_from: "r_ok#2",
+      id: "r_x1",
+      playground: true,
+      session_id: "",
+      forked_from: "r_ok#2",
     })
     const { turns, experiments } = partitionRuns([expt, turn])
     expect(turns.map((r) => r.id)).toEqual(["r_ok"])
@@ -611,7 +844,11 @@ describe("pure helpers", () => {
 
   it("strippedContent reads the events' weft.content through the fold (§5.4)", () => {
     const view = (attrs?: Record<string, string>) =>
-      fold([{ type: "run_start", id: "r", model: { provider: "p", name: "m" } }], undefined, [attrs])
+      fold(
+        [{ type: "run_start", id: "r", model: { provider: "p", name: "m" } }],
+        undefined,
+        [attrs]
+      )
     expect(strippedContent(view({ "weft.content": "stripped" }))).toBe(true)
     expect(strippedContent(view({ "weft.content": "none" }))).toBe(true)
     expect(strippedContent(view())).toBe(false)
@@ -639,7 +876,11 @@ describe("turnHoles (the run header's rule)", () => {
   it("no gap while running; a gap once over; max_tokens from stop_reason", () => {
     expect(holes([2, 3], { status: "running" })).toEqual([])
     expect(holes([2, 3], { status: "succeeded" })).toEqual(["gap"])
-    expect(holes([], { status: "succeeded", stop_reason: "max_tokens" })).toEqual(["max_tokens"])
-    expect(holes([], { status: "running", stop_reason: "max_tokens" })).toEqual(["max_tokens"])
+    expect(
+      holes([], { status: "succeeded", stop_reason: "max_tokens" })
+    ).toEqual(["max_tokens"])
+    expect(holes([], { status: "running", stop_reason: "max_tokens" })).toEqual(
+      ["max_tokens"]
+    )
   })
 })

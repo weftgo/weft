@@ -55,7 +55,10 @@ describe("only links.ts builds a Studio URL", () => {
       'const x = <Link to="/traces/$id" params={{ id }} />',
     ],
     ["navigate to a run", 'void navigate({ to: "/runs/$id", params: { id } })'],
-    ["a router Link to the compare page", 'const x = <Link to="/compare" search={{ a }} />'],
+    [
+      "a router Link to the compare page",
+      'const x = <Link to="/compare" search={{ a }} />',
+    ],
     ["a helper given the route", 'go("/runs/$id", { id })'],
     ["an absolute template path", "const u = `/runs/${id}`"],
     ["a relative template path with a search", "const u = `runs/${id}?step=2`"],
@@ -68,19 +71,31 @@ describe("only links.ts builds a Studio URL", () => {
     ["an experiments route", 'const x = <Link to="/experiments" />'],
     // G2's keys are links.ts's too: a hand-built page URL with them is
     // refused like any other.
-    ["a trace's span and view by hand", "const u = `traces/${id}?span=${s}&view=chat`"],
+    [
+      "a trace's span and view by hand",
+      "const u = `traces/${id}?span=${s}&view=chat`",
+    ],
     [
       "a trace Link with a hand-written search",
       'const x = <Link to="/traces/$id" params={{ id }} search={{ span, view: "chat" }} />',
     ],
-    ["the raw view's filters by hand", "const u = `runs/${id}?view=raw&q=${q}&hide=delta&ev=3`"],
+    [
+      "the raw view's filters by hand",
+      "const u = `runs/${id}?view=raw&q=${q}&hide=delta&ev=3`",
+    ],
     ["the raw view's open event by hand", "const u = `/runs/${id}?ev=${n}`"],
     [
       "the playground's state by hand",
       'void navigate({ to: "/playground", search: { run, step, agent, engine } })',
     ],
-    ["the playground's state off a base", 'const u = new URL("playground?run=r_1&engine=scripted", base)'],
-    ["the replay drawer's state by hand", "const u = `runs/${id}?replay=from_step&from=${n}`"],
+    [
+      "the playground's state off a base",
+      'const u = new URL("playground?run=r_1&engine=scripted", base)',
+    ],
+    [
+      "the replay drawer's state by hand",
+      "const u = `runs/${id}?replay=from_step&from=${n}`",
+    ],
   ])("refuses %s", async (_name, code) => {
     expect(await problems(code)).toBeGreaterThan(0)
   })
@@ -110,8 +125,14 @@ describe("only links.ts builds a Studio URL", () => {
       "a page writing its own state through links.ts",
       'void navigate({ to: ".", search: (prev) => ({ ...prev, ...rawSearch(s) }), replace: true })',
     ],
-    ["a spread trace link with its view", 'void navigate({ ...traceLink(id, { span, view }), replace: true })'],
-    ["the playground's state through links.ts", "const x = <Link {...playgroundStateLink({ run })} />"],
+    [
+      "a spread trace link with its view",
+      "void navigate({ ...traceLink(id, { span, view }), replace: true })",
+    ],
+    [
+      "the playground's state through links.ts",
+      "const x = <Link {...playgroundStateLink({ run })} />",
+    ],
     [
       "the replay drawer's state through links.ts",
       'void navigate({ to: ".", search: (prev) => ({ ...prev, ...replaySearch(r) }), replace: true })',

@@ -5,22 +5,43 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { golden } from "../test/fake-studio"
 import type { PanelState } from "./state"
-import { $, all, DIFF_META, fakeStudio, META, mount, runExperiment, setup, stepDiffRoutes, teardown, text } from "./testkit"
+import {
+  $,
+  all,
+  DIFF_META,
+  fakeStudio,
+  META,
+  mount,
+  runExperiment,
+  setup,
+  stepDiffRoutes,
+  teardown,
+  text,
+} from "./testkit"
 import { stepDiffBlock } from "./compare"
 import type { DiffDoc, DiffSide } from "../lib/stepdiff"
 
 beforeEach(setup)
 afterEach(teardown)
 
-const SAME = { system: "same", tool_calls: "same", tool_results: "same", text: "same", usage: "same" }
+const SAME = {
+  system: "same",
+  tool_calls: "same",
+  tool_results: "same",
+  text: "same",
+  usage: "same",
+}
 
 /** cells reads each drawn row's column states, by ordinal. */
-function cells(el: Awaited<ReturnType<typeof mount>>): Record<string, Record<string, string>> {
+function cells(
+  el: Awaited<ReturnType<typeof mount>>
+): Record<string, Record<string, string>> {
   const out: Record<string, Record<string, string>> = {}
   for (const tr of all(el, "[data-weft-step-diff] tbody tr")) {
     const row: Record<string, string> = {}
     for (const td of Array.from(tr.querySelectorAll("[data-weft-diff-cell]")))
-      row[td.getAttribute("data-weft-diff-cell")!] = td.getAttribute("data-state")!
+      row[td.getAttribute("data-weft-diff-cell")!] =
+        td.getAttribute("data-state")!
     out[tr.getAttribute("data-weft-diff-step")!] = row
   }
   return out
@@ -34,7 +55,9 @@ describe("the result pane's step compare", () => {
     expect(studio.gets("diff")).toHaveLength(1)
     expect(studio.gets("diff")[0].path).toBe("diff?a=s_01-t1&b=pg_x1")
     const markers = all(el, "[data-weft-diff-marker]")
-    expect(markers.map((m) => m.textContent)).toEqual(["changed at step 3 · tool results"])
+    expect(markers.map((m) => m.textContent)).toEqual([
+      "changed at step 3 · tool results",
+    ])
     expect(markers[0].getAttribute("data-weft-diff-marker")).toBe("3")
     expect(cells(el)).toEqual({
       "0": SAME,
@@ -43,16 +66,25 @@ describe("the result pane's step compare", () => {
       "3": { ...SAME, tool_results: "changed" },
       "4": SAME,
     })
-    const changed = $(el, '[data-weft-diff-step="3"] [data-weft-diff-cell="tool_results"]')!
+    const changed = $(
+      el,
+      '[data-weft-diff-step="3"] [data-weft-diff-cell="tool_results"]'
+    )!
     expect(changed.textContent).toContain("a order 3 shipped")
     expect(changed.textContent).toContain("b order 3 lost")
-    expect(text(el, "[data-weft-step-diff] .weft-diff-h")).toContain("1 of 5 steps changed · first at step 3")
+    expect(text(el, "[data-weft-step-diff] .weft-diff-h")).toContain(
+      "1 of 5 steps changed · first at step 3"
+    )
     // The hand-off: Studio's compare page with the same pair.
-    const open = new URL($(el, "[data-weft-step-diff] .weft-diff-h a")!.getAttribute("href")!)
+    const open = new URL(
+      $(el, "[data-weft-step-diff] .weft-diff-h a")!.getAttribute("href")!
+    )
     expect(open.pathname).toBe("/studio/compare")
     expect(open.searchParams.get("step")).toBe("3") // the first changed step
     // The marker links to the step, as Studio's does.
-    expect($(el, '[data-weft-diff-marker="3"] a')!.getAttribute("href")).toBe("http://studio.test/studio/runs/r_db?step=3")
+    expect($(el, '[data-weft-diff-marker="3"] a')!.getAttribute("href")).toBe(
+      "http://studio.test/studio/runs/r_db?step=3"
+    )
   })
 
   it("a column a side did not record reads not comparable — never same — with its holes as badges", async () => {
@@ -60,33 +92,57 @@ describe("the result pane's step compare", () => {
     const el = await mount()
     await runExperiment(el)
     expect(all(el, "[data-weft-diff-marker]")).toHaveLength(0)
-    for (const row of Object.values(cells(el))) for (const s of Object.values(row)) expect(s).toBe("unknown")
-    expect(text(el, '[data-weft-diff-step="0"] [data-weft-diff-cell="text"]')).toBe("not comparable")
-    expect(all(el, '[data-weft-diff-step="0"] [data-weft-diff-side="a"] [data-hole]').map((b) => b.getAttribute("data-hole"))).toEqual([
-      "gap",
-      "not_recorded",
-      "derived",
-    ])
+    for (const row of Object.values(cells(el)))
+      for (const s of Object.values(row)) expect(s).toBe("unknown")
+    expect(
+      text(el, '[data-weft-diff-step="0"] [data-weft-diff-cell="text"]')
+    ).toBe("not comparable")
+    expect(
+      all(
+        el,
+        '[data-weft-diff-step="0"] [data-weft-diff-side="a"] [data-hole]'
+      ).map((b) => b.getAttribute("data-hole"))
+    ).toEqual(["gap", "not_recorded", "derived"])
   })
 
   it("a read token's diff: the system prompt hidden, a badge per side", async () => {
     fakeStudio(stepDiffRoutes(golden("diff-hidden")), DIFF_META)
     const el = await mount()
     await runExperiment(el)
-    expect(all(el, "[data-weft-diff-marker]").map((m) => m.getAttribute("data-weft-diff-marker"))).toEqual(["3"])
-    expect(all(el, '[data-weft-step-diff] [data-weft-diff-side] [data-hole="hidden"]')).toHaveLength(10)
-    const sys = $(el, '[data-weft-diff-step="0"] [data-weft-diff-cell="system"]')!
+    expect(
+      all(el, "[data-weft-diff-marker]").map((m) =>
+        m.getAttribute("data-weft-diff-marker")
+      )
+    ).toEqual(["3"])
+    expect(
+      all(
+        el,
+        '[data-weft-step-diff] [data-weft-diff-side] [data-hole="hidden"]'
+      )
+    ).toHaveLength(10)
+    const sys = $(
+      el,
+      '[data-weft-diff-step="0"] [data-weft-diff-cell="system"]'
+    )!
     expect(sys.getAttribute("data-state")).toBe("same")
     expect(sys.querySelector('[data-hole="hidden"]')).not.toBeNull()
   })
 
   it("a truncated response says so with the response_cap badge", async () => {
     const doc = golden<Record<string, unknown>>("diff")
-    doc.holes = [{ hole: "truncated", reason: "this response reads a bounded number of steps", fix: "open the later steps" }]
+    doc.holes = [
+      {
+        hole: "truncated",
+        reason: "this response reads a bounded number of steps",
+        fix: "open the later steps",
+      },
+    ]
     fakeStudio(stepDiffRoutes(doc), DIFF_META)
     const el = await mount()
     await runExperiment(el)
-    expect($(el, '[data-weft-step-diff] > .weft-note [data-hole="truncated"]')).not.toBeNull()
+    expect(
+      $(el, '[data-weft-step-diff] > .weft-note [data-hole="truncated"]')
+    ).not.toBeNull()
   })
 
   it("says it is reading while GET /api/diff is in flight, then draws the table", async () => {
@@ -97,10 +153,14 @@ describe("the result pane's step compare", () => {
     fakeStudio(routes, DIFF_META)
     const el = await mount()
     await runExperiment(el)
-    expect(text(el, "[data-weft-step-diff-loading]")).toBe("reading the step compare…")
+    expect(text(el, "[data-weft-step-diff-loading]")).toBe(
+      "reading the step compare…"
+    )
     expect($(el, "[data-weft-step-diff]")).toBeNull()
     release(golden("diff"))
-    await vi.waitFor(() => expect($(el, "[data-weft-step-diff]")).not.toBeNull())
+    await vi.waitFor(() =>
+      expect($(el, "[data-weft-step-diff]")).not.toBeNull()
+    )
     expect($(el, "[data-weft-step-diff-loading]")).toBeNull()
   })
 
@@ -108,13 +168,26 @@ describe("the result pane's step compare", () => {
     const studio = fakeStudio(stepDiffRoutes(golden("diff")), META)
     const el = await mount()
     await runExperiment(el)
-    await vi.waitFor(() => expect(text(el, ".weft-xres")).toContain("It is delayed until Friday."))
-    const model = (el as unknown as { model: { state: PanelState; emit: () => void } }).model
-    model.state.meta = { ...model.state.meta!, capabilities: [...model.state.meta!.capabilities, "diff"] }
+    await vi.waitFor(() =>
+      expect(text(el, ".weft-xres")).toContain("It is delayed until Friday.")
+    )
+    const model = (
+      el as unknown as { model: { state: PanelState; emit: () => void } }
+    ).model
+    model.state.meta = {
+      ...model.state.meta!,
+      capabilities: [...model.state.meta!.capabilities, "diff"],
+    }
     model.emit()
-    await vi.waitFor(() => expect(text(el, ".weft-xres")).toContain("the step compare could not be read"))
+    await vi.waitFor(() =>
+      expect(text(el, ".weft-xres")).toContain(
+        "the step compare could not be read"
+      )
+    )
     expect($(el, "[data-weft-step-diff-loading]")).toBeNull()
-    expect(text(el, ".weft-xres")).toContain("the server did not report the diff capability when the run settled")
+    expect(text(el, ".weft-xres")).toContain(
+      "the server did not report the diff capability when the run settled"
+    )
     expect(studio.gets("diff")).toHaveLength(0)
   })
 
@@ -131,10 +204,21 @@ describe("the result pane's step compare", () => {
 describe("a compare the response left thin (review 9)", () => {
   const run = (run_id: string) => ({ run_id, steps: 1, status: "succeeded" })
   it("steps: [] draws an empty table and no marker; no throw", () => {
-    const box = stepDiffBlock({ a: run("a1"), b: run("b1"), steps: [], summary: { changed_steps: [], first_changed: null }, holes: [] }, "http://studio.test/studio/")
+    const box = stepDiffBlock(
+      {
+        a: run("a1"),
+        b: run("b1"),
+        steps: [],
+        summary: { changed_steps: [], first_changed: null },
+        holes: [],
+      },
+      "http://studio.test/studio/"
+    )
     expect(box.querySelectorAll("tbody tr")).toHaveLength(0)
     expect(box.querySelector("[data-weft-diff-marker]")).toBeNull()
-    expect(box.querySelector(".weft-diff-h")!.textContent).toContain("no step changed of 0")
+    expect(box.querySelector(".weft-diff-h")!.textContent).toContain(
+      "no step changed of 0"
+    )
   })
   it("a side with no request record, steps/marks/holes/changes absent: cells and words, no throw", () => {
     // The fields a side or row may lack on the wire (a run whose request record was never written).
@@ -142,15 +226,30 @@ describe("a compare the response left thin (review 9)", () => {
     const doc = {
       a: run("a1"),
       b: run("b1"),
-      steps: [{ step: 0, changed: true, a: thin, b: { ...thin, holes: [{ hole: "not_recorded" }] }, changes: ["system"] }],
+      steps: [
+        {
+          step: 0,
+          changed: true,
+          a: thin,
+          b: { ...thin, holes: [{ hole: "not_recorded" }] },
+          changes: ["system"],
+        },
+      ],
     } as unknown as DiffDoc
     const box = stepDiffBlock(doc, "http://studio.test/studio/")
     const sys = box.querySelector('[data-weft-diff-cell="system"]')!
     expect(sys.getAttribute("data-state")).toBe("changed")
     expect(sys.textContent).toContain("a —")
-    expect(box.querySelector('[data-weft-diff-cell="usage"]')!.getAttribute("data-state")).toBe("same")
+    expect(
+      box
+        .querySelector('[data-weft-diff-cell="usage"]')!
+        .getAttribute("data-state")
+    ).toBe("same")
     expect(box.querySelectorAll("[data-weft-diff-marker]")).toHaveLength(1)
-    const noSteps = stepDiffBlock({ a: run("a1"), b: run("b1") } as unknown as DiffDoc, "http://studio.test/studio/")
+    const noSteps = stepDiffBlock(
+      { a: run("a1"), b: run("b1") } as unknown as DiffDoc,
+      "http://studio.test/studio/"
+    )
     expect(noSteps.querySelectorAll("tbody tr")).toHaveLength(0)
   })
 })

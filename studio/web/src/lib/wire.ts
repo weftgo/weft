@@ -18,7 +18,8 @@ export function wireCutReason(n: number): string {
 }
 
 /** A raw record that did not parse (content derived, zero sides). */
-export const WIRE_DERIVED_REASON = "the raw record did not parse: its request and response were not recoverable"
+export const WIRE_DERIVED_REASON =
+  "the raw record did not parse: its request and response were not recoverable"
 
 /** A response body not read to its end (complete: false). */
 export const WIRE_INCOMPLETE = "incomplete: the body was not read to the end"
@@ -40,13 +41,19 @@ export function isJSONMedia(mt: string | undefined): boolean {
 }
 
 /** withheld is the stripping said: "2 headers withheld: a, b". */
-export function withheld(names: string[] | null | undefined, what: "header" | "query parameter"): string | null {
+export function withheld(
+  names: string[] | null | undefined,
+  what: "header" | "query parameter"
+): string | null {
   const n = names?.length ?? 0
   if (!n) return null
   return `${n} ${what}${n === 1 ? "" : "s"} withheld: ${names!.join(", ")}`
 }
 
 /** The pair's download name: run, step, attempt. */
-export function wireFileName(runId: string, raw: Pick<RawRecord, "step" | "attempt">): string {
+export function wireFileName(
+  runId: string,
+  raw: Pick<RawRecord, "step" | "attempt">
+): string {
   return `${runId.replace(/[^\w.-]+/g, "_")}.step${raw.step}.attempt${raw.attempt}.wire.json`
 }

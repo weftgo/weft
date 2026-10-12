@@ -129,8 +129,9 @@ function steerText(messages: Message[] | null | undefined): string {
     .map((m) =>
       // A message (or its content) can be null on a malformed body.
       (Array.isArray((m as Message | null)?.content) ? m.content : [])
-        .filter((p): p is Extract<(typeof m.content)[number], { type: "text" }> =>
-          (p as { type?: unknown } | null)?.type === "text"
+        .filter(
+          (p): p is Extract<(typeof m.content)[number], { type: "text" }> =>
+            (p as { type?: unknown } | null)?.type === "text"
         )
         .map((p) => p.text)
         .join("")
@@ -141,7 +142,9 @@ function steerText(messages: Message[] | null | undefined): string {
 }
 
 /** "12 in / 3 out", zeros when the usage is missing. */
-function inOut(u: { input_tokens?: number; output_tokens?: number } | undefined): string {
+function inOut(
+  u: { input_tokens?: number; output_tokens?: number } | undefined
+): string {
   return `${u?.input_tokens ?? 0} in / ${u?.output_tokens ?? 0} out`
 }
 

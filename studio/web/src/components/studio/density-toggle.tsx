@@ -35,7 +35,11 @@ export function DensityToggle() {
       aria-pressed={density === "compact"}
       className="text-muted-foreground"
     >
-      {density === "compact" ? <Rows4 data-slot="icon" /> : <Rows2 data-slot="icon" />}
+      {density === "compact" ? (
+        <Rows4 data-slot="icon" />
+      ) : (
+        <Rows2 data-slot="icon" />
+      )}
     </Button>
   )
 }

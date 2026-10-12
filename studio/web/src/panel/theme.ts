@@ -20,7 +20,9 @@ export type ThemeSetting = "auto" | Theme
 /** themeSetting reads a data-theme / stored value: light, dark or auto
  * (anything else is auto). */
 export function themeSetting(v: string | null | undefined): ThemeSetting {
-  const t = String(v ?? "").trim().toLowerCase()
+  const t = String(v ?? "")
+    .trim()
+    .toLowerCase()
   return t === "light" || t === "dark" ? t : "auto"
 }
 
@@ -64,13 +66,18 @@ export function systemTheme(): Theme | "" {
 
 /** resolveTheme: explicit, then stored, then the host page, then the
  * system, then dark. host reads the page (a ThemeWatch's cache). */
-export function resolveTheme(explicit: ThemeSetting, stored: string, host: () => Theme | "" = hostTheme): Theme {
+export function resolveTheme(
+  explicit: ThemeSetting,
+  stored: string,
+  host: () => Theme | "" = hostTheme
+): Theme {
   if (explicit !== "auto") return explicit
   return word(stored) || host() || systemTheme() || "dark"
 }
 
 /** The theme button's cycle: auto → light → dark → auto. */
-export const nextTheme = (t: ThemeSetting): ThemeSetting => (t === "auto" ? "light" : t === "light" ? "dark" : "auto")
+export const nextTheme = (t: ThemeSetting): ThemeSetting =>
+  t === "auto" ? "light" : t === "light" ? "dark" : "auto"
 
 /** ThemeWatch calls back when the host page or the system may have
  * changed theme, and caches what <html> says between those changes:
@@ -90,20 +97,25 @@ export class ThemeWatch {
 
   /** host is hostTheme(), cached until the next change while watching
    * (unwatched, nothing would tell the cache it is stale). */
-  readonly host = (): Theme | "" => (this.obs ? (this.cached ??= hostTheme()) : hostTheme())
+  readonly host = (): Theme | "" =>
+    this.obs ? (this.cached ??= hostTheme()) : hostTheme()
 
   start(cb: () => void): void {
     this.stop()
     this.cb = cb
     try {
       this.obs = new MutationObserver(this.fire)
-      this.obs.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "data-theme"] })
+      this.obs.observe(document.documentElement, {
+        attributes: true,
+        attributeFilter: ["class", "data-theme"],
+      })
     } catch {
       this.obs = null
     }
     this.mq = media(DARK_QUERY)
     try {
-      if (this.mq?.addEventListener) this.mq.addEventListener("change", this.fire, { passive: true })
+      if (this.mq?.addEventListener)
+        this.mq.addEventListener("change", this.fire, { passive: true })
       else this.mq?.addListener(this.fire)
     } catch {
       this.mq = null
@@ -114,7 +126,8 @@ export class ThemeWatch {
     this.obs?.disconnect()
     this.obs = null
     try {
-      if (this.mq?.removeEventListener) this.mq.removeEventListener("change", this.fire)
+      if (this.mq?.removeEventListener)
+        this.mq.removeEventListener("change", this.fire)
       else this.mq?.removeListener(this.fire)
     } catch {
       // nothing to remove

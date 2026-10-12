@@ -18,7 +18,12 @@ import { urlScope } from "@/panel/config"
 import { NO_PAGE_URL, OpenInApp } from "@/components/studio/run-header"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
-import { FakeStudio, golden, pagedEvents, transcriptOf } from "@/test/fake-studio"
+import {
+  FakeStudio,
+  golden,
+  pagedEvents,
+  transcriptOf,
+} from "@/test/fake-studio"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -28,7 +33,12 @@ const rOK = golden<RunsPage>("runs").runs.find((r) => r.id === "r_ok")!
 
 /** scope.golden.json's roundtrip rows: the one string form both sides pin. */
 const SCOPES = (
-  JSON.parse(readFileSync(resolve(process.cwd(), "../testdata/scope.golden.json"), "utf8")) as {
+  JSON.parse(
+    readFileSync(
+      resolve(process.cwd(), "../testdata/scope.golden.json"),
+      "utf8"
+    )
+  ) as {
     roundtrip: { scope: Scope; string: string }[]
   }
 ).roundtrip
@@ -65,7 +75,13 @@ function serve(doc: RunDoc) {
 }
 
 const panelToken = (scope: "read" | "playground") =>
-  `weft_pt.${btoa(JSON.stringify({ public_id: "pub_1", scope, exp: new Date(Date.now() + 3600_000).toISOString() }))
+  `weft_pt.${btoa(
+    JSON.stringify({
+      public_id: "pub_1",
+      scope,
+      exp: new Date(Date.now() + 3600_000).toISOString(),
+    })
+  )
     .replace(/=+$/, "")
     .replace(/\+/g, "-")
     .replace(/\//g, "_")}.c2ln`
@@ -81,27 +97,37 @@ afterEach(() => {
 
 describe("appLink", () => {
   it("is the page with #weft_scope= and the golden string form encoded once", () => {
-    const row = SCOPES.find((r) => r.string === "pub_1;session=s_2;flow=f_3;run=r_9")!
+    const row = SCOPES.find(
+      (r) => r.string === "pub_1;session=s_2;flow=f_3;run=r_9"
+    )!
     const href = appLink(PAGE, row.scope)
     expect(href).toBe(`${PAGE}#weft_scope=${encodeURIComponent(row.string)}`)
-    expect(href).toBe(`${PAGE}#weft_scope=pub_1%3Bsession%3Ds_2%3Bflow%3Df_3%3Brun%3Dr_9`)
+    expect(href).toBe(
+      `${PAGE}#weft_scope=pub_1%3Bsession%3Ds_2%3Bflow%3Df_3%3Brun%3Dr_9`
+    )
   })
 
   it("lands on the panel's URL rung as the same scope, for every golden scope with a public id", () => {
-    for (const { scope } of SCOPES.filter((r) => r.scope.publicId && !/[;=]/.test(r.scope.publicId))) {
+    for (const { scope } of SCOPES.filter(
+      (r) => r.scope.publicId && !/[;=]/.test(r.scope.publicId)
+    )) {
       const href = appLink(PAGE, scope)!
       expect(urlScope(href), serializeScope(scope)).toEqual(scope)
     }
   })
 
   it("replaces the page's own fragment and keeps its query", () => {
-    expect(appLink(`${PAGE}?tab=2#old`, { publicId: "pub_1", run: "r_9" })).toBe(
-      `${PAGE}?tab=2#weft_scope=pub_1%3Brun%3Dr_9`
-    )
+    expect(
+      appLink(`${PAGE}?tab=2#old`, { publicId: "pub_1", run: "r_9" })
+    ).toBe(`${PAGE}?tab=2#weft_scope=pub_1%3Brun%3Dr_9`)
   })
 
   it("carries no fragment without a public id: the panel's URL rung needs one", () => {
-    expect(urlScope(`${PAGE}#weft_scope=${encodeURIComponent(serializeScope({ publicId: "", run: "r_9" }))}`)).toBeNull()
+    expect(
+      urlScope(
+        `${PAGE}#weft_scope=${encodeURIComponent(serializeScope({ publicId: "", run: "r_9" }))}`
+      )
+    ).toBeNull()
     expect(appLink(PAGE, { publicId: "", run: "r_9" })).toBe(PAGE)
   })
 
@@ -125,8 +151,18 @@ describe("OpenInApp", () => {
   })
 
   it("reads the public id from the meta when the row has none", () => {
-    render(<OpenInApp doc={runDoc({ public_id: "", session_id: "", meta: { "weft.page_url": PAGE, "weft.public_id": "pub_m" } })} />)
-    expect(verb()!.getAttribute("href")).toBe(`${PAGE}#weft_scope=pub_m%3Brun%3Dr_9`)
+    render(
+      <OpenInApp
+        doc={runDoc({
+          public_id: "",
+          session_id: "",
+          meta: { "weft.page_url": PAGE, "weft.public_id": "pub_m" },
+        })}
+      />
+    )
+    expect(verb()!.getAttribute("href")).toBe(
+      `${PAGE}#weft_scope=pub_m%3Brun%3Dr_9`
+    )
   })
 
   it("is disabled, naming scope.Header, without weft.page_url", () => {
@@ -143,7 +179,9 @@ describe("the run page header", () => {
     serve(runDoc())
     renderApp("/runs/r_9")
     await waitFor(() => expect(verb()).toBeTruthy())
-    expect(verb()!.getAttribute("href")).toBe(`${PAGE}#weft_scope=pub_1%3Bsession%3Ds_2%3Brun%3Dr_9`)
+    expect(verb()!.getAttribute("href")).toBe(
+      `${PAGE}#weft_scope=pub_1%3Bsession%3Ds_2%3Brun%3Dr_9`
+    )
   })
 
   it("a read-scoped panel token sees it too (its own page)", async () => {

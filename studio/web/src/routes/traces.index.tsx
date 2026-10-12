@@ -14,7 +14,12 @@ import { X } from "lucide-react"
 import { fetchTraces, nextCursor } from "@/lib/api"
 import type { PageCursor } from "@/lib/api"
 import { absoluteTime, relativeTime, spanMs } from "@/lib/format"
-import { dedupeTraces, parseWhen, rangeTime, whenNotes } from "@/lib/run-filters"
+import {
+  dedupeTraces,
+  parseWhen,
+  rangeTime,
+  whenNotes,
+} from "@/lib/run-filters"
 import { runLink, traceLink } from "@/lib/links"
 import type { TracesSearch } from "@/lib/links"
 import { useCapabilities } from "@/hooks/use-capabilities"
@@ -37,8 +42,14 @@ export const Route = createFileRoute("/traces/")({
   validateSearch: (search: Record<string, unknown>): TracesSearch => ({
     // Kept as typed: a refused one is ignored and said (whenNotes), since
     // the router drops a key validation leaves undefined.
-    since: typeof search.since === "string" && search.since.trim() ? search.since.trim() : undefined,
-    until: typeof search.until === "string" && search.until.trim() ? search.until.trim() : undefined,
+    since:
+      typeof search.since === "string" && search.since.trim()
+        ? search.since.trim()
+        : undefined,
+    until:
+      typeof search.until === "string" && search.until.trim()
+        ? search.until.trim()
+        : undefined,
     service:
       typeof search.service === "string" && search.service.trim()
         ? search.service.trim()
@@ -100,7 +111,11 @@ function TracesPage() {
     staleTime: 5_000,
     initialPageParam: undefined as PageCursor | undefined,
     queryFn: ({ pageParam }) =>
-      fetchTraces({ ...filters, before: pageParam?.before, before_id: pageParam?.before_id }),
+      fetchTraces({
+        ...filters,
+        before: pageParam?.before,
+        before_id: pageParam?.before_id,
+      }),
     getNextPageParam: (last, _all, lastParam) => nextCursor(last, lastParam),
     enabled: capable,
   })
@@ -118,7 +133,10 @@ function TracesPage() {
   if (error) return <CapsUnread error={error} />
   if (!capable)
     return (
-      <div className="mx-auto max-w-md space-y-2 py-24 text-center" data-traces-off>
+      <div
+        className="mx-auto max-w-md space-y-2 py-24 text-center"
+        data-traces-off
+      >
         <p className="text-sm">This Studio does not list traces.</p>
         <p className="font-mono text-[11px] text-faint">
           {why("traces") ?? "the traces capability is off"}
@@ -129,17 +147,32 @@ function TracesPage() {
   const chips: { key: keyof TracesSearch; label: string }[] = []
   // A refused since/until: a chip that says it is not applied.
   if (search.since)
-    chips.push({ key: "since", label: since ? `since ${search.since}` : `not applied — since ${search.since}` })
+    chips.push({
+      key: "since",
+      label: since
+        ? `since ${search.since}`
+        : `not applied — since ${search.since}`,
+    })
   if (search.until)
-    chips.push({ key: "until", label: until ? `until ${search.until}` : `not applied — until ${search.until}` })
-  if (search.service) chips.push({ key: "service", label: `service ${search.service}` })
+    chips.push({
+      key: "until",
+      label: until
+        ? `until ${search.until}`
+        : `not applied — until ${search.until}`,
+    })
+  if (search.service)
+    chips.push({ key: "service", label: `service ${search.service}` })
 
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-sm font-medium tracking-tight">Traces</h1>
         <span className="font-mono text-xs text-faint tabular-nums">
-          {q.isPending ? "…" : q.isError ? "" : `${total.toLocaleString()} ${total === 1 ? "trace" : "traces"}`}
+          {q.isPending
+            ? "…"
+            : q.isError
+              ? ""
+              : `${total.toLocaleString()} ${total === 1 ? "trace" : "traces"}`}
         </span>
         <FilterBox
           value={search.service ?? ""}
@@ -170,7 +203,12 @@ function TracesPage() {
           <button
             type="button"
             className="text-thread-ink hover:underline"
-            onClick={() => set({ since: parseWhen(search.since), until: parseWhen(search.until) })}
+            onClick={() =>
+              set({
+                since: parseWhen(search.since),
+                until: parseWhen(search.until),
+              })
+            }
           >
             clear
           </button>
@@ -194,7 +232,9 @@ function TracesPage() {
           <button
             type="button"
             className="font-mono text-[11px] text-thread-ink hover:underline"
-            onClick={() => set({ since: undefined, until: undefined, service: undefined })}
+            onClick={() =>
+              set({ since: undefined, until: undefined, service: undefined })
+            }
           >
             clear all
           </button>
@@ -214,7 +254,9 @@ function TracesPage() {
         </div>
       ) : traces.length === 0 ? (
         <p className="py-20 text-center text-sm">
-          {chips.length > 0 ? "No traces match these filters." : "No traces recorded yet."}
+          {chips.length > 0
+            ? "No traces match these filters."
+            : "No traces recorded yet."}
         </p>
       ) : (
         <>
@@ -232,22 +274,43 @@ function TracesPage() {
               </TableHeader>
               <TableBody>
                 {traces.map((t) => (
-                  <TableRow key={t.trace_id} className="h-9" data-trace={t.trace_id}>
+                  <TableRow
+                    key={t.trace_id}
+                    className="h-9"
+                    data-trace={t.trace_id}
+                  >
                     <TableCell className="max-w-96">
                       <Link
                         {...traceLink(t.trace_id)}
                         className="block truncate text-[13px] hover:text-thread-ink"
                       >
-                        {t.root ? t.root.name : <span className="text-muted-foreground">(no root span)</span>}
+                        {t.root ? (
+                          t.root.name
+                        ) : (
+                          <span className="text-muted-foreground">
+                            (no root span)
+                          </span>
+                        )}
                       </Link>
                       <div className="flex items-center gap-1.5">
-                        <span className="truncate font-mono text-[11px] text-faint">{t.trace_id}</span>
+                        <span className="truncate font-mono text-[11px] text-faint">
+                          {t.trace_id}
+                        </span>
                         {t.error ? (
-                          <span className="font-mono text-[10px] text-status-bad" data-trace-error>
+                          <span
+                            className="font-mono text-[10px] text-status-bad"
+                            data-trace-error
+                          >
                             error
                           </span>
                         ) : null}
-                        {t.badge ? <HoleBadge hole={t.badge} reason={t.reason} fix={t.fix} /> : null}
+                        {t.badge ? (
+                          <HoleBadge
+                            hole={t.badge}
+                            reason={t.reason}
+                            fix={t.fix}
+                          />
+                        ) : null}
                       </div>
                     </TableCell>
                     <TableCell className="font-mono text-xs whitespace-nowrap">
@@ -255,7 +318,10 @@ function TracesPage() {
                     </TableCell>
                     <TableCell className="max-w-64">
                       {t.run_ids.length === 0 ? (
-                        <span className="text-faint" title="no weft run: a trace of non-weft spans only">
+                        <span
+                          className="text-faint"
+                          title="no weft run: a trace of non-weft spans only"
+                        >
                           —
                         </span>
                       ) : (
@@ -272,7 +338,9 @@ function TracesPage() {
                         </div>
                       )}
                     </TableCell>
-                    <TableCell className="text-right font-mono tabular-nums">{t.span_count}</TableCell>
+                    <TableCell className="text-right font-mono tabular-nums">
+                      {t.span_count}
+                    </TableCell>
                     <TableCell
                       className="text-right font-mono whitespace-nowrap tabular-nums"
                       title={absoluteTime(t.start)}
@@ -289,7 +357,8 @@ function TracesPage() {
           </div>
           <div className="flex items-center justify-center gap-3">
             <span className="font-mono text-[11px] text-faint tabular-nums">
-              showing {traces.length.toLocaleString()} of {total.toLocaleString()}
+              showing {traces.length.toLocaleString()} of{" "}
+              {total.toLocaleString()}
             </span>
             {q.hasNextPage && (
               <Button

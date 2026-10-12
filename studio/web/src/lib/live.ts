@@ -81,7 +81,8 @@ export async function requestLiveGrant(
   })
   if (!res.ok) throw new LiveGrantError(res.status)
   const doc = (await res.json()) as { sig?: unknown; exp?: unknown } | null
-  if (typeof doc?.sig !== "string" || !doc.sig) throw new LiveGrantError(res.status)
+  if (typeof doc?.sig !== "string" || !doc.sig)
+    throw new LiveGrantError(res.status)
   return { sig: doc.sig, exp: grantDeadline(doc.exp, res.headers.get("Date")) }
 }
 
@@ -93,11 +94,18 @@ export async function requestLiveGrant(
  * behind therefore neither spends every grant at once nor trusts a
  * spent one. Without a readable Date header (or exp) the full TTL.
  */
-export function grantDeadline(exp: unknown, date: string | null, now = Date.now()): number {
+export function grantDeadline(
+  exp: unknown,
+  date: string | null,
+  now = Date.now()
+): number {
   const serverExp = typeof exp === "string" ? Date.parse(exp) : NaN
   const serverNow = date ? Date.parse(date) : NaN
-  if (!Number.isFinite(serverExp) || !Number.isFinite(serverNow)) return now + LIVE_GRANT_TTL_MS
-  return now + Math.min(LIVE_GRANT_TTL_MS, Math.max(0, serverExp - serverNow - 1000))
+  if (!Number.isFinite(serverExp) || !Number.isFinite(serverNow))
+    return now + LIVE_GRANT_TTL_MS
+  return (
+    now + Math.min(LIVE_GRANT_TTL_MS, Math.max(0, serverExp - serverNow - 1000))
+  )
 }
 
 /** liveStreamURL is the stream a grant opens: GET {base}api/live with
@@ -129,7 +137,9 @@ export function panelTokenExp(token: string): number | null {
   try {
     const body = token.slice("weft_pt.".length).split(".")[0]
     const b64 = body.replace(/-/g, "+").replace(/_/g, "/")
-    const claims = JSON.parse(atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4))) as { exp?: unknown }
+    const claims = JSON.parse(
+      atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4))
+    ) as { exp?: unknown }
     const exp = typeof claims.exp === "string" ? Date.parse(claims.exp) : NaN
     return Number.isFinite(exp) ? exp : null
   } catch {
@@ -145,7 +155,11 @@ export function panelTokenExp(token: string): number | null {
  * whose claims have not expired. No bearer, the same one, or an
  * expired one: the stream stops quietly.
  */
-export function freshBearer(token: string, ended: string, now = Date.now()): boolean {
+export function freshBearer(
+  token: string,
+  ended: string,
+  now = Date.now()
+): boolean {
   if (!token || token === ended) return false
   if (!token.startsWith("weft_pt.")) return true
   const exp = panelTokenExp(token)
@@ -255,7 +269,10 @@ const closedListeners = new Set<(stream: number) => void>()
  * of them. A view: it changes nothing about the streams. Returns the
  * unsubscribe.
  */
-export function onLiveGaveUp(fn: GaveUpListener, closed?: (stream: number) => void): () => void {
+export function onLiveGaveUp(
+  fn: GaveUpListener,
+  closed?: (stream: number) => void
+): () => void {
   gaveUpListeners.add(fn)
   if (closed) closedListeners.add(closed)
   return () => {
@@ -350,7 +367,12 @@ export function openLive(opts: LiveOptions): LiveHandle {
   const connect = () => {
     const n = ++attempt
     const tok = studioToken()
-    requestLiveGrant(new URL("live-grant", apiBase()).toString(), tok, opts.selector, opts.kinds).then(
+    requestLiveGrant(
+      new URL("live-grant", apiBase()).toString(),
+      tok,
+      opts.selector,
+      opts.kinds
+    ).then(
       (grant) => {
         if (!closed && n === attempt) open(grant, tok)
       },
@@ -375,7 +397,12 @@ export function openLive(opts: LiveOptions): LiveHandle {
 
   const open = (grant: LiveGrant, tok: string) => {
     const src = new EventSource(
-      liveStreamURL(new URL("live", apiBase()).toString(), opts.selector, opts.kinds, grant)
+      liveStreamURL(
+        new URL("live", apiBase()).toString(),
+        opts.selector,
+        opts.kinds,
+        grant
+      )
     )
     es = src
     const current = () => !closed && es === src
@@ -399,7 +426,7 @@ export function openLive(opts: LiveOptions): LiveHandle {
       if (!current()) return
       let raw: RawRecordFrame | null
       try {
-        raw = JSON.parse((e).data as string) as RawRecordFrame | null
+        raw = JSON.parse(e.data as string) as RawRecordFrame | null
       } catch {
         return
       }
@@ -429,7 +456,7 @@ export function openLive(opts: LiveOptions): LiveHandle {
       if (!current()) return
       let raw: { run?: RunRow } | null
       try {
-        raw = JSON.parse((e).data as string) as { run?: RunRow } | null
+        raw = JSON.parse(e.data as string) as { run?: RunRow } | null
       } catch {
         return
       }
@@ -440,12 +467,18 @@ export function openLive(opts: LiveOptions): LiveHandle {
       if (!current()) return
       let raw: { run_id?: unknown; kind?: unknown } | null
       try {
-        raw = JSON.parse((e).data as string) as { run_id?: unknown; kind?: unknown } | null
+        raw = JSON.parse(e.data as string) as {
+          run_id?: unknown
+          kind?: unknown
+        } | null
       } catch {
         return
       }
       if (typeof raw?.run_id !== "string" || !raw.run_id) return
-      opts.onBackfillError?.({ run_id: raw.run_id, kind: typeof raw.kind === "string" ? raw.kind : "" })
+      opts.onBackfillError?.({
+        run_id: raw.run_id,
+        kind: typeof raw.kind === "string" ? raw.kind : "",
+      })
     })
     // Ping keeps the connection warm; nothing to do.
     src.addEventListener("ping", () => {})
@@ -533,7 +566,10 @@ function seqOf(e: Event): number {
  * would issue a request per batch on a busy fleet. cancel() drops a
  * pending trailing call (an unmounting consumer).
  */
-export function throttle(fn: () => void, ms: number): (() => void) & { cancel: () => void } {
+export function throttle(
+  fn: () => void,
+  ms: number
+): (() => void) & { cancel: () => void } {
   let last = -Infinity
   let timer: ReturnType<typeof setTimeout> | null = null
   const run = () => {
@@ -542,11 +578,14 @@ export function throttle(fn: () => void, ms: number): (() => void) & { cancel: (
       last = now
       fn()
     } else if (timer === null) {
-      timer = setTimeout(() => {
-        timer = null
-        last = Date.now()
-        fn()
-      }, ms - (now - last))
+      timer = setTimeout(
+        () => {
+          timer = null
+          last = Date.now()
+          fn()
+        },
+        ms - (now - last)
+      )
     }
   }
   run.cancel = () => {

@@ -81,7 +81,8 @@ export function SessionTurns({
                   <UnknownTokens reason={r.cost_reason} />
                 ) : (
                   <>
-                    {tokens(r.usage.input_tokens)} / {tokens(r.usage.output_tokens)}
+                    {tokens(r.usage.input_tokens)} /{" "}
+                    {tokens(r.usage.output_tokens)}
                   </>
                 )}
               </TableCell>
@@ -132,7 +133,8 @@ export function SessionTurns({
                     {x.steps}
                   </TableCell>
                   <TableCell className="text-right font-mono tabular-nums">
-                    {tokens(x.usage.input_tokens)} / {tokens(x.usage.output_tokens)}
+                    {tokens(x.usage.input_tokens)} /{" "}
+                    {tokens(x.usage.output_tokens)}
                   </TableCell>
                   <TableCell
                     className="text-right font-mono whitespace-nowrap tabular-nums"

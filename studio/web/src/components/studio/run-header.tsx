@@ -9,7 +9,12 @@ import { useEffect, useState } from "react"
 import type { RunDoc, Transcript } from "@/lib/api"
 import { producedTexts, runHoles, turnPrompt } from "@/lib/events"
 import type { FoldedRun } from "@/lib/events"
-import { derivedUsageUnknown, isDerived, mergeHoles, statusHoles } from "@/lib/honesty"
+import {
+  derivedUsageUnknown,
+  isDerived,
+  mergeHoles,
+  statusHoles,
+} from "@/lib/honesty"
 import {
   absoluteTime,
   duration,
@@ -31,7 +36,14 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
 import { forkSource } from "@/lib/experiments"
-import { appLink, compareLink, experimentLink, runLink, sessionLink, traceLink } from "@/lib/links"
+import {
+  appLink,
+  compareLink,
+  experimentLink,
+  runLink,
+  sessionLink,
+  traceLink,
+} from "@/lib/links"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { useCopyLink } from "@/hooks/use-copy-link"
 import { useDocumentTitle } from "@/hooks/use-document-title"
@@ -80,11 +92,23 @@ export function OpenInApp({
 }) {
   const page = doc.meta["weft.page_url"]
   const publicId = doc.public_id || doc.meta["weft.public_id"] || ""
-  const href = page ? appLink(page, { publicId, session: doc.session_id, run: doc.id }) : null
+  const href = page
+    ? appLink(page, { publicId, session: doc.session_id, run: doc.id })
+    : null
   if (!href)
     return (
-      <span title={page ? `weft.page_url is not an http(s) URL: ${page}` : NO_PAGE_URL}>
-        <Button variant="outline" size="xs" className="font-mono" disabled data-open-in-app="">
+      <span
+        title={
+          page ? `weft.page_url is not an http(s) URL: ${page}` : NO_PAGE_URL
+        }
+      >
+        <Button
+          variant="outline"
+          size="xs"
+          className="font-mono"
+          disabled
+          data-open-in-app=""
+        >
           <ArrowUpRight data-slot="icon" />
           open in app
         </Button>
@@ -95,7 +119,11 @@ export function OpenInApp({
       href={href}
       target="_blank"
       rel="noopener"
-      className={buttonVariants({ variant: "outline", size: "xs", className: "font-mono" })}
+      className={buttonVariants({
+        variant: "outline",
+        size: "xs",
+        className: "font-mono",
+      })}
       title={
         publicId
           ? `open ${page} with the devtools panel scoped to this run`
@@ -189,11 +217,18 @@ function useNow(active: boolean): number {
  * literally: runLink(src, {step: from_step}) (lib/links.ts). The
  * experiment it was filed under, when one was named, links too.
  */
-export function ReplayOf({ doc }: { doc: Pick<RunDoc, "forked_from" | "experiment_id"> }) {
+export function ReplayOf({
+  doc,
+}: {
+  doc: Pick<RunDoc, "forked_from" | "experiment_id">
+}) {
   const src = forkSource(doc)
   if (!src) return null
   return (
-    <span className="flex items-center gap-2 font-mono text-[11px] text-faint" data-replay-of>
+    <span
+      className="flex items-center gap-2 font-mono text-[11px] text-faint"
+      data-replay-of
+    >
       <Link
         {...runLink(src.runID, { step: src.fromStep })}
         className="text-thread-ink hover:underline"
@@ -202,7 +237,10 @@ export function ReplayOf({ doc }: { doc: Pick<RunDoc, "forked_from" | "experimen
         replay of {src.runID} from step {src.fromStep}
       </Link>
       {doc.experiment_id ? (
-        <Link {...experimentLink(doc.experiment_id)} className="hover:text-foreground hover:underline">
+        <Link
+          {...experimentLink(doc.experiment_id)}
+          className="hover:text-foreground hover:underline"
+        >
           experiment {doc.experiment_id}
         </Link>
       ) : null}
@@ -216,12 +254,19 @@ export function ReplayOf({ doc }: { doc: Pick<RunDoc, "forked_from" | "experimen
  * the base), and "compare with…" — the compare page with this run as
  * the base, which asks for the other. Gated on capability "diff".
  */
-export function CompareWith({ doc }: { doc: Pick<RunDoc, "id" | "forked_from"> }) {
+export function CompareWith({
+  doc,
+}: {
+  doc: Pick<RunDoc, "id" | "forked_from">
+}) {
   const { has } = useCapabilities()
   if (!has("diff")) return null
   const src = forkSource(doc)
   return (
-    <span className="flex items-center gap-2 font-mono text-[11px] text-faint" data-compare-with>
+    <span
+      className="flex items-center gap-2 font-mono text-[11px] text-faint"
+      data-compare-with
+    >
       {src ? (
         <Link
           {...compareLink(src.runID, [doc.id], src.fromStep)}
@@ -293,9 +338,7 @@ export function RunHeader({
               <BreadcrumbSeparator />
               <BreadcrumbItem>
                 <BreadcrumbLink
-                  render={
-                    <Link {...runLink(doc.parent_run_id)} />
-                  }
+                  render={<Link {...runLink(doc.parent_run_id)} />}
                   title="the parent run"
                 >
                   {doc.parent_run_id}
@@ -348,7 +391,9 @@ export function RunHeader({
         </span>
         {/* A derived run has no events to count: its derived badge
             (below) says so — "0 events" would read as lost. */}
-        {isDerived(doc) ? null : <span>{eventCount.toLocaleString()} events</span>}
+        {isDerived(doc) ? null : (
+          <span>{eventCount.toLocaleString()} events</span>
+        )}
         {/* A derived run whose stock spans reported no usage reads "—"
             in the API's reason, never "0 in / 0 out" as a known figure. */}
         {derivedUsageUnknown(doc) ? (
@@ -356,7 +401,10 @@ export function RunHeader({
             <UnknownTokens reason={doc.cost_reason} />
           </span>
         ) : (
-          <span title="input / output tokens, subagents included" data-header-usage="">
+          <span
+            title="input / output tokens, subagents included"
+            data-header-usage=""
+          >
             {usageSummary(doc.usage)}
           </span>
         )}
@@ -364,7 +412,9 @@ export function RunHeader({
           <RunCost
             run={doc}
             hasChildren={
-              doc.children.length > 0 || doc.delegated_cost_known === false || (doc.delegated_cost_usd ?? 0) > 0
+              doc.children.length > 0 ||
+              doc.delegated_cost_known === false ||
+              (doc.delegated_cost_usd ?? 0) > 0
             }
           />
         ) : null}
@@ -434,7 +484,10 @@ export function RunHeader({
           </Link>
         ) : null}
         {doc.public_id ? (
-          <span className="font-mono" title="the public id (the browser-safe handle)">
+          <span
+            className="font-mono"
+            title="the public id (the browser-safe handle)"
+          >
             {doc.public_id}
           </span>
         ) : null}

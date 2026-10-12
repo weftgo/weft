@@ -48,7 +48,8 @@ const agent: Pick<AgentView, "tools"> = {
   ],
 }
 
-const SUB = "substituted from the recorded result when the call repeats, else parked"
+const SUB =
+  "substituted from the recorded result when the call repeats, else parked"
 
 type Row = [string, ReplayVerdict, string, boolean?]
 
@@ -67,10 +68,22 @@ const TABLE: Record<"substitute" | "park" | "allow", Row[]> = {
   park: [
     ["lookup", "parked", "replay never · parks (side effects: park)"],
     ["search", "runs", "replay safe · runs"],
-    ["refund", "parked", "replay never (unannotated) · parks (side effects: park)"],
-    ["email", "parked", "replay never (unannotated) · parks (side effects: park)"],
+    [
+      "refund",
+      "parked",
+      "replay never (unannotated) · parks (side effects: park)",
+    ],
+    [
+      "email",
+      "parked",
+      "replay never (unannotated) · parks (side effects: park)",
+    ],
     ["submit_output", "runs", "structured output · runs"],
-    ["transfer", "parked", "requires approval · parks at the approval boundary"],
+    [
+      "transfer",
+      "parked",
+      "requires approval · parks at the approval boundary",
+    ],
     ["check", "parked", "requires approval · parks at the approval boundary"],
   ],
   allow: [
@@ -89,28 +102,52 @@ const TABLE: Record<"substitute" | "park" | "allow", Row[]> = {
       true,
     ],
     ["submit_output", "runs", "structured output · runs"],
-    ["transfer", "parked", "requires approval · parks at the approval boundary", true],
+    [
+      "transfer",
+      "parked",
+      "requires approval · parks at the approval boundary",
+      true,
+    ],
     ["check", "parked", "requires approval · parks at the approval boundary"],
   ],
 }
 
 const shape = (rows: Row[]) =>
-  rows.map(([name, verdict, why, refuses]) => ({ name, verdict, why, ...(refuses ? { refuses } : {}) }))
+  rows.map(([name, verdict, why, refuses]) => ({
+    name,
+    verdict,
+    why,
+    ...(refuses ? { refuses } : {}),
+  }))
 
 describe("replayVerdicts (allowedTools' rule, as the ack preview words it)", () => {
   for (const mode of ["substitute", "park", "allow"] as const) {
     it(`side effects ${mode}`, () => {
-      expect(replayVerdicts({ catalog, agent, mode })).toEqual(shape(TABLE[mode]))
+      expect(replayVerdicts({ catalog, agent, mode })).toEqual(
+        shape(TABLE[mode])
+      )
     })
   }
 
   it('the default mode "" is substitute', () => {
-    expect(replayVerdicts({ catalog, agent, mode: "" })).toEqual(shape(TABLE.substitute))
+    expect(replayVerdicts({ catalog, agent, mode: "" })).toEqual(
+      shape(TABLE.substitute)
+    )
   })
 
   it("a breakpoint parks whatever the mode and the class — and keeps allow's refusal", () => {
-    for (const mode of ["", "substitute", "park", "allow"] as SideEffectsMode[]) {
-      const out = replayVerdicts({ catalog, agent, mode, breakpoints: ["search", "lookup", "refund"] })
+    for (const mode of [
+      "",
+      "substitute",
+      "park",
+      "allow",
+    ] as SideEffectsMode[]) {
+      const out = replayVerdicts({
+        catalog,
+        agent,
+        mode,
+        breakpoints: ["search", "lookup", "refund"],
+      })
       for (const name of ["search", "lookup", "refund"]) {
         // lookup is neither safe nor opted in: under allow the command
         // is refused while it is on, breakpoint or not.
@@ -136,25 +173,44 @@ describe("replayVerdicts (allowedTools' rule, as the ack preview words it)", () 
   })
 
   it("a tool switched off in tools_enabled is off", () => {
-    const out = replayVerdicts({ catalog, agent, mode: "allow", toolsEnabled: ["search", "refund"] })
-    expect(out.filter((v) => v.verdict !== "off").map((v) => v.name)).toEqual(["search", "refund"])
-    expect(out.find((v) => v.name === "email")).toEqual({ name: "email", verdict: "off", why: "off" })
+    const out = replayVerdicts({
+      catalog,
+      agent,
+      mode: "allow",
+      toolsEnabled: ["search", "refund"],
+    })
+    expect(out.filter((v) => v.verdict !== "off").map((v) => v.name)).toEqual([
+      "search",
+      "refund",
+    ])
+    expect(out.find((v) => v.name === "email")).toEqual({
+      name: "email",
+      verdict: "off",
+      why: "off",
+    })
     // Nothing left on is refused: allow is acceptable now.
     expect(out.some((v) => v.refuses)).toBe(false)
   })
 
   it("an empty tools_enabled is not an override (the wire reads it so): every tool on", () => {
-    expect(replayVerdicts({ catalog, agent, mode: "park", toolsEnabled: [] })).toEqual(shape(TABLE.park))
+    expect(
+      replayVerdicts({ catalog, agent, mode: "park", toolsEnabled: [] })
+    ).toEqual(shape(TABLE.park))
   })
 
   it("the runtime's registration decides the class; without one the catalog's stands", () => {
     // Registered never although the catalog said safe: parks.
-    const reg = { tools: [{ name: "search", side_effects: "never", allow: false }] }
+    const reg = {
+      tools: [{ name: "search", side_effects: "never", allow: false }],
+    }
     expect(
-      replayVerdicts({ catalog: [catalog[1]], agent: reg, mode: "park" })[0].verdict
+      replayVerdicts({ catalog: [catalog[1]], agent: reg, mode: "park" })[0]
+        .verdict
     ).toBe("parked")
     // No registration: the catalog's safe runs, its never parks.
-    expect(replayVerdicts({ catalog, mode: "park" }).map((v) => v.verdict)).toEqual([
+    expect(
+      replayVerdicts({ catalog, mode: "park" }).map((v) => v.verdict)
+    ).toEqual([
       "parked",
       "runs",
       "parked",
@@ -179,29 +235,49 @@ describe("replayVerdicts (allowedTools' rule, as the ack preview words it)", () 
   })
 
   it("allowRefusals walks the registered tools left on, as the server does", () => {
-    expect(allowRefusals(agent, "allow")).toEqual(["lookup", "email", "transfer"])
+    expect(allowRefusals(agent, "allow")).toEqual([
+      "lookup",
+      "email",
+      "transfer",
+    ])
     // Turned off, a tool no longer blocks allow.
-    expect(allowRefusals(agent, "allow", ["search", "refund", "check"])).toEqual([])
+    expect(
+      allowRefusals(agent, "allow", ["search", "refund", "check"])
+    ).toEqual([])
     // A registered tool the step's catalog never offered still counts.
     expect(
-      allowRefusals({ tools: [...agent.tools, { name: "hidden_tool", side_effects: "never", allow: false }] }, "allow", [
-        "search",
-        "hidden_tool",
-      ])
+      allowRefusals(
+        {
+          tools: [
+            ...agent.tools,
+            { name: "hidden_tool", side_effects: "never", allow: false },
+          ],
+        },
+        "allow",
+        ["search", "hidden_tool"]
+      )
     ).toEqual(["hidden_tool"])
     expect(allowRefusals(agent, "substitute")).toEqual([])
     expect(allowRefusals(null, "allow")).toEqual([])
   })
 
   it("breakpointsFor keeps the stored set the agent can fire", () => {
-    expect(breakpointsFor({ breakpoints: ["lookup", "elsewhere"] }, agent)).toEqual(["lookup"])
+    expect(
+      breakpointsFor({ breakpoints: ["lookup", "elsewhere"] }, agent)
+    ).toEqual(["lookup"])
     expect(breakpointsFor(undefined, agent)).toEqual([])
   })
 })
 
 describe("the verbs' drafts (one command on both surfaces)", () => {
   it("replay from this step keeps steps 0..n-1", () => {
-    expect(replayFromStep(2)).toEqual({ verb: "from_step", fromStep: 2, edits: [], thread: "ephemeral", input: "" })
+    expect(replayFromStep(2)).toEqual({
+      verb: "from_step",
+      fromStep: 2,
+      edits: [],
+      thread: "ephemeral",
+      input: "",
+    })
   })
 
   it("edit this result and replay runs the NEXT step fresh against the edit", () => {
@@ -229,7 +305,13 @@ describe("the verbs' drafts (one command on both surfaces)", () => {
   })
 
   it("re-run is from_step 0; continue here is a fork with an empty input to type", () => {
-    expect(rerun()).toEqual({ verb: "rerun", fromStep: 0, edits: [], thread: "ephemeral", input: "" })
+    expect(rerun()).toEqual({
+      verb: "rerun",
+      fromStep: 0,
+      edits: [],
+      thread: "ephemeral",
+      input: "",
+    })
     expect(continueHere()).toEqual({
       verb: "continue",
       fromStep: 0,
@@ -267,9 +349,20 @@ describe("the verbs' drafts (one command on both surfaces)", () => {
     })
     const res = (id: string): Message => ({
       role: "tool",
-      content: [{ type: "tool_result", call_id: id, name: "t", content: "x", is_error: false }],
+      content: [
+        {
+          type: "tool_result",
+          call_id: id,
+          name: "t",
+          content: "x",
+          is_error: false,
+        },
+      ],
     })
-    const reply: Message = { role: "assistant", content: [{ type: "text", text: "done" }] }
+    const reply: Message = {
+      role: "assistant",
+      content: [{ type: "text", text: "done" }],
+    }
     // The last step's calls all answered: from_step may be the count.
     expect(endsInAnsweredCalls([call("c1"), res("c1")])).toBe(true)
     expect(maxFromStep(3, true)).toBe(3)
@@ -282,16 +375,23 @@ describe("the verbs' drafts (one command on both surfaces)", () => {
   })
 
   it("an empty recorded result seeds no edit (the server refuses an empty one)", () => {
-    expect(editResultAndReplay(2, "c7", "")).toMatchObject({ fromStep: 3, edits: [] })
+    expect(editResultAndReplay(2, "c7", "")).toMatchObject({
+      fromStep: 3,
+      edits: [],
+    })
   })
 })
 
 describe("prefixLine", () => {
   it("says what is kept, and when the kept prefix is the compacted one", () => {
-    expect(prefixLine(0, false)).toBe("nothing kept · the whole turn runs again")
+    expect(prefixLine(0, false)).toBe(
+      "nothing kept · the whole turn runs again"
+    )
     expect(prefixLine(1, false)).toBe("step 0 kept")
     expect(prefixLine(3, false)).toBe("steps 0–2 kept")
-    expect(prefixLine(3, true)).toBe("steps 0–2 kept · the compacted prefix (what the model saw at step 3)")
+    expect(prefixLine(3, true)).toBe(
+      "steps 0–2 kept · the compacted prefix (what the model saw at step 3)"
+    )
   })
 })
 

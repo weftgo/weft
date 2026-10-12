@@ -11,8 +11,34 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { WeftDevtools } from "./element"
 import { marksBlock } from "./editor"
-import { $, all, apiError, assistant, fakeStudio, mount, page, pause, settle, setup, teardown, text, transcript, user } from "./testkit"
-import { DONE_EDITS, EDIT_META, editRoutes, events, REPLAY_META, RUN, runRowOf, steerBodies, steerEvents, transcriptCut } from "./replaykit"
+import {
+  $,
+  all,
+  apiError,
+  assistant,
+  fakeStudio,
+  mount,
+  page,
+  pause,
+  settle,
+  setup,
+  teardown,
+  text,
+  transcript,
+  user,
+} from "./testkit"
+import {
+  DONE_EDITS,
+  EDIT_META,
+  editRoutes,
+  events,
+  REPLAY_META,
+  RUN,
+  runRowOf,
+  steerBodies,
+  steerEvents,
+  transcriptCut,
+} from "./replaykit"
 import { AS_OF_2, COMPACTED_C1 } from "../test/edit-fixtures"
 import { editsProblem, FORK_EDITS } from "../lib/edits"
 import { draftProblem } from "./playground"
@@ -27,7 +53,8 @@ const META_PV = EDIT_META
 const PREVIEW = golden("playground-preview")
 const routes = editRoutes
 
-const click = (n: Element | null | undefined) => n?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+const click = (n: Element | null | undefined) =>
+  n?.dispatchEvent(new MouseEvent("click", { bubbles: true }))
 /** Open one editable node and type into its textarea. */
 async function edit(el: WeftDevtools, sel: string, key: string, value: string) {
   click($(el, sel))
@@ -38,14 +65,37 @@ async function edit(el: WeftDevtools, sel: string, key: string, value: string) {
   ta.dispatchEvent(new Event("input", { bubbles: true }))
   await settle()
 }
-const runBtn = (el: WeftDevtools) => all(el, ".weft-drawer button").find((b) => b.textContent === "Run experiment ▶") as HTMLButtonElement
+const runBtn = (el: WeftDevtools) =>
+  all(el, ".weft-drawer button").find(
+    (b) => b.textContent === "Run experiment ▶"
+  ) as HTMLButtonElement
 
 /** The Done line's four edits, made in the Story. */
 async function makeDoneEdits(el: WeftDevtools) {
-  await edit(el, '[data-key="prompt"][data-weft-editable="user"]', "user:0::0", "refund order 7")
-  await edit(el, '.weft-call[data-key="c1"] [data-weft-editable="tool_args"]', "tool_args:0:c1:0", '{"q": "c9"}')
-  await edit(el, '.weft-call[data-key="c2"] [data-weft-editable="tool_result"]', "tool_result:1:c2:0", "policy: no refunds")
-  await edit(el, '[data-key="ins2"][data-weft-editable="insert"]', "insert:2::0", "and check 43")
+  await edit(
+    el,
+    '[data-key="prompt"][data-weft-editable="user"]',
+    "user:0::0",
+    "refund order 7"
+  )
+  await edit(
+    el,
+    '.weft-call[data-key="c1"] [data-weft-editable="tool_args"]',
+    "tool_args:0:c1:0",
+    '{"q": "c9"}'
+  )
+  await edit(
+    el,
+    '.weft-call[data-key="c2"] [data-weft-editable="tool_result"]',
+    "tool_result:1:c2:0",
+    "policy: no refunds"
+  )
+  await edit(
+    el,
+    '[data-key="ins2"][data-weft-editable="insert"]',
+    "insert:2::0",
+    "and check 43"
+  )
 }
 
 describe("the Story's editor (F2's Done line, panel half)", () => {
@@ -53,24 +103,42 @@ describe("the Story's editor (F2's Done line, panel half)", () => {
     const studio = fakeStudio(routes(), META_PV)
     const el = await mount()
     await makeDoneEdits(el)
-    expect($(el, "[data-weft-drawer-verb]")?.textContent).toBe("Edit the transcript and replay")
+    expect($(el, "[data-weft-drawer-verb]")?.textContent).toBe(
+      "Edit the transcript and replay"
+    )
     expect(all(el, "[data-weft-edited]")).toHaveLength(4)
-    expect(all(el, "[data-weft-edit-kind]").map((n) => n.getAttribute("data-weft-edit-kind"))).toEqual(["user", "tool_args", "tool_result", "insert"])
-    expect(text(el, ".weft-drawer .weft-step-h")).toContain("continue from step 2")
+    expect(
+      all(el, "[data-weft-edit-kind]").map((n) =>
+        n.getAttribute("data-weft-edit-kind")
+      )
+    ).toEqual(["user", "tool_args", "tool_result", "insert"])
+    expect(text(el, ".weft-drawer .weft-step-h")).toContain(
+      "continue from step 2"
+    )
     expect($(el, "[data-weft-live]")).not.toBeNull()
     await settle(400) // the preview answers: Run no longer waits
     click(runBtn(el))
     await settle(80)
     const posts = studio.posts("playground/runs")
     expect(posts).toHaveLength(1)
-    expect((posts[0].body as Record<string, unknown>).transcript_edits).toEqual(DONE_EDITS)
-    expect(posts[0].body).toMatchObject({ source: { run_id: RUN, from_step: 2 }, engine: "live" })
+    expect((posts[0].body as Record<string, unknown>).transcript_edits).toEqual(
+      DONE_EDITS
+    )
+    expect(posts[0].body).toMatchObject({
+      source: { run_id: RUN, from_step: 2 },
+      engine: "live",
+    })
   })
 
   it("revert drops the edit and its chip", async () => {
     fakeStudio(routes(), META_PV)
     const el = await mount()
-    await edit(el, '.weft-call[data-key="c2"] [data-weft-editable="tool_result"]', "tool_result:1:c2:0", "x")
+    await edit(
+      el,
+      '.weft-call[data-key="c2"] [data-weft-editable="tool_result"]',
+      "tool_result:1:c2:0",
+      "x"
+    )
     expect(all(el, "[data-weft-edit-kind]")).toHaveLength(1)
     click(all(el, ".weft-ed button").find((b) => b.textContent === "revert"))
     await settle()
@@ -81,8 +149,15 @@ describe("the Story's editor (F2's Done line, panel half)", () => {
   it("a schema-invalid args edit is refused in the editor, field named, and holds Run", async () => {
     const studio = fakeStudio(routes(), META_PV)
     const el = await mount()
-    await edit(el, '.weft-call[data-key="c1"] [data-weft-editable="tool_args"]', "tool_args:0:c1:0", '{"q": 5}')
-    expect(text(el, "[data-weft-ed-error]")).toBe('INVALID_INPUT: tool "lookup_order": field "q": expected string, got number')
+    await edit(
+      el,
+      '.weft-call[data-key="c1"] [data-weft-editable="tool_args"]',
+      "tool_args:0:c1:0",
+      '{"q": 5}'
+    )
+    expect(text(el, "[data-weft-ed-error]")).toBe(
+      'INVALID_INPUT: tool "lookup_order": field "q": expected string, got number'
+    )
     expect($(el, "[data-weft-ed-held]")).not.toBeNull()
     expect(all(el, "[data-weft-edit-kind]")).toHaveLength(0)
     expect(runBtn(el).disabled).toBe(true)
@@ -96,26 +171,66 @@ describe("the preview (will be sent)", () => {
   it("draws the golden's rows with their op chips, the changed knobs and the warnings", async () => {
     const studio = fakeStudio(routes(), META_PV)
     const el = await mount()
-    await edit(el, '.weft-call[data-key="c2"] [data-weft-editable="tool_result"]', "tool_result:1:c2:0", "x")
+    await edit(
+      el,
+      '.weft-call[data-key="c2"] [data-weft-editable="tool_result"]',
+      "tool_result:1:c2:0",
+      "x"
+    )
     await settle(400)
-    expect(all(el, "[data-weft-preview-op]").map((r) => r.getAttribute("data-weft-preview-op"))).toEqual(["changed", "changed", "same", "added", "same", "changed", "added"])
+    expect(
+      all(el, "[data-weft-preview-op]").map((r) =>
+        r.getAttribute("data-weft-preview-op")
+      )
+    ).toEqual([
+      "changed",
+      "changed",
+      "same",
+      "added",
+      "same",
+      "changed",
+      "added",
+    ])
     const first = $(el, '[data-weft-preview-op="changed"]')!
-    expect(first.querySelector("[data-weft-preview-was]")!.textContent).toBe("where are orders 42 and 43?")
-    expect(first.querySelector("[data-weft-preview-will]")!.textContent).toBe("where are orders 7 and 43?")
+    expect(first.querySelector("[data-weft-preview-was]")!.textContent).toBe(
+      "where are orders 42 and 43?"
+    )
+    expect(first.querySelector("[data-weft-preview-will]")!.textContent).toBe(
+      "where are orders 7 and 43?"
+    )
     expect(text(el, "[data-weft-preview-system]")).toBe("system changed")
     expect($(el, '[data-weft-preview-changed="params"]')).not.toBeNull()
-    expect(all(el, "[data-weft-preview-warning]").map((w) => w.getAttribute("data-weft-preview-warning"))).toEqual(["prepare_step", "instructions"])
+    expect(
+      all(el, "[data-weft-preview-warning]").map((w) =>
+        w.getAttribute("data-weft-preview-warning")
+      )
+    ).toEqual(["prepare_step", "instructions"])
     // The body Run would post.
-    expect((studio.posts("playground/preview").at(-1)!.body as Record<string, unknown>).transcript_edits).toEqual([
+    expect(
+      (
+        studio.posts("playground/preview").at(-1)!.body as Record<
+          string,
+          unknown
+        >
+      ).transcript_edits
+    ).toEqual([
       { kind: "tool_result", step: 1, call_id: "c2", tool_result: "x" },
     ])
   })
 
   it("a 400 is shown verbatim and holds Run", async () => {
     const said = 'no tool call "c9" in the kept prefix\'s step 0'
-    fakeStudio(routes(() => apiError(400, "bad_request", said)), META_PV)
+    fakeStudio(
+      routes(() => apiError(400, "bad_request", said)),
+      META_PV
+    )
     const el = await mount()
-    await edit(el, '.weft-call[data-key="c2"] [data-weft-editable="tool_result"]', "tool_result:1:c2:0", "x")
+    await edit(
+      el,
+      '.weft-call[data-key="c2"] [data-weft-editable="tool_result"]',
+      "tool_result:1:c2:0",
+      "x"
+    )
     await settle(400)
     expect(text(el, "[data-weft-preview-error]")).toBe(said)
     expect(runBtn(el).disabled).toBe(true)
@@ -124,7 +239,12 @@ describe("the preview (will be sent)", () => {
   it("without capability preview nothing is asked for and no pane is drawn", async () => {
     const studio = fakeStudio(routes(), REPLAY_META)
     const el = await mount()
-    await edit(el, '.weft-call[data-key="c2"] [data-weft-editable="tool_result"]', "tool_result:1:c2:0", "x")
+    await edit(
+      el,
+      '.weft-call[data-key="c2"] [data-weft-editable="tool_result"]',
+      "tool_result:1:c2:0",
+      "x"
+    )
     await settle(400)
     expect($(el, "[data-weft-preview]")).toBeNull()
     expect(studio.posts("playground/preview")).toHaveLength(0)
@@ -136,20 +256,36 @@ describe("the replayed run carries the mark (weft.edits)", () => {
     const r = routes()
     // (A replayed run is drawn as its source's experiment; the mark is
     // the run's own metadata, drawn wherever the run is the turn.)
-    const row = { ...runRowOf(), meta: { "weft.edits": "0:user,0:c1:args,1:c2:result,2:insert" } }
-    r["runs?public_id=pub_orders&limit=50"] = { total: 1, runs: [row], next_before: null }
+    const row = {
+      ...runRowOf(),
+      meta: { "weft.edits": "0:user,0:c1:args,1:c2:result,2:insert" },
+    }
+    r["runs?public_id=pub_orders&limit=50"] = {
+      total: 1,
+      runs: [row],
+      next_before: null,
+    }
     r[`runs/${RUN}`] = { ...row, children: [], holes: [], compactions: [] }
     fakeStudio(r, META_PV)
     const el = await mount()
-    expect(all(el, "[data-weft-edit-mark]").map((n) => n.getAttribute("data-weft-edit-mark"))).toEqual(["user", "args", "result", "insert"])
-    expect(text(el, '[data-weft-edit-mark="args"]')).toBe("args edited step 0 · call c1 ")
+    expect(
+      all(el, "[data-weft-edit-mark]").map((n) =>
+        n.getAttribute("data-weft-edit-mark")
+      )
+    ).toEqual(["user", "args", "result", "insert"])
+    expect(text(el, '[data-weft-edit-mark="args"]')).toBe(
+      "args edited step 0 · call c1 "
+    )
     expect(marksBlock({ ...row, parent_run_id: "pg_new" })).toBeNull()
   })
 })
 
 // ── F2.2 review fixes ────────────────────────────────────────────────
 
-const kinds = (el: WeftDevtools) => all(el, "[data-weft-edit-kind]").map((n) => n.getAttribute("data-weft-edit-kind"))
+const kinds = (el: WeftDevtools) =>
+  all(el, "[data-weft-edit-kind]").map((n) =>
+    n.getAttribute("data-weft-edit-kind")
+  )
 const C2 = '.weft-call[data-key="c2"] [data-weft-editable="tool_result"]'
 
 describe("an editor follows the command (review 1)", () => {
@@ -158,7 +294,13 @@ describe("an editor follows the command (review 1)", () => {
     const el = await mount()
     await edit(el, C2, "tool_result:1:c2:0", "x")
     const t = $(el, 'textarea[data-weft-k="ed:tool_result:1:c2:0"]')!
-    t.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, composed: true }))
+    t.dispatchEvent(
+      new KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+        composed: true,
+      })
+    )
     await settle()
     expect($(el, ".weft-drawer")).not.toBeNull()
     expect(kinds(el)).toEqual(["tool_result"])
@@ -168,7 +310,12 @@ describe("an editor follows the command (review 1)", () => {
     fakeStudio(routes(), META_PV)
     const el = await mount()
     await edit(el, C2, "tool_result:1:c2:0", "x")
-    await edit(el, '[data-key="prompt"][data-weft-editable="user"]', "user:0::0", "y")
+    await edit(
+      el,
+      '[data-key="prompt"][data-weft-editable="user"]',
+      "user:0::0",
+      "y"
+    )
     click($(el, '.weft-drawer button[aria-label="close the drawer"]'))
     await settle()
     expect($(el, ".weft-drawer")).toBeNull()
@@ -191,7 +338,10 @@ describe("an editor follows the command (review 1)", () => {
     fakeStudio(routes(), META_PV)
     const el = await mount()
     await edit(el, C2, "tool_result:1:c2:0", "policy: none")
-    const t = $(el, 'textarea[data-weft-k="ed:tool_result:1:c2:0"]') as HTMLTextAreaElement
+    const t = $(
+      el,
+      'textarea[data-weft-k="ed:tool_result:1:c2:0"]'
+    ) as HTMLTextAreaElement
     t.focus()
     t.setSelectionRange(3, 3)
     ;(el as unknown as { model: { emit: () => void } }).model.emit()
@@ -212,8 +362,15 @@ describe("a steer is its step's user message (review 2)", () => {
     const el = await mount()
     const steers = all(el, '[data-key="steer"][data-weft-editable="user"]')
     expect(steers).toHaveLength(2)
-    await edit(el, '[data-weft-step="3"] [data-key="steer"][data-weft-editable="user"]', "user:3::0", "stop here")
-    expect(text(el, ".weft-drawer .weft-step-h")).toContain("continue from step 4")
+    await edit(
+      el,
+      '[data-weft-step="3"] [data-key="steer"][data-weft-editable="user"]',
+      "user:3::0",
+      "stop here"
+    )
+    expect(text(el, ".weft-drawer .weft-step-h")).toContain(
+      "continue from step 4"
+    )
     await settle(400)
     click(runBtn(el))
     await settle(80)
@@ -229,7 +386,12 @@ describe("inserts where a replay can keep them (review 3)", () => {
     const r = routes()
     const u = { input_tokens: 1, output_tokens: 1 }
     r[`runs/${RUN}/events?after=0&limit=500`] = page([
-      { type: "run_start", id: RUN, model: { provider: "wefttest", name: "script" }, agent: "acme-support" },
+      {
+        type: "run_start",
+        id: RUN,
+        model: { provider: "wefttest", name: "script" },
+        agent: "acme-support",
+      },
       { type: "step_start", run_id: RUN, index: 0 },
       { type: "step_finish", run_id: RUN, index: 0, reason: "stop", usage: u },
       { type: "run_finish", run_id: RUN, usage: u, steps: 1 },
@@ -247,7 +409,9 @@ describe("inserts where a replay can keep them (review 3)", () => {
     r[`runs/${RUN}/transcript`] = transcriptCut(7)
     fakeStudio(r, META_PV)
     const el = await mount()
-    expect(text(el, '[data-key="ins3"][data-weft-editable="insert"]')).toBe("· insert a message after the last step")
+    expect(text(el, '[data-key="ins3"][data-weft-editable="insert"]')).toBe(
+      "· insert a message after the last step"
+    )
   })
 })
 
@@ -256,14 +420,24 @@ describe("a fork carries no edits (review 4)", () => {
     fakeStudio(routes(), META_PV)
     const el = await mount()
     await edit(el, C2, "tool_result:1:c2:0", "x")
-    const thr = $(el, '.weft-drawer select[aria-label="thread"]') as HTMLSelectElement
+    const thr = $(
+      el,
+      '.weft-drawer select[aria-label="thread"]'
+    ) as HTMLSelectElement
     thr.value = "fork"
     thr.dispatchEvent(new Event("change", { bubbles: true }))
     await settle()
-    await edit(el, '[data-key="prompt"][data-weft-editable="user"]', "user:0::0", "y")
+    await edit(
+      el,
+      '[data-key="prompt"][data-weft-editable="user"]',
+      "user:0::0",
+      "y"
+    )
     expect(text(el, "[data-weft-fork-edits]")).toBe(FORK_EDITS)
     expect($(el, "[data-weft-live]")).toBeNull()
-    expect(text(el, ".weft-drawer .weft-step-h")).not.toContain("continue from step")
+    expect(text(el, ".weft-drawer .weft-step-h")).not.toContain(
+      "continue from step"
+    )
     expect(runBtn(el).disabled).toBe(true)
   })
 })
@@ -272,7 +446,10 @@ describe("Run waits for the preview (review 9)", () => {
   it("held while the changed command's preview is pending, released by its answer", async () => {
     const held: ((v: unknown) => void)[] = []
     let hold = true
-    const studio = fakeStudio(routes(() => (hold ? new Promise((r) => held.push(r)) : PREVIEW)), META_PV)
+    const studio = fakeStudio(
+      routes(() => (hold ? new Promise((r) => held.push(r)) : PREVIEW)),
+      META_PV
+    )
     const el = await mount()
     await edit(el, C2, "tool_result:1:c2:0", "x")
     await pause(400)
@@ -291,7 +468,12 @@ describe("an edit inside the compacted range is said before anything is posted (
     r[`runs/${RUN}/transcript?step=2`] = AS_OF_2
     fakeStudio(r, META_PV)
     const el = await mount()
-    await edit(el, '.weft-call[data-key="c1"] [data-weft-editable="tool_result"]', "tool_result:0:c1:0", "x")
+    await edit(
+      el,
+      '.weft-call[data-key="c1"] [data-weft-editable="tool_result"]',
+      "tool_result:0:c1:0",
+      "x"
+    )
     await edit(el, C2, "tool_result:1:c2:0", "y")
     await settle(400)
     expect(text(el, "[data-weft-view-edit]")).toBe(COMPACTED_C1)
@@ -308,24 +490,35 @@ describe("the preview's pending and its bound (closing round)", () => {
     await edit(el, C2, "tool_result:1:c2:0", "x")
     await settle(400)
     expect(runBtn(el).disabled).toBe(false)
-    const prompt = $(el, '.weft-drawer textarea[data-weft-k="prompt"]') as HTMLTextAreaElement
+    const prompt = $(
+      el,
+      '.weft-drawer textarea[data-weft-k="prompt"]'
+    ) as HTMLTextAreaElement
     prompt.value = "Be brief."
     prompt.dispatchEvent(new Event("input", { bubbles: true }))
     await settle()
     expect(runBtn(el).disabled).toBe(true)
-    await (el as unknown as { model: { runExperiment: () => Promise<void> } }).model.runExperiment()
+    await (
+      el as unknown as { model: { runExperiment: () => Promise<void> } }
+    ).model.runExperiment()
     expect(studio.posts("playground/runs")).toHaveLength(0)
     await settle(400)
     expect(runBtn(el).disabled).toBe(false)
   })
 
   it("a preview that never answers is failed past the bound, not refused: the line, and Run released", async () => {
-    fakeStudio(routes(() => new Promise(() => {})), META_PV)
+    fakeStudio(
+      routes(() => new Promise(() => {})),
+      META_PV
+    )
     const el = await mount()
     await edit(el, C2, "tool_result:1:c2:0", "x")
     expect(runBtn(el).disabled).toBe(true)
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
-    const t = $(el, 'textarea[data-weft-k="ed:tool_result:1:c2:0"]') as HTMLTextAreaElement
+    const t = $(
+      el,
+      'textarea[data-weft-k="ed:tool_result:1:c2:0"]'
+    ) as HTMLTextAreaElement
     t.value = "xy"
     t.dispatchEvent(new Event("input", { bubbles: true }))
     vi.advanceTimersByTime(PREVIEW_MS + PREVIEW_TIMEOUT_MS + 50)
@@ -339,7 +532,10 @@ describe("the preview's pending and its bound (closing round)", () => {
 describe("review fixes (session 8)", () => {
   afterEach(() => vi.useRealTimers())
   const thread = async (el: WeftDevtools, v: string) => {
-    const thr = $(el, '.weft-drawer select[aria-label="thread"]') as HTMLSelectElement
+    const thr = $(
+      el,
+      '.weft-drawer select[aria-label="thread"]'
+    ) as HTMLSelectElement
     thr.value = v
     thr.dispatchEvent(new Event("change", { bubbles: true }))
     await settle()
@@ -352,7 +548,10 @@ describe("review fixes (session 8)", () => {
     await settle(400)
     const before = studio.posts("playground/preview").length
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
-    const t = $(el, 'textarea[data-weft-k="ed:tool_result:1:c2:0"]') as HTMLTextAreaElement
+    const t = $(
+      el,
+      'textarea[data-weft-k="ed:tool_result:1:c2:0"]'
+    ) as HTMLTextAreaElement
     for (let i = 0; i < 20; i++) {
       t.value = `x${"y".repeat(i + 1)}`
       t.dispatchEvent(new Event("input", { bubbles: true }))
@@ -370,18 +569,37 @@ describe("review fixes (session 8)", () => {
     await edit(el, C2, "tool_result:1:c2:0", "x")
     await thread(el, "fork")
     await thread(el, "ephemeral")
-    expect(text(el, ".weft-drawer .weft-step-h")).toContain("continue from step 2")
+    expect(text(el, ".weft-drawer .weft-step-h")).toContain(
+      "continue from step 2"
+    )
     await settle(400)
     click(runBtn(el))
     await settle(80)
     expect(studio.posts("playground/runs")[0].body).toMatchObject({
       source: { run_id: RUN, from_step: 2 },
-      transcript_edits: [{ kind: "tool_result", step: 1, call_id: "c2", tool_result: "x" }],
+      transcript_edits: [
+        { kind: "tool_result", step: 1, call_id: "c2", tool_result: "x" },
+      ],
     })
   })
 
   it("2: the shared rule holds Run for edits at step 0 (both surfaces)", () => {
-    const d = { runId: RUN, agent: "a", edits: [{ step: 1, callID: "c2", toolResult: "x" }], step: 0, instructions: "", registeredInstructions: "", tools: {}, model: "", thinking: "", input: "", engine: "live" as const, sideEffects: "" as const, thread: "ephemeral" as const, runtimeId: "rt" }
+    const d = {
+      runId: RUN,
+      agent: "a",
+      edits: [{ step: 1, callID: "c2", toolResult: "x" }],
+      step: 0,
+      instructions: "",
+      registeredInstructions: "",
+      tools: {},
+      model: "",
+      thinking: "",
+      input: "",
+      engine: "live" as const,
+      sideEffects: "" as const,
+      thread: "ephemeral" as const,
+      runtimeId: "rt",
+    }
     expect(draftProblem(d)).toBe(editsProblem("ephemeral", 0, d.edits))
     expect(draftProblem(d)).toMatch(/from_step ≥ 1/)
     expect(draftProblem({ ...d, step: 2 })).toBeNull()
@@ -397,7 +615,10 @@ describe("review fixes (session 8)", () => {
     expect($(el, "[data-weft-edited]")).toBeNull()
     click(runBtn(el))
     await settle(80)
-    const body = studio.posts("playground/runs")[0].body as Record<string, unknown>
+    const body = studio.posts("playground/runs")[0].body as Record<
+      string,
+      unknown
+    >
     expect(body.source).toEqual({ run_id: RUN, from_step: 0 })
     expect(body.transcript_edits).toBeUndefined()
   })
@@ -405,7 +626,12 @@ describe("review fixes (session 8)", () => {
   it("4: a refusal does not outlive its drawer — a scope change, then a new drawer: no refusal, Run enabled", async () => {
     fakeStudio(routes(), META_PV)
     const el = await mount()
-    await edit(el, '.weft-call[data-key="c1"] [data-weft-editable="tool_args"]', "tool_args:0:c1:0", "{nope")
+    await edit(
+      el,
+      '.weft-call[data-key="c1"] [data-weft-editable="tool_args"]',
+      "tool_args:0:c1:0",
+      "{nope"
+    )
     expect($(el, "[data-weft-ed-held]")).not.toBeNull()
     el.scope("pub_other")
     await settle()
@@ -435,7 +661,10 @@ describe("review fixes (session 8)", () => {
     await settle(400)
     click(runBtn(el))
     await settle(80)
-    expect((studio.posts("playground/runs")[0].body as Record<string, unknown>).transcript_edits).toEqual([
+    expect(
+      (studio.posts("playground/runs")[0].body as Record<string, unknown>)
+        .transcript_edits
+    ).toEqual([
       { kind: "tool_result", step: 1, call_id: "c2", tool_result: "typed" },
     ])
   })
@@ -443,11 +672,17 @@ describe("review fixes (session 8)", () => {
   it("8: a failed transcript?step read is asked again after a back-off, not per keystroke; a scope change forgets the views", async () => {
     let fail = true
     const r = routes()
-    r[`runs/${RUN}/transcript?step=2`] = () => (fail ? apiError(500, "internal", "boom") : AS_OF_2)
+    r[`runs/${RUN}/transcript?step=2`] = () =>
+      fail ? apiError(500, "internal", "boom") : AS_OF_2
     const studio = fakeStudio(r, META_PV)
     const el = await mount()
     const asked = () => studio.gets(`runs/${RUN}/transcript?step=2`).length
-    await edit(el, '.weft-call[data-key="c1"] [data-weft-editable="tool_result"]', "tool_result:0:c1:0", "x")
+    await edit(
+      el,
+      '.weft-call[data-key="c1"] [data-weft-editable="tool_result"]',
+      "tool_result:0:c1:0",
+      "x"
+    )
     await edit(el, C2, "tool_result:1:c2:0", "y")
     await settle(400)
     expect($(el, "[data-weft-view-edit]")).toBeNull()
@@ -456,7 +691,8 @@ describe("review fixes (session 8)", () => {
     // A persistent 500: more keystrokes inside the back-off ask nothing.
     vi.useFakeTimers({ toFake: ["Date"], now: Date.now() })
     try {
-      for (const v of ["y1", "y12", "y123"]) await edit(el, C2, "tool_result:1:c2:0", v)
+      for (const v of ["y1", "y12", "y123"])
+        await edit(el, C2, "tool_result:1:c2:0", v)
       await settle(400)
       expect(asked()).toBe(first)
       fail = false
@@ -468,7 +704,11 @@ describe("review fixes (session 8)", () => {
     }
     expect(text(el, "[data-weft-view-edit]")).toBe(COMPACTED_C1)
     expect(asked()).toBe(first + 1)
-    const model = (el as unknown as { model: { compactedAt: (r: string, s: number) => unknown } }).model
+    const model = (
+      el as unknown as {
+        model: { compactedAt: (r: string, s: number) => unknown }
+      }
+    ).model
     el.scope("pub_other")
     await settle()
     expect(model.compactedAt(RUN, 2)).toBeNull()
@@ -477,13 +717,20 @@ describe("review fixes (session 8)", () => {
   it("8b: a failure that lands after a scope change does not mark the new scope's key failed", async () => {
     let fail = () => {}
     const r = routes()
-    r[`runs/${RUN}/transcript?step=2`] = () => new Promise((ok) => (fail = () => ok(apiError(500, "internal", "boom"))))
+    r[`runs/${RUN}/transcript?step=2`] = () =>
+      new Promise((ok) => (fail = () => ok(apiError(500, "internal", "boom"))))
     fakeStudio(r, META_PV)
     const el = await mount()
-    await edit(el, '.weft-call[data-key="c1"] [data-weft-editable="tool_result"]', "tool_result:0:c1:0", "x")
+    await edit(
+      el,
+      '.weft-call[data-key="c1"] [data-weft-editable="tool_result"]',
+      "tool_result:0:c1:0",
+      "x"
+    )
     await edit(el, C2, "tool_result:1:c2:0", "y")
     await pause(400) // the read stays in flight
-    const asOf = (el as unknown as { model: { asOf: Map<string, unknown> } }).model.asOf
+    const asOf = (el as unknown as { model: { asOf: Map<string, unknown> } })
+      .model.asOf
     expect(asOf.get(`${RUN}#2`)).toBeNull()
     el.scope("pub_other")
     await pause(50)

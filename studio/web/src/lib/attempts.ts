@@ -90,7 +90,8 @@ export function attemptLine(f: AttemptFacts | null | undefined): string | null {
   if (f.n <= 1) return null
   let s = `attempt ${f.n} of ${Math.max(f.total, f.n)}`
   if (f.requested && f.answered)
-    s += f.answered === f.requested ? " · retry" : ` · fallback to ${f.answered}`
+    s +=
+      f.answered === f.requested ? " · retry" : ` · fallback to ${f.answered}`
   return s
 }
 

@@ -5,7 +5,13 @@
 // (programme audit P1-3). Pinned here: with a token stored the way the
 // reader pastes it, every fetch the hook makes carries the header.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { act, cleanup, configure, renderHook, waitFor } from "@testing-library/react"
+import {
+  act,
+  cleanup,
+  configure,
+  renderHook,
+  waitFor,
+} from "@testing-library/react"
 
 import { setStudioToken } from "@/lib/api"
 import { FakeEventSource } from "@/test/fake-event-source"
@@ -20,7 +26,11 @@ const page = (pos: number, done: boolean) => ({
     {
       pos,
       time: "2026-10-01T09:00:00Z",
-      event: { type: "run_start", id: "r1", model: { provider: "p", name: "m" } },
+      event: {
+        type: "run_start",
+        id: "r1",
+        model: { provider: "p", name: "m" },
+      },
     },
   ],
   next_after: null,
@@ -131,7 +141,9 @@ describe("useRunEvents walk and tail", () => {
     const fetchMock = vi.fn(async () => json(pageOf([], null)))
     vi.stubGlobal("fetch", withLiveGrant(fetchMock))
     vi.useFakeTimers({ shouldAdvanceTime: true })
-    const { result } = renderHook(() => useRunEvents("", "running", { live: true }))
+    const { result } = renderHook(() =>
+      useRunEvents("", "running", { live: true })
+    )
     // Past the 2 s poll: still nothing read.
     await vi.advanceTimersByTimeAsync(2500)
     expect(fetchMock).not.toHaveBeenCalled()
@@ -154,7 +166,9 @@ describe("useRunEvents walk and tail", () => {
         : Promise.resolve(json(pageOf([], null)))
     )
     vi.stubGlobal("fetch", withLiveGrant(fetchMock))
-    const { result } = renderHook(() => useRunEvents("r1", "running", { live: true }))
+    const { result } = renderHook(() =>
+      useRunEvents("r1", "running", { live: true })
+    )
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
     const es = await waitFor(() => FakeEventSource.nth(0))
     es.connect()
@@ -165,7 +179,9 @@ describe("useRunEvents walk and tail", () => {
     release(json(pageOf([0, 1], null)))
     await waitFor(() => expect(result.current.lastPos).toBe(3))
     expect(result.current.events).toHaveLength(4)
-    expect(result.current.folded.steps.map((s) => s.index)).toEqual([0, 1, 2, 3])
+    expect(result.current.folded.steps.map((s) => s.index)).toEqual([
+      0, 1, 2, 3,
+    ])
   })
 
   // A frame whose position skips ahead means an event was missed (it
@@ -177,13 +193,17 @@ describe("useRunEvents walk and tail", () => {
         : json(pageOf([2, 3], null))
     )
     vi.stubGlobal("fetch", withLiveGrant(fetchMock))
-    const { result } = renderHook(() => useRunEvents("r1", "running", { live: true }))
+    const { result } = renderHook(() =>
+      useRunEvents("r1", "running", { live: true })
+    )
     await waitFor(() => expect(result.current.lastPos).toBe(1))
     const es = await waitFor(() => FakeEventSource.nth(0))
     es.connect()
     es.emit("record", frame(3), "9") // 2 was never delivered live
     await waitFor(() => expect(result.current.lastPos).toBe(3))
-    expect(result.current.folded.steps.map((s) => s.index)).toEqual([0, 1, 2, 3])
+    expect(result.current.folded.steps.map((s) => s.index)).toEqual([
+      0, 1, 2, 3,
+    ])
     expect(fetchMock.mock.calls.map((c) => afterOf(c[0]))).toEqual([0, 2])
   })
 
@@ -194,7 +214,12 @@ describe("useRunEvents walk and tail", () => {
   it("reads the pages past the walk when the stream opens after it", async () => {
     let stored = [0, 1]
     const fetchMock = vi.fn(async (input: RequestInfo | URL) =>
-      json(pageOf(stored.filter((p) => p >= afterOf(input)), null))
+      json(
+        pageOf(
+          stored.filter((p) => p >= afterOf(input)),
+          null
+        )
+      )
     )
     const granted = withLiveGrant(fetchMock)
     let answerGrant = () => {}
@@ -205,7 +230,9 @@ describe("useRunEvents walk and tail", () => {
           })
         : granted(input, init)
     )
-    const { result } = renderHook(() => useRunEvents("r1", "running", { live: true }))
+    const { result } = renderHook(() =>
+      useRunEvents("r1", "running", { live: true })
+    )
     await waitFor(() => expect(result.current.lastPos).toBe(1))
     stored = [0, 1, 2] // published after the page, before the subscription
     answerGrant()
@@ -218,19 +245,27 @@ describe("useRunEvents walk and tail", () => {
   it("folds deltas and in-order events straight from the stream", async () => {
     const fetchMock = vi.fn(async () => json(pageOf([0], null)))
     vi.stubGlobal("fetch", withLiveGrant(fetchMock))
-    const { result } = renderHook(() => useRunEvents("r1", "running", { live: true }))
+    const { result } = renderHook(() =>
+      useRunEvents("r1", "running", { live: true })
+    )
     await waitFor(() => expect(result.current.lastPos).toBe(0))
     const es = await waitFor(() => FakeEventSource.nth(0))
     es.connect()
     es.emit("record", frame(0, "delta"))
     es.emit("record", frame(1), "5")
     es.emit("record", frame(1, "delta"))
-    await waitFor(() => expect(result.current.folded.steps.find((st) => st.index === 1)?.text).toBe("d1"))
+    await waitFor(() =>
+      expect(
+        result.current.folded.steps.find((st) => st.index === 1)?.text
+      ).toBe("d1")
+    )
     // Deltas are folded (their words reach the step) but never kept in
     // the window (plan H2): it holds the two positioned events.
     expect(result.current.events).toHaveLength(2)
     expect(result.current.total).toBe(2)
-    expect(result.current.folded.steps.find((st) => st.index === 0)?.text).toBe("d0")
+    expect(result.current.folded.steps.find((st) => st.index === 0)?.text).toBe(
+      "d0"
+    )
     expect(result.current.lastPos).toBe(1)
     // The first walk and the open's catch-up (plan C5: the stream opens
     // after the walk began); no refetch for the frames: nothing skipped.
@@ -276,7 +311,10 @@ describe("useRunEvents walk and tail", () => {
   // page used to open a second EventSource for them — two of a
   // browser's six connections per origin for one tab).
   it("hands run frames to onRun on the same stream", async () => {
-    vi.stubGlobal("fetch", withLiveGrant(vi.fn(async () => json(pageOf([0], null)))))
+    vi.stubGlobal(
+      "fetch",
+      withLiveGrant(vi.fn(async () => json(pageOf([0], null))))
+    )
     const onRun = vi.fn()
     renderHook(() => useRunEvents("r1", "running", { live: true, onRun }))
     await waitFor(() => expect(FakeEventSource.instances).toHaveLength(1))
@@ -291,7 +329,9 @@ describe("useRunEvents walk and tail", () => {
     const fetchMock = vi.fn(async () => json(pageOf([0], null)))
     vi.stubGlobal("fetch", withLiveGrant(fetchMock))
     vi.useFakeTimers({ shouldAdvanceTime: true })
-    const { unmount } = renderHook(() => useRunEvents("r1", "running", { live: true }))
+    const { unmount } = renderHook(() =>
+      useRunEvents("r1", "running", { live: true })
+    )
     await waitFor(() => expect(fetchMock).toHaveBeenCalled())
     unmount()
     expect(FakeEventSource.open()).toHaveLength(0)
@@ -330,14 +370,18 @@ describe("useRunEvents seam holes", () => {
         : Promise.resolve(json(pageOf([2, 3, 4], null)))
     )
     vi.stubGlobal("fetch", withLiveGrant(fetchMock))
-    const { result } = renderHook(() => useRunEvents("r1", "running", { live: true }))
+    const { result } = renderHook(() =>
+      useRunEvents("r1", "running", { live: true })
+    )
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
     const es = await waitFor(() => FakeEventSource.nth(0))
     es.connect()
     es.emit("record", frame(4), "9") // 2 and 3 were published before the subscription
     release(json(pageOf([0, 1], null)))
     await waitFor(() => expect(result.current.lastPos).toBe(4))
-    expect(result.current.folded.steps.map((s) => s.index)).toEqual([0, 1, 2, 3, 4])
+    expect(result.current.folded.steps.map((s) => s.index)).toEqual([
+      0, 1, 2, 3, 4,
+    ])
   })
 
   // A hole the pages do not fill either (the server reports it in
@@ -347,7 +391,9 @@ describe("useRunEvents seam holes", () => {
       afterOf(input) === 0 ? json(pageOf([0, 1], null)) : json(pageOf([], null))
     )
     vi.stubGlobal("fetch", withLiveGrant(fetchMock))
-    const { result } = renderHook(() => useRunEvents("r1", "running", { live: true }))
+    const { result } = renderHook(() =>
+      useRunEvents("r1", "running", { live: true })
+    )
     await waitFor(() => expect(result.current.lastPos).toBe(1))
     const es = await waitFor(() => FakeEventSource.nth(0))
     es.connect()
@@ -373,7 +419,10 @@ describe("useRunEvents live publish cost", () => {
   // stream published frame by frame re-rendered a 10k-event page tens
   // of times a second and locked the tab. A burst is one publish.
   it("coalesces a burst of live frames into one publish", async () => {
-    vi.stubGlobal("fetch", withLiveGrant(vi.fn(async () => json(pageOf([0], null)))))
+    vi.stubGlobal(
+      "fetch",
+      withLiveGrant(vi.fn(async () => json(pageOf([0], null))))
+    )
     const published = new Set<unknown>()
     const { result } = renderHook(() => {
       const s = useRunEvents("r1", "running", { live: true })

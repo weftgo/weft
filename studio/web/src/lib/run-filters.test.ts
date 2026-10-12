@@ -26,7 +26,8 @@ import {
 import { runsLink } from "./links"
 
 const API = resolve(process.cwd(), "../testdata/api")
-const golden = <T>(name: string): T => JSON.parse(readFileSync(resolve(API, `${name}.golden.json`), "utf8")) as T
+const golden = <T>(name: string): T =>
+  JSON.parse(readFileSync(resolve(API, `${name}.golden.json`), "utf8")) as T
 
 const ALL = { search: true, pricing: true }
 const NONE = { search: false, pricing: false }
@@ -62,7 +63,12 @@ describe("the URL's filters", () => {
       sort: "cost",
     })
     expect(
-      validateRunsSearch({ status: "nope", min_tokens: -1, sort: "started", tag: "x" })
+      validateRunsSearch({
+        status: "nope",
+        min_tokens: -1,
+        sort: "started",
+        tag: "x",
+      })
     ).toEqual(validateRunsSearch({}))
     // The server's RFC 3339 (time.Parse(time.RFC3339) → 400 otherwise):
     // a real day only — never V8's 2026-02-30 rolled to March 2 — and a
@@ -70,18 +76,47 @@ describe("the URL's filters", () => {
     // Refused values stay in the search as typed (the router would drop
     // the key and the text with it) and are never sent or applied: a
     // not-applied chip and a note say so.
-    const refused = validateRunsSearch({ q: "x", since: "2026-02-30", until: "2026-10-02T12:00:00", min_tokens: "abc" })
+    const refused = validateRunsSearch({
+      q: "x",
+      since: "2026-02-30",
+      until: "2026-10-02T12:00:00",
+      min_tokens: "abc",
+    })
     expect(refused.min_tokens).toBeUndefined()
     expect(searchFiltersFrom(refused, ALL)).toEqual({ q: "x" })
     expect(viaSearch({ since: "2026-02-30" }, ALL)).toBe(false)
     expect(localKeys({ since: "2026-02-30" }, NONE)).toEqual([])
-    expect(runChips(refused, ALL).filter((c) => c.key === "since" || c.key === "until")).toEqual([
-      { key: "since", label: "since 2026-02-30", applied: false, note: "not a real day (YYYY-MM-DD) or an RFC 3339 time with a zone" },
-      { key: "until", label: "until 2026-10-02T12:00:00", applied: false, note: "not a real day (YYYY-MM-DD) or an RFC 3339 time with a zone" },
+    expect(
+      runChips(refused, ALL).filter(
+        (c) => c.key === "since" || c.key === "until"
+      )
+    ).toEqual([
+      {
+        key: "since",
+        label: "since 2026-02-30",
+        applied: false,
+        note: "not a real day (YYYY-MM-DD) or an RFC 3339 time with a zone",
+      },
+      {
+        key: "until",
+        label: "until 2026-10-02T12:00:00",
+        applied: false,
+        note: "not a real day (YYYY-MM-DD) or an RFC 3339 time with a zone",
+      },
     ])
-    for (const bad of ["2026-13-01", "2026-10-01T24:00:00Z", "2026-10-01T12:00:00+2:00", "2026-10-01 12:00:00Z", "2026-02-30"])
+    for (const bad of [
+      "2026-13-01",
+      "2026-10-01T24:00:00Z",
+      "2026-10-01T12:00:00+2:00",
+      "2026-10-01 12:00:00Z",
+      "2026-02-30",
+    ])
       expect(parseWhen(bad), bad).toBeUndefined()
-    for (const good of ["2024-02-29", "2026-10-01T12:00:00Z", "2026-10-01T12:00:00.5+02:00"])
+    for (const good of [
+      "2024-02-29",
+      "2026-10-01T12:00:00Z",
+      "2026-10-01T12:00:00.5+02:00",
+    ])
       expect(parseWhen(good), good).toBe(good)
     expect(whenNotes({ since: "2026-02-30", until: "2026-10-02" })).toEqual([
       "since “2026-02-30” is ignored: not a real day (YYYY-MM-DD) or an RFC 3339 time with a zone",
@@ -110,13 +145,21 @@ describe("the URL's filters", () => {
     ])
     const gold = chips.find((c) => c.value === "tier=gold")!
     expect(removeChip(s, gold)).toEqual({ tag: "region=eu" })
-    expect(removeChip({ ...s, tag: "region=eu" }, chips.find((c) => c.value === "region=eu")!)).toEqual({
+    expect(
+      removeChip(
+        { ...s, tag: "region=eu" },
+        chips.find((c) => c.value === "region=eu")!
+      )
+    ).toEqual({
       tag: undefined,
     })
     expect(removeChip(s, chips[0])).toEqual({ q: undefined })
     // The round trip: chips → link → the same search back.
     const link = runsLink({ ...s, ...removeChip(s, gold) })
-    expect(validateRunsSearch(link.search as Record<string, unknown>)).toEqual({ ...s, tag: "region=eu" })
+    expect(validateRunsSearch(link.search as Record<string, unknown>)).toEqual({
+      ...s,
+      tag: "region=eu",
+    })
     // Clear all keeps the sort (a view, not a filter).
     expect(runChips({ ...s, ...CLEARED }, ALL)).toEqual([])
     expect({ ...s, ...CLEARED }.sort).toBe("cost")
@@ -129,8 +172,13 @@ describe("the URL's filters", () => {
     expect(viaSearch({ sort: "duration" }, ALL)).toBe(true)
     expect(viaSearch({ q: "x" }, NONE)).toBe(false)
     // Cost needs pricing: without it neither sort=cost nor min_cost asks search.
-    expect(viaSearch({ sort: "cost", min_cost: 1 }, { search: true, pricing: false })).toBe(false)
-    const f = searchFiltersFrom(validateRunsSearch({ ...raw, before: "2026-10-01T00:00:00Z" }), ALL)
+    expect(
+      viaSearch({ sort: "cost", min_cost: 1 }, { search: true, pricing: false })
+    ).toBe(false)
+    const f = searchFiltersFrom(
+      validateRunsSearch({ ...raw, before: "2026-10-01T00:00:00Z" }),
+      ALL
+    )
     expect(f).toEqual({
       agent: "orders",
       status: "failed",
@@ -150,7 +198,9 @@ describe("the URL's filters", () => {
   it("a day is UTC midnight: since's own, until's next", () => {
     expect(rangeTime("2026-10-01", "since")).toBe("2026-10-01T00:00:00Z")
     expect(rangeTime("2026-10-31", "until")).toBe("2026-11-01T00:00:00Z")
-    expect(rangeTime("2026-10-01T09:00:00+02:00", "until")).toBe("2026-10-01T09:00:00+02:00")
+    expect(rangeTime("2026-10-01T09:00:00+02:00", "until")).toBe(
+      "2026-10-01T09:00:00+02:00"
+    )
   })
 })
 
@@ -162,7 +212,10 @@ describe("the loaded rows answer what the list cannot", () => {
     const s = validateRunsSearch({ min_duration: 3 })
     expect(localKeys(s, ALL)).toEqual(["min_duration"])
     // r_stale has run 10 s so far; r_sub took 5 s; the rest 2 s.
-    expect(applyLocal(runs, s, ALL, now).map((r) => r.id)).toEqual(["r_stale", "r_sub"])
+    expect(applyLocal(runs, s, ALL, now).map((r) => r.id)).toEqual([
+      "r_stale",
+      "r_sub",
+    ])
     expect(runChips(s, ALL)[0].note).toBe("the loaded rows only")
   })
 
@@ -170,33 +223,63 @@ describe("the loaded rows answer what the list cannot", () => {
     const s = validateRunsSearch({ experiment_id: "exp_tone" })
     expect(s.experiment_id).toBe("exp_tone")
     const chips = runChips(s, ALL)
-    expect(chips).toEqual([{ key: "experiment_id", label: "experiment exp_tone", applied: true }])
+    expect(chips).toEqual([
+      { key: "experiment_id", label: "experiment exp_tone", applied: true },
+    ])
     expect(removeChip(s, chips[0])).toEqual({ experiment_id: undefined })
     expect(CLEARED).toHaveProperty("experiment_id", undefined)
     // Both lists are asked for the experiment's playground runs.
-    expect(filtersFromSearchOf(s)).toMatchObject({ experiment_id: "exp_tone", playground: true })
-    expect(searchFiltersFrom({ ...s, q: "x" }, ALL)).toMatchObject({ experiment_id: "exp_tone", playground: true })
+    expect(filtersFromSearchOf(s)).toMatchObject({
+      experiment_id: "exp_tone",
+      playground: true,
+    })
+    expect(searchFiltersFrom({ ...s, q: "x" }, ALL)).toMatchObject({
+      experiment_id: "exp_tone",
+      playground: true,
+    })
     // The API filters (F5.1): the loaded rows are not narrowed again.
     const mine = { ...runs[0], id: "pg_1", experiment_id: "exp_tone" }
-    expect(applyLocal([mine, ...runs], s, ALL, now)).toHaveLength(runs.length + 1)
+    expect(applyLocal([mine, ...runs], s, ALL, now)).toHaveLength(
+      runs.length + 1
+    )
     expect(localKeys(s, NONE)).toEqual([])
-    expect(runsLink({ experiment_id: "exp_tone" })).toEqual({ to: "/runs", search: { experiment_id: "exp_tone" } })
+    expect(runsLink({ experiment_id: "exp_tone" })).toEqual({
+      to: "/runs",
+      search: { experiment_id: "exp_tone" },
+    })
   })
 
   it("without search: model, error, range and tokens filter the loaded rows; text and tool cannot", () => {
-    const s = validateRunsSearch({ q: "refund", tool: "lookup", error: "INJECTED", since: "2020-01-01T09:00:30Z" })
+    const s = validateRunsSearch({
+      q: "refund",
+      tool: "lookup",
+      error: "INJECTED",
+      since: "2020-01-01T09:00:30Z",
+    })
     expect(localKeys(s, NONE)).toEqual(["error", "since"])
     expect(applyLocal(runs, s, NONE, now).map((r) => r.id)).toEqual(["r_fail"])
     const chips = runChips(s, NONE)
-    expect(chips.find((c) => c.key === "q")).toMatchObject({ applied: false, note: "needs the search capability" })
-    expect(chips.find((c) => c.key === "tool")).toMatchObject({ applied: false })
-    expect(chips.find((c) => c.key === "error")).toMatchObject({ applied: true, note: "the loaded rows only" })
+    expect(chips.find((c) => c.key === "q")).toMatchObject({
+      applied: false,
+      note: "needs the search capability",
+    })
+    expect(chips.find((c) => c.key === "tool")).toMatchObject({
+      applied: false,
+    })
+    expect(chips.find((c) => c.key === "error")).toMatchObject({
+      applied: true,
+      note: "the loaded rows only",
+    })
     // min_cost without pricing applies nowhere, and says so.
-    expect(runChips({ min_cost: 1 }, NONE)[0]).toMatchObject({ applied: false, note: "needs the pricing capability" })
+    expect(runChips({ min_cost: 1 }, NONE)[0]).toMatchObject({
+      applied: false,
+      note: "needs the pricing capability",
+    })
   })
 
   it("without search, a sort orders the loaded rows; with it, the API's order stands", () => {
-    const byTokens = (rs: RunRow[]) => rs.map((r) => r.usage.input_tokens + r.usage.output_tokens)
+    const byTokens = (rs: RunRow[]) =>
+      rs.map((r) => r.usage.input_tokens + r.usage.output_tokens)
     const sorted = byTokens(applyLocal(runs, { sort: "tokens" }, NONE, now))
     expect(sorted).toEqual([...sorted].sort((a, b) => b - a))
     expect(applyLocal(runs, { sort: "tokens" }, ALL, now)).toEqual(runs)
@@ -218,7 +301,12 @@ describe("the trace list's mirror (traces.golden.json ⊆ TraceRow)", () => {
     reason: true,
     fix: true,
   }
-  const PAGE_KEYS: Record<keyof TracesPage, true> = { total: true, traces: true, next_before: true, next_before_id: true }
+  const PAGE_KEYS: Record<keyof TracesPage, true> = {
+    total: true,
+    traces: true,
+    next_before: true,
+    next_before_id: true,
+  }
   const page = golden<TracesPage>("traces")
 
   it("knows every key the Go golden carries", () => {
@@ -226,7 +314,8 @@ describe("the trace list's mirror (traces.golden.json ⊆ TraceRow)", () => {
     expect(page.traces.length).toBeGreaterThan(0)
     for (const t of page.traces) {
       expect(Object.keys(t).filter((k) => !(k in ROW_KEYS))).toEqual([])
-      if (t.root) expect(Object.keys(t.root).sort()).toEqual(["name", "span_id"])
+      if (t.root)
+        expect(Object.keys(t.root).sort()).toEqual(["name", "span_id"])
     }
     // The rootless trace carries the gap badge with its words.
     const rootless = page.traces.find((t) => t.root === null)!
@@ -236,7 +325,12 @@ describe("the trace list's mirror (traces.golden.json ⊆ TraceRow)", () => {
 
   it("dedupes a trace listed again on a later page, first row kept", () => {
     const [a, b] = page.traces
-    expect(dedupeTraces([a, b, { ...a, span_count: 99 }]).map((t) => [t.trace_id, t.span_count])).toEqual([
+    expect(
+      dedupeTraces([a, b, { ...a, span_count: 99 }]).map((t) => [
+        t.trace_id,
+        t.span_count,
+      ])
+    ).toEqual([
       [a.trace_id, a.span_count],
       [b.trace_id, b.span_count],
     ])
@@ -245,7 +339,10 @@ describe("the trace list's mirror (traces.golden.json ⊆ TraceRow)", () => {
 
 describe("the queries", () => {
   afterEach(() => vi.unstubAllGlobals())
-  const reply = (body: unknown) => new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } })
+  const reply = (body: unknown) =>
+    new Response(JSON.stringify(body), {
+      headers: { "Content-Type": "application/json" },
+    })
 
   it("fetchSearch sends search's own filters beside /api/runs'", async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -281,12 +378,21 @@ describe("the queries", () => {
       vi.fn(async (input: RequestInfo | URL) => {
         const url = new URL(String(input))
         seen.push(`${url.pathname.split("/api/")[1]}${url.search}`)
-        return reply({ total: 0, runs: [], sort: "started", next_offset: null, next_before: null })
+        return reply({
+          total: 0,
+          runs: [],
+          sort: "started",
+          next_offset: null,
+          next_before: null,
+        })
       })
     )
     await fetchSearch({ playground: true, experiment_id: "exp_tone", q: "x" })
     await fetchRuns({ playground: true, experiment_id: "exp_tone" })
-    expect(seen).toEqual(["search?playground=true&experiment_id=exp_tone&q=x", "runs?playground=true&experiment_id=exp_tone"])
+    expect(seen).toEqual([
+      "search?playground=true&experiment_id=exp_tone&q=x",
+      "runs?playground=true&experiment_id=exp_tone",
+    ])
   })
 
   it("fetchTraces sends the filters and the exact cursor", async () => {

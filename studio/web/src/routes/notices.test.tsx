@@ -2,7 +2,14 @@
 // each event raises exactly one toast, with its words, and its action
 // does what it says — "open" is a link to the thing, "approve" posts
 // the approval, "retry" reopens the stream.
-import { cleanup, configure, fireEvent, screen, waitFor, within } from "@testing-library/react"
+import {
+  cleanup,
+  configure,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
@@ -12,7 +19,13 @@ import { queryClient } from "@/lib/query"
 import { renderApp, stubBrowser } from "@/test/app"
 import { valueOf } from "@/test/select"
 import { FakeEventSource } from "@/test/fake-event-source"
-import { FakeStudio, apiError, golden, pagedEvents, transcriptOf } from "@/test/fake-studio"
+import {
+  FakeStudio,
+  apiError,
+  golden,
+  pagedEvents,
+  transcriptOf,
+} from "@/test/fake-studio"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -35,7 +48,9 @@ function toastTitles(): string[] {
 /** The one toast whose line matches, once it is up. */
 async function toastFor(re: RegExp): Promise<HTMLElement> {
   return waitFor(() => {
-    const hits = toasts().filter((t) => re.test(t.querySelector("[data-title]")?.textContent ?? ""))
+    const hits = toasts().filter((t) =>
+      re.test(t.querySelector("[data-title]")?.textContent ?? "")
+    )
     expect(hits).toHaveLength(1)
     return hits[0]
   })
@@ -59,7 +74,11 @@ afterEach(() => {
 })
 
 describe("the playground's notices", () => {
-  const tool = (name: string, side_effects = "never") => ({ name, side_effects, allow: false })
+  const tool = (name: string, side_effects = "never") => ({
+    name,
+    side_effects,
+    allow: false,
+  })
   const runtimes = {
     runtimes: [
       {
@@ -81,7 +100,12 @@ describe("the playground's notices", () => {
       },
     ],
   }
-  const command = (id: string, state: string, run_id = "", status?: string) => ({
+  const command = (
+    id: string,
+    state: string,
+    run_id = "",
+    status?: string
+  ) => ({
     command_id: id,
     state,
     run_id,
@@ -94,8 +118,20 @@ describe("the playground's notices", () => {
     events: [
       { type: "run_start", id, model: rOK.model, agent: "orders" },
       { type: "step_start", run_id: id, index: 0 },
-      { type: "step_finish", run_id: id, index: 0, reason: pending ? "tool_calls" : "stop", usage: { input_tokens: 5, output_tokens: 2 } },
-      { type: "run_finish", run_id: id, usage: { input_tokens: 5, output_tokens: 2 }, steps: 1, ...(pending ? { pending } : {}) },
+      {
+        type: "step_finish",
+        run_id: id,
+        index: 0,
+        reason: pending ? "tool_calls" : "stop",
+        usage: { input_tokens: 5, output_tokens: 2 },
+      },
+      {
+        type: "run_finish",
+        run_id: id,
+        usage: { input_tokens: 5, output_tokens: 2 },
+        steps: 1,
+        ...(pending ? { pending } : {}),
+      },
     ].map((event, pos) => ({ pos, time: rOK.started, event })),
     next_after: null,
     done: true,
@@ -122,8 +158,14 @@ describe("the playground's notices", () => {
   it("experiment finished: one toast, its status, and open links the run", async () => {
     studio
       .on("POST playground/runs", command("cmd_1", "queued"))
-      .on("GET playground/commands/cmd_1", command("cmd_1", "finished", "pg_1", "succeeded"))
-      .on("GET runs/pg_1", { ...row({ id: "pg_1", playground: true, status: "succeeded" }), children: [] })
+      .on(
+        "GET playground/commands/cmd_1",
+        command("cmd_1", "finished", "pg_1", "succeeded")
+      )
+      .on("GET runs/pg_1", {
+        ...row({ id: "pg_1", playground: true, status: "succeeded" }),
+        children: [],
+      })
       .on("GET runs/pg_1/events", eventsOf("pg_1"))
       .on("GET runs/pg_1/transcript", { batches: [] })
     const router = await runA()
@@ -132,9 +174,13 @@ describe("the playground's notices", () => {
     expect(open.getAttribute("href")).toMatch(/\/runs\/pg_1$/)
     // Re-renders and refetches never repeat it.
     await settle()
-    expect(toastTitles().filter((s) => s.startsWith("experiment"))).toHaveLength(1)
+    expect(
+      toastTitles().filter((s) => s.startsWith("experiment"))
+    ).toHaveLength(1)
     fireEvent.click(open)
-    await waitFor(() => expect(router.state.location.pathname).toBe("/runs/pg_1"))
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/runs/pg_1")
+    )
   })
 
   it("a matrix raises one toast when its last cell settles — none per cell", async () => {
@@ -143,111 +189,185 @@ describe("the playground's notices", () => {
     studio
       .on("POST experiments", (req) => req.body)
       .on("POST playground/runs", () => command(`cmd_m${++n}`, "queued"))
-      .on("GET playground/commands/cmd_m1", command("cmd_m1", "finished", "pg_m1", "succeeded"))
+      .on(
+        "GET playground/commands/cmd_m1",
+        command("cmd_m1", "finished", "pg_m1", "succeeded")
+      )
       .on("GET playground/commands/cmd_m2", () =>
-        secondDone ? command("cmd_m2", "finished", "pg_m2", "failed") : command("cmd_m2", "accepted", "pg_m2")
+        secondDone
+          ? command("cmd_m2", "finished", "pg_m2", "failed")
+          : command("cmd_m2", "accepted", "pg_m2")
       )
     renderApp("/playground?run=r_ok")
-    await waitFor(() => expect(valueOf(screen.getByLabelText("agent"))).toBe("orders"))
+    await waitFor(() =>
+      expect(valueOf(screen.getByLabelText("agent"))).toBe("orders")
+    )
     fireEvent.click(screen.getByRole("button", { name: "+ variant" }))
-    fireEvent.change(screen.getByLabelText("experiment name"), { target: { value: "exp_tone" } })
+    fireEvent.change(screen.getByLabelText("experiment name"), {
+      target: { value: "exp_tone" },
+    })
     const go = screen.getByRole("button", { name: "Run matrix" })
     await waitFor(() => expect(go).toHaveProperty("disabled", false))
     fireEvent.click(go)
     await waitFor(() =>
-      expect(document.querySelector('[data-cell="A×1"]')?.textContent).toContain("finished")
+      expect(
+        document.querySelector('[data-cell="A×1"]')?.textContent
+      ).toContain("finished")
     )
     // One cell settled, one still running: nothing yet.
     await settle()
     expect(toastTitles()).toEqual([])
     secondDone = true
-    const t = await toastFor(/^experiment exp_tone finished · 1 succeeded, 1 failed$/)
-    expect(within(t).getByRole("link", { name: "open" }).getAttribute("href")).toMatch(
-      /\/experiments\/exp_tone$/
+    const t = await toastFor(
+      /^experiment exp_tone finished · 1 succeeded, 1 failed$/
     )
+    expect(
+      within(t).getByRole("link", { name: "open" }).getAttribute("href")
+    ).toMatch(/\/experiments\/exp_tone$/)
     await settle()
-    expect(toastTitles()).toEqual(["experiment exp_tone finished · 1 succeeded, 1 failed"])
+    expect(toastTitles()).toEqual([
+      "experiment exp_tone finished · 1 succeeded, 1 failed",
+    ])
   })
 
   it("run parked: one toast at its tool, no finished toast, and approve posts the approval", async () => {
-    const pending = [{ type: "tool_call", id: "call_9", name: "refund", args: { order: 42 } }]
+    const pending = [
+      { type: "tool_call", id: "call_9", name: "refund", args: { order: 42 } },
+    ]
     studio
       .on("POST playground/runs", command("cmd_1", "queued"))
-      .on("GET playground/commands/cmd_1", command("cmd_1", "finished", "pg_1", "succeeded"))
-      .on("GET runs/pg_1", { ...row({ id: "pg_1", playground: true, pending: 1 }), children: [] })
+      .on(
+        "GET playground/commands/cmd_1",
+        command("cmd_1", "finished", "pg_1", "succeeded")
+      )
+      .on("GET runs/pg_1", {
+        ...row({ id: "pg_1", playground: true, pending: 1 }),
+        children: [],
+      })
       .on("GET runs/pg_1/events", eventsOf("pg_1", pending))
       .on("GET runs/pg_1/transcript", { batches: [] })
       .on("POST runs/pg_1/approvals", command("cmd_d1", "queued"))
       .on("GET playground/commands/cmd_d1", command("cmd_d1", "queued"))
     await runA()
     const t = await toastFor(/^run pg_1 parked at refund$/)
-    expect(within(t).getByRole("link", { name: "open" }).getAttribute("href")).toMatch(/\/runs\/pg_1$/)
+    expect(
+      within(t).getByRole("link", { name: "open" }).getAttribute("href")
+    ).toMatch(/\/runs\/pg_1$/)
     await settle()
     // A parked run is not a finished experiment: one notice speaks.
     expect(toastTitles()).toEqual(["run pg_1 parked at refund"])
     fireEvent.click(within(t).getByRole("button", { name: "approve" }))
-    await waitFor(() => expect(studio.calls("POST runs/pg_1/approvals")).toHaveLength(1))
-    expect(studio.calls("POST runs/pg_1/approvals")[0].body).toEqual({ call_id: "call_9", decision: "approve" })
+    await waitFor(() =>
+      expect(studio.calls("POST runs/pg_1/approvals")).toHaveLength(1)
+    )
+    expect(studio.calls("POST runs/pg_1/approvals")[0].body).toEqual({
+      call_id: "call_9",
+      decision: "approve",
+    })
   })
 
   const parkedPG1 = () =>
     studio
       .on("POST playground/runs", command("cmd_1", "queued"))
-      .on("GET playground/commands/cmd_1", command("cmd_1", "finished", "pg_1", "succeeded"))
-      .on("GET runs/pg_1", { ...row({ id: "pg_1", playground: true, pending: 1 }), children: [] })
-      .on("GET runs/pg_1/events", eventsOf("pg_1", [{ type: "tool_call", id: "call_9", name: "refund", args: {} }]))
+      .on(
+        "GET playground/commands/cmd_1",
+        command("cmd_1", "finished", "pg_1", "succeeded")
+      )
+      .on("GET runs/pg_1", {
+        ...row({ id: "pg_1", playground: true, pending: 1 }),
+        children: [],
+      })
+      .on(
+        "GET runs/pg_1/events",
+        eventsOf("pg_1", [
+          { type: "tool_call", id: "call_9", name: "refund", args: {} },
+        ])
+      )
       .on("GET runs/pg_1/transcript", { batches: [] })
       .on("POST runs/pg_1/approvals", command("cmd_d1", "queued"))
       .on("GET runs/pg_2/transcript", { batches: [] })
 
   it("a double click on approve posts once", async () => {
-    parkedPG1().on("GET playground/commands/cmd_d1", command("cmd_d1", "queued"))
+    parkedPG1().on(
+      "GET playground/commands/cmd_d1",
+      command("cmd_d1", "queued")
+    )
     await runA()
     const t = await toastFor(/^run pg_1 parked at refund$/)
     const approve = within(t).getByRole("button", { name: "approve" })
     fireEvent.click(approve)
     fireEvent.click(approve)
-    await waitFor(() => expect(studio.calls("POST runs/pg_1/approvals")).toHaveLength(1))
+    await waitFor(() =>
+      expect(studio.calls("POST runs/pg_1/approvals")).toHaveLength(1)
+    )
     await settle()
     expect(studio.calls("POST runs/pg_1/approvals")).toHaveLength(1)
   })
 
   it("a park decided on the card takes its toast down; the resumed run's finish is its own toast", async () => {
     parkedPG1()
-      .on("GET playground/commands/cmd_d1", command("cmd_d1", "finished", "pg_2", "succeeded"))
-      .on("GET runs/pg_2", { ...row({ id: "pg_2", playground: true, status: "succeeded" }), children: [] })
+      .on(
+        "GET playground/commands/cmd_d1",
+        command("cmd_d1", "finished", "pg_2", "succeeded")
+      )
+      .on("GET runs/pg_2", {
+        ...row({ id: "pg_2", playground: true, status: "succeeded" }),
+        children: [],
+      })
       .on("GET runs/pg_2/events", eventsOf("pg_2"))
     await runA()
     await toastFor(/^run pg_1 parked at refund$/)
     const card = document.querySelector<HTMLElement>('[data-variant="A"]')!
-    fireEvent.click(await within(card).findByRole("button", { name: "continue" }))
+    fireEvent.click(
+      await within(card).findByRole("button", { name: "continue" })
+    )
     await toastFor(/^experiment pg_2 finished · succeeded$/)
-    await waitFor(() => expect(toastTitles()).not.toContain("run pg_1 parked at refund"))
+    await waitFor(() =>
+      expect(toastTitles()).not.toContain("run pg_1 parked at refund")
+    )
   })
 
   it("a resumed run that parks again raises a fresh parked toast", async () => {
     parkedPG1()
-      .on("GET playground/commands/cmd_d1", command("cmd_d1", "finished", "pg_2", "succeeded"))
-      .on("GET runs/pg_2", { ...row({ id: "pg_2", playground: true, pending: 1 }), children: [] })
-      .on("GET runs/pg_2/events", eventsOf("pg_2", [{ type: "tool_call", id: "call_10", name: "lookup_order", args: {} }]))
+      .on(
+        "GET playground/commands/cmd_d1",
+        command("cmd_d1", "finished", "pg_2", "succeeded")
+      )
+      .on("GET runs/pg_2", {
+        ...row({ id: "pg_2", playground: true, pending: 1 }),
+        children: [],
+      })
+      .on(
+        "GET runs/pg_2/events",
+        eventsOf("pg_2", [
+          { type: "tool_call", id: "call_10", name: "lookup_order", args: {} },
+        ])
+      )
     await runA()
     const t = await toastFor(/^run pg_1 parked at refund$/)
     fireEvent.click(within(t).getByRole("button", { name: "approve" }))
     await toastFor(/^run pg_2 parked at lookup_order$/)
     // The resumed run parked again: no "finished", the old park's toast gone.
-    await waitFor(() => expect(toastTitles()).toEqual(["run pg_2 parked at lookup_order"]))
+    await waitFor(() =>
+      expect(toastTitles()).toEqual(["run pg_2 parked at lookup_order"])
+    )
   })
 
   it("says nothing finished when no read of the run's row settles (all fail)", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
     studio
       .on("POST playground/runs", command("cmd_1", "queued"))
-      .on("GET playground/commands/cmd_1", command("cmd_1", "finished", "pg_1", "succeeded"))
+      .on(
+        "GET playground/commands/cmd_1",
+        command("cmd_1", "finished", "pg_1", "succeeded")
+      )
       .on("GET runs/pg_1", apiError(500, "internal", "db down"))
       .on("GET runs/pg_1/events", pagedEvents([], { done: false }))
       .on("GET runs/pg_1/transcript", { batches: [] })
     await runA()
-    await waitFor(() => expect(studio.calls("GET runs/pg_1").length).toBeGreaterThan(0))
+    await waitFor(() =>
+      expect(studio.calls("GET runs/pg_1").length).toBeGreaterThan(0)
+    )
     for (let i = 0; i < 30; i++) await vi.advanceTimersByTimeAsync(1000)
     // Every read refused, the last try too: the bounded reads ended.
     const reads = studio.calls("GET runs/pg_1").length
@@ -262,10 +382,14 @@ describe("the playground's notices", () => {
     let done = false
     let refuseSave = false
     studio
-      .on("POST experiments", (req) => (refuseSave ? apiError(500, "internal", "db down") : req.body))
+      .on("POST experiments", (req) =>
+        refuseSave ? apiError(500, "internal", "db down") : req.body
+      )
       .on("POST playground/runs", () => command(`cmd_m${++n}`, "queued"))
       .on("GET playground/commands/cmd_m1", () =>
-        done ? command("cmd_m1", "finished", "pg_m1", "succeeded") : command("cmd_m1", "accepted", "pg_m1")
+        done
+          ? command("cmd_m1", "finished", "pg_m1", "succeeded")
+          : command("cmd_m1", "accepted", "pg_m1")
       )
     renderApp("/playground?run=r_ok")
     const runButton = await screen.findByRole("button", { name: "Run A" })
@@ -275,13 +399,17 @@ describe("the playground's notices", () => {
     const go = screen.getByRole("button", { name: "Run matrix" })
     await waitFor(() => expect(go).toHaveProperty("disabled", false))
     fireEvent.click(go)
-    await waitFor(() => expect(studio.calls("POST playground/runs")).toHaveLength(1))
+    await waitFor(() =>
+      expect(studio.calls("POST playground/runs")).toHaveLength(1)
+    )
     // Renamed while the cell runs; then a second matrix whose save is refused.
     fireEvent.change(name, { target: { value: "exp_two" } })
     refuseSave = true
     await waitFor(() => expect(go).toHaveProperty("disabled", false))
     fireEvent.click(go)
-    await waitFor(() => expect(studio.calls("POST experiments")).toHaveLength(2))
+    await waitFor(() =>
+      expect(studio.calls("POST experiments")).toHaveLength(2)
+    )
     expect(studio.calls("POST playground/runs")).toHaveLength(1)
     done = true
     await toastFor(/^experiment exp_one finished · 1 succeeded$/)
@@ -298,15 +426,28 @@ describe("the playground's notices", () => {
       .on("POST experiments", (req) => req.body)
       .on("POST playground/runs", command("cmd_m1", "queued"))
       .on("GET playground/commands/cmd_m1", () =>
-        settledCell ? { ...command("cmd_m1", "rejected"), error: "runtime rt_1 disconnected" } : command("cmd_m1", "accepted", "pg_m1")
+        settledCell
+          ? {
+              ...command("cmd_m1", "rejected"),
+              error: "runtime rt_1 disconnected",
+            }
+          : command("cmd_m1", "accepted", "pg_m1")
       )
     renderApp("/playground?run=r_ok")
-    await waitFor(() => expect(valueOf(screen.getByLabelText("agent"))).toBe("orders"))
-    fireEvent.change(screen.getByLabelText("experiment name"), { target: { value: "exp_gone" } })
+    await waitFor(() =>
+      expect(valueOf(screen.getByLabelText("agent"))).toBe("orders")
+    )
+    fireEvent.change(screen.getByLabelText("experiment name"), {
+      target: { value: "exp_gone" },
+    })
     const go = screen.getByRole("button", { name: "Run matrix" })
     await waitFor(() => expect(go).toHaveProperty("disabled", false))
     fireEvent.click(go)
-    await waitFor(() => expect(document.querySelector('[data-cell="A×1"]')?.textContent).toContain("accepted"))
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-cell="A×1"]')?.textContent
+      ).toContain("accepted")
+    )
     // The runtime goes (the shell's 5 s read): the matrix's button is held.
     gone = true
     await vi.advanceTimersByTimeAsync(5_000)
@@ -322,34 +463,62 @@ describe("the playground's notices", () => {
     studio
       .on("POST experiments", (req) => req.body)
       .on("POST playground/runs", () =>
-        ++n === 2 ? apiError(503, "unavailable", "runtime rt_1 is not connected") : command(`cmd_m${n}`, "queued")
+        ++n === 2
+          ? apiError(503, "unavailable", "runtime rt_1 is not connected")
+          : command(`cmd_m${n}`, "queued")
       )
       .on("GET playground/commands/cmd_m1", () =>
-        aDone ? command("cmd_m1", "finished", "pg_m1", "succeeded") : command("cmd_m1", "accepted", "pg_m1")
+        aDone
+          ? command("cmd_m1", "finished", "pg_m1", "succeeded")
+          : command("cmd_m1", "accepted", "pg_m1")
       )
-      .on("GET playground/commands/cmd_m3", command("cmd_m3", "finished", "pg_m3", "failed"))
+      .on(
+        "GET playground/commands/cmd_m3",
+        command("cmd_m3", "finished", "pg_m3", "failed")
+      )
     const { router } = renderApp("/playground?run=r_ok")
-    await waitFor(() => expect(valueOf(screen.getByLabelText("agent"))).toBe("orders"))
+    await waitFor(() =>
+      expect(valueOf(screen.getByLabelText("agent"))).toBe("orders")
+    )
     fireEvent.click(screen.getByRole("button", { name: "+ variant" }))
     fireEvent.click(screen.getByRole("button", { name: "+ variant" }))
-    fireEvent.change(screen.getByLabelText("experiment name"), { target: { value: "exp_mix" } })
+    fireEvent.change(screen.getByLabelText("experiment name"), {
+      target: { value: "exp_mix" },
+    })
     const go = screen.getByRole("button", { name: "Run matrix" })
     await waitFor(() => expect(go).toHaveProperty("disabled", false))
     fireEvent.click(go)
     // C (the last issued) settles first, B was refused: A still runs.
-    await waitFor(() => expect(document.querySelector('[data-cell="C×1"]')?.textContent).toContain("finished"))
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-cell="C×1"]')?.textContent
+      ).toContain("finished")
+    )
     await settle()
     expect(toastTitles()).toEqual([])
     aDone = true
-    const t = await toastFor(/^experiment exp_mix finished · 1 succeeded, 1 failed, 1 not run$/)
+    const t = await toastFor(
+      /^experiment exp_mix finished · 1 succeeded, 1 failed, 1 not run$/
+    )
     fireEvent.click(within(t).getByRole("link", { name: "open" }))
-    await waitFor(() => expect(router.state.location.pathname).toBe("/experiments/exp_mix"))
-    expect(toastTitles().filter((x) => x.startsWith("experiment"))).toHaveLength(1)
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/experiments/exp_mix")
+    )
+    expect(
+      toastTitles().filter((x) => x.startsWith("experiment"))
+    ).toHaveLength(1)
   })
 })
 
 describe("a run page's parked notice", () => {
-  const running: RunDoc = { ...rOK, status: "running", finished: null, pending: 0, playground: true, children: [] }
+  const running: RunDoc = {
+    ...rOK,
+    status: "running",
+    finished: null,
+    pending: 0,
+    playground: true,
+    children: [],
+  }
   const head = [
     { type: "run_start", id: "r_ok", model: rOK.model, agent: rOK.agent },
     { type: "step_start", run_id: "r_ok", index: 0 },
@@ -377,8 +546,20 @@ describe("a run page's parked notice", () => {
     rowPending = 1
     studio
       .on("GET meta", meta(capabilities))
-      .on("GET runs/r_ok", () => (parkedRow ? { ...running, status: "succeeded", pending: rowPending } : running))
-      .on("GET playground/commands/cmd_a", { command_id: "cmd_a", state: "finished", status: "succeeded", run_id: "r_ok-2", error: null, created: rOK.started, updated: rOK.started })
+      .on("GET runs/r_ok", () =>
+        parkedRow
+          ? { ...running, status: "succeeded", pending: rowPending }
+          : running
+      )
+      .on("GET playground/commands/cmd_a", {
+        command_id: "cmd_a",
+        state: "finished",
+        status: "succeeded",
+        run_id: "r_ok-2",
+        error: null,
+        created: rOK.started,
+        updated: rOK.started,
+      })
       .on("GET runs/r_ok/events", pagedEvents(head, { done: false }))
       .on("GET runs/r_ok/transcript", transcriptOf([]))
       .on("GET runs/r_ok/spans", { spans: [] })
@@ -389,7 +570,9 @@ describe("a run page's parked notice", () => {
     await waitFor(() => expect(FakeEventSource.open()).toHaveLength(1))
     const es = FakeEventSource.open()[0]
     es.connect()
-    await waitFor(() => expect(studio.calls("GET runs/r_ok/events").length).toBeGreaterThan(0))
+    await waitFor(() =>
+      expect(studio.calls("GET runs/r_ok/events").length).toBeGreaterThan(0)
+    )
     await settle()
     expect(toastTitles()).toEqual([])
     parkedRow = true
@@ -401,8 +584,13 @@ describe("a run page's parked notice", () => {
     await park()
     const t = await toastFor(/^run r_ok parked at refund$/)
     fireEvent.click(within(t).getByRole("button", { name: "approve" }))
-    await waitFor(() => expect(studio.calls("POST runs/r_ok/approvals")).toHaveLength(1))
-    expect(studio.calls("POST runs/r_ok/approvals")[0].body).toEqual({ call_id: "call_1", decision: "approve" })
+    await waitFor(() =>
+      expect(studio.calls("POST runs/r_ok/approvals")).toHaveLength(1)
+    )
+    expect(studio.calls("POST runs/r_ok/approvals")[0].body).toEqual({
+      call_id: "call_1",
+      decision: "approve",
+    })
   })
 
   it("a park decided elsewhere: approve reads the row first, says so, and posts nothing", async () => {
@@ -412,14 +600,19 @@ describe("a run page's parked notice", () => {
     // Another tab (or the devtools panel) decided it meanwhile.
     rowPending = 0
     fireEvent.click(within(t).getByRole("button", { name: "approve" }))
-    await toastFor(/^approve on run r_ok refused: the park is no longer pending — it was decided elsewhere$/)
-    await waitFor(() => expect(toastTitles()).not.toContain("run r_ok parked at refund"))
+    await toastFor(
+      /^approve on run r_ok refused: the park is no longer pending — it was decided elsewhere$/
+    )
+    await waitFor(() =>
+      expect(toastTitles()).not.toContain("run r_ok parked at refund")
+    )
     expect(studio.calls("POST runs/r_ok/approvals")).toHaveLength(0)
   })
 
   it("a decision the runtime rejects is said, not left silent", async () => {
     serve(["live", "playground"])
-    const why = 'no parked run "r_ok" on this runtime (it may already have been resumed)'
+    const why =
+      'no parked run "r_ok" on this runtime (it may already have been resumed)'
     studio.on("GET playground/commands/cmd_a", {
       command_id: "cmd_a",
       state: "rejected",
@@ -431,9 +624,15 @@ describe("a run page's parked notice", () => {
     await park()
     const t = await toastFor(/^run r_ok parked at refund$/)
     fireEvent.click(within(t).getByRole("button", { name: "approve" }))
-    await toastFor(new RegExp(`^approve on run r_ok refused: ${why.replace(/[()]/g, "\\$&")}$`))
+    await toastFor(
+      new RegExp(
+        `^approve on run r_ok refused: ${why.replace(/[()]/g, "\\$&")}$`
+      )
+    )
     expect(studio.calls("POST runs/r_ok/approvals")).toHaveLength(1)
-    await waitFor(() => expect(toastTitles()).not.toContain("run r_ok parked at refund"))
+    await waitFor(() =>
+      expect(toastTitles()).not.toContain("run r_ok parked at refund")
+    )
   })
 
   it("without the playground capability the toast only opens the run", async () => {
@@ -441,18 +640,33 @@ describe("a run page's parked notice", () => {
     await park()
     const t = await toastFor(/^run r_ok parked at refund$/)
     expect(within(t).queryByRole("button", { name: "approve" })).toBeNull()
-    expect(within(t).getByRole("link", { name: "open" }).getAttribute("href")).toMatch(/\/runs\/r_ok$/)
+    expect(
+      within(t).getByRole("link", { name: "open" }).getAttribute("href")
+    ).toMatch(/\/runs\/r_ok$/)
   })
 
   it("a run opened already parked says so on its page, not in a toast", async () => {
-    const parked: RunDoc = { ...rOK, status: "succeeded", pending: 1, children: [] }
+    const parked: RunDoc = {
+      ...rOK,
+      status: "succeeded",
+      pending: 1,
+      children: [],
+    }
     studio
       .on("GET runs/r_ok", parked)
-      .on("GET runs/r_ok/events", pagedEvents([...head, { pos: 2, time: rOK.started, event: finish.event }]))
+      .on(
+        "GET runs/r_ok/events",
+        pagedEvents([
+          ...head,
+          { pos: 2, time: rOK.started, event: finish.event },
+        ])
+      )
       .on("GET runs/r_ok/transcript", transcriptOf([]))
       .on("GET runs/r_ok/spans", { spans: [] })
     renderApp("/runs/r_ok")
-    await waitFor(() => expect(studio.calls("GET runs/r_ok/events").length).toBeGreaterThan(0))
+    await waitFor(() =>
+      expect(studio.calls("GET runs/r_ok/events").length).toBeGreaterThan(0)
+    )
     await settle()
     expect(toastTitles()).toEqual([])
   })
@@ -476,7 +690,9 @@ describe("runtime notices", () => {
       .on("GET runs", runs)
       .on("GET runtimes", () => ({ runtimes: set }))
     renderApp("/runs")
-    await waitFor(() => expect(studio.calls("GET runtimes").length).toBeGreaterThan(0))
+    await waitFor(() =>
+      expect(studio.calls("GET runtimes").length).toBeGreaterThan(0)
+    )
     await settle()
     expect(toastTitles()).toEqual([])
     set = [rt("rt_2", "billing")]
@@ -485,7 +701,10 @@ describe("runtime notices", () => {
     await toastFor(/^runtime acme-api \(rt_1\) disconnected$/)
     await queryClient.invalidateQueries({ queryKey: ["runtimes"] })
     await settle()
-    expect(toastTitles().sort()).toEqual(["runtime acme-api (rt_1) disconnected", "runtime billing (rt_2) connected"])
+    expect(toastTitles().sort()).toEqual([
+      "runtime acme-api (rt_1) disconnected",
+      "runtime billing (rt_2) connected",
+    ])
   })
 
   it("diffs each runtime's connected: a dropped stream, a re-register under the same id, a failed read in between", async () => {
@@ -506,7 +725,9 @@ describe("runtime notices", () => {
       .on("GET runs", runs)
       .on("GET runtimes", () => answer)
     renderApp("/runs")
-    await waitFor(() => expect(studio.calls("GET runtimes").length).toBeGreaterThan(0))
+    await waitFor(() =>
+      expect(studio.calls("GET runtimes").length).toBeGreaterThan(0)
+    )
     await settle()
     expect(toastTitles()).toEqual([])
     // The stream dropped: still listed, connected false.
@@ -515,7 +736,9 @@ describe("runtime notices", () => {
     await toastFor(/^runtime acme-api \(rt_1\) disconnected$/)
     // A failed read in between says nothing.
     answer = apiError(500, "internal", "studio hiccup")
-    await queryClient.invalidateQueries({ queryKey: ["runtimes"] }).catch(() => {})
+    await queryClient
+      .invalidateQueries({ queryKey: ["runtimes"] })
+      .catch(() => {})
     await settle()
     expect(toastTitles()).toEqual(["runtime acme-api (rt_1) disconnected"])
     // The link reconnects under the same id: connected again.
@@ -526,17 +749,29 @@ describe("runtime notices", () => {
     answer = { runtimes: [rt(false)] }
     await queryClient.invalidateQueries({ queryKey: ["runtimes"] })
     await waitFor(() =>
-      expect(toastTitles().filter((x) => x === "runtime acme-api (rt_1) disconnected")).toHaveLength(2)
+      expect(
+        toastTitles().filter(
+          (x) => x === "runtime acme-api (rt_1) disconnected"
+        )
+      ).toHaveLength(2)
     )
   })
 
-  // The shell's hook is the one 5 s poller: the playground and the
-  // replay drawer read the same key without an interval of their own,
-  // so a page holding them still reads /api/runtimes once per 5 s.
+  // The shell's hook is the one poller: the playground and the replay
+  // drawer read the same key without an interval of their own and hold
+  // useRuntimesNeeded, so a page holding them reads /api/runtimes once
+  // per 5 s.
   const pollCases: [string, string, () => Element | null][] = [
-    ["the shell alone", "/runs", () => screen.queryByText("r_ok")],
-    ["the playground", "/playground?run=r_ok", () => screen.queryByRole("button", { name: "Run A" })],
-    ["the open replay drawer", "/runs/r_ok?replay=rerun&from=0", () => document.querySelector("[data-replay-drawer]")],
+    [
+      "the playground",
+      "/playground?run=r_ok",
+      () => screen.queryByRole("button", { name: "Run A" }),
+    ],
+    [
+      "the open replay drawer",
+      "/runs/r_ok?replay=rerun&from=0",
+      () => document.querySelector("[data-replay-drawer]"),
+    ],
   ]
   for (const [name, url, mounted] of pollCases)
     it(`one read of /api/runtimes per 5 s: ${name}`, async () => {
@@ -552,18 +787,86 @@ describe("runtime notices", () => {
         .on("GET runs/r_ok/spans", { spans: [] })
       renderApp(url)
       await waitFor(() => expect(mounted()).toBeTruthy())
-      await waitFor(() => expect(studio.calls("GET runtimes").length).toBeGreaterThan(0))
+      await waitFor(() =>
+        expect(studio.calls("GET runtimes").length).toBeGreaterThan(0)
+      )
       const start = studio.calls("GET runtimes").length
       await vi.advanceTimersByTimeAsync(15_000)
       expect(studio.calls("GET runtimes").length - start).toBe(3)
       // react-query dedupes timers that fire together, so the count alone
       // cannot see a second poller: exactly one observer of the key has an
       // interval — the shell's — however many read it.
-      const query = queryClient.getQueryCache().find({ queryKey: ["runtimes"] })!
-      const intervals = query.observers.map((o) => o.options.refetchInterval).filter(Boolean)
+      const query = queryClient
+        .getQueryCache()
+        .find({ queryKey: ["runtimes"] })!
+      const intervals = query.observers
+        .map((o) => o.options.refetchInterval)
+        .filter(Boolean)
       expect(intervals).toEqual([5_000])
-      expect(query.observers.length).toBe(url === "/runs" ? 1 : 2)
+      expect(query.observers.length).toBe(2)
     })
+
+  const serveQuiet = () =>
+    studio
+      .on("GET meta", meta(["live", "playground", "runtimes"]))
+      .on("GET runs", runs)
+      .on("GET runtimes", { runtimes: [] })
+  const shellInterval = () =>
+    queryClient
+      .getQueryCache()
+      .find({ queryKey: ["runtimes"] })!
+      .observers.map((o) => o.options.refetchInterval)
+      .find(Boolean)
+
+  it("a page nothing on which needs the runtimes backs off: 5 s doubling to 60 s, not 24 reads in 2 minutes", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    serveQuiet()
+    renderApp("/runs")
+    await screen.findByText("r_ok")
+    await waitFor(() =>
+      expect(studio.calls("GET runtimes").length).toBeGreaterThan(0)
+    )
+    const start = studio.calls("GET runtimes").length
+    for (let i = 0; i < 24; i++) await vi.advanceTimersByTimeAsync(5_000)
+    // 5 + 10 + 20 + 40 s, then 60 s: four reads in two minutes, where a
+    // flat 5 s poll takes 24.
+    expect(studio.calls("GET runtimes").length - start).toBe(4)
+    expect(shellInterval()).toBe(60_000)
+  })
+
+  it("a user action or a change in the list starts the quiet poll over at 5 s", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    let set: unknown[] = []
+    serveQuiet().on("GET runtimes", () => ({ runtimes: set }))
+    renderApp("/runs")
+    await screen.findByText("r_ok")
+    await waitFor(() =>
+      expect(studio.calls("GET runtimes").length).toBeGreaterThan(0)
+    )
+    for (let i = 0; i < 24; i++) await vi.advanceTimersByTimeAsync(5_000)
+    expect(shellInterval()).toBe(60_000)
+    fireEvent.keyDown(document.body, { key: "j" })
+    await waitFor(() => expect(shellInterval()).toBe(5_000))
+    // Quiet again, then a runtime connects: the read that saw it resets.
+    for (let i = 0; i < 24; i++) await vi.advanceTimersByTimeAsync(5_000)
+    expect(shellInterval()).toBe(60_000)
+    set = [
+      {
+        id: "rt_9",
+        host: "laptop",
+        pid: 1,
+        service: "acme-api",
+        env: "dev",
+        connected_since: rOK.started,
+        last_seen: rOK.started,
+        agents: [],
+      },
+    ]
+    const before = studio.calls("GET runtimes").length
+    while (studio.calls("GET runtimes").length === before)
+      await vi.advanceTimersByTimeAsync(1_000)
+    await waitFor(() => expect(shellInterval()).toBe(5_000))
+  })
 
   it("reads no runtimes without the playground capability", async () => {
     studio.on("GET runs", runs).on("GET runtimes", { runtimes: [] })
@@ -576,12 +879,21 @@ describe("runtime notices", () => {
 
 describe("runtime notices under a read-scoped panel token", () => {
   it("reads no runtimes: the token may not", async () => {
-    const tok = `weft_pt.${btoa(JSON.stringify({ public_id: "pub_1", scope: "read", exp: new Date(Date.now() + 3600_000).toISOString() }))
+    const tok = `weft_pt.${btoa(
+      JSON.stringify({
+        public_id: "pub_1",
+        scope: "read",
+        exp: new Date(Date.now() + 3600_000).toISOString(),
+      })
+    )
       .replace(/=+$/, "")
       .replace(/\+/g, "-")
       .replace(/\//g, "_")}.c2ln`
     setStudioToken(tok)
-    studio.on("GET meta", meta(["live", "playground", "runtimes"])).on("GET runs", runs).on("GET runtimes", { runtimes: [] })
+    studio
+      .on("GET meta", meta(["live", "playground", "runtimes"]))
+      .on("GET runs", runs)
+      .on("GET runtimes", { runtimes: [] })
     renderApp("/runs")
     await screen.findByText("r_ok")
     await settle()
@@ -590,7 +902,13 @@ describe("runtime notices under a read-scoped panel token", () => {
 
   it("the playground's picker still follows the runtimes: the page is the one 5 s poller", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
-    const tok = `weft_pt.${btoa(JSON.stringify({ public_id: "pub_1", scope: "read", exp: new Date(Date.now() + 3600_000).toISOString() }))
+    const tok = `weft_pt.${btoa(
+      JSON.stringify({
+        public_id: "pub_1",
+        scope: "read",
+        exp: new Date(Date.now() + 3600_000).toISOString(),
+      })
+    )
       .replace(/=+$/, "")
       .replace(/\+/g, "-")
       .replace(/\//g, "_")}.c2ln`
@@ -602,13 +920,17 @@ describe("runtime notices under a read-scoped panel token", () => {
       .on("GET experiments", { experiments: [] })
       .on("GET runs/r_ok", { ...rOK, children: [] })
     renderApp("/playground?run=r_ok")
-    await waitFor(() => expect(studio.calls("GET runtimes").length).toBeGreaterThan(0))
+    await waitFor(() =>
+      expect(studio.calls("GET runtimes").length).toBeGreaterThan(0)
+    )
     const start = studio.calls("GET runtimes").length
     await vi.advanceTimersByTimeAsync(15_000)
     expect(studio.calls("GET runtimes").length - start).toBe(3)
     // One observer polls: the shell's is off under this token, the page's on.
     const query = queryClient.getQueryCache().find({ queryKey: ["runtimes"] })!
-    const polling = query.observers.filter((o) => o.options.enabled !== false && o.options.refetchInterval)
+    const polling = query.observers.filter(
+      (o) => o.options.enabled !== false && o.options.refetchInterval
+    )
     expect(polling.map((o) => o.options.refetchInterval)).toEqual([5_000])
   })
 })
@@ -616,7 +938,12 @@ describe("runtime notices under a read-scoped panel token", () => {
 describe("the live stream giving up", () => {
   it("raises one error toast after the reconnects; retry reopens the stream", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
-    const running: RunDoc = { ...rOK, status: "running", finished: null, children: [] }
+    const running: RunDoc = {
+      ...rOK,
+      status: "running",
+      finished: null,
+      children: [],
+    }
     studio
       .on("GET runs/r_ok", running)
       .on("GET runs/r_ok/events", pagedEvents([], { done: false }))
@@ -625,7 +952,9 @@ describe("the live stream giving up", () => {
       // Studio's grant door is down: every attempt fails.
       .on("POST live-grant", apiError(503, "unavailable", "down"))
     renderApp("/runs/r_ok")
-    await waitFor(() => expect(studio.calls("POST live-grant").length).toBeGreaterThan(0))
+    await waitFor(() =>
+      expect(studio.calls("POST live-grant").length).toBeGreaterThan(0)
+    )
     // The backoff: 1, 2, 4, 8, 16, 30 s — then no more.
     for (let i = 0; i < 8; i++) await vi.advanceTimersByTimeAsync(30_000)
     expect(studio.calls("POST live-grant")).toHaveLength(7)
@@ -640,20 +969,28 @@ describe("the live stream giving up", () => {
 describe("copy link", () => {
   it("says link copied in a toast as well as in the header", async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
-    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    })
     studio.on("GET runs", runs)
     renderApp("/runs")
     await screen.findByText("r_ok")
     fireEvent.keyDown(window, { key: "y" })
     await toastFor(/^link copied$/)
-    expect(document.querySelector("[data-link-copied]")?.textContent).toBe("link copied")
+    expect(document.querySelector("[data-link-copied]")?.textContent).toBe(
+      "link copied"
+    )
     expect(writeText).toHaveBeenCalledTimes(1)
     await settle()
     expect(toastTitles()).toEqual(["link copied"])
   })
 
   it("says the copy failed in a toast where the browser refuses the clipboard", async () => {
-    Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true })
+    Object.defineProperty(navigator, "clipboard", {
+      value: undefined,
+      configurable: true,
+    })
     vi.spyOn(window, "prompt").mockImplementation(() => null)
     studio.on("GET runs", runs)
     renderApp("/runs")

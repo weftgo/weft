@@ -9,9 +9,18 @@ import { asTranscript } from "./api"
 import type { Message, RunCompaction } from "./api"
 import { compactionLine, originalOf } from "./compaction"
 
-const msg = (role: Message["role"], text: string): Message => ({ role, content: [{ type: "text", text }] })
-const texts = (ms: Message[]) => ms.map((m) => (m.content[0] as { text: string }).text)
-const view = (index: number, from: number, to: number, entries = 1): RunCompaction => ({
+const msg = (role: Message["role"], text: string): Message => ({
+  role,
+  content: [{ type: "text", text }],
+})
+const texts = (ms: Message[]) =>
+  ms.map((m) => (m.content[0] as { text: string }).text)
+const view = (
+  index: number,
+  from: number,
+  to: number,
+  entries = 1
+): RunCompaction => ({
   scope: "run",
   index,
   step: index,
@@ -26,7 +35,12 @@ const view = (index: number, from: number, to: number, entries = 1): RunCompacti
 // steer; views at 3 ([3,5): a1, t1) and 5 ([2,6): u1 … a2).
 const transcript = asTranscript({
   batches: [
-    { index: 0, step: 0, input: true, messages: [msg("user", "h0"), msg("assistant", "h1"), msg("user", "u1")] },
+    {
+      index: 0,
+      step: 0,
+      input: true,
+      messages: [msg("user", "h0"), msg("assistant", "h1"), msg("user", "u1")],
+    },
     { index: 1, step: 0, messages: [msg("assistant", "a1")] },
     { index: 2, step: 0, messages: [msg("tool", "t1")] },
     { index: 4, step: 1, messages: [msg("assistant", "a2")] },
@@ -40,7 +54,8 @@ describe("originalOf", () => {
   it("places each view's range by seq over multi-message batches and earlier views", () => {
     const o1 = originalOf(v1, transcript, [v1, v2])
     const o2 = originalOf(v2, transcript, [v1, v2])
-    if (!("messages" in o1) || !("messages" in o2)) throw new Error(`unresolved: ${JSON.stringify([o1, o2])}`)
+    if (!("messages" in o1) || !("messages" in o2))
+      throw new Error(`unresolved: ${JSON.stringify([o1, o2])}`)
     expect(texts(o1.messages)).toEqual(["a1", "t1"])
     expect(texts(o2.messages)).toEqual(["u1", "a1", "t1", "a2"])
   })
@@ -55,11 +70,15 @@ describe("originalOf", () => {
     })
     expect(t.batches[0].unreadable).toBe(true)
     const o = originalOf(view(3, 1, 3), t, [view(3, 1, 3)])
-    expect("gap" in o && o.gap).toContain("messages record 0 before the view does not read as messages")
+    expect("gap" in o && o.gap).toContain(
+      "messages record 0 before the view does not read as messages"
+    )
   })
 
   it("a body that lost a non-message entry is unreadable too", () => {
-    const t = asTranscript({ batches: [{ index: 0, step: 0, messages: [null, msg("user", "u")] }] })
+    const t = asTranscript({
+      batches: [{ index: 0, step: 0, messages: [null, msg("user", "u")] }],
+    })
     expect(t.batches[0].unreadable).toBe(true)
     expect("gap" in originalOf(view(1, 0, 1), t, [])).toBe(true)
   })

@@ -16,7 +16,10 @@ import type { FakeStudio } from "./fake-studio"
 /** capture reads one captured body under ./derived/. */
 function capture(name: string): object {
   return JSON.parse(
-    readFileSync(resolve(process.cwd(), `src/test/derived/${name}.json`), "utf8")
+    readFileSync(
+      resolve(process.cwd(), `src/test/derived/${name}.json`),
+      "utf8"
+    )
   ) as object
 }
 
@@ -48,7 +51,8 @@ const step0NoUsage = capture("step-0-nousage")
 /** The succeeded derived run: two chat spans, a tool call. */
 export const DERIVED = "otel-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7"
 /** The failed one, the same conversation's second turn. */
-export const DERIVED_FAILED = "otel-5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10-1a2b3c4d5e6f7081"
+export const DERIVED_FAILED =
+  "otel-5c0a3e1f9b8d4c2e8a7f6b5d4c3e2f10-1a2b3c4d5e6f7081"
 export const DERIVED_SESSION = "conv_7f3a"
 
 /** The stock_spans words (obsdb.HoleNoteFor(HoleDerived, CauseStockSpans)),
@@ -59,7 +63,8 @@ export const STOCK = {
 }
 
 export const derivedDoc = () => golden<RunDoc>("run-derived")
-export const derivedRows = () => structuredClone(runs) as { total: number; runs: RunRow[]; next_before: null }
+export const derivedRows = () =>
+  structuredClone(runs) as { total: number; runs: RunRow[]; next_before: null }
 export const derivedBodies = {
   diff,
   exportWefttest,
@@ -95,16 +100,22 @@ export function serveDerived(fake: FakeStudio): FakeStudio {
     .on(`GET runs/${DERIVED_FAILED}`, runFailed)
     .on(`GET runs/${R}/events`, golden<object>("events-derived"))
     .on(`GET runs/${R}/transcript`, (req) =>
-      req.query.has("step") ? jsonAt(409, transcriptStep) : golden<object>("transcript-derived")
+      req.query.has("step")
+        ? jsonAt(409, transcriptStep)
+        : golden<object>("transcript-derived")
     )
     .on(`GET runs/${R}/spans`, spans)
     .on(`GET runs/${R}/requests`, requests)
     .on(`GET runs/${R}/tools`, tools)
     .on(`GET runs/${R}/steps/0`, step0)
     .on(`GET runs/${R}/steps/1`, step1)
-    .on(`GET runs/${R}/steps/2`, () => apiError(404, "not_found", `no step 2 of run ${R}`))
+    .on(`GET runs/${R}/steps/2`, () =>
+      apiError(404, "not_found", `no step 2 of run ${R}`)
+    )
     .on(`GET runs/${DERIVED_FAILED}/steps/0`, failedStep0)
-    .on(`GET runs/${DERIVED_FAILED}/steps/1`, () => apiError(404, "not_found", `no step 1 of run ${DERIVED_FAILED}`))
+    .on(`GET runs/${DERIVED_FAILED}/steps/1`, () =>
+      apiError(404, "not_found", `no step 1 of run ${DERIVED_FAILED}`)
+    )
     .on(`GET runs/${DERIVED_FAILED}/spans`, failed.spans)
     .on(`GET runs/${DERIVED_FAILED}/events`, failed.events)
     .on(`GET runs/${DERIVED_FAILED}/transcript`, failed.transcript)
@@ -112,7 +123,9 @@ export function serveDerived(fake: FakeStudio): FakeStudio {
     .on(`GET runs/${DERIVED_FAILED}/tools`, failed.tools)
     .on(`GET runs/${R}/logs`, logs)
     .on(`GET runs/${R}/export`, (req) =>
-      req.query.get("format") === "wefttest" ? jsonAt(400, exportWefttest) : { run: derivedDoc() }
+      req.query.get("format") === "wefttest"
+        ? jsonAt(400, exportWefttest)
+        : { run: derivedDoc() }
     )
     .on("GET diff", diff)
 }

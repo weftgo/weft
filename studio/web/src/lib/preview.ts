@@ -35,7 +35,8 @@ export interface PreviewDoc {
   was_sent: PreviewRequest
   diff: {
     system: "same" | "changed" | "unknown" | "hidden"
-    messages: { op: PreviewOp; was: number | null; will: number | null }[] | null
+    messages:
+      { op: PreviewOp; was: number | null; will: number | null }[] | null
     tools: { added: string[]; removed: string[] } | null
     model: string
     params: string
@@ -53,7 +54,8 @@ export const PREVIEW_PATH = "playground/preview"
  * waiting for it, and the line it says then: Run is released (the
  * preview failed, it did not refuse — the server still validates). */
 export const PREVIEW_TIMEOUT_MS = 10_000
-export const PREVIEW_SILENT = "the preview did not answer; Run is yours — the server still validates"
+export const PREVIEW_SILENT =
+  "the preview did not answer; Run is yours — the server still validates"
 
 /** One aligned message: its op, role, and the words on each side. */
 export interface PreviewRow {
@@ -107,21 +109,28 @@ export function previewView(doc: PreviewDoc): PreviewView {
   return {
     rows: d.messages
       ? d.messages.map((r) => {
-          const m = (r.will !== null ? will[r.will] : undefined) ?? (r.was !== null ? was[r.was] : undefined)
+          const m =
+            (r.will !== null ? will[r.will] : undefined) ??
+            (r.was !== null ? was[r.was] : undefined)
           return {
             op: r.op,
             role: m?.role ?? "",
-            was: r.was !== null && r.op !== "same" ? messageLine(was[r.was]) : "",
+            was:
+              r.was !== null && r.op !== "same" ? messageLine(was[r.was]) : "",
             will: r.will !== null ? messageLine(will[r.will]) : "",
           }
         })
       : null,
     system: d.system,
-    changed: (["model", "params", "thinking", "tool_choice"] as const).filter((k) => d[k] === "changed").map((k) => k.replace("_", " ")),
+    changed: (["model", "params", "thinking", "tool_choice"] as const)
+      .filter((k) => d[k] === "changed")
+      .map((k) => k.replace("_", " ")),
     added: d.tools?.added ?? [],
     removed: d.tools?.removed ?? [],
     holes,
     warnings: doc.warnings,
-    unchecked: doc.unchecked.length ? `unchecked until a runtime registers ${doc.agent}: ${doc.unchecked.join(", ")}` : "",
+    unchecked: doc.unchecked.length
+      ? `unchecked until a runtime registers ${doc.agent}: ${doc.unchecked.join(", ")}`
+      : "",
   }
 }

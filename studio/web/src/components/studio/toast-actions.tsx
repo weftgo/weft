@@ -15,14 +15,22 @@ const cls =
 
 export function ToastActions({ actions }: { actions: ToastAction[] }) {
   return (
-    <span className="ml-auto flex shrink-0 items-center gap-1.5" data-toast-actions="">
+    <span
+      className="ml-auto flex shrink-0 items-center gap-1.5"
+      data-toast-actions=""
+    >
       {actions.map((a) =>
         a.link ? (
           <Link key={a.label} {...a.link} className={cls}>
             {a.label}
           </Link>
         ) : (
-          <button key={a.label} type="button" className={cls} onClick={a.onClick}>
+          <button
+            key={a.label}
+            type="button"
+            className={cls}
+            onClick={a.onClick}
+          >
             {a.label}
           </button>
         )

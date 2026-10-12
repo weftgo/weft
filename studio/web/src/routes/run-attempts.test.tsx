@@ -44,9 +44,18 @@ const meta = (capabilities: string[]) => ({
  * (or the given step_finish timing on a bare step), run_finish. */
 function streamOf(run: string, stepEvents: unknown[]): FakePosEvent[] {
   const evs: unknown[] = [
-    { type: "run_start", id: run, model: { provider: "wefttest", name: "glm-a" } },
+    {
+      type: "run_start",
+      id: run,
+      model: { provider: "wefttest", name: "glm-a" },
+    },
     ...stepEvents,
-    { type: "run_finish", run_id: run, usage: { input_tokens: 10, output_tokens: 5 }, steps: 1 },
+    {
+      type: "run_finish",
+      run_id: run,
+      usage: { input_tokens: 10, output_tokens: 5 },
+      steps: 1,
+    },
   ]
   return evs.map((event, pos) => ({ pos, time: rOK.started, event }))
 }
@@ -182,7 +191,9 @@ function chatSpans(
       "gen_ai.operation.name": "chat",
       "weft.step.index": 0,
       "gen_ai.request.model": "glm-a",
-      ...(ok < 0 ? {} : { "gen_ai.response.model": models[ok], "weft.ttft_ms": 180 }),
+      ...(ok < 0
+        ? {}
+        : { "gen_ai.response.model": models[ok], "weft.ttft_ms": 180 }),
     }),
     ...models.map((m, i) =>
       span(`c${i + 1}`, "b", "attempt", 2 + i * 20, 20 + i * 20, statuses[i], {
@@ -200,7 +211,10 @@ describe("the step story's attempts and timing (A4.2)", () => {
     const run = step0.run_id
     serve({
       run,
-      events: streamOf(run, step0.events.map((e) => e.event)),
+      events: streamOf(
+        run,
+        step0.events.map((e) => e.event)
+      ),
       steps: ["0"],
       requests: recorded(),
     })
@@ -208,16 +222,18 @@ describe("the step story's attempts and timing (A4.2)", () => {
     // Collapsed: the line comes from the request rows, the timing from
     // the folded step_finish — and the step route is not asked.
     await waitFor(() =>
-      expect(
-        card().querySelector("[data-attempt-line]")?.textContent
-      ).toBe("attempt 4 of 4 · fallback to glm-b")
+      expect(card().querySelector("[data-attempt-line]")?.textContent).toBe(
+        "attempt 4 of 4 · fallback to glm-b"
+      )
     )
     expect(card().querySelector("[data-timing]")?.textContent).toBe("1 ms")
     expect(studio.calls(`GET runs/${run}/steps/0`)).toEqual([])
 
     openAttempts()
     await waitFor(() =>
-      expect(attemptsSection().querySelectorAll("[data-attempt]").length).toBe(4)
+      expect(attemptsSection().querySelectorAll("[data-attempt]").length).toBe(
+        4
+      )
     )
     expect(studio.calls(`GET runs/${run}/steps/0`).length).toBe(1)
     const rows = Array.from(
@@ -312,7 +328,9 @@ describe("the step story's attempts and timing (A4.2)", () => {
     cleanup()
     renderApp(`/runs/${run}?sel=s0`)
     await waitFor(() =>
-      expect(document.querySelectorAll("[data-timing]").length).toBeGreaterThan(0)
+      expect(document.querySelectorAll("[data-timing]").length).toBeGreaterThan(
+        0
+      )
     )
     expect(studio.calls(`GET runs/${run}/steps/0`)).toEqual([])
   })
@@ -322,7 +340,10 @@ describe("the step story's attempts and timing (A4.2)", () => {
     const spans = chatSpans(run)
     serve({
       run,
-      events: streamOf(run, step0.events.map((e) => e.event)),
+      events: streamOf(
+        run,
+        step0.events.map((e) => e.event)
+      ),
       steps: ["0"],
       requests: recorded(),
       spans,
@@ -335,24 +356,39 @@ describe("the step story's attempts and timing (A4.2)", () => {
     })
     expect(line.textContent).toBe("attempt 4 of 4 · fallback to glm-b")
     const facts = line.closest("dl")!
-    expect(within(facts).getByText("answered").nextElementSibling?.textContent).toBe("glm-b")
-    expect(within(facts).getByText("requested").nextElementSibling?.textContent).toBe("glm-a")
-    expect(within(facts).getByText("first token").nextElementSibling?.textContent).toBe("180 ms")
+    expect(
+      within(facts).getByText("answered").nextElementSibling?.textContent
+    ).toBe("glm-b")
+    expect(
+      within(facts).getByText("requested").nextElementSibling?.textContent
+    ).toBe("glm-a")
+    expect(
+      within(facts).getByText("first token").nextElementSibling?.textContent
+    ).toBe("180 ms")
     // The attempt list under the chat span, from the step route.
     await waitFor(() =>
-      expect(document.querySelectorAll("[data-attempts-pane] [data-attempt]").length).toBe(4)
+      expect(
+        document.querySelectorAll("[data-attempts-pane] [data-attempt]").length
+      ).toBe(4)
     )
     const outcomes = Array.from(
       document.querySelectorAll("[data-attempts-pane] [data-attempt-outcome]")
     ).map((o) => o.textContent)
-    expect(outcomes).toEqual(["stream_idle", "stream_idle", "stream_idle", "ok"])
+    expect(outcomes).toEqual([
+      "stream_idle",
+      "stream_idle",
+      "stream_idle",
+      "ok",
+    ])
   })
 
   it("a step the run failed in says its attempts and that none answered", async () => {
     const run = step0.run_id
     serve({
       run,
-      events: streamOf(run, [{ type: "step_start", run_id: run, index: 0 }]).slice(0, 2),
+      events: streamOf(run, [
+        { type: "step_start", run_id: run, index: 0 },
+      ]).slice(0, 2),
       steps: ["0"],
       requests: recorded(),
       status: "failed",
@@ -380,7 +416,9 @@ describe("the step story's attempts and timing (A4.2)", () => {
         "recorded by a weft before attempt reporting (A4)"
       )
     )
-    expect(headBadge()?.getAttribute("title")).toContain("upgrade weft and re-run")
+    expect(headBadge()?.getAttribute("title")).toContain(
+      "upgrade weft and re-run"
+    )
     expect(card().querySelector("[data-attempts]")).toBeNull()
     expect(studio.calls(`GET runs/${run}/steps/0`)).toEqual([])
     expect(studio.calls(`GET runs/${run}/requests`)).toEqual([])
@@ -390,7 +428,10 @@ describe("the step story's attempts and timing (A4.2)", () => {
     const run = step0.run_id
     serve({
       run,
-      events: streamOf(run, step0.events.map((e) => e.event)),
+      events: streamOf(
+        run,
+        step0.events.map((e) => e.event)
+      ),
       steps: ["0"],
       requests: recorded(),
       spans: chatSpans(run),
@@ -413,7 +454,10 @@ describe("the step story's attempts and timing (A4.2)", () => {
       run,
       // The process died after tool_start: no tool_finish, no
       // step_finish, no run_finish.
-      events: streamOf(run, step0.events.map((e) => e.event)).slice(0, 3),
+      events: streamOf(
+        run,
+        step0.events.map((e) => e.event)
+      ).slice(0, 3),
       steps: ["0"],
       requests: recorded(),
       status: "interrupted",
@@ -452,7 +496,10 @@ describe("the step story's attempts and timing (A4.2)", () => {
     const run = step0.run_id
     serve({
       run,
-      events: streamOf(run, step0.events.map((e) => e.event)),
+      events: streamOf(
+        run,
+        step0.events.map((e) => e.event)
+      ),
       requests: recorded(),
       spans,
       capabilities: ["requests", "ingest"],
@@ -472,7 +519,9 @@ describe("the step story's attempts and timing (A4.2)", () => {
   }
 
   it("the trace view's chat span with no ok attempt says none answered", async () => {
-    const facts = await chatFacts(chatSpans(step0.run_id, ["error", "error", "error"]))
+    const facts = await chatFacts(
+      chatSpans(step0.run_id, ["error", "error", "error"])
+    )
     expect(facts.attempts).toBe("3 attempts · none answered")
     expect(facts.answered).toBe("not reported")
   })
@@ -506,17 +555,24 @@ describe("the step story's attempts and timing (A4.2)", () => {
     studio = new FakeStudio()
       .on("GET meta", meta(["requests", "steps", "ingest"]))
       .on(`GET runs/${run}`, () => (ended ? finished : running))
-      .on(`GET runs/${run}/events`, pagedEvents(streamOf(run, bareStep(run, {})), { done: () => ended }))
+      .on(
+        `GET runs/${run}/events`,
+        pagedEvents(streamOf(run, bareStep(run, {})), { done: () => ended })
+      )
       .on(`GET runs/${run}/transcript`, transcriptOf([]))
       .on(`GET runs/${run}/spans`, { spans: [] })
       .on(`GET runs/${run}/requests`, pagedRequests(recorded()))
-      .on(`GET runs/${run}/steps/0`, () => (ended ? { ...step0, run_id: run } : live))
+      .on(`GET runs/${run}/steps/0`, () =>
+        ended ? { ...step0, run_id: run } : live
+      )
       .install()
     renderApp(`/runs/${run}?view=story`)
     await waitFor(() => expect(attemptsSection()).toBeTruthy())
     openAttempts()
     await waitFor(() =>
-      expect(attemptsSection().querySelector("[data-attempts-pane]")).toBeTruthy()
+      expect(
+        attemptsSection().querySelector("[data-attempts-pane]")
+      ).toBeTruthy()
     )
     // Running: the doc's "no spans yet" is about the moment — neither
     // the pane nor the card badges it.
@@ -524,7 +580,9 @@ describe("the step story's attempts and timing (A4.2)", () => {
     expect(card().querySelector('[data-holes] [data-hole="gap"]')).toBeNull()
     ended = true
     await waitFor(() =>
-      expect(attemptsSection().querySelectorAll("[data-attempt]").length).toBe(4)
+      expect(attemptsSection().querySelectorAll("[data-attempt]").length).toBe(
+        4
+      )
     )
     expect(attemptsSection().querySelector("[data-hole]")).toBeNull()
     expect(card().textContent).not.toContain("no spans yet")
@@ -534,7 +592,10 @@ describe("the step story's attempts and timing (A4.2)", () => {
     const run = step0.run_id
     serve({
       run,
-      events: streamOf(run, step0.events.map((e) => e.event)),
+      events: streamOf(
+        run,
+        step0.events.map((e) => e.event)
+      ),
       steps: ["0"],
       requests: recorded(),
     })
@@ -549,12 +610,17 @@ describe("the step story's attempts and timing (A4.2)", () => {
     await waitFor(() => expect(attemptsSection()).toBeTruthy())
     openAttempts()
     await waitFor(() =>
-      expect(attemptsSection().querySelectorAll("[data-attempt]").length).toBe(5)
+      expect(attemptsSection().querySelectorAll("[data-attempt]").length).toBe(
+        5
+      )
     )
-    const derived = attemptsSection().querySelector<HTMLElement>('[data-attempt="0"]')!
+    const derived =
+      attemptsSection().querySelector<HTMLElement>('[data-attempt="0"]')!
     expect(derived.textContent).toContain("request #7")
     expect(derived.textContent).not.toContain("attempt 0")
-    expect(derived.querySelector('[data-hole="derived"]')?.getAttribute("title")).toContain(
+    expect(
+      derived.querySelector('[data-hole="derived"]')?.getAttribute("title")
+    ).toContain(
       "this request record's body did not parse: listed by its request index"
     )
   })
@@ -564,22 +630,32 @@ describe("the step story's attempts and timing (A4.2)", () => {
     const all = recorded().requests
     serve({
       run,
-      events: streamOf(run, step0.events.map((e) => e.event)),
+      events: streamOf(
+        run,
+        step0.events.map((e) => e.event)
+      ),
       steps: ["0"],
       requests: { requests: [{ ...all[3], index: 0, attempt: 1 }] },
     })
     renderApp(`/runs/${run}?view=story`)
     await waitFor(() => expect(attemptsSection()).toBeTruthy())
-    await waitFor(() => expect(studio.calls(`GET runs/${run}/requests`).length).toBeGreaterThan(0))
+    await waitFor(() =>
+      expect(studio.calls(`GET runs/${run}/requests`).length).toBeGreaterThan(0)
+    )
     expect(attemptsSection().textContent).not.toContain("1 attempt")
     cleanup()
     serve({
       run,
-      events: streamOf(run, step0.events.map((e) => e.event)),
+      events: streamOf(
+        run,
+        step0.events.map((e) => e.event)
+      ),
       steps: ["0"],
       requests: recorded(),
     })
     renderApp(`/runs/${run}?view=story`)
-    await waitFor(() => expect(attemptsSection().textContent).toContain("4 attempts"))
+    await waitFor(() =>
+      expect(attemptsSection().textContent).toContain("4 attempts")
+    )
   })
 })

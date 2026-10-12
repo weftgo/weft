@@ -1173,8 +1173,11 @@ keeps it. While the turn is parked or running the parked block reads
 the session again every 5 s — not once the next turn is known (resumed
 is final) or the session read was refused (a 4xx): a turn another
 surface resumed reads `decided`. The runtimes need no poll of the
-block's own: they stay on the shell's 5 s poll of the same query
-(`use-notices.ts`, every page). The run page draws the
+block's own: while the turn is parked or running and not yet resumed the
+block holds the shell's poll of the same query at 5 s
+(`use-notices.ts`'s `useRuntimesNeeded`). A failed meta read is held
+until meta answers: a block mounted again, or a refetch with its retry,
+reads the failure, never `checking`. The run page draws the
 same block under the same gate, in the same words, the 403's lifetime
 included (`parity.test.ts`). Studio's other capability-gated pages
 (traces, live, experiments, playground, compare) say a failed meta read
@@ -1787,13 +1790,17 @@ post became and says a rejection), with "open" and,
 for one parked call of a runtime-started run where the playground is on
 and the token may act, "approve" (`POST /api/runs/{id}/approvals`).
 **runtime … connected / disconnected** — the live stream has no runtime
-kind, so the shell reads `GET /api/runtimes` every 5 s (playground
-capability; never under a read-scoped panel token)
-and raises one toast per transition of a runtime's `connected` (a
-runtime gone from the list counts as disconnected, once; a failed read
-says nothing; each flap of the same id is its own toast). A runtime
-that goes down and comes back inside one 5 s poll interval is not
-noticed.
+kind, so the shell reads `GET /api/runtimes` (playground capability;
+never under a read-scoped panel token) every 5 s while a surface needs
+it now — the playground, the replay drawer, an experiment's run
+controls, a parked or running app turn's block — and otherwise on a
+quiet poll that doubles per read that changed nothing, 5 s up to 60 s,
+back to 5 s on a change or a key or pointer press; never while the tab
+is hidden. It raises one toast per transition of a runtime's
+`connected` (a runtime gone from the list counts as disconnected, once;
+a failed read says nothing; each flap of the same id is its own toast).
+A runtime that goes down and comes back inside one poll interval is not
+noticed; on a quiet page the toast comes up to a minute late.
 **live updates stopped after 6 reconnects** — `lib/live.ts` gave up
 (never on a clean close or a panel token's `expired`), with "retry",
 which starts every stream that gave up over. **link copied** / **copy

@@ -44,7 +44,9 @@ export function byStep(rows: RequestRow[]): Map<number, StepRequests> {
 
 /** hasWire: the row carries its attempt's provider exchange (plan A6)
  * — the Studio Wire tab draws it, the panel links to that tab. */
-export function hasWire(row: Pick<RequestRow, "raw">): row is { raw: RawRecord } {
+export function hasWire(
+  row: Pick<RequestRow, "raw">
+): row is { raw: RawRecord } {
   return row.raw != null
 }
 
@@ -89,7 +91,8 @@ export const REQUEST_NOT_RECORDED_LABEL =
 
 /** A finished step no request row names (a gap: the record lost it):
  * the reason both surfaces give its badge. */
-export const REQUEST_NO_RECORD_REASON = "this step ran, but no request record names it"
+export const REQUEST_NO_RECORD_REASON =
+  "this step ran, but no request record names it"
 
 /** A step past the request pages the panel reads (MAX_REQUEST_PAGES ×
  * REQUEST_PAGE): the record is whole, the panel read its first n. */
@@ -104,7 +107,8 @@ export function requestCappedWords(n: number): { reason: string; fix: string } {
  * record the transcript does not hold, a request no messages record
  * names (the core omits the index when a rewritten request's view
  * could not be recorded), and the diff not drawn over a cut prompt. */
-export const REQUEST_MESSAGES_GAP_REASON = "the transcript does not hold the messages this request counts"
+export const REQUEST_MESSAGES_GAP_REASON =
+  "the transcript does not hold the messages this request counts"
 export const REQUEST_NO_INDEX_REASON =
   "no messages record names this request (its compaction view could not be recorded)"
 export const REQUEST_DIFF_CUT_LABEL = "diff not drawn: the prompt was cut"

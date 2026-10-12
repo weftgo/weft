@@ -16,8 +16,12 @@ export function stubLayout(width = 1000, height = 600) {
     }
   )
   const spies = [
-    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(width),
-    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(height),
+    vi
+      .spyOn(HTMLElement.prototype, "offsetWidth", "get")
+      .mockReturnValue(width),
+    vi
+      .spyOn(HTMLElement.prototype, "offsetHeight", "get")
+      .mockReturnValue(height),
     vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
       x: 0,
       y: 0,

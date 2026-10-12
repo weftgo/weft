@@ -9,7 +9,13 @@
 import { useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
-import { ApiError, metaQuery, setStudioToken, studioToken, tabTokenDropped } from "@/lib/api"
+import {
+  ApiError,
+  metaQuery,
+  setStudioToken,
+  studioToken,
+  tabTokenDropped,
+} from "@/lib/api"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
@@ -55,10 +61,9 @@ export function TokenWall({ children }: { children: React.ReactNode }) {
             ? "The hand-off token this tab's link carried expired; paste a token or ask for a new link."
             : "The API behind this page is token-walled."}{" "}
         The <span className="font-mono">studio</span> binary prints its dev
-        token at start (<span className="font-mono">WEFT_STUDIO_TOKEN</span>{" "}
-        or <span className="font-mono">--token</span> fixes it); a hosted
-        Studio uses the token it was configured with. It stays in this
-        browser.
+        token at start (<span className="font-mono">WEFT_STUDIO_TOKEN</span> or{" "}
+        <span className="font-mono">--token</span> fixes it); a hosted Studio
+        uses the token it was configured with. It stays in this browser.
       </p>
       <div className="flex gap-2">
         <Input
@@ -71,7 +76,11 @@ export function TokenWall({ children }: { children: React.ReactNode }) {
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
         />
-        <Button type="submit" size="sm" disabled={!draft.trim() || meta.isFetching}>
+        <Button
+          type="submit"
+          size="sm"
+          disabled={!draft.trim() || meta.isFetching}
+        >
           unlock
         </Button>
       </div>

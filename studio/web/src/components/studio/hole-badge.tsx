@@ -90,7 +90,11 @@ export function HoleBadge({
  * GenAI spans (plan I1.3): the derived badge in the stock_spans words
  * (its reason and fix in the accessible text and the title) — so a row
  * with no events reads "derived", never as one that lost them. */
-export function DerivedChip({ row }: { row: { derived?: boolean; requests_badge?: string } }) {
+export function DerivedChip({
+  row,
+}: {
+  row: { derived?: boolean; requests_badge?: string }
+}) {
   if (!isDerived(row)) return null
   return (
     <span className="inline-flex" data-derived-chip>

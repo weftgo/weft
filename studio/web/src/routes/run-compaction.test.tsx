@@ -31,7 +31,9 @@ vi.setConfig({ testTimeout: 30_000 })
 const RUN = "r_steps"
 const recorded = golden<RunDoc>("run-compacted")
 const events = golden<{ events: FakePosEvent[] }>("events-compacted").events
-const transcript = golden<{ batches: { index: number }[] }>("transcript-compacted")
+const transcript = golden<{ batches: { index: number }[] }>(
+  "transcript-compacted"
+)
 
 let studio: FakeStudio
 function serve(opts: {
@@ -96,14 +98,20 @@ describe("the compaction marker on the run page (A9.2)", () => {
     // The label, then (D5) the reason and fix in its accessible text,
     // inline and visually hidden.
     expect(badge?.firstChild?.textContent).toBe("compacted")
-    expect(
-      badge?.querySelector("[data-hole-words]")?.textContent
-    ).toContain("the model saw a compacted view")
-    expect(badge?.getAttribute("title")).toContain("the model saw a compacted view")
+    expect(badge?.querySelector("[data-hole-words]")?.textContent).toContain(
+      "the model saw a compacted view"
+    )
+    expect(badge?.getAttribute("title")).toContain(
+      "the model saw a compacted view"
+    )
     // Collapsed by default: no original drawn.
     expect(m.querySelector("[data-compaction-original]")).toBeNull()
 
-    await waitFor(() => expect(studio.calls(`GET runs/${RUN}/transcript`).length).toBeGreaterThan(0))
+    await waitFor(() =>
+      expect(studio.calls(`GET runs/${RUN}/transcript`).length).toBeGreaterThan(
+        0
+      )
+    )
     showOriginal(m)
     const orig = await waitFor(() => {
       const o = m.querySelectorAll<HTMLElement>("[data-original-seq]")
@@ -113,14 +121,18 @@ describe("the compaction marker on the run page (A9.2)", () => {
     // Transcript seqs 1 and 2: step 0's lookup call and its result —
     // not the prompt (seq 0), not step 1's research call (seq 3).
     expect(orig.map((o) => o.dataset.originalSeq)).toEqual(["1", "2"])
-    expect(orig[0].textContent).toMatch(/^assistant: lookup_order\(\{"order_id":"42"\}\)/)
+    expect(orig[0].textContent).toMatch(
+      /^assistant: lookup_order\(\{"order_id":"42"\}\)/
+    )
     expect(orig[1].textContent).toBe("tool: lookup_order → order 42 shipped")
     expect(m.textContent).toContain("replaced, transcript messages 1–2:")
     // The replacement: never empty — the count, and where the bodies
     // live; the step route is not asked for it.
     const repl = m.querySelector("[data-compaction-replacement]")!
     expect(repl.textContent).toContain("in their place, 1 message")
-    expect(repl.textContent).toContain("open the step's attempts to load its request count")
+    expect(repl.textContent).toContain(
+      "open the step's attempts to load its request count"
+    )
     expect(studio.calls(`GET runs/${RUN}/steps/2`)).toEqual([])
     // No other card carries a marker.
     expect(card(0).querySelector("[data-compaction]")).toBeNull()
@@ -132,14 +144,18 @@ describe("the compaction marker on the run page (A9.2)", () => {
     renderApp(`/runs/${RUN}?view=story`)
     const m = await marker('[data-compaction="2"]')
     fireEvent.click(
-      within(card(2).querySelector<HTMLElement>('[data-attempts="2"]')!).getByRole("button", { name: /attempts/ })
+      within(
+        card(2).querySelector<HTMLElement>('[data-attempts="2"]')!
+      ).getByRole("button", { name: /attempts/ })
     )
-    await waitFor(() => expect(studio.calls(`GET runs/${RUN}/steps/2`).length).toBe(1))
+    await waitFor(() =>
+      expect(studio.calls(`GET runs/${RUN}/steps/2`).length).toBe(1)
+    )
     showOriginal(m)
     await waitFor(() =>
-      expect(m.querySelector("[data-compaction-replacement]")?.textContent).toContain(
-        "the step's request carried 4 messages in all"
-      )
+      expect(
+        m.querySelector("[data-compaction-replacement]")?.textContent
+      ).toContain("the step's request carried 4 messages in all")
     )
   })
 
@@ -154,7 +170,9 @@ describe("the compaction marker on the run page (A9.2)", () => {
     expect(m.querySelector('[data-hole="compacted"]')).toBeTruthy()
     expect(m.textContent).toContain("manual")
     // At the top: before the first step card.
-    expect(m.compareDocumentPosition(card(0)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(
+      m.compareDocumentPosition(card(0)) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
     expect(document.querySelector("[data-step] [data-compaction]")).toBeNull()
     showOriginal(m)
     expect(m.textContent).toContain("session compaction · after this run")
@@ -164,73 +182,123 @@ describe("the compaction marker on the run page (A9.2)", () => {
   })
 
   it("a session marker without token estimates omits the token part", async () => {
-    const c: RunCompaction = { scope: "session", hash: "ab", replaced: 12, entries: 2, reason: "threshold" }
+    const c: RunCompaction = {
+      scope: "session",
+      hash: "ab",
+      replaced: 12,
+      entries: 2,
+      reason: "threshold",
+    }
     serve({ doc: { compactions: [c] } })
     renderApp(`/runs/${RUN}?view=story`)
     const m = await marker('[data-compaction="session"]')
-    expect(m.querySelector("[data-compaction-line]")?.textContent).toBe("12 messages compacted into 2")
+    expect(m.querySelector("[data-compaction-line]")?.textContent).toBe(
+      "12 messages compacted into 2"
+    )
   })
 
   it("an insertion (nothing replaced) is labelled inserted", async () => {
     const view = recorded.compactions![0]
-    serve({ doc: { compactions: [{ ...view, from_seq: 3, to_seq: 3, replaced: 0, entries: 1 }] } })
+    serve({
+      doc: {
+        compactions: [
+          { ...view, from_seq: 3, to_seq: 3, replaced: 0, entries: 1 },
+        ],
+      },
+    })
     renderApp(`/runs/${RUN}?view=story`)
     const m = await marker('[data-compaction="2"]')
-    expect(m.querySelector("[data-compaction-line]")?.textContent).toBe("1 message inserted by PrepareStep")
-    await waitFor(() => expect(studio.calls(`GET runs/${RUN}/transcript`).length).toBeGreaterThan(0))
+    expect(m.querySelector("[data-compaction-line]")?.textContent).toBe(
+      "1 message inserted by PrepareStep"
+    )
+    await waitFor(() =>
+      expect(studio.calls(`GET runs/${RUN}/transcript`).length).toBeGreaterThan(
+        0
+      )
+    )
     showOriginal(m)
     await waitFor(() =>
-      expect(m.querySelector("[data-compaction-original]")?.textContent).toContain(
-        "nothing replaced: inserted at transcript position 3"
-      )
+      expect(
+        m.querySelector("[data-compaction-original]")?.textContent
+      ).toContain("nothing replaced: inserted at transcript position 3")
     )
   })
 
   it("a view whose earlier records are missing shows the gap badge, never an empty original", async () => {
-    serve({ transcript: { batches: transcript.batches.filter((b) => b.index !== 2) } })
+    serve({
+      transcript: { batches: transcript.batches.filter((b) => b.index !== 2) },
+    })
     renderApp(`/runs/${RUN}?view=story`)
     const m = await marker('[data-compaction="2"]')
-    await waitFor(() => expect(studio.calls(`GET runs/${RUN}/transcript`).length).toBeGreaterThan(0))
+    await waitFor(() =>
+      expect(studio.calls(`GET runs/${RUN}/transcript`).length).toBeGreaterThan(
+        0
+      )
+    )
     showOriginal(m)
     const gap = await waitFor(() => {
       const g = m.querySelector('[data-compaction-original] [data-hole="gap"]')
       expect(g).toBeTruthy()
       return g!
     })
-    expect(gap.parentElement?.textContent).toContain("messages record 2 before the view is missing")
+    expect(gap.parentElement?.textContent).toContain(
+      "messages record 2 before the view is missing"
+    )
     expect(m.querySelectorAll("[data-original-seq]").length).toBe(0)
   })
 
   it("a transcript that could not be read says so, never loading forever", async () => {
-    serve({ transcript: () => apiError(404, "not_found", "no such transcript") })
+    serve({
+      transcript: () => apiError(404, "not_found", "no such transcript"),
+    })
     renderApp(`/runs/${RUN}?view=story`)
     const m = await marker('[data-compaction="2"]')
-    await waitFor(() => expect(studio.calls(`GET runs/${RUN}/transcript`).length).toBeGreaterThan(0))
+    await waitFor(() =>
+      expect(studio.calls(`GET runs/${RUN}/transcript`).length).toBeGreaterThan(
+        0
+      )
+    )
     showOriginal(m)
     const gap = await waitFor(() => {
-      const g = m.querySelector<HTMLElement>('[data-compaction-original] [data-hole="gap"]')
+      const g = m.querySelector<HTMLElement>(
+        '[data-compaction-original] [data-hole="gap"]'
+      )
       expect(g).toBeTruthy()
       return g!
     })
-    expect(gap.getAttribute("title")).toContain("the transcript could not be read")
+    expect(gap.getAttribute("title")).toContain(
+      "the transcript could not be read"
+    )
     expect(m.textContent).not.toContain("loading the transcript")
   })
 
   it("a transcript body that is not a message array below the view is a gap, never a shifted range", async () => {
-    const raw = golden<{ batches: { index: number; messages: unknown }[] }>("transcript-compacted")
+    const raw = golden<{ batches: { index: number; messages: unknown }[] }>(
+      "transcript-compacted"
+    )
     serve({
-      transcript: { batches: raw.batches.map((b) => (b.index === 0 ? { ...b, messages: "not json" } : b)) },
+      transcript: {
+        batches: raw.batches.map((b) =>
+          b.index === 0 ? { ...b, messages: "not json" } : b
+        ),
+      },
     })
     renderApp(`/runs/${RUN}?view=story`)
     const m = await marker('[data-compaction="2"]')
-    await waitFor(() => expect(studio.calls(`GET runs/${RUN}/transcript`).length).toBeGreaterThan(0))
+    await waitFor(() =>
+      expect(studio.calls(`GET runs/${RUN}/transcript`).length).toBeGreaterThan(
+        0
+      )
+    )
     showOriginal(m)
     const gap = await waitFor(() => {
       const g = m.querySelector('[data-compaction-original] [data-hole="gap"]')
       expect(g).toBeTruthy()
       return g!
     })
-    expect(gap.parentElement?.textContent).toContain("messages record 0 before the view does not read as messages")
+    expect(gap.parentElement?.textContent).toContain(
+      "messages record 0 before the view does not read as messages"
+    )
     expect(m.querySelectorAll("[data-original-seq]").length).toBe(0)
   })
 
@@ -239,7 +307,10 @@ describe("the compaction marker on the run page (A9.2)", () => {
     const { compactions: _drop, ...pre } = { ...recorded, children: [] }
     void _drop
     studio = new FakeStudio()
-      .on("GET meta", { ...golden<Record<string, unknown>>("meta"), capabilities: ["steps", "ingest"] })
+      .on("GET meta", {
+        ...golden<Record<string, unknown>>("meta"),
+        capabilities: ["steps", "ingest"],
+      })
       .on(`GET runs/${RUN}`, pre)
       .on(`GET runs/${RUN}/events`, pagedEvents(events))
       .on(`GET runs/${RUN}/transcript`, transcript)
@@ -254,15 +325,24 @@ describe("the compaction marker on the run page (A9.2)", () => {
     // empty href of a `?url` import, <html> inside the test's <div>.
     // Every other console.error is this page's and fails the test.
     const harness: ((c: unknown[]) => boolean)[] = [
-      (c) => String(c[0]).startsWith("Encountered a script tag while rendering React component"),
-      (c) => String(c[0]).startsWith('An empty string ("") was passed to the %s attribute') && c[1] === "href",
-      (c) => String(c[0]).startsWith("In HTML, %s cannot be a child of <%s>") && c[1] === "<html>",
+      (c) =>
+        String(c[0]).startsWith(
+          "Encountered a script tag while rendering React component"
+        ),
+      (c) =>
+        String(c[0]).startsWith(
+          'An empty string ("") was passed to the %s attribute'
+        ) && c[1] === "href",
+      (c) =>
+        String(c[0]).startsWith("In HTML, %s cannot be a child of <%s>") &&
+        c[1] === "<html>",
     ]
     const calls = errors.mock.calls as unknown[][]
     // Each harness warning at most once — React logs each of these once
     // per module, so whichever test mounts first sees them — and
     // nothing else at all.
-    for (const h of harness) expect(calls.filter(h).length).toBeLessThanOrEqual(1)
+    for (const h of harness)
+      expect(calls.filter(h).length).toBeLessThanOrEqual(1)
     expect(calls.filter((c) => !harness.some((h) => h(c)))).toEqual([])
     expect(document.body.textContent).not.toContain("compacted")
   })

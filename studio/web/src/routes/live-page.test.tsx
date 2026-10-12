@@ -7,19 +7,38 @@
 // until the failed row, the server's refusal toasted verbatim), and
 // click-to-peek (?peek=, the run's story, Escape closes) — against the
 // fake Studio and the fake EventSource the live.ts tests use.
-import { act, cleanup, configure, fireEvent, screen, waitFor, within } from "@testing-library/react"
+import {
+  act,
+  cleanup,
+  configure,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import axe from "axe-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
 import type { RunDoc, RunRow, RunsPage } from "@/lib/api"
-import { CANCEL_WAIT_MS, LIVE_BACKFILL_LINE, LIVE_GRACE_MS, RUNNING_COST_REASON } from "@/lib/live-rows"
+import {
+  CANCEL_WAIT_MS,
+  LIVE_BACKFILL_LINE,
+  LIVE_GRACE_MS,
+  RUNNING_COST_REASON,
+} from "@/lib/live-rows"
 import { resetNotices } from "@/lib/notify"
 import { APP_RUN_CANCEL, CANCEL_AGAIN } from "@/components/studio/live-table"
 import { POLLING_LINE } from "@/routes/live"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
-import { FakeStudio, apiError, golden, pagedEvents, transcriptOf } from "@/test/fake-studio"
+import {
+  FakeStudio,
+  apiError,
+  golden,
+  pagedEvents,
+  transcriptOf,
+} from "@/test/fake-studio"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -54,7 +73,11 @@ const CAPS = ["live", "pricing", "playground", "cancel"]
 
 const panelToken = (scope: "read" | "playground") =>
   `weft_pt.${btoa(
-    JSON.stringify({ public_id: "pub_1", scope, exp: new Date(Date.now() + 3600_000).toISOString() })
+    JSON.stringify({
+      public_id: "pub_1",
+      scope,
+      exp: new Date(Date.now() + 3600_000).toISOString(),
+    })
   )
     .replace(/=+$/, "")
     .replace(/\+/g, "-")
@@ -62,7 +85,9 @@ const panelToken = (scope: "read" | "playground") =>
 
 /** The all stream (the peek opens a run stream beside it). */
 function allStream(): FakeEventSource {
-  const es = FakeEventSource.open().find((s) => new URL(s.url).searchParams.has("all"))
+  const es = FakeEventSource.open().find((s) =>
+    new URL(s.url).searchParams.has("all")
+  )
   if (!es) throw new Error("no all stream yet")
   return es
 }
@@ -75,9 +100,11 @@ const ev = (run_id: string, pos: number, event: unknown) => ({
   time: new Date().toISOString(),
   event,
 })
-const rowOf = (id: string) => document.querySelector<HTMLElement>(`tr[data-run="${id}"]`)
+const rowOf = (id: string) =>
+  document.querySelector<HTMLElement>(`tr[data-run="${id}"]`)
 const cell = (id: string, name: string) =>
-  rowOf(id)?.querySelector<HTMLElement>(`[data-cell="${name}"]`)?.textContent ?? null
+  rowOf(id)?.querySelector<HTMLElement>(`[data-cell="${name}"]`)?.textContent ??
+  null
 /** Every stream ever opened (closed ones too) on one run's selector. */
 function streamsOf(run: string): number {
   let n = 0
@@ -92,7 +119,11 @@ function streamsOf(run: string): number {
   }
 }
 const toastTitles = () =>
-  [...document.querySelectorAll<HTMLElement>("[data-sonner-toast] [data-title]")].map((t) => t.textContent)
+  [
+    ...document.querySelectorAll<HTMLElement>(
+      "[data-sonner-toast] [data-title]"
+    ),
+  ].map((t) => t.textContent)
 
 let studio: FakeStudio
 beforeEach(() => {
@@ -135,7 +166,13 @@ describe("the all stream", () => {
     expect(new URL(es.url).searchParams.get("kinds")).toBe("event,run")
     expect(es.refused).toBeNull()
     expect(FakeEventSource.open()).toHaveLength(1)
-    await waitFor(() => expect(document.querySelector("[data-live-conn]")?.getAttribute("data-live-conn")).toBe("live"))
+    await waitFor(() =>
+      expect(
+        document
+          .querySelector("[data-live-conn]")
+          ?.getAttribute("data-live-conn")
+      ).toBe("live")
+    )
     // The bounded backfill rule, said once.
     expect(screen.getByText(LIVE_BACKFILL_LINE)).toBeTruthy()
     // The running list seeds the rows (run frames are never backfilled).
@@ -146,8 +183,21 @@ describe("the all stream", () => {
     const { es } = await openPage()
     act(() => {
       es.emit("run", { run: running("r_a", { agent: "orders" }) }, "1")
-      es.emit("record", ev("r_a", 0, { type: "run_start", id: "r_a", model: rOK.model, agent: "orders" }), "2")
-      es.emit("record", ev("r_a", 1, { type: "step_start", run_id: "r_a", index: 0 }), "3")
+      es.emit(
+        "record",
+        ev("r_a", 0, {
+          type: "run_start",
+          id: "r_a",
+          model: rOK.model,
+          agent: "orders",
+        }),
+        "2"
+      )
+      es.emit(
+        "record",
+        ev("r_a", 1, { type: "step_start", run_id: "r_a", index: 0 }),
+        "3"
+      )
       es.emit(
         "record",
         ev("r_a", 2, {
@@ -160,7 +210,11 @@ describe("the all stream", () => {
         }),
         "4"
       )
-      es.emit("record", ev("r_a", 3, { type: "step_start", run_id: "r_a", index: 1 }), "5")
+      es.emit(
+        "record",
+        ev("r_a", 3, { type: "step_start", run_id: "r_a", index: 1 }),
+        "5"
+      )
     })
     await waitFor(() => expect(cell("r_a", "step")).toBe("2…"))
     expect(cell("r_a", "tokens")).toBe("120")
@@ -206,8 +260,14 @@ describe("the all stream", () => {
         "7"
       )
     })
-    await waitFor(() => expect(rowOf("r_a")!.querySelector("[data-cost]")!.getAttribute("data-cost")).toBe("0.0123"))
-    expect(rowOf("r_a")!.querySelector("[data-cost]")!.textContent).toBe("$0.01")
+    await waitFor(() =>
+      expect(
+        rowOf("r_a")!.querySelector("[data-cost]")!.getAttribute("data-cost")
+      ).toBe("0.0123")
+    )
+    expect(rowOf("r_a")!.querySelector("[data-cost]")!.textContent).toBe(
+      "$0.01"
+    )
     expect(cell("r_a", "step")).toBe("2 / 2")
     expect(cell("r_a", "tokens")).toBe("300")
   })
@@ -215,11 +275,25 @@ describe("the all stream", () => {
   it("puts new runs at the top", async () => {
     const { es } = await openPage()
     act(() => {
-      es.emit("run", { run: running("r_old", { started: new Date(Date.now() - 60_000).toISOString() }) }, "1")
-      es.emit("run", { run: running("r_new", { started: new Date().toISOString() }) }, "2")
+      es.emit(
+        "run",
+        {
+          run: running("r_old", {
+            started: new Date(Date.now() - 60_000).toISOString(),
+          }),
+        },
+        "1"
+      )
+      es.emit(
+        "run",
+        { run: running("r_new", { started: new Date().toISOString() }) },
+        "2"
+      )
     })
     await waitFor(() => expect(rowOf("r_new")).toBeTruthy())
-    const ids = [...document.querySelectorAll("tr[data-run]")].map((r) => r.getAttribute("data-run"))
+    const ids = [...document.querySelectorAll("tr[data-run]")].map((r) =>
+      r.getAttribute("data-run")
+    )
     expect(ids).toEqual(["r_new", "r_old"])
   })
 
@@ -227,7 +301,16 @@ describe("the all stream", () => {
     const { es } = await openPage()
     act(() => {
       es.emit("run", { run: running("r_live") }, "1")
-      es.emit("run", { run: running("r_done", { status: "succeeded", finished: new Date().toISOString() }) }, "2")
+      es.emit(
+        "run",
+        {
+          run: running("r_done", {
+            status: "succeeded",
+            finished: new Date().toISOString(),
+          }),
+        },
+        "2"
+      )
     })
     await waitFor(() => expect(rowOf("r_done")).toBeTruthy())
     // Still there a tick later.
@@ -261,7 +344,10 @@ describe("the all stream", () => {
       es.emit("run", { run: running("r_r", { agent: "research" }) }, "2")
     })
     await waitFor(() => expect(rowOf("r_r")).toBeTruthy())
-    fireEvent.change(screen.getByLabelText("filter the runs by agent or status"), { target: { value: "ord" } })
+    fireEvent.change(
+      screen.getByLabelText("filter the runs by agent or status"),
+      { target: { value: "ord" } }
+    )
     await waitFor(() => expect(rowOf("r_r")).toBeNull())
     expect(rowOf("r_o")).toBeTruthy()
   })
@@ -273,7 +359,9 @@ describe("the stream's life", () => {
     expect(es.closedByClient).toBe(false)
     await act(() => router.navigate({ to: "/runs" }))
     await waitFor(() => expect(es.closedByClient).toBe(true))
-    expect(FakeEventSource.open().some((s) => new URL(s.url).searchParams.has("all"))).toBe(false)
+    expect(
+      FakeEventSource.open().some((s) => new URL(s.url).searchParams.has("all"))
+    ).toBe(false)
   })
 
   it("closes the all stream on unmount", async () => {
@@ -284,34 +372,67 @@ describe("the stream's life", () => {
 
   it("a server overflow says catching up, opens a fresh stream and reads the running list again", async () => {
     const { es } = await openPage()
-    await waitFor(() => expect(document.querySelector("[data-live-conn]")?.getAttribute("data-live-conn")).toBe("live"))
+    await waitFor(() =>
+      expect(
+        document
+          .querySelector("[data-live-conn]")
+          ?.getAttribute("data-live-conn")
+      ).toBe("live")
+    )
     const reads = studio.calls("GET runs").length
     act(() => es.emit("overflow", {}))
-    await waitFor(() => expect(document.querySelector("[data-live-conn]")!.textContent).toBe("overflow — catching up"))
+    await waitFor(() =>
+      expect(document.querySelector("[data-live-conn]")!.textContent).toBe(
+        "overflow — catching up"
+      )
+    )
     expect(es.closedByClient).toBe(true)
     const fresh = await waitFor(
       () => {
-        const n = FakeEventSource.open().find((s) => s !== es && new URL(s.url).searchParams.has("all"))
+        const n = FakeEventSource.open().find(
+          (s) => s !== es && new URL(s.url).searchParams.has("all")
+        )
         expect(n).toBeTruthy()
         return n!
       },
       { timeout: 15_000 }
     )
     act(() => fresh.connect())
-    await waitFor(() => expect(studio.calls("GET runs").length).toBeGreaterThan(reads), { timeout: 5_000 })
-    await waitFor(() => expect(document.querySelector("[data-live-conn]")?.getAttribute("data-live-conn")).toBe("live"))
+    await waitFor(
+      () => expect(studio.calls("GET runs").length).toBeGreaterThan(reads),
+      { timeout: 5_000 }
+    )
+    await waitFor(() =>
+      expect(
+        document
+          .querySelector("[data-live-conn]")
+          ?.getAttribute("data-live-conn")
+      ).toBe("live")
+    )
   })
 
   it("a 403 on the all grant although live_all said yes: polling, with the honest line", async () => {
     studio
-      .on("POST live-grant", () => apiError(403, "forbidden", "the all stream needs the dev token"))
-      .on("GET runs", { total: 1, runs: [running("r_p", { agent: "orders" })], next_before: null })
+      .on("POST live-grant", () =>
+        apiError(403, "forbidden", "the all stream needs the dev token")
+      )
+      .on("GET runs", {
+        total: 1,
+        runs: [running("r_p", { agent: "orders" })],
+        next_before: null,
+      })
     renderApp("/live")
     expect(await screen.findByText(POLLING_LINE)).toBeTruthy()
     expect(document.querySelector('[data-live-mode="polling"]')).toBeTruthy()
     expect(await screen.findByText("r_p")).toBeTruthy()
-    expect(studio.calls("POST live-grant").some((g) => (g.body as { all?: boolean }).all)).toBe(true)
-    expect(FakeEventSource.open().some((s) => new URL(s.url).searchParams.has("all"))).toBe(false)
+    expect(
+      studio
+        .calls("POST live-grant")
+        .some((g) => (g.body as { all?: boolean }).all)
+    ).toBe(true)
+    expect(
+      FakeEventSource.open().some((s) => new URL(s.url).searchParams.has("all"))
+    ).toBe(false)
   })
 })
 
@@ -322,17 +443,34 @@ describe("without live_all", () => {
     studio
       .requireToken(tok)
       .on("GET meta", meta(CAPS, false))
-      .on("GET runs", { total: 1, runs: [running("r_p", { agent: "orders" })], next_before: null })
+      .on("GET runs", {
+        total: 1,
+        runs: [running("r_p", { agent: "orders" })],
+        next_before: null,
+      })
     renderApp("/live")
     expect(await screen.findByText("r_p")).toBeTruthy()
-    expect(screen.getByText("live: polling every 5 s — the all stream needs the dev token or loopback")).toBeTruthy()
+    expect(
+      screen.getByText(
+        "live: polling every 5 s — the all stream needs the dev token or loopback"
+      )
+    ).toBeTruthy()
     // The agent stream the poll may open is refused a panel token (403);
     // the all stream is never asked for.
-    await waitFor(() => expect(studio.calls("POST live-grant").length).toBeGreaterThan(0))
-    expect(studio.calls("POST live-grant").every((g) => !(g.body as { all?: boolean }).all)).toBe(true)
+    await waitFor(() =>
+      expect(studio.calls("POST live-grant").length).toBeGreaterThan(0)
+    )
+    expect(
+      studio
+        .calls("POST live-grant")
+        .every((g) => !(g.body as { all?: boolean }).all)
+    ).toBe(true)
     expect(FakeEventSource.instances).toHaveLength(0)
     const polls = studio.calls("GET runs").length
-    await waitFor(() => expect(studio.calls("GET runs").length).toBeGreaterThan(polls), { timeout: 12_000 })
+    await waitFor(
+      () => expect(studio.calls("GET runs").length).toBeGreaterThan(polls),
+      { timeout: 12_000 }
+    )
   })
 })
 
@@ -340,17 +478,29 @@ describe("cancel", () => {
   it("is drawn only under capability cancel", async () => {
     studio.on("GET meta", meta(["live", "pricing"]))
     const { es } = await openPage()
-    act(() => es.emit("run", { run: running("r_pg", { playground: true }) }, "1"))
+    act(() =>
+      es.emit("run", { run: running("r_pg", { playground: true }) }, "1")
+    )
     await waitFor(() => expect(rowOf("r_pg")).toBeTruthy())
-    expect(within(rowOf("r_pg")!).queryByRole("button", { name: /cancel/ })).toBeNull()
+    expect(
+      within(rowOf("r_pg")!).queryByRole("button", { name: /cancel/ })
+    ).toBeNull()
   })
 
   it("live cancels a run: playground runs only, an inline confirm, POST, cancelling… until the failed row", async () => {
-    studio.on("POST runs/r_pg/cancel", () =>
-      new Response(JSON.stringify({ ...golden<Record<string, unknown>>("cancel"), run_id: "r_pg" }), {
-        status: 202,
-        headers: { "Content-Type": "application/json" },
-      })
+    studio.on(
+      "POST runs/r_pg/cancel",
+      () =>
+        new Response(
+          JSON.stringify({
+            ...golden<Record<string, unknown>>("cancel"),
+            run_id: "r_pg",
+          }),
+          {
+            status: 202,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
     )
     const { es } = await openPage()
     act(() => {
@@ -359,17 +509,31 @@ describe("cancel", () => {
     })
     await waitFor(() => expect(rowOf("r_app")).toBeTruthy())
     // The app's own run: a disabled button that says why.
-    const app = within(rowOf("r_app")!).getByRole("button", { name: /^cancel run r_app/ })
+    const app = within(rowOf("r_app")!).getByRole("button", {
+      name: /^cancel run r_app/,
+    })
     expect((app as HTMLButtonElement).disabled).toBe(true)
     expect(app.getAttribute("title")).toBe(APP_RUN_CANCEL)
     // The first click arms; nothing is posted.
-    fireEvent.click(within(rowOf("r_pg")!).getByRole("button", { name: "cancel run r_pg" }))
-    const confirm = within(rowOf("r_pg")!).getByRole("button", { name: "confirm cancel run r_pg" })
+    fireEvent.click(
+      within(rowOf("r_pg")!).getByRole("button", { name: "cancel run r_pg" })
+    )
+    const confirm = within(rowOf("r_pg")!).getByRole("button", {
+      name: "confirm cancel run r_pg",
+    })
     expect(studio.calls("POST runs/r_pg/cancel")).toHaveLength(0)
     fireEvent.click(confirm)
-    await waitFor(() => expect(studio.calls("POST runs/r_pg/cancel")).toHaveLength(1))
-    await waitFor(() => expect(within(rowOf("r_pg")!).getByText("cancelling…")).toBeTruthy())
-    await waitFor(() => expect(toastTitles()).toContain("cancel sent to run r_pg's runtime · cancelling…"))
+    await waitFor(() =>
+      expect(studio.calls("POST runs/r_pg/cancel")).toHaveLength(1)
+    )
+    await waitFor(() =>
+      expect(within(rowOf("r_pg")!).getByText("cancelling…")).toBeTruthy()
+    )
+    await waitFor(() =>
+      expect(toastTitles()).toContain(
+        "cancel sent to run r_pg's runtime · cancelling…"
+      )
+    )
     // The run's end: its failed row (a cancelled run has no run_finish).
     act(() =>
       es.emit(
@@ -386,28 +550,58 @@ describe("cancel", () => {
         "3"
       )
     )
-    await waitFor(() => expect(within(rowOf("r_pg")!).getByText("failed")).toBeTruthy())
+    await waitFor(() =>
+      expect(within(rowOf("r_pg")!).getByText("failed")).toBeTruthy()
+    )
     expect(within(rowOf("r_pg")!).queryByText("cancelling…")).toBeNull()
-    await waitFor(() => expect(toastTitles()).toContain("run r_pg cancelled · ended failed"))
+    await waitFor(() =>
+      expect(toastTitles()).toContain("run r_pg cancelled · ended failed")
+    )
   })
 
   /** A playground row with its cancel sent (the 202), "cancelling…" showing. */
   async function sentCancel(over: Partial<RunRow> = {}) {
-    studio.on("POST runs/r_pg/cancel", () =>
-      new Response(JSON.stringify({ ...golden<Record<string, unknown>>("cancel"), run_id: "r_pg" }), {
-        status: 202,
-        headers: { "Content-Type": "application/json" },
-      })
+    studio.on(
+      "POST runs/r_pg/cancel",
+      () =>
+        new Response(
+          JSON.stringify({
+            ...golden<Record<string, unknown>>("cancel"),
+            run_id: "r_pg",
+          }),
+          {
+            status: 202,
+            headers: { "Content-Type": "application/json" },
+          }
+        )
     )
     const page = await openPage()
     act(() => {
-      page.es.emit("run", { run: running("r_pg", { playground: true, agent: "orders", ...over }) }, "1")
-      page.es.emit("run", { run: running("r_other", { agent: "research" }) }, "2")
+      page.es.emit(
+        "run",
+        {
+          run: running("r_pg", { playground: true, agent: "orders", ...over }),
+        },
+        "1"
+      )
+      page.es.emit(
+        "run",
+        { run: running("r_other", { agent: "research" }) },
+        "2"
+      )
     })
     await waitFor(() => expect(rowOf("r_pg")).toBeTruthy())
-    fireEvent.click(within(rowOf("r_pg")!).getByRole("button", { name: "cancel run r_pg" }))
-    fireEvent.click(within(rowOf("r_pg")!).getByRole("button", { name: "confirm cancel run r_pg" }))
-    await waitFor(() => expect(within(rowOf("r_pg")!).getByText("cancelling…")).toBeTruthy())
+    fireEvent.click(
+      within(rowOf("r_pg")!).getByRole("button", { name: "cancel run r_pg" })
+    )
+    fireEvent.click(
+      within(rowOf("r_pg")!).getByRole("button", {
+        name: "confirm cancel run r_pg",
+      })
+    )
+    await waitFor(() =>
+      expect(within(rowOf("r_pg")!).getByText("cancelling…")).toBeTruthy()
+    )
     return page
   }
   const ended = (status: RunRow["status"]) => ({
@@ -426,67 +620,130 @@ describe("cancel", () => {
     await new Promise((r) => setTimeout(r, 1200))
     expect(within(rowOf("r_pg")!).getByText("cancelling…")).toBeTruthy()
     const real = Date.now()
-    vi.spyOn(Date, "now").mockImplementation(() => real + CANCEL_WAIT_MS + 1_000)
-    const again = await waitFor(() => within(rowOf("r_pg")!).getByRole("button", { name: "cancel run r_pg" }))
+    vi.spyOn(Date, "now").mockImplementation(
+      () => real + CANCEL_WAIT_MS + 1_000
+    )
+    const again = await waitFor(() =>
+      within(rowOf("r_pg")!).getByRole("button", { name: "cancel run r_pg" })
+    )
     expect(again.getAttribute("title")).toBe(CANCEL_AGAIN)
     expect(within(rowOf("r_pg")!).queryByText("cancelling…")).toBeNull()
   })
 
   it("a cancelled run that ends while the filter hides it still lets go, and the toast says so", async () => {
     const { es } = await sentCancel()
-    fireEvent.change(screen.getByLabelText("filter the runs by agent or status"), { target: { value: "research" } })
+    fireEvent.change(
+      screen.getByLabelText("filter the runs by agent or status"),
+      { target: { value: "research" } }
+    )
     await waitFor(() => expect(rowOf("r_pg")).toBeNull())
     act(() => es.emit("run", ended("failed"), "3"))
-    await waitFor(() => expect(toastTitles()).toContain("run r_pg cancelled · ended failed"))
-    fireEvent.change(screen.getByLabelText("filter the runs by agent or status"), { target: { value: "" } })
-    await waitFor(() => expect(within(rowOf("r_pg")!).getByText("failed")).toBeTruthy())
+    await waitFor(() =>
+      expect(toastTitles()).toContain("run r_pg cancelled · ended failed")
+    )
+    fireEvent.change(
+      screen.getByLabelText("filter the runs by agent or status"),
+      { target: { value: "" } }
+    )
+    await waitFor(() =>
+      expect(within(rowOf("r_pg")!).getByText("failed")).toBeTruthy()
+    )
     expect(within(rowOf("r_pg")!).queryByText("cancelling…")).toBeNull()
   })
 
   it("a run that ends otherwise while cancelling: the toast says how it ended, not cancelled", async () => {
     const { es } = await sentCancel()
     act(() => es.emit("run", ended("succeeded"), "3"))
-    await waitFor(() => expect(toastTitles()).toContain("run r_pg ended succeeded"))
+    await waitFor(() =>
+      expect(toastTitles()).toContain("run r_pg ended succeeded")
+    )
     expect(toastTitles().some((t) => t.includes("cancelled"))).toBe(false)
   })
 
   it("an armed cancel disarms after 3 s", async () => {
     const { es } = await openPage()
-    act(() => es.emit("run", { run: running("r_pg", { playground: true }) }, "1"))
+    act(() =>
+      es.emit("run", { run: running("r_pg", { playground: true }) }, "1")
+    )
     await waitFor(() => expect(rowOf("r_pg")).toBeTruthy())
-    fireEvent.click(within(rowOf("r_pg")!).getByRole("button", { name: "cancel run r_pg" }))
-    expect(within(rowOf("r_pg")!).getByRole("button", { name: "confirm cancel run r_pg" })).toBeTruthy()
-    await waitFor(() => expect(within(rowOf("r_pg")!).getByRole("button", { name: "cancel run r_pg" })).toBeTruthy(), {
-      timeout: 5_000,
-    })
+    fireEvent.click(
+      within(rowOf("r_pg")!).getByRole("button", { name: "cancel run r_pg" })
+    )
+    expect(
+      within(rowOf("r_pg")!).getByRole("button", {
+        name: "confirm cancel run r_pg",
+      })
+    ).toBeTruthy()
+    await waitFor(
+      () =>
+        expect(
+          within(rowOf("r_pg")!).getByRole("button", {
+            name: "cancel run r_pg",
+          })
+        ).toBeTruthy(),
+      {
+        timeout: 5_000,
+      }
+    )
     expect(studio.calls("POST runs/r_pg/cancel")).toHaveLength(0)
   })
 
   it("toasts a 409's message verbatim", async () => {
-    const words = "run r_pg already finished (succeeded): there is nothing to cancel"
+    const words =
+      "run r_pg already finished (succeeded): there is nothing to cancel"
     studio.on("POST runs/r_pg/cancel", () => apiError(409, "conflict", words))
     const { es } = await openPage()
-    act(() => es.emit("run", { run: running("r_pg", { playground: true }) }, "1"))
+    act(() =>
+      es.emit("run", { run: running("r_pg", { playground: true }) }, "1")
+    )
     await waitFor(() => expect(rowOf("r_pg")).toBeTruthy())
-    fireEvent.click(within(rowOf("r_pg")!).getByRole("button", { name: "cancel run r_pg" }))
-    fireEvent.click(within(rowOf("r_pg")!).getByRole("button", { name: "confirm cancel run r_pg" }))
-    await waitFor(() => expect(toastTitles()).toContain(`cancel on run r_pg refused: ${words}`))
+    fireEvent.click(
+      within(rowOf("r_pg")!).getByRole("button", { name: "cancel run r_pg" })
+    )
+    fireEvent.click(
+      within(rowOf("r_pg")!).getByRole("button", {
+        name: "confirm cancel run r_pg",
+      })
+    )
+    await waitFor(() =>
+      expect(toastTitles()).toContain(`cancel on run r_pg refused: ${words}`)
+    )
     // The button is back: cancel again is the reader's.
-    expect(within(rowOf("r_pg")!).getByRole("button", { name: "cancel run r_pg" })).toBeTruthy()
+    expect(
+      within(rowOf("r_pg")!).getByRole("button", { name: "cancel run r_pg" })
+    ).toBeTruthy()
   })
 
   it("a parked run says decide instead, linking to its page", async () => {
     const { es } = await openPage()
     act(() =>
-      es.emit("run", { run: running("r_park", { playground: true, status: "succeeded", pending: 1, finished: new Date().toISOString() }) }, "1")
+      es.emit(
+        "run",
+        {
+          run: running("r_park", {
+            playground: true,
+            status: "succeeded",
+            pending: 1,
+            finished: new Date().toISOString(),
+          }),
+        },
+        "1"
+      )
     )
-    const link = await waitFor(() => within(rowOf("r_park")!).getByRole("link", { name: "parked — decide instead" }))
+    const link = await waitFor(() =>
+      within(rowOf("r_park")!).getByRole("link", {
+        name: "parked — decide instead",
+      })
+    )
     expect(link.getAttribute("href")).toMatch(/\/runs\/r_park$/)
   })
 })
 
 describe("click-to-peek", () => {
-  const doc = (id: string): RunDoc => ({ ...running(id, { agent: "orders" }), children: [] })
+  const doc = (id: string): RunDoc => ({
+    ...running(id, { agent: "orders" }),
+    children: [],
+  })
   const events = (id: string) =>
     [
       { type: "run_start", id, model: rOK.model, agent: "orders" },
@@ -504,30 +761,49 @@ describe("click-to-peek", () => {
   beforeEach(() => {
     studio
       .on("GET runs/r_peek", doc("r_peek"))
-      .on("GET runs/r_peek/events", pagedEvents(events("r_peek"), { done: false }))
+      .on(
+        "GET runs/r_peek/events",
+        pagedEvents(events("r_peek"), { done: false })
+      )
       .on("GET runs/r_peek/transcript", transcriptOf([]))
   })
 
   it("opens the run's story in a side pane on a row click, with ?peek=, and Escape closes it", async () => {
     const { es, router } = await openPage()
-    act(() => es.emit("run", { run: running("r_peek", { agent: "orders" }) }, "1"))
+    act(() =>
+      es.emit("run", { run: running("r_peek", { agent: "orders" }) }, "1")
+    )
     await waitFor(() => expect(rowOf("r_peek")).toBeTruthy())
     // A click on the row (not its link or a button).
     fireEvent.click(within(rowOf("r_peek")!).getByText("orders"))
-    const pane = await screen.findByRole("complementary", { name: "story of run r_peek" })
-    await waitFor(() => expect(router.state.location.search).toEqual({ peek: "r_peek" }))
+    const pane = await screen.findByRole("complementary", {
+      name: "story of run r_peek",
+    })
+    await waitFor(() =>
+      expect(router.state.location.search).toEqual({ peek: "r_peek" })
+    )
     // The story: the run page's StepList over the run's events.
-    await waitFor(() => expect(pane.querySelector("[data-peek-story]")).toBeTruthy())
-    expect(within(pane).getByRole("link", { name: "r_peek" }).getAttribute("href")).toMatch(/\/runs\/r_peek$/)
+    await waitFor(() =>
+      expect(pane.querySelector("[data-peek-story]")).toBeTruthy()
+    )
+    expect(
+      within(pane).getByRole("link", { name: "r_peek" }).getAttribute("href")
+    ).toMatch(/\/runs\/r_peek$/)
     expect(studio.calls("GET runs/r_peek/events").length).toBeGreaterThan(0)
     fireEvent.keyDown(window, { key: "Escape" })
-    await waitFor(() => expect(screen.queryByRole("complementary", { name: "story of run r_peek" })).toBeNull())
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("complementary", { name: "story of run r_peek" })
+      ).toBeNull()
+    )
     expect(router.state.location.search).toEqual({})
   })
 
   it("a link with ?peek= opens the pane; a malformed one is dropped", async () => {
     renderApp("/live?peek=r_peek")
-    expect(await screen.findByRole("complementary", { name: "story of run r_peek" })).toBeTruthy()
+    expect(
+      await screen.findByRole("complementary", { name: "story of run r_peek" })
+    ).toBeTruthy()
     renderApp("/live?peek=%3Cscript%3E")
     await waitFor(() => allStream())
     // The route's validation drops it: no pane, no read of such a run.
@@ -536,10 +812,16 @@ describe("click-to-peek", () => {
   })
 
   it("a deleted run (404): the not-found copy, no stream opened, no events read, nothing polled", async () => {
-    studio.on("GET runs/r_gone", () => apiError(404, "not_found", "no run r_gone"))
+    studio.on("GET runs/r_gone", () =>
+      apiError(404, "not_found", "no run r_gone")
+    )
     renderApp("/live?peek=r_gone")
-    const pane = await screen.findByRole("complementary", { name: "story of run r_gone" })
-    await waitFor(() => expect(within(pane).getByText("no run r_gone")).toBeTruthy())
+    const pane = await screen.findByRole("complementary", {
+      name: "story of run r_gone",
+    })
+    await waitFor(() =>
+      expect(within(pane).getByText("no run r_gone")).toBeTruthy()
+    )
     const runReads = studio.calls("GET runs/r_gone").length
     // Past the run page's 2 s poll: still nothing followed.
     await act(() => new Promise((r) => setTimeout(r, 2_500)))
@@ -549,19 +831,29 @@ describe("click-to-peek", () => {
   })
 
   it("the run page of a deleted run (404): the not-found copy, no stream, no events read", async () => {
-    studio.on("GET runs/r_gone", () => apiError(404, "not_found", "no run r_gone"))
+    studio.on("GET runs/r_gone", () =>
+      apiError(404, "not_found", "no run r_gone")
+    )
     renderApp("/runs/r_gone")
     expect(await screen.findByText("no run r_gone")).toBeTruthy()
     await act(() => new Promise((r) => setTimeout(r, 2_500)))
     expect(studio.calls("GET runs/r_gone/events")).toHaveLength(0)
     expect(streamsOf("r_gone")).toBe(0)
-    expect(studio.calls("POST live-grant").filter((c) => JSON.stringify(c.body ?? "").includes("r_gone"))).toHaveLength(0)
+    expect(
+      studio
+        .calls("POST live-grant")
+        .filter((c) => JSON.stringify(c.body ?? "").includes("r_gone"))
+    ).toHaveLength(0)
   })
 
   it("the close button closes it", async () => {
     renderApp("/live?peek=r_peek")
-    const pane = await screen.findByRole("complementary", { name: "story of run r_peek" })
-    fireEvent.click(within(pane).getByRole("button", { name: "close the peek" }))
+    const pane = await screen.findByRole("complementary", {
+      name: "story of run r_peek",
+    })
+    fireEvent.click(
+      within(pane).getByRole("button", { name: "close the peek" })
+    )
     await waitFor(() => expect(screen.queryByRole("complementary")).toBeNull())
   })
 })
@@ -569,25 +861,54 @@ describe("click-to-peek", () => {
 describe("accessibility", () => {
   it("the table, its buttons and the peek pane: axe finds nothing", async () => {
     studio
-      .on("GET runs/r_x", { ...running("r_x", { agent: "orders" }), children: [] })
+      .on("GET runs/r_x", {
+        ...running("r_x", { agent: "orders" }),
+        children: [],
+      })
       .on("GET runs/r_x/events", pagedEvents([], { done: false }))
       .on("GET runs/r_x/transcript", transcriptOf([]))
     const { es } = await openPage("/live?peek=r_x")
     act(() => {
-      es.emit("run", { run: running("r_x", { agent: "orders", playground: true }) }, "1")
+      es.emit(
+        "run",
+        { run: running("r_x", { agent: "orders", playground: true }) },
+        "1"
+      )
       es.emit("run", { run: running("r_y", { agent: "orders" }) }, "2")
-      es.emit("run", { run: running("r_z", { status: "succeeded", pending: 1, finished: new Date().toISOString() }) }, "3")
+      es.emit(
+        "run",
+        {
+          run: running("r_z", {
+            status: "succeeded",
+            pending: 1,
+            finished: new Date().toISOString(),
+          }),
+        },
+        "3"
+      )
       es.emit("backfill_error", { run_id: "r_y", kind: "event" })
     })
     await waitFor(() => expect(rowOf("r_z")).toBeTruthy())
     const table = screen.getByRole("table", { name: "runs streaming now" })
-    const pane = await screen.findByRole("complementary", { name: "story of run r_x" })
+    const pane = await screen.findByRole("complementary", {
+      name: "story of run r_x",
+    })
     for (const el of [table, pane]) {
       const res = await axe.run(el)
-      expect(res.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(" | ")}`)).toEqual([])
+      expect(
+        res.violations.map(
+          (v) =>
+            `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(" | ")}`
+        )
+      ).toEqual([])
     }
     // Every button has a name that says which run it acts on.
-    for (const b of within(table).getAllByRole("button")) expect(b.textContent || b.getAttribute("aria-label")).toBeTruthy()
-    expect(within(table).getByRole("button", { name: "peek run r_x" }).getAttribute("aria-pressed")).toBe("true")
+    for (const b of within(table).getAllByRole("button"))
+      expect(b.textContent || b.getAttribute("aria-label")).toBeTruthy()
+    expect(
+      within(table)
+        .getByRole("button", { name: "peek run r_x" })
+        .getAttribute("aria-pressed")
+    ).toBe("true")
   })
 })

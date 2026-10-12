@@ -16,7 +16,13 @@ import type { Meta, ModelPrice, PricingSettings } from "./api"
 import { tokenScopeOf } from "./replay"
 
 /** The rate fields of a row, in the file's key order. */
-export const RATE_FIELDS = ["input", "output", "cached_input", "cache_write", "reasoning"] as const
+export const RATE_FIELDS = [
+  "input",
+  "output",
+  "cached_input",
+  "cache_write",
+  "reasoning",
+] as const
 export type RateField = (typeof RATE_FIELDS)[number]
 
 /** Every field of a row, in the file's key order. */
@@ -51,13 +57,23 @@ export function draftOf(s: PricingSettings): PricingDraft {
 
 /** An empty row (the editor's "add row"). */
 export function emptyRow(): DraftRow {
-  return { provider: "", model_glob: "", input: "", output: "", cached_input: "", cache_write: "", reasoning: "" }
+  return {
+    provider: "",
+    model_glob: "",
+    input: "",
+    output: "",
+    cached_input: "",
+    cache_write: "",
+    reasoning: "",
+  }
 }
 
 /** The localStorage key one served table's edits live under: its
  * source, the override file's path (two --pricing files sharing a
  * dated never share a draft) and its dated. */
-export function editsKey(s: Pick<PricingSettings, "source" | "dated" | "path">): string {
+export function editsKey(
+  s: Pick<PricingSettings, "source" | "dated" | "path">
+): string {
   return `studio.pricing.edits:${s.source}:${s.path ?? ""}:${s.dated}`
 }
 
@@ -69,7 +85,11 @@ function isDraft(v: unknown): v is PricingDraft {
     Array.isArray(d.rows) &&
     d.rows.every(
       (r) =>
-        !!r && typeof r === "object" && ROW_FIELDS.every((f) => typeof (r as Record<string, unknown>)[f] === "string")
+        !!r &&
+        typeof r === "object" &&
+        ROW_FIELDS.every(
+          (f) => typeof (r as Record<string, unknown>)[f] === "string"
+        )
     )
   )
 }
@@ -128,7 +148,11 @@ export function isDate(s: string): boolean {
   if (!m) return false
   const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])]
   const t = new Date(Date.UTC(y, mo - 1, d))
-  return t.getUTCFullYear() === y && t.getUTCMonth() === mo - 1 && t.getUTCDate() === d
+  return (
+    t.getUTCFullYear() === y &&
+    t.getUTCMonth() === mo - 1 &&
+    t.getUTCDate() === d
+  )
 }
 
 /**
@@ -203,20 +227,42 @@ function rate(s: string): number | null {
 /** problems is every field of the draft the loader would refuse. */
 export function problems(d: PricingDraft): DraftProblem[] {
   const out: DraftProblem[] = []
-  if (!d.dated.trim()) out.push({ row: -1, field: "dated", message: "missing (the day the rates were read, YYYY-MM-DD)" })
-  else if (!isDate(d.dated.trim())) out.push({ row: -1, field: "dated", message: `"${d.dated}" is not a YYYY-MM-DD date` })
+  if (!d.dated.trim())
+    out.push({
+      row: -1,
+      field: "dated",
+      message: "missing (the day the rates were read, YYYY-MM-DD)",
+    })
+  else if (!isDate(d.dated.trim()))
+    out.push({
+      row: -1,
+      field: "dated",
+      message: `"${d.dated}" is not a YYYY-MM-DD date`,
+    })
   d.rows.forEach((r, i) => {
-    if (!r.provider.trim()) out.push({ row: i, field: "provider", message: "missing" })
-    if (!r.model_glob.trim()) out.push({ row: i, field: "model_glob", message: "missing" })
+    if (!r.provider.trim())
+      out.push({ row: i, field: "provider", message: "missing" })
+    if (!r.model_glob.trim())
+      out.push({ row: i, field: "model_glob", message: "missing" })
     if (r.provider.trim() && r.model_glob.trim()) {
       const bad = globError(`${r.provider.trim()}/${r.model_glob.trim()}`)
-      if (bad) out.push({ row: i, field: "model_glob", message: `not a path.Match pattern: ${bad}` })
+      if (bad)
+        out.push({
+          row: i,
+          field: "model_glob",
+          message: `not a path.Match pattern: ${bad}`,
+        })
     }
     for (const f of RATE_FIELDS) {
       const v = rate(r[f])
       if (v === null && (f === "input" || f === "output"))
         out.push({ row: i, field: f, message: "missing (USD per 1M tokens)" })
-      else if (v !== null && Number.isNaN(v)) out.push({ row: i, field: f, message: `${r[f].trim()} is not a non-negative rate` })
+      else if (v !== null && Number.isNaN(v))
+        out.push({
+          row: i,
+          field: f,
+          message: `${r[f].trim()} is not a non-negative rate`,
+        })
     }
   })
   return out
@@ -234,7 +280,10 @@ export interface PricingFile {
  * the file's key order; null while any field would be refused
  * (problems says which). The note is the served table's, kept.
  */
-export function pricingFile(d: PricingDraft, note?: string): PricingFile | null {
+export function pricingFile(
+  d: PricingDraft,
+  note?: string
+): PricingFile | null {
   if (problems(d).length > 0) return null
   const models = d.rows.map((r) => {
     const m: ModelPrice = {
@@ -270,7 +319,9 @@ function panelClaims(token: string): { public_id?: string; exp?: string } {
   try {
     const body = token.slice("weft_pt.".length).split(".")[0]
     const b64 = body.replace(/-/g, "+").replace(/_/g, "/")
-    const c = JSON.parse(atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4))) as Record<string, unknown>
+    const c = JSON.parse(
+      atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4))
+    ) as Record<string, unknown>
     return {
       public_id: typeof c.public_id === "string" ? c.public_id : undefined,
       exp: typeof c.exp === "string" ? c.exp : undefined,
@@ -289,8 +340,14 @@ function panelClaims(token: string): { public_id?: string; exp?: string } {
  * reads (live_all, pid, db.path). A token stored for a Studio with no
  * Token configured is sent and not needed.
  */
-export function tokenIdentity(token: string, meta: Pick<Meta, "auth_required" | "live_all" | "pid" | "db">): TokenIdentity {
-  const full = meta.live_all === true || meta.pid !== undefined || meta.db.path !== undefined
+export function tokenIdentity(
+  token: string,
+  meta: Pick<Meta, "auth_required" | "live_all" | "pid" | "db">
+): TokenIdentity {
+  const full =
+    meta.live_all === true ||
+    meta.pid !== undefined ||
+    meta.db.path !== undefined
   if (!token) {
     return {
       kind: "none",
@@ -305,14 +362,20 @@ export function tokenIdentity(token: string, meta: Pick<Meta, "auth_required" | 
     return {
       kind: scope === "playground" ? "panel-playground" : "panel-read",
       words: `a ${scope}-scoped panel token${c.public_id ? ` for ${c.public_id}` : ""}: it reads one public id's runs${
-        scope === "read" ? " and no prompts or catalogs" : " and may run experiments in it"
+        scope === "read"
+          ? " and no prompts or catalogs"
+          : " and may run experiments in it"
       }`,
       publicId: c.public_id,
       exp: c.exp,
     }
   }
   if (!meta.auth_required)
-    return { kind: "unused", words: "a stored token, not needed: this Studio has no Token configured (it is sent and ignored)" }
+    return {
+      kind: "unused",
+      words:
+        "a stored token, not needed: this Studio has no Token configured (it is sent and ignored)",
+    }
   return {
     kind: "server",
     words: full

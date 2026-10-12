@@ -178,7 +178,7 @@ function posInt(v: unknown): v is number {
 }
 
 function usageOf(u: Usage | undefined): Usage {
-  const o = (typeof u === "object" ? u : null)
+  const o = typeof u === "object" ? u : null
   return {
     ...o,
     input_tokens: o?.input_tokens ?? 0,
@@ -286,7 +286,10 @@ export function newFold(): FoldFeed {
           const c = findCall(ev.call_id)
           call = c
           if (c) {
-            c.result = { content: text(ev.content), isError: Boolean(ev.is_error) }
+            c.result = {
+              content: text(ev.content),
+              isError: Boolean(ev.is_error),
+            }
             c.state = "done"
             c.finishPos = at
             // the call's step spans through its finish
@@ -317,7 +320,10 @@ export function newFold(): FoldFeed {
             .map((m) => messageText(m))
             .filter(Boolean)
             .join("\n")
-          s.steer = { text: (s.steer?.text ? s.steer.text + "\n" : "") + words, pos: at }
+          s.steer = {
+            text: (s.steer?.text ? s.steer.text + "\n" : "") + words,
+            pos: at,
+          }
           break
         }
         case "run_finish":
@@ -386,7 +392,8 @@ export function linkView(
     if (!child.parent_call_id) continue
     const step = view.steps.find(
       (s) =>
-        child.id === `${child.parent_run_id || view.runId}/${s.index}/${child.parent_call_id}`
+        child.id ===
+        `${child.parent_run_id || view.runId}/${s.index}/${child.parent_call_id}`
     )
     if (step) named.set(child, step)
   }
@@ -395,10 +402,16 @@ export function linkView(
     steps: FoldedStep[],
     resumed: boolean
   ) => {
-    if (view.steps.some((st) => st.toolCalls.some((c) => c.childRunId === child.id)))
+    if (
+      view.steps.some((st) =>
+        st.toolCalls.some((c) => c.childRunId === child.id)
+      )
+    )
       return
     const free = steps.flatMap((st) =>
-      st.toolCalls.filter((c) => c.callId === child.parent_call_id && !c.childRunId)
+      st.toolCalls.filter(
+        (c) => c.callId === child.parent_call_id && !c.childRunId
+      )
     )
     const call = free.find((c) => Boolean(c.resumed) === resumed) ?? free.at(0)
     if (call) call.childRunId = child.id
@@ -432,18 +445,17 @@ function messagesOf(b: TranscriptBatch | null | undefined): Message[] {
   for (const m of raw as unknown[]) {
     if (typeof m !== "object" || m === null) continue
     const msg = m as Message
-    out.push(
-      Array.isArray(msg.content)
-        ? msg
-        : { ...msg, content: [] }
-    )
+    out.push(Array.isArray(msg.content) ? msg : { ...msg, content: [] })
   }
   return out
 }
 
 /** The text parts of a message, joined. Files and other parts are not
  * rendered — the words are the turn. */
-function messageText(m: { content: Part[] } | null | undefined, sep = ""): string {
+function messageText(
+  m: { content: Part[] } | null | undefined,
+  sep = ""
+): string {
   const parts: unknown = m?.content
   if (!Array.isArray(parts)) return ""
   return (parts as (Part | null)[])

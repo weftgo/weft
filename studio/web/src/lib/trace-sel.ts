@@ -94,17 +94,27 @@ export interface Resolved {
  * names the first tool span of that call id in tree order — ambiguous
  * when the id repeats. A key no row has selects nothing.
  */
-export function resolveSel(rows: readonly TraceRow[], sel: string | undefined): Resolved {
+export function resolveSel(
+  rows: readonly TraceRow[],
+  sel: string | undefined
+): Resolved {
   if (!sel) return {}
   const exact = rows.find((r) => r.key === sel || r.id === sel)
   if (exact) return { id: exact.id, key: exact.key }
   if (!sel.startsWith("c:")) return {}
   const call = sel.slice(2)
-  const calls = rows.filter((r) => r.timed?.span.attrs["gen_ai.tool.call.id"] === call)
+  const calls = rows.filter(
+    (r) => r.timed?.span.attrs["gen_ai.tool.call.id"] === call
+  )
   const first = calls.at(0)
   if (!first) return {}
-  return { id: first.id, key: first.key, ...(calls.length > 1 ? { ambiguous: true } : {}) }
+  return {
+    id: first.id,
+    key: first.key,
+    ...(calls.length > 1 ? { ambiguous: true } : {}),
+  }
 }
 
 /** The note an ambiguous old link shows. */
-export const OLD_KEY_NOTE = "an old link: this call id repeats across steps; showing the first"
+export const OLD_KEY_NOTE =
+  "an old link: this call id repeats across steps; showing the first"

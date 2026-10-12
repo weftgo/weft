@@ -41,7 +41,12 @@ export type Notice =
   /** approve posts the decision and answers the command it became (a
    * caller that follows the command itself — the playground card —
    * answers nothing). */
-  | { kind: "parked"; runID: string; tools: string[]; approve?: () => Promise<string | void> }
+  | {
+      kind: "parked"
+      runID: string
+      tools: string[]
+      approve?: () => Promise<string | void>
+    }
   /** The parked notice's "approve" was refused. */
   | { kind: "approve-failed"; runID: string; message: string }
   /** A runtime's connected flipped: transition counts this id's flips,
@@ -61,7 +66,14 @@ export type Notice =
    * row arrived: status says how — "cancelled" is said for failed
    * alone). One toast per run, each outcome replacing the
    * last. */
-  | { kind: "cancel"; runID: string; n: number; outcome: "sent" | "refused" | "ended"; message?: string; status?: string }
+  | {
+      kind: "cancel"
+      runID: string
+      n: number
+      outcome: "sent" | "refused" | "ended"
+      message?: string
+      status?: string
+    }
 
 /** The key of the instance a notice reports: one toast per key. */
 export function noticeKey(n: Notice): string {
@@ -109,28 +121,49 @@ export function noticeText(n: Notice): { title: string; tone: Tone } {
       }
     }
     case "parked":
-      return { title: `run ${n.runID} parked at ${n.tools.join(", ")}`, tone: "info" }
+      return {
+        title: `run ${n.runID} parked at ${n.tools.join(", ")}`,
+        tone: "info",
+      }
     case "approve-failed":
-      return { title: `approve on run ${n.runID} refused: ${n.message}`, tone: "error" }
+      return {
+        title: `approve on run ${n.runID} refused: ${n.message}`,
+        tone: "error",
+      }
     case "runtime-connected":
       return { title: `runtime ${runtimeName(n)} connected`, tone: "success" }
     case "runtime-disconnected":
       return { title: `runtime ${runtimeName(n)} disconnected`, tone: "error" }
     case "live-gave-up":
-      return { title: `live updates stopped after ${LIVE_RETRIES} reconnects`, tone: "error" }
+      return {
+        title: `live updates stopped after ${LIVE_RETRIES} reconnects`,
+        tone: "error",
+      }
     case "copy-link":
       return n.ok
         ? { title: "link copied", tone: "success" }
-        : { title: "copy failed — the browser refused the clipboard", tone: "error" }
+        : {
+            title: "copy failed — the browser refused the clipboard",
+            tone: "error",
+          }
     case "cancel":
       return n.outcome === "sent"
-        ? { title: `cancel sent to run ${n.runID}'s runtime · cancelling…`, tone: "info" }
+        ? {
+            title: `cancel sent to run ${n.runID}'s runtime · cancelling…`,
+            tone: "info",
+          }
         : n.outcome === "ended"
           ? // A cancelled run ends failed; any other end raced the cancel.
             n.status === "failed"
-            ? { title: `run ${n.runID} cancelled · ended failed`, tone: "success" }
+            ? {
+                title: `run ${n.runID} cancelled · ended failed`,
+                tone: "success",
+              }
             : { title: `run ${n.runID} ended ${n.status ?? "—"}`, tone: "info" }
-          : { title: `cancel on run ${n.runID} refused: ${n.message ?? ""}`, tone: "error" }
+          : {
+              title: `cancel on run ${n.runID} refused: ${n.message ?? ""}`,
+              tone: "error",
+            }
   }
 }
 
@@ -173,7 +206,11 @@ function actionsOf(n: Notice, id: string): ToastAction[] {
             sent = true
             dismiss()
             approveAndFollow(n.runID, approve).catch((e: unknown) => {
-              notify({ kind: "approve-failed", runID: n.runID, message: e instanceof Error ? e.message : String(e) })
+              notify({
+                kind: "approve-failed",
+                runID: n.runID,
+                message: e instanceof Error ? e.message : String(e),
+              })
             })
           },
         },
@@ -210,7 +247,10 @@ const APPROVE_POLLS = 90
  * settles — a rejection (the runtime's "no parked run … it may already
  * have been resumed") is said, never left silent.
  */
-async function approveAndFollow(runID: string, approve: () => Promise<string | void>): Promise<void> {
+async function approveAndFollow(
+  runID: string,
+  approve: () => Promise<string | void>
+): Promise<void> {
   const refused = (message: string) => {
     toast.dismiss(`parked:${runID}`)
     notify({ kind: "approve-failed", runID, message })
@@ -259,12 +299,20 @@ export function notify(n: Notice): boolean {
   const { title, tone } = noticeText(n)
   const id = toastID(n)
   const actions = actionsOf(n, id)
-  const show = tone === "success" ? toast.success : tone === "error" ? toast.error : toast.info
+  const show =
+    tone === "success"
+      ? toast.success
+      : tone === "error"
+        ? toast.error
+        : toast.info
   show(title, {
     id,
     // An actionable notice stays until it is dealt with; the rest go.
-    duration: n.kind === "parked" || n.kind === "live-gave-up" ? Infinity : undefined,
-    ...(actions.length ? { action: createElement(ToastActions, { actions }) } : {}),
+    duration:
+      n.kind === "parked" || n.kind === "live-gave-up" ? Infinity : undefined,
+    ...(actions.length
+      ? { action: createElement(ToastActions, { actions }) }
+      : {}),
   })
   return true
 }
@@ -274,7 +322,10 @@ export function notify(n: Notice): boolean {
 export function dismissNotice(kind: "live-gave-up"): void
 /** …or a run's parked notice, once its park ended (decided anywhere). */
 export function dismissNotice(kind: "parked", runID: string): void
-export function dismissNotice(kind: "live-gave-up" | "parked", runID = ""): void {
+export function dismissNotice(
+  kind: "live-gave-up" | "parked",
+  runID = ""
+): void {
   toast.dismiss(kind === "parked" ? `parked:${runID}` : kind)
 }
 
@@ -292,6 +343,11 @@ export function resetNotices(): void {
 /** notifySave raises a save's toast (lib/saves.ts's saveWords). */
 export function notifySave(o: SaveOutcome): void {
   const { title, tone } = saveWords(o)
-  const show = tone === "success" ? toast.success : tone === "error" ? toast.error : toast.info
+  const show =
+    tone === "success"
+      ? toast.success
+      : tone === "error"
+        ? toast.error
+        : toast.info
   show(title, { id: `save:${o.kind}` })
 }

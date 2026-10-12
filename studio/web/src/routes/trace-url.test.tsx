@@ -2,8 +2,19 @@
 // view are its URL: a copied link to a selected span reopens with that
 // span selected, and the back button walks view changes but not cursor
 // moves (a selection is replaced in place, a view is pushed).
-import { RouterProvider, createMemoryHistory, createRouter } from "@tanstack/react-router"
-import { cleanup, configure, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import {
+  RouterProvider,
+  createMemoryHistory,
+  createRouter,
+} from "@tanstack/react-router"
+import {
+  cleanup,
+  configure,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
@@ -20,7 +31,12 @@ vi.setConfig({ testTimeout: 30_000 })
 
 const TRACE = "0af7651916cd43dd8448eb211c80319c"
 
-function span(id: string, name: string, parent = "", over: Partial<Span> = {}): Span {
+function span(
+  id: string,
+  name: string,
+  parent = "",
+  over: Partial<Span> = {}
+): Span {
   return {
     trace_id: TRACE,
     span_id: id,
@@ -62,7 +78,10 @@ beforeEach(() => {
     configurable: true,
   })
   new FakeStudio()
-    .on("GET meta", { ...golden<Record<string, unknown>>("meta"), capabilities: ["live"] })
+    .on("GET meta", {
+      ...golden<Record<string, unknown>>("meta"),
+      capabilities: ["live"],
+    })
     .on(`GET traces/${TRACE}`, { spans })
     .install()
 })
@@ -85,7 +104,11 @@ describe("the trace page's URL (G2)", () => {
     await waitFor(() => expect(row("cc03")).toBeTruthy())
     expect(selectedName()).toBeUndefined()
     fireEvent.click(row("cc03"))
-    await waitFor(() => expect(first.router.state.location.search).toMatchObject({ sel: "t:cc03" }))
+    await waitFor(() =>
+      expect(first.router.state.location.search).toMatchObject({
+        sel: "t:cc03",
+      })
+    )
     expect(selectedName()).toBe("execute_tool lookup_order")
 
     // y copies the page's link as it stands — the bare URL, no token.
@@ -100,8 +123,12 @@ describe("the trace page's URL (G2)", () => {
     // The link, opened fresh: the same span selected.
     cleanup()
     renderApp(copied.pathname + copied.search)
-    await waitFor(() => expect(selectedName()).toBe("execute_tool lookup_order"))
-    expect(row("cc03").parentElement?.getAttribute("aria-selected")).toBe("true")
+    await waitFor(() =>
+      expect(selectedName()).toBe("execute_tool lookup_order")
+    )
+    expect(row("cc03").parentElement?.getAttribute("aria-selected")).toBe(
+      "true"
+    )
   })
 
   it("the back button walks view changes, not cursor moves", async () => {
@@ -113,22 +140,30 @@ describe("the trace page's URL (G2)", () => {
 
     // Cursor moves: the selection is replaced in place.
     fireEvent.click(row("aa01"))
-    await waitFor(() => expect(router.state.location.search).toMatchObject({ sel: "t:aa01" }))
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ sel: "t:aa01" })
+    )
     fireEvent.click(row("bb02"))
-    await waitFor(() => expect(router.state.location.search).toMatchObject({ sel: "t:bb02" }))
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ sel: "t:bb02" })
+    )
     expect(router.history.length).toBe(entries)
     expect(actions).toEqual(["REPLACE", "REPLACE"])
 
     // A view change: a new entry.
     fireEvent.click(screen.getByRole("button", { name: "chat" }))
-    await waitFor(() => expect(router.state.location.search).toMatchObject({ view: "chat" }))
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ view: "chat" })
+    )
     expect(router.history.length).toBe(entries + 1)
     expect(actions).toEqual(["REPLACE", "REPLACE", "PUSH"])
     expect(await screen.findByText("where is order 42?")).toBeTruthy()
 
     // Back: the tree, with the last selection — not the one before it.
     router.history.back()
-    await waitFor(() => expect(router.state.location.search.view).toBeUndefined())
+    await waitFor(() =>
+      expect(router.state.location.search.view).toBeUndefined()
+    )
     expect(router.state.location.search).toMatchObject({ sel: "t:bb02" })
     await waitFor(() => expect(selectedName()).toBe("chat glm"))
   })
@@ -148,7 +183,9 @@ describe("the trace page's URL (G2)", () => {
     fireEvent.keyDown(window, { key: "k", ctrlKey: true })
     const item = await screen.findByText("Copy link to this page")
     // Typed into the palette's own input, y is a letter, not the key.
-    fireEvent.keyDown(screen.getByPlaceholderText(PALETTE_PLACEHOLDER), { key: "y" })
+    fireEvent.keyDown(screen.getByPlaceholderText(PALETTE_PLACEHOLDER), {
+      key: "y",
+    })
     expect(writeText).not.toHaveBeenCalled()
     expect(item.closest("[cmdk-item]")?.textContent).toContain("y")
     fireEvent.click(item)
@@ -175,7 +212,9 @@ describe("the trace page's URL (G2)", () => {
     renderApp(`/traces/${TRACE}?span=aa01`)
     await waitFor(() => expect(row("aa01")).toBeTruthy())
     fireEvent.keyDown(window, { key: "k", ctrlKey: true })
-    fireEvent.keyDown(await screen.findByPlaceholderText(PALETTE_PLACEHOLDER), { key: "y" })
+    fireEvent.keyDown(await screen.findByPlaceholderText(PALETTE_PLACEHOLDER), {
+      key: "y",
+    })
     fireEvent.keyDown(window, { key: "Escape" })
     for (const tag of ["input", "textarea"] as const) {
       const box = document.body.appendChild(document.createElement(tag))
@@ -194,7 +233,9 @@ describe("the trace page's URL (G2)", () => {
 
   it("titles the tab with the trace", async () => {
     renderApp(`/traces/${TRACE}`)
-    await waitFor(() => expect(document.title).toBe("trace 0af76519…319c · weft studio"))
+    await waitFor(() =>
+      expect(document.title).toBe("trace 0af76519…319c · weft studio")
+    )
   })
 
   // Review fix 4: what a link may carry that the page has not got.
@@ -204,7 +245,9 @@ describe("the trace page's URL (G2)", () => {
     ["no search at all", ""],
   ])("survives %s: the tree, nothing selected", async (_name, q) => {
     renderApp(`/traces/${TRACE}${q}`)
-    expect(await screen.findByText("select a span for its attributes")).toBeTruthy()
+    expect(
+      await screen.findByText("select a span for its attributes")
+    ).toBeTruthy()
     expect(row("aa01")).toBeTruthy()
     expect(document.querySelector('[aria-selected="true"]')).toBeNull()
   })
@@ -214,11 +257,18 @@ describe("the trace page's URL (G2)", () => {
     const router = createRouter({
       routeTree,
       basepath: "/studio",
-      history: createMemoryHistory({ initialEntries: [`/studio/traces/${TRACE}?sel=t:cc03`] }),
+      history: createMemoryHistory({
+        initialEntries: [`/studio/traces/${TRACE}?sel=t:cc03`],
+      }),
     })
     cleanup()
-    render(<RouterProvider router={router} />, { container: document, baseElement: document.body })
-    await waitFor(() => expect(selectedName()).toBe("execute_tool lookup_order"))
+    render(<RouterProvider router={router} />, {
+      container: document,
+      baseElement: document.body,
+    })
+    await waitFor(() =>
+      expect(selectedName()).toBe("execute_tool lookup_order")
+    )
     fireEvent.keyDown(window, { key: "y" })
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
     const copied = new URL(writeText.mock.calls[0][0] as string)
@@ -228,7 +278,10 @@ describe("the trace page's URL (G2)", () => {
 
   it("says the copy failed — and shows the link — where the browser has no clipboard", async () => {
     // Studio over a LAN's plain http: no navigator.clipboard.
-    Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true })
+    Object.defineProperty(navigator, "clipboard", {
+      value: undefined,
+      configurable: true,
+    })
     const prompt = vi.fn()
     vi.stubGlobal("prompt", prompt)
     renderApp(`/traces/${TRACE}?sel=t:bb02`)

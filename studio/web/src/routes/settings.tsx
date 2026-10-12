@@ -132,7 +132,15 @@ function SettingsPage() {
   )
 }
 
-function Section({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
+function Section({
+  id,
+  title,
+  children,
+}: {
+  id: string
+  title: string
+  children: React.ReactNode
+}) {
   const h = `settings-${id}`
   return (
     <section
@@ -164,7 +172,10 @@ function Facts({ rows }: { rows: [string, React.ReactNode][] }) {
 
 /** The words for a capability that is off: meta's reason, else ours. */
 function offWhy(meta: Meta, cap: string): string {
-  return meta.capabilities_off?.[cap] ?? `this Studio does not serve capability "${cap}"`
+  return (
+    meta.capabilities_off?.[cap] ??
+    `this Studio does not serve capability "${cap}"`
+  )
 }
 
 function Off({ meta, cap }: { meta: Meta; cap: string }) {
@@ -178,7 +189,8 @@ function Off({ meta, cap }: { meta: Meta; cap: string }) {
 function Unreported({ field }: { field: string }) {
   return (
     <p className="text-xs text-muted-foreground" data-unreported={field}>
-      not reported: this Studio predates <span className="font-mono">{field}</span> in /api/meta
+      not reported: this Studio predates{" "}
+      <span className="font-mono">{field}</span> in /api/meta
     </p>
   )
 }
@@ -228,7 +240,10 @@ function StudioFacts({ meta }: { meta: Meta }) {
             <HiddenByRule what="the pid, db.path and db.size" />
           ),
         ],
-        ["interrupted after", `${meta.interrupted_after_ms} ms of silence a running run reads interrupted`],
+        [
+          "interrupted after",
+          `${meta.interrupted_after_ms} ms of silence a running run reads interrupted`,
+        ],
         [
           "ingest",
           meta.ingest_open
@@ -269,28 +284,55 @@ function TokenSection({ meta }: { meta: Meta }) {
   const clear = () => {
     if (tab) {
       clearTabToken()
-      refetch("this tab's hand-off token cleared: the stored token serves again")
+      refetch(
+        "this tab's hand-off token cleared: the stored token serves again"
+      )
     } else change("", "token cleared")
   }
   return (
     <div className="space-y-3">
       <Facts
         rows={[
-          [tab ? "this tab only" : "stored", tok ? <span data-token-view>{shown ? tok : maskToken(tok)}</span> : "(none)"],
+          [
+            tab ? "this tab only" : "stored",
+            tok ? (
+              <span data-token-view>{shown ? tok : maskToken(tok)}</span>
+            ) : (
+              "(none)"
+            ),
+          ],
           ["identity", <span data-identity={id.kind}>{id.words}</span>],
-          ...(id.exp ? ([["expires", id.exp]] as [string, React.ReactNode][]) : []),
-          ["walled", meta.auth_required ? "yes: every /api request carries the bearer" : "no: this Studio has no Token"],
+          ...(id.exp
+            ? ([["expires", id.exp]] as [string, React.ReactNode][])
+            : []),
+          [
+            "walled",
+            meta.auth_required
+              ? "yes: every /api request carries the bearer"
+              : "no: this Studio has no Token",
+          ],
         ]}
       />
       {tok && (
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant="outline" aria-pressed={shown} onClick={() => setShown((s) => !s)}>
+          <Button
+            size="sm"
+            variant="outline"
+            aria-pressed={shown}
+            onClick={() => setShown((s) => !s)}
+          >
             {shown ? "hide" : "show"}
           </Button>
           <Button
             size="sm"
             variant="outline"
-            onClick={() => void copyText(tok).then((ok) => setNote(ok ? "token copied" : "the browser refused the clipboard"))}
+            onClick={() =>
+              void copyText(tok).then((ok) =>
+                setNote(
+                  ok ? "token copied" : "the browser refused the clipboard"
+                )
+              )
+            }
           >
             copy
           </Button>
@@ -360,15 +402,22 @@ function DatabaseFacts({ meta }: { meta: Meta }) {
         ["kind", meta.db.kind],
         [
           "path",
-          meta.db.path ?? (mayRead ? fileless : <HiddenByRule what="db.path, db.size and the pid" />),
+          meta.db.path ??
+            (mayRead ? (
+              fileless
+            ) : (
+              <HiddenByRule what="db.path, db.size and the pid" />
+            )),
         ],
         [
           "size",
-          meta.db.size !== undefined
-            ? `${humanBytes(meta.db.size)} (${meta.db.size} B, the WAL included)`
-            : mayRead
-              ? fileless
-              : <HiddenByRule what="db.path, db.size and the pid" />,
+          meta.db.size !== undefined ? (
+            `${humanBytes(meta.db.size)} (${meta.db.size} B, the WAL included)`
+          ) : mayRead ? (
+            fileless
+          ) : (
+            <HiddenByRule what="db.path, db.size and the pid" />
+          ),
         ],
       ]}
     />
@@ -388,9 +437,12 @@ function RetentionFacts({ meta }: { meta: Meta }) {
       </p>
       <p className="text-[11px] text-muted-foreground">
         Set it with <span className="font-mono">studio.Retain(d)</span>,{" "}
-        <span className="font-mono">--retain 720h</span> or <span className="font-mono">WEFT_RETAIN=720h</span> (at
-        least 1h) on <span className="font-mono">weft studio</span> / <span className="font-mono">weft dev</span>;{" "}
-        <span className="font-mono">weft vacuum [--retain d]</span> sweeps once and shrinks the file.
+        <span className="font-mono">--retain 720h</span> or{" "}
+        <span className="font-mono">WEFT_RETAIN=720h</span> (at least 1h) on{" "}
+        <span className="font-mono">weft studio</span> /{" "}
+        <span className="font-mono">weft dev</span>;{" "}
+        <span className="font-mono">weft vacuum [--retain d]</span> sweeps once
+        and shrinks the file.
       </p>
     </div>
   )
@@ -407,7 +459,9 @@ function PricingSection({ meta }: { meta: Meta }) {
       rows={[
         ["source", sourceWords(meta.pricing.source)],
         ["dated", meta.pricing.dated],
-        ...(meta.pricing.path ? ([["path", meta.pricing.path]] as [string, React.ReactNode][]) : []),
+        ...(meta.pricing.path
+          ? ([["path", meta.pricing.path]] as [string, React.ReactNode][])
+          : []),
         ["rows", String(meta.pricing.models)],
       ]}
     />
@@ -446,7 +500,13 @@ function sourceWords(s: string): string {
 /** A refused read: 403 is the hidden badge, anything else its words. */
 function Refused({ err, what }: { err: Error; what: string }) {
   if (err instanceof ApiError && err.status === 403)
-    return <HoleBadge hole="hidden" detail reason={`your token's scope may not read ${what}: ${err.message}`} />
+    return (
+      <HoleBadge
+        hole="hidden"
+        detail
+        reason={`your token's scope may not read ${what}: ${err.message}`}
+      />
+    )
   return (
     <p className="text-xs text-status-bad" role="alert">
       {what} did not load: {err.message}
@@ -467,7 +527,9 @@ const FIELD_HEAD: Record<RowField, string> = {
 function PricingTable({ settings }: { settings: PricingSettings }) {
   const key = editsKey(settings)
   const served = useMemo(() => draftOf(settings), [settings])
-  const [draft, setDraft] = useState<PricingDraft>(() => loadEdits(key) ?? served)
+  const [draft, setDraft] = useState<PricingDraft>(
+    () => loadEdits(key) ?? served
+  )
   // Another table served (a restart with another file): its own edits.
   useEffect(() => setDraft(loadEdits(key) ?? served), [key, served])
   const edited = !sameDraft(draft, served)
@@ -477,25 +539,42 @@ function PricingTable({ settings }: { settings: PricingSettings }) {
     else saveEdits(key, next)
   }
   const setCell = (i: number, f: RowField, v: string) =>
-    update({ ...draft, rows: draft.rows.map((r, j) => (j === i ? { ...r, [f]: v } : r)) })
+    update({
+      ...draft,
+      rows: draft.rows.map((r, j) => (j === i ? { ...r, [f]: v } : r)),
+    })
   const bad = problems(draft)
-  const badAt = (row: number, field: DraftProblem["field"]) => bad.find((p) => p.row === row && p.field === field)
+  const badAt = (row: number, field: DraftProblem["field"]) =>
+    bad.find((p) => p.row === row && p.field === field)
   const file = pricingFile(draft, settings.note)
   return (
     <div className="space-y-3">
       <Facts
         rows={[
           ["source", sourceWords(settings.source)],
-          ...(settings.path ? ([["path", settings.path]] as [string, React.ReactNode][]) : []),
+          ...(settings.path
+            ? ([["path", settings.path]] as [string, React.ReactNode][])
+            : []),
           ["dated", settings.dated],
-          ...(settings.note ? ([["note", settings.note]] as [string, React.ReactNode][]) : []),
-          ["state", edited ? <span data-pricing-edited>edited in this browser</span> : "the server's table"],
+          ...(settings.note
+            ? ([["note", settings.note]] as [string, React.ReactNode][])
+            : []),
+          [
+            "state",
+            edited ? (
+              <span data-pricing-edited>edited in this browser</span>
+            ) : (
+              "the server's table"
+            ),
+          ],
         ]}
       />
       <p className="text-xs text-muted-foreground" data-pricing-note>
-        Rates are USD per 1M tokens; first match wins; an empty optional rate prices that kind at the base rate. Edits
-        stay in this browser; to apply them, download the file and run Studio with{" "}
-        <span className="font-mono">--pricing &lt;file&gt;</span> or <span className="font-mono">WEFT_PRICING</span>.
+        Rates are USD per 1M tokens; first match wins; an empty optional rate
+        prices that kind at the base rate. Edits stay in this browser; to apply
+        them, download the file and run Studio with{" "}
+        <span className="font-mono">--pricing &lt;file&gt;</span> or{" "}
+        <span className="font-mono">WEFT_PRICING</span>.
       </p>
       <label className="flex items-center gap-2 text-xs">
         <span className="text-muted-foreground">dated</span>
@@ -509,7 +588,9 @@ function PricingTable({ settings }: { settings: PricingSettings }) {
       </label>
       <div className="overflow-x-auto">
         <Table data-pricing-table>
-          <caption className="sr-only">pricing table, USD per 1M tokens</caption>
+          <caption className="sr-only">
+            pricing table, USD per 1M tokens
+          </caption>
           <TableHeader>
             <TableRow>
               <TableHead scope="col">#</TableHead>
@@ -526,10 +607,14 @@ function PricingTable({ settings }: { settings: PricingSettings }) {
           <TableBody>
             {draft.rows.map((r, i) => (
               <TableRow key={i} data-pricing-row={i}>
-                <TableCell className="font-mono text-[11px] text-faint">{i + 1}</TableCell>
+                <TableCell className="font-mono text-[11px] text-faint">
+                  {i + 1}
+                </TableCell>
                 {ROW_FIELDS.map((f) => {
                   const p = badAt(i, f)
-                  const rateField = (RATE_FIELDS as readonly string[]).includes(f)
+                  const rateField = (RATE_FIELDS as readonly string[]).includes(
+                    f
+                  )
                   return (
                     <TableCell key={f}>
                       <Input
@@ -538,7 +623,11 @@ function PricingTable({ settings }: { settings: PricingSettings }) {
                         aria-label={`row ${i + 1} ${FIELD_HEAD[f]}`}
                         aria-invalid={p ? true : undefined}
                         title={p?.message}
-                        placeholder={rateField && f !== "input" && f !== "output" ? "base" : undefined}
+                        placeholder={
+                          rateField && f !== "input" && f !== "output"
+                            ? "base"
+                            : undefined
+                        }
                         className={`h-7 font-mono text-xs ${rateField ? "w-20" : "w-36"}`}
                         onChange={(e) => setCell(i, f, e.target.value)}
                       />
@@ -550,7 +639,12 @@ function PricingTable({ settings }: { settings: PricingSettings }) {
                     size="sm"
                     variant="ghost"
                     aria-label={`remove row ${i + 1}`}
-                    onClick={() => update({ ...draft, rows: draft.rows.filter((_, j) => j !== i) })}
+                    onClick={() =>
+                      update({
+                        ...draft,
+                        rows: draft.rows.filter((_, j) => j !== i),
+                      })
+                    }
                   >
                     ×
                   </Button>
@@ -561,7 +655,11 @@ function PricingTable({ settings }: { settings: PricingSettings }) {
         </Table>
       </div>
       {bad.length > 0 && (
-        <ul className="space-y-0.5 text-xs text-status-bad" role="alert" data-pricing-problems>
+        <ul
+          className="space-y-0.5 text-xs text-status-bad"
+          role="alert"
+          data-pricing-problems
+        >
           {bad.map((p) => (
             <li key={`${p.row}:${p.field}`} className="font-mono">
               {p.row < 0 ? p.field : `models[${p.row}].${p.field}`}: {p.message}
@@ -570,17 +668,34 @@ function PricingTable({ settings }: { settings: PricingSettings }) {
         </ul>
       )}
       <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="outline" onClick={() => update({ ...draft, rows: [...draft.rows, emptyRow()] })}>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() =>
+            update({ ...draft, rows: [...draft.rows, emptyRow()] })
+          }
+        >
           add row
         </Button>
-        <Button size="sm" variant="outline" disabled={!edited} onClick={() => update(served)}>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!edited}
+          onClick={() => update(served)}
+        >
           reset to the server&apos;s table
         </Button>
         <Button
           size="sm"
           disabled={!file}
-          title={file ? "the override file WEFT_PRICING / --pricing loads" : "fix the fields above first"}
-          onClick={() => file && download("pricing.json", pricingFileText(file))}
+          title={
+            file
+              ? "the override file WEFT_PRICING / --pricing loads"
+              : "fix the fields above first"
+          }
+          onClick={() =>
+            file && download("pricing.json", pricingFileText(file))
+          }
         >
           download pricing.json
         </Button>
@@ -592,16 +707,25 @@ function PricingTable({ settings }: { settings: PricingSettings }) {
 // ── Capabilities ──────────────────────────────────────────────────
 
 function Capabilities({ meta }: { meta: Meta }) {
-  const off = Object.entries(meta.capabilities_off ?? {}).sort(([a], [b]) => a.localeCompare(b))
+  const off = Object.entries(meta.capabilities_off ?? {}).sort(([a], [b]) =>
+    a.localeCompare(b)
+  )
   return (
     <div className="grid gap-4 md:grid-cols-[1fr_2fr]">
       <div className="space-y-1">
         <h3 className="eyebrow" id="caps-on">
           on · {meta.capabilities.length}
         </h3>
-        <ul aria-labelledby="caps-on" className="flex flex-wrap gap-1.5" data-caps-on>
+        <ul
+          aria-labelledby="caps-on"
+          className="flex flex-wrap gap-1.5"
+          data-caps-on
+        >
           {meta.capabilities.map((c) => (
-            <li key={c} className="rounded-sm bg-muted px-1.5 py-0.5 font-mono text-[11px]">
+            <li
+              key={c}
+              className="rounded-sm bg-muted px-1.5 py-0.5 font-mono text-[11px]"
+            >
               {c}
             </li>
           ))}
@@ -611,7 +735,8 @@ function Capabilities({ meta }: { meta: Meta }) {
         <h3 className="eyebrow" id="caps-off">
           off · {off.length}
         </h3>
-        {meta.capabilities_off === undefined && meta.manifest_sources === undefined ? (
+        {meta.capabilities_off === undefined &&
+        meta.manifest_sources === undefined ? (
           // capabilities_off is omitted when nothing is off; a Studio
           // without manifest_sources (always present, the same plan B4)
           // predates both.
@@ -622,7 +747,8 @@ function Capabilities({ meta }: { meta: Meta }) {
           <ul aria-labelledby="caps-off" className="space-y-1" data-caps-off>
             {off.map(([c, why]) => (
               <li key={c} className="text-xs" data-cap-off={c}>
-                <span className="font-mono">{c}</span> <span className="text-muted-foreground">— {why}</span>
+                <span className="font-mono">{c}</span>{" "}
+                <span className="text-muted-foreground">— {why}</span>
               </li>
             ))}
           </ul>
@@ -637,7 +763,11 @@ function Capabilities({ meta }: { meta: Meta }) {
 function RuntimesSection({ meta }: { meta: Meta }) {
   const caps = useCapabilities()
   const on = caps.has("runtimes")
-  const runtimes = useQuery({ ...runtimesQuery(), enabled: on, refetchInterval: on ? 5_000 : false })
+  const runtimes = useQuery({
+    ...runtimesQuery(),
+    enabled: on,
+    refetchInterval: on ? 5_000 : false,
+  })
   const count =
     meta.runtimes === undefined ? null : (
       <p className="text-xs" data-runtime-count={meta.runtimes}>
@@ -665,14 +795,24 @@ function RuntimesSection({ meta }: { meta: Meta }) {
       {count}
       {list.length === 0 ? (
         <p className="text-xs text-muted-foreground">
-          No runtime has registered: an app links with <span className="font-mono">runtime.Install(...)</span> under{" "}
+          No runtime has registered: an app links with{" "}
+          <span className="font-mono">runtime.Install(...)</span> under{" "}
           <span className="font-mono">WEFT_ENV=dev</span>.
         </p>
       ) : (
-        list.map((rt) => <RuntimeCard key={rt.id} rt={rt} breakpoints={caps.has("breakpoints")} />)
+        list.map((rt) => (
+          <RuntimeCard
+            key={rt.id}
+            rt={rt}
+            breakpoints={caps.has("breakpoints")}
+          />
+        ))
       )}
       {caps.has("playground") && (
-        <Link {...playgroundLink()} className="inline-block font-mono text-xs text-thread-ink hover:underline">
+        <Link
+          {...playgroundLink()}
+          className="inline-block font-mono text-xs text-thread-ink hover:underline"
+        >
           open the playground
         </Link>
       )}
@@ -680,9 +820,17 @@ function RuntimesSection({ meta }: { meta: Meta }) {
   )
 }
 
-function RuntimeCard({ rt, breakpoints }: { rt: RuntimeView; breakpoints: boolean }) {
+function RuntimeCard({
+  rt,
+  breakpoints,
+}: {
+  rt: RuntimeView
+  breakpoints: boolean
+}) {
   const connected = rt.connected ?? true
-  const tools = [...new Set(rt.agents.flatMap((a) => a.tools.map((t) => t.name)))].sort()
+  const tools = [
+    ...new Set(rt.agents.flatMap((a) => a.tools.map((t) => t.name))),
+  ].sort()
   return (
     <div className="space-y-2 rounded-lg border p-3" data-runtime={rt.id}>
       <Facts
@@ -690,18 +838,33 @@ function RuntimeCard({ rt, breakpoints }: { rt: RuntimeView; breakpoints: boolea
           ["id", rt.id],
           ["service", `${rt.service || "(unnamed)"} · ${rt.env || "(no env)"}`],
           ["host", `${rt.host} · pid ${rt.pid}`],
-          ["connected", connected ? `yes, since ${rt.connected_since}` : `no — last seen ${rt.last_seen}`],
+          [
+            "connected",
+            connected
+              ? `yes, since ${rt.connected_since}`
+              : `no — last seen ${rt.last_seen}`,
+          ],
           [
             "agents",
-            rt.agents.map((a) => `${a.name} (${a.models.join(", ") || "no model"}${a.resolver ? ", resolver" : ""})`).join("; ") ||
-              "(none)",
+            rt.agents
+              .map(
+                (a) =>
+                  `${a.name} (${a.models.join(", ") || "no model"}${a.resolver ? ", resolver" : ""})`
+              )
+              .join("; ") || "(none)",
           ],
         ]}
       />
       <div className="space-y-1 text-xs">
-        <span className="text-muted-foreground">breakpoints (parked on every run this runtime starts)</span>
+        <span className="text-muted-foreground">
+          breakpoints (parked on every run this runtime starts)
+        </span>
         {breakpoints && connected && tools.length > 0 ? (
-          <Breakpoints runtimeID={rt.id} tools={tools} stored={rt.breakpoints} />
+          <Breakpoints
+            runtimeID={rt.id}
+            tools={tools}
+            stored={rt.breakpoints}
+          />
         ) : (
           <p className="font-mono" data-breakpoints>
             {rt.breakpoints === undefined
@@ -709,7 +872,11 @@ function RuntimeCard({ rt, breakpoints }: { rt: RuntimeView; breakpoints: boolea
               : rt.breakpoints.length
                 ? rt.breakpoints.join(", ")
                 : "none"}
-            {!breakpoints ? " · read-only: capability breakpoints is off" : !connected ? " · read-only: disconnected" : ""}
+            {!breakpoints
+              ? " · read-only: capability breakpoints is off"
+              : !connected
+                ? " · read-only: disconnected"
+                : ""}
           </p>
         )}
       </div>
@@ -740,7 +907,10 @@ function ContentFacts({ meta }: { meta: Meta }) {
         <div className="space-y-1" data-content-mark={l.mark}>
           <p>
             latest run{" "}
-            <Link {...runLink(l.run_id)} className="font-mono text-thread-ink hover:underline">
+            <Link
+              {...runLink(l.run_id)}
+              className="font-mono text-thread-ink hover:underline"
+            >
               {l.run_id}
             </Link>
             : <span className="font-mono">{l.mark}</span> — {l.note}
@@ -749,9 +919,10 @@ function ContentFacts({ meta }: { meta: Meta }) {
         </div>
       )}
       <p className="text-[11px] text-faint">
-        Each destination&apos;s policy is the app&apos;s (<span className="font-mono">otel.NoContent()</span> on a
-        destination, <span className="font-mono">weft.Content(false)</span> on an agent): Studio sees only what
-        arrived, and says so per run.
+        Each destination&apos;s policy is the app&apos;s (
+        <span className="font-mono">otel.NoContent()</span> on a destination,{" "}
+        <span className="font-mono">weft.Content(false)</span> on an agent):
+        Studio sees only what arrived, and says so per run.
       </p>
     </div>
   )
@@ -803,7 +974,9 @@ function Appearance() {
           </label>
         ))}
       </fieldset>
-      <p className="basis-full text-[11px] text-faint">Kept in this browser; the sidebar&apos;s toggles change the same.</p>
+      <p className="basis-full text-[11px] text-faint">
+        Kept in this browser; the sidebar&apos;s toggles change the same.
+      </p>
     </div>
   )
 }

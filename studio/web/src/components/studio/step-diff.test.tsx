@@ -16,10 +16,15 @@ afterEach(cleanup)
 describe("StepDiffTable", () => {
   it("two responses whose a differs draw the error line, no table", async () => {
     const one = golden<DiffDoc>("diff")
-    const two: DiffDoc = { ...one, a: { ...one.a, run_id: `${one.a.run_id}-other` } }
+    const two: DiffDoc = {
+      ...one,
+      a: { ...one.a, run_id: `${one.a.run_id}-other` },
+    }
     const view = nWayView([one, two])
     expect(view.error).toBeTruthy()
-    const { container } = await renderWithRouter(createElement(StepDiffTable, { view }))
+    const { container } = await renderWithRouter(
+      createElement(StepDiffTable, { view })
+    )
     const err = await waitFor(() => {
       const e = container.querySelector("[data-step-diff-error]")
       expect(e).toBeTruthy()
@@ -35,7 +40,10 @@ describe("StepDiffTable", () => {
   // not only a derived run's) reads cost "not comparable", never
   // "changed", even when both figures were priced.
   for (const [name, doc] of [
-    ["a pre-A1 pair (diff-not-recorded)", () => golden<DiffDoc>("diff-not-recorded")],
+    [
+      "a pre-A1 pair (diff-not-recorded)",
+      () => golden<DiffDoc>("diff-not-recorded"),
+    ],
     [
       "a gap side (usage unknown at step 1)",
       () => {
@@ -50,10 +58,16 @@ describe("StepDiffTable", () => {
       const view = nWayView([d])
       const step = d.steps.find((s) => s.unknown.includes("usage"))!.step
       let n = 0
-      const costs = () => ({ fields: { cost_usd: 0.001 * ++n, cost_known: true } })
-      const { container } = await renderWithRouter(createElement(StepDiffTable, { view, costs }))
+      const costs = () => ({
+        fields: { cost_usd: 0.001 * ++n, cost_known: true },
+      })
+      const { container } = await renderWithRouter(
+        createElement(StepDiffTable, { view, costs })
+      )
       const td = await waitFor(() => {
-        const c = container.querySelector(`tr[data-diff-step="${step}"] [data-diff-run="${d.b.run_id}"][data-diff-cell="cost"]`)
+        const c = container.querySelector(
+          `tr[data-diff-step="${step}"] [data-diff-run="${d.b.run_id}"][data-diff-cell="cost"]`
+        )
         expect(c).toBeTruthy()
         return c!
       })

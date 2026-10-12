@@ -8,7 +8,18 @@
 // without the capability, or without a playground panel token, the
 // plain link and no fetch. No token in any URL the panel builds.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { $, all, apiError, baseRoutes, fakeStudio, META, mount, settle, setup, teardown } from "./testkit"
+import {
+  $,
+  all,
+  apiError,
+  baseRoutes,
+  fakeStudio,
+  META,
+  mount,
+  settle,
+  setup,
+  teardown,
+} from "./testkit"
 import type { Route } from "./testkit"
 import type { WeftDevtools } from "./element"
 
@@ -16,8 +27,15 @@ const token = (scope?: string) =>
   `weft_pt.${btoa(JSON.stringify({ public_id: "pub_orders", scope, exp: "2099-01-01T00:00:00Z" })).replace(/=+$/, "")}.sig`
 const PLAYGROUND = token("playground")
 const READ = token("read")
-const HANDOFF_META = { ...META, capabilities: [...META.capabilities, "handoff"] }
-const ATTRS = { "data-endpoint": "http://studio.test/studio/", "data-public-id": "pub_orders", "data-open": "true" }
+const HANDOFF_META = {
+  ...META,
+  capabilities: [...META.capabilities, "handoff"],
+}
+const ATTRS = {
+  "data-endpoint": "http://studio.test/studio/",
+  "data-public-id": "pub_orders",
+  "data-open": "true",
+}
 const PLAIN = "http://studio.test/studio/runs/s_01-t1"
 /** What the server answers (studio/handoff.go): a path under the base, no origin. */
 const LOCATION = "/studio/runs/s_01-t1#token=weft_pt.minted.sig"
@@ -40,7 +58,10 @@ afterEach(() => {
   localStorage.clear()
 })
 
-const expand = (el: WeftDevtools) => all(el, ".weft-head a").find((n) => n.textContent === "⤢") as HTMLAnchorElement
+const expand = (el: WeftDevtools) =>
+  all(el, ".weft-head a").find(
+    (n) => n.textContent === "⤢"
+  ) as HTMLAnchorElement
 
 /** clickExpand clicks ⤢ as a user would; returns whether the panel
  * took the navigation over (the default prevented). */
@@ -52,15 +73,22 @@ async function clickExpand(el: WeftDevtools): Promise<boolean> {
 }
 
 /** toOf is a hand-off request's to, decoded (sent encoded once). */
-const toOf = (c: { path: string }) => new URLSearchParams(c.path.slice(c.path.indexOf("?"))).get("to")
+const toOf = (c: { path: string }) =>
+  new URLSearchParams(c.path.slice(c.path.indexOf("?"))).get("to")
 
 function studioWith(handoff: Route, meta = HANDOFF_META) {
-  return fakeStudio({ ...baseRoutes(), "panel-handoff?to=%2Fruns%2Fs_01-t1": handoff }, meta)
+  return fakeStudio(
+    { ...baseRoutes(), "panel-handoff?to=%2Fruns%2Fs_01-t1": handoff },
+    meta
+  )
 }
 
 describe("open in Studio under a playground panel token (setup C)", () => {
   it("⤢ fetches the hand-off with the bearer and Accept: application/json, and opens its location", async () => {
-    const studio = studioWith({ location: LOCATION, exp: "2099-01-01T00:05:00Z" })
+    const studio = studioWith({
+      location: LOCATION,
+      exp: "2099-01-01T00:05:00Z",
+    })
     const el = await mount({ ...ATTRS, "data-token": PLAYGROUND })
     expect(expand(el).getAttribute("href")).toBe(PLAIN)
     expect(await clickExpand(el)).toBe(true)
@@ -77,7 +105,12 @@ describe("open in Studio under a playground panel token (setup C)", () => {
   it("the to carries the step being read (path and query, no origin)", async () => {
     const routes = baseRoutes()
     const studio = fakeStudio(
-      { ...routes, "panel-handoff?to=%2Fruns%2Fs_01-t1%3Fstep%3D0%26view%3Dstory": { location: LOCATION } },
+      {
+        ...routes,
+        "panel-handoff?to=%2Fruns%2Fs_01-t1%3Fstep%3D0%26view%3Dstory": {
+          location: LOCATION,
+        },
+      },
       HANDOFF_META
     )
     const el = await mount({ ...ATTRS, "data-token": PLAYGROUND })
@@ -85,7 +118,9 @@ describe("open in Studio under a playground panel token (setup C)", () => {
     await settle()
     expect(expand(el).getAttribute("href")).toBe(`${PLAIN}?step=0&view=story`)
     await clickExpand(el)
-    expect(studio.gets("panel-handoff").map(toOf)).toEqual(["/runs/s_01-t1?step=0&view=story"])
+    expect(studio.gets("panel-handoff").map(toOf)).toEqual([
+      "/runs/s_01-t1?step=0&view=story",
+    ])
     expect(opened).toEqual([MINTED])
   })
 
@@ -95,14 +130,23 @@ describe("open in Studio under a playground panel token (setup C)", () => {
     const dock = $(el, ".weft-dock") as HTMLElement
     dock.focus()
     for (const key of ["g", "s"])
-      dock.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, composed: true, cancelable: true }))
+      dock.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key,
+          bubbles: true,
+          composed: true,
+          cancelable: true,
+        })
+      )
     await settle()
     expect(studio.gets("panel-handoff")).toHaveLength(1)
     expect(opened).toEqual([MINTED])
   })
 
   it("a 403 opens the plain link, silently", async () => {
-    studioWith(() => apiError(403, "forbidden", "a read-scoped token cannot widen"))
+    studioWith(() =>
+      apiError(403, "forbidden", "a read-scoped token cannot widen")
+    )
     const el = await mount({ ...ATTRS, "data-token": PLAYGROUND })
     await clickExpand(el)
     expect(opened).toEqual([PLAIN])
@@ -139,13 +183,24 @@ describe("open in Studio under a playground panel token (setup C)", () => {
 
   it("a base of / : the location resolves against the endpoint's origin", async () => {
     const studio = fakeStudio(
-      { ...baseRoutes(), "panel-handoff?to=%2Fruns%2Fs_01-t1": { location: "/runs/s_01-t1#token=weft_pt.minted.sig" } },
+      {
+        ...baseRoutes(),
+        "panel-handoff?to=%2Fruns%2Fs_01-t1": {
+          location: "/runs/s_01-t1#token=weft_pt.minted.sig",
+        },
+      },
       HANDOFF_META
     )
-    const el = await mount({ ...ATTRS, "data-endpoint": "http://studio.test/", "data-token": PLAYGROUND })
+    const el = await mount({
+      ...ATTRS,
+      "data-endpoint": "http://studio.test/",
+      "data-token": PLAYGROUND,
+    })
     expect(await clickExpand(el)).toBe(true)
     expect(studio.gets("panel-handoff").map(toOf)).toEqual(["/runs/s_01-t1"])
-    expect(opened).toEqual(["http://studio.test/runs/s_01-t1#token=weft_pt.minted.sig"])
+    expect(opened).toEqual([
+      "http://studio.test/runs/s_01-t1#token=weft_pt.minted.sig",
+    ])
     expect(opened[0].startsWith(location.origin)).toBe(false)
   })
 
@@ -156,7 +211,9 @@ describe("open in Studio under a playground panel token (setup C)", () => {
     const e = new MouseEvent("click", { bubbles: true, cancelable: true })
     expand(el).dispatchEvent(e)
     await new Promise((r) => setTimeout(r, 1100))
-    expect($(el, ".weft-dock")!.textContent).toContain(`open in Studio: ${PLAIN}`)
+    expect($(el, ".weft-dock")!.textContent).toContain(
+      `open in Studio: ${PLAIN}`
+    )
     release({ location: LOCATION })
     await settle()
     expect(opened).toEqual([MINTED])
@@ -164,7 +221,10 @@ describe("open in Studio under a playground panel token (setup C)", () => {
 
   for (const [name, loc] of [
     ["a malformed location", "http://"],
-    ["a location off the endpoint's origin", "https://evil.example/studio/runs/s_01-t1#token=weft_pt.minted.sig"],
+    [
+      "a location off the endpoint's origin",
+      "https://evil.example/studio/runs/s_01-t1#token=weft_pt.minted.sig",
+    ],
   ] as const)
     it(`${name}: the plain link, nothing thrown`, async () => {
       const escaped: unknown[] = []
@@ -182,26 +242,34 @@ describe("open in Studio under a playground panel token (setup C)", () => {
   it("the slow-answer timer is cleared on disconnect: no stale note on reconnect", async () => {
     studioWith(() => new Promise(() => {}))
     const el = await mount({ ...ATTRS, "data-token": PLAYGROUND })
-    expand(el).dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
+    expand(el).dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true })
+    )
     el.remove()
     await new Promise((r) => setTimeout(r, 1100))
     document.body.appendChild(el)
     await settle()
-    expect($(el, ".weft-dock")?.textContent ?? "").not.toContain("open in Studio:")
+    expect($(el, ".weft-dock")?.textContent ?? "").not.toContain(
+      "open in Studio:"
+    )
   })
 
   it("an answer landing after removal opens no tab and leaves no note", async () => {
     let release: (v: unknown) => void = () => {}
     studioWith(() => new Promise((r) => (release = r)))
     const el = await mount({ ...ATTRS, "data-token": PLAYGROUND })
-    expand(el).dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))
+    expand(el).dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true })
+    )
     el.remove()
     release({ location: LOCATION })
     await settle()
     expect(opened).toEqual([])
     document.body.appendChild(el)
     await settle()
-    expect($(el, ".weft-dock")?.textContent ?? "").not.toContain("open in Studio:")
+    expect($(el, ".weft-dock")?.textContent ?? "").not.toContain(
+      "open in Studio:"
+    )
   })
 
   it("studioLink() stays the plain URL", async () => {

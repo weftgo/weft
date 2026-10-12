@@ -24,14 +24,28 @@ function str(v: unknown): string | undefined {
 
 export const Route = createFileRoute("/compare")({
   validateSearch: (search: Record<string, unknown>): CompareSearch => {
-    const list = Array.isArray(search.b) ? search.b : search.b === undefined ? [] : [search.b]
+    const list = Array.isArray(search.b)
+      ? search.b
+      : search.b === undefined
+        ? []
+        : [search.b]
     const a = str(search.a)
     // compareLink's rule: the base itself and a repeat are dropped (one
     // diff, one column, one key per compared run).
-    const b = [...new Set(list.map(str).filter((x): x is string => !!x && x !== a))]
+    const b = [
+      ...new Set(list.map(str).filter((x): x is string => !!x && x !== a)),
+    ]
     const step =
-      typeof search.step === "number" && Number.isInteger(search.step) && search.step >= 0 ? search.step : undefined
-    return { a, ...(b.length ? { b } : {}), ...(step !== undefined ? { step } : {}) }
+      typeof search.step === "number" &&
+      Number.isInteger(search.step) &&
+      search.step >= 0
+        ? search.step
+        : undefined
+    return {
+      a,
+      ...(b.length ? { b } : {}),
+      ...(step !== undefined ? { step } : {}),
+    }
   },
   component: ComparePage,
 })
@@ -55,7 +69,8 @@ function ComparePage() {
       <div className="mx-auto max-w-lg space-y-2 py-24 text-center">
         <p className="text-sm">This Studio does not serve the step compare.</p>
         <p className="text-xs text-muted-foreground" data-compare-why>
-          {caps.why("diff") ?? "GET /api/diff is not in this Studio's capabilities (upgrade Studio)"}
+          {caps.why("diff") ??
+            "GET /api/diff is not in this Studio's capabilities (upgrade Studio)"}
         </p>
       </div>
     )
@@ -64,8 +79,9 @@ function ComparePage() {
       <div className="space-y-1">
         <h1 className="font-heading text-base font-medium">compare</h1>
         <p className="text-xs text-muted-foreground">
-          steps aligned by ordinal against the base run; a compaction or a subagent call is a mark on its side, never
-          a change; a column a side did not record is not comparable
+          steps aligned by ordinal against the base run; a compaction or a
+          subagent call is a mark on its side, never a change; a column a side
+          did not record is not comparable
         </p>
       </div>
       <form
@@ -84,14 +100,21 @@ function ComparePage() {
             placeholder="run id"
           />
         </label>
-        <Button type="submit" size="sm" variant="outline" disabled={!add.trim()}>
+        <Button
+          type="submit"
+          size="sm"
+          variant="outline"
+          disabled={!add.trim()}
+        >
           add
         </Button>
       </form>
       {a && others.length ? (
         <StepCompare base={a} others={others} focus={step} />
       ) : (
-        <p className="text-xs text-faint">name {a ? "a run to compare with" : "a base run"} above</p>
+        <p className="text-xs text-faint">
+          name {a ? "a run to compare with" : "a base run"} above
+        </p>
       )}
     </div>
   )

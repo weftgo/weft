@@ -71,12 +71,17 @@ function jsonValue(v: unknown): { ok: true; value: unknown } | { ok: false } {
 }
 
 function str(v: unknown): string {
-  return typeof v === "string" ? v : v === undefined || v === null ? "" : JSON.stringify(v)
+  return typeof v === "string"
+    ? v
+    : v === undefined || v === null
+      ? ""
+      : JSON.stringify(v)
 }
 
 function part(p: unknown): ChatPart {
   if (typeof p === "string") return { kind: "text", text: p }
-  if (!p || typeof p !== "object") return { kind: "other", type: typeof p, value: p }
+  if (!p || typeof p !== "object")
+    return { kind: "other", type: typeof p, value: p }
   const o = p as Record<string, unknown>
   const type = typeof o.type === "string" ? o.type : ""
   switch (type) {
@@ -89,10 +94,17 @@ function part(p: unknown): ChatPart {
         kind: "tool_call",
         id: str(o.id),
         name: str(o.name),
-        arguments: typeof o.arguments === "string" ? parsedOrText(o.arguments) : o.arguments,
+        arguments:
+          typeof o.arguments === "string"
+            ? parsedOrText(o.arguments)
+            : o.arguments,
       }
     case "tool_call_response":
-      return { kind: "tool_result", id: str(o.id), response: o.response ?? o.result }
+      return {
+        kind: "tool_result",
+        id: str(o.id),
+        response: o.response ?? o.result,
+      }
     default:
       return { kind: "other", type: type || "unknown", value: p }
   }
@@ -123,22 +135,46 @@ function semconvMessages(
     const parts = Array.isArray(o.parts)
       ? o.parts.map(part)
       : o.content !== undefined
-        ? [part(typeof o.content === "string" ? { type: "text", content: o.content } : o.content)]
+        ? [
+            part(
+              typeof o.content === "string"
+                ? { type: "text", content: o.content }
+                : o.content
+            ),
+          ]
         : []
-    const msg: ChatMessage = { role: str(o.role) || (side === "input" ? "user" : "assistant"), parts, side }
-    if (typeof o.finish_reason === "string" && o.finish_reason) msg.finishReason = o.finish_reason
+    const msg: ChatMessage = {
+      role: str(o.role) || (side === "input" ? "user" : "assistant"),
+      parts,
+      side,
+    }
+    if (typeof o.finish_reason === "string" && o.finish_reason)
+      msg.finishReason = o.finish_reason
     return msg
   })
 }
 
-const INDEXED = /^gen_ai\.(prompt|completion)\.(\d+)\.(role|content|tool_call_id)$/
-const INDEXED_CALL = /^gen_ai\.(prompt|completion)\.(\d+)\.tool_calls\.(\d+)\.(id|name|arguments)$/
+const INDEXED =
+  /^gen_ai\.(prompt|completion)\.(\d+)\.(role|content|tool_call_id)$/
+const INDEXED_CALL =
+  /^gen_ai\.(prompt|completion)\.(\d+)\.tool_calls\.(\d+)\.(id|name|arguments)$/
 
-function legacyMessages(attrs: Record<string, unknown>, keys: string[]): ChatMessage[] {
+function legacyMessages(
+  attrs: Record<string, unknown>,
+  keys: string[]
+): ChatMessage[] {
   const out: ChatMessage[] = []
   // The indexed forms first: they carry roles.
-  type Slot = { role?: string; content?: string; toolCallID?: string; calls: Map<number, { id?: string; name?: string; arguments?: string }> }
-  const sides: Record<"prompt" | "completion", Map<number, Slot>> = { prompt: new Map(), completion: new Map() }
+  type Slot = {
+    role?: string
+    content?: string
+    toolCallID?: string
+    calls: Map<number, { id?: string; name?: string; arguments?: string }>
+  }
+  const sides: Record<"prompt" | "completion", Map<number, Slot>> = {
+    prompt: new Map(),
+    completion: new Map(),
+  }
   const slot = (side: "prompt" | "completion", n: number): Slot => {
     let s = sides[side].get(n)
     if (!s) sides[side].set(n, (s = { calls: new Map() }))
@@ -169,17 +205,31 @@ function legacyMessages(attrs: Record<string, unknown>, keys: string[]): ChatMes
     for (const [, s] of slots) {
       const parts: ChatPart[] = []
       // A tool message answering a call: its content is that result.
-      if (s.toolCallID !== undefined) parts.push({ kind: "tool_result", id: s.toolCallID, response: s.content ?? "" })
+      if (s.toolCallID !== undefined)
+        parts.push({
+          kind: "tool_result",
+          id: s.toolCallID,
+          response: s.content ?? "",
+        })
       else if (s.content) parts.push({ kind: "text", text: s.content })
       for (const [, call] of [...s.calls.entries()].sort((a, b) => a[0] - b[0]))
         parts.push({
           kind: "tool_call",
           id: call.id ?? "",
           name: call.name ?? "",
-          arguments: call.arguments !== undefined ? parsedOrText(call.arguments) : undefined,
+          arguments:
+            call.arguments !== undefined
+              ? parsedOrText(call.arguments)
+              : undefined,
         })
       out.push({
-        role: s.role || (s.toolCallID !== undefined ? "tool" : side === "prompt" ? "user" : "assistant"),
+        role:
+          s.role ||
+          (s.toolCallID !== undefined
+            ? "tool"
+            : side === "prompt"
+              ? "user"
+              : "assistant"),
         parts,
         side: side === "prompt" ? "input" : "output",
       })
@@ -195,7 +245,11 @@ function legacyMessages(attrs: Record<string, unknown>, keys: string[]): ChatMes
       const v = attrs[k]
       if (typeof v === "string" && v) {
         keys.push(k)
-        out.push({ role: side === "input" ? "user" : "assistant", parts: [{ kind: "text", text: v }], side })
+        out.push({
+          role: side === "input" ? "user" : "assistant",
+          parts: [{ kind: "text", text: v }],
+          side,
+        })
         break
       }
     }
@@ -216,17 +270,30 @@ export function genaiChat(attrs: Record<string, unknown>): GenAIChat {
     if (SYSTEM_KEY in attrs) {
       keys.push(SYSTEM_KEY)
       const parsed = jsonValue(attrs[SYSTEM_KEY])
-      if (parsed.ok && Array.isArray(parsed.value)) messages.push({ role: "system", parts: parsed.value.map(part), side: "input" })
+      if (parsed.ok && Array.isArray(parsed.value))
+        messages.push({
+          role: "system",
+          parts: parsed.value.map(part),
+          side: "input",
+        })
       else if (typeof attrs[SYSTEM_KEY] === "string")
-        messages.push({ role: "system", parts: [{ kind: "text", text: attrs[SYSTEM_KEY] }], side: "input" })
+        messages.push({
+          role: "system",
+          parts: [{ kind: "text", text: attrs[SYSTEM_KEY] }],
+          side: "input",
+        })
     }
     if (INPUT_KEY in attrs) {
       keys.push(INPUT_KEY)
-      messages.push(...semconvMessages(attrs[INPUT_KEY], "input", INPUT_KEY, problems))
+      messages.push(
+        ...semconvMessages(attrs[INPUT_KEY], "input", INPUT_KEY, problems)
+      )
     }
     if (OUTPUT_KEY in attrs) {
       keys.push(OUTPUT_KEY)
-      messages.push(...semconvMessages(attrs[OUTPUT_KEY], "output", OUTPUT_KEY, problems))
+      messages.push(
+        ...semconvMessages(attrs[OUTPUT_KEY], "output", OUTPUT_KEY, problems)
+      )
     }
     return { family: "semconv", messages, keys, problems }
   }

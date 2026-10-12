@@ -6,7 +6,14 @@
 // call of a playground run offers "replay from this step" in the run
 // page's own drawer; the header lists the trace's runs.
 import axe from "axe-core"
-import { cleanup, configure, fireEvent, screen, waitFor, within } from "@testing-library/react"
+import {
+  cleanup,
+  configure,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
@@ -23,7 +30,13 @@ vi.setConfig({ testTimeout: 30_000 })
 const TRACE = "4bf92f3577b34da6a3ce929d0e0e4736"
 const RUN = "r_pg"
 
-function span(id: string, name: string, parent: string, attrs: Record<string, unknown>, over: Partial<Span> = {}): Span {
+function span(
+  id: string,
+  name: string,
+  parent: string,
+  attrs: Record<string, unknown>,
+  over: Partial<Span> = {}
+): Span {
   return {
     trace_id: TRACE,
     span_id: id,
@@ -41,28 +54,61 @@ function span(id: string, name: string, parent: string, attrs: Record<string, un
   }
 }
 
-const chat = (id: string, step: number, extra: Record<string, unknown> = {}, over: Partial<Span> = {}, run = RUN) =>
-  span(id, "chat glm", "a1", { "gen_ai.operation.name": "chat", "weft.run.id": run, "weft.step.index": step, ...extra }, {
-    start: `2026-10-01T09:00:0${step * 2}.000Z`,
-    end: `2026-10-01T09:00:0${step * 2 + 1}.000Z`,
-    ...over,
-  })
+const chat = (
+  id: string,
+  step: number,
+  extra: Record<string, unknown> = {},
+  over: Partial<Span> = {},
+  run = RUN
+) =>
+  span(
+    id,
+    "chat glm",
+    "a1",
+    {
+      "gen_ai.operation.name": "chat",
+      "weft.run.id": run,
+      "weft.step.index": step,
+      ...extra,
+    },
+    {
+      start: `2026-10-01T09:00:0${step * 2}.000Z`,
+      end: `2026-10-01T09:00:0${step * 2 + 1}.000Z`,
+      ...over,
+    }
+  )
 const tool = (id: string, step: number, call: string, run = RUN) =>
-  span(id, "execute_tool lookup_order", "a1", {
-    "gen_ai.operation.name": "execute_tool",
-    "gen_ai.tool.name": "lookup_order",
-    "gen_ai.tool.call.id": call,
-    "weft.run.id": run,
-    "weft.step.index": step,
-  }, { start: `2026-10-01T09:00:0${step * 2 + 1}.000Z`, end: `2026-10-01T09:00:0${step * 2 + 1}.500Z` })
+  span(
+    id,
+    "execute_tool lookup_order",
+    "a1",
+    {
+      "gen_ai.operation.name": "execute_tool",
+      "gen_ai.tool.name": "lookup_order",
+      "gen_ai.tool.call.id": call,
+      "weft.run.id": run,
+      "weft.step.index": step,
+    },
+    {
+      start: `2026-10-01T09:00:0${step * 2 + 1}.000Z`,
+      end: `2026-10-01T09:00:0${step * 2 + 1}.500Z`,
+    }
+  )
 
-const NEW_INPUT = JSON.stringify([{ role: "user", parts: [{ type: "text", content: "where is order 42?" }] }])
+const NEW_INPUT = JSON.stringify([
+  { role: "user", parts: [{ type: "text", content: "where is order 42?" }] },
+])
 const NEW_OUTPUT = JSON.stringify([
   {
     role: "assistant",
     parts: [
       { type: "text", content: "let me look" },
-      { type: "tool_call", id: "call_1", name: "lookup_order", arguments: { order_id: "42" } },
+      {
+        type: "tool_call",
+        id: "call_1",
+        name: "lookup_order",
+        arguments: { order_id: "42" },
+      },
     ],
     finish_reason: "tool_call",
   },
@@ -73,8 +119,17 @@ const NEW_OUTPUT = JSON.stringify([
  * tool 1 call_9. */
 function weftSpans(): Span[] {
   return [
-    span("a1", "invoke_agent support", "", { "gen_ai.operation.name": "invoke_agent", "weft.run.id": RUN }, { end: "2026-10-01T09:00:05.000Z" }),
-    chat("b0", 0, { "gen_ai.input.messages": NEW_INPUT, "gen_ai.output.messages": NEW_OUTPUT }),
+    span(
+      "a1",
+      "invoke_agent support",
+      "",
+      { "gen_ai.operation.name": "invoke_agent", "weft.run.id": RUN },
+      { end: "2026-10-01T09:00:05.000Z" }
+    ),
+    chat("b0", 0, {
+      "gen_ai.input.messages": NEW_INPUT,
+      "gen_ai.output.messages": NEW_OUTPUT,
+    }),
     tool("c0", 0, "call_1"),
     chat("b1", 1, {}, { status: "error", status_message: "429 rate limited" }),
     tool("c1", 1, "call_1"),
@@ -113,20 +168,63 @@ const runtime: RuntimeView = {
 }
 
 let studio: FakeStudio
-function serve(opts: { spans?: Span[]; capabilities?: string[]; doc?: RunDoc } = {}) {
+function serve(
+  opts: { spans?: Span[]; capabilities?: string[]; doc?: RunDoc } = {}
+) {
   stubBrowser()
   FakeEventSource.reset()
   vi.stubGlobal("EventSource", FakeEventSource)
   studio = new FakeStudio()
-    .on("GET meta", { ...golden<Record<string, unknown>>("meta"), capabilities: opts.capabilities ?? ["traces"] })
+    .on("GET meta", {
+      ...golden<Record<string, unknown>>("meta"),
+      capabilities: opts.capabilities ?? ["traces"],
+    })
     .on(`GET traces/${TRACE}`, { spans: opts.spans ?? weftSpans() })
     .on(`GET runs/${RUN}`, opts.doc ?? runDoc())
-    .on(`GET runs/${RUN}/transcript`, transcriptOf([
-      [{ role: "user", content: [{ type: "text", text: "where is order 42?" }] }],
-      [{ role: "assistant", content: [{ type: "tool_call", id: "call_1", name: "lookup_order", args: {} }] }],
-      [{ role: "tool", content: [{ type: "tool_result", call_id: "call_1", name: "lookup_order", content: "shipped", is_error: false }] }],
-      [{ role: "assistant", content: [{ type: "text", text: "it shipped" }] }],
-    ]))
+    .on(
+      `GET runs/${RUN}/transcript`,
+      transcriptOf([
+        [
+          {
+            role: "user",
+            content: [{ type: "text", text: "where is order 42?" }],
+          },
+        ],
+        [
+          {
+            role: "assistant",
+            content: [
+              {
+                type: "tool_call",
+                id: "call_1",
+                name: "lookup_order",
+                args: {},
+              },
+            ],
+          },
+        ],
+        [
+          {
+            role: "tool",
+            content: [
+              {
+                type: "tool_result",
+                call_id: "call_1",
+                name: "lookup_order",
+                content: "shipped",
+                is_error: false,
+              },
+            ],
+          },
+        ],
+        [
+          {
+            role: "assistant",
+            content: [{ type: "text", text: "it shipped" }],
+          },
+        ],
+      ])
+    )
     .on("GET runtimes", { runtimes: [runtime] })
   studio.install()
 }
@@ -138,9 +236,16 @@ afterEach(() => {
   setStudioToken("")
 })
 
-const row = (key: string) => document.querySelector<HTMLElement>(`[data-span="${key}"] > div`)
-const link = (key: string) => document.querySelector<HTMLAnchorElement>(`[data-span="${key}"] [data-span-link]`)
-const selectedKey = () => document.querySelector('[role="treeitem"][aria-selected="true"]')?.getAttribute("data-span")
+const row = (key: string) =>
+  document.querySelector<HTMLElement>(`[data-span="${key}"] > div`)
+const link = (key: string) =>
+  document.querySelector<HTMLAnchorElement>(
+    `[data-span="${key}"] [data-span-link]`
+  )
+const selectedKey = () =>
+  document
+    .querySelector('[role="treeitem"][aria-selected="true"]')
+    ?.getAttribute("data-span")
 const note = () => document.querySelector("[data-sel-note]")
 
 describe("the trace page's selection links (H7, G1's keys)", () => {
@@ -148,7 +253,11 @@ describe("the trace page's selection links (H7, G1's keys)", () => {
     serve()
     const { router } = renderApp(`/traces/${TRACE}`)
     await waitFor(() => expect(row("c:1:call_1")).toBeTruthy())
-    expect([...document.querySelectorAll("[data-span]")].map((e) => e.getAttribute("data-span"))).toEqual([
+    expect(
+      [...document.querySelectorAll("[data-span]")].map((e) =>
+        e.getAttribute("data-span")
+      )
+    ).toEqual([
       `r:${RUN}`,
       "s0",
       "c:0:call_1",
@@ -157,13 +266,18 @@ describe("the trace page's selection links (H7, G1's keys)", () => {
       "c:1:call_9",
     ])
     // Each row's label is a link to its own selection.
-    const href = new URL(link("c:1:call_1")!.getAttribute("href")!, "http://studio.test")
+    const href = new URL(
+      link("c:1:call_1")!.getAttribute("href")!,
+      "http://studio.test"
+    )
     expect(href.pathname).toBe(`/traces/${TRACE}`)
     expect(href.searchParams.get("sel")).toBe("c:1:call_1")
 
     const entries = router.history.length
     fireEvent.click(link("c:1:call_1")!)
-    await waitFor(() => expect(router.state.location.search).toEqual({ sel: "c:1:call_1" }))
+    await waitFor(() =>
+      expect(router.state.location.search).toEqual({ sel: "c:1:call_1" })
+    )
     expect(router.history.length).toBe(entries)
     expect(selectedKey()).toBe("c:1:call_1")
   })
@@ -172,7 +286,10 @@ describe("the trace page's selection links (H7, G1's keys)", () => {
     serve({
       spans: [
         ...weftSpans(),
-        span("a2", "invoke_agent researcher", "c0", { "gen_ai.operation.name": "invoke_agent", "weft.run.id": "r_child" }),
+        span("a2", "invoke_agent researcher", "c0", {
+          "gen_ai.operation.name": "invoke_agent",
+          "weft.run.id": "r_child",
+        }),
         chat("d0", 0, {}, { parent_span_id: "a2" }, "r_child"),
       ],
     })
@@ -180,7 +297,9 @@ describe("the trace page's selection links (H7, G1's keys)", () => {
     await waitFor(() => expect(row(`s:r_child:0`)).toBeTruthy())
     expect(row(`c:${RUN}:1:call_1`)).toBeTruthy()
     expect(row(`s:${RUN}:0`)).toBeTruthy()
-    const runs = [...document.querySelectorAll<HTMLAnchorElement>("[data-trace-run]")]
+    const runs = [
+      ...document.querySelectorAll<HTMLAnchorElement>("[data-trace-run]"),
+    ]
     expect(runs.map((a) => [a.textContent, a.getAttribute("href")])).toEqual([
       ["r_child", "/runs/r_child"],
       [RUN, `/runs/${RUN}`],
@@ -188,11 +307,20 @@ describe("the trace page's selection links (H7, G1's keys)", () => {
   })
 
   it("a trace of non-weft spans keeps t:<span id> keys and says it holds no run", async () => {
-    serve({ spans: [span("x1", "GET /orders", "", {}), span("x2", "db.query", "x1", {})] })
+    serve({
+      spans: [
+        span("x1", "GET /orders", "", {}),
+        span("x2", "db.query", "x1", {}),
+      ],
+    })
     renderApp(`/traces/${TRACE}?sel=t:x2`)
     await waitFor(() => expect(selectedKey()).toBe("t:x2"))
-    expect(document.querySelector("[data-trace-runs]")!.textContent).toContain("—")
-    expect(document.querySelector("[data-trace-facts]")!.textContent).toContain("GET /orders")
+    expect(document.querySelector("[data-trace-runs]")!.textContent).toContain(
+      "—"
+    )
+    expect(document.querySelector("[data-trace-facts]")!.textContent).toContain(
+      "GET /orders"
+    )
   })
 
   it("an old bare call key lands on the first match, with a note when the id repeats", async () => {
@@ -229,19 +357,27 @@ describe("the trace page's selection links (H7, G1's keys)", () => {
   it("y copies the current URL, the step-qualified key in it", async () => {
     serve()
     const writeText = vi.fn().mockResolvedValue(undefined)
-    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true })
+    Object.defineProperty(navigator, "clipboard", {
+      value: { writeText },
+      configurable: true,
+    })
     renderApp(`/traces/${TRACE}`)
     await waitFor(() => expect(row("s1")).toBeTruthy())
     fireEvent.click(row("s1")!)
     await waitFor(() => expect(selectedKey()).toBe("s1"))
     fireEvent.keyDown(window, { key: "y" })
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
-    expect(new URL(writeText.mock.calls[0][0] as string).searchParams.get("sel")).toBe("s1")
+    expect(
+      new URL(writeText.mock.calls[0][0] as string).searchParams.get("sel")
+    ).toBe("s1")
   })
 })
 
 const chatBox = () => document.querySelector<HTMLElement>("[data-span-chat]")
-const roles = () => [...chatBox()!.querySelectorAll("[data-chat-role]")].map((e) => e.getAttribute("data-chat-role"))
+const roles = () =>
+  [...chatBox()!.querySelectorAll("[data-chat-role]")].map((e) =>
+    e.getAttribute("data-chat-role")
+  )
 
 describe("the GenAI chat view (H7)", () => {
   it("renders gen_ai.input.messages / gen_ai.output.messages: user text, assistant text and a folded tool call", async () => {
@@ -253,7 +389,9 @@ describe("the GenAI chat view (H7)", () => {
     const box = within(chatBox()!)
     expect(box.getByText("where is order 42?")).toBeTruthy()
     expect(box.getByText("let me look")).toBeTruthy()
-    const call = chatBox()!.querySelector<HTMLDetailsElement>('[data-chat-tool-call="lookup_order"]')!
+    const call = chatBox()!.querySelector<HTMLDetailsElement>(
+      '[data-chat-tool-call="lookup_order"]'
+    )!
     expect(call.open).toBe(false)
     expect(call.textContent).toContain("call_1")
     // The raw attributes stay in the attributes list.
@@ -286,7 +424,9 @@ describe("the GenAI chat view (H7)", () => {
     expect(chatBox()!.getAttribute("data-span-chat")).toBe("legacy")
     expect(roles()).toEqual(["system", "user", "assistant"])
     expect(within(chatBox()!).getByText("be brief")).toBeTruthy()
-    expect(chatBox()!.querySelector('[data-chat-tool-call="lookup_order"]')).toBeTruthy()
+    expect(
+      chatBox()!.querySelector('[data-chat-tool-call="lookup_order"]')
+    ).toBeTruthy()
 
     cleanup()
     renderApp(`/traces/${TRACE}?sel=t:l2`)
@@ -301,7 +441,9 @@ describe("the GenAI chat view (H7)", () => {
     await waitFor(() => expect(chatBox()).toBeTruthy())
     expect(chatBox()!.getAttribute("data-span-chat")).toBe("not_recorded")
     expect(chatBox()!.querySelector('[data-hole="not_recorded"]')).toBeTruthy()
-    expect(chatBox()!.textContent).toContain("this span carries no gen_ai messages")
+    expect(chatBox()!.textContent).toContain(
+      "this span carries no gen_ai messages"
+    )
     expect(chatBox()!.querySelector("[data-chat-role]")).toBeNull()
     // A tool span is not a model call: no chat section at all.
     cleanup()
@@ -319,12 +461,15 @@ describe("the GenAI chat view (H7)", () => {
       return el!
     })
     expect(within(first).getByText("let me look")).toBeTruthy()
-    expect(document.querySelector('[data-chat-span="b1"] [data-hole="not_recorded"]')).toBeTruthy()
+    expect(
+      document.querySelector('[data-chat-span="b1"] [data-hole="not_recorded"]')
+    ).toBeTruthy()
   })
 })
 
 const drawer = () => document.querySelector<HTMLElement>("[data-replay-drawer]")
-const retry = () => document.querySelector<HTMLButtonElement>("[data-replay-from-here]")
+const retry = () =>
+  document.querySelector<HTMLButtonElement>("[data-replay-from-here]")
 
 describe("replay from this step on an errored model call (H7)", () => {
   it("a playground run's failed chat span opens the run page's drawer on that step", async () => {
@@ -337,7 +482,9 @@ describe("replay from this step on an errored model call (H7)", () => {
     })
     expect(btn.getAttribute("data-replay-from-here")).toBe(`${RUN}#1`)
     expect(btn.disabled).toBe(false)
-    expect(document.querySelector("[data-span-retry]")!.textContent).toContain("429 rate limited")
+    expect(document.querySelector("[data-span-retry]")!.textContent).toContain(
+      "429 rate limited"
+    )
     fireEvent.click(btn)
     await waitFor(() => expect(drawer()).toBeTruthy())
     const d = within(drawer()!)
@@ -347,7 +494,10 @@ describe("replay from this step on an errored model call (H7)", () => {
   })
 
   it("the app's own run: a disabled verb that says where replay runs", async () => {
-    serve({ capabilities: ["traces", "playground"], doc: runDoc({ playground: false }) })
+    serve({
+      capabilities: ["traces", "playground"],
+      doc: runDoc({ playground: false }),
+    })
     renderApp(`/traces/${TRACE}?sel=s1`)
     const btn = await waitFor(() => {
       const el = retry()
@@ -355,7 +505,9 @@ describe("replay from this step on an errored model call (H7)", () => {
       return el!
     })
     expect(btn.disabled).toBe(true)
-    expect(btn.title).toBe("the app's own run: replay runs through the playground")
+    expect(btn.title).toBe(
+      "the app's own run: replay runs through the playground"
+    )
   })
 
   it("absent without the playground capability, under a read-scoped token, and on a span that did not fail", async () => {
@@ -393,7 +545,14 @@ describe("the trace page's a11y (H7)", () => {
     // aria-required-children is off as in run-long's axe runs: the
     // waterfall's axis row (its expand / collapse buttons) has sat
     // inside role="tree" since before H7 — a finding of its own.
-    const res = await axe.run(main, { rules: { "aria-required-children": { enabled: false } } })
-    expect(res.violations.map((v) => `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(" | ")}`)).toEqual([])
+    const res = await axe.run(main, {
+      rules: { "aria-required-children": { enabled: false } },
+    })
+    expect(
+      res.violations.map(
+        (v) =>
+          `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(" | ")}`
+      )
+    ).toEqual([])
   })
 })

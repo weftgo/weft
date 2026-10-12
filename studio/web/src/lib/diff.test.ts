@@ -38,9 +38,12 @@ describe("diffLinesBounded", () => {
   })
 
   it("past the cap: the sizes, no table", () => {
-    const big = (t: string) => Array.from({ length: 5000 }, (_, i) => `${t}${i}`).join("\n")
+    const big = (t: string) =>
+      Array.from({ length: 5000 }, (_, i) => `${t}${i}`).join("\n")
     const t0 = performance.now()
-    expect(diffLinesBounded(big("a"), big("b"))).toEqual({ tooLarge: { before: 5000, after: 5000 } })
+    expect(diffLinesBounded(big("a"), big("b"))).toEqual({
+      tooLarge: { before: 5000, after: 5000 },
+    })
     expect(performance.now() - t0).toBeLessThan(500)
   })
 })

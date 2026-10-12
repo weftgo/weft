@@ -262,7 +262,8 @@ export interface Span {
   span_id: string
   parent_span_id: string
   name: string
-  kind: "unspecified" | "internal" | "server" | "client" | "producer" | "consumer"
+  kind:
+    "unspecified" | "internal" | "server" | "client" | "producer" | "consumer"
   start: string
   end: string
   status: "unset" | "ok" | "error"
@@ -650,7 +651,10 @@ export function setStudioToken(tok: string) {
 /** authorize fetches with the bearer; a 401 under the tab's hand-off
  * token drops it and, when a stored token remains, asks once more with
  * that (the hand-off's 5 minutes are over, the dev token is fine). */
-async function authorized(url: string, init: RequestInit & { headers: Record<string, string> }): Promise<Response> {
+async function authorized(
+  url: string,
+  init: RequestInit & { headers: Record<string, string> }
+): Promise<Response> {
   const tok = studioToken()
   // Decided from the token this request went out with, not from the
   // state at its answer: of several requests refused together, the
@@ -662,7 +666,10 @@ async function authorized(url: string, init: RequestInit & { headers: Record<str
   dropTabTokenIf(tok)
   const stored = studioToken()
   if (!stored || stored === tok) return res
-  return fetch(url, { ...init, headers: { ...init.headers, Authorization: `Bearer ${stored}` } })
+  return fetch(url, {
+    ...init,
+    headers: { ...init.headers, Authorization: `Bearer ${stored}` },
+  })
 }
 
 /** dropTabTokenIf drops the tab's hand-off token when it is `tok` (the
@@ -789,7 +796,9 @@ export function asTranscript(doc: RawTranscript): Transcript {
   return {
     batches: (batches as RawTranscript["batches"]).map((b) => {
       const messages = asMessages(b.messages)
-      const unreadable = !Array.isArray(b.messages) || messages.length !== (b.messages as unknown[]).length
+      const unreadable =
+        !Array.isArray(b.messages) ||
+        messages.length !== (b.messages as unknown[]).length
       return {
         index: b.index,
         step: b.step,
@@ -843,11 +852,13 @@ export function runsSearch(filters: RunsFilters): string {
   if (filters.status) params.set("status", filters.status)
   if (filters.session) params.set("session", filters.session)
   if (filters.public_id) params.set("public_id", filters.public_id)
-  if (filters.playground !== undefined) params.set("playground", String(filters.playground))
+  if (filters.playground !== undefined)
+    params.set("playground", String(filters.playground))
   if (filters.parent) params.set("parent", filters.parent)
   else if (filters.all) params.set("all", "1")
   if (filters.before) params.set("before", filters.before)
-  if (filters.before && filters.before_id) params.set("before_id", filters.before_id)
+  if (filters.before && filters.before_id)
+    params.set("before_id", filters.before_id)
   for (const [k, v] of Object.entries(filters.tag ?? {}))
     params.set(`tag.${k}`, v)
   if (filters.limit) params.set("limit", String(filters.limit))
@@ -880,7 +891,10 @@ export interface SearchPage {
  * model (exact), error (a substring), since/until (RFC 3339 on the
  * start), min_tokens (input + output) and min_cost (USD, own +
  * delegated; an unpriced run never matches). */
-export interface SearchFilters extends Omit<RunsFilters, "before" | "before_id"> {
+export interface SearchFilters extends Omit<
+  RunsFilters,
+  "before" | "before_id"
+> {
   q?: string
   tool?: string
   model?: string
@@ -896,7 +910,19 @@ export interface SearchFilters extends Omit<RunsFilters, "before" | "before_id">
 /** GET /api/search?…: the runs list's filters, search's own, sort and
  * offset. */
 export function fetchSearch(filters: SearchFilters = {}): Promise<SearchPage> {
-  const { q, tool, model, error, since, until, min_tokens, min_cost, sort, offset, ...rest } = filters
+  const {
+    q,
+    tool,
+    model,
+    error,
+    since,
+    until,
+    min_tokens,
+    min_cost,
+    sort,
+    offset,
+    ...rest
+  } = filters
   const params = new URLSearchParams(runsSearch(rest).replace(/^\?/, ""))
   if (q) params.set("q", q)
   if (tool) params.set("tool", tool)
@@ -962,7 +988,8 @@ export function fetchTraces(filters: TracesFilters = {}): Promise<TracesPage> {
   if (filters.service) params.set("service", filters.service)
   if (filters.public_id) params.set("public_id", filters.public_id)
   if (filters.before) params.set("before", filters.before)
-  if (filters.before && filters.before_id) params.set("before_id", filters.before_id)
+  if (filters.before && filters.before_id)
+    params.set("before_id", filters.before_id)
   if (filters.limit) params.set("limit", String(filters.limit))
   const qs = params.toString()
   return get<TracesPage>(`traces${qs ? `?${qs}` : ""}`)
@@ -1008,9 +1035,14 @@ export function transcriptAsOfQuery(id: string, step: number) {
     queryKey: ["transcript-as-of", id, step],
     staleTime: 30_000,
     queryFn: () =>
-      get<{ step: number; compacted_at: { from_seq: number; to_seq: number; entries: number } | null }>(
-        `runs/${encodeURIComponent(id)}/transcript?step=${step}`
-      ),
+      get<{
+        step: number
+        compacted_at: {
+          from_seq: number
+          to_seq: number
+          entries: number
+        } | null
+      }>(`runs/${encodeURIComponent(id)}/transcript?step=${step}`),
   })
 }
 
@@ -1260,18 +1292,28 @@ export async function fetchAllRequests(
   opts?: { full?: boolean }
 ): Promise<RunRequestsDoc> {
   const base = prev && !prev.badge ? prev : undefined
-  const held = opts?.full || !base ? [] : [...base.requests].sort((a, b) => a.index - b.index)
+  const held =
+    opts?.full || !base
+      ? []
+      : [...base.requests].sort((a, b) => a.index - b.index)
   // The contiguous prefix 0..n-1: what is past its first hole is read
   // again.
   let keep = 0
   while (keep < held.length && held[keep].index === keep) keep++
   const rows: RequestRow[] = held.slice(0, keep)
-  let from: number | undefined = rows.length ? rows[rows.length - 1].index + 1 : undefined
+  let from: number | undefined = rows.length
+    ? rows[rows.length - 1].index + 1
+    : undefined
   for (;;) {
     const page = await fetchRequests(runId, { from, limit: 1000 })
     rows.push(...page.requests)
     if (page.badge) {
-      return { requests: rows, badge: page.badge, reason: page.reason, fix: page.fix }
+      return {
+        requests: rows,
+        badge: page.badge,
+        reason: page.reason,
+        fix: page.fix,
+      }
     }
     if (page.next_from === undefined || page.next_from <= (from ?? -1)) break
     from = page.next_from
@@ -1281,7 +1323,11 @@ export async function fetchAllRequests(
   else if (rows.some((r) => r.content === "stripped")) {
     const tools = await fetchTools(runId).catch(() => null)
     if (tools?.badge === "stripped")
-      out.stripped = { badge: tools.badge, reason: tools.reason, fix: tools.fix }
+      out.stripped = {
+        badge: tools.badge,
+        reason: tools.reason,
+        fix: tools.fix,
+      }
   }
   return out
 }
@@ -1293,10 +1339,16 @@ export function requestsQuery(runId: string) {
     queryFn: ({ client, queryKey }) => {
       // A run that is over is read whole: its last read must not trust
       // an incremental cursor that a late, out-of-order row fell below.
-      const status = client.getQueryData<RunDoc>(runQuery(runId).queryKey)?.status
-      return fetchAllRequests(runId, client.getQueryData<RunRequestsDoc>(queryKey), {
-        full: status !== undefined && status !== "running",
-      })
+      const status = client.getQueryData<RunDoc>(
+        runQuery(runId).queryKey
+      )?.status
+      return fetchAllRequests(
+        runId,
+        client.getQueryData<RunRequestsDoc>(queryKey),
+        {
+          full: status !== undefined && status !== "running",
+        }
+      )
     },
   })
 }
@@ -1352,7 +1404,12 @@ export interface StepToolCall {
   /** null when content-off stripped it (badge "stripped"). */
   args: unknown
   /** Absent while running or parked. */
-  result?: { content: string; is_error: boolean; bytes: number; truncated?: boolean }
+  result?: {
+    content: string
+    is_error: boolean
+    bytes: number
+    truncated?: boolean
+  }
   span?: { id: string; started: string; finished: string; status: string }
   child_run_id?: string
   pending?: boolean
@@ -1449,7 +1506,11 @@ export function diffQuery(a: string, b: string) {
     queryFn: () => get<DiffDoc>(diffPath(a, b)),
     retry: false,
     refetchInterval: (q) =>
-      q.state.data && (q.state.data.a.status === "running" || q.state.data.b.status === "running") ? 2000 : false,
+      q.state.data &&
+      (q.state.data.a.status === "running" ||
+        q.state.data.b.status === "running")
+        ? 2000
+        : false,
   })
 }
 
@@ -1461,14 +1522,21 @@ export function diffQuery(a: string, b: string) {
  * Content-Disposition's file name. A refusal is an ApiError carrying
  * the server's words (403 hidden to a read token, 409 a run with no
  * recorded answer). */
-export async function fetchTestExport(runID: string): Promise<{ blob: Blob; name: string }> {
+export async function fetchTestExport(
+  runID: string
+): Promise<{ blob: Blob; name: string }> {
   const headers: Record<string, string> = { Accept: "application/zip" }
-  const res = await authorized(new URL(testExportPath(runID), apiBase()).toString(), { headers })
+  const res = await authorized(
+    new URL(testExportPath(runID), apiBase()).toString(),
+    { headers }
+  )
   if (!res.ok) {
     let code = "network"
     let message = `${res.status} ${res.statusText}`
     try {
-      const doc = (await res.json()) as { error?: { code?: string; message?: string } }
+      const doc = (await res.json()) as {
+        error?: { code?: string; message?: string }
+      }
       code = doc.error?.code ?? code
       message = doc.error?.message ?? message
     } catch {
@@ -1476,7 +1544,13 @@ export async function fetchTestExport(runID: string): Promise<{ blob: Blob; name
     }
     throw new ApiError(res.status, code, message)
   }
-  return { blob: await res.blob(), name: dispositionName(res.headers.get("Content-Disposition"), `${runID}.zip`) }
+  return {
+    blob: await res.blob(),
+    name: dispositionName(
+      res.headers.get("Content-Disposition"),
+      `${runID}.zip`
+    ),
+  }
 }
 
 /** PUT /api/agents/{name}/proposal's and DELETE's 200 (studio/proposals.go). */
@@ -1492,12 +1566,19 @@ export interface ProposalDoc {
  * manifest file does not name it, 403 a panel token — the ApiError
  * carries the server's words. */
 export function putProposal(agent: string, instructions: string) {
-  return request<ProposalDoc>("PUT", `agents/${encodeURIComponent(agent)}/proposal`, { instructions })
+  return request<ProposalDoc>(
+    "PUT",
+    `agents/${encodeURIComponent(agent)}/proposal`,
+    { instructions }
+  )
 }
 
 /** DELETE /api/agents/{name}/proposal: withdraw it (404 when none). */
 export function deleteProposal(agent: string) {
-  return request<ProposalDoc>("DELETE", `agents/${encodeURIComponent(agent)}/proposal`)
+  return request<ProposalDoc>(
+    "DELETE",
+    `agents/${encodeURIComponent(agent)}/proposal`
+  )
 }
 
 /** One app log record of a run (GET /api/runs/{id}/logs): a non-weft
@@ -1542,7 +1623,10 @@ export interface LogsQuery {
 /** GET /api/runs/{id}/logs?from=&limit=&severity=. App logs may carry
  * prompts, so a read-scoped token's hidden refusal answers as an empty
  * page carrying the hidden badge — a hole to render, not an error. */
-export async function fetchLogs(runId: string, q: LogsQuery = {}): Promise<LogsPage> {
+export async function fetchLogs(
+  runId: string,
+  q: LogsQuery = {}
+): Promise<LogsPage> {
   const params = new URLSearchParams()
   if (q.from !== undefined) params.set("from", String(q.from))
   if (q.limit !== undefined) params.set("limit", String(q.limit))
@@ -1584,12 +1668,15 @@ export interface SessionFilters {
 
 /** GET /api/sessions: one page; next_before (with next_before_id) is
  * the next page's cursor (null when this was the last) — nextCursor. */
-export function fetchSessions(filters: SessionFilters = {}): Promise<SessionsPage> {
+export function fetchSessions(
+  filters: SessionFilters = {}
+): Promise<SessionsPage> {
   const params = new URLSearchParams()
   if (filters.agent) params.set("agent", filters.agent)
   if (filters.public_id) params.set("public_id", filters.public_id)
   if (filters.before) params.set("before", filters.before)
-  if (filters.before && filters.before_id) params.set("before_id", filters.before_id)
+  if (filters.before && filters.before_id)
+    params.set("before_id", filters.before_id)
   const qs = params.toString()
   return get<SessionsPage>(`sessions${qs ? `?${qs}` : ""}`)
 }
@@ -1612,7 +1699,8 @@ export function sessionQuery(id: string) {
 export function publicQuery(publicId: string) {
   return queryOptions({
     queryKey: ["public", publicId],
-    queryFn: () => get<PublicResolution>(`public/${encodeURIComponent(publicId)}`),
+    queryFn: () =>
+      get<PublicResolution>(`public/${encodeURIComponent(publicId)}`),
   })
 }
 
@@ -1738,7 +1826,12 @@ export interface PlaygroundRunBody {
     /** max_steps, parallelism (lower only), temperature. */
     options?: Record<string, number>
     /** The rest of the sampling knobs; absent fields keep the agent's own. */
-    params?: { top_p?: number; max_tokens?: number; stop?: string[]; seed?: number }
+    params?: {
+      top_p?: number
+      max_tokens?: number
+      stop?: string[]
+      seed?: number
+    }
     tool_choice?: ToolChoiceWire
     /** Tools of the agent to park at the approval boundary. */
     park_on?: string[]
@@ -1799,17 +1892,21 @@ export function fetchCommand(id: string): Promise<CommandStatus> {
  * named the way Replay loads them. The user drops them into
  * testdata; the loop they just lived becomes a CI regression test. */
 export function postFixtures(runID: string, tools: string[]) {
-  return post<{ run_id: string; agent: string; files: { name: string; body: string }[] }>(
-    "playground/fixtures",
-    { run_id: runID, tools }
-  )
+  return post<{
+    run_id: string
+    agent: string
+    files: { name: string; body: string }[]
+  }>("playground/fixtures", { run_id: runID, tools })
 }
 
 /** POST /api/runs/{id}/steer — the rung-4 verb (WEFT-DEVTOOLS §8.4):
  * one user message delivered into a runtime-started run mid-flight. */
 export function postSteer(runID: string, message: string) {
   // An app turn's steer (plan F4.3) answers 202 with the command to poll.
-  return post<{ steered?: boolean; command_id?: string }>(`runs/${encodeURIComponent(runID)}/steer`, { message })
+  return post<{ steered?: boolean; command_id?: string }>(
+    `runs/${encodeURIComponent(runID)}/steer`,
+    { message }
+  )
 }
 
 /** POST /api/runs/{id}/cancel's 202 (studio/cancel.go): the frame is
@@ -1828,7 +1925,10 @@ export interface CancelAccepted {
  * (the app's own run, finished, parked), a 503 a disconnected runtime:
  * the ApiError carries the server's words. */
 export function postCancel(runID: string) {
-  return post<CancelAccepted>(`runs/${encodeURIComponent(runID)}/cancel`, undefined)
+  return post<CancelAccepted>(
+    `runs/${encodeURIComponent(runID)}/cancel`,
+    undefined
+  )
 }
 
 /** PUT /api/runtimes/{id}/breakpoints — the rung-3 verb (WEFT-DEVTOOLS
@@ -1852,7 +1952,13 @@ export interface ExperimentRow extends CostFields {
   name: string
   agent: string
   /** Each variant's modes when they differ from the experiment's (F5.1). */
-  variants: { key: string; overrides?: unknown; engine?: string; side_effects?: string; thread?: string }[]
+  variants: {
+    key: string
+    overrides?: unknown
+    engine?: string
+    side_effects?: string
+    thread?: string
+  }[]
   inputs: { key: string; source_run_id?: string; text?: string }[]
   /** The command the matrix sent (F5.1, obsdb.ExperimentCommand): absent
    * on a definition saved before it — the form is then read back from
@@ -1877,7 +1983,9 @@ export function experimentsQuery(limit?: number) {
     queryKey: limit === undefined ? ["experiments"] : ["experiments", limit],
     staleTime: 10_000,
     queryFn: () =>
-      get<ExperimentsPage>(limit === undefined ? "experiments" : `experiments?limit=${limit}`),
+      get<ExperimentsPage>(
+        limit === undefined ? "experiments" : `experiments?limit=${limit}`
+      ),
   })
 }
 
@@ -1913,7 +2021,12 @@ export function experimentQuery(id: string) {
  * continue / skip / resolve (ADR 0007's verbs, WEFT-DEVTOOLS §8.2). */
 export function postApproval(
   runID: string,
-  body: { call_id: string; decision: "approve" | "deny" | "resolve"; reason?: string; content?: string }
+  body: {
+    call_id: string
+    decision: "approve" | "deny" | "resolve"
+    reason?: string
+    content?: string
+  }
 ) {
   return post<{ command_id: string; state: string }>(
     `runs/${encodeURIComponent(runID)}/approvals`,

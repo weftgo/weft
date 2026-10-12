@@ -6,10 +6,21 @@
 // meta renders the prompt, a pasted token is stored and sent, and the
 // app behind the wall then renders.
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { adoptTokenFromLocation, setStudioToken, studioToken, tabTokenActive } from "@/lib/api"
+import {
+  adoptTokenFromLocation,
+  setStudioToken,
+  studioToken,
+  tabTokenActive,
+} from "@/lib/api"
 import { noRetryOnRefusal } from "@/lib/query"
 import { TokenWall } from "@/components/studio/token-wall"
 
@@ -115,7 +126,9 @@ describe("TokenWall", () => {
     renderWall()
     expect(await screen.findByText("the app")).toBeTruthy()
     expect(tabTokenActive()).toBe(false)
-    expect(new Headers(fetchMock.mock.calls.at(-1)![1]?.headers).get("Authorization")).toBe("Bearer dev-secret")
+    expect(
+      new Headers(fetchMock.mock.calls.at(-1)![1]?.headers).get("Authorization")
+    ).toBe("Bearer dev-secret")
   })
 
   it("words the wall for an expired hand-off token when nothing is stored", async () => {
@@ -125,12 +138,16 @@ describe("TokenWall", () => {
     vi.stubGlobal("fetch", walled("dev-secret"))
     renderWall()
     await screen.findByLabelText("API token")
-    expect(screen.getByText(/hand-off token this tab.s link carried expired/)).toBeTruthy()
+    expect(
+      screen.getByText(/hand-off token this tab.s link carried expired/)
+    ).toBeTruthy()
     expect(screen.queryByText(/The stored token was refused/)).toBeNull()
   })
 })
 
 function handoffToken(): string {
-  const claims = btoa(JSON.stringify({ scope: "read", public_id: "pub_1" })).replace(/=+$/, "")
+  const claims = btoa(
+    JSON.stringify({ scope: "read", public_id: "pub_1" })
+  ).replace(/=+$/, "")
   return `weft_pt.${claims}.sig`
 }

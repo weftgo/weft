@@ -38,7 +38,14 @@ export interface Experiment {
 
 /** A fresh experiment for a command just issued. */
 export function queued(commandID: string, label: string): Experiment {
-  return { commandID, state: "queued", runID: "", error: null, label, row: null }
+  return {
+    commandID,
+    state: "queued",
+    runID: "",
+    error: null,
+    label,
+    row: null,
+  }
 }
 
 /** Row reads after a command settled, waiting for the run's row to
@@ -93,7 +100,12 @@ export function useCommandTracking(
      * it. */
     const finished = (st: CommandStatus, row: RunRow) => {
       if (st.state !== "finished" || row.pending > 0) return
-      notify({ kind: "experiment", commandID, runID: st.run_id, status: row.status })
+      notify({
+        kind: "experiment",
+        commandID,
+        runID: st.run_id,
+        status: row.status,
+      })
     }
     /** The row reads ran out with the row missing or still running:
      * one more read, and a notice only if it settled. */
@@ -115,7 +127,11 @@ export function useCommandTracking(
         if (isUnknownCommand(e)) {
           setRef.current((cur) =>
             mine(cur)
-              ? { ...cur, state: "lost", error: "Studio no longer knows this command (it restarted)" }
+              ? {
+                  ...cur,
+                  state: "lost",
+                  error: "Studio no longer knows this command (it restarted)",
+                }
               : cur
           )
           return
@@ -125,10 +141,17 @@ export function useCommandTracking(
       }
       if (gone()) return
       const parkedRun = decidedRef.current
-      if (parkedRun && st.run_id && st.run_id !== parkedRun) dismissNotice("parked", parkedRun)
+      if (parkedRun && st.run_id && st.run_id !== parkedRun)
+        dismissNotice("parked", parkedRun)
       setRef.current((cur) =>
         mine(cur)
-          ? { ...cur, state: st.state, status: st.status, runID: st.run_id || cur.runID, error: st.error }
+          ? {
+              ...cur,
+              state: st.state,
+              status: st.status,
+              runID: st.run_id || cur.runID,
+              error: st.error,
+            }
           : cur
       )
       let rowSettled = false

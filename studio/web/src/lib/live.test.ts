@@ -11,7 +11,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { adoptTokenFromLocation, setStudioToken, tabTokenActive } from "./api"
-import { freshBearer, grantDeadline, LIVE_GRANT_TTL_MS, onLiveGaveUp, openLive, panelTokenExp, throttle } from "./live"
+import {
+  freshBearer,
+  grantDeadline,
+  LIVE_GRANT_TTL_MS,
+  onLiveGaveUp,
+  openLive,
+  panelTokenExp,
+  throttle,
+} from "./live"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { setServerSkew } from "@/test/fake-live-grant"
 import { FakeStudio, apiError } from "@/test/fake-studio"
@@ -29,7 +37,13 @@ const record = (pos: number, kind = "event") => ({
 /** A panel token whose claims say scope and exp (the fake does not
  * check the signature; the wall compares the whole string). */
 export const panelToken = (exp: number, scope = "read", publicId = "pub_1") =>
-  `weft_pt.${btoa(JSON.stringify({ public_id: publicId, scope, exp: new Date(exp).toISOString() }))
+  `weft_pt.${btoa(
+    JSON.stringify({
+      public_id: publicId,
+      scope,
+      exp: new Date(exp).toISOString(),
+    })
+  )
     .replace(/=+$/, "")
     .replace(/\+/g, "-")
     .replace(/\//g, "_")}.c2ln`
@@ -54,7 +68,10 @@ describe("openLive", () => {
   it("asks for a grant with the bearer in the header, then opens the stream with the sig — no token in any URL", async () => {
     setStudioToken("tok +/=")
     studio.requireToken("tok +/=")
-    const live = openLive({ selector: { run: "a/0/c 1" }, kinds: ["event", "delta"] })
+    const live = openLive({
+      selector: { run: "a/0/c 1" },
+      kinds: ["event", "delta"],
+    })
     await flush()
     const grants = studio.calls("POST live-grant")
     expect(grants).toHaveLength(1)
@@ -105,7 +122,12 @@ describe("openLive", () => {
     studio.requireToken(tok)
     const onRefused = vi.fn()
     const onOverflow = vi.fn()
-    const live = openLive({ selector: { agent: "orders" }, kinds: ["run"], onRefused, onOverflow })
+    const live = openLive({
+      selector: { agent: "orders" },
+      kinds: ["run"],
+      onRefused,
+      onOverflow,
+    })
     await vi.advanceTimersByTimeAsync(10 * 60_000)
     expect(studio.calls("POST live-grant")).toHaveLength(1)
     expect(FakeEventSource.instances).toHaveLength(0)
@@ -125,7 +147,9 @@ describe("openLive", () => {
     expect(tabTokenActive()).toBe(true)
     const live = openLive({ selector: { run: "r1" } })
     await vi.advanceTimersByTimeAsync(10 * 60_000)
-    const auth = studio.calls("POST live-grant").map((c) => c.headers.get("Authorization"))
+    const auth = studio
+      .calls("POST live-grant")
+      .map((c) => c.headers.get("Authorization"))
     expect(auth[0]).toBe(`Bearer ${tab}`)
     expect(auth[1]).toBe("Bearer dev-secret")
     expect(tabTokenActive()).toBe(false)
@@ -187,7 +211,10 @@ describe("openLive", () => {
 
   it("dedups record frames on (run, kind, pos)", async () => {
     const seen: number[] = []
-    const live = openLive({ selector: { run: "r1" }, onRecord: (r) => seen.push(r.pos) })
+    const live = openLive({
+      selector: { run: "r1" },
+      onRecord: (r) => seen.push(r.pos),
+    })
     await flush()
     const es = FakeEventSource.nth(0)
     es.connect()
@@ -339,7 +366,9 @@ describe("openLive", () => {
     live.retry()
     await flush()
     await failAll()
-    expect(heard.mock.calls.map((c) => (c[0] as { round: number }).round)).toEqual([1, 2])
+    expect(
+      heard.mock.calls.map((c) => (c[0] as { round: number }).round)
+    ).toEqual([1, 2])
     live.close()
 
     const clean = openLive({ selector: { run: "r2" } })
@@ -364,13 +393,22 @@ describe("openLive", () => {
   })
 
   it("an expired frame with no fresh bearer stops the stream quietly", async () => {
-    const quiet = [vi.spyOn(console, "error"), vi.spyOn(console, "warn"), vi.spyOn(console, "log")]
+    const quiet = [
+      vi.spyOn(console, "error"),
+      vi.spyOn(console, "warn"),
+      vi.spyOn(console, "log"),
+    ]
     const tok = panelToken(Date.now() + 30_000)
     setStudioToken(tok)
     studio.requireToken(tok)
     const onOverflow = vi.fn()
     const onGaveUp = vi.fn()
-    const live = openLive({ selector: { public_id: "pub_1" }, kinds: ["run"], onOverflow, onGaveUp })
+    const live = openLive({
+      selector: { public_id: "pub_1" },
+      kinds: ["run"],
+      onOverflow,
+      onGaveUp,
+    })
     await flush()
     const es = FakeEventSource.nth(0)
     es.connect()
@@ -439,15 +477,25 @@ describe("grantDeadline", () => {
     const at = (ms: number) => new Date(ms).toISOString()
     const date = (ms: number) => new Date(ms).toUTCString()
     // A server 120 s behind or ahead: the same 59 s from the page's now.
-    expect(grantDeadline(at(now - 120_000 + 60_000), date(now - 120_000), now)).toBe(now + 59_000)
-    expect(grantDeadline(at(now + 120_000 + 60_000), date(now + 120_000), now)).toBe(now + 59_000)
+    expect(
+      grantDeadline(at(now - 120_000 + 60_000), date(now - 120_000), now)
+    ).toBe(now + 59_000)
+    expect(
+      grantDeadline(at(now + 120_000 + 60_000), date(now + 120_000), now)
+    ).toBe(now + 59_000)
     // A panel token's shorter grant stays short; never past the TTL, never negative.
     expect(grantDeadline(at(now + 20_000), date(now), now)).toBe(now + 19_000)
-    expect(grantDeadline(at(now + 3600_000), date(now), now)).toBe(now + LIVE_GRANT_TTL_MS)
+    expect(grantDeadline(at(now + 3600_000), date(now), now)).toBe(
+      now + LIVE_GRANT_TTL_MS
+    )
     expect(grantDeadline(at(now - 5000), date(now), now)).toBe(now)
     // No Date header (or no exp): the full TTL.
-    expect(grantDeadline(at(now + 20_000), null, now)).toBe(now + LIVE_GRANT_TTL_MS)
-    expect(grantDeadline(undefined, date(now), now)).toBe(now + LIVE_GRANT_TTL_MS)
+    expect(grantDeadline(at(now + 20_000), null, now)).toBe(
+      now + LIVE_GRANT_TTL_MS
+    )
+    expect(grantDeadline(undefined, date(now), now)).toBe(
+      now + LIVE_GRANT_TTL_MS
+    )
   })
 })
 

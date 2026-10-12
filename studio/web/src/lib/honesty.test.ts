@@ -80,7 +80,9 @@ describe("the honesty table", () => {
   it("words every cause as obsdb.HoleNoteFor does, and a mark's cause wins over the badge's words (D5)", () => {
     for (const g of golden) {
       const mine = isHole(g.hole) ? (CAUSES[g.hole] ?? {}) : {}
-      expect(Object.keys(mine).sort(), g.hole).toEqual(Object.keys(g.causes ?? {}).sort())
+      expect(Object.keys(mine).sort(), g.hole).toEqual(
+        Object.keys(g.causes ?? {}).sort()
+      )
       for (const [cause, note] of Object.entries(g.causes ?? {})) {
         expect(mine[cause], `${g.hole}/${cause}`).toEqual(note)
         const w = holeWords({ hole: g.hole, cause })
@@ -89,9 +91,13 @@ describe("the honesty table", () => {
       }
     }
     // A result cap's cut is the badge, not the recorder's words.
-    expect(holeWords({ hole: "truncated", cause: "result_cap", bytes: 12 }).label).toBe("truncated")
+    expect(
+      holeWords({ hole: "truncated", cause: "result_cap", bytes: 12 }).label
+    ).toBe("truncated")
     // An unknown cause reads the badge's own words.
-    expect(holeWords({ hole: "gap", cause: "nope" }).reason).toBe(HOLES.gap.reason)
+    expect(holeWords({ hole: "gap", cause: "nope" }).reason).toBe(
+      HOLES.gap.reason
+    )
   })
 
   it("reads an event's attrs: the recorder's cut and the content-off mark", () => {
@@ -104,9 +110,9 @@ describe("the honesty table", () => {
     expect(contentHoles({ "weft.content": "none" })).toEqual([
       { hole: "stripped" },
     ])
-    expect(
-      contentHoles({ "weft.content.truncated_bytes": 12595 })
-    ).toEqual([{ hole: "truncated", bytes: 12595 }])
+    expect(contentHoles({ "weft.content.truncated_bytes": 12595 })).toEqual([
+      { hole: "truncated", bytes: 12595 },
+    ])
   })
 
   it("says what the recorder cut, in bytes", () => {
@@ -143,12 +149,18 @@ describe("statusHoles", () => {
     expect(statusHoles({ status: "running", gaps: [4] })).toEqual([])
     expect(statusHoles({ gaps: [4] })).toEqual([])
     expect(statusHoles({ status: "failed", gaps: [4, 5] })).toEqual([
-      { hole: "gap", reason: "2 events missing (positions 4, 5): a destination dropped a batch" },
+      {
+        hole: "gap",
+        reason:
+          "2 events missing (positions 4, 5): a destination dropped a batch",
+      },
     ])
-    expect(statusHoles({ status: "succeeded", stop_reason: "max_tokens" })).toEqual([
-      { hole: "max_tokens" },
+    expect(
+      statusHoles({ status: "succeeded", stop_reason: "max_tokens" })
+    ).toEqual([{ hole: "max_tokens" }])
+    expect(statusHoles({ status: "interrupted" })).toEqual([
+      { hole: "interrupted" },
     ])
-    expect(statusHoles({ status: "interrupted" })).toEqual([{ hole: "interrupted" }])
   })
 })
 
@@ -156,14 +168,24 @@ describe("statusHoles", () => {
 // panel's one module; studio/appturn.go and studio/manifest.go are the
 // words' source, read here so the two cannot drift.
 describe("the app turn's kinds and refusal words", () => {
-  const turn = { id: "s-t1", session_id: "s", public_id: "pub_s", service: "app" }
-  const rt = (o: Partial<{ id: string; connected: boolean; sessions: boolean }> = {}) => ({ id: "rt_1", service: "app", connected: true, sessions: true, ...o })
-  const go = (f: string) => readFileSync(resolve(process.cwd(), `../${f}`), "utf8")
+  const turn = {
+    id: "s-t1",
+    session_id: "s",
+    public_id: "pub_s",
+    service: "app",
+  }
+  const rt = (
+    o: Partial<{ id: string; connected: boolean; sessions: boolean }> = {}
+  ) => ({ id: "rt_1", service: "app", connected: true, sessions: true, ...o })
+  const go = (f: string) =>
+    readFileSync(resolve(process.cwd(), `../${f}`), "utf8")
 
   it("a subagent's child run is decided on its parent turn: no verb, the parent named", () => {
     const child = { ...turn, id: "s-t1/0/call_1", parent_run_id: "s-t1" }
     expect(parkedKind(child, [rt()])).toBe("child")
-    expect(refusalLine(refusalWords("child", child, [rt()], false))).toBe(`${SUBAGENT_CALL} s-t1`)
+    expect(refusalLine(refusalWords("child", child, [rt()], false))).toBe(
+      `${SUBAGENT_CALL} s-t1`
+    )
   })
 
   it("a thread/pool child's turn (its own session's turn under the delegating call): decided on the parent session, never the plain line", () => {
@@ -172,7 +194,14 @@ describe("the app turn's kinds and refusal words", () => {
     // under the delegating call's ctx, so core stamps weft.parent.run.id.
     // thread stamps weft.session.parent on every pool child's run.
     const meta = { "weft.session.parent": "s" }
-    const child = { id: "s_pool-t1", session_id: "s_pool", public_id: "", service: "app", parent_run_id: "s-t1", meta }
+    const child = {
+      id: "s_pool-t1",
+      session_id: "s_pool",
+      public_id: "",
+      service: "app",
+      parent_run_id: "s-t1",
+      meta,
+    }
     expect(parkedKind(child, [rt()])).toBe("pool-child")
     const w = refusalWords(parkedKind(child, [rt()]), child, [rt()], false)
     expect(refusalLine(w)).toBe(`${POOL_CHILD} s ${POOL_CHILD_TURN} s-t1`)
@@ -182,7 +211,13 @@ describe("the app turn's kinds and refusal words", () => {
   })
 
   it("a pool child p.Submit started outside a run (no parent run id — core stamps it only from a running call's ctx): still pool-child, the parent session named", () => {
-    const sub = { id: "s_sub-t1", session_id: "s_sub", public_id: "", service: "app", meta: { "weft.session.parent": "s" } }
+    const sub = {
+      id: "s_sub-t1",
+      session_id: "s_sub",
+      public_id: "",
+      service: "app",
+      meta: { "weft.session.parent": "s" },
+    }
     expect(parkedKind(sub, [rt()])).toBe("pool-child")
     expect(parkedKind(sub, [rt()], "s_sub-t2")).toBe("pool-child")
     const w = refusalWords("pool-child", sub, [rt()], false)
@@ -193,11 +228,23 @@ describe("the app turn's kinds and refusal words", () => {
   })
 
   it("a non-pool Send inside a tool handler (a parent run id, its own session and public id, no weft.session.parent): its own session's turn, never pool-child", () => {
-    const send = { id: "s2-t1", session_id: "s2", public_id: "pub_s2", service: "app", parent_run_id: "s-t1" }
+    const send = {
+      id: "s2-t1",
+      session_id: "s2",
+      public_id: "pub_s2",
+      service: "app",
+      parent_run_id: "s-t1",
+    }
     expect(parkedKind(send, [rt()])).toBe("decide")
     expect(parkedKind(send, [rt({ sessions: false })])).toBe("read-only")
     expect(parkedKind(send, [rt()], "s2-t2")).toBe("resumed")
-    expect(nextTurn(send, [send, { id: "s2-t2", session_id: "s2", turn: 2 }, { id: "s2-t1/0/c", session_id: "s2", turn: 3, parent_run_id: "s2-t1" }])).toBe("s2-t2")
+    expect(
+      nextTurn(send, [
+        send,
+        { id: "s2-t2", session_id: "s2", turn: 2 },
+        { id: "s2-t1/0/c", session_id: "s2", turn: 3, parent_run_id: "s2-t1" },
+      ])
+    ).toBe("s2-t2")
     expect(appTurn(send)).toBe(true)
     expect(parkedKind({ ...send, public_id: "" }, [rt()])).toBe("no-public-id")
   })
@@ -211,7 +258,11 @@ describe("the app turn's kinds and refusal words", () => {
     expect(parkedKind(inherited, [rt()])).toBe("plain")
     const nested = { id: "r_nested", service: "app", parent_run_id: "s-t1" }
     expect(parkedKind(nested, [rt()])).toBe("plain")
-    expect(refusalLine(refusalWords(parkedKind(nested, [rt()]), nested, [rt()], false))).toBe(`${APP_RUN} — fix: ${APP_RUN_FIX}`)
+    expect(
+      refusalLine(
+        refusalWords(parkedKind(nested, [rt()]), nested, [rt()], false)
+      )
+    ).toBe(`${APP_RUN} — fix: ${APP_RUN_FIX}`)
     expect(go("pricing.go")).toContain(`strings.HasPrefix(k.ID, id+"/")`)
   })
 
@@ -219,46 +270,93 @@ describe("the app turn's kinds and refusal words", () => {
     // core/metadata.go mergeMetadata: a run's ctx metadata reaches every
     // run started under it, weft.session.parent included.
     const meta = { "weft.session.parent": "s" }
-    const nested = { id: "r_nested", session_id: "s_pool", public_id: "pub_s", service: "app", parent_run_id: "s_pool-t1", meta }
+    const nested = {
+      id: "r_nested",
+      session_id: "s_pool",
+      public_id: "pub_s",
+      service: "app",
+      parent_run_id: "s_pool-t1",
+      meta,
+    }
     expect(parkedKind(nested, [rt()])).toBe("plain")
     expect(parkedKind(nested, [rt()], "s_pool-t2")).toBe("plain")
-    expect(refusalLine(refusalWords(parkedKind(nested, [rt()]), nested, [rt()], false))).toBe(`${APP_RUN} — fix: ${APP_RUN_FIX}`)
+    expect(
+      refusalLine(
+        refusalWords(parkedKind(nested, [rt()]), nested, [rt()], false)
+      )
+    ).toBe(`${APP_RUN} — fix: ${APP_RUN_FIX}`)
     expect(appTurn(nested)).toBe(false)
     // The pool child's own turn under the delegating call stays pool-child.
-    expect(parkedKind({ ...nested, id: "s_pool-t1", parent_run_id: "s-t1" }, [rt()])).toBe("pool-child")
+    expect(
+      parkedKind({ ...nested, id: "s_pool-t1", parent_run_id: "s-t1" }, [rt()])
+    ).toBe("pool-child")
   })
 
   it("a session turn without a public id: appturn.go's 403 words and fix", () => {
     const row = { ...turn, public_id: "" }
     expect(parkedKind(row, [rt()])).toBe("no-public-id")
-    expect(refusalWords("no-public-id", row, [rt()], false)).toEqual({ words: noPublicIDWords("s-t1"), fix: APP_RUN_FIX })
-    expect(go("appturn.go")).toContain(`appOwned+" · read-only: run "+row.ID+" is not a turn of a thread session with a public id"`)
+    expect(refusalWords("no-public-id", row, [rt()], false)).toEqual({
+      words: noPublicIDWords("s-t1"),
+      fix: APP_RUN_FIX,
+    })
+    expect(go("appturn.go")).toContain(
+      `appOwned+" · read-only: run "+row.ID+" is not a turn of a thread session with a public id"`
+    )
     // Outside a session it stays the plain Generate's line.
-    expect(parkedKind({ ...turn, session_id: "", public_id: "" }, [rt()])).toBe("plain")
+    expect(parkedKind({ ...turn, session_id: "", public_id: "" }, [rt()])).toBe(
+      "plain"
+    )
   })
 
   it("a Studio without the playground: capabilities_off's reason, never the closed-link line; a failed meta read said as such", () => {
     const off = /offPlayground\s*=\s*"([^"]+)"/.exec(go("manifest.go"))![1]
-    const w = refusalWords("read-only", turn, null, false, undefined, "", { capabilities: ["live"], capabilities_off: { playground: off } })
-    expect(w).toEqual({ words: `${APP_OWNED}: ${PLAYGROUND_OFF}`, fix: off.replace(/^the playground is off:\s*/, "") })
+    const w = refusalWords("read-only", turn, null, false, undefined, "", {
+      capabilities: ["live"],
+      capabilities_off: { playground: off },
+    })
+    expect(w).toEqual({
+      words: `${APP_OWNED}: ${PLAYGROUND_OFF}`,
+      fix: off.replace(/^the playground is off:\s*/, ""),
+    })
     expect(`the playground is off: ${PLAYGROUND_OFF_FIX}`).toBe(off)
     // No capabilities_off sent: the same words, Go's fix.
-    expect(refusalWords("read-only", turn, null, false, undefined, "", { capabilities: [] }).fix).toBe(PLAYGROUND_OFF_FIX)
-    expect(refusalWords("read-only", turn, null, false, undefined, "", { metaError: "boom" })).toEqual({ words: `${CAPS_UNREAD}: boom`, fix: "" })
+    expect(
+      refusalWords("read-only", turn, null, false, undefined, "", {
+        capabilities: [],
+      }).fix
+    ).toBe(PLAYGROUND_OFF_FIX)
+    expect(
+      refusalWords("read-only", turn, null, false, undefined, "", {
+        metaError: "boom",
+      })
+    ).toEqual({ words: `${CAPS_UNREAD}: boom`, fix: "" })
     // A read token is told about its token first.
-    expect(refusalWords("read-only", turn, null, true, undefined, "", { capabilities: [] }).words).toBe(READ_TOKEN)
+    expect(
+      refusalWords("read-only", turn, null, true, undefined, "", {
+        capabilities: [],
+      }).words
+    ).toBe(READ_TOKEN)
   })
 
   it("a failed session read is said as such, never a verdict", () => {
-    expect(refusalWords("decide", turn, [rt()], false, undefined, "", { capabilities: ["playground"], sessionError: "500" })).toEqual({
+    expect(
+      refusalWords("decide", turn, [rt()], false, undefined, "", {
+        capabilities: ["playground"],
+        sessionError: "500",
+      })
+    ).toEqual({
       words: `${SESSION_UNREAD}: 500`,
       fix: "",
     })
   })
 
   it("a finished steer reads steered, a finished decision decided", () => {
-    expect(appVerbWords({ state: "finished" }, "r", "steer").text).toBe("steered")
-    expect(appVerbWords({ state: "finished", decision: "approve" }, "r").text).toBe("decided")
+    expect(appVerbWords({ state: "finished" }, "r", "steer").text).toBe(
+      "steered"
+    )
+    expect(
+      appVerbWords({ state: "finished", decision: "approve" }, "r").text
+    ).toBe("decided")
     // The panel's steer carries no decision: steered without the argument.
     expect(appVerbWords({ state: "finished" }, "r").text).toBe("steered")
   })

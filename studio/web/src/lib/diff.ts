@@ -16,7 +16,10 @@ export function diffLines(before: string, after: string): DiffRow[] {
   )
   for (let i = a.length - 1; i >= 0; i--) {
     for (let j = b.length - 1; j >= 0; j--) {
-      lcs[i][j] = a[i] === b[j] ? lcs[i + 1][j + 1] + 1 : Math.max(lcs[i + 1][j], lcs[i][j + 1])
+      lcs[i][j] =
+        a[i] === b[j]
+          ? lcs[i + 1][j + 1] + 1
+          : Math.max(lcs[i + 1][j], lcs[i][j + 1])
     }
   }
   const out: DiffRow[] = []
@@ -55,12 +58,17 @@ export const DIFF_CAP = 2000
 
 /** A bounded diff: the rows, or — past the cap — the sizes of the
  * middle that differs, for a "too large to diff" note. */
-export type BoundedDiff = { rows: DiffRow[] } | { tooLarge: { before: number; after: number } }
+export type BoundedDiff =
+  { rows: DiffRow[] } | { tooLarge: { before: number; after: number } }
 
 /** diffLinesBounded is diffLines with the common leading and trailing
  * lines trimmed before the LCS (a prompt rewrite is usually local),
  * and the middle capped at `cap` lines a side. */
-export function diffLinesBounded(before: string, after: string, cap = DIFF_CAP): BoundedDiff {
+export function diffLinesBounded(
+  before: string,
+  after: string,
+  cap = DIFF_CAP
+): BoundedDiff {
   const a = before.split("\n")
   const b = after.split("\n")
   let head = 0
@@ -76,12 +84,19 @@ export function diffLinesBounded(before: string, after: string, cap = DIFF_CAP):
   const midB = b.slice(head, b.length - tail)
   if (midA.length > cap || midB.length > cap)
     return { tooLarge: { before: a.length, after: b.length } }
-  const same = (lines: string[]): DiffRow[] => lines.map((text) => ({ kind: "same", text }))
+  const same = (lines: string[]): DiffRow[] =>
+    lines.map((text) => ({ kind: "same", text }))
   const mid: DiffRow[] =
     midA.length === 0
       ? midB.map((text) => ({ kind: "add", text }))
       : midB.length === 0
         ? midA.map((text) => ({ kind: "del", text }))
         : diffLines(midA.join("\n"), midB.join("\n"))
-  return { rows: [...same(a.slice(0, head)), ...mid, ...same(a.slice(a.length - tail))] }
+  return {
+    rows: [
+      ...same(a.slice(0, head)),
+      ...mid,
+      ...same(a.slice(a.length - tail)),
+    ],
+  }
 }

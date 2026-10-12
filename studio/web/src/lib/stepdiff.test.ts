@@ -21,7 +21,12 @@ import type { DiffDoc, DiffRowDoc } from "./stepdiff"
 import { HOLES, holeWords } from "./honesty"
 
 const golden = (name: string) =>
-  JSON.parse(readFileSync(resolve(process.cwd(), `../testdata/api/${name}.golden.json`), "utf8")) as DiffDoc
+  JSON.parse(
+    readFileSync(
+      resolve(process.cwd(), `../testdata/api/${name}.golden.json`),
+      "utf8"
+    )
+  ) as DiffDoc
 
 const SAME = Object.fromEntries(DIFF_COLUMNS.map((c) => [c, "same"]))
 
@@ -32,7 +37,8 @@ describe("stepDiffView over diff.golden.json (a tool result differs at step 3)",
     expect(v.rows.map((r) => r.step)).toEqual([0, 1, 2, 3, 4])
     expect(v.markers).toEqual([3])
     for (const r of v.rows) {
-      if (r.step === 3) expect(r.cells).toEqual({ ...SAME, tool_results: "changed" })
+      if (r.step === 3)
+        expect(r.cells).toEqual({ ...SAME, tool_results: "changed" })
       else expect(r.cells).toEqual(SAME)
     }
     expect(markerWords(v.rows[3])).toBe("changed at step 3 · tool results")
@@ -43,7 +49,9 @@ describe("stepDiffView over diff.golden.json (a tool result differs at step 3)",
 
   it("prints each side's values the same way on every surface", () => {
     const r = v.rows[3]
-    expect(cellText(r.a.side, "tool_calls")).toBe('lookup_order({"order_id":"3"})')
+    expect(cellText(r.a.side, "tool_calls")).toBe(
+      'lookup_order({"order_id":"3"})'
+    )
     expect(cellText(r.a.side, "tool_results")).toBe("order 3 shipped")
     expect(cellText(r.b.side, "tool_results")).toBe("order 3 lost")
     expect(cellText(r.a.side, "system")).toBe("You are a support agent.")
@@ -76,12 +84,18 @@ describe("the hidden and not-recorded goldens", () => {
     expect(v.markers).toEqual([])
     for (const r of v.rows) {
       for (const c of DIFF_COLUMNS) expect(r.cells[c]).toBe("unknown")
-      expect(r.a.holes.map((h) => h.hole)).toEqual(["gap", "not_recorded", "derived"])
+      expect(r.a.holes.map((h) => h.hole)).toEqual([
+        "gap",
+        "not_recorded",
+        "derived",
+      ])
     }
     expect(CELL_WORDS.unknown).toBe("not comparable")
     expect(v.unknown).toBe(10)
     // "no step changed" says it covers only what both recorded
-    expect(summaryWords(v)).toBe("no step changed of 2 · 10 cells not comparable")
+    expect(summaryWords(v)).toBe(
+      "no step changed of 2 · 10 cells not comparable"
+    )
   })
 })
 
@@ -105,23 +119,39 @@ describe("missing steps, marks and the response's holes", () => {
     const v = stepDiffView(short)
     expect(v.markers).toEqual([4])
     for (const c of DIFF_COLUMNS) expect(v.rows[4].cells[c]).toBe("missing")
-    expect(markerWords(v.rows[4])).toBe("changed at step 4 · only in the base run")
-    expect(summaryWords(v)).toBe("1 of 5 steps changed (1 only in one run) · first at step 4")
+    expect(markerWords(v.rows[4])).toBe(
+      "changed at step 4 · only in the base run"
+    )
+    expect(summaryWords(v)).toBe(
+      "1 of 5 steps changed (1 only in one run) · first at step 4"
+    )
   })
 
   it("the response's truncated hole is the response_cap cause", () => {
-    expect(stepDiffView(short).holes).toEqual([{ hole: "truncated", reason: "r", fix: "f", cause: "response_cap" }])
+    expect(stepDiffView(short).holes).toEqual([
+      { hole: "truncated", reason: "r", fix: "f", cause: "response_cap" },
+    ])
   })
 
   it("a mark the side's holes already carry is drawn once, as the hole", () => {
-    const side = { ...base.steps[0].a!, marks: ["max_tokens", "compacted", "subagent"], holes: [{ hole: "max_tokens", reason: "cut" }] }
+    const side = {
+      ...base.steps[0].a!,
+      marks: ["max_tokens", "compacted", "subagent"],
+      holes: [{ hole: "max_tokens", reason: "cut" }],
+    }
     const sv = sideView(side)
     expect(sv.holes.map((h) => h.hole)).toEqual(["max_tokens"])
-    expect(sv.marks.map((m) => [m.mark, m.hole])).toEqual([["compacted", "compacted"], ["subagent", undefined]])
+    expect(sv.marks.map((m) => [m.mark, m.hole])).toEqual([
+      ["compacted", "compacted"],
+      ["subagent", undefined],
+    ])
   })
 
   it("marks take the table's words where they are holes, their own else", () => {
-    expect(markChip("compacted")).toMatchObject({ label: HOLES.compacted.label, hole: "compacted" })
+    expect(markChip("compacted")).toMatchObject({
+      label: HOLES.compacted.label,
+      hole: "compacted",
+    })
     expect(markChip("max_tokens").hole).toBe("max_tokens")
     expect(markChip("interrupted").hole).toBe("interrupted")
     for (const m of ["subagent", "parked", "running", "error"]) {
@@ -137,11 +167,17 @@ describe("missing steps, marks and the response's holes", () => {
     expect(n.others.map((o) => o.run_id)).toEqual(["r_db", "r_dc"])
     expect(n.markers).toEqual([[3], [4]])
     expect(n.rows.filter((r) => r.changed).map((r) => r.step)).toEqual([3, 4])
-    expect(n.rows[3].others.map((o) => o.cells.tool_results)).toEqual(["changed", "same"])
+    expect(n.rows[3].others.map((o) => o.cells.tool_results)).toEqual([
+      "changed",
+      "same",
+    ])
     expect(n.rows[4].others[1].cells.text).toBe("missing")
     expect(n.rows[4].base.side?.text).toBe("all looked up")
     // Not one base: no throw, an empty view with its one line.
-    const bad = nWayView([base, { ...short, a: { ...short.a, run_id: "other" } }])
+    const bad = nWayView([
+      base,
+      { ...short, a: { ...short.a, run_id: "other" } },
+    ])
     expect(bad.rows).toEqual([])
     expect(bad.error).toMatch(/one base run: r_da and other/)
     expect(nWayView([]).error).toMatch(/no run was compared/)

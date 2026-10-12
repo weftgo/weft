@@ -21,7 +21,13 @@
 //   - a RequireApproval tool parks at the approval boundary anyway;
 //   - a tool switched off in tools_enabled is not offered at all.
 // lib/replay.test.ts pins the table.
-import type { AgentView, Message, RuntimeView, ToolEntry, ToolView } from "./api"
+import type {
+  AgentView,
+  Message,
+  RuntimeView,
+  ToolEntry,
+  ToolView,
+} from "./api"
 import type { ReplayEdit } from "./edits"
 
 /** The command's side_effects mode ("" is the server's default,
@@ -68,15 +74,22 @@ export interface VerdictInput {
 
 /** The class words: "replay safe", "replay never", "replay never
  * (unannotated)" — unannotated counts as never. */
-function classWords(entry: CatalogTool, reg: ToolView | undefined): { safe: boolean; words: string } {
+function classWords(
+  entry: CatalogTool,
+  reg: ToolView | undefined
+): { safe: boolean; words: string } {
   const cls = reg ? reg.side_effects : entry.replay
   if (cls === "safe") return { safe: true, words: "replay safe" }
   // A registration says "never" for an unannotated tool too; the
   // catalog keeps the difference ("" = no annotation at all).
-  return { safe: false, words: entry.replay ? "replay never" : "replay never (unannotated)" }
+  return {
+    safe: false,
+    words: entry.replay ? "replay never" : "replay never (unannotated)",
+  }
 }
 
-const SUBSTITUTED = "substituted from the recorded result when the call repeats, else parked"
+const SUBSTITUTED =
+  "substituted from the recorded result when the call repeats, else parked"
 
 /**
  * replayVerdicts is the ack preview's list: per tool, whether its calls
@@ -85,16 +98,20 @@ const SUBSTITUTED = "substituted from the recorded result when the call repeats,
  */
 export function replayVerdicts(input: VerdictInput): ToolVerdict[] {
   const mode: SideEffectsMode = input.mode === "" ? "substitute" : input.mode
-  const enabled = input.toolsEnabled?.length ? new Set(input.toolsEnabled) : null
+  const enabled = input.toolsEnabled?.length
+    ? new Set(input.toolsEnabled)
+    : null
   const breaks = new Set(input.breakpoints ?? [])
   const reg = new Map((input.agent?.tools ?? []).map((t) => [t.name, t]))
   return input.catalog.map((entry): ToolVerdict => {
     const name = entry.name
-    if (enabled && !enabled.has(name)) return { name, verdict: "off", why: "off" }
+    if (enabled && !enabled.has(name))
+      return { name, verdict: "off", why: "off" }
     const r = reg.get(name)
     const { safe, words } = classWords(entry, r)
     const output = name === OUTPUT_TOOL
-    const runsForReal = safe || output || (mode === "allow" && Boolean(r?.allow))
+    const runsForReal =
+      safe || output || (mode === "allow" && Boolean(r?.allow))
     // The server's allow check walks every tool left on, a breakpoint
     // or an approval tool included: the refusal is the command's, not
     // the call's.
@@ -102,18 +119,38 @@ export function replayVerdicts(input: VerdictInput): ToolVerdict[] {
     // The runtime's breakpoints are restricted to the agent's own
     // tools (executor.go's breakpointTools).
     if (breaks.has(name) && (r || !input.agent))
-      return { name, verdict: "parked", why: "breakpoint · parks", ...(refuses ? { refuses } : {}) }
+      return {
+        name,
+        verdict: "parked",
+        why: "breakpoint · parks",
+        ...(refuses ? { refuses } : {}),
+      }
     if (entry.approval) {
       // Parked at the approval boundary whatever the class; the
       // substitute chain answers a parked call it recorded.
       return mode === "substitute"
-        ? { name, verdict: "substituted", why: `requires approval · ${SUBSTITUTED}` }
-        : { name, verdict: "parked", why: "requires approval · parks at the approval boundary", ...(refuses ? { refuses } : {}) }
+        ? {
+            name,
+            verdict: "substituted",
+            why: `requires approval · ${SUBSTITUTED}`,
+          }
+        : {
+            name,
+            verdict: "parked",
+            why: "requires approval · parks at the approval boundary",
+            ...(refuses ? { refuses } : {}),
+          }
     }
-    if (output) return { name, verdict: "runs", why: "structured output · runs" }
+    if (output)
+      return { name, verdict: "runs", why: "structured output · runs" }
     if (safe) return { name, verdict: "runs", why: `${words} · runs` }
     if (mode === "allow") {
-      if (r?.allow) return { name, verdict: "runs", why: "opted in by AllowSideEffects · runs for real" }
+      if (r?.allow)
+        return {
+          name,
+          verdict: "runs",
+          why: "opted in by AllowSideEffects · runs for real",
+        }
       return {
         name,
         verdict: "parked",
@@ -121,9 +158,19 @@ export function replayVerdicts(input: VerdictInput): ToolVerdict[] {
         refuses: true,
       }
     }
-    const unregistered = input.agent && !r ? " · not registered on the runtime" : ""
-    if (mode === "park") return { name, verdict: "parked", why: `${words}${unregistered} · parks (side effects: park)` }
-    return { name, verdict: "substituted", why: `${words}${unregistered} · ${SUBSTITUTED}` }
+    const unregistered =
+      input.agent && !r ? " · not registered on the runtime" : ""
+    if (mode === "park")
+      return {
+        name,
+        verdict: "parked",
+        why: `${words}${unregistered} · parks (side effects: park)`,
+      }
+    return {
+      name,
+      verdict: "substituted",
+      why: `${words}${unregistered} · ${SUBSTITUTED}`,
+    }
   })
 }
 
@@ -144,13 +191,18 @@ export function allowRefusals(
   const on = toolsEnabled?.length ? new Set(toolsEnabled) : null
   return agent.tools
     .filter((t) => !on || on.has(t.name))
-    .filter((t) => !t.allow && t.side_effects !== "safe" && t.name !== OUTPUT_TOOL)
+    .filter(
+      (t) => !t.allow && t.side_effects !== "safe" && t.name !== OUTPUT_TOOL
+    )
     .map((t) => t.name)
 }
 
 /** The breakpoints a runtime parks on for this agent (its stored set,
  * restricted to the agent's tools). */
-export function breakpointsFor(runtime: Pick<RuntimeView, "breakpoints"> | undefined, agent: Pick<AgentView, "tools"> | undefined): string[] {
+export function breakpointsFor(
+  runtime: Pick<RuntimeView, "breakpoints"> | undefined,
+  agent: Pick<AgentView, "tools"> | undefined
+): string[] {
   const have = new Set((agent?.tools ?? []).map((t) => t.name))
   return (runtime?.breakpoints ?? []).filter((t) => have.has(t))
 }
@@ -165,7 +217,8 @@ export function breakpointsFor(runtime: Pick<RuntimeView, "breakpoints"> | undef
 // without a stored step, where order is the ordinal). A card sends its
 // own step.index — a fold with a gap shifts nothing.
 
-export type ReplayVerb = "from_step" | "edit_result" | "edit_prompt" | "rerun" | "continue" | "edit"
+export type ReplayVerb =
+  "from_step" | "edit_result" | "edit_prompt" | "rerun" | "continue" | "edit"
 
 /** One transcript edit on the kept prefix (lib/edits.ts: the five
  * kinds, the wire both clients' buildRunBody send). step is the step
@@ -196,14 +249,24 @@ function pos(n: number): number {
 
 /** replay from this step: steps 0..n-1 kept, step n run fresh. */
 export function replayFromStep(n: number): ReplayDraft {
-  return { verb: "from_step", fromStep: pos(n), edits: [], thread: "ephemeral", input: "" }
+  return {
+    verb: "from_step",
+    fromStep: pos(n),
+    edits: [],
+    thread: "ephemeral",
+    input: "",
+  }
 }
 
 /** edit this result and replay: step `step`'s call `callID` patched
  * (pre-filled with its recorded content), the next step run fresh —
  * from_step = step + 1. An empty recorded result seeds no draft: the
  * server refuses an empty edit (400), so the field starts blank. */
-export function editResultAndReplay(step: number, callID: string, content: string): ReplayDraft {
+export function editResultAndReplay(
+  step: number,
+  callID: string,
+  content: string
+): ReplayDraft {
   const at = pos(step)
   return {
     verb: "edit_result",
@@ -217,7 +280,10 @@ export function editResultAndReplay(step: number, callID: string, content: strin
 
 /** edit the prompt and replay: step n run fresh under an edited system
  * prompt, pre-filled with the text the step was called with. */
-export function editPromptAndReplay(n: number, systemText?: string): ReplayDraft {
+export function editPromptAndReplay(
+  n: number,
+  systemText?: string
+): ReplayDraft {
   return {
     verb: "edit_prompt",
     fromStep: pos(n),
@@ -232,33 +298,60 @@ export function editPromptAndReplay(n: number, systemText?: string): ReplayDraft
 /** edit the transcript and replay (plan F2): the Story's in-place
  * editor opened the drawer; from_step is what its edits imply
  * (lib/edits.ts's impliedFromStep), the edits come as they are made. */
-export function editTranscript(fromStep: number, edits: ReplayEdit[] = []): ReplayDraft {
-  return { verb: "edit", fromStep: pos(fromStep), edits, thread: "ephemeral", input: "" }
+export function editTranscript(
+  fromStep: number,
+  edits: ReplayEdit[] = []
+): ReplayDraft {
+  return {
+    verb: "edit",
+    fromStep: pos(fromStep),
+    edits,
+    thread: "ephemeral",
+    input: "",
+  }
 }
 
 /** re-run: the whole turn again (from_step 0, the source's own input). */
 export function rerun(): ReplayDraft {
-  return { verb: "rerun", fromStep: 0, edits: [], thread: "ephemeral", input: "" }
+  return {
+    verb: "rerun",
+    fromStep: 0,
+    edits: [],
+    thread: "ephemeral",
+    input: "",
+  }
 }
 
 /** continue here with a new message: a fork — a new session with
  * lineage whose next turn is the message typed in the drawer. */
 export function continueHere(): ReplayDraft {
-  return { verb: "continue", fromStep: 0, edits: [], thread: "fork", input: "", focus: "input" }
+  return {
+    verb: "continue",
+    fromStep: 0,
+    edits: [],
+    thread: "fork",
+    input: "",
+    focus: "input",
+  }
 }
 
 /** stepPositionOf is the from_step a step of the run sends: its own
  * ordinal (from_step IS the ordinal — see above), or -1 when the run
  * has no step of that ordinal. It never shifts a number: a fold that
  * lacks a step sends each card's own index. */
-export function stepPositionOf(stepIndexes: readonly number[], ordinal: number): number {
+export function stepPositionOf(
+  stepIndexes: readonly number[],
+  ordinal: number
+): number {
   return stepIndexes.includes(ordinal) ? ordinal : -1
 }
 
 /** transcriptStepCount is the server's stepCount (studio/edits.go):
  * one past the last step ordinal holding an assistant message. A
  * from_step at or past it has nothing fresh to answer (400). */
-export function transcriptStepCount(assistantOrdinals: readonly number[]): number {
+export function transcriptStepCount(
+  assistantOrdinals: readonly number[]
+): number {
   let n = 0
   for (const o of assistantOrdinals) if (o + 1 > n) n = o + 1
   return n
@@ -282,7 +375,8 @@ export function endsInAnsweredCalls(
   const answered = new Set<string>()
   for (const m of own.slice(last + 1))
     if (m.role === "tool")
-      for (const p of m.content) if (p.type === "tool_result") answered.add(p.call_id)
+      for (const p of m.content)
+        if (p.type === "tool_result") answered.add(p.call_id)
   let calls = 0
   for (const p of own[last].content) {
     if (p.type !== "tool_call") continue
@@ -305,7 +399,9 @@ export function maxFromStep(stepCount: number, answeredCalls: boolean): number {
 export function prefixLine(fromStep: number, compacted: boolean): string {
   if (fromStep <= 0) return "nothing kept · the whole turn runs again"
   const kept = fromStep === 1 ? "step 0 kept" : `steps 0–${fromStep - 1} kept`
-  return compacted ? `${kept} · the compacted prefix (what the model saw at step ${fromStep})` : kept
+  return compacted
+    ? `${kept} · the compacted prefix (what the model saw at step ${fromStep})`
+    : kept
 }
 
 /** The token scope a bearer carries: a panel token (weft_pt.<claims>.
@@ -317,7 +413,9 @@ export function tokenScopeOf(token: string): "" | "read" | "playground" {
   try {
     const body = token.slice("weft_pt.".length).split(".")[0]
     const b64 = body.replace(/-/g, "+").replace(/_/g, "/")
-    const claims = JSON.parse(atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4))) as { scope?: unknown }
+    const claims = JSON.parse(
+      atob(b64 + "=".repeat((4 - (b64.length % 4)) % 4))
+    ) as { scope?: unknown }
     return claims.scope === "playground" ? "playground" : "read"
   } catch {
     return "read"
@@ -328,6 +426,9 @@ export function tokenScopeOf(token: string): "" | "read" | "playground" {
  * playground AND the bearer may act — a read-scoped panel token is
  * refused on every write verb (S4.6), so they are hidden, not
  * disabled. The panel's canAct is the same rule. */
-export function canReplay(capabilities: readonly string[], token: string): boolean {
+export function canReplay(
+  capabilities: readonly string[],
+  token: string
+): boolean {
   return capabilities.includes("playground") && tokenScopeOf(token) !== "read"
 }

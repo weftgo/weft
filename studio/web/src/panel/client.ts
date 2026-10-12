@@ -26,7 +26,12 @@ import { asTranscript } from "../lib/api"
 import { diffPath } from "../lib/stepdiff"
 import type { DiffDoc } from "../lib/stepdiff"
 import type { LiveGrant, LiveRecord, LiveRun, LiveSelector } from "../lib/live"
-import { grantSpent, LiveGrantError, liveStreamURL, requestLiveGrant } from "../lib/live"
+import {
+  grantSpent,
+  LiveGrantError,
+  liveStreamURL,
+  requestLiveGrant,
+} from "../lib/live"
 
 export interface PanelEndpoint {
   /** Studio base URL, trailing slash included. */
@@ -78,7 +83,9 @@ async function failure(res: Response): Promise<PanelApiError> {
   let message = `${res.status} ${res.statusText}`
   let parsed: unknown
   try {
-    const body = (await res.json()) as { error?: { code?: string; message?: string } }
+    const body = (await res.json()) as {
+      error?: { code?: string; message?: string }
+    }
     parsed = body
     if (body.error) {
       code = body.error.code ?? code
@@ -92,13 +99,22 @@ async function failure(res: Response): Promise<PanelApiError> {
 
 /** PUT /api/agents/{name}/proposal (plan F6): keep as prompt's
  * proposal, the dev token's only (every panel token is 403). */
-export function putProposal(ep: PanelEndpoint, agent: string, instructions: string): Promise<unknown> {
-  return panelPut(ep, `agents/${encodeURIComponent(agent)}/proposal`, { instructions })
+export function putProposal(
+  ep: PanelEndpoint,
+  agent: string,
+  instructions: string
+): Promise<unknown> {
+  return panelPut(ep, `agents/${encodeURIComponent(agent)}/proposal`, {
+    instructions,
+  })
 }
 
 // ── Reads the panel uses (S4.2 shapes) ────────────────────────────
 
-export function fetchMeta(ep: PanelEndpoint, signal?: AbortSignal): Promise<Meta> {
+export function fetchMeta(
+  ep: PanelEndpoint,
+  signal?: AbortSignal
+): Promise<Meta> {
   return panelGet<Meta>(ep, "meta", signal)
 }
 
@@ -106,13 +122,21 @@ export function fetchMeta(ep: PanelEndpoint, signal?: AbortSignal): Promise<Meta
  * playground panel token's Studio page, as {location} — the minted
  * read token rides its fragment. Accept: application/json, as every
  * read here: a fetch cannot read a redirect's Location. */
-export function fetchHandoff(ep: PanelEndpoint, to: string): Promise<{ location: string }> {
+export function fetchHandoff(
+  ep: PanelEndpoint,
+  to: string
+): Promise<{ location: string }> {
   return panelGet(ep, `panel-handoff?to=${encodeURIComponent(to)}`)
 }
 
 /** GET /api/diff?a=&b= (capability "diff", plan E3): the step-aligned
  * compare lib/stepdiff.ts reads, as Studio fetches it. */
-export function fetchDiff(ep: PanelEndpoint, a: string, b: string, signal?: AbortSignal): Promise<DiffDoc> {
+export function fetchDiff(
+  ep: PanelEndpoint,
+  a: string,
+  b: string,
+  signal?: AbortSignal
+): Promise<DiffDoc> {
   return panelGet<DiffDoc>(ep, diffPath(a, b), signal)
 }
 
@@ -125,7 +149,11 @@ export function fetchRuns(
   return panelGet<RunsPage>(ep, `runs${qs ? `?${qs}` : ""}`, signal)
 }
 
-export function fetchRun(ep: PanelEndpoint, id: string, signal?: AbortSignal): Promise<RunDoc> {
+export function fetchRun(
+  ep: PanelEndpoint,
+  id: string,
+  signal?: AbortSignal
+): Promise<RunDoc> {
   return panelGet<RunDoc>(ep, `runs/${encodeURIComponent(id)}`, signal)
 }
 
@@ -150,9 +178,11 @@ export function fetchTranscript(
   // asTranscript also normalises: a messages body is stored verbatim
   // (studio/api.go's rawOrNull embeds any JSON, or a JSON string for a
   // non-JSON body), and the panel renders inside someone else's page.
-  return panelGet<RawTranscript>(ep, `runs/${encodeURIComponent(id)}/transcript`, signal).then(
-    asTranscript
-  )
+  return panelGet<RawTranscript>(
+    ep,
+    `runs/${encodeURIComponent(id)}/transcript`,
+    signal
+  ).then(asTranscript)
 }
 
 /** The request record pages the panel reads for one run: the turn is
@@ -183,13 +213,29 @@ export async function fetchRequests(
     } catch (err) {
       // Only the route's own hidden refusal is a hole; any other 403
       // (a token scoped to another conversation) is an error.
-      const body = err instanceof PanelApiError && err.status === 403 ? (err.body as Holed | null | undefined) : null
-      if (body?.badge === "hidden") return { requests: [], badge: "hidden", reason: body.reason, fix: body.fix }
+      const body =
+        err instanceof PanelApiError && err.status === 403
+          ? (err.body as Holed | null | undefined)
+          : null
+      if (body?.badge === "hidden")
+        return {
+          requests: [],
+          badge: "hidden",
+          reason: body.reason,
+          fix: body.fix,
+        }
       throw err
     }
     rows.push(...page.requests)
-    if (page.badge) return { requests: rows, badge: page.badge, reason: page.reason, fix: page.fix }
-    if (page.next_from === undefined || page.next_from <= from) return { requests: rows }
+    if (page.badge)
+      return {
+        requests: rows,
+        badge: page.badge,
+        reason: page.reason,
+        fix: page.fix,
+      }
+    if (page.next_from === undefined || page.next_from <= from)
+      return { requests: rows }
     from = page.next_from
   }
   return { requests: rows, truncated: true }
@@ -199,9 +245,17 @@ export async function fetchRequests(
  * reason and fix) — what the run page reads for a stripped row (the
  * requests route badges the row, the tools route words it). Undefined
  * when the route says nothing more. */
-export async function fetchStrippedNote(ep: PanelEndpoint, id: string): Promise<Holed | undefined> {
-  const doc = await panelGet<Holed>(ep, `runs/${encodeURIComponent(id)}/tools`).catch(() => null)
-  return doc?.badge === "stripped" ? { badge: doc.badge, reason: doc.reason, fix: doc.fix } : undefined
+export async function fetchStrippedNote(
+  ep: PanelEndpoint,
+  id: string
+): Promise<Holed | undefined> {
+  const doc = await panelGet<Holed>(
+    ep,
+    `runs/${encodeURIComponent(id)}/tools`
+  ).catch(() => null)
+  return doc?.badge === "stripped"
+    ? { badge: doc.badge, reason: doc.reason, fix: doc.fix }
+    : undefined
 }
 
 export function fetchSpans(
@@ -247,7 +301,11 @@ export function fetchPublic(
   publicId: string,
   signal?: AbortSignal
 ): Promise<PublicResolution> {
-  return panelGet<PublicResolution>(ep, `public/${encodeURIComponent(publicId)}`, signal)
+  return panelGet<PublicResolution>(
+    ep,
+    `public/${encodeURIComponent(publicId)}`,
+    signal
+  )
 }
 
 // ── The playground's verbs (WEFT-PLAYGROUND §10.4, P1–P5) ────────
@@ -291,7 +349,10 @@ export interface RuntimeView {
   breakpoints?: string[]
 }
 
-export function fetchRuntimes(ep: PanelEndpoint, signal?: AbortSignal): Promise<{ runtimes: RuntimeView[] }> {
+export function fetchRuntimes(
+  ep: PanelEndpoint,
+  signal?: AbortSignal
+): Promise<{ runtimes: RuntimeView[] }> {
   return panelGet<{ runtimes: RuntimeView[] }>(ep, "runtimes", signal)
 }
 
@@ -305,7 +366,10 @@ export function postPlaygroundRun(
 
 /** POST /api/playground/preview (plan F2): the run body in, the first
  * request the replay would send out (lib/preview.ts). */
-export function postPreview(ep: PanelEndpoint, body: Record<string, unknown>): Promise<PreviewDoc> {
+export function postPreview(
+  ep: PanelEndpoint,
+  body: Record<string, unknown>
+): Promise<PreviewDoc> {
   return panelPost(ep, PREVIEW_PATH, body)
 }
 
@@ -323,8 +387,14 @@ export interface CommandStatus {
   updated: string
 }
 
-export function fetchCommand(ep: PanelEndpoint, id: string): Promise<CommandStatus> {
-  return panelGet<CommandStatus>(ep, `playground/commands/${encodeURIComponent(id)}`)
+export function fetchCommand(
+  ep: PanelEndpoint,
+  id: string
+): Promise<CommandStatus> {
+  return panelGet<CommandStatus>(
+    ep,
+    `playground/commands/${encodeURIComponent(id)}`
+  )
 }
 
 /** POST /api/runs/{id}/approvals — the parked experiment's continue /
@@ -332,7 +402,12 @@ export function fetchCommand(ep: PanelEndpoint, id: string): Promise<CommandStat
 export function postApproval(
   ep: PanelEndpoint,
   runID: string,
-  body: { call_id: string; decision: "approve" | "deny" | "resolve"; reason?: string; content?: string }
+  body: {
+    call_id: string
+    decision: "approve" | "deny" | "resolve"
+    reason?: string
+    content?: string
+  }
 ): Promise<{ command_id: string; state: string }> {
   return panelPost(ep, `runs/${encodeURIComponent(runID)}/approvals`, body)
 }
@@ -344,31 +419,49 @@ export function putBreakpoints(
   runtimeID: string,
   tools: string[]
 ): Promise<{ tools?: string[] } | null> {
-  return panelPut(ep, `runtimes/${encodeURIComponent(runtimeID)}/breakpoints`, { tools })
+  return panelPut(ep, `runtimes/${encodeURIComponent(runtimeID)}/breakpoints`, {
+    tools,
+  })
 }
 
 /** POST /api/runs/{id}/steer — the rung-4 verb (§8.4): one user
  * message delivered into a runtime-started run mid-flight; on an app
  * turn (plan F4.3) a 202 with the command to poll. */
-export function postSteer(ep: PanelEndpoint, runID: string, message: string): Promise<{ steered?: boolean; command_id?: string }> {
+export function postSteer(
+  ep: PanelEndpoint,
+  runID: string,
+  message: string
+): Promise<{ steered?: boolean; command_id?: string }> {
   return panelPost(ep, `runs/${encodeURIComponent(runID)}/steer`, { message })
 }
 
 /** put one JSON document and decode the answer. */
-async function panelPut<T>(ep: PanelEndpoint, path: string, body: unknown): Promise<T> {
+async function panelPut<T>(
+  ep: PanelEndpoint,
+  path: string,
+  body: unknown
+): Promise<T> {
   const headers: Record<string, string> = {
     Accept: "application/json",
     "Content-Type": "application/json",
   }
   if (ep.token) headers.Authorization = `Bearer ${ep.token}`
-  const res = await fetch(apiUrl(ep, path), { method: "PUT", headers, body: JSON.stringify(body) })
+  const res = await fetch(apiUrl(ep, path), {
+    method: "PUT",
+    headers,
+    body: JSON.stringify(body),
+  })
   if (!res.ok) throw await failure(res)
   return (await res.json()) as T
 }
 
 /** post one JSON document and decode the answer (the panel's write
  * verbs are few; errors are PanelApiError like the reads). */
-export async function panelPost<T>(ep: PanelEndpoint, path: string, body: unknown): Promise<T> {
+export async function panelPost<T>(
+  ep: PanelEndpoint,
+  path: string,
+  body: unknown
+): Promise<T> {
   const headers: Record<string, string> = {
     Accept: "application/json",
     "Content-Type": "application/json",
@@ -441,7 +534,10 @@ export const LIVE_DEDUP_SIZE = 1 << 16
  * frame that does not parse is skipped, a handler that fails is
  * contained, and a refused grant is silence ("closed").
  */
-export function openPanelLive(ep: PanelEndpoint, opts: PanelLiveOptions): PanelLiveHandle {
+export function openPanelLive(
+  ep: PanelEndpoint,
+  opts: PanelLiveOptions
+): PanelLiveHandle {
   let closed = false
   let dropped = false
   let timer: ReturnType<typeof setTimeout> | null = null
@@ -474,13 +570,22 @@ export function openPanelLive(ep: PanelEndpoint, opts: PanelLiveOptions): PanelL
   // then opens the stream it names.
   const connect = () => {
     const n = ++attempt
-    requestLiveGrant(apiUrl(ep, "live-grant"), ep.token, opts.selector, opts.kinds).then(
+    requestLiveGrant(
+      apiUrl(ep, "live-grant"),
+      ep.token,
+      opts.selector,
+      opts.kinds
+    ).then(
       (grant) => {
         if (!closed && n === attempt) open(grant)
       },
       (err: unknown) => {
         if (closed || n !== attempt) return
-        if (opts.onRefused && err instanceof LiveGrantError && err.status === 403) {
+        if (
+          opts.onRefused &&
+          err instanceof LiveGrantError &&
+          err.status === 403
+        ) {
           stop()
           try {
             opts.onRefused()
@@ -498,7 +603,9 @@ export function openPanelLive(ep: PanelEndpoint, opts: PanelLiveOptions): PanelL
   const open = (grant: LiveGrant) => {
     let src: EventSource
     try {
-      src = new EventSource(liveStreamURL(apiUrl(ep, "live"), opts.selector, opts.kinds, grant))
+      src = new EventSource(
+        liveStreamURL(apiUrl(ep, "live"), opts.selector, opts.kinds, grant)
+      )
     } catch {
       // A URL it refuses: history only.
       stop()
@@ -529,7 +636,8 @@ export function openPanelLive(ep: PanelEndpoint, opts: PanelLiveOptions): PanelL
         if (seen.has(key)) return
         seen.add(key)
         // A Set iterates in insertion order: the first key is the oldest.
-        if (seen.size > LIVE_DEDUP_SIZE) seen.delete(seen.values().next().value as string)
+        if (seen.size > LIVE_DEDUP_SIZE)
+          seen.delete(seen.values().next().value as string)
         const id = e.lastEventId
         opts.onRecord?.({
           seq: Number(id) > 0 ? Number(id) : 0,
@@ -546,7 +654,9 @@ export function openPanelLive(ep: PanelEndpoint, opts: PanelLiveOptions): PanelL
     src.addEventListener(
       "run",
       guarded((e) => {
-        const raw = JSON.parse(e.data as string) as { run?: LiveRun["run"] } | null
+        const raw = JSON.parse(e.data as string) as {
+          run?: LiveRun["run"]
+        } | null
         if (!raw?.run || typeof raw.run.id !== "string") return
         const id = e.lastEventId
         opts.onRun?.({ seq: Number(id) > 0 ? Number(id) : 0, run: raw.run })

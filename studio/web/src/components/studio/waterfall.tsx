@@ -302,138 +302,154 @@ export function Waterfall({
         const gap = pads.before[n] ?? 0
         return (
           <Fragment key={sp.id}>
-          {gap > 0 ? (
-            <div className="col-span-3" style={{ height: gap }} aria-hidden data-spacer />
-          ) : null}
-          <div
-            className="group/row contents"
-            role="treeitem"
-            aria-selected={selected}
-            aria-expanded={kids > 0 ? !isFolded : undefined}
-            aria-level={sp.depth + 1}
-            aria-setsize={siblings.count.get(sp.parent ?? "")}
-            aria-posinset={siblings.at.get(sp.id)}
-            data-span={sp.key}
-          >
-            <div
-              ref={selected ? selRef : undefined}
-              className={`flex min-w-0 cursor-pointer items-center gap-1 border-b border-border/60 py-0.5 pr-2 ${cell(selected)} ${
-                selected ? "shadow-[inset_2px_0_0_var(--thread)]" : ""
-              } ${revealed ? "" : "opacity-40"}`}
-              style={{ paddingLeft: `${0.4 + sp.depth * 0.8}rem` }}
-              onClick={() => onSelect?.(sp)}
-              title={`${sp.label}${sp.sub ? ` — ${sp.sub}` : ""}`}
-            >
-              {kids > 0 ? (
-                <button
-                  type="button"
-                  className="flex size-4 shrink-0 items-center justify-center text-faint hover:text-foreground"
-                  aria-label={isFolded ? "expand" : "collapse"}
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    toggle(sp.id)
-                  }}
-                >
-                  <ChevronRight
-                    className={`size-3 transition-transform ${isFolded ? "" : "rotate-90"}`}
-                  />
-                </button>
-              ) : (
-                <span className="size-4 shrink-0" />
-              )}
-              <span
-                className={`w-3 shrink-0 text-center text-[10px] ${toneText[sp.tone]}`}
+            {gap > 0 ? (
+              <div
+                className="col-span-3"
+                style={{ height: gap }}
                 aria-hidden
-              >
-                {kindIcon[sp.kind]}
-              </span>
-              {(() => {
-                const cls = `shrink-0 truncate ${toneText[sp.tone]} ${
-                  sp.kind === "run" || sp.kind === "step" ? "font-medium" : ""
-                }`
-                const href = hrefOf?.(sp)
-                if (!href)
-                  return (
-                    <span className={cls} style={{ maxWidth: "8rem" }}>
-                      {sp.label}
-                    </span>
-                  )
-                // Out of the tab order: the tree is one stop, its rows
-                // walked with the arrows (the selection is the URL).
-                return (
-                  <a
-                    href={href}
-                    tabIndex={-1}
-                    data-span-link
-                    className={`${cls} hover:underline`}
-                    style={{ maxWidth: "8rem" }}
-                    onClick={(e) => {
-                      if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) {
-                        e.stopPropagation()
-                        return
-                      }
-                      e.preventDefault()
-                    }}
-                  >
-                    {sp.label}
-                  </a>
-                )
-              })()}
-              {sp.badge ? (
-                <span
-                  className={`max-w-28 shrink-0 truncate rounded-full border px-1.5 text-[9.5px] leading-4 ${badgeTone[sp.tone]}`}
-                  title={sp.badge}
-                >
-                  {sp.badge}
-                </span>
-              ) : null}
-              {sp.sub ? (
-                <span className="min-w-0 truncate text-faint">{sp.sub}</span>
-              ) : null}
-            </div>
+                data-spacer
+              />
+            ) : null}
             <div
-              className={`waterfall-track relative h-6 cursor-pointer border-b border-border/60 ${cell(selected)}`}
-              onClick={seekAt}
+              className="group/row contents"
+              role="treeitem"
+              aria-selected={selected}
+              aria-expanded={kids > 0 ? !isFolded : undefined}
+              aria-level={sp.depth + 1}
+              aria-setsize={siblings.count.get(sp.parent ?? "")}
+              aria-posinset={siblings.at.get(sp.id)}
+              data-span={sp.key}
             >
               <div
-                className={`absolute rounded-[2px] ${toneBar[sp.tone]} ${
-                  sp.to === null ? "waterfall-open" : ""
-                } ${
-                  sp.kind === "run" || sp.kind === "subagent"
-                    ? "top-2.5 h-1"
-                    : "top-1.5 h-3"
-                }`}
-                style={{ left: `${left}%`, width: `${width}%` }}
-              />
-              {playhead !== null && at <= hi ? (
-                <>
-                  <div
-                    className="pointer-events-none absolute inset-y-0 right-0 bg-background/70"
-                    style={{ left: `${pct(at, domain)}%` }}
-                  />
-                  <div
-                    className="pointer-events-none absolute inset-y-0 w-0.5 bg-thread"
-                    style={{ left: `${pct(at, domain)}%` }}
-                  />
-                </>
-              ) : null}
+                ref={selected ? selRef : undefined}
+                className={`flex min-w-0 cursor-pointer items-center gap-1 border-b border-border/60 py-0.5 pr-2 ${cell(selected)} ${
+                  selected ? "shadow-[inset_2px_0_0_var(--thread)]" : ""
+                } ${revealed ? "" : "opacity-40"}`}
+                style={{ paddingLeft: `${0.4 + sp.depth * 0.8}rem` }}
+                onClick={() => onSelect?.(sp)}
+                title={`${sp.label}${sp.sub ? ` — ${sp.sub}` : ""}`}
+              >
+                {kids > 0 ? (
+                  <button
+                    type="button"
+                    className="flex size-4 shrink-0 items-center justify-center text-faint hover:text-foreground"
+                    aria-label={isFolded ? "expand" : "collapse"}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      toggle(sp.id)
+                    }}
+                  >
+                    <ChevronRight
+                      className={`size-3 transition-transform ${isFolded ? "" : "rotate-90"}`}
+                    />
+                  </button>
+                ) : (
+                  <span className="size-4 shrink-0" />
+                )}
+                <span
+                  className={`w-3 shrink-0 text-center text-[10px] ${toneText[sp.tone]}`}
+                  aria-hidden
+                >
+                  {kindIcon[sp.kind]}
+                </span>
+                {(() => {
+                  const cls = `shrink-0 truncate ${toneText[sp.tone]} ${
+                    sp.kind === "run" || sp.kind === "step" ? "font-medium" : ""
+                  }`
+                  const href = hrefOf?.(sp)
+                  if (!href)
+                    return (
+                      <span className={cls} style={{ maxWidth: "8rem" }}>
+                        {sp.label}
+                      </span>
+                    )
+                  // Out of the tab order: the tree is one stop, its rows
+                  // walked with the arrows (the selection is the URL).
+                  return (
+                    <a
+                      href={href}
+                      tabIndex={-1}
+                      data-span-link
+                      className={`${cls} hover:underline`}
+                      style={{ maxWidth: "8rem" }}
+                      onClick={(e) => {
+                        if (
+                          e.metaKey ||
+                          e.ctrlKey ||
+                          e.shiftKey ||
+                          e.altKey ||
+                          e.button !== 0
+                        ) {
+                          e.stopPropagation()
+                          return
+                        }
+                        e.preventDefault()
+                      }}
+                    >
+                      {sp.label}
+                    </a>
+                  )
+                })()}
+                {sp.badge ? (
+                  <span
+                    className={`max-w-28 shrink-0 truncate rounded-full border px-1.5 text-[9.5px] leading-4 ${badgeTone[sp.tone]}`}
+                    title={sp.badge}
+                  >
+                    {sp.badge}
+                  </span>
+                ) : null}
+                {sp.sub ? (
+                  <span className="min-w-0 truncate text-faint">{sp.sub}</span>
+                ) : null}
+              </div>
+              <div
+                className={`waterfall-track relative h-6 cursor-pointer border-b border-border/60 ${cell(selected)}`}
+                onClick={seekAt}
+              >
+                <div
+                  className={`absolute rounded-[2px] ${toneBar[sp.tone]} ${
+                    sp.to === null ? "waterfall-open" : ""
+                  } ${
+                    sp.kind === "run" || sp.kind === "subagent"
+                      ? "top-2.5 h-1"
+                      : "top-1.5 h-3"
+                  }`}
+                  style={{ left: `${left}%`, width: `${width}%` }}
+                />
+                {playhead !== null && at <= hi ? (
+                  <>
+                    <div
+                      className="pointer-events-none absolute inset-y-0 right-0 bg-background/70"
+                      style={{ left: `${pct(at, domain)}%` }}
+                    />
+                    <div
+                      className="pointer-events-none absolute inset-y-0 w-0.5 bg-thread"
+                      style={{ left: `${pct(at, domain)}%` }}
+                    />
+                  </>
+                ) : null}
+              </div>
+              <div
+                className={`cursor-pointer border-b border-border/60 px-2 py-1 text-right text-[10px] text-faint tabular-nums ${cell(selected)}`}
+                onClick={() => onSelect?.(sp)}
+              >
+                {sp.to === null
+                  ? `${sp.from}–`
+                  : sp.from === sp.to
+                    ? `${sp.from}`
+                    : `${sp.from}–${sp.to}`}
+              </div>
             </div>
-            <div
-              className={`cursor-pointer border-b border-border/60 px-2 py-1 text-right text-[10px] text-faint tabular-nums ${cell(selected)}`}
-              onClick={() => onSelect?.(sp)}
-            >
-              {sp.to === null
-                ? `${sp.from}–`
-                : sp.from === sp.to
-                  ? `${sp.from}`
-                  : `${sp.from}–${sp.to}`}
-            </div>
-          </div>
           </Fragment>
         )
       })}
       {pads.after > 0 ? (
-        <div className="col-span-3" style={{ height: pads.after }} aria-hidden data-spacer />
+        <div
+          className="col-span-3"
+          style={{ height: pads.after }}
+          aria-hidden
+          data-spacer
+        />
       ) : null}
       {spans.length === 0 ? (
         <div className="col-span-3 py-6 text-center text-faint">

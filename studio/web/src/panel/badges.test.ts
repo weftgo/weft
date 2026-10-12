@@ -8,7 +8,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { Meta } from "../lib/api"
 import { UNRUN_CALL_REASON } from "../lib/events"
-import { CAUSES, HOLE_ORDER, HOLES, holeWords, resultCapReason } from "../lib/honesty"
+import {
+  CAUSES,
+  HOLE_ORDER,
+  HOLES,
+  holeWords,
+  resultCapReason,
+} from "../lib/honesty"
 import type { HoleMark } from "../lib/honesty"
 import { REQUEST_NO_RECORD_REASON, requestCappedWords } from "../lib/requests"
 import {
@@ -25,7 +31,20 @@ import {
   SCRIPTED_MODEL,
   turnChips,
 } from "./badges"
-import { $, all, baseRoutes, fakeStudio, META, mount, page, runEvents, runRow, setup, teardown, text } from "./testkit"
+import {
+  $,
+  all,
+  baseRoutes,
+  fakeStudio,
+  META,
+  mount,
+  page,
+  runEvents,
+  runRow,
+  setup,
+  teardown,
+  text,
+} from "./testkit"
 
 beforeEach(setup)
 afterEach(teardown)
@@ -44,37 +63,60 @@ describe("badge (the one renderer)", () => {
       // A keyboard or screen-reader user gets the words too (D5 review).
       expect(b.querySelector(".weft-sr")?.textContent).toBe(` — ${words}`)
       expect(b.textContent).toBe(`${n.label} — ${words}`)
-      expect(b.className).toContain(n.tone === "loss" ? "weft-warn-badge" : "weft-info")
+      expect(b.className).toContain(
+        n.tone === "loss" ? "weft-warn-badge" : "weft-info"
+      )
     }
   })
 
   it("a response's words win over the table's; a cause's words over the badge's; fix \"\" says none applies", () => {
-    expect(badge("hidden", { reason: "the server's own", fix: "its fix" }).getAttribute("title")).toBe(
-      "the server's own — fix: its fix"
-    )
+    expect(
+      badge("hidden", {
+        reason: "the server's own",
+        fix: "its fix",
+      }).getAttribute("title")
+    ).toBe("the server's own — fix: its fix")
     const c = CAUSES.not_recorded!.no_public_id
-    expect(badge("not_recorded", { cause: "no_public_id" }).getAttribute("title")).toBe(`${c.reason} — fix: ${c.fix}`)
-    expect(badge("gap", { fix: "" }).getAttribute("title")).toBe(HOLES.gap.reason)
+    expect(
+      badge("not_recorded", { cause: "no_public_id" }).getAttribute("title")
+    ).toBe(`${c.reason} — fix: ${c.fix}`)
+    expect(badge("gap", { fix: "" }).getAttribute("title")).toBe(
+      HOLES.gap.reason
+    )
     // An unknown badge still renders, verbatim.
     expect(badgeLabel(badge("future_hole"))).toBe("future_hole")
-    expect(noPublicIdWords()).toBe(`${HOLES.not_recorded.label}: ${c.reason} · fix: ${c.fix}`)
-    expect(noPublicIdWords("R", "F")).toBe(`${HOLES.not_recorded.label}: R · fix: F`)
+    expect(noPublicIdWords()).toBe(
+      `${HOLES.not_recorded.label}: ${c.reason} · fix: ${c.fix}`
+    )
+    expect(noPublicIdWords("R", "F")).toBe(
+      `${HOLES.not_recorded.label}: R · fix: F`
+    )
   })
 
   it("lists, lines and request holes reuse it; a line or request hole says its words visibly, once", () => {
     const list = holeBadges([{ hole: "gap" }, { hole: "derived" }])!
-    expect(Array.from(list.children).map((c) => c.getAttribute("data-hole"))).toEqual(["gap", "derived"])
+    expect(
+      Array.from(list.children).map((c) => c.getAttribute("data-hole"))
+    ).toEqual(["gap", "derived"])
     expect(holeBadges([])).toBeNull()
     const line = holeLine({ hole: "gap" })
     expect(line.querySelector('[data-hole="gap"]')).toBeTruthy()
-    expect(line.textContent).toBe(`${HOLES.gap.label} — ${HOLES.gap.reason} · fix: ${HOLES.gap.fix}`)
+    expect(line.textContent).toBe(
+      `${HOLES.gap.label} — ${HOLES.gap.reason} · fix: ${HOLES.gap.fix}`
+    )
     const [b, why] = requestHole("not_recorded")
     expect(b.textContent).toBe("request not recorded by weft v0.9.0 or earlier")
-    expect(why.textContent).toBe(`${HOLES.not_recorded.reason} — fix: ${HOLES.not_recorded.fix}`)
-    expect(requestHole("hidden")[0].textContent).toBe(`request: ${HOLES.hidden.label}`)
+    expect(why.textContent).toBe(
+      `${HOLES.not_recorded.reason} — fix: ${HOLES.not_recorded.fix}`
+    )
+    expect(requestHole("hidden")[0].textContent).toBe(
+      `request: ${HOLES.hidden.label}`
+    )
     const [g, gw] = requestHole("gap", { reason: REQUEST_NO_RECORD_REASON })
     expect(g.textContent).toBe("request: gap")
-    expect(gw.textContent).toBe(`${REQUEST_NO_RECORD_REASON} — fix: ${HOLES.gap.fix}`)
+    expect(gw.textContent).toBe(
+      `${REQUEST_NO_RECORD_REASON} — fix: ${HOLES.gap.fix}`
+    )
     const cap = requestCapped(10000)
     expect(badgeLabel(cap)).toBe("request: truncated — first 10 000 requests")
     expect(cap.getAttribute("data-hole")).toBe("truncated")
@@ -85,7 +127,9 @@ describe("badge (the one renderer)", () => {
   it("a loop's cut is the table's: a result cap is truncated (result_cap), an unrun call max_tokens with no fix", () => {
     const cut = cutBadge({ kind: "bytes", bytes: 2048 })
     expect(cut.getAttribute("data-hole")).toBe("truncated")
-    expect(cut.getAttribute("title")).toBe(`${resultCapReason(2048)} — fix: ${CAUSES.truncated!.result_cap.fix}`)
+    expect(cut.getAttribute("title")).toBe(
+      `${resultCapReason(2048)} — fix: ${CAUSES.truncated!.result_cap.fix}`
+    )
     expect(cut.getAttribute("title")).toContain("2.0 KiB cut")
     const never = cutBadge({ kind: "call", tool: "refund" })
     expect(never.getAttribute("data-hole")).toBe("max_tokens")
@@ -107,14 +151,26 @@ describe("the footer's content line (said on evidence only)", () => {
     folded: { eventHoles },
   })
   const meta = (mark: string, run = "r1", note = "", fix?: string) =>
-    ({ content: { ingest: "as_received", latest: { run_id: run, mark, note, fix } } }) as unknown as Meta
-  const cuts = { 1: [{ hole: "truncated", bytes: 1024 }], 3: [{ hole: "truncated", bytes: 1024 }] }
+    ({
+      content: {
+        ingest: "as_received",
+        latest: { run_id: run, mark, note, fix },
+      },
+    }) as unknown as Meta
+  const cuts = {
+    1: [{ hole: "truncated", bytes: 1024 }],
+    3: [{ hole: "truncated", bytes: 1024 }],
+  }
 
   it("on: the recorder's cuts are evidence content was there; a capped walk says how far it counted", () => {
     const l = capLine(turn([{}, {}], cuts), null)!
     expect(l.text).toBe("content on · 2 events shortened (2.0 KiB cut)")
-    expect(l.title).toBe(`${HOLES.truncated.reason} — fix: ${HOLES.truncated.fix}`)
-    expect(capLine(turn([{}], { 0: [{ hole: "truncated", bytes: 10 }] }), null)!.text).toBe("content on · 1 event shortened (10 B cut)")
+    expect(l.title).toBe(
+      `${HOLES.truncated.reason} — fix: ${HOLES.truncated.fix}`
+    )
+    expect(
+      capLine(turn([{}], { 0: [{ hole: "truncated", bytes: 10 }] }), null)!.text
+    ).toBe("content on · 1 event shortened (10 B cut)")
     expect(capLine(turn([{}], cuts, { capped: true }), null, 5000)!.text).toBe(
       "content on · 2 events shortened (2.0 KiB cut) · first 5000 events"
     )
@@ -124,7 +180,13 @@ describe("the footer's content line (said on evidence only)", () => {
   })
 
   it("review: a mark or a cause that names a prototype key is no mode and no cause (own keys only)", () => {
-    for (const k of ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"]) {
+    for (const k of [
+      "constructor",
+      "toString",
+      "__proto__",
+      "hasOwnProperty",
+      "valueOf",
+    ]) {
       expect(capLine(turn([{ "weft.content": k }]), null)).toBeNull()
       expect(capLine(null, meta(k))).toBeNull()
       const w = holeWords({ hole: "truncated", cause: k })
@@ -146,11 +208,16 @@ describe("the footer's content line (said on evidence only)", () => {
     expect(capLine(turn([{ "weft.content": "none" }]), null)!.text).toBe(
       "content off · captured none (weft.Content(false), or no destination takes content)"
     )
-    expect(capLine(turn([{ "weft.content": "stripped" }]), null)!.text).toBe("content off · otel.NoContent()")
+    expect(capLine(turn([{ "weft.content": "stripped" }]), null)!.text).toBe(
+      "content off · otel.NoContent()"
+    )
     expect(capLine(turn([{ "weft.content": "stripped" }]), null)!.title).toBe(
       `${HOLES.stripped.reason} — fix: ${HOLES.stripped.fix}`
     )
-    const m = capLine(null, meta("none", "r1", "studio's note", "studio's fix"))!
+    const m = capLine(
+      null,
+      meta("none", "r1", "studio's note", "studio's fix")
+    )!
     expect(m.text).toBe(`content off · ${CONTENT_OFF.none}`)
     expect(m.title).toBe("studio's note — fix: studio's fix")
   })
@@ -159,14 +226,27 @@ describe("the footer's content line (said on evidence only)", () => {
     const r = baseRoutes()
     r["runs/s_01-t1/events?after=0&limit=500"] = page(
       runEvents("s_01-t1").map((event, pos) =>
-        pos === 2 ? { pos, time: "2026-10-01T09:00:00Z", event, attrs: { "weft.content.truncated_bytes": 4096 } } : event
+        pos === 2
+          ? {
+              pos,
+              time: "2026-10-01T09:00:00Z",
+              event,
+              attrs: { "weft.content.truncated_bytes": 4096 },
+            }
+          : event
       )
     )
     fakeStudio(r)
     const el = await mount()
-    await vi.waitFor(() => expect(text(el, ".weft-footer")).toContain("content on · 1 event shortened (4.0 KiB cut)"))
+    await vi.waitFor(() =>
+      expect(text(el, ".weft-footer")).toContain(
+        "content on · 1 event shortened (4.0 KiB cut)"
+      )
+    )
     const cap = $(el, '.weft-footer [data-weft-cap="truncated"]')!
-    expect(cap.querySelector(".weft-sr")?.textContent).toBe(` — ${HOLES.truncated.reason} — fix: ${HOLES.truncated.fix}`)
+    expect(cap.querySelector(".weft-sr")?.textContent).toBe(
+      ` — ${HOLES.truncated.reason} — fix: ${HOLES.truncated.fix}`
+    )
   })
 
   it("says nothing in the mounted footer when nothing marks the content", async () => {
@@ -180,21 +260,39 @@ describe("the footer's content line (said on evidence only)", () => {
 describe("the turn chips (the run row's attrs)", () => {
   it("scripted (its zero only when the row's usage is zero), fork of, experiment of — each titled with the attribute it reads", () => {
     const label = (id: string) => (id === "s_01-t3" ? "t3" : id)
-    const chips = (over: Parameters<typeof runRow>[0]) => turnChips(runRow(over), label).map((c) => [c.textContent, c.title])
+    const chips = (over: Parameters<typeof runRow>[0]) =>
+      turnChips(runRow(over), label).map((c) => [c.textContent, c.title])
     expect(chips({})).toEqual([])
-    expect(SCRIPTED_MODEL).toEqual({ provider: "weft/runtime", name: "scripted" })
+    expect(SCRIPTED_MODEL).toEqual({
+      provider: "weft/runtime",
+      name: "scripted",
+    })
     const zero = { input_tokens: 0, output_tokens: 0 }
-    expect(chips({ model: SCRIPTED_MODEL, usage: zero })[0][0]).toBe("scripted (0 tokens)")
+    expect(chips({ model: SCRIPTED_MODEL, usage: zero })[0][0]).toBe(
+      "scripted (0 tokens)"
+    )
     // A scripted parent whose Subagent child ran a real model.
-    expect(chips({ model: SCRIPTED_MODEL, usage: { input_tokens: 40, output_tokens: 7 } })[0][0]).toBe("scripted")
+    expect(
+      chips({
+        model: SCRIPTED_MODEL,
+        usage: { input_tokens: 40, output_tokens: 7 },
+      })[0][0]
+    ).toBe("scripted")
     const fork = chips({ meta: { "weft.session.forked_from": "s_01#e_3" } })
     expect(fork[0][0]).toBe("fork of s_01#e_3")
     expect(fork[0][1]).toContain("weft.session.forked_from")
-    const exp = chips({ playground: true, forked_from: "s_01-t3#1", experiment_id: "exp_1" })
+    const exp = chips({
+      playground: true,
+      forked_from: "s_01-t3#1",
+      experiment_id: "exp_1",
+    })
     expect(exp[0][0]).toBe("experiment of t3")
     expect(exp[0][1]).toContain("weft.forked_from = s_01-t3#1")
     expect(exp[0][1]).toContain("weft.experiment.id exp_1")
-    expect(chips({ playground: true, experiment_id: "exp_2" })[0]).toEqual(["experiment", "weft.experiment.id = exp_2"])
+    expect(chips({ playground: true, experiment_id: "exp_2" })[0]).toEqual([
+      "experiment",
+      "weft.experiment.id = exp_2",
+    ])
   })
 
   it("sit on the turn rows", async () => {
@@ -210,8 +308,16 @@ describe("the turn chips (the run row's attrs)", () => {
       model: SCRIPTED_MODEL,
       usage: { input_tokens: 0, output_tokens: 0 },
     })
-    const fork = runRow({ id: "s_02-t1", session_id: "s_02", meta: { "weft.session.forked_from": "s_01#e_3" } })
-    r["runs?public_id=pub_orders&limit=50"] = { total: 3, runs: [t3, pg, fork], next_before: null }
+    const fork = runRow({
+      id: "s_02-t1",
+      session_id: "s_02",
+      meta: { "weft.session.forked_from": "s_01#e_3" },
+    })
+    r["runs?public_id=pub_orders&limit=50"] = {
+      total: 3,
+      runs: [t3, pg, fork],
+      next_before: null,
+    }
     fakeStudio(r, { ...META, capabilities: ["ingest", "playground"] })
     const el = await mount()
     await vi.waitFor(() => expect(all(el, "[data-weft-chip]").length).toBe(3))
@@ -233,15 +339,22 @@ describe("no panel-only badge strings", () => {
     /(?<![-\w])(truncated|stripped|redacted|max_tokens|interrupted|not[ _]recorded|derived|compacted|shortened|gap|hidden)(?![-\w])/i
   const dir = resolve(process.cwd(), "src/panel")
   const files = readdirSync(dir).filter(
-    (f) => f.endsWith(".ts") && !f.endsWith(".test.ts") && !["badges.ts", "testkit.ts", "styles.ts"].includes(f)
+    (f) =>
+      f.endsWith(".ts") &&
+      !f.endsWith(".test.ts") &&
+      !["badges.ts", "testkit.ts", "styles.ts"].includes(f)
   )
 
   /** The string literals a source holds, comments dropped and a
    * template's ${…} parts left out. */
   function literals(src: string): string[] {
-    const code = src.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:\\])\/\/.*$/gm, "$1")
+    const code = src
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|[^:\\])\/\/.*$/gm, "$1")
     const out: string[] = []
-    for (const m of code.matchAll(/"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\]|\\.)*`/g)) {
+    for (const m of code.matchAll(
+      /"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\]|\\.)*`/g
+    )) {
       const lit = m[0].slice(1, -1)
       out.push(m[0][0] === "`" ? lit.replace(/\$\{[^}]*\}/g, "") : lit)
     }
@@ -249,11 +362,11 @@ describe("no panel-only badge strings", () => {
   }
 
   it("the scan reads literals and skips keys", () => {
-    expect(literals(`const a = "truncated 3 bytes" // stripped\n/* gap */ x === "gap"; \`n \${"hidden"} m\``)).toEqual([
-      "truncated 3 bytes",
-      "gap",
-      "n  m",
-    ])
+    expect(
+      literals(
+        `const a = "truncated 3 bytes" // stripped\n/* gap */ x === "gap"; \`n \${"hidden"} m\``
+      )
+    ).toEqual(["truncated 3 bytes", "gap", "n  m"])
   })
 
   /** The lib modules the panel imports: shared by both surfaces, so a
@@ -261,21 +374,32 @@ describe("no panel-only badge strings", () => {
    * use, named here, and no lib module draws a panel badge. */
   const panelLibs = (): string[] => {
     const libs = new Set<string>()
-    for (const f of readdirSync(dir).filter((x) => x.endsWith(".ts") && !x.endsWith(".test.ts")))
-      for (const m of readFileSync(resolve(dir, f), "utf8").matchAll(/from "\.\.\/lib\/([a-z-]+)"/g)) libs.add(m[1])
+    for (const f of readdirSync(dir).filter(
+      (x) => x.endsWith(".ts") && !x.endsWith(".test.ts")
+    ))
+      for (const m of readFileSync(resolve(dir, f), "utf8").matchAll(
+        /from "\.\.\/lib\/([a-z-]+)"/g
+      ))
+        libs.add(m[1])
     return [...libs].sort()
   }
   /** The shared lib prose that names a hole (by its start), each with
    * the run page's use of it. */
   const LIB_WORDS: Record<string, string> = {
-    "compaction: compacted into ": "compactionLine — the run page's compaction marker",
+    "compaction: compacted into ":
+      "compactionLine — the run page's compaction marker",
     "compaction:thread compacted the session context this run belongs to:  of its messages were replaced by ; the next run starts on the compacted context (":
       "sessionNote — the run page's session marker",
-    "requests:not recorded (stripped)": "paramFields — the run page's params of a content-off request",
-    "requests:request not recorded by weft v0.9.0 or earlier": "REQUEST_NOT_RECORDED_LABEL — the run page's request label",
-    "replay: · the compacted prefix (what the model saw at step )": "prefixLine — the replay drawers' ack preview (plan F1)",
-    "experiment-body:the boundary before step  was compacted away": "compactedRefusal — the server's refusal of an insert inside a view (ADR 0029 decision 4), not the hole",
-    "experiment-body: of step  was compacted away": "compactedRefusal — the server's refusal of an edit inside a view (F1.1's words), not the hole",
+    "requests:not recorded (stripped)":
+      "paramFields — the run page's params of a content-off request",
+    "requests:request not recorded by weft v0.9.0 or earlier":
+      "REQUEST_NOT_RECORDED_LABEL — the run page's request label",
+    "replay: · the compacted prefix (what the model saw at step )":
+      "prefixLine — the replay drawers' ack preview (plan F1)",
+    "experiment-body:the boundary before step  was compacted away":
+      "compactedRefusal — the server's refusal of an insert inside a view (ADR 0029 decision 4), not the hole",
+    "experiment-body: of step  was compacted away":
+      "compactedRefusal — the server's refusal of an edit inside a view (F1.1's words), not the hole",
     "experiment-body:max_tokens must be ":
       "labOverrides — both drawers' option lab (plan F3): the server's refusal, naming the param, not the hole",
   }
@@ -286,10 +410,14 @@ describe("no panel-only badge strings", () => {
     const found: string[] = []
     for (const n of libs) {
       if (n === "honesty") continue // the table itself
-      const src = readFileSync(resolve(process.cwd(), `src/lib/${n}.ts`), "utf8")
+      const src = readFileSync(
+        resolve(process.cwd(), `src/lib/${n}.ts`),
+        "utf8"
+      )
       expect(src.includes("weft-badge"), n).toBe(false)
       for (const lit of literals(src))
-        if (!(HOLE_ORDER as string[]).includes(lit) && WORDS.test(lit)) found.push(`${n}:${lit}`)
+        if (!(HOLE_ORDER as string[]).includes(lit) && WORDS.test(lit))
+          found.push(`${n}:${lit}`)
     }
     // Each found literal is one named (by its start), and each named one is still there.
     const keys = Object.keys(LIB_WORDS)
@@ -303,15 +431,15 @@ describe("no panel-only badge strings", () => {
   const NON_HOLE_BADGES = [
     "element.ts|⚠", // a tool's side-effect class (the drawer)
     "element.ts|decided:", // the decision taken on a parked call
-    "element.ts|\"parked\"", // a parked call (approvals, read-only)
+    'element.ts|"parked"', // a parked call (approvals, read-only)
     "element.ts|data-weft-attempts", // the attempt line (lib/attempts)
     "element.ts|request could not be read", // a read error, not a hole
     "element.ts|prompt changed at this step",
     "element.ts|catalog changed at this step",
-    "element.ts|\"subagent\"", // the child run's link
-    "element.ts|\"subagent\"",
+    'element.ts|"subagent"', // the child run's link
+    'element.ts|"subagent"',
     "element.ts|, ms)", // the call's wall time
-    "element.ts|\"error\"", // a tool error result (data, rule 1)
+    'element.ts|"error"', // a tool error result (data, rule 1)
     "request.ts|data-weft-mark", // E1.2's change chips
     "request.ts|request could not be read",
     "request.ts|data-weft-attempts",
@@ -324,9 +452,15 @@ describe("no panel-only badge strings", () => {
     const found: string[] = []
     for (const f of files) {
       const lines = readFileSync(resolve(dir, f), "utf8").split("\n")
-      for (const l of lines) {
+      for (const [i, l] of lines.entries()) {
         if (!/["`']weft-badge/.test(l)) continue
-        const hit = NON_HOLE_BADGES.find((k) => k.startsWith(`${f}|`) && l.includes(k.slice(f.length + 1)))
+        // The badge's line, else its call's arguments wrapped onto the
+        // next two lines (prettier's el(\n "span",\n "weft-badge …",\n words)).
+        const at = (src: string) =>
+          NON_HOLE_BADGES.find(
+            (k) => k.startsWith(`${f}|`) && src.includes(k.slice(f.length + 1))
+          )
+        const hit = at(l) ?? at(lines.slice(i, i + 3).join(" "))
         found.push(hit ?? `${f}: ${l.trim()}`)
       }
     }
@@ -338,18 +472,30 @@ describe("no panel-only badge strings", () => {
   // badge renderer a label, reason or fix it spells itself — shared
   // words come from lib (lib/requests.ts's REQUEST_* constants), a
   // server's from its response.
-  const BADGE_CALL = /\b(?:badge|hole|runHole|refHole|requestHole|holeBadges|holeLine)\(([^()]|\([^()]*\))*?\b(label|reason|fix)\s*:\s*["'`]/g
+  const BADGE_CALL =
+    /\b(?:badge|hole|runHole|refHole|requestHole|holeBadges|holeLine)\(([^()]|\([^()]*\))*?\b(label|reason|fix)\s*:\s*["'`]/g
   it("the call scan sees a literal note and passes a shared one", () => {
     expect('hole("gap", { reason: "x" })'.match(BADGE_CALL)).not.toBeNull()
-    expect('badge("truncated", { label: `n ${x}` })'.match(BADGE_CALL)).not.toBeNull()
-    expect('hole("gap", { reason: REQUEST_NO_INDEX_REASON })'.match(BADGE_CALL)).toBeNull()
-    expect('runHole("not_recorded", { cause: "not_served", reason: d.notServed })'.match(BADGE_CALL)).toBeNull()
+    expect(
+      'badge("truncated", { label: `n ${x}` })'.match(BADGE_CALL)
+    ).not.toBeNull()
+    expect(
+      'hole("gap", { reason: REQUEST_NO_INDEX_REASON })'.match(BADGE_CALL)
+    ).toBeNull()
+    expect(
+      'runHole("not_recorded", { cause: "not_served", reason: d.notServed })'.match(
+        BADGE_CALL
+      )
+    ).toBeNull()
   })
   it("no panel source but badges.ts passes a badge its own label, reason or fix", () => {
     const found: string[] = []
     for (const f of files) {
-      const code = readFileSync(resolve(dir, f), "utf8").replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:\\])\/\/.*$/gm, "$1")
-      for (const m of code.matchAll(BADGE_CALL)) found.push(`${f}: ${m[0].slice(0, 80)}`)
+      const code = readFileSync(resolve(dir, f), "utf8")
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/(^|[^:\\])\/\/.*$/gm, "$1")
+      for (const m of code.matchAll(BADGE_CALL))
+        found.push(`${f}: ${m[0].slice(0, 80)}`)
     }
     expect(found).toEqual([])
   })
@@ -359,7 +505,8 @@ describe("no panel-only badge strings", () => {
     const found: string[] = []
     for (const f of files)
       for (const lit of literals(readFileSync(resolve(dir, f), "utf8")))
-        if (!(HOLE_ORDER as string[]).includes(lit) && WORDS.test(lit)) found.push(`${f}: ${JSON.stringify(lit)}`)
+        if (!(HOLE_ORDER as string[]).includes(lit) && WORDS.test(lit))
+          found.push(`${f}: ${JSON.stringify(lit)}`)
     expect(found).toEqual([])
   })
 })

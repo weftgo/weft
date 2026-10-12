@@ -92,7 +92,9 @@ export function LiveRuns({
     }
   }, [streamedKey])
 
-  const views = runs.map((r) => polledView(newest(r, frames[r.id] as RunRow | undefined)))
+  const views = runs.map((r) =>
+    polledView(newest(r, frames[r.id] as RunRow | undefined))
+  )
   return (
     <div className="space-y-2">
       <LiveTable

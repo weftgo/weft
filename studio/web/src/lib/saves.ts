@@ -46,7 +46,11 @@ export function dispositionName(cd: string | null, fallback: string): string {
 
 /** saveBlob saves bytes as a file: a Blob URL on an anchor click,
  * revoked once the browser has it. */
-export function saveBlob(blob: Blob, name: string, parent: Node = document.body): void {
+export function saveBlob(
+  blob: Blob,
+  name: string,
+  parent: Node = document.body
+): void {
   const url = URL.createObjectURL(blob)
   const a = document.createElement("a")
   a.href = url
@@ -60,14 +64,20 @@ export function saveBlob(blob: Blob, name: string, parent: Node = document.body)
 /** mayProposeWith is the client's reading of proposals.go's rule: a
  * dev token or none (the server answers loopback-with-no-token, else
  * 403 in its own words); never a panel token. */
-export function mayProposeWith(capabilities: readonly string[], token: string): boolean {
+export function mayProposeWith(
+  capabilities: readonly string[],
+  token: string
+): boolean {
   return capabilities.includes("proposals") && tokenScopeOf(token) === ""
 }
 
 /** mayExportTestWith: the verb is drawn under capability "export" for
  * any identity but a read-scoped panel token (export.go refuses it the
  * wefttest format: fixtures carry prompts). */
-export function mayExportTestWith(capabilities: readonly string[], token: string): boolean {
+export function mayExportTestWith(
+  capabilities: readonly string[],
+  token: string
+): boolean {
   return capabilities.includes("export") && tokenScopeOf(token) !== "read"
 }
 
@@ -81,7 +91,11 @@ export const KEEP_PROMPT_LABEL = "keep as prompt"
  * copies, naming the dev token where Studio serves proposals — and
  * with no agent registered, copy alone: there is nothing to propose
  * to, whatever the token. */
-export function keepEditedTitle(agent: string, capabilities: readonly string[], token: string): string {
+export function keepEditedTitle(
+  agent: string,
+  capabilities: readonly string[],
+  token: string
+): string {
   if (!agent) return "copy the edited prompt"
   return mayProposeWith(capabilities, token)
     ? `copy the edited prompt and propose it as ${agent}'s instructions (shown on the Agents page beside the registered ones)`
@@ -91,7 +105,8 @@ export function keepEditedTitle(agent: string, capabilities: readonly string[], 
 /** What a panel token (or a Studio without proposals) is told. */
 export const PROPOSAL_NEEDS_DEV = "a proposal needs the dev token"
 /** The Agents page's pointer, said once. */
-export const PROPOSAL_POINTER = "the durable path is WEFT-PROMPT.md P3: a propose command over the runtime link"
+export const PROPOSAL_POINTER =
+  "the durable path is WEFT-PROMPT.md P3: a propose command over the runtime link"
 
 /** One save's outcome, in words both surfaces say. */
 export type SaveOutcome =
@@ -122,7 +137,10 @@ export function saveWords(o: SaveOutcome): { title: string; tone: SaveTone } {
   switch (o.kind) {
     case "save-test":
       return o.ok
-        ? { title: `saved ${o.file} — unzip into a package directory and go test`, tone: "success" }
+        ? {
+            title: `saved ${o.file} — unzip into a package directory and go test`,
+            tone: "success",
+          }
         : { title: `save as test refused: ${o.message}`, tone: "error" }
     case "keep-prompt": {
       const w = keepPromptWords(o)
@@ -131,7 +149,10 @@ export function saveWords(o: SaveOutcome): { title: string; tone: SaveTone } {
     case "copy":
       return o.ok
         ? { title: "copied", tone: "success" }
-        : { title: "copy failed — the browser refused the clipboard", tone: "error" }
+        : {
+            title: "copy failed — the browser refused the clipboard",
+            tone: "error",
+          }
     case "withdraw":
       return o.ok
         ? { title: `proposal for ${o.agent} withdrawn`, tone: "success" }
@@ -141,12 +162,27 @@ export function saveWords(o: SaveOutcome): { title: string; tone: SaveTone } {
 
 /** keepPromptWords is keep as prompt's line (the panel bundles this
  * one alone: it has no save-as-test fetch or withdraw of its own). */
-export function keepPromptWords(o: KeepPrompt): { title: string; tone: SaveTone } {
-  const copied = o.copied ? "copied" : "copy failed — the browser refused the clipboard"
+export function keepPromptWords(o: KeepPrompt): {
+  title: string
+  tone: SaveTone
+} {
+  const copied = o.copied
+    ? "copied"
+    : "copy failed — the browser refused the clipboard"
   if (o.proposal === "proposed")
-    return { title: `${copied} · proposed as ${o.agent}'s instructions (see Agents)`, tone: o.copied ? "success" : "info" }
-  if (o.proposal === "refused") return { title: `${copied} · proposal refused: ${o.message ?? ""}`, tone: "error" }
+    return {
+      title: `${copied} · proposed as ${o.agent}'s instructions (see Agents)`,
+      tone: o.copied ? "success" : "info",
+    }
+  if (o.proposal === "refused")
+    return {
+      title: `${copied} · proposal refused: ${o.message ?? ""}`,
+      tone: "error",
+    }
   // No agent: copy alone — no proposal to need a token for.
   if (!o.agent) return { title: copied, tone: o.copied ? "success" : "error" }
-  return { title: `${copied} · ${PROPOSAL_NEEDS_DEV}`, tone: o.copied ? "info" : "error" }
+  return {
+    title: `${copied} · ${PROPOSAL_NEEDS_DEV}`,
+    tone: o.copied ? "info" : "error",
+  }
 }

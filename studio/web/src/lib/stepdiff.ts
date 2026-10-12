@@ -25,8 +25,15 @@ import { HOLES, isHole, mergeHoles } from "./honesty"
 import type { HoleMark } from "./honesty"
 
 /** The compared columns, in the order every surface draws them. */
-export type DiffColumn = "system" | "tool_calls" | "tool_results" | "text" | "usage"
-export const DIFF_COLUMNS: readonly DiffColumn[] = ["system", "tool_calls", "tool_results", "text", "usage"]
+export type DiffColumn =
+  "system" | "tool_calls" | "tool_results" | "text" | "usage"
+export const DIFF_COLUMNS: readonly DiffColumn[] = [
+  "system",
+  "tool_calls",
+  "tool_results",
+  "text",
+  "usage",
+]
 
 /** A column's header. */
 export const COLUMN_LABELS: Record<DiffColumn, string> = {
@@ -38,7 +45,14 @@ export const COLUMN_LABELS: Record<DiffColumn, string> = {
 }
 
 /** The marks a side can carry (studio/diff.go's diffSideOf). */
-export type DiffMark = "compacted" | "subagent" | "max_tokens" | "parked" | "running" | "interrupted" | "error"
+export type DiffMark =
+  | "compacted"
+  | "subagent"
+  | "max_tokens"
+  | "parked"
+  | "running"
+  | "interrupted"
+  | "error"
 
 /** One run of the pair: its id, the steps it recorded, its status. */
 export interface DiffRun {
@@ -122,7 +136,8 @@ export const CELL_WORDS: Record<CellState, string> = {
 export const CELL_REASONS: Record<CellState, string> = {
   same: "both runs recorded this column and it is the same",
   changed: "both runs recorded this column and it differs",
-  unknown: "a side did not record this column (its holes say why): the two were not compared",
+  unknown:
+    "a side did not record this column (its holes say why): the two were not compared",
   missing: "one run has no such step",
 }
 
@@ -159,10 +174,17 @@ export interface MarkChip {
 const MARK_WORDS: Record<string, { label: string; title: string }> = {
   subagent: {
     label: "subagent",
-    title: "this step called a subagent: the child run's steps are its own, marked here, never aligned",
+    title:
+      "this step called a subagent: the child run's steps are its own, marked here, never aligned",
   },
-  parked: { label: "parked", title: "this step parked a call awaiting a decision" },
-  running: { label: "running", title: "this step was still running when the diff was read" },
+  parked: {
+    label: "parked",
+    title: "this step parked a call awaiting a decision",
+  },
+  running: {
+    label: "running",
+    title: "this step was still running when the diff was read",
+  },
   error: { label: "error", title: "this step ended in an error" },
 }
 
@@ -170,7 +192,12 @@ const MARK_WORDS: Record<string, { label: string; title: string }> = {
 export function markChip(mark: string): MarkChip {
   if (isHole(mark)) {
     const n = HOLES[mark]
-    return { mark, label: n.label, title: n.fix ? `${n.reason} — fix: ${n.fix}` : n.reason, hole: mark }
+    return {
+      mark,
+      label: n.label,
+      title: n.fix ? `${n.reason} — fix: ${n.fix}` : n.reason,
+      hole: mark,
+    }
   }
   const w = Object.hasOwn(MARK_WORDS, mark) ? MARK_WORDS[mark] : undefined
   return { mark, label: w?.label ?? mark, title: w?.title ?? mark }
@@ -210,13 +237,20 @@ function argsText(args: unknown): string {
  * token (a read-scoped panel token: system null under hidden). Its
  * hash still compares, so the cell keeps the server's state. */
 export function systemHidden(side: DiffSide | null): boolean {
-  return !!side && side.system == null && list(side.holes).some((h) => h.hole === "hidden")
+  return (
+    !!side &&
+    side.system == null &&
+    list(side.holes).some((h) => h.hole === "hidden")
+  )
 }
 
 /** cellHole is the hole a compared cell carries beside its state: the
  * hidden badge in the system column when either side's prompt is
  * withheld — a "same" there is the hashes', the words unseen. */
-export function cellHole(col: DiffColumn, ...sides: (DiffSide | null)[]): "hidden" | undefined {
+export function cellHole(
+  col: DiffColumn,
+  ...sides: (DiffSide | null)[]
+): "hidden" | undefined {
   return col === "system" && sides.some(systemHidden) ? "hidden" : undefined
 }
 
@@ -229,20 +263,33 @@ export function cellText(side: DiffSide | null, col: DiffColumn): string {
   if (!side) return "—"
   switch (col) {
     case "system":
-      if (side.system != null) return side.system ? clip(side.system) : "(empty)"
+      if (side.system != null)
+        return side.system ? clip(side.system) : "(empty)"
       if (systemHidden(side)) return HOLES.hidden.label
       return side.system_hash ? `#${side.system_hash.slice(0, 8)}` : "—"
     case "tool_calls":
-      return list(side.tool_calls).length ? clip(side.tool_calls.map((c) => `${c.name}(${argsText(c.args)})`).join(", ")) : "(none)"
+      return list(side.tool_calls).length
+        ? clip(
+            side.tool_calls
+              .map((c) => `${c.name}(${argsText(c.args)})`)
+              .join(", ")
+          )
+        : "(none)"
     case "tool_results":
       return list(side.tool_results).length
-        ? clip(side.tool_results.map((r) => `${r.is_error ? "error: " : ""}${r.content}`).join(" · "))
+        ? clip(
+            side.tool_results
+              .map((r) => `${r.is_error ? "error: " : ""}${r.content}`)
+              .join(" · ")
+          )
         : "(none)"
     case "text":
       if (side.text === null) return "—"
       return side.text ? clip(side.text) : "(none)"
     case "usage":
-      return (side.usage as Usage | undefined) ? `${side.usage.input_tokens}→${side.usage.output_tokens}` : "—"
+      return (side.usage as Usage | undefined)
+        ? `${side.usage.input_tokens}→${side.usage.output_tokens}`
+        : "—"
   }
 }
 
@@ -284,7 +331,9 @@ export interface StepDiffView {
  * hole (hole set) is drawn as that hole's badge on both surfaces. */
 export function sideView(side: DiffSide | null): SideView {
   const holes = sideHoles(side)
-  const marks = (side?.marks ?? []).filter((m) => !holes.some((h) => h.hole === m)).map(markChip)
+  const marks = (side?.marks ?? [])
+    .filter((m) => !holes.some((h) => h.hole === m))
+    .map(markChip)
   return { side, marks, holes }
 }
 
@@ -304,7 +353,9 @@ export function stepDiffView(doc: DiffDoc): StepDiffView {
         step: r.step,
         changed: r.changed,
         cells,
-        changedColumns: DIFF_COLUMNS.filter((c) => cells[c] === "changed").map((c) => COLUMN_LABELS[c]),
+        changedColumns: DIFF_COLUMNS.filter((c) => cells[c] === "changed").map(
+          (c) => COLUMN_LABELS[c]
+        ),
         a: sideView(r.a),
         b: sideView(r.b),
       }
@@ -315,13 +366,18 @@ export function stepDiffView(doc: DiffDoc): StepDiffView {
     rows,
     markers: rows.filter((r) => r.changed).map((r) => r.step),
     holes: docHoles(doc),
-    unknown: rows.reduce((n, r) => n + DIFF_COLUMNS.filter((c) => r.cells[c] === "unknown").length, 0),
+    unknown: rows.reduce(
+      (n, r) => n + DIFF_COLUMNS.filter((c) => r.cells[c] === "unknown").length,
+      0
+    ),
   }
 }
 
 /** markerWords is a changed step's marker: "changed at step 3", the
  * columns after it ("· tool results"), or which run lacks the step. */
-export function markerWords(row: Pick<StepRowView, "step" | "cells" | "changedColumns" | "a" | "b">): string {
+export function markerWords(
+  row: Pick<StepRowView, "step" | "cells" | "changedColumns" | "a" | "b">
+): string {
   if (DIFF_COLUMNS.every((c) => row.cells[c] === "missing"))
     return `changed at step ${row.step} · ${row.a.side ? "only in the base run" : "missing from the base run"}`
   return `changed at step ${row.step}${row.changedColumns.length ? ` · ${row.changedColumns.join(", ")}` : ""}`
@@ -330,14 +386,20 @@ export function markerWords(row: Pick<StepRowView, "step" | "cells" | "changedCo
 /** summaryWords is the compare's one line: how many steps changed and
  * the first — and, when some cells were not comparable, that "no step
  * changed" covers only what both runs recorded. */
-export function summaryWords(v: Pick<StepDiffView, "rows" | "markers" | "unknown">): string {
+export function summaryWords(
+  v: Pick<StepDiffView, "rows" | "markers" | "unknown">
+): string {
   const n = v.markers.length
   // A step only one run has is a change (E3.1), said apart.
-  const only = v.rows.filter((r) => r.changed && DIFF_COLUMNS.every((c) => r.cells[c] === "missing")).length
+  const only = v.rows.filter(
+    (r) => r.changed && DIFF_COLUMNS.every((c) => r.cells[c] === "missing")
+  ).length
   const head = n
     ? `${n} of ${v.rows.length} ${v.rows.length === 1 ? "step" : "steps"} changed${only ? ` (${only} only in one run)` : ""} · first at step ${v.markers[0]}`
     : `no step changed of ${v.rows.length}`
-  return v.unknown ? `${head} · ${v.unknown} ${v.unknown === 1 ? "cell" : "cells"} not comparable` : head
+  return v.unknown
+    ? `${head} · ${v.unknown} ${v.unknown === 1 ? "cell" : "cells"} not comparable`
+    : head
 }
 
 // ── The N-way view ────────────────────────────────────────────────
@@ -382,7 +444,10 @@ const ALL_MISSING = (): Record<DiffColumn, CellState> => {
  * ordinal. Every response must name the same a: else (or with none)
  * the view is empty and its error says why — it never throws. */
 export function nWayView(docs: DiffDoc[]): NWayView {
-  const empty = (error: string, base: DiffRun = { run_id: "", steps: 0, status: "" }): NWayView => ({
+  const empty = (
+    error: string,
+    base: DiffRun = { run_id: "", steps: 0, status: "" }
+  ): NWayView => ({
     base,
     others: [],
     rows: [],
@@ -393,9 +458,15 @@ export function nWayView(docs: DiffDoc[]): NWayView {
   if (!docs.length) return empty("no step compare to show: no run was compared")
   const base = docs[0].a
   const other = docs.find((d) => d.a.run_id !== base.run_id)
-  if (other) return empty(`the step compare needs one base run: ${base.run_id} and ${other.a.run_id} were both answered as base`, base)
+  if (other)
+    return empty(
+      `the step compare needs one base run: ${base.run_id} and ${other.a.run_id} were both answered as base`,
+      base
+    )
   const views = docs.map(stepDiffView)
-  const steps = [...new Set(views.flatMap((v) => v.rows.map((r) => r.step)))].sort((x, y) => x - y)
+  const steps = [
+    ...new Set(views.flatMap((v) => v.rows.map((r) => r.step))),
+  ].sort((x, y) => x - y)
   const rows = steps.map((step): NWayRow => {
     const at = views.map((v) => v.rows.find((x) => x.step === step))
     const others = views.map((v, i): OtherCell => {
@@ -403,11 +474,28 @@ export function nWayView(docs: DiffDoc[]): NWayView {
       // A compared run's diff that does not reach the ordinal: neither
       // the base nor it has the step — absent on both, not a change.
       return r
-        ? { run_id: v.b.run_id, changed: r.changed, cells: r.cells, changedColumns: r.changedColumns, side: r.b }
-        : { run_id: v.b.run_id, changed: false, cells: ALL_MISSING(), changedColumns: [], side: sideView(null) }
+        ? {
+            run_id: v.b.run_id,
+            changed: r.changed,
+            cells: r.cells,
+            changedColumns: r.changedColumns,
+            side: r.b,
+          }
+        : {
+            run_id: v.b.run_id,
+            changed: false,
+            cells: ALL_MISSING(),
+            changedColumns: [],
+            side: sideView(null),
+          }
     })
     const baseSide = at.find((r) => r?.a.side)?.a ?? sideView(null)
-    return { step, changed: others.some((o) => o.changed), base: baseSide, others }
+    return {
+      step,
+      changed: others.some((o) => o.changed),
+      base: baseSide,
+      others,
+    }
   })
   return {
     base,

@@ -72,12 +72,11 @@ describe("fold on the goldens", () => {
     expect(call.childRunId).toBe("r_sub/0/call_3")
     expect(call.result!.content).toBe("order 42 shipped this morning")
     // An unlinked call stays unlinked.
-    const none = view.steps.flatMap((s) => s.toolCalls).find(
-      (c) => c.callId === "call_none"
-    )
+    const none = view.steps
+      .flatMap((s) => s.toolCalls)
+      .find((c) => c.callId === "call_none")
     expect(none).toBeUndefined()
   })
-
 })
 
 describe("hand-written edge cases", () => {
@@ -491,9 +490,13 @@ describe("applyTranscript and the input record", () => {
     feed.push({ type: "step_start", index: 0 } as WireEvent)
     feed.push({ type: "text_delta", text: "Hel" } as WireEvent)
     const before = feed.result()
-    const view = applyTranscript(before, [{ messages: [assistant("Hello world")] }], {
-      replace: true,
-    })
+    const view = applyTranscript(
+      before,
+      [{ messages: [assistant("Hello world")] }],
+      {
+        replace: true,
+      }
+    )
     expect(view.steps[0].text).toBe("Hello world")
     expect(before.steps[0].text).toBe("Hel")
     feed.push({ type: "text_delta", text: "lo" } as WireEvent)
@@ -527,14 +530,23 @@ describe("applyTranscript and the input record", () => {
       { input: true, messages: [assistant("a fed-back reply")] },
       { messages: [assistant("the new one")] },
     ]
-    expect(splitTranscript(flagged).produced).toEqual([assistant("the new one")])
+    expect(splitTranscript(flagged).produced).toEqual([
+      assistant("the new one"),
+    ])
   })
 
   it("survives malformed bodies (anything OTLP ingest stored)", () => {
     const junk = [
       { messages: "a bare string" },
       { messages: null },
-      { messages: [null, 7, { role: "assistant" }, { role: "assistant", content: null }] },
+      {
+        messages: [
+          null,
+          7,
+          { role: "assistant" },
+          { role: "assistant", content: null },
+        ],
+      },
       { messages: [assistant("still here")] },
     ] as unknown as { messages: Message[] }[]
     expect(() => applyTranscript(fold(oneStep), junk)).not.toThrow()
@@ -848,7 +860,11 @@ describe("transcript placement by the stored step", () => {
     const view = applyTranscript(fold(twoSteps("r5", [["", ""]])), [
       { step: 0, input: true, messages: [msg("user", "hi")] },
       { step: 0, input: false, messages: [msg("assistant", "a0")] },
-      { step: 3, input: false, messages: [msg("assistant", "from a lost step")] },
+      {
+        step: 3,
+        input: false,
+        messages: [msg("assistant", "from a lost step")],
+      },
     ])
     expect(view.steps[0].text).toBe("a0")
     expect(view.unplaced).toEqual([
@@ -893,7 +909,9 @@ describe("content attrs → badges", () => {
     const finish = p.events.find((pe) => pe.event.type === "tool_finish")!
     const cut = finish.attrs?.["weft.content.truncated_bytes"] ?? 0
     expect(cut).toBeGreaterThan(0)
-    expect(view.eventHoles?.[finish.pos]).toEqual([{ hole: "truncated", bytes: cut }])
+    expect(view.eventHoles?.[finish.pos]).toEqual([
+      { hole: "truncated", bytes: cut },
+    ])
     const step = view.steps[0]
     expect(step.toolCalls[0].holes).toEqual([{ hole: "truncated", bytes: cut }])
     expect(step.holes?.[0].hole).toBe("truncated")
@@ -916,12 +934,11 @@ describe("content attrs → badges", () => {
       p.events.map((pe) => pe.attrs)
     )
     expect(Object.keys(view.eventHoles ?? {}).length).toBe(p.events.length)
-    for (const s of view.steps)
-      expect(s.holes).toEqual([{ hole: "stripped" }])
+    for (const s of view.steps) expect(s.holes).toEqual([{ hole: "stripped" }])
     expect(view.holes).toEqual([{ hole: "stripped" }])
-    expect(runHoles({ holes: [{ hole: "stripped", reason: "doc's" }] }, view)).toEqual([
-      { hole: "stripped", reason: "doc's" },
-    ])
+    expect(
+      runHoles({ holes: [{ hole: "stripped", reason: "doc's" }] }, view)
+    ).toEqual([{ hole: "stripped", reason: "doc's" }])
   })
 
   it("a prefix fold keeps the badges it has seen (replay)", () => {
@@ -986,11 +1003,14 @@ describe("content attrs → badges", () => {
       { type: "run_start", id: "r" },
       { type: "step_start", index: 0 },
     ] as WireEvent[])
-    const doc = { status: "running", holes: [{ hole: "gap", reason: "no spans yet" }] }
+    const doc = {
+      status: "running",
+      holes: [{ hole: "gap", reason: "no spans yet" }],
+    }
     expect(stepHoles(view.steps[0], [], doc)).toEqual([])
-    expect(stepHoles(view.steps[0], [], { ...doc, status: "ok" }).map((h) => h.hole)).toEqual([
-      "gap",
-    ])
+    expect(
+      stepHoles(view.steps[0], [], { ...doc, status: "ok" }).map((h) => h.hole)
+    ).toEqual(["gap"])
   })
 })
 
@@ -1004,14 +1024,54 @@ describe("linkView on a repeated call id inside a resumed step", () => {
   const U = { input_tokens: 1, output_tokens: 1 }
   const events = [
     { type: "run_start", id: R, model: { provider: "p", name: "m" } },
-    { type: "tool_start", run_id: R, seq: 1, call_id: "c1", name: "research", args: {} },
-    { type: "tool_finish", run_id: R, seq: 1, call_id: "c1", name: "research", content: "resumed", is_error: false },
+    {
+      type: "tool_start",
+      run_id: R,
+      seq: 1,
+      call_id: "c1",
+      name: "research",
+      args: {},
+    },
+    {
+      type: "tool_finish",
+      run_id: R,
+      seq: 1,
+      call_id: "c1",
+      name: "research",
+      content: "resumed",
+      is_error: false,
+    },
     { type: "step_start", run_id: R, index: 0 },
-    { type: "tool_start", run_id: R, seq: 2, call_id: "c1", name: "research", args: {} },
-    { type: "tool_finish", run_id: R, seq: 2, call_id: "c1", name: "research", content: "own", is_error: false },
-    { type: "step_finish", run_id: R, index: 0, reason: "tool_calls", usage: U },
+    {
+      type: "tool_start",
+      run_id: R,
+      seq: 2,
+      call_id: "c1",
+      name: "research",
+      args: {},
+    },
+    {
+      type: "tool_finish",
+      run_id: R,
+      seq: 2,
+      call_id: "c1",
+      name: "research",
+      content: "own",
+      is_error: false,
+    },
+    {
+      type: "step_finish",
+      run_id: R,
+      index: 0,
+      reason: "tool_calls",
+      usage: U,
+    },
   ] as WireEvent[]
-  const resumed = { id: `${R}/resume/c1`, parent_run_id: R, parent_call_id: "c1" }
+  const resumed = {
+    id: `${R}/resume/c1`,
+    parent_run_id: R,
+    parent_call_id: "c1",
+  }
   const own = { id: `${R}/0/c1`, parent_run_id: R, parent_call_id: "c1" }
   for (const [label, kids] of [
     ["resumed child listed first", [resumed, own]],
@@ -1020,15 +1080,23 @@ describe("linkView on a repeated call id inside a resumed step", () => {
     it(`each child links to its own call (${label})`, () => {
       const view = linkView(fold(events), [...kids])
       const calls = view.steps[0].toolCalls
-      expect(calls.map((c) => [c.result?.content, c.resumed ?? false, c.childRunId])).toEqual([
+      expect(
+        calls.map((c) => [c.result?.content, c.resumed ?? false, c.childRunId])
+      ).toEqual([
         ["resumed", true, resumed.id],
         ["own", false, own.id],
       ])
     })
   }
   it("links each child once: a second pass changes nothing", () => {
-    const view = linkView(linkView(fold(events), [own, resumed]), [resumed, own])
-    expect(view.steps[0].toolCalls.map((c) => c.childRunId)).toEqual([resumed.id, own.id])
+    const view = linkView(linkView(fold(events), [own, resumed]), [
+      resumed,
+      own,
+    ])
+    expect(view.steps[0].toolCalls.map((c) => c.childRunId)).toEqual([
+      resumed.id,
+      own.id,
+    ])
   })
 })
 
@@ -1042,19 +1110,67 @@ describe("linkView is idempotent when calls outnumber children", () => {
   const events = [
     { type: "run_start", id: R, model: { provider: "p", name: "m" } },
     { type: "step_start", run_id: R, index: 0 },
-    { type: "tool_start", run_id: R, seq: 1, call_id: "call_0", name: "research", args: {} },
-    { type: "tool_finish", run_id: R, seq: 1, call_id: "call_0", name: "research", content: "a", is_error: false },
-    { type: "step_finish", run_id: R, index: 0, reason: "tool_calls", usage: U },
+    {
+      type: "tool_start",
+      run_id: R,
+      seq: 1,
+      call_id: "call_0",
+      name: "research",
+      args: {},
+    },
+    {
+      type: "tool_finish",
+      run_id: R,
+      seq: 1,
+      call_id: "call_0",
+      name: "research",
+      content: "a",
+      is_error: false,
+    },
+    {
+      type: "step_finish",
+      run_id: R,
+      index: 0,
+      reason: "tool_calls",
+      usage: U,
+    },
     { type: "step_start", run_id: R, index: 1 },
-    { type: "tool_start", run_id: R, seq: 2, call_id: "call_0", name: "lookup", args: {} },
-    { type: "tool_finish", run_id: R, seq: 2, call_id: "call_0", name: "lookup", content: "b", is_error: false },
-    { type: "step_finish", run_id: R, index: 1, reason: "tool_calls", usage: U },
+    {
+      type: "tool_start",
+      run_id: R,
+      seq: 2,
+      call_id: "call_0",
+      name: "lookup",
+      args: {},
+    },
+    {
+      type: "tool_finish",
+      run_id: R,
+      seq: 2,
+      call_id: "call_0",
+      name: "lookup",
+      content: "b",
+      is_error: false,
+    },
+    {
+      type: "step_finish",
+      run_id: R,
+      index: 1,
+      reason: "tool_calls",
+      usage: U,
+    },
   ] as WireEvent[]
   const ids = (v: ReturnType<typeof fold>) =>
     v.steps.map((s) => s.toolCalls.map((c) => c.childRunId ?? null))
   for (const [label, child] of [
-    ["named child", { id: `${R}/0/call_0`, parent_run_id: R, parent_call_id: "call_0" }],
-    ["unnamed child", { id: "legacy-child", parent_run_id: R, parent_call_id: "call_0" }],
+    [
+      "named child",
+      { id: `${R}/0/call_0`, parent_run_id: R, parent_call_id: "call_0" },
+    ],
+    [
+      "unnamed child",
+      { id: "legacy-child", parent_run_id: R, parent_call_id: "call_0" },
+    ],
   ] as const) {
     it(`a second and third pass link the same one call (${label})`, () => {
       const feed = newFold()
@@ -1068,7 +1184,11 @@ describe("linkView is idempotent when calls outnumber children", () => {
   it("a pass with fewer children drops the links it no longer has", () => {
     const feed = newFold()
     events.forEach((e) => feed.push(e))
-    const child = { id: `${R}/1/call_0`, parent_run_id: R, parent_call_id: "call_0" }
+    const child = {
+      id: `${R}/1/call_0`,
+      parent_run_id: R,
+      parent_call_id: "call_0",
+    }
     linkView(feed.result(), [child])
     expect(ids(linkView(feed.result(), []))).toEqual([[null], [null]])
   })
@@ -1082,7 +1202,13 @@ describe("tool_finish closes the most recent open call with its id", () => {
       { type: "step_start", index: 0 },
       { type: "tool_start", call_id: "c", name: "a", args: {} },
       { type: "tool_start", call_id: "c", name: "b", args: {} },
-      { type: "tool_finish", call_id: "c", name: "b", content: "B", is_error: false },
+      {
+        type: "tool_finish",
+        call_id: "c",
+        name: "b",
+        content: "B",
+        is_error: false,
+      },
     ] as WireEvent[])
     expect(view.steps[0].toolCalls.map((c) => [c.name, c.state])).toEqual([
       ["a", "running"],

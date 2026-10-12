@@ -28,7 +28,11 @@ const meta = (capabilities: string[]) => ({
  * instructions hash, a lookup then an answer. */
 function v090Events(run: string, steps = 2): FakePosEvent[] {
   const evs: unknown[] = [
-    { type: "run_start", id: run, model: { provider: "wefttest", name: "script" } },
+    {
+      type: "run_start",
+      id: run,
+      model: { provider: "wefttest", name: "script" },
+    },
   ]
   for (let i = 0; i < steps; i++) {
     evs.push({ type: "step_start", run_id: run, index: i })
@@ -108,7 +112,8 @@ describe("a run written by the previous release (A3's done line)", () => {
     renderApp(`/runs/${RUN}?view=story`)
     await waitFor(() =>
       expect(
-        document.querySelectorAll("[data-request] [data-hole='not_recorded']").length
+        document.querySelectorAll("[data-request] [data-hole='not_recorded']")
+          .length
       ).toBe(doc.steps)
     )
     const header = document.querySelector<HTMLElement>("[data-run-holes]")!
@@ -118,9 +123,13 @@ describe("a run written by the previous release (A3's done line)", () => {
     const cards = document.querySelectorAll<HTMLElement>("[data-step]")
     expect(cards.length).toBe(doc.steps)
     for (const card of cards) {
-      expect(card.querySelector("[data-holes] [data-hole='not_recorded']")).toBeTruthy()
+      expect(
+        card.querySelector("[data-holes] [data-hole='not_recorded']")
+      ).toBeTruthy()
       const req = card.querySelector<HTMLElement>("[data-request]")!
-      expect(req.textContent).toContain("request not recorded by weft v0.9.0 or earlier")
+      expect(req.textContent).toContain(
+        "request not recorded by weft v0.9.0 or earlier"
+      )
       expect(req.textContent).toContain(HOLES.not_recorded.reason)
     }
     // No empty pane: step 0 shows its call, step 1 its words.
@@ -141,9 +150,24 @@ describe("a run written by the previous release (A3's done line)", () => {
       .on(`GET runs/${RUN}/events`, pagedEvents(v090Events(RUN)))
       .on(`GET runs/${RUN}/transcript`, {
         batches: [
-          { index: 0, step: -1, badge: "not_recorded", messages: [user("where is 42?")] },
-          { index: 1, step: -1, badge: "not_recorded", messages: [assistant("")] },
-          { index: 2, step: -1, badge: "not_recorded", messages: [assistant("It shipped.")] },
+          {
+            index: 0,
+            step: -1,
+            badge: "not_recorded",
+            messages: [user("where is 42?")],
+          },
+          {
+            index: 1,
+            step: -1,
+            badge: "not_recorded",
+            messages: [assistant("")],
+          },
+          {
+            index: 2,
+            step: -1,
+            badge: "not_recorded",
+            messages: [assistant("It shipped.")],
+          },
         ],
       })
       .on(`GET runs/${RUN}/spans`, { spans: [] })
@@ -156,7 +180,8 @@ describe("a run written by the previous release (A3's done line)", () => {
     )
     await waitFor(() =>
       expect(
-        document.querySelectorAll("[data-request] [data-hole='not_recorded']").length
+        document.querySelectorAll("[data-request] [data-hole='not_recorded']")
+          .length
       ).toBe(2)
     )
 
@@ -176,10 +201,14 @@ describe("a run written by the previous release (A3's done line)", () => {
       ).toBeTruthy()
       // … and its words came from a transcript whose step was
       // inferred: derived, said on the card.
-      expect(card.querySelector("[data-holes] [data-hole='derived']")).toBeTruthy()
+      expect(
+        card.querySelector("[data-holes] [data-hole='derived']")
+      ).toBeTruthy()
       // The request section says why it is empty.
       const req = card.querySelector<HTMLElement>(`[data-request="${step}"]`)!
-      expect(req.textContent).toContain("request not recorded by weft v0.9.0 or earlier")
+      expect(req.textContent).toContain(
+        "request not recorded by weft v0.9.0 or earlier"
+      )
       expect(req.textContent).toContain(HOLES.not_recorded.fix!)
     }
     // The finished words still land on the steps.
@@ -207,8 +236,18 @@ describe("transcript words whose step has no events (view.unplaced)", () => {
       .on(`GET runs/${RUN}/transcript`, {
         batches: [
           { index: 0, step: 0, input: true, messages: [user("where is 42?")] },
-          { index: 1, step: 0, input: false, messages: [assistant("Looking.")] },
-          { index: 2, step: 1, input: false, messages: [assistant("It shipped.")] },
+          {
+            index: 1,
+            step: 0,
+            input: false,
+            messages: [assistant("Looking.")],
+          },
+          {
+            index: 2,
+            step: 1,
+            input: false,
+            messages: [assistant("It shipped.")],
+          },
         ],
       })
       .on(`GET runs/${RUN}/spans`, { spans: [] })
@@ -256,9 +295,9 @@ describe("transcript words whose step has no events (view.unplaced)", () => {
     serve()
     renderApp(`/runs/${RUN}?view=story&t=5`)
     await waitFor(() =>
-      expect(
-        document.querySelector("[data-step='0']")?.textContent
-      ).toContain("Looking.")
+      expect(document.querySelector("[data-step='0']")?.textContent).toContain(
+        "Looking."
+      )
     )
     expect(document.querySelector("[data-unplaced]")).toBeTruthy()
   })
@@ -285,7 +324,10 @@ describe("the run header's status holes (the panel's rule)", () => {
     new FakeStudio()
       .on("GET meta", meta(["ingest"]))
       .on(`GET runs/${RUN}`, doc)
-      .on(`GET runs/${RUN}/events`, pagedEvents(v090Events(RUN), { gaps: [3], done: status !== "running" }))
+      .on(
+        `GET runs/${RUN}/events`,
+        pagedEvents(v090Events(RUN), { gaps: [3], done: status !== "running" })
+      )
       .on(`GET runs/${RUN}/transcript`, { batches: [] })
       .on(`GET runs/${RUN}/spans`, { spans: [] })
       .install()
@@ -295,7 +337,9 @@ describe("the run header's status holes (the panel's rule)", () => {
     serve("succeeded")
     renderApp(`/runs/${RUN}?view=story`)
     await waitFor(() =>
-      expect(document.querySelector("[data-run-holes] [data-hole='gap']")).toBeTruthy()
+      expect(
+        document.querySelector("[data-run-holes] [data-hole='gap']")
+      ).toBeTruthy()
     )
     const header = document.querySelector<HTMLElement>("[data-run-holes]")!
     expect(header.querySelector("[data-hole='max_tokens']")).toBeTruthy()
@@ -305,7 +349,9 @@ describe("the run header's status holes (the panel's rule)", () => {
   it("a running run badges max_tokens, and its gaps only in the banner", async () => {
     serve("running")
     renderApp(`/runs/${RUN}?view=story`)
-    await waitFor(() => expect(screen.getByText(/missing from the/)).toBeTruthy())
+    await waitFor(() =>
+      expect(screen.getByText(/missing from the/)).toBeTruthy()
+    )
     const header = document.querySelector<HTMLElement>("[data-run-holes]")!
     expect(header.querySelector("[data-hole='max_tokens']")).toBeTruthy()
     expect(header.querySelector("[data-hole='gap']")).toBeNull()

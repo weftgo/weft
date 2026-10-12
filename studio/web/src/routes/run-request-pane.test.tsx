@@ -13,7 +13,13 @@
 // review's cases: nothing is decided from an unverified weft.json or a
 // ToolSource tool, no diff over a cut prompt, a bounded diff, the
 // spans read once at run end.
-import { cleanup, configure, fireEvent, waitFor, within } from "@testing-library/react"
+import {
+  cleanup,
+  configure,
+  fireEvent,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
@@ -40,7 +46,13 @@ const PROMPT0 = "You are a support agent."
 const REGISTERED = "You are a careful support agent."
 
 function events(): FakePosEvent[] {
-  const evs: unknown[] = [{ type: "run_start", id: RUN, model: { provider: "wefttest", name: "script" } }]
+  const evs: unknown[] = [
+    {
+      type: "run_start",
+      id: RUN,
+      model: { provider: "wefttest", name: "script" },
+    },
+  ]
   for (let i = 0; i < 3; i++) {
     evs.push({ type: "step_start", run_id: RUN, index: i })
     evs.push({
@@ -51,13 +63,20 @@ function events(): FakePosEvent[] {
       usage: { input_tokens: 5, output_tokens: 2 },
     })
   }
-  evs.push({ type: "run_finish", run_id: RUN, usage: { input_tokens: 15, output_tokens: 6 }, steps: 3 })
+  evs.push({
+    type: "run_finish",
+    run_id: RUN,
+    usage: { input_tokens: 15, output_tokens: 6 },
+    steps: 3,
+  })
   return evs.map((event, pos) => ({ pos, time: rOK.started, event }))
 }
 
 /** The golden's requests name messages records 0, 2 and 4 (1, 3 and 5
  * messages): one message per record, as the run grew. */
-const msg = (role: string, text: string) => [{ role, content: [{ type: "text", text }] }]
+const msg = (role: string, text: string) => [
+  { role, content: [{ type: "text", text }] },
+]
 const BODIES = [
   msg("user", "where is order 42?"),
   msg("assistant", "looking it up"),
@@ -78,7 +97,11 @@ function invokeAgent(attrs: Record<string, unknown>): Span {
     status: "ok",
     status_message: "",
     service: "",
-    attrs: { "gen_ai.operation.name": "invoke_agent", "weft.run.id": RUN, ...attrs },
+    attrs: {
+      "gen_ai.operation.name": "invoke_agent",
+      "weft.run.id": RUN,
+      ...attrs,
+    },
     events: [],
   }
 }
@@ -98,7 +121,12 @@ function manifest(
         ...(opts.nameOnly ? {} : { manifest_hash: rOK.manifest_hash }),
         model: { provider: "wefttest", name: "script" },
         instructions,
-        policy: { parallelism: 4, max_steps: 10, max_result_bytes: 65536, max_model_retries: 3 },
+        policy: {
+          parallelism: 4,
+          max_steps: 10,
+          max_result_bytes: 65536,
+          max_model_retries: 3,
+        },
         tools: ["lookup_order", "refund"].map((name) =>
           sn[name] ? { name, prompt_snippet: sn[name] } : { name }
         ),
@@ -118,7 +146,12 @@ const DEMO0 = `${DEMO1}\n\n${GUIDANCE}`
  * computed as the core does), on the golden's step-0 row. */
 async function rowsFor(
   texts: string[],
-  opts: { names?: string[][]; truncated?: number[]; noIndex?: number[]; stripped?: number[] } = {}
+  opts: {
+    names?: string[][]
+    truncated?: number[]
+    noIndex?: number[]
+    stripped?: number[]
+  } = {}
 ): Promise<RequestsPage> {
   const base = golden<RequestsPage>("requests-ok").requests[0]
   const requests = await Promise.all(
@@ -172,9 +205,15 @@ async function serve(opts: {
   const running: RunDoc = { ...doc, status: "running", finished: null }
   const ended = opts.ended
   studio = new FakeStudio()
-    .on("GET meta", { ...golden<Record<string, unknown>>("meta"), capabilities: ["requests", "ingest"] })
+    .on("GET meta", {
+      ...golden<Record<string, unknown>>("meta"),
+      capabilities: ["requests", "ingest"],
+    })
     .on(`GET runs/${RUN}`, () => (!ended || ended() ? doc : running))
-    .on(`GET runs/${RUN}/events`, pagedEvents(events(), { done: () => !ended || ended() }))
+    .on(
+      `GET runs/${RUN}/events`,
+      pagedEvents(events(), { done: () => !ended || ended() })
+    )
     .on(`GET runs/${RUN}/transcript`, transcriptOf(opts.bodies ?? BODIES))
     .on(`GET runs/${RUN}/spans`, { spans: opts.spans ?? [] })
   if (opts.manifest) studio.on("GET manifest", opts.manifest)
@@ -200,20 +239,28 @@ afterEach(() => {
 })
 
 function pane(step: number): HTMLElement {
-  const el = document.querySelector<HTMLElement>(`[data-step="${step}"] [data-request="${step}"]`)
+  const el = document.querySelector<HTMLElement>(
+    `[data-step="${step}"] [data-request="${step}"]`
+  )
   if (!el) throw new Error(`no request pane on step ${step}`)
   return el
 }
 const marks = (step: number) =>
-  Array.from(pane(step).querySelectorAll("[data-mark]")).map((m) => m.textContent)
+  Array.from(pane(step).querySelectorAll("[data-mark]")).map(
+    (m) => m.textContent
+  )
 
 /** The story view, its request panes drawn (and, unless the record is
  * a hole, loaded: their openers present). */
 async function story(loaded = true) {
   renderApp(`/runs/${RUN}?view=story`)
-  await waitFor(() => expect(document.querySelectorAll("[data-request]").length).toBe(3))
+  await waitFor(() =>
+    expect(document.querySelectorAll("[data-request]").length).toBe(3)
+  )
   if (loaded)
-    await waitFor(() => expect(pane(0).querySelector("button[aria-expanded]")).toBeTruthy())
+    await waitFor(() =>
+      expect(pane(0).querySelector("button[aria-expanded]")).toBeTruthy()
+    )
 }
 function open(step: number) {
   fireEvent.click(within(pane(step)).getByRole("button", { name: /^request$/ }))
@@ -224,8 +271,12 @@ function diff(step: number) {
   return {
     kind: d.getAttribute("data-prompt-diff"),
     caption: d.querySelector("span")?.textContent,
-    add: Array.from(d.querySelectorAll('[data-diff="add"]')).map((r) => r.textContent),
-    del: Array.from(d.querySelectorAll('[data-diff="del"]')).map((r) => r.textContent),
+    add: Array.from(d.querySelectorAll('[data-diff="add"]')).map(
+      (r) => r.textContent
+    ),
+    del: Array.from(d.querySelectorAll('[data-diff="del"]')).map(
+      (r) => r.textContent
+    ),
   }
 }
 /** Let every pending read settle (the manifest, the hash checks — all
@@ -251,7 +302,10 @@ describe("the Request pane's chips and diff (E1 Done)", () => {
   it("(a) studio-local's PrepareStep trim: the chip and the diff at step 1 only, the paragraph removed", async () => {
     // The example's record: two hashes — step 0's, then step 1's for
     // every later step — and no override on the run.
-    await serve({ instructions: DEMO0, requests: await rowsFor([DEMO0, DEMO1, DEMO1]) })
+    await serve({
+      instructions: DEMO0,
+      requests: await rowsFor([DEMO0, DEMO1, DEMO1]),
+    })
     await story()
     await waitFor(() => expect(marks(1)).toEqual(["changed by PrepareStep"]))
     await settle()
@@ -289,7 +343,10 @@ describe("the Request pane's chips and diff (E1 Done)", () => {
     })
     // Step 1 grew the tool set by refund, which the verified manifest
     // shows carries no snippet: only a PrepareStep moved the hash.
-    expect(marks(1)).toEqual(["changed by PrepareStep", "catalog changed at this step"])
+    expect(marks(1)).toEqual([
+      "changed by PrepareStep",
+      "catalog changed at this step",
+    ])
   })
 
   it("(b) an experiment override: 'overridden by experiment', not 'changed by PrepareStep', diffed against the registered instructions", async () => {
@@ -298,7 +355,12 @@ describe("the Request pane's chips and diff (E1 Done)", () => {
     await serve({
       instructions: PROMPT0,
       manifest: manifest(REGISTERED),
-      spans: [invokeAgent({ "weft.override.hash": "f00d", "weft.override.instructions": true })],
+      spans: [
+        invokeAgent({
+          "weft.override.hash": "f00d",
+          "weft.override.instructions": true,
+        }),
+      ],
     })
     await story()
     await waitFor(() => expect(marks(0)).toEqual(["overridden by experiment"]))
@@ -312,7 +374,10 @@ describe("the Request pane's chips and diff (E1 Done)", () => {
       del: [`− ${REGISTERED}`],
     })
     // The later steps' own rewrites are still PrepareStep's.
-    expect(marks(1)).toEqual(["changed by PrepareStep", "catalog changed at this step"])
+    expect(marks(1)).toEqual([
+      "changed by PrepareStep",
+      "catalog changed at this step",
+    ])
     expect(pane(1).textContent).not.toContain("overridden by experiment")
   })
 
@@ -320,7 +385,12 @@ describe("the Request pane's chips and diff (E1 Done)", () => {
     await serve({
       instructions: PROMPT0,
       manifest: manifest(PROMPT0),
-      spans: [invokeAgent({ "weft.override.hash": "beef", "weft.override.model": "a/b" })],
+      spans: [
+        invokeAgent({
+          "weft.override.hash": "beef",
+          "weft.override.model": "a/b",
+        }),
+      ],
     })
     await story()
     await waitFor(() => expect(marks(2)).toEqual(["changed by PrepareStep"]))
@@ -330,9 +400,17 @@ describe("the Request pane's chips and diff (E1 Done)", () => {
   it("catalog changed at this step: on the step whose catalog hash moved, alone", async () => {
     await serve({ instructions: PROMPT0 })
     await story()
-    await waitFor(() => expect(within(pane(1)).getByText("catalog changed at this step")).toBeTruthy())
-    expect(within(pane(0)).queryByText("catalog changed at this step")).toBeNull()
-    expect(within(pane(2)).queryByText("catalog changed at this step")).toBeNull()
+    await waitFor(() =>
+      expect(
+        within(pane(1)).getByText("catalog changed at this step")
+      ).toBeTruthy()
+    )
+    expect(
+      within(pane(0)).queryByText("catalog changed at this step")
+    ).toBeNull()
+    expect(
+      within(pane(2)).queryByText("catalog changed at this step")
+    ).toBeNull()
   })
 })
 
@@ -343,7 +421,10 @@ describe("nothing is decided from what cannot be verified (review 1, 2)", () => 
     const text = `${PROMPT0}\n\nAlways quote the order id.`
     await serve({
       instructions: PROMPT0,
-      manifest: manifest(PROMPT0, { nameOnly: true, snippets: { lookup_order: "Quote nothing." } }),
+      manifest: manifest(PROMPT0, {
+        nameOnly: true,
+        snippets: { lookup_order: "Quote nothing." },
+      }),
       requests: await rowsFor([text, text, text]),
     })
     await story()
@@ -351,7 +432,9 @@ describe("nothing is decided from what cannot be verified (review 1, 2)", () => 
     await settle()
     expect(marks(0)).toEqual([])
     open(0)
-    expect(diff(0)?.caption).toBe("diff vs weft.json's instructions — not verified for this run")
+    expect(diff(0)?.caption).toBe(
+      "diff vs weft.json's instructions — not verified for this run"
+    )
   })
 
   it("a ToolSource tool with a snippet on a plain run: no chip (the manifest cannot know it)", async () => {
@@ -360,7 +443,11 @@ describe("nothing is decided from what cannot be verified (review 1, 2)", () => 
       instructions: PROMPT0,
       manifest: manifest(PROMPT0),
       requests: await rowsFor([text, text, text], {
-        names: [["lookup_order", "search_docs"], ["lookup_order", "search_docs"], ["lookup_order", "search_docs"]],
+        names: [
+          ["lookup_order", "search_docs"],
+          ["lookup_order", "search_docs"],
+          ["lookup_order", "search_docs"],
+        ],
       }),
     })
     await story()
@@ -374,7 +461,10 @@ describe("nothing is decided from what cannot be verified (review 1, 2)", () => 
     await serve({ instructions: PROMPT0 })
     await story()
     await waitFor(() =>
-      expect(marks(1)).toEqual(["prompt changed at this step", "catalog changed at this step"])
+      expect(marks(1)).toEqual([
+        "prompt changed at this step",
+        "catalog changed at this step",
+      ])
     )
     const chip = pane(1).querySelector('[data-mark="prompt"]')!
     expect(chip.getAttribute("title")).toMatch(/PrepareStep/)
@@ -388,7 +478,12 @@ describe("the diff's bounds (review 3, 4)", () => {
   it("no diff over a derived prompt record (its body did not parse): the derived badge, on its step and the next", async () => {
     const page = await rowsFor([DEMO0, DEMO1, DEMO0])
     // obsdb's PromptRecordOf keeps a derived record's hash, not its text.
-    page.requests[1].prompt = { hash: page.requests[1].system_hash, text: "", content: "derived", truncated_bytes: 0 }
+    page.requests[1].prompt = {
+      hash: page.requests[1].system_hash,
+      text: "",
+      content: "derived",
+      truncated_bytes: 0,
+    }
     await serve({ instructions: DEMO0, requests: page })
     await story()
     await waitFor(() => expect(marks(1)).toEqual(["changed by PrepareStep"]))
@@ -413,7 +508,8 @@ describe("the diff's bounds (review 3, 4)", () => {
   })
 
   it("two 5,000-line prompts that differ throughout: 'too large to diff', promptly", async () => {
-    const big = (tag: string) => Array.from({ length: 5000 }, (_, i) => `${tag} line ${i}`).join("\n")
+    const big = (tag: string) =>
+      Array.from({ length: 5000 }, (_, i) => `${tag} line ${i}`).join("\n")
     const a = big("a")
     const b = big("b")
     await serve({ instructions: a, requests: await rowsFor([a, b, b]) })
@@ -434,12 +530,19 @@ describe("the override chip reads the spans once, at run end (review 5)", () => 
     await serve({
       instructions: PROMPT0,
       manifest: manifest(REGISTERED),
-      spans: [invokeAgent({ "weft.override.hash": "f00d", "weft.override.instructions": true })],
+      spans: [
+        invokeAgent({
+          "weft.override.hash": "f00d",
+          "weft.override.instructions": true,
+        }),
+      ],
       ended: () => done,
     })
     vi.useFakeTimers({ shouldAdvanceTime: true })
     renderApp(`/runs/${RUN}?view=story`)
-    await waitFor(() => expect(document.querySelectorAll("[data-request]").length).toBe(3))
+    await waitFor(() =>
+      expect(document.querySelectorAll("[data-request]").length).toBe(3)
+    )
     // Past the 2 s refetchInterval: the row was polled, the spans not.
     const polls = studio.calls(`GET runs/${RUN}`).length
     await vi.advanceTimersByTimeAsync(2500)
@@ -463,16 +566,29 @@ describe("the invoke_agent span lands after the end (round-2 review 1)", () => {
     })
     // The span batch lands after run_finish: the first read has only a
     // chat span, the next one the invoke_agent span too.
-    const chat: Span = { ...invokeAgent({}), span_id: "c1", name: "chat script", attrs: { "gen_ai.operation.name": "chat", "weft.run.id": RUN } }
+    const chat: Span = {
+      ...invokeAgent({}),
+      span_id: "c1",
+      name: "chat script",
+      attrs: { "gen_ai.operation.name": "chat", "weft.run.id": RUN },
+    }
     studio.on(`GET runs/${RUN}/spans`, () => ({
       spans:
         studio.calls(`GET runs/${RUN}/spans`).length <= 1
           ? [chat]
-          : [chat, invokeAgent({ "weft.override.hash": "f00d", "weft.override.instructions": true })],
+          : [
+              chat,
+              invokeAgent({
+                "weft.override.hash": "f00d",
+                "weft.override.instructions": true,
+              }),
+            ],
     }))
     vi.useFakeTimers({ shouldAdvanceTime: true })
     renderApp(`/runs/${RUN}?view=story`)
-    await waitFor(() => expect(document.querySelectorAll("[data-request]").length).toBe(3))
+    await waitFor(() =>
+      expect(document.querySelectorAll("[data-request]").length).toBe(3)
+    )
     done = true
     await until(() => expect(marks(0)).toEqual(["overridden by experiment"]))
     const reads = studio.calls(`GET runs/${RUN}/spans`).length
@@ -486,8 +602,12 @@ describe("the invoke_agent span lands after the end (round-2 review 1)", () => {
     await serve({ instructions: PROMPT0, manifest: manifest(REGISTERED) })
     vi.useFakeTimers({ shouldAdvanceTime: true })
     renderApp(`/runs/${RUN}?view=story`)
-    await waitFor(() => expect(document.querySelectorAll("[data-request]").length).toBe(3))
-    await waitFor(() => expect(studio.calls(`GET runs/${RUN}/spans`)).toHaveLength(1))
+    await waitFor(() =>
+      expect(document.querySelectorAll("[data-request]").length).toBe(3)
+    )
+    await waitFor(() =>
+      expect(studio.calls(`GET runs/${RUN}/spans`)).toHaveLength(1)
+    )
     // Well past several 2 s intervals, inside the 30 s wait a seen end
     // would have opened: still the one read.
     await vi.advanceTimersByTimeAsync(10_000)
@@ -502,17 +622,36 @@ describe("a run opened cold just after it finished (verification review)", () =>
   // the wait counted from the row's end time, and only there.
   it("polls the spans until the invoke_agent span comes: the chip appears without a reload", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
-    await serve({ instructions: PROMPT0, manifest: manifest(REGISTERED), finished: new Date(Date.now() - 5_000).toISOString() })
-    const chat: Span = { ...invokeAgent({}), span_id: "c1", name: "chat script", attrs: { "gen_ai.operation.name": "chat", "weft.run.id": RUN } }
+    await serve({
+      instructions: PROMPT0,
+      manifest: manifest(REGISTERED),
+      finished: new Date(Date.now() - 5_000).toISOString(),
+    })
+    const chat: Span = {
+      ...invokeAgent({}),
+      span_id: "c1",
+      name: "chat script",
+      attrs: { "gen_ai.operation.name": "chat", "weft.run.id": RUN },
+    }
     studio.on(`GET runs/${RUN}/spans`, () => ({
       spans:
         studio.calls(`GET runs/${RUN}/spans`).length <= 1
           ? [chat]
-          : [chat, invokeAgent({ "weft.override.hash": "f00d", "weft.override.instructions": true })],
+          : [
+              chat,
+              invokeAgent({
+                "weft.override.hash": "f00d",
+                "weft.override.instructions": true,
+              }),
+            ],
     }))
     renderApp(`/runs/${RUN}?view=story`)
-    await waitFor(() => expect(document.querySelectorAll("[data-request]").length).toBe(3))
-    await waitFor(() => expect(studio.calls(`GET runs/${RUN}/spans`)).toHaveLength(1))
+    await waitFor(() =>
+      expect(document.querySelectorAll("[data-request]").length).toBe(3)
+    )
+    await waitFor(() =>
+      expect(studio.calls(`GET runs/${RUN}/spans`)).toHaveLength(1)
+    )
     expect(marks(0)).toEqual([])
     await vi.advanceTimersByTimeAsync(2500)
     await until(() => expect(marks(0)).toEqual(["overridden by experiment"]))
@@ -524,10 +663,18 @@ describe("a run opened cold just after it finished (verification review)", () =>
 
   it("bounded to the wait: a span that never comes stops the polling once the row's end is 30 s old", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
-    await serve({ instructions: PROMPT0, manifest: manifest(REGISTERED), finished: new Date(Date.now() - 20_000).toISOString() })
+    await serve({
+      instructions: PROMPT0,
+      manifest: manifest(REGISTERED),
+      finished: new Date(Date.now() - 20_000).toISOString(),
+    })
     renderApp(`/runs/${RUN}?view=story`)
-    await waitFor(() => expect(document.querySelectorAll("[data-request]").length).toBe(3))
-    await waitFor(() => expect(studio.calls(`GET runs/${RUN}/spans`)).toHaveLength(1))
+    await waitFor(() =>
+      expect(document.querySelectorAll("[data-request]").length).toBe(3)
+    )
+    await waitFor(() =>
+      expect(studio.calls(`GET runs/${RUN}/spans`)).toHaveLength(1)
+    )
     await vi.advanceTimersByTimeAsync(4500)
     expect(studio.calls(`GET runs/${RUN}/spans`).length).toBeGreaterThan(1) // inside the wait: polled
     await vi.advanceTimersByTimeAsync(10_000) // the row's end is 34.5 s old
@@ -540,15 +687,23 @@ describe("a run opened cold just after it finished (verification review)", () =>
 
 describe("a request row ahead of its transcript batch (review fixes)", () => {
   it("while the run runs, the newest step's missing batch is the neutral no-transcript line, not the gap badge", async () => {
-    await serve({ instructions: PROMPT0, ended: () => false, bodies: BODIES.slice(0, 4) })
+    await serve({
+      instructions: PROMPT0,
+      ended: () => false,
+      bodies: BODIES.slice(0, 4),
+    })
     await story()
     open(2)
     const m2 = () => pane(2).querySelector("[data-messages-sent]")!
-    await waitFor(() => expect(m2().textContent).toContain("bytes when the transcript is read"))
+    await waitFor(() =>
+      expect(m2().textContent).toContain("bytes when the transcript is read")
+    )
     expect(m2().querySelector('[data-hole="gap"]')).toBeNull()
     // The steps whose batches are there resolve as ever.
     open(1)
-    expect(pane(1).querySelector("[data-messages-line]")?.textContent).toMatch(/^3 messages · \d+ B$/)
+    expect(pane(1).querySelector("[data-messages-line]")?.textContent).toMatch(
+      /^3 messages · \d+ B$/
+    )
   })
 
   it("once the run is over the same missing batch is a gap", async () => {
@@ -556,7 +711,9 @@ describe("a request row ahead of its transcript batch (review fixes)", () => {
     await story()
     open(2)
     await waitFor(() =>
-      expect(pane(2).querySelector('[data-messages-sent] [data-hole="gap"]')).toBeTruthy()
+      expect(
+        pane(2).querySelector('[data-messages-sent] [data-hole="gap"]')
+      ).toBeTruthy()
     )
   })
 })
@@ -571,12 +728,14 @@ describe("the Request pane's rows", () => {
       expect(r?.firstChild?.textContent).toBe(k)
       expect(r?.lastChild?.textContent).toBe("adapter default")
     }
-    expect(within(pane(0)).getByText("tool choice").parentElement?.lastChild?.textContent).toBe(
-      "adapter default"
-    )
-    expect(within(pane(0)).getByText("thinking").parentElement?.lastChild?.textContent).toBe(
-      "adapter default"
-    )
+    expect(
+      within(pane(0)).getByText("tool choice").parentElement?.lastChild
+        ?.textContent
+    ).toBe("adapter default")
+    expect(
+      within(pane(0)).getByText("thinking").parentElement?.lastChild
+        ?.textContent
+    ).toBe("adapter default")
   })
 
   it("messages sent: the count and bytes, the last three inline, the rest in the raw tree (review 6)", async () => {
@@ -586,30 +745,49 @@ describe("the Request pane's rows", () => {
     const sent = BODIES.flat()
     const size = new TextEncoder().encode(JSON.stringify(sent)).length
     await waitFor(() =>
-      expect(pane(2).querySelector("[data-messages-line]")?.textContent).toBe(`5 messages · ${size} B`)
+      expect(pane(2).querySelector("[data-messages-line]")?.textContent).toBe(
+        `5 messages · ${size} B`
+      )
     )
-    expect(pane(2).querySelector("[data-messages-line]")?.getAttribute("title")).toBe(
-      "computed from the transcript as JSON"
-    )
-    const last = Array.from(pane(2).querySelectorAll("[data-messages-last] li")).map((l) => l.textContent)
-    expect(last).toEqual(["tool: order 42: shipped", "assistant: refunding", "tool: refund queued"])
+    expect(
+      pane(2).querySelector("[data-messages-line]")?.getAttribute("title")
+    ).toBe("computed from the transcript as JSON")
+    const last = Array.from(
+      pane(2).querySelectorAll("[data-messages-last] li")
+    ).map((l) => l.textContent)
+    expect(last).toEqual([
+      "tool: order 42: shipped",
+      "assistant: refunding",
+      "tool: refund queued",
+    ])
     // The two before them open as the raw tree, in place.
     expect(pane(2).querySelector("[data-messages-earlier]")).toBeNull()
-    fireEvent.click(within(pane(2)).getByRole("button", { name: /2 earlier messages \(raw\)/ }))
+    fireEvent.click(
+      within(pane(2)).getByRole("button", {
+        name: /2 earlier messages \(raw\)/,
+      })
+    )
     const tree = pane(2).querySelector("[data-messages-earlier]")
     expect(tree?.textContent).toContain("where is order 42?")
     expect(tree?.textContent).toContain("looking it up")
     // The transcript was read once, by the page; the pane fetched nothing.
     expect(studio.calls(`GET runs/${RUN}/transcript`)).toHaveLength(1)
     open(0)
-    expect(pane(0).querySelector("[data-messages-line]")?.textContent).toMatch(/^1 message · \d+ B$/)
-    expect(within(pane(0)).queryByRole("button", { name: /earlier/ })).toBeNull()
+    expect(pane(0).querySelector("[data-messages-line]")?.textContent).toMatch(
+      /^1 message · \d+ B$/
+    )
+    expect(
+      within(pane(0)).queryByRole("button", { name: /earlier/ })
+    ).toBeNull()
   })
 
   it("a request no messages record names: a gap when content was captured, stripped when it was not (review 7)", async () => {
     await serve({
       instructions: DEMO0,
-      requests: await rowsFor([DEMO0, DEMO1, DEMO1], { noIndex: [1, 2], stripped: [2] }),
+      requests: await rowsFor([DEMO0, DEMO1, DEMO1], {
+        noIndex: [1, 2],
+        stripped: [2],
+      }),
     })
     await story()
     open(1)
@@ -620,7 +798,9 @@ describe("the Request pane's rows", () => {
     expect(m1.textContent).not.toContain("captured no content")
     open(2)
     const m2 = pane(2).querySelector("[data-messages-sent]")!
-    expect(m2.textContent).not.toContain("compaction view could not be recorded")
+    expect(m2.textContent).not.toContain(
+      "compaction view could not be recorded"
+    )
     expect(m2.querySelector('[data-hole="stripped"]')).toBeTruthy()
     expect(m1.querySelector('[data-hole="gap"]')).toBeTruthy()
   })
@@ -630,7 +810,11 @@ describe("the Request pane under a read-scoped token (E1 Done (c))", () => {
   it("shows the hidden badge and nothing else: no prompt bytes in the DOM or in any body received", async () => {
     await serve({ instructions: PROMPT0, hidden: true })
     await story(false)
-    await waitFor(() => expect(within(pane(0)).getByText("hidden by your token scope")).toBeTruthy())
+    await waitFor(() =>
+      expect(
+        within(pane(0)).getByText("hidden by your token scope")
+      ).toBeTruthy()
+    )
     for (const step of [0, 1, 2]) {
       const p = pane(step)
       expect(within(p).getByText("hidden by your token scope")).toBeTruthy()
@@ -649,7 +833,10 @@ describe("the Request pane under a read-scoped token (E1 Done (c))", () => {
     expect(req.length).toBeGreaterThan(0)
     for (const r of req) {
       expect(r.status).toBe(403)
-      expect(JSON.parse(r.body)).toMatchObject({ badge: "hidden", fix: "use a playground-scoped token" })
+      expect(JSON.parse(r.body)).toMatchObject({
+        badge: "hidden",
+        fix: "use a playground-scoped token",
+      })
     }
     for (const r of all) {
       expect(r.body).not.toContain(PROMPT0)

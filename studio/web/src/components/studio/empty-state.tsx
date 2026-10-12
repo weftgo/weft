@@ -28,8 +28,8 @@ export function EmptyState({ command }: { command: string }) {
         </pre>
       </div>
       <p className="text-xs text-faint">
-        recorded locally by <span className="font-mono">otel.Install()</span>{" "}
-        — content included
+        recorded locally by <span className="font-mono">otel.Install()</span> —
+        content included
       </p>
       <p className="text-xs text-faint">
         press <Kbd>?</Kbd> for keyboard help

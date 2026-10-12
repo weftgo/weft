@@ -2,16 +2,32 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { RunRow } from "./api"
-import { fetchSessionForks, forkSource, nestExperiments, EXPERIMENT_ID_RE, mintExperimentID, validExperimentID } from "./experiments"
+import {
+  fetchSessionForks,
+  forkSource,
+  nestExperiments,
+  EXPERIMENT_ID_RE,
+  mintExperimentID,
+  validExperimentID,
+} from "./experiments"
 
 const run = (id: string, forked_from = "", started = "2026-10-01T09:00:00Z") =>
   ({ id, forked_from, started, playground: Boolean(forked_from) }) as RunRow
 
 describe("forkSource", () => {
   it("splits the run id from the step it continued at", () => {
-    expect(forkSource(run("x", "s_1-t3#2"))).toEqual({ runID: "s_1-t3", fromStep: 2 })
-    expect(forkSource(run("x", "odd#id#0"))).toEqual({ runID: "odd#id", fromStep: 0 })
-    expect(forkSource(run("x", "no-step"))).toEqual({ runID: "no-step", fromStep: 0 })
+    expect(forkSource(run("x", "s_1-t3#2"))).toEqual({
+      runID: "s_1-t3",
+      fromStep: 2,
+    })
+    expect(forkSource(run("x", "odd#id#0"))).toEqual({
+      runID: "odd#id",
+      fromStep: 0,
+    })
+    expect(forkSource(run("x", "no-step"))).toEqual({
+      runID: "no-step",
+      fromStep: 0,
+    })
     expect(forkSource(run("x"))).toBeNull()
   })
 })
@@ -65,11 +81,15 @@ describe("fetchSessionForks", () => {
     const out = await fetchSessionForks({ public_id: "", agent: "orders" })
     expect(out.truncated).toBe(true)
     expect(fetchMock.mock.calls.length).toBe(4)
-    expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get("agent")).toBe("orders")
+    expect(
+      new URL(String(fetchMock.mock.calls[0][0])).searchParams.get("agent")
+    ).toBe("orders")
   })
 
   it("stops on a cursor that does not advance", async () => {
-    const fetchMock = vi.fn(async () => page([run("pg", "t#0")], "2026-10-01T08:00:00Z"))
+    const fetchMock = vi.fn(async () =>
+      page([run("pg", "t#0")], "2026-10-01T08:00:00Z")
+    )
     vi.stubGlobal("fetch", fetchMock)
     const out = await fetchSessionForks({ public_id: "pub_1", agent: "" })
     expect(fetchMock.mock.calls.length).toBe(2)
@@ -78,9 +98,18 @@ describe("fetchSessionForks", () => {
 
   it("sends the exact cursor back, and walks a group sharing one timestamp", async () => {
     const t = "2026-10-01T08:00:00Z"
-    const exact = (id: string, next_before: string | null, next_before_id: string | null) =>
+    const exact = (
+      id: string,
+      next_before: string | null,
+      next_before_id: string | null
+    ) =>
       new Response(
-        JSON.stringify({ total: 3, runs: [run(id, "t#0")], next_before, next_before_id }),
+        JSON.stringify({
+          total: 3,
+          runs: [run(id, "t#0")],
+          next_before,
+          next_before_id,
+        }),
         { status: 200 }
       )
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -94,20 +123,33 @@ describe("fetchSessionForks", () => {
     const out = await fetchSessionForks({ public_id: "pub_1", agent: "" })
     expect(out.runs.map((r) => r.id)).toEqual(["pg_1", "pg_2", "pg_3"])
     expect(
-      fetchMock.mock.calls.map((c) => new URL(String(c[0])).searchParams.get("before_id"))
+      fetchMock.mock.calls.map((c) =>
+        new URL(String(c[0])).searchParams.get("before_id")
+      )
     ).toEqual([null, "pg_1", "pg_2"])
   })
 })
 
 describe("an experiment's id (command_id's rule)", () => {
   it("a name that fits is its own id; any other is slugged with the nonce; none is exp_<stamp>", () => {
-    expect(mintExperimentID("exp_tone", "2026-10-10T09:30:00", "n1")).toBe("exp_tone")
-    expect(mintExperimentID("  tone / brevity test ", "s", "ab12")).toBe("tone-brevity-test_ab12")
-    expect(mintExperimentID("ünïcode only ✓", "s", "ab12")).toBe("n-code-only_ab12")
+    expect(mintExperimentID("exp_tone", "2026-10-10T09:30:00", "n1")).toBe(
+      "exp_tone"
+    )
+    expect(mintExperimentID("  tone / brevity test ", "s", "ab12")).toBe(
+      "tone-brevity-test_ab12"
+    )
+    expect(mintExperimentID("ünïcode only ✓", "s", "ab12")).toBe(
+      "n-code-only_ab12"
+    )
     expect(mintExperimentID("✓✓", "s", "ab12")).toBe("exp_ab12")
-    expect(mintExperimentID("", "2026-10-10T09:30:00", "n1")).toBe("exp_2026-10-10T09:30:00")
-    expect(mintExperimentID("x".repeat(300), "s", "n1")).toMatch(EXPERIMENT_ID_RE)
-    for (const id of ["a b", "a/b", "", "x".repeat(129)]) expect(validExperimentID(id)).toBe(false)
+    expect(mintExperimentID("", "2026-10-10T09:30:00", "n1")).toBe(
+      "exp_2026-10-10T09:30:00"
+    )
+    expect(mintExperimentID("x".repeat(300), "s", "n1")).toMatch(
+      EXPERIMENT_ID_RE
+    )
+    for (const id of ["a b", "a/b", "", "x".repeat(129)])
+      expect(validExperimentID(id)).toBe(false)
     expect(validExperimentID("cell.A-1:x_y")).toBe(true)
   })
 })

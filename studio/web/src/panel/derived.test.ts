@@ -11,7 +11,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { derivedWords } from "../lib/honesty"
 import { SAVE_TEST_LABEL } from "../lib/saves"
 import { FakeStudio } from "../test/fake-studio"
-import { DERIVED, DERIVED_FAILED, STOCK, derivedBodies, serveDerived } from "../test/derived-fixture"
+import {
+  DERIVED,
+  DERIVED_FAILED,
+  STOCK,
+  derivedBodies,
+  serveDerived,
+} from "../test/derived-fixture"
 import { $, all, click, META, mount, settle, setup, teardown } from "./testkit"
 import { badgeLabel } from "./badges"
 import type { WeftDevtools } from "./element"
@@ -28,12 +34,32 @@ afterEach(() => {
  * runs), on the derived fixture, every verb's capability on. */
 async function open(): Promise<WeftDevtools> {
   serveDerived(
-    new FakeStudio().on("GET meta", { ...META, capabilities: [...META.capabilities, "requests", "steps", "export", "pricing"] })
+    new FakeStudio().on("GET meta", {
+      ...META,
+      capabilities: [
+        ...META.capabilities,
+        "requests",
+        "steps",
+        "export",
+        "pricing",
+      ],
+    })
   ).install()
-  const el = await mount({ "data-endpoint": "http://studio.test/studio/", "data-open": "true" })
-  await vi.waitFor(() => expect(all(el, ".weft-turn").length).toBe(2), { timeout: 5_000 })
+  const el = await mount({
+    "data-endpoint": "http://studio.test/studio/",
+    "data-open": "true",
+  })
+  await vi.waitFor(() => expect(all(el, ".weft-turn").length).toBe(2), {
+    timeout: 5_000,
+  })
   click(all(el, ".weft-turn").find((b) => b.textContent.includes(DERIVED)))
-  await vi.waitFor(() => expect($(el, '[data-weft-turn-holes] [data-hole="derived"]')).toBeTruthy(), { timeout: 5_000 })
+  await vi.waitFor(
+    () =>
+      expect(
+        $(el, '[data-weft-turn-holes] [data-hole="derived"]')
+      ).toBeTruthy(),
+    { timeout: 5_000 }
+  )
   await settle()
   return el
 }
@@ -68,19 +94,27 @@ describe("a derived turn in the panel", () => {
     const el = await open()
     const story = await tab(el, "story")
     const holes = story.querySelector<HTMLElement>("[data-weft-turn-holes]")!
-    expect([...holes.querySelectorAll("[data-hole]")].map((b) => b.getAttribute("data-hole"))).toEqual(["derived"])
+    expect(
+      [...holes.querySelectorAll("[data-hole]")].map((b) =>
+        b.getAttribute("data-hole")
+      )
+    ).toEqual(["derived"])
     saysStock(holes.textContent, "story notes")
     // No verb that would replay or edit it …
     expect(story.querySelector("[data-weft-verb]")).toBeNull()
     expect(story.querySelector("textarea")).toBeNull()
     for (const label of ["✎ Experiment", "↻ Re-run"]) {
-      const b = all(el, "#weft-tp-story button[data-weft-refused]").find((n) => n.firstChild?.textContent === label) as HTMLButtonElement
+      const b = all(el, "#weft-tp-story button[data-weft-refused]").find(
+        (n) => n.firstChild?.textContent === label
+      ) as HTMLButtonElement
       expect(b, label).toBeTruthy()
       expect(b.disabled).toBe(true)
       expect(b.getAttribute("title")).toBe(derivedWords())
     }
     // … and the wefttest export greyed, not a link.
-    const save = story.querySelector<HTMLElement>('[data-weft-refused="derived"]:not(button)')!
+    const save = story.querySelector<HTMLElement>(
+      '[data-weft-refused="derived"]:not(button)'
+    )!
     expect(save.firstChild?.textContent).toBe(SAVE_TEST_LABEL)
     expect(save.getAttribute("aria-disabled")).toBe("true")
     expect(save.tagName).not.toBe("A")
@@ -88,7 +122,9 @@ describe("a derived turn in the panel", () => {
     expect(story.querySelector("a[data-weft-save-test]")).toBeNull()
     // The steps the spans tell are Studio's story: the hand-off says how
     // many and lands on the run page's story at step 0.
-    const off = story.querySelector<HTMLAnchorElement>("[data-weft-derived-handoff]")!
+    const off = story.querySelector<HTMLAnchorElement>(
+      "[data-weft-derived-handoff]"
+    )!
     expect(off.textContent).toBe("2 steps · open in Studio ⤢")
     const url = new URL(off.href)
     expect(url.pathname).toBe(`/studio/runs/${DERIVED}`)
@@ -97,12 +133,29 @@ describe("a derived turn in the panel", () => {
   })
 
   it("no usage reported: the turn's tokens read — with the API's reason, never 0→0", async () => {
-    const reason = (derivedBodies.runNoUsage as { cost_reason: string }).cost_reason
-    serveDerived(new FakeStudio().on("GET meta", { ...META, capabilities: [...META.capabilities, "requests", "pricing"] }))
-      .on("GET runs", { total: 1, runs: [derivedBodies.runNoUsage], next_before: null })
+    const reason = (derivedBodies.runNoUsage as { cost_reason: string })
+      .cost_reason
+    serveDerived(
+      new FakeStudio().on("GET meta", {
+        ...META,
+        capabilities: [...META.capabilities, "requests", "pricing"],
+      })
+    )
+      .on("GET runs", {
+        total: 1,
+        runs: [derivedBodies.runNoUsage],
+        next_before: null,
+      })
       .install()
-    const el = await mount({ "data-endpoint": "http://studio.test/studio/", "data-open": "true" })
-    await vi.waitFor(() => expect($(el, '.weft-turn [data-weft-usage="unknown"]')).toBeTruthy(), { timeout: 5_000 })
+    const el = await mount({
+      "data-endpoint": "http://studio.test/studio/",
+      "data-open": "true",
+    })
+    await vi.waitFor(
+      () =>
+        expect($(el, '.weft-turn [data-weft-usage="unknown"]')).toBeTruthy(),
+      { timeout: 5_000 }
+    )
     const u = $(el, '.weft-turn [data-weft-usage="unknown"]')!
     expect(u.textContent).toBe("—")
     expect(u.getAttribute("title")).toBe(reason)
@@ -114,23 +167,49 @@ describe("a derived turn in the panel", () => {
   })
 
   it("the failed derived turn: one step said singular, its Request tab derived — never 'could not be read'", async () => {
-    serveDerived(new FakeStudio().on("GET meta", { ...META, capabilities: [...META.capabilities, "requests"] })).install()
-    const el = await mount({ "data-endpoint": "http://studio.test/studio/", "data-open": "true" })
-    await vi.waitFor(() => expect(all(el, ".weft-turn").length).toBe(2), { timeout: 5_000 })
-    click(all(el, ".weft-turn").find((b) => b.textContent.includes(DERIVED_FAILED)))
-    await vi.waitFor(() => expect($(el, "[data-weft-derived-handoff]")?.textContent).toBe("1 step · open in Studio ⤢"), { timeout: 5_000 })
+    serveDerived(
+      new FakeStudio().on("GET meta", {
+        ...META,
+        capabilities: [...META.capabilities, "requests"],
+      })
+    ).install()
+    const el = await mount({
+      "data-endpoint": "http://studio.test/studio/",
+      "data-open": "true",
+    })
+    await vi.waitFor(() => expect(all(el, ".weft-turn").length).toBe(2), {
+      timeout: 5_000,
+    })
+    click(
+      all(el, ".weft-turn").find((b) => b.textContent.includes(DERIVED_FAILED))
+    )
+    await vi.waitFor(
+      () =>
+        expect($(el, "[data-weft-derived-handoff]")?.textContent).toBe(
+          "1 step · open in Studio ⤢"
+        ),
+      { timeout: 5_000 }
+    )
     const tp = await tab(el, "request")
-    await vi.waitFor(() => expect(tp.querySelector('[data-hole="derived"]')).toBeTruthy())
+    await vi.waitFor(() =>
+      expect(tp.querySelector('[data-hole="derived"]')).toBeTruthy()
+    )
     saysStock(tp.textContent, "failed request tab")
     expect(tp.textContent).not.toContain("could not be read")
     const tl = await tab(el, "timeline")
-    expect([...tl.querySelectorAll(".weft-wf .weft-wf-name")].map((n) => n.textContent)).toEqual(["invoke_agent support", "chat gpt-5"])
+    expect(
+      [...tl.querySelectorAll(".weft-wf .weft-wf-name")].map(
+        (n) => n.textContent
+      )
+    ).toEqual(["invoke_agent support", "chat gpt-5"])
   })
 
   it("Request: the request badged derived with its reason and fix, no prompt claimed", async () => {
     const el = await open()
     const tp = await tab(el, "request")
-    await vi.waitFor(() => expect(tp.querySelector('[data-hole="derived"]')).toBeTruthy())
+    await vi.waitFor(() =>
+      expect(tp.querySelector('[data-hole="derived"]')).toBeTruthy()
+    )
     saysStock(tp.textContent, "request tab")
     expect(tp.querySelector(".weft-rq-prompt")).toBeNull()
   })
@@ -138,17 +217,30 @@ describe("a derived turn in the panel", () => {
   it("Timeline: the derived line, then the real spans on a time axis", async () => {
     const el = await open()
     const tp = await tab(el, "timeline")
-    await vi.waitFor(() => expect(tp.querySelector(".weft-timeline[data-axis='time']")).toBeTruthy())
-    const line = tp.querySelector<HTMLElement>('.weft-note [data-hole="derived"]')!.parentElement!
+    await vi.waitFor(() =>
+      expect(tp.querySelector(".weft-timeline[data-axis='time']")).toBeTruthy()
+    )
+    const line = tp.querySelector<HTMLElement>(
+      '.weft-note [data-hole="derived"]'
+    )!.parentElement!
     saysStock(line.textContent, "timeline")
-    const names = [...tp.querySelectorAll(".weft-wf .weft-wf-name")].map((n) => n.textContent)
-    expect(names).toEqual(["invoke_agent support", "chat gpt-5", "execute_tool lookup_order", "chat gpt-5"])
+    const names = [...tp.querySelectorAll(".weft-wf .weft-wf-name")].map(
+      (n) => n.textContent
+    )
+    expect(names).toEqual([
+      "invoke_agent support",
+      "chat gpt-5",
+      "execute_tool lookup_order",
+      "chat gpt-5",
+    ])
   })
 
   it("Raw: the derived line above the tree", async () => {
     const el = await open()
     const tp = await tab(el, "raw")
-    const line = tp.querySelector<HTMLElement>('.weft-note [data-hole="derived"]')!.parentElement!
+    const line = tp.querySelector<HTMLElement>(
+      '.weft-note [data-hole="derived"]'
+    )!.parentElement!
     saysStock(line.textContent, "raw")
     expect(tp.textContent).toContain(`"${DERIVED}"`)
   })

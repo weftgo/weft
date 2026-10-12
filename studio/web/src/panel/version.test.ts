@@ -25,7 +25,9 @@ describe("compareVersions on pre-releases and non-versions", () => {
     expect(compareVersions("v0.3.0", "v0.3.0-rc1")).toBeGreaterThan(0)
     expect(compareVersions("v0.3.0-rc.2", "v0.3.0-rc.10")).toBeLessThan(0)
     expect(compareVersions("v0.3.0-rc.1", "v0.3.0-rc.1")).toBe(0)
-    expect(compareVersions("v0.3.1-0.20261001120000-abcdef", "v0.3.1")).toBeLessThan(0)
+    expect(
+      compareVersions("v0.3.1-0.20261001120000-abcdef", "v0.3.1")
+    ).toBeLessThan(0)
     expect(compareVersions("v0.3.0+build.7", "v0.3.0")).toBe(0)
   })
 
@@ -35,14 +37,18 @@ describe("compareVersions on pre-releases and non-versions", () => {
   })
 
   it("a studio_version that is not a version is not 'newer': the panel renders", () => {
-    ;(globalThis as { __WEFT_PANEL_VERSION__?: string }).__WEFT_PANEL_VERSION__ = "v0.3.0"
+    ;(
+      globalThis as { __WEFT_PANEL_VERSION__?: string }
+    ).__WEFT_PANEL_VERSION__ = "v0.3.0"
     try {
-      for (const odd of ["(devel)", "", "garbage", "v", "0.3.x"]) expect(studioIsTooNew(odd)).toBe(false)
+      for (const odd of ["(devel)", "", "garbage", "v", "0.3.x"])
+        expect(studioIsTooNew(odd)).toBe(false)
       expect(studioIsTooNew(undefined as unknown as string)).toBe(false)
       expect(studioIsTooNew("v0.3.0-rc1")).toBe(false)
       expect(studioIsTooNew("v0.3.1")).toBe(true)
     } finally {
-      delete (globalThis as { __WEFT_PANEL_VERSION__?: string }).__WEFT_PANEL_VERSION__
+      delete (globalThis as { __WEFT_PANEL_VERSION__?: string })
+        .__WEFT_PANEL_VERSION__
     }
   })
 })
@@ -53,7 +59,9 @@ describe("studioIsTooNew (§5.1)", () => {
   })
 
   it("a newer Studio is refused", () => {
-    const [major, minor, patch] = panelStudioVersion().replace(/^v/, "").split(".")
+    const [major, minor, patch] = panelStudioVersion()
+      .replace(/^v/, "")
+      .split(".")
     const newer = `v${major}.${Number(minor) + 1}.${patch}`
     expect(studioIsTooNew(newer)).toBe(true)
   })
@@ -72,14 +80,19 @@ describe("the guard against the one version (B6)", () => {
     // as studio_version: both read version/version.go.
     const v = weftVersion()
     expect(v).toMatch(/^v\d+\.\d+\.\d+/)
-    ;(globalThis as { __WEFT_PANEL_VERSION__?: string }).__WEFT_PANEL_VERSION__ = v
+    ;(
+      globalThis as { __WEFT_PANEL_VERSION__?: string }
+    ).__WEFT_PANEL_VERSION__ = v
     try {
       expect(panelStudioVersion()).toBe(v)
       expect(studioIsTooNew(v)).toBe(false)
       const [major, minor, patch] = v.replace(/^v/, "").split(".")
-      expect(studioIsTooNew(`v${major}.${minor}.${Number(patch) + 1}`)).toBe(true)
+      expect(studioIsTooNew(`v${major}.${minor}.${Number(patch) + 1}`)).toBe(
+        true
+      )
     } finally {
-      delete (globalThis as { __WEFT_PANEL_VERSION__?: string }).__WEFT_PANEL_VERSION__
+      delete (globalThis as { __WEFT_PANEL_VERSION__?: string })
+        .__WEFT_PANEL_VERSION__
     }
   })
 })

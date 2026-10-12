@@ -91,18 +91,26 @@ export async function fetchSessionForks(
  * command_id's rule (studio/playground.go): 400 otherwise. */
 export const EXPERIMENT_ID_RE = /^[A-Za-z0-9._:-]{1,128}$/
 
-export const validExperimentID = (id: string | undefined): boolean => !!id && EXPERIMENT_ID_RE.test(id)
+export const validExperimentID = (id: string | undefined): boolean =>
+  !!id && EXPERIMENT_ID_RE.test(id)
 
 /** mintExperimentID is the id a matrix is saved under, never the typed
  * name sent raw: a name that already fits the rule is its own id (the
  * same name re-runs the same experiment); any other name is slugged
  * into the rule's charset with the page's nonce; no name is
  * exp_<stamp>. The name itself is kept as the experiment's name. */
-export function mintExperimentID(name: string, stamp: string, nonce: string): string {
+export function mintExperimentID(
+  name: string,
+  stamp: string,
+  nonce: string
+): string {
   const n = name.trim()
   if (validExperimentID(n)) return n
   const clean = (s: string) => s.replace(/[^A-Za-z0-9._:-]+/g, "-")
   if (!n) return clean(`exp_${stamp}`).slice(0, 128)
-  const slug = clean(n).replace(/^-+|-+$/g, "").slice(0, 100) || "exp"
+  const slug =
+    clean(n)
+      .replace(/^-+|-+$/g, "")
+      .slice(0, 100) || "exp"
   return `${slug}_${clean(nonce)}`.slice(0, 128)
 }

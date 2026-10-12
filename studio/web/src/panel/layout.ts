@@ -52,19 +52,25 @@ export const NARROW_W = 640
 /** Under this viewport width the panel is a bottom sheet. */
 export const SHEET_VW = 480
 
-const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi))
+const clamp = (v: number, lo: number, hi: number) =>
+  Math.min(Math.max(v, lo), Math.max(lo, hi))
 const vw = () => window.innerWidth || 1024
 const vh = () => window.innerHeight || 768
 
 /** initialLayout is what the data-* attributes say (data-position,
  * data-open, data-mode), before storage. */
-export function initialLayout(position: PanelPlacement, open: boolean, mode: string): Layout {
+export function initialLayout(
+  position: PanelPlacement,
+  open: boolean,
+  mode: string
+): Layout {
   const dock = position.endsWith("-dock")
   const w = 520
   const h = 560
   const l: Layout = {
     // An explicit data-mode float|dock wins over what the position implies.
-    mode: mode === "float" ? "float" : dock || mode === "dock" ? "dock" : "float",
+    mode:
+      mode === "float" ? "float" : dock || mode === "dock" ? "dock" : "float",
     side: dock ? (position.slice(0, -5) as Side) : "right",
     open: mode === "pill" ? false : mode === "float" || mode === "dock" || open,
     hidden: mode === "hidden",
@@ -95,18 +101,32 @@ function storage(): Storage | null {
  * the right type kept, anything else ignored. Never throws. */
 export function readStore(): Partial<Layout> {
   try {
-    const doc = JSON.parse(storage()?.getItem(STORE_KEY) ?? "null") as Record<string, unknown> | null
+    const doc = JSON.parse(storage()?.getItem(STORE_KEY) ?? "null") as Record<
+      string,
+      unknown
+    > | null
     if (!doc || typeof doc !== "object" || doc.v !== 1) return {}
     const out: Record<string, unknown> = {}
     const want: Record<string, string> = {
-      x: "number", y: "number", w: "number", h: "number", d: "number",
-      open: "boolean", hidden: "boolean", raw: "boolean", debug: "boolean",
-      run: "string", theme: "string", tab: "string",
+      x: "number",
+      y: "number",
+      w: "number",
+      h: "number",
+      d: "number",
+      open: "boolean",
+      hidden: "boolean",
+      raw: "boolean",
+      debug: "boolean",
+      run: "string",
+      theme: "string",
+      tab: "string",
     }
     for (const [k, t] of Object.entries(want))
-      if (typeof doc[k] === t && (t !== "number" || Number.isFinite(doc[k]))) out[k] = doc[k]
+      if (typeof doc[k] === t && (t !== "number" || Number.isFinite(doc[k])))
+        out[k] = doc[k]
     if (doc.mode === "float" || doc.mode === "dock") out.mode = doc.mode
-    if (["left", "right", "bottom", "top"].includes(doc.side as string)) out.side = doc.side
+    if (["left", "right", "bottom", "top"].includes(doc.side as string))
+      out.side = doc.side
     // D4: tab is additive; a v1 document from before it says raw only.
     if (!TABS.includes(out.tab as string)) out.tab = out.raw ? "raw" : "story"
     return out
@@ -121,14 +141,16 @@ export function readStore(): Partial<Layout> {
 export const PLACE = ["mode", "side", "open", "hidden", "x", "y", "w", "h", "d"]
 
 /** placedIn: a stored layout carries a placement. */
-export const placedIn = (st: Partial<Layout>) => PLACE.some((k) => Object.hasOwn(st, k))
+export const placedIn = (st: Partial<Layout>) =>
+  PLACE.some((k) => Object.hasOwn(st, k))
 
 /** writeStore writes the layout under STORE_KEY (its placement only
  * when placed); a private window (or a full quota) just forgets. */
 export function writeStore(l: Layout, placed: boolean): void {
   try {
     const out: Record<string, unknown> = { v: 1 }
-    for (const [k, v] of Object.entries(l)) if (placed || !PLACE.includes(k)) out[k] = v
+    for (const [k, v] of Object.entries(l))
+      if (placed || !PLACE.includes(k)) out[k] = v
     storage()?.setItem(STORE_KEY, JSON.stringify(out))
   } catch {
     // forgotten: the panel still works
@@ -143,7 +165,10 @@ export function migrateDebug(): boolean {
     const s = storage()
     old = s?.getItem("weft_debug") === "1"
     if (old) {
-      s?.setItem(STORE_KEY, JSON.stringify({ v: 1, ...readStore(), debug: true }))
+      s?.setItem(
+        STORE_KEY,
+        JSON.stringify({ v: 1, ...readStore(), debug: true })
+      )
       s?.removeItem("weft_debug")
     }
   } catch {
@@ -185,11 +210,17 @@ export interface Geometry {
  * dock's size. */
 export function geometry(l: Layout): Geometry {
   const W = vw()
-  if (W < SHEET_VW) return { cls: "weft-sheet", style: {}, width: W, sheet: true }
+  if (W < SHEET_VW)
+    return { cls: "weft-sheet", style: {}, width: W, sheet: true }
   if (l.mode === "float")
     return {
       cls: "weft-float",
-      style: { left: `${l.x}px`, top: `${l.y}px`, width: `${l.w}px`, height: `${l.h}px` },
+      style: {
+        left: `${l.x}px`,
+        top: `${l.y}px`,
+        width: `${l.w}px`,
+        height: `${l.h}px`,
+      },
       width: l.w,
       sheet: false,
     }
@@ -205,8 +236,13 @@ export function geometry(l: Layout): Geometry {
 /** pillPlace is where the pill sits: the float's corner (the half of
  * the viewport its box is in), a dock's side. */
 export function pillPlace(l: Layout): string {
-  if (l.mode === "float") return l.x + l.w / 2 < vw() / 2 ? "bottom-left" : "bottom-right"
-  return l.side === "left" ? "bottom-left" : l.side === "top" ? "top-right" : "bottom-right"
+  if (l.mode === "float")
+    return l.x + l.w / 2 < vw() / 2 ? "bottom-left" : "bottom-right"
+  return l.side === "left"
+    ? "bottom-left"
+    : l.side === "top"
+      ? "top-right"
+      : "bottom-right"
 }
 
 /** The custom property data-push's padding goes through. */
@@ -228,7 +264,10 @@ export class Push {
     const prop = side ? `padding-${side}` : ""
     if (this.prev && this.prev.prop !== prop) this.restore()
     if (!side) return
-    const snap = (p: string): [string, string] => [st.getPropertyValue(p), st.getPropertyPriority(p)]
+    const snap = (p: string): [string, string] => [
+      st.getPropertyValue(p),
+      st.getPropertyPriority(p),
+    ]
     const ours = st.getPropertyValue(prop) === INSET_VAR
     if (!this.prev) this.prev = { prop, was: [snap(INSET), snap(prop)] }
     else if (!ours) this.prev.was[1] = snap(prop)

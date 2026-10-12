@@ -13,7 +13,11 @@ import { ApiError, deleteProposal, manifestQuery, studioToken } from "@/lib/api"
 import { absoluteTime } from "@/lib/format"
 import { copyText } from "@/lib/json"
 import { notifySave } from "@/lib/notify"
-import { mayProposeWith, PROPOSAL_NEEDS_DEV, PROPOSAL_POINTER } from "@/lib/saves"
+import {
+  mayProposeWith,
+  PROPOSAL_NEEDS_DEV,
+  PROPOSAL_POINTER,
+} from "@/lib/saves"
 import { AgentCard } from "@/components/studio/agent-cards"
 import { TextDiff } from "@/components/studio/step-request"
 import { useCapabilities } from "@/hooks/use-capabilities"
@@ -246,7 +250,11 @@ function Proposed({
         <span className="text-faint" data-proposal-since>
           since {absoluteTime(p.since)}
         </span>
-        <span className="text-muted-foreground" title={p.instructions_hash} data-proposal-hash>
+        <span
+          className="text-muted-foreground"
+          title={p.instructions_hash}
+          data-proposal-hash
+        >
           {shortHash(p.instructions_hash)}
         </span>
         <span className="grow" />
@@ -265,7 +273,9 @@ function Proposed({
           type="button"
           className="text-faint hover:text-foreground hover:underline disabled:opacity-50"
           disabled={!may || busy}
-          title={may ? `withdraw the proposal for ${agent.name}` : PROPOSAL_NEEDS_DEV}
+          title={
+            may ? `withdraw the proposal for ${agent.name}` : PROPOSAL_NEEDS_DEV
+          }
           onClick={() => {
             setBusy(true)
             deleteProposal(agent.name)

@@ -125,7 +125,11 @@ export function CodeWin({
           </span>
         ) : null}
         <span className="ml-auto shrink-0 font-mono text-[10px] text-code-mut tabular-nums">
-          {parsed !== null ? (copyOriginal && shown !== text ? "json · pretty-printed · " : "json · ") : ""}
+          {parsed !== null
+            ? copyOriginal && shown !== text
+              ? "json · pretty-printed · "
+              : "json · "
+            : ""}
           {bytes(size)}
           {lines > 1 ? ` · ${lines} lines` : ""}
         </span>

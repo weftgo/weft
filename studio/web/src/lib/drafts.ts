@@ -49,7 +49,8 @@ function open(): Promise<IDBDatabase | null> {
     try {
       const req = idb.open(DB_NAME, 1)
       req.onupgradeneeded = () => {
-        if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE, { keyPath: "id" })
+        if (!req.result.objectStoreNames.contains(STORE))
+          req.result.createObjectStore(STORE, { keyPath: "id" })
       }
       req.onsuccess = () => resolve(req.result)
       req.onerror = () => resolve(null)
@@ -63,7 +64,10 @@ function open(): Promise<IDBDatabase | null> {
 
 /** run one request against the store; undefined when IndexedDB is not
  * there or refused (the caller falls back to memory). */
-async function run<T>(mode: IDBTransactionMode, fn: (s: IDBObjectStore) => IDBRequest<T>): Promise<{ ok: true; value: T } | { ok: false }> {
+async function run<T>(
+  mode: IDBTransactionMode,
+  fn: (s: IDBObjectStore) => IDBRequest<T>
+): Promise<{ ok: true; value: T } | { ok: false }> {
   const db = await open()
   if (!db) return { ok: false }
   return new Promise((resolve) => {
@@ -103,7 +107,11 @@ export function newDraftID(): string {
 export const experimentDraftID = (experimentID: string) => `exp:${experimentID}`
 
 /** saveDraft writes (or replaces) one record. */
-export async function saveDraft(id: string, form: FormState, opts: { kind?: DraftKind; label?: string } = {}): Promise<void> {
+export async function saveDraft(
+  id: string,
+  form: FormState,
+  opts: { kind?: DraftKind; label?: string } = {}
+): Promise<void> {
   const rec: DraftRecord = {
     id,
     kind: opts.kind ?? "draft",
@@ -122,10 +130,16 @@ export async function loadDraft(id: string): Promise<DraftRecord | null> {
 }
 
 /** listDrafts lists the records of a kind, newest first. */
-export async function listDrafts(kind: DraftKind = "draft"): Promise<DraftRecord[]> {
+export async function listDrafts(
+  kind: DraftKind = "draft"
+): Promise<DraftRecord[]> {
   const out = await run<unknown[]>("readonly", (s) => s.getAll())
-  const all = (out.ok ? out.value : [...memory.values()]).map(valid).filter((r): r is DraftRecord => !!r)
-  return all.filter((r) => r.kind === kind).sort((a, b) => b.saved.localeCompare(a.saved))
+  const all = (out.ok ? out.value : [...memory.values()])
+    .map(valid)
+    .filter((r): r is DraftRecord => !!r)
+  return all
+    .filter((r) => r.kind === kind)
+    .sort((a, b) => b.saved.localeCompare(a.saved))
 }
 
 /** deleteDraft removes one record. */

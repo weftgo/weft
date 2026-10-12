@@ -60,7 +60,11 @@ import { useDocumentTitle } from "@/hooks/use-document-title"
 export { filtersFromSearch }
 
 function experimentsLabel(v: "on" | "off" | undefined): string {
-  return v === "on" ? "experiments only" : v === "off" ? "experiments off" : "any runs"
+  return v === "on"
+    ? "experiments only"
+    : v === "off"
+      ? "experiments off"
+      : "any runs"
 }
 const statusLabel: Record<string, string> = {
   all: "any status",
@@ -71,7 +75,8 @@ const statusLabel: Record<string, string> = {
 }
 
 export const Route = createFileRoute("/runs/")({
-  validateSearch: (search: Record<string, unknown>): RunsSearch => validateRunsSearch(search),
+  validateSearch: (search: Record<string, unknown>): RunsSearch =>
+    validateRunsSearch(search),
   component: RunsPage,
 })
 
@@ -176,7 +181,11 @@ function RunsPage() {
     staleTime: 5_000,
     initialPageParam: undefinedOr(filters.before),
     queryFn: ({ pageParam }) =>
-      fetchRuns({ ...filters, before: pageParam?.before, before_id: pageParam?.before_id }),
+      fetchRuns({
+        ...filters,
+        before: pageParam?.before,
+        before_id: pageParam?.before_id,
+      }),
     // The exact cursor (next_before + next_before_id); one that does
     // not move ends the list (never a page loop).
     getNextPageParam: (last, _all, lastParam) => nextCursor(last, lastParam),
@@ -190,7 +199,8 @@ function RunsPage() {
     queryKey: ["runs", "infinite", "search", searchFilters],
     staleTime: 5_000,
     initialPageParam: 0,
-    queryFn: ({ pageParam }) => fetchSearch({ ...searchFilters, offset: pageParam }),
+    queryFn: ({ pageParam }) =>
+      fetchSearch({ ...searchFilters, offset: pageParam }),
     getNextPageParam: (last) => last.next_offset ?? undefined,
     refetchInterval: follow && liveRefused ? 5_000 : false,
     enabled: searching,
@@ -200,7 +210,9 @@ function RunsPage() {
   const runs = applyLocal(loaded, search, caps)
   const local = localKeys(search, caps)
   const total = page.data?.pages[0]?.total ?? 0
-  const costCap = searching ? searchPage.data?.pages[0]?.cost_sort_cap : undefined
+  const costCap = searching
+    ? searchPage.data?.pages[0]?.cost_sort_cap
+    : undefined
   const chips = runChips(search, caps)
   // A since/until the server would refuse is dropped by validation —
   // the list never lands in its error state — and said here, read off
@@ -219,7 +231,8 @@ function RunsPage() {
     // refetches it — at most once a second. A refetch per frame is a
     // request per written batch for every loaded page.
     const refetch = throttle(
-      () => void queryClient.invalidateQueries({ queryKey: ["runs", "infinite"] }),
+      () =>
+        void queryClient.invalidateQueries({ queryKey: ["runs", "infinite"] }),
       1000
     )
     const live = openLive({
@@ -281,7 +294,10 @@ function RunsPage() {
       switch (e.key) {
         case "/": {
           e.preventDefault()
-          const box = searchInput.current && !searchInput.current.disabled ? searchInput.current : agentInput.current
+          const box =
+            searchInput.current && !searchInput.current.disabled
+              ? searchInput.current
+              : agentInput.current
           box?.focus()
           box?.select()
           return
@@ -306,8 +322,7 @@ function RunsPage() {
           return
         case "Enter": {
           const run = selected >= 0 ? runs.at(selected) : undefined
-          if (run)
-            void router.navigate(runLink(run.id))
+          if (run) void router.navigate(runLink(run.id))
           return
         }
       }
@@ -344,7 +359,11 @@ function RunsPage() {
           <FilterBox
             inputRef={searchInput}
             value={search.q ?? ""}
-            placeholder={searchOff ? "search unavailable" : 'search: refund "card declined"'}
+            placeholder={
+              searchOff
+                ? "search unavailable"
+                : 'search: refund "card declined"'
+            }
             label="search runs"
             width="w-64 pl-7"
             debounceMs={400}
@@ -352,7 +371,7 @@ function RunsPage() {
             title={
               searchOff
                 ? searchOffWhy
-                : "every term must match the prompt, answer, error or a tool name (case-insensitive); a \"quoted phrase\" is one term"
+                : 'every term must match the prompt, answer, error or a tool name (case-insensitive); a "quoted phrase" is one term'
             }
             onApply={(v) => setSearch({ q: v || undefined })}
           />
@@ -401,7 +420,9 @@ function RunsPage() {
           }
         >
           <SelectTrigger className="h-8 w-36 text-xs" aria-label="experiments">
-            <SelectValue>{() => experimentsLabel(search.experiments)}</SelectValue>
+            <SelectValue>
+              {() => experimentsLabel(search.experiments)}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="any">any runs</SelectItem>
@@ -482,7 +503,11 @@ function RunsPage() {
           label="filter by tool"
           width="w-32"
           disabled={searchOff}
-          title={searchOff ? `the tool filter: ${searchOffWhy}` : "a tool the run called (exact name)"}
+          title={
+            searchOff
+              ? `the tool filter: ${searchOffWhy}`
+              : "a tool the run called (exact name)"
+          }
           onApply={(v) => setSearch({ tool: v || undefined })}
         />
         <FilterBox
@@ -535,7 +560,9 @@ function RunsPage() {
           title="input + output tokens at least"
           onApply={(v) => {
             const n = numberOrClear(v)
-            setSearch({ min_tokens: n === undefined ? undefined : Math.floor(n) })
+            setSearch({
+              min_tokens: n === undefined ? undefined : Math.floor(n),
+            })
           }}
         />
         {costCapable ? (
@@ -589,8 +616,13 @@ function RunsPage() {
               data-chip={c.key}
               data-chip-applied={c.applied ? "true" : "false"}
             >
-              {c.applied ? null : <span className="text-faint">not applied —</span>}
-              <span className={c.applied ? "" : "text-faint line-through"} data-chip-label>
+              {c.applied ? null : (
+                <span className="text-faint">not applied —</span>
+              )}
+              <span
+                className={c.applied ? "" : "text-faint line-through"}
+                data-chip-label
+              >
                 {c.label}
               </span>
               {c.note ? <span className="text-faint">· {c.note}</span> : null}
@@ -612,7 +644,12 @@ function RunsPage() {
           <button
             type="button"
             className="text-thread-ink hover:underline"
-            onClick={() => setSearch({ since: parseWhen(search.since), until: parseWhen(search.until) })}
+            onClick={() =>
+              setSearch({
+                since: parseWhen(search.since),
+                until: parseWhen(search.until),
+              })
+            }
           >
             clear
           </button>
@@ -620,7 +657,8 @@ function RunsPage() {
       ) : null}
       {local.length > 0 ? (
         <p className="font-mono text-[11px] text-faint" data-local-filters>
-          {local.join(", ").replaceAll("min_", "")} filtered over the loaded rows only
+          {local.join(", ").replaceAll("min_", "")} filtered over the loaded
+          rows only
           {local.some((k) => k !== "min_duration")
             ? ` — this Studio cannot search${why("search") ? ` (${why("search")})` : ""}`
             : " — the API has no duration filter"}
@@ -647,7 +685,11 @@ function RunsPage() {
         filtered ? (
           <div className="space-y-2 py-20 text-center">
             <p className="text-sm">No runs match these filters.</p>
-            <Button variant="outline" size="sm" onClick={() => setSearch(CLEARED)}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSearch(CLEARED)}
+            >
               clear filters
             </Button>
           </div>
@@ -665,14 +707,19 @@ function RunsPage() {
               sort={{
                 active: sortKey,
                 server: caps.search,
-                onSort: (k) => setSearch({ sort: k === "started" ? undefined : k }),
+                onSort: (k) =>
+                  setSearch({ sort: k === "started" ? undefined : k }),
               }}
             />
           </div>
           {costCap ? (
-            <p className="text-center font-mono text-[11px] text-faint" data-cost-sort-cap>
-              sorted by cost among the newest {costCap.toLocaleString()} matching runs: Studio prices at read time, so
-              the runs past them were neither priced nor listed
+            <p
+              className="text-center font-mono text-[11px] text-faint"
+              data-cost-sort-cap
+            >
+              sorted by cost among the newest {costCap.toLocaleString()}{" "}
+              matching runs: Studio prices at read time, so the runs past them
+              were neither priced nor listed
             </p>
           ) : null}
           <div className="flex items-center justify-center gap-3">

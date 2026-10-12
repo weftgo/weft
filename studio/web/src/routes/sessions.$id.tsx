@@ -71,7 +71,8 @@ function SessionPage() {
         <span className="text-xs text-muted-foreground">{s.agent}</span>
         <span className="font-mono text-[11px] text-faint">
           {s.turns} {s.turns === 1 ? "turn" : "turns"} ·{" "}
-          {tokens(s.usage.input_tokens)} in / {tokens(s.usage.output_tokens)} out
+          {tokens(s.usage.input_tokens)} in / {tokens(s.usage.output_tokens)}{" "}
+          out
         </span>
         {s.public_id ? (
           <span
@@ -99,9 +100,9 @@ function SessionPage() {
       ) : null}
       {s.turns > turns.length ? (
         <p className="text-center font-mono text-[11px] text-faint">
-          showing {turns.length.toLocaleString()} of{" "}
-          {s.turns.toLocaleString()} turns — the session document is capped;
-          the runs list filtered by this session pages through all of them
+          showing {turns.length.toLocaleString()} of {s.turns.toLocaleString()}{" "}
+          turns — the session document is capped; the runs list filtered by this
+          session pages through all of them
         </p>
       ) : null}
       <p className="text-center font-mono text-[11px] text-faint">

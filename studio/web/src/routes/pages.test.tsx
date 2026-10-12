@@ -2,17 +2,36 @@
 // shell, the server's own JSON shapes. Each test is a flow a reader
 // hits — the token wall, a list longer than a page, a failing API, a
 // later turn of a thread, a fleet streaming, a panel hand-off.
-import { cleanup, configure, fireEvent, screen, waitFor, within } from "@testing-library/react"
+import {
+  cleanup,
+  configure,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
 import { CAPS_UNREAD } from "@/lib/honesty"
 import { queryClient } from "@/lib/query"
-import type { RunDoc, RunRow, RunsPage, SessionDoc, SessionsPage } from "@/lib/api"
+import type {
+  RunDoc,
+  RunRow,
+  RunsPage,
+  SessionDoc,
+  SessionsPage,
+} from "@/lib/api"
 import { renderApp, stubBrowser } from "@/test/app"
 import { valueOf } from "@/test/select"
 import { FakeEventSource } from "@/test/fake-event-source"
-import { FakeStudio, apiError, golden, pagedEvents, transcriptOf } from "@/test/fake-studio"
+import {
+  FakeStudio,
+  apiError,
+  golden,
+  pagedEvents,
+  transcriptOf,
+} from "@/test/fake-studio"
 
 // Whole pages render against the fake here — meta, then the route's
 // queries, then its walk — and a loaded machine (another suite beside
@@ -65,7 +84,9 @@ describe("the token wall (S4.6, setup B)", () => {
     studio.requireToken("dev-secret").on("GET runs", runs)
     vi.useFakeTimers({ shouldAdvanceTime: true })
     renderApp("/runs")
-    fireEvent.change(await screen.findByLabelText("API token"), { target: { value: "wrong" } })
+    fireEvent.change(await screen.findByLabelText("API token"), {
+      target: { value: "wrong" },
+    })
     fireEvent.click(screen.getByRole("button", { name: "unlock" }))
     expect(await screen.findByText(/stored token was refused/)).toBeTruthy()
     const n = studio.requests.length
@@ -76,7 +97,12 @@ describe("the token wall (S4.6, setup B)", () => {
 
   it("opens the live stream with a grant the bearer bought: no token in its URL (plan C5)", async () => {
     setStudioToken("dev-secret")
-    const running: RunDoc = { ...rOK, status: "running", finished: null, children: [] }
+    const running: RunDoc = {
+      ...rOK,
+      status: "running",
+      finished: null,
+      children: [],
+    }
     studio
       .requireToken("dev-secret")
       .on("GET runs/r_ok", running)
@@ -91,8 +117,15 @@ describe("the token wall (S4.6, setup B)", () => {
     expect(es.url).not.toContain("dev-secret")
     expect(new URL(es.url).searchParams.get("sig")).toMatch(/^weft_lg\./)
     expect(studio.calls("POST live-grant")).toHaveLength(1)
-    expect(studio.calls("POST live-grant")[0].body).toEqual({ run: "r_ok", kinds: "event,delta,run" })
-    expect(studio.requests.every((r) => r.headers.get("Authorization") === "Bearer dev-secret")).toBe(true)
+    expect(studio.calls("POST live-grant")[0].body).toEqual({
+      run: "r_ok",
+      kinds: "event,delta,run",
+    })
+    expect(
+      studio.requests.every(
+        (r) => r.headers.get("Authorization") === "Bearer dev-secret"
+      )
+    ).toBe(true)
   })
 })
 
@@ -100,9 +133,18 @@ describe("the sessions list (S4.7)", () => {
   const sessions = golden<SessionsPage>("sessions")
 
   it("shows the API's error, not the empty state", async () => {
-    studio.on("GET sessions", apiError(500, "internal", "read sessions : disk I/O error"))
+    studio.on(
+      "GET sessions",
+      apiError(500, "internal", "read sessions : disk I/O error")
+    )
     renderApp("/sessions")
-    expect(await screen.findByText("read sessions : disk I/O error", {}, { timeout: 10_000 })).toBeTruthy()
+    expect(
+      await screen.findByText(
+        "read sessions : disk I/O error",
+        {},
+        { timeout: 10_000 }
+      )
+    ).toBeTruthy()
     expect(screen.queryByText("No runs recorded yet")).toBeNull()
   })
 
@@ -111,7 +153,11 @@ describe("the sessions list (S4.7)", () => {
     studio.on("GET sessions", (req) =>
       req.query.get("before")
         ? { total: 2, sessions: [second], next_before: null }
-        : { total: 2, sessions: [first], next_before: "2026-10-01T08:59:00.123456789Z" }
+        : {
+            total: 2,
+            sessions: [first],
+            next_before: "2026-10-01T08:59:00.123456789Z",
+          }
     )
     renderApp("/sessions")
     expect(await screen.findByText(first.id)).toBeTruthy()
@@ -123,7 +169,9 @@ describe("the sessions list (S4.7)", () => {
     expect(studio.calls("GET sessions")[1].query.get("before")).toBe(
       "2026-10-01T08:59:00.123456789Z"
     )
-    await waitFor(() => expect(screen.queryByRole("button", { name: "load more" })).toBeNull())
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "load more" })).toBeNull()
+    )
   })
 
   // The exact cursor: inside a group of threads sharing one last-seen
@@ -136,9 +184,26 @@ describe("the sessions list (S4.7)", () => {
     const t = "2026-10-01T08:59:00.123456789Z"
     studio.on("GET sessions", (req) => {
       const id = req.query.get("before_id")
-      if (!req.query.get("before")) return { total: 3, sessions: [first], next_before: t, next_before_id: first.id }
-      if (id === first.id) return { total: 3, sessions: [second], next_before: t, next_before_id: second.id }
-      return { total: 3, sessions: [third], next_before: null, next_before_id: null }
+      if (!req.query.get("before"))
+        return {
+          total: 3,
+          sessions: [first],
+          next_before: t,
+          next_before_id: first.id,
+        }
+      if (id === first.id)
+        return {
+          total: 3,
+          sessions: [second],
+          next_before: t,
+          next_before_id: second.id,
+        }
+      return {
+        total: 3,
+        sessions: [third],
+        next_before: null,
+        next_before_id: null,
+      }
     })
     renderApp("/sessions")
     expect(await screen.findByText(first.id)).toBeTruthy()
@@ -146,11 +211,9 @@ describe("the sessions list (S4.7)", () => {
     expect(await screen.findByText(second.id)).toBeTruthy()
     fireEvent.click(await screen.findByRole("button", { name: "load more" }))
     expect(await screen.findByText(third.id)).toBeTruthy()
-    expect(studio.calls("GET sessions").map((r) => r.query.get("before_id"))).toEqual([
-      null,
-      first.id,
-      second.id,
-    ])
+    expect(
+      studio.calls("GET sessions").map((r) => r.query.get("before_id"))
+    ).toEqual([null, first.id, second.id])
   })
 })
 
@@ -162,8 +225,10 @@ describe("the runs list", () => {
     const c = row({ id: "r_c" })
     studio.on("GET runs", (req) => {
       const id = req.query.get("before_id")
-      if (!req.query.get("before")) return { ...page([a], t), total: 3, next_before_id: "r_a" }
-      if (id === "r_a") return { ...page([b], t), total: 3, next_before_id: "r_b" }
+      if (!req.query.get("before"))
+        return { ...page([a], t), total: 3, next_before_id: "r_a" }
+      if (id === "r_a")
+        return { ...page([b], t), total: 3, next_before_id: "r_b" }
       return { ...page([c]), total: 3, next_before_id: null }
     })
     renderApp("/runs")
@@ -172,7 +237,9 @@ describe("the runs list", () => {
     expect(await screen.findByText("r_b")).toBeTruthy()
     fireEvent.click(await screen.findByRole("button", { name: "load more" }))
     expect(await screen.findByText("r_c")).toBeTruthy()
-    const sent = studio.calls("GET runs").map((r) => [r.query.get("before"), r.query.get("before_id")])
+    const sent = studio
+      .calls("GET runs")
+      .map((r) => [r.query.get("before"), r.query.get("before_id")])
     expect(sent).toEqual([
       [null, null],
       [t, "r_a"],
@@ -202,8 +269,12 @@ describe("a session page (S4.7)", () => {
     const { container } = renderApp(`/sessions/${session.id}`)
     expect(await screen.findByText("pg_exp_1")).toBeTruthy()
     const nested = container.querySelector(`[data-experiment-of="${turn.id}"]`)
-    expect(nested?.previousElementSibling?.getAttribute("data-turn")).toBe(turn.id)
-    expect(screen.getByText(/1 experiment forked from these turns/)).toBeTruthy()
+    expect(nested?.previousElementSibling?.getAttribute("data-turn")).toBe(
+      turn.id
+    )
+    expect(
+      screen.getByText(/1 experiment forked from these turns/)
+    ).toBeTruthy()
   })
 })
 
@@ -211,7 +282,13 @@ describe("a run page", () => {
   // Turn 2 of a thread, as the local sink stores it: the input record
   // carries turn 1 whole, then one message per record.
   const doc: RunDoc = {
-    ...row({ id: "s_1-t2", session_id: "s_1", turn: 2, steps: 1, event_count: 4 }),
+    ...row({
+      id: "s_1-t2",
+      session_id: "s_1",
+      turn: 2,
+      steps: 1,
+      event_count: 4,
+    }),
     children: [],
   }
   const text = (role: string, words: string) => ({
@@ -221,8 +298,19 @@ describe("a run page", () => {
   const stored = [
     { type: "run_start", id: "s_1-t2", model: doc.model, agent: "orders" },
     { type: "step_start", run_id: "s_1-t2", index: 0 },
-    { type: "step_finish", run_id: "s_1-t2", index: 0, reason: "stop", usage: { input_tokens: 9, output_tokens: 3 } },
-    { type: "run_finish", run_id: "s_1-t2", usage: { input_tokens: 9, output_tokens: 3 }, steps: 1 },
+    {
+      type: "step_finish",
+      run_id: "s_1-t2",
+      index: 0,
+      reason: "stop",
+      usage: { input_tokens: 9, output_tokens: 3 },
+    },
+    {
+      type: "run_finish",
+      run_id: "s_1-t2",
+      usage: { input_tokens: 9, output_tokens: 3 },
+      steps: 1,
+    },
   ].map((event, pos) => ({ pos, time: doc.started, event }))
   const events = pagedEvents(stored)
 
@@ -234,14 +322,20 @@ describe("a run page", () => {
       .on(
         "GET runs/s_1-t2/transcript",
         transcriptOf([
-          [text("user", "first question"), text("assistant", "first answer"), text("user", "second question")],
+          [
+            text("user", "first question"),
+            text("assistant", "first answer"),
+            text("user", "second question"),
+          ],
           [text("assistant", "second answer")],
         ])
       )
     renderApp("/runs/s_1-t2?view=story")
     // The header's prompt and answer, and the step card's text.
     expect(await screen.findByText("second question")).toBeTruthy()
-    await waitFor(() => expect(screen.getAllByText("second answer").length).toBe(2))
+    await waitFor(() =>
+      expect(screen.getAllByText("second answer").length).toBe(2)
+    )
     expect(screen.queryByText("first question")).toBeNull()
     expect(screen.queryByText("first answer")).toBeNull()
   })
@@ -252,11 +346,18 @@ describe("a run page", () => {
       .on("GET runs/s_1-t2/spans", { spans: [] })
       .on(
         "GET runs/s_1-t2/events",
-        pagedEvents([...stored, { pos: 4, time: doc.started, event: null }, { pos: 5, time: doc.started, event: "text" }])
+        pagedEvents([
+          ...stored,
+          { pos: 4, time: doc.started, event: null },
+          { pos: 5, time: doc.started, event: "text" },
+        ])
       )
       .on(
         "GET runs/s_1-t2/transcript",
-        transcriptOf(["a bare JSON string", [null, { role: "assistant", content: null }]])
+        transcriptOf([
+          "a bare JSON string",
+          [null, { role: "assistant", content: null }],
+        ])
       )
     renderApp("/runs/s_1-t2?view=raw")
     expect((await screen.findAllByText("(not an event)")).length).toBe(2)
@@ -273,7 +374,9 @@ describe("a run page", () => {
       .on("GET runs/s_1-t2/spans", { spans: [] })
       .on("GET runs/s_1-t2/transcript", transcriptOf([]))
     renderApp("/runs/s_1-t2")
-    await waitFor(() => expect(studio.calls("GET runs/s_1-t2/events").length).toBeGreaterThan(0))
+    await waitFor(() =>
+      expect(studio.calls("GET runs/s_1-t2/events").length).toBeGreaterThan(0)
+    )
     // Meta answered (the capability that used to restart the walk) and
     // every query settled: a restart would have read from 0 by now.
     await waitFor(() => {
@@ -294,26 +397,41 @@ describe("a run page", () => {
     // it in the header; the in-flight banner is for running runs only.
     const gap = {
       hole: "gap",
-      reason: "1 of the run's event positions are missing: a destination dropped a batch",
+      reason:
+        "1 of the run's event positions are missing: a destination dropped a batch",
       fix: "check the exporter's drops",
     }
     studio
       .on("GET runs/s_1-t2", { ...doc, holes: [gap] })
-      .on("GET runs/s_1-t2/events", pagedEvents(stored.filter((e) => e.pos !== 2), { gaps: [2] }))
+      .on(
+        "GET runs/s_1-t2/events",
+        pagedEvents(
+          stored.filter((e) => e.pos !== 2),
+          { gaps: [2] }
+        )
+      )
       .on("GET runs/s_1-t2/spans", { spans: [] })
       .on("GET runs/s_1-t2/transcript", transcriptOf([]))
     renderApp("/runs/s_1-t2")
     expect(
       await screen.findByText(gap.reason, { exact: false }, { timeout: 10_000 })
     ).toBeTruthy()
-    expect(document.querySelector("[data-run-holes] [data-hole='gap']")).toBeTruthy()
+    expect(
+      document.querySelector("[data-run-holes] [data-hole='gap']")
+    ).toBeTruthy()
     expect(screen.queryByText(/missing from the database/)).toBeNull()
   })
 
   it("says which events are missing while the run is still running", async () => {
     studio
       .on("GET runs/s_1-t2", { ...doc, status: "running", finished: null })
-      .on("GET runs/s_1-t2/events", pagedEvents(stored.filter((e) => e.pos !== 2), { gaps: [2], done: false }))
+      .on(
+        "GET runs/s_1-t2/events",
+        pagedEvents(
+          stored.filter((e) => e.pos !== 2),
+          { gaps: [2], done: false }
+        )
+      )
       .on("GET runs/s_1-t2/spans", { spans: [] })
       .on("GET runs/s_1-t2/transcript", transcriptOf([]))
     renderApp("/runs/s_1-t2")
@@ -333,44 +451,90 @@ describe("a run page", () => {
   // step "already has text".
   it("shows a finished run's transcript words over text the tail streamed with a hole", async () => {
     let over = false
-    const say = (role: string, words: string) => ({ role, content: [{ type: "text", text: words }] })
-    const live: RunDoc = { ...doc, id: "r_tail", status: "running", finished: null }
+    const say = (role: string, words: string) => ({
+      role,
+      content: [{ type: "text", text: words }],
+    })
+    const live: RunDoc = {
+      ...doc,
+      id: "r_tail",
+      status: "running",
+      finished: null,
+    }
     const evs = [
       { type: "run_start", id: "r_tail", model: doc.model, agent: "orders" },
       { type: "step_start", run_id: "r_tail", index: 0 },
     ]
     const end = [
-      { type: "step_finish", run_id: "r_tail", index: 0, reason: "stop", usage: { input_tokens: 1, output_tokens: 1 } },
-      { type: "run_finish", run_id: "r_tail", usage: { input_tokens: 1, output_tokens: 1 }, steps: 1 },
+      {
+        type: "step_finish",
+        run_id: "r_tail",
+        index: 0,
+        reason: "stop",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+      {
+        type: "run_finish",
+        run_id: "r_tail",
+        usage: { input_tokens: 1, output_tokens: 1 },
+        steps: 1,
+      },
     ]
-    const at = (list: unknown[]) => list.map((event, pos) => ({ pos, time: doc.started, event }))
+    const at = (list: unknown[]) =>
+      list.map((event, pos) => ({ pos, time: doc.started, event }))
     studio
-      .on("GET runs/r_tail", () => (over ? { ...live, status: "succeeded", finished: doc.finished } : live))
-      .on("GET runs/r_tail/events", (req) => pagedEvents(at(over ? [...evs, ...end] : evs), { done: () => over })(req))
+      .on("GET runs/r_tail", () =>
+        over ? { ...live, status: "succeeded", finished: doc.finished } : live
+      )
+      .on("GET runs/r_tail/events", (req) =>
+        pagedEvents(at(over ? [...evs, ...end] : evs), { done: () => over })(
+          req
+        )
+      )
       .on("GET runs/r_tail/spans", { spans: [] })
       .on("GET runs/r_tail/transcript", () =>
-        transcriptOf(over ? [[say("user", "q")], [say("assistant", "Hello world")]] : [[say("user", "q")]])
+        transcriptOf(
+          over
+            ? [[say("user", "q")], [say("assistant", "Hello world")]]
+            : [[say("user", "q")]]
+        )
       )
     renderApp("/runs/r_tail?view=story")
     await waitFor(() => expect(FakeEventSource.open()).toHaveLength(1))
     const es = FakeEventSource.open()[0]
     const delta = (pos: number, chunk: string) =>
-      es.emit("record", { run_id: "r_tail", kind: "delta", pos, event: { type: "text_delta", run_id: "r_tail", text: chunk } })
+      es.emit("record", {
+        run_id: "r_tail",
+        kind: "delta",
+        pos,
+        event: { type: "text_delta", run_id: "r_tail", text: chunk },
+      })
     es.connect()
-    await waitFor(() => expect(studio.calls("GET runs/r_tail/events").length).toBeGreaterThan(0))
+    await waitFor(() =>
+      expect(studio.calls("GET runs/r_tail/events").length).toBeGreaterThan(0)
+    )
     delta(0, "Hel")
     es.dropRetrying() // "lo wor" streamed while the connection was down
     es.connect()
     delta(3, "ld")
     expect((await screen.findAllByText("Helld")).length).toBeGreaterThan(0)
     over = true
-    es.emit("run", { run: { ...live, status: "succeeded", finished: doc.finished } }, "9")
+    es.emit(
+      "run",
+      { run: { ...live, status: "succeeded", finished: doc.finished } },
+      "9"
+    )
     await waitFor(() => expect(screen.queryAllByText("Helld")).toHaveLength(0))
     expect(screen.getAllByText("Hello world").length).toBeGreaterThan(0)
   })
 
   it("holds one live stream for a running run, none for a finished one", async () => {
-    const running: RunDoc = { ...doc, id: "r_live", status: "running", finished: null }
+    const running: RunDoc = {
+      ...doc,
+      id: "r_live",
+      status: "running",
+      finished: null,
+    }
     studio
       .on("GET runs/r_live", running)
       .on("GET runs/r_live/events", pagedEvents([], { done: false }))
@@ -379,7 +543,9 @@ describe("a run page", () => {
     renderApp("/runs/r_live")
     expect((await screen.findAllByText("r_live")).length).toBeGreaterThan(0)
     await waitFor(() => expect(FakeEventSource.open()).toHaveLength(1))
-    expect(new URL(FakeEventSource.open()[0].url).searchParams.get("kinds")).toBe("event,delta,run")
+    expect(
+      new URL(FakeEventSource.open()[0].url).searchParams.get("kinds")
+    ).toBe("event,delta,run")
     cleanup()
 
     FakeEventSource.reset()
@@ -390,7 +556,9 @@ describe("a run page", () => {
       .on("GET runs/s_1-t2/spans", { spans: [] })
     renderApp("/runs/s_1-t2")
     expect((await screen.findAllByText("s_1-t2")).length).toBeGreaterThan(0)
-    await waitFor(() => expect(studio.calls("GET runs/s_1-t2/events").length).toBeGreaterThan(0))
+    await waitFor(() =>
+      expect(studio.calls("GET runs/s_1-t2/events").length).toBeGreaterThan(0)
+    )
     expect(FakeEventSource.open()).toHaveLength(0)
   })
 })
@@ -399,7 +567,12 @@ describe("the live page (S4.7)", () => {
   it("without live_all (the poll's fallback) streams per agent — never a connection per running run", async () => {
     studio.on("GET meta", { ...meta(), live_all: false })
     const running = Array.from({ length: 9 }, (_, i) =>
-      row({ id: `r_run_${i}`, status: "running", finished: null, agent: i % 2 ? "orders" : "researcher" })
+      row({
+        id: `r_run_${i}`,
+        status: "running",
+        finished: null,
+        agent: i % 2 ? "orders" : "researcher",
+      })
     )
     studio.on("GET runs", page(running))
     renderApp("/live")
@@ -410,7 +583,11 @@ describe("the live page (S4.7)", () => {
 })
 
 describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
-  const tool = (name: string, side_effects = "never") => ({ name, side_effects, allow: false })
+  const tool = (name: string, side_effects = "never") => ({
+    name,
+    side_effects,
+    allow: false,
+  })
   const runtimes = {
     runtimes: [
       {
@@ -423,7 +600,12 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
         last_seen: rOK.started,
         breakpoints: ["refund"],
         agents: [
-          { name: "planner", models: [], tools: [tool("plan")], instructions: "You plan." },
+          {
+            name: "planner",
+            models: [],
+            tools: [tool("plan")],
+            instructions: "You plan.",
+          },
           {
             name: "orders",
             models: ["glm"],
@@ -447,13 +629,26 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     events: [
       { type: "run_start", id: "pg_1", model: rOK.model, agent: "orders" },
       { type: "step_start", run_id: "pg_1", index: 0 },
-      { type: "step_finish", run_id: "pg_1", index: 0, reason: "tool_calls", usage: { input_tokens: 5, output_tokens: 2 } },
+      {
+        type: "step_finish",
+        run_id: "pg_1",
+        index: 0,
+        reason: "tool_calls",
+        usage: { input_tokens: 5, output_tokens: 2 },
+      },
       {
         type: "run_finish",
         run_id: "pg_1",
         usage: { input_tokens: 5, output_tokens: 2 },
         steps: 1,
-        pending: [{ type: "tool_call", id: "call_9", name: "refund", args: { order: 42 } }],
+        pending: [
+          {
+            type: "tool_call",
+            id: "call_9",
+            name: "refund",
+            args: { order: 42 },
+          },
+        ],
       },
     ].map((event, pos) => ({ pos, time: rOK.started, event })),
     next_after: null,
@@ -463,7 +658,10 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
 
   beforeEach(() => {
     studio
-      .on("GET meta", meta(["live", "playground", "runtimes", "breakpoints", "steer"]))
+      .on(
+        "GET meta",
+        meta(["live", "playground", "runtimes", "breakpoints", "steer"])
+      )
       .on("GET runtimes", runtimes)
       .on("GET experiments", { experiments: [] })
       .on("GET runs/r_ok", source)
@@ -471,7 +669,8 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
   })
 
   it("carries the whole hand-off into the command — and runs the source run's agent", async () => {
-    studio.on("POST playground/runs", command("cmd_1", "queued"))
+    studio
+      .on("POST playground/runs", command("cmd_1", "queued"))
       .on("GET playground/commands/cmd_1", command("cmd_1", "queued"))
     renderApp(
       "/playground?run=r_ok&tools=lookup_order&engine=scripted&side_effects=park&thread=ephemeral&thinking=low"
@@ -483,7 +682,9 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     const runButton = await screen.findByRole("button", { name: "Run A" })
     await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
     fireEvent.click(runButton)
-    await waitFor(() => expect(studio.calls("POST playground/runs")).toHaveLength(1))
+    await waitFor(() =>
+      expect(studio.calls("POST playground/runs")).toHaveLength(1)
+    )
     expect(studio.calls("POST playground/runs")[0].body).toEqual({
       runtime: "rt_1",
       agent: "orders",
@@ -498,7 +699,9 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     // Two "refund" boxes: the tool (turned off by tools=) and the
     // breakpoint (the runtime's stored set, shown after a reload).
     expect(
-      screen.getAllByLabelText<HTMLInputElement>(/^refund/).map((b) => b.checked)
+      screen
+        .getAllByLabelText<HTMLInputElement>(/^refund/)
+        .map((b) => b.checked)
     ).toEqual([false, true])
   })
 
@@ -507,7 +710,8 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
   // 414/431. The fragment's parameters win over the query's, and the
   // fragment leaves the address bar once read.
   it("takes the hand-off from the URL fragment, over the query, and strips it", async () => {
-    studio.on("POST playground/runs", command("cmd_1", "queued"))
+    studio
+      .on("POST playground/runs", command("cmd_1", "queued"))
       .on("GET playground/commands/cmd_1", command("cmd_1", "queued"))
     const { router } = renderApp(
       "/playground?run=r_ok&instructions=from-the-query&thinking=low" +
@@ -522,7 +726,9 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     const runButton = await screen.findByRole("button", { name: "Run A" })
     await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
     fireEvent.click(runButton)
-    await waitFor(() => expect(studio.calls("POST playground/runs")).toHaveLength(1))
+    await waitFor(() =>
+      expect(studio.calls("POST playground/runs")).toHaveLength(1)
+    )
     expect(studio.calls("POST playground/runs")[0].body).toMatchObject({
       agent: "orders",
       source: { run_id: "r_ok", from_step: 0 },
@@ -540,8 +746,19 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
       events: [
         { type: "run_start", id: "pg_1", model: rOK.model, agent: "orders" },
         { type: "step_start", run_id: "pg_1", index: 0 },
-        { type: "step_finish", run_id: "pg_1", index: 0, reason: "stop", usage: { input_tokens: 5, output_tokens: 2 } },
-        { type: "run_finish", run_id: "pg_1", usage: { input_tokens: 5, output_tokens: 2 }, steps: 1 },
+        {
+          type: "step_finish",
+          run_id: "pg_1",
+          index: 0,
+          reason: "stop",
+          usage: { input_tokens: 5, output_tokens: 2 },
+        },
+        {
+          type: "run_finish",
+          run_id: "pg_1",
+          usage: { input_tokens: 5, output_tokens: 2 },
+          steps: 1,
+        },
       ].map((event, pos) => ({ pos, time: rOK.started, event })),
       next_after: null,
       done: true,
@@ -551,7 +768,10 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
       .on("GET meta", meta(["live", "playground", "runtimes", "diff"]))
       .on("POST playground/runs", command("cmd_1", "queued"))
       .on("GET playground/commands/cmd_1", command("cmd_1", "finished", "pg_1"))
-      .on("GET runs/pg_1", { ...row({ id: "pg_1", playground: true, status: "succeeded" }), children: [] })
+      .on("GET runs/pg_1", {
+        ...row({ id: "pg_1", playground: true, status: "succeeded" }),
+        children: [],
+      })
       .on("GET runs/pg_1/events", done)
       .on("GET runs/pg_1/transcript", { batches: [] })
       .on("GET diff", golden<object>("diff"))
@@ -560,15 +780,19 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
     fireEvent.click(runButton)
     const box = await waitFor(() => {
-      const el = document.querySelector<HTMLElement>("[data-variant-steps] [data-step-diff]")
+      const el = document.querySelector<HTMLElement>(
+        "[data-variant-steps] [data-step-diff]"
+      )
       expect(el).toBeTruthy()
       return el!
     })
     // The source is the base: one call, a=r_ok.
-    expect(studio.calls("GET diff").map((r) => r.query.toString())).toEqual(["a=r_ok&b=pg_1"])
-    expect([...box.querySelectorAll("[data-diff-marker]")].map((m) => m.textContent)).toEqual([
-      "changed at step 3 · tool results",
+    expect(studio.calls("GET diff").map((r) => r.query.toString())).toEqual([
+      "a=r_ok&b=pg_1",
     ])
+    expect(
+      [...box.querySelectorAll("[data-diff-marker]")].map((m) => m.textContent)
+    ).toEqual(["changed at step 3 · tool results"])
   })
 
   it("without capability diff the playground draws no step compare and asks for none", async () => {
@@ -576,8 +800,19 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
       events: [
         { type: "run_start", id: "pg_1", model: rOK.model, agent: "orders" },
         { type: "step_start", run_id: "pg_1", index: 0 },
-        { type: "step_finish", run_id: "pg_1", index: 0, reason: "stop", usage: { input_tokens: 5, output_tokens: 2 } },
-        { type: "run_finish", run_id: "pg_1", usage: { input_tokens: 5, output_tokens: 2 }, steps: 1 },
+        {
+          type: "step_finish",
+          run_id: "pg_1",
+          index: 0,
+          reason: "stop",
+          usage: { input_tokens: 5, output_tokens: 2 },
+        },
+        {
+          type: "run_finish",
+          run_id: "pg_1",
+          usage: { input_tokens: 5, output_tokens: 2 },
+          steps: 1,
+        },
       ].map((event, pos) => ({ pos, time: rOK.started, event })),
       next_after: null,
       done: true,
@@ -587,7 +822,10 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
       .on("GET meta", meta(["live", "playground", "runtimes"]))
       .on("POST playground/runs", command("cmd_1", "queued"))
       .on("GET playground/commands/cmd_1", command("cmd_1", "finished", "pg_1"))
-      .on("GET runs/pg_1", { ...row({ id: "pg_1", playground: true, status: "succeeded" }), children: [] })
+      .on("GET runs/pg_1", {
+        ...row({ id: "pg_1", playground: true, status: "succeeded" }),
+        children: [],
+      })
       .on("GET runs/pg_1/events", done)
       .on("GET runs/pg_1/transcript", { batches: [] })
       .on("GET diff", golden<object>("diff"))
@@ -595,12 +833,18 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     const runButton = await screen.findByRole("button", { name: "Run A" })
     await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
     fireEvent.click(runButton)
-    await waitFor(() => expect(document.querySelector('[data-variant="A"]')?.textContent).toContain("finished"))
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-variant="A"]')?.textContent
+      ).toContain("finished")
+    )
     // Plan H3: a result card scrolls inside its own box, one per row at
     // phone width.
     const card = document.querySelector<HTMLElement>('[data-variant="A"]')!
     expect(card.className).toContain("overflow-x-auto")
-    expect(card.closest("[data-result-grid]")!.className).toMatch(/(^| )grid-cols-1( |$)/)
+    expect(card.closest("[data-result-grid]")!.className).toMatch(
+      /(^| )grid-cols-1( |$)/
+    )
     await new Promise((r) => setTimeout(r, 100))
     expect(document.querySelector("[data-variant-steps]")).toBeNull()
     expect(studio.calls("GET diff")).toHaveLength(0)
@@ -611,12 +855,24 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     studio
       .on("POST playground/runs", command("cmd_1", "queued"))
       .on("GET playground/commands/cmd_1", () =>
-        state === "queued" ? command("cmd_1", "queued") : command("cmd_1", "finished", "pg_1")
+        state === "queued"
+          ? command("cmd_1", "queued")
+          : command("cmd_1", "finished", "pg_1")
       )
-      .on("GET runs/pg_1", { ...row({ id: "pg_1", playground: true, pending: 1 }), children: [] })
+      .on("GET runs/pg_1", {
+        ...row({ id: "pg_1", playground: true, pending: 1 }),
+        children: [],
+      })
       .on("GET runs/pg_1/events", parked)
       .on("GET runs/pg_1/transcript", { batches: [] })
-      .on("POST runs/pg_1/approvals", apiError(400, "bad_request", "call call_9 is not pending on run pg_1 (pending: none)"))
+      .on(
+        "POST runs/pg_1/approvals",
+        apiError(
+          400,
+          "bad_request",
+          "call call_9 is not pending on run pg_1 (pending: none)"
+        )
+      )
     renderApp("/playground?run=r_ok")
     const runButton = await screen.findByRole("button", { name: "Run A" })
     await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
@@ -629,15 +885,20 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     state = "finished"
     // A's card still reaches its end: the run id, then — from the
     // stored pages, no live frame needed — the parked call's verbs.
-    const card = await waitFor(() => {
-      const el = document.querySelector<HTMLElement>('[data-variant="A"]')
-      expect(within(el!).getByText("finished")).toBeTruthy()
-      return el!
-    }, { timeout: 10_000 })
+    const card = await waitFor(
+      () => {
+        const el = document.querySelector<HTMLElement>('[data-variant="A"]')
+        expect(within(el!).getByText("finished")).toBeTruthy()
+        return el!
+      },
+      { timeout: 10_000 }
+    )
     expect(await within(card).findByText("awaiting decision")).toBeTruthy()
     fireEvent.click(within(card).getByRole("button", { name: "continue" }))
     // A refused decision is shown on the card that asked.
-    expect(await within(card).findByText(/call call_9 is not pending/)).toBeTruthy()
+    expect(
+      await within(card).findByText(/call call_9 is not pending/)
+    ).toBeTruthy()
     expect(studio.calls("POST runs/pg_1/approvals")[0].body).toEqual({
       call_id: "call_9",
       decision: "approve",
@@ -659,8 +920,18 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
               event: {
                 ...pe.event,
                 pending: [
-                  { type: "tool_call", id: "call_1", name: "refund", args: { order: 1 } },
-                  { type: "tool_call", id: "call_2", name: "lookup_order", args: { order: 2 } },
+                  {
+                    type: "tool_call",
+                    id: "call_1",
+                    name: "refund",
+                    args: { order: 1 },
+                  },
+                  {
+                    type: "tool_call",
+                    id: "call_2",
+                    name: "lookup_order",
+                    args: { order: 2 },
+                  },
                 ],
               },
             }
@@ -669,21 +940,40 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     }
     studio
       .on("POST playground/runs", command("cmd_1", "queued"))
-      .on("GET playground/commands/cmd_1", { ...command("cmd_1", "finished", "pg_1"), status: "succeeded" })
-      .on("GET runs/pg_1", { ...row({ id: "pg_1", playground: true, pending: 2 }), children: [] })
+      .on("GET playground/commands/cmd_1", {
+        ...command("cmd_1", "finished", "pg_1"),
+        status: "succeeded",
+      })
+      .on("GET runs/pg_1", {
+        ...row({ id: "pg_1", playground: true, pending: 2 }),
+        children: [],
+      })
       .on("GET runs/pg_1/events", twoParked)
       .on("GET runs/pg_1/transcript", { batches: [] })
       .on("POST runs/pg_1/approvals", command("cmd_d1", "queued"))
-      .on("GET playground/commands/cmd_d1", { ...command("cmd_d1", "finished", "pg_1"), status: "succeeded" })
+      .on("GET playground/commands/cmd_d1", {
+        ...command("cmd_d1", "finished", "pg_1"),
+        status: "succeeded",
+      })
     renderApp("/playground?run=r_ok")
     const runButton = await screen.findByRole("button", { name: "Run A" })
     await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
     fireEvent.click(runButton)
-    const card = () => document.querySelector<HTMLElement>('[data-variant="A"]')!
-    await waitFor(() => expect(within(card()).getByText("awaiting decision")).toBeTruthy(), { timeout: 10_000 })
+    const card = () =>
+      document.querySelector<HTMLElement>('[data-variant="A"]')!
+    await waitFor(
+      () => expect(within(card()).getByText("awaiting decision")).toBeTruthy(),
+      { timeout: 10_000 }
+    )
     expect(within(card()).queryByText(/will be denied/)).toBeNull()
-    fireEvent.click(within(card()).getAllByRole("button", { name: "continue" })[0])
-    await waitFor(() => expect(studio.calls("GET playground/commands/cmd_d1").length).toBeGreaterThan(0))
+    fireEvent.click(
+      within(card()).getAllByRole("button", { name: "continue" })[0]
+    )
+    await waitFor(() =>
+      expect(
+        studio.calls("GET playground/commands/cmd_d1").length
+      ).toBeGreaterThan(0)
+    )
     // Back on the same parked run: call_1 is decided, call_2 still waits.
     await waitFor(
       () => expect(within(card()).getByText(/decided: approve/)).toBeTruthy(),
@@ -701,8 +991,19 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     studio.on("POST playground/runs", () => command(`cmd_${++n}`, "queued"))
     for (let i = 1; i <= 6; i++) {
       studio
-        .on(`GET playground/commands/cmd_${i}`, command(`cmd_${i}`, "accepted", `pg_${i}`))
-        .on(`GET runs/pg_${i}`, { ...row({ id: `pg_${i}`, playground: true, status: "running", finished: null }), children: [] })
+        .on(
+          `GET playground/commands/cmd_${i}`,
+          command(`cmd_${i}`, "accepted", `pg_${i}`)
+        )
+        .on(`GET runs/pg_${i}`, {
+          ...row({
+            id: `pg_${i}`,
+            playground: true,
+            status: "running",
+            finished: null,
+          }),
+          children: [],
+        })
         .on(`GET runs/pg_${i}/events`, pagedEvents([], { done: false }))
     }
     renderApp("/playground?run=r_ok")
@@ -716,7 +1017,11 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
       await waitFor(() => expect(run).toHaveProperty("disabled", false))
       fireEvent.click(run)
     }
-    await waitFor(() => expect(studio.calls("GET runs/pg_6/events").length).toBeGreaterThan(0), { timeout: 10_000 })
+    await waitFor(
+      () =>
+        expect(studio.calls("GET runs/pg_6/events").length).toBeGreaterThan(0),
+      { timeout: 10_000 }
+    )
     expect(FakeEventSource.open().length).toBeLessThanOrEqual(3)
   })
 
@@ -728,11 +1033,30 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     let reads = 0
     studio
       .on("POST playground/runs", command("cmd_1", "queued"))
-      .on("GET playground/commands/cmd_1", { ...command("cmd_1", "finished", "pg_1"), status: "succeeded" })
+      .on("GET playground/commands/cmd_1", {
+        ...command("cmd_1", "finished", "pg_1"),
+        status: "succeeded",
+      })
       .on("GET runs/pg_1", () =>
         ++reads < 2
-          ? { ...row({ id: "pg_1", playground: true, status: "running", finished: null, usage: { input_tokens: 5, output_tokens: 1 } }), children: [] }
-          : { ...row({ id: "pg_1", playground: true, usage: { input_tokens: 50, output_tokens: 20 } }), children: [] }
+          ? {
+              ...row({
+                id: "pg_1",
+                playground: true,
+                status: "running",
+                finished: null,
+                usage: { input_tokens: 5, output_tokens: 1 },
+              }),
+              children: [],
+            }
+          : {
+              ...row({
+                id: "pg_1",
+                playground: true,
+                usage: { input_tokens: 50, output_tokens: 20 },
+              }),
+              children: [],
+            }
       )
       .on("GET runs/pg_1/events", pagedEvents([]))
       .on("GET runs/pg_1/transcript", transcriptOf([]))
@@ -740,9 +1064,13 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     const runButton = await screen.findByRole("button", { name: "Run A" })
     await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
     fireEvent.click(runButton)
-    const card = () => document.querySelector<HTMLElement>('[data-variant="A"]')!
+    const card = () =>
+      document.querySelector<HTMLElement>('[data-variant="A"]')!
     // The row is re-read on the card's 1 s settle tick.
-    await waitFor(() => expect(within(card()).getByText("50→20 tok")).toBeTruthy(), { timeout: 10_000 })
+    await waitFor(
+      () => expect(within(card()).getByText("50→20 tok")).toBeTruthy(),
+      { timeout: 10_000 }
+    )
   }, 20_000)
 
   // The same race for the events: a parked run's run_finish (which
@@ -753,13 +1081,23 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     let exported = false
     studio
       .on("POST playground/runs", command("cmd_1", "queued"))
-      .on("GET playground/commands/cmd_1", { ...command("cmd_1", "finished", "pg_1"), status: "succeeded" })
+      .on("GET playground/commands/cmd_1", {
+        ...command("cmd_1", "finished", "pg_1"),
+        status: "succeeded",
+      })
       .on("GET runs/pg_1", () => ({
-        ...row({ id: "pg_1", playground: true, pending: exported ? 1 : 0, ...(exported ? {} : { status: "running", finished: null }) }),
+        ...row({
+          id: "pg_1",
+          playground: true,
+          pending: exported ? 1 : 0,
+          ...(exported ? {} : { status: "running", finished: null }),
+        }),
         children: [],
       }))
       .on("GET runs/pg_1/events", (req) =>
-        pagedEvents(exported ? parked.events : parked.events.slice(0, 3), { done: () => exported })(req)
+        pagedEvents(exported ? parked.events : parked.events.slice(0, 3), {
+          done: () => exported,
+        })(req)
       )
       .on("GET runs/pg_1/transcript", transcriptOf([]))
     renderApp("/playground?run=r_ok")
@@ -775,12 +1113,16 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
       },
       { timeout: 10_000 }
     )
-    const card = () => document.querySelector<HTMLElement>('[data-variant="A"]')!
+    const card = () =>
+      document.querySelector<HTMLElement>('[data-variant="A"]')!
     expect(within(card()).queryByText("awaiting decision")).toBeNull()
     exported = true
-    await waitFor(() => expect(within(card()).getByText("awaiting decision")).toBeTruthy(), {
-      timeout: 10_000,
-    })
+    await waitFor(
+      () => expect(within(card()).getByText("awaiting decision")).toBeTruthy(),
+      {
+        timeout: 10_000,
+      }
+    )
   }, 20_000)
 
   // A fork's first accepted ack names no run (weft/runtime link.go):
@@ -799,7 +1141,10 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
             ? command("cmd_f", "accepted", "s_9-t3")
             : command("cmd_f", "accepted")
       )
-      .on("GET runs/s_9-t3", { ...row({ id: "s_9-t3", session_id: "s_9", turn: 3 }), children: [] })
+      .on("GET runs/s_9-t3", {
+        ...row({ id: "s_9-t3", session_id: "s_9", turn: 3 }),
+        children: [],
+      })
       .on("GET runs/s_9-t3/events", pagedEvents([]))
       .on("GET runs/s_9-t3/transcript", transcriptOf([]))
       .on("POST runs/s_9-t3/steer", { steered: true })
@@ -807,20 +1152,37 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     const runButton = await screen.findByRole("button", { name: "Run A" })
     await waitFor(() => expect(runButton).toHaveProperty("disabled", false))
     fireEvent.click(runButton)
-    const card = () => document.querySelector<HTMLElement>('[data-variant="A"]')!
-    await waitFor(() => expect(within(card()).getByText(/turn id arrives once the turn is in flight/)).toBeTruthy())
+    const card = () =>
+      document.querySelector<HTMLElement>('[data-variant="A"]')!
+    await waitFor(() =>
+      expect(
+        within(card()).getByText(/turn id arrives once the turn is in flight/)
+      ).toBeTruthy()
+    )
     expect(within(card()).queryByLabelText("steer message")).toBeNull()
     expect(within(card()).queryByText(/no steer/)).toBeNull()
     phase = 1
-    const input = await within(card()).findByLabelText("steer message", undefined, { timeout: 5_000 })
+    const input = await within(card()).findByLabelText(
+      "steer message",
+      undefined,
+      { timeout: 5_000 }
+    )
     fireEvent.change(input, { target: { value: "be brief" } })
     fireEvent.click(within(card()).getByRole("button", { name: "steer" }))
-    await waitFor(() => expect(studio.calls("POST runs/s_9-t3/steer")).toHaveLength(1))
-    expect(studio.calls("POST runs/s_9-t3/steer")[0].body).toEqual({ message: "be brief" })
+    await waitFor(() =>
+      expect(studio.calls("POST runs/s_9-t3/steer")).toHaveLength(1)
+    )
+    expect(studio.calls("POST runs/s_9-t3/steer")[0].body).toEqual({
+      message: "be brief",
+    })
     phase = 2
-    await waitFor(() => expect(within(card()).getByRole("link", { name: "s_9-t3" })).toBeTruthy())
+    await waitFor(() =>
+      expect(within(card()).getByRole("link", { name: "s_9-t3" })).toBeTruthy()
+    )
     // Never a read with an empty run id.
-    expect(studio.requests.some((r) => /^runs\/(\/|$)/.test(r.path))).toBe(false)
+    expect(studio.requests.some((r) => /^runs\/(\/|$)/.test(r.path))).toBe(
+      false
+    )
   })
 
   // A run the server refuses to steer (a 503 for a gone runtime, a
@@ -830,7 +1192,15 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     studio
       .on("POST playground/runs", command("cmd_1", "queued"))
       .on("GET playground/commands/cmd_1", command("cmd_1", "accepted", "pg_1"))
-      .on("GET runs/pg_1", { ...row({ id: "pg_1", playground: true, status: "running", finished: null }), children: [] })
+      .on("GET runs/pg_1", {
+        ...row({
+          id: "pg_1",
+          playground: true,
+          status: "running",
+          finished: null,
+        }),
+        children: [],
+      })
       .on("GET runs/pg_1/events", pagedEvents([], { done: false }))
       .on("GET runs/pg_1/transcript", transcriptOf([]))
       .on("POST runs/pg_1/steer", apiError(503, "unavailable", refusal))
@@ -842,7 +1212,9 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     fireEvent.change(input, { target: { value: "be brief" } })
     fireEvent.click(screen.getByRole("button", { name: "steer" }))
     expect(await screen.findByText(refusal)).toBeTruthy()
-    expect(studio.calls("POST runs/pg_1/steer")[0].body).toEqual({ message: "be brief" })
+    expect(studio.calls("POST runs/pg_1/steer")[0].body).toEqual({
+      message: "be brief",
+    })
   })
 
   it("runs a matrix over the source turn and keeps every issued cell on a partial failure", async () => {
@@ -864,16 +1236,23 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
       expect(valueOf(screen.getByLabelText("agent"))).toBe("orders")
     )
     fireEvent.click(screen.getByRole("button", { name: "+ variant" }))
-    fireEvent.change(screen.getByLabelText("experiment name"), { target: { value: "exp_tone" } })
+    fireEvent.change(screen.getByLabelText("experiment name"), {
+      target: { value: "exp_tone" },
+    })
     const go = screen.getByRole("button", { name: "Run matrix" })
     await waitFor(() => expect(go).toHaveProperty("disabled", false))
     // The default row is empty: over a source run it re-runs the turn.
     fireEvent.click(go)
-    await waitFor(() => expect(studio.calls("POST playground/runs")).toHaveLength(2))
+    await waitFor(() =>
+      expect(studio.calls("POST playground/runs")).toHaveLength(2)
+    )
     expect(studio.calls("POST experiments")[0].body).toMatchObject({
       id: "exp_tone",
       agent: "orders",
-      variants: [{ key: "A", overrides: {} }, { key: "B", overrides: {} }],
+      variants: [
+        { key: "A", overrides: {} },
+        { key: "B", overrides: {} },
+      ],
       inputs: [{ key: "1", source_run_id: "r_ok" }],
     })
     expect(studio.calls("POST playground/runs")[0].body).toMatchObject({
@@ -881,14 +1260,21 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
       source: { run_id: "r_ok", from_step: 0 },
       experiment_id: "exp_tone",
     })
-    const cellA = await waitFor(() => {
-      const el = document.querySelector<HTMLElement>('[data-cell="A×1"]')
-      expect(el?.textContent).toContain("finished")
-      return el!
-    }, { timeout: 10_000 })
-    expect(within(cellA).getByRole("link").getAttribute("href")).toContain("pg_m1")
+    const cellA = await waitFor(
+      () => {
+        const el = document.querySelector<HTMLElement>('[data-cell="A×1"]')
+        expect(el?.textContent).toContain("finished")
+        return el!
+      },
+      { timeout: 10_000 }
+    )
+    expect(within(cellA).getByRole("link").getAttribute("href")).toContain(
+      "pg_m1"
+    )
     // Plan H3: the matrix's table scrolls inside its own box.
-    expect(cellA.closest("[data-scroll-box]")!.className).toContain("overflow-x-auto")
+    expect(cellA.closest("[data-scroll-box]")!.className).toContain(
+      "overflow-x-auto"
+    )
     // A finished command whose run failed reads failed — never the
     // green of a success (the row's status, §10.4).
     expect(cellA.textContent).toContain("failed")
@@ -903,12 +1289,26 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
 // the capability-gated pages say the read failed (lib/honesty.ts's
 // CAPS_UNREAD), never "this Studio does not list traces" and its kin.
 describe("a failed meta read on the capability-gated pages", () => {
-  for (const url of ["/traces", "/live", "/experiments", "/playground", "/compare?a=r_ok&b=r_err"])
+  for (const url of [
+    "/traces",
+    "/live",
+    "/experiments",
+    "/playground",
+    "/compare?a=r_ok&b=r_err",
+  ])
     it(`${url}: could not read the Studio's capabilities, never "off"`, async () => {
-      studio.on("GET meta", () => apiError(500, "internal", "meta store unavailable"))
+      studio.on("GET meta", () =>
+        apiError(500, "internal", "meta store unavailable")
+      )
       renderApp(url)
-      await waitFor(() => expect(document.querySelector("[data-caps-unread]")?.textContent).toBe(`${CAPS_UNREAD}: meta store unavailable`))
-      expect(document.body.textContent).not.toMatch(/does not list traces|reports no live capability|has no playground|does not serve the step compare/)
+      await waitFor(() =>
+        expect(document.querySelector("[data-caps-unread]")?.textContent).toBe(
+          `${CAPS_UNREAD}: meta store unavailable`
+        )
+      )
+      expect(document.body.textContent).not.toMatch(
+        /does not list traces|reports no live capability|has no playground|does not serve the step compare/
+      )
     })
 })
 
@@ -919,12 +1319,22 @@ describe("a failed meta read on the capability-gated pages", () => {
 describe("a meta read that answers after a failed one", () => {
   it("/traces: the held error clears and a meta without traces reads off, never could-not-read", async () => {
     let fail = true
-    studio.on("GET meta", () => (fail ? apiError(500, "internal", "meta store unavailable") : meta(["live", "ingest"])))
+    studio.on("GET meta", () =>
+      fail
+        ? apiError(500, "internal", "meta store unavailable")
+        : meta(["live", "ingest"])
+    )
     renderApp("/traces")
-    await waitFor(() => expect(document.querySelector("[data-caps-unread]")?.textContent).toBe(`${CAPS_UNREAD}: meta store unavailable`))
+    await waitFor(() =>
+      expect(document.querySelector("[data-caps-unread]")?.textContent).toBe(
+        `${CAPS_UNREAD}: meta store unavailable`
+      )
+    )
     fail = false
     await queryClient.invalidateQueries({ queryKey: ["meta"] })
-    await waitFor(() => expect(document.querySelector("[data-traces-off]")).toBeTruthy())
+    await waitFor(() =>
+      expect(document.querySelector("[data-traces-off]")).toBeTruthy()
+    )
     expect(document.querySelector("[data-caps-unread]")).toBeNull()
     expect(document.body.textContent).not.toContain(CAPS_UNREAD)
   })

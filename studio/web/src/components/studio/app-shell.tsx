@@ -15,12 +15,7 @@
 // mount (plan §9 Q3).
 import { useEffect, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import {
-  ClientOnly,
-  Link,
-  Outlet,
-  useLocation,
-} from "@tanstack/react-router"
+import { ClientOnly, Link, Outlet, useLocation } from "@tanstack/react-router"
 import {
   Activity,
   Bot,
@@ -72,7 +67,12 @@ import {
 } from "@/components/ui/sidebar"
 import { CommandPalette } from "@/components/studio/command-palette"
 import { mayReadExperiments } from "@/components/studio/no-experiments"
-import { experimentsLink, playgroundLink, settingsLink, tracesLink } from "@/lib/links"
+import {
+  experimentsLink,
+  playgroundLink,
+  settingsLink,
+  tracesLink,
+} from "@/lib/links"
 
 function Nav() {
   const meta = useQuery(metaQuery())
@@ -116,8 +116,13 @@ function Nav() {
           {/* The saved experiments (plan F5): the playground's history,
               under the same capability — never under a panel token,
               which the experiments routes refuse. */}
-          {meta.data && mayReadExperiments(meta.data.capabilities) &&
-            item(experimentsLink().to, "Experiments", <Grid3x3 data-slot="icon" />)}
+          {meta.data &&
+            mayReadExperiments(meta.data.capabilities) &&
+            item(
+              experimentsLink().to,
+              "Experiments",
+              <Grid3x3 data-slot="icon" />
+            )}
           {/* Settings (plan H4): every Studio has one. */}
           {item(settingsLink().to, "Settings", <Settings data-slot="icon" />)}
         </SidebarMenu>
@@ -153,7 +158,16 @@ function Place() {
       </span>
     )
   }
-  const places = ["runs", "sessions", "traces", "live", "agents", "playground", "experiments", "settings"]
+  const places = [
+    "runs",
+    "sessions",
+    "traces",
+    "live",
+    "agents",
+    "playground",
+    "experiments",
+    "settings",
+  ]
   return (
     <span className="text-xs text-muted-foreground">
       {places.includes(parts[0]) ? parts[0] : "runs"}

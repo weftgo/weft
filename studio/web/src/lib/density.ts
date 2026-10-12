@@ -19,7 +19,9 @@ let memory: Density | null = null
 
 export function readDensity(): Density {
   try {
-    return localStorage.getItem(DENSITY_KEY) === "compact" ? "compact" : "comfortable"
+    return localStorage.getItem(DENSITY_KEY) === "compact"
+      ? "compact"
+      : "comfortable"
   } catch {
     // unreadable storage: this page's choice, else the default
     return memory ?? "comfortable"

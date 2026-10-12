@@ -92,7 +92,9 @@ export function StepHeadline({
 
 /** stepAnswered says the step's model call answered: it finished, or
  * its tools started (they run only after a successful call). */
-export function stepAnswered(step: Pick<FoldedStep, "finish" | "toolCalls">): boolean {
+export function stepAnswered(
+  step: Pick<FoldedStep, "finish" | "toolCalls">
+): boolean {
   return !!step.finish || step.toolCalls.length > 0
 }
 
@@ -115,8 +117,7 @@ export function stepAttemptsHole(
 }
 
 function outcomeOf(a: StepAttempt) {
-  if (a.outcome === "ok")
-    return <span className="text-ev-result">ok</span>
+  if (a.outcome === "ok") return <span className="text-ev-result">ok</span>
   if (a.outcome === "error")
     return <span className="text-ev-error">{a.error_type || "error"}</span>
   return <span className="text-faint">outcome not reported</span>
@@ -140,7 +141,9 @@ function AttemptRow({ a, from }: { a: StepAttempt; from?: string }) {
       </span>
       <span data-attempt-outcome>{outcomeOf(a)}</span>
       {a.retry_after_ms ? (
-        <span className="text-faint">retry after {msText(a.retry_after_ms)}</span>
+        <span className="text-faint">
+          retry after {msText(a.retry_after_ms)}
+        </span>
       ) : null}
       {st && en ? (
         <span className="text-faint tabular-nums">

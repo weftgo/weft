@@ -15,7 +15,17 @@ import type { ReactNode } from "react"
 
 import { ApiError, postPlaygroundPreview } from "@/lib/api"
 import type { PlaygroundRunBody, RunRow } from "@/lib/api"
-import { checkArgs, editable, editKey, editLine, editMarks, kindOf, markedPart, markLine, MARK_CHIPS } from "@/lib/edits"
+import {
+  checkArgs,
+  editable,
+  editKey,
+  editLine,
+  editMarks,
+  kindOf,
+  markedPart,
+  markLine,
+  MARK_CHIPS,
+} from "@/lib/edits"
 import type { ReplayEdit, UserMessage } from "@/lib/edits"
 import type { TranscriptBatch } from "@/lib/events"
 import { PREVIEW_SILENT, PREVIEW_TIMEOUT_MS, previewView } from "@/lib/preview"
@@ -41,19 +51,34 @@ export const useEditor = () => useContext(EditorContext)
 /** The text a target's edit holds. */
 function valueOf(e: ReplayEdit | undefined): string | undefined {
   if (!e) return undefined
-  return kindOf(e) === "tool_args" ? JSON.stringify(e.args, null, 2) : (e.toolResult ?? e.content)
+  return kindOf(e) === "tool_args"
+    ? JSON.stringify(e.args, null, 2)
+    : (e.toolResult ?? e.content)
 }
 
 /** The edit a field's text makes (undefined: none — empty, or the
  * recorded text again), or the refusal. */
-function editOf(target: ReplayEdit, text: string, recorded: string, schema: unknown, tool: string): { edit?: ReplayEdit; error?: string; unchecked?: boolean } {
+function editOf(
+  target: ReplayEdit,
+  text: string,
+  recorded: string,
+  schema: unknown,
+  tool: string
+): { edit?: ReplayEdit; error?: string; unchecked?: boolean } {
   if (!text.trim() || text === recorded) return {}
   const k = kindOf(target)
   if (k === "tool_args") {
     const r = checkArgs(tool, schema, text)
-    return r.error ? { error: r.error } : { edit: { ...target, args: r.args }, unchecked: r.unchecked }
+    return r.error
+      ? { error: r.error }
+      : { edit: { ...target, args: r.args }, unchecked: r.unchecked }
   }
-  return { edit: k === "tool_result" ? { ...target, toolResult: text } : { ...target, content: text } }
+  return {
+    edit:
+      k === "tool_result"
+        ? { ...target, toolResult: text }
+        : { ...target, content: text },
+  }
 }
 
 /** offered: the editor may edit this target (the step is one a replay
@@ -129,15 +154,26 @@ export function Editable({
             setOpen(true)
           }}
         >
-          {k === "insert" ? <Plus data-slot="icon" /> : <PencilLine data-slot="icon" />}
+          {k === "insert" ? (
+            <Plus data-slot="icon" />
+          ) : (
+            <PencilLine data-slot="icon" />
+          )}
         </Button>
       </div>
     )
   const shown = text ?? valueOf(cur) ?? recorded
   return (
-    <div className="space-y-1" data-edit={k} data-edit-key={key} onClick={(e) => e.stopPropagation()}>
+    <div
+      className="space-y-1"
+      data-edit={k}
+      data-edit-key={key}
+      onClick={(e) => e.stopPropagation()}
+    >
       <div className="flex items-center gap-2">
-        <span className="eyebrow">{k === "insert" ? "inserted · user" : `edit · ${label}`}</span>
+        <span className="eyebrow">
+          {k === "insert" ? "inserted · user" : `edit · ${label}`}
+        </span>
         {cur ? (
           <span
             className="rounded-sm border border-ev-error/50 px-1.5 py-px font-mono text-[10px] text-ev-error uppercase"
@@ -179,7 +215,8 @@ export function Editable({
       />
       {unchecked ? (
         <p className="text-[11px] text-faint" data-edit-unchecked>
-          this browser gives no number literals: integers and exactness are checked by the runtime
+          this browser gives no number literals: integers and exactness are
+          checked by the runtime
         </p>
       ) : null}
       {err ? (
@@ -195,10 +232,17 @@ export function Editable({
  * edit of step 0, index 0) — drawn only where the editor is. */
 export function PromptEditor({ user }: { user: UserMessage }) {
   const ed = useEditor()
-  const target: ReplayEdit = { kind: "user", step: user.step, index: user.index }
+  const target: ReplayEdit = {
+    kind: "user",
+    step: user.step,
+    index: user.index,
+  }
   if (!offered(ed, target)) return null
   return (
-    <div className="rounded-md border border-thread/30 px-3 py-1.5" data-prompt-editor>
+    <div
+      className="rounded-md border border-thread/30 px-3 py-1.5"
+      data-prompt-editor
+    >
       <span className="eyebrow">user · the turn's prompt</span>
       <Editable target={target} recorded={user.text} label="the turn's prompt">
         <p className="text-sm whitespace-pre-wrap">{user.text}</p>
@@ -209,14 +253,28 @@ export function PromptEditor({ user }: { user: UserMessage }) {
 
 /** InsertHere is the boundary before step `step`'s model call: a
  * message inserted there (the ADR 0019 steer shape at rest). */
-export function InsertHere({ step, last = false }: { step: number; last?: boolean }) {
+export function InsertHere({
+  step,
+  last = false,
+}: {
+  step: number
+  last?: boolean
+}) {
   const ed = useEditor()
   if (!offered(ed, { kind: "insert", step })) return null
-  const words = last ? "insert a message after the last step" : `insert a message before step ${step}`
+  const words = last
+    ? "insert a message after the last step"
+    : `insert a message before step ${step}`
   return (
     <div data-insert-at={step} className="pl-4">
-      <Editable target={{ kind: "insert", step }} recorded="" label={`a message inserted before step ${step}`}>
-        <span className="block font-mono text-[10px] text-faint">· {words}</span>
+      <Editable
+        target={{ kind: "insert", step }}
+        recorded=""
+        label={`a message inserted before step ${step}`}
+      >
+        <span className="block font-mono text-[10px] text-faint">
+          · {words}
+        </span>
       </Editable>
     </div>
   )
@@ -224,14 +282,34 @@ export function InsertHere({ step, last = false }: { step: number; last?: boolea
 
 /** EditList is the drawer's list of the command's edits, by kind, each
  * droppable. */
-export function EditList({ edits, onDrop }: { edits: ReplayEdit[]; onDrop: (e: ReplayEdit) => void }) {
+export function EditList({
+  edits,
+  onDrop,
+}: {
+  edits: ReplayEdit[]
+  onDrop: (e: ReplayEdit) => void
+}) {
   if (!edits.length) return null
   return (
-    <ul className="space-y-0.5 text-xs" aria-label="transcript edits" data-edit-list>
+    <ul
+      className="space-y-0.5 text-xs"
+      aria-label="transcript edits"
+      data-edit-list
+    >
       {edits.map((e) => (
-        <li key={editKey(e)} className="flex items-baseline gap-2" data-edit-kind={kindOf(e)}>
-          <span className="min-w-0 flex-1 truncate font-mono">{editLine(e)}</span>
-          <button type="button" className="text-faint hover:underline" onClick={() => onDrop(e)}>
+        <li
+          key={editKey(e)}
+          className="flex items-baseline gap-2"
+          data-edit-kind={kindOf(e)}
+        >
+          <span className="min-w-0 flex-1 truncate font-mono">
+            {editLine(e)}
+          </span>
+          <button
+            type="button"
+            className="text-faint hover:underline"
+            onClick={() => onDrop(e)}
+          >
             drop
           </button>
         </li>
@@ -278,7 +356,12 @@ export function usePreview(body: string): PreviewState {
         },
         (e: unknown) => {
           answered = true
-          if (live) setSt({ error: e instanceof Error ? e.message : String(e), refused: e instanceof ApiError && e.status === 400, for: body })
+          if (live)
+            setSt({
+              error: e instanceof Error ? e.message : String(e),
+              refused: e instanceof ApiError && e.status === 400,
+              for: body,
+            })
         }
       )
     }, PREVIEW_DEBOUNCE_MS)
@@ -306,7 +389,13 @@ export function usePreview(body: string): PreviewState {
  * tools added and removed, the knobs that changed, every hole a badge,
  * the warnings, and what only a runtime checks.
  */
-export function PreviewPane({ state, fromStep }: { state: PreviewState; fromStep: number }) {
+export function PreviewPane({
+  state,
+  fromStep,
+}: {
+  state: PreviewState
+  fromStep: number
+}) {
   const v = state.doc ? previewView(state.doc) : null
   return (
     <div className="space-y-1.5 rounded-md border px-3 py-2" data-preview>
@@ -322,7 +411,9 @@ export function PreviewPane({ state, fromStep }: { state: PreviewState; fromStep
         </p>
       ) : null}
       {!v ? (
-        state.error ? null : <p className="text-[11px] text-faint">assembling the request…</p>
+        state.error ? null : (
+          <p className="text-[11px] text-faint">assembling the request…</p>
+        )
       ) : (
         <>
           <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
@@ -330,7 +421,11 @@ export function PreviewPane({ state, fromStep }: { state: PreviewState; fromStep
               system {v.system}
             </span>
             {v.changed.map((c) => (
-              <span key={c} className="rounded-sm border px-1 font-mono text-thread-ink" data-preview-changed={c}>
+              <span
+                key={c}
+                className="rounded-sm border px-1 font-mono text-thread-ink"
+                data-preview-changed={c}
+              >
                 {c} changed
               </span>
             ))}
@@ -349,22 +444,39 @@ export function PreviewPane({ state, fromStep }: { state: PreviewState; fromStep
             <ol className="space-y-0.5 text-xs" aria-label="messages">
               {v.rows.map((r, i) => (
                 <li key={i} className="flex gap-2" data-preview-op={r.op}>
-                  <span className={`w-14 shrink-0 font-mono text-[10px] ${OP_TONE[r.op]}`}>{r.op}</span>
-                  <span className="w-14 shrink-0 font-mono text-[10px] text-faint">{r.role}</span>
+                  <span
+                    className={`w-14 shrink-0 font-mono text-[10px] ${OP_TONE[r.op]}`}
+                  >
+                    {r.op}
+                  </span>
+                  <span className="w-14 shrink-0 font-mono text-[10px] text-faint">
+                    {r.role}
+                  </span>
                   <span className="min-w-0 flex-1 break-words">
                     {r.was ? (
-                      <span className="block text-muted-foreground line-through" data-preview-was>
+                      <span
+                        className="block text-muted-foreground line-through"
+                        data-preview-was
+                      >
                         {r.was}
                       </span>
                     ) : null}
-                    {r.will ? <span className="block" data-preview-will>{r.will}</span> : null}
+                    {r.will ? (
+                      <span className="block" data-preview-will>
+                        {r.will}
+                      </span>
+                    ) : null}
                   </span>
                 </li>
               ))}
             </ol>
           ) : null}
           {v.warnings.map((w, i) => (
-            <p key={i} className="text-[11px] text-muted-foreground" data-preview-warning={w.kind}>
+            <p
+              key={i}
+              className="text-[11px] text-muted-foreground"
+              data-preview-warning={w.kind}
+            >
               {w.message}
             </p>
           ))}
@@ -386,7 +498,13 @@ export function PreviewPane({ state, fromStep }: { state: PreviewState; fromStep
  * input by its call id). Not drawn on a child run: it inherits the
  * parent's mark, its own transcript was not edited.
  */
-export function EditsMark({ row, batches }: { row: Pick<RunRow, "meta" | "parent_run_id" | "forked_from">; batches?: TranscriptBatch[] }) {
+export function EditsMark({
+  row,
+  batches,
+}: {
+  row: Pick<RunRow, "meta" | "parent_run_id" | "forked_from">
+  batches?: TranscriptBatch[]
+}) {
   const { marks, more } = editMarks(row)
   if (!marks.length && !more) return null
   // The replay's from_step (weft.forked_from's "#N"): where its kept
@@ -394,20 +512,35 @@ export function EditsMark({ row, batches }: { row: Pick<RunRow, "meta" | "parent
   const at = /#(\d+)$/.exec(row.forked_from)?.[1]
   const from = at === undefined ? undefined : Number(at)
   return (
-    <div className="space-y-1 rounded-lg border border-ev-error/30 px-4 py-2 text-xs" data-edits-mark>
-      <span className="eyebrow">kept prefix edited{row.forked_from ? ` · from ${row.forked_from}` : ""}</span>
+    <div
+      className="space-y-1 rounded-lg border border-ev-error/30 px-4 py-2 text-xs"
+      data-edits-mark
+    >
+      <span className="eyebrow">
+        kept prefix edited{row.forked_from ? ` · from ${row.forked_from}` : ""}
+      </span>
       <ul className="space-y-0.5">
         {marks.map((m, i) => (
-          <li key={i} className="flex flex-wrap items-baseline gap-2" data-edit-mark={m.what}>
+          <li
+            key={i}
+            className="flex flex-wrap items-baseline gap-2"
+            data-edit-mark={m.what}
+          >
             <span className="rounded-sm border border-ev-error/50 px-1.5 py-px font-mono text-[10px] text-ev-error uppercase">
               {MARK_CHIPS[m.what]}
             </span>
             <span className="font-mono">{markLine(m)}</span>
-            <span className="min-w-0 truncate font-mono text-muted-foreground">{markedPart(batches, m, from)}</span>
+            <span className="min-w-0 truncate font-mono text-muted-foreground">
+              {markedPart(batches, m, from)}
+            </span>
           </li>
         ))}
       </ul>
-      {more ? <p className="text-faint">+{more} more (the mark is capped at 1024 B)</p> : null}
+      {more ? (
+        <p className="text-faint">
+          +{more} more (the mark is capped at 1024 B)
+        </p>
+      ) : null}
     </div>
   )
 }

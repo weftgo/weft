@@ -5,7 +5,10 @@ import { CAPS_UNREAD } from "@/lib/honesty"
 
 export function CapsUnread({ error }: { error: string }) {
   return (
-    <div className="mx-auto max-w-lg space-y-2 py-24 text-center" data-caps-unread>
+    <div
+      className="mx-auto max-w-lg space-y-2 py-24 text-center"
+      data-caps-unread
+    >
       <p className="text-sm text-ev-error">{`${CAPS_UNREAD}: ${error}`}</p>
     </div>
   )

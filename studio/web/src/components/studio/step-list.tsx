@@ -16,20 +16,29 @@ import { useQuery } from "@tanstack/react-query"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { shared } from "@/lib/virtual"
 import { ChevronRight, Play } from "lucide-react"
-import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
 
 import { stepQuery } from "@/lib/api"
 import { CacheHint, Cost, useCostCapable } from "@/components/studio/cost"
 import { AppSteer, ParkedCalls } from "@/components/studio/parked-calls"
-import type { RunCompaction, RunDoc, StepChild, Transcript, WireEvent } from "@/lib/api"
+import type {
+  RunCompaction,
+  RunDoc,
+  StepChild,
+  Transcript,
+  WireEvent,
+} from "@/lib/api"
 import { compactionsOf, isSessionMarker } from "@/lib/compaction"
-import {
-  callState,
-  fold,
-  linkView,
-  stepHoles,
-  truncation,
-} from "@/lib/events"
+import { callState, fold, linkView, stepHoles, truncation } from "@/lib/events"
 import type {
   FoldedRun,
   FoldedStep,
@@ -49,12 +58,21 @@ import {
   StepHeadline,
   stepAttemptsHole,
 } from "@/components/studio/step-attempts"
-import { CallVerbs, SteerVerb, StepVerbs } from "@/components/studio/replay-verbs"
+import {
+  CallVerbs,
+  SteerVerb,
+  StepVerbs,
+} from "@/components/studio/replay-verbs"
 import type { ReplayAt } from "@/components/studio/replay-verbs"
 import { RequestSection } from "@/components/studio/step-request"
 import { SplitPane, useCanSplit } from "@/components/studio/split-pane"
 import { SPLITS } from "@/lib/pane-sizes"
-import { Editable, EditsMark, InsertHere, PromptEditor } from "@/components/studio/transcript-editor"
+import {
+  Editable,
+  EditsMark,
+  InsertHere,
+  PromptEditor,
+} from "@/components/studio/transcript-editor"
 import { userMessagesOf } from "@/lib/edits"
 import type { UserMessage } from "@/lib/edits"
 import type { RunRequests } from "@/components/studio/step-request"
@@ -93,7 +111,9 @@ function useRemembered(
 ): [boolean, (next: boolean | ((cur: boolean) => boolean)) => void] {
   const mem = useContext(StoryMemory)
   const k = mem && key ? key : undefined
-  const [v, setV] = useState<boolean>(() => (k ? mem?.get(k) : undefined) ?? initial)
+  const [v, setV] = useState<boolean>(
+    () => (k ? mem?.get(k) : undefined) ?? initial
+  )
   const set = useCallback(
     (next: boolean | ((cur: boolean) => boolean)) =>
       setV((cur) => {
@@ -297,7 +317,11 @@ export function ToolCallRow({
             {call.callId}
           </span>
           {replayAt ? (
-            <CallVerbs at={replayAt} callId={call.callId} content={call.result?.content} />
+            <CallVerbs
+              at={replayAt}
+              callId={call.callId}
+              content={call.result?.content}
+            />
           ) : null}
           <JumpButton
             pos={call.startPos}
@@ -311,12 +335,20 @@ export function ToolCallRow({
           {call.args !== undefined ? (
             editStep !== undefined ? (
               <Editable
-                target={{ kind: "tool_args", step: editStep, callID: call.callId }}
+                target={{
+                  kind: "tool_args",
+                  step: editStep,
+                  callID: call.callId,
+                }}
                 recorded={JSON.stringify(call.args, null, 2)}
                 label={`the args of ${call.name} (${call.callId})`}
                 tool={call.name}
               >
-                <CodeWin title="args" text={JSON.stringify(call.args, null, 2)} json />
+                <CodeWin
+                  title="args"
+                  text={JSON.stringify(call.args, null, 2)}
+                  json
+                />
               </Editable>
             ) : (
               <CodeWin
@@ -331,17 +363,21 @@ export function ToolCallRow({
               <span className="text-faint">{call.streamedArgs}</span>
             </div>
           ) : null}
-          {child ? (
-            <SubagentBlock child={child} onJump={onJump} />
-          ) : null}
+          {child ? <SubagentBlock child={child} onJump={onJump} /> : null}
           {call.result ? (
             <Editable
-              target={editStep !== undefined ? { kind: "tool_result", step: editStep, callID: call.callId } : { step: -1 }}
+              target={
+                editStep !== undefined
+                  ? { kind: "tool_result", step: editStep, callID: call.callId }
+                  : { step: -1 }
+              }
               recorded={call.result.content}
               label={`the result of ${call.name} (${call.callId})`}
             >
               <CodeWin
-                title={call.result.isError ? "result · error as data" : "result"}
+                title={
+                  call.result.isError ? "result · error as data" : "result"
+                }
                 text={call.result.content}
                 tone={call.result.isError ? "error" : "result"}
               />
@@ -425,7 +461,8 @@ export function StepBody({
                 (call.childRunId
                   ? childLinks.get(call.childRunId)
                   : undefined) ??
-                (step.toolCalls.filter((c) => c.callId === call.callId).length === 1
+                (step.toolCalls.filter((c) => c.callId === call.callId)
+                  .length === 1
                   ? stepChildren?.get(call.callId)
                   : undefined)
               }
@@ -442,7 +479,11 @@ export function StepBody({
         <Editable
           // A reply rewrite may not drop a step's calls (D2/D3): only a
           // call-free reply is editable.
-          target={editStep !== undefined && step.toolCalls.length === 0 ? { kind: "reply", step: editStep } : { step: -1 }}
+          target={
+            editStep !== undefined && step.toolCalls.length === 0
+              ? { kind: "reply", step: editStep }
+              : { step: -1 }
+          }
           recorded={step.text}
           label={`the reply of step ${step.index}`}
         >
@@ -482,7 +523,11 @@ function SteerBlock({
       <div className="min-w-0 flex-1">
         <span className="eyebrow text-thread/80">steered · user</span>
         <Editable
-          target={user ? { kind: "user", step: user.step, index: user.index } : { step: -1 }}
+          target={
+            user
+              ? { kind: "user", step: user.step, index: user.index }
+              : { step: -1 }
+          }
           recorded={steer.text}
           label={`the steer after step ${user?.step ?? ""}`}
         >
@@ -595,15 +640,22 @@ function StepCard({
   const stepChildren = stepChildMap(stepDoc.data?.children)
   // A ?step= link (A3) lands on the card it names.
   useEffect(() => {
-    if (highlighted && scrollOnHighlight) ref.current?.scrollIntoView({ block: "center" })
+    if (highlighted && scrollOnHighlight)
+      ref.current?.scrollIntoView({ block: "center" })
   }, [highlighted, scrollOnHighlight])
   const failedHere = !step.finish && runStatus === "failed"
   // The Request pane open beside the story (plan H3) — where the page
   // is wide enough and a ResizeObserver measures the split.
-  const [reqOpen, setReqOpen] = useRemembered(`req:${step.index}`, pane !== undefined)
+  const [reqOpen, setReqOpen] = useRemembered(
+    `req:${step.index}`,
+    pane !== undefined
+  )
   // The pane's tab (A6.2): the request or the wire pair, remembered
   // per step; ?pane= sets both when the link names this step.
-  const [wireTab, setWireTab] = useRemembered(`wire:${step.index}`, pane === "wire")
+  const [wireTab, setWireTab] = useRemembered(
+    `wire:${step.index}`,
+    pane === "wire"
+  )
   useEffect(() => {
     if (!pane) return
     setReqOpen(true)
@@ -674,7 +726,10 @@ function StepCard({
         />
         <HoleBadges holes={holes} />
         {costCapable && stepDoc.data ? (
-          <span className="flex items-center gap-1 text-[11px] text-muted-foreground" data-step-cost>
+          <span
+            className="flex items-center gap-1 text-[11px] text-muted-foreground"
+            data-step-cost
+          >
             <Cost fields={stepDoc.data} label="step cost" />
             <CacheHint fields={stepDoc.data} />
           </span>
@@ -748,7 +803,9 @@ function StepCard({
  * out every call id more than one child names (a resumed step 0's
  * resumed and own calls): a repeated id says nothing about which call
  * a child belongs to, so neither child joins on it. */
-export function stepChildMap(children: StepChild[] | undefined): Map<string, ChildRow> {
+export function stepChildMap(
+  children: StepChild[] | undefined
+): Map<string, ChildRow> {
   const out = new Map<string, ChildRow>()
   const repeated = new Set<string>()
   for (const c of children ?? []) {
@@ -773,9 +830,7 @@ function Unplaced({ batches }: { batches: PlacedBatch[] }) {
     .flatMap((b) => b.messages)
     .filter((m) => m.role === "assistant")
     .map((m) =>
-      m.content
-        .map((p) => (p.type === "text" ? p.text : ""))
-        .join("")
+      m.content.map((p) => (p.type === "text" ? p.text : "")).join("")
     )
     .filter(Boolean)
   return (
@@ -888,7 +943,10 @@ export function StepList({
   const memory = useRef(new Map<string, boolean>()).current
   const steps = view.steps
   const virtual = steps.length > STORY_VIRTUAL_AT
-  const indexOf = useMemo(() => new Map(steps.map((st, i) => [st.index, i])), [steps])
+  const indexOf = useMemo(
+    () => new Map(steps.map((st, i) => [st.index, i])),
+    [steps]
+  )
   const hlIndex = highlight === undefined ? -1 : (indexOf.get(highlight) ?? -1)
   const scroller = useRef<HTMLDivElement>(null)
   const virt = useVirtualizer({
@@ -937,7 +995,9 @@ export function StepList({
         scrolledTo.current = n
         virt.scrollToIndex(i, { align: "center" })
       } else if (!virtual)
-        document.querySelector(`[data-step="${n}"]`)?.scrollIntoView({ block: "center" })
+        document
+          .querySelector(`[data-step="${n}"]`)
+          ?.scrollIntoView({ block: "center" })
     }
     onStep?.(n, mode)
   }
@@ -977,100 +1037,111 @@ export function StepList({
   )
   return (
     <StoryMemory.Provider value={memory}>
-    <div className="space-y-3">
-      {onStep ? (
-        <StepScrubber
-          steps={steps}
-          value={highlight}
-          runStatus={runStatus}
-          onStep={scrubTo}
-          inputRef={stepInputRef}
-        />
-      ) : null}
-      <EditsMark row={doc} batches={transcript?.batches} />
-      {sessionMarkers.map((c, i) => (
-        <CompactionMarker
-          key={c.hash || `session-${i}`}
-          c={c}
-          all={compactions}
-          runId={doc.id}
-          transcript={transcript}
-          transcriptError={transcriptError}
-        />
-      ))}
-      {virtual ? (
-        // Virtualised (plan H2): a list whose items say where they sit
-        // in the whole; the DOM holds the cards in view plus overscan.
-        <div
-          ref={scroller}
-          className="max-h-[calc(100vh-12rem)] overflow-auto"
-          role="list"
-          aria-label={`steps, ${steps.length.toLocaleString()}`}
-          data-virtual
-          onScroll={(e) => {
-            atEnd.current = isAtEnd(e.currentTarget)
-            // Scrolled away from the named card: naming it again
-            // scrolls back to it.
-            const r = virt.range
-            if (r && hlIndex >= 0 && (hlIndex < r.startIndex || hlIndex > r.endIndex))
-              scrolledTo.current = undefined
-          }}
-        >
-          <div className="relative w-full" style={{ height: virt.getTotalSize() }}>
-            {virt.getVirtualItems().map((item) => (
-              <div
-                key={item.key}
-                ref={virt.measureElement}
-                data-index={item.index}
-                role="listitem"
-                aria-setsize={steps.length}
-                aria-posinset={item.index + 1}
-                className="absolute top-0 left-0 w-full space-y-3 pb-3"
-                style={{ transform: `translateY(${item.start}px)` }}
-              >
-                {stepBlock(steps[item.index])}
-              </div>
-            ))}
+      <div className="space-y-3">
+        {onStep ? (
+          <StepScrubber
+            steps={steps}
+            value={highlight}
+            runStatus={runStatus}
+            onStep={scrubTo}
+            inputRef={stepInputRef}
+          />
+        ) : null}
+        <EditsMark row={doc} batches={transcript?.batches} />
+        {sessionMarkers.map((c, i) => (
+          <CompactionMarker
+            key={c.hash || `session-${i}`}
+            c={c}
+            all={compactions}
+            runId={doc.id}
+            transcript={transcript}
+            transcriptError={transcriptError}
+          />
+        ))}
+        {virtual ? (
+          // Virtualised (plan H2): a list whose items say where they sit
+          // in the whole; the DOM holds the cards in view plus overscan.
+          <div
+            ref={scroller}
+            className="max-h-[calc(100vh-12rem)] overflow-auto"
+            role="list"
+            aria-label={`steps, ${steps.length.toLocaleString()}`}
+            data-virtual
+            onScroll={(e) => {
+              atEnd.current = isAtEnd(e.currentTarget)
+              // Scrolled away from the named card: naming it again
+              // scrolls back to it.
+              const r = virt.range
+              if (
+                r &&
+                hlIndex >= 0 &&
+                (hlIndex < r.startIndex || hlIndex > r.endIndex)
+              )
+                scrolledTo.current = undefined
+            }}
+          >
+            <div
+              className="relative w-full"
+              style={{ height: virt.getTotalSize() }}
+            >
+              {virt.getVirtualItems().map((item) => (
+                <div
+                  key={item.key}
+                  ref={virt.measureElement}
+                  data-index={item.index}
+                  role="listitem"
+                  aria-setsize={steps.length}
+                  aria-posinset={item.index + 1}
+                  className="absolute top-0 left-0 w-full space-y-3 pb-3"
+                  style={{ transform: `translateY(${item.start}px)` }}
+                >
+                  {stepBlock(steps[item.index])}
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-      ) : (
-        steps.map((step) => (
-          <div key={step.index} className="space-y-3">
-            {stepBlock(step)}
-          </div>
-        ))
-      )}
-      {/* The boundary after the last step (its calls all answered, so
+        ) : (
+          steps.map((step) => (
+            <div key={step.index} className="space-y-3">
+              {stepBlock(step)}
+            </div>
+          ))
+        )}
+        {/* The boundary after the last step (its calls all answered, so
           a replay from the step count is accepted). */}
-      {maxFrom !== null && view.steps.length > 0 && maxFrom > Math.max(...view.steps.map((s) => s.index)) ? (
-        <InsertHere step={maxFrom} last />
-      ) : null}
-      {view.unplaced?.length ? <Unplaced batches={view.unplaced} /> : null}
-      {view.steps.length === 0 ? (
-        <p className="py-6 text-center font-mono text-xs text-faint">
-          {replaying || upTo === 0
-            ? "nothing revealed yet — play or step forward"
-            : events.length === 0
-              ? doc.status === "running"
-                ? "waiting for the first event…"
-                : "no events were recorded for this run"
-              : "no steps yet"}
-        </p>
-      ) : null}
-      {view.finished ? null : (
-        <p className="text-center font-mono text-xs text-faint">
-          {replaying
-            ? `replay · ${upTo} of ${events.length} events shown`
-            : doc.status === "running"
-              ? "stream in progress…"
-              : events.length > 0
-                ? "the stream ended without run_finish"
-                : null}
-        </p>
-      )}
-      {view.pending.length > 0 && <ParkedCalls doc={doc} pending={view.pending} />}
-      <AppSteer doc={doc} />
-    </div>
+        {maxFrom !== null &&
+        view.steps.length > 0 &&
+        maxFrom > Math.max(...view.steps.map((s) => s.index)) ? (
+          <InsertHere step={maxFrom} last />
+        ) : null}
+        {view.unplaced?.length ? <Unplaced batches={view.unplaced} /> : null}
+        {view.steps.length === 0 ? (
+          <p className="py-6 text-center font-mono text-xs text-faint">
+            {replaying || upTo === 0
+              ? "nothing revealed yet — play or step forward"
+              : events.length === 0
+                ? doc.status === "running"
+                  ? "waiting for the first event…"
+                  : "no events were recorded for this run"
+                : "no steps yet"}
+          </p>
+        ) : null}
+        {view.finished ? null : (
+          <p className="text-center font-mono text-xs text-faint">
+            {replaying
+              ? `replay · ${upTo} of ${events.length} events shown`
+              : doc.status === "running"
+                ? "stream in progress…"
+                : events.length > 0
+                  ? "the stream ended without run_finish"
+                  : null}
+          </p>
+        )}
+        {view.pending.length > 0 && (
+          <ParkedCalls doc={doc} pending={view.pending} />
+        )}
+        <AppSteer doc={doc} />
+      </div>
     </StoryMemory.Provider>
   )
 }

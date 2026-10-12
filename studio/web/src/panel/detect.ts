@@ -68,7 +68,10 @@ export interface HeaderRung {
  * ("[native code]"); false for anything it cannot read. */
 export function isNativeFetch(f: unknown): boolean {
   try {
-    return typeof f === "function" && Function.prototype.toString.call(f).includes("[native code]")
+    return (
+      typeof f === "function" &&
+      Function.prototype.toString.call(f).includes("[native code]")
+    )
   } catch {
     return false
   }
@@ -92,7 +95,12 @@ function requestURL(input: unknown): string {
 export function isLoopback(url: string): boolean {
   try {
     const h = new URL(url).hostname.toLowerCase()
-    return h === "localhost" || h.endsWith(".localhost") || /^127(\.\d{1,3}){3}$/.test(h) || h === "[::1]"
+    return (
+      h === "localhost" ||
+      h.endsWith(".localhost") ||
+      /^127(\.\d{1,3}){3}$/.test(h) ||
+      h === "[::1]"
+    )
   } catch {
     return false
   }
@@ -134,7 +142,10 @@ export function installHeaderRung(opts: HeaderRungOptions): HeaderRung | null {
     // carries none (a constructed one), the URL that was asked for.
     const at = (res as { url?: unknown }).url
     const page = opts.pageURL ? opts.pageURL() : location.href
-    const url = new URL(typeof at === "string" && at ? at : requestURL(input), page)
+    const url = new URL(
+      typeof at === "string" && at ? at : requestURL(input),
+      page
+    )
     if (!readable(url.href, page)) return
     if (opts.ignore?.(url.href)) return
     const scope = parseScope(value)
@@ -142,9 +153,13 @@ export function installHeaderRung(opts: HeaderRungOptions): HeaderRung | null {
     opts.onScope(scope, url.pathname)
   }
 
-  const wrapper = function (this: unknown, ...args: Parameters<typeof fetch>): Promise<Response> {
+  const wrapper = function (
+    this: unknown,
+    ...args: Parameters<typeof fetch>
+  ): Promise<Response> {
     const p = prev.apply(this, args) as Promise<Response> | unknown
-    if (!live || !p || typeof (p as Promise<Response>).then !== "function") return p as Promise<Response>
+    if (!live || !p || typeof (p as Promise<Response>).then !== "function")
+      return p as Promise<Response>
     // The page receives the same response (or the same rejection,
     // unhandled exactly when it was unhandled before): the reader
     // only looks at it on the way past.
@@ -180,7 +195,7 @@ export function installHeaderRung(opts: HeaderRungOptions): HeaderRung | null {
     restore() {
       live = false
       try {
-        if (window.fetch !== (wrapper)) return false
+        if (window.fetch !== wrapper) return false
         window.fetch = prev
         return true
       } catch {

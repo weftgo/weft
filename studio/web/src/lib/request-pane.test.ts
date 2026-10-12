@@ -19,7 +19,9 @@ import {
   sha256Hex,
 } from "./request-pane"
 
-function row(over: Partial<RequestRow> & { text?: string; names?: string[] }): RequestRow {
+function row(
+  over: Partial<RequestRow> & { text?: string; names?: string[] }
+): RequestRow {
   const { text, names, ...rest } = over
   return {
     index: 0,
@@ -42,7 +44,14 @@ function row(over: Partial<RequestRow> & { text?: string; names?: string[] }): R
       stream: false,
     },
     prompt:
-      text === undefined ? undefined : { hash: rest.system_hash ?? "", text, content: "", truncated_bytes: 0 },
+      text === undefined
+        ? undefined
+        : {
+            hash: rest.system_hash ?? "",
+            text,
+            content: "",
+            truncated_bytes: 0,
+          },
     ...rest,
   }
 }
@@ -76,10 +85,22 @@ describe("sha256Hex", () => {
 describe("overrideOf", () => {
   it("reads the run's own invoke_agent span, never a child's", () => {
     const spans = [
-      span({ "weft.run.id": "child", "weft.override.hash": "x", "weft.override.instructions": true }),
-      span({ "weft.run.id": "r", "weft.override.hash": "h", "weft.override.model": "a/b" }),
+      span({
+        "weft.run.id": "child",
+        "weft.override.hash": "x",
+        "weft.override.instructions": true,
+      }),
+      span({
+        "weft.run.id": "r",
+        "weft.override.hash": "h",
+        "weft.override.model": "a/b",
+      }),
     ]
-    expect(overrideOf(spans, "r")).toEqual({ hash: "h", instructions: false, fields: ["model"] })
+    expect(overrideOf(spans, "r")).toEqual({
+      hash: "h",
+      instructions: false,
+      fields: ["model"],
+    })
     expect(overrideOf(spans, "child")?.instructions).toBe(true)
   })
   it("is undefined on a plain run", () => {
@@ -93,21 +114,38 @@ describe("composedFromInstructions", () => {
   it("the instructions plus the offered tools' snippets are the loop's composition", async () => {
     const text = composeSystem(ins, ["Look orders up by id.", ""])
     expect(text).toBe("You are a support agent.\n\nLook orders up by id.")
-    const r = row({ system_hash: (await sha256Hex(text))!, text, names: ["lookup", "refund"] })
-    expect(await composedFromInstructions(r, (await sha256Hex(ins))!, ["Look orders up by id.", ""])).toBe(true)
+    const r = row({
+      system_hash: (await sha256Hex(text))!,
+      text,
+      names: ["lookup", "refund"],
+    })
+    expect(
+      await composedFromInstructions(r, (await sha256Hex(ins))!, [
+        "Look orders up by id.",
+        "",
+      ])
+    ).toBe(true)
   })
   it("a rewritten text is not", async () => {
     const text = "You are a support agent. Refunds need a reason."
     const r = row({ system_hash: (await sha256Hex(text))!, text })
-    expect(await composedFromInstructions(r, (await sha256Hex(ins))!, [])).toBe(false)
+    expect(await composedFromInstructions(r, (await sha256Hex(ins))!, [])).toBe(
+      false
+    )
     // No tools offered: no snippets to compose, the manifest unneeded.
-    expect(await composedFromInstructions(r, (await sha256Hex(ins))!, undefined)).toBe(false)
+    expect(
+      await composedFromInstructions(r, (await sha256Hex(ins))!, undefined)
+    ).toBe(false)
   })
   it("cannot decide without the text, or without the snippets of offered tools", async () => {
     const text = "You are a support agent.\n\nsomething"
     const h = (await sha256Hex(ins))!
     expect(
-      await composedFromInstructions(row({ system_hash: "abc", names: ["lookup"] }), h, [])
+      await composedFromInstructions(
+        row({ system_hash: "abc", names: ["lookup"] }),
+        h,
+        []
+      )
     ).toBeUndefined()
     expect(
       await composedFromInstructions(
@@ -118,8 +156,16 @@ describe("composedFromInstructions", () => {
     ).toBeUndefined()
   })
   it("equal hashes decide alone, the stripped text not needed", async () => {
-    expect(await composedFromInstructions(row({ system_hash: "h" }), "h", undefined)).toBe(true)
-    expect(await composedFromInstructions(row({ system_hash: "" }), EMPTY_SHA256, undefined)).toBe(true)
+    expect(
+      await composedFromInstructions(row({ system_hash: "h" }), "h", undefined)
+    ).toBe(true)
+    expect(
+      await composedFromInstructions(
+        row({ system_hash: "" }),
+        EMPTY_SHA256,
+        undefined
+      )
+    ).toBe(true)
   })
 })
 
@@ -167,9 +213,11 @@ describe("messagesSent", () => {
     r.body.messages_ref = { index: 2, count: 9 }
     expect(messagesSent(r, transcript).hole).toBe("gap")
     r.body.messages_ref = { index: 3, count: 4 }
-    expect(messagesSent(r, transcript, [{ scope: "run", index: 3, hash: "", replaced: 1, entries: 1 }]).hole).toBe(
-      "compacted"
-    )
+    expect(
+      messagesSent(r, transcript, [
+        { scope: "run", index: 3, hash: "", replaced: 1, entries: 1 },
+      ]).hole
+    ).toBe("compacted")
     expect(messagesSent(r, null).hole).toBe("no_transcript")
   })
 })
@@ -179,7 +227,12 @@ describe("registeredAgent", () => {
     name: "orders",
     model: { provider: "p", name: "m" },
     instructions: "x",
-    policy: { parallelism: 1, max_steps: 1, max_result_bytes: 1, max_model_retries: 1 },
+    policy: {
+      parallelism: 1,
+      max_steps: 1,
+      max_result_bytes: 1,
+      max_model_retries: 1,
+    },
     tools: [{ name: "lookup", prompt_snippet: "s" }, { name: "refund" }],
     ...over,
   })
@@ -192,14 +245,22 @@ describe("registeredAgent", () => {
     const m: Manifest = {
       weft: 1,
       agents: [agent()],
-      sources: [{ source: "file", manifest_hash: "f", agents: [{ name: "orders", manifest_hash: "h1" }] }],
+      sources: [
+        {
+          source: "file",
+          manifest_hash: "f",
+          agents: [{ name: "orders", manifest_hash: "h1" }],
+        },
+      ],
     }
     expect(registeredAgent(m, "orders", "h1")?.verified).toBe(true)
     expect(registeredAgent(m, "orders", "h2")?.verified).toBe(false)
     expect(registeredAgent(m, "other", "h1")).toBeUndefined()
   })
   it("a name-only match is not verified", () => {
-    expect(registeredAgent({ weft: 1, agents: [agent()] }, "orders", "h1")?.verified).toBe(false)
+    expect(
+      registeredAgent({ weft: 1, agents: [agent()] }, "orders", "h1")?.verified
+    ).toBe(false)
   })
 })
 
@@ -207,7 +268,12 @@ describe("snippetsOf and toolSetMayExplain", () => {
   const a = {
     name: "orders",
     model: { provider: "p", name: "m" },
-    policy: { parallelism: 1, max_steps: 1, max_result_bytes: 1, max_model_retries: 1 },
+    policy: {
+      parallelism: 1,
+      max_steps: 1,
+      max_result_bytes: 1,
+      max_model_retries: 1,
+    },
     tools: [{ name: "lookup", prompt_snippet: "s" }, { name: "refund" }],
   }
   it("a name the manifest does not know (a ToolSource tool) makes the snippets unknown", () => {
@@ -219,34 +285,67 @@ describe("snippetsOf and toolSetMayExplain", () => {
     expect(toolSetMayExplain(["lookup"], ["lookup"], v)).toBe(false)
     expect(toolSetMayExplain(["lookup"], ["lookup", "refund"], v)).toBe(false)
     expect(toolSetMayExplain(["refund"], ["lookup", "refund"], v)).toBe(true)
-    expect(toolSetMayExplain(["lookup"], ["lookup", "search_docs"], v)).toBe(true)
-    expect(toolSetMayExplain(["lookup"], ["lookup", "refund"], { agent: a, verified: false })).toBe(true)
-    expect(toolSetMayExplain(["lookup"], ["lookup", "refund"], undefined)).toBe(true)
+    expect(toolSetMayExplain(["lookup"], ["lookup", "search_docs"], v)).toBe(
+      true
+    )
+    expect(
+      toolSetMayExplain(["lookup"], ["lookup", "refund"], {
+        agent: a,
+        verified: false,
+      })
+    ).toBe(true)
+    expect(toolSetMayExplain(["lookup"], ["lookup", "refund"], undefined)).toBe(
+      true
+    )
   })
   it("a reorder of the same set is snippet order: it explains unless no offered tool has a snippet", () => {
     const v = { agent: a, verified: true }
     // lookup carries a snippet: reordering moves the composed text.
-    expect(toolSetMayExplain(["lookup", "refund"], ["refund", "lookup"], v)).toBe(true)
+    expect(
+      toolSetMayExplain(["lookup", "refund"], ["refund", "lookup"], v)
+    ).toBe(true)
     // Unverified, or a tool the manifest does not know: undecidable.
-    expect(toolSetMayExplain(["lookup", "refund"], ["refund", "lookup"], { agent: a, verified: false })).toBe(true)
+    expect(
+      toolSetMayExplain(["lookup", "refund"], ["refund", "lookup"], {
+        agent: a,
+        verified: false,
+      })
+    ).toBe(true)
     // No offered tool has a snippet: a reorder cannot move the hash.
     const bare = { ...a, tools: [{ name: "lookup" }, { name: "refund" }] }
-    expect(toolSetMayExplain(["lookup", "refund"], ["refund", "lookup"], { agent: bare, verified: true })).toBe(false)
-    expect(toolSetMayExplain(["lookup", "x"], ["x", "lookup"], { agent: bare, verified: true })).toBe(true)
+    expect(
+      toolSetMayExplain(["lookup", "refund"], ["refund", "lookup"], {
+        agent: bare,
+        verified: true,
+      })
+    ).toBe(false)
+    expect(
+      toolSetMayExplain(["lookup", "x"], ["x", "lookup"], {
+        agent: bare,
+        verified: true,
+      })
+    ).toBe(true)
   })
 })
 
 describe("baselineCaption", () => {
   it("names what the diff is against, and says when it is not verified", () => {
-    expect(baselineCaption({ kind: "previous", step: 0, text: "" })).toBe("diff vs step 0")
-    expect(baselineCaption({ kind: "registered", text: "", verified: true })).toBe(
-      "diff vs the registered instructions"
+    expect(baselineCaption({ kind: "previous", step: 0, text: "" })).toBe(
+      "diff vs step 0"
     )
-    expect(baselineCaption({ kind: "registered", text: "", verified: true, overridden: true })).toBe(
-      "diff vs the registered instructions (overridden for this run)"
-    )
-    expect(baselineCaption({ kind: "registered", text: "", verified: false })).toBe(
-      "diff vs weft.json's instructions — not verified for this run"
-    )
+    expect(
+      baselineCaption({ kind: "registered", text: "", verified: true })
+    ).toBe("diff vs the registered instructions")
+    expect(
+      baselineCaption({
+        kind: "registered",
+        text: "",
+        verified: true,
+        overridden: true,
+      })
+    ).toBe("diff vs the registered instructions (overridden for this run)")
+    expect(
+      baselineCaption({ kind: "registered", text: "", verified: false })
+    ).toBe("diff vs weft.json's instructions — not verified for this run")
   })
 })

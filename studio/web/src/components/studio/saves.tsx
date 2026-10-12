@@ -7,7 +7,12 @@ import { useQueryClient } from "@tanstack/react-query"
 import { Download } from "lucide-react"
 import { useState } from "react"
 
-import { fetchTestExport, manifestQuery, putProposal, studioToken } from "@/lib/api"
+import {
+  fetchTestExport,
+  manifestQuery,
+  putProposal,
+  studioToken,
+} from "@/lib/api"
 import { proposalOf, registeredAgent } from "@/lib/request-pane"
 import { copyText } from "@/lib/json"
 import { notifySave } from "@/lib/notify"
@@ -32,13 +37,23 @@ export async function saveTest(runID: string): Promise<void> {
     saveBlob(blob, name)
     notifySave({ kind: "save-test", ok: true, file: name })
   } catch (e) {
-    notifySave({ kind: "save-test", ok: false, message: e instanceof Error ? e.message : String(e) })
+    notifySave({
+      kind: "save-test",
+      ok: false,
+      message: e instanceof Error ? e.message : String(e),
+    })
   }
 }
 
 /** SaveAsTest is the run page's verb (capability "export"; hidden to a
  * read-scoped panel token, which export.go refuses the format). */
-export function SaveAsTest({ runID, derived = false }: { runID: string; derived?: boolean }) {
+export function SaveAsTest({
+  runID,
+  derived = false,
+}: {
+  runID: string
+  derived?: boolean
+}) {
   const { caps } = useCapabilities()
   const [busy, setBusy] = useState(false)
   if (!mayExportTestWith(caps, studioToken())) return null
@@ -48,7 +63,14 @@ export function SaveAsTest({ runID, derived = false }: { runID: string; derived?
   if (derived) {
     const words = derivedWords()
     return (
-      <Button variant="outline" size="xs" className="font-mono" title={words} disabled data-save-test="derived">
+      <Button
+        variant="outline"
+        size="xs"
+        className="font-mono"
+        title={words}
+        disabled
+        data-save-test="derived"
+      >
         <Download data-slot="icon" />
         {SAVE_TEST_LABEL}
         <span className="sr-only">{` — ${words}`}</span>
@@ -92,7 +114,13 @@ export async function keepPrompt(
   }
   try {
     await putProposal(agent, text)
-    notifySave({ kind: "keep-prompt", agent, copied, proposal: "proposed", ...(note ? { note } : {}) })
+    notifySave({
+      kind: "keep-prompt",
+      agent,
+      copied,
+      proposal: "proposed",
+      ...(note ? { note } : {}),
+    })
     return true
   } catch (e) {
     notifySave({
@@ -134,14 +162,20 @@ export function KeepAsPrompt({
         !agent
           ? "copy this system prompt"
           : propose
-          ? `copy this step's instructions and propose them as ${agent}'s (the tools' snippets stripped when the manifest verifies them; shown on the Agents page beside the registered ones)`
-          : `copy this system prompt${caps.includes("proposals") ? ` — ${PROPOSAL_NEEDS_DEV}` : ""}`
+            ? `copy this step's instructions and propose them as ${agent}'s (the tools' snippets stripped when the manifest verifies them; shown on the Agents page beside the registered ones)`
+            : `copy this system prompt${caps.includes("proposals") ? ` — ${PROPOSAL_NEEDS_DEV}` : ""}`
       }
       onClick={() => {
         void (async () => {
           if (!propose) return keepPrompt(caps, agent ?? "", text)
-          const manifest = await qc.fetchQuery(manifestQuery()).catch(() => undefined)
-          const p = proposalOf(text, names, registeredAgent(manifest, agent, manifestHash))
+          const manifest = await qc
+            .fetchQuery(manifestQuery())
+            .catch(() => undefined)
+          const p = proposalOf(
+            text,
+            names,
+            registeredAgent(manifest, agent, manifestHash)
+          )
           const stored = await keepPrompt(caps, agent, p.text, p.note)
           if (stored) await qc.invalidateQueries({ queryKey: ["manifest"] })
         })()

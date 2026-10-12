@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 
-import type { EventsPage, WireEvent, Span as TimedSpan  } from "./api"
+import type { EventsPage, WireEvent, Span as TimedSpan } from "./api"
 import { fold } from "./events"
 import {
   defaultSelection,
@@ -177,7 +177,12 @@ describe("spansFromTimed (the time axis, S4.7)", () => {
       span("y", "x", "y", 3, 8),
     ]
     const rows = spansFromTimed(timed)
-    expect(rows.map((r) => r.label).sort()).toEqual(["orphan", "self", "x", "y"])
+    expect(rows.map((r) => r.label).sort()).toEqual([
+      "orphan",
+      "self",
+      "x",
+      "y",
+    ])
     const byId = new Map(rows.map((r) => [r.id, r]))
     for (const r of rows) {
       // Walking up from any row terminates.
@@ -223,14 +228,32 @@ describe("call span keys on repeated call ids", () => {
     const events = [
       { type: "run_start", id: "r" },
       { type: "tool_start", call_id: "c1", name: "research", args: {} },
-      { type: "tool_finish", call_id: "c1", name: "research", content: "resumed", is_error: false },
+      {
+        type: "tool_finish",
+        call_id: "c1",
+        name: "research",
+        content: "resumed",
+        is_error: false,
+      },
       { type: "step_start", index: 0 },
       { type: "tool_start", call_id: "c1", name: "research", args: {} },
-      { type: "tool_finish", call_id: "c1", name: "research", content: "own", is_error: false },
+      {
+        type: "tool_finish",
+        call_id: "c1",
+        name: "research",
+        content: "own",
+        is_error: false,
+      },
       { type: "step_finish", index: 0, reason: "tool_calls", usage: U },
       { type: "step_start", index: 1 },
       { type: "tool_start", call_id: "c1", name: "lookup", args: {} },
-      { type: "tool_finish", call_id: "c1", name: "lookup", content: "ok", is_error: false },
+      {
+        type: "tool_finish",
+        call_id: "c1",
+        name: "lookup",
+        content: "ok",
+        is_error: false,
+      },
       { type: "step_finish", index: 1, reason: "tool_calls", usage: U },
     ] as WireEvent[]
     const spans = spansFromFold(fold(events), events.length, "succeeded")

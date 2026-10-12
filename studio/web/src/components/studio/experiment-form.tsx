@@ -28,7 +28,14 @@ import {
   sourceSteps,
   unmatchedDrafts,
 } from "@/lib/experiment-body"
-import type { EditDraft, EditField, LabFields, LabProblem, SourceStep, VariantFields } from "@/lib/experiment-body"
+import type {
+  EditDraft,
+  EditField,
+  LabFields,
+  LabProblem,
+  SourceStep,
+  VariantFields,
+} from "@/lib/experiment-body"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { Badge } from "@/components/ui/badge"
 import { SelectField } from "@/components/ui/select-field"
@@ -128,7 +135,9 @@ export function ExperimentForm({
             label="Engine"
             className="w-full"
             value={variant.engine}
-            onValueChange={(v) => patch({ engine: v as VariantFields["engine"] })}
+            onValueChange={(v) =>
+              patch({ engine: v as VariantFields["engine"] })
+            }
             options={[
               { value: "live", label: "live" },
               { value: "scripted", label: "scripted (zero tokens)" },
@@ -141,22 +150,28 @@ export function ExperimentForm({
             label="Side effects"
             className="w-full"
             value={variant.sideEffects}
-            onValueChange={(v) => patch({ sideEffects: v as VariantFields["sideEffects"] })}
+            onValueChange={(v) =>
+              patch({ sideEffects: v as VariantFields["sideEffects"] })
+            }
             options={[
               {
                 value: "substitute",
-                title: "a side-effect call the source recorded is answered from the record; any other call parks",
+                title:
+                  "a side-effect call the source recorded is answered from the record; any other call parks",
                 label: "substitute — recorded results, else park",
               },
               {
                 value: "park",
-                title: "every side-effect call parks; nothing is answered from the record",
+                title:
+                  "every side-effect call parks; nothing is answered from the record",
                 label: "park — every side-effect call waits",
               },
               {
                 value: "allow",
-                title: "refused unless every tool left on is opted in or ReplaySafe",
-                label: "allow — runs the tools this app opted in (AllowSideEffects) for real",
+                title:
+                  "refused unless every tool left on is opted in or ReplaySafe",
+                label:
+                  "allow — runs the tools this app opted in (AllowSideEffects) for real",
               },
             ]}
           />
@@ -170,7 +185,9 @@ export function ExperimentForm({
             label="Thread"
             className="w-full"
             value={variant.thread}
-            onValueChange={(v) => patch({ thread: v as VariantFields["thread"] })}
+            onValueChange={(v) =>
+              patch({ thread: v as VariantFields["thread"] })
+            }
             options={[
               { value: "ephemeral", label: "ephemeral" },
               { value: "fork", label: "fork (new session)" },
@@ -178,18 +195,26 @@ export function ExperimentForm({
           />
         </div>
       </div>
-      {agent ? <OptionLab variant={variant} patch={patch} agent={agent} /> : null}
+      {agent ? (
+        <OptionLab variant={variant} patch={patch} agent={agent} />
+      ) : null}
       {/* Rung 3 (§8.3): break on tools — PUT /api/runtimes/{id}/
           breakpoints; the runtime parks them on every run it
           starts. */}
       {caps.includes("breakpoints") && runtime && agent?.tools.length ? (
         <div className="space-y-1">
-          <span className="text-xs text-muted-foreground">Break on (parks every run)</span>
+          <span className="text-xs text-muted-foreground">
+            Break on (parks every run)
+          </span>
           <Breakpoints
             key={runtime.id}
             runtimeID={runtime.id}
             stored={runtime.breakpoints}
-            tools={[...new Set(runtime.agents.flatMap((a) => a.tools.map((t) => t.name)))]}
+            tools={[
+              ...new Set(
+                runtime.agents.flatMap((a) => a.tools.map((t) => t.name))
+              ),
+            ]}
           />
         </div>
       ) : null}
@@ -228,10 +253,15 @@ function ModelField({
   // The free text is its own state: what was typed stays as typed (a
   // name that extends a listed one, inner spaces) and the model sent is
   // its trim; the select shows a listed name only when nothing is typed.
-  const [free, setFree] = useState(() => (variant.model && !models.includes(variant.model) ? variant.model : ""))
+  const [free, setFree] = useState(() =>
+    variant.model && !models.includes(variant.model) ? variant.model : ""
+  )
   useEffect(() => {
     // Set from outside (another agent, a hand-off): follow it.
-    if (variant.model !== free.trim() && !(free === "" && (variant.model === "" || models.includes(variant.model))))
+    if (
+      variant.model !== free.trim() &&
+      !(free === "" && (variant.model === "" || models.includes(variant.model)))
+    )
       setFree(models.includes(variant.model) ? "" : variant.model)
   }, [variant.model, free, models])
   const listed = free.trim() === ""
@@ -257,7 +287,9 @@ function ModelField({
       </div>
       {agent?.resolver ? (
         <label className="block flex-1 space-y-1">
-          <span className="text-xs text-muted-foreground">or any model name</span>
+          <span className="text-xs text-muted-foreground">
+            or any model name
+          </span>
           <input
             aria-label="model name the app resolves"
             data-model-free=""
@@ -278,15 +310,20 @@ function ModelField({
           value={variant.thinking}
           onValueChange={(v) => patch({ thinking: v })}
           options={[
-            { value: "", label: `default${thinkingDef ? ` (${thinkingDef})` : ""}` },
-            ...["off", "low", "medium", "high"].map((l) => ({ value: l, label: l })),
+            {
+              value: "",
+              label: `default${thinkingDef ? ` (${thinkingDef})` : ""}`,
+            },
+            ...["off", "low", "medium", "high"].map((l) => ({
+              value: l,
+              label: l,
+            })),
           ]}
         />
       </div>
     </div>
   )
 }
-
 
 /** OptionLab is plan F3's form: every narrowing or neutral run option
  * the command carries, each with the agent's default greyed (the
@@ -312,7 +349,8 @@ export function OptionLab({
   const set = (p: Partial<LabFields>) => patch({ lab: { ...lab, ...p } })
   const names = agent.tools.map((t) => t.name)
   const problems = labProblems(variant, agent)
-  const problemOf = (k: keyof LabFields | "lab") => problems.filter((p) => p.field === k)
+  const problemOf = (k: keyof LabFields | "lab") =>
+    problems.filter((p) => p.field === k)
   const greyed = (k: keyof LabFields) => old && LAB_NEW.includes(k)
   const reset = (k: keyof LabFields) =>
     labOn(lab, k, d) ? (
@@ -321,12 +359,19 @@ export function OptionLab({
         className="text-[11px] text-faint hover:underline"
         aria-label={`reset ${LAB_LABELS[k]} to the agent's default`}
         data-lab-reset={k}
-        onClick={() => set(k === "tool_choice" ? { tool_choice: "", tool_choice_name: "" } : { [k]: Array.isArray(lab[k]) ? [] : "" })}
+        onClick={() =>
+          set(
+            k === "tool_choice"
+              ? { tool_choice: "", tool_choice_name: "" }
+              : { [k]: Array.isArray(lab[k]) ? [] : "" }
+          )
+        }
       >
         ↺ default
       </button>
     ) : null
-  const ring = (k: keyof LabFields) => (labOn(lab, k, d) ? "border-primary text-primary" : "")
+  const ring = (k: keyof LabFields) =>
+    labOn(lab, k, d) ? "border-primary text-primary" : ""
   const tc = lab.tool_choice
   const parked = new Set(lab.park_on)
   const only = lab.only_tools.length ? new Set(lab.only_tools) : null
@@ -334,7 +379,9 @@ export function OptionLab({
     <fieldset className="space-y-1" data-lab={k} disabled={greyed(k)}>
       <legend className="flex items-center gap-2 text-xs text-muted-foreground">
         {LAB_LABELS[k]}
-        <span className="text-faint">default: {k === "park_on" ? "none" : "every tool"}</span>
+        <span className="text-faint">
+          default: {k === "park_on" ? "none" : "every tool"}
+        </span>
         {reset(k)}
       </legend>
       <div className="flex flex-wrap gap-2 text-xs">
@@ -345,14 +392,23 @@ export function OptionLab({
           return (
             // A span, not a label: the checkbox's name says which set
             // (the Tools boxes are the bare names).
-            <span key={n} className={`flex items-center gap-1 ${off ? "opacity-50" : on ? "text-primary" : ""}`}>
+            <span
+              key={n}
+              className={`flex items-center gap-1 ${off ? "opacity-50" : on ? "text-primary" : ""}`}
+            >
               <input
                 type="checkbox"
                 aria-label={`${LAB_LABELS[k]}: ${n}`}
                 checked={on}
                 // A checked box stays clearable after its tool is turned off.
                 disabled={greyed(k) || (off && !on)}
-                onChange={(e) => set({ [k]: e.target.checked ? [...lab[k], n] : lab[k].filter((x) => x !== n) })}
+                onChange={(e) =>
+                  set({
+                    [k]: e.target.checked
+                      ? [...lab[k], n]
+                      : lab[k].filter((x) => x !== n),
+                  })
+                }
               />
               {n}
             </span>
@@ -363,8 +419,13 @@ export function OptionLab({
     </fieldset>
   )
   return (
-    <div className="space-y-2 rounded border border-dashed p-2" data-option-lab="">
-      <span className="text-xs text-muted-foreground">Options (empty keeps the agent's default, shown greyed)</span>
+    <div
+      className="space-y-2 rounded border border-dashed p-2"
+      data-option-lab=""
+    >
+      <span className="text-xs text-muted-foreground">
+        Options (empty keeps the agent's default, shown greyed)
+      </span>
       {old ? (
         <p className="text-[11px] text-faint" data-lab-old="">
           this runtime reports no defaults — {LAB_PREDATES}
@@ -423,13 +484,18 @@ export function OptionLab({
             disabled={greyed("tool_choice")}
             className={`disabled:opacity-50 ${ring("tool_choice")}`}
             value={tc}
-            onValueChange={(v) => set({ tool_choice: v as LabFields["tool_choice"] })}
+            onValueChange={(v) =>
+              set({ tool_choice: v as LabFields["tool_choice"] })
+            }
             options={[
               {
                 value: "",
                 label: `default${d ? ` (${d.tool_choice.mode}${d.tool_choice.name ? ` ${d.tool_choice.name}` : ""})` : ""}`,
               },
-              ...(["auto", "any", "none", "named"] as const).map((m) => ({ value: m, label: m })),
+              ...(["auto", "any", "none", "named"] as const).map((m) => ({
+                value: m,
+                label: m,
+              })),
             ]}
           />
           {tc === "named" ? (
@@ -445,7 +511,9 @@ export function OptionLab({
                 ...names.map((n) => ({
                   value: n,
                   label: n,
-                  disabled: (only ? !only.has(n) : variant.toolsOff.has(n)) || parked.has(n),
+                  disabled:
+                    (only ? !only.has(n) : variant.toolsOff.has(n)) ||
+                    parked.has(n),
                 })),
               ]}
             />
@@ -464,7 +532,12 @@ function Problems({ list }: { list: LabProblem[] }) {
   return (
     <>
       {list.map((p, i) => (
-        <p key={`${i}:${p.message}`} className="text-[11px] text-status-bad" role="alert" data-lab-problem={p.field}>
+        <p
+          key={`${i}:${p.message}`}
+          className="text-[11px] text-status-bad"
+          role="alert"
+          data-lab-problem={p.field}
+        >
           {p.message}
         </p>
       ))}
@@ -496,12 +569,17 @@ export function TranscriptEdits({
   const loading = source.fields === null && !source.error
   // While the transcript loads nothing is judged yet: the drafts wait
   // (Run is held by the caller), no alarm is raised.
-  const orphans = loading ? [] : unmatchedDrafts(drafts, source.fields, fromStep)
-  if (!loading && !fields.length && !orphans.length && !source.error) return null
+  const orphans = loading
+    ? []
+    : unmatchedDrafts(drafts, source.fields, fromStep)
+  if (!loading && !fields.length && !orphans.length && !source.error)
+    return null
   // A field is a result patch or a reply rewrite: the Story's other
   // kinds on the same call (its args) are not this field's.
   const at = (f: EditField) => (d: EditDraft) =>
-    d.step === f.step && d.callID === f.callID && kindOf(d) === (f.callID ? "tool_result" : "reply")
+    d.step === f.step &&
+    d.callID === f.callID &&
+    kindOf(d) === (f.callID ? "tool_result" : "reply")
   const draftOf = (f: EditField) => drafts.find(at(f))
   const set = (f: EditField, v: string) => {
     setDrafts((cur) => {
@@ -545,10 +623,13 @@ export function TranscriptEdits({
             variant="outline"
             className="border-ev-error/40 font-mono text-[10px] font-normal text-ev-error"
           >
-            {source.fields === null ? "unchecked edit" : "no such field in the kept prefix"}
+            {source.fields === null
+              ? "unchecked edit"
+              : "no such field in the kept prefix"}
           </Badge>
           <span className="font-mono text-faint">
-            step {String(d.step)} · {String(d.callID ?? "reply")} → {String(d.toolResult ?? d.content ?? "").slice(0, 40)}
+            step {String(d.step)} · {String(d.callID ?? "reply")} →{" "}
+            {String(d.toolResult ?? d.content ?? "").slice(0, 40)}
           </span>
           <button
             type="button"
@@ -561,7 +642,10 @@ export function TranscriptEdits({
       ))}
       {fields.map((f) =>
         f.callID ? (
-          <label key={`${f.step}:${f.callID}`} className="flex items-center gap-1 text-xs">
+          <label
+            key={`${f.step}:${f.callID}`}
+            className="flex items-center gap-1 text-xs"
+          >
             <span className="shrink-0 text-faint">
               step {f.step} · {f.name} →
             </span>
@@ -604,7 +688,8 @@ export function useSourceEditFields(runID: string): {
 } {
   const q = useQuery({ ...transcriptQuery(runID), enabled: Boolean(runID) })
   if (!runID) return { fields: [] }
-  if (q.isError) return { fields: null, error: q.error.message, hidden: isHidden(q.error) }
+  if (q.isError)
+    return { fields: null, error: q.error.message, hidden: isHidden(q.error) }
   if (!q.data) return { fields: null }
   return { fields: editFieldsOf(q.data.batches, Number.MAX_SAFE_INTEGER) }
 }
@@ -633,8 +718,15 @@ export function useSourceSteps(runID: string): {
   answeredCalls?: boolean
   lastCalls?: boolean
 } {
-  const transcript = useQuery({ ...transcriptQuery(runID), enabled: Boolean(runID) })
-  const doc = useQuery({ ...runQuery(runID), enabled: Boolean(runID), staleTime: 30_000 })
+  const transcript = useQuery({
+    ...transcriptQuery(runID),
+    enabled: Boolean(runID),
+  })
+  const doc = useQuery({
+    ...runQuery(runID),
+    enabled: Boolean(runID),
+    staleTime: 30_000,
+  })
   if (!runID) return { steps: [] }
   if (transcript.isError) {
     const e = transcript.error
@@ -677,14 +769,21 @@ export function StepPicker({
   /** The source run's model, shown on each step. */
   model?: string
 }) {
-  const doc = useQuery({ ...runQuery(runID), enabled: Boolean(runID), staleTime: 30_000 })
+  const doc = useQuery({
+    ...runQuery(runID),
+    enabled: Boolean(runID),
+    staleTime: 30_000,
+  })
   const { steps, error, hidden, max, stepCount } = useSourceSteps(runID)
   const shownModel = model ?? (doc.data ? doc.data.model.name : undefined)
-  const failed = doc.data && doc.data.status === "failed" ? doc.data.err || "failed" : ""
+  const failed =
+    doc.data && doc.data.status === "failed" ? doc.data.err || "failed" : ""
   if (steps === null || steps.length === 0) {
     return (
       <label className="block space-y-1" data-step-picker="number">
-        <span className="text-xs text-muted-foreground">Continue from step</span>
+        <span className="text-xs text-muted-foreground">
+          Continue from step
+        </span>
         <span className="flex items-center gap-2">
           <input
             type="number"
@@ -692,18 +791,29 @@ export function StepPicker({
             aria-label="continue from step"
             className="w-20 rounded border bg-transparent px-2 py-1 text-xs"
             value={value}
-            onChange={(e) => onChange(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+            onChange={(e) =>
+              onChange(Math.max(0, Math.floor(Number(e.target.value) || 0)))
+            }
           />
           {hidden ? (
             <HoleBadge hole="hidden" />
           ) : error ? (
-            <Badge variant="outline" className="font-mono text-[10px] font-normal" title={error}>
+            <Badge
+              variant="outline"
+              className="font-mono text-[10px] font-normal"
+              title={error}
+            >
               steps unreadable · {error}
             </Badge>
           ) : steps === null ? (
-            <span className="text-[11px] text-faint">reading the run's steps…</span>
+            <span className="text-[11px] text-faint">
+              reading the run's steps…
+            </span>
           ) : (
-            <Badge variant="outline" className="font-mono text-[10px] font-normal">
+            <Badge
+              variant="outline"
+              className="font-mono text-[10px] font-normal"
+            >
               the run's transcript holds no steps
             </Badge>
           )}
@@ -713,11 +823,17 @@ export function StepPicker({
   }
   // A value the list lacks (a hand-off's step the run does not have) is
   // shown as itself, not silently moved.
-  const offered = steps.filter((st) => st.ordinal > 0 && (max === undefined || st.ordinal <= max))
+  const offered = steps.filter(
+    (st) => st.ordinal > 0 && (max === undefined || st.ordinal <= max)
+  )
   // The step after the last, when its calls are answered (a failed
   // run's next model call, run fresh).
-  const after = max !== undefined && stepCount !== undefined && max === stepCount && max > 0 ? max : null
-  const known = value === 0 || value === after || offered.some((st) => st.ordinal === value)
+  const after =
+    max !== undefined && stepCount !== undefined && max === stepCount && max > 0
+      ? max
+      : null
+  const known =
+    value === 0 || value === after || offered.some((st) => st.ordinal === value)
   const last = Math.max(...steps.map((st) => st.ordinal))
   return (
     <div className="block space-y-1" data-step-picker="list">
@@ -745,9 +861,21 @@ export function StepPicker({
             }
           }),
           ...(after !== null
-            ? [{ value: String(after), label: `${after} · after the last step (answers its calls)` }]
+            ? [
+                {
+                  value: String(after),
+                  label: `${after} · after the last step (answers its calls)`,
+                },
+              ]
             : []),
-          ...(known ? [] : [{ value: String(value), label: `${value} · not a step of this run` }]),
+          ...(known
+            ? []
+            : [
+                {
+                  value: String(value),
+                  label: `${value} · not a step of this run`,
+                },
+              ]),
         ]}
       />
     </div>

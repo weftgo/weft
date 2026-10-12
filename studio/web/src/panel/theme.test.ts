@@ -6,7 +6,16 @@
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { $, baseRoutes, click, fakeStudio, mount, settle, setup, teardown } from "./testkit"
+import {
+  $,
+  baseRoutes,
+  click,
+  fakeStudio,
+  mount,
+  settle,
+  setup,
+  teardown,
+} from "./testkit"
 import type { WeftDevtools } from "./element"
 import { readConfig } from "./config"
 import { STORE_KEY } from "./layout"
@@ -15,10 +24,18 @@ import { resolveTheme } from "./theme"
 import { PALETTE, STUDIO_NAMES } from "../lib/palette"
 import type { Theme } from "../lib/palette"
 
-const BASE = { "data-endpoint": "http://studio.test/studio/", "data-public-id": "pub_orders", "data-open": "true" }
+const BASE = {
+  "data-endpoint": "http://studio.test/studio/",
+  "data-public-id": "pub_orders",
+  "data-open": "true",
+}
 const html = document.documentElement
 const resolved = (el: WeftDevtools) => el.getAttribute("data-theme-resolved")
-const stored = () => JSON.parse(localStorage.getItem(STORE_KEY) ?? "null") as Record<string, unknown> | null
+const stored = () =>
+  JSON.parse(localStorage.getItem(STORE_KEY) ?? "null") as Record<
+    string,
+    unknown
+  > | null
 /** A MutationObserver delivers on a microtask; the panel then redraws. */
 const observed = () => settle()
 
@@ -30,7 +47,11 @@ function stubMedia(dark: boolean) {
   const mq = (q: string) => ({
     media: q,
     get matches() {
-      return q.includes("dark") ? state.dark : q.includes("light") ? !state.dark : false
+      return q.includes("dark")
+        ? state.dark
+        : q.includes("light")
+          ? !state.dark
+          : false
     },
     addEventListener: (_: string, f: () => void) => listeners.add(f),
     removeEventListener: (_: string, f: () => void) => listeners.delete(f),
@@ -48,7 +69,9 @@ function stubMedia(dark: boolean) {
 let quiet: ReturnType<typeof vi.spyOn>[] = []
 beforeEach(() => {
   setup()
-  quiet = (["log", "info", "warn", "error", "debug"] as const).map((m) => vi.spyOn(console, m))
+  quiet = (["log", "info", "warn", "error", "debug"] as const).map((m) =>
+    vi.spyOn(console, m)
+  )
 })
 afterEach(() => {
   // No console output, ever (the panel fails silently).
@@ -68,7 +91,7 @@ describe("auto (D2): the host page, then the system, then dark", () => {
     expect(resolved(el)).toBe("dark")
   })
 
-  it("is light on <html data-theme=\"light\"> without configuration, even under a dark system", async () => {
+  it('is light on <html data-theme="light"> without configuration, even under a dark system', async () => {
     fakeStudio(baseRoutes())
     stubMedia(true)
     html.setAttribute("data-theme", "light")
@@ -76,7 +99,7 @@ describe("auto (D2): the host page, then the system, then dark", () => {
     expect(resolved(el)).toBe("light")
   })
 
-  it("is dark on <html class=\"dark\"> under a light system", async () => {
+  it('is dark on <html class="dark"> under a light system', async () => {
     fakeStudio(baseRoutes())
     stubMedia(false)
     html.className = "dark"
@@ -126,7 +149,9 @@ describe("auto (D2): the host page, then the system, then dark", () => {
     const el = await mount(BASE)
     expect(onHtml()).toBeLessThanOrEqual(1)
     const before = onHtml()
-    const raw = Array.from(el.shadowRoot!.querySelectorAll("button")).find((b) => b.textContent === "raw")
+    const raw = Array.from(el.shadowRoot!.querySelectorAll("button")).find(
+      (b) => b.textContent === "raw"
+    )
     expect(raw).toBeTruthy()
     click(raw)
     await settle()
@@ -146,8 +171,13 @@ describe("auto (D2): the host page, then the system, then dark", () => {
     const observe = vi.spyOn(MutationObserver.prototype, "observe")
     const disconnect = vi.spyOn(MutationObserver.prototype, "disconnect")
     const el = await mount(BASE)
-    const i = observe.mock.calls.findIndex((c) => c[0] === html && c[1]?.attributeFilter?.includes("data-theme"))
-    expect(observe.mock.calls[i][1]).toEqual({ attributes: true, attributeFilter: ["class", "data-theme"] })
+    const i = observe.mock.calls.findIndex(
+      (c) => c[0] === html && c[1]?.attributeFilter?.includes("data-theme")
+    )
+    expect(observe.mock.calls[i][1]).toEqual({
+      attributes: true,
+      attributeFilter: ["class", "data-theme"],
+    })
     const mine = observe.mock.contexts[i]
     expect(media.listeners.size).toBe(1)
     expect(resolved(el)).toBe("light")
@@ -190,7 +220,9 @@ describe("explicit > stored > auto (D2)", () => {
     meta.name = "weft:theme"
     meta.content = "light"
     document.head.appendChild(meta)
-    const el = document.createElement("div") as HTMLElement & { options?: { theme?: "dark" } }
+    const el = document.createElement("div") as HTMLElement & {
+      options?: { theme?: "dark" }
+    }
     expect(readConfig(el).theme).toBe("light")
     el.options = { theme: "dark" }
     expect(readConfig(el).theme).toBe("dark")
@@ -205,7 +237,9 @@ describe("explicit > stored > auto (D2)", () => {
     stubMedia(true)
     let el = await mount(BASE)
     expect(resolved(el)).toBe("dark")
-    expect($(el, ".weft-theme")?.getAttribute("title")).toBe("theme: auto (dark) — next: light")
+    expect($(el, ".weft-theme")?.getAttribute("title")).toBe(
+      "theme: auto (dark) — next: light"
+    )
     expect($(el, ".weft-theme")?.hasAttribute("aria-disabled")).toBe(false)
     click($(el, ".weft-theme"))
     expect(resolved(el)).toBe("light")
@@ -220,21 +254,30 @@ describe("explicit > stored > auto (D2)", () => {
     click($(el, ".weft-theme"))
     expect(stored()?.theme).toBe("") // cleared: auto again
     expect(resolved(el)).toBe("dark")
-    expect($(el, ".weft-theme")?.getAttribute("title")).toBe("theme: auto (dark) — next: light")
+    expect($(el, ".weft-theme")?.getAttribute("title")).toBe(
+      "theme: auto (dark) — next: light"
+    )
   })
 })
 
 describe("the tokens (D2)", () => {
   it("every --weft-* the stylesheet reads is a token declared on :host, dark by default, light under data-theme-resolved", () => {
-    const used = new Set(Array.from(PANEL_CSS.matchAll(/var\((--weft-[a-z0-9-]+)/g), (m) => m[1]))
+    const used = new Set(
+      Array.from(PANEL_CSS.matchAll(/var\((--weft-[a-z0-9-]+)/g), (m) => m[1])
+    )
     // Set by the host only: the dock's z-index and data-push's inset.
     used.delete("--weft-z")
     for (const t of used) expect(TOKENS, t).toContain(t)
     const host = /:host \{([^}]*)\}/.exec(PANEL_CSS)?.[1] ?? ""
-    const light = /:host\(\[data-theme-resolved="light"\]\) \{([^}]*)\}/.exec(PANEL_CSS)?.[1] ?? ""
+    const light =
+      /:host\(\[data-theme-resolved="light"\]\) \{([^}]*)\}/.exec(
+        PANEL_CSS
+      )?.[1] ?? ""
     for (const t of TOKENS) expect(host, t).toContain(`${t}:`)
-    for (const [k, v] of Object.entries(PALETTE.light)) expect(light).toContain(`--weft-${k}: ${v};`)
-    for (const [k, v] of Object.entries(PALETTE.dark)) expect(host).toContain(`--weft-${k}: ${v};`)
+    for (const [k, v] of Object.entries(PALETTE.light))
+      expect(light).toContain(`--weft-${k}: ${v};`)
+    for (const [k, v] of Object.entries(PALETTE.dark))
+      expect(host).toContain(`--weft-${k}: ${v};`)
     // No colour outside the tokens, and no token declared (or
     // redeclared) anywhere but the two :host blocks: a redeclaration on
     // an inner node would shadow a host override.
@@ -254,7 +297,9 @@ describe("the tokens (D2)", () => {
     style.textContent = "weft-devtools { --weft-bg: #123456; }"
     document.head.appendChild(style)
     const el = await mount(BASE)
-    expect(getComputedStyle(el).getPropertyValue("--weft-bg").trim()).toBe("#123456")
+    expect(getComputedStyle(el).getPropertyValue("--weft-bg").trim()).toBe(
+      "#123456"
+    )
     // And the panel never sets a token inline (which would beat it).
     expect(el.getAttribute("style") ?? "").not.toContain("--weft-")
   })
@@ -266,22 +311,35 @@ function studioTokens(selector: string): Record<string, string> {
   // Exactly one top-level block per selector: a later override block
   // would change the app's colours without this test seeing it.
   const esc = selector.replace(".", "\\.")
-  expect(css.match(new RegExp(`^${esc}\\s*\\{`, "gm"))?.length, `top-level ${selector} blocks`).toBe(1)
+  expect(
+    css.match(new RegExp(`^${esc}\\s*\\{`, "gm"))?.length,
+    `top-level ${selector} blocks`
+  ).toBe(1)
   const at = css.search(new RegExp(`^${selector.replace(".", "\\.")} \\{`, "m"))
   expect(at, selector).toBeGreaterThanOrEqual(0)
   const body = css.slice(at, css.indexOf("}", at))
-  return Object.fromEntries(Array.from(body.matchAll(/--([a-z0-9-]+):\s*([^;]+);/g), (m) => [m[1], m[2].trim()]))
+  return Object.fromEntries(
+    Array.from(body.matchAll(/--([a-z0-9-]+):\s*([^;]+);/g), (m) => [
+      m[1],
+      m[2].trim(),
+    ])
+  )
 }
 
 describe("one palette (D2): the panel's shared tokens are styles.css's", () => {
-  for (const [theme, sel] of [["light", ":root"], ["dark", ".dark"]] as const)
+  for (const [theme, sel] of [
+    ["light", ":root"],
+    ["dark", ".dark"],
+  ] as const)
     it(`${theme}: every shared token equals its Studio variable (${sel})`, () => {
       const studio = studioTokens(sel)
       const names = STUDIO_NAMES[theme]
       expect(Object.keys(names).length).toBeGreaterThanOrEqual(12)
       for (const [token, name] of Object.entries(names)) {
         expect(studio[name], `${sel} --${name}`).toBeDefined()
-        expect(PALETTE[theme][token], `--weft-${token} vs --${name}`).toBe(studio[name])
+        expect(PALETTE[theme][token], `--weft-${token} vs --${name}`).toBe(
+          studio[name]
+        )
       }
     })
 })
@@ -302,9 +360,19 @@ function contrast(a: string, b: string): number {
 
 /** blend is fg drawn at opacity a over bg (what opacity does to text). */
 function blend(fg: string, bg: string, a: number): string {
-  const ch = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16))
+  const ch = (h: string) =>
+    [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16))
   const [f, b] = [ch(fg), ch(bg)]
-  return "#" + f.map((v, i) => Math.round(v * a + b[i] * (1 - a)).toString(16).padStart(2, "0")).join("")
+  return (
+    "#" +
+    f
+      .map((v, i) =>
+        Math.round(v * a + b[i] * (1 - a))
+          .toString(16)
+          .padStart(2, "0")
+      )
+      .join("")
+  )
 }
 
 describe("contrast (D2; D3's axe run confirms it)", () => {
@@ -317,7 +385,17 @@ describe("contrast (D2; D3's axe run confirms it)", () => {
   // carry bg themselves) and bg2 (header, steps, footer); the selected
   // or hovered row (bg3) carries fg and dim only. The accent fills the
   // run button under on-accent text.
-  const TEXT = ["fg", "dim", "faint", "accent", "warn", "err", "info", "ok", "parked"]
+  const TEXT = [
+    "fg",
+    "dim",
+    "faint",
+    "accent",
+    "warn",
+    "err",
+    "info",
+    "ok",
+    "parked",
+  ]
   for (const t of ["light", "dark"] as Theme[])
     it(`${t}: body text 4.5:1, UI 3:1`, () => {
       const p = PALETTE[t]
@@ -338,30 +416,49 @@ describe("contrast (D2; D3's axe run confirms it)", () => {
         ["faint", "bg2", 3],
         ["faint", "bg3", 3],
       ]
-      for (const [f, b, min] of pairs) expect(contrast(p[f], p[b]), `${t} --weft-${f} on --weft-${b}`).toBeGreaterThanOrEqual(min)
+      for (const [f, b, min] of pairs)
+        expect(
+          contrast(p[f], p[b]),
+          `${t} --weft-${f} on --weft-${b}`
+        ).toBeGreaterThanOrEqual(min)
       // Any static opacity in the stylesheet blends text into its
       // surface: every text token, so blended, must still clear 4.5:1
       // (@keyframes are animation, not a resting state).
-      const resting = PANEL_CSS.replace(/@keyframes[^{]*\{[^{}]*\{[^}]*\}\s*\}/g, "")
+      const resting = PANEL_CSS.replace(
+        /@keyframes[^{]*\{[^{}]*\{[^}]*\}\s*\}/g,
+        ""
+      )
       for (const m of resting.matchAll(/opacity:\s*([\d.]+)/g))
         for (const f of TEXT)
           for (const b of ["bg", "bg2"])
-            expect(contrast(blend(p[f], p[b], Number(m[1])), p[b]), `${t} --weft-${f} at opacity ${m[1]} on --weft-${b}`).toBeGreaterThanOrEqual(4.5)
+            expect(
+              contrast(blend(p[f], p[b], Number(m[1])), p[b]),
+              `${t} --weft-${f} at opacity ${m[1]} on --weft-${b}`
+            ).toBeGreaterThanOrEqual(4.5)
     })
 
   it("faint never sits on a hovered or selected row (it reads 4.41/4.21 on bg3): those rows recolour it dim", () => {
-    expect(PANEL_CSS).toContain(".weft-turn:hover .weft-when, .weft-turn.weft-sel .weft-when { color: var(--weft-dim); }")
-    const onBg3 = PANEL_CSS.split("}").filter((r) => r.includes("background: var(--weft-bg3)") && r.includes("color: var(--weft-faint)"))
+    expect(PANEL_CSS).toContain(
+      ".weft-turn:hover .weft-when, .weft-turn.weft-sel .weft-when { color: var(--weft-dim); }"
+    )
+    const onBg3 = PANEL_CSS.split("}").filter(
+      (r) =>
+        r.includes("background: var(--weft-bg3)") &&
+        r.includes("color: var(--weft-faint)")
+    )
     expect(onBg3).toEqual([])
   })
 
   it("an experiment row is marked by its indent and rule, not by opacity", () => {
-    expect(PANEL_CSS).toContain(".weft-expts .weft-turn { border-bottom: none; border-left: 1px solid var(--weft-line); }")
+    expect(PANEL_CSS).toContain(
+      ".weft-expts .weft-turn { border-bottom: none; border-left: 1px solid var(--weft-line); }"
+    )
     expect(PANEL_CSS).not.toMatch(/\.weft-expts[^{]*\{[^}]*opacity/)
   })
 
   it("the unreachable line sits on the host page's background, so it takes the host's colour", () => {
-    const rule = (sel: string) => new RegExp(`\\${sel} \\{([^}]*)\\}`).exec(PANEL_CSS)?.[1] ?? ""
+    const rule = (sel: string) =>
+      new RegExp(`\\${sel} \\{([^}]*)\\}`).exec(PANEL_CSS)?.[1] ?? ""
     for (const sel of [".weft-unreachable", ".weft-retry"]) {
       expect(rule(sel), sel).toContain("color: inherit")
       expect(rule(sel), sel).not.toMatch(/color: var\(--weft-/)

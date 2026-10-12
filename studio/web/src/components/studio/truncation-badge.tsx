@@ -21,6 +21,11 @@ export function TruncationBadge({ content }: { content: string }) {
       note={`${kib(cut.bytes)} cut`}
     />
   ) : (
-    <HoleBadge hole="max_tokens" reason={UNRUN_CALL_REASON} fix="" note="call never executed" />
+    <HoleBadge
+      hole="max_tokens"
+      reason={UNRUN_CALL_REASON}
+      fix=""
+      note="call never executed"
+    />
   )
 }

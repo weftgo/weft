@@ -4,12 +4,24 @@
 // re-run alone under the same experiment id, re-run all and its one
 // toast, compare any two cells, the runs list filtered to the
 // experiment, the palette's experiment entry, and axe on both pages.
-import { cleanup, configure, fireEvent, screen, waitFor, within } from "@testing-library/react"
+import {
+  cleanup,
+  configure,
+  fireEvent,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react"
 import axe from "axe-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
-import type { ExperimentRow, PlaygroundRunBody, RunDoc, RunsPage } from "@/lib/api"
+import type {
+  ExperimentRow,
+  PlaygroundRunBody,
+  RunDoc,
+  RunsPage,
+} from "@/lib/api"
 import { experimentDraftID, resetDrafts, saveDraft } from "@/lib/drafts"
 import { parseCellCommandID } from "@/lib/form-state"
 import { COST_WAITS } from "@/routes/experiments.$id"
@@ -25,8 +37,15 @@ import { valueOf } from "@/test/select"
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
 
-const meta = (capabilities: string[]) => ({ ...golden<Record<string, unknown>>("meta"), capabilities })
-const tool = (name: string, side_effects = "never") => ({ name, side_effects, allow: false })
+const meta = (capabilities: string[]) => ({
+  ...golden<Record<string, unknown>>("meta"),
+  capabilities,
+})
+const tool = (name: string, side_effects = "never") => ({
+  name,
+  side_effects,
+  allow: false,
+})
 const runtimes = {
   runtimes: [
     {
@@ -39,7 +58,12 @@ const runtimes = {
       connected_since: rOK.started,
       last_seen: rOK.started,
       agents: [
-        { name: "orders", models: ["glm"], tools: [tool("lookup_order", "safe"), tool("refund")], instructions: "You are support." },
+        {
+          name: "orders",
+          models: ["glm"],
+          tools: [tool("lookup_order", "safe"), tool("refund")],
+          instructions: "You are support.",
+        },
       ],
     },
   ],
@@ -66,11 +90,18 @@ function toastTitles(): string[] {
   )
 }
 const panelToken = (scope: "read" | "playground") =>
-  `weft_pt.${btoa(JSON.stringify({ public_id: "pub_1", scope, exp: new Date(Date.now() + 3600_000).toISOString() }))
+  `weft_pt.${btoa(
+    JSON.stringify({
+      public_id: "pub_1",
+      scope,
+      exp: new Date(Date.now() + 3600_000).toISOString(),
+    })
+  )
     .replace(/=+$/, "")
     .replace(/\+/g, "-")
     .replace(/\//g, "_")}.c2ln`
-const cell = (k: string) => document.querySelector<HTMLElement>(`[data-cell="${k}"]`)!
+const cell = (k: string) =>
+  document.querySelector<HTMLElement>(`[data-cell="${k}"]`)!
 
 let studio: FakeStudio
 beforeEach(() => {
@@ -116,15 +147,21 @@ describe("/experiments", () => {
   it("lists each experiment with its size, runs and cost, each opening its page", async () => {
     renderApp("/experiments")
     const row = await waitFor(() => {
-      const el = document.querySelector<HTMLElement>('[data-experiment-row="exp_tone"]')
+      const el = document.querySelector<HTMLElement>(
+        '[data-experiment-row="exp_tone"]'
+      )
       expect(el?.querySelector("[data-experiment-runs]")?.textContent).toBe("4")
       return el!
     })
     expect(row.textContent).toContain("2 × 2")
     expect(row.textContent).toContain("orders")
     // $0.01 + $0.02 + $0.03 + $0.04, own + delegated.
-    expect(row.querySelector("[data-experiment-cost]")?.textContent).toContain("$0.10")
-    expect(within(row).getByRole("link", { name: "exp_tone" }).getAttribute("href")).toBe("/experiments/exp_tone")
+    expect(row.querySelector("[data-experiment-cost]")?.textContent).toContain(
+      "$0.10"
+    )
+    expect(
+      within(row).getByRole("link", { name: "exp_tone" }).getAttribute("href")
+    ).toBe("/experiments/exp_tone")
     expect(document.title).toBe("experiments · weft studio")
     expect(row.querySelector("[title]")?.getAttribute("title")).toBeTruthy()
     // The row itself answers: no per-row detail read (F5.1).
@@ -133,21 +170,51 @@ describe("/experiments", () => {
 
   it("the TS row type mirrors experiments.golden.json and experiment.golden.json (F5.1 keys)", () => {
     const keys: (keyof ExperimentRow)[] = [
-      "id", "name", "agent", "variants", "inputs", "engine", "side_effects", "thread", "from_step", "source_run_id",
-      "transcript_edits", "created", "updated", "run_count", "runs", "cost_usd", "cost_known", "cost_badge", "cost_reason", "cache",
+      "id",
+      "name",
+      "agent",
+      "variants",
+      "inputs",
+      "engine",
+      "side_effects",
+      "thread",
+      "from_step",
+      "source_run_id",
+      "transcript_edits",
+      "created",
+      "updated",
+      "run_count",
+      "runs",
+      "cost_usd",
+      "cost_known",
+      "cost_badge",
+      "cost_reason",
+      "cache",
     ]
     const variantKeys = ["key", "overrides", "engine", "side_effects", "thread"]
-    const rows = [...golden<{ experiments: Record<string, unknown>[] }>("experiments").experiments, golden<Record<string, unknown>>("experiment")]
+    const rows = [
+      ...golden<{ experiments: Record<string, unknown>[] }>("experiments")
+        .experiments,
+      golden<Record<string, unknown>>("experiment"),
+    ]
     for (const r of rows) {
       for (const k of Object.keys(r)) expect(keys).toContain(k)
-      for (const v of r.variants as Record<string, unknown>[]) for (const k of Object.keys(v)) expect(variantKeys).toContain(k)
+      for (const v of r.variants as Record<string, unknown>[])
+        for (const k of Object.keys(v)) expect(variantKeys).toContain(k)
     }
   })
 
   it("is the playground's: without it, the page says why and reads nothing", async () => {
-    studio.on("GET meta", { ...meta(["live"]), capabilities_off: { playground: "studio.Playground(true) is off" } })
+    studio.on("GET meta", {
+      ...meta(["live"]),
+      capabilities_off: { playground: "studio.Playground(true) is off" },
+    })
     renderApp("/experiments")
-    expect(await screen.findByText("This Studio has no playground, so no experiments.")).toBeTruthy()
+    expect(
+      await screen.findByText(
+        "This Studio has no playground, so no experiments."
+      )
+    ).toBeTruthy()
     expect(studio.calls("GET experiments")).toHaveLength(0)
   })
 
@@ -163,19 +230,33 @@ describe("/experiments", () => {
     })
     studio.on("GET experiments", (req) => {
       const n = Number(req.query.get("limit") || 50)
-      return { experiments: Array.from({ length: Math.min(n, 230) }, (_, i) => row(i)), total: 230 }
+      return {
+        experiments: Array.from({ length: Math.min(n, 230) }, (_, i) => row(i)),
+        total: 230,
+      }
     })
     renderApp("/experiments")
-    const count = () => document.querySelector("[data-experiments-count]")?.textContent ?? ""
+    const count = () =>
+      document.querySelector("[data-experiments-count]")?.textContent ?? ""
     await waitFor(() => expect(count()).toContain("newest 50 of 230"))
     // run_count 0: the cost cell says why there is no figure.
-    const first = document.querySelector<HTMLElement>('[data-experiment-row="exp_0"] [data-experiment-cost] [data-cost]')!
+    const first = document.querySelector<HTMLElement>(
+      '[data-experiment-row="exp_0"] [data-experiment-cost] [data-cost]'
+    )!
     expect(first.getAttribute("title")).toBe("no run to total")
-    expect(studio.calls("GET experiments").at(-1)!.query.get("limit")).toBeNull()
-    for (const [label, n] of [["load 50 more", 100], ["load 50 more", 150], ["load 50 more", 200]] as const) {
+    expect(
+      studio.calls("GET experiments").at(-1)!.query.get("limit")
+    ).toBeNull()
+    for (const [label, n] of [
+      ["load 50 more", 100],
+      ["load 50 more", 150],
+      ["load 50 more", 200],
+    ] as const) {
       fireEvent.click(await screen.findByRole("button", { name: label }))
       await waitFor(() => expect(count()).toContain(`newest ${n} of 230`))
-      expect(studio.calls("GET experiments").at(-1)!.query.get("limit")).toBe(String(n))
+      expect(studio.calls("GET experiments").at(-1)!.query.get("limit")).toBe(
+        String(n)
+      )
     }
     expect(screen.queryByRole("button", { name: /^load/ })).toBeNull()
     expect(screen.getByText("the list stops at the newest 200")).toBeTruthy()
@@ -183,8 +264,12 @@ describe("/experiments", () => {
 
   it("a list within the cut says its size alone, no load-more", async () => {
     renderApp("/experiments")
-    await waitFor(() => expect(document.querySelector("[data-experiment-row]")).toBeTruthy())
-    expect(document.querySelector("[data-experiments-count]")?.textContent).toBe("the playground's saved matrices · 1")
+    await waitFor(() =>
+      expect(document.querySelector("[data-experiment-row]")).toBeTruthy()
+    )
+    expect(
+      document.querySelector("[data-experiments-count]")?.textContent
+    ).toBe("the playground's saved matrices · 1")
     expect(screen.queryByRole("button", { name: /^load/ })).toBeNull()
   })
 
@@ -199,13 +284,25 @@ describe("/experiments/{id}", () => {
   it("draws the variants × inputs grid: each cell its run, status, cost and link; totals per variant", async () => {
     renderApp("/experiments/exp_tone")
     await waitFor(() => expect(cell("B×2").textContent).toContain("failed"))
-    expect(within(cell("A×1")).getByRole("link", { name: "pg_a1" }).getAttribute("href")).toBe("/runs/pg_a1")
-    expect(cell("A×1").querySelector("[data-cell-cost]")?.textContent).toContain("$0.01")
-    expect(document.querySelector('[data-variant-cost="B"]')?.textContent).toContain("$0.07")
-    expect(document.querySelector("[data-experiment-total]")?.textContent).toContain("$0.10")
-    expect(document.querySelector("[data-experiment-runs-link]")?.getAttribute("href")).toBe(
-      "/runs?experiment_id=exp_tone"
-    )
+    expect(
+      within(cell("A×1"))
+        .getByRole("link", { name: "pg_a1" })
+        .getAttribute("href")
+    ).toBe("/runs/pg_a1")
+    expect(
+      cell("A×1").querySelector("[data-cell-cost]")?.textContent
+    ).toContain("$0.01")
+    expect(
+      document.querySelector('[data-variant-cost="B"]')?.textContent
+    ).toContain("$0.07")
+    expect(
+      document.querySelector("[data-experiment-total]")?.textContent
+    ).toContain("$0.10")
+    expect(
+      document
+        .querySelector("[data-experiment-runs-link]")
+        ?.getAttribute("href")
+    ).toBe("/runs?experiment_id=exp_tone")
     expect(document.title).toBe("experiment exp_tone · weft studio")
   })
 
@@ -215,26 +312,63 @@ describe("/experiments/{id}", () => {
     const { router } = renderApp("/experiments/exp_tone")
     await waitFor(() => expect(cell("A×1").textContent).toContain("succeeded"))
     fireEvent.click(screen.getByRole("button", { name: "clone into the form" }))
-    await waitFor(() => expect(router.state.location.pathname).toBe("/playground"))
-    expect(router.state.location.search).toMatchObject({ exp: expect.stringMatching(/^d_/) })
-    await waitFor(() => expect(valueOf(screen.getByLabelText("agent"))).toBe("orders"))
-    expect((await screen.findByText(/^draft d_\w+ reopened · clone of exp_tone$/)).hasAttribute("data-form-restored")).toBe(true)
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/playground")
+    )
+    expect(router.state.location.search).toMatchObject({
+      exp: expect.stringMatching(/^d_/),
+    })
+    await waitFor(() =>
+      expect(valueOf(screen.getByLabelText("agent"))).toBe("orders")
+    )
+    expect(
+      (
+        await screen.findByText(/^draft d_\w+ reopened · clone of exp_tone$/)
+      ).hasAttribute("data-form-restored")
+    ).toBe(true)
     // The saved form, field by field: the source run, the matrix's
     // name, its step and its rows…
-    expect(screen.getByPlaceholderText<HTMLInputElement>("a run id, or blank for fresh input").value).toBe("r_ok")
-    expect(screen.getByLabelText<HTMLInputElement>("experiment name").value).toBe("exp_tone")
-    expect(screen.getByLabelText<HTMLInputElement>("matrix from step").value).toBe("1")
-    expect(screen.getByLabelText<HTMLInputElement>("input 1").value).toBe("where is 42?")
+    expect(
+      screen.getByPlaceholderText<HTMLInputElement>(
+        "a run id, or blank for fresh input"
+      ).value
+    ).toBe("r_ok")
+    expect(
+      screen.getByLabelText<HTMLInputElement>("experiment name").value
+    ).toBe("exp_tone")
+    expect(
+      screen.getByLabelText<HTMLInputElement>("matrix from step").value
+    ).toBe("1")
+    expect(screen.getByLabelText<HTMLInputElement>("input 1").value).toBe(
+      "where is 42?"
+    )
     expect(screen.getByLabelText<HTMLInputElement>("input 2").value).toBe("")
     // …variant A as registered…
-    expect(screen.getByLabelText<HTMLTextAreaElement>("system prompt").value).toBe("You are support.")
-    expect(screen.getByLabelText<HTMLInputElement>(/^refund/).checked).toBe(true)
+    expect(
+      screen.getByLabelText<HTMLTextAreaElement>("system prompt").value
+    ).toBe("You are support.")
+    expect(screen.getByLabelText<HTMLInputElement>(/^refund/).checked).toBe(
+      true
+    )
     // …and variant B's overrides and modes.
     fireEvent.click(screen.getByRole("button", { name: "B" }))
-    await waitFor(() => expect(screen.getByLabelText<HTMLTextAreaElement>("system prompt").value).toBe("Be brief."))
-    await waitFor(() => expect(screen.getByLabelText<HTMLInputElement>(/^refund/).checked).toBe(false))
-    expect(screen.getByLabelText<HTMLInputElement>(/^lookup_order/).checked).toBe(true)
-    expect(document.querySelector<HTMLInputElement>('[data-lab="temperature"]')!.value).toBe("0.5")
+    await waitFor(() =>
+      expect(
+        screen.getByLabelText<HTMLTextAreaElement>("system prompt").value
+      ).toBe("Be brief.")
+    )
+    await waitFor(() =>
+      expect(screen.getByLabelText<HTMLInputElement>(/^refund/).checked).toBe(
+        false
+      )
+    )
+    expect(
+      screen.getByLabelText<HTMLInputElement>(/^lookup_order/).checked
+    ).toBe(true)
+    expect(
+      document.querySelector<HTMLInputElement>('[data-lab="temperature"]')!
+        .value
+    ).toBe("0.5")
     expect(valueOf(screen.getByLabelText("Engine"))).toBe("scripted")
     expect(valueOf(screen.getByLabelText("Side effects"))).toBe("park")
     expect(studio.calls("POST playground/runs")).toHaveLength(0)
@@ -246,15 +380,37 @@ describe("/experiments/{id}", () => {
       v: 1,
       agent: "orders",
       run: "r_ok",
-      variants: [{ key: "A", side_effects: "allow" }, { key: "B", instructions: "Be brief.", tools_on: ["lookup_order"], thread: "ephemeral", lab: { temperature: "0.5" } }],
-      matrix: { name: "exp_tone", from_step: 1, inputs: [{ key: "1", text: "where is 42?" }, { key: "2", text: "" }] },
+      variants: [
+        { key: "A", side_effects: "allow" },
+        {
+          key: "B",
+          instructions: "Be brief.",
+          tools_on: ["lookup_order"],
+          thread: "ephemeral",
+          lab: { temperature: "0.5" },
+        },
+      ],
+      matrix: {
+        name: "exp_tone",
+        from_step: 1,
+        inputs: [
+          { key: "1", text: "where is 42?" },
+          { key: "2", text: "" },
+        ],
+      },
     }
     await saveDraft(experimentDraftID("exp_tone"), kept, { kind: "experiment" })
     renderApp("/experiments/exp_tone")
-    expect((await screen.findByText(/this browser's record/)).textContent).toContain("as it ran")
+    expect(
+      (await screen.findByText(/this browser's record/)).textContent
+    ).toContain("as it ran")
     fireEvent.click(screen.getByRole("button", { name: "clone into the form" }))
-    await waitFor(() => expect(valueOf(screen.getByLabelText("agent"))).toBe("orders"))
-    await waitFor(() => expect(valueOf(screen.getByLabelText("Side effects"))).toBe("allow"))
+    await waitFor(() =>
+      expect(valueOf(screen.getByLabelText("agent"))).toBe("orders")
+    )
+    await waitFor(() =>
+      expect(valueOf(screen.getByLabelText("Side effects"))).toBe("allow")
+    )
   })
 
   // The Done line, 2: a cell re-runs alone.
@@ -268,11 +424,16 @@ describe("/experiments/{id}", () => {
       })
     renderApp("/experiments/exp_tone")
     await waitFor(() => expect(cell("B×2").textContent).toContain("failed"))
-    const btn = within(cell("B×2")).getByRole("button", { name: "re-run cell B×2" })
+    const btn = within(cell("B×2")).getByRole("button", {
+      name: "re-run cell B×2",
+    })
     await waitFor(() => expect(btn).toHaveProperty("disabled", false))
     fireEvent.click(btn)
-    await waitFor(() => expect(studio.calls("POST playground/runs")).toHaveLength(1))
-    const body = studio.calls("POST playground/runs")[0].body as PlaygroundRunBody
+    await waitFor(() =>
+      expect(studio.calls("POST playground/runs")).toHaveLength(1)
+    )
+    const body = studio.calls("POST playground/runs")[0]
+      .body as PlaygroundRunBody
     expect(body).toMatchObject({
       runtime: "rt_1",
       agent: "orders",
@@ -283,11 +444,21 @@ describe("/experiments/{id}", () => {
       thread: "ephemeral",
       experiment_id: "exp_tone",
     })
-    expect(parseCellCommandID(body.command_id)).toEqual({ variant: "B", input: "2", sideEffects: "park" })
+    expect(parseCellCommandID(body.command_id)).toEqual({
+      variant: "B",
+      input: "2",
+      sideEffects: "park",
+    })
     // The cell follows its command, and the experiment is read again.
-    await waitFor(() => expect(cell("B×2").querySelector("[data-cell-rerun]")?.textContent).toBe("re-run finished"))
+    await waitFor(() =>
+      expect(cell("B×2").querySelector("[data-cell-rerun]")?.textContent).toBe(
+        "re-run finished"
+      )
+    )
     expect(followed).toBe(true)
-    await waitFor(() => expect(studio.calls("GET experiments/exp_tone").length).toBeGreaterThan(1))
+    await waitFor(() =>
+      expect(studio.calls("GET experiments/exp_tone").length).toBeGreaterThan(1)
+    )
     // Only that cell: no definition written, no other command.
     expect(studio.calls("POST experiments")).toHaveLength(0)
     await new Promise((r) => setTimeout(r, 200))
@@ -299,16 +470,36 @@ describe("/experiments/{id}", () => {
   it("a different experiment is a fresh page: A's cell states do not follow onto B", async () => {
     studio
       .on("POST playground/runs", command("cmd_r1", "queued"))
-      .on("GET playground/commands/cmd_r1", command("cmd_r1", "finished", "pg_b2_again", "succeeded"))
-      .on("GET experiments/exp_other", { ...pricedExp, id: "exp_other", name: "exp_other" })
+      .on(
+        "GET playground/commands/cmd_r1",
+        command("cmd_r1", "finished", "pg_b2_again", "succeeded")
+      )
+      .on("GET experiments/exp_other", {
+        ...pricedExp,
+        id: "exp_other",
+        name: "exp_other",
+      })
     const { router } = renderApp("/experiments/exp_tone")
     await waitFor(() => expect(cell("B×2").textContent).toContain("failed"))
-    const btn = within(cell("B×2")).getByRole("button", { name: "re-run cell B×2" })
+    const btn = within(cell("B×2")).getByRole("button", {
+      name: "re-run cell B×2",
+    })
     await waitFor(() => expect(btn).toHaveProperty("disabled", false))
     fireEvent.click(btn)
-    await waitFor(() => expect(cell("B×2").querySelector("[data-cell-rerun]")?.textContent).toBe("re-run finished"))
-    await router.navigate({ to: "/experiments/$id", params: { id: "exp_other" } })
-    await waitFor(() => expect(studio.calls("GET experiments/exp_other").length).toBeGreaterThan(0))
+    await waitFor(() =>
+      expect(cell("B×2").querySelector("[data-cell-rerun]")?.textContent).toBe(
+        "re-run finished"
+      )
+    )
+    await router.navigate({
+      to: "/experiments/$id",
+      params: { id: "exp_other" },
+    })
+    await waitFor(() =>
+      expect(studio.calls("GET experiments/exp_other").length).toBeGreaterThan(
+        0
+      )
+    )
     await waitFor(() => expect(cell("B×2").textContent).toContain("failed"))
     expect(cell("B×2").querySelector("[data-cell-rerun]")).toBeNull()
   })
@@ -320,20 +511,28 @@ describe("/experiments/{id}", () => {
     // The experiment never lists the new runs.
     for (let i = 1; i <= 4; i++)
       studio.on(`GET playground/commands/cmd_lost${i}`, () =>
-        done ? command(`cmd_lost${i}`, "finished", `pg_gone${i}`, "succeeded") : command(`cmd_lost${i}`, "accepted")
+        done
+          ? command(`cmd_lost${i}`, "finished", `pg_gone${i}`, "succeeded")
+          : command(`cmd_lost${i}`, "accepted")
       )
     renderApp("/experiments/exp_tone")
     const all = await screen.findByRole("button", { name: "re-run all" })
     await waitFor(() => expect(all).toHaveProperty("disabled", false))
     fireEvent.click(all)
-    await waitFor(() => expect(studio.calls("POST playground/runs")).toHaveLength(4))
+    await waitFor(() =>
+      expect(studio.calls("POST playground/runs")).toHaveLength(4)
+    )
     const readsBefore = studio.calls("GET experiments/exp_tone").length
     done = true
     await waitFor(() =>
-      expect(toastTitles()).toEqual(["experiment exp_tone finished · 4 succeeded · cost not read yet"])
+      expect(toastTitles()).toEqual([
+        "experiment exp_tone finished · 4 succeeded · cost not read yet",
+      ])
     )
     // It re-read the experiment (bounded), then gave up on the cost.
-    expect(studio.calls("GET experiments/exp_tone").length - readsBefore).toBeGreaterThanOrEqual(COST_WAITS)
+    expect(
+      studio.calls("GET experiments/exp_tone").length - readsBefore
+    ).toBeGreaterThanOrEqual(COST_WAITS)
   })
 
   it("re-run all: every cell under the same id, one toast when the last settles, with its cost", async () => {
@@ -354,28 +553,44 @@ describe("/experiments/{id}", () => {
       .on("GET experiments/exp_tone", () => (done ? after : pricedExp))
     for (let i = 1; i <= 4; i++)
       studio.on(`GET playground/commands/cmd_all${i}`, () =>
-        done ? command(`cmd_all${i}`, "finished", `pg_new${i}`, i === 4 ? "failed" : "succeeded") : command(`cmd_all${i}`, "accepted")
+        done
+          ? command(
+              `cmd_all${i}`,
+              "finished",
+              `pg_new${i}`,
+              i === 4 ? "failed" : "succeeded"
+            )
+          : command(`cmd_all${i}`, "accepted")
       )
     renderApp("/experiments/exp_tone")
     const all = await screen.findByRole("button", { name: "re-run all" })
     await waitFor(() => expect(all).toHaveProperty("disabled", false))
     fireEvent.click(all)
-    await waitFor(() => expect(studio.calls("POST playground/runs")).toHaveLength(4))
-    const bodies = studio.calls("POST playground/runs").map((c) => c.body as PlaygroundRunBody)
-    expect(new Set(bodies.map((b) => b.experiment_id))).toEqual(new Set(["exp_tone"]))
-    expect(bodies.map((b) => parseCellCommandID(b.command_id)).map((c) => `${c?.variant}×${c?.input}`)).toEqual([
-      "A×1",
-      "A×2",
-      "B×1",
-      "B×2",
-    ])
+    await waitFor(() =>
+      expect(studio.calls("POST playground/runs")).toHaveLength(4)
+    )
+    const bodies = studio
+      .calls("POST playground/runs")
+      .map((c) => c.body as PlaygroundRunBody)
+    expect(new Set(bodies.map((b) => b.experiment_id))).toEqual(
+      new Set(["exp_tone"])
+    )
+    expect(
+      bodies
+        .map((b) => parseCellCommandID(b.command_id))
+        .map((c) => `${c?.variant}×${c?.input}`)
+    ).toEqual(["A×1", "A×2", "B×1", "B×2"])
     await new Promise((r) => setTimeout(r, 300))
     expect(toastTitles()).toEqual([])
     done = true
     await waitFor(() =>
-      expect(toastTitles()).toEqual(["experiment exp_tone finished · 3 succeeded, 1 failed · $1.00"])
+      expect(toastTitles()).toEqual([
+        "experiment exp_tone finished · 3 succeeded, 1 failed · $1.00",
+      ])
     )
-    const open = [...document.querySelectorAll<HTMLAnchorElement>("[data-sonner-toast] a")].find((a) => a.textContent === "open")
+    const open = [
+      ...document.querySelectorAll<HTMLAnchorElement>("[data-sonner-toast] a"),
+    ].find((a) => a.textContent === "open")
     expect(open?.getAttribute("href")).toBe("/experiments/exp_tone")
   })
 
@@ -386,7 +601,9 @@ describe("/experiments/{id}", () => {
     expect(document.querySelector("[data-compare-picked]")).toBeNull()
     fireEvent.click(screen.getByLabelText("pick cell B×2 to compare"))
     const link = await waitFor(() => {
-      const el = document.querySelector<HTMLAnchorElement>("[data-compare-picked]")
+      const el = document.querySelector<HTMLAnchorElement>(
+        "[data-compare-picked]"
+      )
       expect(el).toBeTruthy()
       return el!
     })
@@ -397,15 +614,27 @@ describe("/experiments/{id}", () => {
     // A third pick drops the oldest.
     fireEvent.click(screen.getByLabelText("pick cell A×2 to compare"))
     await waitFor(() =>
-      expect(new URL(document.querySelector<HTMLAnchorElement>("[data-compare-picked]")!.href).searchParams.get("a")).toBe("pg_b2")
+      expect(
+        new URL(
+          document.querySelector<HTMLAnchorElement>("[data-compare-picked]")!
+            .href
+        ).searchParams.get("a")
+      ).toBe("pg_b2")
     )
   })
 
   it("a pre-F5 matrix's runs are placed by issue order, and said so", async () => {
-    studio.on("GET experiments/exp_tone", { ...experiment, runs: experiment.runs!.map((r) => ({ ...r, meta: {} })) })
+    studio.on("GET experiments/exp_tone", {
+      ...experiment,
+      runs: experiment.runs!.map((r) => ({ ...r, meta: {} })),
+    })
     renderApp("/experiments/exp_tone")
-    await waitFor(() => expect(document.querySelector("[data-placed-by-order]")).toBeTruthy())
-    expect(within(cell("B×1")).getByRole("link", { name: "pg_b1" })).toBeTruthy()
+    await waitFor(() =>
+      expect(document.querySelector("[data-placed-by-order]")).toBeTruthy()
+    )
+    expect(
+      within(cell("B×1")).getByRole("link", { name: "pg_b1" })
+    ).toBeTruthy()
   })
 
   it("a panel token (read or playground) is refused by the routes: the hidden badge, dev token only, nothing fetched", async () => {
@@ -415,7 +644,9 @@ describe("/experiments/{id}", () => {
       for (const url of ["/experiments/exp_tone", "/experiments"]) {
         renderApp(url)
         const page = await waitFor(() => {
-          const el = document.querySelector<HTMLElement>("[data-experiments-hidden]")
+          const el = document.querySelector<HTMLElement>(
+            "[data-experiments-hidden]"
+          )
           expect(el).toBeTruthy()
           return el!
         })
@@ -441,7 +672,9 @@ describe("/experiments/{id}", () => {
     expect(screen.queryByRole("link", { name: "Experiments" })).toBeNull()
     fireEvent.keyDown(window, { key: "k", ctrlKey: true })
     await screen.findByRole("combobox")
-    expect(screen.queryByText("Experiments", { selector: "[cmdk-group-heading]" })).toBeNull()
+    expect(
+      screen.queryByText("Experiments", { selector: "[cmdk-group-heading]" })
+    ).toBeNull()
     expect(studio.calls("GET experiments")).toHaveLength(0)
   })
 })
@@ -451,11 +684,15 @@ describe("the runs list's experiment_id chip", () => {
     const page = golden<RunsPage>("runs")
     // The API filters by experiment_id (F5.1): the fake answers so.
     studio.on("GET runs", (req) =>
-      req.query.get("experiment_id") === "exp_tone" ? { ...page, runs: [runOf("pg_a1", "A", "1")] } : page
+      req.query.get("experiment_id") === "exp_tone"
+        ? { ...page, runs: [runOf("pg_a1", "A", "1")] }
+        : page
     )
     const { router } = renderApp("/runs?experiment_id=exp_tone")
     const chip = await waitFor(() => {
-      const el = document.querySelector<HTMLElement>('[data-chip="experiment_id"]')
+      const el = document.querySelector<HTMLElement>(
+        '[data-chip="experiment_id"]'
+      )
       expect(el).toBeTruthy()
       return el!
     })
@@ -468,25 +705,34 @@ describe("the runs list's experiment_id chip", () => {
     expect(q.get("playground")).toBe("true")
     expect(document.querySelector("[data-local-filters]")).toBeNull()
     fireEvent.click(chip)
-    await waitFor(() => expect(router.state.location.search).not.toHaveProperty("experiment_id"))
+    await waitFor(() =>
+      expect(router.state.location.search).not.toHaveProperty("experiment_id")
+    )
   })
 })
 
 describe("the palette's experiment entry", () => {
   it("routes to /experiments/{id}", async () => {
-    studio.on("GET runs", golden<RunsPage>("runs")).on("GET sessions", { sessions: [], next_before: null }).on("GET traces", { traces: [] })
+    studio
+      .on("GET runs", golden<RunsPage>("runs"))
+      .on("GET sessions", { sessions: [], next_before: null })
+      .on("GET traces", { traces: [] })
     const { router } = renderApp("/runs")
     await screen.findByText("r_ok")
     fireEvent.keyDown(window, { key: "k", ctrlKey: true })
     const input = await screen.findByRole("combobox")
     fireEvent.change(input, { target: { value: "exp_tone" } })
     const item = await waitFor(() => {
-      const el = document.querySelector<HTMLElement>('[cmdk-item][data-palette-kind="experiment"]')
+      const el = document.querySelector<HTMLElement>(
+        '[cmdk-item][data-palette-kind="experiment"]'
+      )
       expect(el).toBeTruthy()
       return el!
     })
     fireEvent.click(item)
-    await waitFor(() => expect(router.state.location.pathname).toBe("/experiments/exp_tone"))
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/experiments/exp_tone")
+    )
   })
 })
 
@@ -494,12 +740,21 @@ describe("the experiments pages' accessibility", () => {
   it("axe finds nothing on the list or the grid", async () => {
     vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null)
     const check = async () => {
-      const res = await axe.run(document.querySelector("main")!, { rules: { region: { enabled: false } } })
-      return res.violations.map((v) => `${v.id}: ${v.nodes.map((x) => `${x.html} ${x.failureSummary ?? ""}`).join(" | ")}`)
+      const res = await axe.run(document.querySelector("main")!, {
+        rules: { region: { enabled: false } },
+      })
+      return res.violations.map(
+        (v) =>
+          `${v.id}: ${v.nodes.map((x) => `${x.html} ${x.failureSummary ?? ""}`).join(" | ")}`
+      )
     }
     renderApp("/experiments")
     await waitFor(() =>
-      expect(document.querySelector('[data-experiment-row="exp_tone"] [data-experiment-runs]')?.textContent).toBe("4")
+      expect(
+        document.querySelector(
+          '[data-experiment-row="exp_tone"] [data-experiment-runs]'
+        )?.textContent
+      ).toBe("4")
     )
     expect(await check()).toEqual([])
     renderApp("/experiments/exp_tone")

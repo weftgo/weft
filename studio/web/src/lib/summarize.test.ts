@@ -96,7 +96,11 @@ describe("summaries of malformed and unknown events", () => {
     ).not.toThrow()
     expect(() =>
       eventSummary(
-        bad({ type: "steered", step: 0, messages: [{ role: "user", content: null }] })
+        bad({
+          type: "steered",
+          step: 0,
+          messages: [{ role: "user", content: null }],
+        })
       )
     ).not.toThrow()
   })

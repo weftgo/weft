@@ -38,7 +38,11 @@ import { grantLedger, withLiveGrant } from "@/test/fake-live-grant"
 
 const SERVER = "tok_SECRET+/=value"
 const PANEL = `weft_pt.${btoa(
-  JSON.stringify({ public_id: "pub_1", scope: "playground", exp: new Date(Date.now() + 3600_000).toISOString() })
+  JSON.stringify({
+    public_id: "pub_1",
+    scope: "playground",
+    exp: new Date(Date.now() + 3600_000).toISOString(),
+  })
 ).replace(/=+$/, "")}.c2ln`
 
 interface Seen {
@@ -54,15 +58,23 @@ function install() {
   const inner = vi.fn(async (input: RequestInfo | URL) => {
     const url = new URL(String(input), "http://studio.test/")
     // Studio's rule (studio/auth.go, plan C5): ?token= is a 401 everywhere.
-    if (url.searchParams.has("token")) return new Response("{}", { status: 401 })
-    return new Response(JSON.stringify({ error: { code: "not_found", message: "" } }), {
-      status: 404,
-      headers: { "content-type": "application/json" },
-    })
+    if (url.searchParams.has("token"))
+      return new Response("{}", { status: 401 })
+    return new Response(
+      JSON.stringify({ error: { code: "not_found", message: "" } }),
+      {
+        status: 404,
+        headers: { "content-type": "application/json" },
+      }
+    )
   })
   const granted = withLiveGrant(inner)
   vi.stubGlobal("fetch", (input: RequestInfo | URL, init?: RequestInit) => {
-    seen.push({ site, url: String(input), auth: new Headers(init?.headers).get("Authorization") })
+    seen.push({
+      site,
+      url: String(input),
+      auth: new Headers(init?.headers).get("Authorization"),
+    })
     return granted(input, init)
   })
   vi.stubGlobal("EventSource", FakeEventSource)
@@ -87,8 +99,16 @@ function assertClean(token: string) {
   expect(seen.length).toBeGreaterThan(0)
   // Every enumerated site made its request (none skipped by a throw
   // before its fetch).
-  for (const name of new Set(sites)) expect(seen.map((s) => s.site), name).toContain(name)
-  const enc = [token, encodeURIComponent(token), new URLSearchParams({ t: token }).toString().slice(2)]
+  for (const name of new Set(sites))
+    expect(
+      seen.map((s) => s.site),
+      name
+    ).toContain(name)
+  const enc = [
+    token,
+    encodeURIComponent(token),
+    new URLSearchParams({ t: token }).toString().slice(2),
+  ]
   for (const s of seen) {
     expect(s.url, s.site).not.toContain("token=")
     for (const v of enc) expect(s.url, s.site).not.toContain(v)
@@ -134,16 +154,27 @@ describe("no client request carries the token in a URL", () => {
       await drive("fetchLogs", () => api.fetchLogs("r1", { from: 1 }))
       await drive("fetchSessions", () => api.fetchSessions({}))
       await drive("fetchCommand", () => api.fetchCommand("c1"))
-      await drive("postPlaygroundRun", () => api.postPlaygroundRun({} as Parameters<typeof api.postPlaygroundRun>[0]))
+      await drive("postPlaygroundRun", () =>
+        api.postPlaygroundRun({} as Parameters<typeof api.postPlaygroundRun>[0])
+      )
       await drive("postFixtures", () => api.postFixtures("r1", []))
       await drive("postSteer", () => api.postSteer("r1", "hi"))
       await drive("putBreakpoints", () => api.putBreakpoints("rt1", []))
-      await drive("postExperiment", () => api.postExperiment({} as Parameters<typeof api.postExperiment>[0]))
-      await drive("postApproval", () => api.postApproval("r1", { call_id: "c", decision: "approve" }))
-      await drive("metaQuery", () => (api.metaQuery().queryFn as () => unknown)())
+      await drive("postExperiment", () =>
+        api.postExperiment({} as Parameters<typeof api.postExperiment>[0])
+      )
+      await drive("postApproval", () =>
+        api.postApproval("r1", { call_id: "c", decision: "approve" })
+      )
+      await drive("metaQuery", () =>
+        (api.metaQuery().queryFn as () => unknown)()
+      )
       await drive("fetchTestExport", () => api.fetchTestExport("r/1"))
       site = "openLive"
-      const live = openLive({ selector: { run: "r1" }, kinds: ["event", "delta", "run"] })
+      const live = openLive({
+        selector: { run: "r1" },
+        kinds: ["event", "delta", "run"],
+      })
       await settle()
       live.close()
       assertClean(token)
@@ -152,25 +183,38 @@ describe("no client request carries the token in a URL", () => {
     it(`the devtools panel, under ${name}`, async () => {
       const ep = { base: "http://studio.test/studio/", token }
       await drive("fetchMeta", () => panel.fetchMeta(ep))
-      await drive("fetchRuns", () => panel.fetchRuns(ep, { public_id: "pub_1" }))
+      await drive("fetchRuns", () =>
+        panel.fetchRuns(ep, { public_id: "pub_1" })
+      )
       await drive("fetchRun", () => panel.fetchRun(ep, "r1"))
       await drive("fetchEvents", () => panel.fetchEvents(ep, "r1", 0))
       await drive("fetchTranscript", () => panel.fetchTranscript(ep, "r1"))
       await drive("fetchRequests", () => panel.fetchRequests(ep, "r1"))
       await drive("fetchSpans", () => panel.fetchSpans(ep, "r1"))
-      await drive("fetchSessions", () => panel.fetchSessions(ep, { public_id: "pub_1" }))
+      await drive("fetchSessions", () =>
+        panel.fetchSessions(ep, { public_id: "pub_1" })
+      )
       await drive("fetchSession", () => panel.fetchSession(ep, "s1"))
       await drive("fetchPublic", () => panel.fetchPublic(ep, "pub_1"))
       await drive("fetchRuntimes", () => panel.fetchRuntimes(ep))
       await drive("fetchCommand", () => panel.fetchCommand(ep, "c1"))
       await drive("postPlaygroundRun", () => panel.postPlaygroundRun(ep, {}))
-      await drive("postApproval", () => panel.postApproval(ep, "r1", { call_id: "c", decision: "deny" }))
+      await drive("postApproval", () =>
+        panel.postApproval(ep, "r1", { call_id: "c", decision: "deny" })
+      )
       await drive("putBreakpoints", () => panel.putBreakpoints(ep, "rt1", []))
       await drive("postSteer", () => panel.postSteer(ep, "r1", "hi"))
-      await drive("fetchHandoff", () => panel.fetchHandoff(ep, "/runs/r1?step=0"))
-      await drive("discoverEndpoint", () => discoverEndpoint("http://studio.test/studio/panel-config.json"))
+      await drive("fetchHandoff", () =>
+        panel.fetchHandoff(ep, "/runs/r1?step=0")
+      )
+      await drive("discoverEndpoint", () =>
+        discoverEndpoint("http://studio.test/studio/panel-config.json")
+      )
       site = "openPanelLive"
-      const h = panel.openPanelLive(ep, { selector: { public_id: "pub_1" }, kinds: ["run"] })
+      const h = panel.openPanelLive(ep, {
+        selector: { public_id: "pub_1" },
+        kinds: ["run"],
+      })
       await settle()
       h.close()
       assertClean(token)
@@ -185,8 +229,14 @@ const SRC = resolve(process.cwd(), "src")
 function sources(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
     const p = join(dir, name)
-    if (statSync(p).isDirectory()) return p === join(SRC, "test") ? [] : sources(p)
-    if (!/\.(ts|tsx)$/.test(name) || /\.test\.tsx?$/.test(name) || name === "testkit.ts") return []
+    if (statSync(p).isDirectory())
+      return p === join(SRC, "test") ? [] : sources(p)
+    if (
+      !/\.(ts|tsx)$/.test(name) ||
+      /\.test\.tsx?$/.test(name) ||
+      name === "testkit.ts"
+    )
+      return []
     return [p]
   })
 }
@@ -199,7 +249,9 @@ function exemptLines(file: string, text: string): Set<number> {
   const out = new Set<number>()
   if (relative(SRC, file) !== join("lib", "api.ts")) return out
   const lines = text.split("\n")
-  const fn = lines.findIndex((l) => l.startsWith("export function adoptTokenFromLocation("))
+  const fn = lines.findIndex((l) =>
+    l.startsWith("export function adoptTokenFromLocation(")
+  )
   if (fn < 0) return out
   let start = fn
   while (start > 0 && !lines[start - 1].startsWith("/**")) start--
@@ -240,13 +292,14 @@ const TOKEN_KEY = [
 ]
 
 describe("no client source sets a token search parameter", () => {
-  it("no .set/.append(\"token\", …) and no URLSearchParams literal with a token key", () => {
+  it('no .set/.append("token", …) and no URLSearchParams literal with a token key', () => {
     const hits: string[] = []
     for (const f of sources(SRC)) {
       readFileSync(f, "utf8")
         .split("\n")
         .forEach((line, i) => {
-          if (TOKEN_KEY.some((re) => re.test(line))) hits.push(`${relative(SRC, f)}:${i + 1}: ${line.trim()}`)
+          if (TOKEN_KEY.some((re) => re.test(line)))
+            hits.push(`${relative(SRC, f)}:${i + 1}: ${line.trim()}`)
         })
     }
     expect(hits).toEqual([])
@@ -260,14 +313,24 @@ describe("no client source sets a token search parameter", () => {
       "new URLSearchParams({ run, token: tok })",
       'new URLSearchParams([["token", tok]])',
     ])
-      expect(TOKEN_KEY.some((re) => re.test(line)), line).toBe(true)
+      expect(
+        TOKEN_KEY.some((re) => re.test(line)),
+        line
+      ).toBe(true)
     // Reading or stripping the page's own parameter is not setting one.
-    expect(TOKEN_KEY.some((re) => re.test('url.searchParams.delete("token")'))).toBe(false)
+    expect(
+      TOKEN_KEY.some((re) => re.test('url.searchParams.delete("token")'))
+    ).toBe(false)
   })
 })
 
 /** The raw request primitives: a file holding one is a call site. */
-const RAW = [/\bfetch\(/, /new EventSource\(/, /\bsendBeacon\b/, /\bXMLHttpRequest\b/]
+const RAW = [
+  /\bfetch\(/,
+  /new EventSource\(/,
+  /\bsendBeacon\b/,
+  /\bXMLHttpRequest\b/,
+]
 
 describe("the call sites above are every raw request site", () => {
   it("the files with fetch(, new EventSource(, sendBeacon or XMLHttpRequest are exactly the enumerated four", () => {
@@ -275,6 +338,11 @@ describe("the call sites above are every raw request site", () => {
       .filter((f) => RAW.some((re) => re.test(readFileSync(f, "utf8"))))
       .map((f) => relative(SRC, f).split("\\").join("/"))
       .sort()
-    expect(found).toEqual(["lib/api.ts", "lib/live.ts", "panel/client.ts", "panel/config.ts"])
+    expect(found).toEqual([
+      "lib/api.ts",
+      "lib/live.ts",
+      "panel/client.ts",
+      "panel/config.ts",
+    ])
   })
 })

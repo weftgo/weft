@@ -178,9 +178,7 @@ function StepDetail({
             requests={requests}
           />
         ) : null}
-        {runId ? (
-          <HoleBadges holes={stepAttemptsHole(step, requests)} />
-        ) : null}
+        {runId ? <HoleBadges holes={stepAttemptsHole(step, requests)} /> : null}
         <span className="ml-auto font-mono text-[10px] text-faint tabular-nums">
           events {step.from}–{step.to}
         </span>
@@ -285,7 +283,9 @@ export function SpanDetail({
   const childLinks = new Map<string, ChildRow>(
     doc.children.map((c) => [c.id, c])
   )
-  const modes: DetailMode[] = span?.timed ? ["detail"] : ["detail", "events", "json"]
+  const modes: DetailMode[] = span?.timed
+    ? ["detail"]
+    : ["detail", "events", "json"]
   // A time-axis row has only its detail: a ?d=events carried over from
   // the event axis would read the span's milliseconds as positions.
   if (span?.timed) mode = "detail"
@@ -318,15 +318,15 @@ export function SpanDetail({
             {/* A derived run (plan I1.3) has no events: no playhead to
                 put at a span's start. */}
             {isDerived(doc) ? null : (
-            <Button
-              variant="ghost"
-              size="xs"
-              className="h-5 px-1.5 font-mono text-[10px] text-faint hover:text-foreground"
-              title={`jump to the start of this span (event #${span.from})`}
-              onClick={() => onJump(span.from + 1)}
-            >
-              ▶ replay here
-            </Button>
+              <Button
+                variant="ghost"
+                size="xs"
+                className="h-5 px-1.5 font-mono text-[10px] text-faint hover:text-foreground"
+                title={`jump to the start of this span (event #${span.from})`}
+                onClick={() => onJump(span.from + 1)}
+              >
+                ▶ replay here
+              </Button>
             )}
           </span>
         ) : null}
@@ -438,7 +438,12 @@ function TimedDetail({
           ["span", sp.name],
           ["span id", sp.span_id],
           ["service", sp.service || "—"],
-          ["status", sp.status_message ? `${sp.status} · ${sp.status_message}` : sp.status],
+          [
+            "status",
+            sp.status_message
+              ? `${sp.status} · ${sp.status_message}`
+              : sp.status,
+          ],
           [
             "time",
             t.toMs == null
@@ -499,7 +504,10 @@ function isChatSpan(sp: TimedSpan): boolean {
  * asked for, the one that answered, "attempt n of m" from its attempt
  * children (the answering one is the last with status ok), and the
  * call's TTFT. */
-function chatFacts(sp: TimedSpan, timed: TimedSpan[]): [string, React.ReactNode][] {
+function chatFacts(
+  sp: TimedSpan,
+  timed: TimedSpan[]
+): [string, React.ReactNode][] {
   const requested = str(sp.attrs["gen_ai.request.model"])
   const kids = timed
     .filter((k) => k.parent_span_id === sp.span_id && k.name === "attempt")

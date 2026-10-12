@@ -33,11 +33,18 @@ function Headers({ h, label }: { h: RawSide["headers"]; label: string }) {
   if (!rows.length)
     return <p className="font-mono text-[11px] text-faint">no headers</p>
   return (
-    <table className="w-full font-mono text-[11px]" aria-label={label} data-wire-headers>
+    <table
+      className="w-full font-mono text-[11px]"
+      aria-label={label}
+      data-wire-headers
+    >
       <tbody>
         {rows.map(([k, v], i) => (
           <tr key={`${k}\u0000${i}`} className="align-top">
-            <th scope="row" className="pr-3 text-left font-normal text-muted-foreground whitespace-nowrap">
+            <th
+              scope="row"
+              className="pr-3 text-left font-normal whitespace-nowrap text-muted-foreground"
+            >
               {k}
             </th>
             <td className="break-all">{v}</td>
@@ -51,9 +58,18 @@ function Headers({ h, label }: { h: RawSide["headers"]; label: string }) {
 function Body({ side, title }: { side: RawSide; title: string }) {
   if (side.encoding === "base64") {
     return (
-      <div className="flex items-center gap-2 font-mono text-[11px]" data-wire-binary>
-        <span className="text-muted-foreground">binary, {bytes(side.bytes)} (base64)</span>
-        <CopyButton text={side.body} label={`copy the ${title} (base64)`} className="text-muted-foreground" />
+      <div
+        className="flex items-center gap-2 font-mono text-[11px]"
+        data-wire-binary
+      >
+        <span className="text-muted-foreground">
+          binary, {bytes(side.bytes)} (base64)
+        </span>
+        <CopyButton
+          text={side.body}
+          label={`copy the ${title} (base64)`}
+          className="text-muted-foreground"
+        />
       </div>
     )
   }
@@ -61,7 +77,14 @@ function Body({ side, title }: { side: RawSide; title: string }) {
     return <p className="font-mono text-[11px] text-faint">empty body</p>
   // Copy keeps the wire bytes: the pretty form may differ (big
   // integers, 1.0), and the bar says when it does.
-  return <CodeWin title={title} text={side.body} json={isJSONMedia(side.media_type) ? undefined : false} copyOriginal />
+  return (
+    <CodeWin
+      title={title}
+      text={side.body}
+      json={isJSONMedia(side.media_type) ? undefined : false}
+      copyOriginal
+    />
+  )
 }
 
 /** The cuts a side carries: the cap's, a body not read to its end. */
@@ -73,12 +96,21 @@ function Cuts({ side }: { side: RawSide }) {
         hole="truncated"
         reason={WIRE_INCOMPLETE_REASON}
         fix=""
-        note={cut > 0 ? `${WIRE_INCOMPLETE} (${kib(cut)} unread)` : WIRE_INCOMPLETE}
+        note={
+          cut > 0 ? `${WIRE_INCOMPLETE} (${kib(cut)} unread)` : WIRE_INCOMPLETE
+        }
       />
     )
   }
   if (cut > 0)
-    return <HoleBadge hole="truncated" reason={wireCutReason(cut)} fix="" note={`${kib(cut)} cut`} />
+    return (
+      <HoleBadge
+        hole="truncated"
+        reason={wireCutReason(cut)}
+        fix=""
+        note={`${kib(cut)} cut`}
+      />
+    )
   return null
 }
 
@@ -99,20 +131,32 @@ function SideBlock({
       ? `${side.method ?? ""} ${side.url ?? ""}`.trim()
       : `${side.status ?? ""}${side.media_type ? ` · ${side.media_type}` : ""}`
   return (
-    <section className="space-y-1.5" aria-label={attempt ? `${kind}, ${attempt}` : kind} data-wire-side={kind}>
+    <section
+      className="space-y-1.5"
+      aria-label={attempt ? `${kind}, ${attempt}` : kind}
+      data-wire-side={kind}
+    >
       <div className="flex flex-wrap items-center gap-2">
         <span className="eyebrow">{kind}</span>
-        <span className="break-all font-mono text-[11px]" data-wire-line>
+        <span className="font-mono text-[11px] break-all" data-wire-line>
           {line}
         </span>
         {kind === "request" && side.media_type ? (
-          <span className="font-mono text-[11px] text-faint">{side.media_type}</span>
+          <span className="font-mono text-[11px] text-faint">
+            {side.media_type}
+          </span>
         ) : null}
-        <span className="font-mono text-[10px] text-faint tabular-nums">{bytes(side.bytes)}</span>
+        <span className="font-mono text-[10px] text-faint tabular-nums">
+          {bytes(side.bytes)}
+        </span>
         <Cuts side={side} />
       </div>
       {withheldWords.map((w) => (
-        <p key={w} className="font-mono text-[11px] text-muted-foreground" data-wire-withheld>
+        <p
+          key={w}
+          className="font-mono text-[11px] text-muted-foreground"
+          data-wire-withheld
+        >
           {w}
         </p>
       ))}
@@ -123,11 +167,21 @@ function SideBlock({
 }
 
 /** One attempt's exchange, or its row's hole. */
-function AttemptWire({ row, runId, label }: { row: RequestRow; runId: string; label?: string }) {
+function AttemptWire({
+  row,
+  runId,
+  label,
+}: {
+  row: RequestRow
+  runId: string
+  label?: string
+}) {
   if (!hasWire(row)) {
     return (
       <div data-wire-attempt={row.attempt} className="space-y-1">
-        {label ? <span className="font-mono text-[11px] text-faint">{label}</span> : null}
+        {label ? (
+          <span className="font-mono text-[11px] text-faint">{label}</span>
+        ) : null}
         <HoleBadge
           hole={row.raw_badge || "not_recorded"}
           cause={row.raw_badge ? undefined : "raw_off"}
@@ -144,40 +198,70 @@ function AttemptWire({ row, runId, label }: { row: RequestRow; runId: string; la
   if (raw.content === "derived")
     return (
       <div data-wire-attempt={row.attempt} className="space-y-1">
-        {label ? <span className="font-mono text-[11px] text-faint">{label}</span> : null}
+        {label ? (
+          <span className="font-mono text-[11px] text-faint">{label}</span>
+        ) : null}
         <HoleBadge hole="derived" reason={WIRE_DERIVED_REASON} fix="" detail />
       </div>
     )
   // The record's cut (both bodies') when neither side counts its own.
   const recordCut =
-    (raw.truncated_bytes ?? 0) > 0 && !raw.request.truncated_bytes && !raw.response?.truncated_bytes
+    (raw.truncated_bytes ?? 0) > 0 &&
+    !raw.request.truncated_bytes &&
+    !raw.response?.truncated_bytes
       ? (raw.truncated_bytes ?? 0)
       : 0
-  const reqWithheld = [withheld(raw.redacted_headers, "header"), withheld(raw.redacted_query, "query parameter")].filter(
-    (w): w is string => w !== null
-  )
+  const reqWithheld = [
+    withheld(raw.redacted_headers, "header"),
+    withheld(raw.redacted_query, "query parameter"),
+  ].filter((w): w is string => w !== null)
   return (
     <div data-wire-attempt={row.attempt} className="space-y-3">
       <div className="flex items-center gap-2">
-        {label ? <span className="font-mono text-[11px] text-faint">{label}</span> : null}
+        {label ? (
+          <span className="font-mono text-[11px] text-faint">{label}</span>
+        ) : null}
         <Button
           variant="ghost"
           size="xs"
           className="ml-auto font-mono text-[11px]"
-          onClick={() => download(wireFileName(runId, raw), pretty({ request: raw.request, response: raw.response }))}
+          onClick={() =>
+            download(
+              wireFileName(runId, raw),
+              pretty({ request: raw.request, response: raw.response })
+            )
+          }
         >
           <Download data-slot="icon" />
           download .json
         </Button>
       </div>
       {recordCut > 0 ? (
-        <HoleBadge hole="truncated" reason={wireCutReason(recordCut)} fix="" note={`${kib(recordCut)} cut`} />
+        <HoleBadge
+          hole="truncated"
+          reason={wireCutReason(recordCut)}
+          fix=""
+          note={`${kib(recordCut)} cut`}
+        />
       ) : null}
-      <SideBlock kind="request" side={raw.request} withheldWords={reqWithheld} attempt={label} />
+      <SideBlock
+        kind="request"
+        side={raw.request}
+        withheldWords={reqWithheld}
+        attempt={label}
+      />
       {raw.response ? (
-        <SideBlock kind="response" side={raw.response} withheldWords={[]} attempt={label} />
+        <SideBlock
+          kind="response"
+          side={raw.response}
+          withheldWords={[]}
+          attempt={label}
+        />
       ) : (
-        <section aria-label={label ? `response, ${label}` : "response"} data-wire-side="response">
+        <section
+          aria-label={label ? `response, ${label}` : "response"}
+          data-wire-side="response"
+        >
           <span className="eyebrow">response</span>{" "}
           <span className="font-mono text-[11px] text-muted-foreground">
             none: the exchange got no response (a transport error)
@@ -193,11 +277,22 @@ function AttemptWire({ row, runId, label }: { row: RequestRow; runId: string; la
  * labelled as the Request pane labels them. The whole record's hole
  * (hidden for a read-scoped token) is the Request pane's header badge.
  */
-export function WireView({ rows, runId }: { rows: RequestRow[]; runId: string }) {
+export function WireView({
+  rows,
+  runId,
+}: {
+  rows: RequestRow[]
+  runId: string
+}) {
   return (
     <div data-wire="" className="space-y-4 pt-2">
       {rows.map((r) => (
-        <AttemptWire key={r.index} row={r} runId={runId} label={rows.length > 1 ? `attempt ${r.attempt}` : undefined} />
+        <AttemptWire
+          key={r.index}
+          row={r}
+          runId={runId}
+          label={rows.length > 1 ? `attempt ${r.attempt}` : undefined}
+        />
       ))}
     </div>
   )

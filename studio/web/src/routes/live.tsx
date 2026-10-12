@@ -53,12 +53,15 @@ interface LiveSearch {
 export const Route = createFileRoute("/live")({
   // An invalid ?peek= reads as none (an explicit undefined: the
   // router keeps a raw key the validator leaves out).
-  validateSearch: (search: Record<string, unknown>): LiveSearch => ({ peek: validPeek(search.peek) }),
+  validateSearch: (search: Record<string, unknown>): LiveSearch => ({
+    peek: validPeek(search.peek),
+  }),
   component: LivePage,
 })
 
 /** The polling fallback's line: why there is no all stream. */
-export const POLLING_LINE = "live: polling every 5 s — the all stream needs the dev token or loopback"
+export const POLLING_LINE =
+  "live: polling every 5 s — the all stream needs the dev token or loopback"
 
 function LivePage() {
   useDocumentTitle({ page: "live" })
@@ -76,8 +79,8 @@ function LivePage() {
       <div className="mx-auto max-w-md space-y-2 py-24 text-center">
         <p className="text-sm">This Studio reports no live capability.</p>
         <p className="text-xs text-muted-foreground">
-          The live lane needs the serving handle's hub (setup A) or the
-          receiver (setup B).
+          The live lane needs the serving handle's hub (setup A) or the receiver
+          (setup B).
         </p>
       </div>
     )
@@ -116,7 +119,11 @@ function LiveBody() {
       if (e.key !== "Escape" || e.defaultPrevented) return
       // A dialog or menu open over the page owns its Escape.
       const t = e.target
-      if (t instanceof Element && t.closest("[role=dialog],[role=menu],[role=listbox]")) return
+      if (
+        t instanceof Element &&
+        t.closest("[role=dialog],[role=menu],[role=listbox]")
+      )
+        return
       setPeekRef.current(undefined)
     }
     window.addEventListener("keydown", onKey)
@@ -124,7 +131,13 @@ function LiveBody() {
   }, [peek])
 
   const streamed = meta.data?.live_all === true && !refused
-  const common = { filter, peek, onPeek: setPeek, now, canCancel: has("cancel") }
+  const common = {
+    filter,
+    peek,
+    onPeek: setPeek,
+    now,
+    canCancel: has("cancel"),
+  }
   const list = streamed ? (
     <StreamedRuns {...common} onRefused={() => setRefused(true)} />
   ) : (
@@ -153,7 +166,10 @@ function LiveBody() {
         />
       </div>
       {!streamed && meta.data ? (
-        <p className="font-mono text-[11px] text-faint" data-live-mode="polling">
+        <p
+          className="font-mono text-[11px] text-faint"
+          data-live-mode="polling"
+        >
           {POLLING_LINE}
         </p>
       ) : null}
@@ -161,14 +177,26 @@ function LiveBody() {
         split={SPLITS.livePeek}
         second={Boolean(peek)}
         panes={[
-          { id: "runs", label: "the runs", defaultSize: 58, minSize: 30, children: list },
+          {
+            id: "runs",
+            label: "the runs",
+            defaultSize: 58,
+            minSize: 30,
+            children: list,
+          },
           {
             id: "peek",
             label: "the peeked run's story",
             defaultSize: 42,
             minSize: 25,
             className: "min-w-0",
-            children: peek ? <LivePeek key={peek} id={peek} onClose={() => setPeek(undefined)} /> : null,
+            children: peek ? (
+              <LivePeek
+                key={peek}
+                id={peek}
+                onClose={() => setPeek(undefined)}
+              />
+            ) : null,
           },
         ]}
         stackedClassName="gap-3"
@@ -187,31 +215,49 @@ interface ListProps {
 
 type Conn = "connecting" | "live" | "reconnecting" | "overflow" | "gave-up"
 
-const CONN_WORDS: Record<Conn, { text: string; title: string; tone: string }> = {
-  connecting: { text: "connecting…", title: "asking for a live grant and opening the all stream", tone: "text-faint" },
-  live: { text: "● live", title: "the all stream is open: rows update as frames arrive", tone: "text-status-run" },
-  reconnecting: {
-    text: "reconnecting…",
-    title: "the stream dropped: the browser resumes it (Last-Event-ID) and the running list is read again",
-    tone: "text-status-int",
-  },
-  overflow: {
-    text: "overflow — catching up",
-    title: "Studio dropped this page's subscription (its queue overflowed): a fresh stream, then the running list again",
-    tone: "text-status-int",
-  },
-  "gave-up": {
-    text: "stopped",
-    title: "the stream gave up reconnecting: the rows are as last seen",
-    tone: "text-status-bad",
-  },
-}
+const CONN_WORDS: Record<Conn, { text: string; title: string; tone: string }> =
+  {
+    connecting: {
+      text: "connecting…",
+      title: "asking for a live grant and opening the all stream",
+      tone: "text-faint",
+    },
+    live: {
+      text: "● live",
+      title: "the all stream is open: rows update as frames arrive",
+      tone: "text-status-run",
+    },
+    reconnecting: {
+      text: "reconnecting…",
+      title:
+        "the stream dropped: the browser resumes it (Last-Event-ID) and the running list is read again",
+      tone: "text-status-int",
+    },
+    overflow: {
+      text: "overflow — catching up",
+      title:
+        "Studio dropped this page's subscription (its queue overflowed): a fresh stream, then the running list again",
+      tone: "text-status-int",
+    },
+    "gave-up": {
+      text: "stopped",
+      title: "the stream gave up reconnecting: the rows are as last seen",
+      tone: "text-status-bad",
+    },
+  }
 
 /** How often frames are folded into the rows: one render per batch on
  * a busy fleet, never one per frame. */
 const FLUSH_MS = 150
 
-function StreamedRuns({ filter, peek, onPeek, now, canCancel, onRefused }: ListProps & { onRefused: () => void }) {
+function StreamedRuns({
+  filter,
+  peek,
+  onPeek,
+  now,
+  canCancel,
+  onRefused,
+}: ListProps & { onRefused: () => void }) {
   const queryClient = useQueryClient()
   const [state, setState] = useState<LiveRows>(emptyLiveRows)
   const stateRef = useRef(state)
@@ -271,7 +317,8 @@ function StreamedRuns({ filter, peek, onPeek, now, canCancel, onRefused }: ListP
       if (timer === null) timer = setTimeout(flush, FLUSH_MS)
     }
     const reread = throttle(
-      () => void queryClient.invalidateQueries({ queryKey: ["runs", "live-page"] }),
+      () =>
+        void queryClient.invalidateQueries({ queryKey: ["runs", "live-page"] }),
       1000
     )
     const h = openLive({
@@ -292,7 +339,8 @@ function StreamedRuns({ filter, peek, onPeek, now, canCancel, onRefused }: ListP
       onOpen: () => setConn("live"),
       onServerOverflow: () => setConn("overflow"),
       onOverflow: () => {
-        if (h.overflowed()) setConn((c) => (c === "overflow" ? c : "reconnecting"))
+        if (h.overflowed())
+          setConn((c) => (c === "overflow" ? c : "reconnecting"))
         else {
           setConn("live")
           reread()
@@ -327,7 +375,12 @@ function StreamedRuns({ filter, peek, onPeek, now, canCancel, onRefused }: ListP
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center gap-2 font-mono text-xs tabular-nums">
-        <span className={c.tone} title={c.title} data-live-conn={conn} role="status">
+        <span
+          className={c.tone}
+          title={c.title}
+          data-live-conn={conn}
+          role="status"
+        >
           {c.text}
         </span>
         {conn === "gave-up" && retry ? (
@@ -337,19 +390,32 @@ function StreamedRuns({ filter, peek, onPeek, now, canCancel, onRefused }: ListP
         ) : null}
         <span className="text-faint">
           {running.toLocaleString()} running
-          {all.length > running ? ` · ${(all.length - running).toLocaleString()} just ended` : ""}
-          {rows.length < all.length ? ` · ${rows.length.toLocaleString()} match the filter` : ""}
+          {all.length > running
+            ? ` · ${(all.length - running).toLocaleString()} just ended`
+            : ""}
+          {rows.length < all.length
+            ? ` · ${rows.length.toLocaleString()} match the filter`
+            : ""}
         </span>
       </div>
       {seed.isPending && all.length === 0 ? (
-        <p className="py-16 text-center font-mono text-xs text-faint">loading…</p>
+        <p className="py-16 text-center font-mono text-xs text-faint">
+          loading…
+        </p>
       ) : all.length === 0 ? (
         <p className="py-16 text-center font-mono text-xs text-faint">
-          nothing is streaming right now — run something and it lands
-          here the moment its first run row is written
+          nothing is streaming right now — run something and it lands here the
+          moment its first run row is written
         </p>
       ) : (
-        <LiveTable rows={rows} allRows={all} now={now} peek={peek} onPeek={onPeek} canCancel={canCancel} />
+        <LiveTable
+          rows={rows}
+          allRows={all}
+          now={now}
+          peek={peek}
+          onPeek={onPeek}
+          canCancel={canCancel}
+        />
       )}
       <p className="font-mono text-[11px] text-faint" data-live-footer>
         {LIVE_BACKFILL_LINE}
@@ -376,11 +442,15 @@ function PolledRuns({ filter, peek, onPeek, now, canCancel }: ListProps) {
           : q.isError
             ? ""
             : `${total.toLocaleString()} running${
-                total > runs.length ? ` · showing the newest ${runs.length.toLocaleString()}` : ""
+                total > runs.length
+                  ? ` · showing the newest ${runs.length.toLocaleString()}`
+                  : ""
               }`}
       </span>
       {q.isPending ? (
-        <p className="py-16 text-center font-mono text-xs text-faint">loading…</p>
+        <p className="py-16 text-center font-mono text-xs text-faint">
+          loading…
+        </p>
       ) : q.isError && runs.length === 0 ? (
         <div className="mx-auto max-w-md space-y-2 py-16 text-center">
           <p className="text-sm text-status-bad">{q.error.message}</p>
@@ -390,8 +460,8 @@ function PolledRuns({ filter, peek, onPeek, now, canCancel }: ListProps) {
         </div>
       ) : runs.length === 0 ? (
         <p className="py-16 text-center font-mono text-xs text-faint">
-          nothing is streaming right now — run something and it lands
-          here the moment its run_start arrives
+          nothing is streaming right now — run something and it lands here the
+          moment its run_start arrives
         </p>
       ) : (
         <LiveRuns
@@ -401,7 +471,11 @@ function PolledRuns({ filter, peek, onPeek, now, canCancel }: ListProps) {
           onPeek={onPeek}
           now={now}
           canCancel={canCancel}
-          onStale={() => void queryClient.invalidateQueries({ queryKey: ["runs", "live-page"] })}
+          onStale={() =>
+            void queryClient.invalidateQueries({
+              queryKey: ["runs", "live-page"],
+            })
+          }
         />
       )}
     </div>

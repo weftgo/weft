@@ -28,11 +28,13 @@ export interface ReplayEdit {
   index?: number
 }
 
-export const kindOf = (e: ReplayEdit): EditKind => e.kind ?? (e.callID ? "tool_result" : "reply")
+export const kindOf = (e: ReplayEdit): EditKind =>
+  e.kind ?? (e.callID ? "tool_result" : "reply")
 
 /** editKey names an edit's target: one edit per target (one insert per
  * boundary in the editors). */
-export const editKey = (e: ReplayEdit): string => `${kindOf(e)}:${e.step}:${e.callID ?? ""}:${e.index ?? 0}`
+export const editKey = (e: ReplayEdit): string =>
+  `${kindOf(e)}:${e.step}:${e.callID ?? ""}:${e.index ?? 0}`
 
 /** wireEdits is §5.1's transcript_edits: kind always sent, each kind
  * with the fields it takes and no other (studio/edits.go's editKindOf
@@ -52,7 +54,11 @@ export function wireEdits(list: ReplayEdit[]): unknown[] {
 
 /** putEdit replaces the edit on e's target, appends it, or (value
  * empty) drops it. */
-export function putEdit(list: ReplayEdit[], e: ReplayEdit, empty = false): ReplayEdit[] {
+export function putEdit(
+  list: ReplayEdit[],
+  e: ReplayEdit,
+  empty = false
+): ReplayEdit[] {
   const k = editKey(e)
   const i = list.findIndex((x) => editKey(x) === k)
   if (empty) return i < 0 ? list : list.filter((_, j) => j !== i)
@@ -63,7 +69,8 @@ export function putEdit(list: ReplayEdit[], e: ReplayEdit, empty = false): Repla
  * step N needs from_step ≥ N + 1, an insert at boundary N from_step ≥ N. */
 export function impliedFromStep(list: ReplayEdit[]): number {
   let n = 0
-  for (const e of list) n = Math.max(n, kindOf(e) === "insert" ? e.step : e.step + 1)
+  for (const e of list)
+    n = Math.max(n, kindOf(e) === "insert" ? e.step : e.step + 1)
   // Edits need from_step > 0 (0 keeps nothing to edit).
   return list.length ? Math.max(n, 1) : 0
 }
@@ -82,9 +89,15 @@ export const FORK_EDITS =
 /** editsProblem holds Run while a draft's edits cannot travel: they go
  * only with from_step > 0, so a draft at step 0 is refused, never sent
  * without them (both surfaces). */
-export function editsProblem(thread: string, step: number, edits: ReplayEdit[] | undefined): string | null {
+export function editsProblem(
+  thread: string,
+  step: number,
+  edits: ReplayEdit[] | undefined
+): string | null {
   return edits?.length && step === 0
-    ? thread === "fork" ? FORK_EDITS : "transcript edits need from_step ≥ 1 (step 0 keeps nothing to edit) — pick a later step or drop the edits"
+    ? thread === "fork"
+      ? FORK_EDITS
+      : "transcript edits need from_step ≥ 1 (step 0 keeps nothing to edit) — pick a later step or drop the edits"
     : null
 }
 
@@ -92,9 +105,17 @@ export function editsProblem(thread: string, step: number, edits: ReplayEdit[] |
 export function editLine(e: ReplayEdit): string {
   const k = kindOf(e)
   const at = k === "insert" ? `before step ${e.step}` : `step ${e.step}`
-  const who = e.callID ? ` · ${e.callID}` : k === "user" && e.index ? ` · #${e.index}` : ""
+  const who = e.callID
+    ? ` · ${e.callID}`
+    : k === "user" && e.index
+      ? ` · #${e.index}`
+      : ""
   // Defensive: a hand-built edit may lack its field or carry another type.
-  const v = String((k === "tool_args" ? JSON.stringify(e.args) : (e.toolResult ?? e.content)) ?? "")
+  const v = String(
+    (k === "tool_args"
+      ? JSON.stringify(e.args)
+      : (e.toolResult ?? e.content)) ?? ""
+  )
   return `${k} · ${at}${who} → ${v.length > 60 ? `${v.slice(0, 59)}…` : v}`
 }
 
@@ -123,7 +144,12 @@ export function userMessagesOf(batches: TranscriptBatch[]): UserMessage[] {
   for (const b of placed) {
     if (b.input) continue
     for (const m of b.messages)
-      if (m.role === "user") out.push({ step: b.step, index: out.filter((u) => u.step === b.step).length, text: textOf(m) })
+      if (m.role === "user")
+        out.push({
+          step: b.step,
+          index: out.filter((u) => u.step === b.step).length,
+          text: textOf(m),
+        })
   }
   return out
 }
@@ -135,11 +161,17 @@ export function userMessagesOf(batches: TranscriptBatch[]): UserMessage[] {
  * winning, not by the edited step's own catalog: a Go-side debt this
  * mirrors so the editor and the server never disagree). undefined
  * where no catalog says. */
-export function schemaOf(steps: Map<number, { rows: { tools?: unknown }[] }> | undefined, tool: string): unknown {
+export function schemaOf(
+  steps: Map<number, { rows: { tools?: unknown }[] }> | undefined,
+  tool: string
+): unknown {
   let out: unknown
   for (const n of [...(steps?.keys() ?? [])].sort((a, b) => a - b))
     for (const row of steps?.get(n)?.rows ?? []) {
-      const t = (row.tools as { tools?: { name: string; schema?: unknown }[] } | undefined)?.tools?.find((x) => x.name === tool)
+      const t = (
+        row.tools as
+          { tools?: { name: string; schema?: unknown }[] } | undefined
+      )?.tools?.find((x) => x.name === tool)
       if (t?.schema) out = t.schema
     }
   return out
@@ -173,7 +205,10 @@ const canon = (v: unknown): string =>
       : v && typeof v === "object"
         ? `{${Object.keys(v)
             .sort()
-            .map((k) => `${JSON.stringify(k)}:${canon((v as Record<string, unknown>)[k])}`)
+            .map(
+              (k) =>
+                `${JSON.stringify(k)}:${canon((v as Record<string, unknown>)[k])}`
+            )
             .join(",")}}`
         : JSON.stringify(v)
 // int64's range, as the loop's decode into an int reads it.
@@ -189,23 +224,46 @@ const integral = (v: Num): boolean => {
 const fits = (t: string, v: unknown): boolean =>
   t === "integer"
     ? v instanceof Number && integral(v as unknown as Num)
-    : !["object", "array", "string", "boolean", "null", "number"].includes(t) || kind(v) === (t === "boolean" ? "bool" : t)
+    : !["object", "array", "string", "boolean", "null", "number"].includes(t) ||
+      kind(v) === (t === "boolean" ? "bool" : t)
 type Schema = Record<string, unknown>
 
 function walk(path: string, s: Schema, v: unknown): string {
   if (v === null && path) return ""
   const at = (want: string, got: string) =>
-    path ? `field "${path}": expected ${want}, got ${got}` : `expected ${want} at the top level, got ${got}`
-  const types = typeof s.type === "string" ? (s.type ? [s.type] : []) : Array.isArray(s.type) ? s.type.filter((t) => typeof t === "string") : []
+    path
+      ? `field "${path}": expected ${want}, got ${got}`
+      : `expected ${want} at the top level, got ${got}`
+  const types =
+    typeof s.type === "string"
+      ? s.type
+        ? [s.type]
+        : []
+      : Array.isArray(s.type)
+        ? s.type.filter((t) => typeof t === "string")
+        : []
   if (types.length && !types.some((t) => fits(t, v)))
-    return at(types.join(" or "), v instanceof Number && types.includes("integer") ? `number ${(v as unknown as Num).lit ?? +v}` : kind(v))
-  if (Array.isArray(s.enum) && s.enum.length && !s.enum.some((e) => canon(e) === canon(v)))
-    return path ? `field "${path}": ${canon(v)} is not one of the schema's values` : "the arguments are not one of the schema's values"
+    return at(
+      types.join(" or "),
+      v instanceof Number && types.includes("integer")
+        ? `number ${(v as unknown as Num).lit ?? +v}`
+        : kind(v)
+    )
+  if (
+    Array.isArray(s.enum) &&
+    s.enum.length &&
+    !s.enum.some((e) => canon(e) === canon(v))
+  )
+    return path
+      ? `field "${path}": ${canon(v)} is not one of the schema's values`
+      : "the arguments are not one of the schema's values"
   const join = (k: string) => (path ? `${path}.${k}` : k)
   if (kind(v) === "object") {
     const o = v as Record<string, unknown>
     const props = (s.properties ?? {}) as Record<string, unknown>
-    for (const r of Array.isArray(s.required) ? s.required : []) if (typeof r === "string" && r && !(r in o)) return `missing required field "${join(r)}"`
+    for (const r of Array.isArray(s.required) ? s.required : [])
+      if (typeof r === "string" && r && !(r in o))
+        return `missing required field "${join(r)}"`
     for (const k of Object.keys(o).sort()) {
       const ps = props[k]
       const m =
@@ -215,12 +273,18 @@ function walk(path: string, s: Schema, v: unknown): string {
             ? ""
             : s.additionalProperties === false
               ? `unknown field "${join(k)}": not in the schema`
-              : s.additionalProperties && typeof s.additionalProperties === "object"
+              : s.additionalProperties &&
+                  typeof s.additionalProperties === "object"
                 ? walk(join(k), s.additionalProperties as Schema, o[k])
                 : ""
       if (m) return m
     }
-  } else if (Array.isArray(v) && s.items && typeof s.items === "object" && !Array.isArray(s.items)) {
+  } else if (
+    Array.isArray(v) &&
+    s.items &&
+    typeof s.items === "object" &&
+    !Array.isArray(s.items)
+  ) {
     for (let i = 0; i < v.length; i++) {
       const m = walk(join(String(i)), s.items as Schema, v[i])
       if (m) return m
@@ -237,7 +301,8 @@ function lossy(path: string, v: unknown): string {
   if (v instanceof Number) {
     const lit = (v as unknown as Num).lit
     const n = +v
-    if (!Number.isFinite(n)) return `field "${path}": the number ${lit ?? n} is out of range here: write it as a string`
+    if (!Number.isFinite(n))
+      return `field "${path}": the number ${lit ?? n} is out of range here: write it as a string`
     if (lit && /^-?\d+$/.test(lit) && BigInt(lit) !== BigInt(n))
       return `field "${path}": the number ${lit} would be sent as ${BigInt(n).toString()} (past the exact integers JSON keeps here): write it as a string or a smaller number`
     return ""
@@ -255,7 +320,11 @@ function lossy(path: string, v: unknown): string {
  * unchecked: this engine gave no number literals (JSON.parse source
  * access), so integer literals and exactness were not checked here —
  * the runtime checks them. */
-export function checkArgs(tool: string, schema: unknown, text: string): { args?: Record<string, unknown>; error?: string; unchecked?: boolean } {
+export function checkArgs(
+  tool: string,
+  schema: unknown,
+  text: string
+): { args?: Record<string, unknown>; error?: string; unchecked?: boolean } {
   const fail = (m: string) => ({ error: `INVALID_INPUT: tool "${tool}": ${m}` })
   let v: unknown
   const seen = { unchecked: false }
@@ -272,10 +341,16 @@ export function checkArgs(tool: string, schema: unknown, text: string): { args?:
   } catch (e) {
     return fail(`invalid JSON: ${e instanceof Error ? e.message : String(e)}`)
   }
-  if (kind(v) !== "object") return fail(`expected object at the top level, got ${kind(v)}`)
-  const m = lossy("", v) || (schema && typeof schema === "object" ? walk("", schema as Schema, v) : "")
+  if (kind(v) !== "object")
+    return fail(`expected object at the top level, got ${kind(v)}`)
+  const m =
+    lossy("", v) ||
+    (schema && typeof schema === "object" ? walk("", schema as Schema, v) : "")
   if (m) return fail(m)
-  return { args: JSON.parse(text) as Record<string, unknown>, ...(seen.unchecked ? { unchecked: true } : {}) }
+  return {
+    args: JSON.parse(text) as Record<string, unknown>,
+    ...(seen.unchecked ? { unchecked: true } : {}),
+  }
 }
 
 // ── The mark (weft.edits) ─────────────────────────────────────────
@@ -300,7 +375,10 @@ export const MARK_CHIPS: Record<EditMark["what"], string> = {
 /** editMarks reads the run's weft.edits (meta): its tokens, and how many
  * the 1024-byte cap left out ("+N more"). None on a child run: it
  * inherits its parent's mark, and its own transcript was not edited. */
-export function editMarks(row: { meta?: Record<string, string>; parent_run_id?: string } | null | undefined): { marks: EditMark[]; more: number } {
+export function editMarks(
+  row:
+    { meta?: Record<string, string>; parent_run_id?: string } | null | undefined
+): { marks: EditMark[]; more: number } {
   const v = row?.parent_run_id ? "" : (row?.meta?.["weft.edits"] ?? "")
   const marks: EditMark[] = []
   let more = 0
@@ -316,9 +394,19 @@ export function editMarks(row: { meta?: Record<string, string>; parent_run_id?: 
     const step = Number(parts[0])
     const last = parts[parts.length - 1]
     if (!parts[0] || !Number.isInteger(step) || parts.length < 2) continue
-    if ((last === "args" || last === "result") && parts.length > 2) marks.push({ step, what: last, callID: parts.slice(1, -1).join(":") })
-    else if (parts.length === 2 && (last === "reply" || last === "insert" || last === "user")) marks.push(last === "user" ? { step, what: "user", index: 0 } : { step, what: last })
-    else if (parts.length === 3 && parts[1] === "user") marks.push({ step, what: "user", index: Number(last) })
+    if ((last === "args" || last === "result") && parts.length > 2)
+      marks.push({ step, what: last, callID: parts.slice(1, -1).join(":") })
+    else if (
+      parts.length === 2 &&
+      (last === "reply" || last === "insert" || last === "user")
+    )
+      marks.push(
+        last === "user"
+          ? { step, what: "user", index: 0 }
+          : { step, what: last }
+      )
+    else if (parts.length === 3 && parts[1] === "user")
+      marks.push({ step, what: "user", index: Number(last) })
   }
   return { marks, more }
 }
@@ -342,7 +430,11 @@ export function markLine(m: EditMark): string {
  * that place does not hold the id, a call id the input names once
  * stands; one it names more than once (a reused id) gives "" — the
  * chip drawn without a value rather than the wrong pair's. */
-export function markedPart(batches: TranscriptBatch[] | undefined, m: EditMark, fromStep?: number): string {
+export function markedPart(
+  batches: TranscriptBatch[] | undefined,
+  m: EditMark,
+  fromStep?: number
+): string {
   if (!m.callID || !batches) return ""
   const input = placeBatches(batches)
     .filter((b) => b.input)
@@ -351,15 +443,24 @@ export function markedPart(batches: TranscriptBatch[] | undefined, m: EditMark, 
     const out: string[] = []
     for (const msg of msgs)
       for (const p of msg.content as (Part | null)[]) {
-        if (m.what === "args" && p?.type === "tool_call" && p.id === m.callID) out.push(`${p.name}(${JSON.stringify(p.args)})`)
-        if (m.what === "result" && p?.type === "tool_result" && p.call_id === m.callID) out.push(String(p.content))
+        if (m.what === "args" && p?.type === "tool_call" && p.id === m.callID)
+          out.push(`${p.name}(${JSON.stringify(p.args)})`)
+        if (
+          m.what === "result" &&
+          p?.type === "tool_result" &&
+          p.call_id === m.callID
+        )
+          out.push(String(p.content))
       }
     return out
   }
   const asst = input.flatMap((x, i) => (x.role === "assistant" ? [i] : []))
   const at = fromStep === undefined ? -1 : asst.length - fromStep + m.step
   if (at >= 0 && at < asst.length && m.step < (fromStep ?? 0)) {
-    const own = m.what === "args" ? input.slice(asst[at], asst[at] + 1) : input.slice(asst[at] + 1, asst[at + 1] ?? input.length)
+    const own =
+      m.what === "args"
+        ? input.slice(asst[at], asst[at] + 1)
+        : input.slice(asst[at] + 1, asst[at + 1] ?? input.length)
     const hit = said(own)
     if (hit.length === 1) return hit[0]
   }

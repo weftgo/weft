@@ -172,9 +172,7 @@ describe("the panel's request line (A1.4)", () => {
     fakeStudio(routes(golden("requests-stripped")), metaWithRequests)
     el = await mount()
     const l0 = $(el, '[data-weft-request="0"]')!
-    expect(l0.textContent).toContain(
-      "content not captured by this app"
-    )
+    expect(l0.textContent).toContain("content not captured by this app")
     expect(l0.textContent).toContain("system prompt 57e8f485cbb5")
     expect(l0.querySelector(".weft-reason")?.textContent).toContain(
       "fix: turn content on"
@@ -250,9 +248,9 @@ describe("the panel's request line (A1.4)", () => {
     let studio = fakeStudio(r, metaWithRequests)
     let el = await mount()
     expect(studio.gets(`runs/${RUN}/requests`).length).toBe(10)
-    expect(badgeLabel($(el, '[data-weft-request="2"] [data-hole="truncated"]'))).toBe(
-      "request: truncated — first 10 000 requests"
-    )
+    expect(
+      badgeLabel($(el, '[data-weft-request="2"] [data-hole="truncated"]'))
+    ).toBe("request: truncated — first 10 000 requests")
     el.remove()
 
     const stuck = routes({ requests: [one], next_from: 0 })
@@ -263,7 +261,9 @@ describe("the panel's request line (A1.4)", () => {
     // with the shared reason.
     const gap = $(el, '[data-weft-request="2"] [data-hole="gap"]')
     expect(badgeLabel(gap)).toBe("request: gap")
-    expect($(el, '[data-weft-request="2"]')!.textContent).toContain(REQUEST_NO_RECORD_REASON)
+    expect($(el, '[data-weft-request="2"]')!.textContent).toContain(
+      REQUEST_NO_RECORD_REASON
+    )
   })
 
   it("without the requests capability, no line and no request", async () => {

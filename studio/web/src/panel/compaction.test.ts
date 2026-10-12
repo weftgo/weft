@@ -8,7 +8,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { golden } from "../test/fake-studio"
 import type { RunDoc } from "../lib/api"
-import { $, all, baseRoutes, click, fakeStudio, mount, page, runRow, settle, setup, teardown } from "./testkit"
+import {
+  $,
+  all,
+  baseRoutes,
+  click,
+  fakeStudio,
+  mount,
+  page,
+  runRow,
+  settle,
+  setup,
+  teardown,
+} from "./testkit"
 import { badgeLabel } from "./badges"
 
 beforeEach(setup)
@@ -22,8 +34,15 @@ const RUN = "s_01-t1"
 function trimRoutes(doc: Partial<RunDoc> = {}) {
   const r = baseRoutes()
   const recorded = golden<RunDoc>("run-compacted")
-  r[`runs/${RUN}`] = { ...runRow({}), children: [], compactions: recorded.compactions, ...doc }
-  r[`runs/${RUN}/events?after=0&limit=500`] = page(golden<{ events: unknown[] }>("events-compacted").events)
+  r[`runs/${RUN}`] = {
+    ...runRow({}),
+    children: [],
+    compactions: recorded.compactions,
+    ...doc,
+  }
+  r[`runs/${RUN}/events?after=0&limit=500`] = page(
+    golden<{ events: unknown[] }>("events-compacted").events
+  )
   r[`runs/${RUN}/transcript`] = golden("transcript-compacted")
   return r
 }
@@ -37,17 +56,26 @@ describe("the panel's compaction marker (A9.2)", () => {
     expect(marks.length).toBe(1)
     const m = $(el, '[data-weft-step="2"] [data-weft-compaction="2"]')!
     expect(m).not.toBeNull()
-    expect(m.textContent).toContain("2 messages rewritten into 1 by PrepareStep")
-    expect(badgeLabel(m.querySelector('[data-hole="compacted"]'))).toBe("compacted")
+    expect(m.textContent).toContain(
+      "2 messages rewritten into 1 by PrepareStep"
+    )
+    expect(badgeLabel(m.querySelector('[data-hole="compacted"]'))).toBe(
+      "compacted"
+    )
     const d = m.querySelector("details")!
     expect(d.hasAttribute("open")).toBe(false)
     expect(d.querySelector("summary")?.textContent).toBe("show original")
     // Exactly the replaced range [1, 3): step 0's lookup call and its
     // result — not the prompt before it, not the research after it.
     const orig = Array.from(d.querySelectorAll("[data-weft-original]"))
-    expect(orig.map((o) => o.getAttribute("data-weft-original"))).toEqual(["1", "2"])
+    expect(orig.map((o) => o.getAttribute("data-weft-original"))).toEqual([
+      "1",
+      "2",
+    ])
     expect(orig[0].textContent).toMatch(/^assistant: lookup_order\(/)
-    expect(orig[1].textContent).toMatch(/^tool: lookup_order → order 42 shipped/)
+    expect(orig[1].textContent).toMatch(
+      /^tool: lookup_order → order 42 shipped/
+    )
     expect(d.textContent).toContain("in their place, 1 message")
     expect(errors).not.toHaveBeenCalled()
   })
@@ -64,8 +92,13 @@ describe("the panel's compaction marker (A9.2)", () => {
     const m = $(el, '[data-weft-compaction="session"]')!
     expect(m).not.toBeNull()
     // Before the first step card: the top of the turn.
-    expect(m.compareDocumentPosition($(el, "[data-weft-step]")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(m.textContent).toContain("3 messages compacted into 1 · 2.1k → 1.0k tokens")
+    expect(
+      m.compareDocumentPosition($(el, "[data-weft-step]")!) &
+        Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy()
+    expect(m.textContent).toContain(
+      "3 messages compacted into 1 · 2.1k → 1.0k tokens"
+    )
     expect(m.querySelector('[data-hole="compacted"]')).not.toBeNull()
     expect(m.querySelector("details")?.hasAttribute("open")).toBe(false)
     expect(all(el, "[data-weft-step] [data-weft-compaction]")).toEqual([])
@@ -88,42 +121,67 @@ describe("the panel's compaction marker (A9.2)", () => {
   it("a view whose earlier records are missing shows the gap badge, never an empty original", async () => {
     const r = trimRoutes()
     const t = golden<{ batches: { index: number }[] }>("transcript-compacted")
-    r[`runs/${RUN}/transcript`] = { batches: t.batches.filter((b) => b.index !== 1) }
-    fakeStudio(r)
-    const el = await mount()
-    const d = $(el, '[data-weft-compaction="2"] details')!
-    expect(d.querySelector('[data-hole="gap"]')).not.toBeNull()
-    expect(d.querySelectorAll("[data-weft-original]").length).toBe(0)
-    expect(d.textContent).toContain("messages record 1 before the view is missing")
-  })
-
-  it("an insertion is labelled inserted and its original says nothing was replaced", async () => {
-    const view = golden<RunDoc>("run-compacted").compactions![0]
-    fakeStudio(trimRoutes({ compactions: [{ ...view, from_seq: 3, to_seq: 3, replaced: 0, entries: 1 }] }))
-    const el = await mount()
-    const m = $(el, '[data-weft-compaction="2"]')!
-    expect(m.textContent).toContain("1 message inserted by PrepareStep")
-    expect(m.querySelector("details")?.textContent).toContain("nothing replaced: inserted at message 3")
-    expect(m.querySelectorAll("[data-weft-original]").length).toBe(0)
-  })
-
-  it("a body that is not a message array below the view is a gap, never a shifted range", async () => {
-    const r = trimRoutes()
-    const t = golden<{ batches: { index: number; messages: unknown }[] }>("transcript-compacted")
     r[`runs/${RUN}/transcript`] = {
-      batches: t.batches.map((b) => (b.index === 0 ? { ...b, messages: "not json" } : b)),
+      batches: t.batches.filter((b) => b.index !== 1),
     }
     fakeStudio(r)
     const el = await mount()
     const d = $(el, '[data-weft-compaction="2"] details')!
     expect(d.querySelector('[data-hole="gap"]')).not.toBeNull()
     expect(d.querySelectorAll("[data-weft-original]").length).toBe(0)
-    expect(d.textContent).toContain("messages record 0 before the view does not read as messages")
+    expect(d.textContent).toContain(
+      "messages record 1 before the view is missing"
+    )
+  })
+
+  it("an insertion is labelled inserted and its original says nothing was replaced", async () => {
+    const view = golden<RunDoc>("run-compacted").compactions![0]
+    fakeStudio(
+      trimRoutes({
+        compactions: [
+          { ...view, from_seq: 3, to_seq: 3, replaced: 0, entries: 1 },
+        ],
+      })
+    )
+    const el = await mount()
+    const m = $(el, '[data-weft-compaction="2"]')!
+    expect(m.textContent).toContain("1 message inserted by PrepareStep")
+    expect(m.querySelector("details")?.textContent).toContain(
+      "nothing replaced: inserted at message 3"
+    )
+    expect(m.querySelectorAll("[data-weft-original]").length).toBe(0)
+  })
+
+  it("a body that is not a message array below the view is a gap, never a shifted range", async () => {
+    const r = trimRoutes()
+    const t = golden<{ batches: { index: number; messages: unknown }[] }>(
+      "transcript-compacted"
+    )
+    r[`runs/${RUN}/transcript`] = {
+      batches: t.batches.map((b) =>
+        b.index === 0 ? { ...b, messages: "not json" } : b
+      ),
+    }
+    fakeStudio(r)
+    const el = await mount()
+    const d = $(el, '[data-weft-compaction="2"] details')!
+    expect(d.querySelector('[data-hole="gap"]')).not.toBeNull()
+    expect(d.querySelectorAll("[data-weft-original]").length).toBe(0)
+    expect(d.textContent).toContain(
+      "messages record 0 before the view does not read as messages"
+    )
   })
 
   it("two views with one hash keep their own open state across a redraw (keyed by index)", async () => {
     // The same insertion at the same place on steps 1 and 2: one hash.
-    const ins = { scope: "run", hash: "same", replaced: 0, entries: 1, from_seq: 3, to_seq: 3 }
+    const ins = {
+      scope: "run",
+      hash: "same",
+      replaced: 0,
+      entries: 1,
+      from_seq: 3,
+      to_seq: 3,
+    }
     fakeStudio(
       trimRoutes({
         compactions: [
@@ -133,7 +191,8 @@ describe("the panel's compaction marker (A9.2)", () => {
       })
     )
     const el = await mount()
-    const det = (step: number) => $(el, `[data-weft-compaction="${step}"] details`) as HTMLDetailsElement
+    const det = (step: number) =>
+      $(el, `[data-weft-compaction="${step}"] details`) as HTMLDetailsElement
     expect(det(1).hasAttribute("open")).toBe(false)
     det(2).setAttribute("open", "")
     det(2).dispatchEvent(new Event("toggle")) // as the browser fires it

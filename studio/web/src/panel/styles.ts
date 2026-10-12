@@ -9,11 +9,13 @@ import type { Theme } from "../lib/palette"
 
 /** The system mono stack every code-ish surface in the panel uses. */
 export const MONO_STACK =
-  "ui-monospace, SFMono-Regular, Menlo, Consolas, \"Liberation Mono\", monospace"
+  'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace'
 
 /** tokens declares a theme's colours as --weft-* custom properties. */
 const tokens = (t: Theme) =>
-  Object.entries(PALETTE[t]).map(([k, v]) => `--weft-${k}: ${v};`).join(" ")
+  Object.entries(PALETTE[t])
+    .map(([k, v]) => `--weft-${k}: ${v};`)
+    .join(" ")
 
 /** The tokens a host page may override (D2): every colour, radius and
  * font the panel draws with, declared on :host — dark by default, the
@@ -21,7 +23,12 @@ const tokens = (t: Theme) =>
  * own element, theme.ts). A host rule such as
  * weft-devtools { --weft-bg: #fff } wins over both: an outer-document
  * rule beats a shadow tree's :host rule. */
-export const TOKENS = [...Object.keys(PALETTE.dark).map((k) => `--weft-${k}`), "--weft-font", "--weft-radius", "--weft-radius-sm"]
+export const TOKENS = [
+  ...Object.keys(PALETTE.dark).map((k) => `--weft-${k}`),
+  "--weft-font",
+  "--weft-radius",
+  "--weft-radius-sm",
+]
 
 export const PANEL_CSS = `
 :host { all: initial; color: inherit; box-sizing: border-box; color-scheme: dark; ${tokens("dark")}

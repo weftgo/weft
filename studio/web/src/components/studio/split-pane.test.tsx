@@ -9,7 +9,11 @@ import { useState } from "react"
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { HANDLE_CLASS, SINGLE_PANE_CLASS, SplitPane } from "@/components/studio/split-pane"
+import {
+  HANDLE_CLASS,
+  SINGLE_PANE_CLASS,
+  SplitPane,
+} from "@/components/studio/split-pane"
 import { paneKey, readPaneSizes, resetPaneSizes } from "@/lib/pane-sizes"
 import { stubLayout, stubViewport } from "@/test/layout"
 
@@ -29,7 +33,9 @@ afterEach(() => {
 /** A pane child with state of its own: a draft. */
 function Draft({ name }: { name: string }) {
   const [v, setV] = useState("")
-  return <input aria-label={name} value={v} onChange={(e) => setV(e.target.value)} />
+  return (
+    <input aria-label={name} value={v} onChange={(e) => setV(e.target.value)} />
+  )
 }
 
 function Probe({ instance, second }: { instance?: string; second?: boolean }) {
@@ -51,7 +57,13 @@ function Probe({ instance, second }: { instance?: string; second?: boolean }) {
             </>
           ),
         },
-        { id: "detail", label: "the detail", defaultSize: 40, minSize: 25, children: <p>detail</p> },
+        {
+          id: "detail",
+          label: "the detail",
+          defaultSize: 40,
+          minSize: 25,
+          children: <p>detail</p>,
+        },
       ]}
     />
   )
@@ -77,7 +89,11 @@ describe("SplitPane", () => {
     expect(sep.getAttribute("aria-valuemax")).toBe("75")
     expect(sep.className).toContain("focus-visible:ring-ring")
     expect(HANDLE_CLASS).not.toMatch(/-(red|blue|gray|zinc|slate)-\d/)
-    expect(document.querySelector('[data-split="trace-detail"]')?.hasAttribute("data-stacked")).toBe(false)
+    expect(
+      document
+        .querySelector('[data-split="trace-detail"]')
+        ?.hasAttribute("data-stacked")
+    ).toBe(false)
   })
 
   it("an arrow key moves the handle, and the move is remembered", async () => {
@@ -108,13 +124,17 @@ describe("SplitPane", () => {
     render(<Probe />)
     await act(async () => {})
     expect(now(handle())).toBe(30)
-    expect(document.querySelector<HTMLElement>('[data-pane="tree"]')!.style.flex).toMatch(/^30 /)
+    expect(
+      document.querySelector<HTMLElement>('[data-pane="tree"]')!.style.flex
+    ).toMatch(/^30 /)
     localStorage.setItem(paneKey("trace-detail"), "[95,5]")
     cleanup()
     render(<Probe />)
     await act(async () => {})
     expect(now(handle())).toBe(75)
-    expect(document.querySelector<HTMLElement>('[data-pane="detail"]')!.style.flex).toMatch(/^25 /)
+    expect(
+      document.querySelector<HTMLElement>('[data-pane="detail"]')!.style.flex
+    ).toMatch(/^25 /)
   })
 
   it("a garbage saved value opens at the default", () => {
@@ -170,7 +190,8 @@ describe("SplitPane", () => {
 
   it("the keyboard moves the panes themselves, not only the handle's value", async () => {
     render(<Probe />)
-    const pane = () => document.querySelector<HTMLElement>('[data-pane="tree"]')!
+    const pane = () =>
+      document.querySelector<HTMLElement>('[data-pane="tree"]')!
     expect(pane().style.flex).toMatch(/^60 /)
     await press(handle(), "ArrowRight")
     expect(pane().style.flex).toMatch(new RegExp(`^${now(handle())} `))
@@ -204,7 +225,9 @@ describe("SplitPane", () => {
     await press(a, "ArrowRight")
     expect(now(b)).toBe(now(a))
     expect(now(c)).toBe(now(a))
-    expect(set.mock.calls.filter(([k]) => k === paneKey("trace-detail"))).toHaveLength(1)
+    expect(
+      set.mock.calls.filter(([k]) => k === paneKey("trace-detail"))
+    ).toHaveLength(1)
     set.mockRestore()
   })
 
@@ -237,7 +260,11 @@ describe("SplitPane", () => {
     const input = screen.getByLabelText<HTMLInputElement>("draft solo")
     fireEvent.change(input, { target: { value: "half typed" } })
     await act(async () => resize(390))
-    expect(document.querySelector('[data-split="trace-detail"]')?.hasAttribute("data-stacked")).toBe(true)
+    expect(
+      document
+        .querySelector('[data-split="trace-detail"]')
+        ?.hasAttribute("data-stacked")
+    ).toBe(true)
     expect(screen.queryByRole("separator")).toBeNull()
     expect(screen.getByLabelText("draft solo")).toBe(input)
     expect(input.value).toBe("half typed")
@@ -270,31 +297,40 @@ describe("SplitPane", () => {
     expect(split.hasAttribute("data-stacked")).toBe(true)
     expect(split.className).toContain("flex-col")
     expect(screen.queryByRole("separator")).toBeNull()
-    expect(Array.from(split.querySelectorAll(":scope > [data-pane]")).map((p) => p.getAttribute("data-pane"))).toEqual([
-      "tree",
-      "detail",
-    ])
+    expect(
+      Array.from(split.querySelectorAll(":scope > [data-pane]")).map((p) =>
+        p.getAttribute("data-pane")
+      )
+    ).toEqual(["tree", "detail"])
   })
 
   it("stacks where the browser has no ResizeObserver", () => {
     vi.stubGlobal("ResizeObserver", undefined)
     render(<Probe />)
-    expect(document.querySelector('[data-split="trace-detail"]')?.hasAttribute("data-stacked")).toBe(true)
+    expect(
+      document
+        .querySelector('[data-split="trace-detail"]')
+        ?.hasAttribute("data-stacked")
+    ).toBe(true)
   })
 
   it("a lone pane clips nothing; the split keeps the library's overflow", async () => {
     const r = render(<Probe second={false} />)
-    const group = () => document.querySelector<HTMLElement>('[data-split="trace-detail"]')!
-    const pane = () => document.querySelector<HTMLElement>('[data-pane="tree"]')!
+    const group = () =>
+      document.querySelector<HTMLElement>('[data-split="trace-detail"]')!
+    const pane = () =>
+      document.querySelector<HTMLElement>('[data-pane="tree"]')!
     const inner = () => pane().firstElementChild as HTMLElement
     expect(getComputedStyle(group()).overflow).toBe("visible")
     expect(getComputedStyle(pane()).overflow).toBe("visible")
-    for (const c of SINGLE_PANE_CLASS.split(" ")) expect(inner().classList.contains(c), c).toBe(true)
+    for (const c of SINGLE_PANE_CLASS.split(" "))
+      expect(inner().classList.contains(c), c).toBe(true)
     r.rerender(<Probe second />)
     await act(async () => {})
     expect(getComputedStyle(group()).overflow).toBe("hidden")
     expect(getComputedStyle(inner()).overflow).toBe("auto")
-    for (const c of SINGLE_PANE_CLASS.split(" ")) expect(inner().classList.contains(c), c).toBe(false)
+    for (const c of SINGLE_PANE_CLASS.split(" "))
+      expect(inner().classList.contains(c), c).toBe(false)
   })
 
   it("styles.css lays a stacked split out as a column at content height, over the library's inline layout", () => {
@@ -304,8 +340,14 @@ describe("SplitPane", () => {
       expect(at, sel).toBeGreaterThan(0)
       return css.slice(at, css.indexOf("}", at))
     }
-    expect(rule("[data-split][data-stacked]")).toMatch(/flex-direction: column !important;[\s\S]*height: auto !important;/)
-    expect(rule("[data-split][data-stacked] > [data-panel]")).toMatch(/flex: none !important;[\s\S]*width: 100% !important;/)
-    expect(rule("[data-split][data-stacked] > [data-panel] > div")).toMatch(/max-height: none !important;[\s\S]*overflow: visible !important;/)
+    expect(rule("[data-split][data-stacked]")).toMatch(
+      /flex-direction: column !important;[\s\S]*height: auto !important;/
+    )
+    expect(rule("[data-split][data-stacked] > [data-panel]")).toMatch(
+      /flex: none !important;[\s\S]*width: 100% !important;/
+    )
+    expect(rule("[data-split][data-stacked] > [data-panel] > div")).toMatch(
+      /max-height: none !important;[\s\S]*overflow: visible !important;/
+    )
   })
 })

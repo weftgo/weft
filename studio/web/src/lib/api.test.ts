@@ -46,7 +46,11 @@ describe("the token (S4.6, setup B)", () => {
   })
 
   it("adopts the fragment's token and strips both forms when a link carries both", () => {
-    window.history.replaceState(null, "", "/runs?token=query-secret&agent=a#token=frag-secret&t=1")
+    window.history.replaceState(
+      null,
+      "",
+      "/runs?token=query-secret&agent=a#token=frag-secret&t=1"
+    )
     expect(adoptTokenFromLocation()).toBe(true)
     expect(studioToken()).toBe("frag-secret")
     expect(window.location.search).toBe("?agent=a")
@@ -64,7 +68,9 @@ describe("the token (S4.6, setup B)", () => {
   // scoped to one public id: it serves this tab alone and never
   // replaces the stored dev token, which every other tab keeps using.
   it("uses a panel token from the fragment for this tab only, the stored token kept", () => {
-    const claims = btoa(JSON.stringify({ scope: "read", pub: "pub_1" })).replace(/=+$/, "")
+    const claims = btoa(
+      JSON.stringify({ scope: "read", pub: "pub_1" })
+    ).replace(/=+$/, "")
     const panel = `weft_pt.${claims}.sig`
     setStudioToken("dev-secret")
     window.history.replaceState(null, "", `/runs/r1#token=${panel}`)
@@ -79,7 +85,9 @@ describe("the token (S4.6, setup B)", () => {
   // the fragment already stripped) still reads it; localStorage keeps
   // the dev token untouched.
   it("keeps a panel token from the fragment across a reload (sessionStorage), the stored token untouched", async () => {
-    const claims = btoa(JSON.stringify({ scope: "read", pub: "pub_1" })).replace(/=+$/, "")
+    const claims = btoa(
+      JSON.stringify({ scope: "read", pub: "pub_1" })
+    ).replace(/=+$/, "")
     const panel = `weft_pt.${claims}.sig`
     setStudioToken("dev-secret")
     window.history.replaceState(null, "", `/runs/r1#token=${panel}`)
@@ -97,18 +105,24 @@ describe("the token (S4.6, setup B)", () => {
   })
 
   it("holds the panel token in memory when sessionStorage throws", () => {
-    const claims = btoa(JSON.stringify({ scope: "read", pub: "pub_1" })).replace(/=+$/, "")
+    const claims = btoa(
+      JSON.stringify({ scope: "read", pub: "pub_1" })
+    ).replace(/=+$/, "")
     const panel = `weft_pt.${claims}.sig`
     const origGet = Storage.prototype.getItem
     const origSet = Storage.prototype.setItem
-    const get = vi.spyOn(Storage.prototype, "getItem").mockImplementation(function (this: Storage, k: string) {
-      if (this === sessionStorage) throw new Error("denied")
-      return origGet.call(this, k)
-    })
-    const set = vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (this: Storage, k: string, v: string) {
-      if (this === sessionStorage) throw new Error("denied")
-      origSet.call(this, k, v)
-    })
+    const get = vi
+      .spyOn(Storage.prototype, "getItem")
+      .mockImplementation(function (this: Storage, k: string) {
+        if (this === sessionStorage) throw new Error("denied")
+        return origGet.call(this, k)
+      })
+    const set = vi
+      .spyOn(Storage.prototype, "setItem")
+      .mockImplementation(function (this: Storage, k: string, v: string) {
+        if (this === sessionStorage) throw new Error("denied")
+        origSet.call(this, k, v)
+      })
     try {
       window.history.replaceState(null, "", `/runs/r1#token=${panel}`)
       expect(adoptTokenFromLocation()).toBe(true)
@@ -149,19 +163,32 @@ describe("a hand-off token refused", () => {
   // the tab falls back to the stored dev token instead of walling a
   // reader whose stored token is fine.
   it("a 401 under an active tab token drops it and retries with the stored dev token", async () => {
-    const claims = btoa(JSON.stringify({ scope: "read", pub: "pub_1" })).replace(/=+$/, "")
+    const claims = btoa(
+      JSON.stringify({ scope: "read", pub: "pub_1" })
+    ).replace(/=+$/, "")
     const panel = `weft_pt.${claims}.sig`
     setStudioToken("dev-secret")
     window.history.replaceState(null, "", `/runs#token=${panel}`)
     adoptTokenFromLocation()
-    const fetchMock = vi.fn(async (_u: RequestInfo | URL, init?: RequestInit) =>
-      new Headers(init?.headers).get("Authorization") === "Bearer dev-secret"
-        ? ok({ total: 0, runs: [], next_before: null })
-        : ok({ error: { code: "unauthorized", message: "bad or expired token" } }, 401)
+    const fetchMock = vi.fn(
+      async (_u: RequestInfo | URL, init?: RequestInit) =>
+        new Headers(init?.headers).get("Authorization") === "Bearer dev-secret"
+          ? ok({ total: 0, runs: [], next_before: null })
+          : ok(
+              {
+                error: {
+                  code: "unauthorized",
+                  message: "bad or expired token",
+                },
+              },
+              401
+            )
     )
     vi.stubGlobal("fetch", fetchMock)
     await fetchRuns({})
-    const auth = fetchMock.mock.calls.map((c) => new Headers(c[1]?.headers).get("Authorization"))
+    const auth = fetchMock.mock.calls.map((c) =>
+      new Headers(c[1]?.headers).get("Authorization")
+    )
     expect(auth).toEqual([`Bearer ${panel}`, "Bearer dev-secret"])
     expect(tabTokenActive()).toBe(false)
     expect(tabTokenDropped()).toBe(true)
@@ -170,20 +197,33 @@ describe("a hand-off token refused", () => {
   })
 
   it("two requests refused together under the tab token both retry with the stored token", async () => {
-    const claims = btoa(JSON.stringify({ scope: "read", pub: "pub_1" })).replace(/=+$/, "")
+    const claims = btoa(
+      JSON.stringify({ scope: "read", pub: "pub_1" })
+    ).replace(/=+$/, "")
     const panel = `weft_pt.${claims}.sig`
     setStudioToken("dev-secret")
     window.history.replaceState(null, "", `/runs#token=${panel}`)
     adoptTokenFromLocation()
-    const fetchMock = vi.fn(async (_u: RequestInfo | URL, init?: RequestInit) =>
-      new Headers(init?.headers).get("Authorization") === "Bearer dev-secret"
-        ? ok({ total: 0, runs: [], next_before: null })
-        : ok({ error: { code: "unauthorized", message: "bad or expired token" } }, 401)
+    const fetchMock = vi.fn(
+      async (_u: RequestInfo | URL, init?: RequestInit) =>
+        new Headers(init?.headers).get("Authorization") === "Bearer dev-secret"
+          ? ok({ total: 0, runs: [], next_before: null })
+          : ok(
+              {
+                error: {
+                  code: "unauthorized",
+                  message: "bad or expired token",
+                },
+              },
+              401
+            )
     )
     vi.stubGlobal("fetch", fetchMock)
     const settled = await Promise.allSettled([fetchRuns({}), fetchRuns({})])
     expect(settled.map((s) => s.status)).toEqual(["fulfilled", "fulfilled"])
-    const auth = fetchMock.mock.calls.map((c) => new Headers(c[1]?.headers).get("Authorization"))
+    const auth = fetchMock.mock.calls.map((c) =>
+      new Headers(c[1]?.headers).get("Authorization")
+    )
     expect(auth.filter((a) => a === `Bearer ${panel}`)).toHaveLength(2)
     expect(auth.filter((a) => a === "Bearer dev-secret")).toHaveLength(2)
     expect(tabTokenActive()).toBe(false)
@@ -191,12 +231,17 @@ describe("a hand-off token refused", () => {
   })
 
   it("with no stored token the 401 stands and the tab token is dropped", async () => {
-    const claims = btoa(JSON.stringify({ scope: "read", pub: "pub_1" })).replace(/=+$/, "")
+    const claims = btoa(
+      JSON.stringify({ scope: "read", pub: "pub_1" })
+    ).replace(/=+$/, "")
     const panel = `weft_pt.${claims}.sig`
     window.history.replaceState(null, "", `/runs#token=${panel}`)
     adoptTokenFromLocation()
     const fetchMock = vi.fn(async () =>
-      ok({ error: { code: "unauthorized", message: "bad or expired token" } }, 401)
+      ok(
+        { error: { code: "unauthorized", message: "bad or expired token" } },
+        401
+      )
     )
     vi.stubGlobal("fetch", fetchMock)
     await expect(fetchRuns({})).rejects.toMatchObject({ status: 401 })
@@ -243,7 +288,15 @@ describe("requests under the mount and the wall", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () =>
-        ok({ error: { code: "unavailable", message: "runtime rt_1 is not connected" } }, 503)
+        ok(
+          {
+            error: {
+              code: "unavailable",
+              message: "runtime rt_1 is not connected",
+            },
+          },
+          503
+        )
       )
     )
     const err = await putBreakpoints("rt_1", []).catch((e: unknown) => e)
@@ -253,9 +306,9 @@ describe("requests under the mount and the wall", () => {
   })
 
   it("carries limit and tags in the runs query", () => {
-    expect(runsSearch({ playground: true, public_id: "pub_1", limit: 500 })).toBe(
-      "?public_id=pub_1&playground=true&limit=500"
-    )
+    expect(
+      runsSearch({ playground: true, public_id: "pub_1", limit: 500 })
+    ).toBe("?public_id=pub_1&playground=true&limit=500")
   })
 })
 
@@ -265,7 +318,11 @@ describe("asTranscript", () => {
       batches: [
         { index: 0, step: 0, messages: "a bare JSON string" },
         { index: 1, step: 0, messages: null },
-        { index: 2, step: 0, messages: [null, 3, { role: "assistant", content: null }] },
+        {
+          index: 2,
+          step: 0,
+          messages: [null, 3, { role: "assistant", content: null }],
+        },
         {
           index: 3,
           step: 0,
@@ -289,13 +346,22 @@ describe("asTranscript", () => {
   // and only the id moves — that must not read as a stuck cursor.
   it("pages on the exact cursor and ends only when the pair stops moving", () => {
     const t = "2026-10-01T09:00:00.5Z"
-    expect(nextCursor({ next_before: null, next_before_id: "x" })).toBeUndefined()
+    expect(
+      nextCursor({ next_before: null, next_before_id: "x" })
+    ).toBeUndefined()
     expect(nextCursor({ next_before: t })).toEqual({ before: t })
-    expect(nextCursor({ next_before: t, next_before_id: null })).toEqual({ before: t })
+    expect(nextCursor({ next_before: t, next_before_id: null })).toEqual({
+      before: t,
+    })
     const a = nextCursor({ next_before: t, next_before_id: "r_a" })
     expect(a).toEqual({ before: t, before_id: "r_a" })
-    expect(nextCursor({ next_before: t, next_before_id: "r_b" }, a)).toEqual({ before: t, before_id: "r_b" })
-    expect(nextCursor({ next_before: t, next_before_id: "r_a" }, a)).toBeUndefined()
+    expect(nextCursor({ next_before: t, next_before_id: "r_b" }, a)).toEqual({
+      before: t,
+      before_id: "r_b",
+    })
+    expect(
+      nextCursor({ next_before: t, next_before_id: "r_a" }, a)
+    ).toBeUndefined()
     expect(runsSearch({ before: t, before_id: "r_a" })).toBe(
       `?before=${encodeURIComponent(t)}&before_id=r_a`
     )
@@ -310,11 +376,15 @@ describe("fetchStep", () => {
   afterEach(() => vi.unstubAllGlobals())
 
   it("reads a step whole: attempts, the answering model, children, compaction", async () => {
-    const fake = new FakeStudio().withSteps("r_steps", ["0", "1", "2"]).install()
+    const fake = new FakeStudio()
+      .withSteps("r_steps", ["0", "1", "2"])
+      .install()
     const s0 = await fetchStep("r_steps", 0)
     expect(fake.calls("GET runs/r_steps/steps/0")).toHaveLength(1)
     expect(s0.model).toMatchObject({ requested: "glm-a", answered: "glm-b" })
-    expect(s0.attempts.map((a) => [a.model, a.outcome, a.error_type ?? ""])).toEqual([
+    expect(
+      s0.attempts.map((a) => [a.model, a.outcome, a.error_type ?? ""])
+    ).toEqual([
       ["glm-a", "error", "stream_idle"],
       ["glm-b", "error", "stream_idle"],
       ["glm-a", "error", "stream_idle"],
@@ -328,7 +398,10 @@ describe("fetchStep", () => {
     expect(s2.status).toBe("parked")
     expect(s2.compaction?.badge).toBe("compacted")
     expect(s2.holes.map((h) => h.hole)).toEqual(["compacted"])
-    await expect(fetchStep("r_steps", 3)).rejects.toMatchObject({ status: 404, code: "not_found" })
+    await expect(fetchStep("r_steps", 3)).rejects.toMatchObject({
+      status: 404,
+      code: "not_found",
+    })
   })
 
   it("carries every missing block as a badge", async () => {
@@ -338,14 +411,24 @@ describe("fetchStep", () => {
       .withSteps("r_tok", ["0", "hidden"])
       .install()
     const old = await fetchStep("old1", 0)
-    expect(old.request && !isRequestRow(old.request) && old.request.badge).toBe("not_recorded")
+    expect(old.request && !isRequestRow(old.request) && old.request.badge).toBe(
+      "not_recorded"
+    )
     expect(old.attempts_badge?.badge).toBe("not_recorded")
-    expect(old.holes.map((h) => h.hole)).toEqual(["gap", "not_recorded", "derived"])
+    expect(old.holes.map((h) => h.hole)).toEqual([
+      "gap",
+      "not_recorded",
+      "derived",
+    ])
     const off = await fetchStep("r_off", 0)
     expect(off.messages_in.badge).toBe("stripped")
-    expect(off.request && isRequestRow(off.request) && off.request.content).toBe("stripped")
+    expect(
+      off.request && isRequestRow(off.request) && off.request.content
+    ).toBe("stripped")
     const hidden = await fetchStep("r_tok", 1)
-    expect(hidden.request && !isRequestRow(hidden.request) && hidden.request.badge).toBe("hidden")
+    expect(
+      hidden.request && !isRequestRow(hidden.request) && hidden.request.badge
+    ).toBe("hidden")
     expect(hidden.children).toHaveLength(1)
   })
 })

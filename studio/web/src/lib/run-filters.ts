@@ -11,7 +11,12 @@ import { runTotal, sortByCost } from "./cost"
 import type { RunsSearch } from "./links"
 import { isDate } from "./settings"
 
-export const RUN_STATUSES: RunStatus[] = ["running", "succeeded", "failed", "interrupted"]
+export const RUN_STATUSES: RunStatus[] = [
+  "running",
+  "succeeded",
+  "failed",
+  "interrupted",
+]
 export const RUN_SORTS = ["duration", "tokens", "cost"] as const
 
 /** What the Studio can do, from api/meta's capabilities. */
@@ -29,13 +34,19 @@ function str(v: unknown): string | undefined {
 
 /** A non-negative finite number (the router parses digits as one). */
 function num(v: unknown): number | undefined {
-  const n = typeof v === "number" ? v : typeof v === "string" && v.trim() ? Number(v) : NaN
+  const n =
+    typeof v === "number"
+      ? v
+      : typeof v === "string" && v.trim()
+        ? Number(v)
+        : NaN
   return Number.isFinite(n) && n >= 0 ? n : undefined
 }
 
 const DAY = /^\d{4}-\d{2}-\d{2}$/
 /** RFC 3339 as Go's time.RFC3339 parses it: a zone is required. */
-const TIME = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-](\d{2}):(\d{2}))$/
+const TIME =
+  /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(\.\d+)?(Z|[+-](\d{2}):(\d{2}))$/
 
 /** parseWhen is a since/until value as the server takes it: a real day
  * (YYYY-MM-DD, round-tripped — never V8's 2026-02-30 → March 2) or an
@@ -62,7 +73,9 @@ export function whenNotes(raw: Record<string, unknown>): string[] {
   for (const k of ["since", "until"] as const) {
     const s = str(raw[k])
     if (s && parseWhen(s) === undefined)
-      out.push(`${k} “${s}” is ignored: not a real day (YYYY-MM-DD) or an RFC 3339 time with a zone`)
+      out.push(
+        `${k} “${s}” is ignored: not a real day (YYYY-MM-DD) or an RFC 3339 time with a zone`
+      )
   }
   return out
 }
@@ -74,17 +87,26 @@ function isTag(t: string): boolean {
 
 /** validateRunsSearch is /runs' validateSearch: unknown or malformed
  * values are dropped, never guessed at. */
-export function validateRunsSearch(search: Record<string, unknown>): RunsSearch {
+export function validateRunsSearch(
+  search: Record<string, unknown>
+): RunsSearch {
   const rawTags = Array.isArray(search.tag) ? search.tag : [search.tag]
-  const tags = [...new Set(rawTags.map(str).filter((t): t is string => !!t && isTag(t)))]
+  const tags = [
+    ...new Set(rawTags.map(str).filter((t): t is string => !!t && isTag(t))),
+  ]
   const sort = RUN_SORTS.find((s) => s === search.sort)
   const out: RunsSearch = {
     q: str(search.q),
     agent: str(search.agent),
-    status: (RUN_STATUSES as unknown[]).includes(search.status) ? (search.status as RunStatus) : undefined,
+    status: (RUN_STATUSES as unknown[]).includes(search.status)
+      ? (search.status as RunStatus)
+      : undefined,
     session: str(search.session),
     public_id: str(search.public_id),
-    experiments: search.experiments === "on" || search.experiments === "off" ? search.experiments : undefined,
+    experiments:
+      search.experiments === "on" || search.experiments === "off"
+        ? search.experiments
+        : undefined,
     tag: withTags(tags),
     tool: str(search.tool),
     model: str(search.model),
@@ -166,12 +188,24 @@ export function usable(s: RunsSearch): RunsSearch {
 }
 
 /** The effective sort: cost needs pricing. */
-export function effectiveSort(s: RunsSearch, caps: FilterCaps): RunsSearch["sort"] {
+export function effectiveSort(
+  s: RunsSearch,
+  caps: FilterCaps
+): RunsSearch["sort"] {
   return s.sort === "cost" && !caps.pricing ? undefined : s.sort
 }
 
 /** The filters only /api/search can apply server-side. */
-const SEARCH_ONLY = ["q", "tool", "model", "error", "since", "until", "min_tokens", "min_cost"] as const
+const SEARCH_ONLY = [
+  "q",
+  "tool",
+  "model",
+  "error",
+  "since",
+  "until",
+  "min_tokens",
+  "min_cost",
+] as const
 
 /** viaSearch: the list is /api/search's — a text or search-only filter
  * or a non-default sort is set, and the Studio searches. */
@@ -179,12 +213,19 @@ export function viaSearch(search: RunsSearch, caps: FilterCaps): boolean {
   if (!caps.search) return false
   const s = usable(search)
   if (effectiveSort(s, caps)) return true
-  return SEARCH_ONLY.some((k) => k !== "min_cost" ? s[k] !== undefined : caps.pricing && s.min_cost !== undefined)
+  return SEARCH_ONLY.some((k) =>
+    k !== "min_cost"
+      ? s[k] !== undefined
+      : caps.pricing && s.min_cost !== undefined
+  )
 }
 
 /** searchFiltersFrom is the search's /api/search filters (no time
  * cursor: a search pages by offset). */
-export function searchFiltersFrom(search: RunsSearch, caps: FilterCaps): SearchFilters {
+export function searchFiltersFrom(
+  search: RunsSearch,
+  caps: FilterCaps
+): SearchFilters {
   const s = usable(search)
   const { before: _b, before_id: _bi, ...base } = filtersFromSearch(s)
   const out: SearchFilters = { ...base }
@@ -202,7 +243,10 @@ export function searchFiltersFrom(search: RunsSearch, caps: FilterCaps): SearchF
 }
 
 /** A run's duration in ms: finished − started, or elapsed so far. */
-export function runDurationMs(r: Pick<RunRow, "started" | "finished">, now = Date.now()): number {
+export function runDurationMs(
+  r: Pick<RunRow, "started" | "finished">,
+  now = Date.now()
+): number {
   const end = r.finished ? Date.parse(r.finished) : now
   return Math.max(0, end - Date.parse(r.started))
 }
@@ -213,12 +257,16 @@ const tokensOf = (r: RunRow) => r.usage.input_tokens + r.usage.output_tokens
  * always (/api/runs and /api/search have none), and search's own when
  * the Studio cannot search (text and tool cannot be: a row carries
  * neither). experiment_id is the API's (F5.1). */
-export function localKeys(search: RunsSearch, caps: FilterCaps): (keyof RunsSearch)[] {
+export function localKeys(
+  search: RunsSearch,
+  caps: FilterCaps
+): (keyof RunsSearch)[] {
   const s = usable(search)
   const keys: (keyof RunsSearch)[] = []
   if (s.min_duration !== undefined) keys.push("min_duration")
   if (!caps.search) {
-    for (const k of ["model", "error", "since", "until", "min_tokens"] as const) if (s[k] !== undefined) keys.push(k)
+    for (const k of ["model", "error", "since", "until", "min_tokens"] as const)
+      if (s[k] !== undefined) keys.push(k)
     if (caps.pricing && s.min_cost !== undefined) keys.push("min_cost")
   }
   return keys
@@ -227,21 +275,38 @@ export function localKeys(search: RunsSearch, caps: FilterCaps): (keyof RunsSear
 /** applyLocal filters loaded rows by localKeys, and — when the list is
  * not search's — sorts them by the search's sort (the loaded rows
  * only). */
-export function applyLocal(runs: RunRow[], search: RunsSearch, caps: FilterCaps, now = Date.now()): RunRow[] {
+export function applyLocal(
+  runs: RunRow[],
+  search: RunsSearch,
+  caps: FilterCaps,
+  now = Date.now()
+): RunRow[] {
   const s = usable(search)
   const keys = new Set(localKeys(s, caps))
   let out = runs
   if (keys.size) {
-    const since = keys.has("since") && s.since ? Date.parse(rangeTime(s.since, "since")) : undefined
-    const until = keys.has("until") && s.until ? Date.parse(rangeTime(s.until, "until")) : undefined
+    const since =
+      keys.has("since") && s.since
+        ? Date.parse(rangeTime(s.since, "since"))
+        : undefined
+    const until =
+      keys.has("until") && s.until
+        ? Date.parse(rangeTime(s.until, "until"))
+        : undefined
     const err = s.error?.toLowerCase()
     out = runs.filter((r) => {
-      if (keys.has("min_duration") && runDurationMs(r, now) < (s.min_duration ?? 0) * 1000) return false
+      if (
+        keys.has("min_duration") &&
+        runDurationMs(r, now) < (s.min_duration ?? 0) * 1000
+      )
+        return false
       if (keys.has("model") && r.model.name !== s.model) return false
-      if (keys.has("error") && !r.err.toLowerCase().includes(err ?? "")) return false
+      if (keys.has("error") && !r.err.toLowerCase().includes(err ?? ""))
+        return false
       if (since !== undefined && Date.parse(r.started) < since) return false
       if (until !== undefined && Date.parse(r.started) >= until) return false
-      if (keys.has("min_tokens") && tokensOf(r) < (s.min_tokens ?? 0)) return false
+      if (keys.has("min_tokens") && tokensOf(r) < (s.min_tokens ?? 0))
+        return false
       if (keys.has("min_cost")) {
         const t = runTotal(r)
         if (!t.known || t.usd < (s.min_cost ?? 0)) return false
@@ -289,25 +354,60 @@ const BAD_WHEN = "not a real day (YYYY-MM-DD) or an RFC 3339 time with a zone"
 export function runChips(s: RunsSearch, caps: FilterCaps): RunChip[] {
   const local = new Set(localKeys(s, caps))
   const chips: RunChip[] = []
-  const push = (key: keyof RunsSearch, label: string, extra: Partial<RunChip> = {}) =>
-    chips.push({ key, label, applied: true, ...(local.has(key) ? { note: ROWS_ONLY } : {}), ...extra })
-  if (s.q) push("q", `“${s.q}”`, caps.search ? {} : { applied: false, note: NEEDS_SEARCH })
+  const push = (
+    key: keyof RunsSearch,
+    label: string,
+    extra: Partial<RunChip> = {}
+  ) =>
+    chips.push({
+      key,
+      label,
+      applied: true,
+      ...(local.has(key) ? { note: ROWS_ONLY } : {}),
+      ...extra,
+    })
+  if (s.q)
+    push(
+      "q",
+      `“${s.q}”`,
+      caps.search ? {} : { applied: false, note: NEEDS_SEARCH }
+    )
   if (s.agent) push("agent", `agent ${s.agent}`)
   if (s.status) push("status", `status ${s.status}`)
-  if (s.tool) push("tool", `tool ${s.tool}`, caps.search ? {} : { applied: false, note: NEEDS_SEARCH })
+  if (s.tool)
+    push(
+      "tool",
+      `tool ${s.tool}`,
+      caps.search ? {} : { applied: false, note: NEEDS_SEARCH }
+    )
   if (s.model) push("model", `model ${s.model}`)
   if (s.error) push("error", `error ~ ${s.error}`)
   for (const k of ["since", "until"] as const) {
     const v = s[k]
-    if (v) push(k, `${k} ${v}`, parseWhen(v) === undefined ? { applied: false, note: BAD_WHEN } : {})
+    if (v)
+      push(
+        k,
+        `${k} ${v}`,
+        parseWhen(v) === undefined ? { applied: false, note: BAD_WHEN } : {}
+      )
   }
-  if (s.min_duration !== undefined) push("min_duration", `duration ≥ ${s.min_duration}s`)
-  if (s.min_tokens !== undefined) push("min_tokens", `tokens ≥ ${s.min_tokens.toLocaleString("en-US")}`)
+  if (s.min_duration !== undefined)
+    push("min_duration", `duration ≥ ${s.min_duration}s`)
+  if (s.min_tokens !== undefined)
+    push("min_tokens", `tokens ≥ ${s.min_tokens.toLocaleString("en-US")}`)
   if (s.min_cost !== undefined)
-    push("min_cost", `cost ≥ $${s.min_cost}`, caps.pricing ? {} : { applied: false, note: NEEDS_PRICING })
+    push(
+      "min_cost",
+      `cost ≥ $${s.min_cost}`,
+      caps.pricing ? {} : { applied: false, note: NEEDS_PRICING }
+    )
   if (s.session) push("session", `session ${s.session}`)
   if (s.public_id) push("public_id", `public id ${s.public_id}`)
-  if (s.experiments) push("experiments", s.experiments === "on" ? "experiments only" : "experiments off")
+  if (s.experiments)
+    push(
+      "experiments",
+      s.experiments === "on" ? "experiments only" : "experiments off"
+    )
   if (s.experiment_id) push("experiment_id", `experiment ${s.experiment_id}`)
   for (const t of tagsOf(s)) push("tag", `tag ${t}`, { value: t })
   if (s.parent) push("parent", `children of ${s.parent}`)
@@ -349,5 +449,7 @@ export const CLEARED: Partial<RunsSearch> = {
  * later page (studio/traces.go). */
 export function dedupeTraces<T extends { trace_id: string }>(rows: T[]): T[] {
   const seen = new Set<string>()
-  return rows.filter((t) => (seen.has(t.trace_id) ? false : (seen.add(t.trace_id), true)))
+  return rows.filter((t) =>
+    seen.has(t.trace_id) ? false : (seen.add(t.trace_id), true)
+  )
 }

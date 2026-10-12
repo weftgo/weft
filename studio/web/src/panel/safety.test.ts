@@ -45,7 +45,11 @@ const metaCalls = (s: ReturnType<typeof fakeStudio>) => s.gets("meta").length
 describe("the element's lifecycle", () => {
   it("an attribute change while meta is in flight rescopes: the panel stays, one meta request", async () => {
     const routes = baseRoutes()
-    routes["runs?public_id=pub_other&limit=50"] = { total: 0, runs: [], next_before: null }
+    routes["runs?public_id=pub_other&limit=50"] = {
+      total: 0,
+      runs: [],
+      next_before: null,
+    }
     const studio = fakeStudio(routes, async () => {
       await pause(20)
       return META
@@ -76,7 +80,11 @@ describe("the element's lifecycle", () => {
 
   it("a public id change after connect rescopes on the same connection; nothing of the old conversation stays", async () => {
     const routes = baseRoutes()
-    routes["runs?public_id=pub_other&limit=50"] = { total: 0, runs: [], next_before: null }
+    routes["runs?public_id=pub_other&limit=50"] = {
+      total: 0,
+      runs: [],
+      next_before: null,
+    }
     const studio = fakeStudio(routes)
     const el = await mount()
     expect(text(el, ".weft-turns")).toContain("s_01-t1")
@@ -90,19 +98,25 @@ describe("the element's lifecycle", () => {
     const before = studio.calls.length
     el.setAttribute("data-position", "bottom-left")
     await settle()
-    expect(($(el, ".weft-dock.weft-float") as HTMLElement).style.left).toBe("16px")
+    expect(($(el, ".weft-dock.weft-float") as HTMLElement).style.left).toBe(
+      "16px"
+    )
     expect(studio.calls.length).toBe(before)
   })
 
   it("markup Studio does not answer goes dormant in place — never removed from under a framework; one quiet line says why", async () => {
     const t = trap()
-    const fetchMock = vi.fn(async () => new Response("no studio", { status: 404 }))
+    const fetchMock = vi.fn(
+      async () => new Response("no studio", { status: 404 })
+    )
     vi.stubGlobal("fetch", fetchMock)
     const el = await mount({ ...ATTRS, "data-open": "false" })
     await settle()
     expect(el.isConnected).toBe(true) // the page's node (a framework may own it)
     expect(el.shadowRoot?.querySelector(".weft-fab, .weft-dock")).toBeNull()
-    expect(text(el, ".weft-unreachable")).toBe("Studio not reachable at http://studio.test/studio/ · retry")
+    expect(text(el, ".weft-unreachable")).toBe(
+      "Studio not reachable at http://studio.test/studio/ · retry"
+    )
     expect(fetchMock).toHaveBeenCalledTimes(1)
     t.release()
     expect(t.escaped).toEqual([])
@@ -145,7 +159,10 @@ describe("the element's lifecycle", () => {
       runs: [runRow({ status: "running", finished: null })],
       next_before: null,
     }
-    routes["runs/s_01-t1"] = { ...runRow({ status: "running", finished: null }), children: [] }
+    routes["runs/s_01-t1"] = {
+      ...runRow({ status: "running", finished: null }),
+      children: [],
+    }
     const studio = fakeStudio(routes)
     const el = await mount()
     expect(FakeEventSource.live("live?")).toHaveLength(2) // scope + tail
@@ -180,17 +197,51 @@ describe("nothing escapes into the host page", () => {
       null,
       "a bare string body",
       { no: "type" },
-      { type: "steered", run_id: "s_01-t1", seq: 1, step: 0, messages: [{ role: "user", content: null }] },
-      { type: "tool_start", run_id: "s_01-t1", seq: 1, call_id: "c1", name: "lookup_order", args: {} },
-      { type: "tool_finish", run_id: "s_01-t1", seq: 1, call_id: "c1", name: "lookup_order", content: 42, is_error: false },
+      {
+        type: "steered",
+        run_id: "s_01-t1",
+        seq: 1,
+        step: 0,
+        messages: [{ role: "user", content: null }],
+      },
+      {
+        type: "tool_start",
+        run_id: "s_01-t1",
+        seq: 1,
+        call_id: "c1",
+        name: "lookup_order",
+        args: {},
+      },
+      {
+        type: "tool_finish",
+        run_id: "s_01-t1",
+        seq: 1,
+        call_id: "c1",
+        name: "lookup_order",
+        content: 42,
+        is_error: false,
+      },
       ...runEvents("s_01-t1").slice(2),
     ])
     routes["runs/s_01-t1/transcript"] = {
       batches: [
         { index: 0, step: 0, messages: null },
         { index: 1, step: 0, messages: "not a list" },
-        { index: 2, step: 0, messages: [null, 7, { role: "user" }, user("where is my order #4411?")] },
-        { index: 3, step: 0, messages: [assistant("Your order shipped yesterday.")] },
+        {
+          index: 2,
+          step: 0,
+          messages: [
+            null,
+            7,
+            { role: "user" },
+            user("where is my order #4411?"),
+          ],
+        },
+        {
+          index: 3,
+          step: 0,
+          messages: [assistant("Your order shipped yesterday.")],
+        },
       ],
     }
     fakeStudio(routes)
@@ -207,16 +258,40 @@ describe("nothing escapes into the host page", () => {
     const routes = baseRoutes()
     routes["runs?public_id=pub_orders&limit=50"] = {
       total: 1,
-      runs: [runRow({ err: evil, agent: evil, model: { provider: evil, name: evil } })],
+      runs: [
+        runRow({
+          err: evil,
+          agent: evil,
+          model: { provider: evil, name: evil },
+        }),
+      ],
       next_before: null,
     }
     routes["runs/s_01-t1/events?after=0&limit=500"] = page([
       ...runEvents("s_01-t1").slice(0, 2),
-      { type: "tool_start", run_id: "s_01-t1", seq: 1, call_id: "c1", name: evil, args: { q: evil } },
-      { type: "tool_finish", run_id: "s_01-t1", seq: 1, call_id: "c1", name: evil, content: evil, is_error: true },
+      {
+        type: "tool_start",
+        run_id: "s_01-t1",
+        seq: 1,
+        call_id: "c1",
+        name: evil,
+        args: { q: evil },
+      },
+      {
+        type: "tool_finish",
+        run_id: "s_01-t1",
+        seq: 1,
+        call_id: "c1",
+        name: evil,
+        content: evil,
+        is_error: true,
+      },
       ...runEvents("s_01-t1").slice(2),
     ])
-    routes["runs/s_01-t1/transcript"] = transcript([user(evil)], [assistant(evil)])
+    routes["runs/s_01-t1/transcript"] = transcript(
+      [user(evil)],
+      [assistant(evil)]
+    )
     fakeStudio(routes)
     const el = await mount()
     click(button(el, "raw"))
@@ -229,10 +304,16 @@ describe("nothing escapes into the host page", () => {
   it("a clipboard that refuses is not the page's unhandled rejection", async () => {
     const t = trap()
     vi.stubGlobal("navigator", {
-      clipboard: { writeText: () => Promise.reject(new Error("NotAllowedError")) },
+      clipboard: {
+        writeText: () => Promise.reject(new Error("NotAllowedError")),
+      },
     })
     const routes = baseRoutes()
-    routes["POST playground/runs"] = apiError(503, "unavailable", "runtime rt_01 is not connected")
+    routes["POST playground/runs"] = apiError(
+      503,
+      "unavailable",
+      "runtime rt_01 is not connected"
+    )
     fakeStudio(routes)
     const el = await mount()
     click(button(el, "✎ Experiment"))
@@ -248,7 +329,12 @@ describe("nothing escapes into the host page", () => {
 
 describe("the keyboard never takes the page's keys", () => {
   const key = (target: EventTarget, init: KeyboardEventInit) => {
-    const e = new KeyboardEvent("keydown", { bubbles: true, composed: true, cancelable: true, ...init })
+    const e = new KeyboardEvent("keydown", {
+      bubbles: true,
+      composed: true,
+      cancelable: true,
+      ...init,
+    })
     target.dispatchEvent(e)
     return e
   }
@@ -360,7 +446,9 @@ describe("the redraw keeps what is the user's", () => {
     expect(active?.tagName).toBe("TEXTAREA")
     expect(active?.value).toBe("Always include the tracking link.")
     // A run frame redraws the whole dock under the field.
-    FakeEventSource.last("public_id=")!.emit("run", { run: runRow({ steps: 7 }) })
+    FakeEventSource.last("public_id=")!.emit("run", {
+      run: runRow({ steps: 7 }),
+    })
     await settle()
     expect(text(el, ".weft-turns")).toContain("7 steps")
     active = el.shadowRoot?.activeElement as HTMLTextAreaElement | null
@@ -373,8 +461,12 @@ describe("the redraw keeps what is the user's", () => {
     fakeStudio(baseRoutes())
     const el = await mount()
     const close = button(el, "–")!
-    close.dispatchEvent(new Event("pointerdown", { bubbles: true, composed: true }))
-    FakeEventSource.last("public_id=")!.emit("run", { run: runRow({ steps: 7 }) })
+    close.dispatchEvent(
+      new Event("pointerdown", { bubbles: true, composed: true })
+    )
+    FakeEventSource.last("public_id=")!.emit("run", {
+      run: runRow({ steps: 7 }),
+    })
     await settle()
     expect(close.isConnected).toBe(true) // still the node under the pointer
     expect(text(el, ".weft-turns")).not.toContain("7 steps")
@@ -387,8 +479,12 @@ describe("the redraw keeps what is the user's", () => {
     fakeStudio(baseRoutes())
     const el = await mount()
     vi.useFakeTimers({ shouldAdvanceTime: true })
-    button(el, "–")!.dispatchEvent(new Event("pointerdown", { bubbles: true, composed: true }))
-    FakeEventSource.last("public_id=")!.emit("run", { run: runRow({ steps: 7 }) })
+    button(el, "–")!.dispatchEvent(
+      new Event("pointerdown", { bubbles: true, composed: true })
+    )
+    FakeEventSource.last("public_id=")!.emit("run", {
+      run: runRow({ steps: 7 }),
+    })
     await vi.advanceTimersByTimeAsync(100)
     expect(text(el, ".weft-turns")).not.toContain("7 steps")
     await vi.advanceTimersByTimeAsync(2_000) // no pointerup, no pointercancel
@@ -402,15 +498,24 @@ describe("the redraw keeps what is the user's", () => {
     await settle()
     const prompt = $(el, ".weft-drawer textarea") as HTMLTextAreaElement
     prompt.focus()
-    prompt.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, composed: true }))
-    FakeEventSource.last("public_id=")!.emit("run", { run: runRow({ steps: 7 }) })
+    prompt.dispatchEvent(
+      new CompositionEvent("compositionstart", {
+        bubbles: true,
+        composed: true,
+      })
+    )
+    FakeEventSource.last("public_id=")!.emit("run", {
+      run: runRow({ steps: 7 }),
+    })
     await settle()
     expect(text(el, ".weft-turns")).not.toContain("7 steps") // composing: the field is left alone
     prompt.blur() // no compositionend arrives
     await settle()
     expect(text(el, ".weft-turns")).toContain("7 steps")
     // …and a later frame draws at once.
-    FakeEventSource.last("public_id=")!.emit("run", { run: runRow({ steps: 8 }) })
+    FakeEventSource.last("public_id=")!.emit("run", {
+      run: runRow({ steps: 8 }),
+    })
     await settle()
     expect(text(el, ".weft-turns")).toContain("8 steps")
   })
@@ -419,7 +524,15 @@ describe("the redraw keeps what is the user's", () => {
     const routes = baseRoutes()
     routes["runs/s_01-t1/transcript"] = transcript(
       [user("where is my order #4411?")],
-      [{ role: "assistant", content: [{ type: "reasoning", text: "think first" }, { type: "text", text: "Shipped." }] }]
+      [
+        {
+          role: "assistant",
+          content: [
+            { type: "reasoning", text: "think first" },
+            { type: "text", text: "Shipped." },
+          ],
+        },
+      ]
     )
     fakeStudio(routes)
     const el = await mount()
@@ -429,21 +542,48 @@ describe("the redraw keeps what is the user's", () => {
     details.dispatchEvent(new Event("toggle")) // as the browser fires it: it does not bubble
     click($(el, "[data-weft-step]")) // marks the step: a redraw
     await settle()
-    expect(($(el, "details.weft-collapsible") as HTMLDetailsElement).hasAttribute("open")).toBe(true)
+    expect(
+      ($(el, "details.weft-collapsible") as HTMLDetailsElement).hasAttribute(
+        "open"
+      )
+    ).toBe(true)
   })
 
   it("the subagent expander loads on the toggle a browser fires (it does not bubble)", async () => {
     const child = { id: "s_01-t1/0/c1", parent_call_id: "c1" }
     const routes = baseRoutes()
-    routes["runs/s_01-t1"] = { ...runRow({}), children: [runRow({ ...child, session_id: "" })] }
+    routes["runs/s_01-t1"] = {
+      ...runRow({}),
+      children: [runRow({ ...child, session_id: "" })],
+    }
     routes["runs/s_01-t1/events?after=0&limit=500"] = page([
       ...runEvents("s_01-t1").slice(0, 2),
-      { type: "tool_start", run_id: "s_01-t1", seq: 1, call_id: "c1", name: "research", args: {} },
-      { type: "tool_finish", run_id: "s_01-t1", seq: 1, call_id: "c1", name: "research", content: "done", is_error: false },
+      {
+        type: "tool_start",
+        run_id: "s_01-t1",
+        seq: 1,
+        call_id: "c1",
+        name: "research",
+        args: {},
+      },
+      {
+        type: "tool_finish",
+        run_id: "s_01-t1",
+        seq: 1,
+        call_id: "c1",
+        name: "research",
+        content: "done",
+        is_error: false,
+      },
       ...runEvents("s_01-t1").slice(2),
     ])
-    routes["runs/s_01-t1/0/c1/events?after=0&limit=500"] = page(runEvents("s_01-t1/0/c1"))
-    routes["runs/s_01-t1/0/c1/transcript"] = transcript([user("dig")], [assistant("the child's findings")])
+    routes["runs/s_01-t1/0/c1/events?after=0&limit=500"] = page(
+      runEvents("s_01-t1/0/c1")
+    )
+    routes["runs/s_01-t1/0/c1/transcript"] = transcript(
+      [user("dig")],
+      [assistant("the child's findings")]
+    )
     const studio = fakeStudio(routes)
     const el = await mount()
     const expander = $(el, "[data-weft-child]") as HTMLDetailsElement
@@ -452,7 +592,9 @@ describe("the redraw keeps what is the user's", () => {
     await settle()
     expect(text(el, "[data-weft-child]")).toContain("the child's findings")
     // Every redraw re-creates the open expander; the child loads once.
-    FakeEventSource.last("public_id=")!.emit("run", { run: runRow({ steps: 2 }) })
+    FakeEventSource.last("public_id=")!.emit("run", {
+      run: runRow({ steps: 2 }),
+    })
     await settle()
     expect(studio.gets("runs/s_01-t1/0/c1/events").length).toBe(1)
   })
@@ -461,7 +603,9 @@ describe("the redraw keeps what is the user's", () => {
     fakeStudio(baseRoutes())
     const el = await mount()
     click(button(el, "raw"))
-    $(el, ".weft-dock")!.dispatchEvent(new KeyboardEvent("keydown", { key: "?", bubbles: true, composed: true }))
+    $(el, ".weft-dock")!.dispatchEvent(
+      new KeyboardEvent("keydown", { key: "?", bubbles: true, composed: true })
+    )
     await settle()
     expect($(el, ".weft-dock .weft-main .weft-raw")).toBeTruthy()
     expect($(el, ".weft-dock > .weft-keys")).toBeTruthy()
@@ -478,21 +622,38 @@ describe("the live streams end", () => {
       for (const es of FakeEventSource.live("public_id=")) es.fail()
       await vi.advanceTimersByTimeAsync(60_000)
     }
-    const opened = FakeEventSource.instances.filter((i) => i.url.includes("public_id=")).length
+    const opened = FakeEventSource.instances.filter((i) =>
+      i.url.includes("public_id=")
+    ).length
     // The first and five reopens (5 s, doubling) — each refused stream
     // given one fresh grant first (a restarted Studio's new key), then
     // reported closed.
     expect(opened).toBe(12)
-    expect(studio.posts("live-grant").filter((g) => (g.body as { public_id?: string }).public_id).length).toBe(12)
+    expect(
+      studio
+        .posts("live-grant")
+        .filter((g) => (g.body as { public_id?: string }).public_id).length
+    ).toBe(12)
     expect(studio.gets("runs?public_id=").length).toBe(6)
   })
 
   it("a tail the panel closed itself never reports: selecting another turn is not undone", async () => {
-    const live = runRow({ id: "s_01-t2", turn: 2, status: "running", finished: null })
+    const live = runRow({
+      id: "s_01-t2",
+      turn: 2,
+      status: "running",
+      finished: null,
+    })
     const routes = baseRoutes()
-    routes["runs?public_id=pub_orders&limit=50"] = { total: 2, runs: [live, runRow({})], next_before: null }
+    routes["runs?public_id=pub_orders&limit=50"] = {
+      total: 2,
+      runs: [live, runRow({})],
+      next_before: null,
+    }
     routes["runs/s_01-t2"] = { ...live, children: [] }
-    routes["runs/s_01-t2/events?after=0&limit=500"] = page(runEvents("s_01-t2").slice(0, 2))
+    routes["runs/s_01-t2/events?after=0&limit=500"] = page(
+      runEvents("s_01-t2").slice(0, 2)
+    )
     fakeStudio(routes)
     const el = await mount()
     expect(text(el, ".weft-sel")).toContain("s_01-t2") // the running turn opens
@@ -509,8 +670,13 @@ describe("the live streams end", () => {
     const routes = baseRoutes()
     routes["runs?limit=10"] = { total: 0, runs: [], next_before: null }
     fakeStudio(routes)
-    const el = await mount({ "data-endpoint": ATTRS["data-endpoint"], "data-open": "true" })
-    expect(text(el, ".weft-title")).toBe("no conversation detected on this page")
+    const el = await mount({
+      "data-endpoint": ATTRS["data-endpoint"],
+      "data-open": "true",
+    })
+    expect(text(el, ".weft-title")).toBe(
+      "no conversation detected on this page"
+    )
     expect(FakeEventSource.instances).toHaveLength(0)
     expect($(el, ".weft-dot")?.getAttribute("title")).toBe("history")
     expect($(el, ".weft-dot.weft-on, .weft-dot.weft-run")).toBeNull()
@@ -521,13 +687,23 @@ describe("the live streams end", () => {
     const got: number[] = []
     const h = openPanelLive(
       { base: "http://studio.test/studio/", token: "" },
-      { selector: { run: "r1" }, kinds: ["delta"], onRecord: (r) => got.push(r.pos) }
+      {
+        selector: { run: "r1" },
+        kinds: ["delta"],
+        onRecord: (r) => got.push(r.pos),
+      }
     )
     await settle()
     const es = FakeEventSource.last("run=r1")!
     es.opened()
     const delta = (pos: number) =>
-      es.emit("record", { run_id: "r1", kind: "delta", pos, time: T0, event: { type: "text_delta", run_id: "r1", text: "x" } })
+      es.emit("record", {
+        run_id: "r1",
+        kind: "delta",
+        pos,
+        time: T0,
+        event: { type: "text_delta", run_id: "r1", text: "x" },
+      })
     const max = 1 << 16 // studio/live.go's liveDedupSize: the same window on both sides
     for (let pos = 0; pos <= max; pos++) delta(pos)
     delta(max) // a repeat inside the window: deduped
@@ -548,7 +724,11 @@ describe("the live streams end", () => {
 describe("the token goes to data-endpoint and nowhere else (§6)", () => {
   it("bearer on fetches only; the EventSource carries a grant's sig, never the token; never in a link to Studio", async () => {
     const routes = baseRoutes()
-    routes["POST playground/runs"] = apiError(503, "unavailable", "runtime rt_01 is not connected")
+    routes["POST playground/runs"] = apiError(
+      503,
+      "unavailable",
+      "runtime rt_01 is not connected"
+    )
     const studio = fakeStudio(routes)
     const el = await mount({ ...ATTRS, "data-token": "dev_secret_tok" })
     click(button(el, "✎ Experiment"))
@@ -556,10 +736,13 @@ describe("the token goes to data-endpoint and nowhere else (§6)", () => {
     click(button(el, "Run experiment ▶"))
     await settle()
     expect(studio.calls.length).toBeGreaterThan(5)
-    for (const c of studio.calls) expect(c.headers.Authorization).toBe("Bearer dev_secret_tok")
+    for (const c of studio.calls)
+      expect(c.headers.Authorization).toBe("Bearer dev_secret_tok")
     for (const call of studio.fetchMock.mock.calls) {
       const u = new URL(String(call[0]))
-      expect(u.origin + u.pathname.slice(0, 12)).toBe("http://studio.test/studio/api/")
+      expect(u.origin + u.pathname.slice(0, 12)).toBe(
+        "http://studio.test/studio/api/"
+      )
       expect(u.search).not.toContain("secret")
     }
     expect(studio.posts("live-grant").length).toBeGreaterThan(0)
@@ -584,9 +767,13 @@ describe("the token goes to data-endpoint and nowhere else (§6)", () => {
 
   it("a run id is one encoded path segment of the deep link, whatever it holds", () => {
     const base = "http://studio.test/studio/"
-    expect(studioLink(base, "a/b?x=1#frag")).toBe(`${base}runs/a%2Fb%3Fx%3D1%23frag`)
+    expect(studioLink(base, "a/b?x=1#frag")).toBe(
+      `${base}runs/a%2Fb%3Fx%3D1%23frag`
+    )
     expect(studioLink(base, "../../evil")).toBe(`${base}runs/..%2F..%2Fevil`)
-    expect(new URL(studioLink(base, "javascript:alert(1)")).protocol).toBe("http:")
+    expect(new URL(studioLink(base, "javascript:alert(1)")).protocol).toBe(
+      "http:"
+    )
   })
 })
 

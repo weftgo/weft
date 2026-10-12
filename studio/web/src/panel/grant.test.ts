@@ -26,8 +26,18 @@ import { setServerSkew } from "../test/fake-live-grant"
 beforeEach(setup)
 afterEach(teardown)
 
-const panelToken = (scope: "read" | "playground", exp = Date.now() + 3600_000, publicId = "pub_orders") =>
-  `weft_pt.${btoa(JSON.stringify({ public_id: publicId, scope, exp: new Date(exp).toISOString() }))
+const panelToken = (
+  scope: "read" | "playground",
+  exp = Date.now() + 3600_000,
+  publicId = "pub_orders"
+) =>
+  `weft_pt.${btoa(
+    JSON.stringify({
+      public_id: publicId,
+      scope,
+      exp: new Date(exp).toISOString(),
+    })
+  )
     .replace(/=+$/, "")
     .replace(/\+/g, "-")
     .replace(/\//g, "_")}.c2ln`
@@ -39,9 +49,16 @@ const EP = "http://studio.test/studio/"
 function liveRoutes() {
   const routes = baseRoutes()
   const running = runRow({ status: "running", finished: null })
-  routes["runs?public_id=pub_orders&limit=50"] = { total: 1, runs: [running], next_before: null }
+  routes["runs?public_id=pub_orders&limit=50"] = {
+    total: 1,
+    runs: [running],
+    next_before: null,
+  }
   routes["runs/s_01-t1"] = { ...running, children: [] }
-  routes["runs/s_01-t1/events?after=0&limit=500"] = page(runEvents("s_01-t1").slice(0, 2), { done: false })
+  routes["runs/s_01-t1/events?after=0&limit=500"] = page(
+    runEvents("s_01-t1").slice(0, 2),
+    { done: false }
+  )
   return routes
 }
 
@@ -65,7 +82,9 @@ describe("every setup opens its streams with a grant", () => {
       )
       for (const g of grants) {
         expect(g.path).toBe("live-grant") // the stream named in the body, not the query
-        expect(g.headers.Authorization).toBe(token ? `Bearer ${token}` : undefined)
+        expect(g.headers.Authorization).toBe(
+          token ? `Bearer ${token}` : undefined
+        )
       }
       const streams = FakeEventSource.instances
       expect(streams.length).toBe(2)
@@ -102,11 +121,24 @@ describe("the grant's lifetime", () => {
   it("a drop inside the grant's 60 s is left to the browser (Last-Event-ID resumes it)", async () => {
     const studio = fakeStudio({})
     const onOpen = vi.fn()
-    const h = openPanelLive({ base: EP, token: "dev_server_tok" }, { selector: { run: "r1" }, onOpen })
+    const h = openPanelLive(
+      { base: EP, token: "dev_server_tok" },
+      { selector: { run: "r1" }, onOpen }
+    )
     await flush()
     const es = FakeEventSource.last("run=r1")!
     es.opened()
-    es.emit("record", { run_id: "r1", kind: "event", pos: 0, time: "2026-10-01T09:00:00Z", event: { type: "step_start", run_id: "r1", index: 0 } }, "17")
+    es.emit(
+      "record",
+      {
+        run_id: "r1",
+        kind: "event",
+        pos: 0,
+        time: "2026-10-01T09:00:00Z",
+        event: { type: "step_start", run_id: "r1", index: 0 },
+      },
+      "17"
+    )
     vi.advanceTimersByTime(30_000)
     es.fail(FakeEventSource.CONNECTING)
     vi.advanceTimersByTime(3000)
@@ -125,7 +157,12 @@ describe("the grant's lifetime", () => {
     const onOverflow = vi.fn()
     const h = openPanelLive(
       { base: EP, token: "dev_server_tok" },
-      { selector: { run: "r1" }, kinds: ["event", "delta", "run"], onOpen, onOverflow }
+      {
+        selector: { run: "r1" },
+        kinds: ["event", "delta", "run"],
+        onOpen,
+        onOverflow,
+      }
     )
     await flush()
     const first = FakeEventSource.last("run=r1")!
@@ -147,7 +184,10 @@ describe("the grant's lifetime", () => {
 
   it("the browser's own retry refused for a spent sig is replaced by a new grant too", async () => {
     const studio = fakeStudio({})
-    const h = openPanelLive({ base: EP, token: "" }, { selector: { run: "r1" } })
+    const h = openPanelLive(
+      { base: EP, token: "" },
+      { selector: { run: "r1" } }
+    )
     await flush()
     const first = FakeEventSource.last("run=r1")!
     first.opened()
@@ -165,10 +205,23 @@ describe("the grant's lifetime", () => {
   })
 
   it("a refused grant is silence: the caller hears closed once, nothing reaches the console", async () => {
-    const quiet = [vi.spyOn(console, "error"), vi.spyOn(console, "warn"), vi.spyOn(console, "log")]
-    fakeStudio({ "POST live-grant": () => new Response('{"error":{"code":"unauthorized","message":"bad or expired token"}}', { status: 401 }) })
+    const quiet = [
+      vi.spyOn(console, "error"),
+      vi.spyOn(console, "warn"),
+      vi.spyOn(console, "log"),
+    ]
+    fakeStudio({
+      "POST live-grant": () =>
+        new Response(
+          '{"error":{"code":"unauthorized","message":"bad or expired token"}}',
+          { status: 401 }
+        ),
+    })
     const onOverflow = vi.fn()
-    openPanelLive({ base: EP, token: "stale" }, { selector: { run: "r1" }, onOverflow })
+    openPanelLive(
+      { base: EP, token: "stale" },
+      { selector: { run: "r1" }, onOverflow }
+    )
     await flush()
     expect(FakeEventSource.instances).toHaveLength(0)
     expect(onOverflow.mock.calls).toEqual([["closed"]])
@@ -176,11 +229,18 @@ describe("the grant's lifetime", () => {
   })
 
   it("an expired frame with no fresh bearer stops quietly: expired, no grant, no console", async () => {
-    const quiet = [vi.spyOn(console, "error"), vi.spyOn(console, "warn"), vi.spyOn(console, "log")]
+    const quiet = [
+      vi.spyOn(console, "error"),
+      vi.spyOn(console, "warn"),
+      vi.spyOn(console, "log"),
+    ]
     const studio = fakeStudio({})
     const tok = panelToken("read", Date.now() + 30_000)
     const onOverflow = vi.fn()
-    openPanelLive({ base: EP, token: tok }, { selector: { public_id: "pub_orders" }, kinds: ["run"], onOverflow })
+    openPanelLive(
+      { base: EP, token: tok },
+      { selector: { public_id: "pub_orders" }, kinds: ["run"], onOverflow }
+    )
     await flush()
     const es = FakeEventSource.last("public_id=")!
     es.opened()
@@ -198,7 +258,10 @@ describe("the grant's lifetime", () => {
     const studio = fakeStudio({})
     const onOpen = vi.fn()
     const onOverflow = vi.fn()
-    const h = openPanelLive({ base: EP, token: "" }, { selector: { run: "r1" }, onOpen, onOverflow })
+    const h = openPanelLive(
+      { base: EP, token: "" },
+      { selector: { run: "r1" }, onOpen, onOverflow }
+    )
     await flush()
     const first = FakeEventSource.last("run=r1")!
     first.opened()
@@ -230,11 +293,24 @@ describe("the grant's lifetime", () => {
       setServerSkew(skew)
       const studio = fakeStudio({})
       const onOverflow = vi.fn()
-      const h = openPanelLive({ base: EP, token: "dev_server_tok" }, { selector: { run: "r1" }, onOverflow })
+      const h = openPanelLive(
+        { base: EP, token: "dev_server_tok" },
+        { selector: { run: "r1" }, onOverflow }
+      )
       await flush()
       const es = FakeEventSource.last("run=r1")!
       es.opened()
-      es.emit("record", { run_id: "r1", kind: "event", pos: 0, time: "2026-10-01T09:00:00Z", event: { type: "step_start", run_id: "r1", index: 0 } }, "4")
+      es.emit(
+        "record",
+        {
+          run_id: "r1",
+          kind: "event",
+          pos: 0,
+          time: "2026-10-01T09:00:00Z",
+          event: { type: "step_start", run_id: "r1", index: 0 },
+        },
+        "4"
+      )
       // A drop at 10 s: well inside the grant on any clock — the
       // browser resumes it, nothing is asked again.
       vi.advanceTimersByTime(10_000)
@@ -259,7 +335,10 @@ describe("the grant's lifetime", () => {
   it("an expired panel token's grant is refused (401): closed, no stream", async () => {
     fakeStudio({})
     const onOverflow = vi.fn()
-    openPanelLive({ base: EP, token: panelToken("read", Date.now() - 1) }, { selector: { public_id: "pub_orders" }, onOverflow })
+    openPanelLive(
+      { base: EP, token: panelToken("read", Date.now() - 1) },
+      { selector: { public_id: "pub_orders" }, onOverflow }
+    )
     await flush()
     expect(FakeEventSource.instances).toHaveLength(0)
     expect(onOverflow.mock.calls).toEqual([["closed"]])
@@ -267,7 +346,10 @@ describe("the grant's lifetime", () => {
 
   it("close() before the grant answers opens nothing", async () => {
     fakeStudio({})
-    const h = openPanelLive({ base: EP, token: "" }, { selector: { run: "r1" } })
+    const h = openPanelLive(
+      { base: EP, token: "" },
+      { selector: { run: "r1" } }
+    )
     h.close()
     await flush()
     expect(FakeEventSource.instances).toHaveLength(0)
@@ -276,7 +358,11 @@ describe("the grant's lifetime", () => {
 
 describe("a panel token's stream that expired, in the panel", () => {
   it("shows no live, asks nothing again, and says nothing to the console", async () => {
-    const quiet = [vi.spyOn(console, "error"), vi.spyOn(console, "warn"), vi.spyOn(console, "log")]
+    const quiet = [
+      vi.spyOn(console, "error"),
+      vi.spyOn(console, "warn"),
+      vi.spyOn(console, "log"),
+    ]
     const studio = fakeStudio(baseRoutes())
     const el = await mount({ ...ATTRS, "data-token": panelToken("read") })
     const es = FakeEventSource.last("public_id=")!

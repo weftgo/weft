@@ -183,9 +183,8 @@ describe("the run page's request section (A1.4)", () => {
     await story()
     await waitFor(() =>
       expect(
-        within(section(0)).getAllByText(
-          "content not captured by this app"
-        ).length
+        within(section(0)).getAllByText("content not captured by this app")
+          .length
       ).toBeGreaterThan(0)
     )
     for (const step of [0, 1, 2]) {
@@ -392,21 +391,32 @@ describe("a request row ingested below the high-water mark (out of order)", () =
     studio = new FakeStudio()
       .on("GET meta", meta(["requests", "ingest"]))
       .on(`GET runs/${RUN}`, () => (ended ? doc : running))
-      .on(`GET runs/${RUN}/events`, pagedEvents(events(), { done: () => ended }))
+      .on(
+        `GET runs/${RUN}/events`,
+        pagedEvents(events(), { done: () => ended })
+      )
       .on(`GET runs/${RUN}/transcript`, transcriptOf([]))
       .on(`GET runs/${RUN}/spans`, { spans: [] })
       // Row 2 (step 1's attempt 2) lands after row 3 was read.
       .on(`GET runs/${RUN}/requests`, (req) =>
-        pagedRequests({ requests: ended ? all : all.filter((r) => r.index !== 2) })(req)
+        pagedRequests({
+          requests: ended ? all : all.filter((r) => r.index !== 2),
+        })(req)
       )
       .install()
     await story()
-    await waitFor(() => expect(section(2).textContent).toContain("changed by PrepareStep"))
+    await waitFor(() =>
+      expect(section(2).textContent).toContain("changed by PrepareStep")
+    )
     open(1)
-    expect(within(section(1)).queryByRole("button", { name: "attempt 2" })).toBeNull()
+    expect(
+      within(section(1)).queryByRole("button", { name: "attempt 2" })
+    ).toBeNull()
     ended = true
     await waitFor(() =>
-      expect(within(section(1)).getByRole("button", { name: "attempt 2" })).toBeTruthy()
+      expect(
+        within(section(1)).getByRole("button", { name: "attempt 2" })
+      ).toBeTruthy()
     )
   })
 })
@@ -416,7 +426,9 @@ describe("fetchAllRequests", () => {
     const all = golden<RequestsPage>("requests-ok").requests
     let rows = all.filter((r) => r.index !== 2)
     studio = new FakeStudio()
-      .on(`GET runs/${RUN}/requests`, (req) => pagedRequests({ requests: rows })(req))
+      .on(`GET runs/${RUN}/requests`, (req) =>
+        pagedRequests({ requests: rows })(req)
+      )
       .install()
     const first = await fetchAllRequests(RUN)
     expect(first.requests.map((r) => r.index)).toEqual([0, 1, 3])

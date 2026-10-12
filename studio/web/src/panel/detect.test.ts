@@ -46,28 +46,57 @@ const PANEL_TOKEN = `weft_pt.${btoa(JSON.stringify({ pid: "pub_demo" })).replace
 
 /** A response the page's own app sends, carrying the header. */
 const scoped = (value: string | null, body = "run r_1 ok") =>
-  new Response(body, { status: 200, headers: value === null ? {} : { [SCOPE_HEADER]: value } })
+  new Response(body, {
+    status: 200,
+    headers: value === null ? {} : { [SCOPE_HEADER]: value },
+  })
 
 /** pub_demo's conversation: two turns, r_1 (older) and r_2 (newest),
  * in session s_a and s_b. */
 function demoRoutes(): Record<string, Route> {
-  const r1 = runRow({ id: "r_1", session_id: "s_a", public_id: "pub_demo", turn: 1, started: "2026-10-01T09:00:00Z" })
-  const r2 = runRow({ id: "r_2", session_id: "s_b", public_id: "pub_demo", turn: 2, started: "2026-10-01T09:05:00Z" })
+  const r1 = runRow({
+    id: "r_1",
+    session_id: "s_a",
+    public_id: "pub_demo",
+    turn: 1,
+    started: "2026-10-01T09:00:00Z",
+  })
+  const r2 = runRow({
+    id: "r_2",
+    session_id: "s_b",
+    public_id: "pub_demo",
+    turn: 2,
+    started: "2026-10-01T09:05:00Z",
+  })
   const routes: Record<string, Route> = { ...baseRoutes() }
-  routes["sessions?public_id=pub_demo"] = { total: 2, sessions: [], next_before: null }
-  routes["runs?public_id=pub_demo&limit=50"] = { total: 2, runs: [r2, r1], next_before: null }
+  routes["sessions?public_id=pub_demo"] = {
+    total: 2,
+    sessions: [],
+    next_before: null,
+  }
+  routes["runs?public_id=pub_demo&limit=50"] = {
+    total: 2,
+    runs: [r2, r1],
+    next_before: null,
+  }
   routes["runs?limit=10"] = { total: 0, runs: [], next_before: null }
   for (const r of [r1, r2]) {
     routes[`runs/${r.id}`] = { ...r, children: [] }
     routes[`runs/${r.id}/events?after=0&limit=500`] = page(runEvents(r.id))
-    routes[`runs/${r.id}/transcript`] = transcript([user(`question of ${r.id}`)], [assistant(`answer of ${r.id}`)])
+    routes[`runs/${r.id}/transcript`] = transcript(
+      [user(`question of ${r.id}`)],
+      [assistant(`answer of ${r.id}`)]
+    )
     routes[`runs/${r.id}/spans`] = { spans: [] }
   }
   return routes
 }
 
 /** script writes the panel's script tag (C2's rung 4). */
-function script(attrs: Record<string, string>, src = "/studio/panel.js"): HTMLScriptElement {
+function script(
+  attrs: Record<string, string>,
+  src = "/studio/panel.js"
+): HTMLScriptElement {
   const s = document.createElement("script")
   s.type = "module"
   s.setAttribute("src", src)
@@ -78,7 +107,8 @@ function script(attrs: Record<string, string>, src = "/studio/panel.js"): HTMLSc
 
 /** The selected turn's id ("" when none). */
 const selected = (el: WeftDevtools) => text(el, ".weft-sel .weft-id")
-const ids = (el: WeftDevtools) => all(el, ".weft-turn .weft-id").map((n) => n.textContent)
+const ids = (el: WeftDevtools) =>
+  all(el, ".weft-turn .weft-id").map((n) => n.textContent)
 
 beforeEach(setup)
 afterEach(() => {
@@ -93,23 +123,31 @@ afterEach(() => {
 describe("C3's Done line: the studio-local page without data-public-id", () => {
   it("scopes to pub_demo and pins run r_1 from the /run response header, within one turn (one fetch)", async () => {
     const routes = demoRoutes()
-    routes["POST /run"] = () => scoped("pub_demo;run=r_1", "run r_1 s_x\nYour order shipped.")
+    routes["POST /run"] = () =>
+      scoped("pub_demo;run=r_1", "run r_1 s_x\nYour order shipped.")
     const studio = fakeStudio(routes)
     // The example's tag, as served: data-weft, data-open, no scope at all.
     script({ "data-weft": "", "data-open": "true" })
     const el = mountPanel()
     await settle()
-    expect(text(el, ".weft-title")).toBe("no conversation detected on this page")
+    expect(text(el, ".weft-title")).toBe(
+      "no conversation detected on this page"
+    )
     expect(text(el, ".weft-detect")).toContain("detect: headers")
     // The page's own chat surface: one turn, one fetch.
-    const res = await window.fetch("/run", { method: "POST", body: JSON.stringify("where is order 42?") })
+    const res = await window.fetch("/run", {
+      method: "POST",
+      body: JSON.stringify("where is order 42?"),
+    })
     expect(await res.text()).toContain("Your order shipped.") // the page's body, untouched
     await settle()
     expect(text(el, ".weft-title")).toContain("pub_demo")
     expect(selected(el)).toBe("r_1") // pinned, though r_2 is newer
     expect(studio.gets("runs/r_1/transcript")).toHaveLength(1)
     expect(studio.posts("/run")).toHaveLength(1)
-    expect(el.detectedScopes().map((d) => [d.key, d.scope.run])).toEqual([["pub_demo", "r_1"]])
+    expect(el.detectedScopes().map((d) => [d.key, d.scope.run])).toEqual([
+      ["pub_demo", "r_1"],
+    ])
   })
 })
 
@@ -120,7 +158,11 @@ describe("when the header rung is on (C5's clause)", () => {
     fakeStudio(demoRoutes())
     const original = window.fetch
     const source = original.toString()
-    const el = await mountWith({ "data-endpoint": REMOTE, "data-token": PANEL_TOKEN, "data-open": "true" })
+    const el = await mountWith({
+      "data-endpoint": REMOTE,
+      "data-token": PANEL_TOKEN,
+      "data-open": "true",
+    })
     expect(window.fetch).toBe(original)
     expect(window.fetch.toString()).toBe(source)
     // The page is loopback (jsdom's): the marker rung (attributes only)
@@ -136,15 +178,24 @@ describe("when the header rung is on (C5's clause)", () => {
     expect(window.fetch).toBe(original)
   })
 
-  it("the same page with data-detect=\"headers\" wraps it; data-detect=\"off\" never does", async () => {
+  it('the same page with data-detect="headers" wraps it; data-detect="off" never does', async () => {
     fakeStudio(demoRoutes())
     const original = window.fetch
-    const on = await mountWith({ "data-endpoint": REMOTE, "data-token": PANEL_TOKEN, "data-detect": "headers", "data-open": "true" })
+    const on = await mountWith({
+      "data-endpoint": REMOTE,
+      "data-token": PANEL_TOKEN,
+      "data-detect": "headers",
+      "data-open": "true",
+    })
     expect(window.fetch).not.toBe(original)
     expect(text(on, ".weft-detect")).toContain("detect: headers")
     on.remove()
     expect(window.fetch).toBe(original)
-    const off = await mountWith({ "data-endpoint": LOCAL, "data-detect": "off", "data-open": "true" })
+    const off = await mountWith({
+      "data-endpoint": LOCAL,
+      "data-detect": "off",
+      "data-open": "true",
+    })
     expect(window.fetch).toBe(original)
     expect(text(off, ".weft-detect")).toContain("detect: off")
   })
@@ -153,12 +204,20 @@ describe("when the header rung is on (C5's clause)", () => {
     fakeStudio(demoRoutes())
     const original = window.fetch
     for (const token of ["", "dev-token-abc"]) {
-      const el = await mountWith({ "data-endpoint": LOCAL, ...(token ? { "data-token": token } : {}), "data-open": "true" })
+      const el = await mountWith({
+        "data-endpoint": LOCAL,
+        ...(token ? { "data-token": token } : {}),
+        "data-open": "true",
+      })
       expect(window.fetch).not.toBe(original)
       el.remove()
       expect(window.fetch).toBe(original)
     }
-    const pt = await mountWith({ "data-endpoint": LOCAL, "data-token": PANEL_TOKEN, "data-open": "true" })
+    const pt = await mountWith({
+      "data-endpoint": LOCAL,
+      "data-token": PANEL_TOKEN,
+      "data-open": "true",
+    })
     expect(window.fetch).toBe(original)
     pt.remove()
   })
@@ -173,7 +232,12 @@ describe("when the header rung is on (C5's clause)", () => {
     expect(window.fetch).toBe(original)
     expect(text(el, ".weft-detect")).toBe(" · detect: off")
     el.remove()
-    const opt = mountPanel({ endpoint: REMOTE, token: PANEL_TOKEN, detect: "headers", open: true })
+    const opt = mountPanel({
+      endpoint: REMOTE,
+      token: PANEL_TOKEN,
+      detect: "headers",
+      open: true,
+    })
     await settle()
     expect(window.fetch).not.toBe(original)
     opt.remove()
@@ -188,7 +252,9 @@ describe("when the header rung is on (C5's clause)", () => {
     const a = await mountWith({ "data-endpoint": LOCAL, "data-open": "true" })
     const afterA = window.fetch
     const b = await mountWith({ "data-endpoint": LOCAL, "data-open": "true" })
-    expect(text(b, ".weft-detect")).toContain("detect: headers+markers (chained)") // B chained to A's wrapper
+    expect(text(b, ".weft-detect")).toContain(
+      "detect: headers+markers (chained)"
+    ) // B chained to A's wrapper
     a.remove() // A first: window.fetch is B's wrapper, A's is left in place, inert
     expect(window.fetch).not.toBe(afterA)
     const res = await window.fetch("/run", { method: "POST" })
@@ -202,22 +268,59 @@ describe("when the header rung is on (C5's clause)", () => {
   })
 
   it("headerRungOn: the page must be on loopback too", () => {
-    expect(headerRungOn({ detect: "", endpoint: LOCAL, token: "" }, "https://shop.example/")).toBe(false)
-    expect(headerRungOn({ detect: "headers", endpoint: LOCAL, token: "" }, "https://shop.example/")).toBe(true)
-    expect(headerRungOn({ detect: "", endpoint: LOCAL, token: "" }, "http://127.0.0.1:5173/")).toBe(true)
+    expect(
+      headerRungOn(
+        { detect: "", endpoint: LOCAL, token: "" },
+        "https://shop.example/"
+      )
+    ).toBe(false)
+    expect(
+      headerRungOn(
+        { detect: "headers", endpoint: LOCAL, token: "" },
+        "https://shop.example/"
+      )
+    ).toBe(true)
+    expect(
+      headerRungOn(
+        { detect: "", endpoint: LOCAL, token: "" },
+        "http://127.0.0.1:5173/"
+      )
+    ).toBe(true)
   })
 
   it("headerRungOn and isLoopback, case by case", () => {
-    for (const u of ["http://localhost:7331/studio/", "http://app.localhost/", "http://127.0.0.1:8080/", "http://127.9.3.1/", "http://[::1]:7331/"])
+    for (const u of [
+      "http://localhost:7331/studio/",
+      "http://app.localhost/",
+      "http://127.0.0.1:8080/",
+      "http://127.9.3.1/",
+      "http://[::1]:7331/",
+    ])
       expect(isLoopback(u), u).toBe(true)
-    for (const u of ["http://studio.example/", "http://128.0.0.1/", "http://localhost.example/", "not a url", ""])
+    for (const u of [
+      "http://studio.example/",
+      "http://128.0.0.1/",
+      "http://localhost.example/",
+      "not a url",
+      "",
+    ])
       expect(isLoopback(u), u).toBe(false)
     expect(headerRungOn({ detect: "", endpoint: LOCAL, token: "" })).toBe(true)
-    expect(headerRungOn({ detect: "", endpoint: LOCAL, token: "server-token" })).toBe(true)
-    expect(headerRungOn({ detect: "", endpoint: LOCAL, token: PANEL_TOKEN })).toBe(false)
-    expect(headerRungOn({ detect: "", endpoint: REMOTE, token: "" })).toBe(false)
-    expect(headerRungOn({ detect: "headers", endpoint: REMOTE, token: PANEL_TOKEN })).toBe(true)
-    expect(headerRungOn({ detect: "off", endpoint: LOCAL, token: "" })).toBe(false)
+    expect(
+      headerRungOn({ detect: "", endpoint: LOCAL, token: "server-token" })
+    ).toBe(true)
+    expect(
+      headerRungOn({ detect: "", endpoint: LOCAL, token: PANEL_TOKEN })
+    ).toBe(false)
+    expect(headerRungOn({ detect: "", endpoint: REMOTE, token: "" })).toBe(
+      false
+    )
+    expect(
+      headerRungOn({ detect: "headers", endpoint: REMOTE, token: PANEL_TOKEN })
+    ).toBe(true)
+    expect(headerRungOn({ detect: "off", endpoint: LOCAL, token: "" })).toBe(
+      false
+    )
   })
 })
 
@@ -233,7 +336,9 @@ async function mountWith(attrs: Record<string, string>): Promise<WeftDevtools> {
 
 describe("installHeaderRung", () => {
   /** stubFetch installs a test double as window.fetch: not native. */
-  function stubFetch(answer: (input: RequestInfo | URL) => Response | Promise<Response>) {
+  function stubFetch(
+    answer: (input: RequestInfo | URL) => Response | Promise<Response>
+  ) {
     const calls: { self: unknown; args: unknown[] }[] = []
     const fn = function (this: unknown, ...args: unknown[]) {
       calls.push({ self: this, args })
@@ -274,14 +379,18 @@ describe("installHeaderRung", () => {
     el.setAttribute("data-detect", "off")
     await settle()
     expect(window.fetch).toBe(theirs)
-    expect(text(el, ".weft-detect")).toContain("detect: off (fetch not restored")
+    expect(text(el, ".weft-detect")).toContain(
+      "detect: off (fetch not restored"
+    )
   })
 
   it("chains a non-native prior patch: the page's this and arguments, the same response, and the header read", async () => {
     const { fn, calls } = stubFetch(() => scoped("pub_a;session=s_1"))
     expect(isNativeFetch(fn)).toBe(false)
     const seen: [string, string][] = []
-    const rung = installHeaderRung({ onScope: (s, path) => seen.push([JSON.stringify(s), path]) })!
+    const rung = installHeaderRung({
+      onScope: (s, path) => seen.push([JSON.stringify(s), path]),
+    })!
     expect(rung.chained).toBe(true)
     const self = { mine: true }
     const init = { method: "POST", body: "hi" }
@@ -290,14 +399,19 @@ describe("installHeaderRung", () => {
     expect(calls[0].self).toBe(self)
     expect(calls[0].args).toEqual(["/chat?c=1", init])
     expect(await res.text()).toBe("run r_1 ok") // the body is the page's, unread
-    expect(seen).toEqual([[JSON.stringify({ publicId: "pub_a", session: "s_1" }), "/chat"]])
+    expect(seen).toEqual([
+      [JSON.stringify({ publicId: "pub_a", session: "s_1" }), "/chat"],
+    ])
     rung.restore()
   })
 
   it("a URL or a Request as the input is read the same way; the response's own URL wins when it has one", async () => {
     stubFetch((input) => {
       const r = scoped("pub_req")
-      if (String(input).includes("redirect")) Object.defineProperty(r, "url", { value: "https://elsewhere.example/landed" })
+      if (String(input).includes("redirect"))
+        Object.defineProperty(r, "url", {
+          value: "https://elsewhere.example/landed",
+        })
       return r
     })
     const seen: string[] = []
@@ -339,7 +453,10 @@ describe("installHeaderRung", () => {
     stubFetch(() => scoped("pub_dev"))
     let pageAt = "http://localhost:5173/chat" // a Vite dev server…
     const seen: string[] = []
-    const rung = installHeaderRung({ onScope: (_s, path) => seen.push(path), pageURL: () => pageAt })!
+    const rung = installHeaderRung({
+      onScope: (_s, path) => seen.push(path),
+      pageURL: () => pageAt,
+    })!
     await window.fetch("http://127.0.0.1:8080/run") // …calling the Go app on another port
     expect(seen).toEqual(["/run"])
     await window.fetch("https://api.example/run") // loopback page, non-loopback response
@@ -363,7 +480,7 @@ describe("installHeaderRung", () => {
       configurable: true,
       get: () => stored,
       set: (v: typeof fetch) => {
-        stored = v === orig ? orig : ((...a: Parameters<typeof fetch>) => v(...a)) // a guard
+        stored = v === orig ? orig : (...a: Parameters<typeof fetch>) => v(...a) // a guard
       },
     })
     try {
@@ -379,12 +496,16 @@ describe("installHeaderRung", () => {
     const seenSignals: unknown[] = []
     vi.stubGlobal("fetch", (_i: unknown, init?: RequestInit) => {
       seenSignals.push(init?.signal)
-      return init?.signal?.aborted ? Promise.reject(new DOMException("aborted", "AbortError")) : Promise.resolve(scoped(null))
+      return init?.signal?.aborted
+        ? Promise.reject(new DOMException("aborted", "AbortError"))
+        : Promise.resolve(scoped(null))
     })
     const rung = installHeaderRung({ onScope: () => {} })!
     const ac = new AbortController()
     ac.abort()
-    await expect(window.fetch("/x", { signal: ac.signal })).rejects.toMatchObject({ name: "AbortError" })
+    await expect(
+      window.fetch("/x", { signal: ac.signal })
+    ).rejects.toMatchObject({ name: "AbortError" })
     expect(seenSignals).toEqual([ac.signal])
     rung.restore()
   })
@@ -396,13 +517,25 @@ describe("installHeaderRung", () => {
   })
 
   it("no console output and no change to the page's outcome on any failure path", async () => {
-    const spies = (["log", "info", "warn", "error", "debug"] as const).map((k) => vi.spyOn(console, k).mockImplementation(() => {}))
+    const spies = (["log", "info", "warn", "error", "debug"] as const).map(
+      (k) => vi.spyOn(console, k).mockImplementation(() => {})
+    )
     const bad: Record<string, unknown> = {
-      throwingGet: { url: "", headers: { get: () => { throw new Error("boom") } } },
+      throwingGet: {
+        url: "",
+        headers: {
+          get: () => {
+            throw new Error("boom")
+          },
+        },
+      },
       opaque: { type: "opaque", url: "", headers: new Headers() },
       noHeaders: { url: "/x" },
       notObject: 42,
-      badURL: { url: "http://[bad", headers: new Headers({ [SCOPE_HEADER]: "pub_x" }) },
+      badURL: {
+        url: "http://[bad",
+        headers: new Headers({ [SCOPE_HEADER]: "pub_x" }),
+      },
     }
     let mode = "throwingGet"
     vi.stubGlobal("fetch", () => Promise.resolve(bad[mode]))
@@ -418,7 +551,11 @@ describe("installHeaderRung", () => {
     // onScope itself throwing:
     vi.stubGlobal("fetch", () => Promise.resolve(scoped("pub_x")))
     rung.restore()
-    const thrower = installHeaderRung({ onScope: () => { throw new Error("x") } })!
+    const thrower = installHeaderRung({
+      onScope: () => {
+        throw new Error("x")
+      },
+    })!
     await window.fetch("/x")
     // A rejection reaches the page as the same rejection.
     const err = new TypeError("network down")
@@ -435,12 +572,27 @@ describe("installHeaderRung", () => {
 
 /** A conversation with one more turn the next /run will name. */
 function addRun(routes: Record<string, Route>, id: string, minute: number) {
-  const r = runRow({ id, session_id: "s_a", public_id: "pub_demo", started: `2026-10-01T09:${String(minute).padStart(2, "0")}:00Z` })
-  const list = routes["runs?public_id=pub_demo&limit=50"] as { runs: unknown[]; total: number }
-  routes["runs?public_id=pub_demo&limit=50"] = { ...list, total: list.total + 1, runs: [r, ...list.runs] }
+  const r = runRow({
+    id,
+    session_id: "s_a",
+    public_id: "pub_demo",
+    started: `2026-10-01T09:${String(minute).padStart(2, "0")}:00Z`,
+  })
+  const list = routes["runs?public_id=pub_demo&limit=50"] as {
+    runs: unknown[]
+    total: number
+  }
+  routes["runs?public_id=pub_demo&limit=50"] = {
+    ...list,
+    total: list.total + 1,
+    runs: [r, ...list.runs],
+  }
   routes[`runs/${id}`] = { ...r, children: [] }
   routes[`runs/${id}/events?after=0&limit=500`] = page(runEvents(id))
-  routes[`runs/${id}/transcript`] = transcript([user(`question of ${id}`)], [assistant(`answer of ${id}`)])
+  routes[`runs/${id}/transcript`] = transcript(
+    [user(`question of ${id}`)],
+    [assistant(`answer of ${id}`)]
+  )
   routes[`runs/${id}/spans`] = { spans: [] }
 }
 
@@ -460,8 +612,14 @@ describe("the panel's detected scopes", () => {
     await settle()
     expect(selected(el)).toBe("r_3") // the next turn, pinned
     expect(studio.gets("sessions?public_id=pub_demo")).toHaveLength(2) // the restart's, then the re-read for the unlisted run — no third
-    expect(FakeEventSource.instances.filter((i) => i.url.includes("public_id=pub_demo"))).toHaveLength(1) // never restarted
-    expect(el.detectedScopes().map((d) => [d.key, d.scope.run, d.path])).toEqual([["pub_demo", "r_3", "/run"]])
+    expect(
+      FakeEventSource.instances.filter((i) =>
+        i.url.includes("public_id=pub_demo")
+      )
+    ).toHaveLength(1) // never restarted
+    expect(
+      el.detectedScopes().map((d) => [d.key, d.scope.run, d.path])
+    ).toEqual([["pub_demo", "r_3", "/run"]])
   })
 
   it("a user's click then a new turn: the selection stays where the user put it", async () => {
@@ -485,8 +643,16 @@ describe("the panel's detected scopes", () => {
 
   it("two paths reporting different conversations do not thrash: the followed path's conversation stays, the other is listed", async () => {
     const routes = demoRoutes()
-    routes["runs?public_id=pub_other&limit=50"] = { total: 0, runs: [], next_before: null }
-    routes["sessions?public_id=pub_other"] = { total: 0, sessions: [], next_before: null }
+    routes["runs?public_id=pub_other&limit=50"] = {
+      total: 0,
+      runs: [],
+      next_before: null,
+    }
+    routes["sessions?public_id=pub_other"] = {
+      total: 0,
+      sessions: [],
+      next_before: null,
+    }
     routes["/a"] = () => scoped("pub_demo;run=r_1")
     routes["/b"] = () => scoped("pub_other")
     routes["/plain"] = () => scoped(null)
@@ -501,7 +667,9 @@ describe("the panel's detected scopes", () => {
     await settle()
     expect(text(el, ".weft-title")).toContain("pub_demo")
     expect(studio.gets("runs?public_id=pub_other")).toHaveLength(0)
-    expect(FakeEventSource.instances.filter((i) => i.url.includes("public_id="))).toHaveLength(1)
+    expect(
+      FakeEventSource.instances.filter((i) => i.url.includes("public_id="))
+    ).toHaveLength(1)
     const byPath = el.detectedByPath()
     expect([...byPath.keys()].sort()).toEqual(["/a", "/b"])
     expect(byPath.get("/a")).toEqual({ publicId: "pub_demo", run: "r_1" })
@@ -520,7 +688,11 @@ describe("the panel's detected scopes", () => {
     const routes = demoRoutes()
     routes["POST /run"] = () => scoped("pub_demo;run=r_1")
     fakeStudio(routes)
-    const el = await mountWith({ "data-endpoint": LOCAL, "data-scope": "pub_orders", "data-open": "true" })
+    const el = await mountWith({
+      "data-endpoint": LOCAL,
+      "data-scope": "pub_orders",
+      "data-open": "true",
+    })
     expect(text(el, ".weft-title")).toContain("pub_orders")
     await window.fetch("/run", { method: "POST" })
     await settle()
@@ -532,13 +704,18 @@ describe("the panel's detected scopes", () => {
     const routes = demoRoutes()
     routes["runs?limit=10"] = () =>
       new Response(JSON.stringify({ total: 0, runs: [], next_before: null }), {
-        headers: { "content-type": "application/json", [SCOPE_HEADER]: "pub_demo" },
+        headers: {
+          "content-type": "application/json",
+          [SCOPE_HEADER]: "pub_demo",
+        },
       })
     fakeStudio(routes)
     const el = await mountWith({ "data-endpoint": LOCAL, "data-open": "true" })
     await window.fetch(`${LOCAL}api/runs?limit=10`) // a request under the endpoint, through the wrapper
     await settle()
-    expect(text(el, ".weft-title")).toBe("no conversation detected on this page")
+    expect(text(el, ".weft-title")).toBe(
+      "no conversation detected on this page"
+    )
     expect(el.detectedScopes()).toEqual([])
   })
 })
@@ -580,7 +757,11 @@ describe("the rung waits for Studio", () => {
 describe("the panel follows the scope (rung 1)", () => {
   it("run pins the selected turn (and its tail) once; the user's click owns it after", async () => {
     const studio = fakeStudio(demoRoutes())
-    const el = await mountWith({ "data-endpoint": REMOTE, "data-scope": "pub_demo;run=r_1", "data-open": "true" })
+    const el = await mountWith({
+      "data-endpoint": REMOTE,
+      "data-scope": "pub_demo;run=r_1",
+      "data-open": "true",
+    })
     expect(selected(el)).toBe("r_1")
     expect(studio.gets("runs/r_2/transcript")).toHaveLength(0) // never opened the newest first
     const r2 = all(el, ".weft-turn").find((n) => n.textContent.includes("r_2"))
@@ -594,11 +775,17 @@ describe("the panel follows the scope (rung 1)", () => {
 
   it("a run that is not among the conversation's runs is said, not silently ignored", async () => {
     const studio = fakeStudio(demoRoutes())
-    const el = await mountWith({ "data-endpoint": REMOTE, "data-scope": "pub_demo;run=r_9", "data-open": "true" })
+    const el = await mountWith({
+      "data-endpoint": REMOTE,
+      "data-scope": "pub_demo;run=r_9",
+      "data-open": "true",
+    })
     expect($(el, ".weft-pin-missing")).toBeNull() // one look is not enough to say so
     await settle(PIN_RECHECK_MS + 100)
     expect(studio.gets("runs?public_id=pub_demo")).toHaveLength(2) // the one re-read
-    expect(text(el, ".weft-pin-missing")).toBe("run r_9 not in this conversation")
+    expect(text(el, ".weft-pin-missing")).toBe(
+      "run r_9 not in this conversation"
+    )
     expect(selected(el)).toBe("r_2") // the default selection stands
     el.setAttribute("data-scope", "pub_demo;run=r_1") // same conversation, another pin: re-narrowed in place
     await settle()
@@ -609,11 +796,21 @@ describe("the panel follows the scope (rung 1)", () => {
   it("a header that lands before its run row says nothing false; the run heard live as it starts is pinned", async () => {
     const routes = demoRoutes()
     fakeStudio(routes)
-    const el = await mountWith({ "data-endpoint": REMOTE, "data-scope": "pub_demo;run=r_3", "data-open": "true" })
+    const el = await mountWith({
+      "data-endpoint": REMOTE,
+      "data-scope": "pub_demo;run=r_3",
+      "data-open": "true",
+    })
     expect($(el, ".weft-pin-missing")).toBeNull() // not listed yet: no "not in this conversation"
     const lane = FakeEventSource.last("public_id=pub_demo")!
     lane.opened()
-    const r3 = runRow({ id: "r_3", session_id: "s_a", public_id: "pub_demo", status: "running", started: "2026-10-01T09:09:00Z" })
+    const r3 = runRow({
+      id: "r_3",
+      session_id: "s_a",
+      public_id: "pub_demo",
+      status: "running",
+      started: "2026-10-01T09:09:00Z",
+    })
     routes["runs/r_3"] = { ...r3, children: [] }
     routes["runs/r_3/events?after=0&limit=500"] = page([])
     routes["runs/r_3/transcript"] = transcript([user("third")])
@@ -626,9 +823,16 @@ describe("the panel follows the scope (rung 1)", () => {
 
   it("session narrows the turn list when the runs carry a session id; flow is a chip that filters nothing", async () => {
     fakeStudio(demoRoutes())
-    const el = await mountWith({ "data-endpoint": REMOTE, "data-scope": "pub_demo;session=s_a;flow=f_1", "data-open": "true" })
+    const el = await mountWith({
+      "data-endpoint": REMOTE,
+      "data-scope": "pub_demo;session=s_a;flow=f_1",
+      "data-open": "true",
+    })
     expect(ids(el)).toEqual(["r_1"])
-    expect(all(el, ".weft-scope-chip").map((n) => n.textContent)).toEqual(["session s_a", "flow f_1"])
+    expect(all(el, ".weft-scope-chip").map((n) => n.textContent)).toEqual([
+      "session s_a",
+      "flow f_1",
+    ])
     el.setAttribute("data-scope", "pub_demo;flow=f_1")
     await settle()
     expect(ids(el)).toEqual(["r_2", "r_1"]) // flow alone filters nothing
@@ -642,9 +846,15 @@ describe("the panel follows the scope (rung 1)", () => {
       next_before: null,
     }
     fakeStudio(routes)
-    const el = await mountWith({ "data-endpoint": REMOTE, "data-scope": "pub_demo;session=s_a", "data-open": "true" })
+    const el = await mountWith({
+      "data-endpoint": REMOTE,
+      "data-scope": "pub_demo;session=s_a",
+      "data-open": "true",
+    })
     expect(ids(el)).toEqual(["r_1"])
-    expect(text(el, ".weft-turns")).toContain("session s_a: these runs carry no session id — not narrowed")
+    expect(text(el, ".weft-turns")).toContain(
+      "session s_a: these runs carry no session id — not narrowed"
+    )
   })
 })
 
@@ -659,13 +869,19 @@ describe("the explicit scope forms", () => {
     expect(readConfig().scope).toEqual({ publicId: "pub_script", run: "r_s" })
     document.head.appendChild(meta)
     expect(readConfig().scope).toEqual({ publicId: "pub_meta", session: "s_m" })
-    const el = create({ "data-public-id": "pub_el", "data-scope": "pub_el2;flow=f" })
+    const el = create({
+      "data-public-id": "pub_el",
+      "data-scope": "pub_el2;flow=f",
+    })
     expect(readConfig(el).scope).toEqual({ publicId: "pub_el2", flow: "f" })
     expect(readConfig(el).publicId).toBe("pub_el2")
     const legacy = create({ "data-public-id": "pub_legacy" })
     expect(readConfig(legacy).scope).toEqual({ publicId: "pub_legacy" }) // deprecated, still read
-    ;(legacy).options = { scope: { publicId: "pub_opt", run: "r_o" } }
-    expect(readConfig(legacy).scope).toEqual({ publicId: "pub_opt", run: "r_o" })
+    legacy.options = { scope: { publicId: "pub_opt", run: "r_o" } }
+    expect(readConfig(legacy).scope).toEqual({
+      publicId: "pub_opt",
+      run: "r_o",
+    })
     expect(readConfig(legacy).scopeExplicit).toBe(true)
   })
 

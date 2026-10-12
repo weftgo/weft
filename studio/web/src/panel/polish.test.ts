@@ -43,11 +43,13 @@ const meta = {
 beforeEach(() => {
   FakeEventSource.instances = []
   vi.stubGlobal("EventSource", FakeEventSource)
-  ;(globalThis as { __WEFT_PANEL_VERSION__?: string }).__WEFT_PANEL_VERSION__ = "v0.2.1"
+  ;(globalThis as { __WEFT_PANEL_VERSION__?: string }).__WEFT_PANEL_VERSION__ =
+    "v0.2.1"
 })
 
 afterEach(() => {
-  delete (globalThis as { __WEFT_PANEL_VERSION__?: string }).__WEFT_PANEL_VERSION__
+  delete (globalThis as { __WEFT_PANEL_VERSION__?: string })
+    .__WEFT_PANEL_VERSION__
   vi.unstubAllGlobals()
   document.body.innerHTML = ""
 })
@@ -55,9 +57,21 @@ afterEach(() => {
 describe("the timing waterfall (§2 Timing, from /spans)", () => {
   it("lays bars over the run's own window", () => {
     const bars = waterfall([
-      { name: "invoke_agent", start: "2026-10-01T09:00:00.000Z", end: "2026-10-01T09:00:10.000Z" },
-      { name: "chat gpt-4o", start: "2026-10-01T09:00:01.000Z", end: "2026-10-01T09:00:05.000Z" },
-      { name: "kb_lookup", start: "2026-10-01T09:00:05.500Z", end: "2026-10-01T09:00:07.000Z" },
+      {
+        name: "invoke_agent",
+        start: "2026-10-01T09:00:00.000Z",
+        end: "2026-10-01T09:00:10.000Z",
+      },
+      {
+        name: "chat gpt-4o",
+        start: "2026-10-01T09:00:01.000Z",
+        end: "2026-10-01T09:00:05.000Z",
+      },
+      {
+        name: "kb_lookup",
+        start: "2026-10-01T09:00:05.500Z",
+        end: "2026-10-01T09:00:07.000Z",
+      },
     ])
     expect(bars).toHaveLength(3)
     expect(bars[0].left).toBe(0)
@@ -73,7 +87,9 @@ describe("the timing waterfall (§2 Timing, from /spans)", () => {
   })
 
   it("renders one row per span with its wall time", () => {
-    const box = renderWaterfall([{ name: "chat gpt-4o", left: 0.1, width: 0.5, ms: 2500 }])
+    const box = renderWaterfall([
+      { name: "chat gpt-4o", left: 0.1, width: 0.5, ms: 2500 },
+    ])
     const row = box.querySelector(".weft-wf-row")
     expect(row?.querySelector(".weft-wf-name")?.textContent).toBe("chat gpt-4o")
     expect(row?.querySelector(".weft-wf-ms")?.textContent).toBe("2500ms")
@@ -94,10 +110,13 @@ describe("the keyboard (§5.2, Q4 decided: Alt+W primary)", () => {
             ? { total: 0, runs: [], next_before: null }
             : { error: { code: "not_found", message: "" } }
       )
-      return new Response(body, { headers: { "content-type": "application/json" } })
+      return new Response(body, {
+        headers: { "content-type": "application/json" },
+      })
     })
     vi.stubGlobal("fetch", withLiveGrant(fetchMock))
-    if (!customElements.get("weft-devtools")) customElements.define("weft-devtools", WeftDevtools)
+    if (!customElements.get("weft-devtools"))
+      customElements.define("weft-devtools", WeftDevtools)
     const el = document.createElement("weft-devtools")
     el.setAttribute("data-endpoint", "http://studio.test/studio/")
     el.setAttribute("data-public-id", "pub_orders")
@@ -109,7 +128,10 @@ describe("the keyboard (§5.2, Q4 decided: Alt+W primary)", () => {
   // Alt+W is the window's; every other key is heard inside the panel
   // (D1), so it is pressed on the dock.
   const press = (el: WeftDevtools, ev: Partial<KeyboardEventInit>) =>
-    (ev.altKey || ev.ctrlKey ? window : (el.shadowRoot?.querySelector(".weft-dock") ?? window)).dispatchEvent(
+    (ev.altKey || ev.ctrlKey
+      ? window
+      : (el.shadowRoot?.querySelector(".weft-dock") ?? window)
+    ).dispatchEvent(
       new KeyboardEvent("keydown", { bubbles: true, composed: true, ...ev })
     )
 
@@ -134,7 +156,9 @@ describe("the keyboard (§5.2, Q4 decided: Alt+W primary)", () => {
     await idle()
     press(el, { key: "?" })
     await idle()
-    expect(el.shadowRoot?.querySelector(".weft-keys")?.textContent).toContain("Alt+W")
+    expect(el.shadowRoot?.querySelector(".weft-keys")?.textContent).toContain(
+      "Alt+W"
+    )
     press(el, { key: "Escape" })
     await idle()
     expect(el.shadowRoot?.querySelector(".weft-keys")).toBeNull()
@@ -149,7 +173,11 @@ describe("the keyboard (§5.2, Q4 decided: Alt+W primary)", () => {
     document.body.appendChild(input)
     input.focus()
     input.dispatchEvent(
-      new KeyboardEvent("keydown", { code: "KeyW", altKey: true, bubbles: true })
+      new KeyboardEvent("keydown", {
+        code: "KeyW",
+        altKey: true,
+        bubbles: true,
+      })
     )
     await idle()
     expect(el.shadowRoot?.querySelector(".weft-fab")).toBeTruthy() // still collapsed

@@ -60,14 +60,22 @@ const statusHint: Record<RunRow["status"], string> = {
     "stored as running, but the heartbeat went stale — a crash or kill",
 }
 
-export function StatusDot({ status, decorative }: { status: RunRow["status"]; decorative?: boolean }) {
+export function StatusDot({
+  status,
+  decorative,
+}: {
+  status: RunRow["status"]
+  decorative?: boolean
+}) {
   // Alone, the dot is an image named for the status (a bare span may not
   // carry aria-label: axe aria-prohibited-attr); beside the status word
   // it is decoration.
   return (
     <span
       title={status}
-      {...(decorative ? { "aria-hidden": true } : { role: "img", "aria-label": status })}
+      {...(decorative
+        ? { "aria-hidden": true }
+        : { role: "img", "aria-label": status })}
       className={`inline-block size-2 shrink-0 rounded-full ${statusColor[status]} ${status === "running" ? "pulse-dot" : ""}`}
     />
   )
@@ -214,15 +222,24 @@ const COST_SORT_SERVER =
   "sorted by Studio (/api/search?sort=cost): each run's whole bill, own + delegated, most first; unpriced runs last"
 const COST_SORT_LOCAL =
   "sorts the loaded rows only (own + delegated, most first; unpriced last): this Studio cannot sort by cost itself (it needs the search capability) — load more to sort more"
-const SORT_WORDS: Record<Exclude<RunSortKey, "cost">, { server: string; local: string }> = {
-  started: { server: "newest first (the default order)", local: "newest first (the default order)" },
+const SORT_WORDS: Record<
+  Exclude<RunSortKey, "cost">,
+  { server: string; local: string }
+> = {
+  started: {
+    server: "newest first (the default order)",
+    local: "newest first (the default order)",
+  },
   duration: {
     server: "sorted by Studio (/api/search?sort=duration): longest first",
-    local: "sorts the loaded rows only (longest first): this Studio cannot sort by duration itself (it needs the search capability) — load more to sort more",
+    local:
+      "sorts the loaded rows only (longest first): this Studio cannot sort by duration itself (it needs the search capability) — load more to sort more",
   },
   tokens: {
-    server: "sorted by Studio (/api/search?sort=tokens): input + output tokens, most first",
-    local: "sorts the loaded rows only (input + output tokens, most first): this Studio cannot sort by tokens itself (it needs the search capability) — load more to sort more",
+    server:
+      "sorted by Studio (/api/search?sort=tokens): input + output tokens, most first",
+    local:
+      "sorts the loaded rows only (input + output tokens, most first): this Studio cannot sort by tokens itself (it needs the search capability) — load more to sort more",
   },
 }
 
@@ -260,15 +277,23 @@ function SortHead({
       <button
         type="button"
         className={`font-medium hover:text-foreground ${active ? "text-foreground" : ""}`}
-        title={active && sortKey !== "started" ? `${why} — click for newest first` : why}
+        title={
+          active && sortKey !== "started"
+            ? `${why} — click for newest first`
+            : why
+        }
         onClick={() => sort.onSort(toggle)}
         data-sort={sortKey}
-        data-cost-sort={sortKey === "cost" ? (sort.server ? "server" : "page") : undefined}
+        data-cost-sort={
+          sortKey === "cost" ? (sort.server ? "server" : "page") : undefined
+        }
         aria-pressed={active}
       >
         {label}
         {active ? " ↓" : ""}
-        {active && sortKey !== "started" && !sort.server ? <span className="text-faint"> (page)</span> : null}
+        {active && sortKey !== "started" && !sort.server ? (
+          <span className="text-faint"> (page)</span>
+        ) : null}
       </button>
     </TableHead>
   )
@@ -292,7 +317,13 @@ function ReplayChip({ run }: { run: Pick<RunRow, "forked_from"> }) {
   )
 }
 
-export function RunsTable({ runs, selectedId, now, showCost, sort }: RunsTableProps) {
+export function RunsTable({
+  runs,
+  selectedId,
+  now,
+  showCost,
+  sort,
+}: RunsTableProps) {
   const clock = now ?? Date.now()
   const navigate = useNavigate()
   const selectedRow = useRef<HTMLTableRowElement>(null)
@@ -307,10 +338,17 @@ export function RunsTable({ runs, selectedId, now, showCost, sort }: RunsTablePr
           <TableHead className="w-28">status</TableHead>
           <TableHead>run</TableHead>
           <TableHead>agent</TableHead>
-          <TableHead title="the thread this run is a turn of">session</TableHead>
+          <TableHead title="the thread this run is a turn of">
+            session
+          </TableHead>
           <TableHead>model</TableHead>
           <TableHead className="text-right">steps</TableHead>
-          <SortHead sortKey="tokens" sort={sort} label="tokens in / out" title="input / output tokens" />
+          <SortHead
+            sortKey="tokens"
+            sort={sort}
+            label="tokens in / out"
+            title="input / output tokens"
+          />
           {showCost ? (
             <SortHead
               sortKey="cost"
@@ -417,7 +455,10 @@ export function RunsTable({ runs, selectedId, now, showCost, sort }: RunsTablePr
                 )}
               </TableCell>
               {showCost ? (
-                <TableCell className="text-right whitespace-nowrap" data-cost-cell>
+                <TableCell
+                  className="text-right whitespace-nowrap"
+                  data-cost-cell
+                >
                   <CostCell run={run} />
                 </TableCell>
               ) : null}

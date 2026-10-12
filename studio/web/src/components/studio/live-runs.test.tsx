@@ -2,7 +2,13 @@
 // browser allows six connections per origin over HTTP/1.1, and a
 // stream per running run (plus one per agent, as it was) meant the
 // seventh run left every later request of the tab queued forever.
-import { cleanup, configure, screen, waitFor, act } from "@testing-library/react"
+import {
+  cleanup,
+  configure,
+  screen,
+  waitFor,
+  act,
+} from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { RunRow } from "@/lib/api"
@@ -58,7 +64,9 @@ describe("LiveRuns", () => {
   it("caps the streams of a large fleet and says which are live", async () => {
     const runs = Array.from({ length: 9 }, (_, i) => run(`r${i}`, `agent-${i}`))
     await renderWithRouter(<LiveRuns runs={runs} onStale={() => {}} />)
-    await waitFor(() => expect(FakeEventSource.open()).toHaveLength(MAX_AGENT_STREAMS))
+    await waitFor(() =>
+      expect(FakeEventSource.open()).toHaveLength(MAX_AGENT_STREAMS)
+    )
     expect(screen.getByText(/streaming 4 of 9 agents live/)).toBeTruthy()
   })
 
@@ -71,21 +79,46 @@ describe("LiveRuns", () => {
     act(() => {
       es.connect()
       // A heartbeat-driven frame of a run already listed: no refetch.
-      es.emit("run", { run: run("r1", "orders", { last_seen: "2026-10-01T09:00:05Z", steps: 7 }) }, "1")
+      es.emit(
+        "run",
+        {
+          run: run("r1", "orders", {
+            last_seen: "2026-10-01T09:00:05Z",
+            steps: 7,
+          }),
+        },
+        "1"
+      )
     })
     expect(onStale).not.toHaveBeenCalled()
     // The step count is the row's own (the run frame carries it).
     await waitFor(() =>
-      expect(document.querySelector('[data-run="r1"] [data-cell="step"]')?.textContent).toBe("7")
+      expect(
+        document.querySelector('[data-run="r1"] [data-cell="step"]')
+          ?.textContent
+      ).toBe("7")
     )
     act(() => {
       // It ended: the row says so at once, and the list is refetched.
-      es.emit("run", { run: run("r1", "orders", { status: "succeeded", steps: 7, last_seen: "2026-10-01T09:00:09Z" }) }, "3")
+      es.emit(
+        "run",
+        {
+          run: run("r1", "orders", {
+            status: "succeeded",
+            steps: 7,
+            last_seen: "2026-10-01T09:00:09Z",
+          }),
+        },
+        "3"
+      )
       // A run the list has not seen started.
       es.emit("run", { run: run("r2", "orders") }, "4")
     })
     await waitFor(() =>
-      expect(document.querySelector('[data-run="r1"] [data-cell="step"]')?.textContent).toBe("7 / 7")
+      expect(
+        document.querySelector('[data-run="r1"] [data-cell="step"]')
+          ?.textContent
+      ).toBe("7 / 7")
     )
     expect(screen.getByText("succeeded")).toBeTruthy()
     expect(onStale).toHaveBeenCalledTimes(1) // throttled: one refetch
@@ -93,7 +126,10 @@ describe("LiveRuns", () => {
 
   it("closes every stream on unmount", async () => {
     const { unmount } = await renderWithRouter(
-      <LiveRuns runs={[run("r1", "orders"), run("r2", "research")]} onStale={() => {}} />
+      <LiveRuns
+        runs={[run("r1", "orders"), run("r2", "research")]}
+        onStale={() => {}}
+      />
     )
     unmount()
     expect(FakeEventSource.open()).toHaveLength(0)

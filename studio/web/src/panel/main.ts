@@ -16,7 +16,12 @@ import { WeftDevtools } from "./element"
 
 declare global {
   interface Window {
-    __WEFT__?: { publicId?: string; scope?: string | { publicId: string; session?: string; flow?: string; run?: string } }
+    __WEFT__?: {
+      publicId?: string
+      scope?:
+        | string
+        | { publicId: string; session?: string; flow?: string; run?: string }
+    }
   }
 }
 
@@ -111,13 +116,17 @@ function boot(): void {
   // body, and a second copy of the script decides after the first —
   // one panel either way, never a dock beside the page's markup.
   if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", () => {
-      try {
-        mountOrWatch()
-      } catch {
-        // fail silent
-      }
-    }, { once: true })
+    document.addEventListener(
+      "DOMContentLoaded",
+      () => {
+        try {
+          mountOrWatch()
+        } catch {
+          // fail silent
+        }
+      },
+      { once: true }
+    )
     return
   }
   mountOrWatch()

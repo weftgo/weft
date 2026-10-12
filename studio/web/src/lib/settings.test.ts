@@ -27,7 +27,13 @@ describe("the pricing draft", () => {
     expect(f).toEqual(want)
     expect(pricingFileText(f!).endsWith("}\n")).toBe(true)
     expect(Object.keys(f!)).toEqual(["dated", "note", "models"])
-    expect(Object.keys(f!.models[0])).toEqual(["provider", "model_glob", "input", "output", "cached_input"])
+    expect(Object.keys(f!.models[0])).toEqual([
+      "provider",
+      "model_glob",
+      "input",
+      "output",
+      "cached_input",
+    ])
   })
 
   it("names every field the loader would refuse; no file until they are fixed", () => {
@@ -36,7 +42,13 @@ describe("the pricing draft", () => {
     d.rows[0].input = "-1"
     d.rows[1].output = ""
     d.rows[1].reasoning = "abc"
-    d.rows.push({ ...emptyRow(), provider: "x", model_glob: "[a", input: "1", output: "1" })
+    d.rows.push({
+      ...emptyRow(),
+      provider: "x",
+      model_glob: "[a",
+      input: "1",
+      output: "1",
+    })
     expect(problems(d).map((p) => `${p.row}:${p.field}`)).toEqual([
       "-1:dated",
       "0:input",
@@ -48,19 +60,43 @@ describe("the pricing draft", () => {
   })
 
   it("keys edits by the served table's source, file path and dated", () => {
-    expect(editsKey(served)).toBe(`studio.pricing.edits:option:${served.path ?? ""}:2026-10-01`)
+    expect(editsKey(served)).toBe(
+      `studio.pricing.edits:option:${served.path ?? ""}:2026-10-01`
+    )
     // Two --pricing files with the same dated never share a draft.
-    const a = editsKey({ source: "file", path: "/etc/a.json", dated: "2026-10-01" })
-    const b = editsKey({ source: "file", path: "/etc/b.json", dated: "2026-10-01" })
+    const a = editsKey({
+      source: "file",
+      path: "/etc/a.json",
+      dated: "2026-10-01",
+    })
+    const b = editsKey({
+      source: "file",
+      path: "/etc/b.json",
+      dated: "2026-10-01",
+    })
     expect(a).not.toBe(b)
-    expect(editsKey({ source: "default", dated: "2026-10-01" })).toBe("studio.pricing.edits:default::2026-10-01")
+    expect(editsKey({ source: "default", dated: "2026-10-01" })).toBe(
+      "studio.pricing.edits:default::2026-10-01"
+    )
   })
 
   it("a rate is a decimal: JS's 0x10, 0b11, Infinity and 1_000 forms are refused, never rewritten", () => {
-    for (const bad of ["0x10", "0b11", "0o7", "Infinity", "1_000", ".5", "5.", " 1e"]) {
+    for (const bad of [
+      "0x10",
+      "0b11",
+      "0o7",
+      "Infinity",
+      "1_000",
+      ".5",
+      "5.",
+      " 1e",
+    ]) {
       const d = draftOf(served)
       d.rows[0].input = bad
-      expect(problems(d).map((p) => `${p.row}:${p.field}`), bad).toEqual(["0:input"])
+      expect(
+        problems(d).map((p) => `${p.row}:${p.field}`),
+        bad
+      ).toEqual(["0:input"])
     }
     for (const good of ["0", "3", "0.25", "1.5e-1", "2E3"]) {
       const d = draftOf(served)
@@ -74,7 +110,16 @@ describe("the pricing draft", () => {
 describe("globError is path.Match's ErrBadPattern", () => {
   // [z-a]: Go's path.Match("openai/[z-a]", "") is nil — out of order
   // matches nothing, and is no ErrBadPattern.
-  it.each(["*", "claude-*", "a/b?", "[abc]", "[^a-z]x", "\\*", "[\\]]", "[z-a]"])("%s is good", (p) => {
+  it.each([
+    "*",
+    "claude-*",
+    "a/b?",
+    "[abc]",
+    "[^a-z]x",
+    "\\*",
+    "[\\]]",
+    "[z-a]",
+  ])("%s is good", (p) => {
     expect(globError(p)).toBe("")
   })
   it.each(["[", "[]", "[a", "[-a]", "ab\\", "[a-]"])("%s is bad", (p) => {
@@ -92,20 +137,43 @@ describe("isDate", () => {
 })
 
 describe("tokenIdentity", () => {
-  const claims = (o: object) => `weft_pt.${btoa(JSON.stringify(o)).replace(/=+$/, "")}.sig`
+  const claims = (o: object) =>
+    `weft_pt.${btoa(JSON.stringify(o)).replace(/=+$/, "")}.sig`
   const db = { kind: "sqlite" }
   it("reads a panel token's scope and public id from its claims", () => {
-    const id = tokenIdentity(claims({ public_id: "pub_1", scope: "read", exp: "2026-10-11T00:00:00Z" }), {
-      auth_required: true,
-      db,
+    const id = tokenIdentity(
+      claims({
+        public_id: "pub_1",
+        scope: "read",
+        exp: "2026-10-11T00:00:00Z",
+      }),
+      {
+        auth_required: true,
+        db,
+      }
+    )
+    expect(id).toMatchObject({
+      kind: "panel-read",
+      publicId: "pub_1",
+      exp: "2026-10-11T00:00:00Z",
     })
-    expect(id).toMatchObject({ kind: "panel-read", publicId: "pub_1", exp: "2026-10-11T00:00:00Z" })
-    expect(tokenIdentity(claims({ scope: "playground" }), { auth_required: true, db }).kind).toBe("panel-playground")
+    expect(
+      tokenIdentity(claims({ scope: "playground" }), {
+        auth_required: true,
+        db,
+      }).kind
+    ).toBe("panel-playground")
   })
   it("any other bearer on a walled Studio is the server token; confirmed by db.path's rule", () => {
-    expect(tokenIdentity("dev", { auth_required: true, live_all: true, db }).words).toContain("reads everything")
-    expect(tokenIdentity("dev", { auth_required: true, db }).words).toContain("by its shape")
-    expect(tokenIdentity("dev", { auth_required: false, db }).kind).toBe("unused")
+    expect(
+      tokenIdentity("dev", { auth_required: true, live_all: true, db }).words
+    ).toContain("reads everything")
+    expect(tokenIdentity("dev", { auth_required: true, db }).words).toContain(
+      "by its shape"
+    )
+    expect(tokenIdentity("dev", { auth_required: false, db }).kind).toBe(
+      "unused"
+    )
     expect(tokenIdentity("", { auth_required: false, db }).kind).toBe("none")
   })
   it("masks without a character of the token", () => {

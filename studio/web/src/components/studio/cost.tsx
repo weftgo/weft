@@ -3,7 +3,12 @@
 // on capability "pricing" (useCostCapable): without it no cost cell is
 // drawn at all, not a "—".
 import type { CostFields, DelegatedCostFields } from "@/lib/api"
-import { CACHE_HINT, cacheNotReported, costView, delegatedView } from "@/lib/cost"
+import {
+  CACHE_HINT,
+  cacheNotReported,
+  costView,
+  delegatedView,
+} from "@/lib/cost"
 import type { CostView } from "@/lib/cost"
 import { useCapabilities } from "@/hooks/use-capabilities"
 
@@ -18,7 +23,15 @@ export function useCostCapable(): boolean {
  * the visible "—", the title kept) — never an aria-label, which a bare
  * span may not carry (axe aria-prohibited-attr). label, for a figure
  * with no visible words beside it, is a visually hidden prefix. */
-export function CostText({ v, className = "", label }: { v: CostView; className?: string; label?: string }) {
+export function CostText({
+  v,
+  className = "",
+  label,
+}: {
+  v: CostView
+  className?: string
+  label?: string
+}) {
   return (
     <span
       className={`font-mono tabular-nums ${v.known ? "" : "text-faint"} ${className}`}
@@ -26,7 +39,9 @@ export function CostText({ v, className = "", label }: { v: CostView; className?
       data-cost={v.known ? String(v.usd) : "unknown"}
       data-cost-badge={v.known ? undefined : v.badge}
     >
-      {label ? <span className="sr-only" data-cost-label>{`${label} `}</span> : null}
+      {label ? (
+        <span className="sr-only" data-cost-label>{`${label} `}</span>
+      ) : null}
       {v.text}
       {v.known ? null : (
         <span className="sr-only" data-cost-words>
@@ -38,13 +53,25 @@ export function CostText({ v, className = "", label }: { v: CostView; className?
 }
 
 /** Cost is an object's own figure. */
-export function Cost({ fields, className, label }: { fields: CostFields | null | undefined; className?: string; label?: string }) {
+export function Cost({
+  fields,
+  className,
+  label,
+}: {
+  fields: CostFields | null | undefined
+  className?: string
+  label?: string
+}) {
   return <CostText v={costView(fields)} className={className} label={label} />
 }
 
 /** CacheHint is the small mark beside a figure priced without cache
  * splits (cache "not_reported"). */
-export function CacheHint({ fields }: { fields: CostFields | null | undefined }) {
+export function CacheHint({
+  fields,
+}: {
+  fields: CostFields | null | undefined
+}) {
   if (!cacheNotReported(fields) || !costView(fields).known) return null
   return (
     <span className="text-[10px] text-faint" title={CACHE_HINT} data-cache-hint>

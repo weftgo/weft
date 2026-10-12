@@ -10,8 +10,12 @@
 declare const __PANEL_STUDIO_VERSION__: string | undefined
 
 export function panelStudioVersion(): string {
-  if (typeof __PANEL_STUDIO_VERSION__ === "string") return __PANEL_STUDIO_VERSION__
-  return (globalThis as { __WEFT_PANEL_VERSION__?: string }).__WEFT_PANEL_VERSION__ ?? "v0.0.0"
+  if (typeof __PANEL_STUDIO_VERSION__ === "string")
+    return __PANEL_STUDIO_VERSION__
+  return (
+    (globalThis as { __WEFT_PANEL_VERSION__?: string })
+      .__WEFT_PANEL_VERSION__ ?? "v0.0.0"
+  )
 }
 
 /** A tag's numbers and its pre-release part: "v0.3.0-rc.1" is
@@ -19,7 +23,10 @@ export function panelStudioVersion(): string {
  * anything that is not a version. */
 function parse(v: unknown): { nums: number[]; pre: string } | null {
   if (typeof v !== "string") return null
-  const m = /^v?(\d+(?:\.\d+)*)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]*)?$/.exec(v.trim())
+  const m =
+    /^v?(\d+(?:\.\d+)*)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]*)?$/.exec(
+      v.trim()
+    )
   if (!m) return null
   return { nums: m[1].split(".").map(Number), pre: m.at(2) ?? "" }
 }

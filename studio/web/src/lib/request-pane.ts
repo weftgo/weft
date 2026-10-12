@@ -47,7 +47,10 @@ const OVERRIDE = "weft.override."
 /** overrideOf reads the run's own invoke_agent span (by weft.run.id; a
  * subagent child's span in the same trace is not this run's) for the
  * override fingerprint. Undefined when the run carries none. */
-export function overrideOf(spans: Span[] | undefined, runId: string): RunOverride | undefined {
+export function overrideOf(
+  spans: Span[] | undefined,
+  runId: string
+): RunOverride | undefined {
   const span = spans?.find(
     (s) =>
       s.attrs["gen_ai.operation.name"] === "invoke_agent" &&
@@ -102,7 +105,9 @@ export function registeredAgent(
     (manifest?.sources ?? []).some(
       (src) =>
         src.source === "file" &&
-        src.agents.some((a) => a.name === agent && a.manifest_hash === manifestHash)
+        src.agents.some(
+          (a) => a.name === agent && a.manifest_hash === manifestHash
+        )
     )
   return { agent: named, verified: listed }
 }
@@ -114,12 +119,17 @@ export async function sha256Hex(text: string): Promise<string | undefined> {
   const subtle = (globalThis.crypto as Crypto | undefined)?.subtle
   if (!subtle) return undefined
   const sum = await subtle.digest("SHA-256", new TextEncoder().encode(text))
-  return Array.from(new Uint8Array(sum), (b) => b.toString(16).padStart(2, "0")).join("")
+  return Array.from(new Uint8Array(sum), (b) =>
+    b.toString(16).padStart(2, "0")
+  ).join("")
 }
 
 /** composeSystem mirrors core/loop.go's: the instructions, then each
  * offered tool's PromptSnippet, paragraphs apart. */
-export function composeSystem(instructions: string, snippets: string[]): string {
+export function composeSystem(
+  instructions: string,
+  snippets: string[]
+): string {
   let out = instructions
   for (const s of snippets) {
     if (!s) continue
@@ -137,7 +147,9 @@ export function snippetsOf(
   agent: ManifestAgent | undefined
 ): string[] | undefined {
   if (!agent) return undefined
-  const byName = new Map(agent.tools.map((t) => [t.name, t.prompt_snippet ?? ""]))
+  const byName = new Map(
+    agent.tools.map((t) => [t.name, t.prompt_snippet ?? ""])
+  )
   if (names.some((n) => !byName.has(n))) return undefined
   return names.map((n) => byName.get(n) ?? "")
 }
@@ -163,8 +175,12 @@ export function proposalOf(
     if (parts.length === 0) return { text }
     const suffix = parts.join("\n\n")
     if (text === suffix) return { text: "" }
-    if (text.endsWith(`\n\n${suffix}`)) return { text: text.slice(0, text.length - suffix.length - 2) }
-    return { text, note: "proposed as recorded: it is not the instructions plus its tools' snippets — a PrepareStep rewrite" }
+    if (text.endsWith(`\n\n${suffix}`))
+      return { text: text.slice(0, text.length - suffix.length - 2) }
+    return {
+      text,
+      note: "proposed as recorded: it is not the instructions plus its tools' snippets — a PrepareStep rewrite",
+    }
   }
   const what =
     names.length === 0
@@ -174,7 +190,10 @@ export function proposalOf(
           ? `${parts.length} tool snippet${parts.length === 1 ? "" : "s"} or a PrepareStep rewrite`
           : "a PrepareStep rewrite"
         : "the tools' snippets or a PrepareStep rewrite"
-  return { text, note: `proposed as recorded: may include ${what} (the manifest does not verify this run's agent)` }
+  return {
+    text,
+    note: `proposed as recorded: may include ${what} (the manifest does not verify this run's agent)`,
+  }
 }
 
 /** The prompt text a row carries, when the record is here — and
@@ -182,7 +201,8 @@ export function proposalOf(
  * PromptRecordOf keeps the hash, not the text) is no text to diff. */
 export function promptText(row: RequestRow | undefined): string | undefined {
   const p = row?.prompt
-  if (!row || !p || isHoleRef(p)) return row && !row.system_hash ? "" : undefined
+  if (!row || !p || isHoleRef(p))
+    return row && !row.system_hash ? "" : undefined
   return p.content === "derived" ? undefined : p.text
 }
 
@@ -250,7 +270,8 @@ export interface PromptBaseline {
 /** The diff's caption. */
 export function baselineCaption(b: PromptBaseline): string {
   if (b.kind === "previous") return `diff vs step ${b.step}`
-  if (!b.verified) return "diff vs weft.json's instructions — not verified for this run"
+  if (!b.verified)
+    return "diff vs weft.json's instructions — not verified for this run"
   return b.overridden
     ? "diff vs the registered instructions (overridden for this run)"
     : "diff vs the registered instructions"
@@ -271,12 +292,16 @@ export function toolSetMayExplain(
 ): boolean {
   const a = new Set(before)
   const b = new Set(after)
-  const changed = [...before.filter((n) => !b.has(n)), ...after.filter((n) => !a.has(n))]
+  const changed = [
+    ...before.filter((n) => !b.has(n)),
+    ...after.filter((n) => !a.has(n)),
+  ]
   if (changed.length === 0) {
     // The same set: unchanged unless reordered — and offer order is
     // snippet order in composeSystem, so a reorder moves the hash
     // unless the verified agent shows no offered tool has a snippet.
-    const reordered = before.length !== after.length || before.some((n, i) => n !== after[i])
+    const reordered =
+      before.length !== after.length || before.some((n, i) => n !== after[i])
     if (!reordered) return false
     if (!reg?.verified) return true
     const all = snippetsOf(after, reg.agent)
@@ -351,15 +376,23 @@ export function messagesSent(
   })
   if (ref.index === undefined) return only("no_index")
   const at = ref.index
-  if (compactions.some((c) => c.scope === "run" && c.index === at)) return only("compacted")
+  if (compactions.some((c) => c.scope === "run" && c.index === at))
+    return only("compacted")
   if (!transcript) return only("no_transcript")
   const batches = transcript.batches.filter((b) => b.index <= at)
   if (batches.some((b) => b.unreadable)) return only("gap")
-  if (!batches.some((b) => b.index === at)) return only(running ? "no_transcript" : "gap")
+  if (!batches.some((b) => b.index === at))
+    return only(running ? "no_transcript" : "gap")
   const msgs = batches.flatMap((b) => b.messages)
   if (msgs.length !== count) return only("gap")
   const bytes = new TextEncoder().encode(JSON.stringify(msgs)).length
   const shown = msgs.slice(Math.max(0, msgs.length - last))
   const cutAt = msgs.length - shown.length
-  return { count, bytes, last: shown, earlier: cutAt, before: msgs.slice(0, cutAt) }
+  return {
+    count,
+    bytes,
+    last: shown,
+    earlier: cutAt,
+    before: msgs.slice(0, cutAt),
+  }
 }

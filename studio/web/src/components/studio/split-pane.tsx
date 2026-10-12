@@ -97,9 +97,17 @@ export function SplitPane({
   const measurable = useMemo(hasResizeObserver, [])
   if (!measurable) {
     return (
-      <div data-split={split} data-stacked="" className={cn("flex min-w-0 flex-col", stackedClassName)}>
+      <div
+        data-split={split}
+        data-stacked=""
+        className={cn("flex min-w-0 flex-col", stackedClassName)}
+      >
         {panes.slice(0, second ? 2 : 1).map((p) => (
-          <div key={p.id} data-pane={p.id} className={cn("min-w-0", p.className)}>
+          <div
+            key={p.id}
+            data-pane={p.id}
+            className={cn("min-w-0", p.className)}
+          >
             {p.children}
           </div>
         ))}
@@ -156,7 +164,9 @@ function Split({
   const set = (sizes: number[]) => {
     if (!both.current) return
     try {
-      groupRef.current?.setLayout(Object.fromEntries(ids.map((id, i) => [id, sizes[i]])))
+      groupRef.current?.setLayout(
+        Object.fromEntries(ids.map((id, i) => [id, sizes[i]]))
+      )
     } catch {
       // a group mid-unmount: nothing to move
     }
@@ -199,7 +209,8 @@ function Split({
         if (!meta.isUserInteraction || !both.current) return
         const l = meta.requestedLayout ?? layout
         const sizes = ids.map((id) => l[id])
-        if (sizes.every((n) => typeof n === "number")) writePaneSizes(split, sizes, uid)
+        if (sizes.every((n) => typeof n === "number"))
+          writePaneSizes(split, sizes, uid)
       }}
     >
       <ResizablePanel
@@ -210,7 +221,11 @@ function Split({
         style={second ? undefined : { overflow: "visible" }}
         // The class lands on the panel's inner div, whose inline
         // overflow: auto / max-height: 100% it overrides when alone.
-        className={cn("min-w-0", !second && SINGLE_PANE_CLASS, panes[0].className)}
+        className={cn(
+          "min-w-0",
+          !second && SINGLE_PANE_CLASS,
+          panes[0].className
+        )}
       >
         {panes[0].children}
       </ResizablePanel>

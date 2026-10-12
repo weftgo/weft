@@ -48,7 +48,12 @@ export function readPaneSizes(id: string, count: number): number[] | null {
     return null
   }
   if (!Array.isArray(v) || v.length !== count) return null
-  if (!v.every((n): n is number => typeof n === "number" && Number.isFinite(n) && n >= 0)) return null
+  if (
+    !v.every(
+      (n): n is number => typeof n === "number" && Number.isFinite(n) && n >= 0
+    )
+  )
+    return null
   const sum = v.reduce((a, b) => a + b, 0)
   if (Math.abs(sum - 100) > 1) return null
   return v
@@ -71,7 +76,9 @@ export function writePaneSizes(id: string, sizes: number[], from = "") {
     // unwritable storage: this page only
   }
   window.dispatchEvent(
-    new CustomEvent<PanesChanged>(PANES_CHANGED_EVENT, { detail: { id, sizes: rounded, from } })
+    new CustomEvent<PanesChanged>(PANES_CHANGED_EVENT, {
+      detail: { id, sizes: rounded, from },
+    })
   )
 }
 
@@ -85,7 +92,9 @@ export function forgetPaneSizes(id: string, defaults: number[], from = "") {
     // unwritable storage: nothing was saved
   }
   window.dispatchEvent(
-    new CustomEvent<PanesChanged>(PANES_CHANGED_EVENT, { detail: { id, sizes: defaults, from } })
+    new CustomEvent<PanesChanged>(PANES_CHANGED_EVENT, {
+      detail: { id, sizes: defaults, from },
+    })
   )
 }
 

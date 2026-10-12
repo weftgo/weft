@@ -33,7 +33,8 @@ export const LIVE_POLL_MS = 5_000
 
 /** The resume backfill's bound as studio/live.go keeps it (allBackfill
  * Window, allBackfillMax): what the footer says. */
-export const LIVE_BACKFILL_LINE = "a reconnect resumes: runs running or seen in the last hour, newest 500"
+export const LIVE_BACKFILL_LINE =
+  "a reconnect resumes: runs running or seen in the last hour, newest 500"
 
 /** What the event frames said about one run. */
 export interface LiveStats {
@@ -74,7 +75,11 @@ export interface LiveRows {
   unreadable: Record<string, string[]>
 }
 
-export const emptyLiveRows: LiveRows = { entries: {}, stats: {}, unreadable: {} }
+export const emptyLiveRows: LiveRows = {
+  entries: {},
+  stats: {},
+  unreadable: {},
+}
 
 /** ended: the run row says the run is over (finished, or parked). */
 export function ended(run: Pick<RunRow, "status" | "pending">): boolean {
@@ -98,13 +103,21 @@ function put(state: LiveRows, run: RunRow, now: number): LiveRows {
 }
 
 /** applyRun folds one run frame: the row, created or refreshed. */
-export function applyRun(state: LiveRows, run: RunRow, now = Date.now()): LiveRows {
+export function applyRun(
+  state: LiveRows,
+  run: RunRow,
+  now = Date.now()
+): LiveRows {
   return put(state, run, now)
 }
 
 /** applySeed folds a read of the running list: rows the stream has
  * not told about are added; a row it has is kept when fresher. */
-export function applySeed(state: LiveRows, runs: RunRow[], now = Date.now()): LiveRows {
+export function applySeed(
+  state: LiveRows,
+  runs: RunRow[],
+  now = Date.now()
+): LiveRows {
   let next = state
   for (const r of runs) next = put(next, r, now)
   return next
@@ -116,9 +129,18 @@ function num(v: unknown): number {
 
 /** applyRecord folds one record frame (only event records count:
  * deltas and messages carry no step or usage). */
-export function applyRecord(state: LiveRows, rec: LiveRecord, now = Date.now()): LiveRows {
+export function applyRecord(
+  state: LiveRows,
+  rec: LiveRecord,
+  now = Date.now()
+): LiveRows {
   if (rec.kind !== "event" || !rec.run_id) return state
-  const ev = rec.event as { type?: string; index?: unknown; usage?: { input_tokens?: unknown; output_tokens?: unknown }; ttft_ms?: unknown } | null
+  const ev = rec.event as {
+    type?: string
+    index?: unknown
+    usage?: { input_tokens?: unknown; output_tokens?: unknown }
+    ttft_ms?: unknown
+  } | null
   const prev = state.stats[rec.run_id] as LiveStats | undefined
   const s: LiveStats = prev
     ? { ...prev, touched: now }
@@ -136,19 +158,29 @@ export function applyRecord(state: LiveRows, rec: LiveRecord, now = Date.now()):
       }
   switch (ev?.type) {
     case "step_start":
-      if (typeof ev.index === "number") s.step = Math.max(s.step ?? -1, ev.index)
+      if (typeof ev.index === "number")
+        s.step = Math.max(s.step ?? -1, ev.index)
       s.inFlight = true
       break
     case "tool_start":
       s.inFlight = true
       break
     case "step_finish":
-      if (typeof ev.index === "number") s.step = Math.max(s.step ?? -1, ev.index)
+      if (typeof ev.index === "number")
+        s.step = Math.max(s.step ?? -1, ev.index)
       s.inFlight = false
       if (ev.usage && typeof ev.usage === "object") {
-        const u = { input: num(ev.usage.input_tokens), output: num(ev.usage.output_tokens) }
-        if (typeof ev.index === "number") s.perStep = { ...s.perStep, [ev.index]: u }
-        else s.unindexed = { input: s.unindexed.input + u.input, output: s.unindexed.output + u.output }
+        const u = {
+          input: num(ev.usage.input_tokens),
+          output: num(ev.usage.output_tokens),
+        }
+        if (typeof ev.index === "number")
+          s.perStep = { ...s.perStep, [ev.index]: u }
+        else
+          s.unindexed = {
+            input: s.unindexed.input + u.input,
+            output: s.unindexed.output + u.output,
+          }
         let input = s.unindexed.input
         let output = s.unindexed.output
         for (const v of Object.values(s.perStep)) {
@@ -159,7 +191,8 @@ export function applyRecord(state: LiveRows, rec: LiveRecord, now = Date.now()):
         s.output = output
         s.sawUsage = true
       }
-      if (typeof ev.ttft_ms === "number" && ev.ttft_ms > 0) s.ttftMs = ev.ttft_ms
+      if (typeof ev.ttft_ms === "number" && ev.ttft_ms > 0)
+        s.ttftMs = ev.ttft_ms
       break
     case "run_finish":
       s.inFlight = false
@@ -173,11 +206,17 @@ export function applyRecord(state: LiveRows, rec: LiveRecord, now = Date.now()):
 /** applyBackfillError marks a run whose stored records a resume could
  * not read: its row shows a "could not read" badge (now, or when the
  * row arrives). */
-export function applyBackfillError(state: LiveRows, f: { run_id: string; kind: string }): LiveRows {
+export function applyBackfillError(
+  state: LiveRows,
+  f: { run_id: string; kind: string }
+): LiveRows {
   const kind = f.kind || "records"
   const have = state.unreadable[f.run_id] ?? []
   if (have.includes(kind)) return state
-  return { ...state, unreadable: { ...state.unreadable, [f.run_id]: [...have, kind] } }
+  return {
+    ...state,
+    unreadable: { ...state.unreadable, [f.run_id]: [...have, kind] },
+  }
 }
 
 /** prune drops the rows that ended more than LIVE_GRACE_MS ago (keep
@@ -203,7 +242,8 @@ export function prune(state: LiveRows, now = Date.now(), keep = ""): LiveRows {
   }
   if (!changed) return state
   const unreadable: Record<string, string[]> = {}
-  for (const [id, ks] of Object.entries(state.unreadable)) if (id in entries || id in stats) unreadable[id] = ks
+  for (const [id, ks] of Object.entries(state.unreadable))
+    if (id in entries || id in stats) unreadable[id] = ks
   return { entries, stats, unreadable }
 }
 
@@ -244,29 +284,52 @@ export function stepText(v: LiveRowView): { text: string; title: string } {
   const total = ended(v.run) && v.run.steps > 0 ? v.run.steps : null
   if (s && s.step !== null) {
     const cur = s.step + 1
-    if (total !== null) return { text: `${cur} / ${total}`, title: `${total} step${total === 1 ? "" : "s"} in all` }
+    if (total !== null)
+      return {
+        text: `${cur} / ${total}`,
+        title: `${total} step${total === 1 ? "" : "s"} in all`,
+      }
     return s.inFlight
       ? { text: `${cur}…`, title: `step ${cur} in flight` }
-      : { text: String(cur), title: `${cur} step${cur === 1 ? "" : "s"} finished` }
+      : {
+          text: String(cur),
+          title: `${cur} step${cur === 1 ? "" : "s"} finished`,
+        }
   }
   if (v.run.steps > 0)
     return total !== null
-      ? { text: `${total} / ${total}`, title: `${total} step${total === 1 ? "" : "s"} in all` }
-      : { text: String(v.run.steps), title: "the row's step count (no step event seen on this page yet)" }
+      ? {
+          text: `${total} / ${total}`,
+          title: `${total} step${total === 1 ? "" : "s"} in all`,
+        }
+      : {
+          text: String(v.run.steps),
+          title: "the row's step count (no step event seen on this page yet)",
+        }
   return { text: "—", title: "no step finished yet" }
 }
 
 /** The tokens cell: input + output so far. */
-export function tokensOf(v: LiveRowView): { n: number; input: number; output: number; partial: boolean } | null {
+export function tokensOf(
+  v: LiveRowView
+): { n: number; input: number; output: number; partial: boolean } | null {
   const s = v.stats
   // A row from an older Studio may come without usage.
   const u = v.run.usage as RunRow["usage"] | undefined
   const rowIn = u?.input_tokens ?? 0
   const rowOut = u?.output_tokens ?? 0
   // The final row's usage is the run's own total: it wins once ended.
-  if (ended(v.run) && rowIn + rowOut > 0) return { n: rowIn + rowOut, input: rowIn, output: rowOut, partial: false }
-  if (s?.sawUsage) return { n: s.input + s.output, input: s.input, output: s.output, partial: s.partial }
-  if (rowIn + rowOut > 0) return { n: rowIn + rowOut, input: rowIn, output: rowOut, partial: false }
+  if (ended(v.run) && rowIn + rowOut > 0)
+    return { n: rowIn + rowOut, input: rowIn, output: rowOut, partial: false }
+  if (s?.sawUsage)
+    return {
+      n: s.input + s.output,
+      input: s.input,
+      output: s.output,
+      partial: s.partial,
+    }
+  if (rowIn + rowOut > 0)
+    return { n: rowIn + rowOut, input: rowIn, output: rowOut, partial: false }
   return null
 }
 
@@ -277,13 +340,21 @@ export const RUNNING_COST_REASON = "running: usage arrives at run end"
  * when a running row came without one. */
 export function costFieldsOf(run: RunRow): RunRow {
   if (run.status === "running" && !run.cost_known && !run.cost_reason)
-    return { ...run, cost_known: false, cost_usd: null, cost_badge: "unknown", cost_reason: RUNNING_COST_REASON }
+    return {
+      ...run,
+      cost_known: false,
+      cost_usd: null,
+      cost_badge: "unknown",
+      cost_reason: RUNNING_COST_REASON,
+    }
   return run
 }
 
 /** The ?peek= run id, validated: an id-shaped string or nothing. */
 export function validPeek(v: unknown): string | undefined {
-  return typeof v === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(v) ? v : undefined
+  return typeof v === "string" && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(v)
+    ? v
+    : undefined
 }
 
 /** Matches a row against the filter box (agent or status, case-folded;
@@ -291,6 +362,8 @@ export function validPeek(v: unknown): string | undefined {
 export function matchesFilter(run: RunRow, q: string): boolean {
   const words = q.toLowerCase().split(/\s+/).filter(Boolean)
   if (!words.length) return true
-  const hay = [run.agent, run.status, run.pending > 0 ? "parked" : ""].join(" ").toLowerCase()
+  const hay = [run.agent, run.status, run.pending > 0 ? "parked" : ""]
+    .join(" ")
+    .toLowerCase()
   return words.every((w) => hay.includes(w))
 }

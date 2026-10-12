@@ -61,16 +61,33 @@ export function ReplayRefused() {
 export function UsageOrUnknown({
   fields,
 }: {
-  fields: { usage: StepDoc["usage"]; cost_known?: boolean; cost_reason?: string }
+  fields: {
+    usage: StepDoc["usage"]
+    cost_known?: boolean
+    cost_reason?: string
+  }
 }) {
-  if (derivedUsageUnknown(fields, true)) return <UnknownTokens reason={fields.cost_reason} />
+  if (derivedUsageUnknown(fields, true))
+    return <UnknownTokens reason={fields.cost_reason} />
   return <Usage usage={fields.usage} />
 }
 
-function Block({ label, hole, n }: { label: string; hole: Holed | undefined; n: number }) {
+function Block({
+  label,
+  hole,
+  n,
+}: {
+  label: string
+  hole: Holed | undefined
+  n: number
+}) {
   const h = hole?.badge ? hole : undefined
   return (
-    <div className="space-y-1" data-derived-block={label} {...(label === "request" ? { "data-request": n } : {})}>
+    <div
+      className="space-y-1"
+      data-derived-block={label}
+      {...(label === "request" ? { "data-request": n } : {})}
+    >
       <div className="eyebrow">{label}</div>
       {h ? (
         <HoleBadge hole={h.badge!} reason={h.reason} fix={h.fix} detail />
@@ -81,7 +98,15 @@ function Block({ label, hole, n }: { label: string; hole: Holed | undefined; n: 
   )
 }
 
-function DerivedStepCard({ runId, n, enabled }: { runId: string; n: number; enabled: boolean }) {
+function DerivedStepCard({
+  runId,
+  n,
+  enabled,
+}: {
+  runId: string
+  n: number
+  enabled: boolean
+}) {
   const q = useQuery({ ...stepQuery(runId, n), enabled, retry: false })
   const costCapable = useCostCapable()
   const st = q.data
@@ -101,14 +126,18 @@ function DerivedStepCard({ runId, n, enabled }: { runId: string; n: number; enab
               <span className="text-muted-foreground">
                 {st.model.provider ? `${st.model.provider}/` : ""}
                 {st.model.requested}
-                {st.model.answered && st.model.answered !== st.model.requested ? ` → ${st.model.answered}` : ""}
+                {st.model.answered && st.model.answered !== st.model.requested
+                  ? ` → ${st.model.answered}`
+                  : ""}
               </span>
             ) : null}
             <UsageOrUnknown fields={st} />
             {costCapable ? <Cost fields={st} label="cost" /> : null}
           </>
         ) : q.isError ? (
-          <span className="text-status-bad">the step could not be read: {q.error.message}</span>
+          <span className="text-status-bad">
+            the step could not be read: {q.error.message}
+          </span>
         ) : enabled ? (
           <span className="text-faint">loading…</span>
         ) : null}
@@ -124,7 +153,9 @@ function DerivedStepCard({ runId, n, enabled }: { runId: string; n: number; enab
             >
               <span className="text-foreground">{c.name}</span>
               <span className="text-faint">{c.call_id || "—"}</span>
-              {c.span ? <span className="text-faint">{c.span.status}</span> : null}
+              {c.span ? (
+                <span className="text-faint">{c.span.status}</span>
+              ) : null}
               <HoleBadge {...DERIVED_HOLE} />
             </li>
           ))}
@@ -132,7 +163,13 @@ function DerivedStepCard({ runId, n, enabled }: { runId: string; n: number; enab
       ) : null}
       {st ? (
         <div className="grid gap-2 sm:grid-cols-2">
-          <Block label="request" hole={st.request && !isRequestRow(st.request) ? st.request : undefined} n={n} />
+          <Block
+            label="request"
+            hole={
+              st.request && !isRequestRow(st.request) ? st.request : undefined
+            }
+            n={n}
+          />
           <Block label="messages" hole={st.messages_in} n={n} />
         </div>
       ) : null}
@@ -141,7 +178,13 @@ function DerivedStepCard({ runId, n, enabled }: { runId: string; n: number; enab
 }
 
 /** DerivedStory is the story tab of a derived run. */
-export function DerivedStory({ doc, replayable }: { doc: RunDoc; replayable: boolean }) {
+export function DerivedStory({
+  doc,
+  replayable,
+}: {
+  doc: RunDoc
+  replayable: boolean
+}) {
   const { has } = useCapabilities()
   const steps = Array.from({ length: Math.max(0, doc.steps) }, (_, i) => i)
   return (

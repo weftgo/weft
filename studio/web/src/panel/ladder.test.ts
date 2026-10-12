@@ -8,14 +8,34 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { discoverEndpoint, findPanelScript, NPM_MARK, readConfig, selfURL } from "./config"
+import {
+  discoverEndpoint,
+  findPanelScript,
+  NPM_MARK,
+  readConfig,
+  selfURL,
+} from "./config"
 import type { MountOptions } from "./config"
 import { mount as mountPanel, WeftDevtools } from "./element"
-import { $, baseRoutes, click, fakeStudio, json, META, settle, setup, teardown, text } from "./testkit"
+import {
+  $,
+  baseRoutes,
+  click,
+  fakeStudio,
+  json,
+  META,
+  settle,
+  setup,
+  teardown,
+  text,
+} from "./testkit"
 
 const RENAMED = "https://proxy.example/assets/devtools.abc123.js"
 
-function script(attrs: Record<string, string>, src = RENAMED): HTMLScriptElement {
+function script(
+  attrs: Record<string, string>,
+  src = RENAMED
+): HTMLScriptElement {
   const s = document.createElement("script")
   s.type = "module"
   if (src) s.setAttribute("src", src)
@@ -31,8 +51,12 @@ function meta(name: string, content: string) {
   document.head.appendChild(m)
 }
 
-function element(attrs: Record<string, string>, options: MountOptions | null = null): WeftDevtools {
-  if (!customElements.get("weft-devtools")) customElements.define("weft-devtools", WeftDevtools)
+function element(
+  attrs: Record<string, string>,
+  options: MountOptions | null = null
+): WeftDevtools {
+  if (!customElements.get("weft-devtools"))
+    customElements.define("weft-devtools", WeftDevtools)
   const el = document.createElement("weft-devtools") as WeftDevtools
   for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v)
   el.options = options
@@ -70,9 +94,17 @@ function stage(
   if (set.includes(3)) meta(field, values[3])
   const attrs: Record<string, string> = {}
   if (set.includes(2)) attrs[`data-${field}`] = values[2]
-  const key = { endpoint: "endpoint", token: "token", "public-id": "publicId", position: "position", open: "open", auto: "auto" }[field]
+  const key = {
+    endpoint: "endpoint",
+    token: "token",
+    "public-id": "publicId",
+    position: "position",
+    open: "open",
+    auto: "auto",
+  }[field]
   // mount(opts) takes booleans for open and auto.
-  const v1 = field === "open" || field === "auto" ? values[1] === "true" : values[1]
+  const v1 =
+    field === "open" || field === "auto" ? values[1] === "true" : values[1]
   const options = set.includes(1) ? ({ [key]: v1 } as MountOptions) : null
   return readConfig(element(attrs, options))
 }
@@ -85,25 +117,56 @@ describe("the configuration ladder (C2): each field, one case per rung", () => {
     4: "http://script.test/studio",
   }
   const cases: Case[] = [
-    { name: "1. mount(opts) wins over every rung below", set: [1, 2, 3, 4], want: "http://opts.test/studio/" },
-    { name: "2. the element's attribute, when opts set none", set: [2, 3, 4], want: "http://attr.test/studio/" },
-    { name: "3. <meta name=weft:endpoint>, when neither does", set: [3, 4], want: "http://meta.test/studio/" },
-    { name: "4. the data-weft script tag's attribute", set: [4], want: "http://script.test/studio/" },
-    { name: "1 over 3: a gap in the middle is skipped", set: [1, 3], want: "http://opts.test/studio/" },
+    {
+      name: "1. mount(opts) wins over every rung below",
+      set: [1, 2, 3, 4],
+      want: "http://opts.test/studio/",
+    },
+    {
+      name: "2. the element's attribute, when opts set none",
+      set: [2, 3, 4],
+      want: "http://attr.test/studio/",
+    },
+    {
+      name: "3. <meta name=weft:endpoint>, when neither does",
+      set: [3, 4],
+      want: "http://meta.test/studio/",
+    },
+    {
+      name: "4. the data-weft script tag's attribute",
+      set: [4],
+      want: "http://script.test/studio/",
+    },
+    {
+      name: "1 over 3: a gap in the middle is skipped",
+      set: [1, 3],
+      want: "http://opts.test/studio/",
+    },
     // Rungs 5 and 6: nothing named it — the script's own directory, with
     // panel-config.json beside it to ask (the async rung, below).
-    { name: "5/6. none: the script's directory, panel-config.json beside it", set: [], want: "https://proxy.example/assets/" },
+    {
+      name: "5/6. none: the script's directory, panel-config.json beside it",
+      set: [],
+      want: "https://proxy.example/assets/",
+    },
   ]
   for (const c of cases) {
     it(`endpoint — ${c.name}`, () => {
       const cfg = stage("endpoint", c.set, endpoints)
       expect(cfg.endpoint).toBe(c.want)
       expect(cfg.endpointExplicit).toBe(c.set.length > 0)
-      expect(cfg.configURL).toBe(c.set.length ? "" : "https://proxy.example/assets/panel-config.json")
+      expect(cfg.configURL).toBe(
+        c.set.length ? "" : "https://proxy.example/assets/panel-config.json"
+      )
     })
   }
 
-  const tokens: Record<Rung, string> = { 1: "tok_opts", 2: "tok_attr", 3: "tok_meta", 4: "tok_script" }
+  const tokens: Record<Rung, string> = {
+    1: "tok_opts",
+    2: "tok_attr",
+    3: "tok_meta",
+    4: "tok_script",
+  }
   const tokenCases: Case[] = [
     { name: "1. mount(opts)", set: [1, 2, 3, 4], want: "tok_opts" },
     { name: "2. the element", set: [2, 3, 4], want: "tok_attr" },
@@ -118,7 +181,12 @@ describe("the configuration ladder (C2): each field, one case per rung", () => {
     })
   }
 
-  const ids: Record<Rung, string> = { 1: "pub_opts", 2: "pub_attr", 3: "pub_meta", 4: "pub_script" }
+  const ids: Record<Rung, string> = {
+    1: "pub_opts",
+    2: "pub_attr",
+    3: "pub_meta",
+    4: "pub_script",
+  }
   for (const c of [
     { name: "1", set: [1, 2, 3, 4], want: "pub_opts" },
     { name: "2", set: [2, 3, 4], want: "pub_attr" },
@@ -130,7 +198,12 @@ describe("the configuration ladder (C2): each field, one case per rung", () => {
     })
   }
 
-  const positions: Record<Rung, string> = { 1: "right-dock", 2: "bottom-left", 3: "right-dock", 4: "bottom-left" }
+  const positions: Record<Rung, string> = {
+    1: "right-dock",
+    2: "bottom-left",
+    3: "right-dock",
+    4: "bottom-left",
+  }
   for (const c of [
     { name: "1", set: [1, 2], want: "right-dock" },
     { name: "2", set: [2, 3], want: "bottom-left" },
@@ -156,7 +229,10 @@ describe("the configuration ladder (C2): each field, one case per rung", () => {
       document.head.querySelectorAll("script, meta").forEach((n) => n.remove())
       const lower = (c.set[0] + 1) as Rung
       if (lower <= 4) {
-        const vals = { 1: "true", 2: "true", 3: "true", 4: "true" } as Record<Rung, string>
+        const vals = { 1: "true", 2: "true", 3: "true", 4: "true" } as Record<
+          Rung,
+          string
+        >
         vals[c.set[0]] = "false"
         expect(stage("open", [c.set[0], lower], vals).open).toBe(false)
       }
@@ -166,7 +242,12 @@ describe("the configuration ladder (C2): each field, one case per rung", () => {
       document.head.querySelectorAll("script, meta").forEach((n) => n.remove())
       const lower = (c.set[0] + 1) as Rung
       if (lower <= 4) {
-        const vals = { 1: "false", 2: "false", 3: "false", 4: "false" } as Record<Rung, string>
+        const vals = {
+          1: "false",
+          2: "false",
+          3: "false",
+          4: "false",
+        } as Record<Rung, string>
         vals[c.set[0]] = "true"
         expect(stage("auto", [c.set[0], lower], vals).auto).toBe(true)
       }
@@ -218,7 +299,11 @@ describe("the configuration ladder (C2): each field, one case per rung", () => {
 
 describe("the panel's script tag (C2: never by its file name)", () => {
   it("a renamed bundle behind a proxy, marked data-weft, is found and its attributes read", () => {
-    const tag = script({ "data-weft": "", "data-public-id": "pub_7", "data-token": "tok" })
+    const tag = script({
+      "data-weft": "",
+      "data-public-id": "pub_7",
+      "data-token": "tok",
+    })
     expect(findPanelScript()).toBe(tag)
     const cfg = readConfig()
     expect(cfg.publicId).toBe("pub_7")
@@ -233,7 +318,10 @@ describe("the panel's script tag (C2: never by its file name)", () => {
   })
 
   it("several data-weft scripts: the first in document order wins", () => {
-    const first = script({ "data-weft": "", "data-public-id": "pub_first" }, "/a/one.js")
+    const first = script(
+      { "data-weft": "", "data-public-id": "pub_first" },
+      "/a/one.js"
+    )
     script({ "data-weft": "", "data-public-id": "pub_second" }, "/b/two.js")
     expect(findPanelScript()).toBe(first)
     expect(readConfig().publicId).toBe("pub_first")
@@ -242,7 +330,10 @@ describe("the panel's script tag (C2: never by its file name)", () => {
   it("the running classic script (document.currentScript) is the panel's, whatever it is called", async () => {
     script({ "data-weft": "", "data-public-id": "pub_other" }, "/other.js")
     const mine = script({ "data-public-id": "pub_mine" }, "/cdn/x9f.js")
-    Object.defineProperty(document, "currentScript", { configurable: true, get: () => mine })
+    Object.defineProperty(document, "currentScript", {
+      configurable: true,
+      get: () => mine,
+    })
     try {
       vi.resetModules()
       const fresh = await import("./config")
@@ -265,8 +356,14 @@ describe("the panel's script tag (C2: never by its file name)", () => {
   it("a third-party widget's tag ahead of the panel's, with generic data-* words, is never the panel's", () => {
     meta("token", "tok_meta")
     const decoy = script(
-      { "data-endpoint": "https://widget.example/api", "data-token": "widget_tok", "data-position": "left-dock", "data-open": "true", "data-auto": "false" },
-      "https://widget.example/embed.js",
+      {
+        "data-endpoint": "https://widget.example/api",
+        "data-token": "widget_tok",
+        "data-position": "left-dock",
+        "data-open": "true",
+        "data-auto": "false",
+      },
+      "https://widget.example/embed.js"
     )
     expect(findPanelScript()).toBeNull() // no data-weft, no src of ours: no tag at all
     let cfg = readConfig()
@@ -304,7 +401,14 @@ describe("rung 4 imported through @weftgo/devtools", () => {
   })
 
   it("the app chunk's tag is never the panel's: endpoint the page's directory, no panel-config.json, the app's data-* unread", async () => {
-    const chunk = script({ "data-endpoint": "/assets/api-proxy/", "data-auto": "false", "data-position": "left-dock" }, selfURL)
+    const chunk = script(
+      {
+        "data-endpoint": "/assets/api-proxy/",
+        "data-auto": "false",
+        "data-position": "left-dock",
+      },
+      selfURL
+    )
     expect(findPanelScript()).toBe(chunk) // the standalone panel.js: its own src is its tag
     WeftDevtools.npmEntry = true
     expect(findPanelScript()).toBeNull()
@@ -318,7 +422,9 @@ describe("rung 4 imported through @weftgo/devtools", () => {
     const studio = fakeStudio(baseRoutes())
     document.body.appendChild(element({}))
     await settle()
-    const urls = studio.fetchMock.mock.calls.map((c) => new URL(String(c[0]), location.href).href)
+    const urls = studio.fetchMock.mock.calls.map(
+      (c) => new URL(String(c[0]), location.href).href
+    )
     expect(urls).toContain(`${location.origin}/app/api/meta`)
     expect(urls.some((u) => u.includes("panel-config.json"))).toBe(false)
   })
@@ -326,7 +432,10 @@ describe("rung 4 imported through @weftgo/devtools", () => {
   it("data-weft still names the panel's tag under the npm entry", () => {
     WeftDevtools.npmEntry = true
     script({}, selfURL)
-    const tagged = script({ "data-weft": "", "data-endpoint": "https://studio.example/studio" }, "/assets/index-abc.js")
+    const tagged = script(
+      { "data-weft": "", "data-endpoint": "https://studio.example/studio" },
+      "/assets/index-abc.js"
+    )
     expect(findPanelScript()).toBe(tagged)
     expect(readConfig().endpoint).toBe("https://studio.example/studio/")
   })
@@ -348,7 +457,10 @@ describe("rung 4 imported through @weftgo/devtools", () => {
   })
 
   it("the assembler writes the same mark config.ts reads", () => {
-    const src = readFileSync(resolve(process.cwd(), "scripts/npm-package.ts"), "utf8")
+    const src = readFileSync(
+      resolve(process.cwd(), "scripts/npm-package.ts"),
+      "utf8"
+    )
     expect(src).toContain(`const NPM_MARK = "${NPM_MARK}"`)
     expect(src).toContain("globalThis.${NPM_MARK} = true")
     expect(src).toContain("delete globalThis.${NPM_MARK}")
@@ -359,30 +471,59 @@ describe("rung 4 imported through @weftgo/devtools", () => {
 
 describe("panel-config.json (rung 5)", () => {
   const stub = (body: unknown, status = 200) => {
-    const f = vi.fn(async (_u: RequestInfo | URL, _i?: RequestInit) => json(body, status))
+    const f = vi.fn(async (_u: RequestInfo | URL, _i?: RequestInit) =>
+      json(body, status)
+    )
     vi.stubGlobal("fetch", f)
     return f
   }
 
   it("names the endpoint: same origin, normalized; no token, no credentials go with the request", async () => {
-    const f = stub({ endpoint: "https://proxy.example/studio", version: "v0.7.0", capabilities: [], token: "nope" })
-    expect(await discoverEndpoint("https://proxy.example/assets/panel-config.json")).toBe("https://proxy.example/studio/")
+    const f = stub({
+      endpoint: "https://proxy.example/studio",
+      version: "v0.7.0",
+      capabilities: [],
+      token: "nope",
+    })
+    expect(
+      await discoverEndpoint("https://proxy.example/assets/panel-config.json")
+    ).toBe("https://proxy.example/studio/")
     const init = f.mock.calls[0][1] as RequestInit
-    expect((init.headers as Record<string, string>).Authorization).toBeUndefined()
+    expect(
+      (init.headers as Record<string, string>).Authorization
+    ).toBeUndefined()
     expect(init.credentials).toBe("omit")
   })
 
   it("another origin, a 404, not JSON, not http(s): no endpoint (the caller falls to the script's directory)", async () => {
     stub({ endpoint: "https://elsewhere.example/studio/" })
-    expect(await discoverEndpoint("https://proxy.example/assets/panel-config.json")).toBe("")
+    expect(
+      await discoverEndpoint("https://proxy.example/assets/panel-config.json")
+    ).toBe("")
     stub({ endpoint: "javascript:alert(1)" })
-    expect(await discoverEndpoint("https://proxy.example/assets/panel-config.json")).toBe("")
+    expect(
+      await discoverEndpoint("https://proxy.example/assets/panel-config.json")
+    ).toBe("")
     stub({ error: {} }, 404)
-    expect(await discoverEndpoint("https://proxy.example/assets/panel-config.json")).toBe("")
-    vi.stubGlobal("fetch", vi.fn(async () => new Response("<html>", { status: 200 })))
-    expect(await discoverEndpoint("https://proxy.example/assets/panel-config.json")).toBe("")
-    vi.stubGlobal("fetch", vi.fn(async () => { throw new TypeError("offline") }))
-    expect(await discoverEndpoint("https://proxy.example/assets/panel-config.json")).toBe("")
+    expect(
+      await discoverEndpoint("https://proxy.example/assets/panel-config.json")
+    ).toBe("")
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("<html>", { status: 200 }))
+    )
+    expect(
+      await discoverEndpoint("https://proxy.example/assets/panel-config.json")
+    ).toBe("")
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new TypeError("offline")
+      })
+    )
+    expect(
+      await discoverEndpoint("https://proxy.example/assets/panel-config.json")
+    ).toBe("")
   })
 })
 
@@ -390,16 +531,24 @@ describe("panel-config.json (rung 5)", () => {
 
 /** Where the panel asked for meta, and with what. */
 const metaURLs = (s: ReturnType<typeof fakeStudio>) =>
-  s.fetchMock.mock.calls.map((c) => String(c[0])).filter((u) => u.endsWith("/api/meta"))
+  s.fetchMock.mock.calls
+    .map((c) => String(c[0]))
+    .filter((u) => u.endsWith("/api/meta"))
 
 describe("a bundle renamed to devtools.abc123.js behind a proxy finds its config", () => {
   it("endpoint from the script tag's attributes", async () => {
-    script({ "data-weft": "", "data-endpoint": "https://proxy.example/studio/", "data-public-id": "pub_orders" })
+    script({
+      "data-weft": "",
+      "data-endpoint": "https://proxy.example/studio/",
+      "data-public-id": "pub_orders",
+    })
     const studio = fakeStudio(baseRoutes())
     const el = mountPanel({ open: true })
     await settle()
     expect(metaURLs(studio)).toEqual(["https://proxy.example/studio/api/meta"])
-    expect(studio.calls.some((c) => c.path.endsWith("panel-config.json"))).toBe(false) // explicit: never asked
+    expect(studio.calls.some((c) => c.path.endsWith("panel-config.json"))).toBe(
+      false
+    ) // explicit: never asked
     expect(text(el, ".weft-title")).toContain("pub_orders")
   })
 
@@ -407,14 +556,24 @@ describe("a bundle renamed to devtools.abc123.js behind a proxy finds its config
     script({ "data-weft": "", "data-public-id": "pub_orders" })
     const studio = fakeStudio({
       ...baseRoutes(),
-      "/assets/panel-config.json": { endpoint: "https://proxy.example/studio", version: "v0.2.1", capabilities: [] },
+      "/assets/panel-config.json": {
+        endpoint: "https://proxy.example/studio",
+        version: "v0.2.1",
+        capabilities: [],
+      },
     })
     const el = mountPanel({ open: true })
     await settle()
-    expect(studio.fetchMock.mock.calls[0][0]).toBe("https://proxy.example/assets/panel-config.json")
+    expect(studio.fetchMock.mock.calls[0][0]).toBe(
+      "https://proxy.example/assets/panel-config.json"
+    )
     expect(metaURLs(studio)).toEqual(["https://proxy.example/studio/api/meta"])
     // The deep links follow the discovered endpoint.
-    expect($(el, "a")?.getAttribute("href")?.startsWith("https://proxy.example/studio/")).toBe(true)
+    expect(
+      $(el, "a")
+        ?.getAttribute("href")
+        ?.startsWith("https://proxy.example/studio/")
+    ).toBe(true)
   })
 
   it("endpoint from its own directory, the last rung", async () => {
@@ -429,11 +588,16 @@ describe("a bundle renamed to devtools.abc123.js behind a proxy finds its config
     // Explicit (a meta tag): panel-config.json is not even asked.
     meta("endpoint", "https://proxy.example/studio/")
     script({ "data-weft": "" })
-    let studio = fakeStudio({ ...baseRoutes(), "/assets/panel-config.json": { endpoint: "https://proxy.example/x/" } })
+    let studio = fakeStudio({
+      ...baseRoutes(),
+      "/assets/panel-config.json": { endpoint: "https://proxy.example/x/" },
+    })
     let el = mountPanel()
     await settle()
     expect(metaURLs(studio)).toEqual(["https://proxy.example/studio/api/meta"])
-    expect(studio.calls.some((c) => c.path.endsWith("panel-config.json"))).toBe(false)
+    expect(studio.calls.some((c) => c.path.endsWith("panel-config.json"))).toBe(
+      false
+    )
     el.remove()
     document.head.querySelectorAll("meta").forEach((n) => n.remove())
 
@@ -441,14 +605,20 @@ describe("a bundle renamed to devtools.abc123.js behind a proxy finds its config
     // another origin and carries a token of its own — both refused.
     studio = fakeStudio({
       ...baseRoutes(),
-      "/assets/panel-config.json": { endpoint: "https://evil.example/studio/", token: "evil_tok" },
+      "/assets/panel-config.json": {
+        endpoint: "https://evil.example/studio/",
+        token: "evil_tok",
+      },
     })
-    document.head.querySelector("script")!.setAttribute("data-token", "tok_secret")
+    document.head
+      .querySelector("script")!
+      .setAttribute("data-token", "tok_secret")
     el = mountPanel()
     await settle()
     expect(metaURLs(studio)).toEqual(["https://proxy.example/assets/api/meta"])
     for (const [u, init] of studio.fetchMock.mock.calls) {
-      const auth = ((init?.headers ?? {}) as Record<string, string>).Authorization
+      const auth = ((init?.headers ?? {}) as Record<string, string>)
+        .Authorization
       if (String(u).endsWith("panel-config.json")) expect(auth).toBeUndefined()
       else {
         expect(new URL(String(u)).origin).toBe("https://proxy.example")
@@ -469,8 +639,14 @@ describe("no Studio: a line for the host's mount, silence for the panel's own", 
   it("mount(opts): 'Studio not reachable at <endpoint> · retry'; retry probes again and the panel comes up", async () => {
     const spies = consoleSpies()
     let up = false
-    const studio = fakeStudio(baseRoutes(), () => (up ? META : new Response("no studio", { status: 404 })))
-    const el = mountPanel({ endpoint: "http://studio.test/studio", publicId: "pub_orders", open: true })
+    const studio = fakeStudio(baseRoutes(), () =>
+      up ? META : new Response("no studio", { status: 404 })
+    )
+    const el = mountPanel({
+      endpoint: "http://studio.test/studio",
+      publicId: "pub_orders",
+      open: true,
+    })
     await settle()
     expect(el.isConnected).toBe(true)
     const line = text(el, ".weft-unreachable")
@@ -508,7 +684,9 @@ describe("no Studio: a line for the host's mount, silence for the panel's own", 
       held = true
       click($(el, ".weft-unreachable button"))
       await new Promise((r) => setTimeout(r, 20)) // the probe is in flight
-      expect(text(el, ".weft-unreachable")).toBe("Studio not reachable at http://studio.test/studio/ · checking…")
+      expect(text(el, ".weft-unreachable")).toBe(
+        "Studio not reachable at http://studio.test/studio/ · checking…"
+      )
       expect($(el, ".weft-fab, .weft-dock")).toBeNull()
       release()
       await settle()
@@ -523,30 +701,45 @@ describe("no Studio: a line for the host's mount, silence for the panel's own", 
     meta("endpoint", "http://down.test/studio/")
     const studio = fakeStudio(baseRoutes())
     // The first request (meta at down.test) gets no Studio.
-    studio.fetchMock.mockImplementationOnce(async () => new Response("no studio", { status: 404 }))
+    studio.fetchMock.mockImplementationOnce(
+      async () => new Response("no studio", { status: 404 })
+    )
     const el = mountPanel({ open: true, publicId: "pub_orders" })
     await settle()
     expect(text(el, ".weft-unreachable")).toContain("http://down.test/studio/")
-    document.head.querySelector("meta")!.setAttribute("content", "http://up.test/studio/")
+    document.head
+      .querySelector("meta")!
+      .setAttribute("content", "http://up.test/studio/")
     click($(el, ".weft-unreachable button"))
     await settle()
     expect($(el, ".weft-unreachable")).toBeNull()
-    expect(metaURLs(studio)).toEqual(["http://down.test/studio/api/meta", "http://up.test/studio/api/meta"])
+    expect(metaURLs(studio)).toEqual([
+      "http://down.test/studio/api/meta",
+      "http://up.test/studio/api/meta",
+    ])
     expect(text(el, ".weft-title")).toContain("pub_orders")
   })
 
   it("markup with data-auto=false shows the line too", async () => {
     fakeStudio(baseRoutes(), new Response("no studio", { status: 404 }))
-    const el = element({ "data-endpoint": "http://studio.test/studio/", "data-auto": "false" })
+    const el = element({
+      "data-endpoint": "http://studio.test/studio/",
+      "data-auto": "false",
+    })
     document.body.appendChild(el)
     await settle()
-    expect(text(el, ".weft-unreachable")).toContain("Studio not reachable at http://studio.test/studio/")
+    expect(text(el, ".weft-unreachable")).toContain(
+      "Studio not reachable at http://studio.test/studio/"
+    )
   })
 
   it("the panel's own auto-mounted dock removes itself silently: no line, no console", async () => {
     const spies = consoleSpies()
     script({ "data-weft": "" })
-    const studio = fakeStudio(baseRoutes(), new Response("no studio", { status: 404 }))
+    const studio = fakeStudio(
+      baseRoutes(),
+      new Response("no studio", { status: 404 })
+    )
     const dock = element({})
     dock.autoMounted = true
     document.body.appendChild(dock)

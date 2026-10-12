@@ -6,7 +6,11 @@
 import { vi } from "vitest"
 import type { RunRow, SessionRow } from "../lib/api"
 import { WeftDevtools } from "./element"
-import { answerLiveGrant, checkLiveURL, resetGrants } from "../test/fake-live-grant"
+import {
+  answerLiveGrant,
+  checkLiveURL,
+  resetGrants,
+} from "../test/fake-live-grant"
 
 export const T0 = "2026-10-01T09:00:00Z"
 
@@ -94,7 +98,9 @@ export const RUNTIMES = {
 export function page(events: unknown[], over: Record<string, unknown> = {}) {
   return {
     events: events.map((event, pos) =>
-      event && typeof event === "object" && "pos" in event ? event : { pos, time: T0, event }
+      event && typeof event === "object" && "pos" in event
+        ? event
+        : { pos, time: T0, event }
     ),
     next_after: null,
     done: true,
@@ -103,8 +109,14 @@ export function page(events: unknown[], over: Record<string, unknown> = {}) {
   }
 }
 
-export const user = (text: string) => ({ role: "user", content: [{ type: "text", text }] })
-export const assistant = (text: string, calls: { id: string; name: string; args?: unknown }[] = []) => ({
+export const user = (text: string) => ({
+  role: "user",
+  content: [{ type: "text", text }],
+})
+export const assistant = (
+  text: string,
+  calls: { id: string; name: string; args?: unknown }[] = []
+) => ({
   role: "assistant",
   content: [
     ...(text ? [{ type: "text", text }] : []),
@@ -120,23 +132,51 @@ export const transcript = (...batches: unknown[][]) => {
   let step = -1
   return {
     batches: batches.map((messages, index) => {
-      if (index > 0 && messages.some((m) => (m as { role?: string } | null)?.role === "assistant")) step++
+      if (
+        index > 0 &&
+        messages.some(
+          (m) => (m as { role?: string } | null)?.role === "assistant"
+        )
+      )
+        step++
       return { index, step: Math.max(step, 0), input: index === 0, messages }
     }),
   }
 }
 
 /** One finished single-step run's events. */
-export function runEvents(id: string, over: { pending?: unknown[] } = {}): unknown[] {
+export function runEvents(
+  id: string,
+  over: { pending?: unknown[] } = {}
+): unknown[] {
   return [
-    { type: "run_start", id, model: { provider: "wefttest", name: "script" }, agent: "acme-support" },
+    {
+      type: "run_start",
+      id,
+      model: { provider: "wefttest", name: "script" },
+      agent: "acme-support",
+    },
     { type: "step_start", run_id: id, index: 0 },
-    { type: "step_finish", run_id: id, index: 0, reason: "stop", usage: { input_tokens: 10, output_tokens: 4 } },
-    { type: "run_finish", run_id: id, usage: { input_tokens: 10, output_tokens: 4 }, steps: 1, ...over },
+    {
+      type: "step_finish",
+      run_id: id,
+      index: 0,
+      reason: "stop",
+      usage: { input_tokens: 10, output_tokens: 4 },
+    },
+    {
+      type: "run_finish",
+      run_id: id,
+      usage: { input_tokens: 10, output_tokens: 4 },
+      steps: 1,
+      ...over,
+    },
   ]
 }
 
-export type Route = unknown | ((init?: RequestInit) => unknown | Response | Promise<unknown | Response>)
+export type Route =
+  | unknown
+  | ((init?: RequestInit) => unknown | Response | Promise<unknown | Response>)
 
 export function json(v: unknown, status = 200): Response {
   return new Response(JSON.stringify(v), {
@@ -145,8 +185,11 @@ export function json(v: unknown, status = 200): Response {
   })
 }
 
-export const apiError = (status: number, code: string, message: string): Response =>
-  json({ error: { code, message } }, status)
+export const apiError = (
+  status: number,
+  code: string,
+  message: string
+): Response => json({ error: { code, message } }, status)
 
 /** The fake Studio: keyed on the decoded path (+ "POST "/"PUT " for
  * the write verbs). A route may be a function — a stateful answer, a
@@ -155,18 +198,30 @@ export const apiError = (status: number, code: string, message: string): Respons
  * overrides it; a ?token= on any route is a 401, as studio/auth.go
  * refuses it. */
 export function fakeStudio(routes: Record<string, Route>, meta: Route = META) {
-  const calls: { method: string; path: string; body: unknown; headers: Record<string, string> }[] = []
-  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    inflight++
-    try {
-      return await answer(input, init)
-    } finally {
-      inflight--
+  const calls: {
+    method: string
+    path: string
+    body: unknown
+    headers: Record<string, string>
+  }[] = []
+  const fetchMock = vi.fn(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      inflight++
+      try {
+        return await answer(input, init)
+      } finally {
+        inflight--
+      }
     }
-  })
-  const answer = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+  )
+  const answer = async (
+    input: RequestInfo | URL,
+    init?: RequestInit
+  ): Promise<Response> => {
     const url = new URL(String(input), "http://studio.test/studio/api/")
-    const path = decodeURIComponent(url.pathname).replace(/^.*\/api\//, "") + (url.search || "")
+    const path =
+      decodeURIComponent(url.pathname).replace(/^.*\/api\//, "") +
+      (url.search || "")
     const method = init?.method ?? "GET"
     calls.push({
       method,
@@ -174,21 +229,29 @@ export function fakeStudio(routes: Record<string, Route>, meta: Route = META) {
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
       headers: (init?.headers ?? {}) as Record<string, string>,
     })
-    if (url.searchParams.has("token")) return apiError(401, "unauthorized", "a token in the URL is refused")
+    if (url.searchParams.has("token"))
+      return apiError(401, "unauthorized", "a token in the URL is refused")
     const key = method === "GET" ? path : `${method} ${path}`
     if (key === "POST live-grant" && !("POST live-grant" in routes)) {
       const auth = new Headers(init?.headers).get("Authorization") ?? ""
-      return answerLiveGrant(url, auth.startsWith("Bearer ") ? auth.slice(7) : "", init?.body ? String(init.body) : undefined)
+      return answerLiveGrant(
+        url,
+        auth.startsWith("Bearer ") ? auth.slice(7) : "",
+        init?.body ? String(init.body) : undefined
+      )
     }
     let hit: Route = path === "meta" ? meta : routes[key]
-    if (typeof hit === "function") hit = await (hit as (i?: RequestInit) => unknown)(init)
+    if (typeof hit === "function")
+      hit = await (hit as (i?: RequestInit) => unknown)(init)
     if (hit instanceof Response) return hit
     if (hit !== undefined) return json(hit)
     return apiError(404, "not_found", path)
   }
   vi.stubGlobal("fetch", fetchMock)
-  const gets = (prefix: string) => calls.filter((c) => c.method === "GET" && c.path.startsWith(prefix))
-  const posts = (prefix: string) => calls.filter((c) => c.method === "POST" && c.path.startsWith(prefix))
+  const gets = (prefix: string) =>
+    calls.filter((c) => c.method === "GET" && c.path.startsWith(prefix))
+  const posts = (prefix: string) =>
+    calls.filter((c) => c.method === "POST" && c.path.startsWith(prefix))
   return { fetchMock, calls, gets, posts }
 }
 
@@ -234,7 +297,10 @@ export class FakeEventSource {
   }
   /** opened: the connection is up. */
   opened() {
-    if (this.refused) throw new Error(`FakeEventSource: ${this.url} was refused: ${this.refused}`)
+    if (this.refused)
+      throw new Error(
+        `FakeEventSource: ${this.url} was refused: ${this.refused}`
+      )
     this.readyState = 1
     this.onopen?.({})
   }
@@ -258,10 +324,14 @@ export class FakeEventSource {
   /** A panel token's stream ended at its expiry: the one final frame,
    * no id. */
   expire() {
-    this.listeners.get("expired")?.forEach((cb) => cb({ data: "{}", lastEventId: "" }))
+    this.listeners
+      .get("expired")
+      ?.forEach((cb) => cb({ data: "{}", lastEventId: "" }))
   }
   static live(part: string): FakeEventSource[] {
-    return FakeEventSource.instances.filter((i) => i.url.includes(part) && i.readyState !== 2)
+    return FakeEventSource.instances.filter(
+      (i) => i.url.includes(part) && i.readyState !== 2
+    )
   }
   static last(part: string): FakeEventSource | undefined {
     return FakeEventSource.instances.filter((i) => i.url.includes(part)).pop()
@@ -292,7 +362,9 @@ export async function idle(): Promise<void> {
     // A draw still scheduled (a live draw waits out LIVE_DRAW_MS) is
     // not rest either.
     const drawing = Array.from(document.querySelectorAll("weft-devtools")).some(
-      (n) => typeof (n as Partial<WeftDevtools>).quiet === "function" && !(n as WeftDevtools).quiet()
+      (n) =>
+        typeof (n as Partial<WeftDevtools>).quiet === "function" &&
+        !(n as WeftDevtools).quiet()
     )
     still = inflight === 0 && !drawing && now === last ? still + 1 : 0
     last = now
@@ -313,13 +385,16 @@ export const ATTRS = {
 }
 
 export function create(attrs: Record<string, string> = ATTRS): WeftDevtools {
-  if (!customElements.get("weft-devtools")) customElements.define("weft-devtools", WeftDevtools)
+  if (!customElements.get("weft-devtools"))
+    customElements.define("weft-devtools", WeftDevtools)
   const el = document.createElement("weft-devtools")
   for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v)
   return el as WeftDevtools
 }
 
-export async function mount(attrs: Record<string, string> = ATTRS): Promise<WeftDevtools> {
+export async function mount(
+  attrs: Record<string, string> = ATTRS
+): Promise<WeftDevtools> {
   const el = create(attrs)
   document.body.appendChild(el)
   await settle()
@@ -330,10 +405,18 @@ export const $ = (el: WeftDevtools, sel: string): Element | null =>
   el.shadowRoot?.querySelector(sel) ?? null
 export const all = (el: WeftDevtools, sel: string): Element[] =>
   Array.from(el.shadowRoot?.querySelectorAll(sel) ?? [])
-export const text = (el: WeftDevtools, sel: string): string => $(el, sel)?.textContent ?? ""
-export const button = (el: WeftDevtools, label: string, within = ""): HTMLElement | undefined =>
-  all(el, `${within} button, ${within} a`).find((b) => b.textContent === label) as HTMLElement | undefined
-export const click = (n: Element | null | undefined) => n?.dispatchEvent(new Event("click", { bubbles: true }))
+export const text = (el: WeftDevtools, sel: string): string =>
+  $(el, sel)?.textContent ?? ""
+export const button = (
+  el: WeftDevtools,
+  label: string,
+  within = ""
+): HTMLElement | undefined =>
+  all(el, `${within} button, ${within} a`).find(
+    (b) => b.textContent === label
+  ) as HTMLElement | undefined
+export const click = (n: Element | null | undefined) =>
+  n?.dispatchEvent(new Event("click", { bubbles: true }))
 
 /** trap records everything that would have reached the host page's
  * own error handlers: window "error" events (a throw in a listener, a
@@ -362,8 +445,16 @@ export function trap() {
 /** The single-turn conversation every suite starts from. */
 export function baseRoutes(): Record<string, Route> {
   return {
-    "sessions?public_id=pub_orders": { total: 1, sessions: [SESSION], next_before: null },
-    "runs?public_id=pub_orders&limit=50": { total: 1, runs: [runRow({})], next_before: null },
+    "sessions?public_id=pub_orders": {
+      total: 1,
+      sessions: [SESSION],
+      next_before: null,
+    },
+    "runs?public_id=pub_orders&limit=50": {
+      total: 1,
+      runs: [runRow({})],
+      next_before: null,
+    },
     "runs/s_01-t1": { ...runRow({}), children: [] },
     "runs/s_01-t1/events?after=0&limit=500": page(runEvents("s_01-t1")),
     "runs/s_01-t1/transcript": transcript(
@@ -380,11 +471,13 @@ export function setup() {
   FakeEventSource.instances = []
   resetGrants()
   vi.stubGlobal("EventSource", FakeEventSource)
-  ;(globalThis as { __WEFT_PANEL_VERSION__?: string }).__WEFT_PANEL_VERSION__ = "v0.2.1"
+  ;(globalThis as { __WEFT_PANEL_VERSION__?: string }).__WEFT_PANEL_VERSION__ =
+    "v0.2.1"
 }
 
 export function teardown() {
-  delete (globalThis as { __WEFT_PANEL_VERSION__?: string }).__WEFT_PANEL_VERSION__
+  delete (globalThis as { __WEFT_PANEL_VERSION__?: string })
+    .__WEFT_PANEL_VERSION__
   vi.useRealTimers()
   vi.unstubAllGlobals()
   document.body.innerHTML = ""
@@ -393,7 +486,10 @@ export function teardown() {
 // ── E3.2: the step compare in the result pane ────────────────────
 
 /** META with the step compare served (capability "diff"). */
-export const DIFF_META = { ...META, capabilities: [...META.capabilities, "diff"] }
+export const DIFF_META = {
+  ...META,
+  capabilities: [...META.capabilities, "diff"],
+}
 
 /** stepDiffRoutes is baseRoutes with an experiment that has ended by
  * the time its command names the run (pg_x1, a replay of s_01-t1 from
@@ -410,9 +506,20 @@ export function stepDiffRoutes(doc: unknown): Record<string, Route> {
     created: T0,
     updated: T0,
   }
-  r["runs/pg_x1"] = { ...runRow({ id: "pg_x1", playground: true, session_id: "", forked_from: "s_01-t1#0" }), children: [] }
+  r["runs/pg_x1"] = {
+    ...runRow({
+      id: "pg_x1",
+      playground: true,
+      session_id: "",
+      forked_from: "s_01-t1#0",
+    }),
+    children: [],
+  }
   r["runs/pg_x1/events?after=0&limit=500"] = page(runEvents("pg_x1"))
-  r["runs/pg_x1/transcript"] = transcript([user("where is my order #4411?")], [assistant("It is delayed until Friday.")])
+  r["runs/pg_x1/transcript"] = transcript(
+    [user("where is my order #4411?")],
+    [assistant("It is delayed until Friday.")]
+  )
   r["diff?a=s_01-t1&b=pg_x1"] = doc
   return r
 }

@@ -31,7 +31,13 @@
 // share link's fragment, #state=<compact>, which restores the form on
 // any browser against the same Studio and starts nothing.
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, Link, useLocation, useNavigate, useSearch } from "@tanstack/react-router"
+import {
+  createFileRoute,
+  Link,
+  useLocation,
+  useNavigate,
+  useSearch,
+} from "@tanstack/react-router"
 import { useEffect, useMemo, useRef, useState } from "react"
 import type { Dispatch, SetStateAction } from "react"
 
@@ -65,7 +71,13 @@ import {
   toolsOffFor,
   unmatchedDrafts,
 } from "@/lib/experiment-body"
-import type { EditDraft, Engine, SideEffects, ThreadMode, VariantFields } from "@/lib/experiment-body"
+import type {
+  EditDraft,
+  Engine,
+  SideEffects,
+  ThreadMode,
+  VariantFields,
+} from "@/lib/experiment-body"
 import { relativeTime, spanMs } from "@/lib/format"
 import { copyText, download } from "@/lib/json"
 import { keepEditedTitle } from "@/lib/saves"
@@ -73,7 +85,7 @@ import { mintExperimentID, validExperimentID } from "@/lib/experiments"
 import { keepPrompt } from "@/components/studio/saves"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { CapsUnread } from "@/components/studio/caps-unread"
-import { RUNTIMES_POLL_MS } from "@/hooks/use-notices"
+import { RUNTIMES_POLL_MS, useRuntimesNeeded } from "@/hooks/use-notices"
 import { canReplay } from "@/lib/replay"
 import {
   isUnknownCommand,
@@ -83,7 +95,11 @@ import {
 } from "@/hooks/use-command-tracking"
 import type { Experiment } from "@/hooks/use-command-tracking"
 import { useRunEvents } from "@/hooks/use-run-events"
-import { ExperimentForm, StepPicker, useSourceEditFields } from "@/components/studio/experiment-form"
+import {
+  ExperimentForm,
+  StepPicker,
+  useSourceEditFields,
+} from "@/components/studio/experiment-form"
 import { EditList } from "@/components/studio/transcript-editor"
 import { mayReadExperiments } from "@/components/studio/no-experiments"
 import { editsProblem } from "@/lib/edits"
@@ -91,10 +107,32 @@ import { Button } from "@/components/ui/button"
 import { SelectField } from "@/components/ui/select-field"
 import { SplitPane } from "@/components/studio/split-pane"
 import { SPLITS } from "@/lib/pane-sizes"
-import { compareLink, experimentLink, experimentsLink, href, playgroundSearch, playgroundShareLink, runLink } from "@/lib/links"
-import { decodeForm, encodeForm, formOfFields, SHARE_CAP, cellCommandID, stateFromHash } from "@/lib/form-state"
+import {
+  compareLink,
+  experimentLink,
+  experimentsLink,
+  href,
+  playgroundSearch,
+  playgroundShareLink,
+  runLink,
+} from "@/lib/links"
+import {
+  decodeForm,
+  encodeForm,
+  formOfFields,
+  SHARE_CAP,
+  cellCommandID,
+  stateFromHash,
+} from "@/lib/form-state"
 import type { FormState, FormVariant } from "@/lib/form-state"
-import { deleteDraft, experimentDraftID, listDrafts, loadDraft, newDraftID, saveDraft } from "@/lib/drafts"
+import {
+  deleteDraft,
+  experimentDraftID,
+  listDrafts,
+  loadDraft,
+  newDraftID,
+  saveDraft,
+} from "@/lib/drafts"
 import type { DraftRecord } from "@/lib/drafts"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { notify } from "@/lib/notify"
@@ -116,7 +154,6 @@ export {
 } from "@/lib/experiment-body"
 export type { EditDraft, EditField } from "@/lib/experiment-body"
 export { Breakpoints } from "@/components/studio/experiment-form"
-
 
 /** What the panel carries over (§2: run, step, current overrides —
  * every knob of the drawer, so nothing is retyped or reset). */
@@ -163,7 +200,9 @@ function parseHandoff(search: Record<string, unknown>): PlaygroundSearch {
   return {
     run: str(search.run),
     step:
-      typeof search.step === "number" && Number.isInteger(search.step) && search.step > 0
+      typeof search.step === "number" &&
+      Number.isInteger(search.step) &&
+      search.step > 0
         ? search.step
         : undefined,
     instructions: str(search.instructions),
@@ -208,16 +247,21 @@ export function handoffFromHash(hash: string): Partial<PlaygroundSearch> {
   }
   const parsed = parseHandoff(rec)
   const out: Partial<PlaygroundSearch> = {}
-  for (const [k, v] of Object.entries(parsed) as [keyof PlaygroundSearch, unknown][])
+  for (const [k, v] of Object.entries(parsed) as [
+    keyof PlaygroundSearch,
+    unknown,
+  ][])
     if (v !== undefined) (out as Record<string, unknown>)[k] = v
   return out
 }
 
 /** Why a read-scoped token sees no Run: the server refuses it (403). */
-export const READ_ONLY_NOTE = "this token may read the playground, not run it: Run is for a dev or write token"
+export const READ_ONLY_NOTE =
+  "this token may read the playground, not run it: Run is for a dev or write token"
 
 export const Route = createFileRoute("/playground")({
-  validateSearch: (search: Record<string, unknown>): PlaygroundSearch => parseHandoff(search),
+  validateSearch: (search: Record<string, unknown>): PlaygroundSearch =>
+    parseHandoff(search),
   component: PlaygroundPage,
 })
 
@@ -245,7 +289,9 @@ function pageStateKey(state: PageState): string {
  * not when the page itself writes its state back (G2: own() names
  * those writes).
  */
-function useHandoff(): PlaygroundSearch & { own: (state: PageState, exp?: string) => boolean } {
+function useHandoff(): PlaygroundSearch & {
+  own: (state: PageState, exp?: string) => boolean
+} {
   const query = useSearch({ from: "/playground" })
   const hash = useLocation({ select: (l) => l.hash })
   const navigate = useNavigate()
@@ -287,7 +333,8 @@ function useHandoff(): PlaygroundSearch & { own: (state: PageState, exp?: string
       })
       const key = JSON.stringify(next)
       if (key === queryKey) return false
-      if (queryKey === arrival.query || arrival.own.has(queryKey)) arrival.own.add(key)
+      if (queryKey === arrival.query || arrival.own.has(queryKey))
+        arrival.own.add(key)
       // No hash: the fragment was read on arrival and leaves the bar.
       void navigate({ to: ".", search: next, replace: true })
       return true
@@ -296,7 +343,10 @@ function useHandoff(): PlaygroundSearch & { own: (state: PageState, exp?: string
   )
   const fromArrival = queryKey === arrival.query || arrival.own.has(queryKey)
   return useMemo(
-    () => ({ ...(fromArrival ? { ...query, ...arrival.fromHash } : query), own }),
+    () => ({
+      ...(fromArrival ? { ...query, ...arrival.fromHash } : query),
+      own,
+    }),
     [query, fromArrival, arrival, own]
   )
 }
@@ -305,9 +355,11 @@ function PlaygroundPage() {
   const { experiment } = useSearch({ from: "/playground" })
   useDocumentTitle({ page: "playground", experiment })
   const caps = useCapabilities()
-  if (caps.loading) return <p className="p-6 text-xs text-muted-foreground">loading…</p>
+  if (caps.loading)
+    return <p className="p-6 text-xs text-muted-foreground">loading…</p>
   if (caps.error) return <CapsUnread error={caps.error} />
-  if (!caps.has("playground")) return <NoPlayground why={caps.why("playground")} />
+  if (!caps.has("playground"))
+    return <NoPlayground why={caps.why("playground")} />
   return <Playground caps={caps.caps} />
 }
 
@@ -318,13 +370,17 @@ function NoPlayground({ why }: { why?: string }) {
     <div className="mx-auto max-w-lg space-y-2 py-24 text-center">
       <p className="text-sm">This Studio has no playground and no debugger.</p>
       {why && (
-        <p className="text-xs text-muted-foreground" data-testid="playground-why">
+        <p
+          className="text-xs text-muted-foreground"
+          data-testid="playground-why"
+        >
           {why}
         </p>
       )}
       <p className="text-xs text-muted-foreground">
-        The runtime link opens with <span className="font-mono">studio.Playground(true)</span>{" "}
-        and <span className="font-mono">runtime.Install(...)</span> in your app
+        The runtime link opens with{" "}
+        <span className="font-mono">studio.Playground(true)</span> and{" "}
+        <span className="font-mono">runtime.Install(...)</span> in your app
         (WEFT-PLAYGROUND §6 rule 1).
       </p>
     </div>
@@ -377,9 +433,11 @@ export function nextVariantKey(keys: string[]): string {
  * it can. Keys address the cells and the experiment's variants. */
 export function variantKeyProblem(key: string, others: string[]): string {
   if (!key.trim()) return "a variant needs a name"
-  if (key !== key.trim()) return "a variant's name has no leading or trailing spaces"
+  if (key !== key.trim())
+    return "a variant's name has no leading or trailing spaces"
   if (key.length > 32) return "a variant's name is at most 32 characters"
-  if ([...key].some((ch) => ch.charCodeAt(0) < 32)) return "a variant's name has no control characters"
+  if ([...key].some((ch) => ch.charCodeAt(0) < 32))
+    return "a variant's name has no control characters"
   if (others.includes(key)) return `variant ${key} already exists`
   return ""
 }
@@ -422,16 +480,20 @@ function Playground({ caps }: { caps: string[] }) {
   const search = useHandoff()
   // Runtimes come and go (an app restarts, a second one connects):
   // the picker follows them.
-  // The shell's runtime notices poll this key every 5 s (use-notices.ts,
-  // the one poller) where the bearer may act (canReplay): this observer
-  // reads the shared cache. A read-scoped token sees the playground with
+  // The shell's runtime notices poll this key (use-notices.ts, the one
+  // poller) where the bearer may act (canReplay) — every 5 s while this
+  // page holds useRuntimesNeeded: this observer reads the shared cache. A read-scoped token sees the playground with
   // the shell's poll off — GET /api/runtimes is the picker for every
   // identity — so here the page is that one poller itself.
   const shellPolls = canReplay(caps, studioToken())
   // …and only such a bearer runs: a read-scoped token's Run would 403,
   // so the run controls are not drawn (the run page's rule).
   const mayRun = shellPolls
-  const runtimes = useQuery({ ...runtimesQuery(), refetchInterval: shellPolls ? false : RUNTIMES_POLL_MS })
+  useRuntimesNeeded(shellPolls)
+  const runtimes = useQuery({
+    ...runtimesQuery(),
+    refetchInterval: shellPolls ? false : RUNTIMES_POLL_MS,
+  })
   const meta = useQuery(metaQuery())
 
   // The variants (§4): A starts as the original, more are added with
@@ -450,7 +512,9 @@ function Playground({ caps }: { caps: string[] }) {
   /** The matrix's form (plan F5: part of the draft and the share link):
    * its rows, its name (the experiment id) and the step every cell
    * continues from. */
-  const [matrixRows, setMatrixRows] = useState<{ key: string; text: string }[]>([{ key: "1", text: "" }])
+  const [matrixRows, setMatrixRows] = useState<{ key: string; text: string }[]>(
+    [{ key: "1", text: "" }]
+  )
   const [matrixName, setMatrixName] = useState("")
   /** The id the matrix's form was saved under (a cloned or reopened
    * experiment's): kept until the name is edited (lib/experiments.ts's
@@ -465,12 +529,17 @@ function Playground({ caps }: { caps: string[] }) {
   const [draftID, setDraftID] = useState(() => search.exp || newDraftID())
   const savedExp = useRef(search.exp ?? "")
   /** What the page says about where its form came from. */
-  const [restored, setRestored] = useState<{ text: string; tone: "info" | "bad" } | null>(null)
+  const [restored, setRestored] = useState<{
+    text: string
+    tone: "info" | "bad"
+  } | null>(null)
   // A share link's form, read once on arrival (the hand-off strips the
   // fragment from the bar after the first render).
   const arrivalHash = useLocation({ select: (l) => l.hash })
   const [shared] = useState(() => stateFromHash(arrivalHash))
-  const [restoring, setRestoring] = useState(() => Boolean(shared || search.exp))
+  const [restoring, setRestoring] = useState(() =>
+    Boolean(shared || search.exp)
+  )
   /** A form was restored: the hand-off's tools= no longer applies. */
   const restoredForm = useRef(false)
   /** Bumped by a restore: the seeding below runs again over the form. */
@@ -487,7 +556,9 @@ function Playground({ caps }: { caps: string[] }) {
   /** The kept prefix's edits (review fix 4b): patched tool results and
    * rewritten call-free replies — the counterfactual the fresh step
    * answers. Source-shaped, not variant-shaped, so they live here. */
-  const [editDrafts, setEditDrafts] = useState<EditDraft[]>(() => editsFromHandoff(search.edits))
+  const [editDrafts, setEditDrafts] = useState<EditDraft[]>(() =>
+    editsFromHandoff(search.edits)
+  )
 
   // The target (§4's header): the source run's own agent on a runtime
   // that registers it — an app with several agents (any app with a
@@ -513,7 +584,10 @@ function Playground({ caps }: { caps: string[] }) {
   }
   /** The states this page wrote that the router has not shown yet
    * (its commit lags a keystroke), and the last one. */
-  const pending = useRef<{ keys: Set<string>; last: string }>({ keys: new Set(), last: "" })
+  const pending = useRef<{ keys: Set<string>; last: string }>({
+    keys: new Set(),
+    last: "",
+  })
   const write = (next: Partial<PageState>) => {
     const state = { ...current, ...next }
     const key = pageStateKey(state)
@@ -563,7 +637,11 @@ function Playground({ caps }: { caps: string[] }) {
     setAgentChoice(queryState.agent)
     setRuntimeChoice(queryState.runtime)
     setVariants((cur) =>
-      cur.map((v, i) => (i === 0 && v.engine !== queryState.engine ? { ...v, engine: queryState.engine } : v))
+      cur.map((v, i) =>
+        i === 0 && v.engine !== queryState.engine
+          ? { ...v, engine: queryState.engine }
+          : v
+      )
     )
     // queryKey is queryState's identity.
   }, [queryKey])
@@ -632,7 +710,10 @@ function Playground({ caps }: { caps: string[] }) {
             ? registered
             : v.instructions,
         // A model the new agent does not offer is not carried over.
-        model: v.model && !agent.models.includes(v.model) && !agent.resolver && prev ? "" : v.model,
+        model:
+          v.model && !agent.models.includes(v.model) && !agent.resolver && prev
+            ? ""
+            : v.model,
         // The option lab is the agent's: another agent's knobs (its
         // defaults, its tools) are not carried over.
         lab: prev && prev.agent !== agent.name ? undefined : v.lab,
@@ -656,7 +737,9 @@ function Playground({ caps }: { caps: string[] }) {
     setEditDrafts(form.edits ?? [])
     setAgentChoice(form.agent ?? "")
     setRuntimeChoice(form.runtime ?? "")
-    setMatrixRows(form.matrix?.inputs.length ? form.matrix.inputs : [{ key: "1", text: "" }])
+    setMatrixRows(
+      form.matrix?.inputs.length ? form.matrix.inputs : [{ key: "1", text: "" }]
+    )
     setMatrixName(form.matrix?.name ?? "")
     setMatrixID(form.matrix?.id ?? "")
     setMatrixFromStep(form.matrix?.from_step ?? 0)
@@ -683,7 +766,10 @@ function Playground({ caps }: { caps: string[] }) {
         if (form) {
           applyFormRef.current(form)
           dirty.current = true
-          setRestored({ text: "restored from a link — nothing runs until you press Run", tone: "info" })
+          setRestored({
+            text: "restored from a link — nothing runs until you press Run",
+            tone: "info",
+          })
         } else
           setRestored({
             text: "the link's form could not be read: it was cut, damaged, or made by a newer Studio",
@@ -695,7 +781,10 @@ function Playground({ caps }: { caps: string[] }) {
         if (rec) {
           applyFormRef.current(rec.form)
           savedExp.current = search.exp
-          setRestored({ text: `draft ${search.exp} reopened${rec.label ? ` · ${rec.label}` : ""}`, tone: "info" })
+          setRestored({
+            text: `draft ${search.exp} reopened${rec.label ? ` · ${rec.label}` : ""}`,
+            tone: "info",
+          })
         } else
           setRestored({
             text: `draft ${search.exp} is not in this browser — a draft stays in the browser that made it; a share link travels`,
@@ -722,7 +811,12 @@ function Playground({ caps }: { caps: string[] }) {
     run: sourceRunID.trim() || undefined,
     step: fromStep,
     edits: editDrafts,
-    matrix: { name: matrixName.trim() || undefined, id: matrixID || undefined, from_step: matrixFromStep, inputs: matrixRows },
+    matrix: {
+      name: matrixName.trim() || undefined,
+      id: matrixID || undefined,
+      from_step: matrixFromStep,
+      inputs: matrixRows,
+    },
   })
   const formJSON = JSON.stringify(form)
   const formRef = useRef(form)
@@ -760,17 +854,25 @@ function Playground({ caps }: { caps: string[] }) {
   const openDraft = async (id: string) => {
     const rec = await loadDraft(id)
     if (!rec) {
-      setRestored({ text: `draft ${id} is no longer in this browser`, tone: "bad" })
+      setRestored({
+        text: `draft ${id} is no longer in this browser`,
+        tone: "bad",
+      })
       return
     }
     setDraftID(id)
     savedExp.current = id
     applyForm(rec.form)
-    setRestored({ text: `draft ${id} reopened${rec.label ? ` · ${rec.label}` : ""}`, tone: "info" })
+    setRestored({
+      text: `draft ${id} reopened${rec.label ? ` · ${rec.label}` : ""}`,
+      tone: "info",
+    })
   }
 
   /** The share link's state: the URL, or why there is none. */
-  const [share, setShare] = useState<{ url?: string; note: string } | null>(null)
+  const [share, setShare] = useState<{ url?: string; note: string } | null>(
+    null
+  )
   const makeShareLink = async () => {
     const enc = await encodeForm(form)
     if (enc.tooLong) {
@@ -792,14 +894,19 @@ function Playground({ caps }: { caps: string[] }) {
   const renameProblem =
     nameDraft === null || nameDraft === variant.key
       ? ""
-      : variantKeyProblem(nameDraft, variants.filter((_, i) => i !== active).map((v) => v.key))
+      : variantKeyProblem(
+          nameDraft,
+          variants.filter((_, i) => i !== active).map((v) => v.key)
+        )
   const applyRename = () => {
     if (nameDraft === null) return
     const next = nameDraft
     setNameDraft(null)
     if (next === variant.key || renameProblem) return
     const old = variant.key
-    setVariants((cur) => cur.map((v, i) => (i === active ? { ...v, key: next } : v)))
+    setVariants((cur) =>
+      cur.map((v, i) => (i === active ? { ...v, key: next } : v))
+    )
     // The matrix's cells follow their variant.
     setCells((cur) =>
       Object.fromEntries(
@@ -813,7 +920,12 @@ function Playground({ caps }: { caps: string[] }) {
   const duplicateVariant = () => {
     setVariants((cur) => {
       const src = cur[active]
-      const copy: Variant = { ...src, toolsOff: new Set(src.toolsOff), key: nextVariantKey(cur.map((v) => v.key)), result: null }
+      const copy: Variant = {
+        ...src,
+        toolsOff: new Set(src.toolsOff),
+        key: nextVariantKey(cur.map((v) => v.key)),
+        result: null,
+      }
       return [...cur.slice(0, active + 1), copy, ...cur.slice(active + 1)]
     })
     setActive(active + 1)
@@ -824,13 +936,15 @@ function Playground({ caps }: { caps: string[] }) {
     setVariants(rest)
     setActive(Math.max(0, active - 1))
     // Variant A's engine is page state (G2): the new first one's.
-    if (active === 0 && rest[0].engine !== engineA) write({ engine: rest[0].engine })
+    if (active === 0 && rest[0].engine !== engineA)
+      write({ engine: rest[0].engine })
   }
 
   const patch = (p: Partial<Variant>) => {
     setVariants((cur) => cur.map((v, i) => (i === active ? { ...v, ...p } : v)))
     // Variant A's engine is page state (G2).
-    if (active === 0 && p.engine && p.engine !== engineA) write({ engine: p.engine })
+    if (active === 0 && p.engine && p.engine !== engineA)
+      write({ engine: p.engine })
   }
 
   /** setResult updates one variant's experiment by the variant's KEY:
@@ -848,7 +962,9 @@ function Playground({ caps }: { caps: string[] }) {
   // Edits no field of the kept prefix matches (or that cannot be
   // checked yet) hold Run: TranscriptEdits shows them, badged.
   const editFields = useSourceEditFields(sourceRunID)
-  const orphans = sourceRunID ? unmatchedDrafts(editDrafts, editFields.fields, fromStep) : []
+  const orphans = sourceRunID
+    ? unmatchedDrafts(editDrafts, editFields.fields, fromStep)
+    : []
   const heldEdits = editsProblem(variant.thread, fromStep, editDrafts)
 
   /** decide answers one parked call of a variant's run with the
@@ -909,7 +1025,10 @@ function Playground({ caps }: { caps: string[] }) {
     try {
       const out = await postPlaygroundRun(body)
       setResult(key, {
-        ...queued(out.command_id, `${key}${sourceRunID ? ` · ${runLabel(sourceRunID)}` : ""}`),
+        ...queued(
+          out.command_id,
+          `${key}${sourceRunID ? ` · ${runLabel(sourceRunID)}` : ""}`
+        ),
         thread: variant.thread,
         agent: agent.name,
         instructions: variant.instructions,
@@ -942,11 +1061,15 @@ function Playground({ caps }: { caps: string[] }) {
     setError("")
     if (!runtime || !agent || busy) return
     if (!validExperimentID(experimentID)) {
-      setError(`experiment id ${experimentID} breaks the rule [A-Za-z0-9._:-]{1,128}`)
+      setError(
+        `experiment id ${experimentID} breaks the rule [A-Za-z0-9._:-]{1,128}`
+      )
       return
     }
     if (inputs.length === 0) {
-      setError("the matrix needs at least one input — or a source run, whose own turn an empty row re-runs")
+      setError(
+        "the matrix needs at least one input — or a source run, whose own turn an empty row re-runs"
+      )
       return
     }
     const plan: { key: string; label: string; body: PlaygroundRunBody }[] = []
@@ -986,7 +1109,9 @@ function Playground({ caps }: { caps: string[] }) {
           side_effects: v.sideEffects,
           thread: v.thread,
         })),
-        ...(sourceRunID ? { source_run_id: sourceRunID, from_step: matrixStep } : { from_step: 0 }),
+        ...(sourceRunID
+          ? { source_run_id: sourceRunID, from_step: matrixStep }
+          : { from_step: 0 }),
         inputs: inputs.map((i) => ({
           key: i.key,
           ...(sourceRunID ? { source_run_id: sourceRunID } : {}),
@@ -1009,7 +1134,11 @@ function Playground({ caps }: { caps: string[] }) {
         experimentDraftID(experimentID),
         {
           ...formRef.current,
-          matrix: { ...(formRef.current.matrix ?? { inputs }), name: experimentName.trim() || experimentID, id: experimentID },
+          matrix: {
+            ...(formRef.current.matrix ?? { inputs }),
+            name: experimentName.trim() || experimentID,
+            id: experimentID,
+          },
         },
         { kind: "experiment", label: experimentName.trim() || experimentID }
       )
@@ -1018,7 +1147,10 @@ function Playground({ caps }: { caps: string[] }) {
       for (const c of plan) {
         try {
           const out = await postPlaygroundRun(c.body)
-          setCells((cur) => ({ ...cur, [c.key]: queued(out.command_id, c.label) }))
+          setCells((cur) => ({
+            ...cur,
+            [c.key]: queued(out.command_id, c.label),
+          }))
         } catch (e) {
           const refused: Experiment = {
             ...queued("", c.label),
@@ -1061,7 +1193,10 @@ function Playground({ caps }: { caps: string[] }) {
                 setAgentChoice(v)
                 write({ agent: v })
               }}
-              options={runtime.agents.map((a) => ({ value: a.name, label: a.name }))}
+              options={runtime.agents.map((a) => ({
+                value: a.name,
+                label: a.name,
+              }))}
             />
             <span>on</span>
             <SelectField
@@ -1091,14 +1226,18 @@ function Playground({ caps }: { caps: string[] }) {
         {target.mismatch && (
           <span className="text-destructive" role="alert">
             · no connected runtime registers agent {target.mismatch}
-            {sourceRow?.agent === target.mismatch ? " (the source run's)" : ""} — this
-            would run {agent?.name ?? "nothing"} instead
+            {sourceRow?.agent === target.mismatch
+              ? " (the source run's)"
+              : ""}{" "}
+            — this would run {agent?.name ?? "nothing"} instead
           </span>
         )}
         {meta.data?.debug_scope && (
           <span className="text-faint">
             · breakpoints &amp; steer act on{" "}
-            {meta.data.debug_scope === OWN_RUNTIME ? SCOPE_OWN : `${meta.data.debug_scope} ${SCOPE_RUNTIME_ONLY}`}
+            {meta.data.debug_scope === OWN_RUNTIME
+              ? SCOPE_OWN
+              : `${meta.data.debug_scope} ${SCOPE_RUNTIME_ONLY}`}
           </span>
         )}
       </header>
@@ -1122,157 +1261,188 @@ function Playground({ caps }: { caps: string[] }) {
                 data-column="config"
                 className="h-full space-y-3 overflow-y-auto p-4 in-data-stacked:h-auto in-data-stacked:overflow-visible in-data-stacked:border-b"
               >
-          {/* Where the form came from (plan F5): a share link, a draft. */}
-          {restored ? (
-            <p
-              className={`text-xs ${restored.tone === "bad" ? "text-status-bad" : "text-muted-foreground"}`}
-              role="status"
-              data-form-restored
-            >
-              {restored.text}
-            </p>
-          ) : null}
-          {/* The variant switcher (§4's "+ variant"): each column of the
+                {/* Where the form came from (plan F5): a share link, a draft. */}
+                {restored ? (
+                  <p
+                    className={`text-xs ${restored.tone === "bad" ? "text-status-bad" : "text-muted-foreground"}`}
+                    role="status"
+                    data-form-restored
+                  >
+                    {restored.text}
+                  </p>
+                ) : null}
+                {/* The variant switcher (§4's "+ variant"): each column of the
               N-way view is one variant's overrides and run. */}
-          <div className="flex flex-wrap items-center gap-1" data-variant-switcher>
-            {variants.map((v, i) => (
-              <button
-                key={v.key}
-                onClick={() => {
-                  setActive(i)
-                  setNameDraft(null)
-                }}
-                aria-pressed={i === active}
-                className={
-                  "rounded border px-2 py-0.5 text-xs " +
-                  (i === active ? "border-foreground font-medium" : "text-muted-foreground")
-                }
-              >
-                {v.key}
-              </button>
-            ))}
-            <button
-              className="rounded border px-2 py-0.5 text-xs text-muted-foreground"
-              onClick={() =>
-                setVariants((cur) => [
-                  ...cur,
-                  {
-                    ...cur[active],
-                    toolsOff: new Set(cur[active].toolsOff),
-                    key: nextVariantKey(cur.map((v) => v.key)),
-                    result: null,
-                  },
-                ])
-              }
-            >
-              + variant
-            </button>
-          </div>
-          {/* The variant's own verbs (plan F5): rename, duplicate, remove. */}
-          <div className="flex flex-wrap items-center gap-2 text-xs" data-variant-verbs>
-            <h2 className="text-sm font-medium">Variant {variant.key}</h2>
-            <input
-              className="w-24 rounded border bg-transparent px-2 py-0.5 text-xs"
-              aria-label="variant name"
-              aria-invalid={renameProblem ? true : undefined}
-              value={nameDraft ?? variant.key}
-              onChange={(e) => setNameDraft(e.target.value)}
-              onBlur={applyRename}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") applyRename()
-                if (e.key === "Escape") setNameDraft(null)
-              }}
-            />
-            <button className="text-muted-foreground hover:underline" onClick={duplicateVariant}>
-              duplicate
-            </button>
-            <button
-              className="text-muted-foreground hover:underline disabled:opacity-50 disabled:no-underline"
-              onClick={removeVariant}
-              disabled={variants.length < 2}
-              title={variants.length < 2 ? "the form keeps at least one variant" : undefined}
-            >
-              remove
-            </button>
-          </div>
-          {renameProblem ? (
-            <p className="text-xs text-status-bad" role="alert">
-              {renameProblem}
-            </p>
-          ) : null}
-          <label className="block space-y-1">
-            <span className="text-xs text-muted-foreground">Source run</span>
-            <input
-              className="w-full rounded border bg-transparent px-2 py-1 font-mono text-xs"
-              value={sourceRunID}
-              onChange={(e) => {
-                setSourceRunID(e.target.value)
-                write({ run: e.target.value.trim() })
-              }}
-              placeholder="a run id, or blank for fresh input"
-            />
-            {sourceRunID && source.isError ? (
-              <span className="block text-destructive">{source.error.message}</span>
-            ) : null}
-          </label>
-          {sourceRunID && (
-            <StepPicker
-              runID={sourceRunID}
-              value={fromStep}
-              onChange={(n) => {
-                setFromStep(n)
-                write({ step: n })
-              }}
-            />
-          )}
-          <ExperimentForm
-            variant={variant}
-            patch={patch}
-            agent={agent}
-            registered={registered}
-            runtime={runtime}
-            caps={caps}
-            sourceRunID={sourceRunID}
-            fromStep={fromStep}
-            editDrafts={editDrafts}
-            setEditDrafts={setEditDrafts}
-          />
-          {/* Edits held at step 0 cannot travel (editsProblem): the
+                <div
+                  className="flex flex-wrap items-center gap-1"
+                  data-variant-switcher
+                >
+                  {variants.map((v, i) => (
+                    <button
+                      key={v.key}
+                      onClick={() => {
+                        setActive(i)
+                        setNameDraft(null)
+                      }}
+                      aria-pressed={i === active}
+                      className={
+                        "rounded border px-2 py-0.5 text-xs " +
+                        (i === active
+                          ? "border-foreground font-medium"
+                          : "text-muted-foreground")
+                      }
+                    >
+                      {v.key}
+                    </button>
+                  ))}
+                  <button
+                    className="rounded border px-2 py-0.5 text-xs text-muted-foreground"
+                    onClick={() =>
+                      setVariants((cur) => [
+                        ...cur,
+                        {
+                          ...cur[active],
+                          toolsOff: new Set(cur[active].toolsOff),
+                          key: nextVariantKey(cur.map((v) => v.key)),
+                          result: null,
+                        },
+                      ])
+                    }
+                  >
+                    + variant
+                  </button>
+                </div>
+                {/* The variant's own verbs (plan F5): rename, duplicate, remove. */}
+                <div
+                  className="flex flex-wrap items-center gap-2 text-xs"
+                  data-variant-verbs
+                >
+                  <h2 className="text-sm font-medium">Variant {variant.key}</h2>
+                  <input
+                    className="w-24 rounded border bg-transparent px-2 py-0.5 text-xs"
+                    aria-label="variant name"
+                    aria-invalid={renameProblem ? true : undefined}
+                    value={nameDraft ?? variant.key}
+                    onChange={(e) => setNameDraft(e.target.value)}
+                    onBlur={applyRename}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") applyRename()
+                      if (e.key === "Escape") setNameDraft(null)
+                    }}
+                  />
+                  <button
+                    className="text-muted-foreground hover:underline"
+                    onClick={duplicateVariant}
+                  >
+                    duplicate
+                  </button>
+                  <button
+                    className="text-muted-foreground hover:underline disabled:no-underline disabled:opacity-50"
+                    onClick={removeVariant}
+                    disabled={variants.length < 2}
+                    title={
+                      variants.length < 2
+                        ? "the form keeps at least one variant"
+                        : undefined
+                    }
+                  >
+                    remove
+                  </button>
+                </div>
+                {renameProblem ? (
+                  <p className="text-xs text-status-bad" role="alert">
+                    {renameProblem}
+                  </p>
+                ) : null}
+                <label className="block space-y-1">
+                  <span className="text-xs text-muted-foreground">
+                    Source run
+                  </span>
+                  <input
+                    className="w-full rounded border bg-transparent px-2 py-1 font-mono text-xs"
+                    value={sourceRunID}
+                    onChange={(e) => {
+                      setSourceRunID(e.target.value)
+                      write({ run: e.target.value.trim() })
+                    }}
+                    placeholder="a run id, or blank for fresh input"
+                  />
+                  {sourceRunID && source.isError ? (
+                    <span className="block text-destructive">
+                      {source.error.message}
+                    </span>
+                  ) : null}
+                </label>
+                {sourceRunID && (
+                  <StepPicker
+                    runID={sourceRunID}
+                    value={fromStep}
+                    onChange={(n) => {
+                      setFromStep(n)
+                      write({ step: n })
+                    }}
+                  />
+                )}
+                <ExperimentForm
+                  variant={variant}
+                  patch={patch}
+                  agent={agent}
+                  registered={registered}
+                  runtime={runtime}
+                  caps={caps}
+                  sourceRunID={sourceRunID}
+                  fromStep={fromStep}
+                  editDrafts={editDrafts}
+                  setEditDrafts={setEditDrafts}
+                />
+                {/* Edits held at step 0 cannot travel (editsProblem): the
               line says so and holds Run, and the list stays here so
               they can be dropped (the kept-prefix fields hide at 0). */}
-          {heldEdits ? (
-            <>
-              <p className="text-xs text-status-bad" role="alert" data-edits-held>
-                {heldEdits}
-              </p>
-              <EditList edits={editDrafts} onDrop={(e) => setEditDrafts((cur) => cur.filter((x) => x !== e))} />
-            </>
-          ) : null}
-          {error && (
-            <p className="text-xs text-destructive" role="alert">
-              {error}
-            </p>
-          )}
-          {mayRun ? (
-            <Button
-              onClick={() => void run()}
-              disabled={
-                !runtime ||
-                !agent ||
-                busy ||
-                resolving ||
-                orphans.length > 0 ||
-                !!heldEdits ||
-                labProblems(variant, agent).length > 0
-              }
-            >
-              {busy ? "sending…" : `Run ${variant.key}`}
-            </Button>
-          ) : (
-            <p className="text-xs text-muted-foreground" data-playground-read-only>
-              {READ_ONLY_NOTE}
-            </p>
-          )}
+                {heldEdits ? (
+                  <>
+                    <p
+                      className="text-xs text-status-bad"
+                      role="alert"
+                      data-edits-held
+                    >
+                      {heldEdits}
+                    </p>
+                    <EditList
+                      edits={editDrafts}
+                      onDrop={(e) =>
+                        setEditDrafts((cur) => cur.filter((x) => x !== e))
+                      }
+                    />
+                  </>
+                ) : null}
+                {error && (
+                  <p className="text-xs text-destructive" role="alert">
+                    {error}
+                  </p>
+                )}
+                {mayRun ? (
+                  <Button
+                    onClick={() => void run()}
+                    disabled={
+                      !runtime ||
+                      !agent ||
+                      busy ||
+                      resolving ||
+                      orphans.length > 0 ||
+                      !!heldEdits ||
+                      labProblems(variant, agent).length > 0
+                    }
+                  >
+                    {busy ? "sending…" : `Run ${variant.key}`}
+                  </Button>
+                ) : (
+                  <p
+                    className="text-xs text-muted-foreground"
+                    data-playground-read-only
+                  >
+                    {READ_ONLY_NOTE}
+                  </p>
+                )}
               </section>
             ),
           },
@@ -1289,65 +1459,80 @@ function Playground({ caps }: { caps: string[] }) {
                 data-column="runs"
                 className="h-full min-w-0 space-y-3 overflow-y-auto p-4 in-data-stacked:h-auto in-data-stacked:overflow-visible"
               >
-          {ran.length > 0 ? (
-            <>
-              {/* The N-way compare (P3): one card per variant, side by
+                {ran.length > 0 ? (
+                  <>
+                    {/* The N-way compare (P3): one card per variant, side by
                   side, with the tokens/latency/tool-call metrics row —
                   and the pairwise text diff of the first two below.
                   Each card follows its own command, whichever variant
                   is being edited. */}
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3" data-result-grid="">
-                {ran.map((v) => (
-                  <ResultCard
-                    key={v.result!.commandID || v.key}
-                    experiment={v.result!}
-                    onUpdate={(upd) => setResult(v.key, upd)}
-                    sourceText={sourceText}
-                    sourceRunID={sourceRunID}
-                    variant={v}
-                    agentName={v.result?.agent ?? v.result?.row?.agent ?? agent?.name ?? ""}
-                    tools={(agent?.tools ?? [])
-                      .map((t) => t.name)
-                      .filter((n) => !v.toolsOff.has(n))}
-                    caps={caps}
-                    mayRun={mayRun}
-                    live={caps.includes("live") && streamed.has(v.key)}
-                    decide={(runID, callID, decision, text) =>
-                      decide(v.key, runID, callID, decision, text)
-                    }
-                  />
-                ))}
-              </div>
-              <CompareTable variants={variants} />
-              <VariantSteps variants={ran} sourceRunID={sourceRunID} />
-              {ran.length >= 2 && <VariantDiff a={ran[0]} b={ran[1]} />}
-            </>
-          ) : null}
-          <Matrix
-            variants={variants}
-            inputs={matrixRows}
-            setInputs={setMatrixRows}
-            name={matrixName}
-            setName={(v) => {
-              setMatrixName(v)
-              setMatrixID("")
-            }}
-            savedID={matrixID}
-            fromStep={matrixFromStep}
-            setFromStep={setMatrixFromStep}
-            runMatrix={runMatrix}
-            busy={busy || resolving || !runtime || !agent}
-            mayRun={mayRun}
-            issuing={busy}
-            cells={cells}
-            setCells={setCells}
-            sourceRunID={sourceRunID}
-            pageFromStep={fromStep}
-            pageEdits={editDrafts.length}
-          />
-          <FormVerbs share={share} makeShareLink={() => void makeShareLink()} />
-          <Drafts current={draftID} saves={saves} open={(id) => void openDraft(id)} />
-          <History selected={search.experiment} />
+                    <div
+                      className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3"
+                      data-result-grid=""
+                    >
+                      {ran.map((v) => (
+                        <ResultCard
+                          key={v.result!.commandID || v.key}
+                          experiment={v.result!}
+                          onUpdate={(upd) => setResult(v.key, upd)}
+                          sourceText={sourceText}
+                          sourceRunID={sourceRunID}
+                          variant={v}
+                          agentName={
+                            v.result?.agent ??
+                            v.result?.row?.agent ??
+                            agent?.name ??
+                            ""
+                          }
+                          tools={(agent?.tools ?? [])
+                            .map((t) => t.name)
+                            .filter((n) => !v.toolsOff.has(n))}
+                          caps={caps}
+                          mayRun={mayRun}
+                          live={caps.includes("live") && streamed.has(v.key)}
+                          decide={(runID, callID, decision, text) =>
+                            decide(v.key, runID, callID, decision, text)
+                          }
+                        />
+                      ))}
+                    </div>
+                    <CompareTable variants={variants} />
+                    <VariantSteps variants={ran} sourceRunID={sourceRunID} />
+                    {ran.length >= 2 && <VariantDiff a={ran[0]} b={ran[1]} />}
+                  </>
+                ) : null}
+                <Matrix
+                  variants={variants}
+                  inputs={matrixRows}
+                  setInputs={setMatrixRows}
+                  name={matrixName}
+                  setName={(v) => {
+                    setMatrixName(v)
+                    setMatrixID("")
+                  }}
+                  savedID={matrixID}
+                  fromStep={matrixFromStep}
+                  setFromStep={setMatrixFromStep}
+                  runMatrix={runMatrix}
+                  busy={busy || resolving || !runtime || !agent}
+                  mayRun={mayRun}
+                  issuing={busy}
+                  cells={cells}
+                  setCells={setCells}
+                  sourceRunID={sourceRunID}
+                  pageFromStep={fromStep}
+                  pageEdits={editDrafts.length}
+                />
+                <FormVerbs
+                  share={share}
+                  makeShareLink={() => void makeShareLink()}
+                />
+                <Drafts
+                  current={draftID}
+                  saves={saves}
+                  open={(id) => void openDraft(id)}
+                />
+                <History selected={search.experiment} />
               </section>
             ),
           },
@@ -1369,7 +1554,10 @@ async function saveFixtures(runID: string, tools: string[]) {
 
 /** withCommandID names a command's at-most-once id (none: the server
  * mints one). */
-function withCommandID(body: PlaygroundRunBody, id: string | undefined): PlaygroundRunBody {
+function withCommandID(
+  body: PlaygroundRunBody,
+  id: string | undefined
+): PlaygroundRunBody {
   return id ? { ...body, command_id: id } : body
 }
 
@@ -1413,7 +1601,9 @@ function useSourceText(runID: string): string {
 /** The lifecycle state as shown: a finished command says how its run
  * ended — a failed run is not a success. */
 function stateLabel(e: Pick<Experiment, "state" | "status">): string {
-  return e.state === "finished" && e.status ? `${e.state} · ${e.status}` : e.state
+  return e.state === "finished" && e.status
+    ? `${e.state} · ${e.status}`
+    : e.state
 }
 
 /** Result cards tailing their run live at once (see `streamed`). */
@@ -1532,7 +1722,9 @@ function ResultCard({
   const stream = useRunEvents(experiment.runID, over ? "ended" : "running", {
     live,
     tracked: true,
-    approve: mayRun ? (runID, callID) => decide(runID, callID, "approve", "") : undefined,
+    approve: mayRun
+      ? (runID, callID) => decide(runID, callID, "approve", "")
+      : undefined,
   })
   const folded = stream.folded
 
@@ -1554,7 +1746,11 @@ function ResultCard({
   }, [over, experiment.state, experiment.runID])
 
   const streamedText = useMemo(
-    () => folded.steps.map((s) => s.text).filter(Boolean).join("\n"),
+    () =>
+      folded.steps
+        .map((s) => s.text)
+        .filter(Boolean)
+        .join("\n"),
     [folded]
   )
   const text = transcriptText ?? streamedText
@@ -1575,11 +1771,18 @@ function ResultCard({
   const decidedHere = folded.pending.filter((c) => decidedCalls[c.id]).length
 
   return (
-    <div className="min-w-0 overflow-x-auto rounded border" data-variant={variant.key}>
+    <div
+      className="min-w-0 overflow-x-auto rounded border"
+      data-variant={variant.key}
+    >
       <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2 text-xs">
         <span className="font-medium">{experiment.label}</span>
         <span
-          className={experiment.status === "failed" ? "text-destructive" : "text-muted-foreground"}
+          className={
+            experiment.status === "failed"
+              ? "text-destructive"
+              : "text-muted-foreground"
+          }
         >
           {stateLabel(experiment)}
         </span>
@@ -1616,7 +1819,11 @@ function ResultCard({
           title={keepEditedTitle(agentName, caps, studioToken())}
           data-keep-prompt
           onClick={() => {
-            void keepPrompt(caps, agentName, experiment.instructions ?? variant.instructions).then((stored) => {
+            void keepPrompt(
+              caps,
+              agentName,
+              experiment.instructions ?? variant.instructions
+            ).then((stored) => {
               if (stored) void qc.invalidateQueries({ queryKey: ["manifest"] })
             })
           }}
@@ -1625,12 +1832,16 @@ function ResultCard({
         </button>
       </div>
       <div className="space-y-2 p-3 text-xs">
-        {experiment.error && <p className="text-destructive">{experiment.error}</p>}
+        {experiment.error && (
+          <p className="text-destructive">{experiment.error}</p>
+        )}
         {stream.error && (
           <p className="text-destructive">event stream: {stream.error}</p>
         )}
         {experiment.state === "queued" && !experiment.runID && (
-          <p className="text-muted-foreground">waiting for the runtime to ack…</p>
+          <p className="text-muted-foreground">
+            waiting for the runtime to ack…
+          </p>
         )}
         {/* A fork's first accepted ack names no run (weft/runtime
             link.go): the session mints the thread turn's id at Send, and
@@ -1645,11 +1856,15 @@ function ResultCard({
           {experiment.row && (
             <>
               <span>
-                {experiment.row.usage.input_tokens}→{experiment.row.usage.output_tokens} tok
+                {experiment.row.usage.input_tokens}→
+                {experiment.row.usage.output_tokens} tok
               </span>
               <span>{latency(experiment.row)}</span>
               {costCapable ? (
-                <span title="the run's whole bill: its own model calls + its subagents'" data-result-cost>
+                <span
+                  title="the run's whole bill: its own model calls + its subagents'"
+                  data-result-cost
+                >
                   <CostText v={sumCost([experiment.row])} />
                 </span>
               ) : null}
@@ -1716,38 +1931,41 @@ function ResultCard({
         )}
         {/* Rung 4 (§8.4, review fix 4d): steer the in-flight run — one
             user message delivered mid-flight. */}
-        {mayRun && caps.includes("steer") && experiment.state === "accepted" && experiment.runID && (
-          <form
-            className="flex items-center gap-2"
-            onSubmit={(e) => {
-              e.preventDefault()
-              const message = steerText.trim()
-              if (!message) return
-              setCardErr("")
-              postSteer(experiment.runID, message)
-                .then(() => setSteerText(""))
-                .catch((err: unknown) =>
-                  setCardErr(err instanceof Error ? err.message : String(err))
-                )
-            }}
-          >
-            <input
-              className="flex-1 rounded border bg-transparent px-2 py-1"
-              aria-label="steer message"
-              placeholder="a message delivered mid-flight"
-              value={steerText}
-              onChange={(e) => setSteerText(e.target.value)}
-            />
-            <button
-              type="submit"
-              className="text-faint hover:underline disabled:opacity-50"
-              title="POST /api/runs/{id}/steer (ADR 0019)"
-              disabled={!steerText.trim()}
+        {mayRun &&
+          caps.includes("steer") &&
+          experiment.state === "accepted" &&
+          experiment.runID && (
+            <form
+              className="flex items-center gap-2"
+              onSubmit={(e) => {
+                e.preventDefault()
+                const message = steerText.trim()
+                if (!message) return
+                setCardErr("")
+                postSteer(experiment.runID, message)
+                  .then(() => setSteerText(""))
+                  .catch((err: unknown) =>
+                    setCardErr(err instanceof Error ? err.message : String(err))
+                  )
+              }}
             >
-              steer
-            </button>
-          </form>
-        )}
+              <input
+                className="flex-1 rounded border bg-transparent px-2 py-1"
+                aria-label="steer message"
+                placeholder="a message delivered mid-flight"
+                value={steerText}
+                onChange={(e) => setSteerText(e.target.value)}
+              />
+              <button
+                type="submit"
+                className="text-faint hover:underline disabled:opacity-50"
+                title="POST /api/runs/{id}/steer (ADR 0019)"
+                disabled={!steerText.trim()}
+              >
+                steer
+              </button>
+            </form>
+          )}
         {cardErr && <p className="text-xs text-destructive">{cardErr}</p>}
         {diff && (
           <div className="rounded border border-dashed p-2">
@@ -1795,7 +2013,9 @@ function latency(row: RunRow): string {
 /** CompareTable is P3's metrics row across the N variants: the
  * finish, tokens, latency and tool calls of each, one column each. */
 function CompareTable({ variants }: { variants: Variant[] }) {
-  const ran = variants.flatMap((v) => (v.result?.row ? [{ key: v.key, row: v.result.row }] : []))
+  const ran = variants.flatMap((v) =>
+    v.result?.row ? [{ key: v.key, row: v.result.row }] : []
+  )
   const costCapable = useCostCapable()
   if (ran.length < 2) return null
   return (
@@ -1804,43 +2024,46 @@ function CompareTable({ variants }: { variants: Variant[] }) {
         compare · {ran.length} variants
       </div>
       <div className="overflow-x-auto" data-scroll-box="">
-      <table className="w-full text-xs">
-        <thead>
-          <tr className="text-left text-faint">
-            <th className="px-3 py-1 font-normal">variant</th>
-            <th className="px-3 py-1 font-normal">status</th>
-            <th className="px-3 py-1 font-normal">tokens</th>
-            <th className="px-3 py-1 font-normal">latency</th>
-            <th className="px-3 py-1 font-normal">steps</th>
-            {costCapable ? (
-              <th className="px-3 py-1 font-normal" title="the run's whole bill: its own model calls + its subagents'">
-                cost
-              </th>
-            ) : null}
-          </tr>
-        </thead>
-        <tbody>
-          {ran.map(({ key, row }) => (
-            <tr key={key} className="border-t">
-              <td className="px-3 py-1 font-medium">{key}</td>
-              <td className="px-3 py-1">
-                {row.status}
-                {row.pending > 0 ? ` · ${row.pending} parked` : ""}
-              </td>
-              <td className="px-3 py-1">
-                {row.usage.input_tokens}→{row.usage.output_tokens}
-              </td>
-              <td className="px-3 py-1">{latency(row)}</td>
-              <td className="px-3 py-1">{row.steps}</td>
+        <table className="w-full text-xs">
+          <thead>
+            <tr className="text-left text-faint">
+              <th className="px-3 py-1 font-normal">variant</th>
+              <th className="px-3 py-1 font-normal">status</th>
+              <th className="px-3 py-1 font-normal">tokens</th>
+              <th className="px-3 py-1 font-normal">latency</th>
+              <th className="px-3 py-1 font-normal">steps</th>
               {costCapable ? (
-                <td className="px-3 py-1" data-compare-cost={key}>
-                  <CostText v={sumCost([row])} />
-                </td>
+                <th
+                  className="px-3 py-1 font-normal"
+                  title="the run's whole bill: its own model calls + its subagents'"
+                >
+                  cost
+                </th>
               ) : null}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {ran.map(({ key, row }) => (
+              <tr key={key} className="border-t">
+                <td className="px-3 py-1 font-medium">{key}</td>
+                <td className="px-3 py-1">
+                  {row.status}
+                  {row.pending > 0 ? ` · ${row.pending} parked` : ""}
+                </td>
+                <td className="px-3 py-1">
+                  {row.usage.input_tokens}→{row.usage.output_tokens}
+                </td>
+                <td className="px-3 py-1">{latency(row)}</td>
+                <td className="px-3 py-1">{row.steps}</td>
+                {costCapable ? (
+                  <td className="px-3 py-1" data-compare-cost={key}>
+                    <CostText v={sumCost([row])} />
+                  </td>
+                ) : null}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   )
@@ -1852,10 +2075,19 @@ function CompareTable({ variants }: { variants: Variant[] }) {
  * GET /api/diff against the one base; capability "diff"). The text
  * diff below stays: it shows the final words line by line, which a
  * step row only marks changed. */
-function VariantSteps({ variants, sourceRunID }: { variants: Variant[]; sourceRunID: string }) {
+function VariantSteps({
+  variants,
+  sourceRunID,
+}: {
+  variants: Variant[]
+  sourceRunID: string
+}) {
   const { has } = useCapabilities()
   const done = variants.flatMap((v) =>
-    v.result?.state === "finished" && v.result.row && v.result.row.status !== "running" && v.result.runID
+    v.result?.state === "finished" &&
+    v.result.row &&
+    v.result.row.status !== "running" &&
+    v.result.runID
       ? [v.result.runID]
       : []
   )
@@ -1865,8 +2097,14 @@ function VariantSteps({ variants, sourceRunID }: { variants: Variant[]; sourceRu
   return (
     <div className="space-y-2 rounded border p-3" data-variant-steps>
       <div className="flex items-center gap-3 text-xs text-muted-foreground">
-        <span>step by step · {sourceRunID ? "against the source run" : "against the first variant"}</span>
-        <Link {...compareLink(base, others)} className="hover:text-foreground hover:underline">
+        <span>
+          step by step ·{" "}
+          {sourceRunID ? "against the source run" : "against the first variant"}
+        </span>
+        <Link
+          {...compareLink(base, others)}
+          className="hover:text-foreground hover:underline"
+        >
           open the compare page
         </Link>
       </div>
@@ -1885,7 +2123,9 @@ function VariantDiff({ a, b }: { a: Variant; b: Variant }) {
   // Finished means the row settled too: the transcript read at the
   // ack may not hold the run's last words yet.
   const doneID = (v: Variant) =>
-    v.result?.state === "finished" && v.result.row && v.result.row.status !== "running"
+    v.result?.state === "finished" &&
+    v.result.row &&
+    v.result.row.status !== "running"
       ? v.result.runID
       : ""
   const idA = doneID(a)
@@ -2005,7 +2245,9 @@ function Matrix({
   // The id is minted, never the typed name sent raw (POST
   // /api/experiments and experiment_id take command_id's rule): a saved
   // id the form carries, else lib/experiments.ts's mintExperimentID.
-  const experimentID = validExperimentID(savedID) ? savedID : mintExperimentID(name, stamp, nonce)
+  const experimentID = validExperimentID(savedID)
+    ? savedID
+    : mintExperimentID(name, stamp, nonce)
   /** Bumped after every poll, so the next one is scheduled even when
    * nothing changed. */
   const [polled, setPolled] = useState(0)
@@ -2015,14 +2257,21 @@ function Matrix({
    * still holds the previous matrix's cells, under its own id). */
   const issued = useRef("")
 
-  const inputKeys = [...new Set(Object.keys(cells).map((k) => k.split("\u0000")[1]))]
+  const inputKeys = [
+    ...new Set(Object.keys(cells).map((k) => k.split("\u0000")[1])),
+  ]
   // Cost per cell and per variant (plan A5): each finished cell's run
   // row (its whole bill, own + delegated), summed client-side per
   // variant — "—" while any run is unread, unfinished or unpriced.
   const costCapable = useCostCapable()
-  const priced = Object.entries(cells).filter(([, c]) => c.runID && c.state === "finished")
+  const priced = Object.entries(cells).filter(
+    ([, c]) => c.runID && c.state === "finished"
+  )
   const rowQs = useQueries({
-    queries: priced.map(([, c]) => ({ ...runQuery(c.runID), enabled: costCapable })),
+    queries: priced.map(([, c]) => ({
+      ...runQuery(c.runID),
+      enabled: costCapable,
+    })),
   })
   const rowOf = new Map(priced.map(([k], i) => [k, rowQs[i]?.data]))
   const cellCost = (key: string) => {
@@ -2033,16 +2282,20 @@ function Matrix({
   const cellBill = (key: string): Parameters<typeof sumCost>[0][number][] => {
     const c = cells[key] as Experiment | undefined
     // A cell that ran nothing (rejected, lost before a run) bills nothing.
-    if (!c || (!c.runID && (c.state === "rejected" || c.state === "lost"))) return []
+    if (!c || (!c.runID && (c.state === "rejected" || c.state === "lost")))
+      return []
     // A lost cell that had started a run may have billed: its own
     // reason, and the variant's total unknown — never left at "not
     // read yet", never dropped from the sum.
     if (c.state === "lost") return [lostCellCost()]
     return [rowOf.get(key)]
   }
-  const variantCost = (vk: string) => sumCost(inputKeys.flatMap((ik) => cellBill(`${vk}\u0000${ik}`)))
+  const variantCost = (vk: string) =>
+    sumCost(inputKeys.flatMap((ik) => cellBill(`${vk}\u0000${ik}`)))
   /** Every finished cell's row is read, or could not be. */
-  const rowsRead = priced.every((_, i) => Boolean(rowQs[i]?.data) || Boolean(rowQs[i]?.isError))
+  const rowsRead = priced.every(
+    (_, i) => Boolean(rowQs[i]?.data) || Boolean(rowQs[i]?.isError)
+  )
   /** The whole matrix's bill: every variant's. */
   const matrixCost = () => sumCost(Object.keys(cells).flatMap(cellBill))
   // One notice for the whole matrix (plan H5), when its last cell
@@ -2068,7 +2321,9 @@ function Matrix({
       succeeded: finished.length - failed,
       failed,
       other: all.length - finished.length,
-      ...(total?.known && typeof total.usd === "number" ? { cost: formatUSD(total.usd) } : {}),
+      ...(total?.known && typeof total.usd === "number"
+        ? { cost: formatUSD(total.usd) }
+        : {}),
     })
     // matrixCost reads the rows rowsRead waits for.
   }, [cells, issuing, rowsRead, costCapable])
@@ -2085,7 +2340,11 @@ function Matrix({
         void Promise.all(
           pending.map(async ([key, c]) => {
             try {
-              return { key, id: c.commandID, st: await fetchCommand(c.commandID) }
+              return {
+                key,
+                id: c.commandID,
+                st: await fetchCommand(c.commandID),
+              }
             } catch (e) {
               // An unknown command never answers: it is lost.
               return isUnknownCommand(e)
@@ -2099,7 +2358,8 @@ function Matrix({
             let next = cur
             for (const u of updates) {
               // The cell may have been replaced by a newer matrix.
-              if (!u || !(u.key in next) || next[u.key].commandID !== u.id) continue
+              if (!u || !(u.key in next) || next[u.key].commandID !== u.id)
+                continue
               const cell = next[u.key]
               next = {
                 ...next,
@@ -2111,7 +2371,12 @@ function Matrix({
                       runID: u.st.run_id || cell.runID,
                       error: u.st.error,
                     }
-                  : { ...cell, state: "lost", error: "Studio no longer knows this command (it restarted)" },
+                  : {
+                      ...cell,
+                      state: "lost",
+                      error:
+                        "Studio no longer knows this command (it restarted)",
+                    },
               }
             }
             return next
@@ -2135,9 +2400,12 @@ function Matrix({
         Experiment matrix · {variants.length} variants × {inputs.length} inputs
         {sourceRunID ? " · over the source run" : ""}
         {sourceRunID && fromStep > 0 ? ` · from step ${fromStep}` : ""}
-        {((pageFromStep > 0 && pageFromStep !== (sourceRunID ? fromStep : 0)) || pageEdits > 0) && (
+        {((pageFromStep > 0 && pageFromStep !== (sourceRunID ? fromStep : 0)) ||
+          pageEdits > 0) && (
           <div className="text-faint" data-matrix-from-step-0>
-            the matrix runs each cell from its own step ({sourceRunID ? fromStep : 0}); Run's step and transcript edits stay with Run
+            the matrix runs each cell from its own step (
+            {sourceRunID ? fromStep : 0}); Run's step and transcript edits stay
+            with Run
           </div>
         )}
       </div>
@@ -2158,9 +2426,15 @@ function Matrix({
               disabled={busy}
               onClick={() => {
                 const id = experimentID
-                void runMatrix(matrixInputs(inputs, sourceRunID), id, name, fromStep, () => {
-                  issued.current = id
-                })
+                void runMatrix(
+                  matrixInputs(inputs, sourceRunID),
+                  id,
+                  name,
+                  fromStep,
+                  () => {
+                    issued.current = id
+                  }
+                )
               }}
             >
               Run matrix
@@ -2184,11 +2458,16 @@ function Matrix({
               aria-label="matrix from step"
               className="w-20 rounded border bg-transparent px-2 py-1"
               value={fromStep}
-              onChange={(e) => setFromStep(Math.max(0, Math.floor(Number(e.target.value) || 0)))}
+              onChange={(e) =>
+                setFromStep(
+                  Math.max(0, Math.floor(Number(e.target.value) || 0))
+                )
+              }
             />
             {fromStep > 0 ? (
               <span className="text-faint" data-matrix-from-step>
-                every cell continues {sourceRunID} from step {fromStep}; the rows' text is not sent past step 0
+                every cell continues {sourceRunID} from step {fromStep}; the
+                rows' text is not sent past step 0
               </span>
             ) : null}
           </label>
@@ -2207,7 +2486,9 @@ function Matrix({
               value={inp.text}
               onChange={(e) =>
                 setInputs((cur) =>
-                  cur.map((x, j) => (j === i ? { ...x, text: e.target.value } : x))
+                  cur.map((x, j) =>
+                    j === i ? { ...x, text: e.target.value } : x
+                  )
                 )
               }
             />
@@ -2215,7 +2496,9 @@ function Matrix({
               <button
                 className="text-faint hover:underline"
                 aria-label={`remove input ${inp.key}`}
-                onClick={() => setInputs((cur) => cur.filter((_, j) => j !== i))}
+                onClick={() =>
+                  setInputs((cur) => cur.filter((_, j) => j !== i))
+                }
               >
                 −
               </button>
@@ -2224,89 +2507,116 @@ function Matrix({
         ))}
         <button
           className="text-faint hover:underline"
-          onClick={() => setInputs((cur) => [...cur, { key: nextInputKey(cur), text: "" }])}
+          onClick={() =>
+            setInputs((cur) => [...cur, { key: nextInputKey(cur), text: "" }])
+          }
         >
           + input
         </button>
         {inputKeys.length > 0 && (
           <div className="overflow-x-auto" data-scroll-box="">
-          <table className="w-full">
-            <thead>
-              <tr className="text-left text-faint">
-                <th className="py-1 font-normal">input</th>
-                {variants.map((v) => (
-                  <th key={v.key} className="py-1 font-normal">
-                    variant {v.key}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {inputKeys.map((ik) => (
-                <tr key={ik} className="border-t">
-                  <td className="py-1">{ik}</td>
-                  {variants.map((v) => {
-                    const cell = cells[`${v.key}\u0000${ik}`] as Experiment | undefined
-                    return (
-                      <td key={v.key} className="py-1" data-cell={`${v.key}×${ik}`}>
-                        {cell ? (
-                          <span
-                            className={
-                              cell.state === "finished" && cell.status !== "failed"
-                                ? "text-status-ok"
-                                : cell.state === "rejected" ||
-                                    cell.state === "lost" ||
-                                    cell.status === "failed"
-                                  ? "text-destructive"
-                                  : "text-muted-foreground"
-                            }
-                          >
-                            {cell.runID ? (
-                              <Link
-                                {...runLink(cell.runID)}
-                                className="hover:underline"
-                                title={cell.runID}
-                              >
-                                {stateLabel(cell)}
-                              </Link>
-                            ) : (
-                              stateLabel(cell)
-                            )}
-                            {cell.error ? ` (${cell.error})` : ""}
-                            {costCapable && cell.runID && cell.state === "finished" ? (
-                              <span className="ml-1.5 text-muted-foreground" data-cell-cost>
-                                {cellCost(`${v.key}\u0000${ik}`) ? (
-                                  <CostText v={cellCost(`${v.key}\u0000${ik}`)!} />
-                                ) : (
-                                  <span className="text-faint" title="reading the run's cost">…</span>
-                                )}
-                              </span>
-                            ) : null}
-                          </span>
-                        ) : (
-                          <span className="text-faint">—</span>
-                        )}
-                      </td>
-                    )
-                  })}
-                </tr>
-              ))}
-            </tbody>
-            {costCapable ? (
-              <tfoot>
-                <tr className="border-t text-muted-foreground">
-                  <td className="py-1" title="each variant's runs, own + delegated, summed here">
-                    cost
-                  </td>
+            <table className="w-full">
+              <thead>
+                <tr className="text-left text-faint">
+                  <th className="py-1 font-normal">input</th>
                   {variants.map((v) => (
-                    <td key={v.key} className="py-1" data-variant-cost={v.key}>
-                      <CostText v={variantCost(v.key)} />
-                    </td>
+                    <th key={v.key} className="py-1 font-normal">
+                      variant {v.key}
+                    </th>
                   ))}
                 </tr>
-              </tfoot>
-            ) : null}
-          </table>
+              </thead>
+              <tbody>
+                {inputKeys.map((ik) => (
+                  <tr key={ik} className="border-t">
+                    <td className="py-1">{ik}</td>
+                    {variants.map((v) => {
+                      const cell = cells[`${v.key}\u0000${ik}`] as
+                        Experiment | undefined
+                      return (
+                        <td
+                          key={v.key}
+                          className="py-1"
+                          data-cell={`${v.key}×${ik}`}
+                        >
+                          {cell ? (
+                            <span
+                              className={
+                                cell.state === "finished" &&
+                                cell.status !== "failed"
+                                  ? "text-status-ok"
+                                  : cell.state === "rejected" ||
+                                      cell.state === "lost" ||
+                                      cell.status === "failed"
+                                    ? "text-destructive"
+                                    : "text-muted-foreground"
+                              }
+                            >
+                              {cell.runID ? (
+                                <Link
+                                  {...runLink(cell.runID)}
+                                  className="hover:underline"
+                                  title={cell.runID}
+                                >
+                                  {stateLabel(cell)}
+                                </Link>
+                              ) : (
+                                stateLabel(cell)
+                              )}
+                              {cell.error ? ` (${cell.error})` : ""}
+                              {costCapable &&
+                              cell.runID &&
+                              cell.state === "finished" ? (
+                                <span
+                                  className="ml-1.5 text-muted-foreground"
+                                  data-cell-cost
+                                >
+                                  {cellCost(`${v.key}\u0000${ik}`) ? (
+                                    <CostText
+                                      v={cellCost(`${v.key}\u0000${ik}`)!}
+                                    />
+                                  ) : (
+                                    <span
+                                      className="text-faint"
+                                      title="reading the run's cost"
+                                    >
+                                      …
+                                    </span>
+                                  )}
+                                </span>
+                              ) : null}
+                            </span>
+                          ) : (
+                            <span className="text-faint">—</span>
+                          )}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+              {costCapable ? (
+                <tfoot>
+                  <tr className="border-t text-muted-foreground">
+                    <td
+                      className="py-1"
+                      title="each variant's runs, own + delegated, summed here"
+                    >
+                      cost
+                    </td>
+                    {variants.map((v) => (
+                      <td
+                        key={v.key}
+                        className="py-1"
+                        data-variant-cost={v.key}
+                      >
+                        <CostText v={variantCost(v.key)} />
+                      </td>
+                    ))}
+                  </tr>
+                </tfoot>
+              ) : null}
+            </table>
           </div>
         )}
       </div>
@@ -2329,7 +2639,11 @@ function FormVerbs({
         copy share link
       </Button>
       {share ? (
-        <p className={share.url ? "text-muted-foreground" : "text-status-bad"} role="status" data-share-note>
+        <p
+          className={share.url ? "text-muted-foreground" : "text-status-bad"}
+          role="status"
+          data-share-note
+        >
           {share.note}
         </p>
       ) : null}
@@ -2352,7 +2666,15 @@ const DRAFTS_SHOWN = 10
 
 /** Drafts lists this browser's drafts of the form (plan F5,
  * lib/drafts.ts), newest first: open one, or delete it. */
-function Drafts({ current, saves, open }: { current: string; saves: number; open: (id: string) => void }) {
+function Drafts({
+  current,
+  saves,
+  open,
+}: {
+  current: string
+  saves: number
+  open: (id: string) => void
+}) {
   const [list, setList] = useState<DraftRecord[] | null>(null)
   const [reads, setReads] = useState(0)
   useEffect(() => {
@@ -2374,17 +2696,23 @@ function Drafts({ current, saves, open }: { current: string; saves: number; open
         {list.slice(0, DRAFTS_SHOWN).map((d) => (
           <li
             key={d.id}
-            className={`flex flex-wrap items-center gap-2 px-3 py-1.5${d.id === current ? " bg-secondary" : ""}`}
+            className={`flex flex-wrap items-center gap-2 px-3 py-1.5${d.id === current ? "bg-secondary" : ""}`}
             data-draft={d.id}
           >
             <span className="font-mono text-faint">{d.id}</span>
             <span className="min-w-0 truncate">{d.label || "—"}</span>
-            {d.saved ? <span className="text-faint">{relativeTime(d.saved)}</span> : null}
+            {d.saved ? (
+              <span className="text-faint">{relativeTime(d.saved)}</span>
+            ) : null}
             <span className="ml-auto flex gap-2">
               {d.id === current ? (
                 <span className="text-faint">open</span>
               ) : (
-                <button className="hover:underline" onClick={() => open(d.id)} aria-label={`open draft ${d.id}`}>
+                <button
+                  className="hover:underline"
+                  onClick={() => open(d.id)}
+                  aria-label={`open draft ${d.id}`}
+                >
                   open
                 </button>
               )}
@@ -2392,7 +2720,9 @@ function Drafts({ current, saves, open }: { current: string; saves: number; open
                 <button
                   className="text-faint hover:underline"
                   aria-label={`delete draft ${d.id}`}
-                  onClick={() => void deleteDraft(d.id).then(() => setReads((n) => n + 1))}
+                  onClick={() =>
+                    void deleteDraft(d.id).then(() => setReads((n) => n + 1))
+                  }
                 >
                   delete
                 </button>
@@ -2434,10 +2764,13 @@ function History({ selected }: { selected?: string }) {
         {list.map((e) => (
           <div
             key={e.id}
-            className={`flex items-center gap-2 px-3 py-1.5${e.id === selected ? " bg-secondary" : ""}`}
+            className={`flex items-center gap-2 px-3 py-1.5${e.id === selected ? "bg-secondary" : ""}`}
             data-selected={e.id === selected ? "" : undefined}
           >
-            <Link {...experimentLink(e.id)} className="font-mono text-faint hover:underline">
+            <Link
+              {...experimentLink(e.id)}
+              className="font-mono text-faint hover:underline"
+            >
               {e.id}
             </Link>
             <span>{e.name || "—"}</span>

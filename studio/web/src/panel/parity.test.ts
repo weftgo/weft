@@ -11,27 +11,83 @@
 // Request tab says not_recorded on both surfaces.
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { cleanup, configure, fireEvent, screen, waitFor } from "@testing-library/react"
+import {
+  cleanup,
+  configure,
+  fireEvent,
+  screen,
+  waitFor,
+} from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "../lib/api"
 import type { RunDoc, RunRow } from "../lib/api"
 import { UNRUN_CALL_REASON } from "../lib/events"
-import { REQUEST_NO_INDEX_REASON, REQUEST_NO_RECORD_REASON, REQUEST_NOT_RECORDED_LABEL } from "../lib/requests"
+import {
+  REQUEST_NO_INDEX_REASON,
+  REQUEST_NO_RECORD_REASON,
+  REQUEST_NOT_RECORDED_LABEL,
+} from "../lib/requests"
 import { badgeLabel } from "./badges"
-import { CAUSES, HOLES, isHole, PLAYGROUND_OFF, resultCapReason, RUNTIMES_UNREAD } from "../lib/honesty"
+import {
+  CAUSES,
+  HOLES,
+  isHole,
+  PLAYGROUND_OFF,
+  resultCapReason,
+  RUNTIMES_UNREAD,
+} from "../lib/honesty"
 import { renderApp, stubBrowser } from "../test/app"
 import { renderWithRouter } from "../test/render"
 import { createElement } from "react"
 import { StepDiffTable } from "../components/studio/step-diff"
-import { DIFF_COLUMNS, cellHole, markerWords, nWayView, stepDiffView } from "../lib/stepdiff"
+import {
+  DIFF_COLUMNS,
+  cellHole,
+  markerWords,
+  nWayView,
+  stepDiffView,
+} from "../lib/stepdiff"
 import type { DiffDoc } from "../lib/stepdiff"
 import { stepDiffBlock } from "./compare"
 import { FakeEventSource as StudioEventSource } from "../test/fake-event-source"
-import { FakeStudio, golden, hiddenRefusal, pagedEvents, pagedRequests } from "../test/fake-studio"
+import {
+  FakeStudio,
+  golden,
+  hiddenRefusal,
+  pagedEvents,
+  pagedRequests,
+} from "../test/fake-studio"
 import type { FakePosEvent } from "../test/fake-studio"
-import { $, all, assistant, ATTRS, baseRoutes, button, click, fakeStudio as panelStudio, META, mount, runExperiment, runRow, RUNTIMES, SESSION, settle, setup, T0, teardown, transcript, user } from "./testkit"
-import { keepEditedTitle, keepPromptWords, PROPOSAL_NEEDS_DEV, SAVE_TEST_LABEL, SAVE_TEST_TITLE } from "../lib/saves"
+import {
+  $,
+  all,
+  assistant,
+  ATTRS,
+  baseRoutes,
+  button,
+  click,
+  fakeStudio as panelStudio,
+  META,
+  mount,
+  runExperiment,
+  runRow,
+  RUNTIMES,
+  SESSION,
+  settle,
+  setup,
+  T0,
+  teardown,
+  transcript,
+  user,
+} from "./testkit"
+import {
+  keepEditedTitle,
+  keepPromptWords,
+  PROPOSAL_NEEDS_DEV,
+  SAVE_TEST_LABEL,
+  SAVE_TEST_TITLE,
+} from "../lib/saves"
 import { resetNotices } from "../lib/notify"
 import type { WeftDevtools } from "./element"
 import { buildRunBody as studioBody, emptyLab } from "../lib/experiment-body"
@@ -46,15 +102,31 @@ import type { ExperimentDraft } from "./playground"
 import { studioPlaygroundLink } from "./element"
 import { drawerHandoff } from "../components/studio/replay-drawer"
 import { playgroundLink } from "../lib/links"
-import { DERIVED, STOCK as DERIVED_STOCK, derivedBodies, serveDerived } from "../test/derived-fixture"
-import { APP_PUB, CALL as APP_CALL, NOPUB as APP_NOPUB, PARKED as APP_PARKED, PLAIN as APP_PLAIN, RUNTIMES_500 as APP_RUNTIMES_500, runtimeRow as appRuntime, serveAppTurn } from "../test/appturn-fixture"
+import {
+  DERIVED,
+  STOCK as DERIVED_STOCK,
+  derivedBodies,
+  serveDerived,
+} from "../test/derived-fixture"
+import {
+  APP_PUB,
+  CALL as APP_CALL,
+  NOPUB as APP_NOPUB,
+  PARKED as APP_PARKED,
+  PLAIN as APP_PLAIN,
+  RUNTIMES_500 as APP_RUNTIMES_500,
+  runtimeRow as appRuntime,
+  serveAppTurn,
+} from "../test/appturn-fixture"
 import type { AppTurnOptions } from "../test/appturn-fixture"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
 
 const RUN = "s_01-t1"
-const table = JSON.parse(readFileSync(resolve(process.cwd(), "../testdata/holes.golden.json"), "utf8")) as {
+const table = JSON.parse(
+  readFileSync(resolve(process.cwd(), "../testdata/holes.golden.json"), "utf8")
+) as {
   hole: string
   reason: string
   fix?: string
@@ -100,9 +172,21 @@ function events(
   } = {}
 ): FakePosEvent[] {
   const evs: unknown[] = [
-    { type: "run_start", id: RUN, model: { provider: "wefttest", name: "script" }, agent: "acme-support" },
+    {
+      type: "run_start",
+      id: RUN,
+      model: { provider: "wefttest", name: "script" },
+      agent: "acme-support",
+    },
     { type: "step_start", run_id: RUN, index: 0 },
-    { type: "tool_start", run_id: RUN, seq: 1, call_id: "c1", name: "lookup_order", args: { order_id: "42" } },
+    {
+      type: "tool_start",
+      run_id: RUN,
+      seq: 1,
+      call_id: "c1",
+      name: "lookup_order",
+      args: { order_id: "42" },
+    },
     {
       type: "tool_finish",
       run_id: RUN,
@@ -122,7 +206,13 @@ function events(
       ttft_ms: 40,
     },
   ]
-  if (opts.finish !== false) evs.push({ type: "run_finish", run_id: RUN, usage: { input_tokens: 5, output_tokens: 2 }, steps: 1 })
+  if (opts.finish !== false)
+    evs.push({
+      type: "run_finish",
+      run_id: RUN,
+      usage: { input_tokens: 5, output_tokens: 2 },
+      steps: 1,
+    })
   return evs.map((event, pos) => {
     const attrs = opts.all ?? (pos === 3 ? opts.attrs : undefined)
     return { pos, time: T0, event, ...(attrs ? { attrs } : {}) }
@@ -132,7 +222,9 @@ function events(
 /** The request record of the baseline: step 0's one attempt (the
  * recorded run's first row). */
 const OK_REQUESTS = () => {
-  const g = golden<{ requests: { index: number; step: number }[] }>("requests-ok")
+  const g = golden<{ requests: { index: number; step: number }[] }>(
+    "requests-ok"
+  )
   return { requests: g.requests.filter((r) => r.step === 0).slice(0, 1) }
 }
 
@@ -154,19 +246,28 @@ const CASES: Record<string, Case> = {
     hole: "truncated",
     scope: "call",
     words: words("truncated"),
-    fixture: () => ({ doc: {}, events: events({ attrs: { "weft.content.truncated_bytes": 12595 } }) }),
+    fixture: () => ({
+      doc: {},
+      events: events({ attrs: { "weft.content.truncated_bytes": 12595 } }),
+    }),
   },
   "truncated (result_cap)": {
     hole: "truncated",
     scope: "call",
     words: resultCapReason(4096),
-    fixture: () => ({ doc: {}, events: events({ content: "shipped\n…[truncated 4096 bytes]" }) }),
+    fixture: () => ({
+      doc: {},
+      events: events({ content: "shipped\n…[truncated 4096 bytes]" }),
+    }),
   },
   stripped: {
     hole: "stripped",
     scope: "header",
     words: words("stripped"),
-    fixture: () => ({ doc: {}, events: events({ all: { "weft.content": "stripped" } }) }),
+    fixture: () => ({
+      doc: {},
+      events: events({ all: { "weft.content": "stripped" } }),
+    }),
   },
   // weft's pipeline never emits weft.content = redacted (Go reserves
   // the mark); this is a non-weft writer's shape, which both surfaces
@@ -175,7 +276,10 @@ const CASES: Record<string, Case> = {
     hole: "redacted",
     scope: "call",
     words: words("redacted"),
-    fixture: () => ({ doc: {}, events: events({ attrs: { "weft.content": "redacted" } }) }),
+    fixture: () => ({
+      doc: {},
+      events: events({ attrs: { "weft.content": "redacted" } }),
+    }),
   },
   max_tokens: {
     hole: "max_tokens",
@@ -189,21 +293,31 @@ const CASES: Record<string, Case> = {
     words: UNRUN_CALL_REASON,
     fixture: () => ({
       doc: {},
-      events: events({ content: "tool call lookup_order was not executed: the response hit the output token limit" }),
+      events: events({
+        content:
+          "tool call lookup_order was not executed: the response hit the output token limit",
+      }),
     }),
   },
   interrupted: {
     hole: "interrupted",
     scope: "header",
     words: words("interrupted"),
-    fixture: () => ({ doc: { status: "interrupted", finished: null }, events: events({ finish: false }) }),
+    fixture: () => ({
+      doc: { status: "interrupted", finished: null },
+      events: events({ finish: false }),
+    }),
   },
   gap: {
     hole: "gap",
     scope: "header",
     words: words("gap"),
     // A lost event (position 2): the record's gap, the run over.
-    fixture: () => ({ doc: {}, events: events().filter((e) => e.pos !== 2), gaps: [2] }),
+    fixture: () => ({
+      doc: {},
+      events: events().filter((e) => e.pos !== 2),
+      gaps: [2],
+    }),
   },
   // A finished step no request row names: the record's gap, on the
   // step's request section (REQUEST_NO_RECORD_REASON on both).
@@ -221,7 +335,13 @@ const CASES: Record<string, Case> = {
       doc: {
         requests_badge: "not_recorded",
         request_count: 0,
-        holes: [{ hole: "not_recorded", reason: HOLES.not_recorded.reason, fix: HOLES.not_recorded.fix }],
+        holes: [
+          {
+            hole: "not_recorded",
+            reason: HOLES.not_recorded.reason,
+            fix: HOLES.not_recorded.fix,
+          },
+        ],
       },
       events: events(),
       requests: "not-recorded",
@@ -231,7 +351,10 @@ const CASES: Record<string, Case> = {
     hole: "derived",
     scope: "header",
     words: words("derived"),
-    fixture: () => ({ doc: { holes: [{ hole: "derived", reason: HOLES.derived.reason }] }, events: events() }),
+    fixture: () => ({
+      doc: { holes: [{ hole: "derived", reason: HOLES.derived.reason }] },
+      events: events(),
+    }),
   },
   hidden: {
     hole: "hidden",
@@ -262,22 +385,55 @@ function serve(fx: Fixture, studioMeta: boolean): FakeStudio {
   const doc = { ...row, children: [], holes: [], ...fx.doc }
   const caps = ["ingest", "requests"]
   const fake = new FakeStudio()
-    .on("GET meta", studioMeta ? { ...golden<Record<string, unknown>>("meta"), capabilities: caps } : { ...META, capabilities: caps })
+    .on(
+      "GET meta",
+      studioMeta
+        ? { ...golden<Record<string, unknown>>("meta"), capabilities: caps }
+        : { ...META, capabilities: caps }
+    )
     .on("GET sessions", { total: 1, sessions: [SESSION], next_before: null })
     .on("GET runs", { total: 1, runs: [row], next_before: null })
     .on(`GET runs/${RUN}`, doc)
-    .on(`GET runs/${RUN}/events`, pagedEvents(fx.events, { gaps: fx.gaps ?? [], done: doc.status !== "running" }))
-    .on(`GET runs/${RUN}/transcript`, fx.transcript ?? transcript([user("where is 42?")], [assistant("It shipped.")]))
+    .on(
+      `GET runs/${RUN}/events`,
+      pagedEvents(fx.events, {
+        gaps: fx.gaps ?? [],
+        done: doc.status !== "running",
+      })
+    )
+    .on(
+      `GET runs/${RUN}/transcript`,
+      fx.transcript ??
+        transcript([user("where is 42?")], [assistant("It shipped.")])
+    )
     .on(`GET runs/${RUN}/spans`, { spans: [] })
   const variant = fx.requests ?? "ok"
-  if (fx.rows) fake.on(`GET runs/${RUN}/requests`, pagedRequests({ requests: fx.rows as never })).on(`GET runs/${RUN}/tools`, fx.tools ?? golden<object>("tools-ok"))
-  else if (variant === "hidden") fake.on(`GET runs/${RUN}/requests`, () => hiddenRefusal()).on(`GET runs/${RUN}/tools`, () => hiddenRefusal())
+  if (fx.rows)
+    fake
+      .on(
+        `GET runs/${RUN}/requests`,
+        pagedRequests({ requests: fx.rows as never })
+      )
+      .on(`GET runs/${RUN}/tools`, fx.tools ?? golden<object>("tools-ok"))
+  else if (variant === "hidden")
+    fake
+      .on(`GET runs/${RUN}/requests`, () => hiddenRefusal())
+      .on(`GET runs/${RUN}/tools`, () => hiddenRefusal())
   else if (variant === "not-recorded")
     fake
-      .on(`GET runs/${RUN}/requests`, pagedRequests(golden("requests-not-recorded")))
+      .on(
+        `GET runs/${RUN}/requests`,
+        pagedRequests(golden("requests-not-recorded"))
+      )
       .on(`GET runs/${RUN}/tools`, golden<object>("tools-not-recorded"))
-  else if (variant === "empty") fake.on(`GET runs/${RUN}/requests`, { requests: [] }).on(`GET runs/${RUN}/tools`, golden<object>("tools-ok"))
-  else fake.on(`GET runs/${RUN}/requests`, pagedRequests(OK_REQUESTS())).on(`GET runs/${RUN}/tools`, golden<object>("tools-ok"))
+  else if (variant === "empty")
+    fake
+      .on(`GET runs/${RUN}/requests`, { requests: [] })
+      .on(`GET runs/${RUN}/tools`, golden<object>("tools-ok"))
+  else
+    fake
+      .on(`GET runs/${RUN}/requests`, pagedRequests(OK_REQUESTS()))
+      .on(`GET runs/${RUN}/tools`, golden<object>("tools-ok"))
   return fake.install()
 }
 
@@ -287,22 +443,40 @@ afterEach(() => {
   teardown()
 })
 
-const holeSet = (nodes: Element[]) => [...new Set(nodes.map((n) => n.getAttribute("data-hole") ?? ""))].sort()
+const holeSet = (nodes: Element[]) =>
+  [...new Set(nodes.map((n) => n.getAttribute("data-hole") ?? ""))].sort()
 
 /** The panel on the fixture, at rest once its request line is drawn:
  * every hole it shows, and the badge in the case's scope. */
-async function inPanel(fx: Fixture, sel?: string): Promise<{ holes: string[]; title: string | null; el: WeftDevtools }> {
+async function inPanel(
+  fx: Fixture,
+  sel?: string
+): Promise<{ holes: string[]; title: string | null; el: WeftDevtools }> {
   serve(fx, false)
   const el = await mount(ATTRS)
-  await vi.waitFor(() => expect($(el, "[data-weft-request]"), "panel request line").toBeTruthy(), { timeout: 5_000 })
-  if (sel) await vi.waitFor(() => expect($(el, sel), `panel ${sel}`).toBeTruthy(), { timeout: 5_000 })
+  await vi.waitFor(
+    () =>
+      expect($(el, "[data-weft-request]"), "panel request line").toBeTruthy(),
+    { timeout: 5_000 }
+  )
+  if (sel)
+    await vi.waitFor(() => expect($(el, sel), `panel ${sel}`).toBeTruthy(), {
+      timeout: 5_000,
+    })
   await settle()
-  return { holes: holeSet(all(el, "[data-hole]")), title: sel ? $(el, sel)!.getAttribute("title") : null, el }
+  return {
+    holes: holeSet(all(el, "[data-hole]")),
+    title: sel ? $(el, sel)!.getAttribute("title") : null,
+    el,
+  }
 }
 
 /** The run page on the same fixture, at rest once its request
  * sections are drawn. */
-async function inStudio(fx: Fixture, sel?: string): Promise<{ holes: string[]; title: string | null }> {
+async function inStudio(
+  fx: Fixture,
+  sel?: string
+): Promise<{ holes: string[]; title: string | null }> {
   stubBrowser()
   // jsdom has no scrolling: the router's restoration would say so.
   vi.stubGlobal("scrollTo", vi.fn())
@@ -311,9 +485,19 @@ async function inStudio(fx: Fixture, sel?: string): Promise<{ holes: string[]; t
   setStudioToken("")
   const fake = serve(fx, true)
   renderApp(`/runs/${RUN}?view=story`)
-  await waitFor(() => expect(document.querySelector("[data-request]"), "studio request section").toBeTruthy())
-  await waitFor(() => expect(fake.calls(`GET runs/${RUN}/requests`).length).toBeGreaterThan(0))
-  if (sel) await waitFor(() => expect(document.querySelector(sel), `studio ${sel}`).toBeTruthy())
+  await waitFor(() =>
+    expect(
+      document.querySelector("[data-request]"),
+      "studio request section"
+    ).toBeTruthy()
+  )
+  await waitFor(() =>
+    expect(fake.calls(`GET runs/${RUN}/requests`).length).toBeGreaterThan(0)
+  )
+  if (sel)
+    await waitFor(() =>
+      expect(document.querySelector(sel), `studio ${sel}`).toBeTruthy()
+    )
   // The request record's answer lands in a later render.
   await new Promise((r) => setTimeout(r, 150))
   return {
@@ -328,7 +512,10 @@ async function both(fx: Fixture, scope?: Scope, hole?: string) {
   await settle()
   cleanup()
   document.body.innerHTML = ""
-  const s = await inStudio(fx, scope && `${STUDIO[scope]} [data-hole="${hole}"]`)
+  const s = await inStudio(
+    fx,
+    scope && `${STUDIO[scope]} [data-hole="${hole}"]`
+  )
   return { panel: p, studio: s }
 }
 
@@ -354,22 +541,33 @@ describe("badge parity over the A3 table (D5)", () => {
       expect(studio.title, "run page").toContain(c.words)
       expect(panel.holes).toContain(c.hole)
       // Every badge the run page shows for this run, the panel shows.
-      expect(studio.holes.filter((h) => !panel.holes.includes(h)), `run page ${studio.holes} vs panel ${panel.holes}`).toEqual([])
+      expect(
+        studio.holes.filter((h) => !panel.holes.includes(h)),
+        `run page ${studio.holes} vs panel ${panel.holes}`
+      ).toEqual([])
     })
 
-  for (const [hole, why] of Object.entries(SKIPPED)) it.skip(`${hole}: ${why}`, () => {})
+  for (const [hole, why] of Object.entries(SKIPPED))
+    it.skip(`${hole}: ${why}`, () => {})
 })
 
 describe("the loop's cut words are shared", () => {
   it("result_cap and the unrun call read the same words the table and lib/events give", () => {
-    expect(resultCapReason(4096)).toBe(`${CAUSES.truncated!.result_cap.reason} (4.0 KiB cut)`)
-    expect(UNRUN_CALL_REASON).toMatch(/not executed: the response hit the output token limit/)
+    expect(resultCapReason(4096)).toBe(
+      `${CAUSES.truncated!.result_cap.reason} (4.0 KiB cut)`
+    )
+    expect(UNRUN_CALL_REASON).toMatch(
+      /not executed: the response hit the output token limit/
+    )
   })
 })
 
 describe("a pre-A1 run's Request tab (D5's second Done clause)", () => {
   it("the run page's request section says not_recorded", async () => {
-    const s = await inStudio(CASES.not_recorded.fixture(), `[data-request] [data-hole="not_recorded"]`)
+    const s = await inStudio(
+      CASES.not_recorded.fixture(),
+      `[data-request] [data-hole="not_recorded"]`
+    )
     expect(s.title).toContain(HOLES.not_recorded.fix!)
   })
 
@@ -383,8 +581,12 @@ describe("a pre-A1 run's Request tab (D5's second Done clause)", () => {
     const tab = $(el, '[data-key="tp:request"]')!
     expect(tab).toBeTruthy()
     expect(tab.textContent).not.toMatch(/lands with E1\.2/)
-    await vi.waitFor(() => expect(tab.querySelector('[data-hole="not_recorded"]')).toBeTruthy())
-    expect(tab.querySelector('[data-hole="not_recorded"]')!.getAttribute("title")).toContain(HOLES.not_recorded.fix!)
+    await vi.waitFor(() =>
+      expect(tab.querySelector('[data-hole="not_recorded"]')).toBeTruthy()
+    )
+    expect(
+      tab.querySelector('[data-hole="not_recorded"]')!.getAttribute("title")
+    ).toContain(HOLES.not_recorded.fix!)
   })
 })
 
@@ -396,18 +598,32 @@ describe("a pre-A1 run's Request tab (D5's second Done clause)", () => {
 describe("the Request panes word a record's holes alike (E1.2)", () => {
   type Seen = { hole: string; label: string; title: string }
   const seen = (nodes: Element[]): Seen[] =>
-    nodes.map((n) => ({ hole: n.getAttribute("data-hole") ?? "", label: badgeLabel(n), title: n.getAttribute("title") ?? "" }))
+    nodes.map((n) => ({
+      hole: n.getAttribute("data-hole") ?? "",
+      label: badgeLabel(n),
+      title: n.getAttribute("title") ?? "",
+    }))
   const key = (x: Seen) => `${x.hole} | ${x.label} | ${x.title}`
-  const row0 = () => structuredClone(golden<{ requests: Record<string, unknown>[] }>("requests-ok").requests[0]) as Record<string, any>
+  const row0 = () =>
+    structuredClone(
+      golden<{ requests: Record<string, unknown>[] }>("requests-ok").requests[0]
+    ) as Record<string, any>
 
-  async function panes(fx: Fixture): Promise<{ panel: Seen[]; studio: Seen[] }> {
+  async function panes(
+    fx: Fixture
+  ): Promise<{ panel: Seen[]; studio: Seen[] }> {
     serve(fx, false)
     const el = await mount(ATTRS)
     await vi.waitFor(() => expect($(el, "#weft-tab-request")).toBeTruthy())
     click($(el, "#weft-tab-request"))
-    await vi.waitFor(() => expect($(el, "#weft-tp-request [data-weft-rq-pane]")).toBeTruthy(), { timeout: 5_000 })
+    await vi.waitFor(
+      () => expect($(el, "#weft-tp-request [data-weft-rq-pane]")).toBeTruthy(),
+      { timeout: 5_000 }
+    )
     await settle()
-    const panel = seen(all(el, "#weft-tp-request [data-weft-rq-pane] [data-hole]"))
+    const panel = seen(
+      all(el, "#weft-tp-request [data-weft-rq-pane] [data-hole]")
+    )
     el.remove()
     await settle()
     cleanup()
@@ -420,26 +636,48 @@ describe("the Request panes word a record's holes alike (E1.2)", () => {
     serve(fx, true)
     renderApp(`/runs/${RUN}?view=story`)
     const pane = () => document.querySelector<HTMLElement>('[data-request="0"]')
-    await waitFor(() => expect(pane()?.querySelector("button[aria-expanded]")).toBeTruthy())
+    await waitFor(() =>
+      expect(pane()?.querySelector("button[aria-expanded]")).toBeTruthy()
+    )
     pane()!.querySelector<HTMLElement>("button[aria-expanded]")!.click()
     await new Promise((r) => setTimeout(r, 150))
-    return { panel, studio: seen(Array.from(pane()!.querySelectorAll("[data-hole]"))) }
+    return {
+      panel,
+      studio: seen(Array.from(pane()!.querySelectorAll("[data-hole]"))),
+    }
   }
-  const expectBoth = (r: { panel: Seen[]; studio: Seen[] }, want: Partial<Seen>[]) => {
+  const expectBoth = (
+    r: { panel: Seen[]; studio: Seen[] },
+    want: Partial<Seen>[]
+  ) => {
     for (const w of want)
       for (const [side, list] of Object.entries(r))
         expect(
-          list.some((x) => Object.entries(w).every(([k, v]) => x[k as "hole"].includes(v))),
+          list.some((x) =>
+            Object.entries(w).every(([k, v]) => x[k as "hole"].includes(v))
+          ),
           `${side} lacks ${JSON.stringify(w)}: ${list.map(key).join("; ")}`
         ).toBe(true)
     // What the run page's pane says of the record, the panel's says.
-    expect(r.studio.map(key).filter((k) => !r.panel.map(key).includes(k))).toEqual([])
+    expect(
+      r.studio.map(key).filter((k) => !r.panel.map(key).includes(k))
+    ).toEqual([])
   }
 
   it("a derived prompt and catalog: the derived badge on both blocks of both panes, no prompt box", async () => {
     const r = row0()
-    r.prompt = { hash: r.system_hash, text: "", content: "derived", truncated_bytes: 0 }
-    r.tools = { hash: r.catalog_hash, tools: [], content: "derived", truncated_bytes: 0 }
+    r.prompt = {
+      hash: r.system_hash,
+      text: "",
+      content: "derived",
+      truncated_bytes: 0,
+    }
+    r.tools = {
+      hash: r.catalog_hash,
+      tools: [],
+      content: "derived",
+      truncated_bytes: 0,
+    }
     const got = await panes({ doc: {}, events: events(), rows: [r] })
     expect(got.panel.filter((x) => x.hole === "derived").length).toBe(2)
     expect(got.studio.filter((x) => x.hole === "derived").length).toBe(2)
@@ -462,18 +700,38 @@ describe("the Request panes word a record's holes alike (E1.2)", () => {
   it("a running run whose transcript batch has not landed: neutral on both panes, never the red gap", async () => {
     const r = row0()
     r.body.messages_ref = { count: 3, index: 99 }
-    const fx: Fixture = { doc: { status: "running", finished: null }, events: events({ finish: false }), rows: [r] }
+    const fx: Fixture = {
+      doc: { status: "running", finished: null },
+      events: events({ finish: false }),
+      rows: [r],
+    }
     const got = await panes(fx)
-    expect(got.panel.filter((x) => x.hole === "gap"), "panel").toEqual([])
-    expect(got.studio.filter((x) => x.hole === "gap"), "run page").toEqual([])
-    expect(document.querySelector('[data-request="0"]')!.textContent).toContain("bytes when the transcript is read")
+    expect(
+      got.panel.filter((x) => x.hole === "gap"),
+      "panel"
+    ).toEqual([])
+    expect(
+      got.studio.filter((x) => x.hole === "gap"),
+      "run page"
+    ).toEqual([])
+    expect(document.querySelector('[data-request="0"]')!.textContent).toContain(
+      "bytes when the transcript is read"
+    )
     serve(fx, false)
     const el = await mount(ATTRS)
     await vi.waitFor(() => expect($(el, "#weft-tab-request")).toBeTruthy())
     click($(el, "#weft-tab-request"))
-    await vi.waitFor(() => expect($(el, "#weft-tp-request [data-weft-messages-line]")).toBeTruthy(), { timeout: 5_000 })
+    await vi.waitFor(
+      () =>
+        expect(
+          $(el, "#weft-tp-request [data-weft-messages-line]")
+        ).toBeTruthy(),
+      { timeout: 5_000 }
+    )
     await settle()
-    expect($(el, "#weft-tp-request [data-weft-rq-pane]")!.textContent).toContain("bytes when the transcript is read")
+    expect(
+      $(el, "#weft-tp-request [data-weft-rq-pane]")!.textContent
+    ).toContain("bytes when the transcript is read")
     expect(all(el, '#weft-tp-request [data-hole="gap"]')).toEqual([])
     el.remove()
   })
@@ -483,9 +741,18 @@ describe("the Request panes word a record's holes alike (E1.2)", () => {
     r.content = "stripped"
     r.prompt = { hash: r.system_hash, badge: "stripped" }
     r.tools = { hash: r.catalog_hash, badge: "stripped" }
-    const tools = { catalogs: [], badge: "stripped", reason: "the destination stripped it (otel.NoContent)", fix: "drop otel.NoContent()" }
+    const tools = {
+      catalogs: [],
+      badge: "stripped",
+      reason: "the destination stripped it (otel.NoContent)",
+      fix: "drop otel.NoContent()",
+    }
     expectBoth(await panes({ doc: {}, events: events(), rows: [r], tools }), [
-      { hole: "stripped", title: "the destination stripped it (otel.NoContent) — fix: drop otel.NoContent()" },
+      {
+        hole: "stripped",
+        title:
+          "the destination stripped it (otel.NoContent) — fix: drop otel.NoContent()",
+      },
     ])
   })
 })
@@ -509,45 +776,99 @@ describe("step compare parity (E3.2)", () => {
     /** The response's own badges. */
     top: string[]
   }
-  const blank = (): Drawn => ({ markers: [], cells: {}, holes: {}, chips: {}, cellHoles: {}, top: [] })
-  const attr = (ns: Iterable<Element>, a: string) => [...ns].map((n) => n.getAttribute(a)!)
+  const blank = (): Drawn => ({
+    markers: [],
+    cells: {},
+    holes: {},
+    chips: {},
+    cellHoles: {},
+    top: [],
+  })
+  const attr = (ns: Iterable<Element>, a: string) =>
+    [...ns].map((n) => n.getAttribute(a)!)
 
   function panelDrawn(doc: DiffDoc): Drawn {
     const box = stepDiffBlock(doc, "http://studio.test/studio/")
     const out = blank()
-    out.top = attr(box.querySelectorAll(":scope > .weft-note [data-hole]"), "data-hole")
+    out.top = attr(
+      box.querySelectorAll(":scope > .weft-note [data-hole]"),
+      "data-hole"
+    )
     for (const m of box.querySelectorAll("[data-weft-diff-marker]"))
-      out.markers.push({ step: m.getAttribute("data-weft-diff-marker")!, text: m.textContent })
+      out.markers.push({
+        step: m.getAttribute("data-weft-diff-marker")!,
+        text: m.textContent,
+      })
     for (const tr of box.querySelectorAll("tbody tr")) {
       const n = tr.getAttribute("data-weft-diff-step")!
       out.cells[n] = {}
       for (const td of tr.querySelectorAll("[data-weft-diff-cell]"))
-        out.cells[n][td.getAttribute("data-weft-diff-cell")!] = td.getAttribute("data-state")!
-      out.cellHoles[n] = attr(tr.querySelectorAll("[data-weft-diff-cell] [data-hole]"), "data-hole")
+        out.cells[n][td.getAttribute("data-weft-diff-cell")!] =
+          td.getAttribute("data-state")!
+      out.cellHoles[n] = attr(
+        tr.querySelectorAll("[data-weft-diff-cell] [data-hole]"),
+        "data-hole"
+      )
       for (const side of ["a", "b"]) {
-        out.holes[`${n}${side}`] = attr(tr.querySelectorAll(`[data-weft-diff-side="${side}"] [data-hole]`), "data-hole")
-        out.chips[`${n}${side}`] = attr(tr.querySelectorAll(`[data-weft-diff-side="${side}"] [data-weft-diff-mark]`), "data-weft-diff-mark")
+        out.holes[`${n}${side}`] = attr(
+          tr.querySelectorAll(`[data-weft-diff-side="${side}"] [data-hole]`),
+          "data-hole"
+        )
+        out.chips[`${n}${side}`] = attr(
+          tr.querySelectorAll(
+            `[data-weft-diff-side="${side}"] [data-weft-diff-mark]`
+          ),
+          "data-weft-diff-mark"
+        )
       }
     }
     return out
   }
 
   async function studioDrawn(doc: DiffDoc): Promise<Drawn> {
-    const { container } = await renderWithRouter(createElement(StepDiffTable, { view: nWayView([doc]) }))
-    await waitFor(() => expect(container.querySelector("[data-step-diff]")).toBeTruthy())
+    const { container } = await renderWithRouter(
+      createElement(StepDiffTable, { view: nWayView([doc]) })
+    )
+    await waitFor(() =>
+      expect(container.querySelector("[data-step-diff]")).toBeTruthy()
+    )
     const out = blank()
-    out.top = attr(container.querySelectorAll("[data-diff-holes] [data-hole]"), "data-hole")
+    out.top = attr(
+      container.querySelectorAll("[data-diff-holes] [data-hole]"),
+      "data-hole"
+    )
     for (const m of container.querySelectorAll("[data-diff-marker]"))
-      out.markers.push({ step: m.getAttribute("data-diff-marker")!, text: m.querySelector("a")!.textContent })
+      out.markers.push({
+        step: m.getAttribute("data-diff-marker")!,
+        text: m.querySelector("a")!.textContent,
+      })
     for (const tr of container.querySelectorAll("tbody tr")) {
       const n = tr.getAttribute("data-diff-step")!
       out.cells[n] = {}
       const mine = `[data-diff-run="${doc.b.run_id}"][data-diff-state]`
-      for (const td of tr.querySelectorAll(mine)) out.cells[n][td.getAttribute("data-diff-cell")!] = td.getAttribute("data-diff-state")!
-      out.cellHoles[n] = attr(tr.querySelectorAll(`${mine} [data-hole]`), "data-hole")
-      for (const [side, run] of [["a", doc.a.run_id], ["b", doc.b.run_id]]) {
-        out.holes[`${n}${side}`] = attr(tr.querySelectorAll(`[data-diff-run="${run}"][data-diff-marks] [data-hole]`), "data-hole")
-        out.chips[`${n}${side}`] = attr(tr.querySelectorAll(`[data-diff-run="${run}"][data-diff-marks] [data-diff-mark]`), "data-diff-mark")
+      for (const td of tr.querySelectorAll(mine))
+        out.cells[n][td.getAttribute("data-diff-cell")!] =
+          td.getAttribute("data-diff-state")!
+      out.cellHoles[n] = attr(
+        tr.querySelectorAll(`${mine} [data-hole]`),
+        "data-hole"
+      )
+      for (const [side, run] of [
+        ["a", doc.a.run_id],
+        ["b", doc.b.run_id],
+      ]) {
+        out.holes[`${n}${side}`] = attr(
+          tr.querySelectorAll(
+            `[data-diff-run="${run}"][data-diff-marks] [data-hole]`
+          ),
+          "data-hole"
+        )
+        out.chips[`${n}${side}`] = attr(
+          tr.querySelectorAll(
+            `[data-diff-run="${run}"][data-diff-marks] [data-diff-mark]`
+          ),
+          "data-diff-mark"
+        )
       }
     }
     cleanup()
@@ -563,10 +884,20 @@ describe("step compare parity (E3.2)", () => {
       const n = String(r.step)
       if (r.changed) out.markers.push({ step: n, text: markerWords(r) })
       out.cells[n] = { ...r.cells }
-      out.cellHoles[n] = DIFF_COLUMNS.flatMap((c) => cellHole(c, r.a.side, r.b.side) ?? [])
-      for (const [side, sv] of [["a", r.a], ["b", r.b]] as const) {
-        out.holes[`${n}${side}`] = [...sv.marks.flatMap((m) => m.hole ?? []), ...sv.holes.map((h) => h.hole)]
-        out.chips[`${n}${side}`] = sv.marks.filter((m) => !m.hole).map((m) => m.mark)
+      out.cellHoles[n] = DIFF_COLUMNS.flatMap(
+        (c) => cellHole(c, r.a.side, r.b.side) ?? []
+      )
+      for (const [side, sv] of [
+        ["a", r.a],
+        ["b", r.b],
+      ] as const) {
+        out.holes[`${n}${side}`] = [
+          ...sv.marks.flatMap((m) => m.hole ?? []),
+          ...sv.holes.map((h) => h.hole),
+        ]
+        out.chips[`${n}${side}`] = sv.marks
+          .filter((m) => !m.hole)
+          .map((m) => m.mark)
       }
     }
     return out
@@ -579,8 +910,23 @@ describe("step compare parity (E3.2)", () => {
     const doc = golden<DiffDoc>("diff")
     const s1 = doc.steps[1]
     s1.a = { ...s1.a!, marks: ["compacted", "subagent"] }
-    s1.b = { ...s1.b!, marks: ["max_tokens"], holes: [{ hole: "max_tokens", reason: "the step finished on the output token limit" }] }
-    doc.holes = [{ hole: "truncated", reason: "this response reads a bounded number of steps", fix: "open the later steps" }]
+    s1.b = {
+      ...s1.b!,
+      marks: ["max_tokens"],
+      holes: [
+        {
+          hole: "max_tokens",
+          reason: "the step finished on the output token limit",
+        },
+      ],
+    }
+    doc.holes = [
+      {
+        hole: "truncated",
+        reason: "this response reads a bounded number of steps",
+        fix: "open the later steps",
+      },
+    ]
     return doc
   }
 
@@ -590,11 +936,14 @@ describe("step compare parity (E3.2)", () => {
     ["diff-not-recorded", () => golden<DiffDoc>("diff-not-recorded")],
     ["diff with marks and a truncated response", marked],
   ]
-  it.each(cases)("%s: the same rows, cells, markers, badges and chips on both surfaces", async (_, make) => {
-    const doc = make()
-    expect(panelDrawn(doc), "panel").toEqual(want(doc))
-    expect(await studioDrawn(doc), "studio").toEqual(want(doc))
-  })
+  it.each(cases)(
+    "%s: the same rows, cells, markers, badges and chips on both surfaces",
+    async (_, make) => {
+      const doc = make()
+      expect(panelDrawn(doc), "panel").toEqual(want(doc))
+      expect(await studioDrawn(doc), "studio").toEqual(want(doc))
+    }
+  )
 
   it("marks: one badge per hole per side — max_tokens in both marks and holes is drawn once — subagent a chip", async () => {
     const doc = marked()
@@ -618,9 +967,13 @@ describe("step compare parity (E3.2)", () => {
   it("the Done line: a tool result that differs at step 3 is one marker on both, every other row the same", async () => {
     const doc = golden<DiffDoc>("diff")
     for (const got of [panelDrawn(doc), await studioDrawn(doc)]) {
-      expect(got.markers).toEqual([{ step: "3", text: "changed at step 3 · tool results" }])
+      expect(got.markers).toEqual([
+        { step: "3", text: "changed at step 3 · tool results" },
+      ])
       for (const [n, row] of Object.entries(got.cells))
-        expect(Object.values(row).filter((s) => s !== "same")).toEqual(n === "3" ? ["changed"] : [])
+        expect(Object.values(row).filter((s) => s !== "same")).toEqual(
+          n === "3" ? ["changed"] : []
+        )
     }
   })
 })
@@ -635,7 +988,12 @@ describe("the transcript editor's command and preview (F2 parity)", () => {
   const edits: ReplayEdit[] = [
     { kind: "user", step: 0, content: "refund order 7" },
     { kind: "tool_args", step: 0, callID: "c1", args: { q: "c9" } },
-    { kind: "tool_result", step: 1, callID: "c2", toolResult: "policy: no refunds" },
+    {
+      kind: "tool_result",
+      step: 1,
+      callID: "c2",
+      toolResult: "policy: no refunds",
+    },
     { kind: "reply", step: 1, content: "rewritten" },
     { kind: "insert", step: 2, content: "and check 43" },
   ]
@@ -651,8 +1009,20 @@ describe("the transcript editor's command and preview (F2 parity)", () => {
       sideEffects: "substitute",
       thread: "ephemeral",
     }
-    const agent = { name: "acme-support", models: [], tools: [{ name: "lookup_order", side_effects: "never", allow: false }] }
-    const studio = studioBody({ runtime: "rt_1", agent, variant, sourceRunID: RUN, fromStep: 3, input: "", edits })
+    const agent = {
+      name: "acme-support",
+      models: [],
+      tools: [{ name: "lookup_order", side_effects: "never", allow: false }],
+    }
+    const studio = studioBody({
+      runtime: "rt_1",
+      agent,
+      variant,
+      sourceRunID: RUN,
+      fromStep: 3,
+      input: "",
+      edits,
+    })
     const panel = panelBody(
       {
         edits,
@@ -672,38 +1042,78 @@ describe("the transcript editor's command and preview (F2 parity)", () => {
       },
       ""
     )
-    expect(JSON.stringify(panel.transcript_edits)).toBe(JSON.stringify(studio.transcript_edits))
+    expect(JSON.stringify(panel.transcript_edits)).toBe(
+      JSON.stringify(studio.transcript_edits)
+    )
     expect(JSON.stringify(panel)).toBe(JSON.stringify(studio))
-    expect((studio.transcript_edits as { kind: string }[]).map((e) => e.kind)).toEqual(["user", "tool_args", "tool_result", "reply", "insert"])
+    expect(
+      (studio.transcript_edits as { kind: string }[]).map((e) => e.kind)
+    ).toEqual(["user", "tool_args", "tool_result", "reply", "insert"])
   })
 
-  type Rows = { system: string; changed: string[]; holes: string[]; rows: string[][]; warnings: string[]; unchecked: string }
+  type Rows = {
+    system: string
+    changed: string[]
+    holes: string[]
+    rows: string[][]
+    warnings: string[]
+    unchecked: string
+  }
   const read = (root: ParentNode, p: string): Rows => ({
-    system: root.querySelector(`[data-${p}preview-system]`)!.getAttribute(`data-${p}preview-system`)!,
-    changed: [...root.querySelectorAll(`[data-${p}preview-changed]`)].map((n) => n.getAttribute(`data-${p}preview-changed`)!),
-    holes: [...root.querySelectorAll("[data-hole]")].map((n) => n.getAttribute("data-hole")!),
+    system: root
+      .querySelector(`[data-${p}preview-system]`)!
+      .getAttribute(`data-${p}preview-system`)!,
+    changed: [...root.querySelectorAll(`[data-${p}preview-changed]`)].map((n) =>
+      n.getAttribute(`data-${p}preview-changed`)!
+    ),
+    holes: [...root.querySelectorAll("[data-hole]")].map((n) =>
+      n.getAttribute("data-hole")!
+    ),
     rows: [...root.querySelectorAll(`[data-${p}preview-op]`)].map((r) => [
       r.getAttribute(`data-${p}preview-op`)!,
       r.querySelector(`[data-${p}preview-was]`)?.textContent ?? "",
       r.querySelector(`[data-${p}preview-will]`)?.textContent ?? "",
     ]),
-    warnings: [...root.querySelectorAll(`[data-${p}preview-warning]`)].map((n) => `${n.getAttribute(`data-${p}preview-warning`)}: ${n.textContent}`),
-    unchecked: root.querySelector(`[data-${p}preview-unchecked]`)?.textContent ?? "",
+    warnings: [...root.querySelectorAll(`[data-${p}preview-warning]`)].map(
+      (n) => `${n.getAttribute(`data-${p}preview-warning`)}: ${n.textContent}`
+    ),
+    unchecked:
+      root.querySelector(`[data-${p}preview-unchecked]`)?.textContent ?? "",
   })
   const PV = golden<PreviewDoc>("playground-preview")
   const hidden: PreviewDoc = {
     ...PV,
-    will_send: { ...PV.will_send, system: null, system_badge: "hidden", tools: null, tools_badge: "hidden" },
-    was_sent: { ...PV.was_sent, system: null, system_badge: "hidden", tools: null, tools_badge: "hidden", badge: "derived" },
+    will_send: {
+      ...PV.will_send,
+      system: null,
+      system_badge: "hidden",
+      tools: null,
+      tools_badge: "hidden",
+    },
+    was_sent: {
+      ...PV.was_sent,
+      system: null,
+      system_badge: "hidden",
+      tools: null,
+      tools_badge: "hidden",
+      badge: "derived",
+    },
     diff: { ...PV.diff, system: "hidden", tools: null },
     unchecked: ["model"],
   }
 
-  for (const [name, doc] of [["the golden", PV], ["hidden to a read token, unchecked", hidden]] as const)
+  for (const [name, doc] of [
+    ["the golden", PV],
+    ["hidden to a read token, unchecked", hidden],
+  ] as const)
     it(`both surfaces draw the same preview rows: ${name}`, async () => {
       const panel = read(previewBlock({ doc }, 2), "weft-")
-      const { container } = await renderWithRouter(createElement(PreviewPane, { state: { doc }, fromStep: 2 }))
-      await waitFor(() => expect(container.querySelector("[data-preview-system]")).toBeTruthy())
+      const { container } = await renderWithRouter(
+        createElement(PreviewPane, { state: { doc }, fromStep: 2 })
+      )
+      await waitFor(() =>
+        expect(container.querySelector("[data-preview-system]")).toBeTruthy()
+      )
       const studio = read(container, "")
       cleanup()
       expect(panel).toEqual(studio)
@@ -718,23 +1128,58 @@ describe("the hand-off to Studio's playground is one fragment (final web review)
   // and the run page drawer's "open in the playground" write the same
   // keys, in the same order, by the same omission rule.
   const tools = ["lookup_order", "search_kb", "refund"]
-  const cases: { name: string; step: number; v: Omit<VariantFields, "toolsOff"> & { off: string[] }; edits: ReplayEdit[] }[] = [
+  const cases: {
+    name: string
+    step: number
+    v: Omit<VariantFields, "toolsOff"> & { off: string[] }
+    edits: ReplayEdit[]
+  }[] = [
     {
       name: "a later step with edits, a lab and every override (the input stays behind)",
       step: 2,
-      v: { off: ["refund"], instructions: "be terse", model: "glm", thinking: "high", input: "stale", engine: "live", sideEffects: "park", thread: "ephemeral", lab: { ...emptyLab(), max_steps: "3", park_on: ["refund"] } },
-      edits: [{ kind: "tool_result", step: 1, callID: "c2", toolResult: "none" }],
+      v: {
+        off: ["refund"],
+        instructions: "be terse",
+        model: "glm",
+        thinking: "high",
+        input: "stale",
+        engine: "live",
+        sideEffects: "park",
+        thread: "ephemeral",
+        lab: { ...emptyLab(), max_steps: "3", park_on: ["refund"] },
+      },
+      edits: [
+        { kind: "tool_result", step: 1, callID: "c2", toolResult: "none" },
+      ],
     },
     {
       name: "step 0, a fork with its input, scripted",
       step: 0,
-      v: { off: [], instructions: "you help", model: "", thinking: "", input: "and order 9?", engine: "scripted", sideEffects: "substitute", thread: "fork" },
+      v: {
+        off: [],
+        instructions: "you help",
+        model: "",
+        thinking: "",
+        input: "and order 9?",
+        engine: "scripted",
+        sideEffects: "substitute",
+        thread: "fork",
+      },
       edits: [],
     },
     {
       name: "every default: the run and its target only",
       step: 0,
-      v: { off: [], instructions: "you help", model: "", thinking: "", input: "", engine: "live", sideEffects: "substitute", thread: "ephemeral" },
+      v: {
+        off: [],
+        instructions: "you help",
+        model: "",
+        thinking: "",
+        input: "",
+        engine: "live",
+        sideEffects: "substitute",
+        thread: "ephemeral",
+      },
       edits: [],
     },
   ]
@@ -742,7 +1187,16 @@ describe("the hand-off to Studio's playground is one fragment (final web review)
     it(c.name, () => {
       const { off, ...v } = c.v
       const studio = playgroundLink(
-        drawerHandoff({ runID: RUN, fromStep: c.step, agent: "acme-support", runtime: "rt_1", tools, registered: "you help", variant: { ...v, toolsOff: new Set(off) }, edits: c.edits })
+        drawerHandoff({
+          runID: RUN,
+          fromStep: c.step,
+          agent: "acme-support",
+          runtime: "rt_1",
+          tools,
+          registered: "you help",
+          variant: { ...v, toolsOff: new Set(off) },
+          edits: c.edits,
+        })
       ).hash
       const draft: ExperimentDraft = {
         runId: RUN,
@@ -761,7 +1215,9 @@ describe("the hand-off to Studio's playground is one fragment (final web review)
         edits: c.edits,
         ...(v.lab ? { lab: v.lab } : {}),
       }
-      const panel = new URL(studioPlaygroundLink("http://studio.test/studio/", draft, c.step)).hash.slice(1)
+      const panel = new URL(
+        studioPlaygroundLink("http://studio.test/studio/", draft, c.step)
+      ).hash.slice(1)
       expect(panel).toBe(studio)
       expect(panel).toContain(`run=${RUN}`)
     })
@@ -772,23 +1228,46 @@ describe("the hand-off to Studio's playground is one fragment (final web review)
 // with the deep link that opens it; where the row carries none, no link,
 // and the run page says the row's not_recorded with the raw_off words.
 describe("the wire pair: the panel links where the run page draws it (A6.2)", () => {
-  const row0 = () => structuredClone(golden<{ requests: Record<string, unknown>[] }>("requests-ok").requests[0]) as Record<string, any>
+  const row0 = () =>
+    structuredClone(
+      golden<{ requests: Record<string, unknown>[] }>("requests-ok").requests[0]
+    ) as Record<string, any>
   const RAW = {
     step: 0,
     attempt: 1,
-    request: { method: "POST", url: "https://api.example/v1/messages", headers: {}, media_type: "application/json", body: "{}", bytes: 2 },
-    response: { status: 200, headers: {}, media_type: "text/event-stream", body: "data: ok\n\n", bytes: 10 },
+    request: {
+      method: "POST",
+      url: "https://api.example/v1/messages",
+      headers: {},
+      media_type: "application/json",
+      body: "{}",
+      bytes: 2,
+    },
+    response: {
+      status: 200,
+      headers: {},
+      media_type: "text/event-stream",
+      body: "data: ok\n\n",
+      bytes: 10,
+    },
     redacted_headers: ["x-api-key"],
   }
-  async function wirePair(r: Record<string, any>): Promise<{ link: string | null; exchange: boolean; hole: Element | null }> {
+  async function wirePair(
+    r: Record<string, any>
+  ): Promise<{ link: string | null; exchange: boolean; hole: Element | null }> {
     const fx: Fixture = { doc: {}, events: events(), rows: [r] }
     serve(fx, false)
     const el = await mount(ATTRS)
     await vi.waitFor(() => expect($(el, "#weft-tab-request")).toBeTruthy())
     click($(el, "#weft-tab-request"))
-    await vi.waitFor(() => expect($(el, "#weft-tp-request [data-weft-rq-pane]")).toBeTruthy(), { timeout: 5_000 })
+    await vi.waitFor(
+      () => expect($(el, "#weft-tp-request [data-weft-rq-pane]")).toBeTruthy(),
+      { timeout: 5_000 }
+    )
     await settle()
-    const link = $(el, "#weft-tp-request [data-weft-wire-link]")?.getAttribute("href") ?? null
+    const link =
+      $(el, "#weft-tp-request [data-weft-wire-link]")?.getAttribute("href") ??
+      null
     el.remove()
     await settle()
     cleanup()
@@ -800,9 +1279,16 @@ describe("the wire pair: the panel links where the run page draws it (A6.2)", ()
     setStudioToken("")
     serve(fx, true)
     renderApp(`/runs/${RUN}?step=0&view=story&pane=wire`)
-    const wire = () => document.querySelector<HTMLElement>('[data-step="0"] [data-wire]')
-    await waitFor(() => expect(wire()?.querySelector("[data-wire-attempt]")).toBeTruthy())
-    return { link, exchange: Boolean(wire()!.querySelector("[data-wire-side]")), hole: wire()!.querySelector("[data-hole]") }
+    const wire = () =>
+      document.querySelector<HTMLElement>('[data-step="0"] [data-wire]')
+    await waitFor(() =>
+      expect(wire()?.querySelector("[data-wire-attempt]")).toBeTruthy()
+    )
+    return {
+      link,
+      exchange: Boolean(wire()!.querySelector("[data-wire-side]")),
+      hole: wire()!.querySelector("[data-hole]"),
+    }
   }
 
   it("a row with raw: the panel's link is the run page's own pane=wire URL, and that page draws the exchange", async () => {
@@ -812,7 +1298,9 @@ describe("the wire pair: the panel links where the run page draws it (A6.2)", ()
     delete r.raw_reason
     delete r.raw_fix
     const got = await wirePair(r)
-    expect(got.link).toBe(`${ATTRS["data-endpoint"]}runs/${RUN}?step=0&view=story&pane=wire`)
+    expect(got.link).toBe(
+      `${ATTRS["data-endpoint"]}runs/${RUN}?step=0&view=story&pane=wire`
+    )
     expect(got.exchange).toBe(true)
     expect(got.hole).toBeNull()
   })
@@ -822,7 +1310,9 @@ describe("the wire pair: the panel links where the run page draws it (A6.2)", ()
     expect(got.link).toBeNull()
     expect(got.exchange).toBe(false)
     expect(got.hole?.getAttribute("data-hole")).toBe("not_recorded")
-    expect(got.hole?.getAttribute("title")).toBe(`${CAUSES.not_recorded!.raw_off.reason} — fix: ${CAUSES.not_recorded!.raw_off.fix}`)
+    expect(got.hole?.getAttribute("title")).toBe(
+      `${CAUSES.not_recorded!.raw_off.reason} — fix: ${CAUSES.not_recorded!.raw_off.fix}`
+    )
   })
 })
 
@@ -830,12 +1320,19 @@ describe("the saves say the same words on both surfaces (F6.2)", () => {
   const PLAY = `weft_pt.${btoa(JSON.stringify({ pid: "pub_orders", scope: "playground" })).replace(/=+$/, "")}.sig`
   const CAPS = ["export", "proposals"]
   const studioToasts = () =>
-    [...document.querySelectorAll<HTMLElement>("[data-sonner-toast]")].map((t) => t.querySelector("[data-title]")?.textContent ?? "")
+    [...document.querySelectorAll<HTMLElement>("[data-sonner-toast]")].map(
+      (t) => t.querySelector("[data-title]")?.textContent ?? ""
+    )
 
   it("save as test's label and title; keep as prompt's copy-only line under a panel token", async () => {
-    vi.stubGlobal("navigator", { clipboard: { writeText: () => Promise.resolve() } })
+    vi.stubGlobal("navigator", {
+      clipboard: { writeText: () => Promise.resolve() },
+    })
     // The panel: the turn's link, then the result pane's keep as prompt.
-    panelStudio(baseRoutes(), { ...META, capabilities: [...META.capabilities, ...CAPS] })
+    panelStudio(baseRoutes(), {
+      ...META,
+      capabilities: [...META.capabilities, ...CAPS],
+    })
     const el = await mount({ ...ATTRS, "data-token": PLAY })
     const link = $(el, "a[data-weft-save-test]")
     expect(link?.textContent).toBe(SAVE_TEST_LABEL)
@@ -845,10 +1342,17 @@ describe("the saves say the same words on both surfaces (F6.2)", () => {
     expect(button(el, "keep as prompt ⤴")?.getAttribute("title")).toBe(
       keepEditedTitle("acme-support", [...META.capabilities, ...CAPS], PLAY)
     )
-    expect(button(el, "keep as prompt ⤴")?.getAttribute("title")).toBe("copy the edited prompt — a proposal needs the dev token")
+    expect(button(el, "keep as prompt ⤴")?.getAttribute("title")).toBe(
+      "copy the edited prompt — a proposal needs the dev token"
+    )
     click(button(el, "keep as prompt ⤴"))
     await settle(20)
-    const keepLine = keepPromptWords({ kind: "keep-prompt", agent: "acme-support", copied: true, proposal: "copy-only" }).title
+    const keepLine = keepPromptWords({
+      kind: "keep-prompt",
+      agent: "acme-support",
+      copied: true,
+      proposal: "copy-only",
+    }).title
     expect($(el, ".weft-api-note")?.textContent).toBe(keepLine)
     el.remove()
     await settle()
@@ -859,30 +1363,71 @@ describe("the saves say the same words on both surfaces (F6.2)", () => {
     stubBrowser()
     StudioEventSource.reset()
     vi.stubGlobal("EventSource", StudioEventSource)
-    Object.defineProperty(window.navigator, "clipboard", { configurable: true, value: { writeText: () => Promise.resolve() } })
+    Object.defineProperty(window.navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: () => Promise.resolve() },
+    })
     resetNotices()
     setStudioToken(PLAY)
-    const evs: unknown[] = [{ type: "run_start", id: RUN, model: { provider: "wefttest", name: "script" } }]
+    const evs: unknown[] = [
+      {
+        type: "run_start",
+        id: RUN,
+        model: { provider: "wefttest", name: "script" },
+      },
+    ]
     for (let i = 0; i < 3; i++)
-      evs.push({ type: "step_start", run_id: RUN, index: i }, { type: "step_finish", run_id: RUN, index: i, reason: "stop", usage: { input_tokens: 1, output_tokens: 1 } })
-    evs.push({ type: "run_finish", run_id: RUN, usage: { input_tokens: 3, output_tokens: 3 }, steps: 3 })
+      evs.push(
+        { type: "step_start", run_id: RUN, index: i },
+        {
+          type: "step_finish",
+          run_id: RUN,
+          index: i,
+          reason: "stop",
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }
+      )
+    evs.push({
+      type: "run_finish",
+      run_id: RUN,
+      usage: { input_tokens: 3, output_tokens: 3 },
+      steps: 3,
+    })
     new FakeStudio()
-      .on("GET meta", { ...golden<Record<string, unknown>>("meta"), capabilities: ["requests", ...CAPS] })
+      .on("GET meta", {
+        ...golden<Record<string, unknown>>("meta"),
+        capabilities: ["requests", ...CAPS],
+      })
       .on(`GET runs/${RUN}`, { ...runRow({ id: RUN }), steps: 3, children: [] })
-      .on(`GET runs/${RUN}/events`, pagedEvents(evs.map((event, pos) => ({ pos, time: T0, event }))))
+      .on(
+        `GET runs/${RUN}/events`,
+        pagedEvents(evs.map((event, pos) => ({ pos, time: T0, event })))
+      )
       .on(`GET runs/${RUN}/spans`, { spans: [] })
       .on(`GET runs/${RUN}/transcript`, { batches: [] })
       .withRequests(RUN, "ok")
       .install()
     renderApp(`/runs/${RUN}?view=story`)
     const btn = await waitFor(() => {
-      const b = [...document.querySelectorAll("button")].find((x) => x.textContent === SAVE_TEST_LABEL)
+      const b = [...document.querySelectorAll("button")].find(
+        (x) => x.textContent === SAVE_TEST_LABEL
+      )
       expect(b).toBeTruthy()
       return b!
     })
     expect(btn.getAttribute("title")).toBe(SAVE_TEST_TITLE)
-    await waitFor(() => expect(document.querySelector('[data-step="0"] [data-request="0"] button[aria-expanded]')).toBeTruthy())
-    ;(document.querySelector('[data-step="0"] [data-request="0"] button[aria-expanded]') as HTMLElement).click()
+    await waitFor(() =>
+      expect(
+        document.querySelector(
+          '[data-step="0"] [data-request="0"] button[aria-expanded]'
+        )
+      ).toBeTruthy()
+    )
+    ;(
+      document.querySelector(
+        '[data-step="0"] [data-request="0"] button[aria-expanded]'
+      ) as HTMLElement
+    ).click()
     const keep = await waitFor(() => {
       const b = document.querySelector<HTMLElement>("[data-keep-prompt]")
       expect(b).toBeTruthy()
@@ -908,25 +1453,51 @@ describe("a derived run on both surfaces (I1.3)", () => {
     expect(s).toContain(DERIVED_STOCK.reason)
     expect(s).toContain(DERIVED_STOCK.fix)
   }
-  const caps = [...golden<{ capabilities: string[] }>("meta").capabilities, "playground"]
+  const caps = [
+    ...golden<{ capabilities: string[] }>("meta").capabilities,
+    "playground",
+  ]
   const fake = (studioMeta: boolean) =>
     serveDerived(
-      new FakeStudio().on("GET meta", studioMeta ? { ...golden<Record<string, unknown>>("meta"), capabilities: caps } : { ...META, capabilities: caps })
+      new FakeStudio().on(
+        "GET meta",
+        studioMeta
+          ? { ...golden<Record<string, unknown>>("meta"), capabilities: caps }
+          : { ...META, capabilities: caps }
+      )
     ).install()
 
   it("the same holes, chips and refusals, the same words", async () => {
     // The panel: dev mode (a derived run has no public id), the turn opened.
     fake(false)
-    const el = await mount({ "data-endpoint": "http://studio.test/studio/", "data-open": "true" })
-    await vi.waitFor(() => expect(all(el, ".weft-turn").length).toBe(2), { timeout: 5_000 })
+    const el = await mount({
+      "data-endpoint": "http://studio.test/studio/",
+      "data-open": "true",
+    })
+    await vi.waitFor(() => expect(all(el, ".weft-turn").length).toBe(2), {
+      timeout: 5_000,
+    })
     click(all(el, ".weft-turn").find((b) => b.textContent.includes(DERIVED)))
-    await vi.waitFor(() => expect($(el, '[data-weft-turn-holes] [data-hole="derived"]')).toBeTruthy(), { timeout: 5_000 })
+    await vi.waitFor(
+      () =>
+        expect(
+          $(el, '[data-weft-turn-holes] [data-hole="derived"]')
+        ).toBeTruthy(),
+      { timeout: 5_000 }
+    )
     click($(el, "#weft-tab-request"))
-    await vi.waitFor(() => expect($(el, '#weft-tp-request [data-hole="derived"]')).toBeTruthy(), { timeout: 5_000 })
+    await vi.waitFor(
+      () =>
+        expect($(el, '#weft-tp-request [data-hole="derived"]')).toBeTruthy(),
+      { timeout: 5_000 }
+    )
     const panel = {
       holes: holeSet(all(el, "[data-hole]")),
-      header: $(el, '[data-weft-turn-holes] [data-hole="derived"]')!.parentElement!.textContent,
-      chip: $(el, `.weft-turn [data-weft-chip="derived"]`)!.getAttribute("title"),
+      header: $(el, '[data-weft-turn-holes] [data-hole="derived"]')!
+        .parentElement!.textContent,
+      chip: $(el, `.weft-turn [data-weft-chip="derived"]`)!.getAttribute(
+        "title"
+      ),
       request: $(el, "#weft-tp-request")!.textContent,
       verbs: all(el, "[data-weft-verb]").length,
       saveLink: all(el, "a[data-weft-save-test]").length,
@@ -935,8 +1506,14 @@ describe("a derived run on both surfaces (I1.3)", () => {
       timeline: [] as (string | null)[],
     }
     click($(el, "#weft-tab-timeline"))
-    await vi.waitFor(() => expect($(el, "#weft-tp-timeline .weft-wf .weft-wf-name")).toBeTruthy(), { timeout: 5_000 })
-    panel.timeline = all(el, "#weft-tp-timeline .weft-wf .weft-wf-name").map((n) => n.textContent)
+    await vi.waitFor(
+      () =>
+        expect($(el, "#weft-tp-timeline .weft-wf .weft-wf-name")).toBeTruthy(),
+      { timeout: 5_000 }
+    )
+    panel.timeline = all(el, "#weft-tp-timeline .weft-wf .weft-wf-name").map(
+      (n) => n.textContent
+    )
     el.remove()
     await settle()
     cleanup()
@@ -950,26 +1527,53 @@ describe("a derived run on both surfaces (I1.3)", () => {
     setStudioToken("")
     fake(true)
     renderApp(`/runs/${DERIVED}?view=story`)
-    await waitFor(() => expect(document.querySelectorAll("[data-step] [data-request] [data-hole='derived']").length).toBe(2))
+    await waitFor(() =>
+      expect(
+        document.querySelectorAll(
+          "[data-step] [data-request] [data-hole='derived']"
+        ).length
+      ).toBe(2)
+    )
     const studio = {
       holes: holeSet(Array.from(document.querySelectorAll("[data-hole]"))),
       header: document.querySelector("[data-run-holes]")!.textContent,
       request: document.querySelector("[data-request]")!.textContent,
       verbs: document.querySelectorAll("[data-replay-verb]").length,
-      steps: document.querySelectorAll("[data-derived-story] [data-step]").length,
-      refused: document.querySelectorAll("[data-replay-refused='derived'], [data-save-test='derived']").length,
+      steps: document.querySelectorAll("[data-derived-story] [data-step]")
+        .length,
+      refused: document.querySelectorAll(
+        "[data-replay-refused='derived'], [data-save-test='derived']"
+      ).length,
     }
     renderApp("/runs")
-    await waitFor(() => expect(document.querySelector("[data-derived-chip] [data-hole='derived']")).toBeTruthy())
-    const studioChip = document.querySelector("[data-derived-chip] [data-hole='derived']")!.getAttribute("title")
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-derived-chip] [data-hole='derived']")
+      ).toBeTruthy()
+    )
+    const studioChip = document
+      .querySelector("[data-derived-chip] [data-hole='derived']")!
+      .getAttribute("title")
     renderApp(`/runs/${DERIVED}`)
-    await waitFor(() => expect(document.querySelectorAll("[data-span]").length).toBe(4))
-    const waterfall = [...document.querySelectorAll("[data-span] > div[title]")].map((n) => n.getAttribute("title")!.split(" — ")[0])
+    await waitFor(() =>
+      expect(document.querySelectorAll("[data-span]").length).toBe(4)
+    )
+    const waterfall = [
+      ...document.querySelectorAll("[data-span] > div[title]"),
+    ].map((n) => n.getAttribute("title")!.split(" — ")[0])
 
     // The same rows: one hole, derived, on each surface.
     expect(panel.holes).toEqual(["derived"])
     expect(studio.holes).toEqual(panel.holes)
-    for (const s of [panel.header, panel.chip, panel.request, studio.header, studioChip, studio.request]) stock(s)
+    for (const s of [
+      panel.header,
+      panel.chip,
+      panel.request,
+      studio.header,
+      studioChip,
+      studio.request,
+    ])
+      stock(s)
     expect(panel.chip).toBe(studioChip)
     // Neither offers what the server would refuse; both say why.
     expect(panel.verbs).toBe(0)
@@ -981,7 +1585,12 @@ describe("a derived run on both surfaces (I1.3)", () => {
     expect(panel.handoff).toBe(`${studio.steps} steps · open in Studio ⤢`)
     expect(studio.steps).toBe(2)
     // The spans: the Timeline lists what the waterfall lists.
-    expect(panel.timeline).toEqual(["invoke_agent support", "chat gpt-5", "execute_tool lookup_order", "chat gpt-5"])
+    expect(panel.timeline).toEqual([
+      "invoke_agent support",
+      "chat gpt-5",
+      "execute_tool lookup_order",
+      "chat gpt-5",
+    ])
     expect(waterfall).toEqual(panel.timeline)
   })
 
@@ -989,8 +1598,15 @@ describe("a derived run on both surfaces (I1.3)", () => {
     const row = derivedBodies.runNoUsage as RunRow
     const reason = row.cost_reason!
     fake(false).on("GET runs", { total: 1, runs: [row], next_before: null })
-    const el = await mount({ "data-endpoint": "http://studio.test/studio/", "data-open": "true" })
-    await vi.waitFor(() => expect($(el, '.weft-turn [data-weft-usage="unknown"]')).toBeTruthy(), { timeout: 5_000 })
+    const el = await mount({
+      "data-endpoint": "http://studio.test/studio/",
+      "data-open": "true",
+    })
+    await vi.waitFor(
+      () =>
+        expect($(el, '.weft-turn [data-weft-usage="unknown"]')).toBeTruthy(),
+      { timeout: 5_000 }
+    )
     const p = $(el, '.weft-turn [data-weft-usage="unknown"]')!
     // The header's total leaves the unknown turn out (Studio's session
     // and list totals read the row the same way: "—", the API's reason).
@@ -1008,7 +1624,11 @@ describe("a derived run on both surfaces (I1.3)", () => {
     setStudioToken("")
     fake(true).on("GET runs", { total: 1, runs: [row], next_before: null })
     renderApp("/runs")
-    await waitFor(() => expect(document.querySelector("tbody tr [data-usage='unknown']")).toBeTruthy())
+    await waitFor(() =>
+      expect(
+        document.querySelector("tbody tr [data-usage='unknown']")
+      ).toBeTruthy()
+    )
     const s = document.querySelector("tbody tr [data-usage='unknown']")!
     expect(p.textContent).toBe("—")
     expect(s.firstChild?.textContent).toBe("—")
@@ -1026,21 +1646,86 @@ describe("a derived run on both surfaces (I1.3)", () => {
 // (GET /api/runtimes), never meta's global debug_scope: breakpoints_own
 // alone, or another service's Sessions runtime, reads read-only.
 describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
-  const cases: { name: string; o: AppTurnOptions; run?: string; click?: boolean; regated?: boolean; kind: string }[] = [
-    { name: "a Sessions runtime of the service: continue decides, the parked turn reads resumed", o: {}, click: true, kind: "resumed" },
-    { name: "the runtime's rejection verbatim", o: { outcome: "rejected" }, click: true, kind: "decide" },
-    { name: "a 403 becomes the read-only line with the server's fix", o: { outcome: "refused" }, click: true, kind: "read-only" },
+  const cases: {
+    name: string
+    o: AppTurnOptions
+    run?: string
+    click?: boolean
+    regated?: boolean
+    kind: string
+  }[] = [
+    {
+      name: "a Sessions runtime of the service: continue decides, the parked turn reads resumed",
+      o: {},
+      click: true,
+      kind: "resumed",
+    },
+    {
+      name: "the runtime's rejection verbatim",
+      o: { outcome: "rejected" },
+      click: true,
+      kind: "decide",
+    },
+    {
+      name: "a 403 becomes the read-only line with the server's fix",
+      o: { outcome: "refused" },
+      click: true,
+      kind: "read-only",
+    },
     // The panel's rule on both: a 403 is live until a runtimes read
     // started after it has applied and says decide — then the verbs are back.
-    { name: "a 403 a later runtimes read re-gates to decide gives the verbs back", o: { outcome: "refused", reconnects: true }, click: true, regated: true, kind: "decide" },
-    { name: "connected without Sessions: read-only", o: { runtimes: [appRuntime({ sessions: false, breakpoints_own: false })] }, kind: "read-only" },
-    { name: "breakpoints_own alone (debug_scope own+runtime): read-only", o: { runtimes: [appRuntime({ sessions: false, breakpoints_own: true })], debugScope: "own+runtime" }, kind: "read-only" },
-    { name: "another service's Sessions runtime: read-only for this service's turn", o: { runtimes: [appRuntime({ service: "billing" })], debugScope: "own+runtime" }, kind: "read-only" },
-    { name: "no runtime of the service connected: the link's fix", o: { runtimes: [] }, kind: "read-only" },
-    { name: "a turn already resumed: decided — resumed as the next run", o: { resumed: true }, kind: "resumed" },
+    {
+      name: "a 403 a later runtimes read re-gates to decide gives the verbs back",
+      o: { outcome: "refused", reconnects: true },
+      click: true,
+      regated: true,
+      kind: "decide",
+    },
+    {
+      name: "connected without Sessions: read-only",
+      o: {
+        runtimes: [appRuntime({ sessions: false, breakpoints_own: false })],
+      },
+      kind: "read-only",
+    },
+    {
+      name: "breakpoints_own alone (debug_scope own+runtime): read-only",
+      o: {
+        runtimes: [appRuntime({ sessions: false, breakpoints_own: true })],
+        debugScope: "own+runtime",
+      },
+      kind: "read-only",
+    },
+    {
+      name: "another service's Sessions runtime: read-only for this service's turn",
+      o: {
+        runtimes: [appRuntime({ service: "billing" })],
+        debugScope: "own+runtime",
+      },
+      kind: "read-only",
+    },
+    {
+      name: "no runtime of the service connected: the link's fix",
+      o: { runtimes: [] },
+      kind: "read-only",
+    },
+    {
+      name: "a turn already resumed: decided — resumed as the next run",
+      o: { resumed: true },
+      kind: "resumed",
+    },
     { name: "a plain Generate's park", o: {}, run: APP_PLAIN, kind: "plain" },
-    { name: "a session turn without a public id: appturn.go's words, the thread.PublicID fix", o: {}, run: APP_NOPUB, kind: "no-public-id" },
-    { name: "a failed runtimes read (500): its error, no verdict, no verbs", o: { runtimesError: true }, kind: "unread" },
+    {
+      name: "a session turn without a public id: appturn.go's words, the thread.PublicID fix",
+      o: {},
+      run: APP_NOPUB,
+      kind: "no-public-id",
+    },
+    {
+      name: "a failed runtimes read (500): its error, no verdict, no verbs",
+      o: { runtimesError: true },
+      kind: "unread",
+    },
   ]
   interface Seen {
     kind: string | null
@@ -1052,31 +1737,68 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
     const fake = serveAppTurn(new FakeStudio(), c.o).install()
     // A run outside the public id's conversation: the panel's fallback list.
     const plain = c.run === APP_PLAIN || c.run === APP_NOPUB
-    const el = await mount({ "data-endpoint": "http://studio.test/studio/", "data-open": "true", ...(plain ? {} : { "data-public-id": APP_PUB }) })
+    const el = await mount({
+      "data-endpoint": "http://studio.test/studio/",
+      "data-open": "true",
+      ...(plain ? {} : { "data-public-id": APP_PUB }),
+    })
     const id = c.run ?? APP_PARKED
-    await vi.waitFor(() => expect(all(el, ".weft-turn").some((b) => b.textContent.includes(id))).toBe(true), { timeout: 5_000 })
+    await vi.waitFor(
+      () =>
+        expect(
+          all(el, ".weft-turn").some((b) => b.textContent.includes(id))
+        ).toBe(true),
+      { timeout: 5_000 }
+    )
     click(all(el, ".weft-turn").find((b) => b.textContent.includes(id)))
     const callSel = `.weft-call[data-key="${APP_CALL.id}"]`
-    await vi.waitFor(() => expect($(el, callSel)).toBeTruthy(), { timeout: 5_000 })
-    await vi.waitFor(() => expect($(el, ".weft-main")?.textContent ?? "").not.toContain("checking for a runtime"), { timeout: 5_000 })
+    await vi.waitFor(() => expect($(el, callSel)).toBeTruthy(), {
+      timeout: 5_000,
+    })
+    await vi.waitFor(
+      () =>
+        expect($(el, ".weft-main")?.textContent ?? "").not.toContain(
+          "checking for a runtime"
+        ),
+      { timeout: 5_000 }
+    )
     await settle()
     if (c.click && c.regated) {
       const reads = fake.calls("GET runtimes").length
       click(button(el, "continue"))
-      await vi.waitFor(() => expect(fake.calls(`POST runs/${APP_PARKED}/approvals`)).toHaveLength(1), { timeout: 5_000 })
-      await vi.waitFor(() => expect(fake.calls("GET runtimes").length).toBeGreaterThan(reads), { timeout: 5_000 })
-      await vi.waitFor(() => expect((button(el, "continue") as HTMLButtonElement | undefined)?.disabled).toBe(false), { timeout: 5_000 })
+      await vi.waitFor(
+        () =>
+          expect(fake.calls(`POST runs/${APP_PARKED}/approvals`)).toHaveLength(
+            1
+          ),
+        { timeout: 5_000 }
+      )
+      await vi.waitFor(
+        () => expect(fake.calls("GET runtimes").length).toBeGreaterThan(reads),
+        { timeout: 5_000 }
+      )
+      await vi.waitFor(
+        () =>
+          expect(
+            (button(el, "continue") as HTMLButtonElement | undefined)?.disabled
+          ).toBe(false),
+        { timeout: 5_000 }
+      )
       await settle()
     } else if (c.click) {
       click(button(el, "continue"))
       const done = () =>
-        $(el, `${callSel} [data-weft-app-verb="rejected"]`) ?? $(el, '[data-weft-app-owned="read-only"]') ?? $(el, '[data-weft-app-owned="resumed"]')
+        $(el, `${callSel} [data-weft-app-verb="rejected"]`) ??
+        $(el, '[data-weft-app-owned="read-only"]') ??
+        $(el, '[data-weft-app-owned="resumed"]')
       await vi.waitFor(() => expect(done()).toBeTruthy(), { timeout: 5_000 })
       await settle()
     }
     const owned = $(el, "[data-weft-app-owned]")
     const seen = {
-      kind: owned?.getAttribute("data-weft-app-owned") ?? (button(el, "continue") ? "decide" : null),
+      kind:
+        owned?.getAttribute("data-weft-app-owned") ??
+        (button(el, "continue") ? "decide" : null),
       line: owned?.textContent ?? "",
       refused: all(el, '[data-weft-refused="app-owned"]').length,
       after: $(el, `${callSel} [data-weft-app-verb]`)?.textContent ?? "",
@@ -1093,28 +1815,53 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
     StudioEventSource.reset()
     vi.stubGlobal("EventSource", StudioEventSource)
     setStudioToken("")
-    const fake = serveAppTurn(new FakeStudio(), { studioMeta: true, ...c.o }).install()
+    const fake = serveAppTurn(new FakeStudio(), {
+      studioMeta: true,
+      ...c.o,
+    }).install()
     renderApp(`/runs/${c.run ?? APP_PARKED}?view=story`)
     const box = () => document.querySelector<HTMLElement>("[data-parked]")
     const first = c.click ? "decide" : c.kind
     await waitFor(() => expect(box()?.getAttribute("data-parked")).toBe(first))
     if (c.click && c.regated) {
       const reads = fake.calls("GET runtimes").length
-      ;[...box()!.querySelectorAll("button")].find((n) => n.textContent === "continue")!.click()
-      await waitFor(() => expect(fake.calls(`POST runs/${APP_PARKED}/approvals`)).toHaveLength(1))
-      await waitFor(() => expect(fake.calls("GET runtimes").length).toBeGreaterThan(reads))
-      await waitFor(() => expect([...box()!.querySelectorAll("button")].find((n) => n.textContent === "continue")?.disabled).toBe(false))
-    } else if (c.click) {
-      ;[...box()!.querySelectorAll("button")].find((n) => n.textContent === "continue")!.click()
+      ;[...box()!.querySelectorAll("button")]
+        .find((n) => n.textContent === "continue")!
+        .click()
+      await waitFor(() =>
+        expect(fake.calls(`POST runs/${APP_PARKED}/approvals`)).toHaveLength(1)
+      )
+      await waitFor(() =>
+        expect(fake.calls("GET runtimes").length).toBeGreaterThan(reads)
+      )
       await waitFor(() =>
         expect(
-          box()!.querySelector('[data-app-verb="rejected"]') ?? box()!.querySelector('[data-app-owned="read-only"]') ?? box()!.querySelector('[data-app-owned="resumed"]')
+          [...box()!.querySelectorAll("button")].find(
+            (n) => n.textContent === "continue"
+          )?.disabled
+        ).toBe(false)
+      )
+    } else if (c.click) {
+      ;[...box()!.querySelectorAll("button")]
+        .find((n) => n.textContent === "continue")!
+        .click()
+      await waitFor(() =>
+        expect(
+          box()!.querySelector('[data-app-verb="rejected"]') ??
+            box()!.querySelector('[data-app-owned="read-only"]') ??
+            box()!.querySelector('[data-app-owned="resumed"]')
         ).toBeTruthy()
       )
     }
     const owned = box()!.querySelector("[data-app-owned]")
     const seen = {
-      kind: owned?.getAttribute("data-app-owned") ?? ([...box()!.querySelectorAll("button")].some((n) => n.textContent === "continue") ? "decide" : null),
+      kind:
+        owned?.getAttribute("data-app-owned") ??
+        ([...box()!.querySelectorAll("button")].some(
+          (n) => n.textContent === "continue"
+        )
+          ? "decide"
+          : null),
       line: owned?.textContent ?? "",
       refused: box()!.querySelectorAll('[data-refused="app-owned"]').length,
       after: box()!.querySelector("[data-app-verb]")?.textContent ?? "",
@@ -1129,21 +1876,45 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
       expect(studio).toEqual(panel)
       expect(panel.kind).toBe(c.kind)
       // A failed read is said as such: never the closed-link verdict.
-      if (c.kind === "unread") expect([panel.line, panel.refused]).toEqual([`${RUNTIMES_UNREAD}: ${APP_RUNTIMES_500}`, 0])
-      if (c.kind === "no-public-id") expect(panel.line).toContain(`run ${APP_NOPUB} is not a turn of a thread session with a public id`)
+      if (c.kind === "unread")
+        expect([panel.line, panel.refused]).toEqual([
+          `${RUNTIMES_UNREAD}: ${APP_RUNTIMES_500}`,
+          0,
+        ])
+      if (c.kind === "no-public-id")
+        expect(panel.line).toContain(
+          `run ${APP_NOPUB} is not a turn of a thread session with a public id`
+        )
     })
 
   // A finished steer reads "steered" on both (lib/honesty.ts's
   // appVerbWords: the panel's steer carries no decision).
   it("a finished steer reads steered on both surfaces, never decided", async () => {
     serveAppTurn(new FakeStudio(), { running: true }).install()
-    const el = await mount({ "data-endpoint": "http://studio.test/studio/", "data-open": "true", "data-public-id": APP_PUB })
-    await vi.waitFor(() => expect(all(el, ".weft-turn").some((b) => b.textContent.includes(APP_PARKED))).toBe(true), { timeout: 5_000 })
+    const el = await mount({
+      "data-endpoint": "http://studio.test/studio/",
+      "data-open": "true",
+      "data-public-id": APP_PUB,
+    })
+    await vi.waitFor(
+      () =>
+        expect(
+          all(el, ".weft-turn").some((b) => b.textContent.includes(APP_PARKED))
+        ).toBe(true),
+      { timeout: 5_000 }
+    )
     click(all(el, ".weft-turn").find((b) => b.textContent.includes(APP_PARKED)))
-    await vi.waitFor(() => expect($(el, "[data-weft-app-steer] input")).toBeTruthy(), { timeout: 5_000 })
-    ;($(el, "[data-weft-app-steer] input") as HTMLInputElement).value = "use staging instead"
+    await vi.waitFor(
+      () => expect($(el, "[data-weft-app-steer] input")).toBeTruthy(),
+      { timeout: 5_000 }
+    )
+    ;($(el, "[data-weft-app-steer] input") as HTMLInputElement).value =
+      "use staging instead"
     click(button(el, "steer"))
-    await vi.waitFor(() => expect($(el, '[data-weft-app-verb="finished"]')).toBeTruthy(), { timeout: 5_000 })
+    await vi.waitFor(
+      () => expect($(el, '[data-weft-app-verb="finished"]')).toBeTruthy(),
+      { timeout: 5_000 }
+    )
     const panel = $(el, '[data-weft-app-verb="finished"]')!.textContent
     el.remove()
     await settle()
@@ -1154,13 +1925,22 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
     StudioEventSource.reset()
     vi.stubGlobal("EventSource", StudioEventSource)
     setStudioToken("")
-    serveAppTurn(new FakeStudio(), { studioMeta: true, running: true }).install()
+    serveAppTurn(new FakeStudio(), {
+      studioMeta: true,
+      running: true,
+    }).install()
     renderApp(`/runs/${APP_PARKED}?view=story`)
-    await waitFor(() => expect(document.querySelector("[data-app-steer]")).toBeTruthy())
+    await waitFor(() =>
+      expect(document.querySelector("[data-app-steer]")).toBeTruthy()
+    )
     const form = document.querySelector<HTMLFormElement>("[data-app-steer]")!
-    fireEvent.change(form.querySelector("input")!, { target: { value: "use staging instead" } })
+    fireEvent.change(form.querySelector("input")!, {
+      target: { value: "use staging instead" },
+    })
     fireEvent.submit(form)
-    await waitFor(() => expect(form.querySelector('[data-app-verb="finished"]')).toBeTruthy())
+    await waitFor(() =>
+      expect(form.querySelector('[data-app-verb="finished"]')).toBeTruthy()
+    )
     const studio = form.querySelector('[data-app-verb="finished"]')!.textContent
     cleanup()
     expect([panel, studio]).toEqual(["steered", "steered"])
@@ -1171,10 +1951,23 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
   // (its AppGateFacts argument, the meta each surface read).
   it("a Studio without the playground: the same line on both", async () => {
     serveAppTurn(new FakeStudio(), { noPlayground: true }).install()
-    const el = await mount({ "data-endpoint": "http://studio.test/studio/", "data-open": "true", "data-public-id": APP_PUB })
-    await vi.waitFor(() => expect(all(el, ".weft-turn").some((b) => b.textContent.includes(APP_PARKED))).toBe(true), { timeout: 5_000 })
+    const el = await mount({
+      "data-endpoint": "http://studio.test/studio/",
+      "data-open": "true",
+      "data-public-id": APP_PUB,
+    })
+    await vi.waitFor(
+      () =>
+        expect(
+          all(el, ".weft-turn").some((b) => b.textContent.includes(APP_PARKED))
+        ).toBe(true),
+      { timeout: 5_000 }
+    )
     click(all(el, ".weft-turn").find((b) => b.textContent.includes(APP_PARKED)))
-    await vi.waitFor(() => expect($(el, "[data-weft-app-owned]")).toBeTruthy(), { timeout: 5_000 })
+    await vi.waitFor(
+      () => expect($(el, "[data-weft-app-owned]")).toBeTruthy(),
+      { timeout: 5_000 }
+    )
     const panel = $(el, "[data-weft-app-owned]")!.textContent
     el.remove()
     await settle()
@@ -1185,10 +1978,19 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
     StudioEventSource.reset()
     vi.stubGlobal("EventSource", StudioEventSource)
     setStudioToken("")
-    serveAppTurn(new FakeStudio(), { studioMeta: true, noPlayground: true }).install()
+    serveAppTurn(new FakeStudio(), {
+      studioMeta: true,
+      noPlayground: true,
+    }).install()
     renderApp(`/runs/${APP_PARKED}?view=story`)
-    await waitFor(() => expect(document.querySelector("[data-parked] [data-app-owned]")).toBeTruthy())
-    const studio = document.querySelector("[data-parked] [data-app-owned]")!.textContent
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-parked] [data-app-owned]")
+      ).toBeTruthy()
+    )
+    const studio = document.querySelector(
+      "[data-parked] [data-app-owned]"
+    )!.textContent
     cleanup()
     expect(studio).toContain(PLAYGROUND_OFF)
     expect(panel).toBe(studio)
@@ -1201,25 +2003,68 @@ describe("an app turn's verbs and words on both surfaces (F4.3)", () => {
 describe("a turn's cost on both surfaces (A5.3)", () => {
   const WHY = "no row of the default pricing table matches wefttest/script"
   const cases: { name: string; doc: Partial<RunDoc> }[] = [
-    { name: "priced, own + delegated", doc: { cost_usd: 0.0029, cost_known: true, cache: "exact", delegated_cost_usd: 0.0011, delegated_cost_known: true } },
-    { name: "an unpriced model: — with its reason", doc: { cost_usd: null, cost_known: false, cost_badge: "unpriced", cost_reason: WHY, delegated_cost_usd: 0.0011, delegated_cost_known: true } },
-    { name: "cache not reported: the visible mark and the hint in the title", doc: { cost_usd: 0.5, cost_known: true, cache: "not_reported", delegated_cost_usd: 0.25, delegated_cost_known: true } },
+    {
+      name: "priced, own + delegated",
+      doc: {
+        cost_usd: 0.0029,
+        cost_known: true,
+        cache: "exact",
+        delegated_cost_usd: 0.0011,
+        delegated_cost_known: true,
+      },
+    },
+    {
+      name: "an unpriced model: — with its reason",
+      doc: {
+        cost_usd: null,
+        cost_known: false,
+        cost_badge: "unpriced",
+        cost_reason: WHY,
+        delegated_cost_usd: 0.0011,
+        delegated_cost_known: true,
+      },
+    },
+    {
+      name: "cache not reported: the visible mark and the hint in the title",
+      doc: {
+        cost_usd: 0.5,
+        cost_known: true,
+        cache: "not_reported",
+        delegated_cost_usd: 0.25,
+        delegated_cost_known: true,
+      },
+    },
   ]
   const priced = (fx: Fixture, studioMeta: boolean) => {
     const meta = studioMeta ? golden<Record<string, unknown>>("meta") : META
-    return serve(fx, studioMeta).on("GET meta", { ...meta, capabilities: ["ingest", "requests", "pricing"] })
+    return serve(fx, studioMeta).on("GET meta", {
+      ...meta,
+      capabilities: ["ingest", "requests", "pricing"],
+    })
   }
-  const read = (n: Element | null | undefined) => ({ text: n?.firstChild?.textContent, title: n?.getAttribute("title") })
+  const read = (n: Element | null | undefined) => ({
+    text: n?.firstChild?.textContent,
+    title: n?.getAttribute("title"),
+  })
 
   for (const c of cases)
     it(`${c.name}: the panel's turn cost is the run page's header cost`, async () => {
       const fx: Fixture = { doc: c.doc, events: events() }
       priced(fx, false)
       const el = await mount(ATTRS)
-      await vi.waitFor(() => expect($(el, ".weft-turn [data-weft-turn-cost]")).toBeTruthy(), { timeout: 5_000 })
-      const [pOwn, pDel] = all(el, ".weft-turn [data-weft-turn-cost] [data-weft-cost]").map(read)
+      await vi.waitFor(
+        () => expect($(el, ".weft-turn [data-weft-turn-cost]")).toBeTruthy(),
+        { timeout: 5_000 }
+      )
+      const [pOwn, pDel] = all(
+        el,
+        ".weft-turn [data-weft-turn-cost] [data-weft-cost]"
+      ).map(read)
       const pHint = $(el, ".weft-turn [data-weft-cache-hint]")
-      const pCache = pHint && { text: pHint.textContent, title: pHint.getAttribute("title") }
+      const pCache = pHint && {
+        text: pHint.textContent,
+        title: pHint.getAttribute("title"),
+      }
       el.remove()
       await settle()
       cleanup()
@@ -1231,18 +2076,36 @@ describe("a turn's cost on both surfaces (A5.3)", () => {
       setStudioToken("")
       priced(fx, true)
       renderApp(`/runs/${RUN}`)
-      await waitFor(() => expect(document.querySelector("[data-run-cost] [data-cost-part='own'] [data-cost]")).toBeTruthy())
-      const sOwn = read(document.querySelector("[data-run-cost] [data-cost-part='own'] [data-cost]"))
-      const sDel = read(document.querySelector("[data-run-cost] [data-cost-part='delegated'] [data-cost]"))
+      await waitFor(() =>
+        expect(
+          document.querySelector(
+            "[data-run-cost] [data-cost-part='own'] [data-cost]"
+          )
+        ).toBeTruthy()
+      )
+      const sOwn = read(
+        document.querySelector(
+          "[data-run-cost] [data-cost-part='own'] [data-cost]"
+        )
+      )
+      const sDel = read(
+        document.querySelector(
+          "[data-run-cost] [data-cost-part='delegated'] [data-cost]"
+        )
+      )
       expect(pOwn.text).toBeTruthy()
       expect(pDel.text).toMatch(/^\$/)
       expect(pOwn).toEqual(sOwn)
       expect(pDel).toEqual(sDel)
       // Studio's visible "cache not reported" mark (CacheHint), the same words and title — or neither.
       const sHint = document.querySelector("[data-run-cost] [data-cache-hint]")
-      expect(pCache).toEqual(sHint && { text: sHint.textContent, title: sHint.getAttribute("title") })
-      if (c.doc.cache === "not_reported") expect(pCache?.text).toBe("cache not reported")
-      if (c.doc.cost_known === false) expect(pOwn).toEqual({ text: "—", title: WHY })
+      expect(pCache).toEqual(
+        sHint && { text: sHint.textContent, title: sHint.getAttribute("title") }
+      )
+      if (c.doc.cache === "not_reported")
+        expect(pCache?.text).toBe("cache not reported")
+      if (c.doc.cost_known === false)
+        expect(pOwn).toEqual({ text: "—", title: WHY })
     })
 })
 
@@ -1253,18 +2116,35 @@ describe("a turn's cost on both surfaces (A5.3)", () => {
 describe("a replayed run's cost on both surfaces (A5.3)", () => {
   const PG = "pg_x1"
   const row = () => ({
-    ...runRow({ id: PG, playground: true, session_id: "", forked_from: `${RUN}#0` }),
+    ...runRow({
+      id: PG,
+      playground: true,
+      session_id: "",
+      forked_from: `${RUN}#0`,
+    }),
     cost_usd: 0.004,
     cost_known: true,
     cache: "exact" as const,
     delegated_cost_usd: 0.001,
     delegated_cost_known: true,
   })
-  const cmd = (state: string) => ({ command_id: "cmd_1", state, run_id: state === "finished" ? PG : "", status: "succeeded", error: null, created: T0, updated: T0 })
+  const cmd = (state: string) => ({
+    command_id: "cmd_1",
+    state,
+    run_id: state === "finished" ? PG : "",
+    status: "succeeded",
+    error: null,
+    created: T0,
+    updated: T0,
+  })
   const caps = ["live", "playground", "runtimes", "pricing"]
   const read = (n: Element | null | undefined) => {
     const f = n?.querySelector("[data-weft-cost], [data-cost]")
-    return { wrapper: n?.getAttribute("title"), text: f?.firstChild?.textContent, title: f?.getAttribute("title") }
+    return {
+      wrapper: n?.getAttribute("title"),
+      text: f?.firstChild?.textContent,
+      title: f?.getAttribute("title"),
+    }
   }
 
   it("the panel's result pane is the playground's result card: figure, title, the whole-bill wrapper", async () => {
@@ -1272,12 +2152,23 @@ describe("a replayed run's cost on both surfaces (A5.3)", () => {
     routes["POST playground/runs"] = { command_id: "cmd_1", state: "queued" }
     routes["playground/commands/cmd_1"] = cmd("finished")
     routes[`runs/${PG}`] = { ...row(), children: [] }
-    routes[`runs/${PG}/events?after=0&limit=500`] = { events: [], next_after: null, done: true, gaps: [] }
-    routes[`runs/${PG}/transcript`] = transcript([user("where is my order #4411?")], [assistant("It is delayed.")])
+    routes[`runs/${PG}/events?after=0&limit=500`] = {
+      events: [],
+      next_after: null,
+      done: true,
+      gaps: [],
+    }
+    routes[`runs/${PG}/transcript`] = transcript(
+      [user("where is my order #4411?")],
+      [assistant("It is delayed.")]
+    )
     panelStudio(routes, { ...META, capabilities: caps })
     const el = await mount(ATTRS)
     await runExperiment(el)
-    await vi.waitFor(() => expect($(el, ".weft-xres [data-weft-result-cost]")).toBeTruthy(), { timeout: 5_000 })
+    await vi.waitFor(
+      () => expect($(el, ".weft-xres [data-weft-result-cost]")).toBeTruthy(),
+      { timeout: 5_000 }
+    )
     const panel = read($(el, ".weft-xres [data-weft-result-cost]"))
     el.remove()
     await settle()
@@ -1289,25 +2180,45 @@ describe("a replayed run's cost on both surfaces (A5.3)", () => {
     vi.stubGlobal("EventSource", StudioEventSource)
     setStudioToken("")
     new FakeStudio()
-      .on("GET meta", { ...golden<Record<string, unknown>>("meta"), capabilities: caps })
+      .on("GET meta", {
+        ...golden<Record<string, unknown>>("meta"),
+        capabilities: caps,
+      })
       .on("GET runtimes", RUNTIMES)
       .on("GET experiments", { experiments: [] })
       .on(`GET runs/${RUN}`, { ...runRow({ id: RUN }), children: [] })
-      .on(`GET runs/${RUN}/transcript`, transcript([user("where is my order #4411?")], [assistant("It shipped.")]))
+      .on(
+        `GET runs/${RUN}/transcript`,
+        transcript(
+          [user("where is my order #4411?")],
+          [assistant("It shipped.")]
+        )
+      )
       .on("POST playground/runs", cmd("queued"))
       .on("GET playground/commands/cmd_1", cmd("finished"))
       .on(`GET runs/${PG}`, { ...row(), children: [] })
       .on(`GET runs/${PG}/events`, pagedEvents([]))
-      .on(`GET runs/${PG}/transcript`, transcript([user("where is my order #4411?")], [assistant("It is delayed.")]))
+      .on(
+        `GET runs/${PG}/transcript`,
+        transcript(
+          [user("where is my order #4411?")],
+          [assistant("It is delayed.")]
+        )
+      )
       .install()
     renderApp(`/playground?run=${RUN}`)
     const go = await screen.findByRole("button", { name: "Run A" })
     await waitFor(() => expect(go).toHaveProperty("disabled", false))
     fireEvent.click(go)
-    await waitFor(() => expect(document.querySelector("[data-result-cost]")).toBeTruthy(), { timeout: 10_000 })
+    await waitFor(
+      () => expect(document.querySelector("[data-result-cost]")).toBeTruthy(),
+      { timeout: 10_000 }
+    )
     const studio = read(document.querySelector("[data-result-cost]"))
     expect(panel.text).toBe("$0.0050")
     expect(panel).toEqual(studio)
-    expect(panel.wrapper).toBe("the run's whole bill: its own model calls + its subagents'")
+    expect(panel.wrapper).toBe(
+      "the run's whole bill: its own model calls + its subagents'"
+    )
   })
 })

@@ -58,7 +58,10 @@ export function CompactionMarker({
         </span>
         <HoleBadge hole="compacted" />
         {session && c.reason ? (
-          <span className="font-mono text-[10px] text-faint" title="thread's compaction reason">
+          <span
+            className="font-mono text-[10px] text-faint"
+            title="thread's compaction reason"
+          >
             {c.reason}
           </span>
         ) : null}
@@ -119,7 +122,9 @@ function ViewOriginal({
   const step = useQuery({ ...stepQuery(runId, c.step ?? -1), enabled: false })
   const d = step.data
   const count =
-    d?.compaction && d.compaction.index === c.index ? d.messages_in.count : undefined
+    d?.compaction && d.compaction.index === c.index
+      ? d.messages_in.count
+      : undefined
   const orig = originalOf(c, transcript, all)
   return (
     <div className="mt-1 space-y-1" data-compaction-original>
@@ -144,7 +149,11 @@ function ViewOriginal({
           </p>
           <ol className="space-y-0.5 border-l-2 border-thread/30 pl-2 font-mono text-[11px]">
             {orig.messages.map((m, i) => (
-              <li key={i} data-original-seq={orig.from + i} className="whitespace-pre-wrap">
+              <li
+                key={i}
+                data-original-seq={orig.from + i}
+                className="whitespace-pre-wrap"
+              >
                 {messageLine(m)}
               </li>
             ))}
@@ -154,7 +163,10 @@ function ViewOriginal({
       <p className="text-muted-foreground" data-compaction-replacement>
         {replacementNote(c, count)}
         {count == null ? (
-          <span className="text-faint"> · open the step's attempts to load its request count</span>
+          <span className="text-faint">
+            {" "}
+            · open the step's attempts to load its request count
+          </span>
         ) : null}
       </p>
     </div>

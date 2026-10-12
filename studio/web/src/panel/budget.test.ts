@@ -3,15 +3,24 @@
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
-import { budgetTable, gzipSize, normalizeStamp, STAMP_PLACEHOLDER } from "../../scripts/panel-budget"
+import {
+  budgetTable,
+  gzipSize,
+  normalizeStamp,
+  STAMP_PLACEHOLDER,
+} from "../../scripts/panel-budget"
 import { weftVersion } from "../../scripts/weft-version"
 import type { Ledger } from "../../scripts/panel-budget"
 
-const ledger = JSON.parse(readFileSync(resolve(process.cwd(), "panel-budget.json"), "utf8")) as Ledger
+const ledger = JSON.parse(
+  readFileSync(resolve(process.cwd(), "panel-budget.json"), "utf8")
+) as Ledger
 
 describe("the size ledger (panel-budget.json)", () => {
   it("is append-only: the recorded rows stay as recorded", () => {
-    expect(ledger.rows.slice(0, 49).map((r) => [r.label, r.item, r.gzip])).toEqual([
+    expect(
+      ledger.rows.slice(0, 49).map((r) => [r.label, r.item, r.gzip])
+    ).toEqual([
       ["C1", "", 32359],
       ["G1", "", 32700],
       ["C5.2", "", 32810],
@@ -63,12 +72,23 @@ describe("the size ledger (panel-budget.json)", () => {
       ["pre-release web fixes", "", 81358],
     ])
     // The minify lever (plan A5.3.0): one row, the new baseline every later row is measured against.
-    expect([ledger.rows[49].label, ledger.rows[49].item, ledger.rows[49].gzip]).toEqual(["minified", "", 73706])
-    for (let i = 1; i < ledger.rows.length; i++) expect(ledger.items.some((x) => x.id === ledger.rows[i].item) || ledger.rows[i].item === "").toBe(true)
+    expect([
+      ledger.rows[49].label,
+      ledger.rows[49].item,
+      ledger.rows[49].gzip,
+    ]).toEqual(["minified", "", 73706])
+    for (let i = 1; i < ledger.rows.length; i++)
+      expect(
+        ledger.items.some((x) => x.id === ledger.rows[i].item) ||
+          ledger.rows[i].item === ""
+      ).toBe(true)
   })
 
   it("its last row is the committed panel.js, measured with the version stamp normalized", () => {
-    const code = readFileSync(resolve(process.cwd(), "../dist/panel/panel.js"), "utf8")
+    const code = readFileSync(
+      resolve(process.cwd(), "../dist/panel/panel.js"),
+      "utf8"
+    )
     // gzipSize, as the build measures: a pure-JS deflate, the same bytes under any host Node.
     const built = gzipSize(normalizeStamp(code, weftVersion()))
     expect(ledger.rows.at(-1)?.gzip).toBe(built)
@@ -78,7 +98,10 @@ describe("the size ledger (panel-budget.json)", () => {
   })
 
   it("ships minified (plan A5.3.0): no indented line, the newlines left are inside template literals", () => {
-    const code = readFileSync(resolve(process.cwd(), "../dist/panel/panel.js"), "utf8")
+    const code = readFileSync(
+      resolve(process.cwd(), "../dist/panel/panel.js"),
+      "utf8"
+    )
     const lines = code.split("\n")
     // The unminified es-lib build indented every nested line with a tab (6,443 of its 7,567 lines);
     // the stylesheet's template literal, the only multi-line text left, indents with spaces.
@@ -87,37 +110,68 @@ describe("the size ledger (panel-budget.json)", () => {
   })
 
   it("a version bump moves no measured byte: the stamp is normalized to a fixed-length placeholder", () => {
-    const code = readFileSync(resolve(process.cwd(), "../dist/panel/panel.js"), "utf8")
+    const code = readFileSync(
+      resolve(process.cwd(), "../dist/panel/panel.js"),
+      "utf8"
+    )
     // The minifier reprints the define's literal as a template literal.
     const tpl = (v: string) => `\`${v}\``
     const stamp = tpl(weftVersion())
     expect(code.split(stamp).length).toBe(2) // exactly once
-    const measure = (v: string) => gzipSize(normalizeStamp(code.split(stamp).join(tpl(v)), v))
+    const measure = (v: string) =>
+      gzipSize(normalizeStamp(code.split(stamp).join(tpl(v)), v))
     const at = measure(weftVersion())
-    for (const v of ["v0.12.0", "v0.100.0", "v1.0.0", "v0.12.0-rc.1"]) expect(measure(v)).toBe(at)
-    expect(normalizeStamp(`x=${stamp}`, weftVersion())).toBe(`x=${tpl(STAMP_PLACEHOLDER)}`)
+    for (const v of ["v0.12.0", "v0.100.0", "v1.0.0", "v0.12.0-rc.1"])
+      expect(measure(v)).toBe(at)
+    expect(normalizeStamp(`x=${stamp}`, weftVersion())).toBe(
+      `x=${tpl(STAMP_PLACEHOLDER)}`
+    )
     // The define's JSON-quoted form (an unminified build) is the stamp too.
-    expect(normalizeStamp(`x=${JSON.stringify(weftVersion())}`, weftVersion())).toBe(`x=${JSON.stringify(STAMP_PLACEHOLDER)}`)
-    expect(() => normalizeStamp("no stamp here", weftVersion())).toThrow(/version stamp/)
+    expect(
+      normalizeStamp(`x=${JSON.stringify(weftVersion())}`, weftVersion())
+    ).toBe(`x=${JSON.stringify(STAMP_PLACEHOLDER)}`)
+    expect(() => normalizeStamp("no stamp here", weftVersion())).toThrow(
+      /version stamp/
+    )
   })
 
   it("prints one line per item: estimate, measured delta, over past half again its estimate; the total and headroom", () => {
     // Over the 49 unminified-era rows: the "minified" row's −7.5 KiB would land in the unbudgeted sum.
-    const { lines, over } = budgetTable({ ...ledger, rows: ledger.rows.slice(0, 49) }, 61898)
+    const { lines, over } = budgetTable(
+      { ...ledger, rows: ledger.rows.slice(0, 49) },
+      61898
+    )
     expect(over).toBe(false)
-    const row = (id: string) => lines.find((l) => l.startsWith(id.padEnd(6))) ?? ""
-    expect(row("D1")).toMatch(/drag\/resize\/dock\/persist\s+\+4\.0 KiB\s+\+3\.6 KiB\s+ok$/) // D1 + its fixes
+    const row = (id: string) =>
+      lines.find((l) => l.startsWith(id.padEnd(6))) ?? ""
+    expect(row("D1")).toMatch(
+      /drag\/resize\/dock\/persist\s+\+4\.0 KiB\s+\+3\.6 KiB\s+ok$/
+    ) // D1 + its fixes
     expect(row("D2")).toMatch(/theme tokens\s+\+1\.0 KiB\s+\+1\.3 KiB\s+ok$/) // D2 + its fixes
-    expect(row("D3")).toMatch(/keyed renderer \+ ARIA\s+\+2\.0 KiB\s+\+1\.5 KiB\s+ok$/)
+    expect(row("D3")).toMatch(
+      /keyed renderer \+ ARIA\s+\+2\.0 KiB\s+\+1\.5 KiB\s+ok$/
+    )
     expect(row("C3")).toMatch(/\+3\.0 KiB\s+\+6\.0 KiB\s+over \(accepted\)$/)
     expect(row("C4")).toMatch(/\+1\.0 KiB\s+\+3\.1 KiB\s+over \(accepted\)$/) // C4.2 + its fixes
-    expect(row("D4")).toMatch(/JSON tree \+ filter\s+\+5\.0 KiB\s+\+5\.2 KiB\s+ok$/) // D4 + its fixes
-    expect(row("E1")).toMatch(/Request tab\s+\+4\.0 KiB\s+\+6\.1 KiB\s+over \(accepted\)$/) // E1 + its fixes: past half again its estimate, accepted
-    expect(row("F2")).toMatch(/transcript editor \+ preview\s+\+4\.0 KiB\s+\+6\.\d KiB\s+over \(accepted\)$/) // F2 + its fixes: past half again its estimate, accepted
-    expect(row("F1")).toMatch(/replay from here\s+\+3\.0 KiB\s+\+5\.1 KiB\s+over \(accepted\)$/) // F1 + its fixes: past half again its estimate, accepted
+    expect(row("D4")).toMatch(
+      /JSON tree \+ filter\s+\+5\.0 KiB\s+\+5\.2 KiB\s+ok$/
+    ) // D4 + its fixes
+    expect(row("E1")).toMatch(
+      /Request tab\s+\+4\.0 KiB\s+\+6\.1 KiB\s+over \(accepted\)$/
+    ) // E1 + its fixes: past half again its estimate, accepted
+    expect(row("F2")).toMatch(
+      /transcript editor \+ preview\s+\+4\.0 KiB\s+\+6\.\d KiB\s+over \(accepted\)$/
+    ) // F2 + its fixes: past half again its estimate, accepted
+    expect(row("F1")).toMatch(
+      /replay from here\s+\+3\.0 KiB\s+\+5\.1 KiB\s+over \(accepted\)$/
+    ) // F1 + its fixes: past half again its estimate, accepted
     expect(lines).toContain("baseline C1: 32,359 B")
-    expect(lines.find((l) => l.includes("unbudgeted"))).toMatch(/G1, C5\.2, D5, D5 fixes.*\+4\.4 KiB/)
-    expect(lines.at(-1)).toBe("total 61,898 B (60.4 KiB) of 81,920 B · headroom 20,022 B (19.6 KiB)")
+    expect(lines.find((l) => l.includes("unbudgeted"))).toMatch(
+      /G1, C5\.2, D5, D5 fixes.*\+4\.4 KiB/
+    )
+    expect(lines.at(-1)).toBe(
+      "total 61,898 B (60.4 KiB) of 81,920 B · headroom 20,022 B (19.6 KiB)"
+    )
   })
 
   it("prints the full ledger's table: the minified and later unbudgeted rows net into one line, 3,822 B of headroom", () => {
@@ -129,21 +183,35 @@ describe("the size ledger (panel-budget.json)", () => {
     const { lines, over } = budgetTable(ledger, 78098)
     expect(over).toBe(false)
     const unbudgeted = lines.find((l) => l.includes("unbudgeted")) ?? ""
-    expect(unbudgeted).toMatch(/pre-release web fixes, minified, I1\.3, I1\.3 fixes, I1\.3 fixes 2, F4\.3, F4\.3 fixes, F4\.3 fixes 2, phase 6 review fixes \(D\), phase 6 review fixes \(E\), phase 6 review fixes \(F\), phase 6 review fixes \(G\), phase 6 review fixes \(H\), phase 6 review fixes \(I\)\)/)
+    expect(unbudgeted).toMatch(
+      /pre-release web fixes, minified, I1\.3, I1\.3 fixes, I1\.3 fixes 2, F4\.3, F4\.3 fixes, F4\.3 fixes 2, phase 6 review fixes \(D\), phase 6 review fixes \(E\), phase 6 review fixes \(F\), phase 6 review fixes \(G\), phase 6 review fixes \(H\), phase 6 review fixes \(I\)\)/
+    )
     expect(unbudgeted.endsWith("\u22120.1 KiB")).toBe(true)
     const a53 = lines.find((l) => l.startsWith("A5.3".padEnd(6))) ?? ""
-    expect(a53).toMatch(/panel cost per turn \/ experiment\s+\+1\.5 KiB\s+\+1\.3 KiB\s+ok$/)
+    expect(a53).toMatch(
+      /panel cost per turn \/ experiment\s+\+1\.5 KiB\s+\+1\.3 KiB\s+ok$/
+    )
     const item = ledger.items.find((x) => x.id === "A5.3")!
     expect(item.estimate).toBe(1536)
-    expect(76511 - 75501 + (77306 - 77110) + (77480 - 77386)).toBeLessThanOrEqual(item.estimate)
-    expect(lines.at(-1)).toBe("total 78,098 B (76.3 KiB) of 81,920 B · headroom 3,822 B (3.7 KiB)")
+    expect(
+      76511 - 75501 + (77306 - 77110) + (77480 - 77386)
+    ).toBeLessThanOrEqual(item.estimate)
+    expect(lines.at(-1)).toBe(
+      "total 78,098 B (76.3 KiB) of 81,920 B · headroom 3,822 B (3.7 KiB)"
+    )
   })
 
   it("says when the build differs from the last row, and only the cap fails", () => {
     const last = ledger.rows.at(-1)!
     const drift = budgetTable(ledger, last.gzip + 71)
     expect(drift.over).toBe(false)
-    expect(drift.lines.some((l) => l.includes(`differs from the ledger's last row (${last.label}, ${last.gzip.toLocaleString("en-US")} B) by +0.1 KiB`))).toBe(true)
+    expect(
+      drift.lines.some((l) =>
+        l.includes(
+          `differs from the ledger's last row (${last.label}, ${last.gzip.toLocaleString("en-US")} B) by +0.1 KiB`
+        )
+      )
+    ).toBe(true)
     const big = budgetTable(ledger, 81921)
     expect(big.over).toBe(true)
     expect(big.lines.at(-1)).toContain("OVER THE CAP")

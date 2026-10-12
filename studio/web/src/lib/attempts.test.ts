@@ -13,26 +13,37 @@ import {
 } from "./attempts"
 import { golden } from "../test/fake-studio"
 
-const row = (attempt: number, name: string) => ({ attempt, body: { model: { name } } })
+const row = (attempt: number, name: string) => ({
+  attempt,
+  body: { model: { name } },
+})
 
 describe("attempts", () => {
   it("words the answering attempt: retry, fallback, nothing for the first", () => {
-    expect(attemptLine({ n: 4, total: 4, requested: "glm-a", answered: "glm-b" })).toBe(
-      "attempt 4 of 4 · fallback to glm-b"
-    )
-    expect(attemptLine({ n: 2, total: 2, requested: "glm-a", answered: "glm-a" })).toBe(
-      "attempt 2 of 2 · retry"
-    )
-    expect(attemptLine({ n: 1, total: 1, requested: "a", answered: "a" })).toBeNull()
+    expect(
+      attemptLine({ n: 4, total: 4, requested: "glm-a", answered: "glm-b" })
+    ).toBe("attempt 4 of 4 · fallback to glm-b")
+    expect(
+      attemptLine({ n: 2, total: 2, requested: "glm-a", answered: "glm-a" })
+    ).toBe("attempt 2 of 2 · retry")
+    expect(
+      attemptLine({ n: 1, total: 1, requested: "a", answered: "a" })
+    ).toBeNull()
     expect(attemptLine(null)).toBeNull()
   })
 
   it("reads the request rows: the last attempt of a finished step answered, none of an ended unfinished one", () => {
     const rows = [row(1, "glm-a"), row(2, "glm-a")]
-    expect(attemptLine(factsFromRows(rows, true))).toBe("attempt 2 of 2 · retry")
+    expect(attemptLine(factsFromRows(rows, true))).toBe(
+      "attempt 2 of 2 · retry"
+    )
     expect(factsFromRows(rows, false, true)).toBeNull()
-    expect(attemptLine(factsFromRows(rows, false))).toBe("2 attempts · none answered")
-    expect(attemptLine(factsFromRows([row(1, "a")], false))).toBe("1 attempt · none answered")
+    expect(attemptLine(factsFromRows(rows, false))).toBe(
+      "2 attempts · none answered"
+    )
+    expect(attemptLine(factsFromRows([row(1, "a")], false))).toBe(
+      "1 attempt · none answered"
+    )
     expect(factsFromRows([], false)).toBeNull()
   })
 
@@ -50,7 +61,9 @@ describe("attempts", () => {
         { attempt: 2, model: "glm-b", outcome: "error" },
       ],
     }
-    expect(attemptLine(factsFromStep(failed))).toBe("2 attempts · none answered")
+    expect(attemptLine(factsFromStep(failed))).toBe(
+      "2 attempts · none answered"
+    )
     expect(factsFromStep({ ...failed, status: "running" })).toBeNull()
   })
 
@@ -70,7 +83,9 @@ describe("attempts", () => {
     expect(attemptsHole({ latencyMs: 3 }, 0)).toBeNull()
     expect(attemptsHole({}, 2)).toBeNull()
     expect(attemptsHole(undefined, 0)).toBeNull()
-    expect(relMs("2020-01-01T00:00:00.120Z", "2020-01-01T00:00:00.000Z")).toBe("+120 ms")
+    expect(relMs("2020-01-01T00:00:00.120Z", "2020-01-01T00:00:00.000Z")).toBe(
+      "+120 ms"
+    )
     expect(relMs("(time)", "2020-01-01T00:00:00.000Z")).toBeNull()
   })
 })

@@ -8,13 +8,30 @@
 // the table's else. element.ts and the Request tab (E1.2) call these;
 // no other panel file spells a hole's words (badges.test.ts greps).
 import type { Meta, RunRow } from "../lib/api"
-import { DERIVED_HOLE, derivedWords, HOLES, holeWords, isDerived, kib, resultCapReason } from "../lib/honesty"
+import {
+  DERIVED_HOLE,
+  derivedWords,
+  HOLES,
+  holeWords,
+  isDerived,
+  kib,
+  resultCapReason,
+} from "../lib/honesty"
 import type { ContentAttrs, HoleMark } from "../lib/honesty"
-import { REQUEST_NOT_RECORDED_LABEL, REQUEST_NOT_STORED, requestCappedWords } from "../lib/requests"
+import {
+  REQUEST_NOT_RECORDED_LABEL,
+  REQUEST_NOT_STORED,
+  requestCappedWords,
+} from "../lib/requests"
 import { UNRUN_CALL_REASON } from "../lib/events"
 import type { Truncation } from "../lib/events"
 import { el } from "./render"
-import { CACHE_HINT, cacheNotReported, costView, delegatedView } from "../lib/cost"
+import {
+  CACHE_HINT,
+  cacheNotReported,
+  costView,
+  delegatedView,
+} from "../lib/cost"
 import type { CostView } from "../lib/cost"
 
 /** What a response (or the panel's own reading) says about one hole:
@@ -38,10 +55,15 @@ export function badgeTitle(reason: string, fix?: string): string {
  * span, the label, the reason and fix as its title. */
 export function badge(hole: string, note: BadgeNote = {}): HTMLElement {
   const w = holeWords({ hole, ...note })
-  const b = el("span", `weft-badge ${w.tone === "loss" ? "weft-warn-badge" : "weft-info"}`, note.label ?? w.label, {
-    title: badgeTitle(w.reason, w.fix),
-    "data-hole": hole,
-  })
+  const b = el(
+    "span",
+    `weft-badge ${w.tone === "loss" ? "weft-warn-badge" : "weft-info"}`,
+    note.label ?? w.label,
+    {
+      title: badgeTitle(w.reason, w.fix),
+      "data-hole": hole,
+    }
+  )
   // The title is a pointer's alone: the words ride in the accessible
   // text too, visually hidden (a keyboard or screen-reader user reads
   // them with the label) — the run page's HoleBadge carries the same
@@ -85,7 +107,10 @@ export function holeLine(m: HoleMark): HTMLElement {
 export function requestLabel(hole: string, cause?: string): string {
   // The version's words are the default cause's alone (not_served: the
   // record may exist, this Studio does not serve it).
-  const label = hole === "not_recorded" && !cause ? REQUEST_NOT_RECORDED_LABEL : holeWords({ hole }).label
+  const label =
+    hole === "not_recorded" && !cause
+      ? REQUEST_NOT_RECORDED_LABEL
+      : holeWords({ hole }).label
   return label.startsWith("request") ? label : `request: ${label}`
 }
 
@@ -93,11 +118,18 @@ export function requestLabel(hole: string, cause?: string): string {
  * the Request tab): the badge, then the reason and fix as words. */
 export function requestHole(hole: string, note: BadgeNote = {}): HTMLElement[] {
   const w = holeWords({ hole, ...note })
-  const b = badge(hole, { ...note, label: note.label ?? requestLabel(hole, note.cause) })
+  const b = badge(hole, {
+    ...note,
+    label: note.label ?? requestLabel(hole, note.cause),
+  })
   b.lastChild?.remove() // said visibly below
   return [
     b,
-    el("div", "weft-reason", [w.reason, w.fix && `fix: ${w.fix}`].filter(Boolean).join(" — ")),
+    el(
+      "div",
+      "weft-reason",
+      [w.reason, w.fix && `fix: ${w.fix}`].filter(Boolean).join(" — ")
+    ),
   ]
 }
 
@@ -115,7 +147,11 @@ export function requestCapped(n: number): HTMLElement {
  * truncated (result_cap), a call the max_tokens step never ran is
  * max_tokens. */
 export function cutBadge(cut: Truncation): HTMLElement {
-  if (cut.kind === "bytes") return badge("truncated", { cause: "result_cap", reason: resultCapReason(cut.bytes) })
+  if (cut.kind === "bytes")
+    return badge("truncated", {
+      cause: "result_cap",
+      reason: resultCapReason(cut.bytes),
+    })
   // The loop already retried the step: no fix applies to this call.
   return badge("max_tokens", { reason: UNRUN_CALL_REASON, fix: "" })
 }
@@ -124,7 +160,12 @@ export function cutBadge(cut: Truncation): HTMLElement {
  * response's reason and fix first (api.go sends them), the cause's
  * words else. */
 export function noPublicIdWords(reason?: string, fix?: string): string {
-  const w = holeWords({ hole: "not_recorded", cause: "no_public_id", reason, fix })
+  const w = holeWords({
+    hole: "not_recorded",
+    cause: "no_public_id",
+    reason,
+    fix,
+  })
   return `${w.label}: ${w.reason} · fix: ${w.fix}`
 }
 
@@ -160,15 +201,26 @@ export function capLine(
   meta: Meta | null | undefined,
   cappedAt = 0
 ): { text: string; title: string; hole?: string } | null {
-  const own = turn?.events.find((e) => typeof e.attrs?.["weft.content"] === "string")?.attrs?.["weft.content"]
+  const own = turn?.events.find(
+    (e) => typeof e.attrs?.["weft.content"] === "string"
+  )?.attrs?.["weft.content"]
   const latest = meta?.content?.latest
-  const fromMeta = !own && latest && (!turn || latest.run_id === turn.id) ? latest : null
+  const fromMeta =
+    !own && latest && (!turn || latest.run_id === turn.id) ? latest : null
   const mark = own ?? fromMeta?.mark ?? ""
   const tail = turn?.capped && cappedAt ? ` · first ${cappedAt} events` : ""
   // Own keys only: the mark is the record's, and "constructor" is no mode.
   if (Object.hasOwn(CONTENT_OFF, mark)) {
-    const w = holeWords({ hole: "stripped", reason: fromMeta?.note, fix: fromMeta?.fix })
-    return { text: `content off · ${CONTENT_OFF[mark]}${tail}`, title: badgeTitle(w.reason, w.fix), hole: "stripped" }
+    const w = holeWords({
+      hole: "stripped",
+      reason: fromMeta?.note,
+      fix: fromMeta?.fix,
+    })
+    return {
+      text: `content off · ${CONTENT_OFF[mark]}${tail}`,
+      title: badgeTitle(w.reason, w.fix),
+      hole: "stripped",
+    }
   }
   let n = 0
   let bytes = 0
@@ -187,7 +239,11 @@ export function capLine(
     }
   }
   if (mark === "full")
-    return { text: `content on${tail}`, title: fromMeta?.note || "the record marks this run's content stored in full" }
+    return {
+      text: `content on${tail}`,
+      title:
+        fromMeta?.note || "the record marks this run's content stored in full",
+    }
   return null
 }
 
@@ -198,20 +254,37 @@ export const SCRIPTED_MODEL = { provider: "weft/runtime", name: "scripted" }
 /** A turn's chips (D5): what its record says it is, beside its id —
  * each plain text, its title naming the attribute it is read from.
  * label names a run the list holds ("t3"), else its short id. */
-export function turnChips(r: RunRow, label: (runId: string) => string): HTMLElement[] {
+export function turnChips(
+  r: RunRow,
+  label: (runId: string) => string
+): HTMLElement[] {
   const out: HTMLElement[] = []
   const chip = (text: string, title: string, kind: string) =>
-    out.push(el("span", "weft-chip weft-tag", text, { title, "data-weft-chip": kind }))
+    out.push(
+      el("span", "weft-chip weft-tag", text, { title, "data-weft-chip": kind })
+    )
   // The scripted engine answers as its own model (runtime/scripted.go's
   // ModelInfo): the run's model, not a weft.* attr — none is stamped.
   // The zero is said only when the row's usage is zero: a scripted
   // parent's Subagent child on a real model rolls real usage in.
-  if (r.model.provider === SCRIPTED_MODEL.provider && r.model.name === SCRIPTED_MODEL.name) {
+  if (
+    r.model.provider === SCRIPTED_MODEL.provider &&
+    r.model.name === SCRIPTED_MODEL.name
+  ) {
     const zero = r.usage.input_tokens + r.usage.output_tokens === 0
-    chip(zero ? "scripted (0 tokens)" : "scripted", "model weft/runtime/scripted: the scripted engine replayed the source run's recorded turns", "scripted")
+    chip(
+      zero ? "scripted (0 tokens)" : "scripted",
+      "model weft/runtime/scripted: the scripted engine replayed the source run's recorded turns",
+      "scripted"
+    )
   }
   const fork = r.meta["weft.session.forked_from"] as string | undefined
-  if (fork) chip(`fork of ${fork}`, `weft.session.forked_from = ${fork}: a thread fork's run (<session>#<entry>)`, "fork")
+  if (fork)
+    chip(
+      `fork of ${fork}`,
+      `weft.session.forked_from = ${fork}: a thread fork's run (<session>#<entry>)`,
+      "fork"
+    )
   if (r.forked_from) {
     const [src, step] = r.forked_from.split("#")
     chip(
@@ -219,7 +292,8 @@ export function turnChips(r: RunRow, label: (runId: string) => string): HTMLElem
       `weft.forked_from = ${r.forked_from}: a playground experiment of run ${src}${step ? ` from step ${step}` : ""}${r.experiment_id ? ` (weft.experiment.id ${r.experiment_id})` : ""}`,
       "experiment"
     )
-  } else if (r.experiment_id) chip("experiment", `weft.experiment.id = ${r.experiment_id}`, "experiment")
+  } else if (r.experiment_id)
+    chip("experiment", `weft.experiment.id = ${r.experiment_id}`, "experiment")
   // Built by the reader from stock OTel GenAI spans (plan I1.3): the
   // derived badge in the stock_spans words, as Studio's row chip.
   if (isDerived(r)) {
@@ -236,19 +310,34 @@ export function turnChips(r: RunRow, label: (runId: string) => string): HTMLElem
  * and accessible text, so the reader learns why instead of a 400. An
  * app-owned turn's decision verbs (plan F4.3) are drawn the same way,
  * with the server's refusal and fix as words, why "app-owned". */
-export function refusedVerb(label: string, tag = "button", words = derivedWords(), why = "derived"): HTMLElement {
-  return el(tag, tag === "button" ? "weft-btn" : "weft-chip", [document.createTextNode(label), el("span", "weft-sr", ` — ${words}`)], {
-    title: words,
-    "data-weft-refused": why,
-    ...(tag === "button" ? { type: "button", disabled: "" } : { "aria-disabled": "true" }),
-  })
+export function refusedVerb(
+  label: string,
+  tag = "button",
+  words = derivedWords(),
+  why = "derived"
+): HTMLElement {
+  return el(
+    tag,
+    tag === "button" ? "weft-btn" : "weft-chip",
+    [document.createTextNode(label), el("span", "weft-sr", ` — ${words}`)],
+    {
+      title: words,
+      "data-weft-refused": why,
+      ...(tag === "button"
+        ? { type: "button", disabled: "" }
+        : { "aria-disabled": "true" }),
+    }
+  )
 }
 
 /** catalogReadError is the ack preview's hole when the step's catalog
  * could not be read (plan F1, the run page's catalogOfStep words): the
  * verdicts are the runtime's registration's, derived. */
 export function catalogReadError(error: string): HoleMark {
-  return { hole: "derived", reason: `the step's catalog could not be read (${error}): the list is the runtime's registration` }
+  return {
+    hole: "derived",
+    reason: `the step's catalog could not be read (${error}): the list is the runtime's registration`,
+  }
 }
 
 /** ackCatalogHole is the ack preview's line for a catalog it cannot
@@ -274,7 +363,11 @@ export function ackCatalogHole(m: HoleMark, registered: boolean): HTMLElement {
  * transcript's step count) — its tools unknown; one past the request
  * pages the panel read; one of a run still running. */
 export function catalogNotRecorded(): HoleMark {
-  return { hole: "not_recorded", reason: "the step carries no request record: the tools it offered are unknown" }
+  return {
+    hole: "not_recorded",
+    reason:
+      "the step carries no request record: the tools it offered are unknown",
+  }
 }
 export function catalogCapped(n: number): HoleMark {
   return { hole: "truncated", ...requestCappedWords(n) }
@@ -291,10 +384,17 @@ export function promptNotServed(): HoleMark {
   return { hole: "not_recorded", cause: "not_served" }
 }
 export function promptNotRecorded(): HoleMark {
-  return { hole: "not_recorded", reason: "the step carries no request record: the system prompt it was called with is unknown" }
+  return {
+    hole: "not_recorded",
+    reason:
+      "the step carries no request record: the system prompt it was called with is unknown",
+  }
 }
 export function promptReadError(error: string): HoleMark {
-  return { hole: "derived", reason: `the step's prompt could not be read (${error}): the registered prompt is pre-filled` }
+  return {
+    hole: "derived",
+    reason: `the step's prompt could not be read (${error}): the registered prompt is pre-filled`,
+  }
 }
 
 // ── Cost (A5.3) ──────────────────────────────────────────────────
@@ -305,9 +405,19 @@ export function promptReadError(error: string): HoleMark {
  * " partial: <title>" —
  * "—" is never a 0. */
 export function costText(v: CostView): HTMLElement {
-  const n = el("span", undefined, v.text, { title: v.title, "data-weft-cost": v.known ? String(v.usd) : "unknown" })
+  const n = el("span", undefined, v.text, {
+    title: v.title,
+    "data-weft-cost": v.known ? String(v.usd) : "unknown",
+  })
   // A partial sum (atLeastCost's "≥ $x", usd its known part) is not "not known".
-  if (!v.known) n.appendChild(el("span", "weft-sr", `${v.usd === undefined ? " not known" : " partial"}: ${v.title}`))
+  if (!v.known)
+    n.appendChild(
+      el(
+        "span",
+        "weft-sr",
+        `${v.usd === undefined ? " not known" : " partial"}: ${v.title}`
+      )
+    )
   return n
 }
 
@@ -322,9 +432,19 @@ export function costText(v: CostView): HTMLElement {
  * figure priced without cache splits. */
 export function turnCost(r: RunRow): HTMLElement {
   const own = costView(r)
-  const n = el("span", undefined, [costText(own)], { "data-weft-turn-cost": "" })
+  const n = el("span", undefined, [costText(own)], {
+    "data-weft-turn-cost": "",
+  })
   const d = delegatedView(r)
-  if ("delegated_cost_known" in r && (!d.known || d.usd! > 0)) n.append(" + ", costText(d), " delegated")
-  if (own.known && cacheNotReported(r)) n.append(" ", el("span", undefined, "cache not reported", { title: CACHE_HINT, "data-weft-cache-hint": "" }))
+  if ("delegated_cost_known" in r && (!d.known || d.usd! > 0))
+    n.append(" + ", costText(d), " delegated")
+  if (own.known && cacheNotReported(r))
+    n.append(
+      " ",
+      el("span", undefined, "cache not reported", {
+        title: CACHE_HINT,
+        "data-weft-cache-hint": "",
+      })
+    )
   return n
 }

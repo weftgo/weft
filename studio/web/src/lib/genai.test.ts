@@ -11,15 +11,30 @@ import { keyRows, resolveSel, traceRuns } from "./trace-sel"
 describe("genaiChat", () => {
   it("reads the current keys: system instructions, input and output, as strings or parsed", () => {
     const c = genaiChat({
-      "gen_ai.system_instructions": JSON.stringify([{ type: "text", content: "be brief" }]),
+      "gen_ai.system_instructions": JSON.stringify([
+        { type: "text", content: "be brief" },
+      ]),
       "gen_ai.input.messages": [
         { role: "user", parts: [{ type: "text", content: "hi" }] },
-        { role: "tool", parts: [{ type: "tool_call_response", id: "call_1", response: "shipped" }] },
+        {
+          role: "tool",
+          parts: [
+            { type: "tool_call_response", id: "call_1", response: "shipped" },
+          ],
+        },
       ],
       "gen_ai.output.messages": JSON.stringify([
         {
           role: "assistant",
-          parts: [{ type: "tool_call", id: "call_2", name: "refund", arguments: '{"id":"42"}' }, { type: "blob", mime_type: "image/png" }],
+          parts: [
+            {
+              type: "tool_call",
+              id: "call_2",
+              name: "refund",
+              arguments: '{"id":"42"}',
+            },
+            { type: "blob", mime_type: "image/png" },
+          ],
           finish_reason: "tool_call",
         },
       ]),
@@ -32,9 +47,19 @@ describe("genaiChat", () => {
       ["tool", "input"],
       ["assistant", "output"],
     ])
-    expect(c.messages[2].parts).toEqual([{ kind: "tool_result", id: "call_1", response: "shipped" }])
-    expect(c.messages[3].parts[0]).toEqual({ kind: "tool_call", id: "call_2", name: "refund", arguments: { id: "42" } })
-    expect(c.messages[3].parts[1]).toMatchObject({ kind: "other", type: "blob" })
+    expect(c.messages[2].parts).toEqual([
+      { kind: "tool_result", id: "call_1", response: "shipped" },
+    ])
+    expect(c.messages[3].parts[0]).toEqual({
+      kind: "tool_call",
+      id: "call_2",
+      name: "refund",
+      arguments: { id: "42" },
+    })
+    expect(c.messages[3].parts[1]).toMatchObject({
+      kind: "other",
+      type: "blob",
+    })
     expect(c.messages[3].finishReason).toBe("tool_call")
     expect(c.problems).toEqual([])
   })
@@ -43,7 +68,9 @@ describe("genaiChat", () => {
     const c = genaiChat({ "gen_ai.input.messages": "{not json" })
     expect(c.family).toBe("semconv")
     expect(c.messages).toEqual([])
-    expect(c.problems).toEqual(["gen_ai.input.messages is not a JSON array of messages"])
+    expect(c.problems).toEqual([
+      "gen_ai.input.messages is not a JSON array of messages",
+    ])
   })
 
   it("reads the legacy keys: indexed with roles and tool calls, else plain", () => {
@@ -57,12 +84,19 @@ describe("genaiChat", () => {
       "gen_ai.completion.0.tool_calls.0.arguments": "not json",
     })
     expect(indexed.family).toBe("legacy")
-    expect(indexed.messages.map((m) => m.role)).toEqual(["system", "user", "assistant"])
+    expect(indexed.messages.map((m) => m.role)).toEqual([
+      "system",
+      "user",
+      "assistant",
+    ])
     expect(indexed.messages[2].parts).toEqual([
       { kind: "text", text: "done" },
       { kind: "tool_call", id: "t1", name: "lookup", arguments: "not json" },
     ])
-    const plain = genaiChat({ "gen_ai.content.prompt": "q", "gen_ai.completion": "a" })
+    const plain = genaiChat({
+      "gen_ai.content.prompt": "q",
+      "gen_ai.completion": "a",
+    })
     expect(plain.messages.map((m) => [m.role, m.parts])).toEqual([
       ["user", [{ kind: "text", text: "q" }]],
       ["assistant", [{ kind: "text", text: "a" }]],
@@ -92,15 +126,28 @@ describe("genaiChat", () => {
       ["tool", "input"],
       ["assistant", "output"],
     ])
-    expect(c.messages[1].parts).toEqual([{ kind: "tool_call", id: "call_1", name: "lookup_order", arguments: { order_id: "42" } }])
-    expect(c.messages[2].parts).toEqual([{ kind: "tool_result", id: "call_1", response: "shipped" }])
-    expect(c.messages[3].parts).toEqual([{ kind: "tool_result", id: "call_2", response: "no role given" }])
+    expect(c.messages[1].parts).toEqual([
+      {
+        kind: "tool_call",
+        id: "call_1",
+        name: "lookup_order",
+        arguments: { order_id: "42" },
+      },
+    ])
+    expect(c.messages[2].parts).toEqual([
+      { kind: "tool_result", id: "call_1", response: "shipped" },
+    ])
+    expect(c.messages[3].parts).toEqual([
+      { kind: "tool_result", id: "call_2", response: "no role given" },
+    ])
     expect(c.keys).toContain("gen_ai.prompt.1.tool_calls.0.name")
     expect(c.keys).toContain("gen_ai.prompt.2.tool_call_id")
   })
 
   it("carries none: family null, nothing reconstructed", () => {
-    expect(genaiChat({ "gen_ai.operation.name": "chat", "weft.run.id": "r" })).toEqual({
+    expect(
+      genaiChat({ "gen_ai.operation.name": "chat", "weft.run.id": "r" })
+    ).toEqual({
       family: null,
       messages: [],
       keys: [],
@@ -132,9 +179,34 @@ describe("the trace page's selection keys", () => {
   it("a second span wanting a taken key keeps its span id key; resolveSel reads keys, span ids and old call keys", () => {
     const spans = [
       sp("a", { "gen_ai.operation.name": "invoke_agent", "weft.run.id": "r" }),
-      sp("b", { "gen_ai.operation.name": "chat", "weft.run.id": "r", "weft.step.index": 0 }, "a"),
-      sp("b2", { "gen_ai.operation.name": "chat", "weft.run.id": "r", "weft.step.index": "0" }, "a"),
-      sp("c", { "gen_ai.operation.name": "execute_tool", "weft.run.id": "r", "weft.step.index": 0, "gen_ai.tool.call.id": "x:y" }, "a"),
+      sp(
+        "b",
+        {
+          "gen_ai.operation.name": "chat",
+          "weft.run.id": "r",
+          "weft.step.index": 0,
+        },
+        "a"
+      ),
+      sp(
+        "b2",
+        {
+          "gen_ai.operation.name": "chat",
+          "weft.run.id": "r",
+          "weft.step.index": "0",
+        },
+        "a"
+      ),
+      sp(
+        "c",
+        {
+          "gen_ai.operation.name": "execute_tool",
+          "weft.run.id": "r",
+          "weft.step.index": 0,
+          "gen_ai.tool.call.id": "x:y",
+        },
+        "a"
+      ),
     ]
     const rows = keyRows(spansFromTimed(spans))
     expect(rows.map((r) => r.key)).toEqual(["r:r", "s0", "t:b2", "c:0:x:y"])
@@ -157,24 +229,47 @@ describe("the trace page's selection keys", () => {
         "gen_ai.tool.call.id": "call_1",
         ...(approved ? { "weft.tool.approved": true } : {}),
       })
-    const one = keyRows(spansFromTimed([tool("r1", "r", true), tool("s1", "r", false)]))
+    const one = keyRows(
+      spansFromTimed([tool("r1", "r", true), tool("s1", "r", false)])
+    )
     expect(one.map((r) => r.key)).toEqual(["c:resume:call_1", "c:0:call_1"])
     // A run page's key pasted into the trace page lands on the resumed call.
-    expect(resolveSel(one, "c:resume:call_1")).toEqual({ id: "t:r1", key: "c:resume:call_1" })
-    expect(resolveSel(one, "c:0:call_1")).toEqual({ id: "t:s1", key: "c:0:call_1" })
+    expect(resolveSel(one, "c:resume:call_1")).toEqual({
+      id: "t:r1",
+      key: "c:resume:call_1",
+    })
+    expect(resolveSel(one, "c:0:call_1")).toEqual({
+      id: "t:s1",
+      key: "c:0:call_1",
+    })
     // An old bare key names both: the first, ambiguous.
-    expect(resolveSel(one, "c:call_1")).toEqual({ id: "t:r1", key: "c:resume:call_1", ambiguous: true })
-    const two = keyRows(spansFromTimed([tool("r1", "ra", true), tool("x1", "rb", false)]))
-    expect(two.map((r) => r.key)).toEqual(["c:ra:resume:call_1", "c:rb:0:call_1"])
+    expect(resolveSel(one, "c:call_1")).toEqual({
+      id: "t:r1",
+      key: "c:resume:call_1",
+      ambiguous: true,
+    })
+    const two = keyRows(
+      spansFromTimed([tool("r1", "ra", true), tool("x1", "rb", false)])
+    )
+    expect(two.map((r) => r.key)).toEqual([
+      "c:ra:resume:call_1",
+      "c:rb:0:call_1",
+    ])
     expect(resolveSel(two, "c:ra:resume:call_1").id).toBe("t:r1")
   })
 
   it("traceSelectionLink writes sel before view, and nothing for no selection", () => {
-    expect(traceSelectionLink("T", { sel: "c:1:call_1", view: "chat" })).toEqual({
+    expect(
+      traceSelectionLink("T", { sel: "c:1:call_1", view: "chat" })
+    ).toEqual({
       to: "/traces/$id",
       params: { id: "T" },
       search: { sel: "c:1:call_1", view: "chat" },
     })
-    expect(traceSelectionLink("T")).toEqual({ to: "/traces/$id", params: { id: "T" }, search: {} })
+    expect(traceSelectionLink("T")).toEqual({
+      to: "/traces/$id",
+      params: { id: "T" },
+      search: {},
+    })
   })
 })

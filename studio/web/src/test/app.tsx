@@ -26,7 +26,8 @@ afterAll(async () => {
   cleanup()
   await queryClient.cancelQueries()
   queryClient.clear()
-  if (!vi.isFakeTimers()) for (let i = 0; i < 2; i++) await new Promise((r) => setTimeout(r, 0))
+  if (!vi.isFakeTimers())
+    for (let i = 0; i < 2; i++) await new Promise((r) => setTimeout(r, 0))
 })
 
 /** jsdom lacks these; the shell and the tables call them. */
@@ -62,9 +63,18 @@ export function renderApp(url: string, opts: { strict?: boolean } = {}) {
   // there.
   return {
     router,
-    ...render(opts.strict ? <StrictMode><RouterProvider router={router} /></StrictMode> : <RouterProvider router={router} />, {
-      container: document,
-      baseElement: document.body,
-    }),
+    ...render(
+      opts.strict ? (
+        <StrictMode>
+          <RouterProvider router={router} />
+        </StrictMode>
+      ) : (
+        <RouterProvider router={router} />
+      ),
+      {
+        container: document,
+        baseElement: document.body,
+      }
+    ),
   }
 }

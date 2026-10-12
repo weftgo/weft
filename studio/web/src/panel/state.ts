@@ -12,7 +12,17 @@
 // timer is the model's own (dispose clears them), every retry is
 // bounded, and a response that arrives for a view the user has left
 // is dropped.
-import type { Holed, Meta, PosEvent, RunDoc, RunRow, SessionRow, Span, ToolCallPart, Transcript } from "../lib/api"
+import type {
+  Holed,
+  Meta,
+  PosEvent,
+  RunDoc,
+  RunRow,
+  SessionRow,
+  Span,
+  ToolCallPart,
+  Transcript,
+} from "../lib/api"
 import { HOLES } from "../lib/honesty"
 import { byStep } from "../lib/requests"
 import type { StepRequests } from "../lib/requests"
@@ -48,7 +58,12 @@ import {
   postSteer,
   putBreakpoints,
 } from "./client"
-import type { CommandStatus, PanelEndpoint, PanelLiveHandle, RuntimeView } from "./client"
+import type {
+  CommandStatus,
+  PanelEndpoint,
+  PanelLiveHandle,
+  RuntimeView,
+} from "./client"
 import {
   buildRunBody,
   draftProblem,
@@ -69,7 +84,8 @@ interface Cursor {
   before: string
   id: string
 }
-const sameCursor = (a: Cursor | null, b: Cursor) => !!a && a.before === b.before && a.id === b.id
+const sameCursor = (a: Cursor | null, b: Cursor) =>
+  !!a && a.before === b.before && a.id === b.id
 
 /** The events walk's page cap: 20 pages of 500. A longer run says so
  * (capped) instead of reading as complete. */
@@ -391,7 +407,10 @@ function newTurnView(id: string): TurnView {
 /** partitionRuns splits a runs page into top-level turns and the
  * experiments that hang off them (a playground run carries the public
  * id but no session id; its source turn is forked_from's run part). */
-export function partitionRuns(runs: RunRow[]): { turns: RunRow[]; experiments: Map<string, RunRow[]> } {
+export function partitionRuns(runs: RunRow[]): {
+  turns: RunRow[]
+  experiments: Map<string, RunRow[]>
+} {
   const turns: RunRow[] = []
   const experiments = new Map<string, RunRow[]>()
   for (const r of runs) {
@@ -429,8 +448,18 @@ interface EventWalk {
  * stored as ingested, so a body may be null, a string or an object
  * with no type: skipped, and a fold that throws on a shape it does not
  * know is contained — nothing here may throw into the host page. */
-function feedEvent(feed: FoldFeed, ev: unknown, pos: number, attrs?: PosEvent["attrs"]): void {
-  if (!ev || typeof ev !== "object" || typeof (ev as { type?: unknown }).type !== "string") return
+function feedEvent(
+  feed: FoldFeed,
+  ev: unknown,
+  pos: number,
+  attrs?: PosEvent["attrs"]
+): void {
+  if (
+    !ev ||
+    typeof ev !== "object" ||
+    typeof (ev as { type?: unknown }).type !== "string"
+  )
+    return
   try {
     feed.push(ev as PosEvent["event"], pos, attrs)
   } catch {
@@ -439,7 +468,11 @@ function feedEvent(feed: FoldFeed, ev: unknown, pos: number, attrs?: PosEvent["a
 }
 
 /** foldInto folds durable events once each, by position. */
-function foldInto(feed: FoldFeed, seen: Set<number>, events: (PosEvent | null)[]): void {
+function foldInto(
+  feed: FoldFeed,
+  seen: Set<number>,
+  events: (PosEvent | null)[]
+): void {
   for (const p of events) {
     if (!p || typeof p.pos !== "number" || seen.has(p.pos)) continue
     seen.add(p.pos)
@@ -466,13 +499,22 @@ function restart(lane: Lane, events: PosEvent[]): void {
  * force folds past one: the pages were read and the hole is a lost
  * batch, not something to wait on. Deltas are live-only and carry
  * their own counter (the hook's rule, hooks/use-run-events.ts). */
-function foldLive(lane: Lane, rec: LiveRecord, force = false): "folded" | "skip" | "gap" {
+function foldLive(
+  lane: Lane,
+  rec: LiveRecord,
+  force = false
+): "folded" | "skip" | "gap" {
   const pos = Number(rec.pos)
   if (rec.kind === "event") {
     if (!Number.isFinite(pos) || lane.seen.has(pos)) return "skip"
     if (!force && pos > lane.pos + 1) return "gap"
     lane.seen.add(pos)
-    lane.events.push({ pos, time: rec.time, event: rec.event, ...(rec.attrs ? { attrs: rec.attrs } : {}) })
+    lane.events.push({
+      pos,
+      time: rec.time,
+      event: rec.event,
+      ...(rec.attrs ? { attrs: rec.attrs } : {}),
+    })
     if (pos > lane.pos) lane.pos = pos
   } else if (rec.kind !== "delta") return "skip"
   feedEvent(lane.feed, rec.event, pos, rec.attrs)
@@ -491,7 +533,11 @@ function viewOf(feed: FoldFeed): FoldedRun {
 /** overlay puts the run's finished words on a fold (applyTranscript
  * maps only what the run produced onto its steps — its input record,
  * the conversation it was fed, is not its reply). */
-function overlay(folded: FoldedRun, transcript: Transcript | null, terminal = false): FoldedRun {
+function overlay(
+  folded: FoldedRun,
+  transcript: Transcript | null,
+  terminal = false
+): FoldedRun {
   if (!transcript) return folded
   try {
     // A terminal run's stored words are the story: they replace what
@@ -529,7 +575,12 @@ export class PanelModel {
   /** Reopen attempts since each stream last opened (LIVE_RETRIES). */
   private retries = { scope: 0, run: 0, exp: 0, dev: 0 }
   /** Each lane's overflow backoff: the step it is at and its last reopen. */
-  private overflows = { scope: { n: 0, at: 0 }, run: { n: 0, at: 0 }, exp: { n: 0, at: 0 }, dev: { n: 0, at: 0 } }
+  private overflows = {
+    scope: { n: 0, at: 0 },
+    run: { n: 0, at: 0 },
+    exp: { n: 0, at: 0 },
+    dev: { n: 0, at: 0 },
+  }
   /** Run frames that arrived while a turn-list fetch was in flight:
    * the fetch's snapshot is older than they are, so they are applied
    * over it. */
@@ -582,9 +633,16 @@ export class PanelModel {
       // (an app's own catch-all route) is not a Studio, same as no
       // answer.
       const doc = (await fetchMeta(this.ep)) as Partial<Meta> | null
-      if (!doc || typeof doc !== "object" || typeof doc.studio_version !== "string")
+      if (
+        !doc ||
+        typeof doc !== "object" ||
+        typeof doc.studio_version !== "string"
+      )
         throw new Error("not a Studio")
-      meta = { ...(doc as Meta), capabilities: Array.isArray(doc.capabilities) ? doc.capabilities : [] }
+      meta = {
+        ...(doc as Meta),
+        capabilities: Array.isArray(doc.capabilities) ? doc.capabilities : [],
+      }
     } catch {
       this.state.gone = true
       return false
@@ -608,7 +666,9 @@ export class PanelModel {
   async rescope(next: Scope | string, opts: { force?: boolean } = {}) {
     const s: Scope = typeof next === "string" ? { publicId: next } : next
     const narrowing = narrowingOf(s)
-    const sameNarrowing = serializeScope({ publicId: "", ...narrowing }) === serializeScope({ publicId: "", ...this.narrowing })
+    const sameNarrowing =
+      serializeScope({ publicId: "", ...narrowing }) ===
+      serializeScope({ publicId: "", ...this.narrowing })
     if (s.publicId === this.publicId && sameNarrowing) return
     const samePublic = s.publicId === this.publicId
     const sameSession = narrowing.session === this.narrowing.session
@@ -650,7 +710,12 @@ export class PanelModel {
     this.scopeSub = this.runSub = this.expSub = this.devSub = undefined
     this.clearTimers()
     this.retries = { scope: 0, run: 0, exp: 0, dev: 0 }
-    this.overflows = { scope: { n: 0, at: 0 }, run: { n: 0, at: 0 }, exp: { n: 0, at: 0 }, dev: { n: 0, at: 0 } }
+    this.overflows = {
+      scope: { n: 0, at: 0 },
+      run: { n: 0, at: 0 },
+      exp: { n: 0, at: 0 },
+      dev: { n: 0, at: 0 },
+    }
     this.devBackoff = false
     const s = this.state
     s.live = false
@@ -731,7 +796,10 @@ export class PanelModel {
 
   /** retry runs fn after the kind's next backoff step, LIVE_RETRIES
    * times at most between two successful opens. */
-  private retry(kind: "scope" | "run" | "exp" | "dev", fn: () => Promise<void>) {
+  private retry(
+    kind: "scope" | "run" | "exp" | "dev",
+    fn: () => Promise<void>
+  ) {
     const n = this.retries[kind]
     if (n >= LIVE_RETRIES) return
     this.retries[kind] = n + 1
@@ -744,15 +812,21 @@ export class PanelModel {
    * Calm is measured from the reopen, not from the overflow: the
    * backoff's own wait is not calm, so a sustained overflow holds at
    * the cap instead of falling back to a second each cycle. */
-  private overflowed(kind: "scope" | "run" | "exp" | "dev", fn: () => Promise<void>) {
+  private overflowed(
+    kind: "scope" | "run" | "exp" | "dev",
+    fn: () => Promise<void>
+  ) {
     const o = this.overflows[kind]
     o.n = o.at && Date.now() - o.at < OVERFLOW_CALM_MS ? o.n + 1 : 0
-    this.after(Math.min(OVERFLOW_MIN_MS * 2 ** Math.min(o.n, 6), 60_000), () => {
-      // The lane reopens now: the calm window starts here (the lanes'
-      // record, which a rescope replaces, is read again).
-      this.overflows[kind].at = Date.now()
-      void fn().catch(quiet)
-    })
+    this.after(
+      Math.min(OVERFLOW_MIN_MS * 2 ** Math.min(o.n, 6), 60_000),
+      () => {
+        // The lane reopens now: the calm window starts here (the lanes'
+        // record, which a rescope replaces, is read again).
+        this.overflows[kind].at = Date.now()
+        void fn().catch(quiet)
+      }
+    )
   }
 
   private after(ms: number, fn: () => void): ReturnType<typeof setTimeout> {
@@ -789,19 +863,32 @@ export class PanelModel {
   private armDev() {
     this.cancel(this.devTimer)
     this.devTimer = null
-    if (!this.watching || this.publicId || this.disposed || !this.state.meta || this.state.tooNew) return
+    if (
+      !this.watching ||
+      this.publicId ||
+      this.disposed ||
+      !this.state.meta ||
+      this.state.tooNew
+    )
+      return
     // The agent stream keeps its agent's rows current; the slower read
     // finds the other agents' runs.
-    this.devTimer = this.after(this.devSub ? DEV_DISCOVERY_MS : DEV_POLL_MS, () => {
-      this.devTimer = null
-      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-        this.armDev()
-        return
+    this.devTimer = this.after(
+      this.devSub ? DEV_DISCOVERY_MS : DEV_POLL_MS,
+      () => {
+        this.devTimer = null
+        if (
+          typeof document !== "undefined" &&
+          document.visibilityState === "hidden"
+        ) {
+          this.armDev()
+          return
+        }
+        void this.refresh()
+          .catch(quiet)
+          .then(() => this.armDev())
       }
-      void this.refresh()
-        .catch(quiet)
-        .then(() => this.armDev())
-    })
+    )
   }
 
   /** armStale watches the rows that read running: a run whose app died
@@ -814,10 +901,15 @@ export class PanelModel {
     this.cancel(this.staleTimer)
     this.staleTimer = null
     if (this.disposed) return
-    const rows = [...this.state.turns, ...[...this.state.experiments.values()].flat()]
+    const rows = [
+      ...this.state.turns,
+      ...[...this.state.experiments.values()].flat(),
+    ]
     if (!rows.some((r) => r.status === "running")) return
     const ia = this.state.meta?.interrupted_after_ms
-    const ms = (typeof ia === "number" && ia > 0 ? Math.min(ia, 10 * 60_000) : 30_000) + 1_000
+    const ms =
+      (typeof ia === "number" && ia > 0 ? Math.min(ia, 10 * 60_000) : 30_000) +
+      1_000
     this.staleTimer = this.after(ms, () => {
       this.staleTimer = null
       void this.refresh().catch(quiet)
@@ -857,7 +949,16 @@ export class PanelModel {
    * covering the gap. */
   private subscribeDev(seq: number) {
     const s = this.state
-    if (this.publicId || this.devSub || s.devRefused || this.devBackoff || this.disposed || !s.meta || s.tooNew) return
+    if (
+      this.publicId ||
+      this.devSub ||
+      s.devRefused ||
+      this.devBackoff ||
+      this.disposed ||
+      !s.meta ||
+      s.tooNew
+    )
+      return
     if (tokenScope(this.ep.token) !== "") {
       s.devRefused = true
       return
@@ -916,7 +1017,12 @@ export class PanelModel {
   private clearTimers() {
     for (const t of this.timers) clearTimeout(t)
     this.timers.clear()
-    this.devTimer = this.staleTimer = this.liveTimer = this.pinTimer = this.rtTimer = null
+    this.devTimer =
+      this.staleTimer =
+      this.liveTimer =
+      this.pinTimer =
+      this.rtTimer =
+        null
   }
 
   /** refresh reloads the header and the turn list. */
@@ -927,25 +1033,36 @@ export class PanelModel {
     try {
       if (this.publicId) {
         // The header's row; without it the list still loads.
-        const sessions = await fetchSessions(this.ep, { public_id: this.publicId }).catch(() => null)
+        const sessions = await fetchSessions(this.ep, {
+          public_id: this.publicId,
+        }).catch(() => null)
         if (seq !== this.loadSeq || this.disposed) return
         if (sessions && Array.isArray(sessions.sessions)) {
           const want = this.narrowing.session
           this.state.session =
-            (want ? sessions.sessions.find((x) => x.id === want) : sessions.sessions[0]) ?? null
+            (want
+              ? sessions.sessions.find((x) => x.id === want)
+              : sessions.sessions[0]) ?? null
         }
       }
       const page = await fetchRuns(
         this.ep,
-        this.publicId ? { public_id: this.publicId, limit: String(TURNS_LIMIT) } : { limit: String(DEV_LIMIT) }
+        this.publicId
+          ? { public_id: this.publicId, limit: String(TURNS_LIMIT) }
+          : { limit: String(DEV_LIMIT) }
       )
       if (seq !== this.loadSeq || this.disposed) return
-      const listed: (RunRow | null)[] = Array.isArray(page.runs) ? page.runs : []
-      const runs = listed.filter((r): r is RunRow => !!r && typeof r.id === "string")
+      const listed: (RunRow | null)[] = Array.isArray(page.runs)
+        ? page.runs
+        : []
+      const runs = listed.filter(
+        (r): r is RunRow => !!r && typeof r.id === "string"
+      )
       const { turns, experiments } = partitionRuns(runs)
       const want = this.narrowing.session
       const s = this.state
-      s.sessionUnrecorded = !!want && turns.length > 0 && !turns.some((r) => r.session_id)
+      s.sessionUnrecorded =
+        !!want && turns.length > 0 && !turns.some((r) => r.session_id)
       const kept = s.turns
       const keptX = s.experiments
       s.turns = turns.filter((r) => this.inSession(r))
@@ -956,10 +1073,15 @@ export class PanelModel {
         const edge = Date.parse(page.next_before)
         const older = (r: RunRow) => !(Date.parse(r.started) > edge)
         for (const r of kept) if (older(r)) this.upsertRun(r, true)
-        for (const r of [...keptX.values()].flat()) if (older(r)) this.upsertRun(r, true)
+        for (const r of [...keptX.values()].flat())
+          if (older(r)) this.upsertRun(r, true)
       } else {
         s.paged = false
-        this.setCursor(page.next_before != null ? { before: page.next_before, id: page.next_before_id ?? "" } : null)
+        this.setCursor(
+          page.next_before != null
+            ? { before: page.next_before, id: page.next_before_id ?? "" }
+            : null
+        )
       }
       s.turnsCapped = this.cursor != null
       for (const r of during) this.upsertRun(r)
@@ -983,7 +1105,8 @@ export class PanelModel {
     const open = this.state.turn
     if (open && !open.done && !open.loading) {
       const status = this.rowOf(open.id)?.status
-      if (status && status !== "running") void this.settleTurn(open).catch(quiet)
+      if (status && status !== "running")
+        void this.settleTurn(open).catch(quiet)
     }
     const pin = this.takePin()
     if (pin) {
@@ -1047,7 +1170,8 @@ export class PanelModel {
   private onRunFrame(f: LiveRun) {
     const run = f.run
     // The dev list's agent stream carries every conversation's runs.
-    if (this.publicId && run.public_id && run.public_id !== this.publicId) return
+    if (this.publicId && run.public_id && run.public_id !== this.publicId)
+      return
     // A subagent's run inherits the public id, but it is not a turn:
     // the list is top-level runs (runs?public_id= reads the same way)
     // and the child hangs off its parent's call.
@@ -1193,7 +1317,8 @@ export class PanelModel {
       this.readRequests(id),
     ])
     view.loading = false
-    if (seq !== this.loadSeq || this.disposed || this.state.turn !== view) return
+    if (seq !== this.loadSeq || this.disposed || this.state.turn !== view)
+      return
     if (view.again) {
       view.again = false
       return this.loadTurn(view)
@@ -1218,7 +1343,8 @@ export class PanelModel {
         const now = doc.children.find((c) => c.id === cid)?.status
         if (!now || now === cv.status) continue
         view.tried.delete(cid)
-        if (view.expanded.has(cid)) void this.expandChild(cid, true).catch(quiet)
+        if (view.expanded.has(cid))
+          void this.expandChild(cid, true).catch(quiet)
         else view.children.delete(cid)
       }
     }
@@ -1237,7 +1363,11 @@ export class PanelModel {
     else this.drain(view, id, () => this.state.turn === view && !view.done)
     if (view.recheck && !view.done) {
       view.recheck = false
-      void this.catchUp(view, id, () => this.state.turn === view && !view.done).catch(quiet)
+      void this.catchUp(
+        view,
+        id,
+        () => this.state.turn === view && !view.done
+      ).catch(quiet)
     }
     this.dress(view)
     this.emit()
@@ -1249,11 +1379,19 @@ export class PanelModel {
    * so the hole is known without a request. */
   private async readRequests(id: string): Promise<PanelRequests | null> {
     if (!this.state.meta?.capabilities.includes("requests")) return null
-    if (tokenScope(this.ep.token) === "read") return { badge: "hidden", reason: HOLES.hidden.reason, fix: HOLES.hidden.fix, steps: new Map() }
+    if (tokenScope(this.ep.token) === "read")
+      return {
+        badge: "hidden",
+        reason: HOLES.hidden.reason,
+        fix: HOLES.hidden.fix,
+        steps: new Map(),
+      }
     try {
       const doc = await fetchRequests(this.ep, id)
       // A stripped row's words are the tools route's (the run page's).
-      const stripped = doc.requests.some((r) => r.content === "stripped") ? await fetchStrippedNote(this.ep, id) : undefined
+      const stripped = doc.requests.some((r) => r.content === "stripped")
+        ? await fetchStrippedNote(this.ep, id)
+        : undefined
       return {
         badge: doc.badge,
         reason: doc.reason,
@@ -1265,7 +1403,10 @@ export class PanelModel {
     } catch (err) {
       // The panel's error path: words in the view, nothing thrown into
       // the page.
-      return { steps: new Map(), error: err instanceof Error ? err.message : String(err) }
+      return {
+        steps: new Map(),
+        error: err instanceof Error ? err.message : String(err),
+      }
     }
   }
 
@@ -1285,7 +1426,12 @@ export class PanelModel {
   /** liveInto takes one live frame for a lane: held while its pages are
    * being read, folded in order otherwise, and a frame past a position
    * the stream never carried sends the lane back to the pages. */
-  private liveInto(lane: Lane, id: string, rec: LiveRecord, current: () => boolean) {
+  private liveInto(
+    lane: Lane,
+    id: string,
+    rec: LiveRecord,
+    current: () => boolean
+  ) {
     if (lane.loading || lane.reading) {
       lane.held.push(rec)
       return
@@ -1303,7 +1449,11 @@ export class PanelModel {
    * pages are read, so it is a lost batch (the page's gaps). One read
    * at a time; asked again meanwhile, it reads once more. Bounded by
    * the walk's page cap. */
-  private async catchUp(lane: Lane, id: string, current: () => boolean): Promise<void> {
+  private async catchUp(
+    lane: Lane,
+    id: string,
+    current: () => boolean
+  ): Promise<void> {
     if (lane.loading || lane.reading) {
       lane.recheck = true
       return
@@ -1322,7 +1472,8 @@ export class PanelModel {
           if (!current()) return
           if (Array.isArray(p.events)) {
             for (const e of p.events as (PosEvent | null)[]) {
-              if (!e || typeof e.pos !== "number" || lane.seen.has(e.pos)) continue
+              if (!e || typeof e.pos !== "number" || lane.seen.has(e.pos))
+                continue
               lane.seen.add(e.pos)
               lane.events.push(e)
               feedEvent(lane.feed, e.event, e.pos, e.attrs)
@@ -1349,7 +1500,11 @@ export class PanelModel {
   private dress(view: TurnView) {
     view.stale = false
     const status = this.rowOf(view.id)?.status ?? view.doc?.status
-    view.folded = overlay(viewOf(view.feed), view.transcript, view.done || (!!status && status !== "running"))
+    view.folded = overlay(
+      viewOf(view.feed),
+      view.transcript,
+      view.done || (!!status && status !== "running")
+    )
     if (view.doc && Array.isArray(view.doc.children)) {
       try {
         linkView(view.folded, view.doc.children)
@@ -1374,16 +1529,26 @@ export class PanelModel {
         // pages past the last position are read (after a load in
         // flight, which then reads them).
         if (this.state.turn === view && !view.done && !view.capped)
-          void this.catchUp(view, id, () => this.state.turn === view && !view.done).catch(quiet)
+          void this.catchUp(
+            view,
+            id,
+            () => this.state.turn === view && !view.done
+          ).catch(quiet)
       },
       onRecord: (rec: LiveRecord) => {
-        if (this.state.turn !== view || view.id !== rec.run_id || view.done) return
+        if (this.state.turn !== view || view.id !== rec.run_id || view.done)
+          return
         // A story cut at the page cap is not extended: it says so, and
         // Studio has the rest.
         if (view.capped) return
         // The pages and the tail overlap (a reconnect backfills the
         // stored events from position 0): one fold per position.
-        this.liveInto(view, id, rec, () => this.state.turn === view && !view.done)
+        this.liveInto(
+          view,
+          id,
+          rec,
+          () => this.state.turn === view && !view.done
+        )
       },
       onRun: (f) => {
         if (f.run.id !== id || this.state.turn !== view) return
@@ -1402,7 +1567,8 @@ export class PanelModel {
         if (why === "expired") return
         if (why === "overflow")
           this.overflowed("run", async () => {
-            if (this.state.turn === view && !view.done) await this.resumeTurn(view)
+            if (this.state.turn === view && !view.done)
+              await this.resumeTurn(view)
           })
         else this.retry("run", () => this.resumeTurn(view))
       },
@@ -1430,7 +1596,12 @@ export class PanelModel {
    * a delegating tool call expands into the child run). */
   async expandChild(childId: string, refresh = false) {
     const view = this.state.turn
-    if (!view || (!refresh && view.children.has(childId)) || view.tried.has(childId)) return
+    if (
+      !view ||
+      (!refresh && view.children.has(childId)) ||
+      view.tried.has(childId)
+    )
+      return
     view.tried.add(childId)
     const seq = this.loadSeq
     let walk: EventWalk
@@ -1451,8 +1622,10 @@ export class PanelModel {
       fetchRun(this.ep, childId).catch(() => null),
       this.readRequests(childId),
     ])
-    if (seq !== this.loadSeq || this.disposed || this.state.turn !== view) return
-    const status = view.doc?.children.find((c) => c.id === childId)?.status ?? "running"
+    if (seq !== this.loadSeq || this.disposed || this.state.turn !== view)
+      return
+    const status =
+      view.doc?.children.find((c) => c.id === childId)?.status ?? "running"
     const folded = overlay(viewOf(feed), transcript, status !== "running")
     // The grandchildren are linked (one level inline: the panel badges
     // them and hands off to Studio).
@@ -1514,15 +1687,23 @@ export class PanelModel {
    * they cannot be read. */
   async pendingCalls(id: string): Promise<ToolCallPart[]> {
     const open = this.state.turn
-    if (open && open.id === id && open.folded.finished && open.folded.pending.length) return [...open.folded.pending]
+    if (
+      open &&
+      open.id === id &&
+      open.folded.finished &&
+      open.folded.pending.length
+    )
+      return [...open.folded.pending]
     try {
       const walk = await this.walkEvents(id)
       for (let i = walk.events.length - 1; i >= 0; i--) {
-        const ev = walk.events[i]?.event as { type?: string; pending?: unknown } | undefined
+        const ev = walk.events[i]?.event as
+          { type?: string; pending?: unknown } | undefined
         if (ev?.type !== "run_finish") continue
         return Array.isArray(ev.pending)
           ? (ev.pending as (ToolCallPart | null)[]).filter(
-              (c): c is ToolCallPart => !!c && typeof c.id === "string" && c.id !== ""
+              (c): c is ToolCallPart =>
+                !!c && typeof c.id === "string" && c.id !== ""
             )
           : []
       }
@@ -1556,7 +1737,11 @@ export class PanelModel {
    * as its own run (A10): its agent, drawn under the parent turn. The
    * runtimes are read each time: a restarted app registers under a new
    * runtime id, and a remembered list would post to the dead one. */
-  async openExperiment(runId: string, at: number | ReplayDraft = 0, opts: { agent?: string; under?: string } = {}) {
+  async openExperiment(
+    runId: string,
+    at: number | ReplayDraft = 0,
+    opts: { agent?: string; under?: string } = {}
+  ) {
     const row = this.rowOf(runId)
     const agentName = opts.agent ?? row?.agent
     if (agentName === undefined) return
@@ -1572,7 +1757,8 @@ export class PanelModel {
       const doc = await fetchRuntimes(this.ep)
       runtimes = Array.isArray(doc.runtimes) ? doc.runtimes : []
     } catch (err) {
-      if (!this.disposed && seq === this.loadSeq) this.setExperimentError(messageOf(err), under)
+      if (!this.disposed && seq === this.loadSeq)
+        this.setExperimentError(messageOf(err), under)
       return
     }
     if (this.disposed || seq !== this.loadSeq) return
@@ -1593,7 +1779,9 @@ export class PanelModel {
     const tools: Record<string, boolean> = {}
     for (const t of agent.tools) tools[t.name] = true
     // The rule that is parking this runtime's runs, whoever set it.
-    this.state.breakpoints = Array.isArray(rt.breakpoints) ? [...rt.breakpoints] : []
+    this.state.breakpoints = Array.isArray(rt.breakpoints)
+      ? [...rt.breakpoints]
+      : []
     // A child replayed from its row before it was ever opened: its
     // records (the catalog the ack preview judges, its steps) are read
     // first — ack before execute.
@@ -1604,10 +1792,17 @@ export class PanelModel {
       if (left()) return
     }
     const turn = this.state.turn
-    const src = turn ? (turn.id === runId ? turn : turn.children.get(runId)) : undefined
+    const src = turn
+      ? turn.id === runId
+        ? turn
+        : turn.children.get(runId)
+      : undefined
     // The source's own prompt, pre-filled where the run starts over —
     // not for "continue here", whose message is a new one.
-    const own = step === 0 && turn && turn.id === runId ? turnPromptOf(turn.transcript) : ""
+    const own =
+      step === 0 && turn && turn.id === runId
+        ? turnPromptOf(turn.transcript)
+        : ""
     const registered = agent.instructions ?? ""
     let instructions = replay?.instructions ?? registered
     let promptFrom: ExperimentDraft["promptFrom"]
@@ -1626,9 +1821,13 @@ export class PanelModel {
         promptFrom = "registered"
         // Every fallback says why, with its badge.
         const req = src?.requests
-        if (p) promptHole = isHoleRef(p) ? { hole: p.badge } : { hole: "truncated", bytes: p.truncated_bytes }
+        if (p)
+          promptHole = isHoleRef(p)
+            ? { hole: p.badge }
+            : { hole: "truncated", bytes: p.truncated_bytes }
         else if (!req) promptHole = promptNotServed()
-        else if (req.badge) promptHole = { hole: req.badge, reason: req.reason, fix: req.fix }
+        else if (req.badge)
+          promptHole = { hole: req.badge, reason: req.reason, fix: req.fix }
         else if (req.error) promptHole = promptReadError(req.error)
         else promptHole = promptNotRecorded()
       }
@@ -1698,9 +1897,18 @@ export class PanelModel {
     const at = d ? `${d.runId}#${d.step}` : ""
     // A failed read is remembered (its time): asked again 10 s on, not per keystroke.
     const f = this.asOf.get(at)
-    if (d && d.edits.length && d.step > 0 && d.thread !== "fork" && (f === undefined || (typeof f == "number" && Date.now() - f > 1e4))) {
+    if (
+      d &&
+      d.edits.length &&
+      d.step > 0 &&
+      d.thread !== "fork" &&
+      (f === undefined || (typeof f == "number" && Date.now() - f > 1e4))
+    ) {
       this.asOf.set(at, null)
-      void panelGet<{ compacted_at: CompactedNote | null }>(this.ep, `runs/${encodeURIComponent(d.runId)}/transcript?step=${d.step}`).then(
+      void panelGet<{ compacted_at: CompactedNote | null }>(
+        this.ep,
+        `runs/${encodeURIComponent(d.runId)}/transcript?step=${d.step}`
+      ).then(
         (doc) => {
           if (this.disposed || !doc.compacted_at) return
           this.asOf.set(at, doc.compacted_at)
@@ -1712,7 +1920,11 @@ export class PanelModel {
         }
       )
     }
-    if (!d || d.thread === "fork" || !(this.state.meta?.capabilities.includes("preview") ?? false)) {
+    if (
+      !d ||
+      d.thread === "fork" ||
+      !(this.state.meta?.capabilities.includes("preview") ?? false)
+    ) {
       this.state.preview = null
       return
     }
@@ -1727,7 +1939,12 @@ export class PanelModel {
       if (left()) return
       void postPreview(this.ep, buildRunBody(d, this.publicId)).then(
         (doc) => !left() && this.setPreview({ doc }),
-        (err: unknown) => !left() && this.setPreview({ error: messageOf(err), refused: err instanceof PanelApiError && err.status === 400 })
+        (err: unknown) =>
+          !left() &&
+          this.setPreview({
+            error: messageOf(err),
+            refused: err instanceof PanelApiError && err.status === 400,
+          })
       )
     })
     // A preview that never answers does not hold Run forever: past the
@@ -1766,7 +1983,14 @@ export class PanelModel {
     // sends none), no transcript edits (step 0 keeps nothing to edit) —
     // and the ack preview drawn again before anything is posted.
     const r = rerunDraft()
-    this.state.drawer = { ...d, verb: r.verb, step: r.fromStep, thread: r.thread, input: r.input, edits: r.edits }
+    this.state.drawer = {
+      ...d,
+      verb: r.verb,
+      step: r.fromStep,
+      thread: r.thread,
+      input: r.input,
+      edits: r.edits,
+    }
     this.schedulePreview()
     this.emit()
   }
@@ -1790,7 +2014,8 @@ export class PanelModel {
     try {
       out = await postPlaygroundRun(this.ep, buildRunBody(draft, this.publicId))
     } catch (err) {
-      if (!this.disposed && seq === this.loadSeq) this.setExperimentError(messageOf(err), draft.under ?? draft.runId)
+      if (!this.disposed && seq === this.loadSeq)
+        this.setExperimentError(messageOf(err), draft.under ?? draft.runId)
       return
     } finally {
       this.posting = false
@@ -1809,7 +2034,11 @@ export class PanelModel {
           : { text: "", calls: [] }
     this.expSub?.close()
     this.expSub = undefined
-    const res = newResult(draft.runId, experimentLabel(draft.runId, forked), source)
+    const res = newResult(
+      draft.runId,
+      experimentLabel(draft.runId, forked),
+      source
+    )
     res.under = draft.under ?? draft.runId
     res.fromStep = draft.thread === "fork" ? 0 : draft.step
     res.commandID = out.command_id
@@ -1827,7 +2056,11 @@ export class PanelModel {
    * is not sent. With several calls parked the runtime holds each
    * decision until all are in, then resumes once (trackCommand records
    * the held ones). */
-  async decide(callID: string, decision: "approve" | "deny" | "resolve", content?: string) {
+  async decide(
+    callID: string,
+    decision: "approve" | "deny" | "resolve",
+    content?: string
+  ) {
     const res = this.state.result
     if (!res || !res.runID || !res.ready || this.deciding) return
     this.deciding = true
@@ -1852,7 +2085,11 @@ export class PanelModel {
       }
       let out: { command_id: string; state: string }
       try {
-        out = await postApproval(this.ep, res.runID, { call_id: callID, decision, content })
+        out = await postApproval(this.ep, res.runID, {
+          call_id: callID,
+          decision,
+          content,
+        })
       } catch (err) {
         // Refused (a read-only token is a 403, a call that is not
         // pending a 400 naming the ones that are, a runtime that left
@@ -1942,7 +2179,8 @@ export class PanelModel {
     } catch (err) {
       // Nothing was stored (a disconnected runtime is a 503): the
       // redraw puts the checkbox back on the set that stands.
-      if (!this.disposed && seq === this.loadSeq) this.setExperimentError(messageOf(err), drawer.runId)
+      if (!this.disposed && seq === this.loadSeq)
+        this.setExperimentError(messageOf(err), drawer.runId)
       return
     }
     if (this.disposed || seq !== this.loadSeq) return
@@ -1982,7 +2220,10 @@ export class PanelModel {
     } else {
       this.expSub?.close()
       this.expSub = undefined
-      const blank = newResult(under ?? this.state.selected, "—", { text: "", calls: [] })
+      const blank = newResult(under ?? this.state.selected, "—", {
+        text: "",
+        calls: [],
+      })
       blank.error = message
       this.state.result = blank
     }
@@ -2005,15 +2246,23 @@ export class PanelModel {
       async (st) => {
         res.state = st.state
         res.error = st.error ?? null
-        if (st.run_id && st.run_id !== res.runID) this.followExperiment(res, st.run_id)
+        if (st.run_id && st.run_id !== res.runID)
+          this.followExperiment(res, st.run_id)
         this.emit()
-        if (st.state === "finished" || st.state === "rejected" || st.state === "lost") {
+        if (
+          st.state === "finished" ||
+          st.state === "rejected" ||
+          st.state === "lost"
+        ) {
           // A decision that finished under the parked run's own id is
           // one the runtime holds: the run resumes once, when every
           // pending call has a decision — this one is recorded, the park
           // stands, and the remaining calls are still to decide.
           if (st.state === "finished" && res.deciding && !st.error) {
-            res.decided = { ...res.decided, [res.deciding.callID]: res.deciding.decision }
+            res.decided = {
+              ...res.decided,
+              [res.deciding.callID]: res.deciding.decision,
+            }
           }
           res.deciding = null
           if (res.runID) await this.settleExperiment(res, 0)
@@ -2035,7 +2284,12 @@ export class PanelModel {
    * knows, an expired token, Studio gone: lost says why, instead of
    * asking forever. It is bounded too: Studio settles a command whose
    * runtime went silent as lost after max(10 min, 3 beats) (§10.5). */
-  private poll(id: string, gone: () => boolean, row: (st: CommandStatus) => boolean | Promise<boolean>, lost: (why: string) => void) {
+  private poll(
+    id: string,
+    gone: () => boolean,
+    row: (st: CommandStatus) => boolean | Promise<boolean>,
+    lost: (why: string) => void
+  ) {
     let fails = 0
     const tick = async () => {
       if (gone() || this.disposed) return
@@ -2044,9 +2298,15 @@ export class PanelModel {
         st = await fetchCommand(this.ep, id)
       } catch (err) {
         if (gone()) return
-        const refused = err instanceof PanelApiError && [401, 403, 404, 410].includes(err.status)
+        const refused =
+          err instanceof PanelApiError &&
+          [401, 403, 404, 410].includes(err.status)
         if (refused || ++fails >= POLL_FAILS) {
-          lost(refused ? messageOf(err) : "Studio stopped answering — the command's state is unknown")
+          lost(
+            refused
+              ? messageOf(err)
+              : "Studio stopped answering — the command's state is unknown"
+          )
           return
         }
         this.after(POLL_MS, () => void tick().catch(quiet))
@@ -2064,7 +2324,11 @@ export class PanelModel {
    * kept verbatim, a 403 kept with the server's fix. A finished
    * decision names the resumed turn; the list is read again so the
    * turn shows (the live frames bring it too). */
-  private async appVerb(key: string, send: () => Promise<{ command_id?: string }>, decision?: string) {
+  private async appVerb(
+    key: string,
+    send: () => Promise<{ command_id?: string }>,
+    decision?: string
+  ) {
     const set = (v: AppVerb) => {
       this.state.app = { ...this.state.app, [key]: { decision, ...v } }
       this.emit()
@@ -2074,11 +2338,19 @@ export class PanelModel {
     try {
       out = await send()
     } catch (err) {
-      const fix = err instanceof PanelApiError ? (err.body as { fix?: unknown } | null)?.fix : undefined
+      const fix =
+        err instanceof PanelApiError
+          ? (err.body as { fix?: unknown } | null)?.fix
+          : undefined
       this.rtAt = 0 // the gate was stale: read the runtimes again
       this.cancel(this.rtTimer)
       this.rtTimer = null
-      set({ state: "refused", error: messageOf(err), rt: this.rtSeq, ...(typeof fix === "string" ? { fix } : {}) })
+      set({
+        state: "refused",
+        error: messageOf(err),
+        rt: this.rtSeq,
+        ...(typeof fix === "string" ? { fix } : {}),
+      })
       return
     }
     if (this.disposed) return
@@ -2087,9 +2359,15 @@ export class PanelModel {
       out.command_id,
       () => this.disposed,
       (st) => {
-        const done = st.state === "finished" || st.state === "rejected" || st.state === "lost"
+        const done =
+          st.state === "finished" ||
+          st.state === "rejected" ||
+          st.state === "lost"
         set({
-          state: st.state === "finished" && st.status === "failed" ? "failed" : st.state,
+          state:
+            st.state === "finished" && st.status === "failed"
+              ? "failed"
+              : st.state,
           ...(st.error ? { error: st.error } : {}),
           ...(st.run_id ? { run: st.run_id } : {}),
         })
@@ -2138,20 +2416,31 @@ export class PanelModel {
   /** decideApp answers one parked call of an app turn (plan F4.3):
    * the same route and verbs as an experiment's, text the deny's
    * reason or the resolve's result. */
-  decideApp(runID: string, callID: string, decision: "approve" | "deny" | "resolve", text = "") {
-    return this.appVerb(`${runID}:${callID}`, () =>
-      postApproval(this.ep, runID, {
-        call_id: callID,
-        decision,
-        ...(decision === "deny" && text ? { reason: text } : {}),
-        ...(decision === "resolve" ? { content: text } : {}),
-      }), decision)
+  decideApp(
+    runID: string,
+    callID: string,
+    decision: "approve" | "deny" | "resolve",
+    text = ""
+  ) {
+    return this.appVerb(
+      `${runID}:${callID}`,
+      () =>
+        postApproval(this.ep, runID, {
+          call_id: callID,
+          decision,
+          ...(decision === "deny" && text ? { reason: text } : {}),
+          ...(decision === "resolve" ? { content: text } : {}),
+        }),
+      decision
+    )
   }
 
   /** steerApp delivers one user message into the app turn running now
    * (plan F4.3): the run id is the turn's — a newer turn is refused. */
   steerApp(runID: string, message: string) {
-    return this.appVerb(`${runID}:steer`, () => postSteer(this.ep, runID, message))
+    return this.appVerb(`${runID}:steer`, () =>
+      postSteer(this.ep, runID, message)
+    )
   }
 
   /** followExperiment points the pane at one run and streams it in
@@ -2192,30 +2481,36 @@ export class PanelModel {
         // The run began before its stream opened (the run id arrives
         // with the lifecycle poll): what it stored before the server
         // subscribed is read from the pages, by position.
-        if (!this.left(res) && res.runID === runID && !res.ready) void this.catchUp(res, runID, current).catch(quiet)
+        if (!this.left(res) && res.runID === runID && !res.ready)
+          void this.catchUp(res, runID, current).catch(quiet)
       },
       onRecord: (rec) => {
-        if (this.state.result !== res || res.runID !== rec.run_id || res.ready) return
+        if (this.state.result !== res || res.runID !== rec.run_id || res.ready)
+          return
         this.liveInto(res, runID, rec, current)
       },
       onRun: (f) => {
         if (this.state.result !== res || f.run.id !== res.runID) return
         res.row = f.run
         this.emit()
-        if (f.run.status !== "running") void this.settleExperiment(res, 0).catch(quiet)
+        if (f.run.status !== "running")
+          void this.settleExperiment(res, 0).catch(quiet)
       },
       onOverflow: (why) => {
         this.expSub = undefined
-        if (this.state.result !== res || res.runID !== runID || res.ready) return
+        if (this.state.result !== res || res.runID !== runID || res.ready)
+          return
         // The stream is gone, the run is not: what is stored reloads
         // and the tail reopens (on the overflow backoff after the
         // server's overflow frame, on the bounded backoff when it
         // closed for good).
         const again = async () => {
-          if (this.state.result !== res || res.runID !== runID || res.ready) return
+          if (this.state.result !== res || res.runID !== runID || res.ready)
+            return
           await this.loadExperiment(res)
           if (this.left(res) || res.runID !== runID || isReady(res)) return
-          if (res.state === "queued" || res.state === "accepted") this.openExperimentStream(res)
+          if (res.state === "queued" || res.state === "accepted")
+            this.openExperimentStream(res)
         }
         // A panel token that expired is not asked again: no live, quietly.
         if (why === "expired") return
@@ -2235,7 +2530,9 @@ export class PanelModel {
   ): Promise<{ transcript: Transcript | null } | null> {
     const runID = res.runID
     res.loading = true
-    let walk: EventWalk | null, transcript: Transcript | null, row: RunRow | null
+    let walk: EventWalk | null,
+      transcript: Transcript | null,
+      row: RunRow | null
     try {
       ;[walk, transcript, row] = await Promise.all([
         this.walkEvents(runID).catch(() => null),
@@ -2245,7 +2542,8 @@ export class PanelModel {
     } finally {
       res.loading = false
     }
-    if (this.disposed || this.state.result !== res || res.runID !== runID) return null
+    if (this.disposed || this.state.result !== res || res.runID !== runID)
+      return null
     if (walk && walk.events.length) restart(res, walk.events)
     // Frames the stream delivered meanwhile fold after the pages.
     const current = () => !this.left(res) && res.runID === runID && !res.ready
@@ -2255,7 +2553,11 @@ export class PanelModel {
       void this.catchUp(res, runID, current).catch(quiet)
     }
     if (row) res.row = row
-    res.folded = overlay(viewOf(res.feed), transcript, !!res.row && res.row.status !== "running")
+    res.folded = overlay(
+      viewOf(res.feed),
+      transcript,
+      !!res.row && res.row.status !== "running"
+    )
     res.stale = false
     this.emit()
     return { transcript }
@@ -2286,9 +2588,15 @@ export class PanelModel {
     // Studio UI's bound) — the final words, the diff and the approval
     // controls are taken from the settled run only.
     const row = res.row
-    const settled = !!row && row.status !== "running" && (row.status !== "succeeded" || res.folded.finished)
+    const settled =
+      !!row &&
+      row.status !== "running" &&
+      (row.status !== "succeeded" || res.folded.finished)
     if (!settled && attempt < SETTLE_READS - 1) {
-      this.after(1_000, () => void this.settleExperiment(res, attempt + 1).catch(quiet))
+      this.after(
+        1_000,
+        () => void this.settleExperiment(res, attempt + 1).catch(quiet)
+      )
       return
     }
     res.ready = true
@@ -2307,7 +2615,8 @@ export class PanelModel {
     if (!(this.state.meta?.capabilities.includes("diff") ?? false)) {
       // Not read: said, so a meta that reports diff later draws why the
       // compare is absent — never "reading…" forever.
-      res.stepDiffError = "the server did not report the diff capability when the run settled"
+      res.stepDiffError =
+        "the server did not report the diff capability when the run settled"
       this.emit()
       return
     }
@@ -2360,10 +2669,22 @@ export class PanelModel {
       })
       // A refresh that landed meanwhile may have set an equal cursor (a
       // new object): the page is still the one asked for.
-      if (seq !== this.loadSeq || this.disposed || !sameCursor(this.cursor, c)) return
+      if (seq !== this.loadSeq || this.disposed || !sameCursor(this.cursor, c))
+        return
       const runs: (RunRow | null)[] = Array.isArray(page.runs) ? page.runs : []
-      for (const r of runs) if (r && typeof r.id === "string" && !r.parent_run_id && this.inSession(r)) this.upsertRun(r, true)
-      this.setCursor(page.next_before != null ? { before: page.next_before, id: page.next_before_id ?? "" } : null)
+      for (const r of runs)
+        if (
+          r &&
+          typeof r.id === "string" &&
+          !r.parent_run_id &&
+          this.inSession(r)
+        )
+          this.upsertRun(r, true)
+      this.setCursor(
+        page.next_before != null
+          ? { before: page.next_before, id: page.next_before_id ?? "" }
+          : null
+      )
       s.paged = true
       s.turnsCapped = this.cursor != null
     } catch {
@@ -2442,7 +2763,11 @@ export class PanelModel {
 }
 
 /** newResult is an empty result pane under one source turn. */
-function newResult(sourceRunID: string, label: string, source: TurnWords): ExperimentResult {
+function newResult(
+  sourceRunID: string,
+  label: string,
+  source: TurnWords
+): ExperimentResult {
   const feed = newFold()
   return {
     commandID: "",

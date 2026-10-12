@@ -14,8 +14,20 @@ import { useEffect, useState } from "react"
 import { Link } from "@tanstack/react-router"
 
 import { ApiError, postCancel } from "@/lib/api"
-import { duration, elapsed, relativeTime, tokens as fmtTokens } from "@/lib/format"
-import { CANCEL_CONFIRM_MS, CANCEL_WAIT_MS, costFieldsOf, ended, stepText, tokensOf } from "@/lib/live-rows"
+import {
+  duration,
+  elapsed,
+  relativeTime,
+  tokens as fmtTokens,
+} from "@/lib/format"
+import {
+  CANCEL_CONFIRM_MS,
+  CANCEL_WAIT_MS,
+  costFieldsOf,
+  ended,
+  stepText,
+  tokensOf,
+} from "@/lib/live-rows"
 import type { LiveRowView } from "@/lib/live-rows"
 import { runLink, sessionLink } from "@/lib/links"
 import { notify } from "@/lib/notify"
@@ -72,7 +84,8 @@ function CancelCell({
         parked — decide instead
       </Link>
     )
-  if (run.status !== "running") return <span className="font-mono text-[11px] text-faint">—</span>
+  if (run.status !== "running")
+    return <span className="font-mono text-[11px] text-faint">—</span>
   if (!run.playground)
     return (
       <Button
@@ -88,7 +101,13 @@ function CancelCell({
     )
   if (cancelling || posting)
     return (
-      <Button variant="outline" size="xs" disabled aria-label={`cancelling… run ${run.id}`} data-cancel="cancelling">
+      <Button
+        variant="outline"
+        size="xs"
+        disabled
+        aria-label={`cancelling… run ${run.id}`}
+        data-cancel="cancelling"
+      >
         cancelling…
       </Button>
     )
@@ -115,7 +134,8 @@ function CancelCell({
           n,
           outcome: "refused",
           // The server's words, verbatim (S4.2's error.message).
-          message: e instanceof ApiError || e instanceof Error ? e.message : String(e),
+          message:
+            e instanceof ApiError || e instanceof Error ? e.message : String(e),
         })
       }
     )
@@ -125,9 +145,15 @@ function CancelCell({
       variant={armed ? "destructive" : "outline"}
       size="xs"
       onClick={press}
-      aria-label={armed ? `confirm cancel run ${run.id}` : `cancel run ${run.id}`}
+      aria-label={
+        armed ? `confirm cancel run ${run.id}` : `cancel run ${run.id}`
+      }
       title={
-        armed ? "click again to cancel this run" : stale ? CANCEL_AGAIN : "ask the runtime that started this run to stop it"
+        armed
+          ? "click again to cancel this run"
+          : stale
+            ? CANCEL_AGAIN
+            : "ask the runtime that started this run to stop it"
       }
       data-cancel={armed ? "armed" : "ready"}
     >
@@ -158,7 +184,9 @@ export function LiveTable({
 }) {
   const priced = useCostCapable()
   // A sent cancel, by run: when it was sent (Date.now()).
-  const [cancelling, setCancelling] = useState<Partial<Record<string, number>>>({})
+  const [cancelling, setCancelling] = useState<Partial<Record<string, number>>>(
+    {}
+  )
   const onCancelling = (id: string, on: boolean) =>
     setCancelling((cur) => {
       if (!on && cur[id] === undefined) return cur
@@ -201,22 +229,36 @@ export function LiveTable({
           <TableHead>run</TableHead>
           <TableHead>agent</TableHead>
           <TableHead className="w-28">status</TableHead>
-          <TableHead className="text-right" title="the current step (and the total once the run ended)">
+          <TableHead
+            className="text-right"
+            title="the current step (and the total once the run ended)"
+          >
             step
           </TableHead>
-          <TableHead className="text-right" title="input + output tokens so far">
+          <TableHead
+            className="text-right"
+            title="input + output tokens so far"
+          >
             tokens
           </TableHead>
           {priced ? (
-            <TableHead className="text-right" title="the run's own cost: unknown while running (usage arrives at run end)">
+            <TableHead
+              className="text-right"
+              title="the run's own cost: unknown while running (usage arrives at run end)"
+            >
               cost
             </TableHead>
           ) : null}
-          <TableHead className="text-right" title="time to first token of the last finished step">
+          <TableHead
+            className="text-right"
+            title="time to first token of the last finished step"
+          >
             TTFT
           </TableHead>
           <TableHead>started</TableHead>
-          <TableHead title="the conversation this run is a turn of">session</TableHead>
+          <TableHead title="the conversation this run is a turn of">
+            session
+          </TableHead>
           <TableHead>
             <span className="sr-only">actions</span>
           </TableHead>
@@ -246,7 +288,10 @@ export function LiveTable({
             >
               <TableCell className="max-w-56">
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <Link {...runLink(r.id)} className="truncate font-mono text-[13px] hover:text-thread-ink">
+                  <Link
+                    {...runLink(r.id)}
+                    className="truncate font-mono text-[13px] hover:text-thread-ink"
+                  >
                     {r.id}
                   </Link>
                   <DerivedChip row={r} />
@@ -264,7 +309,11 @@ export function LiveTable({
               <TableCell>
                 <StatusChip status={r.status} />
               </TableCell>
-              <TableCell className="text-right font-mono text-xs tabular-nums" title={step.title} data-cell="step">
+              <TableCell
+                className="text-right font-mono text-xs tabular-nums"
+                title={step.title}
+                data-cell="step"
+              >
                 {step.text}
               </TableCell>
               <TableCell
@@ -273,7 +322,9 @@ export function LiveTable({
                 title={
                   tok
                     ? `${tok.input.toLocaleString()} in · ${tok.output.toLocaleString()} out${
-                        tok.partial ? " · counted from the steps this page saw (it joined the run mid-way)" : ""
+                        tok.partial
+                          ? " · counted from the steps this page saw (it joined the run mid-way)"
+                          : ""
                       }`
                     : "no step has reported usage yet"
                 }
@@ -294,17 +345,30 @@ export function LiveTable({
               <TableCell
                 className="text-right font-mono text-xs tabular-nums"
                 data-cell="ttft"
-                title={ttft !== null ? "the last finished step's time to first token" : "no step_finish with a TTFT seen yet"}
+                title={
+                  ttft !== null
+                    ? "the last finished step's time to first token"
+                    : "no step_finish with a TTFT seen yet"
+                }
               >
                 {ttft !== null ? `${ttft.toLocaleString()} ms` : "—"}
               </TableCell>
-              <TableCell className="font-mono text-[11px] whitespace-nowrap text-muted-foreground" title={r.started}>
+              <TableCell
+                className="font-mono text-[11px] whitespace-nowrap text-muted-foreground"
+                title={r.started}
+              >
                 {relativeTime(r.started, now)} ·{" "}
-                {r.status === "running" ? elapsed(r.started, now) : duration(r.started, r.finished)}
+                {r.status === "running"
+                  ? elapsed(r.started, now)
+                  : duration(r.started, r.finished)}
               </TableCell>
               <TableCell className="max-w-40 truncate font-mono text-[11px]">
                 {r.session_id ? (
-                  <Link {...sessionLink(r.session_id)} className="hover:text-thread-ink" title={r.session_id}>
+                  <Link
+                    {...sessionLink(r.session_id)}
+                    className="hover:text-thread-ink"
+                    title={r.session_id}
+                  >
                     {r.public_id || r.session_id}
                   </Link>
                 ) : r.public_id ? (
@@ -326,7 +390,12 @@ export function LiveTable({
                     peek
                   </Button>
                   {canCancel ? (
-                    <CancelCell run={r} cancelling={waiting(r.id)} stale={staleCancel(r.id)} onCancelling={onCancelling} />
+                    <CancelCell
+                      run={r}
+                      cancelling={waiting(r.id)}
+                      stale={staleCancel(r.id)}
+                      onCancelling={onCancelling}
+                    />
                   ) : null}
                 </div>
               </TableCell>

@@ -22,7 +22,14 @@
 // base and total count positioned events only.
 import { useEffect, useRef, useState } from "react"
 
-import { ApiError, fetchEventsPage, metaQuery, postApproval, runQuery, studioToken } from "@/lib/api"
+import {
+  ApiError,
+  fetchEventsPage,
+  metaQuery,
+  postApproval,
+  runQuery,
+  studioToken,
+} from "@/lib/api"
 import { canReplay } from "@/lib/replay"
 import type { EventsPage, RunRow, ToolCallPart, WireEvent } from "@/lib/api"
 import { dismissNotice, notify } from "@/lib/notify"
@@ -165,7 +172,13 @@ async function noticeParked(
         if (canReplay(meta.capabilities, studioToken()) && row.playground)
           // The command it becomes: the toast follows it (a rejection
           // is said, never silent).
-          verb = async () => (await postApproval(runID, { call_id: callID, decision: "approve" })).command_id
+          verb = async () =>
+            (
+              await postApproval(runID, {
+                call_id: callID,
+                decision: "approve",
+              })
+            ).command_id
       } catch {
         // unknown scope: the notice offers "open" only
       }
@@ -187,7 +200,8 @@ export function storyRunID(
   run: { data?: unknown; isError: boolean; error: unknown }
 ): string {
   if (run.data === undefined) return ""
-  if (run.isError && run.error instanceof ApiError && run.error.status === 404) return ""
+  if (run.isError && run.error instanceof ApiError && run.error.status === 404)
+    return ""
   return id
 }
 
@@ -271,7 +285,8 @@ export function useRunEvents(
       const folded = s.feed.result()
       if (!loading && !error) {
         const pending = folded.pending
-        if (parkArmed === null) parkArmed = pending.length === 0 || trackedRef.current
+        if (parkArmed === null)
+          parkArmed = pending.length === 0 || trackedRef.current
         if (parkArmed && pending.length > 0) {
           parkArmed = false
           parkedRun.current = id
@@ -307,7 +322,10 @@ export function useRunEvents(
     let pubTimer: ReturnType<typeof setTimeout> | null = null
     const publishLive = () => {
       if (pubTimer !== null) return
-      const wait = Math.min(LIVE_PUBLISH_MAX_MS, 16 + walk.current!.events.length / 20)
+      const wait = Math.min(
+        LIVE_PUBLISH_MAX_MS,
+        16 + walk.current!.events.length / 20
+      )
       pubTimer = setTimeout(() => {
         pubTimer = null
         if (!isCancelled()) publish(false)
@@ -410,7 +428,11 @@ export function useRunEvents(
       let retry = false
       while (held.length > 0) {
         const { rec, reads: at } = held[0]
-        if (rec.kind === "event" && rec.pos > walk.current!.pos + 1 && reads <= at) {
+        if (
+          rec.kind === "event" &&
+          rec.pos > walk.current!.pos + 1 &&
+          reads <= at
+        ) {
           retry = true
           break
         }

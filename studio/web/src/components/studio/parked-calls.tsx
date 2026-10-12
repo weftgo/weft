@@ -18,11 +18,33 @@ import { useEffect, useRef, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
-import { ApiError, fetchCommand, metaQuery, postApproval, postSteer, runtimesQuery, sessionQuery, studioToken } from "@/lib/api"
+import { useRuntimesNeeded } from "@/hooks/use-notices"
+import {
+  ApiError,
+  fetchCommand,
+  metaQuery,
+  postApproval,
+  postSteer,
+  runtimesQuery,
+  sessionQuery,
+  studioToken,
+} from "@/lib/api"
 import type { CommandStatus, RunDoc, SessionDoc } from "@/lib/api"
-import { appTurn, appVerbWords, nextTurn, parkedKind, POOL_CHILD, POOL_CHILD_TURN, poolParent, refusalLine, refusalWords, SUBAGENT_CALL } from "@/lib/honesty"
+import {
+  appTurn,
+  appVerbWords,
+  nextTurn,
+  parkedKind,
+  POOL_CHILD,
+  POOL_CHILD_TURN,
+  poolParent,
+  refusalLine,
+  refusalWords,
+  SUBAGENT_CALL,
+} from "@/lib/honesty"
 import type { AppGateFacts } from "@/lib/honesty"
 import { runLink, sessionLink } from "@/lib/links"
+import { heldError } from "@/lib/query"
 import { canReplay, tokenScopeOf } from "@/lib/replay"
 
 interface Call {
@@ -62,17 +84,34 @@ function useAppVerbs() {
     }
   }, [])
   const set = (key: string, v: Verb) => {
-    if (alive.current) setVerbs((cur) => ({ ...cur, [key]: { decision: (cur[key] as Verb | undefined)?.decision, ...v } }))
+    if (alive.current)
+      setVerbs((cur) => ({
+        ...cur,
+        [key]: { decision: (cur[key] as Verb | undefined)?.decision, ...v },
+      }))
   }
-  const send = async (key: string, post: () => Promise<{ command_id?: string }>, decision?: string) => {
+  const send = async (
+    key: string,
+    post: () => Promise<{ command_id?: string }>,
+    decision?: string
+  ) => {
     set(key, { state: "sending", decision })
     let out: { command_id?: string }
     try {
       out = await post()
     } catch (e) {
-      const fix = e instanceof ApiError ? (e.doc as { fix?: unknown } | undefined)?.fix : undefined
-      const rt = qc.getQueryState(runtimesQuery().queryKey)?.dataUpdateCount ?? 0
-      set(key, { state: "refused", error: e instanceof Error ? e.message : String(e), ...(typeof fix === "string" ? { fix } : {}), rt })
+      const fix =
+        e instanceof ApiError
+          ? (e.doc as { fix?: unknown } | undefined)?.fix
+          : undefined
+      const rt =
+        qc.getQueryState(runtimesQuery().queryKey)?.dataUpdateCount ?? 0
+      set(key, {
+        state: "refused",
+        error: e instanceof Error ? e.message : String(e),
+        ...(typeof fix === "string" ? { fix } : {}),
+        rt,
+      })
       void qc.invalidateQueries({ queryKey: runtimesQuery().queryKey })
       return
     }
@@ -87,9 +126,15 @@ function useAppVerbs() {
       try {
         st = await fetchCommand(id)
       } catch (e) {
-        const gone = e instanceof ApiError && [401, 403, 404, 410].includes(e.status)
+        const gone =
+          e instanceof ApiError && [401, 403, 404, 410].includes(e.status)
         if (gone || ++fails >= 8) {
-          set(key, { state: "lost", error: gone ? e.message : "Studio stopped answering — the command's state is unknown" })
+          set(key, {
+            state: "lost",
+            error: gone
+              ? e.message
+              : "Studio stopped answering — the command's state is unknown",
+          })
           return
         }
         await new Promise((r) => setTimeout(r, 700))
@@ -97,7 +142,10 @@ function useAppVerbs() {
       }
       fails = 0
       set(key, {
-        state: st.state === "finished" && st.status === "failed" ? "failed" : st.state,
+        state:
+          st.state === "finished" && st.status === "failed"
+            ? "failed"
+            : st.state,
         ...(st.error ? { error: st.error } : {}),
         ...(st.run_id ? { run: st.run_id } : {}),
       })
@@ -106,7 +154,12 @@ function useAppVerbs() {
         void qc.invalidateQueries({ queryKey: ["sessions"] })
         void qc.invalidateQueries({ queryKey: ["session"] })
       }
-      if (st.state === "finished" || st.state === "rejected" || st.state === "lost") return
+      if (
+        st.state === "finished" ||
+        st.state === "rejected" ||
+        st.state === "lost"
+      )
+        return
       await new Promise((r) => setTimeout(r, 700))
     }
   }
@@ -115,16 +168,31 @@ function useAppVerbs() {
 
 /** The verb's line under its call (lib/honesty.ts's appVerbWords): a
  * decision reads "decided", a steer "steered". */
-function VerbLine({ v, runID, verb }: { v: Verb | undefined; runID: string; verb?: "decide" | "steer" }) {
+function VerbLine({
+  v,
+  runID,
+  verb,
+}: {
+  v: Verb | undefined
+  runID: string
+  verb?: "decide" | "steer"
+}) {
   if (!v) return null
   const w = appVerbWords(v, runID, verb)
   return (
-    <div className={w.bad ? "text-ev-error" : "text-faint"} data-app-verb={v.state}>
+    <div
+      className={w.bad ? "text-ev-error" : "text-faint"}
+      data-app-verb={v.state}
+    >
       {w.text}
       {w.resumed ? (
         <>
           {" · "}
-          <Link {...runLink(w.resumed)} className="text-thread-ink hover:underline" data-resumed={w.resumed}>
+          <Link
+            {...runLink(w.resumed)}
+            className="text-thread-ink hover:underline"
+            data-resumed={w.resumed}
+          >
             resumed as {w.resumed}
           </Link>
         </>
@@ -135,14 +203,30 @@ function VerbLine({ v, runID, verb }: { v: Verb | undefined; runID: string; verb
 
 /** The verbs on one parked call: continue, skip (the text its reason),
  * resolve (the text its result). */
-function DecideRow({ call, onDecide }: { call: Call; onDecide: (d: "approve" | "deny" | "resolve", text: string) => void }) {
+function DecideRow({
+  call,
+  onDecide,
+}: {
+  call: Call
+  onDecide: (d: "approve" | "deny" | "resolve", text: string) => void
+}) {
   const [text, setText] = useState("")
   return (
     <div className="mt-1 flex flex-wrap items-center gap-2 font-sans">
-      <button type="button" className="text-faint hover:underline" title="Approve: the handler runs for real" onClick={() => onDecide("approve", "")}>
+      <button
+        type="button"
+        className="text-faint hover:underline"
+        title="Approve: the handler runs for real"
+        onClick={() => onDecide("approve", "")}
+      >
         continue
       </button>
-      <button type="button" className="text-faint hover:underline" title="Deny: the model sees a denied result (the text is the reason)" onClick={() => onDecide("deny", text)}>
+      <button
+        type="button"
+        className="text-faint hover:underline"
+        title="Deny: the model sees a denied result (the text is the reason)"
+        onClick={() => onDecide("deny", text)}
+      >
         skip
       </button>
       <button
@@ -169,8 +253,9 @@ function DecideRow({ call, onDecide }: { call: Call; onDecide: (d: "approve" | "
  * or running: another surface may resume it. Not once the next turn is
  * known (resumed is final) or the session read was refused for good (a
  * 4xx: the same answer every time). The runtimes need no interval here:
- * the shell's use-notices.ts polls the same query key every 5 s on
- * every page, under the same canReplay gate. */
+ * the block holds useRuntimesNeeded while its gate may still change, and
+ * the shell's use-notices.ts then polls the same query key every 5 s,
+ * under the same canReplay gate. */
 export const APP_GATE_POLL_MS = 5_000
 
 /** The app's turn and what the page may do on it: the gate reads the
@@ -188,56 +273,126 @@ function useAppTurn(doc: RunDoc) {
   // A subagent's or a pool's child run is decided on its parent, a
   // nested Generate by the app: no gate (lib/honesty.ts's table).
   const app = appTurn(doc)
-  const poll = doc.pending > 0 || doc.status === "running" ? APP_GATE_POLL_MS : false
+  const poll =
+    doc.pending > 0 || doc.status === "running" ? APP_GATE_POLL_MS : false
   const settled = (data: SessionDoc | undefined, err: Error | null) =>
-    !!nextTurn(doc, data?.runs) || (err instanceof ApiError && [401, 403, 404, 410].includes(err.status))
-  const sess = useQuery({ ...sessionQuery(doc.session_id), enabled: app, refetchInterval: (q) => (settled(q.state.data, q.state.error) ? false : poll) })
+    !!nextTurn(doc, data?.runs) ||
+    (err instanceof ApiError && [401, 403, 404, 410].includes(err.status))
+  const sess = useQuery({
+    ...sessionQuery(doc.session_id),
+    enabled: app,
+    refetchInterval: (q) =>
+      settled(q.state.data, q.state.error) ? false : poll,
+  })
   const rts = useQuery({ ...runtimesQuery(), enabled: app && mayAct })
   const next = nextTurn(doc, sess.data?.runs)
+  // A runtime connecting (or the gate re-read after a 403) turns the
+  // verbs on: the shell reads the runtimes every 5 s while this turn is
+  // parked or running and not yet resumed.
+  useRuntimesNeeded(app && mayAct && poll !== false && !next)
   const runtimes = rts.data?.runtimes ?? null
   const kind = parkedKind(doc, runtimes, next)
   // The runtimes reads applied so far (a refusal's rt is compared to it);
   // dataUpdatedAt is read so a read that applied re-renders the page.
-  const rtN = rts.dataUpdatedAt ? (qc.getQueryState(runtimesQuery().queryKey)?.dataUpdateCount ?? 0) : 0
+  const rtN = rts.dataUpdatedAt
+    ? (qc.getQueryState(runtimesQuery().queryKey)?.dataUpdateCount ?? 0)
+    : 0
   const sessErr = app && sess.isError ? sess.error.message : ""
-  // A failed meta read again by a new observer goes back to pending with
-  // no error: the failure it last answered is held — never "checking",
-  // never a verdict on a capability list that never came.
-  const [lastMetaErr, setLastMetaErr] = useState("")
-  if (meta.error && meta.error.message !== lastMetaErr) setLastMetaErr(meta.error.message)
-  const metaErr = !app ? "" : meta.isError ? meta.error.message : meta.isPending && meta.errorUpdateCount > 0 ? lastMetaErr : ""
-  const checking = app && ((meta.isPending && !metaErr) || (sess.isPending && !sessErr) || (mayAct && rts.isPending))
+  // A failed meta read again (a refetch, its retry, a block mounted
+  // anew) goes back to pending with no error: the failure it last
+  // answered is held in the cache until meta answers (lib/query.ts's
+  // heldError) — never "checking" between two failures, never a
+  // verdict on a capability list that never came.
+  const metaErr = !app
+    ? ""
+    : meta.isError
+      ? meta.error.message
+      : meta.isPending
+        ? heldError(qc, metaQuery().queryKey)
+        : ""
+  const checking =
+    app &&
+    ((meta.isPending && !metaErr) ||
+      (sess.isPending && !sessErr) ||
+      (mayAct && rts.isPending))
   const rtErr = app && mayAct && rts.isError ? rts.error.message : ""
   const facts: AppGateFacts = meta.data
-    ? { capabilities: caps, capabilities_off: meta.data.capabilities_off, sessionError: sessErr }
+    ? {
+        capabilities: caps,
+        capabilities_off: meta.data.capabilities_off,
+        sessionError: sessErr,
+      }
     : { metaError: metaErr, sessionError: sessErr }
   // A failed read (meta, the session, the runtimes) is no verdict: no
   // verbs, its error said.
   const unread = app && !!(metaErr || sessErr || (mayAct && rtErr))
-  return { kind, rtN, next, runtimes, mayAct, checking, unread, rtErr, facts, steer: caps.includes("steer") }
+  return {
+    kind,
+    rtN,
+    next,
+    runtimes,
+    mayAct,
+    checking,
+    unread,
+    rtErr,
+    facts,
+    steer: caps.includes("steer"),
+  }
 }
 
-export function ParkedCalls({ doc, pending }: { doc: RunDoc; pending: Call[] }) {
-  const { kind, rtN, next, runtimes, mayAct, checking, unread: failed, rtErr, facts } = useAppTurn(doc)
+export function ParkedCalls({
+  doc,
+  pending,
+}: {
+  doc: RunDoc
+  pending: Call[]
+}) {
+  const {
+    kind,
+    rtN,
+    next,
+    runtimes,
+    mayAct,
+    checking,
+    unread: failed,
+    rtErr,
+    facts,
+  } = useAppTurn(doc)
   const { verbs, send } = useAppVerbs()
   // A 403 is live until a runtimes read started after it has applied
   // and the gate says decide — the panel's rule, strict: a failed or an
   // in-flight read keeps it.
-  const live = (v: Verb | undefined) => !(kind === "decide" && v?.state === "refused" && (v.rt ?? 0) < rtN)
-  const refused = pending.map((c) => verbs[c.id] as Verb | undefined).find((v) => v?.state === "refused" && v.fix && live(v))
+  const live = (v: Verb | undefined) =>
+    !(kind === "decide" && v?.state === "refused" && (v.rt ?? 0) < rtN)
+  const refused = pending
+    .map((c) => verbs[c.id] as Verb | undefined)
+    .find((v) => v?.state === "refused" && v.fix && live(v))
   const read = tokenScopeOf(studioToken()) === "read"
-  const unread = failed && !read && !refused && (kind === "decide" || kind === "read-only")
-  const deciding = kind === "decide" && mayAct && !refused && !checking && !unread
-  const line = refusalLine(refusalWords(kind, doc, runtimes, read, refused, read ? "" : rtErr, facts))
+  const unread =
+    failed && !read && !refused && (kind === "decide" || kind === "read-only")
+  const deciding =
+    kind === "decide" && mayAct && !refused && !checking && !unread
+  const line = refusalLine(
+    refusalWords(kind, doc, runtimes, read, refused, read ? "" : rtErr, facts)
+  )
   const shown = checking && !refused ? "checking" : unread ? "unread" : kind
   return (
-    <div className="rounded-lg border border-ev-error/30 px-4 py-2 text-xs" data-parked={shown}>
-      <span className="eyebrow">{shown === "resumed" ? "decided" : "pending approval"}</span>
+    <div
+      className="rounded-lg border border-ev-error/30 px-4 py-2 text-xs"
+      data-parked={shown}
+    >
+      <span className="eyebrow">
+        {shown === "resumed" ? "decided" : "pending approval"}
+      </span>
       <ul className="mt-1 space-y-0.5">
         {pending.map((p) => (
           <li key={p.id} className="font-mono" data-pending-call={p.id}>
-            {p.name}({p.args == null ? "" : JSON.stringify(p.args)}) — {shown === "resumed" ? "decided" : "awaiting a decision"}
-            {shown === "experiment" || shown === "resumed" || shown === "checking" || shown === "unread" ? null : deciding ? (
+            {p.name}({p.args == null ? "" : JSON.stringify(p.args)}) —{" "}
+            {shown === "resumed" ? "decided" : "awaiting a decision"}
+            {shown === "experiment" ||
+            shown === "resumed" ||
+            shown === "checking" ||
+            shown === "unread" ? null : deciding ? (
               <DecideRow
                 call={p}
                 onDecide={(decision, text) =>
@@ -247,7 +402,9 @@ export function ParkedCalls({ doc, pending }: { doc: RunDoc; pending: Call[] }) 
                       postApproval(doc.id, {
                         call_id: p.id,
                         decision,
-                        ...(decision === "deny" && text ? { reason: text } : {}),
+                        ...(decision === "deny" && text
+                          ? { reason: text }
+                          : {}),
                         ...(decision === "resolve" ? { content: text } : {}),
                       }),
                     decision
@@ -257,21 +414,34 @@ export function ParkedCalls({ doc, pending }: { doc: RunDoc; pending: Call[] }) 
             ) : (
               <div className="mt-1 flex gap-2 font-sans">
                 {["continue", "skip", "resolve…"].map((v) => (
-                  <button key={v} type="button" disabled title={line} className="text-faint opacity-50" data-refused="app-owned">
+                  <button
+                    key={v}
+                    type="button"
+                    disabled
+                    title={line}
+                    className="text-faint opacity-50"
+                    data-refused="app-owned"
+                  >
                     {v}
                     <span className="sr-only"> — {line}</span>
                   </button>
                 ))}
               </div>
             )}
-            {deciding && live(verbs[p.id]) ? <VerbLine v={verbs[p.id]} runID={doc.id} verb="decide" /> : null}
+            {deciding && live(verbs[p.id]) ? (
+              <VerbLine v={verbs[p.id]} runID={doc.id} verb="decide" />
+            ) : null}
           </li>
         ))}
       </ul>
       {shown === "resumed" && next ? (
         <p className="mt-1 text-faint" data-app-owned="resumed">
           {"decided — "}
-          <Link {...runLink(next)} className="text-thread-ink hover:underline" data-resumed={next}>
+          <Link
+            {...runLink(next)}
+            className="text-thread-ink hover:underline"
+            data-resumed={next}
+          >
             resumed as {next}
           </Link>
         </p>
@@ -283,7 +453,11 @@ export function ParkedCalls({ doc, pending }: { doc: RunDoc; pending: Call[] }) 
         // lib/honesty.ts's words, the parent id a link to its turn.
         <p className="mt-1 text-status-int" data-app-owned="child">
           {`${SUBAGENT_CALL} `}
-          <Link {...runLink(doc.parent_run_id)} className="text-thread-ink hover:underline" data-parent-turn={doc.parent_run_id}>
+          <Link
+            {...runLink(doc.parent_run_id)}
+            className="text-thread-ink hover:underline"
+            data-parent-turn={doc.parent_run_id}
+          >
             {doc.parent_run_id}
           </Link>
         </p>
@@ -292,20 +466,37 @@ export function ParkedCalls({ doc, pending }: { doc: RunDoc; pending: Call[] }) 
         // (weft.session.parent); the delegating turn too when known.
         <p className="mt-1 text-status-int" data-app-owned="pool-child">
           {`${POOL_CHILD} `}
-          <Link {...sessionLink(poolParent(doc))} className="text-thread-ink hover:underline" data-parent-session={poolParent(doc)}>
+          <Link
+            {...sessionLink(poolParent(doc))}
+            className="text-thread-ink hover:underline"
+            data-parent-session={poolParent(doc)}
+          >
             {poolParent(doc)}
           </Link>
           {doc.parent_run_id ? (
             <>
               {` ${POOL_CHILD_TURN} `}
-              <Link {...runLink(doc.parent_run_id)} className="text-thread-ink hover:underline" data-parent-turn={doc.parent_run_id}>
+              <Link
+                {...runLink(doc.parent_run_id)}
+                className="text-thread-ink hover:underline"
+                data-parent-turn={doc.parent_run_id}
+              >
                 {doc.parent_run_id}
               </Link>
             </>
           ) : null}
         </p>
       ) : shown === "experiment" || deciding ? null : (
-        <p className="mt-1 text-status-int" data-app-owned={shown === "unread" ? "unread" : kind === "decide" ? "read-only" : kind}>
+        <p
+          className="mt-1 text-status-int"
+          data-app-owned={
+            shown === "unread"
+              ? "unread"
+              : kind === "decide"
+                ? "read-only"
+                : kind
+          }
+        >
           {line}
         </p>
       )}
@@ -319,7 +510,15 @@ export function AppSteer({ doc }: { doc: RunDoc }) {
   const { kind, mayAct, steer, checking, unread } = useAppTurn(doc)
   const { verbs, send } = useAppVerbs()
   const [text, setText] = useState("")
-  if (kind !== "decide" || checking || unread || !mayAct || !steer || doc.status !== "running") return null
+  if (
+    kind !== "decide" ||
+    checking ||
+    unread ||
+    !mayAct ||
+    !steer ||
+    doc.status !== "running"
+  )
+    return null
   return (
     <form
       className="flex flex-wrap items-center gap-2 rounded-lg border px-4 py-2 text-xs"

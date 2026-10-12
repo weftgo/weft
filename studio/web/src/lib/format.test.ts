@@ -91,7 +91,9 @@ describe("formatting edges", () => {
     expect(tokens(1_234_567)).toBe("1.2M")
     expect(tokens(999_999)).toBe("1.0M") // was "1000.0k"
     expect(
-      usageSummary({} as unknown as { input_tokens: number; output_tokens: number })
+      usageSummary(
+        {} as unknown as { input_tokens: number; output_tokens: number }
+      )
     ).toBe("0 in / 0 out")
   })
 })

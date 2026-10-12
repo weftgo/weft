@@ -24,7 +24,9 @@ export function isSessionMarker(c: RunCompaction): boolean {
 
 /** The run's compactions as the document gave them; [] for a document
  * without the field (a Studio older than A9.2). */
-export function compactionsOf(doc: { compactions?: RunCompaction[] } | null | undefined): RunCompaction[] {
+export function compactionsOf(
+  doc: { compactions?: RunCompaction[] } | null | undefined
+): RunCompaction[] {
   return Array.isArray(doc?.compactions) ? doc.compactions : []
 }
 
@@ -44,7 +46,8 @@ export function compactionLine(c: RunCompaction): string {
         : ""
     return `${plural(c.replaced, "message")} compacted into ${c.entries}${toks}`
   }
-  if (c.replaced === 0) return `${plural(c.entries, "message")} inserted by PrepareStep`
+  if (c.replaced === 0)
+    return `${plural(c.entries, "message")} inserted by PrepareStep`
   return `${plural(c.replaced, "message")} rewritten into ${c.entries} by PrepareStep`
 }
 
@@ -86,16 +89,28 @@ export function originalOf(
   const from = c.from_seq ?? -1
   const to = c.to_seq ?? -1
   if (index < 0 || from < 0 || to < from)
-    return { gap: "the view names no usable range: its replaced messages cannot be placed" }
-  const views = new Set(all.filter((v) => !isSessionMarker(v) && v.index != null).map((v) => v.index as number))
+    return {
+      gap: "the view names no usable range: its replaced messages cannot be placed",
+    }
+  const views = new Set(
+    all
+      .filter((v) => !isSessionMarker(v) && v.index != null)
+      .map((v) => v.index as number)
+  )
   // The batches as the wire may hold them: a null entry is no record.
-  const batches = (Array.isArray(transcript.batches) ? transcript.batches : []) as (Transcript["batches"][number] | null)[]
+  const batches = (
+    Array.isArray(transcript.batches) ? transcript.batches : []
+  ) as (Transcript["batches"][number] | null)[]
   const growth = batches
-    .filter((b): b is Transcript["batches"][number] => b !== null && typeof b.index === "number" && b.index < index)
+    .filter(
+      (b): b is Transcript["batches"][number] =>
+        b !== null && typeof b.index === "number" && b.index < index
+    )
     .sort((a, b) => a.index - b.index)
   const held = new Set(growth.map((b) => b.index))
   const missing: number[] = []
-  for (let i = 0; i < index; i++) if (!held.has(i) && !views.has(i)) missing.push(i)
+  for (let i = 0; i < index; i++)
+    if (!held.has(i) && !views.has(i)) missing.push(i)
   if (missing.length)
     return {
       gap: `messages record${missing.length === 1 ? "" : "s"} ${missing.slice(0, 6).join(", ")}${missing.length > 6 ? ", …" : ""} before the view ${missing.length === 1 ? "is" : "are"} missing: the replaced range cannot be placed`,
@@ -108,7 +123,9 @@ export function originalOf(
   const seq: Message[] = []
   for (const b of growth) seq.push(...b.messages)
   if (to > seq.length)
-    return { gap: `the view replaces messages ${from}–${to - 1}, but the transcript holds ${seq.length} before it` }
+    return {
+      gap: `the view replaces messages ${from}–${to - 1}, but the transcript holds ${seq.length} before it`,
+    }
   return { messages: seq.slice(from, to), from, to }
 }
 
@@ -142,7 +159,13 @@ export function messageLine(m: Message, max = 160): string {
 
 /** What a view's replacement reads as on the page: the count, and
  * where its bodies are (the page never holds them). */
-export function replacementNote(c: RunCompaction, requestCount?: number): string {
-  const inAll = requestCount != null ? ` — the step's request carried ${plural(requestCount, "message")} in all` : ""
+export function replacementNote(
+  c: RunCompaction,
+  requestCount?: number
+): string {
+  const inAll =
+    requestCount != null
+      ? ` — the step's request carried ${plural(requestCount, "message")} in all`
+      : ""
   return `in their place, ${plural(c.entries, "message")}${inAll}; the view's body stays in its record (export the run: compactions[].messages)`
 }

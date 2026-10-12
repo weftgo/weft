@@ -10,7 +10,11 @@ import { studioPlaygroundLink, WeftDevtools } from "./element"
 import { buildRunBody, experimentLabel, pickRuntime } from "./playground"
 import type { ExperimentDraft } from "./playground"
 import { idle } from "./testkit"
-import { answerLiveGrant, checkLiveURL, resetGrants } from "../test/fake-live-grant"
+import {
+  answerLiveGrant,
+  checkLiveURL,
+  resetGrants,
+} from "../test/fake-live-grant"
 
 const T0 = "2026-10-01T09:00:00Z"
 
@@ -49,12 +53,24 @@ function runRow(over: Partial<RunRow>): RunRow {
 
 const TRANSCRIPT = {
   batches: [
-    { index: 0, step: 0, messages: [{ role: "user", content: [{ type: "text", text: "where is my order #4411?" }] }] },
+    {
+      index: 0,
+      step: 0,
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "where is my order #4411?" }],
+        },
+      ],
+    },
     {
       index: 1,
       step: 0,
       messages: [
-        { role: "assistant", content: [{ type: "text", text: "Your order shipped yesterday." }] },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "Your order shipped yesterday." }],
+        },
       ],
     },
   ],
@@ -62,10 +78,42 @@ const TRANSCRIPT = {
 
 const EVENTS = {
   events: [
-    { pos: 0, time: T0, event: { type: "run_start", id: "s_01-t1", model: { provider: "wefttest", name: "script" }, agent: "acme-support" } },
-    { pos: 1, time: T0, event: { type: "step_start", run_id: "s_01-t1", index: 0 } },
-    { pos: 2, time: T0, event: { type: "step_finish", run_id: "s_01-t1", index: 0, reason: "stop", usage: { input_tokens: 10, output_tokens: 4 } } },
-    { pos: 3, time: T0, event: { type: "run_finish", run_id: "s_01-t1", usage: { input_tokens: 10, output_tokens: 4 }, steps: 1 } },
+    {
+      pos: 0,
+      time: T0,
+      event: {
+        type: "run_start",
+        id: "s_01-t1",
+        model: { provider: "wefttest", name: "script" },
+        agent: "acme-support",
+      },
+    },
+    {
+      pos: 1,
+      time: T0,
+      event: { type: "step_start", run_id: "s_01-t1", index: 0 },
+    },
+    {
+      pos: 2,
+      time: T0,
+      event: {
+        type: "step_finish",
+        run_id: "s_01-t1",
+        index: 0,
+        reason: "stop",
+        usage: { input_tokens: 10, output_tokens: 4 },
+      },
+    },
+    {
+      pos: 3,
+      time: T0,
+      event: {
+        type: "run_finish",
+        run_id: "s_01-t1",
+        usage: { input_tokens: 10, output_tokens: 4 },
+        steps: 1,
+      },
+    },
   ],
   next_after: null,
   done: true,
@@ -120,49 +168,71 @@ const metaPlayground = {
 }
 
 /** The fake Studio: keyed on the decoded path like panel.test's. */
-function fakeStudio(routes: Record<string, unknown>, meta: unknown = metaPlayground) {
+function fakeStudio(
+  routes: Record<string, unknown>,
+  meta: unknown = metaPlayground
+) {
   const posts: { path: string; body: unknown }[] = []
   const puts: { path: string; body: unknown }[] = []
-  const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = new URL(String(input), "http://studio.test/studio/api/")
-    const path = decodeURIComponent(url.pathname).replace(/^.*\/api\//, "") + (url.search || "")
-    if (init?.method === "POST" && path === "live-grant") {
-      // The live grant (plan C5): the shared fake mints the sig the
-      // stream must carry.
-      const auth = new Headers(init.headers).get("Authorization") ?? ""
-      return answerLiveGrant(url, auth.replace(/^Bearer /, ""), init.body ? String(init.body) : undefined)
-    }
-    if (init?.method === "POST") {
-      posts.push({ path, body: JSON.parse(String(init.body)) })
-      const hit = routes["POST " + path]
+  const fetchMock = vi.fn(
+    async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input), "http://studio.test/studio/api/")
+      const path =
+        decodeURIComponent(url.pathname).replace(/^.*\/api\//, "") +
+        (url.search || "")
+      if (init?.method === "POST" && path === "live-grant") {
+        // The live grant (plan C5): the shared fake mints the sig the
+        // stream must carry.
+        const auth = new Headers(init.headers).get("Authorization") ?? ""
+        return answerLiveGrant(
+          url,
+          auth.replace(/^Bearer /, ""),
+          init.body ? String(init.body) : undefined
+        )
+      }
+      if (init?.method === "POST") {
+        posts.push({ path, body: JSON.parse(String(init.body)) })
+        const hit = routes["POST " + path]
+        if (hit) return json(hit)
+        return new Response(
+          JSON.stringify({ error: { code: "not_found", message: path } }),
+          {
+            status: 404,
+            headers: { "content-type": "application/json" },
+          }
+        )
+      }
+      if (init?.method === "PUT") {
+        puts.push({ path, body: JSON.parse(String(init.body)) })
+        const hit = routes["PUT " + path]
+        if (hit) return json(hit)
+        return new Response(
+          JSON.stringify({ error: { code: "not_found", message: path } }),
+          {
+            status: 404,
+            headers: { "content-type": "application/json" },
+          }
+        )
+      }
+      if (url.pathname.endsWith("/meta")) return json(meta)
+      const hit = routes[path]
       if (hit) return json(hit)
-      return new Response(JSON.stringify({ error: { code: "not_found", message: path } }), {
-        status: 404,
-        headers: { "content-type": "application/json" },
-      })
+      return new Response(
+        JSON.stringify({ error: { code: "not_found", message: path } }),
+        {
+          status: 404,
+          headers: { "content-type": "application/json" },
+        }
+      )
     }
-    if (init?.method === "PUT") {
-      puts.push({ path, body: JSON.parse(String(init.body)) })
-      const hit = routes["PUT " + path]
-      if (hit) return json(hit)
-      return new Response(JSON.stringify({ error: { code: "not_found", message: path } }), {
-        status: 404,
-        headers: { "content-type": "application/json" },
-      })
-    }
-    if (url.pathname.endsWith("/meta")) return json(meta)
-    const hit = routes[path]
-    if (hit) return json(hit)
-    return new Response(JSON.stringify({ error: { code: "not_found", message: path } }), {
-      status: 404,
-      headers: { "content-type": "application/json" },
-    })
-  })
+  )
   return { fetchMock, posts, puts }
 }
 
 function json(v: unknown): Response {
-  return new Response(JSON.stringify(v), { headers: { "content-type": "application/json" } })
+  return new Response(JSON.stringify(v), {
+    headers: { "content-type": "application/json" },
+  })
 }
 
 /** A recording EventSource stub: the test emits the frames. */
@@ -174,7 +244,10 @@ class FakeEventSource {
   readyState = 0
   url: string
   onerror: ((e: unknown) => void) | null = null
-  private listeners = new Map<string, Set<(e: { data: string; lastEventId?: string }) => void>>()
+  private listeners = new Map<
+    string,
+    Set<(e: { data: string; lastEventId?: string }) => void>
+  >()
   constructor(url: string) {
     this.url = url
     FakeEventSource.instances.push(this)
@@ -186,12 +259,17 @@ class FakeEventSource {
       })
     }
   }
-  addEventListener(type: string, cb: (e: { data: string; lastEventId?: string }) => void) {
+  addEventListener(
+    type: string,
+    cb: (e: { data: string; lastEventId?: string }) => void
+  ) {
     if (!this.listeners.has(type)) this.listeners.set(type, new Set())
     this.listeners.get(type)!.add(cb)
   }
   emit(type: string, data: unknown, id = "1") {
-    this.listeners.get(type)?.forEach((cb) => cb({ data: JSON.stringify(data), lastEventId: id }))
+    this.listeners
+      .get(type)
+      ?.forEach((cb) => cb({ data: JSON.stringify(data), lastEventId: id }))
   }
   close() {
     this.readyState = 2
@@ -206,7 +284,8 @@ const settle = async (ms = 0) => {
 }
 
 async function mount(attrs: Record<string, string>): Promise<WeftDevtools> {
-  if (!customElements.get("weft-devtools")) customElements.define("weft-devtools", WeftDevtools)
+  if (!customElements.get("weft-devtools"))
+    customElements.define("weft-devtools", WeftDevtools)
   const el = document.createElement("weft-devtools")
   for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, v)
   document.body.appendChild(el)
@@ -218,24 +297,35 @@ const $ = (el: WeftDevtools, sel: string): Element | null =>
   el.shadowRoot?.querySelector(sel) ?? null
 const all = (el: WeftDevtools, sel: string): Element[] =>
   Array.from(el.shadowRoot?.querySelectorAll(sel) ?? [])
-const text = (el: WeftDevtools, sel: string): string => $(el, sel)?.textContent ?? ""
+const text = (el: WeftDevtools, sel: string): string =>
+  $(el, sel)?.textContent ?? ""
 
 beforeEach(() => {
   FakeEventSource.instances = []
   resetGrants()
   vi.stubGlobal("EventSource", FakeEventSource)
-  ;(globalThis as { __WEFT_PANEL_VERSION__?: string }).__WEFT_PANEL_VERSION__ = "v0.2.1"
+  ;(globalThis as { __WEFT_PANEL_VERSION__?: string }).__WEFT_PANEL_VERSION__ =
+    "v0.2.1"
 })
 
 afterEach(() => {
-  delete (globalThis as { __WEFT_PANEL_VERSION__?: string }).__WEFT_PANEL_VERSION__
+  delete (globalThis as { __WEFT_PANEL_VERSION__?: string })
+    .__WEFT_PANEL_VERSION__
   vi.unstubAllGlobals()
   document.body.innerHTML = ""
 })
 
 const baseRoutes = (): Record<string, unknown> => ({
-  "sessions?public_id=pub_orders": { total: 1, sessions: [SESSION], next_before: null },
-  "runs?public_id=pub_orders&limit=50": { total: 1, runs: [runRow({})], next_before: null },
+  "sessions?public_id=pub_orders": {
+    total: 1,
+    sessions: [SESSION],
+    next_before: null,
+  },
+  "runs?public_id=pub_orders&limit=50": {
+    total: 1,
+    runs: [runRow({})],
+    next_before: null,
+  },
   "runs/s_01-t1": { ...runRow({}), children: [] },
   "runs/s_01-t1/events?after=0&limit=500": EVENTS,
   "runs/s_01-t1/transcript": TRANSCRIPT,
@@ -279,7 +369,11 @@ describe("the pure halves", () => {
     // every scripted run of an agent that registers instructions
     // unusable (programme audit P1-8).
     const samePrompt = buildRunBody(
-      { ...draft, instructions: draft.registeredInstructions, engine: "scripted" },
+      {
+        ...draft,
+        instructions: draft.registeredInstructions,
+        engine: "scripted",
+      },
       "pub_orders"
     ) as Record<string, any>
     expect(samePrompt.overrides.instructions).toBeUndefined()
@@ -289,11 +383,18 @@ describe("the pure halves", () => {
     ) as Record<string, any>
     expect(noPromptRegistered.overrides.instructions).toBe("new prompt")
     // A continued run may not replace the turn's message (400).
-    const cont = buildRunBody({ ...draft, step: 2 }, "pub_orders") as Record<string, any>
+    const cont = buildRunBody({ ...draft, step: 2 }, "pub_orders") as Record<
+      string,
+      any
+    >
     expect(cont.input).toBeUndefined()
     // Transcript edits ride along on a continued run (§5.1's shape).
     const edited = buildRunBody(
-      { ...draft, step: 2, edits: [{ step: 1, callID: "c2", toolResult: "429" }] },
+      {
+        ...draft,
+        step: 2,
+        edits: [{ step: 1, callID: "c2", toolResult: "429" }],
+      },
       ""
     ) as Record<string, any>
     expect(edited.transcript_edits).toEqual([
@@ -301,7 +402,11 @@ describe("the pure halves", () => {
     ])
     // An unchanged tool set carries no override (§10.1).
     const sameTools = buildRunBody(
-      { ...draft, tools: { lookup_order: true, refund: true }, instructions: "" },
+      {
+        ...draft,
+        tools: { lookup_order: true, refund: true },
+        instructions: "",
+      },
       ""
     ) as Record<string, any>
     expect(sameTools.overrides.tools_enabled).toBeUndefined()
@@ -377,7 +482,14 @@ const PARKED_FINISH = {
   run_id: "pg_p1",
   usage: { input_tokens: 10, output_tokens: 4 },
   steps: 1,
-  pending: [{ type: "tool_call", id: "call_1", name: "refund", args: { order_id: "4411" } }],
+  pending: [
+    {
+      type: "tool_call",
+      id: "call_1",
+      name: "refund",
+      args: { order_id: "4411" },
+    },
+  ],
 }
 
 describe("the drawer against a fake Studio", () => {
@@ -391,7 +503,9 @@ describe("the drawer against a fake Studio", () => {
     })
     // Without the capability nothing write-shaped renders.
     expect($(el, ".weft-actions")).toBeTruthy() // meta reports playground here
-    const btn = all(el, ".weft-actions .weft-btn").find((b) => b.textContent === "✎ Experiment")
+    const btn = all(el, ".weft-actions .weft-btn").find(
+      (b) => b.textContent === "✎ Experiment"
+    )
     btn!.dispatchEvent(new Event("click"))
     await settle()
     expect(text(el, ".weft-drawer")).toContain("Experiment · acme-support")
@@ -400,9 +514,13 @@ describe("the drawer against a fake Studio", () => {
     const tools = all(el, ".weft-tool").map((n) => n.textContent)
     expect(tools.some((t) => t.includes("refund"))).toBe(true)
     // ⚠ is on refund (never) and not on lookup_order (safe).
-    const warn = all(el, ".weft-tool").find((n) => n.textContent.includes("refund"))
+    const warn = all(el, ".weft-tool").find((n) =>
+      n.textContent.includes("refund")
+    )
     expect(warn?.querySelector(".weft-warn-badge")?.textContent).toBe("⚠")
-    const safe = all(el, ".weft-tool").find((n) => n.textContent.includes("lookup_order"))
+    const safe = all(el, ".weft-tool").find((n) =>
+      n.textContent.includes("lookup_order")
+    )
     expect(safe?.querySelector(".weft-warn-badge")).toBeNull()
   })
 
@@ -418,15 +536,38 @@ describe("the drawer against a fake Studio", () => {
         created: T0,
         updated: T0,
       },
-      "runs/pg_x1": { ...runRow({ id: "pg_x1", playground: true, session_id: "", forked_from: "s_01-t1#0" }), children: [] },
+      "runs/pg_x1": {
+        ...runRow({
+          id: "pg_x1",
+          playground: true,
+          session_id: "",
+          forked_from: "s_01-t1#0",
+        }),
+        children: [],
+      },
       // A succeeded run's stored events end in run_finish (the pane
       // settles on the row out of running AND that event read).
       "runs/pg_x1/events?after=0&limit=500": {
         events: [
-          { type: "run_start", id: "pg_x1", model: { provider: "wefttest", name: "script" } },
+          {
+            type: "run_start",
+            id: "pg_x1",
+            model: { provider: "wefttest", name: "script" },
+          },
           { type: "step_start", run_id: "pg_x1", index: 0 },
-          { type: "step_finish", run_id: "pg_x1", index: 0, reason: "stop", usage: { input_tokens: 11, output_tokens: 6 } },
-          { type: "run_finish", run_id: "pg_x1", usage: { input_tokens: 11, output_tokens: 6 }, steps: 1 },
+          {
+            type: "step_finish",
+            run_id: "pg_x1",
+            index: 0,
+            reason: "stop",
+            usage: { input_tokens: 11, output_tokens: 6 },
+          },
+          {
+            type: "run_finish",
+            run_id: "pg_x1",
+            usage: { input_tokens: 11, output_tokens: 6 },
+            steps: 1,
+          },
         ].map((event, pos) => ({ pos, time: T0, event })),
         next_after: null,
         done: true,
@@ -438,7 +579,15 @@ describe("the drawer against a fake Studio", () => {
             index: 1,
             step: 0,
             messages: [
-              { role: "assistant", content: [{ type: "text", text: "Your order shipped yesterday — track it here." }] },
+              {
+                role: "assistant",
+                content: [
+                  {
+                    type: "text",
+                    text: "Your order shipped yesterday — track it here.",
+                  },
+                ],
+              },
             ],
           },
         ],
@@ -451,10 +600,14 @@ describe("the drawer against a fake Studio", () => {
       "data-public-id": "pub_orders",
       "data-open": "true",
     })
-    const btn = all(el, ".weft-actions .weft-btn").find((b) => b.textContent === "✎ Experiment")
+    const btn = all(el, ".weft-actions .weft-btn").find(
+      (b) => b.textContent === "✎ Experiment"
+    )
     btn!.dispatchEvent(new Event("click"))
     await settle()
-    const run = all(el, ".weft-drawer button").find((b) => b.textContent === "Run experiment ▶")
+    const run = all(el, ".weft-drawer button").find(
+      (b) => b.textContent === "Run experiment ▶"
+    )
     run!.dispatchEvent(new Event("click"))
     await settle(1200) // the poll tick plus the loads
     const posted = posts.find((p) => p.path === "playground/runs")
@@ -462,21 +615,50 @@ describe("the drawer against a fake Studio", () => {
     expect((posted!.body as Record<string, unknown>).runtime).toBe("rt_01")
     // The live lane streams the result in place: the pane follows the
     // run the ack named.
-    const es = FakeEventSource.instances.find((i) => i.url.includes("run=pg_x1"))
+    const es = FakeEventSource.instances.find((i) =>
+      i.url.includes("run=pg_x1")
+    )
     expect(es).toBeTruthy()
-    es!.emit("record", { run_id: "pg_x1", kind: "event", pos: 1, time: T0,
-      event: { type: "step_start", run_id: "pg_x1", index: 0 } })
-    es!.emit("record", { run_id: "pg_x1", kind: "delta", pos: 1, time: T0,
-      event: { type: "text_delta", run_id: "pg_x1", text: "Your order shipped yesterday — track it here." } })
-    es!.emit("record", { run_id: "pg_x1", kind: "event", pos: 2, time: T0,
-      event: { type: "step_finish", run_id: "pg_x1", index: 0, reason: "stop", usage: { input_tokens: 11, output_tokens: 6 } } })
+    es!.emit("record", {
+      run_id: "pg_x1",
+      kind: "event",
+      pos: 1,
+      time: T0,
+      event: { type: "step_start", run_id: "pg_x1", index: 0 },
+    })
+    es!.emit("record", {
+      run_id: "pg_x1",
+      kind: "delta",
+      pos: 1,
+      time: T0,
+      event: {
+        type: "text_delta",
+        run_id: "pg_x1",
+        text: "Your order shipped yesterday — track it here.",
+      },
+    })
+    es!.emit("record", {
+      run_id: "pg_x1",
+      kind: "event",
+      pos: 2,
+      time: T0,
+      event: {
+        type: "step_finish",
+        run_id: "pg_x1",
+        index: 0,
+        reason: "stop",
+        usage: { input_tokens: 11, output_tokens: 6 },
+      },
+    })
     await settle()
     // The result pane: the label names the turn and the experiment.
     expect(text(el, ".weft-xres .weft-step-h")).toContain("t1·x1")
     expect(text(el, ".weft-xres")).toContain("track it here")
     // The inline diff against the source turn's own words.
     expect(text(el, ".weft-diff-h")).toContain("diff vs t1")
-    expect(text(el, ".weft-diff")).toContain("+ Your order shipped yesterday — track it here.")
+    expect(text(el, ".weft-diff")).toContain(
+      "+ Your order shipped yesterday — track it here."
+    )
   })
 
   it("a parked experiment run offers continue / skip / resolve on its own verbs", async () => {
@@ -491,14 +673,31 @@ describe("the drawer against a fake Studio", () => {
         created: T0,
         updated: T0,
       },
-      "runs/pg_p1": { ...runRow({ id: "pg_p1", playground: true, pending: 1, session_id: "" }), children: [] },
+      "runs/pg_p1": {
+        ...runRow({
+          id: "pg_p1",
+          playground: true,
+          pending: 1,
+          session_id: "",
+        }),
+        children: [],
+      },
       "runs/pg_p1/transcript": { batches: [] },
       // A finished run's events are stored (its row reads finished
       // because its run_finish landed): the parked calls are read from
       // them — the pane's controls act on the run's own pending set.
       "runs/pg_p1/events?after=0&limit=500": {
         events: [
-          { pos: 0, time: T0, event: { type: "run_start", id: "pg_p1", model: { provider: "wefttest", name: "script" }, agent: "acme-support" } },
+          {
+            pos: 0,
+            time: T0,
+            event: {
+              type: "run_start",
+              id: "pg_p1",
+              model: { provider: "wefttest", name: "script" },
+              agent: "acme-support",
+            },
+          },
           { pos: 4, time: T0, event: PARKED_FINISH },
         ],
         next_after: null,
@@ -513,25 +712,46 @@ describe("the drawer against a fake Studio", () => {
       "data-public-id": "pub_orders",
       "data-open": "true",
     })
-    const btn = all(el, ".weft-actions .weft-btn").find((b) => b.textContent === "✎ Experiment")
+    const btn = all(el, ".weft-actions .weft-btn").find(
+      (b) => b.textContent === "✎ Experiment"
+    )
     btn!.dispatchEvent(new Event("click"))
     await settle()
-    const run = all(el, ".weft-drawer button").find((b) => b.textContent === "Run experiment ▶")
+    const run = all(el, ".weft-drawer button").find(
+      (b) => b.textContent === "Run experiment ▶"
+    )
     run!.dispatchEvent(new Event("click"))
     await settle(1200)
     // The parked call shows the three verbs: the run's own finish
     // carried the pending calls.
-    const es = FakeEventSource.instances.find((i) => i.url.includes("run=pg_p1"))
-    es!.emit("record", { run_id: "pg_p1", kind: "event", pos: 4, time: T0, event: PARKED_FINISH })
+    const es = FakeEventSource.instances.find((i) =>
+      i.url.includes("run=pg_p1")
+    )
+    es!.emit("record", {
+      run_id: "pg_p1",
+      kind: "event",
+      pos: 4,
+      time: T0,
+      event: PARKED_FINISH,
+    })
     await settle()
     const res = $(el, ".weft-xres")
     expect(res?.textContent).toContain("awaiting decision")
-    const cont = all(el, ".weft-xres .weft-btn").find((b) => b.textContent === "continue")
+    const cont = all(el, ".weft-xres .weft-btn").find(
+      (b) => b.textContent === "continue"
+    )
     expect(cont).toBeTruthy()
-    expect(all(el, ".weft-xres .weft-btn").some((b) => b.textContent === "skip")).toBe(true)
-    expect(all(el, ".weft-xres .weft-btn").some((b) => b.textContent === "resolve…")).toBe(true)
+    expect(
+      all(el, ".weft-xres .weft-btn").some((b) => b.textContent === "skip")
+    ).toBe(true)
+    expect(
+      all(el, ".weft-xres .weft-btn").some((b) => b.textContent === "resolve…")
+    ).toBe(true)
     // continue posts the approval decision for the parked run.
-    routes["POST runs/pg_p1/approvals"] = { command_id: "cmd_d1", state: "queued" }
+    routes["POST runs/pg_p1/approvals"] = {
+      command_id: "cmd_d1",
+      state: "queued",
+    }
     routes["playground/commands/cmd_d1"] = {
       command_id: "cmd_d1",
       state: "finished",
@@ -566,7 +786,9 @@ describe("the drawer against a fake Studio", () => {
       "data-public-id": "pub_orders",
       "data-open": "true",
     })
-    const btn = all(el, ".weft-actions .weft-btn").find((b) => b.textContent === "✎ Experiment")
+    const btn = all(el, ".weft-actions .weft-btn").find(
+      (b) => b.textContent === "✎ Experiment"
+    )
     btn!.dispatchEvent(new Event("click"))
     await settle()
     // The thread select sits beside the engine select: ephemeral by
@@ -579,7 +801,9 @@ describe("the drawer against a fake Studio", () => {
     thread.value = "fork"
     thread.dispatchEvent(new Event("change"))
     await settle()
-    const run = all(el, ".weft-drawer button").find((b) => b.textContent === "Run experiment ▶")
+    const run = all(el, ".weft-drawer button").find(
+      (b) => b.textContent === "Run experiment ▶"
+    )
     run!.dispatchEvent(new Event("click"))
     await settle()
     const posted = posts.find((p) => p.path === "playground/runs")
@@ -601,7 +825,9 @@ describe("the drawer against a fake Studio", () => {
       "data-public-id": "pub_orders",
       "data-open": "true",
     })
-    const btn = all(el, ".weft-actions .weft-btn").find((b) => b.textContent === "✎ Experiment")
+    const btn = all(el, ".weft-actions .weft-btn").find(
+      (b) => b.textContent === "✎ Experiment"
+    )
     btn!.dispatchEvent(new Event("click"))
     await settle()
     // The breakpoint checkboxes render (gated on the capability).
@@ -609,7 +835,9 @@ describe("the drawer against a fake Studio", () => {
       n.textContent.includes("Break on (parks every run)")
     )
     expect(field).toBeTruthy()
-    const refund = field!.querySelectorAll("label.weft-tool")[1] as HTMLLabelElement
+    const refund = field!.querySelectorAll(
+      "label.weft-tool"
+    )[1] as HTMLLabelElement
     const cb = refund.querySelector("input") as HTMLInputElement
     cb.checked = true
     cb.dispatchEvent(new Event("change"))

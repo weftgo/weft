@@ -4,7 +4,13 @@
 // the run page's replay drawer pre-filled from lib/replay.ts. Hidden —
 // not disabled — when the drawer is gated off (no playground, or a
 // token that may not act): useReplay() is then null.
-import { FilePenLine, GitBranch, PencilLine, RotateCcw, StepForward } from "lucide-react"
+import {
+  FilePenLine,
+  GitBranch,
+  PencilLine,
+  RotateCcw,
+  StepForward,
+} from "lucide-react"
 import type { ReactNode } from "react"
 
 import {
@@ -59,7 +65,12 @@ function Verb({
       data-replay-verb={draft.verb}
       onClick={(e) => {
         e.stopPropagation()
-        open({ runID: at.runID, agent: at.agent, draft, opener: e.currentTarget })
+        open({
+          runID: at.runID,
+          agent: at.agent,
+          draft,
+          opener: e.currentTarget,
+        })
       }}
       // Enter and Space activate the verb, not the row under it (the
       // call row toggles on them); every other key — Escape — goes on.
@@ -93,7 +104,12 @@ export function StepVerbs({ at }: { at: ReplayAt }) {
         icon={<FilePenLine data-slot="icon" />}
         draft={editPromptAndReplay(n)}
       />
-      <Verb at={at} label="re-run the whole turn" icon={<RotateCcw data-slot="icon" />} draft={rerun()} />
+      <Verb
+        at={at}
+        label="re-run the whole turn"
+        icon={<RotateCcw data-slot="icon" />}
+        draft={rerun()}
+      />
       {at.canFork ? (
         <Verb
           at={at}
@@ -126,7 +142,10 @@ export function CallVerbs({
   const n = at.step
   return (
     <span className="flex items-center" data-replay-verbs="call">
-      {content !== undefined && callId && at.maxFromStep !== null && n + 1 <= at.maxFromStep ? (
+      {content !== undefined &&
+      callId &&
+      at.maxFromStep !== null &&
+      n + 1 <= at.maxFromStep ? (
         <Verb
           at={at}
           label={`edit this result and replay (call ${callId})`}
@@ -150,7 +169,8 @@ export function CallVerbs({
 export function SteerVerb({ at }: { at: ReplayAt }) {
   const open = useReplay()
   const n = at.step + 1
-  if (!open || at.step < 0 || at.maxFromStep === null || n > at.maxFromStep) return null
+  if (!open || at.step < 0 || at.maxFromStep === null || n > at.maxFromStep)
+    return null
   return (
     <Verb
       at={at}

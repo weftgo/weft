@@ -108,7 +108,12 @@ export interface RunRequests {
 
 export function runRequests(
   doc: RunRequestsDoc | undefined,
-  opts: { loading: boolean; error?: string; running: boolean; ctx?: RequestContext }
+  opts: {
+    loading: boolean
+    error?: string
+    running: boolean
+    ctx?: RequestContext
+  }
 ): RunRequests {
   const rows = doc?.requests ?? []
   return { ...opts, doc, steps: byStep(rows), prev: previousRows(rows) }
@@ -191,12 +196,15 @@ function PromptDiff({
   // Bounded and memoized: the request query refetches every 2 s while
   // the run runs, and a prompt may be thousands of lines.
   const diff = useMemo(
-    () => (truncated || base.truncated ? null : diffLinesBounded(base.text, text)),
+    () =>
+      truncated || base.truncated ? null : diffLinesBounded(base.text, text),
     [base.text, base.truncated, text, truncated]
   )
   return (
     <div className="space-y-0.5" data-prompt-diff={base.kind}>
-      <span className="font-mono text-[10px] text-faint">{baselineCaption(base)}</span>
+      <span className="font-mono text-[10px] text-faint">
+        {baselineCaption(base)}
+      </span>
       {diff === null ? (
         // A cut tail would read as lines a PrepareStep removed.
         <HoleBadge hole="truncated" label={REQUEST_DIFF_CUT_LABEL} />
@@ -212,7 +220,10 @@ function PromptDiff({
  * page's registered → proposed diff (plan F6) are this one renderer. */
 export function DiffBlock({ diff }: { diff: BoundedDiff }) {
   return "tooLarge" in diff ? (
-    <span className="block font-mono text-[11px] text-faint" data-diff-too-large>
+    <span
+      className="block font-mono text-[11px] text-faint"
+      data-diff-too-large
+    >
       too large to diff ({diff.tooLarge.before} → {diff.tooLarge.after} lines)
     </span>
   ) : (
@@ -289,7 +300,12 @@ function PromptView({
       <span className="flex flex-wrap items-center gap-2">
         <Hash h={doc.hash} />
         {doc.truncated_bytes > 0 || doc.content === "derived" ? null : (
-          <KeepAsPrompt agent={agent} text={doc.text} names={row.body.tools.names} manifestHash={manifestHash} />
+          <KeepAsPrompt
+            agent={agent}
+            text={doc.text}
+            names={row.body.tools.names}
+            manifestHash={manifestHash}
+          />
         )}
         {long ? (
           <button
@@ -310,7 +326,11 @@ function PromptView({
         {doc.content === "derived" ? <HoleBadge hole="derived" detail /> : null}
       </span>
       {base && doc.content !== "derived" && base.text !== doc.text ? (
-        <PromptDiff base={base} text={doc.text} truncated={doc.truncated_bytes > 0} />
+        <PromptDiff
+          base={base}
+          text={doc.text}
+          truncated={doc.truncated_bytes > 0}
+        />
       ) : null}
     </div>
   )
@@ -458,25 +478,31 @@ function MessagesView({
   running?: boolean
 }) {
   const [earlier, setEarlier] = useState(false)
-  const m = messagesSent(row, ctx?.transcript, ctx?.compactions, undefined, running)
+  const m = messagesSent(
+    row,
+    ctx?.transcript,
+    ctx?.compactions,
+    undefined,
+    running
+  )
   const n = `${m.count} ${m.count === 1 ? "message" : "messages"}`
   return (
     <div className="min-w-0 flex-1 space-y-1" data-messages-sent>
       <span className="flex flex-wrap items-center gap-2 font-mono text-[11px]">
         <span
           data-messages-line
-          title={m.bytes !== undefined ? "computed from the transcript as JSON" : undefined}
+          title={
+            m.bytes !== undefined
+              ? "computed from the transcript as JSON"
+              : undefined
+          }
         >
           {m.bytes !== undefined ? `${n} · ${bytes(m.bytes)}` : n}
         </span>
         {m.hole === "compacted" ? (
           <HoleBadge hole="compacted" />
         ) : m.hole === "gap" ? (
-          <HoleBadge
-            hole="gap"
-            reason={REQUEST_MESSAGES_GAP_REASON}
-            detail
-          />
+          <HoleBadge hole="gap" reason={REQUEST_MESSAGES_GAP_REASON} detail />
         ) : m.hole === "no_index" ? (
           row.content === "stripped" ? (
             <HoleBadge hole="stripped" />
@@ -484,11 +510,7 @@ function MessagesView({
             // Content was captured, yet no messages record names the
             // request: the core omits the index when a rewritten
             // request's view could not be recorded.
-            <HoleBadge
-              hole="gap"
-              reason={REQUEST_NO_INDEX_REASON}
-              detail
-            />
+            <HoleBadge hole="gap" reason={REQUEST_NO_INDEX_REASON} detail />
           )
         ) : m.hole === "no_transcript" ? (
           <span className="text-faint">bytes when the transcript is read</span>
@@ -497,7 +519,10 @@ function MessagesView({
       {m.last.length ? (
         <ul className="space-y-0.5" data-messages-last>
           {m.last.map((msg, i) => (
-            <li key={i} className="truncate font-mono text-[11px] text-muted-foreground">
+            <li
+              key={i}
+              className="truncate font-mono text-[11px] text-muted-foreground"
+            >
               {messageLine(msg)}
             </li>
           ))}
@@ -517,7 +542,8 @@ function MessagesView({
               className={`size-3 transition-transform ${earlier ? "rotate-90" : ""}`}
               data-slot="icon"
             />
-            {m.before.length} earlier {m.before.length === 1 ? "message" : "messages"} (raw)
+            {m.before.length} earlier{" "}
+            {m.before.length === 1 ? "message" : "messages"} (raw)
           </button>
           {earlier ? (
             <div data-messages-earlier>
@@ -565,7 +591,13 @@ function AttemptView({
       ) : null}
       <div className="flex gap-2">
         <Label>system</Label>
-        <PromptView row={row} stripped={stripped} base={base} agent={ctx?.agent} manifestHash={ctx?.manifestHash} />
+        <PromptView
+          row={row}
+          stripped={stripped}
+          base={base}
+          agent={ctx?.agent}
+          manifestHash={ctx?.manifestHash}
+        />
       </div>
       <div className="flex gap-2">
         <Label>tools</Label>
@@ -665,7 +697,9 @@ function usePromptFacts(
   const names = row?.body.tools.names ?? []
   const prevNames = prev?.body.tools.names ?? []
   const toolsMoved =
-    changed && (names.length !== prevNames.length || names.some((n, i) => n !== prevNames[i]))
+    changed &&
+    (names.length !== prevNames.length ||
+      names.some((n, i) => n !== prevNames[i]))
   const manifest = useQuery({
     ...manifestQuery(),
     enabled: differs || experiment || toolsMoved,
@@ -689,7 +723,8 @@ function usePromptFacts(
     ],
     enabled: differs && settled,
     staleTime: Infinity,
-    queryFn: () => composedFromInstructions(row!, insHash!, snippets).then((v) => v ?? null),
+    queryFn: () =>
+      composedFromInstructions(row!, insHash!, snippets).then((v) => v ?? null),
   })
   if (!row) return { experiment: false }
   const text = promptText(row)
@@ -704,7 +739,12 @@ function usePromptFacts(
       experiment: false,
       base:
         changed && prev && before !== undefined && text !== undefined
-          ? { kind: "previous", step: prev.step, text: before, truncated: cut(prev) }
+          ? {
+              kind: "previous",
+              step: prev.step,
+              text: before,
+              truncated: cut(prev),
+            }
           : undefined,
     }
   }
@@ -728,7 +768,15 @@ function usePromptFacts(
 }
 
 /** One chip of the pane's header. */
-function Mark({ mark, title, children }: { mark: string; title: string; children: string }) {
+function Mark({
+  mark,
+  title,
+  children,
+}: {
+  mark: string
+  title: string
+  children: string
+}) {
   return (
     <span
       data-mark={mark}
@@ -852,7 +900,10 @@ export function RequestSection({
           </Mark>
         ) : null}
         {mine?.catalogChanged ? (
-          <Mark mark="catalog" title="the tool catalog's hash differs from the previous step's">
+          <Mark
+            mark="catalog"
+            title="the tool catalog's hash differs from the previous step's"
+          >
             {CHIP_CATALOG}
           </Mark>
         ) : null}
@@ -860,15 +911,23 @@ export function RequestSection({
           // A stripped row's words are the tools route's, as below.
           <HoleBadge
             hole={row.content}
-            reason={row.content === "stripped" ? req.doc?.stripped?.reason : undefined}
-            fix={row.content === "stripped" ? req.doc?.stripped?.fix : undefined}
+            reason={
+              row.content === "stripped" ? req.doc?.stripped?.reason : undefined
+            }
+            fix={
+              row.content === "stripped" ? req.doc?.stripped?.fix : undefined
+            }
           />
         ) : null}
       </>
     )
     const tabId = (t: StepPane) => `step-${step}-pane-${t}`
     const tabs = (
-      <div className="flex w-fit rounded-md border p-0.5" role="tablist" aria-label={`step ${step} request`}>
+      <div
+        className="flex w-fit rounded-md border p-0.5"
+        role="tablist"
+        aria-label={`step ${step} request`}
+      >
         {(["request", "wire"] as const).map((t) => (
           <button
             key={t}
@@ -879,7 +938,9 @@ export function RequestSection({
             aria-controls={`${tabId(t)}-panel`}
             data-pane-tab={t}
             className={`rounded-sm px-2.5 py-0.5 font-mono text-[11px] ${
-              tab === t ? "bg-secondary text-foreground" : "text-muted-foreground hover:text-foreground"
+              tab === t
+                ? "bg-secondary text-foreground"
+                : "text-muted-foreground hover:text-foreground"
             }`}
             onClick={() => setTab(t)}
           >
@@ -888,50 +949,62 @@ export function RequestSection({
         ))}
       </div>
     )
-    body = tab === "wire" ? (
-      <div className="space-y-2 pt-2">
-        {tabs}
-        <div role="tabpanel" id={`${tabId("wire")}-panel`} aria-labelledby={tabId("wire")}>
-          <WireView rows={rows} runId={runId ?? req.ctx?.runId ?? "run"} />
-        </div>
-      </div>
-    ) : (
-      <div className="space-y-2 pt-2">
-        {tabs}
-        <div role="tabpanel" id={`${tabId("request")}-panel`} aria-labelledby={tabId("request")} className="space-y-2">
-        {rows.length > 1 ? (
-          <div className="flex gap-1">
-            {rows.map((r) => (
-              <button
-                key={r.index}
-                type="button"
-                className={`rounded-md border px-2 py-0.5 font-mono text-[11px] ${
-                  r === row
-                    ? "border-thread/60 bg-secondary"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-                onClick={() => setPick(r.attempt)}
-              >
-                attempt {r.attempt}
-              </button>
-            ))}
+    body =
+      tab === "wire" ? (
+        <div className="space-y-2 pt-2">
+          {tabs}
+          <div
+            role="tabpanel"
+            id={`${tabId("wire")}-panel`}
+            aria-labelledby={tabId("wire")}
+          >
+            <WireView rows={rows} runId={runId ?? req.ctx?.runId ?? "run"} />
           </div>
-        ) : null}
-        <AttemptView
-          key={row.index}
-          row={row}
-          stripped={req.doc?.stripped}
-          // The diff compares each step's first attempt; a retry sent
-          // the same prompt unless its hash says otherwise.
-          base={
-            facts.base && row.system_hash === rows[0].system_hash ? facts.base : undefined
-          }
-          ctx={req.ctx}
-          running={req.running}
-        />
         </div>
-      </div>
-    )
+      ) : (
+        <div className="space-y-2 pt-2">
+          {tabs}
+          <div
+            role="tabpanel"
+            id={`${tabId("request")}-panel`}
+            aria-labelledby={tabId("request")}
+            className="space-y-2"
+          >
+            {rows.length > 1 ? (
+              <div className="flex gap-1">
+                {rows.map((r) => (
+                  <button
+                    key={r.index}
+                    type="button"
+                    className={`rounded-md border px-2 py-0.5 font-mono text-[11px] ${
+                      r === row
+                        ? "border-thread/60 bg-secondary"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                    onClick={() => setPick(r.attempt)}
+                  >
+                    attempt {r.attempt}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <AttemptView
+              key={row.index}
+              row={row}
+              stripped={req.doc?.stripped}
+              // The diff compares each step's first attempt; a retry sent
+              // the same prompt unless its hash says otherwise.
+              base={
+                facts.base && row.system_hash === rows[0].system_hash
+                  ? facts.base
+                  : undefined
+              }
+              ctx={req.ctx}
+              running={req.running}
+            />
+          </div>
+        </div>
+      )
   } else if (req.loading) {
     head = (
       <span className="font-mono text-[11px] text-faint">
@@ -951,13 +1024,7 @@ export function RequestSection({
       </span>
     )
   } else {
-    head = (
-      <HoleBadge
-        hole="gap"
-        reason={REQUEST_NO_RECORD_REASON}
-        detail
-      />
-    )
+    head = <HoleBadge hole="gap" reason={REQUEST_NO_RECORD_REASON} detail />
   }
 
   return (

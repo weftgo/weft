@@ -21,7 +21,6 @@ import { COMPOSED_MAX, composedCache } from "./request"
 import { href, runLink } from "../lib/links"
 import {
   $,
-
   baseRoutes,
   click,
   FakeEventSource,
@@ -45,7 +44,9 @@ let logs: ReturnType<typeof vi.spyOn>[] = []
 beforeEach(() => {
   setup()
   localStorage.clear()
-  logs = (["log", "info", "warn", "error", "debug"] as const).map((m) => vi.spyOn(console, m))
+  logs = (["log", "info", "warn", "error", "debug"] as const).map((m) =>
+    vi.spyOn(console, m)
+  )
 })
 afterEach(() => {
   // No console output, ever (§5.3).
@@ -57,13 +58,19 @@ afterEach(() => {
 
 const RUN = "s_01-t1"
 const REQS = `runs/${RUN}/requests?limit=1000`
-const BASE = { "data-endpoint": "http://studio.test/studio/", "data-public-id": "pub_orders", "data-open": "true", "data-position": "bottom-dock" }
+const BASE = {
+  "data-endpoint": "http://studio.test/studio/",
+  "data-public-id": "pub_orders",
+  "data-open": "true",
+  "data-position": "bottom-dock",
+}
 const META_R = { ...META, capabilities: [...META.capabilities, "requests"] }
 const PROMPT0 = "You are a support agent."
 const PROMPT1 = "You are a support agent. Refunds need a reason."
 const REGISTERED = "You are a careful support agent."
 /** examples/studio-local's prompts (its trimGuidance). */
-const GUIDANCE = "First-step guidance: look the order up with lookup_order before answering."
+const GUIDANCE =
+  "First-step guidance: look the order up with lookup_order before answering."
 const DEMO1 = "You are the studio-local demo agent."
 const DEMO0 = `${DEMO1}\n\n${GUIDANCE}`
 
@@ -72,16 +79,30 @@ const claims = (scope: string) =>
 
 const U = { input_tokens: 5, output_tokens: 2 }
 function threeSteps(id = RUN): unknown[] {
-  const evs: unknown[] = [{ type: "run_start", id, model: { provider: "wefttest", name: "script" }, agent: "acme-support" }]
+  const evs: unknown[] = [
+    {
+      type: "run_start",
+      id,
+      model: { provider: "wefttest", name: "script" },
+      agent: "acme-support",
+    },
+  ]
   for (let i = 0; i < 3; i++) {
     evs.push({ type: "step_start", run_id: id, index: i })
-    evs.push({ type: "step_finish", run_id: id, index: i, reason: i < 2 ? "tool_calls" : "stop", usage: U })
+    evs.push({
+      type: "step_finish",
+      run_id: id,
+      index: i,
+      reason: i < 2 ? "tool_calls" : "stop",
+      usage: U,
+    })
   }
   evs.push({ type: "run_finish", run_id: id, usage: U, steps: 3 })
   return evs
 }
 
-const goldenRows = () => structuredClone(golden<{ requests: RequestRow[] }>("requests-ok").requests)
+const goldenRows = () =>
+  structuredClone(golden<{ requests: RequestRow[] }>("requests-ok").requests)
 
 /** One row per step with the prompts given (hashes as the core
  * computes them), on the golden's step-0 row. */
@@ -103,7 +124,10 @@ async function rowsFor(texts: string[]): Promise<RequestRow[]> {
   )
 }
 
-const msg = (role: string, text: string) => ({ role, content: [{ type: "text", text }] })
+const msg = (role: string, text: string) => ({
+  role,
+  content: [{ type: "text", text }],
+})
 /** The growth records the golden's requests name (0, 2, 4: 1, 3, 5 messages). */
 const TRANSCRIPT = transcript(
   [msg("user", "where is order 42?")],
@@ -125,7 +149,11 @@ function invokeAgent(attrs: Record<string, unknown>): Span {
     status: "ok",
     status_message: "",
     service: "",
-    attrs: { "gen_ai.operation.name": "invoke_agent", "weft.run.id": RUN, ...attrs },
+    attrs: {
+      "gen_ai.operation.name": "invoke_agent",
+      "weft.run.id": RUN,
+      ...attrs,
+    },
     events: [],
   }
 }
@@ -139,15 +167,31 @@ const manifest = (instructions: string) => ({
       manifest_hash: "sha256:x",
       model: { provider: "wefttest", name: "script" },
       instructions,
-      policy: { parallelism: 4, max_steps: 10, max_result_bytes: 65536, max_model_retries: 3 },
+      policy: {
+        parallelism: 4,
+        max_steps: 10,
+        max_result_bytes: 65536,
+        max_model_retries: 3,
+      },
       tools: [{ name: "lookup_order" }, { name: "refund" }],
     },
   ],
 })
 
-async function routes(o: { instructions?: string; requests?: unknown; spans?: Span[]; manifest?: unknown; doc?: Partial<RunDoc> } = {}) {
+async function routes(
+  o: {
+    instructions?: string
+    requests?: unknown
+    spans?: Span[]
+    manifest?: unknown
+    doc?: Partial<RunDoc>
+  } = {}
+) {
   const r = baseRoutes()
-  const ins = o.instructions === undefined ? {} : { instructions_hash: await sha256Hex(o.instructions) }
+  const ins =
+    o.instructions === undefined
+      ? {}
+      : { instructions_hash: await sha256Hex(o.instructions) }
   r[`runs/${RUN}`] = { ...runRow({ steps: 3 }), ...ins, children: [], ...o.doc }
   r[`runs/${RUN}/events?after=0&limit=500`] = page(threeSteps())
   r[`runs/${RUN}/transcript`] = TRANSCRIPT
@@ -157,16 +201,23 @@ async function routes(o: { instructions?: string; requests?: unknown; spans?: Sp
   return r
 }
 
-async function openTab(attrs: Record<string, string> = BASE): Promise<WeftDevtools> {
+async function openTab(
+  attrs: Record<string, string> = BASE
+): Promise<WeftDevtools> {
   const el = await mount(attrs)
   click($(el, "#weft-tab-request"))
   await settle(20)
   return el
 }
 const tp = (el: WeftDevtools) => $(el, "#weft-tp-request") as HTMLElement
-const pane = (el: WeftDevtools) => tp(el).querySelector<HTMLElement>("[data-weft-rq-pane]")
-const shown = (el: WeftDevtools) => Number(pane(el)?.getAttribute("data-weft-rq-pane"))
-const marks = (el: WeftDevtools) => Array.from(tp(el).querySelectorAll("[data-weft-mark]")).map((m) => m.textContent)
+const pane = (el: WeftDevtools) =>
+  tp(el).querySelector<HTMLElement>("[data-weft-rq-pane]")
+const shown = (el: WeftDevtools) =>
+  Number(pane(el)?.getAttribute("data-weft-rq-pane"))
+const marks = (el: WeftDevtools) =>
+  Array.from(tp(el).querySelectorAll("[data-weft-mark]")).map(
+    (m) => m.textContent
+  )
 async function pickStep(el: WeftDevtools, n: number) {
   click(tp(el).querySelector(`[data-weft-rq-step="${n}"]`))
   await settle(20)
@@ -178,19 +229,34 @@ function diff(el: WeftDevtools) {
   return {
     kind: d.getAttribute("data-weft-prompt-diff"),
     caption: d.querySelector(".weft-diff-h")?.textContent,
-    add: Array.from(d.querySelectorAll('[data-weft-diff="add"]')).map((r) => r.textContent),
-    del: Array.from(d.querySelectorAll('[data-weft-diff="del"]')).map((r) => r.textContent),
+    add: Array.from(d.querySelectorAll('[data-weft-diff="add"]')).map(
+      (r) => r.textContent
+    ),
+    del: Array.from(d.querySelectorAll('[data-weft-diff="del"]')).map(
+      (r) => r.textContent
+    ),
   }
 }
 function key(target: EventTarget, init: KeyboardEventInit) {
-  const e = new KeyboardEvent("keydown", { bubbles: true, composed: true, cancelable: true, ...init })
+  const e = new KeyboardEvent("keydown", {
+    bubbles: true,
+    composed: true,
+    cancelable: true,
+    ...init,
+  })
   target.dispatchEvent(e)
   return e
 }
 
 describe("E1 Done, in the panel", () => {
   it("(a) studio-local's PrepareStep trim: the chip at step 1 only, the diff pure deletions", async () => {
-    const studio = fakeStudio(await routes({ instructions: DEMO0, requests: { requests: await rowsFor([DEMO0, DEMO1, DEMO1]) } }), META_R)
+    const studio = fakeStudio(
+      await routes({
+        instructions: DEMO0,
+        requests: { requests: await rowsFor([DEMO0, DEMO1, DEMO1]) },
+      }),
+      META_R
+    )
     const el = await openTab()
     expect(tab(el)).toBe("true")
     expect(shown(el)).toBe(0)
@@ -201,7 +267,12 @@ describe("E1 Done, in the panel", () => {
     expect(marks(el)).toEqual(["changed by PrepareStep"])
     // A real trim: the guidance paragraph and the blank line before it
     // removed, nothing added.
-    expect(diff(el)).toEqual({ kind: "previous", caption: "diff vs step 0", add: [], del: ["− ", `− ${GUIDANCE}`] })
+    expect(diff(el)).toEqual({
+      kind: "previous",
+      caption: "diff vs step 0",
+      add: [],
+      del: ["− ", `− ${GUIDANCE}`],
+    })
     await pickStep(el, 2)
     expect(marks(el)).toEqual([])
     expect(diff(el)).toBeNull()
@@ -215,7 +286,12 @@ describe("E1 Done, in the panel", () => {
       await routes({
         instructions: PROMPT0,
         manifest: manifest(REGISTERED),
-        spans: [invokeAgent({ "weft.override.hash": "f00d", "weft.override.instructions": true })],
+        spans: [
+          invokeAgent({
+            "weft.override.hash": "f00d",
+            "weft.override.instructions": true,
+          }),
+        ],
       }),
       META_R
     )
@@ -232,28 +308,50 @@ describe("E1 Done, in the panel", () => {
     // The later steps' own rewrites are PrepareStep's; the override
     // is a first-step chip.
     await pickStep(el, 1)
-    expect(marks(el)).toEqual(["changed by PrepareStep", "catalog changed at this step"])
-    expect(diff(el)).toEqual({ kind: "previous", caption: "diff vs step 0", add: [`+ ${PROMPT1}`], del: [`− ${PROMPT0}`] })
+    expect(marks(el)).toEqual([
+      "changed by PrepareStep",
+      "catalog changed at this step",
+    ])
+    expect(diff(el)).toEqual({
+      kind: "previous",
+      caption: "diff vs step 0",
+      add: [`+ ${PROMPT1}`],
+      del: [`− ${PROMPT0}`],
+    })
     // The spans were read once, for the waterfall and the chip alike.
     expect(studio.gets(`runs/${RUN}/spans`).length).toBe(1)
   })
 
   it("(c) a read token sees hidden and nothing else: no prompt bytes in the DOM or in any body received", async () => {
-    const studio = fakeStudio(await routes({ instructions: PROMPT0, manifest: manifest(REGISTERED) }), META_R)
+    const studio = fakeStudio(
+      await routes({ instructions: PROMPT0, manifest: manifest(REGISTERED) }),
+      META_R
+    )
     // Every body the panel received, read beside it.
     const bodies: string[] = []
     const inner = globalThis.fetch
-    vi.stubGlobal("fetch", async (input: RequestInfo | URL, init?: RequestInit) => {
-      const res = await inner(input, init)
-      bodies.push(await res.clone().text())
-      return res
-    })
+    vi.stubGlobal(
+      "fetch",
+      async (input: RequestInfo | URL, init?: RequestInit) => {
+        const res = await inner(input, init)
+        bodies.push(await res.clone().text())
+        return res
+      }
+    )
     const el = await openTab({ ...BASE, "data-token": claims("read") })
     const holes = Array.from(tp(el).querySelectorAll("[data-weft-rq-hole]"))
-    expect(holes.map((h) => h.getAttribute("data-weft-rq-hole"))).toEqual(["hidden"])
-    expect(tp(el).querySelector('[data-hole="hidden"]')?.textContent).toBe("request: hidden by your token scope")
+    expect(holes.map((h) => h.getAttribute("data-weft-rq-hole"))).toEqual([
+      "hidden",
+    ])
+    expect(tp(el).querySelector('[data-hole="hidden"]')?.textContent).toBe(
+      "request: hidden by your token scope"
+    )
     // The badge and its words, nothing else: no step picker, no rows.
-    expect(tp(el).querySelector("[data-weft-rq-pane], [data-weft-rq-step], [data-weft-prompt]")).toBeNull()
+    expect(
+      tp(el).querySelector(
+        "[data-weft-rq-pane], [data-weft-rq-step], [data-weft-prompt]"
+      )
+    ).toBeNull()
     expect(tp(el).textContent).toContain("fix: ")
     for (const p of [PROMPT0, PROMPT1, REGISTERED]) {
       expect(el.shadowRoot!.innerHTML).not.toContain(p)
@@ -267,10 +365,18 @@ describe("E1 Done, in the panel", () => {
   it("a 403 the panel could not foresee is the same hidden badge, its body holding no prompt", async () => {
     const r = await routes()
     r[REQS] = () =>
-      new Response(JSON.stringify({ error: { code: "forbidden", message: "read scope" }, badge: "hidden", reason: "a read-scoped panel token does not read system prompts", fix: "use a playground-scoped token" }), {
-        status: 403,
-        headers: { "content-type": "application/json" },
-      })
+      new Response(
+        JSON.stringify({
+          error: { code: "forbidden", message: "read scope" },
+          badge: "hidden",
+          reason: "a read-scoped panel token does not read system prompts",
+          fix: "use a playground-scoped token",
+        }),
+        {
+          status: 403,
+          headers: { "content-type": "application/json" },
+        }
+      )
     fakeStudio(r, META_R)
     const el = await openTab()
     expect(tp(el).querySelector('[data-hole="hidden"]')).not.toBeNull()
@@ -279,9 +385,18 @@ describe("E1 Done, in the panel", () => {
   })
 
   it("a pre-A1 run (requests_badge not_recorded, request_count 0) shows not_recorded, never an empty tab", async () => {
-    fakeStudio(await routes({ requests: golden("requests-not-recorded"), doc: { requests_badge: "not_recorded", request_count: 0 } }), META_R)
+    fakeStudio(
+      await routes({
+        requests: golden("requests-not-recorded"),
+        doc: { requests_badge: "not_recorded", request_count: 0 },
+      }),
+      META_R
+    )
     const el = await openTab()
-    expect(tp(el).querySelector('[data-weft-rq-hole="not_recorded"] .weft-badge')?.textContent).toBe("request not recorded by weft v0.9.0 or earlier")
+    expect(
+      tp(el).querySelector('[data-weft-rq-hole="not_recorded"] .weft-badge')
+        ?.textContent
+    ).toBe("request not recorded by weft v0.9.0 or earlier")
     expect(tp(el).textContent).toContain("fix: upgrade weft and re-run")
     expect(tp(el).querySelector("[data-weft-rq-pane]")).toBeNull()
   })
@@ -289,27 +404,56 @@ describe("E1 Done, in the panel", () => {
   it("a Studio without the requests capability says so with the table's not_served cause, never an empty tab", async () => {
     const studio = fakeStudio(await routes())
     let el = await openTab()
-    const b = () => tp(el).querySelector('[data-weft-rq-hole="not_recorded"] [data-hole="not_recorded"]')!
-    expect(b().getAttribute("title")).toBe(`${CAUSES.not_recorded!.not_served.reason} — fix: ${CAUSES.not_recorded!.not_served.fix}`)
+    const b = () =>
+      tp(el).querySelector(
+        '[data-weft-rq-hole="not_recorded"] [data-hole="not_recorded"]'
+      )!
+    expect(b().getAttribute("title")).toBe(
+      `${CAUSES.not_recorded!.not_served.reason} — fix: ${CAUSES.not_recorded!.not_served.fix}`
+    )
     // Not the version's label: the run may hold a record.
     expect(badgeLabel(b())).toBe("request: not recorded")
     expect(studio.gets(`runs/${RUN}/requests`)).toEqual([])
     el.remove()
     // The server's own words (capabilities_off.requests) win.
-    fakeStudio(await routes(), { ...META, capabilities_off: { requests: "the requests group is off (studio.NoRequests)" } })
+    fakeStudio(await routes(), {
+      ...META,
+      capabilities_off: {
+        requests: "the requests group is off (studio.NoRequests)",
+      },
+    })
     el = await openTab()
-    expect(b().getAttribute("title")).toContain("the requests group is off (studio.NoRequests)")
+    expect(b().getAttribute("title")).toContain(
+      "the requests group is off (studio.NoRequests)"
+    )
   })
 
   it("(item 1) a derived prompt and catalog: the derived badge on both, no prompt box, and no diff over it on the next step", async () => {
     const rows = await rowsFor([PROMPT0, PROMPT1, PROMPT0])
-    rows[1].prompt = { hash: rows[1].system_hash, text: "", content: "derived", truncated_bytes: 0 }
-    rows[1].tools = { hash: rows[1].catalog_hash, tools: [], content: "derived", truncated_bytes: 0 }
-    fakeStudio(await routes({ instructions: PROMPT0, requests: { requests: rows } }), META_R)
+    rows[1].prompt = {
+      hash: rows[1].system_hash,
+      text: "",
+      content: "derived",
+      truncated_bytes: 0,
+    }
+    rows[1].tools = {
+      hash: rows[1].catalog_hash,
+      tools: [],
+      content: "derived",
+      truncated_bytes: 0,
+    }
+    fakeStudio(
+      await routes({ instructions: PROMPT0, requests: { requests: rows } }),
+      META_R
+    )
     const el = await openTab()
     await pickStep(el, 1)
-    expect(tp(el).querySelector('[data-weft-rq="system"] [data-hole="derived"]')).not.toBeNull()
-    expect(tp(el).querySelector('[data-weft-rq="tools"] [data-hole="derived"]')).not.toBeNull()
+    expect(
+      tp(el).querySelector('[data-weft-rq="system"] [data-hole="derived"]')
+    ).not.toBeNull()
+    expect(
+      tp(el).querySelector('[data-weft-rq="tools"] [data-hole="derived"]')
+    ).not.toBeNull()
     expect(tp(el).querySelector("[data-weft-prompt]")).toBeNull()
     expect(diff(el)).toBeNull()
     await pickStep(el, 2)
@@ -326,21 +470,41 @@ describe("the tab's blocks", () => {
     await pickStep(el, 2)
     const line = tp(el).querySelector("[data-weft-messages-line]")!.textContent
     expect(line).toMatch(/^5 messages · \d+ B$/)
-    const msgs = [msg("user", "where is order 42?"), msg("assistant", "looking it up"), msg("tool", "order 42: shipped"), msg("assistant", "refunding"), msg("tool", "refund queued")]
-    expect(line).toBe(`5 messages · ${new TextEncoder().encode(JSON.stringify(msgs)).length} B`)
-    const last = Array.from(tp(el).querySelectorAll("[data-weft-messages-last] > *")).map((n) => n.textContent)
-    expect(last).toEqual(["tool: order 42: shipped", "assistant: refunding", "tool: refund queued"])
-    const earlier = Array.from(tp(el).querySelectorAll("button")).find((b) => b.textContent.includes("2 earlier messages (raw)"))!
+    const msgs = [
+      msg("user", "where is order 42?"),
+      msg("assistant", "looking it up"),
+      msg("tool", "order 42: shipped"),
+      msg("assistant", "refunding"),
+      msg("tool", "refund queued"),
+    ]
+    expect(line).toBe(
+      `5 messages · ${new TextEncoder().encode(JSON.stringify(msgs)).length} B`
+    )
+    const last = Array.from(
+      tp(el).querySelectorAll("[data-weft-messages-last] > *")
+    ).map((n) => n.textContent)
+    expect(last).toEqual([
+      "tool: order 42: shipped",
+      "assistant: refunding",
+      "tool: refund queued",
+    ])
+    const earlier = Array.from(tp(el).querySelectorAll("button")).find((b) =>
+      b.textContent.includes("2 earlier messages (raw)")
+    )!
     expect(earlier.getAttribute("aria-expanded")).toBe("false")
     expect(tp(el).querySelector("[data-weft-messages-earlier]")).toBeNull()
     click(earlier)
     await settle()
-    const tree = tp(el).querySelector("[data-weft-messages-earlier] .weft-tree")!
+    const tree = tp(el).querySelector(
+      "[data-weft-messages-earlier] .weft-tree"
+    )!
     expect(tree.textContent).toContain("where is order 42?")
     expect(tree.textContent).toContain("looking it up")
     // / on the Request tab focuses the open tree's filter.
     key($(el, ".weft-dock")!, { key: "/" })
-    expect(el.shadowRoot!.activeElement).toBe(tp(el).querySelector(".weft-tree-q"))
+    expect(el.shadowRoot!.activeElement).toBe(
+      tp(el).querySelector(".weft-tree-q")
+    )
   })
 
   it("the catalog: names expand to the description, the policy chips and the schema tree; the catalog-changed chip on its step", async () => {
@@ -350,15 +514,27 @@ describe("the tab's blocks", () => {
     await pickStep(el, 1)
     expect(marks(el)).toContain("catalog changed at this step")
     const tools = Array.from(tp(el).querySelectorAll("[data-weft-tool]"))
-    expect(tools.map((t) => t.getAttribute("data-weft-tool"))).toEqual(["lookup_order", "refund"])
+    expect(tools.map((t) => t.getAttribute("data-weft-tool"))).toEqual([
+      "lookup_order",
+      "refund",
+    ])
     const refund = tp(el).querySelector('[data-weft-tool="refund"] button')!
     expect(refund.getAttribute("aria-expanded")).toBe("false")
     click(refund)
     await settle()
     const open = tp(el).querySelector('[data-weft-tool="refund"]')!
-    expect(open.querySelector("button")?.getAttribute("aria-expanded")).toBe("true")
+    expect(open.querySelector("button")?.getAttribute("aria-expanded")).toBe(
+      "true"
+    )
     expect(open.textContent).toContain("Refund an order.")
-    for (const c of ["timeout none", "approval no", "replay never", "result cap 64.0 KB", "source local"]) expect(open.textContent).toContain(c)
+    for (const c of [
+      "timeout none",
+      "approval no",
+      "replay never",
+      "result cap 64.0 KB",
+      "source local",
+    ])
+      expect(open.textContent).toContain(c)
     expect(open.querySelector(".weft-tree")?.textContent).toContain("order_id")
     await pickStep(el, 2)
     expect(marks(el)).not.toContain("catalog changed at this step")
@@ -369,11 +545,29 @@ describe("the tab's blocks", () => {
     rows[0].body.params = { temperature: 0.2, max_tokens: 512 }
     rows[0].body.tool_choice = { mode: "named", name: "lookup_order" }
     rows[0].body.thinking = { level: "high", budget: 1024 }
-    fakeStudio(await routes({ instructions: PROMPT0, requests: { requests: rows } }), META_R)
+    fakeStudio(
+      await routes({ instructions: PROMPT0, requests: { requests: rows } }),
+      META_R
+    )
     const el = await openTab()
-    const p = (k: string) => tp(el).querySelector(`[data-weft-param="${k}"]`)?.lastElementChild?.textContent
-    expect([p("temperature"), p("top_p"), p("max_tokens"), p("stop"), p("seed")]).toEqual(["0.2", "adapter default", "512", "adapter default", "adapter default"])
-    const v = (k: string) => tp(el).querySelector(`[data-weft-rq="${k}"] .weft-rq-v`)?.textContent
+    const p = (k: string) =>
+      tp(el).querySelector(`[data-weft-param="${k}"]`)?.lastElementChild
+        ?.textContent
+    expect([
+      p("temperature"),
+      p("top_p"),
+      p("max_tokens"),
+      p("stop"),
+      p("seed"),
+    ]).toEqual([
+      "0.2",
+      "adapter default",
+      "512",
+      "adapter default",
+      "adapter default",
+    ])
+    const v = (k: string) =>
+      tp(el).querySelector(`[data-weft-rq="${k}"] .weft-rq-v`)?.textContent
     expect(v("tool_choice")).toBe("named (lookup_order)")
     expect(v("thinking")).toBe("high · budget 1024")
     await pickStep(el, 1)
@@ -385,8 +579,11 @@ describe("the tab's blocks", () => {
     fakeStudio(await routes({ instructions: PROMPT0 }), META_R)
     const el = await openTab()
     await pickStep(el, 1)
-    expect(tp(el).querySelector("[data-weft-attempts]")?.textContent).toBe("attempt 2 of 2 · retry")
-    const pick = (n: number) => tp(el).querySelector(`[data-weft-rq-attempt="${n}"]`)!
+    expect(tp(el).querySelector("[data-weft-attempts]")?.textContent).toBe(
+      "attempt 2 of 2 · retry"
+    )
+    const pick = (n: number) =>
+      tp(el).querySelector(`[data-weft-rq-attempt="${n}"]`)!
     expect(pick(2).getAttribute("aria-pressed")).toBe("true")
     click(pick(1))
     await settle()
@@ -397,13 +594,17 @@ describe("the tab's blocks", () => {
   it("J/K move the step the tab shows, from the one on screen; ⤢ carries it; a step only the record names is walked", async () => {
     const r = await routes({ instructions: PROMPT0 })
     // The events fold two steps; the record names a third.
-    r[`runs/${RUN}/events?after=0&limit=500`] = page(threeSteps().filter((e) => (e as { index?: number }).index !== 2))
+    r[`runs/${RUN}/events?after=0&limit=500`] = page(
+      threeSteps().filter((e) => (e as { index?: number }).index !== 2)
+    )
     fakeStudio(r, META_R)
     const el = await openTab()
     const dock = $(el, ".weft-dock")!
     expect(shown(el)).toBe(0)
     // The step on screen is the one ⤢ carries, before any key.
-    expect($(el, ".weft-head a")?.getAttribute("href")).toMatch(/[?&]step=0(&|$)/)
+    expect($(el, ".weft-head a")?.getAttribute("href")).toMatch(
+      /[?&]step=0(&|$)/
+    )
     key(dock, { key: "J" })
     await settle()
     expect(shown(el)).toBe(1) // the first J moves on from what is shown
@@ -414,20 +615,54 @@ describe("the tab's blocks", () => {
     await settle()
     expect(shown(el)).toBe(1)
     await pickStep(el, 2)
-    expect($(el, ".weft-head a")?.getAttribute("href")).toMatch(/[?&]step=2(&|$)/)
+    expect($(el, ".weft-head a")?.getAttribute("href")).toMatch(
+      /[?&]step=2(&|$)/
+    )
   })
 
   it("a subagent call shows the child's step-0 request, read by the child's id", async () => {
     const CHILD = `${RUN}/0/c_sub`
     const r = await routes({ instructions: PROMPT0 })
-    const childRow = runRow({ id: CHILD, parent_run_id: RUN, parent_call_id: "c_sub", agent: "researcher", session_id: "" })
+    const childRow = runRow({
+      id: CHILD,
+      parent_run_id: RUN,
+      parent_call_id: "c_sub",
+      agent: "researcher",
+      session_id: "",
+    })
     r[`runs/${RUN}`] = { ...runRow({}), children: [childRow] }
     r[`runs/${RUN}/events?after=0&limit=500`] = page([
-      { type: "run_start", id: RUN, model: { provider: "wefttest", name: "script" }, agent: "a" },
+      {
+        type: "run_start",
+        id: RUN,
+        model: { provider: "wefttest", name: "script" },
+        agent: "a",
+      },
       { type: "step_start", run_id: RUN, index: 0 },
-      { type: "tool_start", run_id: RUN, seq: 1, call_id: "c_sub", name: "research", args: { prompt: "dig" } },
-      { type: "tool_finish", run_id: RUN, seq: 1, call_id: "c_sub", name: "research", content: "found it", is_error: false },
-      { type: "step_finish", run_id: RUN, index: 0, reason: "tool_calls", usage: U },
+      {
+        type: "tool_start",
+        run_id: RUN,
+        seq: 1,
+        call_id: "c_sub",
+        name: "research",
+        args: { prompt: "dig" },
+      },
+      {
+        type: "tool_finish",
+        run_id: RUN,
+        seq: 1,
+        call_id: "c_sub",
+        name: "research",
+        content: "found it",
+        is_error: false,
+      },
+      {
+        type: "step_finish",
+        run_id: RUN,
+        index: 0,
+        reason: "tool_calls",
+        usage: U,
+      },
       { type: "run_finish", run_id: RUN, usage: U, steps: 1 },
     ])
     r[REQS] = { requests: goldenRows().slice(0, 1) }
@@ -453,18 +688,51 @@ describe("the tab's blocks", () => {
   it("a child whose history cannot be read says so and hands off to Studio, never a dead button", async () => {
     const CHILD = `${RUN}/0/c_sub`
     const r = await routes({ instructions: PROMPT0 })
-    const childRow = runRow({ id: CHILD, parent_run_id: RUN, parent_call_id: "c_sub", agent: "researcher", session_id: "" })
+    const childRow = runRow({
+      id: CHILD,
+      parent_run_id: RUN,
+      parent_call_id: "c_sub",
+      agent: "researcher",
+      session_id: "",
+    })
     r[`runs/${RUN}`] = { ...runRow({}), children: [childRow] }
     r[`runs/${RUN}/events?after=0&limit=500`] = page([
-      { type: "run_start", id: RUN, model: { provider: "wefttest", name: "script" }, agent: "a" },
+      {
+        type: "run_start",
+        id: RUN,
+        model: { provider: "wefttest", name: "script" },
+        agent: "a",
+      },
       { type: "step_start", run_id: RUN, index: 0 },
-      { type: "tool_start", run_id: RUN, seq: 1, call_id: "c_sub", name: "research", args: {} },
-      { type: "tool_finish", run_id: RUN, seq: 1, call_id: "c_sub", name: "research", content: "found it", is_error: false },
-      { type: "step_finish", run_id: RUN, index: 0, reason: "tool_calls", usage: U },
+      {
+        type: "tool_start",
+        run_id: RUN,
+        seq: 1,
+        call_id: "c_sub",
+        name: "research",
+        args: {},
+      },
+      {
+        type: "tool_finish",
+        run_id: RUN,
+        seq: 1,
+        call_id: "c_sub",
+        name: "research",
+        content: "found it",
+        is_error: false,
+      },
+      {
+        type: "step_finish",
+        run_id: RUN,
+        index: 0,
+        reason: "tool_calls",
+        usage: U,
+      },
       { type: "run_finish", run_id: RUN, usage: U, steps: 1 },
     ])
     r[REQS] = { requests: goldenRows().slice(0, 1) }
-    r[`runs/${CHILD}/events?after=0&limit=500`] = () => new Response("down", { status: 500 })
+    r[`runs/${CHILD}/events?after=0&limit=500`] = () =>
+      new Response("down", { status: 500 })
     fakeStudio(r, META_R)
     const el = await openTab()
     const box = () => tp(el).querySelector(`[data-weft-rq-child="${CHILD}"]`)!
@@ -472,36 +740,66 @@ describe("the tab's blocks", () => {
     await settle()
     expect(box().querySelector("button")).toBeNull()
     expect(box().textContent).toContain("child's history unreachable")
-    expect(box().querySelector(`a[data-weft-handoff="${CHILD}"]`)?.getAttribute("href")).toBe(
-      `http://studio.test/studio/runs/${encodeURIComponent(CHILD)}`
-    )
+    expect(
+      box()
+        .querySelector(`a[data-weft-handoff="${CHILD}"]`)
+        ?.getAttribute("href")
+    ).toBe(`http://studio.test/studio/runs/${encodeURIComponent(CHILD)}`)
   })
 
   it("after a compaction the step shows the marker, and its messages the compacted badge", async () => {
     const recorded = golden<RunDoc>("run-compacted")
     const rows = await rowsFor([PROMPT0, PROMPT0, PROMPT0])
     rows[2].body.messages_ref = { index: 5, count: 4 }
-    const r = await routes({ instructions: PROMPT0, requests: { requests: rows } })
-    r[`runs/${RUN}`] = { ...runRow({ steps: 3 }), instructions_hash: await sha256Hex(PROMPT0), children: [], compactions: recorded.compactions }
-    r[`runs/${RUN}/events?after=0&limit=500`] = page(golden<{ events: unknown[] }>("events-compacted").events)
+    const r = await routes({
+      instructions: PROMPT0,
+      requests: { requests: rows },
+    })
+    r[`runs/${RUN}`] = {
+      ...runRow({ steps: 3 }),
+      instructions_hash: await sha256Hex(PROMPT0),
+      children: [],
+      compactions: recorded.compactions,
+    }
+    r[`runs/${RUN}/events?after=0&limit=500`] = page(
+      golden<{ events: unknown[] }>("events-compacted").events
+    )
     r[`runs/${RUN}/transcript`] = golden("transcript-compacted")
     fakeStudio(r, META_R)
     const el = await openTab()
     expect(tp(el).querySelector("[data-weft-compaction]")).toBeNull()
     await pickStep(el, 2)
     const m = tp(el).querySelector('[data-weft-compaction="2"]')!
-    expect(m.textContent).toContain("2 messages rewritten into 1 by PrepareStep")
+    expect(m.textContent).toContain(
+      "2 messages rewritten into 1 by PrepareStep"
+    )
     expect(m.querySelector('[data-hole="compacted"]')).not.toBeNull()
-    expect(tp(el).querySelector('[data-weft-rq="messages"] [data-hole="compacted"]')).not.toBeNull()
+    expect(
+      tp(el).querySelector('[data-weft-rq="messages"] [data-hole="compacted"]')
+    ).not.toBeNull()
   })
 
   it("the tab is what the keyed patch keeps: a tail's deltas mutate nothing in it", async () => {
-    const r = await routes({ instructions: PROMPT0, requests: { requests: goldenRows().slice(0, 1) } })
+    const r = await routes({
+      instructions: PROMPT0,
+      requests: { requests: goldenRows().slice(0, 1) },
+    })
     const running = runRow({ status: "running", finished: null, steps: 2 })
-    r["runs?public_id=pub_orders&limit=50"] = { total: 1, runs: [running], next_before: null }
-    r[`runs/${RUN}`] = { ...running, instructions_hash: await sha256Hex(PROMPT0), children: [] }
+    r["runs?public_id=pub_orders&limit=50"] = {
+      total: 1,
+      runs: [running],
+      next_before: null,
+    }
+    r[`runs/${RUN}`] = {
+      ...running,
+      instructions_hash: await sha256Hex(PROMPT0),
+      children: [],
+    }
     r[`runs/${RUN}/events?after=0&limit=500`] = page(
-      [...runEvents(RUN).slice(0, 3), { type: "step_start", run_id: RUN, index: 1 }],
+      [
+        ...runEvents(RUN).slice(0, 3),
+        { type: "step_start", run_id: RUN, index: 1 },
+      ],
       { done: false }
     )
     r[`runs/${RUN}/transcript`] = transcript([user("where is my order #4411?")])
@@ -512,39 +810,69 @@ describe("the tab's blocks", () => {
     expect(tp(el).textContent).toContain("not stored yet")
     // Read a recorded step while the tail streams: every block drawn.
     await pickStep(el, 0)
-    for (const b of ["system", "messages", "tools", "params", "tool_choice", "thinking"]) expect(tp(el).querySelector(`[data-weft-rq="${b}"]`), b).not.toBeNull()
-    expect(tp(el).querySelector("[data-weft-prompt]")?.textContent).toBe(PROMPT0)
+    for (const b of [
+      "system",
+      "messages",
+      "tools",
+      "params",
+      "tool_choice",
+      "thinking",
+    ])
+      expect(tp(el).querySelector(`[data-weft-rq="${b}"]`), b).not.toBeNull()
+    expect(tp(el).querySelector("[data-weft-prompt]")?.textContent).toBe(
+      PROMPT0
+    )
     const tail = FakeEventSource.last(`run=${RUN}`)!
     const inTab: MutationRecord[] = []
     const mo = new MutationObserver((ms) => {
       for (const m of ms) if (tp(el).contains(m.target)) inTab.push(m)
     })
-    mo.observe(el.shadowRoot!, { subtree: true, childList: true, attributes: true, characterData: true })
+    mo.observe(el.shadowRoot!, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      characterData: true,
+    })
     for (let i = 0; i < 5; i++) {
-      tail.emit("record", { run_id: RUN, kind: "delta", pos: i, time: T0, event: { type: "text_delta", run_id: RUN, text: ` w${i}` } })
+      tail.emit("record", {
+        run_id: RUN,
+        kind: "delta",
+        pos: i,
+        time: T0,
+        event: { type: "text_delta", run_id: RUN, text: ` w${i}` },
+      })
       await settle(30)
     }
     await settle(150)
-    for (const m of mo.takeRecords()) if (tp(el).contains(m.target)) inTab.push(m)
+    for (const m of mo.takeRecords())
+      if (tp(el).contains(m.target)) inTab.push(m)
     mo.disconnect()
     // The deltas reached the (hidden) story's streaming card…
-    expect($(el, '.weft-step[data-weft-step="1"] .weft-stream')?.textContent).toContain("w4")
+    expect(
+      $(el, '.weft-step[data-weft-step="1"] .weft-stream')?.textContent
+    ).toContain("w4")
     // …and not one node of the Request tab moved.
     expect(inTab).toEqual([])
   })
 })
 
-const tab = (el: WeftDevtools) => $(el, "#weft-tab-request")?.getAttribute("aria-selected")
-
+const tab = (el: WeftDevtools) =>
+  $(el, "#weft-tab-request")?.getAttribute("aria-selected")
 
 describe("the manifest the tab reads (review 2, 10, 11)", () => {
-  const OVERRIDE = [invokeAgent({ "weft.override.hash": "f00d", "weft.override.instructions": true })]
+  const OVERRIDE = [
+    invokeAgent({
+      "weft.override.hash": "f00d",
+      "weft.override.instructions": true,
+    }),
+  ]
   const caption = (el: WeftDevtools) => diff(el)?.caption
 
   it("a failed read is asked again after the backoff, not kept until reload", async () => {
     let n = 0
     const r = await routes({ instructions: PROMPT0, spans: OVERRIDE })
-    r.manifest = () => (++n === 1 ? new Response("{}", { status: 500 }) : manifest(REGISTERED))
+    r.manifest = () =>
+      ++n === 1 ? new Response("{}", { status: 500 }) : manifest(REGISTERED)
     const studio = fakeStudio(r, META_R)
     const t0 = Date.now()
     const now = vi.spyOn(Date, "now").mockReturnValue(t0)
@@ -561,12 +889,20 @@ describe("the manifest the tab reads (review 2, 10, 11)", () => {
     await pickStep(el, 0)
     await settle(30)
     expect(studio.gets("manifest").length).toBe(2)
-    expect(caption(el)).toBe("diff vs the registered instructions (overridden for this run)")
+    expect(caption(el)).toBe(
+      "diff vs the registered instructions (overridden for this run)"
+    )
   })
 
   it("a redeploy: a manifest that does not list the run's hash is asked again once, and the new one verifies", async () => {
     let n = 0
-    const stale = { ...manifest(REGISTERED), agents: manifest(REGISTERED).agents.map((a) => ({ ...a, manifest_hash: "sha256:old" })) }
+    const stale = {
+      ...manifest(REGISTERED),
+      agents: manifest(REGISTERED).agents.map((a) => ({
+        ...a,
+        manifest_hash: "sha256:old",
+      })),
+    }
     const r = await routes({ instructions: PROMPT0, spans: OVERRIDE })
     r.manifest = () => (++n === 1 ? stale : manifest(REGISTERED))
     const studio = fakeStudio(r, META_R)
@@ -576,7 +912,9 @@ describe("the manifest the tab reads (review 2, 10, 11)", () => {
     await pickStep(el, 0)
     await settle(30)
     expect(studio.gets("manifest").length).toBe(2)
-    expect(caption(el)).toBe("diff vs the registered instructions (overridden for this run)")
+    expect(caption(el)).toBe(
+      "diff vs the registered instructions (overridden for this run)"
+    )
     // Listed now: no third read.
     await pickStep(el, 1)
     await pickStep(el, 0)
@@ -584,22 +922,39 @@ describe("the manifest the tab reads (review 2, 10, 11)", () => {
   })
 
   it("a playground token reads the manifest once, and the caption is the dev token's", async () => {
-    const studio = fakeStudio(await routes({ instructions: PROMPT0, manifest: manifest(REGISTERED), spans: OVERRIDE }), META_R)
+    const studio = fakeStudio(
+      await routes({
+        instructions: PROMPT0,
+        manifest: manifest(REGISTERED),
+        spans: OVERRIDE,
+      }),
+      META_R
+    )
     const el = await openTab({ ...BASE, "data-token": claims("playground") })
     await settle(50)
     expect(marks(el)).toEqual(["overridden by experiment"])
-    expect(caption(el)).toBe("diff vs the registered instructions (overridden for this run)")
+    expect(caption(el)).toBe(
+      "diff vs the registered instructions (overridden for this run)"
+    )
     await pickStep(el, 1)
     await pickStep(el, 0)
     expect(studio.gets("manifest").length).toBe(1)
-    expect(studio.calls.find((c) => c.path === "manifest")?.headers.Authorization).toBe(`Bearer ${claims("playground")}`)
+    expect(
+      studio.calls.find((c) => c.path === "manifest")?.headers.Authorization
+    ).toBe(`Bearer ${claims("playground")}`)
   })
 
   it("the composition checks are bounded (COMPOSED_MAX, the oldest dropped)", async () => {
     composedCache.clear()
     for (let i = 0; i < COMPOSED_MAX; i++) composedCache.set(`k${i}`, true)
     // A first step that is not its instructions asks for one check.
-    fakeStudio(await routes({ instructions: REGISTERED, manifest: manifest(REGISTERED) }), META_R)
+    fakeStudio(
+      await routes({
+        instructions: REGISTERED,
+        manifest: manifest(REGISTERED),
+      }),
+      META_R
+    )
     const el = await openTab()
     await settle(50)
     expect(marks(el)).toEqual(["changed by PrepareStep"])
@@ -612,11 +967,25 @@ describe("A6.2: the wire link", () => {
   const RAW = {
     step: 1,
     attempt: 1,
-    request: { method: "POST", url: "https://api.example/v1/messages", headers: {}, media_type: "application/json", body: "{}", bytes: 2 },
-    response: { status: 200, headers: {}, media_type: "text/event-stream", body: "data: ok\n\n", bytes: 10 },
+    request: {
+      method: "POST",
+      url: "https://api.example/v1/messages",
+      headers: {},
+      media_type: "application/json",
+      body: "{}",
+      bytes: 2,
+    },
+    response: {
+      status: 200,
+      headers: {},
+      media_type: "text/event-stream",
+      body: "data: ok\n\n",
+      bytes: 10,
+    },
     redacted_headers: ["x-api-key"],
   }
-  const wire = (el: WeftDevtools) => tp(el).querySelectorAll<HTMLAnchorElement>("[data-weft-wire-link]")
+  const wire = (el: WeftDevtools) =>
+    tp(el).querySelectorAll<HTMLAnchorElement>("[data-weft-wire-link]")
 
   it("a step whose row carries raw gets one anchor: links.ts's deep link to the step's Wire tab, opened in Studio", async () => {
     const rows = goldenRows()
@@ -626,8 +995,15 @@ describe("A6.2: the wire link", () => {
     await pickStep(el, 1)
     const links = wire(el)
     expect(links.length).toBe(1)
-    expect(links[0].getAttribute("href")).toBe(href(BASE["data-endpoint"], runLink(RUN, { step: 1, view: "story", pane: "wire" })))
-    expect(links[0].getAttribute("href")).toBe(`http://studio.test/studio/runs/${RUN}?step=1&view=story&pane=wire`)
+    expect(links[0].getAttribute("href")).toBe(
+      href(
+        BASE["data-endpoint"],
+        runLink(RUN, { step: 1, view: "story", pane: "wire" })
+      )
+    )
+    expect(links[0].getAttribute("href")).toBe(
+      `http://studio.test/studio/runs/${RUN}?step=1&view=story&pane=wire`
+    )
     expect(links[0].target).toBe("_blank")
     expect(links[0].textContent).toBe("wire ↗")
     // The panel never draws a body: the link is all of it.

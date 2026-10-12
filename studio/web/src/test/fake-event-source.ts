@@ -62,7 +62,10 @@ export class FakeEventSource {
 
   /** The connection is up. */
   connect() {
-    if (this.refused) throw new Error(`FakeEventSource: ${this.url} was refused: ${this.refused}`)
+    if (this.refused)
+      throw new Error(
+        `FakeEventSource: ${this.url} was refused: ${this.refused}`
+      )
     this.readyState = FakeEventSource.OPEN
     this.onopen?.()
   }

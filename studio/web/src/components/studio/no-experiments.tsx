@@ -12,7 +12,9 @@ import { HoleBadge } from "@/components/studio/hole-badge"
 export function NoExperiments({ why }: { why?: string }) {
   return (
     <div className="mx-auto max-w-lg space-y-2 py-24 text-center">
-      <p className="text-sm">This Studio has no playground, so no experiments.</p>
+      <p className="text-sm">
+        This Studio has no playground, so no experiments.
+      </p>
       {why ? (
         <p className="text-xs text-muted-foreground" data-experiments-why>
           {why}
@@ -24,7 +26,10 @@ export function NoExperiments({ why }: { why?: string }) {
 
 /** Whether this bearer may read the experiments: under the playground
  * capability, any bearer but a panel token (read or playground). */
-export function mayReadExperiments(capabilities: readonly string[], token = studioToken()): boolean {
+export function mayReadExperiments(
+  capabilities: readonly string[],
+  token = studioToken()
+): boolean {
   return capabilities.includes("playground") && tokenScopeOf(token) === ""
 }
 
@@ -35,9 +40,17 @@ export const EXPERIMENTS_HIDDEN_REASON =
 /** The page under a panel token: the hidden badge, nothing fetched. */
 export function ExperimentsHidden() {
   return (
-    <div className="mx-auto max-w-lg space-y-2 py-24 text-center" data-experiments-hidden>
+    <div
+      className="mx-auto max-w-lg space-y-2 py-24 text-center"
+      data-experiments-hidden
+    >
       <p className="text-sm">Experiments</p>
-      <HoleBadge hole="hidden" detail note="dev token only" reason={EXPERIMENTS_HIDDEN_REASON} />
+      <HoleBadge
+        hole="hidden"
+        detail
+        note="dev token only"
+        reason={EXPERIMENTS_HIDDEN_REASON}
+      />
     </div>
   )
 }

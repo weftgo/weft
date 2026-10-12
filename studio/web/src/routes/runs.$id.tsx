@@ -30,7 +30,14 @@ import { compactionsOf } from "@/lib/compaction"
 import { applyTranscript, fold, linkView } from "@/lib/events"
 import { isPlainShortcut } from "@/lib/keys"
 import { overrideOf } from "@/lib/request-pane"
-import { canReplay, continueHere, editPromptAndReplay, editTranscript, replayFromStep, rerun } from "@/lib/replay"
+import {
+  canReplay,
+  continueHere,
+  editPromptAndReplay,
+  editTranscript,
+  replayFromStep,
+  rerun,
+} from "@/lib/replay"
 import { replayFromSearch, replaySearch } from "@/lib/links"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { editKey, impliedFromStep, putEdit, schemaOf } from "@/lib/edits"
@@ -104,7 +111,11 @@ function knownSel(
   timeSpans: TraceSpan[]
 ): string | undefined {
   if (!sel) return undefined
-  if (fullSpans.some((s) => s.key === sel) || timeSpans.some((s) => s.key === sel)) return sel
+  if (
+    fullSpans.some((s) => s.key === sel) ||
+    timeSpans.some((s) => s.key === sel)
+  )
+    return sel
   const call = /^c:([^:]+)$/.exec(sel)?.[1]
   if (!call) return undefined
   // A top-level call's key is c:<step|resume>:<call id>; a child's
@@ -121,9 +132,14 @@ function knownSel(
 const INVOKE_AGENT_WAIT_MS = 30_000
 
 /** hasInvokeAgent: the run's own invoke_agent span is among these. */
-function hasInvokeAgent(spans: TimedSpan[] | undefined, runId: string): boolean {
+function hasInvokeAgent(
+  spans: TimedSpan[] | undefined,
+  runId: string
+): boolean {
   return (spans ?? []).some(
-    (s) => s.attrs["gen_ai.operation.name"] === "invoke_agent" && s.attrs["weft.run.id"] === runId
+    (s) =>
+      s.attrs["gen_ai.operation.name"] === "invoke_agent" &&
+      s.attrs["weft.run.id"] === runId
   )
 }
 
@@ -132,11 +148,17 @@ function hasInvokeAgent(spans: TimedSpan[] | undefined, runId: string): boolean 
 function timeStepKey(timeSpans: TraceSpan[], n: number): string | undefined {
   const ofStep = timeSpans.filter((s) => {
     const v = s.timed?.span.attrs["weft.step.index"]
-    return (typeof v === "number" || typeof v === "string") && String(v) === String(n)
+    return (
+      (typeof v === "number" || typeof v === "string") &&
+      String(v) === String(n)
+    )
   })
   const chat = ofStep.find((s) => {
     const sp = s.timed?.span
-    return sp?.attrs["gen_ai.operation.name"] === "chat" || sp?.name.startsWith("chat")
+    return (
+      sp?.attrs["gen_ai.operation.name"] === "chat" ||
+      sp?.name.startsWith("chat")
+    )
   })
   return (chat ?? ofStep.at(0))?.key
 }
@@ -144,7 +166,9 @@ function timeStepKey(timeSpans: TraceSpan[], n: number): string | undefined {
 export const Route = createFileRoute("/runs/$id")({
   validateSearch: (search: Record<string, unknown>): RunSearch => ({
     step:
-      typeof search.step === "number" && Number.isInteger(search.step) && search.step >= 0
+      typeof search.step === "number" &&
+      Number.isInteger(search.step) &&
+      search.step >= 0
         ? search.step
         : undefined,
     view:
@@ -152,7 +176,10 @@ export const Route = createFileRoute("/runs/$id")({
         ? search.view
         : undefined,
     raw: search.raw === "doc" ? "doc" : undefined,
-    pane: search.pane === "request" || search.pane === "wire" ? search.pane : undefined,
+    pane:
+      search.pane === "request" || search.pane === "wire"
+        ? search.pane
+        : undefined,
     sel: typeof search.sel === "string" && search.sel ? search.sel : undefined,
     d: search.d === "events" || search.d === "json" ? search.d : undefined,
     axis: search.axis === "time" ? "time" : undefined,
@@ -178,7 +205,9 @@ function RunPage() {
   const search = Route.useSearch()
   const navigate = useNavigate({ from: "/runs/$id" })
   // A step's pane (A6.2) lives on its story card: ?pane= opens there.
-  const view: View = search.view ?? (search.pane && search.step !== undefined ? "story" : "trace")
+  const view: View =
+    search.view ??
+    (search.pane && search.step !== undefined ? "story" : "trace")
   const [layout, setLayout] = useState<Layout>(readLayout)
   const { has, caps, why: capsWhy, loading: capsLoading } = useCapabilities()
   const liveCapable = has("live")
@@ -186,26 +215,39 @@ function RunPage() {
   // has the playground and the bearer may act (a read-scoped panel
   // token may not) — hidden, not disabled, otherwise.
   const replayable = canReplay(caps, studioToken())
-  const [replay, setReplay] = useState<{ req: ReplayRequest | null; n: number }>({
+  const [replay, setReplay] = useState<{
+    req: ReplayRequest | null
+    n: number
+  }>({
     req: null,
     n: 0,
   })
   // The transcript editor's edits (plan F2): one command's, made in
   // the Story and listed in the drawer; a verb's opening starts them
   // over from its draft, closing the drawer drops them.
-  const [edits, setEdits] = useState<{ list: ReplayEdit[]; invalid: Record<string, string> }>({ list: [], invalid: {} })
+  const [edits, setEdits] = useState<{
+    list: ReplayEdit[]
+    invalid: Record<string, string>
+  }>({ list: [], invalid: {} })
   // The drawer's state is in the URL (G2): written with replace — an
   // opening is not a history entry — and read back on a fresh load.
   const writeReplay = useCallback(
     (r: ReplayLinkState | null) =>
-      void navigate({ search: (prev) => ({ ...prev, ...replaySearch(r) }), replace: true }),
+      void navigate({
+        search: (prev) => ({ ...prev, ...replaySearch(r) }),
+        replace: true,
+      }),
     [navigate]
   )
   const openReplay = useCallback(
     (req: ReplayRequest) => {
       setEdits({ list: req.draft.edits, invalid: {} })
       setReplay((cur) => ({ req, n: cur.n + 1 }))
-      writeReplay({ verb: req.draft.verb, from: req.draft.fromStep, ...(req.runID !== id ? { of: req.runID } : {}) })
+      writeReplay({
+        verb: req.draft.verb,
+        from: req.draft.fromStep,
+        ...(req.runID !== id ? { of: req.runID } : {}),
+      })
     },
     [writeReplay, id]
   )
@@ -250,10 +292,20 @@ function RunPage() {
   const runPending = run.isPending
   const runDerived = isDerived(run.data)
   useEffect(() => {
-    if (search.save !== "test" || capsLoading || runPending || saved.current === id) return
+    if (
+      search.save !== "test" ||
+      capsLoading ||
+      runPending ||
+      saved.current === id
+    )
+      return
     saved.current = id
-    void navigate({ search: (prev) => ({ ...prev, save: undefined }), replace: true })
-    if (runDerived) notifySave({ kind: "save-test", ok: false, message: derivedWords() })
+    void navigate({
+      search: (prev) => ({ ...prev, save: undefined }),
+      replace: true,
+    })
+    if (runDerived)
+      notifySave({ kind: "save-test", ok: false, message: derivedWords() })
     else if (mayExportTestWith(caps, studioToken())) void saveTest(id)
     else
       notifySave({
@@ -263,7 +315,16 @@ function RunPage() {
           ? "a read-scoped panel token does not read the run's prompts"
           : `this Studio has no export capability${capsWhy("export") ? `: ${capsWhy("export")}` : ""}`,
       })
-  }, [search.save, capsLoading, runPending, runDerived, caps, capsWhy, id, navigate])
+  }, [
+    search.save,
+    capsLoading,
+    runPending,
+    runDerived,
+    caps,
+    capsWhy,
+    id,
+    navigate,
+  ])
   // The tab is titled while the run loads too (lib/title.ts).
   useDocumentTitle({ page: "run", id, status: run.data?.status })
   // A link with the drawer's state reopens it once, on that step, from
@@ -283,14 +344,24 @@ function RunPage() {
       return
     }
     const draft =
-      r.verb === "rerun" ? rerun() : r.verb === "continue" ? continueHere() : r.verb === "edit_prompt" ? editPromptAndReplay(r.from) : replayFromStep(r.from)
+      r.verb === "rerun"
+        ? rerun()
+        : r.verb === "continue"
+          ? continueHere()
+          : r.verb === "edit_prompt"
+            ? editPromptAndReplay(r.from)
+            : replayFromStep(r.from)
     // No setEdits: a linked verb's draft carries none, and the page
     // remounts per run id (remountDeps), so it starts with none held.
     setReplay((cur) => ({ req: { runID: r.of ?? id, draft }, n: cur.n + 1 }))
     // The link's edits were never in it: a reopened edit / edit_result
     // drawer is the rebuilt draft's verb, and the URL says so.
     if (draft.verb !== r.verb || draft.fromStep !== r.from)
-      writeReplay({ verb: draft.verb, from: draft.fromStep, ...(r.of ? { of: r.of } : {}) })
+      writeReplay({
+        verb: draft.verb,
+        from: draft.fromStep,
+        ...(r.of ? { of: r.of } : {}),
+      })
   }, [capsLoading, replayable, search, id, writeReplay])
   const transcript = useQuery({
     ...transcriptQuery(id),
@@ -323,10 +394,14 @@ function RunPage() {
   // over from position 0 when the capability arrived — the whole
   // stream read twice. It waits for the run's document too, and a
   // deleted run (404) is never followed (storyRunID).
-  const stream = useRunEvents(capsLoading ? "" : storyRunID(id, run), runStatus, {
-    live: liveCapable,
-    onRun: onRunFrame,
-  })
+  const stream = useRunEvents(
+    capsLoading ? "" : storyRunID(id, run),
+    runStatus,
+    {
+      live: liveCapable,
+      onRun: onRunFrame,
+    }
+  )
 
   // The run's request record (ADR 0028 §10), every page: each step
   // shows what it called the model with. Only where the server reports
@@ -352,15 +427,22 @@ function RunPage() {
   const loadedStatus = run.data?.status
   const loadedFinished = run.data?.finished
   useEffect(() => {
-    const was = seenStatus.current.id === id ? seenStatus.current.status : undefined
+    const was =
+      seenStatus.current.id === id ? seenStatus.current.status : undefined
     seenStatus.current = { id, status: loadedStatus }
     if (endSeen.current.id !== id) endSeen.current = { id, at: null }
-    if (was === undefined && loadedStatus && loadedStatus !== "running" && loadedFinished) {
+    if (
+      was === undefined &&
+      loadedStatus &&
+      loadedStatus !== "running" &&
+      loadedFinished
+    ) {
       const fin = Date.parse(loadedFinished)
       const now = Date.now()
       // A server clock ahead of this one counts as now: the window is
       // never longer than INVOKE_AGENT_WAIT_MS from the open.
-      if (Number.isFinite(fin) && now - fin <= INVOKE_AGENT_WAIT_MS) endSeen.current.at = Math.min(fin, now)
+      if (Number.isFinite(fin) && now - fin <= INVOKE_AGENT_WAIT_MS)
+        endSeen.current.at = Math.min(fin, now)
     }
     if (was === "running" && loadedStatus && loadedStatus !== "running") {
       endSeen.current.at = Date.now()
@@ -369,7 +451,10 @@ function RunPage() {
       // end: the spans are read again too — joining a read the status
       // change itself started (the story view enables it now), never a
       // second one.
-      void queryClient.invalidateQueries({ queryKey: ["spans", id] }, { cancelRefetch: false })
+      void queryClient.invalidateQueries(
+        { queryKey: ["spans", id] },
+        { cancelRefetch: false }
+      )
       // A step doc read while running carries running-time holes (no
       // spans yet): every cached step of the run is read again.
       void queryClient.invalidateQueries({ queryKey: ["step", id] })
@@ -402,7 +487,10 @@ function RunPage() {
       return hasInvokeAgent(q.state.data?.spans, id) ? false : 2000
     },
   })
-  const override = useMemo(() => overrideOf(spans.data?.spans, id), [spans.data, id])
+  const override = useMemo(
+    () => overrideOf(spans.data?.spans, id),
+    [spans.data, id]
+  )
   const requests = useMemo(
     () =>
       requestsCapable
@@ -445,7 +533,10 @@ function RunPage() {
   // A derived run (plan I1.3) has spans and no events: its one axis is
   // time — the position axis and its playhead have nothing to show.
   const derived = isDerived(run.data)
-  const axis: "events" | "time" = derived && haveTime ? "time" : (search.axis ?? (haveTime ? "time" : "events"))
+  const axis: "events" | "time" =
+    derived && haveTime
+      ? "time"
+      : (search.axis ?? (haveTime ? "time" : "events"))
 
   // The replay playhead: null = live. Seeks and pauses write t to the
   // URL (a paste reproduces the exact view, A3); playback ticks do
@@ -483,7 +574,9 @@ function RunPage() {
     axis === "events" && ph !== null && ph < stream.events.length
   const foldedNow =
     transcript.data && runStatus !== "running"
-      ? applyTranscript(stream.folded, transcript.data.batches, { replace: true })
+      ? applyTranscript(stream.folded, transcript.data.batches, {
+          replace: true,
+        })
       : stream.folded
   // The replay fold goes through the same overlay: the transcript's
   // words and `derived` placements, and the recorder's badges (the
@@ -509,7 +602,15 @@ function RunPage() {
       steps: prefix.steps.map((st) => byIndex.get(st.index) ?? st),
       unplaced: foldedNow.unplaced,
     }
-  }, [replaying, stream.events, stream.attrs, foldedNow, ph, batches, runStatus])
+  }, [
+    replaying,
+    stream.events,
+    stream.attrs,
+    foldedNow,
+    ph,
+    batches,
+    runStatus,
+  ])
   // While scrubbing the run reads as running: calls past the playhead
   // are "running", not "never completed".
   const viewStatus = replaying ? "running" : runStatus
@@ -561,7 +662,12 @@ function RunPage() {
     (key: string) =>
       void navigate({
         // The trace's selection: a pane would hold the view on the story.
-        search: (prev) => ({ ...prev, sel: key, view: undefined, pane: undefined }),
+        search: (prev) => ({
+          ...prev,
+          sel: key,
+          view: undefined,
+          pane: undefined,
+        }),
         replace: true,
       }),
     [navigate]
@@ -593,7 +699,11 @@ function RunPage() {
       // A step's pane (?pane=, A6.2) is the step's the link landed on:
       // it never rides onto the steps the scrubber crosses.
       void navigate({
-        search: (prev) => ({ ...prev, step: n, pane: n === prev.step ? prev.pane : undefined }),
+        search: (prev) => ({
+          ...prev,
+          step: n,
+          pane: n === prev.step ? prev.pane : undefined,
+        }),
         replace: mode === "replace",
       }),
     [navigate]
@@ -608,7 +718,11 @@ function RunPage() {
         void navigate({
           search: (prev) => {
             const next = prev.view === v || v === "trace" ? undefined : v
-            return { ...prev, view: next, pane: next === "story" ? prev.pane : undefined }
+            return {
+              ...prev,
+              view: next,
+              pane: next === "story" ? prev.pane : undefined,
+            }
           },
         })
       if (e.key === "r") setView("raw")
@@ -628,8 +742,7 @@ function RunPage() {
           } else if (++tries < 10) requestAnimationFrame(focusBox)
         }
         requestAnimationFrame(focusBox)
-      }
-      else if ((e.key === "j" || e.key === "k") && view === "trace") {
+      } else if ((e.key === "j" || e.key === "k") && view === "trace") {
         const i = traceSpans.findIndex((s) => s.key === selKey)
         const next = traceSpans.at(e.key === "j" ? i + 1 : Math.max(i - 1, 0))
         if (next) select(next.key)
@@ -669,7 +782,9 @@ function RunPage() {
   const doc = run.data
   // The editor (plan F2): on the run's own steps, where a replay can
   // keep them — only with the drawer's verbs, never on a running run.
-  const maxFrom = transcript.data ? replayBounds(transcript.data.batches).max : null
+  const maxFrom = transcript.data
+    ? replayBounds(transcript.data.batches).max
+    : null
   // A derived run has no transcript to replay (the playground refuses
   // the source 400): no verbs, no editor, no drawer — its story says
   // why where the verbs would be.
@@ -693,7 +808,11 @@ function RunPage() {
             if (replay.req?.runID !== doc.id) {
               const from = impliedFromStep(list)
               setReplay((cur) => ({
-                req: { runID: doc.id, agent: doc.agent || undefined, draft: editTranscript(from, list) },
+                req: {
+                  runID: doc.id,
+                  agent: doc.agent || undefined,
+                  draft: editTranscript(from, list),
+                },
                 n: cur.n + 1,
               }))
               writeReplay({ verb: "edit", from })
@@ -704,270 +823,285 @@ function RunPage() {
 
   return (
     <ReplayContext.Provider value={replayOn ? openReplay : null}>
-    <EditorContext.Provider value={editor}>
-    <div className="space-y-4">
-      <RunHeader
-        doc={doc}
-        folded={atPlayhead}
-        eventCount={Math.max(doc.event_count, stream.total)}
-        transcript={transcript.data}
-        gaps={stream.gaps}
-      />
-      {evicted ? (
-        <p
-          className="rounded-md border border-dashed px-3 py-2 font-mono text-[11px] text-faint"
-          data-ring-note
-        >
-          showing the last {stream.events.length.toLocaleString()} events (positions{" "}
-          {stream.base.toLocaleString()}–{(stream.total - 1).toLocaleString()}); the{" "}
-          {stream.base.toLocaleString()} before them are on the API (api/runs/{doc.id}
-          /events?after=) — the story and the trace hold the whole run, replay needs the
-          whole stream
-        </p>
-      ) : axis === "events" && !derived ? (
-        <ReplayBar
-          events={stream.events}
-          eventCount={doc.event_count}
-          playhead={playhead}
-          onTick={setPlayhead}
-          onSeek={seek}
-        />
-      ) : null}
-      {/* While running: positions may still be in flight. Once over,
-          the header's gap badge (the run's holes) says it. */}
-      {runStatus === "running" && stream.gaps.length > 0 && (
-        <div className="rounded-md border border-status-bad/30 px-3 py-2 font-mono text-xs text-status-bad">
-          {stream.gaps.length >= 1000 ? "1,000+" : stream.gaps.length} recorded{" "}
-          {stream.gaps.length === 1 ? "event is" : "events are"} missing from the
-          database (position{stream.gaps.length === 1 ? "" : "s"}{" "}
-          {stream.gaps.slice(0, 8).join(", ")}
-          {stream.gaps.length > 8 ? ", …" : ""}) — still in flight, or lost
-          on the way
-        </div>
-      )}
-      {stream.error && (
-        <div className="rounded-md border border-status-bad/30 px-3 py-2 font-mono text-xs text-status-bad">
-          event stream: {stream.error}
-        </div>
-      )}
-      <Tabs
-        value={view}
-        onValueChange={(v) =>
-          void navigate({
-            search: (prev) => ({
-              ...prev,
-              view: v === "raw" || v === "story" ? v : undefined,
-              // A step pane is the story's (it would hold the view there).
-              pane: v === "story" ? prev.pane : undefined,
-            }),
-          })
-        }
-      >
-        <div className="flex flex-wrap items-center gap-3">
-          <TabsList>
-            <TabsTrigger value="trace">trace</TabsTrigger>
-            <TabsTrigger value="story">story</TabsTrigger>
-            <TabsTrigger value="raw">raw</TabsTrigger>
-          </TabsList>
-          {view === "trace" && haveTime && !derived ? (
-            <div className="flex gap-1">
-              {(["events", "time"] as const).map((a) => (
-                <button
-                  key={a}
-                  type="button"
-                  className={`rounded-md border px-2 py-1 font-mono text-[11px] ${
-                    axis === a
-                      ? "border-thread/60 bg-secondary"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                  title={
-                    a === "events"
-                      ? "the event axis: order, and the replay playhead"
-                      : "the time axis: real durations from the run's spans"
-                  }
-                  onClick={() =>
-                    void navigate({
-                      search: (prev) => ({
-                        ...prev,
-                        axis: a === "time" ? "time" : undefined,
-                        sel: undefined,
-                      }),
-                      replace: true,
-                    })
-                  }
-                >
-                  {a}
-                </button>
-              ))}
-            </div>
-          ) : null}
-          <span className="hidden items-center gap-1 text-[11px] text-faint md:flex">
-            <Kbd>e</Kbd>
-            <Kbd>s</Kbd>
-            <Kbd>r</Kbd> views · <Kbd>j</Kbd>
-            <Kbd>k</Kbd> spans ·{" "}
-            {derived ? null : (
-              <>
-                <Kbd>space</Kbd> replay ·{" "}
-              </>
-            )}
-            <Kbd>[</Kbd>
-            <Kbd>]</Kbd> step · <Kbd>n</Kbd> jump to step · <Kbd>?</Kbd> all keys
-          </span>
-          {stream.loading ? (
-            <span className="ml-auto flex items-center gap-1.5 font-mono text-[11px] text-faint">
-              <Spinner className="size-3" /> loading events…
-            </span>
-          ) : null}
-        </div>
-
-        <TabsContent value="trace" className="@container/trace mt-3 space-y-3">
-          {/* A derived run's trace is its spans: until they are here (or
-              if they cannot be read) the derived note stands in — never
-              the position axis's words over a fold of zero events. */}
-          {derived && !haveTime ? (
-            <DerivedNote what="trace" />
-          ) : (
-          <>
-          <div className="flex items-start gap-2">
-            <div className="min-w-0 flex-1">
-              <FlowStrip
-                pills={flow}
-                runStatus={viewStatus}
-                selectedKey={selKey}
-                onSelect={select}
-              />
-            </div>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className="shrink-0 text-muted-foreground"
-              aria-label={`layout: ${layout}`}
-              title={
-                layout === "auto"
-                  ? "layout: side by side when the page is wide enough (click: always side by side)"
-                  : layout === "split"
-                    ? "layout: side by side (click: stacked)"
-                    : "layout: stacked (click: automatic)"
-              }
-              onClick={cycleLayout}
-            >
-              {layout === "stack" ? (
-                <Rows3 data-slot="icon" />
-              ) : (
-                <Columns2 data-slot="icon" />
-              )}
-            </Button>
-          </div>
-          <div className={`grid items-start gap-3 ${gridCols}`}>
-            <Waterfall
-              spans={traceSpans}
-              domain={
-                axis === "time" && haveTime
-                  ? timeDomain(timed)
-                  : [0, Math.max(0, stream.total - 1)]
-              }
-              unit={axis === "time" ? "ms" : "event"}
-              playhead={axis === "events" ? ph : null}
-              onSeek={axis === "events" ? seek : undefined}
-              onSelect={(sp) => select(sp.key)}
-              selectedId={selected?.id}
-              className="max-h-[60vh] @3xl/trace:max-h-[calc(100vh-8rem)]"
-            />
-            <div className={stickyDetail}>
-              <SpanDetail
-                span={selected}
-                events={stream.events}
-                base={stream.base}
-                doc={doc}
-                runStatus={viewStatus}
-                timed={timed}
-                playhead={axis === "events" ? ph : null}
-                mode={search.d ?? "detail"}
-                onMode={(m) =>
-                  void navigate({
-                    search: (prev) => ({
-                      ...prev,
-                      d: m === "detail" ? undefined : m,
-                    }),
-                    replace: true,
-                  })
-                }
-                onJump={jump}
-                requests={requests}
-              />
-            </div>
-          </div>
-          {selKey && !selected ? (
-            <p className="font-mono text-[11px] text-faint">
-              the selected span ({selKey}) is past the playhead — play forward
-              or press End for live
-            </p>
-          ) : null}
-          </>
-          )}
-        </TabsContent>
-        <TabsContent value="story" className="mt-3">
-          {derived ? (
-            <DerivedStory doc={doc} replayable={replayable} />
-          ) : (
-          <StepList
-            events={stream.events}
-            folded={foldedNow}
-            atPlayhead={atPlayhead}
+      <EditorContext.Provider value={editor}>
+        <div className="space-y-4">
+          <RunHeader
             doc={doc}
-            upTo={axis === "events" ? (ph ?? undefined) : undefined}
-            highlight={search.step}
-            pane={search.step === undefined ? undefined : search.pane}
-            onJump={evicted ? undefined : jump}
-            requests={requests}
+            folded={atPlayhead}
+            eventCount={Math.max(doc.event_count, stream.total)}
             transcript={transcript.data}
-            transcriptError={transcript.isError ? transcript.error.message : undefined}
-            onStep={onStep}
-            stepInputRef={stepInput}
+            gaps={stream.gaps}
           />
+          {evicted ? (
+            <p
+              className="rounded-md border border-dashed px-3 py-2 font-mono text-[11px] text-faint"
+              data-ring-note
+            >
+              showing the last {stream.events.length.toLocaleString()} events
+              (positions {stream.base.toLocaleString()}–
+              {(stream.total - 1).toLocaleString()}); the{" "}
+              {stream.base.toLocaleString()} before them are on the API
+              (api/runs/{doc.id}
+              /events?after=) — the story and the trace hold the whole run,
+              replay needs the whole stream
+            </p>
+          ) : axis === "events" && !derived ? (
+            <ReplayBar
+              events={stream.events}
+              eventCount={doc.event_count}
+              playhead={playhead}
+              onTick={setPlayhead}
+              onSeek={seek}
+            />
+          ) : null}
+          {/* While running: positions may still be in flight. Once over,
+          the header's gap badge (the run's holes) says it. */}
+          {runStatus === "running" && stream.gaps.length > 0 && (
+            <div className="rounded-md border border-status-bad/30 px-3 py-2 font-mono text-xs text-status-bad">
+              {stream.gaps.length >= 1000 ? "1,000+" : stream.gaps.length}{" "}
+              recorded {stream.gaps.length === 1 ? "event is" : "events are"}{" "}
+              missing from the database (position
+              {stream.gaps.length === 1 ? "" : "s"}{" "}
+              {stream.gaps.slice(0, 8).join(", ")}
+              {stream.gaps.length > 8 ? ", …" : ""}) — still in flight, or lost
+              on the way
+            </div>
           )}
-        </TabsContent>
-        <TabsContent value="raw" className="mt-3 space-y-3">
-          {derived ? <DerivedNote what="events" /> : null}
-          <RawView
-            doc={doc}
-            events={stream.events}
-            base={stream.base}
-            eventHoles={stream.folded.eventHoles}
-            playhead={ph}
-            onJump={evicted ? undefined : jump}
-            surface={search.raw ?? "events"}
-            onSurface={(s) =>
+          {stream.error && (
+            <div className="rounded-md border border-status-bad/30 px-3 py-2 font-mono text-xs text-status-bad">
+              event stream: {stream.error}
+            </div>
+          )}
+          <Tabs
+            value={view}
+            onValueChange={(v) =>
               void navigate({
                 search: (prev) => ({
                   ...prev,
-                  raw: s === "doc" ? "doc" : undefined,
+                  view: v === "raw" || v === "story" ? v : undefined,
+                  // A step pane is the story's (it would hold the view there).
+                  pane: v === "story" ? prev.pane : undefined,
                 }),
               })
             }
-          />
-        </TabsContent>
-      </Tabs>
-      {replayOn ? (
-        <ReplayDrawer
-          request={replay.req}
-          requestKey={replay.n}
-          edits={edits.list}
-          invalid={Object.values(edits.invalid)}
-          setEdits={(list) => setEdits((cur) => ({ ...cur, list }))}
-          onClose={() => {
-            setReplay((cur) => ({ ...cur, req: null }))
-            setEdits({ list: [], invalid: {} })
-            writeReplay(null)
-          }}
-          onStep={(from) =>
-            void navigate({ search: (prev) => (prev.replay && prev.from !== from ? { ...prev, from } : prev), replace: true })
-          }
-        />
-      ) : null}
-    </div>
-    </EditorContext.Provider>
+          >
+            <div className="flex flex-wrap items-center gap-3">
+              <TabsList>
+                <TabsTrigger value="trace">trace</TabsTrigger>
+                <TabsTrigger value="story">story</TabsTrigger>
+                <TabsTrigger value="raw">raw</TabsTrigger>
+              </TabsList>
+              {view === "trace" && haveTime && !derived ? (
+                <div className="flex gap-1">
+                  {(["events", "time"] as const).map((a) => (
+                    <button
+                      key={a}
+                      type="button"
+                      className={`rounded-md border px-2 py-1 font-mono text-[11px] ${
+                        axis === a
+                          ? "border-thread/60 bg-secondary"
+                          : "text-muted-foreground hover:text-foreground"
+                      }`}
+                      title={
+                        a === "events"
+                          ? "the event axis: order, and the replay playhead"
+                          : "the time axis: real durations from the run's spans"
+                      }
+                      onClick={() =>
+                        void navigate({
+                          search: (prev) => ({
+                            ...prev,
+                            axis: a === "time" ? "time" : undefined,
+                            sel: undefined,
+                          }),
+                          replace: true,
+                        })
+                      }
+                    >
+                      {a}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+              <span className="hidden items-center gap-1 text-[11px] text-faint md:flex">
+                <Kbd>e</Kbd>
+                <Kbd>s</Kbd>
+                <Kbd>r</Kbd> views · <Kbd>j</Kbd>
+                <Kbd>k</Kbd> spans ·{" "}
+                {derived ? null : (
+                  <>
+                    <Kbd>space</Kbd> replay ·{" "}
+                  </>
+                )}
+                <Kbd>[</Kbd>
+                <Kbd>]</Kbd> step · <Kbd>n</Kbd> jump to step · <Kbd>?</Kbd> all
+                keys
+              </span>
+              {stream.loading ? (
+                <span className="ml-auto flex items-center gap-1.5 font-mono text-[11px] text-faint">
+                  <Spinner className="size-3" /> loading events…
+                </span>
+              ) : null}
+            </div>
+
+            <TabsContent
+              value="trace"
+              className="@container/trace mt-3 space-y-3"
+            >
+              {/* A derived run's trace is its spans: until they are here (or
+              if they cannot be read) the derived note stands in — never
+              the position axis's words over a fold of zero events. */}
+              {derived && !haveTime ? (
+                <DerivedNote what="trace" />
+              ) : (
+                <>
+                  <div className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1">
+                      <FlowStrip
+                        pills={flow}
+                        runStatus={viewStatus}
+                        selectedKey={selKey}
+                        onSelect={select}
+                      />
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      className="shrink-0 text-muted-foreground"
+                      aria-label={`layout: ${layout}`}
+                      title={
+                        layout === "auto"
+                          ? "layout: side by side when the page is wide enough (click: always side by side)"
+                          : layout === "split"
+                            ? "layout: side by side (click: stacked)"
+                            : "layout: stacked (click: automatic)"
+                      }
+                      onClick={cycleLayout}
+                    >
+                      {layout === "stack" ? (
+                        <Rows3 data-slot="icon" />
+                      ) : (
+                        <Columns2 data-slot="icon" />
+                      )}
+                    </Button>
+                  </div>
+                  <div className={`grid items-start gap-3 ${gridCols}`}>
+                    <Waterfall
+                      spans={traceSpans}
+                      domain={
+                        axis === "time" && haveTime
+                          ? timeDomain(timed)
+                          : [0, Math.max(0, stream.total - 1)]
+                      }
+                      unit={axis === "time" ? "ms" : "event"}
+                      playhead={axis === "events" ? ph : null}
+                      onSeek={axis === "events" ? seek : undefined}
+                      onSelect={(sp) => select(sp.key)}
+                      selectedId={selected?.id}
+                      className="max-h-[60vh] @3xl/trace:max-h-[calc(100vh-8rem)]"
+                    />
+                    <div className={stickyDetail}>
+                      <SpanDetail
+                        span={selected}
+                        events={stream.events}
+                        base={stream.base}
+                        doc={doc}
+                        runStatus={viewStatus}
+                        timed={timed}
+                        playhead={axis === "events" ? ph : null}
+                        mode={search.d ?? "detail"}
+                        onMode={(m) =>
+                          void navigate({
+                            search: (prev) => ({
+                              ...prev,
+                              d: m === "detail" ? undefined : m,
+                            }),
+                            replace: true,
+                          })
+                        }
+                        onJump={jump}
+                        requests={requests}
+                      />
+                    </div>
+                  </div>
+                  {selKey && !selected ? (
+                    <p className="font-mono text-[11px] text-faint">
+                      the selected span ({selKey}) is past the playhead — play
+                      forward or press End for live
+                    </p>
+                  ) : null}
+                </>
+              )}
+            </TabsContent>
+            <TabsContent value="story" className="mt-3">
+              {derived ? (
+                <DerivedStory doc={doc} replayable={replayable} />
+              ) : (
+                <StepList
+                  events={stream.events}
+                  folded={foldedNow}
+                  atPlayhead={atPlayhead}
+                  doc={doc}
+                  upTo={axis === "events" ? (ph ?? undefined) : undefined}
+                  highlight={search.step}
+                  pane={search.step === undefined ? undefined : search.pane}
+                  onJump={evicted ? undefined : jump}
+                  requests={requests}
+                  transcript={transcript.data}
+                  transcriptError={
+                    transcript.isError ? transcript.error.message : undefined
+                  }
+                  onStep={onStep}
+                  stepInputRef={stepInput}
+                />
+              )}
+            </TabsContent>
+            <TabsContent value="raw" className="mt-3 space-y-3">
+              {derived ? <DerivedNote what="events" /> : null}
+              <RawView
+                doc={doc}
+                events={stream.events}
+                base={stream.base}
+                eventHoles={stream.folded.eventHoles}
+                playhead={ph}
+                onJump={evicted ? undefined : jump}
+                surface={search.raw ?? "events"}
+                onSurface={(s) =>
+                  void navigate({
+                    search: (prev) => ({
+                      ...prev,
+                      raw: s === "doc" ? "doc" : undefined,
+                    }),
+                  })
+                }
+              />
+            </TabsContent>
+          </Tabs>
+          {replayOn ? (
+            <ReplayDrawer
+              request={replay.req}
+              requestKey={replay.n}
+              edits={edits.list}
+              invalid={Object.values(edits.invalid)}
+              setEdits={(list) => setEdits((cur) => ({ ...cur, list }))}
+              onClose={() => {
+                setReplay((cur) => ({ ...cur, req: null }))
+                setEdits({ list: [], invalid: {} })
+                writeReplay(null)
+              }}
+              onStep={(from) =>
+                void navigate({
+                  search: (prev) =>
+                    prev.replay && prev.from !== from
+                      ? { ...prev, from }
+                      : prev,
+                  replace: true,
+                })
+              }
+            />
+          ) : null}
+        </div>
+      </EditorContext.Provider>
     </ReplayContext.Provider>
   )
 }

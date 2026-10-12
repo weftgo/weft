@@ -17,9 +17,20 @@
 // id (fork mode writes one), and the side-effect mode from the cell's
 // command id (cellCommandID below), the one knob neither the definition
 // nor the run row records.
-import type { ExperimentRow, PlaygroundRunBody, RunRow, ToolChoiceWire } from "./api"
+import type {
+  ExperimentRow,
+  PlaygroundRunBody,
+  RunRow,
+  ToolChoiceWire,
+} from "./api"
 import type { ReplayEdit } from "./edits"
-import type { Engine, LabFields, SideEffects, ThreadMode, VariantFields } from "./experiment-body"
+import type {
+  Engine,
+  LabFields,
+  SideEffects,
+  ThreadMode,
+  VariantFields,
+} from "./experiment-body"
 import { editsFromHandoff, emptyLab } from "./experiment-body"
 import { forkSource, validExperimentID } from "./experiments"
 
@@ -77,15 +88,19 @@ export interface FormState {
   }
 }
 
-const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v)
-const isStrings = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string")
+const isObj = (v: unknown): v is Record<string, unknown> =>
+  !!v && typeof v === "object" && !Array.isArray(v)
+const isStrings = (v: unknown): v is string[] =>
+  Array.isArray(v) && v.every((x) => typeof x === "string")
 const ordinal = (v: unknown): number | undefined =>
   typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : undefined
-const text = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined)
+const text = (v: unknown): string | undefined =>
+  typeof v === "string" ? v : undefined
 const ENGINES: Engine[] = ["live", "scripted"]
 const SIDE_EFFECTS: SideEffects[] = ["substitute", "park", "allow"]
 const THREADS: ThreadMode[] = ["ephemeral", "fork"]
-const pick = <T extends string>(v: unknown, of: T[]): T | undefined => of.find((x) => x === v)
+const pick = <T extends string>(v: unknown, of: T[]): T | undefined =>
+  of.find((x) => x === v)
 
 /** labOf keeps the option lab's known knobs of the right shape. */
 function labOf(v: unknown): Partial<LabFields> | undefined {
@@ -93,7 +108,12 @@ function labOf(v: unknown): Partial<LabFields> | undefined {
   const out: Record<string, unknown> = {}
   for (const [k, want] of Object.entries(emptyLab())) {
     const x = v[k]
-    if (Array.isArray(want) ? isStrings(x) && x.length : typeof x === "string" && x !== "") out[k] = x
+    if (
+      Array.isArray(want)
+        ? isStrings(x) && x.length
+        : typeof x === "string" && x !== ""
+    )
+      out[k] = x
   }
   return Object.keys(out).length ? out : undefined
 }
@@ -105,19 +125,28 @@ export const FORM_MAX_ROWS = 64
 /** validateForm reads a form back: unknown keys dropped, wrong shapes
  * dropped, a newer version or no variant refused (null). */
 export function validateForm(o: unknown): FormState | null {
-  if (!isObj(o) || o.v !== FORM_VERSION || !Array.isArray(o.variants)) return null
+  if (!isObj(o) || o.v !== FORM_VERSION || !Array.isArray(o.variants))
+    return null
   const seen = new Set<string>()
   const variants: FormVariant[] = []
   for (const raw of o.variants.slice(0, FORM_MAX_ROWS)) {
-    if (!isObj(raw) || typeof raw.key !== "string" || !raw.key || seen.has(raw.key)) continue
+    if (
+      !isObj(raw) ||
+      typeof raw.key !== "string" ||
+      !raw.key ||
+      seen.has(raw.key)
+    )
+      continue
     seen.add(raw.key)
     const v: FormVariant = { key: raw.key }
     for (const k of ["instructions", "model", "thinking", "input"] as const) {
       const s = text(raw[k])
       if (s) v[k] = s
     }
-    if (isStrings(raw.tools_off) && raw.tools_off.length) v.tools_off = raw.tools_off
-    if (isStrings(raw.tools_on) && raw.tools_on.length) v.tools_on = raw.tools_on
+    if (isStrings(raw.tools_off) && raw.tools_off.length)
+      v.tools_off = raw.tools_off
+    if (isStrings(raw.tools_on) && raw.tools_on.length)
+      v.tools_on = raw.tools_on
     const engine = pick(raw.engine, ENGINES)
     if (engine) v.engine = engine
     const se = pick(raw.side_effects, SIDE_EFFECTS)
@@ -144,7 +173,8 @@ export function validateForm(o: unknown): FormState | null {
     const keys = new Set<string>()
     const inputs: FormInput[] = []
     for (const r of o.matrix.inputs.slice(0, FORM_MAX_ROWS)) {
-      if (!isObj(r) || typeof r.key !== "string" || !r.key || keys.has(r.key)) continue
+      if (!isObj(r) || typeof r.key !== "string" || !r.key || keys.has(r.key))
+        continue
       keys.add(r.key)
       inputs.push({ key: r.key, text: text(r.text) ?? "" })
     }
@@ -176,13 +206,19 @@ export function formOfFields(p: {
   run?: string
   step?: number
   edits?: ReplayEdit[]
-  matrix?: { name?: string; id?: string; from_step?: number; inputs: FormInput[] }
+  matrix?: {
+    name?: string
+    id?: string
+    from_step?: number
+    inputs: FormInput[]
+  }
 }): FormState {
   const form: FormState = {
     v: FORM_VERSION,
     variants: p.variants.map((v) => {
       const fv: FormVariant = { key: v.key }
-      if (v.instructions && v.instructions !== p.registered) fv.instructions = v.instructions
+      if (v.instructions && v.instructions !== p.registered)
+        fv.instructions = v.instructions
       if (v.toolsOn?.length) fv.tools_on = v.toolsOn
       else if (v.toolsOff.size) fv.tools_off = [...v.toolsOff].sort()
       if (v.model) fv.model = v.model
@@ -202,7 +238,9 @@ export function formOfFields(p: {
   if (p.step) form.step = p.step
   if (p.edits?.length) form.edits = p.edits
   if (p.matrix) {
-    form.matrix = { inputs: p.matrix.inputs.map((i) => ({ key: i.key, text: i.text })) }
+    form.matrix = {
+      inputs: p.matrix.inputs.map((i) => ({ key: i.key, text: i.text })),
+    }
     if (p.matrix.name) form.matrix.name = p.matrix.name
     if (validExperimentID(p.matrix.id)) form.matrix.id = p.matrix.id
     if (p.matrix.from_step) form.matrix.from_step = p.matrix.from_step
@@ -231,7 +269,9 @@ function b64url(bytes: Uint8Array): string {
 function unb64url(s: string): Uint8Array | null {
   if (!/^[A-Za-z0-9_-]*$/.test(s)) return null
   try {
-    const bin = atob(s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4))
+    const bin = atob(
+      s.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((s.length + 3) % 4)
+    )
     const out = new Uint8Array(bin.length)
     for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i)
     return out
@@ -242,12 +282,17 @@ function unb64url(s: string): Uint8Array | null {
 
 /** pipe runs bytes through a (de)compression stream; null when the
  * platform has none or the bytes are not its format. */
-async function pipe(bytes: Uint8Array, stream: { readable: ReadableStream; writable: WritableStream } | null): Promise<Uint8Array | null> {
+async function pipe(
+  bytes: Uint8Array,
+  stream: { readable: ReadableStream; writable: WritableStream } | null
+): Promise<Uint8Array | null> {
   if (!stream) return null
   try {
     const body = new Response(bytes as BlobPart).body
     if (!body) return null
-    return new Uint8Array(await new Response(body.pipeThrough(stream)).arrayBuffer())
+    return new Uint8Array(
+      await new Response(body.pipeThrough(stream)).arrayBuffer()
+    )
   } catch {
     return null
   }
@@ -255,7 +300,9 @@ async function pipe(bytes: Uint8Array, stream: { readable: ReadableStream; writa
 
 function deflater(): CompressionStream | null {
   try {
-    return typeof CompressionStream === "function" ? new CompressionStream("deflate-raw") : null
+    return typeof CompressionStream === "function"
+      ? new CompressionStream("deflate-raw")
+      : null
   } catch {
     return null
   }
@@ -263,7 +310,9 @@ function deflater(): CompressionStream | null {
 
 function inflater(): DecompressionStream | null {
   try {
-    return typeof DecompressionStream === "function" ? new DecompressionStream("deflate-raw") : null
+    return typeof DecompressionStream === "function"
+      ? new DecompressionStream("deflate-raw")
+      : null
   } catch {
     return null
   }
@@ -290,13 +339,18 @@ export const DECODE_CAP = 256 * 1024
 /** inflateBounded inflates deflate-raw bytes, counting what comes out
  * and cancelling past cap: null when it passes, or the platform has no
  * DecompressionStream, or the bytes are not deflate. */
-async function inflateBounded(bytes: Uint8Array, cap: number): Promise<Uint8Array | null> {
+async function inflateBounded(
+  bytes: Uint8Array,
+  cap: number
+): Promise<Uint8Array | null> {
   const ds = inflater()
   if (!ds) return null
   try {
     const body = new Response(bytes as BlobPart).body
     if (!body) return null
-    const reader = (body.pipeThrough(ds) as ReadableStream<Uint8Array>).getReader()
+    const reader = (
+      body.pipeThrough(ds) as ReadableStream<Uint8Array>
+    ).getReader()
     const chunks: Uint8Array[] = []
     let n = 0
     for (;;) {
@@ -329,7 +383,12 @@ export async function decodeForm(value: string): Promise<FormState | null> {
   if (!value || value.length > SHARE_CAP) return null
   const bytes = unb64url(value.slice(1))
   if (!bytes) return null
-  const json = value[0] === "z" ? await inflateBounded(bytes, DECODE_CAP) : value[0] === "j" ? bytes : null
+  const json =
+    value[0] === "z"
+      ? await inflateBounded(bytes, DECODE_CAP)
+      : value[0] === "j"
+        ? bytes
+        : null
   if (!json) return null
   try {
     return validateForm(JSON.parse(new TextDecoder().decode(json)))
@@ -352,7 +411,12 @@ export function stateFromHash(hash: string): string | undefined {
  * the keys base64url, s the side-effect mode's letter. The runtime
  * stamps it on the run (weft.playground.command): the experiment page
  * reads the cell a run belongs to back from it. */
-export function cellCommandID(variant: string, input: string, sideEffects: SideEffects, nonce = randomNonce()): string | undefined {
+export function cellCommandID(
+  variant: string,
+  input: string,
+  sideEffects: SideEffects,
+  nonce = randomNonce()
+): string | undefined {
   const enc = (s: string) => b64url(new TextEncoder().encode(s))
   const id = `cell.${enc(variant)}.${enc(input)}.${sideEffects[0]}.${nonce}`
   // A key too long for the id: the server mints one, and the run is
@@ -367,7 +431,9 @@ function randomNonce(): string {
 }
 
 /** parseCellCommandID reads a cell's command id back (null: not one). */
-export function parseCellCommandID(id: string | undefined): { variant: string; input: string; sideEffects: SideEffects } | null {
+export function parseCellCommandID(
+  id: string | undefined
+): { variant: string; input: string; sideEffects: SideEffects } | null {
   if (!id) return null
   const parts = id.split(".")
   if (parts.length !== 5 || parts[0] !== "cell") return null
@@ -383,14 +449,17 @@ export function parseCellCommandID(id: string | undefined): { variant: string; i
 }
 
 /** The run row's command id (weft.playground.command, in meta). */
-export const commandOf = (r: Pick<RunRow, "meta">): string | undefined => r.meta["weft.playground.command"]
+export const commandOf = (r: Pick<RunRow, "meta">): string | undefined =>
+  r.meta["weft.playground.command"]
 
 /** placeRuns maps an experiment's runs to its cells (variant × input),
  * oldest first: by the command id each carries, else — when no run of
  * it carries one and there are exactly variants × inputs runs (a
  * pre-F5 matrix) — by the matrix's issue order, variant-major. byOrder
  * says the second rule placed them; loose is every run left over. */
-export function placeRuns(exp: Pick<ExperimentRow, "variants" | "inputs" | "runs">): {
+export function placeRuns(
+  exp: Pick<ExperimentRow, "variants" | "inputs" | "runs">
+): {
   cells: Map<string, RunRow[]>
   loose: RunRow[]
   byOrder: boolean
@@ -413,7 +482,11 @@ export function placeRuns(exp: Pick<ExperimentRow, "variants" | "inputs" | "runs
       addressed++
     } else loose.push(r)
   }
-  if (addressed === 0 && runs.length > 0 && runs.length === vs.length * is.length) {
+  if (
+    addressed === 0 &&
+    runs.length > 0 &&
+    runs.length === vs.length * is.length
+  ) {
     let n = 0
     for (const v of vs) for (const i of is) add(cellKey(v, i), runs[n++])
     return { cells, loose: [], byOrder: true }
@@ -422,7 +495,8 @@ export function placeRuns(exp: Pick<ExperimentRow, "variants" | "inputs" | "runs
 }
 
 /** A cell's key: variant × input (the playground's own). */
-export const cellKey = (variant: string, input: string): string => `${variant}\u0000${input}`
+export const cellKey = (variant: string, input: string): string =>
+  `${variant}\u0000${input}`
 
 // ── A saved experiment as the form ─────────────────────────────────
 
@@ -432,12 +506,15 @@ export const cellKey = (variant: string, input: string): string => `${variant}\u
 export function variantFromOverrides(key: string, o: unknown): FormVariant {
   const v: FormVariant = { key }
   if (!isObj(o)) return v
-  if (typeof o.instructions === "string" && o.instructions) v.instructions = o.instructions
-  if (isStrings(o.tools_enabled) && o.tools_enabled.length) v.tools_on = o.tools_enabled
+  if (typeof o.instructions === "string" && o.instructions)
+    v.instructions = o.instructions
+  if (isStrings(o.tools_enabled) && o.tools_enabled.length)
+    v.tools_on = o.tools_enabled
   if (typeof o.model === "string" && o.model) v.model = o.model
   if (typeof o.thinking === "string" && o.thinking) v.thinking = o.thinking
   const lab: Partial<LabFields> = {}
-  const num = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? String(x) : undefined)
+  const num = (x: unknown) =>
+    typeof x === "number" && Number.isFinite(x) ? String(x) : undefined
   if (isObj(o.options))
     for (const k of ["max_steps", "parallelism", "temperature"] as const) {
       const s = num(o.options[k])
@@ -448,27 +525,38 @@ export function variantFromOverrides(key: string, o: unknown): FormVariant {
       const s = num(o.params[k])
       if (s !== undefined) lab[k] = s
     }
-    if (isStrings(o.params.stop) && o.params.stop.length) lab.stop = o.params.stop.join("\n")
+    if (isStrings(o.params.stop) && o.params.stop.length)
+      lab.stop = o.params.stop.join("\n")
   }
   if (isObj(o.tool_choice)) {
     const mode = o.tool_choice.mode as ToolChoiceWire["mode"]
     if (["auto", "any", "none", "named"].includes(mode)) {
       lab.tool_choice = mode
-      if (mode === "named" && typeof o.tool_choice.name === "string") lab.tool_choice_name = o.tool_choice.name
+      if (mode === "named" && typeof o.tool_choice.name === "string")
+        lab.tool_choice_name = o.tool_choice.name
     }
   }
   if (isStrings(o.park_on) && o.park_on.length) lab.park_on = o.park_on
-  if (isStrings(o.only_tools) && o.only_tools.length) lab.only_tools = o.only_tools
+  if (isStrings(o.only_tools) && o.only_tools.length)
+    lab.only_tools = o.only_tools
   if (Object.keys(lab).length) v.lab = lab
   return v
 }
 
 /** What a variant's runs say about its modes (see the header). */
-function modesOf(runs: RunRow[]): Pick<FormVariant, "engine" | "side_effects" | "thread"> & { from_step?: number } {
-  const out: Pick<FormVariant, "engine" | "side_effects" | "thread"> & { from_step?: number } = {}
+function modesOf(runs: RunRow[]): Pick<
+  FormVariant,
+  "engine" | "side_effects" | "thread"
+> & {
+  from_step?: number
+} {
+  const out: Pick<FormVariant, "engine" | "side_effects" | "thread"> & {
+    from_step?: number
+  } = {}
   const r = runs.at(-1)
   if (!r) return out
-  if (r.model.provider === "weft/runtime" && r.model.name === "scripted") out.engine = "scripted"
+  if (r.model.provider === "weft/runtime" && r.model.name === "scripted")
+    out.engine = "scripted"
   if (r.session_id) out.thread = "fork"
   const c = parseCellCommandID(commandOf(r))
   if (c && c.sideEffects !== "substitute") out.side_effects = c.sideEffects
@@ -509,7 +597,9 @@ export function formFromExperiment(exp: ExperimentRow): FormState {
   const { cells } = placeRuns(exp)
   let fromStep: number | undefined
   const variants = exp.variants.map((ev) => {
-    const runs = exp.inputs.flatMap((i) => cells.get(cellKey(ev.key, i.key)) ?? [])
+    const runs = exp.inputs.flatMap(
+      (i) => cells.get(cellKey(ev.key, i.key)) ?? []
+    )
     runs.sort((a, b) => Date.parse(a.started) - Date.parse(b.started))
     const { from_step, ...guessed } = modesOf(runs)
     if (from_step !== undefined && fromStep === undefined) fromStep = from_step
@@ -530,7 +620,8 @@ export function formFromExperiment(exp: ExperimentRow): FormState {
   })
   const savedStep = ordinal(exp.from_step)
   if (savedStep !== undefined) fromStep = savedStep
-  const source = exp.source_run_id || exp.inputs.find((i) => i.source_run_id)?.source_run_id
+  const source =
+    exp.source_run_id || exp.inputs.find((i) => i.source_run_id)?.source_run_id
   const form: FormState = {
     v: FORM_VERSION,
     agent: exp.agent || undefined,
@@ -543,11 +634,14 @@ export function formFromExperiment(exp: ExperimentRow): FormState {
   if (validExperimentID(exp.id)) form.matrix!.id = exp.id
   if (source) form.run = source
   if (Array.isArray(exp.transcript_edits) && exp.transcript_edits.length) {
-    const edits = editsFromHandoff(JSON.stringify(editsFromWire(exp.transcript_edits)))
+    const edits = editsFromHandoff(
+      JSON.stringify(editsFromWire(exp.transcript_edits))
+    )
     if (edits.length) form.edits = edits
   }
   if (fromStep) form.matrix!.from_step = fromStep
-  if (!form.matrix!.inputs.length) form.matrix!.inputs = [{ key: "1", text: "" }]
+  if (!form.matrix!.inputs.length)
+    form.matrix!.inputs = [{ key: "1", text: "" }]
   return validateForm(form) ?? form
 }
 
@@ -566,14 +660,17 @@ export function cellBody(
 ): PlaygroundRunBody {
   const ev = exp.variants.find((v) => v.key === variant)
   const ei = exp.inputs.find((i) => i.key === input)
-  if (!ev || !ei) throw new Error(`no cell ${variant}×${input} in experiment ${exp.id}`)
+  if (!ev || !ei)
+    throw new Error(`no cell ${variant}×${input} in experiment ${exp.id}`)
   const fv = form.variants.find((v) => v.key === variant)
   const fromStep = form.matrix?.from_step ?? 0
   const sideEffects = fv?.side_effects ?? "substitute"
   const body: PlaygroundRunBody = {
     runtime: target.runtime,
     agent: exp.agent,
-    source: ei.source_run_id ? { run_id: ei.source_run_id, from_step: fromStep } : null,
+    source: ei.source_run_id
+      ? { run_id: ei.source_run_id, from_step: fromStep }
+      : null,
     overrides: isObj(ev.overrides) ? ev.overrides : {},
     engine: fv?.engine ?? "live",
     side_effects: sideEffects,
@@ -583,7 +680,8 @@ export function cellBody(
   // At a later step the cell continues the kept prefix: no input (the
   // matrix's own rule, buildRunBody).
   if (ei.text && fromStep === 0) body.input = ei.text
-  if (!body.source && !body.input) throw new Error(`cell ${variant}×${input} has no input and no source run`)
+  if (!body.source && !body.input)
+    throw new Error(`cell ${variant}×${input} has no input and no source run`)
   if (target.publicID) body.public_id = target.publicID
   const id = cellCommandID(variant, input, sideEffects)
   if (id) body.command_id = id

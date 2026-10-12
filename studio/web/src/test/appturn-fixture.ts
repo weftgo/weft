@@ -9,7 +9,13 @@
 // appturn.go builds them.
 import type { RunDoc, RunRow } from "@/lib/api"
 import { META, runRow } from "@/panel/testkit"
-import { apiError, appOwnedRefusal, golden, json, pagedEvents } from "./fake-studio"
+import {
+  apiError,
+  appOwnedRefusal,
+  golden,
+  json,
+  pagedEvents,
+} from "./fake-studio"
 import type { FakeStudio } from "./fake-studio"
 
 export const APP_PUB = "pub_app"
@@ -39,7 +45,12 @@ export const SEND = `${SEND_SESSION}-t1`
 export const SEND_NEXT = `${SEND_SESSION}-t2`
 /** A turn of a thread session created without thread.PublicID. */
 export const NOPUB = "s_nopub-t1"
-export const CALL = { type: "tool_call", id: "call_deploy_1", name: "deploy", args: { env: "prod" } }
+export const CALL = {
+  type: "tool_call",
+  id: "call_deploy_1",
+  name: "deploy",
+  args: { env: "prod" },
+}
 const T0 = "2026-10-01T09:00:00Z"
 
 /** The parked turn's row: the app's (no weft.playground), a turn of a
@@ -59,7 +70,13 @@ export function parkedRow(over: Partial<RunRow> = {}): RunRow {
 }
 
 export function resumedRow(): RunRow {
-  return parkedRow({ id: RESUMED, turn: 2, pending: 0, stop_reason: "stop", started: "2026-10-01T09:01:00Z" })
+  return parkedRow({
+    id: RESUMED,
+    turn: 2,
+    pending: 0,
+    stop_reason: "stop",
+    started: "2026-10-01T09:01:00Z",
+  })
 }
 
 export function plainRow(): RunRow {
@@ -71,15 +88,32 @@ export function childRow(): RunRow {
 }
 
 export function poolRow(): RunRow {
-  return parkedRow({ id: POOL, session_id: "s_pool", public_id: "", parent_run_id: PARKED, meta: { "weft.session.parent": APP_SESSION } })
+  return parkedRow({
+    id: POOL,
+    session_id: "s_pool",
+    public_id: "",
+    parent_run_id: PARKED,
+    meta: { "weft.session.parent": APP_SESSION },
+  })
 }
 
 export function poolSubmitRow(): RunRow {
-  return parkedRow({ id: POOL_SUBMIT, session_id: "s_submit", public_id: "", meta: { "weft.session.parent": APP_SESSION } })
+  return parkedRow({
+    id: POOL_SUBMIT,
+    session_id: "s_submit",
+    public_id: "",
+    meta: { "weft.session.parent": APP_SESSION },
+  })
 }
 
 export function sendRow(over: Partial<RunRow> = {}): RunRow {
-  return parkedRow({ id: SEND, session_id: SEND_SESSION, public_id: SEND_PUB, parent_run_id: PARKED, ...over })
+  return parkedRow({
+    id: SEND,
+    session_id: SEND_SESSION,
+    public_id: SEND_PUB,
+    parent_run_id: PARKED,
+    ...over,
+  })
 }
 
 export function noPubRow(): RunRow {
@@ -88,9 +122,20 @@ export function noPubRow(): RunRow {
 
 function events(id: string, pending: boolean) {
   const evs = [
-    { type: "run_start", id, model: { provider: "demo", name: "ops" }, agent: "approvals-example" },
+    {
+      type: "run_start",
+      id,
+      model: { provider: "demo", name: "ops" },
+      agent: "approvals-example",
+    },
     { type: "step_start", run_id: id, index: 0 },
-    { type: "step_finish", run_id: id, index: 0, reason: "tool_calls", usage: { input_tokens: 10, output_tokens: 5 } },
+    {
+      type: "step_finish",
+      run_id: id,
+      index: 0,
+      reason: "tool_calls",
+      usage: { input_tokens: 10, output_tokens: 5 },
+    },
     {
       type: "run_finish",
       run_id: id,
@@ -105,8 +150,20 @@ function events(id: string, pending: boolean) {
 function transcript() {
   return {
     batches: [
-      { index: 0, step: 0, input: true, messages: [{ role: "user", content: [{ type: "text", text: "deploy to prod" }] }] },
-      { index: 1, step: 0, input: false, messages: [{ role: "assistant", content: [CALL] }] },
+      {
+        index: 0,
+        step: 0,
+        input: true,
+        messages: [
+          { role: "user", content: [{ type: "text", text: "deploy to prod" }] },
+        ],
+      },
+      {
+        index: 1,
+        step: 0,
+        input: false,
+        messages: [{ role: "assistant", content: [CALL] }],
+      },
     ],
   }
 }
@@ -121,7 +178,15 @@ export const REJECTED = "the app is writing this session; fork instead"
 export const STEER_FAILED = `no running turn to steer for run ${PARKED} (session ${APP_SESSION} is running ${RESUMED}, not ${PARKED})`
 
 /** A GET /api/runtimes row (studio/runtime's RuntimeView). */
-export function runtimeRow(over: { id?: string; service?: string; connected?: boolean; sessions?: boolean; breakpoints_own?: boolean } = {}) {
+export function runtimeRow(
+  over: {
+    id?: string
+    service?: string
+    connected?: boolean
+    sessions?: boolean
+    breakpoints_own?: boolean
+  } = {}
+) {
   return {
     id: "rt_01",
     host: "laptop",
@@ -179,22 +244,40 @@ export const RUNTIMES_500 = "runtimes store unavailable"
 
 /** serveAppTurn serves the app turn's conversation and its verbs on
  * fake; fake.calls("POST runs/s_app-t1/approvals") is what was sent. */
-export function serveAppTurn(fake: FakeStudio, o: AppTurnOptions = {}): FakeStudio {
-  const g = golden<{ capabilities: string[]; capabilities_off: Record<string, string> }>("meta")
-  const caps = o.noPlayground ? g.capabilities : [...g.capabilities, "playground", "steer", "breakpoints", "runtimes"]
+export function serveAppTurn(
+  fake: FakeStudio,
+  o: AppTurnOptions = {}
+): FakeStudio {
+  const g = golden<{
+    capabilities: string[]
+    capabilities_off: Record<string, string>
+  }>("meta")
+  const caps = o.noPlayground
+    ? g.capabilities
+    : [...g.capabilities, "playground", "steer", "breakpoints", "runtimes"]
   const meta = {
     ...(o.studioMeta ? golden<Record<string, unknown>>("meta") : META),
     capabilities: caps,
     ...(o.noPlayground ? { capabilities_off: g.capabilities_off } : {}),
     debug_scope:
-      o.debugScope ?? ((o.runtimes ?? [runtimeRow()]).some((r) => r.connected && (r.sessions || r.breakpoints_own)) ? "own+runtime" : "runtime-started runs"),
+      o.debugScope ??
+      ((o.runtimes ?? [runtimeRow()]).some(
+        (r) => r.connected && (r.sessions || r.breakpoints_own)
+      )
+        ? "own+runtime"
+        : "runtime-started runs"),
   }
   // Resumed by a verb here, or (o.resumed, read on every request) by another surface.
   let resumedHere = false
   const resumed = () => resumedHere || !!o.resumed
-  const parked = parkedRow(o.running ? { status: "running", pending: 0, finished: "" } : {})
+  const parked = parkedRow(
+    o.running ? { status: "running", pending: 0, finished: "" } : {}
+  )
   // Newest first, as GET /api/runs lists them.
-  const rows = () => (resumed() ? [resumedRow(), parked, plainRow(), noPubRow()] : [parked, plainRow(), noPubRow()])
+  const rows = () =>
+    resumed()
+      ? [resumedRow(), parked, plainRow(), noPubRow()]
+      : [parked, plainRow(), noPubRow()]
   const doc = (r: RunRow): RunDoc => ({ ...r, children: [], holes: [] })
   let polls = 0
   let refused = false
@@ -202,7 +285,18 @@ export function serveAppTurn(fake: FakeStudio, o: AppTurnOptions = {}): FakeStud
     .on("GET meta", meta)
     .on("GET sessions", () => ({
       total: 1,
-      sessions: [{ id: APP_SESSION, public_id: APP_PUB, agent: "approvals-example", turns: resumed() ? 2 : 1, first_seen: T0, last_seen: T0, status: "succeeded", usage: { input_tokens: 10, output_tokens: 5 } }],
+      sessions: [
+        {
+          id: APP_SESSION,
+          public_id: APP_PUB,
+          agent: "approvals-example",
+          turns: resumed() ? 2 : 1,
+          first_seen: T0,
+          last_seen: T0,
+          status: "succeeded",
+          usage: { input_tokens: 10, output_tokens: 5 },
+        },
+      ],
       next_before: null,
     }))
     .on("GET runs", (req) => {
@@ -213,21 +307,33 @@ export function serveAppTurn(fake: FakeStudio, o: AppTurnOptions = {}): FakeStud
     .on("GET runtimes", () =>
       o.runtimesError
         ? apiError(500, "internal", RUNTIMES_500)
-        : { runtimes: refused && !o.reconnects ? [runtimeRow({ sessions: false })] : (o.runtimes ?? [runtimeRow()]) }
+        : {
+            runtimes:
+              refused && !o.reconnects
+                ? [runtimeRow({ sessions: false })]
+                : (o.runtimes ?? [runtimeRow()]),
+          }
     )
-    .on(`GET sessions/${APP_SESSION}`, () => o.sessionError ? apiError(500, "internal", "session store unavailable") : ({
-      id: APP_SESSION,
-      public_id: APP_PUB,
-      agent: "approvals-example",
-      turns: resumed() ? 2 : 1,
-      first_seen: T0,
-      last_seen: T0,
-      status: "succeeded",
-      usage: { input_tokens: 10, output_tokens: 5 },
-      runs: rows().filter((r) => r.session_id === APP_SESSION),
-    }))
+    .on(`GET sessions/${APP_SESSION}`, () =>
+      o.sessionError
+        ? apiError(500, "internal", "session store unavailable")
+        : {
+            id: APP_SESSION,
+            public_id: APP_PUB,
+            agent: "approvals-example",
+            turns: resumed() ? 2 : 1,
+            first_seen: T0,
+            last_seen: T0,
+            status: "succeeded",
+            usage: { input_tokens: 10, output_tokens: 5 },
+            runs: rows().filter((r) => r.session_id === APP_SESSION),
+          }
+    )
     .on(`GET runs/${PARKED}`, () => doc(parked))
-    .on(`GET runs/${PARKED}/events`, pagedEvents(events(PARKED, !o.running), { done: !o.running }))
+    .on(
+      `GET runs/${PARKED}/events`,
+      pagedEvents(events(PARKED, !o.running), { done: !o.running })
+    )
     .on(`GET runs/${PARKED}/transcript`, transcript())
     .on(`GET runs/${PARKED}/spans`, { spans: [] })
     .on(`GET runs/${RESUMED}`, doc(resumedRow()))
@@ -238,7 +344,13 @@ export function serveAppTurn(fake: FakeStudio, o: AppTurnOptions = {}): FakeStud
     .on(`GET runs/${PLAIN}/events`, pagedEvents(events(PLAIN, true)))
     .on(`GET runs/${PLAIN}/transcript`, transcript())
     .on(`GET runs/${PLAIN}/spans`, { spans: [] })
-  for (const r of [childRow(), poolRow(), poolSubmitRow(), noPubRow(), sendRow()])
+  for (const r of [
+    childRow(),
+    poolRow(),
+    poolSubmitRow(),
+    noPubRow(),
+    sendRow(),
+  ])
     fake
       .on(`GET runs/${r.id}`, doc(r))
       .on(`GET runs/${r.id}/events`, pagedEvents(events(r.id, true)))
@@ -253,10 +365,24 @@ export function serveAppTurn(fake: FakeStudio, o: AppTurnOptions = {}): FakeStud
     last_seen: T0,
     status: "succeeded",
     usage: { input_tokens: 10, output_tokens: 5 },
-    runs: o.sendResumed ? [sendRow({ id: SEND_NEXT, turn: 2, pending: 0, stop_reason: "stop" }), sendRow()] : [sendRow()],
+    runs: o.sendResumed
+      ? [
+          sendRow({ id: SEND_NEXT, turn: 2, pending: 0, stop_reason: "stop" }),
+          sendRow(),
+        ]
+      : [sendRow()],
   }))
   const verb = (run: string) => () => {
-    if (o.outcome !== "refused") return json({ command_id: "cmd_app", state: "queued", run_id: run, runtime_id: "rt_01" }, 202)
+    if (o.outcome !== "refused")
+      return json(
+        {
+          command_id: "cmd_app",
+          state: "queued",
+          run_id: run,
+          runtime_id: "rt_01",
+        },
+        202
+      )
     refused = true
     return appOwnedRefusal(run)
   }
@@ -266,12 +392,30 @@ export function serveAppTurn(fake: FakeStudio, o: AppTurnOptions = {}): FakeStud
     .on(`POST runs/${PLAIN}/approvals`, verb(PLAIN))
     .on("GET playground/commands/cmd_app", () => {
       polls++
-      const base = { command_id: "cmd_app", run_id: PARKED, created: T0, updated: T0, error: null }
+      const base = {
+        command_id: "cmd_app",
+        run_id: PARKED,
+        created: T0,
+        updated: T0,
+        error: null,
+      }
       if (polls < 2) return { ...base, state: "queued" }
-      if (o.outcome === "rejected") return { ...base, state: "rejected", error: REJECTED }
-      if (o.steerFailed) return { ...base, state: "finished", status: "failed", error: STEER_FAILED }
+      if (o.outcome === "rejected")
+        return { ...base, state: "rejected", error: REJECTED }
+      if (o.steerFailed)
+        return {
+          ...base,
+          state: "finished",
+          status: "failed",
+          error: STEER_FAILED,
+        }
       if (!o.running) resumedHere = true
-      return { ...base, state: "finished", status: "succeeded", run_id: o.running ? PARKED : RESUMED }
+      return {
+        ...base,
+        state: "finished",
+        status: "succeeded",
+        run_id: o.running ? PARKED : RESUMED,
+      }
     })
   return fake
 }

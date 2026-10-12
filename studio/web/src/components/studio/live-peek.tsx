@@ -31,11 +31,16 @@ export function LivePeek({ id, onClose }: { id: string; onClose: () => void }) {
   // page's rule): the row is written into the cache, no refetch.
   const onRun = useCallback(
     (row: RunRow) => {
-      queryClient.setQueryData(runQuery(id).queryKey, (old) => (old ? { ...old, ...row } : old))
+      queryClient.setQueryData(runQuery(id).queryKey, (old) =>
+        old ? { ...old, ...row } : old
+      )
     },
     [id, queryClient]
   )
-  const stream = useRunEvents(loading ? "" : storyRunID(id, run), status, { live: has("live"), onRun })
+  const stream = useRunEvents(loading ? "" : storyRunID(id, run), status, {
+    live: has("live"),
+    onRun,
+  })
 
   return (
     <aside
@@ -45,10 +50,17 @@ export function LivePeek({ id, onClose }: { id: string; onClose: () => void }) {
     >
       <div className="flex flex-wrap items-center gap-2">
         {run.data ? <StatusChip status={run.data.status} /> : null}
-        <Link {...runLink(id)} className="font-mono text-[13px] hover:text-thread-ink">
+        <Link
+          {...runLink(id)}
+          className="font-mono text-[13px] hover:text-thread-ink"
+        >
           {id}
         </Link>
-        {run.data?.agent ? <span className="text-xs text-muted-foreground">{run.data.agent}</span> : null}
+        {run.data?.agent ? (
+          <span className="text-xs text-muted-foreground">
+            {run.data.agent}
+          </span>
+        ) : null}
         <Button
           variant="ghost"
           size="icon-xs"
@@ -63,16 +75,24 @@ export function LivePeek({ id, onClose }: { id: string; onClose: () => void }) {
       {run.isError ? (
         <p className="font-mono text-xs text-status-bad">{run.error.message}</p>
       ) : !run.data || (stream.loading && stream.events.length === 0) ? (
-        <p className="py-8 text-center font-mono text-xs text-faint">loading…</p>
+        <p className="py-8 text-center font-mono text-xs text-faint">
+          loading…
+        </p>
       ) : (
         <div className="min-w-0" data-peek-story>
-          {stream.error ? <p className="font-mono text-xs text-status-bad">{stream.error}</p> : null}
+          {stream.error ? (
+            <p className="font-mono text-xs text-status-bad">{stream.error}</p>
+          ) : null}
           {/* A derived run (plan I1.3): no events to fold — its story
               is the steps route's, under the derived badge. */}
           {isDerived(run.data) ? (
             <DerivedStory doc={run.data} replayable={false} />
           ) : (
-            <StepList events={stream.events} folded={stream.folded} doc={run.data} />
+            <StepList
+              events={stream.events}
+              folded={stream.folded}
+              doc={run.data}
+            />
           )}
         </div>
       )}

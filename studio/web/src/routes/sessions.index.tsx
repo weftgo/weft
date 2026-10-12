@@ -36,7 +36,10 @@ interface SessionsSearch {
 
 /** matchSession: every whitespace-separated term is a case-insensitive
  * substring of the session's id, public id or agent. */
-function matchSession(s: { id: string; public_id: string; agent: string }, q: string): boolean {
+function matchSession(
+  s: { id: string; public_id: string; agent: string },
+  q: string
+): boolean {
   const hay = `${s.id} ${s.public_id} ${s.agent}`.toLowerCase()
   return q
     .toLowerCase()
@@ -48,7 +51,9 @@ function matchSession(s: { id: string; public_id: string; agent: string }, q: st
 export const Route = createFileRoute("/sessions/")({
   validateSearch: (search: Record<string, unknown>): SessionsSearch => ({
     agent:
-      typeof search.agent === "string" && search.agent ? search.agent : undefined,
+      typeof search.agent === "string" && search.agent
+        ? search.agent
+        : undefined,
     public_id:
       typeof search.public_id === "string" && search.public_id
         ? search.public_id
@@ -109,14 +114,20 @@ function SessionsPage() {
     staleTime: 5_000,
     initialPageParam: undefined as PageCursor | undefined,
     queryFn: ({ pageParam }) =>
-      fetchSessions({ ...filters, before: pageParam?.before, before_id: pageParam?.before_id }),
+      fetchSessions({
+        ...filters,
+        before: pageParam?.before,
+        before_id: pageParam?.before_id,
+      }),
     // The exact cursor (next_before + next_before_id); one that does
     // not move ends the list (never a page loop).
     getNextPageParam: (last, _all, lastParam) => nextCursor(last, lastParam),
   })
   const loadedSessions = q.data?.pages.flatMap((p) => p.sessions) ?? []
   const text = search.q ?? ""
-  const sessions = text ? loadedSessions.filter((s) => matchSession(s, text)) : loadedSessions
+  const sessions = text
+    ? loadedSessions.filter((s) => matchSession(s, text))
+    : loadedSessions
   const total = q.data?.pages[0]?.total ?? 0
 
   const set = (patch: Partial<SessionsSearch>) =>
@@ -162,7 +173,8 @@ function SessionsPage() {
             aria-label={`clear “${search.q}” (the loaded sessions only)`}
             title="matches the loaded sessions' ids, public ids and agents only: the API has no text filter"
           >
-            “{search.q}” <span className="text-faint">· the loaded sessions only</span>
+            “{search.q}”{" "}
+            <span className="text-faint">· the loaded sessions only</span>
             <X className="size-3 text-faint" />
           </button>
         </div>
@@ -186,7 +198,9 @@ function SessionsPage() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => set({ agent: undefined, public_id: undefined, q: undefined })}
+              onClick={() =>
+                set({ agent: undefined, public_id: undefined, q: undefined })
+              }
             >
               clear filters
             </Button>
@@ -196,94 +210,103 @@ function SessionsPage() {
         )
       ) : (
         <>
-        <div className="overflow-x-auto rounded-lg border bg-background">
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent">
-                <TableHead className="w-28">status</TableHead>
-                <TableHead>session</TableHead>
-                <TableHead>agent</TableHead>
-                <TableHead className="text-right">turns</TableHead>
-                <TableHead className="text-right" title="input / output tokens">
-                  tokens in / out
-                </TableHead>
-                {costCapable ? (
-                  <TableHead className="text-right" title="the session's turns, own + delegated, priced at read time">
-                    cost
-                  </TableHead>
-                ) : null}
-                <TableHead className="text-right">last seen</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {sessions.map((s) => (
-                <TableRow key={s.id} className="group h-9">
-                  <TableCell>
-                    <StatusChip status={s.status} />
-                  </TableCell>
-                  <TableCell className="max-w-72">
-                    <Link
-                      {...sessionLink(s.id)}
-                      className="font-mono text-[13px] hover:text-thread-ink"
-                      title={absoluteTime(s.first_seen)}
-                    >
-                      <span className="truncate">{s.id}</span>
-                    </Link>
-                    {s.public_id ? (
-                      <div
-                        className="font-mono text-[11px] text-faint"
-                        title="the public id (the browser-safe handle)"
-                      >
-                        {s.public_id}
-                      </div>
-                    ) : null}
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap">
-                    {s.agent || <span className="text-faint">—</span>}
-                  </TableCell>
-                  <TableCell className="text-right font-mono tabular-nums">
-                    {s.turns}
-                  </TableCell>
-                  <TableCell className="text-right font-mono tabular-nums">
-                    {tokens(s.usage.input_tokens)} /{" "}
-                    {tokens(s.usage.output_tokens)}
-                  </TableCell>
-                  {costCapable ? (
-                    <TableCell className="text-right whitespace-nowrap" data-cost-cell>
-                      <div className="flex flex-col items-end">
-                        <Cost fields={s} />
-                        <CacheHint fields={s} />
-                      </div>
-                    </TableCell>
-                  ) : null}
-                  <TableCell
-                    className="text-right font-mono whitespace-nowrap tabular-nums"
-                    title={absoluteTime(s.last_seen)}
+          <div className="overflow-x-auto rounded-lg border bg-background">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="w-28">status</TableHead>
+                  <TableHead>session</TableHead>
+                  <TableHead>agent</TableHead>
+                  <TableHead className="text-right">turns</TableHead>
+                  <TableHead
+                    className="text-right"
+                    title="input / output tokens"
                   >
-                    {relativeTime(s.last_seen)}
-                  </TableCell>
+                    tokens in / out
+                  </TableHead>
+                  {costCapable ? (
+                    <TableHead
+                      className="text-right"
+                      title="the session's turns, own + delegated, priced at read time"
+                    >
+                      cost
+                    </TableHead>
+                  ) : null}
+                  <TableHead className="text-right">last seen</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
-        <div className="flex items-center justify-center gap-3">
-          <span className="font-mono text-[11px] text-faint tabular-nums">
-            {text
-              ? `${sessions.length.toLocaleString()} of ${loadedSessions.length.toLocaleString()} loaded match (${total.toLocaleString()} listed)`
-              : `showing ${sessions.length.toLocaleString()} of ${total.toLocaleString()}`}
-          </span>
-          {q.hasNextPage && (
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={q.isFetchingNextPage}
-              onClick={() => void q.fetchNextPage()}
-            >
-              {q.isFetchingNextPage ? "loading…" : "load more"}
-            </Button>
-          )}
-        </div>
+              </TableHeader>
+              <TableBody>
+                {sessions.map((s) => (
+                  <TableRow key={s.id} className="group h-9">
+                    <TableCell>
+                      <StatusChip status={s.status} />
+                    </TableCell>
+                    <TableCell className="max-w-72">
+                      <Link
+                        {...sessionLink(s.id)}
+                        className="font-mono text-[13px] hover:text-thread-ink"
+                        title={absoluteTime(s.first_seen)}
+                      >
+                        <span className="truncate">{s.id}</span>
+                      </Link>
+                      {s.public_id ? (
+                        <div
+                          className="font-mono text-[11px] text-faint"
+                          title="the public id (the browser-safe handle)"
+                        >
+                          {s.public_id}
+                        </div>
+                      ) : null}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap">
+                      {s.agent || <span className="text-faint">—</span>}
+                    </TableCell>
+                    <TableCell className="text-right font-mono tabular-nums">
+                      {s.turns}
+                    </TableCell>
+                    <TableCell className="text-right font-mono tabular-nums">
+                      {tokens(s.usage.input_tokens)} /{" "}
+                      {tokens(s.usage.output_tokens)}
+                    </TableCell>
+                    {costCapable ? (
+                      <TableCell
+                        className="text-right whitespace-nowrap"
+                        data-cost-cell
+                      >
+                        <div className="flex flex-col items-end">
+                          <Cost fields={s} />
+                          <CacheHint fields={s} />
+                        </div>
+                      </TableCell>
+                    ) : null}
+                    <TableCell
+                      className="text-right font-mono whitespace-nowrap tabular-nums"
+                      title={absoluteTime(s.last_seen)}
+                    >
+                      {relativeTime(s.last_seen)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          <div className="flex items-center justify-center gap-3">
+            <span className="font-mono text-[11px] text-faint tabular-nums">
+              {text
+                ? `${sessions.length.toLocaleString()} of ${loadedSessions.length.toLocaleString()} loaded match (${total.toLocaleString()} listed)`
+                : `showing ${sessions.length.toLocaleString()} of ${total.toLocaleString()}`}
+            </span>
+            {q.hasNextPage && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={q.isFetchingNextPage}
+                onClick={() => void q.fetchNextPage()}
+              >
+                {q.isFetchingNextPage ? "loading…" : "load more"}
+              </Button>
+            )}
+          </div>
         </>
       )}
     </div>

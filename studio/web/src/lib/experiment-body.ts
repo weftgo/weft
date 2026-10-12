@@ -3,9 +3,20 @@
 // only what changed), and the kept prefix's transcript edits
 // (editFieldsOf, wireEdits). Shared by the playground page and the run
 // page's replay drawer (plan F1): one form, one body, one wire.
-import type { AgentDefaults, AgentView, Message, PlaygroundRunBody, RuntimeView, ToolChoiceWire } from "@/lib/api"
+import type {
+  AgentDefaults,
+  AgentView,
+  Message,
+  PlaygroundRunBody,
+  RuntimeView,
+  ToolChoiceWire,
+} from "@/lib/api"
 import { placeBatches } from "@/lib/events"
-import { endsInAnsweredCalls, maxFromStep, transcriptStepCount } from "@/lib/replay"
+import {
+  endsInAnsweredCalls,
+  maxFromStep,
+  transcriptStepCount,
+} from "@/lib/replay"
 import type { TranscriptBatch } from "@/lib/events"
 import { editsProblem, kindOf, putEdit, wireEdits } from "@/lib/edits"
 import type { ReplayEdit } from "@/lib/edits"
@@ -36,9 +47,17 @@ export interface VariantFields {
 /** toolsOffFor turns the hand-off's tools= (the names left ON) into
  * the agent's turned-off set. Names the agent does not have are
  * ignored; no tools= means everything stays on. */
-export function toolsOffFor(tools: string | undefined, agent: AgentView): Set<string> {
+export function toolsOffFor(
+  tools: string | undefined,
+  agent: AgentView
+): Set<string> {
   if (!tools) return new Set()
-  const on = new Set(tools.split(",").map((t) => t.trim()).filter(Boolean))
+  const on = new Set(
+    tools
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean)
+  )
   return new Set(agent.tools.map((t) => t.name).filter((n) => !on.has(n)))
 }
 
@@ -79,11 +98,17 @@ export function pickTarget(
  * what changed (§10.1): an unchanged prompt is not an override, and
  * no tool turned off sends no tools_enabled. */
 export function overridesOf(
-  variant: Pick<VariantFields, "instructions" | "toolsOff" | "model" | "thinking" | "lab">,
+  variant: Pick<
+    VariantFields,
+    "instructions" | "toolsOff" | "model" | "thinking" | "lab"
+  >,
   agent: AgentView
 ): NonNullable<PlaygroundRunBody["overrides"]> {
   const overrides: NonNullable<PlaygroundRunBody["overrides"]> = {}
-  if (variant.instructions && variant.instructions !== (agent.instructions ?? ""))
+  if (
+    variant.instructions &&
+    variant.instructions !== (agent.instructions ?? "")
+  )
     overrides.instructions = variant.instructions
   const names = agent.tools.map((t) => t.name)
   const enabled = names.filter((n) => !variant.toolsOff.has(n))
@@ -127,7 +152,9 @@ export function buildRunBody(opts: {
   const { variant, sourceRunID, fromStep } = opts
   const input = fromStep === 0 ? opts.input : ""
   if (!sourceRunID && !input)
-    throw new Error("a run needs an input, or a source run to take the turn from")
+    throw new Error(
+      "a run needs an input, or a source run to take the turn from"
+    )
   if (variant.thread === "fork" && !(sourceRunID && input && fromStep === 0))
     throw new Error(
       "fork continues the conversation in a new session: it needs a source run, an input, and step 0"
@@ -144,7 +171,8 @@ export function buildRunBody(opts: {
     thread: variant.thread,
   }
   if (input) body.input = input
-  if (fromStep > 0 && opts.edits?.length) body.transcript_edits = wireEdits(opts.edits)
+  if (fromStep > 0 && opts.edits?.length)
+    body.transcript_edits = wireEdits(opts.edits)
   if (opts.experimentID) body.experiment_id = opts.experimentID
   if (opts.publicID) body.public_id = opts.publicID
   return body
@@ -170,14 +198,18 @@ export interface EditField {
  * when every batch carries one and the input flag, else numbered by
  * order — each assistant message opens the next step, what precedes
  * the first is step 0's (editFieldsOf's rule, below). */
-export function ownMessages(batches: TranscriptBatch[]): { step: number; m: Message }[] {
+export function ownMessages(
+  batches: TranscriptBatch[]
+): { step: number; m: Message }[] {
   const placed = placeBatches(batches)
   const list = Array.isArray(batches) ? batches : []
   const stored =
     list.length > 0 &&
     list.every(
       (b) =>
-        typeof b.step === "number" && b.step >= 0 && typeof b.input === "boolean"
+        typeof b.step === "number" &&
+        b.step >= 0 &&
+        typeof b.input === "boolean"
     )
   const tagged: { step: number; m: Message }[] = []
   for (const [i, b] of placed.entries()) {
@@ -213,7 +245,12 @@ export interface CompactedNote {
  * insert whose boundary, strictly inside — lies in [from_seq, to_seq)
  * of the transcript (the input's messages counted first). "" when none.
  */
-export function compactedRefusal(batches: TranscriptBatch[], edits: EditDraft[], fromStep: number, note: CompactedNote | null | undefined): string {
+export function compactedRefusal(
+  batches: TranscriptBatch[],
+  edits: EditDraft[],
+  fromStep: number,
+  note: CompactedNote | null | undefined
+): string {
   if (!note || fromStep <= 0) return ""
   const input = placeBatches(batches)
     .filter((b) => b.input)
@@ -224,7 +261,9 @@ export function compactedRefusal(batches: TranscriptBatch[], edits: EditDraft[],
   for (const e of edits) {
     const k = kindOf(e)
     if (k === "insert") {
-      const cut = own.findIndex((t) => t.m.role === "assistant" && t.step >= e.step)
+      const cut = own.findIndex(
+        (t) => t.m.role === "assistant" && t.step >= e.step
+      )
       const seq = n + (cut < 0 ? own.length : cut)
       if (seq > note.from_seq && seq < note.to_seq)
         return `the boundary before step ${e.step} was compacted away before step ${fromStep}'s request ${range}; insert outside the range`
@@ -233,20 +272,33 @@ export function compactedRefusal(batches: TranscriptBatch[], edits: EditDraft[],
     const seqs: number[] = []
     if (k === "user") {
       if (e.step === 0 && input.at(-1)?.role === "user") seqs.push(n - 1)
-      own.forEach((t, i) => t.step === e.step && t.m.role === "user" && seqs.push(n + i))
+      own.forEach(
+        (t, i) => t.step === e.step && t.m.role === "user" && seqs.push(n + i)
+      )
       const i = e.index ?? 0
       seqs.splice(0, seqs.length, ...(i < seqs.length ? [seqs[i]] : []))
     } else
       own.forEach((t, i) => {
         if (t.step !== e.step) return
         const parts = t.m.content
-        if (k === "reply" ? t.m.role === "assistant" : k === "tool_args"
-          ? parts.some((p) => p.type === "tool_call" && p.id === e.callID)
-          : parts.some((p) => p.type === "tool_result" && p.call_id === e.callID))
+        if (
+          k === "reply"
+            ? t.m.role === "assistant"
+            : k === "tool_args"
+              ? parts.some((p) => p.type === "tool_call" && p.id === e.callID)
+              : parts.some(
+                  (p) => p.type === "tool_result" && p.call_id === e.callID
+                )
+        )
           seqs.push(n + i)
       })
     if (seqs.some((q) => q >= note.from_seq && q < note.to_seq)) {
-      const what = k === "reply" ? "the reply" : k === "user" ? "the user message" : `call "${e.callID ?? ""}"`
+      const what =
+        k === "reply"
+          ? "the reply"
+          : k === "user"
+            ? "the user message"
+            : `call "${e.callID ?? ""}"`
       return `${what} of step ${e.step} was compacted away before step ${fromStep}'s request ${range}; edit from an earlier from_step`
     }
   }
@@ -269,8 +321,14 @@ export function replayBounds(batches: TranscriptBatch[]): {
   const assistants = own.filter((t) => t.m.role === "assistant")
   const stepCount = transcriptStepCount(assistants.map((t) => t.step))
   const answeredCalls = endsInAnsweredCalls(own.map((t) => t.m))
-  const lastCalls = assistants.at(-1)?.m.content.some((p) => p.type === "tool_call") ?? false
-  return { stepCount, answeredCalls, lastCalls, max: maxFromStep(stepCount, answeredCalls) }
+  const lastCalls =
+    assistants.at(-1)?.m.content.some((p) => p.type === "tool_call") ?? false
+  return {
+    stepCount,
+    answeredCalls,
+    lastCalls,
+    max: maxFromStep(stepCount, answeredCalls),
+  }
 }
 
 /** One step of a source run as the step picker lists it. */
@@ -306,13 +364,21 @@ export function sourceSteps(
     let st = byOrdinal.get(step)
     if (!st) {
       if (m.role !== "assistant") continue
-      st = { position: out.length, ordinal: step, tools: [], toolError: false, compacted: compactedAt.has(step) }
+      st = {
+        position: out.length,
+        ordinal: step,
+        tools: [],
+        toolError: false,
+        compacted: compactedAt.has(step),
+      }
       byOrdinal.set(step, st)
       out.push(st)
     }
     for (const p of m.content) {
-      if (m.role === "assistant" && p.type === "tool_call") st.tools.push(p.name)
-      if (m.role === "tool" && p.type === "tool_result" && p.is_error) st.toolError = true
+      if (m.role === "assistant" && p.type === "tool_call")
+        st.tools.push(p.name)
+      if (m.role === "tool" && p.type === "tool_result" && p.is_error)
+        st.toolError = true
     }
   }
   return out
@@ -347,7 +413,8 @@ export function editFieldsOf(
         if (p.type === "tool_call") hadCalls = true
         if (p.type === "text" && p.text) text += p.text
       }
-      if (text && !hadCalls) fields.push({ step, name: "reply", placeholder: text })
+      if (text && !hadCalls)
+        fields.push({ step, name: "reply", placeholder: text })
     } else if (m.role === "tool") {
       for (const p of m.content) {
         if (p.type === "tool_result")
@@ -375,7 +442,11 @@ export function unmatchedDrafts(
 ): EditDraft[] {
   if (fromStep <= 0) return []
   if (fields === null) return drafts
-  const keys = new Set(fields.filter((f) => f.step < fromStep).map((f) => `${f.step}\u0000${f.callID ?? ""}`))
+  const keys = new Set(
+    fields
+      .filter((f) => f.step < fromStep)
+      .map((f) => `${f.step}\u0000${f.callID ?? ""}`)
+  )
   // The Story's editor (plan F2) names user messages, arguments and
   // boundaries it read from the transcript itself: those are checked
   // against the kept range only (the server checks the rest).
@@ -449,12 +520,27 @@ export const LAB_LABELS: Record<keyof LabFields, string> = {
 }
 
 /** The numeric knobs, in wire order: options first, then params. */
-export const LAB_NUMBERS = ["max_steps", "parallelism", "temperature", "top_p", "max_tokens", "seed"] as const
+export const LAB_NUMBERS = [
+  "max_steps",
+  "parallelism",
+  "temperature",
+  "top_p",
+  "max_tokens",
+  "seed",
+] as const
 export type LabNumber = (typeof LAB_NUMBERS)[number]
 
 /** The knobs the server refuses on a registration that predates the
  * option lab, and its sentence. */
-export const LAB_NEW: (keyof LabFields)[] = ["top_p", "max_tokens", "seed", "stop", "tool_choice", "park_on", "only_tools"]
+export const LAB_NEW: (keyof LabFields)[] = [
+  "top_p",
+  "max_tokens",
+  "seed",
+  "stop",
+  "tool_choice",
+  "park_on",
+  "only_tools",
+]
 export const LAB_PREDATES =
   "runtime predates the option lab: upgrade weft/runtime to use params, tool_choice, park_on, only_tools"
 
@@ -477,10 +563,13 @@ export function labLacksDefaults(agent: Pick<AgentView, "defaults">): boolean {
  * lib/links.ts): the lab's set knobs and the edit list as JSON, so the
  * same experiment opens in Studio as the same command. */
 export function labHandoff(lab: LabFields | undefined): string | undefined {
-  const set = Object.entries(lab ?? {}).filter(([, v]) => (v as string | string[]).length)
+  const set = Object.entries(lab ?? {}).filter(
+    ([, v]) => (v as string | string[]).length
+  )
   return set.length ? JSON.stringify(Object.fromEntries(set)) : undefined
 }
-export const editsHandoff = (list: ReplayEdit[]): string | undefined => (list.length ? JSON.stringify(list) : undefined)
+export const editsHandoff = (list: ReplayEdit[]): string | undefined =>
+  list.length ? JSON.stringify(list) : undefined
 
 function parseJSON(s: string | undefined): unknown {
   try {
@@ -499,7 +588,11 @@ export function labFromHandoff(s: string | undefined): LabFields | undefined {
   let any = false
   for (const [k, want] of Object.entries(lab)) {
     const v = (o as Record<string, unknown>)[k]
-    if (Array.isArray(want) ? Array.isArray(v) && v.every((x) => typeof x === "string") : typeof v === "string") {
+    if (
+      Array.isArray(want)
+        ? Array.isArray(v) && v.every((x) => typeof x === "string")
+        : typeof v === "string"
+    ) {
       lab[k] = v
       any = true
     }
@@ -534,7 +627,10 @@ export function editsFromHandoff(s: string | undefined): ReplayEdit[] {
             text(e.toolResult) &&
             text(e.content) &&
             (e.index === undefined || ord(e.index)) &&
-            (e.args === undefined || (!!e.args && typeof e.args === "object" && !Array.isArray(e.args)))
+            (e.args === undefined ||
+              (!!e.args &&
+                typeof e.args === "object" &&
+                !Array.isArray(e.args)))
           )
         })
         .slice(0, HANDOFF_EDITS_MAX)
@@ -544,7 +640,10 @@ export function editsFromHandoff(s: string | undefined): ReplayEdit[] {
 
 /** labDefault is the agent's default for a knob as the form shows it,
  * greyed: "" when the registration reports none. */
-export function labDefault(key: keyof LabFields, d: AgentDefaults | undefined): string {
+export function labDefault(
+  key: keyof LabFields,
+  d: AgentDefaults | undefined
+): string {
   if (!d) return ""
   switch (key) {
     case "stop":
@@ -559,7 +658,11 @@ export function labDefault(key: keyof LabFields, d: AgentDefaults | undefined): 
   }
   const v = (d as unknown as Record<string, unknown>)[key]
   // A 0 cap is no bound (the server refuses a raise only over a cap > 0).
-  if ((key === "max_steps" || key === "parallelism") && !(typeof v === "number" && v > 0)) return ""
+  if (
+    (key === "max_steps" || key === "parallelism") &&
+    !(typeof v === "number" && v > 0)
+  )
+    return ""
   return typeof v === "number" ? String(v) : ""
 }
 
@@ -569,7 +672,8 @@ const stopsOf = (s: string) => s.split("\n").filter((x) => x !== "")
 
 /** inOrder keeps the agent's tool order (both surfaces send the same
  * array whatever the clicks' order). */
-const inOrder = (names: string[], tools: string[]) => tools.filter((t) => names.includes(t))
+const inOrder = (names: string[], tools: string[]) =>
+  tools.filter((t) => names.includes(t))
 
 /**
  * labOverrides turns the lab into the command's typed fields and the
@@ -581,15 +685,21 @@ export function labOverrides(
   lab: LabFields | undefined,
   agent: Pick<AgentView, "name" | "defaults"> & { tools: { name: string }[] },
   enabled: string[]
-): { overrides: Partial<NonNullable<PlaygroundRunBody["overrides"]>>; problems: LabProblem[] } {
+): {
+  overrides: Partial<NonNullable<PlaygroundRunBody["overrides"]>>
+  problems: LabProblem[]
+} {
   const out: Partial<NonNullable<PlaygroundRunBody["overrides"]>> = {}
   const problems: LabProblem[] = []
   const d = agent.defaults
   const tools = agent.tools.map((t) => t.name)
-  const no = (field: keyof LabFields, message: string) => problems.push({ field, message })
+  const no = (field: keyof LabFields, message: string) =>
+    problems.push({ field, message })
   if (!lab) lab = emptyLab()
   const options: Record<string, number> = {}
-  const params: NonNullable<NonNullable<PlaygroundRunBody["overrides"]>["params"]> = {}
+  const params: NonNullable<
+    NonNullable<PlaygroundRunBody["overrides"]>["params"]
+  > = {}
   for (const key of LAB_NUMBERS) {
     const s = lab[key].trim()
     if (!s) continue
@@ -603,8 +713,10 @@ export function labOverrides(
     const whole = Number.isSafeInteger(v)
     if (key === "max_steps" || key === "parallelism") {
       // checkNeutral's range: a whole number from 1, at most 1e6.
-      if (!whole || v < 1 || v > 1e6) no(key, `${key} must be a whole number from 1`)
-      else if (def !== "" && v > Number(def)) no(key, `${key} may only lower the agent's cap`)
+      if (!whole || v < 1 || v > 1e6)
+        no(key, `${key} must be a whole number from 1`)
+      else if (def !== "" && v > Number(def))
+        no(key, `${key} may only lower the agent's cap`)
       options[key] = v
     } else if (key === "temperature") {
       if (v < 0 || v > 2) no(key, "temperature must be between 0 and 2")
@@ -623,7 +735,8 @@ export function labOverrides(
   }
   const stop = stopsOf(lab.stop)
   if (stop.length && stop.join("\n") !== labDefault("stop", d)) {
-    if (stop.length > 4) no("stop", `stop takes at most 4 sequences, got ${stop.length}`)
+    if (stop.length > 4)
+      no("stop", `stop takes at most 4 sequences, got ${stop.length}`)
     params.stop = stop
   }
   // params in the wire's order, whatever order the knobs were read.
@@ -634,38 +747,76 @@ export function labOverrides(
   if (params.seed !== undefined) p.seed = params.seed
   // studio/playground.go toolOverrides' words, once per list.
   for (const k of ["only_tools", "park_on"] as const)
-    for (const name of new Set(lab[k])) if (!tools.includes(name)) no(k, `tool ${name} in ${k} is not in agent ${agent.name}'s manifest`)
+    for (const name of new Set(lab[k]))
+      if (!tools.includes(name))
+        no(k, `tool ${name} in ${k} is not in agent ${agent.name}'s manifest`)
   let only = inOrder(lab.only_tools, tools)
   if (only.length === tools.length) only = []
   for (const name of only)
     if (enabled.length && !enabled.includes(name))
-      no("only_tools", `only_tools may only narrow tools_enabled: tool ${name} is not enabled`)
+      no(
+        "only_tools",
+        `only_tools may only narrow tools_enabled: tool ${name} is not enabled`
+      )
   const park = inOrder(lab.park_on, tools)
-  const leavesOn = (name: string) => (only.length ? only.includes(name) : enabled.length ? enabled.includes(name) : true)
+  const leavesOn = (name: string) =>
+    only.length
+      ? only.includes(name)
+      : enabled.length
+        ? enabled.includes(name)
+        : true
   let tc: ToolChoiceWire | undefined
   if (lab.tool_choice) {
-    tc = lab.tool_choice === "named" ? { mode: "named", name: lab.tool_choice_name } : { mode: lab.tool_choice }
-    if (d && tc.mode === d.tool_choice.mode && (tc.mode !== "named" || tc.name === d.tool_choice.name)) tc = undefined
+    tc =
+      lab.tool_choice === "named"
+        ? { mode: "named", name: lab.tool_choice_name }
+        : { mode: lab.tool_choice }
+    if (
+      d &&
+      tc.mode === d.tool_choice.mode &&
+      (tc.mode !== "named" || tc.name === d.tool_choice.name)
+    )
+      tc = undefined
   }
   if (tc?.mode === "named") {
     const n = tc.name ?? ""
     if (!n) no("tool_choice", "tool_choice named needs a tool name")
-    else if (!tools.includes(n)) no("tool_choice", `tool ${n} in tool_choice is not in agent ${agent.name}'s manifest`)
-    else if (!leavesOn(n)) no("tool_choice", `tool_choice names ${n}, which this command turns off`)
-    else if (park.includes(n)) no("tool_choice", `tool_choice names ${n}, which park_on parks: every forced call would park`)
+    else if (!tools.includes(n))
+      no(
+        "tool_choice",
+        `tool ${n} in tool_choice is not in agent ${agent.name}'s manifest`
+      )
+    else if (!leavesOn(n))
+      no("tool_choice", `tool_choice names ${n}, which this command turns off`)
+    else if (park.includes(n))
+      no(
+        "tool_choice",
+        `tool_choice names ${n}, which park_on parks: every forced call would park`
+      )
   } else if (!tc && d?.tool_choice.mode === "named" && d.tool_choice.name) {
     const n = d.tool_choice.name
-    if (!leavesOn(n)) no("tool_choice", `the agent's default tool_choice names ${n}, which this command turns off; send tool_choice`)
+    if (!leavesOn(n))
+      no(
+        "tool_choice",
+        `the agent's default tool_choice names ${n}, which this command turns off; send tool_choice`
+      )
     // The explicit rule's sentence (studio/playground.go's parkedChoice):
     // a default that forces a parked tool parks every forced call too.
-    else if (park.includes(n)) no("tool_choice", `tool_choice names ${n}, which park_on parks: every forced call would park`)
+    else if (park.includes(n))
+      no(
+        "tool_choice",
+        `tool_choice names ${n}, which park_on parks: every forced call would park`
+      )
   }
   if (Object.keys(options).length) out.options = options
   if (Object.keys(p).length) out.params = p
   if (tc) out.tool_choice = tc
   if (park.length) out.park_on = park
   if (only.length) out.only_tools = only
-  if (labLacksDefaults(agent) && (out.params || out.tool_choice || out.park_on || out.only_tools))
+  if (
+    labLacksDefaults(agent) &&
+    (out.params || out.tool_choice || out.park_on || out.only_tools)
+  )
     problems.unshift({ field: "lab", message: LAB_PREDATES })
   return { overrides: out, problems }
 }
@@ -673,21 +824,40 @@ export function labOverrides(
 /** labProblems is a variant's option-lab refusals against its agent
  * (the tools it leaves on as the tools_enabled it sends): what holds
  * Run on Studio's surfaces, as the panel's labOf does in the drawer. */
-export function labProblems(variant: Pick<VariantFields, "lab" | "toolsOff">, agent: AgentView): LabProblem[] {
+export function labProblems(
+  variant: Pick<VariantFields, "lab" | "toolsOff">,
+  agent: AgentView
+): LabProblem[] {
   const names = agent.tools.map((t) => t.name)
   const enabled = names.filter((n) => !variant.toolsOff.has(n))
-  return labOverrides(variant.lab, agent, enabled.length < names.length ? enabled : []).problems
+  return labOverrides(
+    variant.lab,
+    agent,
+    enabled.length < names.length ? enabled : []
+  ).problems
 }
 
 /** labOn: the knob is an override (it differs from the agent's
  * default and would be sent) — the form draws it in colour. */
-export function labOn(lab: LabFields | undefined, key: keyof LabFields, d: AgentDefaults | undefined): boolean {
+export function labOn(
+  lab: LabFields | undefined,
+  key: keyof LabFields,
+  d: AgentDefaults | undefined
+): boolean {
   if (!lab) return false
   const v = lab[key]
   if (Array.isArray(v)) return v.length > 0
-  if (key === "stop") return stopsOf(v).length > 0 && stopsOf(v).join("\n") !== labDefault(key, d)
+  if (key === "stop")
+    return stopsOf(v).length > 0 && stopsOf(v).join("\n") !== labDefault(key, d)
   if (key === "tool_choice")
-    return v !== "" && !(v === labDefault(key, d) && (v !== "named" || lab.tool_choice_name === labDefault("tool_choice_name", d)))
+    return (
+      v !== "" &&
+      !(
+        v === labDefault(key, d) &&
+        (v !== "named" ||
+          lab.tool_choice_name === labDefault("tool_choice_name", d))
+      )
+    )
   if (key === "tool_choice_name") return false
   const def = labDefault(key, d)
   return v.trim() !== "" && !(def !== "" && Number(def) === Number(v))

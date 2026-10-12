@@ -10,7 +10,10 @@ import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 import { CAUSES, HOLES, USAGE_AT_FINISH } from "../lib/honesty"
 
-const code = readFileSync(resolve(process.cwd(), "../dist/panel/panel.js"), "utf8")
+const code = readFileSync(
+  resolve(process.cwd(), "../dist/panel/panel.js"),
+  "utf8"
+)
 
 describe("the built panel.js (studio/dist/panel/panel.js)", () => {
   it("defines <weft-devtools> once; carries the npm entry's mark and the host's untrusted-HTML mark the marker scan skips", () => {
@@ -28,14 +31,17 @@ describe("the built panel.js (studio/dist/panel/panel.js)", () => {
 
   it("fires weft:run, weft:parked and weft:error on the element", () => {
     expect(code).toContain("dispatchEvent(new CustomEvent(`weft:${")
-    for (const name of ["run", "parked", "error"]) expect(code).toContain(`.fire(\`${name}\`,{`)
+    for (const name of ["run", "parked", "error"])
+      expect(code).toContain(`.fire(\`${name}\`,{`)
   })
 
   it("carries every word of the honesty table: each badge's label, reason and fix, each cause's, usage at finish", () => {
     const words: string[] = [USAGE_AT_FINISH]
-    for (const note of Object.values(HOLES)) words.push(note.label, note.reason, ...(note.fix ? [note.fix] : []))
+    for (const note of Object.values(HOLES))
+      words.push(note.label, note.reason, ...(note.fix ? [note.fix] : []))
     for (const causes of Object.values(CAUSES))
-      for (const c of Object.values(causes)) words.push(c.reason, ...(c.fix ? [c.fix] : []))
+      for (const c of Object.values(causes))
+        words.push(c.reason, ...(c.fix ? [c.fix] : []))
     expect(words.length).toBeGreaterThan(30)
     expect(words.filter((w) => !code.includes(w))).toEqual([])
   })

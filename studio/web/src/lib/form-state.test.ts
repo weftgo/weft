@@ -24,7 +24,13 @@ import {
   variantFromOverrides,
 } from "./form-state"
 import type { FormState } from "./form-state"
-import { deleteDraft, listDrafts, loadDraft, resetDrafts, saveDraft } from "./drafts"
+import {
+  deleteDraft,
+  listDrafts,
+  loadDraft,
+  resetDrafts,
+  saveDraft,
+} from "./drafts"
 import { experiment } from "@/test/experiment-fixture"
 
 const form: FormState = {
@@ -34,10 +40,27 @@ const form: FormState = {
   step: 2,
   edits: [{ kind: "tool_result", step: 1, callID: "c2", toolResult: "none" }],
   variants: [
-    { key: "A", instructions: "Be brief.", tools_off: ["refund"], engine: "scripted" },
-    { key: "terse", model: "glm", side_effects: "park", lab: { temperature: "0.5", park_on: ["refund"] } },
+    {
+      key: "A",
+      instructions: "Be brief.",
+      tools_off: ["refund"],
+      engine: "scripted",
+    },
+    {
+      key: "terse",
+      model: "glm",
+      side_effects: "park",
+      lab: { temperature: "0.5", park_on: ["refund"] },
+    },
   ],
-  matrix: { name: "exp_tone", from_step: 1, inputs: [{ key: "1", text: "where is 42?" }, { key: "2", text: "" }] },
+  matrix: {
+    name: "exp_tone",
+    from_step: 1,
+    inputs: [
+      { key: "1", text: "where is 42?" },
+      { key: "2", text: "" },
+    ],
+  },
 }
 
 describe("the share link (#state=)", () => {
@@ -60,13 +83,21 @@ describe("the share link (#state=)", () => {
       vi.unstubAllGlobals()
     }
     // A link made that way opens on any browser.
-    expect(await decodeForm((await encodeForm(form, { codec: "j" })).value)).toEqual(form)
+    expect(
+      await decodeForm((await encodeForm(form, { codec: "j" })).value)
+    ).toEqual(form)
   })
 
   it("a form past the cap is said to be too long, never cut", async () => {
     // Random words deflate badly: well past SHARE_CAP once encoded.
-    const words = Array.from({ length: 4000 }, (_, i) => `${i.toString(36)}${Math.random().toString(36).slice(2, 6)}`)
-    const big: FormState = { ...form, variants: [{ key: "A", instructions: words.join(" ") }] }
+    const words = Array.from(
+      { length: 4000 },
+      (_, i) => `${i.toString(36)}${Math.random().toString(36).slice(2, 6)}`
+    )
+    const big: FormState = {
+      ...form,
+      variants: [{ key: "A", instructions: words.join(" ") }],
+    }
     const enc = await encodeForm(big)
     expect(enc.value.length).toBeGreaterThan(SHARE_CAP)
     expect(enc.tooLong).toBe(true)
@@ -80,25 +111,40 @@ describe("the share link (#state=)", () => {
     // A long run of zeros deflates ~1000:1: a short value, a huge body.
     const zeros = new Uint8Array(DECODE_CAP * 4)
     const cs = new CompressionStream("deflate-raw")
-    const z = new Uint8Array(await new Response(new Response(zeros).body!.pipeThrough(cs)).arrayBuffer())
+    const z = new Uint8Array(
+      await new Response(
+        new Response(zeros).body!.pipeThrough(cs)
+      ).arrayBuffer()
+    )
     let bin = ""
     for (const b of z) bin += String.fromCharCode(b)
-    const value = "z" + btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
+    const value =
+      "z" + btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
     expect(value.length).toBeLessThan(SHARE_CAP)
     const parse = vi.spyOn(JSON, "parse")
     expect(await decodeForm(value)).toBeNull()
     // Nothing the size of the inflated body reached the parser.
-    expect(parse.mock.calls.some(([t]) => typeof t === "string" && t.length >= DECODE_CAP)).toBe(false)
+    expect(
+      parse.mock.calls.some(
+        ([t]) => typeof t === "string" && t.length >= DECODE_CAP
+      )
+    ).toBe(false)
     parse.mockRestore()
   })
 
   it("a damaged, cut, foreign or newer value reads as nothing", async () => {
     const enc = await encodeForm(form)
-    expect(await decodeForm(enc.value.slice(0, enc.value.length / 2))).toBeNull()
+    expect(
+      await decodeForm(enc.value.slice(0, enc.value.length / 2))
+    ).toBeNull()
     expect(await decodeForm("x" + enc.value.slice(1))).toBeNull()
     expect(await decodeForm("z!!!")).toBeNull()
     expect(await decodeForm("")).toBeNull()
-    const newer = (await encodeForm({ ...form, v: 2 } as unknown as FormState, { codec: "j" })).value
+    const newer = (
+      await encodeForm({ ...form, v: 2 } as unknown as FormState, {
+        codec: "j",
+      })
+    ).value
     expect(await decodeForm(newer)).toBeNull()
   })
 
@@ -117,13 +163,29 @@ describe("validateForm", () => {
         v: 1,
         agent: 7,
         variants: [
-          { key: "A", engine: "warp", tools_off: [1], lab: { temperature: "0.3", bogus: "x" }, extra: true },
+          {
+            key: "A",
+            engine: "warp",
+            tools_off: [1],
+            lab: { temperature: "0.3", bogus: "x" },
+            extra: true,
+          },
           { key: "A" },
           { nokey: true },
         ],
-        matrix: { inputs: [{ key: "1", text: "hi" }, { key: "1", text: "dup" }], from_step: -1 },
+        matrix: {
+          inputs: [
+            { key: "1", text: "hi" },
+            { key: "1", text: "dup" },
+          ],
+          from_step: -1,
+        },
       })
-    ).toEqual({ v: 1, variants: [{ key: "A", lab: { temperature: "0.3" } }], matrix: { inputs: [{ key: "1", text: "hi" }] } })
+    ).toEqual({
+      v: 1,
+      variants: [{ key: "A", lab: { temperature: "0.3" } }],
+      matrix: { inputs: [{ key: "1", text: "hi" }] },
+    })
     expect(validateForm({ v: 1, variants: [] })).toBeNull()
     expect(validateForm({ v: 2, variants: [{ key: "A" }] })).toBeNull()
     expect(validateForm(null)).toBeNull()
@@ -150,7 +212,11 @@ describe("formOfFields", () => {
       ],
       matrix: { inputs: [{ key: "1", text: "" }] },
     })
-    expect(f).toEqual({ v: 1, variants: [{ key: "A" }], matrix: { inputs: [{ key: "1", text: "" }] } })
+    expect(f).toEqual({
+      v: 1,
+      variants: [{ key: "A" }],
+      matrix: { inputs: [{ key: "1", text: "" }] },
+    })
   })
 })
 
@@ -158,10 +224,18 @@ describe("a cell's command id", () => {
   it("carries the cell's address and side-effect mode, within the server's id rule", () => {
     const id = cellCommandID("A", "1", "park", "n0nce")!
     expect(id).toMatch(/^[A-Za-z0-9._:-]{1,128}$/)
-    expect(parseCellCommandID(id)).toEqual({ variant: "A", input: "1", sideEffects: "park" })
+    expect(parseCellCommandID(id)).toEqual({
+      variant: "A",
+      input: "1",
+      sideEffects: "park",
+    })
     // Any key text survives (base64url).
     const odd = cellCommandID("tone ✓/x", "row.2", "allow")!
-    expect(parseCellCommandID(odd)).toEqual({ variant: "tone ✓/x", input: "row.2", sideEffects: "allow" })
+    expect(parseCellCommandID(odd)).toEqual({
+      variant: "tone ✓/x",
+      input: "row.2",
+      sideEffects: "allow",
+    })
     // Too long for the id: none (the server mints one).
     expect(cellCommandID("V".repeat(100), "1", "substitute")).toBeUndefined()
     expect(parseCellCommandID("cmd_123")).toBeNull()
@@ -182,7 +256,12 @@ const orders: AgentView = {
 describe("a saved experiment read back", () => {
   it("variantFromOverrides is overridesOf's inverse", () => {
     const v = variantFromOverrides("B", experiment.variants[1].overrides)
-    expect(v).toEqual({ key: "B", instructions: "Be brief.", tools_on: ["lookup_order"], lab: { temperature: "0.5" } })
+    expect(v).toEqual({
+      key: "B",
+      instructions: "Be brief.",
+      tools_on: ["lookup_order"],
+      lab: { temperature: "0.5" },
+    })
     const back = overridesOf(
       {
         instructions: v.instructions!,
@@ -198,19 +277,28 @@ describe("a saved experiment read back", () => {
 
   it("places runs by their command ids; a pre-F5 grid by issue order; the rest are loose", () => {
     const p = placeRuns(experiment)
-    expect([...p.cells.entries()].map(([k, l]) => [k, l.map((r) => r.id)])).toEqual([
+    expect(
+      [...p.cells.entries()].map(([k, l]) => [k, l.map((r) => r.id)])
+    ).toEqual([
       [cellKey("A", "1"), ["pg_a1"]],
       [cellKey("A", "2"), ["pg_a2"]],
       [cellKey("B", "1"), ["pg_b1"]],
       [cellKey("B", "2"), ["pg_b2"]],
     ])
     expect(p.byOrder).toBe(false)
-    const old = { ...experiment, runs: experiment.runs!.map((r) => ({ ...r, meta: {} })) }
+    const old = {
+      ...experiment,
+      runs: experiment.runs!.map((r) => ({ ...r, meta: {} })),
+    }
     const q = placeRuns(old)
     expect(q.byOrder).toBe(true)
     expect(q.cells.get(cellKey("B", "1"))?.[0].id).toBe("pg_b1")
     const partial = { ...old, runs: old.runs.slice(0, 3) }
-    expect(placeRuns(partial).loose.map((r) => r.id)).toEqual(["pg_a1", "pg_a2", "pg_b1"])
+    expect(placeRuns(partial).loose.map((r) => r.id)).toEqual([
+      "pg_a1",
+      "pg_a2",
+      "pg_b1",
+    ])
   })
 
   it("formFromExperiment: the variants, the rows, the source, the matrix's step and each variant's modes", () => {
@@ -220,7 +308,14 @@ describe("a saved experiment read back", () => {
       run: "r_ok",
       variants: [
         { key: "A" },
-        { key: "B", instructions: "Be brief.", tools_on: ["lookup_order"], lab: { temperature: "0.5" }, engine: "scripted", side_effects: "park" },
+        {
+          key: "B",
+          instructions: "Be brief.",
+          tools_on: ["lookup_order"],
+          lab: { temperature: "0.5" },
+          engine: "scripted",
+          side_effects: "park",
+        },
       ],
       matrix: {
         name: "exp_tone",
@@ -238,11 +333,25 @@ describe("a saved experiment read back", () => {
     const saved = golden<ExperimentRow>("experiment")
     const f = formFromExperiment(saved)
     // The golden's runs say nothing a heuristic could read; the command does.
-    expect(f.matrix).toMatchObject({ name: "tracking link", id: "exp_g", from_step: 1 })
+    expect(f.matrix).toMatchObject({
+      name: "tracking link",
+      id: "exp_g",
+      from_step: 1,
+    })
     expect(f.run).toBe("r_ok")
     expect(f.variants.find((v) => v.key === "A")).toEqual({ key: "A" })
-    expect(f.variants.find((v) => v.key === "B")).toMatchObject({ engine: "scripted", side_effects: "park" })
-    expect(f.edits).toEqual([{ kind: "tool_result", step: 0, callID: "call_1", toolResult: "order 42: lost" }])
+    expect(f.variants.find((v) => v.key === "B")).toMatchObject({
+      engine: "scripted",
+      side_effects: "park",
+    })
+    expect(f.edits).toEqual([
+      {
+        kind: "tool_result",
+        step: 0,
+        callID: "call_1",
+        toolResult: "order 42: lost",
+      },
+    ])
     // A saved field wins over the runs' reading: the fixture's runs say
     // B ran scripted and parked — the saved command says live, allow.
     const over = formFromExperiment({
@@ -252,18 +361,32 @@ describe("a saved experiment read back", () => {
       from_step: 0,
       variants: experiment.variants.map((v) => ({ ...v, engine: "live" })),
     })
-    expect(over.variants.find((v) => v.key === "B")).toMatchObject({ side_effects: "allow" })
+    expect(over.variants.find((v) => v.key === "B")).toMatchObject({
+      side_effects: "allow",
+    })
     expect(over.variants.find((v) => v.key === "B")?.engine).toBeUndefined()
     expect(over.matrix?.from_step).toBeUndefined()
     // Absent fields fall back to the runs (a definition before F5.1).
-    expect(formFromExperiment(experiment).variants[1]).toMatchObject({ engine: "scripted", side_effects: "park" })
+    expect(formFromExperiment(experiment).variants[1]).toMatchObject({
+      engine: "scripted",
+      side_effects: "park",
+    })
   })
 
   it("keeps an id that fits command_id's rule and drops one that does not (re-minted)", () => {
-    const bad = formFromExperiment({ ...experiment, id: "my experiment/1", name: "my experiment/1" })
+    const bad = formFromExperiment({
+      ...experiment,
+      id: "my experiment/1",
+      name: "my experiment/1",
+    })
     expect(bad.matrix?.name).toBe("my experiment/1")
     expect(bad.matrix?.id).toBeUndefined()
-    expect(validateForm({ ...form, matrix: { inputs: [{ key: "1", text: "" }], name: "a b", id: "a b" } })?.matrix).toEqual({
+    expect(
+      validateForm({
+        ...form,
+        matrix: { inputs: [{ key: "1", text: "" }], name: "a b", id: "a b" },
+      })?.matrix
+    ).toEqual({
       inputs: [{ key: "1", text: "" }],
       name: "a b",
     })
@@ -271,7 +394,10 @@ describe("a saved experiment read back", () => {
 
   it("cellBody re-runs one cell: its overrides as saved, its source, the same experiment id, a cell command id", () => {
     const f = formFromExperiment(experiment)
-    const body = cellBody(experiment, f, "B", "2", { runtime: "rt_1", publicID: "pub_1" })
+    const body = cellBody(experiment, f, "B", "2", {
+      runtime: "rt_1",
+      publicID: "pub_1",
+    })
     expect(body).toMatchObject({
       runtime: "rt_1",
       agent: "orders",
@@ -285,10 +411,22 @@ describe("a saved experiment read back", () => {
     })
     // Past step 0 the cell continues the kept prefix: no input.
     expect(body).not.toHaveProperty("input")
-    expect(parseCellCommandID(body.command_id)).toEqual({ variant: "B", input: "2", sideEffects: "park" })
-    const at0 = cellBody(experiment, { ...f, matrix: { ...f.matrix!, from_step: 0 } }, "A", "1", { runtime: "rt_1" })
+    expect(parseCellCommandID(body.command_id)).toEqual({
+      variant: "B",
+      input: "2",
+      sideEffects: "park",
+    })
+    const at0 = cellBody(
+      experiment,
+      { ...f, matrix: { ...f.matrix!, from_step: 0 } },
+      "A",
+      "1",
+      { runtime: "rt_1" }
+    )
     expect(at0.input).toBe("where is 42?")
-    expect(() => cellBody(experiment, f, "Z", "1", { runtime: "rt_1" })).toThrow(/no cell Z×1/)
+    expect(() =>
+      cellBody(experiment, f, "Z", "1", { runtime: "rt_1" })
+    ).toThrow(/no cell Z×1/)
   })
 })
 
@@ -301,7 +439,9 @@ describe("drafts (no IndexedDB here: the in-memory stand-in)", () => {
     await saveDraft("exp:exp_tone", form, { kind: "experiment" })
     expect((await loadDraft("d_1"))?.form).toEqual(form)
     expect((await listDrafts()).map((d) => d.id)).toEqual(["d_2", "d_1"])
-    expect((await listDrafts("experiment")).map((d) => d.id)).toEqual(["exp:exp_tone"])
+    expect((await listDrafts("experiment")).map((d) => d.id)).toEqual([
+      "exp:exp_tone",
+    ])
     await deleteDraft("d_1")
     expect(await loadDraft("d_1")).toBeNull()
     resetDrafts()

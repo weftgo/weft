@@ -359,9 +359,10 @@ export interface Meta {
   live_all?: boolean
   has_manifest: boolean
   ingest_open: boolean
-  /** Ingest health (U5): the services whose heartbeats reported
-   * records their destination lost on the way here
-   * (weft.records.dropped), most first. Absent from an older Studio. */
+  /** Ingest health (U5): the services whose heartbeats and
+   * run_start/run_finish records reported records their destination
+   * lost on the way here (weft.records.dropped), most first. Absent from
+   * an older Studio, and for a panel token (the dev token's alone). */
   ingest?: {
     dropped: { service: string; records: number; last_heard: string }[]
   }

@@ -202,7 +202,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    auth_required, content, runtimes, manifest_check, pricing {source default|file|option, path?
 //    //    (db.path's rule), dated, models}, retention (Retain's Go
 //    //    duration string, null when off), ingest {dropped: [{service, records, last_heard}]} (U5: the largest
-//    //    weft.records.dropped each service's heartbeats reported on the OTLP path; in memory) — `weft doctor` prints it
+//    //    weft.records.dropped each service's heartbeats and run_start/run_finish reported on the OTLP path; in memory;
+//    //    manifest_check's rule: dev token / setup A loopback only, omitted for a panel token) — `weft doctor` prints it
 //    //    line by line; capabilities_off {capability: why} names the option/flag that left one off;
 //    //    manifest_sources), agents/{name}/proposal (PUT {instructions} / DELETE, plan F6: proposed prompts in memory, 64, lost
 //    //    on restart; dev token or setup A loopback only; capability proposals), manifest (each agent with `proposed`
@@ -482,8 +483,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //            otel.QueueSize(16384), otel.Blocking()),   // per destination (U5): the batch queue (Studio 16,384, others 2,048;
 //                               // Local has none — synchronous); a full queue never blocks: it refuses deltas first (½ full),
 //                               // records at ⅞, run_start/run_finish/the root span/heartbeats last — counted, one WARN per
-//                               // destination ("weft/otel: destination queue full"), weft.records.dropped on its heartbeats;
-//                               // Blocking() waits instead (≤ 5 s), dev only like RawBodies (WEFT_ENV=dev, else one WARN)
+//                               // destination ("weft/otel: destination queue full"), weft.records.dropped on its heartbeats and
+//                               // every run_start/run_finish; Blocking() waits instead (≤ 5 s per stall: after one timed-out wait it
+//                               // refuses at once until an export begins), dev only like RawBodies (WEFT_ENV=dev, else one WARN)
 //        otel.Datadog(),                               // the Agent's OTLP intake, content off
 //        otel.Exporters(spanExporter, logExporter),    // your own exporters (either may be nil)
 //        otel.Content(otel.ContentConfig{MaxBytes: 32 << 10, Redact: redact}),

@@ -22,7 +22,8 @@ const (
 	attrContentKey = "weft.content"
 	attrTruncated  = "weft.content.truncated_bytes"
 	// attrEventTypeKey is weft.event.type (admission's tiers);
-	// attrRecordsDropped the heartbeat's loss count (U5).
+	// attrRecordsDropped the loss count on the heartbeat, run_start and
+	// run_finish (U5).
 	attrEventTypeKey   = "weft.event.type"
 	attrRecordsDropped = "weft.records.dropped"
 	contentStripped    = "stripped"
@@ -154,15 +155,21 @@ func (p *destProc) OnEmit(ctx context.Context, r *sdklog.Record) error {
 			return nil // never sent unredacted
 		}
 	case "heartbeat":
-		// No body, no content. It carries this destination's own loss
-		// so far (weft.records.dropped, record contract §4): Studio's
-		// ingest health hears what the app lost on the way to it.
+		// No body, no content: through unchanged but for the count below.
+	}
+	t := recordTier(&clone, kind)
+	if t == tierPriority {
+		// The heartbeat and the run's bracket (run_start, run_finish)
+		// carry this destination's own loss so far (weft.records.dropped,
+		// record contract §4): Studio's ingest health hears what the app
+		// lost on the way to it — at every run's end, however short the
+		// run, and every heartbeat of a long one.
 		if n := p.drops.lost(); n > 0 {
 			setAttr(&clone, attrRecordsDropped, attribute.Int64Value(n))
 		}
 	}
 	if p.adm != nil {
-		if !p.adm.admit(ctx, recordTier(&clone, kind)) {
+		if !p.adm.admit(ctx, t) {
 			p.drops.overflowed(1, p.adm.size)
 			return nil
 		}
@@ -179,7 +186,7 @@ func (p *destProc) Shutdown(ctx context.Context) error {
 
 func (p *destProc) ForceFlush(ctx context.Context) error {
 	if p.adm != nil {
-		return flushDetached(ctx, p.inner.ForceFlush)
+		return flushDetached(ctx, p.adm, p.inner.ForceFlush)
 	}
 	return p.inner.ForceFlush(ctx)
 }
@@ -614,15 +621,15 @@ func (d *dropCounter) filtered(n int64) {
 // overflowed counts n records the destination's full queue refused
 // (admission.go). The first overflow logs one WARN for the
 // destination's lifetime, naming the queue and the knobs; the running
-// total rides every later heartbeat (weft.records.dropped) and the
-// export-failure WARN's count.
+// total rides every later heartbeat, run_start and run_finish
+// (weft.records.dropped) and the export-failure WARN's count.
 func (d *dropCounter) overflowed(n, queue int64) {
 	d.count.Add(n)
 	d.overflow.Add(n)
 	if d.overflowWarned.CompareAndSwap(false, true) {
 		d.log.Warn("weft/otel: destination queue full, records dropped",
 			"dest", d.name, "queue", queue,
-			"hint", "raise it with otel.QueueSize(n) on the destination, or use otel.Blocking() under WEFT_ENV=dev; deltas are shed first, a run's run_start and run_finish last; the count rides weft.records.dropped on the heartbeat")
+			"hint", "raise it with otel.QueueSize(n) on the destination, or use otel.Blocking() under WEFT_ENV=dev; deltas are shed first, a run's run_start and run_finish last; the count rides weft.records.dropped on the heartbeat and each run's run_start/run_finish")
 	}
 }
 

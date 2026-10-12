@@ -66,7 +66,7 @@ type meta struct {
 		} `json:"latest"`
 	} `json:"content"`
 	// Ingest is the ingest health (U5): absent from a Studio older
-	// than it.
+	// than it, and for a panel token (the dev token's alone).
 	Ingest *struct {
 		Dropped []struct {
 			Service   string    `json:"service"`
@@ -255,9 +255,9 @@ func (p *printer) content(m meta) {
 func (p *printer) ingest(m meta) {
 	switch {
 	case m.Ingest == nil:
-		p.line(ok, "ingest", "this studio predates ingest health (no ingest.dropped)")
+		p.line(ok, "ingest", "not served (no ingest.dropped): a studio older than ingest health, or a panel token — it is the dev token's")
 	case len(m.Ingest.Dropped) == 0:
-		p.line(ok, "ingest", "no app reported lost records (weft.records.dropped on its heartbeats)")
+		p.line(ok, "ingest", "no app reported lost records (weft.records.dropped on its heartbeats and run brackets)")
 	default:
 		p.line(warn, "ingest", "%d service(s) reported records lost on the way here", len(m.Ingest.Dropped))
 		for _, d := range m.Ingest.Dropped {

@@ -595,19 +595,17 @@ func buildDest(ctx context.Context, d dest, cfg config) (_ *destRuntime, err err
 	// own drops (S2.4).
 	//
 	// Each batch chain admits its records ahead of the SDK's queue
-	// (admission.go), the SDK queue sized to match, so a full queue is
-	// weft's counted refusal — never the SDK's silent drop.
+	// (admission.go), the SDK queue sized to match (the span queue with
+	// room for ForceFlush's markers), so a full queue is weft's counted
+	// refusal — never the SDK's silent drop.
 	queue := d.queueSizeOf()
 	if spanExp != nil {
-		adm := newAdmission(queue, d.blocking)
-		var exp sdktrace.SpanExporter = releasingSpanExporter{
-			SpanExporter: countingSpanExporter{SpanExporter: spanExp, drops: drops}, adm: adm}
-		spanOpts := []sdktrace.BatchSpanProcessorOption{sdktrace.WithMaxQueueSize(queue)}
+		var spanOpts []sdktrace.BatchSpanProcessorOption
 		if spanDelay > 0 {
 			spanOpts = append(spanOpts, sdktrace.WithBatchTimeout(spanDelay))
 		}
-		rt.spanProc = admittedSpanProc{SpanProcessor: sdktrace.NewBatchSpanProcessor(exp, spanOpts...),
-			adm: adm, drops: drops}
+		rt.spanProc = newAdmittedSpanProc(countingSpanExporter{SpanExporter: spanExp, drops: drops},
+			queue, d.blocking, drops, spanOpts...)
 	}
 	if logExp != nil {
 		var exp sdklog.Exporter = countingLogExporter{Exporter: logExp, drops: drops}

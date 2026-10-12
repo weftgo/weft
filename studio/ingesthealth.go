@@ -12,10 +12,15 @@ import (
 
 // Ingest health (U5, UX-E-38): what the apps exporting here said about
 // their own losses. Each weft/otel destination stamps its cumulative
-// lost-record count on its heartbeats (weft.records.dropped, record
-// contract §4); Studio keeps the largest value heard per service.name —
-// in memory, like registered manifests: a restart forgets it until the
-// next heartbeat. GET /api/meta serves it as ingest.dropped, the
+// lost-record count on its heartbeats and on every run's run_start and
+// run_finish event records (weft.records.dropped, record contract §4);
+// Studio keeps the largest value heard per service.name — in memory,
+// like registered manifests: a restart forgets it until the next such
+// record. The max is per service, not per process: the pipeline's
+// resource carries no process identity (no service.instance.id, no
+// pid), so an app restarted under the same name, whose count starts
+// again from zero, reads the earlier process's larger count until
+// Studio restarts. GET /api/meta serves it as ingest.dropped, the
 // Settings page shows it, `weft doctor` prints it. Heard on the OTLP
 // ingest path (setup B, `weft dev`): a Local destination writes its own
 // heartbeats into the database directly, and never overflows (it has no
@@ -32,7 +37,8 @@ type ingestDrop struct {
 	heard   time.Time
 }
 
-// heard folds one heartbeat's weft.records.dropped in.
+// heard folds one record's weft.records.dropped in (a heartbeat, a
+// run_start or a run_finish; absent while the destination lost none).
 func (h *ingestHealth) heard(rec *obsdb.Record) {
 	n, ok := dropCount(rec.Attrs["weft.records.dropped"])
 	if !ok || n <= 0 {
@@ -99,16 +105,23 @@ func (h *ingestHealth) snapshot() metaIngest {
 }
 
 // healthHub is the hub the OTLP receiver publishes through: every
-// record frame passes on unchanged, and a heartbeat's drop count is
-// noted on the way.
+// record frame passes on unchanged, and a heartbeat's or a run
+// bracket's drop count is noted on the way.
 type healthHub struct {
 	obsdb.Hub
 	h *ingestHealth
 }
 
 func (hh healthHub) Publish(ctx context.Context, f obsdb.Frame) {
-	if f.Kind == obsdb.FrameRecord && f.Record != nil && f.Weft.Record == "heartbeat" {
+	if f.Kind == obsdb.FrameRecord && f.Record != nil && carriesDrops(f.Weft) {
 		hh.h.heard(f.Record)
 	}
 	hh.Hub.Publish(ctx, f)
+}
+
+// carriesDrops reports whether a record is one weft.records.dropped
+// rides: the heartbeat, run_start and run_finish.
+func carriesDrops(w obsdb.Weft) bool {
+	return w.Record == "heartbeat" ||
+		(w.Record == "event" && (w.EventType == "run_start" || w.EventType == "run_finish"))
 }

@@ -2010,8 +2010,14 @@ A's loopback Host and the server token, `db.path`'s rule; false for a
 panel token and an `AllowOrigins` host), `ingest_open`, `interrupted_after_ms`, capabilities, `capabilities_off`
 {capability: why}, `manifest_sources`, `retention` — `studio.Retain`'s
 duration as a Go duration string, `"720h0m0s"`, `null` when off, the
-default — and `pricing` {source, path?, dated, models}, the cost table;
-see Cost above), `settings/pricing` (the effective pricing table,
+default — `pricing` {source, path?, dated, models}, the cost table;
+see Cost above — and `ingest` {dropped: [{service, records,
+last_heard}]}, the ingest health: the largest `weft.records.dropped`
+each exporting service's heartbeats and `run_start`/`run_finish`
+records reported on the OTLP path, in memory, per `service.name`;
+`manifest_check`'s rule — the dev token's or setup A's loopback, omitted
+for a panel token, whose public id is no reason to read every service's
+name and losses), `settings/pricing` (the effective pricing table,
 capability `pricing`), `runs` (agent,
 status, session, public id, playground, parent, experiment_id,
 `stopped_by` (what ended the run — exact, or a prefix when the value

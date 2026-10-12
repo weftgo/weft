@@ -1199,9 +1199,12 @@ func TestAuthMatrix(t *testing.T) {
 	// rt_link stream may not have wound down yet). auth_required is
 	// everyone's. A panel token's content.latest is the newest run of
 	// its own public id — never the newer run seeded here under pub_b —
-	// and its manifest_check is null (it reads no manifest).
+	// and its manifest_check is null (it reads no manifest). ingest (U5's
+	// health: every exporting service's name and drop count) follows
+	// manifest_check: the server token's, omitted for a panel token.
 	time.Sleep(2 * time.Millisecond) // strictly newer than every seeded run
 	seedRun(t, srv.db, "run_b_newer", "pub_b", "", "", nil)
+	srv.ingestHealth.heard(&obsdb.Record{Service: "svc-other-tenant", Attrs: map[string]any{"weft.records.dropped": int64(3)}})
 	for _, id := range identities {
 		if id.kind == "bad" {
 			continue
@@ -1228,9 +1231,21 @@ func TestAuthMatrix(t *testing.T) {
 			ManifestCheck *struct {
 				Agents int `json:"agents"`
 			} `json:"manifest_check"`
+			Ingest *struct {
+				Dropped []struct {
+					Service string `json:"service"`
+				} `json:"dropped"`
+			} `json:"ingest"`
 			Pricing map[string]any `json:"pricing"`
 		}
 		decode(t, string(b), &meta)
+		if want := id.kind == "server"; (meta.Ingest != nil) != want ||
+			(want && (len(meta.Ingest.Dropped) != 1 || meta.Ingest.Dropped[0].Service != "svc-other-tenant")) {
+			t.Errorf("GET /api/meta as %s: ingest = %+v, want present (svc-other-tenant's drops) only for the server token", id.name, meta.Ingest)
+		}
+		if id.kind != "server" && strings.Contains(string(b), "svc-other-tenant") {
+			t.Errorf("GET /api/meta as %s names another service's drops: %s", id.name, b)
+		}
 		// pricing.path (plan A5) follows db.path: the server token's alone;
 		// the rest of the block is everyone's — and so is the settings
 		// route, whose path follows the same rule.

@@ -34,10 +34,13 @@ type metaDoc struct {
 	HasManifest  bool   `json:"has_manifest"`
 	IngestOpen   bool   `json:"ingest_open"`
 	// Ingest is the ingest health (U5): the services whose heartbeats
-	// reported records their destination lost on the way here.
-	Ingest             metaIngest `json:"ingest"`
-	InterruptedAfterMs int64      `json:"interrupted_after_ms"`
-	Capabilities       []string   `json:"capabilities"`
+	// and run brackets reported records their destination lost on the
+	// way here. manifest_check's rule: the dev token's or setup A's
+	// loopback alone — every exporting service's name and count is no
+	// panel token's to read; omitted for one.
+	Ingest             *metaIngest `json:"ingest,omitempty"`
+	InterruptedAfterMs int64       `json:"interrupted_after_ms"`
+	Capabilities       []string    `json:"capabilities"`
 	// CapabilitiesOff names each capability an option left off, with
 	// the option (and CLI flag) that did (plan B4): the UI's empty
 	// states say it. Omitted when nothing is off.
@@ -181,7 +184,6 @@ func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
 		HasManifest:        len(s.manifest) > 0 || len(reg) > 0,
 		ManifestSources:    len(s.manifestSources(reg)),
 		IngestOpen:         !s.noIngest && s.ingestToken == "",
-		Ingest:             s.ingestHealth.snapshot(),
 		InterruptedAfterMs: obsdb.InterruptedAfter.Milliseconds(),
 		Capabilities:       s.capabilityList(),
 		CapabilitiesOff:    s.capabilitiesOff(),
@@ -202,6 +204,8 @@ func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
 	}
 	if id.panel == nil {
 		doc.ManifestCheck = s.manifestCheck(r.Context(), reg)
+		ingest := s.ingestHealth.snapshot()
+		doc.Ingest = &ingest
 	}
 	writeJSON(w, r, http.StatusOK, doc)
 }

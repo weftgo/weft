@@ -312,6 +312,7 @@ var nonMetaAttr = map[string]struct{}{
 	"weft.cancel.cause":            {}, // U3.2: the run row's cancel_cause column
 	"weft.run.events":              {}, // U5: the run row's events_emitted column
 	"weft.run.messages":            {}, // U5: the run row's messages_emitted column
+	"weft.records.dropped":         {}, // U5-fix: a destination's loss count on run_start/run_finish (ingest health)
 	"weft.stop.raw":                {},
 	"weft.model.tool_calls":        {},
 	"weft.tool.approved":           {},

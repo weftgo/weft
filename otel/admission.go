@@ -19,12 +19,14 @@ import (
 // counter. So each batch chain admits its records itself, ahead of the
 // SDK: admission counts the records it handed the SDK and has not yet
 // seen leave for export, and refuses a record once that count reaches
-// the queue's size. The SDK queue is built with the same size, and a
-// record is released only when the export it rides begins — after the
-// SDK dequeued it — so the SDK queue never holds more than admission
-// let in and never drops on its own: every overflow is weft's refusal,
-// counted (dropCounter.overflowed), warned once per destination, and
-// reported on the heartbeat (weft.records.dropped).
+// the queue's size. The SDK queue is built with the same size (the span
+// queue a few places larger: spanQueueHeadroom), and a record is
+// released only when the export it rides begins — after the SDK dequeued
+// it — so the SDK queue never holds more than admission let in and never
+// drops on its own: every overflow is weft's refusal, counted
+// (dropCounter.overflowed), warned once per destination, and reported as
+// weft.records.dropped on the heartbeat and on every later run_start and
+// run_finish record.
 //
 // Admission sheds by tier, so the records a reader cannot do without go
 // last: deltas (never stored, a live-tail nicety) are refused once the
@@ -36,7 +38,11 @@ import (
 // Admission never blocks the app unless the destination asked for
 // Blocking (development only, refused outside WEFT_ENV=dev): then a
 // durable record waits — bounded by blockMax and the emitting context —
-// for room instead of being refused. Deltas never wait.
+// for room instead of being refused. Deltas never wait. The bound is per
+// stall, not per record: once one wait times out, the chain refuses at
+// once (counted, as without Blocking) until an export begins and gives
+// places back — a hung exporter costs the app one blockMax, not one per
+// record.
 
 // Default queue sizes: the SDK's 2,048 for third-party destinations,
 // sixteen thousand for Studio — a dev loop's event storm (thousands of
@@ -50,6 +56,16 @@ const (
 // counted like any overflow — a hung exporter never hangs the app for
 // longer.
 const blockMax = 5 * time.Second
+
+// spanQueueHeadroom is the SDK span queue's room above admission's size.
+// The span BatchSpanProcessor's ForceFlush puts a marker into the same
+// channel as the spans; admission counts spans, not markers, so without
+// the headroom a flush under a full queue would leave an admitted span
+// no place — the SDK drops it silently (the root, likely: the only tier
+// admitted at the brim) and its place is never released. Each
+// concurrent flush holds one marker; eight is more than the pipeline's
+// flushes ever overlap. The log BatchProcessor queues no marker.
+const spanQueueHeadroom = 8
 
 // tier is a record's shedding class.
 type tier int
@@ -69,6 +85,11 @@ type admission struct {
 	// sums both chains).
 	refused  atomic.Int64
 	blocking bool
+	// wait is one Blocking wait's bound (blockMax; tests shorten it).
+	wait time.Duration
+	// stalled latches a timed-out Blocking wait: until the next release
+	// a Blocking chain refuses at once instead of waiting again.
+	stalled atomic.Bool
 	// space is signalled (never blocking) on every release, so a
 	// Blocking waiter re-tries; one waiter wakes per signal and passes
 	// the baton on when room is left.
@@ -81,7 +102,7 @@ func newAdmission(size int, blocking bool) *admission {
 	if size <= 0 {
 		size = defaultQueueSize
 	}
-	return &admission{size: int64(size), blocking: blocking,
+	return &admission{size: int64(size), blocking: blocking, wait: blockMax,
 		space: make(chan struct{}, 1), done: make(chan struct{})}
 }
 
@@ -125,10 +146,10 @@ func (a *admission) admitOrWait(ctx context.Context, t tier) bool {
 	if a.try(limit) {
 		return true
 	}
-	if !a.blocking || t == tierDelta {
+	if !a.blocking || t == tierDelta || a.stalled.Load() {
 		return false
 	}
-	timer := time.NewTimer(blockMax)
+	timer := time.NewTimer(a.wait)
 	defer timer.Stop()
 	for {
 		select {
@@ -140,6 +161,9 @@ func (a *admission) admitOrWait(ctx context.Context, t tier) bool {
 				return true
 			}
 		case <-timer.C:
+			// No export began for a whole wait: the exporter is stuck.
+			// Every later record is refused at once until one does.
+			a.stalled.Store(true)
 			return false
 		case <-ctx.Done():
 			return false
@@ -149,9 +173,11 @@ func (a *admission) admitOrWait(ctx context.Context, t tier) bool {
 	}
 }
 
-// release gives back n places: the records began their export.
+// release gives back n places: the records began their export (the
+// exporter is moving again: a stalled Blocking chain waits again).
 func (a *admission) release(n int) {
 	a.inflight.Add(-int64(n))
+	a.stalled.Store(false)
 	a.signal()
 }
 
@@ -201,9 +227,28 @@ type admittedSpanProc struct {
 	drops *dropCounter
 }
 
+// newAdmittedSpanProc is a batch span chain over exp: admission sized
+// queue, the SDK queue sized queue + spanQueueHeadroom (the flush
+// markers' room), each export releasing its spans' places.
+func newAdmittedSpanProc(exp sdktrace.SpanExporter, queue int, blocking bool, drops *dropCounter,
+	opts ...sdktrace.BatchSpanProcessorOption) admittedSpanProc {
+	adm := newAdmission(queue, blocking)
+	opts = append([]sdktrace.BatchSpanProcessorOption{sdktrace.WithMaxQueueSize(int(adm.size) + spanQueueHeadroom)}, opts...)
+	bsp := sdktrace.NewBatchSpanProcessor(releasingSpanExporter{SpanExporter: exp, adm: adm}, opts...)
+	return admittedSpanProc{SpanProcessor: bsp, adm: adm, drops: drops}
+}
+
 func (p admittedSpanProc) OnEnd(s sdktrace.ReadOnlySpan) {
 	if s.SpanContext().IsSampled() {
-		if !p.adm.admit(context.Background(), spanTier(s)) {
+		// A span's End carries no context: a Blocking wait is bounded
+		// by its own deadline (the record side waits under the run's).
+		ctx := context.Background()
+		if p.adm.blocking {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, p.adm.wait)
+			defer cancel()
+		}
+		if !p.adm.admit(ctx, spanTier(s)) {
 			p.drops.overflowed(1, p.adm.size)
 			return
 		}
@@ -212,7 +257,7 @@ func (p admittedSpanProc) OnEnd(s sdktrace.ReadOnlySpan) {
 }
 
 func (p admittedSpanProc) ForceFlush(ctx context.Context) error {
-	return flushDetached(ctx, p.SpanProcessor.ForceFlush)
+	return flushDetached(ctx, p.adm, p.SpanProcessor.ForceFlush)
 }
 
 func (p admittedSpanProc) Shutdown(ctx context.Context) error {
@@ -239,13 +284,28 @@ func spanTier(s sdktrace.ReadOnlySpan) tier {
 // the chunks it skipped would never be exported and their places never
 // released. Detached, every chunk is exported (each bounded by the
 // SDK's export timeout) and released; the caller still waits no longer
-// than ctx.
-func flushDetached(ctx context.Context, flush func(context.Context) error) error {
+// than ctx. The detached flush ends with the chain: its context is
+// cancelled when the chain shuts down (adm.done), so a flush whose
+// answer a shut-down processor never sends (sdklog's flush then waits on
+// its response and its context alone) is a bounded goroutine, not a
+// leak.
+func flushDetached(ctx context.Context, adm *admission, flush func(context.Context) error) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
+	fctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	go func() {
+		select {
+		case <-adm.done:
+			cancel()
+		case <-fctx.Done():
+		}
+	}()
 	done := make(chan error, 1)
-	go func() { done <- flush(context.WithoutCancel(ctx)) }()
+	go func() {
+		defer cancel()
+		done <- flush(fctx)
+	}()
 	select {
 	case err := <-done:
 		return err

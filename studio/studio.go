@@ -185,7 +185,8 @@ type Server struct {
 	runtimeSrv *RuntimeServer
 
 	// ingestHealth is what the exporting apps reported losing
-	// (weft.records.dropped on their heartbeats; ingesthealth.go).
+	// (weft.records.dropped on their heartbeats and run brackets;
+	// ingesthealth.go).
 	ingestHealth ingestHealth
 
 	shell []byte

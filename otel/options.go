@@ -305,8 +305,9 @@ func DatadogEndpoint(url string) DestOption {
 // record, deltas first (at half full), then ordinary records (at seven
 // eighths), a run's run_start and run_finish last. Every refusal is
 // counted: one WARN per destination ("weft/otel: destination queue
-// full"), the count on the heartbeat (weft.records.dropped, which
-// Studio's ingest health shows), and the run's gap badge, which counts
+// full"), the count on the heartbeat and every run's run_start and
+// run_finish (weft.records.dropped, which Studio's ingest health
+// shows), and the run's gap badge, which counts
 // the events lost against weft.run.events. Local has no queue (it writes
 // synchronously) and ignores it. The OTEL_BLRP_MAX_QUEUE_SIZE and
 // OTEL_BSP_MAX_QUEUE_SIZE variables do not apply to weft's
@@ -316,8 +317,12 @@ func QueueSize(n int) DestOption {
 }
 
 // Blocking makes a full queue wait for room instead of refusing a
-// durable record — up to 5 s per record and never past the emitting
-// run's context; deltas are still shed. Development only, like
+// durable record — up to 5 s and never past the emitting run's context
+// (a span's End, which has none, waits under its own 5 s deadline);
+// deltas are still shed. The bound is per stall: once a wait times out
+// (the exporter is stuck), every later record is refused at once,
+// counted, until an export begins again — a hung exporter costs the app
+// one 5 s wait, not one per record. Development only, like
 // RawBodies: it takes effect only when WEFT_ENV is "dev" when the
 // pipeline starts; otherwise (and always under NoEnv) Start logs one
 // WARN ("otel: Blocking ignored: WEFT_ENV is not dev") and the

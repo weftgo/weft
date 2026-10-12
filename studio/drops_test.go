@@ -17,6 +17,7 @@ import (
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/wefttest"
+	"github.com/weftgo/weft/obsdb"
 	"github.com/weftgo/weft/obsdb/sqlite"
 	"github.com/weftgo/weft/otel"
 )
@@ -46,9 +47,10 @@ func (b *syncBuf) String() string {
 // Studio with its run_start and run_finish (shed last) but without most
 // of its events, and the run document's gap says how many — "N of M
 // events were lost", M the root span's weft.run.events — with a fix
-// naming otel.QueueSize; the heartbeats that follow carry the
-// destination's drop count, which api/meta's ingest health serves for
-// the app's service.
+// naming otel.QueueSize; its run_finish carries the destination's drop
+// count (weft.records.dropped — no second, longer run needed for a
+// heartbeat to bring it), which api/meta's ingest health serves for the
+// app's service.
 func TestEventStormGapNamesTheQueue(t *testing.T) {
 	logs := &syncBuf{}
 	prev := slog.Default()
@@ -67,7 +69,7 @@ func TestEventStormGapNamesTheQueue(t *testing.T) {
 
 	const queue = 64
 	p, err := otel.Start(context.Background(), otel.NoGlobal(), otel.NoEnv(), otel.Service("storm-app"),
-		otel.Heartbeat(5*time.Millisecond),
+		otel.Heartbeat(0), // the count rides the run's own run_finish
 		// Nothing drains before the flush: the storm meets a full queue
 		// deterministically.
 		otel.Studio(ts.URL, "", otel.QueueSize(queue), otel.BatchDelay(time.Hour)))
@@ -98,17 +100,6 @@ func TestEventStormGapNamesTheQueue(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// A second run that stays open long enough to heartbeat: its
-	// heartbeats carry the destination's drop count so far.
-	wait := core.Tool("wait", "Waits.", func(ctx context.Context, _ struct{}) (string, error) {
-		time.Sleep(60 * time.Millisecond)
-		return "ok", nil
-	})
-	quiet := core.New(wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "wait"}), wefttest.Say("ok")),
-		append([]core.Option{core.Name("quiet"), wait}, opts...)...)
-	if _, err := quiet.Generate(context.Background(), core.Prompt("wait")); err != nil {
-		t.Fatal(err)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := p.ForceFlush(ctx); err != nil {
@@ -179,5 +170,45 @@ func TestEventStormGapNamesTheQueue(t *testing.T) {
 	getJSON("/api/meta", &meta)
 	if len(meta.Ingest.Dropped) != 1 || meta.Ingest.Dropped[0].Service != "storm-app" || meta.Ingest.Dropped[0].Records <= 0 {
 		t.Errorf("meta ingest.dropped = %+v, want storm-app's count", meta.Ingest.Dropped)
+	}
+}
+
+// TestIngestHealthCarriers: the ingest health hears
+// weft.records.dropped from a heartbeat (a long run's, mid-run) and from
+// a run's run_start and run_finish (every run's), keeping the largest
+// per service; any other record's attribute is not its to read.
+func TestIngestHealthCarriers(t *testing.T) {
+	var h ingestHealth
+	hub := healthHub{Hub: obsdb.NewHub(), h: &h}
+	publish := func(svc, record, typ string, n int64) {
+		hub.Publish(context.Background(), obsdb.Frame{Kind: obsdb.FrameRecord,
+			Record: &obsdb.Record{Service: svc, Attrs: map[string]any{"weft.records.dropped": n}},
+			Weft:   obsdb.Weft{Record: record, EventType: typ}})
+	}
+	records := func(svc string) int64 {
+		for _, d := range h.snapshot().Dropped {
+			if d.Service == svc {
+				return d.Records
+			}
+		}
+		return 0
+	}
+	publish("app", "heartbeat", "", 4)
+	if got := records("app"); got != 4 {
+		t.Errorf("after a heartbeat: %d, want 4", got)
+	}
+	publish("app", "event", "run_finish", 9)
+	if got := records("app"); got != 9 {
+		t.Errorf("after a run_finish: %d, want 9", got)
+	}
+	publish("app", "event", "run_start", 6) // an older count: the max stays
+	publish("app", "event", "step_start", 99)
+	publish("app", "delta", "", 99)
+	if got := records("app"); got != 9 {
+		t.Errorf("after run_start 6 and two non-carriers of 99: %d, want 9", got)
+	}
+	publish("other", "event", "run_start", 2)
+	if got := records("other"); got != 2 {
+		t.Errorf("another service's run_start: %d, want 2", got)
 	}
 }

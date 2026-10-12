@@ -367,3 +367,60 @@ func TestFailedRootPastWindow(t *testing.T) {
 		})
 	}
 }
+
+// TestCounterGapWaitsForSettling (the U5 review's 5a): runHoles raises
+// the counter-hole gap — event positions missing below the highest one
+// stored — only once the run stopped settling. With its root span just
+// stored and its run_finish not (yet), the missing position may still
+// land: no gap. The same records past the window read the gap.
+func TestCounterGapWaitsForSettling(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		age      time.Duration
+		settling bool
+	}{
+		{"settling", 0, true},
+		{"past_window", time.Hour, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			db, err := sqlite.Open(":memory:")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+			end := time.Now().UTC().Add(-c.age)
+			if err := db.Write(context.Background(), obsdb.Batch{
+				Records: []obsdb.Record{
+					fxRecord("r_ok", "event", "run_start", 0, end.Add(-time.Second), `{"type":"run_start","id":"r_ok"}`),
+					// position 1 missing: below the high-water mark
+					fxRecord("r_ok", "event", "step_start", 2, end, `{"type":"step_start","run_id":"r_ok","index":0}`),
+				},
+				Spans: []obsdb.Span{fxSpanRec("r_ok", end.Add(-time.Second), end, 1, "", 1, 1)},
+			}); err != nil {
+				t.Fatal(err)
+			}
+			h := Handler(DB(db))
+			var doc struct {
+				holesDoc
+				Settling bool `json:"settling"`
+			}
+			_, _, body := get(t, h, "/studio/api/runs/r_ok")
+			decode(t, body, &doc)
+			if doc.Settling != c.settling {
+				t.Fatalf("settling = %v, want %v (test bug): %s", doc.Settling, c.settling, body)
+			}
+			var gap string
+			for _, hl := range doc.Holes {
+				if hl.Hole == string(obsdb.HoleGap) {
+					gap = hl.Reason
+				}
+			}
+			switch {
+			case c.settling && gap != "":
+				t.Errorf("settling run reads a gap %q: its missing position may still land", gap)
+			case !c.settling && !strings.Contains(gap, "event positions are missing"):
+				t.Errorf("run past the window: gap = %q, want the counter hole named", gap)
+			}
+		})
+	}
+}

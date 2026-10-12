@@ -461,15 +461,23 @@ position. Never stored; it moves the run's last-seen so a quiet run reads
 running instead of interrupted.
 
 Each destination's chain adds `weft.records.dropped` (int) to its own
-copy once it has lost a record: the cumulative count of records that
+copy of three records once it has lost a record: the heartbeat, and the
+`run_start` and `run_finish` event records (an attribute of the record,
+not of the event body — the core emits neither; so every run's end
+carries it, however short the run, where heartbeats come only from runs
+open 10 s). The value is the cumulative count of records that
 destination lost since the pipeline started — its batch queue full (a
 full queue refuses deltas first, at half full; ordinary records at seven
 eighths; `run_start`, `run_finish` and the heartbeat only when full), a
 failed export or write, a redaction failure — policy filters (a
 content-off chain's `messages`, `NoDeltas`) excepted. Absent while it has
-lost none. Studio keeps the largest value heard per `service.name`: its
-ingest health (`/api/meta`'s `ingest.dropped`, the Settings page, `weft
-doctor`).
+lost none. It is not caller metadata (`obsdb.MetaOf` skips it). Studio
+keeps the largest value heard per `service.name` from any of the three:
+its ingest health (`/api/meta`'s `ingest.dropped` — the dev token's and
+setup A's loopback, omitted for a panel token — the Settings page, `weft
+doctor`). The pipeline's resource names no process (no
+`service.instance.id`), so a restarted app's smaller count reads under
+the earlier process's larger one until Studio restarts.
 
 ## 5. Content policy
 

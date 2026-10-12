@@ -798,13 +798,13 @@ func (rs *RuntimeServer) MountGuarded(mux *http.ServeMux, guard func(http.Handle
 // and agents, so it is stable across app restarts), with one
 // exception: an id another process holds — a live stream on it, or,
 // disconnected, work still in that process's hands (a queued or
-// accepted command, or a run an ack named within FinishDeadline) — is
+// accepted command) — is
 // answered with `<id>-<pid>` (then `<id>-<pid>-2`, …) in
 // RegisterResponse.RuntimeID, which the runtime adopts for its link.
 // Two replicas of one service in one cwd, or two links in one process
 // (Registration.Instance), get distinct ids that way; a reconnect of
 // the same process keeps its id, and the old process coming back finds
-// its id, its commands and its run routes where it left them — a new
+// its id and its unfinished commands where it left them — a new
 // process never receives a frame queued for another, whose at-most-once
 // set it does not have. A disconnected entry holding no work is
 // reclaimed by whoever registers next, its breakpoint set Studio's.
@@ -880,9 +880,12 @@ func (rs *RuntimeServer) freeIDLocked(reg Registration) string {
 
 // heldByOtherLocked reports whether id belongs to a process other than
 // reg's: a live stream on it, or — disconnected — a queued or accepted
-// command addressed to it, or a run an ack named within FinishDeadline
-// routed to it (the old process may come back for them). Caller holds
-// mu.
+// command addressed to it (the old process may come back for it). A
+// finished command's run route does not hold the id: an app restarted
+// within minutes of a playground run (weft dev's restart on save) keeps
+// its stable id, its breakpoint set and its /runtimes/<id> link; a late
+// decision for a run parked on the old process reaches the new one,
+// which refuses it ("no parked run …"). Caller holds mu.
 func (rs *RuntimeServer) heldByOtherLocked(id string, reg Registration) bool {
 	c := rs.runtimes[id]
 	if c == nil || sameProcess(c.reg, reg) {
@@ -893,12 +896,6 @@ func (rs *RuntimeServer) heldByOtherLocked(id string, reg Registration) bool {
 	}
 	for _, row := range rs.commands {
 		if row.Runtime == id && (row.state == StateQueued || row.state == StateAccepted) {
-			return true
-		}
-	}
-	recent := rs.now().Add(-rs.FinishDeadline)
-	for run, rt := range rs.runs {
-		if rt == id && rs.runSeen[run].After(recent) {
 			return true
 		}
 	}
@@ -1286,9 +1283,12 @@ func (rs *RuntimeServer) serveAcks(w http.ResponseWriter, r *http.Request) {
 		if b, err := json.Marshal(a); err == nil {
 			row.ack = b
 		}
-		// Written before the 200 leaves: an accepted ack the runtime
-		// was told Studio took is on the store before the runtime runs
-		// anything (store.go's never-twice argument).
+		// Queued for the store before the 200 leaves, not written: the
+		// writer is asynchronous, and a lag only makes the row read
+		// older (a Studio killed after the 200 may hold it as queued) —
+		// store.go's never-twice argument covers that: such a row
+		// reaches no process but the one it was queued for, which
+		// dedupes by command id, else it is decided lost.
 		rs.saveCommandLocked(row)
 	}
 	w.WriteHeader(http.StatusOK)

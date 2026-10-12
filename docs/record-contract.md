@@ -692,7 +692,11 @@ any step's; unknown when the span carries no `gen_ai.usage.*`), its
 recommended), `request` and `messages_in` the badge, and one hole,
 `derived` — never a `gap` or `not_recorded`. A Studio over ClickHouse
 announces derived rows on the live lane as SQLite's hub does (the
-receiver re-reads the trace's derived runs after each export). A panel token never reaches a derived run: it has no public id.
+receiver re-reads the trace's derived runs after each export). A panel token never reaches a derived run: it has no public id. Its session id
+is the stock app's `gen_ai.conversation.id`, which may collide with a weft
+session's id; a panel token's session view, sessions list and session cost
+are then its public id's turns alone (the runs list's rule), never the
+derived rows sharing the id — the server token sees them all.
 
 ## 10. The conformance fixtures
 

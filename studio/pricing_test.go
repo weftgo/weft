@@ -634,12 +634,12 @@ func TestCostPoolChild(t *testing.T) {
 	if childRow.SessionID != childSession {
 		t.Fatalf("the pool child's run carries session %q, want the child session %s", childRow.SessionID, childSession)
 	}
-	sc, _ := srv.sessionCost(ctx, childSession)
+	sc, _, _ := srv.sessionCost(ctx, childSession, "")
 	if f := sc.fields(); usd(f.CostUSD) != "0.002" || !f.CostKnown {
 		t.Errorf("pool child session %s: cost %s known %v (%s), want 0.002", childSession, usd(f.CostUSD), f.CostKnown, f.CostReason)
 	}
 	// And the parent's session is its own turn's bill alone.
-	pc, _ := srv.sessionCost(ctx, s.ID())
+	pc, _, _ := srv.sessionCost(ctx, s.ID(), "")
 	if f := pc.fields(); usd(f.CostUSD) != "0.04" {
 		t.Errorf("pool parent session: cost %s, want 0.04", usd(f.CostUSD))
 	}

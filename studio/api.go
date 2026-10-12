@@ -1252,9 +1252,19 @@ func (s *Server) serveSessions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := sessionsPage{Total: page.Total, Sessions: make([]sessionRow, 0, len(page.Sessions))}
+	pub := panelPublicID(r)
 	for _, sr := range page.Sessions {
+		sc, _, runs := s.sessionCost(r.Context(), sr.ID, pub)
+		if pub != "" {
+			if runs == nil {
+				// The panel row could not be scoped: a row summed over
+				// runs the token may not see is never served.
+				dbError(w, r, "session", sr.ID, errSessionScope)
+				return
+			}
+			sr = scopedSessionRow(sr, topLevel(runs), pub)
+		}
 		srow := sessRow(sr)
-		sc, _ := s.sessionCost(r.Context(), sr.ID)
 		srow.costFields = sc.fields()
 		out.Sessions = append(out.Sessions, srow)
 	}
@@ -1291,13 +1301,92 @@ func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
 		dbError(w, r, "session", id, err)
 		return
 	}
+	pub := panelPublicID(r)
+	if pub != "" {
+		// A panel token's session is its public id's turns (the runs
+		// list's rule): a run of another app sharing the session id — a
+		// derived run whose gen_ai.conversation.id collides — is neither
+		// listed nor summed (docs/record-contract.md §9).
+		det.Runs = withPublicID(det.Runs, pub)
+		det.SessionRow = scopedSessionRow(det.SessionRow, det.Runs, pub)
+	}
 	doc := sessionDoc{sessionRow: sessRow(det.SessionRow), Runs: make([]runRow, 0, len(det.Runs))}
-	sc, c := s.sessionCost(r.Context(), id)
+	sc, c, _ := s.sessionCost(r.Context(), id, pub)
 	doc.costFields = sc.fields()
 	for _, rr := range det.Runs {
 		doc.Runs = append(doc.Runs, c.row(rr))
 	}
 	writeJSON(w, r, http.StatusOK, doc)
+}
+
+// errSessionScope is a panel session row whose runs could not be read
+// to scope it.
+var errSessionScope = errors.New("the session's runs could not be read to scope it to the panel token")
+
+// panelPublicID is the request's panel token's public id, "" for any
+// other identity.
+func panelPublicID(r *http.Request) string {
+	if p := idFrom(r).panel; p != nil {
+		return p.PublicID
+	}
+	return ""
+}
+
+// withPublicID keeps the runs carrying pub.
+func withPublicID(runs []obsdb.RunRow, pub string) []obsdb.RunRow {
+	out := make([]obsdb.RunRow, 0, len(runs))
+	for _, rr := range runs {
+		if rr.PublicID == pub {
+			out = append(out, rr)
+		}
+	}
+	return out
+}
+
+// topLevel keeps the top-level runs (a session row's turns).
+func topLevel(runs []obsdb.RunRow) []obsdb.RunRow {
+	out := make([]obsdb.RunRow, 0, len(runs))
+	for _, rr := range runs {
+		if rr.ParentRunID == "" && !rr.Playground {
+			out = append(out, rr)
+		}
+	}
+	return out
+}
+
+// scopedSessionRow recomputes a session row over the turns a panel
+// token sees (turns, those with pub only): obsdb's SessionRow is a
+// GROUP BY over every run of the session id, which a run of another
+// app can share. The same aggregates as the database's: the turn
+// count, first/last seen, summed usage, MAX(agent), and the newest
+// turn's status (by turn, then start).
+func scopedSessionRow(row obsdb.SessionRow, turns []obsdb.RunRow, pub string) obsdb.SessionRow {
+	out := obsdb.SessionRow{ID: row.ID, PublicID: pub}
+	var newest *obsdb.RunRow
+	for i := range turns {
+		t := &turns[i]
+		if t.PublicID != pub {
+			continue
+		}
+		out.Turns++
+		out.Usage = out.Usage.Add(t.Usage)
+		if t.Agent > out.Agent {
+			out.Agent = t.Agent
+		}
+		if out.FirstSeen.IsZero() || t.Started.Before(out.FirstSeen) {
+			out.FirstSeen = t.Started
+		}
+		if t.LastSeen.After(out.LastSeen) {
+			out.LastSeen = t.LastSeen
+		}
+		if newest == nil || t.Turn > newest.Turn || (t.Turn == newest.Turn && t.Started.After(newest.Started)) {
+			newest = t
+		}
+	}
+	if newest != nil {
+		out.Status = newest.Status
+	}
+	return out
 }
 
 // sessionPublicID is api/sessions/{id}/public_id's answer: the public

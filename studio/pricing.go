@@ -663,18 +663,23 @@ const sessionCostPages = 20
 // in the parent's session), and another agent's Generate inside a tool
 // handler (linked but never rolled up, so no other figure carries it).
 // The coster it returns is primed with that tree for the turn rows.
-func (s *Server) sessionCost(ctx context.Context, id string) (cost, *coster) {
+// publicID, when set (a panel token's), keeps only the runs carrying
+// it — the runs list's rule (scopeRunsQuery): a run of another app
+// that shares the session id (a derived run's gen_ai.conversation.id)
+// is never priced into a panel token's session. The runs it read come
+// back too (nil when the walk failed), for sessionFor's row.
+func (s *Server) sessionCost(ctx context.Context, id, publicID string) (cost, *coster, []obsdb.RunRow) {
 	c := s.coster(ctx)
 	f := false
-	q := obsdb.RunQuery{SessionID: id, ParentRunID: "*", Playground: &f, Limit: 500}
+	q := obsdb.RunQuery{SessionID: id, PublicID: publicID, ParentRunID: "*", Playground: &f, Limit: 500}
 	var runs []obsdb.RunRow
 	for pages := 0; ; pages++ {
 		if pages == sessionCostPages {
-			return cost{badge: costUnknown, reason: fmt.Sprintf("the session holds more than %d runs: too many to price at read time", sessionCostPages*500)}, c
+			return cost{badge: costUnknown, reason: fmt.Sprintf("the session holds more than %d runs: too many to price at read time", sessionCostPages*500)}, c, nil
 		}
 		page, err := s.db.Runs(ctx, q)
 		if err != nil {
-			return cost{badge: costUnknown, reason: "the session's runs could not be read"}, c
+			return cost{badge: costUnknown, reason: "the session's runs could not be read"}, c, nil
 		}
 		runs = append(runs, page.Runs...)
 		if page.NextBefore == nil || len(page.Runs) == 0 {
@@ -682,7 +687,7 @@ func (s *Server) sessionCost(ctx context.Context, id string) (cost, *coster) {
 		}
 		q.Before, q.BeforeID = *page.NextBefore, page.NextBeforeID
 	}
-	return c.setCost(runs, "a turn"), c
+	return c.setCost(runs, "a turn"), c, runs
 }
 
 // setCost is the bill of a set of runs read whole — a session's, an

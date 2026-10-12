@@ -393,7 +393,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // tool_choice {mode, name}, park_on, only_tools — narrowing or neutral, each refusal
 //     // naming its rule; runtime ids are stable per (service, cwd, agents) — rt_ + 16 hex of
 //     // sha256 — and `<id>-<pid>` when another process holds the id (a live stream, or queued/accepted
-//     // work or a recent run route; register's runtime_id, adopted by the link; a client must send
+//     // work — a finished command's run route never holds it; register's runtime_id, adopted by the link; a client must send
 //     // `instance`); commands, routes, breakpoints and registrations persist through obsdb.CommandStore
 //     // (plan I3: studio.New passes its DB; one ordered writer off the request path; a failure holds
 //     // its queue 30 s, then re-applies it), a restarted Studio deciding lost from the stored state (queued past its ack window or
@@ -434,7 +434,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // run_count and cost; /api/runs and /api/search filter by experiment_id=; any experiment_id on a run command is
 //     // accepted, so a re-run joins the saved experiment), /api/runtimes/
 //     // {id}/breakpoints, /api/runs/{id}/steer, /api/runs/{id}/cancel (capability cancel: the link's cancel frame for the command
-//     // holding a runtime-started run; 202 cancelling, 409 app-owned/finished/parked — decide instead, 503 runtime gone; best effort; steer's auth); the panel drawer and /playground
+//     // holding a runtime-started run; 202 cancelling, 409 finished/parked — decide instead, 503 runtime gone; an app-owned turn 403 "app-owned turn" (202 with a runtime.Sessions runtime, whose command row then reads rejected: no per-turn cancel); best effort; steer's auth); the panel drawer and /playground
 //     // (the Studio UI) render them, gated on capabilities — the option lab (plan F3.2)
 //     // one form on both: every override above, defaults greyed, an override in colour
 //     // with a reset, lib/experiment-body.ts's labOverrides (the server's rules by name,

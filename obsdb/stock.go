@@ -232,35 +232,90 @@ type stockWalk struct {
 	tool *Span
 }
 
+// stockWalker answers walkUp for one trace's spans, each span's walk
+// memoised: a span's walk is its parent's plus one hop, so a trace is
+// walked in O(n) whatever its depth — a deep chain re-derived on every
+// ingest batch (inside SQLite's write transaction) would otherwise cost
+// O(n·depth). steps counts the parent hops taken (the tests' bound).
+type stockWalker struct {
+	idx   map[string]*Span
+	memo  map[*Span]stockWalk
+	busy  map[*Span]bool
+	steps int
+}
+
+func newStockWalker(idx map[string]*Span) *stockWalker {
+	return &stockWalker{idx: idx, memo: make(map[*Span]stockWalk, len(idx)), busy: map[*Span]bool{}}
+}
+
 // walkUp follows s's parents to the nearest root. It stops, with no
-// root, at a missing parent, a span with no parent, a span carrying
-// weft.run.id, or after len(idx) steps (a cycle a malformed producer
-// made).
-func walkUp(idx map[string]*Span, s *Span) stockWalk {
-	var w stockWalk
-	cur := s
-	for range len(idx) {
+// root, at a missing parent, a span with no parent or a span carrying
+// weft.run.id; a cycle a malformed producer made reaches no root either
+// (a root ends a walk, so a cycle that reaches one is no cycle walked).
+func (w *stockWalker) walkUp(s *Span) stockWalk {
+	if r, ok := w.memo[s]; ok {
+		return r
+	}
+	// Climb to the first span whose walk is known or decided by its
+	// parent alone, then unwind: each span's walk is its parent's,
+	// with the parent as the nearest execute_tool when it is one.
+	path := []*Span{s}
+	w.busy[s] = true
+	var last stockWalk
+	for cur := s; ; {
 		if cur.ParentSpanID == "" {
-			return stockWalk{}
+			break // last: no root
 		}
-		p, ok := idx[cur.ParentSpanID]
+		p, ok := w.idx[cur.ParentSpanID]
 		if !ok || attr(p.Attrs, attrRunID) != "" {
-			return stockWalk{}
+			break
 		}
+		w.steps++
 		if IsStockRoot(*p) {
-			w.root = p
-			return w
+			last = stockWalk{root: p}
+			break
 		}
-		if w.tool == nil && stockOp(*p) == opExecuteTool {
-			w.tool = p
+		if r, ok := w.memo[p]; ok {
+			last = hop(p, r)
+			break
 		}
+		if w.busy[p] {
+			break // a cycle: no root
+		}
+		w.busy[p] = true
+		path = append(path, p)
 		cur = p
 	}
-	return stockWalk{}
+	w.memo[path[len(path)-1]] = last
+	for i := len(path) - 2; i >= 0; i-- {
+		w.memo[path[i]] = hop(path[i+1], w.memo[path[i+1]])
+	}
+	for _, sp := range path {
+		delete(w.busy, sp)
+	}
+	return w.memo[s]
+}
+
+// hop is the walk of a span whose parent p (not a root) walks r.
+func hop(p *Span, r stockWalk) stockWalk {
+	if r.root == nil {
+		return stockWalk{}
+	}
+	if stockOp(*p) == opExecuteTool {
+		r.tool = p
+	}
+	return r
 }
 
 // deriveTrace derives one trace's runs from its spans by span id.
 func deriveTrace(idx map[string]*Span) []StockRun {
+	out, _ := deriveTraceCounted(idx)
+	return out
+}
+
+// deriveTraceCounted is deriveTrace with the parent hops its walks took.
+func deriveTraceCounted(idx map[string]*Span) ([]StockRun, int) {
+	w := newStockWalker(idx)
 	members := map[*Span][]*Span{}
 	var roots []*Span
 	for _, s := range idx {
@@ -271,19 +326,19 @@ func deriveTrace(idx map[string]*Span) []StockRun {
 		if attr(s.Attrs, attrRunID) != "" {
 			continue
 		}
-		if w := walkUp(idx, s); w.root != nil {
-			members[w.root] = append(members[w.root], s)
+		if r := w.walkUp(s); r.root != nil {
+			members[r.root] = append(members[r.root], s)
 		}
 	}
 	out := make([]StockRun, 0, len(roots))
 	for _, root := range roots {
-		out = append(out, deriveRun(idx, root, members[root]))
+		out = append(out, deriveRun(w, root, members[root]))
 	}
-	return out
+	return out, w.steps
 }
 
 // deriveRun builds one derived run from its root and its members.
-func deriveRun(idx map[string]*Span, root *Span, members []*Span) StockRun {
+func deriveRun(w *stockWalker, root *Span, members []*Span) StockRun {
 	all := append([]*Span{root}, members...)
 	sort.Slice(all, func(i, j int) bool {
 		if !all[i].Start.Equal(all[j].Start) {
@@ -315,10 +370,10 @@ func deriveRun(idx map[string]*Span, root *Span, members []*Span) StockRun {
 			row.Err = StockErrNoDescription
 		}
 	}
-	if w := walkUp(idx, root); w.root != nil {
-		row.ParentRunID = StockRunID(w.root.TraceID, w.root.SpanID)
-		if w.tool != nil {
-			row.ParentCallID = attr(w.tool.Attrs, "gen_ai.tool.call.id")
+	if up := w.walkUp(root); up.root != nil {
+		row.ParentRunID = StockRunID(up.root.TraceID, up.root.SpanID)
+		if up.tool != nil {
+			row.ParentCallID = attr(up.tool.Attrs, "gen_ai.tool.call.id")
 		}
 	}
 	var chats []time.Time

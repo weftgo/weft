@@ -113,7 +113,11 @@ type Option func(*RuntimeServer)
 // WithStore makes the server write its commands, routes, breakpoint
 // sets and registrations through to s, and loads what s holds at New —
 // a restarted Studio over the same database keeps them (plan I3). Nil
-// keeps the server in memory only, as without the option.
+// keeps the server in memory only, as without the option. One Studio
+// per command store: two Studios sharing one (a ClickHouse database)
+// never see each other's acks and beats, so a restarted one would load
+// the other's queued and accepted rows and decide them lost under it
+// (nothing runs twice; live commands read lost).
 func WithStore(s obsdb.CommandStore) Option {
 	return func(rs *RuntimeServer) { rs.store = s }
 }

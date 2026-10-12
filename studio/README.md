@@ -1809,7 +1809,10 @@ The runtime link's bookkeeping is written through to Studio's database
 when the backend implements `obsdb.CommandStore` (both first-party
 backends do: SQLite migration 0007, ClickHouse 0008); `studio.New`
 passes its DB itself. A backend without it keeps everything in memory,
-as before — a restart then forgets it.
+as before — a restart then forgets it. One Studio per command store: two
+Studios over one ClickHouse database never see each other's acks and
+beats, so a restarted one would load the other's queued and accepted rows
+and decide them lost (nothing runs twice; the other's live commands read lost).
 
 **What survives.** Every command (its wire body, state, run id, the
 accepted and last-heartbeat times, the last ack), every run → runtime
@@ -1895,15 +1898,16 @@ id is held by another process's live stream (two replicas of one service
 in one cwd, or two links in one process), Studio answers the registration
 `<id>-<pid>` (then `<id>-<pid>-2`, …) in `runtime_id`, and the link adopts
 it; a reconnect of the same process keeps its id. A disconnected id
-whose process still holds work — a queued or accepted command, or a run
-an ack named within the last 10 min — stays that process's: another
-process registering under it is given `<id>-<pid>`, so the old process
-coming back finds its id, commands and run routes (cancel, steer and the
-debugger's verbs keep reaching the runtime that started a run). A
-disconnected entry holding no work is reclaimed by whoever registers
-under its id next, Studio's breakpoint set kept. So an approval for a run
-parked more than 10 min on a runtime that went away may reach the process
-that took the id since, which refuses it ("no parked run …").
+whose process still holds unfinished work — a queued or accepted
+command — stays that process's: another process registering under it is
+given `<id>-<pid>`, so the old process coming back finds its id and those
+commands. A finished command's run route does not hold the id: a
+disconnected entry holding no unfinished work is reclaimed by whoever
+registers under its id next, Studio's breakpoint set kept — an app
+restarted minutes after a playground run (`weft dev` restarts on every
+save) keeps its id and its `/runtimes/<id>` link. So an approval for a
+run parked on a runtime that went away may reach the process that took
+the id since, which refuses it ("no parked run …").
 
 **The `cwd` field.** `/api/runtimes` rows carry `cwd`, the app's working
 directory — a filesystem path, so under `db.path`'s rule: the server token,

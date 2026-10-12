@@ -200,9 +200,8 @@ func TestStoreBreaker(t *testing.T) {
 
 // TestHeldByOther pins heldByOtherLocked clause by clause: a
 // disconnected id is another process's while it holds a queued or
-// accepted command (whatever its route's age), or a run an ack named
-// within FinishDeadline (whatever its command's state); with neither it
-// is reclaimable.
+// accepted command (whatever its route's age); a finished command's
+// run route, however recent, does not hold it — the id is reclaimable.
 func TestHeldByOther(t *testing.T) {
 	now := time.Now()
 	old := regBody("rt_x")
@@ -225,7 +224,7 @@ func TestHeldByOther(t *testing.T) {
 		held     bool
 	}{
 		{"accepted with an old route", StateAccepted, 20 * time.Minute, true},
-		{"finished with a recent route", StateFinished, 5 * time.Minute, true},
+		{"finished with a recent route", StateFinished, 5 * time.Minute, false},
 		{"finished with an old route", StateFinished, 20 * time.Minute, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -241,6 +240,36 @@ func TestHeldByOther(t *testing.T) {
 				t.Error("the old process itself reads the id as another's")
 			}
 		})
+	}
+}
+
+// TestRestartKeepsStableID: an app restarted as a new process (new pid,
+// new instance) minutes after a playground run finished re-registers
+// under the SAME stable id — weft dev restarts on every save — so it
+// gets Studio's breakpoint set and the /runtimes/<id> link. Only a live
+// stream or unfinished work holds an id for the old process.
+func TestRestartKeepsStableID(t *testing.T) {
+	rs := New()
+	h := mux(rs)
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+	reg := regBody("rt_stable")
+	reg.Pid, reg.Instance = 1111, "inst_first"
+	if got := register(t, h, reg).RuntimeID; got != "rt_stable" {
+		t.Fatalf("first registration = %q", got)
+	}
+	r, closeStream := subscribe(t, rs, ts.URL, "rt_stable", "")
+	cmd := mustEnqueue(t, rs, "rt_stable", Command{Agent: "acme-support", PublicID: "pub_s"})
+	nextRun(t, r)
+	ack(t, rs, Ack{CommandID: cmd.CommandID, State: "accepted", RunID: "pg_s"})
+	ack(t, rs, Ack{CommandID: cmd.CommandID, State: "finished", RunID: "pg_s", Status: "succeeded"})
+	closeStream()
+	waitDisconnected(t, rs, "rt_stable")
+
+	restarted := reg
+	restarted.Pid, restarted.Instance = 9999, "inst_second"
+	if got := register(t, h, restarted).RuntimeID; got != "rt_stable" {
+		t.Errorf("a restarted process after a finished run registered as %q, want the stable rt_stable", got)
 	}
 }
 

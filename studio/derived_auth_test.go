@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/weftgo/weft/obsdb/sqlite"
 )
 
 // The identity rules (S4.6, TestAuthMatrix's table) hold for a derived
@@ -71,5 +73,95 @@ func TestDerivedRunAuth(t *testing.T) {
 	code, out := b4Do(t, http.MethodGet, ts.URL+"/api/runs", read, "")
 	if code != http.StatusOK || strings.Contains(out, "otel-") {
 		t.Errorf("panel GET /api/runs = %d %s, want none of the derived runs", code, out)
+	}
+}
+
+// A derived run's session id is its gen_ai.conversation.id, which any
+// stock app chooses: a stock trace that collides with a weft session's
+// id joins that session's GROUP BY. A panel token's session is its
+// public id's turns — the runs list's rule — so its session view, the
+// sessions list and the session's cost neither list nor sum the
+// colliding derived runs (docs/record-contract.md §9: a panel token
+// never reaches a derived run); the server token still sees all.
+func TestDerivedRunSessionCollision(t *testing.T) {
+	const serverTok, ingestTok = "srv-token", "ingest-token"
+	db, err := sqlite.Open(t.TempDir() + "/collide.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	srv := New(DB(db), Token(serverTok), IngestToken(ingestTok))
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	// The weft turn of pub_a's session conv_7f3a (usage 1/1)…
+	seedRun(t, db, "r_mine", "pub_a", "conv_7f3a", "", nil)
+	// …and another app's stock trace with the same conversation id.
+	b, err := os.ReadFile("../obsdb/testdata/contract/stock_genai/traces.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if code, out := b4Do(t, http.MethodPost, ts.URL+"/v1/traces", ingestTok, string(b)); code != http.StatusOK {
+		t.Fatalf("ingest: %d %s", code, out)
+	}
+	code, out := b4Do(t, http.MethodPost, ts.URL+"/api/panel-tokens", serverTok, `{"public_id":"pub_a"}`)
+	if code != http.StatusOK {
+		t.Fatalf("mint: %d %s", code, out)
+	}
+	var m struct {
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal([]byte(out), &m); err != nil {
+		t.Fatal(err)
+	}
+	type sess struct {
+		Turns int `json:"turns"`
+		Usage struct {
+			InputTokens int64 `json:"input_tokens"`
+		} `json:"usage"`
+		Runs []struct {
+			ID string `json:"id"`
+		} `json:"runs"`
+	}
+	read := func(bearer, path string, into any) string {
+		t.Helper()
+		code, out := b4Do(t, http.MethodGet, ts.URL+path, bearer, "")
+		if code != http.StatusOK {
+			t.Fatalf("GET %s = %d %s", path, code, out)
+		}
+		if err := json.Unmarshal([]byte(out), into); err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
+
+	var panel sess
+	out = read(m.Token, "/api/sessions/conv_7f3a", &panel)
+	if strings.Contains(out, "otel-") || strings.Contains(out, "gpt-5") ||
+		panel.Turns != 1 || len(panel.Runs) != 1 || panel.Runs[0].ID != "r_mine" || panel.Usage.InputTokens != 1 {
+		t.Errorf("panel GET /api/sessions/conv_7f3a = %s, want r_mine alone: 1 turn, input 1", out)
+	}
+	var list struct {
+		Sessions []sess `json:"sessions"`
+	}
+	out = read(m.Token, "/api/sessions", &list)
+	if len(list.Sessions) != 1 || list.Sessions[0].Turns != 1 || list.Sessions[0].Usage.InputTokens != 1 {
+		t.Errorf("panel GET /api/sessions = %s, want conv_7f3a with 1 turn, input 1", out)
+	}
+	var runs struct {
+		Runs []struct {
+			ID string `json:"id"`
+		} `json:"runs"`
+	}
+	read(m.Token, "/api/runs?session=conv_7f3a", &runs)
+	if len(runs.Runs) != panel.Turns {
+		t.Errorf("panel runs?session= lists %d runs, the session %d turns: they must agree", len(runs.Runs), panel.Turns)
+	}
+
+	var dev sess
+	out = read(serverTok, "/api/sessions/conv_7f3a", &dev)
+	if dev.Turns != 3 || len(dev.Runs) != 3 || !strings.Contains(out, "otel-") {
+		t.Errorf("server GET /api/sessions/conv_7f3a = %s, want the weft turn and both derived runs", out)
 	}
 }

@@ -10,7 +10,8 @@ import (
 
 // sessionTitles: a session row's Title is its newest turn's non-empty
 // weft.session.title (metadata, so a content-off session keeps it), its
-// FirstPrompt the first turn's prompt preview (never a later turn's);
+// FirstPrompt the first turn's prompt preview (never a later turn's),
+// its ContentOff whether that first turn stored events and no messages;
 // SessionQuery.Q finds sessions by title, first prompt, id, public id
 // or agent, every term in some field, scoped by PublicID like the rest.
 func sessionTitles(open func(t *testing.T) obsdb.DB) func(*testing.T) {
@@ -68,16 +69,27 @@ func sessionTitles(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			"s_off":   {"Trip planner", ""},
 			"s_plain": {"", "refund order 8812"},
 		}
+		// ContentOff: the first turn kept events and no messages record.
+		off := map[string]bool{"s_off": true}
+		pubs := map[string]string{"s_title": "pub_t", "s_off": "pub_o", "s_plain": "pub_p"}
 		for id, w := range want {
-			if g := got[id]; g.Title != w[0] || g.FirstPrompt != w[1] {
-				t.Errorf("Sessions: %s title, first prompt = %q, %q; want %q, %q", id, g.Title, g.FirstPrompt, w[0], w[1])
+			if g := got[id]; g.Title != w[0] || g.FirstPrompt != w[1] || g.ContentOff != off[id] {
+				t.Errorf("Sessions: %s title, first prompt, content off = %q, %q, %v; want %q, %q, %v", id, g.Title, g.FirstPrompt, g.ContentOff, w[0], w[1], off[id])
 			}
 			det, err := db.Session(ctx(), id)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if det.Title != w[0] || det.FirstPrompt != w[1] {
-				t.Errorf("Session: %s title, first prompt = %q, %q; want %q, %q", id, det.Title, det.FirstPrompt, w[0], w[1])
+			if det.Title != w[0] || det.FirstPrompt != w[1] || det.ContentOff != off[id] {
+				t.Errorf("Session: %s title, first prompt, content off = %q, %q, %v; want %q, %q, %v", id, det.Title, det.FirstPrompt, det.ContentOff, w[0], w[1], off[id])
+			}
+			// Scoped by public id (the panel's read): the same mark.
+			sp, err := db.Sessions(ctx(), obsdb.SessionQuery{PublicID: pubs[id]})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(sp.Sessions) != 1 || sp.Sessions[0].ContentOff != off[id] {
+				t.Errorf("Sessions(public id %s): %+v; want %s, content off %v", pubs[id], sp.Sessions, id, off[id])
 			}
 		}
 		// The title is metadata: it rides the run row's meta too.

@@ -395,17 +395,25 @@ export function RunHeader({
             className="flex min-w-0 items-baseline gap-1.5 text-base font-medium tracking-tight"
             data-run-title
           >
-            <span className="shrink-0">
-              {doc.agent || (
-                <span className="text-muted-foreground">unnamed agent</span>
-              )}
-            </span>
-            {title.kind === "id" || title.text === doc.agent ? null : (
+            {/* Kind agent already leads with the agent (runTitle's
+                "director · (content not captured)"): no second prefix. */}
+            {title.kind === "agent" ? (
+              <TitleText t={title} />
+            ) : (
               <>
-                <span className="shrink-0 text-faint" aria-hidden>
-                  ·
+                <span className="shrink-0">
+                  {doc.agent || (
+                    <span className="text-muted-foreground">unnamed agent</span>
+                  )}
                 </span>
-                <TitleText t={title} />
+                {title.kind === "id" ? null : (
+                  <>
+                    <span className="shrink-0 text-faint" aria-hidden>
+                      ·
+                    </span>
+                    <TitleText t={title} />
+                  </>
+                )}
               </>
             )}
           </h1>

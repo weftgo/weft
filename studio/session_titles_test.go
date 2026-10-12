@@ -1,10 +1,12 @@
 package studio
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/weftgo/weft/obsdb"
 	"github.com/weftgo/weft/obsdb/sqlite"
@@ -14,7 +16,9 @@ import (
 // newest turn's) and its first turn's prompt preview — what Studio and
 // the panel title it with (lib/title.ts) — on the list, the document
 // and a panel token's scoped document alike; ?q= finds sessions by
-// either (obsdb.SessionQuery.Q), never by a later turn's prompt.
+// either (obsdb.SessionQuery.Q), never by a later turn's prompt; an
+// untitled session whose first turn stored no content carries
+// content_off, so the list can say "(content not captured)" (U6-fix).
 func TestSessionTitlesAndQuery(t *testing.T) {
 	const serverTok = "srv-token"
 	db, err := sqlite.Open(t.TempDir() + "/titles.db")
@@ -24,6 +28,26 @@ func TestSessionTitlesAndQuery(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	seedRun(t, db, "conv_t-t1", "pub_a", "conv_t", "", map[string]any{obsdb.SessionTitleKey: "Order desk"})
 	seedRun(t, db, "conv_p-t1", "pub_b", "conv_p", "", nil)
+	// Content-off: the run's events, no messages record.
+	now := time.Now().UTC()
+	var off []obsdb.Record
+	for i, ev := range [][2]string{
+		{"run_start", `{"type":"run_start","id":"conv_o-t1","model":{"provider":"wefttest","name":"script"},"agent":"acme-support"}`},
+		{"run_finish", `{"type":"run_finish","run_id":"conv_o-t1","usage":{"input_tokens":1,"output_tokens":1},"steps":1}`},
+	} {
+		off = append(off, obsdb.Record{
+			Time: now.Add(time.Duration(i) * time.Millisecond), EventName: "weft.event", Severity: 9, Body: ev[1], Service: "svc",
+			Attrs: map[string]any{
+				"weft.record": "event", "weft.run.id": "conv_o-t1", "gen_ai.agent.name": "acme-support",
+				"weft.public_id": "pub_o", "weft.session.id": "conv_o", "weft.turn": "1",
+				"weft.event.type": ev[0], "weft.event.pos": int64(i),
+			},
+			Resource: map[string]any{"service.name": "svc"},
+		})
+	}
+	if err := db.Write(context.Background(), obsdb.Batch{Records: off}); err != nil {
+		t.Fatal(err)
+	}
 	srv := New(DB(db), Token(serverTok))
 	t.Cleanup(func() { _ = srv.Close() })
 	ts := httptest.NewServer(srv.Handler())
@@ -33,6 +57,7 @@ func TestSessionTitlesAndQuery(t *testing.T) {
 		ID          string `json:"id"`
 		Title       string `json:"title"`
 		FirstPrompt string `json:"first_prompt"`
+		ContentOff  bool   `json:"content_off"`
 	}
 	list := func(path string) map[string]row {
 		t.Helper()
@@ -53,11 +78,14 @@ func TestSessionTitlesAndQuery(t *testing.T) {
 		return got
 	}
 	all := list("/api/sessions")
-	if r := all["conv_t"]; r.Title != "Order desk" || r.FirstPrompt != "secret of pub_a" {
+	if r := all["conv_t"]; r.Title != "Order desk" || r.FirstPrompt != "secret of pub_a" || r.ContentOff {
 		t.Errorf("conv_t = %+v, want its title and first prompt", r)
 	}
-	if r := all["conv_p"]; r.Title != "" || r.FirstPrompt != "secret of pub_b" {
+	if r := all["conv_p"]; r.Title != "" || r.FirstPrompt != "secret of pub_b" || r.ContentOff {
 		t.Errorf("conv_p = %+v, want no title, its first prompt", r)
+	}
+	if r := all["conv_o"]; r.Title != "" || r.FirstPrompt != "" || !r.ContentOff {
+		t.Errorf("conv_o = %+v, want no title, no prompt, content_off", r)
 	}
 	if got := list("/api/sessions?q=order+DESK"); len(got) != 1 || got["conv_t"].ID == "" {
 		t.Errorf("?q=order DESK = %v, want conv_t by its title", got)
@@ -78,5 +106,18 @@ func TestSessionTitlesAndQuery(t *testing.T) {
 	}
 	if doc.Title != "Order desk" || doc.FirstPrompt != "secret of pub_a" {
 		t.Errorf("panel session doc = %+v, want the title and first prompt", doc)
+	}
+	// The scoped document keeps the mark too (scopedSessionRow).
+	panelO := mintPanel(t, ts.URL, serverTok, "pub_o")
+	code, out = b4Do(t, http.MethodGet, ts.URL+"/api/sessions/conv_o", panelO, "")
+	if code != http.StatusOK {
+		t.Fatalf("panel GET /api/sessions/conv_o = %d %s", code, out)
+	}
+	doc = row{}
+	if err := json.Unmarshal([]byte(out), &doc); err != nil {
+		t.Fatal(err)
+	}
+	if !doc.ContentOff || doc.FirstPrompt != "" {
+		t.Errorf("panel session doc conv_o = %+v, want content_off", doc)
 	}
 }

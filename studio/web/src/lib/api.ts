@@ -311,6 +311,10 @@ export interface SessionRow extends CostFields {
   title?: string
   /** The first turn's prompt_preview; absent when it stored none. */
   first_prompt?: string
+  /** The first turn was recorded without content (events, no messages
+   * record, not derived): sessionTitle says NO_CONTENT for an untitled
+   * row. Absent when false. */
+  content_off?: boolean
 }
 
 /** GET /api/sessions → SessionsPage. */

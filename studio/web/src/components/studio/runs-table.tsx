@@ -106,7 +106,7 @@ export function StatusChip({
   )
 }
 
-function CopyId({ id, noun = "run id" }: { id: string; noun?: string }) {
+export function CopyId({ id, noun = "run id" }: { id: string; noun?: string }) {
   const [done, setDone] = useState(false)
   return (
     <Button

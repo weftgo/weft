@@ -1670,14 +1670,20 @@ Titles, not ids (U6): a run row, a session's turn and the run page are
 titled by `prompt_preview` (else the agent, else "(content not
 captured)" for a content-off run, else the id), a session by its
 `title` — `thread`'s `weft.session.title`, metadata that survives
-content-off — else its first turn's prompt (`first_prompt`), else the
-id; the id rides under the title as a copyable mono line, and the
+content-off — else its first turn's prompt (`first_prompt`), else
+"(content not captured)" when that first turn stored no content (the
+row's `content_off`), else the id; the id rides under the title as a
+copyable mono line (not repeated when it is the title), and the
 browser tab reads `director · How many units… · succeeded`. One helper,
 `src/lib/title.ts` (`runTitle`, `sessionTitle`), words both Studio and
 the panel's turn list and its narrow dropdown
-(`● parked t3 How many units… · 2 steps`). ⌘K (or
-Ctrl+K) opens the palette anywhere: runs through `/api/search?q=` (by
-id over the recent runs without `search`), sessions, traces (the
+(`● parked t3 How many units… · 2 steps · 811ms`; an experiment
+`↳ replay of t3 · scripted · ● failed · 2 steps · 2.5s`); a thread
+resume reads `resume of t3 · 1 decided call` (`turnTitle`) on the
+session page and in the panel alike. ⌘K (or Ctrl+K) opens the palette
+anywhere: runs through `/api/search?q=` (by id and prompt over the
+recent runs without `search`), sessions (by title or first prompt too),
+traces (the
 newest page's ids, root names, services) under `traces`, experiments
 by name under `playground` (never under a panel token, which the
 experiments routes refuse), the pages — Playground under `playground`,

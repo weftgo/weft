@@ -961,6 +961,20 @@ func sessionPromptExpr(pub string) (string, []any) {
 		ORDER BY r4.turn, r4.started_ns, r4.run_id LIMIT 1)), '')`, args
 }
 
+// sessionContentOffExpr is whether a grouped session's first turn (the
+// one sessionPromptExpr reads) was recorded without content
+// (SessionRow.ContentOff): events and no messages record, not derived.
+// pub scopes as in sessionTitleExpr.
+func sessionContentOffExpr(pub string) (string, []any) {
+	scope, args := "", []any(nil)
+	if pub != "" {
+		scope, args = ` AND r5.public_id = ?`, []any{pub}
+	}
+	return `COALESCE((SELECT r5.derived = 0 AND r5.message_count = 0 AND r5.event_count > 0 FROM runs r5
+		WHERE r5.session_id = runs.session_id AND r5.parent_run_id = '' AND r5.playground = 0` + scope + `
+		ORDER BY r5.turn, r5.started_ns, r5.run_id LIMIT 1), 0)`, args
+}
+
 func havingSQL(having []string) string {
 	if len(having) == 0 {
 		return ""
@@ -983,7 +997,8 @@ func (d *DB) sessionRows(ctx context.Context, cutoff int64, pub, where string, w
 	}
 	title, targs := sessionTitleExpr(pub)
 	prompt, pargs := sessionPromptExpr(pub)
-	args = append(append(args, targs...), pargs...)
+	off, oargs := sessionContentOffExpr(pub)
+	args = append(append(append(args, targs...), pargs...), oargs...)
 	args = append(append(args, wargs...), hargs...)
 	rs, err := d.reads.QueryContext(ctx, `SELECT session_id, MAX(public_id), MAX(agent), COUNT(*),
 		MIN(started_ns), MAX(last_seen_ns),
@@ -991,7 +1006,7 @@ func (d *DB) sessionRows(ctx context.Context, cutoff int64, pub, where string, w
 		(SELECT `+statusExpr+` FROM runs r2 WHERE r2.session_id = runs.session_id
 		 AND r2.parent_run_id = '' AND r2.playground = 0`+statusScope+`
 		 ORDER BY r2.turn DESC, r2.started_ns DESC LIMIT 1),
-		`+title+`, substr(`+prompt+`, 1, `+fmt.Sprint(obsdb.PromptPreviewRunes)+`)
+		`+title+`, substr(`+prompt+`, 1, `+fmt.Sprint(obsdb.PromptPreviewRunes)+`), `+off+`
 		FROM runs WHERE `+where+` GROUP BY session_id`+havingSQL(having)+tail, args...)
 	if err != nil {
 		return nil, err
@@ -1005,7 +1020,7 @@ func (d *DB) sessionRows(ctx context.Context, cutoff int64, pub, where string, w
 		var status string
 		if err := rs.Scan(&row.ID, &row.PublicID, &row.Agent, &row.Turns,
 			&first, &last, &inTok, &outTok, &cached, &cacheW, &reason, &status,
-			&row.Title, &row.FirstPrompt); err != nil {
+			&row.Title, &row.FirstPrompt, &row.ContentOff); err != nil {
 			return nil, err
 		}
 		row.FirstSeen = time.Unix(0, first).UTC()

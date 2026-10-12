@@ -96,6 +96,7 @@ import {
   noPublicIdWords,
   requestCapped,
   requestHole,
+  SCRIPTED_MODEL,
   turnChips,
 } from "./badges"
 import {
@@ -154,7 +155,7 @@ import type { HeaderRung } from "./detect"
 import { installMarkerRung, markerOf } from "./markers"
 import type { Marker, MarkerRung } from "./markers"
 import { parseScope, serializeScope } from "../lib/scope"
-import { clip as clipTitle, runTitle, turnLabel } from "../lib/title"
+import { clip as clipTitle, turnLabel, turnTitle } from "../lib/title"
 import type { Scope } from "../lib/scope"
 import { el, fmtJSON, on, patch, spanWindow, waterfall } from "./render"
 import { PANEL_CSS } from "./styles"
@@ -214,6 +215,29 @@ export function hasCapability(s: PanelState, name: string): boolean {
  * how the panel shows succeeded with pending calls. */
 export function statusChip(r: RunRow): string {
   return r.status === "succeeded" && r.pending > 0 ? "parked" : r.status
+}
+
+/** prevTurn is the turn before r in its session among the loaded
+ * turns (turnTitle's prev: Studio's session page reads the turn above;
+ * the panel's list is newest first and may span sessions). */
+export function prevTurn(
+  r: RunRow,
+  turns: readonly RunRow[]
+): RunRow | undefined {
+  if (r.forked_from || !r.session_id || !(r.turn > 1)) return undefined
+  return turns.find(
+    (x) =>
+      x.session_id === r.session_id && x.turn === r.turn - 1 && !x.forked_from
+  )
+}
+
+/** engineWord is an experiment's engine as its chips say it: scripted
+ * when the run answered as the scripted engine's model, else live. */
+export function engineWord(r: RunRow): "scripted" | "live" {
+  return r.model.provider === SCRIPTED_MODEL.provider &&
+    r.model.name === SCRIPTED_MODEL.name
+    ? "scripted"
+    : "live"
 }
 
 /** studioLink builds the ⤢ deep link (§2: "open in Studio" with the
@@ -2622,16 +2646,19 @@ export class WeftDevtools extends HTMLElement {
     }) as HTMLSelectElement
     for (const r of rows) {
       // What the user recognises (U6): "● parked t3 How many units… ·
-      // 2 steps"; an experiment "↳ ● succeeded replay of t3 · 2 steps".
-      // The id is the option's title only.
-      const t = runTitle(r)
+      // 2 steps · 811ms" (a resume in turnTitle's words, as Studio's
+      // session page); an experiment in its card's order, "↳ replay of
+      // t3 · scripted · ● failed · 2 steps · 811ms". The id is the
+      // option's title only.
+      const t = turnTitle(prevTurn(r, s.turns), r)
       const src = r.forked_from && this.rowOf(r.forked_from.split("#")[0])
+      const tail = `${r.steps} steps · ${duration(r.started, r.finished)}`
       const o = el(
         "option",
         undefined,
         r.forked_from
-          ? `↳ ● ${statusChip(r)} replay of ${src ? turnLabel(src) || shortId(src.id) : "a turn"} · ${r.steps} steps`
-          : `${["●", statusChip(r), turnLabel(r), clipTitle(t.text)].filter(Boolean).join(" ")} · ${r.steps} steps`,
+          ? `↳ replay of ${src ? turnLabel(src) || shortId(src.id) : "a turn"} · ${engineWord(r)} · ● ${statusChip(r)} · ${tail}`
+          : `${["●", statusChip(r), turnLabel(r), clipTitle(t.text)].filter(Boolean).join(" ")} · ${tail}`,
         { value: r.id, "data-key": r.id, title: `${r.id}\n${t.full}` }
       ) as HTMLOptionElement
       o.selected = r.id === s.selected
@@ -3014,7 +3041,7 @@ export class WeftDevtools extends HTMLElement {
       role: "list",
       "aria-label": "turns",
     })
-    const row = (r: RunRow) => this.turnRow(r, s.selected, tab)
+    const row = (r: RunRow) => this.turnRow(r, s.selected, tab, s.turns)
     const shown = new Set<string>(s.turns.map((r) => r.id))
     for (const r of turns) {
       items.appendChild(row(r))
@@ -3170,7 +3197,12 @@ export class WeftDevtools extends HTMLElement {
     }
   }
 
-  private turnRow(r: RunRow, selected: string, tab: string): HTMLElement {
+  private turnRow(
+    r: RunRow,
+    selected: string,
+    tab: string,
+    turns: readonly RunRow[]
+  ): HTMLElement {
     const chip = statusChip(r)
     const row = el(
       "button",
@@ -3184,8 +3216,10 @@ export class WeftDevtools extends HTMLElement {
       }
     )
     // Titled, not id'd (U6): "t3 How many units…", the id in the
-    // title and on the row (data-weft-run).
-    const t = runTitle(r)
+    // title and on the row (data-weft-run); a resume "t4 resume of t3 ·
+    // 1 decided call", turnTitle over the loaded list as Studio's
+    // session page reads it.
+    const t = turnTitle(prevTurn(r, turns), r)
     const row1 = el("div", "weft-row1", [
       el("span", `weft-chip weft-${chip}`, chip),
       el("span", "weft-ttl", `${turnLabel(r)} ${clipTitle(t.text)}`.trim(), {

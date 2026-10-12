@@ -79,8 +79,8 @@ type expectDoc struct {
 	Derived     bool          `json:"derived,omitempty"`
 	Runs        []contractRun `json:"runs"`
 	// Sessions are the case's session rows (§6's "A session"), by id:
-	// identity, turns, and the title and first prompt Studio titles a
-	// session with. Omitted for a case with no session.
+	// identity, turns, and the title, first prompt and content-off mark
+	// Studio titles a session with. Omitted for a case with no session.
 	Sessions []contractSession `json:"sessions,omitempty"`
 }
 
@@ -92,6 +92,7 @@ type contractSession struct {
 	Turns       int    `json:"turns"`
 	Title       string `json:"title,omitempty"`
 	FirstPrompt string `json:"first_prompt,omitempty"`
+	ContentOff  bool   `json:"content_off,omitempty"`
 }
 
 // contractRun is one run row as the contract states it: the run row's
@@ -339,7 +340,7 @@ func observeSessions(t *testing.T, db obsdb.DB) []contractSession {
 	var out []contractSession
 	for _, s := range page.Sessions {
 		out = append(out, contractSession{ID: s.ID, PublicID: s.PublicID, Agent: s.Agent, Turns: s.Turns,
-			Title: s.Title, FirstPrompt: s.FirstPrompt})
+			Title: s.Title, FirstPrompt: s.FirstPrompt, ContentOff: s.ContentOff})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
@@ -1592,7 +1593,7 @@ func genCases() []genCase {
 		},
 		{
 			name: "session_title",
-			desc: "a thread session through a content-off destination, titled with SetInfo after its first turn: weft.session.title (metadata, so it survives content-off) on the second turn and its run row's meta; the session row's title is the newest turn's, its first prompt empty (no messages stored)",
+			desc: "a thread session through a content-off destination, titled with SetInfo after its first turn: weft.session.title (metadata, so it survives content-off) on the second turn and its run row's meta; the session row's title is the newest turn's, its first prompt empty and content_off set (no messages stored)",
 			dest: nil,
 			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
 				agt := pipelineAgent(p, "support", wefttest.Script(

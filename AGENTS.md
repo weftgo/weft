@@ -249,7 +249,8 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    the traces every span of which is its public id's; capability "traces" — obsdb.DB.Traces,
 //    //    no migration), traces/{id},
 //    //    sessions (?q= — every term in the title, first turn's prompt, id, public id or agent; each row's title
-//    (weft.session.title, the newest turn's) and first_prompt; obsdb.SessionQuery.Q), sessions/{id}, sessions/{id}/public_id (the reverse of public/{public_id}: the dev token's
+//    //    (weft.session.title, the newest turn's), first_prompt and content_off (the first turn stored no content);
+//    //    obsdb.SessionQuery.Q), sessions/{id}, sessions/{id}/public_id (the reverse of public/{public_id}: the dev token's
 //    //    alone, every panel token 403 hidden), public/{public_id}, DELETE runs/{id} and DELETE
 //    //    sessions/{id} (capability "delete": a run with its subagent children, or a session's runs —
 //    //    rows, records, search index, spans, app logs — from obsdb's tables only, the app's

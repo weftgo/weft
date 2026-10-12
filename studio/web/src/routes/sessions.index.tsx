@@ -3,8 +3,10 @@
 // text box (plan H1, ?q=) that is /api/sessions?q= (obsdb.SessionQuery.Q:
 // every term in the title, the first turn's prompt, the id, the public
 // id or the agent). A row leads with its title (U6, lib/title.ts's
-// sessionTitle: thread's title, else the first prompt, else the id),
-// the id and public id a copyable line under it. Every view is in the
+// sessionTitle: thread's title, else the first prompt, else "(content
+// not captured)" when the first turn kept none, else the id), the id
+// and public id a copyable line under it — the public id alone when the
+// id is the title. Every view is in the
 // URL (A3).
 import { useEffect, useState } from "react"
 import { useInfiniteQuery } from "@tanstack/react-query"
@@ -16,7 +18,12 @@ import type { PageCursor } from "@/lib/api"
 import { absoluteTime, relativeTime, tokens } from "@/lib/format"
 import { EmptyState } from "@/components/studio/empty-state"
 import { CacheHint, Cost, useCostCapable } from "@/components/studio/cost"
-import { IdChip, StatusChip, TitleText } from "@/components/studio/runs-table"
+import {
+  CopyId,
+  IdChip,
+  StatusChip,
+  TitleText,
+} from "@/components/studio/runs-table"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -224,53 +231,69 @@ function SessionsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {sessions.map((s) => (
-                  <TableRow key={s.id} className="group h-9">
-                    <TableCell>
-                      <StatusChip status={s.status} />
-                    </TableCell>
-                    <TableCell className="max-w-80">
-                      <Link
-                        {...sessionLink(s.id)}
-                        className="flex min-w-0 text-[13px] hover:text-thread-ink"
-                      >
-                        <TitleText t={sessionTitle(s)} />
-                      </Link>
-                      <IdChip
-                        id={s.id}
-                        extra={s.public_id || undefined}
-                        noun="session id"
-                      />
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap">
-                      {s.agent || <span className="text-faint">—</span>}
-                    </TableCell>
-                    <TableCell className="text-right font-mono tabular-nums">
-                      {s.turns}
-                    </TableCell>
-                    <TableCell className="text-right font-mono tabular-nums">
-                      {tokens(s.usage.input_tokens)} /{" "}
-                      {tokens(s.usage.output_tokens)}
-                    </TableCell>
-                    {costCapable ? (
-                      <TableCell
-                        className="text-right whitespace-nowrap"
-                        data-cost-cell
-                      >
-                        <div className="flex flex-col items-end">
-                          <Cost fields={s} />
-                          <CacheHint fields={s} />
-                        </div>
+                {sessions.map((s) => {
+                  const t = sessionTitle(s)
+                  return (
+                    <TableRow key={s.id} className="group h-9">
+                      <TableCell>
+                        <StatusChip status={s.status} />
                       </TableCell>
-                    ) : null}
-                    <TableCell
-                      className="text-right font-mono whitespace-nowrap tabular-nums"
-                      title={absoluteTime(s.last_seen)}
-                    >
-                      {relativeTime(s.last_seen)}
-                    </TableCell>
-                  </TableRow>
-                ))}
+                      <TableCell className="max-w-80">
+                        <Link
+                          {...sessionLink(s.id)}
+                          className="flex min-w-0 items-center gap-1.5 text-[13px] hover:text-thread-ink"
+                        >
+                          <TitleText t={t} />
+                          {t.kind === "id" ? (
+                            <CopyId id={s.id} noun="session id" />
+                          ) : null}
+                        </Link>
+                        {/* The id is the title already (RunTitle's rule):
+                          not repeated under it — the public id alone. */}
+                        {t.kind === "id" ? (
+                          s.public_id ? (
+                            <div className="truncate font-mono text-[11px] text-faint">
+                              {s.public_id}
+                            </div>
+                          ) : null
+                        ) : (
+                          <IdChip
+                            id={s.id}
+                            extra={s.public_id || undefined}
+                            noun="session id"
+                          />
+                        )}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap">
+                        {s.agent || <span className="text-faint">—</span>}
+                      </TableCell>
+                      <TableCell className="text-right font-mono tabular-nums">
+                        {s.turns}
+                      </TableCell>
+                      <TableCell className="text-right font-mono tabular-nums">
+                        {tokens(s.usage.input_tokens)} /{" "}
+                        {tokens(s.usage.output_tokens)}
+                      </TableCell>
+                      {costCapable ? (
+                        <TableCell
+                          className="text-right whitespace-nowrap"
+                          data-cost-cell
+                        >
+                          <div className="flex flex-col items-end">
+                            <Cost fields={s} />
+                            <CacheHint fields={s} />
+                          </div>
+                        </TableCell>
+                      ) : null}
+                      <TableCell
+                        className="text-right font-mono whitespace-nowrap tabular-nums"
+                        title={absoluteTime(s.last_seen)}
+                      >
+                        {relativeTime(s.last_seen)}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
               </TableBody>
             </Table>
           </div>

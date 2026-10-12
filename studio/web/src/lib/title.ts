@@ -169,17 +169,23 @@ export function runTitle(r: TitledRun): Title {
 
 /** sessionTitle titles a session: its title (thread's
  * weft.session.title, metadata that survives content-off), else its
- * first turn's prompt, else NO_CONTENT when that turn — first, when
- * the caller has it — was recorded without content, else its id. */
+ * first turn's prompt, else NO_CONTENT when that turn was recorded
+ * without content (the row's content_off, or first — the turn, when
+ * the caller has it), else its id. */
 export function sessionTitle(
-  s: { id: string; title?: string; first_prompt?: string },
+  s: {
+    id: string
+    title?: string
+    first_prompt?: string
+    content_off?: boolean
+  },
   first?: TitledRun
 ): Title {
   const t = clip(s.title ?? "", Infinity)
   if (t) return { text: t, full: s.title ?? t, kind: "title" }
   const p = clip(s.first_prompt ?? "", Infinity)
   if (p) return { text: p, full: s.first_prompt ?? p, kind: "prompt" }
-  if (first && contentOff(first))
+  if (s.content_off || (first && contentOff(first)))
     return { text: NO_CONTENT, full: NO_CONTENT, kind: "absent" }
   return { text: s.id, full: s.id, kind: "id" }
 }

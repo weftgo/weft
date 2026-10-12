@@ -1,6 +1,6 @@
 {
   "case": "session_title",
-  "description": "a thread session through a content-off destination, titled with SetInfo after its first turn: weft.session.title (metadata, so it survives content-off) on the second turn and its run row's meta; the session row's title is the newest turn's, its first prompt empty (no messages stored)",
+  "description": "a thread session through a content-off destination, titled with SetInfo after its first turn: weft.session.title (metadata, so it survives content-off) on the second turn and its run row's meta; the session row's title is the newest turn's, its first prompt empty and content_off set (no messages stored)",
   "runs": [
     {
       "id": "01K00000000000000000000001-t1",
@@ -100,7 +100,8 @@
       "public_id": "pub_title",
       "agent": "support",
       "turns": 2,
-      "title": "Order desk"
+      "title": "Order desk",
+      "content_off": true
     }
   ]
 }

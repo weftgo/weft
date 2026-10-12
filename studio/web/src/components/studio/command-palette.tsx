@@ -139,7 +139,7 @@ export function CommandPalette({
   // on the prompt, answer, error or a tool name — but only while they
   // answer the text in the box: a previous term's hits under new text
   // are matched by cmdk like any row), then the recent runs cmdk
-  // matches by id and agent.
+  // matches by id, agent and prompt.
   const hitRows = term && searchable ? (hits.data?.runs ?? []) : []
   const hitIDs = new Set(hitRows.map((r) => r.id))
   const recentRows = (recent.data?.runs ?? [])
@@ -149,7 +149,13 @@ export function CommandPalette({
     <CommandItem
       key={r.id}
       value={`run:${r.id} ${r.agent} ${r.status}`}
-      keywords={hit && term === input.trim() ? [input] : undefined}
+      // Found by what it is titled with (U6-fix): the prompt is a
+      // keyword beside the id, so a run is found by its words even when
+      // this Studio cannot search.
+      keywords={[
+        ...(r.prompt_preview ? [r.prompt_preview] : []),
+        ...(hit && term === input.trim() ? [input] : []),
+      ]}
       onSelect={() => go(() => router.navigate(runLink(r.id)))}
       data-palette-kind="run"
       data-palette-id={r.id}
@@ -210,6 +216,9 @@ export function CommandPalette({
               <CommandItem
                 key={s.id}
                 value={`session:${s.id} ${s.public_id} ${s.agent}`}
+                keywords={[s.title, s.first_prompt].filter(
+                  (k): k is string => !!k
+                )}
                 onSelect={() => go(() => router.navigate(sessionLink(s.id)))}
                 data-palette-kind="session"
                 data-palette-id={s.id}

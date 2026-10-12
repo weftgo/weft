@@ -132,6 +132,11 @@ describe("runTitle / sessionTitle / turnTitle", () => {
         { id: "s_1-t1", message_count: 0, event_count: 4 }
       ).text
     ).toBe(NO_CONTENT)
+    // The list's row has no turn: the row's own content_off (U6-fix).
+    expect(sessionTitle({ id: "s_1", content_off: true })).toMatchObject({
+      text: NO_CONTENT,
+      kind: "absent",
+    })
     expect(sessionTitle({ id: "s_1" })).toMatchObject({
       text: "s_1",
       kind: "id",

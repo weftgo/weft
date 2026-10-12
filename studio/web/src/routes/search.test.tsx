@@ -24,6 +24,7 @@ import type {
   TracesPage,
 } from "@/lib/api"
 import { PALETTE_PLACEHOLDER } from "@/components/studio/command-palette"
+import { NO_CONTENT } from "@/lib/title"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { FakeStudio, golden } from "@/test/fake-studio"
@@ -412,6 +413,38 @@ describe("the sessions text filter", () => {
   })
 })
 
+describe("the sessions list titles (U6-fix)", () => {
+  it("an untitled content-off session says so; an id-titled row does not repeat its id under it", async () => {
+    const [a, b] = sessions.sessions
+    studio.on("GET meta", meta([])).on("GET sessions", {
+      ...sessions,
+      sessions: [
+        { ...a, first_prompt: undefined, content_off: true },
+        { ...b, first_prompt: undefined },
+      ],
+    })
+    renderApp("/sessions")
+    await waitFor(() =>
+      expect(document.querySelectorAll("[data-title-kind]")).toHaveLength(2)
+    )
+    expect(
+      [...document.querySelectorAll("[data-title-kind]")].map((n) => [
+        n.getAttribute("data-title-kind"),
+        n.textContent,
+      ])
+    ).toEqual([
+      ["absent", NO_CONTENT],
+      ["id", "s_research"],
+    ])
+    // The content-off row keeps its id chip; the id-titled row shows its
+    // id once (the title), the public id alone under it.
+    expect(document.querySelector('[data-id-chip="s_orders"]')).toBeTruthy()
+    expect(document.querySelector('[data-id-chip="s_research"]')).toBeNull()
+    expect(screen.getAllByText("s_research")).toHaveLength(1)
+    expect(screen.getByText("pub_research")).toBeTruthy()
+  })
+})
+
 describe("the /traces index", () => {
   it("lists the golden traces, the rootless one with the gap badge, runs linked", async () => {
     studio.on("GET meta", meta(["traces"])).on("GET traces", traces)
@@ -742,5 +775,37 @@ describe("the ⌘K palette", () => {
     expect(studio.calls("GET search")).toHaveLength(0)
     expect(studio.calls("GET traces")).toHaveLength(0)
     expect(studio.calls("GET experiments")).toHaveLength(0)
+  })
+
+  it("finds a session by its title and a run by its prompt, with no search capability (U6-fix)", async () => {
+    studio
+      .on("GET meta", meta([]))
+      .on("GET runs", {
+        ...runs,
+        runs: runs.runs.map((r) =>
+          r.id === "r_fail"
+            ? { ...r, prompt_preview: "Cancel the Zanzibar shipment" }
+            : r
+        ),
+      })
+      .on("GET sessions", {
+        ...sessions,
+        sessions: sessions.sessions.map((s) =>
+          s.id === "s_research" ? { ...s, title: "Lagos refund escalation" } : s
+        ),
+      })
+    renderApp("/runs")
+    await screen.findByText("r_ok")
+    const input = await open()
+    await waitFor(() =>
+      expect(kinds().some((k) => k.startsWith("session:"))).toBe(true)
+    )
+    // The session by the title it shows.
+    type(input, "lagos refund")
+    await waitFor(() => expect(kinds()).toEqual(["session:s_research"]))
+    // The run by the prompt it is titled with — never /api/search.
+    type(input, "zanzibar shipment")
+    await waitFor(() => expect(kinds()).toEqual(["run:r_fail"]))
+    expect(studio.calls("GET search")).toHaveLength(0)
   })
 })

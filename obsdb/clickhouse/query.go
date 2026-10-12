@@ -1067,12 +1067,14 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		var ok, failed bool
 		var newestSeen time.Time
 		var firstRun string
+		var firstDerived bool
 		if err := rs.Scan(&row.ID, &row.PublicID, &row.Agent, &turns,
 			&row.FirstSeen, &row.LastSeen, &inTok, &outTok, &cached, &cacheW, &reason,
-			&ok, &failed, &newestSeen, &row.Title, &firstRun); err != nil {
+			&ok, &failed, &newestSeen, &row.Title, &firstRun, &firstDerived); err != nil {
 			return obsdb.SessionPage{}, err
 		}
 		firstRuns = append(firstRuns, firstRun)
+		row.ContentOff = !firstDerived // fillFirstPrompts reads the counts
 		row.Turns = int(turns)
 		row.FirstSeen, row.LastSeen = row.FirstSeen.UTC(), row.LastSeen.UTC()
 		row.Usage = core.Usage{
@@ -1099,7 +1101,8 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 // sessionAggs is a session row's aggregates over sessionRuns' rows,
 // every alias s-prefixed: the newest turn's status inputs and title
 // (argMax on (Turn, Started), SQLite's ORDER BY ... LIMIT 1), and the
-// first turn's run id (argMin), whose prompt fillFirstPrompts reads.
+// first turn's run id (argMin), whose prompt and counts
+// fillFirstPrompts reads, and whether that turn is Derived.
 const sessionAggs = `max(PublicID) AS sPublicID, max(Agent) AS sAgent,
 		uniqExact(RunId) AS sTurns, min(Started) AS sFirstSeen, max(LastSeen) AS sLastSeen,
 		sum(InputTokens) AS sInputTokens, sum(OutputTokens) AS sOutputTokens,
@@ -1108,26 +1111,43 @@ const sessionAggs = `max(PublicID) AS sPublicID, max(Agent) AS sAgent,
 		argMax(greatest(FinishedOK, RootEnded), (Turn, Started)) AS sNewestOK, argMax(Failed, (Turn, Started)) AS sNewestFailed,
 		argMax(LastSeen, (Turn, Started)) AS sNewestLastSeen,
 		argMaxIf(Title, (Turn, Started), Title != '') AS sTitle,
-		argMin(RunId, (Turn, Started, RunId)) AS sFirstRun`
+		argMin(RunId, (Turn, Started, RunId)) AS sFirstRun,
+		argMin(Derived, (Turn, Started, RunId)) AS sFirstDerived`
 
 // fillFirstPrompts sets each row's FirstPrompt to its first turn's
-// prompt preview (firstRuns[i] is rows[i]'s first turn): the run rows'
-// own derivation (fillPreviewsOf), "" for a turn that has none.
+// prompt preview (firstRuns[i] is rows[i]'s first turn) and ContentOff
+// from that turn's counts: the run rows' own derivations (fillCounts),
+// "" for a turn that has none. rows[i].ContentOff arrives as "the first
+// turn is not Derived" and leaves as contentOff's whole rule.
 func (d *DB) fillFirstPrompts(ctx context.Context, rows []obsdb.SessionRow, firstRuns []string) error {
 	if len(firstRuns) == 0 {
 		return nil
 	}
-	byID := make(map[string]*obsdb.RunRow, len(firstRuns))
-	for _, id := range firstRuns {
-		byID[id] = &obsdb.RunRow{ID: id}
+	firsts := make([]*obsdb.RunRow, len(firstRuns))
+	for i, id := range firstRuns {
+		firsts[i] = &obsdb.RunRow{ID: id, Derived: !rows[i].ContentOff}
 	}
-	if err := d.fillPreviewsOf(ctx, firstRuns, byID); err != nil {
+	if err := d.fillCounts(ctx, firsts); err != nil {
 		return err
 	}
+	byID := make(map[string]*obsdb.RunRow, len(firsts))
+	for _, r := range firsts {
+		if _, seen := byID[r.ID]; !seen {
+			byID[r.ID] = r
+		}
+	}
 	for i := range rows {
-		rows[i].FirstPrompt = byID[firstRuns[i]].PromptPreview
+		r := byID[firstRuns[i]]
+		rows[i].FirstPrompt = r.PromptPreview
+		rows[i].ContentOff = contentOff(*r)
 	}
 	return nil
+}
+
+// contentOff is SessionRow.ContentOff's rule over a run row: events
+// stored, not one messages record, not Derived.
+func contentOff(r obsdb.RunRow) bool {
+	return !r.Derived && r.MessageCount == 0 && r.EventCount > 0
 }
 
 // sessionRuns builds the per-run subquery both Sessions and Session
@@ -1146,7 +1166,7 @@ func sessionRuns(narrow, cond string) string {
 				max(FinishedOK) AS FinishedOK, max(Failed) AS Failed, max(RootEnded) AS RootEnded,
 				max(InputTokens) AS InputTokens, max(OutputTokens) AS OutputTokens,
 				max(CachedInputTokens) AS CachedInputTokens, max(CacheWriteTokens) AS CacheWriteTokens,
-				max(ReasoningTokens) AS ReasoningTokens,
+				max(ReasoningTokens) AS ReasoningTokens, max(Derived) AS Derived,
 				max(JSONExtractString(Meta, '` + obsdb.SessionTitleKey + `')) AS Title
 			FROM weft_runs` + narrow + `
 			GROUP BY RunId)
@@ -1182,9 +1202,10 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 		return obsdb.SessionDetail{}, fmt.Errorf("%w: session %s", obsdb.ErrNotFound, id)
 	}
 	var firstRun string
+	var firstDerived bool
 	if err := rs.Scan(&row.ID, &row.PublicID, &row.Agent, &turns,
 		&row.FirstSeen, &row.LastSeen, &inTok, &outTok, &cached, &cacheW, &reason,
-		&ok, &failed, &newestSeen, &row.Title, &firstRun); err != nil {
+		&ok, &failed, &newestSeen, &row.Title, &firstRun, &firstDerived); err != nil {
 		return obsdb.SessionDetail{}, err
 	}
 	if err := rs.Err(); err != nil {
@@ -1216,6 +1237,7 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 	for _, r := range runs { // the first turn's preview, filled with the counts
 		if r.ID == firstRun {
 			row.FirstPrompt = r.PromptPreview
+			row.ContentOff = contentOff(r)
 		}
 	}
 	return obsdb.SessionDetail{SessionRow: row, Runs: runs}, nil

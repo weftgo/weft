@@ -45,6 +45,7 @@ import { renderApp, stubBrowser } from "../test/app"
 import { renderWithRouter } from "../test/render"
 import { createElement } from "react"
 import { StepDiffTable } from "../components/studio/step-diff"
+import { SessionTurns } from "../components/studio/session-turns"
 import {
   DIFF_COLUMNS,
   cellHole,
@@ -2510,11 +2511,13 @@ describe("a settling run on both surfaces (U2-fix2)", () => {
 
 // Titles, not ids (U6): one row, both surfaces, one helper
 // (lib/title.ts). The panel's narrow picker reads "● parked t3 How many
-// units… · 1 steps", its turn row "t3 How many units…"; the run page's
+// units… · 1 steps · 811ms", its turn row "t3 How many units…"; the run page's
 // heading is "agent · the prompt" and the tab "agent · How many units…
 // · succeeded · weft studio"; the id rides in a title / a mono line,
 // never as the label. A content-off row reads "(content not captured)"
 // on both.
+const AT = (ms: number) => new Date(Date.parse(T0) + ms).toISOString()
+
 describe("titles, not ids, on both surfaces (U6)", () => {
   const PROMPT = "How many units of SKU A-17 are in stock right now, please?"
   const CUT = clip(PROMPT)
@@ -2529,8 +2532,8 @@ describe("titles, not ids, on both surfaces (U6)", () => {
   }[] = [
     {
       name: "a parked turn with a prompt",
-      doc: { prompt_preview: PROMPT, pending: 1, turn: 3 },
-      option: `● parked t3 ${CUT} · 1 steps`,
+      doc: { prompt_preview: PROMPT, pending: 1, turn: 3, finished: AT(811) },
+      option: `● parked t3 ${CUT} · 1 steps · 811ms`,
       row: `t3 ${CUT}`,
       heading: `acme-support·${PROMPT}`,
       tab: `acme-support · ${CUT} · succeeded · weft studio`,
@@ -2539,11 +2542,22 @@ describe("titles, not ids, on both surfaces (U6)", () => {
     {
       name: "a content-off turn of an unnamed agent",
       doc: { agent: "", message_count: 0, event_count: 6, turn: 3 },
-      option: `● succeeded t3 ${NO_CONTENT} · 1 steps`,
+      option: `● succeeded t3 ${NO_CONTENT} · 1 steps · 0ms`,
       row: `t3 ${NO_CONTENT}`,
       heading: `unnamed agent·${NO_CONTENT}`,
       tab: `${NO_CONTENT} · succeeded · weft studio`,
       full: NO_CONTENT,
+    },
+    // U6-fix: kind agent already leads with the agent — the heading
+    // says it once, as the row, the picker and the tab do.
+    {
+      name: "a content-off turn of a named agent",
+      doc: { agent: "director", message_count: 0, event_count: 6, turn: 3 },
+      option: `● succeeded t3 director · ${NO_CONTENT} · 1 steps · 0ms`,
+      row: `t3 director · ${NO_CONTENT}`,
+      heading: `director · ${NO_CONTENT}`,
+      tab: `director · ${NO_CONTENT} · succeeded · weft studio`,
+      full: `director · ${NO_CONTENT}`,
     },
   ]
   for (const c of shapes)
@@ -2585,4 +2599,106 @@ describe("titles, not ids, on both surfaces (U6)", () => {
       expect(document.querySelector("[data-run-id]")!.textContent).toBe(RUN)
       await waitFor(() => expect(document.title).toBe(c.tab))
     })
+})
+
+// A thread resume on both surfaces (U6-fix): t3 parked, t4 carries no
+// prompt of its own — turnTitle's "resume of t3 · 1 decided call" on the
+// panel's row and picker and on Studio's session page alike; an
+// experiment of t3 in the picker in its card's order, the engine word
+// and the duration after the steps.
+describe("a resume and an experiment on both surfaces (U6-fix)", () => {
+  const PROMPT = "Book the 9:40 to Lyon"
+  const t3 = runRow({
+    id: "s_01-t3",
+    turn: 3,
+    pending: 1,
+    prompt_preview: PROMPT,
+    started: AT(-60_000),
+    finished: AT(-59_000),
+    last_seen: AT(-59_000),
+  })
+  const t4 = runRow({
+    id: "s_01-t4",
+    turn: 4,
+    prompt_preview: PROMPT,
+    started: T0,
+    finished: AT(811),
+    last_seen: AT(811),
+  })
+  const x1 = runRow({
+    id: "pg_x1",
+    playground: true,
+    session_id: "",
+    turn: 0,
+    forked_from: "s_01-t3#0",
+    status: "failed",
+    model: { provider: "weft/runtime", name: "scripted" },
+    usage: { input_tokens: 0, output_tokens: 0 },
+    started: AT(60_000),
+    finished: AT(62_500),
+    last_seen: AT(62_500),
+  })
+  const RESUME = "resume of t3 · 1 decided call"
+
+  it("the panel's row and picker say what Studio's session page says", async () => {
+    const fake = new FakeStudio()
+      .on("GET meta", { ...META, capabilities: ["ingest", "playground"] })
+      .on("GET sessions", { total: 1, sessions: [SESSION], next_before: null })
+      .on("GET runs", { total: 3, runs: [x1, t4, t3], next_before: null })
+    for (const r of [t3, t4, x1])
+      fake
+        .on(`GET runs/${r.id}`, { ...r, children: [], holes: [] })
+        .on(`GET runs/${r.id}/events`, pagedEvents(events(), { done: true }))
+        .on(
+          `GET runs/${r.id}/transcript`,
+          transcript([user("where is 42?")], [assistant("It shipped.")])
+        )
+        .on(`GET runs/${r.id}/spans`, { spans: [] })
+        .on(`GET runs/${r.id}/requests`, pagedRequests(OK_REQUESTS()))
+        .on(`GET runs/${r.id}/tools`, golden<object>("tools-ok"))
+    fake.install()
+    const el = await mount(ATTRS) // the 520 px float: the picker
+    await vi.waitFor(
+      () => expect(all(el, ".weft-turn-pick option")).toHaveLength(3),
+      { timeout: 5_000 }
+    )
+    const opts = Object.fromEntries(
+      all(el, ".weft-turn-pick option").map((o) => [
+        o.getAttribute("value"),
+        o.textContent,
+      ])
+    )
+    expect(opts).toEqual({
+      "s_01-t4": `● succeeded t4 ${RESUME} · 1 steps · 811ms`,
+      "s_01-t3": `● parked t3 ${PROMPT} · 1 steps · 1.0s`,
+      pg_x1: "↳ replay of t3 · scripted · ● failed · 1 steps · 2.5s",
+    })
+    const rows = Object.fromEntries(
+      all(el, ".weft-turn").map((r) => [
+        r.getAttribute("data-weft-run"),
+        r.querySelector(".weft-ttl")!.textContent,
+      ])
+    )
+    expect(rows["s_01-t4"]).toBe(`t4 ${RESUME}`)
+    expect(rows["s_01-t3"]).toBe(`t3 ${PROMPT}`)
+    el.remove()
+    await settle()
+    cleanup()
+    // Studio's session page: the turns oldest first, turnTitle over the
+    // turn above.
+    const { container } = await renderWithRouter(
+      createElement(SessionTurns, {
+        turns: [t3, t4],
+        experiments: new Map([[t3.id, [x1]]]),
+      })
+    )
+    const heads = Object.fromEntries(
+      [...container.querySelectorAll("[data-turn]")].map((tr) => [
+        tr.getAttribute("data-turn"),
+        tr.querySelector("[data-run-link]")!.textContent,
+      ])
+    )
+    expect(heads["s_01-t4"]).toBe(`t4${RESUME}`)
+    expect(heads["s_01-t3"]).toBe(`t3${PROMPT}`)
+  })
 })

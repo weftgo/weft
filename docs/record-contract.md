@@ -103,7 +103,7 @@ reads them from:
 
 | Attribute | Set by | Meaning | Run row |
 |---|---|---|---|
-| `weft.session.title` | `thread` (`SetInfo`'s title) | the session's title (`Session.Title`) as the turn started, absent before one was set — a label, not content: it survives a content-off destination (the `session_title` fixture) | `meta`; the session row's `title` (§6) |
+| `weft.session.title` | `thread` (`SetInfo`'s title) | the session's title (`Session.Title`) as the turn started, absent before one was set — a label, not content: it survives a content-off destination (the `session_title` fixture). A `Fork` stamps the origin's title until the fork's own `SetInfo`; the title is the newest across the whole entry tree, so a `Branch` back past a `SetInfo` keeps the newer title; the compaction marker's fallback (no run of the session produced the context) stamps the title current when it is emitted | `meta`; the session row's `title` (§6) |
 | `weft.session.forked_from` | `thread` (`Fork`) | `<origin session>#<entry id>` | `meta` |
 | `weft.session.parent` | `thread/pool` | the parent session of a pool child | `meta` |
 | `weft.session.parent_call` | `thread/pool` | the parent's tool call that spawned it, when known | `meta` |
@@ -559,7 +559,11 @@ transcript is the growth `messages` records concatenated in index order.
 `weft.turn`, then `started`) non-empty `weft.session.title`, `""` when
 no turn carried one; its `first_prompt` is the first turn's
 `prompt_preview` — `""` when that turn stored no content, never a later
-turn's (`obsdb.SessionRow.Title`/`FirstPrompt`; the fixtures'
+turn's; its `content_off` is true when that same first turn was recorded
+without content — events stored, no `messages` record, not derived —
+and absent otherwise, so a list titles an untitled content-off session
+"(content not captured)" rather than its id
+(`obsdb.SessionRow.Title`/`FirstPrompt`/`ContentOff`; the fixtures'
 `sessions`). `SessionQuery.Q` matches a term against the title, the
 first turn's whole prompt, the session id, the public id and the agent.
 

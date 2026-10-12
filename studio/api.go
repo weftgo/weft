@@ -609,6 +609,11 @@ type sessionRow struct {
 	// with the first present of the two, else the id (lib/title.ts).
 	Title       string `json:"title,omitempty"`
 	FirstPrompt string `json:"first_prompt,omitempty"`
+	// ContentOff: the first turn was recorded without content
+	// (obsdb.SessionRow.ContentOff) — the list says "(content not
+	// captured)" for an untitled row instead of its id. Absent when
+	// false.
+	ContentOff bool `json:"content_off,omitempty"`
 	// The session's cost (plan A5): its turns' own + delegated — the
 	// session's usage already includes their subagents. A thread/pool
 	// child is another session, which this row does not link: no
@@ -621,7 +626,7 @@ func sessRow(r obsdb.SessionRow) sessionRow {
 		ID: r.ID, PublicID: r.PublicID, Agent: r.Agent, Turns: r.Turns,
 		FirstSeen: r.FirstSeen, LastSeen: r.LastSeen,
 		Status: string(r.Status), Usage: r.Usage,
-		Title: r.Title, FirstPrompt: r.FirstPrompt,
+		Title: r.Title, FirstPrompt: r.FirstPrompt, ContentOff: r.ContentOff,
 	}
 }
 
@@ -1401,7 +1406,7 @@ func withPublicID(runs []obsdb.RunRow, pub string) []obsdb.RunRow {
 // app can share. The same aggregates as the database's: the turn
 // count, first/last seen, summed usage, MAX(agent), and the newest
 // turn's status (by turn, then start), the newest titled turn's title
-// and the first turn's prompt preview.
+// and the first turn's prompt preview and content-off mark.
 func scopedSessionRow(row obsdb.SessionRow, turns []obsdb.RunRow, pub string) obsdb.SessionRow {
 	out := obsdb.SessionRow{ID: row.ID, PublicID: pub}
 	var newest, first, titled *obsdb.RunRow
@@ -1439,6 +1444,7 @@ func scopedSessionRow(row obsdb.SessionRow, turns []obsdb.RunRow, pub string) ob
 	}
 	if first != nil {
 		out.FirstPrompt = first.PromptPreview
+		out.ContentOff = !first.Derived && first.MessageCount == 0 && first.EventCount > 0
 	}
 	if titled != nil {
 		out.Title = titled.Meta[obsdb.SessionTitleKey]

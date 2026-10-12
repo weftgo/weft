@@ -532,6 +532,11 @@ type SessionRow struct {
 	// start) RunRow.PromptPreview: "" when that turn's records carried
 	// no content (content-off) or no user text — never a later turn's.
 	FirstPrompt string
+	// ContentOff marks a session whose first turn (FirstPrompt's) was
+	// recorded without content: events stored and not one messages
+	// record (RunRow.EventCount > 0, MessageCount 0), and not Derived.
+	// The list says "(content not captured)" for it instead of the id.
+	ContentOff bool
 }
 
 // SessionTitleKey is the run metadata a thread session stamps with its

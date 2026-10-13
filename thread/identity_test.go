@@ -15,6 +15,7 @@ package thread_test
 import (
 	"context"
 	"errors"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -38,6 +39,9 @@ type idTracerProvider struct {
 
 	mu    sync.Mutex
 	spans []*idSpan
+	// panicSpanContext makes every span's SpanContext panic: a broken
+	// tracer the session's reporting reads (seeRun), never the loop.
+	panicSpanContext bool
 }
 
 func (p *idTracerProvider) Tracer(string, ...trace.TracerOption) trace.Tracer {
@@ -65,7 +69,7 @@ type idTracer struct {
 }
 
 func (t *idTracer) Start(ctx context.Context, name string, _ ...trace.SpanStartOption) (context.Context, trace.Span) {
-	s := &idSpan{name: name, recording: true}
+	s := &idSpan{name: name, recording: true, panicSC: t.p.panicSpanContext}
 	t.p.mu.Lock()
 	t.p.spans = append(t.p.spans, s)
 	t.p.mu.Unlock()
@@ -81,6 +85,7 @@ type idSpan struct {
 	name      string
 	attrs     []attribute.KeyValue
 	recording bool
+	panicSC   bool
 }
 
 func (s *idSpan) End(...trace.SpanEndOption) {
@@ -106,7 +111,12 @@ func (s *idSpan) SetStatus(codes.Code, string) {}
 // SpanContext answers the zero context: the embedded interface is nil,
 // and a run whose tools execute reads it (a span-less observer would
 // otherwise panic, contained, and drop the step's messages).
-func (s *idSpan) SpanContext() trace.SpanContext { return trace.SpanContext{} }
+func (s *idSpan) SpanContext() trace.SpanContext {
+	if s.panicSC {
+		panic("broken tracer: SpanContext")
+	}
+	return trace.SpanContext{}
+}
 
 func (s *idSpan) RecordError(error, ...trace.EventOption) {}
 
@@ -656,7 +666,7 @@ func TestResumeTurnLinksTheParkedRun(t *testing.T) {
 		t.Fatalf("parked turn: %v, %v", res1, err)
 	}
 	d := thread.Approve(res1.Pending[0].ID)
-	d.Who = "ops@acme"
+	d.Who = "op_42"
 	t2, err := s.Decide(ctx, d)
 	if err != nil || t2 == nil {
 		t.Fatalf("Decide: turn %v, err %v", t2, err)
@@ -680,7 +690,255 @@ func TestResumeTurnLinksTheParkedRun(t *testing.T) {
 	if got, want := resumed.attr("weft.resume.calls"), res1.Pending[0].ID+"=approved"; got != want {
 		t.Errorf("weft.resume.calls = %q, want %q", got, want)
 	}
-	if got := resumed.attr("weft.approval.actor"); got != "ops@acme" {
-		t.Errorf("weft.approval.actor = %q, want ops@acme", got)
+	if got := resumed.attr("weft.approval.actor"); got != "op_42" {
+		t.Errorf("weft.approval.actor = %q, want op_42", got)
+	}
+}
+
+// linkedRefundAgent is a RequireApproval refund agent over script whose
+// spans land in tp.
+func linkedRefundAgent(tp *idTracerProvider, steps ...wefttest.Turn) *core.Agent {
+	refund := core.Tool("refund", "Refund an order.", func(context.Context, struct{}) (string, error) {
+		return "refunded", nil
+	}, core.RequireApproval())
+	return core.New(wefttest.Script(steps...), core.Name("linked"), core.TracerProvider(tp), refund)
+}
+
+// everyDecidingRunLinks fails when an invoke_agent span reports
+// decisions (weft.resume.calls) without naming the run it resumes:
+// whatever turn shape applied them, the link comes with them.
+func everyDecidingRunLinks(t *testing.T, tp *idTracerProvider) {
+	t.Helper()
+	for i, sp := range tp.named("invoke_agent") {
+		if sp.attr("weft.resume.calls") != "" && sp.attr("weft.resumed_from") == "" {
+			t.Errorf("invoke_agent #%d carries weft.resume.calls %q but no weft.resumed_from", i, sp.attr("weft.resume.calls"))
+		}
+	}
+}
+
+// A session reopened behind a parked turn resumes it linked: Open
+// restores the boundary from the request entries, so the resume run
+// Decide starts on the reopened Session names the parked run and the
+// actor exactly as a resume on the writer that parked (U13.1-fix).
+func TestResumeAfterOpenLinksTheParkedRun(t *testing.T) {
+	tp := &idTracerProvider{}
+	ctx := context.Background()
+	agent := linkedRefundAgent(tp,
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "rf1", Args: `{}`}),
+		wefttest.Say("done"),
+	)
+	st := thread.Memory()
+	s, err := thread.Create(ctx, st, agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t1, err := s.Send(ctx, core.User("refund it"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := t1.Wait(); err != nil || len(res.Pending) != 1 {
+		t.Fatalf("parked turn: %v, %v", res, err)
+	}
+	if err := s.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	s2, err := thread.Open(ctx, st, s.ID(), agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s2.Close(ctx) }()
+	d := thread.Approve("rf1")
+	d.Who = "op_42"
+	t2, err := s2.Decide(ctx, d)
+	if err != nil || t2 == nil {
+		t.Fatalf("Decide after Open: turn %v, err %v", t2, err)
+	}
+	if _, err := t2.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	invokes := tp.named("invoke_agent")
+	if len(invokes) != 2 {
+		t.Fatalf("invoke_agent spans = %d, want 2", len(invokes))
+	}
+	r := invokes[1]
+	if got := r.attr("weft.resumed_from"); got != t1.RunID() {
+		t.Errorf("weft.resumed_from after Open = %q, want the parked run %q", got, t1.RunID())
+	}
+	if got := r.attr("weft.resume.calls"); got != "rf1=approved" {
+		t.Errorf("weft.resume.calls after Open = %q, want rf1=approved", got)
+	}
+	if got := r.attr("weft.approval.actor"); got != "op_42" {
+		t.Errorf("weft.approval.actor after Open = %q, want op_42", got)
+	}
+}
+
+// A chain links each resume to the run that parked its own calls: t1
+// parks, t2 resumes it and parks again, t3 resumes t2 — t3's
+// weft.resumed_from is t2's run, never t1's (U13.1-fix).
+func TestResumeChainLinksTheLatestPark(t *testing.T) {
+	tp := &idTracerProvider{}
+	ctx := context.Background()
+	agent := linkedRefundAgent(tp,
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "rf1", Args: `{}`}),
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "rf2", Args: `{}`}),
+		wefttest.Say("done"),
+	)
+	s, err := thread.Create(ctx, thread.Memory(), agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close(ctx) }()
+	t1, err := s.Send(ctx, core.User("refund both"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := t1.Wait(); err != nil || len(res.Pending) != 1 {
+		t.Fatalf("t1: %v, %v", res, err)
+	}
+	t2, err := s.Decide(ctx, thread.Approve("rf1"))
+	if err != nil || t2 == nil {
+		t.Fatalf("Decide rf1: turn %v, err %v", t2, err)
+	}
+	if res, err := t2.Wait(); err != nil || len(res.Pending) != 1 || res.Pending[0].ID != "rf2" {
+		t.Fatalf("t2 (resumes t1, parks rf2): %v, %v", res, err)
+	}
+	t3, err := s.Decide(ctx, thread.Deny("rf2", "not today"))
+	if err != nil || t3 == nil {
+		t.Fatalf("Decide rf2: turn %v, err %v", t3, err)
+	}
+	if _, err := t3.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	invokes := tp.named("invoke_agent")
+	if len(invokes) != 3 {
+		t.Fatalf("invoke_agent spans = %d, want 3", len(invokes))
+	}
+	for i, want := range []struct{ from, calls string }{
+		{"", ""},
+		{t1.RunID(), "rf1=approved"},
+		{t2.RunID(), "rf2=denied"},
+	} {
+		if got := invokes[i].attr("weft.resumed_from"); got != want.from {
+			t.Errorf("run %d: weft.resumed_from = %q, want %q", i+1, got, want.from)
+		}
+		if got := invokes[i].attr("weft.resume.calls"); got != want.calls {
+			t.Errorf("run %d: weft.resume.calls = %q, want %q", i+1, got, want.calls)
+		}
+	}
+	everyDecidingRunLinks(t, tp)
+}
+
+// Decisions link whichever turn applies them (U13.1-fix: the link is
+// computed whenever the recorded decisions ride a run, not only on a
+// resume turn). With AutoResume off, a Decide records and a plain Send
+// queues behind the open boundary (ADR 0021 §1) — it never carries the
+// decisions itself; the Resume that follows does, linked, and the
+// queued Send then runs with no link and no actor.
+func TestDecisionsLinkWhicheverTurnAppliesThem(t *testing.T) {
+	tp := &idTracerProvider{}
+	ctx := context.Background()
+	agent := linkedRefundAgent(tp,
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "rf1", Args: `{}`}),
+		wefttest.Say("refunded"),
+		wefttest.Say("and done"),
+	)
+	s, err := thread.Create(ctx, thread.Memory(), agent, thread.AutoResume(false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close(ctx) }()
+	t1, err := s.Send(ctx, core.User("refund it"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res, err := t1.Wait(); err != nil || len(res.Pending) != 1 {
+		t.Fatalf("parked turn: %v, %v", res, err)
+	}
+	d := thread.Approve("rf1")
+	d.Who = "op_42"
+	if t2, err := s.Decide(ctx, d); err != nil || t2 != nil {
+		t.Fatalf("Decide under AutoResume(false): turn %v, err %v; want no turn", t2, err)
+	}
+	t3, err := s.Send(ctx, core.User("anything else?"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t2, err := s.Resume(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tn := range []*thread.Turn{t2, t3} {
+		if _, err := tn.Wait(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	invokes := tp.named("invoke_agent")
+	if len(invokes) != 3 {
+		t.Fatalf("invoke_agent spans = %d, want 3 (park, resume, the queued send)", len(invokes))
+	}
+	r, after := invokes[1], invokes[2]
+	if got := r.attr("weft.resumed_from"); got != t1.RunID() {
+		t.Errorf("weft.resumed_from = %q, want the parked run %q", got, t1.RunID())
+	}
+	if got := r.attr("weft.resume.calls"); got != "rf1=approved" {
+		t.Errorf("weft.resume.calls = %q, want rf1=approved", got)
+	}
+	if got := r.attr("weft.approval.actor"); got != "op_42" {
+		t.Errorf("weft.approval.actor = %q, want op_42", got)
+	}
+	for _, k := range []string{"weft.resumed_from", "weft.resume.calls", "weft.approval.actor"} {
+		if v := after.attr(k); v != "" {
+			t.Errorf("the queued send's run carries %s = %q", k, v)
+		}
+	}
+	everyDecidingRunLinks(t, tp)
+}
+
+// A reporting panic never costs per-step persistence (U13.1-fix;
+// observability never changes behaviour, T4): the transcript observer
+// appends each step's messages before the session's own reporting —
+// the run sight seeRun takes for compaction markers — reads the run's
+// span, so a tracer whose SpanContext panics still leaves step 0's
+// messages durable while step 1 runs, not only at the turn's end.
+func TestReportingPanicKeepsPerStepPersistence(t *testing.T) {
+	tp := &idTracerProvider{panicSpanContext: true}
+	ctx := context.Background()
+	var s *thread.Session
+	var seen []string
+	lookup := core.Tool("lookup", "Look up.", func(context.Context, struct{}) (string, error) {
+		return "found it", nil
+	})
+	check := core.Tool("check", "Check.", func(context.Context, struct{}) (string, error) {
+		for _, e := range s.Entries() {
+			if me, ok := e.(thread.MessageEntry); ok {
+				for _, p := range me.Message.Content {
+					if r, ok := p.(core.ToolResultPart); ok {
+						seen = append(seen, r.Content)
+					}
+				}
+			}
+		}
+		return "checked", nil
+	})
+	agent := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup", ID: "l1", Args: `{}`}),
+		wefttest.ToolCalls(wefttest.Call{Name: "check", ID: "c1", Args: `{}`}),
+		wefttest.Say("done"),
+	), core.TracerProvider(tp), lookup, check)
+	var err error
+	s, err = thread.Create(ctx, thread.Memory(), agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = s.Close(ctx) }()
+	turn, err := s.Send(ctx, core.User("look it up"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := turn.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(seen, "found it") {
+		t.Errorf("step 0's tool result was not durable while step 1 ran (results on the tree: %q): a reporting panic skipped the per-step append", seen)
 	}
 }

@@ -1102,3 +1102,100 @@ func TestMigration0017BackfillsMetadataDropped(t *testing.T) {
 		t.Errorf("backfilled problems %s, written %s: the two rules disagree", stored["r_old"], stored["r_new"])
 	}
 }
+
+// A file at 0017 holding a parked run (pending 2) opens through 0018:
+// runs_resumed_from exists, a resumer written after the upgrade —
+// naming the parked run through weft.resumed_from — reads resumed_from
+// on its own row, and the parked row stored before the column existed
+// reads resumed_by it, on the single-run read and the list alike: the
+// reverse link is read time, so no backfill is needed (docs/
+// record-contract.md §6, U13.1-fix).
+func TestUpgradeTo0018LinksResumes(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "at17.db")
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE obsdb_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range sortedVersions() {
+		if v > 17 {
+			break
+		}
+		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx, err := raw.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(string(body)); err != nil {
+			t.Fatalf("migration %d: %v", v, err)
+		}
+		if post := postMigrations[v]; post != nil {
+			if err := post(tx); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO obsdb_migrations (version, applied_at) VALUES (?, '2026-10-01T00:00:00Z')`, v); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := raw.Exec(`INSERT INTO runs (run_id, agent, started_ns, last_seen_ns, finished_ok, root_ended, pending, meta) VALUES
+		('r_parked', 'a', 100, 200, 1, 1, 2, '{}')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("open a 0017 file: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+	var n int
+	if err := db.(*DB).reads.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'runs_resumed_from'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("runs_resumed_from after 0018: %d indexes, want 1", n)
+	}
+	at := time.Unix(0, 300).UTC()
+	resumer := obsdb.Span{TraceID: "t2", SpanID: "root", Name: "invoke_agent a", Kind: 1, Start: at,
+		End: at.Add(time.Millisecond), StatusCode: 1, Service: "svc", Attrs: map[string]any{
+			"weft.run.id": "r_resume", "gen_ai.operation.name": "invoke_agent",
+			"weft.resumed_from": "r_parked", "weft.resume.calls": "c1=approved,c2=denied",
+		}}
+	if err := db.Write(ctx, obsdb.Batch{Spans: []obsdb.Span{resumer}}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := db.Run(ctx, "r_parked")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.ResumedBy != "r_resume" || p.ResumedFrom != "" || p.Pending != 2 {
+		t.Errorf("parked after 0018: resumed_by %q, resumed_from %q, pending %d; want r_resume, none, 2", p.ResumedBy, p.ResumedFrom, p.Pending)
+	}
+	r, err := db.Run(ctx, "r_resume")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.ResumedFrom != "r_parked" || r.ResumedBy != "" {
+		t.Errorf("resume after 0018: resumed_from %q, resumed_by %q; want r_parked, none", r.ResumedFrom, r.ResumedBy)
+	}
+	page, err := db.Runs(ctx, obsdb.RunQuery{Limit: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range page.Runs {
+		if row.ID == "r_parked" && row.ResumedBy != "r_resume" {
+			t.Errorf("list after 0018: parked resumed_by %q, want r_resume", row.ResumedBy)
+		}
+	}
+}

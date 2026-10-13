@@ -10,6 +10,7 @@ import (
 	"maps"
 	"reflect"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1274,12 +1275,20 @@ func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolC
 	return results, pending, sub, nil
 }
 
+// maxResumeCalls bounds weft.resume.calls: the first 32 parked calls
+// are listed, the rest counted (",…+k"), so one wide boundary cannot
+// grow the run's span and run_start record without bound.
+const maxResumeCalls = 32
+
 // resumeCallsAttr renders weft.resume.calls: each pending call of a
 // resume, in call order, as <call id>=<kind> joined by commas — kind
 // approved (Approve), denied (Deny), resolved (Resolve, ResolveError)
 // or no_decision (left undecided: rule 12's "DENIED: no decision").
 // "" when the run resumes no pending call. Ids and enums only, never a
-// reason or a resolved payload (ADR 0016).
+// reason or a resolved payload (ADR 0016). The kind is the decision,
+// not the outcome: an approved call may still fail or park again.
+// Capped at maxResumeCalls entries: past it the value ends ",…+k", k
+// the calls not listed.
 func resumeCallsAttr(calls []ToolCallPart, decisions map[string]decision) string {
 	if len(calls) == 0 {
 		return ""
@@ -1288,6 +1297,11 @@ func resumeCallsAttr(calls []ToolCallPart, decisions map[string]decision) string
 	for i, c := range calls {
 		if i > 0 {
 			b.WriteByte(',')
+		}
+		if i == maxResumeCalls {
+			b.WriteString("…+")
+			b.WriteString(strconv.Itoa(len(calls) - i))
+			break
 		}
 		kind := deniedKindNoDecision
 		if d, ok := decisions[c.ID]; ok {

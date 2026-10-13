@@ -157,6 +157,12 @@ type Decision struct {
 	// and it is the identity Quorum counts for unsigned decisions.
 	// Through DecideSigned it is a label only: the signing key is the
 	// identity.
+	//
+	// The run that applies the decision carries it (a signed one's key
+	// id instead) as weft.approval.actor run metadata, which survives
+	// content-off like every metadata pair: it rides every span and
+	// record verbatim, to every destination. Put an opaque id in Who
+	// (and in a keyring KeyID), never an email or a name.
 	Who string
 	// Via names the channel the decision arrived by. The session fills
 	// it on every path it records — Decide always records "user",
@@ -1612,12 +1618,15 @@ func (s *Session) expiredPendingLocked(now time.Time) []Request {
 // resume run resolves (record contract §2, UX-E-17): a signed
 // decision's key id, else the decision's Who; distinct actors in call
 // order, comma-joined. A session owns it: every run of the session
-// sets it, "" (none) on a run that resumes nothing or whose decisions
-// name nobody, so no enclosing run's actor is inherited.
+// sets it, "" (none) on a run that applies no decision or whose
+// decisions name nobody, so no enclosing run's actor is inherited.
+// Metadata survives content-off (Decision.Who): an opaque id, never a
+// person's address.
 const approvalActorKey = "weft.approval.actor"
 
-// resumeLinkLocked is what a resume run reports about the boundary it
-// resolves (UX-E-17): the run that parked its calls — the request
+// resumeLinkLocked is what a run applying decisions reports about the
+// boundary it resolves (UX-E-17) — a resume turn, or any turn the
+// recorded decisions ride (AutoResume off, then a plain Send): the run that parked its calls — the request
 // entries' run id, the run core.ResumeOf names — and the actors of the
 // decisions in force (approvalActorKey's value). Both "" with nothing
 // dangling. Callers hold s.mu.

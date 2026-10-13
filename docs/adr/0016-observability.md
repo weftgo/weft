@@ -640,12 +640,13 @@ unchanged (`TestResumeLinksTheParkedRun`, `TestDeniedCallsHaveSpans`):
 | where | key | value |
 |---|---|---|
 | `invoke_agent` span, `run_start` record | `weft.resumed_from` | the run `ResumeOf` named |
-| `invoke_agent` span, `run_start` record | `weft.resume.calls` | a run fed decisions that resumes parked calls: `<call id>=<kind>` per parked call in call order, comma-joined — `approved`, `denied`, `resolved` (`Resolve`, `ResolveError`), `no_decision` (left undecided: `DENIED: no decision`). Ids and enums only |
+| `invoke_agent` span, `run_start` record | `weft.resume.calls` | a run fed decisions that resumes parked calls: `<call id>=<kind>` per parked call in call order, comma-joined — `approved`, `denied`, `resolved` (`Resolve`, `ResolveError`), `no_decision` (left undecided: `DENIED: no decision`). Ids and enums only; the kind is the decision, not the outcome. Capped at 32 calls, the rest counted as `,…+k` (U13.1-fix) |
 | `execute_tool` span | `weft.tool.denied`, `weft.tool.denied_kind` | a parked call the resume denied (`denied`) or left undecided (`no_decision`): a zero-length span (start = end), `weft.step.index` 0, no `weft.tool.seq` (no `tool_start`: it never ran), `error.type` `DENIED`, status `Error`. Never the reason, which stays in the transcript. The root's `weft.run.denied` keeps counting these calls; a reader does not count the span again |
-| run metadata | `weft.approval.actor` | who decided: `thread` stamps a resume turn's deciders (a signed decision's key id, else its `Who`), `weft/runtime` the decide command's actor; an app passes it with `Metadata`. Metadata, not an attribute the core sets: it rides every span and record of the run under each destination's content policy, like `weft.playground.actor` |
+| run metadata | `weft.approval.actor` | who decided: `thread` stamps a resume turn's deciders (a signed decision's key id, else its `Who`), `weft/runtime` the decide command's actor; an app passes it with `Metadata`. Metadata, not an attribute the core sets: it rides every span and record of the run verbatim, content-off destinations included, like `weft.playground.actor` — an opaque id in `Who` / `KeyID`, never an email (U13.1-fix) |
 
 A `Resolve`d call still has no span (nothing executed). The core
 imports nothing new; `ResumeOf` is additive (apidiff: a new function).
 Readers derive the reverse link — a parked run's `resumed_by`, the
-largest run id whose `resumed_from` names it — at read time
+latest run by start time whose `resumed_from` names it (a tie: the
+larger id; U13.1-fix — never the largest id alone) — at read time
 (`docs/record-contract.md` §6).

@@ -143,6 +143,23 @@ describe("statusOf (U1-fix)", () => {
     expect(statusOf(t1, [t1, turn(2), turn(3)]).word).toBe("parked → t3")
   })
 
+  it("a long resumer id with no turn to name is cut to 8 characters in the word and detail, whole in the hint", () => {
+    const id = "3f9a1c2b7d4e5f60718293a4b5c6d7e8"
+    const s = statusOf({
+      id: "r_gen",
+      status: "succeeded",
+      pending: 2,
+      resumed_by: id,
+    })
+    expect(s).toMatchObject({
+      key: "resumed",
+      word: "parked → 3f9a1c2b…",
+      detail: "2 calls decided · resumed in 3f9a1c2b…",
+      hint: `2 calls decided · resumed in 3f9a1c2b… (${id})`,
+      resumedBy: id,
+    })
+  })
+
   it("the panel's filter picks name every key a turn can read, the decided park included", () => {
     expect(FILTER_KEYS).toEqual([
       "running",

@@ -3034,6 +3034,13 @@ describe("one status vocabulary on both surfaces (U1)", () => {
       detail: "1 call decided · resumed in t2",
     })
     expect(statusOf(t3).hint).toContain("cancelled · studio.cancel")
+    // A stored resume link with no turn to name (U13.1-fix): the
+    // resumer's id cut to 8 characters, whole in the hint — one word
+    // for the panel's turn chip and Studio's runs list alike.
+    const long = "3f9a1c2b7d4e5f60718293a4b5c6d7e8"
+    const gen = statusOf(runRow({ id: "r_gen", pending: 1, resumed_by: long }))
+    expect(gen.word).toBe("parked → 3f9a1c2b…")
+    expect(gen.hint).toContain(`(${long})`)
     // The stored status is the contract's: the row still says failed.
     expect(t3.status).toBe("failed")
   })

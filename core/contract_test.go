@@ -5826,3 +5826,48 @@ func TestDeniedCallsHaveSpans(t *testing.T) {
 		t.Errorf("c2 result = %+v", r)
 	}
 }
+
+// TestResumeCallsIsCapped pins weft.resume.calls' bound (record
+// contract §3, U13.1-fix): a resume of more than 32 parked calls lists
+// the first 32 in call order and counts the rest as ",…+k"; the kinds
+// are the decisions (approved here), not the outcomes.
+func TestResumeCallsIsCapped(t *testing.T) {
+	gated := core.Tool("gated", "Needs approval.", func(context.Context, struct{}) (string, error) {
+		return "ran", nil
+	}, core.RequireApproval())
+	var calls []wefttest.Call
+	for i := range 35 {
+		calls = append(calls, wefttest.Call{Name: "gated", ID: fmt.Sprintf("c%02d", i)})
+	}
+	tp := newRecProvider()
+	agt := core.New(wefttest.Script(wefttest.ToolCalls(calls...), wefttest.Say("ok")),
+		core.TracerProvider(tp), core.Name("wide"), core.MaxResultBytes(0), gated)
+	first, err := agt.Generate(context.Background(), core.Prompt("x"))
+	if err != nil || len(first.Pending) != 35 {
+		t.Fatalf("first run: pending %d, err %v; want 35 parked", len(first.Pending), err)
+	}
+	opts := []core.RunOption{core.Messages(first.Messages...), core.ResumeOf(first.ID)}
+	for _, c := range calls {
+		opts = append(opts, core.Approve(c.ID))
+	}
+	second, err := agt.Generate(context.Background(), opts...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want strings.Builder
+	for i := range 32 {
+		fmt.Fprintf(&want, "c%02d=approved,", i)
+	}
+	want.WriteString("…+3")
+	got := ""
+	tp.mu.Lock()
+	for _, s := range tp.spans {
+		if a := s.attrsMap(); s.name == "invoke_agent wide" && a["weft.run.id"] == second.ID {
+			got = a["weft.resume.calls"]
+		}
+	}
+	tp.mu.Unlock()
+	if got != want.String() {
+		t.Errorf("weft.resume.calls = %q\nwant %q", got, want.String())
+	}
+}

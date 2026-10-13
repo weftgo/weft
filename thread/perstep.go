@@ -72,11 +72,22 @@ type stepPersist struct {
 // and a step's durability must not die with a canceled caller.
 func (s *Session) observer(ctx context.Context, sp *stepPersist, runID string) core.RunOption {
 	return core.OnMessages(func(rctx context.Context, _ int, msgs []core.Message) {
+		// Durability first (T4): the step's messages are appended
+		// before any reporting runs, so a panic in the reporting half
+		// — a broken tracer's span, a logger — never costs the step
+		// its per-step append (observability never changes behaviour).
+		s.persistStep(ctx, sp, msgs)
 		// The run's own context (its invoke_agent span, its merged
 		// metadata) is what a compaction marker under this run is
-		// emitted on (compactmarker.go).
+		// emitted on (compactmarker.go). Contained here: the loop
+		// would contain it too, but as an observer failure.
+		defer func() {
+			if p := recover(); p != nil {
+				s.agent.Logger().Warn("thread: run reporting panicked; the step is persisted",
+					"session", s.ID(), "run", runID, "panic", p)
+			}
+		}()
 		s.seeRun(rctx, runID)
-		s.persistStep(ctx, sp, msgs)
 	})
 }
 

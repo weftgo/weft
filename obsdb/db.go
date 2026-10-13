@@ -368,8 +368,8 @@ type RunRow struct {
 	// ResumedFrom is the run this one resumes — its weft.resumed_from
 	// (core.ResumeOf; thread and weft/runtime pass it, an app passes
 	// the parked RunResult.ID) — and ResumedBy, on a parked run, the
-	// run that resumed it: the largest run id whose ResumedFrom names
-	// this run, derived at read time on both backends, so a resumer
+	// run that resumed it: the latest run by start time whose
+	// ResumedFrom names this run (a tie: the larger id), derived at read time on both backends, so a resumer
 	// stored before or after the parked run links it alike (record
 	// contract §6, UX-E-17). "" when none.
 	ResumedFrom, ResumedBy   string

@@ -17,10 +17,12 @@
 //               against its session's complete turn list (complete);
 //               anywhere else "pending · no resume recorded here";
 //   parked → tN the same, once the resume is known: the row's
-//               resumed_by (U13.1's stored link, read first; not served
-//               yet), else a later turn of its session in runs
-//               (lib/honesty.ts's nextTurn) — the next turn, which
-//               decided the calls or dropped them.
+//               resumed_by (U13.1's stored link, read first), else a
+//               later turn of its session in runs (lib/honesty.ts's
+//               nextTurn) — the next turn, which decided the calls or
+//               dropped them. With no turn to name, the resumer's id
+//               cut to 8 characters ("parked → 3f9a1c2b…"), the whole
+//               id in the hint.
 //
 // settling (U2) is a note beside the word, never a status.
 import { CANCELLED } from "./error-kind"
@@ -92,7 +94,8 @@ export interface StatusRow {
   session_id?: string
   turn?: number
   parent_run_id?: string
-  /** U13.1's stored resume link; absent until served. */
+  /** U13.1's stored resume link: the run that resumed this parked
+   * run. Absent when none is recorded. */
   resumed_by?: string
 }
 
@@ -134,7 +137,9 @@ export function statusOf(
       return { key: "parked", ...STATUS.parked, detail: d, hint: d }
     }
     const t = runs?.find((x) => x.id === next)?.turn
-    const to = t ? `t${t}` : next
+    // shortId's cut inlined: importing lib/title.ts here reorders the
+    // bundle (U1-fix).
+    const to = t ? `t${t}` : next.length > 16 ? `${next.slice(0, 8)}…` : next
     return {
       key: "resumed",
       ...STATUS.resumed,

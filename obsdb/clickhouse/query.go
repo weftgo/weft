@@ -400,11 +400,14 @@ func (d *DB) fillCounts(ctx context.Context, rows []*obsdb.RunRow) error {
 }
 
 // fillResumedByOf loads ResumedBy (contract §6, U13.1): for each of the
-// rows' runs, the largest run id whose ResumedFrom names it — derived
-// here rather than stored, so a resumer ingested before or after the
-// parked run links it alike and no row is written for a parked run not
-// stored (migration 0019). idx_resumed_from skips the granules no
-// resumer names.
+// rows' runs, the latest run by start time whose ResumedFrom names it
+// (a tie on Started goes to the larger RunId; never the largest id
+// alone — a core run id is random hex, a thread turn's <session>-t10
+// sorts before -t9) — derived here rather than stored, so a resumer
+// ingested before or after the parked run links it alike and no row is
+// written for a parked run not stored (migration 0019). Each resumer's
+// partial rows are merged first (min Started), the way every run read
+// does; idx_resumed_from skips the granules no resumer names.
 func (d *DB) fillResumedByOf(ctx context.Context, ids []string, byID map[string]*obsdb.RunRow) error {
 	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
 	args := make([]any, len(ids))
@@ -412,8 +415,11 @@ func (d *DB) fillResumedByOf(ctx context.Context, ids []string, byID map[string]
 		args[i] = id
 	}
 	rs, err := d.conn.Query(ctx,
-		"SELECT ResumedFrom, max(RunId) FROM weft_runs WHERE ResumedFrom IN ("+placeholders+") GROUP BY ResumedFrom",
-		args...)
+		"SELECT ResumedFrom, argMax(RunId, (Started, RunId)) FROM ("+
+			"SELECT RunId, max(ResumedFrom) AS ResumedFrom, min(Started) AS Started FROM weft_runs "+
+			"WHERE RunId IN (SELECT RunId FROM weft_runs WHERE ResumedFrom IN ("+placeholders+")) GROUP BY RunId"+
+			") WHERE ResumedFrom IN ("+placeholders+") GROUP BY ResumedFrom",
+		append(args, args...)...)
 	if err != nil {
 		return err
 	}

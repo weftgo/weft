@@ -988,3 +988,102 @@ func TestUpgradeTo0018BackfillsMetadataDropped(t *testing.T) {
 		}
 	}
 }
+
+// A database at 0018 holding a parked run (pending 2) opens through
+// 0019 on a live server: a resumer written after the upgrade, naming
+// it through weft.resumed_from, reads resumed_from on its own row and
+// the parked run reads resumed_by it — the link is read time, so the
+// row stored before the column existed links without a backfill; the
+// link key stays out of the resumer's meta (docs/record-contract.md
+// §6, U13.1-fix).
+func TestUpgradeTo0019LinksResumes(t *testing.T) {
+	base := os.Getenv("WEFT_CLICKHOUSE_DSN")
+	if base == "" {
+		t.Skip("WEFT_CLICKHOUSE_DSN not set: the 0019 upgrade needs a clickhouse server (README has the one-line container recipe)")
+	}
+	ctx := context.Background()
+	u, err := url.Parse(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	suffix := make([]byte, 6)
+	if _, err := rand.Read(suffix); err != nil {
+		t.Fatal(err)
+	}
+	name := "weft_up_" + hex.EncodeToString(suffix)
+	admin := rawConn(t, base)
+	if err := admin.Exec(ctx, fmt.Sprintf("CREATE DATABASE `%s`", name)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = admin.Exec(context.Background(), fmt.Sprintf("DROP DATABASE IF EXISTS `%s`", name))
+		_ = admin.Close()
+	})
+	u.Path = "/" + name
+	dsn := u.String()
+
+	conn := rawConn(t, dsn)
+	if err := conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS obsdb_migrations (
+		version UInt32, name String, applied_at DateTime DEFAULT now()
+	) ENGINE = MergeTree ORDER BY version`); err != nil {
+		t.Fatal(err)
+	}
+	for v := 1; v <= 18; v++ {
+		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, stmt := range splitStatements(string(body)) {
+			if err := conn.Exec(ctx, stmt); err != nil {
+				t.Fatalf("migration %d: %v", v, err)
+			}
+		}
+		if err := conn.Exec(ctx, `INSERT INTO obsdb_migrations (version, name) VALUES (?, ?)`, uint32(v), migrations[v]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	at := time.Now().UTC().Add(-time.Hour)
+	root := func(run string, trace byte, start time.Time, attrs map[string]any) obsdb.Span {
+		attrs["weft.run.id"] = run
+		attrs["gen_ai.operation.name"] = "invoke_agent"
+		return obsdb.Span{
+			TraceID: "0102030405060708090a0b0c0d0e0f4" + string(trace), SpanID: "0a0b0c0d0e0f08" + string(trace) + "0",
+			Name: "invoke_agent a", Kind: 1, Start: start, End: start.Add(time.Second), StatusCode: 1, Service: "svc",
+			Attrs: attrs, Resource: map[string]any{"service.name": "svc"},
+		}
+	}
+	parked := root("r_parked", '1', at, map[string]any{"weft.run.pending": int64(2)})
+	if err := (&DB{conn: conn}).Write(ctx, obsdb.Batch{Spans: []obsdb.Span{parked}}); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.Close()
+
+	db, err := Open(dsn)
+	if err != nil {
+		t.Fatalf("open a 0018 database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	resumer := root("r_resume", '2', at.Add(2*time.Second), map[string]any{
+		"weft.resumed_from": "r_parked", "weft.resume.calls": "c1=approved,c2=denied", "tenant": "acme",
+	})
+	if err := db.Write(ctx, obsdb.Batch{Spans: []obsdb.Span{resumer}}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := db.Run(ctx, "r_parked")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.ResumedBy != "r_resume" || p.ResumedFrom != "" || p.Pending != 2 {
+		t.Errorf("parked after 0019: resumed_by %q, resumed_from %q, pending %d; want r_resume, none, 2", p.ResumedBy, p.ResumedFrom, p.Pending)
+	}
+	r, err := db.Run(ctx, "r_resume")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.ResumedFrom != "r_parked" || r.ResumedBy != "" {
+		t.Errorf("resume after 0019: resumed_from %q, resumed_by %q; want r_parked, none", r.ResumedFrom, r.ResumedBy)
+	}
+	if len(r.Meta) != 1 || r.Meta["tenant"] != "acme" {
+		t.Errorf("resume's meta after 0019 = %v, want only the caller's {tenant: acme} (the link keys are contract)", r.Meta)
+	}
+}

@@ -1067,7 +1067,11 @@ func (s *Session) runTurn(persist, ctx context.Context, item workItem, callerOpt
 		var parkedRun, actor string
 		s.locked(func() {
 			decisions = s.danglingDecisionsLocked(t.resume)
-			if t.resume {
+			// Any turn the recorded decisions ride links its boundary —
+			// a resume turn, or a plain Send after a Decide that did not
+			// auto-resume: core stamps weft.resume.calls either way, so
+			// the link and the actor come with it (U13.1-fix).
+			if len(decisions) > 0 {
 				parkedRun, actor = s.resumeLinkLocked()
 			}
 		})
@@ -1085,8 +1089,8 @@ func (s *Session) runTurn(persist, ctx context.Context, item workItem, callerOpt
 		// after the caller's options and before the transcript — a later
 		// core.Metadata wins (S1.1), so the session's keys win over a
 		// caller's colliding thread.RunOptions(core.Metadata(...)).
-		// A resume names the run that parked its calls and who decided
-		// them (UX-E-17): core.ResumeOf stamps weft.resumed_from, the
+		// A run applying decisions names the run that parked its calls
+		// and who decided them (UX-E-17): core.ResumeOf stamps weft.resumed_from, the
 		// actor rides as session-owned metadata ("" = none).
 		md := s.runMetadata(t)
 		md[approvalActorKey] = actor

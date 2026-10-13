@@ -13,7 +13,8 @@ import (
 // and the parked run's resumed_by names it — whichever of the two runs
 // a store ingests first, on the single-run read and the list alike. A
 // resumer whose parked run is not stored leaves no row behind for it;
-// two resumers of one parked run read the larger id. The denied call's
+// several resumers of one parked run read the latest by start time
+// (a tie: the larger id). The denied call's
 // zero-length execute_tool span (weft.tool.denied) is not counted
 // beside its root's weft.run.denied; weft.resume.calls and the denied
 // span's marks are contract, never meta; weft.approval.actor is meta.
@@ -124,9 +125,16 @@ func resumeLink(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			check(t, db)
 		})
 		t.Run("TwoResumers", func(t *testing.T) {
+			// The latest resumer by start time wins, never the larger
+			// id: the ids here sort against their start order (a core
+			// run id is random hex; a thread turn's -t10 sorts before
+			// -t9). rl_a_late started last, rl_z_early first.
 			db := open(t)
-			again := root("rl_resume_b", '3', map[string]any{"weft.resumed_from": "rl_parked"})
-			for _, b := range []obsdb.Batch{parked, resumer, {Spans: []obsdb.Span{again}}} {
+			late := root("rl_a_late", '3', map[string]any{"weft.resumed_from": "rl_parked"})
+			late.Start, late.End = old.Add(-time.Second/2), old.Add(time.Second)
+			early := root("rl_z_early", '4', map[string]any{"weft.resumed_from": "rl_parked"})
+			early.Start = old.Add(-2 * time.Second)
+			for _, b := range []obsdb.Batch{parked, {Spans: []obsdb.Span{late}}, resumer, {Spans: []obsdb.Span{early}}} {
 				if err := db.Write(ctx(), b); err != nil {
 					t.Fatal(err)
 				}
@@ -135,8 +143,17 @@ func resumeLink(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if p.ResumedBy != "rl_resume_b" {
-				t.Errorf("parked run resumed twice: resumed_by %q, want the larger id rl_resume_b", p.ResumedBy)
+			if p.ResumedBy != "rl_a_late" {
+				t.Errorf("parked run resumed three times: resumed_by %q, want the latest started rl_a_late", p.ResumedBy)
+			}
+			page, err := db.Runs(ctx(), obsdb.RunQuery{Limit: 50})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, row := range page.Runs {
+				if row.ID == "rl_parked" && row.ResumedBy != "rl_a_late" {
+					t.Errorf("list: parked resumed_by %q, want rl_a_late", row.ResumedBy)
+				}
 			}
 		})
 	}

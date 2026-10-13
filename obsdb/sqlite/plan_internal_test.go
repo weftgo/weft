@@ -216,3 +216,18 @@ func TestTracesWindowUsesSpansStart(t *testing.T) {
 		t.Errorf("unwindowed count plan = %s; the pin says one scan of the primary key — update the doc above", p)
 	}
 }
+
+// TestResumedByUsesItsIndex (U13.1-fix): the run row's resumed_by is a
+// correlated lookup per row read — the latest resumer by start time —
+// planned on runs_resumed_from (0018) by its equality, never a scan of
+// runs per listed row. The few resumers the equality finds are sorted.
+func TestResumedByUsesItsIndex(t *testing.T) {
+	d := planDB(t)
+	plan := queryPlan(t, d, `SELECT run_id, `+resumedByColumn+` FROM runs WHERE run_id = ?`, "r_1")
+	if !usesIndex(plan, "runs_resumed_from") {
+		t.Errorf("resumed_by lookup does not use runs_resumed_from: %s", plan)
+	}
+	if strings.Contains(plan, "SCAN rb") {
+		t.Errorf("resumed_by lookup scans runs: %s", plan)
+	}
+}

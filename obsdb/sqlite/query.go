@@ -35,12 +35,17 @@ const promptPreviewColumn = `COALESCE((SELECT substr(run_search.prompt, 1, 200) 
 	WHERE run_search.run_id = runs.run_id), '')`
 
 // resumedByColumn is the run row's resumed_by (contract §6, U13.1):
-// the largest run id whose resumed_from names this run — derived at
-// read time, so a resumer stored before or after the parked run links
-// it alike. The partial index runs_resumed_from (0018) serves it; its
-// condition is stated beside the equality, as sqlite needs.
-const resumedByColumn = `COALESCE((SELECT MAX(rb.run_id) FROM runs AS rb
-	WHERE rb.resumed_from = runs.run_id AND rb.resumed_from <> ''), '')`
+// the latest run by start time whose resumed_from names this run (a
+// tie on started_ns goes to the larger id) — derived at read time, so a
+// resumer stored before or after the parked run links it alike. Never
+// the largest id alone: a core run id is random hex and a thread turn's
+// <session>-t10 sorts before -t9. The partial index runs_resumed_from
+// (0018) serves the equality — its condition is stated beside it, as
+// sqlite needs — and the handful of resumers it finds are sorted
+// (plan_internal_test.go pins the plan).
+const resumedByColumn = `COALESCE((SELECT rb.run_id FROM runs AS rb
+	WHERE rb.resumed_from = runs.run_id AND rb.resumed_from <> ''
+	ORDER BY rb.started_ns DESC, rb.run_id DESC LIMIT 1), '')`
 
 // statusExpr is the four-row table in SQL: it must agree with
 // obsdb.DeriveStatus, whose test pins the boundaries — succeeded on a

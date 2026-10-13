@@ -942,7 +942,10 @@ func TestSessionsDecisionIsTheAppsDecision(t *testing.T) {
 	own := parkAndDecide(t, func(s *thread.Session, _ *thread.Turn, callID string) *thread.Turn {
 		// The same declared decider as the runtime's command (its
 		// Actor): the resume's weft.approval.actor (UX-E-17) is the
-		// decider's, so the two paths stamp the same metadata.
+		// decider's, so the two paths stamp the same metadata. "devtools"
+		// here only aligns the equality check below; an app's own Decide
+		// names its own decider (an opaque id: the actor survives
+		// content-off).
 		d := thread.Approve(callID)
 		d.Who = "devtools"
 		turn, err := s.Decide(ctx, d)

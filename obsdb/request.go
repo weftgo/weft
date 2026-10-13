@@ -125,13 +125,13 @@ const (
 )
 
 // MetadataCapReason is the metadata_cap hole's reason with the count:
-// "N metadata pairs dropped (limit 64 keys / 1 KiB values)".
+// "N metadata pairs dropped (limit 64 keys, 128-byte keys, 1 KiB values)".
 func MetadataCapReason(n int64) string {
 	pairs := "pairs"
 	if n == 1 {
 		pairs = "pair"
 	}
-	return fmt.Sprintf("%d metadata %s dropped (limit 64 keys / 1 KiB values): no span or record of the run carries them", n, pairs)
+	return fmt.Sprintf("%d metadata %s dropped (limit 64 keys, 128-byte keys, 1 KiB values): no span or record of the run carries them", n, pairs)
 }
 
 // queueFix is the knob every gap's fix names (UX-A-41): the destination

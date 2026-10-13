@@ -34,6 +34,8 @@ configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
 
 const rOK = golden<RunsPage>("runs").runs.find((r) => r.id === "r_ok")!
+/** stream_idle as an attempt row says it (lib/error-kind attemptError). */
+const IDLE = "no bytes from the provider within the adapter's idle timeout"
 
 const meta = (capabilities: string[]) => ({
   ...golden<Record<string, unknown>>("meta"),
@@ -244,7 +246,7 @@ describe("the step story's attempts and timing (A4.2)", () => {
     ).toEqual(["glm-a", "glm-b", "glm-a", "glm-b"])
     expect(
       rows.map((r) => r.querySelector("[data-attempt-outcome]")?.textContent)
-    ).toEqual(["stream_idle", "stream_idle", "stream_idle", "ok"])
+    ).toEqual([IDLE, IDLE, IDLE, "ok"])
     // The fallback layer's attempts (weft.attempt.layer) say so, in
     // lib/attempts' words — the panel's Request tab says the same.
     expect(rows.map((r) => r.querySelector("span")?.textContent)).toEqual([
@@ -253,6 +255,10 @@ describe("the step story's attempts and timing (A4.2)", () => {
       "attempt 3",
       "attempt 4 · fallback",
     ])
+    // The phrase, the raw error.type in the hover (UX-S2-15).
+    expect(
+      rows[0].querySelector<HTMLElement>("[data-attempt-error]")?.title
+    ).toBe("error.type stream_idle")
     // The header now reads the step route: the same words, the same
     // timing.
     expect(card().querySelector("[data-attempt-line]")?.textContent).toBe(
@@ -382,12 +388,7 @@ describe("the step story's attempts and timing (A4.2)", () => {
     const outcomes = Array.from(
       document.querySelectorAll("[data-attempts-pane] [data-attempt-outcome]")
     ).map((o) => o.textContent)
-    expect(outcomes).toEqual([
-      "stream_idle",
-      "stream_idle",
-      "stream_idle",
-      "ok",
-    ])
+    expect(outcomes).toEqual([IDLE, IDLE, IDLE, "ok"])
   })
 
   it("a step the run failed in says its attempts and that none answered", async () => {

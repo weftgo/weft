@@ -51,6 +51,7 @@ import {
   compareLink,
   experimentLink,
   runLink,
+  runsLink,
   sessionLink,
   traceLink,
 } from "@/lib/links"
@@ -615,18 +616,28 @@ export function RunHeader({
             {doc.turn ? ` · turn ${doc.turn}` : ""}
           </Link>
         ) : null}
+        {/* The public id and the metadata pairs filter the runs list
+            on click (UX-S4-14): the list's own URL chips. */}
         {doc.public_id ? (
-          <span
-            className="font-mono"
-            title="the public id (the browser-safe handle)"
+          <Link
+            {...runsLink({ public_id: doc.public_id })}
+            className="font-mono hover:text-foreground hover:underline"
+            title="the public id (the browser-safe handle) — list its runs"
+            data-meta-chip="public_id"
           >
             {doc.public_id}
-          </span>
+          </Link>
         ) : null}
         {Object.entries(doc.meta).map(([k, v]) => (
-          <span key={k} className="font-mono" title={`metadata ${k}`}>
+          <Link
+            key={k}
+            {...runsLink({ tag: `${k}=${v}` })}
+            className="font-mono hover:text-foreground hover:underline"
+            title={`metadata ${k} — list the runs with ${k}=${v}`}
+            data-meta-chip={k}
+          >
             {k}={v}
-          </span>
+          </Link>
         ))}
         {doc.trace_id ? (
           <Link

@@ -14,6 +14,7 @@
 
 import type { Message, Part, RunCompaction, Transcript } from "./api"
 import { tokens } from "./format"
+import { isRepaired, REPAIRED } from "./error-kind"
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`
 
@@ -144,7 +145,9 @@ export function messageLine(m: Message, max = 160): string {
         case "tool_call":
           return `${p.name}(${typeof p.args === "string" ? p.args : JSON.stringify(p.args ?? null)})`
         case "tool_result":
-          return `${p.name ? `${p.name} → ` : ""}${p.content}`
+          // Repair's synthesised result says so first (UX-S1-08): the
+          // line's clip cannot cut the mark.
+          return `${p.name ? `${p.name} → ` : ""}${isRepaired(p.content) ? `[${REPAIRED.word}] ` : ""}${p.content}`
         case "file":
           return `[file ${p.media_type}]`
         default:

@@ -192,3 +192,27 @@ func TestSessionListUsesTheSessionIndex(t *testing.T) {
 		t.Errorf("ResolvePublicID plan = %s, want runs_public", p)
 	}
 }
+
+// TestTracesWindowUsesSpansStart (U32.2, UX-E-64): the traces list's
+// Since window — the count and the page alike — narrows on spans_start
+// (migration 0019), a SEARCH over the range, each candidate trace's
+// group then read on the primary key; without a window the list is one
+// scan of the primary key's order, pinned so a change is seen.
+func TestTracesWindowUsesSpansStart(t *testing.T) {
+	d := planDB(t)
+	group, having, args := traceGroup(obsdb.TraceQuery{Since: time.Now().Add(-time.Hour)})
+	for _, q := range []string{
+		`SELECT COUNT(*) FROM (` + group + having + `)`,
+		group + having + ` ORDER BY MIN(start_ns) DESC, trace_id DESC LIMIT 50`,
+	} {
+		p := queryPlan(t, d, q, args...)
+		if !strings.Contains(p, "SEARCH spans USING COVERING INDEX spans_start (start_ns>?)") ||
+			!strings.Contains(p, "SEARCH spans USING PRIMARY KEY (trace_id=?)") {
+			t.Errorf("plan of %q = %s, want a SEARCH on spans_start for the window and the groups on the primary key", q, p)
+		}
+	}
+	group, having, args = traceGroup(obsdb.TraceQuery{})
+	if p := queryPlan(t, d, `SELECT COUNT(*) FROM (`+group+having+`)`, args...); strings.Contains(p, "spans_start") {
+		t.Errorf("unwindowed count plan = %s; the pin says one scan of the primary key — update the doc above", p)
+	}
+}

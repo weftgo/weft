@@ -630,6 +630,40 @@ resolves its hash. The contract fixtures are record-driven and carry no
 manifest; the obsdbtest `Manifests` case and Studio's
 `TestRunResolvesItsRegisteredManifest` are its proof.
 
+**What the record attributes to user code today** (UX-S1-09). The
+seams where an app's own code runs — `PrepareStep`, `WrapModel`,
+`WrapTools`, `Tap`, `OnMessages`, `OnRunEnd`, option composition — are
+not recorded as hooks; only their effects are. What a reader can
+attribute:
+
+- `PrepareStep`: the `request`/`prompt`/`tools` records are written
+  after it (§4), so a step whose `weft.system.hash` or catalog differs
+  from the run's instructions (`weft.instructions.hash`) or the step
+  before reads as rewritten — Studio's Request pane chips "changed by
+  PrepareStep" / "catalog changed at this step", and a rewritten message
+  view is a `messages` record with `view` (the "compacted" mark). Which
+  `PrepareStep` did it, and why, is not recorded.
+- `WrapModel`: what middleware reports through
+  `core.ReportFromContext` — `attempt` spans with `weft.attempt.layer`
+  (`mw.Retry`, `mw.Fallback`; §3); a middleware that reports nothing is
+  invisible apart from the `chat` span's timing.
+- `WrapTools`: the `execute_tool` span's outcome — `error.type`,
+  `weft.panic.layer` `middleware` for a panic inside the chain,
+  `DENIED` from a policy; the chain itself is not named.
+- `Tap`, `OnMessages`, a failed record or report: `weft.tap.panics` on
+  the `invoke_agent` span (§3), the count of contained panics, never
+  which observer.
+- `OnRunEnd`: nothing (it runs after the span ended; `Agent.TapPanics`
+  alone counts its panics).
+- Option composition: the effective configuration's hashes
+  (`weft.manifest.hash`, `weft.instructions.hash`) and a run option's
+  `weft.override.*` (§3); which option produced a value is not knowable
+  from the record.
+
+Naming the hook on the request record (`request.body.prepared[]`) is
+U25's, and the middleware onion on the step U23's; until then the record
+says what changed, not who changed it.
+
 ## 7. Badges
 
 Every place a record is missing, cut or derived is shown with a badge
@@ -644,7 +678,7 @@ from ADR 0028 §11's closed table (`obsdb.Hole`; the words live in
 | `max_tokens` | `stop_reason` is `max_tokens` |
 | `stripped` | an event record is marked `stripped` or `none` |
 | `truncated` | an event record carries `weft.content.truncated_bytes` > 0 |
-| `truncated`, cause `metadata_cap` | the run's `invoke_agent` span carries `weft.metadata.dropped` = N > 0 (`Problems.MetadataDropped`): "N metadata pairs dropped (limit 64 keys / 1 KiB values)" (`obsdb.MetadataCapReason`) — the core dropped them whole, never cut; the fix names the limits of the Metadata run option |
+| `truncated`, cause `metadata_cap` | the run's `invoke_agent` span carries `weft.metadata.dropped` = N > 0 (`Problems.MetadataDropped`): "N metadata pairs dropped (limit 64 keys, 128-byte keys, 1 KiB values)" (`obsdb.MetadataCapReason`) — the core dropped them whole, never cut; the fix names the limits of the Metadata run option |
 | `gap` | the event counter has a hole below its high-water mark |
 | `gap`, cause `events_lost` | a weft run whose `invoke_agent` span is stored and carries `weft.run.events` = M > 0, with fewer than M events stored (`obsdb.EventsLostHole`, read through `TailLostHole`; and `LostRecordsHole` when no record at all was stored): "N of M events were lost" (`obsdb.EventsLostReason`), with how many of them are the run's tail — "the last K events were lost": positions above the highest one stored, which the counter-hole rule above cannot see — and the fix naming the knob (`otel.QueueSize`, `otel.Blocking()` in dev, the app's "destination queue full" WARN, `weft doctor`). Any status: a failed run's lost events are lost too. Raised once the run stopped settling (§6). Studio folds the counter-hole gap into this one badge's words |
 | `gap`, cause `tail_lost` | a weft run whose root carries no `weft.run.events` (written before U5) — its `invoke_agent` span stored and reading `succeeded`, with events stored and no `run_finish` (`obsdb.TailLostHole`'s fallback): "the run's root span ended but its run_finish record never arrived: a destination dropped the record tail, so the last steps' records are missing" — raised once the run stopped settling (§6), so a root stored ahead of its records is never called lost. Studio badges the step whose `step_finish` was dropped with the same gap (its status `ok`, not `error`) and a counted step with no event with the step gap |

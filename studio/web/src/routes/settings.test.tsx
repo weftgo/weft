@@ -22,7 +22,7 @@ import {
   tabTokenActive,
 } from "@/lib/api"
 import type { PricingSettings } from "@/lib/api"
-import { editsKey } from "@/lib/settings"
+import { editsKey, LOGS_BRIDGE } from "@/lib/settings"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { FakeStudio, apiError, golden } from "@/test/fake-studio"
@@ -237,6 +237,13 @@ describe("the settings page renders every section from the goldens", () => {
       section("retention").querySelector("[data-retention]")!.textContent
     ).toContain("720h0m0s")
     expect(section("content").textContent).toContain("no run stored yet")
+  })
+
+  it("says how app logs reach a run (UX-S1-10): the LoggerProvider, the slog bridge, CallTool", async () => {
+    await openSettings()
+    const line = document.querySelector("[data-logs-bridge]")!
+    expect(line.textContent).toBe(LOGS_BRIDGE)
+    expect(line.textContent).toContain("otel.Slog() arrives in 0.17.0")
   })
 
   it("the sidebar links it and the palette's entry lands on it", async () => {

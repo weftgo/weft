@@ -27,6 +27,7 @@ import {
 } from "@/lib/attempts"
 import type { FoldedStep } from "@/lib/events"
 import type { HoleMark } from "@/lib/honesty"
+import { attemptError } from "@/lib/error-kind"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import type { RunRequests } from "@/components/studio/step-request"
 import { useCapabilities } from "@/hooks/use-capabilities"
@@ -119,8 +120,19 @@ export function stepAttemptsHole(
 
 function outcomeOf(a: StepAttempt) {
   if (a.outcome === "ok") return <span className="text-ev-result">ok</span>
-  if (a.outcome === "error")
-    return <span className="text-ev-error">{a.error_type || "error"}</span>
+  if (a.outcome === "error") {
+    // The phrase, the raw error.type in the hover (UX-S2-15).
+    const e = attemptError(a.error_type)
+    return (
+      <span
+        className="text-ev-error"
+        title={e.title}
+        data-attempt-error={a.error_type}
+      >
+        {e.word}
+      </span>
+    )
+  }
   return <span className="text-faint">outcome not reported</span>
 }
 

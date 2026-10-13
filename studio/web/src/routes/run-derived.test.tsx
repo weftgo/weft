@@ -165,6 +165,17 @@ describe("a derived run's page (the Done line)", () => {
     expect(call.querySelector("[data-hole='derived']")).toBeTruthy()
     expect(document.querySelector("[data-step='1'] [data-call]")).toBeNull()
 
+    // The numbering is the run page's (UX-S4-04): a step's label is its
+    // ordinal from 0, as a recorded run's story cards say "step 0" —
+    // "2 steps" above reads step 0 and step 1, never 1 and 2.
+    expect(
+      [
+        ...document.querySelectorAll<HTMLElement>(
+          "[data-derived-story] [data-step]"
+        ),
+      ].map((c) => c.getAttribute("aria-label"))
+    ).toEqual(["step 0", "step 1"])
+
     // Nothing replays a derived run: no verb, no drawer — the refusal
     // is said where the verbs would be, in the badge's words.
     expect(document.querySelector("[data-replay-verb]")).toBeNull()

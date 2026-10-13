@@ -4,6 +4,8 @@ import {
   contradicts,
   endCard,
   endedWithoutFinish,
+  loopRepeats,
+  repeatWords,
   LAST_STEP_LABEL,
   STOP_REASON_LABEL,
   stopChip,
@@ -193,5 +195,28 @@ describe("the helpers", () => {
     expect(endedWithoutFinish(false, undefined, "failed")).toBe(false)
     expect(endedWithoutFinish(true, undefined)).toBe(false)
     expect(endedWithoutFinish(false, "loop_detected")).toBe(false)
+  })
+})
+
+describe("loopRepeats (UX-S1-07)", () => {
+  it("is the N steps ending at the one core failed at, N the error's count", () => {
+    const l = loopRepeats({ stopped_by: "loop_detected", steps: 3, err: LOOP })
+    expect(l).toEqual({ first: 0, n: 3, steps: [0, 1, 2] })
+    expect(repeatWords(l!).text).toBe("repeats step 0")
+    // No step in the error: the run's last step.
+    expect(
+      loopRepeats({
+        stopped_by: "loop_detected",
+        steps: 5,
+        err: "weft: the model repeated the same tool calls too many times: 2 identical steps in a row",
+      })
+    ).toEqual({ first: 3, n: 2, steps: [3, 4] })
+  })
+
+  it("is null for another stop, or an error that names no count", () => {
+    expect(
+      loopRepeats({ stopped_by: "max_steps", steps: 3, err: MAX_STEPS })
+    ).toBeNull()
+    expect(loopRepeats({ stopped_by: "loop_detected", steps: 3 })).toBeNull()
   })
 })

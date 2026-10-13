@@ -630,20 +630,22 @@ func (d *DB) Trace(ctx context.Context, traceID string) (_ []obsdb.Span, err err
 	return d.querySpans(ctx, `trace_id = ? ORDER BY start_ns, span_id`, traceID)
 }
 
-// Traces groups the spans table by trace id (obsdb.DB.Traces): one
-// scan of the primary key's order, the filters in HAVING over the
-// group's aggregates — a trace's Start is MIN(start_ns), never one
-// span's — and three keyed reads for the page's roots, services and
-// run ids. The scope filter reads weft.public_id off every span's
-// attrs, the attribute /api/traces/{id}'s scope check reads.
+// Traces groups the spans table by trace id (obsdb.DB.Traces): the
+// filters in HAVING over the group's aggregates — a trace's Start is
+// MIN(start_ns), never one span's — and three keyed reads for the
+// page's roots, services and run ids. With no window it is one scan of
+// the primary key's order; a Since window narrows the groups first to
+// the traces with a span at or after it (spans_start, migration 0019;
+// a necessary condition of MIN(start_ns) >= since, so HAVING still
+// decides — obsdb/clickhouse's traceInner narrows the same way). The
+// scope filter reads weft.public_id off every span's attrs, the
+// attribute /api/traces/{id}'s scope check reads.
 func (d *DB) Traces(ctx context.Context, q obsdb.TraceQuery) (_ obsdb.TracePage, err error) {
 	if err := d.checkOpen(); err != nil {
 		return obsdb.TracePage{}, err
 	}
 	defer d.closedErr(&err)
-	having, args := traceHaving(q)
-	const group = `SELECT trace_id, MIN(start_ns), MAX(end_ns), COUNT(*), MAX(status_code = 2)
-		FROM spans GROUP BY trace_id HAVING `
+	group, having, args := traceGroup(q)
 	var total int
 	if err := d.reads.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM (`+group+having+`)`, args...).Scan(&total); err != nil {
@@ -686,11 +688,18 @@ func (d *DB) Traces(ctx context.Context, q obsdb.TraceQuery) (_ obsdb.TracePage,
 	return page, nil
 }
 
-// traceHaving builds Traces' HAVING fragment over one trace's group of
-// spans, with its bind arguments in text order.
-func traceHaving(q obsdb.TraceQuery) (string, []any) {
+// traceGroup builds Traces' grouped select up to its HAVING keyword
+// and the HAVING fragment over one trace's group of spans, with their
+// bind arguments in text order.
+func traceGroup(q obsdb.TraceQuery) (group, having string, args []any) {
+	group = `SELECT trace_id, MIN(start_ns), MAX(end_ns), COUNT(*), MAX(status_code = 2)
+		FROM spans `
+	if !q.Since.IsZero() {
+		group += `WHERE trace_id IN (SELECT trace_id FROM spans WHERE start_ns >= ?) `
+		args = append(args, q.Since.UnixNano())
+	}
+	group += `GROUP BY trace_id HAVING `
 	conds := []string{"1=1"}
-	var args []any
 	if q.Service != "" {
 		conds = append(conds, "SUM(service = ?) > 0")
 		args = append(args, q.Service)
@@ -707,7 +716,7 @@ func traceHaving(q obsdb.TraceQuery) (string, []any) {
 		conds = append(conds, "MIN(start_ns) < ?")
 		args = append(args, q.Until.UnixNano())
 	}
-	return strings.Join(conds, " AND "), args
+	return group, strings.Join(conds, " AND "), args
 }
 
 // queryTraceRows reads the grouped columns of Traces' select.

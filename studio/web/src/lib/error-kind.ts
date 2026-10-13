@@ -72,7 +72,11 @@ export function kindChip(
 ): { text: string; title: string; tone: KindWords["tone"] } | null {
   const k = errorKind(errorType)
   return k && errorType !== CANCELLED
-    ? { text: `[${k.word}]`, title: `${k.hint} — error_type ${errorType}`, tone: k.tone }
+    ? {
+        text: `[${k.word}]`,
+        title: `${k.hint} — error_type ${errorType}`,
+        tone: k.tone,
+      }
     : null
 }
 
@@ -242,6 +246,58 @@ export function toolFailure(
   }
   return { word: errorType, hint: "the ToolError code " + errorType }
 }
+
+// A model attempt's error.type (the attempt span's; UX-S2-15) in
+// words: core's run-level tokens (core/observe.go's errorTypes) as an
+// attempt reads them, the context errors by their names. stream_idle's
+// N is the adapter's idle timeout (openai/anthropic IdleTimeout): the
+// attempt span does not carry it, so the phrase names the timeout, not
+// a number.
+const ATTEMPT_WORDS: Record<string, string | undefined> = {
+  stream_idle: "no bytes from the provider within the adapter's idle timeout",
+  model_requests_denied: "WEFT_MODEL_REQUESTS=deny: the kill switch is on",
+  model_error: "provider error (see the status)",
+  "context.Canceled": CANCELLED,
+  "context.DeadlineExceeded": "deadline",
+  model_contract: "the adapter broke the stream contract",
+}
+
+/** attemptError words a failed attempt's error.type: the phrase, and
+ * the raw type for the hover; an unknown type is printed as itself with
+ * "no description". */
+export function attemptError(errorType?: string): {
+  word: string
+  title: string
+} {
+  if (!errorType)
+    return {
+      word: "error",
+      title: "the attempt failed; no error.type recorded",
+    }
+  const w = ATTEMPT_WORDS[errorType]
+  return w
+    ? { word: w, title: `error.type ${errorType}` }
+    : { word: errorType, title: `error.type ${errorType} — no description` }
+}
+
+/** The text core's Repair writes for a call whose result never
+ * arrived (core/repair.go's interruptedResult, pinned by
+ * error-kind.test.ts against the Go source): a transcript fed back in —
+ * an interrupted turn, a resumed session — gets it per orphaned call
+ * (UX-S1-08). No tool ran. The record carries no other signal (a
+ * weft.messages.repaired attribute is not recorded), so the text is
+ * matched whole. */
+export const REPAIRED_RESULT = "no result recorded: the call was interrupted"
+
+/** A Repair-synthesised result's words: a tool result row's pill and
+ * a request message line read them. */
+export const REPAIRED = {
+  word: "synthesised by Repair",
+  hint: "no tool ran: weft.Repair wrote this result for a call whose result never arrived (matched on its text)",
+}
+
+/** isRepaired: the result text is Repair's own. */
+export const isRepaired = (content: unknown) => content === REPAIRED_RESULT
 
 /** A run's tool facts by call id (toolFactsOf). */
 export type ToolFactsMap = Map<string, ToolFacts & { error_type: string }>

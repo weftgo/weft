@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from "vitest"
 import { stepQuery } from "@/lib/api"
 import type { EventsPage, RunDoc, StepDoc, WireEvent } from "@/lib/api"
 import { fold } from "@/lib/events"
-import { toolFactsOf } from "@/lib/error-kind"
+import { REPAIRED, REPAIRED_RESULT, toolFactsOf } from "@/lib/error-kind"
 import { resultCapReason } from "@/lib/honesty"
 import { StepList } from "@/components/studio/step-list"
 import { renderWithRouter } from "@/test/render"
@@ -554,5 +554,113 @@ describe("StepList's subagent child rows (A10)", () => {
     } finally {
       errors.mockRestore()
     }
+  })
+})
+
+describe("the loop and Repair marks (UX-S1-07, UX-S1-08)", () => {
+  /** One step calling poll({}) and its result. */
+  const step = (i: number, content = "pending"): WireEvent[] => [
+    { type: "step_start", run_id: "r_l", index: i },
+    {
+      type: "tool_start",
+      run_id: "r_l",
+      seq: 2 * i + 1,
+      call_id: `c${i}`,
+      name: "poll",
+      args: { job: "j1" },
+    },
+    {
+      type: "tool_finish",
+      run_id: "r_l",
+      seq: 2 * i + 2,
+      call_id: `c${i}`,
+      name: "poll",
+      content,
+      is_error: content !== "pending",
+    },
+    {
+      type: "step_finish",
+      run_id: "r_l",
+      index: i,
+      reason: "tool_calls",
+      usage: { input_tokens: 1, output_tokens: 1 },
+    },
+  ]
+
+  it("a loop_detected run's repeated steps link the first of the detector's set", async () => {
+    // DetectLoops(3) failing at step 3: the set is steps 1–3, the count
+    // and the step core's error names — step 0 is outside it, whatever
+    // its args (the detector's streak, not a re-comparison).
+    const events: WireEvent[] = [
+      { type: "run_start", id: "r_l", model: { provider: "p", name: "m" } },
+      ...step(0),
+      ...step(1),
+      ...step(2),
+      ...step(3),
+    ]
+    const doc = {
+      ...subDoc,
+      id: "r_l",
+      children: [],
+      status: "failed",
+      steps: 4,
+      stopped_by: "loop_detected",
+      err: "weft: run failed at step 3: weft: the model repeated the same tool calls too many times: 3 identical steps in a row",
+    } as RunDoc
+    await renderWithRouter(
+      <StepList events={events} folded={fold(events)} doc={doc} />
+    )
+    const chip = (n: number) =>
+      document.querySelector<HTMLAnchorElement>(
+        `[data-step="${n}"] [data-loop-repeat]`
+      )
+    expect(chip(0)).toBeNull()
+    expect(chip(1)).toBeNull() // the first of the set: what the others repeat
+    for (const n of [2, 3]) {
+      expect(chip(n)!.textContent).toBe("repeats step 1")
+      expect(chip(n)!.getAttribute("href")).toBe("/runs/r_l?step=1&view=story")
+      expect(chip(n)!.title).toContain("3 identical steps in a row")
+    }
+  })
+
+  it("marks nothing on a run that did not stop on the detector", async () => {
+    const events: WireEvent[] = [
+      { type: "run_start", id: "r_l", model: { provider: "p", name: "m" } },
+      ...step(0),
+      ...step(1),
+    ]
+    const doc = {
+      ...subDoc,
+      id: "r_l",
+      children: [],
+      status: "failed",
+      steps: 2,
+      stopped_by: "max_steps",
+    } as RunDoc
+    await renderWithRouter(
+      <StepList events={events} folded={fold(events)} doc={doc} />
+    )
+    expect(document.querySelector("[data-loop-repeat]")).toBeNull()
+  })
+
+  it("badges Repair's synthesised result, not as the tool's error", async () => {
+    const events: WireEvent[] = [
+      { type: "run_start", id: "r_l", model: { provider: "p", name: "m" } },
+      ...step(0, REPAIRED_RESULT),
+    ]
+    const doc = {
+      ...subDoc,
+      id: "r_l",
+      children: [],
+      status: "succeeded",
+    } as RunDoc
+    await renderWithRouter(
+      <StepList events={events} folded={fold(events)} doc={doc} />
+    )
+    const pill = document.querySelector<HTMLElement>(
+      '[data-call="c0"] [data-tool-pill="repaired"]'
+    )!
+    expect(pill.textContent).toBe(REPAIRED.word)
+    expect(pill.title).toBe(REPAIRED.hint)
   })
 })

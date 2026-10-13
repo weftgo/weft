@@ -180,10 +180,13 @@ func ExampleAudit() {
 func Example_rateLimitMiddleware() {
 	const interval = 20 * time.Millisecond
 	var mu sync.Mutex
-	nextAt := time.Now()
+	var nextAt time.Time // the first call's slot is the moment it arrives
 	reserve := func() time.Duration {
 		mu.Lock()
 		defer mu.Unlock()
+		if nextAt.IsZero() {
+			nextAt = time.Now()
+		}
 		wait := time.Until(nextAt)
 		if wait < 0 {
 			wait = 0

@@ -13,6 +13,7 @@
 // scrolls the virtualiser to its card; and a live run's appends follow
 // the end only while the reader is at it.
 import { useQuery } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { shared } from "@/lib/virtual"
 import { ChevronRight, Play } from "lucide-react"
@@ -28,7 +29,7 @@ import {
 } from "react"
 
 import { stepQuery } from "@/lib/api"
-import { toolFailure } from "@/lib/error-kind"
+import { isRepaired, REPAIRED, toolFailure } from "@/lib/error-kind"
 import type { ToolFactsMap } from "@/lib/error-kind"
 import { CacheHint, Cost, useCostCapable } from "@/components/studio/cost"
 import { AppSteer, ParkedCalls } from "@/components/studio/parked-calls"
@@ -51,9 +52,12 @@ import { isLive, mergeHoles } from "@/lib/honesty"
 import {
   endCard,
   endedWithoutFinish,
+  loopRepeats,
   NO_RUN_FINISH,
+  repeatWords,
   stopChip,
 } from "@/lib/stopped-by"
+import type { LoopRepeats } from "@/lib/stopped-by"
 import type { HoleMark } from "@/lib/honesty"
 import { tokens } from "@/lib/format"
 import { replayBounds } from "@/lib/experiment-body"
@@ -84,6 +88,7 @@ import {
 import { userMessagesOf } from "@/lib/edits"
 import type { UserMessage } from "@/lib/edits"
 import type { RunRequests } from "@/components/studio/step-request"
+import { runLink } from "@/lib/links"
 import type { StepPane } from "@/lib/links"
 import { childOfStep, SubagentBlock } from "@/components/studio/subagent-block"
 import type { ChildRow } from "@/components/studio/subagent-block"
@@ -237,7 +242,13 @@ function CallPill({
   const fact = useContext(ToolFactsCtx)?.get(call.callId)
   if (!r) return null
   const coded = r.isError ? CODED.exec(r.content) : null
-  const f = r.isError && fact ? toolFailure(fact.error_type, fact) : null
+  // Repair's synthesised result is no tool's error (UX-S1-08).
+  const f =
+    r.isError && isRepaired(r.content)
+      ? REPAIRED
+      : r.isError && fact
+        ? toolFailure(fact.error_type, fact)
+        : null
   const cut = truncation(r.content)
   return (
     <span className="flex items-center gap-1.5">
@@ -248,7 +259,7 @@ function CallPill({
             f?.hint ??
             "error as data: the model saw this result and could recover"
           }
-          data-tool-pill={fact?.error_type}
+          data-tool-pill={f === REPAIRED ? "repaired" : fact?.error_type}
         >
           {f?.word ?? (coded ? coded[1] : "tool error")}
         </span>
@@ -621,9 +632,13 @@ function StepCard({
   prompt,
   scrollOnHighlight = true,
   pane,
+  loop,
 }: {
   step: FoldedStep
   runId: string
+  /** The run's DetectLoops set (loopRepeats): a repeat's card links
+   * the first of them (UX-S1-07). */
+  loop?: LoopRepeats | null
   /** The ?pane= a link opened on this (highlighted) step (A6.2). */
   pane?: StepPane
   /** The run document's holes: those that hold for every step badge
@@ -740,6 +755,16 @@ function StepCard({
     >
       <div className="flex flex-wrap items-center gap-2">
         <span className="eyebrow">step {step.index}</span>
+        {loop && loop.first < step.index && loop.steps.includes(step.index) ? (
+          <Link
+            {...runLink(runId, { step: loop.first, view: "story" })}
+            className="rounded-sm border border-status-bad/40 px-1.5 py-px font-mono text-[10px] text-status-bad hover:underline"
+            title={repeatWords(loop).title}
+            data-loop-repeat={loop.first}
+          >
+            {repeatWords(loop).text}
+          </Link>
+        ) : null}
         {stepOutcome(step, runStatus)}
         <StepHeadline
           step={step}
@@ -952,6 +977,7 @@ export function StepList({
   // fold's — a step_start without a reply counts there and would 400.
   const maxFrom = transcript ? replayBounds(transcript.batches).max : null
   const canFork = !doc.parent_run_id && Boolean(doc.session_id)
+  const loop = loopRepeats(doc)
   // The user messages the editor counts (plan F2): step 0's prompt on
   // its card, a steer by its words.
   const users = transcript ? userMessagesOf(transcript.batches) : []
@@ -1048,6 +1074,7 @@ export function StepList({
         replayAt={replayAt(step.index)}
         prompt={step.index === 0 ? prompt : undefined}
         scrollOnHighlight={!virtual}
+        loop={loop}
       />
       {step.steer ? (
         <SteerBlock

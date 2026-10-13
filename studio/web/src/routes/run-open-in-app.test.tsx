@@ -197,3 +197,22 @@ describe("the run page header", () => {
     await waitFor(() => expect(verb()?.tagName).toBe("BUTTON"))
   })
 })
+
+describe("the header's meta chips (UX-S4-14)", () => {
+  it("link the public id and each metadata pair to the runs list's filter", async () => {
+    serve(runDoc({ meta: { tenant: "acme", "weft.page_url": PAGE } }))
+    renderApp("/runs/r_9")
+    const chip = (k: string) =>
+      document.querySelector<HTMLAnchorElement>(`[data-meta-chip="${k}"]`)
+    await waitFor(() => expect(chip("tenant")).toBeTruthy())
+    expect(chip("tenant")!.getAttribute("href")).toBe("/runs?tag=tenant%3Dacme")
+    expect(chip("tenant")!.textContent).toBe("tenant=acme")
+    expect(chip("public_id")!.getAttribute("href")).toBe(
+      "/runs?public_id=pub_1"
+    )
+    // A weft.* pair is metadata too: its chip filters alike.
+    expect(chip("weft.page_url")!.getAttribute("href")).toBe(
+      `/runs?tag=${encodeURIComponent(`weft.page_url=${PAGE}`)}`
+    )
+  })
+})

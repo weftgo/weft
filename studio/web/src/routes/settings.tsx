@@ -39,6 +39,7 @@ import {
   loadEdits,
   maskToken,
   mcpCommand,
+  LOGS_BRIDGE,
   MCP_RECIPE_PATH,
   pricingFile,
   pricingFileText,
@@ -260,6 +261,12 @@ function StudioFacts({ meta }: { meta: Meta }) {
             : "walled: OTLP ingest needs its IngestToken",
         ],
         ["ingest health", <IngestHealth meta={meta} />],
+        [
+          "app logs",
+          <span data-logs-bridge className="text-muted-foreground">
+            {LOGS_BRIDGE}
+          </span>,
+        ],
       ]}
     />
   )
@@ -274,7 +281,8 @@ function IngestHealth({ meta }: { meta: Meta }) {
   if (dropped.length === 0)
     return (
       <span data-ingest-health="ok">
-        no app reported lost records (weft.records.dropped on its heartbeats)
+        no app reported lost records (weft.records.dropped on its heartbeats and
+        its runs&apos; run_start and run_finish records)
       </span>
     )
   return (

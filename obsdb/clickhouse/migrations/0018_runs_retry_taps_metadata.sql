@@ -2,8 +2,9 @@
 -- §3, §6; U32.1), one logical schema with obsdb/sqlite's 0017.
 --
 -- The core gains three span attributes — weft.tool.retry and
--- weft.tool.retry_budget on an execute_tool span (and its tool_finish
--- record) that returned RETRY, weft.tap.panics on an invoke_agent span
+-- weft.tool.retry_budget on an execute_tool span (the span only: the
+-- tool_finish record carries no mark, P7-fix) that returned RETRY,
+-- weft.tap.panics on an invoke_agent span
 -- whose observers panicked — all contract: both run views are restated
 -- with the whole tuple (the logs view's from 0015's, the traces view's
 -- from 0017's), pinned by TestMigrationContractTuple.

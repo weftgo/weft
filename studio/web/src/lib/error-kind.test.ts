@@ -1,7 +1,15 @@
+import { readFileSync } from "node:fs"
+import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 
+import { messageLine } from "@/lib/compaction"
+import type { Message } from "@/lib/api"
 import {
+  attemptError,
   errorKind,
+  isRepaired,
+  REPAIRED,
+  REPAIRED_RESULT,
   kindChip,
   problemBadges,
   statsStrip,
@@ -174,5 +182,62 @@ describe("U32.1's words", () => {
       "1 step",
       "⚠1 tap panics: 1 (observers, contained)",
     ])
+  })
+})
+
+describe("attempt error types (UX-S2-15)", () => {
+  it("words each known type, the raw type in the hover; an unknown one as itself", () => {
+    expect(attemptError("stream_idle")).toEqual({
+      word: "no bytes from the provider within the adapter's idle timeout",
+      title: "error.type stream_idle",
+    })
+    expect(attemptError("model_requests_denied").word).toBe(
+      "WEFT_MODEL_REQUESTS=deny: the kill switch is on"
+    )
+    expect(attemptError("model_error").word).toBe(
+      "provider error (see the status)"
+    )
+    expect(attemptError("context.Canceled").word).toBe("cancelled")
+    expect(attemptError("context.DeadlineExceeded").word).toBe("deadline")
+    expect(attemptError("model_contract").word).toBe(
+      "the adapter broke the stream contract"
+    )
+    expect(attemptError("rate_limited")).toEqual({
+      word: "rate_limited",
+      title: "error.type rate_limited — no description",
+    })
+    expect(attemptError(undefined).word).toBe("error")
+  })
+})
+
+describe("Repair's synthesised result (UX-S1-08)", () => {
+  it("is core's constant, read from the Go source", () => {
+    const src = readFileSync(
+      resolve(process.cwd(), "../../core/repair.go"),
+      "utf8"
+    )
+    expect(/const interruptedResult = "([^"]+)"/.exec(src)?.[1]).toBe(
+      REPAIRED_RESULT
+    )
+    expect(isRepaired(REPAIRED_RESULT)).toBe(true)
+    expect(isRepaired("TIMEOUT: " + REPAIRED_RESULT)).toBe(false)
+  })
+
+  it("marks a request message line first, so the clip cannot cut it", () => {
+    const msg: Message = {
+      role: "tool",
+      content: [
+        {
+          type: "tool_result",
+          call_id: "c1",
+          name: "lookup",
+          content: REPAIRED_RESULT,
+          is_error: true,
+        },
+      ],
+    }
+    expect(messageLine(msg)).toBe(
+      `tool: lookup → [${REPAIRED.word}] ${REPAIRED_RESULT}`
+    )
   })
 })

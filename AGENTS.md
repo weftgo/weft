@@ -43,6 +43,8 @@ lookup := weft.Tool("lookup_order", "Look up an order by ID.",
 // weft.PromptSnippet("…"), weft.Replay(weft.ReplaySafe) (the side-effect class for
 // re-runs: unannotated counts as never — substitute-or-park, never silently re-fired),
 // weft.WrapTools(mw...).
+// agt.CallTool(ctx, weft.ToolCallPart{…}) dispatches one call by hand through the tool chain;
+// outside a run it records nothing (no run, event or span — Studio cannot show it).
 
 // 1b. Tools defined outside Go source: explicit schema, raw args.
 //     weft.RawTool("parse_invoice", "…", schema, func(ctx, raw) (string, error))
@@ -265,7 +267,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    start/end/duration_ms, span_count, error, run_ids (the join key); since/until (RFC 3339, on
 //    //    its earliest span)/service (exact, any span)/public_id, paged as runs; a panel token lists
 //    //    the traces every span of which is its public id's; capability "traces" — obsdb.DB.Traces,
-//    //    no migration), traces/{id},
+//    //    the since window narrowed on SQLite's spans_start, migration 0019), traces/{id},
 //    //    sessions (?q= — every term in the title, first turn's prompt, id, public id or agent; each row's title
 //    //    (weft.session.title, the newest turn's), first_prompt and content_off (the first turn stored no content);
 //    //    obsdb.SessionQuery.Q), sessions/{id}, sessions/{id}/public_id (the reverse of public/{public_id}: the dev token's

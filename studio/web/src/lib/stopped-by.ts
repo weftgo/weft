@@ -157,3 +157,40 @@ export function endedWithoutFinish(
 ): boolean {
   return !finished && !by && status !== "failed"
 }
+
+/** The steps DetectLoops found identical (UX-S1-07): their ordinals,
+ * first to last, and the count core's error names. */
+export interface LoopRepeats {
+  first: number
+  steps: number[]
+  n: number
+}
+
+/** loopRepeats is a loop_detected run's repeated steps, exactly the
+ * detector's set; null for any other run, or when the error names no
+ * count. core's guard compares each step's tool calls with the step
+ * before — names and raw argument bytes, in any order, results not
+ * part of it — and fails the run at the step whose streak reaches N:
+ * the run's last step, the one its error names ("run failed at step
+ * K", else steps − 1). So the set is the N ordinals ending there; the
+ * record's count, never a re-comparison of the parsed args (the
+ * detector hashed the bytes the model sent). */
+export function loopRepeats(r: StopRow): LoopRepeats | null {
+  if (r.stopped_by !== "loop_detected") return null
+  const n = Number(
+    /^(\d+) identical steps/.exec(stopDetail(r.err, r.stopped_by))?.[1]
+  )
+  const at = /run failed at step (\d+)/.exec(r.err ?? "")?.[1]
+  const last = at !== undefined ? Number(at) : stopStep(r.steps)
+  if (!(n > 1) || last === undefined || last + 1 < n) return null
+  const first = last - n + 1
+  return { first, n, steps: Array.from({ length: n }, (_, i) => first + i) }
+}
+
+/** repeatWords is a repeated step card's chip: its text and hint. */
+export function repeatWords(l: LoopRepeats): { text: string; title: string } {
+  return {
+    text: `repeats step ${l.first}`,
+    title: `DetectLoops: the same tool calls (names and arguments) as step ${l.first} — ${l.n} identical steps in a row ended the run`,
+  }
+}

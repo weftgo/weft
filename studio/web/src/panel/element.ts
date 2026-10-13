@@ -123,6 +123,7 @@ import type { AgentView } from "./client"
 import { diffLines, diffSummary } from "../lib/diff"
 import { stepDiffBlock } from "./compare"
 import { callState, runHoles, stepHoles, truncation } from "../lib/events"
+import { isRepaired, REPAIRED } from "../lib/error-kind"
 import {
   compactionLine,
   compactionsOf,
@@ -6723,7 +6724,13 @@ function renderCall(
     const cut = truncation(String(call.result.content))
     if (cut) head.appendChild(cutBadge(cut))
     if (call.result.isError)
-      head.appendChild(el("span", "weft-badge weft-err", "error"))
+      head.appendChild(
+        isRepaired(call.result.content)
+          ? el("span", "weft-badge weft-err", REPAIRED.word, {
+              title: REPAIRED.hint,
+            })
+          : el("span", "weft-badge weft-err", "error")
+      )
     const holes = holeBadges(call.holes ?? [])
     if (holes) head.appendChild(holes)
     const res = el("div", "weft-res", call.result.content, {

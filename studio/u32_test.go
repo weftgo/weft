@@ -43,7 +43,7 @@ func TestRetriesTapsFixture(t *testing.T) {
 	}
 	found := false
 	for _, hl := range doc.Holes {
-		if hl.Hole == "truncated" && strings.HasPrefix(hl.Reason, "1 metadata pair dropped (limit 64 keys / 1 KiB values)") &&
+		if hl.Hole == "truncated" && strings.HasPrefix(hl.Reason, "1 metadata pair dropped (limit 64 keys, 128-byte keys, 1 KiB values)") &&
 			strings.Contains(hl.Fix, "weft.Metadata") {
 			found = true
 		}

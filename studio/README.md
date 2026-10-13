@@ -1619,7 +1619,12 @@ weft.json), **overridden by experiment** (the invoke_agent span carries
 run ends) and **catalog changed at this step**; a read-scoped token
 sees the `hidden` badge and nothing else
 (`examples/studio-local`'s PrepareStep trim is the live demo; a derived
-prompt or catalog record is badged and never diffed over). The open
+prompt or catalog record is badged and never diffed over). These chips
+are what the record attributes to user code today: only effects are
+recorded — a PrepareStep, a WrapModel or WrapTools middleware, a Tap is
+never named as the hook that acted (`docs/record-contract.md` §6, "What
+the record attributes to user code today"; the hook on the request
+record is U25's, the middleware onion U23's). The open
 pane has two tabs, **request** and **Wire** (plan A6.2,
 `components/studio/step-wire.tsx`): per attempt, the provider request
 (method and URL, headers, the body — pretty-printed when its media type
@@ -1713,7 +1718,8 @@ them) and are never sent; "download pricing.json" writes them as the
 override file — `{dated, note, models: [{provider, model_glob, input,
 output, cached_input?, cache_write?, reasoning?}]}`, refused while a
 field `LoadPricing` would reject is wrong — to run Studio with through
-`--pricing <file>` or `WEFT_PRICING`.
+`--pricing <file>` or `WEFT_PRICING`. Applying an edit is that download
+and a restart: a live `PUT /api/settings/pricing` is not offered.
 
 Search and the palette (plan H1): the Runs page has a free-text box
 (`?q=`, debounced; every term must match the prompt, answer, error or a
@@ -2080,7 +2086,9 @@ default — `pricing` {source, path?, dated, models}, the cost table;
 see Cost above — and `ingest` {dropped: [{service, records,
 last_heard}]}, the ingest health: the largest `weft.records.dropped`
 each exporting service's heartbeats and `run_start`/`run_finish`
-records reported on the OTLP path, in memory, per `service.name`;
+records reported on the OTLP path, in memory, per `service.name` —
+lost on a Studio restart, until each app's next carrier reports it
+again (UX-E-38: not persisted, accepted);
 `manifest_check`'s rule — the dev token's or setup A's loopback, omitted
 for a panel token, whose public id is no reason to read every service's
 name and losses), `settings/pricing` (the effective pricing table,

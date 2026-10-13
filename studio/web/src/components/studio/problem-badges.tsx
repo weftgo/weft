@@ -2,11 +2,8 @@
 // lib/error-kind.ts's one table — the runs table's badges line, the run
 // header's kind chip and stats strip. Badges only on problems: a clean
 // run draws nothing.
-import {
-  kindChip,
-  problemBadges,
-  type ProblemRow,
-} from "@/lib/error-kind"
+import { kindChip, problemBadges } from "@/lib/error-kind"
+import type { ProblemRow } from "@/lib/error-kind"
 
 /** The kind chip's class per tone: the cancelled tone is its own (the
  * run's context ended), a plain class until U1's status vocabulary. */

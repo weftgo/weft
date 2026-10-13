@@ -400,6 +400,8 @@ describe("no panel-only badge strings", () => {
       "compactedRefusal — the server's refusal of an insert inside a view (ADR 0029 decision 4), not the hole",
     "experiment-body: of step  was compacted away":
       "compactedRefusal — the server's refusal of an edit inside a view (F1.1's words), not the hole",
+    "error-kind:no result recorded: the call was interrupted":
+      "REPAIRED_RESULT — core's Repair text, matched to badge a synthesised result (UX-S1-08), not the hole",
     "experiment-body:max_tokens must be ":
       "labOverrides — both drawers' option lab (plan F3): the server's refusal, naming the param, not the hole",
   }
@@ -440,6 +442,7 @@ describe("no panel-only badge strings", () => {
     'element.ts|"subagent"',
     "element.ts|, ms)", // the call's wall time
     'element.ts|"error"', // a tool error result (data, rule 1)
+    "element.ts|REPAIRED.word", // Repair's synthesised result (UX-S1-08)
     "request.ts|data-weft-mark", // E1.2's change chips
     "request.ts|request could not be read",
     "request.ts|data-weft-attempts",

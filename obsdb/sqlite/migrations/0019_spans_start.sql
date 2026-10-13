@@ -1,0 +1,15 @@
+-- 0019 · the traces list's window (U32.2, UX-E-64). obsdb/clickhouse
+-- has no counterpart: its traceInner narrows a Since window with
+-- `Timestamp >= …`, which otel_traces' PARTITION BY toDate(Timestamp)
+-- prunes by its parts' minmax, and the outer TraceId IN with
+-- idx_trace_id (0001) — no migration there.
+--
+-- Traces (obsdb.DB.Traces) groups spans by trace id; with a Since
+-- window it first narrows to the traces with a span at or after it
+-- (a necessary condition of MIN(start_ns) >= since — HAVING still
+-- decides). spans_start serves that range covering (trace_id rides
+-- along), and each candidate's group is read on the primary key, so a
+-- recent window no longer scans the whole table. Without a window the
+-- list stays one scan of the primary key's order: every trace is a
+-- candidate.
+CREATE INDEX IF NOT EXISTS spans_start ON spans(start_ns, trace_id);

@@ -20,6 +20,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/weftgo/weft/internal/termsafe"
 )
 
 // Timeout bounds the one request the doctor makes: an unreachable or
@@ -175,6 +177,10 @@ const (
 	fail = "FAIL"
 )
 
+// printer writes the doctor's lines. Every line passes termsafe.Text:
+// what it prints comes from Studio (service names, run ids, notes,
+// error text an OTLP sender may have chosen), and a control character
+// never reaches the terminal raw.
 type printer struct {
 	w      io.Writer
 	failed bool
@@ -185,17 +191,17 @@ func (p *printer) line(status, label, format string, args ...any) {
 	if status == fail {
 		p.failed = true
 	}
-	_, _ = fmt.Fprintf(p.w, "%-4s %-9s %s\n", status, label, fmt.Sprintf(format, args...))
+	_, _ = fmt.Fprintf(p.w, "%-4s %-9s %s\n", status, label, termsafe.Text(fmt.Sprintf(format, args...)))
 }
 
 // sub prints a continuation of the previous line's check.
 func (p *printer) sub(format string, args ...any) {
-	_, _ = fmt.Fprintf(p.w, "               - %s\n", fmt.Sprintf(format, args...))
+	_, _ = fmt.Fprintf(p.w, "               - %s\n", termsafe.Text(fmt.Sprintf(format, args...)))
 }
 
 // raw prints a line outside the table (the unreachable first line).
 func (p *printer) raw(format string, args ...any) {
-	_, _ = fmt.Fprintf(p.w, format+"\n", args...)
+	_, _ = fmt.Fprintln(p.w, termsafe.Text(fmt.Sprintf(format, args...)))
 }
 
 func (p *printer) db(raw json.RawMessage) {
@@ -267,7 +273,10 @@ func (p *printer) ingest(m meta) {
 			}
 			p.sub("%s: %d records dropped by its destination (last heard %s)", svc, d.Records, d.LastHeard.Format(time.RFC3339))
 		}
-		p.sub("fix: raise the destination's queue with otel.QueueSize(n), or use otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names it")
+		// weft.records.dropped counts every lost record — a full queue
+		// and failed exports alike — so the fix names both; the app's
+		// WARN says which it was.
+		p.sub("fix: queue full or exports failing — the app's WARN names which (\"weft/otel: destination queue full\": raise it with otel.QueueSize(n), or use otel.Blocking() under WEFT_ENV=dev; \"weft/otel: destination dropped records\": its err is the export's failure)")
 	}
 }
 

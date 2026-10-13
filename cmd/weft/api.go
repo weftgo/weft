@@ -17,6 +17,8 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"github.com/weftgo/weft/internal/termsafe"
 )
 
 // The API clients: runs, open and export are thin clients of the
@@ -112,7 +114,7 @@ func apiError(path string, status int, body []byte) error {
 	}
 	msg := http.StatusText(status)
 	if json.Unmarshal(body, &e) == nil && e.Error.Message != "" {
-		msg = e.Error.Message
+		msg = termsafe.Text(e.Error.Message)
 	}
 	var err error = &statusError{Status: status, Body: body, line: fmt.Sprintf("GET %s: %d %s", path, status, msg)}
 	if status == http.StatusUnauthorized {
@@ -176,12 +178,14 @@ type runRow struct {
 const promptCells = 40
 
 // prompt is the PROMPT cell: the run's prompt_preview — its first line,
-// tabs as spaces, cut to promptCells runes with "…" — or "-" when the
-// row carries none (a content-off run stores no prompt; Studio's run
-// page badges why).
+// every control character (tabs, escape sequences, carriage returns) a
+// space, cut to promptCells runes with "…" — or "-" when the row
+// carries none (a content-off run stores no prompt; Studio's run page
+// badges why). The preview is untrusted text — an app's prompt, an
+// OTLP sender's record — and never reaches the terminal raw.
 func (r runRow) prompt() string {
 	line, _, _ := strings.Cut(strings.TrimSpace(r.Prompt), "\n")
-	line = strings.TrimSpace(strings.ReplaceAll(line, "\t", " "))
+	line = strings.TrimSpace(termsafe.Text(line))
 	if line == "" {
 		return "-"
 	}
@@ -199,9 +203,20 @@ func (r runRow) stoppedBy() string {
 	case r.StoppedBy == "":
 		return "-"
 	case r.CancelCause != "":
-		return r.StoppedBy + " (" + r.CancelCause + ")"
+		return cell(r.StoppedBy + " (" + r.CancelCause + ")")
 	}
-	return r.StoppedBy
+	return cell(r.StoppedBy)
+}
+
+// cell is a table cell from free text Studio served (an agent name, a
+// cause, an id an OTLP sender chose): control characters as spaces,
+// "-" for nothing — the one rule every printed cell follows.
+func cell(s string) string {
+	s = strings.TrimSpace(termsafe.Text(s))
+	if s == "" {
+		return "-"
+	}
+	return s
 }
 
 // runsPageSize is the page each GET /api/runs asks for (a variable so
@@ -319,11 +334,7 @@ pages:
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
 	_, _ = fmt.Fprintln(tw, "ID\tAGENT\tSTATUS\tSTARTED\tSTEPS\tPROMPT\tSTOPPED BY")
 	for _, r := range rows {
-		agent := r.Agent
-		if agent == "" {
-			agent = "-"
-		}
-		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\t%s\n", r.ID, agent, r.Status,
+		_, _ = fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%d\t%s\t%s\n", cell(r.ID), cell(r.Agent), cell(r.Status),
 			r.Started.Local().Format("2006-01-02 15:04:05"), r.Steps, r.prompt(), r.stoppedBy())
 	}
 	return tw.Flush()

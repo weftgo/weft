@@ -347,7 +347,9 @@ func (s *runScan) row(now time.Time) (obsdb.RunRow, error) {
 		row.Meta = obsdb.MetaOf(attrs)
 	}
 	row.Status = obsdb.DeriveStatus(s.Failed, s.FinishedOK || s.RootEnded, row.LastSeen, now)
-	row.Settling = obsdb.DeriveSettling(s.RootEnded && !s.Derived, s.FinishedOK, row.LastSeen, now)
+	// A failed root is terminal: nothing is coming, so it never settles
+	// (the event page calls it done at once, the same rule).
+	row.Settling = obsdb.DeriveSettling(s.RootEnded && !s.Derived && !s.Failed, s.FinishedOK, row.LastSeen, now)
 	return row, nil
 }
 
@@ -521,7 +523,7 @@ func (d *DB) Events(ctx context.Context, runID string, after int64, limit int) (
 		// one's trailing records are waited for while it settles
 		// (obsdb.EventPage.Done).
 		page.Done = finishedOK || failed ||
-			(rootEnded && !obsdb.DeriveSettling(rootEnded && !derived, finishedOK, lastSeen, time.Now()))
+			(rootEnded && !obsdb.DeriveSettling(rootEnded && !derived && !failed, finishedOK, lastSeen, time.Now()))
 	}
 	gaps, err := d.eventGaps(ctx, runID)
 	if err != nil {

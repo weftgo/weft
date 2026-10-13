@@ -374,10 +374,21 @@ func TestRunsCommand(t *testing.T) {
 		{"a\tb", "a b"},
 		{strings.Repeat("é", 41), strings.Repeat("é", 39) + "…"},
 		{strings.Repeat("x", 40), strings.Repeat("x", 40)},
+		// Untrusted text never reaches the terminal raw: an OSC title
+		// set, a screen clear, a carriage return that would overwrite
+		// the row — every control character is a space.
+		{"\x1b]0;owned\x07hi\x1b[2J there\rX\nnext", "]0;owned hi [2J there X"},
 	} {
 		if got := (runRow{Prompt: c.in}).prompt(); got != c.want {
 			t.Errorf("prompt cell of %q = %q, want %q", c.in, got, c.want)
 		}
+	}
+	// The other free-text cells follow the same rule.
+	if got := cell("bot\x1b[31m\r"); got != "bot [31m" {
+		t.Errorf("cell = %q, want control characters as spaces", got)
+	}
+	if got := (runRow{StoppedBy: "cancel", CancelCause: "x\x1b[2Jy"}).stoppedBy(); got != "cancel (x [2Jy)" {
+		t.Errorf("stopped by = %q, want control characters as spaces", got)
 	}
 	if fs := strings.Fields(lines[1]); fs[len(fs)-1] != "-" {
 		t.Errorf("r_fail's stopped by column = %q, want - (a model error: no control decided)", fs[len(fs)-1])

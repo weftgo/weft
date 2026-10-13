@@ -117,6 +117,10 @@ res, err := agt.Generate(ctx, weft.Prompt("Where is order 1234?"))
 //   weft.StripContent(ev)           // the one content-shaping table: what a content-off destination receives
 // A changed run carries weft.override.hash + weft.override.* on its invoke_agent span (the experiment's fingerprint).
 // res.Text(), res.Messages (full transcript), res.Steps, res.Usage, res.ID
+// Cancel with a cause: ctx, cancel := context.WithCancelCause(ctx); cancel(weft.CancelCause("app.shutdown"))
+//   — the run fails with a *RunError matching context.Canceled; its invoke_agent span records
+//   weft.cancel.cause app.shutdown beside weft.run.stopped_by canceled (any cause with a Kind() string
+//   method is named; a deadline reads "deadline"; ExampleCancelCause). thread and runtime pass theirs.
 
 // 3a. Steer a running turn (ADR 0019): a pull source the loop drains at two
 //     fixed points — after the tool batch (every call paired with its
@@ -155,7 +159,7 @@ res2, err := agt.Generate(ctx, weft.Messages(res.Messages...), weft.Prompt("And 
 //     handler never runs; Resolve on a non-pending id is a loud run error.
 //     weft.ResumeOf(res.ID) links the resume to the parked run (weft.resumed_from; Studio's
 //     parked row reads resumed_by) — the core cannot infer it; thread and runtime pass it.
-//     weft.Metadata{"weft.approval.actor": who} names the decider. A denied call's
+//     weft.Metadata(map[string]string{"weft.approval.actor": who}) names the decider. A denied call's
 //     execute_tool span is zero-length, weft.tool.denied (+ denied_kind denied|no_decision).
 //     Middleware parks any call by returning an error wrapping ErrApprovalRequired.
 
@@ -227,7 +231,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    rule: a read token 403 hidden; the run document carries manifest_available: true when its hash resolves),
 //    //    runs (+session/public/playground/experiment_id/stopped_by/error_type filters — stopped_by exact, or a
 //    //    prefix ending ":" (has_tool_call:); all=1 lists child
-//    //    runs too; each row's stopped_by/cancel_cause (what ended it, U3.2; omitted when none); resumed_from / resumed_by (the approval link, U13.1: the parked run a resume names, and on the parked run the run that resumed it — read time, either ingest order; omitted when none); error_type (a failed run's kind, context errors read cancelled) and the problem counters attempts_retried/fallbacks/tool_errors/denied/truncated/repaired (U4, ingest time — retried counts a failed attempt a later one of its call followed, fallbacks the attempts weft.attempt.layer marks, tool_errors skips RETRY; log_warn/log_error on the run document, read time through obsdb.DB.CountLogs, logs_capped when they are floors (drawn ≥); each omitted when 0); each row's prompt_preview: the turn's own prompt (input record's last user text — a resume's new prompt when it carries one — else first), 200 runes, absent content-off; settling: true while its root is stored and its run_finish not, within 30 s — the UI's isLive follows it, record contract §6),
+//    //    runs too; each row's stopped_by/cancel_cause (what ended it, U3.2; omitted when none); resumed_from / resumed_by (the approval link, U13.1: the parked run a resume names, and on the parked run the run that resumed it — read time, either ingest order; omitted when none); error_type (a failed run's kind, context errors read cancelled) and the problem counters attempts_retried/fallbacks/tool_errors/denied/truncated/repaired (U4, ingest time — retried counts a failed attempt a later one of its call followed, fallbacks the attempts weft.attempt.layer marks, tool_errors skips RETRY; log_warn/log_error on the run document, read time through obsdb.DB.CountLogs, logs_capped when they are floors (drawn ≥); each omitted when 0); each row's prompt_preview: the turn's own prompt (input record's last user text — a resume's new prompt when it carries one — else first), 200 runes, absent content-off; settling: true while its root is stored (not failed: a failed root is terminal) and its run_finish not, within 30 s — the UI's isLive follows it, record contract §6),
 //    //    search (?q= terms over prompt/answer/error/tool names — substrings, AND, a "phrase" one
 //    //    term; agent/tool/status/model/error/since/until/min_tokens/sort=started|duration|tokens/
 //    //    limit/offset + runs' filters; min_cost (USD, own + delegated; unpriced never matches) and
@@ -347,7 +351,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    one); studio.json {url, token, db, pid, started, version} (0600, removed on exit)
 //    //    is the discovery file apps find it through (block 6). The API over a terminal (--url
 //    //    WEFT_STUDIO_URL, --token WEFT_STUDIO_TOKEN): weft doctor checks one; weft runs
-//    //    [--agent --since --failed --limit --json] (a STOPPED BY column; --json carries stopped_by/cancel_cause); weft open <run id> [--open --with-token]
+//    //    [--agent --since --failed --limit --json] (PROMPT and STOPPED BY columns — every cell's control characters as spaces; --json carries prompt_preview/stopped_by/cancel_cause); weft open <run id> [--open --with-token]
 //    //    (prints the bare <url>/runs/<id>; the token only to the browser or on --with-token);
 //    //    weft export <run id> [--format json|jsonl|otlp | --wefttest ./testdata --test Name
 //    //    --force] (fixtures where wefttest.Replay reads them; --force replaces, never

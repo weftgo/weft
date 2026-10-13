@@ -354,3 +354,26 @@ func TestTokenNotRequired(t *testing.T) {
 		t.Errorf("token to an open studio: %v\n%s", err, out)
 	}
 }
+
+// TestControlCharactersStripped: what the doctor prints comes from
+// Studio — a service name an OTLP sender chose among it — and a control
+// character in it never reaches the terminal raw.
+func TestControlCharactersStripped(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, `{"auth_required":true,"weft_version":"v\u001b[2J","studio_version":"s","panel_version":"s",`+
+			`"db":{"kind":"sqlite"},"content":{"ingest":"as_received"},`+
+			`"ingest":{"dropped":[{"service":"evil\u001b]0;owned\u0007\rsvc","records":3,"last_heard":"2026-10-13T00:00:00Z"}]}}`)
+	}))
+	t.Cleanup(ts.Close)
+	out, _ := run(t, ts.URL, tok, env(nil))
+	if strings.ContainsAny(out, "\x1b\x07\r") {
+		t.Errorf("control characters reached the output: %q", out)
+	}
+	if !strings.Contains(out, "evil ]0;owned  svc: 3 records dropped") {
+		t.Errorf("service line = %q, want its control characters as spaces", out)
+	}
+	// weft.records.dropped counts failed exports too: the fix names both.
+	if !strings.Contains(out, "fix: queue full or exports failing — the app's WARN names which") {
+		t.Errorf("ingest fix = %q, want it to name the queue and failing exports", out)
+	}
+}

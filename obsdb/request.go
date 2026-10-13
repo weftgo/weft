@@ -116,6 +116,15 @@ const (
 	// lost"). It replaces tail_lost and no_logger's guess wherever the
 	// root carries the count.
 	CauseEventsLost HoleCause = "events_lost"
+	// CauseMessagesLost: a weft run's invoke_agent span says how many
+	// growth messages records the core emitted (weft.run.messages, U5)
+	// and the store holds some, but fewer — a destination dropped
+	// transcript batches (gap: MessagesLostHole decides it,
+	// MessagesLostReason counts them, "K of N transcript batches were
+	// lost"). A store holding none is not called lost: a content-off
+	// destination stores no messages record by design and obsdb cannot
+	// tell it from one that lost every one (docs/record-contract.md §7).
+	CauseMessagesLost HoleCause = "messages_lost"
 	// CauseMetadataCap: the core's metadata limits dropped pairs of the
 	// run's Metadata (64 keys, a key over 128 bytes, a value over
 	// 1 KiB — dropped whole, never cut; weft.metadata.dropped on its
@@ -141,7 +150,7 @@ const queueFix = "raise the destination's queue: otel.QueueSize(n) on it (Studio
 
 // HoleCauses lists the causes the table words, in order.
 func HoleCauses() []HoleCause {
-	return []HoleCause{CauseNoSpans, CauseResultCap, CauseLogCap, CauseNoPublicID, CauseDevTokenOnly, CauseNotServed, CauseResponseCap, CauseRawOff, CauseStockSpans, CauseNoLogger, CauseTailLost, CauseEventsLost, CauseMetadataCap}
+	return []HoleCause{CauseNoSpans, CauseResultCap, CauseLogCap, CauseNoPublicID, CauseDevTokenOnly, CauseNotServed, CauseResponseCap, CauseRawOff, CauseStockSpans, CauseNoLogger, CauseTailLost, CauseEventsLost, CauseMessagesLost, CauseMetadataCap}
 }
 
 var causeNotes = map[Hole]map[HoleCause]holeNote{
@@ -180,6 +189,10 @@ var causeNotes = map[Hole]map[HoleCause]holeNote{
 		},
 		CauseEventsLost: {
 			"the core emitted more event records than were stored (weft.run.events on the run's root span): a destination dropped them on the way, its queue full or an export failed",
+			queueFix,
+		},
+		CauseMessagesLost: {
+			"the core emitted more transcript batches than were stored (weft.run.messages on the run's root span): a destination dropped them on the way, its queue full or an export failed, so the transcript is missing messages",
 			queueFix,
 		},
 	},
@@ -585,6 +598,35 @@ func EventsLostHole(r RunRow) (Hole, HoleCause) {
 		return "", CauseDefault
 	}
 	return HoleGap, CauseEventsLost
+}
+
+// MessagesLostHole is the counted transcript gap: a weft run whose root
+// span is stored and says it emitted MessagesEmitted growth messages
+// records (weft.run.messages), of which the store holds some but fewer —
+// HoleGap with CauseMessagesLost, worded by MessagesLostReason. Some,
+// not none: a content-off destination stores no messages record by
+// design (docs/record-contract.md §5) and nothing on the row says a
+// destination was content-off, so a store holding none is never called
+// lost — a content-on destination that lost every messages record reads
+// like a content-off one (§7 says so). "" while the run settles, for a
+// derived run, a run whose root is not stored or carries no count, and a
+// run whose transcript batches all arrived.
+func MessagesLostHole(r RunRow) (Hole, HoleCause) {
+	if r.Derived || !r.RootEnded || r.Settling || r.MessageCount == 0 || r.MessageCount >= r.MessagesEmitted {
+		return "", CauseDefault
+	}
+	return HoleGap, CauseMessagesLost
+}
+
+// MessagesLostReason words a counted transcript gap (MessagesLostHole)
+// with its numbers: "K of N transcript batches were lost: …". "" when
+// MessagesLostHole raises none.
+func MessagesLostReason(r RunRow) string {
+	if h, _ := MessagesLostHole(r); h == "" {
+		return ""
+	}
+	lost := r.MessagesEmitted - r.MessageCount
+	return fmt.Sprintf("%d of %d transcript batches were lost: a destination dropped them before they were stored (its queue full, or an export failed), so the transcript is missing the messages they carried", lost, r.MessagesEmitted)
 }
 
 // EventsLostReason words a counted gap (EventsLostHole) with its

@@ -33,6 +33,7 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("RootBeforeRecords", rootBeforeRecords(open))
 	t.Run("StoppedBy", stoppedBy(open))
 	t.Run("EmittedCounts", emittedCounts(open))
+	t.Run("MessagesLost", messagesLost(open))
 	t.Run("ErrorTypeAndProblems", errorTypeAndProblems(open))
 	t.Run("ResumeLink", resumeLink(open))
 	t.Run("Sessions", sessions(open))
@@ -557,6 +558,24 @@ func rootBeforeRecords(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if page.Done {
 			t.Error("settling run's event page is Done before its records landed")
 		}
+		// A failed root never settles (R7-prep): it is terminal, so the row
+		// and the event page give one answer at once — settling false,
+		// Done true — even inside the window.
+		failed := root("r_failfresh", '3', now, nil)
+		failed.StatusCode, failed.StatusMessage = 2, "model exploded"
+		if err := db.Write(ctx(), obsdb.Batch{Spans: []obsdb.Span{failed}}); err != nil {
+			t.Fatal(err)
+		}
+		if f, err := db.Run(ctx(), "r_failfresh"); err != nil {
+			t.Fatal(err)
+		} else if f.Status != obsdb.StatusFailed || f.Settling {
+			t.Errorf("fresh failed root = %s settling %v, want failed and not settling", f.Status, f.Settling)
+		}
+		if fp, err := db.Events(ctx(), "r_failfresh", -1, 100); err != nil {
+			t.Fatal(err)
+		} else if !fp.Done {
+			t.Error("fresh failed root's event page is not Done: the row and the page disagree")
+		}
 		// The records land behind it.
 		start := record("r_settle", "event", "run_start", 0, `{"type":"run_start","id":"r_settle"}`, nil)
 		start.Time = now.Add(-time.Second)
@@ -722,6 +741,84 @@ func emittedCounts(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 				t.Fatal(err)
 			}
 			if got := obsdb.EventsLostReason(r.RunRow, len(page.Gaps)); !strings.HasPrefix(got, c.reason) {
+				t.Errorf("%s reason = %q, want prefix %q", c.id, got, c.reason)
+			}
+		}
+	}
+}
+
+// messagesLost pins docs/record-contract.md §7's counted transcript gap
+// on every backend (R7-prep): past the settling window a root that says
+// it emitted N growth messages records (weft.run.messages), of which the
+// store holds some but fewer, is gap/messages_lost, "K of N transcript
+// batches were lost" — on a failed run too. A store holding none is not
+// called lost (a content-off destination stores none by design, and the
+// row cannot tell it from one that lost them all); a run whose batches
+// all arrived has no hole, a settling one none yet.
+func messagesLost(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		old := time.Now().UTC().Add(-2 * obsdb.InterruptedAfter)
+		root := func(id string, n byte, status int, end time.Time, msgs int64) obsdb.Span {
+			s := invokeSpan(id, status, map[string]any{"weft.run.events": int64(1), "weft.run.messages": msgs})
+			s.TraceID, s.SpanID = "c"+string(n)+s.TraceID[2:], "720000000000000"+string(n)
+			s.Start, s.End = end.Add(-time.Second), end
+			return s
+		}
+		msg := func(id string, idx int64, when time.Time) obsdb.Record {
+			r := record(id, "messages", "", idx, `[{"role":"user","content":[{"type":"text","text":"hi"}]}]`, nil)
+			r.Time = when
+			return r
+		}
+		start := func(id string, when time.Time) obsdb.Record {
+			r := record(id, "event", "run_start", 0, `{"type":"run_start"}`, nil)
+			r.Time = when
+			return r
+		}
+		fresh := time.Now().UTC()
+		batch := obsdb.Batch{
+			Spans: []obsdb.Span{
+				root("m_mid", '1', 1, old, 4),
+				root("m_failed", '2', 2, old, 3),
+				root("m_none", '3', 1, old, 4),
+				root("m_whole", '4', 1, old, 2),
+				root("m_settle", '5', 1, fresh, 3),
+			},
+			Records: []obsdb.Record{
+				start("m_mid", old), msg("m_mid", 0, old), msg("m_mid", 2, old), msg("m_mid", 3, old),
+				start("m_failed", old), msg("m_failed", 0, old),
+				start("m_none", old),
+				start("m_whole", old), msg("m_whole", 0, old), msg("m_whole", 1, old),
+				start("m_settle", fresh), msg("m_settle", 0, fresh),
+			},
+		}
+		if err := db.Write(ctx(), batch); err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range []struct {
+			id     string
+			stored int64
+			hole   obsdb.Hole
+			reason string
+		}{
+			{"m_mid", 3, obsdb.HoleGap, "1 of 4 transcript batches were lost"},
+			{"m_failed", 1, obsdb.HoleGap, "2 of 3 transcript batches were lost"},
+			{"m_none", 0, "", ""},
+			{"m_whole", 2, "", ""},
+			{"m_settle", 1, "", ""},
+		} {
+			r, err := db.Run(ctx(), c.id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if r.MessageCount != c.stored {
+				t.Errorf("%s message_count = %d, want %d", c.id, r.MessageCount, c.stored)
+			}
+			h, cause := obsdb.MessagesLostHole(r.RunRow)
+			if h != c.hole || (h != "" && cause != obsdb.CauseMessagesLost) {
+				t.Errorf("%s hole = %q/%q, want %q/messages_lost", c.id, h, cause, c.hole)
+			}
+			if got := obsdb.MessagesLostReason(r.RunRow); !strings.HasPrefix(got, c.reason) || (c.reason == "") != (got == "") {
 				t.Errorf("%s reason = %q, want prefix %q", c.id, got, c.reason)
 			}
 		}

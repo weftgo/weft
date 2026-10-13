@@ -1,6 +1,6 @@
 {
   "case": "tail_lost",
-  "description": "the tool_calls run whose record tail a destination dropped: every record after the tool_finish lost (step 1's records and run_finish), every span kept — the stored invoke_agent span (status Ok) ends the run, so it reads succeeded, not interrupted; steps, usage and stop_reason from the span; the root says it emitted 8 events (weft.run.events) and 4 are stored: the gap badge (cause events_lost: 4 of 8 events were lost — the last 4 events were lost): the record tail is visibly missing and counted, not a clean success",
+  "description": "the tool_calls run whose record tail a destination dropped: every record after the tool_finish lost (step 1's records and run_finish), every span kept — the stored invoke_agent span (status Ok) ends the run, so it reads succeeded, not interrupted; steps, usage and stop_reason from the span; the root says it emitted 8 events (weft.run.events) and 4 are stored: the gap badge (cause events_lost: 4 of 8 events were lost — the last 4 events were lost) and, the root saying it emitted 4 growth messages records of which 2 are stored, the same badge's messages_lost cause (2 of 4 transcript batches were lost): the record tail is visibly missing and counted, not a clean success",
   "runs": [
     {
       "id": "a1100000000000000000000000000001",
@@ -63,7 +63,8 @@
         "gap"
       ],
       "hole_causes": [
-        "gap:events_lost"
+        "gap:events_lost",
+        "gap:messages_lost"
       ]
     }
   ]

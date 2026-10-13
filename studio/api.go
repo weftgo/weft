@@ -1024,6 +1024,11 @@ func lostEvents(rec obsdb.RunRow, hasSpans bool) []badgeFields {
 //     ended (succeeded) with events stored and no run_finish — a
 //     destination dropped the record tail (obsdb.TailLostHole's
 //     fallback; raised once the run stopped settling);
+//   - gap, cause messages_lost: the root span says the core emitted N
+//     growth messages records (weft.run.messages) and the store holds
+//     some but fewer — "K of N transcript batches were lost"
+//     (obsdb.MessagesLostHole, obsdb.MessagesLostReason; none stored is
+//     never called lost: a content-off destination stores none);
 //   - stripped: its events came through a content-off chain, or the
 //     core captured none (the run_start's weft.content: stripped or
 //     none);
@@ -1104,6 +1109,13 @@ func (s *Server) runHoles(ctx context.Context, rec obsdb.RunRow) ([]stepHole, er
 			// added above) and a mid-run batch says both reasons.
 			holes.also(obsdb.HoleGap, n+" of the run's event positions are missing: a destination dropped a batch", holeFix(obsdb.HoleGap))
 		}
+	}
+	if h, cause := obsdb.MessagesLostHole(rec); h != "" {
+		// Transcript batches the root counts and the store lacks (R7-prep):
+		// "K of N transcript batches were lost" — last, so an events gap
+		// keeps its words first and this one joins it, never in its place.
+		b := badgeFor(h, cause)
+		holes.also(h, obsdb.MessagesLostReason(rec), b.Fix)
 	}
 	return holes.list(), nil
 }

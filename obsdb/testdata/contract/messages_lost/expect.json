@@ -1,0 +1,70 @@
+{
+  "case": "messages_lost",
+  "description": "the tool_calls run whose middle transcript batch a destination dropped: the growth messages record at index 1 (the assistant's tool call) lost, every event and span kept — the root says it emitted 4 growth messages records (weft.run.messages) and 3 are stored: the gap badge (cause messages_lost: 1 of 4 transcript batches were lost), never a clean transcript; the events all arrived, so no events_lost",
+  "runs": [
+    {
+      "id": "a1100000000000000000000000000001",
+      "trace_id": "7ace0000000000000000000000000001",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:23:00Z",
+      "finished": "2026-10-01T09:23:00.015Z",
+      "last_seen": "2026-10-01T09:23:00.015Z",
+      "status": "succeeded",
+      "steps": 2,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "event_count": 8,
+      "message_count": 3,
+      "delta_count": 1,
+      "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "catalog_hash": "d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8",
+      "request_count": 2,
+      "events_emitted": 8,
+      "messages_emitted": 4,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        },
+        {
+          "step": 1,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "lookup_order",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "ok"
+        }
+      ],
+      "holes": [
+        "gap"
+      ],
+      "hole_causes": [
+        "gap:messages_lost"
+      ]
+    }
+  ]
+}

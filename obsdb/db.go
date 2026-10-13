@@ -418,7 +418,7 @@ type RunRow struct {
 	// A RootEnded run without it lost its record tail on the way
 	// (TailLostHole) or never had records (LostRecordsHole).
 	FinishRecorded bool
-	// Settling marks a RootEnded weft run (not Derived) whose run_finish
+	// Settling marks a RootEnded weft run (not Derived, not Failed) whose run_finish
 	// is not stored and that was heard from within InterruptedAfter
 	// (DeriveSettling): a destination may store the root span before the
 	// records that trail it (a log exporter's retry or backlog), so for
@@ -449,9 +449,11 @@ type RunRow struct {
 	// yet, or a weft before them) and when the run emitted none (no
 	// logger). Fewer stored than emitted is a loss (EventsLost,
 	// TailLostHole, LostRecordsHole); emitted 0 with nothing stored is
-	// no_logger. MessagesEmitted is informational: a content-off
-	// destination legitimately stores no messages record (contract §5),
-	// so no reader calls that difference lost.
+	// no_logger. Fewer messages stored than emitted, some stored, is a
+	// lost transcript batch (MessagesLostHole); none stored is not
+	// called lost: a content-off destination legitimately stores no
+	// messages record (contract §5), and the row cannot tell it from one
+	// that lost them all (contract §7).
 	EventsEmitted, MessagesEmitted int64
 	// ErrorType is a failed run's kind (U4): the invoke_agent span's
 	// error.type — max_steps, usage_limit, loop_detected,
@@ -665,8 +667,10 @@ func DeriveStatus(spanFailed, ended bool, lastSeen, now time.Time) Status {
 // destination that stored the root before the records behind it (a
 // log exporter's retry or backlog; Studio's destination batches logs
 // faster than spans, but a user's Exporters pair need not) may still
-// deliver them. Pass rootEnded false for a derived run: stock spans have
-// no records to wait for. A backend derives it at read time beside
+// deliver them. Pass rootEnded false for a derived run — stock spans
+// have no records to wait for — and for a failed one: a failed root is
+// terminal, its event page done at once (EventPage.Done), so the row
+// never says "settling" while the page says done. A backend derives it at read time beside
 // DeriveStatus, with the same clock.
 func DeriveSettling(rootEnded, finishRecorded bool, lastSeen, now time.Time) bool {
 	return rootEnded && !finishRecorded && !lastSeen.IsZero() && now.Sub(lastSeen) <= InterruptedAfter

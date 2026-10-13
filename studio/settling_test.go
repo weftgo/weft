@@ -157,9 +157,9 @@ func TestTailLostAndSpansOnly(t *testing.T) {
 
 // TestSettlingServed: the settling window reaches the API — the run
 // document and the run rows carry settling while a root-ended run's
-// records may still land, a failed spans-only root's steps read error
-// (never running under a failed header) with no record called lost,
-// and a settling spans-only step's Messages-in pane names no gap (the
+// records may still land, a failed spans-only root never settles (it is
+// terminal: R7-prep's one rule with the event page's done) and its steps
+// read error (never running under a failed header), and a settling spans-only step's Messages-in pane names no gap (the
 // U2 re-review's findings 1–3).
 func TestSettlingServed(t *testing.T) {
 	db, err := sqlite.Open(":memory:")
@@ -200,8 +200,8 @@ func TestSettlingServed(t *testing.T) {
 		t.Fatalf("runs = %s, want two rows", body)
 	}
 	for _, r := range list.Runs {
-		if !r.Settling {
-			t.Errorf("run row %s: settling false, want true", r.ID)
+		if want := r.ID == "r_ok"; r.Settling != want {
+			t.Errorf("run row %s: settling %v, want %v (a failed root never settles)", r.ID, r.Settling, want)
 		}
 	}
 
@@ -219,11 +219,12 @@ func TestSettlingServed(t *testing.T) {
 	}
 	decode(t, body, &step)
 	if step.Status != stepError {
-		t.Errorf("failed settling step 0 = %s, want error", step.Status)
+		t.Errorf("failed step 0 = %s, want error", step.Status)
 	}
+	// Not settling, it says what it has at once: spans only, no gap.
 	for _, hl := range step.Holes {
-		if hl.Hole == string(obsdb.HoleGap) || hl.Hole == string(obsdb.HoleNotRecorded) {
-			t.Errorf("failed settling step 0 calls a record lost: %+v", hl)
+		if hl.Hole == string(obsdb.HoleGap) {
+			t.Errorf("failed spans-only step 0 reads a gap: %+v", hl)
 		}
 	}
 
@@ -298,15 +299,21 @@ func TestTailLostAndCounterGap(t *testing.T) {
 // and both carry not_recorded in no_logger's words — never a gap, which
 // is reserved for a root that says records were emitted. The same root
 // saying it emitted 5 reads gap/events_lost ("every one") instead.
+// A failed root inside the window reads the same (R7-prep): a failed
+// root is terminal, never settling, so the row and the event page give
+// one answer from the first read — settling false, done true.
 func TestFailedRootPastWindow(t *testing.T) {
 	for _, c := range []struct {
 		name    string
 		emitted int64
 		hole    obsdb.Hole
 		cause   obsdb.HoleCause
+		age     time.Duration
 	}{
-		{"no_logger", 0, obsdb.HoleNotRecorded, obsdb.CauseNoLogger},
-		{"all_lost", 5, obsdb.HoleGap, obsdb.CauseEventsLost},
+		{"no_logger", 0, obsdb.HoleNotRecorded, obsdb.CauseNoLogger, 31 * time.Second},
+		{"all_lost", 5, obsdb.HoleGap, obsdb.CauseEventsLost, 31 * time.Second},
+		{"no_logger_in_window", 0, obsdb.HoleNotRecorded, obsdb.CauseNoLogger, 0},
+		{"all_lost_in_window", 5, obsdb.HoleGap, obsdb.CauseEventsLost, 0},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			db, err := sqlite.Open(":memory:")
@@ -314,7 +321,7 @@ func TestFailedRootPastWindow(t *testing.T) {
 				t.Fatal(err)
 			}
 			t.Cleanup(func() { _ = db.Close() })
-			end := time.Now().UTC().Add(-31 * time.Second)
+			end := time.Now().UTC().Add(-c.age)
 			failed := fxSpanRec("r_fail", end.Add(-time.Second), end, 2, "model exploded", 1, 1)
 			failed.Attrs["weft.run.events"] = c.emitted
 			if err := db.Write(context.Background(), obsdb.Batch{Spans: []obsdb.Span{failed}}); err != nil {
@@ -330,6 +337,14 @@ func TestFailedRootPastWindow(t *testing.T) {
 			decode(t, body, &doc)
 			if doc.Status != "failed" || doc.Settling {
 				t.Errorf("run = %s settling %v, want failed and settled: %s", doc.Status, doc.Settling, body)
+			}
+			var page struct {
+				Done bool `json:"done"`
+			}
+			_, _, body = get(t, h, "/studio/api/runs/r_fail/events")
+			decode(t, body, &page)
+			if !page.Done {
+				t.Errorf("events of a failed run = not done, want done at once (one answer with settling false): %s", body)
 			}
 			found := false
 			for _, hl := range doc.Holes {

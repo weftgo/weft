@@ -971,9 +971,9 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 243,087 B raw / 78,098 B gzip
-(76.3 KiB, the bundle of the ledger's row "phase 6 review fixes (I)"; 20,206 B — 19.7 KiB — of headroom under
-the 98,304 B, 96 KiB, cap; 3,822 B under the 80 KiB cap before A5.4 raised it). It ships fully minified — whitespace,
+committed `studio/dist/panel/panel.js`, 255,095 B raw / 82,373 B gzip
+(80.4 KiB, the bundle of the ledger's row "R7-prep"; 15,931 B — 15.6 KiB — of headroom under
+the 98,304 B, 96 KiB, cap; A5.4 raised it from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
 build kept its indentation and newlines: 281,470 B raw / 81,358 B gzip,
 562 B under the cap) — and with no sourcemap, so it is unreadable in a

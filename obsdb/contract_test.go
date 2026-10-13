@@ -490,7 +490,8 @@ func intAttr(m map[string]any, k string, def int64) int64 {
 // runHoles is the run-level badge set a reader shows (ADR 0028 §11),
 // sorted: not_recorded from the run row's reading table
 // (RunRow.RequestsHole) or a spans-only run (LostRecordsHole), gap from
-// a dropped record tail (TailLostHole), derived from the row's mark (§9),
+// a dropped record tail (TailLostHole) or transcript batch
+// (MessagesLostHole), derived from the row's mark (§9),
 // interrupted from the derived status,
 // max_tokens from the stop reason, stripped and truncated from the
 // events' content marks, gap from the event counter's holes, compacted
@@ -509,6 +510,12 @@ func runHoles(t *testing.T, db obsdb.DB, r obsdb.RunRow, hasSpans bool) ([]obsdb
 	if h, cause := obsdb.TailLostHole(r); h != "" {
 		// gap, cause events_lost: fewer stored than the root's
 		// weft.run.events; tail_lost before the count (§7)
+		set[h] = true
+		causes = append(causes, string(h)+":"+string(cause))
+	}
+	if h, cause := obsdb.MessagesLostHole(r); h != "" {
+		// gap, cause messages_lost: some growth messages records stored,
+		// fewer than the root's weft.run.messages (§7)
 		set[h] = true
 		causes = append(causes, string(h)+":"+string(cause))
 	}
@@ -1608,7 +1615,7 @@ func genCases() []genCase {
 		},
 		{
 			name: "tail_lost",
-			desc: "the tool_calls run whose record tail a destination dropped: every record after the tool_finish lost (step 1's records and run_finish), every span kept — the stored invoke_agent span (status Ok) ends the run, so it reads succeeded, not interrupted; steps, usage and stop_reason from the span; the root says it emitted 8 events (weft.run.events) and 4 are stored: the gap badge (cause events_lost: 4 of 8 events were lost — the last 4 events were lost): the record tail is visibly missing and counted, not a clean success",
+			desc: "the tool_calls run whose record tail a destination dropped: every record after the tool_finish lost (step 1's records and run_finish), every span kept — the stored invoke_agent span (status Ok) ends the run, so it reads succeeded, not interrupted; steps, usage and stop_reason from the span; the root says it emitted 8 events (weft.run.events) and 4 are stored: the gap badge (cause events_lost: 4 of 8 events were lost — the last 4 events were lost) and, the root saying it emitted 4 growth messages records of which 2 are stored, the same badge's messages_lost cause (2 of 4 transcript batches were lost): the record tail is visibly missing and counted, not a clean success",
 			dest: content,
 			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
 				agt := pipelineAgent(p, "support", wefttest.Script(
@@ -1897,6 +1904,37 @@ func genCases() []genCase {
 				}
 			},
 		},
+		{
+			name: "messages_lost",
+			desc: "the tool_calls run whose middle transcript batch a destination dropped: the growth messages record at index 1 (the assistant's tool call) lost, every event and span kept — the root says it emitted 4 growth messages records (weft.run.messages) and 3 are stored: the gap badge (cause messages_lost: 1 of 4 transcript batches were lost), never a clean transcript; the events all arrived, so no events_lost",
+			dest: content,
+			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+				agt := pipelineAgent(p, "support", wefttest.Script(
+					wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"1234"}`}),
+					wefttest.Say("Order 1234 has shipped.")),
+					core.Instructions("You are a support agent."), lookupTool())
+				return []string{mustRun(t, ctx, agt, core.Prompt("Where is order 1234?")).ID}
+			},
+			edit: func(_ *coltracepb.ExportTraceServiceRequest, lg *collogspb.ExportLogsServiceRequest) {
+				dropped := false
+				for _, rl := range lg.GetResourceLogs() {
+					for _, sl := range rl.GetScopeLogs() {
+						kept := sl.LogRecords[:0]
+						for _, r := range sl.GetLogRecords() {
+							if kvString(r.Attributes, "weft.record") == "messages" && kvInt(r.Attributes, "weft.messages.index") == 1 {
+								dropped = true
+								continue
+							}
+							kept = append(kept, r)
+						}
+						sl.LogRecords = kept
+					}
+				}
+				if !dropped {
+					panic("messages_lost: the run emitted no messages record at index 1")
+				}
+			},
+		},
 	}
 }
 
@@ -1961,4 +1999,60 @@ func kvString(kvs []*commonpb.KeyValue, key string) string {
 		}
 	}
 	return ""
+}
+
+func kvInt(kvs []*commonpb.KeyValue, key string) int64 {
+	for _, kv := range kvs {
+		if kv.GetKey() == key {
+			return kv.GetValue().GetIntValue()
+		}
+	}
+	return -1
+}
+
+// TestContractTableMatchesFixtures: docs/record-contract.md §10's table
+// names every fixture directory under testdata/contract and nothing
+// else, both ways — a case added without its row, or a row whose case
+// is gone, fails here rather than in a review.
+func TestContractTableMatchesFixtures(t *testing.T) {
+	doc, err := os.ReadFile("../docs/record-contract.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, sec, ok := strings.Cut(string(doc), "\n## 10. ")
+	if !ok {
+		t.Fatal("docs/record-contract.md has no §10")
+	}
+	if i := strings.Index(sec, "\n## "); i >= 0 {
+		sec = sec[:i]
+	}
+	row := regexp.MustCompile("(?m)^\\| `([a-z0-9_]+)` \\|")
+	inDoc := map[string]bool{}
+	for _, m := range row.FindAllStringSubmatch(sec, -1) {
+		if inDoc[m[1]] {
+			t.Errorf("§10 lists %q twice", m[1])
+		}
+		inDoc[m[1]] = true
+	}
+	entries, err := os.ReadDir(contractDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	onDisk := map[string]bool{}
+	for _, e := range entries {
+		if e.IsDir() {
+			onDisk[e.Name()] = true
+			if !inDoc[e.Name()] {
+				t.Errorf("fixture %s/%s has no row in docs/record-contract.md §10", contractDir, e.Name())
+			}
+		}
+	}
+	for name := range inDoc {
+		if !onDisk[name] {
+			t.Errorf("docs/record-contract.md §10 lists %q, which has no fixture under %s", name, contractDir)
+		}
+	}
+	if len(onDisk) == 0 {
+		t.Fatalf("no fixtures under %s", contractDir)
+	}
 }

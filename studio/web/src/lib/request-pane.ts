@@ -59,7 +59,7 @@ export function concurrencyWords(c: {
       c.manifest,
       c.overrideRead
         ? "the run's manifest"
-        : "the manifest's value; the run's own setting is read once its spans load"
+        : "the manifest's value; the run's own setting is read when its spans are available"
     )
   return null
 }

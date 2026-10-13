@@ -1865,6 +1865,38 @@ func genCases() []genCase {
 				return []string{first.ID, second.ID}
 			},
 		},
+		{
+			name: "records_dropped",
+			desc: "the tool_calls run from a destination that had lost 3 records: weft.records.dropped 3 on its run_start and run_finish records (record contract §4; the run has no heartbeat — heartbeats are never stored). The count is ingest health's (Studio keeps the largest per service.name): it is not caller metadata, so meta omits it, and no row field or hole reads it — the row is tool_calls' own",
+			dest: content,
+			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+				agt := pipelineAgent(p, "support", wefttest.Script(
+					wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"1234"}`}),
+					wefttest.Say("Order 1234 has shipped.")),
+					core.Instructions("You are a support agent."), lookupTool())
+				return []string{mustRun(t, ctx, agt, core.Prompt("Where is order 1234?")).ID}
+			},
+			edit: func(_ *coltracepb.ExportTraceServiceRequest, lg *collogspb.ExportLogsServiceRequest) {
+				n := 0
+				for _, rl := range lg.GetResourceLogs() {
+					for _, sl := range rl.GetScopeLogs() {
+						for _, r := range sl.GetLogRecords() {
+							switch kvString(r.Attributes, "weft.event.type") {
+							case "run_start", "run_finish":
+								r.Attributes = append(r.Attributes, &commonpb.KeyValue{
+									Key:   "weft.records.dropped",
+									Value: &commonpb.AnyValue{Value: &commonpb.AnyValue_IntValue{IntValue: 3}},
+								})
+								n++
+							}
+						}
+					}
+				}
+				if n != 2 {
+					panic(fmt.Sprintf("records_dropped: stamped %d records, want run_start and run_finish", n))
+				}
+			},
+		},
 	}
 }
 

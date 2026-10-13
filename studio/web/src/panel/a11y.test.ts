@@ -5,7 +5,8 @@
 // whose badges, cap line and chips are all drawn, and (E1.2) the
 // Request tab's chips, diff and trees, and (E3.2) the experiment's
 // step compare table, and (F3.2) the option lab with an override, a
-// refusal and the named tool picker — in both themes (D2),
+// refusal and the named tool picker, and (P7-fix3) the editable fields
+// at rest with axe's name rule checked by hand — in both themes (D2),
 // with axe's default rules; the budget is zero violations. jsdom has
 // no layout, so the rules that need one (color-contrast, and
 // label-content-name-mismatch's visible text) come back "incomplete",
@@ -310,6 +311,31 @@ async function resultEditor(el: WeftDevtools) {
   ).toBeNull()
 }
 
+/** P7-fix3: the editable fields at rest (plan F2) — the prompt, the
+ * insert boundaries, a reply, args and results, each a role=button.
+ * jsdom leaves axe's label-content-name-mismatch incomplete (it needs
+ * layout), so its rule is checked here as axe states it: the visible
+ * text is contained in the accessible name, case and spaces folded. */
+async function editableAtRest(el: WeftDevtools) {
+  const fold = (x: string) => x.replace(/\s+/g, " ").trim().toLowerCase()
+  const fields = Array.from(
+    el.shadowRoot!.querySelectorAll<HTMLElement>(
+      '[data-weft-editable][role="button"]'
+    )
+  )
+  for (const k of ["user", "insert", "tool_result"])
+    expect(
+      fields.some((f) => f.dataset.weftEditable === k),
+      k
+    ).toBe(true)
+  for (const f of fields) {
+    const seen = fold(f.textContent)
+    const name = fold(f.getAttribute("aria-label") ?? f.textContent)
+    expect(name, `${f.dataset.weftEditable} ${f.dataset.key}`).not.toBe("")
+    expect(name.includes(seen), `${f.outerHTML.slice(0, 160)}`).toBe(true)
+  }
+}
+
 /** I1.3: a run derived from stock spans — its turn chip, its hole said
  * in full, the refused verbs and save as test — on the server's own
  * bodies (src/test/derived-fixture.ts). */
@@ -455,6 +481,15 @@ const MODES: {
     attrs: { "data-open": "true", "data-position": "right-dock" },
     sel: ".weft-drawer [data-weft-preview-op]",
     act: transcriptEditor,
+    routes: editRoutes,
+    meta: EDIT_META,
+  },
+  {
+    name: "the editable fields at rest: prompt, boundaries, results (P7-fix3)",
+    width: 1024,
+    attrs: { "data-open": "true", "data-position": "right-dock" },
+    sel: '[data-weft-editable="insert"]',
+    act: editableAtRest,
     routes: editRoutes,
     meta: EDIT_META,
   },

@@ -133,7 +133,7 @@ describe("concurrencyWords (UX-E-50, P7-fix)", () => {
     })
     expect(w?.text).toBe("parallelism: 4")
     expect(w?.title).toContain("the run's manifest")
-    expect(w?.title).not.toMatch(/read once its spans load/)
+    expect(w?.title).not.toMatch(/read when its spans are available/)
     expect(concurrencyWords({ manifest: 1 })?.text).toBe("sequential")
     expect(concurrencyWords({ sequentialTools: false })).toBeNull()
   })
@@ -143,7 +143,7 @@ describe("concurrencyWords (UX-E-50, P7-fix)", () => {
     const w = concurrencyWords({ sequentialTools: false, manifest: 4 })
     expect(w?.text).toBe("parallelism: 4")
     expect(w?.title).toContain(
-      "the manifest's value; the run's own setting is read once its spans load"
+      "the manifest's value; the run's own setting is read when its spans are available"
     )
     expect(w?.title).not.toContain("the run's manifest")
     // sequential_tools is the run's own fact: no hedge needed.

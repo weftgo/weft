@@ -68,6 +68,7 @@ import {
 } from "@/lib/stopped-by"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { KindChip, ProblemStrip } from "@/components/studio/problem-badges"
+import type { ToolFactsMap } from "@/lib/error-kind"
 
 /** StoppedByChip is what ended the run (U3.2), in lib/stopped-by.ts's
  * words, linking to the step where it fired; on every status. */
@@ -334,6 +335,7 @@ export function RunHeader({
   sequentialTools,
   overrideParallelism,
   overrideRead,
+  toolFacts,
 }: {
   doc: RunDoc
   folded: FoldedRun
@@ -353,6 +355,10 @@ export function RunHeader({
   /** The run's own invoke_agent span was seen: an absent override is
    * then absent, not unread (P7-fix2). */
   overrideRead?: boolean
+  /** The run's failed tool calls from its spans (toolFactsOf);
+   * undefined until the spans load — the strip's tool errors then
+   * name no kind (P7-fix3). */
+  toolFacts?: ToolFactsMap
 }) {
   const now = useNow(doc.status === "running")
   const title = runTitle(doc)
@@ -513,7 +519,7 @@ export function RunHeader({
         <span>
           {doc.steps} {doc.steps === 1 ? "step" : "steps"}
         </span>
-        <ProblemStrip row={doc} />
+        <ProblemStrip row={doc} toolFacts={toolFacts} />
         {conc ? (
           <span title={conc.title} data-concurrency>
             {conc.text}

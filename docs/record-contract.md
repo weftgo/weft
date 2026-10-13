@@ -941,6 +941,7 @@ page reaches it.
 | `tracer_only` | the `tool_calls` run from an app that wired a tracer and no logger: spans only — `succeeded` from the `Ok` root alone, `steps`/`usage`/`stop_reason` from the span, `weft_version` and `manifest_hash` from the span; the root's `weft.run.events` 0 (`events_emitted` 0: nothing was emitted); `not_recorded` (cause `no_logger`) |
 | `tracer_only_failed` | the `failed` run, spans only: `failed` with the span's description from the `Error` root alone; `events_emitted` 0; `not_recorded` (cause `no_logger`) |
 | `tail_lost` | the `tool_calls` run with every record after its `tool_finish` dropped (step 1's records and `run_finish`), every span kept: `succeeded` from the `Ok` root, not `interrupted`; `events_emitted` above `event_count`: `gap` (cause `events_lost`, "N of M events were lost — the last K events were lost") — the lost tail visible and counted, never a clean success |
+| `records_dropped` | the `tool_calls` run from a destination that had lost 3 records: `weft.records.dropped` 3 (int) on its `run_start` and `run_finish` records (§4; no heartbeat — never stored, and the run is shorter than 10 s). Ingest health reads it (Studio's largest per `service.name`); no row field: `meta` omits it (`obsdb.MetaOf` skips it), no hole names it — the row is `tool_calls`' own without its metadata |
 
 `expect.json` is `{case, description, pending?, derived?, runs: [...]}`;
 each run lists every row field of §6 and `derived` (§9's mark, omitted

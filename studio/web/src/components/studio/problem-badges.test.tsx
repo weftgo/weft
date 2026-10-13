@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { RunDoc, RunRow } from "@/lib/api"
 import { fold } from "@/lib/events"
+import { toolFactsOf } from "@/lib/error-kind"
+import type { ToolFactsMap } from "@/lib/error-kind"
 import { RunHeader } from "@/components/studio/run-header"
 import { RunsTable } from "@/components/studio/runs-table"
 import { renderWithRouter } from "@/test/render"
@@ -246,5 +248,64 @@ describe("the header's tool concurrency (UX-E-50)", () => {
       />
     )
     expect(c2.querySelector("[data-concurrency]")).toBeNull()
+  })
+})
+
+describe("the strip names the failed tools' kinds (P7-fix3)", () => {
+  // agentic.chaos's shape: three failed execute_tool spans of three
+  // kinds — down (a tool error), hangs (a timeout), pending_child (a
+  // Subagent child parked) — plus a DENIED and a RETRY the counter
+  // leaves out, and a child run's span that is not this run's.
+  const span = (call: string, type: string, run = "run_chaos") => ({
+    attrs: {
+      "gen_ai.operation.name": "execute_tool",
+      "weft.run.id": run,
+      "gen_ai.tool.call.id": call,
+      "error.type": type,
+    },
+  })
+  const chaosSpans = [
+    span("c1", "tool_error"),
+    span("c2", "timeout"),
+    span("c3", "SUBAGENT_PENDING"),
+    span("c4", "DENIED"),
+    span("c5", "RETRY"),
+    span("k1", "panic", "run_child"),
+  ]
+  const strip = async (toolFacts?: ToolFactsMap, tool_errors = 3) => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise(() => {}))
+    )
+    vi.stubGlobal("scrollTo", vi.fn())
+    const { container } = await renderWithRouter(
+      <RunHeader
+        doc={{ ...cleanDoc(), tool_errors }}
+        folded={fold([])}
+        eventCount={4}
+        toolFacts={toolFacts}
+      />
+    )
+    return [...statsLine(container).querySelectorAll("[data-strip]")].map(
+      (s) => s.textContent
+    )
+  }
+
+  it("spans loaded: one line, the count then each kind", async () => {
+    expect(await strip(toolFactsOf(chaosSpans, "run_chaos"))).toEqual([
+      "✗3 3 tool errors: tool error ×1, timeout ×1, pending child ×1",
+    ])
+  })
+
+  it("spans not loaded: the count alone, never a guess", async () => {
+    expect(await strip(undefined)).toEqual(["✗3 3 tool errors"])
+  })
+
+  it("a counted call the loaded spans lack is said, not guessed", async () => {
+    expect(
+      await strip(toolFactsOf(chaosSpans.slice(0, 2), "run_chaos"))
+    ).toEqual([
+      "✗3 3 tool errors: tool error ×1, timeout ×1, 1 not in the loaded spans",
+    ])
   })
 })

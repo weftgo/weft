@@ -3669,7 +3669,10 @@ export class WeftDevtools extends HTMLElement {
       shown.setAttribute("data-weft-editable", k)
       shown.setAttribute("role", "button")
       shown.setAttribute("tabindex", "0")
-      shown.setAttribute("aria-label", `edit ${label}`)
+      // Its name is its visible text (axe's label-content-name-mismatch);
+      // "edit …" is the title, its description. Only an empty field
+      // (a "" result) takes it as its name (P7-fix3).
+      if (!shown.textContent) shown.setAttribute("aria-label", `edit ${label}`)
       shown.title = `edit ${label}`
       on(shown, "click", open)
       on(shown, "keydown", (e) => {

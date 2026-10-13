@@ -192,6 +192,41 @@ export function statsStrip(r: ProblemRow & { steps: number }): string[] {
   ]
 }
 
+// The error.types the tool_errors counter leaves out (obsdb/problems.go
+// ToolErrors): DENIED is counted as denied, RETRY is the intended
+// repair loop, a context error is the run's cancellation.
+const NOT_TOOL_ERRORS = [
+  "DENIED",
+  "RETRY",
+  "context.Canceled",
+  "context.DeadlineExceeded",
+]
+
+/** toolErrorKinds words the kinds behind the tool_errors counter from
+ * the run's loaded execute_tool spans (toolFactsOf): "timeout ×1, tool
+ * error ×1, pending child ×1", in first-seen order. undefined while the
+ * spans are not loaded (facts undefined) or name no failed call — the
+ * strip then reads its count alone, never a guess. Calls the counter
+ * holds but the loaded spans do not are said as such. */
+export function toolErrorKinds(
+  facts: ToolFactsMap | undefined,
+  count: number
+): string | undefined {
+  if (!facts) return undefined
+  const by = new Map<string, number>()
+  let seen = 0
+  for (const f of facts.values()) {
+    if (NOT_TOOL_ERRORS.includes(f.error_type)) continue
+    const w = toolFailure(f.error_type, f)!.word
+    by.set(w, (by.get(w) ?? 0) + 1)
+    seen++
+  }
+  if (seen === 0) return undefined
+  const out = [...by].map(([w, k]) => `${w} ×${k}`)
+  if (count > seen) out.push(`${count - seen} not in the loaded spans`)
+  return out.join(", ")
+}
+
 /** A tool call's failure kind as a pill (UX-S2-05): the execute_tool
  * span's error.type and the attributes beside it. DENIED · policy vs ·
  * approval and INTERNAL · masked are U23.1's (weft.tool.denied_by,
@@ -243,6 +278,11 @@ export function toolFailure(
       }
     case "tool_error":
       return { word: "tool error", hint: "the handler returned an error" }
+    case "SUBAGENT_PENDING":
+      return {
+        word: "pending child",
+        hint: "a Subagent child run parked awaiting a decision (ADR 0014)",
+      }
   }
   return { word: errorType, hint: "the ToolError code " + errorType }
 }

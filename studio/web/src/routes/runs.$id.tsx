@@ -860,6 +860,7 @@ function RunPage() {
             sequentialTools={requestsQ.data?.requests[0]?.body.sequential_tools}
             overrideParallelism={overrideParallelism(spans.data?.spans, id)}
             overrideRead={hasInvokeAgent(spans.data?.spans, id)}
+            toolFacts={spans.data ? toolFacts : undefined}
           />
           {evicted ? (
             <p

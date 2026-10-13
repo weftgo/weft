@@ -2,8 +2,8 @@
 // lib/error-kind.ts's one table — the runs table's badges line, the run
 // header's kind chip and stats strip. Badges only on problems: a clean
 // run draws nothing.
-import { kindChip, problemBadges } from "@/lib/error-kind"
-import type { ProblemRow } from "@/lib/error-kind"
+import { kindChip, problemBadges, toolErrorKinds } from "@/lib/error-kind"
+import type { ProblemRow, ToolFactsMap } from "@/lib/error-kind"
 
 /** The kind chip's class per tone: the cancelled tone is its own (the
  * run's context ended), a plain class until U1's status vocabulary. */
@@ -63,17 +63,34 @@ export function ProblemBadges({
 
 /** ProblemStrip is the run header's loop summary beside the step count
  * (UX-A-40): each problem in words — "↻2 2 model attempts retried" —
- * nothing on a clean run. */
-export function ProblemStrip({ row }: { row: ProblemRow }) {
+ * nothing on a clean run. The tool errors name their kinds from the
+ * run's loaded spans (toolFacts; P7-fix3) — "✗3 3 tool errors:
+ * timeout ×1, tool error ×1, pending child ×1" — and their count alone
+ * while the spans are not loaded. */
+export function ProblemStrip({
+  row,
+  toolFacts,
+}: {
+  row: ProblemRow
+  /** toolFactsOf over the run's spans; undefined until they load. */
+  toolFacts?: ToolFactsMap
+}) {
   const bs = problemBadges(row)
   if (bs.length === 0) return null
   return (
     <>
-      {bs.map((b) => (
-        <span key={b.key} data-strip={b.key} title={b.label}>
-          {b.glyph} {b.label}
-        </span>
-      ))}
+      {bs.map((b) => {
+        const kinds =
+          b.key === "tool_errors"
+            ? toolErrorKinds(toolFacts, row.tool_errors ?? 0)
+            : undefined
+        const label = kinds ? `${b.label}: ${kinds}` : b.label
+        return (
+          <span key={b.key} data-strip={b.key} title={label}>
+            {b.glyph} {label}
+          </span>
+        )
+      })}
     </>
   )
 }

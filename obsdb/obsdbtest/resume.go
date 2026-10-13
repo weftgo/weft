@@ -39,7 +39,7 @@ func resumeLink(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		link := map[string]any{"weft.resumed_from": "rl_parked", "weft.resume.calls": "c1=denied,c2=approved"}
 		resumerRoot := root("rl_resume", '2', map[string]any{
 			"weft.resumed_from": "rl_parked", "weft.resume.calls": "c1=denied,c2=approved",
-			"weft.run.denied": int64(1), "weft.approval.actor": "ops@acme",
+			"weft.run.denied": int64(1), "weft.approval.actor": "op_42",
 		})
 		denied := obsdb.Span{
 			TraceID: resumerRoot.TraceID, SpanID: "7300000000000001", ParentSpanID: resumerRoot.SpanID,
@@ -79,8 +79,8 @@ func resumeLink(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 					t.Errorf("resume meta carries contract key %s: %v", k, r.Meta)
 				}
 			}
-			if r.Meta["weft.approval.actor"] != "ops@acme" {
-				t.Errorf("resume meta = %v, want weft.approval.actor ops@acme", r.Meta)
+			if r.Meta["weft.approval.actor"] != "op_42" {
+				t.Errorf("resume meta = %v, want weft.approval.actor op_42", r.Meta)
 			}
 			page, err := db.Runs(ctx(), obsdb.RunQuery{Limit: 50})
 			if err != nil {

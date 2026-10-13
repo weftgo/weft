@@ -859,6 +859,7 @@ function RunPage() {
             gaps={stream.gaps}
             sequentialTools={requestsQ.data?.requests[0]?.body.sequential_tools}
             overrideParallelism={overrideParallelism(spans.data?.spans, id)}
+            overrideRead={hasInvokeAgent(spans.data?.spans, id)}
           />
           {evicted ? (
             <p

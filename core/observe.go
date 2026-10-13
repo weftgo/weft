@@ -493,7 +493,9 @@ func ceilMS(d time.Duration) int64 {
 // invoke_agent — and ends when callTool returns, before ToolFinish is
 // emitted; a counted RETRY's span alone ends after its batch, when its
 // retry mark is known, stamped with the moment the call returned (end),
-// so its duration is still the call's. A zero end is now. c is the Call the loop placed on the context; seq is the
+// so its duration is still the call's; its Debug "tool call" log line,
+// written by the same func, is therefore logged after the batch too (its
+// duration still the call's). A zero end is now. c is the Call the loop placed on the context; seq is the
 // ToolStart's Seq. A parked (approval) call ends with weft.tool.pending
 // set and no error status: the call did not fail, it was not made. An
 // error result sets Error status with error.type only — never the result

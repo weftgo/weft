@@ -139,7 +139,10 @@ export function statusOf(
     const t = runs?.find((x) => x.id === next)?.turn
     // shortId's cut inlined: importing lib/title.ts here reorders the
     // bundle (U1-fix).
-    const to = t ? `t${t}` : next.length > 16 ? `${next.slice(0, 8)}…` : next
+    // A thread turn's run id (<session>-t<n>) not in the loaded runs
+    // still names its turn: t<n>, never a cut that loses it.
+    const tn = t ?? /-t(\d+)$/.exec(next)?.[1]
+    const to = tn ? `t${tn}` : next.length > 16 ? `${next.slice(0, 8)}…` : next
     return {
       key: "resumed",
       ...STATUS.resumed,

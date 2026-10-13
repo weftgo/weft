@@ -333,6 +333,7 @@ export function RunHeader({
   gaps,
   sequentialTools,
   overrideParallelism,
+  overrideRead,
 }: {
   doc: RunDoc
   folded: FoldedRun
@@ -349,6 +350,9 @@ export function RunHeader({
   /** The run's weft.override.parallelism (overrideOf): the concurrency
    * a run option or a playground override set, ahead of both. */
   overrideParallelism?: number
+  /** The run's own invoke_agent span was seen: an absent override is
+   * then absent, not unread (P7-fix2). */
+  overrideRead?: boolean
 }) {
   const now = useNow(doc.status === "running")
   const title = runTitle(doc)
@@ -371,6 +375,7 @@ export function RunHeader({
   })
   const conc = concurrencyWords({
     override: overrideParallelism,
+    overrideRead,
     sequentialTools,
     manifest: stored.data?.manifest.agents[0]?.policy.parallelism,
   })

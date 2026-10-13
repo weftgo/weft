@@ -39,7 +39,7 @@ func TestResumeLinkFixtures(t *testing.T) {
 	if parked.Pending != 2 || parked.ResumedBy != resume.ID || parked.ResumedFrom != "" {
 		t.Errorf("parked row = %+v, want pending 2, resumed_by %s", parked, resume.ID)
 	}
-	if resume.ResumedFrom != parked.ID || resume.ResumedBy != "" || resume.Meta["weft.approval.actor"] != "ops@acme" {
+	if resume.ResumedFrom != parked.ID || resume.ResumedBy != "" || resume.Meta["weft.approval.actor"] != "op_42" {
 		t.Errorf("resume row = %+v, want resumed_from %s and the actor in meta", resume, parked.ID)
 	}
 	_, _, doc := get(t, h, "/studio/api/runs/"+parked.ID)

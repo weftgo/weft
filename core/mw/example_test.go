@@ -180,12 +180,14 @@ func ExampleAudit() {
 func Example_rateLimitMiddleware() {
 	const interval = 20 * time.Millisecond
 	var mu sync.Mutex
-	var nextAt time.Time // the first call's slot is the moment it arrives
+	var nextAt time.Time // the next free slot
 	reserve := func() time.Duration {
 		mu.Lock()
 		defer mu.Unlock()
-		if nextAt.IsZero() {
-			nextAt = time.Now()
+		// A slot in the past is pulled up to now: idle time is never
+		// banked, so the calls after a quiet stretch are still spaced.
+		if now := time.Now(); nextAt.Before(now) {
+			nextAt = now
 		}
 		wait := time.Until(nextAt)
 		if wait < 0 {

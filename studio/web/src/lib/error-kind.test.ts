@@ -191,9 +191,17 @@ describe("attempt error types (UX-S2-15)", () => {
       word: "no bytes from the provider within the adapter's idle timeout",
       title: "error.type stream_idle",
     })
+    // One wording with the run chip's (P7-fix2).
     expect(attemptError("model_requests_denied").word).toBe(
-      "WEFT_MODEL_REQUESTS=deny: the kill switch is on"
+      "denied by the kill switch (WEFT_MODEL_REQUESTS)"
     )
+    expect(attemptError("model_requests_denied").word).toBe(
+      errorKind("model_requests_denied")!.word
+    )
+    expect(attemptError("unsupported")).toEqual({
+      word: "the model cannot honour part of this request (ErrUnsupported)",
+      title: "error.type unsupported",
+    })
     expect(attemptError("model_error").word).toBe(
       "provider error (see the status)"
     )

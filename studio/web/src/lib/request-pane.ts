@@ -30,9 +30,13 @@ export const CHIP_PROMPT_CHANGED = "prompt changed at this step"
  * read off its invoke_agent span) first; else the request record's
  * sequential_tools (true exactly when the effective Parallelism was 1);
  * else the cap from the run's stored manifest (policy.parallelism).
- * 1 reads "sequential" whichever says it; null when none says. */
+ * 1 reads "sequential" whichever says it; null when none says.
+ * overrideRead says the run's own invoke_agent span was seen: until
+ * it is, a missing override is unknown, not absent, and the manifest's
+ * value is drawn as that — the manifest's, never the run's (P7-fix2). */
 export function concurrencyWords(c: {
   override?: number
+  overrideRead?: boolean
   sequentialTools?: boolean
   manifest?: number
 }): { text: string; title: string } | null {
@@ -51,7 +55,12 @@ export function concurrencyWords(c: {
   if (c.sequentialTools)
     return words(1, "the request record's sequential_tools")
   if (c.manifest !== undefined && c.manifest > 0)
-    return words(c.manifest, "the run's manifest")
+    return words(
+      c.manifest,
+      c.overrideRead
+        ? "the run's manifest"
+        : "the manifest's value; the run's own setting is read once its spans load"
+    )
   return null
 }
 

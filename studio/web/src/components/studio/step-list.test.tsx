@@ -10,7 +10,7 @@ import { describe, expect, it, vi } from "vitest"
 import { stepQuery } from "@/lib/api"
 import type { EventsPage, RunDoc, StepDoc, WireEvent } from "@/lib/api"
 import { fold } from "@/lib/events"
-import { REPAIRED, REPAIRED_RESULT, toolFactsOf } from "@/lib/error-kind"
+import { toolFactsOf } from "@/lib/error-kind"
 import { resultCapReason } from "@/lib/honesty"
 import { StepList } from "@/components/studio/step-list"
 import { renderWithRouter } from "@/test/render"
@@ -557,7 +557,7 @@ describe("StepList's subagent child rows (A10)", () => {
   })
 })
 
-describe("the loop and Repair marks (UX-S1-07, UX-S1-08)", () => {
+describe("the loop marks (UX-S1-07)", () => {
   /** One step calling poll({}) and its result. */
   const step = (i: number, content = "pending"): WireEvent[] => [
     { type: "step_start", run_id: "r_l", index: i },
@@ -641,26 +641,5 @@ describe("the loop and Repair marks (UX-S1-07, UX-S1-08)", () => {
       <StepList events={events} folded={fold(events)} doc={doc} />
     )
     expect(document.querySelector("[data-loop-repeat]")).toBeNull()
-  })
-
-  it("badges Repair's synthesised result, not as the tool's error", async () => {
-    const events: WireEvent[] = [
-      { type: "run_start", id: "r_l", model: { provider: "p", name: "m" } },
-      ...step(0, REPAIRED_RESULT),
-    ]
-    const doc = {
-      ...subDoc,
-      id: "r_l",
-      children: [],
-      status: "succeeded",
-    } as RunDoc
-    await renderWithRouter(
-      <StepList events={events} folded={fold(events)} doc={doc} />
-    )
-    const pill = document.querySelector<HTMLElement>(
-      '[data-call="c0"] [data-tool-pill="repaired"]'
-    )!
-    expect(pill.textContent).toBe(REPAIRED.word)
-    expect(pill.title).toBe(REPAIRED.hint)
   })
 })

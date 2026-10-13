@@ -160,6 +160,22 @@ describe("statusOf (U1-fix)", () => {
     })
   })
 
+  it("a thread resumer id not in the loaded runs reads its turn, t<n>, never cut (U13.1-fix review)", () => {
+    const id = "s_0123456789abcdef0123-t12"
+    const s = statusOf({
+      id: "r_gen",
+      status: "succeeded",
+      pending: 1,
+      resumed_by: id,
+    })
+    expect(s).toMatchObject({
+      word: "parked → t12",
+      detail: "1 call decided · resumed in t12",
+      hint: `1 call decided · resumed in t12 (${id})`,
+      resumedBy: id,
+    })
+  })
+
   it("the panel's filter picks name every key a turn can read, the decided park included", () => {
     expect(FILTER_KEYS).toEqual([
       "running",

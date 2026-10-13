@@ -5691,7 +5691,7 @@ func TestResumeLinksTheParkedRun(t *testing.T) {
 	}
 	v, second, err := core.GenerateAs[verdict](context.Background(), agt,
 		core.Messages(first.Messages...), core.Approve("rf1"), core.Resolve("n1", "noted by hand"),
-		core.ResumeOf(first.ID), core.Metadata(map[string]string{"weft.approval.actor": "ops@acme"}))
+		core.ResumeOf(first.ID), core.Metadata(map[string]string{"weft.approval.actor": "op_42"}))
 	if err != nil || !v.Refunded {
 		t.Fatalf("resume: verdict %+v, err %v", v, err)
 	}
@@ -5714,7 +5714,7 @@ func TestResumeLinksTheParkedRun(t *testing.T) {
 	for k, want := range map[string]string{
 		"weft.resumed_from":   first.ID,
 		"weft.resume.calls":   "rf1=approved,n1=resolved",
-		"weft.approval.actor": "ops@acme",
+		"weft.approval.actor": "op_42",
 	} {
 		if got := resumer[k]; got != want {
 			t.Errorf("resuming run's span %s = %q, want %q", k, got, want)
@@ -5733,7 +5733,7 @@ func TestResumeLinksTheParkedRun(t *testing.T) {
 			}
 		case second.ID:
 			if r.attr("weft.resumed_from") != first.ID || r.attr("weft.resume.calls") != "rf1=approved,n1=resolved" ||
-				r.attr("weft.approval.actor") != "ops@acme" {
+				r.attr("weft.approval.actor") != "op_42" {
 				t.Errorf("resuming run_start = from %q, calls %q, actor %q", r.attr("weft.resumed_from"),
 					r.attr("weft.resume.calls"), r.attr("weft.approval.actor"))
 			}

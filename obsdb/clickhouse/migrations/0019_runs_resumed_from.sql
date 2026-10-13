@@ -5,10 +5,11 @@
 -- weft.resumed_from on its invoke_agent span and run_start record):
 -- weft_runs.ResumedFrom keeps it, max() like every identity column.
 -- The reverse link — a parked run's resumed_by — is not a column: the
--- reader derives it (the largest RunId whose ResumedFrom names the
--- row, fillCounts beside the counts), so a resumer ingested before or
--- after the parked run links it alike and no row is ever written for a
--- parked run that is not stored. idx_resumed_from serves that lookup.
+-- reader derives it (the latest by start time (a tie: the larger id)
+-- whose ResumedFrom names the row, fillCounts beside the counts), so a
+-- resumer ingested before or after the parked run links it alike and
+-- no row is ever written for a parked run that is not stored.
+-- idx_resumed_from serves that lookup.
 --
 -- The core gains four contract attributes — weft.resumed_from,
 -- weft.resume.calls (a resume's decision per parked call), and on a

@@ -1067,10 +1067,11 @@ func (s *Session) runTurn(persist, ctx context.Context, item workItem, callerOpt
 		var parkedRun, actor string
 		s.locked(func() {
 			decisions = s.danglingDecisionsLocked(t.resume)
-			// Any turn the recorded decisions ride links its boundary —
-			// a resume turn, or a plain Send after a Decide that did not
-			// auto-resume: core stamps weft.resume.calls either way, so
-			// the link and the actor come with it (U13.1-fix).
+			// The turn the recorded decisions ride links its boundary.
+			// Defensive: today only resume turns carry decisions (ADR
+			// 0021 §1 — boundaryLocked keeps every plain Send queued
+			// while calls dangle); should another turn ever carry them,
+			// the link comes with them (U13.1-fix).
 			if len(decisions) > 0 {
 				parkedRun, actor = s.resumeLinkLocked()
 			}

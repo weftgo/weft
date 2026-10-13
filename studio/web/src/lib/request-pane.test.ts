@@ -126,11 +126,30 @@ describe("concurrencyWords (UX-E-50, P7-fix)", () => {
     expect(w?.title).toContain("sequential_tools")
   })
   it("then the manifest; null when none says", () => {
-    const w = concurrencyWords({ sequentialTools: false, manifest: 4 })
+    const w = concurrencyWords({
+      sequentialTools: false,
+      manifest: 4,
+      overrideRead: true,
+    })
     expect(w?.text).toBe("parallelism: 4")
-    expect(w?.title).not.toMatch(/may have/)
+    expect(w?.title).toContain("the run's manifest")
+    expect(w?.title).not.toMatch(/read once its spans load/)
     expect(concurrencyWords({ manifest: 1 })?.text).toBe("sequential")
     expect(concurrencyWords({ sequentialTools: false })).toBeNull()
+  })
+  it("the manifest's value is hedged until the run's spans are read (P7-fix2)", () => {
+    // Parallelism(4) at New, Parallelism(2) per run: while running, or
+    // without the requests capability, the override is unread.
+    const w = concurrencyWords({ sequentialTools: false, manifest: 4 })
+    expect(w?.text).toBe("parallelism: 4")
+    expect(w?.title).toContain(
+      "the manifest's value; the run's own setting is read once its spans load"
+    )
+    expect(w?.title).not.toContain("the run's manifest")
+    // sequential_tools is the run's own fact: no hedge needed.
+    expect(
+      concurrencyWords({ sequentialTools: true, manifest: 4 })?.title
+    ).not.toMatch(/read once/)
   })
   it("overrideParallelism reads the run's own invoke_agent span", () => {
     expect(

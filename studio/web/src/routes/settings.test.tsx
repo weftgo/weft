@@ -243,7 +243,9 @@ describe("the settings page renders every section from the goldens", () => {
     await openSettings()
     const line = document.querySelector("[data-logs-bridge]")!
     expect(line.textContent).toBe(LOGS_BRIDGE)
-    expect(line.textContent).toContain("otel.Slog() arrives in 0.17.0")
+    expect(line.textContent).toContain(
+      "a slog→OTel bridge (otel.Slog) is planned"
+    )
   })
 
   it("the sidebar links it and the palette's entry lands on it", async () => {

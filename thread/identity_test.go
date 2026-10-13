@@ -14,6 +14,7 @@ package thread_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strconv"
@@ -901,44 +902,77 @@ func TestDecisionsLinkWhicheverTurnAppliesThem(t *testing.T) {
 // span, so a tracer whose SpanContext panics still leaves step 0's
 // messages durable while step 1 runs, not only at the turn's end.
 func TestReportingPanicKeepsPerStepPersistence(t *testing.T) {
-	tp := &idTracerProvider{panicSpanContext: true}
-	ctx := context.Background()
-	var s *thread.Session
-	var seen []string
-	lookup := core.Tool("lookup", "Look up.", func(context.Context, struct{}) (string, error) {
-		return "found it", nil
-	})
-	check := core.Tool("check", "Check.", func(context.Context, struct{}) (string, error) {
-		for _, e := range s.Entries() {
-			if me, ok := e.(thread.MessageEntry); ok {
-				for _, p := range me.Message.Content {
-					if r, ok := p.(core.ToolResultPart); ok {
-						seen = append(seen, r.Content)
+	// run sends one turn of the same script, with opts on the agent, and
+	// returns the message entries on its path, its TurnEntry and the
+	// tool results the second tool saw on the tree while it ran.
+	run := func(opts ...core.Option) (msgs []core.Message, te thread.TurnEntry, seen []string) {
+		t.Helper()
+		ctx := context.Background()
+		var s *thread.Session
+		lookup := core.Tool("lookup", "Look up.", func(context.Context, struct{}) (string, error) {
+			return "found it", nil
+		})
+		check := core.Tool("check", "Check.", func(context.Context, struct{}) (string, error) {
+			for _, e := range s.Entries() {
+				if me, ok := e.(thread.MessageEntry); ok {
+					for _, p := range me.Message.Content {
+						if r, ok := p.(core.ToolResultPart); ok {
+							seen = append(seen, r.Content)
+						}
 					}
 				}
 			}
+			return "checked", nil
+		})
+		agent := core.New(wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "lookup", ID: "l1", Args: `{}`}),
+			wefttest.ToolCalls(wefttest.Call{Name: "check", ID: "c1", Args: `{}`}),
+			wefttest.Say("done"),
+		), append([]core.Option{lookup, check}, opts...)...)
+		var err error
+		s, err = thread.Create(ctx, thread.Memory(), agent)
+		if err != nil {
+			t.Fatal(err)
 		}
-		return "checked", nil
-	})
-	agent := core.New(wefttest.Script(
-		wefttest.ToolCalls(wefttest.Call{Name: "lookup", ID: "l1", Args: `{}`}),
-		wefttest.ToolCalls(wefttest.Call{Name: "check", ID: "c1", Args: `{}`}),
-		wefttest.Say("done"),
-	), core.TracerProvider(tp), lookup, check)
-	var err error
-	s, err = thread.Create(ctx, thread.Memory(), agent)
-	if err != nil {
-		t.Fatal(err)
+		defer func() { _ = s.Close(ctx) }()
+		turn, err := s.Send(ctx, core.User("look it up"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := turn.Wait(); err != nil {
+			t.Fatal(err)
+		}
+		path, err := s.Path(s.Leaf())
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, e := range path {
+			if me, ok := e.(thread.MessageEntry); ok {
+				msgs = append(msgs, me.Message)
+			}
+		}
+		tes := turnEntries(s)
+		if len(tes) != 1 {
+			t.Fatalf("%d turn entries, want 1", len(tes))
+		}
+		return msgs, tes[0], seen
 	}
-	defer func() { _ = s.Close(ctx) }()
-	turn, err := s.Send(ctx, core.User("look it up"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := turn.Wait(); err != nil {
-		t.Fatal(err)
-	}
+	got, te, seen := run(core.TracerProvider(&idTracerProvider{panicSpanContext: true}))
 	if !slices.Contains(seen, "found it") {
 		t.Errorf("step 0's tool result was not durable while step 1 ran (results on the tree: %q): a reporting panic skipped the per-step append", seen)
+	}
+	// T4: each step appended once, nothing late.
+	if te.LateSteps != 0 {
+		t.Errorf("TurnEntry.LateSteps = %d, want 0: no per-step append failed", te.LateSteps)
+	}
+	// The prompt, three assistant messages and two tool messages.
+	if len(got) != 6 {
+		t.Errorf("%d messages on the path, want 6: %+v", len(got), got)
+	}
+	want, _, _ := run()
+	gj, _ := json.Marshal(got)
+	wj, _ := json.Marshal(want)
+	if string(gj) != string(wj) {
+		t.Errorf("the path's messages under a panicking tracer differ from a run with none:\n got %s\nwant %s", gj, wj)
 	}
 }

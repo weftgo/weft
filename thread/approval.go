@@ -1625,9 +1625,10 @@ func (s *Session) expiredPendingLocked(now time.Time) []Request {
 const approvalActorKey = "weft.approval.actor"
 
 // resumeLinkLocked is what a run applying decisions reports about the
-// boundary it resolves (UX-E-17) — a resume turn, or any turn the
-// recorded decisions ride (AutoResume off, then a plain Send): the run that parked its calls — the request
-// entries' run id, the run core.ResumeOf names — and the actors of the
+// boundary it resolves (UX-E-17) — a resume turn. Defensive: today
+// only resume turns carry decisions (ADR 0021 §1); should another turn
+// ever carry them, the link comes with them. It names the run that
+// parked its calls — the request entries' run id, the run core.ResumeOf names — and the actors of the
 // decisions in force (approvalActorKey's value). Both "" with nothing
 // dangling. Callers hold s.mu.
 func (s *Session) resumeLinkLocked() (parkedRun, actor string) {

@@ -442,7 +442,6 @@ describe("no panel-only badge strings", () => {
     'element.ts|"subagent"',
     "element.ts|, ms)", // the call's wall time
     'element.ts|"error"', // a tool error result (data, rule 1)
-    "element.ts|REPAIRED.word", // Repair's synthesised result (UX-S1-08)
     "request.ts|data-weft-mark", // E1.2's change chips
     "request.ts|request could not be read",
     "request.ts|data-weft-attempts",

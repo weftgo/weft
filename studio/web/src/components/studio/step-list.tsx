@@ -29,7 +29,7 @@ import {
 } from "react"
 
 import { stepQuery } from "@/lib/api"
-import { isRepaired, REPAIRED, toolFailure } from "@/lib/error-kind"
+import { toolFailure } from "@/lib/error-kind"
 import type { ToolFactsMap } from "@/lib/error-kind"
 import { CacheHint, Cost, useCostCapable } from "@/components/studio/cost"
 import { AppSteer, ParkedCalls } from "@/components/studio/parked-calls"
@@ -242,13 +242,7 @@ function CallPill({
   const fact = useContext(ToolFactsCtx)?.get(call.callId)
   if (!r) return null
   const coded = r.isError ? CODED.exec(r.content) : null
-  // Repair's synthesised result is no tool's error (UX-S1-08).
-  const f =
-    r.isError && isRepaired(r.content)
-      ? REPAIRED
-      : r.isError && fact
-        ? toolFailure(fact.error_type, fact)
-        : null
+  const f = r.isError && fact ? toolFailure(fact.error_type, fact) : null
   const cut = truncation(r.content)
   return (
     <span className="flex items-center gap-1.5">
@@ -259,7 +253,7 @@ function CallPill({
             f?.hint ??
             "error as data: the model saw this result and could recover"
           }
-          data-tool-pill={f === REPAIRED ? "repaired" : fact?.error_type}
+          data-tool-pill={fact?.error_type}
         >
           {f?.word ?? (coded ? coded[1] : "tool error")}
         </span>

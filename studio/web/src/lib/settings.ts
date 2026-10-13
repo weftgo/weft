@@ -445,4 +445,4 @@ export function mcpCommand(studioURL: string, authRequired?: boolean): string {
  * records need only its LoggerProvider; an out-of-loop Agent.CallTool
  * is no run and records nothing. */
 export const LOGS_BRIDGE =
-  "weft's records arrive with weft.LoggerProvider / otel.Install; the app's slog lines need a bridge to OTel logs — otel.Slog() arrives in 0.17.0. An Agent.CallTool outside a run records nothing."
+  "weft's records arrive with weft.LoggerProvider / otel.Install; the app's slog lines need a bridge to OTel logs — a slog→OTel bridge (otel.Slog) is planned. An Agent.CallTool outside a run records nothing."

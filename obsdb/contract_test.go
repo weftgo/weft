@@ -1858,7 +1858,7 @@ func genCases() []genCase {
 				}
 				v, second, err := core.GenerateAs[verdict](ctx, agt, core.Messages(first.Messages...),
 					core.Approve(first.Pending[0].ID), core.Resolve(first.Pending[1].ID, "noted by hand"),
-					core.ResumeOf(first.ID), core.Metadata(map[string]string{"weft.approval.actor": "ops@acme"}))
+					core.ResumeOf(first.ID), core.Metadata(map[string]string{"weft.approval.actor": "op_42"}))
 				if err != nil || !v.Refunded {
 					t.Fatalf("resume: verdict %+v, err %v", v, err)
 				}

@@ -255,7 +255,11 @@ export function toolFailure(
 // a number.
 const ATTEMPT_WORDS: Record<string, string | undefined> = {
   stream_idle: "no bytes from the provider within the adapter's idle timeout",
-  model_requests_denied: "WEFT_MODEL_REQUESTS=deny: the kill switch is on",
+  // One wording with the run's chip (P7-fix2).
+  model_requests_denied: WORDS.model_requests_denied,
+  // core.ErrUnsupported's godoc: a Model that cannot honour part of a
+  // request.
+  unsupported: "the model cannot honour part of this request (ErrUnsupported)",
   model_error: "provider error (see the status)",
   "context.Canceled": CANCELLED,
   "context.DeadlineExceeded": "deadline",
@@ -289,8 +293,10 @@ export function attemptError(errorType?: string): {
  * matched whole. */
 export const REPAIRED_RESULT = "no result recorded: the call was interrupted"
 
-/** A Repair-synthesised result's words: a tool result row's pill and
- * a request message line read them. */
+/** A Repair-synthesised result's words: the request message lines
+ * (compaction.ts messageLine) read them — the one surface that can see
+ * it. No tool_finish ever carries this text: Repair writes it into a
+ * later run's input transcript only (P7-fix2). */
 export const REPAIRED = {
   word: "synthesised by Repair",
   hint: "no tool ran: weft.Repair wrote this result for a call whose result never arrived (matched on its text)",

@@ -72,7 +72,7 @@
       "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
       "weft_version": "v0.0.0-contract",
       "meta": {
-        "weft.approval.actor": "ops@acme"
+        "weft.approval.actor": "op_42"
       },
       "started": "2026-10-01T09:21:00.008Z",
       "finished": "2026-10-01T09:21:00.025Z",

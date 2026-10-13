@@ -116,7 +116,23 @@ const (
 	// lost"). It replaces tail_lost and no_logger's guess wherever the
 	// root carries the count.
 	CauseEventsLost HoleCause = "events_lost"
+	// CauseMetadataCap: the core's metadata limits dropped pairs of the
+	// run's Metadata (64 keys, a key over 128 bytes, a value over
+	// 1 KiB — dropped whole, never cut; weft.metadata.dropped on its
+	// invoke_agent span, Problems.MetadataDropped; truncated:
+	// MetadataCapReason counts them).
+	CauseMetadataCap HoleCause = "metadata_cap"
 )
+
+// MetadataCapReason is the metadata_cap hole's reason with the count:
+// "N metadata pairs dropped (limit 64 keys / 1 KiB values)".
+func MetadataCapReason(n int64) string {
+	pairs := "pairs"
+	if n == 1 {
+		pairs = "pair"
+	}
+	return fmt.Sprintf("%d metadata %s dropped (limit 64 keys / 1 KiB values): no span or record of the run carries them", n, pairs)
+}
 
 // queueFix is the knob every gap's fix names (UX-A-41): the destination
 // queue the records waited in, the dev-only wait, the app's own WARN
@@ -125,7 +141,7 @@ const queueFix = "raise the destination's queue: otel.QueueSize(n) on it (Studio
 
 // HoleCauses lists the causes the table words, in order.
 func HoleCauses() []HoleCause {
-	return []HoleCause{CauseNoSpans, CauseResultCap, CauseLogCap, CauseNoPublicID, CauseDevTokenOnly, CauseNotServed, CauseResponseCap, CauseRawOff, CauseStockSpans, CauseNoLogger, CauseTailLost, CauseEventsLost}
+	return []HoleCause{CauseNoSpans, CauseResultCap, CauseLogCap, CauseNoPublicID, CauseDevTokenOnly, CauseNotServed, CauseResponseCap, CauseRawOff, CauseStockSpans, CauseNoLogger, CauseTailLost, CauseEventsLost, CauseMetadataCap}
 }
 
 var causeNotes = map[Hole]map[HoleCause]holeNote{
@@ -185,6 +201,10 @@ var causeNotes = map[Hole]map[HoleCause]holeNote{
 		CauseResponseCap: {
 			"this response reads a bounded number of steps and the run has more: the later steps were not compared, nothing was lost",
 			"open the later steps one by one (runs/{id}/steps/{n})",
+		},
+		CauseMetadataCap: {
+			"metadata pairs over the core's limits were dropped whole",
+			"send fewer or smaller pairs (weft.Metadata: 64 keys, 1 KiB values)",
 		},
 	},
 }
@@ -373,14 +393,26 @@ type RequestModel struct {
 // Content is HoleTruncated when a destination's cap cut Text
 // (TruncatedBytes > 0), HoleDerived when the body did not parse (a
 // malformed producer; Hash is then the weft.system.hash attribute). Hash
-// is over the text before the cut.
+// is over the text before the cut. Segments attribute Text to its
+// sources — the instructions and each tool's PromptSnippet (UX-S2-11;
+// docs/record-contract.md §4) — nil when the producer sent none (no
+// tool contributed a snippet, a cap cut the text, or a writer before
+// the field).
 type PromptRecord struct {
 	Index          int64
 	Time           time.Time
 	Hash           string
 	Text           string
+	Segments       []PromptSegment
 	Content        Hole
 	TruncatedBytes int64
+}
+
+// PromptSegment is one source's share of a composed system text:
+// Source "instructions" or "tool:<name>".
+type PromptSegment struct {
+	Source string `json:"source"`
+	Text   string `json:"text"`
 }
 
 // ToolsRecord is one stored tools record (ADR 0028 §5): the catalog of
@@ -653,8 +685,9 @@ func firstSet(attr, body string) string {
 // the hash of the record's weft.system.hash attribute.
 func PromptRecordOf(r StoredRecord) PromptRecord {
 	var b struct {
-		Hash string `json:"hash"`
-		Text string `json:"text"`
+		Hash     string          `json:"hash"`
+		Text     string          `json:"text"`
+		Segments []PromptSegment `json:"segments"`
 	}
 	out := PromptRecord{Index: r.Index, Time: r.Time, Content: contentHole("", r.TruncatedBytes), TruncatedBytes: r.TruncatedBytes}
 	if json.Unmarshal(r.Body, &b) != nil {
@@ -662,6 +695,9 @@ func PromptRecordOf(r StoredRecord) PromptRecord {
 		return out
 	}
 	out.Hash, out.Text = firstSet(r.SystemHash, b.Hash), b.Text
+	if len(b.Segments) > 0 && r.TruncatedBytes == 0 {
+		out.Segments = b.Segments
+	}
 	return out
 }
 

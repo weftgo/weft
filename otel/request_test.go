@@ -333,3 +333,41 @@ func TestCapToolsMatchesReencodeEachDrop(t *testing.T) {
 		}
 	}
 }
+
+// A prompt record's segments (record contract §4, UX-S2-11) never
+// carry bytes the shaped text does not: a redactor that rewrites the
+// text rewrites each segment the same way, a cap that cut the text
+// drops them, and an untouched body is left as it came (nil).
+func TestShapePromptSegments(t *testing.T) {
+	body := `{"hash":"h","text":"You are SECRET.\n\nUse lookup.","segments":[{"source":"instructions","text":"You are SECRET."},{"source":"tool:lookup","text":"Use lookup."}]}`
+	type seg struct{ Source, Text string }
+	decode := func(b []byte) (text string, segs []seg) {
+		var pr struct {
+			Text     string `json:"text"`
+			Segments []seg  `json:"segments"`
+		}
+		if err := json.Unmarshal(b, &pr); err != nil {
+			t.Fatal(err)
+		}
+		return pr.Text, pr.Segments
+	}
+	redact := func(_ core.ContentKind, s string) string { return strings.ReplaceAll(s, "SECRET", "[x]") }
+	b, cut, err := shapePrompt(body, redact, -1)
+	if err != nil || cut != 0 {
+		t.Fatalf("redact: cut %d, err %v", cut, err)
+	}
+	text, segs := decode(b)
+	if text != "You are [x].\n\nUse lookup." || len(segs) != 2 || segs[0].Text != "You are [x]." || segs[1] != (seg{"tool:lookup", "Use lookup."}) {
+		t.Errorf("redacted = %q %+v", text, segs)
+	}
+	b, cut, err = shapePrompt(body, nil, 10)
+	if err != nil || cut == 0 {
+		t.Fatalf("cap: cut %d, err %v", cut, err)
+	}
+	if text, segs := decode(b); len(text) != 10 || segs != nil {
+		t.Errorf("capped = %q, segments %+v; want the cut text and no segments", text, segs)
+	}
+	if b, _, _ := shapePrompt(body, func(_ core.ContentKind, s string) string { return s }, -1); b != nil {
+		t.Errorf("an unchanged prompt was re-encoded: %s", b)
+	}
+}

@@ -9,6 +9,16 @@
   },
   "body": {
     "hash": "068dac11e8f131c8f87e8c902dda33d8bcd5ce2bdba165e5ef58fce6a8137623",
+    "segments": [
+      {
+        "source": "instructions",
+        "text": "You are a support agent."
+      },
+      {
+        "source": "tool:lookup",
+        "text": "Use lookup for orders."
+      }
+    ],
     "text": "You are a support agent.\n\nUse lookup for orders."
   },
   "event_name": "weft.prompt",

@@ -122,10 +122,13 @@ type requestsPage struct {
 // promptDoc is a resolved prompt record. Content is "" or "truncated"
 // (TruncatedBytes > 0) or "derived" (a body that did not parse).
 type promptDoc struct {
-	Hash           string `json:"hash"`
-	Text           string `json:"text"`
-	Content        string `json:"content"`
-	TruncatedBytes int64  `json:"truncated_bytes"`
+	Hash string `json:"hash"`
+	Text string `json:"text"`
+	// Segments attribute Text to the instructions and each tool's
+	// prompt snippet (UX-S2-11), absent when the record carries none.
+	Segments       []obsdb.PromptSegment `json:"segments,omitempty"`
+	Content        string                `json:"content"`
+	TruncatedBytes int64                 `json:"truncated_bytes"`
 }
 
 // catalogDoc is a resolved tools record: the catalog of one hash,
@@ -310,7 +313,7 @@ func (rs *resolver) prompt(hash string, stripped bool) (any, error) {
 	p, err := rs.db.Prompt(rs.ctx, rs.run, hash)
 	switch {
 	case err == nil:
-		v = promptDoc{Hash: p.Hash, Text: p.Text, Content: string(p.Content), TruncatedBytes: p.TruncatedBytes}
+		v = promptDoc{Hash: p.Hash, Text: p.Text, Segments: p.Segments, Content: string(p.Content), TruncatedBytes: p.TruncatedBytes}
 	case errors.Is(err, obsdb.ErrNotFound):
 		v = holeRef{Hash: hash, Badge: string(missingHole(err))}
 	default:

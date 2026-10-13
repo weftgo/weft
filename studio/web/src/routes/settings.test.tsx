@@ -459,6 +459,28 @@ describe("the token", () => {
     )
   })
 
+  // UX-S4-15: weft mcp is discoverable from Studio — the command with
+  // this Studio's URL (the page's base), the token by environment when
+  // the Studio is walled, the recipe named by its repository path.
+  it("names weft mcp with this Studio's URL and the recipe's path", async () => {
+    studio.on("GET meta", { ...metaG(), auth_required: false })
+    await openSettings()
+    const line = section("token").querySelector("[data-mcp]")!
+    const url = new URL(".", document.baseURI).toString().replace(/\/+$/, "")
+    expect(line.textContent).toContain(`weft mcp --url ${url}`)
+    expect(line.textContent).not.toContain("WEFT_STUDIO_TOKEN")
+    expect(line.textContent).toContain("docs/mcp-recipe.md")
+    expect(line.querySelector("a")).toBeNull()
+  })
+
+  it("a walled Studio's weft mcp line takes the token by environment", async () => {
+    studio.on("GET meta", { ...metaG(), auth_required: true })
+    await openSettings()
+    expect(section("token").querySelector("[data-mcp]")!.textContent).toContain(
+      "WEFT_STUDIO_TOKEN=<token> weft mcp --url "
+    )
+  })
+
   // A hand-off tab (setup C's #token=): the section names the token
   // this tab's alone, and clear drops it only — the stored dev token
   // every other tab reads stays in localStorage.

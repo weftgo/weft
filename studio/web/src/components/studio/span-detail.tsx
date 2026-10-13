@@ -496,6 +496,8 @@ function toolFacts(sp: TimedSpan): [string, React.ReactNode][] {
   const f = toolFailure(str(sp.attrs["error.type"]), {
     panic_layer: str(sp.attrs["weft.panic.layer"]),
     input_error: str(sp.attrs["weft.tool.input_error"]),
+    retry: num(sp.attrs["weft.tool.retry"]),
+    retry_budget: num(sp.attrs["weft.tool.retry_budget"]),
   })
   if (f)
     rows.push([

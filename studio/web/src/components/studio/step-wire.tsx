@@ -22,6 +22,8 @@ import {
   wireCutReason,
   wireFileName,
   withheld,
+  WIRE_PAIR_HINT,
+  WIRE_PAIR_LABEL,
 } from "@/lib/wire"
 import { kib } from "@/lib/honesty"
 import { CodeWin, CopyButton } from "@/components/studio/codewin"
@@ -286,6 +288,13 @@ export function WireView({
 }) {
   return (
     <div data-wire="" className="space-y-4 pt-2">
+      <p
+        className="font-mono text-[11px] text-faint"
+        title={WIRE_PAIR_HINT}
+        data-wire-label
+      >
+        {WIRE_PAIR_LABEL}
+      </p>
       {rows.map((r) => (
         <AttemptWire
           key={r.index}

@@ -28,6 +28,8 @@ import {
 } from "react"
 
 import { stepQuery } from "@/lib/api"
+import { toolFailure } from "@/lib/error-kind"
+import type { ToolFactsMap } from "@/lib/error-kind"
 import { CacheHint, Cost, useCostCapable } from "@/components/studio/cost"
 import { AppSteer, ParkedCalls } from "@/components/studio/parked-calls"
 import type {
@@ -107,6 +109,11 @@ export const STORY_VIRTUAL_AT = 60
  * reason:<step>): a virtualised card unmounts when it
  * scrolls away and reads its state back from here when it returns. */
 const StoryMemory = createContext<Map<string, boolean> | null>(null)
+
+/** The run's tool facts by call id (lib/error-kind.ts's toolFactsOf
+ * over its execute_tool spans): the pill reads "strict input" or
+ * "retry 1/2" off them, else the result's code. */
+const ToolFactsCtx = createContext<ToolFactsMap | undefined>(undefined)
 
 /** useRemembered is useState(initial) remembered under key in the
  * story's memory; without a key (a subagent's or a span's step) or a
@@ -225,17 +232,23 @@ function CallPill({
       </span>
     )
   const r = call.result
+  const fact = useContext(ToolFactsCtx)?.get(call.callId)
   if (!r) return null
   const coded = r.isError ? CODED.exec(r.content) : null
+  const f = r.isError && fact ? toolFailure(fact.error_type, fact) : null
   const cut = truncation(r.content)
   return (
     <span className="flex items-center gap-1.5">
       {r.isError ? (
         <span
           className="rounded-sm border border-ev-error/40 px-1.5 py-px font-mono text-[10px] tracking-wide text-ev-error uppercase"
-          title="error as data: the model saw this result and could recover"
+          title={
+            f?.hint ??
+            "error as data: the model saw this result and could recover"
+          }
+          data-tool-pill={fact?.error_type}
         >
-          {coded ? coded[1] : "tool error"}
+          {f?.word ?? (coded ? coded[1] : "tool error")}
         </span>
       ) : (
         <span className="font-mono text-[11px] text-ev-result">ok</span>
@@ -872,6 +885,7 @@ export function StepList({
   transcriptError,
   onStep,
   stepInputRef,
+  toolFacts,
 }: {
   events: WireEvent[]
   folded: FoldedRun
@@ -905,6 +919,9 @@ export function StepList({
   onStep?: (ordinal: number, mode: "push" | "replace") => void
   /** The scrubber's numeric box, for the page's shortcut. */
   stepInputRef?: React.Ref<HTMLInputElement>
+  /** The run's execute_tool facts by call id (toolFactsOf), when its
+   * spans are loaded. */
+  toolFacts?: ToolFactsMap
 }) {
   // The compactions the run document names (A9.2). A run from before
   // A9 has none in its document and draws no marker: the record is
@@ -1043,130 +1060,132 @@ export function StepList({
   )
   return (
     <StoryMemory.Provider value={memory}>
-      <div className="space-y-3">
-        {onStep ? (
-          <StepScrubber
-            steps={steps}
-            value={highlight}
-            runStatus={runStatus}
-            onStep={scrubTo}
-            inputRef={stepInputRef}
-          />
-        ) : null}
-        <EditsMark row={doc} batches={transcript?.batches} />
-        {sessionMarkers.map((c, i) => (
-          <CompactionMarker
-            key={c.hash || `session-${i}`}
-            c={c}
-            all={compactions}
-            runId={doc.id}
-            transcript={transcript}
-            transcriptError={transcriptError}
-          />
-        ))}
-        {virtual ? (
-          // Virtualised (plan H2): a list whose items say where they sit
-          // in the whole; the DOM holds the cards in view plus overscan.
-          <div
-            ref={scroller}
-            className="max-h-[calc(100vh-12rem)] overflow-auto"
-            role="list"
-            aria-label={`steps, ${steps.length.toLocaleString()}`}
-            data-virtual
-            onScroll={(e) => {
-              atEnd.current = isAtEnd(e.currentTarget)
-              // Scrolled away from the named card: naming it again
-              // scrolls back to it.
-              const r = virt.range
-              if (
-                r &&
-                hlIndex >= 0 &&
-                (hlIndex < r.startIndex || hlIndex > r.endIndex)
-              )
-                scrolledTo.current = undefined
-            }}
-          >
+      <ToolFactsCtx.Provider value={toolFacts}>
+        <div className="space-y-3">
+          {onStep ? (
+            <StepScrubber
+              steps={steps}
+              value={highlight}
+              runStatus={runStatus}
+              onStep={scrubTo}
+              inputRef={stepInputRef}
+            />
+          ) : null}
+          <EditsMark row={doc} batches={transcript?.batches} />
+          {sessionMarkers.map((c, i) => (
+            <CompactionMarker
+              key={c.hash || `session-${i}`}
+              c={c}
+              all={compactions}
+              runId={doc.id}
+              transcript={transcript}
+              transcriptError={transcriptError}
+            />
+          ))}
+          {virtual ? (
+            // Virtualised (plan H2): a list whose items say where they sit
+            // in the whole; the DOM holds the cards in view plus overscan.
             <div
-              className="relative w-full"
-              style={{ height: virt.getTotalSize() }}
+              ref={scroller}
+              className="max-h-[calc(100vh-12rem)] overflow-auto"
+              role="list"
+              aria-label={`steps, ${steps.length.toLocaleString()}`}
+              data-virtual
+              onScroll={(e) => {
+                atEnd.current = isAtEnd(e.currentTarget)
+                // Scrolled away from the named card: naming it again
+                // scrolls back to it.
+                const r = virt.range
+                if (
+                  r &&
+                  hlIndex >= 0 &&
+                  (hlIndex < r.startIndex || hlIndex > r.endIndex)
+                )
+                  scrolledTo.current = undefined
+              }}
             >
-              {virt.getVirtualItems().map((item) => (
-                <div
-                  key={item.key}
-                  ref={virt.measureElement}
-                  data-index={item.index}
-                  role="listitem"
-                  aria-setsize={steps.length}
-                  aria-posinset={item.index + 1}
-                  className="absolute top-0 left-0 w-full space-y-3 pb-3"
-                  style={{ transform: `translateY(${item.start}px)` }}
-                >
-                  {stepBlock(steps[item.index])}
-                </div>
-              ))}
+              <div
+                className="relative w-full"
+                style={{ height: virt.getTotalSize() }}
+              >
+                {virt.getVirtualItems().map((item) => (
+                  <div
+                    key={item.key}
+                    ref={virt.measureElement}
+                    data-index={item.index}
+                    role="listitem"
+                    aria-setsize={steps.length}
+                    aria-posinset={item.index + 1}
+                    className="absolute top-0 left-0 w-full space-y-3 pb-3"
+                    style={{ transform: `translateY(${item.start}px)` }}
+                  >
+                    {stepBlock(steps[item.index])}
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        ) : (
-          steps.map((step) => (
-            <div key={step.index} className="space-y-3">
-              {stepBlock(step)}
-            </div>
-          ))
-        )}
-        {/* The boundary after the last step (its calls all answered, so
+          ) : (
+            steps.map((step) => (
+              <div key={step.index} className="space-y-3">
+                {stepBlock(step)}
+              </div>
+            ))
+          )}
+          {/* The boundary after the last step (its calls all answered, so
           a replay from the step count is accepted). */}
-        {maxFrom !== null &&
-        view.steps.length > 0 &&
-        maxFrom > Math.max(...view.steps.map((s) => s.index)) ? (
-          <InsertHere step={maxFrom} last />
-        ) : null}
-        {view.unplaced?.length ? <Unplaced batches={view.unplaced} /> : null}
-        {view.steps.length === 0 ? (
-          <p className="py-6 text-center font-mono text-xs text-faint">
-            {replaying || upTo === 0
-              ? "nothing revealed yet — play or step forward"
-              : events.length === 0
-                ? doc.status === "running"
-                  ? "waiting for the first event…"
-                  : "no events were recorded for this run"
-                : "no steps yet"}
-          </p>
-        ) : null}
-        {/* What ended the run (U3.2): the end card mirrors the header's
+          {maxFrom !== null &&
+          view.steps.length > 0 &&
+          maxFrom > Math.max(...view.steps.map((s) => s.index)) ? (
+            <InsertHere step={maxFrom} last />
+          ) : null}
+          {view.unplaced?.length ? <Unplaced batches={view.unplaced} /> : null}
+          {view.steps.length === 0 ? (
+            <p className="py-6 text-center font-mono text-xs text-faint">
+              {replaying || upTo === 0
+                ? "nothing revealed yet — play or step forward"
+                : events.length === 0
+                  ? doc.status === "running"
+                    ? "waiting for the first event…"
+                    : "no events were recorded for this run"
+                  : "no steps yet"}
+            </p>
+          ) : null}
+          {/* What ended the run (U3.2): the end card mirrors the header's
           chip, on every status the record names one for; a failed run
           that named none ends on its error (its Error root span is the
           terminal record). */}
-        {!replaying && doc.status !== "running" && endCard(doc) ? (
-          <p
-            className="text-center font-mono text-xs text-muted-foreground"
-            data-story-end
-            title={stopChip(doc)?.title}
-          >
-            {endCard(doc)}
-          </p>
-        ) : view.finished ? null : (
-          <p className="text-center font-mono text-xs text-faint">
-            {replaying
-              ? `replay · ${upTo} of ${events.length} events shown`
-              : isLive(doc)
-                ? // running, or settling (its last records may still
-                  // land): never "ended without run_finish" yet.
-                  "stream in progress…"
-                : events.length > 0 &&
-                    endedWithoutFinish(
-                      view.finished,
-                      doc.stopped_by,
-                      doc.status
-                    )
-                  ? NO_RUN_FINISH
-                  : null}
-          </p>
-        )}
-        {view.pending.length > 0 && (
-          <ParkedCalls doc={doc} pending={view.pending} />
-        )}
-        <AppSteer doc={doc} />
-      </div>
+          {!replaying && doc.status !== "running" && endCard(doc) ? (
+            <p
+              className="text-center font-mono text-xs text-muted-foreground"
+              data-story-end
+              title={stopChip(doc)?.title}
+            >
+              {endCard(doc)}
+            </p>
+          ) : view.finished ? null : (
+            <p className="text-center font-mono text-xs text-faint">
+              {replaying
+                ? `replay · ${upTo} of ${events.length} events shown`
+                : isLive(doc)
+                  ? // running, or settling (its last records may still
+                    // land): never "ended without run_finish" yet.
+                    "stream in progress…"
+                  : events.length > 0 &&
+                      endedWithoutFinish(
+                        view.finished,
+                        doc.stopped_by,
+                        doc.status
+                      )
+                    ? NO_RUN_FINISH
+                    : null}
+            </p>
+          )}
+          {view.pending.length > 0 && (
+            <ParkedCalls doc={doc} pending={view.pending} />
+          )}
+          <AppSteer doc={doc} />
+        </div>
+      </ToolFactsCtx.Provider>
     </StoryMemory.Provider>
   )
 }

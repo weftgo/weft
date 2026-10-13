@@ -31,6 +31,7 @@ const cleanDoc = (): RunDoc => ({
   log_warn: undefined,
   log_error: undefined,
   logs_capped: undefined,
+  tap_panics: undefined,
   pending: 0,
 })
 
@@ -100,5 +101,109 @@ describe("a clean run's header strip and list row (U4-fix)", () => {
       "↻2 2 model attempts retried",
       "W≥3 ≥3 app log warnings",
     ])
+  })
+
+  it("tap panics are a problem in the strip's words (UX-E-51)", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => new Promise(() => {}))
+    )
+    vi.stubGlobal("scrollTo", vi.fn())
+    const { container } = await renderWithRouter(
+      <RunHeader
+        doc={{ ...cleanDoc(), tap_panics: 2 }}
+        folded={fold([])}
+        eventCount={4}
+      />
+    )
+    const strip = [...statsLine(container).querySelectorAll("[data-strip]")]
+    expect(strip.map((s) => s.textContent)).toEqual([
+      "⚠2 tap panics: 2 (observers, contained)",
+    ])
+  })
+})
+
+describe("the header's tool concurrency (UX-E-50)", () => {
+  const manifestDoc = (parallelism: number) => ({
+    manifest_hash: "mh",
+    agent: "support",
+    source: "runtime",
+    first_seen: "2026-10-01T00:00:00Z",
+    current_manifest_hash: "mh",
+    manifest: {
+      weft: 1,
+      agents: [
+        {
+          name: "support",
+          model: { provider: "p", name: "m" },
+          policy: {
+            parallelism,
+            max_steps: 10,
+            max_result_bytes: 65536,
+            max_model_retries: 3,
+          },
+          tools: [],
+        },
+      ],
+    },
+  })
+
+  it("the cap from the run's stored manifest, read once", async () => {
+    const fetch = vi.fn((url: string) =>
+      String(url).includes("/manifests/mh")
+        ? Promise.resolve(
+            new Response(JSON.stringify(manifestDoc(2)), {
+              headers: { "Content-Type": "application/json" },
+            })
+          )
+        : new Promise<Response>(() => {})
+    )
+    vi.stubGlobal("fetch", fetch)
+    vi.stubGlobal("scrollTo", vi.fn())
+    const doc = { ...cleanDoc(), manifest_hash: "mh", manifest_available: true }
+    const { container, findByText } = await renderWithRouter(
+      <RunHeader
+        doc={doc}
+        folded={fold([])}
+        eventCount={4}
+        sequentialTools={false}
+      />
+    )
+    await findByText("parallelism: 2")
+    const c = container.querySelector<HTMLElement>("[data-concurrency]")!
+    expect(c.title).toContain("weft.Parallelism")
+    expect(
+      fetch.mock.calls.filter(([u]) => String(u).includes("/manifests/")).length
+    ).toBe(1)
+  })
+
+  it("no stored manifest: the request record's sequential_tools, else nothing", async () => {
+    const fetch = vi.fn((_url: string) => new Promise<Response>(() => {}))
+    vi.stubGlobal("fetch", fetch)
+    vi.stubGlobal("scrollTo", vi.fn())
+    const { container } = await renderWithRouter(
+      <RunHeader
+        doc={cleanDoc()}
+        folded={fold([])}
+        eventCount={4}
+        sequentialTools
+      />
+    )
+    expect(container.querySelector("[data-concurrency]")!.textContent).toBe(
+      "sequential"
+    )
+    expect(
+      fetch.mock.calls.some(([u]) => String(u).includes("/manifests/"))
+    ).toBe(false)
+    cleanup()
+    const { container: c2 } = await renderWithRouter(
+      <RunHeader
+        doc={cleanDoc()}
+        folded={fold([])}
+        eventCount={4}
+        sequentialTools={false}
+      />
+    )
+    expect(c2.querySelector("[data-concurrency]")).toBeNull()
   })
 })

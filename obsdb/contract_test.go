@@ -164,6 +164,10 @@ type contractProblems struct {
 	Denied          int64 `json:"denied,omitempty"`
 	Truncated       int64 `json:"truncated,omitempty"`
 	Repaired        int64 `json:"repaired,omitempty"`
+	// TapPanics and MetadataDropped are the root's weft.tap.panics and
+	// weft.metadata.dropped (§6, U32.1).
+	TapPanics       int64 `json:"tap_panics,omitempty"`
+	MetadataDropped int64 `json:"metadata_dropped,omitempty"`
 }
 
 // contractLLM is one chat span: one model call.
@@ -189,6 +193,9 @@ type contractRPC struct {
 	PanicLayer     string `json:"panic_layer,omitempty"`
 	InputError     string `json:"input_error,omitempty"`
 	TruncatedBytes int64  `json:"truncated_bytes,omitempty"`
+	// A counted RETRY's place in its budget (§3, U32.1).
+	Retry       int64 `json:"retry,omitempty"`
+	RetryBudget int64 `json:"retry_budget,omitempty"`
 }
 
 func TestContract(t *testing.T) {
@@ -348,7 +355,8 @@ func observeRuns(t *testing.T, db obsdb.DB) []contractRun {
 		}
 		if p := r.Problems; p.Any() {
 			c.Problems = &contractProblems{AttemptsRetried: p.AttemptsRetried, Fallbacks: p.Fallbacks,
-				ToolErrors: p.ToolErrors, Denied: p.Denied, Truncated: p.Truncated, Repaired: p.Repaired}
+				ToolErrors: p.ToolErrors, Denied: p.Denied, Truncated: p.Truncated, Repaired: p.Repaired,
+				TapPanics: p.TapPanics, MetadataDropped: p.MetadataDropped}
 		}
 		if r.Finished != nil {
 			c.Finished = stamp(*r.Finished)
@@ -414,6 +422,8 @@ func spanSteps(spans []obsdb.Span) ([]contractLLM, []contractRPC) {
 				PanicLayer:     strAttr(s.Attrs, "weft.panic.layer"),
 				InputError:     strAttr(s.Attrs, "weft.tool.input_error"),
 				TruncatedBytes: intAttr(s.Attrs, "weft.tool.truncated_bytes", 0),
+				Retry:          intAttr(s.Attrs, "weft.tool.retry", 0),
+				RetryBudget:    intAttr(s.Attrs, "weft.tool.retry_budget", 0),
 			})
 		}
 	}
@@ -480,6 +490,12 @@ func runHoles(t *testing.T, db obsdb.DB, r obsdb.RunRow, hasSpans bool) ([]obsdb
 	}
 	if r.StopReason == string(core.StopMaxTokens) {
 		set[obsdb.HoleMaxTokens] = true
+	}
+	if r.Problems.MetadataDropped > 0 {
+		// truncated, cause metadata_cap: the core's metadata limits
+		// dropped pairs (§7, U32.1)
+		set[obsdb.HoleTruncated] = true
+		causes = append(causes, string(obsdb.HoleTruncated)+":"+string(obsdb.CauseMetadataCap))
 	}
 	for after := int64(-1); ; {
 		page, err := db.Events(ctx, r.ID, after, 1000)
@@ -1750,6 +1766,36 @@ func genCases() []genCase {
 				}
 				second := mustRun(t, ctx, agt, core.Messages(first.Messages...), core.Deny(first.Pending[0].ID, "over the limit"))
 				return []string{first.ID, second.ID}
+			},
+		},
+		{
+			name: "retries_taps",
+			desc: "a run that spends its tool retry budget, under a panicking Tap, with metadata over the core's limits and a tool's PromptSnippet: the tool answers core.ModelRetry under MaxModelRetries(1) twice — execute_tool spans and tool_finish records with weft.tool.retry 1 and 2, weft.tool.retry_budget 1 — and the run fails model_retries_exceeded (RETRY is no tool error); the root carries weft.tap.panics and weft.metadata.dropped 1 (65 caller pairs) — problems tap_panics, metadata_dropped 1, the truncated hole cause metadata_cap; the prompt record carries segments (instructions, tool:flaky)",
+			dest: content,
+			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+				flaky := core.Tool("flaky", "A flaky lookup.", func(context.Context, lookupIn) (string, error) {
+					return "", core.ModelRetry("the order service is warming up: try again")
+				}, core.PromptSnippet("Call flaky for orders; it may ask you to retry."))
+				agt := pipelineAgent(p, "support", wefttest.Script(
+					wefttest.ToolCalls(wefttest.Call{Name: "flaky", Args: `{"order_id":"1234"}`}),
+					wefttest.ToolCalls(wefttest.Call{Name: "flaky", Args: `{"order_id":"1234"}`}),
+					wefttest.Say("never reached")),
+					core.Instructions("You are a support agent."), flaky, core.MaxModelRetries(1),
+					core.Tap(func(_ context.Context, ev core.Event) {
+						if _, ok := ev.(core.RunStart); ok {
+							panic("the app's tap exploded")
+						}
+					}))
+				md := map[string]string{}
+				for i := range 65 {
+					md[fmt.Sprintf("k%02d", i)] = "v"
+				}
+				_, err := agt.Generate(ctx, core.Prompt("Where is order 1234?"), core.Metadata(md))
+				var re *core.RunError
+				if !errors.As(err, &re) || !errors.Is(err, core.ErrModelRetriesExceeded) {
+					t.Fatalf("want a model-retries *RunError, got %v", err)
+				}
+				return []string{re.Result.ID}
 			},
 		},
 	}

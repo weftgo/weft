@@ -10,6 +10,14 @@ import { kib } from "./honesty"
 // not this one).
 
 /** The cap the recorder cuts each wire body at (obsdb's 256 KiB). */
+/** The Wire tab's caption (UX-E-58): the pair is the loop's request
+ * (the request tab, before the model middleware) against the bytes
+ * the adapter put on the wire (after all of it) — never "before /
+ * after middleware": the layers between are not recorded one by one. */
+export const WIRE_PAIR_LABEL = "loop request → wire bytes"
+export const WIRE_PAIR_HINT =
+  "the request tab is what the loop handed the model chain; this is what the adapter sent and received, after every WrapModel layer and the SDK — the layers between are not recorded one by one"
+
 export const WIRE_CAP = 256 * 1024
 
 /** A body the 256 KiB cap cut: the truncated badge's words. */

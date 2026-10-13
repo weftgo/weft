@@ -21,7 +21,7 @@ const LOOP: Record<string, [string, string]> = {
   max_steps: ["max steps reached", "MaxSteps" + E],
   usage_limit: ["usage limit reached", "UsageLimit" + E],
   loop_detected: ["loop detected", "DetectLoops" + E],
-  model_retries_exceeded: ["model retries exceeded", "MaxModelRetries" + E],
+  model_retries_exceeded: ["tool retry budget spent", "MaxModelRetries" + E],
 }
 
 /** stoppedByWords maps a stopped_by value (and, for canceled, its

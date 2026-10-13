@@ -24,7 +24,12 @@ import { setStudioToken } from "@/lib/api"
 import type { RequestRow, RunDoc, RunsPage } from "@/lib/api"
 import { CAUSES } from "@/lib/honesty"
 import { runLink } from "@/lib/links"
-import { WIRE_DERIVED_REASON, WIRE_INCOMPLETE } from "@/lib/wire"
+import {
+  WIRE_DERIVED_REASON,
+  WIRE_INCOMPLETE,
+  WIRE_PAIR_HINT,
+  WIRE_PAIR_LABEL,
+} from "@/lib/wire"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import {
@@ -164,6 +169,18 @@ describe("the step card's Wire tab (A6.2 Done)", () => {
     // The pane key alone (no view) still lands on the story.
     renderApp(`/runs/${RUN}?step=0&pane=wire`)
     await waitFor(() => expect(wire(0)).toBeTruthy())
+  })
+
+  it("the pair is labelled loop request → wire bytes, never before / after middleware (UX-E-58)", async () => {
+    serve()
+    await landOn(0)
+    const label = wire(0)!.querySelector<HTMLElement>("[data-wire-label]")!
+    expect(label.textContent).toBe(WIRE_PAIR_LABEL)
+    expect(label.textContent).toBe("loop request → wire bytes")
+    expect(label.title).toBe(WIRE_PAIR_HINT)
+    expect(wire(0)!.textContent).not.toMatch(
+      /before middleware|after middleware/
+    )
   })
 
   it("an attempt's request and response: method + URL, headers, the JSON body pretty-printed but copied as the wire bytes, the withheld headers and query listed", async () => {

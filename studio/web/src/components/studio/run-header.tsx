@@ -7,7 +7,8 @@ import { Link } from "@tanstack/react-router"
 import { ArrowUpRight, Check, ChevronRight, Link2 } from "lucide-react"
 import { useEffect, useState } from "react"
 
-import { sessionQuery } from "@/lib/api"
+import { sessionQuery, storedManifestQuery } from "@/lib/api"
+import { concurrencyWords } from "@/lib/request-pane"
 import type { RunDoc, Transcript } from "@/lib/api"
 import { producedTexts, runHoles, turnPrompt } from "@/lib/events"
 import type { FoldedRun } from "@/lib/events"
@@ -329,6 +330,7 @@ export function RunHeader({
   eventCount,
   transcript,
   gaps,
+  sequentialTools,
 }: {
   doc: RunDoc
   folded: FoldedRun
@@ -339,6 +341,9 @@ export function RunHeader({
   /** The messages records: the finished words (deltas are not
    * stored), fetched by the page beside the fold. */
   transcript?: Transcript
+  /** The first request record's sequential_tools: the concurrency fact
+   * when the run's manifest is not stored (UX-E-50). */
+  sequentialTools?: boolean
 }) {
   const now = useNow(doc.status === "running")
   const title = runTitle(doc)
@@ -353,6 +358,16 @@ export function RunHeader({
       doc.pending > 0 &&
       ["decide", "read-only", "no-public-id"].includes(parkedKind(doc, null)),
   })
+  // The run's configuration (U27's store; UX-E-50): read once, only
+  // when the run document says the hash resolves.
+  const stored = useQuery({
+    ...storedManifestQuery(doc.manifest_hash),
+    enabled: Boolean(doc.manifest_available && doc.manifest_hash),
+  })
+  const conc = concurrencyWords(
+    stored.data?.manifest.agents[0]?.policy.parallelism,
+    sequentialTools
+  )
   useDocumentTitle(runPlace(doc))
   // The words this run was asked: the last user message it was fed
   // (in a thread the first one is an earlier turn's).
@@ -483,6 +498,11 @@ export function RunHeader({
           {doc.steps} {doc.steps === 1 ? "step" : "steps"}
         </span>
         <ProblemStrip row={doc} />
+        {conc ? (
+          <span title={conc.title} data-concurrency>
+            {conc.text}
+          </span>
+        ) : null}
         {/* A derived run has no events to count: its derived badge
             (below) says so — "0 events" would read as lost. */}
         {isDerived(doc) ? null : (

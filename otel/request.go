@@ -76,17 +76,34 @@ func (p *destProc) shapeContentRecord(clone *sdklog.Record, kind string) (keep b
 }
 
 // shapePrompt redacts then caps a prompt record's text (on a rune
-// boundary). It returns nil bytes when nothing changed.
+// boundary). It returns nil bytes when nothing changed. The text's
+// segments (its attribution to the instructions and each tool's
+// snippet) are redacted one by one; a cap that cut the text drops them
+// — they are its parts, and a cut text has none whole — so no segment
+// ever carries bytes the shaped text does not.
 func shapePrompt(body string, redact func(core.ContentKind, string) string, maxBytes int) ([]byte, int, error) {
 	var pr struct {
-		Hash string `json:"hash"`
-		Text string `json:"text"`
+		Hash     string `json:"hash"`
+		Text     string `json:"text"`
+		Segments []struct {
+			Source string `json:"source"`
+			Text   string `json:"text"`
+		} `json:"segments,omitempty"`
 	}
 	if err := json.Unmarshal([]byte(body), &pr); err != nil {
 		return nil, 0, errors.New("a prompt record that does not decode cannot be shaped: dropped")
 	}
 	text, cut := shapeString(pr.Text, core.ContentPrompt, redact, maxBytes)
-	if text == pr.Text && cut == 0 {
+	changed := text != pr.Text || cut > 0
+	if cut > 0 {
+		pr.Segments = nil
+	}
+	for i, seg := range pr.Segments {
+		if t, _ := shapeString(seg.Text, core.ContentPrompt, redact, -1); t != seg.Text {
+			pr.Segments[i].Text, changed = t, true
+		}
+	}
+	if !changed {
 		return nil, 0, nil
 	}
 	pr.Text = text

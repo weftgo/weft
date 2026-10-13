@@ -38,6 +38,8 @@ import {
   emptyRow,
   loadEdits,
   maskToken,
+  mcpCommand,
+  MCP_RECIPE_PATH,
   pricingFile,
   pricingFileText,
   problems,
@@ -279,8 +281,8 @@ function IngestHealth({ meta }: { meta: Meta }) {
     <span data-ingest-health="dropped" className="space-y-0.5">
       {dropped.map((d) => (
         <span key={d.service} className="block" data-ingest-service={d.service}>
-          {d.service || "(no service.name)"}: {d.records.toLocaleString("en-US")}{" "}
-          records dropped by its destination
+          {d.service || "(no service.name)"}:{" "}
+          {d.records.toLocaleString("en-US")} records dropped by its destination
         </span>
       ))}
       <span className="block text-muted-foreground">
@@ -405,6 +407,17 @@ function TokenSection({ meta }: { meta: Meta }) {
           ? "This tab runs on the hand-off token its link carried: it stays in this tab (sessionStorage, kept across a reload) and never replaces the stored token; clear drops it alone."
           : "The token stays in this browser (localStorage)."}{" "}
         It travels only as the Authorization header — never in a URL.
+      </p>
+      <p className="text-[11px] text-faint" data-mcp>
+        Read this Studio from an MCP client (Claude Code, Cursor):{" "}
+        <code className="font-mono text-foreground select-all">
+          {mcpCommand(
+            new URL(".", document.baseURI).toString(),
+            meta.auth_required
+          )}
+        </code>{" "}
+        — the recipe is <code className="font-mono">{MCP_RECIPE_PATH}</code> in
+        the weft repository.
       </p>
       <p className="font-mono text-[11px] text-thread-ink" role="status">
         {note}

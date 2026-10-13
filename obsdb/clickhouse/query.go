@@ -1374,6 +1374,9 @@ var contractKeys = []string{
 	// (migration 0017's restatement of the traces view; a span
 	// attribute only, so the logs view keeps 0015's).
 	"weft.attempt.layer",
+	// U32.1: a RETRY's count and budget, the run's observer panics
+	// (migration 0018's restatement of both views).
+	"weft.tool.retry", "weft.tool.retry_budget", "weft.tap.panics",
 }
 
 // unmarshalAttrs decodes a JSON column keeping integral numbers as

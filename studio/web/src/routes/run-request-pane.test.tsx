@@ -24,7 +24,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
 import { queryClient } from "@/lib/query"
-import type { Manifest, RequestsPage, RunDoc, RunsPage, Span } from "@/lib/api"
+import type {
+  Manifest,
+  PromptDoc,
+  RequestsPage,
+  RunDoc,
+  RunsPage,
+  Span,
+} from "@/lib/api"
 import { sha256Hex } from "@/lib/request-pane"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
@@ -454,6 +461,34 @@ describe("nothing is decided from what cannot be verified (review 1, 2)", () => 
     await waitFor(() => expect(studio.calls("GET manifest").length).toBe(1))
     await settle()
     expect(marks(0)).toEqual([])
+  })
+
+  it("a prompt record with segments: each source under its label, the same bytes as the text (UX-S2-11)", async () => {
+    const snippet = "Search the docs before answering."
+    const text = `${PROMPT0}\n\n${snippet}`
+    const requests = await rowsFor([text, text, text])
+    for (const r of requests.requests)
+      (r.prompt as PromptDoc).segments = [
+        { source: "instructions", text: PROMPT0 },
+        { source: "tool:search_docs", text: snippet },
+      ]
+    await serve({ instructions: PROMPT0, requests })
+    await story()
+    open(0)
+    await waitFor(() =>
+      expect(pane(0).querySelectorAll("[data-prompt-segment]").length).toBe(2)
+    )
+    const segs = Array.from(
+      pane(0).querySelectorAll<HTMLElement>("[data-prompt-segment]")
+    )
+    expect(segs.map((e) => e.getAttribute("data-prompt-segment"))).toEqual([
+      "instructions",
+      "tool:search_docs",
+    ])
+    expect(segs[1].textContent).toBe(`snippet · search_docs${snippet}`)
+    expect(
+      segs.map((e) => e.querySelector("pre")!.textContent).join("\n\n")
+    ).toBe(text)
   })
 
   it("a tool set that changed with the prompt, unaccounted for: the neutral chip naming both causes", async () => {

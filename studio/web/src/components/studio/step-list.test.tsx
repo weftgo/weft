@@ -10,6 +10,7 @@ import { describe, expect, it, vi } from "vitest"
 import { stepQuery } from "@/lib/api"
 import type { EventsPage, RunDoc, StepDoc, WireEvent } from "@/lib/api"
 import { fold } from "@/lib/events"
+import { toolFactsOf } from "@/lib/error-kind"
 import { resultCapReason } from "@/lib/honesty"
 import { StepList } from "@/components/studio/step-list"
 import { renderWithRouter } from "@/test/render"
@@ -99,6 +100,109 @@ describe("StepList", () => {
     expect(cut.getAttribute("title")).toContain(resultCapReason(130000))
     expect(cut.getAttribute("title")).toContain(
       "raise the tool's weft.MaxResultBytes"
+    )
+  })
+
+  it("the tool pill reads the call's span facts: retry n/budget, strict input (UX-S2-10, UX-E-48)", async () => {
+    const call = (
+      seq: number,
+      id: string,
+      name: string,
+      content: string
+    ): WireEvent[] => [
+      { type: "tool_start", run_id: "r_f", seq, call_id: id, name, args: {} },
+      {
+        type: "tool_finish",
+        run_id: "r_f",
+        seq: seq + 1,
+        call_id: id,
+        name,
+        content,
+        is_error: true,
+      },
+    ]
+    const events: WireEvent[] = [
+      { type: "run_start", id: "r_f", model: { provider: "p", name: "m" } },
+      { type: "step_start", run_id: "r_f", index: 0 },
+      ...call(1, "c1", "flaky", "RETRY: try again"),
+      ...call(3, "c2", "flaky", "RETRY: try again"),
+      ...call(
+        5,
+        "c3",
+        "lookup",
+        'INVALID_INPUT: tool "lookup": unknown field "extra": not in the schema'
+      ),
+      ...call(7, "c4", "other", "RETRY: no span facts"),
+      {
+        type: "step_finish",
+        run_id: "r_f",
+        index: 0,
+        reason: "tool_calls",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+    ]
+    const doc = {
+      ...subDoc,
+      id: "r_f",
+      children: [],
+      status: "failed",
+    } as RunDoc
+    const facts = toolFactsOf(
+      [
+        {
+          attrs: {
+            "gen_ai.operation.name": "execute_tool",
+            "weft.run.id": "r_f",
+            "gen_ai.tool.call.id": "c1",
+            "error.type": "RETRY",
+            "weft.tool.retry": 1,
+            "weft.tool.retry_budget": 1,
+          },
+        },
+        {
+          attrs: {
+            "gen_ai.operation.name": "execute_tool",
+            "weft.run.id": "r_f",
+            "gen_ai.tool.call.id": "c2",
+            "error.type": "RETRY",
+            "weft.tool.retry": 2,
+            "weft.tool.retry_budget": 1,
+          },
+        },
+        {
+          attrs: {
+            "gen_ai.operation.name": "execute_tool",
+            "weft.run.id": "r_f",
+            "gen_ai.tool.call.id": "c3",
+            "error.type": "INVALID_INPUT",
+            "weft.tool.input_error": "strict",
+          },
+        },
+      ],
+      "r_f"
+    )
+    await renderWithRouter(
+      <StepList
+        events={events}
+        folded={fold(events)}
+        doc={doc}
+        toolFacts={facts}
+      />
+    )
+    const pill = (id: string) =>
+      document
+        .querySelector<HTMLElement>(`[data-call="${id}"]`)!
+        .querySelector<HTMLElement>("[data-tool-pill]")
+    expect(pill("c1")!.textContent).toBe("retry 1/1")
+    expect(pill("c2")!.textContent).toBe("retry 2/1 — budget spent")
+    expect(pill("c2")!.title).toBe(
+      "past MaxModelRetries(1): the run fails at its next model call"
+    )
+    expect(pill("c3")!.textContent).toBe("strict input")
+    // No span facts: the result's own code, as before.
+    expect(pill("c4")).toBeNull()
+    expect(document.querySelector('[data-call="c4"]')!.textContent).toContain(
+      "RETRY"
     )
   })
 

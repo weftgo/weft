@@ -47,6 +47,7 @@ import {
   messagesSent,
   previousRows,
   promptText,
+  segmentLabel,
   registeredAgent,
   snippetsOf,
   toolSetMayExplain,
@@ -289,14 +290,38 @@ function PromptView({
   const long = lines.length > PROMPT_LINES
   return (
     <div className="min-w-0 flex-1 space-y-1">
-      <pre
-        data-prompt
-        className="max-w-full overflow-x-auto rounded-md border bg-secondary/40 px-2 py-1.5 font-mono text-[12px] whitespace-pre-wrap"
-      >
-        {long && !all
-          ? lines.slice(0, PROMPT_LINES).join("\n") + "\n…"
-          : doc.text}
-      </pre>
+      {doc.segments?.length && (!long || all) ? (
+        // Attributed (UX-S2-11): each source with a left-border label,
+        // the same bytes as the composed text.
+        <div
+          data-prompt
+          className="max-w-full space-y-1 rounded-md border bg-secondary/40 px-2 py-1.5"
+        >
+          {doc.segments.map((seg, i) => (
+            <div
+              key={i}
+              data-prompt-segment={seg.source}
+              className="border-l-2 border-thread/60 pl-2"
+            >
+              <span className="font-mono text-[10px] text-faint">
+                {segmentLabel(seg.source)}
+              </span>
+              <pre className="overflow-x-auto font-mono text-[12px] whitespace-pre-wrap">
+                {seg.text}
+              </pre>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <pre
+          data-prompt
+          className="max-w-full overflow-x-auto rounded-md border bg-secondary/40 px-2 py-1.5 font-mono text-[12px] whitespace-pre-wrap"
+        >
+          {long && !all
+            ? lines.slice(0, PROMPT_LINES).join("\n") + "\n…"
+            : doc.text}
+        </pre>
+      )}
       <span className="flex flex-wrap items-center gap-2">
         <Hash h={doc.hash} />
         {doc.truncated_bytes > 0 || doc.content === "derived" ? null : (

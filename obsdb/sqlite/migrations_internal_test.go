@@ -1001,3 +1001,104 @@ func TestUpgradeTo0015AddsFailedAllIndex(t *testing.T) {
 		t.Errorf("failed, all after 0015 = %v (total %d), want [r_child r_top]", ids, page.Total)
 	}
 }
+
+// A file at 0016 holding a run whose invoke_agent span carries
+// weft.metadata.dropped opens through 0017: the span's
+// metadata_dropped token joins runs.problems beside the ones already
+// there — the set the writer stores for the same spans
+// (obsdb.SpanProblems, docs/record-contract.md §6, U32.1) — and the
+// run's MetadataDropped reads it.
+func TestMigration0017BackfillsMetadataDropped(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "at16.db")
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE obsdb_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range sortedVersions() {
+		if v > 16 {
+			break
+		}
+		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx, err := raw.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(string(body)); err != nil {
+			t.Fatalf("migration %d: %v", v, err)
+		}
+		if post := postMigrations[v]; post != nil {
+			if err := post(tx); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO obsdb_migrations (version, applied_at) VALUES (?, '2026-10-01T00:00:00Z')`, v); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	spans := func(run, trace string) []obsdb.Span {
+		at := time.Unix(0, 100).UTC()
+		mk := func(id, name string, status int, attrs map[string]any) obsdb.Span {
+			attrs["weft.run.id"] = run
+			return obsdb.Span{TraceID: trace, SpanID: id, Name: name, Kind: 1, Start: at,
+				End: at.Add(time.Millisecond), StatusCode: status, Service: "svc", Attrs: attrs}
+		}
+		return []obsdb.Span{
+			mk("root", "invoke_agent a", 1, map[string]any{"gen_ai.operation.name": "invoke_agent", "weft.metadata.dropped": int64(3)}),
+			mk("tool", "execute_tool t", 2, map[string]any{"gen_ai.operation.name": "execute_tool", "error.type": "tool_error"}),
+		}
+	}
+	// Stored at 0016: the tool's token already in the set.
+	if _, err := raw.Exec(`INSERT INTO runs (run_id, agent, started_ns, last_seen_ns, root_ended, meta, problems) VALUES
+		('r_old', 'a', 100, 200, 1, '{}', '["tool_failed:tool"]')`); err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range spans("r_old", "t1") {
+		attrs, _ := json.Marshal(s.Attrs)
+		if _, err := raw.Exec(`INSERT INTO spans (trace_id, span_id, parent_span_id, name, kind, start_ns, end_ns, status_code,
+			status_message, service, run_id, step, tool_seq, session_id, attrs, resource, events)
+			VALUES (?, ?, ?, ?, 1, 100, 200, ?, '', 'svc', 'r_old', -1, -1, '', ?, '{}', '[]')`,
+			s.TraceID, s.SpanID, s.ParentSpanID, s.Name, s.StatusCode, string(attrs)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("open a 0016 file: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+	if err := db.Write(ctx, obsdb.Batch{Spans: spans("r_new", "t2")}); err != nil {
+		t.Fatal(err)
+	}
+	want := obsdb.Problems{ToolErrors: 1, MetadataDropped: 3}
+	stored := map[string]string{}
+	for _, id := range []string{"r_old", "r_new"} {
+		run, err := db.Run(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run.Problems != want {
+			t.Errorf("%s after 0017 = problems %+v; want %+v", id, run.Problems, want)
+		}
+		var tokens string
+		if err := db.(*DB).reads.QueryRowContext(ctx, `SELECT problems FROM runs WHERE run_id = ?`, id).Scan(&tokens); err != nil {
+			t.Fatal(err)
+		}
+		stored[id] = tokens
+	}
+	if stored["r_old"] != stored["r_new"] {
+		t.Errorf("backfilled problems %s, written %s: the two rules disagree", stored["r_old"], stored["r_new"])
+	}
+}

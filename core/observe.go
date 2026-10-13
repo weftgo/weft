@@ -68,6 +68,9 @@ const (
 	attrToolResultBytes = attribute.Key("weft.tool.result_bytes")
 	attrToolTruncated   = attribute.Key("weft.tool.truncated_bytes")
 	attrToolInputError  = attribute.Key("weft.tool.input_error")
+	attrToolRetry       = attribute.Key("weft.tool.retry")
+	attrToolRetryBudget = attribute.Key("weft.tool.retry_budget")
+	attrTapPanics       = attribute.Key("weft.tap.panics")
 	attrPanicLayer      = attribute.Key("weft.panic.layer")
 	attrRunDenied       = attribute.Key("weft.run.denied")
 	attrStream          = attribute.Key("weft.stream")
@@ -281,6 +284,9 @@ func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo,
 				if n := rec.denied.Load(); n > 0 {
 					attrs = append(attrs, attrRunDenied.Int64(n))
 				}
+				if n := rec.runPanics.Load(); n > 0 {
+					attrs = append(attrs, attrTapPanics.Int64(n))
+				}
 			}
 			if res.StopReason != "" {
 				attrs = append(attrs, attrRunStopReason.String(string(res.StopReason)))
@@ -487,7 +493,7 @@ func ceilMS(d time.Duration) int64 {
 // (weft.tool.truncated_bytes, on a result or an error result alike); a
 // panic names its layer (weft.panic.layer) and an INVALID_INPUT result
 // the rule it broke (weft.tool.input_error).
-func (o *observer) tool(ctx context.Context, c Call, seq int64) (context.Context, func(res ToolResultPart, pending bool, err error, cut int)) {
+func (o *observer) tool(ctx context.Context, c Call, seq int64) (context.Context, func(res ToolResultPart, pending bool, err error, cut int, retry retryMark)) {
 	ctx, span := o.tracer.Start(ctx, spanName(semconv.GenAIOperationNameExecuteTool, c.Name),
 		trace.WithSpanKind(trace.SpanKindInternal))
 	start := time.Now()
@@ -506,7 +512,7 @@ func (o *observer) tool(ctx context.Context, c Call, seq int64) (context.Context
 		attrs = append(attrs, metadataAttrs(ctx)...)
 		span.SetAttributes(attrs...)
 	}
-	return ctx, func(res ToolResultPart, pending bool, err error, cut int) {
+	return ctx, func(res ToolResultPart, pending bool, err error, cut int, retry retryMark) {
 		dur := time.Since(start)
 		if span.IsRecording() {
 			switch {
@@ -520,6 +526,9 @@ func (o *observer) tool(ctx context.Context, c Call, seq int64) (context.Context
 				}
 				if k := inputErrorKind(err); k != "" {
 					span.SetAttributes(attrToolInputError.String(k))
+				}
+				if retry.n > 0 {
+					span.SetAttributes(attrToolRetry.Int(retry.n), attrToolRetryBudget.Int(retry.budget))
 				}
 				span.SetStatus(codes.Error, "")
 			default:
@@ -785,6 +794,17 @@ type recorder struct {
 	// they have no span and no event (ADR 0007), so the invoke_agent
 	// span's weft.run.denied is their one carrier.
 	denied atomic.Int64
+	// runPanics counts this run's contained observer panics — taps,
+	// OnMessages observers, a record or a report the pipeline failed to
+	// build — beside the agent-wide TapPanics: the invoke_agent span's
+	// weft.tap.panics. OnRunEnd observers run after the span ended, so
+	// theirs reach TapPanics alone.
+	runPanics atomic.Int64
+	// retries holds each RETRY result's count and budget (call id →
+	// retryMark) from its tool goroutine until its ToolFinish is
+	// recorded — the tool_finish record's weft.tool.retry, under
+	// truncMu like truncated.
+	retries map[string]retryMark
 
 	// stepModel is the model that answered the step whose StepFinish is
 	// being emitted (callTiming.answered): set by the loop goroutine
@@ -830,6 +850,49 @@ func (r *recorder) takeTruncated(callID string) int {
 	return n
 }
 
+// countPanic counts one contained observer panic: the agent's
+// TapPanics and this run's weft.tap.panics. Nil-safe.
+func (r *recorder) countPanic() {
+	if r == nil {
+		return
+	}
+	if r.panics != nil {
+		r.panics.Add(1)
+	}
+	r.runPanics.Add(1)
+}
+
+// retryMark is a RETRY result's place in its tool's budget: n is the
+// tool's consecutive RETRY count with this result (1-based), budget
+// the run's MaxModelRetries — the guard fails the run once n exceeds
+// it. The zero value marks nothing (not a counted RETRY).
+type retryMark struct{ n, budget int }
+
+// noteRetry remembers a call's retry mark for its tool_finish record.
+// Nil-safe.
+func (r *recorder) noteRetry(callID string, m retryMark) {
+	if r == nil || m.n == 0 {
+		return
+	}
+	r.truncMu.Lock()
+	if r.retries == nil {
+		r.retries = map[string]retryMark{}
+	}
+	r.retries[callID] = m
+	r.truncMu.Unlock()
+}
+
+// takeRetry returns and forgets a call's retry mark, zero when none.
+func (r *recorder) takeRetry(callID string) retryMark {
+	r.truncMu.Lock()
+	defer r.truncMu.Unlock()
+	m, ok := r.retries[callID]
+	if ok {
+		delete(r.retries, callID)
+	}
+	return m
+}
+
 // noteDenied counts one call a resume denied. Nil-safe.
 func (r *recorder) noteDenied() {
 	if r != nil {
@@ -855,8 +918,10 @@ func (r *recorder) recordEvent(ctx context.Context, ev Event) {
 	// destination enabling event records the entry must still go, or it
 	// stays in the map until the run ends.
 	var cut int
+	var retry retryMark
 	if tf, ok := ev.(ToolFinish); ok {
 		cut = r.takeTruncated(tf.CallID)
+		retry = r.takeRetry(tf.CallID)
 	}
 	if !r.elog.Enabled(ctx, log.EnabledParameters{EventName: eventName}) {
 		return
@@ -919,6 +984,9 @@ func (r *recorder) recordEvent(ctx context.Context, ev Event) {
 		attrs = append(attrs, attrToolSeq.Int64(e.Seq), semconv.GenAIToolCallID(e.CallID), semconv.GenAIToolName(e.Name))
 	case ToolFinish:
 		attrs = append(attrs, attrToolSeq.Int64(e.Seq), semconv.GenAIToolCallID(e.CallID), semconv.GenAIToolName(e.Name))
+		if retry.n > 0 {
+			attrs = append(attrs, attrToolRetry.Int(retry.n), attrToolRetryBudget.Int(retry.budget))
+		}
 		if cut > 0 {
 			attrs = append(attrs, attrToolTruncated.Int(cut))
 		}

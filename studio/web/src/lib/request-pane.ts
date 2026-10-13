@@ -24,6 +24,40 @@ export const CHIP_CATALOG = "catalog changed at this step"
  * (a PrepareStep, or the tools' PromptSnippets). */
 export const CHIP_PROMPT_CHANGED = "prompt changed at this step"
 
+/** concurrencyWords is the run header's tool-concurrency fact
+ * (UX-E-50): the cap from the run's stored manifest
+ * (policy.parallelism — "parallelism: 2", 1 reads "sequential"), else
+ * the request record's sequential_tools (true only when the run's
+ * effective Parallelism was 1); null when neither says. */
+export function concurrencyWords(
+  parallelism?: number,
+  sequentialTools?: boolean
+): { text: string; title: string } | null {
+  if (parallelism !== undefined && parallelism > 0)
+    return parallelism === 1
+      ? {
+          text: "sequential",
+          title:
+            "Parallelism 1 (weft.Sequential): one tool call at a time — the run's manifest",
+        }
+      : {
+          text: `parallelism: ${parallelism}`,
+          title: `at most ${parallelism} tool calls at once (weft.Parallelism) — the run's manifest; a run option may have lowered it (weft.override.parallelism)`,
+        }
+  return sequentialTools
+    ? {
+        text: "sequential",
+        title: "the request record's sequential_tools: one tool call at a time",
+      }
+    : null
+}
+
+/** A prompt segment's label (UX-S2-11): "instructions", or
+ * "snippet · <tool>" for a tool's PromptSnippet ("tool:<name>"). */
+export function segmentLabel(source: string): string {
+  return source.startsWith("tool:") ? `snippet · ${source.slice(5)}` : source
+}
+
 /** The sha256 of "": the instructions hash of a run with no
  * instructions (ADR 0028 §4). */
 export const EMPTY_SHA256 =

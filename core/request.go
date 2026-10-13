@@ -159,6 +159,58 @@ type requestModelBody struct {
 type promptBody struct {
 	Hash string `json:"hash"`
 	Text string `json:"text"`
+	// Segments attributes the composed text to its sources (UX-S2-11):
+	// the instructions (after PrepareStep), then one segment per
+	// advertised tool's PromptSnippet ("tool:<name>"), in composition
+	// order. Absent when no tool contributed a snippet — the text is
+	// the instructions alone. Joined by the blank-line separators
+	// composeSystem writes, the segments are Text exactly; the hash
+	// stays over Text.
+	Segments []promptSegment `json:"segments,omitempty"`
+}
+
+// promptSegment is one source's share of the composed system text.
+type promptSegment struct {
+	Source string `json:"source"` // "instructions" | "tool:<name>"
+	Text   string `json:"text"`
+}
+
+// promptSegments splits a composed system text (composeSystem over
+// tools) back into its sources: nil when no tool carries a snippet, or
+// when the text is not the composition of tools' snippets (a caller
+// that built the request another way) — attribution is never guessed.
+func promptSegments(composed string, tools []*ToolDef) []promptSegment {
+	var snippets []promptSegment
+	var tail strings.Builder
+	for _, t := range tools {
+		if t.snippet == "" {
+			continue
+		}
+		if tail.Len() > 0 {
+			tail.WriteString("\n\n")
+		}
+		tail.WriteString(t.snippet)
+		snippets = append(snippets, promptSegment{Source: "tool:" + t.Name, Text: t.snippet})
+	}
+	if len(snippets) == 0 {
+		return nil
+	}
+	var instructions string
+	switch t := tail.String(); {
+	case composed == t:
+	case strings.HasSuffix(composed, "\n\n"+t):
+		instructions = strings.TrimSuffix(composed, "\n\n"+t)
+		if instructions == "" {
+			return nil // "" + "\n\n" is never composed: not ours
+		}
+	default:
+		return nil
+	}
+	out := make([]promptSegment, 0, len(snippets)+1)
+	if instructions != "" {
+		out = append(out, promptSegment{Source: "instructions", Text: instructions})
+	}
+	return append(out, snippets...)
 }
 
 // toolsBody is the tools record's body (ADR 0028 §5): one entry per
@@ -313,7 +365,7 @@ func (r *recorder) recordRequest(mctx context.Context, a *Agent, step int, req M
 	catalog := r.lastCatalog
 
 	if promptOn && systemHash != "" && !r.seenPrompts[systemHash] {
-		if r.emitPrompt(mctx, step, systemHash, req.System) {
+		if r.emitPrompt(mctx, step, systemHash, req.System, promptSegments(req.System, req.Tools)) {
 			if r.seenPrompts == nil {
 				r.seenPrompts = map[string]bool{}
 			}
@@ -446,8 +498,8 @@ func (rr *requestRecord) emit(ctx context.Context, body requestBody) {
 	r.emitRecord(ctx, body.Step, eventNameRequest, b, attrs)
 }
 
-func (r *recorder) emitPrompt(ctx context.Context, step int, hash, text string) bool {
-	b, err := json.Marshal(promptBody{Hash: hash, Text: text})
+func (r *recorder) emitPrompt(ctx context.Context, step int, hash, text string, segments []promptSegment) bool {
+	b, err := json.Marshal(promptBody{Hash: hash, Text: text, Segments: segments})
 	if err != nil {
 		r.debug(ctx, step, "prompt", err)
 		return false
@@ -519,9 +571,7 @@ func (r *recorder) contain(ctx context.Context, step int, what string) {
 
 // contained counts a recovered panic and leaves its Debug line.
 func (r *recorder) contained(ctx context.Context, step int, what string, p any) {
-	if r.panics != nil {
-		r.panics.Add(1)
-	}
+	r.countPanic()
 	// The panic's type only: its value may be built from the very
 	// body the record carried (content).
 	r.debug(ctx, step, what, fmt.Errorf("record panicked (%T)", p))

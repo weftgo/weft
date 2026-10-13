@@ -606,3 +606,20 @@ The run span's `error.type` table is unchanged; a reader's run row reads
 `cancelled` (`docs/record-contract.md` §6). The core imports nothing
 new. The stack of a panic is recorded nowhere yet: it belongs behind a
 development detail switch (`otel.DevDetail`, U23.1), as raw bodies are.
+
+## Amendment (2026-10-13 — retry counts, tap panics, prompt segments; UX plan U32.1)
+
+Three facts the loop knew and did not report, and one the prompt record
+merged away. Attributes and record fields only; observability changes
+no behaviour and no model-visible text (`TestToolRetryCountAndBudget`,
+`TestRunSpanCountsTapPanics`, `TestRequestRecordGoldenShape`):
+
+| where | key | value |
+|---|---|---|
+| `execute_tool` span, `tool_finish` record | `weft.tool.retry`, `weft.tool.retry_budget` | a RETRY the loop counts: the tool's consecutive RETRY count with this result (a success of the tool resets it; one batch's calls in completion order) and the run's `MaxModelRetries`. The budget's run error names both (`tool "x" retried 3 times, past MaxModelRetries(2)`) |
+| `invoke_agent` span | `weft.tap.panics` | at end, when > 0: the observer panics this run contained — taps, `OnMessages` observers, a record or report the pipeline failed to build — the run's share of `Agent.TapPanics` (`OnRunEnd` observers run after the span ended) |
+| `prompt` record body | `segments` | `[{source, text}]`: `instructions`, then `tool:<name>` per advertised tool's `PromptSnippet`, joining to the composed text exactly; absent without a snippet; the hash stays over the text |
+
+The pipeline's content shaping redacts each segment as it redacts the
+text and drops the segments when a cap cut the text, so a segment never
+carries bytes the stored text does not.

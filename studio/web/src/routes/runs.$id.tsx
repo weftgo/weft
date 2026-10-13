@@ -30,6 +30,7 @@ import { compactionsOf } from "@/lib/compaction"
 import { applyTranscript, fold, linkView } from "@/lib/events"
 import { isPlainShortcut } from "@/lib/keys"
 import { overrideOf } from "@/lib/request-pane"
+import { toolFactsOf } from "@/lib/error-kind"
 import {
   canReplay,
   continueHere,
@@ -510,6 +511,10 @@ function RunPage() {
     () => overrideOf(spans.data?.spans, id),
     [spans.data, id]
   )
+  const toolFacts = useMemo(
+    () => toolFactsOf(spans.data?.spans, id),
+    [spans.data, id]
+  )
   const requests = useMemo(
     () =>
       requestsCapable
@@ -850,6 +855,7 @@ function RunPage() {
             eventCount={Math.max(doc.event_count, stream.total)}
             transcript={transcript.data}
             gaps={stream.gaps}
+            sequentialTools={requestsQ.data?.requests[0]?.body.sequential_tools}
           />
           {evicted ? (
             <p
@@ -1072,6 +1078,7 @@ function RunPage() {
                   }
                   onStep={onStep}
                   stepInputRef={stepInput}
+                  toolFacts={toolFacts}
                 />
               )}
             </TabsContent>

@@ -155,7 +155,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			return false
 		}
 		for _, tap := range a.taps {
-			a.safeTap(ctx, tap, ev)
+			a.safeTap(ctx, tap, ev, &records)
 		}
 		records.recordEvent(ctx, ev)
 		sink(ev)
@@ -375,7 +375,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			// continued past the assistant message (ADR 0028 §8), else
 			// the joined message itself, below — so a resume's stored
 			// transcript rebuilds too.
-			a.observeMessages(ctx, cfg, 0, joined)
+			a.observeMessages(ctx, cfg, 0, joined, &records)
 			if !tailHeld {
 				// Appended at the end: the next growth record.
 				// Recorded through a cancellation, as the held tail is:
@@ -609,7 +609,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		}
 		if len(msg.Content) > 0 {
 			res.Messages = append(res.Messages, msg)
-			a.observeMessages(ctx, cfg, step, []Message{msg})
+			a.observeMessages(ctx, cfg, step, []Message{msg}, &records)
 			records.recordMessages(ctx, step, []Message{msg}, false)
 		}
 
@@ -642,7 +642,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			}
 		default:
 			var retried []string
-			rec.Results, pending, sub, retried = a.execTools(ctx, cfg.id, step, tools, calls, seq, emit, false, parallelism, parkSet, &records)
+			rec.Results, pending, sub, retried = a.execTools(ctx, cfg.id, step, tools, calls, seq, emit, false, parallelism, parkSet, &records, state.retries)
 			for _, name := range retried {
 				state.retries[name]++
 			}
@@ -661,7 +661,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 				toolMsg.Content = append(toolMsg.Content, r)
 			}
 			res.Messages = append(res.Messages, toolMsg)
-			a.observeMessages(ctx, cfg, step, []Message{toolMsg})
+			a.observeMessages(ctx, cfg, step, []Message{toolMsg}, &records)
 			records.recordMessages(ctx, step, []Message{toolMsg}, false)
 		}
 		res.Steps = append(res.Steps, rec)
@@ -726,7 +726,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 			// source of truth. The event is a snapshot — the transcript
 			// owns the delivered messages, the event carries a copy.
 			res.Messages = append(res.Messages, steered...)
-			a.observeMessages(ctx, cfg, step, steered)
+			a.observeMessages(ctx, cfg, step, steered, &records)
 			records.recordMessages(ctx, step, steered, false)
 			emit(Steered{RunID: cfg.id, Seq: seq.Add(1), Step: step, Messages: cloneMessages(steered)})
 		}
@@ -762,22 +762,26 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 // come in transcript order without holding the event-ordering lock. A
 // panicking observer is contained and counted like a tap: a broken
 // observer must not break a run, but it must not be invisible either.
-func (a *Agent) observeMessages(ctx context.Context, cfg runConfig, step int, msgs []Message) {
+func (a *Agent) observeMessages(ctx context.Context, cfg runConfig, step int, msgs []Message, rec *recorder) {
 	if len(cfg.onMessages) == 0 {
 		return
 	}
 	snapshot := cloneMessages(msgs)
 	for _, fn := range cfg.onMessages {
-		a.safeOnMessages(ctx, fn, step, snapshot)
+		a.safeOnMessages(ctx, fn, step, snapshot, rec)
 	}
 }
 
 // safeOnMessages runs one transcript observer, containing a panic and
 // counting it (TapPanics) — the same containment a tap gets.
-func (a *Agent) safeOnMessages(ctx context.Context, fn func(context.Context, int, []Message), step int, msgs []Message) {
+func (a *Agent) safeOnMessages(ctx context.Context, fn func(context.Context, int, []Message), step int, msgs []Message, rec *recorder) {
 	defer func() {
 		if recover() != nil {
-			a.tapPanics.Add(1)
+			if rec != nil {
+				rec.countPanic()
+			} else {
+				a.tapPanics.Add(1)
+			}
 		}
 	}()
 	fn(ctx, step, msgs)
@@ -786,10 +790,17 @@ func (a *Agent) safeOnMessages(ctx context.Context, fn func(context.Context, int
 // safeTap runs one tap, containing a panic and counting it (TapPanics):
 // a broken observer must not break a run, but it must not be invisible
 // either.
-func (a *Agent) safeTap(ctx context.Context, tap func(context.Context, Event), ev Event) {
+//
+// rec, when not nil, is the run's recorder: the panic is counted there
+// (it adds to TapPanics too) for the run's weft.tap.panics.
+func (a *Agent) safeTap(ctx context.Context, tap func(context.Context, Event), ev Event, rec *recorder) {
 	defer func() {
 		if recover() != nil {
-			a.tapPanics.Add(1)
+			if rec != nil {
+				rec.countPanic()
+			} else {
+				a.tapPanics.Add(1)
+			}
 		}
 	}()
 	tap(ctx, ev)
@@ -904,8 +915,8 @@ type loopState struct {
 func (a *Agent) guard(res *RunResult, rec *StepRecord, st *loopState) error {
 	for _, name := range slices.Sorted(maps.Keys(st.retries)) {
 		if st.retries[name] > a.maxModelRetries {
-			return fmt.Errorf("%w: tool %q retried %d times",
-				ErrModelRetriesExceeded, name, st.retries[name])
+			return fmt.Errorf("%w: tool %q retried %d times, past MaxModelRetries(%d)",
+				ErrModelRetriesExceeded, name, st.retries[name], a.maxModelRetries)
 		}
 	}
 	if limit := a.usageLimit; limit.InputTokens > 0 || limit.OutputTokens > 0 {
@@ -991,7 +1002,7 @@ func (a *Agent) modelInfo() ModelInfo { return InfoOf(a.model) }
 // rec is the run's recorder, told each call's truncation before its
 // ToolFinish is emitted (the tool_finish record's
 // weft.tool.truncated_bytes); nil records nothing.
-func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*ToolDef, calls []ToolCallPart, seq *atomic.Int64, emit func(Event), approved bool, parallelism int, parkSet *parkRule, rec *recorder) (results []ToolResultPart, pending []ToolCallPart, subagents map[string]Usage, retried []string) {
+func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*ToolDef, calls []ToolCallPart, seq *atomic.Int64, emit func(Event), approved bool, parallelism int, parkSet *parkRule, rec *recorder, retryBase map[string]int) (results []ToolResultPart, pending []ToolCallPart, subagents map[string]Usage, retried []string) {
 	outcomes := make([]ToolResultPart, len(calls))
 	parked := make([]bool, len(calls))
 	sem := make(chan struct{}, parallelism)
@@ -1092,12 +1103,26 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 			var callErr error
 			var cut int
 			outcomes[i], parked[i], retry, cut, callErr = a.callTool(callCtx, call, def, parkSet)
+			var mark retryMark
 			if retry {
 				retryMu.Lock()
 				retried = append(retried, call.Name)
+				if retryBase != nil {
+					// The tool's consecutive RETRY count with this result,
+					// as the guard will count it (weft.tool.retry): the
+					// steps before plus this batch's RETRYs of the same
+					// tool so far, in completion order.
+					mark = retryMark{n: retryBase[call.Name], budget: a.maxModelRetries}
+					for _, name := range retried {
+						if name == call.Name {
+							mark.n++
+						}
+					}
+				}
 				retryMu.Unlock()
 			}
-			endTool(outcomes[i], parked[i], callErr, cut)
+			endTool(outcomes[i], parked[i], callErr, cut, mark)
+			rec.noteRetry(call.ID, mark)
 			if parked[i] {
 				return
 			}
@@ -1158,7 +1183,7 @@ func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolC
 			approved = append(approved, c)
 		}
 	}
-	ran, pending, sub, _ := a.execTools(ctx, cfg.id, 0, tools, approved, seq, emit, true, cfg.effectiveParallelism(a.parallelism), parkSet, rec)
+	ran, pending, sub, _ := a.execTools(ctx, cfg.id, 0, tools, approved, seq, emit, true, cfg.effectiveParallelism(a.parallelism), parkSet, rec, nil)
 	byID := make(map[string]ToolResultPart, len(ran))
 	for _, r := range ran {
 		byID[r.CallID] = r

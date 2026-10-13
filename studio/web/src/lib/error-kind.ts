@@ -22,7 +22,7 @@ export interface KindWords {
 
 // Each kind's hint: the control or sentinel behind it, terse (the
 // panel ships these bytes). The word is the error_type itself.
-const KINDS: Record<string, string> = {
+const KINDS: Record<string, string | undefined> = {
   max_steps: "MaxSteps",
   usage_limit: "UsageLimit",
   loop_detected: "DetectLoops",
@@ -32,7 +32,8 @@ const KINDS: Record<string, string> = {
   stream_idle: "ErrStreamIdle",
   no_output: "Output[T]: no valid output",
   unsupported: "ErrUnsupported",
-  model_requests_denied: "WEFT_MODEL_REQUESTS=deny",
+  model_requests_denied:
+    "WEFT_MODEL_REQUESTS=deny: unset it to call the provider",
   duplicate_tool: "ErrDuplicateTool",
   nil_tool: "ErrNilTool",
   run_panicked: "an uncontained panic",
@@ -51,10 +52,16 @@ export function errorKind(errorType?: string): KindWords | null {
       tone: "cancelled",
     }
   return {
-    word: errorType,
-    hint: (KINDS[errorType] as string | undefined) ?? "error.type",
+    word: WORDS[errorType] ?? errorType,
+    hint: KINDS[errorType] ?? "error.type",
     tone: "bad",
   }
+}
+
+// A kind whose word is not its error_type (UX-S4-09): the kill switch
+// is no provider failure — the run never asked.
+const WORDS: Record<string, string | undefined> = {
+  model_requests_denied: "denied by the kill switch (WEFT_MODEL_REQUESTS)",
 }
 
 /** kindChip is the chip's bracketed text and title; null with no kind. */
@@ -63,7 +70,11 @@ export function kindChip(
 ): { text: string; title: string; tone: KindWords["tone"] } | null {
   const k = errorKind(errorType)
   return k
-    ? { text: `[${k.word}]`, title: `${k.hint} — error_type ${errorType}`, tone: k.tone }
+    ? {
+        text: `[${k.word}]`,
+        title: `${k.hint} — error_type ${errorType}`,
+        tone: k.tone,
+      }
     : null
 }
 
@@ -75,6 +86,8 @@ export interface ProblemRow {
   denied?: number
   truncated?: number
   repaired?: number
+  /** Observer panics the run contained (weft.tap.panics). */
+  tap_panics?: number
   log_warn?: number
   log_error?: number
   /** The log counts stopped at the reader's cap: each is a floor,
@@ -115,13 +128,21 @@ export function problemBadges(r: ProblemRow): ProblemBadge[] {
       `${plural(n(r.fallbacks), "model call")} answered by a fallback model`
     )
   if (n(r.tool_errors) > 0)
-    add("tool_errors", `✗${r.tool_errors}`, plural(n(r.tool_errors), "tool error"))
+    add(
+      "tool_errors",
+      `✗${r.tool_errors}`,
+      plural(n(r.tool_errors), "tool error")
+    )
   const held = n(r.denied) + n(r.pending)
   if (held > 0) {
     const parts = []
     if (n(r.denied) > 0) parts.push(`${r.denied} denied`)
     if (n(r.pending) > 0) parts.push(`${r.pending} parked`)
-    add("denied", held > 1 ? `✋${held}` : "✋", `${parts.join(", ")} (approval or policy)`)
+    add(
+      "denied",
+      held > 1 ? `✋${held}` : "✋",
+      `${parts.join(", ")} (approval or policy)`
+    )
   }
   if (n(r.truncated) > 0)
     add(
@@ -130,13 +151,31 @@ export function problemBadges(r: ProblemRow): ProblemBadge[] {
       `${plural(n(r.truncated), "tool result")} cut by the result cap`
     )
   if (n(r.repaired) > 0)
-    add("repaired", `⚒${r.repaired}`, `${plural(n(r.repaired), "tool call")} repaired`)
+    add(
+      "repaired",
+      `⚒${r.repaired}`,
+      `${plural(n(r.repaired), "tool call")} repaired`
+    )
   // Past the reader's cap the log counts are floors: "≥" on both.
   const ge = r.logs_capped ? "≥" : ""
+  if (n(r.tap_panics) > 0)
+    add(
+      "tap_panics",
+      `⚠${r.tap_panics}`,
+      `tap panics: ${r.tap_panics} (observers, contained)`
+    )
   if (n(r.log_error) > 0)
-    add("log_error", `E${ge}${r.log_error}`, ge + plural(n(r.log_error), "app log error"))
+    add(
+      "log_error",
+      `E${ge}${r.log_error}`,
+      ge + plural(n(r.log_error), "app log error")
+    )
   if (n(r.log_warn) > 0)
-    add("log_warn", `W${ge}${r.log_warn}`, ge + plural(n(r.log_warn), "app log warning"))
+    add(
+      "log_warn",
+      `W${ge}${r.log_warn}`,
+      ge + plural(n(r.log_warn), "app log warning")
+    )
   return out
 }
 
@@ -157,10 +196,14 @@ export function statsStrip(r: ProblemRow & { steps: number }): string[] {
  * weft.tool.error_masked). */
 export function toolFailure(
   errorType?: string,
-  attrs: { panic_layer?: string; input_error?: string } = {}
+  attrs: ToolFacts = {}
 ): { word: string; hint: string } | null {
   if (!errorType) return null
   switch (errorType) {
+    case "RETRY":
+      if (attrs.retry && attrs.retry_budget !== undefined)
+        return retryPill(attrs.retry, attrs.retry_budget)
+      break
     case "panic":
       return {
         word: `panic · ${attrs.panic_layer || "handler"}`,
@@ -183,15 +226,94 @@ export function toolFailure(
       return { word: "timeout", hint: "the call's Timeout passed" }
     case "context.Canceled":
     case "context.DeadlineExceeded":
-      return { word: CANCELLED, hint: "the run's cancellation reached the call" }
+      return {
+        word: CANCELLED,
+        hint: "the run's cancellation reached the call",
+      }
     case "mcp_transport":
       return { word: "MCP transport", hint: "the tools/call did not complete" }
     case "mcp_tool_error":
       return { word: "MCP tool error", hint: "the MCP server answered isError" }
     case "DENIED":
-      return { word: "DENIED", hint: "a policy or an approval refused the call" }
+      return {
+        word: "DENIED",
+        hint: "a policy or an approval refused the call",
+      }
     case "tool_error":
       return { word: "tool error", hint: "the handler returned an error" }
   }
   return { word: errorType, hint: "the ToolError code " + errorType }
+}
+
+/** A run's tool facts by call id (toolFactsOf). */
+export type ToolFactsMap = Map<string, ToolFacts & { error_type: string }>
+
+/** The execute_tool span's facts beside error.type (U4, U32.1). */
+export interface ToolFacts {
+  panic_layer?: string
+  input_error?: string
+  /** weft.tool.retry: the tool's consecutive RETRY count with this
+   * result; weft.tool.retry_budget: the run's MaxModelRetries. */
+  retry?: number
+  retry_budget?: number
+}
+
+/** retryPill words a RETRY result's place in its budget (UX-S2-10):
+ * "retry 1/2"; past the budget — the guard fails the run at its next
+ * model call — "retry 3/2 — budget spent". */
+export function retryPill(
+  count: number,
+  budget: number
+): { word: string; hint: string } {
+  return count > budget
+    ? {
+        word: `retry ${count}/${budget} — budget spent`,
+        hint: `past MaxModelRetries(${budget}): the run fails at its next model call`,
+      }
+    : {
+        word: `retry ${count}/${budget}`,
+        hint: `ModelRetry: the model was asked to fix its call (MaxModelRetries ${budget})`,
+      }
+}
+
+/** A span as toolFactsOf reads it. */
+interface FactSpan {
+  attrs: Record<string, unknown>
+}
+
+const factStr = (v: unknown) => (typeof v === "string" && v ? v : undefined)
+const factNum = (v: unknown) => {
+  const k = typeof v === "string" ? Number(v) : v
+  return typeof k === "number" && Number.isInteger(k) && k >= 0 ? k : undefined
+}
+
+/** toolFactsOf indexes a run's own execute_tool spans by call id: each
+ * failed call's error.type and the facts beside it — the story's tool
+ * pill reads them (strict input, retry n/budget). A subagent child's
+ * spans in the same trace are not this run's. */
+export function toolFactsOf(
+  spans: FactSpan[] | undefined,
+  runId: string
+): ToolFactsMap {
+  const out: ToolFactsMap = new Map()
+  for (const sp of spans ?? []) {
+    const a = sp.attrs
+    const call = factStr(a["gen_ai.tool.call.id"])
+    const type = factStr(a["error.type"])
+    if (
+      a["gen_ai.operation.name"] !== "execute_tool" ||
+      a["weft.run.id"] !== runId ||
+      !call ||
+      !type
+    )
+      continue
+    out.set(call, {
+      error_type: type,
+      panic_layer: factStr(a["weft.panic.layer"]),
+      input_error: factStr(a["weft.tool.input_error"]),
+      retry: factNum(a["weft.tool.retry"]),
+      retry_budget: factNum(a["weft.tool.retry_budget"]),
+    })
+  }
+  return out
 }

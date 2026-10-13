@@ -1,0 +1,2407 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "contract-app"
+            }
+          },
+          {
+            "key": "weft.version",
+            "value": {
+              "stringValue": "v0.0.0-contract"
+            }
+          }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "github.com/weftgo/weft/core",
+            "version": "v0.0.0-contract"
+          },
+          "spans": [
+            {
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "invoke_agent"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "wefttest"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "weft.instructions.hash",
+                  "value": {
+                    "stringValue": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7"
+                  }
+                },
+                {
+                  "key": "weft.manifest.hash",
+                  "value": {
+                    "stringValue": "3a21f00000000000000000000000000000000000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.version",
+                  "value": {
+                    "stringValue": "v0.0.0-contract"
+                  }
+                },
+                {
+                  "key": "weft.metadata.dropped",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "k00",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k01",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k02",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k03",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k04",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k05",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k06",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k07",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k08",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k09",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k10",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k11",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k12",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k13",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k14",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k15",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k16",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k17",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k18",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k19",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k20",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k21",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k22",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k23",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k24",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k25",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k26",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k27",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k28",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k29",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k30",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k31",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k32",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k33",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k34",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k35",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k36",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k37",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k38",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k39",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k40",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k41",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k42",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k43",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k44",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k45",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k46",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k47",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k48",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k49",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k50",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k51",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k52",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k53",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k54",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k55",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k56",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k57",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k58",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k59",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k60",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k61",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k62",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k63",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": {
+                    "intValue": "20"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": {
+                    "intValue": "10"
+                  }
+                },
+                {
+                  "key": "weft.run.steps",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "weft.run.events",
+                  "value": {
+                    "intValue": "9"
+                  }
+                },
+                {
+                  "key": "weft.run.messages",
+                  "value": {
+                    "intValue": "5"
+                  }
+                },
+                {
+                  "key": "weft.tap.panics",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.run.stop_reason",
+                  "value": {
+                    "stringValue": "tool_calls"
+                  }
+                },
+                {
+                  "key": "weft.run.stopped_by",
+                  "value": {
+                    "stringValue": "model_retries_exceeded"
+                  }
+                },
+                {
+                  "key": "error.type",
+                  "value": {
+                    "stringValue": "model_retries_exceeded"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790846400010000000",
+              "events": [
+                {
+                  "attributes": [
+                    {
+                      "key": "exception.type",
+                      "value": {
+                        "stringValue": "*core.RunError"
+                      }
+                    },
+                    {
+                      "key": "exception.message",
+                      "value": {
+                        "stringValue": "weft: run failed at step 1: weft: a tool asked the model to retry too many times: tool \"flaky\" retried 2 times, past MaxModelRetries(1)"
+                      }
+                    }
+                  ],
+                  "name": "exception",
+                  "timeUnixNano": "1790846400001000000"
+                }
+              ],
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "invoke_agent support",
+              "spanId": "5ba0000000000001",
+              "startTimeUnixNano": "1790846400000000000",
+              "status": {
+                "code": "STATUS_CODE_ERROR",
+                "message": "weft: run failed at step 1: weft: a tool asked the model to retry too many times: tool \"flaky\" retried 2 times, past MaxModelRetries(1)"
+              },
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "chat"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.stream",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "wefttest"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "k00",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k01",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k02",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k03",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k04",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k05",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k06",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k07",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k08",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k09",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k10",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k11",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k12",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k13",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k14",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k15",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k16",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k17",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k18",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k19",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k20",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k21",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k22",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k23",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k24",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k25",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k26",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k27",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k28",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k29",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k30",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k31",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k32",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k33",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k34",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k35",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k36",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k37",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k38",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k39",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k40",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k41",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k42",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k43",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k44",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k45",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k46",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k47",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k48",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k49",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k50",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k51",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k52",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k53",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k54",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k55",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k56",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k57",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k58",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k59",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k60",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k61",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k62",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k63",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": {
+                    "intValue": "10"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": {
+                    "intValue": "5"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.finish_reasons",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "tool_calls"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "weft.model.tool_calls",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790846400003000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_CLIENT",
+              "name": "chat script",
+              "parentSpanId": "5ba0000000000001",
+              "spanId": "5ba0000000000002",
+              "startTimeUnixNano": "1790846400002000000",
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "flaky"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_1"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "k00",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k01",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k02",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k03",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k04",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k05",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k06",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k07",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k08",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k09",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k10",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k11",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k12",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k13",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k14",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k15",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k16",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k17",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k18",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k19",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k20",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k21",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k22",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k23",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k24",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k25",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k26",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k27",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k28",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k29",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k30",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k31",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k32",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k33",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k34",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k35",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k36",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k37",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k38",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k39",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k40",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k41",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k42",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k43",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k44",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k45",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k46",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k47",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k48",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k49",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k50",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k51",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k52",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k53",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k54",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k55",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k56",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k57",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k58",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k59",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k60",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k61",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k62",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k63",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "error.type",
+                  "value": {
+                    "stringValue": "RETRY"
+                  }
+                },
+                {
+                  "key": "weft.tool.retry",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.tool.retry_budget",
+                  "value": {
+                    "intValue": "1"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790846400005000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "execute_tool flaky",
+              "parentSpanId": "5ba0000000000001",
+              "spanId": "5ba0000000000003",
+              "startTimeUnixNano": "1790846400004000000",
+              "status": {
+                "code": "STATUS_CODE_ERROR"
+              },
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "chat"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.stream",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "gen_ai.provider.name",
+                  "value": {
+                    "stringValue": "wefttest"
+                  }
+                },
+                {
+                  "key": "gen_ai.request.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "k00",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k01",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k02",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k03",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k04",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k05",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k06",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k07",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k08",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k09",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k10",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k11",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k12",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k13",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k14",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k15",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k16",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k17",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k18",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k19",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k20",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k21",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k22",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k23",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k24",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k25",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k26",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k27",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k28",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k29",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k30",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k31",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k32",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k33",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k34",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k35",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k36",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k37",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k38",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k39",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k40",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k41",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k42",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k43",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k44",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k45",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k46",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k47",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k48",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k49",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k50",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k51",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k52",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k53",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k54",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k55",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k56",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k57",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k58",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k59",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k60",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k61",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k62",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k63",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.input_tokens",
+                  "value": {
+                    "intValue": "10"
+                  }
+                },
+                {
+                  "key": "gen_ai.usage.output_tokens",
+                  "value": {
+                    "intValue": "5"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.finish_reasons",
+                  "value": {
+                    "arrayValue": {
+                      "values": [
+                        {
+                          "stringValue": "tool_calls"
+                        }
+                      ]
+                    }
+                  }
+                },
+                {
+                  "key": "weft.model.tool_calls",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790846400007000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_CLIENT",
+              "name": "chat script",
+              "parentSpanId": "5ba0000000000001",
+              "spanId": "5ba0000000000004",
+              "startTimeUnixNano": "1790846400006000000",
+              "status": {
+                "code": "STATUS_CODE_OK"
+              },
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "flaky"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_1"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "3"
+                  }
+                },
+                {
+                  "key": "k00",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k01",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k02",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k03",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k04",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k05",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k06",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k07",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k08",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k09",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k10",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k11",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k12",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k13",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k14",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k15",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k16",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k17",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k18",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k19",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k20",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k21",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k22",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k23",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k24",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k25",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k26",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k27",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k28",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k29",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k30",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k31",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k32",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k33",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k34",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k35",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k36",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k37",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k38",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k39",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k40",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k41",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k42",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k43",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k44",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k45",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k46",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k47",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k48",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k49",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k50",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k51",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k52",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k53",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k54",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k55",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k56",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k57",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k58",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k59",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k60",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k61",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k62",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "k63",
+                  "value": {
+                    "stringValue": "v"
+                  }
+                },
+                {
+                  "key": "error.type",
+                  "value": {
+                    "stringValue": "RETRY"
+                  }
+                },
+                {
+                  "key": "weft.tool.retry",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "weft.tool.retry_budget",
+                  "value": {
+                    "intValue": "1"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790846400009000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "execute_tool flaky",
+              "parentSpanId": "5ba0000000000001",
+              "spanId": "5ba0000000000005",
+              "startTimeUnixNano": "1790846400008000000",
+              "status": {
+                "code": "STATUS_CODE_ERROR"
+              },
+              "traceId": "7ace0000000000000000000000000001"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

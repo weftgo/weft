@@ -308,7 +308,7 @@ func (x exportRef) doc() any {
 	switch {
 	case x.prompt != nil:
 		p := x.prompt
-		return promptDoc{Hash: p.Hash, Text: p.Text, Content: string(p.Content), TruncatedBytes: p.TruncatedBytes}
+		return promptDoc{Hash: p.Hash, Text: p.Text, Segments: p.Segments, Content: string(p.Content), TruncatedBytes: p.TruncatedBytes}
 	case x.catalog != nil:
 		return catalogOf(*x.catalog)
 	}
@@ -984,9 +984,10 @@ func (x *runExport) otlpLogs() *collogspb.ExportLogsServiceRequest {
 	for _, ref := range x.prompts {
 		if p := ref.prompt; p != nil {
 			body, _ := json.Marshal(struct {
-				Hash string `json:"hash"`
-				Text string `json:"text"`
-			}{p.Hash, p.Text})
+				Hash     string                `json:"hash"`
+				Text     string                `json:"text"`
+				Segments []obsdb.PromptSegment `json:"segments,omitempty"`
+			}{p.Hash, p.Text, p.Segments})
 			if p.Content == obsdb.HoleDerived {
 				body = nil // see derivedBody
 			}

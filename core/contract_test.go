@@ -5204,6 +5204,182 @@ type typedToolErr struct{ kind, text string }
 func (e *typedToolErr) Error() string     { return e.text }
 func (e *typedToolErr) ErrorType() string { return e.kind }
 
+// TestToolRetryCountAndBudget pins weft.tool.retry / retry_budget
+// (record contract §3, U32.1, UX-S2-10): every RETRY result the loop
+// counts carries the tool's consecutive RETRY count with it and the
+// run's MaxModelRetries, on its execute_tool span and its tool_finish
+// record; a success resets the count; the run that spends the budget
+// fails with model_retries_exceeded and an error naming the budget.
+// The model-visible RETRY text is unchanged (rule 5).
+func TestToolRetryCountAndBudget(t *testing.T) {
+	calls := 0
+	flaky := core.Tool("flaky", "Flaky.", func(context.Context, struct{}) (string, error) {
+		calls++
+		if calls == 3 {
+			return "ok", nil
+		}
+		return "", core.ModelRetry("try again")
+	})
+	tp := newRecProvider()
+	lp := newRecLogProvider()
+	agt := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{ID: "c1", Name: "flaky"}),
+		wefttest.ToolCalls(wefttest.Call{ID: "c2", Name: "flaky"}),
+		wefttest.ToolCalls(wefttest.Call{ID: "c3", Name: "flaky"}),
+		wefttest.ToolCalls(wefttest.Call{ID: "c4", Name: "flaky"}),
+		wefttest.ToolCalls(wefttest.Call{ID: "c5", Name: "flaky"}),
+		wefttest.ToolCalls(wefttest.Call{ID: "c6", Name: "flaky"}),
+		wefttest.Say("never"),
+	), core.TracerProvider(tp), core.LoggerProvider(lp), core.MaxModelRetries(2), core.MaxSteps(10), flaky)
+	res, err := agt.Generate(context.Background(), core.Prompt("x"))
+	if !errors.Is(err, core.ErrModelRetriesExceeded) {
+		t.Fatalf("err = %v, want ErrModelRetriesExceeded", err)
+	}
+	if !strings.Contains(err.Error(), `tool "flaky" retried 3 times, past MaxModelRetries(2)`) {
+		t.Errorf("err = %q, want the count and the budget", err)
+	}
+	var re *core.RunError
+	if errors.As(err, &re) {
+		res = re.Result
+	}
+	for _, m := range res.Messages {
+		for _, p := range m.Content {
+			if r, ok := p.(core.ToolResultPart); ok && r.IsError && r.Content != "RETRY: try again" {
+				t.Errorf("the model sees %q, want the RETRY text unchanged", r.Content)
+			}
+		}
+	}
+	// c1 RETRY 1/2, c2 RETRY 2/2, c3 ok (reset), c4 1/2, c5 2/2, c6 3/2.
+	want := map[string]string{"c1": "1", "c2": "2", "c3": "", "c4": "1", "c5": "2", "c6": "3"}
+	got := map[string]string{}
+	budgets := map[string]string{}
+	for _, s := range recSpans(tp) {
+		a := s.attrsMap()
+		if id := a["gen_ai.tool.call.id"]; id != "" {
+			got[id], budgets[id] = a["weft.tool.retry"], a["weft.tool.retry_budget"]
+		}
+	}
+	for id, n := range want {
+		if got[id] != n {
+			t.Errorf("%s span weft.tool.retry = %q, want %q", id, got[id], n)
+		}
+		if b := budgets[id]; (n == "" && b != "") || (n != "" && b != "2") {
+			t.Errorf("%s span weft.tool.retry_budget = %q", id, b)
+		}
+	}
+	finishes := 0
+	for _, r := range lp.ofKind(t, "event") {
+		if r.attr("weft.event.type") != "tool_finish" {
+			continue
+		}
+		finishes++
+		var ev struct {
+			CallID string `json:"call_id"`
+		}
+		_ = json.Unmarshal([]byte(r.body), &ev)
+		n, ok := r.intAttr("weft.tool.retry")
+		b, _ := r.intAttr("weft.tool.retry_budget")
+		switch w := want[ev.CallID]; {
+		case w == "" && ok:
+			t.Errorf("%s tool_finish carries weft.tool.retry %d", ev.CallID, n)
+		case w != "" && (!ok || strconv.FormatInt(n, 10) != w || b != 2):
+			t.Errorf("%s tool_finish weft.tool.retry = %d/%d (%v), want %s/2", ev.CallID, n, b, ok, w)
+		}
+	}
+	if finishes != 6 {
+		t.Errorf("tool_finish records = %d, want 6", finishes)
+	}
+	if got := tp.find(t, "invoke_agent").attrsMap()["error.type"]; got != "model_retries_exceeded" {
+		t.Errorf("invoke_agent error.type = %q", got)
+	}
+}
+
+// TestRunSpanCountsTapPanics pins weft.tap.panics (record contract §3,
+// U32.1, UX-E-51): the observer panics a run contained — taps and
+// OnMessages observers — are counted on its own invoke_agent span at
+// end (Agent.TapPanics counts them too, across runs); a run whose
+// observers did not panic carries no attribute. The run is unchanged.
+func TestRunSpanCountsTapPanics(t *testing.T) {
+	tp := newRecProvider()
+	var panicking atomic.Bool
+	panicking.Store(true)
+	agt := core.New(wefttest.Script(wefttest.Say("one"), wefttest.Say("two")),
+		core.TracerProvider(tp), core.Name("tapped"),
+		core.Tap(func(_ context.Context, ev core.Event) {
+			if _, ok := ev.(core.RunStart); ok && panicking.Load() {
+				panic("tap exploded")
+			}
+		}))
+	if _, err := agt.Generate(context.Background(), core.Prompt("x"),
+		core.OnMessages(func(context.Context, int, []core.Message) { panic("observer exploded") })); err != nil {
+		t.Fatal(err)
+	}
+	spans := spansNamed(tp, "invoke_agent tapped")
+	if len(spans) != 1 {
+		t.Fatalf("invoke_agent spans = %d", len(spans))
+	}
+	n := spans[0].attrsMap()["weft.tap.panics"]
+	if n == "" || n == "0" || n == "1" {
+		t.Errorf("weft.tap.panics = %q, want the tap's and the observer's panics (≥ 2)", n)
+	}
+	if strconv.FormatInt(agt.TapPanics(), 10) != n {
+		t.Errorf("TapPanics = %d, span = %s", agt.TapPanics(), n)
+	}
+	panicking.Store(false)
+	if _, err := agt.Generate(context.Background(), core.Prompt("y")); err != nil {
+		t.Fatal(err)
+	}
+	spans = spansNamed(tp, "invoke_agent tapped")
+	if _, ok := spans[1].attrsMap()["weft.tap.panics"]; ok {
+		t.Errorf("a run without observer panics carries weft.tap.panics")
+	}
+}
+
+// TestModelRequestsDeniedErrorType pins UX-S4-09: a model call the kill
+// switch refused (WEFT_MODEL_REQUESTS=deny → ErrModelRequestsDenied)
+// is error.type model_requests_denied on its chat span and on the run's
+// invoke_agent span — the run row's error_type (record contract §6).
+func TestModelRequestsDeniedErrorType(t *testing.T) {
+	tp := newRecProvider()
+	agt := core.New(wefttest.Script(wefttest.Fail(core.ErrModelRequestsDenied)), core.TracerProvider(tp))
+	_, err := agt.Generate(context.Background(), core.Prompt("x"))
+	if !errors.Is(err, core.ErrModelRequestsDenied) {
+		t.Fatalf("err = %v", err)
+	}
+	for _, name := range []string{"invoke_agent", "chat"} {
+		var span *recSpan
+		for _, s := range recSpans(tp) {
+			if strings.HasPrefix(s.name, name) {
+				span = s
+			}
+		}
+		if span == nil {
+			t.Fatalf("no %s span", name)
+		}
+		if got := span.attrsMap()["error.type"]; got != "model_requests_denied" {
+			t.Errorf("%s error.type = %q, want model_requests_denied", name, got)
+		}
+	}
+}
+
+// recSpans is every span the provider recorded, in start order.
+func recSpans(p *recProvider) []*recSpan {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.spans)
+}
+
+// spansNamed is the recorded spans with the exact name, in start order.
+func spansNamed(p *recProvider, name string) []*recSpan {
+	var out []*recSpan
+	for _, s := range recSpans(p) {
+		if s.name == name {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
 // TestToolFailureKinds pins O3/O4 (record contract §3, U4): a tool
 // failure's error.type and the attributes beside it, with the
 // model-visible result text unchanged (rule 5). A panic is "panic"

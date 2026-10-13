@@ -45,6 +45,17 @@ type Problems struct {
 	// Repaired counts the tool calls whose arguments the loop repaired:
 	// always 0 until the core reports weft.tool.args_repaired (U23.1).
 	Repaired int64
+	// TapPanics counts the observer panics the run contained — taps,
+	// OnMessages observers, a record the pipeline failed to build —
+	// from its invoke_agent span's weft.tap.panics (U32.1, UX-E-51).
+	// The run is unchanged; an observer the app relies on saw less.
+	TapPanics int64
+	// MetadataDropped counts the metadata pairs the core's limits
+	// dropped (64 keys, 128-byte keys, 1 KiB values), from the
+	// invoke_agent span's weft.metadata.dropped (U32.1, UX-E-42): the
+	// run document's truncated hole, cause metadata_cap — not a
+	// problem badge.
+	MetadataDropped int64
 	// LogWarn and LogError count the app's own log records under the
 	// run's spans at WARN (13–16) and at ERROR or above (17–24). They
 	// are read time, not ingest time — an app log carries the trace and
@@ -74,6 +85,11 @@ const (
 	// "denied_approval:<span>:<n>": an invoke_agent span's
 	// weft.run.denied, keyed by its span like every other token.
 	problemDeniedApproval = "denied_approval"
+	// "tap_panics:<span>:<n>" and "metadata_dropped:<span>:<n>": an
+	// invoke_agent span's weft.tap.panics and weft.metadata.dropped
+	// (U32.1; SQLite 0017, ClickHouse 0018).
+	problemTapPanics       = "tap_panics"
+	problemMetadataDropped = "metadata_dropped"
 )
 
 // attemptLayerFallback is weft.attempt.layer's value on a request a
@@ -106,10 +122,11 @@ func RunErrorType(errorType string) string {
 // attempt followed), a fallback layer's answer, an execute_tool span
 // that failed (tool_failed, or denied for error.type DENIED; none for
 // RETRY or a context error) or whose result the cap cut, and an
-// invoke_agent span's weft.run.denied. Nil for a span that contributes
-// none. The rules are restated in ClickHouse's traces view (migration
-// 0017) and SQLite's backfill (0016); the conformance suite pins all
-// three agree.
+// invoke_agent span's weft.run.denied, weft.tap.panics and
+// weft.metadata.dropped. Nil for a span that contributes none. The
+// rules are restated in ClickHouse's traces view (migrations 0017,
+// 0018) and SQLite's backfills (0016, 0017); the conformance suite pins
+// all three agree.
 func SpanProblems(s Span) []string {
 	var out []string
 	key := func(kind string) string { return kind + ":" + s.SpanID }
@@ -145,6 +162,12 @@ func SpanProblems(s Span) []string {
 	case op == "invoke_agent":
 		if n := attrInt(s.Attrs, "weft.run.denied"); n > 0 {
 			out = append(out, key(problemDeniedApproval)+":"+strconv.Itoa(n))
+		}
+		if n := attrInt(s.Attrs, "weft.tap.panics"); n > 0 {
+			out = append(out, key(problemTapPanics)+":"+strconv.Itoa(n))
+		}
+		if n := attrInt(s.Attrs, "weft.metadata.dropped"); n > 0 {
+			out = append(out, key(problemMetadataDropped)+":"+strconv.Itoa(n))
 		}
 	}
 	return out
@@ -198,6 +221,17 @@ func CountProblems(tokens []string) Problems {
 			}
 			if n, err := strconv.ParseInt(f[2], 10, 64); err == nil && n > 0 {
 				p.Denied += n
+			}
+		case problemTapPanics, problemMetadataDropped:
+			if len(f) != 3 {
+				continue
+			}
+			if n, err := strconv.ParseInt(f[2], 10, 64); err == nil && n > 0 {
+				if f[0] == problemTapPanics {
+					p.TapPanics += n
+				} else {
+					p.MetadataDropped += n
+				}
 			}
 		}
 	}

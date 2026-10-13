@@ -422,3 +422,19 @@ export function tokenIdentity(
 export function maskToken(token: string): string {
   return token ? "••••••••" : ""
 }
+
+/** The repository path of the `weft mcp` recipe (UX-S4-15): named as a
+ * path, never an external link (D4: offline by construction). */
+export const MCP_RECIPE_PATH = "docs/mcp-recipe.md"
+
+/** mcpCommand is the command that reads this Studio from an MCP client
+ * (`weft mcp`, docs/mcp-recipe.md): its URL is the page's base — where
+ * this UI and its /api are served — without the trailing slash; a
+ * token-walled Studio adds the token by environment (never in a
+ * command line `ps` shows). */
+export function mcpCommand(studioURL: string, authRequired?: boolean): string {
+  const url = studioURL.replace(/\/+$/, "")
+  return authRequired
+    ? `WEFT_STUDIO_TOKEN=<token> weft mcp --url ${url}`
+    : `weft mcp --url ${url}`
+}

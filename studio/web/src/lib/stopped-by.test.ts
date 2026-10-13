@@ -24,7 +24,7 @@ describe("stoppedByWords: one word per vocabulary value (U3.2)", () => {
     ["max_steps", "max steps reached"],
     ["usage_limit", "usage limit reached"],
     ["loop_detected", "loop detected"],
-    ["model_retries_exceeded", "model retries exceeded"],
+    ["model_retries_exceeded", "tool retry budget spent"],
     ["canceled", "cancelled"],
     ["custom", "custom"],
     ["step_count_is", "step_count_is"],
@@ -72,7 +72,7 @@ const USAGE =
 const LOOP =
   "weft: run failed at step 2: weft: the model repeated the same tool calls too many times: 3 identical steps in a row"
 const RETRIES =
-  'weft: run failed at step 2: weft: a tool asked the model to retry too many times: tool "lookup" retried 4 times'
+  'weft: run failed at step 2: weft: a tool asked the model to retry too many times: tool "lookup" retried 4 times, past MaxModelRetries(3)'
 const CANCELED = "weft: run failed at step 1: context canceled"
 
 describe("the five seeded shapes (U3.2's Done line)", () => {
@@ -112,8 +112,8 @@ describe("the five seeded shapes (U3.2's Done line)", () => {
     [
       "MaxModelRetries",
       { stopped_by: "model_retries_exceeded", steps: 2, err: RETRIES },
-      'model retries exceeded (tool "lookup" retried 4 times)',
-      '■ model retries exceeded at step 1 (tool "lookup" retried 4 times)',
+      'tool retry budget spent (tool "lookup" retried 4 times, past MaxModelRetries(3))',
+      '■ tool retry budget spent at step 1 (tool "lookup" retried 4 times, past MaxModelRetries(3))',
     ],
     [
       "a cancelled run",
@@ -139,7 +139,11 @@ describe("each real core error's detail (U3-fix)", () => {
     ["max_steps", MAX_STEPS, ""],
     ["usage_limit", USAGE, "input 300/250, output 150/250"],
     ["loop_detected", LOOP, "3 identical steps in a row"],
-    ["model_retries_exceeded", RETRIES, 'tool "lookup" retried 4 times'],
+    [
+      "model_retries_exceeded",
+      RETRIES,
+      'tool "lookup" retried 4 times, past MaxModelRetries(3)',
+    ],
     ["canceled", CANCELED, ""],
   ])("%s", (by, err, detail) => {
     expect(stopDetail(err, by)).toBe(detail)

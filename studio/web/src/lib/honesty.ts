@@ -121,6 +121,10 @@ export const CAUSES: Partial<
         "this response reads a bounded number of steps and the run has more: the later steps were not compared, nothing was lost",
       fix: "open the later steps one by one (runs/{id}/steps/{n})",
     },
+    metadata_cap: {
+      reason: "metadata pairs over the core's limits were dropped whole",
+      fix: "send fewer or smaller pairs (weft.Metadata: 64 keys, 1 KiB values)",
+    },
   },
   not_recorded: {
     no_public_id: {

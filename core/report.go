@@ -261,7 +261,12 @@ func (s *stepReport) end() {
 // it, as safeTap does for a tap: a broken observer must not break the
 // run, nor be invisible.
 func (s *stepReport) contain() {
-	if recover() != nil && s.panics != nil {
+	if recover() == nil {
+		return
+	}
+	if s.rec != nil {
+		s.rec.countPanic() // TapPanics and the run's weft.tap.panics
+	} else if s.panics != nil {
 		s.panics.Add(1)
 	}
 }

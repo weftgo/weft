@@ -126,6 +126,8 @@ export interface RunRow extends CostFields, DelegatedCostFields {
   denied?: number
   truncated?: number
   repaired?: number
+  /** Observer panics the run contained (weft.tap.panics, U32.1). */
+  tap_panics?: number
   log_warn?: number
   log_error?: number
   /** log_warn / log_error stopped at the reader's cap (floors, "≥"). */
@@ -209,6 +211,29 @@ export interface RunDoc extends RunRow {
    * body. [] for a run that never compacted; absent from a Studio
    * older than A9.2 — either way the page draws no marker. */
   compactions?: RunCompaction[]
+  /** The run's manifest_hash resolves in Studio's manifest store (U27):
+   * GET /api/manifests/{hash} answers the configuration it ran with. */
+  manifest_available?: boolean
+}
+
+/** GET /api/manifests/{hash}: one stored one-agent manifest (U27). */
+export interface StoredManifest {
+  manifest_hash: string
+  agent: string
+  source: string
+  first_seen: string
+  current_manifest_hash: string
+  manifest: Manifest
+}
+
+/** One stored manifest by its hash (U27), read once: a hash names one
+ * configuration for good. */
+export function storedManifestQuery(hash: string) {
+  return queryOptions({
+    queryKey: ["manifests", hash],
+    staleTime: Infinity,
+    queryFn: () => get<StoredManifest>(`manifests/${encodeURIComponent(hash)}`),
+  })
 }
 
 /** One compaction of a run (api.go's runCompaction). scope "run": a
@@ -1174,6 +1199,9 @@ export interface ToolEntry {
 export interface PromptDoc {
   hash: string
   text: string
+  /** The text by source (UX-S2-11): the instructions, then each tool's
+   * PromptSnippet ("tool:<name>"); absent when no snippet joined it. */
+  segments?: { source: string; text: string }[]
   content: string
   truncated_bytes: number
 }

@@ -269,8 +269,9 @@ func row(rec obsdb.RunRow) runRow {
 // (obsdb.Problems, docs/record-contract.md §6), each omitted when 0:
 // attempts_retried (failed model attempts), fallbacks (calls another
 // model answered), tool_errors, denied (policy refusals and denied
-// approvals), truncated (results the cap cut) and repaired (0 until the
-// core reports repaired arguments). log_warn / log_error count the
+// approvals), truncated (results the cap cut), repaired (0 until the
+// core reports repaired arguments) and tap_panics (observer panics the
+// run contained, weft.tap.panics). log_warn / log_error count the
 // app's own log records under the run's spans by severity — read time,
 // on the run document only (GET /api/runs/{id}), never a list row —
 // and logs_capped says the count stopped at the reader's cap
@@ -283,6 +284,7 @@ type problemFields struct {
 	Denied          int64 `json:"denied,omitempty"`
 	Truncated       int64 `json:"truncated,omitempty"`
 	Repaired        int64 `json:"repaired,omitempty"`
+	TapPanics       int64 `json:"tap_panics,omitempty"`
 	LogWarn         int64 `json:"log_warn,omitempty"`
 	LogError        int64 `json:"log_error,omitempty"`
 	LogsCapped      bool  `json:"logs_capped,omitempty"`
@@ -292,7 +294,7 @@ func problemsOf(p obsdb.Problems) problemFields {
 	return problemFields{
 		AttemptsRetried: p.AttemptsRetried, Fallbacks: p.Fallbacks, ToolErrors: p.ToolErrors,
 		Denied: p.Denied, Truncated: p.Truncated, Repaired: p.Repaired,
-		LogWarn: p.LogWarn, LogError: p.LogError,
+		TapPanics: p.TapPanics, LogWarn: p.LogWarn, LogError: p.LogError,
 	}
 }
 
@@ -1058,6 +1060,12 @@ func (s *Server) runHoles(ctx context.Context, rec obsdb.RunRow) ([]stepHole, er
 	}
 	if reason, fix := replayViewHole(rec); reason != "" {
 		holes.also(obsdb.HoleDerived, reason, fix)
+	}
+	if n := rec.Problems.MetadataDropped; n > 0 {
+		// The core's metadata limits dropped pairs (UX-E-42): the
+		// table's truncated hole, cause metadata_cap, counted.
+		b := badgeFor(obsdb.HoleTruncated, obsdb.CauseMetadataCap)
+		holes.also(obsdb.HoleTruncated, obsdb.MetadataCapReason(n), b.Fix)
 	}
 
 	if rec.EventCount > 0 {

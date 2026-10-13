@@ -31,14 +31,19 @@ export function KindChip({ errorType }: { errorType?: string }) {
 }
 
 /** ProblemBadges is the runs table's line under the title: the kind
- * chip and one glyph per problem, each with its words as the
- * accessible label. */
+ * chip and one glyph per problem, each an image named by its words
+ * (role="img": a bare span may not carry aria-label — axe
+ * aria-prohibited-attr — so a screen reader got the glyph alone).
+ * status is the row's statusOf key: a decided park draws no parked
+ * part (problemBadges). */
 export function ProblemBadges({
   run,
+  status,
 }: {
   run: ProblemRow & { error_type?: string }
+  status?: string
 }) {
-  const bs = problemBadges(run)
+  const bs = problemBadges(run, status)
   if (!kindChip(run.error_type) && bs.length === 0) return null
   return (
     <div
@@ -51,6 +56,7 @@ export function ProblemBadges({
           key={b.key}
           className="rounded-sm border px-1 tabular-nums"
           title={b.label}
+          role="img"
           aria-label={b.label}
           data-problem={b.key}
         >
@@ -69,13 +75,16 @@ export function ProblemBadges({
  * while the spans are not loaded. */
 export function ProblemStrip({
   row,
+  status,
   toolFacts,
 }: {
   row: ProblemRow
+  /** The row's statusOf key (ProblemBadges). */
+  status?: string
   /** toolFactsOf over the run's spans; undefined until they load. */
   toolFacts?: ToolFactsMap
 }) {
-  const bs = problemBadges(row)
+  const bs = problemBadges(row, status)
   if (bs.length === 0) return null
   return (
     <>

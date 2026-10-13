@@ -118,7 +118,11 @@ describe("statusOf (U1-fix)", () => {
       expect(statusOf(t1, [t1, t2], complete)).toMatchObject({
         key: "resumed",
         word: "parked → t2",
-        detail: "1 call decided · resumed in t2",
+        // No stored link: the next turn decided the calls or dropped
+        // them (a Branch, a Rollback, an undecided Send) — never
+        // claimed as a decision (W7-prep).
+        detail: "1 call · next turn t2 (decided or dropped)",
+        hint: "1 call · next turn t2 (decided or dropped) (s_01-t2)",
         resumedBy: "s_01-t2",
       })
     // Another session's later turn is not.
@@ -141,6 +145,9 @@ describe("statusOf (U1-fix)", () => {
     // In a list that loaded it, its turn label.
     const t1 = turn(1, { pending: 1, resumed_by: "s_01-t3" })
     expect(statusOf(t1, [t1, turn(2), turn(3)]).word).toBe("parked → t3")
+    expect(statusOf(t1, [t1, turn(2), turn(3)]).detail).toBe(
+      "1 call decided · resumed in t3"
+    )
   })
 
   it("a long resumer id with no turn to name is cut to 8 characters in the word and detail, whole in the hint", () => {

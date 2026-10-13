@@ -198,16 +198,25 @@ describe("the size ledger (panel-budget.json)", () => {
   })
 
   it("raised the cap to 96 KiB in one row (A5.4, audit §10 decision 1): the bundle unchanged, the headroom 16 KiB larger", () => {
-    const i = ledger.rows.findIndex((r) => r.label === "A5.4 cap raised to 96 KiB")
+    const i = ledger.rows.findIndex(
+      (r) => r.label === "A5.4 cap raised to 96 KiB"
+    )
     expect(i).toBeGreaterThan(0)
     const row = ledger.rows[i]
     expect([row.item, row.gzip]).toEqual(["", 78098])
     expect(ledger.rows[i - 1].label).toBe("phase 6 review fixes (I)")
     expect(row.gzip).toBe(ledger.rows[i - 1].gzip) // the bundle is unchanged
-    expect(row.note).toContain("cap raised from 81,920 B to 98,304 B (audit §10 decision 1, 2026-10-12)")
+    expect(row.note).toContain(
+      "cap raised from 81,920 B to 98,304 B (audit §10 decision 1, 2026-10-12)"
+    )
     expect(row.note).toContain("the build still fails on the cap")
-    const before = budgetTable({ ...ledger, cap: 81920, rows: ledger.rows.slice(0, i) }, 78098)
-    expect(before.lines.at(-1)).toBe("total 78,098 B (76.3 KiB) of 81,920 B · headroom 3,822 B (3.7 KiB)")
+    const before = budgetTable(
+      { ...ledger, cap: 81920, rows: ledger.rows.slice(0, i) },
+      78098
+    )
+    expect(before.lines.at(-1)).toBe(
+      "total 78,098 B (76.3 KiB) of 81,920 B · headroom 3,822 B (3.7 KiB)"
+    )
     expect(budgetTable(ledger, 78098).lines.at(-1)).toBe(
       "total 78,098 B (76.3 KiB) of 98,304 B · headroom 20,206 B (19.7 KiB)"
     )
@@ -219,7 +228,9 @@ describe("the size ledger (panel-budget.json)", () => {
     // phase 6 review fixes' +80 B (D), +366 B (E), +16 B (F), +54 B (G), +98 B (H) and +4 B (I) is the unbudgeted line's −0.1 KiB (U+2212, not a hyphen); A5.3 has its own line: A5.3's +1,010 B, its fixes' +196 B and
     // its fixes 2's +94 B against the raised +1,536 B (its accepted note).
     // Pinned at that row: the ledger as it stood then (later rows have their own tests).
-    const at = ledger.rows.findIndex((r) => r.label === "A5.4 cap raised to 96 KiB")
+    const at = ledger.rows.findIndex(
+      (r) => r.label === "A5.4 cap raised to 96 KiB"
+    )
     const atA54 = { ...ledger, rows: ledger.rows.slice(0, at + 1) }
     expect(atA54.rows.at(-1)!.label).toBe("A5.4 cap raised to 96 KiB")
     const { lines, over } = budgetTable(atA54, 78098)
@@ -249,7 +260,9 @@ describe("the size ledger (panel-budget.json)", () => {
     expect(text(undefined)).not.toContain('"cap"')
     expect(ledgerFrom(text(98304)).cap).toBe(98304)
     for (const cap of [undefined, null, "98304", "", true, 0, -1, 98304.5])
-      expect(() => ledgerFrom(text(cap))).toThrow("panel-budget.json: cap must be a positive integer")
+      expect(() => ledgerFrom(text(cap))).toThrow(
+        "panel-budget.json: cap must be a positive integer"
+      )
     expect(readLedger().cap).toBe(98304)
   })
 
@@ -267,10 +280,14 @@ describe("the size ledger (panel-budget.json)", () => {
     // The build fails on budgetTable's over (vite.panel.config.ts): at the cap passes, one byte over fails.
     const at = budgetTable(ledger, ledger.cap)
     expect(at.over).toBe(false)
-    expect(at.lines.at(-1)).toBe("total 98,304 B (96.0 KiB) of 98,304 B · headroom 0 B (0.0 KiB)")
+    expect(at.lines.at(-1)).toBe(
+      "total 98,304 B (96.0 KiB) of 98,304 B · headroom 0 B (0.0 KiB)"
+    )
     const big = budgetTable(ledger, ledger.cap + 1)
     expect(big.over).toBe(true)
-    expect(big.lines.at(-1)).toBe("total 98,305 B (96.0 KiB) of 98,304 B · headroom none · OVER THE CAP")
+    expect(big.lines.at(-1)).toBe(
+      "total 98,305 B (96.0 KiB) of 98,304 B · headroom none · OVER THE CAP"
+    )
     // The old cap's overrun is no longer one: the cap is the ledger's.
     expect(budgetTable(ledger, 81921).over).toBe(false)
   })

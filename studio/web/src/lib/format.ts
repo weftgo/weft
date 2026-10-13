@@ -49,6 +49,12 @@ export function duration(started: string, finished: string | null): string {
   return spanMs(b - a)
 }
 
+/** A step count in words, "1 step" / "2 steps": the panel's turn row
+ * and picker, the run header, a subagent row — one helper (W7-prep). */
+export function stepCount(n: number): string {
+  return `${n} ${n === 1 ? "step" : "steps"}`
+}
+
 /** A span of milliseconds in the tightest unit that still reads. */
 export function spanMs(ms: number): string {
   if (!Number.isFinite(ms)) return "—"

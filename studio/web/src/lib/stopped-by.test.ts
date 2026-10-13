@@ -169,6 +169,27 @@ describe("each real core error's detail (U3-fix)", () => {
   })
 })
 
+describe("the chip beside a cancelled status word (W7-prep)", () => {
+  const row = {
+    status: "failed",
+    error_type: "cancelled",
+    stopped_by: "canceled",
+    cancel_cause: "studio.cancel",
+    steps: 1,
+  }
+  it("reads the cause alone, never 'cancelled' twice", () => {
+    expect(stopChip(row, true)?.text).toBe("· studio.cancel")
+    expect(stopChip(row, true)?.title).toContain("stopped_by canceled")
+    expect(stopChip({ ...row, cancel_cause: undefined }, true)).toBeNull()
+    // Elsewhere (no status word beside it) the whole words.
+    expect(stopChip(row)?.text).toBe("cancelled · studio.cancel")
+    // A canceled stop under another status word keeps its words.
+    expect(stopChip({ ...row, error_type: "model_error" }, true)?.text).toBe(
+      "cancelled · studio.cancel"
+    )
+  })
+})
+
 describe("the helpers", () => {
   it("stopDetail takes the trailing parenthesised group otherwise", () => {
     expect(stopDetail("limit (input 3/2)")).toBe("input 3/2")

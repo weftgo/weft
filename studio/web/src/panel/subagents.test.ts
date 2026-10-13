@@ -171,6 +171,34 @@ describe("the panel's subagent badge (A10)", () => {
     expect(studio.gets(`runs/${GRAND}`)).toEqual([])
   })
 
+  // Parity with Studio's subagent block (subagent-block.test.tsx, the
+  // same rows): the nested row says statusOf's word, never the stored
+  // one — a parked child "parked", a cancelled one "cancelled"
+  // (W7-prep).
+  it.each([
+    ["parked", { status: "succeeded", pending: 1 }],
+    [
+      "cancelled",
+      {
+        status: "failed",
+        error_type: "cancelled",
+        cancel_cause: "studio.cancel",
+      },
+    ],
+  ])(
+    "the nested row reads a %s child in statusOf's word",
+    async (word, over) => {
+      const r = routes()
+      const doc = r[`runs/${RUN}`] as { children: Record<string, unknown>[] }
+      doc.children = [{ ...doc.children[0], ...over }]
+      fakeStudio(r, metaWithRequests)
+      const el = await mount({ ...ATTRS, "data-token": claims("playground") })
+      const text = $(el, `[data-weft-child="${CHILD}"] summary`)?.textContent
+      expect(text).toContain(`subagent researcher · ${word} · `)
+      expect(text).not.toMatch(/· (succeeded|failed) ·/)
+    }
+  )
+
   it("a read-scoped token sees the child's request as hidden and never asks for it", async () => {
     const studio = fakeStudio(routes(), metaWithRequests)
     const el = await mount({ ...ATTRS, "data-token": claims("read") })

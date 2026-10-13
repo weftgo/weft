@@ -711,7 +711,9 @@ function RunsPage() {
       ) : (
         <>
           {/* U7: what is unpriced, once over the rows, not per cell. */}
-          {costCapable ? <UnpricedNote rows={runs} /> : null}
+          {costCapable ? (
+            <UnpricedNote rows={runs} more={page.hasNextPage} />
+          ) : null}
           <div className="overflow-x-auto rounded-lg border bg-background">
             <RunsTable
               runs={runs}

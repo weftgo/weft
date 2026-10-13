@@ -29,7 +29,7 @@ import {
   usageKnown,
 } from "../lib/honesty"
 import type { HoleMark, ParkedKind } from "../lib/honesty"
-import { FILTER_KEYS, statusOf } from "../lib/status"
+import { AWAITING, FILTER_KEYS, statusOf } from "../lib/status"
 import type { Status } from "../lib/status"
 import {
   paramsLine,
@@ -140,7 +140,7 @@ import {
   timingLine,
 } from "../lib/attempts"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "../lib/events"
-import { duration, relativeTime, tokens } from "../lib/format"
+import { duration, relativeTime, stepCount, tokens } from "../lib/format"
 import {
   discoverEndpoint,
   headerRungOn,
@@ -2665,7 +2665,7 @@ export class WeftDevtools extends HTMLElement {
       // option's title only.
       const t = turnTitle(prevTurn(r, s.turns), r)
       const src = r.forked_from && this.rowOf(r.forked_from.split("#")[0])
-      const tail = `${r.steps} steps · ${duration(r.started, r.finished)}`
+      const tail = `${stepCount(r.steps)} · ${duration(r.started, r.finished)}`
       const o = el(
         "option",
         undefined,
@@ -2885,7 +2885,7 @@ export class WeftDevtools extends HTMLElement {
           { "data-weft-cost-total": "" }
         )
       )
-      const u = unpricedLine(s.turns, "turn")
+      const u = unpricedLine(s.turns, "turn", s.turnsCapped)
       if (u) {
         const a = el("a", "weft-chip weft-tag weft-unp", u.text, {
           href: href(this.base, settingsLink(u.models[0])),
@@ -3294,10 +3294,14 @@ export class WeftDevtools extends HTMLElement {
       }),
       // What the record says this turn is (D5): scripted, a fork, an
       // experiment of a turn the list names.
-      ...turnChips(r, (id) => {
-        const src = this.rowOf(id)
-        return src?.turn ? `t${src.turn}` : shortId(id)
-      }),
+      ...turnChips(
+        r,
+        (id) => {
+          const src = this.rowOf(id)
+          return src?.turn ? `t${src.turn}` : shortId(id)
+        },
+        chip.key
+      ),
       el("span", "weft-when", relativeTime(r.last_seen || r.started)),
     ])
     const usage = r.usage
@@ -3307,7 +3311,7 @@ export class WeftDevtools extends HTMLElement {
         undefined,
         r.model.name ? `${r.model.provider}/${r.model.name}` : ""
       ),
-      el("span", undefined, `${r.steps} steps`),
+      el("span", undefined, stepCount(r.steps)),
       // A derived run whose spans reported no usage: "—" with the API's
       // reason (Studio's UnknownTokens), never 0→0 as known.
       derivedUsageUnknown(r)
@@ -5085,7 +5089,7 @@ export class WeftDevtools extends HTMLElement {
   ): HTMLElement {
     const approvals = el("div", "weft-step")
     approvals.appendChild(
-      el("div", "weft-step-h", [el("span", undefined, "awaiting decision")])
+      el("div", "weft-step-h", [el("span", undefined, AWAITING)])
     )
     const abody = el("div", "weft-step-b")
     const left = pending.filter((c) => !decided[c.id]).length
@@ -5190,17 +5194,12 @@ export class WeftDevtools extends HTMLElement {
     // (the chat spans' usage, the tool spans) are Studio's story.
     if (this.derived(t)) {
       const n = this.rowOf(t.id)?.steps ?? t.doc?.steps ?? 0
-      const a = el(
-        "a",
-        undefined,
-        `${n} ${n === 1 ? "step" : "steps"} · open in Studio ⤢`,
-        {
-          href: studioLink(this.base, t.id, 0),
-          target: "_blank",
-          rel: "noopener",
-          "data-weft-derived-handoff": t.id,
-        }
-      )
+      const a = el("a", undefined, `${stepCount(n)} · open in Studio ⤢`, {
+        href: studioLink(this.base, t.id, 0),
+        target: "_blank",
+        rel: "noopener",
+        "data-weft-derived-handoff": t.id,
+      })
       wrap.appendChild(el("div", "weft-note", [a]))
     }
     const ids = this.turnLinks(t, s)
@@ -5489,11 +5488,7 @@ export class WeftDevtools extends HTMLElement {
     const box = el("div", "weft-step")
     box.appendChild(
       el("div", "weft-step-h", [
-        el(
-          "span",
-          undefined,
-          next ? "decided" : "awaiting decision (read-only)"
-        ),
+        el("span", undefined, next ? "decided" : `${AWAITING} (read-only)`),
       ])
     )
     const body = el("div", "weft-step-b")
@@ -6787,12 +6782,14 @@ function childBlock(
   if (t.expanded.has(childId)) details.setAttribute("open", "")
   // The nested row (A10): agent, status, usage — the parent's row of
   // the child, before it is opened; its usage only once the record
-  // has it, its holes (interrupted, stripped…) as badges.
+  // has it, its holes (interrupted, stripped…) as badges. Its status
+  // in statusOf's word (W7-prep; Studio's subagent block): a parked
+  // child parked, a cancelled one cancelled — never the stored word.
   const summary = el(
     "summary",
     undefined,
     row
-      ? `subagent ${row.agent || shortId(childId)} · ${row.status} · ${
+      ? `subagent ${row.agent || shortId(childId)} · ${statusOf(row).word} · ${
           usageKnown(row.status)
             ? usageLine(row.usage)
             : row.status === "running"

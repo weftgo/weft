@@ -15,6 +15,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import {
   Breakpoints,
   buildRunBody,
+  CompareTable,
   editFieldsOf,
   matrixInputs,
   nextInputKey,
@@ -23,7 +24,16 @@ import {
   toolsOffFor,
   wireEdits,
 } from "./playground"
-import type { AgentView, Message, RuntimeView } from "@/lib/api"
+import type {
+  AgentView,
+  Message,
+  RunRow,
+  RunsPage,
+  RuntimeView,
+} from "@/lib/api"
+import type { Experiment } from "@/hooks/use-command-tracking"
+import { golden } from "@/test/fake-studio"
+import { renderWithRouter } from "@/test/render"
 
 const batch = (...messages: Message[]) => ({ index: 0, step: 0, messages })
 const user = (text: string): Message => ({
@@ -487,5 +497,39 @@ describe("Breakpoints", () => {
     expect(screen.getByLabelText<HTMLInputElement>("refund").checked).toBe(
       false
     )
+  })
+})
+
+describe("CompareTable", () => {
+  afterEach(cleanup)
+  const ok = golden<RunsPage>("runs").runs.find((r) => r.id === "r_ok")!
+  const v = (key: string, row: Partial<RunRow>) => ({
+    key,
+    result: { row: { ...ok, id: `r_${key}`, ...row } } as Experiment,
+  })
+
+  // The variant's status in statusOf's word (W7-prep): the stored
+  // word read "failed" for a cancelled variant and "succeeded · 1
+  // parked" for a parked one.
+  it("words each variant's status through statusOf", async () => {
+    const { container } = await renderWithRouter(
+      <CompareTable
+        variants={[
+          v("A", { status: "succeeded", pending: 1 }),
+          v("B", {
+            status: "failed",
+            error_type: "cancelled",
+            cancel_cause: "studio.cancel",
+          }),
+          v("C", { status: "succeeded", pending: 0 }),
+        ]}
+      />
+    )
+    const cell = (k: string) =>
+      container.querySelector(`[data-compare-status="${k}"] [data-status]`)
+    expect(cell("A")?.getAttribute("data-status")).toBe("parked")
+    expect(cell("A")?.textContent).toBe("parked")
+    expect(cell("B")?.textContent).toBe("cancelled")
+    expect(cell("C")?.textContent).toBe("succeeded")
   })
 })

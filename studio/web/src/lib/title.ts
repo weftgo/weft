@@ -10,6 +10,7 @@
 // lead with — the words a person recognises (the prompt, the session's
 // title), the id a copyable line under them. Studio and the panel read
 // the same helper (parity.test.ts pins both renderers on one row).
+import { isLive } from "./honesty"
 
 /** The suffix every title ends with (the root route's own title). */
 export const STUDIO = "weft studio"
@@ -143,13 +144,28 @@ export interface TitledRun {
   message_count?: number
   event_count?: number
   derived?: boolean
+  status?: string
+  settling?: boolean
+  /** A run document's (or a child row's) holes; a list row has none. */
+  holes?: readonly { hole: string }[]
 }
 
 /** contentOff: the row's run was recorded without content — events
  * stored and not one messages record (a content-off destination stores
- * none). A derived run has neither and is not content-off. */
+ * none). A derived run has neither and is not content-off. Not while
+ * the run is live (isLive: running or settling — its messages records
+ * may still arrive), and not where the row names a lost-records hole
+ * (gap, events_lost among its causes; not_recorded): records were
+ * dropped, not content (W7-prep). A list row carries no holes, so
+ * there the status and settling fields are the whole gate. */
 export function contentOff(r: TitledRun): boolean {
-  return !r.derived && !r.message_count && (r.event_count ?? 0) > 0
+  return (
+    !r.derived &&
+    !r.message_count &&
+    (r.event_count ?? 0) > 0 &&
+    !isLive(r) &&
+    !r.holes?.some((h) => h.hole === "gap" || h.hole === "not_recorded")
+  )
 }
 
 /** runTitle titles a run: its prompt_preview's first line, else its

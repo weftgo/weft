@@ -212,7 +212,9 @@ function SessionsPage() {
         <>
           {/* U7: the cost cell is a number or "—"; what is unpriced is
               said once, here, with the pricing link. */}
-          {costCapable ? <UnpricedNote rows={sessions} noun="session" /> : null}
+          {costCapable ? (
+            <UnpricedNote rows={sessions} noun="session" more={q.hasNextPage} />
+          ) : null}
           <div className="overflow-x-auto rounded-lg border bg-background">
             <Table>
               <TableHeader>

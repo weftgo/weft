@@ -472,6 +472,13 @@ every badge the run page shows is one the panel shows, and that a
 hole-free baseline (timed steps, a request row) shows none on either.
 And a pre-A1 run's request section says `not_recorded` on the run page
 and in the panel's Request tab.
+Studio-only, by the panel's byte budget (not a parity gap): the
+story's end card ("■ max steps reached at step 9", `endCard`), a loop's
+"repeats step K" chip (`loopRepeats`), the tool failure pill
+(`toolFailure` / `retryPill`, "retry 3/2 — budget spent"), the header's
+concurrency chip and the "last step stopped on" relabel of a stop
+reason that contradicts `stopped_by` — the panel's turn chip names what
+ended the turn, the run page draws the rest.
 
 The Request tab (plan E1.2) is the run page's Request pane in the panel
 (`src/panel/request.ts`, the same readings: `lib/request-pane.ts`,
@@ -1141,7 +1148,7 @@ this session; fork instead`). A running app turn takes steer the same
 way, its own run id posted — a delivered one reads `steered`; a steer
 that missed its turn reads `failed: no running turn to steer for run …
 (…)`. Cancel is never offered on an
-app turn. Otherwise the block reads `awaiting decision (read-only)`: the
+app turn. Otherwise the block reads `awaiting a decision (read-only)`: the
 verbs drawn disabled (`badges.ts`'s refused verb,
 `data-weft-refused="app-owned"`) and one line in the server's words —
 `app-owned turn · read-only: no runtime of service <svc> is connected —
@@ -1570,7 +1577,12 @@ be missed — a session turn read against its session's whole turn list
 session-scoped list); elsewhere (the runs list under a filter or sort,
 the live table, an experiment's grid) "1 call pending · no resume
 recorded here", and for a plain `Generate` "1 call pending · a resume,
-if any, is not linked yet". The runs list's status filter has `parked`
+if any, is not linked yet". A decided park's detail says "1 call decided
+· resumed in t2" only on the stored `resumed_by`; a park found by the
+next turn alone says "1 call · next turn t2 (decided or dropped)" — after
+a Branch, a Rollback or an undecided Send that turn is no resume. The
+sessions list's status is the newest turn's stored word (no parked /
+cancelled until U16): its row carries only `status`. The runs list's status filter has `parked`
 too — the API is asked for succeeded and the loaded rows are kept where
 the word reads parked (its chip says so, and that a resume which did
 not succeed is not looked for; the header then reads "N listed of M

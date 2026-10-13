@@ -45,8 +45,7 @@ const rOK = runs.runs.find((r) => r.id === "r_ok")!
 const rStale = runs.runs.find((r) => r.id === "r_stale")!
 /** A finished run on wefttest/script: scripted, an exact $0 (U7). */
 const rScripted = runs.runs.find((r) => r.id === "r_fail")!
-const KIMI_WHY =
-  "openai/kimi-k2.7-code has no price"
+const KIMI_WHY = "openai/kimi-k2.7-code has no price"
 /** A finished run on a model no pricing row matches: unpriced — the
  * fixture's run on an OpenAI-compatible model, as pricing.go writes it. */
 const rFail: RunRow = {
@@ -313,12 +312,10 @@ describe("the sessions list", () => {
         "9 of 9 turns unpriced: no price for openai/kimi-k2.7-code, acme/x, acme/y",
       unpriced_models: ["openai/kimi-k2.7-code", "acme/x", "acme/y"],
     }
-    studio
-      .on("GET meta", meta(["pricing"]))
-      .on("GET sessions", {
-        ...sessions,
-        sessions: [unpriced, sessions.sessions[1]],
-      })
+    studio.on("GET meta", meta(["pricing"])).on("GET sessions", {
+      ...sessions,
+      sessions: [unpriced, sessions.sessions[1]],
+    })
     renderApp("/sessions")
     await screen.findByText("s_orders")
     const cell = document.querySelectorAll("[data-cost-cell]")[0]

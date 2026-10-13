@@ -125,6 +125,51 @@ describe("a clean run's header strip and list row (U4-fix)", () => {
   })
 })
 
+// Parity with the panel's problems chip (panel/badges.test.ts): each
+// badge an image named by its words, and a decided park's stored
+// pending draws no ✋ (W7-prep).
+describe("the runs table's problem badges (W7-prep)", () => {
+  it("are images named by their words; a decided park draws no parked badge", async () => {
+    const row = load("runs.golden.json") as { runs: RunRow[] }
+    const base = { ...row.runs[0], ...cleanDoc(), children: undefined }
+    const { container } = await renderWithRouter(
+      <RunsTable
+        runs={[
+          {
+            ...base,
+            id: "r_open",
+            status: "succeeded",
+            pending: 1,
+            attempts_retried: 1,
+          },
+          {
+            ...base,
+            id: "r_done",
+            status: "succeeded",
+            pending: 1,
+            attempts_retried: 1,
+            resumed_by: "r_open",
+          },
+        ]}
+        now={Date.parse("2026-10-01T12:00:00Z")}
+      />
+    )
+    const rows = [...container.querySelectorAll("tbody tr")]
+    const badges = (i: number) => [
+      ...rows[i].querySelectorAll<HTMLElement>("[data-problem]"),
+    ]
+    for (const b of badges(0)) {
+      expect(b.getAttribute("role")).toBe("img")
+      expect(b.getAttribute("aria-label")).toBe(b.title)
+    }
+    expect(badges(0).map((b) => b.getAttribute("aria-label"))).toEqual([
+      "1 model attempt retried",
+      "1 parked (approval or policy)",
+    ])
+    expect(badges(1).map((b) => b.dataset.problem)).toEqual(["retried"])
+  })
+})
+
 describe("the header's tool concurrency (UX-E-50)", () => {
   const manifestDoc = (parallelism: number) => ({
     manifest_hash: "mh",
@@ -171,7 +216,8 @@ describe("the header's tool concurrency (UX-E-50)", () => {
         sequentialTools={false}
       />
     )
-    await findByText("parallelism: 2")
+    // The run's spans unread: the manifest's value, marked (W7-prep).
+    await findByText("parallelism: 2 (manifest)")
     const c = container.querySelector<HTMLElement>("[data-concurrency]")!
     expect(c.title).toContain("weft.Parallelism")
     expect(

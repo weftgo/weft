@@ -12,7 +12,6 @@ import {
   REPAIRED_RESULT,
   kindChip,
   problemBadges,
-  statsStrip,
   toolFactsOf,
   toolFailure,
 } from "@/lib/error-kind"
@@ -68,11 +67,26 @@ describe("error kinds (U4)", () => {
     ])
   })
 
-  it("the stats strip: steps, then the problems in words", () => {
-    expect(statsStrip({ steps: 1 })).toEqual(["1 step"])
-    expect(
-      statsStrip({ steps: 2, attempts_retried: 2, tool_errors: 1 })
-    ).toEqual(["2 steps", "↻2 2 model attempts retried", "✗1 1 tool error"])
+  // The stored pending count stays after a resume: a decided park
+  // draws no parked part (its word says "parked → tN"), an open one
+  // "parked", any other word "held" (W7-prep).
+  it("words pending calls by the row's status key", () => {
+    expect(problemBadges({ pending: 1 }, "parked")[0].label).toBe(
+      "1 parked (approval or policy)"
+    )
+    expect(problemBadges({ pending: 1 }, "resumed")).toEqual([])
+    expect(problemBadges({ pending: 1, denied: 1 }, "resumed")).toEqual([
+      { key: "denied", glyph: "✋", label: "1 denied (approval or policy)" },
+    ])
+    expect(problemBadges({ pending: 2 }, "failed")[0].label).toBe(
+      "2 held (approval or policy)"
+    )
+  })
+
+  it("the kind chip says the retry budget in words", () => {
+    expect(kindChip("model_retries_exceeded")?.text).toBe(
+      "[retry budget spent]"
+    )
   })
 
   it("tool failure pills: panic by layer, strict input, MCP, cancelled", () => {
@@ -91,6 +105,11 @@ describe("error kinds (U4)", () => {
     expect(toolFailure("mcp_transport")?.word).toBe("MCP transport")
     expect(toolFailure("mcp_tool_error")?.word).toBe("MCP tool error")
     expect(toolFailure("context.Canceled")?.word).toBe("cancelled")
+    // A deadline is its own kind, the attempt phrase's word (W7-prep).
+    expect(toolFailure("context.DeadlineExceeded")?.word).toBe(
+      attemptError("context.DeadlineExceeded").word
+    )
+    expect(toolFailure("context.DeadlineExceeded")?.word).toBe("deadline")
     expect(toolFailure("ORDER_NOT_FOUND")?.word).toBe("ORDER_NOT_FOUND")
     expect(toolFailure("")).toBeNull()
   })
@@ -177,10 +196,6 @@ describe("U32.1's words", () => {
         glyph: "⚠2",
         label: "tap panics: 2 (observers, contained)",
       },
-    ])
-    expect(statsStrip({ steps: 1, tap_panics: 1 })).toEqual([
-      "1 step",
-      "⚠1 tap panics: 1 (observers, contained)",
     ])
   })
 })

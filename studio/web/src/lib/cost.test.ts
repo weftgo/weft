@@ -503,6 +503,11 @@ describe("a page's one unpriced line (U7)", () => {
     expect(line.text).toBe("4 turns unpriced: no row for a/x, b/y (+1)")
     expect(line.title).toBe("no row of the pricing table matches a/x, b/y, c/z")
     expect(unpricedLine([rScripted(), priced(1), rStale()])).toBeNull()
+    // A paged list with rows not loaded: the count is the loaded rows'
+    // (W7-prep).
+    expect(unpricedLine([m("a/x")], "run", true)!.text).toBe(
+      "1 run unpriced: no row for a/x · the loaded rows"
+    )
   })
   it('the API\'s cut list (five models, then "(+n)") is never a model: the line says "and more" (U5U7-fix 8b)', () => {
     const cut: RunRow = {

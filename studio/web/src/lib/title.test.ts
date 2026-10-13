@@ -113,6 +113,18 @@ describe("runTitle / sessionTitle / turnTitle", () => {
     expect(
       runTitle({ ...base, message_count: 0, derived: true })
     ).toMatchObject({ text: base.id, kind: "id" })
+    // Not while it runs or settles (its messages may still land), and
+    // not where a hole says records were lost (W7-prep).
+    for (const over of [
+      { status: "running" },
+      { status: "succeeded", settling: true },
+      { status: "succeeded", holes: [{ hole: "gap" }] },
+      { status: "failed", holes: [{ hole: "not_recorded" }] },
+    ])
+      expect(runTitle({ ...base, message_count: 0, ...over }).kind).toBe("id")
+    expect(
+      runTitle({ ...base, message_count: 0, status: "succeeded" }).kind
+    ).toBe("absent")
   })
   it("a session: its title, else the first prompt, else content-off (its first turn), else the id", () => {
     expect(

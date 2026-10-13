@@ -113,4 +113,28 @@ describe("SubagentBlock", () => {
     )
     expect(await screen.findByText("the finding")).toBeTruthy()
   })
+
+  // Parity with the panel's nested row (panel/subagents.test.ts, the
+  // same rows): statusOf's word, never the stored one (W7-prep).
+  it.each<[string, Partial<RunRow>]>([
+    ["parked", { status: "succeeded", pending: 1 }],
+    [
+      "cancelled",
+      {
+        status: "failed",
+        error_type: "cancelled",
+        cancel_cause: "studio.cancel",
+      },
+    ],
+  ])("reads a %s child in statusOf's word", async (word, over) => {
+    new FakeStudio().install()
+    const { container } = await renderWithRouter(
+      <SubagentBlock child={{ ...child, ...over, finished: rOK.finished }} />
+    )
+    await waitFor(() =>
+      expect(container.querySelector("[data-child-status]")?.textContent).toBe(
+        word
+      )
+    )
+  })
 })

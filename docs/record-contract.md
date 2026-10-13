@@ -702,14 +702,19 @@ the run — and **parked → tN** once its resume is known: the row's
 makes, read first), else a later turn of the same thread session (the
 next turn in that session, which decided the calls or dropped them as
 `DENIED: no decision` — after a Branch, a Rollback or a Send without a
-decision it is not a resume). With no turn to name, the word carries
+decision it is not a resume). Its detail says "N calls decided ·
+resumed in tN" only on the stored `resumed_by`; found by the next turn
+alone it says "N calls · next turn tN (decided or dropped)". With no
+turn to name, the word carries
 the resumer's id cut to 8 characters, the whole id in the hint. A reader says "N
 calls awaiting a decision" only where it looked for that turn and could
 not miss it: the row has a session and the reader holds that session's
 whole turn list (Studio's session page, the run header once its session
 loaded, the panel's session-scoped turns). Anywhere else — a filtered or
-sorted runs list, a plain `Generate`, an experiment row — the park reads
-"N calls pending · no resume recorded here": a plain `Generate` is
+sorted runs list, an experiment row — a session turn's park reads
+"N calls pending · no resume recorded here", and a sessionless run's (a
+plain `Generate`) "N calls pending · a resume, if any, is not linked
+yet": a plain `Generate` is
 linked only when the app resuming it passes `weft.ResumeOf(res.ID)`
 (`thread` and `weft/runtime` always do), and a resumer the store does
 not hold links nothing. parked is therefore "open or not yet linked",
@@ -719,7 +724,9 @@ status word already says cancelled, the `error_type` kind chip is
 dropped and the kind stays in the hint. Studio and the devtools panel
 draw these words from one table (`studio/web/src/lib/status.ts`), each
 in one colour role (`lib/palette.ts`'s `ROLE`); the `run` host event
-keeps the plain words (`parked` = succeeded with pending calls).
+keeps the plain words (`parked` = succeeded with pending calls). The
+sessions list's status is the newest turn's stored word (no parked /
+cancelled until U16): its row carries only `status`.
 
 ## 8. The GenAI semantic conventions
 

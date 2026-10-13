@@ -142,6 +142,9 @@ function badgeRoutes(): Record<string, Route> {
   const row = runRow({
     meta: { "weft.session.forked_from": "s_00#e_3" },
     stop_reason: "max_tokens",
+    // The problems chip (W7-prep): glyphs, named for a screen reader.
+    attempts_retried: 2,
+    tool_errors: 1,
   })
   r["runs?public_id=pub_orders&limit=50"] = {
     total: 1,
@@ -180,6 +183,13 @@ async function badgesDrawn(el: WeftDevtools) {
     '.weft-footer [data-weft-cap="truncated"]',
   ])
     expect(root.querySelector(sel), sel).not.toBeNull()
+  // The problems chip is an image named by its words, not a hover
+  // (axe aria-prohibited-attr: a role-less span may not carry one).
+  const probs = root.querySelector('[data-weft-chip="problems"]')!
+  expect(probs.getAttribute("role")).toBe("img")
+  expect(probs.getAttribute("aria-label")).toBe(
+    "2 model attempts retried; 1 tool error"
+  )
 }
 
 /** E1.2: the Request tab over a recorded request record — step 2's

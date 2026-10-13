@@ -295,6 +295,26 @@ describe("the turn chips (the run row's attrs)", () => {
     ])
   })
 
+  // Parity with Studio's runs-table badges (problem-badges.test.tsx):
+  // the problems chip is named, and a decided park's stored pending
+  // draws no ✋ (W7-prep).
+  it("the problems chip: named, and no parked part on a decided park", () => {
+    const label = (id: string) => id
+    const probs = (status: string) =>
+      turnChips(
+        runRow({ pending: 1, attempts_retried: 1 }),
+        label,
+        status
+      ).find((c) => c.getAttribute("data-weft-chip") === "problems")!
+    const open = probs("parked")
+    expect(open.textContent).toBe("↻1 ✋")
+    expect(open.getAttribute("role")).toBe("img")
+    expect(open.getAttribute("aria-label")).toBe(
+      "1 model attempt retried; 1 parked (approval or policy)"
+    )
+    expect(probs("resumed").textContent).toBe("↻1")
+  })
+
   it("sit on the turn rows", async () => {
     const r = baseRoutes()
     const t3 = runRow({ id: "s_01-t3", turn: 3 })

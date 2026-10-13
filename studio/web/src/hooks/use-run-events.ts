@@ -38,7 +38,8 @@ import { openLive } from "@/lib/live"
 import type { LiveHandle, LiveRecord } from "@/lib/live"
 import { newFold } from "@/lib/events"
 import type { FoldedRun, FoldFeed } from "@/lib/events"
-import { isLive, type ContentAttrs } from "@/lib/honesty"
+import { isLive } from "@/lib/honesty"
+import type { ContentAttrs } from "@/lib/honesty"
 import { EVENT_RING_CAPACITY, Ring } from "@/lib/ring"
 
 export interface RunStream {
@@ -240,9 +241,9 @@ export function useRunEvents(
   const walk = useRef<Walk | null>(null)
   if (walk.current === null) walk.current = newWalk(capacity)
   // Live: running, or settling (its root stored, records trailing).
-  const live = isLive({ status, settling: opts?.settling })
-  const liveRef = useRef(live)
-  liveRef.current = live
+  const runLive = isLive({ status, settling: opts?.settling })
+  const liveRef = useRef(runLive)
+  liveRef.current = runLive
   const onRunRef = useRef(opts?.onRun)
   onRunRef.current = opts?.onRun
   const wantRun = Boolean(opts?.onRun)
@@ -535,10 +536,10 @@ export function useRunEvents(
   // The tail has nothing more to carry: the stream is
   // closed, the pages finish the story.
   useEffect(() => {
-    if (!id || live) return
+    if (!id || runLive) return
     endTail.current()
     catchUp.current()
-  }, [id, live])
+  }, [id, runLive])
 
   return stream
 }

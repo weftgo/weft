@@ -33,7 +33,8 @@ export const CHIP_PROMPT_CHANGED = "prompt changed at this step"
  * 1 reads "sequential" whichever says it; null when none says.
  * overrideRead says the run's own invoke_agent span was seen: until
  * it is, a missing override is unknown, not absent, and the manifest's
- * value is drawn as that — the manifest's, never the run's (P7-fix2). */
+ * value is drawn as that — the manifest's, never the run's (P7-fix2),
+ * marked "(manifest)" in the visible text (W7-prep). */
 export function concurrencyWords(c: {
   override?: number
   overrideRead?: boolean
@@ -54,13 +55,15 @@ export function concurrencyWords(c: {
     return words(c.override, "this run's override (weft.override.parallelism)")
   if (c.sequentialTools)
     return words(1, "the request record's sequential_tools")
-  if (c.manifest !== undefined && c.manifest > 0)
-    return words(
+  if (c.manifest !== undefined && c.manifest > 0) {
+    if (c.overrideRead) return words(c.manifest, "the run's manifest")
+    // The hedge is visible, not hover-only (W7-prep): "(manifest)".
+    const w = words(
       c.manifest,
-      c.overrideRead
-        ? "the run's manifest"
-        : "the manifest's value; the run's own setting is read when its spans are available"
+      "the manifest's value; the run's own setting is read when its spans are available"
     )
+    return { ...w, text: `${w.text} (manifest)` }
+  }
   return null
 }
 

@@ -138,6 +138,8 @@ import { useDocumentTitle } from "@/hooks/use-document-title"
 import { notify } from "@/lib/notify"
 import { StepCompare } from "@/components/studio/step-diff"
 import { CostText, useCostCapable } from "@/components/studio/cost"
+import { StatusChip } from "@/components/studio/runs-table"
+import { AWAITING } from "@/lib/status"
 import { formatUSD, lostCellCost, sumCost } from "@/lib/cost"
 import { OWN_RUNTIME, SCOPE_OWN, SCOPE_RUNTIME_ONLY } from "@/lib/honesty"
 
@@ -1879,7 +1881,7 @@ function ResultCard({
         {folded.pending.length > 0 && experiment.runID && (
           <div className="space-y-1 rounded border border-dashed p-2">
             <div className="text-faint">
-              {mayRun ? "awaiting decision" : "awaiting decision (read-only)"}
+              {mayRun ? AWAITING : `${AWAITING} (read-only)`}
             </div>
             {folded.pending.length > 1 && (
               <div className="text-status-int">
@@ -2012,7 +2014,11 @@ function latency(row: RunRow): string {
 
 /** CompareTable is P3's metrics row across the N variants: the
  * finish, tokens, latency and tool calls of each, one column each. */
-function CompareTable({ variants }: { variants: Variant[] }) {
+export function CompareTable({
+  variants,
+}: {
+  variants: Pick<Variant, "key" | "result">[]
+}) {
   const ran = variants.flatMap((v) =>
     v.result?.row ? [{ key: v.key, row: v.result.row }] : []
   )
@@ -2046,9 +2052,11 @@ function CompareTable({ variants }: { variants: Variant[] }) {
             {ran.map(({ key, row }) => (
               <tr key={key} className="border-t">
                 <td className="px-3 py-1 font-medium">{key}</td>
-                <td className="px-3 py-1">
-                  {row.status}
-                  {row.pending > 0 ? ` · ${row.pending} parked` : ""}
+                <td className="px-3 py-1" data-compare-status={key}>
+                  {/* statusOf's word (W7-prep): a cancelled variant
+                      cancelled, a parked one parked — never the stored
+                      word. */}
+                  <StatusChip row={row} />
                 </td>
                 <td className="px-3 py-1">
                   {row.usage.input_tokens}→{row.usage.output_tokens}

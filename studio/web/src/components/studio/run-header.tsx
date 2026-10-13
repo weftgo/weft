@@ -26,6 +26,7 @@ import {
   duration,
   elapsed,
   relativeTime,
+  stepCount,
   usageSummary,
 } from "@/lib/format"
 import { CopyButton } from "@/components/studio/codewin"
@@ -59,6 +60,7 @@ import { useCapabilities } from "@/hooks/use-capabilities"
 import { useCopyLink } from "@/hooks/use-copy-link"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { runTitle, shortId } from "@/lib/title"
+import { statusOf } from "@/lib/status"
 import type { TitlePlace } from "@/lib/title"
 import {
   contradicts,
@@ -73,7 +75,7 @@ import type { ToolFactsMap } from "@/lib/error-kind"
 /** StoppedByChip is what ended the run (U3.2), in lib/stopped-by.ts's
  * words, linking to the step where it fired; on every status. */
 function StoppedByChip({ doc }: { doc: RunDoc }) {
-  const chip = stopChip(doc)
+  const chip = stopChip(doc, true)
   if (!chip) return null
   return (
     <Link
@@ -516,10 +518,12 @@ export function RunHeader({
       </div>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-xs text-muted-foreground tabular-nums">
-        <span>
-          {doc.steps} {doc.steps === 1 ? "step" : "steps"}
-        </span>
-        <ProblemStrip row={doc} toolFacts={toolFacts} />
+        <span>{stepCount(doc.steps)}</span>
+        <ProblemStrip
+          row={doc}
+          status={statusOf(doc, sess.data?.runs, !!sess.data).key}
+          toolFacts={toolFacts}
+        />
         {conc ? (
           <span title={conc.title} data-concurrency>
             {conc.text}

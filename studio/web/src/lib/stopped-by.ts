@@ -6,6 +6,8 @@
 // story end card, the runs table, the panel's turn chip — read their
 // words here and nowhere else.
 
+import { CANCELLED } from "./error-kind"
+
 /** A stopped_by value's words: the chip's text and its one-line hint. */
 export interface StopWords {
   word: string
@@ -90,14 +92,34 @@ export interface StopRow {
   err?: string
   steps?: number
   status?: string
+  error_type?: string
 }
 
 /** stopChip is the chip's text (the word, the error's detail in
  * parentheses) and title (the hint and the raw value); null when the
- * run recorded no stopped_by. */
-export function stopChip(r: StopRow): { text: string; title: string } | null {
+ * run recorded no stopped_by. besideStatus: the chip sits beside the
+ * run's status word (the header, the panel's turn row) — where that
+ * word already says cancelled (failed, error_type cancelled; status.ts)
+ * the chip reads the cause alone, "· studio.cancel", and nothing
+ * without one: never "cancelled" twice (W7-prep). */
+export function stopChip(
+  r: StopRow,
+  besideStatus?: boolean
+): { text: string; title: string } | null {
   const w = stoppedByWords(r.stopped_by, r.cancel_cause)
   if (!w) return null
+  if (
+    besideStatus &&
+    r.stopped_by === "canceled" &&
+    r.status === "failed" &&
+    r.error_type === CANCELLED
+  )
+    return r.cancel_cause
+      ? {
+          text: `· ${r.cancel_cause}`,
+          title: `${w.hint} — stopped_by ${r.stopped_by}`,
+        }
+      : null
   const d = stopDetail(r.err, r.stopped_by)
   return {
     text: w.word + (d ? ` (${d})` : ""),

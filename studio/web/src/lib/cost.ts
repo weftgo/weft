@@ -342,10 +342,13 @@ const CUT_MARK = /^\(\+\d+\)$/
  * known yet (running) does not. null when no row is unpriced. noun is
  * what a row is ("run", "turn", "session"). The API lists five models
  * per field, a sixth and more as a last "(+n)" (pricing.go's capModels):
- * such a mark is never a model — the line then says "and more". */
+ * such a mark is never a model — the line then says "and more". more
+ * says the list is paged and has rows not loaded: the count is the
+ * loaded rows' only, said so — "· the loaded rows" (W7-prep). */
 export function unpricedLine(
   rows: readonly (CostFields & DelegatedCostFields)[],
-  noun = "run"
+  noun = "run",
+  more?: boolean
 ): UnpricedLine | null {
   let n = 0
   let cut = false
@@ -369,13 +372,13 @@ export function unpricedLine(
   }
   if (!n) return null
   const extra = models.length > 2 ? `+${models.length - 2}` : ""
-  const more = cut
+  const tail = cut
     ? ` (${extra ? `${extra} ` : ""}and more)`
     : extra
       ? ` (${extra})`
       : ""
   return {
-    text: `${n} ${noun}${n > 1 ? "s" : ""} unpriced${models.length ? `: no row for ${models.slice(0, 2).join(", ")}${more}` : ""}`,
+    text: `${n} ${noun}${n > 1 ? "s" : ""} unpriced${models.length ? `: no row for ${models.slice(0, 2).join(", ")}${tail}` : ""}${more ? " · the loaded rows" : ""}`,
     title: models.length
       ? `no row of the pricing table matches ${models.join(", ")}${cut ? " and more" : ""}`
       : "no model reported to price",

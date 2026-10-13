@@ -257,10 +257,13 @@ export const SCRIPTED_MODEL = { provider: "weft/runtime", name: "scripted" }
 
 /** A turn's chips (D5): what its record says it is, beside its id —
  * each plain text, its title naming the attribute it is read from.
- * label names a run the list holds ("t3"), else its short id. */
+ * label names a run the list holds ("t3"), else its short id. status
+ * is the turn's statusOf key (problemBadges: a decided park draws no
+ * parked part). */
 export function turnChips(
   r: RunRow,
-  label: (runId: string) => string
+  label: (runId: string) => string,
+  status?: string
 ): HTMLElement[] {
   const out: HTMLElement[] = []
   const chip = (text: string, title: string, kind: string) =>
@@ -302,7 +305,7 @@ export function turnChips(
   // trail — the run page's header note, its words.
   if (r.settling) chip(SETTLING_WORD, SETTLING_HINT, "settling")
   // What ended the turn (U3.2): the run page's header chip, its words.
-  const stop = stopChip(r)
+  const stop = stopChip(r, true)
   if (stop) chip(stop.text, stop.title, "stopped-by")
   // The failed run's kind and its problems (U4): the runs table's
   // badges, one chip each, lib/error-kind.ts's words.
@@ -311,13 +314,14 @@ export function turnChips(
     chip(kind.text, kind.title, "error-type")
     out[out.length - 1].setAttribute("data-tone", kind.tone)
   }
-  const probs = problemBadges(r)
-  if (probs.length)
-    chip(
-      probs.map((b) => b.glyph).join(" "),
-      probs.map((b) => b.label).join("; "),
-      "problems"
-    )
+  const probs = problemBadges(r, status)
+  if (probs.length) {
+    const words = probs.map((b) => b.label).join("; ")
+    chip(probs.map((b) => b.glyph).join(" "), words, "problems")
+    // Glyphs and a hover only: named, as Studio's badges (W7-prep).
+    out[out.length - 1].setAttribute("role", "img")
+    out[out.length - 1].setAttribute("aria-label", words)
+  }
   // Built by the reader from stock OTel GenAI spans (plan I1.3): the
   // derived badge in the stock_spans words, as Studio's row chip.
   if (isDerived(r)) {

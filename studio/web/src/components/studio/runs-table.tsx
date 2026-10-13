@@ -511,7 +511,7 @@ export function RunsTable({
                 <ReplayChip run={run} />
                 <DerivedChip row={run} />
                 <StoppedByLine run={run} />
-                <ProblemBadges run={run} />
+                <ProblemBadges run={run} status={statusOf(run, runs).key} />
                 {run.err ? (
                   <div
                     className="truncate font-mono text-[11px] text-status-bad/80"

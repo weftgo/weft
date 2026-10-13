@@ -582,14 +582,14 @@ describe("the playground's hand-off edits and run controls (final web review)", 
         expect(c).toBeTruthy()
         return c!
       })
-      await within(card).findByText(/^awaiting decision/)
+      await within(card).findByText(/^awaiting a decision/)
       return card
     }
 
     it("a read-scoped token: no fixture, no decision, no steer; the run link and the parked name stay", async () => {
       const card = await runCard(readToken)
       expect(
-        within(card).getByText("awaiting decision (read-only)")
+        within(card).getByText("awaiting a decision (read-only)")
       ).toBeTruthy()
       expect(
         within(card).getByText("refund", {

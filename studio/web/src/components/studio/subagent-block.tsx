@@ -15,7 +15,7 @@ import type { RunRow, RunStatus, StepChild, Usage } from "@/lib/api"
 import { runQuery, transcriptQuery } from "@/lib/api"
 import { compactionsOf } from "@/lib/compaction"
 import { applyTranscript, linkView } from "@/lib/events"
-import { usageSummary } from "@/lib/format"
+import { stepCount, usageSummary } from "@/lib/format"
 import {
   mergeHoles,
   rowHoles,
@@ -174,7 +174,7 @@ export function SubagentBlock({
         ) : null}
         {child.steps !== undefined ? (
           <span className="font-mono text-[11px] text-muted-foreground">
-            {child.steps} {child.steps === 1 ? "step" : "steps"}
+            {stepCount(child.steps)}
           </span>
         ) : null}
         <span

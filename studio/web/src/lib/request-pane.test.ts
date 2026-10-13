@@ -134,14 +134,17 @@ describe("concurrencyWords (UX-E-50, P7-fix)", () => {
     expect(w?.text).toBe("parallelism: 4")
     expect(w?.title).toContain("the run's manifest")
     expect(w?.title).not.toMatch(/read when its spans are available/)
-    expect(concurrencyWords({ manifest: 1 })?.text).toBe("sequential")
+    expect(concurrencyWords({ manifest: 1 })?.text).toBe(
+      "sequential (manifest)"
+    )
     expect(concurrencyWords({ sequentialTools: false })).toBeNull()
   })
   it("the manifest's value is hedged until the run's spans are read (P7-fix2)", () => {
     // Parallelism(4) at New, Parallelism(2) per run: while running, or
     // without the requests capability, the override is unread.
     const w = concurrencyWords({ sequentialTools: false, manifest: 4 })
-    expect(w?.text).toBe("parallelism: 4")
+    // Visible, not hover-only (W7-prep).
+    expect(w?.text).toBe("parallelism: 4 (manifest)")
     expect(w?.title).toContain(
       "the manifest's value; the run's own setting is read when its spans are available"
     )

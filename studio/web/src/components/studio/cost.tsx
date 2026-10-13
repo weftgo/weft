@@ -78,13 +78,16 @@ export function CostText({
 export function UnpricedNote({
   rows,
   noun,
+  more,
   className = "",
 }: {
   rows: readonly (CostFields & DelegatedCostFields)[]
   noun?: string
+  /** The list is paged and has rows not loaded (unpricedLine). */
+  more?: boolean
   className?: string
 }) {
-  const line = unpricedLine(rows, noun)
+  const line = unpricedLine(rows, noun, more)
   if (!line) return null
   return (
     <span

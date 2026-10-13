@@ -736,7 +736,7 @@ describe("the drawer against a fake Studio", () => {
     })
     await settle()
     const res = $(el, ".weft-xres")
-    expect(res?.textContent).toContain("awaiting decision")
+    expect(res?.textContent).toContain("awaiting a decision")
     const cont = all(el, ".weft-xres .weft-btn").find(
       (b) => b.textContent === "continue"
     )

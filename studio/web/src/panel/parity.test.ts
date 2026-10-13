@@ -2377,13 +2377,15 @@ describe("stopped by on both surfaces (U3.2)", () => {
       name: "a cancelled run",
       doc: {
         status: "failed",
+        error_type: "cancelled",
         stopped_by: "canceled",
         cancel_cause: "studio.cancel",
         stop_reason: "tool_calls",
         err: "weft: run failed at step 0: context canceled",
         steps: 1,
       },
-      chip: "cancelled · studio.cancel",
+      // Beside the status word "cancelled": the cause alone (W7-prep).
+      chip: "· studio.cancel",
       end: "■ cancelled · studio.cancel at step 0",
     },
   ]
@@ -2635,7 +2637,7 @@ describe("a settling run on both surfaces (U2-fix2)", () => {
 
 // Titles, not ids (U6): one row, both surfaces, one helper
 // (lib/title.ts). The panel's narrow picker reads "● parked t3 How many
-// units… · 1 steps · 811ms", its turn row "t3 How many units…"; the run page's
+// units… · 1 step · 811ms", its turn row "t3 How many units…"; the run page's
 // heading is "agent · the prompt" and the tab "agent · How many units…
 // · succeeded · weft studio"; the id rides in a title / a mono line,
 // never as the label. A content-off row reads "(content not captured)"
@@ -2657,7 +2659,7 @@ describe("titles, not ids, on both surfaces (U6)", () => {
     {
       name: "a parked turn with a prompt",
       doc: { prompt_preview: PROMPT, pending: 1, turn: 3, finished: AT(811) },
-      option: `● parked t3 ${CUT} · 1 steps · 811ms`,
+      option: `● parked t3 ${CUT} · 1 step · 811ms`,
       row: `t3 ${CUT}`,
       heading: `acme-support·${PROMPT}`,
       tab: `acme-support · ${CUT} · succeeded · weft studio`,
@@ -2666,7 +2668,7 @@ describe("titles, not ids, on both surfaces (U6)", () => {
     {
       name: "a content-off turn of an unnamed agent",
       doc: { agent: "", message_count: 0, event_count: 6, turn: 3 },
-      option: `● succeeded t3 ${NO_CONTENT} · 1 steps · 0ms`,
+      option: `● succeeded t3 ${NO_CONTENT} · 1 step · 0ms`,
       row: `t3 ${NO_CONTENT}`,
       heading: `unnamed agent·${NO_CONTENT}`,
       tab: `${NO_CONTENT} · succeeded · weft studio`,
@@ -2677,7 +2679,7 @@ describe("titles, not ids, on both surfaces (U6)", () => {
     {
       name: "a content-off turn of a named agent",
       doc: { agent: "director", message_count: 0, event_count: 6, turn: 3 },
-      option: `● succeeded t3 director · ${NO_CONTENT} · 1 steps · 0ms`,
+      option: `● succeeded t3 director · ${NO_CONTENT} · 1 step · 0ms`,
       row: `t3 director · ${NO_CONTENT}`,
       heading: `director · ${NO_CONTENT}`,
       tab: `director · ${NO_CONTENT} · succeeded · weft studio`,
@@ -2793,10 +2795,10 @@ describe("a resume and an experiment on both surfaces (U6-fix)", () => {
       ])
     )
     expect(opts).toEqual({
-      "s_01-t4": `● succeeded t4 ${RESUME} · 1 steps · 811ms`,
+      "s_01-t4": `● succeeded t4 ${RESUME} · 1 step · 811ms`,
       // t4 resumed t3 (U1): its word is the decided park's.
-      "s_01-t3": `● parked → t4 t3 ${PROMPT} · 1 steps · 1.0s`,
-      pg_x1: "↳ replay of t3 · scripted · ● failed · 1 steps · 2.5s",
+      "s_01-t3": `● parked → t4 t3 ${PROMPT} · 1 step · 1.0s`,
+      pg_x1: "↳ replay of t3 · scripted · ● failed · 1 step · 2.5s",
     })
     const rows = Object.fromEntries(
       all(el, ".weft-turn").map((r) => [
@@ -3031,8 +3033,12 @@ describe("one status vocabulary on both surfaces (U1)", () => {
       key: "resumed",
       word: "parked → t2",
       resumedBy: "s_01-t2",
-      detail: "1 call decided · resumed in t2",
+      detail: "1 call · next turn t2 (decided or dropped)",
     })
+    // "decided · resumed" only on the stored link (W7-prep).
+    expect(statusOf({ ...t1, resumed_by: "s_01-t2" }, [t1, t2]).detail).toBe(
+      "1 call decided · resumed in t2"
+    )
     expect(statusOf(t3).hint).toContain("cancelled · studio.cancel")
     // A stored resume link with no turn to name (U13.1-fix): the
     // resumer's id cut to 8 characters, whole in the hint — one word
@@ -3269,7 +3275,7 @@ describe("one status vocabulary on both surfaces (U1)", () => {
         ).toBe("s_01-t2")
       )
       expect(chip().textContent).toBe(
-        "parked → t2· 1 call decided · resumed in t2"
+        "parked → t2· 1 call · next turn t2 (decided or dropped)"
       )
     })
 

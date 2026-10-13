@@ -20,7 +20,8 @@
 //               resumed_by (U13.1's stored link, read first), else a
 //               later turn of its session in runs (lib/honesty.ts's
 //               nextTurn) — the next turn, which decided the calls or
-//               dropped them. With no turn to name, the resumer's id
+//               dropped them: "decided · resumed in tN" on the stored
+//               link only, "next turn tN (decided or dropped)" else. With no turn to name, the resumer's id
 //               cut to 8 characters ("parked → 3f9a1c2b…"), the whole
 //               id in the hint.
 //
@@ -43,6 +44,10 @@ export interface StatusWords {
   hint: string
   role: Role
 }
+
+/** A park's open calls (statusOf's detail) and the approvals block's
+ * heading on both surfaces: one phrase (W7-prep). */
+export const AWAITING = "awaiting a decision"
 
 /** The table: the six words, and the decided park ("parked → tN"). */
 export const STATUS: Record<StatusKey, StatusWords> = {
@@ -132,7 +137,7 @@ export function statusOf(
     if (!next) {
       const d =
         complete && ownTurn(r)
-          ? `${calls} awaiting a decision`
+          ? `${calls} ${AWAITING}`
           : `${calls} pending · ${r.session_id ? "no resume recorded here" : "a resume, if any, is not linked yet"}`
       return { key: "parked", ...STATUS.parked, detail: d, hint: d }
     }
@@ -143,12 +148,19 @@ export function statusOf(
     // still names its turn: t<n>, never a cut that loses it.
     const tn = t ?? /-t(\d+)$/.exec(next)?.[1]
     const to = tn ? `t${tn}` : next.length > 16 ? `${next.slice(0, 8)}…` : next
+    // "decided · resumed" only on the stored link (W7-prep): the next
+    // turn after a Branch, a Rollback or an undecided Send is no
+    // resume (docs/record-contract.md §7) — it decided the calls or
+    // dropped them.
+    const d = r.resumed_by
+      ? `${calls} decided · resumed in ${to}`
+      : `${calls} · next turn ${to} (decided or dropped)`
     return {
       key: "resumed",
       ...STATUS.resumed,
       word: `${STATUS.resumed.word} ${to}`,
-      detail: `${calls} decided · resumed in ${to}`,
-      hint: `${calls} decided · resumed in ${to} (${next})`,
+      detail: d,
+      hint: `${d} (${next})`,
       resumedBy: next,
     }
   }

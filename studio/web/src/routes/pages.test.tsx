@@ -893,7 +893,7 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
       },
       { timeout: 10_000 }
     )
-    expect(await within(card).findByText("awaiting decision")).toBeTruthy()
+    expect(await within(card).findByText("awaiting a decision")).toBeTruthy()
     fireEvent.click(within(card).getByRole("button", { name: "continue" }))
     // A refused decision is shown on the card that asked.
     expect(
@@ -962,7 +962,8 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     const card = () =>
       document.querySelector<HTMLElement>('[data-variant="A"]')!
     await waitFor(
-      () => expect(within(card()).getByText("awaiting decision")).toBeTruthy(),
+      () =>
+        expect(within(card()).getByText("awaiting a decision")).toBeTruthy(),
       { timeout: 10_000 }
     )
     expect(within(card()).queryByText(/will be denied/)).toBeNull()
@@ -1115,10 +1116,11 @@ describe("the playground (WEFT-PLAYGROUND §4, §10.4)", () => {
     )
     const card = () =>
       document.querySelector<HTMLElement>('[data-variant="A"]')!
-    expect(within(card()).queryByText("awaiting decision")).toBeNull()
+    expect(within(card()).queryByText("awaiting a decision")).toBeNull()
     exported = true
     await waitFor(
-      () => expect(within(card()).getByText("awaiting decision")).toBeTruthy(),
+      () =>
+        expect(within(card()).getByText("awaiting a decision")).toBeTruthy(),
       {
         timeout: 10_000,
       }

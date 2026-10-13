@@ -381,7 +381,7 @@ describe("the rung-1 surfaces against a fake Studio", () => {
       (n.getAttribute("data-weft-run") ?? "").includes("r_park")
     )
     expect(row?.textContent).toContain("script")
-    expect(row?.textContent).toContain("1 steps")
+    expect(row?.textContent).toMatch(/1 step(?!s)/)
   })
 
   it("turn view: prompt, reasoning collapsed, final text from the transcript, tool call args and result, usage splits", async () => {
@@ -608,7 +608,7 @@ describe("the rung-1 surfaces against a fake Studio", () => {
       "data-open": "true",
     })
     const main = text(el, ".weft-main")
-    expect(main).toContain("awaiting decision (read-only)")
+    expect(main).toContain("awaiting a decision (read-only)")
     expect(main).toContain("refund")
     expect(main).toContain('{"order_id":"42"}')
     // No runtime of the run's service acts on the app's sessions: the
@@ -679,7 +679,7 @@ describe("the rung-1 surfaces against a fake Studio", () => {
     )
     scope?.emit("run", { run: runRow({ id: "r_live", steps: 1 }) })
     await idle()
-    expect(text(el, ".weft-turns")).toContain("1 steps")
+    expect(text(el, ".weft-turns")).toMatch(/1 step(?!s)/)
   })
 
   it("the live turn list upserts: two run frames for one id leave one row, its chip on the latest frame", async () => {

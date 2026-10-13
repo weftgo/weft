@@ -174,7 +174,7 @@ describe("the result pane follows the command to its run", () => {
       },
     })
     await settle()
-    expect(text(el, ".weft-xres")).not.toContain("awaiting decision")
+    expect(text(el, ".weft-xres")).not.toContain("awaiting a decision")
     await settle(800) // the next poll: finished, under pg_b
     expect(text(el, ".weft-xres")).toContain(
       "It shipped; a refund needs your approval."
@@ -396,7 +396,7 @@ describe("the result pane follows the command to its run", () => {
     for (let i = 0; i < 6; i++) await vi.advanceTimersByTimeAsync(1_000)
     await settle()
     expect(reads).toBeGreaterThanOrEqual(3)
-    expect(text(el, ".weft-xres")).toContain("awaiting decision")
+    expect(text(el, ".weft-xres")).toContain("awaiting a decision")
     expect(button(el, "continue", ".weft-xres")).toBeTruthy()
   })
 
@@ -639,7 +639,7 @@ describe("the approval controls (P2-16)", () => {
       decision: "deny",
     })
     expect(text(el, ".weft-xres")).toContain("Refunded and escalated.")
-    expect(text(el, ".weft-xres")).not.toContain("awaiting decision")
+    expect(text(el, ".weft-xres")).not.toContain("awaiting a decision")
   })
 
   it("a refused decision is shown and leaves the parked run decidable", async () => {
@@ -672,7 +672,7 @@ describe("the approval controls (P2-16)", () => {
     expect(text(el, ".weft-xres")).toContain(
       "no parked run pg_p1 on this runtime"
     )
-    expect(text(el, ".weft-xres")).toContain("awaiting decision")
+    expect(text(el, ".weft-xres")).toContain("awaiting a decision")
   })
 
   it("a read-scoped panel token is offered no write verb; a playground one is", async () => {

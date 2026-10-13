@@ -62,6 +62,9 @@ export function errorKind(errorType?: string): KindWords | null {
 // is no provider failure — the run never asked.
 const WORDS: Record<string, string | undefined> = {
   model_requests_denied: "denied by the kill switch (WEFT_MODEL_REQUESTS)",
+  // Beside the stop chip "tool retry budget spent" (stopped-by.ts):
+  // the same budget, in words (W7-prep).
+  model_retries_exceeded: "retry budget spent",
 }
 
 /** kindChip is the chip's bracketed text and title; null with no kind,
@@ -112,8 +115,12 @@ const plural = (k: number, one: string, many = one + "s") =>
 
 /** problemBadges lists a run's problems, in one fixed order — none for
  * a clean run (badges only on problems). Parked calls ride ✋ with the
- * denials: both are calls a policy held. */
-export function problemBadges(r: ProblemRow): ProblemBadge[] {
+ * denials: both are calls a policy held. status is the row's statusOf
+ * key (lib/status.ts): the stored pending count stays after a resume,
+ * so a decided park ("resumed") draws no parked part — its status word
+ * already says "parked → tN" — and a row whose word is not parked says
+ * "held" (W7-prep). */
+export function problemBadges(r: ProblemRow, status?: string): ProblemBadge[] {
   const out: ProblemBadge[] = []
   const add = (key: string, glyph: string, label: string) =>
     out.push({ key, glyph, label })
@@ -135,11 +142,13 @@ export function problemBadges(r: ProblemRow): ProblemBadge[] {
       `✗${r.tool_errors}`,
       plural(n(r.tool_errors), "tool error")
     )
-  const held = n(r.denied) + n(r.pending)
+  const parked = status === "resumed" ? 0 : n(r.pending)
+  const held = n(r.denied) + parked
   if (held > 0) {
     const parts = []
     if (n(r.denied) > 0) parts.push(`${r.denied} denied`)
-    if (n(r.pending) > 0) parts.push(`${r.pending} parked`)
+    if (parked > 0)
+      parts.push(`${parked} ${status === "parked" ? "parked" : "held"}`)
     add(
       "denied",
       held > 1 ? `✋${held}` : "✋",
@@ -179,17 +188,6 @@ export function problemBadges(r: ProblemRow): ProblemBadge[] {
       ge + plural(n(r.log_warn), "app log warning")
     )
   return out
-}
-
-/** statsStrip is the run header's loop summary (UX-A-40): the steps,
- * then the problems in words — "2 steps · ↻2 2 model attempts retried ·
- * ✗1 1 tool error". Badges only on problems: a clean run
- * reads its steps alone. */
-export function statsStrip(r: ProblemRow & { steps: number }): string[] {
-  return [
-    plural(r.steps, "step"),
-    ...problemBadges(r).map((b) => `${b.glyph} ${b.label}`),
-  ]
 }
 
 // The error.types the tool_errors counter leaves out (obsdb/problems.go
@@ -262,10 +260,15 @@ export function toolFailure(
     case "timeout":
       return { word: "timeout", hint: "the call's Timeout passed" }
     case "context.Canceled":
-    case "context.DeadlineExceeded":
       return {
         word: CANCELLED,
         hint: "the run's cancellation reached the call",
+      }
+    // A deadline is not a cancel (the attempt phrase's word too).
+    case "context.DeadlineExceeded":
+      return {
+        word: "deadline",
+        hint: "the run's deadline passed while the call ran",
       }
     case "mcp_transport":
       return { word: "MCP transport", hint: "the tools/call did not complete" }

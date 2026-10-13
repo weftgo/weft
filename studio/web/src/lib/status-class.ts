@@ -7,7 +7,8 @@ import { ROLE, STUDIO_NAMES } from "./palette"
 import type { Role } from "./palette"
 
 export const ROLE_CLASS: Record<string, { dot: string; text: string }> = {
-  "status-run": { dot: "bg-status-run", text: "text-status-run" },
+  // The running word in its ink (palette.ts's INK): 4.5:1 as text.
+  "status-run": { dot: "bg-status-run", text: "text-status-run-ink" },
   "status-ok": { dot: "bg-status-ok", text: "text-status-ok" },
   "status-bad": { dot: "bg-status-bad", text: "text-status-bad" },
   "status-int": { dot: "bg-status-int", text: "text-status-int" },

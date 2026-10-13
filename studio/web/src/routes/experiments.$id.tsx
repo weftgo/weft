@@ -54,6 +54,8 @@ import { canReplay } from "@/lib/replay"
 import { isUnknownCommand, settled } from "@/hooks/use-command-tracking"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { useDocumentTitle } from "@/hooks/use-document-title"
+import { statusOf } from "@/lib/status"
+import { statusClass } from "@/lib/status-class"
 import { useRuntimesNeeded } from "@/hooks/use-notices"
 import { CostText, useCostCapable } from "@/components/studio/cost"
 import { Button } from "@/components/ui/button"
@@ -531,7 +533,7 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
                               checked={picked.includes(run.id)}
                               onChange={() => togglePick(run.id)}
                             />
-                            <RunStatus status={run.status} />
+                            <RunStatus run={run} />
                             <Link
                               {...runLink(run.id)}
                               className="font-mono hover:underline"
@@ -626,7 +628,7 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
           <ul className="space-y-0.5">
             {placed.loose.map((r) => (
               <li key={r.id} className="flex items-center gap-2">
-                <RunStatus status={r.status} />
+                <RunStatus run={r} />
                 <Link {...runLink(r.id)} className="font-mono hover:underline">
                   {r.id}
                 </Link>
@@ -640,17 +642,18 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
   )
 }
 
-/** RunStatus is a cell's run status, in words and its tone. */
-function RunStatus({ status }: { status: RunRow["status"] }) {
-  const tone =
-    status === "succeeded"
-      ? "text-status-ok"
-      : status === "failed"
-        ? "text-status-bad"
-        : "text-muted-foreground"
+/** RunStatus is a cell's run status, in lib/status.ts's words and
+ * role (U1-fix): parked and cancelled too, a park "not linked yet" —
+ * no session's turns are read here. */
+function RunStatus({ run }: { run: RunRow }) {
+  const s = statusOf(run)
   return (
-    <span className={`font-mono ${tone}`} data-run-status={status}>
-      {status}
+    <span
+      className={`font-mono ${statusClass(s.role).text}`}
+      title={s.hint}
+      data-run-status={s.key}
+    >
+      {s.word}
     </span>
   )
 }

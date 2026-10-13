@@ -42,7 +42,7 @@ export function ProblemBadges({
   run: ProblemRow & { error_type?: string }
 }) {
   const bs = problemBadges(run)
-  if (!run.error_type && bs.length === 0) return null
+  if (!kindChip(run.error_type) && bs.length === 0) return null
   return (
     <div
       className="flex flex-wrap items-center gap-1 font-mono text-[11px] text-muted-foreground"

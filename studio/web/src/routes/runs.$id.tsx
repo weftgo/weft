@@ -985,6 +985,7 @@ function RunPage() {
                       <FlowStrip
                         pills={flow}
                         runStatus={viewStatus}
+                        errorType={replaying ? undefined : run.data.error_type}
                         selectedKey={selKey}
                         onSelect={select}
                       />

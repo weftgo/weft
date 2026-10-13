@@ -17,7 +17,7 @@
 // the reader is peeking at it).
 import type { RunRow } from "./api"
 import type { LiveRecord } from "./live"
-import { statusOf } from "./status"
+import { STATUS, statusOf } from "./status"
 
 /** How long a finished run stays listed. */
 export const LIVE_GRACE_MS = 30_000
@@ -358,14 +358,22 @@ export function validPeek(v: unknown): string | undefined {
     : undefined
 }
 
-/** Matches a row against the filter box (agent or status — the stored
- * word and lib/status.ts's: parked, cancelled — case-folded;
- * every word must match one of them). */
-export function matchesFilter(run: RunRow, q: string): boolean {
+/** Matches a row against the filter box, case-folded, every word
+ * matching: a status word (lib/status.ts's keys: running · succeeded ·
+ * failed · interrupted · parked · cancelled · resumed) matches the
+ * row's status key — parked an open or not-yet-linked park, never a
+ * decided one (its resume looked for among runs, the held rows); any
+ * other word a substring of the agent or the status word. */
+export function matchesFilter(
+  run: RunRow,
+  q: string,
+  runs?: readonly RunRow[]
+): boolean {
   const words = q.toLowerCase().split(/\s+/).filter(Boolean)
   if (!words.length) return true
-  const hay = [run.agent, run.status, statusOf(run).word]
-    .join(" ")
-    .toLowerCase()
-  return words.every((w) => hay.includes(w))
+  const st = statusOf(run, runs)
+  const hay = `${run.agent} ${st.word}`.toLowerCase()
+  return words.every((w) =>
+    Object.hasOwn(STATUS, w) ? st.key === w : hay.includes(w)
+  )
 }

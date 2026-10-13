@@ -95,10 +95,11 @@ export function LiveRuns({
   const views = runs.map((r) =>
     polledView(newest(r, frames[r.id] as RunRow | undefined))
   )
+  const held = views.map((v) => v.run)
   return (
     <div className="space-y-2">
       <LiveTable
-        rows={views.filter((v) => matchesFilter(v.run, filter))}
+        rows={views.filter((v) => matchesFilter(v.run, filter, held))}
         allRows={views}
         now={now}
         peek={peek}

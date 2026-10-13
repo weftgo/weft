@@ -30,7 +30,7 @@ const toneText: Record<SpanTone, string> = {
   result: "text-ev-result",
   error: "text-ev-error",
   bad: "text-status-bad",
-  running: "text-status-run",
+  running: "text-status-run-ink",
   never: "text-ev-error",
 }
 const badgeTone: Record<SpanTone, string> = {
@@ -39,7 +39,7 @@ const badgeTone: Record<SpanTone, string> = {
   result: "border-ev-result/50 text-ev-result",
   error: "border-ev-error/50 text-ev-error",
   bad: "border-status-bad/50 text-status-bad",
-  running: "border-status-run/50 text-status-run",
+  running: "border-status-run/50 text-status-run-ink",
   never: "border-ev-error/50 text-ev-error",
 }
 const kindIcon: Record<SpanKind, string> = {

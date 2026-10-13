@@ -296,3 +296,26 @@ describe("notify", () => {
       expect(noticeText(n).title).not.toMatch(/token|Bearer|weft_pt\./)
   })
 })
+
+describe("the cancel toast's end, in lib/status.ts's word (U1-fix)", () => {
+  const ended = (status: string): Notice => ({
+    kind: "cancel",
+    runID: "r_pg",
+    n: 1,
+    outcome: "ended",
+    status,
+  })
+  it("cancelled reads cancelled; a kindless failed reads as before; any other end raced", () => {
+    expect(noticeText(ended("cancelled"))).toEqual({
+      title: "run r_pg cancelled",
+      tone: "success",
+    })
+    expect(noticeText(ended("failed")).title).toBe(
+      "run r_pg cancelled · ended failed"
+    )
+    expect(noticeText(ended("parked")).title).toBe("run r_pg ended parked")
+    expect(noticeText(ended("parked → t2")).title).toBe(
+      "run r_pg ended parked → t2"
+    )
+  })
+})

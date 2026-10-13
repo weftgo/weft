@@ -11,16 +11,20 @@
 //   cancelled   status failed and error_type cancelled (U4: the run's
 //               context ended), its weft.cancel.cause in the hint;
 //   parked      status succeeded with pending calls and no resume
-//               known — open, actionable;
-//   parked → tN the same, once a later turn of its session exists: the
-//               calls were decided and tN resumed them (lib/honesty.ts's
-//               nextTurn, the loaded turns). A plain Generate's resume
-//               has no link to find until core stamps one (U13.1's
-//               weft.resumed_from): it reads parked meanwhile.
+//               known: open, or not yet linked. Its detail says
+//               "awaiting a decision" only where the resume was looked
+//               for and could not be missed — a session turn read
+//               against its session's complete turn list (complete);
+//               anywhere else "pending · no resume recorded here";
+//   parked → tN the same, once the resume is known: the row's
+//               resumed_by (U13.1's stored link, read first; not served
+//               yet), else a later turn of its session in runs
+//               (lib/honesty.ts's nextTurn) — the next turn, which
+//               decided the calls or dropped them.
 //
 // settling (U2) is a note beside the word, never a status.
 import { CANCELLED } from "./error-kind"
-import { nextTurn } from "./honesty"
+import { nextTurn, ownTurn } from "./honesty"
 import type { Role } from "./palette"
 
 export type StatusKey =
@@ -62,7 +66,7 @@ export const STATUS: Record<StatusKey, StatusWords> = {
   },
   parked: {
     word: "parked",
-    hint: "awaiting a decision",
+    hint: "pending",
     role: "parked",
   },
   cancelled: {
@@ -88,6 +92,8 @@ export interface StatusRow {
   session_id?: string
   turn?: number
   parent_run_id?: string
+  /** U13.1's stored resume link; absent until served. */
+  resumed_by?: string
 }
 
 /** A row's status: its key, words and role; detail is what the run
@@ -101,10 +107,12 @@ export interface Status extends StatusWords {
 
 /** statusOf words a row. runs are the turns around it (a session's, a
  * list's, the panel's loaded ones): where a park's resume is looked
- * for; none given, a park reads open. */
+ * for. complete says runs is the row's session's whole turn list: only
+ * then may an unresumed session turn read "awaiting a decision". */
 export function statusOf(
   r: StatusRow,
-  runs?: readonly StatusRow[] | null
+  runs?: readonly StatusRow[] | null,
+  complete?: boolean
 ): Status {
   const n = r.pending ?? 0
   if (r.status === "failed" && r.error_type === CANCELLED) {
@@ -117,9 +125,12 @@ export function statusOf(
   }
   if (r.status === "succeeded" && n > 0) {
     const calls = `${n} ${n > 1 ? "calls" : "call"}`
-    const next = nextTurn(r, runs)
+    const next = r.resumed_by || (r.turn ? nextTurn(r, runs) : undefined)
     if (!next) {
-      const d = `${calls} awaiting a decision`
+      const d =
+        complete && ownTurn(r)
+          ? `${calls} awaiting a decision`
+          : `${calls} pending · ${r.session_id ? "no resume recorded here" : "a resume, if any, is not linked yet"}`
       return { key: "parked", ...STATUS.parked, detail: d, hint: d }
     }
     const t = runs?.find((x) => x.id === next)?.turn
@@ -139,12 +150,15 @@ export function statusOf(
     : { key: k, word: r.status, hint: r.status, role: "resumed" }
 }
 
-/** The panel's turn filter: the words a user picks, one key each. */
+/** The panel's turn filter: the words a user picks, one key each.
+ * parked is open or not yet linked; resumed ("parked → (decided)") a
+ * park whose resume is known. */
 export const FILTER_KEYS: StatusKey[] = [
   "running",
   "succeeded",
   "failed",
   "interrupted",
   "parked",
+  "resumed",
   "cancelled",
 ]

@@ -654,13 +654,24 @@ two more, from fields it already has: **cancelled** is `failed` with
 `error_type` `cancelled` (its `cancel_cause` beside it); **parked** is
 `succeeded` with `pending` > 0 while nothing is known to have resumed
 the run — and **parked → tN** once a later turn of the same thread
-session exists (the next turn in that session is the resume: a thread
-resume always is). A plain `Generate` resumed by a later run carries no
-link to it yet, so it reads parked until core stamps one
-(weft.resumed_from, planned). Studio and the devtools panel draw these
-words from one table (`studio/web/src/lib/status.ts`), each in one
-colour role (`lib/palette.ts`'s `ROLE`); the `run` host event keeps the
-plain words (`parked` = succeeded with pending calls).
+session exists (the next turn in that session, which decided the calls
+or dropped them as `DENIED: no decision` — after a Branch, a Rollback
+or a Send without a decision it is not a resume). A reader says "N
+calls awaiting a decision" only where it looked for that turn and could
+not miss it: the row has a session and the reader holds that session's
+whole turn list (Studio's session page, the run header once its session
+loaded, the panel's session-scoped turns). Anywhere else — a filtered or
+sorted runs list, a plain `Generate`, an experiment row — the park reads
+"N calls pending · no resume recorded here": a plain `Generate` resumed
+by a later run carries no link to it yet (a stored resume link, U13.1's
+resumed_from attribute, is planned). parked is therefore "open or not
+yet linked", never a claim that nobody decided. cancelled and
+interrupted share the warn colour (their words differ); where the
+status word already says cancelled, the `error_type` kind chip is
+dropped and the kind stays in the hint. Studio and the devtools panel
+draw these words from one table (`studio/web/src/lib/status.ts`), each
+in one colour role (`lib/palette.ts`'s `ROLE`); the `run` host event
+keeps the plain words (`parked` = succeeded with pending calls).
 
 ## 8. The GenAI semantic conventions
 

@@ -18,12 +18,12 @@ import { createFileRoute, useNavigate, useRouter } from "@tanstack/react-router"
 import { RefreshCw, Radio, Search, X } from "lucide-react"
 
 import { fetchRuns, fetchSearch, nextCursor } from "@/lib/api"
-import type { PageCursor, RunsPage, RunStatus } from "@/lib/api"
+import type { PageCursor, RunsPage } from "@/lib/api"
 import { openLive, throttle } from "@/lib/live"
 import { isPlainShortcut } from "@/lib/keys"
 import {
   CLEARED,
-  RUN_STATUSES,
+  STATUS_PICKS,
   applyLocal,
   effectiveSort,
   filtersFromSearch,
@@ -73,6 +73,7 @@ const statusLabel: Record<string, string> = {
   succeeded: "succeeded",
   failed: "failed",
   interrupted: "interrupted",
+  parked: "parked",
 }
 
 export const Route = createFileRoute("/runs/")({
@@ -392,7 +393,9 @@ function RunsPage() {
         <Select
           value={search.status ?? "all"}
           onValueChange={(v) =>
-            setSearch({ status: v === "all" ? undefined : (v as RunStatus) })
+            setSearch({
+              status: v === "all" ? undefined : (v as RunsSearch["status"]),
+            })
           }
         >
           <SelectTrigger
@@ -405,7 +408,7 @@ function RunsPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">any status</SelectItem>
-            {RUN_STATUSES.map((s) => (
+            {STATUS_PICKS.map((s) => (
               <SelectItem key={s} value={s}>
                 {s}
               </SelectItem>

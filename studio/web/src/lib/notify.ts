@@ -63,9 +63,10 @@ export type Notice =
   | { kind: "copy-link"; ok: boolean; n: number }
   /** The live page's cancel (plan H6): n is the press; sent (the 202),
    * refused (the server's words, verbatim), or ended (the run's ended
-   * row arrived: status says how — "cancelled" is said for failed
-   * alone). One toast per run, each outcome replacing the
-   * last. */
+   * row arrived: status says how, lib/status.ts's word — cancelled
+   * as itself, a failed row with no error_type as "cancelled · ended
+   * failed" (a Studio older than U4)). One toast per run, each outcome
+   * replacing the last. */
   | {
       kind: "cancel"
       runID: string
@@ -154,9 +155,9 @@ export function noticeText(n: Notice): { title: string; tone: Tone } {
           }
         : n.outcome === "ended"
           ? // A cancelled run ends failed; any other end raced the cancel.
-            n.status === "failed"
+            n.status === "cancelled" || n.status === "failed"
             ? {
-                title: `run ${n.runID} cancelled · ended failed`,
+                title: `run ${n.runID} cancelled${n.status === "failed" ? " · ended failed" : ""}`,
                 tone: "success",
               }
             : { title: `run ${n.runID} ended ${n.status ?? "—"}`, tone: "info" }

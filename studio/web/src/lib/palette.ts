@@ -31,6 +31,7 @@ export const PALETTE: Record<Theme, Record<string, string>> = {
     ok: "#1f7a45",
     parked: "#8a3fb0",
     "status-run": "#ef4d21",
+    "status-run-ink": "#d13c10",
     scrim: "rgba(251,250,247,.92)",
     shadow: "rgba(25,23,19,.18)",
   },
@@ -50,6 +51,7 @@ export const PALETTE: Record<Theme, Record<string, string>> = {
     ok: "#4ade80",
     parked: "#c678dd",
     "status-run": "#ff5c2b",
+    "status-run-ink": "#ff5c2b",
     scrim: "rgba(19,18,17,.92)",
     shadow: "rgba(0,0,0,.45)",
   },
@@ -73,6 +75,7 @@ export const STUDIO_NAMES: Record<Theme, Record<string, string>> = {
     ok: "status-ok",
     parked: "status-parked",
     "status-run": "status-run",
+    "status-run-ink": "status-run-ink",
   },
   dark: {
     bg: "background",
@@ -90,6 +93,7 @@ export const STUDIO_NAMES: Record<Theme, Record<string, string>> = {
     ok: "status-ok",
     parked: "status-parked",
     "status-run": "status-run",
+    "status-run-ink": "status-run-ink",
   },
 }
 
@@ -108,3 +112,9 @@ export const ROLE = {
 } as const
 
 export type Role = keyof typeof ROLE
+
+/** The token a role's WORD is drawn in, where its mark's token is a UI
+ * colour under 4.5:1 as text (U1-fix): the running dot, pulse and pill
+ * border stay --status-run (3:1 is enough for a mark); the running word
+ * is --status-run-ink. Any other token is its own ink. */
+export const INK: Record<string, string> = { "status-run": "status-run-ink" }

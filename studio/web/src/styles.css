@@ -75,6 +75,7 @@
   --status-ok: #1f7a45;
   --status-bad: #b42318;
   --status-run: #ef4d21; /* the thread, darkened to clear 3:1 on paper */
+  --status-run-ink: #d13c10; /* the running word: 4.5:1 on paper (U1-fix) */
   --status-int: #9a6a06;
   --status-parked: #8a3fb0; /* a run parked on an approval (U1) */
 }
@@ -132,6 +133,7 @@
   --status-ok: #4ade80;
   --status-bad: #f87171;
   --status-run: #ff5c2b;
+  --status-run-ink: #ff5c2b;
   --status-int: #e3b341;
   --status-parked: #c678dd;
 }
@@ -221,6 +223,7 @@ html[data-density="compact"] {
   --color-status-ok: var(--status-ok);
   --color-status-bad: var(--status-bad);
   --color-status-run: var(--status-run);
+  --color-status-run-ink: var(--status-run-ink);
   --color-status-int: var(--status-int);
   --color-status-parked: var(--status-parked);
   --radius-sm: calc(var(--radius) * 0.6);

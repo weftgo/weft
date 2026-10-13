@@ -219,6 +219,40 @@ describe("the loaded rows answer what the list cannot", () => {
     expect(runChips(s, ALL)[0].note).toBe("the loaded rows only")
   })
 
+  it("parked (U1-fix): succeeded asked of the API, the loaded rows kept where statusOf reads parked", () => {
+    const s = validateRunsSearch({ status: "parked" })
+    expect(s.status).toBe("parked")
+    expect(filtersFromSearchOf(s).status).toBe("succeeded")
+    expect(searchFiltersFrom(s, ALL).status).toBe("succeeded")
+    expect(localKeys(s, ALL)).toEqual(["status"])
+    const row = (o: Partial<RunRow>): RunRow => ({
+      ...runs[0],
+      status: "succeeded",
+      parent_run_id: "",
+      ...o,
+    })
+    const open = row({ id: "s_01-t1", session_id: "s_01", turn: 1, pending: 1 })
+    const resumed = row({
+      id: "s_02-t1",
+      session_id: "s_02",
+      turn: 1,
+      pending: 1,
+    })
+    const t2 = row({ id: "s_02-t2", session_id: "s_02", turn: 2, pending: 0 })
+    const plain = row({ id: "r_gen", session_id: "", turn: 0, pending: 2 })
+    const done = row({ id: "r_done", session_id: "", turn: 0, pending: 0 })
+    expect(
+      applyLocal([open, resumed, t2, plain, done], s, ALL, now).map((r) => r.id)
+    ).toEqual(["s_01-t1", "r_gen"])
+    expect(runChips(s, ALL)[0]).toMatchObject({
+      label: "status parked",
+      applied: true,
+      note: "the loaded rows only: pending calls, no resume among them",
+    })
+    // An unknown status is dropped, never guessed at.
+    expect(validateRunsSearch({ status: "resumed" }).status).toBeUndefined()
+  })
+
   it("experiment_id (plan F5, F5.1): a URL chip the API applies, playground runs asked of both lists", () => {
     const s = validateRunsSearch({ experiment_id: "exp_tone" })
     expect(s.experiment_id).toBe("exp_tone")

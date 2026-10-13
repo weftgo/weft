@@ -336,7 +336,8 @@ as `<run id>.json` (a `/` in a child's id becomes `_`). The turn list
 has its own filter above it — text over the run id, the error and each
 loaded row's `prompt_preview` (every run row carries one since 0.14.0,
 absent for a content-off run) — a status (`running`, `succeeded`,
-`failed`, `interrupted`, `parked` — an open park only — `cancelled`) and has error — over the loaded rows, never stored, "n of m turns" while it
+`failed`, `interrupted`, `parked` — open or not yet linked, never a decided one —
+`parked → (decided)`, `cancelled`) and has error — over the loaded rows, never stored, "n of m turns" while it
 narrows ("n of m loaded · the filter applies to the loaded turns" while
 older pages remain, and then nothing loads by itself: the button does;
 the narrow dropdown keeps the selected turn listed).
@@ -1557,15 +1558,29 @@ Status words (U1) are one table, `src/lib/status.ts`, on every surface
 live table, the panel's turn list, picker and filter: `running`,
 `succeeded`, `failed`, `interrupted`, and two read-time words over the
 stored four — `cancelled` (failed with `error_type` cancelled, the cancel
-cause in its title) and `parked` (succeeded with calls awaiting a
-decision, "parked · 1 call awaiting a decision" in the run header) while
-nothing resumed it; once a later turn of its thread session exists it
-reads `parked → t2`, a link to that turn. A plain `Generate` resumed by
-another run has no link yet and reads parked. Each word has one colour
-role (`src/lib/palette.ts`'s `ROLE`), the same hex on both surfaces:
-running `--status-run`, succeeded `--status-ok`, failed `--status-bad`,
-interrupted and cancelled `--status-int`, parked `--status-parked`, a
-decided park muted; the live dot is the succeeded colour.
+cause in its title; the `[cancelled]` kind chip is not drawn beside it)
+and `parked` (succeeded with pending calls) while nothing is known to
+have resumed it; once a later turn of its thread session is among the
+rows read (or, from U13.1, the row's `resumed_by`) it reads
+`parked → t2`, a link to that turn (in the panel, a click on the word
+selects it). The certainty is in the detail, never the word: "1 call
+awaiting a decision" only where the resume was looked for and could not
+be missed — a session turn read against its session's whole turn list
+(the session page, the run header once its session loaded, the panel's
+session-scoped list); elsewhere (the runs list under a filter or sort,
+the live table, an experiment's grid) "1 call pending · no resume
+recorded here", and for a plain `Generate` "1 call pending · a resume,
+if any, is not linked yet". The runs list's status filter has `parked`
+too — the API is asked for succeeded and the loaded rows are kept where
+the word reads parked (its chip says so); the live table's filter
+matches a status word on the key, so `parked` never matches a decided
+park. Each word has one colour role (`src/lib/palette.ts`'s `ROLE`), the
+same hex on both surfaces: running `--status-run`, succeeded
+`--status-ok`, failed `--status-bad`, interrupted and cancelled
+`--status-int` (the words differ), parked `--status-parked`, a decided
+park muted; the live dot is the succeeded colour. A role's word is drawn
+in its ink (`INK`): the running word in `--status-run-ink`, 4.5:1 on
+both themes, the dot, pulse and pill border in `--status-run`.
 
 The runs list (light): status as a dot and a word, the error under a
 failed run's id, session/public-id/experiment filters that mirror the

@@ -103,6 +103,10 @@ export interface RunRow extends CostFields, DelegatedCostFields {
    * final_answer, max_steps, usage_limit, canceled, … (lib/stopped-by.ts
    * words it). Absent when none was recorded. */
   stopped_by?: string
+  /** The run that resumed this parked run (U13.1's stored link, not
+   * served yet): lib/status.ts reads it before looking for a later turn.
+   * Absent until the server serves it. */
+  resumed_by?: string
   /** A canceled run's weft.cancel.cause (studio.cancel,
    * thread.interrupted, deadline, …). Absent otherwise. */
   cancel_cause?: string

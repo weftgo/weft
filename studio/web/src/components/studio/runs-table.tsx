@@ -54,13 +54,15 @@ const roleClass = (s: Status) => statusClass(s.role)
 export function StatusDot({
   row,
   runs,
+  complete,
   decorative,
 }: {
   row: StatusRow
   runs?: readonly StatusRow[] | null
+  complete?: boolean
   decorative?: boolean
 }) {
-  const s = statusOf(row, runs)
+  const s = statusOf(row, runs, complete)
   // Alone, the dot is an image named for the status (a bare span may not
   // carry aria-label: axe aria-prohibited-attr); beside the status word
   // it is decoration.
@@ -75,24 +77,28 @@ export function StatusDot({
   )
 }
 
-/** Dot + word, in lib/status.ts's words (U1): parked while calls await
- * a decision and nothing resumed them, "parked → tN" — a link to the
+/** Dot + word, in lib/status.ts's words (U1): parked while nothing is
+ * known to have resumed the calls, "parked → tN" — a link to the
  * resume — once a turn in runs did, cancelled for a cancelled failure.
+ * complete: runs is the row's session's whole turn list (statusOf).
  * dotOnly keeps just the dot (with a title) for tight spots; detail
- * adds the header's "· 1 call awaiting a decision". */
+ * adds the header's "· 1 call awaiting a decision" (complete) or
+ * "· 1 call pending · no resume recorded here". */
 export function StatusChip({
   row,
   runs,
+  complete,
   dotOnly,
   detail,
 }: {
   row: StatusRow
   runs?: readonly StatusRow[] | null
+  complete?: boolean
   dotOnly?: boolean
   detail?: boolean
 }) {
-  if (dotOnly) return <StatusDot row={row} runs={runs} />
-  const s = statusOf(row, runs)
+  if (dotOnly) return <StatusDot row={row} runs={runs} complete={complete} />
+  const s = statusOf(row, runs, complete)
   const word = s.resumedBy ? (
     <Link
       {...runLink(s.resumedBy)}
@@ -110,7 +116,7 @@ export function StatusChip({
       title={s.hint}
       data-status={s.key}
     >
-      <StatusDot row={row} runs={runs} decorative />
+      <StatusDot row={row} runs={runs} complete={complete} decorative />
       {word}
       {detail && s.detail ? (
         <span className="text-muted-foreground">· {s.detail}</span>
@@ -566,7 +572,7 @@ export function RunsTable({
               </TableCell>
               <TableCell className="text-right font-mono whitespace-nowrap tabular-nums">
                 {run.status === "running" ? (
-                  <span className="text-status-run" title="elapsed so far">
+                  <span className="text-status-run-ink" title="elapsed so far">
                     {elapsed(run.started, clock)}…
                   </span>
                 ) : (

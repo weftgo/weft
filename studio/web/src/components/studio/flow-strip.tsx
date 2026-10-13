@@ -2,35 +2,34 @@
 // between them (results fed back into the next request), the end
 // state last. Click a pill to select that step in the trace.
 import type { FlowPill } from "@/lib/trace"
+import { statusOf } from "@/lib/status"
+import { statusClass } from "@/lib/status-class"
 
 export function FlowStrip({
   pills,
   runStatus,
+  errorType,
   selectedKey,
   onSelect,
 }: {
   pills: FlowPill[]
   runStatus: string
+  /** The run row's error_type: cancelled is worded as itself. */
+  errorType?: string
   selectedKey?: string
   onSelect: (key: string) => void
 }) {
   if (pills.length === 0) return null
+  // The end mark in lib/status.ts's word and role (U1-fix): a
+  // cancelled run reads cancelled, not failed.
+  const st = statusOf({ id: "", status: runStatus, error_type: errorType })
   const end =
-    runStatus === "failed"
-      ? "✗ failed"
-      : runStatus === "interrupted"
-        ? "✗ interrupted"
-        : runStatus === "running"
-          ? "…"
-          : "■ done"
-  const endTone =
-    runStatus === "succeeded"
-      ? "text-status-ok"
-      : runStatus === "running"
-        ? "text-status-run"
-        : runStatus === "failed"
-          ? "text-status-bad"
-          : "text-status-int"
+    st.key === "running"
+      ? "…"
+      : st.key === "succeeded"
+        ? "■ done"
+        : `✗ ${st.word}`
+  const endTone = statusClass(st.role).text
   return (
     <div
       className="flex items-stretch gap-1 overflow-x-auto pb-1"
@@ -77,7 +76,9 @@ export function FlowStrip({
                   failed
                 </span>
               ) : p.open ? (
-                <span className="ml-1.5 font-normal text-status-run">…</span>
+                <span className="ml-1.5 font-normal text-status-run-ink">
+                  …
+                </span>
               ) : null}
             </span>
             {p.gist ? (

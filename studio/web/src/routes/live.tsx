@@ -225,7 +225,7 @@ const CONN_WORDS: Record<Conn, { text: string; title: string; tone: string }> =
     live: {
       text: "● live",
       title: "the all stream is open: rows update as frames arrive",
-      tone: "text-status-run",
+      tone: "text-status-run-ink",
     },
     reconnecting: {
       text: "reconnecting…",
@@ -368,7 +368,8 @@ function StreamedRuns({
   }, [now, peek])
 
   const all = useMemo(() => rowsOf(state), [state])
-  const rows = all.filter((v) => matchesFilter(v.run, filter))
+  const held = all.map((v) => v.run)
+  const rows = all.filter((v) => matchesFilter(v.run, filter, held))
   const running = all.filter((v) => !ended(v.run)).length
   const c = CONN_WORDS[conn]
 

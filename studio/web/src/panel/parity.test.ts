@@ -50,6 +50,8 @@ import { renderWithRouter } from "../test/render"
 import { createElement } from "react"
 import { StepDiffTable } from "../components/studio/step-diff"
 import { SessionTurns } from "../components/studio/session-turns"
+import { RunsTable } from "../components/studio/runs-table"
+import { matchesFilter } from "../lib/live-rows"
 import {
   DIFF_COLUMNS,
   cellHole,
@@ -61,6 +63,7 @@ import type { DiffDoc } from "../lib/stepdiff"
 import { stepDiffBlock } from "./compare"
 import { FakeEventSource as StudioEventSource } from "../test/fake-event-source"
 import {
+  apiError,
   FakeStudio,
   golden,
   hiddenRefusal,
@@ -3019,7 +3022,11 @@ describe("one status vocabulary on both surfaces (U1)", () => {
     })
     // The transition: t1 reads parked until t2 exists.
     expect(statusOf(t1, [t1]).word).toBe("parked")
-    expect(statusOf(t1, [t1]).detail).toBe("1 call awaiting a decision")
+    // "awaiting a decision" only against the session's whole turn list.
+    expect(statusOf(t1, [t1], true).detail).toBe("1 call awaiting a decision")
+    expect(statusOf(t1, [t1]).detail).toBe(
+      "1 call pending · no resume recorded here"
+    )
     expect(statusOf(t1, [t1, t2])).toMatchObject({
       key: "resumed",
       word: "parked → t2",
@@ -3068,6 +3075,16 @@ describe("one status vocabulary on both surfaces (U1)", () => {
         `.weft-chip.weft-${key} { color: var(--weft-${ROLE[STATUS[key].role]}); border: 1px solid; }`
       )
     }
+    // The panel's list is session-scoped: an open park's resume was
+    // looked for, so its hint may say awaiting (U1-fix) — Studio's
+    // session page says the same below.
+    expect(chips["s_01-t4"].getAttribute("title")).toBe(
+      "2 calls awaiting a decision"
+    )
+    // The status word says cancelled: no [cancelled] kind chip beside it.
+    expect(
+      $(el, '[data-weft-run="s_01-t3"] [data-weft-chip="error-type"]')
+    ).toBeNull()
     // The picker leads with the same word.
     for (const o of all(el, ".weft-turn-pick option"))
       expect(o.textContent).toContain(
@@ -3087,6 +3104,17 @@ describe("one status vocabulary on both surfaces (U1)", () => {
     expect(
       all(el, ".weft-turn").map((r) => r.getAttribute("data-weft-run"))
     ).toEqual(["s_01-t3"])
+    // The decided park has its own pick (U1-fix).
+    const pick = all(el, ".weft-tq-status option").find(
+      (o) => (o as HTMLOptionElement).value === "resumed"
+    )
+    expect(pick?.textContent).toBe("parked → (decided)")
+    st.value = "resumed"
+    st.dispatchEvent(new Event("change", { bubbles: true }))
+    await settle()
+    expect(
+      all(el, ".weft-turn").map((r) => r.getAttribute("data-weft-run"))
+    ).toEqual(["s_01-t1"])
     el.remove()
     await settle()
     cleanup()
@@ -3098,6 +3126,11 @@ describe("one status vocabulary on both surfaces (U1)", () => {
         experiments: new Map(),
       })
     )
+    expect(
+      container
+        .querySelector('[data-turn="s_01-t4"] [data-status]')!
+        .getAttribute("title")
+    ).toBe("2 calls awaiting a decision")
     for (const [id, word] of Object.entries(WORDS)) {
       const c = container.querySelector(`[data-turn="${id}"] [data-status]`)!
       expect(c.textContent, id).toBe(word)
@@ -3110,5 +3143,148 @@ describe("one status vocabulary on both surfaces (U1)", () => {
         .querySelector('[data-turn="s_01-t1"] [data-resumed-by]')!
         .getAttribute("data-resumed-by")
     ).toBe("s_01-t2")
+  })
+
+  it("the runs list and the live filter never claim awaiting: the resume may be off the page (U1-fix)", async () => {
+    // A runs page that holds t4 alone (a filter, a sort): no claim.
+    const { container } = await renderWithRouter(
+      createElement(RunsTable, { runs: [t4] })
+    )
+    const c = container.querySelector("[data-status]")!
+    expect(c.textContent).toBe("parked")
+    expect(c.getAttribute("title")).toBe(
+      "2 calls pending · no resume recorded here"
+    )
+    cleanup()
+    // A page that holds t1 and t2: t1's resume is among them.
+    const two = await renderWithRouter(
+      createElement(RunsTable, { runs: [t2, t1] })
+    )
+    expect(
+      two.container
+        .querySelector('[data-status="resumed"] [data-resumed-by]')!
+        .getAttribute("data-resumed-by")
+    ).toBe("s_01-t2")
+    // The live filter matches on the key: "parked" is not t1 once t2 is
+    // held, "resumed" is.
+    expect(matchesFilter(t1, "parked", [t1, t2])).toBe(false)
+    expect(matchesFilter(t1, "resumed", [t1, t2])).toBe(true)
+    expect(matchesFilter(t1, "parked", [t1])).toBe(true)
+    expect(matchesFilter(t3, "failed")).toBe(false)
+    expect(matchesFilter(t3, "cancelled")).toBe(true)
+  })
+
+  it("the panel hands a decided park off to its resume turn (U1-fix)", async () => {
+    const fake = new FakeStudio()
+      .on("GET meta", { ...META, capabilities: ["ingest"] })
+      .on("GET sessions", { total: 1, sessions: [SESSION], next_before: null })
+      .on("GET runs", { total: 2, runs: [t2, t1], next_before: null })
+    for (const r of [t1, t2])
+      fake
+        .on(`GET runs/${r.id}`, { ...r, children: [], holes: [] })
+        .on(`GET runs/${r.id}/events`, pagedEvents(events(), { done: true }))
+        .on(
+          `GET runs/${r.id}/transcript`,
+          transcript([user("where is 42?")], [assistant("It shipped.")])
+        )
+        .on(`GET runs/${r.id}/spans`, { spans: [] })
+        .on(`GET runs/${r.id}/requests`, pagedRequests(OK_REQUESTS()))
+        .on(`GET runs/${r.id}/tools`, golden<object>("tools-ok"))
+    fake.install()
+    const el = await mount(ATTRS)
+    // The decided park's word is the hand-off (Studio links it).
+    const go = await vi.waitFor(
+      () => {
+        const b = $(el, '[data-weft-run="s_01-t1"] [data-weft-resume]')
+        expect(b).toBeTruthy()
+        return b!
+      },
+      { timeout: 5_000 }
+    )
+    expect(go.getAttribute("data-weft-resume")).toBe("s_01-t2")
+    expect(go.textContent).toBe("parked → t2")
+    // An open park's word is no hand-off.
+    expect($(el, '[data-weft-run="s_01-t2"] [data-weft-resume]')).toBeNull()
+    click(go)
+    await vi.waitFor(() =>
+      expect(
+        $(el, '.weft-turn[aria-current="true"]')?.getAttribute("data-weft-run")
+      ).toBe("s_01-t2")
+    )
+    el.remove()
+    await settle()
+  })
+
+  describe("the run header's detail and link (U1-fix)", () => {
+    const header = async (doc: Partial<RunRow>, session: object | null) => {
+      cleanup()
+      document.body.innerHTML = ""
+      stubBrowser()
+      vi.stubGlobal("scrollTo", vi.fn())
+      StudioEventSource.reset()
+      vi.stubGlobal("EventSource", StudioEventSource)
+      setStudioToken("")
+      const fake = serve({ doc, events: events() }, true)
+      if (session) fake.on("GET sessions/s_01", session)
+      renderApp(`/runs/${RUN}?view=story`)
+      await waitFor(() =>
+        expect(document.querySelector("[data-header-usage]")).toBeTruthy()
+      )
+      return () =>
+        document.querySelector(
+          '[data-status="parked"], [data-status="resumed"]'
+        )!
+    }
+
+    it("with the session loaded and no later turn: awaiting a decision", async () => {
+      const chip = await header(
+        { pending: 1 },
+        { ...SESSION, runs: [runRow({ pending: 1 })] }
+      )
+      await waitFor(() =>
+        expect(chip().textContent).toBe("parked· 1 call awaiting a decision")
+      )
+    })
+
+    it("with a later turn loaded: parked → t2, a link to it", async () => {
+      const chip = await header(
+        { pending: 1 },
+        {
+          ...SESSION,
+          runs: [runRow({ pending: 1 }), runRow({ id: "s_01-t2", turn: 2 })],
+        }
+      )
+      await waitFor(() =>
+        expect(
+          chip()
+            .querySelector("[data-resumed-by]")
+            ?.getAttribute("data-resumed-by")
+        ).toBe("s_01-t2")
+      )
+      expect(chip().textContent).toBe(
+        "parked → t2· 1 call decided · resumed in t2"
+      )
+    })
+
+    it("the session refused: pending, no claim", async () => {
+      const chip = await header({ pending: 1 }, () =>
+        apiError(500, "internal", "boom")
+      )
+      await settle()
+      expect(chip().textContent).toBe(
+        "parked· 1 call pending · no resume recorded here"
+      )
+    })
+
+    it("a plain Generate (rw.support-desk's shape): never awaiting", async () => {
+      const chip = await header(
+        { pending: 1, session_id: "", public_id: "", turn: 0 },
+        null
+      )
+      await settle()
+      expect(chip().textContent).toBe(
+        "parked· 1 call pending · a resume, if any, is not linked yet"
+      )
+    })
   })
 })

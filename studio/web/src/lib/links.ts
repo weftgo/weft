@@ -284,7 +284,9 @@ export interface RunsSearch {
   /** Free-text search terms (/api/search's q). */
   q?: string
   agent?: string
-  status?: "running" | "succeeded" | "failed" | "interrupted"
+  /** The stored four, or "parked" (U1-fix): read-time, applied to the
+   * loaded rows (lib/run-filters.ts). */
+  status?: "running" | "succeeded" | "failed" | "interrupted" | "parked"
   session?: string
   public_id?: string
   /** Experiments on/off: absent = all runs; "off" excludes playground

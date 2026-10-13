@@ -6,7 +6,7 @@ import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
 import { describe, expect, it } from "vitest"
 
-import { PALETTE, ROLE, STUDIO_NAMES } from "./palette"
+import { INK, PALETTE, ROLE, STUDIO_NAMES } from "./palette"
 import type { Role } from "./palette"
 import { STATUS } from "./status"
 import { ROLE_CLASS, studioVar } from "./status-class"
@@ -31,10 +31,17 @@ describe("status roles (U1)", () => {
   ] as const)
     it(`${theme}: each role is the same hex on both surfaces`, () => {
       const studio = studioTokens(sel)
-      for (const [role, t] of Object.entries(ROLE)) {
+      // A role's word ink (U1-fix) is held like its mark.
+      for (const [role, t] of [
+        ...Object.entries(ROLE),
+        ...Object.entries(ROLE).flatMap(([r, m]) =>
+          INK[m] ? [[`${r} word`, INK[m]] as const] : []
+        ),
+      ]) {
         // The same variable in both themes: Studio's class is one.
         const v = STUDIO_NAMES[theme][t]
-        expect(v, role).toBe(studioVar(role as Role))
+        if (!role.endsWith(" word"))
+          expect(v, role).toBe(studioVar(role as Role))
         expect(studio[v], `${role}: --${v}`).toMatch(/^#[0-9a-f]{6}$/)
         expect(PALETTE[theme][t], `${role}: --weft-${t} vs --${v}`).toBe(
           studio[v]
@@ -48,7 +55,7 @@ describe("status roles (U1)", () => {
       const studio = studioVar(role)
       expect(ROLE_CLASS[studio], studio).toEqual({
         dot: `bg-${studio}`,
-        text: `text-${studio}`,
+        text: `text-${STUDIO_NAMES.light[INK[ROLE[role]] ?? ROLE[role]]}`,
       })
     }
     // The live dot is the succeeded colour (UX-F-07).

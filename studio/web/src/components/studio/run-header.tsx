@@ -462,7 +462,12 @@ export function RunHeader({
             />
           </div>
         </div>
-        <StatusChip row={doc} runs={sess.data?.runs} detail />
+        <StatusChip
+          row={doc}
+          runs={sess.data?.runs}
+          complete={!!sess.data}
+          detail
+        />
         {/* Settling: the status word stays (it is the root's), the note
             says the story may stop short while its records trail. */}
         {doc.settling ? (
@@ -537,7 +542,7 @@ export function RunHeader({
           started {relativeTime(doc.started, now)} · {absoluteTime(doc.started)}
         </span>
         <span
-          className={doc.status === "running" ? "text-status-run" : ""}
+          className={doc.status === "running" ? "text-status-run-ink" : ""}
           title={
             doc.finished
               ? `finished ${absoluteTime(doc.finished)}`

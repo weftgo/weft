@@ -220,7 +220,9 @@ function CallPill({
 }) {
   if (state === "running")
     return (
-      <span className="font-mono text-[11px] text-status-run">running…</span>
+      <span className="font-mono text-[11px] text-status-run-ink">
+        running…
+      </span>
     )
   if (state === "never")
     return (
@@ -583,7 +585,9 @@ export function stepOutcome(step: FoldedStep, runStatus: string) {
     )
   }
   if (runStatus === "running")
-    return <span className="font-mono text-xs text-status-run">in flight…</span>
+    return (
+      <span className="font-mono text-xs text-status-run-ink">in flight…</span>
+    )
   return (
     <span
       className={`font-mono text-xs ${runStatus === "failed" ? "text-status-bad" : "text-ev-error"}`}

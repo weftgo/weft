@@ -395,6 +395,8 @@ describe("contrast (D2; D3's axe run confirms it)", () => {
     "info",
     "ok",
     "parked",
+    // The running word (U1-fix): status-run-ink, never status-run.
+    "status-run-ink",
   ]
   for (const t of ["light", "dark"] as Theme[])
     it(`${t}: body text 4.5:1, UI 3:1`, () => {
@@ -415,9 +417,9 @@ describe("contrast (D2; D3's axe run confirms it)", () => {
         ["info", "bg3", 3],
         ["faint", "bg2", 3],
         ["faint", "bg3", 3],
-        // The running role (U1): Studio's --status-run, a UI mark (the
-        // live dot, the pill's border) and the running chip's word — the
-        // colour Studio's own running word is drawn in, 3:1 on paper.
+        // The running role (U1): Studio's --status-run, a UI mark only
+        // (the live dot, its pulse, the pill's border), 3:1 on paper; its
+        // word is status-run-ink, held to 4.5:1 with the text above.
         ["status-run", "bg", 3],
         ["status-run", "bg2", 3],
       ]

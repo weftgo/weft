@@ -31,6 +31,8 @@ import {
 import type { LiveRowView } from "@/lib/live-rows"
 import { runLink, sessionLink } from "@/lib/links"
 import { notify } from "@/lib/notify"
+import { STATUS, statusOf } from "@/lib/status"
+import { statusClass } from "@/lib/status-class"
 import { Cost, useCostCapable } from "@/components/studio/cost"
 import { DerivedChip, HoleBadge } from "@/components/studio/hole-badge"
 import { StatusChip, UnknownTokens } from "@/components/studio/runs-table"
@@ -56,11 +58,14 @@ let presses = 0
 
 function CancelCell({
   run,
+  runs,
   cancelling,
   stale,
   onCancelling,
 }: {
   run: LiveRowView["run"]
+  /** The held rows: where a park's resume is looked for. */
+  runs: LiveRowView["run"][]
   cancelling: boolean
   /** A sent cancel saw no end in CANCEL_WAIT_MS. */
   stale: boolean
@@ -74,11 +79,13 @@ function CancelCell({
     return () => clearTimeout(t)
   }, [armed])
 
-  if (run.pending > 0)
+  // Parked while nothing is known to have resumed it (U1-fix): a
+  // decided park is over like any ended run.
+  if (statusOf(run, runs).key === "parked")
     return (
       <Link
         {...runLink(run.id)}
-        className="font-mono text-[11px] whitespace-nowrap text-status-int underline-offset-2 hover:underline"
+        className={`font-mono text-[11px] whitespace-nowrap ${statusClass(STATUS.parked.role).text} underline-offset-2 hover:underline`}
         title="a parked run is over until its pending calls are decided: approve or deny on its page"
       >
         parked — decide instead
@@ -210,7 +217,7 @@ export function LiveTable({
           runID: r.run.id,
           n: ++presses,
           outcome: "ended",
-          status: r.run.pending > 0 ? "parked" : r.run.status,
+          status: statusOf(r.run, runsAll).word,
         })
       }
     }
@@ -394,6 +401,7 @@ export function LiveTable({
                   {canCancel ? (
                     <CancelCell
                       run={r}
+                      runs={runsAll}
                       cancelling={waiting(r.id)}
                       stale={staleCancel(r.id)}
                       onCancelling={onCancelling}

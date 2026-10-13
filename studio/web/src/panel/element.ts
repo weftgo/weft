@@ -30,6 +30,7 @@ import {
 } from "../lib/honesty"
 import type { HoleMark, ParkedKind } from "../lib/honesty"
 import { FILTER_KEYS, statusOf } from "../lib/status"
+import type { Status } from "../lib/status"
 import {
   paramsLine,
   REQUEST_NO_RECORD_REASON,
@@ -2669,8 +2670,8 @@ export class WeftDevtools extends HTMLElement {
         "option",
         undefined,
         r.forked_from
-          ? `↳ replay of ${src ? turnLabel(src) || shortId(src.id) : "a turn"} · ${engineWord(r)} · ● ${statusOf(r, s.turns).word} · ${tail}`
-          : `${["●", statusOf(r, s.turns).word, turnLabel(r), clipTitle(t.text)].filter(Boolean).join(" ")} · ${tail}`,
+          ? `↳ replay of ${src ? turnLabel(src) || shortId(src.id) : "a turn"} · ${engineWord(r)} · ● ${this.st(r).word} · ${tail}`
+          : `${["●", this.st(r).word, turnLabel(r), clipTitle(t.text)].filter(Boolean).join(" ")} · ${tail}`,
         { value: r.id, "data-key": r.id, title: `${r.id}\n${t.full}` }
       ) as HTMLOptionElement
       o.selected = r.id === s.selected
@@ -3148,9 +3149,14 @@ export class WeftDevtools extends HTMLElement {
       "aria-label": "status",
     }) as HTMLSelectElement
     for (const v of ["", ...FILTER_KEYS]) {
-      const o = el("option", undefined, v || "any status", {
-        value: v,
-      }) as HTMLOptionElement
+      const o = el(
+        "option",
+        undefined,
+        v === "resumed" ? "parked → (decided)" : v || "any status",
+        {
+          value: v,
+        }
+      ) as HTMLOptionElement
       o.selected = v === f.status
       st.appendChild(o)
     }
@@ -3175,6 +3181,31 @@ export class WeftDevtools extends HTMLElement {
     return box
   }
 
+  /** st words a turn (lib/status.ts): a session-scoped list holds every
+   * turn newer than a loaded one, so its session turns' resumes were
+   * looked for. */
+  private st(r: RunRow) {
+    return statusOf(r, this.last.turns, !!this.last.session)
+  }
+
+  /** resumeChip is a turn's status chip; a decided park's hands off to
+   * its resume (U1-fix, Studio's link): a click selects that turn when
+   * loaded — the parked block's "resumed as" is the keyboard path. */
+  private resumeChip(c: Status): HTMLElement {
+    const n = el("span", `weft-chip weft-st weft-${c.key}`, c.word, {
+      title: c.hint,
+    })
+    const to = c.resumedBy
+    if (to && this.rowOf(to)) {
+      n.setAttribute("data-weft-resume", to)
+      on(n, "click", (e) => {
+        e.stopPropagation()
+        this.go(this.model?.select(to, true))
+      })
+    }
+    return n
+  }
+
   /** filtering: the turn filter narrows anything. */
   private filtering(): boolean {
     return this.tq.text.trim() !== "" || !!this.tq.status || this.tq.err
@@ -3183,8 +3214,9 @@ export class WeftDevtools extends HTMLElement {
   /** match is the turn filter's test of one row. */
   private match(r: RunRow): boolean {
     const f = this.tq
-    // "parked" is an open park only (U1): a decided one reads parked → tN.
-    if (f.status && statusOf(r, this.last.turns).key !== f.status) return false
+    // "parked" is open or not yet linked (U1-fix): a decided one reads
+    // parked → tN, the "parked → (decided)" pick.
+    if (f.status && this.st(r).key !== f.status) return false
     if (f.err && !r.err && r.status !== "failed") return false
     const q = f.text.trim().toLowerCase()
     return (
@@ -3237,7 +3269,7 @@ export class WeftDevtools extends HTMLElement {
     tab: string,
     turns: readonly RunRow[]
   ): HTMLElement {
-    const chip = statusOf(r, turns)
+    const chip = this.st(r)
     const row = el(
       "button",
       `weft-turn${r.id === selected ? " weft-sel" : ""}`,
@@ -3255,9 +3287,7 @@ export class WeftDevtools extends HTMLElement {
     // session page reads it.
     const t = turnTitle(prevTurn(r, turns), r)
     const row1 = el("div", "weft-row1", [
-      el("span", `weft-chip weft-st weft-${chip.key}`, chip.word, {
-        title: chip.hint,
-      }),
+      this.resumeChip(chip),
       el("span", "weft-ttl", `${turnLabel(r)} ${clipTitle(t.text)}`.trim(), {
         title: `${r.id}\n${t.full}`,
         "data-weft-title": t.kind,

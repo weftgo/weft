@@ -33,6 +33,8 @@ import {
   useRunRequests,
 } from "@/components/studio/step-request"
 import { runLink } from "@/lib/links"
+import { statusOf } from "@/lib/status"
+import { statusClass } from "@/lib/status-class"
 
 /** A child run as the parent's page knows it: the run document's
  * children row (RunDetail.Children), or — when only the step route's
@@ -81,6 +83,9 @@ export function SubagentBlock({
     child.status !== "running"
       ? child.status
       : (doc.data?.status ?? child.status)
+  // Its word and role (U1-fix): a parked child parked, a cancelled one
+  // cancelled, interrupted in its own role.
+  const st = statusOf({ ...child, ...doc.data, status: childStatus })
   // A child that ends while open: its words are in the transcript
   // (deltas are not stored), read again now — the copy read on expand
   // holds only what the child had said by then.
@@ -174,15 +179,10 @@ export function SubagentBlock({
         ) : null}
         <span
           data-child-status={childStatus}
-          className={`font-mono text-[11px] ${
-            childStatus === "running"
-              ? "text-status-run"
-              : childStatus === "succeeded"
-                ? "text-status-ok"
-                : "text-ev-error"
-          }`}
+          className={`font-mono text-[11px] ${statusClass(st.role).text}`}
+          title={st.hint}
         >
-          {childStatus === "running" ? "running…" : childStatus}
+          {childStatus === "running" ? "running…" : st.word}
         </span>
         <span
           className="font-mono text-[11px] text-muted-foreground"

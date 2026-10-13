@@ -81,7 +81,7 @@ function SessionPage() {
         </div>
         {/* The session's status is its newest turn's word (U1): parked
             while that turn's calls await a decision. */}
-        <StatusChip row={turns.at(-1) ?? s} runs={turns} detail />
+        <StatusChip row={turns.at(-1) ?? s} runs={turns} complete detail />
         <span className="text-xs text-muted-foreground">{s.agent}</span>
         <span className="font-mono text-[11px] text-faint">
           {s.turns} {s.turns === 1 ? "turn" : "turns"} ·{" "}

@@ -64,17 +64,15 @@ const WORDS: Record<string, string | undefined> = {
   model_requests_denied: "denied by the kill switch (WEFT_MODEL_REQUESTS)",
 }
 
-/** kindChip is the chip's bracketed text and title; null with no kind. */
+/** kindChip is the chip's bracketed text and title; null with no kind,
+ * and for cancelled (U1-fix): the status word beside it already says
+ * cancelled, error_type in its hint (lib/status.ts). */
 export function kindChip(
   errorType?: string
 ): { text: string; title: string; tone: KindWords["tone"] } | null {
   const k = errorKind(errorType)
-  return k
-    ? {
-        text: `[${k.word}]`,
-        title: `${k.hint} — error_type ${errorType}`,
-        tone: k.tone,
-      }
+  return k && errorType !== CANCELLED
+    ? { text: `[${k.word}]`, title: `${k.hint} — error_type ${errorType}`, tone: k.tone }
     : null
 }
 

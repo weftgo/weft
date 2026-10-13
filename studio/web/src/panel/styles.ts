@@ -4,7 +4,7 @@
 // the host page's CSS and the panel's never meet (§5.4). No webfonts
 // — the mono stack is the machine's own voice, and a dock must not
 // fetch fonts (V2: served by your backend, works offline).
-import { PALETTE, ROLE } from "../lib/palette"
+import { INK, PALETTE, ROLE } from "../lib/palette"
 import type { Theme } from "../lib/palette"
 import { STATUS } from "../lib/status"
 
@@ -24,7 +24,7 @@ const statusRules = () =>
   Object.entries(STATUS)
     .map(
       ([k, w]) =>
-        `.weft-chip.weft-${k} { color: var(--weft-${ROLE[w.role]}); border: 1px solid; }`
+        `.weft-chip.weft-${k} { color: var(--weft-${INK[ROLE[w.role]] ?? ROLE[w.role]}); border: 1px solid; }`
     )
     .join("\n")
 
@@ -118,7 +118,7 @@ export const PANEL_CSS = `
 .weft-dot.weft-run { background: var(--weft-status-run); animation: weft-pulse 1.2s infinite; }
 @keyframes weft-pulse { 50% { opacity: .35; } }
 .weft-fab-running { border-color: var(--weft-status-run); }
-.weft-fab-count { color: var(--weft-status-run); font-variant-numeric: tabular-nums; }
+.weft-fab-count { color: var(--weft-status-run-ink); font-variant-numeric: tabular-nums; }
 .weft-fab-pulse { animation: weft-pulse 1.2s infinite; }
 .weft-howto { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-bottom: 1px solid var(--weft-line); color: var(--weft-dim); }
 @media (prefers-reduced-motion: reduce) { .weft-dot.weft-run, .weft-fab-pulse { animation: none; } }
@@ -185,7 +185,6 @@ details.weft-collapsible[open] > summary::before { content: "\\25BE "; }
 .weft-chip.weft-tag { border: 1px solid var(--weft-line); color: var(--weft-dim); }
 .weft-unp { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--weft-dim); }
 .weft-tag[data-tone=bad] { color: var(--weft-err); }
-.weft-tag[data-tone=cancelled] { color: var(--weft-${ROLE.cancelled}); }
 .weft-note { color: var(--weft-dim); border: 1px dashed var(--weft-line); border-radius: var(--weft-radius);
   padding: 6px 9px; margin-bottom: 8px; }
 .weft-note.weft-warn { color: var(--weft-warn); border-color: var(--weft-warn); }

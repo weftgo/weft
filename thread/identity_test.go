@@ -103,6 +103,11 @@ func (s *idSpan) SetAttributes(attrs ...attribute.KeyValue) {
 
 func (s *idSpan) SetStatus(codes.Code, string) {}
 
+// SpanContext answers the zero context: the embedded interface is nil,
+// and a run whose tools execute reads it (a span-less observer would
+// otherwise panic, contained, and drop the step's messages).
+func (s *idSpan) SpanContext() trace.SpanContext { return trace.SpanContext{} }
+
 func (s *idSpan) RecordError(error, ...trace.EventOption) {}
 
 func (s *idSpan) attr(key string) string {
@@ -622,4 +627,60 @@ func TestRunIdentitySessionTitle(t *testing.T) {
 				mds[1]["weft.session.title"], mds[2]["weft.session.title"])
 		}
 	})
+}
+
+// A resume turn links the turn that parked (UX-E-17): its run carries
+// weft.resumed_from — the parked run's id, from the request entries —
+// weft.resume.calls, and the deciding actor as weft.approval.actor; the
+// parked turn's run carries none of them.
+func TestResumeTurnLinksTheParkedRun(t *testing.T) {
+	tp := &idTracerProvider{}
+	ctx := context.Background()
+	refund := core.Tool("refund", "Refund an order.", func(context.Context, struct{}) (string, error) {
+		return "refunded", nil
+	}, core.RequireApproval())
+	agent := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "rf1", Args: `{}`}),
+		wefttest.Say("done"),
+	), core.Name("linked"), core.TracerProvider(tp), refund)
+	s, err := thread.Create(ctx, thread.Memory(), agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t1, err := s.Send(ctx, core.User("refund it"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res1, err := t1.Wait()
+	if err != nil || len(res1.Pending) != 1 {
+		t.Fatalf("parked turn: %v, %v", res1, err)
+	}
+	d := thread.Approve(res1.Pending[0].ID)
+	d.Who = "ops@acme"
+	t2, err := s.Decide(ctx, d)
+	if err != nil || t2 == nil {
+		t.Fatalf("Decide: turn %v, err %v", t2, err)
+	}
+	if _, err := t2.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	invokes := tp.named("invoke_agent")
+	if len(invokes) != 2 {
+		t.Fatalf("invoke_agent spans = %d, want 2", len(invokes))
+	}
+	parked, resumed := invokes[0], invokes[1]
+	for _, k := range []string{"weft.resumed_from", "weft.resume.calls", "weft.approval.actor"} {
+		if v := parked.attr(k); v != "" {
+			t.Errorf("parked turn's run carries %s = %q", k, v)
+		}
+	}
+	if got := resumed.attr("weft.resumed_from"); got != t1.RunID() {
+		t.Errorf("weft.resumed_from = %q, want the parked run %q", got, t1.RunID())
+	}
+	if got, want := resumed.attr("weft.resume.calls"), res1.Pending[0].ID+"=approved"; got != want {
+		t.Errorf("weft.resume.calls = %q, want %q", got, want)
+	}
+	if got := resumed.attr("weft.approval.actor"); got != "ops@acme" {
+		t.Errorf("weft.approval.actor = %q, want ops@acme", got)
+	}
 }

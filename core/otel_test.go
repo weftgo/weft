@@ -577,8 +577,8 @@ func TestSpansEndOnCancellation(t *testing.T) {
 	}
 }
 
-// S9: a resumed call carries weft.tool.approved; a denied call produces
-// no span (it never executes).
+// S9: a resumed call carries weft.tool.approved; a denied call's
+// zero-length span is TestDeniedCallsHaveSpans'.
 func TestSpansResumedCalls(t *testing.T) {
 	tp := newRecProvider()
 	gated := core.Tool("gated", "Needs a human.", func(context.Context, struct{}) (string, error) {

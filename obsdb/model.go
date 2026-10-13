@@ -63,6 +63,10 @@ type Weft struct {
 	ToolSeq                          int64 // -1 when absent
 	Playground                       bool
 	ExperimentID, ForkedFrom         string
+	// ResumedFrom is a resuming run's weft.resumed_from (core.ResumeOf,
+	// UX-E-17): the parked run it resumes. On its invoke_agent span and
+	// run_start record only.
+	ResumedFrom string
 	// Reason is a messages record's weft.messages.reason: "" for
 	// transcript growth, "compacted" for a compaction view (ADR 0028
 	// §8), which is never counted or concatenated as transcript. A
@@ -99,6 +103,7 @@ const (
 	attrPlayground   = "weft.playground"
 	attrExperimentID = "weft.experiment.id"
 	attrForkedFrom   = "weft.forked_from"
+	attrResumedFrom  = "weft.resumed_from"
 
 	// ADR 0028 §8: the compaction view and the session marker.
 	attrMessagesReason  = "weft.messages.reason"
@@ -127,6 +132,7 @@ func DeriveSpan(s Span) Weft {
 		Playground:   attrBool(s.Attrs, attrPlayground),
 		ExperimentID: attr(s.Attrs, attrExperimentID),
 		ForkedFrom:   attr(s.Attrs, attrForkedFrom),
+		ResumedFrom:  attr(s.Attrs, attrResumedFrom),
 	}
 }
 
@@ -152,6 +158,7 @@ func DeriveRecord(r Record) Weft {
 		Playground:   attrBool(r.Attrs, attrPlayground),
 		ExperimentID: attr(r.Attrs, attrExperimentID),
 		ForkedFrom:   attr(r.Attrs, attrForkedFrom),
+		ResumedFrom:  attr(r.Attrs, attrResumedFrom),
 		Reason:       attrReason(r.Attrs),
 		Input:        attrBool(r.Attrs, attrMessagesInput),
 	}
@@ -300,6 +307,10 @@ var nonMetaAttr = map[string]struct{}{
 	attrRecord: {}, attrEventType: {}, attrEventPos: {}, attrDeltaPos: {},
 	attrMessagesIdx: {}, attrStepIndex: {}, attrToolSeq: {},
 	attrPlayground: {}, attrExperimentID: {}, attrForkedFrom: {},
+	attrResumedFrom:                {}, // U13.1: the run row's resumed_from column
+	"weft.resume.calls":            {}, // U13.1: a resume's decisions per parked call (on the spans)
+	"weft.tool.denied":             {}, // U13.1: a denied call's execute_tool span
+	"weft.tool.denied_kind":        {}, // U13.1: denied | no_decision
 	"weft.messages.count":          {},
 	"weft.messages.input":          {},
 	"weft.content":                 {},

@@ -768,7 +768,7 @@ func (l *link) dispatchDecision(ctx context.Context, d approvalDecision) {
 		return
 	}
 	defer func() { <-l.slots }()
-	status, finalRun, errText := l.resume(ctx, ps, runID, d.CommandID)
+	status, finalRun, errText := l.resume(ctx, ps, d.RunID, runID, d.CommandID)
 	if status == "failed" && finalRun == "" {
 		// A fork's Decide refused before its session recorded anything
 		// (resume reports no run): the boundary is still open, so the

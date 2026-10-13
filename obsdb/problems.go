@@ -143,6 +143,13 @@ func SpanProblems(s Span) []string {
 			out = append(out, key(problemFallbackAnswer))
 		}
 	case op == "execute_tool":
+		// A resume's denied call (UX-E-17): a zero-length span marked
+		// weft.tool.denied, error.type DENIED. Its root's
+		// weft.run.denied counts it already (denied_approval), so the
+		// span adds no token of its own — never counted twice.
+		if attrTrue(s.Attrs, "weft.tool.denied") {
+			break
+		}
 		if s.StatusCode == 2 {
 			switch et, _ := s.Attrs["error.type"].(string); et {
 			case "DENIED":
@@ -241,4 +248,16 @@ func CountProblems(tokens []string) Problems {
 		}
 	}
 	return p
+}
+
+// attrTrue reports a boolean attribute set true — a bool, or the
+// string "true" a store that stringifies attributes reads back.
+func attrTrue(m map[string]any, k string) bool {
+	switch v := m[k].(type) {
+	case bool:
+		return v
+	case string:
+		return v == "true"
+	}
+	return false
 }

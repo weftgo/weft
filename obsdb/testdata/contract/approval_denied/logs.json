@@ -140,7 +140,7 @@
                 }
               ],
               "body": {
-                "stringValue": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Refund order 1234.\"}]}]"
+                "stringValue": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Refund orders 1234 and 5678.\"}]}]"
               },
               "eventName": "weft.messages",
               "flags": 1,
@@ -420,7 +420,7 @@
                 }
               ],
               "body": {
-                "stringValue": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_call\",\"id\":\"call_1\",\"name\":\"refund_order\",\"args\":{\"order_id\":\"1234\"}}]}]"
+                "stringValue": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_call\",\"id\":\"call_1\",\"name\":\"refund_order\",\"args\":{\"order_id\":\"1234\"}},{\"type\":\"tool_call\",\"id\":\"call_2\",\"name\":\"refund_order\",\"args\":{\"order_id\":\"5678\"}}]}]"
               },
               "eventName": "weft.messages",
               "flags": 1,
@@ -515,7 +515,7 @@
                 {
                   "key": "weft.event.type",
                   "value": {
-                    "stringValue": "step_finish"
+                    "stringValue": "tool_start"
                   }
                 },
                 {
@@ -534,6 +534,74 @@
                   "key": "weft.event.pos",
                   "value": {
                     "intValue": "3"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_2"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "refund_order"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"tool_start\",\"run_id\":\"a1100000000000000000000000000001\",\"seq\":2,\"call_id\":\"call_2\",\"name\":\"refund_order\",\"args\":{\"order_id\":\"5678\"}}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790846340008000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790846340008000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "step_finish"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "4"
                   }
                 },
                 {
@@ -560,10 +628,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790846340008000000",
+              "observedTimeUnixNano": "1790846340009000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000001",
-              "timeUnixNano": "1790846340008000000",
+              "timeUnixNano": "1790846340009000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -601,19 +669,19 @@
                 {
                   "key": "weft.event.pos",
                   "value": {
-                    "intValue": "4"
+                    "intValue": "5"
                   }
                 }
               ],
               "body": {
-                "stringValue": "{\"type\":\"run_finish\",\"run_id\":\"a1100000000000000000000000000001\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"steps\":1,\"pending\":[{\"type\":\"tool_call\",\"id\":\"call_1\",\"name\":\"refund_order\",\"args\":{\"order_id\":\"1234\"}}],\"stopped_by\":\"parked\"}"
+                "stringValue": "{\"type\":\"run_finish\",\"run_id\":\"a1100000000000000000000000000001\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"steps\":1,\"pending\":[{\"type\":\"tool_call\",\"id\":\"call_1\",\"name\":\"refund_order\",\"args\":{\"order_id\":\"1234\"}},{\"type\":\"tool_call\",\"id\":\"call_2\",\"name\":\"refund_order\",\"args\":{\"order_id\":\"5678\"}}],\"stopped_by\":\"parked\"}"
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790846340009000000",
+              "observedTimeUnixNano": "1790846340010000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
               "spanId": "5ba0000000000001",
-              "timeUnixNano": "1790846340009000000",
+              "timeUnixNano": "1790846340010000000",
               "traceId": "7ace0000000000000000000000000001"
             },
             {
@@ -667,6 +735,18 @@
                   }
                 },
                 {
+                  "key": "weft.resume.calls",
+                  "value": {
+                    "stringValue": "call_1=denied,call_2=no_decision"
+                  }
+                },
+                {
+                  "key": "weft.resumed_from",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
                   "key": "weft.version",
                   "value": {
                     "stringValue": "v0.0.0-contract"
@@ -678,10 +758,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790846340010000000",
+              "observedTimeUnixNano": "1790846340011000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
-              "spanId": "5ba0000000000004",
-              "timeUnixNano": "1790846340010000000",
+              "spanId": "5ba0000000000005",
+              "timeUnixNano": "1790846340011000000",
               "traceId": "7ace0000000000000000000000000002"
             },
             {
@@ -736,14 +816,14 @@
                 }
               ],
               "body": {
-                "stringValue": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Refund order 1234.\"}]},{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_call\",\"id\":\"call_1\",\"name\":\"refund_order\",\"args\":{\"order_id\":\"1234\"}}]}]"
+                "stringValue": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Refund orders 1234 and 5678.\"}]},{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_call\",\"id\":\"call_1\",\"name\":\"refund_order\",\"args\":{\"order_id\":\"1234\"}},{\"type\":\"tool_call\",\"id\":\"call_2\",\"name\":\"refund_order\",\"args\":{\"order_id\":\"5678\"}}]}]"
               },
               "eventName": "weft.messages",
               "flags": 1,
-              "observedTimeUnixNano": "1790846340011000000",
+              "observedTimeUnixNano": "1790846340012000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
-              "spanId": "5ba0000000000004",
-              "timeUnixNano": "1790846340011000000",
+              "spanId": "5ba0000000000005",
+              "timeUnixNano": "1790846340012000000",
               "traceId": "7ace0000000000000000000000000002"
             },
             {
@@ -792,14 +872,14 @@
                 }
               ],
               "body": {
-                "stringValue": "[{\"role\":\"tool\",\"content\":[{\"type\":\"tool_result\",\"call_id\":\"call_1\",\"name\":\"refund_order\",\"content\":\"DENIED: over the limit\",\"is_error\":true}]}]"
+                "stringValue": "[{\"role\":\"tool\",\"content\":[{\"type\":\"tool_result\",\"call_id\":\"call_1\",\"name\":\"refund_order\",\"content\":\"DENIED: over the limit\",\"is_error\":true},{\"type\":\"tool_result\",\"call_id\":\"call_2\",\"name\":\"refund_order\",\"content\":\"DENIED: no decision\",\"is_error\":true}]}]"
               },
               "eventName": "weft.messages",
               "flags": 1,
-              "observedTimeUnixNano": "1790846340012000000",
+              "observedTimeUnixNano": "1790846340013000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
-              "spanId": "5ba0000000000004",
-              "timeUnixNano": "1790846340012000000",
+              "spanId": "5ba0000000000005",
+              "timeUnixNano": "1790846340013000000",
               "traceId": "7ace0000000000000000000000000002"
             },
             {
@@ -852,10 +932,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790846340013000000",
+              "observedTimeUnixNano": "1790846340014000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
-              "spanId": "5ba0000000000004",
-              "timeUnixNano": "1790846340013000000",
+              "spanId": "5ba0000000000005",
+              "timeUnixNano": "1790846340014000000",
               "traceId": "7ace0000000000000000000000000002"
             },
             {
@@ -902,10 +982,10 @@
               },
               "eventName": "weft.prompt",
               "flags": 1,
-              "observedTimeUnixNano": "1790846340014000000",
+              "observedTimeUnixNano": "1790846340015000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
-              "spanId": "5ba0000000000005",
-              "timeUnixNano": "1790846340014000000",
+              "spanId": "5ba0000000000006",
+              "timeUnixNano": "1790846340015000000",
               "traceId": "7ace0000000000000000000000000002"
             },
             {
@@ -952,10 +1032,10 @@
               },
               "eventName": "weft.tools",
               "flags": 1,
-              "observedTimeUnixNano": "1790846340015000000",
+              "observedTimeUnixNano": "1790846340016000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
-              "spanId": "5ba0000000000005",
-              "timeUnixNano": "1790846340015000000",
+              "spanId": "5ba0000000000006",
+              "timeUnixNano": "1790846340016000000",
               "traceId": "7ace0000000000000000000000000002"
             },
             {
@@ -1020,10 +1100,10 @@
               },
               "eventName": "weft.request",
               "flags": 1,
-              "observedTimeUnixNano": "1790846340016000000",
+              "observedTimeUnixNano": "1790846340017000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
-              "spanId": "5ba0000000000005",
-              "timeUnixNano": "1790846340016000000",
+              "spanId": "5ba0000000000006",
+              "timeUnixNano": "1790846340017000000",
               "traceId": "7ace0000000000000000000000000002"
             },
             {
@@ -1066,14 +1146,14 @@
                 }
               ],
               "body": {
-                "stringValue": "{\"type\":\"text_delta\",\"run_id\":\"a1100000000000000000000000000002\",\"text\":\"The refund was declined.\"}"
+                "stringValue": "{\"type\":\"text_delta\",\"run_id\":\"a1100000000000000000000000000002\",\"text\":\"The refunds were declined.\"}"
               },
               "eventName": "weft.delta",
               "flags": 1,
-              "observedTimeUnixNano": "1790846340017000000",
+              "observedTimeUnixNano": "1790846340018000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
-              "spanId": "5ba0000000000004",
-              "timeUnixNano": "1790846340017000000",
+              "spanId": "5ba0000000000005",
+              "timeUnixNano": "1790846340018000000",
               "traceId": "7ace0000000000000000000000000002"
             },
             {
@@ -1122,14 +1202,14 @@
                 }
               ],
               "body": {
-                "stringValue": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"The refund was declined.\"}]}]"
+                "stringValue": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"The refunds were declined.\"}]}]"
               },
               "eventName": "weft.messages",
               "flags": 1,
-              "observedTimeUnixNano": "1790846340018000000",
+              "observedTimeUnixNano": "1790846340019000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
-              "spanId": "5ba0000000000004",
-              "timeUnixNano": "1790846340018000000",
+              "spanId": "5ba0000000000005",
+              "timeUnixNano": "1790846340019000000",
               "traceId": "7ace0000000000000000000000000002"
             },
             {
@@ -1200,10 +1280,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790846340019000000",
+              "observedTimeUnixNano": "1790846340020000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
-              "spanId": "5ba0000000000004",
-              "timeUnixNano": "1790846340019000000",
+              "spanId": "5ba0000000000005",
+              "timeUnixNano": "1790846340020000000",
               "traceId": "7ace0000000000000000000000000002"
             },
             {
@@ -1250,10 +1330,10 @@
               },
               "eventName": "weft.event",
               "flags": 1,
-              "observedTimeUnixNano": "1790846340020000000",
+              "observedTimeUnixNano": "1790846340021000000",
               "severityNumber": "SEVERITY_NUMBER_INFO",
-              "spanId": "5ba0000000000004",
-              "timeUnixNano": "1790846340020000000",
+              "spanId": "5ba0000000000005",
+              "timeUnixNano": "1790846340021000000",
               "traceId": "7ace0000000000000000000000000002"
             }
           ],

@@ -85,8 +85,28 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	if cfg.systemSet {
 		instructionsHash = hashText(cfg.system)
 	}
+	// A resume's pending calls — the calls the earlier run left without
+	// a result — are found before the run span starts: the span and the
+	// run_start record report each one's decision (weft.resume.calls),
+	// beside the run ResumeOf named (weft.resumed_from).
+	var resume []ToolCallPart
+	var skip map[string]bool
+	if len(cfg.decisions) > 0 {
+		resume = unresolvedCalls(cfg.messages)
+		skip = make(map[string]bool, len(resume))
+		for _, c := range resume {
+			skip[c.ID] = true
+		}
+	}
+	resumeCalls := resumeCallsAttr(resume, cfg.decisions)
 	var runExtra []attribute.KeyValue
 	runExtra = append(runExtra, cfg.overrideAttrs()...)
+	if resumeCalls != "" {
+		runExtra = append(runExtra, attrResumeCalls.String(resumeCalls))
+	}
+	if cfg.resumedFrom != "" {
+		runExtra = append(runExtra, attrResumedFrom.String(cfg.resumedFrom))
+	}
 	runExtra = append(runExtra, attrInstructionsHash.String(instructionsHash))
 	if c, ok := CallFromContext(ctx); ok {
 		runExtra = append(runExtra, attrParentRunID.String(c.RunID), attrParentCallID.String(c.CallID))
@@ -111,6 +131,8 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		runID:        cfg.id,
 		agent:        a.name,
 		manifestHash: a.manifestHash,
+		resumedFrom:  cfg.resumedFrom,
+		resumeCalls:  resumeCalls,
 		obs:          &a.obs,
 		panics:       &a.tapPanics,
 	}
@@ -166,16 +188,9 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// anything a caller feeds back in (a partial transcript, a resumed
 	// session) becomes valid provider input. When the caller supplies
 	// approval decisions, the calls left pending by the earlier run are
-	// exempt from repair: this run resolves them itself, below.
-	var resume []ToolCallPart
-	var skip map[string]bool
-	if len(cfg.decisions) > 0 {
-		resume = unresolvedCalls(cfg.messages)
-		skip = make(map[string]bool, len(resume))
-		for _, c := range resume {
-			skip[c.ID] = true
-		}
-	}
+	// exempt from repair: this run resolves them itself, below (resume
+	// and skip are computed before the run span starts, which reports
+	// them as weft.resume.calls).
 	res = &RunResult{ID: cfg.id, Messages: repair(cfg.messages, skip)}
 	seq := new(atomic.Int64)
 	// The OnRunEnd observers report the run's outcome exactly once —
@@ -1199,10 +1214,10 @@ func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolC
 		}
 		// A resolved call never runs: the decision's content is the
 		// result, verbatim, capped as any result would be (the cap is
-		// a transcript rule, not an execution rule). It follows the
-		// denied path — a result in the tool message, no span, no
-		// events, Call.Approved never set (ADR 0007's 2026-09-22
-		// amendment).
+		// a transcript rule, not an execution rule) — a result in the
+		// tool message, no span, no events, Call.Approved never set
+		// (ADR 0007's 2026-09-22 amendment); weft.resume.calls names
+		// it resolved.
 		if d, ok := cfg.decisions[c.ID]; ok && d.resolved {
 			resultCap := a.resultCap
 			if def, _ := findTool(tools, c.Name); def != nil && def.capSet {
@@ -1220,9 +1235,9 @@ func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolC
 			results = append(results, r)
 			continue
 		}
-		reason := "no decision"
+		reason, kind := "no decision", deniedKindNoDecision
 		if d, ok := cfg.decisions[c.ID]; ok {
-			reason = d.reason
+			reason, kind = d.reason, deniedKindDenied
 		}
 		results = append(results, ToolResultPart{
 			CallID:  c.ID,
@@ -1230,11 +1245,46 @@ func (a *Agent) resolvePending(ctx context.Context, cfg runConfig, calls []ToolC
 			IsError: true,
 			Content: deniedResult(reason),
 		})
-		// A denied call has no span and no event (ADR 0007): the run's
+		// A denied call never ran: no event (ADR 0007), a zero-length
+		// execute_tool span naming its kind (UX-E-17), and the run's
 		// root counts it (weft.run.denied).
+		a.obs.deniedTool(ctx, cfg.id, c, kind)
 		rec.noteDenied()
 	}
 	return results, pending, sub, nil
+}
+
+// resumeCallsAttr renders weft.resume.calls: each pending call of a
+// resume, in call order, as <call id>=<kind> joined by commas — kind
+// approved (Approve), denied (Deny), resolved (Resolve, ResolveError)
+// or no_decision (left undecided: rule 12's "DENIED: no decision").
+// "" when the run resumes no pending call. Ids and enums only, never a
+// reason or a resolved payload (ADR 0016).
+func resumeCallsAttr(calls []ToolCallPart, decisions map[string]decision) string {
+	if len(calls) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for i, c := range calls {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		kind := deniedKindNoDecision
+		if d, ok := decisions[c.ID]; ok {
+			switch {
+			case d.approved:
+				kind = "approved"
+			case d.resolved:
+				kind = "resolved"
+			default:
+				kind = deniedKindDenied
+			}
+		}
+		b.WriteString(c.ID)
+		b.WriteByte('=')
+		b.WriteString(kind)
+	}
+	return b.String()
 }
 
 // unresolvedCalls returns the tool calls of the last assistant message

@@ -828,6 +828,7 @@ func (x *runExport) identityAttrs() map[string]any {
 	set("weft.public_id", r.PublicID)
 	set("weft.experiment.id", r.ExperimentID)
 	set("weft.forked_from", r.ForkedFrom)
+	set("weft.resumed_from", r.ResumedFrom)
 	if r.Turn != 0 {
 		m["weft.turn"] = strconv.Itoa(r.Turn)
 	}

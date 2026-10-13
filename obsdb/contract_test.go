@@ -104,20 +104,25 @@ type contractRun struct {
 	ID string `json:"id"`
 	// Derived is §9's mark: the reader built the row from stock spans
 	// (obsdb.RunRow.Derived); omitted for every weft run.
-	Derived          bool              `json:"derived,omitempty"`
-	ParentRunID      string            `json:"parent_run_id,omitempty"`
-	ParentCallID     string            `json:"parent_call_id,omitempty"`
-	TraceID          string            `json:"trace_id,omitempty"`
-	Service          string            `json:"service,omitempty"`
-	Agent            string            `json:"agent,omitempty"`
-	Provider         string            `json:"provider,omitempty"`
-	Model            string            `json:"model,omitempty"`
-	SessionID        string            `json:"session_id,omitempty"`
-	PublicID         string            `json:"public_id,omitempty"`
-	Turn             int               `json:"turn,omitempty"`
-	Playground       bool              `json:"playground,omitempty"`
-	ExperimentID     string            `json:"experiment_id,omitempty"`
-	ForkedFrom       string            `json:"forked_from,omitempty"`
+	Derived      bool   `json:"derived,omitempty"`
+	ParentRunID  string `json:"parent_run_id,omitempty"`
+	ParentCallID string `json:"parent_call_id,omitempty"`
+	TraceID      string `json:"trace_id,omitempty"`
+	Service      string `json:"service,omitempty"`
+	Agent        string `json:"agent,omitempty"`
+	Provider     string `json:"provider,omitempty"`
+	Model        string `json:"model,omitempty"`
+	SessionID    string `json:"session_id,omitempty"`
+	PublicID     string `json:"public_id,omitempty"`
+	Turn         int    `json:"turn,omitempty"`
+	Playground   bool   `json:"playground,omitempty"`
+	ExperimentID string `json:"experiment_id,omitempty"`
+	ForkedFrom   string `json:"forked_from,omitempty"`
+	// ResumedFrom / ResumedBy are the approval link (§6, U13.1): the
+	// run a resume names (weft.resumed_from) and, on the parked run,
+	// the run that resumed it (read time).
+	ResumedFrom      string            `json:"resumed_from,omitempty"`
+	ResumedBy        string            `json:"resumed_by,omitempty"`
 	ManifestHash     string            `json:"manifest_hash,omitempty"`
 	WeftVersion      string            `json:"weft_version,omitempty"`
 	Meta             map[string]string `json:"meta,omitempty"`
@@ -196,6 +201,11 @@ type contractRPC struct {
 	// A counted RETRY's place in its budget (§3, U32.1).
 	Retry       int64 `json:"retry,omitempty"`
 	RetryBudget int64 `json:"retry_budget,omitempty"`
+	// The approval marks (§3): a call resumed by Approve, and a
+	// resume's denied call's zero-length span (U13.1).
+	Approved   bool   `json:"approved,omitempty"`
+	Denied     bool   `json:"denied,omitempty"`
+	DeniedKind string `json:"denied_kind,omitempty"`
 }
 
 func TestContract(t *testing.T) {
@@ -342,6 +352,7 @@ func observeRuns(t *testing.T, db obsdb.DB) []contractRun {
 			Agent: r.Agent, Provider: r.Provider, Model: r.Model,
 			SessionID: r.SessionID, PublicID: r.PublicID, Turn: r.Turn,
 			Playground: r.Playground, ExperimentID: r.ExperimentID, ForkedFrom: r.ForkedFrom,
+			ResumedFrom: r.ResumedFrom, ResumedBy: r.ResumedBy,
 			ManifestHash: r.ManifestHash, WeftVersion: r.WeftVersion, Meta: r.Meta,
 			Started: stamp(r.Started), LastSeen: stamp(r.LastSeen), Status: r.Status, Error: r.Err,
 			Steps: r.Steps, Pending: r.Pending, StopReason: r.StopReason,
@@ -424,11 +435,21 @@ func spanSteps(spans []obsdb.Span) ([]contractLLM, []contractRPC) {
 				TruncatedBytes: intAttr(s.Attrs, "weft.tool.truncated_bytes", 0),
 				Retry:          intAttr(s.Attrs, "weft.tool.retry", 0),
 				RetryBudget:    intAttr(s.Attrs, "weft.tool.retry_budget", 0),
+				Approved:       boolAttr(s.Attrs, "weft.tool.approved"),
+				Denied:         boolAttr(s.Attrs, "weft.tool.denied"),
+				DeniedKind:     strAttr(s.Attrs, "weft.tool.denied_kind"),
 			})
 		}
 	}
 	sort.SliceStable(chat, func(i, j int) bool { return chat[i].Step < chat[j].Step })
-	sort.SliceStable(tools, func(i, j int) bool { return tools[i].Seq < tools[j].Seq })
+	// By seq, then call id: a resume's denied calls have no seq (-1),
+	// and the backends store spans in no order a reader can rely on.
+	sort.SliceStable(tools, func(i, j int) bool {
+		if tools[i].Seq != tools[j].Seq {
+			return tools[i].Seq < tools[j].Seq
+		}
+		return tools[i].CallID < tools[j].CallID
+	})
 	return chat, tools
 }
 
@@ -443,6 +464,18 @@ func statusWord(code int) string {
 }
 
 func strAttr(m map[string]any, k string) string { s, _ := m[k].(string); return s }
+
+// boolAttr reads a boolean attribute as either backend returns it: a
+// bool, or ClickHouse's stringified "true".
+func boolAttr(m map[string]any, k string) bool {
+	switch v := m[k].(type) {
+	case bool:
+		return v
+	case string:
+		return v == "true"
+	}
+	return false
+}
 
 func intAttr(m map[string]any, k string, def int64) int64 {
 	switch v := m[k].(type) {
@@ -1750,21 +1783,23 @@ func genCases() []genCase {
 		},
 		{
 			name: "approval_denied",
-			desc: "a RequireApproval call parked, then the resume denies it (core.Deny): the parked run reads pending 1; the resumed run has no execute_tool span for the denied call (ADR 0007) and its invoke_agent span carries weft.run.denied 1 — problems denied 1",
+			desc: "two RequireApproval calls parked, then the resume (core.ResumeOf the parked run) denies one (core.Deny) and leaves the other undecided: the parked run reads pending 2 and resumed_by the resume; the resume reads resumed_from the parked run, a zero-length execute_tool span per denied call (weft.tool.denied, denied_kind denied / no_decision, error.type DENIED) and its invoke_agent span carries weft.resume.calls and weft.run.denied 2 — problems denied 2, the denied spans not counted again",
 			dest: content,
 			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
 				refund := core.Tool("refund_order", "Refund an order.", func(_ context.Context, in lookupIn) (string, error) {
 					return "refunded " + in.OrderID, nil
 				}, core.RequireApproval())
 				agt := pipelineAgent(p, "support", wefttest.Script(
-					wefttest.ToolCalls(wefttest.Call{Name: "refund_order", Args: `{"order_id":"1234"}`}),
-					wefttest.Say("The refund was declined.")),
+					wefttest.ToolCalls(wefttest.Call{Name: "refund_order", Args: `{"order_id":"1234"}`},
+						wefttest.Call{Name: "refund_order", Args: `{"order_id":"5678"}`}),
+					wefttest.Say("The refunds were declined.")),
 					core.Instructions("You are a support agent."), refund)
-				first := mustRun(t, ctx, agt, core.Prompt("Refund order 1234."))
-				if len(first.Pending) != 1 {
-					t.Fatalf("want one pending call, got %d", len(first.Pending))
+				first := mustRun(t, ctx, agt, core.Prompt("Refund orders 1234 and 5678."))
+				if len(first.Pending) != 2 {
+					t.Fatalf("want two pending calls, got %d", len(first.Pending))
 				}
-				second := mustRun(t, ctx, agt, core.Messages(first.Messages...), core.Deny(first.Pending[0].ID, "over the limit"))
+				second := mustRun(t, ctx, agt, core.Messages(first.Messages...),
+					core.Deny(first.Pending[0].ID, "over the limit"), core.ResumeOf(first.ID))
 				return []string{first.ID, second.ID}
 			},
 		},
@@ -1796,6 +1831,38 @@ func genCases() []genCase {
 					t.Fatalf("want a model-retries *RunError, got %v", err)
 				}
 				return []string{re.Result.ID}
+			},
+		},
+		{
+			name: "resumed",
+			desc: "rw.support-desk's shape: a RequireApproval refund and a note parked (pending 2), then a GenerateAs resumes them with core.Approve, core.Resolve, core.ResumeOf the parked run and weft.approval.actor metadata: the approved call's execute_tool span carries weft.tool.approved, the resolved one has no span; the resume's root carries weft.resume.calls (approved, resolved) and weft.resumed_from; the actor lands in the resume's meta; the parked run reads resumed_by the resume",
+			dest: content,
+			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+				type verdict struct {
+					Refunded bool `json:"refunded"`
+				}
+				refund := core.Tool("issue_refund", "Refund an order.", func(_ context.Context, in lookupIn) (string, error) {
+					return "refunded " + in.OrderID, nil
+				}, core.RequireApproval())
+				note := core.Tool("add_note", "Note the ticket.", func(_ context.Context, in lookupIn) (string, error) {
+					return "noted " + in.OrderID, nil
+				}, core.RequireApproval())
+				agt := pipelineAgent(p, "support-desk", wefttest.Script(
+					wefttest.ToolCalls(wefttest.Call{Name: "issue_refund", Args: `{"order_id":"1234"}`},
+						wefttest.Call{Name: "add_note", Args: `{"order_id":"1234"}`}),
+					wefttest.ToolCalls(wefttest.Call{Name: "submit_output", Args: `{"refunded":true}`})),
+					core.Instructions("You are a support agent."), core.Output[verdict](), refund, note)
+				first := mustRun(t, ctx, agt, core.Prompt("Refund order 1234."))
+				if len(first.Pending) != 2 {
+					t.Fatalf("want two pending calls, got %d", len(first.Pending))
+				}
+				v, second, err := core.GenerateAs[verdict](ctx, agt, core.Messages(first.Messages...),
+					core.Approve(first.Pending[0].ID), core.Resolve(first.Pending[1].ID, "noted by hand"),
+					core.ResumeOf(first.ID), core.Metadata(map[string]string{"weft.approval.actor": "ops@acme"}))
+				if err != nil || !v.Refunded {
+					t.Fatalf("resume: verdict %+v, err %v", v, err)
+				}
+				return []string{first.ID, second.ID}
 			},
 		},
 	}

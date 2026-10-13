@@ -192,6 +192,7 @@ func RunFrame(r RunRow) Frame {
 		RunID: r.ID, ParentRunID: r.ParentRunID, ParentCallID: r.ParentCallID,
 		SessionID: r.SessionID, PublicID: r.PublicID, Turn: r.Turn, Agent: r.Agent,
 		Playground: r.Playground, ExperimentID: r.ExperimentID, ForkedFrom: r.ForkedFrom,
+		ResumedFrom: r.ResumedFrom,
 	}
 	return Frame{Kind: FrameRun, Run: &r, Weft: w}
 }

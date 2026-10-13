@@ -638,9 +638,32 @@ func TestPlaygroundApprovalVerbs(t *testing.T) {
 	if err := json.Unmarshal([]byte(approveResp), &cmdID); err != nil {
 		t.Fatal(err)
 	}
-	e.waitCommand(t, cmdID.CommandID, "finished")
+	fin := e.waitCommand(t, cmdID.CommandID, "finished")
 	if !refundRan.Load() {
 		t.Error("approve (continue) did not run the handler for real")
+	}
+	// The resume names the parked run (core.ResumeOf, UX-E-17) and the
+	// decider (the command's actor: "local" on setup A's loopback): the
+	// resume's row reads resumed_from, the parked run's resumed_by.
+	var resumed struct {
+		RunID string `json:"run_id"`
+	}
+	if err := json.Unmarshal([]byte(fin), &resumed); err != nil || resumed.RunID == "" || resumed.RunID == st2.RunID {
+		t.Fatalf("approve's finished row = %s", fin)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		_, parkedDoc := e.api(t, http.MethodGet, "/api/runs/"+st2.RunID, "")
+		_, resumeDoc := e.api(t, http.MethodGet, "/api/runs/"+resumed.RunID, "")
+		if strings.Contains(parkedDoc, `"resumed_by":"`+resumed.RunID+`"`) &&
+			strings.Contains(resumeDoc, `"resumed_from":"`+st2.RunID+`"`) &&
+			strings.Contains(resumeDoc, `"weft.approval.actor":"local"`) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("the approval link never landed:\nparked %s\nresume %s", parkedDoc, resumeDoc)
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
 }
 

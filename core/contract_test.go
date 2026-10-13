@@ -5496,9 +5496,9 @@ func TestToolFailureKinds(t *testing.T) {
 
 // TestRunSpanCountsDeniedCalls pins weft.run.denied (record contract
 // §3, U4): a resume's denied calls — an explicit Deny and a call left
-// undecided — have no span and no event (ADR 0007), so the resumed
-// run's invoke_agent span counts them; a run that denied nothing
-// carries no attribute.
+// undecided — have no event (ADR 0007) and a zero-length denied span
+// each (TestDeniedCallsHaveSpans); the resumed run's invoke_agent span
+// counts them; a run that denied nothing carries no attribute.
 func TestRunSpanCountsDeniedCalls(t *testing.T) {
 	gated := core.Tool("gated", "Needs approval.", func(context.Context, struct{}) (string, error) {
 		return "ran", nil
@@ -5590,5 +5590,177 @@ func TestFallbackAttemptCarriesLayer(t *testing.T) {
 	tp.mu.Unlock()
 	if !slices.Equal(layers, []string{"", "fallback"}) {
 		t.Errorf("attempt layers = %q, want [\"\" \"fallback\"]", layers)
+	}
+}
+
+// TestResumeLinksTheParkedRun pins the approval link (record contract
+// §3/§4, UX-E-17), in rw.support-desk's shape: a plain Generate parks
+// a RequireApproval refund, and a GenerateAs resumes it with the
+// transcript, Approve, a Resolve for its sibling, core.ResumeOf(the
+// parked run's id) and the approver as weft.approval.actor metadata.
+// The resuming run's invoke_agent span and run_start record carry
+// weft.resumed_from (the parked id) and weft.resume.calls (each parked
+// call's decision kind, in call order); the actor rides as metadata on
+// both; the parked run carries none of them. Reporting only: the
+// transcript the model sees is the one a resume without ResumeOf
+// produces.
+func TestResumeLinksTheParkedRun(t *testing.T) {
+	type verdict struct {
+		Refunded bool `json:"refunded"`
+	}
+	refund := core.Tool("issue_refund", "Refund an order.", func(context.Context, struct{}) (string, error) {
+		return "refunded", nil
+	}, core.RequireApproval())
+	note := core.Tool("add_note", "Note the ticket.", func(context.Context, struct{}) (string, error) {
+		return "noted", nil
+	}, core.RequireApproval())
+	script := func() core.Model {
+		return wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "issue_refund", ID: "rf1"}, wefttest.Call{Name: "add_note", ID: "n1"}),
+			wefttest.ToolCalls(wefttest.Call{Name: "submit_output", ID: "out", Args: `{"refunded":true}`}),
+		)
+	}
+	tp, lp := newRecProvider(), newRecLogProvider()
+	agt := core.New(script(), core.Name("support-desk"), core.Output[verdict](),
+		core.TracerProvider(tp), core.LoggerProvider(lp), refund, note)
+	first, err := agt.Generate(context.Background(), core.Prompt("Refund order 1234."))
+	if err != nil || len(first.Pending) != 2 {
+		t.Fatalf("first run: pending %d, err %v; want 2 parked", len(first.Pending), err)
+	}
+	v, second, err := core.GenerateAs[verdict](context.Background(), agt,
+		core.Messages(first.Messages...), core.Approve("rf1"), core.Resolve("n1", "noted by hand"),
+		core.ResumeOf(first.ID), core.Metadata(map[string]string{"weft.approval.actor": "ops@acme"}))
+	if err != nil || !v.Refunded {
+		t.Fatalf("resume: verdict %+v, err %v", v, err)
+	}
+
+	roots := map[string]map[string]string{}
+	tp.mu.Lock()
+	for _, s := range tp.spans {
+		if s.name == "invoke_agent support-desk" {
+			a := s.attrsMap()
+			roots[a["weft.run.id"]] = a
+		}
+	}
+	tp.mu.Unlock()
+	parked, resumer := roots[first.ID], roots[second.ID]
+	for _, k := range []string{"weft.resumed_from", "weft.resume.calls", "weft.approval.actor"} {
+		if v, ok := parked[k]; ok {
+			t.Errorf("parked run's span carries %s = %q", k, v)
+		}
+	}
+	for k, want := range map[string]string{
+		"weft.resumed_from":   first.ID,
+		"weft.resume.calls":   "rf1=approved,n1=resolved",
+		"weft.approval.actor": "ops@acme",
+	} {
+		if got := resumer[k]; got != want {
+			t.Errorf("resuming run's span %s = %q, want %q", k, got, want)
+		}
+	}
+	var starts int
+	for _, r := range lp.ofKind(t, "event") {
+		if r.attr("weft.event.type") != "run_start" {
+			continue
+		}
+		starts++
+		switch r.attr("weft.run.id") {
+		case first.ID:
+			if r.attr("weft.resumed_from") != "" || r.attr("weft.resume.calls") != "" {
+				t.Errorf("parked run_start carries the link: %q / %q", r.attr("weft.resumed_from"), r.attr("weft.resume.calls"))
+			}
+		case second.ID:
+			if r.attr("weft.resumed_from") != first.ID || r.attr("weft.resume.calls") != "rf1=approved,n1=resolved" ||
+				r.attr("weft.approval.actor") != "ops@acme" {
+				t.Errorf("resuming run_start = from %q, calls %q, actor %q", r.attr("weft.resumed_from"),
+					r.attr("weft.resume.calls"), r.attr("weft.approval.actor"))
+			}
+		}
+	}
+	if starts != 2 {
+		t.Errorf("run_start records = %d, want 2", starts)
+	}
+
+	// Model-visible behaviour is unchanged (rule 5): the same resume
+	// without the link yields the same transcript.
+	plain := core.New(script(), core.Name("support-desk"), core.Output[verdict](), refund, note)
+	p1, err := plain.Generate(context.Background(), core.Prompt("Refund order 1234."))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, p2, err := core.GenerateAs[verdict](context.Background(), plain,
+		core.Messages(p1.Messages...), core.Approve("rf1"), core.Resolve("n1", "noted by hand"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ := json.Marshal(second.Messages)
+	b, _ := json.Marshal(p2.Messages)
+	if string(a) != string(b) {
+		t.Errorf("ResumeOf changed the transcript:\n%s\n%s", a, b)
+	}
+}
+
+// TestDeniedCallsHaveSpans pins the denied execute_tool span (record
+// contract §3, UX-E-17): each call a resume denies — an explicit Deny
+// and a call left undecided — gets a zero-length execute_tool span
+// carrying weft.tool.denied, weft.tool.denied_kind (denied |
+// no_decision), error.type DENIED and status Error, never the reason;
+// the resume's weft.resume.calls names both; weft.run.denied still
+// counts them.
+func TestDeniedCallsHaveSpans(t *testing.T) {
+	gated := core.Tool("gated", "Needs approval.", func(context.Context, struct{}) (string, error) {
+		return "ran", nil
+	}, core.RequireApproval())
+	tp := newRecProvider()
+	agt := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "gated", ID: "c1"}, wefttest.Call{Name: "gated", ID: "c2"}),
+		wefttest.Say("ok"),
+	), core.TracerProvider(tp), core.Name("appr"), gated)
+	first, err := agt.Generate(context.Background(), core.Prompt("x"))
+	if err != nil || len(first.Pending) != 2 {
+		t.Fatalf("first run: pending %d, err %v; want 2 parked", len(first.Pending), err)
+	}
+	second, err := agt.Generate(context.Background(), core.Messages(first.Messages...), core.Deny("c1", "not today"), core.ResumeOf(first.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := map[string]string{}
+	tp.mu.Lock()
+	for _, s := range tp.spans {
+		a := s.attrsMap()
+		switch {
+		case s.name == "invoke_agent appr" && a["weft.run.id"] == second.ID:
+			if a["weft.resume.calls"] != "c1=denied,c2=no_decision" || a["weft.run.denied"] != "2" || a["weft.resumed_from"] != first.ID {
+				t.Errorf("resume root: calls %q, denied %q, from %q", a["weft.resume.calls"], a["weft.run.denied"], a["weft.resumed_from"])
+			}
+		case s.name == "execute_tool gated" && a["weft.tool.denied"] == "true":
+			kinds[a["gen_ai.tool.call.id"]] = a["weft.tool.denied_kind"]
+			if a["weft.run.id"] != second.ID || a["error.type"] != "DENIED" || s.status != codes.Error {
+				t.Errorf("denied span %s: run %q, error.type %q, status %v", a["gen_ai.tool.call.id"], a["weft.run.id"], a["error.type"], s.status)
+			}
+			if _, ok := a["weft.tool.seq"]; ok {
+				t.Errorf("denied span %s carries weft.tool.seq: it never ran", a["gen_ai.tool.call.id"])
+			}
+			if s.startTS.IsZero() || !s.startTS.Equal(s.endTS) {
+				t.Errorf("denied span %s: start %v end %v, want zero length", a["gen_ai.tool.call.id"], s.startTS, s.endTS)
+			}
+			for k, v := range a {
+				if strings.Contains(v, "not today") {
+					t.Errorf("denied span %s carries the reason in %s", a["gen_ai.tool.call.id"], k)
+				}
+			}
+		}
+	}
+	tp.mu.Unlock()
+	if kinds["c1"] != "denied" || kinds["c2"] != "no_decision" || len(kinds) != 2 {
+		t.Errorf("denied spans = %v, want c1 denied, c2 no_decision", kinds)
+	}
+	// The model still sees the two DENIED results, unchanged.
+	tool := second.Messages[2]
+	if r := tool.Content[0].(core.ToolResultPart); r.Content != "DENIED: not today" || !r.IsError {
+		t.Errorf("c1 result = %+v", r)
+	}
+	if r := tool.Content[1].(core.ToolResultPart); r.Content != "DENIED: no decision" || !r.IsError {
+		t.Errorf("c2 result = %+v", r)
 	}
 }

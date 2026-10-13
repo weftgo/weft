@@ -365,17 +365,25 @@ type RunRow struct {
 	Turn                                                       int
 	Playground                                                 bool
 	ExperimentID, ForkedFrom                                   string
-	Meta                                                       map[string]string
-	Started                                                    time.Time
-	Finished                                                   *time.Time
-	LastSeen                                                   time.Time
-	Status                                                     Status
-	Err                                                        string
-	Steps, Pending                                             int
-	StopReason                                                 string
-	Usage                                                      core.Usage
-	EventCount, MessageCount                                   int64
-	DeltaCount                                                 int64 // deltas are counted, never stored (Q4)
+	// ResumedFrom is the run this one resumes — its weft.resumed_from
+	// (core.ResumeOf; thread and weft/runtime pass it, an app passes
+	// the parked RunResult.ID) — and ResumedBy, on a parked run, the
+	// run that resumed it: the largest run id whose ResumedFrom names
+	// this run, derived at read time on both backends, so a resumer
+	// stored before or after the parked run links it alike (record
+	// contract §6, UX-E-17). "" when none.
+	ResumedFrom, ResumedBy   string
+	Meta                     map[string]string
+	Started                  time.Time
+	Finished                 *time.Time
+	LastSeen                 time.Time
+	Status                   Status
+	Err                      string
+	Steps, Pending           int
+	StopReason               string
+	Usage                    core.Usage
+	EventCount, MessageCount int64
+	DeltaCount               int64 // deltas are counted, never stored (Q4)
 	// ADR 0028 §10: run_start's weft.instructions.hash ("" on a run
 	// written before the request record — RequestsHole reads the
 	// table), request index 0's weft.catalog.hash ("" when it offered

@@ -36,6 +36,10 @@ type runConfig struct {
 	// approve, deny with a reason, or resolve with content
 	// (Approve, Deny, Resolve, ResolveError).
 	decisions map[string]decision
+	// resumedFrom is ResumeOf's run id: the parked run this one
+	// resumes, stamped as weft.resumed_from on the invoke_agent span
+	// and the run_start record. "" when the caller named none.
+	resumedFrom string
 	// steer is the run's steering source, installed by Steering; nil on
 	// an ordinary run, and never inherited by a Subagent's child runs.
 	steer SteerFunc
@@ -111,7 +115,10 @@ func (o denyOption) applyRun(c *runConfig) { c.decide(o.id, decision{reason: o.r
 // Deny resolves a pending call without running it: the model sees an
 // error result reading "DENIED: <reason>" and the loop continues.
 // Pending calls given neither Approve nor Deny are denied with the
-// reason "no decision" ("DENIED: no decision").
+// reason "no decision" ("DENIED: no decision"). A denied call never
+// runs and emits no event; its execute_tool span is zero-length,
+// marked weft.tool.denied with weft.tool.denied_kind denied or
+// no_decision (never the reason, which is the transcript's).
 func Deny(callID, reason string) RunOption { return denyOption{callID, reason} }
 
 type resolveOption struct {
@@ -148,6 +155,30 @@ func Resolve(callID, content string) RunOption {
 func ResolveError(callID, content string) RunOption {
 	return resolveOption{id: callID, content: content, isError: true}
 }
+
+type resumeOfOption string
+
+func (o resumeOfOption) applyRun(c *runConfig) {
+	if o != "" {
+		c.resumedFrom = string(o)
+	}
+}
+
+// ResumeOf names the run this run resumes: the parked run whose
+// RunResult.ID the caller holds when it passes that run's transcript
+// back with Approve, Deny or Resolve. The core cannot infer it — a
+// transcript carries no run id — so the caller states it, and the
+// run's invoke_agent span and run_start record carry it as
+// weft.resumed_from, the link a reader follows from a decided park to
+// the run that resumed it (record contract §3; Studio's run row reads
+// resumed_from, and resumed_by on the parked run). Reporting only: the
+// option changes nothing the model sees and nothing the loop does —
+// the decisions resume the calls, with or without it. weft/thread
+// passes it on every resume turn, weft/runtime on every resume it
+// runs; an app resuming a plain Generate passes res.ID. Empty values
+// are ignored; the last ResumeOf wins. A Subagent's child run does not
+// inherit it.
+func ResumeOf(runID string) RunOption { return resumeOfOption(runID) }
 
 type runIDOption string
 

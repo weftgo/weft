@@ -29,7 +29,8 @@ const runColumns = `RunId, ParentRunID, ParentCallID, TraceID, Agent, Provider, 
 	Failed, Err, Steps, Pending, StopReason, InputTokens, OutputTokens,
 	CachedInputTokens, CacheWriteTokens, ReasoningTokens, DeltaCount,
 	InstructionsHash, CatalogHash, RequestCount, Derived, RootEnded,
-	StoppedBy, CancelCause, EventsEmitted, MessagesEmitted, ErrorType, Problems`
+	StoppedBy, CancelCause, EventsEmitted, MessagesEmitted, ErrorType, Problems,
+	ResumedFrom`
 
 // runAggregates is the same list as a GROUP BY RunId select: max for
 // identity strings, flags, usage and last-seen; min for started — the
@@ -49,7 +50,8 @@ const runAggregates = `RunId, max(ParentRunID) AS ParentRunID, max(ParentCallID)
 	max(RequestCount) AS RequestCount, max(Derived) AS Derived, max(RootEnded) AS RootEnded,
 	max(StoppedBy) AS StoppedBy, max(CancelCause) AS CancelCause,
 	max(EventsEmitted) AS EventsEmitted, max(MessagesEmitted) AS MessagesEmitted,
-	max(ErrorType) AS ErrorType, groupUniqArrayArray(Problems) AS Problems`
+	max(ErrorType) AS ErrorType, groupUniqArrayArray(Problems) AS Problems,
+	max(ResumedFrom) AS ResumedFrom`
 
 // statusCase is the four-row table in SQL over weft_runs' columns: it
 // must agree with obsdb.DeriveStatus, whose test pins the boundaries —
@@ -275,7 +277,7 @@ func (d *DB) queryRunRows(ctx context.Context, now time.Time, sql string, args .
 			&s.InTok, &s.OutTok, &s.CachedTok, &s.CacheWriteTok, &s.ReasonTok, &s.DeltaCount,
 			&s.InstructionsHash, &s.CatalogHash, &s.RequestCount, &s.Derived, &s.RootEnded,
 			&s.StoppedBy, &s.CancelCause, &s.EventsEmitted, &s.MessagesEmitted,
-			&s.ErrorType, &s.Problems); err != nil {
+			&s.ErrorType, &s.Problems, &s.ResumedFrom); err != nil {
 			return nil, err
 		}
 		row, err := s.row(now)
@@ -308,6 +310,7 @@ type runScan struct {
 	EventsEmitted, MessagesEmitted                     int64
 	ErrorType                                          string
 	Problems                                           []string
+	ResumedFrom                                        string
 }
 
 func (s *runScan) row(now time.Time) (obsdb.RunRow, error) {
@@ -317,7 +320,8 @@ func (s *runScan) row(now time.Time) (obsdb.RunRow, error) {
 		ManifestHash: s.ManifestHash, WeftVersion: s.WeftVersion, Service: s.Service,
 		SessionID: s.SessionID, PublicID: s.PublicID, Turn: int(s.Turn),
 		Playground: s.Playground, ExperimentID: s.ExperimentID, ForkedFrom: s.ForkedFrom,
-		Started: s.Started.UTC(), LastSeen: s.LastSeen.UTC(),
+		ResumedFrom: s.ResumedFrom,
+		Started:     s.Started.UTC(), LastSeen: s.LastSeen.UTC(),
 		Err: s.Err, Steps: int(s.Steps), Pending: int(s.Pending), StopReason: s.StopReason,
 		Usage: core.Usage{
 			InputTokens: s.InTok, OutputTokens: s.OutTok,
@@ -387,9 +391,43 @@ func (d *DB) fillCounts(ctx context.Context, rows []*obsdb.RunRow) error {
 		if err := d.fillPreviewsOf(ctx, ids[:n], byID); err != nil {
 			return err
 		}
+		if err := d.fillResumedByOf(ctx, ids[:n], byID); err != nil {
+			return err
+		}
 		ids = ids[n:]
 	}
 	return nil
+}
+
+// fillResumedByOf loads ResumedBy (contract §6, U13.1): for each of the
+// rows' runs, the largest run id whose ResumedFrom names it — derived
+// here rather than stored, so a resumer ingested before or after the
+// parked run links it alike and no row is written for a parked run not
+// stored (migration 0019). idx_resumed_from skips the granules no
+// resumer names.
+func (d *DB) fillResumedByOf(ctx context.Context, ids []string, byID map[string]*obsdb.RunRow) error {
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(ids)), ",")
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		args[i] = id
+	}
+	rs, err := d.conn.Query(ctx,
+		"SELECT ResumedFrom, max(RunId) FROM weft_runs WHERE ResumedFrom IN ("+placeholders+") GROUP BY ResumedFrom",
+		args...)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = rs.Close() }()
+	for rs.Next() {
+		var from, by string
+		if err := rs.Scan(&from, &by); err != nil {
+			return err
+		}
+		if row, ok := byID[from]; ok {
+			row.ResumedBy = by
+		}
+	}
+	return rs.Err()
 }
 
 func (d *DB) fillCountsOf(ctx context.Context, ids []string, byID map[string]*obsdb.RunRow) error {
@@ -1377,6 +1415,10 @@ var contractKeys = []string{
 	// U32.1: a RETRY's count and budget, the run's observer panics
 	// (migration 0018's restatement of both views).
 	"weft.tool.retry", "weft.tool.retry_budget", "weft.tap.panics",
+	// U13.1: the approval link — the run row's resumed_from, a resume's
+	// decisions per parked call, a denied call's span marks (migration
+	// 0019's restatement of both views).
+	"weft.resumed_from", "weft.resume.calls", "weft.tool.denied", "weft.tool.denied_kind",
 }
 
 // unmarshalAttrs decodes a JSON column keeping integral numbers as

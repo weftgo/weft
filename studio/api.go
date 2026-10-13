@@ -109,26 +109,33 @@ func dbError(w http.ResponseWriter, r *http.Request, noun, id string, err error)
 // runRow is every list and detail: the identity chain, timing, the
 // derived status, usage and the counts (S4.3's RunRow).
 type runRow struct {
-	ID           string            `json:"id"`
-	ParentRunID  string            `json:"parent_run_id"`
-	ParentCallID string            `json:"parent_call_id"`
-	TraceID      string            `json:"trace_id"`
-	Agent        string            `json:"agent"`
-	Model        core.ModelInfo    `json:"model"`
-	ManifestHash string            `json:"manifest_hash"`
-	WeftVersion  string            `json:"weft_version"`
-	Service      string            `json:"service"`
-	SessionID    string            `json:"session_id"`
-	PublicID     string            `json:"public_id"`
-	Turn         int               `json:"turn"`
-	Playground   bool              `json:"playground"`
-	ExperimentID string            `json:"experiment_id"`
-	ForkedFrom   string            `json:"forked_from"`
-	Meta         map[string]string `json:"meta"`
-	Started      time.Time         `json:"started"`
-	Finished     *time.Time        `json:"finished"`
-	LastSeen     time.Time         `json:"last_seen"`
-	Status       string            `json:"status"` // derived: a stale running row reads "interrupted"
+	ID           string         `json:"id"`
+	ParentRunID  string         `json:"parent_run_id"`
+	ParentCallID string         `json:"parent_call_id"`
+	TraceID      string         `json:"trace_id"`
+	Agent        string         `json:"agent"`
+	Model        core.ModelInfo `json:"model"`
+	ManifestHash string         `json:"manifest_hash"`
+	WeftVersion  string         `json:"weft_version"`
+	Service      string         `json:"service"`
+	SessionID    string         `json:"session_id"`
+	PublicID     string         `json:"public_id"`
+	Turn         int            `json:"turn"`
+	Playground   bool           `json:"playground"`
+	ExperimentID string         `json:"experiment_id"`
+	ForkedFrom   string         `json:"forked_from"`
+	// ResumedFrom is the parked run this run resumes (its
+	// weft.resumed_from, core.ResumeOf) and ResumedBy, on a parked run,
+	// the run that resumed it (obsdb.RunRow; docs/record-contract.md
+	// §6, UX-E-17). Absent when none: the status word reads
+	// "parked → <resumer>" from resumed_by (lib/status.ts).
+	ResumedFrom string            `json:"resumed_from,omitempty"`
+	ResumedBy   string            `json:"resumed_by,omitempty"`
+	Meta        map[string]string `json:"meta"`
+	Started     time.Time         `json:"started"`
+	Finished    *time.Time        `json:"finished"`
+	LastSeen    time.Time         `json:"last_seen"`
+	Status      string            `json:"status"` // derived: a stale running row reads "interrupted"
 	// Settling marks a run whose root span is stored (status already
 	// succeeded or failed from it) but whose run_finish record is not,
 	// heard from within 30 s by its own timestamps (obsdb.RunRow.Settling,
@@ -229,6 +236,8 @@ func row(rec obsdb.RunRow) runRow {
 		Playground:    rec.Playground,
 		ExperimentID:  rec.ExperimentID,
 		ForkedFrom:    rec.ForkedFrom,
+		ResumedFrom:   rec.ResumedFrom,
+		ResumedBy:     rec.ResumedBy,
 		Meta:          rec.Meta,
 		Started:       rec.Started,
 		LastSeen:      rec.LastSeen,

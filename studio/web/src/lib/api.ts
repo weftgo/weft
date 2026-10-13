@@ -83,6 +83,10 @@ export interface RunRow extends CostFields, DelegatedCostFields {
   playground: boolean
   experiment_id: string
   forked_from: string
+  /** The parked run this run resumes (weft.resumed_from, core.ResumeOf;
+   * U13.1). Absent when it resumes nothing. Its reverse, resumed_by on
+   * the parked run, is the status word's link (lib/status.ts). */
+  resumed_from?: string
   meta: Record<string, string>
   started: string
   finished: string | null

@@ -1248,7 +1248,10 @@ func Approve(callID string) RunOption { return core.Approve(callID) }
 // Deny resolves a pending call without running it: the model sees an
 // error result reading "DENIED: <reason>" and the loop continues.
 // Pending calls given neither Approve nor Deny are denied with the
-// reason "no decision" ("DENIED: no decision").
+// reason "no decision" ("DENIED: no decision"). A denied call never
+// runs and emits no event; its execute_tool span is zero-length,
+// marked weft.tool.denied with weft.tool.denied_kind denied or
+// no_decision (never the reason, which is the transcript's).
 func Deny(callID, reason string) RunOption { return core.Deny(callID, reason) }
 
 // Resolve resumes a pending call with a result computed outside the
@@ -1272,6 +1275,22 @@ func Resolve(callID, content string) RunOption { return core.Resolve(callID, con
 // model sees the content on an error result, the shape a failed
 // execution would have produced.
 func ResolveError(callID, content string) RunOption { return core.ResolveError(callID, content) }
+
+// ResumeOf names the run this run resumes: the parked run whose
+// RunResult.ID the caller holds when it passes that run's transcript
+// back with Approve, Deny or Resolve. The core cannot infer it — a
+// transcript carries no run id — so the caller states it, and the
+// run's invoke_agent span and run_start record carry it as
+// weft.resumed_from, the link a reader follows from a decided park to
+// the run that resumed it (record contract §3; Studio's run row reads
+// resumed_from, and resumed_by on the parked run). Reporting only: the
+// option changes nothing the model sees and nothing the loop does —
+// the decisions resume the calls, with or without it. weft/thread
+// passes it on every resume turn, weft/runtime on every resume it
+// runs; an app resuming a plain Generate passes res.ID. Empty values
+// are ignored; the last ResumeOf wins. A Subagent's child run does not
+// inherit it.
+func ResumeOf(runID string) RunOption { return core.ResumeOf(runID) }
 
 // RunID sets the run's identifier instead of generating one — for
 // replays, idempotent retries, and correlating with an outer system's own

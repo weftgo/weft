@@ -940,7 +940,12 @@ func parkAndDecideBy(t *testing.T, breakpoint bool, decide func(s *thread.Sessio
 func TestSessionsDecisionIsTheAppsDecision(t *testing.T) {
 	ctx := context.Background()
 	own := parkAndDecide(t, func(s *thread.Session, _ *thread.Turn, callID string) *thread.Turn {
-		turn, err := s.Decide(ctx, thread.Approve(callID))
+		// The same declared decider as the runtime's command (its
+		// Actor): the resume's weft.approval.actor (UX-E-17) is the
+		// decider's, so the two paths stamp the same metadata.
+		d := thread.Approve(callID)
+		d.Who = "devtools"
+		turn, err := s.Decide(ctx, d)
 		if err != nil {
 			t.Fatal(err)
 		}

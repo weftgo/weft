@@ -20,7 +20,7 @@ import (
 
 const runColumns = `run_id, parent_run_id, parent_call_id, trace_id, agent, provider, model,
 	manifest_hash, weft_version, service, session_id, public_id, turn,
-	playground, experiment_id, forked_from, meta,
+	playground, experiment_id, forked_from, resumed_from, meta,
 	started_ns, finished_ns, last_seen_ns, finished_ok, failed, err,
 	steps, pending, stop_reason,
 	input_tokens, output_tokens, cached_input_tokens, cache_write_tokens, reasoning_tokens,
@@ -33,6 +33,14 @@ const runColumns = `run_id, parent_run_id, parent_call_id, trace_id, agent, prov
 // obsdb.PromptPreviewRunes characters (” for a run with none).
 const promptPreviewColumn = `COALESCE((SELECT substr(run_search.prompt, 1, 200) FROM run_search
 	WHERE run_search.run_id = runs.run_id), '')`
+
+// resumedByColumn is the run row's resumed_by (contract §6, U13.1):
+// the largest run id whose resumed_from names this run — derived at
+// read time, so a resumer stored before or after the parked run links
+// it alike. The partial index runs_resumed_from (0018) serves it; its
+// condition is stated beside the equality, as sqlite needs.
+const resumedByColumn = `COALESCE((SELECT MAX(rb.run_id) FROM runs AS rb
+	WHERE rb.resumed_from = runs.run_id AND rb.resumed_from <> ''), '')`
 
 // statusExpr is the four-row table in SQL: it must agree with
 // obsdb.DeriveStatus, whose test pins the boundaries — succeeded on a
@@ -248,7 +256,7 @@ func (d *DB) queryRunRows(ctx context.Context, where string, args []any, now tim
 }
 
 func (d *DB) runRowsQuery(ctx context.Context, where string, args []any) ([]runRowScan, error) {
-	rs, err := d.reads.QueryContext(ctx, `SELECT `+runColumns+`, `+promptPreviewColumn+` FROM runs WHERE `+where, args...)
+	rs, err := d.reads.QueryContext(ctx, `SELECT `+runColumns+`, `+promptPreviewColumn+`, `+resumedByColumn+` FROM runs WHERE `+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -258,14 +266,14 @@ func (d *DB) runRowsQuery(ctx context.Context, where string, args []any) ([]runR
 		var r runRowScan
 		if err := rs.Scan(&r.ID, &r.ParentRunID, &r.ParentCallID, &r.TraceID, &r.Agent, &r.Provider,
 			&r.Model, &r.ManifestHash, &r.WeftVersion, &r.Service, &r.SessionID, &r.PublicID, &r.Turn,
-			&r.Playground, &r.ExperimentID, &r.ForkedFrom, &r.Meta,
+			&r.Playground, &r.ExperimentID, &r.ForkedFrom, &r.ResumedFrom, &r.Meta,
 			&r.Started, &r.Finished, &r.LastSeen, &r.FinishedOK, &r.Failed, &r.Err,
 			&r.Steps, &r.Pending, &r.StopReason,
 			&r.InTok, &r.OutTok, &r.CachedTok, &r.CacheWrite, &r.ReasonTok,
 			&r.EventCount, &r.DeltaCount, &r.MessageCount,
 			&r.InstructionsHash, &r.CatalogHash, &r.RequestCount, &r.Derived, &r.RootEnded,
 			&r.StoppedBy, &r.CancelCause, &r.EventsEmitted, &r.MessagesEmitted,
-			&r.ErrorType, &r.Problems, &r.PromptPreview); err != nil {
+			&r.ErrorType, &r.Problems, &r.PromptPreview, &r.ResumedBy); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -280,6 +288,7 @@ type runRowScan struct {
 	Turn                                              int
 	Playground                                        bool
 	ExperimentID, ForkedFrom, Meta                    string
+	ResumedFrom, ResumedBy                            string
 	Started, LastSeen                                 int64
 	Finished                                          sql.NullInt64
 	FinishedOK, Failed                                bool
@@ -303,6 +312,7 @@ func scanRunRow(r runRowScan, now time.Time) (obsdb.RunRow, error) {
 		ManifestHash: r.ManifestHash, WeftVersion: r.WeftVersion, Service: r.Service,
 		SessionID: r.SessionID, PublicID: r.PublicID, Turn: r.Turn,
 		Playground: r.Playground, ExperimentID: r.ExperimentID, ForkedFrom: r.ForkedFrom,
+		ResumedFrom: r.ResumedFrom, ResumedBy: r.ResumedBy,
 		Started:  time.Unix(0, r.Started).UTC(),
 		LastSeen: time.Unix(0, r.LastSeen).UTC(),
 		Err:      r.Err, Steps: r.Steps, Pending: r.Pending, StopReason: r.StopReason,

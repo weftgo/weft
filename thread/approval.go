@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/weftgo/weft/core"
@@ -1605,6 +1606,46 @@ func (s *Session) expiredPendingLocked(now time.Time) []Request {
 		}
 	}
 	return out
+}
+
+// approvalActorKey is the run metadata naming who decided the calls a
+// resume run resolves (record contract §2, UX-E-17): a signed
+// decision's key id, else the decision's Who; distinct actors in call
+// order, comma-joined. A session owns it: every run of the session
+// sets it, "" (none) on a run that resumes nothing or whose decisions
+// name nobody, so no enclosing run's actor is inherited.
+const approvalActorKey = "weft.approval.actor"
+
+// resumeLinkLocked is what a resume run reports about the boundary it
+// resolves (UX-E-17): the run that parked its calls — the request
+// entries' run id, the run core.ResumeOf names — and the actors of the
+// decisions in force (approvalActorKey's value). Both "" with nothing
+// dangling. Callers hold s.mu.
+func (s *Session) resumeLinkLocked() (parkedRun, actor string) {
+	dangling := s.danglingCallsLocked()
+	if len(dangling) == 0 {
+		return "", ""
+	}
+	walk := s.approvalWalkLocked()
+	var actors []string
+	for _, c := range dangling {
+		run, ds := walk.occurrence(c.ID)
+		if parkedRun == "" {
+			parkedRun = run
+		}
+		d, ok := effectiveDecision(ds, s.cfg.quorum)
+		if !ok {
+			continue
+		}
+		who := d.KeyID
+		if who == "" {
+			who = d.Who
+		}
+		if who != "" && !slices.Contains(actors, who) {
+			actors = append(actors, who)
+		}
+	}
+	return parkedRun, strings.Join(actors, ",")
 }
 
 // danglingDecisionsLocked maps the boundary's calls to the core

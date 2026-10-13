@@ -73,9 +73,17 @@ const (
 	attrTapPanics       = attribute.Key("weft.tap.panics")
 	attrPanicLayer      = attribute.Key("weft.panic.layer")
 	attrRunDenied       = attribute.Key("weft.run.denied")
-	attrStream          = attribute.Key("weft.stream")
-	attrTTFTMS          = attribute.Key("weft.ttft_ms")
-	attrLatencyMS       = attribute.Key("weft.latency_ms")
+	// The approval link (UX-E-17, ADR 0016's 2026-10-13 amendment): the
+	// resuming run's decisions per parked call and the run it resumes
+	// (ResumeOf), on its invoke_agent span and run_start record; each
+	// denied call's zero-length execute_tool span.
+	attrResumeCalls    = attribute.Key("weft.resume.calls")
+	attrResumedFrom    = attribute.Key("weft.resumed_from")
+	attrToolDenied     = attribute.Key("weft.tool.denied")
+	attrToolDeniedKind = attribute.Key("weft.tool.denied_kind")
+	attrStream         = attribute.Key("weft.stream")
+	attrTTFTMS         = attribute.Key("weft.ttft_ms")
+	attrLatencyMS      = attribute.Key("weft.latency_ms")
 )
 
 // The record attributes and event names (ADR 0024's record contract),
@@ -561,6 +569,45 @@ func (o *observer) tool(ctx context.Context, c Call, seq int64) (context.Context
 	}
 }
 
+// deniedTool reports one parked call a resume denied — an explicit
+// Deny (kind "denied") or a call left undecided ("no_decision", the
+// "DENIED: no decision" result rule 12 writes): a zero-length
+// execute_tool span under the run's invoke_agent span, carrying the
+// call's ids, weft.tool.denied and weft.tool.denied_kind, status Error
+// with error.type DENIED — the result the model sees is an error. No
+// seq (no ToolStart was emitted: the call never ran) and never the
+// reason, which is the transcript's (ids and enums only on spans, ADR
+// 0016). The invoke_agent span's weft.run.denied still counts these
+// calls; a reader counts them there, not here (record contract §6).
+func (o *observer) deniedTool(ctx context.Context, runID string, call ToolCallPart, kind string) {
+	now := time.Now()
+	_, span := o.tracer.Start(ctx, spanName(semconv.GenAIOperationNameExecuteTool, call.Name),
+		trace.WithSpanKind(trace.SpanKindInternal), trace.WithTimestamp(now))
+	if span.IsRecording() {
+		attrs := []attribute.KeyValue{
+			semconv.GenAIOperationNameExecuteTool,
+			semconv.GenAIToolName(call.Name),
+			semconv.GenAIToolCallID(call.ID),
+			attrRunID.String(runID),
+			attrStepIndex.Int(0),
+			attrToolDenied.Bool(true),
+			attrToolDeniedKind.String(kind),
+			semconv.ErrorTypeKey.String(CodeDenied),
+		}
+		attrs = append(attrs, metadataAttrs(ctx)...)
+		span.SetAttributes(attrs...)
+		span.SetStatus(codes.Error, "")
+	}
+	span.End(trace.WithTimestamp(now))
+}
+
+// The denied span's kinds (deniedTool); its error.type is CodeDenied,
+// mw.Allow's refusal's.
+const (
+	deniedKindDenied     = "denied"
+	deniedKindNoDecision = "no_decision"
+)
+
 // runEnd is what the loop knows about a run's end beyond its result
 // and error: the control that stopped it and, for a canceled run, the
 // cancellation's typed cause — the invoke_agent span's
@@ -742,6 +789,12 @@ type recorder struct {
 	// agent; "" when unnamed. Reported on the run_start record and the
 	// invoke_agent span only.
 	manifestHash string
+	// resumedFrom and resumeCalls are a resuming run's link (ResumeOf)
+	// and its decisions per parked call (weft.resume.calls): reported
+	// on the run_start record and the invoke_agent span only; "" on a
+	// run that resumes nothing.
+	resumedFrom string
+	resumeCalls string
 
 	eventPos    atomic.Int64
 	deltaPos    atomic.Int64
@@ -1002,6 +1055,12 @@ func (r *recorder) recordEvent(ctx context.Context, ev Event) {
 		}
 		if e.InstructionsHash != "" {
 			attrs = append(attrs, attrInstructionsHash.String(e.InstructionsHash))
+		}
+		if r.resumeCalls != "" {
+			attrs = append(attrs, attrResumeCalls.String(r.resumeCalls))
+		}
+		if r.resumedFrom != "" {
+			attrs = append(attrs, attrResumedFrom.String(r.resumedFrom))
 		}
 		attrs = append(attrs, attrVersion.String(version))
 	}

@@ -1,0 +1,127 @@
+{
+  "case": "resumed",
+  "description": "rw.support-desk's shape: a RequireApproval refund and a note parked (pending 2), then a GenerateAs resumes them with core.Approve, core.Resolve, core.ResumeOf the parked run and weft.approval.actor metadata: the approved call's execute_tool span carries weft.tool.approved, the resolved one has no span; the resume's root carries weft.resume.calls (approved, resolved) and weft.resumed_from; the actor lands in the resume's meta; the parked run reads resumed_by the resume",
+  "runs": [
+    {
+      "id": "a1100000000000000000000000000001",
+      "trace_id": "7ace0000000000000000000000000001",
+      "service": "contract-app",
+      "agent": "support-desk",
+      "provider": "wefttest",
+      "model": "script",
+      "resumed_by": "a1100000000000000000000000000002",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:21:00Z",
+      "finished": "2026-10-01T09:21:00.01Z",
+      "last_seen": "2026-10-01T09:21:00.01Z",
+      "status": "succeeded",
+      "steps": 1,
+      "pending": 2,
+      "stop_reason": "tool_calls",
+      "stopped_by": "parked",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 6,
+      "message_count": 2,
+      "delta_count": 0,
+      "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "catalog_hash": "cf37d3f2ebf1da3838725edc5dd83ffe5a29df3a9083fc145fa70ff07ddd2016",
+      "request_count": 1,
+      "events_emitted": 6,
+      "messages_emitted": 2,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "issue_refund",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "unset"
+        },
+        {
+          "name": "add_note",
+          "call_id": "call_2",
+          "step": 0,
+          "seq": 2,
+          "status": "unset"
+        }
+      ],
+      "holes": []
+    },
+    {
+      "id": "a1100000000000000000000000000002",
+      "trace_id": "7ace0000000000000000000000000002",
+      "service": "contract-app",
+      "agent": "support-desk",
+      "provider": "wefttest",
+      "model": "script",
+      "resumed_from": "a1100000000000000000000000000001",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "meta": {
+        "weft.approval.actor": "ops@acme"
+      },
+      "started": "2026-10-01T09:21:00.008Z",
+      "finished": "2026-10-01T09:21:00.025Z",
+      "last_seen": "2026-10-01T09:21:00.025Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "tool_calls",
+      "stopped_by": "output_submitted",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 8,
+      "message_count": 4,
+      "delta_count": 0,
+      "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "catalog_hash": "cf37d3f2ebf1da3838725edc5dd83ffe5a29df3a9083fc145fa70ff07ddd2016",
+      "request_count": 1,
+      "events_emitted": 8,
+      "messages_emitted": 4,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "issue_refund",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "ok",
+          "approved": true
+        },
+        {
+          "name": "submit_output",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 3,
+          "status": "ok"
+        }
+      ],
+      "holes": []
+    }
+  ]
+}

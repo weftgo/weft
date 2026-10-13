@@ -115,6 +115,7 @@ reads them from:
 | `weft.replay.view` | `weft/runtime` | a replay from step N > 0: `transcript`, `compacted:<index>`, `derived` or `unknown` | `meta` |
 | `weft.edits` | `weft/runtime` | the transcript edits a replay applied | `meta` |
 | `weft.page_url` | `weft/scope` | the app page the run was started from (sanitised) | `meta` |
+| `weft.approval.actor` | `thread` (a resume turn: each decision's signing key id, else its `Who`), `weft/runtime` (the decide command's actor: `panel:<public id>`, `server`, `local`), the app via `Metadata` | who decided the calls this run resumes — distinct actors in call order, comma-joined; absent when the decisions name nobody. Metadata, so under each destination's content policy as any caller pair; `thread` owns it (`""` on every other turn) | `meta` |
 | `enduser.id` | the app via `Metadata` | the end user (§2's table) | `meta` (its mirror `user.id` is not) |
 
 **A session stamps its own identity, empty = none.** Run metadata
@@ -146,9 +147,9 @@ out of `meta`; only that list does. It is, exactly:
 | Never in `meta` | Keys |
 |---|---|
 | identity (§2) | `weft.run.id`, `weft.parent.run.id`, `weft.parent.call.id`, `weft.session.id`, `weft.public_id`, `weft.turn`, `gen_ai.agent.name` |
-| run-row columns | `weft.playground`, `weft.experiment.id`, `weft.forked_from`, `weft.version`, `weft.manifest.hash`, `weft.instructions.hash` |
+| run-row columns | `weft.playground`, `weft.experiment.id`, `weft.forked_from`, `weft.resumed_from`, `weft.version`, `weft.manifest.hash`, `weft.instructions.hash` |
 | record keys (§4) | `weft.record`, `weft.event.type`, `weft.event.pos`, `weft.delta.pos`, `weft.messages.index`, `weft.messages.count`, `weft.messages.input`, `weft.messages.reason`, `weft.messages.from_seq`, `weft.messages.to_seq`, `weft.request.index`, `weft.prompt.index`, `weft.tools.index`, `weft.raw.index`, `weft.system.hash`, `weft.catalog.hash`, `weft.compaction.hash`, `weft.compaction.scope`, `weft.content`, `weft.content.truncated_bytes`, `weft.step.index`, `weft.tool.seq`, `weft.attempt.index`, `weft.latency_ms` |
-| span keys (§3) | `weft.run.steps`, `weft.run.pending`, `weft.run.denied`, `weft.run.stop_reason`, `weft.stop.raw`, `weft.model.tool_calls`, `weft.stream`, `weft.ttft_ms`, `weft.attempt.retry_after_ms`, `weft.tool.approved`, `weft.tool.pending`, `weft.tool.result_bytes`, `weft.tool.truncated_bytes`, `weft.tool.input_error`, `weft.tool.retry`, `weft.tool.retry_budget`, `weft.panic.layer`, `weft.metadata.dropped`, `weft.tap.panics`, `weft.override.hash` and every `weft.override.*` key of §3 |
+| span keys (§3) | `weft.run.steps`, `weft.run.pending`, `weft.run.denied`, `weft.run.stop_reason`, `weft.stop.raw`, `weft.model.tool_calls`, `weft.stream`, `weft.ttft_ms`, `weft.attempt.retry_after_ms`, `weft.tool.approved`, `weft.tool.pending`, `weft.tool.result_bytes`, `weft.tool.truncated_bytes`, `weft.tool.input_error`, `weft.tool.retry`, `weft.tool.retry_budget`, `weft.panic.layer`, `weft.metadata.dropped`, `weft.tap.panics`, `weft.resume.calls`, `weft.tool.denied`, `weft.tool.denied_kind`, `weft.override.hash` and every `weft.override.*` key of §3 |
 | GenAI keys (§8) | `gen_ai.operation.name`, `gen_ai.provider.name`, `gen_ai.request.model`, `gen_ai.response.model`, `gen_ai.response.finish_reasons`, the five `gen_ai.usage.*` keys, `gen_ai.tool.name`, `gen_ai.tool.call.id`, `error.type` |
 | mirrors | `gen_ai.conversation.id`, `session.id`, `user.id` |
 
@@ -196,6 +197,8 @@ child). It ends when the run does, however the run ends.
 | `weft.manifest.hash` | string | named agents |
 | `weft.version` | string | always |
 | `weft.metadata.dropped` | int | the metadata limits dropped pairs (§6 `problems`' `metadata_dropped` token: the run document's `truncated` hole, cause `metadata_cap`, §7) |
+| `weft.resumed_from` | string | the run this one resumes, as `core.ResumeOf` named it (UX-E-17): `thread` passes it on every resume turn (the parked turn's run id), `weft/runtime` on every resume it runs, an app resuming a plain `Generate` passes the parked `RunResult.ID` — the core cannot infer it, a transcript carries no run id. §6 `resumed_from` / `resumed_by` |
+| `weft.resume.calls` | string | a run fed decisions that resumes parked calls: each parked call, in call order, as `<call id>=<kind>`, comma-joined — `approved` (`Approve`), `denied` (`Deny`), `resolved` (`Resolve`, `ResolveError`), `no_decision` (left undecided: rule 12's `DENIED: no decision`). Ids and enums only — never a reason or a resolved payload (the transcript's). `thread` writes an undecided call as an explicit `Deny(id, "no decision")`, so a thread resume reads `denied` there |
 | `weft.override.hash` | string, sha256 hex | a run option changed the agent's configuration (the experiment fingerprint) |
 | `weft.override.instructions` | bool `true` | the instructions were replaced (the text is never on a span) |
 | `weft.override.tools` | string, comma-joined sorted names | `OnlyTools` |
@@ -211,7 +214,7 @@ child). It ends when the run does, however the run ends.
 | `weft.run.events` | int | at end, always: the durable `event` records the run handed to its LoggerProvider (§4's `weft.event.pos` counter's final value) — 0 when no logger was wired or it enabled none. A reader compares it with what it stored (§6 `events_emitted`, §7 `gap` / `events_lost`) |
 | `weft.run.messages` | int | at end, always: the growth `messages` records emitted (views excluded) — 0 when content capture was off or no logger was wired. Informational: a content-off destination legitimately stores none (§5) |
 | `weft.run.pending` | int | at end, when calls are parked for approval |
-| `weft.run.denied` | int | at end, on the resuming run (a run fed decisions), when it denied parked calls — an explicit `Deny` and every call left undecided ("no decision"): they have no `execute_tool` span and no event (ADR 0007), so this is their one carrier (§6 `problems.denied`). Not a `Resolve` (a result computed outside the process); not an `mw.Allow` refusal (a policy middleware's `DENIED` has its own `execute_tool` span, counted from there); not the calls `Repair` fills with an error result when a transcript with parked calls returns with a new prompt instead of decisions — those are uncounted |
+| `weft.run.denied` | int | at end, on the resuming run (a run fed decisions), when it denied parked calls — an explicit `Deny` and every call left undecided ("no decision"): they have no event (ADR 0007) and, since U13.1, a zero-length `execute_tool` span each marked `weft.tool.denied` — which a reader does not count again: this count stays their carrier (§6 `problems.denied`). Not a `Resolve` (a result computed outside the process); not an `mw.Allow` refusal (a policy middleware's `DENIED` has its own `execute_tool` span, counted from there); not the calls `Repair` fills with an error result when a transcript with parked calls returns with a new prompt instead of decisions — those are uncounted |
 | `weft.tap.panics` | int | at end, when observers panicked during the run and were contained: taps, `OnMessages` observers, a record or report the logger or tracer failed to build — the run's share of `Agent.TapPanics` (`OnRunEnd` observers run after the span ended: theirs reach `TapPanics` alone). The run is unchanged; an observer the app relies on saw less (§6 `problems.tap_panics`) |
 | `weft.run.stop_reason` | string | at end: the last step's `stop`, `tool_calls`, `max_tokens` |
 | `weft.run.stopped_by` | string | at end, what ended the run: a fired `StopWhen` condition's manifest name (`has_tool_call:<tools>`, `step_count_is:N`, `output_submitted`, a custom condition's `String()`, else `custom`), `final_answer`, `parked`, `max_steps`, `usage_limit`, `loop_detected`, `model_retries_exceeded`, `canceled`; absent on a failure no control decided (a model error, …: `error.type` names it). On a failed run this span is its only carrier (no `run_finish`) |
@@ -267,6 +270,7 @@ Name `execute_tool <tool>`, kind Internal, child of `invoke_agent`.
 | `gen_ai.tool.name`, `gen_ai.tool.call.id` | string | always |
 | `weft.run.id`, `weft.step.index`, `weft.tool.seq` | string, int, int | always |
 | `weft.tool.approved` | bool `true` | a call resumed by `Approve` |
+| `weft.tool.denied`, `weft.tool.denied_kind` | bool `true`, string | a parked call the resume denied: `denied` (`Deny`) or `no_decision` (left undecided). The span is zero-length (start = end, the moment the resume decided it), carries `weft.step.index` 0 and no `weft.tool.seq` (no `tool_start`: the call never ran), `error.type` `DENIED`, status `Error` — never the reason |
 | `weft.tool.result_bytes` | int | at end, a successful result only (not an error result, not a parked call): the length of the result the model sees (after the result cap) |
 | `weft.tool.pending` | bool `true` | at end: the call was parked for approval |
 | `weft.tool.truncated_bytes` | int | at end, a result or an error result the result cap (`MaxResultBytes`) cut: the bytes it removed — the number the model's `…[truncated N bytes]` marker names; absent when nothing was cut |
@@ -277,8 +281,10 @@ Name `execute_tool <tool>`, kind Internal, child of `invoke_agent`.
 
 Status: `Ok` for a result; `Error` with an empty description for an
 error result (the result text is content); **unset** for a call parked
-for approval (`weft.tool.pending`). Denied and undecided calls produce no
-span.
+for approval (`weft.tool.pending`). A call a resume denied or left
+undecided has a zero-length span marked `weft.tool.denied` (UX-E-17;
+before U13.1 it had none — the root's `weft.run.denied` was its one
+trace). A `Resolve`d call has no span: nothing executed.
 
 ## 4. Log records
 
@@ -334,7 +340,7 @@ The body is the core's event wire (ADR 0004), discriminated by `type`;
 
 | `weft.event.type` | Body fields | Extra attributes |
 |---|---|---|
-| `run_start` | `id`, `model {provider, name}`, `agent`, `instructions_hash` (informational: readers take the `weft.instructions.hash` attribute, never this field) | `weft.parent.run.id`, `weft.parent.call.id` (children), `weft.manifest.hash` (named agents), `weft.instructions.hash` (always, since ADR 0028), `weft.version` |
+| `run_start` | `id`, `model {provider, name}`, `agent`, `instructions_hash` (informational: readers take the `weft.instructions.hash` attribute, never this field) | `weft.parent.run.id`, `weft.parent.call.id` (children), `weft.manifest.hash` (named agents), `weft.instructions.hash` (always, since ADR 0028), `weft.version`, `weft.resumed_from` and `weft.resume.calls` (a resume, as on the span) |
 | `step_start` | `run_id`, `index` | `weft.step.index` |
 | `tool_start` | `run_id`, `seq`, `call_id`, `name`, `args` | `weft.tool.seq`, `gen_ai.tool.call.id`, `gen_ai.tool.name` |
 | `tool_finish` | `run_id`, `seq`, `call_id`, `name`, `content`, `is_error` | same as `tool_start`; `weft.tool.truncated_bytes` (int) when the result cap cut the content, and `weft.tool.retry` / `weft.tool.retry_budget` (int) on a counted RETRY, as on the span |
@@ -542,6 +548,7 @@ no `run_finish`; `trace_id` from the records); `weft_version` and
 `manifest_hash` from the span when no record carries them
 (`tracer_only`);
 `meta`, `playground`, `experiment_id` and `forked_from` (`tool_calls`);
+`resumed_from` / `resumed_by` (`resumed`, `approval_denied`);
 `stopped_by` from `run_finish` and the span (`stopped_by`, `parked`, every
 succeeded case), from the span alone on a failed run (`failed`:
 `max_steps`; `canceled`: `canceled` with `cancel_cause` `studio.cancel`),
@@ -564,6 +571,8 @@ backends' own tests' to pin.
 | `provider`, `model` | `run_start`'s `model.provider`/`model.name`, or the `invoke_agent` span's `gen_ai.provider.name`/`gen_ai.request.model` (the span spells the provider in semconv form: `gcp.gemini` for the core's `google`) |
 | `session_id`, `public_id`, `turn` | `weft.session.id`, `weft.public_id`, `weft.turn` |
 | `playground`, `experiment_id`, `forked_from` | `weft.playground`, `weft.experiment.id`, `weft.forked_from` |
+| `resumed_from` | `weft.resumed_from` (the `invoke_agent` span or `run_start`; the larger when they differ). SQLite 0018's `runs.resumed_from`, ClickHouse 0019's `weft_runs.ResumedFrom` |
+| `resumed_by` | on a parked run: the largest run id whose `resumed_from` names it — derived at read time on both backends (SQLite a correlated lookup over 0018's `runs_resumed_from`, ClickHouse one grouped read beside the counts over 0019's `idx_resumed_from`), never stored, so a resumer ingested before or after the parked run links it alike, no row is written for a parked run a store does not hold, and deleting the resumer unlinks it. Studio's status word reads `parked → <resumer>` from it (U1's seam) |
 | `manifest_hash`, `weft_version` | `weft.manifest.hash`, `weft.version` — from any record or span of the run that carries them (the `invoke_agent` span does): a run whose records were lost, or never emitted, still names both. `weft_version`'s precedence, one on both backends: the `run_start` record's `weft.version` and the `invoke_agent` span's rank together (one core literal, so equal by construction), the larger string kept should they differ (ClickHouse's `max`, SQLite's merge); the root span's resource `weft.version` (`otel.Install` stamps it there) only when the root carries no attribute; no other span's resource ever (ClickHouse 0012 restates the traces view so, and SQLite's merge reads only the root; a row written before either from a non-root span's resource stays, on both backends — ClickHouse's 0010/0011 view and SQLite's old fill-if-empty both kept one, and neither ClickHouse's `max` nor SQLite's `maxString` can forget it — and differs only where one run's spans carried different resources) |
 | `meta` | every string attribute outside the contract (`obsdb.MetaOf`; `weft.run.stopped_by` and `weft.cancel.cause` are contract — their columns above — and SQLite's 0010 removes them from rows written between U3.1 and U3.2). On ClickHouse the row's `Meta` is `max(String)` over per-row JSON strings, not a merge: a value a reader derives is a column with its own aggregate, never a `meta` key |
 | `started` | the earliest time of anything of the run: span starts, record times |
@@ -887,8 +896,9 @@ page reaches it.
 | `canceled` | a run canceled mid-tool with `core.CancelCause("studio.cancel")`: status `failed`, `error.type` `context.Canceled` (the row's `error_type` `cancelled`; the cancelled call's `context.Canceled` is no tool error), `weft.run.stopped_by` `canceled`, `weft.cancel.cause` `studio.cancel`; no `run_finish` — the row's `stopped_by` and `cancel_cause` from the span alone |
 | `tool_problems` | four failing tool calls, one per step: a handler panic (`error.type` `panic`, `weft.panic.layer` `handler`), a `StrictInput` refusal (`INVALID_INPUT`, `weft.tool.input_error` `strict`), a result the cap cut (status `ok`, `weft.tool.truncated_bytes` 90), an `mw.Allow` refusal (`DENIED`); the run succeeds with `problems` `tool_errors` 2, `truncated` 1, `denied` 1 |
 | `retry_fallback` | `mw.Retry` over a model failing twice (`attempts_retried` 2); `mw.Fallback` to a backup that answers (`attempts_retried` 1, `fallbacks` 1: the backup's `attempt` carries `weft.attempt.layer` `fallback`); `mw.Retry` exhausted at three failing attempts (`error_type` `stream_idle`, `attempts_retried` 2 — U4's rule read 3); `mw.Fallback` to a backup of the primary's model name on another provider (`fallbacks` 1 — U4's name comparison read 0) |
-| `approval_denied` | a `RequireApproval` call parked (`pending` 1), then denied on resume: no `execute_tool` span for it, the resumed root's `weft.run.denied` 1 — `problems.denied` 1 |
+| `approval_denied` | two `RequireApproval` calls parked (`pending` 2), then the resume (`core.ResumeOf` the parked run) denies one (`Deny`) and leaves the other undecided: each gets a zero-length `execute_tool` span marked `weft.tool.denied` (`denied_kind` `denied`, `no_decision`; `error.type` `DENIED`, status `Error`), the root's `weft.resume.calls` names both and its `weft.run.denied` 2 — `problems.denied` 2, the spans not counted again; `resumed_from` on the resume, `resumed_by` on the parked run |
 | `retries_taps` | a tool answering `core.ModelRetry` under `MaxModelRetries(1)` twice: `execute_tool` spans and `tool_finish` records with `weft.tool.retry` 1 and 2, `weft.tool.retry_budget` 1, the run failing `model_retries_exceeded` (`tool "flaky" retried 2 times, past MaxModelRetries(1)`) — `RETRY` is no `tool_errors`; a panicking `Tap` (`weft.tap.panics` on the root, `problems.tap_panics`); 65 metadata pairs (`weft.metadata.dropped` 1: `metadata_dropped` 1, the `truncated` hole cause `metadata_cap`); a tool's `PromptSnippet` (the prompt record's `segments`) |
+| `resumed` | rw.support-desk's shape: a `RequireApproval` refund and a note parked (`pending` 2), then a `GenerateAs` resumes them with `Approve`, `Resolve`, `core.ResumeOf` the parked run and `weft.approval.actor` metadata: the approved call's span carries `weft.tool.approved`, the resolved one has none; the root's `weft.resume.calls` `…=approved,…=resolved`; the actor in the resume's `meta`; `resumed_from` on the resume, `resumed_by` on the parked run |
 | `stock_genai` | §9: stock spans, no `weft.*` (hand-written: the one case no weft code generates); two derived runs in one conversation, one with a tool call, one failed; `derived` |
 | `tracer_only` | the `tool_calls` run from an app that wired a tracer and no logger: spans only — `succeeded` from the `Ok` root alone, `steps`/`usage`/`stop_reason` from the span, `weft_version` and `manifest_hash` from the span; the root's `weft.run.events` 0 (`events_emitted` 0: nothing was emitted); `not_recorded` (cause `no_logger`) |
 | `tracer_only_failed` | the `failed` run, spans only: `failed` with the span's description from the `Error` root alone; `events_emitted` 0; `not_recorded` (cause `no_logger`) |

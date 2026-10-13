@@ -1241,7 +1241,13 @@ func (pr *parkedRun) ordered() []approvalDecision {
 //
 // commandID is the decision command's id: a fork's resumed turn is
 // acked accepted under it once its run id is known (awaitTurn).
-func (l *link) resume(ctx context.Context, pr *parkedRun, runID, commandID string) (status, finalRun, errText string) {
+// parkedRunID is the run that parked: the resume names it with
+// core.ResumeOf (weft.resumed_from, UX-E-17) and the deciders — the
+// decisions' actors, as the command carried them (actorOf: the panel
+// token's "panel:<public id>", "server", "local") — as
+// weft.approval.actor. A fork's resume links through its session
+// (thread passes both from the decisions it records, td.Who).
+func (l *link) resume(ctx context.Context, pr *parkedRun, parkedRunID, runID, commandID string) (status, finalRun, errText string) {
 	decisions := pr.ordered()
 	if pr.sess != nil {
 		ds := make([]thread.Decision, 0, len(decisions))
@@ -1281,6 +1287,16 @@ func (l *link) resume(ctx context.Context, pr *parkedRun, runID, commandID strin
 		default: // resolve
 			opts = append(opts, core.Resolve(d.CallID, d.Content))
 		}
+	}
+	opts = append(opts, core.ResumeOf(parkedRunID))
+	var actors []string
+	for _, d := range decisions {
+		if d.Actor != "" && !slices.Contains(actors, d.Actor) {
+			actors = append(actors, d.Actor)
+		}
+	}
+	if len(actors) > 0 {
+		opts = append(opts, core.Metadata(map[string]string{"weft.approval.actor": strings.Join(actors, ",")}))
 	}
 	steer, release := l.steering(runID)
 	defer release()

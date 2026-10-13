@@ -136,7 +136,7 @@ func TestForkSteerNeverRunsUnparked(t *testing.T) {
 	if pr == nil {
 		t.Fatalf("the fork's turn %s did not park", parkedRun)
 	}
-	if status, _, errText := l.resume(ctx, pr, "pg_resume", ""); status != "succeeded" {
+	if status, _, errText := l.resume(ctx, pr, "pg_parked", "pg_resume", ""); status != "succeeded" {
 		t.Fatalf("resume = %s %s", status, errText)
 	}
 	// The steer's follow-up turn runs now: it calls refund, which must

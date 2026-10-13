@@ -1064,7 +1064,13 @@ func (s *Session) runTurn(persist, ctx context.Context, item workItem, callerOpt
 		// can resolve them (the approval resume).
 		input := s.rawContext()
 		var decisions []core.RunOption
-		s.locked(func() { decisions = s.danglingDecisionsLocked(t.resume) })
+		var parkedRun, actor string
+		s.locked(func() {
+			decisions = s.danglingDecisionsLocked(t.resume)
+			if t.resume {
+				parkedRun, actor = s.resumeLinkLocked()
+			}
+		})
 		runOpts := append([]core.RunOption(nil), callerOpts...)
 		runOpts = append(runOpts, decisions...)
 		// The session's steering source rides every run (ADR 0019): an
@@ -1079,7 +1085,15 @@ func (s *Session) runTurn(persist, ctx context.Context, item workItem, callerOpt
 		// after the caller's options and before the transcript — a later
 		// core.Metadata wins (S1.1), so the session's keys win over a
 		// caller's colliding thread.RunOptions(core.Metadata(...)).
-		runOpts = append(runOpts, core.Metadata(s.runMetadata(t)))
+		// A resume names the run that parked its calls and who decided
+		// them (UX-E-17): core.ResumeOf stamps weft.resumed_from, the
+		// actor rides as session-owned metadata ("" = none).
+		md := s.runMetadata(t)
+		md[approvalActorKey] = actor
+		runOpts = append(runOpts, core.Metadata(md))
+		if parkedRun != "" {
+			runOpts = append(runOpts, core.ResumeOf(parkedRun))
+		}
 		runOpts = append(runOpts, core.Messages(input...), core.RunID(t.RunID()))
 		run := s.agent.Stream(withSession(ctx, s), runOpts...)
 		for ev, serr := range run.Events() {

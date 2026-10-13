@@ -95,7 +95,7 @@
                 {
                   "key": "weft.run.events",
                   "value": {
-                    "intValue": "5"
+                    "intValue": "6"
                   }
                 },
                 {
@@ -107,7 +107,7 @@
                 {
                   "key": "weft.run.pending",
                   "value": {
-                    "intValue": "1"
+                    "intValue": "2"
                   }
                 },
                 {
@@ -123,7 +123,7 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790846340005000000",
+              "endTimeUnixNano": "1790846340007000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "invoke_agent support",
@@ -199,7 +199,7 @@
                 {
                   "key": "weft.model.tool_calls",
                   "value": {
-                    "intValue": "1"
+                    "intValue": "2"
                   }
                 },
                 {
@@ -281,6 +281,61 @@
                 {
                   "key": "gen_ai.operation.name",
                   "value": {
+                    "stringValue": "execute_tool"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "refund_order"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_2"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "weft.tool.pending",
+                  "value": {
+                    "boolValue": true
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790846340006000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "execute_tool refund_order",
+              "parentSpanId": "5ba0000000000001",
+              "spanId": "5ba0000000000004",
+              "startTimeUnixNano": "1790846340005000000",
+              "status": {},
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
                     "stringValue": "invoke_agent"
                   }
                 },
@@ -306,6 +361,18 @@
                   "key": "gen_ai.request.model",
                   "value": {
                     "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "weft.resume.calls",
+                  "value": {
+                    "stringValue": "call_1=denied,call_2=no_decision"
+                  }
+                },
+                {
+                  "key": "weft.resumed_from",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
                   }
                 },
                 {
@@ -359,7 +426,7 @@
                 {
                   "key": "weft.run.denied",
                   "value": {
-                    "intValue": "1"
+                    "intValue": "2"
                   }
                 },
                 {
@@ -375,12 +442,12 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790846340009000000",
+              "endTimeUnixNano": "1790846340015000000",
               "flags": 257,
               "kind": "SPAN_KIND_INTERNAL",
               "name": "invoke_agent support",
-              "spanId": "5ba0000000000004",
-              "startTimeUnixNano": "1790846340006000000",
+              "spanId": "5ba0000000000005",
+              "startTimeUnixNano": "1790846340008000000",
               "status": {
                 "code": "STATUS_CODE_OK"
               },
@@ -467,15 +534,141 @@
                   }
                 }
               ],
-              "endTimeUnixNano": "1790846340008000000",
+              "endTimeUnixNano": "1790846340010000000",
               "flags": 257,
               "kind": "SPAN_KIND_CLIENT",
               "name": "chat script",
-              "parentSpanId": "5ba0000000000004",
-              "spanId": "5ba0000000000005",
-              "startTimeUnixNano": "1790846340007000000",
+              "parentSpanId": "5ba0000000000005",
+              "spanId": "5ba0000000000006",
+              "startTimeUnixNano": "1790846340009000000",
               "status": {
                 "code": "STATUS_CODE_OK"
+              },
+              "traceId": "7ace0000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "refund_order"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_1"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000002"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.tool.denied",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "weft.tool.denied_kind",
+                  "value": {
+                    "stringValue": "denied"
+                  }
+                },
+                {
+                  "key": "error.type",
+                  "value": {
+                    "stringValue": "DENIED"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790846340012000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "execute_tool refund_order",
+              "parentSpanId": "5ba0000000000005",
+              "spanId": "5ba0000000000007",
+              "startTimeUnixNano": "1790846340011000000",
+              "status": {
+                "code": "STATUS_CODE_ERROR"
+              },
+              "traceId": "7ace0000000000000000000000000002"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "gen_ai.operation.name",
+                  "value": {
+                    "stringValue": "execute_tool"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "refund_order"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_2"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000002"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.tool.denied",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "weft.tool.denied_kind",
+                  "value": {
+                    "stringValue": "no_decision"
+                  }
+                },
+                {
+                  "key": "error.type",
+                  "value": {
+                    "stringValue": "DENIED"
+                  }
+                }
+              ],
+              "endTimeUnixNano": "1790846340014000000",
+              "flags": 257,
+              "kind": "SPAN_KIND_INTERNAL",
+              "name": "execute_tool refund_order",
+              "parentSpanId": "5ba0000000000005",
+              "spanId": "5ba0000000000008",
+              "startTimeUnixNano": "1790846340013000000",
+              "status": {
+                "code": "STATUS_CODE_ERROR"
               },
               "traceId": "7ace0000000000000000000000000002"
             }

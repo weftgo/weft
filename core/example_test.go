@@ -461,6 +461,37 @@ func ExampleRequireApproval() {
 	// Done.
 }
 
+// ResumeOf links a resume to the run it resumes: the transcript carries
+// no run id, so the caller names the parked run (its RunResult.ID). The
+// resuming run reports weft.resumed_from and weft.resume.calls (each
+// parked call's decision), and Studio shows the parked run as resumed
+// by it. The approver rides as metadata — weft.approval.actor — under
+// the destinations' content policy, like any caller pair.
+func ExampleResumeOf() {
+	refund := core.Tool("refund", "Refund an order.", func(context.Context, struct{}) (string, error) {
+		return "refunded", nil
+	}, core.RequireApproval())
+	agt := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{ID: "c1", Name: "refund"}),
+		wefttest.Say("Refunded."),
+	), refund)
+
+	parked, err := agt.Generate(context.Background(), core.Prompt("refund order 42"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	res, err := agt.Generate(context.Background(),
+		core.Messages(parked.Messages...), core.Approve("c1"),
+		core.ResumeOf(parked.ID),
+		core.Metadata(map[string]string{"weft.approval.actor": "ops@example.com"}))
+	if err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println(res.Text())
+	// Output:
+	// Refunded.
+}
+
 // The loop's coded failures are exported contract strings. A denied
 // call renders DENIED whether the approval boundary refused it (here,
 // on resume) or mw.Allow did — one vocabulary for the model; the same

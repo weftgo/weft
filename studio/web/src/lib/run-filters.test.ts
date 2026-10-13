@@ -247,7 +247,7 @@ describe("the loaded rows answer what the list cannot", () => {
     expect(runChips(s, ALL)[0]).toMatchObject({
       label: "status parked",
       applied: true,
-      note: "the loaded rows only: pending calls, no resume among them",
+      note: "the loaded rows only: pending calls, no resume among them — a resume that did not succeed is not looked for",
     })
     // An unknown status is dropped, never guessed at.
     expect(validateRunsSearch({ status: "resumed" }).status).toBeUndefined()

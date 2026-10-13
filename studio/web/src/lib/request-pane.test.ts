@@ -12,9 +12,11 @@ import {
   toolSetMayExplain,
   composedFromInstructions,
   composeSystem,
+  concurrencyWords,
   EMPTY_SHA256,
   messagesSent,
   overrideOf,
+  overrideParallelism,
   previousRows,
   sha256Hex,
 } from "./request-pane"
@@ -106,6 +108,46 @@ describe("overrideOf", () => {
   it("is undefined on a plain run", () => {
     expect(overrideOf([span({ "weft.run.id": "r" })], "r")).toBeUndefined()
     expect(overrideOf(undefined, "r")).toBeUndefined()
+  })
+})
+
+describe("concurrencyWords (UX-E-50, P7-fix)", () => {
+  it("the run's override first: Parallelism(1) over a manifest of 4", () => {
+    expect(
+      concurrencyWords({ override: 1, sequentialTools: true, manifest: 4 })
+    ).toMatchObject({ text: "sequential" })
+    expect(concurrencyWords({ override: 2, manifest: 4 })?.text).toBe(
+      "parallelism: 2"
+    )
+  })
+  it("then sequential_tools, as the run ran, over the manifest", () => {
+    const w = concurrencyWords({ sequentialTools: true, manifest: 4 })
+    expect(w?.text).toBe("sequential")
+    expect(w?.title).toContain("sequential_tools")
+  })
+  it("then the manifest; null when none says", () => {
+    const w = concurrencyWords({ sequentialTools: false, manifest: 4 })
+    expect(w?.text).toBe("parallelism: 4")
+    expect(w?.title).not.toMatch(/may have/)
+    expect(concurrencyWords({ manifest: 1 })?.text).toBe("sequential")
+    expect(concurrencyWords({ sequentialTools: false })).toBeNull()
+  })
+  it("overrideParallelism reads the run's own invoke_agent span", () => {
+    expect(
+      overrideParallelism(
+        [
+          span({
+            "weft.run.id": "r",
+            "weft.override.hash": "h",
+            "weft.override.parallelism": 1,
+          }),
+        ],
+        "r"
+      )
+    ).toBe(1)
+    expect(overrideParallelism([span({ "weft.run.id": "r" })], "r")).toBe(
+      undefined
+    )
   })
 })
 

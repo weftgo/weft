@@ -1022,7 +1022,10 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 	parked := make([]bool, len(calls))
 	sem := make(chan struct{}, parallelism)
 	subs := map[string]Usage{}
-	var retryMu sync.Mutex
+	// A counted RETRY's span waits for its mark (below): retriedAt[i]
+	// marks call i's outcome a RETRY, endRetry[i] ends its span.
+	retriedAt := make([]bool, len(calls))
+	endRetry := make([]func(retryMark), len(calls))
 
 	// Event-ordering rule for concurrent tools: the Seq is assigned and the
 	// event emitted under one lock, so observed order always matches Seq
@@ -1118,26 +1121,17 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 			var callErr error
 			var cut int
 			outcomes[i], parked[i], retry, cut, callErr = a.callTool(callCtx, call, def, parkSet)
-			var mark retryMark
-			if retry {
-				retryMu.Lock()
-				retried = append(retried, call.Name)
-				if retryBase != nil {
-					// The tool's consecutive RETRY count with this result,
-					// as the guard will count it (weft.tool.retry): the
-					// steps before plus this batch's RETRYs of the same
-					// tool so far, in completion order.
-					mark = retryMark{n: retryBase[call.Name], budget: a.maxModelRetries}
-					for _, name := range retried {
-						if name == call.Name {
-							mark.n++
-						}
-					}
-				}
-				retryMu.Unlock()
+			retriedAt[i] = retry
+			if retry && retryBase != nil {
+				// Its mark depends on the whole batch: the span ends
+				// after wg.Wait, stamped now. Attribution only — the
+				// ToolFinish below is not delayed.
+				at := time.Now()
+				res, c := outcomes[i], cut
+				endRetry[i] = func(m retryMark) { endTool(res, false, callErr, c, m, at) }
+			} else {
+				endTool(outcomes[i], parked[i], callErr, cut, retryMark{}, time.Time{})
 			}
-			endTool(outcomes[i], parked[i], callErr, cut, mark)
-			rec.noteRetry(call.ID, mark)
 			if parked[i] {
 				return
 			}
@@ -1165,6 +1159,32 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 		}
 	}
 	wg.Wait()
+	// The retry marks (weft.tool.retry), assigned once the batch is
+	// known, in call order — the guard's count exactly: the steps
+	// before plus this batch's RETRYs of the tool, none when the same
+	// batch has a success of that tool (the guard resets it).
+	succeeded := map[string]bool{}
+	for i, call := range calls {
+		if !parked[i] && !outcomes[i].IsError {
+			succeeded[call.Name] = true
+		}
+	}
+	counted := map[string]int{}
+	for i, call := range calls {
+		if !retriedAt[i] {
+			continue
+		}
+		retried = append(retried, call.Name)
+		if endRetry[i] == nil {
+			continue
+		}
+		var mark retryMark
+		if !succeeded[call.Name] {
+			counted[call.Name]++
+			mark = retryMark{n: retryBase[call.Name] + counted[call.Name], budget: a.maxModelRetries}
+		}
+		endRetry[i](mark)
+	}
 	results = make([]ToolResultPart, 0, len(calls))
 	for i, call := range calls {
 		if parked[i] {

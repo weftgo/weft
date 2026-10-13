@@ -31,9 +31,11 @@ import type {
   RequestRow,
   RunCompaction,
   RunRequestsDoc,
+  Span,
   ToolEntry,
   Transcript,
 } from "@/lib/api"
+import { attemptLabel, attemptLayer } from "@/lib/attempts"
 import { messageLine } from "@/lib/compaction"
 import { diffLinesBounded } from "@/lib/diff"
 import type { BoundedDiff } from "@/lib/diff"
@@ -86,6 +88,9 @@ export interface RequestContext {
   instructionsHash?: string
   /** The run's weft.override.* fingerprint (its invoke_agent span). */
   override?: RunOverride
+  /** The run's spans: each attempt span's weft.attempt.layer
+   * (attemptLayer), the attempts list's "· fallback". */
+  spans?: Span[]
   /** The transcript's growth records: the messages each request sent. */
   transcript?: Transcript | null
   compactions?: RunCompaction[]
@@ -871,6 +876,11 @@ export function RequestSection({
   const rows = mine?.rows ?? []
   const row = rows.find((r) => r.attempt === pick) ?? rows.at(-1)
   const facts = usePromptFacts(req, step, rows.at(0))
+  const label = (r: RequestRow) =>
+    attemptLabel(
+      r.attempt,
+      attemptLayer(req.ctx?.spans, req.ctx?.runId ?? "", step, r.attempt)
+    )
 
   let head: React.ReactNode
   let body: React.ReactNode = null
@@ -892,7 +902,7 @@ export function RequestSection({
           </span>
         ) : null}
         <span className="font-mono text-[11px] text-faint">
-          {rows.map((r) => `attempt ${r.attempt}`).join(" · ")}
+          {rows.map(label).join(" · ")}
         </span>
         <span className="font-mono text-[11px] text-faint">
           {row.body.tools.names.length} tools
@@ -1008,7 +1018,7 @@ export function RequestSection({
                     }`}
                     onClick={() => setPick(r.attempt)}
                   >
-                    attempt {r.attempt}
+                    {label(r)}
                   </button>
                 ))}
               </div>

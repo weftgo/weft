@@ -16,6 +16,7 @@ import { stepQuery } from "@/lib/api"
 import type { StepAttempt, StepDoc } from "@/lib/api"
 import {
   ATTEMPTS_NOT_STORED,
+  attemptLabel,
   attemptLine,
   factsFromRows,
   factsFromStep,
@@ -131,10 +132,13 @@ function AttemptRow({ a, from }: { a: StepAttempt; from?: string }) {
       data-attempt={a.attempt}
       className="flex flex-wrap items-center gap-x-3 gap-y-0.5 font-mono text-[11px]"
     >
-      <span className="w-16 text-faint">
+      <span
+        className="min-w-16 text-faint"
+        data-attempt-layer={a.layer || undefined}
+      >
         {a.attempt === 0 && typeof a.request_index === "number"
           ? `request #${a.request_index}`
-          : `attempt ${a.attempt}`}
+          : attemptLabel(a.attempt, a.layer)}
       </span>
       <span data-attempt-model className="text-muted-foreground">
         {a.model}

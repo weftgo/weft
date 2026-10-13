@@ -877,3 +877,114 @@ func TestUpgradeTo0017RederivesProblems(t *testing.T) {
 		}
 	}
 }
+
+// A database at 0017 — spans from a producer before U32.1: an
+// invoke_agent span with weft.metadata.dropped (which predates 0018),
+// no weft.tap.panics, no retry marks — opens through 0018 on a live
+// server: the backfill derives metadata_dropped from the stored span,
+// and the spans written after the upgrade through the restated traces
+// view count tap_panics and metadata_dropped, the three new keys staying
+// out of the run's meta (docs/record-contract.md §6).
+func TestUpgradeTo0018BackfillsMetadataDropped(t *testing.T) {
+	base := os.Getenv("WEFT_CLICKHOUSE_DSN")
+	if base == "" {
+		t.Skip("WEFT_CLICKHOUSE_DSN not set: the 0018 upgrade needs a clickhouse server (README has the one-line container recipe)")
+	}
+	ctx := context.Background()
+	u, err := url.Parse(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	suffix := make([]byte, 6)
+	if _, err := rand.Read(suffix); err != nil {
+		t.Fatal(err)
+	}
+	name := "weft_up_" + hex.EncodeToString(suffix)
+	admin := rawConn(t, base)
+	if err := admin.Exec(ctx, fmt.Sprintf("CREATE DATABASE `%s`", name)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = admin.Exec(context.Background(), fmt.Sprintf("DROP DATABASE IF EXISTS `%s`", name))
+		_ = admin.Close()
+	})
+	u.Path = "/" + name
+	dsn := u.String()
+
+	conn := rawConn(t, dsn)
+	if err := conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS obsdb_migrations (
+		version UInt32, name String, applied_at DateTime DEFAULT now()
+	) ENGINE = MergeTree ORDER BY version`); err != nil {
+		t.Fatal(err)
+	}
+	for v := 1; v <= 17; v++ {
+		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, stmt := range splitStatements(string(body)) {
+			if err := conn.Exec(ctx, stmt); err != nil {
+				t.Fatalf("migration %d: %v", v, err)
+			}
+		}
+		if err := conn.Exec(ctx, `INSERT INTO obsdb_migrations (version, name) VALUES (?, ?)`, uint32(v), migrations[v]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	at := time.Now().UTC().Add(-time.Hour)
+	spans := func(run string, trace byte, u32 bool) []obsdb.Span {
+		id := func(n byte) string { return "0a0b0c0d0e0f07" + string(trace) + string(n) }
+		mk := func(n, parent byte, spanName string, status int, attrs map[string]any) obsdb.Span {
+			attrs["weft.run.id"] = run
+			s := obsdb.Span{
+				TraceID: "0102030405060708090a0b0c0d0e0f3" + string(trace), SpanID: id(n),
+				Name: spanName, Kind: 1, Start: at, End: at.Add(time.Second), StatusCode: status, Service: "svc",
+				Attrs: attrs, Resource: map[string]any{"service.name": "svc"},
+			}
+			if parent != 0 {
+				s.ParentSpanID = id(parent)
+			}
+			return s
+		}
+		root := map[string]any{"gen_ai.operation.name": "invoke_agent", "tenant": "acme", "weft.metadata.dropped": int64(3)}
+		tool := map[string]any{"gen_ai.operation.name": "execute_tool", "error.type": "RETRY"}
+		if u32 {
+			root["weft.tap.panics"] = int64(2)
+			tool["weft.tool.retry"], tool["weft.tool.retry_budget"] = int64(1), int64(2)
+		}
+		return []obsdb.Span{
+			mk('0', 0, "invoke_agent a", 1, root),
+			mk('1', '0', "execute_tool flaky", 2, tool),
+		}
+	}
+	if err := (&DB{conn: conn}).Write(ctx, obsdb.Batch{Spans: spans("r_old", '1', false)}); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.Close()
+
+	db, err := Open(dsn)
+	if err != nil {
+		t.Fatalf("open a 0017 database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	if err := db.Write(ctx, obsdb.Batch{Spans: spans("r_new", '2', true)}); err != nil {
+		t.Fatal(err)
+	}
+	// RETRY is no tool error; the stored span's metadata_dropped is
+	// backfilled; the new span counts its tap panics too.
+	for id, want := range map[string]obsdb.Problems{
+		"r_old": {MetadataDropped: 3},
+		"r_new": {MetadataDropped: 3, TapPanics: 2},
+	} {
+		r, err := db.Run(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Problems != want {
+			t.Errorf("%s after 0018 = problems %+v; want %+v", id, r.Problems, want)
+		}
+		if id == "r_new" && (len(r.Meta) != 1 || r.Meta["tenant"] != "acme") {
+			t.Errorf("%s's meta after 0018 = %v, want only the caller's {tenant: acme} (the retry and tap keys are contract)", id, r.Meta)
+		}
+	}
+}

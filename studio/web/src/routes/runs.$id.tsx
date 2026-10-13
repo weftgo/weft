@@ -29,7 +29,7 @@ import type { RunRow, Span as TimedSpan } from "@/lib/api"
 import { compactionsOf } from "@/lib/compaction"
 import { applyTranscript, fold, linkView } from "@/lib/events"
 import { isPlainShortcut } from "@/lib/keys"
-import { overrideOf } from "@/lib/request-pane"
+import { overrideOf, overrideParallelism } from "@/lib/request-pane"
 import { toolFactsOf } from "@/lib/error-kind"
 import {
   canReplay,
@@ -528,6 +528,7 @@ function RunPage() {
               manifestHash: run.data?.manifest_hash,
               instructionsHash: run.data?.instructions_hash,
               override,
+              spans: spans.data?.spans,
               transcript: transcript.data,
               compactions: compactionsOf(run.data),
             },
@@ -543,6 +544,7 @@ function RunPage() {
       id,
       run.data,
       override,
+      spans.data,
       transcript.data,
     ]
   )
@@ -856,6 +858,7 @@ function RunPage() {
             transcript={transcript.data}
             gaps={stream.gaps}
             sequentialTools={requestsQ.data?.requests[0]?.body.sequential_tools}
+            overrideParallelism={overrideParallelism(spans.data?.spans, id)}
           />
           {evicted ? (
             <p

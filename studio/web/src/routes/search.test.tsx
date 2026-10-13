@@ -369,6 +369,27 @@ describe("the Runs search box and its URL chips", () => {
     expect(
       document.querySelector("[data-local-filters]")!.textContent
     ).toContain(why)
+    // A loaded-rows filter: the header counts the rows, never "matching"
+    // with the server's total of what it was asked.
+    expect(document.querySelector("[data-runs-count]")!.textContent).toBe(
+      `1 listed of ${runs.runs.length} loaded`
+    )
+  })
+
+  it("the parked pick (U1-fix): succeeded asked, the header the loaded rows' count, the chip's note says what is not looked for", async () => {
+    studio.on("GET meta", meta(["pricing"])).on("GET runs", runs)
+    renderApp("/runs?status=parked")
+    await waitFor(() =>
+      expect(document.querySelector("[data-runs-count]")!.textContent).toMatch(
+        / listed of \d+ loaded$/
+      )
+    )
+    expect(studio.calls("GET runs").at(-1)!.query.get("status")).toBe(
+      "succeeded"
+    )
+    expect(
+      document.querySelector<HTMLElement>('[data-chip="status"]')!.textContent
+    ).toContain("a resume that did not succeed is not looked for")
   })
 })
 

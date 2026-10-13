@@ -204,7 +204,7 @@ var causeNotes = map[Hole]map[HoleCause]holeNote{
 		},
 		CauseMetadataCap: {
 			"metadata pairs over the core's limits were dropped whole",
-			"send fewer or smaller pairs (weft.Metadata: 64 keys, 1 KiB values)",
+			"send fewer or smaller pairs (weft.Metadata: 64 keys, 128-byte keys, 1 KiB values)",
 		},
 	},
 }

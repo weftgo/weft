@@ -331,6 +331,7 @@ export function RunHeader({
   transcript,
   gaps,
   sequentialTools,
+  overrideParallelism,
 }: {
   doc: RunDoc
   folded: FoldedRun
@@ -342,8 +343,11 @@ export function RunHeader({
    * stored), fetched by the page beside the fold. */
   transcript?: Transcript
   /** The first request record's sequential_tools: the concurrency fact
-   * when the run's manifest is not stored (UX-E-50). */
+   * as the run ran, ahead of its stored manifest (UX-E-50). */
   sequentialTools?: boolean
+  /** The run's weft.override.parallelism (overrideOf): the concurrency
+   * a run option or a playground override set, ahead of both. */
+  overrideParallelism?: number
 }) {
   const now = useNow(doc.status === "running")
   const title = runTitle(doc)
@@ -364,10 +368,11 @@ export function RunHeader({
     ...storedManifestQuery(doc.manifest_hash),
     enabled: Boolean(doc.manifest_available && doc.manifest_hash),
   })
-  const conc = concurrencyWords(
-    stored.data?.manifest.agents[0]?.policy.parallelism,
-    sequentialTools
-  )
+  const conc = concurrencyWords({
+    override: overrideParallelism,
+    sequentialTools,
+    manifest: stored.data?.manifest.agents[0]?.policy.parallelism,
+  })
   useDocumentTitle(runPlace(doc))
   // The words this run was asked: the last user message it was fed
   // (in a thread the first one is an earlier turn's).

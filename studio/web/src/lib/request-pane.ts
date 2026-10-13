@@ -25,31 +25,34 @@ export const CHIP_CATALOG = "catalog changed at this step"
 export const CHIP_PROMPT_CHANGED = "prompt changed at this step"
 
 /** concurrencyWords is the run header's tool-concurrency fact
- * (UX-E-50): the cap from the run's stored manifest
- * (policy.parallelism — "parallelism: 2", 1 reads "sequential"), else
- * the request record's sequential_tools (true only when the run's
- * effective Parallelism was 1); null when neither says. */
-export function concurrencyWords(
-  parallelism?: number,
+ * (UX-E-50), as the run actually ran: the run's own
+ * weft.override.parallelism (a run option or a playground override,
+ * read off its invoke_agent span) first; else the request record's
+ * sequential_tools (true exactly when the effective Parallelism was 1);
+ * else the cap from the run's stored manifest (policy.parallelism).
+ * 1 reads "sequential" whichever says it; null when none says. */
+export function concurrencyWords(c: {
+  override?: number
   sequentialTools?: boolean
-): { text: string; title: string } | null {
-  if (parallelism !== undefined && parallelism > 0)
-    return parallelism === 1
+  manifest?: number
+}): { text: string; title: string } | null {
+  const words = (n: number, from: string) =>
+    n === 1
       ? {
           text: "sequential",
-          title:
-            "Parallelism 1 (weft.Sequential): one tool call at a time — the run's manifest",
+          title: `one tool call at a time (Parallelism 1) — ${from}`,
         }
       : {
-          text: `parallelism: ${parallelism}`,
-          title: `at most ${parallelism} tool calls at once (weft.Parallelism) — the run's manifest; a run option may have lowered it (weft.override.parallelism)`,
+          text: `parallelism: ${n}`,
+          title: `at most ${n} tool calls at once (weft.Parallelism) — ${from}`,
         }
-  return sequentialTools
-    ? {
-        text: "sequential",
-        title: "the request record's sequential_tools: one tool call at a time",
-      }
-    : null
+  if (c.override !== undefined && c.override > 0)
+    return words(c.override, "this run's override (weft.override.parallelism)")
+  if (c.sequentialTools)
+    return words(1, "the request record's sequential_tools")
+  if (c.manifest !== undefined && c.manifest > 0)
+    return words(c.manifest, "the run's manifest")
+  return null
 }
 
 /** A prompt segment's label (UX-S2-11): "instructions", or
@@ -106,6 +109,23 @@ export function overrideOf(
     instructions: ins === true || ins === "true",
     fields: fields.sort(),
   }
+}
+
+/** overrideParallelism is the run's weft.override.parallelism (its own
+ * invoke_agent span): the tool concurrency a run option or a playground
+ * override set; undefined when none did. */
+export function overrideParallelism(
+  spans: Span[] | undefined,
+  runId: string
+): number | undefined {
+  const n = Number(
+    spans?.find(
+      (s) =>
+        s.attrs["gen_ai.operation.name"] === "invoke_agent" &&
+        s.attrs["weft.run.id"] === runId
+    )?.attrs[`${OVERRIDE}parallelism`]
+  )
+  return Number.isInteger(n) && n > 0 ? n : undefined
 }
 
 /** The manifest's agent for a run, and whether it is the version the

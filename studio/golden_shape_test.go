@@ -207,7 +207,8 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		{"session-public-id.golden.json", "/api/sessions/s_x/public_id", nil},
 		// The step goldens are recorded from TestStepRoute's real run;
 		// this one has no instructions, one tool and no failed attempt.
-		{"step-0.golden.json", "/api/runs/" + res.ID + "/steps/0", []string{".attempts[].error_type", ".request.prompt", ".request.tools.tools[].schema"}},
+		// No fallback either: the golden's fallback attempts carry layer.
+		{"step-0.golden.json", "/api/runs/" + res.ID + "/steps/0", []string{".attempts[].error_type", ".attempts[].layer", ".request.prompt", ".request.tools.tools[].schema"}},
 		// The app's two log lines, attributed through the tool's span.
 		{"logs-ok.golden.json", "/api/runs/" + res.ID + "/logs", nil},
 		{"logs-ok-paged.golden.json", "/api/runs/" + res.ID + "/logs?limit=1", nil},

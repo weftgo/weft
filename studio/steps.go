@@ -122,12 +122,15 @@ type stepModel struct {
 // chat span. Outcome is ok or error from the span's status; absent when
 // no span says (attempts_badge then says why).
 type stepAttempt struct {
-	Attempt      int64      `json:"attempt"`
-	Model        string     `json:"model"`
-	Provider     string     `json:"provider,omitempty"`
-	Outcome      string     `json:"outcome,omitempty"`
-	ErrorType    string     `json:"error_type,omitempty"`
-	RetryAfterMS int64      `json:"retry_after_ms,omitempty"`
+	Attempt      int64  `json:"attempt"`
+	Model        string `json:"model"`
+	Provider     string `json:"provider,omitempty"`
+	Outcome      string `json:"outcome,omitempty"`
+	ErrorType    string `json:"error_type,omitempty"`
+	RetryAfterMS int64  `json:"retry_after_ms,omitempty"`
+	// Layer is the attempt span's weft.attempt.layer: "fallback" for a
+	// request mw.Fallback sent to a backup; absent on a primary attempt.
+	Layer        string     `json:"layer,omitempty"`
 	Started      *time.Time `json:"started,omitempty"`
 	Finished     *time.Time `json:"finished,omitempty"`
 	SpanID       string     `json:"span_id,omitempty"`
@@ -1109,6 +1112,7 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 		if ms, ok := attrInt64(sp.Attrs["weft.attempt.retry_after_ms"]); ok {
 			a.RetryAfterMS = ms
 		}
+		a.Layer, _ = sp.Attrs["weft.attempt.layer"].(string)
 		st, en := sp.Start, sp.End
 		if !st.IsZero() {
 			a.Started = &st

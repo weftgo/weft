@@ -17,6 +17,32 @@ export interface AttemptFacts {
   answered?: string
 }
 
+/** attemptLabel is an attempt's name in the attempts lists (U4-fix):
+ * "attempt 2", "attempt 2 · fallback" when its attempt span's
+ * weft.attempt.layer names a layer (mw.Fallback's "fallback"). */
+export function attemptLabel(n: number, layer?: string): string {
+  return layer ? `attempt ${n} · ${layer}` : `attempt ${n}`
+}
+
+/** attemptLayer is an attempt span's weft.attempt.layer — the run's
+ * span for that step and attempt — what the attempts lists label
+ * "fallback" when the step route (StepAttempt.layer) is not what they
+ * draw from. */
+export function attemptLayer(
+  spans: { name: string; attrs: Record<string, unknown> }[] | null | undefined,
+  runId: string,
+  step: number,
+  n: number
+): string | undefined {
+  return spans?.find(
+    ({ name, attrs: a }) =>
+      name === "attempt" &&
+      a["weft.run.id"] === runId &&
+      a["weft.step.index"] === step &&
+      a["weft.attempt.index"] === n
+  )?.attrs["weft.attempt.layer"] as string | undefined
+}
+
 /** The request-record row's fields the line reads (RequestRow's). */
 interface RowLike {
   attempt: number

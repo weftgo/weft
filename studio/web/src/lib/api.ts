@@ -1483,6 +1483,9 @@ export interface StepAttempt {
   outcome?: "ok" | "error"
   error_type?: string
   retry_after_ms?: number
+  /** The attempt span's weft.attempt.layer: "fallback" for a request
+   * mw.Fallback sent to a backup; absent on a primary attempt. */
+  layer?: string
   started?: string
   finished?: string
   span_id?: string

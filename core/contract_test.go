@@ -9,6 +9,7 @@ import (
 	"io"
 	"iter"
 	"log/slog"
+	"maps"
 	"os"
 	"reflect"
 	"regexp"
@@ -5207,8 +5208,8 @@ func (e *typedToolErr) ErrorType() string { return e.kind }
 // TestToolRetryCountAndBudget pins weft.tool.retry / retry_budget
 // (record contract §3, U32.1, UX-S2-10): every RETRY result the loop
 // counts carries the tool's consecutive RETRY count with it and the
-// run's MaxModelRetries, on its execute_tool span and its tool_finish
-// record; a success resets the count; the run that spends the budget
+// run's MaxModelRetries, on its execute_tool span (not the tool_finish
+// record); a success resets the count; the run that spends the budget
 // fails with model_retries_exceeded and an error naming the budget.
 // The model-visible RETRY text is unchanged (rule 5).
 func TestToolRetryCountAndBudget(t *testing.T) {
@@ -5267,23 +5268,16 @@ func TestToolRetryCountAndBudget(t *testing.T) {
 			t.Errorf("%s span weft.tool.retry_budget = %q", id, b)
 		}
 	}
+	// The mark rides the span only: a tool_finish record is written as
+	// its call finishes, before the batch that decides the mark is over.
 	finishes := 0
 	for _, r := range lp.ofKind(t, "event") {
 		if r.attr("weft.event.type") != "tool_finish" {
 			continue
 		}
 		finishes++
-		var ev struct {
-			CallID string `json:"call_id"`
-		}
-		_ = json.Unmarshal([]byte(r.body), &ev)
-		n, ok := r.intAttr("weft.tool.retry")
-		b, _ := r.intAttr("weft.tool.retry_budget")
-		switch w := want[ev.CallID]; {
-		case w == "" && ok:
-			t.Errorf("%s tool_finish carries weft.tool.retry %d", ev.CallID, n)
-		case w != "" && (!ok || strconv.FormatInt(n, 10) != w || b != 2):
-			t.Errorf("%s tool_finish weft.tool.retry = %d/%d (%v), want %s/2", ev.CallID, n, b, ok, w)
+		if n, ok := r.intAttr("weft.tool.retry"); ok {
+			t.Errorf("tool_finish carries weft.tool.retry %d, want it on the span only", n)
 		}
 	}
 	if finishes != 6 {
@@ -5292,6 +5286,74 @@ func TestToolRetryCountAndBudget(t *testing.T) {
 	if got := tp.find(t, "invoke_agent").attrsMap()["error.type"]; got != "model_retries_exceeded" {
 		t.Errorf("invoke_agent error.type = %q", got)
 	}
+}
+
+// TestToolRetryMarkFollowsTheGuard pins the retry mark's batch rule
+// (P7-fix): marks are assigned after the batch, in call order, as the
+// guard counts — a tool with a success in the same batch is reset, so
+// its RETRY there carries no mark (the run goes on); parallel RETRYs of
+// one tool are numbered by call order, not completion order.
+func TestToolRetryMarkFollowsTheGuard(t *testing.T) {
+	type in struct {
+		Ok    bool `json:"ok"`
+		Delay int  `json:"delay"`
+	}
+	x := core.Tool("x", "X.", func(_ context.Context, a in) (string, error) {
+		time.Sleep(time.Duration(a.Delay) * time.Millisecond)
+		if a.Ok {
+			return "ok", nil
+		}
+		return "", core.ModelRetry("again")
+	})
+	marks := func(t *testing.T, tp *recProvider) map[string]string {
+		got := map[string]string{}
+		for _, s := range recSpans(tp) {
+			a := s.attrsMap()
+			if id := a["gen_ai.tool.call.id"]; id != "" {
+				got[id] = a["weft.tool.retry"]
+			}
+		}
+		return got
+	}
+	t.Run("mixed batch", func(t *testing.T) {
+		tp := newRecProvider()
+		agt := core.New(wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{ID: "c1", Name: "x"}),
+			wefttest.ToolCalls(wefttest.Call{ID: "c2", Name: "x"}),
+			wefttest.ToolCalls(
+				wefttest.Call{ID: "c3", Name: "x", Args: `{"delay":20}`},
+				wefttest.Call{ID: "c4", Name: "x", Args: `{"ok":true}`}),
+			wefttest.Say("done"),
+		), core.TracerProvider(tp), core.MaxModelRetries(2), core.Parallelism(2), x)
+		if _, err := agt.Generate(context.Background(), core.Prompt("x")); err != nil {
+			t.Fatalf("the batch's success resets the count, the run goes on: %v", err)
+		}
+		want := map[string]string{"c1": "1", "c2": "2", "c3": "", "c4": ""}
+		if got := marks(t, tp); !maps.Equal(got, want) {
+			t.Errorf("marks = %v, want %v", got, want)
+		}
+	})
+	t.Run("parallel numbering", func(t *testing.T) {
+		for range 3 {
+			tp := newRecProvider()
+			// p1 finishes last, p3 first: completion order is the reverse.
+			agt := core.New(wefttest.Script(
+				wefttest.ToolCalls(
+					wefttest.Call{ID: "p1", Name: "x", Args: `{"delay":40}`},
+					wefttest.Call{ID: "p2", Name: "x", Args: `{"delay":20}`},
+					wefttest.Call{ID: "p3", Name: "x"}),
+				wefttest.Say("done"),
+			), core.TracerProvider(tp), core.MaxModelRetries(2), core.Parallelism(3), x)
+			_, err := agt.Generate(context.Background(), core.Prompt("x"))
+			if !errors.Is(err, core.ErrModelRetriesExceeded) {
+				t.Fatalf("err = %v, want ErrModelRetriesExceeded", err)
+			}
+			want := map[string]string{"p1": "1", "p2": "2", "p3": "3"}
+			if got := marks(t, tp); !maps.Equal(got, want) {
+				t.Errorf("marks = %v, want %v (call order)", got, want)
+			}
+		}
+	})
 }
 
 // TestRunSpanCountsTapPanics pins weft.tap.panics (record contract §3,

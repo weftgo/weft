@@ -361,7 +361,12 @@ export interface RunChip {
 const ROWS_ONLY = "the loaded rows only"
 const NEEDS_SEARCH = "needs the search capability"
 const NEEDS_PRICING = "needs the pricing capability"
-const PARKED_NOTE = "the loaded rows only: pending calls, no resume among them"
+/** The parked pick asks the server for succeeded runs (a park ends its
+ * run successfully), so a resume turn that failed, is running or was
+ * interrupted is not loaded: looking it up would be a read per parked
+ * row's session, too many for a list — the note says so instead. */
+const PARKED_NOTE =
+  "the loaded rows only: pending calls, no resume among them — a resume that did not succeed is not looked for"
 const BAD_WHEN = "not a real day (YYYY-MM-DD) or an RFC 3339 time with a zone"
 
 /** runChips is every set filter as a chip, in the toolbar's order. */

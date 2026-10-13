@@ -81,6 +81,12 @@ func TestExperimentRunsUseTheIndex(t *testing.T) {
 //     order cannot win, and the few matches sort in a temp B-tree (the
 //     finding, U27-fix: the page walked runs_all, testing every row
 //     until the LIMIT filled).
+//   - not under a public id or session equality (P7-fix): runOrder
+//     keeps the plain spelling there and runs_public /
+//     runs_session(_started) narrow the read — in their order under a
+//     parent equality; with all=1 they lead with parent_run_id before
+//     started_ns, so the matches of one public id or session sort in a
+//     temp B-tree whichever spelling (pinned on the index only).
 //
 // The status filter, honestly: statusExpr's CASE takes a bind parameter
 // (the interrupted cutoff), so no index serves it as such. runWhere
@@ -117,6 +123,10 @@ func TestRunListsUseTheirIndexes(t *testing.T) {
 		{name: "failed, all", q: obsdb.RunQuery{Status: obsdb.StatusFailed, ParentRunID: "*"}, count: "runs_failed_all", page: "runs_failed_all", noTempBy: true},
 		{name: "running, all", q: obsdb.RunQuery{Status: obsdb.StatusRunning, ParentRunID: "*"}, count: "runs_last_seen", page: "runs_last_seen", search: true},
 		{name: "running", q: obsdb.RunQuery{Status: obsdb.StatusRunning}, count: "runs_started", page: "runs_started", noTempBy: true},
+		{name: "public id, all, last seen after", q: obsdb.RunQuery{PublicID: "pub_1", ParentRunID: "*", LastSeenAfter: time.Now()}, count: "runs_public", page: "runs_public"},
+		{name: "public id, last seen after", q: obsdb.RunQuery{PublicID: "pub_1", LastSeenAfter: time.Now()}, count: "runs_public", page: "runs_public", noTempBy: true},
+		{name: "session, all, running", q: obsdb.RunQuery{SessionID: "s_1", ParentRunID: "*", Status: obsdb.StatusRunning}, count: "runs_session_started", page: "runs_session"},
+		{name: "session, running", q: obsdb.RunQuery{SessionID: "s_1", Status: obsdb.StatusRunning}, count: "runs_session_started", page: "runs_session_started", noTempBy: true},
 		{name: "succeeded, all", q: obsdb.RunQuery{Status: obsdb.StatusSucceeded, ParentRunID: "*"}, page: "runs_all", countScan: true},
 	} {
 		count, page, args := runListSQL(c.q)

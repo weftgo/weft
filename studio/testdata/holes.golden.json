@@ -10,7 +10,7 @@
       },
       "metadata_cap": {
         "reason": "metadata pairs over the core's limits were dropped whole",
-        "fix": "send fewer or smaller pairs (weft.Metadata: 64 keys, 1 KiB values)"
+        "fix": "send fewer or smaller pairs (weft.Metadata: 64 keys, 128-byte keys, 1 KiB values)"
       },
       "response_cap": {
         "reason": "this response reads a bounded number of steps and the run has more: the later steps were not compared, nothing was lost",

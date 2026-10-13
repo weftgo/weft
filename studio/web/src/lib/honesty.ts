@@ -123,7 +123,7 @@ export const CAUSES: Partial<
     },
     metadata_cap: {
       reason: "metadata pairs over the core's limits were dropped whole",
-      fix: "send fewer or smaller pairs (weft.Metadata: 64 keys, 1 KiB values)",
+      fix: "send fewer or smaller pairs (weft.Metadata: 64 keys, 128-byte keys, 1 KiB values)",
     },
   },
   not_recorded: {

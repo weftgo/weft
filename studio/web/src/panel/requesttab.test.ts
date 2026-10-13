@@ -14,6 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { golden } from "../test/fake-studio"
 import type { RequestRow, RunDoc, Span } from "../lib/api"
 import { sha256Hex } from "../lib/request-pane"
+import { attemptLabel } from "../lib/attempts"
 import { CAUSES } from "../lib/honesty"
 import { badgeLabel } from "./badges"
 import { MANIFEST_RETRY_MS } from "./element"
@@ -589,6 +590,34 @@ describe("the tab's blocks", () => {
     await settle()
     expect(pick(1).getAttribute("aria-pressed")).toBe("true")
     expect(pick(2).getAttribute("aria-pressed")).toBe("false")
+  })
+
+  it("the attempts: a fallback layer's attempt reads as on the run page (parity)", async () => {
+    const attempt = (n: number, layer?: string): Span => ({
+      ...invokeAgent({}),
+      span_id: `at${n}`,
+      name: "attempt",
+      attrs: {
+        "weft.run.id": RUN,
+        "weft.step.index": 1,
+        "weft.attempt.index": n,
+        ...(layer ? { "weft.attempt.layer": layer } : {}),
+      },
+    })
+    fakeStudio(
+      await routes({
+        instructions: PROMPT0,
+        spans: [invokeAgent({}), attempt(1), attempt(2, "fallback")],
+      }),
+      META_R
+    )
+    const el = await openTab()
+    await pickStep(el, 1)
+    const words = Array.from(
+      tp(el).querySelectorAll("[data-weft-rq-attempt]")
+    ).map((b) => b.textContent)
+    expect(words).toEqual([attemptLabel(1), attemptLabel(2, "fallback")])
+    expect(words[1]).toBe("attempt 2 · fallback")
   })
 
   it("J/K move the step the tab shows, from the one on screen; ⤢ carries it; a step only the record names is walked", async () => {

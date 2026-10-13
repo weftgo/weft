@@ -347,14 +347,21 @@ function RunsPage() {
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-sm font-medium tracking-tight">Runs</h1>
-        <span className="font-mono text-xs text-faint tabular-nums">
+        <span
+          className="font-mono text-xs text-faint tabular-nums"
+          data-runs-count
+        >
           {page.isPending
             ? "…"
-            : filtered
-              ? `${total.toLocaleString()} matching`
-              : search.subagents === "all"
-                ? `${total.toLocaleString()} runs`
-                : `${total.toLocaleString()} top-level`}
+            : local.length > 0
+              ? // A loaded-rows filter: the server's total counts what it
+                // was asked (parked asks for succeeded), not the matches.
+                `${runs.length.toLocaleString()} listed of ${loaded.length.toLocaleString()} loaded`
+              : filtered
+                ? `${total.toLocaleString()} matching`
+                : search.subagents === "all"
+                  ? `${total.toLocaleString()} runs`
+                  : `${total.toLocaleString()} top-level`}
         </span>
         <div className="relative">
           <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-faint" />

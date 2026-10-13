@@ -21,7 +21,12 @@
 // badge and nothing else — a read token never asked for a byte.
 import type { Manifest, RequestRow, RunCompaction, ToolEntry } from "../lib/api"
 import { isHoleRef } from "../lib/api"
-import { attemptLine, factsFromRows } from "../lib/attempts"
+import {
+  attemptLabel,
+  attemptLayer,
+  attemptLine,
+  factsFromRows,
+} from "../lib/attempts"
 import { compactionsOf, isSessionMarker, messageLine } from "../lib/compaction"
 import { diffLinesBounded } from "../lib/diff"
 import type { BoundedDiff } from "../lib/diff"
@@ -137,7 +142,8 @@ function picker(
   label: string,
   items: number[],
   cur: number,
-  pick: (n: number) => void
+  pick: (n: number) => void,
+  words = (n: number) => `${label} ${n}`
 ): HTMLElement {
   const box = el("div", "weft-holes weft-rq-pick", undefined, {
     role: "group",
@@ -148,7 +154,7 @@ function picker(
     const b = el(
       "button",
       `weft-btn${n === cur ? " weft-active" : ""}`,
-      `${label} ${n}`,
+      words(n),
       {
         type: "button",
         "aria-pressed": String(n === cur),
@@ -690,7 +696,8 @@ export function renderRequestTab(d: RequestTabDeps): HTMLElement {
         (n) => {
           d.pick.set(step, n)
           d.redraw()
-        }
+        },
+        (n) => attemptLabel(n, attemptLayer(d.t.spans, d.t.id, step, n))
       )
     )
 

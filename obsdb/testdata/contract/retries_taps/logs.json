@@ -3627,18 +3627,6 @@
                   }
                 },
                 {
-                  "key": "weft.tool.retry",
-                  "value": {
-                    "intValue": "1"
-                  }
-                },
-                {
-                  "key": "weft.tool.retry_budget",
-                  "value": {
-                    "intValue": "1"
-                  }
-                },
-                {
                   "key": "k00",
                   "value": {
                     "stringValue": "v"
@@ -6764,18 +6752,6 @@
                   "key": "gen_ai.tool.name",
                   "value": {
                     "stringValue": "flaky"
-                  }
-                },
-                {
-                  "key": "weft.tool.retry",
-                  "value": {
-                    "intValue": "2"
-                  }
-                },
-                {
-                  "key": "weft.tool.retry_budget",
-                  "value": {
-                    "intValue": "1"
                   }
                 },
                 {

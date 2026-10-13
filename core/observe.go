@@ -491,7 +491,9 @@ func ceilMS(d time.Duration) int64 {
 // context before the chain runs — so it is the parent of every span the
 // handler starts, an HTTP client's, a database driver's, a child run's
 // invoke_agent — and ends when callTool returns, before ToolFinish is
-// emitted. c is the Call the loop placed on the context; seq is the
+// emitted; a counted RETRY's span alone ends after its batch, when its
+// retry mark is known, stamped with the moment the call returned (end),
+// so its duration is still the call's. A zero end is now. c is the Call the loop placed on the context; seq is the
 // ToolStart's Seq. A parked (approval) call ends with weft.tool.pending
 // set and no error status: the call did not fail, it was not made. An
 // error result sets Error status with error.type only — never the result
@@ -501,7 +503,7 @@ func ceilMS(d time.Duration) int64 {
 // (weft.tool.truncated_bytes, on a result or an error result alike); a
 // panic names its layer (weft.panic.layer) and an INVALID_INPUT result
 // the rule it broke (weft.tool.input_error).
-func (o *observer) tool(ctx context.Context, c Call, seq int64) (context.Context, func(res ToolResultPart, pending bool, err error, cut int, retry retryMark)) {
+func (o *observer) tool(ctx context.Context, c Call, seq int64) (context.Context, func(res ToolResultPart, pending bool, err error, cut int, retry retryMark, end time.Time)) {
 	ctx, span := o.tracer.Start(ctx, spanName(semconv.GenAIOperationNameExecuteTool, c.Name),
 		trace.WithSpanKind(trace.SpanKindInternal))
 	start := time.Now()
@@ -520,8 +522,11 @@ func (o *observer) tool(ctx context.Context, c Call, seq int64) (context.Context
 		attrs = append(attrs, metadataAttrs(ctx)...)
 		span.SetAttributes(attrs...)
 	}
-	return ctx, func(res ToolResultPart, pending bool, err error, cut int, retry retryMark) {
-		dur := time.Since(start)
+	return ctx, func(res ToolResultPart, pending bool, err error, cut int, retry retryMark, end time.Time) {
+		if end.IsZero() {
+			end = time.Now()
+		}
+		dur := end.Sub(start)
 		if span.IsRecording() {
 			switch {
 			case pending:
@@ -565,7 +570,7 @@ func (o *observer) tool(ctx context.Context, c Call, seq int64) (context.Context
 			}
 			l.LogAttrs(ctx, slog.LevelDebug, "tool call", attrs...)
 		}
-		span.End()
+		span.End(trace.WithTimestamp(end))
 	}
 }
 
@@ -853,11 +858,6 @@ type recorder struct {
 	// weft.tap.panics. OnRunEnd observers run after the span ended, so
 	// theirs reach TapPanics alone.
 	runPanics atomic.Int64
-	// retries holds each RETRY result's count and budget (call id →
-	// retryMark) from its tool goroutine until its ToolFinish is
-	// recorded — the tool_finish record's weft.tool.retry, under
-	// truncMu like truncated.
-	retries map[string]retryMark
 
 	// stepModel is the model that answered the step whose StepFinish is
 	// being emitted (callTiming.answered): set by the loop goroutine
@@ -918,33 +918,12 @@ func (r *recorder) countPanic() {
 // retryMark is a RETRY result's place in its tool's budget: n is the
 // tool's consecutive RETRY count with this result (1-based), budget
 // the run's MaxModelRetries — the guard fails the run once n exceeds
-// it. The zero value marks nothing (not a counted RETRY).
+// it. The zero value marks nothing (not a counted RETRY). execTools
+// assigns the marks after its batch, in call order, so a mark is
+// exactly what the guard counts; it rides the execute_tool span only
+// (the tool_finish record is written as the call finishes, before its
+// siblings' outcomes are known).
 type retryMark struct{ n, budget int }
-
-// noteRetry remembers a call's retry mark for its tool_finish record.
-// Nil-safe.
-func (r *recorder) noteRetry(callID string, m retryMark) {
-	if r == nil || m.n == 0 {
-		return
-	}
-	r.truncMu.Lock()
-	if r.retries == nil {
-		r.retries = map[string]retryMark{}
-	}
-	r.retries[callID] = m
-	r.truncMu.Unlock()
-}
-
-// takeRetry returns and forgets a call's retry mark, zero when none.
-func (r *recorder) takeRetry(callID string) retryMark {
-	r.truncMu.Lock()
-	defer r.truncMu.Unlock()
-	m, ok := r.retries[callID]
-	if ok {
-		delete(r.retries, callID)
-	}
-	return m
-}
 
 // noteDenied counts one call a resume denied. Nil-safe.
 func (r *recorder) noteDenied() {
@@ -971,10 +950,8 @@ func (r *recorder) recordEvent(ctx context.Context, ev Event) {
 	// destination enabling event records the entry must still go, or it
 	// stays in the map until the run ends.
 	var cut int
-	var retry retryMark
 	if tf, ok := ev.(ToolFinish); ok {
 		cut = r.takeTruncated(tf.CallID)
-		retry = r.takeRetry(tf.CallID)
 	}
 	if !r.elog.Enabled(ctx, log.EnabledParameters{EventName: eventName}) {
 		return
@@ -1037,9 +1014,6 @@ func (r *recorder) recordEvent(ctx context.Context, ev Event) {
 		attrs = append(attrs, attrToolSeq.Int64(e.Seq), semconv.GenAIToolCallID(e.CallID), semconv.GenAIToolName(e.Name))
 	case ToolFinish:
 		attrs = append(attrs, attrToolSeq.Int64(e.Seq), semconv.GenAIToolCallID(e.CallID), semconv.GenAIToolName(e.Name))
-		if retry.n > 0 {
-			attrs = append(attrs, attrToolRetry.Int(retry.n), attrToolRetryBudget.Int(retry.budget))
-		}
 		if cut > 0 {
 			attrs = append(attrs, attrToolTruncated.Int(cut))
 		}

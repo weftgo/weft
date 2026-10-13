@@ -1,6 +1,6 @@
 {
   "case": "retries_taps",
-  "description": "a run that spends its tool retry budget, under a panicking Tap, with metadata over the core's limits and a tool's PromptSnippet: the tool answers core.ModelRetry under MaxModelRetries(1) twice — execute_tool spans and tool_finish records with weft.tool.retry 1 and 2, weft.tool.retry_budget 1 — and the run fails model_retries_exceeded (RETRY is no tool error); the root carries weft.tap.panics and weft.metadata.dropped 1 (65 caller pairs) — problems tap_panics, metadata_dropped 1, the truncated hole cause metadata_cap; the prompt record carries segments (instructions, tool:flaky)",
+  "description": "a run that spends its tool retry budget, under a panicking Tap, with metadata over the core's limits and a tool's PromptSnippet: the tool answers core.ModelRetry under MaxModelRetries(1) twice — execute_tool spans with weft.tool.retry 1 and 2 (the tool_finish records carry none), weft.tool.retry_budget 1 — and the run fails model_retries_exceeded (RETRY is no tool error); the root carries weft.tap.panics and weft.metadata.dropped 1 (65 caller pairs) — problems tap_panics, metadata_dropped 1, the truncated hole cause metadata_cap; the prompt record carries segments (instructions, tool:flaky)",
   "runs": [
     {
       "id": "a1100000000000000000000000000001",

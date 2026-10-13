@@ -3,7 +3,7 @@
 // list row draws no badge; one problem draws exactly its words.
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { cleanup } from "@testing-library/react"
+import { cleanup, waitFor } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { RunDoc, RunRow } from "@/lib/api"
@@ -175,6 +175,47 @@ describe("the header's tool concurrency (UX-E-50)", () => {
     expect(
       fetch.mock.calls.filter(([u]) => String(u).includes("/manifests/")).length
     ).toBe(1)
+  })
+
+  it("as the run ran: its override, then sequential_tools, over the manifest", async () => {
+    const fetch = vi.fn((url: string) =>
+      String(url).includes("/manifests/mh")
+        ? Promise.resolve(
+            new Response(JSON.stringify(manifestDoc(4)), {
+              headers: { "Content-Type": "application/json" },
+            })
+          )
+        : new Promise<Response>(() => {})
+    )
+    vi.stubGlobal("fetch", fetch)
+    vi.stubGlobal("scrollTo", vi.fn())
+    const doc = { ...cleanDoc(), manifest_hash: "mh", manifest_available: true }
+    // weft.Parallelism(4) run with the run option Parallelism(2).
+    const { findByText } = await renderWithRouter(
+      <RunHeader
+        doc={doc}
+        folded={fold([])}
+        eventCount={4}
+        sequentialTools={false}
+        overrideParallelism={2}
+      />
+    )
+    await findByText("parallelism: 2")
+    cleanup()
+    // Parallelism(1) as a run option: the request record says sequential.
+    const { container } = await renderWithRouter(
+      <RunHeader doc={doc} folded={fold([])} eventCount={4} sequentialTools />
+    )
+    await waitFor(() =>
+      expect(
+        fetch.mock.calls.some(([u]) => String(u).includes("/manifests/"))
+      ).toBe(true)
+    )
+    // The manifest (4) answered; the run's own record still wins.
+    await new Promise((r) => setTimeout(r, 20))
+    expect(container.querySelector("[data-concurrency]")!.textContent).toBe(
+      "sequential"
+    )
   })
 
   it("no stored manifest: the request record's sequential_tools, else nothing", async () => {

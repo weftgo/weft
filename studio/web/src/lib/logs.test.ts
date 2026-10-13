@@ -183,6 +183,7 @@ const STEP_ATTEMPT_KEYS: Record<keyof StepAttempt, true> = {
   outcome: true,
   error_type: true,
   retry_after_ms: true,
+  layer: true,
   started: true,
   finished: true,
   span_id: true,

@@ -245,6 +245,14 @@ describe("the step story's attempts and timing (A4.2)", () => {
     expect(
       rows.map((r) => r.querySelector("[data-attempt-outcome]")?.textContent)
     ).toEqual(["stream_idle", "stream_idle", "stream_idle", "ok"])
+    // The fallback layer's attempts (weft.attempt.layer) say so, in
+    // lib/attempts' words — the panel's Request tab says the same.
+    expect(rows.map((r) => r.querySelector("span")?.textContent)).toEqual([
+      "attempt 1",
+      "attempt 2 · fallback",
+      "attempt 3",
+      "attempt 4 · fallback",
+    ])
     // The header now reads the step route: the same words, the same
     // timing.
     expect(card().querySelector("[data-attempt-line]")?.textContent).toBe(

@@ -112,8 +112,13 @@ func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (_ obsdb.RunPage, err e
 // makes started_ns an expression no index orders, so the plan is
 // SEARCH runs USING INDEX runs_last_seen (last_seen_ns>?) and a temp
 // B-tree over the matches (TestRunListsUseTheirIndexes pins both).
+// Not under a public id or session equality (the panel's public-id live
+// backfill, a session's running list): runs_public / runs_session_started
+// lead with that equality and narrow better than runs_last_seen, so the
+// plain spelling stays and the planner keeps them.
 func runOrder(q obsdb.RunQuery) string {
-	if q.ParentRunID == "*" && (q.Status == obsdb.StatusRunning || !q.LastSeenAfter.IsZero()) {
+	if q.ParentRunID == "*" && q.PublicID == "" && q.SessionID == "" &&
+		(q.Status == obsdb.StatusRunning || !q.LastSeenAfter.IsZero()) {
 		return ` ORDER BY +started_ns DESC, run_id DESC`
 	}
 	return ` ORDER BY started_ns DESC, run_id DESC`

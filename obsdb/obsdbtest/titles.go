@@ -11,7 +11,8 @@ import (
 // sessionTitles: a session row's Title is its newest turn's non-empty
 // weft.session.title (metadata, so a content-off session keeps it), its
 // FirstPrompt the first turn's prompt preview (never a later turn's),
-// its ContentOff whether that first turn stored events and no messages;
+// its ContentOff whether that first turn stored events and no messages
+// and is over — not running, not settling (obsdb.SessionContentOff);
 // SessionQuery.Q finds sessions by title, first prompt, id, public id
 // or agent, every term in some field, scoped by PublicID like the rest.
 func sessionTitles(open func(t *testing.T) obsdb.DB) func(*testing.T) {
@@ -125,6 +126,55 @@ func sessionTitles(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			if !slices.Equal(ids, c.want) || p.Total != len(c.want) {
 				t.Errorf("q %q (public id %q) = %v (total %d), want %v", c.q, c.pub, ids, p.Total, c.want)
 			}
+		}
+		// ContentOff waits for the first turn to be over: running (a
+		// run_start alone, fresh) or settling (its root span stored, the
+		// run_finish not yet) may still store its messages records (D7).
+		now := time.Now().UTC()
+		live := func(sid, pub string) map[string]any {
+			return map[string]any{"weft.session.id": sid, "weft.public_id": pub, "weft.turn": int64(1), "gen_ai.agent.name": "watch"}
+		}
+		for _, sid := range []string{"s_running", "s_settling"} {
+			id := sid + "-t1"
+			start := record(id, "event", "run_start", 0, `{"type":"run_start","id":"`+id+`"}`, live(sid, "pub_"+sid))
+			start.Time = now
+			b := obsdb.Batch{Records: []obsdb.Record{start}}
+			if sid == "s_settling" {
+				sp := invokeSpan(id, 1, live(sid, "pub_"+sid))
+				sp.TraceID, sp.SpanID = "d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7d7", "d7d7d7d7d7d7d7d7"
+				sp.Start, sp.End = now.Add(-time.Second), now
+				b.Spans = []obsdb.Span{sp}
+			}
+			if err := db.Write(ctx(), b); err != nil {
+				t.Fatal(err)
+			}
+		}
+		page, err = db.Sessions(ctx(), obsdb.SessionQuery{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		got = map[string]obsdb.SessionRow{}
+		for _, s := range page.Sessions {
+			got[s.ID] = s
+		}
+		for sid, want := range map[string]bool{"s_running": false, "s_settling": false, "s_off": true} {
+			det, err := db.Session(ctx(), sid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sp, err := db.Sessions(ctx(), obsdb.SessionQuery{PublicID: det.PublicID})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got[sid].ContentOff != want || det.ContentOff != want || len(sp.Sessions) != 1 || sp.Sessions[0].ContentOff != want {
+				t.Errorf("%s content off: list %v, document %v, scoped %+v; want %v", sid, got[sid].ContentOff, det.ContentOff, sp.Sessions, want)
+			}
+		}
+		if r, err := db.Run(ctx(), "s_running-t1"); err != nil || r.Status != obsdb.StatusRunning {
+			t.Errorf("s_running-t1 = %+v, %v; want running", r.RunRow, err)
+		}
+		if r, err := db.Run(ctx(), "s_settling-t1"); err != nil || !r.Settling {
+			t.Errorf("s_settling-t1 = %+v, %v; want settling", r.RunRow, err)
 		}
 	}
 }

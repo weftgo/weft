@@ -121,3 +121,28 @@ func TestSessionTitlesAndQuery(t *testing.T) {
 		t.Errorf("panel session doc conv_o = %+v, want content_off", doc)
 	}
 }
+
+// A panel token's session document (scopedSessionRow) marks content_off
+// as lib/title.ts's contentOff does: not while the first turn is
+// running or settling — its messages records may still arrive (D7).
+func TestScopedSessionRowContentOffGate(t *testing.T) {
+	base := obsdb.RunRow{ID: "conv-t1", PublicID: "pub", Turn: 1, EventCount: 2, Status: obsdb.StatusSucceeded}
+	for _, c := range []struct {
+		name string
+		edit func(*obsdb.RunRow)
+		want bool
+	}{
+		{"settled, events, no messages", func(*obsdb.RunRow) {}, true},
+		{"running", func(r *obsdb.RunRow) { r.Status = obsdb.StatusRunning }, false},
+		{"settling", func(r *obsdb.RunRow) { r.Settling = true }, false},
+		{"messages stored", func(r *obsdb.RunRow) { r.MessageCount = 1 }, false},
+		{"derived", func(r *obsdb.RunRow) { r.Derived = true }, false},
+	} {
+		r := base
+		c.edit(&r)
+		got := scopedSessionRow(obsdb.SessionRow{ID: "conv"}, []obsdb.RunRow{r}, "pub")
+		if got.ContentOff != c.want {
+			t.Errorf("%s: ContentOff = %v, want %v", c.name, got.ContentOff, c.want)
+		}
+	}
+}

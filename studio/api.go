@@ -1560,7 +1560,9 @@ func scopedSessionRow(row obsdb.SessionRow, turns []obsdb.RunRow, pub string) ob
 	}
 	if first != nil {
 		out.FirstPrompt = first.PromptPreview
-		out.ContentOff = !first.Derived && first.MessageCount == 0 && first.EventCount > 0
+		// Gated like lib/title.ts's contentOff: a first turn still
+		// running or settling may yet store its messages records.
+		out.ContentOff = obsdb.SessionContentOff(*first)
 	}
 	if titled != nil {
 		out.Title = titled.Meta[obsdb.SessionTitleKey]

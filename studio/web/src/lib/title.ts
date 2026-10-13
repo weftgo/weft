@@ -146,6 +146,8 @@ export interface TitledRun {
   derived?: boolean
   status?: string
   settling?: boolean
+  /** What the core emitted (api.ts's RunRow): fewer stored is a loss. */
+  events_emitted?: number
   /** A run document's (or a child row's) holes; a list row has none. */
   holes?: readonly { hole: string }[]
 }
@@ -157,13 +159,16 @@ export interface TitledRun {
  * may still arrive), and not where the row names a lost-records hole
  * (gap, events_lost among its causes; not_recorded): records were
  * dropped, not content (W7-prep). A list row carries no holes, so
- * there the status and settling fields are the whole gate. */
+ * there the status and settling fields gate it, and its counts: fewer
+ * events stored than the core emitted (events_emitted) is a loss, not
+ * content-off (D7). */
 export function contentOff(r: TitledRun): boolean {
   return (
     !r.derived &&
     !r.message_count &&
     (r.event_count ?? 0) > 0 &&
     !isLive(r) &&
+    !(r.events_emitted && (r.event_count ?? 0) < r.events_emitted) &&
     !r.holes?.some((h) => h.hole === "gap" || h.hole === "not_recorded")
   )
 }

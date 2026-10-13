@@ -180,7 +180,15 @@ describe("the chip beside a cancelled status word (W7-prep)", () => {
   it("reads the cause alone, never 'cancelled' twice", () => {
     expect(stopChip(row, true)?.text).toBe("· studio.cancel")
     expect(stopChip(row, true)?.title).toContain("stopped_by canceled")
-    expect(stopChip({ ...row, cancel_cause: undefined }, true)).toBeNull()
+    // No cause: the step it fired at, so the header's link survives (D7);
+    // a run of no steps has none.
+    expect(stopChip({ ...row, cancel_cause: undefined }, true)).toEqual({
+      text: "· step 0",
+      title: stopChip(row, true)?.title,
+    })
+    expect(
+      stopChip({ ...row, cancel_cause: undefined, steps: 0 }, true)
+    ).toBeNull()
     // Elsewhere (no status word beside it) the whole words.
     expect(stopChip(row)?.text).toBe("cancelled · studio.cancel")
     // A canceled stop under another status word keeps its words.

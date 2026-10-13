@@ -291,4 +291,29 @@ describe("the size ledger (panel-budget.json)", () => {
     // The old cap's overrun is no longer one: the cap is the ledger's.
     expect(budgetTable(ledger, 81921).over).toBe(false)
   })
+
+  it("studio/README.md's panel figures are the ledger's last row (D7): the chain README → ledger → built bundle", () => {
+    const readme = readFileSync(
+      resolve(process.cwd(), "../README.md"),
+      "utf8"
+    ).replace(/\s+/g, " ")
+    const m =
+      /committed `studio\/dist\/panel\/panel\.js`, ([\d,]+) B raw \/ ([\d,]+) B gzip \(([\d.]+) KiB, the bundle of the ledger's row "([^"]+)"; ([\d,]+) B — ([\d.]+) KiB — of headroom/.exec(
+        readme
+      )
+    expect(m, "the README's panel-size sentence").not.toBeNull()
+    const n = (x: string) => Number(x.replace(/,/g, ""))
+    const [, raw, gz, gzKiB, label, head, headKiB] = m!
+    const last = ledger.rows.at(-1)!
+    expect(label).toBe(last.label)
+    expect(n(gz)).toBe(last.gzip)
+    expect(gzKiB).toBe((last.gzip / 1024).toFixed(1))
+    expect(n(head)).toBe(ledger.cap - last.gzip)
+    expect(headKiB).toBe(((ledger.cap - last.gzip) / 1024).toFixed(1))
+    // Raw is wc -c of the committed file (its version stamp included): a
+    // bump that changes the stamp's length moves it, and the release's bump
+    // step rebuilds dist and updates these figures.
+    const code = readFileSync(resolve(process.cwd(), "../dist/panel/panel.js"))
+    expect(n(raw)).toBe(code.byteLength)
+  })
 })

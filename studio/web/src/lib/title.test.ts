@@ -120,10 +120,21 @@ describe("runTitle / sessionTitle / turnTitle", () => {
       { status: "succeeded", settling: true },
       { status: "succeeded", holes: [{ hole: "gap" }] },
       { status: "failed", holes: [{ hole: "not_recorded" }] },
+      // A list row (no holes) whose events were lost (D7).
+      { status: "succeeded", event_count: 2, events_emitted: 5 },
     ])
       expect(runTitle({ ...base, message_count: 0, ...over }).kind).toBe("id")
     expect(
       runTitle({ ...base, message_count: 0, status: "succeeded" }).kind
+    ).toBe("absent")
+    expect(
+      runTitle({
+        ...base,
+        message_count: 0,
+        status: "succeeded",
+        event_count: 5,
+        events_emitted: 5,
+      }).kind
     ).toBe("absent")
   })
   it("a session: its title, else the first prompt, else content-off (its first turn), else the id", () => {

@@ -46,6 +46,7 @@ import type { AppGateFacts } from "@/lib/honesty"
 import { runLink, sessionLink } from "@/lib/links"
 import { heldError } from "@/lib/query"
 import { canReplay, tokenScopeOf } from "@/lib/replay"
+import { AWAITING } from "@/lib/status"
 
 interface Call {
   id: string
@@ -388,7 +389,7 @@ export function ParkedCalls({
         {pending.map((p) => (
           <li key={p.id} className="font-mono" data-pending-call={p.id}>
             {p.name}({p.args == null ? "" : JSON.stringify(p.args)}) —{" "}
-            {shown === "resumed" ? "decided" : "awaiting a decision"}
+            {shown === "resumed" ? "decided" : AWAITING}
             {shown === "experiment" ||
             shown === "resumed" ||
             shown === "checking" ||

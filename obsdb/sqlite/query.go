@@ -1032,18 +1032,53 @@ func sessionPromptExpr(pub string) (string, []any) {
 		ORDER BY r4.turn, r4.started_ns, r4.run_id LIMIT 1)), '')`, args
 }
 
-// sessionContentOffExpr is whether a grouped session's first turn (the
-// one sessionPromptExpr reads) was recorded without content
-// (SessionRow.ContentOff): events and no messages record, not derived.
-// pub scopes as in sessionTitleExpr.
-func sessionContentOffExpr(pub string) (string, []any) {
+// sessionFirstTurnExpr is a grouped session's first turn (the one
+// sessionPromptExpr reads) as a JSON object of what
+// SessionRow.ContentOff reads: its counts, Derived and the status
+// inputs firstTurn derives Status and Settling from, as the run
+// scanner does; ” when the session has none. pub scopes as in
+// sessionTitleExpr.
+func sessionFirstTurnExpr(pub string) (string, []any) {
 	scope, args := "", []any(nil)
 	if pub != "" {
 		scope, args = ` AND r5.public_id = ? AND r5.public_id <> ''`, []any{pub}
 	}
-	return `COALESCE((SELECT r5.derived = 0 AND r5.message_count = 0 AND r5.event_count > 0 FROM runs r5
+	return `COALESCE((SELECT json_object('derived', r5.derived, 'messages', r5.message_count, 'events', r5.event_count,
+			'failed', r5.failed, 'finished_ok', r5.finished_ok, 'root_ended', r5.root_ended, 'last_seen', r5.last_seen_ns)
+		FROM runs r5
 		WHERE r5.session_id = runs.session_id AND r5.session_id <> '' AND r5.parent_run_id = '' AND r5.playground = 0` + scope + `
-		ORDER BY r5.turn, r5.started_ns, r5.run_id LIMIT 1), 0)`, args
+		ORDER BY r5.turn, r5.started_ns, r5.run_id LIMIT 1), '')`, args
+}
+
+// firstTurn is sessionFirstTurnExpr's object (sqlite's booleans are
+// integers).
+type firstTurn struct {
+	Derived    int   `json:"derived"`
+	Messages   int64 `json:"messages"`
+	Events     int64 `json:"events"`
+	Failed     int   `json:"failed"`
+	FinishedOK int   `json:"finished_ok"`
+	RootEnded  int   `json:"root_ended"`
+	LastSeen   int64 `json:"last_seen"`
+}
+
+// contentOff decodes a firstTurn and applies obsdb.SessionContentOff
+// to it, its Status and Settling derived as the run scanner derives
+// them (DeriveStatus, DeriveSettling); false for none.
+func (f *firstTurn) contentOff(stored string, now time.Time) (bool, error) {
+	if stored == "" {
+		return false, nil
+	}
+	if err := json.Unmarshal([]byte(stored), f); err != nil {
+		return false, fmt.Errorf("sqlite: session first turn: %w", err)
+	}
+	derived, failed, finishedOK, rootEnded := f.Derived != 0, f.Failed != 0, f.FinishedOK != 0, f.RootEnded != 0
+	seen := time.Unix(0, f.LastSeen)
+	return obsdb.SessionContentOff(obsdb.RunRow{
+		Derived: derived, MessageCount: f.Messages, EventCount: f.Events,
+		Status:   obsdb.DeriveStatus(failed, finishedOK || rootEnded, seen, now),
+		Settling: obsdb.DeriveSettling(rootEnded && !derived && !failed, finishedOK, seen, now),
+	}), nil
 }
 
 func havingSQL(having []string) string {
@@ -1066,15 +1101,20 @@ func (d *DB) sessionRows(ctx context.Context, cutoff int64, pub, where string, w
 		return nil, err
 	}
 	defer func() { _ = rs.Close() }()
+	now := time.Unix(0, cutoff).Add(obsdb.InterruptedAfter) // statusExpr's clock
 	var out []obsdb.SessionRow
 	for rs.Next() {
 		var row obsdb.SessionRow
 		var first, last int64
 		var inTok, outTok, cached, cacheW, reason sql.NullInt64
-		var status string
+		var status, firstStored string
 		if err := rs.Scan(&row.ID, &row.PublicID, &row.Agent, &row.Turns,
 			&first, &last, &inTok, &outTok, &cached, &cacheW, &reason, &status,
-			&row.Title, &row.FirstPrompt, &row.ContentOff); err != nil {
+			&row.Title, &row.FirstPrompt, &firstStored); err != nil {
+			return nil, err
+		}
+		var ft firstTurn
+		if row.ContentOff, err = ft.contentOff(firstStored, now); err != nil {
 			return nil, err
 		}
 		row.FirstSeen = time.Unix(0, first).UTC()
@@ -1106,7 +1146,7 @@ func sessionRowsSQL(cutoff int64, pub, where string, wargs []any,
 	}
 	title, targs := sessionTitleExpr(pub)
 	prompt, pargs := sessionPromptExpr(pub)
-	off, oargs := sessionContentOffExpr(pub)
+	off, oargs := sessionFirstTurnExpr(pub)
 	args = append(append(append(args, targs...), pargs...), oargs...)
 	args = append(append(args, wargs...), hargs...)
 	return `SELECT session_id, MAX(public_id), MAX(agent), COUNT(*),

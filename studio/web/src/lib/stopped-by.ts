@@ -100,8 +100,10 @@ export interface StopRow {
  * run recorded no stopped_by. besideStatus: the chip sits beside the
  * run's status word (the header, the panel's turn row) — where that
  * word already says cancelled (failed, error_type cancelled; status.ts)
- * the chip reads the cause alone, "· studio.cancel", and nothing
- * without one: never "cancelled" twice (W7-prep). */
+ * the chip reads the cause alone, "· studio.cancel", and without one
+ * the step it fired at, "· step 2" — the header's link to that step
+ * survives (D7); nothing for a run of no steps: never "cancelled"
+ * twice (W7-prep). */
 export function stopChip(
   r: StopRow,
   besideStatus?: boolean
@@ -113,13 +115,12 @@ export function stopChip(
     r.stopped_by === "canceled" &&
     r.status === "failed" &&
     r.error_type === CANCELLED
-  )
-    return r.cancel_cause
-      ? {
-          text: `· ${r.cancel_cause}`,
-          title: `${w.hint} — stopped_by ${r.stopped_by}`,
-        }
-      : null
+  ) {
+    const title = `${w.hint} — stopped_by ${r.stopped_by}`
+    if (r.cancel_cause) return { text: `· ${r.cancel_cause}`, title }
+    const n = stopStep(r.steps)
+    return n === undefined ? null : { text: `· step ${n}`, title }
+  }
   const d = stopDetail(r.err, r.stopped_by)
   return {
     text: w.word + (d ? ` (${d})` : ""),

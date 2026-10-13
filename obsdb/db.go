@@ -578,9 +578,23 @@ type SessionRow struct {
 	FirstPrompt string
 	// ContentOff marks a session whose first turn (FirstPrompt's) was
 	// recorded without content: events stored and not one messages
-	// record (RunRow.EventCount > 0, MessageCount 0), and not Derived.
-	// The list says "(content not captured)" for it instead of the id.
+	// record (RunRow.EventCount > 0, MessageCount 0), and not Derived,
+	// nor running or settling — its messages records may still arrive
+	// (SessionContentOff). The list says "(content not captured)" for it
+	// instead of the id.
 	ContentOff bool
+}
+
+// SessionContentOff is SessionRow.ContentOff's rule over the session's
+// first turn, a run row with its Status and Settling derived
+// (DeriveStatus, DeriveSettling): events stored, not one messages
+// record, not Derived, and over — not running, not settling, whose
+// messages records may still arrive. Every backend and Studio's scoped
+// session row read it; the web client's lib/title.ts contentOff is its
+// twin.
+func SessionContentOff(first RunRow) bool {
+	return !first.Derived && first.MessageCount == 0 && first.EventCount > 0 &&
+		first.Status != StatusRunning && !first.Settling
 }
 
 // SessionTitleKey is the run metadata a thread session stamps with its

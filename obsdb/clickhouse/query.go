@@ -1152,22 +1152,20 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 	defer func() { _ = rs.Close() }()
 	now := time.Now()
 	page := obsdb.SessionPage{Total: int(total)}
-	var firstRuns []string
+	var firstRuns []*obsdb.RunRow
 	for rs.Next() {
 		var row obsdb.SessionRow
 		var turns uint64
 		var inTok, outTok, cached, cacheW, reason int64
 		var ok, failed bool
 		var newestSeen time.Time
-		var firstRun string
-		var firstDerived bool
-		if err := rs.Scan(&row.ID, &row.PublicID, &row.Agent, &turns,
+		var first firstTurn
+		if err := rs.Scan(append([]any{&row.ID, &row.PublicID, &row.Agent, &turns,
 			&row.FirstSeen, &row.LastSeen, &inTok, &outTok, &cached, &cacheW, &reason,
-			&ok, &failed, &newestSeen, &row.Title, &firstRun, &firstDerived); err != nil {
+			&ok, &failed, &newestSeen, &row.Title}, first.dest()...)...); err != nil {
 			return obsdb.SessionPage{}, err
 		}
-		firstRuns = append(firstRuns, firstRun)
-		row.ContentOff = !firstDerived // fillFirstPrompts reads the counts
+		firstRuns = append(firstRuns, first.row(now)) // fillFirstPrompts reads the counts
 		row.Turns = int(turns)
 		row.FirstSeen, row.LastSeen = row.FirstSeen.UTC(), row.LastSeen.UTC()
 		row.Usage = core.Usage{
@@ -1195,7 +1193,8 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 // every alias s-prefixed: the newest turn's status inputs and title
 // (argMax on (Turn, Started), SQLite's ORDER BY ... LIMIT 1), and the
 // first turn's run id (argMin), whose prompt and counts
-// fillFirstPrompts reads, and whether that turn is Derived.
+// fillFirstPrompts reads, and that turn's Derived and status inputs
+// (firstTurn derives its Status and Settling).
 const sessionAggs = `max(PublicID) AS sPublicID, max(Agent) AS sAgent,
 		uniqExact(RunId) AS sTurns, min(Started) AS sFirstSeen, max(LastSeen) AS sLastSeen,
 		sum(InputTokens) AS sInputTokens, sum(OutputTokens) AS sOutputTokens,
@@ -1205,24 +1204,48 @@ const sessionAggs = `max(PublicID) AS sPublicID, max(Agent) AS sAgent,
 		argMax(LastSeen, (Turn, Started)) AS sNewestLastSeen,
 		argMaxIf(Title, (Turn, Started), Title != '') AS sTitle,
 		argMin(RunId, (Turn, Started, RunId)) AS sFirstRun,
-		argMin(Derived, (Turn, Started, RunId)) AS sFirstDerived`
+		argMin(Derived, (Turn, Started, RunId)) AS sFirstDerived,
+		argMin(Failed, (Turn, Started, RunId)) AS sFirstFailed,
+		argMin(FinishedOK, (Turn, Started, RunId)) AS sFirstFinishedOK,
+		argMin(RootEnded, (Turn, Started, RunId)) AS sFirstRootEnded,
+		argMin(LastSeen, (Turn, Started, RunId)) AS sFirstLastSeen`
+
+// firstTurn is a session row's first-turn aggregates (sessionAggs'
+// sFirst* columns, in order).
+type firstTurn struct {
+	id                                   string
+	derived, failed, finishedOK, rootEnd bool
+	lastSeen                             time.Time
+}
+
+func (f *firstTurn) dest() []any {
+	return []any{&f.id, &f.derived, &f.failed, &f.finishedOK, &f.rootEnd, &f.lastSeen}
+}
+
+// row is the first turn as a run row with its Status and Settling
+// derived as the run scanner derives them (DeriveStatus,
+// DeriveSettling); fillCounts adds its counts.
+func (f *firstTurn) row(now time.Time) *obsdb.RunRow {
+	seen := f.lastSeen.UTC()
+	return &obsdb.RunRow{
+		ID: f.id, Derived: f.derived, RootEnded: f.rootEnd, FinishRecorded: f.finishedOK, LastSeen: seen,
+		Status:   obsdb.DeriveStatus(f.failed, f.finishedOK || f.rootEnd, seen, now),
+		Settling: obsdb.DeriveSettling(f.rootEnd && !f.derived && !f.failed, f.finishedOK, seen, now),
+	}
+}
 
 // fillFirstPrompts sets each row's FirstPrompt to its first turn's
-// prompt preview (firstRuns[i] is rows[i]'s first turn) and ContentOff
-// from that turn's counts: the run rows' own derivations (fillCounts),
-// "" for a turn that has none. rows[i].ContentOff arrives as "the first
-// turn is not Derived" and leaves as contentOff's whole rule.
-func (d *DB) fillFirstPrompts(ctx context.Context, rows []obsdb.SessionRow, firstRuns []string) error {
-	if len(firstRuns) == 0 {
+// prompt preview (firsts[i] is rows[i]'s first turn) and ContentOff
+// from that turn (obsdb.SessionContentOff) once fillCounts has given it
+// the run rows' own counts; "" for a turn that has none.
+func (d *DB) fillFirstPrompts(ctx context.Context, rows []obsdb.SessionRow, firsts []*obsdb.RunRow) error {
+	if len(firsts) == 0 {
 		return nil
-	}
-	firsts := make([]*obsdb.RunRow, len(firstRuns))
-	for i, id := range firstRuns {
-		firsts[i] = &obsdb.RunRow{ID: id, Derived: !rows[i].ContentOff}
 	}
 	if err := d.fillCounts(ctx, firsts); err != nil {
 		return err
 	}
+	// fillCounts fills the first row of each id: read every row's from it.
 	byID := make(map[string]*obsdb.RunRow, len(firsts))
 	for _, r := range firsts {
 		if _, seen := byID[r.ID]; !seen {
@@ -1230,17 +1253,11 @@ func (d *DB) fillFirstPrompts(ctx context.Context, rows []obsdb.SessionRow, firs
 		}
 	}
 	for i := range rows {
-		r := byID[firstRuns[i]]
+		r := byID[firsts[i].ID]
 		rows[i].FirstPrompt = r.PromptPreview
-		rows[i].ContentOff = contentOff(*r)
+		rows[i].ContentOff = obsdb.SessionContentOff(*r)
 	}
 	return nil
-}
-
-// contentOff is SessionRow.ContentOff's rule over a run row: events
-// stored, not one messages record, not Derived.
-func contentOff(r obsdb.RunRow) bool {
-	return !r.Derived && r.MessageCount == 0 && r.EventCount > 0
 }
 
 // sessionRuns builds the per-run subquery both Sessions and Session
@@ -1294,11 +1311,10 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 		}
 		return obsdb.SessionDetail{}, fmt.Errorf("%w: session %s", obsdb.ErrNotFound, id)
 	}
-	var firstRun string
-	var firstDerived bool
-	if err := rs.Scan(&row.ID, &row.PublicID, &row.Agent, &turns,
+	var first firstTurn
+	if err := rs.Scan(append([]any{&row.ID, &row.PublicID, &row.Agent, &turns,
 		&row.FirstSeen, &row.LastSeen, &inTok, &outTok, &cached, &cacheW, &reason,
-		&ok, &failed, &newestSeen, &row.Title, &firstRun, &firstDerived); err != nil {
+		&ok, &failed, &newestSeen, &row.Title}, first.dest()...)...); err != nil {
 		return obsdb.SessionDetail{}, err
 	}
 	if err := rs.Err(); err != nil {
@@ -1328,9 +1344,9 @@ func (d *DB) Session(ctx context.Context, id string) (_ obsdb.SessionDetail, err
 		return obsdb.SessionDetail{}, err
 	}
 	for _, r := range runs { // the first turn's preview, filled with the counts
-		if r.ID == firstRun {
+		if r.ID == first.id {
 			row.FirstPrompt = r.PromptPreview
-			row.ContentOff = contentOff(r)
+			row.ContentOff = obsdb.SessionContentOff(r)
 		}
 	}
 	return obsdb.SessionDetail{SessionRow: row, Runs: runs}, nil

@@ -72,7 +72,10 @@
           "provider": "wefttest",
           "name": "script"
         },
-        "stream": true
+        "stream": true,
+        "prepared": [
+          "system"
+        ]
       },
       "prompt": {
         "hash": "7be02fcc1da7eb770a5ac56060dee4a1a6e8fa3734b0206f38f2e5a38c0a8921",
@@ -116,7 +119,10 @@
           "provider": "wefttest",
           "name": "script"
         },
-        "stream": true
+        "stream": true,
+        "prepared": [
+          "system"
+        ]
       },
       "prompt": {
         "hash": "7be02fcc1da7eb770a5ac56060dee4a1a6e8fa3734b0206f38f2e5a38c0a8921",

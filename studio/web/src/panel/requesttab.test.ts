@@ -311,6 +311,8 @@ describe("E1 Done, in the panel", () => {
     await pickStep(el, 1)
     expect(marks(el)).toEqual([
       "changed by PrepareStep",
+      // The record names the part (O9): the request's prepared.
+      "PrepareStep: system",
       "catalog changed at this step",
     ])
     expect(diff(el)).toEqual({

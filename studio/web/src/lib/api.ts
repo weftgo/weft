@@ -1298,6 +1298,8 @@ export interface ToolEntry {
   max_result_bytes: number
   sequential: boolean
   source: string
+  /** The tool Output registered (submit_output): the typed answer. */
+  output?: boolean
 }
 
 /** A resolved prompt record. content is "" or "truncated"
@@ -1336,7 +1338,9 @@ export interface RequestBody {
   messages_ref: { index?: number; count: number }
   tools: { catalog_hash: string; names: string[] }
   tool_choice?: { mode: string; name?: string }
-  thinking?: { level: string; budget?: number }
+  /** wire: how the adapter sends the level (O16) — the provider field
+   * it writes, or "none"; absent when the model declares none. */
+  thinking?: { level: string; budget?: number; wire?: string }
   sequential_tools: boolean
   params: {
     temperature?: number
@@ -1347,6 +1351,9 @@ export interface RequestBody {
   }
   model: { provider?: string; name?: string }
   stream: boolean
+  /** The parts the PrepareStep chain changed (O9): system, messages,
+   * tools, tool_choice, params, thinking, sequential_tools. */
+  prepared?: string[]
 }
 
 /** One request record: one model-call attempt. content is ""
@@ -1584,6 +1591,11 @@ export interface StepAttempt {
   /** The attempt span's weft.attempt.layer: "fallback" for a request
    * mw.Fallback sent to a backup; absent on a primary attempt. */
   layer?: string
+  /** U25 (O6): the attempt span's http.response.status_code, its
+   * weft.attempt.wait_ms and, failed, its status description. */
+  http_status?: number
+  wait_ms?: number
+  error?: string
   started?: string
   finished?: string
   span_id?: string

@@ -52,6 +52,11 @@ export interface FoldedToolCall {
   /** What the recorder did to this call's content (its tool_start and
    * tool_finish attrs: truncated, stripped — lib/honesty.ts). */
   holes?: HoleMark[]
+  /** A call of a max_tokens step the loop never ran (rule 11): no
+   * tool_start, placed from the transcript (applyTranscript) with its
+   * cut arguments as the model sent them and the "not executed"
+   * result (UX-S1-03). */
+  unrun?: boolean
 }
 
 export interface FoldedStep {
@@ -649,8 +654,32 @@ export function applyTranscript(
         // A content-stripped tool_start carries null args: the
         // transcript's are the ones the model sent.
         if (call && call.args == null && tc.args != null) call.args = tc.args
+        // A max_tokens step's calls never ran (rule 11): no event
+        // carries them — the transcript does, cut where the output
+        // stopped (UX-S1-03).
+        if (!call && step.finish?.reason === "max_tokens")
+          step.toolCalls.push({
+            callId: tc.id,
+            name: tc.name,
+            args: tc.args,
+            streamedArgs: "",
+            state: "done",
+            startPos: step.from,
+            unrun: true,
+          })
       }
     }
+    // Their "not executed" results, from the step's tool message.
+    for (const msg of b.messages)
+      for (const part of msg.role === "tool" ? msg.content : []) {
+        const r = part as Extract<Part, { type: "tool_result" }> | null
+        const call =
+          r?.type === "tool_result"
+            ? step.toolCalls.find((c) => c.unrun && c.callId === r.call_id)
+            : undefined
+        if (call && r)
+          call.result = { content: String(r.content), isError: !!r.is_error }
+      }
   }
   out.unplaced = unplaced
   return out

@@ -62,6 +62,7 @@ import {
 import type { DiffDoc } from "../lib/stepdiff"
 import { stepDiffBlock } from "./compare"
 import { FakeEventSource as StudioEventSource } from "../test/fake-event-source"
+import { panelRoutes, shape, studioFor } from "../test/cards-fixture"
 import {
   apiError,
   FakeStudio,
@@ -3915,5 +3916,76 @@ describe("the landing step's answer on both surfaces (P8-fix-a)", () => {
       timeout: 5_000,
     })
     expect(all(el, "[data-weft-logs]")).toHaveLength(0)
+  })
+})
+
+// U25: the run cards' facts are one set of words on both surfaces — a
+// recorded shape (studio/cards_test.go's golden) drawn by the panel's
+// Story, then by the run page's story: the tool card's execution facts,
+// a breakpoint park's word, a Subagent call's typed outcome, an
+// attempt's cause.
+describe("the run cards' facts on both surfaces (U25)", () => {
+  const CAPS = {
+    ...META,
+    capabilities: [...META.capabilities, "requests", "steps"],
+  }
+  async function panelText(name: string, sel: string): Promise<string[]> {
+    panelStudio(panelRoutes(name), CAPS)
+    const el = await mount()
+    await settle()
+    const out = all(el, sel).map((n) => n.textContent)
+    el.remove()
+    await settle()
+    teardown()
+    setup()
+    return out
+  }
+  async function studioText(name: string, sel: string, query = "view=story") {
+    stubBrowser()
+    StudioEventSource.reset()
+    vi.stubGlobal("EventSource", StudioEventSource)
+    setStudioToken("")
+    studioFor(name).install()
+    renderApp(`/runs/${shape(name).run.id}?${query}`)
+    await waitFor(() => expect(document.querySelector(sel)).toBeTruthy())
+    return Array.from(document.querySelectorAll(sel), (n) => n.textContent)
+  }
+
+  it("tools.timeout's execution facts", async () => {
+    const panel = await panelText(
+      "tools.timeout",
+      '.weft-call[data-key="s1"] .weft-badge.weft-info'
+    )
+    const studio = await studioText(
+      "tools.timeout",
+      '[data-call="s1"] [data-exec-facts]'
+    )
+    expect(studio).toEqual(["0 ms / 50 ms limit"])
+    expect(panel).toContain(studio[0])
+  })
+
+  it("appr.breakpoint-own's park word", async () => {
+    const panel = await panelText(
+      "appr.breakpoint-own",
+      '.weft-call[data-key="b1"] .weft-warn'
+    )
+    const studio = await studioText(
+      "appr.breakpoint-own",
+      '[data-call="b1"] [data-parked-call]'
+    )
+    expect(panel).toEqual(studio)
+  })
+
+  it("sub.failed's typed outcome", async () => {
+    const panel = await panelText(
+      "sub.failed",
+      '.weft-call[data-key="w1"] .weft-err'
+    )
+    const studio = await studioText(
+      "sub.failed",
+      '[data-call="w1"] [data-tool-pill]'
+    )
+    expect(studio).toEqual(["child failed"])
+    expect(panel).toEqual(studio)
   })
 })

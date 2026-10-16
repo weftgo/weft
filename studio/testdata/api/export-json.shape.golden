@@ -115,6 +115,8 @@
 .requests.requests[].body.model.provider=string
 .requests.requests[].body.model{}
 .requests.requests[].body.params{}
+.requests.requests[].body.prepared[]
+.requests.requests[].body.prepared[]=string
 .requests.requests[].body.sequential_tools=bool
 .requests.requests[].body.step=float64
 .requests.requests[].body.stream=bool

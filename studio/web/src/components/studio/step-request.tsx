@@ -35,8 +35,14 @@ import type {
   ToolEntry,
   Transcript,
 } from "@/lib/api"
-import { attemptLabel, attemptLayer } from "@/lib/attempts"
 import { messageLine } from "@/lib/compaction"
+import {
+  attemptTag,
+  OUTPUT,
+  overrideTitle,
+  preparedChip,
+  thinkingWords,
+} from "@/lib/cards"
 import { diffLinesBounded } from "@/lib/diff"
 import type { BoundedDiff } from "@/lib/diff"
 import {
@@ -419,6 +425,11 @@ function ToolChips({ t }: { t: ToolEntry }) {
         <Chip title="a barrier: runs alone">sequential</Chip>
       ) : null}
       <Chip title="where the tool came from">source {t.source || "?"}</Chip>
+      {t.output ? (
+        <Chip title="the tool Output registered: the run's typed answer, not a side effect (the tools record's output)">
+          {OUTPUT.typed}
+        </Chip>
+      ) : null}
     </span>
   )
 }
@@ -656,10 +667,11 @@ function AttemptView({
       </div>
       <div className="flex gap-2">
         <Label>thinking</Label>
-        <span className="font-mono text-[11px]">
-          {b.thinking
-            ? `${b.thinking.level}${b.thinking.budget ? ` · budget ${b.thinking.budget}` : ""}`
-            : "adapter default"}
+        <span
+          className="font-mono text-[11px]"
+          data-thinking-wire={b.thinking?.wire}
+        >
+          {thinkingWords(b.thinking)}
         </span>
       </div>
       <div className="flex gap-2">
@@ -876,11 +888,16 @@ export function RequestSection({
   const rows = mine?.rows ?? []
   const row = rows.find((r) => r.attempt === pick) ?? rows.at(-1)
   const facts = usePromptFacts(req, step, rows.at(0))
+  // What the PrepareStep chain changed at this step (O9), and every
+  // knob an experiment overrode for the run (UX-S5b-03) — on the run's
+  // first recorded step, as the instructions chip was.
+  const prep = preparedChip(rows.at(0)?.body.prepared)
+  const overridden =
+    rows.length > 0 && !req.prev.has(step) && !req.doc?.badge
+      ? (req.ctx?.override?.fields ?? [])
+      : []
   const label = (r: RequestRow) =>
-    attemptLabel(
-      r.attempt,
-      attemptLayer(req.ctx?.spans, req.ctx?.runId ?? "", step, r.attempt)
-    )
+    attemptTag(req.ctx?.spans, req.ctx?.runId ?? "", step, r.attempt)
 
   let head: React.ReactNode
   let body: React.ReactNode = null
@@ -926,11 +943,16 @@ export function RequestSection({
             {CHIP_PROMPT_CHANGED}
           </Mark>
         ) : null}
-        {facts.experiment ? (
+        {prep ? (
           <Mark
-            mark="experiment"
-            title="the run's instructions were replaced for this run (weft.override.instructions on its invoke_agent span)"
+            mark="prepared"
+            title="what this step's PrepareStep chain changed (the request record's prepared)"
           >
+            {prep}
+          </Mark>
+        ) : null}
+        {overridden.length ? (
+          <Mark mark="experiment" title={overrideTitle(overridden)}>
             {CHIP_EXPERIMENT}
           </Mark>
         ) : null}

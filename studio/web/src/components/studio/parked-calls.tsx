@@ -14,6 +14,7 @@
 // the playground says so in meta.capabilities_off's words. Steer on the
 // running app turn sits beside (AppSteer). Cancel is never offered on
 // an app turn: the runtime refuses it.
+import { BREAKPOINT } from "@/lib/cards"
 import { useEffect, useRef, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
@@ -344,9 +345,13 @@ function useAppTurn(doc: RunDoc) {
 export function ParkedCalls({
   doc,
   pending,
+  words,
 }: {
   doc: RunDoc
   pending: Call[]
+  /** Each parked call's words by id (lib/cards.ts parkWords): an
+   * approval gate or a breakpoint (UX-H-18). */
+  words?: Map<string, { word: string; hint: string }>
 }) {
   const {
     kind,
@@ -383,13 +388,21 @@ export function ParkedCalls({
       data-parked={shown}
     >
       <span className="eyebrow">
-        {shown === "resumed" ? "decided" : "pending approval"}
+        {shown === "resumed"
+          ? "decided"
+          : pending.every((p) => words?.get(p.id)?.word === BREAKPOINT)
+            ? BREAKPOINT
+            : "pending approval"}
       </span>
       <ul className="mt-1 space-y-0.5">
         {pending.map((p) => (
           <li key={p.id} className="font-mono" data-pending-call={p.id}>
             {p.name}({p.args == null ? "" : JSON.stringify(p.args)}) —{" "}
-            {shown === "resumed" ? "decided" : AWAITING}
+            <span title={words?.get(p.id)?.hint}>
+              {shown === "resumed"
+                ? "decided"
+                : (words?.get(p.id)?.word ?? AWAITING)}
+            </span>
             {shown === "experiment" ||
             shown === "resumed" ||
             shown === "checking" ||

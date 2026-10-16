@@ -8,6 +8,7 @@
 // capability. Every hole is a badge: a run older than attempt
 // reporting shows not_recorded with its reason and fix, never an empty
 // pane.
+import { attemptCause } from "@/lib/cards"
 import { useQuery } from "@tanstack/react-query"
 import { ChevronRight } from "lucide-react"
 import { useState } from "react"
@@ -156,6 +157,12 @@ function AttemptRow({ a, from }: { a: StepAttempt; from?: string }) {
         {a.model}
       </span>
       <span data-attempt-outcome>{outcomeOf(a)}</span>
+      {attemptCause(a) ? (
+        // Why it failed and how long it waited first (UX-S2-02).
+        <span className="text-muted-foreground" data-attempt-cause>
+          {attemptCause(a)}
+        </span>
+      ) : null}
       {a.retry_after_ms ? (
         <span className="text-faint">
           retry after {msText(a.retry_after_ms)}

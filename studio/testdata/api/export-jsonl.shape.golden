@@ -101,6 +101,8 @@
 <request>.body.model.provider=string
 <request>.body.model{}
 <request>.body.params{}
+<request>.body.prepared[]
+<request>.body.prepared[]=string
 <request>.body.sequential_tools=bool
 <request>.body.step=float64
 <request>.body.stream=bool

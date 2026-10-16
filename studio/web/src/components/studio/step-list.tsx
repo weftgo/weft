@@ -28,7 +28,15 @@ import {
   useState,
 } from "react"
 
-import { stepQuery } from "@/lib/api"
+import { isHoleRef, stepQuery } from "@/lib/api"
+import {
+  CHILD_HINT,
+  childOutcome,
+  execLine,
+  PARK_HINT,
+  parkWord,
+} from "@/lib/cards"
+import type { CallFacts } from "@/lib/cards"
 import { toolFailure } from "@/lib/error-kind"
 import type { ToolFactsMap } from "@/lib/error-kind"
 import { CacheHint, Cost, useCostCapable } from "@/components/studio/cost"
@@ -120,6 +128,16 @@ const StoryMemory = createContext<Map<string, boolean> | null>(null)
  * "retry 1/2" off them, else the result's code. */
 const ToolFactsCtx = createContext<ToolFactsMap | undefined>(undefined)
 
+/** The run cards' facts (U25): each call's execute_tool facts by
+ * `<step>:<call id>` (lib/cards.ts callFactsOf), the parked calls'
+ * words by call id, each tool's origin by name. */
+interface Cards {
+  facts?: Map<string, CallFacts>
+  parked: Map<string, { word: string; hint: string }>
+  sources?: Map<string, string>
+}
+const CardsCtx = createContext<Cards | undefined>(undefined)
+
 /** useRemembered is useState(initial) remembered under key in the
  * story's memory; without a key (a subagent's or a span's step) or a
  * memory, plain state. */
@@ -180,10 +198,15 @@ export function Usage({
   )
 }
 
-/** One-line args: `{"order_id":"42"}`, clipped. */
+/** One-line args: `{"order_id":"42"}`, clipped. A call cut at the
+ * output limit keeps its args as the model sent them (a string). */
 function argsSummary(call: FoldedToolCall): string {
   const src =
-    call.args !== undefined ? JSON.stringify(call.args) : call.streamedArgs
+    typeof call.args === "string"
+      ? call.args
+      : call.args !== undefined
+        ? JSON.stringify(call.args)
+        : call.streamedArgs
   if (!src) return ""
   return src.length > 80 ? `${src.slice(0, 79)}…` : src
 }
@@ -219,10 +242,37 @@ function JumpButton({
 function CallPill({
   call,
   state,
+  step,
+  child,
 }: {
   call: FoldedToolCall
   state: "running" | "done" | "never"
+  step?: number
+  child?: boolean
 }) {
+  const cards = useContext(CardsCtx)
+  const cf = cards?.facts?.get(`${step}:${call.callId}`)
+  const parked = state === "never" ? cards?.parked.get(call.callId) : undefined
+  const src = cards?.sources?.get(call.name)
+  const exec =
+    [execLine(cf), src && src !== "local" ? src : null]
+      .filter(Boolean)
+      .join(" · ") || null
+  if (parked)
+    // A parked call awaits a decision — an approval gate or a
+    // breakpoint (UX-S3-12, UX-H-18) — it did not fail.
+    return (
+      <span className="flex items-center gap-1.5">
+        <span
+          className="rounded-sm border border-status-parked/50 px-1.5 py-px font-mono text-[10px] tracking-wide text-status-parked"
+          title={parked.hint}
+          data-parked-call={cf?.park ?? ""}
+        >
+          {parked.word}
+        </span>
+        {exec ? <ExecFacts text={exec} /> : null}
+      </span>
+    )
   if (state === "running")
     return (
       <span className="font-mono text-[11px] text-status-run-ink">
@@ -242,7 +292,14 @@ function CallPill({
   const fact = useContext(ToolFactsCtx)?.get(call.callId)
   if (!r) return null
   const coded = r.isError ? CODED.exec(r.content) : null
-  const f = r.isError && fact ? toolFailure(fact.error_type, fact) : null
+  // A Subagent call's typed outcome first (UX-S3-15), then the kind.
+  const type = fact?.error_type ?? coded?.[1]
+  const typed = r.isError ? childOutcome(type, cf, child) : null
+  const f = typed
+    ? { word: typed, hint: CHILD_HINT[type ?? ""] ?? "" }
+    : r.isError && fact
+      ? toolFailure(fact.error_type, fact)
+      : null
   const cut = truncation(r.content)
   return (
     <span className="flex items-center gap-1.5">
@@ -263,8 +320,23 @@ function CallPill({
       <span className="font-mono text-[11px] text-faint tabular-nums">
         {bytes(new TextEncoder().encode(r.content).length)}
       </span>
+      {exec ? <ExecFacts text={exec} /> : null}
       {cut ? <TruncationBadge content={r.content} /> : null}
       {call.holes?.length ? <HoleBadges holes={call.holes} /> : null}
+    </span>
+  )
+}
+
+/** A tool card's execution facts (UX-S2-06): its wall time against
+ * the limit it ran under, its queue wait, its origin. */
+function ExecFacts({ text }: { text: string }) {
+  return (
+    <span
+      className="font-mono text-[11px] text-faint tabular-nums"
+      title="the call's wall time / the Timeout it ran under · the wait for its turn · its origin (the execute_tool span, the tools record)"
+      data-exec-facts
+    >
+      {text}
     </span>
   )
 }
@@ -277,9 +349,12 @@ export function ToolCallRow({
   compact,
   replayAt,
   editStep,
+  step,
 }: {
   call: FoldedToolCall
   runStatus: string
+  /** The step the call is of: its facts' key (call ids repeat). */
+  step?: number
   child?: ChildRow
   onJump?: (t: number) => void
   compact?: boolean
@@ -334,7 +409,12 @@ export function ToolCallRow({
             {summary}
           </span>
         ) : null}
-        <CallPill call={call} state={state} />
+        <CallPill
+          call={call}
+          state={state}
+          step={step}
+          child={!!(child || call.childRunId)}
+        />
         <span className="ml-auto flex items-center gap-1">
           <span
             className="font-mono text-[10px] text-faint"
@@ -358,8 +438,15 @@ export function ToolCallRow({
       </div>
       {open ? (
         <div className={`space-y-1.5 pt-1 ${compact ? "" : "max-w-3xl"}`}>
-          {call.args !== undefined ? (
-            editStep !== undefined ? (
+          {typeof call.args === "string" ? (
+            // The model's args cut where its output stopped (UX-S1-03):
+            // as sent, never parsed.
+            <CodeWin
+              title="args · cut at the output token limit"
+              text={call.args}
+            />
+          ) : call.args !== undefined ? (
+            editStep !== undefined && !call.unrun ? (
               <Editable
                 target={{
                   kind: "tool_args",
@@ -483,6 +570,7 @@ export function StepBody({
               key={call.startPos}
               call={call}
               runStatus={runStatus}
+              step={step.index}
               child={
                 (call.childRunId
                   ? childLinks.get(call.childRunId)
@@ -909,6 +997,7 @@ export function StepList({
   onStep,
   stepInputRef,
   toolFacts,
+  callFacts,
 }: {
   events: WireEvent[]
   folded: FoldedRun
@@ -945,6 +1034,9 @@ export function StepList({
   /** The run's execute_tool facts by call id (toolFactsOf), when its
    * spans are loaded. */
   toolFacts?: ToolFactsMap
+  /** The run cards' call facts by `<step>:<call id>` (callFactsOf),
+   * when its spans are loaded (U25). */
+  callFacts?: Map<string, CallFacts>
 }) {
   // The compactions the run document names (A9.2). A run from before
   // A9 has none in its document and draws no marker: the record is
@@ -965,6 +1057,22 @@ export function StepList({
   // While scrubbing, the run reads as running: calls past the
   // playhead are "running", not "never completed".
   const runStatus = replaying ? "running" : doc.status
+  // The parked calls' words (UX-S3-12, UX-H-18): an approval gate or a
+  // breakpoint, by the span's park source; the tools' origins by name.
+  const parked = new Map(
+    view.pending.map((c) => {
+      const f = [...(callFacts ?? [])].find(
+        ([k, v]) => v.park && k.endsWith(`:${c.id}`)
+      )?.[1]
+      const word = parkWord(f, c.name, doc.meta["weft.playground.breakpoints"])
+      return [c.id, { word, hint: PARK_HINT[word] ?? "" }] as const
+    })
+  )
+  const sources = new Map<string, string>()
+  for (const r of requests?.doc?.requests ?? [])
+    for (const t of r.tools && !isHoleRef(r.tools) ? r.tools.tools : [])
+      sources.set(t.name, t.source)
+  const cards: Cards = { facts: callFacts, parked, sources }
   // The verbs' from_step is the card's own step ordinal (the stored
   // index the server cuts at). How far a replay may start is the
   // transcript's to say (the server's rule, replayBounds), never the
@@ -1085,132 +1193,136 @@ export function StepList({
   )
   return (
     <StoryMemory.Provider value={memory}>
-      <ToolFactsCtx.Provider value={toolFacts}>
-        <div className="space-y-3">
-          {onStep ? (
-            <StepScrubber
-              steps={steps}
-              value={highlight}
-              runStatus={runStatus}
-              onStep={scrubTo}
-              inputRef={stepInputRef}
-            />
-          ) : null}
-          <EditsMark row={doc} batches={transcript?.batches} />
-          {sessionMarkers.map((c, i) => (
-            <CompactionMarker
-              key={c.hash || `session-${i}`}
-              c={c}
-              all={compactions}
-              runId={doc.id}
-              transcript={transcript}
-              transcriptError={transcriptError}
-            />
-          ))}
-          {virtual ? (
-            // Virtualised (plan H2): a list whose items say where they sit
-            // in the whole; the DOM holds the cards in view plus overscan.
-            <div
-              ref={scroller}
-              className="max-h-[calc(100vh-12rem)] overflow-auto"
-              role="list"
-              aria-label={`steps, ${steps.length.toLocaleString()}`}
-              data-virtual
-              onScroll={(e) => {
-                atEnd.current = isAtEnd(e.currentTarget)
-                // Scrolled away from the named card: naming it again
-                // scrolls back to it.
-                const r = virt.range
-                if (
-                  r &&
-                  hlIndex >= 0 &&
-                  (hlIndex < r.startIndex || hlIndex > r.endIndex)
-                )
-                  scrolledTo.current = undefined
-              }}
-            >
+      <CardsCtx.Provider value={cards}>
+        <ToolFactsCtx.Provider value={toolFacts}>
+          <div className="space-y-3">
+            {onStep ? (
+              <StepScrubber
+                steps={steps}
+                value={highlight}
+                runStatus={runStatus}
+                onStep={scrubTo}
+                inputRef={stepInputRef}
+              />
+            ) : null}
+            <EditsMark row={doc} batches={transcript?.batches} />
+            {sessionMarkers.map((c, i) => (
+              <CompactionMarker
+                key={c.hash || `session-${i}`}
+                c={c}
+                all={compactions}
+                runId={doc.id}
+                transcript={transcript}
+                transcriptError={transcriptError}
+              />
+            ))}
+            {virtual ? (
+              // Virtualised (plan H2): a list whose items say where they sit
+              // in the whole; the DOM holds the cards in view plus overscan.
               <div
-                className="relative w-full"
-                style={{ height: virt.getTotalSize() }}
+                ref={scroller}
+                className="max-h-[calc(100vh-12rem)] overflow-auto"
+                role="list"
+                aria-label={`steps, ${steps.length.toLocaleString()}`}
+                data-virtual
+                onScroll={(e) => {
+                  atEnd.current = isAtEnd(e.currentTarget)
+                  // Scrolled away from the named card: naming it again
+                  // scrolls back to it.
+                  const r = virt.range
+                  if (
+                    r &&
+                    hlIndex >= 0 &&
+                    (hlIndex < r.startIndex || hlIndex > r.endIndex)
+                  )
+                    scrolledTo.current = undefined
+                }}
               >
-                {virt.getVirtualItems().map((item) => (
-                  <div
-                    key={item.key}
-                    ref={virt.measureElement}
-                    data-index={item.index}
-                    role="listitem"
-                    aria-setsize={steps.length}
-                    aria-posinset={item.index + 1}
-                    className="absolute top-0 left-0 w-full space-y-3 pb-3"
-                    style={{ transform: `translateY(${item.start}px)` }}
-                  >
-                    {stepBlock(steps[item.index])}
-                  </div>
-                ))}
+                <div
+                  className="relative w-full"
+                  style={{ height: virt.getTotalSize() }}
+                >
+                  {virt.getVirtualItems().map((item) => (
+                    <div
+                      key={item.key}
+                      ref={virt.measureElement}
+                      data-index={item.index}
+                      role="listitem"
+                      aria-setsize={steps.length}
+                      aria-posinset={item.index + 1}
+                      className="absolute top-0 left-0 w-full space-y-3 pb-3"
+                      style={{ transform: `translateY(${item.start}px)` }}
+                    >
+                      {stepBlock(steps[item.index])}
+                    </div>
+                  ))}
+                </div>
               </div>
-            </div>
-          ) : (
-            steps.map((step) => (
-              <div key={step.index} className="space-y-3">
-                {stepBlock(step)}
-              </div>
-            ))
-          )}
-          {/* The boundary after the last step (its calls all answered, so
+            ) : (
+              steps.map((step) => (
+                <div key={step.index} className="space-y-3">
+                  {stepBlock(step)}
+                </div>
+              ))
+            )}
+            {/* The boundary after the last step (its calls all answered, so
           a replay from the step count is accepted). */}
-          {maxFrom !== null &&
-          view.steps.length > 0 &&
-          maxFrom > Math.max(...view.steps.map((s) => s.index)) ? (
-            <InsertHere step={maxFrom} last />
-          ) : null}
-          {view.unplaced?.length ? <Unplaced batches={view.unplaced} /> : null}
-          {view.steps.length === 0 ? (
-            <p className="py-6 text-center font-mono text-xs text-faint">
-              {replaying || upTo === 0
-                ? "nothing revealed yet — play or step forward"
-                : events.length === 0
-                  ? doc.status === "running"
-                    ? "waiting for the first event…"
-                    : "no events were recorded for this run"
-                  : "no steps yet"}
-            </p>
-          ) : null}
-          {/* What ended the run (U3.2): the end card mirrors the header's
+            {maxFrom !== null &&
+            view.steps.length > 0 &&
+            maxFrom > Math.max(...view.steps.map((s) => s.index)) ? (
+              <InsertHere step={maxFrom} last />
+            ) : null}
+            {view.unplaced?.length ? (
+              <Unplaced batches={view.unplaced} />
+            ) : null}
+            {view.steps.length === 0 ? (
+              <p className="py-6 text-center font-mono text-xs text-faint">
+                {replaying || upTo === 0
+                  ? "nothing revealed yet — play or step forward"
+                  : events.length === 0
+                    ? doc.status === "running"
+                      ? "waiting for the first event…"
+                      : "no events were recorded for this run"
+                    : "no steps yet"}
+              </p>
+            ) : null}
+            {/* What ended the run (U3.2): the end card mirrors the header's
           chip, on every status the record names one for; a failed run
           that named none ends on its error (its Error root span is the
           terminal record). */}
-          {!replaying && doc.status !== "running" && endCard(doc) ? (
-            <p
-              className="text-center font-mono text-xs text-muted-foreground"
-              data-story-end
-              title={stopChip(doc)?.title}
-            >
-              {endCard(doc)}
-            </p>
-          ) : view.finished ? null : (
-            <p className="text-center font-mono text-xs text-faint">
-              {replaying
-                ? `replay · ${upTo} of ${events.length} events shown`
-                : isLive(doc)
-                  ? // running, or settling (its last records may still
-                    // land): never "ended without run_finish" yet.
-                    "stream in progress…"
-                  : events.length > 0 &&
-                      endedWithoutFinish(
-                        view.finished,
-                        doc.stopped_by,
-                        doc.status
-                      )
-                    ? NO_RUN_FINISH
-                    : null}
-            </p>
-          )}
-          {view.pending.length > 0 && (
-            <ParkedCalls doc={doc} pending={view.pending} />
-          )}
-          <AppSteer doc={doc} />
-        </div>
-      </ToolFactsCtx.Provider>
+            {!replaying && doc.status !== "running" && endCard(doc) ? (
+              <p
+                className="text-center font-mono text-xs text-muted-foreground"
+                data-story-end
+                title={stopChip(doc)?.title}
+              >
+                {endCard(doc)}
+              </p>
+            ) : view.finished ? null : (
+              <p className="text-center font-mono text-xs text-faint">
+                {replaying
+                  ? `replay · ${upTo} of ${events.length} events shown`
+                  : isLive(doc)
+                    ? // running, or settling (its last records may still
+                      // land): never "ended without run_finish" yet.
+                      "stream in progress…"
+                    : events.length > 0 &&
+                        endedWithoutFinish(
+                          view.finished,
+                          doc.stopped_by,
+                          doc.status
+                        )
+                      ? NO_RUN_FINISH
+                      : null}
+              </p>
+            )}
+            {view.pending.length > 0 && (
+              <ParkedCalls doc={doc} pending={view.pending} words={parked} />
+            )}
+            <AppSteer doc={doc} />
+          </div>
+        </ToolFactsCtx.Provider>
+      </CardsCtx.Provider>
     </StoryMemory.Provider>
   )
 }

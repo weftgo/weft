@@ -247,8 +247,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    model call carried — the record's truth, the replay prefix for N > 0 (from_step 0 re-runs
 //    //    step 0's PrepareStep), compacted_at naming its view; null under hidden for a read token, ADR 0029),
 //    //    runs/{id}/steps/{n} (one step
-//    //    assembled: request, attempts, events, tool calls, children, holes, its own call's cost;
-//    //    capability "steps"), cost on every run row (plan A5, read time, never stored): cost_usd
+//    //    assembled: request, attempts (each with http_status / wait_ms / error, U25), events, tool calls,
+//    //    children, holes, its own call's cost; capability "steps"; the run cards' words — exec line, park
+//    //    word, typed child outcome, attempt cause, PrepareStep chip, thinking wire, attachments, token
+//    //    split, OUTPUT card — are src/lib/cards.ts's, both renderers), cost on every run row (plan A5, read time, never stored): cost_usd
 //    //    (own: usage minus its core Subagent children's — `<id>/…` only; pool children and nested Generates are not
 //    //    subtracted — at its model's rates; null + cost_badge unpriced|unknown + cost_reason, never 0; a scripted model no
 //    //    row matches — wefttest/*, weft/runtime/scripted only (any other wrapper ships its own row) — an exact 0 + cost_badge scripted, a Go rule, not a row), cost_known,

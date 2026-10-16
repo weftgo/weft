@@ -137,6 +137,17 @@ import { diffLines, diffSummary } from "../lib/diff"
 import { stepDiffBlock } from "./compare"
 import { callState, runHoles, stepHoles, truncation } from "../lib/events"
 import {
+  attachmentsOf,
+  callFactsOf,
+  childOutcome,
+  execLine,
+  OUTPUT,
+  outputOf,
+  parkWord,
+  repairedWords,
+  tokenSplit,
+} from "../lib/cards"
+import {
   compactionLine,
   compactionsOf,
   isSessionMarker,
@@ -5268,6 +5279,32 @@ export class WeftDevtools extends HTMLElement {
           : note
       )
     }
+    // The prompt's files (UX-S1-13), the own / delegated tokens
+    // (UX-S3-13), the typed output (UX-S1-06): lib/cards.ts's words.
+    const files = attachmentsOf(t.transcript?.batches)
+    if (files.length)
+      wrap.appendChild(
+        el("div", "weft-reason", files.join(" · "), { "data-weft-files": "" })
+      )
+    const split = t.doc && tokenSplit(t.doc.usage, t.doc.children)
+    if (split)
+      wrap.appendChild(
+        el("div", "weft-reason", split, { "data-weft-split": "" })
+      )
+    const out = outputOf(t.folded, t.spans, t.id)
+    if (out)
+      wrap.appendChild(
+        el(
+          "div",
+          "weft-reason",
+          out.args === undefined
+            ? OUTPUT.none
+            : out.repairs
+              ? `${OUTPUT.typed} · ${repairedWords(out.repairs)}`
+              : OUTPUT.typed,
+          { "data-weft-output": "" }
+        )
+      )
     // A replayed run whose prefix was edited says which pairs (weft.edits).
     const mark = marksBlock(this.rowOf(t.id) ?? t.doc, t.transcript?.batches)
     if (mark) wrap.appendChild(mark)
@@ -6911,13 +6948,31 @@ function renderCall(
     }
   }
   if (replay) head.appendChild(callVerbs(stepIndex, call, replay))
+  // The call's execution facts (UX-S2-06): lib/cards.ts, the run page's.
+  const f =
+    t && !ctx?.child
+      ? callFactsOf(t.spans, t.id).get(`${stepIndex}:${call.callId}`)
+      : undefined
+  const ex = execLine(f)
+  if (ex) head.appendChild(el("span", "weft-badge weft-info", ex))
   if (call.result) {
-    const ms = spanMs(t, call)
-    if (ms) head.appendChild(el("span", "weft-badge weft-info", ms))
-    const cut = truncation(String(call.result.content))
+    const content = String(call.result.content)
+    const cut = truncation(content)
     if (cut) head.appendChild(cutBadge(cut))
-    if (call.result.isError)
-      head.appendChild(el("span", "weft-badge weft-err", "error"))
+    if (call.result.isError) {
+      // A Subagent call's typed outcome (UX-S3-15).
+      head.appendChild(
+        el(
+          "span",
+          "weft-badge weft-err",
+          childOutcome(
+            f?.errorType ?? /^([A-Z_]+):/.exec(content)?.[1],
+            f,
+            !!call.childRunId
+          ) ?? "error"
+        )
+      )
+    }
     const holes = holeBadges(call.holes ?? [])
     if (holes) head.appendChild(holes)
     const res = el("div", "weft-res", call.result.content, {
@@ -6936,29 +6991,19 @@ function renderCall(
   } else if (state === "running") {
     box.appendChild(el("div", "weft-res", "running…"))
   } else {
-    box.appendChild(el("div", "weft-res weft-warn", "never completed"))
+    // A parked call awaits a decision — a gate or a breakpoint
+    // (UX-S3-12, UX-H-18) — it did not fail.
+    box.appendChild(
+      el(
+        "div",
+        "weft-res weft-warn",
+        t?.folded.pending.some((c) => c.id === call.callId)
+          ? parkWord(f, call.name, t.doc?.meta["weft.playground.breakpoints"])
+          : "never completed"
+      )
+    )
   }
   return box
-}
-
-/** spanMs reads the tool call's wall time off its execute_tool span
- * when the spans are loaded (the waterfall's numbers, in line). */
-function spanMs(t: TurnView | undefined, call: FoldedToolCall): string {
-  if (!t?.spans) return ""
-  // The call's own span by its call id; a span without one (a foreign
-  // SDK's) matches by tool name.
-  const tools = t.spans.filter((sp) => sp.name === "execute_tool")
-  const span =
-    tools.find((sp) => sp.attrs["gen_ai.tool.call.id"] === call.callId) ??
-    tools.find(
-      (sp) =>
-        sp.attrs["gen_ai.tool.call.id"] === undefined &&
-        sp.attrs["gen_ai.tool.name"] === call.name
-    )
-  if (!span) return ""
-  const ms = Date.parse(span.end) - Date.parse(span.start)
-  if (!Number.isFinite(ms) || ms < 0) return ""
-  return `${Math.round(ms)}ms`
 }
 
 /** childBlock is the lazy subagent expander (§2, Dv3): the call's
@@ -7145,6 +7190,7 @@ function sourceLabel(label: string): string {
 }
 
 function argsText(call: FoldedToolCall): string {
+  if (typeof call.args === "string") return `(${call.args}`
   if (call.args !== undefined) {
     try {
       return `(${JSON.stringify(call.args)})`

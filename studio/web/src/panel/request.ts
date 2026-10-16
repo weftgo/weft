@@ -21,12 +21,8 @@
 // badge and nothing else — a read token never asked for a byte.
 import type { Manifest, RequestRow, RunCompaction, ToolEntry } from "../lib/api"
 import { isHoleRef } from "../lib/api"
-import {
-  attemptLabel,
-  attemptLayer,
-  attemptLine,
-  factsFromRows,
-} from "../lib/attempts"
+import { attemptLine, factsFromRows } from "../lib/attempts"
+import { attemptTag, preparedChip, thinkingWords } from "../lib/cards"
 import { compactionsOf, isSessionMarker, messageLine } from "../lib/compaction"
 import { diffLinesBounded } from "../lib/diff"
 import type { BoundedDiff } from "../lib/diff"
@@ -669,7 +665,15 @@ export function renderRequestTab(d: RequestTabDeps): HTMLElement {
         facts.prompt === "either" ? CHIP_PROMPT_CHANGED : CHIP_PREPARE_STEP
       )
     )
-  if (facts.experiment) head.appendChild(chip("experiment", CHIP_EXPERIMENT))
+  // The step's PrepareStep parts (O9) and the run's overridden knobs
+  // (UX-S5b-03), the run page's chips.
+  const prep = preparedChip(first.body.prepared)
+  if (prep) head.appendChild(chip("prepared", prep))
+  if (
+    !prev.get(step) &&
+    overrideOf(d.t.spans ?? undefined, d.t.id)?.fields.length
+  )
+    head.appendChild(chip("experiment", CHIP_EXPERIMENT))
   if (mine?.catalogChanged) head.appendChild(chip("catalog", CHIP_CATALOG))
   // The wire pair lives in Studio (A6.2): one link, when a row has it.
   if (rows.some(hasWire))
@@ -697,7 +701,7 @@ export function renderRequestTab(d: RequestTabDeps): HTMLElement {
           d.pick.set(step, n)
           d.redraw()
         },
-        (n) => attemptLabel(n, attemptLayer(d.t.spans, d.t.id, step, n))
+        (n) => attemptTag(d.t.spans, d.t.id, step, n)
       )
     )
 
@@ -754,17 +758,7 @@ export function renderRequestTab(d: RequestTabDeps): HTMLElement {
     )
   )
   pane.appendChild(
-    row(
-      "thinking",
-      [
-        mono(
-          b.thinking
-            ? `${b.thinking.level}${b.thinking.budget ? ` · budget ${b.thinking.budget}` : ""}`
-            : "adapter default"
-        ),
-      ],
-      "thinking"
-    )
+    row("thinking", [mono(thinkingWords(b.thinking))], "thinking")
   )
   // The step's subagent calls: the child's own step-0 request (A10).
   const calls = folded?.toolCalls.filter((c) => c.childRunId) ?? []

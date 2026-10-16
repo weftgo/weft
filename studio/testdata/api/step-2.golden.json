@@ -42,7 +42,10 @@
         "provider": "wefttest",
         "name": "glm-a"
       },
-      "stream": true
+      "stream": true,
+      "prepared": [
+        "messages"
+      ]
     },
     "prompt": {
       "hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",

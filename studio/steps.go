@@ -130,7 +130,15 @@ type stepAttempt struct {
 	RetryAfterMS int64  `json:"retry_after_ms,omitempty"`
 	// Layer is the attempt span's weft.attempt.layer: "fallback" for a
 	// request mw.Fallback sent to a backup; absent on a primary attempt.
-	Layer        string     `json:"layer,omitempty"`
+	Layer string `json:"layer,omitempty"`
+	// The attempt's cause and wait (U25, O6): the span's
+	// http.response.status_code, its weft.attempt.wait_ms (the backoff
+	// slept before it) and, on a failure, its status description — the
+	// provider's error text the span already exports (never content the
+	// content policy holds back: no record is read for it).
+	HTTPStatus   int64      `json:"http_status,omitempty"`
+	WaitMS       int64      `json:"wait_ms,omitempty"`
+	Error        string     `json:"error,omitempty"`
 	Started      *time.Time `json:"started,omitempty"`
 	Finished     *time.Time `json:"finished,omitempty"`
 	SpanID       string     `json:"span_id,omitempty"`
@@ -1118,6 +1126,11 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 			a.RetryAfterMS = ms
 		}
 		a.Layer, _ = sp.Attrs["weft.attempt.layer"].(string)
+		a.HTTPStatus, _ = attrInt64(sp.Attrs["http.response.status_code"])
+		a.WaitMS, _ = attrInt64(sp.Attrs["weft.attempt.wait_ms"])
+		if sp.StatusCode == 2 {
+			a.Error = sp.StatusMessage
+		}
 		st, en := sp.Start, sp.End
 		if !st.IsZero() {
 			a.Started = &st

@@ -356,6 +356,10 @@ type RequestBody struct {
 	Params          RequestParams      `json:"params"`
 	Model           RequestModel       `json:"model"`
 	Stream          bool               `json:"stream"`
+	// Prepared names the parts the run's PrepareStep chain changed
+	// (O9, record contract §4): system, messages, tools, tool_choice,
+	// params, thinking, sequential_tools. Absent when none did.
+	Prepared []string `json:"prepared,omitempty"`
 }
 
 // RequestMessagesRef says which messages the request carried: the
@@ -383,6 +387,9 @@ type RequestToolChoice struct {
 type RequestThinking struct {
 	Level  string `json:"level"`
 	Budget int64  `json:"budget,omitempty"`
+	// Wire is how the adapter sends the level (O16): the provider field
+	// it writes, or "none"; absent when the model declares none.
+	Wire string `json:"wire,omitempty"`
 }
 
 // RequestParams are the sampling parameters; nil is the adapter's
@@ -455,6 +462,9 @@ type ToolEntry struct {
 	MaxResultBytes int             `json:"max_result_bytes"`
 	Sequential     bool            `json:"sequential"`
 	Source         string          `json:"source"`
+	// Output marks the tool Output registered (submit_output): the
+	// run's typed answer (record contract §4, UX-S1-06).
+	Output bool `json:"output,omitempty"`
 }
 
 // HoleError is the ErrNotFound DB.Prompt and DB.Tools return when the

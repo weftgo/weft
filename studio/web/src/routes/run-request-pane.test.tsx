@@ -352,6 +352,8 @@ describe("the Request pane's chips and diff (E1 Done)", () => {
     // shows carries no snippet: only a PrepareStep moved the hash.
     expect(marks(1)).toEqual([
       "changed by PrepareStep",
+      // The record names the part (O9): the request's prepared.
+      "PrepareStep: system",
       "catalog changed at this step",
     ])
   })
@@ -383,12 +385,14 @@ describe("the Request pane's chips and diff (E1 Done)", () => {
     // The later steps' own rewrites are still PrepareStep's.
     expect(marks(1)).toEqual([
       "changed by PrepareStep",
+      // The record names the part (O9): the request's prepared.
+      "PrepareStep: system",
       "catalog changed at this step",
     ])
     expect(pane(1).textContent).not.toContain("overridden by experiment")
   })
 
-  it("an override of something else (the model) is no instructions chip", async () => {
+  it("an override of something else (the model) is the experiment chip, its knob named (UX-S5b-03)", async () => {
     await serve({
       instructions: PROMPT0,
       manifest: manifest(PROMPT0),
@@ -401,7 +405,10 @@ describe("the Request pane's chips and diff (E1 Done)", () => {
     })
     await story()
     await waitFor(() => expect(marks(2)).toEqual(["changed by PrepareStep"]))
-    expect(marks(0)).toEqual([])
+    expect(marks(0)).toEqual(["overridden by experiment"])
+    expect(
+      pane(0).querySelector('[data-mark="experiment"]')?.getAttribute("title")
+    ).toContain("model")
   })
 
   it("catalog changed at this step: on the step whose catalog hash moved, alone", async () => {
@@ -498,6 +505,7 @@ describe("nothing is decided from what cannot be verified (review 1, 2)", () => 
     await waitFor(() =>
       expect(marks(1)).toEqual([
         "prompt changed at this step",
+        "PrepareStep: system",
         "catalog changed at this step",
       ])
     )

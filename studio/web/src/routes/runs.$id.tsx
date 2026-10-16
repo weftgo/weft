@@ -48,6 +48,7 @@ import { compactionsOf } from "@/lib/compaction"
 import { applyTranscript, fold, linkView } from "@/lib/events"
 import { isPlainShortcut } from "@/lib/keys"
 import { overrideOf, overrideParallelism } from "@/lib/request-pane"
+import { callFactsOf } from "@/lib/cards"
 import { toolFactsOf } from "@/lib/error-kind"
 import {
   canReplay,
@@ -566,6 +567,7 @@ function RunPage() {
   )
   const override = useMemo(() => overrideOf(ownSpans, id), [ownSpans, id])
   const toolFacts = useMemo(() => toolFactsOf(ownSpans, id), [ownSpans, id])
+  const callFacts = useMemo(() => callFactsOf(ownSpans, id), [ownSpans, id])
   const requests = useMemo(
     () =>
       requestsCapable
@@ -1290,6 +1292,7 @@ function RunPage() {
             overrideParallelism={overrideParallelism(ownSpans, id)}
             overrideRead={hasInvokeAgent(ownSpans, id)}
             toolFacts={spans.data ? toolFacts : undefined}
+            spans={ownSpans}
           />
           {evicted ? (
             <p
@@ -1673,6 +1676,7 @@ function RunPage() {
                   onStep={onStep}
                   stepInputRef={stepInput}
                   toolFacts={toolFacts}
+                  callFacts={spans.data ? callFacts : undefined}
                 />
               )}
             </TabsContent>

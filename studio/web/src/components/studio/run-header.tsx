@@ -9,7 +9,14 @@ import { useEffect, useState } from "react"
 
 import { sessionQuery, storedManifestQuery } from "@/lib/api"
 import { concurrencyWords } from "@/lib/request-pane"
-import type { RunDoc, Transcript } from "@/lib/api"
+import {
+  attachmentsOf,
+  OUTPUT,
+  outputOf,
+  repairedWords,
+  tokenSplit,
+} from "@/lib/cards"
+import type { RunDoc, Span, Transcript } from "@/lib/api"
 import { producedTexts, runHoles, turnPrompt } from "@/lib/events"
 import type { FoldedRun } from "@/lib/events"
 import {
@@ -339,6 +346,7 @@ export function RunHeader({
   overrideParallelism,
   overrideRead,
   toolFacts,
+  spans,
 }: {
   doc: RunDoc
   folded: FoldedRun
@@ -362,6 +370,9 @@ export function RunHeader({
    * undefined until the spans load — the strip's tool errors then
    * name no kind (P7-fix3). */
   toolFacts?: ToolFactsMap
+  /** The run's own spans: an Output agent's root carries
+   * weft.output.submitted (U25) — false is "no output submitted". */
+  spans?: Span[]
 }) {
   const now = useNow(doc.status === "running")
   const title = runTitle(doc)
@@ -393,6 +404,11 @@ export function RunHeader({
   // (in a thread the first one is an earlier turn's).
   const prompt = turnPrompt(transcript?.batches ?? [])
   const answer = answerOf(transcript?.batches, folded)
+  // The structured output (UX-S1-06), the prompt's attachments
+  // (UX-S1-13), the own / delegated token split (UX-S3-13).
+  const output = outputOf(folded, spans, doc.id)
+  const files = attachmentsOf(transcript?.batches)
+  const split = tokenSplit(doc.usage, doc.children)
   const timing =
     doc.status === "running"
       ? `running for ${elapsed(doc.started, now)}`
@@ -552,6 +568,16 @@ export function RunHeader({
             {usageSummary(doc.usage)}
           </span>
         )}
+        {split ? (
+          <span
+            title={`input tokens: this run's own and its subagent children's (${doc.children
+              .map((c) => `${c.agent || c.id}: ${c.usage.input_tokens}`)
+              .join(", ")})`}
+            data-token-split
+          >
+            {split}
+          </span>
+        ) : null}
         {costCapable ? (
           <RunCost
             run={doc}
@@ -587,6 +613,22 @@ export function RunHeader({
       ) : null}
 
       {prompt ? <Quote label="prompt" text={prompt} tone="prompt" /> : null}
+      {files.length ? (
+        <div
+          className="flex flex-wrap gap-1.5 pl-[calc(6ch+1.5rem)]"
+          data-attachments
+        >
+          {files.map((f, i) => (
+            <span
+              key={i}
+              className="rounded-sm border px-1.5 py-px font-mono text-[10px] text-muted-foreground"
+              title="a file part of the prompt: its media type and size (the bytes stay in the transcript)"
+            >
+              {f}
+            </span>
+          ))}
+        </div>
+      ) : null}
       {doc.err ? (
         <div className="flex gap-3 rounded-md border border-status-bad/40 bg-status-bad/5 px-3 py-2">
           <span className="eyebrow mt-0.5 w-[6ch] shrink-0 text-status-bad">
@@ -604,6 +646,37 @@ export function RunHeader({
       ) : null}
       {answer && !doc.err ? (
         <Quote label="answer" text={answer} tone="answer" />
+      ) : null}
+      {output?.args !== undefined ? (
+        <div className="space-y-1" data-output-card>
+          <Quote
+            label="output"
+            text={JSON.stringify(output.args, null, 2)}
+            tone="answer"
+          />
+          <div className="flex gap-1.5 pl-[calc(6ch+1.5rem)] font-mono text-[10px] text-muted-foreground">
+            <span title="the arguments of the run's last valid submit_output call: what GenerateAs / OutputOf decode">
+              {OUTPUT.typed}
+            </span>
+            {output.repairs ? (
+              <span
+                className="text-status-int"
+                title="submit_output calls the schema refused (INVALID_INPUT) before the valid one"
+                data-output-repairs={output.repairs}
+              >
+                {repairedWords(output.repairs)}
+              </span>
+            ) : null}
+          </div>
+        </div>
+      ) : output?.none ? (
+        <div
+          className="font-mono text-xs text-status-int"
+          title="an Output agent's run that ended without a valid submit_output call: GenerateAs returns ErrNoOutput (weft.output.submitted false)"
+          data-output-none
+        >
+          {OUTPUT.none}
+        </div>
       ) : null}
       {/* The model's last finish reason, relabelled where it reads
           otherwise than what ended the run (UX-A-08). */}

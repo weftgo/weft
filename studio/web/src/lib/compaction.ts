@@ -12,6 +12,7 @@
 // optional — a run that did not compact emits none — so its absence
 // is no hole and there is no "not recorded" badge for it.
 
+import { fileWords } from "./cards"
 import type { Message, Part, RunCompaction, Transcript } from "./api"
 import { tokens } from "./format"
 import { isRepaired, REPAIRED } from "./error-kind"
@@ -149,7 +150,7 @@ export function messageLine(m: Message, max = 160): string {
           // line's clip cannot cut the mark.
           return `${p.name ? `${p.name} → ` : ""}${isRepaired(p.content) ? `[${REPAIRED.word}] ` : ""}${p.content}`
         case "file":
-          return `[file ${p.media_type}]`
+          return `[${fileWords(p)}]`
         default:
           return ""
       }

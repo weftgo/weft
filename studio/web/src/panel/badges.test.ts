@@ -463,8 +463,8 @@ describe("no panel-only badge strings", () => {
     'element.ts|"subagent"', // the child run's link
     'element.ts|"subagent"',
     "element.ts|depthWord", // a child nested past the indent (UX-D-13)
-    "element.ts|, ms)", // the call's wall time
-    'element.ts|"error"', // a tool error result (data, rule 1)
+    "element.ts|, ex)", // the call's execution facts (lib/cards.ts execLine)
+    "element.ts|childOutcome(", // a tool error result (data, rule 1), a Subagent call's typed outcome
     "request.ts|data-weft-mark", // E1.2's change chips
     "request.ts|request could not be read",
     "request.ts|data-weft-attempts",

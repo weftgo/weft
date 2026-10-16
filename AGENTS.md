@@ -259,7 +259,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    compacted step keys on its view, noted compacted_at),
 //    //    runs/{id}/logs?from=&limit=&severity= (the app's own log lines under the run's
 //    //    spans, capability "logs"; refused to a read-scoped token: they may carry prompts;
-//    //    the run row carries delta_count), diff?a=&b= (two runs aligned by step ordinal, each
+//    //    the run row carries delta_count; drawn by the run page's logs view ?view=logs&lsev=,
+//    //    the drawer's Logs tab, WARN/ERROR row ticks, jump to span ?sel=t:<span>; the panel's
+//    //    step "📄 ⤢" hands off, U11.2), diff?a=&b= (two runs aligned by step ordinal, each
 //    //    step reduced to system/tool_calls/tool_results/text/usage with changes and unknown per
 //    //    row (a column a side did not record is never compared) and a summary; compaction and
 //    //    subagent are marks, never a change; system hidden to a read token; past the step cap a
@@ -340,7 +342,9 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    without a Token (setup A) the loopback Host is the wall and an unsafe method (not GET/HEAD/OPTIONS)
 //    //    whose Origin's host:port is not the request's Host and not an AllowOrigins entry, or with no Origin but
 //    //    Sec-Fetch-Site: cross-site, is 403 "cross-origin write refused (setup A)";
-//    //    OTLP ingest (/v1/traces, /v1/logs) carries its own IngestToken.
+//    //    OTLP ingest (/v1/traces, /v1/logs) carries its own IngestToken. Every response
+//    //    carries X-Request-Id (a 5xx body error.request_id too); slog.Default gets a WARN per
+//    //    refused ingest batch (rate-limited) and an ERROR per 5xx, each naming it (U11.2).
 //    // Setup B, any language (package cmd/weft — `go install github.com/weftgo/weft/cmd/weft@latest`;
 //    // the one place the clickhouse driver lives): weft studio --db sqlite://path |
 //    //    clickhouse://user:pass@host:9000/db [--addr --token --manifest weft.json (or

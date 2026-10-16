@@ -14,6 +14,7 @@ import (
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/obsdb"
+	"github.com/weftgo/weft/studio/internal/reqlog"
 	"github.com/weftgo/weft/version"
 )
 
@@ -41,16 +42,25 @@ func writeJSON(w http.ResponseWriter, r *http.Request, status int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
+// writeError answers in the API's error shape. The reason is the
+// request's in Studio's server log
+// (studio/internal/reqlog): a 5xx is one ERROR line naming it and the
+// request id, which a 5xx body carries too (request_id), so a user's
+// report meets its line in studio.log.
 func writeError(w http.ResponseWriter, r *http.Request, status int, code, msg string) {
+	reqlog.Refuse(r.Context(), code, msg)
+	type body struct {
+		Code      string `json:"code"`
+		Message   string `json:"message"`
+		RequestID string `json:"request_id,omitempty"`
+	}
+	b := body{Code: code, Message: msg}
+	if status >= 500 {
+		b.RequestID = reqlog.ID(r.Context())
+	}
 	writeJSON(w, r, status, struct {
-		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}{struct {
-		Code    string `json:"code"`
-		Message string `json:"message"`
-	}{code, msg}})
+		Error body `json:"error"`
+	}{b})
 }
 
 // maxBody bounds a JSON request body on the API (the playground,

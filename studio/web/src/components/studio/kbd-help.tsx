@@ -19,8 +19,8 @@ export const bindings: Binding[] = [
   { keys: ["j", "k"], action: "next / previous row (or ↓ ↑)", where: "runs" },
   { keys: ["enter"], action: "open the selected run", where: "runs" },
   {
-    keys: ["w", "s", "r"],
-    action: "waterfall · story · raw views",
+    keys: ["w", "s", "r", "l"],
+    action: "waterfall · story · raw · logs views",
     where: "run",
   },
   {

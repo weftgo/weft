@@ -29,6 +29,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	"github.com/weftgo/weft/obsdb"
+	"github.com/weftgo/weft/studio/internal/reqlog"
 
 	collogspb "go.opentelemetry.io/proto/otlp/collector/logs/v1"
 	coltracepb "go.opentelemetry.io/proto/otlp/collector/trace/v1"
@@ -230,13 +231,21 @@ func respond(w http.ResponseWriter, r *http.Request, msg proto.Message) {
 
 // writeIngestError answers with the API's error shape (S4.2): the
 // exporter retries on the status code; the body is for the human.
+// The refusal's reason is the request's in Studio's server log
+// (studio/internal/reqlog: one WARN line per refused batch, ERROR on a
+// 5xx, each with the request id); a 5xx body carries request_id too.
 func writeIngestError(w http.ResponseWriter, r *http.Request, status int, code, msg string) {
+	reqlog.Refuse(r.Context(), code, msg)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	if r.Method == http.MethodHead {
 		return
 	}
-	_, _ = w.Write([]byte(`{"error":{"code":` + quoteJSON(code) + `,"message":` + quoteJSON(msg) + `}}`))
+	rid := ""
+	if id := reqlog.ID(r.Context()); id != "" && status >= 500 {
+		rid = `,"request_id":` + quoteJSON(id)
+	}
+	_, _ = w.Write([]byte(`{"error":{"code":` + quoteJSON(code) + `,"message":` + quoteJSON(msg) + rid + `}}`))
 }
 
 // quoteJSON renders s as a JSON string. Codes and messages are plain

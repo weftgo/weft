@@ -1016,8 +1016,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 269,797 B raw / 87,654 B gzip
-(85.6 KiB, the bundle of the ledger's row "U8.3 Timeline run tree"; 10,650 B — 10.4 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 270,089 B raw / 87,751 B gzip
+(85.7 KiB, the bundle of the ledger's row "U11.2 logs hand-off"; 10,553 B — 10.3 KiB — of headroom under
 the 98,304 B, 96 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; A5.4 raised it from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -1713,13 +1713,24 @@ changed-at-this-step marks), **replied**, **tools ran**, **then** (the
 next step, or the run's end card); then the row's facts (a model call's
 who-answered and attempts, a tool's failure kind). Below, the lazy tabs
 **Request · Response · Tool I/O · Logs · Raw OTel** — only the open one
-is drawn; Logs reads `runs/{id}/logs` when it opens and lists the lines
-under the row's spans (the route's `not_recorded` hint for a run without
-`otel.Slog()`); Raw OTel holds the span's attributes and events (and, for
+is drawn; Logs reads `runs/{id}/logs` when it opens — every page, up to
+10,000 lines (`src/lib/logs.ts`), a longer list badged `truncated` — and
+lists the lines under the row's spans (the route's `not_recorded` hint
+for a run without `otel.Slog()`; a running run's row with no line yet
+says its spans are not reported yet, and the page's `partial_reason`;
+read again every 5 s while it runs); Raw OTel holds the span's attributes and events (and, for
 a row the fold holds, its slice of the event stream and the folded node).
 `?tab=` names the open tab (absent: a step or run its Response, a model
 call its Request, a tool its Tool I/O; a pre-U10.1 `?d=` reads as Raw
-OTel). With no `?sel=`/`?step=` the page lands where something went
+OTel). The run's **logs** view (`?view=logs`, key `l`, U11.2) lists
+every line with a severity filter (`?lsev=info|warn|error`, the route's
+`severity=`) and per line **jump to span** — `?sel=t:<span id>`, the row
+that span (or its nearest drawn ancestor) is behind, its Logs tab open.
+A tree row a WARN / ERROR line landed on carries a tick ("E1 W2", read
+at `severity=warn` only when the run document counts such lines); its
+click opens that row's Logs tab. The devtools panel hands each Story
+step off with "📄 ⤢" (`lib/links.ts`'s `logsLink`: the step's row, its
+Logs tab), reading no line itself. With no `?sel=`/`?step=` the page lands where something went
 wrong (UX-A-03): the first failed row (never the root, never an attempt),
 else a tool that never finished, else the step a failed run failed at
 ("run failed at step N"), else step 0 — on the scale shown; "past the
@@ -2574,7 +2585,16 @@ The `#token=` fragment `weft open` and `weft studio --open` hand the
 browser never reaches the server; the UI reads it. OTLP
 ingest is `POST /v1/traces` and `/v1/logs` (protobuf and JSON, gzip,
 16 MiB after decompression, publish-then-write, 503 on a write failure
-so the exporter retries). Under `Playground(true)` the playground's
+so the exporter retries). Every response carries `X-Request-Id` (the
+client's when it sent one of at most 64 `[A-Za-z0-9._:-]`, else a
+generated one), and a 5xx body carries it as `error.request_id`.
+Studio's server log (`slog.Default`; `studio/internal/reqlog`, UX-E-37)
+writes one WARN line per refused ingest batch — `studio: ingest batch
+refused` with `request_id`, `status`, `path`, `remote`, `code`,
+`reason` (the error body's message: a bad token, a size, a malformed
+body), `bytes` — at most one a minute per remote, path, code and status
+(the next line counts the rest, `suppressed=n`), and one ERROR line per
+5xx, `studio: request failed` with the same fields, never limited. Under `Playground(true)` the playground's
 routes join (`GET /api/runtimes`, `POST /api/playground/runs`, `GET
 /api/playground/commands/{id}`, `POST /api/runs/{id}/approvals`,
 `POST /api/playground/fixtures`, `GET/POST /api/experiments` (the 50 most recently updated by default, `?limit=` up to 200, with `total`; id: `[A-Za-z0-9._:-]{1,128}`, as command_id; each row with `created`, `run_count`,

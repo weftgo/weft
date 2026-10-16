@@ -1821,17 +1821,6 @@ export async function fetchLogs(
   }
 }
 
-/** The run's app log lines, the first page of 1,000 (the route's max):
- * the run page's drawer filters them by the selected row's spans
- * (U10.1). */
-export function logsQuery(id: string) {
-  return queryOptions({
-    queryKey: ["logs", id],
-    staleTime: 30_000,
-    queryFn: () => fetchLogs(id, { limit: 1000 }),
-  })
-}
-
 /** The run's spans; with tree (capability spans_tree, U9.1) its
  * descendants' too, each carrying run_id / parent_run_id — the run
  * tree's child rows. The key's prefix is ["spans", id] either way, so

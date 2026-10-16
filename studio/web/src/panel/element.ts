@@ -212,6 +212,7 @@ import { renderRequestTab, stepsOf } from "./request"
 import type { Geometry, Layout } from "./layout"
 import {
   href,
+  logsLink,
   playgroundLink,
   runLink,
   saveTestLink,
@@ -5261,6 +5262,7 @@ export class WeftDevtools extends HTMLElement {
         {
           endpoint: this.base,
           runId: t.id,
+          logs: hasCapability(s, "logs"),
           ...(ed ? { edit: ed } : {}),
           ...(this.canAct(s) && !this.derived(t)
             ? {
@@ -6236,6 +6238,9 @@ export interface FoldCtx {
   /** The transcript editor (plan F2) on the turn's own steps; absent:
    * nothing is editable (a child, a running turn, no playground). */
   edit?: EdCtx
+  /** Capability logs (U11.2): each step hands its app log lines off
+   * to Studio's drawer Logs tab (📄 ⤢). */
+  logs?: boolean
 }
 
 /** The editor as the Story's renderers call it: box turns a shown node
@@ -6377,6 +6382,16 @@ function renderStep(
   const holes = holeBadges(old ? mergeHoles(own, [old]) : own)
   if (holes) head.appendChild(holes)
   if (ctx?.replay) head.appendChild(stepVerbs(step.index, ctx.replay))
+  if (ctx?.logs && ctx.endpoint && ctx.runId && !ctx.child)
+    head.appendChild(
+      el("a", undefined, "📄 ⤢", {
+        href: href(ctx.endpoint, logsLink(ctx.runId, step.index)),
+        target: "_blank",
+        rel: "noopener",
+        title: "app logs in Studio",
+        "data-weft-logs": String(step.index),
+      })
+    )
   card.appendChild(head)
   const body = el("div", "weft-step-b")
   // The step's run-scope compaction views (A9.2), on its step line.

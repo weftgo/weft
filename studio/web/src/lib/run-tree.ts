@@ -76,7 +76,8 @@ export function resolveRowSel(
   rows: readonly WaterfallRow[],
   sel: string | undefined,
   rootId: string,
-  step?: number
+  step?: number,
+  parents?: ReadonlyMap<string, string>
 ): string | undefined {
   if (!sel) return undefined
   const has = (k: string) => (rows.some((r) => r.key === k) ? k : undefined)
@@ -102,10 +103,20 @@ export function resolveRowSel(
       (k.startsWith(`c${q}`) ? has(`c:${k.slice(q.length + 1)}`) : undefined)
     if (hit) return hit
   }
+  // t:<span id>: the row that span is behind, whichever run's — and
+  // (a log line's "jump to span", U11.2: an app span under a tool) for
+  // a span no row draws, the row of its nearest drawn ancestor
+  // (parents: span id → parent span id).
   if (sel.startsWith("t:")) {
-    const id = sel.slice(2)
-    const hit = rows.find((r) => r.span?.span_id === id)?.key
-    if (hit) return hit
+    for (
+      let id: string | undefined = sel.slice(2), hops = 0;
+      id && hops < 64;
+      id = parents?.get(id), hops++
+    ) {
+      const at = id
+      const hit = rows.find((r) => r.span?.span_id === at)?.key
+      if (hit) return hit
+    }
   }
   const call = /^c:([^:]+)$/.exec(sel)?.[1]
   if (call) {
@@ -320,9 +331,10 @@ export function expandFor(
   full: readonly WaterfallRow[],
   sel: string | undefined,
   rootId: string,
-  step?: number
+  step?: number,
+  parents?: ReadonlyMap<string, string>
 ): string[] {
-  const key = resolveRowSel(full, sel, rootId, step)
+  const key = resolveRowSel(full, sel, rootId, step, parents)
   const by = new Map(full.map((r) => [r.key, r]))
   const out: string[] = []
   const up = (r: WaterfallRow | undefined) =>

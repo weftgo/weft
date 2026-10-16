@@ -1,4 +1,4 @@
-// The run page (B1, B2, B7, B9, B10; S4.5/S4.7; U8.2): three views,
+// The run page (B1, B2, B7, B9, B10; S4.5/S4.7; U8.2; U11.2): four views,
 // all URLs (A3):
 //
 //   waterfall  (default) the flow strip, then the run tree | detail
@@ -10,6 +10,11 @@
 //              playhead) belongs to the order scale.
 //   story      the step cards top to bottom, subagents lazy (S4.3).
 //   raw        the events explorer and the document tree.
+//   logs       the run's app log lines (U11.2, audit §6.9): a severity
+//              filter (?lsev=), every page up to lib/logs.ts's cap, and
+//              per line "jump to span" — the run tree row it was logged
+//              under, its drawer's Logs tab open. The tree's rows carry
+//              a WARN / ERROR tick where such a line landed.
 //
 // "trace" is the /traces page's word (an OTel trace); the run page
 // draws a run tree.
@@ -109,6 +114,15 @@ import { saveTest } from "@/components/studio/saves"
 import { notifySave } from "@/lib/notify"
 import { mayExportTestWith } from "@/lib/saves"
 import { RawView } from "@/components/studio/raw-view"
+import { LogsView } from "@/components/studio/logs-view"
+import {
+  allLogsQuery,
+  jumpSel,
+  logLevelOf,
+  LOGS,
+  logTicks,
+  severityClass,
+} from "@/lib/logs"
 import { DerivedNote, DerivedStory } from "@/components/studio/derived-story"
 import { derivedWords, isDerived, isLive } from "@/lib/honesty"
 import { ReplayBar } from "@/components/studio/replay-bar"
@@ -127,7 +141,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { storyRunID, useRunEvents } from "@/hooks/use-run-events"
 
-type View = "waterfall" | "story" | "raw"
+type View = "waterfall" | "story" | "raw" | "logs"
 
 /** The waterfall's layout: side by side, stacked, or by the width. */
 type Layout = "auto" | "split" | "stack"
@@ -192,9 +206,11 @@ export const Route = createFileRoute("/runs/$id")({
         ? search.step
         : undefined,
     view:
-      search.view === "raw" || search.view === "story"
+      search.view === "raw" || search.view === "story" || search.view === "logs"
         ? search.view
         : undefined,
+    // The logs view's severity filter (U11.2).
+    lsev: logLevelOf(search.lsev),
     raw: search.raw === "doc" ? "doc" : undefined,
     pane:
       search.pane === "request" || search.pane === "wire"
@@ -589,6 +605,15 @@ function RunPage() {
     [view, spans.data]
   )
   const haveTime = timed.length > 0
+  // Each span's parent (the run's and its descendants'): a log line's
+  // span no row draws selects its nearest ancestor's row (jumpSel), and
+  // ticks it.
+  const spanParents = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const s of spans.data?.spans ?? [])
+      if (s.parent_span_id) m.set(s.span_id, s.parent_span_id)
+    return m
+  }, [spans.data])
   // A derived run (plan I1.3) has spans and no events: its one scale is
   // time — the order scale and its playhead have nothing to show. Asked
   // for time without spans, the run reads on the order scale.
@@ -864,7 +889,8 @@ function RunPage() {
           waterfallRows({ ...treeInput, expanded: ALL_RUNS }, treeScale).rows,
           sel,
           id,
-          search.step
+          search.step,
+          spanParents
         )
       : []
     setImpliedAt({ key: impliedKey, runs: implied })
@@ -878,6 +904,25 @@ function RunPage() {
     [treeInput, expanded, treeScale]
   )
   const treeRows = useMemo(() => treeSpans(tree), [tree])
+  // WARN / ERROR ticks (U11.2): read only when the run document counts
+  // such lines (log_warn / log_error), at warn and above.
+  const tickRead =
+    has("logs") &&
+    view === "waterfall" &&
+    (run.data?.log_warn ?? 0) + (run.data?.log_error ?? 0) > 0
+  const warnLogs = useQuery({
+    ...allLogsQuery(id, "warn", runStatus === "running"),
+    enabled: tickRead,
+  })
+  const ticks = useMemo(
+    () =>
+      logTicks(
+        warnLogs.data?.logs ?? [],
+        treeRows.map((r) => ({ key: r.key, spanId: r.timed?.span.span_id })),
+        spanParents
+      ),
+    [warnLogs.data, treeRows, spanParents]
+  )
   // The dim filters (§6.1, UX-A-04): ?dim= names them; rows no filter
   // keeps dim, never hide.
   const dim = useMemo(() => parseDim(search.dim), [search.dim])
@@ -916,7 +961,7 @@ function RunPage() {
   // While replaying, a row the playhead has not reached yet stays
   // selected (and says so below) when the whole run has it.
   const selKey =
-    resolveRowSel(tree.rows, search.sel, id, search.step) ??
+    resolveRowSel(tree.rows, search.sel, id, search.step, spanParents) ??
     (replaying && search.sel && fullSpans.some((s) => s.key === search.sel)
       ? search.sel
       : undefined) ??
@@ -1072,6 +1117,7 @@ function RunPage() {
           },
         })
       if (e.key === "r") setView("raw")
+      else if (e.key === "l") setView("logs")
       else if (e.key === "s") setView("story")
       else if (e.key === "w") setView("waterfall")
       else if (e.key === "n") {
@@ -1110,6 +1156,35 @@ function RunPage() {
     scale,
     setScale,
   ])
+
+  // A row's WARN / ERROR tick: a click opens its drawer's Logs tab.
+  const logTick = (sp: (typeof treeRows)[number]) => {
+    const t = ticks.get(sp.key)
+    if (!t) return null
+    return (
+      <button
+        type="button"
+        className={`shrink-0 font-mono text-[10px] ${severityClass(t.error ? 17 : 13)}`}
+        title={LOGS.tickHint(t.warn, t.error)}
+        data-log-tick={sp.key}
+        onClick={(e) => {
+          e.stopPropagation()
+          void navigate({
+            search: (prev) => ({
+              ...prev,
+              sel: sp.key,
+              tab: "logs",
+              view: undefined,
+              pane: undefined,
+            }),
+            replace: true,
+          })
+        }}
+      >
+        {LOGS.tick(t)}
+      </button>
+    )
+  }
 
   if (run.isPending) {
     return (
@@ -1241,7 +1316,10 @@ function RunPage() {
               void navigate({
                 search: (prev) => ({
                   ...prev,
-                  view: v === "raw" || v === "story" ? v : undefined,
+                  view:
+                    v === "raw" || v === "story" || v === "logs"
+                      ? v
+                      : undefined,
                   // A step pane is the story's (it would hold the view there).
                   pane: v === "story" ? prev.pane : undefined,
                 }),
@@ -1253,6 +1331,9 @@ function RunPage() {
                 <TabsTrigger value="waterfall">waterfall</TabsTrigger>
                 <TabsTrigger value="story">story</TabsTrigger>
                 <TabsTrigger value="raw">raw</TabsTrigger>
+                <TabsTrigger value="logs" data-logs-tab>
+                  {LOGS.view}
+                </TabsTrigger>
               </TabsList>
               {view === "waterfall" && scaled ? (
                 <div
@@ -1342,7 +1423,8 @@ function RunPage() {
               <span className="hidden items-center gap-1 text-[11px] text-faint md:flex">
                 <Kbd>w</Kbd>
                 <Kbd>s</Kbd>
-                <Kbd>r</Kbd> views · <Kbd>j</Kbd>
+                <Kbd>r</Kbd>
+                <Kbd>l</Kbd> views · <Kbd>j</Kbd>
                 <Kbd>k</Kbd> rows ·{" "}
                 {scaled ? (
                   <>
@@ -1455,7 +1537,13 @@ function RunPage() {
                                 <HoleBadge {...UNTIMED_HOLE} />
                               )
                             ) : null
-                          if (!sp.childRun) return untimed
+                          if (!sp.childRun)
+                            return (
+                              <>
+                                {logTick(sp)}
+                                {untimed}
+                              </>
+                            )
                           const r = sp.childRun
                           const hole = noSpans.get(r)
                           const marks = childMarks.get(r)
@@ -1466,6 +1554,7 @@ function RunPage() {
                             childStatus.get(r) === "running"
                           return (
                             <>
+                              {logTick(sp)}
                               {untimed}
                               {hole && !running ? (
                                 <HoleBadge
@@ -1565,6 +1654,33 @@ function RunPage() {
                   toolFacts={toolFacts}
                 />
               )}
+            </TabsContent>
+            <TabsContent value="logs" className="mt-3">
+              {view === "logs" ? (
+                <LogsView
+                  runId={id}
+                  started={doc.started}
+                  running={runStatus === "running"}
+                  level={search.lsev ?? ""}
+                  onLevel={(l) =>
+                    void navigate({
+                      search: (prev) => ({ ...prev, lsev: l || undefined }),
+                      replace: true,
+                    })
+                  }
+                  onJump={(span) =>
+                    void navigate({
+                      search: (prev) => ({
+                        ...prev,
+                        view: undefined,
+                        pane: undefined,
+                        sel: jumpSel(span),
+                        tab: "logs",
+                      }),
+                    })
+                  }
+                />
+              ) : null}
             </TabsContent>
             <TabsContent value="raw" className="mt-3 space-y-3">
               {derived ? <DerivedNote what="events" /> : null}

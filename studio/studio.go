@@ -9,6 +9,7 @@ import (
 
 	"github.com/weftgo/weft/obsdb"
 	"github.com/weftgo/weft/obsdb/sqlite"
+	"github.com/weftgo/weft/studio/internal/reqlog"
 	"github.com/weftgo/weft/version"
 )
 
@@ -168,6 +169,9 @@ type Server struct {
 	// registered (addRunRoute): run ids carry slashes, so the run
 	// subtree is one mux handler that dispatches on the last segment.
 	runRoutes []runRoute
+	// reqs is the server log of failed requests (UX-E-37): the request
+	// id on every response, a line per refused ingest batch and 5xx.
+	reqs *reqlog.Logger
 
 	// live (config.live, set by New from the Live default) is the hub
 	// /api/live streams from (S4.1).
@@ -225,7 +229,7 @@ func New(opts ...Option) *Server {
 		panic("studio: " + retainFloorMsg)
 	}
 	resolvePricing(&c)
-	s := &Server{config: c, now: time.Now, mux: http.NewServeMux(), grantKey: liveGrantKey(c.token)}
+	s := &Server{config: c, now: time.Now, mux: http.NewServeMux(), grantKey: liveGrantKey(c.token), reqs: reqlog.New()}
 	if c.db == nil {
 		path := c.dbPath
 		if path == "" {
@@ -353,13 +357,19 @@ func remoteIsLoopback(r *http.Request) bool {
 // ServeHTTP routes one request: the registered route groups (the API,
 // the live stream, ingest) on the mux, then the UI — embedded files
 // first, the SPA shell for every other path (deep links survive
-// reload).
+// reload). Every request carries an X-Request-Id (the client's, else
+// one generated) and a refused ingest batch or a 5xx is one line on
+// slog.Default naming it (studio/internal/reqlog, UX-E-37).
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h := w.Header()
 	h.Set("X-Content-Type-Options", "nosniff")
 	h.Set("Referrer-Policy", "no-referrer")
 	h.Set("Content-Security-Policy", s.csp)
-	s.routed().ServeHTTP(w, r)
+	if s.reqs == nil {
+		s.routed().ServeHTTP(w, r)
+		return
+	}
+	s.reqs.Wrap(s.routed()).ServeHTTP(w, r)
 }
 
 // routed wraps the mux with the cross-cutting concerns in order

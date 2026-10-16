@@ -16,7 +16,7 @@ import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 
 import { isDerived } from "@/lib/honesty"
-import { logsQuery } from "@/lib/api"
+import { allLogsQuery, LOGS } from "@/lib/logs"
 import type { RunDoc, Span as TimedSpan, WireEvent } from "@/lib/api"
 import { attemptLine, msText } from "@/lib/attempts"
 import { toolFailure } from "@/lib/error-kind"
@@ -49,7 +49,8 @@ import {
 import type { Span } from "@/lib/trace"
 import { JsonTree } from "@/components/studio/json-tree"
 import { EventsExplorer } from "@/components/studio/raw-view"
-import { HoleBadge, HoleBadges } from "@/components/studio/hole-badge"
+import { HoleBadges } from "@/components/studio/hole-badge"
+import { LogLines, LogsHoles } from "@/components/studio/logs-view"
 import { useReplay } from "@/components/studio/replay-drawer"
 import {
   AttemptsSection,
@@ -493,19 +494,28 @@ function spanIdsFor(
   return ids
 }
 
-/** The Logs tab: the run's app log lines (GET runs/{id}/logs) under the
+/** The Logs tab: the run's app log lines (GET runs/{id}/logs, every
+ * page up to lib/logs.ts's cap — a cut list badged truncated) under the
  * row's spans — read when the tab opens, the route's hole badges (a
- * run recorded without otel.Slog(), a read token's hidden) as they come. */
+ * run recorded without otel.Slog(), a read token's hidden) as they
+ * come. The read is the run-level Logs view's too (one query). */
 function LogsTab({
   runId,
   spans,
+  running,
 }: {
   runId: string
   spans: Set<string> | null
+  /** The run is running: its lines are read again, and a row with no
+   * line yet says its spans are pending, never "no line". */
+  running: boolean
 }) {
   const { has } = useCapabilities()
   const on = has("logs")
-  const q = useQuery({ ...logsQuery(runId), enabled: on })
+  const q = useQuery({
+    ...allLogsQuery(runId, undefined, running),
+    enabled: on,
+  })
   if (!on)
     return <p className="font-mono text-xs text-faint">{DRAWER.logsOff}</p>
   if (q.isPending)
@@ -520,30 +530,14 @@ function LogsTab({
   )
   return (
     <div className="space-y-2" data-drawer-logs>
-      {page.badge ? (
-        <HoleBadge hole={page.badge} reason={page.reason} fix={page.fix} />
-      ) : null}
-      {page.holes?.length ? <HoleBadges holes={page.holes} /> : null}
+      <LogsHoles page={page} />
       {lines.length ? (
-        <ul className="space-y-0.5 font-mono text-[11px]">
-          {lines.map((l) => (
-            <li key={l.index} className="flex gap-2" data-log-line>
-              <span
-                className={`w-10 shrink-0 ${
-                  l.severity_number >= 17
-                    ? "text-status-bad"
-                    : l.severity_number >= 13
-                      ? "text-ev-error"
-                      : "text-faint"
-                }`}
-              >
-                {l.severity || "—"}
-              </span>
-              <span className="min-w-0 break-words">{l.body}</span>
-            </li>
-          ))}
-        </ul>
-      ) : page.badge ? null : (
+        <LogLines lines={lines} />
+      ) : page.badge ? null : running || page.partial ? (
+        <p className="font-mono text-xs text-faint" data-logs-pending>
+          {LOGS.pending}
+        </p>
+      ) : (
         <p className="font-mono text-xs text-faint">{DRAWER.noLogs}</p>
       )}
     </div>
@@ -834,6 +828,7 @@ export function SpanDetail({
             />
           ) : active === "logs" ? (
             <LogsTab
+              running={runStatus === "running"}
               runId={row?.runId ?? span.runId}
               spans={spanIdsFor(
                 row ?? span,

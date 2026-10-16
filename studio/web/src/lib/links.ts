@@ -30,9 +30,9 @@ import { serializeScope } from "./scope"
 import type { Scope } from "./scope"
 
 /** The run page's views: the waterfall (the run tree, the default),
- * the story (step cards) and the raw JSON. "trace" is the /traces
- * page's word only (U8.2). */
-export type RunView = "waterfall" | "story" | "raw"
+ * the story (step cards), the raw JSON and the run's app logs (U11.2).
+ * "trace" is the /traces page's word only (U8.2). */
+export type RunView = "waterfall" | "story" | "raw" | "logs"
 
 /** The run tree's scale (lib/waterfall.ts's Scale): wall time from the
  * run's spans, or stream order (the replay playhead's); or the call
@@ -62,6 +62,9 @@ export interface RunSearch {
   /** The drawer's open tab (waterfall view, U10.1; lib/run-tree.ts's
    * DRAWER_TABS): absent, the selected row's default. */
   tab?: "request" | "response" | "tools" | "logs" | "raw"
+  /** The logs view's severity filter (U11.2): the lowest level kept;
+   * absent, every line. */
+  lsev?: "info" | "warn" | "error"
   /** The run tree's scale: time (spans) or order (positions, replay), or graph.
    * A pre-U8.2 ?axis=time|events is read as time|order, never written. */
   scale?: RunScale
@@ -173,6 +176,8 @@ export interface RunLinkOptions {
   /** A run tree row to select, by its key (lib/waterfall.ts's rowKeys:
    * the panel's Timeline hands a child run's row off with it). */
   sel?: string
+  /** The drawer's tab on the selected row (U10.1). */
+  tab?: RunSearch["tab"]
   view?: RunView
   /** The step's pane to open (needs `step`). */
   pane?: StepPane
@@ -397,6 +402,7 @@ export function runLink(id: string, opts: RunLinkOptions = {}): RunLink {
     search.sel = `c:${opts.resumed ? "resume" : String(step)}:${opts.call}`
   else if (opts.span) search.sel = `t:${opts.span}`
   else if (opts.sel) search.sel = opts.sel
+  if (opts.tab) search.tab = opts.tab
   if (opts.scale === "time" || opts.scale === "order" || opts.scale === "graph")
     search.scale = opts.scale
   const t = ordinal(opts.t)
@@ -415,6 +421,12 @@ export function runLink(id: string, opts: RunLinkOptions = {}): RunLink {
   }
   return { to: "/runs/$id", params: { id }, search }
 }
+
+/** logsLink is a step's hand-off to its app log lines (U11.2): the
+ * step's row selected in the run tree, its drawer's Logs tab open —
+ * the devtools panel's 📄 ⤢. */
+export const logsLink = (id: string, step: number) =>
+  runLink(id, { sel: `s${step}`, tab: "logs" })
 
 /** rawSearch is the raw view's state as search keys, every one
  * present (undefined clears it): the raw view merges them into the

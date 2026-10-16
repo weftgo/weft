@@ -41,6 +41,7 @@ import {
 import {
   ANSWER_LABELS,
   failedAtStep,
+  landStep,
   repliedLine,
   sentLine,
   stepVerdict,
@@ -5291,7 +5292,9 @@ export class WeftDevtools extends HTMLElement {
         {
           endpoint: this.base,
           runId: t.id,
-          logs: hasCapability(s, "logs"),
+          // The logs route refuses every panel token: the hand-off is
+          // drawn for no token or the dev token only.
+          logs: hasCapability(s, "logs") && tokenScope(this.cfg.token) === "",
           run: row ?? t.doc ?? undefined,
           ...(ed ? { edit: ed } : {}),
           ...(this.canAct(s) && !this.derived(t)
@@ -6329,6 +6332,11 @@ export function renderFolded(
   // live region (D3), and only its card changes while it does.
   const last =
     runStatus === "running" && !ctx?.child ? view.steps.at(-1) : undefined
+  // The answer's step (§6.3), Studio's landing rule: the step read,
+  // else the one the run failed at (landStep), else the first.
+  const ns = view.steps.map((s) => s.index)
+  const ans =
+    selectedStep ?? landStep(ctx?.run && failedAtStep(ctx.run), ns) ?? ns[0]
   for (const step of view.steps) {
     // The boundary before the step's model call takes an inserted
     // message (plan F2: a steer at rest).
@@ -6347,7 +6355,16 @@ export function renderFolded(
         )
       )
     wrap.appendChild(
-      renderStep(step, runStatus, t, selectedStep, open, ctx, step === last)
+      renderStep(
+        step,
+        runStatus,
+        t,
+        selectedStep,
+        open,
+        ctx,
+        step === last,
+        ans
+      )
     )
   }
   // The boundary after the last step (its calls all answered).
@@ -6384,7 +6401,8 @@ function renderStep(
   selectedStep?: number | null,
   open?: OpenState,
   ctx?: FoldCtx,
-  streaming = false
+  streaming = false,
+  ans?: number
 ): HTMLElement {
   const card = el("div", "weft-step", undefined, {
     "data-key": `s${step.index}`,
@@ -6450,9 +6468,9 @@ function renderStep(
     )
   card.appendChild(head)
   const body = el("div", "weft-step-b")
-  // The answer first (§6.3): on the step read, else the one it failed at.
+  // The answer first (§6.3), on renderFolded's landing step.
   const run = ctx?.run
-  if (t && run && step.index === (selectedStep ?? failedAtStep(run)))
+  if (t && run && step.index === ans)
     body.appendChild(answerBlock(step, t, run, ctx.endpoint))
   // The step's run-scope compaction views (A9.2), on its step line.
   const doc = ctx?.child ? ctx.child.doc : t?.doc
@@ -6636,16 +6654,10 @@ function answerBlock(
   for (const k of req?.keys() ?? []) if (k < n && k > p) p = k
   const prev = req?.get(p)?.rows.at(-1)
   const running = run.status === "running"
-  // No step_finish latency: the step's measured span (Studio's step row).
-  const wf = step.finish?.latencyMs
-    ? undefined
-    : waterfallRows({ runId: t.id, status: run.status, spans: t.spans })
-  const ms =
-    wf?.scale === "time"
-      ? wf.rows.find((r) => r.kind === "step" && r.step === n && !r.untimed)
-          ?.took
-      : undefined
-  const v = stepVerdict(step, run, ms ?? undefined)
+  // The step_finish latency only, as Studio's drawer (a step row has no
+  // span of its own to measure: P8-fix-a dropped the panel's fallback).
+  const next = t.folded.steps.some((s) => s.index === n + 1)
+  const v = stepVerdict(step, run, undefined, !next)
   const dl = el("dl", "weft-ans")
   const line = (
     k: keyof typeof ANSWER_LABELS,
@@ -6679,15 +6691,7 @@ function answerBlock(
     toolsLine(step, running),
     step.toolCalls.some((c) => c.result?.isError)
   )
-  line(
-    "then",
-    thenLine(
-      step,
-      run,
-      t.folded.steps.some((s) => s.index === n + 1)
-    ),
-    v.bad
-  )
+  line("then", thenLine(step, run, next), v.bad)
   const box = el("div", undefined, [dl], { "data-key": "ans" })
   // Raw OTel hands off here; Logs is the step head's 📄 ⤢ (U11.2's
   // logsLink, under capability logs) — one link per tab.

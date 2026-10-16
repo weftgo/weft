@@ -7,19 +7,19 @@
   },
   "request": {
     "badge": "not_recorded",
-    "reason": "the record did not exist in the weft that wrote this run (v0.9.0 or earlier keeps no request, prompt or tools records, ADR 0028): nothing was lost, there was nothing to keep",
+    "reason": "the weft that wrote this run kept no such record (v0.9.0 or earlier keeps no request, prompt or tools records, ADR 0028): nothing was lost",
     "fix": "upgrade weft and re-run"
   },
   "attempts": [],
   "attempts_badge": {
     "badge": "not_recorded",
-    "reason": "the run was recorded without a tracer, so attempt spans and the answering model were not stored",
+    "reason": "the run was recorded without a tracer: no attempt spans, no answering model",
     "fix": "install a tracer (otel.Install records spans)"
   },
   "messages_in": {
     "count": 0,
     "badge": "not_recorded",
-    "reason": "the record did not exist in the weft that wrote this run (v0.9.0 or earlier keeps no request, prompt or tools records, ADR 0028): nothing was lost, there was nothing to keep",
+    "reason": "the weft that wrote this run kept no such record (v0.9.0 or earlier keeps no request, prompt or tools records, ADR 0028): nothing was lost",
     "fix": "upgrade weft and re-run"
   },
   "events": [],
@@ -38,11 +38,11 @@
     {
       "hole": "gap",
       "reason": "the run counts this step, but no event of it was stored: a destination dropped its records",
-      "fix": "raise the destination's queue: otel.QueueSize(n) on it (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names the destination, and weft doctor prints the drops Studio heard of (weft.records.dropped)"
+      "fix": "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names it, weft doctor the drops (weft.records.dropped)"
     },
     {
       "hole": "not_recorded",
-      "reason": "the record did not exist in the weft that wrote this run (v0.9.0 or earlier keeps no request, prompt or tools records, ADR 0028): nothing was lost, there was nothing to keep",
+      "reason": "the weft that wrote this run kept no such record (v0.9.0 or earlier keeps no request, prompt or tools records, ADR 0028): nothing was lost",
       "fix": "upgrade weft and re-run"
     },
     {

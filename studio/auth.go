@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/weftgo/weft/obsdb"
+	"github.com/weftgo/weft/studio/internal/reqlog"
 )
 
 // Auth and CORS (S4.6). Three setups, one handler:
@@ -476,6 +477,9 @@ func (s *Server) cors(next http.Handler) http.Handler {
 			h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			h.Set("Access-Control-Allow-Headers",
 				"Authorization, Content-Type, Last-Event-ID")
+			// The request id (reqlog) is readable cross-origin: a panel's
+			// error report quotes it to meet its server log line.
+			h.Set("Access-Control-Expose-Headers", reqlog.Header)
 			if r.Method == http.MethodOptions {
 				h.Set("Access-Control-Max-Age", "600")
 				w.WriteHeader(http.StatusNoContent)

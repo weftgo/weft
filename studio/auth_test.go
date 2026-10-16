@@ -331,6 +331,11 @@ func TestCORS(t *testing.T) {
 	if code != http.StatusOK || hdr.Get("Access-Control-Allow-Origin") != "http://localhost:3000" {
 		t.Errorf("GET with origin: %d %v", code, hdr)
 	}
+	// The request id is readable cross-origin (P8-fix-a 9): a panel on
+	// another origin can quote it in an error report.
+	if got := hdr.Get("Access-Control-Expose-Headers"); !strings.Contains(got, "X-Request-Id") || hdr.Get("X-Request-Id") == "" {
+		t.Errorf("cross-origin GET: Expose-Headers %q, X-Request-Id %q", got, hdr.Get("X-Request-Id"))
+	}
 	// Explicit AllowOrigins replace the default.
 	custom := Handler(DB(fixtureDB(t)), Token("dev"), AllowOrigins("https://app.example"))
 	if code, hdr := preflight(custom, "/studio/api/runs", "https://app.example"); code != http.StatusNoContent ||

@@ -17,6 +17,7 @@ import {
 } from "./run-tree"
 import {
   failedAtStep,
+  landStep,
   repliedLine,
   sentLine,
   stepVerdict,
@@ -178,12 +179,15 @@ describe("each stop lands on the step every surface names (U10.1-fix #2, #3)", (
       at: 2,
       refused: false,
     },
-    // A cancel before step 3 started names the unstarted step.
+    // A cancel before step 3 started names the unstarted step (core's
+    // loop-top ctx check, fail(step, ctx.Err()), steps 3): no row draws
+    // it, so the landing falls back to the last drawn (landStep).
     {
       by: "canceled",
       err: `${P} 3: context canceled`,
       steps: 3,
       at: 2,
+      named: 3,
       refused: false,
     },
   ]
@@ -195,7 +199,7 @@ describe("each stop lands on the step every surface names (U10.1-fix #2, #3)", (
         stopped_by: c.by,
         steps: c.steps,
       }
-      expect(failedAtStep(run)).toBe(c.at)
+      expect(failedAtStep(run)).toBe(c.named ?? c.at)
       const rows = [
         { key: "r:R", runId: "R", kind: "run", status: "error" },
         ...Array.from({ length: c.steps }, (_, i) => ({
@@ -212,7 +216,8 @@ describe("each stop lands on the step every surface names (U10.1-fix #2, #3)", (
         toolCalls: [{ name: "x", finishPos: 1 }],
         finish: { reason: "tool_calls" },
       }
-      const v = stepVerdict(last, run)
+      // The landed step is the last drawn: no step after it.
+      const v = stepVerdict(last, run, undefined, true)
       expect(v.bad).toBe(true)
       expect(v.text.includes("the loop refused")).toBe(c.refused)
       if (c.refused)
@@ -235,6 +240,228 @@ describe("each stop lands on the step every surface names (U10.1-fix #2, #3)", (
       stepVerdict({ index: 1, toolCalls: [], finish: { reason: "stop" } }, run)
         .text
     ).toBe("✗ failed: boom · stop · 0 in · 0 out")
+  })
+})
+
+// P8-fix-a finding 1: the shapes core really writes (core/loop.go).
+// A step's record is appended only after its model call and its tools,
+// so a model error or a cancel during step N fails with "run failed at
+// step N" (fail(step, streamErr) / fail(step, ctx.Err()) inside the
+// call) while weft.run.steps is N: step N is the open one — its chat
+// span carries the error, the fold holds its step_start — and step N − 1
+// succeeded. The guard stops fail(step, err) after step N was appended
+// (steps N + 1); max_steps fails at fail(maxSteps, ErrMaxSteps) with
+// steps maxSteps; a cancel noticed at the loop's top, before step N's
+// StepStart, fails "at step N" with steps N and no row for N.
+describe("core's real failure shapes land on the failing step (P8-fix-a #1)", () => {
+  const R = "r_core"
+  const ev = (o: Record<string, unknown>) => ({ run_id: R, ...o })
+  const finished = (i: number) => [
+    ev({ type: "step_start", index: i }),
+    ev({
+      type: "tool_start",
+      seq: i + 1,
+      call_id: `c${i}`,
+      name: "more",
+      args: {},
+    }),
+    ev({
+      type: "tool_finish",
+      seq: i + 1,
+      call_id: `c${i}`,
+      name: "more",
+      content: "ok",
+      is_error: false,
+    }),
+    ev({
+      type: "step_finish",
+      index: i,
+      reason: "tool_calls",
+      usage: { input_tokens: 1, output_tokens: 1 },
+    }),
+  ]
+  const start = {
+    type: "run_start",
+    id: R,
+    agent: "a",
+    model: { provider: "wefttest", name: "script" },
+  }
+  const span = (
+    id: string,
+    name: string,
+    from: number,
+    to: number,
+    attrs: Record<string, unknown>,
+    status = "ok"
+  ) => ({
+    trace_id: "t",
+    span_id: id,
+    parent_span_id: id === "inv" ? "" : "inv",
+    name,
+    start: new Date(Date.UTC(2026, 9, 1, 9, 0, 0, from)).toISOString(),
+    end: new Date(Date.UTC(2026, 9, 1, 9, 0, 0, to)).toISOString(),
+    status,
+    attrs: { "weft.run.id": R, ...attrs },
+    run_id: R,
+  })
+  const chatSpan = (i: number, status = "ok") =>
+    span(
+      `c${i}`,
+      "chat script",
+      i * 10 + 1,
+      i * 10 + 4,
+      { "gen_ai.operation.name": "chat", "weft.step.index": i },
+      status
+    )
+  const toolSpan = (i: number) =>
+    span(`t${i}`, "execute_tool more", i * 10 + 5, i * 10 + 8, {
+      "gen_ai.operation.name": "execute_tool",
+      "weft.step.index": i,
+      "gen_ai.tool.name": "more",
+      "gen_ai.tool.call.id": `c${i}`,
+    })
+  const cases: {
+    name: string
+    err: string
+    by?: string
+    steps: number
+    /** Finished steps, then whether step `steps` has begun (open). */
+    open: boolean
+    named: number
+    land: number
+  }[] = [
+    {
+      name: "a model error at step 0",
+      err: "weft: run failed at step 0: model stream: boom",
+      steps: 0,
+      open: true,
+      named: 0,
+      land: 0,
+    },
+    {
+      name: "a model error at step 1",
+      err: "weft: run failed at step 1: model stream: boom",
+      steps: 1,
+      open: true,
+      named: 1,
+      land: 1,
+    },
+    {
+      name: "a cancel during step 1's model call",
+      err: "weft: run failed at step 1: context canceled",
+      by: "canceled",
+      steps: 1,
+      open: true,
+      named: 1,
+      land: 1,
+    },
+    {
+      name: "a cancel before step 2 began",
+      err: "weft: run failed at step 2: context canceled",
+      by: "canceled",
+      steps: 2,
+      open: false,
+      named: 2,
+      land: 1,
+    },
+    {
+      name: "max_steps after steps 0–2",
+      err: "weft: run failed at step 3: weft: run exceeded the maximum number of steps",
+      by: "max_steps",
+      steps: 3,
+      open: false,
+      named: 2,
+      land: 2,
+    },
+    {
+      name: "usage_limit after step 1",
+      err: "weft: run failed at step 1: weft: run exceeded its usage limit (input 2/1)",
+      by: "usage_limit",
+      steps: 2,
+      open: false,
+      named: 1,
+      land: 1,
+    },
+  ]
+  for (const c of cases)
+    it(c.name, () => {
+      const run = {
+        status: "failed",
+        err: c.err,
+        stopped_by: c.by,
+        steps: c.steps,
+      }
+      expect(failedAtStep(run)).toBe(c.named)
+      const n = c.steps
+      const events = [
+        start,
+        ...Array.from({ length: n }, (_, i) => finished(i)).flat(),
+        ...(c.open ? [ev({ type: "step_start", index: n })] : []),
+      ] as unknown as Parameters<typeof fold>[0]
+      const f = fold(events)
+      const spans = [
+        span(
+          "inv",
+          "invoke_agent a",
+          0,
+          100,
+          { "gen_ai.operation.name": "invoke_agent", "weft.run.steps": n },
+          "error"
+        ),
+        ...Array.from({ length: n }, (_, i) => [
+          chatSpan(i),
+          toolSpan(i),
+        ]).flat(),
+        ...(c.open ? [chatSpan(n, "error")] : []),
+      ] as unknown as Parameters<typeof waterfallRows>[0]["spans"]
+      for (const scale of ["time", "order"] as const) {
+        const rows = waterfallRows(
+          {
+            runId: R,
+            status: "failed",
+            spans: scale === "time" ? spans : undefined,
+            fold: f,
+            total: events.length,
+          },
+          scale
+        ).rows
+        const sel = defaultRowSel(rows, failedAtStep(run))
+        // The step the selection is under (the drawer's answer).
+        let r = rows.find((x) => x.key === sel)
+        while (r && r.kind !== "step") r = rows.find((x) => x.key === r!.parent)
+        expect(r?.key, `${scale}: ${sel}`).toBe(`s${c.land}`)
+      }
+      // The verdict row: the landed step (the last drawn) reads the
+      // failure; the one before it (if any) does not.
+      const steps = f.steps
+      const landed = steps.find((s) => s.index === c.land)!
+      expect(steps.at(-1)?.index).toBe(c.land)
+      expect(stepVerdict(landed, run, undefined, true).bad).toBe(true)
+      if (c.land > 0)
+        expect(
+          stepVerdict(
+            steps.find((s) => s.index === c.land - 1)!,
+            run,
+            undefined,
+            false
+          ).bad
+        ).toBe(false)
+      expect(
+        landStep(
+          c.named,
+          steps.map((s) => s.index)
+        )
+      ).toBe(c.land)
+      // The then line ends the run at the landed step.
+      if (c.by)
+        expect(thenLine(landed, run, false)).toContain(`at step ${c.land}`)
+    })
+
+  it("landStep: the named step if drawn, else the last before it, else none", () => {
+    expect(landStep(2, [0, 1, 2])).toBe(2)
+    expect(landStep(2, [0, 1])).toBe(1)
+    expect(landStep(0, [1, 2])).toBeUndefined()
+    expect(landStep(undefined, [0])).toBeUndefined()
   })
 })
 

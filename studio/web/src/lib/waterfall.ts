@@ -104,6 +104,10 @@ export interface WaterfallInput {
    * child row no span or fold names reads its agent, else its tool's
    * name — one label rule on both scales and both surfaces. */
   agents?: ReadonlyMap<string, string>
+  /** The descendant-span rules (lib/waterfall-tree.ts): Studio's run
+   * page passes them (treeRows) for its ?tree=1 read; without them a
+   * descendant's spans link no tool and a collapsed child claims none. */
+  descend?: Descend
 }
 
 export interface WaterfallModel {
@@ -528,10 +532,42 @@ function flatten(root: Node, rootRun: string): WaterfallRow[] {
 
 // ── The time scale ─────────────────────────────────────────────────
 
-interface Placed {
+export interface Placed {
   span: TimedSpan
   start: number
   took: number
+}
+
+/** A tree node as the time scale builds it (a row with its kids). */
+export type TreeRowNode = Node
+
+/** The descendant half of the time scale (U9.2; lib/waterfall-tree.ts's
+ * descend): over the placed spans, the run's invoke_agent spans (by
+ * run), the root run and the span → run rule, it says which tool row a
+ * child run hangs under — by span (under: the tool span's ref → the
+ * child's run) and, that span absent, by (run, call) and start time
+ * (fallback) — and claims a collapsed child's spans (and its
+ * descendants') into its one row. A run's own spans (the panel's read:
+ * no ?tree=1) give it nothing to do, so the panel bundles none of it;
+ * the rules are the run tree's, in one place either way. */
+export type Descend = (
+  placed: readonly Placed[],
+  invoke: ReadonlyMap<string, Placed>,
+  root: string,
+  runOf: (p: Placed) => string,
+  byRun: ReadonlyMap<string, readonly Placed[]>
+) => {
+  under: ReadonlyMap<string, string>
+  fallback: (
+    run: string,
+    call: string | undefined,
+    t: Placed
+  ) => string | undefined
+  claim: (
+    run: string,
+    claimed: Set<TimedSpan>,
+    bySpan: Map<string, TreeRowNode | null>
+  ) => void
 }
 
 /** A span on the axis: offset from t0 and duration, or undefined when
@@ -581,38 +617,10 @@ function timeRows(input: WaterfallInput): WaterfallModel {
   for (const p of placed)
     if (opOf(p.span) === "invoke_agent" && !invoke.has(runOf(p)))
       invoke.set(runOf(p), p)
-  // A child run hangs under the span its invoke_agent span names as
-  // parent — call ids repeat per step (core numbers call_1 each step),
-  // so the span, never the call id, says which tool. Only when that
-  // span is absent: by (parent run, parent call) — and since a call id
-  // repeats per step and a child names no parent step (nor is its id
-  // parsed, docs/record-contract.md §2), a tool takes the child under
-  // its (run, call) whose run starts inside it — one candidate or
-  // several.
-  const present = new Set(placed.map((p) => spanRef(p.span)))
-  const under = new Map<string, string>()
-  const byCall = new Map<string, Placed[]>()
-  for (const [run, p] of invoke) {
-    if (run === input.runId) continue
-    const ps = spanRef(p.span, p.span.parent_span_id)
-    const a = attrsOf(p.span)
-    if (p.span.parent_span_id && present.has(ps)) under.set(ps, run)
-    else if (str(a["weft.parent.call.id"])) {
-      const k = `${a["weft.parent.run.id"]}\n${a["weft.parent.call.id"]}`
-      const list = byCall.get(k)
-      if (list) list.push(p)
-      else byCall.set(k, [p])
-    }
-  }
-  const fallback = (run: string, call: string | undefined, t: Placed) => {
-    const list = call ? byCall.get(`${run}\n${call}`) : undefined
-    // The one candidate too must start inside the tool: step 0's tool
-    // never takes step 1's child because step 0's own is absent.
-    const pick = list?.find(
-      (c) => c.start >= t.start && c.start <= t.start + t.took
-    )
-    return pick && runOf(pick)
-  }
+  // Descendant runs' spans (?tree=1): which tool each child hangs
+  // under, and a collapsed child's spans claimed — input.descend
+  // (lib/waterfall-tree.ts). A run's own spans need neither.
+  const ds = input.descend?.(placed, invoke, input.runId, runOf, byRun)
   // A chat span's attempts, by the chat span: grouped once (a run of
   // thousands of steps must not scan every span per model call).
   const attemptsOf = new Map<string, Placed[]>()
@@ -633,17 +641,8 @@ function timeRows(input: WaterfallInput): WaterfallModel {
     return n
   }
 
-  // A collapsed child's spans (and its descendants', `<run>/…`) stay
-  // inside its one row.
   const built = new Set<string>()
-  const claimRun = (run: string) => {
-    for (const [r, list] of byRun)
-      if (r === run || r.startsWith(`${run}/`))
-        for (const p of list) {
-          claimed.add(p.span)
-          if (!bySpan.has(spanRef(p.span))) bySpan.set(spanRef(p.span), null)
-        }
-  }
+  const claimRun = (run: string) => ds?.claim(run, claimed, bySpan)
   const buildRun = (
     run: string,
     isChild: boolean,
@@ -766,9 +765,9 @@ function timeRows(input: WaterfallInput): WaterfallModel {
       )
       kid(
         t,
-        under.get(spanRef(p.span)) ??
+        ds?.under.get(spanRef(p.span)) ??
           call?.childRunId ??
-          fallback(run, callId, p)
+          ds?.fallback(run, callId, p)
       )
       return t
     }

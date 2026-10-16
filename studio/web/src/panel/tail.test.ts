@@ -79,7 +79,11 @@ describe("a turn of a longer conversation", () => {
     click(row(el, "s_01-t2"))
     await settle()
     expect(text(el, ".weft-main > div > .weft-note")).toBe("and the refund?")
-    expect(text(el, ".weft-step-b")).toBe("The refund was issued this morning.")
+    // The reply itself (the answer above it quotes it too: P8-fix-a,
+    // the answer on step 0 when nothing failed).
+    expect(text(el, '.weft-step-b > [data-key="text"]')).toBe(
+      "The refund was issued this morning."
+    )
     expect(text(el, ".weft-main")).not.toContain(
       "Your order shipped yesterday."
     )
@@ -171,7 +175,7 @@ describe("the live tail", () => {
       event: { type: "text_delta", run_id: "s_01-t1", text: " yesterday." },
     })
     await settle()
-    expect(text(el, ".weft-step-b")).toBe(" yesterday.")
+    expect(text(el, ".weft-step-b > .weft-stream")).toBe(" yesterday.")
     finish(routes)
     FakeEventSource.last("public_id=")!.emit("run", { run: runRow({}) })
     await settle()

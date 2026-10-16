@@ -48,13 +48,29 @@ export const TOKENS = [
   "--weft-radius-sm",
 ]
 
+// The stylesheet carries no CSS comment (P8-fix-a: they shipped in
+// panel.js, ~345 B gzip); its notes live here, in its order:
+//   .weft-root — no colour: the dock and the pill set theirs; the
+//     unreachable line keeps the host's (:host inherits color past
+//     all: initial).
+//   .weft-docked — D1: the float's box and the dock's size are inline
+//     (layout.ts).
+//   .weft-unreachable — C2: a mount the host made, with no Studio
+//     answering — one quiet line in the page's flow, where the host put
+//     the element: it sits on the host's background, so it takes the
+//     host's colour, not a theme's.
+//   .weft-tabs … — D4: the turn view's tabs, the turn filter, paging,
+//     the raw tree, the timeline axis.
+//   .weft-rq-* — the Request tab (E1.2).
+//   .weft-actions … — rung 2: the experiment drawer and its result
+//     (§3, §8.2).
+//   .weft-verbs … — replay from here (plan F1): hover/focus verbs, the
+//     ack preview.
 export const PANEL_CSS = `
 :host { all: initial; color: inherit; box-sizing: border-box; color-scheme: dark; ${tokens("dark")}
   --weft-font: ${MONO_STACK}; --weft-radius: 8px; --weft-radius-sm: 5px; }
 :host([data-theme-resolved="light"]) { color-scheme: light; ${tokens("light")} }
 *, *::before, *::after { box-sizing: inherit; }
-/* No colour here: the dock and the pill set theirs; the unreachable
-   line keeps the host's (:host inherits color past all: initial). */
 .weft-root {
   font: 12px/1.45 var(--weft-font);
 }
@@ -69,7 +85,6 @@ export const PANEL_CSS = `
   box-shadow: 0 12px 40px var(--weft-shadow);
   overflow: hidden; outline: none;
 }
-/* D1: the float's box and the dock's size are inline (layout.ts). */
 .weft-docked { border-radius: 0; max-width: 100vw; max-height: 100vh; }
 .weft-side-right { right: 0; top: 0; bottom: 0; border-right: none; }
 .weft-side-left { left: 0; top: 0; bottom: 0; border-left: none; }
@@ -106,9 +121,6 @@ export const PANEL_CSS = `
 .weft-fab:hover { background: var(--weft-bg2); }
 .weft-fab::before { content: "\\25C8"; color: var(--weft-accent); margin-right: 4px; }
 
-/* C2: a mount the host made, with no Studio answering — one quiet
-   line in the page's flow, where the host put the element: it sits on
-   the host's background, so it takes the host's colour, not a theme's. */
 .weft-unreachable { display: inline; font: 12px/1.45 var(--weft-font); color: inherit; }
 .weft-unreachable-at { color: inherit; }
 .weft-retry { background: none; border: none; padding: 0; color: inherit; cursor: pointer;
@@ -228,7 +240,6 @@ ${toneRules()}
   padding: 5px 10px; border-top: 1px solid var(--weft-line); color: var(--weft-faint);
   background: var(--weft-bg2); white-space: normal; font-size: 11px;
 }
-/* D4: the turn view's tabs, the turn filter, paging, the raw tree, the timeline axis. */
 .weft-tabs { display: flex; gap: 2px; margin: -4px 0 8px; border-bottom: 1px solid var(--weft-line); }
 .weft-tab { background: none; border: none; border-bottom: 2px solid transparent; color: var(--weft-dim);
   padding: 3px 8px; cursor: pointer; font: inherit; }
@@ -252,7 +263,6 @@ ${toneRules()}
 .weft-tv { overflow: hidden; text-overflow: ellipsis; }
 .weft-tc { margin-left: auto; flex: none; background: none; border: none; color: var(--weft-dim); cursor: pointer; font: inherit; }
 .weft-tmore { margin: 1px 0; }
-/* The Request tab (E1.2) */
 .weft-rq-steps, .weft-rq-head { margin-bottom: 6px; align-items: center; }
 .weft-rq-row { display: flex; gap: 8px; margin-top: 7px; }
 .weft-rq-k { width: 76px; flex: none; color: var(--weft-dim); }
@@ -278,7 +288,6 @@ ${toneRules()}
 .weft-splash { padding: 24px; color: var(--weft-dim); text-align: center; }
 .weft-splash .weft-warn { color: var(--weft-warn); display: block; margin-bottom: 6px; }
 
-/* ── Rung 2: the experiment drawer and its result (§3, §8.2) ───── */
 .weft-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 6px 0 10px; }
 .weft-drawer { border-color: var(--weft-accent); }
 .weft-field { display: block; margin-bottom: 7px; color: var(--weft-dim); }
@@ -322,7 +331,6 @@ select.weft-input { width: auto; min-width: 120px; }
 .weft-diff-a { color: var(--weft-warn); }
 .weft-diff-b { color: var(--weft-info); }
 .weft-resolve { width: auto; min-width: 150px; margin: 0 4px; }
-/* ── Replay from here (plan F1): hover/focus verbs, the ack preview ── */
 .weft-verbs { display: inline-flex; gap: 2px; margin-left: 4px; }
 .weft-verb { background: none; border: none; color: var(--weft-dim); cursor: pointer; padding: 0 3px; font: inherit; clip-path: inset(50%); }
 .weft-verb::before { content: attr(data-g); }

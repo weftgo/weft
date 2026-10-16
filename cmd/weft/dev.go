@@ -84,6 +84,7 @@ func runDev(args []string, stdout, stderr io.Writer) error {
 		"write a new stable dev token beside the database (<db>.token) before serving; an action, so no environment mirror")
 	retain := retainFlag(fs, "to keep runs after they were last seen: older ones that are not running are deleted from studio's tables")
 	pricing := pricingFlag(fs)
+	logs := addLogFlags(fs)
 	noWatch := fs.Bool("no-watch", false,
 		"do not restart the app on a .go change; weft dev exits with the app's exit code")
 	var roots []string
@@ -96,6 +97,11 @@ func runDev(args []string, stdout, stderr io.Writer) error {
 	if err := parse(fs, args); err != nil {
 		return err
 	}
+	restoreLog, err := logs.install(stderr)
+	if err != nil {
+		return err
+	}
+	defer restoreLog()
 	argv := fs.Args()
 	if len(argv) == 0 {
 		argv = []string{"go", "run", "."}

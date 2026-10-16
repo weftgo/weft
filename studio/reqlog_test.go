@@ -6,12 +6,14 @@ package studio
 // carries too (X-Request-Id, and request_id in the 5xx body).
 import (
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 )
 
 // captureLog points slog.Default at a buffer for the test.
@@ -123,5 +125,57 @@ func TestServerLogNamesA5xxWithItsRequestID(t *testing.T) {
 	New(DB(fixtureDB(t))).Handler().ServeHTTP(w, req)
 	if w.Code != http.StatusNotFound || logged.Len() != 0 {
 		t.Errorf("a 404: %d, logged %q", w.Code, logged.String())
+	}
+}
+
+// P8-fix-a 2: a 5xx answered to a panel token masks the database's error
+// text in its body, but Studio's server log line for that request id
+// still names the real error — the operator's only way to it.
+func TestServerLogNamesAPanelTokens5xxCause(t *testing.T) {
+	logged := captureLog(t)
+	stub := stubDB{err: errors.New("open /var/lib/studio/secret.db: disk on fire")}
+	h := Handler(DB(stub), Token("srv"))
+	tok, err := signPanelToken([]byte("srv"), panelClaims{PublicID: "pub_orders", Scope: scopeRead, Exp: time.Now().Add(time.Hour)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	code, hdr, body := getWith(t, h, "/studio/api/runs/r_x", tok, "")
+	if code != http.StatusInternalServerError || strings.Contains(body, "disk on fire") {
+		t.Fatalf("panel token's 500: %d %s", code, body)
+	}
+	id := hdr.Get("X-Request-Id")
+	var line string
+	for _, l := range linesOf(logged) {
+		if strings.Contains(l, "request_id="+id) {
+			line = l
+		}
+	}
+	if !strings.Contains(line, `reason="read run r_x: open /var/lib/studio/secret.db: disk on fire"`) {
+		t.Errorf("the 5xx line for %s does not name the real error: %q", id, line)
+	}
+}
+
+// P8-fix-a 13: /api/meta's ingest section counts the batches this
+// Studio accepted and refused, with the last refusal and its time.
+func TestMetaIngestCounts(t *testing.T) {
+	captureLog(t)
+	ts := httptest.NewServer(New(DB(fixtureDB(t))).Handler())
+	t.Cleanup(ts.Close)
+	post := func(body string) {
+		resp, err := http.Post(ts.URL+"/v1/traces", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+	}
+	post(`{"resourceSpans":[]}`)
+	post("{not otlp")
+	in := metaOf(t, ts, "").Ingest
+	if in == nil {
+		t.Fatal("meta carries no ingest section")
+	}
+	if in.Accepted != 1 || in.Refused != 1 || in.LastAt == nil ||
+		!strings.HasPrefix(in.LastError, "400 bad_request: decode application/json") {
+		t.Errorf("ingest counts %+v", *in)
 	}
 }

@@ -6,7 +6,17 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { LogRow, Span as TimedSpan } from "./api"
 import { logsLink } from "./links"
-import { fetchAllLogs, jumpSel, LOGS, logTicks } from "./logs"
+import { QueryClient } from "@tanstack/react-query"
+import {
+  allLogsQuery,
+  fetchAllLogs,
+  jumpSel,
+  LOG_PAGES,
+  LOGS,
+  LOGS_POLL_MS,
+  logTicks,
+} from "./logs"
+import type { AllLogs } from "./logs"
 import { resolveRowSel } from "./run-tree"
 import type { WaterfallRow } from "./waterfall"
 
@@ -113,6 +123,91 @@ describe("logTicks", () => {
     expect(LOGS.tickHint(1, 1)).toBe(
       "1 app log error, 1 app log warning under this row (its Logs tab)"
     )
+  })
+
+  // P8-fix-a finding 7: a cut warn read makes the counts floors.
+  it("a cut read says its counts are floors: ≥ on the tick, at least in its hint", () => {
+    expect(LOGS.tick({ warn: 2, error: 1 }, true)).toBe("≥E1 W2")
+    expect(LOGS.tickHint(2, 1, true)).toBe(
+      "at least 1 app log error, 2 app log warnings under this row (its Logs tab): the first 10,000 WARN+ lines were read"
+    )
+  })
+})
+
+// P8-fix-a finding 6: a running run's lines are read on from the last
+// line held, never from 0 again; a cut read is never re-read; the
+// finished run's read is whole, once.
+describe("allLogsQuery pages on while the run runs", () => {
+  afterEach(() => vi.unstubAllGlobals())
+
+  it("reads on from the line after the last held, keeps a cut read as it is", async () => {
+    const froms: (string | null)[] = []
+    let total = 2
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const u = new URL(String(input))
+        froms.push(u.searchParams.get("from"))
+        const from = Number(u.searchParams.get("from") ?? 0)
+        const logs = []
+        for (let i = from; i < total; i++) logs.push(line(i, 13))
+        return reply({ logs })
+      })
+    )
+    const first = await fetchAllLogs("r_live", "warn")
+    expect(first.logs.map((l) => l.index)).toEqual([0, 1])
+    total = 3
+    const next = await fetchAllLogs("r_live", "warn", LOG_PAGES, first)
+    expect(froms).toEqual([null, "2"])
+    expect(next.logs.map((l) => l.index)).toEqual([0, 1, 2])
+    // A cut read is the cap's: nothing more is read.
+    const cut = { ...next, cut: true }
+    expect(await fetchAllLogs("r_live", "warn", LOG_PAGES, cut)).toBe(cut)
+    expect(froms).toHaveLength(2)
+  })
+
+  it("through the query: one read per poll from the held tail, none once cut; the finished run's key reads whole", async () => {
+    const froms: (string | null)[] = []
+    let cutNow = false
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        const u = new URL(String(input))
+        froms.push(u.searchParams.get("from"))
+        const from = Number(u.searchParams.get("from") ?? 0)
+        return reply(
+          cutNow
+            ? { logs: [line(from, 13)], next_from: from + 1 }
+            : { logs: [line(from, 13)] }
+        )
+      })
+    )
+    const qc = new QueryClient()
+    const live = allLogsQuery("r_q", "warn", true)
+    await qc.fetchQuery(live)
+    await qc.refetchQueries({ queryKey: live.queryKey })
+    expect(froms).toEqual([null, "1"])
+    const held = qc.getQueryData<AllLogs>(live.queryKey)!
+    expect(held.logs.map((l) => l.index)).toEqual([0, 1])
+    const interval = live.refetchInterval as (q: unknown) => number | false
+    expect(interval({ state: { data: held } })).toBe(LOGS_POLL_MS)
+    expect(interval({ state: { data: { ...held, cut: true } } })).toBe(false)
+    // The finished run: its own key, read from 0, not polled.
+    const done = allLogsQuery("r_q", "warn", false)
+    expect(done.queryKey).not.toEqual(live.queryKey)
+    await qc.fetchQuery(done)
+    expect(froms).toEqual([null, "1", null])
+    const doneInterval = done.refetchInterval as (q: unknown) => number | false
+    expect(doneInterval({ state: { data: held } })).toBe(false)
+    // A flood while running: the cap cuts it, and the cut read stops.
+    froms.length = 0
+    cutNow = true
+    const flood = allLogsQuery("r_flood", undefined, true)
+    const page = await qc.fetchQuery(flood)
+    expect(page.cut).toBe(true)
+    expect(froms).toHaveLength(LOG_PAGES)
+    await qc.refetchQueries({ queryKey: flood.queryKey })
+    expect(froms).toHaveLength(LOG_PAGES)
   })
 })
 

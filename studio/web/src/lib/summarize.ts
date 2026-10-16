@@ -231,20 +231,35 @@ export interface AnswerStep {
 
 /** failedAtStep is the step a failed run failed at: the one core's
  * RunError names ("run failed at step N"), else its last step;
- * undefined for a run that did not fail or ran no step. A max_steps
- * run's error names the step it would have run next (core's
- * fail(maxSteps, ErrMaxSteps): "at step 3" after steps 0–2), and a
- * cancel before a step started names that unstarted step: a named step
- * the run never reached reads as its last (stopStep) — the step the
- * header's stop and the end card name. */
+ * undefined for a run that did not fail or ran no step. Core appends a
+ * step's record only after its model call and its tools, so a model
+ * error or a cancel during step N reads "at step N" with steps N: step
+ * N is the open one (its errored chat span, the fold's open step). A
+ * max_steps run's error names the step it would have run next ("at step
+ * 3" after steps 0–2): its stop is its last step (stopStep). A cancel
+ * before step N began names a step no surface draws: landStep falls
+ * back to the last one drawn. */
 export function failedAtStep(r: AnswerRun): number | undefined {
   if (r.status !== "failed") return undefined
   const at = /run failed at step (\d+)/.exec(r.err ?? "")?.[1]
-  if (at === undefined || r.stopped_by === "max_steps") return stopStep(r.steps)
-  const n = Number(at)
-  return r.steps !== undefined && r.steps > 0 && n >= r.steps
+  return at === undefined || r.stopped_by === "max_steps"
     ? stopStep(r.steps)
-    : n
+    : Number(at)
+}
+
+/** landStep is where a selection lands for the step a run failed at
+ * among the steps a surface draws: that step, else the last drawn
+ * before it (a cancel before step N began: N − 1); undefined with no
+ * failure or none drawn before it (the caller's step 0). */
+export function landStep(
+  failedAt: number | undefined,
+  drawn: readonly number[]
+): number | undefined {
+  let best: number | undefined
+  if (failedAt !== undefined)
+    for (const n of drawn)
+      if (n <= failedAt && (best === undefined || n > best)) best = n
+  return best
 }
 
 /** The stops a loop guard makes at the continuation point (AGENTS.md
@@ -291,17 +306,21 @@ export interface Verdict {
  * next model call (a guard's stop: GUARD_STOPS), or the step never
  * finished; then the finish reason,
  * its tokens, its latency and its time to first token. ms is the
- * step's measured span, used when no step_finish latency is known.
+ * step's measured span, used when no step_finish latency is known;
+ * last: no later step is drawn, so a failure named past it (a cancel
+ * before the next step began, landStep) reads on it.
  */
 export function stepVerdict(
   step: AnswerStep,
   run: AnswerRun,
-  ms?: number
+  ms?: number,
+  last = false
 ): Verdict {
   const parts: string[] = []
   let bad = false
   const f = step.finish
-  if (failedAtStep(run) === step.index) {
+  const at = failedAtStep(run) ?? -1
+  if (at === step.index || (last && at > step.index)) {
     bad = true
     const w = stoppedByWords(run.stopped_by, run.cancel_cause)
     const d = stopDetail(run.err, run.stopped_by)
@@ -399,7 +418,7 @@ export function toolsLine(step: AnswerStep, running = false): string {
 }
 
 /** thenLine is what came after the step: the next step, or how the
- * run ended there (lib/stopped-by.ts's end card). */
+ * run ended there (lib/stopped-by.ts's end card, at this step). */
 export function thenLine(
   step: AnswerStep,
   run: AnswerRun,
@@ -407,5 +426,6 @@ export function thenLine(
 ): string {
   if (hasNext) return `→ step ${step.index + 1}`
   if (run.status === "running") return "running…"
-  return endCard(run) ?? `■ ${run.status || "ended"}`
+  // The last step drawn is where the run ended: its end card names it.
+  return endCard(run, step.index) ?? `■ ${run.status || "ended"}`
 }

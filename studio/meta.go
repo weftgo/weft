@@ -203,6 +203,9 @@ func (s *Server) serveMeta(w http.ResponseWriter, r *http.Request) {
 	if id.panel == nil {
 		doc.ManifestCheck = s.manifestCheck(r.Context(), reg)
 		ingest := s.ingestHealth.snapshot()
+		if s.reqs != nil {
+			ingest = ingest.withCounts(s.reqs.Ingest())
+		}
 		doc.Ingest = &ingest
 	}
 	writeJSON(w, r, http.StatusOK, doc)

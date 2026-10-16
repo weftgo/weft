@@ -1,7 +1,7 @@
 {
   "catalogs": [],
   "badge": "not_recorded",
-  "reason": "the record did not exist in the weft that wrote this run (v0.9.0 or earlier keeps no request, prompt or tools records, ADR 0028): nothing was lost, there was nothing to keep",
+  "reason": "the weft that wrote this run kept no such record (v0.9.0 or earlier keeps no request, prompt or tools records, ADR 0028): nothing was lost",
   "fix": "upgrade weft and re-run"
 }
 

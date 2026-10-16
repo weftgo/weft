@@ -74,6 +74,7 @@ import {
   ALL_RUNS,
   CHILD_CAPPED_FIX,
   childCappedReason,
+  childStreamPolls,
   defaultRowSel,
   detailSpan,
   drawerTabOf,
@@ -101,9 +102,10 @@ import {
   UNTIMED_HOLE,
   UNTIMED_PENDING,
   UNTIMED_PENDING_HINT,
-  waterfallRows,
 } from "@/lib/waterfall"
 import type { Scale } from "@/lib/waterfall"
+// The ?tree=1 read: the descendant rules too (lib/waterfall-tree.ts).
+import { treeRows as waterfallRows } from "@/lib/waterfall-tree"
 import type { FoldedRun } from "@/lib/events"
 import { callGraph, catalogSources, GRAPH_HINT, nodeOfRun } from "@/lib/graph"
 import { CallGraphView } from "@/components/studio/call-graph"
@@ -685,10 +687,7 @@ function RunPage() {
       ...childStreamQuery(r),
       enabled: onTree,
       refetchInterval: (q: { state: { data?: ChildStream } }) =>
-        isLive(childDocs[i]) ||
-        (rootLive && (!childDocs[i] || q.state.data?.done === false))
-          ? 2000
-          : false,
+        childStreamPolls(childDocs[i], q.state.data, rootLive) ? 2000 : false,
     })),
     combine: dataOf,
   })
@@ -1187,7 +1186,7 @@ function RunPage() {
       <button
         type="button"
         className={`shrink-0 font-mono text-[10px] ${severityClass(t.error ? 17 : 13)}`}
-        title={LOGS.tickHint(t.warn, t.error)}
+        title={LOGS.tickHint(t.warn, t.error, warnLogs.data?.cut)}
         data-log-tick={sp.key}
         onClick={(e) => {
           e.stopPropagation()
@@ -1203,7 +1202,7 @@ function RunPage() {
           })
         }}
       >
-        {LOGS.tick(t)}
+        {LOGS.tick(t, warnLogs.data?.cut)}
       </button>
     )
   }

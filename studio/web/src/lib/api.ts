@@ -449,6 +449,13 @@ export interface Meta {
    * an older Studio, and for a panel token (the dev token's alone). */
   ingest?: {
     dropped: { service: string; records: number; last_heard: string }[]
+    /** OTLP POSTs answered 2xx / 4xx–5xx since start (P8-fix-a, in
+     * memory), and the last refusal ("<status> <code>: <reason>", its
+     * time) — omitted before one. */
+    accepted?: number
+    refused?: number
+    last_error?: string
+    last_at?: string
   }
   interrupted_after_ms: number
   capabilities: string[]

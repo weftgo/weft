@@ -31,9 +31,13 @@ import {
   spanTree,
   timeDomain,
   took,
-  waterfallRows,
+  waterfallRows as ownRows,
 } from "./waterfall"
 import type { WaterfallRow } from "./waterfall"
+// The run tree as Studio's run page builds it: the descendant rules
+// in (lib/waterfall-tree.ts). ownRows is the panel's (a run's own
+// spans): the split's guard is at the end of this file.
+import { treeRows as waterfallRows } from "./waterfall-tree"
 
 const brief = (r: WaterfallRow) =>
   `${"  ".repeat(r.depth)}${r.kind} ${r.key} ${r.label}${r.gist ? ` | ${r.gist}` : ""}`
@@ -764,5 +768,35 @@ describe("fold rows no span covers (U8.2-fix: truncation is visible)", () => {
       "time"
     )
     expect(wf.rows.find((r) => r.key === "c:0:call_1")!.gist).toBe("55 B")
+  })
+})
+
+// P8-fix-a: the descendant rules live in lib/waterfall-tree.ts, which
+// panel.js does not bundle. The panel reads a run's own spans (no
+// ?tree=1): on that input both builds draw the same rows; only a
+// descendant's spans tell them apart.
+describe("the run tree's descendant half is split out (P8-fix-a)", () => {
+  const own = SPANS.filter((s) => s.attrs["weft.run.id"] === DIR)
+  it("a run's own spans: the panel's build and the run page's agree, row for row", () => {
+    expect(own.length).toBeGreaterThan(0)
+    expect(own.length).toBeLessThan(SPANS.length)
+    for (const status of ["succeeded", "running"])
+      expect(
+        ownRows({ runId: DIR, status, spans: own, fold: FOLD, total: 9 }).rows
+      ).toEqual(
+        waterfallRows({ runId: DIR, status, spans: own, fold: FOLD, total: 9 })
+          .rows
+      )
+    // The order scale too (no expanded child, no descendant folds).
+    expect(ownRows({ runId: DIR, fold: FOLD, total: 9 }, "order").rows).toEqual(
+      waterfallRows({ runId: DIR, fold: FOLD, total: 9 }, "order").rows
+    )
+  })
+
+  it("a descendant's spans need the run page's build: without it they are not claimed by its row", () => {
+    const tree = waterfallRows({ runId: DIR, spans: SPANS, fold: FOLD })
+    const bare = ownRows({ runId: DIR, spans: SPANS, fold: FOLD })
+    expect(tree.rows.filter((r) => r.runId === OPS)).toHaveLength(1)
+    expect(bare.rows.filter((r) => r.runId === OPS).length).toBeGreaterThan(1)
   })
 })

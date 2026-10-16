@@ -54,18 +54,25 @@ export const LOGS = {
     `the first ${n.toLocaleString("en-US")} lines are shown (${LOG_PAGES} pages of ${LOG_PAGE.toLocaleString("en-US")}): later lines of this run were not read here, nothing was lost`,
   cutFix:
     "filter by severity, or page the route: GET /api/runs/{id}/logs?from=<next_from>",
-  /** A row's tick: "E1 W2" (the problem badges' letters). */
-  tick: (t: { warn: number; error: number }) =>
+  /** A row's tick: "E1 W2" (the problem badges' letters); "≥E1 W2"
+   * when the warn read was cut — counts that are floors. */
+  tick: (t: { warn: number; error: number }, cut = false) =>
+    (cut ? "≥" : "") +
     [t.error ? `E${t.error}` : "", t.warn ? `W${t.warn}` : ""]
       .filter(Boolean)
       .join(" "),
-  tickHint: (warn: number, err: number) =>
+  tickHint: (warn: number, err: number, cut = false) =>
+    (cut ? "at least " : "") +
     [
       err ? `${err} app log error${err === 1 ? "" : "s"}` : "",
       warn ? `${warn} app log warning${warn === 1 ? "" : "s"}` : "",
     ]
       .filter(Boolean)
-      .join(", ") + " under this row (its Logs tab)",
+      .join(", ") +
+    " under this row (its Logs tab)" +
+    (cut
+      ? `: the first ${(LOG_PAGES * LOG_PAGE).toLocaleString("en-US")} WARN+ lines were read`
+      : ""),
 } as const
 
 /** A severity number's tone class: ERROR and above, WARN, the rest. */
@@ -82,22 +89,28 @@ export interface AllLogs extends LogsPage {
 /** fetchAllLogs reads the run's lines page by page (at or above
  * severity), up to LOG_PAGES pages; the holes are every page's,
  * deduped, the badge the first page's (a hidden or not_recorded page
- * answers with no lines and no next page). */
+ * answers with no lines and no next page). Given prev (a running run's
+ * last read), it reads on from the line after prev's last, its pages
+ * counted against the same cap; a cut prev is kept as it is. */
 export async function fetchAllLogs(
   runId: string,
   severity?: string,
-  pages = LOG_PAGES
+  pages = LOG_PAGES,
+  prev?: AllLogs
 ): Promise<AllLogs> {
+  if (prev?.cut) return prev
   const read = (from?: number) =>
     fetchLogs(runId, {
       limit: LOG_PAGE,
       ...(from === undefined ? {} : { from }),
       ...(severity ? { severity } : {}),
     })
-  const first = await read()
-  const logs: LogRow[] = []
-  const holes: StepHole[] = []
-  const seen = new Set<string>()
+  const logs: LogRow[] = [...(prev?.logs ?? [])]
+  const holes: StepHole[] = [...(prev?.holes ?? [])]
+  const seen = new Set(holes.map((h) => `${h.hole}|${h.reason}`))
+  const tail = logs.at(-1)?.index
+  const first = await read(tail === undefined ? undefined : tail + 1)
+  const budget = Math.max(1, pages - Math.ceil(logs.length / LOG_PAGE))
   let cut = false
   for (let page = first, i = 1; ; i++) {
     logs.push(...page.logs)
@@ -107,7 +120,7 @@ export async function fetchAllLogs(
         holes.push(h)
       }
     if (page.next_from === undefined) break
-    if (i >= pages) {
+    if (i >= budget) {
       cut = true
       break
     }
@@ -117,15 +130,28 @@ export async function fetchAllLogs(
 }
 
 /** The run's lines (at or above severity), every page up to the cap:
- * the drawer's Logs tab (no severity) and the run-level view share
- * the read. */
+ * the drawer's Logs tab (no severity), the run-level view and the
+ * ticks (warn) share the read where they ask the same. While the run
+ * runs its lines arrive as its spans end: read again every
+ * LOGS_POLL_MS from the last line held, never from 0, and not once the
+ * read is cut. A line's index is its place in time among the lines its
+ * spans attribute, so a span ending late can slot lines below the last
+ * held: the finished run's read (its own key) is whole, once. */
 export function allLogsQuery(id: string, severity?: string, running = false) {
   return queryOptions({
-    queryKey: ["logs", id, severity ?? ""],
+    queryKey: ["logs", id, severity ?? "", running],
     staleTime: 30_000,
-    queryFn: () => fetchAllLogs(id, severity),
-    // A running run's lines arrive as its spans end: read again.
-    refetchInterval: running ? LOGS_POLL_MS : false,
+    queryFn: ({ client, queryKey }) =>
+      fetchAllLogs(
+        id,
+        severity,
+        LOG_PAGES,
+        running ? client.getQueryData<AllLogs>(queryKey) : undefined
+      ),
+    // The live read's lines stay drawn while the finished read loads.
+    placeholderData: (held) => held,
+    refetchInterval: (q) =>
+      running && !q.state.data?.cut ? LOGS_POLL_MS : false,
   })
 }
 

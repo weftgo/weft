@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/weftgo/weft/obsdb"
+	"github.com/weftgo/weft/studio/internal/reqlog"
 )
 
 // Ingest health (U5, UX-E-38): what the apps exporting here said about
@@ -86,6 +87,25 @@ type metaIngest struct {
 	// Dropped lists the services that reported lost records, most
 	// first; never null.
 	Dropped []metaIngestDrop `json:"dropped"`
+	// Accepted and Refused count the OTLP batches (POSTs under /v1/)
+	// this Studio answered 2xx and 4xx/5xx since it started; LastError
+	// is the last refusal — "<status> <code>: <reason>", the reason its
+	// server log line names — and LastAt its time, both omitted before
+	// the first (UX-E-37; studio/internal/reqlog, in memory).
+	Accepted  int64      `json:"accepted"`
+	Refused   int64      `json:"refused"`
+	LastError string     `json:"last_error,omitempty"`
+	LastAt    *time.Time `json:"last_at,omitempty"`
+}
+
+// withCounts adds the request log's ingest counters.
+func (m metaIngest) withCounts(c reqlog.IngestCounts) metaIngest {
+	m.Accepted, m.Refused, m.LastError = c.Accepted, c.Refused, c.LastError
+	if !c.LastAt.IsZero() {
+		t := c.LastAt
+		m.LastAt = &t
+	}
+	return m
 }
 
 func (h *ingestHealth) snapshot() metaIngest {

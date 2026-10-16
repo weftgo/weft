@@ -100,7 +100,9 @@ func badRequest(w http.ResponseWriter, r *http.Request, msg string) {
 // are 404, everything else is a 500 that names the failure (loud over
 // silent, ADR 0010 §2.5's rule, carried over). A panel token lives in
 // a page, so its holder gets the code and the operation, never the
-// database's own error text (paths, SQL, hosts).
+// database's own error text (paths, SQL, hosts) — while Studio's server
+// log still names the real error (reqlog.Cause), so the operator's line
+// for that request id says what failed.
 func dbError(w http.ResponseWriter, r *http.Request, noun, id string, err error) {
 	switch {
 	case errors.Is(err, obsdb.ErrNotFound):
@@ -108,6 +110,7 @@ func dbError(w http.ResponseWriter, r *http.Request, noun, id string, err error)
 	case idFrom(r).panel != nil:
 		writeError(w, r, http.StatusInternalServerError, "internal",
 			"read "+noun+" "+id+" failed")
+		reqlog.Cause(r.Context(), "read "+noun+" "+id+": "+err.Error())
 	default:
 		writeError(w, r, http.StatusInternalServerError, "internal",
 			"read "+noun+" "+id+": "+err.Error())

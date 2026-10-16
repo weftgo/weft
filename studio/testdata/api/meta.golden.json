@@ -9,7 +9,9 @@
   "has_manifest": true,
   "ingest_open": true,
   "ingest": {
-    "dropped": []
+    "dropped": [],
+    "accepted": 0,
+    "refused": 0
   },
   "interrupted_after_ms": 30000,
   "capabilities": [

@@ -10,6 +10,8 @@
 // React: Studio only (the panel draws the model itself, U8.3).
 import type { Span as TimedSpan } from "./api"
 import type { AnswerStep } from "./summarize"
+import { isLive } from "./honesty"
+import { landStep } from "./summarize"
 import type { Span, SpanKind } from "./trace"
 import type { WaterfallModel, WaterfallRow } from "./waterfall"
 import { lanesWord, ROW_KIND, rowBadge, rowKeys, rowTone } from "./waterfall"
@@ -200,7 +202,8 @@ const timed = (r: Span | undefined) => (r?.timed ? r : undefined)
  * call, a tool, a child run; never the root, whose failure is its
  * header's, nor an attempt a later one answered for), else a tool
  * that never finished — then the step a failed run failed at
- * (failedAt: lib/summarize.ts's failedAtStep), then step 0, then the
+ * (failedAt: lib/summarize.ts's failedAtStep; not drawn, the last step
+ * before it — landStep), then step 0, then the
  * first row. Read on the rows the page draws, on the scale shown.
  */
 export function defaultRowSel(
@@ -212,13 +215,19 @@ export function defaultRowSel(
     rows.find((r) => r.parent !== undefined && r.kind !== "attempt" && f(r))
       ?.key
   const has = (k: string) => rows.some((r) => r.key === k)
+  // The run's own step rows: a step no row draws (a cancel before it
+  // began) lands on the last one before it (landStep).
+  const land = landStep(
+    failedAt,
+    rows.flatMap((r) => {
+      const n = r.runId === root ? /^s(\d+)$/.exec(r.key)?.[1] : undefined
+      return n === undefined ? [] : [Number(n)]
+    })
+  )
   return (
     pick((r) => r.status === "error") ??
     pick((r) => r.kind === "tool" && r.status === "never") ??
-    (failedAt !== undefined &&
-    rows.some((r) => r.key === `s${failedAt}` && r.runId === root)
-      ? `s${failedAt}`
-      : undefined) ??
+    (land !== undefined ? `s${land}` : undefined) ??
     (has("s0") ? "s0" : undefined) ??
     rows.at(0)?.key
   )
@@ -441,6 +450,19 @@ export function qualifyKey(key: string, run: string): string {
 export const childCappedReason = (cap: number) =>
   `this page reads a child run's first ${cap.toLocaleString("en-US")} events for its rows: the later ones are not drawn here, nothing was lost`
 export const CHILD_CAPPED_FIX = "open the child run (open run ↗)"
+
+/** childStreamPolls says whether an expanded child's stream is read
+ * again (U10.1-fix #8): while the child is live, while its last read
+ * did not end on a terminal page (done false — the server answers done
+ * for a terminal run: at most one more read), or while the root runs
+ * and the child's document has not answered yet. */
+export function childStreamPolls(
+  doc: { status?: string; settling?: boolean } | undefined,
+  stream: { done: boolean } | undefined,
+  rootLive: boolean
+): boolean {
+  return isLive(doc) || stream?.done === false || (rootLive && !doc)
+}
 
 /** A child row's gap badge: how many of its recorded events are
  * missing. */

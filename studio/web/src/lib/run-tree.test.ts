@@ -15,6 +15,7 @@ import {
 } from "@/test/director-fixture"
 import {
   ALL_RUNS,
+  childStreamPolls,
   detailSpan,
   expandFor,
   qualifyKey,
@@ -23,11 +24,35 @@ import {
 } from "./run-tree"
 import { spansFromFold, spansFromTimed } from "./trace"
 import { keyRows, resolveSel } from "./trace-sel"
-import { rowBadge, waterfallRows } from "./waterfall"
+import { rowBadge } from "./waterfall"
+// The run page's build (the ?tree=1 read's descendant rules in).
+import { treeRows as waterfallRows } from "./waterfall-tree"
 
 const time = waterfallRows({ runId: DIR, spans: SPANS, fold: FOLD, total: 9 })
 const order = waterfallRows({ runId: DIR, fold: FOLD, total: 9 }, "order")
 const folded = spansFromFold(FOLD, 9, "succeeded")
+
+// P8-fix-a finding 4: a child whose last read ended short of its
+// terminal page is read again whatever the root does — a root that
+// finished first must not freeze its child's tail.
+describe("childStreamPolls", () => {
+  const done = { done: true }
+  const open = { done: false }
+  it("reads a child again while it is live or its last page was not done", () => {
+    expect(childStreamPolls({ status: "running" }, done, false)).toBe(true)
+    expect(
+      childStreamPolls({ status: "succeeded", settling: true }, done, false)
+    ).toBe(true)
+    // The root ended, the child's doc reads terminal, its stream did not:
+    // one more read (the server answers done for a terminal run).
+    expect(childStreamPolls({ status: "succeeded" }, open, false)).toBe(true)
+    expect(childStreamPolls({ status: "succeeded" }, done, false)).toBe(false)
+    // No document yet: asked again only while the root runs.
+    expect(childStreamPolls(undefined, undefined, true)).toBe(true)
+    expect(childStreamPolls(undefined, undefined, false)).toBe(false)
+    expect(childStreamPolls({ status: "failed" }, done, true)).toBe(false)
+  })
+})
 
 describe("treeSpans", () => {
   it("keys, labels, gists, badges and marks from the rows", () => {

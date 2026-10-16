@@ -3,7 +3,7 @@
 //
 //	go install github.com/weftgo/weft/cmd/weft@latest
 //
-//	weft studio [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--no-playground] [--retain] [--pricing]
+//	weft studio [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--no-playground] [--retain] [--pricing] [--log-level] [--log-format]
 //	weft dev [studio's flags] [--no-watch] [--watch dir] [-- command args…]
 //	weft runs [--agent] [--since] [--failed] [--limit] [--json]
 //	weft open <run id> [--open] [--with-token]
@@ -22,7 +22,10 @@
 // WEFT_STUDIO_ADDR, --db WEFT_DB, --token WEFT_STUDIO_TOKEN, --manifest
 // WEFT_MANIFEST, --url WEFT_STUDIO_URL (the Studio the API clients talk
 // to, default http://127.0.0.1:7331), --retain WEFT_RETAIN, --pricing
-// WEFT_PRICING.
+// WEFT_PRICING. On weft studio and weft dev, --log-level WEFT_LOG_LEVEL
+// (debug, info, warn, error) and --log-format WEFT_LOG_FORMAT (text,
+// json) pick the server log's slog handler on stderr: the refused ingest
+// batches and the 5xx lines with their request ids.
 //
 // # weft studio
 //
@@ -246,7 +249,7 @@ func usageError(format string, args ...any) error {
 const usage = `weft — the weft framework's command line
 
 Usage:
-  weft studio  [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--no-playground] [--retain] [--pricing]
+  weft studio  [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--no-playground] [--retain] [--pricing] [--log-level] [--log-format]
   weft dev     [studio's flags] [--no-watch] [--watch dir] [-- command args…]   (default: go run .)
   weft runs    [--url] [--token] [--agent] [--since] [--failed] [--limit] [--json]
   weft open    <run id> [--url] [--token] [--open] [--with-token]
@@ -258,7 +261,8 @@ Usage:
 
 Environment (each mirrors a flag): WEFT_STUDIO_ADDR (--addr), WEFT_DB (--db),
 WEFT_STUDIO_TOKEN (--token), WEFT_MANIFEST (--manifest), WEFT_STUDIO_URL (--url),
-WEFT_RETAIN (--retain; a Go duration of at least 1h, 0 = off), WEFT_PRICING (--pricing).
+WEFT_RETAIN (--retain; a Go duration of at least 1h, 0 = off), WEFT_PRICING (--pricing),
+WEFT_LOG_LEVEL (--log-level: debug|info|warn|error), WEFT_LOG_FORMAT (--log-format: text|json).
 Run "weft <command> -h" for a command's flags.
 `
 
@@ -371,12 +375,18 @@ func runStudio(args []string, stdout, stderr io.Writer) error {
 		"write a new stable dev token beside the database (<db>.token) before serving; an action, so no environment mirror")
 	retain := retainFlag(fs, "to keep runs after they were last seen: older ones that are not running are deleted from studio's tables")
 	pricing := pricingFlag(fs)
+	logs := addLogFlags(fs)
 	if err := parse(fs, args); err != nil {
 		return err
 	}
 	if fs.NArg() > 0 {
 		return usageError("studio takes no arguments, got %q", fs.Args())
 	}
+	restoreLog, err := logs.install(stderr)
+	if err != nil {
+		return err
+	}
+	defer restoreLog()
 	retainOpts, retainNote, err := retainOptions(*retain)
 	if err != nil {
 		return err

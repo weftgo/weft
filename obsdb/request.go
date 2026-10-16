@@ -146,7 +146,7 @@ func MetadataCapReason(n int64) string {
 // queueFix is the knob every gap's fix names (UX-A-41): the destination
 // queue the records waited in, the dev-only wait, the app's own WARN
 // and the counter Studio heard.
-const queueFix = "raise the destination's queue: otel.QueueSize(n) on it (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names the destination, and weft doctor prints the drops Studio heard of (weft.records.dropped)"
+const queueFix = "raise the destination's queue: otel.QueueSize(n) (Studio's default 16,384), or otel.Blocking() under WEFT_ENV=dev; the app's WARN \"weft/otel: destination queue full\" names it, weft doctor the drops (weft.records.dropped)"
 
 // HoleCauses lists the causes the table words, in order.
 func HoleCauses() []HoleCause {
@@ -156,7 +156,7 @@ func HoleCauses() []HoleCause {
 var causeNotes = map[Hole]map[HoleCause]holeNote{
 	HoleNotRecorded: {
 		CauseNoSpans: {
-			"the run was recorded without a tracer, so attempt spans and the answering model were not stored",
+			"the run was recorded without a tracer: no attempt spans, no answering model",
 			"install a tracer (otel.Install records spans)",
 		},
 		CauseNoPublicID: {
@@ -164,15 +164,15 @@ var causeNotes = map[Hole]map[HoleCause]holeNote{
 			"thread.Create(…, thread.PublicID(id)), or set weft.public_id on every turn",
 		},
 		CauseRawOff: {
-			"no wire bodies were recorded for this attempt: otel.RawBodies is off (the default, and refused outside WEFT_ENV=dev), or the adapter does not report them",
+			"no wire bodies recorded for this attempt: otel.RawBodies is off (the default; refused outside WEFT_ENV=dev) or the adapter does not report them",
 			"run under WEFT_ENV=dev with otel.RawBodies(true) and a first-party adapter (an injected google client is not captured)",
 		},
 		CauseNotServed: {
 			"this Studio does not serve the request record (no requests capability): the run may hold one",
-			"open the run in a Studio that serves it (upgrade Studio, or enable the requests group)",
+			"use a Studio that serves it (upgrade it, or enable the requests group)",
 		},
 		CauseNoLogger: {
-			"the app exported spans only: this run's spans arrived but none of its records did, so it has no events, transcript or request records",
+			"the app exported spans only: they arrived, none of its records did — no events, transcript or request records",
 			"wire the logs too: pass weft.LoggerProvider(lp) beside weft.TracerProvider, or use otel.Install (it wires both)",
 		},
 	},
@@ -185,20 +185,20 @@ var causeNotes = map[Hole]map[HoleCause]holeNote{
 	HoleGap: {
 		CauseTailLost: {
 			"the run's root span ended but its run_finish record never arrived: a destination dropped the record tail, so the last steps' records are missing",
-			"the spans arrived, the records behind them did not: " + queueFix,
+			queueFix,
 		},
 		CauseEventsLost: {
-			"the core emitted more event records than were stored (weft.run.events on the run's root span): a destination dropped them on the way, its queue full or an export failed",
+			"more event records were emitted than stored (weft.run.events on the root span): a destination dropped them, its queue full or an export failed",
 			queueFix,
 		},
 		CauseMessagesLost: {
-			"the core emitted more transcript batches than were stored (weft.run.messages on the run's root span): a destination dropped them on the way, its queue full or an export failed, so the transcript is missing messages",
+			"more transcript batches were emitted than stored (weft.run.messages on the root span): a destination dropped them, its queue full or an export failed — messages are missing",
 			queueFix,
 		},
 	},
 	HoleHidden: {
 		CauseDevTokenOnly: {
-			"a panel token is scoped to one public id and may not look up a session's: this route answers the dev token only",
+			"a panel token reads its one public id, never a session's: this route answers the dev token only",
 			"ask with the server (dev) token, or use the public id the panel token was minted for",
 		},
 	},
@@ -208,11 +208,11 @@ var causeNotes = map[Hole]map[HoleCause]holeNote{
 			"raise the tool's weft.MaxResultBytes",
 		},
 		CauseLogCap: {
-			"the app-log reader's candidate cap was reached before attribution; later lines of this run may be missing",
-			"log less in the run's trace (a busy subagent or sibling run counts too); phase 2 filters by span before the cap",
+			"the app-log reader's cap was reached before attribution: later lines of this run may be missing",
+			"log less in the run's trace (a busy subagent or sibling run counts too)",
 		},
 		CauseResponseCap: {
-			"this response reads a bounded number of steps and the run has more: the later steps were not compared, nothing was lost",
+			"the run has more steps than this response reads: the later ones were not compared, nothing was lost",
 			"open the later steps one by one (runs/{id}/steps/{n})",
 		},
 		CauseMetadataCap: {
@@ -239,7 +239,7 @@ var holeNotes = map[Hole]holeNote{
 		"raise the destination's cap: otel.Content(otel.ContentConfig{MaxBytes: …}), -1 for unlimited",
 	},
 	HoleStripped: {
-		"content not captured by this app: the destination's chain stripped it (weft.content = stripped), or the agent captured none (weft.Content(false), weft.content = none), so prompts, catalogs, messages, tool arguments and results were dropped before they were stored",
+		"content not captured by this app: the destination stripped it (weft.content = stripped) or the agent captured none (weft.Content(false), weft.content = none) — prompts, catalogs, messages, tool arguments and results were dropped before storage",
 		"turn content on: drop otel.NoContent() from the destination, or weft.Content(false) from the agent",
 	},
 	HoleRedacted: {
@@ -259,7 +259,7 @@ var holeNotes = map[Hole]holeNote{
 		queueFix,
 	},
 	HoleNotRecorded: {
-		"the record did not exist in the weft that wrote this run (v0.9.0 or earlier keeps no request, prompt or tools records, ADR 0028): nothing was lost, there was nothing to keep",
+		"the weft that wrote this run kept no such record (v0.9.0 or earlier keeps no request, prompt or tools records, ADR 0028): nothing was lost",
 		"upgrade weft and re-run",
 	},
 	HoleDerived: {
@@ -267,7 +267,7 @@ var holeNotes = map[Hole]holeNote{
 		"",
 	},
 	HoleHidden: {
-		"your token's scope may not read this: a read-scoped panel token does not read system prompts or tool catalogs",
+		"your token's scope may not read this: a read-scoped panel token reads no system prompt or tool catalog",
 		"use a playground-scoped token",
 	},
 	HoleCompacted: {

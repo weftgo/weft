@@ -249,7 +249,7 @@ function Answer({
   // While scrubbing the run reads as running: the verdict and the end
   // are the playhead's, not the record's.
   const run = runStatus === doc.status ? doc : { status: runStatus }
-  const verdict = stepVerdict(step, run, ms)
+  const verdict = stepVerdict(step, run, ms, !hasNext)
   const mine = requests?.steps.get(step.index)
   const row = mine?.rows.at(-1)
   const prev = requests?.prev.get(step.index)

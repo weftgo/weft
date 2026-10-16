@@ -138,14 +138,19 @@ export const FAILED_WORD = "failed"
 
 /** endCard is the story's last line: "■ <word> at step N (detail)";
  * for a failed run that named no stop (a model error), "■ failed ·
- * <err>" — its stored Error root span is the terminal record. */
-export function endCard(r: StopRow): string | null {
+ * <err>" — its stored Error root span is the terminal record. n is
+ * the step it names, the run's last by default; the drawer's then line
+ * passes the last step it draws (a cancel during step N's model call
+ * ends at step N, the open one). */
+export function endCard(
+  r: StopRow,
+  n: number | undefined = stopStep(r.steps)
+): string | null {
   const w = stoppedByWords(r.stopped_by, r.cancel_cause)
   if (!w)
     return r.status === "failed"
       ? `■ ${FAILED_WORD}${r.err ? ` · ${r.err}` : ""}`
       : null
-  const n = stopStep(r.steps)
   const d = stopDetail(r.err, r.stopped_by)
   return `■ ${w.word}${n === undefined ? "" : ` at step ${n}`}${d ? ` (${d})` : ""}`
 }

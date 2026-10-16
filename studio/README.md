@@ -310,13 +310,18 @@ Studio" hand-off; past two levels the indent stops and the row says
 once, on the call — UX-D-13) and a spans waterfall.
 
 The step read (U10.2, the audit's §6.3): the Story's selected step —
-else, unpicked, the step the run failed at — opens answer first, the
+else, unpicked, the run page's landing step: the one the run failed at
+(lib/summarize.ts's failedAtStep; a step no card draws — a cancel
+before it began — falls back to the last drawn, landStep), else step 0
+(P8-fix-a) — opens answer first, the
 run page's drawer at panel width: `lib/summarize.ts`'s verdict line
 (`[data-verdict]`: what stopped the run there, the finish, tokens,
 latency, first token) and its sent / replied / tools ran / then lines
 (`[data-answer-line]`), the same words `parity.test.ts` holds to
 Studio's drawer on opt.usage-limit; its Logs and Raw OTel hand off
-(the step head's `📄 ⤢` — U11.2's `logsLink`, under capability logs —
+(the step head's `📄 ⤢` — U11.2's `logsLink`, under capability logs,
+for no token or the dev token only: the logs route refuses every panel
+token —
 and the answer's `Raw OTel ⤢`: the run page at the step's row,
 `?sel=s<n>&tab=logs|raw`, lib/links.ts's `runLink` — no token in the
 URL; a playground panel token opens it through the hand-off, as every
@@ -1040,13 +1045,16 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 275,671 B raw / 89,556 B gzip
-(87.5 KiB, the bundle of the ledger's row "U10.2 Story answer first"; 8,748 B — 8.5 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 269,768 B raw / 88,480 B gzip
+(86.4 KiB, the bundle of the ledger's row "P8-fix-a (review + trim)"; 9,824 B — 9.6 KiB — of headroom under
 the 98,304 B, 96 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; A5.4 raised it from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
 build kept its indentation and newlines: 281,470 B raw / 81,358 B gzip,
-562 B under the cap) — and with no sourcemap, so it is unreadable in a
+562 B under the cap; since P8-fix-a its stylesheet's whitespace too,
+`vite.panel.config.ts`'s `minifyCss`, and no `/* @__PURE__ */`
+annotation — the npm package's thin modules keep theirs) — and with no
+sourcemap, so it is unreadable in a
 host page's devtools: that is the accepted cost of the headroom. To
 read the panel, read its source, `studio/web/src/panel`; a sourcemap
 is deliberately not shipped (it would be a second file, against the
@@ -1771,13 +1779,18 @@ every line with a severity filter (`?lsev=info|warn|error`, the route's
 `severity=`) and per line **jump to span** — `?sel=t:<span id>`, the row
 that span (or its nearest drawn ancestor) is behind, its Logs tab open.
 A tree row a WARN / ERROR line landed on carries a tick ("E1 W2", read
-at `severity=warn` only when the run document counts such lines); its
-click opens that row's Logs tab. The devtools panel hands each Story
+at `severity=warn` only when the run document counts such lines;
+"≥E1 W2" when that read hit the 10,000-line cap); its click opens that
+row's Logs tab. While the run runs the lines are read again every 5 s
+from the line after the last held (never from 0, never once cut); the
+finished run's read is whole, once. The devtools panel hands each Story
 step off with "📄 ⤢" (`lib/links.ts`'s `logsLink`: the step's row, its
 Logs tab), reading no line itself. With no `?sel=`/`?step=` the page lands where something went
 wrong (UX-A-03): the first failed row (never the root, never an attempt),
 else a tool that never finished, else the step a failed run failed at
-("run failed at step N"), else step 0 — on the scale shown; "past the
+("run failed at step N": a model error or a cancel during step N lands
+on step N, the open one; a step no row draws, on the last drawn before
+it), else step 0 — on the scale shown; "past the
 playhead" is said only while replaying. **read in the story** opens the
 story on the selection's step: the story is the read mode of the same
 selection (a `?sel=` names the card it highlights). "trace" names the
@@ -2298,7 +2311,8 @@ panel token and an `AllowOrigins` host), `ingest_open`, `interrupted_after_ms`, 
 duration as a Go duration string, `"720h0m0s"`, `null` when off, the
 default — `pricing` {source, path?, dated, models}, the cost table;
 see Cost above — and `ingest` {dropped: [{service, records,
-last_heard}]}, the ingest health: the largest `weft.records.dropped`
+last_heard}], accepted, refused, last_error?, last_at?} (the counters:
+the OTLP batches this Studio answered, see the server log below), the ingest health: the largest `weft.records.dropped`
 each exporting service's heartbeats and `run_start`/`run_finish`
 records reported on the OTLP path, in memory, per `service.name` —
 lost on a Studio restart, until each app's next carrier reports it
@@ -2659,9 +2673,25 @@ Studio's server log (`slog.Default`; `studio/internal/reqlog`, UX-E-37)
 writes one WARN line per refused ingest batch — `studio: ingest batch
 refused` with `request_id`, `status`, `path`, `remote`, `code`,
 `reason` (the error body's message: a bad token, a size, a malformed
-body), `bytes` — at most one a minute per remote, path, code and status
-(the next line counts the rest, `suppressed=n`), and one ERROR line per
-5xx, `studio: request failed` with the same fields, never limited. Under `Playground(true)` the playground's
+body), `bytes` — at most one a minute per remote, route, code and
+status, the route its class (`/v1/traces`, `/v1/logs`, else `/v1/*`:
+a scan of distinct paths shares one limit; the next line counts the
+rest, `suppressed=n`). The limiter holds 1,024 keys: full, it drops
+the expired ones, else logs no new key until a window turns and the
+next line says how many it skipped (`suppressed_overflow=n`). Behind a
+reverse proxy every client is the proxy's one remote, so they share one
+limit. One ERROR line per 5xx, `studio: request failed` with the same
+fields, is never limited; a 5xx whose body is masked for a panel token
+still logs the real error as its `reason`; a handler panic is one
+ERROR line, `studio: handler panicked` with the request id and the
+panic. `X-Request-Id` is in `Access-Control-Expose-Headers`, so a
+cross-origin panel can read it. `weft studio` / `weft dev`
+`--log-level debug|info|warn|error` (`WEFT_LOG_LEVEL`) and
+`--log-format text|json` (`WEFT_LOG_FORMAT`) pick that log's handler on
+stderr. `/api/meta`'s `ingest` adds `accepted` / `refused` (the OTLP
+POSTs answered 2xx / 4xx–5xx since start, in memory) and the last
+refusal, `last_error` ("<status> <code>: <reason>") with `last_at`,
+omitted before the first. Under `Playground(true)` the playground's
 routes join (`GET /api/runtimes`, `POST /api/playground/runs`, `GET
 /api/playground/commands/{id}`, `POST /api/runs/{id}/approvals`,
 `POST /api/playground/fixtures`, `GET/POST /api/experiments` (the 50 most recently updated by default, `?limit=` up to 200, with `total`; id: `[A-Za-z0-9._:-]{1,128}`, as command_id; each row with `created`, `run_count`,

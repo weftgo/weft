@@ -81,7 +81,7 @@ const hidden403 = () =>
       },
       badge: "hidden",
       reason:
-        "a read-scoped panel token does not read system prompts or tool catalogs",
+        "a read-scoped panel token reads no system prompt or tool catalog",
       fix: "use a playground-scoped token",
     },
     403
@@ -99,7 +99,7 @@ describe("the panel's request line (A1.4)", () => {
       )
       // The hole says why and what to do, with nothing asked.
       expect(l.querySelector(".weft-reason")?.textContent).toBe(
-        "your token's scope may not read this: a read-scoped panel token does not read system prompts or tool catalogs — fix: use a playground-scoped token"
+        "your token's scope may not read this: a read-scoped panel token reads no system prompt or tool catalog — fix: use a playground-scoped token"
       )
     }
     expect(studio.gets(`runs/${RUN}/requests`)).toEqual([])

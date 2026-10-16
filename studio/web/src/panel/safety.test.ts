@@ -773,8 +773,9 @@ describe("the token goes to data-endpoint and nowhere else (§6)", () => {
     }
     const links = all(el, "a").map((a) => a.getAttribute("href") ?? "")
     // ⤢, save as fixture, compare in Studio, and the turn's join keys
-    // (G1: its session and trace are links)
-    expect(links.length).toBe(5)
+    // (G1: its session and trace are links), and the answer's Raw OTel
+    // ⤢ on the step it lands on (P8-fix-a: step 0 when nothing failed)
+    expect(links.length).toBe(6)
     for (const href of links) {
       expect(href.startsWith("http://studio.test/studio/")).toBe(true)
       expect(href).not.toContain("secret")

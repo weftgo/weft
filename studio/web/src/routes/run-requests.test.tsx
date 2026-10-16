@@ -222,7 +222,7 @@ describe("the run page's request section (A1.4)", () => {
         within(s).getByText("request not recorded by weft v0.9.0 or earlier")
       ).toBeTruthy()
       expect(s.textContent).toContain(
-        "the record did not exist in the weft that wrote this run"
+        "the weft that wrote this run kept no such record"
       )
       expect(s.textContent).toContain("upgrade weft and re-run")
     }

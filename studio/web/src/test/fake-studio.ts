@@ -197,7 +197,7 @@ export function hiddenRefusal(): Response {
       },
       badge: "hidden",
       reason:
-        "your token's scope may not read this: a read-scoped panel token does not read system prompts or tool catalogs",
+        "your token's scope may not read this: a read-scoped panel token reads no system prompt or tool catalog",
       fix: "use a playground-scoped token",
     },
     403

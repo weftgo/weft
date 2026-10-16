@@ -1536,6 +1536,12 @@ describe("a derived run on both surfaces (I1.3)", () => {
       saveLink: all(el, "a[data-weft-save-test]").length,
       refused: all(el, '[data-weft-refused="derived"]').length,
       handoff: $(el, "[data-weft-derived-handoff]")!.textContent,
+      // P8-fix-a #12, the documented difference: the panel draws no
+      // Story steps for a derived turn (no events to fold), so no
+      // answer — it hands the steps off to the run page, whose drawer
+      // reads the step's answer from its spans (lib/run-tree.ts's
+      // derivedStep, drawer.test.ts).
+      answers: all(el, "[data-verdict]").length,
     }
     el.remove()
     await settle()
@@ -1598,6 +1604,7 @@ describe("a derived run on both surfaces (I1.3)", () => {
     expect(studio.refused).toBe(2) // replay, save as test
     // The steps: the panel hands off with the count the page draws cards for.
     expect(panel.handoff).toBe(`${studio.steps} steps · open in Studio ⤢`)
+    expect(panel.answers).toBe(0)
     expect(studio.steps).toBe(2)
     // The run tree's rows on both: "the run tree on both surfaces (U8.3)".
   })
@@ -3645,5 +3652,268 @@ describe("the step's answer on both surfaces (U10.2)", () => {
     }
     expect(panel.verdict).toContain("✗ usage limit reached")
     expect(panel).toEqual(studio)
+  })
+})
+
+// P8-fix-a #1, #11, #12: with no step picked both surfaces land on the
+// same step — where the run failed (core's real shapes, core/loop.go:
+// a model error or a cancel during step N names step N with steps N;
+// a cancel before step N began names N with no row for it, so the last
+// drawn), else step 0 — and draw the same answer there. Each case is
+// opt.usage-limit's bodies cut to what core writes for it.
+describe("the landing step's answer on both surfaces (P8-fix-a)", () => {
+  const P = "weft: run failed at step"
+  const inv = (attrs: Record<string, unknown>, status: "ok" | "error") =>
+    UL_SPANS.map((s) =>
+      s.span_id === "u_inv"
+        ? {
+            ...s,
+            status,
+            attrs: (({
+              "weft.run.stopped_by": _b,
+              "error.type": _e,
+              ...a
+            }) => ({ ...a, ...attrs }))(s.attrs),
+          }
+        : s
+    )
+  // Steps 0–1 finished, step 2 begun: its chat span errored, no tool.
+  const openTwo = (attrs: Record<string, unknown>) =>
+    inv({ "weft.run.steps": 2, ...attrs }, "error")
+      .filter((s) => s.span_id !== "u_t2")
+      .map((s) =>
+        s.span_id === "u_c2" ? { ...s, status: "error" as const } : s
+      )
+  const cases: {
+    name: string
+    doc: Partial<RunDoc>
+    events: typeof UL_EVENTS
+    spans: typeof UL_SPANS
+    requests?: typeof UL_REQUESTS
+    land: number
+    bad: boolean
+  }[] = [
+    {
+      name: "succeeded: step 0",
+      doc: {
+        status: "succeeded",
+        err: "",
+        stopped_by: "final_answer",
+        error_type: "",
+      },
+      events: UL_EVENTS,
+      spans: inv({ "weft.run.stopped_by": "final_answer" }, "ok"),
+      land: 0,
+      bad: false,
+    },
+    {
+      name: "settling: step 0, the record's words",
+      doc: {
+        status: "succeeded",
+        settling: true,
+        err: "",
+        stopped_by: "final_answer",
+        error_type: "",
+      },
+      events: UL_EVENTS,
+      spans: inv({ "weft.run.stopped_by": "final_answer" }, "ok"),
+      land: 0,
+      bad: false,
+    },
+    {
+      name: "max_steps: its last step",
+      doc: {
+        err: `${P} 3: weft: run exceeded the maximum number of steps`,
+        stopped_by: "max_steps",
+        error_type: "max_steps",
+      },
+      events: UL_EVENTS,
+      spans: inv(
+        { "weft.run.stopped_by": "max_steps", "error.type": "max_steps" },
+        "error"
+      ),
+      land: 2,
+      bad: true,
+    },
+    {
+      name: "a model error during step 2: step 2, never step 1",
+      doc: {
+        steps: 2,
+        err: `${P} 2: model stream: boom`,
+        stopped_by: undefined,
+        error_type: "model",
+      },
+      events: UL_EVENTS.slice(0, 10),
+      spans: openTwo({}),
+      land: 2,
+      bad: true,
+    },
+    {
+      name: "a cancel during step 2's model call: step 2",
+      doc: {
+        steps: 2,
+        err: `${P} 2: context canceled`,
+        stopped_by: "canceled",
+        error_type: "cancelled",
+      },
+      events: UL_EVENTS.slice(0, 10),
+      spans: openTwo({
+        "weft.run.stopped_by": "canceled",
+        "error.type": "cancelled",
+      }),
+      land: 2,
+      bad: true,
+    },
+    {
+      name: "a cancel before step 2 began: the last drawn, step 1",
+      doc: {
+        steps: 2,
+        err: `${P} 2: context canceled`,
+        stopped_by: "canceled",
+        error_type: "cancelled",
+      },
+      events: UL_EVENTS.slice(0, 9),
+      spans: inv(
+        {
+          "weft.run.steps": 2,
+          "weft.run.stopped_by": "canceled",
+          "error.type": "cancelled",
+        },
+        "error"
+      ).filter((s) => s.span_id !== "u_c2" && s.span_id !== "u_t2"),
+      requests: { requests: UL_REQUESTS.requests.slice(0, 2) },
+      land: 1,
+      bad: true,
+    },
+  ]
+  const lines = (root: ParentNode) =>
+    Array.from(root.querySelectorAll<HTMLElement>("[data-answer-line]")).map(
+      (n) => [n.dataset.answerLine, n.firstChild?.textContent]
+    )
+  for (const c of cases)
+    it(c.name, async () => {
+      const doc = ulDoc(c.doc)
+      const row = (({ children: _c, holes: _h, compactions: _x, ...r }) => r)(
+        doc
+      ) as unknown as RunRow
+      const serveCase = (meta: Record<string, unknown>) =>
+        new FakeStudio()
+          .on("GET meta", meta)
+          .on("GET runs", { total: 1, runs: [row], next_before: null })
+          .on(`GET runs/${UL}`, doc)
+          .on(
+            `GET runs/${UL}/events`,
+            pagedEvents(
+              c.events.map((event, pos) => ({ pos, time: doc.started, event })),
+              { done: true }
+            )
+          )
+          .on(`GET runs/${UL}/transcript`, transcriptOf(UL_BODIES))
+          .on(`GET runs/${UL}/spans`, { spans: c.spans })
+          .on(
+            `GET runs/${UL}/requests`,
+            pagedRequests(c.requests ?? UL_REQUESTS)
+          )
+          .on(`GET runs/${UL}/logs`, UL_LOGS)
+          .on("GET runtimes", { runtimes: [] })
+          .install()
+      serveCase({
+        ...META,
+        capabilities: [...META.capabilities, "requests", "logs"],
+      })
+      const el = await mount({
+        "data-endpoint": "http://studio.test/studio/",
+        "data-open": "true",
+      })
+      await vi.waitFor(() => expect(all(el, ".weft-turn").length).toBe(1), {
+        timeout: 5_000,
+      })
+      click(all(el, ".weft-turn")[0])
+      await vi.waitFor(
+        () =>
+          expect($(el, '[data-answer-line="sent"]')?.textContent).toContain(
+            "message"
+          ),
+        { timeout: 5_000 }
+      )
+      expect(all(el, "[data-verdict]")).toHaveLength(1)
+      const step = $(el, "[data-verdict]")!.closest<HTMLElement>(".weft-step")!
+      expect(step.getAttribute("data-weft-step")).toBe(String(c.land))
+      const verdict = step.querySelector("[data-verdict]")!
+      const panel = {
+        verdict: verdict.textContent,
+        bad: verdict.hasAttribute("data-bad"),
+        lines: lines(step),
+      }
+      el.remove()
+      await settle()
+      cleanup()
+      document.body.innerHTML = ""
+
+      stubBrowser()
+      vi.stubGlobal("scrollTo", vi.fn())
+      StudioEventSource.reset()
+      vi.stubGlobal("EventSource", StudioEventSource)
+      setStudioToken("")
+      serveCase({
+        ...golden<Record<string, unknown>>("meta"),
+        capabilities: ["ingest", "requests", "playground", "diff", "logs"],
+      })
+      renderApp(`/runs/${UL}`)
+      await waitFor(() =>
+        expect(
+          document.querySelector('[data-answer-line="sent"]')?.textContent
+        ).toContain("message")
+      )
+      const v = document.querySelector<HTMLElement>("[data-verdict]")!
+      const studio = {
+        verdict: v.textContent,
+        bad: v.hasAttribute("data-bad"),
+        lines: lines(document),
+      }
+      expect(panel.bad).toBe(c.bad)
+      expect(panel).toEqual(studio)
+    })
+
+  // P8-fix-a #5: the logs route refuses every panel token, so the step
+  // head's 📄 ⤢ is drawn for no token or the dev token only.
+  it("a panel token's Story draws no logs hand-off", async () => {
+    const doc = ulDoc()
+    const row = (({ children: _c, holes: _h, compactions: _x, ...r }) => r)(
+      doc
+    ) as unknown as RunRow
+    new FakeStudio()
+      .on("GET meta", {
+        ...META,
+        capabilities: [...META.capabilities, "requests", "logs"],
+      })
+      .on("GET runs", { total: 1, runs: [row], next_before: null })
+      .on(`GET runs/${UL}`, doc)
+      .on(
+        `GET runs/${UL}/events`,
+        pagedEvents(
+          UL_EVENTS.map((event, pos) => ({ pos, time: doc.started, event })),
+          { done: true }
+        )
+      )
+      .on(`GET runs/${UL}/transcript`, transcriptOf(UL_BODIES))
+      .on(`GET runs/${UL}/spans`, { spans: UL_SPANS })
+      .on(`GET runs/${UL}/requests`, pagedRequests(UL_REQUESTS))
+      .on("GET runtimes", { runtimes: [] })
+      .install()
+    const read = `weft_pt.${btoa(JSON.stringify({ public_id: "pub_x", scope: "read", exp: "2099-01-01T00:00:00Z" })).replace(/=+$/, "")}.sig`
+    const el = await mount({
+      "data-endpoint": "http://studio.test/studio/",
+      "data-open": "true",
+      "data-token": read,
+    })
+    await vi.waitFor(() => expect(all(el, ".weft-turn").length).toBe(1), {
+      timeout: 5_000,
+    })
+    click(all(el, ".weft-turn")[0])
+    await vi.waitFor(() => expect($(el, "[data-verdict]")).toBeTruthy(), {
+      timeout: 5_000,
+    })
+    expect(all(el, "[data-weft-logs]")).toHaveLength(0)
   })
 })

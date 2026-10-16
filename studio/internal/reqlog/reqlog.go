@@ -4,22 +4,37 @@
 // echoed on the response; a refused ingest batch (a 4xx on /v1/) is one
 // WARN line and every 5xx one ERROR line on slog.Default, each naming
 // the request id, the status and the reason the handler answered with
-// (Refuse). Studio's error bodies carry the id on a 5xx too, so a
-// report from a user meets its line in studio.log.
+// (Refuse; Cause when the body masks the real error). Studio's error
+// bodies carry the id on a 5xx too, so a report from a user meets its
+// line in studio.log. A handler panic is one ERROR line with the id; the
+// panic goes on up to net/http.
 //
-// Ingest refusals are rate-limited per (remote host, status, code): the
-// first in a minute is logged, the rest counted onto the next line
-// (suppressed=n) — a misconfigured exporter retrying every second
-// leaves one line a minute, never a flood. 5xx lines are never limited.
+// Ingest refusals are rate-limited per (remote host, route, status,
+// code), the route being its class — /v1/traces, /v1/logs, else /v1/*,
+// so a scan of distinct /v1/<x> paths shares one key: the first in a
+// minute is logged, the rest counted onto the next line (suppressed=n)
+// — a misconfigured exporter retrying every second leaves one line a
+// minute, never a flood. The limiter holds at most 1,024 keys: full, it
+// drops the expired windows first; when none has expired, a refusal
+// under a new key is not logged until a window turns, and the next line
+// logged carries the count (suppressed_overflow=n). Behind a reverse
+// proxy every client arrives from the proxy's address, so they share
+// one remote and one limit. 5xx lines are never limited.
+//
+// The logger also counts the ingest batches (POSTs under /v1/) it saw
+// accepted and refused, with the last refusal and its time (Ingest):
+// /api/meta's ingest section.
 package reqlog
 
 import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -36,10 +51,21 @@ const maxID = 64
 type ctxKey struct{}
 
 // info is one request's: its id and the reason a handler refused it.
+// cause, when set, is what the log names instead of reason: the real
+// error behind a body that masks it (Cause).
 type info struct {
 	id     string
 	code   string
 	reason string
+	cause  string
+}
+
+// logged is the reason the log names: the cause when one was recorded.
+func (in *info) logged() string {
+	if in.cause != "" {
+		return in.cause
+	}
+	return in.reason
 }
 
 // ID is the request's id, "" outside Wrap.
@@ -56,6 +82,16 @@ func ID(ctx context.Context) string {
 func Refuse(ctx context.Context, code, msg string) {
 	if in, _ := ctx.Value(ctxKey{}).(*info); in != nil {
 		in.code, in.reason = code, msg
+	}
+}
+
+// Cause records the real reason behind a refusal whose body masks it (a
+// 5xx answered to a panel token names the operation, never the
+// database's error text): the server log names msg, the body keeps what
+// Refuse was given. A no-op outside Wrap.
+func Cause(ctx context.Context, msg string) {
+	if in, _ := ctx.Value(ctxKey{}).(*info); in != nil {
+		in.cause = msg
 	}
 }
 
@@ -81,11 +117,54 @@ func newID() string {
 	return hex.EncodeToString(b[:])
 }
 
-// Logger is one server's request log: its rate limit's state.
+// Logger is one server's request log: its rate limit's state and the
+// ingest counters.
 type Logger struct {
 	mu   sync.Mutex
 	seen map[string]*window
-	now  func() time.Time
+	// overflow counts the refusals not logged because the limiter was
+	// full of live windows; the next line logged carries it.
+	overflow int
+	now      func() time.Time
+	ingest   IngestCounts
+}
+
+// IngestCounts is what the logger saw of ingest (POSTs under /v1/):
+// the batches answered 2xx, the batches refused (4xx and 5xx), and the
+// last refusal — "<status> <code>: <reason>" — with its time (zero
+// before the first).
+type IngestCounts struct {
+	Accepted  int64
+	Refused   int64
+	LastError string
+	LastAt    time.Time
+}
+
+// Ingest returns the ingest counters so far: in memory, a restart
+// starts them again from zero.
+func (l *Logger) Ingest() IngestCounts {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.ingest
+}
+
+// countIngest folds one answered ingest batch into the counters.
+func (l *Logger) countIngest(status int, in *info) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if status < 400 {
+		l.ingest.Accepted++
+		return
+	}
+	l.ingest.Refused++
+	msg := strconv.Itoa(status)
+	if in.code != "" {
+		msg += " " + in.code
+	}
+	if r := in.logged(); r != "" {
+		msg += ": " + r
+	}
+	l.ingest.LastError, l.ingest.LastAt = msg, l.now().UTC()
 }
 
 type window struct {
@@ -96,37 +175,59 @@ type window struct {
 // limitWindow is the ingest refusal limit's window per key.
 const limitWindow = time.Minute
 
-// maxKeys bounds the limiter's map; past it the map starts over.
+// maxKeys bounds the limiter's map: full, it drops the expired windows,
+// else stops logging new keys until one turns.
 const maxKeys = 1024
 
 // New returns a request log.
 func New() *Logger { return &Logger{seen: map[string]*window{}, now: time.Now} }
 
-// allow reports whether a refusal under key is logged now and how many
-// were suppressed since the last line.
-func (l *Logger) allow(key string) (bool, int) {
+// allow reports whether a refusal under key is logged now, how many
+// under it were suppressed since its last line, and how many went
+// unlogged because the limiter was full (reset once reported).
+func (l *Logger) allow(key string) (ok bool, suppressed, overflow int) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.now()
 	w := l.seen[key]
 	if w != nil && now.Sub(w.start) < limitWindow {
 		w.suppressed++
-		return false, 0
+		return false, 0, 0
 	}
-	n := 0
 	if w != nil {
-		n = w.suppressed
+		suppressed = w.suppressed
 	}
 	if w == nil && len(l.seen) >= maxKeys {
-		l.seen = map[string]*window{}
+		for k, old := range l.seen {
+			if now.Sub(old.start) >= limitWindow {
+				delete(l.seen, k)
+			}
+		}
+		if len(l.seen) >= maxKeys {
+			l.overflow++
+			return false, 0, 0
+		}
 	}
 	l.seen[key] = &window{start: now}
-	return true, n
+	overflow, l.overflow = l.overflow, 0
+	return true, suppressed, overflow
+}
+
+// routeClass is a key's route: the two OTLP routes by name, every other
+// /v1/ path one class.
+func routeClass(path string) string {
+	switch path {
+	case "/v1/traces", "/v1/logs":
+		return path
+	}
+	return "/v1/*"
 }
 
 // Wrap gives every request its id (on the context and the response's
 // X-Request-Id) and logs, once it is answered, a 5xx at ERROR and a
-// refused ingest batch (a 4xx under /v1/) at WARN.
+// refused ingest batch (a 4xx under /v1/) at WARN. A handler panic is
+// logged at ERROR with the id and panics on (http.ErrAbortHandler,
+// net/http's deliberate abort, is not logged).
 func (l *Logger) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get(Header)
@@ -136,24 +237,41 @@ func (l *Logger) Wrap(next http.Handler) http.Handler {
 		in := &info{id: id}
 		w.Header().Set(Header, id)
 		sw := &statusWriter{ResponseWriter: w}
-		next.ServeHTTP(sw, r.WithContext(context.WithValue(r.Context(), ctxKey{}, in)))
+		var rw http.ResponseWriter = sw
+		if _, ok := w.(http.Flusher); ok {
+			rw = flushWriter{sw}
+		}
+		defer func() {
+			if v := recover(); v != nil {
+				if err, _ := v.(error); err != http.ErrAbortHandler { //nolint:errorlint // net/http compares the value itself
+					slog.Error("studio: handler panicked",
+						append(l.attrs(r, in, http.StatusInternalServerError, 0, 0), "panic", fmt.Sprint(v))...)
+				}
+				panic(v)
+			}
+		}()
+		next.ServeHTTP(rw, r.WithContext(context.WithValue(r.Context(), ctxKey{}, in)))
 		status := sw.status
 		if status == 0 {
 			status = http.StatusOK
 		}
+		ingest := strings.HasPrefix(r.URL.Path, "/v1/")
+		if ingest && r.Method == http.MethodPost {
+			l.countIngest(status, in)
+		}
 		switch {
 		case status >= 500:
-			slog.Error("studio: request failed", l.attrs(r, in, status, 0)...)
-		case status >= 400 && strings.HasPrefix(r.URL.Path, "/v1/"):
-			ok, n := l.allow(hostOf(r.RemoteAddr) + "|" + r.URL.Path + "|" + in.code + "|" + http.StatusText(status))
-			if ok {
-				slog.Warn("studio: ingest batch refused", l.attrs(r, in, status, n)...)
+			slog.Error("studio: request failed", l.attrs(r, in, status, 0, 0)...)
+		case status >= 400 && ingest:
+			key := hostOf(r.RemoteAddr) + "|" + routeClass(r.URL.Path) + "|" + in.code + "|" + http.StatusText(status)
+			if ok, n, over := l.allow(key); ok {
+				slog.Warn("studio: ingest batch refused", l.attrs(r, in, status, n, over)...)
 			}
 		}
 	})
 }
 
-func (l *Logger) attrs(r *http.Request, in *info, status, suppressed int) []any {
+func (l *Logger) attrs(r *http.Request, in *info, status, suppressed, overflow int) []any {
 	a := []any{
 		"request_id", in.id, "status", status, "method", r.Method, "path", r.URL.Path,
 		"remote", hostOf(r.RemoteAddr),
@@ -161,14 +279,17 @@ func (l *Logger) attrs(r *http.Request, in *info, status, suppressed int) []any 
 	if in.code != "" {
 		a = append(a, "code", in.code)
 	}
-	if in.reason != "" {
-		a = append(a, "reason", in.reason)
+	if reason := in.logged(); reason != "" {
+		a = append(a, "reason", reason)
 	}
 	if r.ContentLength > 0 {
 		a = append(a, "bytes", r.ContentLength)
 	}
 	if suppressed > 0 {
 		a = append(a, "suppressed", suppressed)
+	}
+	if overflow > 0 {
+		a = append(a, "suppressed_overflow", overflow)
 	}
 	return a
 }
@@ -180,8 +301,11 @@ func hostOf(addr string) string {
 	return addr
 }
 
-// statusWriter keeps the status a handler wrote; Flush and Unwrap keep
-// the live stream's flushing and http.ResponseController working.
+// statusWriter keeps the status a handler wrote; Unwrap keeps
+// http.ResponseController working. It is an http.Flusher only as
+// flushWriter, which Wrap picks when the underlying writer flushes — so
+// a handler's w.(http.Flusher) check (the live stream, the runtime
+// link) answers what the connection can do.
 type statusWriter struct {
 	http.ResponseWriter
 	status int
@@ -201,10 +325,14 @@ func (w *statusWriter) Write(b []byte) (int, error) {
 	return w.ResponseWriter.Write(b)
 }
 
-func (w *statusWriter) Flush() {
-	if f, ok := w.ResponseWriter.(http.Flusher); ok {
-		f.Flush()
-	}
-}
-
 func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
+// flushWriter is a statusWriter over a writer that flushes.
+type flushWriter struct{ *statusWriter }
+
+func (w flushWriter) Flush() {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
+	w.ResponseWriter.(http.Flusher).Flush()
+}

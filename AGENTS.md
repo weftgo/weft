@@ -214,7 +214,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    // API: meta (db {kind, path, size: path/size to loopback and the server token only},
 //    //    auth_required, content, runtimes, manifest_check, pricing {source default|file|option, path?
 //    //    (db.path's rule), dated, models}, retention (Retain's Go
-//    //    duration string, null when off), ingest {dropped: [{service, records, last_heard}]} (U5: the largest
+//    //    duration string, null when off), ingest {dropped: [{service, records, last_heard}], accepted, refused, last_error?, last_at?} (accepted/refused: the OTLP POSTs this Studio answered 2xx / 4xx–5xx, last_error the last refusal "<status> <code>: <reason>"; U5: dropped is the largest
 //    //    weft.records.dropped each service's heartbeats and run_start/run_finish reported on the OTLP path; in memory;
 //    //    manifest_check's rule: dev token / setup A loopback only, omitted for a panel token) — `weft doctor` prints it
 //    //    line by line; capabilities_off {capability: why} names the option/flag that left one off;
@@ -308,7 +308,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    experiment drawer pre-filled from lib/replay.ts with its ack preview, gated by canReplay;
 //    //    plan F2: the Story edits in place — prompt, steer, args (JSON checked against the step's catalog
 //    //    schema, lib/edits.ts), result, reply, an insert at a boundary — into that drawer's one command, its
-//    //    "will be sent" preview (lib/preview.ts, capability preview); a replayed run's weft.edits as chips)/Timeline (U8.3: the run page's run tree rows one level deep — lib/waterfall.ts's keys, labels, ROW_KIND/KIND_ICON, rowTone in lib/palette.ts's TONE; a child run one row, ⤢ to ?sel=, labelled by its agent (waterfallRows' agents, else its tool); a step's rows are buttons on one tab stop — click/Enter selects it; time axis with spans, seq without; U10.2: the Story's selected step — else the one it failed at — answer first, lib/summarize.ts's verdict · sent · replied · tools ran · then as Studio's drawer, Logs via the head's 📄 ⤢ (logsLink), Raw OTel ⤢ to ?sel=s<n>&tab=raw; the request one line until opened; subagents inline at any depth)/Raw (src/panel/tree.ts: a lazy JSON
+//    //    "will be sent" preview (lib/preview.ts, capability preview); a replayed run's weft.edits as chips)/Timeline (U8.3: the run page's run tree rows one level deep — lib/waterfall.ts's keys, labels, ROW_KIND/KIND_ICON, rowTone in lib/palette.ts's TONE; a child run one row, ⤢ to ?sel=, labelled by its agent (waterfallRows' agents, else its tool); a step's rows are buttons on one tab stop — click/Enter selects it; time axis with spans, seq without; U10.2: the Story's selected step — else the run page's landing step (the one it failed at, landStep's last drawn for an unstarted one, else step 0) — answer first, lib/summarize.ts's verdict · sent · replied · tools ran · then as Studio's drawer, Logs via the head's 📄 ⤢ (logsLink; no token or the dev token only), Raw OTel ⤢ to ?sel=s<n>&tab=raw; the request one line until opened; subagents inline at any depth)/Raw (src/panel/tree.ts: a lazy JSON
 //    //    tree, "/" filter, copy-node/all, download), a turn-list filter, runs paged by before=/before_id=
 //    //    with no cap, the tab stored as `tab`; its honesty, plan D5: every badge drawn by
 //    //    src/panel/badges.ts from the A3 table (data-hole, reason — fix: as title; badge(hole, note) for
@@ -344,8 +344,10 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    whose Origin's host:port is not the request's Host and not an AllowOrigins entry, or with no Origin but
 //    //    Sec-Fetch-Site: cross-site, is 403 "cross-origin write refused (setup A)";
 //    //    OTLP ingest (/v1/traces, /v1/logs) carries its own IngestToken. Every response
-//    //    carries X-Request-Id (a 5xx body error.request_id too); slog.Default gets a WARN per
-//    //    refused ingest batch (rate-limited) and an ERROR per 5xx, each naming it (U11.2).
+//    //    carries X-Request-Id (a 5xx body error.request_id too; exposed to CORS); slog.Default gets a WARN per
+//    //    refused ingest batch (rate-limited per remote + route class /v1/traces|/v1/logs|/v1/*) and an ERROR per
+//    //    5xx (the real error even when a panel token's body masks it) or handler panic, each naming it (U11.2);
+//    //    weft studio / weft dev --log-level (WEFT_LOG_LEVEL) --log-format text|json (WEFT_LOG_FORMAT) pick its handler.
 //    // Setup B, any language (package cmd/weft — `go install github.com/weftgo/weft/cmd/weft@latest`;
 //    // the one place the clickhouse driver lives): weft studio --db sqlite://path |
 //    //    clickhouse://user:pass@host:9000/db [--addr --token --manifest weft.json (or

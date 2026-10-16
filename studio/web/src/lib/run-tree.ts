@@ -9,7 +9,7 @@
 // story shows), else through its timed span. Plain TypeScript, no
 // React: Studio only (the panel draws the model itself, U8.3).
 import type { Span as TimedSpan } from "./api"
-import type { Span } from "./trace"
+import type { Span, SpanKind } from "./trace"
 import type { WaterfallModel, WaterfallRow } from "./waterfall"
 import { lanesWord, ROW_KIND, rowBadge, rowKeys, rowTone } from "./waterfall"
 

@@ -385,7 +385,7 @@ describe("the failed derived run (one step, its root span in error)", () => {
     )
   })
 
-  it("spans not (yet) readable: the trace tab is the derived note, never the position axis's words", async () => {
+  it("spans not (yet) readable: the waterfall tab is the derived note, never the order scale's words", async () => {
     serve()
     studio.on(`GET runs/${DERIVED_FAILED}/spans`, () =>
       apiError(500, "internal", "spans unreadable")

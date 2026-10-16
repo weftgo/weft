@@ -56,7 +56,10 @@ mount as one `http.Handler`.
    non-asset, non-API path under the mount (SPA fallback).
 7. **Budgets.** T1's `dist` stays under **600 KiB gzipped in total** (JS +
    CSS + fonts). A breach is a CI failure until someone raises it here with
-   a reason.
+   a reason. *Amended 2026-10-16:* raised to **700 KiB** by the user for
+   phase 8's one-run-screen items (run tree, call graph, step drawer,
+   logs) — the shared row model is now in both bundles; the panel.js copy
+   (≈86 KiB) counts here and under its own 96 KiB cap.
 8. **Built for hosting from day one, without hosting code.** Two API
    rules make the same bundle serve local, self-hosted and hosted
    Studio (`WEFTGO-PRICING-AND-TIERS.md` §10: one artifact):

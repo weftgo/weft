@@ -1002,8 +1002,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 266,089 B raw / 86,289 B gzip
-(84.3 KiB, the bundle of the ledger's row "U9.2 child subtree in place"; 12,015 B — 11.7 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 266,901 B raw / 86,572 B gzip
+(84.5 KiB, the bundle of the ledger's row "U8.2-fix/U9.2-fix run tree review"; 11,732 B — 11.5 KiB — of headroom under
 the 98,304 B, 96 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; A5.4 raised it from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -1643,7 +1643,15 @@ offset on hover), the critical path a thin accent under the bars with a
 legend. It draws on the **time** scale when the run has spans and the
 **order** scale (stream positions, the replay playhead's) otherwise;
 `?scale=time|order` picks and the switch writes either value (a pre-U8.2
-`?axis=time|events` link reads as time|order). With the `spans_tree`
+`?axis=time|events` link reads as time|order); the `t` key steps the
+scale (time → order → graph; `s` stays the story's). A step or call the
+run's events have and no span covers is drawn, never left out (U8.2-fix):
+while the run goes on it sits after the row before it, no duration,
+marked **spans not reported yet**; once the run ended it is badged
+`not_recorded` (dropped on the way or never exported — `truncated` when
+the tree's own cap cut it). The dim filters (`?dim=errors,slow,tools`,
+the **dim all but** chips) dim every row the active filters do not keep
+— never hide it; a kept row's ancestors stay lit. With the `spans_tree`
 capability the page reads `runs/{id}/spans?tree=1` and a delegation's
 child run is one collapsed row under its tool call with **open run ↗**;
 selecting it shows the call's detail, the subagent block. Its chevron
@@ -1651,24 +1659,31 @@ selecting it shows the call's detail, the subagent block. Its chevron
 calls and tools from the same `?tree=1` spans, its own children again
 one collapsed row each — drawn on expand, never fetched, unless the
 tree's `truncated` hole says the server cut it, when the expanded
-child's own `?tree=1` is read and merged; the child's events and run
-document are read on expand too (a time row's gists, the order scale's
-rows). Selection crosses the boundary: a `?sel=` naming a row inside a
+child's own `?tree=1` is read and merged; the child's events (every
+page, up to 20,000 — past that a `truncated` badge on its row; its gaps
+a `gap` badge) and run document are read on expand too (a time row's
+gists, the order scale's rows), and read again every 2 s while the
+child or the run runs. Selection crosses the boundary: a `?sel=` naming a row inside a
 child (its run-qualified `rowKeys` key, `s:<run>:<n>`, `c:<run>:<at>:<call>`,
-or `<child run>:<span id>`) expands the children above it, and folding a
+or `<child run>:<span id>`) expands the children above it — a key inside
+a child no row draws selects that child's row — and folding a
 child that holds the selection moves it to the child's row. The tree's
 holes are badges above it (`truncated`, `not_recorded` / `no_spans` —
-also on the child rows it names —, `hidden`). **whole trace ↗** opens
-`/traces/<trace id>` with the selection kept (a child run's own rows
-run-qualified, as the trace page keys them). The third scale,
+also on the finished child rows it names, in the server's words; a
+running child has no span yet and reads running —, `hidden`). **whole
+trace ↗** opens `/traces/<trace id>` with the selection kept, the run's
+own rows always run-qualified (the trace page keys bare only its own
+root run, and reads that root's qualified keys back). The third scale,
 `?scale=graph` (`src/lib/graph.ts`, inline SVG), is the call graph over
 the same spans: one node per agent (its runs, the slowest, failures,
 tokens when the spans carry them) in call-depth columns, one per MCP
 server (a tool whose request-catalog source starts `mcp`, the run's own
-calls), each edge its call count and slowest call; a node selects its
-first run's row and the selected row lights its node — switching scales
-keeps the selection. Pool children are sessions, not runs of the trace:
-not drawn. A row's detail reads the fold's step, call or run where
+calls; a child run's MCP calls are said not shown, its catalog not read
+here), each edge its call count and slowest call (the slowest, not a
+percentile; no cost on nodes), a self-call a loop over its node; a node
+selects its first run's row and the selected row lights its node —
+switching scales keeps the selection. Pool children are sessions, not
+runs of the trace: not drawn. A row's detail reads the fold's step, call or run where
 the fold has one (the story's bodies), a model call or any other span its
 span's facts. "trace" names the `/traces` page only. In the story,
 subagent children sit as nested rows under the step
@@ -2024,7 +2039,8 @@ playground, the experiment form and the split, density and select
 components.
 
 Keyboard: `⌘K` jumps to any recent run, `/` filters, `j`/`k` move,
-`enter` opens, `w`/`s`/`r` switch waterfall/story/raw, `space` replays,
+`enter` opens, `w`/`s`/`r` switch waterfall/story/raw, `t` steps the
+waterfall's scale (time/order/graph), `space` replays,
 `[`/`]` jump by step or tool event, `,`/`.` move one event, `y` copies
 the page's link, `?` lists everything. Keys fire only on a bare press
 outside a text box.
@@ -2566,12 +2582,12 @@ the build output is committed at [dist/](./dist) and embedded with
 
 ```sh
 make studio-build   # cd studio/web && bun install && bun run build
-make studio-check   # rebuild, prove dist is fresh, check the 600 KiB gzip budget, typecheck + test
+make studio-check   # rebuild, prove dist is fresh, check the 700 KiB gzip budget, typecheck + test
 ```
 
 `make studio-check` is the freshness gate (ADR 0018 §4): it fails if
-`dist/` does not match `web/` or if the gzipped total exceeds 600 KiB
-(currently ~400 KiB: the app's ~363 plus the panel bundle's ~36.4).
+`dist/` does not match `web/` or if the gzipped total exceeds 700 KiB
+(currently ~599 KiB, the panel bundle's ~85 included).
 The build is deterministic — two builds from
 one tree are byte-identical (`scripts/clean-dist.ts` pins the router's
 prerender timestamp and keeps `<base href>` first in `<head>`).

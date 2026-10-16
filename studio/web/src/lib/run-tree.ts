@@ -80,6 +80,7 @@ export function treeSpans(model: WaterfallModel): Span[] {
       ...(r.child
         ? { childRun: r.child.runId, collapsed: r.child.collapsed }
         : {}),
+      ...(r.untimed ? { untimed: r.untimed } : {}),
     }
   })
 }
@@ -89,8 +90,12 @@ export function treeSpans(model: WaterfallModel): Span[] {
  * of it — the fold's root key "run" (r:<run> now), the root's
  * run-qualified s:<run>:<n> / c:<run>:… (bare now), a t:<span id> (a
  * pre-U8.2 time-axis row: the row that span is behind), a bare
- * c:<call id> (pre-G1: the call in the linked step, else the first).
- * A key no row has selects nothing.
+ * c:<call id> (pre-G1: the call in the linked step, else the first),
+ * a denied call keyed by its step (c:<step>:<call>: c:resume:<call>
+ * now, lib/trace-sel.ts's mapping). A key inside a child run no row
+ * draws (collapsed, or its rows not read) selects that child's row —
+ * the deepest drawn child whose run id the key names. A key no row
+ * has, nor any child of it, selects nothing.
  */
 export function resolveRowSel(
   rows: readonly WaterfallRow[],
@@ -112,24 +117,52 @@ export function resolveRowSel(
     )
     if (bare) return bare
   }
+  // A denied call's old key, by its step: c:resume:<call> now (the
+  // root's qualified form read bare).
+  const denied = /^(c:(?:.+:)?)\d+:([^:]+)$/.exec(sel)
+  if (denied) {
+    const k = `${denied[1]}resume:${denied[2]}`
+    const hit =
+      has(k) ??
+      (k.startsWith(`c${q}`) ? has(`c:${k.slice(q.length + 1)}`) : undefined)
+    if (hit) return hit
+  }
   if (sel.startsWith("t:")) {
     const id = sel.slice(2)
-    return rows.find((r) => r.span?.span_id === id)?.key
+    const hit = rows.find((r) => r.span?.span_id === id)?.key
+    if (hit) return hit
   }
   const call = /^c:([^:]+)$/.exec(sel)?.[1]
-  if (!call) {
-    // <run>:<span id> (U9.2): the row of that run its span is behind.
-    const i = sel.lastIndexOf(":")
+  if (call) {
+    const calls = rows.filter(
+      (r) => r.kind === "tool" && r.runId === rootId && r.callId === call
+    )
+    return (calls.find((r) => r.step === step) ?? calls.at(0))?.key
+  }
+  // <run>:<span id> (U9.2): the row of that run its span is behind.
+  const i = sel.lastIndexOf(":")
+  if (i > 0) {
     const run = sel.slice(0, i)
     const id = sel.slice(i + 1)
-    return i > 0
-      ? rows.find((r) => r.runId === run && r.span?.span_id === id)?.key
-      : undefined
+    const hit = rows.find((r) => r.runId === run && r.span?.span_id === id)
+    if (hit) return hit.key
   }
-  const calls = rows.filter(
-    (r) => r.kind === "tool" && r.runId === rootId && r.callId === call
-  )
-  return (calls.find((r) => r.step === step) ?? calls.at(0))?.key
+  // Inside a child no row draws: that child's own row, the deepest (a
+  // grandchild's keys name its id, <child>/…, as the tree's own
+  // collapsing reads it).
+  if (!/^[sctr]:/.test(sel)) return undefined
+  const rest = sel.slice(2)
+  let best: WaterfallRow | undefined
+  for (const r of rows)
+    if (
+      r.kind === "child" &&
+      (rest === r.runId ||
+        rest.startsWith(`${r.runId}:`) ||
+        rest.startsWith(`${r.runId}/`)) &&
+      (!best || r.runId.length > best.runId.length)
+    )
+      best = r
+  return best?.key
 }
 
 /**
@@ -213,6 +246,17 @@ export function qualifyKey(key: string, run: string): string {
   if (key.startsWith("t:")) return k.span(key.slice(2))
   return key
 }
+
+/** A child row's truncated badge when its stream passed the page's
+ * read cap (U9.2-fix W3): nothing lost, not all of it read here. */
+export const childCappedReason = (cap: number) =>
+  `this page reads a child run's first ${cap.toLocaleString("en-US")} events for its rows: the later ones are not drawn here, nothing was lost`
+export const CHILD_CAPPED_FIX = "open the child run (open run ↗)"
+
+/** A child row's gap badge: how many of its recorded events are
+ * missing. */
+export const gapNote = (n: number) =>
+  `${n.toLocaleString("en-US")} ${n === 1 ? "event" : "events"} missing`
 
 /** The run page's link to the whole trace (UX-A-17). */
 export const TRACE_LINK = "whole trace ↗"

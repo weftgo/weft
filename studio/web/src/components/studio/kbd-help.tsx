@@ -29,6 +29,11 @@ export const bindings: Binding[] = [
     where: "run",
   },
   {
+    keys: ["t"],
+    action: "the waterfall's scale: time · order · graph",
+    where: "run",
+  },
+  {
     keys: ["↑", "↓", "←", "→"],
     action: "move / fold in the waterfall (tree focused)",
     where: "run",

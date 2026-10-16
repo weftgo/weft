@@ -3,7 +3,16 @@
 // director run.
 import { describe, expect, it } from "vitest"
 
-import { DIR, FOLD, INV, OPS, SPANS } from "@/test/director-fixture"
+import {
+  DIR,
+  FOLD,
+  INV,
+  inv,
+  OPS,
+  span,
+  SPANS,
+  tool,
+} from "@/test/director-fixture"
 import {
   ALL_RUNS,
   detailSpan,
@@ -12,7 +21,8 @@ import {
   resolveRowSel,
   treeSpans,
 } from "./run-tree"
-import { spansFromFold } from "./trace"
+import { spansFromFold, spansFromTimed } from "./trace"
+import { keyRows, resolveSel } from "./trace-sel"
 import { rowBadge, waterfallRows } from "./waterfall"
 
 const time = waterfallRows({ runId: DIR, spans: SPANS, fold: FOLD, total: 9 })
@@ -130,6 +140,44 @@ describe("the child subtree in place (U9.2)", () => {
     expect(resolveRowSel(full.rows, `${OPS}:i_t`, DIR)).toBeUndefined()
   })
 
+  it("resolveRowSel: a key inside a child no row draws selects that child's row (U8.2-fix)", () => {
+    // ops-manager collapsed: its rows, and its worker's, are not drawn.
+    const rows = time.rows
+    expect(rows.some((r) => r.key === `s:${OPS}:1`)).toBe(false)
+    expect(resolveRowSel(rows, `s:${OPS}:1`, DIR)).toBe(`r:${OPS}`)
+    expect(resolveRowSel(rows, `c:${OPS}:0:call_1`, DIR)).toBe(`r:${OPS}`)
+    expect(resolveRowSel(rows, `t:${OPS}:o_c0`, DIR)).toBe(`r:${OPS}`)
+    // The worker's keys: its drawn ancestor.
+    expect(resolveRowSel(rows, `c:${INV}:0:call_1`, DIR)).toBe(`r:${OPS}`)
+    expect(resolveRowSel(rows, `r:${INV}`, DIR)).toBe(`r:${OPS}`)
+    // Drawn: the row itself.
+    const one = waterfallRows({
+      runId: DIR,
+      spans: SPANS,
+      expanded: new Set([OPS]),
+    }).rows
+    expect(resolveRowSel(one, `s:${OPS}:1`, DIR)).toBe(`s:${OPS}:1`)
+    expect(resolveRowSel(one, `c:${INV}:0:call_1`, DIR)).toBe(`r:${INV}`)
+    // A run the tree has no row for selects nothing.
+    expect(resolveRowSel(rows, "s:other:1", DIR)).toBeUndefined()
+  })
+
+  it("resolveRowSel: a denied call keyed by its step reads c:resume:<call> (trace-sel's mapping)", () => {
+    const rows = waterfallRows({
+      runId: "r",
+      spans: [
+        span("inv", "", "invoke_agent a", 0, 10, inv("r", "a")),
+        span("den", "inv", "execute_tool x", 0.5, 0.5, {
+          ...tool("r", 0, "x", 1),
+          "weft.tool.denied": true,
+        }),
+      ],
+    }).rows
+    expect(rows.map((r) => r.key)).toContain("c:resume:call_1")
+    expect(resolveRowSel(rows, "c:0:call_1", "r")).toBe("c:resume:call_1")
+    expect(resolveRowSel(rows, "c:r:0:call_1", "r")).toBe("c:resume:call_1")
+  })
+
   it("treeSpans marks a child row collapsed or expanded", () => {
     const one = treeSpans(
       waterfallRows({ runId: DIR, spans: SPANS, expanded: new Set([OPS]) })
@@ -146,5 +194,27 @@ describe("the child subtree in place (U9.2)", () => {
     expect(qualifyKey("c:resume:call_1", OPS)).toBe(`c:${OPS}:resume:call_1`)
     expect(qualifyKey("t:ab", OPS)).toBe(`t:${OPS}:ab`)
     expect(qualifyKey(`r:${OPS}`, OPS)).toBe(`r:${OPS}`)
+  })
+
+  it("the trace page reads its root's qualified keys back (the run page always qualifies, U9.2-fix W4)", () => {
+    const rows = keyRows(spansFromTimed(SPANS))
+    // The director is this trace's root: its keys bare there.
+    expect(resolveSel(rows, qualifyKey("s1:m", DIR)).key).toBe("s1:m")
+    expect(resolveSel(rows, qualifyKey("s1", DIR)).key).toBe("s1:m")
+    expect(resolveSel(rows, qualifyKey("c:0:call_1", DIR)).key).toBe(
+      "c:0:call_1"
+    )
+    expect(resolveSel(rows, qualifyKey("t:d_http", DIR)).key).toBe("t:d_http")
+    // Under an app's trace whose root is another run, the qualified key
+    // is the one that names the director's row (a bare s1 would name
+    // the root's).
+    const app = rows.map((r) =>
+      r.key === `r:${DIR}`
+        ? r
+        : r.key.startsWith("s1")
+          ? { ...r, key: `s:${DIR}:1:m` }
+          : r
+    )
+    expect(resolveSel(app, qualifyKey("s1:m", DIR)).key).toBe(`s:${DIR}:1:m`)
   })
 })

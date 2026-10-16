@@ -8,6 +8,8 @@ import {
   callGraph,
   catalogSources,
   edgeLabel,
+  graphUnsourced,
+  loopLabel,
   nodeLine,
   nodeOfRun,
 } from "./graph"
@@ -83,6 +85,44 @@ describe("callGraph", () => {
     })
     // A local tool is not a node.
     expect(g2.nodes).toHaveLength(4)
+  })
+
+  it("a self-call is a loop edge; a resumed call's child finds its parent by core's id rule (U9.2-fix)", () => {
+    const spans = [
+      span("a", "", "invoke_agent director", 0, 30, inv("R", "director")),
+      span("b", "a", "invoke_agent director", 2, 20, {
+        ...inv("R/0/c1", "director"),
+        "weft.parent.run.id": "R",
+      }),
+      // No weft.parent.run.id: <parent>/resume/<call> names R.
+      span(
+        "c",
+        "a",
+        "invoke_agent worker",
+        21,
+        25,
+        inv("R/resume/c2", "worker")
+      ),
+    ]
+    const g2 = callGraph(spans, "R")
+    expect(g2.nodes.map((n) => [n.id, n.depth, n.runs])).toEqual([
+      ["a:director", 0, ["R", "R/0/c1"]],
+      ["a:worker", 1, ["R/resume/c2"]],
+    ])
+    expect(g2.edges.map((e) => [e.from, e.to, e.count])).toEqual([
+      ["a:director", "a:director", 1],
+      ["a:director", "a:worker", 1],
+    ])
+    expect(loopLabel(g2.edges[0])).toBe("↻ 1× · 18.0ms")
+  })
+
+  it("a child run's tools whose catalog the page did not read are listed unsourced, never guessed", () => {
+    const src = () => "mcp:billing"
+    const g2 = callGraph(SPANS, DIR, src, (r) => r === DIR)
+    expect(g2.unsourced).toEqual([OPS, INV].sort())
+    expect(g2.nodes.some((n) => n.kind === "mcp")).toBe(true)
+    expect(graphUnsourced(2)).toMatch(/^MCP calls of 2 child runs not shown/)
+    expect(callGraph(SPANS, DIR).unsourced).toEqual([])
   })
 
   it("reads the sources from a run's request catalogs", () => {

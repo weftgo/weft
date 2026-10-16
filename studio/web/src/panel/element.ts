@@ -6601,7 +6601,7 @@ function renderCall(
 ): HTMLElement {
   const box = el("div", "weft-call", undefined, { "data-key": call.callId })
   const state = callState(call, runStatus)
-  // The call's name is its place on the run page (G1): the trace view
+  // The call's name is its place on the run page (G1): the run tree
   // with this call selected, named with its step — a call id repeats
   // across steps.
   const runId = ctx?.runId

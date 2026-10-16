@@ -1146,6 +1146,47 @@ export function eventsQuery(id: string, after: number, limit = 500) {
   })
 }
 
+/** How many of a child run's events the run tree reads (U9.2-fix):
+ * pages of 5,000, then a truncated badge on its row. */
+export const CHILD_EVENTS_CAP = 20_000
+
+/** A child run's stream as the run tree reads it: every page up to
+ * CHILD_EVENTS_CAP, its gaps, and whether more remained (capped). */
+export interface ChildStream {
+  events: PosEvent[]
+  gaps: number[]
+  /** The endpoint's done on the last page: the run reads terminal. */
+  done: boolean
+  /** More events remained past the cap. */
+  capped: boolean
+}
+
+/** A child run's whole stream (the run tree's expanded child, U9.2-fix
+ * W3): followed by next_after page by page, never one page silently. */
+export function childStreamQuery(id: string) {
+  return queryOptions({
+    queryKey: ["events", id, "tree"],
+    queryFn: async (): Promise<ChildStream> => {
+      const events: PosEvent[] = []
+      const gaps = new Set<number>()
+      let after = -1
+      for (;;) {
+        const page = await fetchEventsPage(id, after, 5000)
+        events.push(...page.events)
+        for (const g of page.gaps) gaps.add(g)
+        const next = page.next_after
+        // More pages only while the cursor moves (as the root's walk).
+        const more = next != null && next > after
+        if (!more)
+          return { events, gaps: [...gaps], done: page.done, capped: false }
+        if (events.length >= CHILD_EVENTS_CAP)
+          return { events, gaps: [...gaps], done: page.done, capped: true }
+        after = next
+      }
+    },
+  })
+}
+
 export function transcriptQuery(id: string) {
   return queryOptions({
     queryKey: ["transcript", id],

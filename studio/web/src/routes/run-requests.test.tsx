@@ -260,7 +260,7 @@ describe("the run page's request section (A1.4)", () => {
     expect(studio.calls(`GET runs/${RUN}/requests`)).toEqual([])
   })
 
-  it("the trace view's step detail shows the same request", async () => {
+  it("the waterfall's step detail shows the same request", async () => {
     serve("ok")
     renderApp(`/runs/${RUN}?sel=s1`)
     await waitFor(() =>

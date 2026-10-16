@@ -58,7 +58,9 @@ export function stepCount(n: number): string {
 /** A span of milliseconds in the tightest unit that still reads. */
 export function spanMs(ms: number): string {
   if (!Number.isFinite(ms)) return "—"
-  if (ms < 1000) return `${Math.round(ms)}ms`
+  // The unit is chosen on the rounded value: 999.6ms reads 1.0s, never
+  // "1000ms".
+  if (ms < 999.5) return `${Math.round(ms)}ms`
   // Under a minute keeps a decimal — unless rounding would print
   // "60.0s"; from there on whole seconds, so a remainder never reads 60.
   if (ms < 59_950) return `${(ms / 1000).toFixed(1)}s`

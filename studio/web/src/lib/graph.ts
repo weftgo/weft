@@ -44,7 +44,12 @@ export interface GraphEdge {
 
 export interface CallGraph {
   nodes: GraphNode[]
+  /** A self-call (an agent delegating to itself) is an edge whose from
+   * is its to: the view draws it as a loop over the node. */
   edges: GraphEdge[]
+  /** The runs that called tools whose sources the page did not read
+   * (a child run's catalog): their MCP calls are not drawn. */
+  unsourced: string[]
 }
 
 /** The tools record's source of a run's tool, when the page knows it. */
@@ -56,11 +61,12 @@ const ms = (s: Span) => {
 }
 
 /** A run's parent: the invoke_agent span's weft.parent.run.id, the
- * tree answer's parent_run_id, else core's id rule (<parent>/<step>/<call>). */
+ * tree answer's parent_run_id, else core's id rule (<parent>/<step>/<call>,
+ * <parent>/resume/<call> under Approve). */
 function parentOf(inv: Span, run: string): string | undefined {
   const a = str(attrsOf(inv)["weft.parent.run.id"]) ?? inv.parent_run_id
   if (a) return a
-  const m = /^(.+)\/\d+\/[^/]+$/.exec(run)
+  const m = /^(.+)\/(?:\d+|resume)\/[^/]+$/.exec(run)
   return m?.[1]
 }
 
@@ -70,11 +76,14 @@ function parentOf(inv: Span, run: string): string | undefined {
  * (a tool whose source starts "mcp") as edges to their server's node.
  * A run without its invoke_agent span is not drawn (the tree's holes
  * say why); an agent two callers reach is one node with two edges.
+ * `known` says whose catalogs sourceOf read (every run's by default): a
+ * run outside it that called tools is listed unsourced.
  */
 export function callGraph(
   spans: readonly Span[],
   rootRun: string,
-  sourceOf?: SourceOf
+  sourceOf?: SourceOf,
+  known: (run: string) => boolean = () => true
 ): CallGraph {
   const runOf = (s: Span) =>
     s.run_id ?? str(attrsOf(s)["weft.run.id"]) ?? rootRun
@@ -140,10 +149,15 @@ export function callGraph(
     const from = up ? agentOf.get(up) : undefined
     if (from) edge(from, agentOf.get(run)!, ms(s), s.status === "error")
   }
+  const unsourced = new Set<string>()
   if (sourceOf)
     for (const s of spans) {
       if (opOf(s) !== "execute_tool") continue
       const run = runOf(s)
+      if (!known(run)) {
+        unsourced.add(run)
+        continue
+      }
       const from = agentOf.get(run)
       const tool = str(attrsOf(s)["gen_ai.tool.name"])
       const src = tool ? sourceOf(run, tool) : undefined
@@ -174,7 +188,7 @@ export function callGraph(
   const all = [...nodes.values()]
   const deepest = Math.max(0, ...all.map((n) => n.depth))
   for (const n of all) if (n.depth < 0) n.depth = deepest + 1
-  return { nodes: all, edges: out }
+  return { nodes: all, edges: out, unsourced: [...unsourced].sort() }
 }
 
 /** The node whose runs hold `run` (the selection's), if any. */
@@ -222,6 +236,14 @@ export function catalogSources(
     }
   return out
 }
+
+/** Said when child runs called tools whose catalogs the page did not
+ * read: their MCP servers are not nodes here. */
+export const graphUnsourced = (n: number) =>
+  `MCP calls of ${n === 1 ? "1 child run" : `${n} child runs`} not shown: the graph reads this run's own tool catalog — open a child run for its MCP servers`
+
+/** A self-call's loop label: "↻ 2× · 18.0ms". */
+export const loopLabel = (e: GraphEdge) => `↻ ${edgeLabel(e)}`
 
 /** Said when the spans hold one agent and no MCP calls. */
 export const GRAPH_ALONE =

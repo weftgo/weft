@@ -22,9 +22,11 @@ import {
   SPANS,
   tool,
 } from "@/test/director-fixture"
+import type { FoldedRun } from "./events"
 import {
   dimRows,
   extent,
+  UNTIMED_HOLE,
   instantMs,
   spanTree,
   timeDomain,
@@ -355,12 +357,22 @@ describe("a call id two steps repeat (core numbers call_1 per step)", () => {
     expect(by(`r:${C0}`).start).toBeGreaterThanOrEqual(by("c:0:call_1").start)
   })
 
-  it("without the tool span, (parent run, call) is the fallback", () => {
-    const wf = waterfallRows({
-      runId: "P",
-      spans: spans.filter((s) => !["p_t1", "k1", "k1_c"].includes(s.span_id)),
-    })
-    expect(wf.rows.find((r) => r.key === `r:${C0}`)!.parent).toBe("c:0:call_1")
+  it("without the tool span, (parent run, call) is the fallback — a step's own child each, never overwritten", () => {
+    // The tool spans arrive, the span each invoke_agent names as parent
+    // does not: the (run, call) bucket holds both children, and each
+    // tool takes the one that starts inside it.
+    const cut = spans.map((s) =>
+      s.span_id === "k0"
+        ? { ...s, parent_span_id: "gone0" }
+        : s.span_id === "k1"
+          ? { ...s, parent_span_id: "gone1" }
+          : s
+    )
+    const wf = waterfallRows({ runId: "P", spans: cut })
+    const by = (k: string) => wf.rows.find((r) => r.key === k)!
+    expect(by(`r:${C0}`).parent).toBe("c:0:call_1")
+    expect(by(`r:${C1}`).parent).toBe("c:1:call_1")
+    expect(wf.rows.filter((r) => r.kind === "span")).toEqual([])
   })
 })
 
@@ -566,6 +578,8 @@ describe("two model calls in one step (re-run after an error)", () => {
 
 describe("the words (cosmetic)", () => {
   it("chooses the unit on the rounded value", () => {
+    expect(took(999.6)).toBe("1.0s")
+    expect(took(999.4)).toBe("999ms")
     expect(took(99.96)).toBe("100ms")
     expect(took(0.9996)).toBe("1.0ms")
     expect(took(0)).toBe("0µs")
@@ -593,5 +607,127 @@ describe("the words (cosmetic)", () => {
     const texts = wf.rows.map((r) => extent(r, "order"))
     for (const t of texts) expect(t).toMatch(/^#\d+(\.\d)?–(\d+(\.\d)?)?$/)
     expect(texts.some((t) => t.includes("."))).toBe(true)
+  })
+})
+
+describe("fold rows no span covers (U8.2-fix: truncation is visible)", () => {
+  const R = "r1"
+  // Step 0's spans were read; step 1 finished in the fold, its spans
+  // not (yet) read; step 2 is open.
+  const spans = [
+    span("c0", "root", "chat m", 0, 3, chat(R, 0, "tool_calls", 1)),
+    span("x0", "root", "execute_tool lookup", 4, 8, tool(R, 0, "lookup", 1)),
+  ]
+  const call = (i: number, done: boolean) => ({
+    callId: "call_1",
+    name: "lookup",
+    startPos: 4 * i + 2,
+    ...(done
+      ? { finishPos: 4 * i + 3, result: { content: "ok", isError: false } }
+      : {}),
+  })
+  const step = (i: number, done: boolean) => ({
+    index: i,
+    text: "",
+    reasoning: "",
+    toolCalls: done ? [call(i, true)] : [],
+    ...(done ? { finish: { reason: "tool_calls", usage: {} } } : {}),
+    from: 4 * i + 1,
+    to: 4 * i + 4,
+  })
+  const foldOf = (finished: boolean, steps: unknown[]) =>
+    ({
+      runId: R,
+      steps,
+      pending: [],
+      finished,
+      startPos: 0,
+      agent: "a",
+    }) as unknown as FoldedRun
+
+  it("live: a just-finished step is drawn at the edge, pending its spans, never gone", () => {
+    const wf = waterfallRows(
+      {
+        runId: R,
+        status: "running",
+        spans,
+        fold: foldOf(false, [step(0, true), step(1, true), step(2, false)]),
+      },
+      "time"
+    )
+    const by = (k: string) => wf.rows.find((r) => r.key === k)!
+    expect(wf.rows.filter((r) => r.kind === "step").map((r) => r.key)).toEqual([
+      "s0",
+      "s1",
+      "s2",
+    ])
+    expect(by(`r:${R}`).gist).toBe("3 steps")
+    for (const k of ["s1", "s1:m", "c:1:call_1"]) {
+      expect(by(k).untimed).toBe("pending")
+      expect(by(k).took).toBe(0)
+      expect(by(k).status).toBe("ok")
+      expect(extent(by(k), "time")).toBe("—")
+    }
+    // After the row before it: step 0's end.
+    expect(by("s1").start).toBe(by("s0").start + by("s0").took!)
+    expect(by("c:1:call_1").parent).toBe("s1")
+    // The open step stays open, no mark.
+    expect([by("s2").took, by("s2").status, by("s2").untimed]).toEqual([
+      null,
+      "running",
+      undefined,
+    ])
+    expect(by("s0").untimed).toBeUndefined()
+  })
+
+  it("finished: a step whose spans never came is drawn missing, in its place", () => {
+    const wf = waterfallRows(
+      {
+        runId: R,
+        status: "succeeded",
+        spans,
+        fold: foldOf(true, [step(0, true), step(1, true)]),
+      },
+      "time"
+    )
+    const by = (k: string) => wf.rows.find((r) => r.key === k)!
+    expect(wf.rows.map((r) => r.key)).toEqual([
+      `r:${R}`,
+      "s0",
+      "s0:m",
+      "c:0:call_1",
+      "s1",
+      "s1:m",
+      "c:1:call_1",
+    ])
+    for (const k of ["s1", "s1:m", "c:1:call_1"])
+      expect(by(k).untimed).toBe("missing")
+    expect(UNTIMED_HOLE.hole).toBe("not_recorded")
+    expect(UNTIMED_HOLE.reason).toMatch(/no span covers this row/)
+  })
+
+  it("content-off: a tool row's gist is its result size, a string count read too", () => {
+    const wf = waterfallRows(
+      {
+        runId: R,
+        status: "succeeded",
+        spans: [
+          span("x0", "", "execute_tool lookup", 0, 4, {
+            ...tool(R, 0, "lookup", 1),
+            "weft.tool.result_bytes": "55",
+          }),
+        ],
+        fold: foldOf(true, [
+          {
+            ...step(0, true),
+            toolCalls: [
+              { ...call(0, true), result: { content: "", isError: false } },
+            ],
+          },
+        ]),
+      },
+      "time"
+    )
+    expect(wf.rows.find((r) => r.key === "c:0:call_1")!.gist).toBe("55 B")
   })
 })

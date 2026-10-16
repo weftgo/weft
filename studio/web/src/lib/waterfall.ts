@@ -18,7 +18,7 @@
 //
 // Plain TypeScript, no React, no DOM: shared by both clients.
 import type { Span as TimedSpan } from "./api"
-import type { FoldedRun, FoldedToolCall } from "./events"
+import type { FoldedRun, FoldedStep, FoldedToolCall } from "./events"
 import { spanMs, stepCount } from "./format"
 
 /** The axis: wall time from spans, or stream order from events. */
@@ -75,6 +75,11 @@ export interface WaterfallRow {
   critical: boolean
   /** The span behind the row (time scale). */
   span?: TimedSpan
+  /** A row the fold has and no span covers (time scale): `pending`
+   * while the run goes on (its spans are not reported yet), `missing`
+   * once it ended (dropped on the way, or never exported). It sits
+   * after the row before it, with no duration: its time is not known. */
+  untimed?: "pending" | "missing"
 }
 
 export interface WaterfallInput {
@@ -137,6 +142,7 @@ const pos = (v: number) => +v.toFixed(1)
 /** A row's extent as text: its duration on the time scale, its
  * position range on the order scale. */
 export function extent(row: WaterfallRow, scale: Scale): string {
+  if (row.untimed) return "—"
   if (scale === "time") return row.took === null ? "…" : took(row.took)
   return `#${pos(row.start)}–${row.took === null ? "" : pos(row.start + row.took)}`
 }
@@ -435,10 +441,12 @@ const toolRow = (
     key,
     kind: "tool",
     label: name,
-    gist: call?.result
+    // Content-off, the result's text is empty: its size (metadata,
+    // kept content-off) says what came back.
+    gist: call?.result?.content
       ? clip(call.result.content)
-      : typeof bytes === "number"
-        ? `${bytes} B`
+      : int(bytes) !== undefined
+        ? `${int(bytes)} B`
         : undefined,
     runId: run,
     step,
@@ -571,18 +579,43 @@ function timeRows(input: WaterfallInput): WaterfallModel {
   // A child run hangs under the span its invoke_agent span names as
   // parent — call ids repeat per step (core numbers call_1 each step),
   // so the span, never the call id, says which tool. Only when that
-  // span is absent: by (parent run, parent call).
+  // span is absent: by (parent run, parent call) — and since a call id
+  // repeats per step and a child names no parent step (nor is its id
+  // parsed, docs/record-contract.md §2), of several children under one
+  // (run, call) a tool takes the one whose run starts inside it.
   const present = new Set(placed.map((p) => spanRef(p.span)))
   const under = new Map<string, string>()
-  const byCall = new Map<string, string>()
+  const byCall = new Map<string, Placed[]>()
   for (const [run, p] of invoke) {
     if (run === input.runId) continue
     const ps = spanRef(p.span, p.span.parent_span_id)
     const a = attrsOf(p.span)
     if (p.span.parent_span_id && present.has(ps)) under.set(ps, run)
-    else if (str(a["weft.parent.call.id"]))
-      byCall.set(`${a["weft.parent.run.id"]}\n${a["weft.parent.call.id"]}`, run)
+    else if (str(a["weft.parent.call.id"])) {
+      const k = `${a["weft.parent.run.id"]}\n${a["weft.parent.call.id"]}`
+      const list = byCall.get(k)
+      if (list) list.push(p)
+      else byCall.set(k, [p])
+    }
   }
+  const fallback = (run: string, call: string | undefined, t: Placed) => {
+    const list = call ? byCall.get(`${run}\n${call}`) : undefined
+    const pick =
+      list?.length === 1
+        ? list[0]
+        : list?.find((c) => c.start >= t.start && c.start <= t.start + t.took)
+    return pick && runOf(pick)
+  }
+  // A chat span's attempts, by the chat span: grouped once (a run of
+  // thousands of steps must not scan every span per model call).
+  const attemptsOf = new Map<string, Placed[]>()
+  for (const p of placed)
+    if (opOf(p.span) === "attempt") {
+      const k = spanRef(p.span, p.span.parent_span_id)
+      const list = attemptsOf.get(k)
+      if (list) list.push(p)
+      else attemptsOf.set(k, [p])
+    }
 
   const bySpan = new Map<string, Node | null>()
   const claimed = new Set<TimedSpan>()
@@ -664,6 +697,14 @@ function timeRows(input: WaterfallInput): WaterfallModel {
       // A run is built once: parent links that loop end here.
       if (id && !built.has(id)) t.kids.push(buildRun(id, true, t))
     }
+    // The fold's steps by index and its resumed calls by call id, once.
+    const foldSteps = new Map<number, FoldedStep>()
+    const resumed = new Map<string, FoldedToolCall>()
+    for (const fs of fold?.steps ?? []) {
+      if (!foldSteps.has(fs.index)) foldSteps.set(fs.index, fs)
+      for (const c of fs.toolCalls)
+        if (c.resumed && !resumed.has(c.callId)) resumed.set(c.callId, c)
+    }
     // Steps: the chat spans and the execute_tool spans of an index.
     const stepsAt = new Map<number, { chats: Placed[]; tools: Placed[] }>()
     const seen = new Set<string>()
@@ -687,12 +728,12 @@ function timeRows(input: WaterfallInput): WaterfallModel {
       seen.add(`${where}\n${callId}`)
       const call = callId
         ? where === "resume"
-          ? fold?.steps
-              .flatMap((s) => s.toolCalls)
-              .find((c) => c.resumed && c.callId === callId)
-          : fold?.steps
-              .find((s) => s.index === step)
-              ?.toolCalls.find((c) => c.callId === callId && !c.resumed)
+          ? resumed.get(callId)
+          : step === undefined
+            ? undefined
+            : foldSteps
+                .get(step)
+                ?.toolCalls.find((c) => c.callId === callId && !c.resumed)
         : undefined
       const t = nodeOf(
         p,
@@ -715,14 +756,14 @@ function timeRows(input: WaterfallInput): WaterfallModel {
         t,
         under.get(spanRef(p.span)) ??
           call?.childRunId ??
-          byCall.get(`${run}\n${callId}`)
+          fallback(run, callId, p)
       )
       return t
     }
     const steps = new Map<number, [Node, number]>()
     const byStart = (a: Placed, b: Placed) => a.start - b.start
     for (const [n, s] of [...stepsAt].sort((a, b) => a[0] - b[0])) {
-      const fstep = fold?.steps.find((x) => x.index === n)
+      const fstep = foldSteps.get(n)
       let a = Infinity
       let b = -Infinity
       for (const p of [...s.chats, ...s.tools]) {
@@ -775,11 +816,7 @@ function timeRows(input: WaterfallInput): WaterfallModel {
           )
         )
         // Its attempts: the attempt spans under the chat span.
-        const tries = own.filter(
-          (x) =>
-            opOf(x.span) === "attempt" &&
-            spanRef(x.span, x.span.parent_span_id) === spanRef(p.span)
-        )
+        const tries = attemptsOf.get(spanRef(p.span)) ?? []
         if (tries.length) m.attempts = tries.length
         for (const x of tries) {
           const xa = attrsOf(x.span)
@@ -810,45 +847,67 @@ function timeRows(input: WaterfallInput): WaterfallModel {
       })
       step.kids.push(...s.tools.map((p) => toolNode(p, n)))
     }
-    // In flight (a live run): the fold's steps and calls no span has
-    // closed yet are open rows — a step from the run's latest end, a
-    // call from its step's.
-    if (live && fold) {
+    // The fold's steps and calls no span covers (U8.2-fix). While the
+    // run goes on, an open one runs from the run's latest end (a step)
+    // or its step's (a call), and a finished one waits for its spans
+    // (`pending`: they export when they end, the page reads them every
+    // few seconds); once it ended, they are `missing` (dropped on the
+    // way, never exported) — drawn, never left out: truncation is
+    // visible. An untimed row sits after the row before it, no duration.
+    if (fold) {
       const edge = end > -Infinity ? end : root.start
-      for (const fs of fold.steps) {
+      const inFlight = live && !fold.finished
+      const mark = live ? "pending" : "missing"
+      const timed = [...steps].sort((a, b) => a[0] - b[0])
+      let prev = root.start
+      let j = 0
+      for (const fs of [...fold.steps].sort((a, b) => a.index - b.index)) {
+        for (; j < timed.length && timed[j][0] < fs.index; j++)
+          prev = Math.max(prev, timed[j][1][1])
         let st = steps.get(fs.index)
-        if (!st && !fs.finish) {
+        if (!st) {
+          const open = inFlight && !fs.finish
+          const from = open ? edge : prev
+          const status: RowStatus = open
+            ? "running"
+            : fs.finish
+              ? "ok"
+              : "never"
           const s = stepRow(
             k,
             run,
             fs.index,
             fs.toolCalls.filter((c) => !c.resumed).map((c) => c.name),
             fs.text,
-            edge,
-            null,
-            "running"
+            from,
+            open ? null : 0,
+            status,
+            fs.finish?.reason
           )
-          if (!fs.toolCalls.length)
-            s.kids.push(
-              modelRow(
-                k.model(fs.index),
-                run,
-                fs.index,
-                fold.model?.name,
-                0,
-                fs.text,
-                edge,
-                null,
-                "running"
-              )
+          if (!open) s.untimed = mark
+          if (!open || !fs.toolCalls.length) {
+            const m = modelRow(
+              k.model(fs.index),
+              run,
+              fs.index,
+              fold.model?.name,
+              open ? 0 : fs.toolCalls.filter((c) => !c.resumed).length,
+              fs.text,
+              from,
+              open ? null : 0,
+              status,
+              fs.finish?.reason
             )
+            if (!open) m.untimed = mark
+            s.kids.push(m)
+          }
           root.kids.push(s)
-          steps.set(fs.index, (st = [s, edge]))
+          steps.set(fs.index, (st = [s, from]))
         }
         for (const c of fs.toolCalls) {
           const where = c.resumed ? "resume" : fs.index
-          if (c.finishPos !== undefined || seen.has(`${where}\n${c.callId}`))
-            continue
+          if (seen.has(`${where}\n${c.callId}`)) continue
+          const open = inFlight && c.finishPos === undefined
           const t = toolRow(
             k.call(where, c.callId),
             run,
@@ -857,11 +916,18 @@ function timeRows(input: WaterfallInput): WaterfallModel {
             c.name,
             c,
             undefined,
-            c.resumed || !st ? edge : st[1],
-            null,
-            "running"
+            c.resumed ? (open ? edge : root.start) : st[1],
+            open ? null : 0,
+            open
+              ? "running"
+              : c.finishPos === undefined
+                ? "never"
+                : c.result?.isError
+                  ? "error"
+                  : "ok"
           )
-          ;(c.resumed || !st ? root : st[0]).kids.push(t)
+          if (!open) t.untimed = mark
+          ;(c.resumed ? root : st[0]).kids.push(t)
           kid(t, c.childRunId)
         }
       }
@@ -1106,6 +1172,21 @@ export const CRITICAL_HINT =
 export const lanesWord = (n: number | undefined) =>
   n && n > 1 ? `${n} lanes` : ""
 
+/** An untimed row's mark while the run goes on (not a loss: its spans
+ * export when they end). */
+export const UNTIMED_PENDING = "spans not reported yet"
+export const UNTIMED_PENDING_HINT =
+  "the run's events have this row; its spans export when they end and the page reads them every few seconds — its time is not known yet"
+
+/** An untimed row's badge once the run ended: the A3 table's
+ * not_recorded, in this instance's words (lib/honesty.ts's HoleMark). */
+export const UNTIMED_HOLE = {
+  hole: "not_recorded",
+  reason:
+    "no span covers this row: the run's events have it, its spans were not stored — dropped on the way (weft.records.dropped) or never exported — so its time is not known",
+  fix: 'if the app logged "weft/otel: destination queue full", raise that destination\'s queue: otel.QueueSize(n)',
+} as const
+
 /** A child run row's link to its own page. */
 export const OPEN_RUN = "open run ↗"
 
@@ -1125,6 +1206,41 @@ export interface Dim {
   slow?: boolean
   /** Keep tool and child-run rows. */
   tools?: boolean
+}
+
+/** The filters in the chip row's order, with their words and hints. */
+export const DIMS = ["errors", "slow", "tools"] as const
+export type DimKey = (typeof DIMS)[number]
+export const DIM_WORDS: Record<DimKey, { label: string; hint: string }> = {
+  errors: {
+    label: "errors",
+    hint: "dim every row but the failing ones and the rows above them",
+  },
+  slow: {
+    label: "slow",
+    hint: "dim every row that took less than a fifth of the run",
+  },
+  tools: {
+    label: "tools",
+    hint: "dim every row but tool calls and child runs",
+  },
+}
+/** The chip row's label. */
+export const DIM_LABEL = "dim all but"
+
+/** A ?dim= value read back: the filters it names, unknown names dropped. */
+export function parseDim(v: unknown): Dim {
+  const out: Dim = {}
+  if (typeof v !== "string") return out
+  for (const k of v.split(","))
+    if ((DIMS as readonly string[]).includes(k)) out[k as DimKey] = true
+  return out
+}
+
+/** The ?dim= value of a Dim, in DIMS's order; undefined with none on. */
+export function dimParam(d: Dim): string | undefined {
+  const on = DIMS.filter((k) => d[k])
+  return on.length ? on.join(",") : undefined
 }
 
 /** dimRows returns the keys to dim: with no filter on, none; else

@@ -4,7 +4,7 @@
 // child as a nested row — agent, status, usage, a link to its own run
 // page — and opening it shows the CHILD's prompt
 // (requests-child.golden.json, read by the child's id), never the
-// parent's; the trace view's call detail does the same; the runs list
+// parent's; the waterfall's call detail does the same; the runs list
 // keeps children out by default and a toggle lists them, each with its
 // parent link.
 import {
@@ -245,7 +245,7 @@ describe("subagents on the run page (A10)", () => {
     expect(block.querySelector("[data-prompt]")).toBeNull()
   })
 
-  it("the trace view's subagent call opens the child, whose step shows the child's request", async () => {
+  it("the waterfall's subagent call opens the child, whose step shows the child's request", async () => {
     serve()
     renderApp(`/runs/${RUN}?sel=${encodeURIComponent("c:1:c_sub")}`)
     let block: HTMLElement | null = null
@@ -263,7 +263,7 @@ describe("subagents on the run page (A10)", () => {
   })
 })
 
-describe("the trace view on a call id repeated across steps (A10)", () => {
+describe("the waterfall on a call id repeated across steps (A10)", () => {
   // Step 0 calls lookup_order as c1; step 1 calls the research
   // subagent, also as c1 (ids may repeat across steps, core/loop.go):
   // the child, <run>/1/c1, belongs to step 1's call alone. The trace

@@ -18,7 +18,8 @@ import axe from "axe-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
-import type { RunDoc, RunsPage, WireEvent } from "@/lib/api"
+import type { RunDoc, RunsPage, Span as TimedSpan, WireEvent } from "@/lib/api"
+import { waterfallRows } from "@/lib/waterfall"
 import { useRunEvents } from "@/hooks/use-run-events"
 import {
   describeStep,
@@ -498,5 +499,98 @@ describe("the scrubber's read-out (plan H2)", () => {
     expect(describeStep(live, 1, "running", stepOffsets(live))).toBe(
       "step 1 of 2 · in flight · t+10 ms model time"
     )
+  })
+})
+
+describe("the run tree's time scale over a long run (U8.2-fix)", () => {
+  // N steps, each a chat span with one attempt under it and a tool span:
+  // the tree reads each span's attributes a bounded number of times —
+  // never once per span per model call (the O(n²) the review measured:
+  // 5,000 steps with an attempt each took 1.5 s).
+  const iso = (ms: number) => new Date(Date.UTC(2026, 0, 1) + ms).toISOString()
+  function longSpans(n: number) {
+    let reads = 0
+    const sp = (
+      id: string,
+      parent: string,
+      name: string,
+      a: number,
+      b: number,
+      attrs: Record<string, unknown>
+    ) => {
+      const s = {
+        trace_id: "t",
+        span_id: id,
+        parent_span_id: parent,
+        name,
+        start: iso(a),
+        end: iso(b),
+        status: "ok",
+      }
+      Object.defineProperty(s, "attrs", {
+        get: () => (reads++, attrs),
+        enumerable: true,
+      })
+      return s as unknown as TimedSpan
+    }
+    const run = { "weft.run.id": RUN }
+    const spans = [
+      sp("root", "", "invoke_agent long", 0, n * 10 + 5, {
+        ...run,
+        "gen_ai.operation.name": "invoke_agent",
+      }),
+    ]
+    for (let i = 0; i < n; i++)
+      spans.push(
+        sp(`c${i}`, "root", "chat m", i * 10, i * 10 + 3, {
+          ...run,
+          "gen_ai.operation.name": "chat",
+          "weft.step.index": i,
+        }),
+        sp(`a${i}`, `c${i}`, "attempt", i * 10, i * 10 + 3, {
+          ...run,
+          "gen_ai.operation.name": "attempt",
+          "weft.step.index": i,
+          "weft.attempt.index": 1,
+        }),
+        sp(`x${i}`, "root", "execute_tool lookup", i * 10 + 4, i * 10 + 8, {
+          ...run,
+          "gen_ai.operation.name": "execute_tool",
+          "weft.step.index": i,
+          "gen_ai.tool.call.id": `c${i}`,
+          "gen_ai.tool.name": "lookup",
+        })
+      )
+    return { spans, reads: () => reads }
+  }
+
+  it("reads each span's attributes a bounded number of times, linear in the run", () => {
+    const perSpan = (n: number) => {
+      const { spans, reads } = longSpans(n)
+      const before = reads()
+      const wf = waterfallRows(
+        { runId: RUN, status: "succeeded", spans },
+        "time"
+      )
+      expect(wf.rows).toHaveLength(1 + 4 * n)
+      return (reads() - before) / spans.length
+    }
+    const small = perSpan(200)
+    const large = perSpan(2_000)
+    // Linear: the per-span count does not grow with the run (the
+    // quadratic build grew it tenfold here).
+    expect(large).toBeLessThan(small * 1.5)
+    expect(large).toBeLessThan(40)
+  })
+
+  it("draws 10,000 steps with an attempt each well inside a second", () => {
+    const { spans } = longSpans(10_000)
+    const t = performance.now()
+    const wf = waterfallRows({ runId: RUN, status: "running", spans }, "time")
+    const ms = performance.now() - t
+    expect(wf.rows).toHaveLength(40_001)
+    // Measured ~130 ms (bun); the quadratic build took ~6 s. The bound
+    // is generous: the machine may be shared.
+    expect(ms).toBeLessThan(2_000)
   })
 })

@@ -61,6 +61,9 @@ export interface RunSearch {
   /** The run tree's scale: time (spans) or order (positions, replay), or graph.
    * A pre-U8.2 ?axis=time|events is read as time|order, never written. */
   scale?: RunScale
+  /** The run tree's dim filters (§6.1, UX-A-04): errors, slow, tools,
+   * comma-separated — rows no filter keeps dim, never hide. */
+  dim?: string
   /** The replay playhead: a stream position. */
   t?: number
   /** The raw view's search text (G2). */

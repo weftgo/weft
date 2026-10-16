@@ -113,8 +113,10 @@ export function resolveSel(
 ): Resolved {
   if (!sel) return {}
   const root = rootRun(rows)
+  // The run page qualifies its own run's keys always (U9.2-fix W4):
+  // this trace's root reads them bare — s, c and t alike.
   const now =
-    root && /^[sc]:/.test(sel) && sel.startsWith(`${sel[0]}:${root}:`)
+    root && /^[sct]:/.test(sel) && sel.startsWith(`${sel[0]}:${root}:`)
       ? sel.replace(`:${root}:`, sel[0] === "s" ? "" : ":")
       : sel
   const denied = /^(c:(?:[^:]+:)?)\d+:(.+)$/.exec(now)

@@ -80,6 +80,9 @@ export interface WaterfallProps {
    * by the caller's model, so the row's chevron (and ←/→) asks for them
    * here instead of folding locally. */
   onExpand?: (span: Span) => void
+  /** Row keys drawn dim (the run tree's filters, lib/waterfall.ts's
+   * dimRows): dim, never hidden. */
+  dimmed?: ReadonlySet<string>
   className?: string
 }
 
@@ -109,6 +112,7 @@ export function Waterfall({
   head = "span",
   trail,
   onExpand,
+  dimmed,
   className = "",
 }: WaterfallProps) {
   // A child row the caller expands: its open state is its own.
@@ -334,6 +338,7 @@ export function Waterfall({
         const width = Math.max(0.6, pct(end + 1, domain) - left)
         const selected = selectedId === sp.id
         const revealed = sp.from < at
+        const dim = !!dimmed?.has(sp.key)
         const gap = pads.before[n] ?? 0
         return (
           <Fragment key={sp.id}>
@@ -358,12 +363,14 @@ export function Waterfall({
               data-lane={sp.lane}
               data-lanes={sp.lanes}
               data-child-run={sp.childRun}
+              data-dimmed={dim ? "" : undefined}
+              data-untimed={sp.untimed}
             >
               <div
                 ref={selected ? selRef : undefined}
                 className={`flex min-w-0 cursor-pointer items-center gap-1 border-b border-border/60 py-0.5 pr-2 ${cell(selected)} ${
                   selected ? "shadow-[inset_2px_0_0_var(--thread)]" : ""
-                } ${revealed ? "" : "opacity-40"}`}
+                } ${revealed && !dim ? "" : "opacity-40"}`}
                 style={{ paddingLeft: `${0.4 + sp.depth * 0.8}rem` }}
                 onClick={() => onSelect?.(sp)}
                 title={`${sp.label}${sp.sub ? ` — ${sp.sub}` : ""}`}
@@ -444,7 +451,7 @@ export function Waterfall({
                 {trail?.(sp)}
               </div>
               <div
-                className={`waterfall-track relative h-6 cursor-pointer border-b border-border/60 ${cell(selected)}`}
+                className={`waterfall-track relative h-6 cursor-pointer border-b border-border/60 ${cell(selected)} ${dim ? "opacity-40" : ""}`}
                 onClick={seekAt}
               >
                 <div
@@ -478,15 +485,17 @@ export function Waterfall({
                 onClick={() => onSelect?.(sp)}
                 title={time ? `+${took(sp.from)}` : undefined}
               >
-                {time
-                  ? sp.to === null
-                    ? "…"
-                    : took(sp.to - sp.from)
-                  : sp.to === null
-                    ? `${sp.from}–`
-                    : sp.from === sp.to
-                      ? `${sp.from}`
-                      : `${sp.from}–${sp.to}`}
+                {sp.untimed
+                  ? "—"
+                  : time
+                    ? sp.to === null
+                      ? "…"
+                      : took(sp.to - sp.from)
+                    : sp.to === null
+                      ? `${sp.from}–`
+                      : sp.from === sp.to
+                        ? `${sp.from}`
+                        : `${sp.from}–${sp.to}`}
               </div>
             </div>
           </Fragment>

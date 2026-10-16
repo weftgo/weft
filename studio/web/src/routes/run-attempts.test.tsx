@@ -7,7 +7,7 @@
 // reason and fix, never an empty pane; a collapsed card reads its
 // timing from the folded step_finish and fetches nothing; without the
 // steps capability nothing is fetched and the timing still shows; the
-// trace view's chat span names the answering model and the attempt.
+// waterfall.s chat span names the answering model and the attempt.
 import {
   cleanup,
   configure,
@@ -337,7 +337,7 @@ describe("the step story's attempts and timing (A4.2)", () => {
       )
     )
     expect(card().querySelector("[data-attempts]")).toBeNull()
-    // Every view (the trace view's step detail opens its pane by
+    // Every view (the waterfall's step detail opens its pane by
     // default) stays off the route.
     cleanup()
     renderApp(`/runs/${run}?sel=s0`)
@@ -349,7 +349,7 @@ describe("the step story's attempts and timing (A4.2)", () => {
     expect(studio.calls(`GET runs/${run}/steps/0`)).toEqual([])
   })
 
-  it("the trace view's chat span names the answering model and the attempt, with the attempt list under it", async () => {
+  it("the waterfall's chat span names the answering model and the attempt, with the attempt list under it", async () => {
     const run = step0.run_id
     const spans = chatSpans(run)
     serve({
@@ -433,7 +433,7 @@ describe("the step story's attempts and timing (A4.2)", () => {
     expect(studio.calls(`GET runs/${run}/requests`)).toEqual([])
   })
 
-  it("the trace view's chat span without the steps capability still names the attempt, and fetches nothing", async () => {
+  it("the waterfall's chat span without the steps capability still names the attempt, and fetches nothing", async () => {
     const run = step0.run_id
     serve({
       run,
@@ -479,7 +479,7 @@ describe("the step story's attempts and timing (A4.2)", () => {
     )
   })
 
-  it("the trace view's step detail badges a pre-A4 step without the steps capability", async () => {
+  it("the waterfall's step detail badges a pre-A4 step without the steps capability", async () => {
     const run = "old3"
     serve({
       run,
@@ -500,7 +500,7 @@ describe("the step story's attempts and timing (A4.2)", () => {
     expect(studio.calls(`GET runs/${run}/steps/0`)).toEqual([])
   })
 
-  /** The chat span's facts as the trace view's detail lists them. */
+  /** The chat span's facts as the waterfall's detail lists them. */
   async function chatFacts(spans: Span[]): Promise<Record<string, string>> {
     const run = step0.run_id
     serve({
@@ -527,7 +527,7 @@ describe("the step story's attempts and timing (A4.2)", () => {
     return out
   }
 
-  it("the trace view's chat span with no ok attempt says none answered", async () => {
+  it("the waterfall's chat span with no ok attempt says none answered", async () => {
     const facts = await chatFacts(
       chatSpans(step0.run_id, ["error", "error", "error"])
     )
@@ -535,7 +535,7 @@ describe("the step story's attempts and timing (A4.2)", () => {
     expect(facts.answered).toBe("not reported")
   })
 
-  it("the trace view's chat span counts attempts only past one", async () => {
+  it("the waterfall's chat span counts attempts only past one", async () => {
     const one = await chatFacts(chatSpans(step0.run_id, ["ok"]))
     expect(one.attempts).toBeUndefined()
     expect(one.answered).toBe("glm-a")

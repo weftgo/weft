@@ -159,7 +159,8 @@ import type { Marker, MarkerRung } from "./markers"
 import { parseScope, serializeScope } from "../lib/scope"
 import { clip as clipTitle, turnLabel, turnTitle } from "../lib/title"
 import type { Scope } from "../lib/scope"
-import { el, fmtJSON, on, patch, spanWindow, waterfall } from "./render"
+import { el, fmtJSON, on, patch } from "./render"
+import { waterfallRows } from "../lib/waterfall"
 import { PANEL_CSS } from "./styles"
 import { nextTheme, resolveTheme, themeSetting, ThemeWatch } from "./theme"
 import {
@@ -6076,66 +6077,39 @@ export function readStep(view: FoldedRun, selected: number | null): number {
     : -1
 }
 
-/** renderTimeline is the Timeline tab (D4): the waterfall at the
- * column's full width over a time axis (ms from the run's first span)
- * when the run has spans; without, its steps and tool calls placed by
- * the event sequence (seq: the event's position in the run's stream). */
+/** renderTimeline is the Timeline tab (D4): lib/waterfall.ts's run
+ * tree at the column's full width, over a time axis (ms from the run's
+ * first span) when the run has spans; without, its steps and tool
+ * calls placed by the event sequence (seq: the event's position in the
+ * run's stream — the model's order scale). Today it draws the span
+ * rows (time) or the step and tool rows (seq) flat; U8.3 draws the
+ * tree. */
 export function renderTimeline(t: TurnView): HTMLElement {
-  const spans = t.spans ?? []
-  const win = spanWindow(spans)
-  const bars: {
-    name: string
-    left: number
-    width: number
-    ms: number
-    label?: string
-  }[] = waterfall(spans)
-  let axis = "time"
-  let end = 0
-  if (bars.length) {
-    // The axis is the bars' own window (waterfall's).
-    end = win.to - win.from
-  } else {
-    axis = "seq"
-    const open = new Map<string, [string, number]>()
-    end = Math.max(1, t.events.length ? t.events[t.events.length - 1].pos : 0)
-    const put = (name: string, a: number, b: number) =>
-      bars.push({
-        name,
-        left: a / end,
-        width: Math.max(0.005, (b - a) / end),
-        ms: b - a,
-        label: `#${a}–${b}`,
-      })
-    for (const e of t.events) {
-      const ev = e.event as {
-        type?: string
-        index?: number
-        call_id?: string
-        name?: string
+  const wf = waterfallRows({
+    runId: t.id,
+    status: t.doc?.status,
+    spans: t.spans,
+    fold: t.folded,
+    total: (t.events.at(-1)?.pos ?? 0) + 1,
+  })
+  const axis = wf.scale === "time" ? "time" : "seq"
+  const end = wf.domain[1]
+  const bars = wf.rows
+    .filter((r) =>
+      wf.scale === "time" ? r.span : r.kind === "step" || r.kind === "tool"
+    )
+    .map((r) => {
+      const w = r.took ?? end - r.start
+      return {
+        name: r.span?.name ?? r.label,
+        left: r.start / end,
+        width: Math.max(0.005, w / end),
+        ms: Math.round(w),
+        label: axis === "seq" ? `#${r.start}–${r.start + w}` : undefined,
       }
-      const id = ev.type?.startsWith("step_")
-        ? `s${ev.index}`
-        : `c${ev.call_id}`
-      if (ev.type === "step_start" || ev.type === "tool_start")
-        open.set(id, [
-          ev.type === "step_start" ? `step ${ev.index}` : String(ev.name),
-          e.pos,
-        ])
-      else if (
-        (ev.type === "step_finish" || ev.type === "tool_finish") &&
-        open.has(id)
-      ) {
-        const [name, a] = open.get(id)!
-        open.delete(id)
-        put(name, a, e.pos)
-      }
-    }
-    // Still running: open to the newest event.
-    for (const [name, a] of open.values()) put(name, a, end)
-  }
+    })
   const box = el("div", "weft-timeline", undefined, { "data-axis": axis })
-  const lost = spans.length - win.placed
+  const lost = wf.unplaced
   if (lost > 0)
     box.appendChild(
       el(

@@ -308,8 +308,21 @@ step story above, and the playground's drawer and result), **Request**
 (the step's request, below), **Timeline** (the spans waterfall
 at the column's full width over a time axis — ms from the run's first
 span — or, on a run without spans, its steps and tool calls placed by
-the event sequence, `seq`, the position in the run's event stream) and
-**Raw**. Raw is a JSON tree (`src/panel/tree.ts`, hand-written) of
+the event sequence, `seq`, the position in the run's event stream, a
+step before its calls) and **Raw**. Its rows are `src/lib/waterfall.ts`'s
+run tree (U8.1), the one row model both renderers draw:
+`waterfallRows({runId, status, spans, fold, total, children, expanded}, scale?)`
+gives run › step › model call (› attempt) / tool (lane) › child run on a
+`time` scale (ms from the earliest span, sub-millisecond kept) or an
+`order` scale (stream positions, a run without spans), each row with its
+selection key (`lib/trace-sel.ts`'s scheme), offset and duration
+(`took`: 15µs, 9.5ms, 7.7s), a gist from the folded events and
+transcript, its status, its lane and whether it is on the critical path;
+a child run is one collapsed row until expanded, its rows from its own
+spans (each carrying its `weft.run.id`, the `?tree=1` shape) or fold;
+`dimRows` dims (never hides) by errors, slow or tools. Studio's span list
+(`lib/trace.ts`'s `spansFromTimed`) walks the same span tree
+(`spanTree`) and time domain. Raw is a JSON tree (`src/panel/tree.ts`, hand-written) of
 `{doc, events, transcript, spans}`, plus `requests` when the panel
 already read them: `▸`/`▾` per node (`aria-expanded`; `→` opens, `←`
 closes); only open nodes are built — a small document opens whole, a
@@ -978,8 +991,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 255,791 B raw / 82,608 B gzip
-(80.7 KiB, the bundle of the ledger's row "D7"; 15,696 B — 15.3 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 265,444 B raw / 85,849 B gzip
+(83.8 KiB, the bundle of the ledger's row "U8.1 run tree model"; 12,455 B — 12.2 KiB — of headroom under
 the 98,304 B, 96 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; A5.4 raised it from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library

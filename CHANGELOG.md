@@ -6,6 +6,12 @@ is pre-1.0; since 0.9.0 a release is one tag for the framework plus
 `core/vX.Y.Z` for the loop module (ADR 0027; before it, one tag per
 module, ADR 0005).
 
+## Unreleased
+
+### Changed
+
+- Studio, panel: one run-tree row model for both renderers (U8.1; UX-F-18, UX-A-04, UX-A-22, UX-A-23, UX-S2-07). New `src/lib/waterfall.ts`: `waterfallRows()` builds run › step › model call (› attempt) / tool (lane) › child run on a `time` scale (from `/spans`, sub-millisecond digits kept) or an `order` scale (stream positions, for a run without spans), each row with its selection key, offset and duration, a gist from the folded events and transcript ("→ 1 call", the first 60 characters of a reply or tool result), its status, tool lanes per step, the critical path and the label rule "model · script"; a child run is one collapsed row with lazy rows from its own spans (the `?tree=1` shape: spans keyed by run id) or fold; `dimRows` dims by errors / slow / tools. The panel's `spanWindow` / `waterfall` (`src/panel/render.ts`) and its Timeline's inline seq builder are gone: the Timeline draws the model's rows (on a spanless run a step now precedes its calls, instead of the order they closed in); `lib/trace.ts`'s `spansFromTimed` / `timeDomain` walk the model's span tree. Studio's waterfall axis reads "ms" (was "MSS") and "events", its time ticks and its right column humanised (7.7s, a duration per row, the offset on hover) instead of raw millisecond ranges. Panel +3,241 B (85,849 B): the model is shared code the panel did not bundle before (the audit's +700 B assumed it did).
+
 ## 0.16.0 — 2026-10-13
 
 ### Added

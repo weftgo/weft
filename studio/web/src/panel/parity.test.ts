@@ -1576,7 +1576,8 @@ describe("a derived run on both surfaces (I1.3)", () => {
       expect(document.querySelectorAll("[data-span]").length).toBe(4)
     )
     const waterfall = [
-      ...document.querySelectorAll("[data-span] > div[title]"),
+      // The label cell (the duration cell titles its offset).
+      ...document.querySelectorAll("[data-span] > div[title]:first-child"),
     ].map((n) => n.getAttribute("title")!.split(" — ")[0])
 
     // The same rows: one hole, derived, on each surface.

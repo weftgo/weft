@@ -5,7 +5,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { renderWaterfall, studioLink, WeftDevtools } from "./element"
 import { idle } from "./testkit"
-import { waterfall } from "./render"
+import { waterfallRows } from "../lib/waterfall"
+import type { Span } from "../lib/api"
 import { withLiveGrant } from "../test/fake-live-grant"
 
 class FakeEventSource {
@@ -55,35 +56,46 @@ afterEach(() => {
 })
 
 describe("the timing waterfall (§2 Timing, from /spans)", () => {
+  // The bars are lib/waterfall.ts's rows (U8.1): one model for both
+  // renderers, placed over the run's own window.
+  const span = (name: string, start: string, end: string) =>
+    ({ name, start, end }) as Span
+  const bars = (spans: Span[]) => {
+    const wf = waterfallRows({ runId: "r", spans }, "time")
+    const end = wf.domain[1]
+    return wf.rows
+      .filter((r) => r.span)
+      .map((r) => ({
+        left: r.start / end,
+        width: (r.took ?? 0) / end,
+        ms: r.took,
+      }))
+  }
   it("lays bars over the run's own window", () => {
-    const bars = waterfall([
-      {
-        name: "invoke_agent",
-        start: "2026-10-01T09:00:00.000Z",
-        end: "2026-10-01T09:00:10.000Z",
-      },
-      {
-        name: "chat gpt-4o",
-        start: "2026-10-01T09:00:01.000Z",
-        end: "2026-10-01T09:00:05.000Z",
-      },
-      {
-        name: "kb_lookup",
-        start: "2026-10-01T09:00:05.500Z",
-        end: "2026-10-01T09:00:07.000Z",
-      },
+    const b = bars([
+      span(
+        "invoke_agent",
+        "2026-10-01T09:00:00.000Z",
+        "2026-10-01T09:00:10.000Z"
+      ),
+      span(
+        "chat gpt-4o",
+        "2026-10-01T09:00:01.000Z",
+        "2026-10-01T09:00:05.000Z"
+      ),
+      span("kb_lookup", "2026-10-01T09:00:05.500Z", "2026-10-01T09:00:07.000Z"),
     ])
-    expect(bars).toHaveLength(3)
-    expect(bars[0].left).toBe(0)
-    expect(bars[0].width).toBeCloseTo(1, 5)
-    expect(bars[1].left).toBeCloseTo(0.1, 5)
-    expect(bars[1].ms).toBe(4000)
-    expect(bars[2].width).toBeCloseTo(0.15, 5)
+    expect(b).toHaveLength(3)
+    expect(b[0].left).toBe(0)
+    expect(b[0].width).toBeCloseTo(1, 5)
+    expect(b[1].left).toBeCloseTo(0.1, 5)
+    expect(b[1].ms).toBe(4000)
+    expect(b[2].width).toBeCloseTo(0.15, 5)
   })
 
   it("yields nothing without parseable spans", () => {
-    expect(waterfall([])).toEqual([])
-    expect(waterfall([{ name: "x", start: "nope", end: T0 }])).toEqual([])
+    expect(bars([])).toEqual([])
+    expect(bars([span("x", "nope", T0)])).toEqual([])
   })
 
   it("renders one row per span with its wall time", () => {

@@ -284,12 +284,14 @@ describe("the timeline", () => {
       "seq 4",
       "seq 5",
     ])
+    // The run tree's order (lib/waterfall.ts, U8.1): a step, then its
+    // calls — no longer by when each closed.
     expect(all(el, ".weft-wf .weft-wf-name").map((n) => n.textContent)).toEqual(
-      ["lookup_order", "step 0"]
+      ["step 0", "lookup_order"]
     )
     expect(all(el, ".weft-wf .weft-wf-ms").map((n) => n.textContent)).toEqual([
-      "#2–3",
       "#1–4",
+      "#2–3",
     ])
   })
 

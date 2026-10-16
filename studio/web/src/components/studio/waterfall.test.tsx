@@ -100,4 +100,44 @@ describe("Waterfall on a cyclic parent chain", () => {
     )
     expect(screen.getAllByRole("treeitem")).toHaveLength(3)
   })
+
+  it("the time axis reads 'ms', humanised ticks and a duration per row (UX-A-22, UX-A-23)", () => {
+    const row = (id: string, from: number, to: number): Span => ({
+      id,
+      key: id,
+      depth: 0,
+      kind: "tool",
+      label: id,
+      tone: "tool",
+      from,
+      to,
+      runId: "",
+    })
+    render(
+      <Waterfall
+        spans={[row("t:a", 0, 7737), row("t:b", 1934, 1934.5)]}
+        domain={[0, 7737]}
+        playhead={null}
+        unit="ms"
+      />
+    )
+    // The unit as-is (no "MSS"), the axis in s/ms, durations not ranges.
+    expect(screen.getByText("ms")).toBeTruthy()
+    expect(screen.queryByText("mss")).toBeNull()
+    expect(screen.getByText("7.7s", { selector: "span" })).toBeTruthy()
+    expect(screen.getByText("7.7s", { selector: "div" })).toBeTruthy()
+    expect(screen.getByText("500µs")).toBeTruthy()
+    expect(screen.queryByText("0–7737")).toBeNull()
+  })
+
+  it("the position axis keeps its ranges, the unit pluralised once", () => {
+    render(
+      <Waterfall
+        spans={spans}
+        domain={[0, events.length - 1]}
+        playhead={null}
+      />
+    )
+    expect(screen.getByText("events")).toBeTruthy()
+  })
 })

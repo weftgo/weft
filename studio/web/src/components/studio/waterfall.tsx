@@ -14,6 +14,7 @@ import { ChevronRight } from "lucide-react"
 import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 
 import type { Span, SpanKind, SpanTone } from "@/lib/trace"
+import { took } from "@/lib/waterfall"
 
 const toneBar: Record<SpanTone, string> = {
   step: "bg-ev-step/60",
@@ -124,6 +125,9 @@ export function Waterfall({
   })
   const [lo, hi] = domain
   const total = hi - lo + 1
+  // The time axis reads humanised (UX-A-23: 7.7s, not 7737), each row
+  // its duration with its offset on hover; positions stay ranges.
+  const time = unit === "ms"
   const at = playhead ?? hi + 1
   const ticks = useMemo(() => {
     const n = Math.min(4, Math.max(1, total - 1))
@@ -282,13 +286,13 @@ export function Waterfall({
                 left: `${i === ticks.length - 1 ? 100 : pct(t, domain)}%`,
               }}
             >
-              {t}
+              {time ? took(t) : t}
             </span>
           ))}
         </div>
       </div>
       <div className="sticky top-0 z-10 border-b bg-secondary/80 px-2 py-1 text-right text-[10px] tracking-wide text-faint uppercase backdrop-blur">
-        {unit}s
+        {unit === "event" ? "events" : unit}
       </div>
 
       {shown.map((sp, n) => {
@@ -432,12 +436,17 @@ export function Waterfall({
               <div
                 className={`cursor-pointer border-b border-border/60 px-2 py-1 text-right text-[10px] text-faint tabular-nums ${cell(selected)}`}
                 onClick={() => onSelect?.(sp)}
+                title={time ? `+${took(sp.from)}` : undefined}
               >
-                {sp.to === null
-                  ? `${sp.from}–`
-                  : sp.from === sp.to
-                    ? `${sp.from}`
-                    : `${sp.from}–${sp.to}`}
+                {time
+                  ? sp.to === null
+                    ? "…"
+                    : took(sp.to - sp.from)
+                  : sp.to === null
+                    ? `${sp.from}–`
+                    : sp.from === sp.to
+                      ? `${sp.from}`
+                      : `${sp.from}–${sp.to}`}
               </div>
             </div>
           </Fragment>

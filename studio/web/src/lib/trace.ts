@@ -7,6 +7,10 @@
 // positions).
 import type { Span as TimedSpan } from "./api"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "./events"
+import { earliestStart, instantMs, spanTree } from "./waterfall"
+
+/** The time axis's domain, lib/waterfall.ts's (one implementation). */
+export { timeDomain } from "./waterfall"
 
 export type SpanKind = "run" | "step" | "tool" | "subagent"
 
@@ -272,62 +276,26 @@ export function flowFromFold(folded: FoldedRun, runStatus: string): FlowPill[] {
   })
 }
 
-/** The earliest parseable start, in epoch ms; NaN when none parses.
- * A loop, not Math.min(...spread): a large trace overflows the
- * argument stack. */
-function earliestStart(timed: TimedSpan[]): number {
-  let t0 = NaN
-  for (const s of timed) {
-    const t = Date.parse(s.start)
-    if (Number.isFinite(t) && !(t >= t0)) t0 = t
-  }
-  return t0
-}
-
 /**
  * spansFromTimed builds the time-axis trace from /spans (S4.7): rows
  * are the timed spans themselves — the invoke_agent span, the chat
- * calls, the tool executions — nested by parent_span_id, positioned
- * in milliseconds since the earliest start. The domain is
- * timeDomain(spans); replay does not apply here (nothing to scrub:
- * these are durations), so the playhead is null.
- *
- * Rows come out in tree order — a span, then its whole subtree,
- * siblings by start — whatever order the API returned (it sorts by
- * start, which interleaves parallel siblings' children). A span whose
- * parent is not in the set is a root; a parent chain that loops (a
- * span naming itself, two naming each other — ingest stores what it
- * is sent) is cut where the walk would revisit, so every span gets
- * exactly one row and no consumer can loop on `parent`.
+ * calls, the tool executions — in lib/waterfall.ts's span tree order
+ * (spanTree: a span, then its subtree, siblings by start; a parent
+ * cycle cut at the revisit), positioned in milliseconds since the
+ * earliest start. The domain is timeDomain(spans); replay does not
+ * apply here (nothing to scrub: these are durations), so the playhead
+ * is null. The run tree's own rows (run › step › model / tool) are
+ * lib/waterfall.ts's waterfallRows; this is its flat span projection
+ * for the trace page and the run page's span list.
  */
 export function spansFromTimed(timed: TimedSpan[]): Span[] {
-  if (timed.length === 0) return []
   const t0 = earliestStart(timed)
-  const startOf = (s: TimedSpan): number => {
-    const t = Date.parse(s.start)
-    return Number.isFinite(t) && Number.isFinite(t0) ? Math.max(0, t - t0) : 0
-  }
-  const byID = new Map<string, TimedSpan>()
-  for (const s of timed) if (!byID.has(s.span_id)) byID.set(s.span_id, s)
-  const kids = new Map<string, TimedSpan[]>()
-  const roots: TimedSpan[] = []
-  for (const s of timed) {
-    const p = s.parent_span_id
-    if (p && p !== s.span_id && byID.has(p)) {
-      const list = kids.get(p)
-      if (list) list.push(s)
-      else kids.set(p, [s])
-    } else roots.push(s)
-  }
-  const byStart = (a: TimedSpan, b: TimedSpan) => startOf(a) - startOf(b)
-
-  const out: Span[] = []
-  const placed = new Set<TimedSpan>()
-  const row = (sp: TimedSpan, parent: string | undefined, depth: number) => {
-    const fromMs = startOf(sp)
-    const endMs = Date.parse(sp.end)
-    const toMs =
-      Number.isFinite(endMs) && Number.isFinite(t0) ? endMs - t0 : null
+  return spanTree(timed).map(({ span: sp, parent, depth }) => {
+    const a = instantMs(sp.start)
+    const b = instantMs(sp.end)
+    const fromMs =
+      Number.isFinite(a) && Number.isFinite(t0) ? Math.max(0, a - t0) : 0
+    const toMs = Number.isFinite(b) && Number.isFinite(t0) ? b - t0 : null
     const runID =
       typeof sp.attrs["weft.run.id"] === "string" ? sp.attrs["weft.run.id"] : ""
     // The core names a span "<operation> <name>" ("invoke_agent
@@ -337,10 +305,10 @@ export function spansFromTimed(timed: TimedSpan[]): Span[] {
       typeof sp.attrs["gen_ai.operation.name"] === "string"
         ? sp.attrs["gen_ai.operation.name"]
         : sp.name.split(" ")[0]
-    out.push({
+    return {
       id: `t:${sp.span_id}`,
       key: `t:${sp.span_id}`,
-      parent,
+      parent: parent !== undefined ? `t:${parent}` : undefined,
       depth,
       kind: op === "invoke_agent" ? "run" : "tool",
       label: sp.name,
@@ -353,50 +321,8 @@ export function spansFromTimed(timed: TimedSpan[]): Span[] {
       to: toMs,
       timed: { span: sp, fromMs, toMs },
       runId: runID,
-    })
-  }
-  // Depth-first without recursion (a deep trace must not overflow the
-  // stack): the work list holds a span with the row it hangs under.
-  const walk = (start: TimedSpan[]) => {
-    const stack: {
-      sp: TimedSpan
-      parent: string | undefined
-      depth: number
-    }[] = [...start]
-      .sort(byStart)
-      .reverse()
-      .map((sp) => ({ sp, parent: undefined, depth: 0 }))
-    for (let item = stack.pop(); item; item = stack.pop()) {
-      const { sp, parent, depth } = item
-      if (placed.has(sp)) continue
-      placed.add(sp)
-      row(sp, parent, depth)
-      const children = (kids.get(sp.span_id) ?? []).slice().sort(byStart)
-      for (let i = children.length - 1; i >= 0; i--)
-        stack.push({
-          sp: children[i],
-          parent: `t:${sp.span_id}`,
-          depth: depth + 1,
-        })
     }
-  }
-  walk(roots)
-  // Whatever no root reaches sits on a parent cycle: each remaining
-  // span opens its own tree (the cycle is cut at the revisit).
-  for (const sp of timed) if (!placed.has(sp)) walk([sp])
-  return out
-}
-
-/** The time axis's domain: [0, the latest end] in milliseconds. */
-export function timeDomain(timed: TimedSpan[]): [number, number] {
-  const t0 = earliestStart(timed)
-  if (!Number.isFinite(t0)) return [0, 1]
-  let hi = 1
-  for (const s of timed) {
-    const end = Date.parse(s.end)
-    if (Number.isFinite(end) && end - t0 > hi) hi = end - t0
-  }
-  return [0, hi]
+  })
 }
 
 /** Whether a span is a GenAI semconv span (the chat view's rows). */

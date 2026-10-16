@@ -239,7 +239,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    cost_sort_cap when cut; run rows
 //    //    only, scoped like runs; capability "search" — obsdb.Searcher: SQLite FTS5 trigram,
 //    //    migration 0004; ClickHouse one derivation per search + positionCaseInsensitiveUTF8, no migration; short terms ASCII-folded on SQLite), runs/{id} (with its compactions: run-scope views, then session markers),
-//    //    runs/{id}/events|transcript|spans|requests|tools (each requests row's `raw`: the attempt's wire pair under otel.RawBodies, else null + raw_badge not_recorded; transcript?step=N adds what step N's
+//    //    runs/{id}/events|transcript|spans|requests|tools (spans: run_id on each; ?tree=1 — capability spans_tree, obsdb.TreeReader, U9.1 — every descendant run's spans too, by the weft.parent.run.id chain from the run's trace in one query, keyed run_id + span_id with parent_run_id; each requests row's `raw`: the attempt's wire pair under otel.RawBodies, else null + raw_badge not_recorded; transcript?step=N adds what step N's
 //    //    model call carried — the record's truth, the replay prefix for N > 0 (from_step 0 re-runs
 //    //    step 0's PrepareStep), compacted_at naming its view; null under hidden for a read token, ADR 0029),
 //    //    runs/{id}/steps/{n} (one step

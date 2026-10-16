@@ -202,6 +202,7 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 		out.Sort = string(query.Sort)
 	}
 	c := s.coster(r.Context())
+	c.primeTrees(page.Runs)
 	for _, rec := range page.Runs {
 		out.Runs = append(out.Runs, c.row(rec))
 	}
@@ -244,6 +245,7 @@ func (s *Server) serveCostSearch(w http.ResponseWriter, r *http.Request, srch ob
 		cands = cands[:costSortCap]
 	}
 	c := s.coster(r.Context())
+	c.primeTrees(cands)
 	type priced struct {
 		rec   obsdb.RunRow
 		usd   float64

@@ -561,6 +561,11 @@ func (s *Server) priceStep(ctx context.Context, doc *stepDoc, det obsdb.RunDetai
 	}
 	doc.costFields = &f
 	c := s.coster(ctx)
+	kids := make([]obsdb.RunRow, len(doc.Children))
+	for i := range doc.Children {
+		kids[i] = doc.Children[i].rec
+	}
+	c.primeTrees(kids)
 	for i := range doc.Children {
 		rc := c.cost(doc.Children[i].rec)
 		doc.Children[i].costFields = rc.own.fields()

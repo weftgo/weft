@@ -34,6 +34,7 @@ const (
 	offAuth       = "no server token to sign panel tokens with: turn it on with studio.Token(tok); weft studio always sets one"
 	offHandoff    = "no Token: panel tokens do not exist here, so there is none to hand off from: turn it on with studio.Token(tok); weft studio always sets one"
 	offSearch     = "the database cannot search: its obsdb.DB does not implement obsdb.Searcher (obsdb/sqlite and obsdb/clickhouse both do)"
+	offSpansTree  = "the database cannot read a run tree: its obsdb.DB does not implement obsdb.TreeReader (obsdb/sqlite and obsdb/clickhouse both do); GET /api/runs/{id}/spans?tree=1 answers 501"
 )
 
 // optionalCapabilities is every capability a route group registers
@@ -52,6 +53,7 @@ var optionalCapabilities = map[string]string{
 	"handoff":     offHandoff,
 	"search":      offSearch,
 	"manifests":   offManifests,
+	"spans_tree":  offSpansTree,
 }
 
 // manifestSourceView is one entry of api/manifest's sources.

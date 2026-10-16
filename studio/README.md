@@ -260,7 +260,12 @@ rows have no `cached_input`, so cached Gemini prompts are priced at the
 input rate; Claude Opus 5.5 fast mode and long-context tiers are not
 modelled, and models with a long-context tier (Claude Haiku 5.5, Claude
 Sonnet 4.5, Gemini 2.5 Pro) are left out. `--pricing` / `WEFT_PRICING`
-paths are shown absolute in `/api/meta` and `/api/settings/pricing`. An experiment's runs are priced one by one (each cell is a
+paths are shown absolute in `/api/meta` and `/api/settings/pricing`. A
+page of runs (the runs list, search, an experiment's runs, a run
+document's children) reads its subagent trees for the own/delegated
+split one `obsdb.TreeReader.ChildRuns` read per tree level, never one
+per row (U9.1); a database without a TreeReader reads each run's
+children one run at a time, to the same figures. An experiment's runs are priced one by one (each cell is a
 run row); obsdb records no variant key on a run, so a per-variant total
 is the client's sum. `GET /api/settings/pricing` (capability `pricing`,
 read-only, every valid identity) answers the effective table in the
@@ -2183,7 +2188,15 @@ from_seq, to_seq, hash, replaced, entries}` or `null`; `badge:
 "derived"` when no request record placed them, `messages: null` with
 `badge: "hidden"` for a read-scoped panel token over a view; 404 past
 the run's last step, 409 with the hole — `gap`, `stripped` — when the
-records do not rebuild it), `runs/{id}/spans` (for a
+records do not rebuild it), `runs/{id}/spans` (each span with
+`run_id`, the run's; `?tree=1` — capability `spans_tree`, U9.1, the
+database an `obsdb.TreeReader`, else 501 and `capabilities_off` says
+why — adds every descendant run's spans, the subagent tree by the
+`weft.parent.run.id` chain read from the run's trace in one query,
+in start order, each keyed by `run_id` + `span_id` with its run's
+`parent_run_id`; a panel token reads a tree whose every span is its
+public id's, the trace route's rule; docs/record-contract.md §6 "A run
+tree"; for a
 read-scoped panel token — here, in `traces/{trace_id}` and in the
 export alike — without the tool names a run's overrides put on its
 invoke_agent span: `weft.override.tools`, `park_on`,

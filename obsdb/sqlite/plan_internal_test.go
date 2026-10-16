@@ -231,3 +231,38 @@ func TestResumedByUsesItsIndex(t *testing.T) {
 		t.Errorf("resumed_by lookup scans runs: %s", plan)
 	}
 }
+
+// TestRunSpansUseTheirIndexes (U9.1; UX-E-22, UX-E-34): a run's spans
+// are planned on the partial index spans_run (0001) — runSpansWhere
+// states its condition (run_id <> ”) beside the equality, without
+// which sqlite scanned the whole spans table and sorted it — and a run
+// tree's one read (treeSpansSQL, GET /api/runs/{id}/spans?tree=1) on
+// spans_trace_start (0020): the trace in start order, no temp B-tree,
+// each span's run row by runs' primary key. Trace and a derived run's
+// spans read the same trace order.
+func TestRunSpansUseTheirIndexes(t *testing.T) {
+	d := planDB(t)
+	if p := queryPlan(t, d, `SELECT `+spanColumns+` FROM spans WHERE `+runSpansWhere, "r_1"); !strings.HasPrefix(p, "SEARCH spans USING INDEX spans_run (run_id=?)") {
+		t.Errorf("RunSpans plan = %s, want a SEARCH on spans_run", p)
+	}
+	tree := queryPlan(t, d, treeSpansSQL, "0102030405060708090a0b0c0d0e0f10")
+	if !strings.Contains(tree, "SEARCH s USING INDEX spans_trace_start (trace_id=?)") ||
+		!strings.Contains(tree, "SEARCH r USING INDEX sqlite_autoindex_runs_1 (run_id=?)") ||
+		strings.Contains(tree, "TEMP B-TREE") || strings.Contains(tree, "SCAN") {
+		t.Errorf("RunTreeSpans plan = %s, want spans_trace_start in its order and runs by key, no scan, no sort", tree)
+	}
+	if p := queryPlan(t, d, `SELECT `+spanColumns+` FROM spans WHERE trace_id = ? ORDER BY start_ns, span_id`, "t"); !strings.Contains(p, "spans_trace_start") || strings.Contains(p, "TEMP B-TREE") {
+		t.Errorf("Trace plan = %s, want spans_trace_start's order", p)
+	}
+}
+
+// TestChildRunsUseTheIndex (U9.1; UX-E-24): the runs list's children —
+// a page's parents in one statement — are planned on runs_started
+// (0014: parent_run_id leads it), never a scan of runs.
+func TestChildRunsUseTheIndex(t *testing.T) {
+	d := planDB(t)
+	p := queryPlan(t, d, `SELECT run_id FROM runs WHERE `+childRunsWhere(3), "a", "b", "c")
+	if !usesIndex(p, "runs_started") || strings.Contains(p, "SCAN runs") {
+		t.Errorf("ChildRuns plan = %s, want runs_started, no scan", p)
+	}
+}

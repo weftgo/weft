@@ -1,0 +1,13 @@
+-- 0020 · a trace's spans in start order (U9.1, UX-A-01, UX-E-34).
+-- obsdb/clickhouse has no counterpart for the trace read: its TraceId
+-- lookups are idx_trace_id's (0001), and its 0020 adds the parent-run
+-- index ChildRuns reads.
+--
+-- RunTreeSpans (obsdb.TreeReader: GET /api/runs/{id}/spans?tree=1) and
+-- Trace read one trace's spans ORDER BY start_ns, span_id. The primary
+-- key (trace_id, span_id) finds the trace but sorts it in a temp
+-- B-tree; spans_trace_start carries trace_id, start_ns and — a WITHOUT
+-- ROWID table's index ends with the primary key — span_id, so the
+-- trace is read in its order, one search, no sort
+-- (plan_internal_test.go pins the plan).
+CREATE INDEX IF NOT EXISTS spans_trace_start ON spans(trace_id, start_ns);

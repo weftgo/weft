@@ -27,7 +27,8 @@
         "weft.turn": 1,
         "weft.version": "v0.6.0"
       },
-      "events": []
+      "events": [],
+      "run_id": "r_sub"
     }
   ]
 }

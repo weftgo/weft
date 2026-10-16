@@ -606,6 +606,44 @@ func (c *coster) prime(id string, kids []obsdb.RunRow) {
 	c.kids[id] = kids
 }
 
+// primeTrees reads the subagent trees of a page of runs before they are
+// priced (U9.1, UX-E-24): one obsdb.TreeReader.ChildRuns read per
+// level of the trees — the page's runs, then their core Subagent
+// children, … — instead of a children read per run, so a runs list or
+// a search page costs as many reads as its deepest tree has levels. A
+// run already primed is not read again. Without a TreeReader, or when
+// a level's read fails, it stops: the runs left unprimed read their
+// children one at a time (children), as before.
+func (c *coster) primeTrees(recs []obsdb.RunRow) {
+	tr, ok := c.db.(obsdb.TreeReader)
+	if !ok {
+		return
+	}
+	var ids []string
+	for _, r := range recs {
+		if _, done := c.kids[r.ID]; !done {
+			ids = append(ids, r.ID)
+		}
+	}
+	for len(ids) > 0 {
+		kids, err := tr.ChildRuns(c.ctx, ids)
+		if err != nil {
+			slog.DebugContext(c.ctx, "studio: a page's subagent children could not be read at once; reading them per run", "err", err)
+			return
+		}
+		var next []string
+		for _, id := range ids {
+			c.prime(id, kids[id])
+			for _, k := range subagents(id, kids[id]) {
+				if _, done := c.kids[k.ID]; !done {
+					next = append(next, k.ID)
+				}
+			}
+		}
+		ids = next
+	}
+}
+
 // costerChildPages bounds the children walk of one run: 20 pages of 500.
 const costerChildPages = 20
 

@@ -132,3 +132,83 @@ func TestRunSpansUseTheTraceAndRunIndexes(t *testing.T) {
 		t.Errorf("the by-run statement's plan names no idx_weft_run_id:\n%s", p)
 	}
 }
+
+// TestRunTreeAndChildRunsUseTheirIndexes (U9.1; UX-E-34, UX-E-24): a
+// run tree's trace is read with `TraceId = ?`, which idx_trace_id
+// (0001) serves — ClickHouse's equivalent of SQLite's
+// spans_trace_start — and a page's children with `ParentRunID IN (…)`,
+// which idx_parent_run (0020) serves; EXPLAIN indexes = 1 names each.
+// A run row naming another trace than its spans' still answers its
+// tree from its spans' trace.
+func TestRunTreeAndChildRunsUseTheirIndexes(t *testing.T) {
+	db := freshDB(t)
+	ctx := context.Background()
+
+	var idx uint64
+	if err := db.conn.QueryRow(ctx, `SELECT count() FROM system.data_skipping_indices
+		WHERE database = currentDatabase() AND table = 'weft_runs' AND name = 'idx_parent_run'
+		AND type = 'bloom_filter' AND expr = 'ParentRunID'`).Scan(&idx); err != nil {
+		t.Fatal(err)
+	}
+	if idx != 1 {
+		t.Fatalf("weft_runs idx_parent_run = %d, want the bloom_filter skip index on ParentRunID 0020 adds", idx)
+	}
+
+	at := time.Now().UTC().Add(-time.Minute)
+	const trace = "0102030405060708090a0b0c0d0e0f12"
+	span := func(spanID, parentSpan, runID, parentRun string) obsdb.Span {
+		attrs := map[string]any{"gen_ai.operation.name": "invoke_agent", "weft.run.id": runID}
+		if parentRun != "" {
+			attrs["weft.parent.run.id"] = parentRun
+		}
+		return obsdb.Span{
+			TraceID: trace, SpanID: spanID, ParentSpanID: parentSpan, Name: "invoke_agent a", Kind: 1,
+			Start: at, End: at.Add(time.Second), StatusCode: 1, Service: "svc",
+			Attrs: attrs, Resource: map[string]any{"service.name": "svc"},
+		}
+	}
+	// The parent's record carries another trace than its spans (ff…):
+	// the row's max(TraceID) holds none of them.
+	rec := obsdb.Record{
+		Time: at, TraceID: "ffffffffffffffffffffffffffffffff", Service: "svc",
+		Body: `{"type":"run_start","run_id":"tr_p"}`,
+		Attrs: map[string]any{"weft.record": "event", "weft.run.id": "tr_p",
+			"weft.event.type": "run_start", "weft.event.pos": int64(0)},
+		Resource: map[string]any{"service.name": "svc"},
+	}
+	if err := db.Write(ctx, obsdb.Batch{
+		Spans: []obsdb.Span{span("0a0b0c0d0e0f0501", "", "tr_p", ""),
+			span("0a0b0c0d0e0f0502", "0a0b0c0d0e0f0501", "tr_p/0/c", "tr_p")},
+		Records: []obsdb.Record{rec},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tree, err := db.RunTreeSpans(ctx, "tr_p")
+	if err != nil || len(tree) != 2 || tree[1].RunID != "tr_p/0/c" || tree[1].ParentRunID != "tr_p" {
+		t.Errorf("RunTreeSpans(tr_p) = %+v, %v; want its span and its child's, from the spans' trace", tree, err)
+	}
+
+	explain := func(q string, args ...any) string {
+		t.Helper()
+		rows, err := db.conn.Query(ctx, "EXPLAIN indexes = 1 "+q, args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rows.Close() }()
+		var out []string
+		for rows.Next() {
+			var line string
+			if err := rows.Scan(&line); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, strings.TrimSpace(line))
+		}
+		return strings.Join(out, "\n")
+	}
+	if p := explain(traceSpans, trace); !strings.Contains(p, "idx_trace_id") {
+		t.Errorf("the tree's trace read names no idx_trace_id:\n%s", p)
+	}
+	if p := explain(childRunsSQL(2), "tr_p", "x", "tr_p", "x"); !strings.Contains(p, "idx_parent_run") {
+		t.Errorf("ChildRuns' plan names no idx_parent_run:\n%s", p)
+	}
+}

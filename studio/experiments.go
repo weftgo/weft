@@ -283,6 +283,7 @@ func (s *Server) serveExperiment(w http.ResponseWriter, r *http.Request) {
 			dbError(w, r, "experiment runs", id, err)
 			return
 		}
+		c.primeTrees(page.Runs)
 		for _, rec := range page.Runs {
 			runs = append(runs, c.row(rec))
 		}

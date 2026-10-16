@@ -576,6 +576,13 @@ type spanDTO struct {
 	Service       string         `json:"service"`
 	Attrs         map[string]any `json:"attrs"`
 	Events        []spanEventDTO `json:"events"`
+	// RunID is the run the span belongs to: on api/runs/{id}/spans the
+	// run's (every span), with ?tree=1 each descendant's own; absent on
+	// api/traces/{id}, whose spans' weft.run.id is in attrs.
+	// ParentRunID is that run's parent, on ?tree=1 only, absent when
+	// none is known. A tree's spans are keyed by run_id + span_id.
+	RunID       string `json:"run_id,omitempty"`
+	ParentRunID string `json:"parent_run_id,omitempty"`
 }
 
 type spanEventDTO struct {
@@ -811,6 +818,7 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 	}
 	out := runsPage{Total: page.Total, Runs: make([]runRow, 0, len(page.Runs))}
 	c := s.coster(r.Context())
+	c.primeTrees(page.Runs)
 	for _, rec := range page.Runs {
 		out.Runs = append(out.Runs, c.row(rec))
 	}
@@ -923,6 +931,7 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	c := s.coster(r.Context())
 	c.prime(det.ID, det.Children)
+	c.primeTrees(det.Children)
 	doc := runDoc{runRow: c.row(det.RunRow), Children: s.childRows(r.Context(), c, det.Children)}
 	doc.LogWarn, doc.LogError, doc.LogsCapped = s.logCounts(r.Context(), id)
 	holes, err := s.runHoles(r.Context(), det.RunRow)
@@ -1354,17 +1363,61 @@ func (s *Server) serveRunTranscript(w http.ResponseWriter, r *http.Request, id s
 
 // serveRunSpans answers api/runs/{id}/spans (S4.3): the run's timed
 // spans — the chat calls, tool executions and the invoke_agent span
-// itself, with times.
+// itself, with times — each with run_id the run's. With tree=1 (U9.1,
+// capability spans_tree: obsdb.TreeReader) the spans of every
+// descendant run come beside them — the subagent tree, by the
+// weft.parent.run.id chain, from the run's trace in one read — each
+// keyed by run_id + span_id with its run's parent_run_id, in start
+// order. A panel token reads a tree whose every span is its public
+// id's (the trace route's rule, scopeSpans).
 func (s *Server) serveRunSpans(w http.ResponseWriter, r *http.Request, id string) {
+	tree := false
+	if v := r.URL.Query().Get("tree"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			badRequest(w, r, "tree must be true or false (1 or 0)")
+			return
+		}
+		tree = b
+	}
+	tr, canTree := s.db.(obsdb.TreeReader)
+	if tree && !canTree {
+		writeError(w, r, http.StatusNotImplemented, "not_implemented", offSpansTree)
+		return
+	}
 	if !s.scopeRunID(w, r, id) {
 		return
 	}
-	list, err := s.db.RunSpans(r.Context(), id)
-	if err != nil {
-		dbError(w, r, "spans of run", id, err)
+	if !tree {
+		list, err := s.db.RunSpans(r.Context(), id)
+		if err != nil {
+			dbError(w, r, "spans of run", id, err)
+			return
+		}
+		doc := spans(spansFor(r, list))
+		for i := range doc.Spans {
+			doc.Spans[i].RunID = id
+		}
+		writeJSON(w, r, http.StatusOK, doc)
 		return
 	}
-	writeJSON(w, r, http.StatusOK, spans(spansFor(r, list)))
+	list, err := tr.RunTreeSpans(r.Context(), id)
+	if err != nil {
+		dbError(w, r, "span tree of run", id, err)
+		return
+	}
+	plain := make([]obsdb.Span, len(list))
+	for i, sp := range list {
+		plain[i] = sp.Span
+	}
+	doc := spans(spansFor(r, plain))
+	for i := range doc.Spans {
+		doc.Spans[i].RunID, doc.Spans[i].ParentRunID = list[i].RunID, list[i].ParentRunID
+	}
+	if !scopeSpans(w, r, doc.Spans) {
+		return
+	}
+	writeJSON(w, r, http.StatusOK, doc)
 }
 
 // serveTrace answers api/traces/{trace_id} (S4.3): any trace, weft or

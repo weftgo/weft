@@ -532,6 +532,11 @@ func TestAuthMatrix(t *testing.T) {
 		{name: "GET /api/runs/{id}/transcript?step=0", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/transcript?step=0" }, resources: all, want: scoped(ok)},
 		{name: "GET /api/runs/{id}/transcript?step=9", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/transcript?step=9" }, resources: all, want: scoped(miss)},
 		{name: "GET /api/runs/{id}/spans", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/spans" }, resources: all, want: scoped(ok)},
+		// The run tree (U9.1): the run's scope decides, then every span
+		// of the tree must be the token's public id (the trace route's
+		// rule); a flag that does not parse is refused before the scope.
+		{name: "GET /api/runs/{id}/spans?tree=1", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/spans?tree=1" }, resources: all, want: scoped(ok)},
+		{name: "GET /api/runs/{id}/spans?tree=bad", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/spans?tree=bad" }, resources: one, want: anyValid(http.StatusBadRequest)},
 		// The request record carries the system prompt and the catalog:
 		// refused to a read-scoped token whatever the run (the manifest's
 		// rule, badge "hidden" — pinned below), scoped for the rest.
@@ -1166,7 +1171,7 @@ func TestAuthMatrix(t *testing.T) {
 		if id.kind == "bad" {
 			continue
 		}
-		for _, path := range []string{"/api/runs/run_a/spans", "/api/traces/" + trace["A"],
+		for _, path := range []string{"/api/runs/run_a/spans", "/api/runs/run_a/spans?tree=1", "/api/traces/" + trace["A"],
 			"/api/runs/run_a/export?format=json", "/api/runs/run_a/export?format=jsonl"} {
 			req, _ := http.NewRequest(http.MethodGet, ts.URL+path, nil)
 			req.Header.Set("Authorization", "Bearer "+id.token)

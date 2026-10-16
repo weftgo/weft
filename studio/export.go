@@ -324,6 +324,7 @@ func (s *Server) collectExport(ctx context.Context, id string, hidden bool) (*ru
 	}
 	c := s.coster(ctx)
 	c.prime(det.ID, det.Children)
+	c.primeTrees(det.Children)
 	x := &runExport{run: det, hidden: hidden, row: c.row(det.RunRow), children: s.childRows(ctx, c, det.Children)}
 	if x.runHoles, err = s.runHoles(ctx, det.RunRow); err != nil {
 		return nil, err

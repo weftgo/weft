@@ -603,6 +603,32 @@ events; its tool calls are its `execute_tool` spans ordered by
 `weft.tool.seq`, equally its `tool_start`/`tool_finish` events. The
 transcript is the growth `messages` records concatenated in index order.
 
+**A run tree** (U9.1) is a run's spans with every descendant run's: the
+runs whose parent chain reaches it — each run's parent its row's
+`parent_run_id`, else its spans' `weft.parent.run.id` (a run still
+running has a row before its `invoke_agent` span ends), a derived run's
+(§9) its derivation's — read from the run's trace (the row's
+`trace_id`; when that trace holds none of the run's spans, its first
+span's) in one query by trace id and cut by `obsdb.CutRunTree`. Each
+span belongs to the run its `weft.run.id` names, else to the derived run
+whose subtree holds it; a span of no run (an app's own) and a run of the
+same trace outside the chain (a sibling under one app-level trace) are
+not in it, nor is a run in another trace (a `thread/pool` child
+session's). The tree is ordered by start, then span id, and keyed by
+run id + span id (`obsdb.TreeSpan`: the span, its `RunID`, that run's
+`ParentRunID`). Served by `obsdb.TreeReader` — both shipped backends:
+SQLite reads the trace on `spans_trace_start` (0020: trace id, start,
+then the primary key's span id — no sort) with each span's run row
+joined by key; ClickHouse reads it on `idx_trace_id` (0001) and the
+runs' parents by `RunId`, weft_runs' key — and by Studio as
+`GET /api/runs/{id}/spans?tree=1` (capability `spans_tree`; each span's
+`run_id` and `parent_run_id`). `TreeReader.ChildRuns` is
+`RunDetail.Children` for many parents in one read (SQLite on
+`runs_started`, ClickHouse on 0020's `idx_parent_run`): Studio prices a
+runs page's subagent trees one read per tree level. The fixtures'
+`subagent` case pins the parent's tree (`tree` in `expect.json`); every
+other case's tree is the run's own spans alone, `RunSpans`' count.
+
 **A session** is the runs sharing `weft.session.id` that are top-level
 (no parent) and not playground runs, ordered by `weft.turn`, then
 `started`; the public id resolves to its session through
@@ -929,7 +955,7 @@ page reaches it.
 |---|---|
 | `plain` | one model call, no tools: the minimal succeeded run |
 | `tool_calls` | two steps, one `execute_tool`; `catalog_hash` set; run metadata through `core.Metadata`: caller keys and `enduser.id` in `meta` (`user.id` not), the playground marks `weft/runtime` stamps — `playground`, `experiment_id`, `forked_from` as columns, `weft.playground.command` and `weft.replay.view` in `meta` |
-| `subagent` | a parent and its `<id>/0/call_1` child, linked; the parent's usage includes the child's |
+| `subagent` | a parent and its `<id>/0/call_1` child, linked; the parent's usage includes the child's; the parent's run tree (§6) holds the child's two spans (`tree`) |
 | `session_turns` | two `thread` turns: `<session>-t<n>`, session id, public id, turn |
 | `compacted` | a run-scope view (`weft.messages.reason = compacted`), excluded from `message_count`; the `compacted` badge |
 | `content_off` | a content-off destination: stripped events, no messages, request records kept; the `stripped` badge |
@@ -955,7 +981,7 @@ page reaches it.
 
 `expect.json` is `{case, description, pending?, derived?, runs: [...]}`;
 each run lists every row field of §6 and `derived` (§9's mark, omitted
-when false — every weft run), its `chat` and `tools` lists, and
+when false — every weft run), its `chat` and `tools` lists, its `tree` (§6's run tree: each descendant run with its parent and span count, omitted for a run with none), and
 its `holes` — the run-level badge set as the test reads it from the row,
 the events and the compactions (§7's rules; `derived` from the row's mark).
 A case whose `expect.json` carries `pending` (the item that implements it)

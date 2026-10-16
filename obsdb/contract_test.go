@@ -154,7 +154,13 @@ type contractRun struct {
 	Problems  *contractProblems `json:"problems,omitempty"`
 	Chat      []contractLLM     `json:"chat"`
 	Tools     []contractRPC     `json:"tools"`
-	Holes     []obsdb.Hole      `json:"holes"`
+	// Tree is the run's descendants as its run tree reads them (§6,
+	// U9.1: obsdb.TreeReader.RunTreeSpans), "<run id> child of <parent run
+	// id>: <n> spans" per run in first-span order; omitted for a run
+	// with no descendant (the tree holds its own spans alone — their
+	// count is chat + tools + the root).
+	Tree  []string     `json:"tree,omitempty"`
+	Holes []obsdb.Hole `json:"holes"`
 	// HoleCauses names the cause of each run-level hole the row's rules
 	// decide (§7: LostRecordsHole, TailLostHole), "<hole>:<cause>".
 	HoleCauses []string `json:"hole_causes,omitempty"`
@@ -377,8 +383,43 @@ func observeRuns(t *testing.T, db obsdb.DB) []contractRun {
 			t.Fatal(err)
 		}
 		c.Chat, c.Tools = spanSteps(spans)
+		c.Tree = treeOf(t, db, r.ID, len(spans))
 		c.Holes, c.HoleCauses = runHoles(t, db, r, len(spans) > 0)
 		out = append(out, c)
+	}
+	return out
+}
+
+// treeOf is a run's descendants in its run tree (contractRun.Tree):
+// nil when the tree holds the run's own spans alone — which must be
+// exactly RunSpans' own count.
+func treeOf(t *testing.T, db obsdb.DB, id string, own int) []string {
+	t.Helper()
+	tr, ok := db.(obsdb.TreeReader)
+	if !ok {
+		t.Fatalf("%T implements no obsdb.TreeReader", db)
+	}
+	tree, err := tr.RunTreeSpans(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var order []string
+	count, parent := map[string]int{}, map[string]string{}
+	for _, s := range tree {
+		if count[s.RunID] == 0 {
+			order = append(order, s.RunID)
+		}
+		count[s.RunID]++
+		parent[s.RunID] = s.ParentRunID
+	}
+	if count[id] != own {
+		t.Errorf("run %s: its tree holds %d of its own spans, RunSpans %d", id, count[id], own)
+	}
+	var out []string
+	for _, r := range order {
+		if r != id {
+			out = append(out, fmt.Sprintf("%s child of %s: %d spans", r, parent[r], count[r]))
+		}
 	}
 	return out
 }

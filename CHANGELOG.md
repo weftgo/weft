@@ -8,9 +8,18 @@ module, ADR 0005).
 
 ## Unreleased
 
+### Added
+
+- obsdb, Studio: the run tree (U9.1; UX-A-01, UX-E-22, UX-E-34, UX-E-24). `GET /api/runs/{id}/spans?tree=1` (capability `spans_tree`) answers the run's spans and every descendant run's — the subagent tree by the `weft.parent.run.id` chain (a run row's `parent_run_id` first, so a running child's finished spans count), read from the run's trace in one query by trace id, in start order — each keyed by `run_id` + `span_id` with its run's `parent_run_id`; a sibling run of the same app trace, a run-less span and a run in another trace (a `thread/pool` child session's) are not in it. Every `/spans` answer now carries `run_id` (the run's); the TS mirror is `Span.run_id?` / `parent_run_id?`. New optional `obsdb.TreeReader` (`RunTreeSpans`, `ChildRuns`), `obsdb.TreeSpan`, `obsdb.CutRunTree`, `obsdb.TreeRunIDs`, implemented by both backends: SQLite migration 0020 adds `spans_trace_start` (a trace in start order, no sort; `Trace` uses it too) and the tree joins each span's run row by key; ClickHouse reads the trace on `idx_trace_id` and the runs' parents by `RunId`, and migration 0020 adds the `idx_parent_run` bloom filter on `weft_runs.ParentRunID` (materialized in the background). A database without a TreeReader leaves `spans_tree` off (`capabilities_off` says why) and answers `?tree=1` with 501. Record contract §6 "A run tree"; the `subagent` fixture pins the parent's `tree`.
+
 ### Changed
 
 - Studio, panel: one run-tree row model for both renderers (U8.1; UX-F-18, UX-A-04, UX-A-22, UX-A-23, UX-S2-07). New `src/lib/waterfall.ts`: `waterfallRows()` builds run › step › model call (› attempt) / tool (lane) › child run on a `time` scale (from `/spans`, sub-millisecond digits kept) or an `order` scale (stream positions, for a run without spans), each row with its selection key, offset and duration, a gist from the folded events and transcript ("→ 1 call", the first 60 characters of a reply or tool result), its status, tool lanes per step, the critical path and the label rule "model · script"; a child run is one collapsed row with lazy rows from its own spans (the `?tree=1` shape: spans keyed by run id) or fold; `dimRows` dims by errors / slow / tools. The panel's `spanWindow` / `waterfall` (`src/panel/render.ts`) and its Timeline's inline seq builder are gone: the Timeline draws the model's rows (on a spanless run a step now precedes its calls, instead of the order they closed in); `lib/trace.ts`'s `spansFromTimed` / `timeDomain` walk the model's span tree. Studio's waterfall axis reads "ms" (was "MSS") and "events", its time ticks and its right column humanised (7.7s, a duration per row, the offset on hover) instead of raw millisecond ranges. Panel +3,241 B (85,849 B): the model is shared code the panel did not bundle before (the audit's +700 B assumed it did).
+
+### Fixed
+
+- obsdb/sqlite: `RunSpans` uses the partial index `spans_run` (UX-E-22): its read states the index's `run_id <> ''` beside the equality, without which every waterfall scanned the whole spans table.
+- Studio: the runs list is no longer N+1 (UX-E-24): a page's subagent trees (runs list, search, an experiment's runs, a run document's and a step's children) are read for the own/delegated cost split one `ChildRuns` read per tree level instead of a `COUNT` + page per row, recursively; the figures are unchanged.
 
 ## 0.16.0 — 2026-10-13
 

@@ -354,6 +354,13 @@ export interface Span {
   service: string
   attrs: Record<string, unknown>
   events: SpanEvent[]
+  /** The run the span belongs to: on /api/runs/{id}/spans the run's,
+   * with ?tree=1 (capability spans_tree, U9.1) each descendant run's
+   * own — a tree's spans are keyed by run_id + span_id. Absent on
+   * /api/traces/{trace_id} (attrs carry weft.run.id there). */
+  run_id?: string
+  /** That run's parent run, on ?tree=1 only; absent when none is known. */
+  parent_run_id?: string
 }
 
 export interface SpansDoc {

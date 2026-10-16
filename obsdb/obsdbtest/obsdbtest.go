@@ -89,6 +89,7 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("Commands", commandsTable(open))
 	t.Run("CommandsPrune", commandsPrune(open))
 	t.Run("Manifests", manifests(open))
+	t.Run("RunTree", runTree(open))
 }
 
 func ctx() context.Context { return context.Background() }

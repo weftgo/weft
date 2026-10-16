@@ -382,11 +382,7 @@ func (d *DB) fillCounts(ctx context.Context, rows []*obsdb.RunRow) error {
 	// caps (max_query_size, 256 KiB by default): an uncapped Session's
 	// thousands of runs read in chunks, each well under the cap.
 	for len(ids) > 0 {
-		n, size := 0, 0
-		for n < len(ids) && n < 1000 && (n == 0 || size+len(ids[n]) < 64<<10) {
-			size += len(ids[n])
-			n++
-		}
+		n := idChunk(ids)
 		if err := d.fillCountsOf(ctx, ids[:n], byID); err != nil {
 			return err
 		}
@@ -776,6 +772,151 @@ func (d *DB) RunSpans(ctx context.Context, runID string) (_ []obsdb.Span, err er
 		}
 	}
 	return d.querySpans(ctx, runSpansByRun, runID)
+}
+
+// RunTreeSpans is obsdb.TreeReader's: the run's trace read once by
+// TraceId (traceSpans: idx_trace_id, 0001 — otel_traces' sort key is
+// the service and span name, so a skip index is ClickHouse's whole
+// equivalent of SQLite's spans_trace_start), the parents of the runs
+// its spans name read by RunId (weft_runs' primary key), cut to the
+// run's subtree (obsdb.CutRunTree). The trace is the run row's (a
+// derived run's from its id); when that trace holds none of the run's
+// spans — a record carried another trace (RunSpans' fallback) — the
+// trace of the run's first span is read instead.
+func (d *DB) RunTreeSpans(ctx context.Context, runID string) (_ []obsdb.TreeSpan, err error) {
+	if err := d.checkOpen(); err != nil {
+		return nil, err
+	}
+	defer d.closedErr(&err)
+	trace, err := d.runTrace(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if t, _, ok := obsdb.ParseStockRunID(runID); ok {
+		trace = t
+	}
+	tree, err := d.treeOf(ctx, trace, runID)
+	if err != nil || ownsSpan(tree, runID) {
+		return tree, err
+	}
+	var other string
+	if err := d.conn.QueryRow(ctx,
+		`SELECT any(TraceId) FROM otel_traces WHERE RunId = ? AND RunId != ''`, runID).Scan(&other); err != nil {
+		return nil, err
+	}
+	if other == "" || other == trace {
+		return tree, nil
+	}
+	return d.treeOf(ctx, other, runID)
+}
+
+// traceSpans is a trace's spans in start order, one row per span.
+const traceSpans = "SELECT " + spanColumns + " FROM otel_traces WHERE TraceId = ?" + spanDedup
+
+// treeOf is one trace cut to runID's subtree.
+func (d *DB) treeOf(ctx context.Context, trace, runID string) ([]obsdb.TreeSpan, error) {
+	if trace == "" {
+		return []obsdb.TreeSpan{}, nil
+	}
+	spans, err := d.querySpans(ctx, traceSpans, trace)
+	if err != nil {
+		return nil, err
+	}
+	parents := map[string]string{}
+	for ids := obsdb.TreeRunIDs(spans); len(ids) > 0; {
+		n := idChunk(ids)
+		placeholders := strings.TrimSuffix(strings.Repeat("?,", n), ",")
+		args := make([]any, n)
+		for i, id := range ids[:n] {
+			args[i] = id
+		}
+		rs, err := d.conn.Query(ctx, "SELECT RunId, max(ParentRunID) FROM weft_runs WHERE RunId IN ("+
+			placeholders+") GROUP BY RunId", args...)
+		if err != nil {
+			return nil, err
+		}
+		for rs.Next() {
+			var id, parent string
+			if err := rs.Scan(&id, &parent); err != nil {
+				_ = rs.Close()
+				return nil, err
+			}
+			parents[id] = parent
+		}
+		err = rs.Err()
+		_ = rs.Close()
+		if err != nil {
+			return nil, err
+		}
+		ids = ids[n:]
+	}
+	return obsdb.CutRunTree(spans, runID, parents), nil
+}
+
+// ownsSpan says whether the tree holds a span of runID itself.
+func ownsSpan(tree []obsdb.TreeSpan, runID string) bool {
+	for _, s := range tree {
+		if s.RunID == runID {
+			return true
+		}
+	}
+	return false
+}
+
+// idChunk is how many of ids one statement binds: the ids bind as
+// literals into the query text, which the server caps (max_query_size,
+// 256 KiB by default) — fillCounts' rule, at most 1000 ids and 64 KiB.
+func idChunk(ids []string) int {
+	n, size := 0, 0
+	for n < len(ids) && n < 1000 && (n == 0 || size+len(ids[n]) < 64<<10) {
+		size += len(ids[n])
+		n++
+	}
+	return n
+}
+
+// ChildRuns is obsdb.TreeReader's: the parents' children, merged rows
+// (FINAL) narrowed by primary key to the runs some row of which names
+// one of the parents — idx_parent_run (0020) skips the granules none
+// does — one statement per idChunk of parent ids, grouped in Go; the
+// counts filled as Run's children are.
+func (d *DB) ChildRuns(ctx context.Context, parentIDs []string) (_ map[string][]obsdb.RunRow, err error) {
+	if err := d.checkOpen(); err != nil {
+		return nil, err
+	}
+	defer d.closedErr(&err)
+	out := map[string][]obsdb.RunRow{}
+	now := time.Now()
+	for ids := parentIDs; len(ids) > 0; {
+		n := idChunk(ids)
+		args := make([]any, 0, 2*n)
+		for _, id := range ids[:n] {
+			args = append(args, id)
+		}
+		args = append(args, args...)
+		rows, err := d.queryRunRows(ctx, now, childRunsSQL(n), args...)
+		if err != nil {
+			return nil, err
+		}
+		if err := d.fillCounts(ctx, rowPtrs(rows)); err != nil {
+			return nil, err
+		}
+		for _, r := range rows {
+			out[r.ParentRunID] = append(out[r.ParentRunID], r)
+		}
+		ids = ids[n:]
+	}
+	return out, nil
+}
+
+// childRunsSQL is ChildRuns' statement for n parent ids (bound twice:
+// the narrowing, then the merged rows' equality), in
+// RunDetail.Children's order.
+func childRunsSQL(n int) string {
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", n), ",")
+	return "SELECT " + runColumns + " FROM weft_runs FINAL WHERE " +
+		"RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.ParentRunID IN (" + placeholders + ")) " +
+		"AND ParentRunID IN (" + placeholders + ") AND ParentRunID != '' ORDER BY Started, RunId"
 }
 
 // RunSpans' two statements: by the run row's trace and run id, and by

@@ -21,6 +21,7 @@
     "traces",
     "search",
     "manifests",
+    "spans_tree",
     "pricing",
     "delete",
     "proposals",

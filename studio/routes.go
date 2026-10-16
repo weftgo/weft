@@ -192,6 +192,15 @@ func (s *Server) registerGroups() {
 	if _, ok := s.db.(obsdb.ManifestStore); ok {
 		s.addGroup(manifestsGroup())
 	}
+	// The run tree (U9.1): GET /api/runs/{id}/spans?tree=1, a run's
+	// spans with every descendant run's. The route is the read API's
+	// spans route; the capability says the flag is served — present
+	// when the database reads run trees (obsdb.TreeReader — both
+	// first-party backends), otherwise meta.capabilities_off says why
+	// and the flag answers 501.
+	if _, ok := s.db.(obsdb.TreeReader); ok {
+		s.addGroup(routeGroup{name: "spans_tree", capability: "spans_tree"})
+	}
 	// The pricing table (plan A5): GET /api/settings/pricing, the
 	// effective table read-only. Always present; cost itself rides the
 	// rows, priced at read time.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/weftgo/weft/core"
@@ -204,7 +205,7 @@ func DedupBatches(batches []TranscriptBatch) []TranscriptBatch {
 // newest first, 50 at a time.
 type RunQuery struct {
 	Agent, SessionID, PublicID, ParentRunID string            // ParentRunID: "" top-level only, "*" all
-	Status                                  Status            // "" any
+	Status                                  Status            // "" any; a StatusWords word (parked, cancelled read time)
 	Playground                              *bool             // nil any
 	ExperimentID                            string            // the runs of one experiment
 	Meta                                    map[string]string // subset match on metadata
@@ -357,6 +358,57 @@ const (
 	StatusFailed      Status = "failed"
 	StatusInterrupted Status = "interrupted"
 )
+
+// The read-time status words (I3; Studio's lib/status.ts vocabulary):
+// never a row's Status, only a RunQuery filter, each mapped onto the
+// stored columns by both backends (docs/record-contract.md §6).
+const (
+	// StatusParked is an open park: succeeded, pending > 0, and no run
+	// whose resumed_from names it (RunRow.ResumedBy empty).
+	StatusParked Status = "parked"
+	// StatusCancelled is failed with error_type cancelled (RunErrorType:
+	// the run's context ended).
+	StatusCancelled Status = "cancelled"
+)
+
+// StatusWords is every word RunQuery.Status takes, in the order an
+// error names them: the four derived statuses, then the read-time words.
+var StatusWords = []Status{
+	StatusRunning, StatusSucceeded, StatusFailed, StatusInterrupted,
+	StatusParked, StatusCancelled,
+}
+
+// ErrInvalidStatus is ParseStatus's error: the word is not one of
+// StatusWords. Its message names them.
+var ErrInvalidStatus = errors.New("status must be running, succeeded, failed, interrupted, parked or cancelled")
+
+// ParseStatus reads a status filter as the read API takes it: "" is
+// any, a word of StatusWords is itself, anything else wraps
+// ErrInvalidStatus — never an empty answer for a typo.
+func ParseStatus(s string) (Status, error) {
+	if s == "" {
+		return "", nil
+	}
+	for _, w := range StatusWords {
+		if Status(s) == w {
+			return w, nil
+		}
+	}
+	return "", fmt.Errorf("%w (%q given)", ErrInvalidStatus, s)
+}
+
+// Stored is the derived status a filter word narrows: parked reads
+// succeeded runs, cancelled failed ones (each with its own condition
+// beside it, the backends'); the four derived statuses are themselves.
+func (s Status) Stored() Status {
+	switch s {
+	case StatusParked:
+		return StatusSucceeded
+	case StatusCancelled:
+		return StatusFailed
+	}
+	return s
+}
 
 // RunRow is one run in a list or detail: the identity chain, timing,
 // derived status and the denormalised usage and counts the list view

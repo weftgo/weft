@@ -383,20 +383,26 @@ describe("the Runs search box and its URL chips", () => {
     )
   })
 
-  it("the parked pick (U1-fix): succeeded asked, the header the loaded rows' count, the chip's note says what is not looked for", async () => {
-    studio.on("GET meta", meta(["pricing"])).on("GET runs", runs)
+  it("the parked pick (I3): status=parked asked of the API — its total the count, no loaded-rows note", async () => {
+    studio
+      .on("GET meta", meta(["pricing"]))
+      .on("GET runs", (req) =>
+        req.query.get("status") === "parked"
+          ? { total: 1, runs: [rOK], next_before: null }
+          : runs
+      )
     renderApp("/runs?status=parked")
     await waitFor(() =>
-      expect(document.querySelector("[data-runs-count]")!.textContent).toMatch(
-        / listed of \d+ loaded$/
+      expect(document.querySelector("[data-runs-count]")!.textContent).toBe(
+        "1 matching"
       )
     )
-    expect(studio.calls("GET runs").at(-1)!.query.get("status")).toBe(
-      "succeeded"
-    )
+    expect(studio.calls("GET runs").at(-1)!.query.get("status")).toBe("parked")
+    expect(document.querySelector("[data-local-filters]")).toBeNull()
     expect(
-      document.querySelector<HTMLElement>('[data-chip="status"]')!.textContent
-    ).toContain("a resume that did not succeed is not looked for")
+      document.querySelector<HTMLElement>('[data-chip="status"]')!.dataset
+        .chipApplied
+    ).toBe("true")
   })
 })
 

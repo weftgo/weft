@@ -791,7 +791,6 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	query := obsdb.RunQuery{
 		Agent:        q.Get("agent"),
-		Status:       obsdb.Status(q.Get("status")),
 		SessionID:    q.Get("session"),
 		PublicID:     q.Get("public_id"),
 		ExperimentID: q.Get("experiment_id"),
@@ -801,6 +800,11 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 		ParentRunID:  parentParam(q),
 		Meta:         tagParams(q),
 	}
+	st, ok := statusParam(w, r, q)
+	if !ok {
+		return
+	}
+	query.Status = st
 	if v := q.Get("playground"); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
@@ -862,6 +866,24 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, r, http.StatusOK, out)
+}
+
+// statusParam is the one status parser of /api/runs and /api/search
+// (I3, issue 003): "" any; a word of obsdb.StatusWords — the derived
+// four and the read-time parked and cancelled, which the backends map
+// onto stored columns (docs/record-contract.md §6); anything else a 400
+// naming the allowed words, never an empty list for a typo.
+func statusParam(w http.ResponseWriter, r *http.Request, q map[string][]string) (obsdb.Status, bool) {
+	var v string
+	if vs := q["status"]; len(vs) > 0 {
+		v = vs[0]
+	}
+	st, err := obsdb.ParseStatus(v)
+	if err != nil {
+		badRequest(w, r, err.Error())
+		return "", false
+	}
+	return st, true
 }
 
 // parentParam resolves the parent query param onto RunQuery.ParentRunID,

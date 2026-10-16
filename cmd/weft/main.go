@@ -5,7 +5,7 @@
 //
 //	weft studio [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--no-playground] [--retain] [--pricing] [--log-level] [--log-format]
 //	weft dev [studio's flags] [--no-watch] [--watch dir] [-- command args…]
-//	weft runs [--agent] [--since] [--failed] [--limit] [--json]
+//	weft runs [--agent] [--since] [--failed] [--status] [--limit] [--json]
 //	weft open <run id> [--open] [--with-token]
 //	weft export <run id> [--wefttest dir [--test name] [--force]] [--format json|jsonl|otlp]
 //	weft doctor
@@ -95,7 +95,8 @@
 // `weft runs` prints one row per top-level run (id, agent, status,
 // started, steps, stopped by — what ended it, a canceled run's cause in
 // parentheses, "-" when none was recorded), newest first, from GET
-// /api/runs; --agent and --failed filter on the server, --since (a duration such as 2h, or an
+// /api/runs; --agent, --failed and --status (running, succeeded, failed, interrupted,
+// parked or cancelled; a word outside them exits 2) filter on the server, --since (a duration such as 2h, or an
 // RFC 3339 time) stops the paging at the first older run, --limit
 // (default 50, 0 for all) caps the rows and says so on stderr when it
 // hid any, --json prints the rows as Studio serves them (stopped_by and
@@ -251,7 +252,7 @@ const usage = `weft — the weft framework's command line
 Usage:
   weft studio  [--addr] [--db] [--token] [--rotate-token] [--manifest] [--open] [--no-playground] [--retain] [--pricing] [--log-level] [--log-format]
   weft dev     [studio's flags] [--no-watch] [--watch dir] [-- command args…]   (default: go run .)
-  weft runs    [--url] [--token] [--agent] [--since] [--failed] [--limit] [--json]
+  weft runs    [--url] [--token] [--agent] [--since] [--failed] [--status] [--limit] [--json]
   weft open    <run id> [--url] [--token] [--open] [--with-token]
   weft export  <run id> [--url] [--token] [--format json|jsonl|otlp] [--wefttest dir [--test name] [--force]]
   weft doctor  [--url] [--token]

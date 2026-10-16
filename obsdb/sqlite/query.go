@@ -140,18 +140,29 @@ func runWhere(q obsdb.RunQuery, now time.Time) (string, []any) {
 	if q.Status != "" {
 		cutoff := now.Add(-obsdb.InterruptedAfter).UnixNano()
 		conds = append(conds, "("+statusExpr+") = ?")
-		args = append(args, cutoff, string(q.Status))
-		// Each condition below is implied by the CASE (redundant), and
-		// is there for the planner: the CASE, with its bind parameter,
-		// can be served by no index, while these name the columns of
-		// runs_last_seen and runs_failed (0014), and runs_failed_all
-		// (0015) for the all-runs failed page.
+		// A read-time word (I3) narrows its derived status: parked reads
+		// succeeded, cancelled failed — its own condition below.
+		args = append(args, cutoff, string(q.Status.Stored()))
+		// Each running/failed condition below is implied by the CASE
+		// (redundant), and is there for the planner: the CASE, with its
+		// bind parameter, can be served by no index, while these name the
+		// columns of runs_last_seen and runs_failed (0014), and
+		// runs_failed_all (0015) for the all-runs failed page.
 		switch q.Status {
 		case obsdb.StatusRunning:
 			conds = append(conds, "last_seen_ns >= ?")
 			args = append(args, cutoff)
 		case obsdb.StatusFailed:
 			conds = append(conds, "failed = 1")
+		case obsdb.StatusCancelled:
+			conds = append(conds, "failed = 1 AND error_type = ?")
+			args = append(args, obsdb.ErrorTypeCancelled)
+		case obsdb.StatusParked:
+			// An open park: pending calls and no resumer — resumed_by's
+			// rule (resumedByColumn) as an anti-join over the partial
+			// index runs_resumed_from.
+			conds = append(conds, `pending > 0 AND NOT EXISTS (SELECT 1 FROM runs AS rb
+	WHERE rb.resumed_from = runs.run_id AND rb.resumed_from <> '')`)
 		}
 	}
 	conds = append(conds, "1=1")

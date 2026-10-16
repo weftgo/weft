@@ -961,9 +961,14 @@ function asMessages(raw: unknown): Message[] {
 
 // ── Query options ──────────────────────────────────────────────────
 
+/** A status filter (I3): a derived status, or a read-time word —
+ * parked (an open park), cancelled (a failed run whose context ended)
+ * — that /api/runs and /api/search map onto stored columns. */
+export type RunStatusFilter = RunStatus | "parked" | "cancelled"
+
 export interface RunsFilters {
   agent?: string
-  status?: RunStatus | ""
+  status?: RunStatusFilter | ""
   session?: string
   public_id?: string
   playground?: boolean

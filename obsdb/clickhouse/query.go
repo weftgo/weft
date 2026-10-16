@@ -68,6 +68,28 @@ const statusCase = `CASE WHEN Failed = 1 THEN 'failed'
 	WHEN toUnixTimestamp64Nano(LastSeen) >= ? THEN 'running'
 	ELSE 'interrupted' END`
 
+// statusConds is a status filter over the grouped rows (Runs and
+// Search alike): statusCase equal to the derived status, and for a
+// read-time word (I3) its own condition — parked an open park (Pending
+// above 0 and no run whose ResumedFrom names it: resumed_by's rule, read
+// over idx_resumed_from), cancelled a failed run whose ErrorType is
+// cancelled. None for "".
+func statusConds(st obsdb.Status, now time.Time) ([]string, []any) {
+	if st == "" {
+		return nil, nil
+	}
+	conds := []string{"(" + statusCase + ") = ?"}
+	args := []any{now.Add(-obsdb.InterruptedAfter).UnixNano(), string(st.Stored())}
+	switch st {
+	case obsdb.StatusCancelled:
+		conds = append(conds, "ErrorType = ?")
+		args = append(args, obsdb.ErrorTypeCancelled)
+	case obsdb.StatusParked:
+		conds = append(conds, "Pending > 0 AND RunId NOT IN (SELECT rb.ResumedFrom FROM weft_runs AS rb WHERE rb.ResumedFrom <> '')")
+	}
+	return conds, args
+}
+
 func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (_ obsdb.RunPage, err error) {
 	if err := d.checkOpen(); err != nil {
 		return obsdb.RunPage{}, err
@@ -75,12 +97,7 @@ func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (_ obsdb.RunPage, err e
 	defer d.closedErr(&err)
 	now := time.Now()
 	inner, args := runsInner(q)
-	var conds []string
-	var outerArgs []any
-	if q.Status != "" {
-		outerArgs = append(outerArgs, now.Add(-obsdb.InterruptedAfter).UnixNano(), string(q.Status))
-		conds = append(conds, "("+statusCase+") = ?")
-	}
+	conds, outerArgs := statusConds(q.Status, now)
 	total, err := d.countRows(ctx,
 		"SELECT count() FROM ("+inner+") WHERE "+strings.Join(or1(conds), " AND "), args, outerArgs)
 	if err != nil {

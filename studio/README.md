@@ -91,7 +91,7 @@ UI with the token in the URL fragment.
 
 The same binary is the API over a terminal, each subcommand one
 route, `--url` (`WEFT_STUDIO_URL`) and `--token` (`WEFT_STUDIO_TOKEN`)
-picking the Studio: `weft runs [--agent] [--since] [--failed] [--limit]
+picking the Studio: `weft runs [--agent] [--since] [--failed] [--status] [--limit]
 [--json]` (`GET /api/runs`; a limit that hid runs says so on stderr),
 `weft open <run id> [--open] [--with-token]` (checks `GET
 /api/runs/{id}`, prints the bare `<url>/runs/<id>`; the token goes only
@@ -2333,7 +2333,13 @@ again (UX-E-38: not persisted, accepted);
 for a panel token, whose public id is no reason to read every service's
 name and losses), `settings/pricing` (the effective pricing table,
 capability `pricing`), `runs` (agent,
-status, session, public id, playground, parent, experiment_id,
+status — one parser for `/api/runs` and `/api/search` (I3): running,
+succeeded, failed, interrupted, and the read-time `parked` (an open
+park: succeeded, pending calls, no run whose `resumed_from` names it)
+and `cancelled` (failed with `error_type` cancelled), each mapped onto
+stored columns on both backends so `total` and the cursor count the
+filtered set; any other word is a 400 naming them, never an empty
+list — session, public id, playground, parent, experiment_id,
 `stopped_by` (what ended the run — exact, or a prefix when the value
 ends in `:`: `has_tool_call:` is every tool-call stop; `/api/search`
 takes it too) and `tag.<k>=<v>` filters, cursor-paged; every run row

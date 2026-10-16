@@ -10,6 +10,7 @@ import { fetchRuns, fetchSearch, fetchTraces } from "./api"
 import type { RunRow, RunsPage, TraceRow, TracesPage } from "./api"
 import {
   CLEARED,
+  STATUS_PICKS,
   applyLocal,
   filtersFromSearch as filtersFromSearchOf,
   dedupeTraces,
@@ -219,36 +220,29 @@ describe("the loaded rows answer what the list cannot", () => {
     expect(runChips(s, ALL)[0].note).toBe("the loaded rows only")
   })
 
-  it("parked (U1-fix): succeeded asked of the API, the loaded rows kept where statusOf reads parked", () => {
-    const s = validateRunsSearch({ status: "parked" })
-    expect(s.status).toBe("parked")
-    expect(filtersFromSearchOf(s).status).toBe("succeeded")
-    expect(searchFiltersFrom(s, ALL).status).toBe("succeeded")
-    expect(localKeys(s, ALL)).toEqual(["status"])
-    const row = (o: Partial<RunRow>): RunRow => ({
-      ...runs[0],
-      status: "succeeded",
-      parent_run_id: "",
-      ...o,
-    })
-    const open = row({ id: "s_01-t1", session_id: "s_01", turn: 1, pending: 1 })
-    const resumed = row({
-      id: "s_02-t1",
-      session_id: "s_02",
-      turn: 1,
-      pending: 1,
-    })
-    const t2 = row({ id: "s_02-t2", session_id: "s_02", turn: 2, pending: 0 })
-    const plain = row({ id: "r_gen", session_id: "", turn: 0, pending: 2 })
-    const done = row({ id: "r_done", session_id: "", turn: 0, pending: 0 })
-    expect(
-      applyLocal([open, resumed, t2, plain, done], s, ALL, now).map((r) => r.id)
-    ).toEqual(["s_01-t1", "r_gen"])
-    expect(runChips(s, ALL)[0]).toMatchObject({
-      label: "status parked",
-      applied: true,
-      note: "the loaded rows only: pending calls, no resume among them — a resume that did not succeed is not looked for",
-    })
+  it("parked and cancelled (I3): server-side words, sent as they are, never a loaded-rows filter", () => {
+    for (const st of ["parked", "cancelled"] as const) {
+      const s = validateRunsSearch({ status: st })
+      expect(s.status).toBe(st)
+      expect(filtersFromSearchOf(s).status).toBe(st)
+      expect(searchFiltersFrom(s, ALL).status).toBe(st)
+      expect(localKeys(s, ALL)).toEqual([])
+      expect(runChips(s, ALL)[0]).toEqual({
+        key: "status",
+        label: `status ${st}`,
+        applied: true,
+      })
+      // The rows are the server's: none dropped here.
+      expect(applyLocal(runs, s, ALL, now)).toEqual(runs)
+    }
+    expect(STATUS_PICKS).toEqual([
+      "running",
+      "succeeded",
+      "failed",
+      "interrupted",
+      "parked",
+      "cancelled",
+    ])
     // An unknown status is dropped, never guessed at.
     expect(validateRunsSearch({ status: "resumed" }).status).toBeUndefined()
   })

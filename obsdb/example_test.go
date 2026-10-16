@@ -11,6 +11,22 @@ import (
 	"github.com/weftgo/weft/obsdb/sqlite"
 )
 
+// A status filter as the read API takes it (I3): the four derived
+// statuses and the read-time parked and cancelled are filters; any other
+// word is an error naming them, never an empty list. A read-time word
+// narrows its derived status (Stored) with a condition of its own.
+func ExampleParseStatus() {
+	st, err := obsdb.ParseStatus("parked")
+	fmt.Println(st, st.Stored(), err)
+	_, err = obsdb.ParseStatus("completed")
+	fmt.Println(errors.Is(err, obsdb.ErrInvalidStatus))
+	fmt.Println(err)
+	// Output:
+	// parked succeeded <nil>
+	// true
+	// status must be running, succeeded, failed, interrupted, parked or cancelled ("completed" given)
+}
+
 // One small batch — a run_start event and one messages record — is the
 // durable shape every weft run writes. Events returns the positioned
 // event bodies verbatim; Transcript returns the messages bodies in

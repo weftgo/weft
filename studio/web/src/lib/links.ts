@@ -310,7 +310,8 @@ export interface RunsSearch {
   agent?: string
   /** The stored four, or "parked" (U1-fix): read-time, applied to the
    * loaded rows (lib/run-filters.ts). */
-  status?: "running" | "succeeded" | "failed" | "interrupted" | "parked"
+  status?:
+    "running" | "succeeded" | "failed" | "interrupted" | "parked" | "cancelled"
   session?: string
   public_id?: string
   /** Experiments on/off: absent = all runs; "off" excludes playground

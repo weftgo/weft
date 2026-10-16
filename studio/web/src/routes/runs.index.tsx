@@ -82,6 +82,7 @@ const statusLabel: Record<string, string> = {
   failed: "failed",
   interrupted: "interrupted",
   parked: "parked",
+  cancelled: "cancelled",
 }
 
 export const Route = createFileRoute("/runs/")({
@@ -376,7 +377,7 @@ function RunsPage() {
             ? "…"
             : local.length > 0
               ? // A loaded-rows filter: the server's total counts what it
-                // was asked (parked asks for succeeded), not the matches.
+                // was asked, not the matches.
                 `${runs.length.toLocaleString()} listed of ${loaded.length.toLocaleString()} loaded`
               : filtered
                 ? `${total.toLocaleString()} matching`

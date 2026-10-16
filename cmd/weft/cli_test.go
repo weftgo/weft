@@ -418,6 +418,13 @@ func TestRunsCommand(t *testing.T) {
 	}{
 		{nil, "r_fail,r_ok"},
 		{[]string{"--failed"}, "r_fail"},
+		// --status takes the API's words (I3): sent as status=, the
+		// read-time ones filtered by Studio.
+		{[]string{"--status", "failed"}, "r_fail"},
+		{[]string{"--status", "failed", "--failed"}, "r_fail"},
+		{[]string{"--status", "succeeded"}, "r_ok"},
+		{[]string{"--status", "parked"}, ""},
+		{[]string{"--status", "cancelled"}, ""},
 		{[]string{"--agent", "orders"}, "r_ok"},
 		{[]string{"--since", "1h"}, "r_fail,r_ok"},
 		{[]string{"--since", time.Now().Add(time.Hour).UTC().Format(time.RFC3339)}, ""},
@@ -426,6 +433,16 @@ func TestRunsCommand(t *testing.T) {
 		if got := strings.Join(rows(c.args...), ","); got != c.want {
 			t.Errorf("weft runs %v = %q, want %q", c.args, got, c.want)
 		}
+	}
+	// A word outside them is a usage error (exit 2) naming the words,
+	// before any request; so is --failed beside another status.
+	for _, args := range [][]string{{"runs", "--status", "bogus"}, {"runs", "--status", "parked", "--failed"}} {
+		if _, errb, code := weft(args...); code != 2 || !strings.Contains(errb, "--") {
+			t.Errorf("weft %v = exit %d %q, want a usage error", args, code, errb)
+		}
+	}
+	if _, errb, _ := weft("runs", "--status", "bogus"); !strings.Contains(errb, "running, succeeded, failed, interrupted, parked or cancelled") {
+		t.Errorf("--status bogus stderr = %q, want the allowed words", errb)
 	}
 	// --since between the two runs keeps the newer one only.
 	out, _, _ = weft("runs", "--json")

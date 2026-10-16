@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/weftgo/weft/internal/termsafe"
+	"github.com/weftgo/weft/obsdb"
 )
 
 // The API clients: runs, open and export are thin clients of the
@@ -231,6 +232,7 @@ func runRuns(args []string, stdout, stderr io.Writer) error {
 	agent := fs.String("agent", "", "only this agent's runs (the API's agent=)")
 	since := fs.String("since", "", "only runs started after this: a `duration` back from now (2h, 30m) or an RFC 3339 time")
 	failed := fs.Bool("failed", false, "only failed runs (the API's status=failed)")
+	status := fs.String("status", "", "only runs of this `status`: running, succeeded, failed, interrupted, parked or cancelled (the API's status=)")
 	limit := fs.Int("limit", 50, "print at most this many runs (0: every matching run)")
 	asJSON := fs.Bool("json", false, "print the rows as Studio serves them, a JSON array")
 	pos, err := parseArgs(fs, args)
@@ -254,8 +256,18 @@ func runRuns(args []string, stdout, stderr io.Writer) error {
 	if *agent != "" {
 		q.Set("agent", *agent)
 	}
+	st, err := obsdb.ParseStatus(*status)
+	if err != nil {
+		return usageError("--status: %v", err)
+	}
 	if *failed {
-		q.Set("status", "failed")
+		if st != "" && st != obsdb.StatusFailed {
+			return usageError("--failed and --status %s ask for different runs", st)
+		}
+		st = obsdb.StatusFailed
+	}
+	if st != "" {
+		q.Set("status", string(st))
 	}
 	var raws []json.RawMessage
 	var rows []runRow

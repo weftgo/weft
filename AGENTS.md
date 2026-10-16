@@ -229,7 +229,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    weft.json at New and from every runtime registration (the link's ordered writer); content-addressed,
 //    //    the first write kept, kept forever — DELETE runs/sessions and Retain never touch them; /api/manifest's
 //    //    rule: a read token 403 hidden; the run document carries manifest_available: true when its hash resolves),
-//    //    runs (+session/public/playground/experiment_id/stopped_by/error_type/id_prefix filters — stopped_by exact, or a
+//    //    runs (+status — running|succeeded|failed|interrupted and the read-time parked (open parks: pending, no resumer)|cancelled, one parser with search's, any other word a 400 (I3) — +session/public/playground/experiment_id/stopped_by/error_type/id_prefix filters — stopped_by exact, or a
 //    //    prefix ending ":" (has_tool_call:); id_prefix the runs whose id starts with it, byte for byte (obsdb.RunQuery.IDPrefix,
 //    //    both backends; the ⌘K palette's lookup of a pasted short id); all=1 lists child
 //    //    runs too; each row's stopped_by/cancel_cause (what ended it, U3.2; omitted when none); resumed_from / resumed_by (the approval link, U13.1: the parked run a resume names, and on the parked run the run that resumed it — read time, either ingest order; omitted when none); error_type (a failed run's kind, context errors read cancelled) and the problem counters attempts_retried/fallbacks/tool_errors/denied/truncated/repaired (U4, ingest time — retried counts a failed attempt a later one of its call followed, fallbacks the attempts weft.attempt.layer marks, tool_errors skips RETRY; log_warn/log_error on the run document, read time through obsdb.DB.CountLogs, logs_capped when they are floors (drawn ≥); each omitted when 0); each row's children_count / children_failed (H9: the runs whose parent is it, one level, from the cost's children read — no read per row; omitted when 0); each row's prompt_preview: the turn's own prompt (input record's last user text — a resume's new prompt when it carries one — else first), 200 runes, absent content-off; settling: true while its root is stored (not failed: a failed root is terminal) and its run_finish not, within 30 s — the UI's isLive follows it, record contract §6),
@@ -358,7 +358,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    one); studio.json {url, token, db, pid, started, version} (0600, removed on exit)
 //    //    is the discovery file apps find it through (block 6). The API over a terminal (--url
 //    //    WEFT_STUDIO_URL, --token WEFT_STUDIO_TOKEN): weft doctor checks one; weft runs
-//    //    [--agent --since --failed --limit --json] (PROMPT and STOPPED BY columns — every cell's control characters as spaces; --json carries prompt_preview/stopped_by/cancel_cause); weft open <run id> [--open --with-token]
+//    //    [--agent --since --failed --status running|succeeded|failed|interrupted|parked|cancelled --limit --json] (PROMPT and STOPPED BY columns — every cell's control characters as spaces; --json carries prompt_preview/stopped_by/cancel_cause); weft open <run id> [--open --with-token]
 //    //    (prints the bare <url>/runs/<id>; the token only to the browser or on --with-token);
 //    //    weft export <run id> [--format json|jsonl|otlp | --wefttest ./testdata --test Name
 //    //    --force] (fixtures where wefttest.Replay reads them; --force replaces, never

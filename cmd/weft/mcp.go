@@ -469,7 +469,7 @@ type mcpRunIn struct {
 
 type mcpRunsIn struct {
 	Agent        string `json:"agent,omitempty" jsonschema:"only this agent's runs"`
-	Status       string `json:"status,omitempty" jsonschema:"running, succeeded, failed or interrupted"`
+	Status       string `json:"status,omitempty" jsonschema:"running, succeeded, failed, interrupted, parked (an open park: pending calls, no resume) or cancelled (a failed run whose context ended); any other word is a 400"`
 	Session      string `json:"session,omitempty" jsonschema:"only this thread session's runs"`
 	PublicID     string `json:"public_id,omitempty" jsonschema:"only this public id's runs"`
 	ExperimentID string `json:"experiment_id,omitempty" jsonschema:"only this playground experiment's runs"`
@@ -485,7 +485,7 @@ type mcpSearchIn struct {
 	Q         string  `json:"q,omitempty" jsonschema:"terms: case-insensitive substrings of prompt, answer, error or a tool name, all required"`
 	Agent     string  `json:"agent,omitempty" jsonschema:"exact agent name"`
 	Tool      string  `json:"tool,omitempty" jsonschema:"runs that called this tool (exact name)"`
-	Status    string  `json:"status,omitempty" jsonschema:"running, succeeded, failed or interrupted"`
+	Status    string  `json:"status,omitempty" jsonschema:"running, succeeded, failed, interrupted, parked (an open park: pending calls, no resume) or cancelled (a failed run whose context ended); any other word is a 400"`
 	Model     string  `json:"model,omitempty" jsonschema:"exact model name"`
 	Error     string  `json:"error,omitempty" jsonschema:"substring of the run's error"`
 	Since     string  `json:"since,omitempty" jsonschema:"started at or after (RFC 3339)"`

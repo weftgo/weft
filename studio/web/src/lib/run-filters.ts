@@ -10,22 +10,24 @@ import type { RunRow, RunsFilters, RunStatus, SearchFilters } from "./api"
 import { runTotal, sortByCost } from "./cost"
 import type { RunsSearch } from "./links"
 import { isDate } from "./settings"
-import { statusOf } from "./status"
 
-/** The stored statuses: the ones /api/runs and /api/search filter. */
+/** The derived statuses a row carries. */
 export const RUN_STATUSES: RunStatus[] = [
   "running",
   "succeeded",
   "failed",
   "interrupted",
 ]
-/** The status picks (U1-fix): the stored four and parked — read-time,
- * never stored: the server is asked for succeeded and the loaded rows
- * are kept where lib/status.ts reads parked (pending calls, no resume
- * among them). A server-side parked filter is a later item. */
+/** The status picks (I3): the derived four and the read-time parked and
+ * cancelled (lib/status.ts's words) — every one a server-side filter of
+ * /api/runs and /api/search (obsdb.StatusWords: parked an open park —
+ * pending calls, no run whose resumed_from names it; cancelled a failed
+ * run whose error_type is cancelled), so paging and the total count the
+ * filtered set; any other word is the server's 400. */
 export const STATUS_PICKS: NonNullable<RunsSearch["status"]>[] = [
   ...RUN_STATUSES,
   "parked",
+  "cancelled",
 ]
 export const RUN_SORTS = ["duration", "tokens", "cost"] as const
 
@@ -155,7 +157,7 @@ export function withTags(tags: string[]): string | string[] | undefined {
 export function filtersFromSearch(s: RunsSearch): RunsFilters {
   const filters: RunsFilters = {}
   if (s.agent) filters.agent = s.agent
-  if (s.status) filters.status = s.status === "parked" ? "succeeded" : s.status
+  if (s.status) filters.status = s.status
   if (s.session) filters.session = s.session
   if (s.public_id) filters.public_id = s.public_id
   if (s.experiments) filters.playground = s.experiments === "on"
@@ -273,7 +275,6 @@ export function localKeys(
 ): (keyof RunsSearch)[] {
   const s = usable(search)
   const keys: (keyof RunsSearch)[] = []
-  if (s.status === "parked") keys.push("status")
   if (s.min_duration !== undefined) keys.push("min_duration")
   if (!caps.search) {
     for (const k of ["model", "error", "since", "until", "min_tokens"] as const)
@@ -306,8 +307,6 @@ export function applyLocal(
         : undefined
     const err = s.error?.toLowerCase()
     out = runs.filter((r) => {
-      // parked over the loaded rows: a resume is looked for among them.
-      if (keys.has("status") && statusOf(r, runs).key !== "parked") return false
       if (
         keys.has("min_duration") &&
         runDurationMs(r, now) < (s.min_duration ?? 0) * 1000
@@ -361,12 +360,6 @@ export interface RunChip {
 const ROWS_ONLY = "the loaded rows only"
 const NEEDS_SEARCH = "needs the search capability"
 const NEEDS_PRICING = "needs the pricing capability"
-/** The parked pick asks the server for succeeded runs (a park ends its
- * run successfully), so a resume turn that failed, is running or was
- * interrupted is not loaded: looking it up would be a read per parked
- * row's session, too many for a list — the note says so instead. */
-const PARKED_NOTE =
-  "the loaded rows only: pending calls, no resume among them — a resume that did not succeed is not looked for"
 const BAD_WHEN = "not a real day (YYYY-MM-DD) or an RFC 3339 time with a zone"
 
 /** runChips is every set filter as a chip, in the toolbar's order. */
@@ -392,12 +385,7 @@ export function runChips(s: RunsSearch, caps: FilterCaps): RunChip[] {
       caps.search ? {} : { applied: false, note: NEEDS_SEARCH }
     )
   if (s.agent) push("agent", `agent ${s.agent}`)
-  if (s.status)
-    push(
-      "status",
-      `status ${s.status}`,
-      s.status === "parked" ? { note: PARKED_NOTE } : {}
-    )
+  if (s.status) push("status", `status ${s.status}`)
   if (s.tool)
     push(
       "tool",

@@ -125,11 +125,7 @@ func (s *Server) serveSearch(w http.ResponseWriter, r *http.Request) {
 		badRequest(w, r, "sort must be started, duration, tokens or cost")
 		return
 	}
-	switch v := obsdb.Status(q.Get("status")); v {
-	case "", obsdb.StatusRunning, obsdb.StatusSucceeded, obsdb.StatusFailed, obsdb.StatusInterrupted:
-		query.Status = v
-	default:
-		badRequest(w, r, "status must be running, succeeded, failed or interrupted")
+	if query.Status, ok = statusParam(w, r, q); !ok {
 		return
 	}
 	if v := q.Get("playground"); v != "" {

@@ -252,7 +252,8 @@ type mcpCall struct {
 func mcpCalls() []mcpCall {
 	return []mcpCall{
 		{"meta", nil, "/api/meta", nil},
-		{"runs", map[string]any{"agent": "orders"}, "/api/runs?agent=orders", nil},
+		// I3: a read-time status word is the API's filter, as the tool documents.
+		{"runs", map[string]any{"agent": "orders", "status": "parked"}, "/api/runs?agent=orders&status=parked", nil},
 		{"search", map[string]any{"q": "order", "status": "succeeded"}, "/api/search?q=order&status=succeeded", nil},
 		{"run", map[string]any{"id": "r_ok"}, "/api/runs/r_ok", nil},
 		{"step", map[string]any{"id": "r_ok", "n": 0}, "/api/runs/r_ok/steps/0", nil},

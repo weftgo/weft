@@ -104,9 +104,9 @@ func (d *DB) Search(ctx context.Context, q obsdb.SearchQuery) (_ obsdb.RunPage, 
 	// The cheap filters, over the grouped rows.
 	var cheap []string
 	var cheapArgs []any
-	if q.Status != "" {
-		cheap = append(cheap, "("+statusCase+") = ?")
-		cheapArgs = append(cheapArgs, now.Add(-obsdb.InterruptedAfter).UnixNano(), string(q.Status))
+	if sc, sa := statusConds(q.Status, now); len(sc) > 0 {
+		cheap = append(cheap, sc...)
+		cheapArgs = append(cheapArgs, sa...)
 	}
 	if q.Model != "" {
 		cheap = append(cheap, "Model = ?")

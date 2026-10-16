@@ -259,9 +259,9 @@ describe("the trace page's selection links (H7, G1's keys)", () => {
       )
     ).toEqual([
       `r:${RUN}`,
-      "s0",
+      "s0:m",
       "c:0:call_1",
-      "s1",
+      "s1:m",
       "c:1:call_1",
       "c:1:call_9",
     ])
@@ -282,7 +282,7 @@ describe("the trace page's selection links (H7, G1's keys)", () => {
     expect(selectedKey()).toBe("c:1:call_1")
   })
 
-  it("run-qualifies the keys when the trace holds several runs, and lists the runs", async () => {
+  it("run-qualifies another run's keys when the trace holds several (the root run's stay bare, as on the run page), and lists the runs", async () => {
     serve({
       spans: [
         ...weftSpans(),
@@ -293,10 +293,12 @@ describe("the trace page's selection links (H7, G1's keys)", () => {
         chat("d0", 0, {}, { parent_span_id: "a2" }, "r_child"),
       ],
     })
-    renderApp(`/traces/${TRACE}`)
-    await waitFor(() => expect(row(`s:r_child:0`)).toBeTruthy())
-    expect(row(`c:${RUN}:1:call_1`)).toBeTruthy()
-    expect(row(`s:${RUN}:0`)).toBeTruthy()
+    renderApp(`/traces/${TRACE}?sel=c:${RUN}:1:call_1`)
+    await waitFor(() => expect(row(`s:r_child:0:m`)).toBeTruthy())
+    expect(row("c:1:call_1")).toBeTruthy()
+    expect(row("s0:m")).toBeTruthy()
+    // A pre-U8.1-fix link (the root run qualified) lands on its row.
+    await waitFor(() => expect(selectedKey()).toBe("c:1:call_1"))
     const runs = [
       ...document.querySelectorAll<HTMLAnchorElement>("[data-trace-run]"),
     ]
@@ -362,14 +364,14 @@ describe("the trace page's selection links (H7, G1's keys)", () => {
       configurable: true,
     })
     renderApp(`/traces/${TRACE}`)
-    await waitFor(() => expect(row("s1")).toBeTruthy())
-    fireEvent.click(row("s1")!)
-    await waitFor(() => expect(selectedKey()).toBe("s1"))
+    await waitFor(() => expect(row("s1:m")).toBeTruthy())
+    fireEvent.click(row("s1:m")!)
+    await waitFor(() => expect(selectedKey()).toBe("s1:m"))
     fireEvent.keyDown(window, { key: "y" })
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
     expect(
       new URL(writeText.mock.calls[0][0] as string).searchParams.get("sel")
-    ).toBe("s1")
+    ).toBe("s1:m")
   })
 })
 
@@ -512,8 +514,8 @@ describe("replay from this step on an errored model call (H7)", () => {
 
   it("absent without the playground capability, under a read-scoped token, and on a span that did not fail", async () => {
     serve({ capabilities: ["traces"] })
-    renderApp(`/traces/${TRACE}?sel=s1`)
-    await waitFor(() => expect(selectedKey()).toBe("s1"))
+    renderApp(`/traces/${TRACE}?sel=s1:m`)
+    await waitFor(() => expect(selectedKey()).toBe("s1:m"))
     await new Promise((r) => setTimeout(r, 50))
     expect(retry()).toBeNull()
 
@@ -521,16 +523,17 @@ describe("replay from this step on an errored model call (H7)", () => {
     serve({ capabilities: ["traces", "playground"] })
     const claims = btoa(JSON.stringify({ scope: "read" })).replace(/=+$/, "")
     setStudioToken(`weft_pt.${claims}.sig`)
-    renderApp(`/traces/${TRACE}?sel=s1`)
-    await waitFor(() => expect(selectedKey()).toBe("s1"))
+    renderApp(`/traces/${TRACE}?sel=s1:m`)
+    await waitFor(() => expect(selectedKey()).toBe("s1:m"))
     await new Promise((r) => setTimeout(r, 50))
     expect(retry()).toBeNull()
     setStudioToken("")
 
     cleanup()
     serve({ capabilities: ["traces", "playground"] })
+    // The pre-U8.1-fix chat key lands on the model call it named.
     renderApp(`/traces/${TRACE}?sel=s0`)
-    await waitFor(() => expect(selectedKey()).toBe("s0"))
+    await waitFor(() => expect(selectedKey()).toBe("s0:m"))
     await new Promise((r) => setTimeout(r, 50))
     expect(retry()).toBeNull()
   })

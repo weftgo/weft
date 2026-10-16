@@ -7,6 +7,7 @@ import { genaiChat, isModelCall } from "./genai"
 import { traceSelectionLink } from "./links"
 import { spansFromTimed } from "./trace"
 import { keyRows, resolveSel, traceRuns } from "./trace-sel"
+import { waterfallRows } from "./waterfall"
 
 describe("genaiChat", () => {
   it("reads the current keys: system instructions, input and output, as strings or parsed", () => {
@@ -209,7 +210,11 @@ describe("the trace page's selection keys", () => {
       ),
     ]
     const rows = keyRows(spansFromTimed(spans))
-    expect(rows.map((r) => r.key)).toEqual(["r:r", "s0", "t:b2", "c:0:x:y"])
+    // The run tree's keys (lib/waterfall.ts's rowKeys): a model call is
+    // s<step>:m, the step's second one :m2.
+    expect(rows.map((r) => r.key)).toEqual(["r:r", "s0:m", "s0:m2", "c:0:x:y"])
+    // A pre-U8.1-fix chat key lands on the model call it named.
+    expect(resolveSel(rows, "s0")).toEqual({ id: "t:b", key: "s0:m" })
     expect(rows.map((r) => r.id)).toEqual(["t:a", "t:b", "t:b2", "t:c"])
     expect(resolveSel(rows, "c:0:x:y")).toEqual({ id: "t:c", key: "c:0:x:y" })
     expect(resolveSel(rows, "t:c")).toEqual({ id: "t:c", key: "c:0:x:y" })
@@ -251,11 +256,89 @@ describe("the trace page's selection keys", () => {
     const two = keyRows(
       spansFromTimed([tool("r1", "ra", true), tool("x1", "rb", false)])
     )
-    expect(two.map((r) => r.key)).toEqual([
-      "c:ra:resume:call_1",
-      "c:rb:0:call_1",
-    ])
+    // The trace's root run (here the first met) keys bare, as the run
+    // page's root does; an old root-qualified key still lands.
+    expect(two.map((r) => r.key)).toEqual(["c:resume:call_1", "c:rb:0:call_1"])
     expect(resolveSel(two, "c:ra:resume:call_1").id).toBe("t:r1")
+  })
+
+  it("a denied call (zero-length, weft.tool.denied) is c:resume:<call>, as the run tree keys it; its old step key still lands", () => {
+    const rows = keyRows(
+      spansFromTimed([
+        sp("inv", {
+          "gen_ai.operation.name": "invoke_agent",
+          "weft.run.id": "r",
+        }),
+        sp(
+          "d",
+          {
+            "gen_ai.operation.name": "execute_tool",
+            "weft.run.id": "r",
+            "weft.step.index": 0,
+            "gen_ai.tool.call.id": "call_2",
+            "weft.tool.denied": "true", // the ClickHouse map's string
+          },
+          "inv"
+        ),
+      ])
+    )
+    expect(rows.map((r) => r.key)).toEqual(["r:r", "c:resume:call_2"])
+    expect(resolveSel(rows, "c:0:call_2")).toEqual({
+      id: "t:d",
+      key: "c:resume:call_2",
+    })
+    // The run tree draws the same span under the same key.
+    const tree = waterfallRows({
+      runId: "r",
+      spans: rows.map((r) => r.timed!.span),
+    })
+    expect(tree.rows.map((r) => r.key)).toEqual(["r:r", "c:resume:call_2"])
+  })
+
+  it("one key scheme: every weft row the trace page keys is the run tree's row of that key", () => {
+    const at = (n: number) => `2026-10-01T09:00:00.00${n}Z`
+    const timed = (
+      id: string,
+      parent: string,
+      n: number,
+      attrs: Record<string, unknown>
+    ) => ({
+      ...sp(id, { "weft.run.id": "r", ...attrs }, parent),
+      start: at(n),
+      end: at(n + 1),
+    })
+    const spans = [
+      timed("inv", "", 0, { "gen_ai.operation.name": "invoke_agent" }),
+      timed("c0", "inv", 1, {
+        "gen_ai.operation.name": "chat",
+        "weft.step.index": 0,
+      }),
+      timed("a1", "c0", 1, {
+        "gen_ai.operation.name": "attempt",
+        "weft.attempt.index": 1,
+      }),
+      timed("c0b", "inv", 2, {
+        "gen_ai.operation.name": "chat",
+        "weft.step.index": 0,
+      }),
+      timed("a2", "c0b", 2, {
+        "gen_ai.operation.name": "attempt",
+        "weft.attempt.index": 1,
+      }),
+      timed("t0", "inv", 3, {
+        "gen_ai.operation.name": "execute_tool",
+        "weft.step.index": 0,
+        "gen_ai.tool.call.id": "call_1",
+      }),
+    ]
+    const trace = keyRows(spansFromTimed(spans))
+      .map((r) => r.key)
+      .filter((k) => k !== "r:r")
+    expect(trace).toEqual(["s0:m", "s0:a1", "s0:m2", "s0:m2:a1", "c:0:call_1"])
+    const tree = new Set(
+      waterfallRows({ runId: "r", spans }).rows.map((r) => r.key)
+    )
+    for (const k of trace) expect(tree.has(k)).toBe(true)
   })
 
   it("traceSelectionLink writes sel before view, and nothing for no selection", () => {

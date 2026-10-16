@@ -320,11 +320,17 @@ run tree (U8.1), the one row model both renderers draw:
 gives run › step › model call (› attempt) / tool (lane) › child run on a
 `time` scale (ms from the earliest span, sub-millisecond kept) or an
 `order` scale (stream positions, a run without spans), each row with its
-selection key (`lib/trace-sel.ts`'s scheme), offset and duration
+selection key (`rowKeys`, the one scheme the trace page keys by too),
+offset and duration
 (`took`: 15µs, 9.5ms, 7.7s), a gist from the folded events and
 transcript, its status, its lane and whether it is on the critical path;
 a child run is one collapsed row until expanded, its rows from its own
-spans (each carrying its `weft.run.id`, the `?tree=1` shape) or fold;
+spans (each carrying its `weft.run.id`, the `?tree=1` shape) or fold,
+hung under the tool span its `invoke_agent` span names as parent (call
+ids repeat per step; `weft.parent.*` only when that span is absent) — a
+nested Generate's run, or a live delegation whose tool has not ended, is
+a child row too, and a running run's in-flight steps and calls are open
+rows on the time scale;
 `dimRows` dims (never hides) by errors, slow or tools. Studio's span list
 (`lib/trace.ts`'s `spansFromTimed`) walks the same span tree
 (`spanTree`) and time domain. Raw is a JSON tree (`src/panel/tree.ts`, hand-written) of
@@ -996,8 +1002,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 265,444 B raw / 85,849 B gzip
-(83.8 KiB, the bundle of the ledger's row "U8.1 run tree model"; 12,455 B — 12.2 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 266,076 B raw / 86,281 B gzip
+(84.3 KiB, the bundle of the ledger's row "U8.1-fix"; 12,023 B — 11.7 KiB — of headroom under
 the 98,304 B, 96 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; A5.4 raised it from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -1698,16 +1704,21 @@ as a span tree plus a chat view when semconv content was captured;
 `/settings` says what this Studio is and serves.
 
 The trace page (plan H7): every selection is a URL, `?sel=` the row's
-step-qualified key (`src/lib/trace-sel.ts`, G1's scheme) — `r:<run>` an
-invoke_agent span, `s<step>` a chat span, `c:<step>:<call id>` a tool
-execution (`c:resume:<call id>` a resumed call, its span the one carrying
-`weft.tool.approved` — the run page's key), run-qualified (`s:<run>:<step>`, `c:<run>:<step>:<call id>`)
-when the trace holds several runs, `t:<span id>` for any other span and
-for a second span wanting a taken key; each row's label links to it (a
-plain click selects in place, replacing the URL; `y` copies it). An old
-bare `c:<call id>` lands on the first tool span of that id, saying "an
-old link: this call id repeats across steps; showing the first" when it
-repeats; a pre-H7 `?span=<span id>` still selects. A model call's chat
+step-qualified key (`src/lib/trace-sel.ts`), the run tree's own
+(`src/lib/waterfall.ts`'s `rowKeys`, U8.1-fix) so a link names the same
+row on the run page — `r:<run>` an invoke_agent span, `s<step>:m` a chat
+span (a step's second `:m2`), `s<step>:a<n>` an attempt of it,
+`c:<step>:<call id>` a tool execution (`c:resume:<call id>` a resumed or
+denied call, its span the one carrying `weft.tool.approved` or
+`weft.tool.denied`), the trace's root run bare and every other run
+run-qualified (`s:<run>:<step>:m`, `c:<run>:<step>:<call id>`),
+`t:<span id>` for any other span and for a span wanting a taken key; each
+row's label links to it (a plain click selects in place, replacing the
+URL; `y` copies it). An old bare `c:<call id>` lands on the first tool
+span of that id, saying "an old link: this call id repeats across steps;
+showing the first" when it repeats; a pre-H7 `?span=<span id>` still
+selects, and so do the pre-U8.1-fix forms (a chat span's `s<step>`, the
+root run qualified, a denied call's `c:<step>:<call id>`). A model call's chat
 section draws its messages role by role from either key family —
 `gen_ai.input.messages` / `gen_ai.output.messages` (JSON `{role, parts}`
 arrays, `tool_call` parts folded as name + arguments) with

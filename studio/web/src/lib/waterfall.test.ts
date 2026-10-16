@@ -491,3 +491,280 @@ describe("the shared helpers", () => {
     expect(timeDomain(SPANS)).toEqual([0, 14])
   })
 })
+
+// ── U8.1-fix: the review's findings, one test each ─────────────────
+
+describe("a call id two steps repeat (core numbers call_1 per step)", () => {
+  // P delegates with call_1 in step 0 and again with call_1 in step 1:
+  // each child hangs under the tool span its invoke_agent span names.
+  const C0 = "P/0/call_1"
+  const C1 = "P/1/call_1"
+  const parent = { "weft.parent.run.id": "P", "weft.parent.call.id": "call_1" }
+  const spans = [
+    span("p", "", "invoke_agent p", 0, 30, inv("P", "p")),
+    span("p_c0", "p", "chat m", 0, 1, chat("P", 0, "tool_calls", 1)),
+    span("p_t0", "p", "execute_tool a", 1, 10, tool("P", 0, "a", 1)),
+    span("k0", "p_t0", "invoke_agent a", 2, 9, inv(C0, "a", parent)),
+    span("k0_c", "k0", "chat m", 2, 3, chat(C0, 0, "stop", 0)),
+    span("p_c1", "p", "chat m", 11, 12, chat("P", 1, "tool_calls", 1)),
+    span("p_t1", "p", "execute_tool b", 12, 20, tool("P", 1, "b", 1)),
+    span("k1", "p_t1", "invoke_agent b", 13, 19, inv(C1, "b", parent)),
+    span("k1_c", "k1", "chat m", 13, 14, chat(C1, 0, "stop", 0)),
+  ]
+
+  it("each tool gets its own child, and no child span is left as a raw row", () => {
+    const wf = waterfallRows({
+      runId: "P",
+      spans,
+      expanded: new Set([C0, C1]),
+    })
+    const by = (k: string) => wf.rows.find((r) => r.key === k)!
+    expect(by(`r:${C0}`).parent).toBe("c:0:call_1")
+    expect(by(`r:${C1}`).parent).toBe("c:1:call_1")
+    expect(by(`s:${C0}:0:m`).parent).toBe(`s:${C0}:0`)
+    expect(by(`s:${C1}:0:m`).parent).toBe(`s:${C1}:0`)
+    expect(wf.rows.filter((r) => r.kind === "span")).toEqual([])
+    // The child starts inside its tool.
+    expect(by(`r:${C0}`).start).toBeGreaterThanOrEqual(by("c:0:call_1").start)
+  })
+
+  it("without the tool span, (parent run, call) is the fallback", () => {
+    const wf = waterfallRows({
+      runId: "P",
+      spans: spans.filter((s) => !["p_t1", "k1", "k1_c"].includes(s.span_id)),
+    })
+    expect(wf.rows.find((r) => r.key === `r:${C0}`)!.parent).toBe("c:0:call_1")
+  })
+})
+
+describe("a running delegation (the ?tree=1 shape, mid-flight)", () => {
+  const P = "P"
+  const C = "P/0/call_1"
+  const events = [
+    {
+      type: "run_start",
+      id: P,
+      agent: "p",
+      model: { provider: "x", name: "m" },
+    },
+    { type: "step_start", run_id: P, index: 0 },
+    {
+      type: "tool_start",
+      run_id: P,
+      seq: 1,
+      call_id: "call_1",
+      name: "ops",
+      args: {},
+    },
+  ] as unknown as WireEvent[]
+  // Only the finished spans arrive: the root's step-0 chat and the
+  // child's step-0 chat — neither invoke_agent nor the tool has ended.
+  const spans = [
+    span("p_c0", "p", "chat m", 0, 1, chat(P, 0, "tool_calls", 1)),
+    span("c_c0", "c_inv", "chat m", 2, 3, chat(C, 0, "tool_calls", 1)),
+  ]
+
+  it("the open call is a row, its child a running row under it, never a foreign span", () => {
+    const wf = waterfallRows({
+      runId: P,
+      status: "running",
+      spans,
+      fold: linkView(fold(events), [
+        { id: C, parent_call_id: "call_1", parent_run_id: P },
+      ]),
+    })
+    expect(wf.scale).toBe("time")
+    expect(wf.rows.map(brief)).toEqual([
+      "run r:P p | 1 step",
+      "  step s0 step 0",
+      "    model s0:m model · script | → 1 call",
+      "    tool c:0:call_1 ops",
+      "      child r:P/0/call_1 subagent",
+    ])
+    const by = (k: string) => wf.rows.find((r) => r.key === k)!
+    for (const k of ["r:P", "s0", "c:0:call_1", `r:${C}`]) {
+      expect(by(k).took).toBeNull()
+      expect(by(k).status).toBe("running")
+    }
+    expect(by(`r:${C}`).child).toEqual({
+      runId: C,
+      collapsed: true,
+      loaded: true,
+    })
+    expect(by("c:0:call_1").start).toBe(1)
+  })
+
+  it("with no fold link, the child is a running row under the root", () => {
+    const wf = waterfallRows({ runId: P, status: "running", spans })
+    const child = wf.rows.find((r) => r.key === `r:${C}`)!
+    expect(child.kind).toBe("child")
+    expect(child.parent).toBe("r:P")
+    expect(child.took).toBeNull()
+    expect(child.status).toBe("running")
+    expect(wf.rows.filter((r) => r.kind === "span")).toEqual([])
+  })
+
+  it("a step the model is still answering is an open step with an open model call", () => {
+    const wf = waterfallRows({
+      runId: DIR,
+      status: "running",
+      spans: SPANS.filter((s) => s.span_id !== "d_c1" && s.span_id !== "d_inv"),
+      fold: linkView(fold(EVENTS.slice(0, 7)), [
+        { id: OPS, parent_call_id: "call_1", parent_run_id: DIR },
+      ]),
+    })
+    const s1 = wf.rows.find((r) => r.key === "s1")!
+    const m1 = wf.rows.find((r) => r.key === "s1:m")!
+    expect([s1.took, s1.status, m1.took, m1.status]).toEqual([
+      null,
+      "running",
+      null,
+      "running",
+    ])
+    expect(m1.parent).toBe("s1")
+    // From the run's latest end: step 0's tool.
+    const t = wf.rows.find((r) => r.key === "c:0:call_1")!
+    expect(s1.start).toBeCloseTo(t.start + t.took!, 3)
+  })
+})
+
+describe("string-typed attributes (the ClickHouse fallback map)", () => {
+  const wf = waterfallRows({
+    runId: "r",
+    spans: [
+      span("inv", "", "invoke_agent a", 0, 10, inv("r", "a")),
+      span("res", "inv", "execute_tool x", 0.5, 1, {
+        ...tool("r", 0, "x", 1),
+        "weft.tool.approved": "true",
+      }),
+      span("c0", "inv", "chat m", 1, 2, {
+        ...chat("r", 0, "tool_calls", 1),
+        "gen_ai.response.finish_reasons": '["tool_calls"]',
+      }),
+      span("t0", "inv", "execute_tool x", 2, 3, {
+        ...tool("r", 0, "x", 1),
+        "weft.tool.pending": "true",
+      }),
+    ],
+  })
+  const by = (k: string) => wf.rows.find((r) => r.key === k)!
+
+  it('"true" reads true: the resumed call apart from step 0\'s, a pending call pending', () => {
+    expect(by("c:resume:call_1").parent).toBe("r:r")
+    expect(by("c:0:call_1").parent).toBe("s0")
+    expect(by("c:0:call_1").status).toBe("pending")
+  })
+
+  it("a finish list stored as a JSON string reads its first reason", () => {
+    expect(by("s0").finish).toBe("tool_calls")
+    expect(by("s0:m").finish).toBe("tool_calls")
+  })
+})
+
+describe("span ids are unique within a trace only", () => {
+  it("a nested Generate's run in its own trace nests by trace and span id; its rows run-qualified", () => {
+    const other = (s: Span): Span => ({ ...s, trace_id: "t2" })
+    const wf = waterfallRows({
+      runId: "r",
+      expanded: new Set(["n"]),
+      spans: [
+        span("a", "", "invoke_agent a", 0, 10, inv("r", "a")),
+        span("x", "a", "http.get", 1, 2, {}),
+        // The same span ids in another trace: a nested Generate (no
+        // weft.parent.*, no fold link).
+        other(span("a", "", "invoke_agent n", 3, 9, inv("n", "n"))),
+        other(span("x", "a", "db.query", 4, 5, { "weft.run.id": "n" })),
+      ],
+    })
+    expect(wf.rows.map(brief)).toEqual([
+      "run r:r a | 2 steps",
+      "  span t:x http.get",
+      "  child r:n n | 2 steps",
+      "    span t:n:x db.query",
+    ])
+  })
+
+  it("a nested Generate under a tool span is that tool's collapsed child", () => {
+    const wf = waterfallRows({
+      runId: "r",
+      spans: [
+        span("a", "", "invoke_agent a", 0, 10, inv("r", "a")),
+        span("c", "a", "chat m", 0, 1, chat("r", 0, "tool_calls", 1)),
+        span("t", "a", "execute_tool x", 1, 9, tool("r", 0, "x", 1)),
+        span("na", "t", "invoke_agent n", 2, 8, inv("n", "n")),
+        span("nc", "na", "chat m", 2, 3, chat("n", 0, "stop", 0)),
+      ],
+    })
+    const n = wf.rows.find((r) => r.key === "r:n")!
+    expect(n.parent).toBe("c:0:call_1")
+    expect(n.child).toEqual({ runId: "n", collapsed: true, loaded: true })
+    expect(wf.rows.map((r) => r.kind)).not.toContain("span")
+  })
+})
+
+describe("two model calls in one step (re-run after an error)", () => {
+  // Given out of start order: the error came first.
+  const wf = waterfallRows({
+    runId: "r",
+    spans: [
+      span("a", "", "invoke_agent a", 0, 10, inv("r", "a")),
+      span("c2", "a", "chat m", 4, 5, chat("r", 0, "stop", 0)),
+      span(
+        "c1",
+        "a",
+        "chat m",
+        1,
+        2,
+        { ...chat("r", 0, "error", 0), "error.type": "timeout" },
+        "error"
+      ),
+      span("x", "c2", "attempt", 4, 5, {
+        "gen_ai.operation.name": "attempt",
+        "weft.run.id": "r",
+        "weft.attempt.index": 1,
+      }),
+    ],
+  })
+  const by = (k: string) => wf.rows.find((r) => r.key === k)!
+
+  it("keys by start (:m the first, :m2 the next, its attempts under it); the step reads the last", () => {
+    expect(by("s0:m").span!.span_id).toBe("c1")
+    expect(by("s0:m2").span!.span_id).toBe("c2")
+    expect(by("s0:m2:a1").parent).toBe("s0:m2")
+    expect(by("s0").status).toBe("ok")
+    expect(by("s0").finish).toBe("stop")
+    expect(by("s0:m").error).toBe("timeout")
+  })
+})
+
+describe("the words (cosmetic)", () => {
+  it("chooses the unit on the rounded value", () => {
+    expect(took(99.96)).toBe("100ms")
+    expect(took(0.9996)).toBe("1.0ms")
+    expect(took(0)).toBe("0µs")
+  })
+
+  it("an expanded child's scaled positions keep one decimal", () => {
+    const child = fold([
+      { type: "run_start", id: OPS, agent: "ops-manager" },
+      { type: "step_start", run_id: OPS, index: 0 },
+      { type: "text_delta", run_id: OPS, text: "x" },
+      { type: "step_finish", run_id: OPS, index: 0, reason: "stop" },
+      { type: "step_start", run_id: OPS, index: 1 },
+      { type: "text_delta", run_id: OPS, text: "y" },
+      { type: "step_finish", run_id: OPS, index: 1, reason: "stop" },
+      { type: "run_finish", run_id: OPS, steps: 2 },
+    ] as unknown as WireEvent[])
+    const wf = waterfallRows({
+      runId: DIR,
+      status: "succeeded",
+      fold: FOLD,
+      total: EVENTS.length,
+      children: new Map([[OPS, child]]),
+      expanded: new Set([OPS]),
+    })
+    const texts = wf.rows.map((r) => extent(r, "order"))
+    for (const t of texts) expect(t).toMatch(/^#\d+(\.\d)?–(\d+(\.\d)?)?$/)
+    expect(texts.some((t) => t.includes("."))).toBe(true)
+  })
+})

@@ -128,6 +128,9 @@ describe("Waterfall on a cyclic parent chain", () => {
     expect(screen.getByText("7.7s", { selector: "div" })).toBeTruthy()
     expect(screen.getByText("500µs")).toBeTruthy()
     expect(screen.queryByText("0–7737")).toBeNull()
+    // The first tick is the origin: "0", not "0µs".
+    expect(screen.queryByText("0µs")).toBeNull()
+    expect(screen.getByText("0", { selector: "span" })).toBeTruthy()
   })
 
   it("the position axis keeps its ranges, the unit pluralised once", () => {

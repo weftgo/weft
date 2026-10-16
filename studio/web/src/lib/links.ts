@@ -180,11 +180,12 @@ export interface SessionLink {
 }
 
 export interface TraceSearch {
-  /** The selected row's key (plan H7, G1's scheme — lib/trace-sel.ts):
-   * r:<run>, s<step>, c:<step>:<call id> (run-qualified, s:<run>:<step>
-   * and c:<run>:<step>:<call id>, when the trace holds several runs),
-   * t:<span id> for any other span. A bare c:<call id> (pre-G1) still
-   * resolves, to the first match. */
+  /** The selected row's key — the run tree's (lib/waterfall.ts's
+   * rowKeys; lib/trace-sel.ts): r:<run>, s<step>:m a model call,
+   * c:<step>:<call id>, c:resume:<call id>, the trace's root run bare and
+   * another run run-qualified (s:<run>:<step>:m, c:<run>:<step>:<call
+   * id>), t:<span id> for any other span. A bare c:<call id> (pre-G1)
+   * still resolves, to the first match, as do the pre-U8.1-fix forms. */
   sel?: string
   /** A pre-H7 link's selection, by span id: read, never written. */
   span?: string

@@ -286,7 +286,7 @@ export function Waterfall({
                 left: `${i === ticks.length - 1 ? 100 : pct(t, domain)}%`,
               }}
             >
-              {time ? took(t) : t}
+              {time && t ? took(t) : t}
             </span>
           ))}
         </div>

@@ -374,6 +374,19 @@ describe("a call id two steps repeat (core numbers call_1 per step)", () => {
     expect(by(`r:${C1}`).parent).toBe("c:1:call_1")
     expect(wf.rows.filter((r) => r.kind === "span")).toEqual([])
   })
+
+  it("one candidate under (run, call) is taken only by the tool it starts inside (U10.1-fix #9)", () => {
+    // Step 0's child never exported a span; step 1's names a parent
+    // that is gone: the bucket holds step 1's child alone, and step
+    // 0's tool (which comes first) must not claim it.
+    const cut = spans
+      .filter((s) => !s.span_id.startsWith("k0"))
+      .map((s) => (s.span_id === "k1" ? { ...s, parent_span_id: "gone1" } : s))
+    const wf = waterfallRows({ runId: "P", spans: cut })
+    const by = (k: string) => wf.rows.find((r) => r.key === k)
+    expect(by(`r:${C1}`)?.parent).toBe("c:1:call_1")
+    expect(wf.rows.filter((r) => r.parent === "c:0:call_1")).toEqual([])
+  })
 })
 
 describe("a running delegation (the ?tree=1 shape, mid-flight)", () => {

@@ -432,3 +432,33 @@ export function canReplay(
 ): boolean {
   return capabilities.includes("playground") && tokenScopeOf(token) !== "read"
 }
+
+/** The one faint line the run page's drawer draws where its replay
+ * verbs would be when they are not offered (U10.1-fix #10): why, from
+ * capabilities_off or the token's scope — the verbs stay hidden, never
+ * a dead button. */
+export const REPLAY_OFF = {
+  playground: "replay needs the playground",
+  read: "a read token cannot replay",
+  running: "replay after the run ends",
+} as const
+
+/** replayOffWhy is that line, or undefined when the verbs are offered:
+ * the missing playground first (with capabilities_off's reason when
+ * meta gave one: the option or flag that left it off), then a
+ * read-scoped token, then a run still running. */
+export function replayOffWhy(
+  capabilities: readonly string[],
+  token: string,
+  running: boolean,
+  /** meta's capabilities_off.playground, when it gave one. */
+  playgroundOff?: string
+): string | undefined {
+  if (!capabilities.includes("playground"))
+    return playgroundOff
+      ? `${REPLAY_OFF.playground} — ${playgroundOff}`
+      : REPLAY_OFF.playground
+  if (tokenScopeOf(token) === "read") return REPLAY_OFF.read
+  if (running) return REPLAY_OFF.running
+  return undefined
+}

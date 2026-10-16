@@ -143,6 +143,101 @@ describe("the landing selection (UX-A-03)", () => {
   })
 })
 
+describe("each stop lands on the step every surface names (U10.1-fix #2, #3)", () => {
+  // Core's error text as each stop writes it: max_steps names the step
+  // it would have run next (fail(maxSteps, ErrMaxSteps)); the guards
+  // the step they ran after; a cancel during the last step's tools
+  // that step.
+  const P = "weft: run failed at step"
+  const cases = [
+    {
+      by: "max_steps",
+      err: `${P} 3: weft: run exceeded the maximum number of steps`,
+      steps: 3,
+      at: 2,
+      refused: true,
+    },
+    {
+      by: "loop_detected",
+      err: `${P} 4: weft: the model repeated the same tool calls too many times: 5 identical steps in a row`,
+      steps: 5,
+      at: 4,
+      refused: true,
+    },
+    {
+      by: "model_retries_exceeded",
+      err: `${P} 1: weft: a tool asked the model to retry too many times: tool "x" retried 4 times`,
+      steps: 2,
+      at: 1,
+      refused: true,
+    },
+    {
+      by: "canceled",
+      err: `${P} 2: context canceled`,
+      steps: 3,
+      at: 2,
+      refused: false,
+    },
+    // A cancel before step 3 started names the unstarted step.
+    {
+      by: "canceled",
+      err: `${P} 3: context canceled`,
+      steps: 3,
+      at: 2,
+      refused: false,
+    },
+  ]
+  for (const c of cases)
+    it(`${c.by}: ${c.err.slice(P.length + 1, P.length + 3)}`, () => {
+      const run = {
+        status: "failed",
+        err: c.err,
+        stopped_by: c.by,
+        steps: c.steps,
+      }
+      expect(failedAtStep(run)).toBe(c.at)
+      const rows = [
+        { key: "r:R", runId: "R", kind: "run", status: "error" },
+        ...Array.from({ length: c.steps }, (_, i) => ({
+          key: `s${i}`,
+          runId: "R",
+          parent: "r:R",
+          kind: "step",
+          status: "ok",
+        })),
+      ] as unknown as Parameters<typeof defaultRowSel>[0]
+      expect(defaultRowSel(rows, failedAtStep(run))).toBe(`s${c.at}`)
+      const last = {
+        index: c.at,
+        toolCalls: [{ name: "x", finishPos: 1 }],
+        finish: { reason: "tool_calls" },
+      }
+      const v = stepVerdict(last, run)
+      expect(v.bad).toBe(true)
+      expect(v.text.includes("the loop refused")).toBe(c.refused)
+      if (c.refused)
+        expect(v.text).toContain(`the loop refused step ${c.at + 1}`)
+      // The end card names the same step the drawer landed on.
+      expect(thenLine(last, run, false)).toContain(`at step ${c.at}`)
+      // No earlier step reads as the failure.
+      if (c.at > 0)
+        expect(stepVerdict({ ...last, index: c.at - 1 }, run).bad).toBe(false)
+    })
+
+  it("a model error is no refusal either", () => {
+    const run = {
+      status: "failed",
+      err: "weft: run failed at step 1: boom",
+      steps: 2,
+    }
+    expect(failedAtStep(run)).toBe(1)
+    expect(
+      stepVerdict({ index: 1, toolCalls: [], finish: { reason: "stop" } }, run)
+        .text
+    ).toBe("✗ failed: boom · stop · 0 in · 0 out")
+  })
+})
+
 describe("kind labels, tabs and the step a row is under", () => {
   it("a model call is MODEL, never TOOL", () => {
     expect(KIND_LABEL.model).toBe("MODEL")

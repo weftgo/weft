@@ -9,6 +9,7 @@
 // story shows), else through its timed span. Plain TypeScript, no
 // React: Studio only (the panel draws the model itself, U8.3).
 import type { Span as TimedSpan } from "./api"
+import type { AnswerStep } from "./summarize"
 import type { Span, SpanKind } from "./trace"
 import type { WaterfallModel, WaterfallRow } from "./waterfall"
 import { lanesWord, ROW_KIND, rowBadge, rowKeys, rowTone } from "./waterfall"
@@ -289,8 +290,85 @@ export function stepRowOf(
   return undefined
 }
 
+/** A number attribute: a number, or the ClickHouse fallback map's
+ * string. */
+function numAttr(v: unknown): number | undefined {
+  const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v
+  return typeof n === "number" && Number.isFinite(n) ? n : undefined
+}
+
+/** The first finish reason: a list, its JSON string, or one reason. */
+function firstFinish(v: unknown): string | undefined {
+  if (typeof v === "string" && v.startsWith("["))
+    try {
+      v = JSON.parse(v)
+    } catch {
+      /* the string itself */
+    }
+  const f = Array.isArray(v) ? (v as unknown[])[0] : v
+  return typeof f === "string" ? f : undefined
+}
+
+/**
+ * derivedStep is a derived run's step (plan I1.3: stock GenAI spans,
+ * no events) as the answer reads it, from the step's spans alone:
+ * the finish reason and the tokens its chat span's gen_ai attributes
+ * carry, the model call's duration, and its execute_tool spans as the
+ * calls the model asked for (an error status their failure). No text:
+ * a span carries no reply — the drawer says so (DRAWER.derivedNoEvents).
+ * undefined when the step row is not drawn.
+ */
+export function derivedStep(
+  stepKey: string,
+  rows: readonly Span[]
+): AnswerStep | undefined {
+  const row = rows.find((r) => r.key === stepKey && r.kind === "step")
+  const index = /^s(\d+)$/.exec(stepKey)?.[1]
+  if (!row || index === undefined) return undefined
+  const under = rows.filter((r) => r.parent === stepKey)
+  const model = under.find((r) => r.kind === "model" && r.timed)
+  const a = model?.timed?.span.attrs ?? {}
+  const reason = firstFinish(a["gen_ai.response.finish_reasons"])
+  const inTok = numAttr(a["gen_ai.usage.input_tokens"])
+  const outTok = numAttr(a["gen_ai.usage.output_tokens"])
+  const t = model?.timed
+  const latencyMs = t && t.toMs !== null ? t.toMs - t.fromMs : undefined
+  return {
+    index: Number(index),
+    toolCalls: under
+      .filter((r) => r.kind === "tool")
+      .map((r) => {
+        const s = r.timed?.span
+        const ta = s?.attrs ?? {}
+        const name = ta["gen_ai.tool.name"]
+        const done = !!r.timed && r.timed.toMs !== null
+        return {
+          name: typeof name === "string" ? name : r.label,
+          ...(done
+            ? {
+                finishPos: 0,
+                result: { isError: s?.status === "error", content: "" },
+              }
+            : {}),
+        }
+      }),
+    ...(model && t?.toMs !== null
+      ? {
+          finish: {
+            reason: reason ?? "",
+            ...(inTok !== undefined || outTok !== undefined
+              ? { usage: { input_tokens: inTok, output_tokens: outTok } }
+              : {}),
+            ...(latencyMs !== undefined && latencyMs > 0 ? { latencyMs } : {}),
+          },
+        }
+      : {}),
+  }
+}
+
 /** The drawer's words (§6.3): its verbs, its tabs' empty states. */
 export const DRAWER = {
+  derivedNoEvents: "— a derived run has no event record",
   replay: "replay from here ▸",
   replayHint: (n: number) =>
     `replay from step ${n}: the steps before it as recorded, step ${n} on run fresh (the experiment drawer)`,

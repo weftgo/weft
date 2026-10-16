@@ -231,12 +231,31 @@ export interface AnswerStep {
 
 /** failedAtStep is the step a failed run failed at: the one core's
  * RunError names ("run failed at step N"), else its last step;
- * undefined for a run that did not fail or ran no step. */
+ * undefined for a run that did not fail or ran no step. A max_steps
+ * run's error names the step it would have run next (core's
+ * fail(maxSteps, ErrMaxSteps): "at step 3" after steps 0–2), and a
+ * cancel before a step started names that unstarted step: a named step
+ * the run never reached reads as its last (stopStep) — the step the
+ * header's stop and the end card name. */
 export function failedAtStep(r: AnswerRun): number | undefined {
   if (r.status !== "failed") return undefined
   const at = /run failed at step (\d+)/.exec(r.err ?? "")?.[1]
-  return at !== undefined ? Number(at) : stopStep(r.steps)
+  if (at === undefined || r.stopped_by === "max_steps") return stopStep(r.steps)
+  const n = Number(at)
+  return r.steps !== undefined && r.steps > 0 && n >= r.steps
+    ? stopStep(r.steps)
+    : n
 }
+
+/** The stops a loop guard makes at the continuation point (AGENTS.md
+ * rule 13): the step finished and the guard refused the next model
+ * call. A cancel or a model error is no refusal. */
+const GUARD_STOPS: ReadonlySet<string> = new Set([
+  "usage_limit",
+  "loop_detected",
+  "model_retries_exceeded",
+  "max_steps",
+])
 
 /** The answer's line labels, in their order (§6.3). */
 export const ANSWER_LABELS = {
@@ -269,7 +288,8 @@ export interface Verdict {
  * stepVerdict is the step's one line: where the run failed at this
  * step, what stopped it (the stop's words and the error's detail) and
  * what that means — the step finished and the loop's guard refused the
- * next model call, or the step never finished; then the finish reason,
+ * next model call (a guard's stop: GUARD_STOPS), or the step never
+ * finished; then the finish reason,
  * its tokens, its latency and its time to first token. ms is the
  * step's measured span, used when no step_finish latency is known.
  */
@@ -289,7 +309,11 @@ export function stepVerdict(
     const head = w
       ? `✗ ${w.word}${d ? ` (${d})` : ""}`
       : `✗ failed${why ? `: ${clip(why, 120)}` : ""}`
-    parts.push(f ? `${head} — the loop refused step ${step.index + 1}` : head)
+    parts.push(
+      f && GUARD_STOPS.has(run.stopped_by ?? "")
+        ? `${head} — the loop refused step ${step.index + 1}`
+        : head
+    )
   } else if (!f) {
     bad = run.status !== "running"
     parts.push(bad ? "no step_finish" : "running…")

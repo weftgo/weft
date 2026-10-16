@@ -1166,14 +1166,23 @@ export interface ChildStream {
 }
 
 /** A child run's whole stream (the run tree's expanded child, U9.2-fix
- * W3): followed by next_after page by page, never one page silently. */
+ * W3): followed by next_after page by page, never one page silently.
+ * A refetch reads on from the last position it holds (U10.1-fix #8),
+ * never the whole stream again — unless that read held gaps (a lost
+ * batch may still arrive below it): then from the start. A capped read
+ * stays as it is (its row says so); nothing past the cap is read. */
 export function childStreamQuery(id: string) {
   return queryOptions({
     queryKey: ["events", id, "tree"],
-    queryFn: async (): Promise<ChildStream> => {
-      const events: PosEvent[] = []
+    queryFn: async ({ client, queryKey }): Promise<ChildStream> => {
+      const prev = client.getQueryData<ChildStream>(queryKey)
+      if (prev?.capped) return prev
+      const resume = prev && !prev.gaps.length
+      const events: PosEvent[] = resume ? [...prev.events] : []
       const gaps = new Set<number>()
-      let after = -1
+      // `after` is the first position returned: the one past the last.
+      const last = resume ? prev.events.at(-1)?.pos : undefined
+      let after = last !== undefined ? last + 1 : -1
       for (;;) {
         const page = await fetchEventsPage(id, after, 5000)
         events.push(...page.events)

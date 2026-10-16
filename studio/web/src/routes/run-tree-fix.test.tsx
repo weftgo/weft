@@ -44,6 +44,7 @@ function serve(
     opsStatus?: RunRow["status"]
     opsEvents?: WireEvent[]
     opsGaps?: number[]
+    rootStatus?: RunRow["status"]
   } = {}
 ) {
   stubBrowser()
@@ -62,6 +63,7 @@ function serve(
     ...rOK,
     id: DIR,
     agent: "director",
+    status: opts.rootStatus ?? rOK.status,
     steps: 2,
     trace_id: "t1",
     children: [ops],
@@ -263,6 +265,41 @@ describe("child rows (U9.2-fix W2, W3)", () => {
         ),
       { timeout: 6_000 }
     )
+  })
+
+  it("a running child is read on from its last position, never from the start again (U10.1-fix #8)", async () => {
+    serve({ opsStatus: "running" })
+    renderApp(`/runs/${DIR}`)
+    await waitFor(() => expect(keys()).toContain(`r:${OPS}`))
+    fireEvent.click(toggle(`r:${OPS}`))
+    await waitFor(
+      () =>
+        expect(
+          studio.calls(`GET runs/${OPS}/events`).length
+        ).toBeGreaterThanOrEqual(2),
+      { timeout: 6_000 }
+    )
+    const afters = studio
+      .calls(`GET runs/${OPS}/events`)
+      .map((r) => r.query.get("after"))
+    // Its four events at 0–3: the first read from the start, every
+    // later one from position 4.
+    expect(afters[0]).toBe("-1")
+    expect(new Set(afters.slice(1))).toEqual(new Set(["4"]))
+  })
+
+  it("a finished child under a running root is read once (U10.1-fix #8)", async () => {
+    serve({ rootStatus: "running" })
+    renderApp(`/runs/${DIR}`)
+    await waitFor(() => expect(keys()).toContain(`r:${OPS}`))
+    fireEvent.click(toggle(`r:${OPS}`))
+    await waitFor(() =>
+      expect(studio.calls(`GET runs/${OPS}/events`).length).toBe(1)
+    )
+    // Two of the root's 2 s beats: the child is not read again.
+    await new Promise((r) => setTimeout(r, 4_500))
+    expect(studio.calls(`GET runs/${OPS}/events`)).toHaveLength(1)
+    expect(studio.calls(`GET runs/${OPS}`)).toHaveLength(1)
   })
 
   it("an expanded child's gaps and its read cap are badges on its row", async () => {

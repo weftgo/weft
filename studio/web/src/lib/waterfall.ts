@@ -582,8 +582,9 @@ function timeRows(input: WaterfallInput): WaterfallModel {
   // so the span, never the call id, says which tool. Only when that
   // span is absent: by (parent run, parent call) — and since a call id
   // repeats per step and a child names no parent step (nor is its id
-  // parsed, docs/record-contract.md §2), of several children under one
-  // (run, call) a tool takes the one whose run starts inside it.
+  // parsed, docs/record-contract.md §2), a tool takes the child under
+  // its (run, call) whose run starts inside it — one candidate or
+  // several.
   const present = new Set(placed.map((p) => spanRef(p.span)))
   const under = new Map<string, string>()
   const byCall = new Map<string, Placed[]>()
@@ -601,10 +602,11 @@ function timeRows(input: WaterfallInput): WaterfallModel {
   }
   const fallback = (run: string, call: string | undefined, t: Placed) => {
     const list = call ? byCall.get(`${run}\n${call}`) : undefined
-    const pick =
-      list?.length === 1
-        ? list[0]
-        : list?.find((c) => c.start >= t.start && c.start <= t.start + t.took)
+    // The one candidate too must start inside the tool: step 0's tool
+    // never takes step 1's child because step 0's own is absent.
+    const pick = list?.find(
+      (c) => c.start >= t.start && c.start <= t.start + t.took
+    )
     return pick && runOf(pick)
   }
   // A chat span's attempts, by the chat span: grouped once (a run of

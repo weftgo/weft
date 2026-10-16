@@ -13,10 +13,11 @@
 import { useQuery } from "@tanstack/react-query"
 import { ArrowUpRight } from "lucide-react"
 import { Link } from "@tanstack/react-router"
-import { useState } from "react"
+import { useId, useState } from "react"
 
-import { isDerived } from "@/lib/honesty"
+import { derivedWords, isDerived } from "@/lib/honesty"
 import { allLogsQuery, LOGS } from "@/lib/logs"
+import { studioToken } from "@/lib/api"
 import type { RunDoc, Span as TimedSpan, WireEvent } from "@/lib/api"
 import { attemptLine, msText } from "@/lib/attempts"
 import { toolFailure } from "@/lib/error-kind"
@@ -27,6 +28,7 @@ import {
   editPromptAndReplay,
   editResultAndReplay,
   replayFromStep,
+  replayOffWhy,
   rerun,
 } from "@/lib/replay"
 import {
@@ -34,10 +36,12 @@ import {
   DRAWER_TAB_LABEL,
   DRAWER_TABS,
   defaultTab,
+  derivedStep,
   KIND_LABEL,
   stepRowOf,
 } from "@/lib/run-tree"
 import type { DrawerTab } from "@/lib/run-tree"
+import type { AnswerStep } from "@/lib/summarize"
 import {
   ANSWER_LABELS,
   repliedLine,
@@ -229,14 +233,18 @@ function Answer({
   requests,
   hasNext,
   onTab,
+  derived = false,
 }: {
-  step: FoldedStep
+  step: AnswerStep
   doc: RunDoc
   runStatus: string
   ms?: number
   requests?: RunRequests
   hasNext: boolean
   onTab: (t: DrawerTab) => void
+  /** A derived run's step (lib/run-tree.ts's derivedStep): read from
+   * its spans; what no span carries says so. */
+  derived?: boolean
 }) {
   // While scrubbing the run reads as running: the verdict and the end
   // are the playhead's, not the record's.
@@ -245,19 +253,21 @@ function Answer({
   const mine = requests?.steps.get(step.index)
   const row = mine?.rows.at(-1)
   const prev = requests?.prev.get(step.index)
-  const sent = requests?.loading
-    ? DRAWER.loading
-    : sentLine(
-        row
-          ? {
-              count: row.body.messages_ref.count,
-              prevCount: prev?.body.messages_ref.count,
-              tools: row.body.tools.names.length,
-              promptChanged: mine?.promptChanged,
-              catalogChanged: mine?.catalogChanged,
-            }
-          : undefined
-      )
+  const sent = derived
+    ? DRAWER.derivedNoEvents
+    : requests?.loading
+      ? DRAWER.loading
+      : sentLine(
+          row
+            ? {
+                count: row.body.messages_ref.count,
+                prevCount: prev?.body.messages_ref.count,
+                tools: row.body.tools.names.length,
+                promptChanged: mine?.promptChanged,
+                catalogChanged: mine?.catalogChanged,
+              }
+            : undefined
+        )
   const running = runStatus === "running"
   const line = (
     k: keyof typeof ANSWER_LABELS,
@@ -299,12 +309,18 @@ function Answer({
           {verdict.text}
         </dd>
       </div>
-      {line("sent", sent, "request")}
-      {line("replied", repliedLine(step, running), "response")}
+      {line("sent", sent, derived ? undefined : "request")}
+      {line(
+        "replied",
+        derived && !step.toolCalls.length
+          ? DRAWER.derivedNoEvents
+          : repliedLine(step, running),
+        derived ? undefined : "response"
+      )}
       {line(
         "tools",
         toolsLine(step, running),
-        step.toolCalls.length ? "tools" : undefined,
+        step.toolCalls.length && !derived ? "tools" : undefined,
         step.toolCalls.some((c) => c.result?.isError)
       )}
       {line("then", thenLine(step, run, hasNext), undefined, verdict.bad)}
@@ -315,7 +331,10 @@ function Answer({
 /** The drawer's verbs (UX-C-23): drawn, with their words, wherever the
  * selection has a step of the run to replay from — the experiment
  * drawer's entry points (lib/replay.ts), and the compare page landing
- * on this step. Hidden, not disabled, where a verb cannot act. */
+ * on this step. Hidden, not disabled, where a verb cannot act — one
+ * faint line says why in their place (lib/replay.ts's replayOffWhy:
+ * no playground, a read token, a running run; a derived run the
+ * stock_spans words). */
 function Verbs({
   doc,
   step,
@@ -332,7 +351,7 @@ function Verbs({
   onStory?: () => void
 }) {
   const open = useReplay()
-  const { has } = useCapabilities()
+  const { caps, has, why } = useCapabilities()
   const live = doc.status === "running"
   const child = childRun
     ? doc.children.find((c) => c.id === childRun)
@@ -422,13 +441,28 @@ function Verbs({
       {DRAWER.compare}
     </Link>
   ) : null
-  if (!verbs.length && !compare && !onStory) return null
+  // Where a replay verb would stand and none is offered: why, faintly.
+  const off =
+    !verbs.length && (child || step !== undefined)
+      ? isDerived(doc)
+        ? derivedWords()
+        : replayOffWhy(caps, studioToken(), live, why("playground"))
+      : undefined
+  if (!verbs.length && !off && !compare && !onStory) return null
   return (
     <div
       className="flex flex-wrap items-center gap-2 border-b px-3 py-1.5"
       data-drawer-verbs
     >
       {verbs}
+      {off ? (
+        <span
+          className="font-mono text-[11px] text-faint"
+          data-drawer-verbs-off
+        >
+          {off}
+        </span>
+      ) : null}
       {compare}
       {onStory && step !== undefined ? (
         <button
@@ -599,6 +633,9 @@ export function SpanDetail({
   const childLinks = new Map<string, ChildRow>(
     doc.children.map((c) => [c.id, c])
   )
+  // The tabs' ids (aria-controls / aria-labelledby): one drawer a page,
+  // unique all the same.
+  const tabsId = useId()
   if (!span)
     return (
       <div
@@ -632,8 +669,13 @@ export function SpanDetail({
     stepRow?.timed && stepRow.timed.toMs !== null
       ? stepRow.timed.toMs - stepRow.timed.fromMs
       : undefined
+  // A derived run's fold is empty: its step's answer reads its spans.
+  const derived = isDerived(doc)
+  const answer: AnswerStep | undefined =
+    step ?? (derived && ownStep ? derivedStep(ownStep, rows) : undefined)
   const hasNext =
-    step !== undefined && folded.some((s) => s.key === `s${step.index + 1}`)
+    answer !== undefined &&
+    (derived ? rows : folded).some((s) => s.key === `s${answer.index + 1}`)
   // The timed span behind the row, else (a step: no span of its own)
   // its model call's.
   const own =
@@ -671,7 +713,7 @@ export function SpanDetail({
       </div>
       <Verbs
         doc={doc}
-        step={step?.index}
+        step={answer?.index}
         call={call}
         childRun={row?.childRun}
         maxFrom={maxFrom}
@@ -679,9 +721,10 @@ export function SpanDetail({
       />
       <div className="min-h-0 flex-1 overflow-auto">
         <div className="space-y-3 px-3 py-3" data-drawer-answer>
-          {step ? (
+          {answer ? (
             <Answer
-              step={step}
+              step={answer}
+              derived={!step}
               doc={doc}
               runStatus={runStatus}
               ms={stepMs}
@@ -745,13 +788,36 @@ export function SpanDetail({
           className="flex items-center gap-1 border-y px-2 pt-1"
           role="tablist"
           aria-label="drawer"
+          // The tabs pattern: ←/→ move (wrapping), Home/End jump; the
+          // open tab is the one tab stop (roving tabindex).
+          onKeyDown={(e) => {
+            const i = tabs.indexOf(active)
+            const n = tabs.length
+            const to =
+              e.key === "ArrowRight"
+                ? (i + 1) % n
+                : e.key === "ArrowLeft"
+                  ? (i - 1 + n) % n
+                  : e.key === "Home"
+                    ? 0
+                    : e.key === "End"
+                      ? n - 1
+                      : -1
+            if (to < 0) return
+            e.preventDefault()
+            onTab(tabs[to])
+            document.getElementById(`${tabsId}-tab-${tabs[to]}`)?.focus()
+          }}
         >
           {tabs.map((t) => (
             <button
               key={t}
               type="button"
               role="tab"
+              id={`${tabsId}-tab-${t}`}
               aria-selected={active === t}
+              aria-controls={`${tabsId}-panel`}
+              tabIndex={active === t ? 0 : -1}
               data-drawer-tab={t}
               className={`-mb-px border-b-2 px-2.5 py-1.5 font-mono text-[11px] ${
                 active === t
@@ -767,6 +833,9 @@ export function SpanDetail({
         <div
           className="space-y-3 px-3 py-3"
           role="tabpanel"
+          id={`${tabsId}-panel`}
+          aria-labelledby={`${tabsId}-tab-${active}`}
+          tabIndex={0}
           data-drawer-panel={active}
         >
           {active === "request" ? (

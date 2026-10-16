@@ -663,18 +663,20 @@ function RunPage() {
     [opened, knownRuns, sel, id]
   )
   const onTree = view === "waterfall"
-  // An expanded child follows the root's cadence while either runs
-  // (U9.2-fix W3): its document and its stream are read again every
-  // 2 s, its own spans (a cut tree's) every 5 s — never frozen at the
-  // expand. Its stream is read whole (childStreamQuery pages it), up to
-  // a cap its row badges.
+  // An expanded child is followed while it runs (U9.2-fix W3, U10.1-fix
+  // #8): its document and its stream are read again every 2 s, its own
+  // spans (a cut tree's) every 5 s — never frozen at the expand, and a
+  // finished child never re-read. Before its document answers (a child
+  // the root is still starting) it is asked again while the root runs.
+  // Its stream is read once whole and then from its last position on
+  // (childStreamQuery pages it), up to a cap its row badges.
   const rootLive = isLive(run.data)
   const childDocs = useQueries({
     queries: fetchRuns.map((r) => ({
       ...runQuery(r),
       enabled: onTree,
       refetchInterval: (q: { state: { data?: RunRow } }) =>
-        rootLive || isLive(q.state.data) ? 2000 : false,
+        isLive(q.state.data) || (rootLive && !q.state.data) ? 2000 : false,
     })),
     combine: dataOf,
   })
@@ -683,7 +685,8 @@ function RunPage() {
       ...childStreamQuery(r),
       enabled: onTree,
       refetchInterval: (q: { state: { data?: ChildStream } }) =>
-        rootLive || isLive(childDocs[i]) || q.state.data?.done === false
+        isLive(childDocs[i]) ||
+        (rootLive && (!childDocs[i] || q.state.data?.done === false))
           ? 2000
           : false,
     })),
@@ -966,12 +969,12 @@ function RunPage() {
       ? search.sel
       : undefined) ??
     stepKey ??
-    (derived && treeScale === "time"
-      ? tree.rows[0]?.key
-      : defaultRowSel(
-          tree.rows,
-          replaying || !run.data ? undefined : failedAtStep(run.data)
-        ))
+    // A derived run's rows land by the same rule (its steps are drawn
+    // from its spans): where something went wrong, else step 0.
+    defaultRowSel(
+      tree.rows,
+      replaying || !run.data ? undefined : failedAtStep(run.data)
+    )
   const selectedRow = treeRows.find((s) => s.key === selKey)
   // The story is the read mode of the same selection (§6.3): the step
   // the selected row is under is the card it highlights.

@@ -7,9 +7,11 @@
 // tab lists the step's own lines; the story is the read mode of the
 // same selection.
 import { cleanup, configure, fireEvent, waitFor } from "@testing-library/react"
+import axe from "axe-core"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
+import { REPLAY_OFF } from "@/lib/replay"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import {
@@ -34,12 +36,15 @@ vi.setConfig({ testTimeout: 30_000 })
 
 let studio: FakeStudio
 
-function serve(capabilities: string[]) {
+function serve(
+  capabilities: string[],
+  opts: { token?: string; doc?: Parameters<typeof ulDoc>[0] } = {}
+) {
   stubBrowser()
   FakeEventSource.reset()
   vi.stubGlobal("EventSource", FakeEventSource)
-  setStudioToken("")
-  const doc = ulDoc()
+  setStudioToken(opts.token ?? "")
+  const doc = ulDoc(opts.doc)
   studio = new FakeStudio()
     .on("GET meta", {
       ...golden<Record<string, unknown>>("meta"),
@@ -152,6 +157,87 @@ describe("the drawer on opt.usage-limit (the Done line)", () => {
     await waitFor(() => expect(verdict()).toContain("usage limit reached"))
     expect(document.querySelector('[data-drawer-verb="from_step"]')).toBeNull()
     expect(document.querySelector('[data-drawer-verb="compare"]')).toBeNull()
+    // One faint line says why, in capabilities_off's words (U10.1-fix #10).
+    const off = document.querySelector("[data-drawer-verbs-off]")!
+    expect(off.textContent).toBe(
+      `${REPLAY_OFF.playground} — the playground is off: turn it on with studio.Playground(true); weft studio --no-playground turns it off`
+    )
+  })
+
+  it("a read token and a running run: the verbs' place says why (U10.1-fix #10)", async () => {
+    const read = `weft_pt.${btoa(
+      JSON.stringify({
+        public_id: "pub_1",
+        scope: "read",
+        exp: "2099-01-01T00:00:00Z",
+      })
+    ).replace(/=+$/, "")}.sig`
+    serve(ALL, { token: read })
+    renderApp(`/runs/${UL}`)
+    await waitFor(() => expect(verdict()).toContain("usage limit reached"))
+    expect(document.querySelector('[data-drawer-verb="from_step"]')).toBeNull()
+    expect(document.querySelector("[data-drawer-verbs-off]")!.textContent).toBe(
+      REPLAY_OFF.read
+    )
+    cleanup()
+    serve(ALL, {
+      doc: { status: "running", err: "", stopped_by: "", error_type: "" },
+    })
+    renderApp(`/runs/${UL}?sel=s1`)
+    await waitFor(() => expect(selected()).toEqual(["s1"]))
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-drawer-verbs-off]")?.textContent
+      ).toBe(REPLAY_OFF.running)
+    )
+    expect(document.querySelector('[data-drawer-verb="from_step"]')).toBeNull()
+  })
+
+  it("the tabs follow the tabs pattern: ids, roving tabindex, arrow keys; axe clean (U10.1-fix #7)", async () => {
+    serve(ALL)
+    const { router } = renderApp(`/runs/${UL}`)
+    await waitFor(() => expect(selected()).toEqual(["s2"]))
+    const panel = document.querySelector<HTMLElement>("[data-drawer-panel]")!
+    const active = tab("response")
+    expect(active.getAttribute("aria-controls")).toBe(panel.id)
+    expect(panel.getAttribute("aria-labelledby")).toBe(active.id)
+    expect(active.tabIndex).toBe(0)
+    expect(tab("request").tabIndex).toBe(-1)
+    active.focus()
+    fireEvent.keyDown(active, { key: "ArrowRight" })
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ tab: "tools" })
+    )
+    expect(document.activeElement).toBe(tab("tools"))
+    await waitFor(() => expect(tab("tools").tabIndex).toBe(0))
+    expect(
+      document
+        .querySelector("[data-drawer-panel]")!
+        .getAttribute("aria-labelledby")
+    ).toBe(tab("tools").id)
+    fireEvent.keyDown(tab("tools"), { key: "End" })
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ tab: "raw" })
+    )
+    fireEvent.keyDown(tab("raw"), { key: "ArrowRight" })
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ tab: "request" })
+    )
+    fireEvent.keyDown(tab("request"), { key: "ArrowLeft" })
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ tab: "raw" })
+    )
+    // The tablist alone: the Raw panel's event rows are the events
+    // explorer's own (not this drawer's tabs).
+    const res = await axe.run(
+      drawer().querySelector<HTMLElement>("[role=tablist]")!
+    )
+    expect(
+      res.violations.map(
+        (v) =>
+          `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(" | ")}`
+      )
+    ).toEqual([])
   })
 
   it("kind labels: a model call is MODEL, a tool TOOL, the run RUN", async () => {

@@ -25,6 +25,7 @@ import {
   holeWords,
   rowHoles,
 } from "@/lib/honesty"
+import { DRAWER } from "@/lib/run-tree"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import { FakeStudio, apiError, golden, pagedEvents } from "@/test/fake-studio"
@@ -286,6 +287,42 @@ describe("a derived run's page (the Done line)", () => {
     expect(document.body.textContent).not.toMatch(/space\s*replay/)
   })
 
+  it("lands on step 0 like any run, its answer read from the spans (U10.1-fix #5)", async () => {
+    serve()
+    renderApp(`/runs/${DERIVED}`)
+    const sel = () =>
+      [...document.querySelectorAll("[data-span]")]
+        .filter((n) => n.getAttribute("aria-selected") === "true")
+        .map((n) => n.getAttribute("data-span"))
+    await waitFor(() => expect(sel()).toEqual(["s0"]))
+    const line = (k: string) =>
+      document.querySelector(`[data-answer-line="${k}"]`)?.textContent ?? ""
+    await waitFor(() =>
+      expect(document.querySelector("[data-verdict]")?.textContent).toContain(
+        "tool_calls · 812 in · 41 out"
+      )
+    )
+    // What no span carries says so, plainly — never a request count.
+    expect(line("sent")).toBe(DRAWER.derivedNoEvents)
+    expect(line("replied")).toBe("called lookup_order(…)")
+    expect(line("tools")).toBe("1 ran")
+    expect(line("then")).toBe("→ step 1")
+    // Step 1 called no tool and its reply is not in a span.
+    renderApp(`/runs/${DERIVED}?sel=s1`)
+    await waitFor(() => expect(sel()).toEqual(["s1"]))
+    await waitFor(() =>
+      expect(document.querySelector("[data-verdict]")?.textContent).toContain(
+        "stop · 905 in · 37 out"
+      )
+    )
+    expect(line("replied")).toBe(DRAWER.derivedNoEvents)
+    // Nothing replays it: the verbs' place says why, in the stock words.
+    saysStock(
+      document.querySelector("[data-drawer-verbs-off]")!.textContent,
+      "drawer verbs"
+    )
+  })
+
   it("the raw view says derived above the empty event list", async () => {
     serve()
     renderApp(`/runs/${DERIVED}?view=raw`)
@@ -364,6 +401,19 @@ describe("the failed derived run (one step, its root span in error)", () => {
     expect(top).not.toContain("1 steps")
     expect(document.body.textContent).toContain("agent cancelled by the user")
     saysStock(document.querySelector("[data-run-holes]")!.textContent, "header")
+    // The drawer lands on the failed step, its verdict the run's error
+    // (U10.1-fix #5) — never the root row.
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-verdict]")?.hasAttribute("data-bad")
+      ).toBe(true)
+    )
+    expect(document.querySelector("[data-verdict]")!.textContent).toContain(
+      "agent cancelled by the user"
+    )
+    expect(
+      document.querySelector('[data-span^="r:"][aria-selected="true"]')
+    ).toBeNull()
     for (const words of ["did not finish", "no steps yet", "past the playhead"])
       expect(document.body.textContent, words).not.toContain(words)
 

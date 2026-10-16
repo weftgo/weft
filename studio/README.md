@@ -1016,8 +1016,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 270,089 B raw / 87,751 B gzip
-(85.7 KiB, the bundle of the ledger's row "U11.2 logs hand-off"; 10,553 B — 10.3 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 270,068 B raw / 87,738 B gzip
+(85.7 KiB, the bundle of the ledger's row "U10.1-fix drawer review"; 10,566 B — 10.3 KiB — of headroom under
 the 98,304 B, 96 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; A5.4 raised it from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -1677,7 +1677,10 @@ child's own `?tree=1` is read and merged; the child's events (every
 page, up to 20,000 — past that a `truncated` badge on its row; its gaps
 a `gap` badge) and run document are read on expand too (a time row's
 gists, the order scale's rows), and read again every 2 s while the
-child or the run runs. Selection crosses the boundary: a `?sel=` naming a row inside a
+child runs (before its document answers, while the run runs) — its
+stream from the position past the last one held, from the start again
+only when that read held gaps; a finished child is never read again.
+Selection crosses the boundary: a `?sel=` naming a row inside a
 child (its run-qualified `rowKeys` key, `s:<run>:<n>`, `c:<run>:<at>:<call>`,
 or `<child run>:<span id>`) expands the children above it — a key inside
 a child no row draws selects that child's row — and folding a
@@ -1703,14 +1706,27 @@ MODEL, ATTEMPT, TOOL, CHILD RUN, SPAN), the verbs drawn with their words
 — **replay from here ▸**, **edit…** (the prompt, or a tool row's result),
 **compare…** (`/compare` landing on the step; capability `diff`), the
 child row's **replay the child ▸** — hidden, not disabled, without the
-playground or under a read token; then, for a step of the run or its
+playground, under a read token or while the run runs, one faint line in
+their place saying which ("replay needs the playground — <capabilities_off's
+reason>", "a read token cannot replay", "replay after the run ends";
+a derived run the stock_spans words; `src/lib/replay.ts`'s
+`replayOffWhy`); the tabs are a tablist (ids, roving tabindex, ←/→,
+Home/End); then, for a step of the run or its
 model call, attempt or tool, the answer lines from `src/lib/summarize.ts`:
 **verdict** (where the run failed at this step, its stop and the error's
 detail — "✗ usage limit reached (input 300/250, output 150/250) — the
-loop refused step 3" — then finish, tokens, latency, first token),
+loop refused step 3", the refusal said for a guard's stop only:
+usage_limit, loop_detected, model_retries_exceeded, max_steps; a step
+the error names that the run never reached — max_steps' "at step N"
+after steps 0…N−1, a cancel before a step began — reads as the last
+step — then finish, tokens, latency, first token),
 **sent** (messages, how many new, tools offered, the record's
 changed-at-this-step marks), **replied**, **tools ran**, **then** (the
-next step, or the run's end card); then the row's facts (a model call's
+next step, or the run's end card) — on a derived run read from the
+step's spans (finish and tokens from the chat span's gen_ai attributes,
+its execute_tool spans as the calls; what no span carries reads "— a
+derived run has no event record"), the run landing by the same rule;
+then the row's facts (a model call's
 who-answered and attempts, a tool's failure kind). Below, the lazy tabs
 **Request · Response · Tool I/O · Logs · Raw OTel** — only the open one
 is drawn; Logs reads `runs/{id}/logs` when it opens — every page, up to

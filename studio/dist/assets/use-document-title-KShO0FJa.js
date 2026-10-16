@@ -1,0 +1,1 @@
+import{di as e,li as t,t as n}from"./title-CY2o-NNG.js";var r=e(t(),1);function i(e){let t=n(e);(0,r.useEffect)(()=>{typeof document<`u`&&(document.title=t)},[t])}export{i as t};

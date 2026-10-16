@@ -32,11 +32,23 @@ import type { HoleMark, ParkedKind } from "../lib/honesty"
 import { AWAITING, FILTER_KEYS, statusOf } from "../lib/status"
 import type { Status } from "../lib/status"
 import {
+  paramFields,
   paramsLine,
   REQUEST_NO_RECORD_REASON,
   REQUEST_NOT_STORED,
   shortHash,
 } from "../lib/requests"
+import {
+  ANSWER_LABELS,
+  failedAtStep,
+  repliedLine,
+  sentLine,
+  stepVerdict,
+  thenLine,
+  toolsLine,
+} from "../lib/summarize"
+import type { AnswerRun } from "../lib/summarize"
+import { DRAWER_TAB_LABEL } from "../lib/run-tree"
 import {
   allowRefusals,
   breakpointsFor,
@@ -161,6 +173,7 @@ import { clip as clipTitle, turnLabel, turnTitle } from "../lib/title"
 import type { Scope } from "../lib/scope"
 import { el, fmtJSON, on, patch } from "./render"
 import {
+  depthWord,
   extent,
   KIND_ICON,
   lanesWord,
@@ -1826,18 +1839,31 @@ export class WeftDevtools extends HTMLElement {
     if (e.key === "Tab") return this.trap(e)
     if (typing(e)) return
     const at = e.target as HTMLElement
+    // A Timeline step row (P7) is a button: Enter or Space clicks it.
+    const tl = at.matches(".weft-tl[role]")
+    if (tl && (e.key === "Enter" || e.key === " ")) {
+      e.preventDefault()
+      at.click()
+      return
+    }
     if (
       (e.key === "ArrowDown" || e.key === "ArrowUp") &&
-      at.classList.contains("weft-turn")
+      (tl || at.classList.contains("weft-turn"))
     ) {
       // The roving tabindex (D3): arrows move the tab stop down the
-      // turn list; Enter or a click selects.
+      // turn list (or the Timeline's step rows); Enter or a click selects.
       const rows = Array.from(
-        this.body.querySelectorAll<HTMLElement>(".weft-turn")
+        this.body.querySelectorAll<HTMLElement>(
+          tl ? ".weft-tl[role]" : ".weft-turn"
+        )
       )
       const i = rows.indexOf(at) + (e.key === "ArrowDown" ? 1 : -1)
       const n = i < 0 ? undefined : rows.at(i)
       e.preventDefault()
+      if (n && tl) {
+        at.tabIndex = -1
+        n.tabIndex = 0
+      }
       n?.focus()
       return
     }
@@ -3439,6 +3465,9 @@ export class WeftDevtools extends HTMLElement {
     // carries into Studio (Dv3).
     on(main, "click", (e) => {
       if (!(e.target instanceof Element)) return
+      // A hand-off link opens through the panel token's hand-off (G3).
+      const a = e.target.closest("a[data-weft-handoff]")
+      if (a && this.handoff((a as HTMLAnchorElement).href)) e.preventDefault()
       const target = e.target.closest("[data-weft-step]")
       if (!target) return
       const n = Number(target.getAttribute("data-weft-step"))
@@ -5263,6 +5292,7 @@ export class WeftDevtools extends HTMLElement {
           endpoint: this.base,
           runId: t.id,
           logs: hasCapability(s, "logs"),
+          run: row ?? t.doc ?? undefined,
           ...(ed ? { edit: ed } : {}),
           ...(this.canAct(s) && !this.derived(t)
             ? {
@@ -6116,6 +6146,7 @@ export function renderTimeline(
     spans: t.spans,
     fold: t.folded,
     total: (t.events.at(-1)?.pos ?? 0) + 1,
+    agents: new Map((t.doc?.children ?? []).map((c) => [c.id, c.agent])),
   })
   const time = wf.scale === "time"
   const end = wf.domain[1]
@@ -6152,6 +6183,10 @@ export function renderTimeline(
     ])
   )
   const wrap = el("div", "weft-wf")
+  const steps = wf.rows.filter((r) => r.step !== undefined)
+  const stop = (
+    steps.find((r) => r.kind === "step" && r.step === sel) ?? steps.at(0)
+  )?.key
   for (const r of wf.rows) {
     const kind = ROW_KIND[r.kind]
     const b = r.status === "ok" ? undefined : rowBadge(r)
@@ -6198,7 +6233,13 @@ export function renderTimeline(
       "data-kind": kind,
       "data-tone": rowTone(r),
     }
-    if (r.step !== undefined) at["data-weft-step"] = String(r.step)
+    // A row of a step is a button (P7): Enter or Space selects it, the
+    // arrows move one tab stop (the selected step's row, else the first).
+    if (r.step !== undefined) {
+      at["data-weft-step"] = String(r.step)
+      at.role = "button"
+      at.tabindex = r.key === stop ? "0" : "-1"
+    }
     if (r.critical) at["data-critical"] = ""
     wrap.appendChild(
       el(
@@ -6241,6 +6282,16 @@ export interface FoldCtx {
   /** Capability logs (U11.2): each step hands its app log lines off
    * to Studio's drawer Logs tab (📄 ⤢). */
   logs?: boolean
+  /** The turn's run facts (its row, else its doc): the selected step —
+   * else the step it failed at — opens with lib/summarize.ts's answer,
+   * Studio's drawer at panel width (U10.2). */
+  run?: AnswerRun
+  /** Inside an expander: the turn the children load into, how deep
+   * this child sits, and its call's result — the child's final words
+   * equal to it are not drawn twice (UX-D-13). */
+  turn?: TurnView
+  depth?: number
+  said?: string
 }
 
 /** The editor as the Story's renderers call it: box turns a shown node
@@ -6288,7 +6339,7 @@ export function renderFolded(
           "",
           el(
             "div",
-            "weft-reason",
+            "weft-reason weft-ins",
             `· insert a message before step ${step.index}`,
             { "data-key": `ins${step.index}` }
           ),
@@ -6312,9 +6363,14 @@ export function renderFolded(
       ctx.edit.box(
         { kind: "insert", step: max },
         "",
-        el("div", "weft-reason", "· insert a message after the last step", {
-          "data-key": `ins${max}`,
-        }),
+        el(
+          "div",
+          "weft-reason weft-ins",
+          "· insert a message after the last step",
+          {
+            "data-key": `ins${max}`,
+          }
+        ),
         `a message inserted before step ${max}`
       )
     )
@@ -6394,6 +6450,10 @@ function renderStep(
     )
   card.appendChild(head)
   const body = el("div", "weft-step-b")
+  // The answer first (§6.3): on the step read, else the one it failed at.
+  const run = ctx?.run
+  if (t && run && step.index === (selectedStep ?? failedAtStep(run)))
+    body.appendChild(answerBlock(step, t, run, ctx.endpoint))
   // The step's run-scope compaction views (A9.2), on its step line.
   const doc = ctx?.child ? ctx.child.doc : t?.doc
   const comps = compactionsOf(doc)
@@ -6430,7 +6490,8 @@ function renderStep(
         "aria-busy": "true",
       })
     )
-  else if (step.text) {
+  // A child's final words that are its call's result: drawn there once.
+  else if (step.text && step.text.trim() !== ctx?.said?.trim()) {
     const said = el("div", undefined, step.text, { "data-key": "text" })
     // A call-free reply only: a rewrite may not drop a step's calls.
     body.appendChild(
@@ -6557,6 +6618,94 @@ function lastStep(req: PanelRequests): number {
   return n
 }
 
+/** answerBlock is the step read, answer first (U10.2, audit §6.3):
+ * Studio's drawer at panel width — lib/summarize.ts's verdict, sent,
+ * replied, tools ran and then lines, Studio's words — its Logs and Raw
+ * OTel handed off to the run page at the step's row (?sel=&tab=). */
+function answerBlock(
+  step: FoldedStep,
+  t: TurnView,
+  run: AnswerRun,
+  endpoint?: string
+): HTMLElement {
+  const n = step.index
+  const req = t.requests?.steps
+  const mine = req?.get(n)
+  const row = mine?.rows.at(-1)
+  let p = -1
+  for (const k of req?.keys() ?? []) if (k < n && k > p) p = k
+  const prev = req?.get(p)?.rows.at(-1)
+  const running = run.status === "running"
+  // No step_finish latency: the step's measured span (Studio's step row).
+  const wf = step.finish?.latencyMs
+    ? undefined
+    : waterfallRows({ runId: t.id, status: run.status, spans: t.spans })
+  const ms =
+    wf?.scale === "time"
+      ? wf.rows.find((r) => r.kind === "step" && r.step === n && !r.untimed)
+          ?.took
+      : undefined
+  const v = stepVerdict(step, run, ms ?? undefined)
+  const dl = el("dl", "weft-ans")
+  const line = (
+    k: keyof typeof ANSWER_LABELS,
+    text: string,
+    bad: boolean,
+    at: Record<string, string> = { "data-answer-line": k }
+  ) => {
+    if (bad) at["data-bad"] = ""
+    dl.append(
+      el("dt", undefined, ANSWER_LABELS[k]),
+      el("dd", undefined, text, at)
+    )
+  }
+  line("verdict", v.text, v.bad, { "data-verdict": "" })
+  line(
+    "sent",
+    sentLine(
+      row && {
+        count: row.body.messages_ref.count,
+        prevCount: prev?.body.messages_ref.count,
+        tools: row.body.tools.names.length,
+        promptChanged: mine?.promptChanged,
+        catalogChanged: mine?.catalogChanged,
+      }
+    ),
+    false
+  )
+  line("replied", repliedLine(step, running), false)
+  line(
+    "tools",
+    toolsLine(step, running),
+    step.toolCalls.some((c) => c.result?.isError)
+  )
+  line(
+    "then",
+    thenLine(
+      step,
+      run,
+      t.folded.steps.some((s) => s.index === n + 1)
+    ),
+    v.bad
+  )
+  const box = el("div", undefined, [dl], { "data-key": "ans" })
+  // Raw OTel hands off here; Logs is the step head's 📄 ⤢ (U11.2's
+  // logsLink, under capability logs) — one link per tab.
+  if (endpoint)
+    box.appendChild(
+      el("div", "weft-reason", [
+        el("a", undefined, `${DRAWER_TAB_LABEL.raw} ⤢`, {
+          href: href(endpoint, runLink(t.id, { sel: `s${n}`, tab: "raw" })),
+          target: "_blank",
+          rel: "noopener",
+          title: "open in Studio",
+          "data-weft-handoff": t.id,
+        }),
+      ])
+    )
+  return box
+}
+
 /** requestLine is the step's request (ADR 0028 §10, the Studio run
  * page's section in one line): the attempts and the changed marks,
  * the system prompt collapsed, the catalog's names, the params. A hole
@@ -6601,7 +6750,9 @@ function requestLine(
     )
     return box
   }
-  const head = el("div", "weft-call-h", [
+  // One line by default (UX-D-12): the attempts, the marks and the
+  // badges; the prompt, the catalog and the params on a click.
+  const head = el("summary", "weft-call-h", [
     el("span", "weft-name", "request"),
     el(
       "span",
@@ -6619,7 +6770,13 @@ function requestLine(
     )
   if (row.content && row.content !== "stripped")
     head.appendChild(badge(row.content))
-  box.appendChild(head)
+  const all = el("details", "weft-collapsible", [head])
+  if (open) {
+    const key = `${open.scope}\u0000req\u0000${step}`
+    all.setAttribute("data-weft-open", key)
+    if (open.keys.has(key)) all.setAttribute("open", "")
+  }
+  box.appendChild(all)
   if (row.content === "stripped") box.append(...requestHole("stripped"))
   const p = row.prompt
   if (p && !isHoleRef(p)) {
@@ -6634,7 +6791,7 @@ function requestLine(
       el("summary", undefined, `system prompt · ${text.length} chars`)
     )
     d.appendChild(el("div", "weft-res", text))
-    box.appendChild(d)
+    all.appendChild(d)
   } else if (row.system_hash) {
     const line = el(
       "div",
@@ -6642,13 +6799,15 @@ function requestLine(
       `system prompt ${shortHash(row.system_hash)}`
     )
     if (p) line.append(" · ", badge(p.badge))
-    box.appendChild(line)
+    all.appendChild(line)
   }
   const names = row.body.tools.names
-  box.appendChild(
+  all.appendChild(
     el("div", "weft-res", `tools: ${names.length ? names.join(", ") : "none"}`)
   )
-  box.appendChild(el("div", "weft-res", `params: ${paramsLine(row)}`))
+  // Every param the adapter's default: nothing to say (UX-D-12).
+  if (paramFields(row).some(([, v]) => v !== "adapter default"))
+    all.appendChild(el("div", "weft-res", `params: ${paramsLine(row)}`))
   return box
 }
 
@@ -6719,15 +6878,13 @@ function renderCall(
             title: call.childRunId,
           })
     )
-    // One level inline: a grandchild is its badge and the hand-off.
-    if (ctx?.child) {
-      if (ctx.endpoint) head.appendChild(handOff(ctx.endpoint, call.childRunId))
-    } else if (t) {
+    // Any depth inline (UX-D-13): a grandchild expands as its parent did.
+    const turn = t ?? ctx?.turn
+    if (turn) {
       // A10: replay from here on the child replays the CHILD as its own
       // run (its id, its agent), the parent untouched.
       if (replay) {
-        const agent =
-          t.doc?.children.find((c) => c.id === call.childRunId)?.agent ?? ""
+        const agent = childRow(turn, call.childRunId)?.agent ?? ""
         head.appendChild(
           verbs("child", [
             verb(
@@ -6745,7 +6902,7 @@ function renderCall(
         )
       }
       box.appendChild(
-        childBlock(call.childRunId, t, open, ctx?.endpoint, replay)
+        childBlock(call, turn, open, ctx?.endpoint, replay, ctx?.depth)
       )
     }
   }
@@ -6802,18 +6959,24 @@ function spanMs(t: TurnView | undefined, call: FoldedToolCall): string {
 
 /** childBlock is the lazy subagent expander (§2, Dv3): the call's
  * child run folds on demand and nests under the call. The element
- * delegates the toggle through [data-weft-child]. */
+ * delegates the toggle through [data-weft-child]. Any depth expands
+ * the same way (UX-D-13); past two levels the indent stops and the
+ * summary names the depth. */
 function childBlock(
-  childId: string,
+  call: FoldedToolCall,
   t: TurnView,
   open?: OpenState,
   endpoint?: string,
-  replay?: ReplayCtx
+  replay?: ReplayCtx,
+  up = 0
 ): HTMLElement {
+  const childId = call.childRunId!
+  const depth = up + 1
   const child = t.children.get(childId)
-  const row = t.doc?.children.find((c) => c.id === childId)
+  const row = childRow(t, childId)
   const details = el("details", "weft-collapsible")
   details.setAttribute("data-weft-child", childId)
+  if (depth > 2) details.setAttribute("data-depth", String(depth))
   if (t.expanded.has(childId)) details.setAttribute("open", "")
   // The nested row (A10): agent, status, usage — the parent's row of
   // the child, before it is opened; its usage only once the record
@@ -6834,6 +6997,8 @@ function childBlock(
       : `subagent ${shortId(childId)}`
   )
   summary.setAttribute("aria-expanded", String(t.expanded.has(childId)))
+  if (depth > 2)
+    summary.appendChild(el("span", "weft-badge weft-info", depthWord(depth)))
   const holes = row && holeBadges(child?.doc?.holes ?? rowHoles(row))
   if (holes) summary.appendChild(holes)
   details.appendChild(summary)
@@ -6855,6 +7020,9 @@ function childBlock(
           endpoint,
           child,
           runId: childId,
+          turn: t,
+          depth,
+          said: call.result?.content,
           // The child's steps replay the child (A10); never a fork.
           ...(replay
             ? {
@@ -6880,6 +7048,14 @@ function childBlock(
       )
   }
   return details
+}
+
+/** childRow is a child run's row: the turn's own children, else a
+ * loaded child's (a grandchild at any depth). */
+function childRow(t: TurnView, id: string) {
+  return [t.doc, ...[...t.children.values()].map((c) => c.doc)]
+    .flatMap((d) => d?.children ?? [])
+    .find((c) => c.id === id)
 }
 
 /** handOff is "open in Studio" for a child run: its run page

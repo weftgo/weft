@@ -137,24 +137,53 @@ describe("the panel's request line (A1.4)", () => {
     fakeStudio(routes(golden("requests-ok")), metaWithRequests)
     const el = await mount({ ...ATTRS, "data-token": claims("playground") })
     const line = (step: number) => $(el, `[data-weft-request="${step}"]`)!
-    // The prompt: in a collapsed <details>, the text itself.
-    const d1 = line(1).querySelector("details")!
+    // One line by default (UX-D-12, U10.2): the attempts and the marks
+    // on the summary; the prompt, the catalog and the params a click away.
+    const all1 = line(1).querySelector("details")!
+    expect(all1.hasAttribute("open")).toBe(false)
+    expect(all1.querySelector("summary")?.textContent).toBe(
+      "requestattempt 1 · attempt 2prompt changed at this stepcatalog changed at this step"
+    )
+    // The prompt: in a collapsed <details> inside it, the text itself.
+    const d1 = all1.querySelector("details")!
     expect(d1.hasAttribute("open")).toBe(false)
     expect(d1.querySelector(".weft-res")?.textContent).toBe(PROMPT1)
-    expect(line(0).querySelector("details .weft-res")?.textContent).toBe(
-      PROMPT0
-    )
-    // The catalog's names; the params on one line, every field named.
+    expect(
+      line(0).querySelector("details details .weft-res")?.textContent
+    ).toBe(PROMPT0)
+    // The catalog's names; params every one the adapter's default say
+    // nothing (UX-D-12), a set one is named (the Request tab has all).
     expect(line(1).textContent).toContain("tools: lookup_order, refund")
     expect(line(0).textContent).toContain("tools: lookup_order")
-    expect(line(1).textContent).toContain(
-      "params: temperature adapter default · top_p adapter default · max_tokens adapter default · stop adapter default · seed adapter default"
-    )
+    expect(line(1).textContent).not.toContain("params:")
     // The step a PrepareStep rewrote, and its retry.
     expect(line(1).textContent).toContain("prompt changed at this step")
     expect(line(1).textContent).toContain("catalog changed at this step")
     expect(line(1).textContent).toContain("attempt 1 · attempt 2")
     expect(line(0).textContent).not.toContain("changed at this step")
+  })
+
+  it("a param the request set is named on the request line (all-default says nothing)", async () => {
+    const g = golden<{ requests: Record<string, unknown>[] }>("requests-ok")
+    const requests = g.requests.map((r) =>
+      r.step === 0
+        ? {
+            ...r,
+            body: {
+              ...(r.body as Record<string, unknown>),
+              params: { temperature: 0.2 },
+            },
+          }
+        : r
+    )
+    fakeStudio(routes({ requests }), metaWithRequests)
+    const el = await mount({ ...ATTRS, "data-token": claims("playground") })
+    expect($(el, '[data-weft-request="0"]')!.textContent).toContain(
+      "params: temperature 0.2 · top_p adapter default"
+    )
+    expect($(el, '[data-weft-request="1"]')!.textContent).not.toContain(
+      "params:"
+    )
   })
 
   it("a pre-A1 run says so on every step; a content-off one shows the hash and the badge", async () => {
@@ -177,7 +206,8 @@ describe("the panel's request line (A1.4)", () => {
     expect(l0.querySelector(".weft-reason")?.textContent).toContain(
       "fix: turn content on"
     )
-    expect(l0.querySelector("details")).toBeNull()
+    // No prompt to open: the request's one level holds only the hash.
+    expect(l0.querySelector("details details")).toBeNull()
   })
 
   it("a 403 without the hidden badge is an error, not the hidden hole", async () => {

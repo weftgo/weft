@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { patch } from "./render"
 import { FILTER_MS, KIDS_CAP, newTree, STR_CAP, treeView, utf8 } from "./tree"
 import { STORE_KEY } from "./layout"
+import { PANEL_CSS } from "./styles"
 import {
   $,
   all,
@@ -1189,5 +1190,61 @@ describe("paging (before= / before_id=, no cap)", () => {
     await pause(FILTER_MS + 50)
     expect(FakeIO.all.length).toBe(made)
     expect(el.shadowRoot!.innerHTML).toBe(before)
+  })
+})
+
+// U8.3-fix (P7): a Timeline row of a step is a button — one tab stop
+// (the selected step's row, else the first), the arrows move it, Enter
+// or Space selects the step and opens it in Story; the run row is not
+// a control and does not look like one.
+describe("the timeline's rows from the keyboard (P7)", () => {
+  it("step rows are buttons on one tab stop; Enter selects the step in Story", async () => {
+    const routes = baseRoutes()
+    routes["runs/s_01-t1/events?after=0&limit=500"] = page([
+      ...runEvents("s_01-t1").slice(0, 2),
+      {
+        type: "tool_start",
+        run_id: "s_01-t1",
+        seq: 1,
+        call_id: "c1",
+        name: "lookup_order",
+        args: {},
+      },
+      {
+        type: "tool_finish",
+        run_id: "s_01-t1",
+        seq: 1,
+        call_id: "c1",
+        name: "lookup_order",
+        content: "ok",
+        is_error: false,
+      },
+      ...runEvents("s_01-t1").slice(2),
+    ])
+    fakeStudio(routes)
+    const el = await mount(BASE)
+    click(tab(el, "timeline"))
+    await settle()
+    const rows = all(el, ".weft-tl") as HTMLElement[]
+    expect(rows.map((n) => [n.getAttribute("role"), n.tabIndex])).toEqual([
+      [null, -1], // the run row: no control
+      ["button", 0], // step 0: the tab stop
+      ["button", -1],
+      ["button", -1],
+    ])
+    expect(PANEL_CSS).toContain(".weft-tl[role] { cursor: pointer; }")
+    expect(PANEL_CSS).not.toMatch(/\.weft-tl \{ cursor/)
+    rows[1].focus()
+    key(rows[1], { key: "ArrowDown" })
+    expect(active(el)?.dataset.key).toBe(rows[2].dataset.key)
+    expect(rows[2].tabIndex).toBe(0)
+    expect(rows[1].tabIndex).toBe(-1)
+    const e = key(rows[3], { key: "Enter" })
+    expect(e.defaultPrevented).toBe(true)
+    await settle()
+    expect(tab(el, "story").getAttribute("aria-selected")).toBe("true")
+    expect(
+      ($(el, '.weft-step[data-weft-step="0"]') as HTMLElement).style.outline
+    ).toContain("solid")
   })
 })

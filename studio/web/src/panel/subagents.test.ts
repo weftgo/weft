@@ -3,8 +3,9 @@
 // parent's step, each with the CHILD's request line (read by the
 // child's id, under the same scope rules as the turn's: a read-scoped
 // token never asks and shows hidden) and an "open in Studio" hand-off
-// carrying the child's id. A grandchild is its badge and the hand-off,
-// never another expander.
+// carrying the child's id. A grandchild expands the same way (UX-D-13,
+// U10.2): lazy, read only once opened; past two levels the indent stops
+// and the row names its depth.
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 import { golden } from "../test/fake-studio"
 import {
@@ -31,6 +32,7 @@ afterEach(teardown)
 const RUN = "s_01-t1"
 const CHILD = `${RUN}/0/c_sub`
 const GRAND = `${CHILD}/0/c_deep`
+const GREAT = `${GRAND}/0/c_deepest`
 const PARENT_PROMPT = "You are a support agent."
 const CHILD_PROMPT = "You research orders." // requests-child.golden.json
 const U = { input_tokens: 10, output_tokens: 5 }
@@ -122,20 +124,34 @@ function routes() {
   )
   r[`runs/${CHILD}/transcript`] = { batches: [] }
   r[`runs/${CHILD}/requests?limit=1000`] = golden("requests-child")
+  const greatRow = runRow({
+    id: GREAT,
+    parent_run_id: GRAND,
+    parent_call_id: "c_deepest",
+    agent: "miner",
+    session_id: "",
+  })
+  r[`runs/${GRAND}`] = { ...grandRow, children: [greatRow] }
+  r[`runs/${GRAND}/events?after=0&limit=500`] = page(
+    delegating(GRAND, "c_deepest", "deepest")
+  )
+  r[`runs/${GRAND}/transcript`] = { batches: [] }
+  r[`runs/${GRAND}/requests?limit=1000`] = golden("requests-child")
   return r
 }
 
-async function openChild(el: WeftDevtools): Promise<Element> {
-  const expander = $(el, `[data-weft-child="${CHILD}"]`) as HTMLDetailsElement
+async function openChild(el: WeftDevtools, id = CHILD): Promise<Element> {
+  const at = `[data-weft-child="${CSS.escape(id)}"]`
+  const expander = $(el, at) as HTMLDetailsElement
   expect(expander).toBeTruthy()
   expander.setAttribute("open", "")
   expander.dispatchEvent(new Event("toggle", { bubbles: true }))
   await settle()
-  return $(el, `[data-weft-child="${CHILD}"]`)!
+  return $(el, at)!
 }
 
 describe("the panel's subagent badge (A10)", () => {
-  it("opens the child inline with its own request line and a hand-off carrying its id; a grandchild only hands off", async () => {
+  it("opens the child inline with its own request line and a hand-off carrying its id; a grandchild expands the same way, lazily", async () => {
     const studio = fakeStudio(routes(), metaWithRequests)
     const el = await mount({ ...ATTRS, "data-token": claims("playground") })
     const closed = $(el, `[data-weft-child="${CHILD}"]`)!
@@ -161,14 +177,64 @@ describe("the panel's subagent badge (A10)", () => {
     expect(hand.getAttribute("href")).toBe(
       `http://studio.test/studio/runs/${encodeURIComponent(CHILD)}`
     )
-    // The grandchild: a badge and the hand-off, no expander, no reads.
-    expect($(el, `[data-weft-child="${GRAND}"]`)).toBeNull()
+    // The grandchild (UX-D-13): its own expander, closed, nothing read
+    // until it is opened; its row names it from the child's document.
+    const grand = $(el, `[data-weft-child="${CSS.escape(GRAND)}"]`)!
+    expect(grand.hasAttribute("open")).toBe(false)
+    expect(grand.querySelector("summary")?.textContent).toContain(
+      "subagent digger · succeeded"
+    )
     expect(
-      block
-        .querySelector(`[data-weft-handoff="${GRAND}"]`)
+      grand
+        .querySelector(`[data-weft-handoff="${CSS.escape(GRAND)}"]`)
         ?.getAttribute("href")
     ).toBe(`http://studio.test/studio/runs/${encodeURIComponent(GRAND)}`)
-    expect(studio.gets(`runs/${GRAND}`)).toEqual([])
+    expect(studio.gets(`runs/${GRAND}/events`)).toEqual([])
+    // Opened: read by its own id, its steps under it; two levels deep
+    // the indent holds, so no depth mark yet.
+    const g = await openChild(el, GRAND)
+    expect(studio.gets(`runs/${GRAND}/events`).length).toBe(1)
+    expect(g.hasAttribute("data-depth")).toBe(false)
+    expect(g.querySelector('[data-weft-step="0"]')).toBeTruthy()
+    // Its own child, three levels down: the indent stops, the depth named.
+    const great = $(el, `[data-weft-child="${CSS.escape(GREAT)}"]`)!
+    expect(great.getAttribute("data-depth")).toBe("3")
+    expect(great.querySelector("summary .weft-badge")?.textContent).toBe(
+      "depth 3"
+    )
+  })
+
+  it.each([
+    ["the call's result: drawn once, on the call", "found it", false],
+    ["other words: drawn", "found it, I think", true],
+  ])("a child's final words that are %s (UX-D-13)", async (_, words, drawn) => {
+    const r = routes()
+    const ev = delegating(CHILD, "c_deep", "deeper")
+    // The child answers in a second step; its parent's call returned
+    // "found it".
+    ev.splice(
+      ev.length - 1,
+      0,
+      { type: "step_start", run_id: CHILD, index: 1 },
+      { type: "text_delta", run_id: CHILD, text: words },
+      {
+        type: "step_finish",
+        run_id: CHILD,
+        index: 1,
+        reason: "stop",
+        usage: U,
+      }
+    )
+    r[`runs/${CHILD}/events?after=0&limit=500`] = page(ev)
+    fakeStudio(r, metaWithRequests)
+    const el = await mount({ ...ATTRS, "data-token": claims("playground") })
+    const block = await openChild(el)
+    // The child's step 1 is drawn; its words only when they are not a
+    // second copy of the result the parent's call row already shows.
+    expect(block.querySelector('[data-weft-step="1"]')).toBeTruthy()
+    expect(
+      block.querySelector('[data-weft-step="1"] [data-key=text]')?.textContent
+    ).toBe(drawn ? words : undefined)
   })
 
   // Parity with Studio's subagent block (subagent-block.test.tsx, the

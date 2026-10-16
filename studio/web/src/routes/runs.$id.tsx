@@ -854,6 +854,16 @@ function RunPage() {
   )
   // The run tree (U8.2): lib/waterfall.ts's rows on the page's scale,
   // projected into the Waterfall's rows.
+  // A child row no span names reads its agent (U10.2, the panel's rule).
+  const childAgents = useMemo(() => {
+    const out = new Map<string, string>()
+    for (const c of [
+      ...(run.data?.children ?? []),
+      ...childDocs.flatMap((d) => d?.children ?? []),
+    ])
+      if (c.agent) out.set(c.id, c.agent)
+    return out
+  }, [run.data?.children, childDocs])
   const treeInput = useMemo(
     () => ({
       runId: id,
@@ -862,8 +872,17 @@ function RunPage() {
       fold: linkedFold,
       total: stream.total,
       children: childFolds,
+      agents: childAgents,
     }),
-    [id, viewStatus, treeSpansAll, linkedFold, stream.total, childFolds]
+    [
+      id,
+      viewStatus,
+      treeSpansAll,
+      linkedFold,
+      stream.total,
+      childFolds,
+      childAgents,
+    ]
   )
   // Every child expanded: where a ?sel= row sits, and so which children
   // it opens. A second whole tree, so built only when the selection, the

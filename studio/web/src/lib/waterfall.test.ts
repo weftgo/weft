@@ -416,6 +416,27 @@ describe("a running delegation (the ?tree=1 shape, mid-flight)", () => {
     span("c_c0", "c_inv", "chat m", 2, 3, chat(C, 0, "tool_calls", 1)),
   ]
 
+  it("a child row no span names reads its agent (the run document's), on both scales (U8.3-fix)", () => {
+    const input = {
+      runId: P,
+      status: "running",
+      spans,
+      fold: linkView(fold(events), [
+        { id: C, parent_call_id: "call_1", parent_run_id: P },
+      ]),
+      agents: new Map([[C, "researcher"]]),
+    }
+    const label = (scale?: "order") =>
+      waterfallRows(input, scale).rows.find((r) => r.key === `r:${C}`)?.label
+    expect(label()).toBe("researcher")
+    expect(label("order")).toBe("researcher")
+    // Without it, both fall back to the call's tool name.
+    const bare = { ...input, agents: undefined }
+    expect(
+      waterfallRows(bare, "order").rows.find((r) => r.key === `r:${C}`)?.label
+    ).toBe("ops")
+  })
+
   it("the open call is a row, its child a running row under it, never a foreign span", () => {
     const wf = waterfallRows({
       runId: P,
@@ -431,7 +452,8 @@ describe("a running delegation (the ?tree=1 shape, mid-flight)", () => {
       "  step s0 step 0",
       "    model s0:m model · script | → 1 call",
       "    tool c:0:call_1 ops",
-      "      child r:P/0/call_1 subagent",
+      // No agent known: the label rule falls back to its tool's name.
+      "      child r:P/0/call_1 ops",
     ])
     const by = (k: string) => wf.rows.find((r) => r.key === k)!
     for (const k of ["r:P", "s0", "c:0:call_1", `r:${C}`]) {

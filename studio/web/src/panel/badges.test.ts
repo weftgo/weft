@@ -420,6 +420,8 @@ describe("no panel-only badge strings", () => {
       "compactedRefusal — the server's refusal of an insert inside a view (ADR 0029 decision 4), not the hole",
     "experiment-body: of step  was compacted away":
       "compactedRefusal — the server's refusal of an edit inside a view (F1.1's words), not the hole",
+    "run-tree:— a derived run has no event record":
+      "DRAWER.derivedNoEvents — the run page's drawer; the panel imports only DRAWER_TAB_LABEL (U10.2)",
     "error-kind:no result recorded: the call was interrupted":
       "REPAIRED_RESULT — core's Repair text, matched to badge a synthesised result (UX-S1-08), not the hole",
     "experiment-body:max_tokens must be ":
@@ -460,6 +462,7 @@ describe("no panel-only badge strings", () => {
     "element.ts|catalog changed at this step",
     'element.ts|"subagent"', // the child run's link
     'element.ts|"subagent"',
+    "element.ts|depthWord", // a child nested past the indent (UX-D-13)
     "element.ts|, ms)", // the call's wall time
     'element.ts|"error"', // a tool error result (data, rule 1)
     "request.ts|data-weft-mark", // E1.2's change chips

@@ -100,6 +100,10 @@ export interface WaterfallInput {
   children?: ReadonlyMap<string, FoldedRun>
   /** Child run ids drawn expanded; every other child is collapsed. */
   expanded?: ReadonlySet<string>
+  /** Child runs' agents, by run id (the run document's children): a
+   * child row no span or fold names reads its agent, else its tool's
+   * name — one label rule on both scales and both surfaces. */
+  agents?: ReadonlyMap<string, string>
 }
 
 export interface WaterfallModel {
@@ -643,7 +647,12 @@ function timeRows(input: WaterfallInput): WaterfallModel {
   const buildRun = (
     run: string,
     isChild: boolean,
-    at?: { start: number; took: number | null; status: RowStatus }
+    at?: {
+      start: number
+      took: number | null
+      status: RowStatus
+      label?: string
+    }
   ): Node => {
     built.add(run)
     const own = byRun.get(run) ?? []
@@ -666,7 +675,7 @@ function timeRows(input: WaterfallInput): WaterfallModel {
       isChild,
       str(ia["gen_ai.agent.name"]) ??
         inv?.span.name.replace(/^invoke_agent\s*/, "") ??
-        fold?.agent,
+        (fold?.agent || input.agents?.get(run) || at?.label),
       int(ia["weft.run.steps"]) ?? fold?.steps.length,
       inv?.start ?? (lo < Infinity ? lo : (at?.start ?? 0)),
       inv
@@ -1067,7 +1076,7 @@ function orderRows(input: WaterfallInput): WaterfallModel {
           child = runRow(
             id,
             true,
-            cf?.agent || c.name,
+            cf?.agent || input.agents?.get(id) || c.name,
             cf?.steps.length,
             lo,
             t.took,
@@ -1213,19 +1222,23 @@ export const CRITICAL_HINT =
 export const lanesWord = (n: number | undefined) =>
   n && n > 1 ? `${n} lanes` : ""
 
+/** A child run nested deeper than its indent shows (UX-D-13: the
+ * panel's Story stops indenting past two levels and names the depth). */
+export const depthWord = (n: number) => `depth ${n}`
+
 /** An untimed row's mark while the run goes on (not a loss: its spans
  * export when they end). */
 export const UNTIMED_PENDING = "spans not reported yet"
 export const UNTIMED_PENDING_HINT =
-  "the run's events have this row; its spans export when they end and the page reads them every few seconds — its time is not known yet"
+  "its spans export when they end; the page reads them every few seconds"
 
 /** An untimed row's badge once the run ended: the A3 table's
  * not_recorded, in this instance's words (lib/honesty.ts's HoleMark). */
 export const UNTIMED_HOLE = {
   hole: "not_recorded",
   reason:
-    "no span covers this row: the run's events have it, its spans were not stored — dropped on the way (weft.records.dropped) or never exported — so its time is not known",
-  fix: 'if the app logged "weft/otel: destination queue full", raise that destination\'s queue: otel.QueueSize(n)',
+    "no span covers this row: its spans were dropped (weft.records.dropped) or never exported",
+  fix: 'on "weft/otel: destination queue full", raise otel.QueueSize(n)',
 } as const
 
 /** A child run row's link to its own page. */

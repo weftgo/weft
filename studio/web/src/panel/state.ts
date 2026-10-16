@@ -1631,8 +1631,11 @@ export class PanelModel {
     ])
     if (seq !== this.loadSeq || this.disposed || this.state.turn !== view)
       return
+    // A grandchild (UX-D-13) is no row of the turn's: its own document.
     const status =
-      view.doc?.children.find((c) => c.id === childId)?.status ?? "running"
+      view.doc?.children.find((c) => c.id === childId)?.status ??
+      doc?.status ??
+      "running"
     const folded = overlay(viewOf(feed), transcript, status !== "running")
     // The grandchildren are linked (one level inline: the panel badges
     // them and hands off to Studio).

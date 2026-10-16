@@ -178,6 +178,13 @@ details.weft-collapsible > summary::before { content: "\\25B8 "; }
 details.weft-collapsible[open] > summary::before { content: "\\25BE "; }
 
 .weft-req { margin-bottom: 6px; }
+details[data-depth] { margin-left: -10px; }
+.weft-ans { display: grid; grid-template-columns: max-content 1fr; gap: 1px 8px; margin: 0 0 6px; }
+.weft-ans dt { color: var(--weft-faint); }
+.weft-ans dd { margin: 0; }
+.weft-ans [data-bad] { color: var(--weft-err); }
+[data-key=ans] a { margin-right: 8px; color: var(--weft-accent); }
+@media (hover: hover) { .weft-ins:not(:hover):not(:focus-visible) { color: transparent; } }
 .weft-call { border-top: 1px dashed var(--weft-line); margin-top: 6px; padding-top: 6px; }
 .weft-call-h { display: flex; gap: 6px; align-items: baseline; flex-wrap: wrap; }
 .weft-call .weft-name { color: var(--weft-info); }
@@ -204,7 +211,8 @@ details.weft-collapsible[open] > summary::before { content: "\\25BE "; }
 .weft-wf-bar { position: absolute; top: 0; bottom: 0; border-radius: var(--weft-radius-sm); background: var(--weft-info); min-width: 2px; }
 .weft-wf-ms { width: 52px; flex: none; text-align: right; color: var(--weft-faint); }
 ${toneRules()}
-.weft-tl { cursor: pointer; }
+.weft-tl[role] { cursor: pointer; }
+.weft-tl[data-tone=step] .weft-wf-bar, .weft-tl[data-tone=never] .weft-wf-bar { background: color-mix(in srgb, var(--c) 60%, transparent); }
 .weft-tl.weft-sel { background: var(--weft-bg3); }
 .weft-tl .weft-wf-name { color: var(--c); }
 .weft-tl i { font-style: normal; display: inline-block; width: 2ch; }

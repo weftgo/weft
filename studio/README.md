@@ -303,9 +303,28 @@ shown), the step story with tool calls, usage splits, each step's
 attempts and timing ("attempt 4 of 4 · fallback to glm-b", "1.2 s ·
 ttft 180 ms"), approvals (read-only — or decided from the panel on
 the app's own turns, below), truncation/gap/stripped honesty, the raw JSON, a live tail,
-⤢ deep links into Studio, lazy subagents (one level inline, with the
-child's request line and an "open in Studio" hand-off; a grandchild is
-the hand-off only) and a spans waterfall.
+⤢ deep links into Studio, lazy subagents (inline at any depth, each
+read only once opened, with the child's request line and an "open in
+Studio" hand-off; past two levels the indent stops and the row says
+"depth N"; a child's final words that are its call's result are drawn
+once, on the call — UX-D-13) and a spans waterfall.
+
+The step read (U10.2, the audit's §6.3): the Story's selected step —
+else, unpicked, the step the run failed at — opens answer first, the
+run page's drawer at panel width: `lib/summarize.ts`'s verdict line
+(`[data-verdict]`: what stopped the run there, the finish, tokens,
+latency, first token) and its sent / replied / tools ran / then lines
+(`[data-answer-line]`), the same words `parity.test.ts` holds to
+Studio's drawer on opt.usage-limit; its Logs and Raw OTel hand off
+(the step head's `📄 ⤢` — U11.2's `logsLink`, under capability logs —
+and the answer's `Raw OTel ⤢`: the run page at the step's row,
+`?sel=s<n>&tab=logs|raw`, lib/links.ts's `runLink` — no token in the
+URL; a playground panel token opens it through the hand-off, as every
+`[data-weft-handoff]` link does). Each step's request is one line by
+default (UX-D-12: the attempts, the changed marks, the badges) and opens
+on a click to the prompt, the catalog and the params — the params only
+when one is not the adapter's default; the "insert a message" lines
+show on hover or focus.
 
 The views (plan D4). The open turn has four tabs, a `role="tablist"`
 (`←`/`→`, `Home`/`End` move and select; one tab stop): **Story** (the
@@ -342,8 +361,13 @@ each row's extent with its offset as the title, a row no span covers
 "spans not reported yet" or badged `not_recorded`; a child run is one
 row whose ⤢ opens Studio's run page at it (`?sel=r:<child>`, where it
 expands in place), never its subtree; a click on a step's row selects
-that step in Story (what the header's ⤢ carries). The panel reads
-`/spans` without `?tree=1`: a child row's extent is its tool call's.
+that step in Story (what the header's ⤢ carries) — a step's rows are
+buttons on one tab stop (the selected step's, else the first; `↑`/`↓`
+move it, `Enter`/`Space` select; the run row is no control). The panel
+reads `/spans` without `?tree=1`: a child row's extent is its tool
+call's, its label its agent from the run document (`waterfallRows`'
+`agents`, else its tool's name — one rule on both scales and surfaces,
+the label Studio reads off the child's `invoke_agent` span).
 `parity.test.ts`'s "the run tree on both surfaces" holds the two
 renderers to the same rows on the director run. Studio's span list
 (`lib/trace.ts`'s `spansFromTimed`) walks the same span tree
@@ -1016,8 +1040,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 270,068 B raw / 87,738 B gzip
-(85.7 KiB, the bundle of the ledger's row "U10.1-fix drawer review"; 10,566 B — 10.3 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 275,671 B raw / 89,556 B gzip
+(87.5 KiB, the bundle of the ledger's row "U10.2 Story answer first"; 8,748 B — 8.5 KiB — of headroom under
 the 98,304 B, 96 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; A5.4 raised it from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library

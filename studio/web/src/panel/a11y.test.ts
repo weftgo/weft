@@ -437,6 +437,19 @@ const MODES: {
     act: timeline,
   },
   {
+    // U10.2: a picked step's answer, its hand-offs and the request line.
+    name: "the Story's step read answer first",
+    width: 1024,
+    attrs: { "data-open": "true" },
+    sel: "[data-verdict]",
+    act: async (el) => {
+      ;(
+        el.shadowRoot!.querySelector(".weft-step .weft-step-h") as HTMLElement
+      ).click()
+      await settle()
+    },
+  },
+  {
     name: "the experiment drawer open",
     width: 1024,
     attrs: { "data-open": "true", "data-position": "right-dock" },

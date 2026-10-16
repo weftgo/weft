@@ -86,6 +86,13 @@ describe("runLink", () => {
     )
   })
 
+  it("opens the drawer's tab on a selected row (U10.2: the panel's Logs / Raw OTel hand-off)", () => {
+    expect(path(runLink("r_1", { sel: "s2", tab: "logs" }))).toBe(
+      "runs/r_1?sel=s2&tab=logs"
+    )
+    expect(runLink("r_1", { sel: "s2" }).search.tab).toBeUndefined()
+  })
+
   it("selects an OTel span, the scale and the replay position", () => {
     expect(runLink("r_1", { span: "ab12" }).search.sel).toBe("t:ab12")
     expect(path(runLink("r_1", { scale: "time", t: 7 }))).toBe(

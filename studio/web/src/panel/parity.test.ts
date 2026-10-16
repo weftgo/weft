@@ -69,6 +69,7 @@ import {
   hiddenRefusal,
   pagedEvents,
   pagedRequests,
+  transcriptOf,
 } from "../test/fake-studio"
 import type { FakePosEvent } from "../test/fake-studio"
 import {
@@ -138,6 +139,15 @@ import {
   OPS,
   SPANS as DIR_SPANS,
 } from "../test/director-fixture"
+import {
+  UL,
+  UL_BODIES,
+  UL_EVENTS,
+  UL_LOGS,
+  UL_REQUESTS,
+  UL_SPANS,
+  ulDoc,
+} from "../test/usage-limit-fixture"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -3311,7 +3321,7 @@ describe("the run tree on both surfaces (U8.3)", () => {
     ...s,
     run_id: DIR,
   }))
-  const serveDir = (studioMeta: boolean) =>
+  const serveDir = (studioMeta: boolean, spans = own) =>
     new FakeStudio()
       .on(
         "GET meta",
@@ -3327,7 +3337,7 @@ describe("the run tree on both surfaces (U8.3)", () => {
         )
       )
       .on(`GET runs/${DIR}/transcript`, { messages: [] })
-      .on(`GET runs/${DIR}/spans`, { spans: own })
+      .on(`GET runs/${DIR}/spans`, { spans })
       .install()
   const kinds = (n: HTMLElement) => [n.dataset.kind, n.dataset.tone]
 
@@ -3402,7 +3412,7 @@ describe("the run tree on both surfaces (U8.3)", () => {
       "step 0",
       "model · script",
       "ops_manager",
-      "subagent", // no child span or fold read: the row's own word
+      "ops-manager", // no child span or fold read: its agent, from the doc
       "http.get",
       "step 1",
       "model · script",
@@ -3424,5 +3434,216 @@ describe("the run tree on both surfaces (U8.3)", () => {
     expect(new URL(handoff.getAttribute("href")!).searchParams.get("sel")).toBe(
       `r:${OPS}`
     )
+  })
+})
+
+// U8.3-fix (P6): one label rule for a child row. The panel reads its
+// own spans (no ?tree=1): the child row is the fold's, named by the run
+// document's agent. Studio, fed the ?tree=1 shape, names it from the
+// child's invoke_agent span. The same key and the same label on both.
+describe("the child row's label on both surfaces, whatever spans each read (U8.3-fix)", () => {
+  const rOK = golden<{ runs: RunRow[] }>("runs").runs.find(
+    (r) => r.id === "r_ok"
+  )!
+  const child: RunRow = {
+    ...rOK,
+    id: OPS,
+    agent: "ops-manager",
+    parent_run_id: DIR,
+    parent_call_id: "call_1",
+  }
+  const row: RunRow = { ...rOK, id: DIR, agent: "director", steps: 2 }
+  const doc = {
+    ...row,
+    trace_id: "t1",
+    children: [child],
+    holes: [],
+  } as unknown as RunDoc
+  const withRun = (sp: typeof DIR_SPANS) =>
+    sp.map((s) => ({ ...s, run_id: String(s.attrs["weft.run.id"] ?? DIR) }))
+  const serveTree = (meta: Record<string, unknown>, spans: typeof DIR_SPANS) =>
+    new FakeStudio()
+      .on("GET meta", meta)
+      .on("GET runs", { total: 1, runs: [row], next_before: null })
+      .on(`GET runs/${DIR}`, doc)
+      .on(
+        `GET runs/${DIR}/events`,
+        pagedEvents(
+          DIR_EVENTS.map((event, pos) => ({ pos, time: rOK.started, event })),
+          { done: true }
+        )
+      )
+      .on(`GET runs/${DIR}/transcript`, { messages: [] })
+      .on(`GET runs/${DIR}/spans`, { spans })
+      .install()
+
+  it("the panel's fold fallback and Studio's ?tree=1 spans: one key, one label", async () => {
+    serveTree(
+      META,
+      withRun(DIR_SPANS.filter((s) => s.span_id.startsWith("d_")))
+    )
+    const el = await mount({
+      "data-endpoint": "http://studio.test/studio/",
+      "data-open": "true",
+    })
+    await vi.waitFor(() => expect(all(el, ".weft-turn").length).toBe(1), {
+      timeout: 5_000,
+    })
+    click(all(el, ".weft-turn")[0])
+    await vi.waitFor(() => expect($(el, "#weft-tab-timeline")).toBeTruthy(), {
+      timeout: 5_000,
+    })
+    click($(el, "#weft-tab-timeline"))
+    const at = `#weft-tp-timeline [data-key="${CSS.escape(`tl:r:${OPS}`)}"]`
+    await vi.waitFor(() => expect($(el, at)).toBeTruthy(), { timeout: 5_000 })
+    const panel = $(el, `${at} .weft-tl-l`)!.textContent
+    el.remove()
+    await settle()
+    cleanup()
+    document.body.innerHTML = ""
+
+    stubBrowser()
+    vi.stubGlobal("scrollTo", vi.fn())
+    StudioEventSource.reset()
+    vi.stubGlobal("EventSource", StudioEventSource)
+    setStudioToken("")
+    serveTree(
+      {
+        ...golden<Record<string, unknown>>("meta"),
+        capabilities: [
+          ...golden<{ capabilities: string[] }>("meta").capabilities,
+          "spans_tree",
+        ],
+      },
+      withRun(DIR_SPANS)
+    )
+    renderApp(`/runs/${DIR}`)
+    const sel = `[data-span="${CSS.escape(`r:${OPS}`)}"]`
+    await waitFor(() => expect(document.querySelector(sel)).toBeTruthy())
+    const studio = document
+      .querySelector(`${sel} div[title]`)!
+      .getAttribute("title")!
+      .split(" — ")[0]
+    expect(panel).toBe("ops-manager")
+    expect(studio).toBe(panel)
+  })
+})
+
+// U10.2 (UX-D-12, audit §6.3): the panel's Story step is Studio's
+// answer-first drawer at panel width — lib/summarize.ts's verdict and
+// its sent / replied / tools ran / then lines, the same words. On
+// opt.usage-limit (test/usage-limit-fixture.ts) both land on step 2,
+// the step the run failed at.
+describe("the step's answer on both surfaces (U10.2)", () => {
+  const doc = ulDoc()
+  const row = (({ children: _c, holes: _h, compactions: _x, ...r }) => r)(
+    doc
+  ) as unknown as RunRow
+  const serveUL = (meta: Record<string, unknown>) =>
+    new FakeStudio()
+      .on("GET meta", meta)
+      .on("GET runs", { total: 1, runs: [row], next_before: null })
+      .on(`GET runs/${UL}`, doc)
+      .on(
+        `GET runs/${UL}/events`,
+        pagedEvents(
+          UL_EVENTS.map((event, pos) => ({ pos, time: doc.started, event })),
+          { done: true }
+        )
+      )
+      .on(`GET runs/${UL}/transcript`, transcriptOf(UL_BODIES))
+      .on(`GET runs/${UL}/spans`, { spans: UL_SPANS })
+      .on(`GET runs/${UL}/requests`, pagedRequests(UL_REQUESTS))
+      .on(`GET runs/${UL}/logs`, UL_LOGS)
+      .on("GET runtimes", { runtimes: [] })
+      .install()
+  const lines = (root: ParentNode) =>
+    Array.from(root.querySelectorAll<HTMLElement>("[data-answer-line]")).map(
+      (n) => [n.dataset.answerLine, n.firstChild?.textContent]
+    )
+
+  it("opt.usage-limit's step 2: the panel's verdict and lines are Studio's drawer's", async () => {
+    serveUL({
+      ...META,
+      capabilities: [...META.capabilities, "requests", "logs"],
+    })
+    const el = await mount({
+      "data-endpoint": "http://studio.test/studio/",
+      "data-open": "true",
+    })
+    await vi.waitFor(() => expect(all(el, ".weft-turn").length).toBe(1), {
+      timeout: 5_000,
+    })
+    click(all(el, ".weft-turn")[0])
+    // No step picked: the answer sits on the step the run failed at.
+    await vi.waitFor(
+      () =>
+        expect(
+          $(el, '[data-weft-step="2"] [data-answer-line="sent"]')?.textContent
+        ).toContain("messages"),
+      { timeout: 5_000 }
+    )
+    expect(all(el, "[data-verdict]")).toHaveLength(1)
+    const step = $(el, '.weft-step[data-weft-step="2"]')!
+    const verdict = step.querySelector("[data-verdict]")!
+    const panel = {
+      verdict: verdict.textContent,
+      bad: verdict.hasAttribute("data-bad"),
+      lines: lines(step),
+    }
+    // Logs (the step head's 📄 ⤢, U11.2's logsLink) and Raw OTel (the answer's)
+    // hand off to the run page at the step's row — no token in the URL.
+    const go = Array.from(step.querySelectorAll<HTMLAnchorElement>("a")).filter(
+      (a) => a.textContent.endsWith("⤢") && a.href.includes("tab=")
+    )
+    expect(go.map((a) => a.textContent)).toEqual(["📄 ⤢", "Raw OTel ⤢"])
+    for (const [a, tab] of [
+      [go[0], "logs"],
+      [go[1], "raw"],
+    ] as const) {
+      const u = new URL(a.href)
+      expect(u.pathname).toBe(`/studio/runs/${UL}`)
+      expect(u.searchParams.get("sel")).toBe("s2")
+      expect(u.searchParams.get("tab")).toBe(tab)
+      expect(a.href).not.toContain("token")
+    }
+    // Picking another step moves the answer there.
+    click($(el, '.weft-step[data-weft-step="0"] .weft-step-h'))
+    await vi.waitFor(
+      () =>
+        expect(
+          $(el, '.weft-step[data-weft-step="0"] [data-verdict]')
+        ).toBeTruthy(),
+      { timeout: 5_000 }
+    )
+    expect(all(el, "[data-verdict]")).toHaveLength(1)
+    el.remove()
+    await settle()
+    cleanup()
+    document.body.innerHTML = ""
+
+    stubBrowser()
+    vi.stubGlobal("scrollTo", vi.fn())
+    StudioEventSource.reset()
+    vi.stubGlobal("EventSource", StudioEventSource)
+    setStudioToken("")
+    serveUL({
+      ...golden<Record<string, unknown>>("meta"),
+      capabilities: ["ingest", "requests", "playground", "diff", "logs"],
+    })
+    renderApp(`/runs/${UL}`)
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-answer-line="sent"]')?.textContent
+      ).toContain("messages")
+    )
+    const v = document.querySelector<HTMLElement>("[data-verdict]")!
+    const studio = {
+      verdict: v.textContent,
+      bad: v.hasAttribute("data-bad"),
+      lines: lines(document),
+    }
+    expect(panel.verdict).toContain("✗ usage limit reached")
+    expect(panel).toEqual(studio)
   })
 })

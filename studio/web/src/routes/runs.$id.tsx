@@ -1,14 +1,20 @@
-// The run page (B1, B2, B7, B9, B10; S4.5/S4.7): three views, all
-// URLs (A3):
+// The run page (B1, B2, B7, B9, B10; S4.5/S4.7; U8.2): three views,
+// all URLs (A3):
 //
-//   trace  (default) the flow strip, then a waterfall | detail split.
-//          The waterfall's axis is time when the run has spans
-//          (S4.7), positions otherwise — ?axis= picks, and replay
-//          (the playhead) belongs to the position axis.
-//   story  the step cards top to bottom, subagents lazy (S4.3).
-//   raw    the events explorer and the document tree.
+//   waterfall  (default) the flow strip, then the run tree | detail
+//              split. The tree is lib/waterfall.ts's waterfallRows
+//              (run › step › model call / tool lane › child run, gists,
+//              durations, the critical path) on the time scale when
+//              the run has spans, the order scale (stream positions)
+//              otherwise — ?scale=time|order picks, and replay (the
+//              playhead) belongs to the order scale.
+//   story      the step cards top to bottom, subagents lazy (S4.3).
+//   raw        the events explorer and the document tree.
 //
-// The replay playhead (?t=) drives every view on the position axis.
+// "trace" is the /traces page's word (an OTel trace); the run page
+// draws a run tree.
+//
+// The replay playhead (?t=) drives every view on the order scale.
 // A running run's tail is the /api/live stream when the server has
 // the lane (S4.5) — one stream per page: deltas stream, run frames
 // refresh the document, a lost stream falls back to the paged poll. The document and transcript
@@ -39,20 +45,21 @@ import {
   replayFromStep,
   rerun,
 } from "@/lib/replay"
-import { replayFromSearch, replaySearch } from "@/lib/links"
+import { replayFromSearch, replaySearch, runLink } from "@/lib/links"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { editKey, impliedFromStep, putEdit, schemaOf } from "@/lib/edits"
 import type { ReplayEdit } from "@/lib/edits"
 import { replayBounds } from "@/lib/experiment-body"
-import type { ReplayLinkState, RunSearch } from "@/lib/links"
-import type { Span as TraceSpan } from "@/lib/trace"
+import type { ReplayLinkState, RunScale, RunSearch } from "@/lib/links"
+import { defaultSelection, flowFromFold, spansFromFold } from "@/lib/trace"
+import { detailSpan, resolveRowSel, treeSpans } from "@/lib/run-tree"
 import {
-  defaultSelection,
-  flowFromFold,
-  spansFromFold,
-  spansFromTimed,
-  timeDomain,
-} from "@/lib/trace"
+  CRITICAL,
+  CRITICAL_HINT,
+  OPEN_RUN,
+  SCALE_HINT,
+  waterfallRows,
+} from "@/lib/waterfall"
 import { FlowStrip } from "@/components/studio/flow-strip"
 import { RunHeader, runPlace } from "@/components/studio/run-header"
 import { saveTest } from "@/components/studio/saves"
@@ -77,7 +84,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { storyRunID, useRunEvents } from "@/hooks/use-run-events"
 
-type View = "trace" | "story" | "raw"
+type View = "waterfall" | "story" | "raw"
 
 /** The trace's layout: side by side, stacked, or by the width. */
 type Layout = "auto" | "split" | "stack"
@@ -94,39 +101,11 @@ function readLayout(): Layout {
 
 // The page's search is lib/links.ts's RunSearch: step is the step
 // ordinal (the loop's step index, the n of api/runs/{id}/steps/{n}),
-// never an event position — the page maps it to the step's card
-// (story) and span (trace) itself.
-
-/**
- * knownSel is ?sel= when it names a span the page has: a key no row
- * carries (a call gone from the run, a typo) selects nothing and is
- * dropped, so ?step= or the default decides instead. A pre-G1 call key
- * (c:<call id>, ambiguous once a call id repeats across steps) maps to
- * the call in the linked step when there is one, else to the first
- * c:<step>:<call id> key.
- */
-function knownSel(
-  sel: string | undefined,
-  step: number | undefined,
-  fullSpans: TraceSpan[],
-  timeSpans: TraceSpan[]
-): string | undefined {
-  if (!sel) return undefined
-  if (
-    fullSpans.some((s) => s.key === sel) ||
-    timeSpans.some((s) => s.key === sel)
-  )
-    return sel
-  const call = /^c:([^:]+)$/.exec(sel)?.[1]
-  if (!call) return undefined
-  // A top-level call's key is c:<step|resume>:<call id>; a child's
-  // carries its run id too and never matches this shape.
-  const calls = fullSpans.filter((s) => {
-    const at = s.key.split(":")[1]
-    return s.kind === "tool" && s.key === `c:${at}:${call}`
-  })
-  return (calls.find((s) => s.key === `c:${step}:${call}`) ?? calls.at(0))?.key
-}
+// never an event position — the page maps it to the step's row
+// itself. ?sel= is a run tree row key (lib/waterfall.ts's rowKeys); a
+// key no row carries (a call gone from the run, a typo) selects
+// nothing, so ?step= or the default decides instead; old forms
+// resolve (lib/run-tree.ts's resolveRowSel).
 
 /** How long after the end the run page waits for the run's
  * invoke_agent span (an OTLP exporter's batch lands after run_finish). */
@@ -144,24 +123,13 @@ function hasInvokeAgent(
   )
 }
 
-/** timeStepKey is the time-axis row of step n: its chat span (the
- * core stamps weft.step.index on it), else any span of that step. */
-function timeStepKey(timeSpans: TraceSpan[], n: number): string | undefined {
-  const ofStep = timeSpans.filter((s) => {
-    const v = s.timed?.span.attrs["weft.step.index"]
-    return (
-      (typeof v === "number" || typeof v === "string") &&
-      String(v) === String(n)
-    )
-  })
-  const chat = ofStep.find((s) => {
-    const sp = s.timed?.span
-    return (
-      sp?.attrs["gen_ai.operation.name"] === "chat" ||
-      sp?.name.startsWith("chat")
-    )
-  })
-  return (chat ?? ofStep.at(0))?.key
+/** A scale a search value names; "events" is the old axis's order. */
+function scaleOf(v: unknown): RunScale | undefined {
+  return v === "time" || v === "order"
+    ? v
+    : v === "events"
+      ? "order"
+      : undefined
 }
 
 export const Route = createFileRoute("/runs/$id")({
@@ -183,7 +151,9 @@ export const Route = createFileRoute("/runs/$id")({
         : undefined,
     sel: typeof search.sel === "string" && search.sel ? search.sel : undefined,
     d: search.d === "events" || search.d === "json" ? search.d : undefined,
-    axis: search.axis === "time" ? "time" : undefined,
+    // The run tree's scale (U8.2, UX-A-02: both values round-trip); a
+    // pre-U8.2 link's ?axis=time|events reads as time|order.
+    scale: scaleOf(search.scale) ?? scaleOf(search.axis),
     t:
       typeof search.t === "number" && search.t >= 0
         ? Math.floor(search.t)
@@ -208,7 +178,7 @@ function RunPage() {
   // A step's pane (A6.2) lives on its story card: ?pane= opens there.
   const view: View =
     search.view ??
-    (search.pane && search.step !== undefined ? "story" : "trace")
+    (search.pane && search.step !== undefined ? "story" : "waterfall")
   const [layout, setLayout] = useState<Layout>(readLayout)
   const { has, caps, why: capsWhy, loading: capsLoading } = useCapabilities()
   const liveCapable = has("live")
@@ -495,26 +465,29 @@ function RunPage() {
   // transition the page observed, or a cold open of a run whose row
   // says it finished inside those 30 s; a run that finished earlier,
   // opened cold, reads its spans once and never polls.
+  // With capability spans_tree (U9.1) the descendants' spans come too:
+  // the run tree's child rows read them (each span names its run).
   const spans = useQuery({
-    ...spansQuery(id),
+    ...spansQuery(id, has("spans_tree")),
     enabled:
-      (view === "trace" || (requestsCapable && runStatus !== "running")) &&
+      (view === "waterfall" || (requestsCapable && runStatus !== "running")) &&
       Boolean(run.data?.trace_id),
     refetchInterval: (q) => {
-      if (runStatus === "running") return view === "trace" ? 5000 : false
+      if (runStatus === "running") return view === "waterfall" ? 5000 : false
       const at = endSeen.current.id === id ? endSeen.current.at : null
       if (at === null || Date.now() - at > INVOKE_AGENT_WAIT_MS) return false
       return hasInvokeAgent(q.state.data?.spans, id) ? false : 2000
     },
   })
-  const override = useMemo(
-    () => overrideOf(spans.data?.spans, id),
+  // The run's own spans (a tree read carries its descendants' too).
+  const ownSpans = useMemo(
+    () =>
+      spans.data?.spans.filter((s) => !s.run_id || s.run_id === id) ??
+      undefined,
     [spans.data, id]
   )
-  const toolFacts = useMemo(
-    () => toolFactsOf(spans.data?.spans, id),
-    [spans.data, id]
-  )
+  const override = useMemo(() => overrideOf(ownSpans, id), [ownSpans, id])
+  const toolFacts = useMemo(() => toolFactsOf(ownSpans, id), [ownSpans, id])
   const requests = useMemo(
     () =>
       requestsCapable
@@ -528,7 +501,7 @@ function RunPage() {
               manifestHash: run.data?.manifest_hash,
               instructionsHash: run.data?.instructions_hash,
               override,
-              spans: spans.data?.spans,
+              spans: ownSpans,
               transcript: transcript.data,
               compactions: compactionsOf(run.data),
             },
@@ -544,25 +517,24 @@ function RunPage() {
       id,
       run.data,
       override,
-      spans.data,
+      ownSpans,
       transcript.data,
     ]
   )
 
-  // The time axis is the trace view's: the story reads the spans only
-  // for the override chip, and stays on the position axis (replay).
+  // The time scale is the waterfall's: the story reads the spans only
+  // for the override chip, and stays on the order scale (replay).
   const timed: TimedSpan[] = useMemo(
-    () => (view === "trace" ? (spans.data?.spans ?? []) : []),
+    () => (view === "waterfall" ? (spans.data?.spans ?? []) : []),
     [view, spans.data]
   )
   const haveTime = timed.length > 0
-  // A derived run (plan I1.3) has spans and no events: its one axis is
-  // time — the position axis and its playhead have nothing to show.
+  // A derived run (plan I1.3) has spans and no events: its one scale is
+  // time — the order scale and its playhead have nothing to show. Asked
+  // for time without spans, the run reads on the order scale.
   const derived = isDerived(run.data)
-  const axis: "events" | "time" =
-    derived && haveTime
-      ? "time"
-      : (search.axis ?? (haveTime ? "time" : "events"))
+  const scale: RunScale =
+    derived && haveTime ? "time" : haveTime ? (search.scale ?? "time") : "order"
 
   // The replay playhead: null = live. Seeks and pauses write t to the
   // URL (a paste reproduces the exact view, A3); playback ticks do
@@ -594,10 +566,10 @@ function RunPage() {
   const ph = evicted ? null : playhead
 
   // Everything below renders the fold AT the playhead on the position
-  // axis: one fold, one shape, whether live or scrubbed (B2). The
-  // time axis has no playhead — durations do not replay.
+  // scale: one fold, one shape, whether live or scrubbed (B2). The
+  // time scale has no playhead — durations do not replay.
   const replaying =
-    axis === "events" && ph !== null && ph < stream.events.length
+    scale === "order" && ph !== null && ph < stream.events.length
   const foldedNow =
     transcript.data && runStatus !== "running"
       ? applyTranscript(stream.folded, transcript.data.batches, {
@@ -641,59 +613,90 @@ function RunPage() {
   // are "running", not "never completed".
   const viewStatus = replaying ? "running" : runStatus
 
-  // The trace's calls carry their child's id (linkView, as the story's
-  // do): the call detail's subagent block joins on it — never on the
-  // bare call id, which may repeat across steps (A10).
+  // The calls carry their child's id (linkView, as the story's do):
+  // the call detail's subagent block and the tree's child row join on
+  // it — never on the bare call id, which may repeat across steps (A10).
   const children = run.data?.children
-  const posSpans = useMemo(
-    () =>
-      spansFromFold(
-        children ? linkView(atPlayhead, children) : atPlayhead,
-        stream.total,
-        viewStatus
-      ),
-    [atPlayhead, children, stream.total, viewStatus]
+  const linkedFold = useMemo(
+    () => (children ? linkView(atPlayhead, children) : atPlayhead),
+    [atPlayhead, children]
   )
-  const timeSpans = useMemo(() => spansFromTimed(timed), [timed])
-  const traceSpans = axis === "time" && haveTime ? timeSpans : posSpans
+  // The detail pane's rows: the fold's spans at the playhead (the
+  // story's bodies, the replay positions).
+  const posSpans = useMemo(
+    () => spansFromFold(linkedFold, stream.total, viewStatus),
+    [linkedFold, stream.total, viewStatus]
+  )
+  // The run tree (U8.2): lib/waterfall.ts's rows on the page's scale,
+  // projected into the Waterfall's rows.
+  const tree = useMemo(
+    () =>
+      waterfallRows(
+        {
+          runId: id,
+          status: viewStatus,
+          spans: timed,
+          fold: linkedFold,
+          total: stream.total,
+        },
+        scale
+      ),
+    [id, viewStatus, timed, linkedFold, stream.total, scale]
+  )
+  const treeRows = useMemo(() => treeSpans(tree), [tree])
   const flow = useMemo(
     () => flowFromFold(atPlayhead, viewStatus),
     [atPlayhead, viewStatus]
   )
-  // The selection: ?sel= names a span key; absent, start where
+  // The selection: ?sel= names a row key; absent, start where
   // something went wrong (the full fold decides, not the prefix).
   const fullSpans = useMemo(
     () => spansFromFold(stream.folded, stream.total, runStatus),
     [stream.folded, stream.total, runStatus]
   )
   // ?step= (a deep link to a step, lib/links.ts) selects that step's
-  // row when no (known) span is named: on the position axis the step's
-  // own span (the ordinal is its key's number), on the time axis the
-  // step's chat span (weft.step.index), else the default.
-  const onTime = axis === "time" && haveTime
+  // row when no (known) row is named, else the default.
   const stepKey =
-    search.step === undefined
-      ? undefined
-      : onTime
-        ? timeStepKey(timeSpans, search.step)
-        : fullSpans.some((s) => s.key === `s${search.step}`)
-          ? `s${search.step}`
-          : undefined
+    search.step !== undefined &&
+    tree.rows.some((r) => r.key === `s${search.step}`)
+      ? `s${search.step}`
+      : undefined
+  // While replaying, a row the playhead has not reached yet stays
+  // selected (and says so below) when the whole run has it.
   const selKey =
-    knownSel(search.sel, search.step, fullSpans, timeSpans) ??
+    resolveRowSel(tree.rows, search.sel, id, search.step) ??
+    (replaying && search.sel && fullSpans.some((s) => s.key === search.sel)
+      ? search.sel
+      : undefined) ??
     stepKey ??
-    (derived && onTime ? timeSpans[0]?.key : defaultSelection(fullSpans)?.key)
-  const selected = traceSpans.find((s) => s.key === selKey)
+    (derived && scale === "time"
+      ? tree.rows[0]?.key
+      : resolveRowSel(tree.rows, defaultSelection(fullSpans)?.key, id))
+  const selectedRow = treeRows.find((s) => s.key === selKey)
+  // A derived run's fold holds no events: its rows read their spans.
+  const selected = useMemo(
+    () => detailSpan(selKey, treeRows, derived ? [] : posSpans),
+    [selKey, treeRows, posSpans, derived]
+  )
   const select = useCallback(
     (key: string) =>
       void navigate({
-        // The trace's selection: a pane would hold the view on the story.
+        // The waterfall's selection: a pane would hold the view on the story.
         search: (prev) => ({
           ...prev,
           sel: key,
           view: undefined,
           pane: undefined,
         }),
+        replace: true,
+      }),
+    [navigate]
+  )
+  const setScale = useCallback(
+    (to: RunScale) =>
+      void navigate({
+        // Written as itself (UX-A-02): ?scale=order round-trips.
+        search: (prev) => ({ ...prev, scale: to }),
         replace: true,
       }),
     [navigate]
@@ -705,14 +708,16 @@ function RunPage() {
     (t: number) => {
       setPlayhead(t)
       void navigate({
+        // The playhead is the order scale's: a run with spans
+        // switches to it.
         search: (prev) => ({
           ...prev,
           t,
-          axis: prev.axis === "time" ? undefined : prev.axis,
+          scale: haveTime ? "order" : prev.scale,
         }),
       })
     },
-    [navigate]
+    [navigate, haveTime]
   )
 
   // The story's scrubber (plan H2) names a step the way a deep link
@@ -735,15 +740,15 @@ function RunPage() {
     [navigate]
   )
 
-  // Keys: r toggles raw, s the story, e the trace; j/k walk the
-  // trace's rows (A4); n jumps to a step (the story's scrubber).
+  // Keys: r toggles raw, s the story, w the waterfall; j/k walk the
+  // run tree's rows (A4); n jumps to a step (the story's scrubber).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!isPlainShortcut(e) || !run.data) return
       const setView = (v: View) =>
         void navigate({
           search: (prev) => {
-            const next = prev.view === v || v === "trace" ? undefined : v
+            const next = prev.view === v || v === "waterfall" ? undefined : v
             return {
               ...prev,
               view: next,
@@ -753,7 +758,7 @@ function RunPage() {
         })
       if (e.key === "r") setView("raw")
       else if (e.key === "s") setView("story")
-      else if (e.key === "e") setView("trace")
+      else if (e.key === "w") setView("waterfall")
       else if (e.key === "n") {
         e.preventDefault()
         if (view !== "story") setView("story")
@@ -768,15 +773,15 @@ function RunPage() {
           } else if (++tries < 10) requestAnimationFrame(focusBox)
         }
         requestAnimationFrame(focusBox)
-      } else if ((e.key === "j" || e.key === "k") && view === "trace") {
-        const i = traceSpans.findIndex((s) => s.key === selKey)
-        const next = traceSpans.at(e.key === "j" ? i + 1 : Math.max(i - 1, 0))
+      } else if ((e.key === "j" || e.key === "k") && view === "waterfall") {
+        const i = treeRows.findIndex((s) => s.key === selKey)
+        const next = treeRows.at(e.key === "j" ? i + 1 : Math.max(i - 1, 0))
         if (next) select(next.key)
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [navigate, run.data, view, traceSpans, selKey, select])
+  }, [navigate, run.data, view, treeRows, selKey, select])
 
   if (run.isPending) {
     return (
@@ -858,8 +863,8 @@ function RunPage() {
             transcript={transcript.data}
             gaps={stream.gaps}
             sequentialTools={requestsQ.data?.requests[0]?.body.sequential_tools}
-            overrideParallelism={overrideParallelism(spans.data?.spans, id)}
-            overrideRead={hasInvokeAgent(spans.data?.spans, id)}
+            overrideParallelism={overrideParallelism(ownSpans, id)}
+            overrideRead={hasInvokeAgent(ownSpans, id)}
             toolFacts={spans.data ? toolFacts : undefined}
           />
           {evicted ? (
@@ -872,10 +877,10 @@ function RunPage() {
               {(stream.total - 1).toLocaleString()}); the{" "}
               {stream.base.toLocaleString()} before them are on the API
               (api/runs/{doc.id}
-              /events?after=) — the story and the trace hold the whole run,
+              /events?after=) — the story and the waterfall hold the whole run,
               replay needs the whole stream
             </p>
-          ) : axis === "events" && !derived ? (
+          ) : scale === "order" && !derived ? (
             <ReplayBar
               events={stream.events}
               eventCount={doc.event_count}
@@ -917,47 +922,54 @@ function RunPage() {
           >
             <div className="flex flex-wrap items-center gap-3">
               <TabsList>
-                <TabsTrigger value="trace">trace</TabsTrigger>
+                <TabsTrigger value="waterfall">waterfall</TabsTrigger>
                 <TabsTrigger value="story">story</TabsTrigger>
                 <TabsTrigger value="raw">raw</TabsTrigger>
               </TabsList>
-              {view === "trace" && haveTime && !derived ? (
-                <div className="flex gap-1">
-                  {(["events", "time"] as const).map((a) => (
+              {view === "waterfall" && haveTime && !derived ? (
+                <div
+                  className="flex items-center gap-1 font-mono text-[11px]"
+                  role="group"
+                  aria-label="scale"
+                  data-scale={scale}
+                >
+                  <span className="text-faint">scale:</span>
+                  {(["time", "order"] as const).map((a) => (
                     <button
                       key={a}
                       type="button"
-                      className={`rounded-md border px-2 py-1 font-mono text-[11px] ${
-                        axis === a
+                      aria-pressed={scale === a}
+                      className={`rounded-md border px-2 py-1 ${
+                        scale === a
                           ? "border-thread/60 bg-secondary"
                           : "text-muted-foreground hover:text-foreground"
                       }`}
-                      title={
-                        a === "events"
-                          ? "the event axis: order, and the replay playhead"
-                          : "the time axis: real durations from the run's spans"
-                      }
-                      onClick={() =>
-                        void navigate({
-                          search: (prev) => ({
-                            ...prev,
-                            axis: a === "time" ? "time" : undefined,
-                            sel: undefined,
-                          }),
-                          replace: true,
-                        })
-                      }
+                      title={SCALE_HINT[a]}
+                      onClick={() => setScale(a)}
                     >
                       {a}
                     </button>
                   ))}
                 </div>
               ) : null}
+              {view === "waterfall" && treeRows.some((r) => r.critical) ? (
+                <span
+                  className="flex items-center gap-1 font-mono text-[11px] text-faint"
+                  title={CRITICAL_HINT}
+                  data-critical-legend
+                >
+                  <span
+                    className="inline-block h-0.5 w-3 bg-thread"
+                    aria-hidden
+                  />
+                  {CRITICAL}
+                </span>
+              ) : null}
               <span className="hidden items-center gap-1 text-[11px] text-faint md:flex">
-                <Kbd>e</Kbd>
+                <Kbd>w</Kbd>
                 <Kbd>s</Kbd>
                 <Kbd>r</Kbd> views · <Kbd>j</Kbd>
-                <Kbd>k</Kbd> spans ·{" "}
+                <Kbd>k</Kbd> rows ·{" "}
                 {derived ? null : (
                   <>
                     <Kbd>space</Kbd> replay ·{" "}
@@ -975,14 +987,14 @@ function RunPage() {
             </div>
 
             <TabsContent
-              value="trace"
+              value="waterfall"
               className="@container/trace mt-3 space-y-3"
             >
-              {/* A derived run's trace is its spans: until they are here (or
+              {/* A derived run's tree is its spans: until they are here (or
               if they cannot be read) the derived note stands in — never
-              the position axis's words over a fold of zero events. */}
+              the order scale's words over a fold of zero events. */}
               {derived && !haveTime ? (
-                <DerivedNote what="trace" />
+                <DerivedNote what="waterfall" />
               ) : (
                 <>
                   <div className="flex items-start gap-2">
@@ -1018,17 +1030,27 @@ function RunPage() {
                   </div>
                   <div className={`grid items-start gap-3 ${gridCols}`}>
                     <Waterfall
-                      spans={traceSpans}
-                      domain={
-                        axis === "time" && haveTime
-                          ? timeDomain(timed)
-                          : [0, Math.max(0, stream.total - 1)]
-                      }
-                      unit={axis === "time" ? "ms" : "event"}
-                      playhead={axis === "events" ? ph : null}
-                      onSeek={axis === "events" ? seek : undefined}
+                      spans={treeRows}
+                      domain={tree.domain}
+                      unit={scale === "time" ? "ms" : "event"}
+                      playhead={scale === "order" ? ph : null}
+                      onSeek={scale === "order" ? seek : undefined}
                       onSelect={(sp) => select(sp.key)}
-                      selectedId={selected?.id}
+                      selectedId={selectedRow?.id}
+                      label="waterfall"
+                      head="run"
+                      trail={(sp) =>
+                        sp.childRun ? (
+                          <Link
+                            {...runLink(sp.childRun)}
+                            className="ml-auto shrink-0 text-thread-ink hover:underline"
+                            data-open-run={sp.childRun}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            {OPEN_RUN}
+                          </Link>
+                        ) : null
+                      }
                       className="max-h-[60vh] @3xl/trace:max-h-[calc(100vh-8rem)]"
                     />
                     <div className={stickyDetail}>
@@ -1039,7 +1061,7 @@ function RunPage() {
                         doc={doc}
                         runStatus={viewStatus}
                         timed={timed}
-                        playhead={axis === "events" ? ph : null}
+                        playhead={scale === "order" ? ph : null}
                         mode={search.d ?? "detail"}
                         onMode={(m) =>
                           void navigate({
@@ -1055,9 +1077,9 @@ function RunPage() {
                       />
                     </div>
                   </div>
-                  {selKey && !selected ? (
+                  {selKey && !selectedRow ? (
                     <p className="font-mono text-[11px] text-faint">
-                      the selected span ({selKey}) is past the playhead — play
+                      the selected row ({selKey}) is past the playhead — play
                       forward or press End for live
                     </p>
                   ) : null}
@@ -1073,7 +1095,7 @@ function RunPage() {
                   folded={foldedNow}
                   atPlayhead={atPlayhead}
                   doc={doc}
-                  upTo={axis === "events" ? (ph ?? undefined) : undefined}
+                  upTo={scale === "order" ? (ph ?? undefined) : undefined}
                   highlight={search.step}
                   pane={search.step === undefined ? undefined : search.pane}
                   onJump={evicted ? undefined : jump}

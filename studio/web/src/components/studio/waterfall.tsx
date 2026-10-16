@@ -48,6 +48,9 @@ const kindIcon: Record<SpanKind, string> = {
   step: "↻",
   tool: "⚙",
   subagent: "↳",
+  model: "◆",
+  attempt: "◇",
+  span: "○",
 }
 
 export interface WaterfallProps {
@@ -67,6 +70,12 @@ export interface WaterfallProps {
   hrefOf?: (span: Span) => string | undefined
   /** Rows deeper than this start folded. */
   foldDepth?: number
+  /** The tree's accessible name and its first column's heading. */
+  label?: string
+  head?: string
+  /** What a row draws after its label (the run tree's child row: its
+   * "open run ↗" link). */
+  trail?: (span: Span) => React.ReactNode
   className?: string
 }
 
@@ -92,6 +101,9 @@ export function Waterfall({
   selectedId,
   hrefOf,
   foldDepth = 5,
+  label = "trace",
+  head = "span",
+  trail,
   className = "",
 }: WaterfallProps) {
   const [folded, setFolded] = useState<Set<string>>(() => new Set())
@@ -232,14 +244,14 @@ export function Waterfall({
       ref={scroller}
       className={`waterfall grid grid-cols-[minmax(12rem,17rem)_minmax(0,1fr)_3.5rem] overflow-auto rounded-lg border bg-background font-mono text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring/50 ${className}`}
       role="tree"
-      aria-label="trace"
+      aria-label={label}
       data-virtual={virtual ? "" : undefined}
       tabIndex={0}
       onKeyDown={onKey}
     >
       {/* axis */}
       <div className="sticky top-0 z-10 flex items-center gap-2 border-b bg-secondary/80 px-2 py-1 text-[10px] tracking-wide text-faint uppercase backdrop-blur">
-        span
+        {head}
         <span className="ml-auto flex gap-1 tracking-normal normal-case">
           <button
             type="button"
@@ -323,6 +335,10 @@ export function Waterfall({
               aria-setsize={siblings.count.get(sp.parent ?? "")}
               aria-posinset={siblings.at.get(sp.id)}
               data-span={sp.key}
+              data-critical={sp.critical ? "" : undefined}
+              data-lane={sp.lane}
+              data-lanes={sp.lanes}
+              data-child-run={sp.childRun}
             >
               <div
                 ref={selected ? selRef : undefined}
@@ -405,6 +421,7 @@ export function Waterfall({
                 {sp.sub ? (
                   <span className="min-w-0 truncate text-faint">{sp.sub}</span>
                 ) : null}
+                {trail?.(sp)}
               </div>
               <div
                 className={`waterfall-track relative h-6 cursor-pointer border-b border-border/60 ${cell(selected)}`}
@@ -417,6 +434,9 @@ export function Waterfall({
                     sp.kind === "run" || sp.kind === "subagent"
                       ? "top-2.5 h-1"
                       : "top-1.5 h-3"
+                  } ${
+                    // The critical path (U8.2): a thin accent under the bar.
+                    sp.critical ? "shadow-[0_2px_0_0_var(--thread)]" : ""
                   }`}
                   style={{ left: `${left}%`, width: `${width}%` }}
                 />

@@ -1,4 +1,4 @@
-// The detail panel beside the waterfall: the selected span, read
+// The detail panel beside the waterfall: the selected row, read
 // three ways — detail (what happened, using the same step and call
 // bodies as the story view), events (only this span's slice of the
 // stream) and json (the folded node). Everything renders from the
@@ -317,8 +317,9 @@ export function SpanDetail({
             <span className="uppercase">{span.kind}</span>
             <span className="text-foreground">{span.label}</span>
             {/* A derived run (plan I1.3) has no events: no playhead to
-                put at a span's start. */}
-            {isDerived(doc) ? null : (
+                put at a span's start; a timed row's extent is
+                milliseconds, not a position. */}
+            {isDerived(doc) || span.timed ? null : (
               <Button
                 variant="ghost"
                 size="xs"
@@ -335,7 +336,7 @@ export function SpanDetail({
       <div className="min-h-0 flex-1 overflow-auto px-3 py-3">
         {!span ? (
           <p className="font-mono text-xs text-faint">
-            select a span in the trace
+            select a row in the waterfall
           </p>
         ) : mode === "events" ? (
           <EventsExplorer

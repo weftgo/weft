@@ -310,11 +310,12 @@ describe("a 5,000-step run scrolls (plan H2)", () => {
     expect(steps().length).toBeLessThan(20)
   })
 
-  it("the waterfall mounts a bounded window of its 10,001 rows", async () => {
+  it("the waterfall mounts a bounded window of its 15,001 rows", async () => {
     renderApp(`/runs/${RUN}`)
+    // The run, and per step its row, its model call and its tool call.
     const tree = await screen.findByRole(
       "tree",
-      { name: "trace" },
+      { name: "waterfall" },
       { timeout: 60_000 }
     )
     await waitFor(() => expect(tree.hasAttribute("data-virtual")).toBe(true), {
@@ -325,7 +326,7 @@ describe("a 5,000-step run scrolls (plan H2)", () => {
     expect(rows().length).toBeLessThan(80)
     // The spacers keep the whole height: scrolled to the end, the last
     // step's call row is mounted.
-    scrollTo(tree, 10_001 * 25)
+    scrollTo(tree, 15_001 * 25)
     await waitFor(() =>
       expect(tree.querySelector('[data-span="c:4999:c4999"]')).toBeTruthy()
     )

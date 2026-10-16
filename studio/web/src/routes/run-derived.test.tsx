@@ -6,7 +6,13 @@
 // waterfall from the real spans; no replay or wefttest export offered.
 // Every response is the server's (src/test/derived-fixture.ts: the Go
 // goldens and bodies a real Studio answered for the stock_genai fixture).
-import { act, cleanup, configure, waitFor } from "@testing-library/react"
+import {
+  act,
+  cleanup,
+  configure,
+  screen,
+  waitFor,
+} from "@testing-library/react"
 import axe from "axe-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -258,18 +264,17 @@ describe("a derived run's page (the Done line)", () => {
     expect(row.textContent).not.toContain("0 / 0")
   })
 
-  it("the trace view draws the real spans on the time axis, a span selected — no playhead over zero events", async () => {
+  it("the waterfall draws the real spans on the time scale, a span selected — no playhead over zero events", async () => {
     serve()
     renderApp(`/runs/${DERIVED}`)
     await waitFor(() =>
-      expect(document.body.textContent).toContain("execute_tool lookup_order")
+      expect(document.querySelector("[data-span^='c:']")).toBeTruthy()
     )
-    for (const name of [
-      "invoke_agent support",
-      "chat gpt-5",
-      "execute_tool lookup_order",
-    ])
-      expect(document.body.textContent).toContain(name)
+    // The run tree's labels (U8.2, UX-A-04), never the OTel span names.
+    const tree = screen.getByRole("tree", { name: "waterfall" })
+    for (const name of ["support", "step 0", "model · gpt-5", "lookup_order"])
+      expect(tree.textContent).toContain(name)
+    expect(tree.textContent).not.toContain("execute_tool lookup_order")
     expect(document.body.textContent).not.toContain("past the playhead")
     expect(document.body.textContent).not.toContain(
       "press space or click the bar to replay"
@@ -340,11 +345,16 @@ describe("a derived run's page (the Done line)", () => {
 })
 
 describe("the failed derived run (one step, its root span in error)", () => {
-  it("its page: failed with the error text, 1 step, the derived note; the trace its spans — no false 'did not finish'", async () => {
+  it("its page: failed with the error text, 1 step, the derived note; the waterfall its spans — no false 'did not finish'", async () => {
     serve()
     renderApp(`/runs/${DERIVED_FAILED}`)
+    // Its two spans as the run tree: the run, its step, the model call.
     await waitFor(() =>
-      expect(document.querySelectorAll("[data-span]").length).toBe(2)
+      expect(
+        [...document.querySelectorAll("[data-span]")].map((n) =>
+          n.getAttribute("data-span")
+        )
+      ).toEqual([expect.stringMatching(/^r:/), "s0", "s0:m"])
     )
     const top = document
       .querySelector("h1")!
@@ -382,10 +392,12 @@ describe("the failed derived run (one step, its root span in error)", () => {
     )
     renderApp(`/runs/${DERIVED_FAILED}`)
     await waitFor(() =>
-      expect(document.querySelector("[data-derived-note='trace']")).toBeTruthy()
+      expect(
+        document.querySelector("[data-derived-note='waterfall']")
+      ).toBeTruthy()
     )
     saysStock(
-      document.querySelector("[data-derived-note='trace']")!.textContent,
+      document.querySelector("[data-derived-note='waterfall']")!.textContent,
       "trace note"
     )
     expect(document.querySelector("[data-span]")).toBeNull()

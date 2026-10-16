@@ -1081,6 +1081,40 @@ export function waterfallRows(
     : orderRows(input)
 }
 
+// ── Words ──────────────────────────────────────────────────────────
+// The renderers' words for a row (U8.2): the badge, the critical path,
+// the lanes, the child's link — one place, both surfaces.
+
+/** A row's badge: the error's kind; an open row's state (running,
+ * pending, never); a finished step or model call's finish reason; "ok"
+ * on a tool or child run; nothing on a finished root (the header says
+ * how the run ended). */
+export function rowBadge(r: WaterfallRow): string | undefined {
+  if (r.status === "error") return r.error ?? "error"
+  if (r.status !== "ok") return r.status
+  if (r.kind === "step" || r.kind === "model") return r.finish
+  return r.kind === "tool" || r.kind === "child" ? "ok" : undefined
+}
+
+/** The critical path's legend and hint. */
+export const CRITICAL = "critical path"
+export const CRITICAL_HINT =
+  "the chain of rows that set the run's length: of overlapping calls, the one that ended last"
+
+/** A step's lanes when it ran calls side by side ("2 lanes"); one lane
+ * says nothing. */
+export const lanesWord = (n: number | undefined) =>
+  n && n > 1 ? `${n} lanes` : ""
+
+/** A child run row's link to its own page. */
+export const OPEN_RUN = "open run ↗"
+
+/** The scale switch's words and hints. */
+export const SCALE_HINT: Record<Scale, string> = {
+  time: "time: real durations from the run's spans",
+  order: "order: stream positions, and the replay playhead",
+}
+
 // ── Filters ────────────────────────────────────────────────────────
 
 /** The dim filters (§6.1): rows that do not match dim, never hide. */

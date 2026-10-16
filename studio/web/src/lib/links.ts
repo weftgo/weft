@@ -29,9 +29,14 @@ import type { ReplayVerb } from "./replay"
 import { serializeScope } from "./scope"
 import type { Scope } from "./scope"
 
-/** The run page's views: the trace (the default), the story (step
- * cards) and the raw JSON. */
-export type RunView = "trace" | "story" | "raw"
+/** The run page's views: the waterfall (the run tree, the default),
+ * the story (step cards) and the raw JSON. "trace" is the /traces
+ * page's word only (U8.2). */
+export type RunView = "waterfall" | "story" | "raw"
+
+/** The run tree's scale (lib/waterfall.ts's Scale): wall time from the
+ * run's spans, or stream order (the replay playhead's). */
+export type RunScale = "time" | "order"
 
 /** A step card's panes a link can open (A6.2): the Request pane, or
  * its Wire tab (the attempt's provider request and response). */
@@ -41,18 +46,20 @@ export type StepPane = "request" | "wire"
 export interface RunSearch {
   /** The step ordinal (see the header). */
   step?: number
-  view?: Exclude<RunView, "trace">
+  view?: Exclude<RunView, "waterfall">
   /** The step card's pane open on the step named (A6.2): its Request
    * pane, or that pane's Wire tab. Only beside a step. */
   pane?: StepPane
   raw?: "events" | "doc"
-  /** The selected span's key (trace view): s<step>, c:<step>:<call id>
+  /** The selected row's key (waterfall view; lib/waterfall.ts's
+   * rowKeys): r:<run>, s<step>, s<step>:m, c:<step>:<call id>
    * (c:resume:<call id> for a resumed call), t:<span id>. */
   sel?: string
-  /** The detail panel's mode (trace view). */
+  /** The detail panel's mode (waterfall view). */
   d?: "events" | "json"
-  /** The waterfall's axis: positions (replay) or time (spans). */
-  axis?: "events" | "time"
+  /** The run tree's scale: time (spans) or order (positions, replay).
+   * A pre-U8.2 ?axis=time|events is read as time|order, never written. */
+  scale?: RunScale
   /** The replay playhead: a stream position. */
   t?: number
   /** The raw view's search text (G2). */
@@ -152,13 +159,13 @@ export interface RunLinkOptions {
   /** The call is the run's resumed call (executed before step 0's
    * model call: an approved call of the previous run). */
   resumed?: boolean
-  /** An OTel span to select, by its span id (the trace view's time
-   * axis rows). */
+  /** An OTel span to select, by its span id (the waterfall's time
+   * scale rows). */
   span?: string
   view?: RunView
   /** The step's pane to open (needs `step`). */
   pane?: StepPane
-  axis?: "events" | "time"
+  scale?: RunScale
   /** The replay playhead (a stream position). */
   t?: number
   /** The raw view's filters and open event (view "raw"). */
@@ -365,21 +372,20 @@ function ordinal(n: number | undefined): number | undefined {
 }
 
 /** runLink is a run page: the run, and optionally the step (its
- * ordinal), the call or span selected, the view, the axis and the
+ * ordinal), the call or span selected, the view, the scale and the
  * replay position. */
 export function runLink(id: string, opts: RunLinkOptions = {}): RunLink {
   const step = ordinal(opts.step)
   const search: RunSearch = {}
   // Key order is the URL's order: step first, then the view.
   if (step !== undefined) search.step = step
-  if (opts.view && opts.view !== "trace") search.view = opts.view
+  if (opts.view && opts.view !== "waterfall") search.view = opts.view
   if (step !== undefined && (opts.pane === "request" || opts.pane === "wire"))
     search.pane = opts.pane
   if (opts.call && (opts.resumed || step !== undefined))
     search.sel = `c:${opts.resumed ? "resume" : String(step)}:${opts.call}`
   else if (opts.span) search.sel = `t:${opts.span}`
-  if (opts.axis === "time") search.axis = "time"
-  else if (opts.axis === "events") search.axis = "events"
+  if (opts.scale === "time" || opts.scale === "order") search.scale = opts.scale
   const t = ordinal(opts.t)
   if (t !== undefined) search.t = t
   if (opts.raw) {

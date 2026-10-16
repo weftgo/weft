@@ -18,15 +18,19 @@ export const bindings: Binding[] = [
   { keys: ["/"], action: "focus the search box", where: "runs" },
   { keys: ["j", "k"], action: "next / previous row (or ↓ ↑)", where: "runs" },
   { keys: ["enter"], action: "open the selected run", where: "runs" },
-  { keys: ["e", "s", "r"], action: "trace · story · raw views", where: "run" },
+  {
+    keys: ["w", "s", "r"],
+    action: "waterfall · story · raw views",
+    where: "run",
+  },
   {
     keys: ["j", "k"],
-    action: "next / previous span in the trace",
+    action: "next / previous row in the waterfall",
     where: "run",
   },
   {
     keys: ["↑", "↓", "←", "→"],
-    action: "move / fold in the trace (tree focused)",
+    action: "move / fold in the waterfall (tree focused)",
     where: "run",
   },
   { keys: ["space"], action: "play / pause replay", where: "run" },

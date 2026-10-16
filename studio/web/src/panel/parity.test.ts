@@ -1572,8 +1572,9 @@ describe("a derived run on both surfaces (I1.3)", () => {
       .querySelector("[data-derived-chip] [data-hole='derived']")!
       .getAttribute("title")
     renderApp(`/runs/${DERIVED}`)
+    // The run tree (U8.2): the run, two steps, their model calls, the tool.
     await waitFor(() =>
-      expect(document.querySelectorAll("[data-span]").length).toBe(4)
+      expect(document.querySelectorAll("[data-span]").length).toBe(6)
     )
     const waterfall = [
       // The label cell (the duration cell titles its offset).
@@ -1602,14 +1603,25 @@ describe("a derived run on both surfaces (I1.3)", () => {
     // The steps: the panel hands off with the count the page draws cards for.
     expect(panel.handoff).toBe(`${studio.steps} steps · open in Studio ⤢`)
     expect(studio.steps).toBe(2)
-    // The spans: the Timeline lists what the waterfall lists.
+    // The spans: the Timeline lists the spans behind the waterfall's
+    // rows — Studio draws them as the run tree (U8.2), one row per span
+    // plus the steps that group them; the panel's Timeline draws the
+    // same tree in U8.3.
     expect(panel.timeline).toEqual([
       "invoke_agent support",
       "chat gpt-5",
       "execute_tool lookup_order",
       "chat gpt-5",
     ])
-    expect(waterfall).toEqual(panel.timeline)
+    // A model call is labelled by the model that answered.
+    expect(waterfall).toEqual([
+      "support",
+      "step 0",
+      "model · gpt-5-2025-08-07",
+      "lookup_order",
+      "step 1",
+      "model · gpt-5-2025-08-07",
+    ])
   })
 
   it("no usage reported: both surfaces read the row's tokens as unknown, in the API's reason", async () => {

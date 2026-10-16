@@ -458,9 +458,18 @@ describe("?sel= and ?step= resolve to a row that exists (G1 review)", () => {
     expect(document.body.textContent).not.toContain("past the playhead")
   })
 
-  it("?step=1&axis=time selects step 1's chat span on the time axis", async () => {
+  it("?step=1&scale=time selects step 1's row on the time scale", async () => {
     serve({ traced: true })
-    renderApp(`/runs/${REP}?step=1&axis=time`)
-    await waitFor(() => expect(selected()).toEqual(["t:aa03"]))
+    renderApp(`/runs/${REP}?step=1&scale=time`)
+    await waitFor(() => expect(selected()).toEqual(["s1"]))
+  })
+
+  it("an old link's ?axis=time is the time scale, and ?sel=t:<span id> the row that span is behind", async () => {
+    serve({ traced: true })
+    renderApp(`/runs/${REP}?axis=time&sel=t:aa03`)
+    await waitFor(() => expect(selected()).toEqual(["s1:m"]))
+    expect(
+      document.querySelector("[data-scale]")!.getAttribute("data-scale")
+    ).toBe("time")
   })
 })

@@ -62,8 +62,8 @@ describe("runLink", () => {
     )
     // step 0 is a step.
     expect(path(runLink("r_1", { step: 0 }))).toBe("runs/r_1?step=0")
-    // The trace is the default view: never written.
-    expect(path(runLink("r_1", { step: 1, view: "trace" }))).toBe(
+    // The waterfall is the default view: never written.
+    expect(path(runLink("r_1", { step: 1, view: "waterfall" }))).toBe(
       "runs/r_1?step=1"
     )
     expect(path(runLink("r_1", { view: "raw" }))).toBe("runs/r_1?view=raw")
@@ -86,11 +86,17 @@ describe("runLink", () => {
     )
   })
 
-  it("selects an OTel span, the axis and the replay position", () => {
+  it("selects an OTel span, the scale and the replay position", () => {
     expect(runLink("r_1", { span: "ab12" }).search.sel).toBe("t:ab12")
-    expect(path(runLink("r_1", { axis: "time", t: 7 }))).toBe(
-      "runs/r_1?axis=time&t=7"
+    expect(path(runLink("r_1", { scale: "time", t: 7 }))).toBe(
+      "runs/r_1?scale=time&t=7"
     )
+    // UX-A-02: the order scale is written as itself, never dropped.
+    expect(path(runLink("r_1", { scale: "order" }))).toBe(
+      "runs/r_1?scale=order"
+    )
+    // The waterfall is the default view: never written.
+    expect(path(runLink("r_1", { view: "waterfall" }))).toBe("runs/r_1")
     expect(runLink("r_1", { t: -3 }).search.t).toBeUndefined()
   })
 
@@ -311,7 +317,13 @@ describe("compareLink", () => {
 describe("no link ever carries a token", () => {
   it("whatever the base or the values, no builder writes token=", () => {
     const links = [
-      runLink("r_1", { step: 1, call: "c", view: "story", axis: "time", t: 3 }),
+      runLink("r_1", {
+        step: 1,
+        call: "c",
+        view: "story",
+        scale: "time",
+        t: 3,
+      }),
       runLink("r_1", { span: "s", resumed: true, call: "c" }),
       sessionLink("s_1"),
       traceLink("t_1", { span: "s" }),

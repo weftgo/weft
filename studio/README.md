@@ -3,7 +3,7 @@
 The UI, the JSON API, the live stream and the OTLP receiver over one
 [obsdb](../obsdb) database: the runs list, the run page (steps, tool
 calls and results, subagents lazy, truncation badged, replay over the
-event index, a time-axis waterfall when the run has spans), sessions
+event index, the run tree on a time scale when the run has spans), sessions
 (threads), any trace — weft or not — a live page, and agent and tool
 cards from the manifest. One `http.Handler`, no build step for users,
 fully offline.
@@ -589,7 +589,7 @@ is not listed). The verbs and the drawer are drawn only under the
 trimmed turn and checks the chip and the deleted guidance line.
 Deep links (plan G1) follow one scheme, `src/lib/links.ts`, shared by
 the panel and Studio's app (an ESLint rule refuses a Studio URL built
-anywhere else): `runs/<id>?step=<n>&view=story|raw&pane=request|wire&sel=…&axis=time&t=…`,
+anywhere else): `runs/<id>?step=<n>&view=story|raw&pane=request|wire&sel=…&scale=time|order&t=…`,
 `sessions/<id>`, `traces/<id>?sel=<row key>&view=chat`,
 `playground#run=…` (the hand-off in the fragment),
 `playground?run=…&step=…&agent=…&engine=…` (the page's own state, G2)
@@ -1002,8 +1002,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 266,076 B raw / 86,281 B gzip
-(84.3 KiB, the bundle of the ledger's row "U8.1-fix"; 12,023 B — 11.7 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 266,070 B raw / 86,283 B gzip
+(84.3 KiB, the bundle of the ledger's row "U8.2 run tree in Studio"; 12,021 B — 11.7 KiB — of headroom under
 the 98,304 B, 96 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; A5.4 raised it from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -1632,9 +1632,25 @@ toggle that streams an agent's runs as they happen:
 
 The run page (light) — the prompt and the answer first (the answer now
 comes from the transcript: deltas are live-only), then the facts; the
-**trace** draws on the **time axis** when the run has spans (real
-durations, `?axis=` picks; the position axis keeps the replay
-playhead), and subagent children sit as nested rows under the step
+**waterfall** (the default view, U8.2) is the run tree —
+`src/lib/waterfall.ts`'s `waterfallRows`, projected by
+`src/lib/run-tree.ts`: run › step › model call (› attempt) / tool lane ›
+child run, each row its label ("model · script", the tool's name, never
+the OTel span name or a per-row service), a gist ("1 tool: ops_manager",
+"→ 1 call", a reply's or result's first 60 characters), a badge (the
+finish reason, the error's kind, ok) and its duration under "ms" (its
+offset on hover), the critical path a thin accent under the bars with a
+legend. It draws on the **time** scale when the run has spans and the
+**order** scale (stream positions, the replay playhead's) otherwise;
+`?scale=time|order` picks and the switch writes either value (a pre-U8.2
+`?axis=time|events` link reads as time|order). With the `spans_tree`
+capability the page reads `runs/{id}/spans?tree=1` and a delegation's
+child run is one collapsed row under its tool call with **open run ↗**
+(its subtree in place is U9.2); selecting it shows the call's detail, the
+subagent block. A row's detail reads the fold's step, call or run where
+the fold has one (the story's bodies), a model call or any other span its
+span's facts. "trace" names the `/traces` page only. In the story,
+subagent children sit as nested rows under the step
 that called them (agent, status, usage, holes, a link) and expand
 lazily — their events and their request record (the child's prompt,
 read by the child's id) are their own runs', fetched on demand. Each
@@ -1691,7 +1707,7 @@ into the story's words but never kept in the ring: they have no position on
 the API, so the window's positions, its `base` and the eviction note count
 positioned events only:
 
-![run page with the trace, light theme](screenshots/run-light.png)
+![run page with the waterfall, light theme](screenshots/run-light.png)
 
 Sessions list a thread's turns in order with usage and the newest
 status; `/live` shows everything streaming right now (plan H6 — one `/api/live?all=1&kinds=event,run` stream opened with a grant `{"all":true}` when `/api/meta`'s `live_all` is true, the dev token or setup A's loopback: run frames add and refresh the rows, event frames keep each row's step — the newest step index, "…" while a step runs — tokens so far (input + output from step_finish usage, one figure per step index so a re-delivered frame replaces rather than adds, "≥" when the page joined mid-run) and TTFT; cost is the row's own, "—" with "running: usage arrives at run end" until the final run frame prices it; the running list seeds the rows since run frames are never backfilled; the header shows the stream's state — connecting, live, reconnecting, overflow, stopped with a retry; a reconnect resumes with `Last-Event-ID` and the footer states the bound, runs running or seen in the last hour, newest 500; a run the resume could not read gets a "could not read" `gap` badge; finished runs stay 30 s then drop unless peeked; a filter box narrows by agent or status — a status word (`running`, `failed`, `cancelled`, `parked`, …) matches by its key, so typing `failed` no longer matches a cancelled run and `parked` no decided park, any other word the agent or the shown word as text; without `live_all` — any panel token — the page polls the running list every 5 s and says "live: polling every 5 s — the all stream needs the dev token or loopback"; under capability `cancel` a runtime-started run's row gets a cancel button — the first click arms it for 3 s, the second posts `POST /api/runs/{id}/cancel` and the row reads "cancelling…" until the run's row ends — looked for among every row, the filter aside — or 30 s pass without an end, when the button is back titled "no end seen — cancel again" (a cancel is best effort); the end is toasted as "run X cancelled · ended failed", or "run X ended <status>" when it ended otherwise, and a refusal in the server's own words; an app-owned run's button is disabled, "cancel is not supported on an app turn" (the runtime refuses it: thread has no per-turn cancel), a parked run's says "parked — decide instead" and links to the run page; clicking a row or its peek button opens that run's story beside the list in a resizable pane remembered per device as split `live-peek`, its run id in `?peek=`, Escape or the close button closing it); `/traces` lists
@@ -1817,11 +1833,11 @@ walks views, never cursor moves:
 | live | `peek` | the run whose story the side pane shows | push |
 | sessions | `agent`, `public_id`, `q` | the filters | push |
 | traces | `since`, `until`, `service` | the filters (a refused `since`/`until` kept, ignored and said) | push |
-| run | `view=story\|raw` | the view (trace is the default) | push |
+| run | `view=story\|raw` | the view (the waterfall is the default) | push |
 | run | `raw=doc` | the raw view's surface | push |
 | run | `step` | the step (its ordinal) | — (a link's landing) |
 | run | `pane=request\|wire` | the highlighted step's pane (its tab); dropped when the step or the view changes | — (a link's landing; not written back) |
-| run | `sel`, `d`, `axis` | the selected span, detail mode, axis | replace |
+| run | `sel`, `d`, `scale` | the selected row (a run tree key), detail mode, the scale (`time\|order`) | replace |
 | run | `t` | the replay playhead (seeks and pauses) | replace |
 | run | `q`, `hide`, `ev` | the raw view's search, hidden kinds (`hide=step,delta`), open event's position | replace |
 | run | `replay`, `from`, `of` | the replay drawer: its verb, its from_step, the child run it replays (a fresh load reopens it on that step, from the verb's draft — edits are not in the link) | replace |
@@ -1987,7 +2003,7 @@ playground, the experiment form and the split, density and select
 components.
 
 Keyboard: `⌘K` jumps to any recent run, `/` filters, `j`/`k` move,
-`enter` opens, `e`/`s`/`r` switch trace/story/raw, `space` replays,
+`enter` opens, `w`/`s`/`r` switch waterfall/story/raw, `space` replays,
 `[`/`]` jump by step or tool event, `,`/`.` move one event, `y` copies
 the page's link, `?` lists everything. Keys fire only on a bare press
 outside a text box.

@@ -12,7 +12,11 @@ import { earliestStart, instantMs, spanTree } from "./waterfall"
 /** The time axis's domain, lib/waterfall.ts's (one implementation). */
 export { timeDomain } from "./waterfall"
 
-export type SpanKind = "run" | "step" | "tool" | "subagent"
+/** run/step/tool/subagent: the fold's rows; model, attempt and span:
+ * the run tree's (lib/waterfall.ts) — a model call, its attempt, a
+ * span weft does not name. */
+export type SpanKind =
+  "run" | "step" | "tool" | "subagent" | "model" | "attempt" | "span"
 
 export type SpanTone =
   | "step" // neutral boundaries
@@ -51,6 +55,12 @@ export interface Span {
   timed?: TimedRow
   /** For steps and calls inside a subagent: which run they belong to. */
   runId: string
+  /** The run tree's marks (lib/run-tree.ts): on the critical path; a
+   * tool's lane, a step's lane count; a child run row's run id. */
+  critical?: boolean
+  lane?: number
+  lanes?: number
+  childRun?: string
 }
 
 /** A time-axis row's own data: the span, with from/to in milliseconds

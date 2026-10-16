@@ -1762,11 +1762,18 @@ export async function fetchLogs(
   }
 }
 
-export function spansQuery(id: string) {
+/** The run's spans; with tree (capability spans_tree, U9.1) its
+ * descendants' too, each carrying run_id / parent_run_id — the run
+ * tree's child rows. The key's prefix is ["spans", id] either way, so
+ * one invalidation refreshes both. */
+export function spansQuery(id: string, tree = false) {
   return queryOptions({
-    queryKey: ["spans", id],
+    queryKey: tree ? ["spans", id, "tree"] : ["spans", id],
     staleTime: 30_000,
-    queryFn: () => get<SpansDoc>(`runs/${encodeURIComponent(id)}/spans`),
+    queryFn: () =>
+      get<SpansDoc>(
+        `runs/${encodeURIComponent(id)}/spans${tree ? "?tree=1" : ""}`
+      ),
   })
 }
 

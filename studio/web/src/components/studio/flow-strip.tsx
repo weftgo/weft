@@ -1,6 +1,6 @@
 // The flow strip: the loop at a glance — one pill per step, arrows
 // between them (results fed back into the next request), the end
-// state last. Click a pill to select that step in the trace.
+// state last. Click a pill to select that step in the waterfall.
 import type { FlowPill } from "@/lib/trace"
 import { statusOf } from "@/lib/status"
 import { statusClass } from "@/lib/status-class"

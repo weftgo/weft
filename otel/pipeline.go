@@ -561,7 +561,7 @@ func buildDest(ctx context.Context, d dest, cfg config) (_ *destRuntime, err err
 		}
 		rt.localDB = db
 		if d.traces {
-			rt.spanProc = sdktrace.NewSimpleSpanProcessor(&localSpanExporter{db: db, drops: drops})
+			rt.spanProc = sdktrace.NewSimpleSpanProcessor(unmarkUnlessAppLogs(d, &localSpanExporter{db: db, drops: drops}))
 		}
 		if d.logs {
 			rt.logProc = &destProc{
@@ -614,7 +614,7 @@ func buildDest(ctx context.Context, d dest, cfg config) (_ *destRuntime, err err
 		if spanDelay > 0 {
 			spanOpts = append(spanOpts, sdktrace.WithBatchTimeout(spanDelay))
 		}
-		rt.spanProc = newAdmittedSpanProc(countingSpanExporter{SpanExporter: spanExp, drops: drops},
+		rt.spanProc = newAdmittedSpanProc(countingSpanExporter{SpanExporter: unmarkUnlessAppLogs(d, spanExp), drops: drops},
 			queue, d.blocking, drops, spanOpts...)
 	}
 	if logExp != nil {

@@ -78,7 +78,7 @@ func startBridgeTest(t *testing.T, opts ...Option) *Pipeline {
 // and one under the pipeline's quiet context, is not bridged.
 func TestSlogHandlerTeesUnderASpan(t *testing.T) {
 	exp := &recLogs{}
-	p := startBridgeTest(t, Exporters(nil, exp, AppLogs(true)))
+	p := startBridgeTest(t, Exporters(nil, exp, WithContent(), AppLogs(true)))
 	var text bytes.Buffer
 	logger := slog.New(p.SlogHandler(slog.NewTextHandler(&text, nil))).With("svc", "orders").WithGroup("req")
 	ctx, span := p.TracerProvider().Tracer("t").Start(context.Background(), "work")
@@ -181,7 +181,7 @@ func TestAppLogsDefaults(t *testing.T) {
 func TestCoreRunLinesBridged(t *testing.T) {
 	exp := &recLogs{}
 	spans := tracetest.NewInMemoryExporter()
-	p := startBridgeTest(t, Exporters(spans, exp, AppLogs(true)))
+	p := startBridgeTest(t, Exporters(spans, exp, WithContent(), AppLogs(true)))
 	logger := slog.New(p.SlogHandler(nil))
 	agt := core.New(wefttest.Script(wefttest.Say("done")), core.Name("bridged"),
 		core.TracerProvider(p.TracerProvider()), core.LoggerProvider(p.LoggerProvider()),
@@ -250,7 +250,7 @@ func TestNoBridgeNoMark(t *testing.T) {
 // how many lines it emitted (weft.logs.bridged, record contract §4).
 func TestHeartbeatCarriesBridgedCount(t *testing.T) {
 	exp := &recLogs{}
-	p := startBridgeTest(t, Exporters(nil, exp))
+	p := startBridgeTest(t, Exporters(nil, exp, AppLogs(true)))
 	tr := newRunTracker()
 	tr.open["r1"] = map[string]string{}
 	heartbeats(context.Background(), p.lp.Logger(instrumentationName), tr, nil, func() (int64, bool) { return 7, true })
@@ -285,7 +285,7 @@ func TestSlogOptionWrapsDefault(t *testing.T) {
 	defer func() { log.SetOutput(prevW); log.SetFlags(prevFlags); slog.SetDefault(prevDefault) }()
 
 	exp := &recLogs{}
-	shutdown := Install(NoEnv(), Heartbeat(0), Exporters(nil, exp, AppLogs(true)), Slog())
+	shutdown := Install(NoEnv(), Heartbeat(0), Exporters(nil, exp, WithContent(), AppLogs(true)), Slog())
 	if _, ok := slog.Default().Handler().(*slogHandler); !ok {
 		shutdown()
 		t.Fatalf("slog.Default's handler is %T, want the bridge", slog.Default().Handler())
@@ -323,7 +323,7 @@ func TestSlogOptionWrapsDefault(t *testing.T) {
 // copies) on many goroutines — the stress gate's target.
 func TestSlogHandlerConcurrent(t *testing.T) {
 	exp := &recLogs{}
-	p := startBridgeTest(t, Exporters(nil, exp, AppLogs(true)))
+	p := startBridgeTest(t, Exporters(nil, exp, WithContent(), AppLogs(true)))
 	base := slog.New(p.SlogHandler(slog.NewTextHandler(&bytes.Buffer{}, &slog.HandlerOptions{Level: slog.LevelError + 4})))
 	ctx, span := p.TracerProvider().Tracer("t").Start(context.Background(), "work")
 	defer span.End()

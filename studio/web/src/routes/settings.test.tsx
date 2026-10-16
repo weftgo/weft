@@ -244,7 +244,7 @@ describe("the settings page renders every section from the goldens", () => {
     const line = document.querySelector("[data-logs-bridge]")!
     expect(line.textContent).toBe(LOGS_BRIDGE)
     expect(line.textContent).toContain(
-      "a slog→OTel bridge (otel.Slog) is planned"
+      "otel.Install(…, otel.Slog()) bridges slog.Default"
     )
   })
 

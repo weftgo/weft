@@ -234,3 +234,57 @@ func (b bridgeSpanProc) OnStart(_ context.Context, s sdktrace.ReadWriteSpan) {
 func (bridgeSpanProc) OnEnd(sdktrace.ReadOnlySpan)      {}
 func (bridgeSpanProc) Shutdown(context.Context) error   { return nil }
 func (bridgeSpanProc) ForceFlush(context.Context) error { return nil }
+
+// unmarkUnlessAppLogs wraps a destination's span exporter so that, when
+// the destination takes no app logs (AppLogs), its invoke_agent spans
+// leave without weft.logs.bridged: the mark says "this store holds the
+// run's bridged lines", and a store that never receives them must read
+// as unbridged — the logs route's hint, never an empty page that reads
+// "the app logged nothing". The span processor sets the mark once for
+// every destination (the span is shared); each export takes it off its
+// own copy.
+func unmarkUnlessAppLogs(d dest, exp sdktrace.SpanExporter) sdktrace.SpanExporter {
+	if d.appLogsOn() {
+		return exp
+	}
+	return unmarkSpanExporter{exp}
+}
+
+type unmarkSpanExporter struct{ sdktrace.SpanExporter }
+
+func (e unmarkSpanExporter) ExportSpans(ctx context.Context, spans []sdktrace.ReadOnlySpan) error {
+	out, copied := spans, false
+	for i, s := range spans {
+		if !isInvokeAgentName(s.Name()) || !hasSpanAttr(s, attrLogsBridged) {
+			continue
+		}
+		if !copied { // the batch is the processor's: never written in place
+			out, copied = append([]sdktrace.ReadOnlySpan(nil), spans...), true
+		}
+		out[i] = unmarkedSpan{s}
+	}
+	return e.SpanExporter.ExportSpans(ctx, out)
+}
+
+func hasSpanAttr(s sdktrace.ReadOnlySpan, key string) bool {
+	for _, kv := range s.Attributes() {
+		if string(kv.Key) == key {
+			return true
+		}
+	}
+	return false
+}
+
+// unmarkedSpan is a span read without weft.logs.bridged.
+type unmarkedSpan struct{ sdktrace.ReadOnlySpan }
+
+func (s unmarkedSpan) Attributes() []attribute.KeyValue {
+	in := s.ReadOnlySpan.Attributes()
+	out := make([]attribute.KeyValue, 0, len(in))
+	for _, kv := range in {
+		if string(kv.Key) != attrLogsBridged {
+			out = append(out, kv)
+		}
+	}
+	return out
+}

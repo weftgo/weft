@@ -441,8 +441,9 @@ export function mcpCommand(studioURL: string, authRequired?: boolean): string {
 
 /** What carries an app's own log lines here (UX-S1-10): the run's
  * logs route (capability "logs") reads OTLP log records under the
- * run's spans, and slog lines are not OTLP until bridged. Weft's own
+ * run's spans, and slog lines are not OTLP until bridged (otel.Slog,
+ * U11.1). Weft's own
  * records need only its LoggerProvider; an out-of-loop Agent.CallTool
  * is no run and records nothing. */
 export const LOGS_BRIDGE =
-  "weft's records arrive with weft.LoggerProvider / otel.Install; the app's slog lines need a bridge to OTel logs — a slog→OTel bridge (otel.Slog) is planned. An Agent.CallTool outside a run records nothing."
+  "weft's records arrive with weft.LoggerProvider / otel.Install; the app's slog lines need a bridge to OTel logs — otel.Install(…, otel.Slog()) bridges slog.Default, otel.SlogHandler(h) any other handler. An Agent.CallTool outside a run records nothing."

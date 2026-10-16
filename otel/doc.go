@@ -33,10 +33,12 @@
 //     handler) tees every line logged on a span-carrying context to the
 //     pipeline as an app log record with that span's ids — weft.Logger's
 //     run lines, mw.Log's, the app's own — for the destinations AppLogs
-//     admits (Local and Studio with content on by default). While it is
-//     wired, heartbeats and each run's invoke_agent span carry
-//     weft.logs.bridged; Studio's logs route reads its absence as "the
-//     app's slog isn't bridged".
+//     admits (Local and Studio with content on by default), each line
+//     shaped by the destination's content policy (Redact, MaxBytes;
+//     stripped when content is off). While it is live, heartbeats and
+//     each run's invoke_agent span carry weft.logs.bridged on the
+//     destinations that take the lines; Studio's logs route reads its
+//     absence as "no weft slog bridge was recorded for this run".
 //   - The Local destination writes obsdb/sqlite synchronously: nothing
 //     emitted is lost, and the DB's hub is setup A's live lane.
 //   - Install never panics and never fails the program; Start returns

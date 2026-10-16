@@ -38,7 +38,9 @@ type ContentConfig struct {
 	// core.ContentResult. It also sees a prompt record's text
 	// (core.ContentPrompt) and each stop sequence of a request record
 	// (core.ContentStop); a tools record is capped, never redacted (ADR
-	// 0028 §6). Ids, names, roles, signatures, file parts and hashes are
+	// 0028 §6), and a bridged app log line's message and string
+	// attributes (ContentLog; Slog, SlogHandler — capped too, a panic
+	// drops the line). Ids, names, roles, signatures, file parts and hashes are
 	// not passed to it; a transcript record is redacted, never capped. It
 	// runs on the run's goroutine: a panic in it is contained — the event
 	// goes out stripped, the transcript record not at all — and counted
@@ -337,9 +339,15 @@ func Blocking() DestOption {
 // with content on, off for Datadog, Langfuse, OTLP and Exporters — and
 // for a Local or Studio destination under NoContent — because an app's
 // log lines may carry anything it logged, prompts included. AppLogs(true)
-// is the opt-in: the lines go as logged, whatever the destination's
-// content setting (the content policy shapes weft's records, not the
-// app's). AppLogs(false) keeps them from a Local or Studio destination.
+// is the opt-in: it admits the lines, never bypasses the destination's
+// content policy — an app log line is content like a transcript record,
+// so a content-on destination applies ContentConfig's Redact
+// (ContentLog) and MaxBytes to its message and string attributes, and a
+// content-off one receives it stripped (message and string values
+// emptied, weft.content=stripped; severity, span and the other
+// attributes kept). AppLogs(false) keeps them from a Local or Studio
+// destination. Only a destination that takes the lines carries the
+// bridge mark (weft.logs.bridged on its heartbeats and root spans).
 // Records the app emits through the OTel Logs API itself are not the
 // bridge's and are not governed by it.
 func AppLogs(on bool) DestOption {

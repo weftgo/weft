@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/weftgo/weft"
 	"github.com/weftgo/weft/mw"
@@ -151,4 +152,55 @@ func ExampleSlogHandler() {
 		fmt.Println(obsdb.SeverityText(l.Severity), l.Body, "·", names[l.SpanID], "· id", l.Attrs["id"])
 	}
 	// Output: WARN slow lookup · execute_tool lookup · id 42
+}
+
+// ContentLog is the kind Redact sees for a bridged app log line: its
+// message and each string attribute are content like a transcript
+// field, redacted (then capped at MaxBytes) before they leave — here a
+// card number a tool handler logged never reaches the store.
+func ExampleContentLog() {
+	dir, err := os.MkdirTemp("", "weft-otel-slog-")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() { _ = os.RemoveAll(dir) }()
+	redact := func(kind weft.ContentKind, s string) string {
+		if kind == otel.ContentLog {
+			return strings.ReplaceAll(s, "4111111111111111", "[card]")
+		}
+		return s
+	}
+	path := filepath.Join(dir, "weft.db")
+	shutdown := otel.Install(otel.NoEnv(), otel.Local(path),
+		otel.Content(otel.ContentConfig{Redact: redact}))
+	logger := slog.New(otel.SlogHandler(nil))
+
+	charge := weft.Tool("charge", "Charge a card.", func(ctx context.Context, in struct {
+		Card string `json:"card"`
+	}) (string, error) {
+		logger.InfoContext(ctx, "charging "+in.Card, "card", in.Card)
+		return "ok", nil
+	})
+	agt := weft.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "charge", Args: `{"card":"4111111111111111"}`}),
+		wefttest.Say("charged")), weft.Name("example"), charge)
+	res, err := agt.Generate(context.Background(), weft.Prompt("charge it"))
+	if err != nil {
+		log.Fatal(err)
+	}
+	shutdown()
+
+	db, err := sqlite.Open(path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer func() { _ = db.Close() }()
+	page, err := db.OtherLogs(context.Background(), res.ID, obsdb.LogQuery{})
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, l := range page.Logs {
+		fmt.Println(l.Body, "· card", l.Attrs["card"])
+	}
+	// Output: charging [card] · card [card]
 }

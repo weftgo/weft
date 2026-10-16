@@ -3,11 +3,15 @@ package otel
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/weftgo/weft/core"
 
 	"go.opentelemetry.io/otel/attribute"
 	otellog "go.opentelemetry.io/otel/log"
@@ -30,9 +34,27 @@ const bridgeScope = "github.com/weftgo/weft/otel/slog"
 // attrLogsBridged is weft.logs.bridged: on the heartbeat, the count of
 // lines the pipeline's bridge emitted so far; on a run's invoke_agent
 // span, the same count when the run began. Present only while the
-// pipeline has a bridge — its absence on a stored root span is what
-// the logs route's hint hole reads (obsdb.LogPage.NoBridge).
+// pipeline has a live bridge, and only on what reaches a destination
+// that takes app logs (AppLogs) — its absence on a stored root span is
+// what the logs route's hint hole reads (obsdb.LogPage.NoBridge).
 const attrLogsBridged = "weft.logs.bridged"
+
+// attrLogAttrsDropped is weft.log.attrs_dropped: on a bridged line, how
+// many of its slog attributes the bridge left off past maxBridgedAttrs.
+const attrLogAttrsDropped = "weft.log.attrs_dropped"
+
+// maxBridgedAttrs is how many slog attributes one bridged line carries:
+// below the OTel SDK's default record limit (128), so the marks weft
+// adds itself (weft.log.attrs_dropped, weft.content,
+// weft.content.truncated_bytes) always fit and a cut is counted, never
+// the SDK's silent drop.
+const maxBridgedAttrs = 120
+
+// ContentLog is the kind the destination's Redact receives for a
+// bridged app log line (Slog, SlogHandler): its message and each of its
+// string attributes. It is not a core kind — the core never logs
+// content into a record; the bridge carries what the app logged.
+const ContentLog core.ContentKind = "log"
 
 // quietKey marks a context whose log lines the bridge never takes: the
 // pipeline's own WARNs (a failing destination) go out under quietCtx,
@@ -42,36 +64,46 @@ type quietKey struct{}
 
 var quietCtx = context.WithValue(context.Background(), quietKey{}, true)
 
-// globalBridge is set once any package-level SlogHandler was built: a
-// handler that follows the installed pipeline, so the installed one
-// counts as bridged from then on.
-var globalBridge atomic.Bool
-
 // bridgeState is a pipeline's half of the bridge.
 type bridgeState struct {
-	wired  atomic.Bool  // Slog, or Pipeline.SlogHandler, bound a handler to this pipeline
-	count  atomic.Int64 // lines emitted into the provider
-	logger otellog.Logger
+	wired   atomic.Bool  // Pipeline.SlogHandler bound a handler to this pipeline
+	contact atomic.Bool  // a handler teed a line into this pipeline
+	count   atomic.Int64 // lines emitted into the provider
+	logger  otellog.Logger
+	// installed is Slog's wrap of slog.Default (nil without Slog): live
+	// while it still is the default's handler.
+	installed atomic.Pointer[slogHandler]
+	// prev, prevW and prevFlags are what Slog found: the default logger
+	// and the log package's writer and flags (restore's target, and a
+	// later pipeline's when this one closed first).
+	prev      *slog.Logger
+	prevW     io.Writer
+	prevFlags int
 	// restore puts slog.Default and the log package back as Slog found
 	// them (nil when Slog did not wrap the default).
 	restore func()
 }
 
-// bridged reports whether the pipeline has a bridge and how many lines
-// it emitted so far: weft.logs.bridged's value.
+// bridged reports whether the pipeline has a live bridge and how many
+// lines it emitted so far: weft.logs.bridged's value. Live is a handler
+// bound to this pipeline (Pipeline.SlogHandler), Slog's wrap while it is
+// still slog.Default's handler, or any handler — the package-level
+// SlogHandler, or a program's own wrap of Slog's — that has teed a line
+// into this pipeline. Merely building a package-level SlogHandler marks
+// nothing: it follows whichever pipeline is installed when it logs.
+// Which destinations see the mark is theirs to say (AppLogs: a
+// destination that takes no app logs never carries it).
 func (p *Pipeline) bridged() (int64, bool) {
-	if p.bridge.wired.Load() {
-		return p.bridge.count.Load(), true
-	}
-	if globalBridge.Load() {
-		installedMu.RLock()
-		installed := installedPipeline == p
-		installedMu.RUnlock()
-		if installed {
-			return p.bridge.count.Load(), true
+	live := p.bridge.wired.Load() || p.bridge.contact.Load()
+	if !live {
+		if h := p.bridge.installed.Load(); h != nil && slog.Default().Handler() == slog.Handler(h) {
+			live = true
 		}
 	}
-	return 0, false
+	if !live {
+		return 0, false
+	}
+	return p.bridge.count.Load(), true
 }
 
 // Slog bridges the program's default logger: once the pipeline is
@@ -86,10 +118,19 @@ func (p *Pipeline) bridged() (int64, bool) {
 //
 // A program still on slog's built-in default handler (it never called
 // slog.SetDefault) keeps its lines on the log package's writer, written
-// by a slog.TextHandler at INFO and above: wrapping the built-in
-// handler itself would deadlock the log package. Under NoGlobal (Start
-// only) the default is left alone, like the OTel globals; bind a
-// handler with Pipeline.SlogHandler instead.
+// by a slog.TextHandler at the level slog.SetLogLoggerLevel set (INFO
+// unless changed) — wrapping the built-in handler itself would deadlock
+// the log package. The format changes while the bridge is installed:
+// the TextHandler's key=value lines (time=… level=… msg=…) replace the
+// built-in "2009/11/10 23:00:00 INFO msg k=v" form, and the log
+// package's flags no longer shape them; both come back at shutdown.
+//
+// One Slog pipeline at a time: a second Install(…, Slog()) wraps the
+// first's bridge. Shut them down in reverse order; out of order, the
+// last shutdown still skips a closed pipeline's wrap and restores what
+// the first found. Under NoGlobal (Start only) the default is left
+// alone, like the OTel globals; bind a handler with
+// Pipeline.SlogHandler instead.
 func Slog() Option {
 	return optionFunc(func(c *config) { c.slog = true })
 }
@@ -107,17 +148,24 @@ func Slog() Option {
 // slog message as its body; the slog level as its severity (DEBUG 5,
 // INFO 9, WARN 13, ERROR 17 — level + 9, held to 1–24) and severity
 // text; the attributes flattened, a group's keys joined with "." (a
-// key "weft.run.id", which would make the record read as weft's own,
-// is renamed "slog.weft.run.id"); durations and times as their string
-// forms; the trace and span ids of ctx. Only a line logged under a
+// key starting "weft." — "weft.run.id", "weft.record", which would make
+// the record read as weft's own — is renamed "slog.weft.…"), the first
+// 120 kept and the rest counted in weft.log.attrs_dropped; durations
+// and times as their string forms; the trace and span ids of ctx. Only a line logged under a
 // valid span context is teed — a line with no span names no run and
 // stays with next alone — and only at a level some destination takes:
 // the bridge itself has no level, every slog level (DEBUG included:
 // weft's own lines are Debug) goes to the pipeline. Which destinations
 // receive the lines is AppLogs': Local and Studio with content on by
-// default, never a third party unless it opts in.
+// default, never a third party unless it opts in. Each destination
+// shapes a line by its content policy (ContentConfig): Redact over the
+// message and string attributes (ContentLog), each capped at MaxBytes
+// with weft.content.truncated_bytes; a content-off destination that
+// opted in gets the line stripped — severity, span and non-string
+// attributes kept, message and string values emptied, weft.content
+// "stripped". Under a full queue bridged lines are shed with the
+// deltas, before weft's own records.
 func SlogHandler(next slog.Handler) slog.Handler {
-	globalBridge.Store(true)
 	return &slogHandler{next: next}
 }
 
@@ -135,18 +183,40 @@ func (p *Pipeline) installSlog() {
 	w, flags := log.Writer(), log.Flags()
 	next := prev.Handler()
 	if isBuiltinSlogHandler(next) {
-		next = slog.NewTextHandler(w, nil)
+		next = slog.NewTextHandler(w, &slog.HandlerOptions{Level: logLoggerLevel()})
 	}
-	h := p.SlogHandler(next)
+	h := &slogHandler{next: next, pipe: p}
+	p.bridge.prev, p.bridge.prevW, p.bridge.prevFlags = prev, w, flags
+	p.bridge.installed.Store(h)
 	slog.SetDefault(slog.New(h))
 	p.bridge.restore = func() {
-		if slog.Default().Handler() != h {
-			return // the program replaced it since: theirs stays
+		if slog.Default().Handler() != slog.Handler(h) {
+			return // the program (or a later Slog pipeline) replaced it since: theirs stays
 		}
-		slog.SetDefault(prev)
-		log.SetOutput(w)
-		log.SetFlags(flags)
+		target, tw, tf := prev, w, flags
+		// Out-of-order shutdown: what this one found may be an earlier
+		// Slog pipeline's wrap, closed since — restore what that one
+		// found instead, never a dead bridge's TextHandler.
+		for {
+			ph, ok := target.Handler().(*slogHandler)
+			if !ok || ph.pipe == nil || ph.pipe.bridge.installed.Load() != ph || !ph.pipe.closing.Load() {
+				break
+			}
+			b := &ph.pipe.bridge
+			target, tw, tf = b.prev, b.prevW, b.prevFlags
+		}
+		slog.SetDefault(target)
+		log.SetOutput(tw)
+		log.SetFlags(tf)
 	}
+}
+
+// logLoggerLevel reads the level slog.SetLogLoggerLevel set (it has no
+// getter: set and put back).
+func logLoggerLevel() slog.Level {
+	l := slog.SetLogLoggerLevel(slog.LevelInfo)
+	slog.SetLogLoggerLevel(l)
+	return l
 }
 
 // isBuiltinSlogHandler reports whether h is slog's own default handler
@@ -221,9 +291,13 @@ func (h *slogHandler) Handle(ctx context.Context, r slog.Record) error {
 			kvs = appendSlogAttr(kvs, h.prefix, a)
 			return true
 		})
+		if n := len(kvs) - maxBridgedAttrs; n > 0 {
+			kvs = append(kvs[:maxBridgedAttrs:maxBridgedAttrs], attribute.Int64(attrLogAttrsDropped, int64(n)))
+		}
 		rec.AddAttributes(kvs...)
 		p.bridge.logger.Emit(ctx, rec)
 		p.bridge.count.Add(1)
+		p.bridge.contact.Store(true)
 	}
 	if h.next != nil && h.next.Enabled(ctx, r.Level) {
 		return h.next.Handle(ctx, r)
@@ -291,8 +365,11 @@ func appendSlogAttr(kvs []attribute.KeyValue, prefix string, a slog.Attr) []attr
 		return kvs
 	}
 	key := prefix + a.Key
-	if key == "weft.run.id" {
-		key = "slog.weft.run.id" // a weft.run.id would make the line read as weft's own record
+	if strings.HasPrefix(key, "weft.") {
+		// weft.* keys are weft's own (weft.run.id, weft.record,
+		// weft.event.type, …): an app's would make the line read as a
+		// weft record — routed, shaped and tiered as one.
+		key = "slog." + key
 	}
 	return append(kvs, attribute.KeyValue{Key: attribute.Key(key), Value: slogValue(a.Value)})
 }

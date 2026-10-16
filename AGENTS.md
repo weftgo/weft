@@ -523,7 +523,11 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //   groups flattened "a.b"), restored at shutdown; otel.SlogHandler(next) bridges any handler
 //    //   (follows the installed pipeline), p.SlogHandler(next) one pipeline; per destination
 //    //   otel.AppLogs(on) — default Local/Studio with content on, a third party only opted in;
-//    //   weft.logs.bridged (count) on heartbeats and each invoke_agent span; GET runs/{id}/logs
+//    //   admits, never bypasses content policy: Redact (otel.ContentLog) + MaxBytes on body and string
+//    //   attrs, content-off → stripped; app weft.* keys renamed slog.weft.*; >120 attrs counted
+//    //   (weft.log.attrs_dropped); shed with the deltas on overflow;
+//    //   weft.logs.bridged (count) on heartbeats and each invoke_agent span, only on the destinations
+//    //   that take the lines and only while a bridge is live; GET runs/{id}/logs
 //    //   of a run without it (and no line) holds the not_recorded hint naming otel.Slog()
 //    otel.LocalDB()   // the installed pipeline's obsdb.DB (nil without a Local destination)
 //    otel.StudioEndpoint()  // the Studio destination weft/runtime dials

@@ -109,7 +109,7 @@ const logsNoSpansReason = "the run was recorded without a tracer: app logs are a
 // a run whose app slog was not bridged (obsdb.LogPage.NoBridge): the
 // empty page's cause, so it never reads "the app logged nothing".
 const (
-	logsNoBridgeReason = "no app logs: the app's slog isn't bridged — its log lines (its own, weft.Logger's, mw.Log's and mw.Audit's) never reached the pipeline (the run's root span carries no weft.logs.bridged)"
+	logsNoBridgeReason = "no app logs: no weft slog bridge was recorded for this run (its root span carries no weft.logs.bridged), so its slog lines — the app's own, weft.Logger's, mw.Log's, mw.Audit's — did not reach this store; if the app bridges slog itself (contrib otelslog, the OTel Logs API), it logged nothing under this run"
 	logsNoBridgeFix    = "bridge slog: otel.Install(…, otel.Slog()), or log through slog.New(otel.SlogHandler(h))"
 )
 

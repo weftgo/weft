@@ -304,7 +304,9 @@ enables Debug; `slog.New(slog.DiscardHandler)` turns the lines off.
 logged on a span-carrying context — these, `mw.Log`'s, `mw.Audit`'s and
 your own, Debug included — reaches the Local and Studio destinations
 (`otel.AppLogs(true)` opts a third party in) under the span it was
-logged in, and Studio shows it on the run's logs (`runs/{id}/logs`);
+logged in — redacted and capped by the destination's `ContentConfig`
+like any content, stripped where content is off — and Studio shows it
+on the run's logs (`runs/{id}/logs`);
 a run recorded without the bridge says so there.
 `examples/otel` runs the whole thing against the real SDK offline.
 No prompt, message, tool argument or tool result reaches a span: ids,

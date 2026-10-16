@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -92,7 +93,10 @@ type destProc struct {
 	adm *admission
 	// appLogs is whether this chain takes the slog bridge's records
 	// (dest.appLogsOn): it answers Enabled for the bridge's scope, and a
-	// bridged record reaching a chain without it is filtered.
+	// bridged record reaching a chain without it is filtered — as is
+	// the heartbeat's weft.logs.bridged, a mark that would claim lines
+	// this destination never receives. A bridged record it does take is
+	// shaped by the content policy (shapeAppLog).
 	appLogs bool
 }
 
@@ -112,9 +116,22 @@ func (p *destProc) Enabled(_ context.Context, param sdklog.EnabledParameters) bo
 }
 
 func (p *destProc) OnEmit(ctx context.Context, r *sdklog.Record) error {
-	if r.InstrumentationScope().Name == bridgeScope && !p.appLogs {
-		p.drops.filtered(1)
-		return nil // the app's slog lines go only where AppLogs sends them
+	if r.InstrumentationScope().Name == bridgeScope {
+		if !p.appLogs {
+			p.drops.filtered(1)
+			return nil // the app's slog lines go only where AppLogs sends them
+		}
+		clone := r.Clone()
+		if !p.shapeAppLog(&clone) {
+			return nil // never sent unredacted
+		}
+		// An app's lines are shed with the deltas: a chatty Debug logger
+		// never crowds weft's own records out of a full queue.
+		if p.adm != nil && !p.adm.admit(ctx, tierDelta) {
+			p.drops.overflowed(1, p.adm.size)
+			return nil
+		}
+		return p.inner.OnEmit(ctx, &clone)
 	}
 	clone := r.Clone()
 	kind := recordKind(&clone)
@@ -166,7 +183,12 @@ func (p *destProc) OnEmit(ctx context.Context, r *sdklog.Record) error {
 			return nil // never sent unredacted
 		}
 	case "heartbeat":
-		// No body, no content: through unchanged but for the count below.
+		// No body, no content: through unchanged but for the count below
+		// — and the bridge mark, which only a destination that takes the
+		// bridged lines may carry.
+		if !p.appLogs {
+			removeAttr(&clone, attrLogsBridged)
+		}
 	}
 	t := recordTier(&clone, kind)
 	if t == tierPriority {
@@ -302,6 +324,78 @@ func (p *destProc) redactRaw(clone *sdklog.Record) (keep bool) {
 		return false
 	}
 	clone.SetBody(attribute.StringValue(string(b)))
+	return true
+}
+
+// shapeAppLog applies the destination's content policy to one bridged
+// app log line (record contract §4) — an app may log anything, prompts
+// and PII included, so its lines are content like any transcript
+// field. Content off (a Local or Studio destination under NoContent, or
+// a content-off third party that opted in with AppLogs(true)): the
+// message and every string attribute value are emptied and the record
+// marked weft.content=stripped — its existence, time, severity, span
+// and non-string attributes survive as metadata. Content on: Redact
+// (ContentLog) then the MaxBytes cap over the message and each string
+// attribute, the bytes cut summed in weft.content.truncated_bytes. The
+// bridge's own weft.* marks are never shaped. A Redact panic drops the
+// record, counted as the destination's loss: never sent unredacted.
+func (p *destProc) shapeAppLog(clone *sdklog.Record) (keep bool) {
+	var kvs []attribute.KeyValue
+	clone.WalkAttributes(func(kv attribute.KeyValue) bool {
+		kvs = append(kvs, kv)
+		return true
+	})
+	appString := func(kv attribute.KeyValue) bool {
+		return kv.Value.Type() == attribute.STRING && !strings.HasPrefix(string(kv.Key), "weft.")
+	}
+	if !p.content {
+		clone.SetBody(attribute.StringValue(""))
+		for i, kv := range kvs {
+			if appString(kv) {
+				kvs[i].Value = attribute.StringValue("")
+			}
+		}
+		kvs = append(kvs, attribute.String(attrContentKey, contentStripped))
+		clone.SetAttributes(kvs...)
+		return true
+	}
+	redact := p.contentC.Redact
+	maxBytes := p.contentC.MaxBytes
+	if maxBytes == 0 {
+		maxBytes = 32 << 10
+	}
+	defer func() {
+		if v := recover(); v != nil {
+			keep = false
+			// The panic's type only: its value is commonly built from
+			// the very content Redact was given.
+			p.drops.dropped(1, fmt.Errorf("content redaction panicked (%T): the app log record was dropped", v))
+		}
+	}()
+	cut, changed := 0, false
+	if body := clone.Body(); body.Type() == attribute.STRING {
+		s, c := shapeString(body.AsString(), ContentLog, redact, maxBytes)
+		if s != body.AsString() {
+			clone.SetBody(attribute.StringValue(s))
+		}
+		cut += c
+	}
+	for i, kv := range kvs {
+		if !appString(kv) {
+			continue
+		}
+		s, c := shapeString(kv.Value.AsString(), ContentLog, redact, maxBytes)
+		if s != kv.Value.AsString() {
+			kvs[i].Value, changed = attribute.StringValue(s), true
+		}
+		cut += c
+	}
+	if cut > 0 {
+		kvs, changed = append(kvs, attribute.Int64(attrTruncated, int64(cut))), true
+	}
+	if changed {
+		clone.SetAttributes(kvs...)
+	}
 	return true
 }
 
@@ -578,6 +672,23 @@ func setAttr(r *sdklog.Record, key string, value attribute.Value) {
 	})
 	kept = append(kept, attribute.KeyValue{Key: attribute.Key(key), Value: value})
 	r.SetAttributes(kept...)
+}
+
+// removeAttr drops one attribute from the clone (when present).
+func removeAttr(r *sdklog.Record, key string) {
+	var kept []attribute.KeyValue
+	found := false
+	r.WalkAttributes(func(kv attribute.KeyValue) bool {
+		if string(kv.Key) == key {
+			found = true
+		} else {
+			kept = append(kept, kv)
+		}
+		return true
+	})
+	if found {
+		r.SetAttributes(kept...)
+	}
 }
 
 func addAttr(r *sdklog.Record, key string, value attribute.Value) {

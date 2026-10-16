@@ -1396,7 +1396,8 @@ func (l *link) overrideOptions(cmd command) []core.RunOption {
 	// The debugger's breakpoints (§8.3): parked on every run this
 	// runtime starts, whatever the command asked for — D7's rule,
 	// applied per run because the agent is immutable.
-	if breaks := l.breakpointTools(cmd.Agent); len(breaks) > 0 {
+	breaks := l.breakpointTools(cmd.Agent)
+	if len(breaks) > 0 {
 		opts = append(opts, core.ParkOn(breaks...))
 	}
 	// The command's own park_on adds to both: parking only narrows.
@@ -1419,6 +1420,13 @@ func (l *link) overrideOptions(cmd command) []core.RunOption {
 	}
 	if cmd.Actor != "" {
 		meta["weft.playground.actor"] = cmd.Actor
+	}
+	if len(breaks) > 0 {
+		// The breakpoints this run parks on (UX-H-18): they reach the
+		// core as ParkOn, so a parked call's weft.tool.pending.source
+		// reads park_on — this names which of those parks are the
+		// debugger's, sorted, comma-joined.
+		meta["weft.playground.breakpoints"] = strings.Join(slices.Sorted(slices.Values(breaks)), ",")
 	}
 	if v := replayViewMark(cmd); v != "" {
 		meta["weft.replay.view"] = v

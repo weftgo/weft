@@ -128,3 +128,20 @@ func injectThinking(thinking map[string]any) option.Middleware {
 		return next(r)
 	}
 }
+
+// ThinkingWire names how a thinking level leaves this adapter — the
+// request record's thinking.wire (O16, docs/record-contract.md §4),
+// read by the loop through the optional method convention (ADR 0013):
+// "reasoning_effort" (the effort dialect), "thinking" (the gateway
+// object the object dialect injects), or "none" when the level maps to
+// nothing on this dialect (ThinkOff and a Budget under effort, every
+// level under DialectNone). A field name, never a value.
+func (m *model) ThinkingWire(t core.ThinkingConfig) string {
+	switch {
+	case m.dialect == DialectEffort && reasoningEffort(t) != "":
+		return "reasoning_effort"
+	case m.dialect == DialectObject && thinkingObj(t) != nil:
+		return "thinking"
+	}
+	return "none"
+}

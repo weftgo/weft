@@ -853,6 +853,7 @@ func TestLinkStopLeaksNoGoroutines(t *testing.T) {
 // run straight past the breakpoint.
 func TestBreakpointIsNotSubstituted(t *testing.T) {
 	var lookups atomic.Int64
+	var bpMeta atomic.Value
 	lookup := core.Tool("lookup_order", "Look up.", func(ctx context.Context, in struct {
 		OrderID string `json:"order_id"`
 	}) (string, error) {
@@ -861,7 +862,12 @@ func TestBreakpointIsNotSubstituted(t *testing.T) {
 	})
 	agent := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"1"}`, ID: "c1"}),
-		wefttest.Say("done")), core.Name("acme-support"), lookup)
+		wefttest.Say("done")), core.Name("acme-support"), lookup,
+		core.Tap(func(ctx context.Context, ev core.Event) {
+			if _, ok := ev.(core.RunStart); ok {
+				bpMeta.Store(core.MetadataFromContext(ctx)["weft.playground.breakpoints"])
+			}
+		}))
 	l := newExecLink(nil, agent)
 	defer l.stop()
 	l.setBreakpoints([]string{"lookup_order"})
@@ -886,6 +892,11 @@ func TestBreakpointIsNotSubstituted(t *testing.T) {
 	}
 	if n := lookups.Load(); n != 0 {
 		t.Errorf("lookup ran %d times", n)
+	}
+	// The run names its breakpoints (UX-H-18): the core records the
+	// park as park_on, the metadata says it was the debugger's.
+	if got, _ := bpMeta.Load().(string); got != "lookup_order" {
+		t.Errorf("weft.playground.breakpoints = %q, want lookup_order", got)
 	}
 }
 

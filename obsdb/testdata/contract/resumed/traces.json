@@ -121,6 +121,12 @@
                   "value": {
                     "stringValue": "parked"
                   }
+                },
+                {
+                  "key": "weft.output.submitted",
+                  "value": {
+                    "boolValue": false
+                  }
                 }
               ],
               "endTimeUnixNano": "1790846460007000000",
@@ -264,6 +270,12 @@
                   "value": {
                     "boolValue": true
                   }
+                },
+                {
+                  "key": "weft.tool.pending.source",
+                  "value": {
+                    "stringValue": "approval"
+                  }
                 }
               ],
               "endTimeUnixNano": "1790846460004000000",
@@ -318,6 +330,12 @@
                   "key": "weft.tool.pending",
                   "value": {
                     "boolValue": true
+                  }
+                },
+                {
+                  "key": "weft.tool.pending.source",
+                  "value": {
+                    "stringValue": "approval"
                   }
                 }
               ],
@@ -439,6 +457,12 @@
                   "key": "weft.run.stopped_by",
                   "value": {
                     "stringValue": "output_submitted"
+                  }
+                },
+                {
+                  "key": "weft.output.submitted",
+                  "value": {
+                    "boolValue": true
                   }
                 }
               ],

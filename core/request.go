@@ -114,6 +114,12 @@ type requestBody struct {
 	Params          paramsBody       `json:"params"`
 	Model           requestModelBody `json:"model"`
 	Stream          bool             `json:"stream"`
+	// Prepared names the parts of the request the agent's PrepareStep
+	// chain changed (O9, UX-E-14), in this order: system, messages,
+	// tools, tool_choice, params, thinking, sequential_tools. Names
+	// only — content-free, so it survives content-off. Absent when no
+	// PrepareStep ran or it changed nothing.
+	Prepared []string `json:"prepared,omitempty"`
 }
 
 // messagesRef names the request's messages: the run's view as of
@@ -138,6 +144,151 @@ type toolChoiceBody struct {
 type thinkingBody struct {
 	Level  string `json:"level"`
 	Budget int64  `json:"budget,omitempty"`
+	// Wire is how the adapter sends the level (O16): the provider
+	// field it writes — reasoning_effort, thinking, budget_tokens,
+	// thinking_budget, … — or "none" when it sends nothing for it. A
+	// name, never a value. Absent when the model declares no wire
+	// form (the optional ThinkingWire method, thinkingWire).
+	Wire string `json:"wire,omitempty"`
+}
+
+// thinkingWire asks the model chain how it sends a thinking level: the
+// first model along the Unwrap chain with the optional method
+// ThinkingWire(ThinkingConfig) string answers (a convention like
+// ReportsAttempts, ADR 0013 — the first-party adapters implement it).
+// "" when none does or the request sets no thinking. The walk is
+// bounded (maxWireUnwrap hops) and never calls the provider; a panic
+// out of a method (or an uncomparable wrapper's self-check) reads "".
+func thinkingWire(m Model, t ThinkingConfig) (wire string) {
+	if t == (ThinkingConfig{}) {
+		return ""
+	}
+	defer func() {
+		if recover() != nil {
+			wire = "" // a broken method never breaks the step
+		}
+	}()
+	for range maxWireUnwrap {
+		if m == nil {
+			return ""
+		}
+		if w, ok := m.(interface {
+			ThinkingWire(ThinkingConfig) string
+		}); ok {
+			return w.ThinkingWire(t)
+		}
+		next := Unwrap(m)
+		if next == m {
+			return ""
+		}
+		m = next
+	}
+	return ""
+}
+
+// maxWireUnwrap bounds thinkingWire's walk down the Unwrap chain.
+const maxWireUnwrap = 64
+
+// The parts preparedFields names, in the record's order.
+const (
+	preparedSystem     = "system"
+	preparedMessages   = "messages"
+	preparedTools      = "tools"
+	preparedToolChoice = "tool_choice"
+	preparedParams     = "params"
+	preparedThinking   = "thinking"
+	preparedSequential = "sequential_tools"
+)
+
+// preparedFields compares a step's request before and after the
+// PrepareStep chain: before is what the loop built, after what the
+// chain returned, transcript and tools the step's own inputs (the
+// chain saw deep copies of them, so an in-place edit shows as a
+// difference here). Cheap compares — strings, values, lengths, the
+// structural message walk the compaction view uses — and a schema
+// encoded only when its pointer changed (the chain's clones' always
+// did: a step under PrepareStep encodes each offered schema once more,
+// as the catalog hash already does).
+func preparedFields(before, after ModelRequest, transcript []Message, tools []*ToolDef) []string {
+	var out []string
+	if after.System != before.System {
+		out = append(out, preparedSystem)
+	}
+	if !sameMessages(transcript, after.Messages) {
+		out = append(out, preparedMessages)
+	}
+	if !sameTools(tools, after.Tools) {
+		out = append(out, preparedTools)
+	}
+	if after.ToolChoice != before.ToolChoice {
+		out = append(out, preparedToolChoice)
+	}
+	if !sameParams(before.Params, after.Params) {
+		out = append(out, preparedParams)
+	}
+	if after.Thinking != before.Thinking {
+		out = append(out, preparedThinking)
+	}
+	if after.SequentialTools != before.SequentialTools {
+		out = append(out, preparedSequential)
+	}
+	return out
+}
+
+func sameMessages(a, b []Message) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !sameMessage(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// sameTools compares the offered sets by what the model sees and the
+// prompt snippet: the order, each name, description, snippet and
+// schema (the same pointer, or the same encoding).
+func sameTools(a, b []*ToolDef) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		x, y := a[i], b[i]
+		if x == y {
+			continue
+		}
+		if x == nil || y == nil || x.Name != y.Name || x.Description != y.Description ||
+			x.snippet != y.snippet || !sameSchema(x.InputSchema, y.InputSchema) {
+			return false
+		}
+	}
+	return true
+}
+
+func sameSchema(a, b *Schema) bool {
+	if a == b {
+		return true
+	}
+	if a == nil || b == nil {
+		return false
+	}
+	ja, errA := json.Marshal(a)
+	jb, errB := json.Marshal(b)
+	return errA == nil && errB == nil && bytes.Equal(ja, jb)
+}
+
+func sameParams(a, b RequestParams) bool {
+	return samePtr(a.Temperature, b.Temperature) && samePtr(a.TopP, b.TopP) &&
+		samePtr(a.MaxTokens, b.MaxTokens) && samePtr(a.Seed, b.Seed) && slices.Equal(a.Stop, b.Stop)
+}
+
+func samePtr[T comparable](a, b *T) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
 }
 
 // paramsBody mirrors RequestParams: an absent field is the adapter's
@@ -231,6 +382,10 @@ type toolEntry struct {
 	MaxResultBytes int             `json:"max_result_bytes"`
 	Sequential     bool            `json:"sequential"`
 	Source         string          `json:"source"`
+	// Output marks the tool Output registered (submit_output): the
+	// run's typed answer, not a side effect (UX-S1-06). Absent on
+	// every other tool.
+	Output bool `json:"output,omitempty"`
 }
 
 // The tool sources a tools record names by default: local for an
@@ -274,6 +429,7 @@ func (a *Agent) toolEntries(tools []*ToolDef, parkSet *parkRule) ([]toolEntry, e
 			MaxResultBytes: resultCap,
 			Sequential:     t.sequential,
 			Source:         source,
+			Output:         a.hasOutput && t.Name == outputToolName,
 		})
 	}
 	slices.SortStableFunc(out, func(x, y toolEntry) int { return strings.Compare(x.Name, y.Name) })
@@ -322,7 +478,7 @@ type requestRecord struct {
 // When it does, the run-scope compaction view (ADR 0028 §8) is emitted
 // right before the request record and the request's messages_ref
 // names it; otherwise the ref names the latest growth record.
-func (r *recorder) recordRequest(mctx context.Context, a *Agent, step int, req ModelRequest, info ModelInfo, parkSet *parkRule, transcript []Message, rewritten bool) (rr *requestRecord) {
+func (r *recorder) recordRequest(mctx context.Context, a *Agent, step int, req ModelRequest, info ModelInfo, parkSet *parkRule, transcript []Message, rewritten bool, prepared []string, wire string) (rr *requestRecord) {
 	defer r.contain(mctx, step, "request")
 	if mctx.Err() != nil {
 		return nil
@@ -409,8 +565,9 @@ func (r *recorder) recordRequest(mctx context.Context, a *Agent, step int, req M
 			Stop:        slices.Clone(req.Params.Stop),
 			Seed:        req.Params.Seed,
 		},
-		Model:  requestModelBody(info),
-		Stream: true, // the Model contract is a stream (Model.Stream)
+		Model:    requestModelBody(info),
+		Stream:   true, // the Model contract is a stream (Model.Stream)
+		Prepared: prepared,
 	}
 	// The request's messages are the compaction view it was given, or
 	// else the transcript as of the latest growth record (never an
@@ -435,7 +592,7 @@ func (r *recorder) recordRequest(mctx context.Context, a *Agent, step int, req M
 		body.ToolChoice = &toolChoiceBody{Mode: string(req.ToolChoice.Mode), Name: req.ToolChoice.Name}
 	}
 	if req.Thinking != (ThinkingConfig{}) {
-		body.Thinking = &thinkingBody{Level: thinkingLevelName(req.Thinking.Level), Budget: req.Thinking.Budget}
+		body.Thinking = &thinkingBody{Level: thinkingLevelName(req.Thinking.Level), Budget: req.Thinking.Budget, Wire: wire}
 	}
 	rr = &requestRecord{r: r, body: body}
 	rr.emit(mctx, body)

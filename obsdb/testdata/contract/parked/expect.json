@@ -48,7 +48,8 @@
           "call_id": "call_1",
           "step": 0,
           "seq": 1,
-          "status": "unset"
+          "status": "unset",
+          "pending_source": "approval"
         }
       ],
       "holes": []

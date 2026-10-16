@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 	"strconv"
+	"strings"
 	"sync/atomic"
 )
 
@@ -46,6 +47,35 @@ type nest struct {
 	emit   func(Event)
 	usage  func(Usage)
 	closed atomic.Bool
+	// pending names a child that ended parked: its pending calls'
+	// tool names, comma-joined (weft.subagent.pending on the call's
+	// execute_tool span). Written by the handler, read by the span's
+	// end — on another goroutine when the call timed out.
+	pending atomic.Pointer[string]
+}
+
+// notePending records the parked child's pending calls by tool name.
+func (n *nest) notePending(calls []ToolCallPart) {
+	if n == nil || len(calls) == 0 {
+		return
+	}
+	names := make([]string, len(calls))
+	for i, c := range calls {
+		names[i] = c.Name
+	}
+	s := strings.Join(names, ",")
+	n.pending.Store(&s)
+}
+
+// pendingNames is what notePending recorded, "" for none.
+func (n *nest) pendingNames() string {
+	if n == nil {
+		return ""
+	}
+	if p := n.pending.Load(); p != nil {
+		return *p
+	}
+	return ""
 }
 
 // sink returns the event sink a child run reports through. A nil nest
@@ -217,6 +247,7 @@ func Subagent(name, description string, child *Agent, opts ...ToolOption) *ToolD
 				Message: fmt.Sprintf("agent %q failed at step %d: %v", name, re.Step, re.Err),
 				Err:     err}
 		case len(res.Pending) > 0:
+			n.notePending(res.Pending)
 			return "", &ToolError{Code: CodeSubagentPending,
 				Message: fmt.Sprintf("agent %q ended awaiting approval of %d call(s)", name, len(res.Pending))}
 		case child.hasOutput:

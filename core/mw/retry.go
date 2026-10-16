@@ -141,8 +141,9 @@ func (m *retryModel) Unwrap() core.Model { return m.next }
 
 func (m *retryModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	return func(yield func(core.ModelEvent, error) bool) {
+		var wait time.Duration // slept before this try (AttemptInfo.Wait)
 		for attempt := 0; ; attempt++ {
-			yielded, failed := replay(ctx, m.next, req, "", yield)
+			yielded, failed := replay(withWait(ctx, wait), m.next, req, "", wait, yield)
 			if failed == nil {
 				return
 			}
@@ -170,6 +171,7 @@ func (m *retryModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq
 				yield(nil, ctx.Err())
 				return
 			}
+			wait = delay
 		}
 	}
 }

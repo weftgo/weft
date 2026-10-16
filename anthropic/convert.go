@@ -362,3 +362,21 @@ func mapStopReason(reason string, category string) (core.StopReason, string) {
 		return core.StopEndTurn, reason
 	}
 }
+
+// ThinkingWire names how a thinking level leaves this adapter — the
+// request record's thinking.wire (O16, docs/record-contract.md §4),
+// read by the loop through the optional method convention (ADR 0013):
+// the thinking member params sends — "thinking.disabled" (ThinkOff),
+// "thinking.budget_tokens" (a Budget), "thinking.adaptive" (a bare
+// level), "none" for the unset level. A field name, never a value.
+func (m *model) ThinkingWire(t core.ThinkingConfig) string {
+	switch {
+	case t.Level == core.ThinkOff:
+		return "thinking.disabled"
+	case t.Budget > 0:
+		return "thinking.budget_tokens"
+	case t.Level != core.ThinkUnset:
+		return "thinking.adaptive"
+	}
+	return "none"
+}

@@ -206,8 +206,8 @@ child). It ends when the run does, however the run ends.
 | `weft.override.model` | string `<provider>/<name>` (the bare name without a provider) | `UseModel` |
 | `weft.override.park_on`, `weft.override.park_all_except` | string | `ParkOn` / `ParkAllExcept` |
 | `weft.override.thinking` | string | a per-run thinking level |
-| `weft.override.tool_choice` | string | a per-run tool choice |
-| `weft.override.params` | string (JSON) | per-run sampling params |
+| `weft.override.tool_choice` | string | a per-run tool choice: `auto`, `any`, `none`, `tool:<name>` (a named choice with no name reads `tool`, never `tool:`) |
+| `weft.override.params` | string (JSON) | per-run sampling params: the set knobs only, by the request record's lower-case names — `{"temperature":0.4,"top_p":0.9,"max_tokens":64,"stop":["END"],"seed":7}` (U25; before it, the Go struct's field names with nulls) |
 | `weft.override.max_steps`, `weft.override.parallelism` | int | lowered per run |
 | `gen_ai.usage.input_tokens`, `gen_ai.usage.output_tokens` | int | at end: run totals, Subagent children included |
 | `gen_ai.usage.cache_read.input_tokens`, `gen_ai.usage.cache_creation.input_tokens`, `gen_ai.usage.reasoning.output_tokens` | int | at end, each only when non-zero |
@@ -215,6 +215,7 @@ child). It ends when the run does, however the run ends.
 | `weft.run.events` | int | at end, always: the durable `event` records the run handed to its LoggerProvider (§4's `weft.event.pos` counter's final value) — 0 when no logger was wired or it enabled none. A reader compares it with what it stored (§6 `events_emitted`, §7 `gap` / `events_lost`) |
 | `weft.run.messages` | int | at end, always: the growth `messages` records emitted (views excluded) — 0 when content capture was off or no logger was wired. Informational: a content-off destination legitimately stores none (§5) |
 | `weft.run.pending` | int | at end, when calls are parked for approval |
+| `weft.output.submitted` | bool | at end, an agent built with `Output` only: `true` when the run ended with a valid `submit_output` call (what `GenerateAs` / `OutputOf` decode), `false` when it did not — the case `GenerateAs` answers `ErrNoOutput`, which the caller sees and the record otherwise would not (UX-S1-06). A caller-side decode failure stays the caller's: no record carries it |
 | `weft.run.denied` | int | at end, on the resuming run (a run fed decisions), when it denied parked calls — an explicit `Deny` and every call left undecided ("no decision"): they have no event (ADR 0007) and, since U13.1, a zero-length `execute_tool` span each marked `weft.tool.denied` — which a reader does not count again: this count stays their carrier (§6 `problems.denied`). Not a `Resolve` (a result computed outside the process); not an `mw.Allow` refusal (a policy middleware's `DENIED` has its own `execute_tool` span, counted from there); not the calls `Repair` fills with an error result when a transcript with parked calls returns with a new prompt instead of decisions — those are uncounted |
 | `weft.tap.panics` | int | at end, when observers panicked during the run and were contained: taps, `OnMessages` observers, a record or report the logger or tracer failed to build — the run's share of `Agent.TapPanics` (`OnRunEnd` observers run after the span ended: theirs reach `TapPanics` alone). The run is unchanged; an observer the app relies on saw less (§6 `problems.tap_panics`) |
 | `weft.run.stop_reason` | string | at end: the last step's `stop`, `tool_calls`, `max_tokens` |
@@ -258,6 +259,13 @@ numbered per model call),
 `mw.Fallback` sent to a backup — the one marker §6's `fallbacks` keys
 on; absent on the primary's tries, first or retried, and on a backup
 that reports its own attempts, such as a `Retry` around it),
+`weft.attempt.wait_ms` (`AttemptInfo.Wait`: the backoff the reporting
+layer slept before sending this attempt — `mw.Retry`'s delay, the
+provider's retry-after it honoured — rounded up, never 0; absent on an
+attempt sent at once, a first try and a fallback's backup alike),
+`http.response.status_code` (`AttemptInfo.HTTPStatus`: the provider's
+HTTP status when the reporter found one — `mw.Retry` and `mw.Fallback`
+read it off the error with `mw.HTTPStatus`; absent when none is known),
 `gen_ai.response.model` on success, `error.type` and status `Error` on
 failure.
 
@@ -280,6 +288,10 @@ Name `execute_tool <tool>`, kind Internal, child of `invoke_agent`.
 | `weft.tool.denied`, `weft.tool.denied_kind` | bool `true`, string | a parked call the resume denied: `denied` (`Deny`) or `no_decision` (left undecided). The span is zero-length (start = end, the moment the resume decided it), carries `weft.step.index` 0 and no `weft.tool.seq` (no `tool_start`: the call never ran), `error.type` `DENIED`, status `Error` — never the reason |
 | `weft.tool.result_bytes` | int | at end, a successful result only (not an error result, not a parked call): the length of the result the model sees (after the result cap) |
 | `weft.tool.pending` | bool `true` | at end: the call was parked for approval |
+| `weft.tool.pending.source` | string | beside `weft.tool.pending`: why it parked (UX-H-18) — `approval` (the tool's `RequireApproval`), `park_on` (the run's `ParkOn`; `weft/runtime` passes a playground run's breakpoints this way and names them in the run's `weft.playground.breakpoints` metadata), `park_source` (an agent `ParkSource` answered the name — `runtime.Breakpoints()` on the app's own runs), `park_all_except` (`ParkAllExcept`, the run's or inherited: the playground's side-effect rule), `middleware` (a tool middleware returned `ErrApprovalRequired`) |
+| `weft.tool.timeout_ms` | int | at start, when a deadline is in force: the call's `Timeout` (the tool's own, else the agent's), the limit a `timeout` error ran out (UX-S2-06) |
+| `weft.tool.queue_ms` | int | at start, a call that waited for its turn — behind a `Sequential` barrier with calls before it, or for a `Parallelism` slot: the wait, rounded up, never 0; absent on a call that started at once |
+| `weft.subagent.pending` | string | `error.type` `SUBAGENT_PENDING`: the parked child's pending calls by tool name, comma-joined in call order (UX-S3-15) |
 | `weft.tool.truncated_bytes` | int | at end, a result or an error result the result cap (`MaxResultBytes`) cut: the bytes it removed — the number the model's `…[truncated N bytes]` marker names; absent when nothing was cut |
 | `error.type` | string | an error result, in this order: the `ToolError` code when the chain produced one (`INVALID_INPUT`, `NO_SUCH_TOOL`, `DENIED` from a policy middleware such as `mw.Allow`, `RETRY`, a handler's own code); `timeout` (the call's `Timeout` passed); `panic` (a contained panic in the handler or its middleware); the context error's name when the run's cancellation reached the call (`context.Canceled`, `context.DeadlineExceeded`); the error's own `ErrorType()` string when an error in its chain declares one (a convention: `weft/mcp`'s `mcp_transport` — the `tools/call` did not complete — and `mcp_tool_error` — the server answered `isError`); else `tool_error` |
 | `weft.tool.retry`, `weft.tool.retry_budget` | int, int | `error.type` `RETRY` (`core.ModelRetry`) counted by the loop: the tool's consecutive RETRY count with this result (1-based; assigned after the step's batch, in call order, exactly as the guard counts: a success of the tool resets it, so a RETRY in a batch that also holds a success of the same tool carries no mark; the span of a marked call ends after its batch, timestamped when the call returned, so its duration is still the call's; on the span only — the `tool_finish` record is written as the call finishes, before the mark is known) and the run's `MaxModelRetries`. The loop fails the run (`model_retries_exceeded`, its error naming both: `tool "x" retried 3 times, past MaxModelRetries(2)`) at its next model call once the count passes the budget. Absent on a resumed approved call's RETRY, which the loop does not count. The model-visible `RETRY: …` text is unchanged |
@@ -410,9 +422,21 @@ rewritten), `request`. A request that was never sent is never recorded.
   `attempt`, `system_hash`, `messages_ref {index?, count}` (the messages
   record the request's messages are the view as of; `index` absent when
   capture was off or a content-off destination removed it, §5), `tools {catalog_hash, names}` (names in offered
-  order), `tool_choice?`, `thinking?`, `sequential_tools`, `params
-  {temperature?, top_p?, max_tokens?, stop?, seed?}`, `model {provider,
-  name}`, `stream`.
+  order), `tool_choice?`, `thinking? {level, budget?, wire?}`,
+  `sequential_tools`, `params {temperature?, top_p?, max_tokens?, stop?,
+  seed?}`, `model {provider, name}`, `stream`, `prepared?`. `thinking.wire`
+  (O16) is how the adapter sends the level — the provider field it
+  writes, never a value: `openai` `reasoning_effort` | `thinking` (the
+  gateway object) | `none`; `anthropic` `thinking.adaptive` |
+  `thinking.budget_tokens` | `thinking.disabled`; `google`
+  `thinking_level` | `thinking_budget`; `none` when the level maps to
+  nothing. A model declares it with the optional method
+  `ThinkingWire(core.ThinkingConfig) string`, found along the `Unwrap`
+  chain (ADR 0013's convention); absent when none does. `prepared` (O9,
+  UX-E-14) names the parts the agent's `PrepareStep` chain changed, in
+  the order `system`, `messages`, `tools`, `tool_choice`, `params`,
+  `thinking`, `sequential_tools` — names only, so it survives content
+  off; absent when no `PrepareStep` ran or it changed nothing.
 - `prompt`: attributes `weft.prompt.index`, `weft.system.hash`. Body
   `{"hash", "text"}`: the composed system text (instructions after
   `PrepareStep`, with the tools' prompt snippets appended). `segments?: [{source, text}]` attributes the text to its sources
@@ -425,7 +449,9 @@ rewritten), `request`. A request that was never sent is never recorded.
   (`core.ContentPrompt`) and drops `segments` when its cap cut the text.
 - `tools`: attributes `weft.tools.index`, `weft.catalog.hash`. Body
   `{"hash", "tools": [{name, description, schema, timeout_ms, approval,
-  replay, max_result_bytes, sequential, source}]}` in name order.
+  replay, max_result_bytes, sequential, source, output?}]}` in name
+  order; `output: true` marks the tool `Output` registered
+  (`submit_output`, the run's typed answer — UX-S1-06).
 
 **Hashes.** Every text hash is lowercase hex sha256 of the UTF-8 bytes,
 taken before any destination redacts or caps the text:
@@ -1094,6 +1120,7 @@ page reaches it.
 | `tail_lost` | the `tool_calls` run with every record after its `tool_finish` dropped (step 1's records and `run_finish`), every span kept: `succeeded` from the `Ok` root, not `interrupted`; `events_emitted` above `event_count`: `gap` (cause `events_lost`, "N of M events were lost — the last K events were lost"), and with `messages_emitted` above a non-zero `message_count` the same badge's cause `messages_lost` ("2 of 4 transcript batches were lost") — the lost tail visible and counted, never a clean success |
 | `slog_bridged` | the `tool_calls` run with the slog bridge bound (`Pipeline.SlogHandler`) and the OTLP destination opted in (`otel.AppLogs(true)`): `mw.Log`'s request and finish lines under each `chat` span (DEBUG 5) and the tool handler's WARN 13 under its `execute_tool` span (a `slog.Group` flattened to `db.table`) arrive as app log records (§4) and read back attributed to the run (`logs`); a line logged with no span is not bridged. The root carries `weft.logs.bridged` 0 — not metadata (`meta` omits it); the row is otherwise `tool_calls`' own. `mw.Log`'s measured `dur` reads `1ms` |
 | `records_dropped` | the `tool_calls` run from a destination that had lost 3 records: `weft.records.dropped` 3 (int) on its `run_start` and `run_finish` records (§4; no heartbeat — never stored, and the run is shorter than 10 s). Ingest health reads it (Studio's largest per `service.name`); no row field: `meta` omits it (`obsdb.MetaOf` skips it), no hole names it — the row is `tool_calls`' own without its metadata |
+| `run_cards` | the run cards' facts (U25): an `Output` run repaired after one invalid submission (`submit_output` `INVALID_INPUT`, then a valid call — `stopped_by` `output_submitted`, the tools record's `output: true`, the root's `weft.output.submitted` `true`) and an `Output` run that answered in text (`weft.output.submitted` `false`); a call parked by the run's `ParkOn` (`pending_source` `park_on`) and one by an agent `ParkSource` (`park_source`); a tool cut by its `Timeout` (`timeout_ms` 5, `error.type` `timeout`); a `Subagent` child parked at its `RequireApproval` tool (`SUBAGENT_PENDING`, `subagent_pending` `refund_order`; the child `pending_source` `approval`); a `PrepareStep` rewriting step 0's system text, tool choice and params (the request record's `prepared` `[system, tool_choice, params]`) on a model declaring `thinking.wire` `reasoning_effort`; `mw.Retry` over a 503 then an answer (the first attempt's `http.response.status_code` 503, the second's `weft.attempt.wait_ms`, normalised to 1) |
 | `messages_lost` | the `tool_calls` run with its middle transcript batch dropped (the growth `messages` record at index 1, the assistant's tool call), every event and span kept: `message_count` 3 below `messages_emitted` 4 — `gap` (cause `messages_lost`, "1 of 4 transcript batches were lost"); every event stored, so no `events_lost` |
 
 `expect.json` is `{case, description, pending?, derived?, runs: [...]}`;
@@ -1126,7 +1153,8 @@ byte-stable so that `go test ./obsdb -run 'TestContract$'
   is not the run's, while `started`, `finished` and `last_seen` (min and
   max) are stable, no measured duration survives, and the status reads
   as it would long after the run;
-- measured durations (`weft.ttft_ms`, `weft.latency_ms`, `step_finish`'s
+- measured durations (`weft.ttft_ms`, `weft.latency_ms`,
+  `weft.attempt.wait_ms`, `weft.tool.queue_ms`, `step_finish`'s
   `latency_ms`/`ttft_ms`) read 1 where set;
 - `weft.version` and the instrumentation scope's version read
   `v0.0.0-contract`, so `weft_version` is that and a release never

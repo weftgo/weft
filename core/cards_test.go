@@ -1,0 +1,364 @@
+package core_test
+
+// The run cards' facts (U25; docs/record-contract.md §3, §4): what the
+// loop and the model middleware record so a step and a tool card can
+// tell the whole truth — an attempt's wait and HTTP status, a call's
+// park source, deadline and queue wait, a parked Subagent child's
+// calls, an Output run's submission, the parts a PrepareStep changed
+// and the adapter's thinking wire. Reporting only: every run here sees
+// the transcript it would see without a tracer or a logger.
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"slices"
+	"testing"
+	"time"
+
+	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/mw"
+	"github.com/weftgo/weft/core/wefttest"
+)
+
+// statusError carries an HTTP status the way the vendor SDKs' errors
+// do (the exported StatusCode field mw.HTTPStatus reads).
+type statusError struct{ StatusCode int }
+
+func (e statusError) Error() string { return "503 Service Unavailable: overloaded" }
+
+// spansOf returns the recorded spans with the given name, flattened.
+func spansOf(tp *recProvider, name string) []map[string]string {
+	tp.mu.Lock()
+	defer tp.mu.Unlock()
+	var out []map[string]string
+	for _, s := range tp.spans {
+		if s.name == name || (name == "execute_tool" && len(s.name) > 13 && s.name[:13] == "execute_tool ") {
+			out = append(out, s.attrsMap())
+		}
+	}
+	return out
+}
+
+// TestAttemptWaitAndStatus: mw.Retry reports each try's HTTP status
+// (mw.HTTPStatus on its error) and, from the second try on, the backoff
+// it slept before it — weft.attempt.wait_ms, rounded up, never 0; a
+// first try carries no wait.
+func TestAttemptWaitAndStatus(t *testing.T) {
+	tp := newRecProvider()
+	m := wefttest.Script(wefttest.Fail(statusError{503}), wefttest.Say("ok"))
+	agt := core.New(m, core.TracerProvider(tp),
+		core.WrapModel(mw.Retry(mw.BaseDelay(time.Millisecond), mw.Classifier(func(error) bool { return true }))))
+	if _, err := agt.Generate(context.Background(), core.Prompt("x")); err != nil {
+		t.Fatal(err)
+	}
+	att := spansOf(tp, "attempt")
+	if len(att) != 2 {
+		t.Fatalf("attempt spans = %d, want 2", len(att))
+	}
+	if att[0]["http.response.status_code"] != "503" || att[0]["weft.attempt.wait_ms"] != "" {
+		t.Errorf("attempt 1 = status %q wait %q, want 503 and no wait", att[0]["http.response.status_code"], att[0]["weft.attempt.wait_ms"])
+	}
+	if att[1]["weft.attempt.wait_ms"] == "" || att[1]["weft.attempt.wait_ms"] == "0" || att[1]["http.response.status_code"] != "" {
+		t.Errorf("attempt 2 = wait %q status %q, want a wait and no status", att[1]["weft.attempt.wait_ms"], att[1]["http.response.status_code"])
+	}
+}
+
+// TestRetryWaitReachesFallback: under WrapModel(Retry, Fallback) the
+// Fallback reports the attempts; the backoff Retry slept rides to the
+// primary's next try, never to the backup's.
+func TestRetryWaitReachesFallback(t *testing.T) {
+	tp := newRecProvider()
+	primary := wefttest.Script(wefttest.Fail(statusError{503}), wefttest.Fail(statusError{503}))
+	backup := wefttest.Script(wefttest.Fail(statusError{503}), wefttest.Say("from backup"))
+	agt := core.New(primary, core.TracerProvider(tp), core.WrapModel(
+		mw.Retry(mw.MaxRetries(1), mw.BaseDelay(time.Millisecond), mw.Classifier(func(error) bool { return true })),
+		mw.Fallback(backup)))
+	if _, err := agt.Generate(context.Background(), core.Prompt("x")); err != nil {
+		t.Fatal(err)
+	}
+	var waited []bool
+	for _, a := range spansOf(tp, "attempt") {
+		waited = append(waited, a["weft.attempt.wait_ms"] != "")
+	}
+	// try 1: primary (no wait), backup (no wait); try 2: primary (the
+	// backoff), backup answering (no wait).
+	if !slices.Equal(waited, []bool{false, false, true, false}) {
+		t.Errorf("attempts waited = %v, want [false false true false]", waited)
+	}
+}
+
+// TestToolSpanFacts pins the execute_tool span's U25 facts: the
+// deadline in force, the park source of each way a call parks, and a
+// parked Subagent child's calls.
+func TestToolSpanFacts(t *testing.T) {
+	ctx := context.Background()
+	noop := func(name string, opts ...core.ToolOption) *core.ToolDef {
+		return core.Tool(name, "Do it.", func(context.Context, struct{}) (string, error) { return "done", nil }, opts...)
+	}
+	call := func(name string) core.Model {
+		return wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: name, ID: "c1"}), wefttest.Say("ok"))
+	}
+	source := func(tp *recProvider) string {
+		for _, s := range spansOf(tp, "execute_tool") {
+			if s["weft.tool.pending"] == "true" {
+				return s["weft.tool.pending.source"]
+			}
+		}
+		return ""
+	}
+	gate := func(next core.ToolCaller) core.ToolCaller {
+		return func(ctx context.Context, c core.ToolCallPart) (string, error) {
+			if cc, _ := core.CallFromContext(ctx); !cc.Approved {
+				return "", core.ErrApprovalRequired
+			}
+			return next(ctx, c)
+		}
+	}
+	for _, c := range []struct {
+		name string
+		opts []core.Option
+		run  []core.RunOption
+		want string
+	}{
+		{"approval", []core.Option{noop("t", core.RequireApproval())}, nil, "approval"},
+		{"park_on", []core.Option{noop("t")}, []core.RunOption{core.ParkOn("t")}, "park_on"},
+		{"park_source", []core.Option{noop("t"), core.ParkSource(func(context.Context) []string { return []string{"t"} })}, nil, "park_source"},
+		{"park_on wins over a source", []core.Option{noop("t"), core.ParkSource(func(context.Context) []string { return []string{"t"} })}, []core.RunOption{core.ParkOn("t")}, "park_on"},
+		{"park_all_except", []core.Option{noop("t")}, []core.RunOption{core.ParkAllExcept()}, "park_all_except"},
+		{"middleware", []core.Option{noop("t"), core.WrapTools(gate)}, nil, "middleware"},
+	} {
+		tp := newRecProvider()
+		agt := core.New(call("t"), append([]core.Option{core.TracerProvider(tp)}, c.opts...)...)
+		res, err := agt.Generate(ctx, append([]core.RunOption{core.Prompt("go")}, c.run...)...)
+		if err != nil || len(res.Pending) != 1 {
+			t.Fatalf("%s: pending %d err %v, want one parked call", c.name, len(res.Pending), err)
+		}
+		if got := source(tp); got != c.want {
+			t.Errorf("%s: weft.tool.pending.source = %q, want %q", c.name, got, c.want)
+		}
+	}
+
+	// The deadline: the tool's own Timeout, else the agent's; none
+	// without either.
+	tp := newRecProvider()
+	agt := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "own", ID: "c1"}),
+		wefttest.ToolCalls(wefttest.Call{Name: "inherits", ID: "c2"}),
+		wefttest.Say("ok"),
+	), core.TracerProvider(tp), core.Timeout(2*time.Second),
+		noop("own", core.Timeout(250*time.Millisecond)), noop("inherits"))
+	if _, err := agt.Generate(ctx, core.Prompt("go")); err != nil {
+		t.Fatal(err)
+	}
+	var limits []string
+	for _, s := range spansOf(tp, "execute_tool") {
+		limits = append(limits, s["weft.tool.timeout_ms"])
+	}
+	if !slices.Equal(limits, []string{"250", "2000"}) {
+		t.Errorf("timeout_ms = %q, want [250 2000]", limits)
+	}
+
+	// A parked Subagent child: SUBAGENT_PENDING names its parked calls.
+	tp = newRecProvider()
+	child := core.New(wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "refund", ID: "k1"})),
+		noop("refund", core.RequireApproval()))
+	parent := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "delegate", ID: "c1", Args: `{"prompt":"refund it"}`}),
+		wefttest.Say("waiting"),
+	), core.TracerProvider(tp), core.Subagent("delegate", "Delegate.", child))
+	if _, err := parent.Generate(ctx, core.Prompt("go")); err != nil {
+		t.Fatal(err)
+	}
+	var pend []string
+	for _, s := range spansOf(tp, "execute_tool") {
+		if s["error.type"] == core.CodeSubagentPending {
+			pend = append(pend, s["weft.subagent.pending"])
+		}
+	}
+	if !slices.Equal(pend, []string{"refund"}) {
+		t.Errorf("weft.subagent.pending = %q, want [refund]", pend)
+	}
+}
+
+// TestToolQueueWait: under Parallelism(1) the second call of a batch
+// waits for the first's slot — weft.tool.queue_ms on its span only.
+func TestToolQueueWait(t *testing.T) {
+	tp := newRecProvider()
+	slow := core.Tool("slow", "Sleep.", func(context.Context, struct{}) (string, error) {
+		time.Sleep(5 * time.Millisecond)
+		return "done", nil
+	})
+	agt := core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "slow", ID: "a"}, wefttest.Call{Name: "slow", ID: "b"}),
+		wefttest.Say("ok"),
+	), core.TracerProvider(tp), core.Parallelism(1), slow)
+	if _, err := agt.Generate(context.Background(), core.Prompt("go")); err != nil {
+		t.Fatal(err)
+	}
+	queued := map[string]string{}
+	for _, s := range spansOf(tp, "execute_tool") {
+		queued[s["gen_ai.tool.call.id"]] = s["weft.tool.queue_ms"]
+	}
+	if queued["a"] != "" || queued["b"] == "" || queued["b"] == "0" {
+		t.Errorf("queue_ms = %v, want none on a and a wait on b", queued)
+	}
+}
+
+// TestOutputSubmittedAttr: an Output agent's run says whether it ended
+// with a valid submission; a run of an agent without Output says
+// nothing; the tools record marks submit_output as the output.
+func TestOutputSubmittedAttr(t *testing.T) {
+	type verdict struct {
+		Label string `json:"label"`
+	}
+	ctx := context.Background()
+	for _, c := range []struct {
+		name  string
+		model core.Model
+		want  string
+	}{
+		{"submitted", wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "submit_output", Args: `{"label":"pass"}`})), "true"},
+		{"text only", wefttest.Script(wefttest.Say("it passes")), "false"},
+	} {
+		tp, lp := newRecProvider(), newRecLogProvider()
+		agt := core.New(c.model, core.TracerProvider(tp), core.LoggerProvider(lp), core.Output[verdict]())
+		_, _, err := core.GenerateAs[verdict](ctx, agt, core.Prompt("grade"))
+		if c.want == "false" && !errors.Is(err, core.ErrNoOutput) {
+			t.Fatalf("%s: err = %v, want ErrNoOutput", c.name, err)
+		}
+		if got := tp.find(t, "invoke_agent").attrsMap()["weft.output.submitted"]; got != c.want {
+			t.Errorf("%s: weft.output.submitted = %q, want %q", c.name, got, c.want)
+		}
+		tools := lp.ofKind(t, "tools")
+		if len(tools) != 1 {
+			t.Fatalf("%s: tools records = %d", c.name, len(tools))
+		}
+		var body struct {
+			Tools []struct {
+				Name   string `json:"name"`
+				Output bool   `json:"output"`
+			} `json:"tools"`
+		}
+		if err := json.Unmarshal([]byte(tools[0].body), &body); err != nil || len(body.Tools) != 1 ||
+			body.Tools[0].Name != "submit_output" || !body.Tools[0].Output {
+			t.Errorf("%s: tools record = %s, want submit_output marked output", c.name, tools[0].body)
+		}
+	}
+	tp := newRecProvider()
+	agt := core.New(wefttest.Script(wefttest.Say("hi")), core.TracerProvider(tp))
+	if _, err := agt.Generate(ctx, core.Prompt("x")); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := tp.find(t, "invoke_agent").attrsMap()["weft.output.submitted"]; ok {
+		t.Error("a run without Output carries weft.output.submitted")
+	}
+}
+
+// wireModel is a scripted model that declares its thinking wire form
+// (an adapter's optional ThinkingWire method, O16).
+type wireModel struct{ core.Model }
+
+func (wireModel) ThinkingWire(t core.ThinkingConfig) string {
+	if t.Level == core.ThinkOff {
+		return "none"
+	}
+	return "reasoning_effort"
+}
+
+// TestRequestRecordPreparedAndWire: the request record names the parts
+// the PrepareStep chain changed (O9) — none when it changed nothing,
+// an in-place message edit counted — and the thinking wire the model
+// chain declares (O16), found through middleware by Unwrap.
+func TestRequestRecordPreparedAndWire(t *testing.T) {
+	type reqBody struct {
+		Step     int      `json:"step"`
+		Prepared []string `json:"prepared"`
+		Thinking *struct {
+			Level string `json:"level"`
+			Wire  string `json:"wire"`
+		} `json:"thinking"`
+	}
+	lp := newRecLogProvider()
+	cold := 0.0
+	agt := core.New(wireModel{wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "t", ID: "c1"}),
+		wefttest.ToolCalls(wefttest.Call{Name: "t", ID: "c2"}),
+		wefttest.Say("done"),
+	)}, core.LoggerProvider(lp), core.Instructions("Be brief."),
+		core.Thinking(core.ThinkingConfig{Level: core.ThinkLow}),
+		core.WrapModel(mw.Retry()),
+		core.Tool("t", "Do it.", func(context.Context, struct{}) (string, error) { return "done", nil }),
+		core.PrepareStep(func(_ context.Context, step int, req core.ModelRequest) (core.ModelRequest, error) {
+			switch step {
+			case 0:
+				req.System += " Step 0."
+				req.ToolChoice = core.ToolChoiceConfig{Mode: core.ToolChoiceNamed, Name: "t"}
+				req.Params.Temperature = &cold
+			case 1:
+				req.Messages[0] = core.User("rewritten in place")
+				req.Thinking = core.ThinkingConfig{Level: core.ThinkOff}
+			}
+			return req, nil
+		}))
+	if _, err := agt.Generate(context.Background(), core.Prompt("go")); err != nil {
+		t.Fatal(err)
+	}
+	var got []reqBody
+	for _, r := range lp.ofKind(t, "request") {
+		var b reqBody
+		if err := json.Unmarshal([]byte(r.body), &b); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, b)
+	}
+	if len(got) != 3 {
+		t.Fatalf("request records = %d, want 3", len(got))
+	}
+	want := [][]string{{"system", "tool_choice", "params"}, {"messages", "thinking"}, nil}
+	wires := []string{"reasoning_effort", "none", "reasoning_effort"}
+	for i, b := range got {
+		if !slices.Equal(b.Prepared, want[i]) {
+			t.Errorf("step %d prepared = %q, want %q", b.Step, b.Prepared, want[i])
+		}
+		if b.Thinking == nil || b.Thinking.Wire != wires[i] {
+			t.Errorf("step %d thinking = %+v, want wire %q", b.Step, b.Thinking, wires[i])
+		}
+	}
+	// No PrepareStep: no prepared; a model without the method: no wire.
+	lp = newRecLogProvider()
+	plain := core.New(wefttest.Script(wefttest.Say("hi")), core.LoggerProvider(lp),
+		core.Thinking(core.ThinkingConfig{Level: core.ThinkHigh}))
+	if _, err := plain.Generate(context.Background(), core.Prompt("x")); err != nil {
+		t.Fatal(err)
+	}
+	var b reqBody
+	if err := json.Unmarshal([]byte(lp.ofKind(t, "request")[0].body), &b); err != nil {
+		t.Fatal(err)
+	}
+	if b.Prepared != nil || b.Thinking == nil || b.Thinking.Wire != "" {
+		t.Errorf("plain request = %+v, want no prepared and no wire", b)
+	}
+}
+
+// TestOverrideParamsFlat: weft.override.params is the set knobs by the
+// request record's lower-case names (UX-S5b-03), and a named tool
+// choice with no name never reads "tool:".
+func TestOverrideParamsFlat(t *testing.T) {
+	tp := newRecProvider()
+	agt := core.New(wefttest.Script(wefttest.Say("hi")), core.TracerProvider(tp))
+	temp, seed := 0.4, int64(7)
+	if _, err := agt.Generate(context.Background(), core.Prompt("x"),
+		core.Params(core.RequestParams{Temperature: &temp, Seed: &seed, Stop: []string{"END"}})); err != nil {
+		t.Fatal(err)
+	}
+	if got := tp.find(t, "invoke_agent").attrsMap()["weft.override.params"]; got != `{"temperature":0.4,"stop":["END"],"seed":7}` {
+		t.Errorf("weft.override.params = %s", got)
+	}
+	tp = newRecProvider()
+	agt = core.New(wefttest.Script(wefttest.Say("hi")), core.TracerProvider(tp))
+	_, _ = agt.Generate(context.Background(), core.Prompt("x"), core.ToolChoice(core.ToolChoiceConfig{Mode: core.ToolChoiceNamed}))
+	if got := tp.find(t, "invoke_agent").attrsMap()["weft.override.tool_choice"]; got != "tool" {
+		t.Errorf("weft.override.tool_choice = %q, want tool", got)
+	}
+}

@@ -2238,7 +2238,7 @@ func TestPlaygroundOptionLabAndResolver(t *testing.T) {
 			t.Errorf("%s = %q, want %q", key, attrs[key], want)
 		}
 	}
-	for _, frag := range []string{`"Temperature":0.1`, `"TopP":0.5`, `"Seed":3`} {
+	for _, frag := range []string{`"temperature":0.1`, `"top_p":0.5`, `"seed":3`} {
 		if !strings.Contains(attrs["weft.override.params"], frag) {
 			t.Errorf("weft.override.params = %s, want %s", attrs["weft.override.params"], frag)
 		}

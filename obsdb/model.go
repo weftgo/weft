@@ -333,14 +333,24 @@ var nonMetaAttr = map[string]struct{}{
 	"weft.logs.bridged":            {}, // U11.1: the slog bridge's count on the heartbeat and the root span (the logs route's hint)
 	"weft.tool.retry":              {}, // U32.1: a RETRY's consecutive count (the story's pill)
 	"weft.tool.retry_budget":       {}, // U32.1: the run's MaxModelRetries beside it
-	"weft.tap.panics":              {}, // U32.1: the run's contained observer panics (Problems)
-	"weft.stop.raw":                {},
-	"weft.model.tool_calls":        {},
-	"weft.tool.approved":           {},
-	"weft.tool.pending":            {},
-	"weft.tool.result_bytes":       {},
-	"weft.metadata.dropped":        {},
-	"weft.override.hash":           {},
+	// U25: a card's facts — an attempt's wait and HTTP status, a call's
+	// park source, deadline, queue wait and a parked child's calls, an
+	// Output run's submission. Span attributes, not caller metadata.
+	"weft.attempt.wait_ms":      {},
+	"http.response.status_code": {},
+	"weft.tool.pending.source":  {},
+	"weft.tool.timeout_ms":      {},
+	"weft.tool.queue_ms":        {},
+	"weft.subagent.pending":     {},
+	"weft.output.submitted":     {},
+	"weft.tap.panics":           {}, // U32.1: the run's contained observer panics (Problems)
+	"weft.stop.raw":             {},
+	"weft.model.tool_calls":     {},
+	"weft.tool.approved":        {},
+	"weft.tool.pending":         {},
+	"weft.tool.result_bytes":    {},
+	"weft.metadata.dropped":     {},
+	"weft.override.hash":        {},
 	// ADR 0028: the request record's keys.
 	"weft.request.index":     {},
 	"weft.prompt.index":      {},

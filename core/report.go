@@ -41,6 +41,16 @@ type AttemptInfo struct {
 	// weft.attempt.layer — what a reader's fallbacks counter keys on
 	// (docs/record-contract.md §3, §6), never a model-name comparison.
 	Layer string
+	// Wait is how long the reporting layer waited before it sent this
+	// attempt (a retry's backoff or the provider's retry-after it
+	// honoured), zero for an attempt sent at once. The attempt span
+	// carries it as weft.attempt.wait_ms.
+	Wait time.Duration
+	// HTTPStatus is the provider's HTTP status for this attempt when the
+	// reporter found one (mw.HTTPStatus on the error, an adapter's
+	// response), zero when none is known. The attempt span carries it as
+	// http.response.status_code.
+	HTTPStatus int
 }
 
 // AttemptLayerFallback is AttemptInfo.Layer for a request a fallback
@@ -304,6 +314,9 @@ const (
 	attrAttemptIndex        = attribute.Key("weft.attempt.index")
 	attrAttemptRetryAfterMS = attribute.Key("weft.attempt.retry_after_ms")
 	attrAttemptLayer        = attribute.Key("weft.attempt.layer")
+	attrAttemptWaitMS       = attribute.Key("weft.attempt.wait_ms")
+	logWait                 = "wait"
+	logStatus               = "status"
 	logAttempt              = "attempt"
 	logRetryAfter           = "retry_after"
 	logLayer                = "layer"
@@ -350,6 +363,12 @@ func (s *stepReport) attempt(a AttemptInfo) {
 		if a.Layer != "" {
 			attrs = append(attrs, attrAttemptLayer.String(a.Layer))
 		}
+		if a.Wait > 0 {
+			attrs = append(attrs, attrAttemptWaitMS.Int64(ceilMS(a.Wait)))
+		}
+		if a.HTTPStatus > 0 {
+			attrs = append(attrs, semconv.HTTPResponseStatusCode(a.HTTPStatus))
+		}
 		attrs = append(attrs, metadataAttrs(ctx)...)
 		span.SetAttributes(attrs...)
 		if a.Err != nil {
@@ -391,6 +410,12 @@ func (s *stepReport) attempt(a AttemptInfo) {
 		}
 		if a.Layer != "" {
 			attrs = append(attrs, slog.String(logLayer, a.Layer))
+		}
+		if a.Wait > 0 {
+			attrs = append(attrs, slog.Duration(logWait, a.Wait))
+		}
+		if a.HTTPStatus > 0 {
+			attrs = append(attrs, slog.Int(logStatus, a.HTTPStatus))
 		}
 		if a.Err != nil {
 			attrs = append(attrs, slog.String(logErr, a.Err.Error()))

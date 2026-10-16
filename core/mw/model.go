@@ -72,7 +72,13 @@ func (m *fallbackModel) Stream(ctx context.Context, req core.ModelRequest) iter.
 			if i > 0 {
 				layer = core.AttemptLayerFallback
 			}
-			yielded, failed := replay(ctx, model, req, layer, yield)
+			// The wait an enclosing Retry slept before this try belongs to
+			// the chain's first request alone; a backup is sent at once.
+			var wait time.Duration
+			if i == 0 {
+				wait = waitOf(ctx)
+			}
+			yielded, failed := replay(ctx, model, req, layer, wait, yield)
 			if failed == nil {
 				return
 			}
@@ -94,8 +100,10 @@ func (m *fallbackModel) Stream(ctx context.Context, req core.ModelRequest) iter.
 // returns whether any event reached the consumer and the stream error,
 // if one ended it. A consumer that stops early is reported as yielded
 // with no error. layer is the report's AttemptInfo.Layer ("" for the
-// primary).
-func replay(ctx context.Context, model core.Model, req core.ModelRequest, layer string, yield func(core.ModelEvent, error) bool) (bool, error) {
+// primary), wait its AttemptInfo.Wait (the backoff slept before this
+// request); the report carries the HTTP status HTTPStatus finds on the
+// attempt's error.
+func replay(ctx context.Context, model core.Model, req core.ModelRequest, layer string, wait time.Duration, yield func(core.ModelEvent, error) bool) (bool, error) {
 	if reportsItself(model) {
 		return stream(ctx, model, req, yield)
 	}
@@ -103,9 +111,27 @@ func replay(ctx context.Context, model core.Model, req core.ModelRequest, layer 
 	yielded, failed := stream(ctx, model, req, yield)
 	end := time.Now()
 	ask, _ := RetryAfter(failed, end)
+	status, _ := HTTPStatus(failed)
 	core.ReportFromContext(ctx).Attempt(core.AttemptInfo{Model: info.Name, Provider: info.Provider,
-		Start: start, End: end, Err: failed, RetryAfter: ask, Layer: layer})
+		Start: start, End: end, Err: failed, RetryAfter: ask, Layer: layer, Wait: wait, HTTPStatus: status})
 	return yielded, failed
+}
+
+// waitKey carries the backoff Retry slept before a try to the layer
+// that reports it, when that is a Fallback beneath it (a self-reporting
+// model Retry stays silent over).
+type waitKey struct{}
+
+func withWait(ctx context.Context, d time.Duration) context.Context {
+	if d <= 0 && waitOf(ctx) == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, waitKey{}, d)
+}
+
+func waitOf(ctx context.Context) time.Duration {
+	d, _ := ctx.Value(waitKey{}).(time.Duration)
+	return d
 }
 
 // maxUnwrap bounds reportsItself's walk: a chain deeper than this is

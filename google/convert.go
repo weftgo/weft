@@ -456,3 +456,19 @@ func mapFinish(reason genai.FinishReason, hasCalls bool) (core.StopReason, strin
 		return core.StopEndTurn, string(reason)
 	}
 }
+
+// ThinkingWire names how a thinking level leaves this adapter — the
+// request record's thinking.wire (O16, docs/record-contract.md §4),
+// read by the loop through the optional method convention (ADR 0013):
+// the thinkingConfig field the request sets — "thinking_budget"
+// (ThinkOff's zero, or a Budget), "thinking_level" (a bare level),
+// "none" for the unset level. A field name, never a value.
+func (m *model) ThinkingWire(t core.ThinkingConfig) string {
+	switch {
+	case t.Level == core.ThinkOff, t.Budget > 0:
+		return "thinking_budget"
+	case t.Level != core.ThinkUnset:
+		return "thinking_level"
+	}
+	return "none"
+}

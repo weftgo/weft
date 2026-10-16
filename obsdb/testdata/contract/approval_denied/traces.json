@@ -264,6 +264,12 @@
                   "value": {
                     "boolValue": true
                   }
+                },
+                {
+                  "key": "weft.tool.pending.source",
+                  "value": {
+                    "stringValue": "approval"
+                  }
                 }
               ],
               "endTimeUnixNano": "1790846340004000000",
@@ -318,6 +324,12 @@
                   "key": "weft.tool.pending",
                   "value": {
                     "boolValue": true
+                  }
+                },
+                {
+                  "key": "weft.tool.pending.source",
+                  "value": {
+                    "stringValue": "approval"
                   }
                 }
               ],

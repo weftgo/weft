@@ -98,7 +98,10 @@ agt := weft.New(model,                       // any weft.Model (adapters, or wef
 // reports an attempt (an `attempt` span under `chat`) — reporting, not a seam;
 // a no-op outside a run's model call; mw.Retry/mw.Fallback use it, adapters may
 // (AttemptInfo.Layer: weft.AttemptLayerFallback on mw.Fallback's backup request,
-// the span's weft.attempt.layer — what a reader's fallbacks counter keys on).
+// the span's weft.attempt.layer — what a reader's fallbacks counter keys on;
+// AttemptInfo.Wait / .HTTPStatus: weft.attempt.wait_ms, http.response.status_code — mw.Retry fills both).
+// An adapter declares how a thinking level goes out with the optional method
+// ThinkingWire(weft.ThinkingConfig) string (the request record's thinking.wire, O16; found by Unwrap).
 
 // 3. Run it.
 res, err := agt.Generate(ctx, weft.Prompt("Where is order 1234?"))

@@ -45,8 +45,8 @@ func TestObserverNoopAllocations(t *testing.T) {
 		t.Errorf("model span allocs = %.0f, want < 10", n)
 	}
 	if n := testing.AllocsPerRun(100, func() {
-		_, end := o.tool(ctx, Call{RunID: "r"}, 1)
-		end(out, false, nil, 0, retryMark{}, time.Time{})
+		_, end := o.tool(ctx, Call{RunID: "r"}, 1, toolStartFacts{})
+		end(out, "", nil, 0, retryMark{}, time.Time{})
 	}); n >= 10 {
 		t.Errorf("tool span allocs = %.0f, want < 10", n)
 	}
@@ -77,8 +77,8 @@ func BenchmarkObserverNoop(b *testing.B) {
 		end(finish, true, 0, nil, callTiming{})
 	})
 	bench("tool", func() {
-		_, end := o.tool(ctx, Call{RunID: "r"}, 1)
-		end(out, false, nil, 0, retryMark{}, time.Time{})
+		_, end := o.tool(ctx, Call{RunID: "r"}, 1, toolStartFacts{})
+		end(out, "", nil, 0, retryMark{}, time.Time{})
 	})
 }
 
@@ -104,8 +104,8 @@ func TestLoggerNoAllocWhenDisabled(t *testing.T) {
 	ctx := context.Background()
 	_, endRun := o.run(ctx, "r", "a", ModelInfo{Provider: "p", Name: "m"}, nil, nil)
 	_, endModel := o.model(ctx, "r", 0, ModelInfo{Provider: "p", Name: "m"})
-	_, endTool := o.tool(ctx, Call{RunID: "r", Name: "t"}, 1)
-	endTool(ToolResultPart{Content: "x"}, false, nil, 0, retryMark{}, time.Time{})
+	_, endTool := o.tool(ctx, Call{RunID: "r", Name: "t"}, 1, toolStartFacts{})
+	endTool(ToolResultPart{Content: "x"}, "", nil, 0, retryMark{}, time.Time{})
 	endModel(ModelFinish{Reason: StopEndTurn}, true, 0, nil, callTiming{})
 	endRun(&RunResult{}, nil, runEnd{})
 	if h.enabled == 0 {

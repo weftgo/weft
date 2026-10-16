@@ -219,6 +219,11 @@ type contractRPC struct {
 	Approved   bool   `json:"approved,omitempty"`
 	Denied     bool   `json:"denied,omitempty"`
 	DeniedKind string `json:"denied_kind,omitempty"`
+	// The card facts (§3, U25): why a call parked, the deadline it ran
+	// under, a parked Subagent child's calls.
+	PendingSource   string `json:"pending_source,omitempty"`
+	TimeoutMS       int64  `json:"timeout_ms,omitempty"`
+	SubagentPending string `json:"subagent_pending,omitempty"`
 }
 
 func TestContract(t *testing.T) {
@@ -521,6 +526,10 @@ func spanSteps(spans []obsdb.Span) ([]contractLLM, []contractRPC) {
 				Approved:       boolAttr(s.Attrs, "weft.tool.approved"),
 				Denied:         boolAttr(s.Attrs, "weft.tool.denied"),
 				DeniedKind:     strAttr(s.Attrs, "weft.tool.denied_kind"),
+
+				PendingSource:   strAttr(s.Attrs, "weft.tool.pending.source"),
+				TimeoutMS:       intAttr(s.Attrs, "weft.tool.timeout_ms", 0),
+				SubagentPending: strAttr(s.Attrs, "weft.subagent.pending"),
 			})
 		}
 	}
@@ -1084,7 +1093,7 @@ func normaliseCase(tr *coltracepb.ExportTraceServiceRequest, lg *collogspb.Expor
 			switch kv.GetKey() {
 			case "weft.version":
 				kv.Value = &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: fixtureVersion}}
-			case "weft.ttft_ms", "weft.latency_ms":
+			case "weft.ttft_ms", "weft.latency_ms", "weft.attempt.wait_ms", "weft.tool.queue_ms":
 				if kv.GetValue().GetIntValue() > 0 {
 					kv.Value = &commonpb.AnyValue{Value: &commonpb.AnyValue_IntValue{IntValue: 1}}
 				}
@@ -2049,6 +2058,12 @@ func genCases() []genCase {
 				}
 			},
 		},
+		{
+			name: "run_cards",
+			desc: "the run cards' facts (U25): an Output run repaired after one invalid submission (submit_output INVALID_INPUT then a valid call; the tools record marks it output, the root weft.output.submitted true) and an Output run that answered in text (weft.output.submitted false); a call parked by the run's ParkOn (pending_source park_on) and one parked by an agent ParkSource (park_source); a tool cut by its Timeout (timeout_ms 5, error.type timeout); a Subagent child parked at its RequireApproval tool (SUBAGENT_PENDING, weft.subagent.pending names its call); a PrepareStep rewriting the system text, the tool choice and the params at step 0 (the request record's prepared [system, tool_choice, params]) on a model declaring its thinking wire (thinking.wire reasoning_effort); mw.Retry over a 503 then an answer (the second attempt's weft.attempt.wait_ms, the first's http.response.status_code 503)",
+			dest: content,
+			run:  runCards,
+		},
 	}
 }
 
@@ -2170,3 +2185,85 @@ func TestContractTableMatchesFixtures(t *testing.T) {
 		t.Fatalf("no fixtures under %s", contractDir)
 	}
 }
+
+// runCards drives the run_cards case: one agent per card fact, each
+// step at most one tool call (the generator's determinism rule).
+func runCards(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+	type verdict struct {
+		Label string `json:"label" jsonschema:"the verdict"`
+	}
+	var ids []string
+	repaired := pipelineAgent(p, "grader", wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "submit_output", Args: `{"label":7}`}),
+		wefttest.ToolCalls(wefttest.Call{Name: "submit_output", Args: `{"label":"pass"}`}),
+	), core.Output[verdict]())
+	ids = append(ids, mustRun(t, ctx, repaired, core.Prompt("Grade it.")).ID)
+	chatty := pipelineAgent(p, "grader", wefttest.Script(wefttest.Say("It passes.")), core.Output[verdict]())
+	ids = append(ids, mustRun(t, ctx, chatty, core.Prompt("Grade it.")).ID)
+
+	refund := core.Tool("refund_order", "Refund an order.", func(_ context.Context, in lookupIn) (string, error) {
+		return "refunded " + in.OrderID, nil
+	})
+	parkOn := pipelineAgent(p, "support", wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund_order", Args: `{"order_id":"1"}`})), refund)
+	ids = append(ids, mustRun(t, ctx, parkOn, core.Prompt("Refund order 1."), core.ParkOn("refund_order")).ID)
+	sourced := pipelineAgent(p, "support", wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"2"}`})), lookupTool(),
+		core.ParkSource(func(context.Context) []string { return []string{"lookup_order"} }))
+	ids = append(ids, mustRun(t, ctx, sourced, core.Prompt("Where is order 2?")).ID)
+
+	slow := core.Tool("slow_lookup", "A lookup that hangs.", func(ctx context.Context, _ lookupIn) (string, error) {
+		<-ctx.Done()
+		return "", ctx.Err()
+	}, core.Timeout(5*time.Millisecond))
+	timed := pipelineAgent(p, "support", wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "slow_lookup", Args: `{"order_id":"3"}`}),
+		wefttest.Say("The lookup timed out."),
+	), slow)
+	ids = append(ids, mustRun(t, ctx, timed, core.Prompt("Look up order 3.")).ID)
+
+	gated := core.Tool("refund_order", "Refund an order.", func(_ context.Context, in lookupIn) (string, error) {
+		return "refunded " + in.OrderID, nil
+	}, core.RequireApproval())
+	child := pipelineAgent(p, "refunds", wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund_order", Args: `{"order_id":"4"}`})), gated)
+	parent := pipelineAgent(p, "support", wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "refunds", Args: `{"prompt":"refund order 4"}`}),
+		wefttest.Say("The refund awaits approval."),
+	), core.Subagent("refunds", "Refund orders.", child))
+	pid := mustRun(t, ctx, parent, core.Prompt("Refund order 4.")).ID
+	ids = append(ids, pid, pid+"/0/call_1")
+
+	cold := 0.0
+	prepared := pipelineAgent(p, "classifier", wiredModel{wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"5"}`}),
+		wefttest.Say("Order 5 shipped."),
+	)}, lookupTool(), core.Instructions("You classify orders."),
+		core.Thinking(core.ThinkingConfig{Level: core.ThinkLow}),
+		core.PrepareStep(func(_ context.Context, step int, req core.ModelRequest) (core.ModelRequest, error) {
+			if step == 0 {
+				req.System += " Step 0: look the order up first."
+				req.ToolChoice = core.ToolChoiceConfig{Mode: core.ToolChoiceNamed, Name: "lookup_order"}
+				req.Params.Temperature = &cold
+			}
+			return req, nil
+		}))
+	ids = append(ids, mustRun(t, ctx, prepared, core.Prompt("Classify order 5.")).ID)
+
+	overloaded := wefttest.Script(wefttest.Fail(statusErr{503}), wefttest.Say("Hello after a retry."))
+	retried := pipelineAgent(p, "support", overloaded,
+		core.WrapModel(mw.Retry(mw.MaxRetries(2), mw.BaseDelay(time.Millisecond), mw.Classifier(func(error) bool { return true }))))
+	return append(ids, mustRun(t, ctx, retried, core.Prompt("hi")).ID)
+}
+
+// wiredModel is a scripted model that declares its thinking wire form
+// (the optional ThinkingWire method an adapter implements, O16).
+type wiredModel struct{ core.Model }
+
+func (wiredModel) ThinkingWire(core.ThinkingConfig) string { return "reasoning_effort" }
+
+// statusErr is a provider error carrying an HTTP status the way the
+// vendor SDKs' errors do (mw.HTTPStatus's StatusCode field).
+type statusErr struct{ StatusCode int }
+
+func (e statusErr) Error() string { return "503 Service Unavailable: overloaded" }

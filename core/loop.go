@@ -137,7 +137,17 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		obs:          &a.obs,
 		panics:       &a.tapPanics,
 	}
-	ctx, endSpan := a.obs.run(ctx, cfg.id, a.name, InfoOf(model), runExtra, &records)
+	ctx, endRunSpan := a.obs.run(ctx, cfg.id, a.name, InfoOf(model), runExtra, &records)
+	// An Output agent's run says whether it ended with a valid
+	// submission (weft.output.submitted, UX-S1-06): GenerateAs's
+	// ErrNoOutput is the caller's, the span says it happened.
+	endSpan := func(r *RunResult, err error, end runEnd) {
+		if a.hasOutput {
+			_, ok := submittedJSON(r)
+			end.output, end.submitted = true, ok
+		}
+		endRunSpan(r, err, end)
+	}
 	// A panic nothing contains — PrepareStep functions are arbitrary
 	// user code; model, tool, and tap panics are contained further down
 	// — must not leak the run span: this guard ends it with the panic
@@ -363,7 +373,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	// attributes were taken above, so a source's answer is never an
 	// override.
 	if len(a.parkSources) > 0 {
-		cfg.parkOn = append(slices.Clone(cfg.parkOn), a.readParkSources(ctx, cfg.id)...)
+		cfg.parkSourced = a.readParkSources(ctx, cfg.id)
 	}
 	ctx, parkSet := cfg.resolvePark(ctx)
 	if len(resume) > 0 {
@@ -455,12 +465,21 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		// what the step both advertises and dispatches against, so the
 		// one-snapshot-per-step invariant holds by construction (ADR
 		// 0006 amendment).
+		before := req
 		for _, fn := range a.prepare {
 			var err error
 			req, err = fn(ctx, step, req)
 			if err != nil {
 				return fail(step, err)
 			}
+		}
+		// What the chain changed (O9): the request record's prepared[],
+		// names only. Compared against the step's own inputs — the
+		// transcript and the fetched tools, which the chain's deep copies
+		// leave untouched.
+		var prepared []string
+		if a.prepare != nil {
+			prepared = preparedFields(before, req, res.Messages, tools)
 		}
 		tools = req.Tools
 		if a.prepare != nil {
@@ -502,7 +521,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		// then the request record (attempt 1), on the chat span's
 		// context, after PrepareStep, validation and composition, right
 		// before the chain runs. Reporting only: req is not touched.
-		reqRec := records.recordRequest(mctx, a, step, req, info, parkSet, res.Messages, a.prepare != nil)
+		reqRec := records.recordRequest(mctx, a, step, req, info, parkSet, res.Messages, a.prepare != nil, prepared, thinkingWire(model, req.Thinking))
 		// The chain's reporting path (ReportFromContext): attempts and
 		// wire bodies the chain reports land on this step's record; each
 		// attempt after the first adds its own request record.
@@ -1071,7 +1090,14 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 	for i, call := range calls {
 		def, _ := findTool(tools, call.Name)
 		barrier := def != nil && def.sequential
+		// The call's queue wait (weft.tool.queue_ms): measured only when
+		// it had to wait — behind a barrier with calls before it, or for
+		// a Parallelism slot — so a call that started at once has none.
+		var queued time.Time
 		if barrier {
+			if i > 0 {
+				queued = time.Now()
+			}
 			// Let everything in flight finish before this call starts.
 			// wg.Add only happens on this goroutine, so Wait is safe.
 			wg.Wait()
@@ -1083,9 +1109,20 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 		if !canceled {
 			select {
 			case sem <- struct{}{}:
-			case <-ctx.Done():
-				canceled = true
+			default:
+				if queued.IsZero() {
+					queued = time.Now()
+				}
+				select {
+				case sem <- struct{}{}:
+				case <-ctx.Done():
+					canceled = true
+				}
 			}
+		}
+		var queue time.Duration
+		if !queued.IsZero() {
+			queue = sinceAtLeast(queued)
 		}
 		if canceled {
 			outcomes[i] = ToolResultPart{
@@ -1117,11 +1154,13 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 			// and a child run's invoke_agent hangs under it — ended with
 			// the call's outcome, before ToolFinish is emitted so no span
 			// operation runs under emitMu (ADR 0016).
-			callCtx, endTool := a.obs.tool(callCtx, c, startSeq)
+			callCtx, endTool := a.obs.tool(callCtx, c, startSeq, toolStartFacts{timeout: a.callTimeout(def), queue: queue})
 			var retry bool
 			var callErr error
 			var cut int
-			outcomes[i], parked[i], retry, cut, callErr = a.callTool(callCtx, call, def, parkSet)
+			var park string
+			outcomes[i], park, retry, cut, callErr = a.callTool(callCtx, call, def, parkSet)
+			parked[i] = park != ""
 			retriedAt[i] = retry
 			if retry && retryBase != nil {
 				// Its mark depends on the whole batch: the span ends
@@ -1129,9 +1168,9 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 				// ToolFinish below is not delayed.
 				at := time.Now()
 				res, c := outcomes[i], cut
-				endRetry[i] = func(m retryMark) { endTool(res, false, callErr, c, m, at) }
+				endRetry[i] = func(m retryMark) { endTool(res, "", callErr, c, m, at) }
 			} else {
-				endTool(outcomes[i], parked[i], callErr, cut, retryMark{}, time.Time{})
+				endTool(outcomes[i], park, callErr, cut, retryMark{}, time.Time{})
 			}
 			if parked[i] {
 				return
@@ -1509,6 +1548,12 @@ func (a *Agent) chain(def *ToolDef, strict bool, parkSet *parkRule, mark *handle
 		// run (ADR 0024 D7).
 		if def.approval || parkSet.parks(def.Name, a.hasOutput && def.Name == outputToolName) {
 			if c, _ := CallFromContext(ctx); !c.Approved {
+				if mark != nil {
+					mark.parkedBy = parkByApproval
+					if !def.approval {
+						mark.parkedBy = parkSet.parkedBy(def.Name, a.hasOutput && def.Name == outputToolName)
+					}
+				}
 				return "", fmt.Errorf("%w: tool %q", ErrApprovalRequired, call.Name)
 			}
 		}
@@ -1554,7 +1599,7 @@ func (a *Agent) chain(def *ToolDef, strict bool, parkSet *parkRule, mark *handle
 //
 // cut is the bytes the result cap removed from the content (0 when it
 // cut nothing): the observer's weft.tool.truncated_bytes.
-func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef, parkSet *parkRule) (res ToolResultPart, pending, retry bool, cut int, err error) {
+func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef, parkSet *parkRule) (res ToolResultPart, park string, retry bool, cut int, err error) {
 	res = ToolResultPart{CallID: call.ID, Name: call.Name}
 	resultCap := a.resultCap
 	timeout := a.toolTimeout
@@ -1582,7 +1627,11 @@ func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef, p
 	}
 	if err != nil {
 		if errors.Is(err, ErrApprovalRequired) {
-			return res, true, false, 0, nil
+			park = mark.parkedBy
+			if park == "" {
+				park = parkByMiddleware
+			}
+			return res, park, false, 0, nil
 		}
 		res.IsError = true
 		res.Content = err.Error()
@@ -1591,12 +1640,21 @@ func (a *Agent) callTool(ctx context.Context, call ToolCallPart, def *ToolDef, p
 		// handler's (the chain's outcome is what the loop sees).
 		var te *ToolError
 		if errors.As(err, &te) && te.Code == CodeRetry {
-			return res, false, true, 0, err
+			return res, "", true, 0, err
 		}
-		return res, false, false, 0, err
+		return res, "", false, 0, err
 	}
 	res.Content = out
-	return res, false, false, 0, nil
+	return res, "", false, 0, nil
+}
+
+// callTimeout is the deadline a call to def runs under: its own
+// Timeout, else the agent's (0: none).
+func (a *Agent) callTimeout(def *ToolDef) time.Duration {
+	if def != nil && def.timeoutSet {
+		return def.timeout
+	}
+	return a.toolTimeout
 }
 
 // toolTimeoutError is a per-call timeout, typed so the observer can
@@ -1661,6 +1719,10 @@ func invokeContained(ctx context.Context, fn ToolCaller, call ToolCallPart, mark
 type handlerMark struct {
 	panicked bool
 	value    any
+	// parkedBy is the approval boundary's reason when the chain's base
+	// parked the call (parkByApproval, or the park rule's); a parked
+	// call whose base never ran was parked by a middleware.
+	parkedBy string
 }
 
 func (m *handlerMark) note(p any) { m.panicked, m.value = true, p }

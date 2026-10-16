@@ -1,0 +1,505 @@
+{
+  "case": "run_cards",
+  "description": "the run cards' facts (U25): an Output run repaired after one invalid submission (submit_output INVALID_INPUT then a valid call; the tools record marks it output, the root weft.output.submitted true) and an Output run that answered in text (weft.output.submitted false); a call parked by the run's ParkOn (pending_source park_on) and one parked by an agent ParkSource (park_source); a tool cut by its Timeout (timeout_ms 5, error.type timeout); a Subagent child parked at its RequireApproval tool (SUBAGENT_PENDING, weft.subagent.pending names its call); a PrepareStep rewriting the system text, the tool choice and the params at step 0 (the request record's prepared [system, tool_choice, params]) on a model declaring its thinking wire (thinking.wire reasoning_effort); mw.Retry over a 503 then an answer (the second attempt's weft.attempt.wait_ms, the first's http.response.status_code 503)",
+  "runs": [
+    {
+      "id": "a1100000000000000000000000000001",
+      "trace_id": "7ace0000000000000000000000000001",
+      "service": "contract-app",
+      "agent": "classifier",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:25:00Z",
+      "finished": "2026-10-01T09:25:00.103Z",
+      "last_seen": "2026-10-01T09:25:00.103Z",
+      "status": "succeeded",
+      "steps": 2,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "event_count": 8,
+      "message_count": 4,
+      "delta_count": 1,
+      "instructions_hash": "f3520d4073eb6a537a911cec6046c46fdf6e475b887a7f3b5e51ba633a88c54b",
+      "catalog_hash": "d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8",
+      "request_count": 2,
+      "events_emitted": 8,
+      "messages_emitted": 4,
+      "chat": [
+        {
+          "step": 0,
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        },
+        {
+          "step": 1,
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "lookup_order",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "ok"
+        }
+      ],
+      "holes": []
+    },
+    {
+      "id": "a1100000000000000000000000000002",
+      "trace_id": "7ace0000000000000000000000000002",
+      "service": "contract-app",
+      "agent": "grader",
+      "provider": "wefttest",
+      "model": "script",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000002",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:25:00Z",
+      "finished": "2026-10-01T09:25:00.017Z",
+      "last_seen": "2026-10-01T09:25:00.017Z",
+      "status": "succeeded",
+      "steps": 2,
+      "stop_reason": "tool_calls",
+      "stopped_by": "output_submitted",
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "event_count": 10,
+      "message_count": 5,
+      "delta_count": 0,
+      "instructions_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "catalog_hash": "fe1c6afdbd1bdcc11132395edd2bdcad8cf672c8562d1345d28032b97279fc2e",
+      "request_count": 2,
+      "events_emitted": 10,
+      "messages_emitted": 5,
+      "problems": {
+        "tool_errors": 1
+      },
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        },
+        {
+          "step": 1,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "submit_output",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "error",
+          "error_type": "INVALID_INPUT",
+          "input_error": "schema"
+        },
+        {
+          "name": "submit_output",
+          "call_id": "call_1",
+          "step": 1,
+          "seq": 3,
+          "status": "ok"
+        }
+      ],
+      "holes": []
+    },
+    {
+      "id": "a1100000000000000000000000000003",
+      "trace_id": "7ace0000000000000000000000000003",
+      "service": "contract-app",
+      "agent": "grader",
+      "provider": "wefttest",
+      "model": "script",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000003",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:25:00.018Z",
+      "finished": "2026-10-01T09:25:00.026Z",
+      "last_seen": "2026-10-01T09:25:00.026Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 4,
+      "message_count": 2,
+      "delta_count": 1,
+      "instructions_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "catalog_hash": "fe1c6afdbd1bdcc11132395edd2bdcad8cf672c8562d1345d28032b97279fc2e",
+      "request_count": 1,
+      "events_emitted": 4,
+      "messages_emitted": 2,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": []
+    },
+    {
+      "id": "a1100000000000000000000000000004",
+      "trace_id": "7ace0000000000000000000000000004",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000004",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:25:00.022Z",
+      "finished": "2026-10-01T09:25:00.035Z",
+      "last_seen": "2026-10-01T09:25:00.035Z",
+      "status": "succeeded",
+      "steps": 1,
+      "pending": 1,
+      "stop_reason": "tool_calls",
+      "stopped_by": "parked",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 5,
+      "message_count": 2,
+      "delta_count": 0,
+      "instructions_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "catalog_hash": "dbc50d76ecb613ffdb94f564bcab1c877313c8d353621e5297a4b9922ee24e18",
+      "request_count": 1,
+      "events_emitted": 5,
+      "messages_emitted": 2,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "refund_order",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "unset",
+          "pending_source": "park_on"
+        }
+      ],
+      "holes": []
+    },
+    {
+      "id": "a1100000000000000000000000000005",
+      "trace_id": "7ace0000000000000000000000000005",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000005",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:25:00.028Z",
+      "finished": "2026-10-01T09:25:00.044Z",
+      "last_seen": "2026-10-01T09:25:00.044Z",
+      "status": "succeeded",
+      "steps": 1,
+      "pending": 1,
+      "stop_reason": "tool_calls",
+      "stopped_by": "parked",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 5,
+      "message_count": 2,
+      "delta_count": 0,
+      "instructions_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "catalog_hash": "d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8",
+      "request_count": 1,
+      "events_emitted": 5,
+      "messages_emitted": 2,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "lookup_order",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "unset",
+          "pending_source": "park_source"
+        }
+      ],
+      "holes": []
+    },
+    {
+      "id": "a1100000000000000000000000000006",
+      "trace_id": "7ace0000000000000000000000000006",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000006",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:25:00.034Z",
+      "finished": "2026-10-01T09:25:00.06Z",
+      "last_seen": "2026-10-01T09:25:00.06Z",
+      "status": "succeeded",
+      "steps": 2,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "event_count": 8,
+      "message_count": 4,
+      "delta_count": 1,
+      "instructions_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "catalog_hash": "1908a9d0105663ee90d4dd21051049548155d0e028d93e73f88572a63618e289",
+      "request_count": 2,
+      "events_emitted": 8,
+      "messages_emitted": 4,
+      "problems": {
+        "tool_errors": 1
+      },
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        },
+        {
+          "step": 1,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "slow_lookup",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "error",
+          "error_type": "timeout",
+          "timeout_ms": 5
+        }
+      ],
+      "holes": []
+    },
+    {
+      "id": "a1100000000000000000000000000007",
+      "trace_id": "7ace0000000000000000000000000007",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000007",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:25:00.042Z",
+      "finished": "2026-10-01T09:25:00.085Z",
+      "last_seen": "2026-10-01T09:25:00.085Z",
+      "status": "succeeded",
+      "steps": 2,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 30,
+        "output_tokens": 15
+      },
+      "event_count": 8,
+      "message_count": 4,
+      "delta_count": 1,
+      "instructions_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "catalog_hash": "48f2ecfcf1b7fc18abfb6dcffa2c9d9e346bb4cf74ba5c16f3100c12a9da9d7d",
+      "request_count": 2,
+      "events_emitted": 8,
+      "messages_emitted": 4,
+      "problems": {
+        "tool_errors": 1
+      },
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        },
+        {
+          "step": 1,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "refunds",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "error",
+          "error_type": "SUBAGENT_PENDING",
+          "subagent_pending": "refund_order"
+        }
+      ],
+      "tree": [
+        "a1100000000000000000000000000007/0/call_1 child of a1100000000000000000000000000007: 3 spans"
+      ],
+      "holes": []
+    },
+    {
+      "id": "a1100000000000000000000000000007/0/call_1",
+      "parent_run_id": "a1100000000000000000000000000007",
+      "parent_call_id": "call_1",
+      "trace_id": "7ace0000000000000000000000000007",
+      "service": "contract-app",
+      "agent": "refunds",
+      "provider": "wefttest",
+      "model": "script",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000008",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:25:00.046Z",
+      "finished": "2026-10-01T09:25:00.076Z",
+      "last_seen": "2026-10-01T09:25:00.076Z",
+      "status": "succeeded",
+      "steps": 1,
+      "pending": 1,
+      "stop_reason": "tool_calls",
+      "stopped_by": "parked",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 5,
+      "message_count": 2,
+      "delta_count": 0,
+      "instructions_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "catalog_hash": "dbc50d76ecb613ffdb94f564bcab1c877313c8d353621e5297a4b9922ee24e18",
+      "request_count": 1,
+      "events_emitted": 5,
+      "messages_emitted": 2,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "refund_order",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "unset",
+          "pending_source": "approval"
+        }
+      ],
+      "holes": []
+    },
+    {
+      "id": "a1100000000000000000000000000008",
+      "trace_id": "7ace0000000000000000000000000008",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000009",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:25:00.056Z",
+      "finished": "2026-10-01T09:25:00.112Z",
+      "last_seen": "2026-10-01T09:25:00.112Z",
+      "status": "succeeded",
+      "steps": 1,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 4,
+      "message_count": 2,
+      "delta_count": 1,
+      "instructions_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "request_count": 2,
+      "events_emitted": 4,
+      "messages_emitted": 2,
+      "problems": {
+        "attempts_retried": 1
+      },
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [],
+      "holes": []
+    }
+  ]
+}

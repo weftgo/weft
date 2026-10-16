@@ -306,6 +306,12 @@
                   }
                 },
                 {
+                  "key": "weft.attempt.wait_ms",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
                   "key": "error.type",
                   "value": {
                     "stringValue": "stream_idle"
@@ -355,6 +361,12 @@
                   "key": "gen_ai.request.model",
                   "value": {
                     "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "weft.attempt.wait_ms",
+                  "value": {
+                    "intValue": "1"
                   }
                 },
                 {
@@ -964,6 +976,12 @@
                   }
                 },
                 {
+                  "key": "weft.attempt.wait_ms",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
                   "key": "error.type",
                   "value": {
                     "stringValue": "stream_idle"
@@ -1013,6 +1031,12 @@
                   "key": "gen_ai.request.model",
                   "value": {
                     "stringValue": "script"
+                  }
+                },
+                {
+                  "key": "weft.attempt.wait_ms",
+                  "value": {
+                    "intValue": "1"
                   }
                 },
                 {

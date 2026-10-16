@@ -441,7 +441,9 @@ func TestRunsInnerFiltersAfterGrouping(t *testing.T) {
 // the logs view gaining weft.attempt.layer on the way; 0019 (U13.1) both
 // views with the whole set, the approval link's four keys (u13Keys)
 // appended; 0021 (U11.1) both views with the whole set, the slog
-// bridge's weft.logs.bridged (u11Keys) appended.
+// bridge's weft.logs.bridged (u11Keys) appended; 0022 (U25) both views
+// with the whole set, the run cards' seven span facts (u25Keys)
+// appended.
 const (
 	adr0028Keys   = 12 + 4 + 1 + 10
 	rawKeys       = 1
@@ -453,10 +455,12 @@ const (
 	u32Keys       = 3
 	u13Keys       = 4
 	u11Keys       = 1
+	u25Keys       = 7
 )
 
 func TestMigrationContractTuple(t *testing.T) {
-	at0019 := contractKeys[:len(contractKeys)-u11Keys]
+	at0021 := contractKeys[:len(contractKeys)-u25Keys]
+	at0019 := at0021[:len(at0021)-u11Keys]
 	at0018 := at0019[:len(at0019)-u13Keys]
 	at0017 := at0018[:len(at0018)-u32Keys]
 	at0015 := at0017[:len(at0017)-layerKeys]
@@ -469,7 +473,7 @@ func TestMigrationContractTuple(t *testing.T) {
 	for _, c := range []struct {
 		version, tuples int
 		keys            []string
-	}{{1, 2, before}, {3, 1, before}, {4, 2, at0004}, {5, 1, at0005}, {10, 1, at0004}, {11, 2, at0011}, {12, 1, at0011}, {13, 1, at0013}, {14, 1, at0014}, {15, 2, at0015}, {17, 1, at0017}, {18, 2, at0018}, {19, 2, at0019}, {21, 2, contractKeys}} {
+	}{{1, 2, before}, {3, 1, before}, {4, 2, at0004}, {5, 1, at0005}, {10, 1, at0004}, {11, 2, at0011}, {12, 1, at0011}, {13, 1, at0013}, {14, 1, at0014}, {15, 2, at0015}, {17, 1, at0017}, {18, 2, at0018}, {19, 2, at0019}, {21, 2, at0021}, {22, 2, contractKeys}} {
 		body, err := migrationsFS.ReadFile("migrations/" + migrations[c.version])
 		if err != nil {
 			t.Fatal(err)

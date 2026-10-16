@@ -1762,6 +1762,10 @@ var contractKeys = []string{
 	// and a run's invoke_agent span (the traces view) — the logs route's
 	// hint, never metadata (migration 0021's restatement of both views).
 	"weft.logs.bridged",
+	// U25: the cards' facts — attempt, tool and run span attributes
+	// (migration 0022's restatement of both views).
+	"weft.attempt.wait_ms", "http.response.status_code", "weft.tool.pending.source",
+	"weft.tool.timeout_ms", "weft.tool.queue_ms", "weft.subagent.pending", "weft.output.submitted",
 }
 
 // unmarshalAttrs decodes a JSON column keeping integral numbers as

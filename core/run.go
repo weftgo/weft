@@ -76,6 +76,11 @@ type runConfig struct {
 	// (non-nil once set, possibly empty).
 	parkAll    bool
 	parkExcept map[string]bool
+	// parkSourced is what the agent's ParkSources answered for this run
+	// (ADR 0030), read once in execute: parked like parkOn, recorded
+	// apart from it (weft.tool.pending.source park_source) and never an
+	// override.
+	parkSourced []string
 }
 
 type decision struct {
@@ -376,6 +381,37 @@ type parkRule struct {
 	on     map[string]bool
 	all    bool
 	except map[string]bool
+	// sourced holds the names only a ParkSource put in on (none of the
+	// run's own ParkOn options named them): their parks read
+	// park_source, not park_on.
+	sourced map[string]bool
+}
+
+// The park sources a parked call's execute_tool span names
+// (weft.tool.pending.source, UX-H-18), in the order parkedBy decides.
+const (
+	parkByApproval   = "approval"        // the tool's RequireApproval
+	parkByParkOn     = "park_on"         // the run's ParkOn
+	parkBySource     = "park_source"     // an agent ParkSource (a breakpoint)
+	parkByParkAll    = "park_all_except" // ParkAllExcept, the run's or inherited
+	parkByMiddleware = "middleware"      // a tool middleware's ErrApprovalRequired
+)
+
+// parkedBy names why the rule parks a call to the named tool, "" when
+// it does not: park_on before park_source (a name both list is the
+// run's own choice), then the default-deny half.
+func (p *parkRule) parkedBy(name string, answer bool) string {
+	switch {
+	case p == nil:
+		return ""
+	case p.on[name] && p.sourced[name]:
+		return parkBySource
+	case p.on[name]:
+		return parkByParkOn
+	case p.all && !answer && !p.except[name]:
+		return parkByParkAll
+	}
+	return ""
 }
 
 // parks reports whether a call to the named tool parks under the rule.
@@ -416,13 +452,24 @@ func (c *runConfig) resolvePark(ctx context.Context) (context.Context, *parkRule
 		ctx = context.WithValue(ctx, parkExceptKey{}, except)
 		inForce = true
 	}
-	if len(c.parkOn) == 0 && !inForce {
+	if len(c.parkOn) == 0 && len(c.parkSourced) == 0 && !inForce {
 		return ctx, nil
 	}
 	rule := &parkRule{all: inForce, except: except}
-	if len(c.parkOn) > 0 {
-		rule.on = make(map[string]bool, len(c.parkOn))
+	if len(c.parkOn)+len(c.parkSourced) > 0 {
+		rule.on = make(map[string]bool, len(c.parkOn)+len(c.parkSourced))
 		for _, name := range c.parkOn {
+			rule.on[name] = true
+		}
+		for _, name := range c.parkSourced {
+			if !rule.on[name] {
+				if rule.sourced == nil {
+					rule.sourced = map[string]bool{}
+				}
+				rule.sourced[name] = true
+			}
+		}
+		for name := range rule.sourced {
 			rule.on[name] = true
 		}
 	}
@@ -812,12 +859,25 @@ func (c *runConfig) overrideAttrs() []attribute.KeyValue {
 			// over a forcing default reads "auto", never "".
 			value = "auto"
 		case ToolChoiceNamed:
-			value = string(ToolChoiceNamed) + ":" + tc.Name
+			// A named choice with no name (refused at the model call)
+			// reads as its mode, never "tool:".
+			if tc.Name != "" {
+				value = string(ToolChoiceNamed) + ":" + tc.Name
+			}
 		}
 		add("tool_choice", value, attribute.String(attrOverrideToolChoice, value))
 	}
 	if c.paramsSet {
-		b, err := json.Marshal(c.params)
+		// The set knobs only, by the request record's lower-case names
+		// (UX-S5b-03): {"temperature":0.4,"top_p":0.9}, never the Go
+		// struct with its nulls.
+		b, err := json.Marshal(paramsBody{
+			Temperature: c.params.Temperature,
+			TopP:        c.params.TopP,
+			MaxTokens:   c.params.MaxTokens,
+			Stop:        c.params.Stop,
+			Seed:        c.params.Seed,
+		})
 		if err != nil {
 			b = []byte("{}")
 		}

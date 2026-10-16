@@ -51,20 +51,29 @@ const (
 // are the semconv/v1.41.0 constants — the newest semconv package that
 // carries the GenAI group, itself recorded in ADR 0016.
 const (
-	attrRunID           = attribute.Key("weft.run.id")
-	attrRunSteps        = attribute.Key("weft.run.steps")
-	attrRunPending      = attribute.Key("weft.run.pending")
-	attrRunStopReason   = attribute.Key("weft.run.stop_reason")
-	attrRunStoppedBy    = attribute.Key("weft.run.stopped_by")
-	attrRunEvents       = attribute.Key("weft.run.events")
-	attrRunMessages     = attribute.Key("weft.run.messages")
-	attrCancelCause     = attribute.Key("weft.cancel.cause")
-	attrStepIndex       = attribute.Key("weft.step.index")
-	attrStopRaw         = attribute.Key("weft.stop.raw")
-	attrModelToolCalls  = attribute.Key("weft.model.tool_calls")
-	attrToolSeq         = attribute.Key("weft.tool.seq")
-	attrToolApproved    = attribute.Key("weft.tool.approved")
-	attrToolPending     = attribute.Key("weft.tool.pending")
+	attrRunID          = attribute.Key("weft.run.id")
+	attrRunSteps       = attribute.Key("weft.run.steps")
+	attrRunPending     = attribute.Key("weft.run.pending")
+	attrRunStopReason  = attribute.Key("weft.run.stop_reason")
+	attrRunStoppedBy   = attribute.Key("weft.run.stopped_by")
+	attrRunEvents      = attribute.Key("weft.run.events")
+	attrRunMessages    = attribute.Key("weft.run.messages")
+	attrCancelCause    = attribute.Key("weft.cancel.cause")
+	attrStepIndex      = attribute.Key("weft.step.index")
+	attrStopRaw        = attribute.Key("weft.stop.raw")
+	attrModelToolCalls = attribute.Key("weft.model.tool_calls")
+	attrToolSeq        = attribute.Key("weft.tool.seq")
+	attrToolApproved   = attribute.Key("weft.tool.approved")
+	attrToolPending    = attribute.Key("weft.tool.pending")
+	// The execution facts of a call (UX-S2-06, UX-H-18, UX-S3-15): the
+	// deadline it ran under, how long it queued, why it parked, and a
+	// Subagent child's parked calls.
+	attrToolPendingSource = attribute.Key("weft.tool.pending.source")
+	attrToolTimeoutMS     = attribute.Key("weft.tool.timeout_ms")
+	attrToolQueueMS       = attribute.Key("weft.tool.queue_ms")
+	attrSubagentPending   = attribute.Key("weft.subagent.pending")
+	// An Output agent's run end (UX-S1-06).
+	attrOutputSubmitted = attribute.Key("weft.output.submitted")
 	attrToolResultBytes = attribute.Key("weft.tool.result_bytes")
 	attrToolTruncated   = attribute.Key("weft.tool.truncated_bytes")
 	attrToolInputError  = attribute.Key("weft.tool.input_error")
@@ -305,6 +314,9 @@ func (o *observer) run(ctx context.Context, runID, agent string, info ModelInfo,
 			if end.cancelCause != "" {
 				attrs = append(attrs, attrCancelCause.String(end.cancelCause))
 			}
+			if end.output {
+				attrs = append(attrs, attrOutputSubmitted.Bool(end.submitted))
+			}
 			span.SetAttributes(attrs...)
 		}
 		var l *slog.Logger
@@ -505,7 +517,15 @@ func ceilMS(d time.Duration) int64 {
 // (weft.tool.truncated_bytes, on a result or an error result alike); a
 // panic names its layer (weft.panic.layer) and an INVALID_INPUT result
 // the rule it broke (weft.tool.input_error).
-func (o *observer) tool(ctx context.Context, c Call, seq int64) (context.Context, func(res ToolResultPart, pending bool, err error, cut int, retry retryMark, end time.Time)) {
+// toolStartFacts is what the loop knows of a call as it starts: the
+// deadline in force (0: none) and the time it queued for its turn (0:
+// it started at once).
+type toolStartFacts struct {
+	timeout time.Duration
+	queue   time.Duration
+}
+
+func (o *observer) tool(ctx context.Context, c Call, seq int64, facts toolStartFacts) (context.Context, func(res ToolResultPart, park string, err error, cut int, retry retryMark, end time.Time)) {
 	ctx, span := o.tracer.Start(ctx, spanName(semconv.GenAIOperationNameExecuteTool, c.Name),
 		trace.WithSpanKind(trace.SpanKindInternal))
 	start := time.Now()
@@ -521,10 +541,17 @@ func (o *observer) tool(ctx context.Context, c Call, seq int64) (context.Context
 		if c.Approved {
 			attrs = append(attrs, attrToolApproved.Bool(true))
 		}
+		if facts.timeout > 0 {
+			attrs = append(attrs, attrToolTimeoutMS.Int64(facts.timeout.Milliseconds()))
+		}
+		if facts.queue > 0 {
+			attrs = append(attrs, attrToolQueueMS.Int64(ceilMS(facts.queue)))
+		}
 		attrs = append(attrs, metadataAttrs(ctx)...)
 		span.SetAttributes(attrs...)
 	}
-	return ctx, func(res ToolResultPart, pending bool, err error, cut int, retry retryMark, end time.Time) {
+	return ctx, func(res ToolResultPart, park string, err error, cut int, retry retryMark, end time.Time) {
+		pending := park != ""
 		if end.IsZero() {
 			end = time.Now()
 		}
@@ -532,9 +559,12 @@ func (o *observer) tool(ctx context.Context, c Call, seq int64) (context.Context
 		if span.IsRecording() {
 			switch {
 			case pending:
-				span.SetAttributes(attrToolPending.Bool(true))
+				span.SetAttributes(attrToolPending.Bool(true), attrToolPendingSource.String(park))
 			case err != nil:
 				span.SetAttributes(semconv.ErrorTypeKey.String(toolErrorType(err)))
+				if names := nestFromContext(ctx).pendingNames(); names != "" {
+					span.SetAttributes(attrSubagentPending.String(names))
+				}
 				var pe *toolPanicError
 				if errors.As(err, &pe) {
 					span.SetAttributes(attrPanicLayer.String(pe.layer))
@@ -624,6 +654,9 @@ const (
 type runEnd struct {
 	stoppedBy   string
 	cancelCause string
+	// output says the agent was built with Output; submitted that the
+	// run ended with a valid submission (weft.output.submitted).
+	output, submitted bool
 }
 
 // The loop's own weft.run.stopped_by values — the exits no StopWhen

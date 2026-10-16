@@ -6374,6 +6374,8 @@
       "catalog_hash": "fa8742b767630e2316b66ad87eeb839595383924e725c4eee96ef0ee9e61b1fd",
       "request_count": 2,
       "prompt_preview": "delegate",
+      "children_count": 1,
+      "children_failed": 1,
       "children": [
         {
           "id": "r_subfail/0/w1",

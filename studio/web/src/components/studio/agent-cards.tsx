@@ -1,10 +1,13 @@
 // Agent and tool cards (H1): the manifest (weft.json) drawn — per
 // agent its name, model, instructions (collapsed), policy; per tool
 // name, description, input schema as a tree, per-tool policy chips,
-// and the source file:line as text (opening it inline is T2a).
+// and the source file:line as text (opening it inline is T2a). Every
+// policy chip is titled with what it does (lib/policy.ts, U26).
 import { ChevronRight } from "lucide-react"
 
 import type { ManifestAgent, ManifestTool } from "@/lib/api"
+import { agentPolicyChips, toolPolicyChips } from "@/lib/policy"
+import type { PolicyChip } from "@/lib/policy"
 import {
   Collapsible,
   CollapsibleContent,
@@ -59,28 +62,29 @@ export function SchemaTree({
   )
 }
 
-function PolicyChips({ tool }: { tool: ManifestTool }) {
-  const chips: string[] = []
-  if (tool.timeout) chips.push(`timeout ${tool.timeout}`)
-  if (tool.sequential) chips.push("sequential")
-  if (tool.require_approval) chips.push("approval")
-  if (tool.strict_input) chips.push("strict input")
-  if (tool.max_result_bytes !== undefined)
-    chips.push(`cap ${tool.max_result_bytes}`)
-  if (tool.subagent) chips.push(`subagent: ${tool.subagent}`)
+/** Chips is a row of policy chips, each titled with what it does
+ * (lib/policy.ts, U26). */
+function Chips({ chips }: { chips: PolicyChip[] }) {
   if (chips.length === 0) return null
   return (
     <div className="flex flex-wrap gap-1">
       {chips.map((c) => (
         <span
-          key={c}
-          className="rounded-full border border-border px-1.5 py-px font-mono text-[10px] text-muted-foreground"
+          key={`${c.key}:${c.text}`}
+          className="cursor-help rounded-full border border-border px-1.5 py-px font-mono text-[10px] text-muted-foreground"
+          title={c.title}
+          data-policy-chip={c.key}
         >
-          {c}
+          {c.text}
+          <span className="sr-only">{` — ${c.title}`}</span>
         </span>
       ))}
     </div>
   )
+}
+
+function PolicyChips({ tool }: { tool: ManifestTool }) {
+  return <Chips chips={toolPolicyChips(tool)} />
 }
 
 function ToolCard({ tool }: { tool: ManifestTool }) {
@@ -111,15 +115,6 @@ function ToolCard({ tool }: { tool: ManifestTool }) {
 }
 
 export function AgentCard({ agent }: { agent: ManifestAgent }) {
-  const policy = agent.policy
-  const policyChips = [
-    `parallelism ${policy.parallelism}`,
-    `max steps ${policy.max_steps}`,
-    `retries ${policy.max_model_retries}`,
-    `cap ${policy.max_result_bytes}`,
-    policy.timeout ? `timeout ${policy.timeout}` : "",
-    policy.detect_loops ? `loops ${policy.detect_loops}` : "",
-  ].filter(Boolean)
   return (
     <div className="space-y-2 rounded-lg border bg-background px-4 py-3">
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
@@ -128,16 +123,7 @@ export function AgentCard({ agent }: { agent: ManifestAgent }) {
           {agent.model.provider}/{agent.model.name}
         </span>
       </div>
-      <div className="flex flex-wrap gap-1">
-        {policyChips.map((c) => (
-          <span
-            key={c}
-            className="rounded-full border border-border px-1.5 py-px font-mono text-[10px] text-muted-foreground"
-          >
-            {c}
-          </span>
-        ))}
-      </div>
+      <Chips chips={agentPolicyChips(agent.policy)} />
       {agent.instructions ? (
         <Collapsible defaultOpen={false}>
           <CollapsibleTrigger className="group/instr flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground">

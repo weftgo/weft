@@ -225,6 +225,9 @@ type RunQuery struct {
 	// ErrorType keeps the runs whose RunRow.ErrorType is exactly this
 	// ("" any): max_steps, cancelled, model_error, …
 	ErrorType string
+	// IDPrefix keeps the runs whose ID starts with it, byte for byte
+	// ("" any; no wildcard, no case folding): a pasted short id.
+	IDPrefix string
 }
 
 // TraceQuery selects traces for Traces. The zero value lists every

@@ -829,4 +829,114 @@ describe("the ⌘K palette", () => {
     await waitFor(() => expect(kinds()).toEqual(["run:r_fail"]))
     expect(studio.calls("GET search")).toHaveLength(0)
   })
+
+  // U26 (UX-A-13): a pasted id prefix, a public id and a tag.
+  const director = "1c06797f5e2a4b0c9d8e7f6a5b4c3d2e"
+  function lookups() {
+    studio
+      .on("GET meta", meta(["search", "traces"]))
+      .on("GET runs", (req) => {
+        if (req.query.get("id_prefix") === "1c06797f")
+          return {
+            total: 1,
+            runs: [row(director, { agent: "director" })],
+            next_before: null,
+          }
+        if (req.query.get("public_id") === "pub_acme")
+          return {
+            total: 1,
+            runs: [row("r_pub", { public_id: "pub_acme" })],
+            next_before: null,
+          }
+        if (req.query.get("tag.scenario") === "rw.deep-delegation")
+          return {
+            total: 1,
+            runs: [row("r_tag", { meta: { scenario: "rw.deep-delegation" } })],
+            next_before: null,
+          }
+        // Any other read (a server that ignored the filter): the
+        // recent page, which never ranks first.
+        return {
+          ...runs,
+          runs: [
+            ...runs.runs,
+            row("r_scn", { meta: { scenario: "rw.budget-guards" } }),
+          ],
+        }
+      })
+      .on("GET sessions", sessions)
+      .on("GET search", {
+        total: 0,
+        runs: [],
+        sort: "started",
+        next_offset: null,
+      })
+      // A trace whose id holds 1c06797f's characters in order, apart:
+      // a subsequence matcher listed it (the audit's wrong jump).
+      .on("GET traces", {
+        ...traces,
+        traces: [
+          {
+            ...traces.traces[0],
+            trace_id: "d1a5c0b06c7d9e7f6247176a7993f5e9",
+          },
+        ],
+      })
+  }
+
+  it("opens 1c06797f by prefix: the exact match ranks first and Enter opens it, no trace subsequence listed", async () => {
+    lookups()
+    const { router } = renderApp("/runs")
+    await screen.findByText("r_ok")
+    const input = await open()
+    type(input, "1c06797f")
+    await waitFor(() => expect(kinds()[0]).toBe(`run:${director}`))
+    expect(kinds().some((k) => k.startsWith("trace:"))).toBe(false)
+    const q = studio
+      .calls("GET runs")
+      .find((r) => r.query.get("id_prefix") === "1c06797f")!
+    expect(q.query.get("all")).toBe("1")
+    expect(
+      document.querySelector("[data-palette-exact]")?.textContent
+    ).toContain("Exact match")
+    const selected = () =>
+      document.querySelector<HTMLElement>('[cmdk-item][data-selected="true"]')
+    await waitFor(() => expect(selected()?.dataset.paletteId).toBe(director))
+    fireEvent.keyDown(input, { key: "Enter" })
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe(`/runs/${director}`)
+    )
+  })
+
+  it("finds a run by public id and by a key=value tag; a bare tag value matches the loaded runs' metadata", async () => {
+    lookups()
+    renderApp("/runs")
+    await screen.findByText("r_ok")
+    const input = await open()
+    type(input, "pub_acme")
+    await waitFor(() => expect(kinds()[0]).toBe("run:r_pub"))
+    type(input, "scenario=rw.deep-delegation")
+    await waitFor(() => expect(kinds()[0]).toBe("run:r_tag"))
+    type(input, "rw.budget-guards")
+    await waitFor(() => expect(kinds()).toContain("run:r_scn"))
+  })
+
+  it("Enter on text nothing matches opens nothing", async () => {
+    lookups()
+    const { router } = renderApp("/runs")
+    await screen.findByText("r_ok")
+    const input = await open()
+    type(input, "ffffffff")
+    await waitFor(() =>
+      expect(
+        studio
+          .calls("GET runs")
+          .some((r) => r.query.get("id_prefix") === "ffffffff")
+      ).toBe(true)
+    )
+    await screen.findByText("Nothing matches.")
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(router.state.location.pathname).toBe("/runs")
+    expect(screen.getByPlaceholderText(PALETTE_PLACEHOLDER)).toBeTruthy()
+  })
 })

@@ -81,7 +81,11 @@ import type {
 import { relativeTime, spanMs } from "@/lib/format"
 import { copyText, download } from "@/lib/json"
 import { keepEditedTitle } from "@/lib/saves"
-import { mintExperimentID, validExperimentID } from "@/lib/experiments"
+import {
+  matrixStepLine,
+  mintExperimentID,
+  validExperimentID,
+} from "@/lib/experiments"
 import { keepPrompt } from "@/components/studio/saves"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { CapsUnread } from "@/components/studio/caps-unread"
@@ -102,7 +106,7 @@ import {
 } from "@/components/studio/experiment-form"
 import { EditList } from "@/components/studio/transcript-editor"
 import { mayReadExperiments } from "@/components/studio/no-experiments"
-import { editsProblem } from "@/lib/edits"
+import { editsProblem, wireEdits } from "@/lib/edits"
 import { Button } from "@/components/ui/button"
 import { SelectField } from "@/components/ui/select-field"
 import { SplitPane } from "@/components/studio/split-pane"
@@ -522,7 +526,6 @@ function Playground({ caps }: { caps: string[] }) {
    * experiment's): kept until the name is edited (lib/experiments.ts's
    * rule; a renamed matrix mints its own). */
   const [matrixID, setMatrixID] = useState("")
-  const [matrixFromStep, setMatrixFromStep] = useState(0)
 
   // The form's draft (plan F5): its id is minted per page, or the
   // query's ?exp= when the page opened on one; it joins the query once
@@ -744,7 +747,6 @@ function Playground({ caps }: { caps: string[] }) {
     )
     setMatrixName(form.matrix?.name ?? "")
     setMatrixID(form.matrix?.id ?? "")
-    setMatrixFromStep(form.matrix?.from_step ?? 0)
     writeRef.current({
       run: form.run ?? "",
       step: form.step ?? 0,
@@ -816,7 +818,6 @@ function Playground({ caps }: { caps: string[] }) {
     matrix: {
       name: matrixName.trim() || undefined,
       id: matrixID || undefined,
-      from_step: matrixFromStep,
       inputs: matrixRows,
     },
   })
@@ -1053,9 +1054,6 @@ function Playground({ caps }: { caps: string[] }) {
      * typed: the name is never sent as the id. */
     experimentID: string,
     experimentName: string,
-    /** The step every cell continues from (plan F5: one number for the
-     * whole matrix, source.from_step's ordinal). */
-    matrixStep: number,
     /** Called once the definition is saved, before any cell is issued
      * (the matrix's notice is labelled from here: plan H5). */
     onSaved?: () => void
@@ -1088,8 +1086,11 @@ function Playground({ caps }: { caps: string[] }) {
                 agent,
                 variant: v,
                 sourceRunID,
-                fromStep: sourceRunID ? matrixStep : 0,
+                // The page's one step and its edits (U26): a cell is
+                // Run with this row's input.
+                fromStep: sourceRunID ? fromStep : 0,
                 input: i.text,
+                edits: editDrafts,
                 publicID: sourceRow?.public_id,
                 experimentID,
               }),
@@ -1112,8 +1113,11 @@ function Playground({ caps }: { caps: string[] }) {
           thread: v.thread,
         })),
         ...(sourceRunID
-          ? { source_run_id: sourceRunID, from_step: matrixStep }
+          ? { source_run_id: sourceRunID, from_step: fromStep }
           : { from_step: 0 }),
+        ...(sourceRunID && fromStep > 0 && editDrafts.length
+          ? { transcript_edits: wireEdits(editDrafts) }
+          : {}),
         inputs: inputs.map((i) => ({
           key: i.key,
           ...(sourceRunID ? { source_run_id: sourceRunID } : {}),
@@ -1513,8 +1517,7 @@ function Playground({ caps }: { caps: string[] }) {
                     setMatrixID("")
                   }}
                   savedID={matrixID}
-                  fromStep={matrixFromStep}
-                  setFromStep={setMatrixFromStep}
+                  fromStep={sourceRunID ? fromStep : 0}
                   runMatrix={runMatrix}
                   busy={busy || resolving || !runtime || !agent}
                   mayRun={mayRun}
@@ -1522,8 +1525,7 @@ function Playground({ caps }: { caps: string[] }) {
                   cells={cells}
                   setCells={setCells}
                   sourceRunID={sourceRunID}
-                  pageFromStep={fromStep}
-                  pageEdits={editDrafts.length}
+                  edits={sourceRunID && fromStep > 0 ? editDrafts.length : 0}
                 />
                 <FormVerbs
                   share={share}
@@ -2199,7 +2201,6 @@ function Matrix({
   setName,
   savedID,
   fromStep,
-  setFromStep,
   runMatrix,
   busy,
   mayRun,
@@ -2207,24 +2208,23 @@ function Matrix({
   cells,
   setCells,
   sourceRunID,
-  pageFromStep = 0,
-  pageEdits = 0,
+  edits = 0,
 }: {
   variants: Variant[]
-  /** The matrix's rows, name and from_step: the page's form (plan F5). */
+  /** The matrix's rows and name: the page's form (plan F5). */
   inputs: { key: string; text: string }[]
   setInputs: Dispatch<SetStateAction<{ key: string; text: string }[]>>
   name: string
   setName: (v: string) => void
   /** The id the form carries (a reopened experiment's), else "". */
   savedID: string
+  /** The page's one step (U26; UX-C-21): the source block's step
+   * picker sets it for Run and the matrix alike. */
   fromStep: number
-  setFromStep: (n: number) => void
   runMatrix: (
     inputs: { key: string; text: string }[],
     experimentID: string,
     experimentName: string,
-    fromStep: number,
     onSaved?: () => void
   ) => Promise<void>
   /** The matrix's run button is held (a command posting, the target
@@ -2239,11 +2239,8 @@ function Matrix({
   cells: Record<string, Experiment>
   setCells: React.Dispatch<React.SetStateAction<Record<string, Experiment>>>
   sourceRunID: string
-  /** The page's from_step and transcript edits: the matrix runs every
-   * cell from its own step without Run's edits, and says so when the
-   * page holds either. */
-  pageFromStep?: number
-  pageEdits?: number
+  /** The page's transcript edits every cell carries (past step 0). */
+  edits?: number
 }) {
   const qc = useQueryClient()
   // The default id is minted once per page, not per render: the id on
@@ -2408,14 +2405,6 @@ function Matrix({
         Experiment matrix · {variants.length} variants × {inputs.length} inputs
         {sourceRunID ? " · over the source run" : ""}
         {sourceRunID && fromStep > 0 ? ` · from step ${fromStep}` : ""}
-        {((pageFromStep > 0 && pageFromStep !== (sourceRunID ? fromStep : 0)) ||
-          pageEdits > 0) && (
-          <div className="text-faint" data-matrix-from-step-0>
-            the matrix runs each cell from its own step (
-            {sourceRunID ? fromStep : 0}); Run's step and transcript edits stay
-            with Run
-          </div>
-        )}
       </div>
       <div className="space-y-2 p-3 text-xs">
         <div className="flex flex-wrap items-center gap-2">
@@ -2438,7 +2427,6 @@ function Matrix({
                   matrixInputs(inputs, sourceRunID),
                   id,
                   name,
-                  fromStep,
                   () => {
                     issued.current = id
                   }
@@ -2453,32 +2441,15 @@ function Matrix({
             </span>
           )}
         </div>
-        {/* One from_step for every cell (plan F5): the step ordinal the
-            cells continue the source run from — the replay drawer's
-            from_step. Past step 0 a cell continues the kept prefix, so
-            an input row's text is not sent (§5.1). */}
-        {sourceRunID ? (
-          <label className="flex flex-wrap items-center gap-2">
-            <span className="text-muted-foreground">from step</span>
-            <input
-              type="number"
-              min={0}
-              aria-label="matrix from step"
-              className="w-20 rounded border bg-transparent px-2 py-1"
-              value={fromStep}
-              onChange={(e) =>
-                setFromStep(
-                  Math.max(0, Math.floor(Number(e.target.value) || 0))
-                )
-              }
-            />
-            {fromStep > 0 ? (
-              <span className="text-faint" data-matrix-from-step>
-                every cell continues {sourceRunID} from step {fromStep}; the
-                rows' text is not sent past step 0
-              </span>
-            ) : null}
-          </label>
+        {/* One step for the page (U26; UX-C-21): the source block's step
+            picker — the one Run continues from — is every cell's
+            from_step, and the page's transcript edits go with each. Past
+            step 0 a cell continues the kept prefix, so an input row's
+            text is not sent (§5.1). */}
+        {sourceRunID && fromStep > 0 ? (
+          <p className="text-faint" data-matrix-from-step>
+            {matrixStepLine(sourceRunID, fromStep, edits)}
+          </p>
         ) : null}
         {inputs.map((inp, i) => (
           <div key={inp.key} className="flex items-center gap-2">

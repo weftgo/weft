@@ -184,6 +184,11 @@ func runsInner(q obsdb.RunQuery) (string, []any) {
 	if q.ErrorType != "" {
 		eq("ErrorType", q.ErrorType)
 	}
+	if q.IDPrefix != "" {
+		// RunId is the grouping key: narrowing on it is the whole filter.
+		narrow = append(narrow, "startsWith(RunId, ?)")
+		narrowArgs = append(narrowArgs, q.IDPrefix)
+	}
 	switch {
 	case q.StoppedBy == "":
 	case strings.HasSuffix(q.StoppedBy, ":"):

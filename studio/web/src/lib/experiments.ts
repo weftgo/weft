@@ -114,3 +114,18 @@ export function mintExperimentID(
       .slice(0, 100) || "exp"
   return `${slug}_${clean(nonce)}`.slice(0, 128)
 }
+
+/** matrixStepLine is the matrix's line past step 0 (U26; UX-C-21): the
+ * page's one step — the source block's picker, Run's too — and the
+ * page's transcript edits every cell carries. */
+export function matrixStepLine(
+  run: string,
+  step: number,
+  edits: number
+): string {
+  const carried =
+    edits > 0
+      ? ` with the page's ${edits === 1 ? "transcript edit" : `${edits} transcript edits`}`
+      : ""
+  return `every cell continues ${run} from step ${step} (the page's step, picked above)${carried}; the rows' text is not sent past step 0`
+}

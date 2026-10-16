@@ -24,6 +24,7 @@ import type {
   ToolChoiceWire,
 } from "./api"
 import type { ReplayEdit } from "./edits"
+import { wireEdits } from "./edits"
 import type {
   Engine,
   LabFields,
@@ -34,8 +35,12 @@ import type {
 import { editsFromHandoff, emptyLab } from "./experiment-body"
 import { forkSource, validExperimentID } from "./experiments"
 
-/** The form's format version: a newer one is refused, never guessed. */
-export const FORM_VERSION = 1
+/** The form's format version: another one is refused, never guessed.
+ * 2 (U26; UX-C-21): one step for the page — `step`, which Run and the
+ * matrix both continue from, with the page's transcript edits; v1's
+ * second step (matrix.from_step) is gone, and a v1 link or draft is
+ * refused rather than read with one of its two steps dropped. */
+export const FORM_VERSION = 2
 
 /** One variant as the form holds it. Absent fields are the defaults:
  * instructions "" (the agent's registered prompt), every tool on, no
@@ -70,10 +75,12 @@ export interface FormState {
   v: typeof FORM_VERSION
   agent?: string
   runtime?: string
-  /** The source run and the step Run continues from (its ordinal). */
+  /** The source run and the page's one step (its ordinal): Run and
+   * every matrix cell continue from it. */
   run?: string
   step?: number
-  /** Run's transcript edits (the matrix never sends them). */
+  /** The page's transcript edits: Run and every matrix cell send them
+   * (past step 0). */
   edits?: ReplayEdit[]
   variants: FormVariant[]
   matrix?: {
@@ -82,8 +89,6 @@ export interface FormState {
     /** The experiment id it is saved under (lib/experiments.ts's rule;
      * one that breaks it is dropped and re-minted). */
     id?: string
-    /** The step every cell continues from (an ordinal; 0 the whole turn). */
-    from_step?: number
     inputs: FormInput[]
   }
 }
@@ -184,8 +189,6 @@ export function validateForm(o: unknown): FormState | null {
       if (name) out.matrix.name = name
       const id = text(o.matrix.id)
       if (validExperimentID(id)) out.matrix.id = id
-      const fs = ordinal(o.matrix.from_step)
-      if (fs) out.matrix.from_step = fs
     }
   }
   return out
@@ -209,7 +212,6 @@ export function formOfFields(p: {
   matrix?: {
     name?: string
     id?: string
-    from_step?: number
     inputs: FormInput[]
   }
 }): FormState {
@@ -243,7 +245,6 @@ export function formOfFields(p: {
     }
     if (p.matrix.name) form.matrix.name = p.matrix.name
     if (validExperimentID(p.matrix.id)) form.matrix.id = p.matrix.id
-    if (p.matrix.from_step) form.matrix.from_step = p.matrix.from_step
   }
   return form
 }
@@ -639,7 +640,7 @@ export function formFromExperiment(exp: ExperimentRow): FormState {
     )
     if (edits.length) form.edits = edits
   }
-  if (fromStep) form.matrix!.from_step = fromStep
+  if (fromStep) form.step = fromStep
   if (!form.matrix!.inputs.length)
     form.matrix!.inputs = [{ key: "1", text: "" }]
   return validateForm(form) ?? form
@@ -663,7 +664,7 @@ export function cellBody(
   if (!ev || !ei)
     throw new Error(`no cell ${variant}×${input} in experiment ${exp.id}`)
   const fv = form.variants.find((v) => v.key === variant)
-  const fromStep = form.matrix?.from_step ?? 0
+  const fromStep = form.step ?? 0
   const sideEffects = fv?.side_effects ?? "substitute"
   const body: PlaygroundRunBody = {
     runtime: target.runtime,
@@ -680,6 +681,10 @@ export function cellBody(
   // At a later step the cell continues the kept prefix: no input (the
   // matrix's own rule, buildRunBody).
   if (ei.text && fromStep === 0) body.input = ei.text
+  // The page's transcript edits travel with every cell past step 0
+  // (U26: one step, one set of edits — the matrix's rule is Run's).
+  if (fromStep > 0 && form.edits?.length)
+    body.transcript_edits = wireEdits(form.edits)
   if (!body.source && !body.input)
     throw new Error(`cell ${variant}×${input} has no input and no source run`)
   if (target.publicID) body.public_id = target.publicID

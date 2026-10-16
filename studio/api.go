@@ -768,7 +768,9 @@ const (
 // stopped_by (what ended the run, exact — has_tool_call:submit — or, a
 // value ending in ':', a prefix: has_tool_call: is every tool-call
 // stop), error_type (a failed run's kind, exact: max_steps, cancelled,
-// model_error, …), tag.<k>=<v> metadata matches, before (the
+// model_error, …), id_prefix (the runs whose id starts with it, byte
+// for byte: a pasted short id — the ⌘K palette's lookup, children
+// included under all=1), tag.<k>=<v> metadata matches, before (the
 // RFC 3339 paging cursor on started) with before_id (the cursor's run
 // id: exact inside a tie) and limit. next_before / next_before_id are
 // the next page's before / before_id, null on the last page.
@@ -782,6 +784,7 @@ func (s *Server) serveRuns(w http.ResponseWriter, r *http.Request) {
 		ExperimentID: q.Get("experiment_id"),
 		StoppedBy:    q.Get("stopped_by"),
 		ErrorType:    q.Get("error_type"),
+		IDPrefix:     q.Get("id_prefix"),
 		ParentRunID:  parentParam(q),
 		Meta:         tagParams(q),
 	}

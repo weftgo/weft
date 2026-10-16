@@ -336,9 +336,13 @@ describe("/experiments/{id}", () => {
     expect(
       screen.getByLabelText<HTMLInputElement>("experiment name").value
     ).toBe("exp_tone")
-    expect(
-      screen.getByLabelText<HTMLInputElement>("matrix from step").value
-    ).toBe("1")
+    // The page's one step (U26): the matrix reads it, with no picker of
+    // its own.
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-matrix-from-step]")?.textContent
+      ).toMatch(/^every cell continues r_ok from step 1 /)
+    )
     expect(screen.getByLabelText<HTMLInputElement>("input 1").value).toBe(
       "where is 42?"
     )
@@ -377,9 +381,10 @@ describe("/experiments/{id}", () => {
 
   it("clones from this browser's record of the matrix when it has one, exactly", async () => {
     const kept: FormState = {
-      v: 1,
+      v: 2,
       agent: "orders",
       run: "r_ok",
+      step: 1,
       variants: [
         { key: "A", side_effects: "allow" },
         {
@@ -392,7 +397,6 @@ describe("/experiments/{id}", () => {
       ],
       matrix: {
         name: "exp_tone",
-        from_step: 1,
         inputs: [
           { key: "1", text: "where is 42?" },
           { key: "2", text: "" },

@@ -22,9 +22,14 @@
 
 import { tokenScopeOf } from "./replay"
 
+/** The export route of a run in one format (under the API base). */
+export function exportPath(runID: string, format: string): string {
+  return `runs/${encodeURIComponent(runID)}/export?format=${encodeURIComponent(format)}`
+}
+
 /** The export route of a run's wefttest zip (under the API base). */
 export function testExportPath(runID: string): string {
-  return `runs/${encodeURIComponent(runID)}/export?format=wefttest`
+  return exportPath(runID, "wefttest")
 }
 
 /** dispositionName reads a Content-Disposition's file name: RFC 6266's

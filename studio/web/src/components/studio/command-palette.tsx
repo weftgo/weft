@@ -6,7 +6,10 @@
 // else matched by id over the recent runs; sessions over the newest
 // page's ids, public ids and agents; traces over the newest page of
 // /api/traces (ids, root names, services — the API has no text
-// filter); experiments by name. Each group is there only under its
+// filter); experiments by name. A pasted id prefix, a public id or a
+// key=value tag is looked up on the server and its runs rank first as
+// exact matches, Enter opening the first; every other item matches by
+// contiguous substrings, never a subsequence (lib/finder.ts, U26). Each group is there only under its
 // capability ("traces", "playground" for experiments — and no panel
 // token, which the experiments routes refuse). cmdk gives the
 // dialog, the combobox and the listbox: ↑↓ move, Enter opens, Escape
@@ -33,6 +36,7 @@ import {
 
 import {
   experimentsQuery,
+  fetchRuns,
   fetchSearch,
   fetchTraces,
   metaQuery,
@@ -41,6 +45,13 @@ import {
 } from "@/lib/api"
 import type { RunRow } from "@/lib/api"
 import { toggleDensity } from "@/lib/density"
+import {
+  EXACT_VALUE,
+  exactRows,
+  lookupsOf,
+  metaKeywords,
+  paletteFilter,
+} from "@/lib/finder"
 import { resetPaneSizes } from "@/lib/pane-sizes"
 import {
   experimentLink,
@@ -113,6 +124,34 @@ export function CommandPalette({
     queryFn: () => fetchSearch({ q: term, limit: 10 }),
     enabled: open && searchable && term.length > 0,
   })
+  // The exact lookups (lib/finder.ts): an id prefix (children too), a
+  // public id, a tag — each its own small /api/runs read.
+  const look = lookupsOf(term)
+  const byPrefix = useQuery({
+    queryKey: ["palette", "id_prefix", look.idPrefix],
+    staleTime: 5_000,
+    queryFn: () =>
+      fetchRuns({ id_prefix: look.idPrefix, all: true, limit: 10 }),
+    enabled: open && !!look.idPrefix,
+  })
+  const byPublic = useQuery({
+    queryKey: ["palette", "public_id", look.publicId],
+    staleTime: 5_000,
+    queryFn: () =>
+      fetchRuns({ public_id: look.publicId, all: true, limit: 10 }),
+    enabled: open && !!look.publicId,
+  })
+  const byTag = useQuery({
+    queryKey: ["palette", "tag", look.tag?.key, look.tag?.value],
+    staleTime: 5_000,
+    queryFn: () =>
+      fetchRuns({
+        tag: look.tag ? { [look.tag.key]: look.tag.value } : {},
+        all: true,
+        limit: 10,
+      }),
+    enabled: open && !!look.tag,
+  })
   const sessions = useQuery({ ...sessionsQuery({}), enabled: open })
   const tracesOn = has("traces")
   const traces = useQuery({
@@ -140,21 +179,36 @@ export function CommandPalette({
   // answer the text in the box: a previous term's hits under new text
   // are matched by cmdk like any row), then the recent runs cmdk
   // matches by id, agent and prompt.
-  const hitRows = term && searchable ? (hits.data?.runs ?? []) : []
+  // The exact matches first, only while they answer the text in the
+  // box (a stale answer under new text is dropped, not ranked first).
+  const settled = term === input.trim()
+  const exact = settled
+    ? exactRows(look, {
+        idPrefix: byPrefix.data?.runs,
+        publicId: byPublic.data?.runs,
+        tag: byTag.data?.runs,
+      })
+    : []
+  const exactIDs = new Set(exact.map((r) => r.id))
+  const hitRows =
+    term && searchable
+      ? (hits.data?.runs ?? []).filter((r) => !exactIDs.has(r.id))
+      : []
   const hitIDs = new Set(hitRows.map((r) => r.id))
   const recentRows = (recent.data?.runs ?? [])
-    .filter((r) => !hitIDs.has(r.id))
+    .filter((r) => !hitIDs.has(r.id) && !exactIDs.has(r.id))
     .slice(0, 25)
-  const runItem = (r: RunRow, hit: boolean) => (
+  const runItem = (r: RunRow, hit: boolean, isExact = false) => (
     <CommandItem
       key={r.id}
-      value={`run:${r.id} ${r.agent} ${r.status}`}
+      value={`${isExact ? EXACT_VALUE : ""}run:${r.id} ${r.agent} ${r.status}`}
       // Found by what it is titled with (U6-fix): the prompt is a
       // keyword beside the id, so a run is found by its words even when
-      // this Studio cannot search.
+      // this Studio cannot search; its metadata pairs too (U26).
       keywords={[
         ...(r.prompt_preview ? [r.prompt_preview] : []),
-        ...(hit && term === input.trim() ? [input] : []),
+        ...metaKeywords(r.meta),
+        ...(hit && settled ? [input] : []),
       ]}
       onSelect={() => go(() => router.navigate(runLink(r.id)))}
       data-palette-kind="run"
@@ -177,7 +231,7 @@ export function CommandPalette({
     >
       {/* The dialog is the frame; cmdk's root (its store) is Command —
           without it every item throws on open. */}
-      <Command>
+      <Command filter={paletteFilter}>
         <CommandInput
           placeholder={PALETTE_PLACEHOLDER}
           value={input}
@@ -185,6 +239,11 @@ export function CommandPalette({
         />
         <CommandList>
           <CommandEmpty>Nothing matches.</CommandEmpty>
+          {exact.length > 0 ? (
+            <CommandGroup heading="Exact match" data-palette-exact>
+              {exact.map((r) => runItem(r, false, true))}
+            </CommandGroup>
+          ) : null}
           <CommandGroup
             heading={
               searchable ? "Runs" : "Runs (by id: this Studio cannot search)"

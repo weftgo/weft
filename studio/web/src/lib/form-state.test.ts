@@ -55,7 +55,6 @@ const form: FormState = {
   ],
   matrix: {
     name: "exp_tone",
-    from_step: 1,
     inputs: [
       { key: "1", text: "where is 42?" },
       { key: "2", text: "" },
@@ -141,7 +140,7 @@ describe("the share link (#state=)", () => {
     expect(await decodeForm("z!!!")).toBeNull()
     expect(await decodeForm("")).toBeNull()
     const newer = (
-      await encodeForm({ ...form, v: 2 } as unknown as FormState, {
+      await encodeForm({ ...form, v: 3 } as unknown as FormState, {
         codec: "j",
       })
     ).value
@@ -160,7 +159,7 @@ describe("validateForm", () => {
   it("keeps known keys of the right shape, drops the rest, refuses a form without a variant", () => {
     expect(
       validateForm({
-        v: 1,
+        v: 2,
         agent: 7,
         variants: [
           {
@@ -182,12 +181,22 @@ describe("validateForm", () => {
         },
       })
     ).toEqual({
-      v: 1,
+      v: 2,
       variants: [{ key: "A", lab: { temperature: "0.3" } }],
       matrix: { inputs: [{ key: "1", text: "hi" }] },
     })
-    expect(validateForm({ v: 1, variants: [] })).toBeNull()
-    expect(validateForm({ v: 2, variants: [{ key: "A" }] })).toBeNull()
+    expect(validateForm({ v: 2, variants: [] })).toBeNull()
+    expect(validateForm({ v: 3, variants: [{ key: "A" }] })).toBeNull()
+    // Form v1 carried two steps (Run's and the matrix's): refused, never
+    // read with one of them dropped (U26; UX-C-21).
+    expect(
+      validateForm({
+        v: 1,
+        step: 2,
+        variants: [{ key: "A" }],
+        matrix: { from_step: 0, inputs: [{ key: "1", text: "" }] },
+      })
+    ).toBeNull()
     expect(validateForm(null)).toBeNull()
   })
 })
@@ -213,7 +222,7 @@ describe("formOfFields", () => {
       matrix: { inputs: [{ key: "1", text: "" }] },
     })
     expect(f).toEqual({
-      v: 1,
+      v: 2,
       variants: [{ key: "A" }],
       matrix: { inputs: [{ key: "1", text: "" }] },
     })
@@ -301,11 +310,12 @@ describe("a saved experiment read back", () => {
     ])
   })
 
-  it("formFromExperiment: the variants, the rows, the source, the matrix's step and each variant's modes", () => {
+  it("formFromExperiment: the variants, the rows, the source, the page's one step and each variant's modes", () => {
     expect(formFromExperiment(experiment)).toEqual({
-      v: 1,
+      v: 2,
       agent: "orders",
       run: "r_ok",
+      step: 1,
       variants: [
         { key: "A" },
         {
@@ -320,7 +330,6 @@ describe("a saved experiment read back", () => {
       matrix: {
         name: "exp_tone",
         id: "exp_tone",
-        from_step: 1,
         inputs: [
           { key: "1", text: "where is 42?" },
           { key: "2", text: "" },
@@ -336,8 +345,8 @@ describe("a saved experiment read back", () => {
     expect(f.matrix).toMatchObject({
       name: "tracking link",
       id: "exp_g",
-      from_step: 1,
     })
+    expect(f.step).toBe(1)
     expect(f.run).toBe("r_ok")
     expect(f.variants.find((v) => v.key === "A")).toEqual({ key: "A" })
     expect(f.variants.find((v) => v.key === "B")).toMatchObject({
@@ -365,7 +374,7 @@ describe("a saved experiment read back", () => {
       side_effects: "allow",
     })
     expect(over.variants.find((v) => v.key === "B")?.engine).toBeUndefined()
-    expect(over.matrix?.from_step).toBeUndefined()
+    expect(over.step).toBeUndefined()
     // Absent fields fall back to the runs (a definition before F5.1).
     expect(formFromExperiment(experiment).variants[1]).toMatchObject({
       engine: "scripted",
@@ -416,14 +425,25 @@ describe("a saved experiment read back", () => {
       input: "2",
       sideEffects: "park",
     })
-    const at0 = cellBody(
+    const at0 = cellBody(experiment, { ...f, step: 0 }, "A", "1", {
+      runtime: "rt_1",
+    })
+    expect(at0.input).toBe("where is 42?")
+    // The page's edits travel with every cell past step 0 (U26).
+    const edited = cellBody(
       experiment,
-      { ...f, matrix: { ...f.matrix!, from_step: 0 } },
+      {
+        ...f,
+        edits: [
+          { kind: "tool_result", step: 0, callID: "c1", toolResult: "x" },
+        ],
+      },
       "A",
       "1",
       { runtime: "rt_1" }
     )
-    expect(at0.input).toBe("where is 42?")
+    expect(edited.transcript_edits).toHaveLength(1)
+    expect(at0.transcript_edits).toBeUndefined()
     expect(() =>
       cellBody(experiment, f, "Z", "1", { runtime: "rt_1" })
     ).toThrow(/no cell Z×1/)

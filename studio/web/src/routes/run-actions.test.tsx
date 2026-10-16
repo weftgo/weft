@@ -1,0 +1,227 @@
+// U26 (UX-A-15) on the run page against a fake Studio: the header's
+// export verbs download json / jsonl / otlp through the export route
+// with the bearer (never a token in the URL), a read token offered no
+// otlp; "delete run…" asks first in an in-page dialog naming the
+// subagent runs that go with it and what stays, DELETEs, and lands on
+// the runs list; where the server would refuse it, one faint line says
+// why instead of the verb.
+import {
+  cleanup,
+  configure,
+  fireEvent,
+  screen,
+  waitFor,
+} from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+
+import { setStudioToken } from "@/lib/api"
+import type { RunDoc, RunsPage } from "@/lib/api"
+import { DELETE_OFF, deleteConfirmWords } from "@/lib/run-actions"
+import { renderApp, stubBrowser } from "@/test/app"
+import { FakeEventSource } from "@/test/fake-event-source"
+import {
+  FakeStudio,
+  apiError,
+  golden,
+  pagedEvents,
+  transcriptOf,
+} from "@/test/fake-studio"
+
+configure({ asyncUtilTimeout: 10_000 })
+vi.setConfig({ testTimeout: 30_000 })
+
+const runs = golden<RunsPage>("runs")
+const rOK = runs.runs.find((r) => r.id === "r_ok")!
+const RUN = rOK.id
+const DEV = "dev-token-123"
+const READ = `weft_pt.${btoa(JSON.stringify({ pid: "pub_1", scope: "read" })).replace(/=+$/, "")}.sig`
+const baseMeta = golden<Record<string, unknown>>("meta")
+
+let saved: string[]
+let studio: FakeStudio
+beforeEach(() => {
+  stubBrowser()
+  FakeEventSource.reset()
+  vi.stubGlobal("EventSource", FakeEventSource)
+  setStudioToken("")
+  saved = []
+  URL.createObjectURL = vi.fn(() => "blob:weft-test")
+  URL.revokeObjectURL = vi.fn()
+  vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+    this: HTMLAnchorElement
+  ) {
+    saved.push(this.download)
+  })
+})
+afterEach(() => {
+  cleanup()
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+  setStudioToken("")
+})
+
+function serve(
+  over: Record<string, unknown> = {},
+  children: RunDoc["children"] = []
+) {
+  const doc: RunDoc = { ...rOK, children }
+  studio = new FakeStudio()
+    .on("GET meta", { ...baseMeta, ...over })
+    .on("GET runs", runs)
+    .on(`GET runs/${RUN}`, doc)
+    .on(`GET runs/${RUN}/events`, pagedEvents([]))
+    .on(`GET runs/${RUN}/spans`, { spans: [] })
+    .on(`GET runs/${RUN}/transcript`, transcriptOf([]))
+    .on(
+      `GET runs/${RUN}/export`,
+      (req) =>
+        new Response("{}", {
+          status: 200,
+          headers: {
+            "Content-Disposition": `attachment; filename="${RUN}.${req.query.get("format") === "otlp" ? "otlp.json" : req.query.get("format")}"`,
+          },
+        })
+    )
+    .on(`DELETE runs/${RUN}`, {
+      deleted: "run",
+      run_id: RUN,
+      note: "deleted",
+    })
+  return studio
+}
+
+const formats = () =>
+  [...document.querySelectorAll<HTMLElement>("[data-export-format]")].map(
+    (b) => b.dataset.exportFormat
+  )
+
+describe("export on the run page", () => {
+  it("downloads json, jsonl and otlp with the bearer; xml is not offered (the route serves four formats)", async () => {
+    setStudioToken(DEV)
+    serve().requireToken(DEV).install()
+    renderApp(`/runs/${RUN}`)
+    await waitFor(() => expect(formats()).toEqual(["json", "jsonl", "otlp"]))
+    for (const f of ["json", "jsonl", "otlp"]) {
+      fireEvent.click(
+        document.querySelector<HTMLElement>(`[data-export-format="${f}"]`)!
+      )
+      await waitFor(() =>
+        expect(
+          studio
+            .calls(`GET runs/${RUN}/export`)
+            .some((c) => c.query.get("format") === f)
+        ).toBe(true)
+      )
+      await waitFor(() =>
+        expect(
+          document.querySelector<HTMLButtonElement>(
+            `[data-export-format="${f}"]`
+          )!.disabled
+        ).toBe(false)
+      )
+    }
+    expect(saved).toEqual([`${RUN}.json`, `${RUN}.jsonl`, `${RUN}.otlp.json`])
+    for (const c of studio.calls(`GET runs/${RUN}/export`)) {
+      expect(c.headers.get("Authorization")).toBe(`Bearer ${DEV}`)
+      expect([...c.query.keys()]).toEqual(["format"])
+    }
+  })
+
+  it("a read token is offered json and jsonl, not otlp; no export capability, none", async () => {
+    setStudioToken(READ)
+    serve().install()
+    const first = renderApp(`/runs/${RUN}`)
+    await waitFor(() => expect(formats()).toEqual(["json", "jsonl"]))
+    first.unmount()
+    cleanup()
+    setStudioToken("")
+    serve({ capabilities: ["requests"] }).install()
+    renderApp(`/runs/${RUN}`)
+    await screen.findByText("copy link")
+    expect(formats()).toEqual([])
+  })
+})
+
+describe("delete on the run page", () => {
+  const kids = [
+    { ...rOK, id: `${RUN}/call_1`, agent: "worker" },
+  ] as unknown as RunDoc["children"]
+
+  it("asks in an in-page dialog naming the subagent run and what stays, DELETEs, and lands on the runs list", async () => {
+    const confirmSpy = vi.fn(() => true)
+    vi.stubGlobal("confirm", confirmSpy)
+    serve({}, kids).install()
+    const { router } = renderApp(`/runs/${RUN}`)
+    fireEvent.click(await screen.findByRole("button", { name: "delete run…" }))
+    const dialog = await screen.findByRole("dialog")
+    const w = deleteConfirmWords({ id: RUN, children: kids })
+    expect(dialog.textContent).toContain(w.title)
+    expect(dialog.textContent).toContain(
+      "removed from studio's database only — the app's own conversation store is untouched"
+    )
+    expect(dialog.textContent).toContain("Its subagent run goes with it:")
+    expect(
+      dialog.querySelector(`[data-delete-child="${RUN}/call_1"]`)
+    ).toBeTruthy()
+    // Nothing is sent before the confirm.
+    expect(studio.calls(`DELETE runs/${RUN}`)).toHaveLength(0)
+    fireEvent.click(screen.getByRole("button", { name: "delete run" }))
+    await waitFor(() =>
+      expect(studio.calls(`DELETE runs/${RUN}`)).toHaveLength(1)
+    )
+    await waitFor(() => expect(router.state.location.pathname).toBe("/runs"))
+    expect(confirmSpy).not.toHaveBeenCalled()
+  })
+
+  it("cancel sends nothing; a refusal stays in the dialog in the server's words", async () => {
+    serve()
+      .on(`DELETE runs/${RUN}`, () =>
+        apiError(403, "forbidden", "deletion answers a loopback Host only")
+      )
+      .install()
+    renderApp(`/runs/${RUN}`)
+    fireEvent.click(await screen.findByRole("button", { name: "delete run…" }))
+    fireEvent.click(await screen.findByRole("button", { name: "cancel" }))
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull())
+    expect(studio.calls(`DELETE runs/${RUN}`)).toHaveLength(0)
+    fireEvent.click(screen.getByRole("button", { name: "delete run…" }))
+    fireEvent.click(await screen.findByRole("button", { name: "delete run" }))
+    expect((await screen.findByRole("alert")).textContent).toBe(
+      "delete refused: deletion answers a loopback Host only"
+    )
+  })
+
+  it("is not offered where the server refuses it: a panel token, live_all false, no capability — each says why", async () => {
+    setStudioToken(READ)
+    serve().install()
+    let r = renderApp(`/runs/${RUN}`)
+    await waitFor(() =>
+      expect(document.querySelector("[data-delete-off]")?.textContent).toBe(
+        DELETE_OFF.panel
+      )
+    )
+    expect(screen.queryByRole("button", { name: "delete run…" })).toBeNull()
+    r.unmount()
+    cleanup()
+    setStudioToken("")
+    serve({ live_all: false }).install()
+    r = renderApp(`/runs/${RUN}`)
+    await waitFor(() =>
+      expect(document.querySelector("[data-delete-off]")?.textContent).toBe(
+        DELETE_OFF.host
+      )
+    )
+    r.unmount()
+    cleanup()
+    serve({
+      capabilities: ["export"],
+      capabilities_off: { delete: "studio.NoDelete()" },
+    }).install()
+    renderApp(`/runs/${RUN}`)
+    await waitFor(() =>
+      expect(document.querySelector("[data-delete-off]")?.textContent).toBe(
+        `${DELETE_OFF.capability} — studio.NoDelete()`
+      )
+    )
+  })
+})

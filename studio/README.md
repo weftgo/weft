@@ -1479,7 +1479,7 @@ of them under the same experiment id, compare two cells on the compare page,
 or "clone into the form", which reopens the playground on a draft holding the
 matrix's form — exactly, in any browser: the experiment saves the whole
 command (engine, side effects and thread per variant, `from_step`, the source
-run, transcript edits (none from a matrix)), and only a definition saved before that is read back
+run, the transcript edits), and only a definition saved before that is read back
 from its runs. The matrix's name is free text; its id follows command_id's
 rule (`[A-Za-z0-9._:-]{1,128}`): a name that fits is its own id, any other is
 slugged with a per-page nonce, an empty one is `exp_<time>`, and a reopened
@@ -1491,9 +1491,13 @@ keeps your form as a draft in this browser once you change it. `?exp=<draft
 id>` reopens it, and the drafts list opens or deletes the others. Drafts
 never leave the browser. "Copy share link" carries the whole form in the URL
 fragment (`#state=`, no token, at most 8,000 characters encoded). It opens
-against the same Studio, restores the form, and runs nothing. A matrix runs
-every cell from its own `from_step`, the source run's step ordinal; past
-step 0 the rows' text is not sent. When its last cell settles, one toast says
+against the same Studio, restores the form, and runs nothing. The page has
+one step (U26): the source block's step picker sets the step Run and every
+matrix cell continue from (the source run's step ordinal), and the page's
+transcript edits go with each cell past step 0 — a cell is Run with its
+row's input; past step 0 the rows' text is not sent. The form's format is
+v2 (`FORM_VERSION`): a v1 share link or draft, which carried a second
+step for the matrix, is refused, never read with one step dropped. When its last cell settles, one toast says
 how many succeeded and failed, with the bill when pricing is on (an
 experiment page's "re-run all" re-reads the experiment at most three times
 for a run not yet listed, then says "cost not read yet"). A share link's
@@ -1946,7 +1950,30 @@ newest page's ids, root names, services) under `traces`, experiments
 by name under `playground` (never under a panel token, which the
 experiments routes refuse), the pages — Playground under `playground`,
 Settings (plan H4's page) — and the Studio commands; ↑↓ move, Enter
-opens, Escape closes.
+opens, Escape closes. A pasted id is looked up, never fuzzy-matched
+(U26; `src/lib/finder.ts`): one word of four characters or more is an id
+prefix (`GET /api/runs?id_prefix=…&all=1`, subagent children included),
+`pub_…` a public id, `key=value` a tag, and their runs rank first under
+**Exact match** — Enter opens the first; every other item matches by
+contiguous substrings of its words (never a subsequence), so text that
+matches nothing opens nothing. A run's metadata pairs are keywords: a
+scenario tag's value finds the loaded runs it labels.
+
+The run page's header carries the API's run verbs (U26;
+`src/lib/run-actions.ts`): **export json · jsonl · otlp** beside save as
+test (capability `export`; each a download through
+`GET /api/runs/{id}/export?format=` with the bearer — the route serves
+those four formats and no other, `xml` is a 400; a read-scoped token is
+offered json and jsonl, otlp carrying the request records), and **delete
+run…** (capability `delete`), which asks first in an in-page dialog
+naming the subagent runs that go with it and saying the rows leave
+Studio's database only, the app's conversation store untouched; it is
+offered where the server answers it — the dev token, or a loopback Host
+with no token (meta `live_all`, the same rule) — and elsewhere one faint
+line says why. The Agents page titles every policy chip with what it
+does and the option that set it (`src/lib/policy.ts`), `stop_when`
+("stops when output_submitted") and `usage_limit` ("usage ≤ 25.0k in")
+included.
 
 Every view is a URL (plan G2): each piece of page state lives in a
 search param, built and read through `src/lib/links.ts`. A cursor move

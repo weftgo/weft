@@ -54,4 +54,37 @@ describe("AgentCard", () => {
 
     expect(screen.getByText("subagent: researcher")).toBeTruthy()
   })
+
+  it("shows stop_when and usage_limit, and titles every policy chip with what it does (U26)", () => {
+    render(
+      <AgentCard
+        agent={{
+          ...agent,
+          policy: {
+            ...agent.policy,
+            detect_loops: 5,
+            stop_when: ["output_submitted"],
+            usage_limit: { input_tokens: 25_000 },
+          },
+        }}
+      />
+    )
+    const chip = (key: string) =>
+      document.querySelector<HTMLElement>(`[data-policy-chip="${key}"]`)!
+    expect(chip("stop_when").title).toMatch(/StopWhen/)
+    expect(screen.getByText("stops when output_submitted")).toBeTruthy()
+    expect(screen.getByText("usage ≤ 25.0k in")).toBeTruthy()
+    expect(chip("usage_limit").title).toMatch(/ErrUsageLimit/)
+    expect(screen.getByText("cap 64 KiB")).toBeTruthy()
+    expect(chip("max_result_bytes").title).toMatch(/65,536 bytes is cut/)
+    expect(screen.getByText("retries 3")).toBeTruthy()
+    expect(chip("max_model_retries").title).toMatch(
+      /consecutive RETRY results one tool may return/
+    )
+    expect(chip("detect_loops").title).toMatch(/ErrLoopDetected/)
+    for (const el of document.querySelectorAll<HTMLElement>(
+      "[data-policy-chip]"
+    ))
+      expect(el.title).not.toBe("")
+  })
 })

@@ -1,8 +1,9 @@
 // Plan F5 on the playground: the form as a value — a share link
 // (#state=) restores it on a fresh page without running anything, a
 // draft (?exp=) survives a remount, the variants are renamed,
-// duplicated and removed, the matrix runs from one from_step with each
-// cell's address in its command id, and its toast says the bill.
+// duplicated and removed, the matrix runs from the page's one step
+// (U26: the source block's picker, Run's too) with the page's edits and
+// each cell's address in its command id, and its toast says the bill.
 import {
   cleanup,
   configure,
@@ -110,9 +111,10 @@ const variantButtons = () =>
   ].map((b) => b.textContent)
 
 const shared: FormState = {
-  v: 1,
+  v: 2,
   agent: "orders",
   run: "r_ok",
+  step: 1,
   variants: [
     { key: "A", instructions: "You are careful.", tools_off: ["refund"] },
     {
@@ -125,7 +127,6 @@ const shared: FormState = {
   ],
   matrix: {
     name: "exp_shared",
-    from_step: 1,
     inputs: [
       { key: "1", text: "hello" },
       { key: "3", text: "bye" },
@@ -162,9 +163,13 @@ describe("the share link (#state=)", () => {
     expect(
       screen.getByLabelText<HTMLInputElement>("experiment name").value
     ).toBe("exp_shared")
-    expect(
-      screen.getByLabelText<HTMLInputElement>("matrix from step").value
-    ).toBe("1")
+    // One step for the page (U26): the matrix has no picker of its own.
+    expect(screen.queryByLabelText("matrix from step")).toBeNull()
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-matrix-from-step]")?.textContent
+      ).toMatch(/^every cell continues r_ok from step 1 /)
+    )
     expect(screen.getByLabelText<HTMLInputElement>("input 1").value).toBe(
       "hello"
     )
@@ -203,7 +208,7 @@ describe("the share link (#state=)", () => {
     expect(url.hash).toMatch(/^#state=[zj][A-Za-z0-9_-]+$/)
     expect(input.value).not.toMatch(/token/i)
     expect(await decodeForm(url.hash.slice("#state=".length))).toEqual({
-      v: 1,
+      v: 2,
       run: "r_ok",
       variants: [{ key: "A", instructions: "Answer in one line." }],
       matrix: { inputs: [{ key: "1", text: "where is 7?" }] },
@@ -340,12 +345,12 @@ describe("the variants' verbs", () => {
 })
 
 describe("the matrix (plan F5)", () => {
-  it("runs every cell from its from_step, each cell's address in its command id, and keeps the form it ran", async () => {
+  it("runs every cell from the page's one step, each cell's address in its command id, and keeps the form it ran", async () => {
     let n = 0
     studio
       .on("POST experiments", (req) => req.body)
       .on("POST playground/runs", () => command(`cmd_m${++n}`, "queued"))
-    renderApp("/playground?run=r_ok")
+    renderApp("/playground?run=r_ok&step=2")
     await waitFor(() =>
       expect(valueOf(screen.getByLabelText("agent"))).toBe("orders")
     )
@@ -353,11 +358,9 @@ describe("the matrix (plan F5)", () => {
     fireEvent.change(screen.getByLabelText("experiment name"), {
       target: { value: "exp_step" },
     })
-    fireEvent.change(screen.getByLabelText("matrix from step"), {
-      target: { value: "2" },
-    })
+    expect(screen.queryByLabelText("matrix from step")).toBeNull()
     expect(document.querySelector("[data-matrix-from-step]")?.textContent).toBe(
-      "every cell continues r_ok from step 2; the rows' text is not sent past step 0"
+      "every cell continues r_ok from step 2 (the page's step, picked above); the rows' text is not sent past step 0"
     )
     const go = screen.getByRole("button", { name: "Run matrix" })
     await waitFor(() => expect(go).toHaveProperty("disabled", false))
@@ -387,9 +390,9 @@ describe("the matrix (plan F5)", () => {
     expect(kept.matrix).toEqual({
       name: "exp_step",
       id: "exp_step",
-      from_step: 2,
       inputs: [{ key: "1", text: "" }],
     })
+    expect(kept.step).toBe(2)
     // The definition saves the whole command (F5.1).
     expect(studio.calls("POST experiments")[0].body).toMatchObject({
       id: "exp_step",

@@ -181,6 +181,12 @@ func runWhere(q obsdb.RunQuery, now time.Time) (string, []any) {
 		conds = append(conds, "error_type = ?")
 		args = append(args, q.ErrorType)
 	}
+	if q.IDPrefix != "" {
+		// A prefix by substr (no LIKE wildcard, no case folding); the
+		// lower bound lets the planner range-scan the primary key.
+		conds = append(conds, "run_id >= ? AND substr(run_id, 1, length(?)) = ?")
+		args = append(args, q.IDPrefix, q.IDPrefix, q.IDPrefix)
+	}
 	if q.StoppedBy != "" {
 		cond, cargs := stoppedByCond(q.StoppedBy)
 		conds = append(conds, cond)

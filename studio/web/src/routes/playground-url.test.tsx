@@ -468,24 +468,24 @@ describe("the playground's hand-off edits and run controls (final web review)", 
     expect(document.querySelector("[data-matrix-read-only]")).toBeTruthy()
   })
 
-  it("the matrix says it runs from step 0 when the page holds a later step or edits", async () => {
-    const line = () => document.querySelector("[data-matrix-from-step-0]")
+  it("one step for the page (U26): the matrix runs from Run's step with the page's edits, and says so", async () => {
+    const line = () => document.querySelector("[data-matrix-from-step]")
     renderApp("/playground?run=r_ok")
     await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
     await screen.findByRole("button", { name: "Run matrix" })
     expect(line()).toBeNull()
-    renderApp("/playground#run=r_ok&step=2")
+    expect(screen.queryByLabelText("matrix from step")).toBeNull()
+    expect(document.querySelectorAll("[data-step-picker]")).toHaveLength(1)
+    renderApp(
+      `/playground#run=r_ok&step=2&edits=${encodeURIComponent('[{"step":1,"callID":"c2","toolResult":"none"}]')}`
+    )
     await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
     await waitFor(() =>
       expect(line()?.textContent).toBe(
-        "the matrix runs each cell from its own step (0); Run's step and transcript edits stay with Run"
+        "every cell continues r_ok from step 2 (the page's step, picked above) with the page's transcript edit; the rows' text is not sent past step 0"
       )
     )
-    renderApp(
-      `/playground#run=r_ok&edits=${encodeURIComponent('[{"step":1,"callID":"c2","toolResult":"none"}]')}`
-    )
-    await waitFor(() => expect(valueOf(agentSelect())).toBe("orders"))
-    await waitFor(() => expect(line()).toBeTruthy())
+    expect(document.querySelectorAll("[data-step-picker]")).toHaveLength(1)
   })
 
   it("a dev token keeps Run and Run matrix", async () => {

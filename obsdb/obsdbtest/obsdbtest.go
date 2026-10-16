@@ -38,6 +38,7 @@ func Run(t *testing.T, open func(t *testing.T) obsdb.DB) {
 	t.Run("ResumeLink", resumeLink(open))
 	t.Run("Sessions", sessions(open))
 	t.Run("Children", children(open))
+	t.Run("IDPrefix", idPrefix(open))
 	t.Run("Paging", paging(open))
 	t.Run("DeltaRule", deltaRule(open))
 	t.Run("HeartbeatRule", heartbeatRule(open))
@@ -1248,6 +1249,56 @@ func children(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		all, _ := db.Runs(ctx(), obsdb.RunQuery{ParentRunID: "*"})
 		if all.Total != 2 {
 			t.Errorf("all = %d, want 2", all.Total)
+		}
+	}
+}
+
+// idPrefix: RunQuery.IDPrefix keeps the runs whose id starts with it,
+// byte for byte — no LIKE wildcard, no case folding — and composes with
+// the parent filter like any other (a child is found under "*" only).
+func idPrefix(open func(t *testing.T) obsdb.DB) func(*testing.T) {
+	return func(t *testing.T) {
+		db := open(t)
+		var recs []obsdb.Record
+		for _, id := range []string{"1c06797fab", "1c06797fcd", "1c0679", "1C06797fef", "1c_6797f", "2c06797f"} {
+			recs = append(recs, record(id, "event", "run_start", 0, `{"type":"run_start","id":"`+id+`"}`, nil))
+		}
+		recs = append(recs, record("1c06797fkid", "event", "run_start", 0, `{"type":"run_start","id":"1c06797fkid"}`,
+			map[string]any{"weft.parent.run.id": "2c06797f", "weft.parent.call.id": "call_1"}))
+		if err := db.Write(ctx(), obsdb.Batch{Records: recs}); err != nil {
+			t.Fatal(err)
+		}
+		ids := func(q obsdb.RunQuery) []string {
+			t.Helper()
+			page, err := db.Runs(ctx(), q)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var out []string
+			for _, r := range page.Runs {
+				out = append(out, r.ID)
+			}
+			if page.Total != len(out) {
+				t.Errorf("%+v: total %d, %d rows", q, page.Total, len(out))
+			}
+			sort.Strings(out)
+			return out
+		}
+		for _, c := range []struct {
+			q    obsdb.RunQuery
+			want string
+		}{
+			{obsdb.RunQuery{IDPrefix: "1c06797f"}, "1c06797fab 1c06797fcd"},
+			{obsdb.RunQuery{IDPrefix: "1c06797f", ParentRunID: "*"}, "1c06797fab 1c06797fcd 1c06797fkid"},
+			{obsdb.RunQuery{IDPrefix: "1c06797fab"}, "1c06797fab"},
+			{obsdb.RunQuery{IDPrefix: "1c_6"}, "1c_6797f"},
+			{obsdb.RunQuery{IDPrefix: "1c%"}, ""},
+			{obsdb.RunQuery{IDPrefix: "1C"}, "1C06797fef"},
+			{obsdb.RunQuery{IDPrefix: "1c06797fzz"}, ""},
+		} {
+			if got := strings.Join(ids(c.q), " "); got != c.want {
+				t.Errorf("%+v = %q, want %q", c.q, got, c.want)
+			}
 		}
 	}
 }

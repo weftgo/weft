@@ -32,6 +32,7 @@ import {
 import { CopyButton } from "@/components/studio/codewin"
 import { RunCost, UnpricedNote, useCostCapable } from "@/components/studio/cost"
 import { SaveAsTest } from "@/components/studio/saves"
+import { DeleteRun, ExportVerbs } from "@/components/studio/run-actions"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import {
   StatusChip,
@@ -510,10 +511,13 @@ export function RunHeader({
         ) : null}
         <ReplayOf doc={doc} />
         <CompareWith doc={doc} />
-        <span className="ml-auto flex items-center gap-2">
+        <span className="ml-auto flex flex-wrap items-center gap-2">
           <OpenInApp doc={doc} />
           <SaveAsTest runID={doc.id} derived={isDerived(doc)} />
+          {/* The run's other downloads and its delete (U26). */}
+          <ExportVerbs runID={doc.id} />
           <CopyLink />
+          <DeleteRun doc={doc} />
         </span>
       </div>
 

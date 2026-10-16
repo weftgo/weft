@@ -23,7 +23,7 @@
 //                    openPanelLive — POST live-grant, then new EventSource
 //   panel/config.ts  discoverEndpoint — GET panel-config.json (no credential at all)
 //   lib/api.ts       request()   — every fetch*/post*/put* and *Query queryFn
-//                    fetchTestExport — the wefttest zip (its own fetch: a blob, not JSON)
+//                    fetchExport — a run's download, fetchTestExport its zip (a blob, not JSON)
 //   lib/live.ts      openLive    — POST live-grant (requestLiveGrant), then new EventSource
 import { readdirSync, readFileSync, statSync } from "node:fs"
 import { join, relative, resolve } from "node:path"
@@ -170,6 +170,8 @@ describe("no client request carries the token in a URL", () => {
         (api.metaQuery().queryFn as () => unknown)()
       )
       await drive("fetchTestExport", () => api.fetchTestExport("r/1"))
+      await drive("fetchExport", () => api.fetchExport("r/1", "jsonl"))
+      await drive("deleteRun", () => api.deleteRun("r/1"))
       site = "openLive"
       const live = openLive({
         selector: { run: "r1" },

@@ -10,7 +10,7 @@ import { queryOptions } from "@tanstack/react-query"
 
 import type { ContentAttrs } from "./honesty"
 import { diffPath } from "./stepdiff"
-import { dispositionName, testExportPath } from "./saves"
+import { dispositionName, exportPath } from "./saves"
 import { tokenScopeOf } from "./replay"
 import type { DiffDoc } from "./stepdiff"
 
@@ -973,6 +973,9 @@ export interface RunsFilters {
   stopped_by?: string
   /** A failed run's kind (U4), exact: max_steps, cancelled, … */
   error_type?: string
+  /** The runs whose id starts with this, byte for byte (U26: the ⌘K
+   * palette's lookup of a pasted short id). /api/runs only. */
+  id_prefix?: string
 }
 
 export function runsSearch(filters: RunsFilters): string {
@@ -994,6 +997,7 @@ export function runsSearch(filters: RunsFilters): string {
   if (filters.experiment_id) params.set("experiment_id", filters.experiment_id)
   if (filters.stopped_by) params.set("stopped_by", filters.stopped_by)
   if (filters.error_type) params.set("error_type", filters.error_type)
+  if (filters.id_prefix) params.set("id_prefix", filters.id_prefix)
   const qs = params.toString()
   return qs ? `?${qs}` : ""
 }
@@ -1705,16 +1709,21 @@ export function diffQuery(a: string, b: string) {
 // run page's "save as test" (plan F6) fetches the wefttest zip with the
 // bearer and saves it as a blob (lib/saves.ts) — never a token in a URL.
 
-/** GET /api/runs/{id}/export?format=wefttest: the zip and the
- * Content-Disposition's file name. A refusal is an ApiError carrying
- * the server's words (403 hidden to a read token, 409 a run with no
- * recorded answer). */
-export async function fetchTestExport(
-  runID: string
+/** GET /api/runs/{id}/export?format=…: the download and the
+ * Content-Disposition's file name (U26: json, jsonl and otlp beside
+ * the wefttest zip — studio/export.go serves those four and nothing
+ * else). A refusal is an ApiError carrying the server's words (403
+ * hidden to a read token for otlp and wefttest, 409 a run with no
+ * recorded answer for wefttest). */
+export async function fetchExport(
+  runID: string,
+  format: string
 ): Promise<{ blob: Blob; name: string }> {
-  const headers: Record<string, string> = { Accept: "application/zip" }
+  const headers: Record<string, string> = {
+    Accept: format === "wefttest" ? "application/zip" : "*/*",
+  }
   const res = await authorized(
-    new URL(testExportPath(runID), apiBase()).toString(),
+    new URL(exportPath(runID, format), apiBase()).toString(),
     { headers }
   )
   if (!res.ok) {
@@ -1735,9 +1744,31 @@ export async function fetchTestExport(
     blob: await res.blob(),
     name: dispositionName(
       res.headers.get("Content-Disposition"),
-      `${runID}.zip`
+      `${runID}.${format === "wefttest" ? "zip" : format}`
     ),
   }
+}
+
+/** GET /api/runs/{id}/export?format=wefttest: the zip (fetchExport). */
+export function fetchTestExport(
+  runID: string
+): Promise<{ blob: Blob; name: string }> {
+  return fetchExport(runID, "wefttest")
+}
+
+/** DELETE /api/runs/{id}'s 200 (studio/delete.go's deleteDoc). */
+export interface DeleteDoc {
+  deleted: "run" | "session"
+  run_id?: string
+  session_id?: string
+  note: string
+}
+
+/** DELETE /api/runs/{id} (capability "delete"; the dev token, or setup
+ * A's loopback with no token — every panel token is 403): the run and
+ * its subagent children, from studio's database only. */
+export function deleteRun(runID: string) {
+  return request<DeleteDoc>("DELETE", `runs/${encodeURIComponent(runID)}`)
 }
 
 /** PUT /api/agents/{name}/proposal's and DELETE's 200 (studio/proposals.go). */

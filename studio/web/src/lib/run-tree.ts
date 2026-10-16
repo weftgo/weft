@@ -206,6 +206,130 @@ export function detailSpan(
 
 const timed = (r: Span | undefined) => (r?.timed ? r : undefined)
 
+/**
+ * defaultRowSel is where the run page lands when no ?sel= or ?step=
+ * names a row (UX-A-03; arena's ltDefaultSel): where something went
+ * wrong — the first row in tree order that failed (a step, a model
+ * call, a tool, a child run; never the root, whose failure is its
+ * header's, nor an attempt a later one answered for), else a tool
+ * that never finished — then the step a failed run failed at
+ * (failedAt: lib/summarize.ts's failedAtStep), then step 0, then the
+ * first row. Read on the rows the page draws, on the scale shown.
+ */
+export function defaultRowSel(
+  rows: readonly WaterfallRow[],
+  failedAt?: number
+): string | undefined {
+  const root = rows.at(0)?.runId
+  const pick = (f: (r: WaterfallRow) => boolean) =>
+    rows.find((r) => r.parent !== undefined && r.kind !== "attempt" && f(r))
+      ?.key
+  const has = (k: string) => rows.some((r) => r.key === k)
+  return (
+    pick((r) => r.status === "error") ??
+    pick((r) => r.kind === "tool" && r.status === "never") ??
+    (failedAt !== undefined &&
+    rows.some((r) => r.key === `s${failedAt}` && r.runId === root)
+      ? `s${failedAt}`
+      : undefined) ??
+    (has("s0") ? "s0" : undefined) ??
+    rows.at(0)?.key
+  )
+}
+
+/** The drawer's kind label for a row (UX-A-05: a model call is MODEL,
+ * never TOOL). */
+export const KIND_LABEL: Record<SpanKind, string> = {
+  run: "RUN",
+  subagent: "CHILD RUN",
+  step: "STEP",
+  model: "MODEL",
+  attempt: "ATTEMPT",
+  tool: "TOOL",
+  span: "SPAN",
+}
+
+/** The drawer's lazy tabs (§6.3), in their order: ?tab= names one. */
+export const DRAWER_TABS = [
+  "request",
+  "response",
+  "tools",
+  "logs",
+  "raw",
+] as const
+export type DrawerTab = (typeof DRAWER_TABS)[number]
+export const DRAWER_TAB_LABEL: Record<DrawerTab, string> = {
+  request: "Request",
+  response: "Response",
+  tools: "Tool I/O",
+  logs: "Logs",
+  raw: "Raw OTel",
+}
+
+/** A ?tab= value the drawer knows, else undefined. */
+export function drawerTabOf(v: unknown): DrawerTab | undefined {
+  return DRAWER_TABS.find((t) => t === v)
+}
+
+/** The tab a row opens on when ?tab= names none: a model call and its
+ * attempts their request, a tool its I/O, a step and a run what they
+ * replied (the step's words and calls, a run's steps), a span its
+ * attributes. */
+export function defaultTab(kind: SpanKind | undefined): DrawerTab {
+  switch (kind) {
+    case "tool":
+      return "tools"
+    case "step":
+    case "run":
+    case "subagent":
+      return "response"
+    case "span":
+      return "raw"
+    default:
+      return "request"
+  }
+}
+
+/** The step a row belongs to, by its key and its parents' (a step, its
+ * model call, an attempt, a tool): the step row's key, or undefined. */
+export function stepRowOf(
+  key: string | undefined,
+  rows: readonly Span[]
+): Span | undefined {
+  const by = new Map(rows.map((r) => [r.key, r]))
+  for (let r = key ? by.get(key) : undefined; r; r = by.get(r.parent ?? ""))
+    if (r.kind === "step") return r
+    else if (r.kind === "run" || r.kind === "subagent") return undefined
+  return undefined
+}
+
+/** The drawer's words (§6.3): its verbs, its tabs' empty states. */
+export const DRAWER = {
+  replay: "replay from here ▸",
+  replayHint: (n: number) =>
+    `replay from step ${n}: the steps before it as recorded, step ${n} on run fresh (the experiment drawer)`,
+  edit: "edit…",
+  editHint: (n: number) => `edit step ${n}'s prompt and replay`,
+  editResult: "edit result…",
+  editResultHint: (call: string) => `edit ${call}'s result and replay`,
+  compare: "compare…",
+  compareHint: "this run beside another, step by step, landing on this step",
+  rerunChild: "replay the child ▸",
+  story: "read in the story",
+  storyHint: "the same selection as a step card (s)",
+  noRequest: "no request record for this row: the Request tab is a step's",
+  noTools: "no tool calls under this row",
+  noResponse: "nothing replied under this row",
+  noLogs: "no app log line under this row's spans",
+  logsOff:
+    "this Studio has no logs capability: the app's log lines are not served",
+  noSpan:
+    "no OTel span behind this row (the order scale, or a row no span covers): its folded events below",
+  select: "select a row in the run tree",
+  loading: "loading…",
+  jump: "▶ jump here",
+} as const
+
 /** Every run drawn expanded: the model only asks has(). */
 export const ALL_RUNS: ReadonlySet<string> = {
   has: () => true,

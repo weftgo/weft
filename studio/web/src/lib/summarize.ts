@@ -1,6 +1,8 @@
 // Event summaries: one line per wire event for the replay gutter,
 // the raw explorer and the current-event readout. Pure functions.
 import type { Message, WireEvent } from "./api"
+import { msText } from "./attempts"
+import { endCard, stopDetail, stoppedByWords, stopStep } from "./stopped-by"
 
 export type EventKind =
   | "step" // run/step boundaries
@@ -191,4 +193,195 @@ export function eventSummary(ev: WireEvent, width = 96): string {
     default:
       return short(ev, width)
   }
+}
+
+// ── The step drawer's answer (U10.1, audit §6.3) ───────────────────
+// What one step did, answer first: a verdict line, what was sent,
+// what the model replied, what the tools did, and what came next.
+// Plain data in, words out — the run page's drawer and (U10.2) the
+// panel's Story step read these, so both say the same thing.
+
+/** The run facts a step's verdict reads (a run row or document). */
+export interface AnswerRun {
+  status?: string
+  err?: string
+  stopped_by?: string
+  cancel_cause?: string
+  steps?: number
+  error_type?: string
+}
+
+/** The step facts the answer reads (a folded step). */
+export interface AnswerStep {
+  index: number
+  text?: string
+  toolCalls: {
+    name: string
+    args?: unknown
+    result?: { isError: boolean; content: string }
+    finishPos?: number
+  }[]
+  finish?: {
+    reason: string
+    usage?: { input_tokens?: number; output_tokens?: number }
+    latencyMs?: number
+    ttftMs?: number
+  }
+}
+
+/** failedAtStep is the step a failed run failed at: the one core's
+ * RunError names ("run failed at step N"), else its last step;
+ * undefined for a run that did not fail or ran no step. */
+export function failedAtStep(r: AnswerRun): number | undefined {
+  if (r.status !== "failed") return undefined
+  const at = /run failed at step (\d+)/.exec(r.err ?? "")?.[1]
+  return at !== undefined ? Number(at) : stopStep(r.steps)
+}
+
+/** The answer's line labels, in their order (§6.3). */
+export const ANSWER_LABELS = {
+  verdict: "verdict",
+  sent: "sent",
+  replied: "replied",
+  tools: "tools ran",
+  then: "then",
+} as const
+
+const count = (n: number, one: string) =>
+  `${n.toLocaleString("en-US")} ${n === 1 ? one : `${one}s`}`
+
+/** tokensWord is "30 in · 10 out" (zeros when a side is missing). */
+export function tokensWord(u?: {
+  input_tokens?: number
+  output_tokens?: number
+}): string {
+  const n = (v?: number) => (v ?? 0).toLocaleString("en-US")
+  return `${n(u?.input_tokens)} in · ${n(u?.output_tokens)} out`
+}
+
+/** A step's verdict: its words and whether it reads as a failure. */
+export interface Verdict {
+  text: string
+  bad: boolean
+}
+
+/**
+ * stepVerdict is the step's one line: where the run failed at this
+ * step, what stopped it (the stop's words and the error's detail) and
+ * what that means — the step finished and the loop's guard refused the
+ * next model call, or the step never finished; then the finish reason,
+ * its tokens, its latency and its time to first token. ms is the
+ * step's measured span, used when no step_finish latency is known.
+ */
+export function stepVerdict(
+  step: AnswerStep,
+  run: AnswerRun,
+  ms?: number
+): Verdict {
+  const parts: string[] = []
+  let bad = false
+  const f = step.finish
+  if (failedAtStep(run) === step.index) {
+    bad = true
+    const w = stoppedByWords(run.stopped_by, run.cancel_cause)
+    const d = stopDetail(run.err, run.stopped_by)
+    const why = (run.err ?? "").replace(/^weft: run failed at step \d+: /, "")
+    const head = w
+      ? `✗ ${w.word}${d ? ` (${d})` : ""}`
+      : `✗ failed${why ? `: ${clip(why, 120)}` : ""}`
+    parts.push(f ? `${head} — the loop refused step ${step.index + 1}` : head)
+  } else if (!f) {
+    bad = run.status !== "running"
+    parts.push(bad ? "no step_finish" : "running…")
+  }
+  if (f) parts.push(f.reason || "finished", tokensWord(f.usage))
+  const took = f?.latencyMs && f.latencyMs > 0 ? f.latencyMs : ms
+  if (took !== undefined && Number.isFinite(took) && took >= 0)
+    parts.push(msText(took))
+  if (f?.ttftMs && f.ttftMs > 0) parts.push(`first token ${msText(f.ttftMs)}`)
+  return { text: parts.join(" · "), bad }
+}
+
+/** What the request record says one step sent. */
+export interface SentFacts {
+  /** Messages the request carried. */
+  count: number
+  /** The previous recorded step's count: the new ones are the rest. */
+  prevCount?: number
+  /** Tools offered. */
+  tools: number
+  /** The step's marks (lib/requests.ts's byStep). */
+  promptChanged?: boolean
+  catalogChanged?: boolean
+}
+
+export const SENT_NOT_RECORDED = "— no request record for this step"
+export const SENT_UNCHANGED = "unchanged since the step before"
+
+/** sentLine is "5 messages (1 new) · 1 tool offered · unchanged since
+ * the step before" — or the marks the step carries, which the Request
+ * tab explains (its chips: changed by PrepareStep, …). */
+export function sentLine(s: SentFacts | undefined): string {
+  if (!s) return SENT_NOT_RECORDED
+  const fresh =
+    s.prevCount !== undefined && s.count >= s.prevCount
+      ? ` (${s.count - s.prevCount} new)`
+      : ""
+  const marks = [
+    s.promptChanged ? "prompt changed at this step" : "",
+    s.catalogChanged ? "catalog changed at this step" : "",
+  ].filter(Boolean)
+  return [
+    `${count(s.count, "message")}${fresh}`,
+    `${count(s.tools, "tool")} offered`,
+    marks.length
+      ? marks.join(" · ")
+      : s.prevCount !== undefined
+        ? SENT_UNCHANGED
+        : "",
+  ]
+    .filter(Boolean)
+    .join(" · ")
+}
+
+/** repliedLine is the model's reply in a line: its words, the calls it
+ * asked for, or why there is none. */
+export function repliedLine(step: AnswerStep, running = false): string {
+  const calls = step.toolCalls.map(
+    (c) => `${c.name}(${c.args === undefined ? "…" : short(c.args, 40)})`
+  )
+  const text = step.text ? `“${clip(step.text, 120)}”` : ""
+  const asked = calls.length ? `called ${calls.join(", ")}` : ""
+  if (text || asked) return [text, asked].filter(Boolean).join(" · ")
+  if (!step.finish) return running ? "— (not yet)" : "— (no reply recorded)"
+  return "— (no text, no calls)"
+}
+
+/** toolsLine is what the step's calls did: "2 ran · 1 error", "1
+ * never finished", or "none — the model called no tool". */
+export function toolsLine(step: AnswerStep, running = false): string {
+  const calls = step.toolCalls
+  if (!calls.length) return "none — the model called no tool"
+  const done = calls.filter((c) => c.finishPos !== undefined)
+  const errors = done.filter((c) => c.result?.isError).length
+  const open = calls.length - done.length
+  return [
+    `${done.length} ran`,
+    errors ? count(errors, "error") : "",
+    open ? `${open} ${running ? "running" : "never finished"}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ")
+}
+
+/** thenLine is what came after the step: the next step, or how the
+ * run ended there (lib/stopped-by.ts's end card). */
+export function thenLine(
+  step: AnswerStep,
+  run: AnswerRun,
+  hasNext: boolean
+): string {
+  if (hasNext) return `→ step ${step.index + 1}`
+  if (run.status === "running") return "running…"
+  return endCard(run) ?? `■ ${run.status || "ended"}`
 }

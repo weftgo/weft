@@ -63,12 +63,16 @@ import { editKey, impliedFromStep, putEdit, schemaOf } from "@/lib/edits"
 import type { ReplayEdit } from "@/lib/edits"
 import { replayBounds } from "@/lib/experiment-body"
 import type { ReplayLinkState, RunScale, RunSearch } from "@/lib/links"
-import { defaultSelection, flowFromFold, spansFromFold } from "@/lib/trace"
+import { failedAtStep } from "@/lib/summarize"
+import { flowFromFold, spansFromFold } from "@/lib/trace"
 import {
   ALL_RUNS,
   CHILD_CAPPED_FIX,
   childCappedReason,
+  defaultRowSel,
   detailSpan,
+  drawerTabOf,
+  stepRowOf,
   gapNote,
   expandFor,
   qualifyKey,
@@ -198,6 +202,8 @@ export const Route = createFileRoute("/runs/$id")({
         : undefined,
     sel: typeof search.sel === "string" && search.sel ? search.sel : undefined,
     d: search.d === "events" || search.d === "json" ? search.d : undefined,
+    // The drawer's tab (U10.1): round-trips; an unknown one is dropped.
+    tab: drawerTabOf(search.tab),
     // The run tree's scale (U8.2, UX-A-02: both values round-trip); a
     // pre-U8.2 link's ?axis=time|events reads as time|order.
     scale: scaleOf(search.scale) ?? scaleOf(search.axis),
@@ -893,7 +899,9 @@ function RunPage() {
     [atPlayhead, viewStatus]
   )
   // The selection: ?sel= names a row key; absent, start where
-  // something went wrong (the full fold decides, not the prefix).
+  // something went wrong (UX-A-03: on the rows the tree draws, on the
+  // scale shown — the first failed row, else the step the run failed
+  // at, else step 0).
   const fullSpans = useMemo(
     () => spansFromFold(stream.folded, stream.total, runStatus),
     [stream.folded, stream.total, runStatus]
@@ -915,8 +923,32 @@ function RunPage() {
     stepKey ??
     (derived && treeScale === "time"
       ? tree.rows[0]?.key
-      : resolveRowSel(tree.rows, defaultSelection(fullSpans)?.key, id))
+      : defaultRowSel(
+          tree.rows,
+          replaying || !run.data ? undefined : failedAtStep(run.data)
+        ))
   const selectedRow = treeRows.find((s) => s.key === selKey)
+  // The story is the read mode of the same selection (§6.3): the step
+  // the selected row is under is the card it highlights.
+  // Only a selection the URL names: the default one never scrolls the
+  // story.
+  const selStepKey = stepRowOf(selKey, treeRows)?.key
+  const selStep =
+    selStepKey && /^s\d+$/.test(selStepKey)
+      ? Number(selStepKey.slice(1))
+      : undefined
+  const namedStep = search.sel ? selStep : undefined
+  const readInStory = useCallback(
+    () =>
+      void navigate({
+        search: (prev) => ({
+          ...prev,
+          view: "story",
+          step: selStep ?? prev.step,
+        }),
+      }),
+    [navigate, selStep]
+  )
   // A derived run's fold holds no events: its rows read their spans.
   const selected = useMemo(
     () => detailSpan(selKey, treeRows, derived ? [] : posSpans),
@@ -1473,28 +1505,35 @@ function RunPage() {
                     <div className={stickyDetail}>
                       <SpanDetail
                         span={selected}
+                        row={selectedRow}
+                        rows={treeRows}
+                        folded={derived ? [] : posSpans}
                         events={stream.events}
                         base={stream.base}
                         doc={doc}
                         runStatus={viewStatus}
                         timed={timed}
                         playhead={scale === "order" ? ph : null}
-                        mode={search.d ?? "detail"}
-                        onMode={(m) =>
+                        // A pre-U10.1 ?d=events|json reads as Raw OTel.
+                        tab={search.tab ?? (search.d ? "raw" : undefined)}
+                        onTab={(t) =>
                           void navigate({
                             search: (prev) => ({
                               ...prev,
-                              d: m === "detail" ? undefined : m,
+                              tab: t,
+                              d: undefined,
                             }),
                             replace: true,
                           })
                         }
                         onJump={jump}
+                        onStory={derived ? undefined : readInStory}
                         requests={requests}
+                        maxFrom={maxFrom}
                       />
                     </div>
                   </div>
-                  {selKey && !selectedRow ? (
+                  {replaying && selKey && !selectedRow ? (
                     <p className="font-mono text-[11px] text-faint">
                       the selected row ({selKey}) is past the playhead — play
                       forward or press End for live
@@ -1513,7 +1552,7 @@ function RunPage() {
                   atPlayhead={atPlayhead}
                   doc={doc}
                   upTo={scale === "order" ? (ph ?? undefined) : undefined}
-                  highlight={search.step}
+                  highlight={search.step ?? namedStep}
                   pane={search.step === undefined ? undefined : search.pane}
                   onJump={evicted ? undefined : jump}
                   requests={requests}

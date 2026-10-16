@@ -262,11 +262,16 @@ describe("the run page's request section (A1.4)", () => {
 
   it("the waterfall's step detail shows the same request", async () => {
     serve("ok")
-    renderApp(`/runs/${RUN}?sel=s1`)
+    // The drawer's Request tab (U10.1: a step opens on its reply; its
+    // sent line names the marks, the tab the chips).
+    renderApp(`/runs/${RUN}?sel=s1&tab=request`)
     await waitFor(() =>
       expect(screen.getByText("prompt changed at this step")).toBeTruthy()
     )
     expect(screen.getByText("catalog changed at this step")).toBeTruthy()
+    expect(
+      document.querySelector('[data-answer-line="sent"]')?.textContent
+    ).toContain("prompt changed at this step · catalog changed at this step")
   })
 })
 

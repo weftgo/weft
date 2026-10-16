@@ -1683,9 +1683,36 @@ here), each edge its call count and slowest call (the slowest, not a
 percentile; no cost on nodes), a self-call a loop over its node; a node
 selects its first run's row and the selected row lights its node —
 switching scales keeps the selection. Pool children are sessions, not
-runs of the trace: not drawn. A row's detail reads the fold's step, call or run where
-the fold has one (the story's bodies), a model call or any other span its
-span's facts. "trace" names the `/traces` page only. In the story,
+runs of the trace: not drawn. The selected row opens the drawer beside
+the tree, answer first (U10.1, audit §6.3): its kind label (RUN, STEP,
+MODEL, ATTEMPT, TOOL, CHILD RUN, SPAN), the verbs drawn with their words
+— **replay from here ▸**, **edit…** (the prompt, or a tool row's result),
+**compare…** (`/compare` landing on the step; capability `diff`), the
+child row's **replay the child ▸** — hidden, not disabled, without the
+playground or under a read token; then, for a step of the run or its
+model call, attempt or tool, the answer lines from `src/lib/summarize.ts`:
+**verdict** (where the run failed at this step, its stop and the error's
+detail — "✗ usage limit reached (input 300/250, output 150/250) — the
+loop refused step 3" — then finish, tokens, latency, first token),
+**sent** (messages, how many new, tools offered, the record's
+changed-at-this-step marks), **replied**, **tools ran**, **then** (the
+next step, or the run's end card); then the row's facts (a model call's
+who-answered and attempts, a tool's failure kind). Below, the lazy tabs
+**Request · Response · Tool I/O · Logs · Raw OTel** — only the open one
+is drawn; Logs reads `runs/{id}/logs` when it opens and lists the lines
+under the row's spans (the route's `not_recorded` hint for a run without
+`otel.Slog()`); Raw OTel holds the span's attributes and events (and, for
+a row the fold holds, its slice of the event stream and the folded node).
+`?tab=` names the open tab (absent: a step or run its Response, a model
+call its Request, a tool its Tool I/O; a pre-U10.1 `?d=` reads as Raw
+OTel). With no `?sel=`/`?step=` the page lands where something went
+wrong (UX-A-03): the first failed row (never the root, never an attempt),
+else a tool that never finished, else the step a failed run failed at
+("run failed at step N"), else step 0 — on the scale shown; "past the
+playhead" is said only while replaying. **read in the story** opens the
+story on the selection's step: the story is the read mode of the same
+selection (a `?sel=` names the card it highlights). "trace" names the
+`/traces` page only. In the story,
 subagent children sit as nested rows under the step
 that called them (agent, status, usage, holes, a link) and expand
 lazily — their events and their request record (the child's prompt,

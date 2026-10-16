@@ -56,8 +56,12 @@ export interface RunSearch {
    * rowKeys): r:<run>, s<step>, s<step>:m, c:<step>:<call id>
    * (c:resume:<call id> for a resumed call), t:<span id>. */
   sel?: string
-  /** The detail panel's mode (waterfall view). */
+  /** A pre-U10.1 detail mode (waterfall view): read as tab=raw, never
+   * written. */
   d?: "events" | "json"
+  /** The drawer's open tab (waterfall view, U10.1; lib/run-tree.ts's
+   * DRAWER_TABS): absent, the selected row's default. */
+  tab?: "request" | "response" | "tools" | "logs" | "raw"
   /** The run tree's scale: time (spans) or order (positions, replay), or graph.
    * A pre-U8.2 ?axis=time|events is read as time|order, never written. */
   scale?: RunScale

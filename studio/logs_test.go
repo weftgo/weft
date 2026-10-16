@@ -17,11 +17,22 @@ import (
 // fixture database: r_ok's two app log lines in time order, each with
 // its index, severity name and number, body, attributes and span; the
 // page, the severity filter that keeps indexes, the bad parameters, a
-// run with spans and no logs (empty, no badge), a run with no span
+// run with spans and no logs recorded with no slog bridge (the
+// not_recorded hint naming otel.Slog(), U11.1), a bridged run that
+// logged nothing (empty, no badge), a run with no span
 // (the not_recorded badge with this route's reason and the tracer
 // fix) and an unknown run (404).
 func TestLogsRoute(t *testing.T) {
-	h := Handler(DB(fixtureDB(t)))
+	db := fixtureDB(t)
+	// r_quiet: a run recorded with the slog bridge on (its root span
+	// carries weft.logs.bridged) that logged nothing.
+	quiet := fxSpanRec("r_quiet", fixtureT0.Add(time.Hour), fixtureT0.Add(time.Hour+time.Second), 1, "", 1, 1)
+	quiet.TraceID, quiet.SpanID = "0f0e0d0c0b0a09080706050403020100", "0f0e0d0c0b0a0908"
+	quiet.Attrs["weft.logs.bridged"] = int64(0)
+	if err := db.Write(context.Background(), obsdb.Batch{Spans: []obsdb.Span{quiet}}); err != nil {
+		t.Fatal(err)
+	}
+	h := Handler(DB(db))
 
 	code, _, body := get(t, h, "/studio/api/runs/r_ok/logs")
 	if code != http.StatusOK {
@@ -63,10 +74,20 @@ func TestLogsRoute(t *testing.T) {
 		}
 	}
 
-	// r_fail has a span and logged nothing: empty, no badge.
+	// r_fail has a span, no line and no bridge mark: the hint names
+	// the fix (otel.Slog()), never "the app logged nothing".
 	code, _, body = get(t, h, "/studio/api/runs/r_fail/logs")
+	if code != http.StatusOK {
+		t.Fatalf("r_fail logs: %d %s", code, body)
+	}
+	golden(t, "logs-no-bridge.golden.json", body)
+	if !strings.HasPrefix(body, `{"logs":[]`) || !strings.Contains(body, `"badge":"not_recorded"`) || !strings.Contains(body, "otel.Slog()") {
+		t.Errorf("r_fail logs = %s, want an empty list with the not_recorded hint naming otel.Slog()", body)
+	}
+	// r_quiet was bridged and logged nothing: empty, no badge.
+	code, _, body = get(t, h, "/studio/api/runs/r_quiet/logs")
 	if code != http.StatusOK || strings.Contains(body, "badge") || !strings.HasPrefix(body, `{"logs":[]`) || !strings.Contains(body, `"holes":[]`) {
-		t.Errorf("r_fail logs = %d %s, want an empty list without a badge", code, body)
+		t.Errorf("r_quiet logs = %d %s, want an empty list without a badge", code, body)
 	}
 	// r_stale was recorded without a tracer: nothing to attribute
 	// through.

@@ -50,6 +50,10 @@ type logRow struct {
 // the step route's shape ({hole, reason, fix?}); [] when none:
 //
 //   - not_recorded: the run has no span to attribute logs through;
+//     or (obsdb.LogPage.NoBridge) its root span is stored without
+//     weft.logs.bridged and no line is attributed to it — the app's
+//     slog was not bridged, the reason and fix name otel.Slog() (U11.1:
+//     the hint, never a loss);
 //   - truncated: the run's traces hold more than obsdb.MaxLogCandidates
 //     log lines in its window — the cap applies before attribution, so
 //     a flooding subagent or sibling counts — and later lines of this
@@ -100,6 +104,14 @@ const logsPartialReason = "spans are exported when they end: lines under in-flig
 // logsNoSpansReason words the not_recorded hole of a run with no span:
 // HoleNote's own reason is the request record's.
 const logsNoSpansReason = "the run was recorded without a tracer: app logs are attributed to a run through the spans they were emitted under, and this run stored none"
+
+// logsNoBridgeReason and logsNoBridgeFix word the not_recorded hint of
+// a run whose app slog was not bridged (obsdb.LogPage.NoBridge): the
+// empty page's cause, so it never reads "the app logged nothing".
+const (
+	logsNoBridgeReason = "no app logs: the app's slog isn't bridged — its log lines (its own, weft.Logger's, mw.Log's and mw.Audit's) never reached the pipeline (the run's root span carries no weft.logs.bridged)"
+	logsNoBridgeFix    = "bridge slog: otel.Install(…, otel.Slog()), or log through slog.New(otel.SlogHandler(h))"
+)
 
 // mayReadLogs refuses a read-scoped panel token (readsPrompts): 403 in
 // the error shape, with the hidden badge so the panel renders the hole.
@@ -186,6 +198,9 @@ func (s *Server) serveRunLogs(w http.ResponseWriter, r *http.Request, id string)
 	}
 	if page.Gap > 0 {
 		holes.add(obsdb.HoleGap, gapReason(page.Gap), holeFix(obsdb.HoleGap))
+	}
+	if page.NoBridge {
+		holes.add(obsdb.HoleNotRecorded, logsNoBridgeReason, logsNoBridgeFix)
 	}
 	out.setHoles(holes.list())
 	if page.Partial {

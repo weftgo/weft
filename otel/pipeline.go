@@ -51,6 +51,7 @@ type Pipeline struct {
 	studioToken string
 
 	tracker  *runTracker
+	bridge   bridgeState // the slog bridge (slog.go)
 	beatMu   sync.Mutex
 	beatStop chan struct{}
 	beatDone chan struct{}
@@ -150,6 +151,11 @@ func (p *Pipeline) Shutdown(ctx context.Context) error {
 		}
 	}
 	defer close(p.closed)
+	// The default logger first (Slog): the program's lines go back to
+	// where they went before, while every destination is still open.
+	if p.bridge.restore != nil {
+		p.bridge.restore()
+	}
 	// The package accessors stop handing this pipeline out first: a
 	// LocalDB() after shutdown is nil, not a closed database.
 	installedMu.Lock()
@@ -260,6 +266,9 @@ func Start(ctx context.Context, opts ...Option) (*Pipeline, error) {
 	}
 	if !cfg.noGlobal {
 		registerGlobals(p)
+		if cfg.slog {
+			p.installSlog()
+		}
 	}
 	return p, nil
 }
@@ -441,7 +450,7 @@ func build(ctx context.Context, cfg config, dests []dest) (p *Pipeline, failed e
 	}
 	var spanProcs []sdktrace.SpanProcessor
 	var logProcs []sdklog.Processor
-	spanProcs = append(spanProcs, &trackerSpanProc{t: p.tracker})
+	spanProcs = append(spanProcs, &trackerSpanProc{t: p.tracker}, bridgeSpanProc{p: p})
 	logProcs = append(logProcs, p.tracker)
 
 	var built []*destRuntime
@@ -489,6 +498,7 @@ func build(ctx context.Context, cfg config, dests []dest) (p *Pipeline, failed e
 		lpOpts = append(lpOpts, sdklog.WithProcessor(lp))
 	}
 	p.lp = &LoggerProvider{LoggerProvider: sdklog.NewLoggerProvider(lpOpts...), raw: cfg.rawBodies}
+	p.bridge.logger = p.lp.Logger(bridgeScope)
 	p.startHeartbeat()
 	return p, nil
 }
@@ -557,7 +567,7 @@ func buildDest(ctx context.Context, d dest, cfg config) (_ *destRuntime, err err
 			rt.logProc = &destProc{
 				name: d.name, inner: sdklog.NewSimpleProcessor(&localLogExporter{db: db, drops: drops}),
 				content: content, contentC: contentCfg, noDeltas: d.noDeltas, drops: drops,
-				raw: cfg.rawBodies && d.rawOn(),
+				raw: cfg.rawBodies && d.rawOn(), appLogs: d.appLogsOn(),
 			}
 		}
 	case destStudio, destDatadog, destLangfuse, destOTLP:
@@ -627,7 +637,7 @@ func buildDest(ctx context.Context, d dest, cfg config) (_ *destRuntime, err err
 		inner, adm := newAdmittedLogBatch(exp, queue, d.blocking, drops, batch...)
 		rt.logProc = &destProc{name: d.name, inner: inner,
 			content: content, contentC: contentCfg, noDeltas: d.noDeltas, drops: drops,
-			raw: cfg.rawBodies && d.rawOn(), adm: adm}
+			raw: cfg.rawBodies && d.rawOn(), adm: adm, appLogs: d.appLogsOn()}
 	}
 	if rt.spanProc == nil && rt.logProc == nil {
 		return nil, errors.New("neither signal enabled")
@@ -851,7 +861,7 @@ func (p *Pipeline) startHeartbeat() {
 					return
 				default:
 				}
-				heartbeats(context.Background(), logger, p.tracker, stop)
+				heartbeats(context.Background(), logger, p.tracker, stop, p.bridged)
 			}
 		}
 	}()

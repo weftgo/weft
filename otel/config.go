@@ -24,6 +24,9 @@ type config struct {
 	// rawBodies is RawBodies' ask; Start keeps it only under
 	// WEFT_ENV=dev (and never under NoEnv), else one WARN and off.
 	rawBodies bool
+	// slog is Slog's ask: wrap slog.Default with the bridge once the
+	// globals are registered (never under NoGlobal).
+	slog bool
 }
 
 type destKind int
@@ -59,6 +62,8 @@ type dest struct {
 	// blocking is Blocking's, kept by Start only under WEFT_ENV=dev.
 	queueSize int
 	blocking  bool
+	// appLogs is AppLogs' ask (nil: the kind's default, appLogsOn).
+	appLogs *bool
 }
 
 func newDest(kind destKind, name string) dest {
@@ -86,6 +91,17 @@ func (d dest) contentDefault() bool {
 // when the pipeline's RawBodies is in force: Local and Studio with
 // content on, never a third party whatever its content setting.
 func (d dest) rawOn() bool {
+	return (d.kind == destLocal || d.kind == destStudio) && d.contentOn()
+}
+
+// appLogsOn is whether this destination takes the slog bridge's app
+// log records (AppLogs): AppLogs' answer when given, else Local and
+// Studio with content on — an app log may carry anything, prompts
+// included, so a third party never gets one by default.
+func (d dest) appLogsOn() bool {
+	if d.appLogs != nil {
+		return *d.appLogs
+	}
 	return (d.kind == destLocal || d.kind == destStudio) && d.contentOn()
 }
 

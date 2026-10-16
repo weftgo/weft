@@ -517,6 +517,14 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //                               // wire request/response as a weft.raw record, Local/Studio only, credentials stripped, 256 KiB per body (ADR 0028 §12)
 //    )()
 //    p, err := otel.Start(ctx, opts...)               // Install with errors; otel.NoGlobal() for tests
+//    // + otel.Slog() (an Install option, U11.1): slog.Default bridged — every line logged on a
+//    //   span-carrying context (weft.Logger's Debug run lines, mw.Log, mw.Audit, the app's own) is an
+//    //   app log record under that span (scope github.com/weftgo/weft/otel/slog, severity level+9,
+//    //   groups flattened "a.b"), restored at shutdown; otel.SlogHandler(next) bridges any handler
+//    //   (follows the installed pipeline), p.SlogHandler(next) one pipeline; per destination
+//    //   otel.AppLogs(on) — default Local/Studio with content on, a third party only opted in;
+//    //   weft.logs.bridged (count) on heartbeats and each invoke_agent span; GET runs/{id}/logs
+//    //   of a run without it (and no line) holds the not_recorded hint naming otel.Slog()
 //    otel.LocalDB()   // the installed pipeline's obsdb.DB (nil without a Local destination)
 //    otel.StudioEndpoint()  // the Studio destination weft/runtime dials
 //    studio.Handler(studio.DB(otel.LocalDB()))  // setup A (block 7): the Inspector over the

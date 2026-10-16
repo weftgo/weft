@@ -1686,6 +1686,10 @@ var contractKeys = []string{
 	// decisions per parked call, a denied call's span marks (migration
 	// 0019's restatement of both views).
 	"weft.resumed_from", "weft.resume.calls", "weft.tool.denied", "weft.tool.denied_kind",
+	// U11.1: the slog bridge's count — on the heartbeat (the logs view)
+	// and a run's invoke_agent span (the traces view) — the logs route's
+	// hint, never metadata (migration 0021's restatement of both views).
+	"weft.logs.bridged",
 }
 
 // unmarshalAttrs decodes a JSON column keeping integral numbers as

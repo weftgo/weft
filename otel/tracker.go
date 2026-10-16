@@ -42,7 +42,10 @@ var _ sdktrace.SpanProcessor = (*trackerSpanProc)(nil)
 func (t *runTracker) Enabled(_ context.Context, param sdklog.EnabledParameters) bool {
 	// weft.raw too: only a destination's chain may ask for wire bodies
 	// (RawBodies), never the tracker on every pipeline's behalf.
-	return !contentEvent(param.EventName) && param.EventName != eventNameRaw
+	// The slog bridge's lines neither: they name no run (an app log is
+	// attributed through its span, never tracked).
+	return !contentEvent(param.EventName) && param.EventName != eventNameRaw &&
+		param.InstrumentationScope.Name != bridgeScope
 }
 
 func (t *runTracker) OnEmit(_ context.Context, r *sdklog.Record) error {
@@ -183,7 +186,10 @@ func isInvokeAgentName(name string) bool {
 // stop ends the pass before its next record: each emit may be a
 // synchronous write (the Local sink) queued behind every run's, and
 // Shutdown waits for this goroutine.
-func heartbeats(ctx context.Context, emit log.Logger, t *runTracker, stop <-chan struct{}) {
+//
+// bridged is the pipeline's slog bridge count (Pipeline.bridged): with
+// a bridge, every heartbeat carries weft.logs.bridged.
+func heartbeats(ctx context.Context, emit log.Logger, t *runTracker, stop <-chan struct{}, bridged func() (int64, bool)) {
 	for runID, meta := range t.snapshot() {
 		select {
 		case <-stop:
@@ -200,7 +206,31 @@ func heartbeats(ctx context.Context, emit log.Logger, t *runTracker, stop <-chan
 		for k, v := range meta {
 			attrs = append(attrs, attribute.String(k, v))
 		}
+		if bridged != nil {
+			if n, ok := bridged(); ok {
+				attrs = append(attrs, attribute.Int64(attrLogsBridged, n))
+			}
+		}
 		r.AddAttributes(attrs...)
 		emit.Emit(ctx, r)
 	}
 }
+
+// bridgeSpanProc stamps weft.logs.bridged on every run's invoke_agent
+// span as it starts, while the pipeline has a slog bridge: the durable
+// mark the logs route reads (obsdb.LogPage.NoBridge) — a stored root
+// without it ran with no bridge, so an empty logs page says why.
+type bridgeSpanProc struct{ p *Pipeline }
+
+func (b bridgeSpanProc) OnStart(_ context.Context, s sdktrace.ReadWriteSpan) {
+	if !isInvokeAgentName(s.Name()) {
+		return
+	}
+	if n, ok := b.p.bridged(); ok {
+		s.SetAttributes(attribute.Int64(attrLogsBridged, n))
+	}
+}
+
+func (bridgeSpanProc) OnEnd(sdktrace.ReadOnlySpan)      {}
+func (bridgeSpanProc) Shutdown(context.Context) error   { return nil }
+func (bridgeSpanProc) ForceFlush(context.Context) error { return nil }

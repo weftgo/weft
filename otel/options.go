@@ -331,3 +331,17 @@ func QueueSize(n int) DestOption {
 func Blocking() DestOption {
 	return destOptionFunc(func(d *dest) { d.blocking = true })
 }
+
+// AppLogs says whether this destination takes the slog bridge's app
+// log records (Slog, SlogHandler): on by default for Local and Studio
+// with content on, off for Datadog, Langfuse, OTLP and Exporters — and
+// for a Local or Studio destination under NoContent — because an app's
+// log lines may carry anything it logged, prompts included. AppLogs(true)
+// is the opt-in: the lines go as logged, whatever the destination's
+// content setting (the content policy shapes weft's records, not the
+// app's). AppLogs(false) keeps them from a Local or Studio destination.
+// Records the app emits through the OTel Logs API itself are not the
+// bridge's and are not governed by it.
+func AppLogs(on bool) DestOption {
+	return destOptionFunc(func(d *dest) { d.appLogs = &on })
+}

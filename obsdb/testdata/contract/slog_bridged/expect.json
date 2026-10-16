@@ -1,0 +1,72 @@
+{
+  "case": "slog_bridged",
+  "description": "the tool_calls run with the slog bridge on (otel.SlogHandler bound to the pipeline, the OTLP destination opted in with otel.AppLogs(true)): mw.Log's two lines per model call under each chat span and the tool handler's WARN under its execute_tool span arrive as app log records — no weft.run.id, attributed to the run through their spans (§4's app log records), severity DEBUG 5 / WARN 13, attributes flattened; a line logged outside any span is not bridged. The root span carries weft.logs.bridged (int, the lines bridged before the run began: 0) — the logs route's mark, not metadata (meta omits it); the row is tool_calls' own. The generator sets mw.Log's measured dur to 1ms",
+  "runs": [
+    {
+      "id": "a1100000000000000000000000000001",
+      "trace_id": "7ace0000000000000000000000000001",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:24:00Z",
+      "finished": "2026-10-01T09:24:00.016Z",
+      "last_seen": "2026-10-01T09:24:00.016Z",
+      "status": "succeeded",
+      "steps": 2,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "event_count": 8,
+      "message_count": 4,
+      "delta_count": 1,
+      "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "catalog_hash": "d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8",
+      "request_count": 2,
+      "events_emitted": 8,
+      "messages_emitted": 4,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        },
+        {
+          "step": 1,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "lookup_order",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "ok"
+        }
+      ],
+      "logs": [
+        "DEBUG model request · chat script [messages model provider system_bytes thinking tools]",
+        "DEBUG model finish · chat script [dur input_tokens model output_tokens provider raw reason tool_calls]",
+        "WARN slow lookup · execute_tool lookup_order [db.table order_id]",
+        "DEBUG model request · chat script [messages model provider system_bytes thinking tools]",
+        "DEBUG model finish · chat script [dur input_tokens model output_tokens provider raw reason tool_calls]"
+      ],
+      "holes": []
+    }
+  ]
+}

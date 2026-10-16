@@ -330,6 +330,7 @@ var nonMetaAttr = map[string]struct{}{
 	"weft.tool.input_error":        {}, // U4: which input rule an INVALID_INPUT broke
 	"weft.panic.layer":             {}, // U4: a panic's layer, handler or middleware
 	"weft.attempt.layer":           {}, // U4-fix: a fallback layer's attempt (the fallbacks counter)
+	"weft.logs.bridged":            {}, // U11.1: the slog bridge's count on the heartbeat and the root span (the logs route's hint)
 	"weft.tool.retry":              {}, // U32.1: a RETRY's consecutive count (the story's pill)
 	"weft.tool.retry_budget":       {}, // U32.1: the run's MaxModelRetries beside it
 	"weft.tap.panics":              {}, // U32.1: the run's contained observer panics (Problems)

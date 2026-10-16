@@ -156,8 +156,22 @@ func otherLogs(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			t.Fatal(err)
 		}
 		none, err := db.OtherLogs(ctx(), "r_quiet", obsdb.LogQuery{})
-		if err != nil || none.Logs == nil || len(none.Logs) != 0 || none.Gap != 0 || none.Partial {
-			t.Errorf("a run without app logs = %#v, %v; want an empty slice, nothing else", none, err)
+		if err != nil || none.Logs == nil || len(none.Logs) != 0 || none.Gap != 0 || none.Partial || !none.NoBridge {
+			t.Errorf("a run without app logs = %#v, %v; want an empty slice, NoBridge (its root carries no weft.logs.bridged), nothing else", none, err)
+		}
+		// The same run recorded with the slog bridge on (U11.1): its root
+		// carries weft.logs.bridged, so the empty page is the app's
+		// silence, no hint.
+		hushed := invokeSpan("r_hushed", 1, map[string]any{"weft.logs.bridged": int64(0)})
+		hushed.TraceID, hushed.SpanID = "b2"+trace[2:], "2000000000000002"
+		if err := db.Write(ctx(), obsdb.Batch{Spans: []obsdb.Span{hushed}, Records: finishedRun("r_hushed")}); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := db.OtherLogs(ctx(), "r_hushed", obsdb.LogQuery{}); err != nil || len(got.Logs) != 0 || got.NoBridge {
+			t.Errorf("a bridged run without app logs = %#v, %v; want an empty page without NoBridge", got, err)
+		}
+		if got, err := db.OtherLogs(ctx(), "r_logs", obsdb.LogQuery{}); err != nil || got.NoBridge {
+			t.Errorf("a run with app logs = NoBridge %v, %v; want false (lines arrived, whatever their path)", got.NoBridge, err)
 		}
 
 		// A finished run with no span has nothing to attribute through:
@@ -195,8 +209,8 @@ func otherLogs(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if err := db.Write(ctx(), obsdb.Batch{Spans: []obsdb.Span{live}, Records: []obsdb.Record{start, pending}}); err != nil {
 			t.Fatal(err)
 		}
-		if got, err := db.OtherLogs(ctx(), "r_live", obsdb.LogQuery{}); err != nil || !got.Partial || got.Gap != 0 || len(got.Logs) != 0 {
-			t.Errorf("a running run = %#v, %v; want partial, no gap, no lines yet", got, err)
+		if got, err := db.OtherLogs(ctx(), "r_live", obsdb.LogQuery{}); err != nil || !got.Partial || got.Gap != 0 || len(got.Logs) != 0 || got.NoBridge {
+			t.Errorf("a running run = %#v, %v; want partial, no gap, no lines yet, no NoBridge (its root is not stored)", got, err)
 		}
 
 		// Past MaxLogCandidates lines the read is cut and says so.

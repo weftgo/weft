@@ -136,12 +136,27 @@ const MaxLogCandidates = 10_000
 //     attribution — so only lines among the first MaxLogCandidates by
 //     time were read: later lines of this run may be missing, and Logs
 //     may hold far fewer than MaxLogCandidates.
+//   - NoBridge: the run's root span (invoke_agent) is stored without
+//     weft.logs.bridged and no app log line is attributed to the run:
+//     the pipeline that recorded it had no slog bridge (otel.Slog,
+//     otel.SlogHandler) when it began, so its slog lines — weft.Logger's,
+//     mw.Log's, the app's own — never reached the store. A reader shows
+//     it as a hint beside the empty page, never as a loss. Never set
+//     while the root is not stored (a running run), for a run derived
+//     from stock spans, once any line is attributed, or beside Gap or
+//     Truncated (lines exist that may be the run's).
 type LogPage struct {
 	Logs      []OtherLog
 	Partial   bool
 	Gap       int
 	Truncated bool
+	NoBridge  bool
 }
+
+// attrLogsBridged is the pipeline's bridge mark on a run's invoke_agent
+// span (weft.logs.bridged, record contract §3): present, whatever its
+// value, when the app's slog was bridged as the run began.
+const attrLogsBridged = "weft.logs.bridged"
 
 // LogCandidates is a backend's half of DB.OtherLogs: the non-weft log
 // records (no weft.run.id) of the given traces whose time is within
@@ -352,7 +367,23 @@ func attributeLogs(ctx context.Context, db DB, runID string, candidates LogCandi
 	for i, k := range kept {
 		logs[i] = k.l
 	}
+	if len(logs) == 0 && page.Gap == 0 && !page.Truncated && !det.Derived {
+		page.NoBridge = unbridgedRoot(own, runID)
+	}
 	return page, logs, nil
+}
+
+// unbridgedRoot reports whether the run's own invoke_agent span is
+// among own and carries no weft.logs.bridged (LogPage.NoBridge).
+func unbridgedRoot(own []Span, runID string) bool {
+	for _, s := range own {
+		if s.Attrs[attrRunID] != runID || (s.Attrs["gen_ai.operation.name"] != "invoke_agent" && !strings.HasPrefix(s.Name, "invoke_agent")) {
+			continue
+		}
+		_, marked := s.Attrs[attrLogsBridged]
+		return !marked
+	}
+	return false
 }
 
 type spanKey struct{ trace, span string }

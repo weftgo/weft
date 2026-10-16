@@ -339,7 +339,7 @@ func TestHeartbeatCarriesNoEventContract(t *testing.T) {
 	capture := &recordCapture{}
 	provider := sdklog.NewLoggerProvider(sdklog.WithProcessor(sdklog.NewSimpleProcessor(capture)))
 	defer func() { _ = provider.Shutdown(context.Background()) }()
-	heartbeats(context.Background(), provider.Logger(instrumentationName), tr, nil)
+	heartbeats(context.Background(), provider.Logger(instrumentationName), tr, nil, nil)
 	if len(capture.records) != 1 {
 		t.Fatalf("%d heartbeats for one open run", len(capture.records))
 	}

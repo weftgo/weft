@@ -22,7 +22,9 @@
 // and moves to the next free port, saying so in one line (plan B2).
 //
 // The five lines (serve): Install the otel defaults (the local sink at
-// ./.weft/weft.db, content on, no network), build the Studio server
+// ./.weft/weft.db, content on, no network; otel.Slog() bridges
+// slog.Default, so the agent's mw.Log lines land under each step's
+// span), build the Studio server
 // with Playground(true) over the pipeline's own handle — the same DB,
 // the same live hub — mount its Handler, and pass it to
 // runtime.Install. The /run endpoint is the demo's own surface, not
@@ -67,6 +69,7 @@ import (
 	"time"
 
 	"github.com/weftgo/weft"
+	"github.com/weftgo/weft/mw"
 	"github.com/weftgo/weft/otel"
 	"github.com/weftgo/weft/runtime"
 	"github.com/weftgo/weft/scope"
@@ -165,12 +168,16 @@ func main() {
 // with an edited input visibly answers differently. Its PrepareStep
 // trims the prompt: from step 1 on the first-step guidance paragraph
 // is dropped, so Studio's Request pane shows step 1's system prompt
-// diffed against step 0's with the "changed by PrepareStep" chip.
+// diffed against step 0's with the "changed by PrepareStep" chip. Its
+// model chain logs each call (mw.Log on slog.Default, Debug): with the
+// slog bridge serve installs (otel.Slog()), those lines are the run's
+// app logs, each under its step's chat span — Studio's runs/{id}/logs.
 func demoAgent() *weft.Agent {
 	return weft.New(paced{150 * time.Millisecond, echoModel{}},
 		weft.Name("studio-local"),
 		weft.Instructions(demoInstructions),
 		weft.PrepareStep(trimGuidance),
+		weft.WrapModel(mw.Log(nil)),
 		lookupOrder, refundOrder)
 }
 
@@ -196,7 +203,9 @@ func serve(addr string, explicitAddr bool) error {
 	// The local sink ($WEFT_DB or ./.weft/weft.db), content on; named
 	// explicitly so it stays when the environment adds a destination
 	// (WEFT_STUDIO_URL under weft dev): the embedded Studio reads it.
-	defer otel.Install(otel.Local(""))()
+	// Slog bridges slog.Default, so the app's log lines (mw.Log's
+	// included) reach Studio under the span they were logged in.
+	defer otel.Install(otel.Local(""), otel.Slog())()
 
 	// Beside a running Studio — WEFT_STUDIO_URL, or the one the
 	// pipeline joined through the discovery file — that Studio holds

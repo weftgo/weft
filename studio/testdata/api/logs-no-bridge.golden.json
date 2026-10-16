@@ -1,0 +1,14 @@
+{
+  "logs": [],
+  "holes": [
+    {
+      "hole": "not_recorded",
+      "reason": "no app logs: the app's slog isn't bridged — its log lines (its own, weft.Logger's, mw.Log's and mw.Audit's) never reached the pipeline (the run's root span carries no weft.logs.bridged)",
+      "fix": "bridge slog: otel.Install(…, otel.Slog()), or log through slog.New(otel.SlogHandler(h))"
+    }
+  ],
+  "badge": "not_recorded",
+  "reason": "no app logs: the app's slog isn't bridged — its log lines (its own, weft.Logger's, mw.Log's and mw.Audit's) never reached the pipeline (the run's root span carries no weft.logs.bridged)",
+  "fix": "bridge slog: otel.Install(…, otel.Slog()), or log through slog.New(otel.SlogHandler(h))"
+}
+

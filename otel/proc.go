@@ -90,11 +90,18 @@ type destProc struct {
 	// adm admits records ahead of a batch chain's SDK queue (nil for
 	// Local, written synchronously: no queue to overflow).
 	adm *admission
+	// appLogs is whether this chain takes the slog bridge's records
+	// (dest.appLogsOn): it answers Enabled for the bridge's scope, and a
+	// bridged record reaching a chain without it is filtered.
+	appLogs bool
 }
 
 var _ sdklog.Processor = (*destProc)(nil)
 
 func (p *destProc) Enabled(_ context.Context, param sdklog.EnabledParameters) bool {
+	if param.InstrumentationScope.Name == bridgeScope {
+		return p.appLogs
+	}
 	if param.EventName == eventNameRaw {
 		return p.raw
 	}
@@ -105,6 +112,10 @@ func (p *destProc) Enabled(_ context.Context, param sdklog.EnabledParameters) bo
 }
 
 func (p *destProc) OnEmit(ctx context.Context, r *sdklog.Record) error {
+	if r.InstrumentationScope().Name == bridgeScope && !p.appLogs {
+		p.drops.filtered(1)
+		return nil // the app's slog lines go only where AppLogs sends them
+	}
 	clone := r.Clone()
 	kind := recordKind(&clone)
 	switch kind {
@@ -611,7 +622,7 @@ func (d *dropCounter) dropped(n int64, cause error) {
 		if cause != nil {
 			attrs = append(attrs, "err", cause.Error())
 		}
-		d.log.Warn("weft/otel: destination dropped records", attrs...)
+		d.log.WarnContext(quietCtx, "weft/otel: destination dropped records", attrs...)
 	}
 }
 
@@ -629,7 +640,7 @@ func (d *dropCounter) overflowed(n, queue int64) {
 	d.count.Add(n)
 	d.overflow.Add(n)
 	if d.overflowWarned.CompareAndSwap(false, true) {
-		d.log.Warn("weft/otel: destination queue full, records dropped",
+		d.log.WarnContext(quietCtx, "weft/otel: destination queue full, records dropped",
 			"dest", d.name, "queue", queue,
 			"hint", "raise it with otel.QueueSize(n) on the destination, or use otel.Blocking() under WEFT_ENV=dev; deltas are shed first, a run's run_start and run_finish last; the count rides weft.records.dropped on the heartbeat and each run's run_start/run_finish")
 	}
@@ -640,7 +651,7 @@ func (d *dropCounter) overflowed(n, queue int64) {
 // records are refused at once until one does (admission.go's latch).
 func (d *dropCounter) stalled() {
 	if d.stallWarned.CompareAndSwap(false, true) {
-		d.log.Warn("weft/otel: destination "+d.name+": exporter stalled — records are refused until it recovers (Blocking)",
+		d.log.WarnContext(quietCtx, "weft/otel: destination "+d.name+": exporter stalled — records are refused until it recovers (Blocking)",
 			"dest", d.name)
 	}
 }

@@ -298,9 +298,14 @@ For logs, `weft.Logger(l)` writes one Debug line per phase — run start,
 run finish, model call, tool call — with ids, the model, durations,
 usage, and outcomes; never message text or tool arguments. The default
 (`slog.Default`, resolved at log time) is silent until your handler
-enables Debug; `slog.New(slog.DiscardHandler)` turns the lines off. A
-handler that bridges slog to OTel correlates the lines with the spans
-for free: they are logged on the span-carrying context.
+enables Debug; `slog.New(slog.DiscardHandler)` turns the lines off.
+`otel.Install(…, otel.Slog())` bridges `slog.Default` to the pipeline
+(or `slog.New(otel.SlogHandler(h))` any logger you build): every line
+logged on a span-carrying context — these, `mw.Log`'s, `mw.Audit`'s and
+your own, Debug included — reaches the Local and Studio destinations
+(`otel.AppLogs(true)` opts a third party in) under the span it was
+logged in, and Studio shows it on the run's logs (`runs/{id}/logs`);
+a run recorded without the bridge says so there.
 `examples/otel` runs the whole thing against the real SDK offline.
 No prompt, message, tool argument or tool result reaches a span: ids,
 names, counts, durations, reasons, and error types only. Error *text*

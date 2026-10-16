@@ -12,6 +12,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -160,7 +161,12 @@ type contractRun struct {
 	// of <parent>: no span (missing)" per RunTree.Missing; omitted for a run
 	// with no descendant (the tree holds its own spans alone — their
 	// count is chat + tools + the root).
-	Tree  []string     `json:"tree,omitempty"`
+	Tree []string `json:"tree,omitempty"`
+	// Logs are the run's app log records as DB.OtherLogs attributes them
+	// (§4's app log records, U11.1): "<SEVERITY> <body> · <span name>"
+	// per line, the span its trace and span ids name, then its attribute
+	// keys sorted in brackets; omitted for a run with none.
+	Logs  []string     `json:"logs,omitempty"`
 	Holes []obsdb.Hole `json:"holes"`
 	// HoleCauses names the cause of each run-level hole the row's rules
 	// decide (§7: LostRecordsHole, TailLostHole), "<hole>:<cause>".
@@ -385,8 +391,37 @@ func observeRuns(t *testing.T, db obsdb.DB) []contractRun {
 		}
 		c.Chat, c.Tools = spanSteps(spans)
 		c.Tree = treeOf(t, db, r.ID, len(spans))
+		c.Logs = logsOf(t, db, r.ID, spans)
 		c.Holes, c.HoleCauses = runHoles(t, db, r, len(spans) > 0)
 		out = append(out, c)
+	}
+	return out
+}
+
+// logsOf is a run's app log lines (contractRun.Logs); none for a run
+// with no span to attribute them through.
+func logsOf(t *testing.T, db obsdb.DB, id string, spans []obsdb.Span) []string {
+	t.Helper()
+	page, err := db.OtherLogs(context.Background(), id, obsdb.LogQuery{Limit: 1000})
+	var he *obsdb.HoleError
+	if errors.As(err, &he) {
+		return nil
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]string{}
+	for _, s := range spans {
+		names[s.SpanID] = s.Name
+	}
+	var out []string
+	for _, l := range page.Logs {
+		keys := make([]string, 0, len(l.Attrs))
+		for k := range l.Attrs {
+			keys = append(keys, k)
+		}
+		slices.Sort(keys)
+		out = append(out, fmt.Sprintf("%s %s · %s [%s]", obsdb.SeverityText(l.Severity), l.Body, names[l.SpanID], strings.Join(keys, " ")))
 	}
 	return out
 }
@@ -1980,6 +2015,37 @@ func genCases() []genCase {
 				}
 				if !dropped {
 					panic("messages_lost: the run emitted no messages record at index 1")
+				}
+			},
+		},
+		{
+			name: "slog_bridged",
+			desc: "the tool_calls run with the slog bridge on (otel.SlogHandler bound to the pipeline, the OTLP destination opted in with otel.AppLogs(true)): mw.Log's two lines per model call under each chat span and the tool handler's WARN under its execute_tool span arrive as app log records — no weft.run.id, attributed to the run through their spans (§4's app log records), severity DEBUG 5 / WARN 13, attributes flattened; a line logged outside any span is not bridged. The root span carries weft.logs.bridged (int, the lines bridged before the run began: 0) — the logs route's mark, not metadata (meta omits it); the row is tool_calls' own. The generator sets mw.Log's measured dur to 1ms",
+			dest: append(append([]otel.DestOption{}, content...), otel.AppLogs(true)),
+			run: func(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+				logger := slog.New(p.SlogHandler(nil))
+				logger.InfoContext(ctx, "outside any span") // no span context: never bridged
+				lookup := core.Tool("lookup_order", "Look up an order by ID.", func(ctx context.Context, in lookupIn) (string, error) {
+					logger.WarnContext(ctx, "slow lookup", "order_id", in.OrderID, slog.Group("db", "table", "orders"))
+					return "order " + in.OrderID + ": shipped", nil
+				})
+				agt := pipelineAgent(p, "support", wefttest.Script(
+					wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"1234"}`}),
+					wefttest.Say("Order 1234 has shipped.")),
+					core.Instructions("You are a support agent."), core.WrapModel(mw.Log(logger)), lookup)
+				return []string{mustRun(t, ctx, agt, core.Prompt("Where is order 1234?")).ID}
+			},
+			edit: func(_ *coltracepb.ExportTraceServiceRequest, lg *collogspb.ExportLogsServiceRequest) {
+				for _, rl := range lg.GetResourceLogs() {
+					for _, sl := range rl.GetScopeLogs() {
+						for _, r := range sl.GetLogRecords() {
+							for _, kv := range r.Attributes {
+								if kv.GetKey() == "dur" {
+									kv.Value = &commonpb.AnyValue{Value: &commonpb.AnyValue_StringValue{StringValue: "1ms"}}
+								}
+							}
+						}
+					}
 				}
 			},
 		},

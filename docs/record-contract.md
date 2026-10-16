@@ -196,6 +196,7 @@ child). It ends when the run does, however the run ends.
 | `weft.parent.run.id`, `weft.parent.call.id` | string | Subagent children |
 | `weft.manifest.hash` | string | named agents |
 | `weft.version` | string | always |
+| `weft.logs.bridged` | int | at start, while the pipeline has a slog bridge (`otel.Slog`, `otel.SlogHandler`; set by `weft/otel`'s span processor, not the core): the lines the bridge had emitted so far. Its presence is the mark — a stored root without it ran with no bridge, which the logs route's hint reads (§7); not caller metadata (`obsdb.MetaOf` skips it) |
 | `weft.metadata.dropped` | int | the metadata limits dropped pairs (§6 `problems`' `metadata_dropped` token: the run document's `truncated` hole, cause `metadata_cap`, §7) |
 | `weft.resumed_from` | string | the run this one resumes, as `core.ResumeOf` named it (UX-E-17): `thread` passes it on every resume turn (the parked turn's run id), `weft/runtime` on every resume it runs, an app resuming a plain `Generate` passes the parked `RunResult.ID` — the core cannot infer it, a transcript carries no run id. §6 `resumed_from` / `resumed_by` |
 | `weft.resume.calls` | string | a run fed decisions that resumes parked calls: each parked call, in call order, as `<call id>=<kind>`, comma-joined — `approved` (`Approve`), `denied` (`Deny`), `resolved` (`Resolve`, `ResolveError`), `no_decision` (left undecided: rule 12's `DENIED: no decision`). The kind is the decision, not the outcome: an `approved` call may still fail, or park again. Ids and enums only — never a reason or a resolved payload (the transcript's). Capped at 32 calls: past them the value ends `,…+k`, `k` the calls not listed. `no_decision` comes only from a plain core `Generate`: `thread` writes an undecided call as an explicit `Deny(id, "no decision")`, so a thread resume reads `denied` there, and `weft/runtime` resumes a parked run only once every pending call has its decision |
@@ -503,6 +504,43 @@ doctor`). The pipeline's resource names no process (no
 `service.instance.id`), so a restarted app's smaller count reads under
 the earlier process's larger one until Studio restarts.
 
+While the pipeline has a slog bridge, every heartbeat also carries
+`weft.logs.bridged` (int): the lines the bridge emitted since the
+pipeline started (pipeline-wide, the same count on every destination's
+copy) — like the root span's mark (§3), never metadata.
+
+### App log records — the slog bridge
+
+Not weft records: they carry no `weft.record` and no `weft.run.id`, so a
+store keeps them with the app's other log records (`other_logs` on
+SQLite, `otel_logs` on ClickHouse) and a reader attributes them to a run
+through the span they were emitted under (`obsdb.DB.OtherLogs`: the
+run's own spans and the non-weft spans below them, never a child run's).
+`weft/otel`'s bridge (`otel.Slog()` wraps `slog.Default`;
+`otel.SlogHandler(next)` and `Pipeline.SlogHandler(next)` wrap any
+handler) emits one per slog line logged under a valid span context — a
+line with no span names no run and is not bridged:
+
+| Field | Value |
+|---|---|
+| instrumentation scope | `github.com/weftgo/weft/otel/slog` — what the destination chains recognise a bridged line by |
+| trace id, span id | the context's: the `chat` span for `mw.Log`'s lines and anything the model chain logs, the `execute_tool` span for a tool handler's (and `mw.Audit`'s), the `invoke_agent` span for `core.Logger`'s run lines |
+| timestamp | the slog record's time (its emission when zero); observed timestamp the bridge's clock |
+| severity number | the slog level + 9, held to 1–24: DEBUG 5, INFO 9, WARN 13, ERROR 17 |
+| severity text | the slog level's name (`DEBUG`, `INFO`, `WARN`, `ERROR`, `INFO+2`) |
+| body | the slog message (string) |
+| attributes | the handler's and the record's slog attributes, flattened: a group's keys joined with `.` (`db.table`), an empty-keyed group inline; strings, ints, floats and bools as themselves, durations and times as their string forms, anything else its `fmt` text; a key `weft.run.id` is renamed `slog.weft.run.id` (it would make the line read as weft's own) |
+
+Every slog level goes to the pipeline — the bridge has no level of its
+own, and `core.Logger`'s and `mw.Log`'s lines are DEBUG — at the
+severities some destination takes. Which destinations take them is
+`otel.AppLogs`: Local and Studio with content on by default, never
+Datadog, Langfuse, OTLP or Exporters unless the destination opts in with
+`otel.AppLogs(true)` (an app may log anything, prompts included; the
+opt-in sends the lines as logged — §5's content policy shapes weft's
+records, not the app's). The pipeline's own WARNs about its destinations
+are never bridged.
+
 ## 5. Content policy
 
 Content — message text, tool arguments and results, the system prompt,
@@ -739,6 +777,7 @@ from ADR 0028 §11's closed table (`obsdb.Hole`; the words live in
 | `gap`, cause `tail_lost` | a weft run whose root carries no `weft.run.events` (written before U5) — its `invoke_agent` span stored and reading `succeeded`, with events stored and no `run_finish` (`obsdb.TailLostHole`'s fallback): "the run's root span ended but its run_finish record never arrived: a destination dropped the record tail, so the last steps' records are missing" — raised once the run stopped settling (§6), so a root stored ahead of its records is never called lost. Studio badges the step whose `step_finish` was dropped with the same gap (its status `ok`, not `error`) and a counted step with no event with the step gap |
 | `compacted` | the run holds a run-scope view (`weft.messages.reason = compacted`) |
 | `derived` | the run was built from stock spans (`RunRow.Derived`, §9): "derived from spans · no events" — that run's alone, never a weft run whose records are missing |
+| `not_recorded` on the logs route only (U11.1) | not a run-level badge: Studio's `GET /api/runs/{id}/logs` holds it when the run's `invoke_agent` span is stored without `weft.logs.bridged` (§3) and no app log line is attributed to the run, no line is in its gap and the scan was not cut (`obsdb.LogPage.NoBridge`; never while the root is not stored, never for a `derived` run): "no app logs: the app's slog isn't bridged", the fix naming `otel.Slog()` — a hint beside the empty page, so it never reads "the app logged nothing" |
 | `not_recorded`, cause `no_logger` | a weft run (not `derived`, not `running`) whose spans are stored and none of its records — no event, `messages` or `request` record — and whose root says it emitted none (`weft.run.events` and `weft.run.messages` 0 or absent; `obsdb.LostRecordsHole`): "the app exported spans only"; the fix names the agent option LoggerProvider (`core.LoggerProvider`, the root package's alias) and `otel.Install`. Not raised while the run settles (§6). Studio badges every step document of such a run and its requests, tools and step request panes with the same cause (`RunRow.RequestsHoleCause`), never a step `gap`. A root that says records were emitted while none was stored reads `gap`, cause `events_lost` ("every one" lost) instead: `no_logger` is reserved for emitted = 0 |
 
 `redacted` (reserved: the pipeline does not yet mark a redaction) and
@@ -1004,6 +1043,7 @@ page reaches it.
 | `tracer_only` | the `tool_calls` run from an app that wired a tracer and no logger: spans only — `succeeded` from the `Ok` root alone, `steps`/`usage`/`stop_reason` from the span, `weft_version` and `manifest_hash` from the span; the root's `weft.run.events` 0 (`events_emitted` 0: nothing was emitted); `not_recorded` (cause `no_logger`) |
 | `tracer_only_failed` | the `failed` run, spans only: `failed` with the span's description from the `Error` root alone; `events_emitted` 0; `not_recorded` (cause `no_logger`) |
 | `tail_lost` | the `tool_calls` run with every record after its `tool_finish` dropped (step 1's records and `run_finish`), every span kept: `succeeded` from the `Ok` root, not `interrupted`; `events_emitted` above `event_count`: `gap` (cause `events_lost`, "N of M events were lost — the last K events were lost"), and with `messages_emitted` above a non-zero `message_count` the same badge's cause `messages_lost` ("2 of 4 transcript batches were lost") — the lost tail visible and counted, never a clean success |
+| `slog_bridged` | the `tool_calls` run with the slog bridge bound (`Pipeline.SlogHandler`) and the OTLP destination opted in (`otel.AppLogs(true)`): `mw.Log`'s request and finish lines under each `chat` span (DEBUG 5) and the tool handler's WARN 13 under its `execute_tool` span (a `slog.Group` flattened to `db.table`) arrive as app log records (§4) and read back attributed to the run (`logs`); a line logged with no span is not bridged. The root carries `weft.logs.bridged` 0 — not metadata (`meta` omits it); the row is otherwise `tool_calls`' own. `mw.Log`'s measured `dur` reads `1ms` |
 | `records_dropped` | the `tool_calls` run from a destination that had lost 3 records: `weft.records.dropped` 3 (int) on its `run_start` and `run_finish` records (§4; no heartbeat — never stored, and the run is shorter than 10 s). Ingest health reads it (Studio's largest per `service.name`); no row field: `meta` omits it (`obsdb.MetaOf` skips it), no hole names it — the row is `tool_calls`' own without its metadata |
 | `messages_lost` | the `tool_calls` run with its middle transcript batch dropped (the growth `messages` record at index 1, the assistant's tool call), every event and span kept: `message_count` 3 below `messages_emitted` 4 — `gap` (cause `messages_lost`, "1 of 4 transcript batches were lost"); every event stored, so no `events_lost` |
 

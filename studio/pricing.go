@@ -830,6 +830,14 @@ func (c *coster) fill(out *runRow, rec obsdb.RunRow) {
 	rc := c.cost(rec)
 	out.costFields = rc.own.fields()
 	out.delegatedFields = rc.delegated.delegatedFields()
+	// The children the cost read (primed for a page, else read for this
+	// row): their count and failures ride on the row (H9), no read more.
+	for _, k := range c.kids[rec.ID] {
+		out.ChildrenCount++
+		if k.Status == obsdb.StatusFailed {
+			out.ChildrenFailed++
+		}
+	}
 }
 
 func (c cost) delegatedFields() delegatedFields {

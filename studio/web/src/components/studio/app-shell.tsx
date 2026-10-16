@@ -257,8 +257,10 @@ export function AppShell() {
           )}
         </SidebarFooter>
       </Sidebar>
-      <SidebarInset>
-        <header className="flex h-12 items-center gap-3 border-b px-4">
+      {/* min-w-0 (H9, UX-A-09): the page never widens past the window — a
+          wide table scrolls inside its own frame, never the page. */}
+      <SidebarInset className="min-w-0">
+        <header className="flex h-12 min-w-0 items-center gap-3 border-b px-4">
           <SidebarTrigger className="-ml-1" />
           <WeftWordmark className="md:hidden" />
           <ClientOnly fallback={null}>
@@ -286,7 +288,7 @@ export function AppShell() {
             <Kbd className="ml-1">⌘K</Kbd>
           </Button>
         </header>
-        <div className="flex-1 p-4">
+        <div className="min-w-0 flex-1 p-4">
           <ClientOnly
             fallback={
               <div className="flex justify-center py-24">

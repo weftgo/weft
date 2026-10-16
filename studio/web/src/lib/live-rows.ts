@@ -13,14 +13,27 @@
 // past live.ts's dedup window — replaces its step's, never adds),
 // TTFT the last step_finish's ttft_ms. Cost is the row's own block —
 // unknown while running (A5.1: usage arrives at run end), known on the
-// final run frame. A row that ended stays GRACE_MS, then drops (unless
-// the reader is peeking at it).
+// final run frame. A row that ended stays LIVE_GRACE_MS (a minute),
+// then drops (unless the reader is peeking at it); a page opened (or
+// reloaded) lists the runs that ended within that minute too
+// (applyRecent, H9), so a reload does not forget them. Attempt frames
+// (kind attempt, O17: lib/live-attempts.ts) keep each run's newest
+// attempt — a retrying step is seen before its chat span ends. The rows
+// are drawn in tree order (lib/delegation.ts's nest): a subagent right
+// under its parent, indented.
 import type { RunRow } from "./api"
+import { nest } from "./delegation"
 import type { LiveRecord } from "./live"
+import type { LiveAttempt } from "./live-attempts"
+import { newerAttempt } from "./live-attempts"
 import { STATUS, statusOf } from "./status"
 
-/** How long a finished run stays listed. */
-export const LIVE_GRACE_MS = 30_000
+/** How long a finished run stays listed: a minute (H9, UX-A-18). */
+export const LIVE_GRACE_MS = 60_000
+
+/** What the footer says about the rows that ended. */
+export const LIVE_GRACE_LINE =
+  "a run that ended stays a minute, dimmed — a reload lists the runs that ended in the last minute"
 
 /** How long an armed cancel waits for its confirming click. */
 export const CANCEL_CONFIRM_MS = 3_000
@@ -74,12 +87,15 @@ export interface LiveRows {
   /** The kinds a resume could not read, by run (backfill_error) — kept
    * apart from the rows: the frame may name a run listed later. */
   unreadable: Record<string, string[]>
+  /** Each run's newest attempt frame (O17), by run. */
+  attempts: Record<string, LiveAttempt>
 }
 
 export const emptyLiveRows: LiveRows = {
   entries: {},
   stats: {},
   unreadable: {},
+  attempts: {},
 }
 
 /** ended: the run row says the run is over (finished, or parked). */
@@ -93,10 +109,15 @@ function fresher(a: RunRow | undefined, b: RunRow): RunRow {
   return Date.parse(a.last_seen) > Date.parse(b.last_seen) ? a : b
 }
 
-function put(state: LiveRows, run: RunRow, now: number): LiveRows {
+function put(
+  state: LiveRows,
+  run: RunRow,
+  now: number,
+  endedAt0?: number
+): LiveRows {
   const prev = state.entries[run.id] as LiveEntry | undefined
   const row = fresher(prev?.run, run)
-  const endedAt = ended(row) ? (prev?.endedAt ?? now) : null
+  const endedAt = ended(row) ? (prev?.endedAt ?? endedAt0 ?? now) : null
   return {
     ...state,
     entries: { ...state.entries, [run.id]: { run: row, endedAt } },
@@ -122,6 +143,33 @@ export function applySeed(
   let next = state
   for (const r of runs) next = put(next, r, now)
   return next
+}
+
+/** applyRecent folds a read of the latest runs on the page's first
+ * load: those that ended within LIVE_GRACE_MS (by their finished time,
+ * else last seen) are listed as just ended, their grace counted from
+ * that time — a reload keeps them; older ones are not. */
+export function applyRecent(
+  state: LiveRows,
+  runs: RunRow[],
+  now = Date.now()
+): LiveRows {
+  let next = state
+  for (const r of runs) {
+    if (!ended(r)) continue
+    const at = Date.parse(r.finished ?? r.last_seen)
+    if (!Number.isFinite(at) || now - at > LIVE_GRACE_MS) continue
+    next = put(next, r, now, Math.min(at, now))
+  }
+  return next
+}
+
+/** applyAttempt folds one attempt frame: the run's newest attempt. */
+export function applyAttempt(state: LiveRows, a: LiveAttempt): LiveRows {
+  const cur = state.attempts[a.run_id] as LiveAttempt | undefined
+  const next = newerAttempt(cur, a)
+  if (next === cur) return state
+  return { ...state, attempts: { ...state.attempts, [a.run_id]: next } }
 }
 
 function num(v: unknown): number {
@@ -245,7 +293,10 @@ export function prune(state: LiveRows, now = Date.now(), keep = ""): LiveRows {
   const unreadable: Record<string, string[]> = {}
   for (const [id, ks] of Object.entries(state.unreadable))
     if (id in entries || id in stats) unreadable[id] = ks
-  return { entries, stats, unreadable }
+  const attempts: Record<string, LiveAttempt> = {}
+  for (const [id, a] of Object.entries(state.attempts))
+    if (id in entries || id in stats) attempts[id] = a
+  return { entries, stats, unreadable, attempts }
 }
 
 /** A row as the table draws it. */
@@ -255,27 +306,36 @@ export interface LiveRowView {
   /** Kinds a resume could not read (the "could not read" badge). */
   unreadable: string[]
   endedAt: number | null
+  /** The run's newest attempt frame (O17), when one arrived. */
+  attempt?: LiveAttempt
+  /** Its depth in the tree the rows are drawn in (0 a root). */
+  depth: number
 }
 
-/** rowsOf lists the rows newest first (started, then id). */
+/** rowsOf lists the rows in tree order (lib/delegation.ts's nest): the
+ * roots newest first (started, then id), each run's children right
+ * under it, newest first, one level deeper. */
 export function rowsOf(state: LiveRows): LiveRowView[] {
-  return Object.values(state.entries)
-    .map((e) => ({
-      run: e.run,
-      stats: state.stats[e.run.id] ?? null,
-      unreadable: state.unreadable[e.run.id] ?? [],
-      endedAt: e.endedAt,
-    }))
+  const sorted = Object.values(state.entries)
+    .map((e) => e.run)
     .sort((a, b) => {
-      const d = Date.parse(b.run.started) - Date.parse(a.run.started)
-      return d !== 0 && Number.isFinite(d) ? d : a.run.id < b.run.id ? 1 : -1
+      const d = Date.parse(b.started) - Date.parse(a.started)
+      return d !== 0 && Number.isFinite(d) ? d : a.id < b.id ? 1 : -1
     })
+  return nest(sorted).map(({ row, depth }) => ({
+    run: row,
+    stats: state.stats[row.id] ?? null,
+    unreadable: state.unreadable[row.id] ?? [],
+    endedAt: state.entries[row.id].endedAt,
+    ...(row.id in state.attempts ? { attempt: state.attempts[row.id] } : {}),
+    depth,
+  }))
 }
 
 /** A polled row as the table draws it (no stream: the row's own
  * figures only). */
 export function polledView(run: RunRow): LiveRowView {
-  return { run, stats: null, unreadable: [], endedAt: null }
+  return { run, stats: null, unreadable: [], endedAt: null, depth: 0 }
 }
 
 /** The step cell: current (the newest index seen, 1-based) and, once

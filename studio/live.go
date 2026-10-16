@@ -137,6 +137,56 @@ type recordFrameDTO struct {
 	Attrs map[string]any `json:"attrs,omitempty"`
 }
 
+// attemptFrameDTO is the data of an `event: attempt` frame (O17,
+// UX-E-30): one try inside a model call, from its `attempt` span as the
+// span lands, so a step that is retrying or falling back is visible
+// before its chat span ends. Step is weft.step.index, Attempt
+// weft.attempt.index (1-based per model call), Layer weft.attempt.layer
+// ("fallback" on a backup's request, else absent), Status "error" (the
+// span's status Error; ErrorType its error.type) or "ok", WaitMS the
+// provider's retry-after ask (weft.attempt.retry_after_ms) when it sent
+// one: mw.Retry's own backoff is not recorded, so absent then. Live
+// only: never a stored frame, never backfilled (the span itself is
+// stored, and the step routes read it).
+type attemptFrameDTO struct {
+	RunID     string    `json:"run_id"`
+	SessionID string    `json:"session_id"`
+	PublicID  string    `json:"public_id"`
+	Step      int       `json:"step"`
+	Attempt   int64     `json:"attempt"`
+	Layer     string    `json:"layer,omitempty"`
+	Status    string    `json:"status"`
+	ErrorType string    `json:"error_type,omitempty"`
+	Provider  string    `json:"provider,omitempty"`
+	Model     string    `json:"model,omitempty"`
+	Start     time.Time `json:"start"`
+	End       time.Time `json:"end"`
+	WaitMS    *int64    `json:"wait_ms,omitempty"`
+	TraceID   string    `json:"trace_id"`
+	SpanID    string    `json:"span_id"`
+}
+
+// attemptOf reads an attempt span into its frame's data.
+func attemptOf(sp obsdb.Span) attemptFrameDTO {
+	w := obsdb.DeriveSpan(sp)
+	a := attemptFrameDTO{
+		RunID: w.RunID, Step: w.Step, Status: "ok",
+		Start: sp.Start, End: sp.End, TraceID: sp.TraceID, SpanID: sp.SpanID,
+	}
+	a.Attempt, _ = attrInt64(sp.Attrs["weft.attempt.index"])
+	a.Layer, _ = sp.Attrs["weft.attempt.layer"].(string)
+	a.Provider, _ = sp.Attrs["gen_ai.provider.name"].(string)
+	a.Model, _ = sp.Attrs["gen_ai.request.model"].(string)
+	if sp.StatusCode == 2 {
+		a.Status = "error"
+		a.ErrorType, _ = sp.Attrs["error.type"].(string)
+	}
+	if ms, ok := attrInt64(sp.Attrs["weft.attempt.retry_after_ms"]); ok {
+		a.WaitMS = &ms
+	}
+	return a
+}
+
 // runFrameDTO is the data of an `event: run` frame.
 type runFrameDTO struct {
 	Run json.RawMessage `json:"run"`
@@ -177,9 +227,9 @@ func liveSelector(q map[string][]string) (obsdb.Selector, error) {
 }
 
 // liveKinds parses the optional kinds parameter (S4.5): a
-// comma-separated list over event, delta, messages and run; the
-// default is event,run. Heartbeats are never a kind and never
-// forwarded.
+// comma-separated list over event, delta, messages, run and attempt
+// (O17: an attempt span as it lands, attemptFrameDTO); the default is
+// event,run. Heartbeats are never a kind and never forwarded.
 func liveKinds(q map[string][]string) (map[string]bool, error) {
 	vs, ok := q["kinds"]
 	if !ok || len(vs) == 0 || vs[0] == "" {
@@ -188,16 +238,16 @@ func liveKinds(q map[string][]string) (map[string]bool, error) {
 	kinds := map[string]bool{}
 	for _, k := range strings.Split(vs[0], ",") {
 		switch strings.TrimSpace(k) {
-		case "event", "delta", "messages", "run":
+		case "event", "delta", "messages", "run", "attempt":
 			kinds[strings.TrimSpace(k)] = true
 		case "":
 			// a trailing comma
 		default:
-			return nil, fmt.Errorf("kind %q is not one of event, delta, messages, run", k)
+			return nil, fmt.Errorf("kind %q is not one of event, delta, messages, run, attempt", k)
 		}
 	}
 	if len(kinds) == 0 {
-		return nil, fmt.Errorf("kinds must name at least one of event, delta, messages, run")
+		return nil, fmt.Errorf("kinds must name at least one of event, delta, messages, run, attempt")
 	}
 	return kinds, nil
 }
@@ -373,6 +423,8 @@ func liveWanted(kinds map[string]bool, f obsdb.Frame) bool {
 		return f.Weft.Record != "heartbeat" && kinds[f.Weft.Record]
 	case obsdb.FrameRun:
 		return kinds["run"]
+	case obsdb.FrameAttempt:
+		return kinds["attempt"]
 	default:
 		return false
 	}
@@ -382,6 +434,12 @@ func liveWanted(kinds map[string]bool, f obsdb.Frame) bool {
 // and non-weft records carry no position: never deduped, always
 // forwarded (a run row may legitimately change).
 func liveDedupKey(f obsdb.Frame) (liveKey, bool) {
+	if f.Kind == obsdb.FrameAttempt && f.Span != nil {
+		// One attempt of one model call: (run, step, attempt index),
+		// published by ingest and by a self-publishing database alike.
+		a := attemptOf(*f.Span)
+		return liveKey{run: f.Weft.RunID, kind: "attempt", pos: int64(a.Step)<<20 | a.Attempt&(1<<20-1)}, true
+	}
 	if f.Kind != obsdb.FrameRecord || f.Record == nil || f.Weft.RunID == "" {
 		return liveKey{}, false
 	}
@@ -425,6 +483,17 @@ func writeFrame(sw *sseWriter, f obsdb.Frame, c *coster) {
 		}
 		data, _ := json.Marshal(runFrameDTO{Run: rowJSON})
 		sw.frame("id: %d\nevent: run\ndata: %s\n\n", f.Seq, data)
+	case obsdb.FrameAttempt:
+		if f.Span == nil {
+			return
+		}
+		a := attemptOf(*f.Span)
+		a.SessionID, a.PublicID = f.Weft.SessionID, f.Weft.PublicID
+		data, err := json.Marshal(a)
+		if err != nil {
+			return
+		}
+		sw.frame("id: %d\nevent: attempt\ndata: %s\n\n", f.Seq, data)
 	}
 	sw.flush()
 }

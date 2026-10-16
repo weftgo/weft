@@ -50,6 +50,7 @@
   "catalog_hash": "",
   "request_count": 0,
   "prompt_preview": "Where is order 42?",
+  "children_count": 1,
   "children": [
     {
       "id": "r_sub/0/call_3",

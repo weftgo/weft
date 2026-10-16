@@ -1,0 +1,1 @@
+import{t as e,xi as t,yi as n}from"./title-C2XFjXTG.js";var r=t(n(),1);function i(t){let n=e(t);(0,r.useEffect)(()=>{typeof document<`u`&&(document.title=n)},[n])}export{i as t};

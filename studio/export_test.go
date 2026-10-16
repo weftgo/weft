@@ -372,6 +372,8 @@ func withoutChildren(t *testing.T, body []byte) string {
 	decode(t, string(body), &doc)
 	run, _ := doc["run"].(map[string]any)
 	delete(run, "children")
+	delete(run, "children_count") // H9: the children it counts are not in the copy
+	delete(run, "children_failed")
 	// The run's cost split reads its children (plan A5: own usage is its
 	// usage minus theirs, delegated is theirs), which the copy lacks.
 	for _, k := range []string{"cost_usd", "cost_known", "cost_badge", "cost_reason", "cache",

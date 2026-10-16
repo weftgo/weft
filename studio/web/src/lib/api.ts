@@ -166,6 +166,12 @@ export interface RunRow extends CostFields, DelegatedCostFields {
    * absent when its records carried no content (content-off) or no
    * user text. lib/title.ts's runTitle leads with it. */
   prompt_preview?: string
+  /** The runs whose parent is this one, one level deep, and how many of
+   * them failed (H9, api.go's runRow: read from the children read the
+   * cost already makes). Each absent when 0, and from an older Studio;
+   * lib/delegation.ts words them. */
+  children_count?: number
+  children_failed?: number
 }
 
 /** GET /api/runs → RunsPage. */

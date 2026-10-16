@@ -4,7 +4,11 @@
 // public id, experiments on/off, the sort, before. The filter boxes
 // mirror the URL (back/forward updates them), active filters read as
 // removable chips with a clear, and an empty result under a filter
-// says so instead of claiming nothing was ever recorded. A text or
+// says so instead of claiming nothing was ever recorded. The toolbar is
+// one line (H9, UX-A-09/10): search, agent, status, "+ filter", the
+// top-level toggle; the other filters sit behind "+ filter" — a set one
+// is its chip, so the bar stays collapsed — and the key hint is one
+// "? keys" chip. A text or
 // search-only filter, or a column sort, reads /api/search (capability
 // "search", offset-paged); otherwise /api/runs, and a filter it cannot
 // apply is applied to the loaded rows and its chip says so
@@ -15,7 +19,7 @@ import { useEffect, useRef, useState } from "react"
 import { useInfiniteQuery, useQueryClient } from "@tanstack/react-query"
 import type { InfiniteData } from "@tanstack/react-query"
 import { createFileRoute, useNavigate, useRouter } from "@tanstack/react-router"
-import { RefreshCw, Radio, Search, X } from "lucide-react"
+import { ChevronDown, RefreshCw, Radio, Search, X } from "lucide-react"
 
 import { fetchRuns, fetchSearch, nextCursor } from "@/lib/api"
 import type { PageCursor, RunsPage } from "@/lib/api"
@@ -23,7 +27,10 @@ import { openLive, throttle } from "@/lib/live"
 import { isPlainShortcut } from "@/lib/keys"
 import {
   CLEARED,
+  FILTERS_HINT,
   STATUS_PICKS,
+  moreFilterCount,
+  moreFilterLabel,
   applyLocal,
   effectiveSort,
   filtersFromSearch,
@@ -54,6 +61,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
+import { nest } from "@/lib/delegation"
 import { runLink } from "@/lib/links"
 import type { RunsSearch } from "@/lib/links"
 import { useDocumentTitle } from "@/hooks/use-document-title"
@@ -209,7 +217,17 @@ function RunsPage() {
   })
   const page = searching ? searchPage : listPage
   const loaded = page.data?.pages.flatMap((p) => p.runs) ?? []
-  const runs = applyLocal(loaded, search, caps)
+  // The "with subagents" view (H9, UX-A-19): the loaded rows as trees,
+  // each child under its parent — on the default order only (a sort
+  // ranks every run on its own).
+  const tree =
+    search.subagents === "all" && !search.parent && sortKey === "started"
+      ? nest(applyLocal(loaded, search, caps))
+      : null
+  const runs = tree ? tree.map((n) => n.row) : applyLocal(loaded, search, caps)
+  const depths = tree
+    ? Object.fromEntries(tree.map((n) => [n.row.id, n.depth]))
+    : undefined
   const local = localKeys(search, caps)
   const total = page.data?.pages[0]?.total ?? 0
   const costCap = searching
@@ -278,6 +296,9 @@ function RunsPage() {
   // selection starts unset — nothing is highlighted until a key moves
   // it — and resets when the list changes under it.
   const [selected, setSelected] = useState(-1)
+  // "+ filter" (H9): the other filter boxes, folded by default.
+  const [moreOpen, setMoreOpen] = useState(false)
+  const moreSet = moreFilterCount(search, costCapable)
   const searchInput = useRef<HTMLInputElement>(null)
   const agentInput = useRef<HTMLInputElement>(null)
   const [chord, setChord] = useState<"g" | null>(null)
@@ -363,7 +384,7 @@ function RunsPage() {
                   ? `${total.toLocaleString()} runs`
                   : `${total.toLocaleString()} top-level`}
         </span>
-        <div className="relative">
+        <div className="relative w-full min-w-0 sm:w-72">
           <Search className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-faint" />
           <FilterBox
             inputRef={searchInput}
@@ -374,7 +395,7 @@ function RunsPage() {
                 : 'search: refund "card declined"'
             }
             label="search runs"
-            width="w-64 pl-7"
+            width="w-full pl-7"
             debounceMs={400}
             disabled={searchOff}
             title={
@@ -395,6 +416,7 @@ function RunsPage() {
           value={search.agent ?? ""}
           placeholder="agent"
           label="filter by agent"
+          width="w-32"
           onApply={(v) => setSearch({ agent: v || undefined })}
         />
         <Select
@@ -406,7 +428,7 @@ function RunsPage() {
           }
         >
           <SelectTrigger
-            className="h-8 w-36 text-xs"
+            className="h-8 w-32 text-xs"
             aria-label="filter by status"
           >
             <SelectValue>
@@ -422,25 +444,22 @@ function RunsPage() {
             ))}
           </SelectContent>
         </Select>
-        <Select
-          value={search.experiments ?? "any"}
-          onValueChange={(v) =>
-            setSearch({
-              experiments: v === "on" || v === "off" ? v : undefined,
-            })
-          }
+        <Button
+          variant={moreOpen ? "secondary" : "outline"}
+          size="sm"
+          className="h-8 gap-1 text-xs"
+          aria-expanded={moreOpen}
+          aria-controls="run-filters"
+          title={FILTERS_HINT}
+          onClick={() => setMoreOpen((o) => !o)}
+          data-more-filters
         >
-          <SelectTrigger className="h-8 w-36 text-xs" aria-label="experiments">
-            <SelectValue>
-              {() => experimentsLabel(search.experiments)}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="any">any runs</SelectItem>
-            <SelectItem value="off">experiments off</SelectItem>
-            <SelectItem value="on">experiments only</SelectItem>
-          </SelectContent>
-        </Select>
+          {moreFilterLabel(moreSet)}
+          <ChevronDown
+            data-slot="icon"
+            className={moreOpen ? "rotate-180" : ""}
+          />
+        </Button>
         {search.parent ? null : (
           <Button
             variant={search.subagents === "all" ? "default" : "outline"}
@@ -483,9 +502,12 @@ function RunsPage() {
             streaming needs the server token · polling
           </span>
         ) : null}
-        <span className="hidden items-center gap-1 text-[11px] text-faint md:flex">
-          <Kbd>/</Kbd> search · <Kbd>j</Kbd>
-          <Kbd>k</Kbd> move · <Kbd>enter</Kbd> open
+        <span
+          className="hidden items-center gap-1 text-[11px] text-faint lg:flex"
+          title="/ search · j k move · enter open — every key: press ?"
+          data-keys-hint
+        >
+          <Kbd>?</Kbd> keys
         </span>
         <Button
           variant="ghost"
@@ -505,114 +527,143 @@ function RunsPage() {
         </Button>
       </div>
 
-      {/* The filters (plan H1): each applies on enter/blur and becomes a
-          chip below; search's own need capability search server-side. */}
-      <div className="flex flex-wrap items-center gap-2" data-run-filters>
-        <FilterBox
-          value={search.tool ?? ""}
-          placeholder="tool"
-          label="filter by tool"
-          width="w-32"
-          disabled={searchOff}
-          title={
-            searchOff
-              ? `the tool filter: ${searchOffWhy}`
-              : "a tool the run called (exact name)"
-          }
-          onApply={(v) => setSearch({ tool: v || undefined })}
-        />
-        <FilterBox
-          value={search.model ?? ""}
-          placeholder="model"
-          label="filter by model"
-          width="w-32"
-          title="the run's model name (exact)"
-          onApply={(v) => setSearch({ model: v || undefined })}
-        />
-        <FilterBox
-          value={search.error ?? ""}
-          placeholder="error contains"
-          label="filter by error"
-          width="w-36"
-          title="a case-insensitive substring of the run's error"
-          onApply={(v) => setSearch({ error: v || undefined })}
-        />
-        <FilterBox
-          value={search.since ?? ""}
-          placeholder="since YYYY-MM-DD"
-          label="started since"
-          width="w-36"
-          title="started on or after: a day (UTC) or an RFC 3339 time"
-          onApply={(v) => setSearch({ since: v || undefined })}
-        />
-        <FilterBox
-          value={search.until ?? ""}
-          placeholder="until YYYY-MM-DD"
-          label="started until"
-          width="w-36"
-          title="started on or before a day (UTC, the day included), or before an RFC 3339 time"
-          onApply={(v) => setSearch({ until: v || undefined })}
-        />
-        <FilterBox
-          value={search.min_duration?.toString() ?? ""}
-          placeholder="≥ seconds"
-          label="minimum duration in seconds"
-          width="w-24"
-          type="number"
-          title="duration at least, in seconds — the loaded rows only: the API has no duration filter"
-          onApply={(v) => setSearch({ min_duration: numberOrClear(v) })}
-        />
-        <FilterBox
-          value={search.min_tokens?.toString() ?? ""}
-          placeholder="≥ tokens"
-          label="minimum tokens"
-          width="w-24"
-          type="number"
-          title="input + output tokens at least"
-          onApply={(v) => {
-            const n = numberOrClear(v)
-            setSearch({
-              min_tokens: n === undefined ? undefined : Math.floor(n),
-            })
-          }}
-        />
-        {costCapable ? (
+      {/* The filters (plan H1), behind "+ filter" (H9): each applies on
+          enter/blur and becomes a chip below; search's own need capability
+          search server-side. */}
+      {moreOpen ? (
+        <div
+          className="flex flex-wrap items-center gap-2"
+          id="run-filters"
+          data-run-filters
+        >
+          <Select
+            value={search.experiments ?? "any"}
+            onValueChange={(v) =>
+              setSearch({
+                experiments: v === "on" || v === "off" ? v : undefined,
+              })
+            }
+          >
+            <SelectTrigger
+              className="h-8 w-36 text-xs"
+              aria-label="experiments"
+            >
+              <SelectValue>
+                {() => experimentsLabel(search.experiments)}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="any">any runs</SelectItem>
+              <SelectItem value="off">experiments off</SelectItem>
+              <SelectItem value="on">experiments only</SelectItem>
+            </SelectContent>
+          </Select>
           <FilterBox
-            value={search.min_cost?.toString() ?? ""}
-            placeholder="≥ $"
-            label="minimum cost in USD"
-            width="w-20"
-            type="number"
-            title="the run's whole bill (own + delegated) at least, in USD; an unpriced run never matches"
-            onApply={(v) => setSearch({ min_cost: numberOrClear(v) })}
+            value={search.tool ?? ""}
+            placeholder="tool"
+            label="filter by tool"
+            width="w-32"
+            disabled={searchOff}
+            title={
+              searchOff
+                ? `the tool filter: ${searchOffWhy}`
+                : "a tool the run called (exact name)"
+            }
+            onApply={(v) => setSearch({ tool: v || undefined })}
           />
-        ) : null}
-        <FilterBox
-          value=""
-          placeholder="+ tag k=v"
-          label="add a tag filter"
-          width="w-32"
-          title="add a tag filter (k=v); several tags must all match"
-          onApply={(v) => {
-            if (v.indexOf("=") <= 0) return
-            setSearch({ tag: withTags([...new Set([...tagsOf(search), v])]) })
-          }}
-        />
-        <FilterBox
-          value={search.session ?? ""}
-          placeholder="session"
-          label="filter by session"
-          width="w-32"
-          onApply={(v) => setSearch({ session: v || undefined })}
-        />
-        <FilterBox
-          value={search.public_id ?? ""}
-          placeholder="public id"
-          label="filter by public id"
-          width="w-32"
-          onApply={(v) => setSearch({ public_id: v || undefined })}
-        />
-      </div>
+          <FilterBox
+            value={search.model ?? ""}
+            placeholder="model"
+            label="filter by model"
+            width="w-32"
+            title="the run's model name (exact)"
+            onApply={(v) => setSearch({ model: v || undefined })}
+          />
+          <FilterBox
+            value={search.error ?? ""}
+            placeholder="error contains"
+            label="filter by error"
+            width="w-36"
+            title="a case-insensitive substring of the run's error"
+            onApply={(v) => setSearch({ error: v || undefined })}
+          />
+          <FilterBox
+            value={search.since ?? ""}
+            placeholder="since YYYY-MM-DD"
+            label="started since"
+            width="w-36"
+            title="started on or after: a day (UTC) or an RFC 3339 time"
+            onApply={(v) => setSearch({ since: v || undefined })}
+          />
+          <FilterBox
+            value={search.until ?? ""}
+            placeholder="until YYYY-MM-DD"
+            label="started until"
+            width="w-36"
+            title="started on or before a day (UTC, the day included), or before an RFC 3339 time"
+            onApply={(v) => setSearch({ until: v || undefined })}
+          />
+          <FilterBox
+            value={search.min_duration?.toString() ?? ""}
+            placeholder="≥ seconds"
+            label="minimum duration in seconds"
+            width="w-28"
+            type="number"
+            title="duration at least, in seconds — the loaded rows only: the API has no duration filter"
+            onApply={(v) => setSearch({ min_duration: numberOrClear(v) })}
+          />
+          <FilterBox
+            value={search.min_tokens?.toString() ?? ""}
+            placeholder="≥ tokens"
+            label="minimum tokens"
+            width="w-28"
+            type="number"
+            title="input + output tokens at least"
+            onApply={(v) => {
+              const n = numberOrClear(v)
+              setSearch({
+                min_tokens: n === undefined ? undefined : Math.floor(n),
+              })
+            }}
+          />
+          {costCapable ? (
+            <FilterBox
+              value={search.min_cost?.toString() ?? ""}
+              placeholder="≥ $"
+              label="minimum cost in USD"
+              width="w-20"
+              type="number"
+              title="the run's whole bill (own + delegated) at least, in USD; an unpriced run never matches"
+              onApply={(v) => setSearch({ min_cost: numberOrClear(v) })}
+            />
+          ) : null}
+          <FilterBox
+            value=""
+            placeholder="+ tag k=v"
+            label="add a tag filter"
+            width="w-32"
+            title="add a tag filter (k=v); several tags must all match"
+            onApply={(v) => {
+              if (v.indexOf("=") <= 0) return
+              setSearch({ tag: withTags([...new Set([...tagsOf(search), v])]) })
+            }}
+          />
+          <FilterBox
+            value={search.session ?? ""}
+            placeholder="session"
+            label="filter by session"
+            width="w-32"
+            onApply={(v) => setSearch({ session: v || undefined })}
+          />
+          <FilterBox
+            value={search.public_id ?? ""}
+            placeholder="public id"
+            label="filter by public id"
+            width="w-32"
+            onApply={(v) => setSearch({ public_id: v || undefined })}
+          />
+        </div>
+      ) : null}
 
       {chips.length > 0 ? (
         <div className="flex flex-wrap items-center gap-1.5" data-run-chips>
@@ -714,11 +765,12 @@ function RunsPage() {
           {costCapable ? (
             <UnpricedNote rows={runs} more={page.hasNextPage} />
           ) : null}
-          <div className="overflow-x-auto rounded-lg border bg-background">
+          <div className="relative overflow-x-auto rounded-lg border bg-background">
             <RunsTable
               runs={runs}
               selectedId={selected >= 0 ? runs[selected]?.id : undefined}
               showCost={costCapable}
+              depths={depths}
               sort={{
                 active: sortKey,
                 server: caps.search,

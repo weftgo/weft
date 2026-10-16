@@ -3,10 +3,26 @@
 // compareLink). One GET /api/diff?a=&b= per compared run against the
 // same base; the table is components/studio/step-diff.tsx over
 // lib/stepdiff.ts, the module the devtools panel's 2-way block reads.
+// It opens with a run picker (H9, UX-A-16; lib/compare-picker.ts): the
+// newest runs as a base, then the base's replay source and its agent's
+// runs to compare with; ?b= also takes ids joined by commas.
+import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 
+import { runQuery, runsQuery } from "@/lib/api"
+import type { RunRow } from "@/lib/api"
+import {
+  PICK_BASE,
+  PICK_NONE,
+  PICK_OTHER,
+  PICK_UNREADABLE,
+  candidates,
+  splitRuns,
+} from "@/lib/compare-picker"
+import { relativeTime } from "@/lib/format"
 import { compareLink } from "@/lib/links"
+import { runTitle, shortId } from "@/lib/title"
 import type { CompareSearch } from "@/lib/links"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { CapsUnread } from "@/components/studio/caps-unread"
@@ -24,11 +40,7 @@ function str(v: unknown): string | undefined {
 
 export const Route = createFileRoute("/compare")({
   validateSearch: (search: Record<string, unknown>): CompareSearch => {
-    const list = Array.isArray(search.b)
-      ? search.b
-      : search.b === undefined
-        ? []
-        : [search.b]
+    const list = splitRuns(search.b)
     const a = str(search.a)
     // compareLink's rule: the base itself and a repeat are dropped (one
     // diff, one column, one key per compared run).
@@ -75,7 +87,7 @@ function ComparePage() {
       </div>
     )
   return (
-    <div className="space-y-4 p-6">
+    <div className="min-w-0 space-y-4">
       <div className="space-y-1">
         <h1 className="font-heading text-base font-medium">compare</h1>
         <p className="text-xs text-muted-foreground">
@@ -94,7 +106,7 @@ function ComparePage() {
         <label className="flex items-center gap-2 text-xs">
           {a ? "compare with" : "base run"}
           <input
-            className="w-72 rounded border bg-transparent px-2 py-1 font-mono text-xs"
+            className="w-full min-w-0 rounded border bg-transparent px-2 py-1 font-mono text-xs sm:w-72"
             value={add}
             onChange={(e) => setAdd(e.target.value)}
             placeholder="run id"
@@ -109,13 +121,83 @@ function ComparePage() {
           add
         </Button>
       </form>
+      <RunPicker
+        base={a || undefined}
+        compared={others}
+        onPick={(id) =>
+          void navigate(
+            a ? compareLink(a, [...others, id], step) : compareLink(id)
+          )
+        }
+      />
       {a && others.length ? (
         <StepCompare base={a} others={others} focus={step} />
-      ) : (
-        <p className="text-xs text-faint">
-          name {a ? "a run to compare with" : "a base run"} above
-        </p>
-      )}
+      ) : null}
     </div>
+  )
+}
+
+/** RunPicker offers the runs to pick (lib/compare-picker.ts): the
+ * newest as a base, then — a base named — its replay source and its
+ * agent's runs first. One click adds the run to the URL. */
+function RunPicker({
+  base,
+  compared,
+  onPick,
+}: {
+  base?: string
+  compared: string[]
+  onPick: (id: string) => void
+}) {
+  const recent = useQuery(runsQuery({ limit: 50 }))
+  const baseRow = useQuery({ ...runQuery(base ?? ""), enabled: !!base })
+  const picks = candidates(
+    recent.data?.runs ?? [],
+    base ? (baseRow.data ?? ({ id: base } as RunRow)) : undefined,
+    compared
+  )
+  return (
+    <section className="space-y-1.5" aria-label="pick a run" data-run-picker>
+      <h2 className="text-xs text-muted-foreground">
+        {base ? PICK_OTHER : PICK_BASE}
+      </h2>
+      {recent.isPending ? (
+        <p className="font-mono text-[11px] text-faint">…</p>
+      ) : recent.isError ? (
+        <p className="font-mono text-[11px] text-faint">{PICK_UNREADABLE}</p>
+      ) : picks.length === 0 ? (
+        <p className="font-mono text-[11px] text-faint">{PICK_NONE}</p>
+      ) : (
+        <ul className="flex flex-wrap gap-1.5">
+          {picks.map(({ run, why }) => {
+            const t = runTitle(run)
+            return (
+              <li key={run.id} className="max-w-full min-w-0">
+                <button
+                  type="button"
+                  className="flex max-w-full min-w-0 items-center gap-1.5 rounded border px-2 py-1 text-left text-xs hover:bg-accent"
+                  title={`${run.id} · ${t.full}`}
+                  onClick={() => onPick(run.id)}
+                  data-pick={run.id}
+                >
+                  <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+                    {shortId(run.id)}
+                  </span>
+                  <span className="min-w-0 truncate">{t.text}</span>
+                  {why ? (
+                    <span className="shrink-0 rounded-full bg-secondary px-1.5 font-mono text-[10px] text-muted-foreground">
+                      {why}
+                    </span>
+                  ) : null}
+                  <span className="shrink-0 font-mono text-[10px] text-faint">
+                    {relativeTime(run.started)}
+                  </span>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </section>
   )
 }

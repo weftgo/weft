@@ -446,6 +446,45 @@ export function removeChip(s: RunsSearch, chip: RunChip): Partial<RunsSearch> {
   return { [chip.key]: undefined }
 }
 
+/** The filters behind the toolbar's "+ filter" fold (H9, UX-A-10): every
+ * one but the search box, agent and status, which stay on the bar. A
+ * set one is its chip, so the fold stays closed. */
+export const MORE_FILTER_KEYS = [
+  "experiments",
+  "tool",
+  "model",
+  "error",
+  "since",
+  "until",
+  "min_duration",
+  "min_tokens",
+  "min_cost",
+  "tag",
+  "session",
+  "public_id",
+] as const satisfies readonly (keyof RunsSearch)[]
+
+/** moreFilterCount is how many of the folded filters are set (min_cost
+ * only where the cost column is drawn). */
+export function moreFilterCount(s: RunsSearch, costCapable: boolean): number {
+  let n = 0
+  for (const k of MORE_FILTER_KEYS) {
+    if (k === "min_cost" && !costCapable) continue
+    if (k === "tag") n += tagsOf(s).length
+    else if (s[k] !== undefined) n++
+  }
+  return n
+}
+
+/** The fold's button: "+ filter", and how many it holds once set. */
+export function moreFilterLabel(n: number): string {
+  return n > 0 ? `+ filter · ${n} set` : "+ filter"
+}
+
+/** The fold's title. */
+export const FILTERS_HINT =
+  "more filters: experiments, tool, model, error, since, until, duration, tokens, cost, tag, session, public id — each set one is a chip below"
+
 /** CLEARED is the patch that clears every chip (the sort and the
  * subagents toggle are views, not filters: kept). */
 export const CLEARED: Partial<RunsSearch> = {

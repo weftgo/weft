@@ -222,6 +222,16 @@ type runRow struct {
 	// stores no messages, and the stripped / not_recorded holes the run
 	// document already reports say why — no badge of its own.
 	PromptPreview string `json:"prompt_preview,omitempty"`
+	// ChildrenCount is the runs whose parent_run_id names this one (its
+	// core Subagent children, a thread/pool child session's run, another
+	// agent's Generate inside a tool handler — every parent-linked run,
+	// one level deep) and ChildrenFailed those of them whose status is
+	// failed (H9, UX-A-19: the runs list's "⑂ n" chip). Read time, from
+	// the children read the cost already makes (coster.primeTrees: one
+	// obsdb.TreeReader.ChildRuns read per level of a page, never one per
+	// row); each omitted when 0, and on a row the coster did not price.
+	ChildrenCount  int `json:"children_count,omitempty"`
+	ChildrenFailed int `json:"children_failed,omitempty"`
 	// Holes is set on a run document's children[] rows only (plan
 	// A10): each child's own runHoles, so the parent's page badges a
 	// content-off or interrupted child before its document is read.

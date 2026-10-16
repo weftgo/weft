@@ -376,9 +376,16 @@ describe("the runs list keeps subagent children out by default (A10)", () => {
   it("lists top-level runs, and the toggle lists the children with their parent link", async () => {
     const parentRow: RunRow = { ...rOK, id: RUN, agent: "orders" }
     serve()
+    // A child whose parent is not among the loaded rows (H9: it keeps
+    // its "subagent of" link; one under a listed parent is nested).
+    const stray: RunRow = {
+      ...childRow,
+      id: "r_gone/0/c_x",
+      parent_run_id: "r_gone",
+    }
     studio.on("GET runs", (req) =>
       req.query.get("all") === "1"
-        ? { total: 2, runs: [parentRow, childRow], next_before: null }
+        ? { total: 3, runs: [childRow, parentRow, stray], next_before: null }
         : { total: 1, runs: [parentRow], next_before: null }
     )
     renderApp("/runs")
@@ -390,13 +397,27 @@ describe("the runs list keeps subagent children out by default (A10)", () => {
     fireEvent.click(screen.getByRole("button", { name: "top-level only" }))
     expect(await screen.findByText(CHILD)).toBeTruthy()
     expect(studio.calls("GET runs").at(-1)?.query.get("all")).toBe("1")
-    const parentLink = document.querySelector<HTMLElement>(
+    // The tree (H9, UX-A-19): the child right under its parent, indented,
+    // listed first by start though it was; the stray a root.
+    const rows = [...document.querySelectorAll<HTMLElement>("tbody tr")]
+    expect(
+      rows.map((tr) => [
+        tr.querySelector("[data-run-link]")?.getAttribute("data-run-link"),
+        tr.dataset.depth ?? "0",
+      ])
+    ).toEqual([
+      [RUN, "0"],
+      [CHILD, "1"],
+      ["r_gone/0/c_x", "0"],
+    ])
+    expect(rows[1].querySelector("[data-parent-link]")).toBeNull()
+    const parentLink = rows[2].querySelector<HTMLElement>(
       "[data-parent-link] a"
     )
-    expect(parentLink?.textContent).toBe(RUN)
+    expect(parentLink?.textContent).toBe("r_gone")
     expect(
       decodeURIComponent(parentLink?.getAttribute("href") ?? "")
-    ).toContain(`/runs/${RUN}`)
+    ).toContain(`/runs/r_gone`)
     expect(screen.getByRole("button", { name: "with subagents" })).toBeTruthy()
   })
 

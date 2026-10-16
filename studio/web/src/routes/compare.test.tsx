@@ -301,6 +301,77 @@ describe("the compare page", () => {
     ).toHaveLength(2)
   })
 
+  it("H9: opens with a run picker — a base, then the base agent's runs — and ?b= takes commas", async () => {
+    const rows = golden<RunsPage>("runs").runs
+    const rOK = rows.find((r) => r.id === "r_ok")!
+    const mine = { ...rOK, id: "r_mine", agent: "orders" }
+    const other = { ...rOK, id: "r_other", agent: "billing" }
+    serve(["diff"], { "r_da|r_db": golden<DiffDoc>("diff") })
+    studio
+      .on("GET runs", { total: 3, runs: [other, mine], next_before: null })
+      .on("GET runs/r_base", {
+        ...rOK,
+        id: "r_base",
+        agent: "orders",
+        children: [],
+        holes: [],
+        compactions: [],
+      })
+    const { router } = renderApp("/compare")
+    const pick = await waitFor(() => {
+      const b = document.querySelector<HTMLElement>('[data-pick="r_other"]')
+      expect(b).toBeTruthy()
+      return b!
+    })
+    expect(
+      document.querySelector("[data-run-picker] h2")!.textContent
+    ).toContain("pick a base run")
+    pick.click()
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ a: "r_other" })
+    )
+    cleanup()
+
+    // A base named: its agent's runs first, the base itself never.
+    serve(["diff"])
+    studio
+      .on("GET runs", {
+        total: 3,
+        runs: [other, mine, { ...mine, id: "r_base" }],
+        next_before: null,
+      })
+      .on("GET runs/r_base", {
+        ...rOK,
+        id: "r_base",
+        agent: "orders",
+        children: [],
+        holes: [],
+        compactions: [],
+      })
+    renderApp("/compare?a=r_base")
+    await waitFor(() =>
+      expect(
+        [...document.querySelectorAll<HTMLElement>("[data-pick]")].map(
+          (b) => b.dataset.pick
+        )
+      ).toEqual(["r_mine", "r_other"])
+    )
+    expect(
+      document.querySelector('[data-pick="r_mine"]')!.textContent
+    ).toContain("same agent")
+    cleanup()
+
+    // b=r_db,r_dc: two compared runs, as the array form would be.
+    serve(["diff"], { "r_da|r_db": golden<DiffDoc>("diff") })
+    const second = renderApp("/compare?a=r_da&b=r_db,r_dc")
+    await waitFor(() =>
+      expect(second.router.state.location.search).toMatchObject({
+        a: "r_da",
+        b: ["r_db", "r_dc"],
+      })
+    )
+  })
+
   it("without capability diff: no call, the page says why", async () => {
     serve(["playground"], { "r_da|r_db": golden<DiffDoc>("diff") })
     renderApp('/compare?a=r_da&b=["r_db"]')

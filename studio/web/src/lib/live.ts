@@ -191,6 +191,10 @@ export interface LiveRun {
 export interface LiveHandlers {
   onRecord?: (rec: LiveRecord) => void
   onRun?: (run: LiveRun) => void
+  /** Readers of other frame kinds, by SSE event name: each gets the
+   * frame's data and seq (lib/live-attempts.ts's attemptFrames reads
+   * the attempt frames of a stream that asks for kind attempt). */
+  frames?: Record<string, (data: string, seq: number) => void>
   /**
    * Refetch pages from the API: frames were (or may have been) missed.
    * Called when the stream is lost — the server dropped this
@@ -463,6 +467,12 @@ export function openLive(opts: LiveOptions): LiveHandle {
       if (typeof raw?.run !== "object") return
       opts.onRun?.({ seq: seqOf(e), run: raw.run })
     })
+    // The other frame kinds a caller reads itself (an attempt frame:
+    // lib/live-attempts.ts's attemptFrames), with the frame's seq.
+    for (const [k, fn] of Object.entries(opts.frames ?? {}))
+      src.addEventListener(k, (e) => {
+        if (current()) fn(String(e.data), seqOf(e))
+      })
     src.addEventListener("backfill_error", (e) => {
       if (!current()) return
       let raw: { run_id?: unknown; kind?: unknown } | null

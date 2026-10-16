@@ -162,8 +162,8 @@ describe("the all stream", () => {
     const { es } = await openPage()
     const grants = studio.calls("POST live-grant")
     expect(grants).toHaveLength(1)
-    expect(grants[0].body).toEqual({ all: true, kinds: "event,run" })
-    expect(new URL(es.url).searchParams.get("kinds")).toBe("event,run")
+    expect(grants[0].body).toEqual({ all: true, kinds: "event,run,attempt" })
+    expect(new URL(es.url).searchParams.get("kinds")).toBe("event,run,attempt")
     expect(es.refused).toBeNull()
     expect(FakeEventSource.open()).toHaveLength(1)
     await waitFor(() =>
@@ -176,7 +176,9 @@ describe("the all stream", () => {
     // The bounded backfill rule, said once.
     expect(screen.getByText(LIVE_BACKFILL_LINE)).toBeTruthy()
     // The running list seeds the rows (run frames are never backfilled).
-    expect(studio.calls("GET runs")[0].query.get("status")).toBe("running")
+    expect(
+      studio.calls("GET runs").some((c) => c.query.get("status") === "running")
+    ).toBe(true)
   })
 
   it("builds a row from run and event frames: step, tokens so far and TTFT from step_finish; cost — while running, known on the final frame", async () => {
@@ -910,5 +912,88 @@ describe("accessibility", () => {
         .getByRole("button", { name: "peek run r_x" })
         .getAttribute("aria-pressed")
     ).toBe("true")
+  })
+})
+
+describe("H9: the tree, the minute and the attempt frames", () => {
+  it("draws a subagent under its parent and a retrying step from the attempt frame", async () => {
+    const { es } = await openPage()
+    const t0 = Date.now()
+    act(() => {
+      es.emit(
+        "run",
+        {
+          run: running("r_kid", {
+            parent_run_id: "r_dad",
+            agent: "worker",
+            started: new Date(t0 - 1_000).toISOString(),
+          }),
+        },
+        "1"
+      )
+      es.emit(
+        "run",
+        {
+          run: running("r_dad", {
+            agent: "director",
+            started: new Date(t0 - 3_000).toISOString(),
+          }),
+        },
+        "2"
+      )
+      es.emit(
+        "attempt",
+        {
+          run_id: "r_dad",
+          session_id: "",
+          public_id: "",
+          step: 0,
+          attempt: 1,
+          status: "error",
+          error_type: "rate_limited",
+          start: new Date(t0).toISOString(),
+          end: new Date(t0).toISOString(),
+        },
+        "3"
+      )
+    })
+    await waitFor(() =>
+      expect(
+        [...document.querySelectorAll<HTMLElement>("tr[data-run]")].map(
+          (tr) => tr.dataset.run
+        )
+      ).toEqual(["r_dad", "r_kid"])
+    )
+    expect(
+      rowOf("r_kid")!.querySelector("[data-depth]")!.getAttribute("data-depth")
+    ).toBe("1")
+    const note = await waitFor(() => {
+      const n = rowOf("r_dad")!.querySelector<HTMLElement>("[data-attempt]")
+      expect(n).toBeTruthy()
+      return n!
+    })
+    expect(note.textContent).toBe("↻ attempt 1 failed")
+    expect(note.dataset.retrying).toBe("")
+    expect(note.title).toContain("rate_limited")
+  })
+
+  it("a reload lists the runs that ended in the last minute, dimmed", async () => {
+    const done = running("r_done", {
+      status: "succeeded",
+      finished: new Date(Date.now() - 10_000).toISOString(),
+    })
+    const old = running("r_old", {
+      status: "succeeded",
+      finished: new Date(Date.now() - 10 * 60_000).toISOString(),
+    })
+    studio.on("GET runs", (req) =>
+      req.query.get("status") === "running"
+        ? { total: 0, runs: [], next_before: null }
+        : { total: 2, runs: [done, old], next_before: null }
+    )
+    await openPage()
+    await waitFor(() => expect(rowOf("r_done")).toBeTruthy())
+    expect(rowOf("r_done")!.className).toContain("opacity-70")
+    expect(rowOf("r_old")).toBeNull()
   })
 })

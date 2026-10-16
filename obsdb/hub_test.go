@@ -7,6 +7,26 @@ import (
 	"time"
 )
 
+// AttemptFrame (O17): an `attempt` span naming a run is a frame with the
+// span's identity — matched by a run selector like any frame — and any
+// other span, or an attempt span naming no run, is none.
+func TestAttemptFrame(t *testing.T) {
+	sp := Span{Name: "attempt", Attrs: map[string]any{"weft.run.id": "r1", "weft.public_id": "pub", "weft.step.index": int64(2)}}
+	f, ok := AttemptFrame(sp)
+	if !ok || f.Kind != FrameAttempt || f.Span == nil || f.Weft.RunID != "r1" || f.Weft.PublicID != "pub" || f.Weft.Step != 2 {
+		t.Fatalf("AttemptFrame = %+v, %v", f, ok)
+	}
+	if !(Selector{RunID: "r1"}).matches(f.Weft) || !(Selector{All: true}).matches(f.Weft) {
+		t.Error("a run or all selector misses the attempt frame")
+	}
+	if _, ok := AttemptFrame(Span{Name: "chat", Attrs: sp.Attrs}); ok {
+		t.Error("a chat span made an attempt frame")
+	}
+	if _, ok := AttemptFrame(Span{Name: "attempt"}); ok {
+		t.Error("an attempt span naming no run made a frame")
+	}
+}
+
 func recFrame(runID, sessionID, kind string) Frame {
 	r := Record{EventName: "weft.event", Body: `{}`,
 		Attrs: map[string]any{"weft.run.id": runID, "weft.record": kind, "weft.session.id": sessionID}}

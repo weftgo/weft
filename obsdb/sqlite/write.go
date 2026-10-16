@@ -220,8 +220,8 @@ func upsertDerived(ctx context.Context, tx *sql.Tx, r obsdb.RunRow) error {
 }
 
 // publish sends the batch's frames to the hub before Write returns:
-// every record as ingested (deltas included), then the run rows that
-// changed.
+// every record as ingested (deltas included), the attempt spans
+// (obsdb.AttemptFrame, O17), then the run rows that changed.
 func (d *DB) publish(b obsdb.Batch, ru *runUpdates, derived []string) {
 	if d.hub == nil {
 		return
@@ -229,6 +229,11 @@ func (d *DB) publish(b obsdb.Batch, ru *runUpdates, derived []string) {
 	ctx := context.Background()
 	for _, r := range b.Records {
 		d.hub.Publish(ctx, obsdb.RecordFrame(r))
+	}
+	for _, s := range b.Spans {
+		if f, ok := obsdb.AttemptFrame(s); ok {
+			d.hub.Publish(ctx, f)
+		}
 	}
 	ids := append(append([]string{}, ru.order...), derived...)
 	// A resumer's batch changes its parked run's row too — its

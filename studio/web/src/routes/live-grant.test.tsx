@@ -165,7 +165,7 @@ describe("the live page's streams", () => {
         expect(grant.body).toEqual(
           panel
             ? { agent: "orders", kinds: "run" }
-            : { all: true, kinds: "event,run" }
+            : { all: true, kinds: "event,run,attempt" }
         )
         if (panel) {
           // studio/livegrant.go: a panel token is never granted an agent

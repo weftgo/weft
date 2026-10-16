@@ -169,26 +169,27 @@ func TestGoldensMatchARealRun(t *testing.T) {
 	for _, c := range []struct {
 		golden, path string
 		// what the fixture holds that this run does not: a subagent
-		// child (and so an unpriced delegated figure), a crash orphan's
-		// open finish, a metadata key of its own.
+		// child (and so an unpriced delegated figure, and its parent's
+		// children_count), a crash orphan's open finish, a metadata key
+		// of its own.
 		absent []string
 	}{
 		// U7: the fixture's subagent is unpriced (openai/kimi-k2.7-code);
 		// the real run's models are wefttest's, scripted: an exact $0.
-		{"run-sub.golden.json", "/api/runs/" + res.ID, []string{".children[]", ".meta.cwd", ".delegated_cost_reason", ".delegated_cost_usd=<nil>", ".delegated_unpriced_models[]"}},
+		{"run-sub.golden.json", "/api/runs/" + res.ID, []string{".children[]", ".children_count", ".meta.cwd", ".delegated_cost_reason", ".delegated_cost_usd=<nil>", ".delegated_unpriced_models[]"}},
 		// The run documents A9.2 pins from runs that compacted (a
 		// PrepareStep trim, thread's session marker): every field but the
 		// compactions themselves is the plain run's.
 		// The fixture's run reports attempts and a fallback (U4's
 		// problem counters); TestProblemCountersFromARealRun pins those
 		// fields from real runs that have them.
-		{"run-compacted.golden.json", "/api/runs/" + res.ID, []string{".children[]", ".compactions[]", ".holes[]", ".delegated_cost_reason", ".delegated_cost_usd=<nil>", ".attempts_retried", ".fallbacks"}},
+		{"run-compacted.golden.json", "/api/runs/" + res.ID, []string{".children[]", ".children_count", ".compactions[]", ".holes[]", ".delegated_cost_reason", ".delegated_cost_usd=<nil>", ".attempts_retried", ".fallbacks"}},
 		{"run-session-compacted.golden.json", "/api/runs/" + res.ID, []string{".compactions[]"}},
-		{"runs.golden.json", "/api/runs", []string{".runs[].finished=<nil>", ".runs[].meta.cwd", ".runs[].delegated_cost_reason", ".runs[].delegated_cost_usd=<nil>", ".runs[].cost_usd=<nil>", ".runs[].delegated_unpriced_models[]"}},
+		{"runs.golden.json", "/api/runs", []string{".runs[].children_count", ".runs[].finished=<nil>", ".runs[].meta.cwd", ".runs[].delegated_cost_reason", ".runs[].delegated_cost_usd=<nil>", ".runs[].cost_usd=<nil>", ".runs[].delegated_unpriced_models[]"}},
 		{"runs-children.golden.json", "/api/runs?all=1", []string{".runs[].meta.cwd", ".runs[].cost_usd=<nil>", ".runs[].unpriced_models[]"}},
 		// Search (plan A7): run rows, prompt_preview included, from the
 		// real run's prompt "where is order 42?".
-		{"search.golden.json", "/api/search?q=order&sort=tokens", []string{".runs[].meta.cwd", ".runs[].delegated_cost_reason", ".runs[].delegated_cost_usd=<nil>", ".runs[].delegated_unpriced_models[]"}},
+		{"search.golden.json", "/api/search?q=order&sort=tokens", []string{".runs[].children_count", ".runs[].meta.cwd", ".runs[].delegated_cost_reason", ".runs[].delegated_cost_usd=<nil>", ".runs[].delegated_unpriced_models[]"}},
 		{"events-ok.golden.json", "/api/runs/" + res.ID + "/events", nil},
 		{"events-ok-paged.golden.json", "/api/runs/" + res.ID + "/events?after=2&limit=3", nil},
 		{"transcript-ok.golden.json", "/api/runs/" + res.ID + "/transcript", nil},

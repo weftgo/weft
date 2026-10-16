@@ -1618,7 +1618,11 @@ beside it — never a change by themselves — and its holes are badges
 from the one table, as is the response's own `truncated`
 (`response_cap`). Both surfaces read `GET /api/diff` through one module,
 `src/lib/stepdiff.ts`: Studio's `/compare?a=<run>&b=["<run>",…]&step=N` page
-(`lib/links.ts`'s `compareLink`; N-way is N−1 calls of the 2-way route
+(`b=r1,r2` reads the same; it opens with a run picker — H9,
+`lib/compare-picker.ts`: the newest runs as a base, then the base's
+replay source and its agent's runs to compare with, one click each;
+the table scrolls inside its own frame, never the page;
+`lib/links.ts`'s `compareLink`; N-way is N−1 calls of the 2-way route
 against the base run `a`, drawn in the first column; `step` highlights
 and scrolls to that ordinal's row; a mark the side's holes already
 carry is drawn once, as its badge; a system prompt withheld from a read
@@ -1855,7 +1859,7 @@ positioned events only:
 ![run page with the waterfall, light theme](screenshots/run-light.png)
 
 Sessions list a thread's turns in order with usage and the newest
-status; `/live` shows everything streaming right now (plan H6 — one `/api/live?all=1&kinds=event,run` stream opened with a grant `{"all":true}` when `/api/meta`'s `live_all` is true, the dev token or setup A's loopback: run frames add and refresh the rows, event frames keep each row's step — the newest step index, "…" while a step runs — tokens so far (input + output from step_finish usage, one figure per step index so a re-delivered frame replaces rather than adds, "≥" when the page joined mid-run) and TTFT; cost is the row's own, "—" with "running: usage arrives at run end" until the final run frame prices it; the running list seeds the rows since run frames are never backfilled; the header shows the stream's state — connecting, live, reconnecting, overflow, stopped with a retry; a reconnect resumes with `Last-Event-ID` and the footer states the bound, runs running or seen in the last hour, newest 500; a run the resume could not read gets a "could not read" `gap` badge; finished runs stay 30 s then drop unless peeked; a filter box narrows by agent or status — a status word (`running`, `failed`, `cancelled`, `parked`, …) matches by its key, so typing `failed` no longer matches a cancelled run and `parked` no decided park, any other word the agent or the shown word as text; without `live_all` — any panel token — the page polls the running list every 5 s and says "live: polling every 5 s — the all stream needs the dev token or loopback"; under capability `cancel` a runtime-started run's row gets a cancel button — the first click arms it for 3 s, the second posts `POST /api/runs/{id}/cancel` and the row reads "cancelling…" until the run's row ends — looked for among every row, the filter aside — or 30 s pass without an end, when the button is back titled "no end seen — cancel again" (a cancel is best effort); the end is toasted as "run X cancelled · ended failed", or "run X ended <status>" when it ended otherwise, and a refusal in the server's own words; an app-owned run's button is disabled, "cancel is not supported on an app turn" (the runtime refuses it: thread has no per-turn cancel), a parked run's says "parked — decide instead" and links to the run page; clicking a row or its peek button opens that run's story beside the list in a resizable pane remembered per device as split `live-peek`, its run id in `?peek=`, Escape or the close button closing it); `/traces` lists
+status; `/live` shows everything streaming right now (plan H6, H9 — one `/api/live?all=1&kinds=event,run,attempt` stream opened with a grant `{"all":true}` when `/api/meta`'s `live_all` is true, the dev token or setup A's loopback: run frames add and refresh the rows, event frames keep each row's step — the newest step index, "…" while a step runs — tokens so far (input + output from step_finish usage, one figure per step index so a re-delivered frame replaces rather than adds, "≥" when the page joined mid-run) and TTFT; cost is the row's own, "—" with "running: usage arrives at run end" until the final run frame prices it; the running list seeds the rows since run frames are never backfilled; the header shows the stream's state — connecting, live, reconnecting, overflow, stopped with a retry; a reconnect resumes with `Last-Event-ID` and the footer states the bound, runs running or seen in the last hour, newest 500; a run the resume could not read gets a "could not read" `gap` badge; the rows are trees — a subagent under its parent, indented — and a step's newest attempt frame is a line under its step ("↻ attempt 1 failed" while the run runs, the error type and the provider's wait in its title; "ok on attempt 2" after); the session cell is the session's short id with the public id under it; finished runs stay a minute, dimmed, then drop unless peeked, and the first load also lists the runs that ended in the last minute (a reload keeps them); a filter box narrows by agent or status — a status word (`running`, `failed`, `cancelled`, `parked`, …) matches by its key, so typing `failed` no longer matches a cancelled run and `parked` no decided park, any other word the agent or the shown word as text; without `live_all` — any panel token — the page polls the running list every 5 s and says "live: polling every 5 s — the all stream needs the dev token or loopback"; under capability `cancel` a runtime-started run's row gets a cancel button — the first click arms it for 3 s, the second posts `POST /api/runs/{id}/cancel` and the row reads "cancelling…" until the run's row ends — looked for among every row, the filter aside — or 30 s pass without an end, when the button is back titled "no end seen — cancel again" (a cancel is best effort); the end is toasted as "run X cancelled · ended failed", or "run X ended <status>" when it ended otherwise, and a refusal in the server's own words; an app-owned run's button is disabled, "cancel is not supported on an app turn" (the runtime refuses it: thread has no per-turn cancel), a parked run's says "parked — decide instead" and links to the run page; clicking a row or its peek button opens that run's story beside the list in a resizable pane remembered per device as split `live-peek`, its run id in `?peek=`, Escape or the close button closing it); `/traces` lists
 every trace the database holds (`GET /api/traces`, capability `traces`:
 root span, service, start, duration, span count, error, the runs it
 holds linked; since/until/service chips, paged by the exact cursor and
@@ -1932,7 +1936,15 @@ day that does not exist or a time without its zone — RFC 3339 as the
 server parses it — stays a "not applied" chip with a note, never sent),
 duration, tokens, cost (with `pricing`) and any number of tags, plus
 column sorting on started, duration, tokens and cost — each filter a
-removable chip in the URL (`src/lib/run-filters.ts`). A text or
+removable chip in the URL (`src/lib/run-filters.ts`). The toolbar is
+one line (H9): search, agent, status, "+ filter" (the others —
+experiments, tool, model, error, the range, the minimums, tags, session,
+public id — folded behind it, its button counting the set ones; a set
+filter is its chip, so the fold stays closed), the top-level toggle and
+a "? keys" chip; the page never scrolls sideways at any width (the
+table scrolls inside its frame, and a narrow window folds the quieter
+columns: session, model, steps, tokens, cost, started, agent, in that
+order). A text or
 search-only filter, or a sort, reads `/api/search` (offset-paged);
 otherwise `/api/runs`. Duration is always applied to the loaded rows
 (the API has no duration filter); without `search` the box says why
@@ -2331,7 +2343,15 @@ while its root span is stored and its `run_finish` is not, heard from
 within 30 s — its records may still arrive, so the UI follows it as it
 follows a running run (omitted otherwise; §6); top-level only by default — `parent=<run id>`
 lists one run's subagent children, `all=1` (or `parent=*`) every run,
-children included; every run row carries `prompt_preview` — the turn's
+children included; every priced run row (lists, search, the run
+document) carries `children_count` and `children_failed` (H9: the runs
+whose `parent_run_id` names it, one level deep, and those of them that
+failed — read from the children read the cost already makes, one
+`ChildRuns` read per level of a page, never per row; each omitted when
+0) — the runs list's "⑂ n" chip, a disclosure that reads
+`?parent=<id>` and draws the children under the row, one level deeper
+(grandchildren read when opened); in the "with subagents" view the
+loaded rows are drawn as trees, a child under its parent; every run row carries `prompt_preview` — the turn's
 own prompt: the input record's last user message with text (on a resume
 that carries a new prompt, that prompt: the next record's user text
 before its first assistant message), else the first user message with
@@ -2601,10 +2621,25 @@ a later write starts a new run row; a later read is 404),
 `GET /api/live` — the SSE
 stream whose frame ids are the hub's Seq: exactly one selector
 (`run`/`session`/`public_id`/`agent`/`all`), `kinds` over
-event/delta/messages/run (default `event,run`; deltas are opt-in,
-heartbeats never), a ping every 15 s, `Last-Event-ID` resume with the
-gap backfilled from the database and deduped on `(run, kind, pos)`,
-and `event: overflow` when a slow subscriber's queue drops it.
+event/delta/messages/run/attempt (default `event,run`; deltas and
+attempts are opt-in, heartbeats never), a ping every 15 s,
+`Last-Event-ID` resume with the gap backfilled from the database and
+deduped on `(run, kind, pos)`, and `event: overflow` when a slow
+subscriber's queue drops it. Kind `attempt` (H9, O17) is a live-only
+frame: `event: attempt` with the hub's Seq as its id and
+`{run_id, session_id, public_id, step, attempt, layer?, status
+ok|error, error_type?, provider?, model?, start, end, wait_ms?,
+trace_id, span_id}` — one try inside a model call, read from its
+`attempt` span (record contract §3) the moment the span lands (ingest
+or the database's own write, deduped on run, step and attempt), so a
+step that is retrying or falling back is visible before its `chat`
+span ends. `wait_ms` is the provider's retry-after ask
+(`weft.attempt.retry_after_ms`), absent when it sent none (`mw.Retry`'s
+own backoff is not recorded); the selector matches the span's identity
+(`weft.run.id`, the session and public id it carries — not `agent`:
+an attempt span names no agent). Never stored as a frame and never
+backfilled: a resume replays records only; the span itself is stored
+and read by the step routes.
 `all=1` (plan A7, the Live page) streams every run in the database as
 its frames are published — subagent child runs included, each frame
 naming its own `run_id` (a record that names no run is not forwarded);

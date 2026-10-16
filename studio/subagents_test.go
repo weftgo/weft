@@ -47,6 +47,31 @@ func TestSubagentsOnThePage(t *testing.T) {
 	if got := list(""); len(got) != 1 || got[0].ID != "r_steps" {
 		t.Errorf("runs (default) = %+v, want the parent alone: top-level only", got)
 	}
+	// The delegation shape on the row (H9, UX-A-19): the parent counts
+	// its one child, none failed; the child counts none. Search's rows
+	// carry the same.
+	for _, q := range []string{"/api/runs?all=1", "/api/search?all=1"} {
+		var counts struct {
+			Runs []struct {
+				ID             string `json:"id"`
+				ChildrenCount  *int   `json:"children_count"`
+				ChildrenFailed *int   `json:"children_failed"`
+			} `json:"runs"`
+		}
+		decode(t, fetchJSON(t, ts, q, nil), &counts)
+		for _, r := range counts.Runs {
+			switch r.ID {
+			case "r_steps":
+				if r.ChildrenCount == nil || *r.ChildrenCount != 1 || r.ChildrenFailed != nil {
+					t.Errorf("%s: the parent's children_count %v / children_failed %v, want 1 and absent", q, r.ChildrenCount, r.ChildrenFailed)
+				}
+			case kid:
+				if r.ChildrenCount != nil {
+					t.Errorf("%s: the child's children_count %v, want absent", q, *r.ChildrenCount)
+				}
+			}
+		}
+	}
 	if got := list("?parent=r_steps"); len(got) != 1 || got[0] != (row{kid, "r_steps", "c_sub", "researcher"}) {
 		t.Errorf("runs?parent=r_steps = %+v, want the researcher's run linked to r_steps/c_sub", got)
 	}

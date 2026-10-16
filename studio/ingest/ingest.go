@@ -154,6 +154,14 @@ func writeBatch(
 		for _, rec := range batch.Records {
 			hub.Publish(ctx, obsdb.RecordFrame(rec))
 		}
+		// The attempt spans (O17): a retrying step's word before its
+		// chat span ends. A self-publishing database sends them too;
+		// the live route dedups on (run, step, attempt).
+		for _, sp := range batch.Spans {
+			if f, ok := obsdb.AttemptFrame(sp); ok {
+				hub.Publish(ctx, f)
+			}
+		}
 	}
 	if err := db.Write(r.Context(), batch); err != nil {
 		writeIngestError(w, r, http.StatusServiceUnavailable, "unavailable",

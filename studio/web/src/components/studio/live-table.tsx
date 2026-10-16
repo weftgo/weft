@@ -9,7 +9,12 @@
 // until the run's end arrives (looked for over every row, a filtered-out
 // one included) or CANCEL_WAIT_MS pass without it — then the button is
 // back, "no end seen — cancel again" (a cancel is best effort) — and the
-// server's refusal toasted in its own words.
+// server's refusal toasted in its own words. The rows come in tree
+// order (lib/live-rows' rowsOf): a subagent is indented under its
+// parent (H9, UX-A-18); the step cell carries the run's newest attempt
+// frame when it says something (lib/live-attempts' attemptNote: a
+// failed try while the run still runs reads retrying); the session cell
+// is the session's id, its public id a quieter line under it.
 import { useEffect, useState } from "react"
 import { Link } from "@tanstack/react-router"
 
@@ -29,7 +34,9 @@ import {
   tokensOf,
 } from "@/lib/live-rows"
 import type { LiveRowView } from "@/lib/live-rows"
+import { attemptNote } from "@/lib/live-attempts"
 import { runLink, sessionLink } from "@/lib/links"
+import { shortId } from "@/lib/title"
 import { notify } from "@/lib/notify"
 import { STATUS, statusOf } from "@/lib/status"
 import { statusClass } from "@/lib/status-class"
@@ -265,7 +272,7 @@ export function LiveTable({
             TTFT
           </TableHead>
           <TableHead>started</TableHead>
-          <TableHead title="the conversation this run is a turn of">
+          <TableHead title="the conversation this run is a turn of (its public id under it)">
             session
           </TableHead>
           <TableHead>
@@ -279,6 +286,7 @@ export function LiveTable({
           const step = stepText(v)
           const tok = tokensOf(v)
           const ttft = v.stats?.ttftMs ?? null
+          const note = attemptNote(v.attempt, !ended(r))
           const peeked = peek === r.id
           return (
             <TableRow
@@ -295,8 +303,23 @@ export function LiveTable({
                 onPeek(peeked ? undefined : r.id)
               }}
             >
-              <TableCell className="max-w-56">
+              <TableCell
+                className="max-w-56"
+                data-depth={v.depth}
+                style={
+                  v.depth ? { paddingLeft: `${0.5 + v.depth * 1.25}rem` } : {}
+                }
+              >
                 <div className="flex flex-wrap items-center gap-1.5">
+                  {v.depth ? (
+                    <span
+                      className="font-mono text-[11px] text-faint"
+                      title={`a child run of ${r.parent_run_id}`}
+                      aria-label="child run of the row above"
+                    >
+                      ↳
+                    </span>
+                  ) : null}
                   <Link
                     {...runLink(r.id)}
                     className="truncate font-mono text-[13px] hover:text-thread-ink"
@@ -324,6 +347,16 @@ export function LiveTable({
                 data-cell="step"
               >
                 {step.text}
+                {note ? (
+                  <div
+                    className={`text-[11px] whitespace-nowrap ${note.retrying ? statusClass(STATUS.interrupted.role).text : "text-faint"}`}
+                    title={note.title}
+                    data-attempt={v.attempt?.attempt}
+                    data-retrying={note.retrying ? "" : undefined}
+                  >
+                    {note.text}
+                  </div>
+                ) : null}
               </TableCell>
               <TableCell
                 className="text-right font-mono text-xs tabular-nums"
@@ -376,15 +409,23 @@ export function LiveTable({
                   <Link
                     {...sessionLink(r.session_id)}
                     className="hover:text-thread-ink"
-                    title={r.session_id}
+                    title={`the session ${r.session_id}`}
+                    data-session-cell
                   >
-                    {r.public_id || r.session_id}
+                    {shortId(r.session_id)}
                   </Link>
-                ) : r.public_id ? (
-                  <span title="public id">{r.public_id}</span>
                 ) : (
                   <span className="text-faint">—</span>
                 )}
+                {r.public_id ? (
+                  <div
+                    className="truncate text-faint"
+                    title={`public id ${r.public_id}`}
+                    data-public-id-cell
+                  >
+                    {r.public_id}
+                  </div>
+                ) : null}
               </TableCell>
               <TableCell>
                 <div className="flex items-center justify-end gap-1.5">

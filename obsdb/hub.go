@@ -6,12 +6,13 @@ import (
 )
 
 // Frame is one live-lane message: a record as ingested (deltas
-// included), or a run row that changed.
+// included), a run row that changed, or an attempt span as it landed.
 type Frame struct {
-	Kind   string  // "record" | "run"
+	Kind   string  // "record" | "run" | "attempt"
 	Record *Record // Kind == record; Weft derived
 	Weft   Weft
 	Run    *RunRow // Kind == run
+	Span   *Span   // Kind == attempt; Weft derived
 	Seq    uint64  // hub-wide, monotonic: the SSE id and the resume cursor
 }
 
@@ -19,6 +20,12 @@ type Frame struct {
 const (
 	FrameRecord = "record"
 	FrameRun    = "run"
+	// FrameAttempt is an `attempt` span (one try inside a model call,
+	// docs/record-contract.md §3) published as it lands (O17, UX-E-30):
+	// the live lane's word that a step is retrying or falling back
+	// before its chat span ends. Live only: the span is stored as any
+	// span is, and the frame is never backfilled.
+	FrameAttempt = "attempt"
 )
 
 // Selector scopes a subscription: exactly one field set. A run-scoped
@@ -195,4 +202,18 @@ func RunFrame(r RunRow) Frame {
 		ResumedFrom: r.ResumedFrom,
 	}
 	return Frame{Kind: FrameRun, Run: &r, Weft: w}
+}
+
+// AttemptFrame builds the frame a write publishes for an `attempt`
+// span (FrameAttempt): the span with its derived identity. ok is false
+// for every other span, and for an attempt span that names no run.
+func AttemptFrame(s Span) (Frame, bool) {
+	if s.Name != "attempt" {
+		return Frame{}, false
+	}
+	w := DeriveSpan(s)
+	if w.RunID == "" {
+		return Frame{}, false
+	}
+	return Frame{Kind: FrameAttempt, Span: &s, Weft: w}, true
 }

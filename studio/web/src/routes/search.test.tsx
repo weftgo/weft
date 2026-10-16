@@ -174,7 +174,13 @@ describe("the Runs search box and its URL chips", () => {
     fireEvent.click(screen.getByRole("button", { name: "clear “refund”" }))
     await waitFor(() => expect(router.state.location.search.q).toBeUndefined())
     expect(chipKeys()).not.toContain("q")
-    // A box adds a chip: the tool box writes ?tool=.
+    // A box adds a chip: the tool box writes ?tool=. The boxes sit behind
+    // "+ filter" (H9): folded until it opens, its count the set ones.
+    expect(document.querySelector("[data-run-filters]")).toBeNull()
+    const more = document.querySelector<HTMLElement>("[data-more-filters]")!
+    expect(more.getAttribute("aria-expanded")).toBe("false")
+    expect(more.textContent).toContain("+ filter · ")
+    fireEvent.click(more)
     const tool = screen.getByRole("textbox", { name: "filter by tool" })
     fireEvent.change(tool, { target: { value: "refund_order" } })
     fireEvent.keyDown(tool, { key: "Enter" })
@@ -264,6 +270,7 @@ describe("the Runs search box and its URL chips", () => {
     await waitFor(() =>
       expect(document.querySelector("[data-when-notes]")).toBeNull()
     )
+    fireEvent.click(document.querySelector<HTMLElement>("[data-more-filters]")!)
     const since = screen.getByRole("textbox", { name: "started since" })
     fireEvent.change(since, { target: { value: "2026-10-01T09:00:00" } })
     fireEvent.keyDown(since, { key: "Enter" })

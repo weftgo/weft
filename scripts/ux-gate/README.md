@@ -19,3 +19,11 @@
   `tracer_only` contract fixture, walks the journeys (API, Studio UI, the panel) and
   the principle gate, and prints one PASS / FAIL / RECORDED line per clause to
   `$RUN/gate7.txt` (screenshots in `$RUN/shots`); exit 1 when a clause FAILs.
+- `h9.js` — item H9's done line in a real browser: the runs list (toolbar folded, "with
+  subagents" nested), `/compare` (its picker, two picks) and a subagent parent's run page fit
+  1440 and 360 px with no sideways page scroll, and `/live` during an offline run draws the
+  retrying step from the live `attempt` frame, the parent above its child, and keeps the rows a
+  minute (a reload included). Run it against a Studio holding the contract fixtures, with
+  `DEMO` a command that runs such a director (a wefttest script whose first model call fails
+  retryably under `mw.Retry`, delegating to a subagent, through `otel.Install(otel.Studio(…))`):
+  `STUDIO=… TOKEN=… DEMO="<binary> <studio url> <token>" PLAYWRIGHT_DIR=… node scripts/ux-gate/h9.js`.

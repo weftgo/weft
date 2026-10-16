@@ -678,13 +678,14 @@ export function RunHeader({
             <Link
               key={c.id}
               {...runLink(c.id)}
-              className="flex items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono text-[11px] text-thread-ink hover:bg-secondary"
-              title={`open the child run (${c.status})`}
+              className="flex max-w-full min-w-0 items-center gap-1 rounded-sm border px-1.5 py-0.5 font-mono text-[11px] text-thread-ink hover:bg-secondary"
+              title={`open the child run ${c.id} (${c.status})`}
             >
               <StatusChip row={c} dotOnly />
               {c.agent}
-              <ChevronRight className="size-3 text-faint" />
-              {c.id}
+              <ChevronRight className="size-3 shrink-0 text-faint" />
+              {/* A long child id ellipsizes (H9, UX-A-21): never wider than the page. */}
+              <span className="min-w-0 truncate">{c.id}</span>
               <ArrowUpRight className="size-3" data-slot="icon" />
             </Link>
           ))}

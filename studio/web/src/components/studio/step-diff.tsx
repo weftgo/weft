@@ -338,7 +338,8 @@ export function StepDiffTable({
           </li>
         ))}
       </ul>
-      <div className="overflow-x-auto rounded border">
+      {/* relative: an sr-only cell word positions inside this frame, never past the page (H9, UX-A-16). */}
+      <div className="relative overflow-x-auto rounded border">
         <table className="w-full font-mono text-[11px]">
           <caption className="sr-only">
             steps of {runs.join(", ")} aligned by step ordinal;{" "}

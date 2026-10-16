@@ -3,7 +3,8 @@
 // surface on hover.
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { screen } from "@testing-library/react"
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react"
+import { QueryClient } from "@tanstack/react-query"
 import { describe, expect, it } from "vitest"
 
 import type { RunsPage } from "@/lib/api"
@@ -140,5 +141,65 @@ describe("RunsTable problem badges (U4)", () => {
     const cancel = [...container.querySelectorAll("tbody tr")][5]
     expect(cancel.querySelector("[data-status]")!.textContent).toBe("cancelled")
     expect(cancel.querySelector("[data-problems]")).toBeNull()
+  })
+
+  it("H9: a parent's ⑂ chip opens its child runs under it; a tree view draws them indented", async () => {
+    const [ok] = goldenRuns().filter((r) => r.id === "r_ok")
+    const dad = {
+      ...ok,
+      id: "r_dad",
+      children_count: 2,
+      children_failed: 1,
+    }
+    const kid = {
+      ...ok,
+      id: "r_dad/0/c1",
+      parent_run_id: "r_dad",
+      agent: "worker",
+    }
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    client.setQueryData(["runs", "children", "r_dad"], {
+      total: 1,
+      runs: [kid],
+      next_before: null,
+    })
+    const { container } = await renderWithRouter(
+      <RunsTable runs={[dad]} now={NOW} />,
+      client
+    )
+    const chip = container.querySelector<HTMLElement>("[data-children-chip]")!
+    expect(chip.textContent).toContain("⑂ 2")
+    expect(chip.textContent).toContain("1 failed")
+    expect(chip.getAttribute("aria-expanded")).toBe("false")
+    expect(container.querySelectorAll("tbody tr")).toHaveLength(1)
+    fireEvent.click(chip)
+    await waitFor(() =>
+      expect(container.querySelectorAll("tbody tr")).toHaveLength(2)
+    )
+    const rows = [...container.querySelectorAll<HTMLElement>("tbody tr")]
+    expect(rows[1].dataset.depth).toBe("1")
+    expect(rows[1].textContent).toContain("worker")
+    expect(chip.getAttribute("aria-expanded")).toBe("true")
+    cleanup()
+
+    // The "with subagents" view: the rows come as a tree (depths), the
+    // chip a plain label — its children are listed already.
+    const tree = await renderWithRouter(
+      <RunsTable
+        runs={[dad, kid]}
+        depths={{ r_dad: 0, "r_dad/0/c1": 1 }}
+        now={NOW}
+      />
+    )
+    const label = tree.container.querySelector<HTMLElement>(
+      "[data-children-chip]"
+    )!
+    expect(label.tagName).toBe("SPAN")
+    const trs = [...tree.container.querySelectorAll<HTMLElement>("tbody tr")]
+    expect(trs.map((tr) => tr.dataset.depth)).toEqual([undefined, "1"])
+    // A nested child does not repeat "subagent of": its place says so.
+    expect(trs[1].querySelector("[data-parent-link]")).toBeNull()
   })
 })

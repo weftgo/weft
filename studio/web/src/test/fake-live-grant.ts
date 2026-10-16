@@ -43,7 +43,7 @@ export function setServerSkew(ms: number) {
 }
 
 const SELECTORS = ["run", "session", "public_id", "agent", "all"] as const
-const KINDS = ["event", "delta", "messages", "run"]
+const KINDS = ["event", "delta", "messages", "run", "attempt"]
 
 /** The canonical stream a query names, or an error message. */
 function streamOf(
@@ -63,7 +63,7 @@ function streamOf(
     value = "1"
   }
   // live.go's liveKinds: omitted or empty is event,run; names trimmed,
-  // a trailing comma allowed, anything outside the four a 400.
+  // a trailing comma allowed, anything outside the five a 400.
   const raw = q.get("kinds") || "event,run"
   const names = raw
     .split(",")
@@ -71,11 +71,14 @@ function streamOf(
     .filter(Boolean)
   const bad = names.find((k) => !KINDS.includes(k))
   if (bad !== undefined)
-    return { error: `kind "${bad}" is not one of event, delta, messages, run` }
+    return {
+      error: `kind "${bad}" is not one of event, delta, messages, run, attempt`,
+    }
   const kinds = [...new Set(names)].sort()
   if (!kinds.length)
     return {
-      error: "kinds must name at least one of event, delta, messages, run",
+      error:
+        "kinds must name at least one of event, delta, messages, run, attempt",
     }
   return { stream: JSON.stringify([sel, value, kinds.join(",")]), sel, value }
 }

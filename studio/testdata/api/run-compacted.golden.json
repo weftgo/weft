@@ -50,6 +50,7 @@
   "catalog_hash": "974dbbd40b479735e3931872bc773dc4351bddc76c1e52c12457ea04c42f2b14",
   "request_count": 6,
   "prompt_preview": "refund order 42",
+  "children_count": 1,
   "children": [
     {
       "id": "r_steps/1/c_sub",

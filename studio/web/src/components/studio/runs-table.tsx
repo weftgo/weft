@@ -5,13 +5,25 @@
 // (lib/title.ts's runTitle, U6) — the id a mono, copyable line under
 // it; a failed row carries its error below, so the list already
 // answers "what broke". Numbers are tabular mono; the whole row opens
-// the run. The running dot pulses once per 2 s (reduced motion stops
+// the run. A run that started others carries "⑂ n" (lib/delegation.ts,
+// H9): a disclosure that reads its child runs and draws them under it;
+// in the "with subagents" view the list is a tree already (depths). A
+// narrow window folds the quieter columns (COL). The running dot pulses once per 2 s (reduced motion stops
 // it, styles.css).
 import { Check, Copy } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
+import { useQuery } from "@tanstack/react-query"
 import { Link, useNavigate } from "@tanstack/react-router"
 
+import { fetchRuns } from "@/lib/api"
 import type { RunRow } from "@/lib/api"
+import {
+  CHILDREN_UNREADABLE,
+  HIDE_CHILDREN,
+  NO_CHILDREN_LISTED,
+  SHOW_CHILDREN,
+  childrenChip,
+} from "@/lib/delegation"
 import { stoppedByWords } from "@/lib/stopped-by"
 import { ProblemBadges } from "@/components/studio/problem-badges"
 import {
@@ -44,7 +56,7 @@ import { DerivedChip } from "@/components/studio/hole-badge"
 import { derivedUsageUnknown } from "@/lib/honesty"
 import { runLink, sessionLink } from "@/lib/links"
 import { statusClass } from "@/lib/status-class"
-import { statusOf } from "@/lib/status"
+import { STATUS, statusOf } from "@/lib/status"
 import type { Status, StatusRow } from "@/lib/status"
 import { runTitle, shortId } from "@/lib/title"
 import type { Title } from "@/lib/title"
@@ -306,6 +318,10 @@ export interface RunsTableProps {
   showCost?: boolean
   /** The column sort; absent, the headers are plain. */
   sort?: RunsSort
+  /** The rows are a tree already (the "with subagents" view, in
+   * lib/delegation.ts's nest order): each row's depth, by id. Absent,
+   * every row is a root and its "⑂ n" chip opens its children here. */
+  depths?: Record<string, number>
 }
 
 /** CostCell is a run's own cost and, when its subagents cost anything
@@ -431,31 +447,60 @@ export function RunsTable({
   now,
   showCost,
   sort,
+  depths,
 }: RunsTableProps) {
   const clock = now ?? Date.now()
-  const navigate = useNavigate()
   const selectedRow = useRef<HTMLTableRowElement>(null)
   // j/k keeps the selected row in view.
   useEffect(() => {
     selectedRow.current?.scrollIntoView({ block: "nearest" })
   }, [selectedId])
+  // The rows whose child runs are open in place (H9): by run id.
+  const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set())
+  const toggle = (id: string) =>
+    setOpen((cur) => {
+      const next = new Set(cur)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  const row = (run: RunRow, depth: number, listed: boolean) => (
+    <RunTableRow
+      key={run.id}
+      run={run}
+      runs={runs}
+      depth={depth}
+      clock={clock}
+      showCost={showCost}
+      selected={selectedId === run.id}
+      selectedRef={selectedRow}
+      // A row whose children are listed already (the "with subagents"
+      // view's tree) has nothing to open.
+      open={listed ? undefined : open}
+      onToggle={toggle}
+    />
+  )
   return (
-    <Table>
+    <Table className="table-fixed sm:table-auto">
       <TableHeader>
         <TableRow className="hover:bg-transparent">
-          <TableHead className="w-28">status</TableHead>
+          <TableHead className="w-24 sm:w-28">status</TableHead>
           <TableHead>run</TableHead>
-          <TableHead>agent</TableHead>
-          <TableHead title="the thread this run is a turn of">
+          <TableHead className={COL.agent}>agent</TableHead>
+          <TableHead
+            className={COL.session}
+            title="the thread this run is a turn of"
+          >
             session
           </TableHead>
-          <TableHead>model</TableHead>
-          <TableHead className="text-right">steps</TableHead>
+          <TableHead className={COL.model}>model</TableHead>
+          <TableHead className={`text-right ${COL.steps}`}>steps</TableHead>
           <SortHead
             sortKey="tokens"
             sort={sort}
             label="tokens in / out"
             title="input / output tokens"
+            className={`text-right ${COL.tokens}`}
           />
           {showCost ? (
             <SortHead
@@ -463,127 +508,341 @@ export function RunsTable({
               sort={sort}
               label="cost"
               title="the run's own cost, priced at read time; its subagents' apart"
+              className={`text-right ${COL.cost}`}
             />
           ) : null}
-          <SortHead sortKey="started" sort={sort} label="started" />
-          <SortHead sortKey="duration" sort={sort} label="duration" />
+          <SortHead
+            sortKey="started"
+            sort={sort}
+            label="started"
+            className={`text-right ${COL.started}`}
+          />
+          <SortHead
+            sortKey="duration"
+            sort={sort}
+            label="duration"
+            className="w-20 text-right sm:w-auto"
+          />
         </TableRow>
       </TableHeader>
       <TableBody>
-        {runs.map((run) => {
-          const selected = selectedId === run.id
-          return (
-            <TableRow
-              key={run.id}
-              ref={selected ? selectedRow : undefined}
-              data-selected={selected ? "" : undefined}
-              className={`group h-9 cursor-pointer ${
-                selected ? "bg-accent shadow-[inset_2px_0_0_var(--thread)]" : ""
-              }`}
-              onClick={(e) => {
-                // A click anywhere on the row opens the run; links and
-                // buttons inside keep their own behaviour (middle-click,
-                // copy).
-                if ((e.target as HTMLElement).closest("a,button")) return
-                void navigate(runLink(run.id))
-              }}
-            >
-              <TableCell>
-                <StatusChip row={run} runs={runs} />
-              </TableCell>
-              <TableCell className="max-w-80">
-                <RunTitle run={run} extra={run.public_id || undefined} />
-                {run.parent_run_id ? (
-                  <div
-                    className="flex items-center gap-1 truncate font-mono text-[11px] text-faint"
-                    data-parent-link
-                  >
-                    ↳ subagent of
-                    <Link
-                      {...runLink(run.parent_run_id)}
-                      className="truncate text-muted-foreground hover:text-thread-ink hover:underline"
-                      title={`the parent run (call ${run.parent_call_id})`}
-                    >
-                      {run.parent_run_id}
-                    </Link>
-                  </div>
-                ) : null}
-                <ReplayChip run={run} />
-                <DerivedChip row={run} />
-                <StoppedByLine run={run} />
-                <ProblemBadges run={run} status={statusOf(run, runs).key} />
-                {run.err ? (
-                  <div
-                    className="truncate font-mono text-[11px] text-status-bad/80"
-                    title={run.err}
-                  >
-                    {run.err}
-                  </div>
-                ) : null}
-              </TableCell>
-              <TableCell className="whitespace-nowrap">
-                {run.agent || <span className="text-faint">—</span>}
-              </TableCell>
-              <TableCell className="whitespace-nowrap">
-                {run.session_id ? (
-                  <Link
-                    {...sessionLink(run.session_id)}
-                    className="font-mono text-[11px] text-muted-foreground hover:text-thread-ink hover:underline"
-                    title={`the session ${run.session_id} (${run.public_id || "no public id"})`}
-                  >
-                    {shortId(run.session_id)}
-                    {run.turn ? ` ·t${run.turn}` : ""}
-                  </Link>
-                ) : (
-                  <span className="text-faint">—</span>
-                )}
-              </TableCell>
-              <TableCell>
-                <Badge
-                  variant="outline"
-                  className="font-mono text-[11px] font-normal"
-                >
-                  {run.model.provider}/{run.model.name}
-                </Badge>
-              </TableCell>
-              <TableCell className="text-right font-mono tabular-nums">
-                {run.steps}
-              </TableCell>
-              <TableCell className="text-right">
-                {derivedUsageUnknown(run) ? (
-                  <UnknownTokens reason={run.cost_reason} />
-                ) : (
-                  <TokensCell usage={run.usage} />
-                )}
-              </TableCell>
-              {showCost ? (
-                <TableCell
-                  className="text-right whitespace-nowrap"
-                  data-cost-cell
-                >
-                  <CostCell run={run} />
-                </TableCell>
-              ) : null}
-              <TableCell
-                className="text-right font-mono whitespace-nowrap tabular-nums"
-                title={absoluteTime(run.started)}
-              >
-                {relativeTime(run.started, clock)}
-              </TableCell>
-              <TableCell className="text-right font-mono whitespace-nowrap tabular-nums">
-                {run.status === "running" ? (
-                  <span className="text-status-run-ink" title="elapsed so far">
-                    {elapsed(run.started, clock)}…
-                  </span>
-                ) : (
-                  duration(run.started, run.finished)
-                )}
-              </TableCell>
-            </TableRow>
-          )
-        })}
+        {runs.map((run) =>
+          row(run, depths?.[run.id] ?? 0, depths !== undefined)
+        )}
       </TableBody>
     </Table>
+  )
+}
+
+/** The columns a narrow window folds (H9, UX-A-09/21): the run, its
+ * status and duration always; the rest from the width that has room —
+ * no page ever scrolls sideways (the table scrolls in its own frame
+ * past them). */
+const COL = {
+  agent: "hidden sm:table-cell",
+  session: "hidden 2xl:table-cell",
+  model: "hidden xl:table-cell",
+  steps: "hidden lg:table-cell",
+  tokens: "hidden md:table-cell",
+  cost: "hidden md:table-cell",
+  started: "hidden sm:table-cell",
+}
+
+interface RunTableRowProps {
+  run: RunRow
+  /** Every row of the list: where a park's resume is looked for. */
+  runs: RunRow[]
+  depth: number
+  clock: number
+  showCost?: boolean
+  selected: boolean
+  selectedRef: React.RefObject<HTMLTableRowElement | null>
+  /** The open set; undefined when the row's children are listed in
+   * the table already (no disclosure). */
+  open?: ReadonlySet<string>
+  onToggle: (id: string) => void
+}
+
+/** One run's row, and — opened through its "⑂ n" chip (H9, UX-A-19) —
+ * its child runs under it, one level deeper, each with a chip of its
+ * own: a tree read a level at a time, never per row up front. */
+function RunTableRow({
+  run,
+  runs,
+  depth,
+  clock,
+  showCost,
+  selected,
+  selectedRef,
+  open,
+  onToggle,
+}: RunTableRowProps) {
+  const navigate = useNavigate()
+  const chip = childrenChip(run)
+  const isOpen = open?.has(run.id) ?? false
+  return (
+    <>
+      <TableRow
+        ref={selected ? selectedRef : undefined}
+        data-selected={selected ? "" : undefined}
+        data-depth={depth || undefined}
+        className={`group h-9 cursor-pointer ${
+          selected ? "bg-accent shadow-[inset_2px_0_0_var(--thread)]" : ""
+        }`}
+        onClick={(e) => {
+          // A click anywhere on the row opens the run; links and
+          // buttons inside keep their own behaviour (middle-click,
+          // copy).
+          if ((e.target as HTMLElement).closest("a,button")) return
+          void navigate(runLink(run.id))
+        }}
+      >
+        <TableCell>
+          <StatusChip row={run} runs={runs} />
+        </TableCell>
+        <TableCell
+          className="max-w-0 sm:max-w-64 lg:max-w-80"
+          style={depth ? { paddingLeft: `${0.5 + depth * 1.25}rem` } : {}}
+        >
+          <div className="flex min-w-0 items-center gap-1.5">
+            {depth ? (
+              <span
+                className="shrink-0 font-mono text-[11px] text-faint"
+                aria-hidden
+              >
+                ↳
+              </span>
+            ) : null}
+            <div className="min-w-0 flex-1">
+              <RunTitle run={run} extra={run.public_id || undefined} />
+            </div>
+            {chip ? (
+              <ChildrenToggle
+                chip={chip}
+                runID={run.id}
+                open={open ? isOpen : undefined}
+                onToggle={onToggle}
+              />
+            ) : null}
+          </div>
+          {run.parent_run_id && !depth ? (
+            <div
+              className="flex items-center gap-1 truncate font-mono text-[11px] text-faint"
+              data-parent-link
+            >
+              ↳ subagent of
+              <Link
+                {...runLink(run.parent_run_id)}
+                className="truncate text-muted-foreground hover:text-thread-ink hover:underline"
+                title={`the parent run (call ${run.parent_call_id})`}
+              >
+                {run.parent_run_id}
+              </Link>
+            </div>
+          ) : null}
+          <ReplayChip run={run} />
+          <DerivedChip row={run} />
+          <StoppedByLine run={run} />
+          <ProblemBadges run={run} status={statusOf(run, runs).key} />
+          {run.err ? (
+            <div
+              className="truncate font-mono text-[11px] text-status-bad/80"
+              title={run.err}
+            >
+              {run.err}
+            </div>
+          ) : null}
+        </TableCell>
+        <TableCell
+          className={`max-w-32 truncate whitespace-nowrap ${COL.agent}`}
+        >
+          {run.agent || <span className="text-faint">—</span>}
+        </TableCell>
+        <TableCell className={`whitespace-nowrap ${COL.session}`}>
+          {run.session_id ? (
+            <Link
+              {...sessionLink(run.session_id)}
+              className="font-mono text-[11px] text-muted-foreground hover:text-thread-ink hover:underline"
+              title={`the session ${run.session_id} (${run.public_id || "no public id"})`}
+            >
+              {shortId(run.session_id)}
+              {run.turn ? ` ·t${run.turn}` : ""}
+            </Link>
+          ) : (
+            <span className="text-faint">—</span>
+          )}
+        </TableCell>
+        <TableCell className={`max-w-44 ${COL.model}`}>
+          <Badge
+            variant="outline"
+            className="max-w-full truncate font-mono text-[11px] font-normal"
+            title={`${run.model.provider}/${run.model.name}`}
+          >
+            {run.model.provider}/{run.model.name}
+          </Badge>
+        </TableCell>
+        <TableCell className={`text-right font-mono tabular-nums ${COL.steps}`}>
+          {run.steps}
+        </TableCell>
+        <TableCell className={`text-right ${COL.tokens}`}>
+          {derivedUsageUnknown(run) ? (
+            <UnknownTokens reason={run.cost_reason} />
+          ) : (
+            <TokensCell usage={run.usage} />
+          )}
+        </TableCell>
+        {showCost ? (
+          <TableCell
+            className={`text-right whitespace-nowrap ${COL.cost}`}
+            data-cost-cell
+          >
+            <CostCell run={run} />
+          </TableCell>
+        ) : null}
+        <TableCell
+          className={`text-right font-mono whitespace-nowrap tabular-nums ${COL.started}`}
+          title={absoluteTime(run.started)}
+        >
+          {relativeTime(run.started, clock)}
+        </TableCell>
+        <TableCell className="text-right font-mono whitespace-nowrap tabular-nums">
+          {run.status === "running" ? (
+            <span className="text-status-run-ink" title="elapsed so far">
+              {elapsed(run.started, clock)}…
+            </span>
+          ) : (
+            duration(run.started, run.finished)
+          )}
+        </TableCell>
+      </TableRow>
+      {isOpen && open ? (
+        <ChildRows
+          parent={run.id}
+          depth={depth + 1}
+          clock={clock}
+          showCost={showCost}
+          open={open}
+          onToggle={onToggle}
+          columns={showCost ? 10 : 9}
+        />
+      ) : null}
+    </>
+  )
+}
+
+/** ChildrenToggle is the "⑂ n" chip (the failed count in the failed
+ * role's colour): a disclosure that opens the child runs under the
+ * row, or — open undefined, the children listed already — a label. */
+function ChildrenToggle({
+  chip,
+  runID,
+  open,
+  onToggle,
+}: {
+  chip: NonNullable<ReturnType<typeof childrenChip>>
+  runID: string
+  open?: boolean
+  onToggle: (id: string) => void
+}) {
+  const words = (
+    <>
+      {chip.text}
+      {chip.failed ? (
+        <span className={statusClass(STATUS.failed.role).text}>
+          {" "}
+          · {chip.failed}
+        </span>
+      ) : null}
+    </>
+  )
+  if (open === undefined)
+    return (
+      <span
+        className="shrink-0 font-mono text-[11px] text-muted-foreground"
+        title={chip.title}
+        data-children-chip
+      >
+        {words}
+      </span>
+    )
+  return (
+    <button
+      type="button"
+      className="shrink-0 rounded border px-1 font-mono text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+      aria-expanded={open}
+      aria-label={`${open ? HIDE_CHILDREN : SHOW_CHILDREN}: ${chip.title}`}
+      title={`${chip.title} — ${open ? HIDE_CHILDREN : SHOW_CHILDREN}`}
+      onClick={(e) => {
+        e.stopPropagation()
+        onToggle(runID)
+      }}
+      data-children-chip
+    >
+      {open ? "▾" : "▸"} {words}
+    </button>
+  )
+}
+
+/** ChildRows reads one run's child runs (GET /api/runs?parent=<id>) as
+ * it opens and draws them as rows one level deeper; each opens its own
+ * the same way (grandchildren read when asked, never before). */
+function ChildRows({
+  parent,
+  depth,
+  clock,
+  showCost,
+  open,
+  onToggle,
+  columns,
+}: {
+  parent: string
+  depth: number
+  clock: number
+  showCost?: boolean
+  open: ReadonlySet<string>
+  onToggle: (id: string) => void
+  columns: number
+}) {
+  const q = useQuery({
+    queryKey: ["runs", "children", parent],
+    queryFn: () => fetchRuns({ parent, limit: 100 }),
+    staleTime: 5_000,
+  })
+  const pad = { paddingLeft: `${0.5 + depth * 1.25}rem` }
+  if (q.isPending || q.isError || q.data.runs.length === 0)
+    return (
+      <TableRow className="hover:bg-transparent" data-children-of={parent}>
+        <TableCell
+          colSpan={columns}
+          className="font-mono text-[11px] text-faint"
+          style={pad}
+        >
+          {q.isPending
+            ? "…"
+            : q.isError
+              ? CHILDREN_UNREADABLE
+              : NO_CHILDREN_LISTED}
+        </TableCell>
+      </TableRow>
+    )
+  const kids = q.data.runs
+  return (
+    <>
+      {kids.map((k) => (
+        <RunTableRow
+          key={k.id}
+          run={k}
+          runs={kids}
+          depth={depth}
+          clock={clock}
+          showCost={showCost}
+          selected={false}
+          selectedRef={{ current: null }}
+          open={open}
+          onToggle={onToggle}
+        />
+      ))}
+    </>
   )
 }
 

@@ -1,10 +1,14 @@
-// The live page (S4.7, plan H6): everything streaming right now. When
-// api/meta's live_all says this caller may (the dev token, or setup A's
-// loopback), ONE stream — /api/live?all=1, kinds event,run, opened with
-// a grant like every other — carries every run: run frames make and
-// refresh the rows, event frames keep their step, tokens so far and
-// TTFT (lib/live-rows). The running list seeds the rows (run frames are
-// never backfilled) and is read again after a loss. A reconnect resumes
+// The live page (S4.7, plan H6, H9): everything streaming right now.
+// When api/meta's live_all says this caller may (the dev token, or
+// setup A's loopback), ONE stream — /api/live?all=1, kinds
+// event,run,attempt, opened with a grant like every other — carries
+// every run: run frames make and refresh the rows, event frames keep
+// their step, tokens so far and TTFT, attempt frames a retrying step's
+// word (lib/live-rows, lib/live-attempts). The rows are drawn as trees,
+// a subagent under its parent; one that ended stays a minute. The
+// running list seeds the rows (run frames are never backfilled) and is
+// read again after a loss; the first load also lists the runs that
+// ended in the last minute (applyRecent), so a reload keeps them. A reconnect resumes
 // (Last-Event-ID) and the server backfills a bounded set — the footer
 // says which. Without live_all (a panel token) the page polls the
 // running list every 5 s, with the agent streams it may open, and says
@@ -18,10 +22,15 @@ import { fetchRun, fetchRuns, metaQuery } from "@/lib/api"
 import type { RunRow } from "@/lib/api"
 import { openLive, throttle } from "@/lib/live"
 import type { LiveRecord } from "@/lib/live"
+import { attemptFrames } from "@/lib/live-attempts"
+import type { LiveAttempt } from "@/lib/live-attempts"
 import {
   LIVE_BACKFILL_LINE,
+  LIVE_GRACE_LINE,
   LIVE_POLL_MS,
+  applyAttempt,
   applyBackfillError,
+  applyRecent,
   applyRecord,
   applyRun,
   applySeed,
@@ -271,6 +280,18 @@ function StreamedRuns({
     queryFn: () => fetchRuns({ status: "running", parent: "*", limit: 200 }),
   })
   const seeded = useRef(false)
+  // The first load's recent runs (H9, UX-A-18): those that ended in the
+  // last minute are listed as just ended, so a reload keeps them.
+  const recent = useQuery({
+    queryKey: ["runs", "live-page", "recent"],
+    queryFn: () => fetchRuns({ parent: "*", limit: 100 }),
+    staleTime: Infinity,
+  })
+  useEffect(() => {
+    if (!recent.data) return
+    const at = Date.now()
+    setState((s) => applyRecent(s, recent.data.runs, at))
+  }, [recent.data])
 
   // The running list: rows the stream has not told about yet, and —
   // after a loss — the end of a running row the gap hid (each read
@@ -296,18 +317,21 @@ function StreamedRuns({
   useEffect(() => {
     let runs: RunRow[] = []
     let records: LiveRecord[] = []
+    let attempts: LiveAttempt[] = []
     let errors: { run_id: string; kind: string }[] = []
     let timer: ReturnType<typeof setTimeout> | null = null
     const flush = () => {
       timer = null
-      const [rs, recs, errs] = [runs, records, errors]
+      const [rs, recs, atts, errs] = [runs, records, attempts, errors]
       runs = []
       records = []
+      attempts = []
       errors = []
       const at = Date.now()
       setState((s) => {
         let n = s
         for (const r of recs) n = applyRecord(n, r, at)
+        for (const a of atts) n = applyAttempt(n, a)
         for (const r of rs) n = applyRun(n, r, at)
         for (const f of errs) n = applyBackfillError(n, f)
         return n
@@ -323,7 +347,11 @@ function StreamedRuns({
     )
     const h = openLive({
       selector: { all: true },
-      kinds: ["event", "run"],
+      kinds: ["event", "run", "attempt"],
+      frames: attemptFrames((a) => {
+        attempts.push(a)
+        schedule()
+      }),
       onRun: (f) => {
         runs.push(f.run)
         schedule()
@@ -399,7 +427,7 @@ function StreamedRuns({
             : ""}
         </span>
       </div>
-      {seed.isPending && all.length === 0 ? (
+      {(seed.isPending || recent.isPending) && all.length === 0 ? (
         <p className="py-16 text-center font-mono text-xs text-faint">
           loading…
         </p>
@@ -419,7 +447,7 @@ function StreamedRuns({
         />
       )}
       <p className="font-mono text-[11px] text-faint" data-live-footer>
-        {LIVE_BACKFILL_LINE}
+        <span>{LIVE_GRACE_LINE}</span> · <span>{LIVE_BACKFILL_LINE}</span>
       </p>
     </div>
   )

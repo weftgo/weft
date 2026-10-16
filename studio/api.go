@@ -1366,10 +1366,13 @@ func (s *Server) serveRunTranscript(w http.ResponseWriter, r *http.Request, id s
 // itself, with times — each with run_id the run's. With tree=1 (U9.1,
 // capability spans_tree: obsdb.TreeReader) the spans of every
 // descendant run come beside them — the subagent tree, by the
-// weft.parent.run.id chain, from the run's trace in one read — each
-// keyed by run_id + span_id with its run's parent_run_id, in start
-// order. A panel token reads a tree whose every span is its public
-// id's (the trace route's rule, scopeSpans).
+// weft.parent.run.id chain and core's id rule, found from the run rows
+// and read by run id (obsdb.TreeReader.RunTreeSpans) — each keyed by
+// run_id + span_id with its run's parent_run_id, in start order, at
+// most obsdb.TreeSpanCap, with the tree's holes (treeSpansDoc). A
+// panel token reads the run's own spans and the descendants of its
+// public id (scopeTree): the others are left out under a hidden hole,
+// never a 403 for the whole tree.
 func (s *Server) serveRunSpans(w http.ResponseWriter, r *http.Request, id string) {
 	tree := false
 	if v := r.URL.Query().Get("tree"); v != "" {
@@ -1401,23 +1404,134 @@ func (s *Server) serveRunSpans(w http.ResponseWriter, r *http.Request, id string
 		writeJSON(w, r, http.StatusOK, doc)
 		return
 	}
-	list, err := tr.RunTreeSpans(r.Context(), id)
+	rt, err := tr.RunTreeSpans(r.Context(), id)
 	if err != nil {
 		dbError(w, r, "span tree of run", id, err)
 		return
+	}
+	list, missing, hidden := rt.Spans, rt.Missing, false
+	if p := idFrom(r).panel; p != nil {
+		list, missing, hidden = scopeTree(id, p.PublicID, list, missing)
 	}
 	plain := make([]obsdb.Span, len(list))
 	for i, sp := range list {
 		plain[i] = sp.Span
 	}
-	doc := spans(spansFor(r, plain))
+	doc := treeSpansDoc{Spans: spans(spansFor(r, plain)).Spans, Holes: []treeHole{}}
 	for i := range doc.Spans {
 		doc.Spans[i].RunID, doc.Spans[i].ParentRunID = list[i].RunID, list[i].ParentRunID
 	}
-	if !scopeSpans(w, r, doc.Spans) {
-		return
+	if rt.Truncated {
+		doc.Holes = append(doc.Holes, treeHole{
+			Hole: string(obsdb.HoleTruncated), Cause: string(obsdb.CauseResponseCap),
+			Reason: fmt.Sprintf("this response reads at most %d spans of the run tree and the tree holds more: the later spans were not read, nothing was lost", obsdb.TreeSpanCap),
+			Fix:    "open a child run's own tree (runs/{id}/spans?tree=1 on the child), or its spans (runs/{id}/spans)",
+		})
+	}
+	if len(missing) > 0 {
+		_, fix := obsdb.HoleNoteFor(obsdb.HoleNotRecorded, obsdb.CauseNoSpans)
+		runs := make([]string, len(missing))
+		for i, m := range missing {
+			runs[i] = m.ID
+		}
+		doc.Holes = append(doc.Holes, treeHole{
+			Hole: string(obsdb.HoleNotRecorded), Cause: string(obsdb.CauseNoSpans),
+			Reason: missingRunsReason(len(missing)), Fix: fix, Runs: runs,
+		})
+	}
+	if hidden {
+		doc.Holes = append(doc.Holes, treeHole{
+			Hole:   string(obsdb.HoleHidden),
+			Reason: "runs of this tree carry another public id, or none: a panel token reads its own public id's runs, so their spans and their subtrees' are left out",
+			Fix:    "open the tree with the server (dev) token",
+		})
 	}
 	writeJSON(w, r, http.StatusOK, doc)
+}
+
+// treeSpansDoc is api/runs/{id}/spans?tree=1: the tree's spans and its
+// holes (U9.1-fix) — truncated (cause response_cap) past
+// obsdb.TreeSpanCap spans, not_recorded (cause no_spans, runs naming
+// them) for descendant runs with a row and no span, hidden for the
+// runs a panel token's scope left out. Always a list, empty when the
+// tree is whole.
+type treeSpansDoc struct {
+	Spans []spanDTO  `json:"spans"`
+	Holes []treeHole `json:"holes"`
+}
+
+// treeHole is one hole of a run tree: the A3 table's badge and cause,
+// the reader's reason with the tree's numbers in it, the table's fix
+// where it has one, and the runs it names (no_spans only).
+type treeHole struct {
+	Hole   string   `json:"hole"`
+	Cause  string   `json:"cause,omitempty"`
+	Reason string   `json:"reason"`
+	Fix    string   `json:"fix,omitempty"`
+	Runs   []string `json:"runs,omitempty"`
+}
+
+// missingRunsReason is the no_spans hole's reason with the count.
+func missingRunsReason(n int) string {
+	runs := "runs have"
+	if n == 1 {
+		runs = "run has"
+	}
+	return fmt.Sprintf("%d descendant %s a row and no span in this tree: it ran without a tracer, a destination dropped its spans, or it has not reported one yet", n, runs)
+}
+
+// scopeTree cuts a run tree to a panel token's public id (U9.1-fix):
+// the run's own spans stay — scopeRunID already checked its row, and
+// the plain route answers them so — and a descendant run stays when
+// each of its spans (a missing run: its row) carries the token's
+// public id and its parent run stays; any other run is left out with
+// its whole subtree, hidden true. No run of another public id is
+// named, counted or answered.
+func scopeTree(root, pub string, list []obsdb.TreeSpan, missing []obsdb.TreeRun) ([]obsdb.TreeSpan, []obsdb.TreeRun, bool) {
+	parent := map[string]string{}
+	foreign := map[string]bool{}
+	for _, sp := range list {
+		parent[sp.RunID] = sp.ParentRunID
+		if got, _ := sp.Attrs["weft.public_id"].(string); sp.RunID != root && got != pub {
+			foreign[sp.RunID] = true
+		}
+	}
+	for _, m := range missing {
+		parent[m.ID] = m.ParentRunID
+		if m.PublicID != pub {
+			foreign[m.ID] = true
+		}
+	}
+	memo := map[string]bool{root: true}
+	var visible func(id string, depth int) bool
+	visible = func(id string, depth int) bool {
+		if v, ok := memo[id]; ok {
+			return v
+		}
+		memo[id] = false // a loop never reaches the root
+		p, known := parent[id]
+		v := known && !foreign[id] && depth < len(parent) && visible(p, depth+1)
+		memo[id] = v
+		return v
+	}
+	hidden := false
+	var spans []obsdb.TreeSpan
+	for _, sp := range list {
+		if visible(sp.RunID, 0) {
+			spans = append(spans, sp)
+		} else {
+			hidden = true
+		}
+	}
+	var runs []obsdb.TreeRun
+	for _, m := range missing {
+		if visible(m.ID, 0) {
+			runs = append(runs, m)
+		} else {
+			hidden = true
+		}
+	}
+	return spans, runs, hidden
 }
 
 // serveTrace answers api/traces/{trace_id} (S4.3): any trace, weft or

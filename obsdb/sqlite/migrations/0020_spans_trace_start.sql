@@ -3,8 +3,10 @@
 -- lookups are idx_trace_id's (0001), and its 0020 adds the parent-run
 -- index ChildRuns reads.
 --
--- RunTreeSpans (obsdb.TreeReader: GET /api/runs/{id}/spans?tree=1) and
--- Trace read one trace's spans ORDER BY start_ns, span_id. The primary
+-- Trace and a derived run's tree (obsdb.TreeReader.RunTreeSpans: GET
+-- /api/runs/{id}/spans?tree=1 — a weft run's tree is read by run id on
+-- spans_run, U9.1-fix) read one trace's spans ORDER BY start_ns,
+-- span_id. The primary
 -- key (trace_id, span_id) finds the trace but sorts it in a temp
 -- B-tree; spans_trace_start carries trace_id, start_ns and — a WITHOUT
 -- ROWID table's index ends with the primary key — span_id, so the

@@ -245,11 +245,19 @@ func TestRunSpansUseTheirIndexes(t *testing.T) {
 	if p := queryPlan(t, d, `SELECT `+spanColumns+` FROM spans WHERE `+runSpansWhere, "r_1"); !strings.HasPrefix(p, "SEARCH spans USING INDEX spans_run (run_id=?)") {
 		t.Errorf("RunSpans plan = %s, want a SEARCH on spans_run", p)
 	}
-	tree := queryPlan(t, d, treeSpansSQL, "0102030405060708090a0b0c0d0e0f10")
-	if !strings.Contains(tree, "SEARCH s USING INDEX spans_trace_start (trace_id=?)") ||
-		!strings.Contains(tree, "SEARCH r USING INDEX sqlite_autoindex_runs_1 (run_id=?)") ||
-		strings.Contains(tree, "TEMP B-TREE") || strings.Contains(tree, "SCAN") {
-		t.Errorf("RunTreeSpans plan = %s, want spans_trace_start in its order and runs by key, no scan, no sort", tree)
+	// U9.1-fix: the tree is found from the rows — the recursive walk on
+	// runs_started, the id rule's range and each row on runs' primary
+	// key — and its spans read by run id on spans_run, never by trace.
+	rows := queryPlan(t, d, treeRowsSQL, "r_1", "r_1/", "r_10")
+	if !strings.Contains(rows, "runs_started (parent_run_id=?)") ||
+		!strings.Contains(rows, "sqlite_autoindex_runs_1 (run_id>? AND run_id<?)") ||
+		strings.Contains(rows, "SCAN r") || strings.Contains(rows, "SCAN runs") {
+		t.Errorf("RunTreeSpans rows plan = %s, want runs_started for the walk, the primary key for the id rule, no scan of runs", rows)
+	}
+	tree := queryPlan(t, d, treeSpansSQL, `["r_1","r_1/0/c"]`, 10001)
+	if !strings.Contains(tree, "SEARCH spans USING INDEX spans_run (run_id=?)") ||
+		strings.Contains(tree, "SCAN spans") || strings.Contains(tree, "trace_id") {
+		t.Errorf("RunTreeSpans spans plan = %s, want spans_run by run id, no scan, no trace read", tree)
 	}
 	if p := queryPlan(t, d, `SELECT `+spanColumns+` FROM spans WHERE trace_id = ? ORDER BY start_ns, span_id`, "t"); !strings.Contains(p, "spans_trace_start") || strings.Contains(p, "TEMP B-TREE") {
 		t.Errorf("Trace plan = %s, want spans_trace_start's order", p)

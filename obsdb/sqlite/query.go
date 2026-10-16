@@ -635,88 +635,99 @@ func (d *DB) RunSpans(ctx context.Context, runID string) (_ []obsdb.Span, err er
 // the whole spans table (UX-E-22; plan_internal_test.go pins the plan).
 const runSpansWhere = `run_id = ? AND run_id <> '' ORDER BY start_ns, span_id`
 
-// treeSpansSQL is RunTreeSpans' one read: the trace's spans in start
-// order on spans_trace_start (0020) — trace_id, start_ns, then the
-// primary key's span_id, so no sort — each with its run row's parent
-// (runs' primary key; ” for a span with no run or a run with no row).
-const treeSpansSQL = `SELECT s.trace_id, s.span_id, s.parent_span_id, s.name, s.kind,
-	s.start_ns, s.end_ns, s.status_code, s.status_message, s.service, s.attrs, s.resource, s.events,
-	s.run_id, COALESCE(r.parent_run_id, '')
-	FROM spans AS s LEFT JOIN runs AS r ON r.run_id = s.run_id AND s.run_id <> ''
-	WHERE s.trace_id = ? ORDER BY s.start_ns, s.span_id`
+// The run tree's two reads (RunTreeSpans), each planned on an index
+// (plan_internal_test.go pins them):
+//
+//   - treeRowsSQL: the run and its descendants' rows — a recursive walk
+//     down runs.parent_run_id (runs_started, 0014: parent_run_id leads
+//     it) from the run, with the ids core's id rule names its
+//     descendants (?2 < run_id < ?3: the run's id + "/" and + "0", the
+//     byte after "/"; runs' primary key) — in RunRow order, each row
+//     looked up by key (CROSS JOIN keeps the walk outermost: without
+//     it sqlite scans runs in started order to skip the sort);
+//   - treeSpansSQL: the members' spans by run id (spans_run, its
+//     partial condition stated), in start order, at most
+//     obsdb.TreeSpanCap + 1.
+//
+// A span with a weft.run.id always has its run's row (Write upserts it
+// from the span, the span's weft.parent.run.id its parent), so the
+// rows name every run a span of the tree can belong to.
+const (
+	treeRowsSQL = `WITH RECURSIVE tree(id) AS (
+		SELECT ?1
+		UNION SELECT run_id FROM runs WHERE run_id > ?2 AND run_id < ?3
+		UNION SELECT r.run_id FROM runs AS r JOIN tree AS t ON r.parent_run_id = t.id
+	)
+	SELECT r.run_id, r.parent_run_id, r.public_id, r.started_ns FROM tree AS t CROSS JOIN runs AS r ON r.run_id = t.id
+	ORDER BY r.started_ns, r.run_id`
+	treeSpansSQL = `SELECT ` + spanColumns + ` FROM spans
+	WHERE run_id IN (SELECT value FROM json_each(?)) AND run_id <> '' ORDER BY start_ns, span_id LIMIT ?`
+)
 
-// RunTreeSpans is obsdb.TreeReader's: the run's trace read once by
-// trace id (treeSpansSQL), the run rows' parents beside each span, cut
-// to the run's subtree (obsdb.CutRunTree). The trace is the run row's
-// (a derived run's from its id); when it names none, or holds none of
-// the run's spans, the trace of the run's first stored span is read
-// instead (obsdb/clickhouse's rule).
-func (d *DB) RunTreeSpans(ctx context.Context, runID string) (_ []obsdb.TreeSpan, err error) {
+// RunTreeSpans is obsdb.TreeReader's. A weft run's subtree is found
+// from the run rows before a span is read (treeRowsSQL, one recursive
+// statement; obsdb.TreeMembers places a row whose parent chain does
+// not reach the run by the id rule), then the members' spans are read
+// by run id, in any trace, capped (treeSpansSQL, obsdb.CapTree): the
+// run's trace is never read whole. A derived run (no run id on its
+// spans) is cut from its trace, as RunSpans reads it.
+func (d *DB) RunTreeSpans(ctx context.Context, runID string) (_ obsdb.RunTree, err error) {
 	if err := d.checkOpen(); err != nil {
-		return nil, err
+		return obsdb.RunTree{}, err
 	}
 	defer d.closedErr(&err)
-	var trace string
-	if t, _, ok := obsdb.ParseStockRunID(runID); ok {
-		if err := d.runExists(ctx, runID); err != nil {
-			return nil, err
-		}
-		trace = t
-	} else {
-		err := d.reads.QueryRowContext(ctx, `SELECT trace_id FROM runs WHERE run_id = ?`, runID).Scan(&trace)
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("%w: run %s", obsdb.ErrNotFound, runID)
-		}
+	if err := d.runExists(ctx, runID); err != nil {
+		return obsdb.RunTree{}, err
+	}
+	if trace, _, ok := obsdb.ParseStockRunID(runID); ok {
+		spans, err := d.querySpans(ctx, `trace_id = ? ORDER BY start_ns, span_id`, trace)
 		if err != nil {
-			return nil, err
+			return obsdb.RunTree{}, err
 		}
+		return obsdb.CapTree(spans, runID, nil, nil), nil
 	}
-	tree, err := d.treeOf(ctx, trace, runID)
+	rows, err := d.treeRows(ctx, runID)
 	if err != nil {
-		return nil, err
+		return obsdb.RunTree{}, err
 	}
-	for _, s := range tree {
-		if s.RunID == runID {
-			return tree, nil
-		}
+	parents := make(map[string]string, len(rows))
+	for _, r := range rows {
+		parents[r.ID] = r.ParentRunID
 	}
-	var other string
-	err = d.reads.QueryRowContext(ctx,
-		`SELECT trace_id FROM spans WHERE run_id = ? AND run_id <> '' LIMIT 1`, runID).Scan(&other)
-	if err == sql.ErrNoRows || other == trace {
-		return tree, nil
-	}
+	list, err := json.Marshal(obsdb.TreeMemberIDs(runID, parents))
 	if err != nil {
-		return nil, err
+		return obsdb.RunTree{}, err
 	}
-	return d.treeOf(ctx, other, runID)
+	rs, err := d.reads.QueryContext(ctx, treeSpansSQL, string(list), obsdb.TreeSpanCap+1)
+	if err != nil {
+		return obsdb.RunTree{}, err
+	}
+	defer func() { _ = rs.Close() }()
+	var spans []obsdb.Span
+	if err := scanSpans(rs, nil, func(s obsdb.Span) { spans = append(spans, s) }); err != nil {
+		return obsdb.RunTree{}, err
+	}
+	return obsdb.CapTree(spans, runID, parents, rows), nil
 }
 
-// treeOf is one trace cut to runID's subtree.
-func (d *DB) treeOf(ctx context.Context, trace, runID string) ([]obsdb.TreeSpan, error) {
-	if trace == "" {
-		return []obsdb.TreeSpan{}, nil
-	}
-	rs, err := d.reads.QueryContext(ctx, treeSpansSQL, trace)
+// treeRows is treeRowsSQL for runID.
+func (d *DB) treeRows(ctx context.Context, runID string) ([]obsdb.TreeRun, error) {
+	rs, err := d.reads.QueryContext(ctx, treeRowsSQL, runID, runID+"/", runID+"0")
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rs.Close() }()
-	var (
-		spans         []obsdb.Span
-		run, parent   string
-		parents       = map[string]string{}
-		parentColumns = []any{&run, &parent}
-	)
-	if err := scanSpans(rs, parentColumns, func(s obsdb.Span) {
-		spans = append(spans, s)
-		if run != "" && parent != "" {
-			parents[run] = parent
+	var out []obsdb.TreeRun
+	for rs.Next() {
+		var r obsdb.TreeRun
+		var started int64
+		if err := rs.Scan(&r.ID, &r.ParentRunID, &r.PublicID, &started); err != nil {
+			return nil, err
 		}
-	}); err != nil {
-		return nil, err
+		r.Started = timeOf(started)
+		out = append(out, r)
 	}
-	return obsdb.CutRunTree(spans, runID, parents), nil
+	return out, rs.Err()
 }
 
 // childChunk bounds one ChildRuns statement's parent ids (sqlite's

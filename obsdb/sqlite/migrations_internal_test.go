@@ -1199,3 +1199,81 @@ func TestUpgradeTo0018LinksResumes(t *testing.T) {
 		}
 	}
 }
+
+// A file at 0019 holding a parent run and its Subagent child — rows
+// and spans stored before spans_trace_start existed — opens through
+// 0020 (U9.1-fix): the index exists, and the run tree's reads answer
+// the rows stored before it: ChildRuns names the child, RunTreeSpans
+// holds both runs' spans keyed by run, the child under its parent.
+func TestUpgradeTo0020ReadsRunTrees(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "at19.db")
+	raw, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`CREATE TABLE obsdb_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, v := range sortedVersions() {
+		if v > 19 {
+			break
+		}
+		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		tx, err := raw.Begin()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(string(body)); err != nil {
+			t.Fatalf("migration %d: %v", v, err)
+		}
+		if post := postMigrations[v]; post != nil {
+			if err := post(tx); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if _, err := tx.Exec(`INSERT INTO obsdb_migrations (version, applied_at) VALUES (?, '2026-10-01T00:00:00Z')`, v); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := raw.Exec(`INSERT INTO runs (run_id, parent_run_id, trace_id, agent, started_ns, last_seen_ns, finished_ok, root_ended, meta) VALUES
+		('r_up', '', 't20', 'a', 100, 400, 1, 1, '{}'),
+		('r_up/0/c', 'r_up', 't20', 'b', 200, 300, 1, 1, '{}')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`INSERT INTO spans (trace_id, span_id, parent_span_id, name, kind, start_ns, end_ns, status_code, run_id, attrs, resource) VALUES
+		('t20', 's1', '', 'invoke_agent a', 1, 100, 400, 1, 'r_up', '{"weft.run.id":"r_up"}', '{}'),
+		('t20', 's2', 's1', 'invoke_agent b', 1, 200, 300, 1, 'r_up/0/c', '{"weft.run.id":"r_up/0/c","weft.parent.run.id":"r_up"}', '{}')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := Open(path)
+	if err != nil {
+		t.Fatalf("open a 0019 file: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	ctx := context.Background()
+	var n int
+	if err := db.(*DB).reads.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'spans_trace_start'`).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Errorf("spans_trace_start after 0020: %d indexes, want 1", n)
+	}
+	kids, err := db.(obsdb.TreeReader).ChildRuns(ctx, []string{"r_up"})
+	if err != nil || len(kids["r_up"]) != 1 || kids["r_up"][0].ID != "r_up/0/c" {
+		t.Errorf("ChildRuns after 0020 = %v, %v; want r_up/0/c", kids, err)
+	}
+	tree, err := db.(obsdb.TreeReader).RunTreeSpans(ctx, "r_up")
+	if err != nil || len(tree.Spans) != 2 || tree.Spans[0].RunID != "r_up" || tree.Spans[1].RunID != "r_up/0/c" ||
+		tree.Spans[1].ParentRunID != "r_up" || tree.Truncated || len(tree.Missing) != 0 {
+		t.Errorf("RunTreeSpans after 0020 = %+v, %v; want r_up's span and its child's under it", tree, err)
+	}
+}

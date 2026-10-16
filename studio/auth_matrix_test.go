@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -532,9 +533,10 @@ func TestAuthMatrix(t *testing.T) {
 		{name: "GET /api/runs/{id}/transcript?step=0", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/transcript?step=0" }, resources: all, want: scoped(ok)},
 		{name: "GET /api/runs/{id}/transcript?step=9", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/transcript?step=9" }, resources: all, want: scoped(miss)},
 		{name: "GET /api/runs/{id}/spans", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/spans" }, resources: all, want: scoped(ok)},
-		// The run tree (U9.1): the run's scope decides, then every span
-		// of the tree must be the token's public id (the trace route's
-		// rule); a flag that does not parse is refused before the scope.
+		// The run tree (U9.1): the run's scope decides; a descendant of
+		// another public id is left out under a hidden hole, never a 403
+		// (TestAuthMatrixTreeScope); a flag that does not parse is
+		// refused before the scope.
 		{name: "GET /api/runs/{id}/spans?tree=1", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/spans?tree=1" }, resources: all, want: scoped(ok)},
 		{name: "GET /api/runs/{id}/spans?tree=bad", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/spans?tree=bad" }, resources: one, want: anyValid(http.StatusBadRequest)},
 		// The request record carries the system prompt and the catalog:
@@ -1645,3 +1647,135 @@ func TestSetupACrossOriginWrites(t *testing.T) {
 		}
 	}
 }
+
+// TestAuthMatrixTreeScope (U9.1-fix): a panel token's ?tree=1 is the
+// run's own spans and the descendants of its public id — never a 403
+// for the whole tree because one descendant carries another public id
+// (a nested Generate or thread turn inside a tool handler, a child
+// whose Metadata cleared weft.public_id, a pool child in the trace).
+// Such a run is left out with its whole subtree, said by a hidden
+// hole, and nothing of it — id, public id, span — is in the body; a
+// missing child (a row, no span) is named only when it is the token's.
+// The server token reads the whole tree, with no hidden hole.
+func TestAuthMatrixTreeScope(t *testing.T) {
+	const serverTok = "srv-token"
+	srv := New(Open(t.TempDir()+"/tree.db"), Token(serverTok))
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	const (
+		trace   = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+		root    = "mix_root"
+		mine    = "mix_root/0/c1"
+		nested  = "mix_nested"
+		under   = "mix_nested/0/c"
+		cleared = "mix_root/0/c2"
+		bareA   = "mix_root/1/c3"
+		bareB   = "mix_root/1/c4"
+	)
+	now := time.Now().UTC()
+	span := func(spanID, parentSpan, runID, parentRun, pub string, ms int) obsdb.Span {
+		attrs := map[string]any{"gen_ai.operation.name": "invoke_agent", "weft.run.id": runID}
+		if parentRun != "" {
+			attrs["weft.parent.run.id"] = parentRun
+		}
+		if pub != "" {
+			attrs["weft.public_id"] = pub
+		}
+		at := now.Add(time.Duration(ms) * time.Millisecond)
+		return obsdb.Span{TraceID: trace, SpanID: spanID, ParentSpanID: parentSpan, Name: "invoke_agent a", Kind: 1,
+			Start: at, End: at.Add(time.Millisecond), StatusCode: 1, Service: "svc",
+			Attrs: attrs, Resource: map[string]any{"service.name": "svc"}}
+	}
+	if err := srv.db.Write(context.Background(), obsdb.Batch{Spans: []obsdb.Span{
+		span("0e00000000000001", "", root, "", "pub_a", 0),
+		span("0e00000000000002", "0e00000000000001", mine, root, "pub_a", 1),
+		span("0e00000000000003", "0e00000000000001", nested, root, "pub_b", 2),
+		span("0e00000000000004", "0e00000000000003", under, nested, "pub_a", 3),
+		span("0e00000000000005", "0e00000000000001", cleared, root, "", 4),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	seedRun(t, srv.db, root, "pub_a", "", "", nil)
+	seedRun(t, srv.db, bareA, "pub_a", "", "", map[string]any{"weft.parent.run.id": root})
+	seedRun(t, srv.db, bareB, "pub_b", "", "", map[string]any{"weft.parent.run.id": root})
+
+	sign := func(pub string) string {
+		tok, err := signPanelToken([]byte(serverTok), panelClaims{PublicID: pub, Scope: scopePlayground, Exp: time.Now().Add(time.Hour)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tok
+	}
+	type doc struct {
+		Spans []struct {
+			RunID string `json:"run_id"`
+		} `json:"spans"`
+		Holes []struct {
+			Hole, Cause string
+			Runs        []string
+		} `json:"holes"`
+	}
+	get := func(tok string) (int, doc, string) {
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/runs/"+root+"/spans?tree=1", nil)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		b, _ := io.ReadAll(resp.Body)
+		var d doc
+		if resp.StatusCode == http.StatusOK {
+			if err := json.Unmarshal(b, &d); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return resp.StatusCode, d, string(b)
+	}
+	runs := func(d doc) []string {
+		var out []string
+		for _, s := range d.Spans {
+			out = append(out, s.RunID)
+		}
+		return out
+	}
+	holes := func(d doc) map[string][]string {
+		out := map[string][]string{}
+		for _, h := range d.Holes {
+			out[h.Hole+":"+h.Cause] = h.Runs
+		}
+		return out
+	}
+
+	code, d, body := get(sign("pub_a"))
+	if code != http.StatusOK {
+		t.Fatalf("pub_a's tree = %d %s, want 200 (the other public ids' runs left out, not a 403)", code, body)
+	}
+	if got, want := strings.Join(runs(d), ","), root+","+mine; got != want {
+		t.Errorf("pub_a's tree runs = %s, want %s (nested, its pub_a child and the cleared child left out)", got, want)
+	}
+	if h := holes(d); len(h) != 2 || !slices.Equal(h["not_recorded:no_spans"], []string{bareA}) || !hasKey(h, "hidden:") {
+		t.Errorf("pub_a's tree holes = %v, want not_recorded:no_spans naming %s alone and hidden", h, bareA)
+	}
+	for _, leak := range []string{nested, under, cleared, bareB, "pub_b"} {
+		if strings.Contains(body, leak) {
+			t.Errorf("pub_a's tree names %q: %s", leak, body)
+		}
+	}
+	// The plain route answers the run's own spans to the same token.
+	if code, _, _ := get(sign("pub_b")); code != http.StatusForbidden {
+		t.Errorf("pub_b's tree of pub_a's run = %d, want 403 (the run's own scope decides)", code)
+	}
+
+	code, d, _ = get(serverTok)
+	if got, want := strings.Join(runs(d), ","), strings.Join([]string{root, mine, nested, under, cleared}, ","); code != http.StatusOK || got != want {
+		t.Errorf("the server token's tree = %d %s, want %s", code, got, want)
+	}
+	if h := holes(d); len(h) != 1 || !slices.Equal(h["not_recorded:no_spans"], []string{bareA, bareB}) {
+		t.Errorf("the server token's holes = %v, want not_recorded:no_spans naming both bare children, no hidden", h)
+	}
+}
+
+func hasKey(m map[string][]string, k string) bool { _, ok := m[k]; return ok }

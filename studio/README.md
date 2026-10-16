@@ -2219,11 +2219,16 @@ records do not rebuild it), `runs/{id}/spans` (each span with
 `run_id`, the run's; `?tree=1` — capability `spans_tree`, U9.1, the
 database an `obsdb.TreeReader`, else 501 and `capabilities_off` says
 why — adds every descendant run's spans, the subagent tree by the
-`weft.parent.run.id` chain read from the run's trace in one query,
+`weft.parent.run.id` chain and core's id rule (`<parent>/<step>/<call>`),
+found from the run rows and read by run id — never the whole trace —
 in start order, each keyed by `run_id` + `span_id` with its run's
-`parent_run_id`; a panel token reads a tree whose every span is its
-public id's, the trace route's rule; docs/record-contract.md §6 "A run
-tree"; for a
+`parent_run_id`, at most 10,000 spans (`obsdb.TreeSpanCap`), and
+`holes` (always a list): `truncated` (cause `response_cap`) past the
+cap, `not_recorded` (cause `no_spans`, `runs` naming them) for children
+with a row and no span, `hidden` for a panel token — which reads the
+run's own spans and its public id's descendants, every other
+descendant left out with its subtree, unnamed, never a 403 for the
+tree; docs/record-contract.md §6 "A run tree"; for a
 read-scoped panel token — here, in `traces/{trace_id}` and in the
 export alike — without the tool names a run's overrides put on its
 invoke_agent span: `weft.override.tools`, `park_on`,

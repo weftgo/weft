@@ -156,7 +156,8 @@ type contractRun struct {
 	Tools     []contractRPC     `json:"tools"`
 	// Tree is the run's descendants as its run tree reads them (§6,
 	// U9.1: obsdb.TreeReader.RunTreeSpans), "<run id> child of <parent run
-	// id>: <n> spans" per run in first-span order; omitted for a run
+	// id>: <n> spans" per run in first-span order, then "<run id> child
+	// of <parent>: no span (missing)" per RunTree.Missing; omitted for a run
 	// with no descendant (the tree holds its own spans alone — their
 	// count is chat + tools + the root).
 	Tree  []string     `json:"tree,omitempty"`
@@ -405,7 +406,10 @@ func treeOf(t *testing.T, db obsdb.DB, id string, own int) []string {
 	}
 	var order []string
 	count, parent := map[string]int{}, map[string]string{}
-	for _, s := range tree {
+	if tree.Truncated {
+		t.Errorf("run %s: its tree reads truncated", id)
+	}
+	for _, s := range tree.Spans {
 		if count[s.RunID] == 0 {
 			order = append(order, s.RunID)
 		}
@@ -420,6 +424,9 @@ func treeOf(t *testing.T, db obsdb.DB, id string, own int) []string {
 		if r != id {
 			out = append(out, fmt.Sprintf("%s child of %s: %d spans", r, parent[r], count[r]))
 		}
+	}
+	for _, m := range tree.Missing {
+		out = append(out, fmt.Sprintf("%s child of %s: no span (missing)", m.ID, m.ParentRunID))
 	}
 	return out
 }

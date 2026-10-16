@@ -3,6 +3,7 @@ package obsdbtest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"testing"
 	"time"
@@ -90,9 +91,13 @@ func runTree(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			}
 			return out
 		}
-		tree, err := tr.RunTreeSpans(ctx(), director)
+		full, err := tr.RunTreeSpans(ctx(), director)
 		if err != nil {
 			t.Fatal(err)
+		}
+		tree := full.Spans
+		if full.Truncated || len(full.Missing) != 0 {
+			t.Errorf("RunTreeSpans(director) = truncated %v, missing %v; want neither", full.Truncated, full.Missing)
 		}
 		want := []key{
 			{director, "0b00000000000001", ""}, {director, "0b00000000000002", ""}, {director, "0b00000000000003", ""},
@@ -105,19 +110,102 @@ func runTree(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if len(tree) > 0 && (tree[0].Name != "invoke_agent director" || tree[0].Attrs["weft.run.id"] != director || tree[0].TraceID != treeTrace) {
 			t.Errorf("RunTreeSpans' span = %+v, want the stored span whole", tree[0].Span)
 		}
-		if tree, err := tr.RunTreeSpans(ctx(), ops); err != nil || !slices.Equal(keys(tree), want[3:]) {
-			t.Errorf("RunTreeSpans(ops) = %v, %v; want ops and worker alone", keys(tree), err)
+		if tree, err := tr.RunTreeSpans(ctx(), ops); err != nil || !slices.Equal(keys(tree.Spans), want[3:]) {
+			t.Errorf("RunTreeSpans(ops) = %v, %v; want ops and worker alone", keys(tree.Spans), err)
 		}
-		if tree, err := tr.RunTreeSpans(ctx(), app); err != nil || len(tree) != 1 || tree[0].RunID != app {
-			t.Errorf("RunTreeSpans(app) = %v, %v; want its own span alone", keys(tree), err)
+		if tree, err := tr.RunTreeSpans(ctx(), app); err != nil || len(tree.Spans) != 1 || tree.Spans[0].RunID != app {
+			t.Errorf("RunTreeSpans(app) = %v, %v; want its own span alone", keys(tree.Spans), err)
 		}
+		// The descendants the parent chain alone cannot place (U9.1-fix):
+		// a Subagent child whose run_start was lost (only its chat span,
+		// no weft.parent.run.id — its row names no parent; the id rule
+		// places it), a nested Generate inside a tool handler (its own id,
+		// its invoke_agent's weft.parent.run.id, another public id), that
+		// run's child stored under another trace (its row's parent), and
+		// a child with a row and no span (Missing, with its public id).
+		const (
+			deepTrace = "0102030405060708090a0b0c0d0e0f21"
+			farTrace  = "0102030405060708090a0b0c0d0e0f22"
+			deep      = "tree_deep"
+			lost      = "tree_deep/0/call_a"
+			nested    = "tree_nested_turn"
+			far       = "tree_nested_turn/0/call_n"
+			bare      = "tree_deep/1/call_b"
+		)
+		inTrace := func(sp obsdb.Span, trace, pub string) obsdb.Span {
+			sp.TraceID = trace
+			if pub != "" {
+				sp.Attrs["weft.public_id"] = pub
+			}
+			return sp
+		}
+		deepStart := func(id, parent, pub string, pos int64) obsdb.Record {
+			r := record(id, "event", "run_start", pos, `{"type":"run_start","id":"`+id+`"}`,
+				map[string]any{"weft.session.id": "", "weft.public_id": pub})
+			r.TraceID = deepTrace
+			if parent != "" {
+				r.Attrs["weft.parent.run.id"] = parent
+			}
+			return r
+		}
+		if err := db.Write(ctx(), obsdb.Batch{
+			Spans: []obsdb.Span{
+				inTrace(treeSpan("0c00000000000001", "", "invoke_agent deep", deep, "", 0), deepTrace, "pub_t"),
+				inTrace(treeSpan("0c00000000000002", "0c00000000000001", "chat", lost, "", 1), deepTrace, "pub_t"),
+				inTrace(treeSpan("0c00000000000003", "0c00000000000001", "invoke_agent nested", nested, deep, 2), deepTrace, "pub_other"),
+				inTrace(treeSpan("0c00000000000004", "", "invoke_agent far", far, "", 3), farTrace, "pub_other"),
+			},
+			Records: []obsdb.Record{deepStart(deep, "", "pub_t", 0), deepStart(far, nested, "pub_other", 1),
+				deepStart(bare, deep, "pub_t", 2)},
+		}); err != nil {
+			t.Fatal(err)
+		}
+		got, err := tr.RunTreeSpans(ctx(), deep)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantDeep := []key{
+			{deep, "0c00000000000001", ""}, {lost, "0c00000000000002", deep},
+			{nested, "0c00000000000003", deep}, {far, "0c00000000000004", nested},
+		}
+		if !slices.Equal(keys(got.Spans), wantDeep) {
+			t.Errorf("RunTreeSpans(deep) = %v,\nwant %v (the id rule's child, the nested turn, its child in another trace)", keys(got.Spans), wantDeep)
+		}
+		if want := []obsdb.TreeRun{{ID: bare, ParentRunID: deep, PublicID: "pub_t", Started: at(2 * time.Second)}}; got.Truncated ||
+			len(got.Missing) != 1 || got.Missing[0].ID != want[0].ID || got.Missing[0].ParentRunID != want[0].ParentRunID ||
+			got.Missing[0].PublicID != want[0].PublicID || !got.Missing[0].Started.Equal(want[0].Started) {
+			t.Errorf("RunTreeSpans(deep) = truncated %v, missing %+v; want missing %+v", got.Truncated, got.Missing, want)
+		}
+
+		// The cap: a tree of more than obsdb.TreeSpanCap spans answers its
+		// first TreeSpanCap in start order and says it holds more.
+		const big = "tree_big"
+		many := make([]obsdb.Span, 0, obsdb.TreeSpanCap+1)
+		for i := range obsdb.TreeSpanCap + 1 {
+			sp := treeSpan(fmt.Sprintf("0d%014x", i), "", "chat", big, "", 10+i)
+			sp.TraceID = "0102030405060708090a0b0c0d0e0f23"
+			many = append(many, sp)
+		}
+		if err := db.Write(ctx(), obsdb.Batch{Spans: many}); err != nil {
+			t.Fatal(err)
+		}
+		capped, err := tr.RunTreeSpans(ctx(), big)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !capped.Truncated || len(capped.Spans) != obsdb.TreeSpanCap || capped.Spans[0].SpanID != many[0].SpanID ||
+			capped.Spans[obsdb.TreeSpanCap-1].SpanID != many[obsdb.TreeSpanCap-1].SpanID || len(capped.Missing) != 0 {
+			t.Errorf("RunTreeSpans(big) = truncated %v, %d spans, missing %v; want truncated, the first %d",
+				capped.Truncated, len(capped.Spans), capped.Missing, obsdb.TreeSpanCap)
+		}
+
 		// A run with a row and no span: an empty tree, not an error.
 		if err := db.Write(ctx(), obsdb.Batch{Records: []obsdb.Record{record("tree_bare", "event", "run_start", 0,
 			`{"type":"run_start","id":"tree_bare"}`, nil)}}); err != nil {
 			t.Fatal(err)
 		}
-		if tree, err := tr.RunTreeSpans(ctx(), "tree_bare"); err != nil || len(tree) != 0 {
-			t.Errorf("RunTreeSpans(a run with no span) = %v, %v; want empty", keys(tree), err)
+		if tree, err := tr.RunTreeSpans(ctx(), "tree_bare"); err != nil || len(tree.Spans) != 0 || len(tree.Missing) != 0 {
+			t.Errorf("RunTreeSpans(a run with no span) = %v, %v; want empty", tree, err)
 		}
 		if _, err := tr.RunTreeSpans(ctx(), "nope"); !errors.Is(err, obsdb.ErrNotFound) {
 			t.Errorf("RunTreeSpans(unknown) = %v, want ErrNotFound", err)

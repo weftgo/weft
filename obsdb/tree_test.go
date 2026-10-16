@@ -46,8 +46,58 @@ func TestCutRunTree(t *testing.T) {
 	if got := obsdb.CutRunTree(nil, "root", nil); got == nil || len(got) != 0 {
 		t.Errorf("CutRunTree(nil) = %#v, want empty, non-nil", got)
 	}
-	if got, want := obsdb.TreeRunIDs(spans), []string{"root", "kid", "grand", "other", "loop_a", "loop_b"}; !slices.Equal(got, want) {
-		t.Errorf("TreeRunIDs = %v, want %v", got, want)
+	// The id rule (U9.1-fix): a run no row, span or derivation places —
+	// a running child whose run_start was lost, its spans carrying no
+	// weft.parent.run.id, a row with no parent — is in the tree when
+	// core's id names it a descendant, under its nearest known ancestor
+	// (a call id holding "/" included); a run another parent claims
+	// outside the tree is still the id's.
+	idRule := []obsdb.Span{
+		treeTestSpan("r1", "", map[string]any{"weft.run.id": "root"}),
+		treeTestSpan("r2", "r1", map[string]any{"weft.run.id": "root/0/call_a"}),
+		treeTestSpan("r3", "r2", map[string]any{"weft.run.id": "root/0/call_a/1/call_b"}),
+		treeTestSpan("r4", "r1", map[string]any{"weft.run.id": "root/0/call/with/slash"}),
+		treeTestSpan("r5", "r1", map[string]any{"weft.run.id": "root/resume/call_c", "weft.parent.run.id": "elsewhere"}),
+		treeTestSpan("r6", "", map[string]any{"weft.run.id": "rootish/0/call_x"}),
+	}
+	if got, want := ids(obsdb.CutRunTree(idRule, "root", nil)), []string{
+		"root/r1<", "root/0/call_a/r2<root", "root/0/call_a/1/call_b/r3<root/0/call_a",
+		"root/0/call/with/slash/r4<root", "root/resume/call_c/r5<root",
+	}; !slices.Equal(got, want) {
+		t.Errorf("CutRunTree(id rule) = %v, want %v", got, want)
+	}
+	known := func(id string) bool { return id == "a/0/c" }
+	for _, c := range []struct {
+		id, parent string
+		ok         bool
+	}{
+		{"a/0/c", "a", true}, {"a/0/c/1/d", "a/0/c", true}, {"a/0/c/x/1/d", "a/0/c", true},
+		{"a/1/e", "a", true}, {"a", "", false}, {"ab/0/c", "", false}, {"b/0/c", "", false},
+	} {
+		if p, ok := obsdb.TreeIDRule("a", c.id, known); p != c.parent || ok != c.ok {
+			t.Errorf("TreeIDRule(a, %s) = %q, %v; want %q, %v", c.id, p, ok, c.parent, c.ok)
+		}
+	}
+	if got, want := obsdb.TreeMemberIDs("root", map[string]string{
+		"root": "", "kid": "root", "grand": "kid", "root/0/c": "", "other": "", "loop_a": "loop_b", "loop_b": "loop_a",
+	}), []string{"grand", "kid", "root", "root/0/c"}; !slices.Equal(got, want) {
+		t.Errorf("TreeMemberIDs = %v, want %v", got, want)
+	}
+
+	// CapTree: past the cap the first TreeSpanCap, Truncated, no
+	// Missing; under it, Missing names each member row with no span.
+	read := make([]obsdb.Span, obsdb.TreeSpanCap+1)
+	for i := range read {
+		read[i] = treeTestSpan(fmt.Sprintf("c%05d", i), "", map[string]any{"weft.run.id": "root"})
+	}
+	rows := []obsdb.TreeRun{{ID: "root"}, {ID: "root/0/a", PublicID: "pub"}, {ID: "stray", ParentRunID: "x"}}
+	capParents := map[string]string{"root": "", "root/0/a": "root", "stray": "x"}
+	if got := obsdb.CapTree(read, "root", capParents, rows); !got.Truncated || len(got.Spans) != obsdb.TreeSpanCap || len(got.Missing) != 0 {
+		t.Errorf("CapTree(cap+1) = truncated %v, %d spans, missing %v; want truncated at the cap", got.Truncated, len(got.Spans), got.Missing)
+	}
+	got := obsdb.CapTree(read[:2], "root", capParents, rows)
+	if want := []obsdb.TreeRun{{ID: "root/0/a", ParentRunID: "root", PublicID: "pub"}}; got.Truncated || len(got.Spans) != 2 || !slices.Equal(got.Missing, want) {
+		t.Errorf("CapTree(2) = truncated %v, %d spans, missing %+v; want 2 spans, missing %+v", got.Truncated, len(got.Spans), got.Missing, want)
 	}
 
 	// A derived run (§9) nested under another: its spans are its own,
@@ -94,4 +144,29 @@ func ExampleCutRunTree() {
 	// 02 execute_tool ops (run d, parent "")
 	// 03 invoke_agent ops (run d/0/c1, parent "d")
 	// 04 chat (run d/0/c1/0/c2, parent "d/0/c1")
+}
+
+// A run tree's members from the rows alone: the parent chain first,
+// then core's id rule for a run no chain places — here a grandchild
+// whose run_start was lost (its row names no parent) and a nested turn
+// whose parent chain leads elsewhere. A backend reads the members'
+// spans by run id after this.
+func ExampleTreeMembers() {
+	parents := map[string]string{
+		"d":             "",
+		"d/0/c1":        "d",
+		"d/0/c1/1/c2":   "", // a row with no parent: the id rule places it
+		"nested_turn":   "d/0/c1",
+		"sibling":       "",
+		"elsewhere/0/x": "elsewhere",
+	}
+	for _, id := range obsdb.TreeMemberIDs("d", parents) {
+		p, _ := obsdb.TreeIDRule("d", id, func(s string) bool { _, ok := parents[s]; return ok })
+		fmt.Printf("%s (parent %q, id rule %q)\n", id, obsdb.TreeMembers("d", parents)[id], p)
+	}
+	// Output:
+	// d (parent "", id rule "")
+	// d/0/c1 (parent "d", id rule "d")
+	// d/0/c1/1/c2 (parent "d/0/c1", id rule "d/0/c1")
+	// nested_turn (parent "d/0/c1", id rule "")
 }

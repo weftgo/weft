@@ -605,29 +605,57 @@ transcript is the growth `messages` records concatenated in index order.
 
 **A run tree** (U9.1) is a run's spans with every descendant run's: the
 runs whose parent chain reaches it — each run's parent its row's
-`parent_run_id`, else its spans' `weft.parent.run.id` (a run still
-running has a row before its `invoke_agent` span ends), a derived run's
-(§9) its derivation's — read from the run's trace (the row's
-`trace_id`; when that trace holds none of the run's spans, its first
-span's) in one query by trace id and cut by `obsdb.CutRunTree`. Each
-span belongs to the run its `weft.run.id` names, else to the derived run
-whose subtree holds it; a span of no run (an app's own) and a run of the
-same trace outside the chain (a sibling under one app-level trace) are
-not in it, nor is a run in another trace (a `thread/pool` child
-session's). The tree is ordered by start, then span id, and keyed by
-run id + span id (`obsdb.TreeSpan`: the span, its `RunID`, that run's
-`ParentRunID`). Served by `obsdb.TreeReader` — both shipped backends:
-SQLite reads the trace on `spans_trace_start` (0020: trace id, start,
-then the primary key's span id — no sort) with each span's run row
-joined by key; ClickHouse reads it on `idx_trace_id` (0001) and the
-runs' parents by `RunId`, weft_runs' key — and by Studio as
+`parent_run_id` (a span with a `weft.run.id` always makes its run's row,
+its `weft.parent.run.id` the row's parent, so a running child has a row
+before its `invoke_agent` span ends) — and, whatever its row says, every
+run core's id rule names a descendant: a Subagent child's id is
+`<parent>/<step>/<call id>` (`<parent>/resume/<call id>` under
+Approve), so a run whose id starts with the run's id + `/` belongs to
+the tree, under the nearest run above it by that id
+(`obsdb.TreeIDRule`) — a child whose `run_start` was lost and whose
+spans carry no `weft.parent.run.id` is placed so. The descendants are
+found from the run rows before a span is read (`obsdb.TreeMembers`) and
+their spans read by run id, in any trace: a child stored under another
+trace is in the tree, and the run's trace is never read whole — a leaf
+of a large app-level trace reads its own subtree only. A derived run
+(§9), whose spans carry no run id, is cut from its trace
+(`obsdb.CutRunTree`), its descendants by their derivation's parent.
+Each span belongs to the run its `weft.run.id` names, else to the
+derived run whose subtree holds it; a span of no run (an app's own) and
+a run outside the chain and the id rule (a sibling under one app-level
+trace) are not in it, nor is a `thread/pool` child session (it runs on
+the pool's own context: its runs name no parent run). The tree is ordered by start, then span id,
+keyed by run id + span id (`obsdb.TreeSpan`: the span, its `RunID`,
+that run's `ParentRunID`), and capped at `obsdb.TreeSpanCap` (10,000)
+spans, the first in start order: `obsdb.RunTree.Truncated` says the tree
+holds more. `RunTree.Missing` is the descendant runs with a row and no
+span in the tree (a child that ran without a tracer, whose spans a
+destination dropped, or that has not reported one yet), each with its
+parent and public id; empty on a cut tree. Served by `obsdb.TreeReader`
+— both shipped backends: SQLite finds the rows in one recursive
+statement (`runs_started` for the walk, runs' primary key for the id
+rule's range) and reads the spans on `spans_run`; ClickHouse finds them
+on weft_runs' primary key (the id rule, `startsWith`) and 0020's
+`idx_parent_run` (one statement per level a non-Subagent child opens)
+and reads the spans on `idx_weft_run_id` (0016) — and by Studio as
 `GET /api/runs/{id}/spans?tree=1` (capability `spans_tree`; each span's
-`run_id` and `parent_run_id`). `TreeReader.ChildRuns` is
+`run_id` and `parent_run_id`, and the tree's `holes`: `truncated`, cause
+`response_cap`, past the cap; `not_recorded`, cause `no_spans`, naming
+the missing runs; `hidden` when a panel token's scope left runs out). A
+panel token reads the run's own spans — the run's scope decides, as on
+the plain route — and each descendant whose spans (a missing one: its
+row) carry the token's public id under a parent it reads; any other
+descendant (a nested `Generate` or thread turn inside a tool handler
+with its own session's public id, a child whose metadata cleared
+`weft.public_id`) is left out with its whole subtree, unnamed, under
+the `hidden` hole — never a 403 for the tree. `TreeReader.ChildRuns` is
 `RunDetail.Children` for many parents in one read (SQLite on
-`runs_started`, ClickHouse on 0020's `idx_parent_run`): Studio prices a
-runs page's subagent trees one read per tree level. The fixtures'
-`subagent` case pins the parent's tree (`tree` in `expect.json`); every
-other case's tree is the run's own spans alone, `RunSpans`' count.
+`runs_started`, ClickHouse on 0020's `idx_parent_run`), in the same
+order (started, then id): Studio prices a runs page's subagent trees one
+read per tree level, so a row's delegated figures, reasons and unpriced
+models are the run document's. The fixtures' `subagent` case pins the
+parent's tree (`tree` in `expect.json`); every other case's tree is the
+run's own spans alone, `RunSpans`' count.
 
 **A session** is the runs sharing `weft.session.id` that are top-level
 (no parent) and not playground runs, ordered by `weft.turn`, then

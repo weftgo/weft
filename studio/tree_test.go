@@ -63,7 +63,7 @@ type countingTreeDB struct {
 	tree obsdb.TreeReader
 }
 
-func (c countingTreeDB) RunTreeSpans(ctx context.Context, id string) ([]obsdb.TreeSpan, error) {
+func (c countingTreeDB) RunTreeSpans(ctx context.Context, id string) (obsdb.RunTree, error) {
 	c.mu.Lock()
 	c.treeReads++
 	c.mu.Unlock()
@@ -182,10 +182,14 @@ func TestSpansTreeFromARealRun(t *testing.T) {
 
 	cdb.reset()
 	var doc struct {
-		Spans []treeSpanDoc `json:"spans"`
+		Spans []treeSpanDoc     `json:"spans"`
+		Holes []json.RawMessage `json:"holes"`
 	}
 	if code := getJSON(t, ts.URL+"/api/runs/"+director+"/spans?tree=1", &doc); code != http.StatusOK {
 		t.Fatalf("?tree=1 = %d", code)
+	}
+	if doc.Holes == nil || len(doc.Holes) != 0 {
+		t.Errorf("?tree=1 holes = %s, want an empty list (the tree is whole)", doc.Holes)
 	}
 	if _, spans, _, trees, _ := cdb.reset(); trees != 1 || spans != 0 {
 		t.Errorf("?tree=1 read RunTreeSpans %d times and RunSpans %d, want one tree read and no per-run read", trees, spans)
@@ -342,5 +346,77 @@ func TestRunsListReadsChildrenPerLevel(t *testing.T) {
 	}
 	if code := getJSON(t, ts2.URL+"/api/runs/"+directors[0]+"/spans", nil); code != http.StatusOK {
 		t.Errorf("plain spans without a TreeReader = %d, want 200", code)
+	}
+}
+
+// TestDelegatedCostReasonsOldestFirst (U9.1-fix): a parent with two
+// unpriced children and a running one — the runs list row and the run
+// document say the same delegated figure, reason and unpriced models,
+// byte for byte, the children read oldest-first on both (ChildRuns'
+// order, RunDetail.Children's): the first unpriced child named first.
+func TestDelegatedCostReasonsOldestFirst(t *testing.T) {
+	db, err := sqlite.Open(filepath.Join(t.TempDir(), "weft.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	srv := studio.New(studio.DB(db))
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+	t.Cleanup(func() { _ = srv.Close() })
+
+	base := time.Now().UTC().Add(-time.Minute)
+	run := func(id, parent, model string, at time.Duration, finished bool) []obsdb.Record {
+		rec := func(evType string, pos int64, body string) obsdb.Record {
+			attrs := map[string]any{"weft.record": "event", "weft.run.id": id, "weft.event.type": evType,
+				"weft.event.pos": pos, "gen_ai.agent.name": "a"}
+			if parent != "" {
+				attrs["weft.parent.run.id"], attrs["weft.parent.call.id"] = parent, "call"
+			}
+			return obsdb.Record{Time: base.Add(at + time.Duration(pos)*time.Millisecond), EventName: "weft.event",
+				Severity: 9, Body: body, Service: "svc", Attrs: attrs, Resource: map[string]any{"service.name": "svc"}}
+		}
+		out := []obsdb.Record{rec("run_start", 0, `{"type":"run_start","id":"`+id+`","model":{"provider":"acme","name":"`+model+`"},"agent":"a"}`)}
+		if finished {
+			out = append(out, rec("run_finish", 1, `{"type":"run_finish","run_id":"`+id+`","usage":{"input_tokens":10,"output_tokens":5},"steps":1}`))
+		}
+		return out
+	}
+	const parent = "cost_parent"
+	var recs []obsdb.Record
+	recs = append(recs, run(parent, "", "m-parent", 0, true)...)
+	recs = append(recs, run(parent+"/0/a", parent, "m-unknown-1", time.Second, true)...)
+	recs = append(recs, run(parent+"/0/b", parent, "m-running", 2*time.Second, false)...)
+	recs = append(recs, run(parent+"/0/c", parent, "m-unknown-2", 3*time.Second, true)...)
+	if err := db.Write(context.Background(), obsdb.Batch{Records: recs}); err != nil {
+		t.Fatal(err)
+	}
+
+	type figures struct {
+		ID               string   `json:"id"`
+		DelegatedCostUSD *float64 `json:"delegated_cost_usd"`
+		DelegatedKnown   bool     `json:"delegated_cost_known"`
+		DelegatedReason  string   `json:"delegated_cost_reason"`
+		DelegatedModels  []string `json:"delegated_unpriced_models"`
+	}
+	var list struct {
+		Runs []figures `json:"runs"`
+	}
+	if code := getJSON(t, ts.URL+"/api/runs", &list); code != http.StatusOK || len(list.Runs) != 1 {
+		t.Fatalf("/api/runs = %d, %d rows; want the parent alone", code, len(list.Runs))
+	}
+	var doc figures
+	if code := getJSON(t, ts.URL+"/api/runs/"+parent, &doc); code != http.StatusOK {
+		t.Fatalf("run document = %d", code)
+	}
+	a, _ := json.Marshal(list.Runs[0])
+	b, _ := json.Marshal(doc)
+	if string(a) != string(b) {
+		t.Errorf("the runs list row and the run document differ:\n list %s\n doc  %s", a, b)
+	}
+	if doc.DelegatedKnown || doc.DelegatedReason == "" || len(doc.DelegatedModels) != 2 ||
+		!strings.Contains(doc.DelegatedModels[0], "m-unknown-1") || !strings.Contains(doc.DelegatedModels[1], "m-unknown-2") {
+		t.Errorf("delegated = known %v, reason %q, unpriced %v; want unknown, a reason, the unpriced models oldest-first",
+			doc.DelegatedKnown, doc.DelegatedReason, doc.DelegatedModels)
 	}
 }

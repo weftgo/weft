@@ -1087,3 +1087,98 @@ func TestUpgradeTo0019LinksResumes(t *testing.T) {
 		t.Errorf("resume's meta after 0019 = %v, want only the caller's {tenant: acme} (the link keys are contract)", r.Meta)
 	}
 }
+
+// A database at 0019 holding a parent run and its Subagent child —
+// rows and spans written before idx_parent_run existed — opens through
+// 0020 on a live server (U9.1-fix): the index exists, materialized
+// over the parts written before it, and the run tree's reads answer
+// those rows: ChildRuns names the child, RunTreeSpans holds both runs'
+// spans keyed by run, the child under its parent.
+func TestUpgradeTo0020ReadsRunTrees(t *testing.T) {
+	base := os.Getenv("WEFT_CLICKHOUSE_DSN")
+	if base == "" {
+		t.Skip("WEFT_CLICKHOUSE_DSN not set: the 0020 upgrade needs a clickhouse server (README has the one-line container recipe)")
+	}
+	ctx := context.Background()
+	u, err := url.Parse(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	suffix := make([]byte, 6)
+	if _, err := rand.Read(suffix); err != nil {
+		t.Fatal(err)
+	}
+	name := "weft_up_" + hex.EncodeToString(suffix)
+	admin := rawConn(t, base)
+	if err := admin.Exec(ctx, fmt.Sprintf("CREATE DATABASE `%s`", name)); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = admin.Exec(context.Background(), fmt.Sprintf("DROP DATABASE IF EXISTS `%s`", name))
+		_ = admin.Close()
+	})
+	u.Path = "/" + name
+	dsn := u.String()
+
+	conn := rawConn(t, dsn)
+	if err := conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS obsdb_migrations (
+		version UInt32, name String, applied_at DateTime DEFAULT now()
+	) ENGINE = MergeTree ORDER BY version`); err != nil {
+		t.Fatal(err)
+	}
+	for v := 1; v <= 19; v++ {
+		body, err := migrationsFS.ReadFile("migrations/" + migrations[v])
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, stmt := range splitStatements(string(body)) {
+			if err := conn.Exec(ctx, stmt); err != nil {
+				t.Fatalf("migration %d: %v", v, err)
+			}
+		}
+		if err := conn.Exec(ctx, `INSERT INTO obsdb_migrations (version, name) VALUES (?, ?)`, uint32(v), migrations[v]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	at := time.Now().UTC().Add(-time.Hour)
+	const trace = "0102030405060708090a0b0c0d0e0f50"
+	span := func(spanID, parentSpan, run, parentRun string, start time.Time) obsdb.Span {
+		attrs := map[string]any{"weft.run.id": run, "gen_ai.operation.name": "invoke_agent"}
+		if parentRun != "" {
+			attrs["weft.parent.run.id"] = parentRun
+		}
+		return obsdb.Span{TraceID: trace, SpanID: spanID, ParentSpanID: parentSpan, Name: "invoke_agent a", Kind: 1,
+			Start: start, End: start.Add(time.Second), StatusCode: 1, Service: "svc",
+			Attrs: attrs, Resource: map[string]any{"service.name": "svc"}}
+	}
+	if err := (&DB{conn: conn}).Write(ctx, obsdb.Batch{Spans: []obsdb.Span{
+		span("0a0b0c0d0e0f0901", "", "r_up", "", at),
+		span("0a0b0c0d0e0f0902", "0a0b0c0d0e0f0901", "r_up/0/c", "r_up", at.Add(time.Millisecond)),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.Close()
+
+	db, err := Open(dsn)
+	if err != nil {
+		t.Fatalf("open a 0019 database: %v", err)
+	}
+	defer func() { _ = db.Close() }()
+	var idx uint64
+	if err := db.(*DB).conn.QueryRow(ctx, `SELECT count() FROM system.data_skipping_indices
+		WHERE database = currentDatabase() AND table = 'weft_runs' AND name = 'idx_parent_run'`).Scan(&idx); err != nil {
+		t.Fatal(err)
+	}
+	if idx != 1 {
+		t.Errorf("idx_parent_run after 0020: %d, want 1", idx)
+	}
+	kids, err := db.(obsdb.TreeReader).ChildRuns(ctx, []string{"r_up"})
+	if err != nil || len(kids["r_up"]) != 1 || kids["r_up"][0].ID != "r_up/0/c" {
+		t.Errorf("ChildRuns after 0020 = %v, %v; want r_up/0/c", kids, err)
+	}
+	tree, err := db.(obsdb.TreeReader).RunTreeSpans(ctx, "r_up")
+	if err != nil || len(tree.Spans) != 2 || tree.Spans[0].RunID != "r_up" || tree.Spans[1].RunID != "r_up/0/c" ||
+		tree.Spans[1].ParentRunID != "r_up" || tree.Truncated || len(tree.Missing) != 0 {
+		t.Errorf("RunTreeSpans after 0020 = %+v, %v; want r_up's span and its child's under it", tree, err)
+	}
+}

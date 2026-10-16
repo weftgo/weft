@@ -134,12 +134,13 @@ func TestRunSpansUseTheTraceAndRunIndexes(t *testing.T) {
 }
 
 // TestRunTreeAndChildRunsUseTheirIndexes (U9.1; UX-E-34, UX-E-24): a
-// run tree's trace is read with `TraceId = ?`, which idx_trace_id
-// (0001) serves — ClickHouse's equivalent of SQLite's
-// spans_trace_start — and a page's children with `ParentRunID IN (…)`,
-// which idx_parent_run (0020) serves; EXPLAIN indexes = 1 names each.
-// A run row naming another trace than its spans' still answers its
-// tree from its spans' trace.
+// run tree is found from the rows — the run and the id rule's on
+// weft_runs' primary key, their children on idx_parent_run (0020) —
+// and its spans read by RunId on idx_weft_run_id (0016), never by the
+// whole trace; a derived run's trace is read with `TraceId = ?`
+// (idx_trace_id, 0001); a page's children with `ParentRunID IN (…)`
+// on idx_parent_run. EXPLAIN indexes = 1 names each. A run row naming
+// another trace than its spans' still answers its tree.
 func TestRunTreeAndChildRunsUseTheirIndexes(t *testing.T) {
 	db := freshDB(t)
 	ctx := context.Background()
@@ -184,8 +185,8 @@ func TestRunTreeAndChildRunsUseTheirIndexes(t *testing.T) {
 		t.Fatal(err)
 	}
 	tree, err := db.RunTreeSpans(ctx, "tr_p")
-	if err != nil || len(tree) != 2 || tree[1].RunID != "tr_p/0/c" || tree[1].ParentRunID != "tr_p" {
-		t.Errorf("RunTreeSpans(tr_p) = %+v, %v; want its span and its child's, from the spans' trace", tree, err)
+	if err != nil || len(tree.Spans) != 2 || tree.Spans[1].RunID != "tr_p/0/c" || tree.Spans[1].ParentRunID != "tr_p" {
+		t.Errorf("RunTreeSpans(tr_p) = %+v, %v; want its span and its child's, read by run id", tree, err)
 	}
 
 	explain := func(q string, args ...any) string {
@@ -206,7 +207,19 @@ func TestRunTreeAndChildRunsUseTheirIndexes(t *testing.T) {
 		return strings.Join(out, "\n")
 	}
 	if p := explain(traceSpans, trace); !strings.Contains(p, "idx_trace_id") {
-		t.Errorf("the tree's trace read names no idx_trace_id:\n%s", p)
+		t.Errorf("a derived tree's trace read names no idx_trace_id:\n%s", p)
+	}
+	// U9.1-fix: the tree is found from the rows — the id rule's on the
+	// primary key, their children on idx_parent_run — and its spans read
+	// by run id on idx_weft_run_id, never the whole trace.
+	if p := explain(treeIDRows, "tr_p", "tr_p/"); !strings.Contains(p, "Keys:\nRunId") || strings.Contains(p, "Condition: true") {
+		t.Errorf("the id rule's rows are not read on weft_runs' primary key:\n%s", p)
+	}
+	if p := explain(treeChildIDs(treeIDCondition), "tr_p", "tr_p/"); !strings.Contains(p, "idx_parent_run") {
+		t.Errorf("the tree's children read names no idx_parent_run:\n%s", p)
+	}
+	if p := explain(treeSpansByIDRule+" OR RunId IN (?))"+treeSpanOrder, "tr_p", "tr_p/", "x", 10); !strings.Contains(p, "idx_weft_run_id") || strings.Contains(p, "idx_trace_id") {
+		t.Errorf("the tree's spans read names no idx_weft_run_id (or reads by trace):\n%s", p)
 	}
 	if p := explain(childRunsSQL(2), "tr_p", "x", "tr_p", "x"); !strings.Contains(p, "idx_parent_run") {
 		t.Errorf("ChildRuns' plan names no idx_parent_run:\n%s", p)

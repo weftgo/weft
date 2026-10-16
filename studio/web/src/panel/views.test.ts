@@ -240,12 +240,18 @@ describe("the timeline", () => {
       "1500 ms",
       "2000 ms",
     ])
-    expect(all(el, ".weft-wf .weft-wf-name").map((n) => n.textContent)).toEqual(
-      ["invoke_agent", "chat"]
-    )
-    expect(all(el, ".weft-wf .weft-wf-ms").map((n) => n.textContent)).toEqual([
-      "2000ms",
-      "1000ms",
+    expect(all(el, ".weft-tl .weft-tl-l").map((n) => n.textContent)).toEqual([
+      "run",
+      "step 0",
+      "model · script",
+      "chat",
+    ])
+    expect(all(el, ".weft-tl .weft-wf-ms").map((n) => n.textContent)).toEqual([
+      // The fold's step and model call no span covers: untimed (U8.3).
+      "2.0s",
+      "—",
+      "—",
+      "1.0s",
     ])
   })
 
@@ -286,13 +292,32 @@ describe("the timeline", () => {
     ])
     // The run tree's order (lib/waterfall.ts, U8.1): a step, then its
     // calls — no longer by when each closed.
-    expect(all(el, ".weft-wf .weft-wf-name").map((n) => n.textContent)).toEqual(
-      ["step 0", "lookup_order"]
-    )
-    expect(all(el, ".weft-wf .weft-wf-ms").map((n) => n.textContent)).toEqual([
+    expect(all(el, ".weft-tl .weft-tl-l").map((n) => n.textContent)).toEqual([
+      "acme-support",
+      "step 0",
+      "model · script",
+      "lookup_order",
+    ])
+    expect(all(el, ".weft-tl .weft-wf-ms").map((n) => n.textContent)).toEqual([
+      "#0–5",
       "#1–4",
+      "#1–2",
       "#2–3",
     ])
+  })
+
+  it("U8.3: a row's click selects its step in Story (what ⤢ carries)", async () => {
+    fakeStudio(baseRoutes())
+    const el = await mount(BASE)
+    click(tab(el, "timeline"))
+    await settle()
+    const head = () =>
+      all(el, ".weft-head a").find((n) => n.textContent === "⤢")!
+    expect(head().getAttribute("href")).not.toContain("step=")
+    click(all(el, '.weft-tl[data-weft-step="0"]')[1])
+    await settle()
+    expect(tab(el, "story").getAttribute("aria-selected")).toBe("true")
+    expect(head().getAttribute("href")).toContain("step=0")
   })
 
   it("review: the axis is the waterfall's own window, and a span it cannot place is said", async () => {
@@ -324,9 +349,12 @@ describe("the timeline", () => {
       "750 ms",
       "1000 ms",
     ])
-    expect(all(el, ".weft-wf .weft-wf-name").map((n) => n.textContent)).toEqual(
-      ["chat"]
-    )
+    expect(all(el, ".weft-tl .weft-tl-l").map((n) => n.textContent)).toEqual([
+      "acme-support",
+      "step 0",
+      "model · script",
+      "chat",
+    ])
     expect(text(el, ".weft-timeline .weft-warn")).toBe(
       "2 spans not placed: unreadable times, or an end before the start"
     )

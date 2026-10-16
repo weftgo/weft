@@ -170,6 +170,9 @@ export interface RunLinkOptions {
   /** An OTel span to select, by its span id (the waterfall's time
    * scale rows). */
   span?: string
+  /** A run tree row to select, by its key (lib/waterfall.ts's rowKeys:
+   * the panel's Timeline hands a child run's row off with it). */
+  sel?: string
   view?: RunView
   /** The step's pane to open (needs `step`). */
   pane?: StepPane
@@ -393,6 +396,7 @@ export function runLink(id: string, opts: RunLinkOptions = {}): RunLink {
   if (opts.call && (opts.resumed || step !== undefined))
     search.sel = `c:${opts.resumed ? "resume" : String(step)}:${opts.call}`
   else if (opts.span) search.sel = `t:${opts.span}`
+  else if (opts.sel) search.sel = opts.sel
   if (opts.scale === "time" || opts.scale === "order" || opts.scale === "graph")
     search.scale = opts.scale
   const t = ordinal(opts.t)

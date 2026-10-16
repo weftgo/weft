@@ -4,7 +4,7 @@
 // the host page's CSS and the panel's never meet (§5.4). No webfonts
 // — the mono stack is the machine's own voice, and a dock must not
 // fetch fonts (V2: served by your backend, works offline).
-import { INK, PALETTE, ROLE } from "../lib/palette"
+import { INK, PALETTE, ROLE, TONE } from "../lib/palette"
 import type { Theme } from "../lib/palette"
 import { STATUS } from "../lib/status"
 
@@ -26,6 +26,13 @@ const statusRules = () =>
       ([k, w]) =>
         `.weft-chip.weft-${k} { color: var(--weft-${INK[ROLE[w.role]] ?? ROLE[w.role]}); border: 1px solid; }`
     )
+    .join("\n")
+
+/** toneRules colours each Timeline row by its tone (U8.3, lib/
+ * waterfall.ts's rowTone × lib/palette.ts's TONE): Studio's colour. */
+const toneRules = () =>
+  Object.entries(TONE)
+    .map(([k, t]) => `.weft-tl[data-tone=${k}] { --c: var(--weft-${t}); }`)
     .join("\n")
 
 /** The tokens a host page may override (D2): every colour, radius and
@@ -191,11 +198,22 @@ details.weft-collapsible[open] > summary::before { content: "\\25BE "; }
 
 .weft-wf { margin: 4px 0 10px; }
 .weft-wf-row { display: flex; align-items: center; gap: 6px; margin: 2px 0; }
-.weft-wf-name { width: 130px; flex: none; overflow: hidden; text-overflow: ellipsis;
+.weft-wf-name { width: 160px; flex: none; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; color: var(--weft-dim); }
 .weft-wf-track { flex: 1; height: 8px; background: var(--weft-bg3); border-radius: var(--weft-radius-sm); position: relative; }
 .weft-wf-bar { position: absolute; top: 0; bottom: 0; border-radius: var(--weft-radius-sm); background: var(--weft-info); min-width: 2px; }
 .weft-wf-ms { width: 52px; flex: none; text-align: right; color: var(--weft-faint); }
+${toneRules()}
+.weft-tl { cursor: pointer; }
+.weft-tl.weft-sel { background: var(--weft-bg3); }
+.weft-tl .weft-wf-name { color: var(--c); }
+.weft-tl i { font-style: normal; display: inline-block; width: 2ch; }
+.weft-tl b { font-weight: normal; font-size: 10px; margin-left: 4px; }
+.weft-tl a { margin-left: 4px; color: var(--weft-accent); }
+.weft-tl .weft-wf-bar { background: var(--c); }
+.weft-tl[data-kind=run] .weft-wf-bar, .weft-tl[data-kind=subagent] .weft-wf-bar { top: 2px; bottom: 2px; }
+.weft-tl[data-critical] .weft-wf-bar { box-shadow: 0 2px 0 var(--weft-accent); }
+.weft-tl-u { font-size: 10px; color: var(--weft-dim); }
 
 .weft-usage { display: flex; gap: 12px; flex-wrap: wrap; color: var(--weft-dim); margin-top: 4px; }
 .weft-footer {

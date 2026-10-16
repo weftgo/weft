@@ -9,34 +9,9 @@
 // story shows), else through its timed span. Plain TypeScript, no
 // React: Studio only (the panel draws the model itself, U8.3).
 import type { Span as TimedSpan } from "./api"
-import type { Span, SpanKind, SpanTone } from "./trace"
-import type { RowKind, WaterfallModel, WaterfallRow } from "./waterfall"
-import { lanesWord, rowBadge, rowKeys } from "./waterfall"
-
-const KIND: Record<RowKind, SpanKind> = {
-  run: "run",
-  child: "subagent",
-  step: "step",
-  model: "model",
-  attempt: "attempt",
-  tool: "tool",
-  span: "span",
-}
-
-function tone(r: WaterfallRow): SpanTone {
-  switch (r.status) {
-    case "error":
-      return r.kind === "tool" ? "error" : "bad"
-    case "running":
-      return "running"
-    case "never":
-      return "never"
-    case "pending":
-      return "result"
-    default:
-      return r.kind === "tool" ? "tool" : "step"
-  }
-}
+import type { Span } from "./trace"
+import type { WaterfallModel, WaterfallRow } from "./waterfall"
+import { lanesWord, ROW_KIND, rowBadge, rowKeys, rowTone } from "./waterfall"
 
 /** A timed span as a detail row (the TimedDetail pane's input). */
 function timedOf(span: TimedSpan, r: WaterfallRow): Span["timed"] {
@@ -65,11 +40,11 @@ export function treeSpans(model: WaterfallModel): Span[] {
       key: r.key,
       parent: r.parent,
       depth: r.depth,
-      kind: KIND[r.kind],
+      kind: ROW_KIND[r.kind],
       label: r.label,
       sub: sub || undefined,
       badge: rowBadge(r),
-      tone: tone(r),
+      tone: rowTone(r),
       from: r.start,
       to: r.took === null ? null : r.start + r.took,
       ...(time && r.span ? { timed: timedOf(r.span, r) } : {}),

@@ -29,6 +29,7 @@ export const PALETTE: Record<Theme, Record<string, string>> = {
     err: "#b42318",
     info: "#2f5bd3",
     ok: "#1f7a45",
+    result: "#4d7a2a",
     parked: "#8a3fb0",
     "status-run": "#ef4d21",
     "status-run-ink": "#d13c10",
@@ -49,6 +50,7 @@ export const PALETTE: Record<Theme, Record<string, string>> = {
     err: "#f87171",
     info: "#7aa2ff",
     ok: "#4ade80",
+    result: "#8fbf6a",
     parked: "#c678dd",
     "status-run": "#ff5c2b",
     "status-run-ink": "#ff5c2b",
@@ -73,6 +75,7 @@ export const STUDIO_NAMES: Record<Theme, Record<string, string>> = {
     err: "status-bad",
     info: "ev-tool",
     ok: "status-ok",
+    result: "ev-result",
     parked: "status-parked",
     "status-run": "status-run",
     "status-run-ink": "status-run-ink",
@@ -91,6 +94,7 @@ export const STUDIO_NAMES: Record<Theme, Record<string, string>> = {
     err: "status-bad",
     info: "ev-tool",
     ok: "status-ok",
+    result: "ev-result",
     parked: "status-parked",
     "status-run": "status-run",
     "status-run-ink": "status-run-ink",
@@ -118,3 +122,26 @@ export type Role = keyof typeof ROLE
  * border stay --status-run (3:1 is enough for a mark); the running word
  * is --status-run-ink. Any other token is its own ink. */
 export const INK: Record<string, string> = { "status-run": "status-run-ink" }
+
+/** A run tree row's tone (U8.3; lib/waterfall.ts's rowTone): the panel
+ * token the Timeline draws it in. Studio's Waterfall draws the tone's
+ * own variable (TONE_STUDIO) — the same hex per theme (palette.test.ts):
+ * error-as-data is mustard (--ev-error = --weft-warn), a failed row red. */
+export const TONE = {
+  step: "fg",
+  tool: "info",
+  result: "result",
+  error: "warn",
+  bad: "err",
+  running: "status-run-ink",
+  never: "warn",
+} as const
+export const TONE_STUDIO: Record<keyof typeof TONE, string> = {
+  step: "foreground",
+  tool: "ev-tool",
+  result: "ev-result",
+  error: "ev-error",
+  bad: "status-bad",
+  running: "status-run-ink",
+  never: "ev-error",
+}

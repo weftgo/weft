@@ -204,10 +204,8 @@ describe("a derived turn in the panel", () => {
     expect(tp.textContent).not.toContain("could not be read")
     const tl = await tab(el, "timeline")
     expect(
-      [...tl.querySelectorAll(".weft-wf .weft-wf-name")].map(
-        (n) => n.textContent
-      )
-    ).toEqual(["invoke_agent support", "chat gpt-5"])
+      [...tl.querySelectorAll(".weft-tl .weft-tl-l")].map((n) => n.textContent)
+    ).toEqual(["support", "step 0", "model · gpt-5-2025-08-07"])
   })
 
   it("Request: the request badged derived with its reason and fix, no prompt claimed", async () => {
@@ -230,14 +228,17 @@ describe("a derived turn in the panel", () => {
       '.weft-note [data-hole="derived"]'
     )!.parentElement!
     saysStock(line.textContent, "timeline")
-    const names = [...tp.querySelectorAll(".weft-wf .weft-wf-name")].map(
+    const names = [...tp.querySelectorAll(".weft-tl .weft-tl-l")].map(
       (n) => n.textContent
     )
+    // The run tree's rows (U8.3): the label rule, not the span names.
     expect(names).toEqual([
-      "invoke_agent support",
-      "chat gpt-5",
-      "execute_tool lookup_order",
-      "chat gpt-5",
+      "support",
+      "step 0",
+      "model · gpt-5-2025-08-07",
+      "lookup_order",
+      "step 1",
+      "model · gpt-5-2025-08-07",
     ])
   })
 

@@ -160,7 +160,19 @@ import { parseScope, serializeScope } from "../lib/scope"
 import { clip as clipTitle, turnLabel, turnTitle } from "../lib/title"
 import type { Scope } from "../lib/scope"
 import { el, fmtJSON, on, patch } from "./render"
-import { waterfallRows } from "../lib/waterfall"
+import {
+  extent,
+  KIND_ICON,
+  lanesWord,
+  ROW_KIND,
+  rowBadge,
+  rowTone,
+  took,
+  UNTIMED_HOLE,
+  UNTIMED_PENDING,
+  UNTIMED_PENDING_HINT,
+  waterfallRows,
+} from "../lib/waterfall"
 import { PANEL_CSS } from "./styles"
 import { nextTheme, resolveTheme, themeSetting, ThemeWatch } from "./theme"
 import {
@@ -3430,6 +3442,9 @@ export class WeftDevtools extends HTMLElement {
       if (!target) return
       const n = Number(target.getAttribute("data-weft-step"))
       if (Number.isFinite(n)) this.model?.selectStep(n)
+      // A Timeline row opens its step in Story (U8.3); its ⤢ hands off.
+      if (target.matches(".weft-tl") && !e.target.closest("a"))
+        this.setTab("story")
     })
     if (s.tooNew && s.meta) {
       main.appendChild(
@@ -3486,7 +3501,7 @@ export class WeftDevtools extends HTMLElement {
           tab === "raw"
             ? this.rawView(t)
             : tab === "timeline"
-              ? renderTimeline(t)
+              ? renderTimeline(t, s.selectedStep, this.base)
               : this.requestView(s, t),
         ]),
         tab
@@ -6077,14 +6092,22 @@ export function readStep(view: FoldedRun, selected: number | null): number {
     : -1
 }
 
-/** renderTimeline is the Timeline tab (D4): lib/waterfall.ts's run
- * tree at the column's full width, over a time axis (ms from the run's
- * first span) when the run has spans; without, its steps and tool
- * calls placed by the event sequence (seq: the event's position in the
- * run's stream — the model's order scale). Today it draws the span
- * rows (time) or the step and tool rows (seq) flat; U8.3 draws the
- * tree. */
-export function renderTimeline(t: TurnView): HTMLElement {
+/** renderTimeline is the Timeline tab (D4, U8.3): lib/waterfall.ts's
+ * run tree — Studio's run page's rows, one level deep: the run, its
+ * steps, their model calls and tools (and the spans under them), each
+ * child run one row with ⤢ handing off to Studio's run page at that row
+ * (?sel=), never its subtree. A row is drawn as Studio draws it: indented
+ * by depth, its kind's glyph (ROW_KIND, KIND_ICON), its tone's colour
+ * (rowTone, lib/palette.ts's TONE), the label rule, the critical path,
+ * its extent (took; the offset as its title), an untimed row's words.
+ * Over a time axis (ms from the run's first span) when the run has
+ * spans; without, the event sequence (seq: the order scale). A row of
+ * a step carries data-weft-step: a click selects that step in Story. */
+export function renderTimeline(
+  t: TurnView,
+  sel?: number | null,
+  endpoint?: string
+): HTMLElement {
   const wf = waterfallRows({
     runId: t.id,
     status: t.doc?.status,
@@ -6092,23 +6115,11 @@ export function renderTimeline(t: TurnView): HTMLElement {
     fold: t.folded,
     total: (t.events.at(-1)?.pos ?? 0) + 1,
   })
-  const axis = wf.scale === "time" ? "time" : "seq"
+  const time = wf.scale === "time"
   const end = wf.domain[1]
-  const bars = wf.rows
-    .filter((r) =>
-      wf.scale === "time" ? r.span : r.kind === "step" || r.kind === "tool"
-    )
-    .map((r) => {
-      const w = r.took ?? end - r.start
-      return {
-        name: r.span?.name ?? r.label,
-        left: r.start / end,
-        width: Math.max(0.005, w / end),
-        ms: Math.round(w),
-        label: axis === "seq" ? `#${r.start}–${r.start + w}` : undefined,
-      }
-    })
-  const box = el("div", "weft-timeline", undefined, { "data-axis": axis })
+  const box = el("div", "weft-timeline", undefined, {
+    "data-axis": time ? "time" : "seq",
+  })
   const lost = wf.unplaced
   if (lost > 0)
     box.appendChild(
@@ -6118,7 +6129,7 @@ export function renderTimeline(t: TurnView): HTMLElement {
         `${lost} span${lost === 1 ? "" : "s"} not placed: unreadable times, or an end before the start`
       )
     )
-  if (!bars.length) {
+  if (wf.rows.length < 2) {
     box.appendChild(
       el("div", "weft-note", "nothing to place yet: no spans and no steps")
     )
@@ -6127,50 +6138,85 @@ export function renderTimeline(t: TurnView): HTMLElement {
   const ticks = el("div", "weft-axis")
   for (const f of [0, 0.25, 0.5, 0.75, 1]) {
     const v = Math.round(end * f)
-    const tick = el(
-      "span",
-      "weft-tick",
-      axis === "time" ? `${v} ms` : `seq ${v}`
-    )
+    const tick = el("span", "weft-tick", time ? `${v} ms` : `seq ${v}`)
     tick.style.left = `${f * 100}%`
     ticks.appendChild(tick)
   }
   box.appendChild(
     el("div", "weft-wf-row", [
-      el("span", "weft-wf-name", axis === "time" ? "time (ms)" : "seq"),
+      el("span", "weft-wf-name", time ? "time (ms)" : "seq"),
       ticks,
       el("span", "weft-wf-ms"),
     ])
   )
-  box.appendChild(renderWaterfall(bars))
-  return box
-}
-
-/** renderWaterfall draws §2's timing mini-waterfall: one bar per
- * span over the run's own window, wall milliseconds beside (or the
- * bar's own label: the seq range on a spanless run). */
-export function renderWaterfall(
-  bars: {
-    name: string
-    left: number
-    width: number
-    ms: number
-    label?: string
-  }[]
-): HTMLElement {
-  const box = el("div", "weft-wf")
-  for (const b of bars) {
-    const row = el("div", "weft-wf-row")
-    row.appendChild(el("span", "weft-wf-name", b.name, { title: b.name }))
+  const wrap = el("div", "weft-wf")
+  for (const r of wf.rows) {
+    const kind = ROW_KIND[r.kind]
+    const b = r.status === "ok" ? undefined : rowBadge(r)
+    const sub = [r.gist, lanesWord(r.lanes)].filter(Boolean).join(" · ")
+    const name = el(
+      "span",
+      "weft-wf-name",
+      [
+        el("i", undefined, KIND_ICON[kind], { "aria-hidden": "true" }),
+        el("span", "weft-tl-l", r.label),
+        ...(b ? [el("b", undefined, b)] : []),
+      ],
+      { title: sub ? `${r.label} — ${sub}` : r.label }
+    )
+    name.style.paddingLeft = `${r.depth * 2}ch`
+    if (r.child && endpoint)
+      name.appendChild(
+        el("a", undefined, "⤢", {
+          href: href(endpoint, runLink(t.id, { sel: r.key })),
+          target: "_blank",
+          rel: "noopener",
+          title: "open in Studio",
+          "data-weft-handoff": r.child.runId,
+        })
+      )
     const track = el("span", "weft-wf-track")
-    const bar = el("span", "weft-wf-bar")
-    bar.style.left = `${(b.left * 100).toFixed(2)}%`
-    bar.style.width = `${(b.width * 100).toFixed(2)}%`
-    track.appendChild(bar)
-    row.appendChild(track)
-    row.appendChild(el("span", "weft-wf-ms", b.label ?? `${b.ms}ms`))
-    box.appendChild(row)
+    if (r.untimed === "missing")
+      track.appendChild(badge(UNTIMED_HOLE.hole, UNTIMED_HOLE))
+    else if (r.untimed)
+      track.appendChild(
+        el("span", "weft-tl-u", UNTIMED_PENDING, {
+          title: UNTIMED_PENDING_HINT,
+        })
+      )
+    else {
+      const bar = el("span", "weft-wf-bar")
+      const w = r.took ?? end - r.start
+      bar.style.left = `${((r.start / end) * 100).toFixed(2)}%`
+      bar.style.width = `${(Math.max(0.005, w / end) * 100).toFixed(2)}%`
+      track.appendChild(bar)
+    }
+    const at: Record<string, string> = {
+      "data-key": `tl:${r.key}`,
+      "data-kind": kind,
+      "data-tone": rowTone(r),
+    }
+    if (r.step !== undefined) at["data-weft-step"] = String(r.step)
+    if (r.critical) at["data-critical"] = ""
+    wrap.appendChild(
+      el(
+        "div",
+        `weft-wf-row weft-tl${r.kind === "step" && r.step === sel ? " weft-sel" : ""}`,
+        [
+          name,
+          track,
+          el(
+            "span",
+            "weft-wf-ms",
+            extent(r, wf.scale),
+            time ? { title: `+${took(r.start)}` } : undefined
+          ),
+        ],
+        at
+      )
+    )
   }
+  box.appendChild(wrap)
   return box
 }
 

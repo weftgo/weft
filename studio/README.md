@@ -331,7 +331,21 @@ ids repeat per step; `weft.parent.*` only when that span is absent) — a
 nested Generate's run, or a live delegation whose tool has not ended, is
 a child row too, and a running run's in-flight steps and calls are open
 rows on the time scale;
-`dimRows` dims (never hides) by errors, slow or tools. Studio's span list
+`dimRows` dims (never hides) by errors, slow or tools. The Timeline
+draws those rows as Studio's run page does, one level deep (U8.3): the
+same keys, labels (with the gist as the label's title), kinds
+(`ROW_KIND`, glyphs `KIND_ICON`: ▣ run, ↻ step, ◆ model, ◇ attempt, ⚙
+tool, ↳ child run, ○ span) and tones (`rowTone`, coloured through
+`lib/palette.ts`'s `TONE` — Studio's variable for each, the same hex,
+`palette.test.ts`), indented by depth, the critical path under the bar,
+each row's extent with its offset as the title, a row no span covers
+"spans not reported yet" or badged `not_recorded`; a child run is one
+row whose ⤢ opens Studio's run page at it (`?sel=r:<child>`, where it
+expands in place), never its subtree; a click on a step's row selects
+that step in Story (what the header's ⤢ carries). The panel reads
+`/spans` without `?tree=1`: a child row's extent is its tool call's.
+`parity.test.ts`'s "the run tree on both surfaces" holds the two
+renderers to the same rows on the director run. Studio's span list
 (`lib/trace.ts`'s `spansFromTimed`) walks the same span tree
 (`spanTree`) and time domain. Raw is a JSON tree (`src/panel/tree.ts`, hand-written) of
 `{doc, events, transcript, spans}`, plus `requests` when the panel
@@ -1002,8 +1016,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 266,901 B raw / 86,572 B gzip
-(84.5 KiB, the bundle of the ledger's row "U8.2-fix/U9.2-fix run tree review"; 11,732 B — 11.5 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 269,797 B raw / 87,654 B gzip
+(85.6 KiB, the bundle of the ledger's row "U8.3 Timeline run tree"; 10,650 B — 10.4 KiB — of headroom under
 the 98,304 B, 96 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; A5.4 raised it from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library

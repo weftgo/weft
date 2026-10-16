@@ -20,6 +20,7 @@
 import type { Span as TimedSpan } from "./api"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "./events"
 import { spanMs, stepCount } from "./format"
+import type { SpanKind, SpanTone } from "./trace"
 
 /** The axis: wall time from spans, or stream order from events. */
 export type Scale = "time" | "order"
@@ -1160,6 +1161,44 @@ export function rowBadge(r: WaterfallRow): string | undefined {
   if (r.status !== "ok") return r.status
   if (r.kind === "step" || r.kind === "model") return r.finish
   return r.kind === "tool" || r.kind === "child" ? "ok" : undefined
+}
+
+/** The kind each renderer draws a row as (the Waterfall's SpanKind: a
+ * child run is a subagent row), its glyph, and its tone (U8.3): Studio's
+ * run tree and the panel's Timeline read the same three tables, so a
+ * row is the same kind and colour on both (the panel's colours are
+ * lib/palette.ts's TONE). */
+export const ROW_KIND: Record<RowKind, SpanKind> = {
+  run: "run",
+  child: "subagent",
+  step: "step",
+  model: "model",
+  attempt: "attempt",
+  tool: "tool",
+  span: "span",
+}
+export const KIND_ICON: Record<SpanKind, string> = {
+  run: "▣",
+  step: "↻",
+  tool: "⚙",
+  subagent: "↳",
+  model: "◆",
+  attempt: "◇",
+  span: "○",
+}
+export function rowTone(r: WaterfallRow): SpanTone {
+  switch (r.status) {
+    case "error":
+      return r.kind === "tool" ? "error" : "bad"
+    case "running":
+      return "running"
+    case "never":
+      return "never"
+    case "pending":
+      return "result"
+    default:
+      return r.kind === "tool" ? "tool" : "step"
+  }
 }
 
 /** The critical path's legend and hint. */

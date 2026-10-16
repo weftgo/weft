@@ -13,8 +13,8 @@ import { shared, spacers } from "@/lib/virtual"
 import { ChevronRight } from "lucide-react"
 import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 
-import type { Span, SpanKind, SpanTone } from "@/lib/trace"
-import { took } from "@/lib/waterfall"
+import type { Span, SpanTone } from "@/lib/trace"
+import { KIND_ICON, took } from "@/lib/waterfall"
 
 const toneBar: Record<SpanTone, string> = {
   step: "bg-ev-step/60",
@@ -42,15 +42,6 @@ const badgeTone: Record<SpanTone, string> = {
   bad: "border-status-bad/50 text-status-bad",
   running: "border-status-run/50 text-status-run-ink",
   never: "border-ev-error/50 text-ev-error",
-}
-const kindIcon: Record<SpanKind, string> = {
-  run: "▣",
-  step: "↻",
-  tool: "⚙",
-  subagent: "↳",
-  model: "◆",
-  attempt: "◇",
-  span: "○",
 }
 
 export interface WaterfallProps {
@@ -359,6 +350,8 @@ export function Waterfall({
               aria-setsize={siblings.count.get(sp.parent ?? "")}
               aria-posinset={siblings.at.get(sp.id)}
               data-span={sp.key}
+              data-kind={sp.kind}
+              data-tone={sp.tone}
               data-critical={sp.critical ? "" : undefined}
               data-lane={sp.lane}
               data-lanes={sp.lanes}
@@ -397,7 +390,7 @@ export function Waterfall({
                   className={`w-3 shrink-0 text-center text-[10px] ${toneText[sp.tone]}`}
                   aria-hidden
                 >
-                  {kindIcon[sp.kind]}
+                  {KIND_ICON[sp.kind]}
                 </span>
                 {(() => {
                   const cls = `shrink-0 truncate ${toneText[sp.tone]} ${

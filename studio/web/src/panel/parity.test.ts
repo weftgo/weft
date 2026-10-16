@@ -132,6 +132,12 @@ import {
   serveAppTurn,
 } from "../test/appturn-fixture"
 import type { AppTurnOptions } from "../test/appturn-fixture"
+import {
+  DIR,
+  EVENTS as DIR_EVENTS,
+  OPS,
+  SPANS as DIR_SPANS,
+} from "../test/director-fixture"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -1520,17 +1526,7 @@ describe("a derived run on both surfaces (I1.3)", () => {
       saveLink: all(el, "a[data-weft-save-test]").length,
       refused: all(el, '[data-weft-refused="derived"]').length,
       handoff: $(el, "[data-weft-derived-handoff]")!.textContent,
-      timeline: [] as (string | null)[],
     }
-    click($(el, "#weft-tab-timeline"))
-    await vi.waitFor(
-      () =>
-        expect($(el, "#weft-tp-timeline .weft-wf .weft-wf-name")).toBeTruthy(),
-      { timeout: 5_000 }
-    )
-    panel.timeline = all(el, "#weft-tp-timeline .weft-wf .weft-wf-name").map(
-      (n) => n.textContent
-    )
     el.remove()
     await settle()
     cleanup()
@@ -1571,16 +1567,6 @@ describe("a derived run on both surfaces (I1.3)", () => {
     const studioChip = document
       .querySelector("[data-derived-chip] [data-hole='derived']")!
       .getAttribute("title")
-    renderApp(`/runs/${DERIVED}`)
-    // The run tree (U8.2): the run, two steps, their model calls, the tool.
-    await waitFor(() =>
-      expect(document.querySelectorAll("[data-span]").length).toBe(6)
-    )
-    const waterfall = [
-      // The label cell (the duration cell titles its offset).
-      ...document.querySelectorAll("[data-span] > div[title]:first-child"),
-    ].map((n) => n.getAttribute("title")!.split(" — ")[0])
-
     // The same rows: one hole, derived, on each surface.
     expect(panel.holes).toEqual(["derived"])
     expect(studio.holes).toEqual(panel.holes)
@@ -1603,25 +1589,7 @@ describe("a derived run on both surfaces (I1.3)", () => {
     // The steps: the panel hands off with the count the page draws cards for.
     expect(panel.handoff).toBe(`${studio.steps} steps · open in Studio ⤢`)
     expect(studio.steps).toBe(2)
-    // The spans: the Timeline lists the spans behind the waterfall's
-    // rows — Studio draws them as the run tree (U8.2), one row per span
-    // plus the steps that group them; the panel's Timeline draws the
-    // same tree in U8.3.
-    expect(panel.timeline).toEqual([
-      "invoke_agent support",
-      "chat gpt-5",
-      "execute_tool lookup_order",
-      "chat gpt-5",
-    ])
-    // A model call is labelled by the model that answered.
-    expect(waterfall).toEqual([
-      "support",
-      "step 0",
-      "model · gpt-5-2025-08-07",
-      "lookup_order",
-      "step 1",
-      "model · gpt-5-2025-08-07",
-    ])
+    // The run tree's rows on both: "the run tree on both surfaces (U8.3)".
   })
 
   it("no usage reported: both surfaces read the row's tokens as unknown, in the API's reason", async () => {
@@ -3312,5 +3280,149 @@ describe("one status vocabulary on both surfaces (U1)", () => {
         "parked· 1 call pending · a resume, if any, is not linked yet"
       )
     })
+  })
+})
+
+// U8.3 (UX-F-18, UX-D-34): one row model, two renderers. The director
+// run (rw.deep-delegation, test/director-fixture.ts) on Studio's run
+// page and in the panel's Timeline: the same rows — key, label (with
+// its gist: the label cell's "label — sub" title), kind and tone — the
+// child run one collapsed row on both, the panel never deeper.
+describe("the run tree on both surfaces (U8.3)", () => {
+  const rOK = golden<{ runs: RunRow[] }>("runs").runs.find(
+    (r) => r.id === "r_ok"
+  )!
+  const child: RunRow = {
+    ...rOK,
+    id: OPS,
+    agent: "ops-manager",
+    parent_run_id: DIR,
+    parent_call_id: "call_1",
+  }
+  const row: RunRow = { ...rOK, id: DIR, agent: "director", steps: 2 }
+  const doc = {
+    ...row,
+    trace_id: "t1",
+    children: [child],
+    holes: [],
+  } as unknown as RunDoc
+  // The run's own spans: the panel reads /spans without ?tree=1.
+  const own = DIR_SPANS.filter((s) => s.span_id.startsWith("d_")).map((s) => ({
+    ...s,
+    run_id: DIR,
+  }))
+  const serveDir = (studioMeta: boolean) =>
+    new FakeStudio()
+      .on(
+        "GET meta",
+        studioMeta ? golden<Record<string, unknown>>("meta") : META
+      )
+      .on("GET runs", { total: 1, runs: [row], next_before: null })
+      .on(`GET runs/${DIR}`, doc)
+      .on(
+        `GET runs/${DIR}/events`,
+        pagedEvents(
+          DIR_EVENTS.map((event, pos) => ({ pos, time: rOK.started, event })),
+          { done: true }
+        )
+      )
+      .on(`GET runs/${DIR}/transcript`, { messages: [] })
+      .on(`GET runs/${DIR}/spans`, { spans: own })
+      .install()
+  const kinds = (n: HTMLElement) => [n.dataset.kind, n.dataset.tone]
+
+  it("the director run: the same row keys, labels and kind classes (one level deep on the panel)", async () => {
+    serveDir(false)
+    const el = await mount({
+      "data-endpoint": "http://studio.test/studio/",
+      "data-open": "true",
+    })
+    await vi.waitFor(() => expect(all(el, ".weft-turn").length).toBe(1), {
+      timeout: 5_000,
+    })
+    click(all(el, ".weft-turn")[0])
+    await vi.waitFor(() => expect($(el, "#weft-tab-timeline")).toBeTruthy(), {
+      timeout: 5_000,
+    })
+    click($(el, "#weft-tab-timeline"))
+    await vi.waitFor(
+      () =>
+        expect(
+          $(el, `#weft-tp-timeline [data-key="${CSS.escape(`tl:r:${OPS}`)}"]`)
+        ).toBeTruthy(),
+      { timeout: 5_000 }
+    )
+    const panel = (all(el, "#weft-tp-timeline .weft-tl") as HTMLElement[]).map(
+      (n) => [
+        n.dataset.key!.slice(3), // tl:<row key>
+        n.querySelector(".weft-wf-name")!.getAttribute("title"),
+        ...kinds(n),
+      ]
+    )
+    const handoff = $(el, `#weft-tp-timeline [data-weft-handoff]`)!
+    el.remove()
+    await settle()
+    cleanup()
+    document.body.innerHTML = ""
+
+    stubBrowser()
+    vi.stubGlobal("scrollTo", vi.fn())
+    StudioEventSource.reset()
+    vi.stubGlobal("EventSource", StudioEventSource)
+    setStudioToken("")
+    serveDir(true)
+    renderApp(`/runs/${DIR}`)
+    await waitFor(() =>
+      expect(
+        document.querySelector(`[data-span="${CSS.escape(`r:${OPS}`)}"]`)
+      ).toBeTruthy()
+    )
+    const studio = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-span]")
+    ).map((n) => [
+      n.dataset.span,
+      n.querySelector("div[title]")!.getAttribute("title"),
+      ...kinds(n),
+    ])
+
+    expect(panel).toEqual(studio)
+    expect(panel.map((r) => r[0])).toEqual([
+      `r:${DIR}`,
+      "s0",
+      "s0:m",
+      "c:0:call_1",
+      `r:${OPS}`,
+      "t:d_http",
+      "s1",
+      "s1:m",
+    ])
+    // The label rule, the kinds (a child run a subagent row), the tones.
+    expect(panel.map((r) => r[1]!.split(" — ")[0])).toEqual([
+      "director",
+      "step 0",
+      "model · script",
+      "ops_manager",
+      "subagent", // no child span or fold read: the row's own word
+      "http.get",
+      "step 1",
+      "model · script",
+    ])
+    expect(panel.map((r) => r[2])).toEqual([
+      "run",
+      "step",
+      "model",
+      "tool",
+      "subagent",
+      "span",
+      "step",
+      "model",
+    ])
+    // One level deep: the child is one row, its ⤢ hands off to Studio's
+    // run page at that row.
+    expect(panel.some((r) => r[0]!.includes(`${OPS}:`))).toBe(false)
+    expect(handoff.getAttribute("data-weft-handoff")).toBe(OPS)
+    expect(new URL(handoff.getAttribute("href")!).searchParams.get("sel")).toBe(
+      `r:${OPS}`
+    )
   })
 })

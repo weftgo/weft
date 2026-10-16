@@ -3,7 +3,7 @@
 // keyboard with the Q4 collision decided (Alt+W primary; Chrome eats
 // Ctrl+Shift+W as close-window before any page can see it).
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { renderWaterfall, studioLink, WeftDevtools } from "./element"
+import { studioLink, WeftDevtools } from "./element"
 import { idle } from "./testkit"
 import { waterfallRows } from "../lib/waterfall"
 import type { Span } from "../lib/api"
@@ -98,17 +98,7 @@ describe("the timing waterfall (§2 Timing, from /spans)", () => {
     expect(bars([span("x", "nope", T0)])).toEqual([])
   })
 
-  it("renders one row per span with its wall time", () => {
-    const box = renderWaterfall([
-      { name: "chat gpt-4o", left: 0.1, width: 0.5, ms: 2500 },
-    ])
-    const row = box.querySelector(".weft-wf-row")
-    expect(row?.querySelector(".weft-wf-name")?.textContent).toBe("chat gpt-4o")
-    expect(row?.querySelector(".weft-wf-ms")?.textContent).toBe("2500ms")
-    const bar = row?.querySelector(".weft-wf-bar") as HTMLElement
-    expect(bar.style.left).toBe("10%")
-    expect(bar.style.width).toBe("50%")
-  })
+  // The rows as the Timeline draws them: timeline.test.ts (U8.3).
 })
 
 describe("the keyboard (§5.2, Q4 decided: Alt+W primary)", () => {

@@ -642,7 +642,9 @@ const runSpansWhere = `run_id = ? AND run_id <> '' ORDER BY start_ns, span_id`
 //     down runs.parent_run_id (runs_started, 0014: parent_run_id leads
 //     it) from the run, with the ids core's id rule names its
 //     descendants (?2 < run_id < ?3: the run's id + "/" and + "0", the
-//     byte after "/"; runs' primary key) — in RunRow order, each row
+//     byte after "/"; runs' primary key — a superset: obsdb.TreeMembers
+//     keeps the ids of core's child shape, obsdb.TreeChildID, whose row
+//     names no parent) — in RunRow order, each row
 //     looked up by key (CROSS JOIN keeps the walk outermost: without
 //     it sqlite scans runs in started order to skip the sort);
 //   - treeSpansSQL: the members' spans by run id (spans_run, its
@@ -658,7 +660,8 @@ const (
 		UNION SELECT run_id FROM runs WHERE run_id > ?2 AND run_id < ?3
 		UNION SELECT r.run_id FROM runs AS r JOIN tree AS t ON r.parent_run_id = t.id
 	)
-	SELECT r.run_id, r.parent_run_id, r.public_id, r.started_ns FROM tree AS t CROSS JOIN runs AS r ON r.run_id = t.id
+	SELECT r.run_id, r.parent_run_id, r.public_id, r.started_ns, r.failed, r.finished_ok, r.root_ended, r.last_seen_ns
+	FROM tree AS t CROSS JOIN runs AS r ON r.run_id = t.id
 	ORDER BY r.started_ns, r.run_id`
 	treeSpansSQL = `SELECT ` + spanColumns + ` FROM spans
 	WHERE run_id IN (SELECT value FROM json_each(?)) AND run_id <> '' ORDER BY start_ns, span_id LIMIT ?`
@@ -670,8 +673,11 @@ const (
 // not reach the run by the id rule), then the members' spans are read
 // by run id, in any trace, capped (treeSpansSQL, obsdb.CapTree): the
 // run's trace is never read whole. A derived run (no run id on its
-// spans) is cut from its trace, as RunSpans reads it.
-func (d *DB) RunTreeSpans(ctx context.Context, runID string) (_ obsdb.RunTree, err error) {
+// spans) is cut from its trace, as RunSpans reads it, the trace's first
+// obsdb.TreeTraceCap spans (stockTreeWhere). Every statement is bounded
+// by the tree's own size: the walk visits each member row once.
+func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTree, err error) {
+	runID := q.RunID
 	if err := d.checkOpen(); err != nil {
 		return obsdb.RunTree{}, err
 	}
@@ -680,11 +686,14 @@ func (d *DB) RunTreeSpans(ctx context.Context, runID string) (_ obsdb.RunTree, e
 		return obsdb.RunTree{}, err
 	}
 	if trace, _, ok := obsdb.ParseStockRunID(runID); ok {
-		spans, err := d.querySpans(ctx, `trace_id = ? ORDER BY start_ns, span_id`, trace)
+		spans, err := d.querySpans(ctx, stockTreeWhere, trace)
 		if err != nil {
 			return obsdb.RunTree{}, err
 		}
-		return obsdb.CapTree(spans, runID, nil, nil), nil
+		cut := len(spans) > obsdb.TreeTraceCap
+		tree := obsdb.CapTree(spans[:min(len(spans), obsdb.TreeTraceCap)], false, q, nil, nil)
+		tree.TraceTruncated = cut
+		return tree, nil
 	}
 	rows, err := d.treeRows(ctx, runID)
 	if err != nil {
@@ -694,7 +703,7 @@ func (d *DB) RunTreeSpans(ctx context.Context, runID string) (_ obsdb.RunTree, e
 	for _, r := range rows {
 		parents[r.ID] = r.ParentRunID
 	}
-	list, err := json.Marshal(obsdb.TreeMemberIDs(runID, parents))
+	list, err := json.Marshal(obsdb.TreeReadIDs(q, parents, rows))
 	if err != nil {
 		return obsdb.RunTree{}, err
 	}
@@ -707,8 +716,13 @@ func (d *DB) RunTreeSpans(ctx context.Context, runID string) (_ obsdb.RunTree, e
 	if err := scanSpans(rs, nil, func(s obsdb.Span) { spans = append(spans, s) }); err != nil {
 		return obsdb.RunTree{}, err
 	}
-	return obsdb.CapTree(spans, runID, parents, rows), nil
+	return obsdb.CapTree(spans, len(spans) > obsdb.TreeSpanCap, q, parents, rows), nil
 }
+
+// stockTreeWhere is a derived run's tree read: its trace in start
+// order, the first obsdb.TreeTraceCap spans and one more (the trace
+// holds more: RunTree.TraceTruncated), on the primary key.
+var stockTreeWhere = fmt.Sprintf(`trace_id = ? ORDER BY start_ns, span_id LIMIT %d`, obsdb.TreeTraceCap+1)
 
 // treeRows is treeRowsSQL for runID.
 func (d *DB) treeRows(ctx context.Context, runID string) ([]obsdb.TreeRun, error) {
@@ -718,13 +732,16 @@ func (d *DB) treeRows(ctx context.Context, runID string) ([]obsdb.TreeRun, error
 	}
 	defer func() { _ = rs.Close() }()
 	var out []obsdb.TreeRun
+	now := time.Now()
 	for rs.Next() {
 		var r obsdb.TreeRun
-		var started int64
-		if err := rs.Scan(&r.ID, &r.ParentRunID, &r.PublicID, &started); err != nil {
+		var started, seen int64
+		var failed, finished, rootEnded bool
+		if err := rs.Scan(&r.ID, &r.ParentRunID, &r.PublicID, &started, &failed, &finished, &rootEnded, &seen); err != nil {
 			return nil, err
 		}
 		r.Started = timeOf(started)
+		r.Status = obsdb.DeriveStatus(failed, finished || rootEnded, timeOf(seen), now)
 		out = append(out, r)
 	}
 	return out, rs.Err()

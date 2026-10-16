@@ -31,8 +31,11 @@ type TreeReader interface {
 	// names the run it belongs to and that run's parent: the key a
 	// reader draws one run's spans under another's by is (RunID,
 	// SpanID). ErrNotFound for an unknown run; empty, not an error, for
-	// a run with no span stored.
-	RunTreeSpans(ctx context.Context, runID string) (RunTree, error)
+	// a run with no span stored. TreeQuery.PublicID scopes the answer
+	// to one public id (a panel token's): the cut, then the scope, then
+	// the cap, so a run the scope leaves out never takes a visible
+	// run's place under the cap (RunTree.Hidden).
+	RunTreeSpans(ctx context.Context, q TreeQuery) (RunTree, error)
 	// ChildRuns returns the direct children (RunRow.ParentRunID) of each
 	// of the parent ids, in one read per call however many ids it names
 	// (the backend may split a very long list into chunks): each
@@ -43,11 +46,38 @@ type TreeReader interface {
 	ChildRuns(ctx context.Context, parentIDs []string) (map[string][]RunRow, error)
 }
 
+// TreeQuery names the run tree TreeReader.RunTreeSpans reads.
+type TreeQuery struct {
+	// RunID is the tree's root run.
+	RunID string
+	// PublicID, when not "", scopes the tree to one public id (a panel
+	// token's, U9.1-fix): the root run's spans stay, and a descendant
+	// run stays when its row and each of its spans carry PublicID and
+	// its parent run stays; any other descendant is left out with its
+	// whole subtree, unnamed and uncounted (RunTree.Hidden). The
+	// backend leaves the rows' outsiders out of its span read, and the
+	// cap counts the visible spans alone.
+	PublicID string
+}
+
 // TreeSpanCap bounds the spans one RunTreeSpans answer holds: 10,000,
 // the first in start order. A tree with more is cut there and says so
 // (RunTree.Truncated; Studio's truncated hole, cause response_cap):
 // each child run's own tree is a read away.
 const TreeSpanCap = 10_000
+
+// TreeTraceCap bounds the spans a derived run's tree (§9 of
+// docs/record-contract.md: its spans carry no run id) reads of its
+// trace before it cuts the run's subtree out: 50,000, the first in
+// start order. A trace with more is read that far and says so
+// (RunTree.TraceTruncated). The subtree is cut from what was read,
+// then capped at TreeSpanCap, so a run late in a large trace keeps its
+// own spans while they fall inside the read.
+const TreeTraceCap = 50_000
+
+// TreeMissingCap bounds RunTree.Missing: the first 100 by start, the
+// whole count in RunTree.MissingCount.
+const TreeMissingCap = 100
 
 // RunTree is TreeReader.RunTreeSpans' answer.
 type RunTree struct {
@@ -57,20 +87,35 @@ type RunTree struct {
 	// Truncated says the tree holds more than TreeSpanCap spans: Spans
 	// is its first TreeSpanCap.
 	Truncated bool
+	// TraceTruncated says a derived run's trace held more than
+	// TreeTraceCap spans: the tree was cut from the trace's first
+	// TreeTraceCap, so a span of it after them was not read. Never set
+	// for a weft run (its spans are read by run id).
+	TraceTruncated bool
 	// Missing is the descendant runs the tree knows from their rows
-	// that have no span in Spans — a child that ran without a tracer,
-	// whose spans a destination dropped, or that has not reported one
-	// yet — ordered by Started, then id. Empty when Truncated:
-	// a cut tree cannot tell a missing run from one past the cap.
+	// that have no span in Spans and are not running — a child that
+	// ran without a tracer, or whose spans a destination dropped —
+	// ordered by Started, then id: at most TreeMissingCap, the first
+	// ones. A running child (StatusRunning: spans export when they
+	// end) is not missing yet. Empty when Truncated: a cut tree cannot
+	// tell a missing run from one past the cap.
 	Missing []TreeRun
+	// MissingCount is how many runs are missing: Missing's length
+	// before TreeMissingCap.
+	MissingCount int
+	// Hidden says TreeQuery.PublicID's scope left runs out.
+	Hidden bool
 }
 
 // TreeRun names one run of a tree: its id, its parent, its public id
-// (weft.public_id, "" when none — what a scoped reader filters by) and
-// when it started (RunRow.Started, the order Missing lists runs in).
+// (weft.public_id, "" when none — what a scoped reader filters by),
+// when it started (RunRow.Started, the order Missing lists runs in)
+// and its derived status (DeriveStatus with the read's clock: a
+// running run is never Missing).
 type TreeRun struct {
 	ID, ParentRunID, PublicID string
 	Started                   time.Time
+	Status                    Status
 }
 
 // TreeSpan is one span of a run tree (TreeReader.RunTreeSpans): the
@@ -85,13 +130,18 @@ type TreeSpan struct {
 
 // TreeIDRule is the parent core's id rule gives id inside runID's
 // subtree: a Subagent child's id is <parent>/<step>/<call id> (and
-// <parent>/resume/<call id> under Approve), so an id that starts with
-// runID + "/" descends from runID. The parent is the nearest id above
-// it that known holds — id trimmed at each "/" from the end, so a call
-// id holding a "/" of its own still finds its run — else runID. ok is
-// false for an id outside the subtree (runID itself included).
+// <parent>/resume/<call id> under Approve), so an id of that shape
+// under runID (TreeChildID: the step all digits or "resume", a
+// non-empty call id) descends from runID; an app's own hierarchical
+// id ("job/1", or "job/1/retry/2" under "job/1") is not of it. The
+// parent is the nearest run above id that known holds and of which id
+// has the shape — id trimmed at each "/" from the end, so a call id
+// holding a "/" of its own still finds its run — else runID. ok is
+// false for an id outside the subtree (runID itself included). The
+// rule is a fallback for a run no row or span names a parent of
+// (TreeMembers): a stored parent always wins over the id.
 func TreeIDRule(runID, id string, known func(string) bool) (parent string, ok bool) {
-	if !strings.HasPrefix(id, runID+"/") {
+	if !TreeChildID(runID, id) {
 		return "", false
 	}
 	for p := id; ; {
@@ -100,10 +150,33 @@ func TreeIDRule(runID, id string, known func(string) bool) (parent string, ok bo
 			return runID, true
 		}
 		p = p[:i]
-		if known(p) {
+		if known(p) && TreeChildID(p, id) {
 			return p, true
 		}
 	}
+}
+
+// TreeChildID reports whether id has the shape core gives a child run
+// of parent (core's childRunID): parent + "/" + a step (one or more
+// ASCII digits) or "resume", then "/" + a non-empty call id.
+func TreeChildID(parent, id string) bool {
+	rest, ok := strings.CutPrefix(id, parent+"/")
+	if !ok {
+		return false
+	}
+	seg, call, ok := strings.Cut(rest, "/")
+	if !ok || call == "" || seg == "" {
+		return false
+	}
+	if seg == "resume" {
+		return true
+	}
+	for i := 0; i < len(seg); i++ {
+		if seg[i] < '0' || seg[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // TreeMembers is runID's subtree from what a backend knows before it
@@ -111,8 +184,9 @@ func TreeIDRule(runID, id string, known func(string) bool) (parent string, ok bo
 // parent-chain and id-rule reads returned, the trace's runs with no
 // row (their spans' weft.parent.run.id, "" when none) — to its parent.
 // A run is in the subtree when its parent chain reaches runID, or,
-// when the chain does not, when the id rule names it a descendant
-// (TreeIDRule; its parent then the rule's). The answer maps every
+// when no row or span names its parent (mapped to ""), when the id
+// rule names it a descendant (TreeIDRule; its parent then the rule's):
+// a stored parent outside the subtree wins over the id. The answer maps every
 // member, runID included, to its parent; a parent chain that loops
 // (never written by the core) ends where it repeats.
 func TreeMembers(runID string, parents map[string]string) map[string]string {
@@ -131,8 +205,8 @@ func TreeMembers(runID string, parents map[string]string) map[string]string {
 		if grew {
 			continue
 		}
-		for id := range parents {
-			if _, done := in[id]; done {
+		for id, stored := range parents {
+			if _, done := in[id]; done || stored != "" {
 				continue
 			}
 			if p, ok := TreeIDRule(runID, id, known); ok {
@@ -149,8 +223,8 @@ func TreeMembers(runID string, parents map[string]string) map[string]string {
 // (RunRow.ParentRunID; a backend reads it beside the spans); a run
 // absent from it, or mapped to "", takes its parent from its spans'
 // weft.parent.run.id (the root span carries it), and a derived run
-// from its derivation's ParentRunID; a run none of those places in the
-// subtree is in it when the id rule names it a descendant
+// from its derivation's ParentRunID; a run none of those names a
+// parent of is in the subtree when the id rule names it a descendant
 // (TreeIDRule) — a running child whose run_start was lost, a run with
 // no row. A span belongs to the run its weft.run.id names, else to the
 // derived run whose subtree holds it; a span of neither (an app's own
@@ -200,28 +274,34 @@ func CutRunTree(spans []Span, runID string, parents map[string]string) []TreeSpa
 }
 
 // CapTree is a backend's last step: read is the spans it read in start
-// order, at most TreeSpanCap + 1 so that one more says the tree holds
-// more; parents is CutRunTree's; rows is the member runs it read a row
-// of. The answer is the read cut to runID's subtree and to TreeSpanCap,
-// and Missing: each of rows but runID's that is a member (TreeMembers,
-// its parent the members') with no span in the cut, ordered by
-// Started, then id. Missing stays empty on a cut tree.
-func CapTree(read []Span, runID string, parents map[string]string, rows []TreeRun) RunTree {
-	more := len(read) > TreeSpanCap
-	if more {
-		read = read[:TreeSpanCap]
+// order — a weft run's by member id (TreeReadIDs), at most
+// TreeSpanCap + 1, more true when it read that many; a derived run's
+// from its trace, more false; parents is CutRunTree's; rows is the
+// member runs it read a row of. The answer is the read cut to q's
+// subtree, then to q's scope (TreeQuery.PublicID), then to TreeSpanCap
+// — so a run the scope leaves out never takes a visible one's place —
+// and Missing: each of the visible rows but the root's that is a
+// member (TreeMembers, its parent the members'), not running, with no
+// span in the answer, ordered by Started, then id, the first
+// TreeMissingCap. Missing stays empty on a cut tree.
+func CapTree(read []Span, more bool, q TreeQuery, parents map[string]string, rows []TreeRun) RunTree {
+	spans := CutRunTree(read, q.RunID, parents)
+	members := TreeMembers(q.RunID, parents)
+	out := RunTree{}
+	if q.PublicID != "" {
+		spans, rows, out.Hidden = scopeTree(q, spans, members, rows)
 	}
-	out := RunTree{Spans: CutRunTree(read, runID, parents), Truncated: more}
-	if more || len(rows) == 0 {
+	if more || len(spans) > TreeSpanCap {
+		out.Spans, out.Truncated = spans[:min(len(spans), TreeSpanCap)], true
 		return out
 	}
-	members := TreeMembers(runID, parents)
+	out.Spans = spans
 	seen := make(map[string]bool, len(rows))
 	for _, s := range out.Spans {
 		seen[s.RunID] = true
 	}
 	for _, r := range rows {
-		if p, ok := members[r.ID]; ok && r.ID != runID && !seen[r.ID] {
+		if p, ok := members[r.ID]; ok && r.ID != q.RunID && !seen[r.ID] && r.Status != StatusRunning {
 			r.ParentRunID = p
 			out.Missing = append(out.Missing, r)
 			seen[r.ID] = true
@@ -233,7 +313,101 @@ func CapTree(read []Span, runID string, parents map[string]string, rows []TreeRu
 		}
 		return strings.Compare(a.ID, b.ID)
 	})
+	out.MissingCount = len(out.Missing)
+	out.Missing = out.Missing[:min(len(out.Missing), TreeMissingCap)]
 	return out
+}
+
+// TreeReadIDs is the run ids a backend reads a weft run tree's spans
+// by: TreeMembers' ids, sorted, and under a scope (TreeQuery.PublicID)
+// only the members the rows show visible — the root, and each run
+// whose row carries the public id under a visible parent — so a run
+// the scope leaves out is never read and never takes a visible run's
+// place under the read's limit. A member with no row is read: its
+// spans decide (CapTree).
+func TreeReadIDs(q TreeQuery, parents map[string]string, rows []TreeRun) []string {
+	members := TreeMembers(q.RunID, parents)
+	pub := make(map[string]string, len(rows))
+	for _, r := range rows {
+		pub[r.ID] = r.PublicID
+	}
+	visible := treeVisible(q.RunID, members, func(id string) bool {
+		p, ok := pub[id]
+		return !ok || p == q.PublicID
+	})
+	ids := make([]string, 0, len(members))
+	for id := range members {
+		if q.PublicID == "" || visible(id) {
+			ids = append(ids, id)
+		}
+	}
+	slices.Sort(ids)
+	return ids
+}
+
+// treeVisible is the scope's walk: a run is visible when it is root,
+// or when own holds for it and its parent (parent[id]) is visible; a
+// loop never reaches the root.
+func treeVisible(root string, parent map[string]string, own func(string) bool) func(string) bool {
+	memo := map[string]bool{root: true}
+	var visible func(id string) bool
+	visible = func(id string) bool {
+		if v, ok := memo[id]; ok {
+			return v
+		}
+		memo[id] = false // a loop never reaches the root
+		p, known := parent[id]
+		v := known && own(id) && visible(p)
+		memo[id] = v
+		return v
+	}
+	return visible
+}
+
+// scopeTree cuts a run tree to q.PublicID: the root's spans stay, and
+// a descendant run stays when its row (when it has one) and each of
+// its spans carry the public id and its parent run stays; any other
+// run is left out with its whole subtree, hidden true. The rows
+// answered are the visible members'.
+func scopeTree(q TreeQuery, spans []TreeSpan, members map[string]string, rows []TreeRun) ([]TreeSpan, []TreeRun, bool) {
+	parent := make(map[string]string, len(members))
+	for id, p := range members {
+		parent[id] = p
+	}
+	foreign := map[string]bool{}
+	for _, sp := range spans {
+		parent[sp.RunID] = sp.ParentRunID
+		if got, _ := sp.Attrs[attrPublicID].(string); sp.RunID != q.RunID && got != q.PublicID {
+			foreign[sp.RunID] = true
+		}
+	}
+	for _, r := range rows {
+		if _, ok := members[r.ID]; ok && r.ID != q.RunID && r.PublicID != q.PublicID {
+			foreign[r.ID] = true
+		}
+	}
+	visible := treeVisible(q.RunID, parent, func(id string) bool { return !foreign[id] })
+	hidden := false
+	kept := make([]TreeSpan, 0, len(spans))
+	for _, sp := range spans {
+		if visible(sp.RunID) {
+			kept = append(kept, sp)
+		} else {
+			hidden = true
+		}
+	}
+	var runs []TreeRun
+	for _, r := range rows {
+		if _, ok := members[r.ID]; !ok {
+			continue
+		}
+		if visible(r.ID) {
+			runs = append(runs, r)
+		} else {
+			hidden = true
+		}
+	}
+	return kept, runs, hidden
 }
 
 // TreeMemberIDs is TreeMembers' run ids, sorted: the ids a backend

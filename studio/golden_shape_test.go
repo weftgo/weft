@@ -197,6 +197,7 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		// are its own).
 		{"transcript-as-of-step.golden.json", "/api/runs/" + res.ID + "/transcript?step=1", []string{".compacted_at", ".batches[].messages[].content[][tool_call].args", ".messages[].content[][tool_call].args"}},
 		{"spans-sub.golden.json", "/api/runs/" + res.ID + "/spans", nil},
+		{"spans-tree.golden.json", "/api/runs/" + res.ID + "/spans?tree=1", []string{".holes[]", ".spans[].parent_run_id"}}, // the real run delegates to no child; the holes come from TestSpansTreeGolden,
 		{"trace.golden.json", "/api/traces/" + trace, nil},
 		// The trace list (plan A7): the real run's trace has its root; the
 		// fixture's orphan trace pins the missing root's null and badge.

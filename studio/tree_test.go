@@ -63,11 +63,11 @@ type countingTreeDB struct {
 	tree obsdb.TreeReader
 }
 
-func (c countingTreeDB) RunTreeSpans(ctx context.Context, id string) (obsdb.RunTree, error) {
+func (c countingTreeDB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (obsdb.RunTree, error) {
 	c.mu.Lock()
 	c.treeReads++
 	c.mu.Unlock()
-	return c.tree.RunTreeSpans(ctx, id)
+	return c.tree.RunTreeSpans(ctx, q)
 }
 
 func (c countingTreeDB) ChildRuns(ctx context.Context, ids []string) (map[string][]obsdb.RunRow, error) {

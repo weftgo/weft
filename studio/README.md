@@ -2256,16 +2256,22 @@ records do not rebuild it), `runs/{id}/spans` (each span with
 `run_id`, the run's; `?tree=1` — capability `spans_tree`, U9.1, the
 database an `obsdb.TreeReader`, else 501 and `capabilities_off` says
 why — adds every descendant run's spans, the subagent tree by the
-`weft.parent.run.id` chain and core's id rule (`<parent>/<step>/<call>`),
-found from the run rows and read by run id — never the whole trace —
+`weft.parent.run.id` chain and, for a run no row or span names a parent
+of, core's exact child id shape (`<parent>/<digits>/<call>` or
+`<parent>/resume/<call>`),
+found from the run rows and read by run id — never the whole trace;
+a derived run's tree is cut from its trace's first 50,000 spans —
 in start order, each keyed by `run_id` + `span_id` with its run's
 `parent_run_id`, at most 10,000 spans (`obsdb.TreeSpanCap`), and
 `holes` (always a list): `truncated` (cause `response_cap`) past the
-cap, `not_recorded` (cause `no_spans`, `runs` naming them) for children
-with a row and no span, `hidden` for a panel token — which reads the
+cap or past a derived run's trace read, `not_recorded` (cause
+`no_spans`, `runs` naming the first 100, `count` all) for finished
+children with a row and no span (a running child is not missing),
+`hidden` for a panel token — which reads the
 run's own spans and its public id's descendants, every other
-descendant left out with its subtree, unnamed, never a 403 for the
-tree; docs/record-contract.md §6 "A run tree"; for a
+descendant left out with its subtree before the cap, unnamed, never a
+403 for the tree; `testdata/api/spans-tree.golden.json` pins the shape;
+docs/record-contract.md §6 "A run tree"; for a
 read-scoped panel token — here, in `traces/{trace_id}` and in the
 export alike — without the tool names a run's overrides put on its
 invoke_agent span: `weft.override.tools`, `park_on`,

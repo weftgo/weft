@@ -1371,8 +1371,10 @@ func (s *Server) serveRunTranscript(w http.ResponseWriter, r *http.Request, id s
 // run_id + span_id with its run's parent_run_id, in start order, at
 // most obsdb.TreeSpanCap, with the tree's holes (treeSpansDoc). A
 // panel token reads the run's own spans and the descendants of its
-// public id (scopeTree): the others are left out under a hidden hole,
-// never a 403 for the whole tree.
+// public id (obsdb.TreeQuery.PublicID: cut, then scoped, then capped,
+// so a hidden run never takes a visible one's place under the cap):
+// the others are left out under a hidden hole, never a 403 for the
+// whole tree.
 func (s *Server) serveRunSpans(w http.ResponseWriter, r *http.Request, id string) {
 	tree := false
 	if v := r.URL.Query().Get("tree"); v != "" {
@@ -1404,15 +1406,16 @@ func (s *Server) serveRunSpans(w http.ResponseWriter, r *http.Request, id string
 		writeJSON(w, r, http.StatusOK, doc)
 		return
 	}
-	rt, err := tr.RunTreeSpans(r.Context(), id)
+	q := obsdb.TreeQuery{RunID: id}
+	if p := idFrom(r).panel; p != nil {
+		q.PublicID = p.PublicID
+	}
+	rt, err := tr.RunTreeSpans(r.Context(), q)
 	if err != nil {
 		dbError(w, r, "span tree of run", id, err)
 		return
 	}
-	list, missing, hidden := rt.Spans, rt.Missing, false
-	if p := idFrom(r).panel; p != nil {
-		list, missing, hidden = scopeTree(id, p.PublicID, list, missing)
-	}
+	list := rt.Spans
 	plain := make([]obsdb.Span, len(list))
 	for i, sp := range list {
 		plain[i] = sp.Span
@@ -1428,18 +1431,25 @@ func (s *Server) serveRunSpans(w http.ResponseWriter, r *http.Request, id string
 			Fix:    "open a child run's own tree (runs/{id}/spans?tree=1 on the child), or its spans (runs/{id}/spans)",
 		})
 	}
-	if len(missing) > 0 {
+	if rt.TraceTruncated {
+		doc.Holes = append(doc.Holes, treeHole{
+			Hole: string(obsdb.HoleTruncated), Cause: string(obsdb.CauseResponseCap),
+			Reason: fmt.Sprintf("this run's spans carry no run id, so its tree is cut from its trace, and this response reads at most the trace's first %d spans: a span of the tree after them was not read, nothing was lost", obsdb.TreeTraceCap),
+			Fix:    "open the trace (traces/{trace_id}), or a child run's own tree",
+		})
+	}
+	if rt.MissingCount > 0 {
 		_, fix := obsdb.HoleNoteFor(obsdb.HoleNotRecorded, obsdb.CauseNoSpans)
-		runs := make([]string, len(missing))
-		for i, m := range missing {
+		runs := make([]string, len(rt.Missing))
+		for i, m := range rt.Missing {
 			runs[i] = m.ID
 		}
 		doc.Holes = append(doc.Holes, treeHole{
 			Hole: string(obsdb.HoleNotRecorded), Cause: string(obsdb.CauseNoSpans),
-			Reason: missingRunsReason(len(missing)), Fix: fix, Runs: runs,
+			Reason: missingRunsReason(rt.MissingCount, len(runs)), Fix: fix, Runs: runs, Count: rt.MissingCount,
 		})
 	}
-	if hidden {
+	if rt.Hidden {
 		doc.Holes = append(doc.Holes, treeHole{
 			Hole:   string(obsdb.HoleHidden),
 			Reason: "runs of this tree carry another public id, or none: a panel token reads its own public id's runs, so their spans and their subtrees' are left out",
@@ -1451,10 +1461,12 @@ func (s *Server) serveRunSpans(w http.ResponseWriter, r *http.Request, id string
 
 // treeSpansDoc is api/runs/{id}/spans?tree=1: the tree's spans and its
 // holes (U9.1-fix) — truncated (cause response_cap) past
-// obsdb.TreeSpanCap spans, not_recorded (cause no_spans, runs naming
-// them) for descendant runs with a row and no span, hidden for the
-// runs a panel token's scope left out. Always a list, empty when the
-// tree is whole.
+// obsdb.TreeSpanCap spans, and again, for a derived run, past the
+// trace's first obsdb.TreeTraceCap; not_recorded (cause no_spans, runs
+// naming the first obsdb.TreeMissingCap, count all of them) for
+// descendant runs with a row, no span and no longer running; hidden
+// for the runs a panel token's scope left out. Always a list, empty
+// when the tree is whole.
 type treeSpansDoc struct {
 	Spans []spanDTO  `json:"spans"`
 	Holes []treeHole `json:"holes"`
@@ -1462,76 +1474,29 @@ type treeSpansDoc struct {
 
 // treeHole is one hole of a run tree: the A3 table's badge and cause,
 // the reader's reason with the tree's numbers in it, the table's fix
-// where it has one, and the runs it names (no_spans only).
+// where it has one, and the runs it names with their count (no_spans
+// only: runs at most obsdb.TreeMissingCap, count every one).
 type treeHole struct {
 	Hole   string   `json:"hole"`
 	Cause  string   `json:"cause,omitempty"`
 	Reason string   `json:"reason"`
 	Fix    string   `json:"fix,omitempty"`
 	Runs   []string `json:"runs,omitempty"`
+	Count  int      `json:"count,omitempty"`
 }
 
-// missingRunsReason is the no_spans hole's reason with the count.
-func missingRunsReason(n int) string {
+// missingRunsReason is the no_spans hole's reason with the count, and
+// how many of them runs names when the cap cut the list.
+func missingRunsReason(n, named int) string {
 	runs := "runs have"
 	if n == 1 {
 		runs = "run has"
 	}
-	return fmt.Sprintf("%d descendant %s a row and no span in this tree: it ran without a tracer, a destination dropped its spans, or it has not reported one yet", n, runs)
-}
-
-// scopeTree cuts a run tree to a panel token's public id (U9.1-fix):
-// the run's own spans stay — scopeRunID already checked its row, and
-// the plain route answers them so — and a descendant run stays when
-// each of its spans (a missing run: its row) carries the token's
-// public id and its parent run stays; any other run is left out with
-// its whole subtree, hidden true. No run of another public id is
-// named, counted or answered.
-func scopeTree(root, pub string, list []obsdb.TreeSpan, missing []obsdb.TreeRun) ([]obsdb.TreeSpan, []obsdb.TreeRun, bool) {
-	parent := map[string]string{}
-	foreign := map[string]bool{}
-	for _, sp := range list {
-		parent[sp.RunID] = sp.ParentRunID
-		if got, _ := sp.Attrs["weft.public_id"].(string); sp.RunID != root && got != pub {
-			foreign[sp.RunID] = true
-		}
+	out := fmt.Sprintf("%d finished descendant %s a row and no span in this tree: it ran without a tracer, or a destination dropped its spans", n, runs)
+	if named < n {
+		out += fmt.Sprintf(" (the first %d by start are named)", named)
 	}
-	for _, m := range missing {
-		parent[m.ID] = m.ParentRunID
-		if m.PublicID != pub {
-			foreign[m.ID] = true
-		}
-	}
-	memo := map[string]bool{root: true}
-	var visible func(id string, depth int) bool
-	visible = func(id string, depth int) bool {
-		if v, ok := memo[id]; ok {
-			return v
-		}
-		memo[id] = false // a loop never reaches the root
-		p, known := parent[id]
-		v := known && !foreign[id] && depth < len(parent) && visible(p, depth+1)
-		memo[id] = v
-		return v
-	}
-	hidden := false
-	var spans []obsdb.TreeSpan
-	for _, sp := range list {
-		if visible(sp.RunID, 0) {
-			spans = append(spans, sp)
-		} else {
-			hidden = true
-		}
-	}
-	var runs []obsdb.TreeRun
-	for _, m := range missing {
-		if visible(m.ID, 0) {
-			runs = append(runs, m)
-		} else {
-			hidden = true
-		}
-	}
-	return spans, runs, hidden
+	return out
 }
 
 // serveTrace answers api/traces/{trace_id} (S4.3): any trace, weft or

@@ -1271,7 +1271,7 @@ func TestUpgradeTo0020ReadsRunTrees(t *testing.T) {
 	if err != nil || len(kids["r_up"]) != 1 || kids["r_up"][0].ID != "r_up/0/c" {
 		t.Errorf("ChildRuns after 0020 = %v, %v; want r_up/0/c", kids, err)
 	}
-	tree, err := db.(obsdb.TreeReader).RunTreeSpans(ctx, "r_up")
+	tree, err := db.(obsdb.TreeReader).RunTreeSpans(ctx, obsdb.TreeQuery{RunID: "r_up"})
 	if err != nil || len(tree.Spans) != 2 || tree.Spans[0].RunID != "r_up" || tree.Spans[1].RunID != "r_up/0/c" ||
 		tree.Spans[1].ParentRunID != "r_up" || tree.Truncated || len(tree.Missing) != 0 {
 		t.Errorf("RunTreeSpans after 0020 = %+v, %v; want r_up's span and its child's under it", tree, err)

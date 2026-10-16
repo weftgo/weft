@@ -645,19 +645,34 @@ transcript is the growth `messages` records concatenated in index order.
 runs whose parent chain reaches it — each run's parent its row's
 `parent_run_id` (a span with a `weft.run.id` always makes its run's row,
 its `weft.parent.run.id` the row's parent, so a running child has a row
-before its `invoke_agent` span ends) — and, whatever its row says, every
-run core's id rule names a descendant: a Subagent child's id is
-`<parent>/<step>/<call id>` (`<parent>/resume/<call id>` under
-Approve), so a run whose id starts with the run's id + `/` belongs to
-the tree, under the nearest run above it by that id
+before its `invoke_agent` span ends) — and, as a fallback for a run no
+row or span names a parent of, the runs core's id rule names
+descendants. A reader never parses an id where a stored parent
+answers: a run whose row or span names a parent outside the tree is
+not in it, whatever its id. The rule is core's child id shape exactly
+(`core/subagent.go`'s `childRunID`): `<parent>/<step>/<call id>`, the
+step one or more ASCII digits, or `<parent>/resume/<call id>` under
+Approve, the call id non-empty (`obsdb.TreeChildID`). A parent-less run
+whose id has that shape under the run's id belongs to the tree, under
+the nearest run above it of which the id has the shape
 (`obsdb.TreeIDRule`) — a child whose `run_start` was lost and whose
-spans carry no `weft.parent.run.id` is placed so. The descendants are
+spans carry no `weft.parent.run.id` is placed so; an app's own
+hierarchical ids (`job/1`, `job/1/retry/2`) are not of the shape and
+are never placed by it. SQLite reads the id range (`run_id > id + "/"`,
+`< id + "0"`) and keeps the shape in Go; ClickHouse adds `match()` with
+the same pattern to its `startsWith`. The descendants are
 found from the run rows before a span is read (`obsdb.TreeMembers`) and
 their spans read by run id, in any trace: a child stored under another
 trace is in the tree, and the run's trace is never read whole — a leaf
 of a large app-level trace reads its own subtree only. A derived run
 (§9), whose spans carry no run id, is cut from its trace
-(`obsdb.CutRunTree`), its descendants by their derivation's parent.
+(`obsdb.CutRunTree`), its descendants by their derivation's parent:
+the trace's first `obsdb.TreeTraceCap` (50,000) spans in start order
+are read, the subtree cut from them first and capped after, so a run
+late in a large trace keeps its spans while they fall inside the read;
+`RunTree.TraceTruncated` says the trace held more (Studio's second
+`truncated` hole, cause `response_cap`, its reason naming the trace
+cap).
 Each span belongs to the run its `weft.run.id` names, else to the
 derived run whose subtree holds it; a span of no run (an app's own) and
 a run outside the chain and the id rule (a sibling under one app-level
@@ -667,9 +682,15 @@ keyed by run id + span id (`obsdb.TreeSpan`: the span, its `RunID`,
 that run's `ParentRunID`), and capped at `obsdb.TreeSpanCap` (10,000)
 spans, the first in start order: `obsdb.RunTree.Truncated` says the tree
 holds more. `RunTree.Missing` is the descendant runs with a row and no
-span in the tree (a child that ran without a tracer, whose spans a
-destination dropped, or that has not reported one yet), each with its
-parent and public id; empty on a cut tree. Served by `obsdb.TreeReader`
+span in the tree that are not running (a child that ran without a
+tracer, or whose spans a destination dropped; a running child has no
+span yet because spans export when they end, so it is not missing),
+each with its parent and public id, the first `obsdb.TreeMissingCap`
+(100) by start, `RunTree.MissingCount` all of them; empty on a cut
+tree. The reads are bounded by the tree's own size: SQLite's recursive
+walk visits each member row once, ClickHouse issues one statement per
+level a non-Subagent child opens (a chain of nested turns n deep costs
+n statements), and the span read is capped. Served by `obsdb.TreeReader`
 — both shipped backends: SQLite finds the rows in one recursive
 statement (`runs_started` for the walk, runs' primary key for the id
 rule's range) and reads the spans on `spans_run`; ClickHouse finds them
@@ -678,15 +699,21 @@ on weft_runs' primary key (the id rule, `startsWith`) and 0020's
 and reads the spans on `idx_weft_run_id` (0016) — and by Studio as
 `GET /api/runs/{id}/spans?tree=1` (capability `spans_tree`; each span's
 `run_id` and `parent_run_id`, and the tree's `holes`: `truncated`, cause
-`response_cap`, past the cap; `not_recorded`, cause `no_spans`, naming
-the missing runs; `hidden` when a panel token's scope left runs out). A
+`response_cap`, past the cap (and past a derived run's trace cap);
+`not_recorded`, cause `no_spans`, `runs` naming the first 100 missing
+runs and `count` all of them; `hidden` when a panel token's scope left
+runs out; `studio/testdata/api/spans-tree.golden.json` pins the shape). A
 panel token reads the run's own spans — the run's scope decides, as on
 the plain route — and each descendant whose spans (a missing one: its
 row) carry the token's public id under a parent it reads; any other
 descendant (a nested `Generate` or thread turn inside a tool handler
 with its own session's public id, a child whose metadata cleared
 `weft.public_id`) is left out with its whole subtree, unnamed, under
-the `hidden` hole — never a 403 for the tree. `TreeReader.ChildRuns` is
+the `hidden` hole — never a 403 for the tree. The scope cuts before the
+cap (`obsdb.TreeQuery.PublicID`): the backend reads only the runs the
+rows show visible, then the spans' own public ids decide, then the cap
+counts visible spans alone — a hidden run never takes a visible one's
+place, nor makes the visible tree read `truncated`. `TreeReader.ChildRuns` is
 `RunDetail.Children` for many parents in one read (SQLite on
 `runs_started`, ClickHouse on 0020's `idx_parent_run`), in the same
 order (started, then id): Studio prices a runs page's subagent trees one

@@ -1,0 +1,72 @@
+{
+  "spans": [
+    {
+      "trace_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeee3",
+      "span_id": "0f00000000000001",
+      "parent_span_id": "",
+      "name": "invoke_agent a",
+      "kind": "internal",
+      "start": "2026-10-01T12:00:00Z",
+      "end": "2026-10-01T12:00:00.001Z",
+      "status": "ok",
+      "status_message": "",
+      "service": "svc",
+      "attrs": {
+        "gen_ai.operation.name": "invoke_agent",
+        "weft.run.id": "tg_root"
+      },
+      "events": [],
+      "run_id": "tg_root"
+    },
+    {
+      "trace_id": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeee3",
+      "span_id": "0f00000000000002",
+      "parent_span_id": "",
+      "name": "invoke_agent a",
+      "kind": "internal",
+      "start": "2026-10-01T12:00:00.001Z",
+      "end": "2026-10-01T12:00:00.002Z",
+      "status": "ok",
+      "status_message": "",
+      "service": "svc",
+      "attrs": {
+        "gen_ai.operation.name": "invoke_agent",
+        "weft.parent.run.id": "tg_root",
+        "weft.run.id": "tg_root/0/call_a"
+      },
+      "events": [],
+      "run_id": "tg_root/0/call_a",
+      "parent_run_id": "tg_root"
+    }
+  ],
+  "holes": [
+    {
+      "hole": "truncated",
+      "cause": "response_cap",
+      "reason": "this response reads at most 10000 spans of the run tree and the tree holds more: the later spans were not read, nothing was lost",
+      "fix": "open a child run's own tree (runs/{id}/spans?tree=1 on the child), or its spans (runs/{id}/spans)"
+    },
+    {
+      "hole": "truncated",
+      "cause": "response_cap",
+      "reason": "this run's spans carry no run id, so its tree is cut from its trace, and this response reads at most the trace's first 50000 spans: a span of the tree after them was not read, nothing was lost",
+      "fix": "open the trace (traces/{trace_id}), or a child run's own tree"
+    },
+    {
+      "hole": "not_recorded",
+      "cause": "no_spans",
+      "reason": "101 finished descendant runs have a row and no span in this tree: it ran without a tracer, or a destination dropped its spans (the first 1 by start are named)",
+      "fix": "install a tracer (otel.Install records spans)",
+      "runs": [
+        "tg_root/1/call_b"
+      ],
+      "count": 101
+    },
+    {
+      "hole": "hidden",
+      "reason": "runs of this tree carry another public id, or none: a panel token reads its own public id's runs, so their spans and their subtrees' are left out",
+      "fix": "open the tree with the server (dev) token"
+    }
+  ]
+}
+

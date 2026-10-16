@@ -435,7 +435,7 @@ func treeOf(t *testing.T, db obsdb.DB, id string, own int) []string {
 	if !ok {
 		t.Fatalf("%T implements no obsdb.TreeReader", db)
 	}
-	tree, err := tr.RunTreeSpans(context.Background(), id)
+	tree, err := tr.RunTreeSpans(context.Background(), obsdb.TreeQuery{RunID: id})
 	if err != nil {
 		t.Fatal(err)
 	}

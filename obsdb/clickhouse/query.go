@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -789,8 +790,12 @@ func (d *DB) RunSpans(ctx context.Context, runID string) (_ []obsdb.Span, err er
 // name every run a span of the tree can belong to. A derived run (no
 // run id on its spans) is cut from its trace (traceSpans), as RunSpans
 // reads it. A Subagent-only tree costs four statements: the run's row,
-// the id-rule rows, their children, the spans.
-func (d *DB) RunTreeSpans(ctx context.Context, runID string) (_ obsdb.RunTree, err error) {
+// the id-rule rows, their children, the spans; a deeper chain of
+// non-Subagent children one statement more per level, bounded by the
+// tree's own depth. A derived run reads its trace's first
+// obsdb.TreeTraceCap spans (stockTreeSpans).
+func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTree, err error) {
+	runID := q.RunID
 	if err := d.checkOpen(); err != nil {
 		return obsdb.RunTree{}, err
 	}
@@ -799,13 +804,16 @@ func (d *DB) RunTreeSpans(ctx context.Context, runID string) (_ obsdb.RunTree, e
 		return obsdb.RunTree{}, err
 	}
 	if t, _, ok := obsdb.ParseStockRunID(runID); ok {
-		spans, err := d.querySpans(ctx, traceSpans, t)
+		spans, err := d.querySpans(ctx, stockTreeSpans, t, obsdb.TreeTraceCap+1)
 		if err != nil {
 			return obsdb.RunTree{}, err
 		}
-		return obsdb.CapTree(spans, runID, nil, nil), nil
+		cut := len(spans) > obsdb.TreeTraceCap
+		tree := obsdb.CapTree(spans[:min(len(spans), obsdb.TreeTraceCap)], false, q, nil, nil)
+		tree.TraceTruncated = cut
+		return tree, nil
 	}
-	rows, err := d.treeRunRows(ctx, treeIDRows, runID, runID+"/")
+	rows, err := d.treeRunRows(ctx, treeIDRows, treeIDArgs(runID)...)
 	if err != nil {
 		return obsdb.RunTree{}, err
 	}
@@ -813,7 +821,7 @@ func (d *DB) RunTreeSpans(ctx context.Context, runID string) (_ obsdb.RunTree, e
 	for _, r := range rows {
 		parents[r.ID] = r.ParentRunID
 	}
-	level, err := d.treeRunRows(ctx, treeChildRows(treeIDCondition), runID, runID+"/")
+	level, err := d.treeRunRows(ctx, treeChildRows(treeIDCondition), treeIDArgs(runID)...)
 	if err != nil {
 		return obsdb.RunTree{}, err
 	}
@@ -837,23 +845,26 @@ func (d *DB) RunTreeSpans(ctx context.Context, runID string) (_ obsdb.RunTree, e
 			frontier = frontier[n:]
 		}
 	}
-	spans, err := d.treeSpans(ctx, runID, rows, obsdb.TreeMemberIDs(runID, parents))
+	spans, err := d.treeSpans(ctx, q, parents, rows)
 	if err != nil {
 		return obsdb.RunTree{}, err
 	}
-	return obsdb.CapTree(spans, runID, parents, rows), nil
+	return obsdb.CapTree(spans, len(spans) > obsdb.TreeSpanCap, q, parents, rows), nil
 }
 
 // The run tree's statements (RunTreeSpans; runspans_internal_test.go
 // pins their indexes). A run's merged columns are read grouped by
 // RunId, in RunRow order.
 const (
-	treeRowColumns = "SELECT RunId, max(ParentRunID), max(PublicID), min(Started) AS started FROM weft_runs WHERE "
-	treeRowOrder   = " GROUP BY RunId ORDER BY started, RunId"
+	treeRowColumns = "SELECT RunId, max(ParentRunID), max(PublicID), min(Started) AS started, " +
+		"max(Failed), max(FinishedOK), max(RootEnded), max(LastSeen) FROM weft_runs WHERE "
+	treeRowOrder = " GROUP BY RunId ORDER BY started, RunId"
 	// treeIDCondition: the run and the ids the id rule names its
 	// descendants, on weft_runs' primary key (the run's id, then its
-	// id + "/").
-	treeIDCondition = "RunId = ? OR startsWith(RunId, ?)"
+	// id + "/"), of core's child shape (match: obsdb.TreeChildID's
+	// rule, treeIDArgs' pattern) — obsdb.TreeMembers keeps those whose
+	// row names no parent.
+	treeIDCondition = "RunId = ? OR (startsWith(RunId, ?) AND match(RunId, ?))"
 	treeIDRows      = treeRowColumns + treeIDCondition + treeRowOrder
 	// treeSpansByIDRule: the spans of the runs treeIDCondition selects,
 	// by RunId; treeSpans closes the parenthesis, after the literal list
@@ -863,6 +874,18 @@ const (
 	// treeSpanOrder: start order, one row per span, the cap and one more.
 	treeSpanOrder = " ORDER BY Timestamp, SpanId LIMIT 1 BY TraceId, SpanId LIMIT ?"
 )
+
+// treeIDArgs is treeIDCondition's binds for runID: the id, its prefix,
+// and the RE2 pattern of core's child shape under it (obsdb.TreeChildID:
+// a step of digits or "resume", then a non-empty call id).
+func treeIDArgs(runID string) []any {
+	return []any{runID, runID + "/", "^" + regexp.QuoteMeta(runID) + "/([0-9]+|resume)/(?s:.+)$"}
+}
+
+// stockTreeSpans is a derived run's tree read: its trace in start
+// order, one row per span, the first obsdb.TreeTraceCap and one more
+// (the trace holds more: RunTree.TraceTruncated).
+const stockTreeSpans = traceSpans + " LIMIT ?"
 
 // treeChildRows is the rows whose ParentRunID is one of the runs the
 // condition parents selects on weft_runs — idx_parent_run's narrowing,
@@ -897,50 +920,77 @@ func (d *DB) treeRunRows(ctx context.Context, q string, args ...any) ([]obsdb.Tr
 	}
 	defer func() { _ = rs.Close() }()
 	var out []obsdb.TreeRun
+	now := time.Now()
 	for rs.Next() {
 		var r obsdb.TreeRun
-		if err := rs.Scan(&r.ID, &r.ParentRunID, &r.PublicID, &r.Started); err != nil {
+		var failed, finished, rootEnded bool
+		var seen time.Time
+		if err := rs.Scan(&r.ID, &r.ParentRunID, &r.PublicID, &r.Started, &failed, &finished, &rootEnded, &seen); err != nil {
 			return nil, err
 		}
 		r.Started = timeOf(r.Started)
+		r.Status = obsdb.DeriveStatus(failed, finished || rootEnded, timeOf(seen), now)
 		out = append(out, r)
 	}
 	return out, rs.Err()
 }
 
-// treeSpans reads the members' spans: the run's and its id-rule rows'
-// by one subquery, every other member by a literal list (idChunk ids
-// a statement, the first chunk in the subquery's statement), each
+// treeSpans reads the members' spans (obsdb.TreeReadIDs: under a scope
+// the visible ones alone): the run's and its id-rule rows' by one
+// subquery when the read takes every row that subquery names — no
+// scope, and every row of the id rule's shape a member — else by
+// literal lists alone; every other member by a literal list (idChunk
+// ids a statement, the first chunk in the subquery's statement), each
 // statement in start order and capped at obsdb.TreeSpanCap + 1, merged
 // in that order when there is more than one.
-func (d *DB) treeSpans(ctx context.Context, runID string, rows []obsdb.TreeRun, members []string) ([]obsdb.Span, error) {
-	byRule := map[string]bool{runID: true}
-	for _, r := range rows {
-		if strings.HasPrefix(r.ID, runID+"/") {
-			byRule[r.ID] = true
+func (d *DB) treeSpans(ctx context.Context, q obsdb.TreeQuery, parents map[string]string, rows []obsdb.TreeRun) ([]obsdb.Span, error) {
+	ids := obsdb.TreeReadIDs(q, parents, rows)
+	read := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		read[id] = true
+	}
+	useRule := q.PublicID == ""
+	byRule := map[string]bool{}
+	if useRule {
+		byRule[q.RunID] = true
+		for _, r := range rows {
+			if obsdb.TreeChildID(q.RunID, r.ID) {
+				byRule[r.ID] = true
+				useRule = useRule && read[r.ID]
+			}
 		}
 	}
+	if !useRule {
+		byRule = map[string]bool{}
+	}
 	var others []string
-	for _, id := range members {
+	for _, id := range ids {
 		if !byRule[id] {
 			others = append(others, id)
 		}
 	}
-	n := 0
-	if len(others) > 0 {
-		n = idChunk(others)
+	var out []obsdb.Span
+	merged := false
+	if useRule {
+		n := 0
+		if len(others) > 0 {
+			n = idChunk(others)
+		}
+		stmt, args := treeSpansByIDRule, treeIDArgs(q.RunID)
+		if n > 0 {
+			stmt += " OR RunId IN (" + placeholders(n) + ")"
+			args = append(args, anys(others[:n])...)
+		}
+		var err error
+		if out, err = d.querySpans(ctx, stmt+")"+treeSpanOrder, append(args, obsdb.TreeSpanCap+1)...); err != nil {
+			return nil, err
+		}
+		others = others[n:]
+		merged = len(others) > 0
+	} else {
+		merged = len(others) > idChunk(others)
 	}
-	q, args := treeSpansByIDRule, []any{runID, runID + "/"}
-	if n > 0 {
-		q += " OR RunId IN (" + placeholders(n) + ")"
-		args = append(args, anys(others[:n])...)
-	}
-	out, err := d.querySpans(ctx, q+")"+treeSpanOrder, append(args, obsdb.TreeSpanCap+1)...)
-	if err != nil {
-		return nil, err
-	}
-	merged := len(others) > n
-	for rest := others[n:]; len(rest) > 0; {
+	for rest := others; len(rest) > 0; {
 		k := idChunk(rest)
 		more, err := d.querySpans(ctx, "SELECT "+spanColumns+" FROM otel_traces WHERE RunId IN ("+placeholders(k)+")"+
 			treeSpanOrder, append(anys(rest[:k]), obsdb.TreeSpanCap+1)...)

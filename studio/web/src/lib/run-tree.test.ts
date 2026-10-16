@@ -3,8 +3,15 @@
 // director run.
 import { describe, expect, it } from "vitest"
 
-import { DIR, FOLD, OPS, SPANS } from "@/test/director-fixture"
-import { detailSpan, resolveRowSel, treeSpans } from "./run-tree"
+import { DIR, FOLD, INV, OPS, SPANS } from "@/test/director-fixture"
+import {
+  ALL_RUNS,
+  detailSpan,
+  expandFor,
+  qualifyKey,
+  resolveRowSel,
+  treeSpans,
+} from "./run-tree"
 import { spansFromFold } from "./trace"
 import { rowBadge, waterfallRows } from "./waterfall"
 
@@ -94,5 +101,50 @@ describe("detailSpan", () => {
 
   it("on the order scale, a model call reads its step", () => {
     expect(detailSpan("s1:m", treeSpans(order), folded)?.key).toBe("s1")
+  })
+})
+
+describe("the child subtree in place (U9.2)", () => {
+  const full = waterfallRows({
+    runId: DIR,
+    spans: SPANS,
+    fold: FOLD,
+    expanded: ALL_RUNS,
+  })
+
+  it("expandFor: the children above a ?sel= row, a child row itself left as drawn", () => {
+    expect(expandFor(full.rows, `c:${INV}:0:call_1`, DIR)).toEqual([INV, OPS])
+    expect(expandFor(full.rows, `s:${OPS}:1`, DIR)).toEqual([OPS])
+    expect(expandFor(full.rows, `r:${INV}`, DIR)).toEqual([OPS])
+    expect(expandFor(full.rows, `r:${OPS}`, DIR)).toEqual([])
+    expect(expandFor(full.rows, "s1", DIR)).toEqual([])
+    expect(expandFor(full.rows, "nope", DIR)).toEqual([])
+    expect(expandFor(full.rows, undefined, DIR)).toEqual([])
+  })
+
+  it("resolveRowSel reads <child run>:<span id>", () => {
+    expect(resolveRowSel(full.rows, `${INV}:i_t`, DIR)).toBe(
+      `c:${INV}:0:call_1`
+    )
+    expect(resolveRowSel(full.rows, `${OPS}:o_inv`, DIR)).toBe(`r:${OPS}`)
+    expect(resolveRowSel(full.rows, `${OPS}:i_t`, DIR)).toBeUndefined()
+  })
+
+  it("treeSpans marks a child row collapsed or expanded", () => {
+    const one = treeSpans(
+      waterfallRows({ runId: DIR, spans: SPANS, expanded: new Set([OPS]) })
+    )
+    expect(one.find((s) => s.key === `r:${OPS}`)!.collapsed).toBe(false)
+    expect(one.find((s) => s.key === `r:${INV}`)!.collapsed).toBe(true)
+  })
+
+  it("qualifyKey writes a run's own keys as the trace page keys them", () => {
+    expect(qualifyKey("s0", OPS)).toBe(`s:${OPS}:0`)
+    expect(qualifyKey("s1:m", OPS)).toBe(`s:${OPS}:1:m`)
+    expect(qualifyKey("s0:a2", OPS)).toBe(`s:${OPS}:0:a2`)
+    expect(qualifyKey("c:0:call_1", OPS)).toBe(`c:${OPS}:0:call_1`)
+    expect(qualifyKey("c:resume:call_1", OPS)).toBe(`c:${OPS}:resume:call_1`)
+    expect(qualifyKey("t:ab", OPS)).toBe(`t:${OPS}:ab`)
+    expect(qualifyKey(`r:${OPS}`, OPS)).toBe(`r:${OPS}`)
   })
 })

@@ -35,8 +35,9 @@ import type { Scope } from "./scope"
 export type RunView = "waterfall" | "story" | "raw"
 
 /** The run tree's scale (lib/waterfall.ts's Scale): wall time from the
- * run's spans, or stream order (the replay playhead's). */
-export type RunScale = "time" | "order"
+ * run's spans, or stream order (the replay playhead's); or the call
+ * graph over the same spans (lib/graph.ts, U9.2). */
+export type RunScale = "time" | "order" | "graph"
 
 /** A step card's panes a link can open (A6.2): the Request pane, or
  * its Wire tab (the attempt's provider request and response). */
@@ -57,7 +58,7 @@ export interface RunSearch {
   sel?: string
   /** The detail panel's mode (waterfall view). */
   d?: "events" | "json"
-  /** The run tree's scale: time (spans) or order (positions, replay).
+  /** The run tree's scale: time (spans) or order (positions, replay), or graph.
    * A pre-U8.2 ?axis=time|events is read as time|order, never written. */
   scale?: RunScale
   /** The replay playhead: a stream position. */
@@ -385,7 +386,8 @@ export function runLink(id: string, opts: RunLinkOptions = {}): RunLink {
   if (opts.call && (opts.resumed || step !== undefined))
     search.sel = `c:${opts.resumed ? "resume" : String(step)}:${opts.call}`
   else if (opts.span) search.sel = `t:${opts.span}`
-  if (opts.scale === "time" || opts.scale === "order") search.scale = opts.scale
+  if (opts.scale === "time" || opts.scale === "order" || opts.scale === "graph")
+    search.scale = opts.scale
   const t = ordinal(opts.t)
   if (t !== undefined) search.t = t
   if (opts.raw) {

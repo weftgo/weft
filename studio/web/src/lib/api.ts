@@ -365,6 +365,20 @@ export interface Span {
 
 export interface SpansDoc {
   spans: Span[]
+  /** The tree's holes, on ?tree=1 only (api.go's treeSpansDoc, U9.1-fix):
+   * truncated (cause response_cap) past the server's span cap — a
+   * child's own ?tree=1 reads its subtree —, not_recorded (cause
+   * no_spans, runs naming them) for descendant runs with a row and no
+   * span, hidden for the runs a panel token's scope left out. [] when
+   * the tree is whole; absent on a plain read. */
+  holes?: TreeHole[]
+}
+
+/** One hole of a run tree (api.go's treeHole): the A3 table's badge
+ * and cause, the reader's reason, the fix, and the runs it names. */
+export interface TreeHole extends StepHole {
+  cause?: string
+  runs?: string[]
 }
 
 /** A session row: its cost is its turns' own + delegated (plan A5);

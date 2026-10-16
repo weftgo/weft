@@ -76,6 +76,10 @@ export interface WaterfallProps {
   /** What a row draws after its label (the run tree's child row: its
    * "open run ↗" link). */
   trail?: (span: Span) => React.ReactNode
+  /** A child run row's toggle (the run tree, U9.2): its rows are drawn
+   * by the caller's model, so the row's chevron (and ←/→) asks for them
+   * here instead of folding locally. */
+  onExpand?: (span: Span) => void
   className?: string
 }
 
@@ -104,19 +108,28 @@ export function Waterfall({
   label = "trace",
   head = "span",
   trail,
+  onExpand,
   className = "",
 }: WaterfallProps) {
+  // A child row the caller expands: its open state is its own.
+  const own = (sp: Span) => !!onExpand && sp.collapsed !== undefined
   const [folded, setFolded] = useState<Set<string>>(() => new Set())
   // Deep subtrees start folded. The events usually arrive after mount,
-  // so the fold is applied once, the first time there is a tree.
+  // so the fold is applied once, the first time there is a tree. With
+  // onExpand a child run's rows are the caller's (expanded on purpose,
+  // or for a ?sel= inside them): only the root run's fold here.
   const autoFolded = useRef(false)
+  const managed = !!onExpand
   useEffect(() => {
     if (autoFolded.current || spans.length <= 1) return
     autoFolded.current = true
     const deep = new Set<string>()
-    for (const sp of spans) if (sp.depth >= foldDepth) deep.add(sp.parent ?? "")
+    const root = spans[0].runId
+    for (const sp of spans)
+      if (sp.depth >= foldDepth && !(managed && sp.runId !== root))
+        deep.add(sp.parent ?? "")
     if (deep.size > 0) setFolded((prev) => new Set([...prev, ...deep]))
-  }, [spans, foldDepth])
+  }, [spans, foldDepth, managed])
   const children = useMemo(() => {
     const m = new Map<string, number>()
     for (const sp of spans)
@@ -179,12 +192,15 @@ export function Waterfall({
     } else if (e.key === "ArrowLeft" && i >= 0) {
       e.preventDefault()
       const sp = visible[i]
-      if ((children.get(sp.id) ?? 0) > 0 && !folded.has(sp.id)) toggle(sp.id)
+      if (own(sp) && !sp.collapsed) onExpand!(sp)
+      else if ((children.get(sp.id) ?? 0) > 0 && !folded.has(sp.id))
+        toggle(sp.id)
       else if (sp.parent) onSelect(byId.get(sp.parent) ?? sp)
     } else if (e.key === "ArrowRight" && i >= 0) {
       e.preventDefault()
       const sp = visible[i]
-      if (folded.has(sp.id)) toggle(sp.id)
+      if (own(sp) && sp.collapsed) onExpand!(sp)
+      else if (folded.has(sp.id)) toggle(sp.id)
     }
   }
   // Each row's place among its siblings (aria-posinset/-setsize):
@@ -268,7 +284,9 @@ export function Waterfall({
               setFolded(
                 new Set(
                   spans
-                    .filter((s) => s.kind !== "run" && children.has(s.id))
+                    .filter(
+                      (s) => s.kind !== "run" && !own(s) && children.has(s.id)
+                    )
                     .map((s) => s.id)
                 )
               )
@@ -308,8 +326,9 @@ export function Waterfall({
       </div>
 
       {shown.map((sp, n) => {
-        const kids = children.get(sp.id) ?? 0
-        const isFolded = folded.has(sp.id)
+        const mine = own(sp)
+        const kids = mine ? 1 : (children.get(sp.id) ?? 0)
+        const isFolded = mine ? !!sp.collapsed : folded.has(sp.id)
         const left = pct(sp.from, domain)
         const end = sp.to ?? hi
         const width = Math.max(0.6, pct(end + 1, domain) - left)
@@ -356,7 +375,8 @@ export function Waterfall({
                     aria-label={isFolded ? "expand" : "collapse"}
                     onClick={(e) => {
                       e.stopPropagation()
-                      toggle(sp.id)
+                      if (mine) onExpand!(sp)
+                      else toggle(sp.id)
                     }}
                   >
                     <ChevronRight

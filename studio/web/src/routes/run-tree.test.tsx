@@ -170,10 +170,10 @@ describe("the run tree on the director run (the Done line)", () => {
     await waitFor(() => expect(keys()).toContain("s1:m"))
     const scale = () => document.querySelector<HTMLElement>("[data-scale]")!
     expect(scale().dataset.scale).toBe("time")
-    // The switch is time | order: the dead "events" axis is gone.
+    // The switch is time | order | graph: the dead "events" axis is gone.
     expect(
       Array.from(scale().querySelectorAll("button")).map((b) => b.textContent)
-    ).toEqual(["time", "order"])
+    ).toEqual(["time", "order", "graph"])
     fireEvent.click(
       Array.from(scale().querySelectorAll("button")).find(
         (b) => b.textContent === "order"

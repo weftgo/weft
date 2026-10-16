@@ -61,6 +61,9 @@ export interface Span {
   lane?: number
   lanes?: number
   childRun?: string
+  /** A child run row: drawn collapsed (true) or expanded in place
+   * (false) — the run page's expand toggles it (U9.2). */
+  collapsed?: boolean
 }
 
 /** A time-axis row's own data: the span, with from/to in milliseconds

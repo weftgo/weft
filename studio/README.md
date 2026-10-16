@@ -589,7 +589,7 @@ is not listed). The verbs and the drawer are drawn only under the
 trimmed turn and checks the chip and the deleted guidance line.
 Deep links (plan G1) follow one scheme, `src/lib/links.ts`, shared by
 the panel and Studio's app (an ESLint rule refuses a Studio URL built
-anywhere else): `runs/<id>?step=<n>&view=story|raw&pane=request|wire&sel=…&scale=time|order&t=…`,
+anywhere else): `runs/<id>?step=<n>&view=story|raw&pane=request|wire&sel=…&scale=time|order|graph&t=…`,
 `sessions/<id>`, `traces/<id>?sel=<row key>&view=chat`,
 `playground#run=…` (the hand-off in the fragment),
 `playground?run=…&step=…&agent=…&engine=…` (the page's own state, G2)
@@ -1002,8 +1002,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 266,070 B raw / 86,283 B gzip
-(84.3 KiB, the bundle of the ledger's row "U8.2 run tree in Studio"; 12,021 B — 11.7 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 266,089 B raw / 86,289 B gzip
+(84.3 KiB, the bundle of the ledger's row "U9.2 child subtree in place"; 12,015 B — 11.7 KiB — of headroom under
 the 98,304 B, 96 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; A5.4 raised it from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -1645,9 +1645,30 @@ legend. It draws on the **time** scale when the run has spans and the
 `?scale=time|order` picks and the switch writes either value (a pre-U8.2
 `?axis=time|events` link reads as time|order). With the `spans_tree`
 capability the page reads `runs/{id}/spans?tree=1` and a delegation's
-child run is one collapsed row under its tool call with **open run ↗**
-(its subtree in place is U9.2); selecting it shows the call's detail, the
-subagent block. A row's detail reads the fold's step, call or run where
+child run is one collapsed row under its tool call with **open run ↗**;
+selecting it shows the call's detail, the subagent block. Its chevron
+(or →/←) expands the child's subtree in place (U9.2): its steps, model
+calls and tools from the same `?tree=1` spans, its own children again
+one collapsed row each — drawn on expand, never fetched, unless the
+tree's `truncated` hole says the server cut it, when the expanded
+child's own `?tree=1` is read and merged; the child's events and run
+document are read on expand too (a time row's gists, the order scale's
+rows). Selection crosses the boundary: a `?sel=` naming a row inside a
+child (its run-qualified `rowKeys` key, `s:<run>:<n>`, `c:<run>:<at>:<call>`,
+or `<child run>:<span id>`) expands the children above it, and folding a
+child that holds the selection moves it to the child's row. The tree's
+holes are badges above it (`truncated`, `not_recorded` / `no_spans` —
+also on the child rows it names —, `hidden`). **whole trace ↗** opens
+`/traces/<trace id>` with the selection kept (a child run's own rows
+run-qualified, as the trace page keys them). The third scale,
+`?scale=graph` (`src/lib/graph.ts`, inline SVG), is the call graph over
+the same spans: one node per agent (its runs, the slowest, failures,
+tokens when the spans carry them) in call-depth columns, one per MCP
+server (a tool whose request-catalog source starts `mcp`, the run's own
+calls), each edge its call count and slowest call; a node selects its
+first run's row and the selected row lights its node — switching scales
+keeps the selection. Pool children are sessions, not runs of the trace:
+not drawn. A row's detail reads the fold's step, call or run where
 the fold has one (the story's bodies), a model call or any other span its
 span's facts. "trace" names the `/traces` page only. In the story,
 subagent children sit as nested rows under the step

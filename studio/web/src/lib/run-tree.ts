@@ -11,7 +11,7 @@
 import type { Span as TimedSpan } from "./api"
 import type { Span, SpanKind, SpanTone } from "./trace"
 import type { RowKind, WaterfallModel, WaterfallRow } from "./waterfall"
-import { lanesWord, rowBadge } from "./waterfall"
+import { lanesWord, rowBadge, rowKeys } from "./waterfall"
 
 const KIND: Record<RowKind, SpanKind> = {
   run: "run",
@@ -77,7 +77,9 @@ export function treeSpans(model: WaterfallModel): Span[] {
       critical: r.critical,
       ...(r.lane !== undefined ? { lane: r.lane } : {}),
       ...(r.lanes !== undefined ? { lanes: r.lanes } : {}),
-      ...(r.child ? { childRun: r.child.runId } : {}),
+      ...(r.child
+        ? { childRun: r.child.runId, collapsed: r.child.collapsed }
+        : {}),
     }
   })
 }
@@ -115,7 +117,15 @@ export function resolveRowSel(
     return rows.find((r) => r.span?.span_id === id)?.key
   }
   const call = /^c:([^:]+)$/.exec(sel)?.[1]
-  if (!call) return undefined
+  if (!call) {
+    // <run>:<span id> (U9.2): the row of that run its span is behind.
+    const i = sel.lastIndexOf(":")
+    const run = sel.slice(0, i)
+    const id = sel.slice(i + 1)
+    return i > 0
+      ? rows.find((r) => r.runId === run && r.span?.span_id === id)?.key
+      : undefined
+  }
   const calls = rows.filter(
     (r) => r.kind === "tool" && r.runId === rootId && r.callId === call
   )
@@ -162,3 +172,49 @@ export function detailSpan(
 }
 
 const timed = (r: Span | undefined) => (r?.timed ? r : undefined)
+
+/** Every run drawn expanded: the model only asks has(). */
+export const ALL_RUNS: ReadonlySet<string> = {
+  has: () => true,
+} as unknown as ReadonlySet<string>
+
+/**
+ * expandFor is the child runs to draw expanded so the row `sel` names
+ * is drawn (U9.2: ?sel= restores the subtree it is in): the child rows
+ * above it in `full`, the model with every child expanded. A child
+ * row itself stays as it is drawn.
+ */
+export function expandFor(
+  full: readonly WaterfallRow[],
+  sel: string | undefined,
+  rootId: string,
+  step?: number
+): string[] {
+  const key = resolveRowSel(full, sel, rootId, step)
+  const by = new Map(full.map((r) => [r.key, r]))
+  const out: string[] = []
+  const up = (r: WaterfallRow | undefined) =>
+    r?.parent ? by.get(r.parent) : undefined
+  for (let p = up(key ? by.get(key) : undefined); p; p = up(p))
+    if (p.kind === "child") out.push(p.runId)
+  return out
+}
+
+/**
+ * qualifyKey is a run's own (bare) row key in its run-qualified form:
+ * the key the /traces page gives that row when the run is not the
+ * trace's root (lib/trace-sel.ts — one scheme, rowKeys).
+ */
+export function qualifyKey(key: string, run: string): string {
+  const k = rowKeys(run, true)
+  const s = /^s(\d+)(.*)$/.exec(key)
+  if (s) return `${k.step(s[1])}${s[2]}`
+  if (key.startsWith("c:")) return `c:${run}:${key.slice(2)}`
+  if (key.startsWith("t:")) return k.span(key.slice(2))
+  return key
+}
+
+/** The run page's link to the whole trace (UX-A-17). */
+export const TRACE_LINK = "whole trace ↗"
+export const TRACE_HINT =
+  "the OTel trace this run is in: every run and span of it, the selection kept"

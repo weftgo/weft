@@ -19,12 +19,13 @@
 // the lane (S4.5) — one stream per page: deltas stream, run frames
 // refresh the document, a lost stream falls back to the paged poll. The document and transcript
 // refresh every 2 s while running as the poll-shaped fallback.
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query"
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { Columns2, Rows3 } from "lucide-react"
 
 import {
+  eventsQuery,
   requestsQuery,
   runQuery,
   studioToken,
@@ -45,21 +46,41 @@ import {
   replayFromStep,
   rerun,
 } from "@/lib/replay"
-import { replayFromSearch, replaySearch, runLink } from "@/lib/links"
+import {
+  replayFromSearch,
+  replaySearch,
+  runLink,
+  traceSelectionLink,
+} from "@/lib/links"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { editKey, impliedFromStep, putEdit, schemaOf } from "@/lib/edits"
 import type { ReplayEdit } from "@/lib/edits"
 import { replayBounds } from "@/lib/experiment-body"
 import type { ReplayLinkState, RunScale, RunSearch } from "@/lib/links"
 import { defaultSelection, flowFromFold, spansFromFold } from "@/lib/trace"
-import { detailSpan, resolveRowSel, treeSpans } from "@/lib/run-tree"
+import {
+  ALL_RUNS,
+  detailSpan,
+  expandFor,
+  qualifyKey,
+  resolveRowSel,
+  TRACE_HINT,
+  TRACE_LINK,
+  treeSpans,
+} from "@/lib/run-tree"
 import {
   CRITICAL,
   CRITICAL_HINT,
   OPEN_RUN,
   SCALE_HINT,
+  str,
   waterfallRows,
 } from "@/lib/waterfall"
+import type { Scale } from "@/lib/waterfall"
+import type { FoldedRun } from "@/lib/events"
+import { callGraph, catalogSources, GRAPH_HINT, nodeOfRun } from "@/lib/graph"
+import { CallGraphView } from "@/components/studio/call-graph"
+import { HoleBadge, HoleBadges } from "@/components/studio/hole-badge"
 import { FlowStrip } from "@/components/studio/flow-strip"
 import { RunHeader, runPlace } from "@/components/studio/run-header"
 import { saveTest } from "@/components/studio/saves"
@@ -107,6 +128,14 @@ function readLayout(): Layout {
 // nothing, so ?step= or the default decides instead; old forms
 // resolve (lib/run-tree.ts's resolveRowSel).
 
+/** useQueries' combine: the data alone (structurally shared, so a
+ * memo on it moves only when an answer does). */
+const dataOf = <T,>(rs: { data?: T }[]) => rs.map((r) => r.data)
+
+/** The scales the switch offers, in its order. */
+const SCALES = ["time", "order", "graph"] as const
+const scaleHint = (a: RunScale) => (a === "graph" ? GRAPH_HINT : SCALE_HINT[a])
+
 /** How long after the end the run page waits for the run's
  * invoke_agent span (an OTLP exporter's batch lands after run_finish). */
 const INVOKE_AGENT_WAIT_MS = 30_000
@@ -125,7 +154,7 @@ function hasInvokeAgent(
 
 /** A scale a search value names; "events" is the old axis's order. */
 function scaleOf(v: unknown): RunScale | undefined {
-  return v === "time" || v === "order"
+  return v === "time" || v === "order" || v === "graph"
     ? v
     : v === "events"
       ? "order"
@@ -534,7 +563,102 @@ function RunPage() {
   // for time without spans, the run reads on the order scale.
   const derived = isDerived(run.data)
   const scale: RunScale =
-    derived && haveTime ? "time" : haveTime ? (search.scale ?? "time") : "order"
+    derived && haveTime
+      ? search.scale === "graph"
+        ? "graph"
+        : "time"
+      : haveTime
+        ? (search.scale ?? "time")
+        : "order"
+  // The tree's own scale: the graph reads (and selects in) the time
+  // scale's rows.
+  const treeScale: Scale = scale === "graph" ? "time" : scale
+
+  // The child subtree in place (U9.2, UX-A-01): a child run row stays
+  // one row until expanded; its rows (and its children's, lazily — drawn
+  // on expand, never before) come from the same ?tree=1 spans. A ?sel=
+  // inside a child expands the children above it (expandFor, below).
+  // The order scale (and a time row's gists) read the child's own fold:
+  // its events and its run document (for its children), fetched on
+  // expand — and for a run the ?sel= names, so a pasted link restores
+  // the subtree on either scale.
+  const [opened, setOpened] = useState<ReadonlySet<string>>(() => new Set())
+  const treeHoles = useMemo(() => spans.data?.holes ?? [], [spans.data])
+  const knownRuns = useMemo(() => {
+    const out = new Set<string>()
+    for (const s of spans.data?.spans ?? []) {
+      const r = s.run_id ?? str(s.attrs["weft.run.id"])
+      if (r) out.add(r)
+    }
+    for (const c of run.data?.children ?? []) out.add(c.id)
+    return out
+  }, [spans.data, run.data?.children])
+  const sel = search.sel
+  const fetchRuns = useMemo(
+    () =>
+      [
+        ...new Set([
+          ...opened,
+          ...[...knownRuns].filter((r) => r !== id && sel?.includes(r)),
+        ]),
+      ].sort(),
+    [opened, knownRuns, sel, id]
+  )
+  const onTree = view === "waterfall"
+  const childDocs = useQueries({
+    queries: fetchRuns.map((r) => ({ ...runQuery(r), enabled: onTree })),
+    combine: dataOf,
+  })
+  const childEvents = useQueries({
+    queries: fetchRuns.map((r) => ({
+      ...eventsQuery(r, -1, 5000),
+      enabled: onTree,
+    })),
+    combine: dataOf,
+  })
+  // A tree the server cut (truncated, cause response_cap): an expanded
+  // child reads its own ?tree=1, merged in.
+  const cut = treeHoles.some((h) => h.hole === "truncated")
+  const childTrees = useQueries({
+    queries: (cut ? fetchRuns : []).map((r) => ({
+      ...spansQuery(r, true),
+      enabled: onTree,
+    })),
+    combine: dataOf,
+  })
+  const childFolds = useMemo(() => {
+    const out = new Map<string, FoldedRun>()
+    fetchRuns.forEach((r, i) => {
+      const page = childEvents[i]
+      if (!page) return
+      const f = fold(page.events.map((e) => e.event))
+      const kids = childDocs[i]?.children
+      out.set(r, kids ? linkView(f, kids) : f)
+    })
+    return out
+  }, [fetchRuns, childEvents, childDocs])
+  const treeSpansAll: TimedSpan[] = useMemo(() => {
+    const extra = childTrees.flatMap((d) => d?.spans ?? [])
+    if (!extra.length) return timed
+    const seen = new Set(timed.map((s) => `${s.trace_id}/${s.span_id}`))
+    const out = [...timed]
+    for (const s of extra)
+      if (!seen.has(`${s.trace_id}/${s.span_id}`)) {
+        seen.add(`${s.trace_id}/${s.span_id}`)
+        out.push(s)
+      }
+    return out
+  }, [timed, childTrees])
+  // The runs the tree's no_spans hole names: their child rows say so.
+  const noSpans = useMemo(
+    () =>
+      new Set(
+        treeHoles
+          .filter((h) => h.hole === "not_recorded")
+          .flatMap((h) => h.runs ?? [])
+      ),
+    [treeHoles]
+  )
 
   // The replay playhead: null = live. Seeks and pauses write t to the
   // URL (a paste reproduces the exact view, A3); playback ticks do
@@ -629,19 +753,31 @@ function RunPage() {
   )
   // The run tree (U8.2): lib/waterfall.ts's rows on the page's scale,
   // projected into the Waterfall's rows.
+  const treeInput = useMemo(
+    () => ({
+      runId: id,
+      status: viewStatus,
+      spans: treeSpansAll,
+      fold: linkedFold,
+      total: stream.total,
+      children: childFolds,
+    }),
+    [id, viewStatus, treeSpansAll, linkedFold, stream.total, childFolds]
+  )
+  // Every child expanded: where a ?sel= row sits, and so which children
+  // it opens.
+  const implied = useMemo(() => {
+    if (!sel) return []
+    const full = waterfallRows({ ...treeInput, expanded: ALL_RUNS }, treeScale)
+    return expandFor(full.rows, sel, id, search.step)
+  }, [sel, treeInput, treeScale, id, search.step])
+  const expanded = useMemo(
+    () => new Set([...opened, ...implied]),
+    [opened, implied]
+  )
   const tree = useMemo(
-    () =>
-      waterfallRows(
-        {
-          runId: id,
-          status: viewStatus,
-          spans: timed,
-          fold: linkedFold,
-          total: stream.total,
-        },
-        scale
-      ),
-    [id, viewStatus, timed, linkedFold, stream.total, scale]
+    () => waterfallRows({ ...treeInput, expanded }, treeScale),
+    [treeInput, expanded, treeScale]
   )
   const treeRows = useMemo(() => treeSpans(tree), [tree])
   const flow = useMemo(
@@ -669,7 +805,7 @@ function RunPage() {
       ? search.sel
       : undefined) ??
     stepKey ??
-    (derived && scale === "time"
+    (derived && treeScale === "time"
       ? tree.rows[0]?.key
       : resolveRowSel(tree.rows, defaultSelection(fullSpans)?.key, id))
   const selectedRow = treeRows.find((s) => s.key === selKey)
@@ -691,6 +827,40 @@ function RunPage() {
         replace: true,
       }),
     [navigate]
+  )
+  // A child row's toggle: expand it, or fold it back into one row — and
+  // a selection inside it moves to the child's own row (it would be
+  // drawn nowhere).
+  const toggleChild = useCallback(
+    (child: string) => {
+      if (!expanded.has(child)) {
+        setOpened((cur) => new Set([...cur, child]))
+        return
+      }
+      setOpened(
+        (cur) =>
+          new Set(
+            [...cur].filter((r) => r !== child && !r.startsWith(`${child}/`))
+          )
+      )
+      if (implied.includes(child)) select(`r:${child}`)
+    },
+    [expanded, implied, select]
+  )
+  // The call graph (U9.2, §6.2): the same spans, agents and MCP servers
+  // as nodes; the selection is the tree's.
+  const sources = useMemo(
+    () => catalogSources(requests?.steps),
+    [requests?.steps]
+  )
+  const graph = useMemo(
+    () =>
+      scale === "graph"
+        ? callGraph(treeSpansAll, id, (r, tool) =>
+            r === id ? sources.get(tool) : undefined
+          )
+        : undefined,
+    [scale, treeSpansAll, id, sources]
   )
   const setScale = useCallback(
     (to: RunScale) =>
@@ -934,7 +1104,7 @@ function RunPage() {
                   data-scale={scale}
                 >
                   <span className="text-faint">scale:</span>
-                  {(["time", "order"] as const).map((a) => (
+                  {SCALES.map((a) => (
                     <button
                       key={a}
                       type="button"
@@ -944,7 +1114,7 @@ function RunPage() {
                           ? "border-thread/60 bg-secondary"
                           : "text-muted-foreground hover:text-foreground"
                       }`}
-                      title={SCALE_HINT[a]}
+                      title={scaleHint(a)}
                       onClick={() => setScale(a)}
                     >
                       {a}
@@ -964,6 +1134,23 @@ function RunPage() {
                   />
                   {CRITICAL}
                 </span>
+              ) : null}
+              {view === "waterfall" && doc.trace_id ? (
+                <Link
+                  {...traceSelectionLink(doc.trace_id, {
+                    sel:
+                      selectedRow &&
+                      selectedRow.runId === id &&
+                      doc.parent_run_id
+                        ? qualifyKey(selectedRow.key, id)
+                        : selectedRow?.key,
+                  })}
+                  className="font-mono text-[11px] text-thread-ink hover:underline"
+                  title={TRACE_HINT}
+                  data-trace-link
+                >
+                  {TRACE_LINK}
+                </Link>
               ) : null}
               <span className="hidden items-center gap-1 text-[11px] text-faint md:flex">
                 <Kbd>w</Kbd>
@@ -1028,31 +1215,55 @@ function RunPage() {
                       )}
                     </Button>
                   </div>
+                  {treeHoles.length > 0 ? (
+                    <div data-tree-holes>
+                      <HoleBadges holes={treeHoles} />
+                    </div>
+                  ) : null}
                   <div className={`grid items-start gap-3 ${gridCols}`}>
-                    <Waterfall
-                      spans={treeRows}
-                      domain={tree.domain}
-                      unit={scale === "time" ? "ms" : "event"}
-                      playhead={scale === "order" ? ph : null}
-                      onSeek={scale === "order" ? seek : undefined}
-                      onSelect={(sp) => select(sp.key)}
-                      selectedId={selectedRow?.id}
-                      label="waterfall"
-                      head="run"
-                      trail={(sp) =>
-                        sp.childRun ? (
-                          <Link
-                            {...runLink(sp.childRun)}
-                            className="ml-auto shrink-0 text-thread-ink hover:underline"
-                            data-open-run={sp.childRun}
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            {OPEN_RUN}
-                          </Link>
-                        ) : null
-                      }
-                      className="max-h-[60vh] @3xl/trace:max-h-[calc(100vh-8rem)]"
-                    />
+                    {graph ? (
+                      <CallGraphView
+                        graph={graph}
+                        selected={nodeOfRun(graph, selectedRow?.runId)?.id}
+                        onSelect={(n) => n.runs[0] && select(`r:${n.runs[0]}`)}
+                      />
+                    ) : (
+                      <Waterfall
+                        spans={treeRows}
+                        domain={tree.domain}
+                        unit={scale === "time" ? "ms" : "event"}
+                        playhead={scale === "order" ? ph : null}
+                        onSeek={scale === "order" ? seek : undefined}
+                        onSelect={(sp) => select(sp.key)}
+                        selectedId={selectedRow?.id}
+                        label="waterfall"
+                        head="run"
+                        onExpand={(sp) =>
+                          sp.childRun && toggleChild(sp.childRun)
+                        }
+                        trail={(sp) =>
+                          sp.childRun ? (
+                            <>
+                              {noSpans.has(sp.childRun) ? (
+                                <HoleBadge
+                                  hole="not_recorded"
+                                  cause="no_spans"
+                                />
+                              ) : null}
+                              <Link
+                                {...runLink(sp.childRun)}
+                                className="ml-auto shrink-0 text-thread-ink hover:underline"
+                                data-open-run={sp.childRun}
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {OPEN_RUN}
+                              </Link>
+                            </>
+                          ) : null
+                        }
+                        className="max-h-[60vh] @3xl/trace:max-h-[calc(100vh-8rem)]"
+                      />
+                    )}
                     <div className={stickyDetail}>
                       <SpanDetail
                         span={selected}

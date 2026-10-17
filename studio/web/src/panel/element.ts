@@ -4820,8 +4820,8 @@ export class WeftDevtools extends HTMLElement {
       }
     }
     // P4's saves (§3's row): keep-as-prompt copies the text and, under
-    // the dev token, proposes it (plan F6) — Studio's title; save-as-
-    // fixture hands off to Studio (the files download there).
+    // the dev token, proposes it (plan F6) — Studio's title; save as
+    // test hands off to Studio's run page (the zip downloads there).
     const keep = el("button", "weft-btn", "keep as prompt ⤴", {
       title: keepEditedTitle(
         this.model?.state.drawer?.agent ?? "",
@@ -4868,15 +4868,17 @@ export class WeftDevtools extends HTMLElement {
       )
     })
     head.appendChild(keep)
-    const fixture = el("a", "weft-btn", "save as fixture", {
-      href: href(this.base, playgroundLink(r.runID ? { run: r.runID } : {})),
-      target: "_blank",
-      rel: "noopener",
-      title:
-        "hand off to Studio: the run's records as wefttest replay fixtures (D4)",
-    })
-    fixture.style.textDecoration = "none"
-    head.appendChild(fixture)
+    // UX-C-29: one verb, one zip — the run page's save as test.
+    if (r.runID) {
+      const save = el("a", "weft-btn", SAVE_TEST_LABEL, {
+        href: href(this.base, saveTestLink(r.runID)),
+        target: "_blank",
+        rel: "noopener",
+        title: SAVE_TEST_TITLE,
+      })
+      save.style.textDecoration = "none"
+      head.appendChild(save)
+    }
     const compare = el("a", "weft-btn", "compare in Studio", {
       title:
         "open the Studio playground with this run, step and the current overrides carried over",

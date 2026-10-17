@@ -50,6 +50,7 @@ import type { ReplayDraft } from "@/lib/replay"
 import { renderWithRouter } from "@/test/render"
 import { HOLES } from "@/lib/honesty"
 import { runLink } from "@/lib/links"
+import { resetNotices } from "@/lib/notify"
 
 configure({ asyncUtilTimeout: 10_000 })
 vi.setConfig({ testTimeout: 30_000 })
@@ -1932,6 +1933,146 @@ describe("the replay drawer's link, closing round (F2.2)", () => {
         replay: "from_step",
         from: 3,
       })
+    )
+  })
+})
+
+describe("the drawer's edit fields and outcome (U29.3)", () => {
+  // Call ids that repeat across steps (UX-C-24) and parallel calls of
+  // one tool (UX-C-25): c1 at step 0 and again at step 1.
+  const callWith = (calls: { id: string; args: unknown }[]) => [
+    {
+      role: "assistant",
+      content: calls.map((c) => ({
+        type: "tool_call",
+        id: c.id,
+        name: "lookup_order",
+        args: c.args,
+      })),
+    },
+  ]
+  const big = "x".repeat(3000)
+  const repeated = [
+    [{ role: "user", content: [{ type: "text", text: "orders?" }] }],
+    callWith([
+      { id: "c1", args: { order: 42 } },
+      { id: "c2", args: { order: 43 } },
+    ]),
+    [
+      ...result("c1", "lookup_order", "shipped"),
+      ...result("c2", "lookup_order", big),
+    ],
+    callWith([{ id: "c1", args: { order: 7 } }]),
+    result("c1", "lookup_order", "lost"),
+    [{ role: "assistant", content: [{ type: "text", text: "done" }] }],
+  ]
+
+  it("edit this result focuses that step's field, the calls labelled apart, the result a sized textarea", async () => {
+    serve({ bodies: repeated })
+    const d = await drawerFor(editResultAndReplay(1, "c1", "found"))
+    const field = await waitFor(() => {
+      const el = drawer()!.querySelector<HTMLTextAreaElement>(
+        '[data-edit-step="1"][data-edit-call="c1"]'
+      )
+      expect(el).toBeTruthy()
+      return el!
+    })
+    await waitFor(() => expect(document.activeElement).toBe(field))
+    expect(field.tagName).toBe("TEXTAREA")
+    expect(field.value).toBe("found")
+    // Parallel calls of one tool read apart: tool(args) · call id.
+    const label = (key: string) =>
+      drawer()!
+        .querySelector(`[data-edit-field="${key}"] label > span`)!
+        .textContent.replace(/\s+/g, " ")
+    expect(label("0:c1")).toBe("step 0 · lookup_order(order=42) · c1 →")
+    expect(label("0:c2")).toBe("step 0 · lookup_order(order=43) · c2 →")
+    expect(label("1:c1")).toBe("step 1 · lookup_order(order=7) · c1 →")
+    // The multi-KB result: its size, "start from recorded" fills it,
+    // "reset to recorded" drops the edit.
+    const c2 = drawer()!.querySelector<HTMLElement>('[data-edit-field="0:c2"]')!
+    expect(c2.querySelector("[data-edit-size]")!.textContent).toBe(
+      "recorded 2.9 KB"
+    )
+    fireEvent.click(c2.querySelector("[data-edit-from-recorded]")!)
+    const area = c2.querySelector("textarea")!
+    expect(area.value).toBe(big)
+    fireEvent.change(area, { target: { value: "gone" } })
+    expect(c2.querySelector("[data-edit-size]")!.textContent).toBe(
+      "recorded 2.9 KB · edited 4 B"
+    )
+    fireEvent.click(c2.querySelector("[data-edit-reset]")!)
+    expect(area.value).toBe("")
+    expect(
+      d.getByLabelText("edit the result of lookup_order (c1) at step 0")
+    ).toBeTruthy()
+  })
+
+  it("a rejected command says why and sends again as a new command (UX-C-31)", async () => {
+    serve()
+    let n = 0
+    studio
+      .on("POST playground/runs", () => ({
+        command_id: `cmd_${++n}`,
+        state: "queued",
+      }))
+      .on("GET playground/commands/cmd_1", {
+        command_id: "cmd_1",
+        state: "rejected",
+        run_id: "",
+        error: "runtime rt_1 refused: budget spent",
+        created: rOK.started,
+        updated: rOK.started,
+      })
+      .on("GET playground/commands/cmd_2", {
+        command_id: "cmd_2",
+        state: "finished",
+        status: "succeeded",
+        run_id: "pg_new",
+        error: null,
+        created: rOK.started,
+        updated: rOK.started,
+      })
+    resetNotices()
+    const d = await drawerFor(replayFromStep(3))
+    const run = await waitFor(() => {
+      const b = d.getByRole<HTMLButtonElement>("button", { name: "Run" })
+      expect(b.disabled).toBe(false)
+      return b
+    })
+    fireEvent.click(run)
+    const again = await waitFor(() => {
+      const el = drawer()!.querySelector<HTMLButtonElement>(
+        "[data-replay-again]"
+      )
+      expect(el).toBeTruthy()
+      return el!
+    })
+    expect(
+      drawer()!.querySelector('[data-replay-state="rejected"]')!.textContent
+    ).toContain("the runtime refused it: runtime rt_1 refused: budget spent")
+    expect(again.disabled).toBe(false)
+    fireEvent.click(again)
+    await waitFor(() =>
+      expect(studio.calls("POST playground/runs")).toHaveLength(2)
+    )
+    expect(studio.calls("POST playground/runs")[1].body).toEqual(
+      studio.calls("POST playground/runs")[0].body
+    )
+    await waitFor(() =>
+      expect(
+        drawer()!.querySelector('[data-replay-state="finished"]')
+      ).toBeTruthy()
+    )
+  })
+
+  it("while open, the page under it never scrolls sideways at phone width (UX-C-33)", async () => {
+    serve()
+    await drawerFor(replayFromStep(3))
+    expect(document.documentElement.hasAttribute("data-replay-open")).toBe(true)
+    cleanup()
+    expect(document.documentElement.hasAttribute("data-replay-open")).toBe(
+      false
     )
   })
 })

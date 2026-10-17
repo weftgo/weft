@@ -394,7 +394,7 @@ describe("the preview (will be sent)", () => {
       [...pane.querySelectorAll("[data-preview-warning]")].map((w) =>
         w.getAttribute("data-preview-warning")
       )
-    ).toEqual(["prepare_step", "instructions"])
+    ).toEqual(["instructions"])
   })
 
   it("a 400 is shown verbatim and holds Run", async () => {

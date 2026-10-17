@@ -210,8 +210,10 @@ function Place() {
     "experiments",
     "settings",
   ]
+  // min-w-0 + truncate (UX-C-33): at 360 px "playground" or
+  // "experiments" beside the wordmark pushed Search 10 px past the edge.
   return (
-    <span className="text-xs text-muted-foreground">
+    <span className="min-w-0 truncate text-xs text-muted-foreground">
       {places.includes(parts[0]) ? parts[0] : "runs"}
     </span>
   )

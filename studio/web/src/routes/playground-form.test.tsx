@@ -140,6 +140,68 @@ const shared: FormState = {
   },
 }
 
+describe("a bare /playground asks for its target (UX-C-35)", () => {
+  it("names the registered agents and the latest failed runs, picks none, and a pick fills the form", async () => {
+    studio.on("GET runs", {
+      runs: [{ ...rOK, id: "r_bad", agent: "orders", status: "failed" }],
+      next_before: null,
+    })
+    renderApp("/playground")
+    const pick = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>("[data-pick-agent]")
+      expect(el).toBeTruthy()
+      return el!
+    })
+    expect(pick.querySelector("p")!.textContent).toBe(
+      "Pick an agent (2 registered on 1 runtime) or paste a run id in Source run"
+    )
+    expect(
+      [...pick.querySelectorAll("[data-pick-agent-option]")].map((b) =>
+        b.getAttribute("data-pick-agent-option")
+      )
+    ).toEqual(["planner", "orders"])
+    // No agent is taken: no agent picker, the header asks, Run is held.
+    expect(screen.queryByLabelText("agent")).toBeNull()
+    expect(document.querySelector("[data-pick-agent-head]")!.textContent).toBe(
+      "pick an agent"
+    )
+    await waitFor(() =>
+      expect(pick.querySelector('[data-pick-run="r_bad"]')).toBeTruthy()
+    )
+    expect(
+      studio.calls("GET runs").some((c) => c.query.get("status") === "failed")
+    ).toBe(true)
+    fireEvent.click(
+      pick.querySelector<HTMLElement>('[data-pick-agent-option="orders"]')!
+    )
+    await waitFor(() =>
+      expect(valueOf(screen.getByLabelText("agent"))).toBe("orders")
+    )
+    expect(document.querySelector("[data-pick-agent]")).toBeNull()
+    expect(prompt().value).toBe("You are support.")
+  })
+
+  it("a failed run picked is the source; its agent follows it", async () => {
+    studio
+      .on("GET runs", {
+        runs: [{ ...rOK, id: "r_ok", agent: "orders", status: "failed" }],
+        next_before: null,
+      })
+      .on("GET runs/r_ok", { ...rOK, agent: "orders", children: [] })
+    renderApp("/playground")
+    const run = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>('[data-pick-run="r_ok"]')
+      expect(el).toBeTruthy()
+      return el!
+    })
+    fireEvent.click(run)
+    await waitFor(() =>
+      expect(valueOf(screen.getByLabelText("agent"))).toBe("orders")
+    )
+    expect(document.querySelector("[data-pick-agent]")).toBeNull()
+  })
+})
+
 describe("the share link (#state=)", () => {
   // The Done line, 3: the shareable link restores the form — a fresh
   // render, another machine's: nothing but the URL.
@@ -227,7 +289,7 @@ describe("the share link (#state=)", () => {
   })
 
   it("a form too long for a link says so and offers none", async () => {
-    renderApp("/playground")
+    renderApp("/playground?agent=planner")
     await waitFor(() =>
       expect(valueOf(screen.getByLabelText("agent"))).toBeTruthy()
     )

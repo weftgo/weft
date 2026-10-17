@@ -259,10 +259,6 @@
   "compacted_at": null,
   "warnings": [
     {
-      "kind": "prepare_step",
-      "message": "the agent's PrepareStep runs again at replay time (ADR 0029): this request is exact when it is idempotent over its own output"
-    },
-    {
       "kind": "instructions",
       "message": "the loop appends the offered tools' prompt snippets to the instructions; the record does not hold them, so the override is shown as written"
     }

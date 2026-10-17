@@ -170,6 +170,16 @@ html[data-density="compact"] {
   --studio-text: 0.8125rem;
 }
 
+/* The replay drawer is full width below sm (UX-C-33): the page under it
+   is covered, so it never scrolls sideways while the drawer is open
+   (data-replay-open on <html>, set by the drawer). */
+@media (width < 40rem) {
+  html[data-replay-open],
+  html[data-replay-open] body {
+    overflow-x: hidden;
+  }
+}
+
 @theme inline {
   --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;

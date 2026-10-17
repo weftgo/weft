@@ -204,7 +204,7 @@ describe("the preview (will be sent)", () => {
       all(el, "[data-weft-preview-warning]").map((w) =>
         w.getAttribute("data-weft-preview-warning")
       )
-    ).toEqual(["prepare_step", "instructions"])
+    ).toEqual(["instructions"])
     // The body Run would post.
     expect(
       (

@@ -497,7 +497,7 @@ describe("the playground's hand-off edits and run controls (final web review)", 
   })
 
   // The result cards follow the same rule: every verb that POSTs —
-  // save as fixture, a parked call's continue/skip/resolve, steer — is
+  // save as test, a parked call's continue/skip/resolve, steer — is
   // for a bearer that may act; a read-scoped token keeps the links (the
   // run id) and sees the parked call's name, read-only. A card is on
   // screen under a read token when the bearer changed after Run (the
@@ -521,7 +521,7 @@ describe("the playground's hand-off edits and run controls (final web review)", 
       fake
         .on("GET meta", {
           ...golden<Record<string, unknown>>("meta"),
-          capabilities: ["playground", "runtimes", "steer"],
+          capabilities: ["export", "playground", "runtimes", "steer"],
         })
         .on("POST playground/runs", command("cmd_1", "queued"))
         .on(
@@ -597,7 +597,7 @@ describe("the playground's hand-off edits and run controls (final web review)", 
         })
       ).toBeTruthy()
       for (const name of [
-        "save as fixture",
+        "save as test",
         "continue",
         "skip",
         "resolve",
@@ -613,10 +613,10 @@ describe("the playground's hand-off edits and run controls (final web review)", 
       expect(screen.queryByRole("button", { name: "approve" })).toBeNull()
     })
 
-    it("a dev token: the fixture, decision and steer verbs are drawn", async () => {
+    it("a dev token: the save, decision and steer verbs are drawn", async () => {
       const card = await runCard()
       for (const name of [
-        "save as fixture",
+        "save as test",
         "continue",
         "skip",
         "resolve",
@@ -625,6 +625,17 @@ describe("the playground's hand-off edits and run controls (final web review)", 
         expect(within(card).getByRole("button", { name })).toBeTruthy()
       expect(within(card).getByLabelText("steer message")).toBeTruthy()
       expect(card.querySelector("[data-pending-read-only]")).toBeNull()
+      // One verb, one download (UX-C-29): the run page's wefttest zip,
+      // never the per-file fixtures route.
+      fireEvent.click(
+        within(card).getByRole("button", { name: "save as test" })
+      )
+      await waitFor(() =>
+        expect(
+          fake.calls("GET runs/pg_1/export").map((c) => c.query.get("format"))
+        ).toEqual(["wefttest"])
+      )
+      expect(fake.calls("POST playground/fixtures")).toHaveLength(0)
       // The parked notice offers the card's own approve.
       await screen.findByText("run pg_1 parked at refund")
       expect(

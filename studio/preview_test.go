@@ -200,7 +200,10 @@ func TestPreviewRoute(t *testing.T) {
 		d.Diff.Tools == nil || len(d.Diff.Tools.Added)+len(d.Diff.Tools.Removed) != 0 {
 		t.Errorf("tools = %+v, diff %+v; want the recorded catalog, unchanged", d.WillSend.Tools, d.Diff.Tools)
 	}
-	if d.warning("prepare_step") == "" || d.warning("instructions") == "" || d.Runtime != nil || len(d.Unchecked) != 0 {
+	// No PrepareStep acted on the source (no request names prepared):
+	// its caveat is not said (UX-C-26); no runtime, no catalog to judge.
+	if d.warning("prepare_step") != "" || d.warning("catalog") != "" || d.warning("agent") != "" ||
+		d.warning("instructions") == "" || d.Runtime != nil || len(d.Unchecked) != 0 {
 		t.Errorf("warnings %+v runtime %v unchecked %v", d.Warnings, d.Runtime, d.Unchecked)
 	}
 
@@ -278,6 +281,19 @@ func TestPreviewRoute(t *testing.T) {
 		rd.Diff.Tools == nil || strings.Join(rd.Diff.Tools.Added, ",") != "refund" || rd.WillSend.ParamsSource != "agent" {
 		t.Errorf("registered preview = %d %s", code, out)
 	}
+	// The registration offers refund, step 2 recorded lookup_order alone:
+	// a warning, not only a row (UX-C-26).
+	if w := rd.warning("catalog"); w != "agent acme-support's registered catalog differs from the one step 2 recorded (adds refund, track_parcel): the replay offers the registered tools" {
+		t.Errorf("catalog warning = %q", w)
+	}
+	// Another agent than the source's is said.
+	code, out = previewPost(t, pt, "/api/playground/preview", "",
+		`{"agent":"planner","source":{"run_id":"r_pv","from_step":2}}`)
+	var ad previewDocT
+	decode(t, out, &ad)
+	if w := ad.warning("agent"); code != http.StatusOK || w != "the source run is agent acme-support's; this replays it as agent planner" {
+		t.Errorf("agent mismatch = %d %q", code, w)
+	}
 	// Unregistered: listed, not checked.
 	code, out = previewPost(t, pt, "/api/playground/preview", "",
 		`{"agent":"acme-support","source":{"run_id":"r_pv","from_step":2},"overrides":{"tools_enabled":["nope"],"model":"x"}}`)
@@ -303,6 +319,34 @@ func TestPreviewRoute(t *testing.T) {
 	if code, out := previewPost(t, pt, "/api/playground/preview", "", `{"agent":"acme-support","source":{"run_id":"r_pv","from_step":4}}`); code != http.StatusBadRequest ||
 		!strings.Contains(out, "from_step 4 is beyond the source run's last step") {
 		t.Errorf("past the end = %d %s", code, out)
+	}
+}
+
+// TestPreviewSaysPrepareStepWhereOneActed is UX-C-26: the PrepareStep
+// caveat is said when the source's request records name what a
+// PrepareStep changed (prepared, O9) — with the parts — and not on a
+// run whose records name none (TestPreviewRoute's).
+func TestPreviewSaysPrepareStepWhereOneActed(t *testing.T) {
+	pt := newPlaygroundTestServer(t)
+	withPipeline(t, pt.ts.URL, true, func(prov []core.Option) {
+		agent := core.New(wefttest.Script(wefttest.Say("hi")),
+			append([]core.Option{core.Name("acme-support"), core.Instructions("You help."),
+				core.PrepareStep(func(_ context.Context, _ int, req core.ModelRequest) (core.ModelRequest, error) {
+					req.System += " Be brief."
+					return req, nil
+				})}, prov...)...)
+		if _, err := agent.Generate(context.Background(), core.RunID("r_ps"), core.Prompt("hello")); err != nil {
+			t.Fatal(err)
+		}
+	})
+	waitRun(t, pt.ts, "r_ps", 1, pt.token)
+	code, out := previewPost(t, pt, "/api/playground/preview", "",
+		`{"agent":"acme-support","source":{"run_id":"r_ps","from_step":0}}`)
+	var d previewDocT
+	decode(t, out, &d)
+	const want = "the agent's PrepareStep changed this run's recorded requests (system) and runs again at replay time (ADR 0029): this request is exact when it is idempotent over its own output"
+	if w := d.warning("prepare_step"); code != http.StatusOK || w != want {
+		t.Errorf("prepare_step warning = %d %q\nwant %q", code, w, want)
 	}
 }
 

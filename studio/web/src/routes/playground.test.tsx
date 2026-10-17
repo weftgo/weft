@@ -78,20 +78,50 @@ describe("editFieldsOf", () => {
   it("derives the kept steps' tool results and call-free replies", () => {
     // from_step 1 keeps step 0 only: step 1's result is NOT offered.
     expect(editFieldsOf(batches, 1)).toEqual([
-      { step: 0, callID: "c1", name: "lookup_order", placeholder: "shipped" },
+      {
+        step: 0,
+        callID: "c1",
+        name: "lookup_order",
+        placeholder: "shipped",
+        args: {},
+      },
     ])
     // from_step 2 keeps steps 0..1: both steps' results are patchable;
     // no reply is (step 2's reply is the fresh step, not kept).
     expect(editFieldsOf(batches, 2)).toEqual([
-      { step: 0, callID: "c1", name: "lookup_order", placeholder: "shipped" },
-      { step: 1, callID: "c2", name: "refund", placeholder: "refunded" },
+      {
+        step: 0,
+        callID: "c1",
+        name: "lookup_order",
+        placeholder: "shipped",
+        args: {},
+      },
+      {
+        step: 1,
+        callID: "c2",
+        name: "refund",
+        placeholder: "refunded",
+        args: {},
+      },
     ])
     // from_step 3 keeps the reply too: step 2's assistant message is
     // call-free, so its text is rewritable (a reply rewrite may not
     // drop a step's calls — a call-carrying reply never renders).
     expect(editFieldsOf(batches, 3)).toEqual([
-      { step: 0, callID: "c1", name: "lookup_order", placeholder: "shipped" },
-      { step: 1, callID: "c2", name: "refund", placeholder: "refunded" },
+      {
+        step: 0,
+        callID: "c1",
+        name: "lookup_order",
+        placeholder: "shipped",
+        args: {},
+      },
+      {
+        step: 1,
+        callID: "c2",
+        name: "refund",
+        placeholder: "refunded",
+        args: {},
+      },
       { step: 2, name: "reply", placeholder: "Refunded — anything else?" },
     ])
   })
@@ -110,7 +140,13 @@ describe("editFieldsOf", () => {
       batch(assistantText("done")),
     ]
     expect(editFieldsOf(turn2, 2)).toEqual([
-      { step: 0, callID: "c9", name: "refund", placeholder: "refunded" },
+      {
+        step: 0,
+        callID: "c9",
+        name: "refund",
+        placeholder: "refunded",
+        args: {},
+      },
       { step: 1, name: "reply", placeholder: "done" },
     ])
   })
@@ -134,10 +170,22 @@ describe("editFieldsOf", () => {
       { index: 2, step: 1, input: false, messages: [assistantText("done")] },
     ]
     expect(editFieldsOf(stored, 1)).toEqual([
-      { step: 0, callID: "c1", name: "lookup_order", placeholder: "shipped" },
+      {
+        step: 0,
+        callID: "c1",
+        name: "lookup_order",
+        placeholder: "shipped",
+        args: {},
+      },
     ])
     expect(editFieldsOf(stored, 2)).toEqual([
-      { step: 0, callID: "c1", name: "lookup_order", placeholder: "shipped" },
+      {
+        step: 0,
+        callID: "c1",
+        name: "lookup_order",
+        placeholder: "shipped",
+        args: {},
+      },
       { step: 1, name: "reply", placeholder: "done" },
     ])
   })
@@ -175,7 +223,13 @@ describe("editFieldsOf", () => {
     ]
     expect(editFieldsOf(mixed, 1)).toEqual([
       { step: 0, callID: "c_r", name: "refund", placeholder: "refunded" },
-      { step: 0, callID: "c1", name: "lookup_order", placeholder: "shipped" },
+      {
+        step: 0,
+        callID: "c1",
+        name: "lookup_order",
+        placeholder: "shipped",
+        args: {},
+      },
     ])
     // A run fed no messages, no stored steps: no row is flagged input,
     // so none is taken for it.
@@ -195,7 +249,13 @@ describe("editFieldsOf", () => {
       { index: 2, step: -1, input: false, messages: [assistantText("done")] },
     ]
     expect(editFieldsOf(bare, 2)).toEqual([
-      { step: 0, callID: "c1", name: "lookup_order", placeholder: "shipped" },
+      {
+        step: 0,
+        callID: "c1",
+        name: "lookup_order",
+        placeholder: "shipped",
+        args: {},
+      },
       { step: 1, name: "reply", placeholder: "done" },
     ])
   })

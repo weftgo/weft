@@ -288,14 +288,32 @@ async function approveAndFollow(
 }
 
 const raised = new Set<string>()
+/** Commands a surface on screen already shows the outcome of. */
+const quiet = new Set<string>()
+
+/** quietCommand holds back a command's experiment notice while the
+ * caller shows its outcome itself — the replay drawer, whose outcome
+ * and compare the bottom-right toast would cover (UX-C-32). It answers
+ * the release; a notice suppressed meanwhile is not raised later. */
+export function quietCommand(commandID: string): () => void {
+  quiet.add(commandID)
+  return () => {
+    quiet.delete(commandID)
+  }
+}
 
 /**
  * notify raises a notice's toast, once per instance: true when it was
- * raised, false when its key already was (a repeat, a re-render).
+ * raised, false when its key already was (a repeat, a re-render) or
+ * the command's outcome is on screen (quietCommand).
  */
 export function notify(n: Notice): boolean {
   const key = noticeKey(n)
   if (raised.has(key)) return false
+  if (n.kind === "experiment" && quiet.has(n.commandID)) {
+    raised.add(key)
+    return false
+  }
   raised.add(key)
   const { title, tone } = noticeText(n)
   const id = toastID(n)
@@ -333,6 +351,7 @@ export function dismissNotice(
 /** resetNotices forgets every raised key (tests: one page per test). */
 export function resetNotices(): void {
   raised.clear()
+  quiet.clear()
   toast.dismiss()
 }
 

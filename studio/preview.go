@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/obsdb"
@@ -125,7 +126,10 @@ type previewToolsDiff struct {
 }
 
 // previewWarning is one thing the preview cannot promise: kind
-// prepare_step (always: the agent's PrepareStep runs again), compacted
+// prepare_step (the agent's PrepareStep runs again — when a request
+// record names what it changed, or no request was recorded), catalog
+// (the registered tools differ from the recorded step's), agent (the
+// replay's agent is not the source run's), compacted
 // (the prefix is a compaction view), derived (no request record placed
 // the messages), scripted (a scripted-engine refusal, the run route's
 // sentence), instructions (the loop appends tool prompt snippets the
@@ -379,8 +383,50 @@ func (s *Server) assemblePreview(ctx context.Context, doc *previewDoc, req runRe
 		ToolChoice: sameOr(doc.WillSend.ToolChoice == doc.WasSent.ToolChoice),
 	}
 
-	doc.Warnings = append(doc.Warnings, previewWarning{Kind: "prepare_step",
-		Message: "the agent's PrepareStep runs again at replay time (ADR 0029): this request is exact when it is idempotent over its own output"})
+	// The PrepareStep caveat only where one acted (UX-C-26): a request
+	// record names what the chain changed (prepared, O9); with no
+	// request record at all nothing says, so the caveat stands.
+	prepared, err := s.preparedParts(ctx, run)
+	if err != nil {
+		return &cmdError{http.StatusInternalServerError, "internal", "read requests of run " + run + " failed"}
+	}
+	switch {
+	case len(prepared) > 0:
+		doc.Warnings = append(doc.Warnings, previewWarning{Kind: "prepare_step",
+			Message: "the agent's PrepareStep changed this run's recorded requests (" + strings.Join(prepared, ", ") + ") and runs again at replay time (ADR 0029): this request is exact when it is idempotent over its own output"})
+	case rec == nil:
+		doc.Warnings = append(doc.Warnings, previewWarning{Kind: "prepare_step",
+			Message: "the run recorded no request, so whether a PrepareStep changed it is unknown; one runs again at replay time (ADR 0029): this request is exact when it is idempotent over its own output"})
+	}
+	// The registration's catalog against the recorded one (UX-C-26): a
+	// difference is the replay offering other tools than the step did,
+	// whatever the overrides narrow — said as a warning, not only a row.
+	if agent != nil && rec != nil {
+		if names := agent.ManifestToolNames(); names != nil {
+			reg := make([]previewTool, len(names))
+			for i, n := range names {
+				reg[i] = previewTool{Name: n}
+			}
+			recorded := make([]previewTool, len(rec.Body.Tools.Names))
+			for i, n := range rec.Body.Tools.Names {
+				recorded[i] = previewTool{Name: n}
+			}
+			if d := diffTools(reg, recorded); len(d.Added)+len(d.Removed) > 0 {
+				msg := fmt.Sprintf("agent %s's registered catalog differs from the one step %d recorded", req.Agent, rec.Step)
+				if prompts {
+					msg += catalogDelta(d)
+				}
+				doc.Warnings = append(doc.Warnings, previewWarning{Kind: "catalog",
+					Message: msg + ": the replay offers the registered tools"})
+			}
+		}
+	}
+	// Another agent than the source's (UX-C-26): the replay is that
+	// agent's prompt and tools over this run's transcript.
+	if det, err := s.db.Run(ctx, run); err == nil && det.Agent != "" && req.Agent != "" && det.Agent != req.Agent {
+		doc.Warnings = append(doc.Warnings, previewWarning{Kind: "agent",
+			Message: fmt.Sprintf("the source run is agent %s's; this replays it as agent %s", det.Agent, req.Agent)})
+	}
 	if sm.View != nil && from > 0 {
 		doc.CompactedAt = noteOf(*sm.View)
 		doc.Warnings = append(doc.Warnings, previewWarning{Kind: "compacted",
@@ -651,6 +697,59 @@ func jsonEqual(a, b any) bool {
 	x, _ := json.Marshal(a)
 	y, _ := json.Marshal(b)
 	return string(x) == string(y)
+}
+
+// catalogDelta is a catalog warning's detail: " (adds a, b; drops c)".
+func catalogDelta(d *previewToolsDiff) string {
+	var parts []string
+	if len(d.Added) > 0 {
+		parts = append(parts, "adds "+strings.Join(d.Added, ", "))
+	}
+	if len(d.Removed) > 0 {
+		parts = append(parts, "drops "+strings.Join(d.Removed, ", "))
+	}
+	return " (" + strings.Join(parts, "; ") + ")"
+}
+
+// preparedParts is every part a PrepareStep changed on any of the
+// run's request records (their prepared lists, O9), in the record's
+// order, each once; nil when none names one.
+func (s *Server) preparedParts(ctx context.Context, run string) ([]string, error) {
+	order := []string{"system", "messages", "tools", "tool_choice", "params", "thinking", "sequential_tools"}
+	seen := map[string]bool{}
+	q := obsdb.RequestQuery{Limit: maxRequestsLimit}
+	for {
+		page, err := s.db.Requests(ctx, run, q)
+		if errors.Is(err, obsdb.ErrNotFound) {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		for _, r := range page {
+			for _, p := range r.Body.Prepared {
+				seen[p] = true
+			}
+		}
+		if len(page) < q.PageLimit() {
+			break
+		}
+		q.From = page[len(page)-1].Index + 1
+	}
+	var out []string
+	for _, p := range order {
+		if seen[p] {
+			out = append(out, p)
+			delete(seen, p)
+		}
+	}
+	// A part a newer core names that this list does not: kept, sorted.
+	rest := make([]string, 0, len(seen))
+	for p := range seen {
+		rest = append(rest, p)
+	}
+	slices.Sort(rest)
+	return append(out, rest...), nil
 }
 
 // diffTools names the tools added and removed, in name order.

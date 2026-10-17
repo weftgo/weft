@@ -4,7 +4,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { LIVE_RETRIES } from "./live"
-import { noticeKey, noticeText, notify, resetNotices } from "./notify"
+import {
+  noticeKey,
+  noticeText,
+  notify,
+  quietCommand,
+  resetNotices,
+} from "./notify"
 import type { Notice } from "./notify"
 
 const sonner = vi.hoisted(() => {
@@ -258,6 +264,30 @@ describe("notify", () => {
     expect(toast.success.mock.calls[0][1]).toMatchObject({
       id: "experiment:cmd_1",
     })
+  })
+
+  it("holds back the finish toast of a command whose outcome is on screen (UX-C-32)", () => {
+    const n: Notice = {
+      kind: "experiment",
+      commandID: "cmd_q",
+      runID: "pg_q",
+      status: "succeeded",
+    }
+    const release = quietCommand("cmd_q")
+    expect(notify(n)).toBe(false)
+    // Another command still toasts; the quiet one is not raised later.
+    expect(notify({ ...n, commandID: "cmd_other" })).toBe(true)
+    release()
+    expect(notify(n)).toBe(false)
+    expect(toast.success).toHaveBeenCalledTimes(1)
+    expect(toast.success.mock.calls[0][1]).toMatchObject({
+      id: "experiment:cmd_other",
+    })
+    // A parked notice for the same run is not a finish: it still shows.
+    quietCommand("cmd_p")
+    expect(notify({ kind: "parked", runID: "pg_q", tools: ["refund"] })).toBe(
+      true
+    )
   })
 
   it("keeps an actionable notice up; lets the rest go", () => {

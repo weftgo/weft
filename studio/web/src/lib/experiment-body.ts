@@ -94,6 +94,22 @@ export function pickTarget(
   }
 }
 
+/** agentCount is how many agents the runtimes register, in all. */
+export function agentCount(runtimes: RuntimeView[]): number {
+  return runtimes.reduce((n, r) => n + r.agents.length, 0)
+}
+
+/** The bare playground's header while it asks (UX-C-35). */
+export const PICK_AGENT_HEAD = "pick an agent"
+
+/** pickAgentLine is the bare playground's question (UX-C-35): nothing
+ * named a target, so it asks instead of taking the first agent. */
+export function pickAgentLine(runtimes: RuntimeView[]): string {
+  const n = agentCount(runtimes)
+  const r = runtimes.filter((x) => x.agents.length > 0).length
+  return `Pick an agent (${n} registered on ${r} ${r === 1 ? "runtime" : "runtimes"}) or paste a run id in Source run`
+}
+
 /** The overrides a variant applies to the registered agent — only
  * what changed (§10.1): an unchanged prompt is not an override, and
  * no tool turned off sends no tools_enabled. */
@@ -191,6 +207,28 @@ export interface EditField {
   /** The tool's name, or "reply". */
   name: string
   placeholder: string
+  /** A tool result's call arguments as its assistant message recorded
+   * them (absent when the call is not in the prefix): what tells
+   * parallel calls of one tool apart (callLabel). */
+  args?: unknown
+}
+
+/** callLabel names a tool result's field by its call — the tool and
+ * its arguments, key=value, nested values elided, cut at max
+ * characters: "lookup(order_id=42)" — so parallel calls of one tool
+ * read apart (UX-C-25). The call id is drawn beside it. */
+export function callLabel(name: string, args: unknown, max = 48): string {
+  let inner = ""
+  if (args && typeof args === "object" && !Array.isArray(args))
+    inner = Object.entries(args as Record<string, unknown>)
+      .map(
+        ([k, v]) =>
+          `${k}=${v !== null && typeof v === "object" ? "…" : String(v)}`
+      )
+      .join(", ")
+  else if (args !== undefined && args !== null) inner = JSON.stringify(args)
+  if (inner.length > max) inner = inner.slice(0, max - 1) + "…"
+  return `${name}(${inner})`
 }
 
 /** ownMessages is the run's own messages (the input record left out),
@@ -404,13 +442,18 @@ export function editFieldsOf(
 ): EditField[] {
   const tagged = ownMessages(batches)
   const fields: EditField[] = []
+  // A result's call, by its step and id (call ids repeat across steps).
+  const calls = new Map<string, unknown>()
   for (const { step, m } of tagged) {
     if (step < 0 || step >= fromStep) continue
     if (m.role === "assistant") {
       let text = ""
       let hadCalls = false
       for (const p of m.content) {
-        if (p.type === "tool_call") hadCalls = true
+        if (p.type === "tool_call") {
+          hadCalls = true
+          calls.set(`${step}\u0000${p.id}`, p.args)
+        }
         if (p.type === "text" && p.text) text += p.text
       }
       if (text && !hadCalls)
@@ -423,6 +466,7 @@ export function editFieldsOf(
             callID: p.call_id,
             name: p.name || p.call_id,
             placeholder: typeof p.content === "string" ? p.content : "",
+            args: calls.get(`${step}\u0000${p.call_id}`),
           })
       }
     }

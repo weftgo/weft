@@ -744,6 +744,12 @@ export function refusalWords(
 export const refusalLine = (w: { words: string; fix: string }) =>
   w.fix ? `${w.words} — fix: ${w.fix}` : w.words
 
+/** refusalHead is a refused verb's short tooltip (UX-A-36): the
+ * refusal's head — "app-owned turn · read-only", "this token is
+ * read-only" — the whole line said once under the calls, not on every
+ * verb. */
+export const refusalHead = (w: { words: string }) => w.words.split(/: | — /)[0]
+
 /** appVerbWords is one app-turn verb's line under its call, the same
  * on both surfaces: in flight ("queued…"), "decided" for a decision or
  * "steered" for a steer (with the turn the finished command names, when

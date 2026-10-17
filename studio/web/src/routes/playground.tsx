@@ -47,26 +47,29 @@ import {
   fetchRun,
   fetchTranscript,
   postExperiment,
-  postFixtures,
   postApproval,
   postSteer,
   fetchCommand,
   postPlaygroundRun,
   runQuery,
+  runsQuery,
   runtimesQuery,
   studioToken,
 } from "@/lib/api"
-import type { PlaygroundRunBody, RunRow } from "@/lib/api"
+import type { PlaygroundRunBody, RunRow, RuntimeView } from "@/lib/api"
 import { producedText } from "@/lib/events"
 import { diffLines, diffSummary } from "@/lib/diff"
 import type { DiffRow } from "@/lib/diff"
 import {
+  agentCount,
   buildRunBody,
   editsFromHandoff,
   emptyLab,
   labFromHandoff,
   labProblems,
   overridesOf,
+  PICK_AGENT_HEAD,
+  pickAgentLine,
   pickTarget,
   toolsOffFor,
   unmatchedDrafts,
@@ -79,14 +82,19 @@ import type {
   VariantFields,
 } from "@/lib/experiment-body"
 import { relativeTime, spanMs } from "@/lib/format"
-import { copyText, download } from "@/lib/json"
-import { keepEditedTitle } from "@/lib/saves"
+import { copyText } from "@/lib/json"
+import {
+  keepEditedTitle,
+  mayExportTestWith,
+  SAVE_TEST_LABEL,
+  SAVE_TEST_TITLE,
+} from "@/lib/saves"
 import {
   matrixStepLine,
   mintExperimentID,
   validExperimentID,
 } from "@/lib/experiments"
-import { keepPrompt } from "@/components/studio/saves"
+import { keepPrompt, saveTest } from "@/components/studio/saves"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { CapsUnread } from "@/components/studio/caps-unread"
 import { RUNTIMES_POLL_MS, useRuntimesNeeded } from "@/hooks/use-notices"
@@ -679,10 +687,22 @@ function Playground({ caps }: { caps: string[] }) {
   const sourceRow =
     sourceRunID && source.data?.id === sourceRunID ? source.data : undefined
   const all = runtimes.data?.runtimes ?? []
-  const target = pickTarget(all, {
-    runtime: runtimeChoice || undefined,
-    agent: agentChoice || sourceRow?.agent || undefined,
-  })
+  // A bare /playground over several registered agents asks (UX-C-35):
+  // nothing names a target — no run, agent, runtime or restored form —
+  // so the first runtime's first agent would be an arbitrary pick.
+  const choosing =
+    !sourceRunID.trim() &&
+    !agentChoice &&
+    !runtimeChoice &&
+    !shared &&
+    !search.exp &&
+    agentCount(all) > 1
+  const target: ReturnType<typeof pickTarget> = choosing
+    ? {}
+    : pickTarget(all, {
+        runtime: runtimeChoice || undefined,
+        agent: agentChoice || sourceRow?.agent || undefined,
+      })
   const runtime = target.runtime
   const agent = target.agent
   // The source row decides the agent: hold the verbs until it is read.
@@ -1189,7 +1209,9 @@ function Playground({ caps }: { caps: string[] }) {
     <div className="flex h-full min-h-0 flex-col">
       <header className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b px-4 py-2 text-xs text-muted-foreground">
         <span>Playground ·</span>
-        {runtime && agent ? (
+        {choosing ? (
+          <span data-pick-agent-head>{PICK_AGENT_HEAD}</span>
+        ) : runtime && agent ? (
           <>
             <SelectField
               label="agent"
@@ -1276,6 +1298,20 @@ function Playground({ caps }: { caps: string[] }) {
                   >
                     {restored.text}
                   </p>
+                ) : null}
+                {choosing ? (
+                  <PickTarget
+                    runtimes={all}
+                    onAgent={(rt, name) => {
+                      setRuntimeChoice(rt)
+                      setAgentChoice(name)
+                      write({ runtime: rt, agent: name })
+                    }}
+                    onRun={(id) => {
+                      setSourceRunID(id)
+                      write({ run: id })
+                    }}
+                  />
                 ) : null}
                 {/* The variant switcher (§4's "+ variant"): each column of the
               N-way view is one variant's overrides and run. */}
@@ -1490,9 +1526,6 @@ function Playground({ caps }: { caps: string[] }) {
                             agent?.name ??
                             ""
                           }
-                          tools={(agent?.tools ?? [])
-                            .map((t) => t.name)
-                            .filter((n) => !v.toolsOff.has(n))}
                           caps={caps}
                           mayRun={mayRun}
                           live={caps.includes("live") && streamed.has(v.key)}
@@ -1546,14 +1579,73 @@ function Playground({ caps }: { caps: string[] }) {
   )
 }
 
-/** saveFixtures downloads the run's wefttest replay fixtures, one
- * file each (the browser writes them; Studio never touches the user's
- * tree). tools is the catalogue the run's requests carried — the
- * variant's enabled set — because the fixture key hashes it. */
-async function saveFixtures(runID: string, tools: string[]) {
-  if (!runID) return
-  const doc = await postFixtures(runID, tools)
-  for (const f of doc.files) download(f.name, f.body)
+/** PickTarget is the bare playground's empty state (UX-C-35): every
+ * registered agent one click away, and the latest failed runs as
+ * one-click sources (their own agent follows the run). Nothing runs. */
+function PickTarget({
+  runtimes,
+  onAgent,
+  onRun,
+}: {
+  runtimes: RuntimeView[]
+  onAgent: (runtime: string, agent: string) => void
+  onRun: (runID: string) => void
+}) {
+  const failed = useQuery({
+    ...runsQuery({ status: "failed", limit: 5 }),
+    retry: false,
+  })
+  const rows = failed.data?.runs ?? []
+  return (
+    <section
+      className="space-y-2 rounded-md border px-3 py-2 text-xs"
+      data-pick-agent
+    >
+      <p className="text-sm">{pickAgentLine(runtimes)}</p>
+      <ul className="flex flex-wrap gap-1.5">
+        {runtimes.flatMap((r) =>
+          r.agents.map((a) => (
+            <li key={`${r.id}\u0000${a.name}`}>
+              <button
+                type="button"
+                className="rounded border px-2 py-0.5 hover:bg-muted"
+                title={`runtime ${r.id}`}
+                data-pick-agent-option={a.name}
+                onClick={() => onAgent(r.id, a.name)}
+              >
+                {a.name}
+                <span className="text-faint"> · {r.service || r.id}</span>
+              </button>
+            </li>
+          ))
+        )}
+      </ul>
+      {rows.length ? (
+        <div className="space-y-1">
+          <span className="eyebrow">recent failed runs</span>
+          <ul className="space-y-0.5">
+            {rows.map((row) => (
+              <li key={row.id}>
+                <button
+                  type="button"
+                  className="w-full truncate text-left hover:underline"
+                  title={row.id}
+                  data-pick-run={row.id}
+                  onClick={() => onRun(row.id)}
+                >
+                  <span className="font-mono">{row.agent}</span>
+                  <span className="text-faint">
+                    {" · "}
+                    {row.prompt_preview || row.id}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+    </section>
+  )
 }
 
 /** withCommandID names a command's at-most-once id (none: the server
@@ -1676,7 +1768,6 @@ function ResultCard({
   sourceRunID,
   variant,
   agentName,
-  tools,
   caps,
   mayRun,
   live,
@@ -1689,7 +1780,6 @@ function ResultCard({
   variant: Variant
   /** The agent the card's run is of: keep as prompt proposes to it. */
   agentName: string
-  tools: string[]
   caps: string[]
   /** The bearer may act (canReplay, the run page's rule): else the
    * card draws no verb that POSTs — no fixture save, no decision, no
@@ -1800,22 +1890,20 @@ function ResultCard({
           </Link>
         )}
         <span className="grow" />
-        {/* P4's saves: the fixture is a wefttest replay test of this
-            run (D4); keep-as-prompt copies the variant's instructions
-            and, under proposals, proposes them (plan F6). */}
-        {mayRun && (
+        {/* P4's saves (plan F6): "save as test" is the run page's verb
+            and download — one zip (export?format=wefttest), never one
+            download per fixture file (UX-C-29); keep-as-prompt copies
+            the variant's instructions and, under proposals, proposes
+            them. */}
+        {mayRun && mayExportTestWith(caps, studioToken()) && (
           <button
             className="text-faint hover:underline disabled:opacity-50"
-            title="write this run's records as wefttest replay fixtures"
+            title={SAVE_TEST_TITLE}
             disabled={!experiment.runID}
-            onClick={() => {
-              setCardErr("")
-              saveFixtures(experiment.runID, tools).catch((e: unknown) =>
-                setCardErr(e instanceof Error ? e.message : String(e))
-              )
-            }}
+            data-save-test
+            onClick={() => void saveTest(experiment.runID)}
           >
-            save as fixture
+            {SAVE_TEST_LABEL}
           </button>
         )}
         <button

@@ -49,10 +49,7 @@ describe("previewView", () => {
     expect(v.changed).toEqual(["params"])
     expect(v.added).toEqual([])
     expect(v.holes).toEqual([])
-    expect(v.warnings.map((w) => w.kind)).toEqual([
-      "prepare_step",
-      "instructions",
-    ])
+    expect(v.warnings.map((w) => w.kind)).toEqual(["instructions"])
     expect(v.unchecked).toBe("")
   })
 

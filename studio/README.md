@@ -1045,8 +1045,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 274,020 B raw / 90,051 B gzip
-(87.9 KiB, the bundle of the ledger's row "U29.1 run page polish"; 8,253 B — 8.1 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 273,930 B raw / 89,990 B gzip
+(87.9 KiB, the bundle of the ledger's row "U29.3 polish"; 8,314 B — 8.1 KiB — of headroom under
 the 98,304 B, 96 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; A5.4 raised it from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -1580,7 +1580,11 @@ messages one row each with the server's op (`same`, `changed` with was
 struck through above will, `added`, `removed`), tools added and removed,
 the knobs that changed (model, params, thinking, tool choice), every
 `*_badge` from the honesty table, the warnings one line each
-(`prepare_step` always, `compacted`, `derived`, `scripted`,
+(`prepare_step` when a request record of the source names what a
+`PrepareStep` changed — its `prepared` parts listed — or the source
+recorded no request; `catalog` when the registered agent's tools differ
+from the recorded step's; `agent` when the replay's agent is not the
+source run's; `compacted`, `derived`, `scripted`,
 `instructions`) and `unchecked` as a line naming what only a runtime
 checks. Its 400 is the command's own sentence, shown verbatim, and
 holds Run. A replayed run whose row carries `weft.edits` opens its Story

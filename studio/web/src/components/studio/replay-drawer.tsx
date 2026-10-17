@@ -61,6 +61,7 @@ import {
 } from "@/hooks/use-command-tracking"
 import type { Experiment } from "@/hooks/use-command-tracking"
 import { useRuntimesNeeded } from "@/hooks/use-notices"
+import { quietCommand } from "@/lib/notify"
 import {
   ExperimentForm,
   StepPicker,
@@ -160,7 +161,14 @@ export function ReplayDrawer({
       close.current()
     }
     window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
+    // Below sm the drawer covers the page: styles.css clips the page's
+    // sideways scroll under it while this is set (UX-C-33).
+    const root = document.documentElement
+    root.setAttribute("data-replay-open", "")
+    return () => {
+      window.removeEventListener("keydown", onKey)
+      root.removeAttribute("data-replay-open")
+    }
   }, [open])
   if (!request) return null
   return (
@@ -434,7 +442,8 @@ function ReplayForm({
       : draft.focus === "input"
         ? 'textarea[aria-label="input"]'
         : draft.focus === "edit" && draft.edits[0]?.callID
-          ? `[data-edit-call="${CSS.escape(draft.edits[0].callID)}"]`
+          ? // Step and call (UX-C-24): call ids repeat across steps.
+            `[data-edit-step="${draft.edits[0].step}"][data-edit-call="${CSS.escape(draft.edits[0].callID)}"]`
           : ""
   useEffect(() => {
     if (fieldFocused.current || !focusSel) return
@@ -680,6 +689,25 @@ function ReplayForm({
   else if (target.mismatch)
     blocked = `agent ${target.mismatch} is not registered on runtime ${runtime?.id ?? "?"}`
   else if (!wantAgent && source.isPending) blocked = "reading the source run…"
+  // What holds Run, the command in flight aside: "send again" on a
+  // rejected or lost command is held by the same rules.
+  const held =
+    Boolean(blocked) ||
+    !runtime ||
+    !agent ||
+    busy ||
+    refused.length > 0 ||
+    orphans.length > 0 ||
+    // The option lab's refusals (plan F3), said on their knobs.
+    labProblems(variant, agent).length > 0 ||
+    pastEnd ||
+    scriptedPastEnd ||
+    invalid.length > 0 ||
+    Boolean(preview.refused) ||
+    Boolean(preview.pending) ||
+    forkEdits ||
+    Boolean(compactedEdit) ||
+    (variant.thread === "fork" && !variant.input.trim())
 
   return (
     <>
@@ -857,25 +885,7 @@ function ReplayForm({
         <div className="flex items-center gap-2">
           <Button
             onClick={() => void run()}
-            disabled={
-              Boolean(blocked) ||
-              !runtime ||
-              !agent ||
-              busy ||
-              refused.length > 0 ||
-              orphans.length > 0 ||
-              // The option lab's refusals (plan F3), said on their knobs.
-              labProblems(variant, agent).length > 0 ||
-              pastEnd ||
-              scriptedPastEnd ||
-              invalid.length > 0 ||
-              Boolean(preview.refused) ||
-              Boolean(preview.pending) ||
-              forkEdits ||
-              Boolean(compactedEdit) ||
-              (variant.thread === "fork" && !variant.input.trim()) ||
-              Boolean(experiment && !settled(experiment.state))
-            }
+            disabled={held || Boolean(experiment && !settled(experiment.state))}
           >
             {busy ? "sending…" : "Run"}
           </Button>
@@ -904,6 +914,7 @@ function ReplayForm({
             fromStep={fromStep}
             agent={agent?.name}
             runtime={runtime?.id}
+            onAgain={held ? undefined : () => void run()}
           />
         ) : null}
       </div>
@@ -969,15 +980,22 @@ function ReplayOutcome({
   fromStep,
   agent,
   runtime,
+  onAgain,
 }: {
   experiment: Experiment
   sourceRunID: string
   fromStep: number
   agent?: string
   runtime?: string
+  /** Re-issue the form as a new command (UX-C-31); absent while the
+   * form's own rules hold Run. */
+  onAgain?: () => void
 }) {
   const e = experiment
   const { has } = useCapabilities()
+  // The drawer shows this command's outcome: its finish toast would
+  // cover it (UX-C-32), so the notice is not raised while it is open.
+  useEffect(() => quietCommand(e.commandID), [e.commandID])
   const label =
     e.state === "finished" && e.status ? `${e.state} · ${e.status}` : e.state
   return (
@@ -995,7 +1013,21 @@ function ReplayOutcome({
       {e.state === "rejected" || e.state === "lost" ? (
         <p className="text-status-bad" role="alert">
           {e.state === "rejected" ? "the runtime refused it" : "lost"}
-          {e.error ? `: ${e.error}` : ""}
+          {e.error ? `: ${e.error}` : ""}{" "}
+          <button
+            type="button"
+            className="text-thread-ink hover:underline disabled:no-underline disabled:opacity-50"
+            disabled={!onAgain}
+            title={
+              onAgain
+                ? "post the form again as a new command"
+                : "the form's own rules hold it (see above)"
+            }
+            data-replay-again
+            onClick={() => onAgain?.()}
+          >
+            send again
+          </button>
         </p>
       ) : e.error ? (
         <p className="text-status-bad">{e.error}</p>

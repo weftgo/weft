@@ -13,7 +13,9 @@ import { ApiError, putBreakpoints, runQuery, transcriptQuery } from "@/lib/api"
 import type { AgentView, RuntimeView } from "@/lib/api"
 import { kindOf } from "@/lib/edits"
 import { compactionsOf, isSessionMarker } from "@/lib/compaction"
+import { bytes } from "@/lib/summarize"
 import {
+  callLabel,
   editFieldsOf,
   emptyLab,
   LAB_LABELS,
@@ -643,22 +645,12 @@ export function TranscriptEdits({
       ))}
       {fields.map((f) =>
         f.callID ? (
-          <label
+          <ResultField
             key={`${f.step}:${f.callID}`}
-            className="flex items-center gap-1 text-xs"
-          >
-            <span className="shrink-0 text-faint">
-              step {f.step} · {f.name} →
-            </span>
-            <input
-              className="w-full rounded border bg-transparent px-2 py-1"
-              aria-label={`edit the result of ${f.name} (${f.callID}) at step ${f.step}`}
-              data-edit-call={f.callID}
-              placeholder={f.placeholder.slice(0, 60)}
-              value={draftOf(f)?.toolResult ?? ""}
-              onChange={(e) => set(f, e.target.value)}
-            />
-          </label>
+            field={f}
+            value={draftOf(f)?.toolResult}
+            onChange={(v) => set(f, v)}
+          />
         ) : (
           <label key={`${f.step}:reply`} className="block space-y-1 text-xs">
             <span className="text-faint">step {f.step} · reply</span>
@@ -672,6 +664,81 @@ export function TranscriptEdits({
           </label>
         )
       )}
+    </div>
+  )
+}
+
+/** utf8Bytes is a text's size on the wire. */
+function utf8Bytes(s: string): number {
+  return new TextEncoder().encode(s).length
+}
+
+/** ResultField is one kept tool result's editor (UX-C-25): labelled by
+ * its call — the tool with its arguments and the call id, so parallel
+ * calls of one tool read apart — a textarea sized to the text (a
+ * multi-KB result is not a one-line input), "start from recorded" to
+ * edit the recorded text rather than retype it, "reset to recorded" to
+ * drop the edit, and a size line. Its selector is step + call id
+ * (UX-C-24: call ids repeat across steps). An empty value is no edit. */
+function ResultField({
+  field: f,
+  value,
+  onChange,
+}: {
+  field: EditField
+  value: string | undefined
+  onChange: (v: string) => void
+}) {
+  const recorded = f.placeholder
+  const shown = value ?? ""
+  const lines = (shown || recorded).split("\n").length
+  return (
+    <div
+      className="space-y-1 text-xs"
+      data-edit-field={`${f.step}:${f.callID}`}
+    >
+      <label className="block space-y-1">
+        <span className="block text-faint">
+          step {f.step} ·{" "}
+          <span className="font-mono">{callLabel(f.name, f.args)}</span> ·{" "}
+          <span className="font-mono">{f.callID}</span> →
+        </span>
+        <textarea
+          rows={Math.min(8, Math.max(2, lines))}
+          className="w-full rounded border bg-transparent px-2 py-1 font-mono"
+          aria-label={`edit the result of ${f.name} (${f.callID}) at step ${f.step}`}
+          data-edit-step={f.step}
+          data-edit-call={f.callID}
+          placeholder={recorded.slice(0, 200)}
+          value={shown}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      </label>
+      <div className="flex flex-wrap items-center gap-2 text-[11px] text-faint">
+        <span data-edit-size>
+          recorded {bytes(utf8Bytes(recorded))}
+          {value ? ` · edited ${bytes(utf8Bytes(value))}` : ""}
+        </span>
+        {value ? (
+          <button
+            type="button"
+            className="hover:underline"
+            data-edit-reset
+            onClick={() => onChange("")}
+          >
+            reset to recorded
+          </button>
+        ) : recorded ? (
+          <button
+            type="button"
+            className="hover:underline"
+            data-edit-from-recorded
+            onClick={() => onChange(recorded)}
+          >
+            start from recorded
+          </button>
+        ) : null}
+      </div>
     </div>
   )
 }

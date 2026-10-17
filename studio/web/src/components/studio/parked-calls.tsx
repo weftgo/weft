@@ -15,7 +15,7 @@
 // running app turn sits beside (AppSteer). Cancel is never offered on
 // an app turn: the runtime refuses it.
 import { BREAKPOINT } from "@/lib/cards"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 
@@ -39,6 +39,7 @@ import {
   POOL_CHILD,
   POOL_CHILD_TURN,
   poolParent,
+  refusalHead,
   refusalLine,
   refusalWords,
   SUBAGENT_CALL,
@@ -378,9 +379,20 @@ export function ParkedCalls({
     failed && !read && !refused && (kind === "decide" || kind === "read-only")
   const deciding =
     kind === "decide" && mayAct && !refused && !checking && !unread
-  const line = refusalLine(
-    refusalWords(kind, doc, runtimes, read, refused, read ? "" : rtErr, facts)
+  const why = refusalWords(
+    kind,
+    doc,
+    runtimes,
+    read,
+    refused,
+    read ? "" : rtErr,
+    facts
   )
+  const line = refusalLine(why)
+  // The refusal is said once under the calls (UX-A-36): each refused
+  // verb carries its head as a tooltip and points at that line.
+  const head = refusalHead(why)
+  const lineID = useId()
   const shown = checking && !refused ? "checking" : unread ? "unread" : kind
   return (
     <div
@@ -432,12 +444,12 @@ export function ParkedCalls({
                     key={v}
                     type="button"
                     disabled
-                    title={line}
+                    title={head}
+                    aria-describedby={lineID}
                     className="text-faint opacity-50"
                     data-refused="app-owned"
                   >
                     {v}
-                    <span className="sr-only"> — {line}</span>
                   </button>
                 ))}
               </div>
@@ -465,7 +477,7 @@ export function ParkedCalls({
         </p>
       ) : shown === "child" && doc.parent_run_id ? (
         // lib/honesty.ts's words, the parent id a link to its turn.
-        <p className="mt-1 text-status-int" data-app-owned="child">
+        <p id={lineID} className="mt-1 text-status-int" data-app-owned="child">
           {`${SUBAGENT_CALL} `}
           <Link
             {...runLink(doc.parent_run_id)}
@@ -478,7 +490,11 @@ export function ParkedCalls({
       ) : shown === "pool-child" && poolParent(doc) ? (
         // ADR 0022 §7: the request is mirrored onto the parent session
         // (weft.session.parent); the delegating turn too when known.
-        <p className="mt-1 text-status-int" data-app-owned="pool-child">
+        <p
+          id={lineID}
+          className="mt-1 text-status-int"
+          data-app-owned="pool-child"
+        >
           {`${POOL_CHILD} `}
           <Link
             {...sessionLink(poolParent(doc))}
@@ -502,6 +518,7 @@ export function ParkedCalls({
         </p>
       ) : shown === "experiment" || deciding ? null : (
         <p
+          id={lineID}
           className="mt-1 text-status-int"
           data-app-owned={
             shown === "unread"

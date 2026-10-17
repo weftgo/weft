@@ -18,6 +18,7 @@ import { setStudioToken } from "@/lib/api"
 import { queryClient } from "@/lib/query"
 import {
   APP_LINK_FIX,
+  APP_OWNED,
   APP_RUN,
   APP_RUN_FIX,
   CAPS_UNREAD,
@@ -161,13 +162,22 @@ describe("the run page decides an app turn its service's Sessions runtime acts o
       expect(parked().querySelector("[data-app-owned]")).toBeTruthy()
     )
     expect(line()).toBe(SVC_WORDS)
-    expect(
-      [
-        ...parked().querySelectorAll<HTMLButtonElement>(
-          '[data-refused="app-owned"]'
-        ),
-      ].every((b) => b.disabled && b.title === SVC_WORDS)
-    ).toBe(true)
+    // The reason once under the calls (UX-A-36): each verb carries the
+    // short head and points at the line, never repeats it.
+    const lineEl = parked().querySelector("[data-app-owned]")!
+    const refusedVerbs = [
+      ...parked().querySelectorAll<HTMLButtonElement>(
+        '[data-refused="app-owned"]'
+      ),
+    ]
+    expect(refusedVerbs).toHaveLength(3)
+    for (const b of refusedVerbs) {
+      expect(b.disabled).toBe(true)
+      expect(b.title).toBe(APP_OWNED)
+      expect(b.textContent).not.toContain(SVC_WORDS)
+      expect(b.getAttribute("aria-describedby")).toBe(lineEl.id)
+    }
+    expect(parked().textContent.split(SVC_WORDS)).toHaveLength(2)
   })
 
   it("steer on the running app turn posts its run id; a steer that missed its turn is said verbatim", async () => {

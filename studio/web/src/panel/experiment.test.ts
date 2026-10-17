@@ -181,7 +181,7 @@ describe("the result pane follows the command to its run", () => {
     )
     expect(FakeEventSource.live("run=pg_a")).toHaveLength(0)
     expect($(el, ".weft-xres a")?.getAttribute("href")).toBe(
-      "http://studio.test/studio/playground#run=pg_b"
+      "http://studio.test/studio/runs/pg_b?save=test"
     )
     // The controls are the last run's own pending set — call_b, never
     // the first leg's call_a.

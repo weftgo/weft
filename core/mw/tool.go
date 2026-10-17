@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/weftgo/weft/core"
+	"github.com/weftgo/weft/core/internal/contentflag"
 )
 
 // Allow gates every tool call on a predicate over its core.Call. A
@@ -37,7 +38,11 @@ func Allow(permit func(core.Call) bool) core.ToolMiddleware {
 // Audit logs one line per tool call at Info level on the given logger
 // (slog.Default when nil): run, step, call id, tool, duration, and the
 // outcome — the model-visible error text, plus the internal cause when
-// the error is a *core.ToolError with one. It changes nothing.
+// the error is a *core.ToolError with one. Under the running agent's
+// core.Content(false) neither text is logged — a bridged line
+// (otel.Slog) would store it on a content-on destination — only
+// err_bytes, the error text's length, and a *core.ToolError's code. It
+// changes nothing.
 func Audit(l *slog.Logger) core.ToolMiddleware {
 	return func(next core.ToolCaller) core.ToolCaller {
 		return func(ctx context.Context, call core.ToolCallPart) (string, error) {
@@ -60,6 +65,12 @@ func Audit(l *slog.Logger) core.ToolMiddleware {
 				attrs = append(attrs, "result_bytes", len(out))
 			case errors.Is(err, core.ErrApprovalRequired):
 				attrs = append(attrs, "pending", true)
+			case contentflag.Off(ctx):
+				attrs = append(attrs, "err_bytes", len(err.Error()))
+				var te *core.ToolError
+				if errors.As(err, &te) && te.Code != "" {
+					attrs = append(attrs, "code", te.Code)
+				}
 			default:
 				attrs = append(attrs, "err", err.Error())
 				var te *core.ToolError

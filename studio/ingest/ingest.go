@@ -73,6 +73,20 @@ func Logs(db obsdb.DB, hub obsdb.Hub, authorized func(*http.Request) bool) http.
 	}
 }
 
+// maxEcho is how many bytes of a request header value a refusal echoes
+// (its body, its server log line, meta's ingest.last_error): a client's
+// header is not ours to keep whole.
+const maxEcho = 64
+
+// capEcho cuts s to maxEcho bytes, marking the cut with "…" (the error
+// body's quoter makes a split rune valid JSON).
+func capEcho(s string) string {
+	if len(s) <= maxEcho {
+		return s
+	}
+	return s[:maxEcho] + "…"
+}
+
 // decode reads the request body and unmarshals it into msg as
 // protobuf or JSON per the Content-Type. The limit is 16 MiB after
 // decompression (S4.4): a gzip stream is capped past the gunzip, the
@@ -102,7 +116,7 @@ func decode(w http.ResponseWriter, r *http.Request, msg proto.Message) bool {
 		body = io.LimitReader(zr, MaxBody+1)
 	default:
 		writeIngestError(w, r, http.StatusUnsupportedMediaType, "unsupported",
-			"Content-Encoding "+enc+" is not supported (identity or gzip)")
+			"Content-Encoding "+capEcho(enc)+" is not supported (identity or gzip)")
 		return false
 	}
 	b, err := io.ReadAll(body)

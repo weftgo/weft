@@ -369,6 +369,27 @@ func TestTokenNotRequired(t *testing.T) {
 	}
 }
 
+// TestIngestRefusalWindow: a refused batch warns while the last refusal
+// is within the hour; an older one reads ok, its line still printed.
+func TestIngestRefusalWindow(t *testing.T) {
+	for _, c := range []struct {
+		ago  time.Duration
+		want string
+	}{{2 * time.Minute, "warn ingest    "}, {2 * time.Hour, "ok   ingest    "}} {
+		at := time.Now().Add(-c.ago).UTC().Format(time.RFC3339)
+		ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			_, _ = io.WriteString(w, `{"auth_required":true,"weft_version":"v","studio_version":"s","panel_version":"s",`+
+				`"db":{"kind":"sqlite"},"content":{"ingest":"as_received"},`+
+				`"ingest":{"dropped":[],"accepted":7,"refused":1,"last_error":"401 unauthorized: no token","last_at":"`+at+`"}}`)
+		}))
+		out, _ := run(t, ts.URL, tok, env(nil))
+		ts.Close()
+		if !strings.Contains(out, c.want+"7 OTLP batches accepted, 1 refused") || !strings.Contains(out, "- last refused at "+at) {
+			t.Errorf("last refusal %s ago: want %q\n%s", c.ago, c.want, out)
+		}
+	}
+}
+
 // TestControlCharactersStripped: what the doctor prints comes from
 // Studio — a service name an OTLP sender chose among it — and a control
 // character in it never reaches the terminal raw.

@@ -17,6 +17,8 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/weftgo/weft/core/internal/contentflag"
+
 	"go.opentelemetry.io/otel/attribute"
 )
 
@@ -138,6 +140,12 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		panics:       &a.tapPanics,
 	}
 	ctx, endRunSpan := a.obs.run(ctx, cfg.id, a.name, InfoOf(model), runExtra, &records)
+	// Content(false) rides the run's context for mw.Audit (the error
+	// text it would log is content); a child run of another choice lifts
+	// its parent's mark. Nothing is added when neither applies.
+	if off := a.content != nil && !*a.content; off || contentflag.Off(ctx) {
+		ctx = contentflag.With(ctx, off)
+	}
 	// An Output agent's run says whether it ended with a valid
 	// submission (weft.output.submitted, UX-S1-06): GenerateAs's
 	// ErrNoOutput is the caller's, the span says it happened.
@@ -1159,7 +1167,7 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 			// and a child run's invoke_agent hangs under it — ended with
 			// the call's outcome, before ToolFinish is emitted so no span
 			// operation runs under emitMu (ADR 0016).
-			callCtx, endTool := a.obs.tool(callCtx, c, startSeq, toolStartFacts{timeout: a.callTimeout(def), queue: queue})
+			callCtx, endTool := a.obs.tool(callCtx, c, startSeq, toolStartFacts{timeout: a.callTimeout(def), queue: queue, contentOff: a.content != nil && !*a.content})
 			var retry bool
 			var callErr error
 			var cut int

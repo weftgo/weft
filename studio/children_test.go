@@ -3,6 +3,7 @@ package studio
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,6 +61,47 @@ func TestChildrenCountKnown(t *testing.T) {
 	r := page.Runs[0]
 	if r.ChildrenUnknown == nil || !*r.ChildrenUnknown || r.ChildrenCount != nil || r.ChildrenFailed != nil {
 		t.Errorf("failing: row = %s, want children_unknown true and no count", body)
+	}
+}
+
+// TestChildrenPrimeCapped: past the coster's child-row bound the page's
+// trees are not read further, nor run by run: the capped runs' counts
+// read children_unknown and their parent's delegated cost not known.
+func TestChildrenPrimeCapped(t *testing.T) {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	prev := primeChildCap
+	primeChildCap = 2
+	t.Cleanup(func() { primeChildCap = prev })
+	at := time.Now().Add(-time.Hour)
+	seedAt(t, db, "p", "", "", at, true)
+	seedAt(t, db, "p/0/c1", "", "p", at.Add(time.Second), true)
+	seedAt(t, db, "p/0/c1/0/g1", "", "p/0/c1", at.Add(2*time.Second), true)
+	seedAt(t, db, "p/0/c1/0/g2", "", "p/0/c1", at.Add(3*time.Second), true)
+	seedAt(t, db, "p/0/c1/0/g3", "", "p/0/c1", at.Add(4*time.Second), true)
+
+	var page struct {
+		Runs []struct {
+			ID                 string `json:"id"`
+			ChildrenCount      *int   `json:"children_count"`
+			ChildrenUnknown    *bool  `json:"children_unknown"`
+			DelegatedCostKnown bool   `json:"delegated_cost_known"`
+			DelegatedReason    string `json:"delegated_cost_reason"`
+		}
+	}
+	_, _, body := get(t, Handler(DB(db)), "/studio/api/runs")
+	decode(t, body, &page)
+	if len(page.Runs) != 1 {
+		t.Fatalf("runs = %s", body)
+	}
+	r := page.Runs[0]
+	// p's one child was read (1 ≤ 2); c1's three were past the bound.
+	if r.ChildrenCount == nil || *r.ChildrenCount != 1 || r.ChildrenUnknown != nil || r.DelegatedCostKnown ||
+		!strings.Contains(r.DelegatedReason, "past the 10000 child runs") {
+		t.Errorf("row = %s, want p's one child counted, its delegated cost not known past the cap", body)
 	}
 }
 

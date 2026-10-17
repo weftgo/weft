@@ -313,3 +313,44 @@ func TestTracesPanelScope(t *testing.T) {
 		t.Errorf("server token: %d %s", code, body)
 	}
 }
+
+// TestTracesRootPastPage: a trace of more runs than one runs page (500)
+// still names its root (read by id, not as the oldest of a newest-first
+// page) and counts every failed descendant.
+func TestTracesRootPastPage(t *testing.T) {
+	srv := New(Open(t.TempDir() + "/big.db"))
+	t.Cleanup(func() { _ = srv.Close() })
+	const trace = "5e000000000000000000000000000005"
+	spans := []obsdb.Span{tlSpan(trace, "5e00000000000001", "", "invoke_agent orders", "studio-test", 0, time.Hour, 1, tlWeft("big", "pub_a", "invoke_agent", nil))}
+	for i := range 600 {
+		status := 1
+		if i%200 == 7 {
+			status = 2 // three failed children
+		}
+		run := fmt.Sprintf("big/0/c%03d", i)
+		spans = append(spans, tlSpan(trace, fmt.Sprintf("5e1%013x", i), "5e00000000000001", "invoke_agent researcher", "studio-test",
+			time.Duration(i+1)*time.Second, time.Duration(i+2)*time.Second, status,
+			tlWeft(run, "pub_a", "invoke_agent", map[string]any{"weft.parent.run.id": "big", "weft.parent.call.id": fmt.Sprintf("c%03d", i)})))
+	}
+	if err := srv.db.Write(context.Background(), obsdb.Batch{Spans: spans}); err != nil {
+		t.Fatal(err)
+	}
+	code, _, body := get(t, srv.Handler(), "/studio/api/traces")
+	if code != http.StatusOK {
+		t.Fatalf("%d %s", code, body)
+	}
+	var doc struct {
+		Traces []struct {
+			RootRun *struct {
+				ID string `json:"id"`
+			} `json:"root_run"`
+			FailedRuns int  `json:"failed_runs"`
+			Capped     bool `json:"failed_runs_capped"`
+		} `json:"traces"`
+	}
+	decode(t, body, &doc)
+	if len(doc.Traces) != 1 || doc.Traces[0].RootRun == nil || doc.Traces[0].RootRun.ID != "big" ||
+		doc.Traces[0].FailedRuns != 3 || doc.Traces[0].Capped {
+		t.Errorf("trace row = %.600s", body)
+	}
+}

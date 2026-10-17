@@ -193,15 +193,19 @@ func runWhere(q obsdb.RunQuery, now time.Time) (string, []any) {
 		args = append(args, q.ErrorType)
 	}
 	if q.IDPrefix != "" {
-		// A prefix by substr (no LIKE wildcard, no case folding); the
-		// bounds close the range the planner scans on the primary key:
+		// A prefix as a byte range (no LIKE wildcard, no case folding):
 		// every id with the prefix sorts at or after it and before its
-		// successor (BINARY collation compares bytes).
-		conds = append(conds, "run_id >= ? AND substr(run_id, 1, length(?)) = ?")
-		args = append(args, q.IDPrefix, q.IDPrefix, q.IDPrefix)
+		// successor (BINARY collation compares bytes), the range the
+		// planner scans on the primary key. substr / length count
+		// characters, not bytes, so a prefix ending inside a UTF-8
+		// sequence would miss; a prefix of 0xFF bytes alone (no
+		// successor) compares the id's leading bytes as a blob.
 		if hi, ok := prefixEnd(q.IDPrefix); ok {
-			conds = append(conds, "run_id < ?")
-			args = append(args, hi)
+			conds = append(conds, "run_id >= ? AND run_id < ?")
+			args = append(args, q.IDPrefix, hi)
+		} else {
+			conds = append(conds, "run_id >= ? AND substr(CAST(run_id AS BLOB), 1, ?) = CAST(? AS BLOB)")
+			args = append(args, q.IDPrefix, len(q.IDPrefix), q.IDPrefix)
 		}
 	}
 	if q.StoppedBy != "" {
@@ -665,9 +669,9 @@ const runSpansWhere = `run_id = ? AND run_id <> '' ORDER BY start_ns, span_id`
 //     down runs.parent_run_id (runs_started, 0014: parent_run_id leads
 //     it) from the run, with the ids core's id rule names its
 //     descendants (?2 < run_id < ?3: the run's id + "/" and + "0", the
-//     byte after "/"; runs' primary key — a superset: obsdb.TreeMembers
-//     keeps the ids of core's child shape, obsdb.TreeChildID, whose row
-//     names no parent) — in RunRow order, each row
+//     byte after "/"; runs' primary key — a superset: treeRows keeps
+//     the rows of it that name no parent only in core's child shape,
+//     obsdb.TreeChildID) — in RunRow order, each row
 //     looked up by key (CROSS JOIN keeps the walk outermost: without
 //     it sqlite scans runs in started order to skip the sort);
 //   - treeSpansSQL: the members' spans by run id (spans_run, its
@@ -685,7 +689,7 @@ const (
 	)
 	SELECT r.run_id, r.parent_run_id, r.public_id, r.started_ns, r.failed, r.finished_ok, r.root_ended, r.last_seen_ns
 	FROM tree AS t CROSS JOIN runs AS r ON r.run_id = t.id
-	ORDER BY r.started_ns, r.run_id`
+	ORDER BY r.started_ns, r.run_id LIMIT ?4`
 	treeSpansSQL = `SELECT ` + spanColumns + ` FROM spans
 	WHERE run_id IN (SELECT value FROM json_each(?)) AND run_id <> '' ORDER BY start_ns, span_id LIMIT ?`
 )
@@ -722,6 +726,8 @@ func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTr
 	if err != nil {
 		return obsdb.RunTree{}, err
 	}
+	rowsCut := len(rows) > obsdb.TreeRowCap
+	rows = rows[:min(len(rows), obsdb.TreeRowCap)]
 	parents := make(map[string]string, len(rows))
 	for _, r := range rows {
 		parents[r.ID] = r.ParentRunID
@@ -739,7 +745,7 @@ func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTr
 	if err := scanSpans(rs, nil, func(s obsdb.Span) { spans = append(spans, s) }); err != nil {
 		return obsdb.RunTree{}, err
 	}
-	return obsdb.CapTree(spans, len(spans) > obsdb.TreeSpanCap, q, parents, rows), nil
+	return obsdb.CapTree(spans, rowsCut || len(spans) > obsdb.TreeSpanCap, q, parents, rows), nil
 }
 
 // stockTreeWhere is a derived run's tree read: its trace in start
@@ -747,9 +753,10 @@ func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTr
 // holds more: RunTree.TraceTruncated), on the primary key.
 var stockTreeWhere = fmt.Sprintf(`trace_id = ? ORDER BY start_ns, span_id LIMIT %d`, obsdb.TreeTraceCap+1)
 
-// treeRows is treeRowsSQL for runID.
+// treeRows is treeRowsSQL for runID: at most obsdb.TreeRowCap rows and
+// one more (the caller cuts the tree there, Truncated).
 func (d *DB) treeRows(ctx context.Context, runID string) ([]obsdb.TreeRun, error) {
-	rs, err := d.reads.QueryContext(ctx, treeRowsSQL, runID, runID+"/", runID+"0")
+	rs, err := d.reads.QueryContext(ctx, treeRowsSQL, runID, runID+"/", runID+"0", obsdb.TreeRowCap+1)
 	if err != nil {
 		return nil, err
 	}
@@ -762,6 +769,13 @@ func (d *DB) treeRows(ctx context.Context, runID string) ([]obsdb.TreeRun, error
 		var failed, finished, rootEnded bool
 		if err := rs.Scan(&r.ID, &r.ParentRunID, &r.PublicID, &started, &failed, &finished, &rootEnded, &seen); err != nil {
 			return nil, err
+		}
+		// The id range is a superset: a row it found that names no
+		// parent is kept only in core's child shape (obsdb.TreeChildID),
+		// the rows ClickHouse's treeIDCondition reads — so both backends
+		// hand obsdb.TreeMembers the same runs.
+		if r.ID != runID && r.ParentRunID == "" && !obsdb.TreeChildID(runID, r.ID) {
+			continue
 		}
 		r.Started = timeOf(started)
 		r.Status = obsdb.DeriveStatus(failed, finished || rootEnded, timeOf(seen), now)
@@ -776,7 +790,9 @@ const childChunk = 500
 
 // ChildRuns is obsdb.TreeReader's: the parents' children in one
 // statement per childChunk ids, `parent_run_id IN (…)` on runs_started
-// (0014: parent_run_id leads it), grouped in Go.
+// (0014: parent_run_id leads it), grouped in Go; each statement reads
+// at most what is left of obsdb.ChildRunsCap and one more, the one more
+// answering obsdb.ErrChildRunsCapped.
 func (d *DB) ChildRuns(ctx context.Context, parentIDs []string) (_ map[string][]obsdb.RunRow, err error) {
 	if err := d.checkOpen(); err != nil {
 		return nil, err
@@ -784,16 +800,22 @@ func (d *DB) ChildRuns(ctx context.Context, parentIDs []string) (_ map[string][]
 	defer d.closedErr(&err)
 	out := map[string][]obsdb.RunRow{}
 	now := time.Now()
+	left := obsdb.ChildRunsCap
 	for start := 0; start < len(parentIDs); start += childChunk {
 		ids := parentIDs[start:min(start+childChunk, len(parentIDs))]
-		args := make([]any, len(ids))
+		args := make([]any, len(ids), len(ids)+1)
 		for i, id := range ids {
 			args[i] = id
 		}
-		rows, err := d.queryRunRows(ctx, childRunsWhere(len(ids)), args, now)
+		args = append(args, left+1)
+		rows, err := d.queryRunRows(ctx, childRunsWhere(len(ids))+` LIMIT ?`, args, now)
 		if err != nil {
 			return nil, err
 		}
+		if len(rows) > left {
+			return nil, obsdb.ErrChildRunsCapped
+		}
+		left -= len(rows)
 		for _, r := range rows {
 			out[r.ParentRunID] = append(out[r.ParentRunID], r)
 		}

@@ -261,11 +261,16 @@ func (p *printer) content(m meta) {
 	}
 }
 
+// refusalWindow is how recent the last refused batch must be for the
+// ingest line to warn.
+const refusalWindow = time.Hour
+
 // ingest prints the ingest health: the OTLP batches this Studio
 // accepted and refused (and the last refusal), then the services whose
 // heartbeats said their destination lost records on the way
 // (weft.records.dropped). A warning, not a failure: the runs say which
 // of theirs are missing (the gap badge, "N of M events were lost").
+// Refusals warn only within refusalWindow of the last one.
 func (p *printer) ingest(m meta) {
 	if m.Ingest == nil {
 		p.line(ok, "ingest", "not served (no ingest.dropped): a studio older than ingest health, or a panel token — it is the dev token's")
@@ -276,6 +281,13 @@ func (p *printer) ingest(m meta) {
 	refused := in.Refused != nil && *in.Refused > 0
 	if in.Accepted != nil && in.Refused != nil {
 		counts = fmt.Sprintf("%d OTLP batches accepted, %d refused; ", *in.Accepted, *in.Refused)
+	}
+	// A refusal warns while it is recent: the last one within the hour
+	// (refusalWindow), or one with no time said. The counts are since
+	// Studio started, so one refused batch long ago reads ok, its line
+	// still printed below.
+	if refused && in.LastAt != nil && time.Since(*in.LastAt) > refusalWindow {
+		refused = false
 	}
 	status := ok
 	if refused || len(in.Dropped) > 0 {

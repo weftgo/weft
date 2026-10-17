@@ -217,6 +217,20 @@ func runTree(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if jt, err := tr.RunTreeSpans(ctx(), obsdb.TreeQuery{RunID: "tree_job/1"}); err != nil || len(jt.Spans) != 1 || jt.Spans[0].RunID != "tree_job/1" || jt.MissingCount != 0 {
 			t.Errorf("RunTreeSpans(tree_job/1) = %v, missing %d, %v; want its own span alone", keys(jt.Spans), jt.MissingCount, err)
 		}
+		// A parent counts only when it is a member: under tree_j, the
+		// app's own "tree_j/1" (not of core's shape) is no member, so
+		// "tree_j/1/0/c" — core's shape under tree_j — is tree_j's
+		// child on every backend, never an orphan under tree_j/1.
+		if err := db.Write(ctx(), obsdb.Batch{Spans: []obsdb.Span{
+			job("tree_j", "0e00000000000011", 10), job("tree_j/1", "0e00000000000012", 11), job("tree_j/1/0/c", "0e00000000000013", 12),
+		}}); err != nil {
+			t.Fatal(err)
+		}
+		jt, err := tr.RunTreeSpans(ctx(), obsdb.TreeQuery{RunID: "tree_j"})
+		if want := []key{{"tree_j", "0e00000000000011", ""}, {"tree_j/1/0/c", "0e00000000000013", "tree_j"}}; err != nil ||
+			!slices.Equal(keys(jt.Spans), want) || jt.MissingCount != 0 {
+			t.Errorf("RunTreeSpans(tree_j) = %v, missing %d, %v; want %v", keys(jt.Spans), jt.MissingCount, err, want)
+		}
 
 		// A derived run late in a large trace (U9.1-fix2): the subtree is
 		// cut from the trace before the cap, so 10,005 earlier spans of
@@ -325,6 +339,27 @@ func runTree(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		}
 		if none, err := tr.ChildRuns(ctx(), nil); err != nil || len(none) != 0 {
 			t.Errorf("ChildRuns(nil) = %v, %v; want empty", none, err)
+		}
+
+		// Past the caps: a run of obsdb.ChildRunsCap + 1 children answers
+		// ErrChildRunsCapped from ChildRuns (never a part), and its tree
+		// past obsdb.TreeRowCap rows is cut and says so.
+		const wide = "tree_wide"
+		wideRecs := []obsdb.Record{start(wide, "")}
+		for i := range max(obsdb.ChildRunsCap, obsdb.TreeRowCap) + 1 {
+			wideRecs = append(wideRecs, start(fmt.Sprintf("%s/0/c%05d", wide, i), wide))
+		}
+		if err := db.Write(ctx(), obsdb.Batch{Records: wideRecs}); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := tr.ChildRuns(ctx(), []string{wide}); !errors.Is(err, obsdb.ErrChildRunsCapped) || got != nil {
+			t.Errorf("ChildRuns(wide) = %d parents, %v; want ErrChildRunsCapped", len(got), err)
+		}
+		if got, err := tr.ChildRuns(ctx(), []string{director}); err != nil || len(got[director]) != 1 {
+			t.Errorf("ChildRuns(director) beside a wide run = %v, %v", got, err)
+		}
+		if wt, err := tr.RunTreeSpans(ctx(), obsdb.TreeQuery{RunID: wide}); err != nil || !wt.Truncated || wt.MissingCount != 0 {
+			t.Errorf("RunTreeSpans(wide) = truncated %v, missing %d, %v; want truncated, no missing", wt.Truncated, wt.MissingCount, err)
 		}
 
 		dead, cancel := context.WithCancel(ctx())

@@ -72,7 +72,7 @@ describe("attempt frames", () => {
   })
 
   it("word a failed try as retrying while the run runs, past tense once it ended", () => {
-    const n = attemptNote(att({ wait_ms: 4000 }), true)!
+    const n = attemptNote(att({ retry_after_ms: 4000 }), true)!
     expect(n.text).toBe("↻ attempt 1 failed")
     expect(n.retrying).toBe(true)
     expect(n.title).toContain("step 1 attempt 1 failed (rate_limited)")

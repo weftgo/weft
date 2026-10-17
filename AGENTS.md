@@ -276,7 +276,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    a; from the run header, the replay drawer, the playground) and the panel's 2-way result
 //    //    pane, parity.test.ts holding both to the same rows), traces (the trace list: each
 //    //    trace's root {span_id, name} — null + badge gap when only child spans arrived — service,
-//    //    start/end/duration_ms, span_count, error, run_ids (the join key), root_run {id, agent, prompt_preview, status} (the first id without "/") and failed_runs (among it and its core children); since/until (RFC 3339, on
+//    //    start/end/duration_ms, span_count, error, run_ids (the join key), root_run {id, agent, prompt_preview, status} (the first id without "/") and failed_runs (among it and its core children; failed_runs_capped when that count stopped at 500 — a floor; the root read by its id); since/until (RFC 3339, on
 //    //    its earliest span)/service (exact, any span)/public_id, paged as runs; a panel token lists
 //    //    the traces every span of which is its public id's; capability "traces" — obsdb.DB.Traces,
 //    //    the since window narrowed on SQLite's spans_start, migration 0019), traces/{id},
@@ -287,7 +287,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    sessions/{id} (capability "delete": a run with its subagent children, or a session's runs —
 //    //    rows, records, search index, spans, app logs — from obsdb's tables only, the app's
 //    //    conversation store and a shared file's thread tables untouched; the dev token or setup A's
-//    //    loopback Host, every panel token 403; obsdb.DB.DeleteRun/DeleteSession/Sweep/Vacuum; stored manifests stay), /api/live (SSE; kinds event|delta|messages|run|attempt — attempt (H9, O17) a live-only frame from each `attempt` span as it lands {run_id, step, attempt, layer, status, error_type, wait_ms (the provider's retry-after)}, never backfilled; ?all=1 every run, dev token/loopback only — meta live_all; its resume
+//    //    loopback Host, every panel token 403; obsdb.DB.DeleteRun/DeleteSession/Sweep/Vacuum; stored manifests stay), /api/live (SSE; kinds event|delta|messages|run|attempt — attempt (H9, O17) a live-only frame from each `attempt` span as it lands {run_id, step, attempt, layer, status, error_type, wait_ms (weft.attempt.wait_ms, the wait before the next try — the step route's), retry_after_ms (the provider's ask)}, never backfilled; ?all=1 every run, dev token/loopback only — meta live_all; its resume
 //    //    backfills the last hour / running runs, ≤ 500 — obsdb.RunQuery.LastSeenAfter), /api/panel-tokens (with a Token), /api/panel-handoff?to= (setup C hand-off, capability handoff, with a Token only:
 //    //    a playground panel token → 303 <base><to>#token= with a 5-minute read token for its public id (capped at its own exp;
 //    //    Accept: application/json → {location, exp}); the server token → 303 with no fragment; a read token 403, it cannot widen;

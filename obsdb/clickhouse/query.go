@@ -837,7 +837,7 @@ func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTr
 		tree.TraceTruncated = cut
 		return tree, nil
 	}
-	rows, err := d.treeRunRows(ctx, treeIDRows, treeIDArgs(runID)...)
+	rows, err := d.treeRunRows(ctx, treeIDRows+treeRowLimit, append(treeIDArgs(runID), obsdb.TreeRowCap+1)...)
 	if err != nil {
 		return obsdb.RunTree{}, err
 	}
@@ -845,11 +845,13 @@ func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTr
 	for _, r := range rows {
 		parents[r.ID] = r.ParentRunID
 	}
-	level, err := d.treeRunRows(ctx, treeChildRows(treeIDCondition), treeIDArgs(runID)...)
+	level, err := d.treeRunRows(ctx, treeChildRows(treeIDCondition)+treeRowLimit, append(treeIDArgs(runID), obsdb.TreeRowCap+1)...)
 	if err != nil {
 		return obsdb.RunTree{}, err
 	}
-	for len(level) > 0 {
+	// Past obsdb.TreeRowCap rows the walk stops: the tree is cut there
+	// (Truncated), its rows the first read.
+	for len(level) > 0 && len(rows) <= obsdb.TreeRowCap {
 		var frontier []string
 		for _, r := range level {
 			if _, ok := parents[r.ID]; !ok {
@@ -861,7 +863,7 @@ func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTr
 		level = nil
 		for len(frontier) > 0 {
 			n := idChunk(frontier)
-			more, err := d.treeRunRows(ctx, treeChildRows("RunId IN ("+placeholders(n)+")"), anys(frontier[:n])...)
+			more, err := d.treeRunRows(ctx, treeChildRows("RunId IN ("+placeholders(n)+")")+treeRowLimit, append(anys(frontier[:n]), obsdb.TreeRowCap+1)...)
 			if err != nil {
 				return obsdb.RunTree{}, err
 			}
@@ -869,11 +871,18 @@ func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTr
 			frontier = frontier[n:]
 		}
 	}
+	rowsCut := len(rows) > obsdb.TreeRowCap
+	if rowsCut {
+		for _, r := range rows[obsdb.TreeRowCap:] {
+			delete(parents, r.ID)
+		}
+		rows = rows[:obsdb.TreeRowCap]
+	}
 	spans, err := d.treeSpans(ctx, q, parents, rows)
 	if err != nil {
 		return obsdb.RunTree{}, err
 	}
-	return obsdb.CapTree(spans, len(spans) > obsdb.TreeSpanCap, q, parents, rows), nil
+	return obsdb.CapTree(spans, rowsCut || len(spans) > obsdb.TreeSpanCap, q, parents, rows), nil
 }
 
 // The run tree's statements (RunTreeSpans; runspans_internal_test.go
@@ -883,6 +892,8 @@ const (
 	treeRowColumns = "SELECT RunId, max(ParentRunID), max(PublicID), min(Started) AS started, " +
 		"max(Failed), max(FinishedOK), max(RootEnded), max(LastSeen) FROM weft_runs WHERE "
 	treeRowOrder = " GROUP BY RunId ORDER BY started, RunId"
+	// treeRowLimit bounds each row read: obsdb.TreeRowCap and one more.
+	treeRowLimit = " LIMIT ?"
 	// treeIDCondition: the run and the ids the id rule names its
 	// descendants, on weft_runs' primary key (the run's id, then its
 	// id + "/"), of core's child shape (match: obsdb.TreeChildID's
@@ -1055,7 +1066,9 @@ func idChunk(ids []string) int {
 // (FINAL) narrowed by primary key to the runs some row of which names
 // one of the parents — idx_parent_run (0020) skips the granules none
 // does — one statement per idChunk of parent ids, grouped in Go; the
-// counts filled as Run's children are.
+// counts filled as Run's children are. Each statement reads at most
+// what is left of obsdb.ChildRunsCap and one more, the one more
+// answering obsdb.ErrChildRunsCapped.
 func (d *DB) ChildRuns(ctx context.Context, parentIDs []string) (_ map[string][]obsdb.RunRow, err error) {
 	if err := d.checkOpen(); err != nil {
 		return nil, err
@@ -1063,17 +1076,23 @@ func (d *DB) ChildRuns(ctx context.Context, parentIDs []string) (_ map[string][]
 	defer d.closedErr(&err)
 	out := map[string][]obsdb.RunRow{}
 	now := time.Now()
+	left := obsdb.ChildRunsCap
 	for ids := parentIDs; len(ids) > 0; {
 		n := idChunk(ids)
-		args := make([]any, 0, 2*n)
+		args := make([]any, 0, 2*n+1)
 		for _, id := range ids[:n] {
 			args = append(args, id)
 		}
 		args = append(args, args...)
-		rows, err := d.queryRunRows(ctx, now, childRunsSQL(n), args...)
+		args = append(args, left+1)
+		rows, err := d.queryRunRows(ctx, now, childRunsSQL(n)+" LIMIT ?", args...)
 		if err != nil {
 			return nil, err
 		}
+		if len(rows) > left {
+			return nil, obsdb.ErrChildRunsCapped
+		}
+		left -= len(rows)
 		if err := d.fillCounts(ctx, rowPtrs(rows)); err != nil {
 			return nil, err
 		}

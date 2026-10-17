@@ -24,7 +24,7 @@ func addLogFlags(fs *flag.FlagSet) logFlags {
 		level: fs.String("log-level", "",
 			"the server log's `level`: debug, info, warn or error (default: $WEFT_LOG_LEVEL, else info)"),
 		format: fs.String("log-format", "",
-			"the server log's `format` on stderr: text or json (default: $WEFT_LOG_FORMAT, else Go's log line)"),
+			"the server log's `format` on stderr: text or json (default: $WEFT_LOG_FORMAT; else text when a level is set, Go's log line when neither is)"),
 	}
 }
 

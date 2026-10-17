@@ -156,7 +156,11 @@ func Allow(permit func(weft.Call) bool) weft.ToolMiddleware { return coremw.Allo
 // Audit logs one line per tool call at Info level on the given logger
 // (slog.Default when nil): run, step, call id, tool, duration, and the
 // outcome — the model-visible error text, plus the internal cause when
-// the error is a *core.ToolError with one. It changes nothing.
+// the error is a *core.ToolError with one. Under the running agent's
+// core.Content(false) neither text is logged — a bridged line
+// (otel.Slog) would store it on a content-on destination — only
+// err_bytes, the error text's length, and a *core.ToolError's code. It
+// changes nothing.
 func Audit(l *slog.Logger) weft.ToolMiddleware { return coremw.Audit(l) }
 
 // MapErrors shapes handler errors centrally before the loop renders

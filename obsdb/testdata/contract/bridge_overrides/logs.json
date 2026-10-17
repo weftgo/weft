@@ -1,0 +1,1803 @@
+{
+  "resourceLogs": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "contract-app"
+            }
+          },
+          {
+            "key": "weft.version",
+            "value": {
+              "stringValue": "v0.0.0-contract"
+            }
+          }
+        ]
+      },
+      "scopeLogs": [
+        {
+          "logRecords": [
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "run_start"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.manifest.hash",
+                  "value": {
+                    "stringValue": "3a21f00000000000000000000000000000000000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.instructions.hash",
+                  "value": {
+                    "stringValue": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7"
+                  }
+                },
+                {
+                  "key": "weft.version",
+                  "value": {
+                    "stringValue": "v0.0.0-contract"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"run_start\",\"id\":\"a1100000000000000000000000000001\",\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"agent\":\"support\",\"instructions_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\"}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790846820000000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790846820000000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "messages"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.messages.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.messages.count",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.messages.input",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"Where is order 1234?\"}]}]"
+              },
+              "eventName": "weft.messages",
+              "flags": 1,
+              "observedTimeUnixNano": "1790846820001000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790846820001000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "step_start"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"step_start\",\"run_id\":\"a1100000000000000000000000000001\",\"index\":0}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790846820002000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790846820002000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "prompt"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.prompt.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.system.hash",
+                  "value": {
+                    "stringValue": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"text\":\"You are a support agent.\"}"
+              },
+              "eventName": "weft.prompt",
+              "flags": 1,
+              "observedTimeUnixNano": "1790846820003000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000002",
+              "timeUnixNano": "1790846820003000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "tools"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.tools.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.catalog.hash",
+                  "value": {
+                    "stringValue": "d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"hash\":\"d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8\",\"tools\":[{\"name\":\"lookup_order\",\"description\":\"Look up an order by ID.\",\"schema\":{\"type\":\"object\",\"properties\":{\"order_id\":{\"type\":\"string\",\"description\":\"the order to look up\"}},\"required\":[\"order_id\"]},\"timeout_ms\":0,\"approval\":false,\"replay\":\"never\",\"max_result_bytes\":65536,\"sequential\":false,\"source\":\"local\"}]}"
+              },
+              "eventName": "weft.tools",
+              "flags": 1,
+              "observedTimeUnixNano": "1790846820004000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000002",
+              "timeUnixNano": "1790846820004000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "request"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.request.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.attempt.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.system.hash",
+                  "value": {
+                    "stringValue": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7"
+                  }
+                },
+                {
+                  "key": "weft.catalog.hash",
+                  "value": {
+                    "stringValue": "d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"step\":0,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"index\":0,\"count\":1},\"tools\":{\"catalog_hash\":\"d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8\",\"names\":[\"lookup_order\"]},\"tool_choice\":{\"mode\":\"any\"},\"sequential_tools\":false,\"params\":{\"temperature\":0.4},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+              },
+              "eventName": "weft.request",
+              "flags": 1,
+              "observedTimeUnixNano": "1790846820005000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000002",
+              "timeUnixNano": "1790846820005000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "messages"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.messages.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.messages.count",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_call\",\"id\":\"call_1\",\"name\":\"lookup_order\",\"args\":{\"order_id\":\"1234\"}}]}]"
+              },
+              "eventName": "weft.messages",
+              "flags": 1,
+              "observedTimeUnixNano": "1790846820006000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790846820006000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "tool_start"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_1"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "lookup_order"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"tool_start\",\"run_id\":\"a1100000000000000000000000000001\",\"seq\":1,\"call_id\":\"call_1\",\"name\":\"lookup_order\",\"args\":{\"order_id\":\"1234\"}}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790846820007000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790846820007000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "tool_finish"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "3"
+                  }
+                },
+                {
+                  "key": "weft.tool.seq",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.call.id",
+                  "value": {
+                    "stringValue": "call_1"
+                  }
+                },
+                {
+                  "key": "gen_ai.tool.name",
+                  "value": {
+                    "stringValue": "lookup_order"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"tool_finish\",\"run_id\":\"a1100000000000000000000000000001\",\"seq\":2,\"call_id\":\"call_1\",\"name\":\"lookup_order\",\"content\":\"order 1234: shipped\",\"is_error\":false}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790846820008000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790846820008000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "messages"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.messages.index",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "weft.messages.count",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "[{\"role\":\"tool\",\"content\":[{\"type\":\"tool_result\",\"call_id\":\"call_1\",\"name\":\"lookup_order\",\"content\":\"order 1234: shipped\",\"is_error\":false}]}]"
+              },
+              "eventName": "weft.messages",
+              "flags": 1,
+              "observedTimeUnixNano": "1790846820009000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790846820009000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "step_finish"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "4"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "weft.latency_ms",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"step_finish\",\"run_id\":\"a1100000000000000000000000000001\",\"index\":0,\"reason\":\"tool_calls\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"latency_ms\":1}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790846820010000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790846820010000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "step_start"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "5"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"step_start\",\"run_id\":\"a1100000000000000000000000000001\",\"index\":1}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790846820011000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790846820011000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "request"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.request.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.attempt.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.system.hash",
+                  "value": {
+                    "stringValue": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7"
+                  }
+                },
+                {
+                  "key": "weft.catalog.hash",
+                  "value": {
+                    "stringValue": "d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"step\":1,\"attempt\":1,\"system_hash\":\"57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7\",\"messages_ref\":{\"index\":2,\"count\":3},\"tools\":{\"catalog_hash\":\"d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8\",\"names\":[\"lookup_order\"]},\"tool_choice\":{\"mode\":\"any\"},\"sequential_tools\":false,\"params\":{\"temperature\":0.4},\"model\":{\"provider\":\"wefttest\",\"name\":\"script\"},\"stream\":true}"
+              },
+              "eventName": "weft.request",
+              "flags": 1,
+              "observedTimeUnixNano": "1790846820012000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000004",
+              "timeUnixNano": "1790846820012000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "delta"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "text_delta"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "weft.delta.pos",
+                  "value": {
+                    "intValue": "0"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"text_delta\",\"run_id\":\"a1100000000000000000000000000001\",\"text\":\"Order 1234 has shipped.\"}"
+              },
+              "eventName": "weft.delta",
+              "flags": 1,
+              "observedTimeUnixNano": "1790846820013000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790846820013000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "messages"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.messages.index",
+                  "value": {
+                    "intValue": "3"
+                  }
+                },
+                {
+                  "key": "weft.messages.count",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "[{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Order 1234 has shipped.\"}]}]"
+              },
+              "eventName": "weft.messages",
+              "flags": 1,
+              "observedTimeUnixNano": "1790846820014000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790846820014000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "step_finish"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "6"
+                  }
+                },
+                {
+                  "key": "weft.step.index",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.latency_ms",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "weft.ttft_ms",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "gen_ai.response.model",
+                  "value": {
+                    "stringValue": "script"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"step_finish\",\"run_id\":\"a1100000000000000000000000000001\",\"index\":1,\"reason\":\"stop\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5},\"latency_ms\":1,\"ttft_ms\":1}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790846820015000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790846820015000000",
+              "traceId": "7ace0000000000000000000000000001"
+            },
+            {
+              "attributes": [
+                {
+                  "key": "weft.record",
+                  "value": {
+                    "stringValue": "event"
+                  }
+                },
+                {
+                  "key": "weft.run.id",
+                  "value": {
+                    "stringValue": "a1100000000000000000000000000001"
+                  }
+                },
+                {
+                  "key": "weft.event.type",
+                  "value": {
+                    "stringValue": "run_finish"
+                  }
+                },
+                {
+                  "key": "weft.content",
+                  "value": {
+                    "stringValue": "full"
+                  }
+                },
+                {
+                  "key": "gen_ai.agent.name",
+                  "value": {
+                    "stringValue": "support"
+                  }
+                },
+                {
+                  "key": "weft.event.pos",
+                  "value": {
+                    "intValue": "7"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "{\"type\":\"run_finish\",\"run_id\":\"a1100000000000000000000000000001\",\"usage\":{\"input_tokens\":20,\"output_tokens\":10},\"steps\":2,\"stopped_by\":\"final_answer\"}"
+              },
+              "eventName": "weft.event",
+              "flags": 1,
+              "observedTimeUnixNano": "1790846820016000000",
+              "severityNumber": "SEVERITY_NUMBER_INFO",
+              "spanId": "5ba0000000000001",
+              "timeUnixNano": "1790846820016000000",
+              "traceId": "7ace0000000000000000000000000001"
+            }
+          ],
+          "scope": {
+            "name": "github.com/weftgo/weft/core",
+            "version": "v0.0.0-contract"
+          }
+        },
+        {
+          "logRecords": [
+            {
+              "attributes": [
+                {
+                  "key": "k000",
+                  "value": {
+                    "intValue": "0"
+                  }
+                },
+                {
+                  "key": "k001",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "k002",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "k003",
+                  "value": {
+                    "intValue": "3"
+                  }
+                },
+                {
+                  "key": "k004",
+                  "value": {
+                    "intValue": "4"
+                  }
+                },
+                {
+                  "key": "k005",
+                  "value": {
+                    "intValue": "5"
+                  }
+                },
+                {
+                  "key": "k006",
+                  "value": {
+                    "intValue": "6"
+                  }
+                },
+                {
+                  "key": "k007",
+                  "value": {
+                    "intValue": "7"
+                  }
+                },
+                {
+                  "key": "k008",
+                  "value": {
+                    "intValue": "8"
+                  }
+                },
+                {
+                  "key": "k009",
+                  "value": {
+                    "intValue": "9"
+                  }
+                },
+                {
+                  "key": "k010",
+                  "value": {
+                    "intValue": "10"
+                  }
+                },
+                {
+                  "key": "k011",
+                  "value": {
+                    "intValue": "11"
+                  }
+                },
+                {
+                  "key": "k012",
+                  "value": {
+                    "intValue": "12"
+                  }
+                },
+                {
+                  "key": "k013",
+                  "value": {
+                    "intValue": "13"
+                  }
+                },
+                {
+                  "key": "k014",
+                  "value": {
+                    "intValue": "14"
+                  }
+                },
+                {
+                  "key": "k015",
+                  "value": {
+                    "intValue": "15"
+                  }
+                },
+                {
+                  "key": "k016",
+                  "value": {
+                    "intValue": "16"
+                  }
+                },
+                {
+                  "key": "k017",
+                  "value": {
+                    "intValue": "17"
+                  }
+                },
+                {
+                  "key": "k018",
+                  "value": {
+                    "intValue": "18"
+                  }
+                },
+                {
+                  "key": "k019",
+                  "value": {
+                    "intValue": "19"
+                  }
+                },
+                {
+                  "key": "k020",
+                  "value": {
+                    "intValue": "20"
+                  }
+                },
+                {
+                  "key": "k021",
+                  "value": {
+                    "intValue": "21"
+                  }
+                },
+                {
+                  "key": "k022",
+                  "value": {
+                    "intValue": "22"
+                  }
+                },
+                {
+                  "key": "k023",
+                  "value": {
+                    "intValue": "23"
+                  }
+                },
+                {
+                  "key": "k024",
+                  "value": {
+                    "intValue": "24"
+                  }
+                },
+                {
+                  "key": "k025",
+                  "value": {
+                    "intValue": "25"
+                  }
+                },
+                {
+                  "key": "k026",
+                  "value": {
+                    "intValue": "26"
+                  }
+                },
+                {
+                  "key": "k027",
+                  "value": {
+                    "intValue": "27"
+                  }
+                },
+                {
+                  "key": "k028",
+                  "value": {
+                    "intValue": "28"
+                  }
+                },
+                {
+                  "key": "k029",
+                  "value": {
+                    "intValue": "29"
+                  }
+                },
+                {
+                  "key": "k030",
+                  "value": {
+                    "intValue": "30"
+                  }
+                },
+                {
+                  "key": "k031",
+                  "value": {
+                    "intValue": "31"
+                  }
+                },
+                {
+                  "key": "k032",
+                  "value": {
+                    "intValue": "32"
+                  }
+                },
+                {
+                  "key": "k033",
+                  "value": {
+                    "intValue": "33"
+                  }
+                },
+                {
+                  "key": "k034",
+                  "value": {
+                    "intValue": "34"
+                  }
+                },
+                {
+                  "key": "k035",
+                  "value": {
+                    "intValue": "35"
+                  }
+                },
+                {
+                  "key": "k036",
+                  "value": {
+                    "intValue": "36"
+                  }
+                },
+                {
+                  "key": "k037",
+                  "value": {
+                    "intValue": "37"
+                  }
+                },
+                {
+                  "key": "k038",
+                  "value": {
+                    "intValue": "38"
+                  }
+                },
+                {
+                  "key": "k039",
+                  "value": {
+                    "intValue": "39"
+                  }
+                },
+                {
+                  "key": "k040",
+                  "value": {
+                    "intValue": "40"
+                  }
+                },
+                {
+                  "key": "k041",
+                  "value": {
+                    "intValue": "41"
+                  }
+                },
+                {
+                  "key": "k042",
+                  "value": {
+                    "intValue": "42"
+                  }
+                },
+                {
+                  "key": "k043",
+                  "value": {
+                    "intValue": "43"
+                  }
+                },
+                {
+                  "key": "k044",
+                  "value": {
+                    "intValue": "44"
+                  }
+                },
+                {
+                  "key": "k045",
+                  "value": {
+                    "intValue": "45"
+                  }
+                },
+                {
+                  "key": "k046",
+                  "value": {
+                    "intValue": "46"
+                  }
+                },
+                {
+                  "key": "k047",
+                  "value": {
+                    "intValue": "47"
+                  }
+                },
+                {
+                  "key": "k048",
+                  "value": {
+                    "intValue": "48"
+                  }
+                },
+                {
+                  "key": "k049",
+                  "value": {
+                    "intValue": "49"
+                  }
+                },
+                {
+                  "key": "k050",
+                  "value": {
+                    "intValue": "50"
+                  }
+                },
+                {
+                  "key": "k051",
+                  "value": {
+                    "intValue": "51"
+                  }
+                },
+                {
+                  "key": "k052",
+                  "value": {
+                    "intValue": "52"
+                  }
+                },
+                {
+                  "key": "k053",
+                  "value": {
+                    "intValue": "53"
+                  }
+                },
+                {
+                  "key": "k054",
+                  "value": {
+                    "intValue": "54"
+                  }
+                },
+                {
+                  "key": "k055",
+                  "value": {
+                    "intValue": "55"
+                  }
+                },
+                {
+                  "key": "k056",
+                  "value": {
+                    "intValue": "56"
+                  }
+                },
+                {
+                  "key": "k057",
+                  "value": {
+                    "intValue": "57"
+                  }
+                },
+                {
+                  "key": "k058",
+                  "value": {
+                    "intValue": "58"
+                  }
+                },
+                {
+                  "key": "k059",
+                  "value": {
+                    "intValue": "59"
+                  }
+                },
+                {
+                  "key": "k060",
+                  "value": {
+                    "intValue": "60"
+                  }
+                },
+                {
+                  "key": "k061",
+                  "value": {
+                    "intValue": "61"
+                  }
+                },
+                {
+                  "key": "k062",
+                  "value": {
+                    "intValue": "62"
+                  }
+                },
+                {
+                  "key": "k063",
+                  "value": {
+                    "intValue": "63"
+                  }
+                },
+                {
+                  "key": "k064",
+                  "value": {
+                    "intValue": "64"
+                  }
+                },
+                {
+                  "key": "k065",
+                  "value": {
+                    "intValue": "65"
+                  }
+                },
+                {
+                  "key": "k066",
+                  "value": {
+                    "intValue": "66"
+                  }
+                },
+                {
+                  "key": "k067",
+                  "value": {
+                    "intValue": "67"
+                  }
+                },
+                {
+                  "key": "k068",
+                  "value": {
+                    "intValue": "68"
+                  }
+                },
+                {
+                  "key": "k069",
+                  "value": {
+                    "intValue": "69"
+                  }
+                },
+                {
+                  "key": "k070",
+                  "value": {
+                    "intValue": "70"
+                  }
+                },
+                {
+                  "key": "k071",
+                  "value": {
+                    "intValue": "71"
+                  }
+                },
+                {
+                  "key": "k072",
+                  "value": {
+                    "intValue": "72"
+                  }
+                },
+                {
+                  "key": "k073",
+                  "value": {
+                    "intValue": "73"
+                  }
+                },
+                {
+                  "key": "k074",
+                  "value": {
+                    "intValue": "74"
+                  }
+                },
+                {
+                  "key": "k075",
+                  "value": {
+                    "intValue": "75"
+                  }
+                },
+                {
+                  "key": "k076",
+                  "value": {
+                    "intValue": "76"
+                  }
+                },
+                {
+                  "key": "k077",
+                  "value": {
+                    "intValue": "77"
+                  }
+                },
+                {
+                  "key": "k078",
+                  "value": {
+                    "intValue": "78"
+                  }
+                },
+                {
+                  "key": "k079",
+                  "value": {
+                    "intValue": "79"
+                  }
+                },
+                {
+                  "key": "k080",
+                  "value": {
+                    "intValue": "80"
+                  }
+                },
+                {
+                  "key": "k081",
+                  "value": {
+                    "intValue": "81"
+                  }
+                },
+                {
+                  "key": "k082",
+                  "value": {
+                    "intValue": "82"
+                  }
+                },
+                {
+                  "key": "k083",
+                  "value": {
+                    "intValue": "83"
+                  }
+                },
+                {
+                  "key": "k084",
+                  "value": {
+                    "intValue": "84"
+                  }
+                },
+                {
+                  "key": "k085",
+                  "value": {
+                    "intValue": "85"
+                  }
+                },
+                {
+                  "key": "k086",
+                  "value": {
+                    "intValue": "86"
+                  }
+                },
+                {
+                  "key": "k087",
+                  "value": {
+                    "intValue": "87"
+                  }
+                },
+                {
+                  "key": "k088",
+                  "value": {
+                    "intValue": "88"
+                  }
+                },
+                {
+                  "key": "k089",
+                  "value": {
+                    "intValue": "89"
+                  }
+                },
+                {
+                  "key": "k090",
+                  "value": {
+                    "intValue": "90"
+                  }
+                },
+                {
+                  "key": "k091",
+                  "value": {
+                    "intValue": "91"
+                  }
+                },
+                {
+                  "key": "k092",
+                  "value": {
+                    "intValue": "92"
+                  }
+                },
+                {
+                  "key": "k093",
+                  "value": {
+                    "intValue": "93"
+                  }
+                },
+                {
+                  "key": "k094",
+                  "value": {
+                    "intValue": "94"
+                  }
+                },
+                {
+                  "key": "k095",
+                  "value": {
+                    "intValue": "95"
+                  }
+                },
+                {
+                  "key": "k096",
+                  "value": {
+                    "intValue": "96"
+                  }
+                },
+                {
+                  "key": "k097",
+                  "value": {
+                    "intValue": "97"
+                  }
+                },
+                {
+                  "key": "k098",
+                  "value": {
+                    "intValue": "98"
+                  }
+                },
+                {
+                  "key": "k099",
+                  "value": {
+                    "intValue": "99"
+                  }
+                },
+                {
+                  "key": "k100",
+                  "value": {
+                    "intValue": "100"
+                  }
+                },
+                {
+                  "key": "k101",
+                  "value": {
+                    "intValue": "101"
+                  }
+                },
+                {
+                  "key": "k102",
+                  "value": {
+                    "intValue": "102"
+                  }
+                },
+                {
+                  "key": "k103",
+                  "value": {
+                    "intValue": "103"
+                  }
+                },
+                {
+                  "key": "k104",
+                  "value": {
+                    "intValue": "104"
+                  }
+                },
+                {
+                  "key": "k105",
+                  "value": {
+                    "intValue": "105"
+                  }
+                },
+                {
+                  "key": "k106",
+                  "value": {
+                    "intValue": "106"
+                  }
+                },
+                {
+                  "key": "k107",
+                  "value": {
+                    "intValue": "107"
+                  }
+                },
+                {
+                  "key": "k108",
+                  "value": {
+                    "intValue": "108"
+                  }
+                },
+                {
+                  "key": "k109",
+                  "value": {
+                    "intValue": "109"
+                  }
+                },
+                {
+                  "key": "k110",
+                  "value": {
+                    "intValue": "110"
+                  }
+                },
+                {
+                  "key": "k111",
+                  "value": {
+                    "intValue": "111"
+                  }
+                },
+                {
+                  "key": "k112",
+                  "value": {
+                    "intValue": "112"
+                  }
+                },
+                {
+                  "key": "k113",
+                  "value": {
+                    "intValue": "113"
+                  }
+                },
+                {
+                  "key": "k114",
+                  "value": {
+                    "intValue": "114"
+                  }
+                },
+                {
+                  "key": "k115",
+                  "value": {
+                    "intValue": "115"
+                  }
+                },
+                {
+                  "key": "k116",
+                  "value": {
+                    "intValue": "116"
+                  }
+                },
+                {
+                  "key": "k117",
+                  "value": {
+                    "intValue": "117"
+                  }
+                },
+                {
+                  "key": "k118",
+                  "value": {
+                    "intValue": "118"
+                  }
+                },
+                {
+                  "key": "k119",
+                  "value": {
+                    "intValue": "119"
+                  }
+                },
+                {
+                  "key": "weft.log.attrs_dropped",
+                  "value": {
+                    "intValue": "5"
+                  }
+                }
+              ],
+              "body": {
+                "stringValue": "card [redacted]"
+              },
+              "flags": 1,
+              "observedTimeUnixNano": "1790846820017000000",
+              "severityNumber": "SEVERITY_NUMBER_WARN",
+              "severityText": "WARN",
+              "spanId": "5ba0000000000003",
+              "timeUnixNano": "1790846820017000000",
+              "traceId": "7ace0000000000000000000000000001"
+            }
+          ],
+          "scope": {
+            "name": "github.com/weftgo/weft/otel/slog"
+          }
+        }
+      ]
+    }
+  ]
+}

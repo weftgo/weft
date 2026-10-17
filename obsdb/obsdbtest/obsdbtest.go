@@ -1261,7 +1261,7 @@ func idPrefix(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
 		db := open(t)
 		var recs []obsdb.Record
-		for _, id := range []string{"1c06797fab", "1c06797fcd", "1c0679", "1C06797fef", "1c_6797f", "2c06797f", "1d", "0z"} {
+		for _, id := range []string{"1c06797fab", "1c06797fcd", "1c0679", "1C06797fef", "1c_6797f", "2c06797f", "1d", "0z", "a\u00e91"} {
 			recs = append(recs, record(id, "event", "run_start", 0, `{"type":"run_start","id":"`+id+`"}`, nil))
 		}
 		recs = append(recs, record("1c06797fkid", "event", "run_start", 0, `{"type":"run_start","id":"1c06797fkid"}`,
@@ -1301,6 +1301,11 @@ func idPrefix(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			{obsdb.RunQuery{IDPrefix: "1"}, "1C06797fef 1c0679 1c06797fab 1c06797fcd 1c_6797f 1d"},
 			{obsdb.RunQuery{IDPrefix: "2"}, "2c06797f"},
 			{obsdb.RunQuery{IDPrefix: "0"}, "0z"},
+			// Bytes, not characters: a prefix ending inside a UTF-8
+			// sequence (é is c3 a9) matches on both backends.
+			{obsdb.RunQuery{IDPrefix: "a\xc3"}, "a\u00e91"},
+			{obsdb.RunQuery{IDPrefix: "a\u00e9"}, "a\u00e91"},
+			{obsdb.RunQuery{IDPrefix: "a\xc3\xa8"}, ""},
 		} {
 			if got := strings.Join(ids(c.q), " "); got != c.want {
 				t.Errorf("%+v = %q, want %q", c.q, got, c.want)

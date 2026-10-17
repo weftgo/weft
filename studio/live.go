@@ -144,8 +144,10 @@ type recordFrameDTO struct {
 // weft.attempt.index (1-based per model call), Layer weft.attempt.layer
 // ("fallback" on a backup's request, else absent), Status "error" (the
 // span's status Error; ErrorType its error.type) or "ok", WaitMS the
-// provider's retry-after ask (weft.attempt.retry_after_ms) when it sent
-// one: mw.Retry's own backoff is not recorded, so absent then. Live
+// wait before the next try (weft.attempt.wait_ms: mw.Retry's backoff,
+// the provider's ask honoured — the step route's attempts[].wait_ms)
+// and RetryAfterMS the provider's retry-after ask itself
+// (weft.attempt.retry_after_ms), each absent when not recorded. Live
 // only: never a stored frame, never backfilled (the span itself is
 // stored, and the step routes read it).
 type attemptFrameDTO struct {
@@ -162,8 +164,10 @@ type attemptFrameDTO struct {
 	Start     time.Time `json:"start"`
 	End       time.Time `json:"end"`
 	WaitMS    *int64    `json:"wait_ms,omitempty"`
-	TraceID   string    `json:"trace_id"`
-	SpanID    string    `json:"span_id"`
+	// RetryAfterMS is the provider's retry-after ask.
+	RetryAfterMS *int64 `json:"retry_after_ms,omitempty"`
+	TraceID      string `json:"trace_id"`
+	SpanID       string `json:"span_id"`
 }
 
 // attemptOf reads an attempt span into its frame's data.
@@ -181,8 +185,11 @@ func attemptOf(sp obsdb.Span) attemptFrameDTO {
 		a.Status = "error"
 		a.ErrorType, _ = sp.Attrs["error.type"].(string)
 	}
-	if ms, ok := attrInt64(sp.Attrs["weft.attempt.retry_after_ms"]); ok {
+	if ms, ok := attrInt64(sp.Attrs["weft.attempt.wait_ms"]); ok {
 		a.WaitMS = &ms
+	}
+	if ms, ok := attrInt64(sp.Attrs["weft.attempt.retry_after_ms"]); ok {
+		a.RetryAfterMS = &ms
 	}
 	return a
 }

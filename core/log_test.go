@@ -197,6 +197,44 @@ func TestLoggerNoDeltas(t *testing.T) {
 	}
 }
 
+// Under Content(false) the tool call line names an error result's size
+// (err_bytes), never its text: a bridged line (otel.Slog) would store it
+// on a content-on destination regardless of the agent's choice.
+func TestLoggerToolErrorContentOff(t *testing.T) {
+	fail := core.Tool("fail", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "", errors.New("SECRET-ROW")
+	})
+	for _, off := range []bool{false, true} {
+		h := &capHandler{level: slog.LevelDebug}
+		opts := []core.Option{fail, core.Logger(slog.New(h))}
+		if off {
+			opts = append(opts, core.Content(false))
+		}
+		agt := core.New(wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "fail"}), wefttest.Say("ok")), opts...)
+		if _, err := agt.Generate(context.Background(), core.Prompt("x")); err != nil {
+			t.Fatal(err)
+		}
+		var tl *line
+		for _, l := range h.lines() {
+			if l.msg == "tool call" {
+				tl = &l
+			}
+		}
+		if tl == nil {
+			t.Fatal("no tool call line")
+		}
+		errText, hasErr := tl.attrs["err"].(string)
+		_, hasBytes := tl.attrs["err_bytes"]
+		if off {
+			if hasErr || !hasBytes {
+				t.Errorf("content off: attrs = %v, want err_bytes and no err", tl.attrs)
+			}
+		} else if !hasErr || hasBytes || errText == "" {
+			t.Errorf("content as the logger says: attrs = %v, want err", tl.attrs)
+		}
+	}
+}
+
 // L1 + O13: without the option, lines go to slog.Default at Debug —
 // silent under the default Info handler, honoured when a program sets a
 // Debug default after building its agents (the common order). This is

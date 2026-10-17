@@ -1,0 +1,70 @@
+{
+  "case": "bridge_stripped",
+  "description": "a bridged WARN on a content-off destination that opted in (otel.NoContent, otel.AppLogs(true)): the line stored stripped — its message and string attribute values emptied, weft.content stripped, severity, span and the int attribute kept (the run itself content-off: the stripped hole)",
+  "runs": [
+    {
+      "id": "a1100000000000000000000000000001",
+      "trace_id": "7ace0000000000000000000000000001",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:28:00Z",
+      "finished": "2026-10-01T09:28:00.01Z",
+      "last_seen": "2026-10-01T09:28:00.01Z",
+      "status": "succeeded",
+      "steps": 2,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "event_count": 8,
+      "message_count": 0,
+      "delta_count": 1,
+      "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "catalog_hash": "d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8",
+      "request_count": 2,
+      "events_emitted": 8,
+      "messages_emitted": 0,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        },
+        {
+          "step": 1,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "lookup_order",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "ok"
+        }
+      ],
+      "logs": [
+        "WARN  · execute_tool lookup_order [attempt order_id weft.content]"
+      ],
+      "holes": [
+        "stripped"
+      ]
+    }
+  ]
+}

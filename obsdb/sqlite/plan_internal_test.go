@@ -248,7 +248,7 @@ func TestRunSpansUseTheirIndexes(t *testing.T) {
 	// U9.1-fix: the tree is found from the rows — the recursive walk on
 	// runs_started, the id rule's range and each row on runs' primary
 	// key — and its spans read by run id on spans_run, never by trace.
-	rows := queryPlan(t, d, treeRowsSQL, "r_1", "r_1/", "r_10")
+	rows := queryPlan(t, d, treeRowsSQL, "r_1", "r_1/", "r_10", 10_001)
 	if !strings.Contains(rows, "runs_started (parent_run_id=?)") ||
 		!strings.Contains(rows, "sqlite_autoindex_runs_1 (run_id>? AND run_id<?)") ||
 		strings.Contains(rows, "SCAN r") || strings.Contains(rows, "SCAN runs") {

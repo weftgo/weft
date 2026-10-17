@@ -2,6 +2,7 @@ package studio
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -70,6 +71,9 @@ type traceRow struct {
 	// and its core subagent children (the runs whose id starts with the
 	// root's); 0 is omitted.
 	FailedRuns int `json:"failed_runs,omitempty"`
+	// FailedRunsCapped is true when FailedRuns stopped at the read's
+	// cap (500): a floor.
+	FailedRunsCapped bool `json:"failed_runs_capped,omitempty"`
 	badgeFields
 }
 
@@ -96,35 +100,45 @@ func rootRunOf(ids []string) string {
 	return root
 }
 
-// traceRuns reads a trace row's root run and failed count: one runs
-// read per trace, by the root's id prefix (its core children with it),
-// scoped to the list's public id.
+// traceRuns reads a trace row's root run and failed count: the root by
+// its id (a trace of more than a page of runs still names it), the
+// failures by a failed-only read of the root's id prefix (its core
+// children with it), each scoped to the list's public id. Past one
+// page of failures the count is a floor (FailedRunsCapped).
 func (s *Server) traceRuns(ctx context.Context, row *traceRow, publicID string) error {
 	root := rootRunOf(row.RunIDs)
 	if root == "" {
 		return nil
 	}
-	page, err := s.db.Runs(ctx, obsdb.RunQuery{IDPrefix: root, ParentRunID: "*", PublicID: publicID, Limit: 500})
+	det, err := s.db.Run(ctx, root)
+	switch {
+	case errors.Is(err, obsdb.ErrNotFound):
+	case err != nil:
+		return err
+	case publicID == "" || det.PublicID == publicID:
+		row.RootRun = &traceRun{ID: det.ID, Agent: det.Agent, PromptPreview: det.PromptPreview, Status: string(det.Status)}
+	}
+	page, err := s.db.Runs(ctx, obsdb.RunQuery{IDPrefix: root, ParentRunID: "*", PublicID: publicID,
+		Status: obsdb.StatusFailed, Limit: traceFailedCap})
 	if err != nil {
 		return err
 	}
-	in := map[string]bool{}
+	in := make(map[string]bool, len(row.RunIDs))
 	for _, id := range row.RunIDs {
 		in[id] = true
 	}
 	for _, rec := range page.Runs {
-		if !in[rec.ID] {
-			continue
-		}
-		if rec.Status == obsdb.StatusFailed {
+		if in[rec.ID] && rec.Status == obsdb.StatusFailed {
 			row.FailedRuns++
 		}
-		if rec.ID == root {
-			row.RootRun = &traceRun{ID: rec.ID, Agent: rec.Agent, PromptPreview: rec.PromptPreview, Status: string(rec.Status)}
-		}
 	}
+	row.FailedRunsCapped = len(page.Runs) >= traceFailedCap
 	return nil
 }
+
+// traceFailedCap is the failed runs one trace row reads (the runs
+// read's own maximum).
+const traceFailedCap = 500
 
 // tracesPage is GET /api/traces's body, paged as runsPage is.
 type tracesPage struct {

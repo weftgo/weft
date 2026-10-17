@@ -433,6 +433,43 @@ func TestAuditLogsCause(t *testing.T) {
 	}
 }
 
+// Under the agent's Content(false) Audit's line carries neither the
+// error text (model-visible content) nor the cause — a bridged line
+// would store them on a content-on destination — only err_bytes and
+// the code; a child agent without Content(false) logs them again.
+func TestAuditContentOff(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	db := core.Tool("db", "", func(_ context.Context, _ struct{}) (string, error) {
+		return "", &core.ToolError{Code: "DB", Message: "secret row 42", Err: errors.New("pg: secret")}
+	})
+	child := core.New(wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "db"}), wefttest.Say("ok")), db, core.WrapTools(mw.Audit(logger)))
+	model := wefttest.Script(wefttest.ToolCalls(wefttest.Call{Name: "db"}), wefttest.ToolCalls(wefttest.Call{Name: "kid"}), wefttest.Say("ok"))
+	parent := core.New(model, db, core.Subagent("kid", "", child), core.Content(false), core.WrapTools(mw.Audit(logger)))
+	if _, err := parent.Generate(context.Background(), core.RunID("run-1"), core.Prompt("x")); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	var parentDB, childDB string
+	for _, l := range lines {
+		switch {
+		case strings.Contains(l, "run=run-1 ") && strings.Contains(l, "tool=db"):
+			parentDB = l
+		case strings.Contains(l, "run=run-1/") && strings.Contains(l, "tool=db"):
+			childDB = l
+		}
+	}
+	if parentDB == "" || childDB == "" {
+		t.Fatalf("missing lines:\n%s", buf.String())
+	}
+	if strings.Contains(parentDB, "secret") || !strings.Contains(parentDB, "err_bytes=17") || !strings.Contains(parentDB, "code=DB") {
+		t.Errorf("content-off line = %s", parentDB)
+	}
+	if !strings.Contains(childDB, `err="DB: secret row 42"`) || !strings.Contains(childDB, `cause="pg: secret"`) {
+		t.Errorf("child (content as the logger says) line = %s", childDB)
+	}
+}
+
 func TestMapErrors(t *testing.T) {
 	plain := core.Tool("plain", "", func(_ context.Context, _ struct{}) (string, error) {
 		return "", errors.New("pq: duplicate key value violates unique constraint")

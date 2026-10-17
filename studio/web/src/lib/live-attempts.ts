@@ -26,9 +26,10 @@ export interface LiveAttempt {
   model?: string
   start: string
   end: string
-  /** The provider's retry-after ask in ms; absent when it sent none
-   * (mw.Retry's own backoff is not recorded). */
+  /** The wait before the next try in ms (weft.attempt.wait_ms). */
   wait_ms?: number
+  /** The provider's retry-after ask in ms; absent when it sent none. */
+  retry_after_ms?: number
 }
 
 /** The dedup bound: two generations of keys, rotated at this size. */
@@ -114,8 +115,8 @@ export function attemptNote(
   const kind = a.error_type ? ` (${a.error_type})` : ""
   if (a.status === "error") {
     const wait =
-      a.wait_ms !== undefined
-        ? ` · the provider asked to wait ${spanMs(a.wait_ms)}`
+      a.retry_after_ms !== undefined
+        ? ` · the provider asked to wait ${spanMs(a.retry_after_ms)}`
         : ""
     return running
       ? {

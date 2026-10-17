@@ -30,6 +30,7 @@ func attemptSpan(run, id string, index int64, failed bool, at time.Time) obsdb.S
 		sp.StatusCode = 2
 		sp.Attrs["error.type"] = "rate_limited"
 		sp.Attrs["weft.attempt.retry_after_ms"] = int64(4000)
+		sp.Attrs["weft.attempt.wait_ms"] = int64(4100)
 	}
 	return sp
 }
@@ -75,13 +76,13 @@ func TestLiveAttemptFrames(t *testing.T) {
 		t.Fatal(err)
 	}
 	want1 := map[string]any{"run_id": "r_att", "step": 0.0, "attempt": 1.0, "status": "error",
-		"error_type": "rate_limited", "wait_ms": 4000.0, "public_id": "pub_a", "model": "script", "provider": "wefttest"}
+		"error_type": "rate_limited", "wait_ms": 4100.0, "retry_after_ms": 4000.0, "public_id": "pub_a", "model": "script", "provider": "wefttest"}
 	for k, v := range want1 {
 		if a1[k] != v {
 			t.Errorf("first attempt frame %s = %v, want %v (%s)", k, a1[k], v, frames[0].data)
 		}
 	}
-	if a2["attempt"] != 2.0 || a2["status"] != "ok" || a2["wait_ms"] != nil || a2["error_type"] != nil {
+	if a2["attempt"] != 2.0 || a2["status"] != "ok" || a2["wait_ms"] != nil || a2["retry_after_ms"] != nil || a2["error_type"] != nil {
 		t.Errorf("second attempt frame: %s", frames[1].data)
 	}
 	if frames[0].id == "" {

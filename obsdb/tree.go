@@ -2,6 +2,7 @@ package obsdb
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"time"
@@ -42,7 +43,8 @@ type TreeReader interface {
 	// parent's children ordered by Started, then id; a parent with no
 	// child (or no row) is absent from the map. RunDetail.Children's
 	// rows, for a page of runs at once — the runs list prices a page's
-	// subagent trees level by level instead of one read per row.
+	// subagent trees level by level instead of one read per row. At
+	// most ChildRunsCap rows in all; past it ErrChildRunsCapped.
 	ChildRuns(ctx context.Context, parentIDs []string) (map[string][]RunRow, error)
 }
 
@@ -78,6 +80,21 @@ const TreeTraceCap = 50_000
 // TreeMissingCap bounds RunTree.Missing: the first 100 by start, the
 // whole count in RunTree.MissingCount.
 const TreeMissingCap = 100
+
+// TreeRowCap bounds the run rows one RunTreeSpans read takes of a weft
+// run's tree: 10,000, in RunRow order. A tree of more runs is read that
+// far and says so (RunTree.Truncated, as past TreeSpanCap): the runs
+// past it, and their spans, are not in the answer.
+const TreeRowCap = 10_000
+
+// ChildRunsCap bounds one TreeReader.ChildRuns call: 10,000 child rows
+// in all, over every parent it names. A call whose parents hold more
+// answers ErrChildRunsCapped and no map: the caller reads those
+// parents' children as not known, never as a part.
+const ChildRunsCap = 10_000
+
+// ErrChildRunsCapped is ChildRuns' answer past ChildRunsCap.
+var ErrChildRunsCapped = errors.New("obsdb: more child runs than ChildRunsCap")
 
 // RunTree is TreeReader.RunTreeSpans' answer.
 type RunTree struct {
@@ -190,12 +207,31 @@ func TreeChildID(parent, id string) bool {
 // A run is in the subtree when its parent chain reaches runID, or,
 // when no row or span names its parent (mapped to ""), when the id
 // rule names it a descendant (TreeIDRule; its parent then the rule's):
-// a stored parent outside the subtree wins over the id. The answer maps every
-// member, runID included, to its parent; a parent chain that loops
-// (never written by the core) ends where it repeats.
+// a stored parent outside the subtree wins over the id. The rule's
+// parent is a member, never merely a run the backend found: the
+// nearest run above the id that is (or becomes) a member, so an app's
+// own "j/1" (no member: not of core's shape, no stored parent) leaves
+// "j/1/0/c" to j — whichever superset of rows a backend read. The
+// answer maps every member, runID included, to its parent; a parent
+// chain that loops (never written by the core) ends where it repeats.
 func TreeMembers(runID string, parents map[string]string) map[string]string {
 	known := func(id string) bool { _, ok := parents[id]; return ok || id == runID }
 	in := map[string]string{runID: parents[runID]}
+	member := func(id string) bool { _, ok := in[id]; return ok }
+	// The id rule's candidates, shortest first: a parent's id is a
+	// prefix of its child's, so it is placed before them.
+	var rule []string
+	for id, stored := range parents {
+		if stored == "" && TreeChildID(runID, id) {
+			rule = append(rule, id)
+		}
+	}
+	slices.SortFunc(rule, func(a, b string) int {
+		if len(a) != len(b) {
+			return len(a) - len(b)
+		}
+		return strings.Compare(a, b)
+	})
 	for grew := true; grew; {
 		grew = false
 		for id, p := range parents {
@@ -209,11 +245,27 @@ func TreeMembers(runID string, parents map[string]string) map[string]string {
 		if grew {
 			continue
 		}
-		for id, stored := range parents {
-			if _, done := in[id]; done || stored != "" {
+		// A candidate whose nearest found run is a member takes it; one
+		// whose nearest found run is not a member yet waits a round
+		// (that run may still join by its stored parent).
+		for _, id := range rule {
+			if member(id) {
 				continue
 			}
-			if p, ok := TreeIDRule(runID, id, known); ok {
+			if p, ok := TreeIDRule(runID, id, known); ok && member(p) {
+				in[id], grew = p, true
+			}
+		}
+		if grew {
+			continue
+		}
+		// What still waits has a non-member nearest run: its parent is
+		// the nearest member above it instead.
+		for _, id := range rule {
+			if member(id) {
+				continue
+			}
+			if p, ok := TreeIDRule(runID, id, member); ok {
 				in[id], grew = p, true
 			}
 		}

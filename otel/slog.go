@@ -119,7 +119,8 @@ func (p *Pipeline) bridged() (int64, bool) {
 // A program still on slog's built-in default handler (it never called
 // slog.SetDefault) keeps its lines on the log package's writer, written
 // by a slog.TextHandler at the level slog.SetLogLoggerLevel set (INFO
-// unless changed) — wrapping the built-in handler itself would deadlock
+// unless changed; read once, at Install), each line after log.Prefix()
+// — wrapping the built-in handler itself would deadlock
 // the log package. The format changes while the bridge is installed:
 // the TextHandler's key=value lines (time=… level=… msg=…) replace the
 // built-in "2009/11/10 23:00:00 INFO msg k=v" form, and the log
@@ -183,9 +184,15 @@ func (p *Pipeline) installSlog() {
 	w, flags := log.Writer(), log.Flags()
 	next := prev.Handler()
 	if isBuiltinSlogHandler(next) {
-		next = slog.NewTextHandler(w, &slog.HandlerOptions{Level: logLoggerLevel()})
+		// The level is slog.SetLogLoggerLevel's at Install, read once; the
+		// log package's prefix (log.SetPrefix) still leads each line.
+		tw := w
+		if pre := log.Prefix(); pre != "" {
+			tw = prefixWriter{w: w, prefix: []byte(pre)}
+		}
+		next = slog.NewTextHandler(tw, &slog.HandlerOptions{Level: logLoggerLevel()})
 	}
-	h := &slogHandler{next: next, pipe: p}
+	h := &slogHandler{next: next, pipe: p, viaSlog: true}
 	p.bridge.prev, p.bridge.prevW, p.bridge.prevFlags = prev, w, flags
 	p.bridge.installed.Store(h)
 	slog.SetDefault(slog.New(h))
@@ -211,6 +218,22 @@ func (p *Pipeline) installSlog() {
 	}
 }
 
+// prefixWriter puts the log package's prefix before each line the
+// stand-in TextHandler writes (one Write per record).
+type prefixWriter struct {
+	w      io.Writer
+	prefix []byte
+}
+
+func (p prefixWriter) Write(b []byte) (int, error) {
+	line := make([]byte, 0, len(p.prefix)+len(b))
+	line = append(append(line, p.prefix...), b...)
+	if _, err := p.w.Write(line); err != nil {
+		return 0, err
+	}
+	return len(b), nil
+}
+
 // logLoggerLevel reads the level slog.SetLogLoggerLevel set (it has no
 // getter: set and put back).
 func logLoggerLevel() slog.Level {
@@ -232,6 +255,10 @@ type slogHandler struct {
 	pipe   *Pipeline // nil: the installed pipeline, per record
 	prefix string    // the open groups, "a.b."
 	attrs  []attribute.KeyValue
+	// viaSlog marks Slog's wrap of the default (and its WithAttrs /
+	// WithGroup copies): its lines mark contact only when the default's
+	// handler is no longer that wrap.
+	viaSlog bool
 }
 
 var _ slog.Handler = (*slogHandler)(nil)
@@ -297,7 +324,14 @@ func (h *slogHandler) Handle(ctx context.Context, r slog.Record) error {
 		rec.AddAttributes(kvs...)
 		p.bridge.logger.Emit(ctx, rec)
 		p.bridge.count.Add(1)
-		p.bridge.contact.Store(true)
+		// A line through Slog's own wrap while it is still the default's
+		// handler is that wrap's liveness, which bridged reads directly:
+		// marking contact would keep the pipeline bridged after the
+		// program replaced the default. Any other path — a bound or
+		// package-level handler, a program's wrap of Slog's — is contact.
+		if !h.viaSlog || slog.Default().Handler() != slog.Handler(p.bridge.installed.Load()) {
+			p.bridge.contact.Store(true)
+		}
 	}
 	if h.next != nil && h.next.Enabled(ctx, r.Level) {
 		return h.next.Handle(ctx, r)

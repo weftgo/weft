@@ -145,6 +145,11 @@ const (
 	logDur          = "dur"
 	logErr          = "err"
 	logResultBytes  = "result_bytes"
+	// logErrBytes stands in for logErr on a tool call's line under the
+	// agent's Content(false): an error result is model-visible content,
+	// and a bridged line (otel.Slog) would store it on a content-on
+	// destination regardless of the agent's choice.
+	logErrBytes = "err_bytes"
 )
 
 // providerNames maps ModelInfo.Provider onto the semconv well-known
@@ -523,6 +528,9 @@ func ceilMS(d time.Duration) int64 {
 type toolStartFacts struct {
 	timeout time.Duration
 	queue   time.Duration
+	// contentOff is the agent's Content(false): the Debug line names an
+	// error result's size (err_bytes), never its text.
+	contentOff bool
 }
 
 func (o *observer) tool(ctx context.Context, c Call, seq int64, facts toolStartFacts) (context.Context, func(res ToolResultPart, park string, err error, cut int, retry retryMark, end time.Time)) {
@@ -595,6 +603,8 @@ func (o *observer) tool(ctx context.Context, c Call, seq int64, facts toolStartF
 			switch {
 			case pending:
 				attrs = append(attrs, slog.Bool(logPending, true))
+			case res.IsError && facts.contentOff:
+				attrs = append(attrs, slog.Int(logErrBytes, len(res.Content)))
 			case res.IsError:
 				attrs = append(attrs, slog.String(logErr, res.Content))
 			default:

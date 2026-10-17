@@ -2070,7 +2070,66 @@ func genCases() []genCase {
 			dest: content,
 			run:  runQueueBreakpoints,
 		},
+		{
+			name: "bridge_overrides",
+			desc: "the facts the earlier cases do not hold (P8-pre-go): a run whose Params replace the agent's (temperature 0.2, top_p 0.9) with temperature 0.4 alone and whose ToolChoice forces any tool — the root's weft.override.params {\"temperature\":0.4,\"top_p\":null} (null: an agent knob the replacement leaves unset) and weft.override.tool_choice any (the mode; a named choice reads tool:<name>), beside weft.override.hash; and a bridged WARN under its execute_tool span (the OTLP destination opted in with otel.AppLogs(true), content on, a Redact over otel.ContentLog) carrying 125 attributes: the message redacted (\"card [redacted]\"), the first 120 kept and weft.log.attrs_dropped 5 (int) counted",
+			dest: []otel.DestOption{otel.WithContent(otel.ContentConfig{Redact: redactCards}), otel.AppLogs(true)},
+			run:  runBridgeOverrides,
+		},
+		{
+			name: "bridge_stripped",
+			desc: "a bridged WARN on a content-off destination that opted in (otel.NoContent, otel.AppLogs(true)): the line stored stripped — its message and string attribute values emptied, weft.content stripped, severity, span and the int attribute kept (the run itself content-off: the stripped hole)",
+			dest: []otel.DestOption{otel.NoContent(), otel.AppLogs(true)},
+			run:  runBridgeStripped,
+		},
 	}
+}
+
+// redactCards is bridge_overrides' Redact: a bridged line's "4111…"
+// card number reads [redacted]; every other kind passes as it came.
+func redactCards(k core.ContentKind, s string) string {
+	if k != otel.ContentLog {
+		return s
+	}
+	return strings.ReplaceAll(s, "4111-1111", "[redacted]")
+}
+
+// runBridgeOverrides drives bridge_overrides: a run with replaced
+// Params and a forced ToolChoice, its tool logging one wide line.
+func runBridgeOverrides(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+	logger := slog.New(p.SlogHandler(nil))
+	lookup := core.Tool("lookup_order", "Look up an order by ID.", func(ctx context.Context, in lookupIn) (string, error) {
+		args := make([]any, 0, 2*125)
+		for i := range 125 {
+			args = append(args, fmt.Sprintf("k%03d", i), i)
+		}
+		logger.WarnContext(ctx, "card 4111-1111", args...)
+		return "order " + in.OrderID + ": shipped", nil
+	})
+	t02, t04, p09 := 0.2, 0.4, 0.9
+	agt := pipelineAgent(p, "support", wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"1234"}`}),
+		wefttest.Say("Order 1234 has shipped.")),
+		core.Instructions("You are a support agent."), lookup,
+		core.Params(core.RequestParams{Temperature: &t02, TopP: &p09}))
+	return []string{mustRun(t, ctx, agt, core.Prompt("Where is order 1234?"),
+		core.Params(core.RequestParams{Temperature: &t04}),
+		core.ToolChoice(core.ToolChoiceConfig{Mode: core.ToolChoiceAny})).ID}
+}
+
+// runBridgeStripped drives bridge_stripped: one bridged line on a
+// content-off destination.
+func runBridgeStripped(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+	logger := slog.New(p.SlogHandler(nil))
+	lookup := core.Tool("lookup_order", "Look up an order by ID.", func(ctx context.Context, in lookupIn) (string, error) {
+		logger.WarnContext(ctx, "slow lookup for alice@example.com", "order_id", in.OrderID, "attempt", 2)
+		return "order " + in.OrderID + ": shipped", nil
+	})
+	agt := pipelineAgent(p, "support", wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "lookup_order", Args: `{"order_id":"1234"}`}),
+		wefttest.Say("Order 1234 has shipped.")),
+		core.Instructions("You are a support agent."), lookup)
+	return []string{mustRun(t, ctx, agt, core.Prompt("Where is order 1234?")).ID}
 }
 
 // runQueueBreakpoints drives the queue_breakpoints case: a queued call

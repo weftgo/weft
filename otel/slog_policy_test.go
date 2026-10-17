@@ -325,6 +325,11 @@ func TestBridgeMarkNotSticky(t *testing.T) {
 	if _, ok := r.bridged(); !ok {
 		t.Fatal("Slog's wrap is not live right after Install")
 	}
+	// A line teed through Slog's own wrap does not make the mark sticky.
+	logUnder(r, slog.Default().Handler(), "through the default")
+	if n, _ := r.bridged(); n != 1 {
+		t.Fatalf("bridged count = %d, want 1", n)
+	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(&bytes.Buffer{}, nil)))
 	if _, ok := r.bridged(); ok {
 		t.Error("the program replaced slog.Default, yet the pipeline still reads bridged")
@@ -351,12 +356,19 @@ func TestSlogNonLIFOShutdown(t *testing.T) {
 		t.Skip("the test process is not on slog's built-in handler")
 	}
 	builtin := slog.Default()
+	prevPrefix := log.Prefix()
+	log.SetPrefix("[app] ")
+	defer log.SetPrefix(prevPrefix)
 
 	a := Install(NoEnv(), Heartbeat(0), Exporters(nil, &recLogs{}, WithContent(), AppLogs(true)), Slog())
 	slog.Debug("debug through the substitute")
 	if !strings.Contains(out.String(), "debug through the substitute") {
 		a()
 		t.Fatalf("SetLogLoggerLevel(DEBUG) not honoured by the substitute handler:\n%s", out.String())
+	}
+	if !strings.HasPrefix(out.String(), "[app] time=") {
+		a()
+		t.Fatalf("the substitute handler dropped log.Prefix():\n%s", out.String())
 	}
 	b := Install(NoEnv(), Heartbeat(0), Exporters(nil, &recLogs{}, WithContent(), AppLogs(true)), Slog())
 	a() // out of order

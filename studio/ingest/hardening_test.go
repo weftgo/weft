@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"unicode/utf8"
 )
@@ -68,6 +69,19 @@ func TestOTLPJSONAsSendersSpellIt(t *testing.T) {
 // quoter copied bytes above 0x7f through, so an error message echoing
 // request bytes (a Content-Encoding value, a decoder's complaint) that
 // were not UTF-8 produced a body no JSON reader accepts.
+// A refusal echoes at most 64 bytes of the client's Content-Encoding.
+func TestContentEncodingEchoCapped(t *testing.T) {
+	long := strings.Repeat("x", 10_000)
+	resp := post(t, Logs(openDB(t), nil, always), []byte("x"), map[string]string{
+		"Content-Type": "application/json", "Content-Encoding": long,
+	})
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusUnsupportedMediaType || strings.Contains(string(b), strings.Repeat("x", 65)) ||
+		!strings.Contains(string(b), strings.Repeat("x", 64)+"…") {
+		t.Errorf("status %d, body %.200q", resp.StatusCode, b)
+	}
+}
+
 func TestErrorBodyIsAlwaysJSON(t *testing.T) {
 	resp := post(t, Logs(openDB(t), nil, always), []byte("x"), map[string]string{
 		"Content-Type": "application/json", "Content-Encoding": "br\xff\x00\"zip",

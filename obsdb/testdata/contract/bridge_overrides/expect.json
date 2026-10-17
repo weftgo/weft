@@ -1,0 +1,68 @@
+{
+  "case": "bridge_overrides",
+  "description": "the facts the earlier cases do not hold (P8-pre-go): a run whose Params replace the agent's (temperature 0.2, top_p 0.9) with temperature 0.4 alone and whose ToolChoice forces any tool — the root's weft.override.params {\"temperature\":0.4,\"top_p\":null} (null: an agent knob the replacement leaves unset) and weft.override.tool_choice any (the mode; a named choice reads tool:<name>), beside weft.override.hash; and a bridged WARN under its execute_tool span (the OTLP destination opted in with otel.AppLogs(true), content on, a Redact over otel.ContentLog) carrying 125 attributes: the message redacted (\"card [redacted]\"), the first 120 kept and weft.log.attrs_dropped 5 (int) counted",
+  "runs": [
+    {
+      "id": "a1100000000000000000000000000001",
+      "trace_id": "7ace0000000000000000000000000001",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:27:00Z",
+      "finished": "2026-10-01T09:27:00.016Z",
+      "last_seen": "2026-10-01T09:27:00.016Z",
+      "status": "succeeded",
+      "steps": 2,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "event_count": 8,
+      "message_count": 4,
+      "delta_count": 1,
+      "instructions_hash": "57e8f485cbb5aab3a684a972d8cc3981c066cbf52ef8706d75f2bc0a831c78f7",
+      "catalog_hash": "d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8",
+      "request_count": 2,
+      "events_emitted": 8,
+      "messages_emitted": 4,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        },
+        {
+          "step": 1,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "lookup_order",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "ok"
+        }
+      ],
+      "logs": [
+        "WARN card [redacted] · execute_tool lookup_order [k000 k001 k002 k003 k004 k005 k006 k007 k008 k009 k010 k011 k012 k013 k014 k015 k016 k017 k018 k019 k020 k021 k022 k023 k024 k025 k026 k027 k028 k029 k030 k031 k032 k033 k034 k035 k036 k037 k038 k039 k040 k041 k042 k043 k044 k045 k046 k047 k048 k049 k050 k051 k052 k053 k054 k055 k056 k057 k058 k059 k060 k061 k062 k063 k064 k065 k066 k067 k068 k069 k070 k071 k072 k073 k074 k075 k076 k077 k078 k079 k080 k081 k082 k083 k084 k085 k086 k087 k088 k089 k090 k091 k092 k093 k094 k095 k096 k097 k098 k099 k100 k101 k102 k103 k104 k105 k106 k107 k108 k109 k110 k111 k112 k113 k114 k115 k116 k117 k118 k119 weft.log.attrs_dropped]"
+      ],
+      "holes": []
+    }
+  ]
+}

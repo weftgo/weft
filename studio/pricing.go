@@ -585,6 +585,11 @@ type coster struct {
 	// a set's (setCost) whose one-level read (primeChildren) failed —
 	// the row's children_count is then not known (children_unknown).
 	partKids map[string]bool
+	// capped marks the runs whose children primeTrees stopped short of
+	// (its primeChildCap, or ChildRuns' obsdb.ErrChildRunsCapped): their
+	// figures and counts read not known, never read one at a time.
+	capped map[string]bool
+	primed int // child rows primeTrees read so far
 	// scope is the request's panel token public id (scopeOf), "" for any
 	// other identity. Under it, kids holds each run's children inScope
 	// only — every count, children list and delegated figure read from
@@ -609,7 +614,7 @@ func (rc runCost) total() (float64, bool) {
 }
 
 func (s *Server) coster(ctx context.Context) *coster {
-	return &coster{ctx: ctx, db: s.db, table: s.pricing, kids: map[string][]obsdb.RunRow{}, memo: map[string]runCost{}, partKids: map[string]bool{},
+	return &coster{ctx: ctx, db: s.db, table: s.pricing, kids: map[string][]obsdb.RunRow{}, memo: map[string]runCost{}, partKids: map[string]bool{}, capped: map[string]bool{},
 		scope: scopeOf(ctx), hidden: map[string]int{}, hiddenSubs: map[string]int{}, hiddenUsage: map[string]core.Usage{}}
 }
 
@@ -653,7 +658,11 @@ func (c *coster) visibleKids(id string) ([]obsdb.RunRow, int) {
 // a search page costs as many reads as its deepest tree has levels. A
 // run already primed is not read again. Without a TreeReader, or when
 // a level's read fails, it stops: the runs left unprimed read their
-// children one at a time (children), as before.
+// children one at a time (children), as before. Bounded: once
+// primeChildCap child rows have been read for this coster (or a level
+// holds more than ChildRuns reads, obsdb.ErrChildRunsCapped), the
+// level's runs are capped — their cost and children counts read not
+// known (children_unknown), not read again run by run.
 func (c *coster) primeTrees(recs []obsdb.RunRow) {
 	tr, ok := c.db.(obsdb.TreeReader)
 	if !ok {
@@ -667,10 +676,23 @@ func (c *coster) primeTrees(recs []obsdb.RunRow) {
 	}
 	for len(ids) > 0 {
 		kids, err := tr.ChildRuns(c.ctx, ids)
+		n := 0
+		for _, k := range kids {
+			n += len(k)
+		}
+		if errors.Is(err, obsdb.ErrChildRunsCapped) || (err == nil && c.primed+n > primeChildCap) {
+			slog.DebugContext(c.ctx, "studio: a page's subagent trees hold too many child runs to read: their cost and counts are not known",
+				"cap", primeChildCap, "runs", len(ids))
+			for _, id := range ids {
+				c.capped[id] = true
+			}
+			return
+		}
 		if err != nil {
 			slog.DebugContext(c.ctx, "studio: a page's subagent children could not be read at once; reading them per run", "err", err)
 			return
 		}
+		c.primed += n
 		var next []string
 		for _, id := range ids {
 			c.prime(id, kids[id])
@@ -718,6 +740,14 @@ func (c *coster) primeChildren(recs []obsdb.RunRow) {
 	}
 }
 
+// primeChildCap bounds the child rows primeTrees reads for one coster
+// (a request): obsdb.ChildRunsCap, the bound the per-run walk had
+// (costerChildPages × 500). A variable for tests.
+var primeChildCap = obsdb.ChildRunsCap
+
+// errChildrenCapped is children's answer for a run primeTrees capped.
+var errChildrenCapped = fmt.Errorf("more than %d child runs under the runs read: too many to read at once", obsdb.ChildRunsCap)
+
 // costerChildPages bounds the children walk of one run: 20 pages of 500.
 const costerChildPages = 20
 
@@ -725,6 +755,9 @@ const costerChildPages = 20
 func (c *coster) children(id string) ([]obsdb.RunRow, error) {
 	if k, ok := c.kids[id]; ok {
 		return k, nil
+	}
+	if c.capped[id] {
+		return nil, errChildrenCapped
 	}
 	var out []obsdb.RunRow
 	q := obsdb.RunQuery{ParentRunID: id, Limit: 500}
@@ -760,7 +793,11 @@ func (c *coster) cost(rec obsdb.RunRow) runCost {
 func (c *coster) compute(rec obsdb.RunRow) runCost {
 	all, err := c.children(rec.ID)
 	if err != nil {
+		slog.DebugContext(c.ctx, "studio: a run's subagent children could not be read: its cost is not known", "run", rec.ID, "err", err)
 		why := "the run's subagent children could not be read, so its own usage cannot be told from theirs"
+		if errors.Is(err, errChildrenCapped) {
+			why = "the run's subagent children are past the " + strconv.Itoa(obsdb.ChildRunsCap) + " child runs one read takes, so its own usage cannot be told from theirs"
+		}
 		return runCost{
 			own:       cost{badge: costUnknown, reason: why, cache: cacheOf(rec.Usage)},
 			delegated: cost{badge: costUnknown, reason: why, why: rec.ID + ": " + why, cause: why},

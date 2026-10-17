@@ -110,6 +110,7 @@ reads them from:
 | `weft.playground` | `weft/runtime` | `"true"` on a run Studio's playground started (never part of a session) | column `playground` |
 | `weft.playground.command` | `weft/runtime` | the playground command id | `meta` |
 | `weft.playground.actor` | `weft/runtime` | who issued it, when known | `meta` |
+| `weft.playground.breakpoints` | `weft/runtime` | a playground run's breakpoints: the tool names it parks at (through `ParkOn`), comma-joined and sorted — what reads a `park_on` park named there as a breakpoint, not an approval gate (the `queue_breakpoints` fixture) | `meta` |
 | `weft.experiment.id` | `weft/runtime` | the saved experiment the run belongs to | column `experiment_id` |
 | `weft.forked_from` | `weft/runtime` | `<source run>#<from step>`: the run this replay continues | column `forked_from` |
 | `weft.replay.view` | `weft/runtime` | a replay from step N > 0: `transcript`, `compacted:<index>`, `derived` or `unknown` | `meta` |
@@ -567,6 +568,13 @@ line with no span names no run and is not bridged:
 | attributes | the handler's and the record's slog attributes, flattened: a group's keys joined with `.` (`db.table`), an empty-keyed group inline; strings, ints, floats and bools as themselves, durations and times as their string forms, anything else its `fmt` text; every key starting `weft.` is renamed `slog.weft.…` (`weft.record`, `weft.run.id`, `weft.event.type` would make the line read — route, shape and shed — as weft's own); the first 120 kept, the rest counted in `weft.log.attrs_dropped` (int, only when some were) so the SDK's 128-attribute limit never cuts silently |
 | `weft.content`, `weft.content.truncated_bytes` | the destination's content policy (below): `stripped` on a content-off destination's copy; the bytes Redact-then-MaxBytes cut on a content-on one |
 
+An agent's `core.Content(false)` reaches its own lines before any
+destination does: `core.Logger`'s `tool call` line names an error
+result's size (`err_bytes`) instead of its text (`err`), and
+`mw.Audit`'s line `err_bytes` and the `*core.ToolError`'s `code`
+instead of `err` and `cause` — a content-on destination could
+otherwise store what the agent keeps out of its records.
+
 Every slog level goes to the pipeline — the bridge has no level of its
 own, and `core.Logger`'s and `mw.Log`'s lines are DEBUG — at the
 severities some destination takes. Which destinations take them is
@@ -729,7 +737,15 @@ the pool's own context: its runs name no parent run). The tree is ordered by sta
 keyed by run id + span id (`obsdb.TreeSpan`: the span, its `RunID`,
 that run's `ParentRunID`), and capped at `obsdb.TreeSpanCap` (10,000)
 spans, the first in start order: `obsdb.RunTree.Truncated` says the tree
-holds more. `RunTree.Missing` is the descendant runs with a row and no
+holds more — as it does past `obsdb.TreeRowCap` (10,000) run rows, the
+rows read first kept. A parent the id rule names is a member, never a
+run merely found beside one (`j/1/0/c` under `j` is `j`'s child when the
+app's own `j/1`, of no core shape, is no member; SQLite keeps the id
+range's rows naming no parent only in core's child shape, the rows
+ClickHouse reads). `TreeReader.ChildRuns` reads at most
+`obsdb.ChildRunsCap` (10,000) rows a call, else `obsdb.ErrChildRunsCapped`:
+Studio's coster then reads those runs' cost and children counts as not
+known (`children_unknown`), never a part. `RunTree.Missing` is the descendant runs with a row and no
 span in the tree that are not running (a child that ran without a
 tracer, or whose spans a destination dropped; a running child has no
 span yet because spans export when they end, so it is not missing),
@@ -1124,6 +1140,8 @@ page reaches it.
 | `records_dropped` | the `tool_calls` run from a destination that had lost 3 records: `weft.records.dropped` 3 (int) on its `run_start` and `run_finish` records (§4; no heartbeat — never stored, and the run is shorter than 10 s). Ingest health reads it (Studio's largest per `service.name`); no row field: `meta` omits it (`obsdb.MetaOf` skips it), no hole names it — the row is `tool_calls`' own without its metadata |
 | `run_cards` | the run cards' facts (U25): an `Output` run repaired after one invalid submission (`submit_output` `INVALID_INPUT`, then a valid call — `stopped_by` `output_submitted`, the tools record's `output: true`, the root's `weft.output.submitted` `true`) and an `Output` run that answered in text (`weft.output.submitted` `false`); a call parked by the run's `ParkOn` (`pending_source` `park_on`) and one by an agent `ParkSource` (`park_source`); a tool cut by its `Timeout` (`timeout_ms` 5, `error.type` `timeout`); a `Subagent` child parked at its `RequireApproval` tool (`SUBAGENT_PENDING`, `subagent_pending` `refund_order`; the child `pending_source` `approval`); a `PrepareStep` rewriting step 0's system text, tool choice and params (the request record's `prepared` `[system, tool_choice, params]`) on a model declaring `thinking.wire` `reasoning_effort`; `mw.Retry` over a 503 then an answer (the first attempt's `http.response.status_code` 503, the second's `weft.attempt.wait_ms`, normalised to 1) |
 | `queue_breakpoints` | the phase 8 facts `run_cards` does not hold: a step's two calls under `Parallelism(1)`, the first holding the one slot 30 ms — the second's `execute_tool` span carries `weft.tool.queue_ms` (int, the generator sets it to 1), the first's none; and a playground run's breakpoint park — the runtime's metadata `weft.playground` `true` and `weft.playground.breakpoints` `refund_order` on every record and span, the call parked through `ParkOn` (`pending_source` `park_on`): what Studio and the panel read as a breakpoint (lib/cards.ts `parkWord`), not an approval gate. (`run_cards` holds the request record's `prepared` and `thinking.wire`.) |
+| `bridge_overrides` | a run whose `Params` replace the agent's (`temperature` 0.2, `top_p` 0.9) with `temperature` 0.4 alone and whose `ToolChoice` forces any tool: the root's `weft.override.params` `{"temperature":0.4,"top_p":null}` (`null`: an agent knob the replacement leaves unset) and `weft.override.tool_choice` `any`, beside `weft.override.hash` (span attributes, no row field); and a bridged WARN under its `execute_tool` span (`otel.AppLogs(true)`, content on, a `Redact` over `otel.ContentLog`) with 125 attributes: the message redacted (`card [redacted]`), the first 120 kept, `weft.log.attrs_dropped` 5 (int) |
+| `bridge_stripped` | a bridged WARN on a content-off destination that opted in (`otel.NoContent()`, `otel.AppLogs(true)`): stored stripped — its message and string attribute values emptied, `weft.content` `stripped`, severity, span and the int attribute kept; the run itself content-off (`stripped`) |
 | `messages_lost` | the `tool_calls` run with its middle transcript batch dropped (the growth `messages` record at index 1, the assistant's tool call), every event and span kept: `message_count` 3 below `messages_emitted` 4 — `gap` (cause `messages_lost`, "1 of 4 transcript batches were lost"); every event stored, so no `events_lost` |
 
 `expect.json` is `{case, description, pending?, derived?, runs: [...]}`;

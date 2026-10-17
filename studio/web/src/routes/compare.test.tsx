@@ -2,12 +2,14 @@
 // (N-way: N−1 calls of GET /api/diff against one base), the run
 // header's "compare with…" links, gated on capability "diff" — every
 // response served from the E3.1 goldens (studio/testdata/api/diff*).
-import { cleanup, configure, waitFor } from "@testing-library/react"
+import { cleanup, configure, fireEvent, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
 import type { RunDoc, RunsPage } from "@/lib/api"
 import type { DiffDoc } from "@/lib/stepdiff"
+import { CAUSES } from "@/lib/honesty"
+import { PICK_FOUND_NONE, WHY_PUBLIC } from "@/lib/compare-picker"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import {
@@ -184,10 +186,12 @@ describe("the compare page", () => {
   it("a read token's diff: system hidden, badged on each side; a truncated response badged response_cap", async () => {
     const doc = golden<DiffDoc>("diff-hidden")
     doc.holes = [
+      // The words the server sends for it (lib/honesty.ts's CAUSES,
+      // pinned by holes.golden.json), never a fixture's own.
       {
         hole: "truncated",
-        reason: "this response reads a bounded number of steps",
-        fix: "open the later steps",
+        cause: "response_cap",
+        ...CAUSES.truncated!.response_cap,
       },
     ]
     serve(["diff"], { "r_ta|r_tb": doc })
@@ -344,6 +348,7 @@ describe("the compare page", () => {
         ...rOK,
         id: "r_base",
         agent: "orders",
+        public_id: "",
         children: [],
         holes: [],
         compactions: [],
@@ -369,6 +374,61 @@ describe("the compare page", () => {
         a: "r_da",
         b: ["r_db", "r_dc"],
       })
+    )
+  })
+
+  it("P8-fix-b #13: the base's conversation first, and a find box past the newest 50", async () => {
+    const rows = golden<RunsPage>("runs").runs
+    const rOK = rows.find((r) => r.id === "r_ok")!
+    const newest = { ...rOK, id: "r_new", agent: "billing", public_id: "" }
+    const turn = { ...rOK, id: "r_turn2", agent: "billing", public_id: "pub_c" }
+    const old = { ...rOK, id: "r_old_deep", agent: "archivist", public_id: "" }
+    serve(["diff"])
+    studio
+      .on("GET runs", (req) => {
+        if (req.query.get("public_id") === "pub_c")
+          return { total: 1, runs: [turn], next_before: null }
+        if (req.query.get("id_prefix") === "r_old")
+          return { total: 1, runs: [old], next_before: null }
+        if (req.query.get("id_prefix") || req.query.get("agent"))
+          return { total: 0, runs: [], next_before: null }
+        return { total: 1, runs: [newest], next_before: null }
+      })
+      .on("GET runs/r_base", {
+        ...rOK,
+        id: "r_base",
+        agent: "orders",
+        public_id: "pub_c",
+        children: [],
+        holes: [],
+        compactions: [],
+      })
+    renderApp("/compare?a=r_base")
+    const picks = () =>
+      [...document.querySelectorAll<HTMLElement>("[data-pick]")].map(
+        (b) => b.dataset.pick
+      )
+    await waitFor(() => expect(picks()).toEqual(["r_turn2", "r_new"]))
+    expect(
+      document.querySelector('[data-pick="r_turn2"]')!.textContent
+    ).toContain(WHY_PUBLIC)
+    // The find box asks the server: a run past the newest page.
+    const find = document.querySelector<HTMLInputElement>("[data-pick-find]")!
+    fireEvent.change(find, { target: { value: "r_old" } })
+    await waitFor(() => expect(picks()[0]).toBe("r_old_deep"))
+    expect(
+      studio
+        .calls("GET runs")
+        .some(
+          (c) =>
+            c.query.get("id_prefix") === "r_old" && c.query.get("all") === "1"
+        )
+    ).toBe(true)
+    fireEvent.change(find, { target: { value: "zzzz" } })
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-pick-found-none]")?.textContent
+      ).toBe(PICK_FOUND_NONE)
     )
   })
 

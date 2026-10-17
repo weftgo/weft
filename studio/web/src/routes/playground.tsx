@@ -121,9 +121,11 @@ import {
   runLink,
 } from "@/lib/links"
 import {
-  decodeForm,
+  decodeFormOutcome,
+  draftRefusedWords,
   encodeForm,
   formOfFields,
+  LINK_REFUSED,
   SHARE_CAP,
   cellCommandID,
   stateFromHash,
@@ -134,6 +136,7 @@ import {
   experimentDraftID,
   listDrafts,
   loadDraft,
+  loadDraftOutcome,
   newDraftID,
   saveDraft,
 } from "@/lib/drafts"
@@ -765,24 +768,21 @@ function Playground({ caps }: { caps: string[] }) {
     const run = { alive: true }
     void (async () => {
       if (shared) {
-        const form = await decodeForm(shared)
+        const got = await decodeFormOutcome(shared)
         if (!run.alive) return
-        if (form) {
-          applyFormRef.current(form)
+        if ("form" in got) {
+          applyFormRef.current(got.form)
           dirty.current = true
           setRestored({
             text: "restored from a link — nothing runs until you press Run",
             tone: "info",
           })
-        } else
-          setRestored({
-            text: "the link's form could not be read: it was cut, damaged, or made by a newer Studio",
-            tone: "bad",
-          })
+        } else setRestored({ text: LINK_REFUSED[got.refused], tone: "bad" })
       } else if (search.exp) {
-        const rec = await loadDraft(search.exp)
+        const got = await loadDraftOutcome(search.exp)
         if (!run.alive) return
-        if (rec) {
+        if ("rec" in got) {
+          const rec = got.rec
           applyFormRef.current(rec.form)
           savedExp.current = search.exp
           setRestored({
@@ -791,7 +791,7 @@ function Playground({ caps }: { caps: string[] }) {
           })
         } else
           setRestored({
-            text: `draft ${search.exp} is not in this browser — a draft stays in the browser that made it; a share link travels`,
+            text: draftRefusedWords(search.exp, got.refused),
             tone: "bad",
           })
       }

@@ -16,8 +16,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
 import type { PlaygroundRunBody, RunDoc } from "@/lib/api"
-import { listDrafts, resetDrafts } from "@/lib/drafts"
-import { decodeForm, encodeForm, parseCellCommandID } from "@/lib/form-state"
+import { listDrafts, resetDrafts, saveDraft } from "@/lib/drafts"
+import {
+  decodeForm,
+  draftRefusedWords,
+  encodeForm,
+  LINK_REFUSED,
+  parseCellCommandID,
+} from "@/lib/form-state"
 import type { FormState } from "@/lib/form-state"
 import { playgroundShareLink, path } from "@/lib/links"
 import { resetNotices } from "@/lib/notify"
@@ -242,6 +248,17 @@ describe("the share link (#state=)", () => {
     expect(screen.queryByLabelText("share link")).toBeNull()
   })
 
+  it("a v1 link says it is older, with the way out — not 'a newer Studio' (P8-fix-b #3)", async () => {
+    const v1 = (
+      await encodeForm(
+        { v: 1, step: 2, variants: [{ key: "A" }] } as unknown as FormState,
+        { codec: "j" }
+      )
+    ).value
+    renderApp(`/playground#state=${v1}`)
+    expect(await screen.findByText(LINK_REFUSED.older)).toBeTruthy()
+  })
+
   it("a damaged link says so, and the page stays usable", async () => {
     renderApp("/playground#state=zNOT_A_FORM")
     expect(
@@ -284,6 +301,18 @@ describe("drafts (?exp=)", () => {
     // The drafts list names it, open.
     const item = document.querySelector<HTMLElement>(`[data-draft="${id}"]`)!
     expect(within(item).getByText("open")).toBeTruthy()
+  })
+
+  it("a v1 draft says it is older, with the way out — not 'not in this browser' (P8-fix-b #3)", async () => {
+    await saveDraft("d_1111111111", {
+      v: 1,
+      step: 2,
+      variants: [{ key: "A" }],
+    } as unknown as FormState)
+    renderApp("/playground?exp=d_1111111111")
+    expect(
+      await screen.findByText(draftRefusedWords("d_1111111111", "older"))
+    ).toBeTruthy()
   })
 
   it("a draft from another browser is not here: the page says so", async () => {

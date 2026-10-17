@@ -71,9 +71,11 @@ const statusCase = `CASE WHEN Failed = 1 THEN 'failed'
 // statusConds is a status filter over the grouped rows (Runs and
 // Search alike): statusCase equal to the derived status, and for a
 // read-time word (I3) its own condition — parked an open park (Pending
-// above 0 and no run whose ResumedFrom names it: resumed_by's rule, read
-// over idx_resumed_from), cancelled a failed run whose ErrorType is
-// cancelled. None for "".
+// above 0 and no run whose ResumedFrom names it: resumed_by's rule — the
+// NOT IN set is built from every row's ResumedFrom, a column scan the
+// bloom idx_resumed_from cannot narrow (it serves lookups of given ids;
+// README.md states the cost)), cancelled a failed run whose ErrorType
+// is cancelled. None for "".
 func statusConds(st obsdb.Status, now time.Time) ([]string, []any) {
 	if st == "" {
 		return nil, nil

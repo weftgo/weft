@@ -99,6 +99,11 @@ export async function fetchAllLogs(
   prev?: AllLogs
 ): Promise<AllLogs> {
   if (prev?.cut) return prev
+  // The cap held already (a running run's reads reached pages ×
+  // LOG_PAGE lines): no page more, the read is cut — never a page per
+  // poll past the cap (P8-fix-b #9).
+  if (prev && prev.logs.length >= pages * LOG_PAGE)
+    return { ...prev, cut: true }
   const read = (from?: number) =>
     fetchLogs(runId, {
       limit: LOG_PAGE,

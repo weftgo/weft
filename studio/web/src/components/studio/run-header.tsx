@@ -74,7 +74,7 @@ import {
   contradicts,
   stopChip,
   stopReasonLabel,
-  stopStep,
+  endStep,
 } from "@/lib/stopped-by"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { KindChip, ProblemStrip } from "@/components/studio/problem-badges"
@@ -82,12 +82,18 @@ import type { ToolFactsMap } from "@/lib/error-kind"
 
 /** StoppedByChip is what ended the run (U3.2), in lib/stopped-by.ts's
  * words, linking to the step where it fired; on every status. */
-function StoppedByChip({ doc }: { doc: RunDoc }) {
-  const chip = stopChip(doc, true)
+function StoppedByChip({
+  doc,
+  drawn,
+}: {
+  doc: RunDoc
+  drawn: readonly number[]
+}) {
+  const chip = stopChip(doc, true, drawn)
   if (!chip) return null
   return (
     <Link
-      {...runLink(doc.id, { step: stopStep(doc.steps), view: "story" })}
+      {...runLink(doc.id, { step: endStep(doc, drawn), view: "story" })}
       className="rounded-sm border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground hover:bg-secondary hover:text-foreground"
       title={chip.title}
       data-stopped-by={doc.stopped_by}
@@ -516,7 +522,7 @@ export function RunHeader({
           </span>
         ) : null}
         <KindChip errorType={doc.error_type} />
-        <StoppedByChip doc={doc} />
+        <StoppedByChip doc={doc} drawn={folded.steps.map((s) => s.index)} />
         <Badge variant="outline" className="font-mono text-[11px] font-normal">
           {doc.model.provider}/{doc.model.name}
         </Badge>

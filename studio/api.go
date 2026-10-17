@@ -232,6 +232,10 @@ type runRow struct {
 	// row); each omitted when 0, and on a row the coster did not price.
 	ChildrenCount  int `json:"children_count,omitempty"`
 	ChildrenFailed int `json:"children_failed,omitempty"`
+	// ChildrenUnknown says the children read failed (P8-fix-b): the
+	// count above is not known — absent, it would read as "no
+	// subagents". Omitted when the count is known.
+	ChildrenUnknown bool `json:"children_unknown,omitempty"`
 	// Holes is set on a run document's children[] rows only (plan
 	// A10): each child's own runHoles, so the parent's page badges a
 	// content-off or interrupted child before its document is read.
@@ -1670,6 +1674,9 @@ func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
 	doc := sessionDoc{sessionRow: sessRow(det.SessionRow), Runs: make([]runRow, 0, len(det.Runs))}
 	sc, c, _ := s.sessionCost(r.Context(), id, pub)
 	doc.costFields = sc.fields()
+	// The turn rows' children counts: every parent-linked run, as on
+	// the runs list — the session walk primed its own runs only.
+	c.primeChildren(det.Runs)
 	for _, rr := range det.Runs {
 		doc.Runs = append(doc.Runs, c.row(rr))
 	}

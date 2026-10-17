@@ -274,3 +274,21 @@ func TestChildRunsUseTheIndex(t *testing.T) {
 		t.Errorf("ChildRuns plan = %s, want runs_started, no scan", p)
 	}
 }
+
+// TestIDPrefixIsAClosedRange (P8-fix-b #11): an id prefix bounds the
+// primary-key range on both sides — at or after the prefix, before its
+// successor (prefixEnd) — so a one-character prefix never walks every
+// id above it; an all-0xFF prefix has no upper bound.
+func TestIDPrefixIsAClosedRange(t *testing.T) {
+	d := planDB(t)
+	_, page, args := runListSQL(obsdb.RunQuery{IDPrefix: "1", ParentRunID: "*"})
+	if pp := queryPlan(t, d, page, args...); !strings.Contains(pp, "run_id>? AND run_id<?") {
+		t.Errorf("id prefix page plan = %s, want a closed run_id range", pp)
+	}
+	for p, want := range map[string]string{"1": "2", "1c0z": "1c0{", "a\xff": "b", "\xff\xff": ""} {
+		got, ok := prefixEnd(p)
+		if got != want || ok != (want != "") {
+			t.Errorf("prefixEnd(%q) = %q, %v; want %q", p, got, ok, want)
+		}
+	}
+}

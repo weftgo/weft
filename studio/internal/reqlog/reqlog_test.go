@@ -27,19 +27,19 @@ func TestAllowWindow(t *testing.T) {
 	now := time.Unix(0, 0)
 	l := New()
 	l.now = func() time.Time { return now }
-	if ok, n, _ := l.allow("k"); !ok || n != 0 {
+	if ok, n, _, _ := l.allow("k"); !ok || n != 0 {
 		t.Fatalf("first: %v %d", ok, n)
 	}
 	for range 3 {
-		if ok, _, _ := l.allow("k"); ok {
+		if ok, _, _, _ := l.allow("k"); ok {
 			t.Fatal("a repeat inside the window was allowed")
 		}
 	}
-	if ok, _, _ := l.allow("other"); !ok {
+	if ok, _, _, _ := l.allow("other"); !ok {
 		t.Error("another key was limited")
 	}
 	now = now.Add(limitWindow)
-	if ok, n, _ := l.allow("k"); !ok || n != 3 {
+	if ok, n, _, _ := l.allow("k"); !ok || n != 3 {
 		t.Errorf("after the window: %v suppressed=%d, want true 3", ok, n)
 	}
 }
@@ -75,23 +75,33 @@ func TestAllowOverflow(t *testing.T) {
 	l := New()
 	l.now = func() time.Time { return now }
 	for i := range maxKeys {
-		if ok, _, _ := l.allow("k" + strconv.Itoa(i)); !ok {
+		if ok, _, _, _ := l.allow("k" + strconv.Itoa(i)); !ok {
 			t.Fatalf("key %d refused while filling", i)
 		}
 	}
-	if ok, _, _ := l.allow("new"); ok {
+	if ok, _, _, _ := l.allow("new"); ok {
 		t.Fatal("a new key was logged while every window is live")
 	}
-	if ok, _, _ := l.allow("k0"); ok {
+	if ok, _, _, _ := l.allow("k0"); ok {
 		t.Fatal("the full map was reset: a limited key logged again inside its window")
 	}
 	now = now.Add(limitWindow)
-	ok, _, over := l.allow("new")
+	ok, _, over, exp := l.allow("new")
 	if !ok || over != 1 {
 		t.Fatalf("after the windows turned: ok=%v overflow=%d, want true 1", ok, over)
 	}
+	// k0's refusal inside its window was suppressed; the sweep that
+	// dropped k0 carries it onto this line (P8-fix-b #16).
+	if exp != 1 {
+		t.Errorf("after the sweep: suppressed_expired=%d, want 1 (k0's suppressed refusal)", exp)
+	}
 	if len(l.seen) != 1 {
 		t.Errorf("expired windows kept: %d keys", len(l.seen))
+	}
+	// Reported once.
+	now = now.Add(limitWindow)
+	if _, _, _, exp := l.allow("again"); exp != 0 {
+		t.Errorf("the expired count was reported twice: %d", exp)
 	}
 }
 

@@ -608,7 +608,7 @@ function RunsPage() {
             value={search.min_duration?.toString() ?? ""}
             placeholder="≥ seconds"
             label="minimum duration in seconds"
-            width="w-28"
+            width="w-32"
             type="number"
             title="duration at least, in seconds — the loaded rows only: the API has no duration filter"
             onApply={(v) => setSearch({ min_duration: numberOrClear(v) })}
@@ -617,7 +617,7 @@ function RunsPage() {
             value={search.min_tokens?.toString() ?? ""}
             placeholder="≥ tokens"
             label="minimum tokens"
-            width="w-28"
+            width="w-32"
             type="number"
             title="input + output tokens at least"
             onApply={(v) => {
@@ -772,6 +772,7 @@ function RunsPage() {
               selectedId={selected >= 0 ? runs[selected]?.id : undefined}
               showCost={costCapable}
               depths={depths}
+              listedAs={search.status}
               sort={{
                 active: sortKey,
                 server: caps.search,

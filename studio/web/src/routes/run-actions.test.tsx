@@ -15,6 +15,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
+import { queryClient } from "@/lib/query"
 import type { RunDoc, RunsPage } from "@/lib/api"
 import { DELETE_OFF, deleteConfirmWords } from "@/lib/run-actions"
 import { renderApp, stubBrowser } from "@/test/app"
@@ -159,10 +160,14 @@ describe("delete on the run page", () => {
     expect(dialog.textContent).toContain(
       "removed from studio's database only — the app's own conversation store is untouched"
     )
-    expect(dialog.textContent).toContain("Its subagent run goes with it:")
+    expect(dialog.textContent).toContain(w.children)
+    expect(w.children).toContain("every subagent run under it, at any depth")
     expect(
       dialog.querySelector(`[data-delete-child="${RUN}/call_1"]`)
     ).toBeTruthy()
+    expect(dialog.querySelector("[data-delete-derived]")?.textContent).toBe(
+      w.derived
+    )
     // Nothing is sent before the confirm.
     expect(studio.calls(`DELETE runs/${RUN}`)).toHaveLength(0)
     fireEvent.click(screen.getByRole("button", { name: "delete run" }))
@@ -171,6 +176,49 @@ describe("delete on the run page", () => {
     )
     await waitFor(() => expect(router.state.location.pathname).toBe("/runs"))
     expect(confirmSpy).not.toHaveBeenCalled()
+  })
+
+  it("deleting a child reads its parent's document again (P8-fix-b #12)", async () => {
+    const CHILD = `${RUN}/call_1`
+    const childDoc = {
+      ...rOK,
+      id: CHILD,
+      parent_run_id: RUN,
+      children: [],
+    } as unknown as RunDoc
+    let parentKids: RunDoc["children"] = kids
+    serve()
+      .on(`GET runs/${RUN}`, () => ({ ...rOK, children: parentKids }))
+      .on(`GET runs/${CHILD}`, childDoc)
+      .on(`GET runs/${CHILD}/events`, pagedEvents([]))
+      .on(`GET runs/${CHILD}/spans`, { spans: [] })
+      .on(`GET runs/${CHILD}/transcript`, transcriptOf([]))
+      .on(`DELETE runs/${CHILD}`, () => {
+        parentKids = []
+        return { deleted: "run", run_id: CHILD, note: "deleted" }
+      })
+      .install()
+    const { router } = renderApp(`/runs/${RUN}`)
+    // The parent's document is in the cache, naming the child.
+    await waitFor(() =>
+      expect(studio.calls(`GET runs/${RUN}`).length).toBeGreaterThan(0)
+    )
+    await router.navigate({ to: "/runs/$id", params: { id: CHILD } })
+    fireEvent.click(await screen.findByRole("button", { name: "delete run…" }))
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries")
+    fireEvent.click(await screen.findByRole("button", { name: "delete run" }))
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe(`/runs/${RUN}`)
+    )
+    expect(
+      invalidate.mock.calls.some(
+        ([f]) => JSON.stringify(f?.queryKey) === JSON.stringify(["run", RUN])
+      )
+    ).toBe(true)
+    // …and the parent no longer lists it.
+    await waitFor(() =>
+      expect(document.querySelector(`[href="/runs/${CHILD}"]`)).toBeNull()
+    )
   })
 
   it("cancel sends nothing; a refusal stays in the dialog in the server's words", async () => {

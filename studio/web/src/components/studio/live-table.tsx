@@ -286,7 +286,7 @@ export function LiveTable({
           const step = stepText(v)
           const tok = tokensOf(v)
           const ttft = v.stats?.ttftMs ?? null
-          const note = attemptNote(v.attempt, !ended(r))
+          const note = attemptNote(v.attempt, !ended(r), v.stats?.step)
           const peeked = peek === r.id
           return (
             <TableRow

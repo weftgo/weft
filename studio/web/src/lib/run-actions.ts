@@ -102,30 +102,47 @@ export function deleteOffWhy(
   return undefined
 }
 
-/** The confirm's words: what goes, and what stays. */
+/** The confirm's words: what goes, and what stays. The server deletes
+ * the run's whole closure — every run whose parent chain reaches it,
+ * at any depth (obsdb/sqlite/delete.go's closure) — and the derived
+ * runs read from its tools' spans (a stock agent's run under one of
+ * its tools, obsdb.StockRunsOf). The page knows the children (one
+ * level) and each child's children_count (the next), so the count is
+ * those known, a floor ("N+ known") when a grandchild may have its
+ * own. */
 export function deleteConfirmWords(run: {
   id: string
-  children: readonly { id: string }[]
+  children: readonly { id: string; children_count?: number }[]
 }): {
   title: string
   body: string
   children: string
+  derived: string
   action: string
   cancel: string
 } {
-  const n = run.children.length
+  const grand = run.children.reduce((n, c) => n + (c.children_count ?? 0), 0)
+  const known = run.children.length + grand
+  const floor = grand > 0 ? "+" : ""
   return {
     title: `Delete run ${run.id}?`,
     body: "Its spans, records, app logs and search index are removed from studio's database only — the app's own conversation store is untouched. This cannot be undone.",
     children:
-      n === 0
-        ? "It has no subagent runs."
-        : n === 1
-          ? "Its subagent run goes with it:"
-          : `Its ${n} subagent runs go with it:`,
+      known === 0
+        ? "No subagent run is known under it; any recorded under it goes with it."
+        : `It goes with every subagent run under it, at any depth (${known}${floor} known):`,
+    derived:
+      "Derived runs read from its tools' spans (a stock agent under one of its tools) go too.",
     action: "delete run",
     cancel: "cancel",
   }
+}
+
+/** A listed child's own subagent runs, beside it in the confirm. */
+export function childrenUnder(n: number): string {
+  return n === 1
+    ? "(+1 subagent run under it)"
+    : `(+${n} subagent runs under it)`
 }
 
 /** The delete's outcome line (the toast). */

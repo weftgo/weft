@@ -1045,8 +1045,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 273,650 B raw / 89,875 B gzip
-(87.8 KiB, the bundle of the ledger's row "U25 run cards"; 8,429 B — 8.2 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 273,704 B raw / 89,920 B gzip
+(87.8 KiB, the bundle of the ledger's row "P8-fix-b review fixes"; 8,384 B — 8.2 KiB — of headroom under
 the 98,304 B, 96 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; A5.4 raised it from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -1662,10 +1662,13 @@ next turn alone says "1 call · next turn t2 (decided or dropped)" — after
 a Branch, a Rollback or an undecided Send that turn is no resume. The
 sessions list's status is the newest turn's stored word (no parked /
 cancelled until U16): its row carries only `status`. The runs list's status filter has `parked`
-too — the API is asked for succeeded and the loaded rows are kept where
-the word reads parked (its chip says so, and that a resume which did
-not succeed is not looked for; the header then reads "N listed of M
-loaded", never "matching"); the live table's filter matches a status
+too — the API's `status=parked` (I3): the open parks by the stored
+link, no run whose `resumed_from` names it. The page's own word reads a
+park decided also when a later turn of its session followed it
+(`nextTurn`), so a run recorded before U13.1, or resumed without
+`weft.ResumeOf`, is listed there while it reads `parked → tN`: such a
+row says "decided by a later turn the record does not link"
+(`lib/status.ts`'s `unlinkedDecided`, P8-fix-b); the live table's filter matches a status
 word by its key, not its text — `parked` never matches a decided park,
 and `failed` no longer matches a cancelled run (whose key is
 `cancelled`); any other word matches the agent or the shown word as
@@ -2354,9 +2357,15 @@ document) carries `children_count` and `children_failed` (H9: the runs
 whose `parent_run_id` names it, one level deep, and those of them that
 failed — read from the children read the cost already makes, one
 `ChildRuns` read per level of a page, never per row; each omitted when
-0) — the runs list's "⑂ n" chip, a disclosure that reads
-`?parent=<id>` and draws the children under the row, one level deeper
-(grandchildren read when opened); in the "with subagents" view the
+0; `children_unknown: true` when that read failed — the count is then
+not known, the chip "⑂ ?", never an absent count read as "no
+subagents"; a session document's turn rows count every parent-linked
+run too, a pool child session's included, from one more `ChildRuns`
+read) — the runs list's "⑂ n" chip, a disclosure that reads
+`?parent=<id>` and draws the first 100 children under the row, one level deeper
+(grandchildren read when opened), "+N more · open the list" linking
+`/runs?parent=<id>` when the row counts more or the read has a next
+page; in the "with subagents" view the
 loaded rows are drawn as trees, a child under its parent; every run row carries `prompt_preview` — the turn's
 own prompt: the input record's last user message with text (on a resume
 that carries a new prompt, that prompt: the next record's user text

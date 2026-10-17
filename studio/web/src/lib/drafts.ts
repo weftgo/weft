@@ -11,7 +11,7 @@
 // data, jsdom): the drafts then live in memory for the page's life —
 // the playground still works, a reload just forgets them.
 import type { FormState } from "./form-state"
-import { validateForm } from "./form-state"
+import { formRefusalOf, validateForm } from "./form-state"
 
 export type DraftKind = "draft" | "experiment"
 
@@ -125,8 +125,24 @@ export async function saveDraft(
 
 /** loadDraft reads one record (null: none in this browser). */
 export async function loadDraft(id: string): Promise<DraftRecord | null> {
+  const out = await loadDraftOutcome(id)
+  return "rec" in out ? out.rec : null
+}
+
+/** loadDraftOutcome is loadDraft saying why it read nothing: a record
+ * kept in an older form version (older), else none here (missing). */
+export async function loadDraftOutcome(
+  id: string
+): Promise<{ rec: DraftRecord } | { refused: "older" | "missing" }> {
   const out = await run<unknown>("readonly", (s) => s.get(id))
-  return valid(out.ok ? out.value : memory.get(id))
+  const raw = out.ok ? out.value : memory.get(id)
+  const rec = valid(raw)
+  if (rec) return { rec }
+  const form =
+    raw && typeof raw === "object"
+      ? (raw as Record<string, unknown>).form
+      : undefined
+  return { refused: formRefusalOf(form) === "older" ? "older" : "missing" }
 }
 
 /** listDrafts lists the records of a kind, newest first. */

@@ -172,6 +172,10 @@ export interface RunRow extends CostFields, DelegatedCostFields {
    * lib/delegation.ts words them. */
   children_count?: number
   children_failed?: number
+  /** The children read failed (P8-fix-b): the count is not known —
+   * lib/delegation.ts draws "⑂ ?", never "no subagents". Absent when
+   * the count is known, and from an older Studio. */
+  children_unknown?: boolean
 }
 
 /** GET /api/runs → RunsPage. */

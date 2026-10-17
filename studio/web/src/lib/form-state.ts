@@ -127,6 +127,39 @@ function labOf(v: unknown): Partial<LabFields> | undefined {
  * a hand-built link cannot stall the page. */
 export const FORM_MAX_ROWS = 64
 
+/** Why a form was not read (formRefusalOf): an older format (a v1
+ * link or draft, before U26's one step), a newer one, or not a form. */
+export type FormRefusal = "older" | "newer" | "unreadable"
+
+/** formRefusalOf names why validateForm refused o: its version is
+ * below FORM_VERSION (older), above it (newer), or it is no form. */
+export function formRefusalOf(o: unknown): FormRefusal {
+  if (isObj(o) && typeof o.v === "number" && Number.isInteger(o.v)) {
+    if (o.v < FORM_VERSION) return "older"
+    if (o.v > FORM_VERSION) return "newer"
+  }
+  return "unreadable"
+}
+
+/** The playground's line for a share link it did not read, per
+ * refusal: an older one names the way out (the CHANGELOG's). */
+export const LINK_REFUSED: Record<FormRefusal, string> = {
+  older:
+    "the link's form is from an older Studio (before the playground's one step picker): re-create it from the experiment — open it and \"clone into the form\"",
+  newer: "the link's form was made by a newer Studio: open it there",
+  unreadable: "the link's form could not be read: it was cut or damaged",
+}
+
+/** The line for a draft (?exp=) the page did not reopen. */
+export function draftRefusedWords(
+  id: string,
+  why: "older" | "missing"
+): string {
+  return why === "older"
+    ? `draft ${id} is from an older Studio (before the playground's one step picker): re-create it from the experiment — open it and "clone into the form"`
+    : `draft ${id} is not in this browser — a draft stays in the browser that made it; a share link travels`
+}
+
 /** validateForm reads a form back: unknown keys dropped, wrong shapes
  * dropped, a newer version or no variant refused (null). */
 export function validateForm(o: unknown): FormState | null {
@@ -381,21 +414,34 @@ async function inflateBounded(
  * longer than a share link carries (SHARE_CAP), or when it inflates
  * past DECODE_CAP. */
 export async function decodeForm(value: string): Promise<FormState | null> {
-  if (!value || value.length > SHARE_CAP) return null
+  const out = await decodeFormOutcome(value)
+  return "form" in out ? out.form : null
+}
+
+/** decodeFormOutcome is decodeForm saying why it read nothing: an
+ * older or newer version (FormRefusal), else unreadable. */
+export async function decodeFormOutcome(
+  value: string
+): Promise<{ form: FormState } | { refused: FormRefusal }> {
+  const unreadable = { refused: "unreadable" as const }
+  if (!value || value.length > SHARE_CAP) return unreadable
   const bytes = unb64url(value.slice(1))
-  if (!bytes) return null
+  if (!bytes) return unreadable
   const json =
     value[0] === "z"
       ? await inflateBounded(bytes, DECODE_CAP)
       : value[0] === "j"
         ? bytes
         : null
-  if (!json) return null
+  if (!json) return unreadable
+  let o: unknown
   try {
-    return validateForm(JSON.parse(new TextDecoder().decode(json)))
+    o = JSON.parse(new TextDecoder().decode(json))
   } catch {
-    return null
+    return unreadable
   }
+  const form = validateForm(o)
+  return form ? { form } : { refused: formRefusalOf(o) }
 }
 
 /** stateFromHash is the #state= value of a URL fragment, if any. */

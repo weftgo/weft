@@ -9,14 +9,16 @@
 // filter); experiments by name. A pasted id prefix, a public id or a
 // key=value tag is looked up on the server and its runs rank first as
 // exact matches, Enter opening the first; every other item matches by
-// contiguous substrings, never a subsequence (lib/finder.ts, U26). Each group is there only under its
+// contiguous substrings, never a subsequence (lib/finder.ts, U26), and
+// with no exact match Enter opens nothing until the user moves the
+// selection (acceptSelection, P8-fix-b). Each group is there only under its
 // capability ("traces", "playground" for experiments — and no panel
 // token, which the experiments routes refuse). cmdk gives the
 // dialog, the combobox and the listbox: ↑↓ move, Enter opens, Escape
 // closes. Every jump is a links.ts link. No separator between the
 // groups: a listbox may hold only groups and options (axe's
 // aria-required-children), and the headings divide them.
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { useRouter } from "@tanstack/react-router"
 import {
@@ -46,11 +48,14 @@ import {
 import type { RunRow } from "@/lib/api"
 import { toggleDensity } from "@/lib/density"
 import {
+  acceptSelection,
   EXACT_VALUE,
   exactRows,
   lookupsOf,
   metaKeywords,
+  movesSelection,
   paletteFilter,
+  tagHintFor,
 } from "@/lib/finder"
 import { resetPaneSizes } from "@/lib/pane-sizes"
 import {
@@ -110,6 +115,13 @@ export function CommandPalette({
   const has = (c: string) => caps.includes(c)
   const density = useDensity()
   const [input, setInput] = useState("")
+  // cmdk's selection, held here so its automatic pick of the first item
+  // can be refused (acceptSelection). A refusal toggles "" and " " —
+  // both read as no selection (cmdk trims) — because cmdk sets its own
+  // value before it asks, and an unchanged prop would not undo that.
+  const [selected, setSelected] = useState("")
+  // The user moved the selection since the text last changed.
+  const moved = useRef(false)
   useEffect(() => {
     if (!open) setInput("")
   }, [open])
@@ -190,6 +202,18 @@ export function CommandPalette({
       })
     : []
   const exactIDs = new Set(exact.map((r) => r.id))
+  const tagHint = tagHintFor(look, exact.length, settled)
+  const onSelection = (v: string) => {
+    if (
+      acceptSelection({
+        text: input,
+        exactCount: exact.length,
+        moved: moved.current,
+      })
+    )
+      setSelected(v)
+    else setSelected((cur) => (cur === "" ? " " : ""))
+  }
   const hitRows =
     term && searchable
       ? (hits.data?.runs ?? []).filter((r) => !exactIDs.has(r.id))
@@ -231,13 +255,27 @@ export function CommandPalette({
     >
       {/* The dialog is the frame; cmdk's root (its store) is Command —
           without it every item throws on open. */}
-      <Command filter={paletteFilter}>
+      <Command
+        filter={paletteFilter}
+        value={selected}
+        onValueChange={onSelection}
+        onKeyDown={(e) => {
+          if (movesSelection(e)) moved.current = true
+        }}
+      >
         <CommandInput
           placeholder={PALETTE_PLACEHOLDER}
           value={input}
-          onValueChange={setInput}
+          onValueChange={(v) => {
+            moved.current = false
+            setInput(v)
+          }}
         />
-        <CommandList>
+        <CommandList
+          onPointerMoveCapture={() => {
+            moved.current = true
+          }}
+        >
           <CommandEmpty>Nothing matches.</CommandEmpty>
           {exact.length > 0 ? (
             <CommandGroup heading="Exact match" data-palette-exact>
@@ -446,6 +484,16 @@ export function CommandPalette({
             </CommandItem>
           </CommandGroup>
         </CommandList>
+        {/* Outside the listbox (only groups and options belong there). */}
+        {tagHint ? (
+          <p
+            className="border-t px-3 py-1.5 text-[11px] text-muted-foreground"
+            role="note"
+            data-palette-tag-hint
+          >
+            {tagHint}
+          </p>
+        ) : null}
       </Command>
     </CommandDialog>
   )

@@ -96,9 +96,19 @@ export interface AttemptNote {
 
 export function attemptNote(
   a: LiveAttempt | undefined,
-  running: boolean
+  running: boolean,
+  /** The run's current step (0-based, the live stats'): an attempt of
+   * an earlier step says nothing more — the run moved on (P8-fix-b). */
+  current?: number | null
 ): AttemptNote | null {
   if (!a) return null
+  if (
+    a.step >= 0 &&
+    current !== undefined &&
+    current !== null &&
+    a.step < current
+  )
+    return null
   const step = a.step >= 0 ? `step ${a.step + 1} ` : ""
   const via = a.layer === "fallback" ? " (fallback)" : ""
   const kind = a.error_type ? ` (${a.error_type})` : ""

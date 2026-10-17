@@ -425,6 +425,9 @@ func TestRunsCommand(t *testing.T) {
 		{[]string{"--status", "succeeded"}, "r_ok"},
 		{[]string{"--status", "parked"}, ""},
 		{[]string{"--status", "cancelled"}, ""},
+		// P8-fix-b #14: cancelled is a failed run's word — --failed
+		// beside it narrows nothing more, never a usage error.
+		{[]string{"--status", "cancelled", "--failed"}, ""},
 		{[]string{"--agent", "orders"}, "r_ok"},
 		{[]string{"--since", "1h"}, "r_fail,r_ok"},
 		{[]string{"--since", time.Now().Add(time.Hour).UTC().Format(time.RFC3339)}, ""},

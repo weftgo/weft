@@ -71,6 +71,16 @@ type holesDoc struct {
 	} `json:"holes"`
 }
 
+// msNorm puts a fixed 1 for the measured milliseconds a real run's
+// events stamp (latency_ms, ttft_ms: wall clock, 1 on one run and 5 on
+// the next), as stepNorm does, so the events goldens are byte-stable
+// (P8-fix-b #18). The JSON type is kept; the test reads no value.
+func msNorm(body string) string {
+	return msRe.ReplaceAllString(body, `"$1":1`)
+}
+
+var msRe = regexp.MustCompile(`"(latency_ms|ttft_ms)":\s*[0-9]+`)
+
 // TestEventAttrs: a capped run's events carry
 // weft.content.truncated_bytes where the cap cut (the tool result),
 // and nothing where it did not; a content-off run's events all carry
@@ -83,7 +93,7 @@ func TestEventAttrs(t *testing.T) {
 	done := func(b string) bool { return strings.Contains(b, `"type":"run_finish"`) }
 
 	capped := fetchJSON(t, ts, "/api/runs/r_cap/events?limit=1000", done)
-	requestsGolden(t, "events-capped.golden.json", capped)
+	requestsGolden(t, "events-capped.golden.json", msNorm(capped))
 	var cp attrsPage
 	decode(t, capped, &cp)
 	cut := 0
@@ -113,7 +123,7 @@ func TestEventAttrs(t *testing.T) {
 	}
 
 	stripped := fetchJSON(t, ts, "/api/runs/r_strip/events?limit=1000", done)
-	requestsGolden(t, "events-stripped.golden.json", stripped)
+	requestsGolden(t, "events-stripped.golden.json", msNorm(stripped))
 	var sp attrsPage
 	decode(t, stripped, &sp)
 	for _, e := range sp.Events {

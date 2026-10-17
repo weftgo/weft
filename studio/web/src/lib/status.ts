@@ -170,6 +170,24 @@ export function statusOf(
     : { key: k, word: r.status, hint: r.status, role: "resumed" }
 }
 
+/** The note on a row the server lists as parked (/api/runs?status=
+ * parked: no run's resumed_from names it) that this page reads
+ * decided: a later turn of its session followed it, but no resume link
+ * was recorded (pre-U13.1 data, or a resume without weft.ResumeOf). */
+export const UNLINKED_DECIDED =
+  "decided by a later turn the record does not link"
+
+/** unlinkedDecided says a row listed under the server's parked filter
+ * reads decided here only through a later turn (statusOf's nextTurn),
+ * never through a stored resume link. */
+export function unlinkedDecided(
+  listedAs: string | undefined,
+  s: Status,
+  r: StatusRow
+): boolean {
+  return listedAs === "parked" && s.key === "resumed" && !r.resumed_by
+}
+
 /** The panel's turn filter: the words a user picks, one key each.
  * parked is open or not yet linked; resumed ("parked → (decided)") a
  * park whose resume is known. */

@@ -90,6 +90,18 @@ describe("attempt frames", () => {
     ).toBe("ok on attempt 2 (fallback)")
     // A first try that answered says nothing.
     expect(attemptNote(att({ status: "ok" }), true)).toBeNull()
+    // P8-fix-b #13: an earlier step's attempt says nothing on a later
+    // step — "ok on attempt 2" from step 1 is gone on step 6.
+    const ok2 = att({
+      step: 0,
+      attempt: 2,
+      status: "ok",
+      error_type: undefined,
+    })
+    expect(attemptNote(ok2, true, 0)?.text).toBe("ok on attempt 2")
+    expect(attemptNote(ok2, true, 5)).toBeNull()
+    expect(attemptNote(att({ step: 0 }), true, 5)).toBeNull()
+    expect(attemptNote(ok2, true, null)?.text).toBe("ok on attempt 2")
     expect(attemptNote(undefined, true)).toBeNull()
   })
 })

@@ -54,6 +54,17 @@ after the non-weft spans below them, and `weft_runs` last: a deletion
 cut short leaves the run listed and a retry finishes it. The TTLs stay
 as they are: Studio's retention is additive.
 
+The read-time status `parked` (`RunQuery.Status = obsdb.StatusParked`,
+`/api/runs?status=parked`) is an anti-join: a run with pending calls
+whose id no row's `ResumedFrom` names. That `NOT IN (SELECT
+ResumedFrom … WHERE ResumedFrom <> '')` set is built from the
+`ResumedFrom` column of every `weft_runs` row — `idx_resumed_from` (a
+bloom filter) serves a lookup of given ids, not "every non-empty
+value" — so the parked filter reads one String column across the whole
+table per query (the resumes only are kept in the set, small next to
+the runs). On a large table expect that column scan; the other status
+words read only the grouped rows the order index walks.
+
 DSN forms: `clickhouse://user:pass@host:9000/database` (native
 protocol, the port is 9000 not 8123), `clickhouses://...` or
 `?secure=1` for TLS, extra query parameters become clickhouse-go

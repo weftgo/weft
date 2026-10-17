@@ -8,16 +8,19 @@
 // runs to compare with; ?b= also takes ids joined by commas.
 import { useQuery } from "@tanstack/react-query"
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 
-import { runQuery, runsQuery } from "@/lib/api"
+import { fetchRuns, runQuery, runsQuery } from "@/lib/api"
 import type { RunRow } from "@/lib/api"
 import {
   PICK_BASE,
+  PICK_FIND,
+  PICK_FOUND_NONE,
   PICK_NONE,
   PICK_OTHER,
   PICK_UNREADABLE,
   candidates,
+  findQueries,
   splitRuns,
 } from "@/lib/compare-picker"
 import { relativeTime } from "@/lib/format"
@@ -151,16 +154,69 @@ function RunPicker({
 }) {
   const recent = useQuery(runsQuery({ limit: 50 }))
   const baseRow = useQuery({ ...runQuery(base ?? ""), enabled: !!base })
+  // The base's conversation: its public id's runs, offered first.
+  const pub = baseRow.data?.public_id
+  const samePublic = useQuery({
+    queryKey: ["compare", "public", pub],
+    queryFn: () => fetchRuns({ public_id: pub, all: true, limit: 20 }),
+    enabled: !!pub,
+    staleTime: 5_000,
+  })
+  // The find box: past the newest 50, by id prefix and by agent.
+  const [text, setText] = useState("")
+  const [settled, setSettled] = useState("")
+  useEffect(() => {
+    const t = setTimeout(() => setSettled(text), 250)
+    return () => clearTimeout(t)
+  }, [text])
+  const find = findQueries(settled)
+  const byPrefix = useQuery({
+    queryKey: ["compare", "find", "id_prefix", find?.id_prefix],
+    queryFn: () =>
+      fetchRuns({ id_prefix: find?.id_prefix, all: true, limit: 8 }),
+    enabled: !!find,
+    staleTime: 5_000,
+  })
+  const byAgent = useQuery({
+    queryKey: ["compare", "find", "agent", find?.agent],
+    queryFn: () => fetchRuns({ agent: find?.agent, limit: 8 }),
+    enabled: !!find,
+    staleTime: 5_000,
+  })
+  const found = find
+    ? [...(byPrefix.data?.runs ?? []), ...(byAgent.data?.runs ?? [])]
+    : []
+  const finding = !!find && (byPrefix.isPending || byAgent.isPending)
   const picks = candidates(
     recent.data?.runs ?? [],
     base ? (baseRow.data ?? ({ id: base } as RunRow)) : undefined,
-    compared
+    compared,
+    { found, samePublic: samePublic.data?.runs }
   )
   return (
     <section className="space-y-1.5" aria-label="pick a run" data-run-picker>
-      <h2 className="text-xs text-muted-foreground">
-        {base ? PICK_OTHER : PICK_BASE}
-      </h2>
+      <div className="flex flex-wrap items-center gap-2">
+        <h2 className="text-xs text-muted-foreground">
+          {base ? PICK_OTHER : PICK_BASE}
+        </h2>
+        <input
+          type="search"
+          className="w-full min-w-0 rounded border bg-transparent px-2 py-0.5 font-mono text-[11px] sm:w-64"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder={PICK_FIND}
+          aria-label={PICK_FIND}
+          data-pick-find
+        />
+        {find && !finding && found.length === 0 ? (
+          <span
+            className="font-mono text-[11px] text-faint"
+            data-pick-found-none
+          >
+            {PICK_FOUND_NONE}
+          </span>
+        ) : null}
+      </div>
       {recent.isPending ? (
         <p className="font-mono text-[11px] text-faint">…</p>
       ) : recent.isError ? (

@@ -2,7 +2,7 @@
 // the raw explorer and the current-event readout. Pure functions.
 import type { Message, WireEvent } from "./api"
 import { msText } from "./attempts"
-import { endCard, stopDetail, stoppedByWords, stopStep } from "./stopped-by"
+import { endCard, failedAtStep, stopDetail, stoppedByWords } from "./stopped-by"
 
 export type EventKind =
   | "step" // run/step boundaries
@@ -229,38 +229,10 @@ export interface AnswerStep {
   }
 }
 
-/** failedAtStep is the step a failed run failed at: the one core's
- * RunError names ("run failed at step N"), else its last step;
- * undefined for a run that did not fail or ran no step. Core appends a
- * step's record only after its model call and its tools, so a model
- * error or a cancel during step N reads "at step N" with steps N: step
- * N is the open one (its errored chat span, the fold's open step). A
- * max_steps run's error names the step it would have run next ("at step
- * 3" after steps 0–2): its stop is its last step (stopStep). A cancel
- * before step N began names a step no surface draws: landStep falls
- * back to the last one drawn. */
-export function failedAtStep(r: AnswerRun): number | undefined {
-  if (r.status !== "failed") return undefined
-  const at = /run failed at step (\d+)/.exec(r.err ?? "")?.[1]
-  return at === undefined || r.stopped_by === "max_steps"
-    ? stopStep(r.steps)
-    : Number(at)
-}
-
-/** landStep is where a selection lands for the step a run failed at
- * among the steps a surface draws: that step, else the last drawn
- * before it (a cancel before step N began: N − 1); undefined with no
- * failure or none drawn before it (the caller's step 0). */
-export function landStep(
-  failedAt: number | undefined,
-  drawn: readonly number[]
-): number | undefined {
-  let best: number | undefined
-  if (failedAt !== undefined)
-    for (const n of drawn)
-      if (n <= failedAt && (best === undefined || n > best)) best = n
-  return best
-}
+// failedAtStep and landStep live in stopped-by.ts (the header chip
+// and the story's end card read them too); re-exported here, where the
+// answer and the panel's Story import them.
+export { failedAtStep, landStep } from "./stopped-by"
 
 /** The stops a loop guard makes at the continuation point (AGENTS.md
  * rule 13): the step finished and the guard refused the next model

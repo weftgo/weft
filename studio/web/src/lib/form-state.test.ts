@@ -12,8 +12,11 @@ import {
   cellKey,
   DECODE_CAP,
   decodeForm,
+  decodeFormOutcome,
+  draftRefusedWords,
   encodeForm,
   FORM_VERSION,
+  LINK_REFUSED,
   formFromExperiment,
   formOfFields,
   parseCellCommandID,
@@ -28,6 +31,7 @@ import {
   deleteDraft,
   listDrafts,
   loadDraft,
+  loadDraftOutcome,
   resetDrafts,
   saveDraft,
 } from "./drafts"
@@ -145,6 +149,26 @@ describe("the share link (#state=)", () => {
       })
     ).value
     expect(await decodeForm(newer)).toBeNull()
+  })
+
+  it("says why it read nothing: an older (v1) form names the way out, a newer one and a damaged one their own (P8-fix-b #3)", async () => {
+    const v1 = { v: 1, step: 2, variants: [{ key: "A" }] }
+    const older = (await encodeForm(v1 as unknown as FormState, { codec: "j" }))
+      .value
+    expect(await decodeFormOutcome(older)).toEqual({ refused: "older" })
+    expect(await decodeForm(older)).toBeNull()
+    const newer = (
+      await encodeForm({ ...form, v: 3 } as unknown as FormState, {
+        codec: "j",
+      })
+    ).value
+    expect(await decodeFormOutcome(newer)).toEqual({ refused: "newer" })
+    expect(await decodeFormOutcome("z!!!")).toEqual({ refused: "unreadable" })
+    const ok = (await encodeForm(form)).value
+    expect(await decodeFormOutcome(ok)).toEqual({ form })
+    expect(LINK_REFUSED.older).toMatch(/re-create it from the experiment/)
+    expect(LINK_REFUSED.newer).toMatch(/newer Studio/)
+    expect(LINK_REFUSED.unreadable).not.toMatch(/newer/)
   })
 
   it("is the fragment's state= key", () => {
@@ -464,6 +488,27 @@ describe("drafts (no IndexedDB here: the in-memory stand-in)", () => {
     ])
     await deleteDraft("d_1")
     expect(await loadDraft("d_1")).toBeNull()
+    resetDrafts()
+  })
+})
+
+describe("loadDraftOutcome (P8-fix-b #3)", () => {
+  it("a draft kept in form v1 reads older, with the way out; none here reads missing", async () => {
+    resetDrafts()
+    await saveDraft("d_old", {
+      v: 1,
+      step: 2,
+      variants: [{ key: "A" }],
+    } as unknown as FormState)
+    expect(await loadDraftOutcome("d_old")).toEqual({ refused: "older" })
+    expect(await loadDraft("d_old")).toBeNull()
+    expect(await loadDraftOutcome("d_none")).toEqual({ refused: "missing" })
+    expect(draftRefusedWords("d_old", "older")).toMatch(
+      /^draft d_old is from an older Studio.*re-create it from the experiment/
+    )
+    expect(draftRefusedWords("d_none", "missing")).toMatch(
+      /^draft d_none is not in this browser/
+    )
     resetDrafts()
   })
 })

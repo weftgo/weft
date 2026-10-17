@@ -4,9 +4,11 @@
 //
 //   - An id is never fuzzy-matched: a pasted id prefix is looked up on
 //     the server (GET /api/runs?id_prefix=…&all=1 — children included)
-//     and its rows rank first as exact matches; a public id (pub_…) is
-//     GET /api/runs?public_id=…; a tag (key=value) is
-//     GET /api/runs?tag.key=value. Each answer is kept only where it
+//     and its rows rank first as exact matches; any such word is also
+//     looked up as a public id (GET /api/runs?public_id=…: an app picks
+//     its own, "pub_…" or "arena:run-1:rw.deep-delegation" alike); a
+//     tag (key=value) is GET /api/runs?tag.key=value. Each answer is
+//     kept only where it
 //     says what was asked (the id starts with the text, the public id
 //     or the pair is the text), so a server that ignores a filter can
 //     never put a stranger first.
@@ -16,7 +18,12 @@
 //     id merely holds those characters in order, and Enter opens
 //     nothing when nothing matches.
 //   - A run's metadata pairs (k=v) are keywords: a scenario tag's value
-//     finds the loaded runs it labels.
+//     finds the loaded runs it labels. The server matches a tag only by
+//     its key (tag.<k>=<v>), so a bare value finds no older run: the
+//     palette says so (TAG_VALUE_HINT) while nothing exact answers.
+//   - Enter opens the exact match. With none, cmdk's own pick of the
+//     first item is not taken (acceptSelection): Enter does nothing
+//     until the user moves the selection (arrows, the pointer).
 
 /** The shortest text looked up as an id prefix. */
 export const ID_PREFIX_MIN = 4
@@ -29,8 +36,8 @@ export interface Lookups {
 }
 
 /** lookupsOf reads a settled palette text: one word with no space is
- * an id prefix once it is ID_PREFIX_MIN long; pub_… is also a public
- * id; key=value is a tag (and nothing else). */
+ * an id prefix and a public id once it is ID_PREFIX_MIN long (pub_… at
+ * any length is a public id); key=value is a tag (and nothing else). */
 export function lookupsOf(term: string): Lookups {
   const t = term.trim()
   if (!t || /\s/.test(t)) return {}
@@ -38,8 +45,9 @@ export function lookupsOf(term: string): Lookups {
   if (eq > 0 && eq < t.length - 1)
     return { tag: { key: t.slice(0, eq), value: t.slice(eq + 1) } }
   const out: Lookups = {}
-  if (t.length >= ID_PREFIX_MIN && eq < 0) out.idPrefix = t
-  if (t.startsWith("pub_")) out.publicId = t
+  if (eq >= 0) return out
+  if (t.length >= ID_PREFIX_MIN) out.idPrefix = t
+  if (t.length >= ID_PREFIX_MIN || t.startsWith("pub_")) out.publicId = t
   return out
 }
 
@@ -109,4 +117,45 @@ export function paletteFilter(
   if (body.startsWith(words[0]) || v.startsWith(words[0])) return 0.9
   const at = hay.indexOf(words[0])
   return 0.1 + 0.7 / (1 + at / 32)
+}
+
+/** What the palette says under a bare word nothing exact answers: the
+ * server matches a tag by its key only. */
+export const TAG_VALUE_HINT =
+  "a tag value? the server matches tags as key=value (e.g. scenario=rw.deep-delegation)"
+
+/** tagHintFor is TAG_VALUE_HINT when the settled text is one bare word
+ * (an id prefix's shape, no "=") and no exact match answers it. */
+export function tagHintFor(
+  l: Lookups,
+  exactCount: number,
+  settled: boolean
+): string | undefined {
+  if (!settled || exactCount > 0 || !l.idPrefix) return undefined
+  return TAG_VALUE_HINT
+}
+
+/** acceptSelection is whether the palette takes a selection cmdk
+ * offers: always while the box is empty, once the user has moved it
+ * (arrows, the pointer), or when an exact match answers the text —
+ * otherwise cmdk's automatic pick of the first item is dropped, so
+ * Enter on a substring hit opens nothing (UX-A-13). */
+export function acceptSelection(o: {
+  text: string
+  exactCount: number
+  moved: boolean
+}): boolean {
+  return !o.text.trim() || o.moved || o.exactCount > 0
+}
+
+/** The keys that move cmdk's selection: the palette counts them as the
+ * user's choice. */
+export function movesSelection(e: { key: string; ctrlKey?: boolean }): boolean {
+  if (
+    ["ArrowDown", "ArrowUp", "Home", "End", "PageUp", "PageDown"].includes(
+      e.key
+    )
+  )
+    return true
+  return !!e.ctrlKey && ["n", "p", "j", "k"].includes(e.key)
 }

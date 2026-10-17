@@ -581,6 +581,10 @@ type coster struct {
 	table *PricingTable
 	kids  map[string][]obsdb.RunRow
 	memo  map[string]runCost
+	// partKids marks the runs whose children in kids are a part only:
+	// a set's (setCost) whose one-level read (primeChildren) failed —
+	// the row's children_count is then not known (children_unknown).
+	partKids map[string]bool
 }
 
 // runCost is one run's own and delegated figures.
@@ -595,7 +599,7 @@ func (rc runCost) total() (float64, bool) {
 }
 
 func (s *Server) coster(ctx context.Context) *coster {
-	return &coster{ctx: ctx, db: s.db, table: s.pricing, kids: map[string][]obsdb.RunRow{}, memo: map[string]runCost{}}
+	return &coster{ctx: ctx, db: s.db, table: s.pricing, kids: map[string][]obsdb.RunRow{}, memo: map[string]runCost{}, partKids: map[string]bool{}}
 }
 
 // prime records a run's children already read (a run document's).
@@ -641,6 +645,40 @@ func (c *coster) primeTrees(recs []obsdb.RunRow) {
 			}
 		}
 		ids = next
+	}
+}
+
+// primeChildren reads the runs' children, one level, in one
+// obsdb.TreeReader.ChildRuns read, over what a set primed (setCost: a
+// session's runs only — a thread/pool child session's run or a nested
+// Generate carries another session id, so the set misses it). The
+// cost is unchanged (it reads the core Subagent children, which the
+// set holds); the rows' children_count / children_failed count every
+// parent-linked run, as the runs list's do. Without a TreeReader, or
+// when the read fails, each run's count is marked unknown.
+func (c *coster) primeChildren(recs []obsdb.RunRow) {
+	ids := make([]string, 0, len(recs))
+	for _, r := range recs {
+		ids = append(ids, r.ID)
+	}
+	if len(ids) == 0 {
+		return
+	}
+	tr, ok := c.db.(obsdb.TreeReader)
+	var kids map[string][]obsdb.RunRow
+	var err error
+	if ok {
+		kids, err = tr.ChildRuns(c.ctx, ids)
+	}
+	if !ok || err != nil {
+		slog.DebugContext(c.ctx, "studio: a set's child runs could not be read: their counts are unknown", "err", err)
+		for _, id := range ids {
+			c.partKids[id] = true
+		}
+		return
+	}
+	for _, id := range ids {
+		c.prime(id, kids[id])
 	}
 }
 
@@ -832,7 +870,14 @@ func (c *coster) fill(out *runRow, rec obsdb.RunRow) {
 	out.delegatedFields = rc.delegated.delegatedFields()
 	// The children the cost read (primed for a page, else read for this
 	// row): their count and failures ride on the row (H9), no read more.
-	for _, k := range c.kids[rec.ID] {
+	// When that read failed (or only a set's part is held) the count is
+	// not known: children_unknown, never an absent count that reads as
+	// "no subagents".
+	kids, read := c.kids[rec.ID]
+	if !read || c.partKids[rec.ID] {
+		out.ChildrenUnknown = true
+	}
+	for _, k := range kids {
 		out.ChildrenCount++
 		if k.Status == obsdb.StatusFailed {
 			out.ChildrenFailed++

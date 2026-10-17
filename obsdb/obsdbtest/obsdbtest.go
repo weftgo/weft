@@ -1261,7 +1261,7 @@ func idPrefix(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
 		db := open(t)
 		var recs []obsdb.Record
-		for _, id := range []string{"1c06797fab", "1c06797fcd", "1c0679", "1C06797fef", "1c_6797f", "2c06797f"} {
+		for _, id := range []string{"1c06797fab", "1c06797fcd", "1c0679", "1C06797fef", "1c_6797f", "2c06797f", "1d", "0z"} {
 			recs = append(recs, record(id, "event", "run_start", 0, `{"type":"run_start","id":"`+id+`"}`, nil))
 		}
 		recs = append(recs, record("1c06797fkid", "event", "run_start", 0, `{"type":"run_start","id":"1c06797fkid"}`,
@@ -1296,6 +1296,11 @@ func idPrefix(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			{obsdb.RunQuery{IDPrefix: "1c%"}, ""},
 			{obsdb.RunQuery{IDPrefix: "1C"}, "1C06797fef"},
 			{obsdb.RunQuery{IDPrefix: "1c06797fzz"}, ""},
+			// One character: the range is closed on both sides — "1d"
+			// and "2c…" sort above "1", "0z" and "1C…" below.
+			{obsdb.RunQuery{IDPrefix: "1"}, "1C06797fef 1c0679 1c06797fab 1c06797fcd 1c_6797f 1d"},
+			{obsdb.RunQuery{IDPrefix: "2"}, "2c06797f"},
+			{obsdb.RunQuery{IDPrefix: "0"}, "0z"},
 		} {
 			if got := strings.Join(ids(c.q), " "); got != c.want {
 				t.Errorf("%+v = %q, want %q", c.q, got, c.want)

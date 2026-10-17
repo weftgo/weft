@@ -15,7 +15,7 @@ import { golden } from "../test/fake-studio"
 import type { RequestRow, RunDoc, Span } from "../lib/api"
 import { sha256Hex } from "../lib/request-pane"
 import { attemptLabel } from "../lib/attempts"
-import { CAUSES } from "../lib/honesty"
+import { CAUSES, HOLES } from "../lib/honesty"
 import { badgeLabel } from "./badges"
 import { MANIFEST_RETRY_MS } from "./element"
 import { COMPOSED_MAX, composedCache } from "./request"
@@ -372,8 +372,8 @@ describe("E1 Done, in the panel", () => {
         JSON.stringify({
           error: { code: "forbidden", message: "read scope" },
           badge: "hidden",
-          reason: "a read-scoped panel token does not read system prompts",
-          fix: "use a playground-scoped token",
+          reason: HOLES.hidden.reason,
+          fix: HOLES.hidden.fix,
         }),
         {
           status: 403,

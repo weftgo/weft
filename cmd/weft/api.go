@@ -261,10 +261,14 @@ func runRuns(args []string, stdout, stderr io.Writer) error {
 		return usageError("--status: %v", err)
 	}
 	if *failed {
-		if st != "" && st != obsdb.StatusFailed {
+		// --failed narrows nothing a failed word does not: --status
+		// cancelled (a failed run whose context ended) keeps its word.
+		if st != "" && st.Stored() != obsdb.StatusFailed {
 			return usageError("--failed and --status %s ask for different runs", st)
 		}
-		st = obsdb.StatusFailed
+		if st == "" {
+			st = obsdb.StatusFailed
+		}
 	}
 	if st != "" {
 		q.Set("status", string(st))

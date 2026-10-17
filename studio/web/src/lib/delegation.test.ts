@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest"
 
-import { childrenChip, nest } from "./delegation"
+import {
+  CHILDREN_COUNT_UNKNOWN,
+  childrenChip,
+  moreChildren,
+  nest,
+} from "./delegation"
 
 const r = (id: string, parent_run_id = "") => ({ id, parent_run_id })
 
@@ -20,6 +25,22 @@ describe("childrenChip", () => {
     expect(c?.failed).toBe("2 failed")
     expect(c?.title).toContain("3 child runs")
     expect(c?.title).toContain("2 failed")
+  })
+})
+
+describe("the children read's edges (P8-fix-b)", () => {
+  it("an unknown count is ⑂ ?", () => {
+    expect(childrenChip({ children_unknown: true })).toEqual({
+      text: "⑂ ?",
+      failed: "",
+      title: CHILDREN_COUNT_UNKNOWN,
+    })
+  })
+  it("+N more past the page read; + more when only the server's cursor says so", () => {
+    expect(moreChildren(100, 250, true)).toBe("+150 more · open the list")
+    expect(moreChildren(100, 100, false)).toBeUndefined()
+    expect(moreChildren(100, 90, true)).toBe("+ more · open the list")
+    expect(moreChildren(3, undefined, false)).toBeUndefined()
   })
 })
 

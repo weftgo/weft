@@ -2,6 +2,7 @@
 // against its source, from GET /api/diff (served from the E3.1 goldens,
 // studio/testdata/api/diff*.golden.json), drawn through lib/stepdiff.ts.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { CAUSES } from "../lib/honesty"
 
 import { golden } from "../test/fake-studio"
 import type { PanelState } from "./state"
@@ -131,10 +132,12 @@ describe("the result pane's step compare", () => {
   it("a truncated response says so with the response_cap badge", async () => {
     const doc = golden<Record<string, unknown>>("diff")
     doc.holes = [
+      // The words the server sends for it (lib/honesty.ts's CAUSES,
+      // pinned by holes.golden.json), never a fixture's own.
       {
         hole: "truncated",
-        reason: "this response reads a bounded number of steps",
-        fix: "open the later steps",
+        cause: "response_cap",
+        ...CAUSES.truncated!.response_cap,
       },
     ]
     fakeStudio(stepDiffRoutes(doc), DIFF_META)

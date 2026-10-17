@@ -194,9 +194,15 @@ func runWhere(q obsdb.RunQuery, now time.Time) (string, []any) {
 	}
 	if q.IDPrefix != "" {
 		// A prefix by substr (no LIKE wildcard, no case folding); the
-		// lower bound lets the planner range-scan the primary key.
+		// bounds close the range the planner scans on the primary key:
+		// every id with the prefix sorts at or after it and before its
+		// successor (BINARY collation compares bytes).
 		conds = append(conds, "run_id >= ? AND substr(run_id, 1, length(?)) = ?")
 		args = append(args, q.IDPrefix, q.IDPrefix, q.IDPrefix)
+		if hi, ok := prefixEnd(q.IDPrefix); ok {
+			conds = append(conds, "run_id < ?")
+			args = append(args, hi)
+		}
 	}
 	if q.StoppedBy != "" {
 		cond, cargs := stoppedByCond(q.StoppedBy)
@@ -1399,4 +1405,20 @@ func problemsOf(stored string) obsdb.Problems {
 		_ = json.Unmarshal([]byte(stored), &tokens)
 	}
 	return obsdb.CountProblems(tokens)
+}
+
+// prefixEnd is the least string greater than every string starting
+// with p, byte for byte: p with its last byte below 0xFF incremented
+// and the bytes after it dropped. ok is false when p is all 0xFF bytes
+// (no such bound: the range is open above).
+func prefixEnd(p string) (string, bool) {
+	b := []byte(p)
+	for len(b) > 0 {
+		if i := len(b) - 1; b[i] < 0xFF {
+			b[i]++
+			return string(b), true
+		}
+		b = b[:len(b)-1]
+	}
+	return "", false
 }

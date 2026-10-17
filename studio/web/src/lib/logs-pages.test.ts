@@ -11,6 +11,7 @@ import {
   allLogsQuery,
   fetchAllLogs,
   jumpSel,
+  LOG_PAGE,
   LOG_PAGES,
   LOGS,
   LOGS_POLL_MS,
@@ -164,6 +165,18 @@ describe("allLogsQuery pages on while the run runs", () => {
     const cut = { ...next, cut: true }
     expect(await fetchAllLogs("r_live", "warn", LOG_PAGES, cut)).toBe(cut)
     expect(froms).toHaveLength(2)
+    // P8-fix-b #9: a live read holding the cap already (pages × LOG_PAGE
+    // lines, its last read ending on no next page) reads no page more
+    // and comes back cut.
+    const full: AllLogs = {
+      logs: Array.from({ length: 2 * LOG_PAGE }, (_, i) => line(i, 13)),
+      holes: [],
+      cut: false,
+    }
+    const capped = await fetchAllLogs("r_live", "warn", 2, full)
+    expect(froms).toHaveLength(2)
+    expect(capped.cut).toBe(true)
+    expect(capped.logs).toHaveLength(2 * LOG_PAGE)
   })
 
   it("through the query: one read per poll from the held tail, none once cut; the finished run's key reads whole", async () => {

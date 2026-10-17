@@ -1,16 +1,30 @@
 import { describe, expect, it } from "vitest"
 
 import {
+  acceptSelection,
   EXACT_VALUE,
   exactRows,
   lookupsOf,
   metaKeywords,
+  movesSelection,
   paletteFilter,
+  TAG_VALUE_HINT,
+  tagHintFor,
 } from "./finder"
 
 describe("lookupsOf", () => {
   it("reads an id prefix, a public id and a tag; spaces and short text ask nothing", () => {
-    expect(lookupsOf("1c06797f")).toEqual({ idPrefix: "1c06797f" })
+    expect(lookupsOf("1c06797f")).toEqual({
+      idPrefix: "1c06797f",
+      publicId: "1c06797f",
+    })
+    // An app-chosen public id (no pub_): looked up as one too.
+    expect(lookupsOf("arena:run-1:rw.deep-delegation")).toEqual({
+      idPrefix: "arena:run-1:rw.deep-delegation",
+      publicId: "arena:run-1:rw.deep-delegation",
+    })
+    expect(lookupsOf("pub_")).toEqual({ idPrefix: "pub_", publicId: "pub_" })
+    expect(lookupsOf("a=")).toEqual({})
     expect(lookupsOf("pub_acme")).toEqual({
       idPrefix: "pub_acme",
       publicId: "pub_acme",
@@ -52,6 +66,38 @@ describe("exactRows", () => {
         }
       ).map((r) => r.id)
     ).toEqual(["a"])
+  })
+})
+
+describe("acceptSelection and the tag hint (P8-fix-b)", () => {
+  it("takes cmdk's pick only for an empty box, an exact match, or the user's own move", () => {
+    expect(acceptSelection({ text: "", exactCount: 0, moved: false })).toBe(
+      true
+    )
+    expect(
+      acceptSelection({ text: "director", exactCount: 0, moved: false })
+    ).toBe(false)
+    expect(
+      acceptSelection({ text: "director", exactCount: 0, moved: true })
+    ).toBe(true)
+    expect(
+      acceptSelection({ text: "1c06797f", exactCount: 1, moved: false })
+    ).toBe(true)
+    expect(movesSelection({ key: "ArrowDown" })).toBe(true)
+    expect(movesSelection({ key: "n", ctrlKey: true })).toBe(true)
+    expect(movesSelection({ key: "n" })).toBe(false)
+    expect(movesSelection({ key: "Enter" })).toBe(false)
+  })
+  it("says tags need key=value under a bare word nothing exact answers", () => {
+    expect(tagHintFor(lookupsOf("rw.deep-delegation"), 0, true)).toBe(
+      TAG_VALUE_HINT
+    )
+    expect(tagHintFor(lookupsOf("rw.deep-delegation"), 1, true)).toBeUndefined()
+    expect(
+      tagHintFor(lookupsOf("rw.deep-delegation"), 0, false)
+    ).toBeUndefined()
+    expect(tagHintFor(lookupsOf("k=v"), 0, true)).toBeUndefined()
+    expect(tagHintFor(lookupsOf("two words"), 0, true)).toBeUndefined()
   })
 })
 

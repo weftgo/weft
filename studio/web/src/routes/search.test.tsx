@@ -24,6 +24,8 @@ import type {
   TracesPage,
 } from "@/lib/api"
 import { PALETTE_PLACEHOLDER } from "@/components/studio/command-palette"
+import { TAG_VALUE_HINT } from "@/lib/finder"
+import { UNLINKED_DECIDED } from "@/lib/status"
 import { NO_CONTENT } from "@/lib/title"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
@@ -404,6 +406,45 @@ describe("the Runs search box and its URL chips", () => {
         .chipApplied
     ).toBe("true")
   })
+
+  it("a row listed as parked that reads decided by a later turn says the record does not link it (P8-fix-b #6)", async () => {
+    // The server's parked: no run's resumed_from names t1. This page
+    // reads t1 decided through t2, a later turn of its session.
+    const t1 = row("s_x-t1", {
+      status: "succeeded",
+      pending: 1,
+      session_id: "s_x",
+      turn: 1,
+    })
+    const t2 = row("s_x-t2", {
+      status: "succeeded",
+      session_id: "s_x",
+      turn: 2,
+      pending: 1,
+    })
+    const linked = row("s_y-t1", {
+      status: "succeeded",
+      pending: 1,
+      session_id: "s_y",
+      turn: 1,
+    })
+    studio.on("GET meta", meta([])).on("GET runs", {
+      total: 3,
+      runs: [t2, t1, linked],
+      next_before: null,
+    })
+    renderApp("/runs?status=parked")
+    await waitFor(() =>
+      expect(
+        [...document.querySelectorAll("[data-unlinked-decided]")].map(
+          (n) => n.closest("tr")?.textContent.includes("s_x-t1") ?? false
+        )
+      ).toEqual([true])
+    )
+    expect(document.querySelector("[data-unlinked-decided]")!.textContent).toBe(
+      UNLINKED_DECIDED
+    )
+  })
 })
 
 describe("the sessions text filter", () => {
@@ -738,7 +779,11 @@ describe("the ⌘K palette", () => {
     )
     const selected = () =>
       document.querySelector<HTMLElement>('[cmdk-item][data-selected="true"]')
-    await waitFor(() => expect(selected()?.dataset.paletteKind).toBe("session"))
+    // No exact run match: nothing is picked for the user (P8-fix-b #4)…
+    expect(selected()).toBeNull()
+    // …until they move: ↓ takes the first item, ↑ stays on it.
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    expect(selected()?.dataset.paletteKind).toBe("session")
     fireEvent.keyDown(input, { key: "ArrowDown" })
     fireEvent.keyDown(input, { key: "ArrowUp" })
     expect(selected()?.dataset.paletteKind).toBe("session")
@@ -845,6 +890,8 @@ describe("the ⌘K palette", () => {
 
   // U26 (UX-A-13): a pasted id prefix, a public id and a tag.
   const director = "1c06797f5e2a4b0c9d8e7f6a5b4c3d2e"
+  // An app-chosen public id: no pub_ prefix (P8-fix-b #1).
+  const APP_PUB = "arena:run-1-120644:rw.deep-delegation"
   function lookups() {
     studio
       .on("GET meta", meta(["search", "traces"]))
@@ -859,6 +906,12 @@ describe("the ⌘K palette", () => {
           return {
             total: 1,
             runs: [row("r_pub", { public_id: "pub_acme" })],
+            next_before: null,
+          }
+        if (req.query.get("public_id") === APP_PUB)
+          return {
+            total: 1,
+            runs: [row("r_app", { public_id: APP_PUB })],
             next_before: null,
           }
         if (req.query.get("tag.scenario") === "rw.deep-delegation")
@@ -951,5 +1004,53 @@ describe("the ⌘K palette", () => {
     fireEvent.keyDown(input, { key: "Enter" })
     expect(router.state.location.pathname).toBe("/runs")
     expect(screen.getByPlaceholderText(PALETTE_PLACEHOLDER)).toBeTruthy()
+  })
+
+  it("finds an app-chosen public id with no pub_ prefix (P8-fix-b #1)", async () => {
+    lookups()
+    const { router } = renderApp("/runs")
+    await screen.findByText("r_ok")
+    const input = await open()
+    type(input, APP_PUB)
+    await waitFor(() => expect(kinds()[0]).toBe("run:r_app"))
+    expect(
+      studio.calls("GET runs").some((r) => r.query.get("public_id") === APP_PUB)
+    ).toBe(true)
+    // An exact match: Enter opens it.
+    const selected = () =>
+      document.querySelector<HTMLElement>('[cmdk-item][data-selected="true"]')
+    await waitFor(() => expect(selected()?.dataset.paletteId).toBe("r_app"))
+    expect(document.querySelector("[data-palette-tag-hint]")).toBeNull()
+    fireEvent.keyDown(input, { key: "Enter" })
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/runs/r_app")
+    )
+  })
+
+  it("a bare tag value says tags need key=value; Enter on a substring hit opens nothing until the user moves (P8-fix-b #1, #4)", async () => {
+    lookups()
+    const { router } = renderApp("/runs")
+    await screen.findByText("r_ok")
+    const input = await open()
+    type(input, "rw.budget-guards")
+    await waitFor(() => expect(kinds()).toContain("run:r_scn"))
+    await waitFor(() =>
+      expect(
+        document.querySelector("[data-palette-tag-hint]")?.textContent
+      ).toBe(TAG_VALUE_HINT)
+    )
+    const selected = () =>
+      document.querySelector<HTMLElement>('[cmdk-item][data-selected="true"]')
+    expect(selected()).toBeNull()
+    fireEvent.keyDown(input, { key: "Enter" })
+    expect(router.state.location.pathname).toBe("/runs")
+    expect(screen.getByPlaceholderText(PALETTE_PLACEHOLDER)).toBeTruthy()
+    // The user's own move is taken: ↓ then Enter opens the hit.
+    fireEvent.keyDown(input, { key: "ArrowDown" })
+    expect(selected()?.dataset.paletteId).toBe("r_scn")
+    fireEvent.keyDown(input, { key: "Enter" })
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe("/runs/r_scn")
+    )
   })
 })

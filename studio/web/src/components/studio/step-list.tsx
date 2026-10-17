@@ -59,6 +59,7 @@ import type {
 import { isLive, mergeHoles } from "@/lib/honesty"
 import {
   endCard,
+  endStep,
   endedWithoutFinish,
   loopRepeats,
   NO_RUN_FINISH,
@@ -1296,7 +1297,13 @@ export function StepList({
                 data-story-end
                 title={stopChip(doc)?.title}
               >
-                {endCard(doc)}
+                {endCard(
+                  doc,
+                  endStep(
+                    doc,
+                    view.steps.map((s) => s.index)
+                  )
+                )}
               </p>
             ) : view.finished ? null : (
               <p className="text-center font-mono text-xs text-faint">

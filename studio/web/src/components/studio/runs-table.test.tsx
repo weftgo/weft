@@ -176,11 +176,18 @@ describe("RunsTable problem badges (U4)", () => {
     expect(container.querySelectorAll("tbody tr")).toHaveLength(1)
     fireEvent.click(chip)
     await waitFor(() =>
-      expect(container.querySelectorAll("tbody tr")).toHaveLength(2)
+      expect(container.querySelectorAll("tbody tr")).toHaveLength(3)
     )
     const rows = [...container.querySelectorAll<HTMLElement>("tbody tr")]
     expect(rows[1].dataset.depth).toBe("1")
     expect(rows[1].textContent).toContain("worker")
+    // P8-fix-b #7: the chip counts 2, one was read — the rest are a
+    // link to the whole list, never silently missing.
+    expect(rows[2].dataset.childrenMore).toBe("r_dad")
+    expect(rows[2].textContent).toBe("+1 more · open the list")
+    expect(rows[2].querySelector("a")!.getAttribute("href")).toBe(
+      "/runs?parent=r_dad"
+    )
     expect(chip.getAttribute("aria-expanded")).toBe("true")
     cleanup()
 
@@ -201,5 +208,15 @@ describe("RunsTable problem badges (U4)", () => {
     expect(trs.map((tr) => tr.dataset.depth)).toEqual([undefined, "1"])
     // A nested child does not repeat "subagent of": its place says so.
     expect(trs[1].querySelector("[data-parent-link]")).toBeNull()
+  })
+
+  it("P8-fix-b #8: a row whose children read failed draws ⑂ ?, never no chip", async () => {
+    const [ok] = goldenRuns().filter((r) => r.id === "r_ok")
+    await renderWithRouter(
+      <RunsTable runs={[{ ...ok, children_unknown: true }]} now={NOW} />
+    )
+    const chip = document.querySelector<HTMLElement>("[data-children-chip]")!
+    expect(chip.textContent).toContain("⑂ ?")
+    expect(chip.getAttribute("title") ?? chip.innerHTML).toBeTruthy()
   })
 })

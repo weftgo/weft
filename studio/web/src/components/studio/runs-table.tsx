@@ -18,11 +18,13 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import { fetchRuns } from "@/lib/api"
 import type { RunRow } from "@/lib/api"
 import {
+  CHILDREN_PAGE,
   CHILDREN_UNREADABLE,
   HIDE_CHILDREN,
   NO_CHILDREN_LISTED,
   SHOW_CHILDREN,
   childrenChip,
+  moreChildren,
 } from "@/lib/delegation"
 import { stoppedByWords } from "@/lib/stopped-by"
 import { ProblemBadges } from "@/components/studio/problem-badges"
@@ -54,9 +56,14 @@ import { costView, delegatedView } from "@/lib/cost"
 import { CacheHint, CostText } from "@/components/studio/cost"
 import { DerivedChip } from "@/components/studio/hole-badge"
 import { derivedUsageUnknown } from "@/lib/honesty"
-import { runLink, sessionLink } from "@/lib/links"
+import { runLink, runsLink, sessionLink } from "@/lib/links"
 import { statusClass } from "@/lib/status-class"
-import { STATUS, statusOf } from "@/lib/status"
+import {
+  STATUS,
+  statusOf,
+  UNLINKED_DECIDED,
+  unlinkedDecided,
+} from "@/lib/status"
 import type { Status, StatusRow } from "@/lib/status"
 import { runTitle, shortId } from "@/lib/title"
 import type { Title } from "@/lib/title"
@@ -322,6 +329,10 @@ export interface RunsTableProps {
    * lib/delegation.ts's nest order): each row's depth, by id. Absent,
    * every row is a root and its "⑂ n" chip opens its children here. */
   depths?: Record<string, number>
+  /** The server's status filter the rows were listed under (?status=):
+   * a row listed as parked that reads decided here says why
+   * (unlinkedDecided). */
+  listedAs?: string
 }
 
 /** CostCell is a run's own cost and, when its subagents cost anything
@@ -448,6 +459,7 @@ export function RunsTable({
   showCost,
   sort,
   depths,
+  listedAs,
 }: RunsTableProps) {
   const clock = now ?? Date.now()
   const selectedRow = useRef<HTMLTableRowElement>(null)
@@ -478,6 +490,7 @@ export function RunsTable({
       // view's tree) has nothing to open.
       open={listed ? undefined : open}
       onToggle={toggle}
+      listedAs={listedAs}
     />
   )
   return (
@@ -561,6 +574,7 @@ interface RunTableRowProps {
    * the table already (no disclosure). */
   open?: ReadonlySet<string>
   onToggle: (id: string) => void
+  listedAs?: string
 }
 
 /** One run's row, and — opened through its "⑂ n" chip (H9, UX-A-19) —
@@ -576,6 +590,7 @@ function RunTableRow({
   selectedRef,
   open,
   onToggle,
+  listedAs,
 }: RunTableRowProps) {
   const navigate = useNavigate()
   const chip = childrenChip(run)
@@ -599,6 +614,14 @@ function RunTableRow({
       >
         <TableCell>
           <StatusChip row={run} runs={runs} />
+          {unlinkedDecided(listedAs, statusOf(run, runs), run) ? (
+            <div
+              className="font-mono text-[10px] leading-tight text-faint"
+              data-unlinked-decided
+            >
+              {UNLINKED_DECIDED}
+            </div>
+          ) : null}
         </TableCell>
         <TableCell
           className="max-w-0 sm:max-w-64 lg:max-w-80"
@@ -718,6 +741,7 @@ function RunTableRow({
       {isOpen && open ? (
         <ChildRows
           parent={run.id}
+          count={run.children_count}
           depth={depth + 1}
           clock={clock}
           showCost={showCost}
@@ -788,6 +812,7 @@ function ChildrenToggle({
  * the same way (grandchildren read when asked, never before). */
 function ChildRows({
   parent,
+  count,
   depth,
   clock,
   showCost,
@@ -796,6 +821,8 @@ function ChildRows({
   columns,
 }: {
   parent: string
+  /** The row's children_count: past the page read, "+N more". */
+  count?: number
   depth: number
   clock: number
   showCost?: boolean
@@ -805,7 +832,7 @@ function ChildRows({
 }) {
   const q = useQuery({
     queryKey: ["runs", "children", parent],
-    queryFn: () => fetchRuns({ parent, limit: 100 }),
+    queryFn: () => fetchRuns({ parent, limit: CHILDREN_PAGE }),
     staleTime: 5_000,
   })
   const pad = { paddingLeft: `${0.5 + depth * 1.25}rem` }
@@ -826,6 +853,7 @@ function ChildRows({
       </TableRow>
     )
   const kids = q.data.runs
+  const more = moreChildren(kids.length, count, !!q.data.next_before)
   return (
     <>
       {kids.map((k) => (
@@ -842,6 +870,22 @@ function ChildRows({
           onToggle={onToggle}
         />
       ))}
+      {more ? (
+        <TableRow className="hover:bg-transparent" data-children-more={parent}>
+          <TableCell
+            colSpan={columns}
+            className="font-mono text-[11px] text-faint"
+            style={pad}
+          >
+            <Link
+              {...runsLink({ parent })}
+              className="text-muted-foreground hover:text-thread-ink hover:underline"
+            >
+              {more}
+            </Link>
+          </TableCell>
+        </TableRow>
+      ) : null}
     </>
   )
 }

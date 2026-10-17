@@ -15,9 +15,11 @@
 // minute is logged, the rest counted onto the next line (suppressed=n)
 // — a misconfigured exporter retrying every second leaves one line a
 // minute, never a flood. The limiter holds at most 1,024 keys: full, it
-// drops the expired windows first; when none has expired, a refusal
-// under a new key is not logged until a window turns, and the next line
-// logged carries the count (suppressed_overflow=n). Behind a reverse
+// drops the expired windows first — the refusals they had suppressed
+// since their last line are carried onto the next line logged
+// (suppressed_expired=n), never lost with them; when none has expired,
+// a refusal under a new key is not logged until a window turns, and the
+// next line logged carries the count (suppressed_overflow=n). Behind a reverse
 // proxy every client arrives from the proxy's address, so they share
 // one remote and one limit. 5xx lines are never limited.
 //
@@ -125,8 +127,11 @@ type Logger struct {
 	// overflow counts the refusals not logged because the limiter was
 	// full of live windows; the next line logged carries it.
 	overflow int
-	now      func() time.Time
-	ingest   IngestCounts
+	// expired carries the suppressed counts of the windows the full map
+	// dropped: the next line logged reports them.
+	expired int
+	now     func() time.Time
+	ingest  IngestCounts
 }
 
 // IngestCounts is what the logger saw of ingest (POSTs under /v1/):
@@ -183,16 +188,17 @@ const maxKeys = 1024
 func New() *Logger { return &Logger{seen: map[string]*window{}, now: time.Now} }
 
 // allow reports whether a refusal under key is logged now, how many
-// under it were suppressed since its last line, and how many went
-// unlogged because the limiter was full (reset once reported).
-func (l *Logger) allow(key string) (ok bool, suppressed, overflow int) {
+// under it were suppressed since its last line, how many went unlogged
+// because the limiter was full, and how many the dropped expired
+// windows had suppressed (the last two reset once reported).
+func (l *Logger) allow(key string) (ok bool, suppressed, overflow, expired int) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	now := l.now()
 	w := l.seen[key]
 	if w != nil && now.Sub(w.start) < limitWindow {
 		w.suppressed++
-		return false, 0, 0
+		return false, 0, 0, 0
 	}
 	if w != nil {
 		suppressed = w.suppressed
@@ -200,17 +206,19 @@ func (l *Logger) allow(key string) (ok bool, suppressed, overflow int) {
 	if w == nil && len(l.seen) >= maxKeys {
 		for k, old := range l.seen {
 			if now.Sub(old.start) >= limitWindow {
+				l.expired += old.suppressed
 				delete(l.seen, k)
 			}
 		}
 		if len(l.seen) >= maxKeys {
 			l.overflow++
-			return false, 0, 0
+			return false, 0, 0, 0
 		}
 	}
 	l.seen[key] = &window{start: now}
 	overflow, l.overflow = l.overflow, 0
-	return true, suppressed, overflow
+	expired, l.expired = l.expired, 0
+	return true, suppressed, overflow, expired
 }
 
 // routeClass is a key's route: the two OTLP routes by name, every other
@@ -245,7 +253,7 @@ func (l *Logger) Wrap(next http.Handler) http.Handler {
 			if v := recover(); v != nil {
 				if err, _ := v.(error); err != http.ErrAbortHandler { //nolint:errorlint // net/http compares the value itself
 					slog.Error("studio: handler panicked",
-						append(l.attrs(r, in, http.StatusInternalServerError, 0, 0), "panic", fmt.Sprint(v))...)
+						append(l.attrs(r, in, http.StatusInternalServerError, 0, 0, 0), "panic", fmt.Sprint(v))...)
 				}
 				panic(v)
 			}
@@ -261,17 +269,17 @@ func (l *Logger) Wrap(next http.Handler) http.Handler {
 		}
 		switch {
 		case status >= 500:
-			slog.Error("studio: request failed", l.attrs(r, in, status, 0, 0)...)
+			slog.Error("studio: request failed", l.attrs(r, in, status, 0, 0, 0)...)
 		case status >= 400 && ingest:
 			key := hostOf(r.RemoteAddr) + "|" + routeClass(r.URL.Path) + "|" + in.code + "|" + http.StatusText(status)
-			if ok, n, over := l.allow(key); ok {
-				slog.Warn("studio: ingest batch refused", l.attrs(r, in, status, n, over)...)
+			if ok, n, over, exp := l.allow(key); ok {
+				slog.Warn("studio: ingest batch refused", l.attrs(r, in, status, n, over, exp)...)
 			}
 		}
 	})
 }
 
-func (l *Logger) attrs(r *http.Request, in *info, status, suppressed, overflow int) []any {
+func (l *Logger) attrs(r *http.Request, in *info, status, suppressed, overflow, expired int) []any {
 	a := []any{
 		"request_id", in.id, "status", status, "method", r.Method, "path", r.URL.Path,
 		"remote", hostOf(r.RemoteAddr),
@@ -290,6 +298,9 @@ func (l *Logger) attrs(r *http.Request, in *info, status, suppressed, overflow i
 	}
 	if overflow > 0 {
 		a = append(a, "suppressed_overflow", overflow)
+	}
+	if expired > 0 {
+		a = append(a, "suppressed_expired", expired)
 	}
 	return a
 }

@@ -4,6 +4,7 @@ import {
   contradicts,
   endCard,
   endedWithoutFinish,
+  endStep,
   loopRepeats,
   repeatWords,
   LAST_STEP_LABEL,
@@ -247,5 +248,29 @@ describe("loopRepeats (UX-S1-07)", () => {
       loopRepeats({ stopped_by: "max_steps", steps: 3, err: MAX_STEPS })
     ).toBeNull()
     expect(loopRepeats({ stopped_by: "loop_detected", steps: 3 })).toBeNull()
+  })
+})
+
+describe("endStep: the step the chip, its link and the end card name (P8-fix-b #5)", () => {
+  const cancel = {
+    status: "failed",
+    stopped_by: "canceled",
+    error_type: "cancelled",
+    steps: 2,
+    err: "weft: run failed at step 2: context canceled",
+  }
+  it("a cancel during step N names N; before N began, the last drawn", () => {
+    expect(endStep(cancel)).toBe(2)
+    expect(endStep(cancel, [0, 1, 2])).toBe(2)
+    expect(endStep(cancel, [0, 1])).toBe(1)
+    expect(stopChip(cancel, true)?.text).toBe("· step 2")
+    expect(stopChip(cancel, true, [0, 1])?.text).toBe("· step 1")
+    expect(endCard(cancel)).toBe("■ cancelled at step 2")
+  })
+  it("a run that did not fail names its last step", () => {
+    expect(
+      endStep({ status: "succeeded", stopped_by: "final_answer", steps: 3 })
+    ).toBe(2)
+    expect(endStep({ status: "succeeded", steps: 0 })).toBeUndefined()
   })
 })

@@ -951,10 +951,12 @@ describe("step compare parity (E3.2)", () => {
       ],
     }
     doc.holes = [
+      // The words the server sends for it (lib/honesty.ts's CAUSES,
+      // pinned by holes.golden.json), never a fixture's own.
       {
         hole: "truncated",
-        reason: "this response reads a bounded number of steps",
-        fix: "open the later steps",
+        cause: "response_cap",
+        ...CAUSES.truncated!.response_cap,
       },
     ]
     return doc
@@ -3874,6 +3876,24 @@ describe("the landing step's answer on both surfaces (P8-fix-a)", () => {
       }
       expect(panel.bad).toBe(c.bad)
       expect(panel).toEqual(studio)
+      if (c.doc.stopped_by !== "canceled") return
+      // P8-fix-b #5: the header's chip, its link and the story's end
+      // card name the landing step too — a cancel during step 2 reads
+      // step 2, never step 1.
+      const chip = document.querySelector<HTMLAnchorElement>(
+        'a[data-stopped-by="canceled"]'
+      )!
+      expect(chip.textContent).toBe(`· step ${c.land}`)
+      expect(
+        new URL(chip.getAttribute("href")!, "http://x").searchParams.get("step")
+      ).toBe(String(c.land))
+      cleanup()
+      renderApp(`/runs/${UL}?view=story`)
+      await waitFor(() =>
+        expect(document.querySelector("[data-story-end]")?.textContent).toBe(
+          `■ cancelled at step ${c.land}`
+        )
+      )
     })
 
   // P8-fix-a #5: the logs route refuses every panel token, so the step

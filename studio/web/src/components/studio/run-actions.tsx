@@ -13,6 +13,7 @@ import type { RunDoc } from "@/lib/api"
 import { runLink, runsLink } from "@/lib/links"
 import {
   DELETE_LABEL,
+  childrenUnder,
   deleteConfirmWords,
   deletedWords,
   deleteOffWhy,
@@ -91,7 +92,11 @@ export function DeleteRun({
   doc,
 }: {
   doc: Pick<RunDoc, "id" | "parent_run_id"> & {
-    children: readonly { id: string; agent?: string }[]
+    children: readonly {
+      id: string
+      agent?: string
+      children_count?: number
+    }[]
   }
 }) {
   const meta = useQuery(metaQuery())
@@ -127,6 +132,10 @@ export function DeleteRun({
       toast.success(deletedWords({ ok: true, id: doc.id }), { id: "delete" })
       qc.removeQueries({ queryKey: ["run", doc.id] })
       void qc.invalidateQueries({ queryKey: ["runs"] })
+      // The parent's document lists the deleted child (children[],
+      // children_count): read it again before landing on it.
+      if (doc.parent_run_id)
+        void qc.invalidateQueries({ queryKey: ["run", doc.parent_run_id] })
       await router.navigate(
         doc.parent_run_id ? runLink(doc.parent_run_id) : runsLink()
       )
@@ -175,10 +184,16 @@ export function DeleteRun({
                   <li key={c.id} data-delete-child={c.id}>
                     {c.agent ? `${c.agent} · ` : ""}
                     {c.id}
+                    {c.children_count
+                      ? ` ${childrenUnder(c.children_count)}`
+                      : ""}
                   </li>
                 ))}
               </ul>
             ) : null}
+            <p className="text-muted-foreground" data-delete-derived>
+              {w.derived}
+            </p>
             {refused ? (
               <p className="text-status-bad" role="alert" data-delete-refused>
                 {refused}

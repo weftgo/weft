@@ -40,12 +40,13 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { unmatchedDrafts } from "@/lib/experiment-body"
 import { TranscriptEdits } from "@/components/studio/experiment-form"
+import { EDIT_FIELD } from "@/lib/edits"
 import {
   ReplayAck,
   ReplayDrawer,
   catalogOfStep,
 } from "@/components/studio/replay-drawer"
-import { editResultAndReplay, replayFromStep } from "@/lib/replay"
+import { editResultAndReplay, REPLAY_MARK, replayFromStep } from "@/lib/replay"
 import type { ReplayDraft } from "@/lib/replay"
 import { renderWithRouter } from "@/test/render"
 import { HOLES } from "@/lib/honesty"
@@ -1196,6 +1197,50 @@ describe("a pre-filled edit is never pruned silently (review 2)", () => {
   })
 })
 
+describe("the transcript-edit fields (UX-C-47)", () => {
+  it("the recorded value is a muted line, an empty field reads empty, a draft is chipped edited", async () => {
+    serve()
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    const { container } = render(
+      <QueryClientProvider client={client}>
+        <TranscriptEdits
+          runID={RUN}
+          fromStep={3}
+          drafts={[{ step: 2, callID: "c3", toolResult: ERR }]}
+          setDrafts={vi.fn()}
+        />
+      </QueryClientProvider>
+    )
+    await waitFor(() =>
+      expect(container.querySelector('[data-edit-call="c3"]')).toBeTruthy()
+    )
+    const inputs = Array.from(
+      container.querySelectorAll<HTMLTextAreaElement>("[data-edit-call]")
+    )
+    for (const i of inputs) {
+      const field = i.closest("[data-edit-field]")!
+      // The placeholder never carries the recorded text.
+      expect(i.placeholder).toBe(EDIT_FIELD.empty)
+      expect(field.querySelector("[data-edit-recorded]")!.textContent).toMatch(
+        /^recorded: /
+      )
+      expect(!!field.querySelector("[data-edit-edited]")).toBe(
+        i.getAttribute("data-edit-call") === "c3"
+      )
+    }
+    const c3 = container.querySelector<HTMLTextAreaElement>(
+      '[data-edit-call="c3"]'
+    )!
+    expect(c3.value).toBe(ERR)
+    expect(
+      c3.closest("[data-edit-field]")!.querySelector("[data-edit-edited]")!
+        .textContent
+    ).toBe(EDIT_FIELD.edited)
+  })
+})
+
 // ── Final fixes (F1.2) ─────────────────────────────────────────────
 
 describe("the verb's field has focus on open (final 2)", () => {
@@ -1904,6 +1949,23 @@ describe("the replay drawer's link, closing round (F2.2)", () => {
     )
     expect(router.state.location.search).not.toHaveProperty("from")
     expect(drawer()).toBeNull()
+  })
+
+  it("the story marks the step the drawer replays from, and the kept prefix (UX-C-46)", async () => {
+    renderApp(`/runs/${RUN}?view=story&replay=from_step&from=2`)
+    await waitFor(() => expect(drawer()).toBeTruthy())
+    const mark = (n: number) =>
+      document
+        .querySelector(`[data-step="${n}"]`)
+        ?.getAttribute("data-replay-mark") ?? null
+    await waitFor(() => expect(mark(2)).toBe("from"))
+    expect(mark(0)).toBe("kept")
+    expect(mark(1)).toBe("kept")
+    expect(mark(3)).toBeNull()
+    expect(
+      document.querySelector('[data-step="2"] [data-replay-chip="from"]')!
+        .textContent
+    ).toBe(REPLAY_MARK.from)
   })
 
   it("an in-app navigation to another run's drawer link reopens it there", async () => {

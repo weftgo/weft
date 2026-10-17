@@ -12,6 +12,11 @@ import { STATUS } from "../lib/status"
 export const MONO_STACK =
   'ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace'
 
+/** The system sans stack the panel's prose is set in (UX-F-19): a
+ * step's text, the prompt and the notes read as Studio's Geist prose
+ * does; ids, JSON and numbers stay in the mono stack. No webfont. */
+export const PROSE_STACK = "system-ui, sans-serif"
+
 /** tokens declares a theme's colours as --weft-* custom properties. */
 const tokens = (t: Theme) =>
   Object.entries(PALETTE[t])
@@ -44,6 +49,7 @@ const toneRules = () =>
 export const TOKENS = [
   ...Object.keys(PALETTE.dark).map((k) => `--weft-${k}`),
   "--weft-font",
+  "--weft-font-prose",
   "--weft-radius",
   "--weft-radius-sm",
 ]
@@ -68,7 +74,7 @@ export const TOKENS = [
 //     ack preview.
 export const PANEL_CSS = `
 :host { all: initial; color: inherit; box-sizing: border-box; color-scheme: dark; ${tokens("dark")}
-  --weft-font: ${MONO_STACK}; --weft-radius: 8px; --weft-radius-sm: 5px; }
+  --weft-font: ${MONO_STACK}; --weft-font-prose: ${PROSE_STACK}; --weft-radius: 8px; --weft-radius-sm: 5px; }
 :host([data-theme-resolved="light"]) { color-scheme: light; ${tokens("light")} }
 *, *::before, *::after { box-sizing: inherit; }
 .weft-root {
@@ -122,7 +128,6 @@ export const PANEL_CSS = `
 .weft-fab::before { content: "\\25C8"; color: var(--weft-accent); margin-right: 4px; }
 
 .weft-unreachable { display: inline; font: 12px/1.45 var(--weft-font); color: inherit; }
-.weft-unreachable-at { color: inherit; }
 .weft-retry { background: none; border: none; padding: 0; color: inherit; cursor: pointer;
   text-decoration: underline; font: inherit; }
 
@@ -134,8 +139,8 @@ export const PANEL_CSS = `
 }
 .weft-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--weft-faint); flex: none; }
 .weft-dot.weft-on { background: var(--weft-ok); }
-.weft-dot.weft-run { background: var(--weft-status-run); animation: weft-pulse 1.2s infinite; }
-@keyframes weft-pulse { 50% { opacity: .35; } }
+.weft-dot.weft-run { background: var(--weft-status-run); }
+.weft-dot.weft-run, @keyframes weft-pulse { 50% { opacity: .35; } }
 .weft-fab-running { border-color: var(--weft-status-run); }
 .weft-fab-count { color: var(--weft-status-run-ink); font-variant-numeric: tabular-nums; }
 .weft-fab-pulse { animation: weft-pulse 1.2s infinite; }
@@ -182,6 +187,7 @@ ${statusRules()}
 .weft-step-h { display: flex; gap: 8px; padding: 5px 8px; color: var(--weft-dim);
   border-bottom: 1px solid var(--weft-line); align-items: baseline; }
 .weft-step-b { padding: 7px 9px; white-space: pre-wrap; word-break: break-word; }
+.weft-note, .weft-stream, [data-key=text] { font-family: var(--weft-font-prose); }
 .weft-reason { color: var(--weft-faint); margin-top: 4px; }
 details.weft-collapsible > summary {
   cursor: pointer; color: var(--weft-dim); padding: 3px 0; list-style: none;
@@ -319,8 +325,8 @@ select.weft-input { width: auto; min-width: 120px; }
   padding: 6px 9px; }
 .weft-diff-h { color: var(--weft-dim); margin-bottom: 4px; }
 .weft-diff-row { white-space: pre-wrap; word-break: break-word; }
-.weft-diff-add { color: var(--weft-info); }
-.weft-diff-del { color: var(--weft-warn); text-decoration: line-through; }
+.weft-diff-add, .weft-diff-b { color: var(--weft-ok); }
+.weft-diff-del { color: var(--weft-err); text-decoration: line-through; }
 .weft-diff-markers { margin: 0 0 4px; padding: 0; list-style: none; color: var(--weft-warn); }
 .weft-diff-markers a { color: inherit; }
 .weft-diff-table { width: 100%; border-collapse: collapse; font-size: 11px; }
@@ -328,8 +334,7 @@ select.weft-input { width: auto; min-width: 120px; }
 .weft-diff-same, .weft-diff-missing { color: var(--weft-faint); }
 .weft-diff-unknown { color: var(--weft-dim); font-style: italic; }
 .weft-diff-changed > th, td.weft-diff-changed { color: var(--weft-warn); }
-.weft-diff-a { color: var(--weft-warn); }
-.weft-diff-b { color: var(--weft-info); }
+.weft-diff-a { color: var(--weft-err); }
 .weft-resolve { width: auto; min-width: 150px; margin: 0 4px; }
 .weft-verbs { display: inline-flex; gap: 2px; margin-left: 4px; }
 .weft-verb { background: none; border: none; color: var(--weft-dim); cursor: pointer; padding: 0 3px; font: inherit; clip-path: inset(50%); }

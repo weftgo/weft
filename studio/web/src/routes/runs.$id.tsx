@@ -1240,6 +1240,11 @@ function RunPage() {
   // the source 400): no verbs, no editor, no drawer — its story says
   // why where the verbs would be.
   const replayOn = replayable && !derived
+  // The drawer open on this run's own step (UX-C-46; the URL's
+  // ?replay=&from=, of= naming another run — a child's — marks none).
+  const replayLinked = replayFromSearch(search)
+  const replayFromHere =
+    replayLinked && !replayLinked.of ? replayLinked.from : undefined
   const editor: Editor | null =
     replayOn && transcript.data && doc.status !== "running"
       ? {
@@ -1672,6 +1677,7 @@ function RunPage() {
                   stepInputRef={stepInput}
                   toolFacts={toolFacts}
                   callFacts={spans.data ? callFacts : undefined}
+                  replayFrom={replayOn ? replayFromHere : undefined}
                 />
               )}
             </TabsContent>

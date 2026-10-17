@@ -23,6 +23,7 @@ import type {
   RunsPage,
 } from "@/lib/api"
 import { experimentDraftID, resetDrafts, saveDraft } from "@/lib/drafts"
+import { EXPERIMENT_CELLS } from "@/lib/experiments"
 import { parseCellCommandID } from "@/lib/form-state"
 import { COST_WAITS } from "@/routes/experiments.$id"
 import { EXPERIMENTS_HIDDEN_REASON } from "@/components/studio/no-experiments"
@@ -168,6 +169,98 @@ describe("/experiments", () => {
     expect(studio.calls("GET experiments/exp_tone")).toHaveLength(0)
   })
 
+  it("each row says how it went and what it ran — pass rate, engines, source and step, last run — and the filter narrows by agent or source (UX-C-36)", async () => {
+    studio.on("GET experiments", {
+      experiments: [
+        {
+          id: "exp_tone",
+          name: "exp_tone",
+          agent: "orders",
+          variants: [{ key: "A" }, { key: "B", engine: "scripted" }],
+          inputs: experiment.inputs,
+          engine: "live",
+          source_run_id: "r_ok",
+          from_step: 1,
+          created: rOK.started,
+          run_count: 4,
+          succeeded: 3,
+          last_run: rOK.started,
+          cost_usd: 0.1,
+          cost_known: true,
+          cache: "exact",
+        },
+        {
+          id: "exp_typed",
+          name: "exp_typed",
+          agent: "billing",
+          variants: [{ key: "A" }],
+          inputs: [{ key: "1", text: "hello" }],
+          created: rOK.started,
+          run_count: 1,
+        },
+      ],
+    })
+    renderApp("/experiments")
+    const row = await waitFor(() => {
+      const el = document.querySelector<HTMLElement>(
+        '[data-experiment-row="exp_tone"]'
+      )
+      expect(el).toBeTruthy()
+      return el!
+    })
+    expect(row.querySelector("[data-experiment-pass]")!.textContent).toBe(
+      "3 / 4 passed"
+    )
+    expect(row.querySelector("[data-experiment-engine]")!.textContent).toBe(
+      "live · scripted"
+    )
+    const src = row.querySelector("[data-experiment-source]")!
+    expect(src.textContent).toBe("r_ok · step 1")
+    expect(
+      within(src as HTMLElement)
+        .getByRole("link", { name: "r_ok" })
+        .getAttribute("href")
+    ).toBe("/runs/r_ok?step=1&view=story")
+    expect(row.querySelector("[data-experiment-last]")!.textContent).not.toBe(
+      "—"
+    )
+    // A row from before the outcome, typed inputs: dashes with their why.
+    const typed = document.querySelector<HTMLElement>(
+      '[data-experiment-row="exp_typed"]'
+    )!
+    expect(
+      typed.querySelector("[data-experiment-pass]")!.textContent
+    ).toContain(EXPERIMENT_CELLS.passUnknown)
+    expect(
+      typed.querySelector("[data-experiment-source]")!.textContent
+    ).toContain(EXPERIMENT_CELLS.noSource)
+    // The filter: by agent, then by source run.
+    const filter = document.querySelector<HTMLInputElement>(
+      "[data-experiments-filter]"
+    )!
+    fireEvent.change(filter, { target: { value: "billing" } })
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-experiment-row="exp_tone"]')
+      ).toBeNull()
+    )
+    expect(
+      document.querySelector('[data-experiment-row="exp_typed"]')
+    ).toBeTruthy()
+    fireEvent.change(filter, { target: { value: "r_ok" } })
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-experiment-row="exp_typed"]')
+      ).toBeNull()
+    )
+    expect(
+      document.querySelector('[data-experiment-row="exp_tone"]')
+    ).toBeTruthy()
+    expect(
+      document.querySelector("[data-experiments-count]")!.textContent
+    ).toContain("1 match")
+  })
+
   it("the TS row type mirrors experiments.golden.json and experiment.golden.json (F5.1 keys)", () => {
     const keys: (keyof ExperimentRow)[] = [
       "id",
@@ -184,6 +277,8 @@ describe("/experiments", () => {
       "created",
       "updated",
       "run_count",
+      "succeeded",
+      "last_run",
       "runs",
       "cost_usd",
       "cost_known",

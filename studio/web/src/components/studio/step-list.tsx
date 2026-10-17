@@ -101,6 +101,7 @@ import type { RunRequests } from "@/components/studio/step-request"
 import { runLink } from "@/lib/links"
 import type { StepPane } from "@/lib/links"
 import { childOfStep, SubagentBlock } from "@/components/studio/subagent-block"
+import { REPLAY_MARK, replayMarkOf } from "@/lib/replay"
 import type { ChildRow } from "@/components/studio/subagent-block"
 import { TruncationBadge } from "@/components/studio/truncation-badge"
 import { StepScrubber } from "@/components/studio/step-scrubber"
@@ -719,9 +720,13 @@ function StepCard({
   loop,
   folded = false,
   dimmed = false,
+  replayMark,
 }: {
   step: FoldedStep
   runId: string
+  /** The open replay drawer's mark on this card (UX-C-46, lib/replay.ts
+   * replayMarkOf): ringed on its from step, faint on the kept prefix. */
+  replayMark?: "from" | "kept"
   /** STORY_SHAPE's collapse (UX-A-38): the card shows its head only;
    * its body stays mounted (a draft in its editor survives). */
   folded?: boolean
@@ -772,6 +777,12 @@ function StepCard({
     if (highlighted && scrollOnHighlight)
       ref.current?.scrollIntoView({ block: "center" })
   }, [highlighted, scrollOnHighlight])
+  // The drawer's from step comes into view as the drawer opens on it.
+  const replayFrom = replayMark === "from"
+  useEffect(() => {
+    if (replayFrom && scrollOnHighlight)
+      ref.current?.scrollIntoView({ block: "center" })
+  }, [replayFrom, scrollOnHighlight])
   const failedHere = !step.finish && runStatus === "failed"
   // The Request pane open beside the story (plan H3) — where the page
   // is wide enough and a ResizeObserver measures the split.
@@ -842,14 +853,32 @@ function StepCard({
       data-highlighted={highlighted ? "" : undefined}
       data-folded={folded ? "" : undefined}
       data-dimmed={dimmed ? "" : undefined}
+      data-replay-mark={replayMark}
       className={`group/row space-y-2 rounded-lg border bg-background px-4 py-3 ${
-        highlighted ? "ring-2 ring-thread/60" : ""
+        highlighted || replayFrom ? "ring-2 ring-thread/60" : ""
       } ${failedHere ? "border-status-bad/40" : ""} ${
         dimmed ? "opacity-40 transition-opacity hover:opacity-100" : ""
+      } ${
+        replayMark === "kept" && !dimmed
+          ? "opacity-60 transition-opacity hover:opacity-100"
+          : ""
       }`}
     >
       <div className="flex flex-wrap items-center gap-2">
         <span className="eyebrow">step {step.index}</span>
+        {replayMark ? (
+          <span
+            className={`rounded-sm border px-1.5 py-px font-mono text-[10px] ${
+              replayFrom
+                ? "border-thread/60 text-thread-ink"
+                : "text-muted-foreground"
+            }`}
+            title={replayFrom ? REPLAY_MARK.fromHint : REPLAY_MARK.keptHint}
+            data-replay-chip={replayMark}
+          >
+            {replayFrom ? REPLAY_MARK.from : REPLAY_MARK.kept}
+          </span>
+        ) : null}
         {loop && loop.first < step.index && loop.steps.includes(step.index) ? (
           <Link
             {...runLink(runId, { step: loop.first, view: "story" })}
@@ -1013,8 +1042,12 @@ export function StepList({
   stepInputRef,
   toolFacts,
   callFacts,
+  replayFrom,
 }: {
   events: WireEvent[]
+  /** The open replay drawer's from step on this run (UX-C-46): its card
+   * ringed and scrolled to, the steps before it marked kept. */
+  replayFrom?: number
   folded: FoldedRun
   /** The page's fold at the playhead (the transcript overlaid, the
    * recorder's badges kept): used while replaying instead of folding
@@ -1217,6 +1250,7 @@ export function StepList({
         prompt={step.index === 0 ? prompt : undefined}
         scrollOnHighlight={!virtual}
         loop={loop}
+        replayMark={replayMarkOf(step.index, replayFrom)}
       />
       {step.steer ? (
         <SteerBlock

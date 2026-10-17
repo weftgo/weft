@@ -153,3 +153,44 @@ describe("an experiment's id (command_id's rule)", () => {
     expect(validExperimentID("cell.A-1:x_y")).toBe(true)
   })
 })
+
+describe("the experiments list's words (UX-C-36, UX-C-44)", () => {
+  it("matrixSize pluralises each noun past one", async () => {
+    const { matrixSize, counted } = await import("./experiments")
+    expect(matrixSize(1, 1)).toBe("1 variant × 1 input")
+    expect(matrixSize(2, 3)).toBe("2 variants × 3 inputs")
+    expect(matrixSize(0, 1)).toBe("0 variants × 1 input")
+    expect(counted(1, "run")).toBe("1 run")
+    expect(counted(4, "run")).toBe("4 runs")
+  })
+  it("passLine, the engines, the sources and the filter", async () => {
+    const {
+      experimentEngines,
+      experimentSources,
+      matchesExperiment,
+      passLine,
+    } = await import("./experiments")
+    const e = {
+      id: "exp_g",
+      name: "tracking link",
+      agent: "orders",
+      engine: "live",
+      source_run_id: "r_ok",
+      variants: [{ key: "A" }, { key: "B", engine: "scripted" }],
+      inputs: [
+        { key: "1", source_run_id: "r_ok" },
+        { key: "2", source_run_id: "r_two" },
+      ],
+      run_count: 3,
+      succeeded: 2,
+    }
+    expect(passLine(e)).toBe("2 / 3 passed")
+    expect(passLine({ run_count: 3 })).toBeUndefined()
+    expect(experimentEngines(e)).toBe("live · scripted")
+    expect(experimentEngines({ variants: [{ key: "A" }] })).toBe("")
+    expect(experimentSources(e)).toEqual(["r_ok", "r_two"])
+    expect(matchesExperiment(e, "ORDERS")).toBe(true)
+    expect(matchesExperiment(e, "orders r_two")).toBe(true)
+    expect(matchesExperiment(e, "orders r_three")).toBe(false)
+  })
+})

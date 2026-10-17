@@ -39,7 +39,12 @@ import {
   usageSummary,
 } from "@/lib/format"
 import { CopyButton } from "@/components/studio/codewin"
-import { RunCost, UnpricedNote, useCostCapable } from "@/components/studio/cost"
+import {
+  RunCost,
+  ScriptedChip,
+  UnpricedNote,
+  useCostCapable,
+} from "@/components/studio/cost"
 import { SaveAsTest } from "@/components/studio/saves"
 import { DeleteRun, ExportVerbs } from "@/components/studio/run-actions"
 import { HoleBadge } from "@/components/studio/hole-badge"
@@ -553,6 +558,7 @@ export function RunHeader({
         <Badge variant="outline" className="font-mono text-[11px] font-normal">
           {doc.model.provider}/{doc.model.name}
         </Badge>
+        <ScriptedChip row={doc} />
         {doc.parent_call_id ? (
           <span className="font-mono text-[11px] text-faint">
             child of call {doc.parent_call_id}

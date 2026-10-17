@@ -35,6 +35,9 @@ import {
   cacheNotReported,
   costView,
   delegatedView,
+  SCRIPTED_HINT,
+  SCRIPTED_MODEL,
+  scriptedChip,
 } from "../lib/cost"
 import type { CostView } from "../lib/cost"
 
@@ -251,9 +254,7 @@ export function capLine(
   return null
 }
 
-/** The scripted engine's own ModelInfo (runtime/scripted.go; pinned
- * there by TestScriptedModelInfo). */
-export const SCRIPTED_MODEL = { provider: "weft/runtime", name: "scripted" }
+export { SCRIPTED_MODEL }
 
 /** A turn's chips (D5): what its record says it is, beside its id —
  * each plain text, its title naming the attribute it is read from.
@@ -272,19 +273,8 @@ export function turnChips(
     )
   // The scripted engine answers as its own model (runtime/scripted.go's
   // ModelInfo): the run's model, not a weft.* attr — none is stamped.
-  // The zero is said only when the row's usage is zero: a scripted
-  // parent's Subagent child on a real model rolls real usage in.
-  if (
-    r.model.provider === SCRIPTED_MODEL.provider &&
-    r.model.name === SCRIPTED_MODEL.name
-  ) {
-    const zero = r.usage.input_tokens + r.usage.output_tokens === 0
-    chip(
-      zero ? "scripted (0 tokens)" : "scripted",
-      "model weft/runtime/scripted: the scripted engine replayed the source run's recorded turns",
-      "scripted"
-    )
-  }
+  const sc = scriptedChip(r)
+  if (sc) chip(sc, SCRIPTED_HINT, "scripted")
   const fork = r.meta["weft.session.forked_from"] as string | undefined
   if (fork)
     chip(

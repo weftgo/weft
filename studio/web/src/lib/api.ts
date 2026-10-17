@@ -2258,6 +2258,11 @@ export interface ExperimentRow extends CostFields {
   /** The top-level runs under the label and their whole bill (own +
    * delegated) — on the list rows and the detail alike (F5.1). */
   run_count?: number
+  /** The top-level runs that succeeded and the newest one's start
+   * (UX-C-36): absent from a Studio before them, and past the summary's
+   * walk cap, where the runs were not all read. */
+  succeeded?: number
+  last_run?: string
   runs?: RunRow[]
 }
 

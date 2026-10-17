@@ -439,9 +439,32 @@ export function canReplay(
  * a dead button. */
 export const REPLAY_OFF = {
   playground: "replay needs the playground",
-  read: "a read token cannot replay",
+  read: "a read token cannot replay: it needs the dev token or a playground panel token",
   running: "replay after the run ends",
 } as const
+
+/** The story's marks while the replay drawer is open on this run
+ * (UX-C-46): the step it replays from is ringed and scrolled to, the
+ * steps before it — the recorded prefix the replay keeps — drawn
+ * faint. */
+export const REPLAY_MARK = {
+  from: "replaying from here",
+  fromHint: "the open replay drawer re-runs this run from this step",
+  kept: "kept",
+  keptHint:
+    "a step before the replay's from step: its recorded transcript is kept as the replay's prefix",
+} as const
+
+/** replayMarkOf is a step's mark under a drawer replaying from step
+ * from: "from" on it, "kept" before it, none after it or with no
+ * drawer open. */
+export function replayMarkOf(
+  step: number,
+  from: number | undefined
+): "from" | "kept" | undefined {
+  if (from === undefined) return undefined
+  return step === from ? "from" : step < from ? "kept" : undefined
+}
 
 /** replayOffWhy is that line, or undefined when the verbs are offered:
  * the missing playground first (with capabilities_off's reason when

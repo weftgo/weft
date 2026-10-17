@@ -90,6 +90,7 @@ import {
   SAVE_TEST_TITLE,
 } from "@/lib/saves"
 import {
+  matrixSize,
   matrixStepLine,
   mintExperimentID,
   validExperimentID,
@@ -2490,7 +2491,7 @@ function Matrix({
   return (
     <div className="rounded border">
       <div className="border-b px-3 py-2 text-xs text-muted-foreground">
-        Experiment matrix · {variants.length} variants × {inputs.length} inputs
+        Experiment matrix · {matrixSize(variants.length, inputs.length)}
         {sourceRunID ? " · over the source run" : ""}
         {sourceRunID && fromStep > 0 ? ` · from step ${fromStep}` : ""}
       </div>

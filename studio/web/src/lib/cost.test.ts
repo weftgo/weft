@@ -545,3 +545,25 @@ describe("a page's one unpriced line (U7)", () => {
     ).toBe("unknown")
   })
 })
+
+describe("the scripted chip (UX-C-42)", () => {
+  it("names a scripted run, its zero only when the row billed nothing", async () => {
+    const { SCRIPTED_MODEL, isScripted, scriptedChip } = await import("./cost")
+    const zero = { input_tokens: 0, output_tokens: 0 }
+    expect(scriptedChip({ model: SCRIPTED_MODEL, usage: zero })).toBe(
+      "scripted · 0 tokens"
+    )
+    expect(
+      scriptedChip({
+        model: SCRIPTED_MODEL,
+        usage: { input_tokens: 10, output_tokens: 5 },
+      })
+    ).toBe("scripted")
+    expect(
+      scriptedChip({ model: { provider: "openai", name: "gpt" }, usage: zero })
+    ).toBeUndefined()
+    expect(isScripted({ model: { provider: "weft/runtime", name: "x" } })).toBe(
+      false
+    )
+  })
+})

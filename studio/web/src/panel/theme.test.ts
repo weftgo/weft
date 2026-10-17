@@ -19,7 +19,7 @@ import {
 import type { WeftDevtools } from "./element"
 import { readConfig } from "./config"
 import { STORE_KEY } from "./layout"
-import { PANEL_CSS, TOKENS } from "./styles"
+import { PANEL_CSS, PROSE_STACK, TOKENS } from "./styles"
 import { resolveTheme } from "./theme"
 import { PALETTE, STUDIO_NAMES } from "../lib/palette"
 import type { Theme } from "../lib/palette"
@@ -261,6 +261,15 @@ describe("explicit > stored > auto (D2)", () => {
 })
 
 describe("the tokens (D2)", () => {
+  it("prose is set in --weft-font-prose, a system sans stack; machine text stays mono (UX-F-19)", () => {
+    const host = /:host \{([^}]*)\}/.exec(PANEL_CSS)?.[1] ?? ""
+    expect(host).toContain(`--weft-font-prose: ${PROSE_STACK};`)
+    expect(PROSE_STACK).not.toMatch(/mono/)
+    expect(PANEL_CSS).toContain(
+      ".weft-note, .weft-stream, [data-key=text] { font-family: var(--weft-font-prose); }"
+    )
+    expect(PANEL_CSS).toContain("font: 12px/1.45 var(--weft-font);")
+  })
   it("every --weft-* the stylesheet reads is a token declared on :host, dark by default, light under data-theme-resolved", () => {
     const used = new Set(
       Array.from(PANEL_CSS.matchAll(/var\((--weft-[a-z0-9-]+)/g), (m) => m[1])

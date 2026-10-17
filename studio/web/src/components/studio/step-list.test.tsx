@@ -646,7 +646,7 @@ describe("the loop marks (UX-S1-07)", () => {
   // UX-A-38: a long story folds to its step heads, or dims its quiet
   // steps so the problems stand out; the named step stays whole.
   it("collapse all steps and only problems (UX-A-38)", async () => {
-    Element.prototype.scrollIntoView ??= () => {}
+    ;(Element.prototype as Partial<Element>).scrollIntoView ??= () => {}
     const events: WireEvent[] = [
       { type: "run_start", id: "r_l", model: { provider: "p", name: "m" } },
       ...step(0),

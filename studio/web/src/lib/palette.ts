@@ -145,3 +145,16 @@ export const TONE_STUDIO: Record<keyof typeof TONE, string> = {
   running: "status-run-ink",
   never: "ev-error",
 }
+
+/** The diff roles (UX-F-20): one pair both surfaces draw a diff in —
+ * added green, removed red and struck (the strike and the +/− marks
+ * carry it without colour) — and a changed cell in the error-as-data
+ * mustard. The panel draws DIFF's token (its prompt diff, the result
+ * pane's diff, a compare's a / b values); Studio's DiffBlock and step
+ * diff the DIFF_STUDIO variable: the same hex per theme (palette.test.ts). */
+export const DIFF = { add: "ok", del: "err", changed: "warn" } as const
+export const DIFF_STUDIO: Record<keyof typeof DIFF, string> = {
+  add: "status-ok",
+  del: "status-bad",
+  changed: "ev-error",
+}

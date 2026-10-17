@@ -471,7 +471,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // /api/playground/fixtures (wefttest replay fixtures from a run's records),
 //     // /api/experiments (the saved groups + the runs they label — the 50 most recently updated by default, ?limit= up to 200, with `total`; each saved with its whole command: engine,
 //     // side_effects, thread, from_step, source_run_id, transcript_edits, per variant overrides + modes; listed with created,
-//     // run_count and cost; /api/runs and /api/search filter by experiment_id=; any experiment_id on a run command is
+//     // run_count, succeeded, last_run and cost; /api/runs and /api/search filter by experiment_id=; any experiment_id on a run command is
 //     // accepted, so a re-run joins the saved experiment), /api/runtimes/
 //     // {id}/breakpoints, /api/runs/{id}/steer, /api/runs/{id}/cancel (capability cancel: the link's cancel frame for the command
 //     // holding a runtime-started run; 202 cancelling, 409 finished/parked — decide instead, 503 runtime gone; an app-owned turn 403 "app-owned turn" (202 with a runtime.Sessions runtime, whose command row then reads rejected: no per-turn cancel); best effort; steer's auth); the panel drawer and /playground

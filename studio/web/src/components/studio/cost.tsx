@@ -3,17 +3,41 @@
 // on capability "pricing" (useCostCapable): without it no cost cell is
 // drawn at all, not a "—".
 import { Link } from "@tanstack/react-router"
-import type { CostFields, DelegatedCostFields } from "@/lib/api"
+import type { CostFields, DelegatedCostFields, RunRow } from "@/lib/api"
 import {
   CACHE_HINT,
   cacheNotReported,
   costView,
   delegatedView,
+  SCRIPTED_HINT,
+  scriptedChip,
   unpricedLine,
 } from "@/lib/cost"
 import { settingsLink } from "@/lib/links"
 import type { CostView } from "@/lib/cost"
 import { useCapabilities } from "@/hooks/use-capabilities"
+
+/** ScriptedChip is a scripted run's chip (UX-C-42): lib/cost.ts's
+ * scriptedChip words, the panel's turn chip — "scripted · 0 tokens" on
+ * a run that billed nothing — on the run header and the experiment
+ * grid; nothing for a live run. */
+export function ScriptedChip({
+  row,
+}: {
+  row: Pick<RunRow, "model" | "usage">
+}) {
+  const text = scriptedChip(row)
+  if (!text) return null
+  return (
+    <span
+      className="rounded-sm border px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+      title={SCRIPTED_HINT}
+      data-chip="scripted"
+    >
+      {text}
+    </span>
+  )
+}
 
 /** useCostCapable: the Studio prices usage (capability "pricing"). */
 export function useCostCapable(): boolean {

@@ -71,6 +71,8 @@
   "created": "2020-01-01T09:00:00Z",
   "updated": "2020-01-01T09:00:00Z",
   "run_count": 2,
+  "succeeded": 2,
+  "last_run": "2020-01-01T09:00:02.123Z",
   "cost_usd": 0.00024,
   "cost_known": true,
   "cost_reason": "no cache split reported; a cached prompt may be overstated",

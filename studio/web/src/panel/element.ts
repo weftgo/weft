@@ -93,7 +93,7 @@ import {
   replayBounds,
 } from "../lib/experiment-body"
 import type { LabFields } from "../lib/experiment-body"
-import { atLeastCost, sumCost, unpricedLine } from "../lib/cost"
+import { atLeastCost, isScripted, sumCost, unpricedLine } from "../lib/cost"
 import {
   ackCatalogHole,
   badge,
@@ -111,7 +111,6 @@ import {
   noPublicIdWords,
   requestCapped,
   requestHole,
-  SCRIPTED_MODEL,
   turnChips,
 } from "./badges"
 import {
@@ -286,10 +285,7 @@ export function prevTurn(
 /** engineWord is an experiment's engine as its chips say it: scripted
  * when the run answered as the scripted engine's model, else live. */
 export function engineWord(r: RunRow): "scripted" | "live" {
-  return r.model.provider === SCRIPTED_MODEL.provider &&
-    r.model.name === SCRIPTED_MODEL.name
-    ? "scripted"
-    : "live"
+  return isScripted(r) ? "scripted" : "live"
 }
 
 /** studioLink builds the ⤢ deep link (§2: "open in Studio" with the
@@ -2908,7 +2904,10 @@ export class WeftDevtools extends HTMLElement {
       unknown && !known.length
         ? "—"
         : `${unknown ? "≥" : ""}${tokens(inTok)}→${tokens(outTok)}`
-    const stats = `${s.turns.length}${s.turnsCapped ? "+" : ""} turns · ${tok} tok`
+    // "turn" is a session's word (UX-F-13): a list no session scopes
+    // counts runs; "1 turn" singular.
+    const count = s.turns.length
+    const stats = `${count}${s.turnsCapped ? "+" : ""} ${s.session ? "turn" : "run"}${count - 1 || s.turnsCapped ? "s" : ""} · ${tok} tok`
     h.appendChild(
       el("span", undefined, stats, {
         title: unknown ? `${stats} — ${unknown.cost_reason ?? ""}` : stats,
@@ -4137,7 +4136,7 @@ export class WeftDevtools extends HTMLElement {
       "aria-label": "side effects",
     }) as HTMLSelectElement
     seSel.title =
-      "How side-effect tools behave in the re-run. ReplaySafe tools always run; the others substitute, park, or — under allow, if the app opted them in — run for real."
+      "in the re-run, ReplaySafe tools always run; the others substitute, park, or run for real under allow (opted in)"
     const seLabel = el("option", undefined, "side effects: substitute", {
       title:
         "a side-effect call the source recorded is answered from the record; any other call parks for you",

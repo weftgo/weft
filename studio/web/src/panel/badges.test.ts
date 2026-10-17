@@ -269,7 +269,7 @@ describe("the turn chips (the run row's attrs)", () => {
     })
     const zero = { input_tokens: 0, output_tokens: 0 }
     expect(chips({ model: SCRIPTED_MODEL, usage: zero })[0][0]).toBe(
-      "scripted (0 tokens)"
+      "scripted · 0 tokens"
     )
     // A scripted parent whose Subagent child ran a real model.
     expect(
@@ -342,7 +342,7 @@ describe("the turn chips (the run row's attrs)", () => {
     const el = await mount()
     await vi.waitFor(() => expect(all(el, "[data-weft-chip]").length).toBe(3))
     const of = (kind: string) => $(el, `[data-weft-chip="${kind}"]`)!
-    expect(of("scripted").textContent).toBe("scripted (0 tokens)")
+    expect(of("scripted").textContent).toBe("scripted · 0 tokens")
     expect(of("experiment").textContent).toBe("experiment of t3")
     expect(of("fork").textContent).toBe("fork of s_01#e_3")
     expect(of("experiment").closest('[data-key="pg_1"]')).toBeTruthy()

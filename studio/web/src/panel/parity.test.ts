@@ -1629,7 +1629,7 @@ describe("a derived run on both surfaces (I1.3)", () => {
     // The header's total leaves the unknown turn out (Studio's session
     // and list totals read the row the same way: "—", the API's reason).
     const stats = $(el, "[data-weft-stats]")!
-    expect(stats.textContent).toBe("1 turns · — tok")
+    expect(stats.textContent).toBe("1 run · — tok")
     expect(stats.getAttribute("title")).toContain(reason)
     el.remove()
     await settle()

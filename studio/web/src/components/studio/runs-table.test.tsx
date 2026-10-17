@@ -223,7 +223,7 @@ describe("RunsTable problem badges (U4)", () => {
 
 describe("RunsTable polish (U29.1)", () => {
   it("announces the j/k selection with aria-current (UX-A-27)", async () => {
-    Element.prototype.scrollIntoView ??= () => {}
+    ;(Element.prototype as Partial<Element>).scrollIntoView ??= () => {}
     await renderWithRouter(
       <RunsTable runs={goldenRuns()} now={NOW} selectedId="r_ok" />
     )

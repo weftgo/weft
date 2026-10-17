@@ -6,7 +6,7 @@
 // it: the session page finds the forks by asking for playground runs
 // and joining on forked_from.
 import { fetchRuns, nextCursor } from "./api"
-import type { PageCursor, RunRow, SessionRow } from "./api"
+import type { ExperimentRow, PageCursor, RunRow, SessionRow } from "./api"
 
 /** The run an experiment was forked from, and the step it continued
  * at: forked_from is "<run id>#<from_step>". A run id may itself hold
@@ -113,6 +113,68 @@ export function mintExperimentID(
       .replace(/^-+|-+$/g, "")
       .slice(0, 100) || "exp"
   return `${slug}_${clean(nonce)}`.slice(0, 128)
+}
+
+/** counted is "1 variant" / "2 variants": a count with its noun, the
+ * plural only past one. */
+export const counted = (n: number, noun: string): string =>
+  `${n} ${noun}${n === 1 ? "" : "s"}`
+
+/** matrixSize is a matrix's shape in words (UX-C-44): "1 variant × 1
+ * input", "2 variants × 3 inputs" — the playground's Matrix header and
+ * the experiment page's. */
+export function matrixSize(variants: number, inputs: number): string {
+  return `${counted(variants, "variant")} × ${counted(inputs, "input")}`
+}
+
+/** The experiments list's outcome, engine and source cells (UX-C-36). */
+export const EXPERIMENT_CELLS = {
+  passHint: "the experiment's top-level runs that succeeded, of all its runs",
+  passUnknown:
+    "not counted: this Studio predates the list row's outcome, or the experiment holds too many runs to read",
+  noSource: "no source run: typed inputs",
+  filter: "filter by agent or source run",
+} as const
+
+/** passLine is the pass rate, "2 / 3 passed", or undefined when the row
+ * carries no succeeded count. */
+export function passLine(
+  e: Pick<ExperimentRow, "succeeded" | "run_count">
+): string | undefined {
+  if (e.succeeded === undefined || e.run_count === undefined) return undefined
+  return `${e.succeeded} / ${e.run_count} passed`
+}
+
+/** experimentEngines is every engine the experiment's cells ran on —
+ * the command's and each variant's own — deduped, in order ("live",
+ * "live · scripted"); "" when none was saved (a pre-F5.1 definition). */
+export function experimentEngines(
+  e: Pick<ExperimentRow, "engine" | "variants">
+): string {
+  const all = [e.engine, ...e.variants.map((v) => v.engine ?? e.engine)]
+  return [...new Set(all.filter((x): x is string => !!x))].join(" · ")
+}
+
+/** experimentSources is the source runs the experiment replays: the
+ * command's and each input's, deduped. */
+export function experimentSources(
+  e: Pick<ExperimentRow, "source_run_id" | "inputs">
+): string[] {
+  const all = [e.source_run_id, ...e.inputs.map((i) => i.source_run_id)]
+  return [...new Set(all.filter((x): x is string => !!x))]
+}
+
+/** matchesExperiment is the list's filter (UX-C-36): every term a
+ * substring of the agent, the id, the name or a source run id. */
+export function matchesExperiment(e: ExperimentRow, q: string): boolean {
+  const hay = [e.agent, e.id, e.name, ...experimentSources(e)]
+    .join("\n")
+    .toLowerCase()
+  return q
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean)
+    .every((t) => hay.includes(t))
 }
 
 /** matrixStepLine is the matrix's line past step 0 (U26; UX-C-21): the

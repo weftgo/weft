@@ -166,7 +166,7 @@ describe("a derived turn in the panel", () => {
     expect($(el, ".weft-turn")!.textContent).not.toContain("0→0")
     // The header's total leaves the unknown turn out: "—", the reason its title.
     const stats = $(el, "[data-weft-stats]")!
-    expect(stats.textContent).toBe("1 turns · — tok")
+    expect(stats.textContent).toBe("1 run · — tok")
     expect(stats.getAttribute("title")).toContain(reason)
   })
 

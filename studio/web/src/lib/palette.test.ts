@@ -89,3 +89,52 @@ describe("run tree tones (U8.3)", () => {
       }
     })
 })
+
+describe("diff roles (UX-F-20)", () => {
+  // One pair on both surfaces: added green, removed red, a changed
+  // cell mustard — the panel's rules in DIFF's token, Studio's
+  // DiffBlock and step diff in DIFF_STUDIO's variable, one hex.
+  it("the panel's diff rules draw DIFF's tokens", async () => {
+    const { DIFF } = await import("./palette")
+    const { PANEL_CSS } = await import("../panel/styles")
+    expect(PANEL_CSS).toContain(
+      `.weft-diff-add, .weft-diff-b { color: var(--weft-${DIFF.add}); }`
+    )
+    expect(PANEL_CSS).toContain(
+      `.weft-diff-del { color: var(--weft-${DIFF.del}); text-decoration: line-through; }`
+    )
+    expect(PANEL_CSS).toContain(
+      `.weft-diff-a { color: var(--weft-${DIFF.del}); }`
+    )
+    expect(PANEL_CSS).toContain(
+      `td.weft-diff-changed { color: var(--weft-${DIFF.changed}); }`
+    )
+  })
+  it("Studio's DiffBlock and step diff draw DIFF_STUDIO's variables", async () => {
+    const { DIFF_STUDIO } = await import("./palette")
+    const req = readFileSync(
+      resolve(process.cwd(), "src/components/studio/step-request.tsx"),
+      "utf8"
+    )
+    expect(req).toContain(`text-${DIFF_STUDIO.add}`)
+    expect(req).toContain(`text-${DIFF_STUDIO.del} line-through`)
+    const sd = readFileSync(
+      resolve(process.cwd(), "src/components/studio/step-diff.tsx"),
+      "utf8"
+    )
+    expect(sd).toContain(`changed: "bg-${DIFF_STUDIO.changed}/10`)
+  })
+  for (const [theme, sel] of [
+    ["light", ":root"],
+    ["dark", ".dark"],
+  ] as const)
+    it(`${theme}: each diff role is the same hex on both surfaces`, async () => {
+      const { DIFF, DIFF_STUDIO } = await import("./palette")
+      const studio = studioTokens(sel)
+      for (const [k, t] of Object.entries(DIFF)) {
+        const v = DIFF_STUDIO[k as keyof typeof DIFF]
+        expect(studio[v], `${k}: --${v}`).toMatch(/^#[0-9a-f]{6}$/)
+        expect(PALETTE[theme][t], `${k}: --weft-${t} vs --${v}`).toBe(studio[v])
+      }
+    })
+})

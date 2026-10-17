@@ -689,7 +689,9 @@ func TestExperimentsGolden(t *testing.T) {
 	golden(t, "experiment.golden.json", experimentDates.ReplaceAllString(detail, `"$1":"2020-01-01T09:00:00Z"`))
 
 	_, _, list := get(t, h, "/studio/api/experiments")
-	for _, want := range []string{`"run_count":2`, `"cost_usd":0.00024`, `"created":"`, `"transcript_edits":[`} {
+	// The list row's outcome (UX-C-36): both runs succeeded, the newest
+	// one's start the last run.
+	for _, want := range []string{`"run_count":2`, `"succeeded":2`, `"last_run":"2020-01-01T09:00:02.123Z"`, `"cost_usd":0.00024`, `"created":"`, `"transcript_edits":[`} {
 		if !strings.Contains(list, want) {
 			t.Errorf("history missing %s: %s", want, list)
 		}

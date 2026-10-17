@@ -415,3 +415,13 @@ describe("canReplay (the panel's canAct rule)", () => {
     expect(tokenScopeOf("plain")).toBe("")
   })
 })
+
+describe("the story's marks under the replay drawer (UX-C-46)", () => {
+  it("rings the from step and marks the kept prefix", async () => {
+    const { replayMarkOf } = await import("./replay")
+    expect(replayMarkOf(2, 2)).toBe("from")
+    expect(replayMarkOf(0, 2)).toBe("kept")
+    expect(replayMarkOf(3, 2)).toBeUndefined()
+    expect(replayMarkOf(0, undefined)).toBeUndefined()
+  })
+})

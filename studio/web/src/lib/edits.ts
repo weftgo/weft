@@ -363,6 +363,17 @@ export interface EditMark {
   index?: number
 }
 
+/** The playground's transcript-edit fields (UX-C-47): the recorded
+ * value is a muted "recorded: …" line above the field, never its
+ * placeholder (an empty field that looked filled); the field's own
+ * placeholder says it is empty; a field holding a draft carries the
+ * "edited" chip. */
+export const EDIT_FIELD = {
+  recorded: "recorded: ",
+  empty: "empty: type to replace the recorded value",
+  edited: "edited",
+} as const
+
 /** The chip each token draws on the replayed run's Story. */
 export const MARK_CHIPS: Record<EditMark["what"], string> = {
   args: "args edited",

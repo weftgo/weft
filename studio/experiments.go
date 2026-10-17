@@ -65,9 +65,14 @@ func bodyOf(e obsdb.Experiment) experimentBody {
 // labelled with its id (never stored): run_count counts its top-level
 // runs (the detail's runs[]), and the cost block is their whole bill —
 // each run's own + delegated (pricing.go), unknown with a reason when a
-// run is not priced or the runs could not all be read.
+// run is not priced or the runs could not all be read. succeeded counts
+// the top-level runs that finished with a result (the list's pass rate,
+// succeeded / run_count) and last_run is the newest one's start (UX-C-36);
+// both are omitted past the walk's cap, where the runs were not all read.
 type experimentSummary struct {
-	RunCount int `json:"run_count"`
+	RunCount  int        `json:"run_count"`
+	Succeeded *int       `json:"succeeded,omitempty"`
+	LastRun   *time.Time `json:"last_run,omitempty"`
 	costFields
 }
 
@@ -335,11 +340,20 @@ func (s *Server) experimentSummary(ctx context.Context, c *coster, id string) (e
 		}
 		q.Before, q.BeforeID = *page.NextBefore, page.NextBeforeID
 	}
-	n := 0
+	n, ok := 0, 0
+	var last *time.Time
 	for _, r := range runs {
-		if r.ParentRunID == "" {
-			n++
+		if r.ParentRunID != "" {
+			continue
+		}
+		n++
+		if r.Status == obsdb.StatusSucceeded {
+			ok++
+		}
+		if last == nil || r.Started.After(*last) {
+			t := r.Started.UTC()
+			last = &t
 		}
 	}
-	return experimentSummary{RunCount: n, costFields: c.setCost(runs, "run").fields()}, nil
+	return experimentSummary{RunCount: n, Succeeded: &ok, LastRun: last, costFields: c.setCost(runs, "run").fields()}, nil
 }

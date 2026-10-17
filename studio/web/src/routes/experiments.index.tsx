@@ -5,7 +5,11 @@
 // "pricing" — all on the list row itself (F5.1: created, run_count and
 // the cost block), no per-row read. Each row opens the experiment's
 // page. Capability-gated on "playground", whose routes these are, and
-// never read under a panel token (the routes refuse every one). The
+// never read under a panel token (the routes refuse every one). Each
+// row also says how it went and what it ran (UX-C-36): the pass rate
+// (succeeded / run_count), the engines, the source run and step, the
+// last run's time; a filter narrows the loaded rows by agent or source
+// run (lib/experiments.ts matchesExperiment). The
 // list is the server's cut — the most recently updated, 50 by default,
 // 200 at most — and says so when total is larger, with a load-more.
 import { useState } from "react"
@@ -14,8 +18,16 @@ import { createFileRoute, Link } from "@tanstack/react-router"
 
 import { EXPERIMENTS_MAX, EXPERIMENTS_PAGE, experimentsQuery } from "@/lib/api"
 import { absoluteTime, relativeTime } from "@/lib/format"
+import { statusClass } from "@/lib/status-class"
 import { costView, sumCost } from "@/lib/cost"
-import { experimentLink, playgroundLink } from "@/lib/links"
+import {
+  EXPERIMENT_CELLS,
+  experimentEngines,
+  experimentSources,
+  matchesExperiment,
+  passLine,
+} from "@/lib/experiments"
+import { experimentLink, playgroundLink, runLink } from "@/lib/links"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { CapsUnread } from "@/components/studio/caps-unread"
 import { useDocumentTitle } from "@/hooks/use-document-title"
@@ -63,9 +75,11 @@ function ExperimentList() {
     ...experimentsQuery(limit === EXPERIMENTS_PAGE ? undefined : limit),
     placeholderData: keepPreviousData,
   })
-  const rows = list.data?.experiments ?? []
+  const loaded = list.data?.experiments ?? []
+  const [q, setQ] = useState("")
+  const rows = q.trim() ? loaded.filter((e) => matchesExperiment(e, q)) : loaded
   const total = list.data?.total
-  const cut = total !== undefined && total > rows.length
+  const cut = total !== undefined && total > loaded.length
   const costCapable = useCostCapable()
   return (
     <section className="space-y-3 p-4" aria-labelledby="experiments-title">
@@ -75,7 +89,8 @@ function ExperimentList() {
         </h1>
         <span className="text-xs text-muted-foreground" data-experiments-count>
           the playground's saved matrices ·{" "}
-          {cut ? `newest ${rows.length} of ${total}` : rows.length}
+          {cut ? `newest ${loaded.length} of ${total}` : loaded.length}
+          {q.trim() ? ` · ${rows.length} match` : ""}
         </span>
         {cut ? (
           limit < EXPERIMENTS_MAX ? (
@@ -91,7 +106,7 @@ function ExperimentList() {
               {Math.min(
                 EXPERIMENTS_PAGE,
                 EXPERIMENTS_MAX - limit,
-                total - rows.length
+                total - loaded.length
               )}{" "}
               more
             </button>
@@ -104,6 +119,17 @@ function ExperimentList() {
             </span>
           )
         ) : null}
+        {loaded.length ? (
+          <input
+            type="search"
+            className="ml-2 w-56 rounded border bg-transparent px-2 py-0.5 text-xs"
+            placeholder={EXPERIMENT_CELLS.filter}
+            aria-label={EXPERIMENT_CELLS.filter}
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            data-experiments-filter
+          />
+        ) : null}
         <Link {...playgroundLink()} className="ml-auto text-xs hover:underline">
           new in the playground
         </Link>
@@ -114,7 +140,7 @@ function ExperimentList() {
         <p className="text-xs text-status-bad" role="alert">
           the experiments could not be read: {list.error.message}
         </p>
-      ) : rows.length === 0 ? (
+      ) : loaded.length === 0 ? (
         <p className="py-16 text-center text-sm text-muted-foreground">
           No experiments yet: a matrix run from the playground is saved here.
         </p>
@@ -127,7 +153,11 @@ function ExperimentList() {
                 <TableHead>agent</TableHead>
                 <TableHead>created</TableHead>
                 <TableHead>variants × inputs</TableHead>
+                <TableHead>engine</TableHead>
+                <TableHead>source</TableHead>
                 <TableHead className="text-right">runs</TableHead>
+                <TableHead>passed</TableHead>
+                <TableHead>last run</TableHead>
                 {costCapable ? (
                   <TableHead className="text-right">cost</TableHead>
                 ) : null}
@@ -135,6 +165,8 @@ function ExperimentList() {
             </TableHeader>
             <TableBody>
               {rows.map((e) => {
+                const sources = experimentSources(e)
+                const pass = passLine(e)
                 return (
                   <TableRow key={e.id} data-experiment-row={e.id}>
                     <TableCell>
@@ -162,6 +194,53 @@ function ExperimentList() {
                       {e.variants.length} × {e.inputs.length}
                     </TableCell>
                     <TableCell
+                      className="font-mono text-xs"
+                      data-experiment-engine
+                    >
+                      {experimentEngines(e) || "—"}
+                    </TableCell>
+                    <TableCell
+                      className="font-mono text-xs"
+                      data-experiment-source
+                    >
+                      {sources.length ? (
+                        <>
+                          {sources.slice(0, 2).map((id) => (
+                            <Link
+                              key={id}
+                              {...runLink(id, {
+                                step: e.from_step || undefined,
+                                view: e.from_step ? "story" : undefined,
+                              })}
+                              className="mr-1 hover:underline"
+                              title={id}
+                            >
+                              {id.length > 14 ? `${id.slice(0, 12)}…` : id}
+                            </Link>
+                          ))}
+                          {sources.length > 2 ? (
+                            <span className="text-faint">
+                              +{sources.length - 2}
+                            </span>
+                          ) : null}
+                          {e.from_step ? (
+                            <span className="text-faint">
+                              {" "}
+                              · step {e.from_step}
+                            </span>
+                          ) : null}
+                        </>
+                      ) : (
+                        <span
+                          className="text-faint"
+                          title={EXPERIMENT_CELLS.noSource}
+                        >
+                          —
+                          <span className="sr-only">{` ${EXPERIMENT_CELLS.noSource}`}</span>
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell
                       className="text-right font-mono text-xs"
                       data-experiment-runs
                     >
@@ -169,6 +248,42 @@ function ExperimentList() {
                         <span className="text-faint" title={NO_RUN_COUNT}>
                           —<span className="sr-only">{` ${NO_RUN_COUNT}`}</span>
                         </span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-xs" data-experiment-pass>
+                      {pass ? (
+                        <span
+                          className={
+                            statusClass(
+                              e.succeeded === e.run_count
+                                ? "succeeded"
+                                : "failed"
+                            ).text
+                          }
+                          title={EXPERIMENT_CELLS.passHint}
+                        >
+                          {pass}
+                        </span>
+                      ) : (
+                        <span
+                          className="text-faint"
+                          title={EXPERIMENT_CELLS.passUnknown}
+                        >
+                          —
+                          <span className="sr-only">{` ${EXPERIMENT_CELLS.passUnknown}`}</span>
+                        </span>
+                      )}
+                    </TableCell>
+                    <TableCell
+                      className="text-xs text-muted-foreground"
+                      data-experiment-last
+                    >
+                      {e.last_run ? (
+                        <span title={absoluteTime(e.last_run)}>
+                          {relativeTime(e.last_run)}
+                        </span>
+                      ) : (
+                        "—"
                       )}
                     </TableCell>
                     {costCapable ? (

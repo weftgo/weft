@@ -28,6 +28,7 @@ import type { CommandStatus, ExperimentRow, RunRow } from "@/lib/api"
 import { absoluteTime, relativeTime } from "@/lib/format"
 import { formatUSD, sumCost } from "@/lib/cost"
 import { pickTarget } from "@/lib/experiment-body"
+import { counted, matrixSize } from "@/lib/experiments"
 import {
   cellBody,
   cellKey,
@@ -57,7 +58,11 @@ import { useDocumentTitle } from "@/hooks/use-document-title"
 import { statusOf } from "@/lib/status"
 import { statusClass } from "@/lib/status-class"
 import { useRuntimesNeeded } from "@/hooks/use-notices"
-import { CostText, useCostCapable } from "@/components/studio/cost"
+import {
+  CostText,
+  ScriptedChip,
+  useCostCapable,
+} from "@/components/studio/cost"
 import { Button } from "@/components/ui/button"
 import { NotFound } from "@/components/studio/not-found"
 import { isNotFound } from "@/lib/not-found"
@@ -387,8 +392,9 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
             <span className="text-sm">{exp.name}</span>
           ) : null}
           <span className="text-xs text-muted-foreground">
-            agent {exp.agent || "—"} · {exp.variants.length} variants ×{" "}
-            {exp.inputs.length} inputs · {runs.length} runs
+            agent {exp.agent || "—"} ·{" "}
+            {matrixSize(exp.variants.length, exp.inputs.length)} ·{" "}
+            {counted(runs.length, "run")}
           </span>
           {costCapable && runs.length ? (
             <span className="text-xs" data-experiment-total>
@@ -552,6 +558,7 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
                                 <CostText v={sumCost([run])} />
                               </span>
                             ) : null}
+                            <ScriptedChip row={run} />
                             {all.length > 1 ? (
                               <span
                                 className="text-faint"

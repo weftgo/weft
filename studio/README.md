@@ -523,7 +523,7 @@ event carries no mark when full, an unmarked run, another run's mark),
 the line says nothing. The cap itself is the app's
 (`otel.Content(otel.ContentConfig{MaxBytes: …})`) and no record carries
 it, so the line does not name it. Turn rows carry chips read from the run
-row, each titled with its source: "scripted (0 tokens)" (the run's model
+row, each titled with its source: "scripted · 0 tokens" (the run's model
 is `weft/runtime/scripted`, the scripted engine's own, pinned by
 `runtime`'s `TestScriptedModelInfo`, because no `weft.*` attribute names the
 engine; plain "scripted" when the row's usage is not zero, as when a
@@ -907,6 +907,8 @@ fields), `--weft-fg`, `--weft-dim`, `--weft-faint`, `--weft-line`,
 `--weft-accent`, `--weft-on-accent` (text on the accent), `--weft-warn`,
 `--weft-err`, `--weft-info`, `--weft-ok`, `--weft-parked`,
 `--weft-scrim` (the `?` overlay), `--weft-shadow`, `--weft-font`,
+`--weft-font-prose` (a step's text, the prompt and the notes: `system-ui,
+sans-serif`, no webfont; ids, JSON and numbers stay in `--weft-font`),
 `--weft-radius`, `--weft-radius-sm` (and `--weft-z`, above).
 The panel's own tokens, not Studio's: light `--weft-faint` `#766f61`
 (Studio's `--faint` reads 2.6:1 on paper, under AA; dark `--weft-faint`
@@ -1045,8 +1047,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 273,930 B raw / 89,990 B gzip
-(87.9 KiB, the bundle of the ledger's row "U29.3 polish"; 8,314 B — 8.1 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 273,957 B raw / 90,048 B gzip
+(87.9 KiB, the bundle of the ledger's row "U29.4 polish"; 8,256 B — 8.1 KiB — of headroom under
 the 98,304 B, 96 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; A5.4 raised it from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -2748,7 +2750,7 @@ refusal, `last_error` ("<status> <code>: <reason>") with `last_at`,
 omitted before the first. Under `Playground(true)` the playground's
 routes join (`GET /api/runtimes`, `POST /api/playground/runs`, `GET
 /api/playground/commands/{id}`, `POST /api/runs/{id}/approvals`,
-`POST /api/playground/fixtures`, `GET/POST /api/experiments` (the 50 most recently updated by default, `?limit=` up to 200, with `total`; id: `[A-Za-z0-9._:-]{1,128}`, as command_id; each row with `created`, `run_count`,
+`POST /api/playground/fixtures`, `GET/POST /api/experiments` (the 50 most recently updated by default, `?limit=` up to 200, with `total`; id: `[A-Za-z0-9._:-]{1,128}`, as command_id; each row with `created`, `run_count`, `succeeded` and `last_run` (the top-level runs that succeeded and the newest one's start; omitted past the summary's 10,000-run walk),
 `cost_usd`/`cost_known`; a POST creates or replaces the whole definition —
 `engine`/`side_effects`/`thread`/`from_step`/`source_run_id`/`transcript_edits`
 kept as sent, per variant its overrides + modes), `GET

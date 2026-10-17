@@ -11,7 +11,7 @@ import type { Dispatch, ReactNode, SetStateAction } from "react"
 
 import { ApiError, putBreakpoints, runQuery, transcriptQuery } from "@/lib/api"
 import type { AgentView, RuntimeView } from "@/lib/api"
-import { kindOf } from "@/lib/edits"
+import { EDIT_FIELD, kindOf } from "@/lib/edits"
 import { compactionsOf, isSessionMarker } from "@/lib/compaction"
 import { bytes } from "@/lib/summarize"
 import {
@@ -643,28 +643,66 @@ export function TranscriptEdits({
           </button>
         </div>
       ))}
-      {fields.map((f) =>
-        f.callID ? (
-          <ResultField
-            key={`${f.step}:${f.callID}`}
-            field={f}
-            value={draftOf(f)?.toolResult}
-            onChange={(v) => set(f, v)}
-          />
-        ) : (
+      {fields.map((f) => {
+        // The recorded value is a muted line, not the placeholder
+        // (UX-C-47): an empty field reads empty, an edited one "edited".
+        if (f.callID)
+          return (
+            <ResultField
+              key={`${f.step}:${f.callID}`}
+              field={f}
+              value={draftOf(f)?.toolResult}
+              onChange={(v) => set(f, v)}
+            />
+          )
+        const content = draftOf(f)?.content
+        return (
           <label key={`${f.step}:reply`} className="block space-y-1 text-xs">
-            <span className="text-faint">step {f.step} · reply</span>
+            <span className="flex items-center gap-1 text-faint">
+              step {f.step} · reply
+              {content !== undefined ? <EditedChip /> : null}
+            </span>
+            <RecordedLine text={f.placeholder} />
             <textarea
               rows={2}
               className="w-full rounded border bg-transparent px-2 py-1"
-              placeholder={f.placeholder.slice(0, 80)}
-              value={draftOf(f)?.content ?? ""}
+              aria-label={`edit the reply at step ${f.step}`}
+              data-edit-reply={f.step}
+              placeholder={EDIT_FIELD.empty}
+              value={content ?? ""}
               onChange={(e) => set(f, e.target.value)}
             />
           </label>
         )
-      )}
+      })}
     </div>
+  )
+}
+
+/** RecordedLine is a kept field's recorded value as a muted line above
+ * it (UX-C-47), never its placeholder: an empty field reads empty. */
+function RecordedLine({ text }: { text: string }) {
+  return (
+    <span
+      className="block truncate font-mono text-[11px] text-faint"
+      title={text}
+      data-edit-recorded
+    >
+      {EDIT_FIELD.recorded}
+      {text.slice(0, 120)}
+    </span>
+  )
+}
+
+/** EditedChip marks a kept field holding a draft (UX-C-47). */
+function EditedChip() {
+  return (
+    <span
+      className="shrink-0 rounded-sm border border-thread/60 px-1 font-mono text-[10px] text-thread-ink"
+      data-edit-edited
+    >
+      {EDIT_FIELD.edited}
+    </span>
   )
 }
 
@@ -703,18 +741,20 @@ function ResultField({
           <span className="font-mono">{callLabel(f.name, f.args)}</span> ·{" "}
           <span className="font-mono">{f.callID}</span> →
         </span>
+        <RecordedLine text={recorded} />
         <textarea
           rows={Math.min(8, Math.max(2, lines))}
           className="w-full rounded border bg-transparent px-2 py-1 font-mono"
           aria-label={`edit the result of ${f.name} (${f.callID}) at step ${f.step}`}
           data-edit-step={f.step}
           data-edit-call={f.callID}
-          placeholder={recorded.slice(0, 200)}
+          placeholder={EDIT_FIELD.empty}
           value={shown}
           onChange={(e) => onChange(e.target.value)}
         />
       </label>
       <div className="flex flex-wrap items-center gap-2 text-[11px] text-faint">
+        {value ? <EditedChip /> : null}
         <span data-edit-size>
           recorded {bytes(utf8Bytes(recorded))}
           {value ? ` · edited ${bytes(utf8Bytes(value))}` : ""}

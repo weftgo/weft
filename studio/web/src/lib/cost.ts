@@ -61,6 +61,32 @@ const UNKNOWN_WHY = "this Studio did not price it"
 /** A scripted model's figure: an exact $0 nothing bills. */
 export const SCRIPTED_TEXT = "$0 · scripted"
 
+/** The scripted engine's own ModelInfo (runtime/scripted.go; pinned
+ * there by TestScriptedModelInfo). */
+export const SCRIPTED_MODEL = { provider: "weft/runtime", name: "scripted" }
+
+/** isScripted: the run answered as the scripted engine's model. */
+export const isScripted = (r: Pick<RunRow, "model">) =>
+  r.model.provider === SCRIPTED_MODEL.provider &&
+  r.model.name === SCRIPTED_MODEL.name
+
+/** The scripted chip's hint: the attribute it is read from. */
+export const SCRIPTED_HINT =
+  "model weft/runtime/scripted: the source run's recorded turns, replayed"
+
+/** scriptedChip is a scripted run's chip (UX-C-42), the same words on
+ * the panel's turn row, Studio's run header and experiment grid:
+ * "scripted · 0 tokens" only when the row's usage is zero — a scripted
+ * parent's Subagent child on a real model rolls real usage in. */
+export function scriptedChip(
+  r: Pick<RunRow, "model" | "usage">
+): string | undefined {
+  if (!isScripted(r)) return undefined
+  return r.usage.input_tokens + r.usage.output_tokens
+    ? "scripted"
+    : "scripted · 0 tokens"
+}
+
 function view(
   usd: number | null | undefined,
   known: boolean | undefined,

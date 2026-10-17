@@ -141,6 +141,17 @@ interface Cards {
 }
 const CardsCtx = createContext<Cards | undefined>(undefined)
 
+/** The parked calls' words by call id under a RunCards (the drawer's
+ * answer and call facts read them), else undefined. */
+export const useParkedCalls = () => useContext(CardsCtx)?.parked
+
+/** The parked block under a RunCards, in its words. */
+function CardsParkedCalls(
+  props: Omit<React.ComponentProps<typeof ParkedCalls>, "words">
+) {
+  return <ParkedCalls {...props} words={useParkedCalls()} />
+}
+
 /** useRemembered is useState(initial) remembered under key in the
  * story's memory; without a key (a subagent's or a span's step) or a
  * memory, plain state. */
@@ -1026,6 +1037,86 @@ function Unplaced({ batches }: { batches: PlacedBatch[] }) {
   )
 }
 
+/**
+ * RunCards provides the run cards' facts (U25) — each call's
+ * execute_tool facts, the parked calls' words, the tools' origins and
+ * the execute_tool error facts — to every call row under it: the story
+ * (StepList) and the run tree's drawer (span-detail) read the one
+ * source, so a parked call reads "awaiting a decision" in both.
+ */
+export function RunCards({
+  doc,
+  pending,
+  callFacts,
+  toolFacts,
+  requests,
+  children,
+}: {
+  doc: RunDoc
+  /** The fold's pending calls (FoldedRun.pending). */
+  pending: readonly { id: string; name: string }[]
+  callFacts?: Map<string, CallFacts>
+  toolFacts?: ToolFactsMap
+  requests?: RunRequests
+  children: React.ReactNode
+}) {
+  // The parked calls' words (UX-S3-12, UX-H-18): an approval gate or a
+  // breakpoint, by the span's park source; the tools' origins by name.
+  // A ParkSource park is a breakpoint when the run's service has a
+  // runtime that registered breakpoints_own: the runtimes are read —
+  // the key observed at all — only while such a park is drawn (the
+  // parked block's own read shares the cache; the shell's is the one
+  // poller), by a probe beside the children, never around them.
+  const parkFacts = pending.map(
+    (c) =>
+      [
+        c,
+        [...(callFacts ?? [])].find(
+          ([k, v]) => v.park && k.endsWith(`:${c.id}`)
+        )?.[1],
+      ] as const
+  )
+  const [own, setOwn] = useState(false)
+  const probe = parkFacts.some(([, f]) => f?.park === "park_source")
+  const parked = new Map(
+    parkFacts.map(([c, f]) => {
+      const word = parkWord(f, c.name, doc, own)
+      return [c.id, { word, hint: PARK_HINT[word] ?? "" }] as const
+    })
+  )
+  const sources = new Map<string, string>()
+  for (const r of requests?.doc?.requests ?? [])
+    for (const t of r.tools && !isHoleRef(r.tools) ? r.tools.tools : [])
+      sources.set(t.name, t.source)
+  const cards: Cards = { facts: callFacts, parked, sources }
+  return (
+    <CardsCtx.Provider value={cards}>
+      <ToolFactsCtx.Provider value={toolFacts}>
+        {probe ? (
+          <OwnBreakpointsProbe service={doc.service} onOwn={setOwn} />
+        ) : null}
+        {children}
+      </ToolFactsCtx.Provider>
+    </CardsCtx.Provider>
+  )
+}
+
+/** Reads whether the run's service has a runtime that registered
+ * breakpoints_own (lib/cards.ts ownBreakpoints), mounted only while a
+ * ParkSource park is drawn. */
+function OwnBreakpointsProbe({
+  service,
+  onOwn,
+}: {
+  service?: string
+  onOwn: (own: boolean) => void
+}) {
+  const rts = useQuery(runtimesQuery())
+  const own = ownBreakpoints(rts.data?.runtimes, service)
+  useEffect(() => onOwn(own), [own, onOwn])
+  return null
+}
+
 export function StepList({
   events,
   folded,
@@ -1105,37 +1196,6 @@ export function StepList({
   // While scrubbing, the run reads as running: calls past the
   // playhead are "running", not "never completed".
   const runStatus = replaying ? "running" : doc.status
-  // The parked calls' words (UX-S3-12, UX-H-18): an approval gate or a
-  // breakpoint, by the span's park source; the tools' origins by name.
-  // A ParkSource park is a breakpoint when the run's service has a
-  // runtime that registered breakpoints_own: the runtimes are read
-  // only while such a park is drawn (the parked block's own read
-  // shares the cache).
-  const parkFacts = view.pending.map(
-    (c) =>
-      [
-        c,
-        [...(callFacts ?? [])].find(
-          ([k, v]) => v.park && k.endsWith(`:${c.id}`)
-        )?.[1],
-      ] as const
-  )
-  const rts = useQuery({
-    ...runtimesQuery(),
-    enabled: parkFacts.some(([, f]) => f?.park === "park_source"),
-  })
-  const own = ownBreakpoints(rts.data?.runtimes, doc.service)
-  const parked = new Map(
-    parkFacts.map(([c, f]) => {
-      const word = parkWord(f, c.name, doc, own)
-      return [c.id, { word, hint: PARK_HINT[word] ?? "" }] as const
-    })
-  )
-  const sources = new Map<string, string>()
-  for (const r of requests?.doc?.requests ?? [])
-    for (const t of r.tools && !isHoleRef(r.tools) ? r.tools.tools : [])
-      sources.set(t.name, t.source)
-  const cards: Cards = { facts: callFacts, parked, sources }
   // The verbs' from_step is the card's own step ordinal (the stored
   // index the server cuts at). How far a replay may start is the
   // transcript's to say (the server's rule, replayBounds), never the
@@ -1267,170 +1327,172 @@ export function StepList({
   )
   return (
     <StoryMemory.Provider value={memory}>
-      <CardsCtx.Provider value={cards}>
-        <ToolFactsCtx.Provider value={toolFacts}>
-          <div className="space-y-3">
-            {onStep ? (
-              <StepScrubber
-                steps={steps}
-                value={highlight}
-                runStatus={runStatus}
-                onStep={scrubTo}
-                inputRef={stepInputRef}
-              />
-            ) : null}
-            {steps.length > 1 ? (
-              <div
-                className="flex items-center justify-end gap-1"
-                role="group"
-                aria-label="story shape"
-                data-story-shape
+      <RunCards
+        doc={doc}
+        pending={view.pending}
+        callFacts={callFacts}
+        toolFacts={toolFacts}
+        requests={requests}
+      >
+        <div className="space-y-3">
+          {onStep ? (
+            <StepScrubber
+              steps={steps}
+              value={highlight}
+              runStatus={runStatus}
+              onStep={scrubTo}
+              inputRef={stepInputRef}
+            />
+          ) : null}
+          {steps.length > 1 ? (
+            <div
+              className="flex items-center justify-end gap-1"
+              role="group"
+              aria-label="story shape"
+              data-story-shape
+            >
+              <Button
+                variant="ghost"
+                size="xs"
+                className="font-mono text-[11px]"
+                aria-pressed={allFolded}
+                onClick={() => setAllFolded((f) => !f)}
               >
-                <Button
-                  variant="ghost"
-                  size="xs"
-                  className="font-mono text-[11px]"
-                  aria-pressed={allFolded}
-                  onClick={() => setAllFolded((f) => !f)}
-                >
-                  {allFolded ? STORY_SHAPE.expand : STORY_SHAPE.collapse}
-                </Button>
-                <Button
-                  variant={problemsOnly ? "secondary" : "ghost"}
-                  size="xs"
-                  className="font-mono text-[11px]"
-                  aria-pressed={problemsOnly}
-                  title={STORY_SHAPE.problemsHint}
-                  onClick={() => setProblemsOnly((p) => !p)}
-                >
-                  {STORY_SHAPE.problems}
-                </Button>
-              </div>
-            ) : null}
-            <EditsMark row={doc} batches={transcript?.batches} />
-            {sessionMarkers.map((c, i) => (
-              <CompactionMarker
-                key={c.hash || `session-${i}`}
-                c={c}
-                all={compactions}
-                runId={doc.id}
-                transcript={transcript}
-                transcriptError={transcriptError}
-              />
-            ))}
-            {virtual ? (
-              // Virtualised (plan H2): a list whose items say where they sit
-              // in the whole; the DOM holds the cards in view plus overscan.
-              <div
-                ref={scroller}
-                className="max-h-[calc(100vh-12rem)] overflow-auto"
-                role="list"
-                aria-label={`steps, ${steps.length.toLocaleString()}`}
-                data-virtual
-                onScroll={(e) => {
-                  atEnd.current = isAtEnd(e.currentTarget)
-                  // Scrolled away from the named card: naming it again
-                  // scrolls back to it.
-                  const r = virt.range
-                  if (
-                    r &&
-                    hlIndex >= 0 &&
-                    (hlIndex < r.startIndex || hlIndex > r.endIndex)
-                  )
-                    scrolledTo.current = undefined
-                }}
+                {allFolded ? STORY_SHAPE.expand : STORY_SHAPE.collapse}
+              </Button>
+              <Button
+                variant={problemsOnly ? "secondary" : "ghost"}
+                size="xs"
+                className="font-mono text-[11px]"
+                aria-pressed={problemsOnly}
+                title={STORY_SHAPE.problemsHint}
+                onClick={() => setProblemsOnly((p) => !p)}
               >
-                <div
-                  className="relative w-full"
-                  style={{ height: virt.getTotalSize() }}
-                >
-                  {virt.getVirtualItems().map((item) => (
-                    <div
-                      key={item.key}
-                      ref={virt.measureElement}
-                      data-index={item.index}
-                      role="listitem"
-                      aria-setsize={steps.length}
-                      aria-posinset={item.index + 1}
-                      className="absolute top-0 left-0 w-full space-y-3 pb-3"
-                      style={{ transform: `translateY(${item.start}px)` }}
-                    >
-                      {stepBlock(steps[item.index])}
-                    </div>
-                  ))}
-                </div>
+                {STORY_SHAPE.problems}
+              </Button>
+            </div>
+          ) : null}
+          <EditsMark row={doc} batches={transcript?.batches} />
+          {sessionMarkers.map((c, i) => (
+            <CompactionMarker
+              key={c.hash || `session-${i}`}
+              c={c}
+              all={compactions}
+              runId={doc.id}
+              transcript={transcript}
+              transcriptError={transcriptError}
+            />
+          ))}
+          {virtual ? (
+            // Virtualised (plan H2): a list whose items say where they sit
+            // in the whole; the DOM holds the cards in view plus overscan.
+            <div
+              ref={scroller}
+              className="max-h-[calc(100vh-12rem)] overflow-auto"
+              role="list"
+              aria-label={`steps, ${steps.length.toLocaleString()}`}
+              data-virtual
+              onScroll={(e) => {
+                atEnd.current = isAtEnd(e.currentTarget)
+                // Scrolled away from the named card: naming it again
+                // scrolls back to it.
+                const r = virt.range
+                if (
+                  r &&
+                  hlIndex >= 0 &&
+                  (hlIndex < r.startIndex || hlIndex > r.endIndex)
+                )
+                  scrolledTo.current = undefined
+              }}
+            >
+              <div
+                className="relative w-full"
+                style={{ height: virt.getTotalSize() }}
+              >
+                {virt.getVirtualItems().map((item) => (
+                  <div
+                    key={item.key}
+                    ref={virt.measureElement}
+                    data-index={item.index}
+                    role="listitem"
+                    aria-setsize={steps.length}
+                    aria-posinset={item.index + 1}
+                    className="absolute top-0 left-0 w-full space-y-3 pb-3"
+                    style={{ transform: `translateY(${item.start}px)` }}
+                  >
+                    {stepBlock(steps[item.index])}
+                  </div>
+                ))}
               </div>
-            ) : (
-              steps.map((step) => (
-                <div key={step.index} className="space-y-3">
-                  {stepBlock(step)}
-                </div>
-              ))
-            )}
-            {/* The boundary after the last step (its calls all answered, so
+            </div>
+          ) : (
+            steps.map((step) => (
+              <div key={step.index} className="space-y-3">
+                {stepBlock(step)}
+              </div>
+            ))
+          )}
+          {/* The boundary after the last step (its calls all answered, so
           a replay from the step count is accepted). */}
-            {maxFrom !== null &&
-            view.steps.length > 0 &&
-            maxFrom > Math.max(...view.steps.map((s) => s.index)) ? (
-              <InsertHere step={maxFrom} last />
-            ) : null}
-            {view.unplaced?.length ? (
-              <Unplaced batches={view.unplaced} />
-            ) : null}
-            {view.steps.length === 0 ? (
-              <p className="py-6 text-center font-mono text-xs text-faint">
-                {replaying || upTo === 0
-                  ? "nothing revealed yet — play or step forward"
-                  : events.length === 0
-                    ? doc.status === "running"
-                      ? "waiting for the first event…"
-                      : "no events were recorded for this run"
-                    : "no steps yet"}
-              </p>
-            ) : null}
-            {/* What ended the run (U3.2): the end card mirrors the header's
+          {maxFrom !== null &&
+          view.steps.length > 0 &&
+          maxFrom > Math.max(...view.steps.map((s) => s.index)) ? (
+            <InsertHere step={maxFrom} last />
+          ) : null}
+          {view.unplaced?.length ? <Unplaced batches={view.unplaced} /> : null}
+          {view.steps.length === 0 ? (
+            <p className="py-6 text-center font-mono text-xs text-faint">
+              {replaying || upTo === 0
+                ? "nothing revealed yet — play or step forward"
+                : events.length === 0
+                  ? doc.status === "running"
+                    ? "waiting for the first event…"
+                    : "no events were recorded for this run"
+                  : "no steps yet"}
+            </p>
+          ) : null}
+          {/* What ended the run (U3.2): the end card mirrors the header's
           chip, on every status the record names one for; a failed run
           that named none ends on its error (its Error root span is the
           terminal record). */}
-            {!replaying && doc.status !== "running" && endCard(doc) ? (
-              <p
-                className="text-center font-mono text-xs text-muted-foreground"
-                data-story-end
-                title={stopChip(doc)?.title}
-              >
-                {endCard(
+          {!replaying && doc.status !== "running" && endCard(doc) ? (
+            <p
+              className="text-center font-mono text-xs text-muted-foreground"
+              data-story-end
+              title={stopChip(doc)?.title}
+            >
+              {endCard(
+                doc,
+                endStep(
                   doc,
-                  endStep(
-                    doc,
-                    view.steps.map((s) => s.index)
-                  )
-                )}
-              </p>
-            ) : view.finished ? null : (
-              <p className="text-center font-mono text-xs text-faint">
-                {replaying
-                  ? `replay · ${upTo} of ${events.length} events shown`
-                  : isLive(doc)
-                    ? // running, or settling (its last records may still
-                      // land): never "ended without run_finish" yet.
-                      "stream in progress…"
-                    : events.length > 0 &&
-                        endedWithoutFinish(
-                          view.finished,
-                          doc.stopped_by,
-                          doc.status
-                        )
-                      ? NO_RUN_FINISH
-                      : null}
-              </p>
-            )}
-            {view.pending.length > 0 && (
-              <ParkedCalls doc={doc} pending={view.pending} words={parked} />
-            )}
-            <AppSteer doc={doc} />
-          </div>
-        </ToolFactsCtx.Provider>
-      </CardsCtx.Provider>
+                  view.steps.map((s) => s.index)
+                )
+              )}
+            </p>
+          ) : view.finished ? null : (
+            <p className="text-center font-mono text-xs text-faint">
+              {replaying
+                ? `replay · ${upTo} of ${events.length} events shown`
+                : isLive(doc)
+                  ? // running, or settling (its last records may still
+                    // land): never "ended without run_finish" yet.
+                    "stream in progress…"
+                  : events.length > 0 &&
+                      endedWithoutFinish(
+                        view.finished,
+                        doc.stopped_by,
+                        doc.status
+                      )
+                    ? NO_RUN_FINISH
+                    : null}
+            </p>
+          )}
+          {view.pending.length > 0 && (
+            <CardsParkedCalls doc={doc} pending={view.pending} />
+          )}
+          <AppSteer doc={doc} />
+        </div>
+      </RunCards>
     </StoryMemory.Provider>
   )
 }

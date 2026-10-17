@@ -245,7 +245,9 @@ clause k4 "$([ -z "$k4bad" ] && echo PASS || echo FAIL)" "every new phase-8 rout
 attrs="weft.logs.bridged weft.attempt.wait_ms http.response.status_code weft.tool.timeout_ms weft.tool.queue_ms weft.tool.pending.source weft.subagent.pending weft.output.submitted prepared[] thinking.wire weft.playground.breakpoints"
 lines=(); bad=""; rec=""
 for a in $attrs; do
-  case "$a" in prepared[]) doc=prepared; needle='"prepared"';; thinking.wire) doc=thinking.wire; needle='"wire"';; *) doc="$a"; needle="\"$a\"";; esac
+  # prepared[] and thinking.wire are request record body fields: inside
+  # logs.json's string body their quotes are escaped (\"prepared\").
+  case "$a" in prepared[]) doc=prepared; needle='\"prepared\"';; thinking.wire) doc=thinking.wire; needle='\"wire\"';; *) doc="$a"; needle="\"$a\"";; esac
   d=$(grep -c -F "$doc" "$REPO/docs/record-contract.md")
   f=$(grep -l -F "$needle" "$REPO"/obsdb/testdata/contract/*/*.json 2>/dev/null | xargs -r -n1 dirname | xargs -r -n1 basename | sort -u | tr '\n' ',' | sed 's/,$//')
   if [ -z "$f" ]; then

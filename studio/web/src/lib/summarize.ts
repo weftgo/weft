@@ -3,6 +3,7 @@
 import type { Message, WireEvent } from "./api"
 import type { FoldedStep } from "./events"
 import { msText } from "./attempts"
+import { AWAITING } from "./status"
 import { endCard, failedAtStep, stopDetail, stoppedByWords } from "./stopped-by"
 
 export type EventKind =
@@ -260,6 +261,8 @@ export interface AnswerStep {
   text?: string
   toolCalls: {
     name: string
+    /** The call id (a derived step's calls may have none). */
+    callId?: string
     args?: unknown
     result?: { isError: boolean; content: string }
     finishPos?: number
@@ -422,19 +425,28 @@ export function repliedLine(step: AnswerStep, running = false): string {
 export const NOT_EXECUTED = "not executed"
 
 /** toolsLine is what the step's calls did: "2 ran · 1 error", "1
- * never finished", "1 not executed" (a max_tokens cut), or "none — the
- * model called no tool". */
-export function toolsLine(step: AnswerStep, running = false): string {
+ * never finished", "1 not executed" (a max_tokens cut), "1 awaiting a
+ * decision" (a parked call: parked is the run's pending calls —
+ * an approval gate or a breakpoint, never "never finished"), or "none
+ * — the model called no tool". */
+export function toolsLine(
+  step: AnswerStep,
+  running = false,
+  parked: readonly { id: string }[] = []
+): string {
   const calls = step.toolCalls
   if (!calls.length) return "none — the model called no tool"
   const done = calls.filter((c) => c.finishPos !== undefined)
   const errors = done.filter((c) => c.result?.isError).length
   const unrun = calls.filter((c) => c.unrun).length
-  const open = calls.length - done.length - unrun
+  // A pending call never finished and was never cut (rule 11).
+  const held = calls.filter((c) => parked.some((p) => p.id == c.callId)).length
+  const open = calls.length - done.length - unrun - held
   return [
-    done.length || !unrun ? `${done.length} ran` : "",
+    done.length || !(unrun || held) ? `${done.length} ran` : "",
     errors ? count(errors, "error") : "",
     unrun ? `${unrun} ${NOT_EXECUTED}` : "",
+    held ? `${held} ${AWAITING}` : "",
     open ? `${open} ${running ? "running" : "never finished"}` : "",
   ]
     .filter(Boolean)

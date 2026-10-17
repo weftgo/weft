@@ -178,7 +178,7 @@ export const PANEL_CSS = `
 .weft-turn .weft-ttl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .weft-turn .weft-when { margin-left: auto; color: var(--weft-faint); flex: none; }
 .weft-turn .weft-row2 { display: flex; gap: 8px; color: var(--weft-dim); margin-top: 2px; }
-.weft-chip { border-radius: var(--weft-radius-sm); background: var(--weft-bg); padding: 0 4px; font-size: 10px; line-height: 16px; flex: none; }
+.weft-chip { border-radius: var(--weft-radius-sm); background: var(--weft-bg); padding: 0 4px; font-size: 10px; line-height: 16px; flex: none; text-decoration: none; }
 ${statusRules()}
 .weft-st::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 3px; }
 .weft-expts { margin: 0 0 4px 18px; }

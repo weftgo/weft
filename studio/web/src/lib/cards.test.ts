@@ -26,6 +26,7 @@ import { messageLine } from "./compaction"
 import { applyTranscript, fold, truncation } from "./events"
 import { AWAITING } from "./status"
 import { NOT_EXECUTED, toolsLine } from "./summarize"
+import { UNTIMED_NOTE, waterfallRows } from "./waterfall"
 import { shape } from "@/test/cards-fixture"
 
 const foldOf = (name: string) => {
@@ -69,6 +70,38 @@ describe("the run cards' facts (U25)", () => {
     // "never finished".
     expect(toolsLine(v.steps[0])).toBe(`1 ${NOT_EXECUTED}`)
     expect(toolsLine(v.steps[1])).toBe("1 ran")
+  })
+
+  it("loop.max-tokens-tools: the call never run is drawn 'not executed' in the run tree, never a loss hole (P8-gate-fix)", () => {
+    const s = shape("loop.max-tokens-tools")
+    const wf = waterfallRows(
+      {
+        runId: s.run.id,
+        status: s.run.status,
+        spans: s.spans.spans,
+        fold: foldOf("loop.max-tokens-tools"),
+      },
+      "time"
+    )
+    const row = wf.rows.find((r) => r.key === "c:0:t1")!
+    expect(row.untimed).toBe("unrun")
+    expect(UNTIMED_NOTE.unrun[0]).toBe(NOT_EXECUTED)
+    // No row of the run is a loss: every other row has its span.
+    expect(wf.rows.filter((r) => r.untimed === "missing")).toEqual([])
+  })
+
+  it("appr.park: the tools-ran line counts a parked call as awaiting a decision, never 'never finished' (P8-gate-fix)", () => {
+    const v = foldOf("appr.park")
+    const step = v.steps.find((st) =>
+      st.toolCalls.some((c) => c.callId === "d1")
+    )!
+    const ids = v.pending.map((c) => c.id)
+    expect(ids).toContain("d1")
+    const line = toolsLine(step, false, v.pending)
+    expect(line).toContain(`1 ${AWAITING}`)
+    expect(line).not.toContain("never finished")
+    // Without the run's pending ids the line cannot know.
+    expect(toolsLine(step)).toContain("never finished")
   })
 
   it("out.invalid-repaired / out.no-output: the typed output, its repair count, the missing submission", () => {

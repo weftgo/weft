@@ -40,6 +40,7 @@ import {
 } from "../lib/requests"
 import {
   ANSWER_LABELS,
+  NOT_EXECUTED,
   failedAtStep,
   landStep,
   repliedLine,
@@ -5422,15 +5423,16 @@ export class WeftDevtools extends HTMLElement {
     else if (save) {
       // A hand-off (G1 style): Studio's run page downloads it with its
       // own bearer — the measured in-panel fetch-and-save cost ~0.8 KiB.
-      const a = el("a", "weft-chip", SAVE_TEST_LABEL, {
-        href: href(this.base, saveTestLink(t.id)),
-        target: "_blank",
-        rel: "noopener",
-        title: SAVE_TEST_TITLE,
-        "data-weft-save-test": t.id,
-      })
-      a.style.textDecoration = "none"
-      box.appendChild(a)
+      // .weft-chip carries text-decoration: none (styles.ts).
+      box.appendChild(
+        el("a", "weft-chip", SAVE_TEST_LABEL, {
+          href: href(this.base, saveTestLink(t.id)),
+          target: "_blank",
+          rel: "noopener",
+          title: SAVE_TEST_TITLE,
+          "data-weft-save-test": t.id,
+        })
+      )
     }
     const link = (
       label: string,
@@ -5438,17 +5440,14 @@ export class WeftDevtools extends HTMLElement {
       title: string,
       attr: string,
       id: string
-    ) => {
-      const a = el("a", "weft-chip", label, {
+    ) =>
+      el("a", "weft-chip", label, {
         href: url,
         target: "_blank",
         rel: "noopener",
         title,
         [attr]: id,
       })
-      a.style.textDecoration = "none"
-      return a
-    }
     if (session)
       box.appendChild(
         link(
@@ -6261,10 +6260,14 @@ export function renderTimeline(
     if (r.untimed === "missing")
       track.appendChild(badge(UNTIMED_HOLE.hole, UNTIMED_HOLE))
     else if (r.untimed)
+      // A call never run (rule 11) reads its words alone, as the
+      // panel's park words do; pending keeps its hint.
       track.appendChild(
-        el("span", "weft-tl-u", UNTIMED_PENDING, {
-          title: UNTIMED_PENDING_HINT,
-        })
+        r.untimed == "unrun"
+          ? el("span", "weft-tl-u", NOT_EXECUTED)
+          : el("span", "weft-tl-u", UNTIMED_PENDING, {
+              title: UNTIMED_PENDING_HINT,
+            })
       )
     else {
       const bar = el("span", "weft-wf-bar")
@@ -6730,7 +6733,7 @@ function answerBlock(
   line("replied", repliedLine(step, running), false)
   line(
     "tools",
-    toolsLine(step, running),
+    toolsLine(step, running, t.folded.pending),
     step.toolCalls.some((c) => c.result?.isError)
   )
   line("then", thenLine(step, run, next), v.bad)

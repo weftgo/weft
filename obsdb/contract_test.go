@@ -2064,7 +2064,45 @@ func genCases() []genCase {
 			dest: content,
 			run:  runCards,
 		},
+		{
+			name: "queue_breakpoints",
+			desc: "the phase 8 facts run_cards does not hold: a step's two calls under Parallelism(1), the first holding the one slot 30 ms, so the second's execute_tool span carries weft.tool.queue_ms (int, the wait rounded up; the generator sets it to 1) and the first's none; and a playground run's breakpoint park — the runtime's metadata weft.playground true and weft.playground.breakpoints refund_order (comma-joined, sorted) on every record and span, the call parked through ParkOn (weft.tool.pending.source park_on): what reads a park_on park named there as a breakpoint, not an approval gate",
+			dest: content,
+			run:  runQueueBreakpoints,
+		},
 	}
+}
+
+// runQueueBreakpoints drives the queue_breakpoints case: a queued call
+// (weft.tool.queue_ms) and a playground breakpoint park
+// (weft.playground.breakpoints), the metadata weft/runtime stamps.
+func runQueueBreakpoints(t *testing.T, ctx context.Context, p *otel.Pipeline, _ *otlpCapture) []string {
+	held := core.Tool("lookup_order", "Look up an order by ID.", func(_ context.Context, in lookupIn) (string, error) {
+		if in.OrderID == "6" {
+			// Hold the one Parallelism slot: the next call waits for it.
+			time.Sleep(30 * time.Millisecond)
+		}
+		return "order " + in.OrderID + ": shipped", nil
+	})
+	queued := pipelineAgent(p, "support", wefttest.Script(
+		wefttest.ToolCalls(
+			wefttest.Call{Name: "lookup_order", Args: `{"order_id":"6"}`},
+			wefttest.Call{Name: "lookup_order", Args: `{"order_id":"7"}`}),
+		wefttest.Say("Orders 6 and 7 have shipped."),
+	), held, core.Parallelism(1))
+	ids := []string{mustRun(t, ctx, queued, core.Prompt("Where are orders 6 and 7?")).ID}
+
+	refund := core.Tool("refund_order", "Refund an order.", func(_ context.Context, in lookupIn) (string, error) {
+		return "refunded " + in.OrderID, nil
+	})
+	debugged := pipelineAgent(p, "support", wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "refund_order", Args: `{"order_id":"8"}`})), refund)
+	return append(ids, mustRun(t, ctx, debugged, core.Prompt("Refund order 8."),
+		core.ParkOn("refund_order"),
+		core.Metadata(map[string]string{
+			"weft.playground":             "true",
+			"weft.playground.breakpoints": "refund_order",
+		})).ID)
 }
 
 // namedModel gives a scripted model its own identity: the fallback's

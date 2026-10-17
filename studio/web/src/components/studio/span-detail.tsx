@@ -44,6 +44,7 @@ import type { DrawerTab } from "@/lib/run-tree"
 import type { AnswerStep } from "@/lib/summarize"
 import {
   ANSWER_LABELS,
+  NOT_EXECUTED,
   repliedLine,
   sentLine,
   stepVerdict,
@@ -67,6 +68,7 @@ import {
   StepBody,
   ToolCallRow,
   stepOutcome,
+  useParkedCalls,
 } from "@/components/studio/step-list"
 import type { ChildRow } from "@/components/studio/subagent-block"
 import { Button } from "@/components/ui/button"
@@ -204,6 +206,7 @@ function CallFacts({
   call: FoldedToolCall
   runStatus: string
 }) {
+  const parked = useParkedCalls()?.get(call.callId)
   return (
     <Facts
       rows={[
@@ -215,7 +218,7 @@ function CallFacts({
           call.finishPos === undefined
             ? runStatus === "running"
               ? "not yet"
-              : "never"
+              : (parked?.word ?? (call.unrun ? NOT_EXECUTED : "never"))
             : `event ${call.finishPos}`,
         ],
       ]}
@@ -269,6 +272,9 @@ function Answer({
             : undefined
         )
   const running = runStatus === "running"
+  // The run's parked calls (RunCards): "awaiting a decision", never
+  // "never finished".
+  const parked = useParkedCalls()
   const line = (
     k: keyof typeof ANSWER_LABELS,
     text: string,
@@ -319,7 +325,11 @@ function Answer({
       )}
       {line(
         "tools",
-        toolsLine(step, running),
+        toolsLine(
+          step,
+          running,
+          [...(parked?.keys() ?? [])].map((id) => ({ id }))
+        ),
         step.toolCalls.length && !derived ? "tools" : undefined,
         step.toolCalls.some((c) => c.result?.isError)
       )}
@@ -891,6 +901,18 @@ export function SpanDetail({
                       ? (span.node as FoldedStep).toolCalls
                       : []
               }
+              // The run's own step the calls are of: the run cards'
+              // facts key (a subagent's call has none here).
+              step={
+                step &&
+                (!call ||
+                  step.toolCalls.some(
+                    (c) =>
+                      c.callId === call.callId && c.startPos === call.startPos
+                  ))
+                  ? step.index
+                  : undefined
+              }
               runStatus={runStatus}
               childLinks={childLinks}
               onJump={onJump}
@@ -926,11 +948,13 @@ export function SpanDetail({
 
 function ToolsTab({
   calls,
+  step,
   runStatus,
   childLinks,
   onJump,
 }: {
   calls: FoldedToolCall[]
+  step?: number
   runStatus: string
   childLinks: Map<string, ChildRow>
   onJump: (t: number) => void
@@ -943,6 +967,7 @@ function ToolsTab({
         <ToolCallRow
           key={`${c.startPos}:${c.callId}`}
           call={c}
+          step={step}
           runStatus={runStatus}
           child={c.childRunId ? childLinks.get(c.childRunId) : undefined}
           onJump={onJump}

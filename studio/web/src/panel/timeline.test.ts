@@ -16,6 +16,10 @@ import {
   waterfallRows,
 } from "../lib/waterfall"
 import { TONE } from "../lib/palette"
+import type { WireEvent } from "../lib/api"
+import { applyTranscript, fold } from "../lib/events"
+import { NOT_EXECUTED } from "../lib/summarize"
+import { shape } from "../test/cards-fixture"
 import { PANEL_CSS } from "./styles"
 
 /** The run's own spans, as GET /spans serves them without ?tree=1. */
@@ -153,5 +157,26 @@ describe("the Timeline on the director run (U8.3)", () => {
       turn({ spans, doc: { status: "running" } as TurnView["doc"] })
     )
     expect(live.textContent).toContain(UNTIMED_PENDING)
+  })
+
+  it("a call the loop never ran (rule 11) reads 'not executed', never a loss hole (P8-gate-fix)", () => {
+    const s = shape("loop.max-tokens-tools")
+    const folded = applyTranscript(
+      fold(s.events.events.map((e) => e.event as WireEvent)),
+      s.transcript.batches,
+      { replace: true }
+    )
+    const box = renderTimeline(
+      turn({
+        id: s.run.id,
+        doc: { status: s.run.status } as TurnView["doc"],
+        spans: s.spans.spans,
+        folded,
+        events: [{ pos: s.events.events.length }] as TurnView["events"],
+      })
+    )
+    const r = row(box, "c:0:t1")
+    expect(r.textContent).toContain(NOT_EXECUTED)
+    expect(r.querySelector("[data-hole]")).toBeNull()
   })
 })

@@ -1,0 +1,128 @@
+{
+  "case": "queue_breakpoints",
+  "description": "the phase 8 facts run_cards does not hold: a step's two calls under Parallelism(1), the first holding the one slot 30 ms, so the second's execute_tool span carries weft.tool.queue_ms (int, the wait rounded up; the generator sets it to 1) and the first's none; and a playground run's breakpoint park — the runtime's metadata weft.playground true and weft.playground.breakpoints refund_order (comma-joined, sorted) on every record and span, the call parked through ParkOn (weft.tool.pending.source park_on): what reads a park_on park named there as a breakpoint, not an approval gate",
+  "runs": [
+    {
+      "id": "a1100000000000000000000000000001",
+      "trace_id": "7ace0000000000000000000000000001",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000001",
+      "weft_version": "v0.0.0-contract",
+      "started": "2026-10-01T09:26:00Z",
+      "finished": "2026-10-01T09:26:00.017Z",
+      "last_seen": "2026-10-01T09:26:00.017Z",
+      "status": "succeeded",
+      "steps": 2,
+      "stop_reason": "stop",
+      "stopped_by": "final_answer",
+      "usage": {
+        "input_tokens": 20,
+        "output_tokens": 10
+      },
+      "event_count": 10,
+      "message_count": 4,
+      "delta_count": 1,
+      "instructions_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "catalog_hash": "d90d08d79c38775c5a61ba7037f26bb5e9f84ef466c82dae2a056cdd8614a1e8",
+      "request_count": 2,
+      "events_emitted": 10,
+      "messages_emitted": 4,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        },
+        {
+          "step": 1,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "stop",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "lookup_order",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "ok"
+        },
+        {
+          "name": "lookup_order",
+          "call_id": "call_2",
+          "step": 0,
+          "seq": 3,
+          "status": "ok"
+        }
+      ],
+      "holes": []
+    },
+    {
+      "id": "a1100000000000000000000000000002",
+      "trace_id": "7ace0000000000000000000000000002",
+      "service": "contract-app",
+      "agent": "support",
+      "provider": "wefttest",
+      "model": "script",
+      "playground": true,
+      "manifest_hash": "3a21f00000000000000000000000000000000000000000000000000000000002",
+      "weft_version": "v0.0.0-contract",
+      "meta": {
+        "weft.playground.breakpoints": "refund_order"
+      },
+      "started": "2026-10-01T09:26:00.01Z",
+      "finished": "2026-10-01T09:26:00.026Z",
+      "last_seen": "2026-10-01T09:26:00.026Z",
+      "status": "succeeded",
+      "steps": 1,
+      "pending": 1,
+      "stop_reason": "tool_calls",
+      "stopped_by": "parked",
+      "usage": {
+        "input_tokens": 10,
+        "output_tokens": 5
+      },
+      "event_count": 5,
+      "message_count": 2,
+      "delta_count": 0,
+      "instructions_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "catalog_hash": "dbc50d76ecb613ffdb94f564bcab1c877313c8d353621e5297a4b9922ee24e18",
+      "request_count": 1,
+      "events_emitted": 5,
+      "messages_emitted": 2,
+      "chat": [
+        {
+          "step": 0,
+          "model": "script",
+          "response_model": "script",
+          "finish_reason": "tool_calls",
+          "input_tokens": 10,
+          "output_tokens": 5,
+          "status": "ok"
+        }
+      ],
+      "tools": [
+        {
+          "name": "refund_order",
+          "call_id": "call_1",
+          "step": 0,
+          "seq": 1,
+          "status": "unset",
+          "pending_source": "park_on"
+        }
+      ],
+      "holes": []
+    }
+  ]
+}

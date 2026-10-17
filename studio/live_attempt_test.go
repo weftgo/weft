@@ -95,6 +95,57 @@ func TestLiveAttemptFrames(t *testing.T) {
 	}
 }
 
+// TestLiveAttemptFramesStayInScope (the auth matrix's kinds=attempt
+// rows, P8-gate-fix): a panel token's attempt stream, opened by a
+// grant on a run nothing has stored yet, receives no attempt frame of
+// another public id's run — or of one with none — and its own public
+// id's frames flow; the server token's stream reads them all.
+func TestLiveAttemptFramesStayInScope(t *testing.T) {
+	db, err := sqlite.Open(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	h := Handler(DB(db), Token("srv"))
+	for _, sc := range []string{scopeRead, scopePlayground} {
+		tok, err := signPanelToken([]byte("srv"), panelClaims{PublicID: "pub_mine", Scope: sc, Exp: time.Now().Add(time.Hour)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		run := "r_future_" + sc
+		q := "run=" + run + "&kinds=attempt"
+		resp := subscribeLive(t, h, "?"+q+"&sig="+mustGrant(t, h, tok, q), "")
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("%s: %d", sc, resp.StatusCode)
+		}
+		at := time.Now().UTC()
+		foreign := attemptSpan(run, "f1f1f1f1f1f1f1f1", 1, true, at)
+		foreign.Attrs["weft.public_id"] = "pub_other"
+		bare := attemptSpan(run, "f2f2f2f2f2f2f2f2", 2, true, at)
+		delete(bare.Attrs, "weft.public_id")
+		if err := db.Write(context.Background(), obsdb.Batch{Spans: []obsdb.Span{foreign, bare}}); err != nil {
+			t.Fatal(err)
+		}
+		if frames := readSSE(t, resp, 1, 400*time.Millisecond); len(frames) != 0 {
+			t.Errorf("%s: a pub_mine token received another public id's attempt frame: %+v", sc, frames[0])
+		}
+		_ = resp.Body.Close()
+
+		own := "r_own_" + sc
+		q = "run=" + own + "&kinds=attempt"
+		resp = subscribeLive(t, h, "?"+q+"&sig="+mustGrant(t, h, tok, q), "")
+		mine := attemptSpan(own, "f3f3f3f3f3f3f3f3", 1, true, at)
+		mine.Attrs["weft.public_id"] = "pub_mine"
+		if err := db.Write(context.Background(), obsdb.Batch{Spans: []obsdb.Span{mine}}); err != nil {
+			t.Fatal(err)
+		}
+		if frames := framesOf(readSSE(t, resp, 1, 2*time.Second), "attempt"); len(frames) != 1 || !strings.Contains(frames[0].data, `"public_id":"pub_mine"`) {
+			t.Errorf("%s: own attempt frames = %+v", sc, frames)
+		}
+		_ = resp.Body.Close()
+	}
+}
+
 // TestLiveAttemptFramesThroughIngest: OTLP ingest publishes the attempt
 // spans of a /v1/traces batch to a hub the database does not own (a
 // ClickHouse-shaped setup B).

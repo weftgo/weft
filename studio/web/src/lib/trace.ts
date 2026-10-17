@@ -66,8 +66,9 @@ export interface Span {
    * (false) — the run page's expand toggles it (U9.2). */
   collapsed?: boolean
   /** A run tree row no span covers (lib/waterfall.ts's untimed): its
-   * time is not known — pending its spans, or missing. */
-  untimed?: "pending" | "missing"
+   * time is not known — pending its spans, missing, or a call the
+   * loop never ran (unrun). */
+  untimed?: "pending" | "missing" | "unrun"
 }
 
 /** A time-axis row's own data: the span, with from/to in milliseconds

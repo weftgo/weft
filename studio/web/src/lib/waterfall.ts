@@ -20,6 +20,7 @@
 import type { Span as TimedSpan } from "./api"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "./events"
 import { spanMs, stepCount, UNNAMED_AGENT } from "./format"
+import { NOT_EXECUTED } from "./summarize"
 import type { SpanKind, SpanTone } from "./trace"
 
 /** The axis: wall time from spans, or stream order from events. */
@@ -32,6 +33,9 @@ export type RowKind =
 
 /** A row's state as a token; the words are the renderer's (lib). */
 export type RowStatus = "ok" | "error" | "pending" | "running" | "never"
+
+/** Why a row has no span (WaterfallRow.untimed). */
+export type Untimed = "pending" | "missing" | "unrun"
 
 export interface WaterfallRow {
   /** Unique within the model; the selection key, rowKeys' scheme (the
@@ -79,8 +83,10 @@ export interface WaterfallRow {
   /** A row the fold has and no span covers (time scale): `pending`
    * while the run goes on (its spans are not reported yet), `missing`
    * once it ended (dropped on the way, or never exported). It sits
-   * after the row before it, with no duration: its time is not known. */
-  untimed?: "pending" | "missing"
+   * after the row before it, with no duration: its time is not known.
+   * `unrun`: a max_tokens step's call the loop never ran (rule 11) —
+   * no span by design, "not executed", never a loss. */
+  untimed?: Untimed
 }
 
 export interface WaterfallInput {
@@ -937,7 +943,9 @@ function timeRows(input: WaterfallInput): WaterfallModel {
                   ? "error"
                   : "ok"
           )
-          if (!open) t.untimed = mark
+          // A max_tokens step's call the loop never ran (rule 11) has
+          // no span by design: "not executed", never a loss.
+          if (!open) t.untimed = c.unrun ? "unrun" : mark
           ;(c.resumed ? root : st[0]).kids.push(t)
           kid(t, c.childRunId)
         }
@@ -1230,6 +1238,17 @@ export const depthWord = (n: number) => `depth ${n}`
 export const UNTIMED_PENDING = "spans not reported yet"
 export const UNTIMED_PENDING_HINT =
   "its spans export when they end; the page reads them every few seconds"
+
+/** An untimed row's words that are no loss, by its mark: a pending
+ * row's, and a call the loop never ran (rule 11: its step hit the
+ * output token limit; no span by design). Both renderers. */
+export const UNTIMED_NOTE: Record<"pending" | "unrun", [string, string]> = {
+  pending: [UNTIMED_PENDING, UNTIMED_PENDING_HINT],
+  unrun: [
+    NOT_EXECUTED,
+    "its step hit the output token limit: the loop ran none of its calls (rule 11), so no span covers it by design",
+  ],
+}
 
 /** An untimed row's badge once the run ended: the A3 table's
  * not_recorded, in this instance's words (lib/honesty.ts's HoleMark). */

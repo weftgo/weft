@@ -1047,8 +1047,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 273,932 B raw / 90,072 B gzip
-(88.0 KiB, the bundle of the ledger's row "U29.5 polish"; 8,232 B — 8.0 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 274,011 B raw / 90,112 B gzip
+(88.0 KiB, the bundle of the ledger's row "P8-gate-fix"; 8,192 B — 8.0 KiB — of headroom under
 the 98,304 B, 96 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; A5.4 raised it from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library
@@ -1712,7 +1712,9 @@ run's events have and no span covers is drawn, never left out (U8.2-fix):
 while the run goes on it sits after the row before it, no duration,
 marked **spans not reported yet**; once the run ended it is badged
 `not_recorded` (dropped on the way or never exported — `truncated` when
-the tree's own cap cut it). The dim filters (`?dim=errors,slow,tools`,
+the tree's own cap cut it). A max_tokens step's call the loop never ran
+(rule 11) has no span by design: it reads **not executed**, no badge
+(P8-gate-fix; the panel's Timeline the same). The dim filters (`?dim=errors,slow,tools`,
 the **dim all but** chips) dim every row the active filters do not keep
 — never hide it; a kept row's ancestors stay lit. With the `spans_tree`
 capability the page reads `runs/{id}/spans?tree=1` and a delegation's

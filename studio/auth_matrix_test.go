@@ -524,6 +524,19 @@ func TestAuthMatrix(t *testing.T) {
 		// The pricing table (plan A5): every valid identity reads it.
 		{name: "GET /api/settings/pricing", method: "GET", path: fixed("/api/settings/pricing"), resources: one, want: anyValid(ok)},
 		{name: "GET /api/runs?parent=<B's run>", method: "GET", path: fixed("/api/runs?parent=run_b"), resources: one, want: anyValid(ok)}, // forced onto the token's public id: empty for a panel token (pinned below)
+		// The ⌘K palette's short-id lookup (U26): /api/runs' scoping — a
+		// panel token's lookup is forced onto its public id (pinned
+		// below: run_a found, run_b never), a foreign public_id 403
+		// before the prefix is read.
+		{name: "GET /api/runs?id_prefix=run_", method: "GET", path: fixed("/api/runs?id_prefix=run_"), resources: one, want: anyValid(ok)},
+		{name: "GET /api/runs?id_prefix=<res's run>&all=1", method: "GET", path: func(res string) string { return "/api/runs?all=1&id_prefix=" + run[res] }, resources: all, want: anyValid(ok)},
+		{name: "GET /api/runs?id_prefix=&public_id=", method: "GET", path: func(res string) string { return "/api/runs?id_prefix=run_&public_id=" + public[res] },
+			resources: []string{"A", "B", "missing"}, want: func(kind, res string) int {
+				if kind == "server" || res == "A" {
+					return ok
+				}
+				return forbidden403
+			}},
 		{name: "GET /api/runs/{id}", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] }, resources: all, want: scoped(ok)},
 		{name: "GET /api/runs/{id}/events", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/events" }, resources: all, want: scoped(ok)},
 		{name: "GET /api/runs/{id}/transcript", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/transcript" }, resources: all, want: scoped(ok)},
@@ -603,6 +616,35 @@ func TestAuthMatrix(t *testing.T) {
 		{name: "HEAD /api/runs/{id}/export?format=otlp", method: "HEAD", path: func(res string) string { return "/api/runs/" + run[res] + "/export?format=otlp" }, resources: all, want: acting(ok)},
 		{name: "HEAD /api/runs/{id}/export?format=wefttest", method: "HEAD", path: func(res string) string { return "/api/runs/" + run[res] + "/export?format=wefttest" }, resources: all, want: acting(ok)},
 		{name: "GET /api/runs/{id}/export?format=xml", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/export?format=xml" }, resources: one, want: anyValid(http.StatusBadRequest)},
+		// The tree export (UX-A-31, &tree=1): the root run's scope
+		// decides, as each format's own row; a subagent run of another
+		// public id is left out under a hidden hole, never a 403
+		// (TestAuthMatrixTreeScope). wefttest refuses tree (400) only
+		// once the hidden rule and the scope passed; a flag that does
+		// not parse is 400 after the scope.
+		{name: "GET /api/runs/{id}/export?format=json&tree=1", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/export?format=json&tree=1" }, resources: all, want: scoped(ok)},
+		{name: "GET /api/runs/{id}/export?format=jsonl&tree=1", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/export?format=jsonl&tree=1" }, resources: all, want: scoped(ok)},
+		{name: "GET /api/runs/{id}/export?format=otlp&tree=1", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/export?format=otlp&tree=1" }, resources: all, want: acting(ok)},
+		{name: "HEAD /api/runs/{id}/export?format=json&tree=1", method: "HEAD", path: func(res string) string { return "/api/runs/" + run[res] + "/export?format=json&tree=1" }, resources: all, want: scoped(ok)},
+		// (An id nothing stored passes the scope — there is nothing to
+		// scope by — so its refusal is the flag's 400, not a 404.)
+		{name: "GET /api/runs/{id}/export?format=wefttest&tree=1", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/export?format=wefttest&tree=1" }, resources: all,
+			want: func(kind, res string) int {
+				if kind == "read" {
+					return forbidden403
+				}
+				if res == "missing" {
+					return http.StatusBadRequest
+				}
+				return scoped(http.StatusBadRequest)(kind, res)
+			}},
+		{name: "GET /api/runs/{id}/export?format=json&tree=bad", method: "GET", path: func(res string) string { return "/api/runs/" + run[res] + "/export?format=json&tree=bad" }, resources: all,
+			want: func(kind, res string) int {
+				if res == "missing" {
+					return http.StatusBadRequest
+				}
+				return scoped(http.StatusBadRequest)(kind, res)
+			}},
 		{name: "GET /api/traces/{id}", method: "GET", path: func(res string) string { return "/api/traces/" + trace[res] }, resources: all, want: scoped(ok)},
 		// The trace list (plan A7): /api/runs' scoping — forced onto a
 		// panel token's public id (pinned below: no foreign trace or run
@@ -692,6 +734,22 @@ func TestAuthMatrix(t *testing.T) {
 		{name: "GET /api/live?all=1&public_id= (two selectors)", method: "GET", path: fixed("/api/live?all=1&public_id=pub_a"), resources: one, want: anyValid(http.StatusBadRequest)},
 		{name: "GET /api/live?run=&kinds=delta,messages,run", method: "GET", path: func(res string) string { return "/api/live?kinds=delta,messages,run&run=" + run[res] },
 			resources: []string{"A", "B", "none"}, want: scoped(ok)},
+		// The live attempt frame (H9, kinds=attempt): the stream's own
+		// selector rules — scoped by run, session or public id, all=1
+		// the server token's — and each frame checked against the token
+		// (TestLiveAttemptFramesStayInScope).
+		{name: "GET /api/live?run=&kinds=attempt", method: "GET", path: func(res string) string { return "/api/live?kinds=attempt&run=" + run[res] },
+			resources: []string{"A", "B", "none"}, want: scoped(ok)},
+		{name: "GET /api/live?public_id=&kinds=attempt,run", method: "GET", path: func(res string) string { return "/api/live?kinds=attempt,run&public_id=" + public[res] },
+			resources: []string{"A", "B", "missing"}, want: func(kind, res string) int {
+				if kind == "server" || res == "A" {
+					return ok
+				}
+				return forbidden403
+			}},
+		{name: "GET /api/live?all=1&kinds=attempt", method: "GET", path: fixed("/api/live?all=1&kinds=attempt"), resources: one, want: serverOnly(ok)},
+		{name: "GET /api/live?run=&kinds=attempt&sig=", method: "GET", path: func(res string) string { return "/api/live?kinds=attempt&run=" + run[res] },
+			resources: []string{"A", "B", "none"}, grant: true, want: scoped(ok)},
 
 		// The live grant (plan C5): scoped exactly as the stream is —
 		// a panel token is refused, at grant time, a stream outside its
@@ -1339,7 +1397,8 @@ func TestAuthMatrix(t *testing.T) {
 			"/api/runs?session=s_b", "/api/runs?agent=acme-support&limit=500", "/api/sessions?agent=acme-support",
 			"/api/search?q=secret", "/api/search?q=secret&all=1", "/api/search?q=pub_b&parent=*", "/api/search?session=s_b&all=1",
 			"/api/search?tool=refund&all=1", "/api/traces", "/api/traces?service=svc&limit=500",
-			"/api/runs?experiment_id=exp_1", "/api/runs?experiment_id=exp_1&all=1", "/api/search?experiment_id=exp_1&all=1"} {
+			"/api/runs?experiment_id=exp_1", "/api/runs?experiment_id=exp_1&all=1", "/api/search?experiment_id=exp_1&all=1",
+			"/api/runs?id_prefix=run_", "/api/runs?id_prefix=run_b", "/api/runs?id_prefix=run_b&all=1", "/api/runs?id_prefix=run_n&all=1"} {
 			req, _ := http.NewRequest(http.MethodGet, ts.URL+path, nil)
 			req.Header.Set("Authorization", "Bearer "+id.token)
 			resp, err := http.DefaultClient.Do(req)
@@ -1352,6 +1411,28 @@ func TestAuthMatrix(t *testing.T) {
 				if strings.Contains(string(b), `"`+foreign) {
 					t.Errorf("%s as %s lists %s: %s", path, id.name, foreign, b)
 				}
+			}
+		}
+	}
+
+	// The short-id lookup (U26) finds inside the identity's scope: the
+	// server token's run_b, a panel token's own run_a — its run_b
+	// lookup is empty (above), never a 403 that says it exists.
+	for _, id := range identities {
+		if id.kind == "bad" {
+			continue
+		}
+		for prefix, want := range map[string]bool{"run_a": true, "run_b": id.kind == "server"} {
+			req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/runs?id_prefix="+prefix, nil)
+			req.Header.Set("Authorization", "Bearer "+id.token)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b, _ := io.ReadAll(resp.Body)
+			_ = resp.Body.Close()
+			if got := strings.Contains(string(b), `"id":"`+prefix+`"`); resp.StatusCode != http.StatusOK || got != want {
+				t.Errorf("GET /api/runs?id_prefix=%s as %s = %d, lists %s: %v, want %v: %s", prefix, id.name, resp.StatusCode, prefix, got, want, b)
 			}
 		}
 	}
@@ -1775,6 +1856,97 @@ func TestAuthMatrixTreeScope(t *testing.T) {
 	}
 	if h := holes(d); len(h) != 1 || !slices.Equal(h["not_recorded:no_spans"], []string{bareA, bareB}) {
 		t.Errorf("the server token's holes = %v, want not_recorded:no_spans naming both bare children, no hidden", h)
+	}
+
+	// The tree export (UX-A-31, &tree=1) follows the same scope: a
+	// panel token's export leaves the subagent runs of another public
+	// id, or none, out with their subtrees under one hidden hole
+	// counting them (nested, cleared, bareB: 3) — never a 403, never
+	// one of their exports (mix_nested's pub_a grandchild included);
+	// read-scoped or playground alike for json and jsonl; the server
+	// token's export holds them all, no hole.
+	signScope := func(pub, sc string) string {
+		tok, err := signPanelToken([]byte(serverTok), panelClaims{PublicID: pub, Scope: sc, Exp: time.Now().Add(time.Hour)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tok
+	}
+	export := func(tok, format string) (int, string) {
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/runs/"+root+"/export?tree=1&format="+format, nil)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	type treeExport struct {
+		Subagents []struct {
+			Run struct {
+				ID string `json:"id"`
+			} `json:"run"`
+		} `json:"subagents"`
+		SubagentHoles []struct {
+			Hole  string `json:"hole"`
+			Count int    `json:"count"`
+		} `json:"subagent_holes"`
+	}
+	for _, tc := range []struct {
+		name, tok string
+		subs      []string
+		hidden    int
+	}{
+		{"read panel token pub_a", signScope("pub_a", scopeRead), []string{mine, bareA}, 3},
+		{"playground panel token pub_a", sign("pub_a"), []string{mine, bareA}, 3},
+		{"server token", serverTok, []string{nested, under, mine, cleared, bareA, bareB}, 0},
+	} {
+		code, body := export(tc.tok, "json")
+		if code != http.StatusOK {
+			t.Fatalf("%s: tree export = %d %s, want 200", tc.name, code, body)
+		}
+		var x treeExport
+		if err := json.Unmarshal([]byte(body), &x); err != nil {
+			t.Fatal(err)
+		}
+		var subs []string
+		for _, s := range x.Subagents {
+			subs = append(subs, s.Run.ID)
+		}
+		slices.Sort(subs)
+		if !slices.Equal(subs, tc.subs) {
+			t.Errorf("%s: tree export subagents = %v, want %v", tc.name, subs, tc.subs)
+		}
+		hidden := 0
+		for _, h := range x.SubagentHoles {
+			if h.Hole == "hidden" {
+				hidden = h.Count
+			}
+		}
+		if hidden != tc.hidden {
+			t.Errorf("%s: tree export hidden hole counts %d, want %d: %+v", tc.name, hidden, tc.hidden, x.SubagentHoles)
+		}
+		if tc.hidden > 0 {
+			for _, f := range []string{"json", "jsonl"} {
+				// The root's own document lists its direct children
+				// (GET /api/runs/{id}'s rows); a grandchild under a
+				// hidden child is in no exported document.
+				_, b := export(tc.tok, f)
+				if strings.Contains(b, under) {
+					t.Errorf("%s: the %s tree export names %q, a run under a hidden subtree", tc.name, f, under)
+				}
+			}
+		}
+	}
+	// otlp carries the request records: a read-scoped token is refused
+	// it, tree or not (403, badge hidden).
+	if code, _ := export(signScope("pub_a", scopeRead), "otlp"); code != http.StatusForbidden {
+		t.Errorf("a read panel token's otlp tree export = %d, want 403", code)
+	}
+	if code, _ := export(sign("pub_b"), "json"); code != http.StatusForbidden {
+		t.Errorf("pub_b's tree export of pub_a's run = %d, want 403 (the root run's scope decides)", code)
 	}
 }
 

@@ -101,8 +101,7 @@ import {
   SCALE_HINT,
   str,
   UNTIMED_HOLE,
-  UNTIMED_PENDING,
-  UNTIMED_PENDING_HINT,
+  UNTIMED_NOTE,
 } from "@/lib/waterfall"
 import type { Scale } from "@/lib/waterfall"
 // The ?tree=1 read: the descendant rules too (lib/waterfall-tree.ts).
@@ -133,7 +132,7 @@ import { LoadFailed } from "@/components/studio/empty-state"
 import { ReplayContext, ReplayDrawer } from "@/components/studio/replay-drawer"
 import type { ReplayRequest } from "@/components/studio/replay-drawer"
 import { SpanDetail } from "@/components/studio/span-detail"
-import { StepList } from "@/components/studio/step-list"
+import { RunCards, StepList } from "@/components/studio/step-list"
 import { EditorContext } from "@/components/studio/transcript-editor"
 import type { Editor } from "@/components/studio/transcript-editor"
 import { runRequests } from "@/components/studio/step-request"
@@ -311,12 +310,15 @@ function RunPage() {
       }
       return next
     })
+  // Stacked, the one column is minmax(0,1fr), never the implicit auto
+  // track: an auto track grows to its widest item's min-content (the
+  // drawer's call rows), past a 360 px page (H9, P8-gate-fix).
   const gridCols =
     layout === "split"
       ? "grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]"
       : layout === "stack"
-        ? ""
-        : "@3xl/trace:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]"
+        ? "grid-cols-[minmax(0,1fr)]"
+        : "grid-cols-[minmax(0,1fr)] @3xl/trace:grid-cols-[minmax(0,1.05fr)_minmax(0,1fr)]"
   const stickyDetail =
     layout === "split"
       ? "sticky top-3 max-h-[calc(100vh-8rem)]"
@@ -1518,7 +1520,10 @@ function RunPage() {
                       <HoleBadges holes={treeHoles} />
                     </div>
                   ) : null}
-                  <div className={`grid items-start gap-3 ${gridCols}`}>
+                  <div
+                    className={`grid items-start gap-3 ${gridCols}`}
+                    data-trace-grid={layout}
+                  >
                     {graph ? (
                       <CallGraphView
                         graph={graph}
@@ -1545,14 +1550,17 @@ function RunPage() {
                           // spans while the run goes on; once over, the
                           // A3 table's not_recorded — or truncated, when
                           // the server cut the tree (its cap, not a loss).
+                          // A call the loop never ran (rule 11): "not
+                          // executed", no span by design — never a loss.
                           const untimed =
-                            sp.untimed === "pending" ? (
+                            sp.untimed === "pending" ||
+                            sp.untimed === "unrun" ? (
                               <span
                                 className="shrink-0 text-[10px] text-faint italic"
-                                title={UNTIMED_PENDING_HINT}
-                                data-untimed-note
+                                title={UNTIMED_NOTE[sp.untimed][1]}
+                                data-untimed-note={sp.untimed}
                               >
-                                {UNTIMED_PENDING}
+                                {UNTIMED_NOTE[sp.untimed][0]}
                               </span>
                             ) : sp.untimed === "missing" ? (
                               cutHole ? (
@@ -1616,34 +1624,45 @@ function RunPage() {
                       />
                     )}
                     <div className={stickyDetail}>
-                      <SpanDetail
-                        span={selected}
-                        row={selectedRow}
-                        rows={treeRows}
-                        folded={derived ? [] : posSpans}
-                        events={stream.events}
-                        base={stream.base}
+                      {/* The story's run cards (U25) — park words, tool
+                          limits, typed child outcomes — for the drawer's
+                          call rows too: one source (P8-gate-fix). */}
+                      <RunCards
                         doc={doc}
-                        runStatus={viewStatus}
-                        timed={timed}
-                        playhead={scale === "order" ? ph : null}
-                        // A pre-U10.1 ?d=events|json reads as Raw OTel.
-                        tab={search.tab ?? (search.d ? "raw" : undefined)}
-                        onTab={(t) =>
-                          void navigate({
-                            search: (prev) => ({
-                              ...prev,
-                              tab: t,
-                              d: undefined,
-                            }),
-                            replace: true,
-                          })
-                        }
-                        onJump={jump}
-                        onStory={derived ? undefined : readInStory}
+                        pending={foldedNow.pending}
+                        callFacts={spans.data ? callFacts : undefined}
+                        toolFacts={toolFacts}
                         requests={requests}
-                        maxFrom={maxFrom}
-                      />
+                      >
+                        <SpanDetail
+                          span={selected}
+                          row={selectedRow}
+                          rows={treeRows}
+                          folded={derived ? [] : posSpans}
+                          events={stream.events}
+                          base={stream.base}
+                          doc={doc}
+                          runStatus={viewStatus}
+                          timed={timed}
+                          playhead={scale === "order" ? ph : null}
+                          // A pre-U10.1 ?d=events|json reads as Raw OTel.
+                          tab={search.tab ?? (search.d ? "raw" : undefined)}
+                          onTab={(t) =>
+                            void navigate({
+                              search: (prev) => ({
+                                ...prev,
+                                tab: t,
+                                d: undefined,
+                              }),
+                              replace: true,
+                            })
+                          }
+                          onJump={jump}
+                          onStory={derived ? undefined : readInStory}
+                          requests={requests}
+                          maxFrom={maxFrom}
+                        />
+                      </RunCards>
                     </div>
                   </div>
                   {replaying && selKey && !selectedRow ? (

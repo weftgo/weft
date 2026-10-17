@@ -87,6 +87,18 @@ describe("the Story's cards tell the whole truth (U25)", () => {
     )
   })
 
+  it("appr.park: the answer's tools-ran line counts the parked call as awaiting a decision, as Studio's drawer (P8-gate-fix)", async () => {
+    const el = await story("appr.park")
+    const answer = all(el, '[data-answer-line="tools"]').map(
+      (n) => n.textContent
+    )
+    expect(answer.length).toBeGreaterThan(0)
+    for (const line of answer) {
+      expect(line).toContain(`1 ${AWAITING}`)
+      expect(line).not.toContain("never finished")
+    }
+  })
+
   it.each([
     ["appr.breakpoint-own", "b1", BY_SOURCE],
     ["appr.breakpoint-playground", "b2", BREAKPOINT],

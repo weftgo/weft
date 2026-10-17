@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
 import { BREAKPOINT, BY_SOURCE, OUTPUT } from "@/lib/cards"
+import { NOT_EXECUTED } from "@/lib/summarize"
 import { AWAITING } from "@/lib/status"
 import { renderApp, stubBrowser } from "@/test/app"
 import { shape, studioFor } from "@/test/cards-fixture"
@@ -240,6 +241,103 @@ describe("the run cards tell the whole truth (U25)", () => {
       expect(card()!.querySelector("[data-thinking-wire]")?.textContent).toBe(
         "low → reasoning_effort"
       )
+    )
+  })
+})
+
+// The run tree's drawer reads the story's run cards (P8-gate-fix): its
+// Tool I/O rows and its answer lines carry the same park words, tool
+// limits and typed child outcomes — one source (RunCards), never
+// "NEVER COMPLETED" / "never finished" for a parked call.
+describe("the drawer draws the run cards too (P8-gate-fix)", () => {
+  const drawer = () => document.querySelector<HTMLElement>("[data-drawer]")
+  const drawerCall = (id: string) =>
+    drawer()?.querySelector<HTMLElement>(`[data-call="${id}"]`) ?? null
+  const ownRuntime = (name: string) => (st: ReturnType<typeof studioFor>) =>
+    st.on("GET runtimes", {
+      runtimes: [
+        {
+          id: "rt_1",
+          service: shape(name).run.service,
+          breakpoints_own: true,
+          connected: true,
+          agents: [],
+        },
+      ],
+    })
+
+  it.each([
+    ["appr.park", "d1", AWAITING, false],
+    ["appr.breakpoint-own", "b1", BY_SOURCE, false],
+    ["appr.breakpoint-own", "b1", BREAKPOINT, true],
+  ] as const)(
+    "%s: the landing step's answer and the call's Tool I/O read %s",
+    async (name, id, word, own) => {
+      open(name, "tab=tools", own ? ownRuntime(name) : undefined)
+      await waitFor(() =>
+        expect(
+          drawerCall(id)?.querySelector("[data-parked-call]")?.textContent
+        ).toBe(word)
+      )
+      expect(drawer()!.textContent).not.toMatch(/never completed/i)
+      const tools = document.querySelector<HTMLElement>(
+        '[data-answer-line="tools"]'
+      )!
+      expect(tools.textContent).toContain(`1 ${AWAITING}`)
+      expect(tools.textContent).not.toContain("never finished")
+    }
+  )
+
+  it("appr.park: the call row's facts say it awaits a decision, never 'finished at never'", async () => {
+    open("appr.park", "sel=c:0:d1&tab=tools")
+    await waitFor(() =>
+      expect(
+        drawerCall("d1")?.querySelector("[data-parked-call]")?.textContent
+      ).toBe(AWAITING)
+    )
+    const answer = drawer()!.querySelector<HTMLElement>("[data-drawer-answer]")!
+    expect(answer.textContent).toContain(`finished at${AWAITING}`)
+    expect(drawer()!.textContent).not.toMatch(/never completed/i)
+  })
+
+  it("tools.timeout: the drawer's call row names the limit it ran under", async () => {
+    open("tools.timeout", "sel=c:0:s1&tab=tools")
+    await waitFor(() =>
+      expect(
+        drawerCall("s1")?.querySelector("[data-exec-facts]")?.textContent
+      ).toBe("0 ms / 50 ms limit")
+    )
+  })
+
+  it("loop.max-tokens-tools: the run tree draws the call never run 'not executed', no loss hole", async () => {
+    open("loop.max-tokens-tools", "")
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-untimed-note="unrun"]')?.textContent
+      ).toBe(NOT_EXECUTED)
+    )
+    const tree = document.querySelector<HTMLElement>(".waterfall")!
+    expect(tree.querySelector('[data-hole="not_recorded"]')).toBeNull()
+  })
+
+  it("H9 run@360: stacked, the tree's grid is one minmax(0,1fr) column — never an auto track its widest row grows past the page", async () => {
+    open("appr.park", "")
+    await waitFor(() =>
+      expect(document.querySelector("[data-trace-grid]")).not.toBeNull()
+    )
+    const grid = document.querySelector<HTMLElement>("[data-trace-grid]")!
+    expect(grid.getAttribute("data-trace-grid")).toBe("auto")
+    // jsdom lays nothing out: the rule is the class (scripts/ux-gate/
+    // h9.js measures it in a browser).
+    expect(grid.className.split(" ")).toContain("grid-cols-[minmax(0,1fr)]")
+  })
+
+  it("sub.failed: the drawer's call row reads the typed child outcome", async () => {
+    open("sub.failed", "sel=c:0:w1&tab=tools")
+    await waitFor(() =>
+      expect(
+        drawerCall("w1")?.querySelector("[data-tool-pill]")?.textContent
+      ).toBe("child failed")
     )
   })
 })

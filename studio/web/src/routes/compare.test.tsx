@@ -297,7 +297,7 @@ describe("the compare page", () => {
     )
     expect(router.state.location.search).toMatchObject({
       a: "r_da",
-      b: ["r_db"],
+      b: "r_db",
     })
     expect(studio.calls("GET diff")).toHaveLength(1)
     expect(
@@ -372,7 +372,7 @@ describe("the compare page", () => {
     await waitFor(() =>
       expect(second.router.state.location.search).toMatchObject({
         a: "r_da",
-        b: ["r_db", "r_dc"],
+        b: "r_db,r_dc",
       })
     )
   })
@@ -479,7 +479,7 @@ describe("the run header's compare links", () => {
     expect(u.pathname).toBe("/compare")
     expect(u.searchParams.get("a")).toBe("r_src")
     expect(u.searchParams.get("step")).toBe("3") // the step the fork continued from
-    expect(JSON.parse(u.searchParams.get("b")!)).toEqual(["pg_new"])
+    expect(u.searchParams.get("b")).toBe("pg_new") // UX-F-30: no JSON array
     expect(other.textContent).toBe("compare with…")
     expect(
       new URL(other.getAttribute("href")!, "http://x").searchParams.get("b")

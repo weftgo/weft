@@ -8,6 +8,8 @@ import {
   runTitle,
   sessionTitle,
   shortId,
+  traceRunsWords,
+  traceTitle,
   turnTitle,
 } from "./title"
 
@@ -201,5 +203,31 @@ describe("runTitle / sessionTitle / turnTitle", () => {
     expect(clip("x".repeat(41))).toBe(`${"x".repeat(39)}…`)
     expect(clip("é".repeat(50), 10)).toBe(`${"é".repeat(9)}…`)
     expect(clip("\n\n  two\nthree")).toBe("two")
+  })
+})
+
+describe("the trace list's words (UX-A-39)", () => {
+  it("titles a trace by its top run's agent and prompt, else its root span", () => {
+    expect(
+      traceTitle({
+        root: { name: "invoke_agent orders" },
+        root_run: {
+          agent: "orders",
+          prompt_preview: "Where is order 42?\nmore",
+        },
+      })
+    ).toEqual({
+      text: "orders · Where is order 42?",
+      full: "orders · Where is order 42?\nmore",
+    })
+    expect(traceTitle({ root: { name: "POST /chat" } }).text).toBe("POST /chat")
+    expect(traceTitle({ root: null }).text).toBe("(no root span)")
+  })
+  it("counts runs and failures, never lists ids", () => {
+    expect(traceRunsWords({ run_ids: [] })).toBe("—")
+    expect(traceRunsWords({ run_ids: ["a"] })).toBe("1 run")
+    expect(traceRunsWords({ run_ids: ["a", "a/0/c"], failed_runs: 1 })).toBe(
+      "2 runs · 1 failed"
+    )
   })
 })

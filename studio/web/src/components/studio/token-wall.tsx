@@ -16,6 +16,7 @@ import {
   studioToken,
   tabTokenDropped,
 } from "@/lib/api"
+import { TOKEN_WALL } from "@/lib/settings"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
@@ -53,7 +54,10 @@ export function TokenWall({ children }: { children: React.ReactNode }) {
         unlock()
       }}
     >
-      <p className="text-sm font-medium">This Studio needs its API token.</p>
+      <h1 className="text-sm font-medium" data-token-wall>
+        {TOKEN_WALL.heading}
+      </h1>
+      <p className="text-xs">This Studio needs its API token.</p>
       <p className="text-xs text-muted-foreground">
         {had
           ? "The stored token was refused — it expired, or this Studio restarted with a new one."

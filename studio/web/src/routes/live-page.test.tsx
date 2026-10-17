@@ -837,7 +837,8 @@ describe("click-to-peek", () => {
       apiError(404, "not_found", "no run r_gone")
     )
     renderApp("/runs/r_gone")
-    expect(await screen.findByText("no run r_gone")).toBeTruthy()
+    // UX-F-31: the one not-found state.
+    expect(await screen.findByText("No run r_gone in this Studio")).toBeTruthy()
     await act(() => new Promise((r) => setTimeout(r, 2_500)))
     expect(studio.calls("GET runs/r_gone/events")).toHaveLength(0)
     expect(streamsOf("r_gone")).toBe(0)

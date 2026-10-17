@@ -294,23 +294,28 @@ describe("compareLink", () => {
   it("is the compare page: the base run a and the runs compared with it, as the router reads them back", () => {
     expect(compareLink("r_1", ["r_2", "", "r_1", "r_2", "r_3"])).toEqual({
       to: "/compare",
-      search: { a: "r_1", b: ["r_2", "r_3"] },
+      search: { a: "r_1", b: "r_2,r_3" },
     })
     expect(compareLink("r_1")).toEqual({ to: "/compare", search: { a: "r_1" } })
     const u = new URL(href(BASE, compareLink("123", ["r/2"])))
     expect(u.pathname).toBe("/studio/compare")
     expect(JSON.parse(u.searchParams.get("a")!)).toBe("123")
-    expect(JSON.parse(u.searchParams.get("b")!)).toEqual(["r/2"])
+    expect(u.searchParams.get("b")).toBe("r/2")
+    // UX-F-30: a readable comma list; an id holding a comma keeps the array.
+    expect(new URL(href(BASE, compareLink("r_1", ["r_2", "r_3"]))).search).toBe(
+      "?a=r_1&b=r_2%2Cr_3"
+    )
+    expect(compareLink("r_1", ["r,2", "r_3"]).search.b).toEqual(["r,2", "r_3"])
   })
 
   it("lands on a step: the ordinal, dropped when it is not one", () => {
     expect(compareLink("r_1", ["r_2"], 3)).toEqual({
       to: "/compare",
-      search: { a: "r_1", b: ["r_2"], step: 3 },
+      search: { a: "r_1", b: "r_2", step: 3 },
     })
     expect(compareLink("r_1", ["r_2"], -1).search).toEqual({
       a: "r_1",
-      b: ["r_2"],
+      b: "r_2",
     })
     expect(compareLink("r_1", [], 1.5).search).toEqual({ a: "r_1" })
     expect(

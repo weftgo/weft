@@ -291,7 +291,11 @@ export interface PlaygroundLink {
  * compared with it (each one GET /api/diff?a=&b= against a). */
 export interface CompareSearch {
   a?: string
-  b?: string[]
+  /** The compared runs as one comma list (UX-F-30: b=r_2,r_3, a link a
+   * person can read) — an array only when an id itself holds a comma
+   * (runsParam); the page reads both (lib/compare-picker.ts's
+   * splitRuns), the older JSON array links too. */
+  b?: string | string[]
   /** The step ordinal to land on (the row scrolled to, highlighted). */
   step?: number
 }
@@ -592,6 +596,11 @@ export function experimentsLink(): ExperimentsLink {
   return { to: "/experiments", search: {} }
 }
 
+/** sessionsLink is the sessions list. */
+export function sessionsLink(): { to: "/sessions"; search: object } {
+  return { to: "/sessions", search: {} }
+}
+
 /** playgroundDraftLink is the playground with a draft of this browser
  * open (?exp=, lib/drafts.ts). */
 export function playgroundDraftLink(id: string): PlaygroundLink {
@@ -605,10 +614,17 @@ export function playgroundShareLink(state: string): PlaygroundLink {
   return { to: "/playground", search: {}, hash: `state=${state}` }
 }
 
+/** runsParam is ?b= for these ids: one comma list, or the array when
+ * an id holds a comma (a comma list would split it). */
+export function runsParam(b: string[]): string | string[] {
+  return b.some((x) => x.includes(",")) ? b : b.join()
+}
+
 /** compareLink is the step-aligned compare of a base run with others
  * (rows by step ordinal; N-way is N−1 diffs against a), optionally
  * landing on one step (its ordinal). Empty ids and the base itself are
- * dropped from others, duplicates kept once. */
+ * dropped from others, duplicates kept once; they go as one comma list
+ * (UX-F-30), never a JSON array. */
 export function compareLink(
   a: string,
   others: string[] = [],
@@ -616,7 +632,7 @@ export function compareLink(
 ): CompareLink {
   const b = [...new Set(others.filter((x) => x && x !== a))]
   const search: CompareSearch = { a }
-  if (b.length) search.b = b
+  if (b.length) search.b = runsParam(b)
   const n = ordinal(step)
   if (n !== undefined) search.step = n
   return { to: "/compare", search }

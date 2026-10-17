@@ -36,6 +36,7 @@ import type {
   SourceStep,
   VariantFields,
 } from "@/lib/experiment-body"
+import { BREAKPOINT_WORDS } from "@/lib/settings"
 import { HoleBadge } from "@/components/studio/hole-badge"
 import { Badge } from "@/components/ui/badge"
 import { SelectField } from "@/components/ui/select-field"
@@ -910,11 +911,8 @@ export function Breakpoints({
   }, [storedKey])
   const [err, setErr] = useState("")
   const [saving, setSaving] = useState(false)
-  const toggle = async (name: string, on: boolean) => {
+  const put = async (next: Set<string>) => {
     const prev = set
-    const next = new Set(set)
-    if (on) next.add(name)
-    else next.delete(name)
     setSet(next)
     setErr("")
     setSaving(true)
@@ -928,6 +926,14 @@ export function Breakpoints({
       setSaving(false)
     }
   }
+  const toggle = (name: string, on: boolean) => {
+    const next = new Set(set)
+    if (on) next.add(name)
+    else next.delete(name)
+    return put(next)
+  }
+  // UX-A-33: every tool on parks every call — said, not left to a count.
+  const all = tools.length > 1 && tools.every((t) => set.has(t))
   return (
     <div className="space-y-1">
       <div className="flex flex-wrap gap-2 text-xs">
@@ -942,7 +948,24 @@ export function Breakpoints({
             {t}
           </label>
         ))}
+        {set.size > 0 ? (
+          <button
+            type="button"
+            className="font-mono text-thread-ink hover:underline disabled:opacity-50"
+            title={BREAKPOINT_WORDS.clearTitle}
+            disabled={saving}
+            onClick={() => void put(new Set())}
+            data-breakpoints-clear
+          >
+            {BREAKPOINT_WORDS.clear}
+          </button>
+        ) : null}
       </div>
+      {all ? (
+        <p className="text-xs text-status-int" data-breakpoints-all>
+          {BREAKPOINT_WORDS.all}
+        </p>
+      ) : null}
       {err && (
         <p className="text-xs text-destructive" role="alert">
           {err}

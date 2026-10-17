@@ -1,5 +1,5 @@
 // The compare page (plan E3, E3.2): a base run and the runs compared
-// with it, step by step — /compare?a=<run>&b=["<run>",…] (lib/links.ts's
+// with it, step by step — /compare?a=<run>&b=<run>,<run> (lib/links.ts's
 // compareLink). One GET /api/diff?a=&b= per compared run against the
 // same base; the table is components/studio/step-diff.tsx over
 // lib/stepdiff.ts, the module the devtools panel's 2-way block reads.
@@ -24,7 +24,7 @@ import {
   splitRuns,
 } from "@/lib/compare-picker"
 import { relativeTime } from "@/lib/format"
-import { compareLink } from "@/lib/links"
+import { compareLink, runsParam } from "@/lib/links"
 import { runTitle, shortId } from "@/lib/title"
 import type { CompareSearch } from "@/lib/links"
 import { useCapabilities } from "@/hooks/use-capabilities"
@@ -58,7 +58,7 @@ export const Route = createFileRoute("/compare")({
         : undefined
     return {
       a,
-      ...(b.length ? { b } : {}),
+      ...(b.length ? { b: runsParam(b) } : {}),
       ...(step !== undefined ? { step } : {}),
     }
   },
@@ -66,7 +66,9 @@ export const Route = createFileRoute("/compare")({
 })
 
 function ComparePage() {
-  const { a = "", b = [], step } = Route.useSearch()
+  const { a = "", b: bParam, step } = Route.useSearch()
+  // Normalised by validateSearch: a comma list, or an array (runsParam).
+  const b = splitRuns(bParam).map(String)
   useDocumentTitle({ page: "compare", a: a || undefined, b })
   const navigate = useNavigate()
   const caps = useCapabilities()

@@ -1109,6 +1109,17 @@ export interface TraceRow {
   span_count: number
   error: boolean
   run_ids: string[]
+  /** The trace's top run (UX-A-39): what the list titles the row with.
+   * Absent for a trace of non-weft spans. */
+  root_run?: {
+    id: string
+    agent?: string
+    prompt_preview?: string
+    status: string
+  }
+  /** The trace's failed runs among the root and its core subagent
+   * children; absent at 0. */
+  failed_runs?: number
   badge?: string
   reason?: string
   fix?: string
@@ -1751,13 +1762,19 @@ export function diffQuery(a: string, b: string) {
  * recorded answer for wefttest). */
 export async function fetchExport(
   runID: string,
-  format: string
+  format: string,
+  /** &tree=1 (UX-A-31): every subagent run under it too (json, jsonl
+   * and otlp; studio/export.go). */
+  tree = false
 ): Promise<{ blob: Blob; name: string }> {
   const headers: Record<string, string> = {
     Accept: format === "wefttest" ? "application/zip" : "*/*",
   }
   const res = await authorized(
-    new URL(exportPath(runID, format), apiBase()).toString(),
+    new URL(
+      exportPath(runID, format) + (tree ? "&tree=1" : ""),
+      apiBase()
+    ).toString(),
     { headers }
   )
   if (!res.ok) {
@@ -2065,6 +2082,10 @@ export interface RuntimeView {
    * /api/runtimes/{id}/breakpoints): what it parks on every run it
    * starts. Absent on a Studio older than the field. */
   breakpoints?: string[]
+  /** When this Studio last delivered that set (UX-A-33; in memory:
+   * absent for a set adopted from a registration or restored after a
+   * Studio restart). */
+  breakpoints_set_at?: string
 }
 
 export function runtimesQuery() {

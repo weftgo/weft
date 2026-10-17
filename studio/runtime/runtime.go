@@ -514,6 +514,10 @@ type RuntimeView struct {
 	// reloaded UI shows the rule that is parking its runs. Empty, never
 	// null.
 	Breakpoints []string `json:"breakpoints"`
+	// BreakpointsSetAt is when this Studio last delivered the set (PUT
+	// …/breakpoints, UX-A-33). In memory: absent for a set adopted from
+	// a registration or restored from the store after a restart.
+	BreakpointsSetAt *time.Time `json:"breakpoints_set_at,omitempty"`
 }
 
 // AgentView is one agent of a connected runtime. Resolver and Defaults
@@ -693,6 +697,9 @@ type connected struct {
 	// breakpoints is the debugger's tool set (§8.3), applied to every
 	// run this runtime starts; GET /api/runtimes reports it.
 	breakpoints []string
+	// breakpointsSetAt is when SetBreakpoints last delivered them (zero
+	// for a set adopted or restored).
+	breakpointsSetAt time.Time
 	// manifest keys the manifest its latest registration carried.
 	manifest manifestKey
 	// stored is the LastSeen last written to the store (the ping
@@ -1673,6 +1680,10 @@ func (rs *RuntimeServer) Snapshot() []RuntimeView {
 			BreakpointsOwn: c.reg.BreakpointsOwn,
 			Breakpoints:    append([]string{}, c.breakpoints...),
 		}
+		if !c.breakpointsSetAt.IsZero() {
+			at := c.breakpointsSetAt
+			v.BreakpointsSetAt = &at
+		}
 		for _, a := range c.reg.Agents {
 			av := AgentView{Name: a.Name, Models: a.Models, Resolver: a.Resolver,
 				Instructions: a.ManifestInstructions()}
@@ -1850,6 +1861,7 @@ func (rs *RuntimeServer) SetBreakpoints(runtimeID string, tools []string) error 
 		return ErrNotConnected
 	}
 	c.breakpoints = append([]string(nil), tools...)
+	c.breakpointsSetAt = time.Now().UTC()
 	rs.saveBreakpointsLocked(runtimeID, c.breakpoints)
 	return nil
 }

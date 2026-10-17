@@ -138,6 +138,8 @@ import type { Editor } from "@/components/studio/transcript-editor"
 import { runRequests } from "@/components/studio/step-request"
 import { Waterfall } from "@/components/studio/waterfall"
 import { Button } from "@/components/ui/button"
+import { NotFound } from "@/components/studio/not-found"
+import { isNotFound } from "@/lib/not-found"
 import { Kbd } from "@/components/ui/kbd"
 import { Spinner } from "@/components/ui/spinner"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -1217,6 +1219,7 @@ function RunPage() {
     )
   }
   if (run.isError) {
+    if (isNotFound(run.error)) return <NotFound kind="run" id={id} />
     return (
       <div className="mx-auto max-w-md space-y-3 py-24 text-center">
         <p className="font-mono text-xs text-faint">{id}</p>

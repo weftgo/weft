@@ -447,3 +447,56 @@ export function mcpCommand(studioURL: string, authRequired?: boolean): string {
  * is no run and records nothing. */
 export const LOGS_BRIDGE =
   "weft's records arrive with weft.LoggerProvider / otel.Install; the app's slog lines need a bridge to OTel logs — otel.Install(…, otel.Slog()) bridges slog.Default, otel.SlogHandler(h) any other handler. An Agent.CallTool outside a run records nothing."
+
+/** The token wall's words (UX-F-26): its heading, and the hint on the
+ * sidebar's pages it hides until the token is in. */
+export const TOKEN_WALL = {
+  heading: "Sign in to this Studio",
+  needs: "needs the token",
+} as const
+
+/** The skip link (UX-F-25): the first tab stop of every page. */
+export const SKIP_TO_CONTENT = "Skip to content"
+
+/** The OTLP ingest's policy in words (UX-A-34): meta.ingest_open is
+ * studio/studio.go's ingestAuthorized open rule — /v1/traces and
+ * /v1/logs take a loopback peer's OTLP without a token (no proxy
+ * header, no foreign Origin); walled, they need the IngestToken. The
+ * live page says the open rule in these words and links to Settings,
+ * which holds the fact. */
+export const INGEST_WORDS = {
+  open: "accepting OTLP from loopback without a token",
+  openFact:
+    "open: /v1/traces and /v1/logs accept OTLP from loopback without a token (a proxied or cross-origin request is refused)",
+  walled: "walled: OTLP ingest needs its IngestToken",
+} as const
+
+/** The Settings page's sections, in page order (UX-A-32): the section
+ * index and the sections themselves read their titles here. The anchor
+ * of each is #settings-<id>. */
+export const SETTINGS_SECTIONS = [
+  { id: "studio", title: "Studio" },
+  { id: "token", title: "Token" },
+  { id: "database", title: "Database" },
+  { id: "retention", title: "Retention" },
+  { id: "pricing", title: "Pricing" },
+  { id: "capabilities", title: "Capabilities" },
+  { id: "runtimes", title: "Runtimes" },
+  { id: "content", title: "Content policy" },
+  { id: "appearance", title: "Appearance" },
+  { id: "keyboard", title: "Keyboard" },
+] as const
+
+export type SettingsSectionID = (typeof SETTINGS_SECTIONS)[number]["id"]
+
+/** The breakpoints words (UX-A-33): the warning when every tool of the
+ * runtime parks, the clear verb, and when the set was last delivered. */
+export const BREAKPOINT_WORDS = {
+  all: "every tool is a breakpoint: every tool call of every run this runtime starts parks",
+  clear: "clear all",
+  clearTitle:
+    "remove every breakpoint of this runtime (PUT /api/runtimes/{id}/breakpoints with no tools)",
+  setAt: (when: string) => `set ${when} through this Studio`,
+  setAtUnknown:
+    "set before this Studio started, or by the runtime's own registration",
+} as const

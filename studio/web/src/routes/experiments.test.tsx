@@ -614,7 +614,7 @@ describe("/experiments/{id}", () => {
     const u = new URL(link.href)
     expect(u.pathname).toBe("/compare")
     expect(u.searchParams.get("a")).toBe("pg_a1")
-    expect(JSON.parse(u.searchParams.get("b")!)).toEqual(["pg_b2"])
+    expect(u.searchParams.get("b")).toBe("pg_b2")
     // A third pick drops the oldest.
     fireEvent.click(screen.getByLabelText("pick cell A×2 to compare"))
     await waitFor(() =>

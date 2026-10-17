@@ -59,6 +59,8 @@ import { statusClass } from "@/lib/status-class"
 import { useRuntimesNeeded } from "@/hooks/use-notices"
 import { CostText, useCostCapable } from "@/components/studio/cost"
 import { Button } from "@/components/ui/button"
+import { NotFound } from "@/components/studio/not-found"
+import { isNotFound } from "@/lib/not-found"
 import {
   ExperimentsHidden,
   mayReadExperiments,
@@ -351,6 +353,8 @@ function Experiment({ id, caps }: { id: string; caps: string[] }) {
 
   if (q.isPending)
     return <p className="p-6 text-xs text-muted-foreground">loading…</p>
+  if (q.isError && isNotFound(q.error))
+    return <NotFound kind="experiment" id={id} />
   if (q.isError)
     return (
       <div className="space-y-2 p-6 text-xs">

@@ -33,6 +33,8 @@ import type { ReplayRequest } from "@/components/studio/replay-drawer"
 import { Waterfall } from "@/components/studio/waterfall"
 import { SplitPane } from "@/components/studio/split-pane"
 import { Button } from "@/components/ui/button"
+import { NotFound } from "@/components/studio/not-found"
+import { isNotFound } from "@/lib/not-found"
 import { Spinner } from "@/components/ui/spinner"
 import { SPLITS } from "@/lib/pane-sizes"
 import { runLink, traceSelectionLink, tracesLink } from "@/lib/links"
@@ -121,6 +123,7 @@ function TracePage() {
     )
   }
   if (q.isError) {
+    if (isNotFound(q.error)) return <NotFound kind="trace" id={id} />
     return (
       <div className="mx-auto max-w-md space-y-3 py-24 text-center">
         <p className="font-mono text-xs text-faint">{id}</p>

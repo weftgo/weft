@@ -21,6 +21,7 @@ import {
   whenNotes,
 } from "@/lib/run-filters"
 import { runLink, traceLink } from "@/lib/links"
+import { shortId, traceRunsWords, traceTitle } from "@/lib/title"
 import type { TracesSearch } from "@/lib/links"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { CapsUnread } from "@/components/studio/caps-unread"
@@ -282,19 +283,19 @@ function TracesPage() {
                     <TableCell className="max-w-96">
                       <Link
                         {...traceLink(t.trace_id)}
-                        className="block truncate text-[13px] hover:text-thread-ink"
+                        className={`block truncate text-[13px] hover:text-thread-ink ${t.root || t.root_run ? "" : "text-muted-foreground"}`}
+                        title={traceTitle(t).full}
+                        data-trace-title
                       >
-                        {t.root ? (
-                          t.root.name
-                        ) : (
-                          <span className="text-muted-foreground">
-                            (no root span)
-                          </span>
-                        )}
+                        {traceTitle(t).text}
                       </Link>
                       <div className="flex items-center gap-1.5">
-                        <span className="truncate font-mono text-[11px] text-faint">
-                          {t.trace_id}
+                        <span
+                          className="truncate font-mono text-[11px] text-faint"
+                          title={t.trace_id}
+                        >
+                          {t.root ? `${t.root.name} · ` : ""}
+                          {shortId(t.trace_id)}
                         </span>
                         {t.error ? (
                           <span
@@ -316,7 +317,7 @@ function TracesPage() {
                     <TableCell className="font-mono text-xs whitespace-nowrap">
                       {t.service || <span className="text-faint">—</span>}
                     </TableCell>
-                    <TableCell className="max-w-64">
+                    <TableCell className="font-mono text-xs whitespace-nowrap">
                       {t.run_ids.length === 0 ? (
                         <span
                           className="text-faint"
@@ -325,17 +326,14 @@ function TracesPage() {
                           —
                         </span>
                       ) : (
-                        <div className="flex flex-wrap gap-x-2">
-                          {t.run_ids.map((id) => (
-                            <Link
-                              key={id}
-                              {...runLink(id)}
-                              className="truncate font-mono text-[11px] text-muted-foreground hover:text-thread-ink hover:underline"
-                            >
-                              {id}
-                            </Link>
-                          ))}
-                        </div>
+                        <Link
+                          {...runLink(t.root_run?.id ?? t.run_ids[0])}
+                          className={`hover:text-thread-ink hover:underline ${t.failed_runs ? "text-status-bad" : "text-muted-foreground"}`}
+                          title={t.run_ids.join("\n")}
+                          data-trace-run-count
+                        >
+                          {traceRunsWords(t)}
+                        </Link>
                       )}
                     </TableCell>
                     <TableCell className="text-right font-mono tabular-nums">

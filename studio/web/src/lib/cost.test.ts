@@ -29,6 +29,7 @@ import {
   lostCellCost,
   runTotal,
   sortByCost,
+  costSortNote,
   sumCost,
   unpricedLine,
 } from "./cost"
@@ -301,6 +302,16 @@ describe("the cost order and totals", () => {
       "u1",
       "u2",
     ])
+  })
+  it("costSortNote counts the rows sorted last, not by cost (UX-A-35)", () => {
+    const a = { ...priced(1, 0), id: "a" }
+    expect(costSortNote([a])).toBeNull()
+    expect(costSortNote([a, rFail()])).toBe(
+      "1 run with no known cost: listed last, newest first — not sorted by cost"
+    )
+    expect(costSortNote([rFail(), rStale(), a], true)).toBe(
+      "2 runs with no known cost: listed last, newest first — not sorted by cost · the loaded rows"
+    )
   })
   it("sumCost totals a variant's runs and is — when any is unknown or unread", () => {
     expect(sumCost([priced(0.01, 0.005), priced(0.02)])).toMatchObject({

@@ -325,6 +325,8 @@ describe("the trace list's mirror (traces.golden.json ⊆ TraceRow)", () => {
     span_count: true,
     error: true,
     run_ids: true,
+    root_run: true,
+    failed_runs: true,
     badge: true,
     reason: true,
     fix: true,

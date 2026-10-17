@@ -1,12 +1,8 @@
-import {
-  HeadContent,
-  Link,
-  Scripts,
-  createRootRoute,
-} from "@tanstack/react-router"
+import { HeadContent, Scripts, createRootRoute } from "@tanstack/react-router"
 import { QueryClientProvider } from "@tanstack/react-query"
 
 import { AppShell } from "@/components/studio/app-shell"
+import { NotFound } from "@/components/studio/not-found"
 import { queryClient } from "@/lib/query"
 import { densityBootstrap } from "@/lib/density"
 import appCss from "../styles.css?url"
@@ -33,22 +29,8 @@ export const Route = createRootRoute({
       },
     ],
   }),
-  notFoundComponent: () => (
-    <div className="mx-auto max-w-md space-y-3 py-24 text-center">
-      <p className="font-mono text-xs text-faint">404</p>
-      <p className="text-sm">There is no page here.</p>
-      <p className="text-xs text-muted-foreground">
-        Studio's pages are in the sidebar. A run link looks like{" "}
-        <span className="font-mono">runs/&lt;id&gt;</span>.
-      </p>
-      <Link
-        to="/runs"
-        className="inline-block font-mono text-xs text-thread-ink hover:underline"
-      >
-        go to runs
-      </Link>
-    </div>
-  ),
+  // UX-F-31: the one not-found state, as the run page's 404 draws it.
+  notFoundComponent: () => <NotFound kind="page" />,
   shellComponent: RootDocument,
 })
 

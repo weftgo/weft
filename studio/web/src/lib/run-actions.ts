@@ -53,6 +53,16 @@ export const EXPORT_FORMATS: readonly ExportFormat[] = [
 
 export const EXPORT_LABEL = "export"
 
+/** The "with subagents" toggle beside the formats (UX-A-31: &tree=1),
+ * offered on a run with children: the export carries every subagent
+ * run under it, each its own document, and the file is named
+ * <run>.tree.<ext>. */
+export const EXPORT_TREE = {
+  label: "with subagents",
+  title:
+    "also export every subagent run under this one (at most 200), each with its own events, transcript, requests and spans — a cut or a run another public id holds is said in subagent_holes",
+} as const
+
 /** exportFormatsFor is what the identity may download: none without
  * capability "export"; a read-scoped panel token no otlp. */
 export function exportFormatsFor(

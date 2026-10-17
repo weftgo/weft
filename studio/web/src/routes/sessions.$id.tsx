@@ -11,6 +11,8 @@ import { absoluteTime, relativeTime, tokens } from "@/lib/format"
 import { IdChip, StatusChip, TitleText } from "@/components/studio/runs-table"
 import { SessionTurns } from "@/components/studio/session-turns"
 import { Button } from "@/components/ui/button"
+import { NotFound } from "@/components/studio/not-found"
+import { isNotFound } from "@/lib/not-found"
 import { Spinner } from "@/components/ui/spinner"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { sessionTitle } from "@/lib/title"
@@ -50,6 +52,7 @@ function SessionPage() {
     )
   }
   if (q.isError) {
+    if (isNotFound(q.error)) return <NotFound kind="session" id={id} />
     return (
       <div className="mx-auto max-w-md space-y-3 py-24 text-center">
         <p className="font-mono text-xs text-faint">{id}</p>

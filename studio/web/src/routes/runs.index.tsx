@@ -49,6 +49,7 @@ import { useCapabilities } from "@/hooks/use-capabilities"
 import { EmptyState } from "@/components/studio/empty-state"
 import { RunsTable } from "@/components/studio/runs-table"
 import { UnpricedNote } from "@/components/studio/cost"
+import { costSortNote } from "@/lib/cost"
 import type { RunSortKey } from "@/components/studio/runs-table"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -766,7 +767,13 @@ function RunsPage() {
           {costCapable ? (
             <UnpricedNote rows={runs} more={page.hasNextPage} />
           ) : null}
-          <div className="relative overflow-x-auto rounded-lg border bg-background">
+          {/* UX-F-25: the skip link lands here, past the filter bar —
+              the next Tab is the first row. */}
+          <div
+            className="relative overflow-x-auto rounded-lg border bg-background outline-none"
+            tabIndex={-1}
+            data-skip-target
+          >
             <RunsTable
               runs={runs}
               selectedId={selected >= 0 ? runs[selected]?.id : undefined}
@@ -781,6 +788,14 @@ function RunsPage() {
               }}
             />
           </div>
+          {sortKey === "cost" && costSortNote(runs, page.hasNextPage) ? (
+            <p
+              className="text-center font-mono text-[11px] text-faint"
+              data-cost-sort-note
+            >
+              {costSortNote(runs, page.hasNextPage)}
+            </p>
+          ) : null}
           {costCap ? (
             <p
               className="text-center font-mono text-[11px] text-faint"

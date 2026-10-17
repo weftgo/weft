@@ -187,6 +187,20 @@ export function sortByCost<T extends RunRow>(runs: readonly T[]): T[] {
     .map((x) => x.r)
 }
 
+/** costSortNote is the runs list's line under sort=cost (UX-A-35):
+ * the rows whose whole bill is not known (unpriced, or running) are
+ * listed after every priced one, newest first — not sorted by cost —
+ * and the line says how many, "· the loaded rows" when more are
+ * paged. null when every row is priced. */
+export function costSortNote(
+  rows: readonly (CostFields & DelegatedCostFields)[],
+  more?: boolean
+): string | null {
+  const n = rows.filter((r) => !runTotal(r).known).length
+  if (!n) return null
+  return `${n} ${n === 1 ? "run" : "runs"} with no known cost: listed last, newest first — not sorted by cost${more ? " · the loaded rows" : ""}`
+}
+
 /** sumCost totals runs' whole bills (a playground variant's runs):
  * unknown — with the first reason — when any run is missing or
  * unknown; an empty list is unknown too (nothing to total). */

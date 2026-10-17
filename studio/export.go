@@ -64,6 +64,14 @@ import (
 //     on the view and says so in its compacted_at header, and the
 //     skeleton's header repeats it.
 //
+// With &tree=1 (UX-A-31) json, jsonl and otlp export the delegation
+// whole: the run, then every subagent run under it (breadth first, at
+// most exportTreeCap), each its own export — json a "subagents" list
+// beside "subagent_holes", jsonl each run's lines after its "run"
+// record then "subagent_hole" lines, otlp every run in the same two
+// requests — and the file is named <run id>.tree.<ext>. wefttest with
+// tree is a 400: its replay substitutes the subagents' recorded answers.
+//
 // The read-scope rule is the requests route's: a read-scoped panel
 // token never reads system prompts or tool catalogs. json and jsonl
 // export everything else, the request block replaced by the hidden
@@ -102,8 +110,21 @@ func (s *Server) serveRunExport(w http.ResponseWriter, r *http.Request, id strin
 	if !s.scopeRunID(w, r, id) {
 		return
 	}
+	tree := false
+	if v := r.URL.Query().Get("tree"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			badRequest(w, r, "tree must be true or false (1 or 0)")
+			return
+		}
+		tree = b
+	}
 	ctx := r.Context()
 	if name == "wefttest" {
+		if tree {
+			badRequest(w, r, "tree applies to json, jsonl and otlp: a wefttest replay replays this run's own model calls, and its subagents' answers are the recorded tool results it substitutes")
+			return
+		}
 		s.exportFixtures(w, r, id, f)
 		return
 	}
@@ -113,21 +134,161 @@ func (s *Server) serveRunExport(w http.ResponseWriter, r *http.Request, id strin
 		return
 	}
 	x.spans = spansFor(r, x.spans)
+	var sub []*runExport
+	var holes []treeHole
+	if tree {
+		if sub, holes, err = s.collectSubtree(r, x); err != nil {
+			dbError(w, r, "subagent runs of run", id, err)
+			return
+		}
+		f.ext = "tree." + f.ext
+	}
 	var body []byte
-	switch name {
-	case "json":
+	switch {
+	case name == "json" && tree:
+		body, err = json.Marshal(treeDoc(x, sub, holes))
+		body = append(body, '\n')
+	case name == "json":
 		body, err = json.Marshal(x.doc())
 		body = append(body, '\n')
-	case "jsonl":
-		body, err = x.jsonl()
-	case "otlp":
-		body, err = x.otlp()
+	case name == "jsonl":
+		body, err = treeJSONL(append([]*runExport{x}, sub...), holes)
+	case name == "otlp":
+		body, err = otlpOf(append([]*runExport{x}, sub...))
 	}
 	if err != nil {
 		writeError(w, r, http.StatusInternalServerError, "internal", "export run "+id+": "+err.Error())
 		return
 	}
 	writeDownload(w, r, id, f, body)
+}
+
+// exportTreeCap bounds the subagent runs one ?tree=1 export reads.
+const exportTreeCap = 200
+
+// collectSubtree reads every subagent run under x (UX-A-31: ?tree=1),
+// breadth first by the run documents' children — each child's whole
+// export, its own children queued after it — at most exportTreeCap of
+// them, with the tree's holes: truncated (cause response_cap) past the
+// cap, hidden for the runs a panel token's public id does not reach
+// (left out with their subtrees). A child deleted between the reads is
+// skipped. Never nil holes: [] when the tree is whole.
+func (s *Server) collectSubtree(r *http.Request, x *runExport) ([]*runExport, []treeHole, error) {
+	ctx := r.Context()
+	panel := idFrom(r).panel
+	queue := append([]obsdb.RunRow(nil), x.run.Children...)
+	var out []*runExport
+	hidden, truncated := 0, false
+	for len(queue) > 0 {
+		kid := queue[0]
+		queue = queue[1:]
+		if panel != nil && kid.PublicID != panel.PublicID {
+			hidden++
+			continue
+		}
+		if len(out) >= exportTreeCap {
+			truncated = true
+			break
+		}
+		c, err := s.collectExport(ctx, kid.ID, x.hidden)
+		if errors.Is(err, obsdb.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, nil, err
+		}
+		c.spans = spansFor(r, c.spans)
+		out = append(out, c)
+		queue = append(queue, c.run.Children...)
+	}
+	holes := []treeHole{}
+	if truncated {
+		holes = append(holes, treeHole{
+			Hole: string(obsdb.HoleTruncated), Cause: string(obsdb.CauseResponseCap),
+			Reason: fmt.Sprintf("this export reads at most %d subagent runs and the tree holds more: the later ones were not exported, nothing was lost", exportTreeCap),
+			Fix:    "export a subagent run's own tree (runs/{id}/export?tree=1 on the child)",
+		})
+	}
+	if hidden > 0 {
+		holes = append(holes, treeHole{
+			Hole:   string(obsdb.HoleHidden),
+			Reason: fmt.Sprintf("%d subagent runs carry another public id, or none: a panel token reads its own public id's runs, so they and their subtrees are left out", hidden),
+			Fix:    "export the tree with the server (dev) token",
+			Count:  hidden,
+		})
+	}
+	return out, holes, nil
+}
+
+// exportTreeDoc is the json export with ?tree=1: the run's document,
+// then every subagent run's own (breadth first; each run block names
+// its parent_run_id) and the tree's holes — [] when the tree is whole.
+type exportTreeDoc struct {
+	exportDoc
+	Subagents     []exportDoc `json:"subagents"`
+	SubagentHoles []treeHole  `json:"subagent_holes"`
+}
+
+func treeDoc(x *runExport, sub []*runExport, holes []treeHole) exportTreeDoc {
+	out := exportTreeDoc{exportDoc: x.doc(), Subagents: []exportDoc{}, SubagentHoles: holes}
+	for _, c := range sub {
+		out.Subagents = append(out.Subagents, c.doc())
+	}
+	return out
+}
+
+// treeJSONL is the jsonl export of several runs: each run's lines in
+// turn (each begins with its own "run" record, so a reader groups the
+// lines after it under that run), then one "subagent_hole" line per
+// hole of the tree.
+func treeJSONL(runs []*runExport, holes []treeHole) ([]byte, error) {
+	var out []byte
+	for _, x := range runs {
+		b, err := x.jsonl()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, b...)
+	}
+	for _, h := range holes {
+		b, err := json.Marshal(h)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, `{"record":"subagent_hole",`...)
+		out = append(out, b[1:]...)
+		out = append(out, '\n')
+	}
+	return out, nil
+}
+
+// otlpOf renders runs as {"logs": ExportLogsServiceRequest, "traces":
+// ExportTraceServiceRequest} in OTLP/JSON — ids as hex strings, as the
+// OTLP/JSON encoding spells them (obsdb.FromOTLP… reads them back). One
+// run is the plain export; several (?tree=1) put every run's resource
+// logs and resource spans in the same two requests, which /v1/logs and
+// /v1/traces read back into the whole tree. The tree's holes have no
+// OTLP spelling: the json and jsonl exports carry them.
+func otlpOf(runs []*runExport) ([]byte, error) {
+	logs := &collogspb.ExportLogsServiceRequest{}
+	traces := &coltracepb.ExportTraceServiceRequest{}
+	for _, x := range runs {
+		logs.ResourceLogs = append(logs.ResourceLogs, x.otlpLogs().ResourceLogs...)
+		traces.ResourceSpans = append(traces.ResourceSpans, x.otlpTraces().ResourceSpans...)
+	}
+	lb, err := marshalOTLP(logs)
+	if err != nil {
+		return nil, err
+	}
+	tb, err := marshalOTLP(traces)
+	if err != nil {
+		return nil, err
+	}
+	b, err := json.Marshal(struct {
+		Logs   json.RawMessage `json:"logs"`
+		Traces json.RawMessage `json:"traces"`
+	}{lb, tb})
+	return append(b, '\n'), err
 }
 
 // writeDownload sends an export as an attachment named <run id>.<ext>.
@@ -776,25 +937,6 @@ func (x *runExport) jsonl() ([]byte, error) {
 // otlpScope is the instrumentation scope the export's records and
 // spans name: the records are rebuilt, not the producer's own.
 const otlpScope = "github.com/weftgo/weft/studio/export"
-
-// otlp renders the run as {"logs": ExportLogsServiceRequest, "traces":
-// ExportTraceServiceRequest} in OTLP/JSON — ids as hex strings, as the
-// OTLP/JSON encoding spells them (obsdb.FromOTLP… reads them back).
-func (x *runExport) otlp() ([]byte, error) {
-	logs, err := marshalOTLP(x.otlpLogs())
-	if err != nil {
-		return nil, err
-	}
-	traces, err := marshalOTLP(x.otlpTraces())
-	if err != nil {
-		return nil, err
-	}
-	b, err := json.Marshal(struct {
-		Logs   json.RawMessage `json:"logs"`
-		Traces json.RawMessage `json:"traces"`
-	}{logs, traces})
-	return append(b, '\n'), err
-}
 
 // marshalOTLP is protojson, compacted: protojson's whitespace is
 // deliberately unstable, and an export is the same bytes every time.

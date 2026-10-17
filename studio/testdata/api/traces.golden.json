@@ -15,7 +15,12 @@
       "error": false,
       "run_ids": [
         "tl_other"
-      ]
+      ],
+      "root_run": {
+        "id": "tl_other",
+        "agent": "orders",
+        "status": "succeeded"
+      }
     },
     {
       "trace_id": "3c000000000000000000000000000003",
@@ -45,7 +50,12 @@
       "error": false,
       "run_ids": [
         "tl_web"
-      ]
+      ],
+      "root_run": {
+        "id": "tl_web",
+        "agent": "orders",
+        "status": "succeeded"
+      }
     },
     {
       "trace_id": "1a000000000000000000000000000001",
@@ -62,7 +72,13 @@
       "run_ids": [
         "tl_parent",
         "tl_parent/0/call_1"
-      ]
+      ],
+      "root_run": {
+        "id": "tl_parent",
+        "agent": "orders",
+        "status": "succeeded"
+      },
+      "failed_runs": 1
     }
   ],
   "next_before": null,

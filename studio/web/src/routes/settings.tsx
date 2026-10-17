@@ -26,6 +26,7 @@ import {
 } from "@/lib/api"
 import type { Meta, PricingSettings, RuntimeView } from "@/lib/api"
 import { copyText, download } from "@/lib/json"
+import { absoluteTime, relativeTime } from "@/lib/format"
 import { playgroundLink, runLink } from "@/lib/links"
 import { setDensity } from "@/lib/density"
 import type { Density } from "@/lib/density"
@@ -39,8 +40,11 @@ import {
   loadEdits,
   maskToken,
   mcpCommand,
+  BREAKPOINT_WORDS,
+  INGEST_WORDS,
   LOGS_BRIDGE,
   MCP_RECIPE_PATH,
+  SETTINGS_SECTIONS,
   pricingFile,
   pricingFileText,
   problems,
@@ -49,7 +53,12 @@ import {
   tokenIdentity,
   withPriceRow,
 } from "@/lib/settings"
-import type { DraftProblem, PricingDraft, RowField } from "@/lib/settings"
+import type {
+  DraftProblem,
+  PricingDraft,
+  RowField,
+  SettingsSectionID,
+} from "@/lib/settings"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { useDocumentTitle } from "@/hooks/use-document-title"
 import { Breakpoints } from "@/components/studio/experiment-form"
@@ -96,69 +105,106 @@ function SettingsPage() {
         <p className="text-sm text-status-bad" role="alert">
           /api/meta did not answer: {meta.error.message}
         </p>
-        <Section id="appearance" title="Appearance">
+        <Section id="appearance">
           <Appearance />
         </Section>
-        <Section id="keyboard" title="Keyboard">
+        <Section id="keyboard">
           <KbdHelpBody />
         </Section>
       </div>
     )
   const m = meta.data
   return (
-    <div className="mx-auto max-w-4xl space-y-4 pb-12">
-      <h1 className="text-lg font-medium">Settings</h1>
-      <Section id="studio" title="Studio">
-        <StudioFacts meta={m} />
-      </Section>
-      <Section id="token" title="Token">
-        <TokenSection meta={m} />
-      </Section>
-      <Section id="database" title="Database">
-        <DatabaseFacts meta={m} />
-      </Section>
-      <Section id="retention" title="Retention">
-        <RetentionFacts meta={m} />
-      </Section>
-      <Section id="pricing" title="Pricing">
-        <PricingSection meta={m} />
-      </Section>
-      <Section id="capabilities" title="Capabilities">
-        <Capabilities meta={m} />
-      </Section>
-      <Section id="runtimes" title="Runtimes">
-        <RuntimesSection meta={m} />
-      </Section>
-      <Section id="content" title="Content policy">
-        <ContentFacts meta={m} />
-      </Section>
-      <Section id="appearance" title="Appearance">
-        <Appearance />
-      </Section>
-      <Section id="keyboard" title="Keyboard">
-        <KbdHelpBody />
-      </Section>
+    <div className="mx-auto max-w-5xl pb-12 lg:grid lg:grid-cols-[10rem_minmax(0,1fr)] lg:gap-6">
+      <SectionIndex />
+      <div className="min-w-0 space-y-4">
+        <h1 className="text-lg font-medium">Settings</h1>
+        <Section id="studio">
+          <StudioFacts meta={m} />
+        </Section>
+        <Section id="token">
+          <TokenSection meta={m} />
+        </Section>
+        <Section id="database">
+          <DatabaseFacts meta={m} />
+        </Section>
+        <Section id="retention">
+          <RetentionFacts meta={m} />
+        </Section>
+        <Section id="pricing">
+          <PricingSection meta={m} />
+        </Section>
+        <Section id="capabilities">
+          <Capabilities meta={m} />
+        </Section>
+        <Section id="runtimes">
+          <RuntimesSection meta={m} />
+        </Section>
+        <Section id="content">
+          <ContentFacts meta={m} />
+        </Section>
+        <Section id="appearance">
+          <Appearance />
+        </Section>
+        <Section id="keyboard">
+          <KbdHelpBody />
+        </Section>
+      </div>
     </div>
+  )
+}
+
+/** The section index (UX-A-32): every section in page order, sticky
+ * beside them at desktop width, a wrapped row above them on a phone.
+ * Each entry scrolls to its section and focuses its heading — never a
+ * bare #fragment, which the page's <base> would resolve against the
+ * Studio mount instead of this page. */
+function SectionIndex() {
+  return (
+    <nav
+      aria-label="settings sections"
+      className="mb-4 lg:mb-0"
+      data-settings-index
+    >
+      <ul className="flex flex-wrap gap-x-3 gap-y-1 font-mono text-xs lg:sticky lg:top-4 lg:flex-col lg:gap-1">
+        {SETTINGS_SECTIONS.map((s) => (
+          <li key={s.id}>
+            <a
+              href={`#settings-${s.id}`}
+              className="text-muted-foreground hover:text-thread-ink hover:underline"
+              onClick={(e) => {
+                const h = document.getElementById(`settings-${s.id}`)
+                if (!h) return
+                e.preventDefault()
+                h.scrollIntoView({ block: "start" })
+                h.focus({ preventScroll: true })
+              }}
+            >
+              {s.title}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </nav>
   )
 }
 
 function Section({
   id,
-  title,
   children,
 }: {
-  id: string
-  title: string
+  id: SettingsSectionID
   children: React.ReactNode
 }) {
   const h = `settings-${id}`
+  const title = SETTINGS_SECTIONS.find((s) => s.id === id)?.title ?? id
   return (
     <section
       aria-labelledby={h}
       data-section={id}
-      className="space-y-3 rounded-2xl bg-card px-5 py-4 text-sm ring-1 ring-foreground/10"
+      className="scroll-mt-4 space-y-3 rounded-2xl bg-card px-5 py-4 text-sm ring-1 ring-foreground/10"
     >
-      <h2 id={h} className="text-base font-medium">
+      <h2 id={h} tabIndex={-1} className="text-base font-medium outline-none">
         {title}
       </h2>
       {children}
@@ -256,9 +302,7 @@ function StudioFacts({ meta }: { meta: Meta }) {
         ],
         [
           "ingest",
-          meta.ingest_open
-            ? "open: /v1/traces and /v1/logs take OTLP without a token"
-            : "walled: OTLP ingest needs its IngestToken",
+          meta.ingest_open ? INGEST_WORDS.openFact : INGEST_WORDS.walled,
         ],
         ["ingest health", <IngestHealth meta={meta} />],
         [
@@ -949,6 +993,21 @@ function RuntimeCard({
                 : ""}
           </p>
         )}
+        {rt.breakpoints?.length ? (
+          <p
+            className="font-mono text-[11px] text-faint"
+            data-breakpoints-set-at={rt.breakpoints_set_at ?? ""}
+            title={
+              rt.breakpoints_set_at
+                ? absoluteTime(rt.breakpoints_set_at)
+                : undefined
+            }
+          >
+            {rt.breakpoints_set_at
+              ? BREAKPOINT_WORDS.setAt(relativeTime(rt.breakpoints_set_at))
+              : BREAKPOINT_WORDS.setAtUnknown}
+          </p>
+        ) : null}
       </div>
     </div>
   )

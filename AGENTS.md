@@ -259,7 +259,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    them once — lib/cost.ts unpricedLine, "N runs unpriced: no row for …" + a /settings?price= link prefilling a row); session rows
 //    //    cost_usd = turns' own + delegated (no pool-child figure); settings/pricing (the effective
 //    //    table in the file's shape + source, path?; capability "pricing", every identity reads it), runs/{id}/export?format=json|jsonl|otlp|wefttest (the whole run as one
-//    //    download, capability "export"; otlp re-ingests through /v1/*, wefttest is a zip:
+//    //    download, capability "export"; &tree=1 on json/jsonl/otlp adds every subagent run under it, ≤ 200, each its own export (json subagents + subagent_holes, the file <run>.tree.<ext>; wefttest refuses it); otlp re-ingests through /v1/*, wefttest is a zip:
 //    //    `<agent>_replay_test.go` (plan F6, a passing replay test) beside `testdata/TestReplay_<run>/` fixtures
 //    //    wefttest.Replay reads — results keyed by (step, call id), steered steps via a generated wefttest.NewSteers source, a
 //    //    compacted step keys on its view, noted compacted_at),
@@ -276,7 +276,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    a; from the run header, the replay drawer, the playground) and the panel's 2-way result
 //    //    pane, parity.test.ts holding both to the same rows), traces (the trace list: each
 //    //    trace's root {span_id, name} — null + badge gap when only child spans arrived — service,
-//    //    start/end/duration_ms, span_count, error, run_ids (the join key); since/until (RFC 3339, on
+//    //    start/end/duration_ms, span_count, error, run_ids (the join key), root_run {id, agent, prompt_preview, status} (the first id without "/") and failed_runs (among it and its core children); since/until (RFC 3339, on
 //    //    its earliest span)/service (exact, any span)/public_id, paged as runs; a panel token lists
 //    //    the traces every span of which is its public id's; capability "traces" — obsdb.DB.Traces,
 //    //    the since window narrowed on SQLite's spans_start, migration 0019), traces/{id},
@@ -438,7 +438,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //     // (plan I3: studio.New passes its DB; one ordered writer off the request path; a failure holds
 //     // its queue 30 s, then re-applies it), a restarted Studio deciding lost from the stored state (queued past its ack window or
 //     // without a stored runtime, accepted past its watch from the stored last beat) and never
-//     // re-sending an accepted command; /api/runtimes gives each runtime connected (a live stream now; a dropped
+//     // re-sending an accepted command; /api/runtimes gives each runtime breakpoints_set_at (in memory) and connected (a live stream now; a dropped
 //     // one stays listed, false, until pruned; cwd under db.path's rule; restored after a Studio
 //     // restart until it re-registers) and each agent resolver + defaults (the form greys
 //     // them; absent for a runtime older than the option lab — Studio then refuses the option lab's

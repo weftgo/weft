@@ -103,11 +103,14 @@ export function CommandPalette({
   onOpenChange,
   onCopyLink,
   onHelp,
+  initial = "",
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   onCopyLink: () => void
   onHelp: () => void
+  /** Words typed in as it opens (lib/not-found.ts's openPalette). */
+  initial?: string
 }) {
   const router = useRouter()
   const meta = useQuery(metaQuery())
@@ -124,7 +127,8 @@ export function CommandPalette({
   const moved = useRef(false)
   useEffect(() => {
     if (!open) setInput("")
-  }, [open])
+    else if (initial) setInput(initial)
+  }, [open, initial])
   const term = useDebounced(input.trim(), 250)
 
   // Fetched only while the palette is open, each under its capability.

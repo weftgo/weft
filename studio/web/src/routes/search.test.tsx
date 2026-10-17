@@ -545,11 +545,18 @@ describe("the /traces index", () => {
     const links = [...first.querySelectorAll("a")].map((a) =>
       a.getAttribute("href")
     )
+    // UX-A-39: titled by the top run's agent, the runs counted with
+    // their failures (one link, to the top run) — never hex lists.
     expect(links).toEqual([
       "/traces/1a000000000000000000000000000001",
       "/runs/tl_parent",
-      "/runs/tl_parent%2F0%2Fcall_1",
     ])
+    expect(first.querySelector("[data-trace-title]")!.textContent).toBe(
+      "orders"
+    )
+    expect(first.querySelector("[data-trace-run-count]")!.textContent).toBe(
+      "2 runs · 1 failed"
+    )
     expect(first.querySelector("[data-trace-error]")).toBeTruthy()
   })
 

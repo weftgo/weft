@@ -37,7 +37,9 @@ import { useCopyLink } from "@/hooks/use-copy-link"
 import { useLiveGaveUpNotices, useRuntimeNotices } from "@/hooks/use-notices"
 import { Toaster } from "@/components/ui/sonner"
 import { KbdHelpBody } from "@/components/studio/kbd-help"
-import { TokenWall } from "@/components/studio/token-wall"
+import { TokenWall, isUnauthorized } from "@/components/studio/token-wall"
+import { PALETTE_EVENT } from "@/lib/not-found"
+import { SKIP_TO_CONTENT, TOKEN_WALL } from "@/lib/settings"
 import {
   Dialog,
   DialogContent,
@@ -74,9 +76,45 @@ import {
   tracesLink,
 } from "@/lib/links"
 
+const NEEDS_TOKEN = TOKEN_WALL.needs
+
+/** skipToContent focuses the page's first stop after its chrome: an
+ * element the page marks data-skip-target (the runs list's table, past
+ * its filters), else the main content. A plain #fragment would resolve
+ * against the Studio mount's <base>, not this page. */
+function skipToContent(e: React.MouseEvent) {
+  e.preventDefault()
+  const t =
+    document.querySelector<HTMLElement>("[data-skip-target]") ??
+    document.getElementById("main-content")
+  t?.focus()
+  t?.scrollIntoView({ block: "nearest" })
+}
+
 function Nav() {
   const meta = useQuery(metaQuery())
   const location = useLocation()
+  // UX-F-26: behind the token wall meta answers 401, so nothing says
+  // which capability-gated pages exist; they stay listed, disabled, so
+  // the sidebar does not change shape once the token is in.
+  const walled = isUnauthorized(meta.error)
+  const locked = (label: string, icon: React.ReactNode) => (
+    <SidebarMenuItem key={label}>
+      <SidebarMenuButton
+        aria-disabled
+        tooltip={`${label} · ${NEEDS_TOKEN}`}
+        data-nav-locked={label}
+      >
+        {icon}
+        <span className="flex min-w-0 flex-1 items-baseline justify-between gap-2">
+          <span>{label}</span>
+          <span className="font-mono text-[10px] text-faint">
+            {NEEDS_TOKEN}
+          </span>
+        </span>
+      </SidebarMenuButton>
+    </SidebarMenuItem>
+  )
   const item = (to: string, label: string, icon: React.ReactNode) => (
     <SidebarMenuItem key={to}>
       <SidebarMenuButton
@@ -96,17 +134,20 @@ function Nav() {
           {item("/runs", "Runs", <List data-slot="icon" />)}
           {item("/sessions", "Sessions", <MessagesSquare data-slot="icon" />)}
           {/* The trace list (plan H1): under capability "traces". */}
+          {walled && locked("Traces", <Network data-slot="icon" />)}
           {meta.data?.capabilities.includes("traces") &&
             item(tracesLink().to, "Traces", <Network data-slot="icon" />)}
           {item("/live", "Live", <Activity data-slot="icon" />)}
           {/* Agents: a manifest (weft.json or a registration), or a
               runtime link a runtime may register one through (B4). */}
+          {walled && locked("Agents", <Bot data-slot="icon" />)}
           {(meta.data?.has_manifest ||
             meta.data?.capabilities.includes("playground")) &&
             item("/agents", "Agents", <Bot data-slot="icon" />)}
           {/* The playground (step 8): offered exactly when the runtime
               link's routes are registered (the capability is computed
               from them, never hard-coded). */}
+          {walled && locked("Playground", <FlaskConical data-slot="icon" />)}
           {meta.data?.capabilities.includes("playground") &&
             item(
               playgroundLink().to,
@@ -116,6 +157,7 @@ function Nav() {
           {/* The saved experiments (plan F5): the playground's history,
               under the same capability — never under a panel token,
               which the experiments routes refuse. */}
+          {walled && locked("Experiments", <Grid3x3 data-slot="icon" />)}
           {meta.data &&
             mayReadExperiments(meta.data.capabilities) &&
             item(
@@ -178,6 +220,19 @@ function Place() {
 export function AppShell() {
   const meta = useQuery(metaQuery())
   const [paletteOpen, setPaletteOpen] = useState(false)
+  // A page opens the palette with words typed in (lib/not-found.ts's
+  // openPalette: a 404'd run's "search for it").
+  const [paletteQuery, setPaletteQuery] = useState("")
+  useEffect(() => {
+    const on = (e: Event) => {
+      setPaletteQuery(
+        String((e as CustomEvent<{ q?: string } | null>).detail?.q ?? "")
+      )
+      setPaletteOpen(true)
+    }
+    window.addEventListener(PALETTE_EVENT, on)
+    return () => window.removeEventListener(PALETTE_EVENT, on)
+  }, [])
 
   // The theme class survives hydration (see applyStoredTheme), and the
   // density attribute with it (plan H3).
@@ -219,6 +274,15 @@ export function AppShell() {
 
   return (
     <SidebarProvider>
+      {/* UX-F-25: the first tab stop on every page. */}
+      <a
+        href="#main-content"
+        onClick={skipToContent}
+        className="sr-only z-50 rounded-md bg-background px-3 py-2 text-sm ring-2 ring-ring focus:not-sr-only focus:fixed focus:top-2 focus:left-2"
+        data-skip-link
+      >
+        {SKIP_TO_CONTENT}
+      </a>
       <Sidebar collapsible="icon">
         <SidebarHeader>
           <div className="flex h-12 items-center px-2">
@@ -288,7 +352,11 @@ export function AppShell() {
             <Kbd className="ml-1">⌘K</Kbd>
           </Button>
         </header>
-        <div className="min-w-0 flex-1 p-4">
+        <div
+          id="main-content"
+          tabIndex={-1}
+          className="min-w-0 flex-1 p-4 outline-none"
+        >
           <ClientOnly
             fallback={
               <div className="flex justify-center py-24">
@@ -315,7 +383,11 @@ export function AppShell() {
 
       <CommandPalette
         open={paletteOpen}
-        onOpenChange={setPaletteOpen}
+        onOpenChange={(o) => {
+          setPaletteOpen(o)
+          if (!o) setPaletteQuery("")
+        }}
+        initial={paletteQuery}
         onCopyLink={() => void copyLink()}
         onHelp={() => setHelpOpen(true)}
       />

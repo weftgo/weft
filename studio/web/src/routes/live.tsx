@@ -16,7 +16,7 @@
 // Escape closes it.
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
 
 import { fetchRun, fetchRuns, metaQuery } from "@/lib/api"
 import type { RunRow } from "@/lib/api"
@@ -43,6 +43,8 @@ import {
 } from "@/lib/live-rows"
 import type { LiveRows } from "@/lib/live-rows"
 import { SPLITS } from "@/lib/pane-sizes"
+import { settingsLink } from "@/lib/links"
+import { INGEST_WORDS } from "@/lib/settings"
 import { LiveRuns } from "@/components/studio/live-runs"
 import { LivePeek } from "@/components/studio/live-peek"
 import { LiveTable } from "@/components/studio/live-table"
@@ -158,12 +160,15 @@ function LiveBody() {
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="text-sm font-medium tracking-tight">Live</h1>
         {meta.data?.ingest_open ? (
-          <span
-            className="font-mono text-[11px] text-faint"
-            title="OTLP ingest answers loopback without a token (setup B)"
+          <Link
+            {...settingsLink()}
+            hash="settings-studio"
+            className="font-mono text-[11px] text-faint hover:text-thread-ink hover:underline"
+            title={INGEST_WORDS.openFact}
+            data-ingest-open
           >
-            ingest open
-          </span>
+            {INGEST_WORDS.open}
+          </Link>
         ) : null}
         <Input
           type="search"

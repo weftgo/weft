@@ -18,6 +18,7 @@ import {
   deletedWords,
   deleteOffWhy,
   EXPORT_LABEL,
+  EXPORT_TREE,
   exportFormatsFor,
   exportWords,
 } from "@/lib/run-actions"
@@ -36,15 +37,28 @@ import {
 /** ExportVerbs: "export json · jsonl · otlp" — each a download of the
  * run in that format (wefttest is save as test, beside it). Absent
  * without capability "export". */
-export function ExportVerbs({ runID }: { runID: string }) {
+export function ExportVerbs({
+  runID,
+  subagents = 0,
+}: {
+  runID: string
+  /** The run's subagent runs (one level): with any, "with subagents"
+   * is offered (UX-A-31: &tree=1). */
+  subagents?: number
+}) {
   const meta = useQuery(metaQuery())
   const formats = exportFormatsFor(meta.data?.capabilities ?? [], studioToken())
   const [busy, setBusy] = useState("")
+  const [tree, setTree] = useState(false)
   if (!formats.length) return null
   const run = async (format: string) => {
     setBusy(format)
     try {
-      const { blob, name } = await fetchExport(runID, format)
+      const { blob, name } = await fetchExport(
+        runID,
+        format,
+        tree && subagents > 0
+      )
       saveBlob(blob, name)
       toast.success(exportWords({ ok: true, file: name }), { id: "export" })
     } catch (e) {
@@ -82,6 +96,21 @@ export function ExportVerbs({ runID }: { runID: string }) {
           {f.label}
         </Button>
       ))}
+      {subagents > 0 ? (
+        <label
+          className="flex items-center gap-1 font-mono text-[11px] text-faint"
+          title={EXPORT_TREE.title}
+        >
+          <input
+            type="checkbox"
+            checked={tree}
+            disabled={busy !== ""}
+            onChange={(e) => setTree(e.target.checked)}
+            data-export-tree
+          />
+          {EXPORT_TREE.label}
+        </label>
+      ) : null}
     </span>
   )
 }

@@ -1,7 +1,9 @@
 package studio
 
 import (
+	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/weftgo/weft/obsdb"
@@ -59,7 +61,69 @@ type traceRow struct {
 	SpanCount  int        `json:"span_count"`
 	Error      bool       `json:"error"`
 	RunIDs     []string   `json:"run_ids"`
+	// RootRun is the trace's top run (UX-A-39): the first of RunIDs with
+	// no "/" (core's child id rule), else the shortest — its agent, its
+	// prompt preview and status, what the list titles the row with.
+	// Absent for a trace of non-weft spans, or when that run has no row.
+	RootRun *traceRun `json:"root_run,omitempty"`
+	// FailedRuns counts the trace's runs read failed among the root run
+	// and its core subagent children (the runs whose id starts with the
+	// root's); 0 is omitted.
+	FailedRuns int `json:"failed_runs,omitempty"`
 	badgeFields
+}
+
+// traceRun is a trace row's top run, as the run list words it.
+type traceRun struct {
+	ID            string `json:"id"`
+	Agent         string `json:"agent,omitempty"`
+	PromptPreview string `json:"prompt_preview,omitempty"`
+	Status        string `json:"status"`
+}
+
+// rootRunOf is the trace's top run id: the first with no "/", else the
+// shortest ("" for none).
+func rootRunOf(ids []string) string {
+	root := ""
+	for _, id := range ids {
+		if !strings.Contains(id, "/") {
+			return id
+		}
+		if root == "" || len(id) < len(root) {
+			root = id
+		}
+	}
+	return root
+}
+
+// traceRuns reads a trace row's root run and failed count: one runs
+// read per trace, by the root's id prefix (its core children with it),
+// scoped to the list's public id.
+func (s *Server) traceRuns(ctx context.Context, row *traceRow, publicID string) error {
+	root := rootRunOf(row.RunIDs)
+	if root == "" {
+		return nil
+	}
+	page, err := s.db.Runs(ctx, obsdb.RunQuery{IDPrefix: root, ParentRunID: "*", PublicID: publicID, Limit: 500})
+	if err != nil {
+		return err
+	}
+	in := map[string]bool{}
+	for _, id := range row.RunIDs {
+		in[id] = true
+	}
+	for _, rec := range page.Runs {
+		if !in[rec.ID] {
+			continue
+		}
+		if rec.Status == obsdb.StatusFailed {
+			row.FailedRuns++
+		}
+		if rec.ID == root {
+			row.RootRun = &traceRun{ID: rec.ID, Agent: rec.Agent, PromptPreview: rec.PromptPreview, Status: string(rec.Status)}
+		}
+	}
+	return nil
 }
 
 // tracesPage is GET /api/traces's body, paged as runsPage is.
@@ -129,6 +193,10 @@ func (s *Server) serveTraces(w http.ResponseWriter, r *http.Request) {
 			row.Root = &traceRoot{SpanID: t.Root.SpanID, Name: t.Root.Name}
 		} else {
 			row.badgeFields = rootMissing
+		}
+		if err := s.traceRuns(r.Context(), &row, query.PublicID); err != nil {
+			dbError(w, r, "traces", "", err)
+			return
 		}
 		out.Traces = append(out.Traces, row)
 	}

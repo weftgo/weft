@@ -202,7 +202,8 @@ func TestGoldensMatchARealRun(t *testing.T) {
 		{"trace.golden.json", "/api/traces/" + trace, nil},
 		// The trace list (plan A7): the real run's trace has its root; the
 		// fixture's orphan trace pins the missing root's null and badge.
-		{"traces.golden.json", "/api/traces", []string{".traces[].root=<nil>", ".traces[].badge", ".traces[].reason", ".traces[].fix"}},
+		// The real run failed nothing (failed_runs is omitted at 0).
+		{"traces.golden.json", "/api/traces", []string{".traces[].root=<nil>", ".traces[].badge", ".traces[].reason", ".traces[].fix", ".traces[].failed_runs"}},
 		{"sessions.golden.json", "/api/sessions", []string{".sessions[].cost_usd=<nil>"}},
 		{"session-orders.golden.json", "/api/sessions/s_x", []string{".runs[].finished=<nil>", ".runs[].meta.cwd", ".cost_usd=<nil>", ".runs[].cost_usd=<nil>"}},
 		{"public.golden.json", "/api/public/pub_x", nil},

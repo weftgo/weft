@@ -318,6 +318,20 @@ func TestBreakpointsSurviveAReconnect(t *testing.T) {
 	if views := rs.Snapshot(); len(views) != 1 || len(views[0].Breakpoints) != 1 || views[0].Breakpoints[0] != "refund" {
 		t.Errorf("snapshot breakpoints = %+v", views)
 	}
+	// UX-A-33: the view says when this Studio delivered the set.
+	if views := rs.Snapshot(); len(views) != 1 || views[0].BreakpointsSetAt == nil || time.Since(*views[0].BreakpointsSetAt) > time.Minute {
+		t.Errorf("snapshot breakpoints_set_at = %+v, want the delivery's time", views)
+	}
+}
+
+// TestBreakpointsSetAtAbsentUntilSet: a runtime nobody set breakpoints
+// on reports no breakpoints_set_at (UX-A-33: never a made-up time).
+func TestBreakpointsSetAtAbsentUntilSet(t *testing.T) {
+	rs := fastServer()
+	register(t, mux(rs), regBody("rt_bp0"))
+	if views := rs.Snapshot(); len(views) != 1 || views[0].BreakpointsSetAt != nil {
+		t.Errorf("snapshot = %+v, want no breakpoints_set_at before a PUT", views)
+	}
 }
 
 // TestSnapshotConnected: a runtime whose stream dropped stays listed

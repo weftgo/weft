@@ -537,7 +537,7 @@ export function RunHeader({
           <OpenInApp doc={doc} />
           <SaveAsTest runID={doc.id} derived={isDerived(doc)} />
           {/* The run's other downloads and its delete (U26). */}
-          <ExportVerbs runID={doc.id} />
+          <ExportVerbs runID={doc.id} subagents={doc.children.length} />
           <CopyLink />
           <DeleteRun doc={doc} />
         </span>

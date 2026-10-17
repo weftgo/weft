@@ -247,3 +247,37 @@ export function turnTitle(
     kind: "resume",
   }
 }
+
+/** traceTitle titles a trace list row (UX-A-39): its top run's agent
+ * and prompt ("orders · Where is order 42?"), else that agent alone,
+ * else the root span's name (a trace of non-weft spans), else "(no
+ * root span)". full keeps the whole prompt for the title attribute. */
+export function traceTitle(t: {
+  root: { name: string } | null
+  root_run?: { agent?: string; prompt_preview?: string }
+}): { text: string; full: string } {
+  const run = t.root_run
+  const prompt = clip(run?.prompt_preview ?? "", 80)
+  if (run?.agent || prompt) {
+    const text = [run?.agent, prompt].filter(Boolean).join(" · ")
+    return {
+      text,
+      full: [run?.agent, run?.prompt_preview].filter(Boolean).join(" · "),
+    }
+  }
+  const name = t.root?.name ?? "(no root span)"
+  return { text: name, full: name }
+}
+
+/** traceRunsWords is a trace row's runs cell (UX-A-39): how many runs
+ * the trace holds and how many of them failed — "3 runs · 1 failed" —
+ * never the id list; "—" for none. */
+export function traceRunsWords(t: {
+  run_ids: readonly string[]
+  failed_runs?: number
+}): string {
+  const n = t.run_ids.length
+  if (!n) return "—"
+  const runs = `${n} ${n === 1 ? "run" : "runs"}`
+  return t.failed_runs ? `${runs} · ${t.failed_runs} failed` : runs
+}

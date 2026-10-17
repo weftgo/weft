@@ -17,7 +17,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { setStudioToken } from "@/lib/api"
 import { queryClient } from "@/lib/query"
 import type { RunDoc, RunsPage } from "@/lib/api"
-import { DELETE_OFF, deleteConfirmWords } from "@/lib/run-actions"
+import { DELETE_OFF, EXPORT_TREE, deleteConfirmWords } from "@/lib/run-actions"
 import { renderApp, stubBrowser } from "@/test/app"
 import { FakeEventSource } from "@/test/fake-event-source"
 import {
@@ -126,6 +126,35 @@ describe("export on the run page", () => {
       expect(c.headers.get("Authorization")).toBe(`Bearer ${DEV}`)
       expect([...c.query.keys()]).toEqual(["format"])
     }
+  })
+
+  it("a run with subagents offers 'with subagents', which adds tree=1 (UX-A-31); a run without none", async () => {
+    const kids = [
+      { ...rOK, id: `${RUN}/call_1`, agent: "worker" },
+    ] as unknown as RunDoc["children"]
+    setStudioToken(DEV)
+    serve({}, kids).requireToken(DEV).install()
+    const first = renderApp(`/runs/${RUN}`)
+    await waitFor(() => expect(formats()).toEqual(["json", "jsonl", "otlp"]))
+    const box = document.querySelector<HTMLInputElement>("[data-export-tree]")!
+    expect(box.closest("label")!.textContent).toBe(EXPORT_TREE.label)
+    fireEvent.click(box)
+    fireEvent.click(
+      document.querySelector<HTMLElement>(`[data-export-format="json"]`)!
+    )
+    await waitFor(() =>
+      expect(
+        studio
+          .calls(`GET runs/${RUN}/export`)
+          .some((c) => c.query.get("tree") === "1")
+      ).toBe(true)
+    )
+    first.unmount()
+    cleanup()
+    serve().requireToken(DEV).install()
+    renderApp(`/runs/${RUN}`)
+    await waitFor(() => expect(formats()).toEqual(["json", "jsonl", "otlp"]))
+    expect(document.querySelector("[data-export-tree]")).toBeNull()
   })
 
   it("a read token is offered json and jsonl, not otlp; no export capability, none", async () => {

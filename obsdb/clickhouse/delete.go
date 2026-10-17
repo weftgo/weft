@@ -9,6 +9,7 @@ import (
 	ch "github.com/ClickHouse/clickhouse-go/v2"
 
 	"github.com/weftgo/weft/obsdb"
+	"github.com/weftgo/weft/obsdb/internal/caps"
 )
 
 // Deletion and retention (plan A7, §13.13) on ClickHouse: lightweight
@@ -115,11 +116,11 @@ func (d *DB) Sweep(ctx context.Context, before time.Time) (n int, err error) {
 	// Passes of at most obsdb.SweepBatch roots: the roots' subtrees are
 	// disjoint (a root's parent is no candidate), so each pass is its
 	// own closure and its own round of mutations, ctx checked between.
-	for start := 0; start < len(roots); start += obsdb.SweepBatch {
+	for start := 0; start < len(roots); start += caps.SweepBatch {
 		if err := ctx.Err(); err != nil {
 			return n, err
 		}
-		ids, err := d.closure(ctx, roots[start:min(start+obsdb.SweepBatch, len(roots))], true)
+		ids, err := d.closure(ctx, roots[start:min(start+caps.SweepBatch, len(roots))], true)
 		if err != nil {
 			return n, err
 		}

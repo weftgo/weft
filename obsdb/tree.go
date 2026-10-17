@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/weftgo/weft/obsdb/internal/caps"
 )
 
 // TreeReader is the run tree's reads (U9.1), an optional capability of
@@ -348,8 +350,8 @@ func CapTree(read []Span, more bool, q TreeQuery, parents map[string]string, row
 		spans, rows, out.HiddenCount = scopeTree(q, spans, members, rows)
 		out.Hidden = out.HiddenCount > 0
 	}
-	if more || len(spans) > TreeSpanCap {
-		out.Spans, out.Truncated = spans[:min(len(spans), TreeSpanCap)], true
+	if more || len(spans) > caps.TreeSpan {
+		out.Spans, out.Truncated = spans[:min(len(spans), caps.TreeSpan)], true
 		return out
 	}
 	out.Spans = spans
@@ -371,7 +373,7 @@ func CapTree(read []Span, more bool, q TreeQuery, parents map[string]string, row
 		return strings.Compare(a.ID, b.ID)
 	})
 	out.MissingCount = len(out.Missing)
-	out.Missing = out.Missing[:min(len(out.Missing), TreeMissingCap)]
+	out.Missing = out.Missing[:min(len(out.Missing), caps.TreeMissing)]
 	return out
 }
 

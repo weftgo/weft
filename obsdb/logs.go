@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/weftgo/weft/obsdb/internal/caps"
 )
 
 // LogQuery selects a run's app log records for DB.OtherLogs. The zero
@@ -294,14 +296,14 @@ func attributeLogs(ctx context.Context, db DB, runID string, candidates LogCandi
 	attributed := logSpans(own, all)
 
 	from, to := det.Started.Add(-LogSkew), det.LastSeen.Add(LogSkew)
-	cands, err := candidates(ctx, traces, from, to, MaxLogCandidates+1)
+	cands, err := candidates(ctx, traces, from, to, caps.LogCandidates+1)
 	if err != nil {
 		return LogPage{}, nil, err
 	}
-	if len(cands) > MaxLogCandidates {
+	if len(cands) > caps.LogCandidates {
 		// The candidates arrive in time order (LogCandidates), so the
 		// first MaxLogCandidates are the cap's.
-		cands, page.Truncated = cands[:MaxLogCandidates], true
+		cands, page.Truncated = cands[:caps.LogCandidates], true
 	}
 	stored := map[spanKey]bool{}
 	for _, s := range all {

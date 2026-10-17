@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/weftgo/weft/obsdb"
+	"github.com/weftgo/weft/obsdb/internal/caps"
 )
 
 // The deletion fixture (plan A7): delRun is one run with everything a
@@ -351,13 +352,16 @@ func sweep(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 // count over every pass — and a running run among them stays under a
 // cutoff in the future, kept by its status alone. It heartbeats just
 // before the sweep, as live runs do, so only the sweep — not the
-// backlog's write — has to fit inside obsdb.InterruptedAfter.
+// backlog's write — has to fit inside obsdb.InterruptedAfter. The
+// passes run at a lowered SweepBatch (internal/caps), ten roots each:
+// the backlog's 47 roots take five, the last one short.
 func sweepBatched(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
 		db := open(t)
+		lowerCaps(t, map[*int]int{&caps.SweepBatch: 10})
 		now := time.Now().UTC()
 		old := now.Add(-2 * time.Hour)
-		const roots = obsdb.SweepBatch + 37
+		roots := caps.SweepBatch + 37
 		var b obsdb.Batch
 		for i := range roots {
 			id := fmt.Sprintf("swb_%04d", i)

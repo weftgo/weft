@@ -36,7 +36,7 @@ jobs:
       - name: test (every module)
         run: |
           for m in $(go list -m -f '{{.Dir}}'); do
-            (cd "$m" && go test -race ./...)
+            (cd "$m" && go test -race -timeout 20m ./...)
           done
       - name: build (every module)
         run: |

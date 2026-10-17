@@ -11,6 +11,7 @@ import (
 
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/obsdb"
+	"github.com/weftgo/weft/obsdb/internal/caps"
 )
 
 // The read side. Status is derived on read through obsdb.DeriveStatus —
@@ -713,12 +714,12 @@ func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTr
 		return obsdb.RunTree{}, err
 	}
 	if trace, _, ok := obsdb.ParseStockRunID(runID); ok {
-		spans, err := d.querySpans(ctx, stockTreeWhere, trace)
+		spans, err := d.querySpans(ctx, stockTreeWhere(), trace)
 		if err != nil {
 			return obsdb.RunTree{}, err
 		}
-		cut := len(spans) > obsdb.TreeTraceCap
-		tree := obsdb.CapTree(spans[:min(len(spans), obsdb.TreeTraceCap)], false, q, nil, nil)
+		cut := len(spans) > caps.TreeTrace
+		tree := obsdb.CapTree(spans[:min(len(spans), caps.TreeTrace)], false, q, nil, nil)
 		tree.TraceTruncated = cut
 		return tree, nil
 	}
@@ -726,8 +727,8 @@ func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTr
 	if err != nil {
 		return obsdb.RunTree{}, err
 	}
-	rowsCut := len(rows) > obsdb.TreeRowCap
-	rows = rows[:min(len(rows), obsdb.TreeRowCap)]
+	rowsCut := len(rows) > caps.TreeRow
+	rows = rows[:min(len(rows), caps.TreeRow)]
 	parents := make(map[string]string, len(rows))
 	for _, r := range rows {
 		parents[r.ID] = r.ParentRunID
@@ -736,7 +737,7 @@ func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTr
 	if err != nil {
 		return obsdb.RunTree{}, err
 	}
-	rs, err := d.reads.QueryContext(ctx, treeSpansSQL, string(list), obsdb.TreeSpanCap+1)
+	rs, err := d.reads.QueryContext(ctx, treeSpansSQL, string(list), caps.TreeSpan+1)
 	if err != nil {
 		return obsdb.RunTree{}, err
 	}
@@ -745,18 +746,20 @@ func (d *DB) RunTreeSpans(ctx context.Context, q obsdb.TreeQuery) (_ obsdb.RunTr
 	if err := scanSpans(rs, nil, func(s obsdb.Span) { spans = append(spans, s) }); err != nil {
 		return obsdb.RunTree{}, err
 	}
-	return obsdb.CapTree(spans, rowsCut || len(spans) > obsdb.TreeSpanCap, q, parents, rows), nil
+	return obsdb.CapTree(spans, rowsCut || len(spans) > caps.TreeSpan, q, parents, rows), nil
 }
 
 // stockTreeWhere is a derived run's tree read: its trace in start
 // order, the first obsdb.TreeTraceCap spans and one more (the trace
 // holds more: RunTree.TraceTruncated), on the primary key.
-var stockTreeWhere = fmt.Sprintf(`trace_id = ? ORDER BY start_ns, span_id LIMIT %d`, obsdb.TreeTraceCap+1)
+func stockTreeWhere() string {
+	return fmt.Sprintf(`trace_id = ? ORDER BY start_ns, span_id LIMIT %d`, caps.TreeTrace+1)
+}
 
 // treeRows is treeRowsSQL for runID: at most obsdb.TreeRowCap rows and
 // one more (the caller cuts the tree there, Truncated).
 func (d *DB) treeRows(ctx context.Context, runID string) ([]obsdb.TreeRun, error) {
-	rs, err := d.reads.QueryContext(ctx, treeRowsSQL, runID, runID+"/", runID+"0", obsdb.TreeRowCap+1)
+	rs, err := d.reads.QueryContext(ctx, treeRowsSQL, runID, runID+"/", runID+"0", caps.TreeRow+1)
 	if err != nil {
 		return nil, err
 	}
@@ -800,7 +803,7 @@ func (d *DB) ChildRuns(ctx context.Context, parentIDs []string) (_ map[string][]
 	defer d.closedErr(&err)
 	out := map[string][]obsdb.RunRow{}
 	now := time.Now()
-	left := obsdb.ChildRunsCap
+	left := caps.ChildRuns
 	for start := 0; start < len(parentIDs); start += childChunk {
 		ids := parentIDs[start:min(start+childChunk, len(parentIDs))]
 		args := make([]any, len(ids), len(ids)+1)

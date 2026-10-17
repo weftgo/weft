@@ -13,6 +13,7 @@ import (
 	"github.com/weftgo/weft/core"
 	"github.com/weftgo/weft/core/wefttest"
 	"github.com/weftgo/weft/obsdb"
+	"github.com/weftgo/weft/obsdb/internal/caps"
 	"github.com/weftgo/weft/thread"
 	threadsqlite "github.com/weftgo/weft/thread/sqlite"
 )
@@ -242,7 +243,9 @@ func TestSweepYieldsBetweenPasses(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 	t0 := time.Now().UTC().Add(-time.Hour)
-	const roots = obsdb.SweepBatch + 3
+	// A lowered pass (internal/caps): ten roots, so three more take two.
+	defer caps.Lower(&caps.SweepBatch, 10)()
+	roots := caps.SweepBatch + 3
 	for i := range roots {
 		delFixture(t, db, fmt.Sprintf("old_%04d", i), "", "", t0)
 	}

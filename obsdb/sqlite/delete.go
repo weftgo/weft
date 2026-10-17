@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/weftgo/weft/obsdb"
+	"github.com/weftgo/weft/obsdb/internal/caps"
 )
 
 // Deletion and retention (plan A7, §13.13): every statement below names
@@ -85,7 +86,7 @@ func (d *DB) Sweep(ctx context.Context, before time.Time) (n int, err error) {
 			return n, err
 		}
 		n += deleted
-		if roots < obsdb.SweepBatch {
+		if roots < caps.SweepBatch {
 			return n, nil
 		}
 		if sweepPassHook != nil {
@@ -109,7 +110,7 @@ func (d *DB) sweepPass(ctx context.Context, before time.Time) (roots, deleted in
 			AND NOT EXISTS (SELECT 1 FROM runs AS p WHERE p.run_id = r.parent_run_id AND r.parent_run_id <> ''
 				AND p.last_seen_ns < ? AND (p.failed = 1 OR p.finished_ok = 1 OR p.root_ended = 1 OR p.last_seen_ns < ?))
 			LIMIT ?`,
-			unixNS(before), cut, unixNS(before), cut, obsdb.SweepBatch)
+			unixNS(before), cut, unixNS(before), cut, caps.SweepBatch)
 		if err != nil {
 			return nil, err
 		}

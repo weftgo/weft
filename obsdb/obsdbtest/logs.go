@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/weftgo/weft/obsdb"
+	"github.com/weftgo/weft/obsdb/internal/caps"
 )
 
 // otherLogs pins DB.OtherLogs (plan A7): a run's app log records — the
@@ -213,26 +214,28 @@ func otherLogs(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			t.Errorf("a running run = %#v, %v; want partial, no gap, no lines yet, no NoBridge (its root is not stored)", got, err)
 		}
 
-		// Past MaxLogCandidates lines the read is cut and says so.
+		// Past MaxLogCandidates lines the read is cut and says so, at a
+		// lowered cap (internal/caps): tens of lines, not ten thousand.
+		lowerCaps(t, map[*int]int{&caps.LogCandidates: 20})
 		many := invokeSpan("r_many", 1, nil)
 		many.TraceID, many.SpanID = "d1"+trace[2:], "4000000000000001"
-		lines := make([]obsdb.Record, 0, obsdb.MaxLogCandidates+1)
-		for i := 0; i <= obsdb.MaxLogCandidates; i++ {
+		lines := make([]obsdb.Record, 0, caps.LogCandidates+1)
+		for i := 0; i <= caps.LogCandidates; i++ {
 			lines = append(lines, obsdb.Record{Time: at(time.Second + time.Duration(i)*time.Microsecond),
 				TraceID: many.TraceID, SpanID: many.SpanID, Severity: 9, Body: fmt.Sprintf("line %d", i), Service: "conf-svc"})
 		}
 		if err := db.Write(ctx(), obsdb.Batch{Spans: []obsdb.Span{many}, Records: append(finishedRun("r_many"), lines...)}); err != nil {
 			t.Fatal(err)
 		}
-		last, err := db.OtherLogs(ctx(), "r_many", obsdb.LogQuery{From: obsdb.MaxLogCandidates - 1, Limit: 10})
-		if err != nil || !last.Truncated || len(last.Logs) != 1 || last.Logs[0].Index != obsdb.MaxLogCandidates-1 ||
-			last.Logs[0].Body != fmt.Sprintf("line %d", obsdb.MaxLogCandidates-1) {
-			t.Errorf("past the cap = truncated %v, %d rows %+v, %v; want the first %d lines and truncated", last.Truncated, len(last.Logs), last.Logs, err, obsdb.MaxLogCandidates)
+		last, err := db.OtherLogs(ctx(), "r_many", obsdb.LogQuery{From: int64(caps.LogCandidates) - 1, Limit: 10})
+		if err != nil || !last.Truncated || len(last.Logs) != 1 || last.Logs[0].Index != int64(caps.LogCandidates)-1 ||
+			last.Logs[0].Body != fmt.Sprintf("line %d", caps.LogCandidates-1) {
+			t.Errorf("past the cap = truncated %v, %d rows %+v, %v; want the first %d lines and truncated", last.Truncated, len(last.Logs), last.Logs, err, caps.LogCandidates)
 		}
 		// Counting: the cap's lines, capped (a floor); none at WARN — the
 		// severity narrows the scan, so INFO lines never reach the cap.
-		if c, err := db.CountLogs(ctx(), "r_many", 1); err != nil || c != (obsdb.LogCounts{Total: obsdb.MaxLogCandidates, Capped: true}) {
-			t.Errorf("CountLogs(r_many, 1) = %+v, %v; want %d, capped", c, err, obsdb.MaxLogCandidates)
+		if c, err := db.CountLogs(ctx(), "r_many", 1); err != nil || c != (obsdb.LogCounts{Total: int64(caps.LogCandidates), Capped: true}) {
+			t.Errorf("CountLogs(r_many, 1) = %+v, %v; want %d, capped", c, err, caps.LogCandidates)
 		}
 		if c, err := db.CountLogs(ctx(), "r_many", 13); err != nil || c != (obsdb.LogCounts{}) {
 			t.Errorf("CountLogs(r_many, 13) = %+v, %v; want none, not capped", c, err)
@@ -248,7 +251,7 @@ func otherLogs(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		kidSpan.Attrs = map[string]any{"gen_ai.operation.name": "invoke_agent", "weft.run.id": "r_flood/0/c1"}
 		flood := append(finishedRun("r_flood"), obsdb.Record{Time: at(2 * time.Second), TraceID: parent.TraceID,
 			SpanID: parent.SpanID, Severity: 9, Body: "the parent's own line", Service: "conf-svc"})
-		for i := 0; i < obsdb.MaxLogCandidates; i++ {
+		for i := 0; i < caps.LogCandidates; i++ {
 			flood = append(flood, obsdb.Record{Time: at(time.Second + time.Duration(i)*time.Microsecond),
 				TraceID: parent.TraceID, SpanID: kidSpan.SpanID, Severity: 9, Body: fmt.Sprintf("child %d", i), Service: "conf-svc"})
 		}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/weftgo/weft/obsdb"
+	"github.com/weftgo/weft/obsdb/internal/caps"
 )
 
 // The run tree (U9.1, obsdb.TreeReader): a run's spans with every
@@ -39,6 +40,15 @@ func treeSpan(spanID, parentSpan, name, runID, parentRun string, ms int) obsdb.S
 	}
 }
 
+// lowerCaps sets each bound to its value for the rest of t (the table
+// runs its cases one at a time: no read runs beside the change).
+func lowerCaps(t *testing.T, to map[*int]int) {
+	t.Helper()
+	for v, n := range to {
+		t.Cleanup(caps.Lower(v, n))
+	}
+}
+
 func runTree(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
 		db := open(t)
@@ -46,6 +56,12 @@ func runTree(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if !ok {
 			t.Skip("backend does not implement obsdb.TreeReader")
 		}
+		// The caps' cases run over lowered caps (internal/caps), so a
+		// past-the-cap tree is tens of rows, not tens of thousands; the
+		// ordering the cases rely on holds as released (the trace cap
+		// above the span cap and its noise). caps_test.go pins the
+		// released values, tree_test.go CapTree at them.
+		lowerCaps(t, map[*int]int{&caps.TreeSpan: 10, &caps.TreeTrace: 50, &caps.TreeRow: 10, &caps.ChildRuns: 10})
 		// director › ops (a Subagent child) › worker (a grandchild, still
 		// running: only its chat span is stored, so its parent comes from
 		// its run row's run_start); app (a sibling run in the same app
@@ -233,11 +249,11 @@ func runTree(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		}
 
 		// A derived run late in a large trace (U9.1-fix2): the subtree is
-		// cut from the trace before the cap, so 10,005 earlier spans of
-		// other work never push it out.
+		// cut from the trace before the cap, so TreeSpanCap + 5 earlier
+		// spans of other work never push it out.
 		const noiseTrace = "0102030405060708090a0b0c0d0e0f25"
-		noise := make([]obsdb.Span, 0, obsdb.TreeSpanCap+6)
-		for i := range obsdb.TreeSpanCap + 5 {
+		noise := make([]obsdb.Span, 0, caps.TreeSpan+6)
+		for i := range caps.TreeSpan + 5 {
 			noise = append(noise, obsdb.Span{
 				TraceID: noiseTrace, SpanID: fmt.Sprintf("0f%014x", i), Name: "GET /noise", Kind: 1,
 				Start: at(time.Duration(i) * time.Microsecond), End: at(time.Duration(i+1) * time.Microsecond),
@@ -261,11 +277,11 @@ func runTree(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if lt.Truncated || lt.TraceTruncated || len(lt.Spans) != 1 || lt.Spans[0].SpanID != late.SpanID {
 			t.Errorf("RunTreeSpans(late derived run) = truncated %v, trace truncated %v, %d spans; want its one span", lt.Truncated, lt.TraceTruncated, len(lt.Spans))
 		}
-		// Past obsdb.TreeTraceCap spans of the trace the read stops and
+		// Past the trace cap (obsdb.TreeTraceCap, lowered) spans of the trace the read stops and
 		// says so: a root after them is not read.
 		const hugeTrace = "0102030405060708090a0b0c0d0e0f26"
-		huge := make([]obsdb.Span, 0, obsdb.TreeTraceCap+2)
-		for i := range obsdb.TreeTraceCap + 1 {
+		huge := make([]obsdb.Span, 0, caps.TreeTrace+2)
+		for i := range caps.TreeTrace + 1 {
 			sp := noise[0]
 			sp.TraceID, sp.SpanID = hugeTrace, fmt.Sprintf("1f%014x", i)
 			sp.Start, sp.End = at(time.Duration(i)*time.Microsecond), at(time.Duration(i+1)*time.Microsecond)
@@ -285,11 +301,11 @@ func runTree(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 				ht.TraceTruncated, ht.Truncated, len(ht.Spans))
 		}
 
-		// The cap: a tree of more than obsdb.TreeSpanCap spans answers its
-		// first TreeSpanCap in start order and says it holds more.
+		// The cap: a tree of more than obsdb.TreeSpanCap (lowered) spans
+		// answers its first TreeSpanCap in start order and says it holds more.
 		const big = "tree_big"
-		many := make([]obsdb.Span, 0, obsdb.TreeSpanCap+1)
-		for i := range obsdb.TreeSpanCap + 1 {
+		many := make([]obsdb.Span, 0, caps.TreeSpan+1)
+		for i := range caps.TreeSpan + 1 {
 			sp := treeSpan(fmt.Sprintf("0d%014x", i), "", "chat", big, "", 10+i)
 			sp.TraceID = "0102030405060708090a0b0c0d0e0f23"
 			many = append(many, sp)
@@ -301,10 +317,10 @@ func runTree(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !capped.Truncated || len(capped.Spans) != obsdb.TreeSpanCap || capped.Spans[0].SpanID != many[0].SpanID ||
-			capped.Spans[obsdb.TreeSpanCap-1].SpanID != many[obsdb.TreeSpanCap-1].SpanID || len(capped.Missing) != 0 {
+		if !capped.Truncated || len(capped.Spans) != caps.TreeSpan || capped.Spans[0].SpanID != many[0].SpanID ||
+			capped.Spans[caps.TreeSpan-1].SpanID != many[caps.TreeSpan-1].SpanID || len(capped.Missing) != 0 {
 			t.Errorf("RunTreeSpans(big) = truncated %v, %d spans, missing %v; want truncated, the first %d",
-				capped.Truncated, len(capped.Spans), capped.Missing, obsdb.TreeSpanCap)
+				capped.Truncated, len(capped.Spans), capped.Missing, caps.TreeSpan)
 		}
 
 		// A run with a row and no span: an empty tree, not an error.
@@ -346,7 +362,7 @@ func runTree(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		// past obsdb.TreeRowCap rows is cut and says so.
 		const wide = "tree_wide"
 		wideRecs := []obsdb.Record{start(wide, "")}
-		for i := range max(obsdb.ChildRunsCap, obsdb.TreeRowCap) + 1 {
+		for i := range max(caps.ChildRuns, caps.TreeRow) + 1 {
 			wideRecs = append(wideRecs, start(fmt.Sprintf("%s/0/c%05d", wide, i), wide))
 		}
 		if err := db.Write(ctx(), obsdb.Batch{Records: wideRecs}); err != nil {

@@ -101,7 +101,7 @@ const chip = (kind: string) =>
       (b) => b.textContent.startsWith(kind) && b.hasAttribute("aria-pressed")
     )!
 const eventRow = (pos: number) =>
-  document.querySelector(`[data-pos="${pos}"] [role="button"]`) as HTMLElement
+  document.querySelector(`[data-pos="${pos}"] [data-ev-toggle]`) as HTMLElement
 
 describe("the run page's URL (G2)", () => {
   it("reopens the raw view's filters and open event from a link", async () => {

@@ -169,18 +169,16 @@ describe("the tabs", () => {
     )
   })
 
-  it("r opens Raw and again goes back to the tab before it; the raw button is a toggle (aria-pressed)", async () => {
+  it("r opens Raw and again goes back to the tab before it; the header has no raw button (UX-F-22: r and the Raw tab remain)", async () => {
     fakeStudio(baseRoutes())
     const el = await mount(BASE)
-    const raw = () =>
-      all(el, ".weft-head button").find((b) => b.textContent === "raw")!
-    expect(raw().getAttribute("aria-pressed")).toBe("false")
+    expect(
+      all(el, ".weft-head button").some((b) => b.textContent === "raw")
+    ).toBe(false)
     dock(el).focus()
     key(dock(el), { key: "r" })
     await settle()
     expect(tab(el, "raw").getAttribute("aria-selected")).toBe("true")
-    expect(raw().getAttribute("aria-pressed")).toBe("true")
-    expect(raw().hasAttribute("aria-expanded")).toBe(false)
     key(dock(el), { key: "r" })
     await settle()
     expect(tab(el, "story").getAttribute("aria-selected")).toBe("true")

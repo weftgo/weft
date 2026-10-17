@@ -64,7 +64,7 @@ export function badge(hole: string, note: BadgeNote = {}): HTMLElement {
   const w = holeWords({ hole, ...note })
   const b = el(
     "span",
-    `weft-badge ${w.tone === "loss" ? "weft-warn-badge" : "weft-info"}`,
+    `weft-badge ${w.tone === "loss" ? "weft-warn-badge" : "weft-tag"}`,
     note.label ?? w.label,
     {
       title: badgeTitle(w.reason, w.fix),

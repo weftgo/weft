@@ -357,11 +357,9 @@ describe("a 5,000-step run scrolls (plan H2)", () => {
       .closest('[role="listitem"]')!
     expect(item.getAttribute("aria-posinset")).toBe("10001")
     expect(item.getAttribute("aria-setsize")).toBe("20002")
-    // nested-interactive is the event row's own (a role=button row
-    // holding its copy button, before H2) — not the list's.
-    const res = await axe.run(table, {
-      rules: { "nested-interactive": { enabled: false } },
-    })
+    // Every rule on: the event row's toggle is a button beside its copy
+    // button, no longer a role=button row around it (U29.5).
+    const res = await axe.run(table)
     expect(res.violations.map((v) => v.id)).toEqual([])
   })
 })

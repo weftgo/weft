@@ -149,9 +149,7 @@ describe("auto (D2): the host page, then the system, then dark", () => {
     const el = await mount(BASE)
     expect(onHtml()).toBeLessThanOrEqual(1)
     const before = onHtml()
-    const raw = Array.from(el.shadowRoot!.querySelectorAll("button")).find(
-      (b) => b.textContent === "raw"
-    )
+    const raw = el.shadowRoot!.querySelector("#weft-tab-raw")
     expect(raw).toBeTruthy()
     click(raw)
     await settle()

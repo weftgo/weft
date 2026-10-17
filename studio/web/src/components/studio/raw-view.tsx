@@ -115,32 +115,33 @@ function EventRow({
       className={`group/ev border-b border-border/60 last:border-0 ${revealed ? "" : "opacity-50"}`}
       data-pos={pos}
     >
-      <div
-        className="grid cursor-pointer grid-cols-[3.5rem_1rem_9.5rem_minmax(0,1fr)_auto] items-center gap-2 px-2 py-1 font-mono text-[12px] hover:bg-secondary/60"
-        onClick={() => setOpen((o) => !o)}
-        role="button"
-        aria-expanded={open}
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault()
-            setOpen((o) => !o)
-          }
-        }}
-      >
-        <span className="text-right text-faint tabular-nums">{pos}</span>
-        <ChevronRight
-          className={`size-3 text-faint transition-transform ${open ? "rotate-90" : ""}`}
-        />
-        <span className={`flex items-center gap-1 truncate ${kindClass(kind)}`}>
-          {eventType(ev)}
-        </span>
-        <span className="flex min-w-0 items-center gap-1.5">
-          {holes?.length ? <HoleBadges holes={holes} /> : null}
-          <span className="truncate text-muted-foreground">
-            {eventSummary(ev, 160)}
+      {/* The toggle is a button beside the row's verbs, not a
+          role=button row around them (axe nested-interactive, U29.5):
+          a subgrid over the first four columns. */}
+      <div className="grid grid-cols-[3.5rem_1rem_9.5rem_minmax(0,1fr)_auto] items-center gap-2 px-2 py-1 font-mono text-[12px] hover:bg-secondary/60">
+        <button
+          type="button"
+          className="col-span-4 grid cursor-pointer grid-cols-subgrid items-center text-left"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          data-ev-toggle
+        >
+          <span className="text-right text-faint tabular-nums">{pos}</span>
+          <ChevronRight
+            className={`size-3 text-faint transition-transform ${open ? "rotate-90" : ""}`}
+          />
+          <span
+            className={`flex items-center gap-1 truncate ${kindClass(kind)}`}
+          >
+            {eventType(ev)}
           </span>
-        </span>
+          <span className="flex min-w-0 items-center gap-1.5">
+            {holes?.length ? <HoleBadges holes={holes} /> : null}
+            <span className="truncate text-muted-foreground">
+              {eventSummary(ev, 160)}
+            </span>
+          </span>
+        </button>
         <span className="flex items-center gap-0.5 opacity-0 group-hover/ev:opacity-100 focus-within:opacity-100">
           {onJump ? (
             <Button

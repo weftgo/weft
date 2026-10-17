@@ -496,7 +496,7 @@ describe("the live tail", () => {
     expect(text(el, ".weft-step-b")).toContain("w19")
     // A user's own action draws at once.
     draw.mockClear()
-    click(button(el, "raw"))
+    click($(el, "#weft-tab-raw"))
     await pause(20)
     expect(draw.mock.calls.length).toBeGreaterThan(0)
     draw.mockRestore()

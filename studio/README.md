@@ -983,13 +983,13 @@ throttle stays.
 | Element | ARIA |
 |---|---|
 | the dock | `role="complementary"`, `aria-label="weft devtools"` |
-| the turn list | `.weft-rows`: `role="list"` (`aria-label="turns"`); each run a `role="listitem"` holding its row button, the selected one `aria-current="true"`; roving tabindex (one row `tabindex="0"`) |
+| the turn list | `.weft-rows`: `role="list"` (`aria-label="turns"`); each run a `role="listitem"` holding its row button, the selected one `aria-current="true"`, its `aria-label` the row in words (`turn 3, parked, <title>, 2 steps, 60 in 30 out, 3h ago`, U29.5); roving tabindex (one row `tabindex="0"`) |
 | the running step's text | `aria-live="polite"` and `aria-busy="true"` while it streams (a reader waits instead of re-reading each draw) — the one live text region |
 | the step-end status | a visually hidden `role="status"` line, always in the dock, written once when the running step ends: `step N finished · n words` |
-| expanders | `aria-expanded` on how to scope, a subagent's summary, and each raw tree node's `▸`/`▾`; the header's `raw` is a toggle, `aria-pressed` (D4: it switches tabs) |
+| expanders | `aria-expanded` on how to scope, a subagent's summary, and each raw tree node's `▸`/`▾`; Raw is a tab (`r` toggles it; the header's `raw` button is gone, U29.5) |
 | the turn view's tabs (D4) | `role="tablist"` (`aria-label="turn views"`) of `role="tab"` buttons with `aria-selected`, one `tabindex="0"`, `aria-controls` on the selected one; the drawn panel `role="tabpanel"`, `aria-labelledby` its tab |
 | the filters | `aria-label="filter turns"`, `aria-label="status"`, `aria-label="filter keys and values"`; `⧉` labelled `copy <key>` |
-| icon buttons | an `aria-label` on each: `⤢`, `⇆`, `◐`, `–`, `↺`, and the pill (its visible words, `weft devtools · 10→4`) |
+| icon buttons | an `aria-label` on each: `⤢`, `⇆`, `◐`, `–`, `↺`, and the pill (its visible words, `weft devtools · 10→4`); from 480 px of dock width `⤢`, `⇆`, `◐` also show their word (`Studio`, `layout`, `theme` — a `data-w` attribute as `:before` content under a container query; each word inside its label) |
 | the switcher, the turn dropdown | `aria-label="conversation"`, `aria-label="turn"` |
 | the experiment drawer | the system prompt, input and edit fields inside their `<label>`; the selects `aria-label`led `model`, `thinking`, `side effects`, `engine`, `thread`; the result pane's `compare with`; tool and breakpoint checkboxes inside their labels; `–` / `↺` labelled; the option lab's fields inside their `<label>`, its checkboxes `aria-label`led `only tools: <tool>` / `park on: <tool>` in a labelled group, each `↺` `reset <knob> to the agent's default` |
 
@@ -1047,8 +1047,8 @@ reachable at <endpoint> · retry`, where `retry` asks again (the line
 reads `checking…` while it does). The
 artifact is built by
 `studio/web/vite.panel.config.ts` (a separate library-mode build), the
-committed `studio/dist/panel/panel.js`, 273,957 B raw / 90,048 B gzip
-(87.9 KiB, the bundle of the ledger's row "U29.4 polish"; 8,256 B — 8.1 KiB — of headroom under
+committed `studio/dist/panel/panel.js`, 273,932 B raw / 90,072 B gzip
+(88.0 KiB, the bundle of the ledger's row "U29.5 polish"; 8,232 B — 8.0 KiB — of headroom under
 the 98,304 B, 96 KiB, cap — figures updated with every ledger row and the release bump, a
 test holding them to the ledger's last row; A5.4 raised it from 80 KiB at 78,098 B, the row "phase 6 review fixes (I)"). It ships fully minified — whitespace,
 identifiers and syntax (plan A5.3.0; before it the es-format library

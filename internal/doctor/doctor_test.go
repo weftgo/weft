@@ -99,6 +99,16 @@ func TestEveryLineMapsToMeta(t *testing.T) {
 	if err := p.Shutdown(ctx); err != nil {
 		t.Fatal(err)
 	}
+	// One refused batch (no ingest token): ingest.last_error / last_at
+	// are omitempty, served once a refusal happened.
+	refused, err := http.Post(ts.URL+"/v1/traces", "application/x-protobuf", strings.NewReader(""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = refused.Body.Close()
+	if refused.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("an ingest POST with no token: %s, want 401", refused.Status)
+	}
 
 	var healthy map[string]any
 	for deadline := time.Now().Add(5 * time.Second); ; time.Sleep(10 * time.Millisecond) {
@@ -181,7 +191,11 @@ func TestEveryLineMapsToMeta(t *testing.T) {
 		t.Errorf("doctor printed checks %v, want Lines' %v:\n%s", labels, want, out)
 	}
 	for _, s := range []string{"content   studio stores content as received; latest run", ": stripped", "fix: drop otel.NoContent()",
-		"db        sqlite /", "weft.json 1 agents, 1 checked against their latest runs: current"} {
+		"db        sqlite /", "weft.json 1 agents, 1 checked against their latest runs: current",
+		// The ingest counters (UX-E-37): the app's batches accepted, the
+		// one refused above, and the refusal with its fix.
+		"warn ingest    ", " OTLP batches accepted, 1 refused; no app reported lost records",
+		"- last refused at ", ": 401 ", "fix: studio's log names each refused batch with its request id"} {
 		if !strings.Contains(out, s) {
 			t.Errorf("output lacks %q:\n%s", s, out)
 		}
@@ -350,7 +364,7 @@ func TestTokenNotRequired(t *testing.T) {
 	open := httptest.NewServer(srv.Handler())
 	t.Cleanup(open.Close)
 	out, err := run(t, open.URL, "some-token", env(nil))
-	if err != nil || strings.Contains(out, "accepted") || !strings.Contains(out, "ok   token     not required (no Token configured)") {
+	if err != nil || strings.Contains(out, "token     accepted") || !strings.Contains(out, "ok   token     not required (no Token configured)") {
 		t.Errorf("token to an open studio: %v\n%s", err, out)
 	}
 }
@@ -362,12 +376,17 @@ func TestControlCharactersStripped(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, `{"auth_required":true,"weft_version":"v\u001b[2J","studio_version":"s","panel_version":"s",`+
 			`"db":{"kind":"sqlite"},"content":{"ingest":"as_received"},`+
-			`"ingest":{"dropped":[{"service":"evil\u001b]0;owned\u0007\rsvc","records":3,"last_heard":"2026-10-13T00:00:00Z"}]}}`)
+			`"ingest":{"dropped":[{"service":"evil\u001b]0;owned\u0007\rsvc","records":3,"last_heard":"2026-10-13T00:00:00Z"}],`+
+			`"accepted":7,"refused":2,"last_error":"401 unauthorized: bad\u001b[2Jtoken","last_at":"2026-10-13T00:00:01Z"}}`)
 	}))
 	t.Cleanup(ts.Close)
 	out, _ := run(t, ts.URL, tok, env(nil))
 	if strings.ContainsAny(out, "\x1b\x07\r") {
 		t.Errorf("control characters reached the output: %q", out)
+	}
+	if !strings.Contains(out, "warn ingest    7 OTLP batches accepted, 2 refused; 1 service(s) reported records lost") ||
+		!strings.Contains(out, "- last refused at 2026-10-13T00:00:01Z: 401 unauthorized: bad [2Jtoken") {
+		t.Errorf("ingest counters = %q, want the counts and the last refusal, its control characters as spaces", out)
 	}
 	if !strings.Contains(out, "evil ]0;owned  svc: 3 records dropped") {
 		t.Errorf("service line = %q, want its control characters as spaces", out)

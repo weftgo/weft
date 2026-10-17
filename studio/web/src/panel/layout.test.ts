@@ -256,10 +256,8 @@ describe("drag and resize (pointer events, clamped to the viewport)", () => {
   it("a press on a header control is the control's, not a drag", async () => {
     fakeStudio(baseRoutes())
     const el = await open()
-    const raw = all(el, ".weft-head button").find(
-      (b) => b.textContent === "raw"
-    )!
-    await drag(raw, 600, 200, -100, -50)
+    const theme = $(el, ".weft-head .weft-theme") as HTMLElement
+    await drag(theme, 600, 200, -100, -50)
     expect(dock(el).style.left).toBe("488px")
   })
 

@@ -2530,6 +2530,7 @@ export class WeftDevtools extends HTMLElement {
       type: "button",
       title: fixed ? said : `${said} — next: ${nextTheme(pick)}`,
       "aria-label": said,
+      "data-w": "theme",
       ...(fixed ? { "aria-disabled": "true" } : {}),
     })
     on(b, "click", () => {
@@ -2900,10 +2901,10 @@ export class WeftDevtools extends HTMLElement {
     const unknown = s.turns.find((r) => derivedUsageUnknown(r))
     const inTok = known.reduce((n, r) => n + r.usage.input_tokens, 0)
     const outTok = known.reduce((n, r) => n + r.usage.output_tokens, 0)
-    const tok =
-      unknown && !known.length
-        ? "—"
-        : `${unknown ? "≥" : ""}${tokens(inTok)}→${tokens(outTok)}`
+    // No turn at all reads "—" too (UX-F-33): nothing known, not 0→0.
+    const tok = !known.length
+      ? "—"
+      : `${unknown ? "≥" : ""}${tokens(inTok)}→${tokens(outTok)}`
     // "turn" is a session's word (UX-F-13): a list no session scopes
     // counts runs; "1 turn" singular.
     const count = s.turns.length
@@ -2958,24 +2959,18 @@ export class WeftDevtools extends HTMLElement {
         rel: "noopener",
         title: "open in Studio (run, and the step you are reading)",
         "aria-label": "open in Studio",
+        "data-w": "Studio",
       })
-      a.style.textDecoration = "none"
       on(a, "click", (e, n) => {
         if (this.handoff((n as HTMLAnchorElement).href)) e.preventDefault()
       })
       h.appendChild(a)
     }
-    const isRaw = this.lay.tab === "raw"
-    const raw = el("button", `weft-btn${isRaw ? " weft-active" : ""}`, "raw", {
-      title: "the JSON, one keypress away (r)",
-      "aria-pressed": String(isRaw),
-    })
-    on(raw, "click", () => this.toggleRaw())
-    h.appendChild(raw)
     const where = this.lay.mode === "float" ? "float" : `dock ${this.lay.side}`
     const lay = el("button", "weft-btn weft-layout", "⇆", {
       title: `layout: ${where} — next (Alt+Shift+W)`,
       "aria-label": `layout: ${where}`,
+      "data-w": "layout",
     })
     on(lay, "click", () => this.cycle())
     h.appendChild(lay)
@@ -3094,7 +3089,7 @@ export class WeftDevtools extends HTMLElement {
         ? `no turns of session ${session} yet`
         : this.model?.publicId
           ? "no turns yet — run your app"
-          : "no runs yet (dev)"
+          : "no runs yet — connect your app (otel.Install)"
       list.appendChild(el("div", "weft-splash", empty))
       return list
     }
@@ -3337,6 +3332,7 @@ export class WeftDevtools extends HTMLElement {
     // 1 decided call", turnTitle over the loaded list as Studio's
     // session page reads it.
     const t = turnTitle(prevTurn(r, turns), r)
+    const when = relativeTime(r.last_seen || r.started)
     const row1 = el("div", "weft-row1", [
       this.resumeChip(chip),
       el("span", "weft-ttl", `${turnLabel(r)} ${clipTitle(t.text)}`.trim(), {
@@ -3353,7 +3349,7 @@ export class WeftDevtools extends HTMLElement {
         },
         chip.key
       ),
-      el("span", "weft-when", relativeTime(r.last_seen || r.started)),
+      el("span", "weft-when", when),
     ])
     const usage = r.usage
     const row2 = el("div", "weft-row2", [
@@ -3381,6 +3377,12 @@ export class WeftDevtools extends HTMLElement {
     if (this.model && hasCapability(this.model.state, "pricing"))
       row2.insertBefore(turnCost(r), row2.lastChild)
     row.append(row1, row2)
+    // Its accessible name in words (UX-F-32), not every field run
+    // together: "turn 3, parked, <title>, 2 steps, 60 in 30 out, 3h ago".
+    row.setAttribute(
+      "aria-label",
+      `${r.turn ? `turn ${r.turn}` : "run"}, ${chip.word}, ${clipTitle(t.text)}, ${stepCount(r.steps)}${derivedUsageUnknown(r) ? "" : `, ${tokens(usage.input_tokens)} in ${tokens(usage.output_tokens)} out`}, ${when}`
+    )
     if (r.err) row.appendChild(el("div", "weft-reason", r.err))
     on(row, "click", () => this.go(this.model?.select(r.id, true)))
     on(row, "focus", (_, n) => this.roveTo(n, r.id))
@@ -3419,7 +3421,6 @@ export class WeftDevtools extends HTMLElement {
       }
     )
     if (known) on(n2, "click", () => this.select(src, n))
-    else n2.style.textDecoration = "none"
     return [n2]
   }
 
@@ -3505,7 +3506,10 @@ export class WeftDevtools extends HTMLElement {
       return main
     }
     if (!s.turn) {
-      main.appendChild(el("div", "weft-splash", "select a turn"))
+      // Only when there is a turn to select (UX-F-33): the list's own
+      // empty line says the rest.
+      if (s.turns.length)
+        main.appendChild(el("div", "weft-splash", "select a turn"))
       return main
     }
     // The turn's tabs (D4): Story (the step story and the playground),
@@ -4875,7 +4879,6 @@ export class WeftDevtools extends HTMLElement {
         rel: "noopener",
         title: SAVE_TEST_TITLE,
       })
-      save.style.textDecoration = "none"
       head.appendChild(save)
     }
     const compare = el("a", "weft-btn", "compare in Studio", {
@@ -4903,7 +4906,6 @@ export class WeftDevtools extends HTMLElement {
     compare.setAttribute("rel", "noopener")
     for (const ev of ["pointerdown", "focus", "click", "contextmenu"])
       on(compare, ev, (_, a) => link(a))
-    compare.style.textDecoration = "none"
     head.appendChild(compare)
     const discard = el("button", "weft-btn", "discard", {
       title: "clear the result pane",
@@ -4943,7 +4945,6 @@ export class WeftDevtools extends HTMLElement {
           "aria-label": label,
           [attr]: "",
         })
-        a.style.textDecoration = "none"
         return a
       }
       line.appendChild(

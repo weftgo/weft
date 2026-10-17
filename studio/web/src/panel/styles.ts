@@ -135,8 +135,9 @@ export const PANEL_CSS = `
   display: flex; align-items: center; gap: 8px;
   padding: 8px 10px; background: var(--weft-bg2);
   border-bottom: 1px solid var(--weft-line);
-  white-space: nowrap; overflow: hidden;
+  white-space: nowrap; overflow: hidden; container-type: inline-size;
 }
+@container (min-width: 480px) { [data-w]:before { content: attr(data-w) " "; } }
 .weft-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--weft-faint); flex: none; }
 .weft-dot.weft-on { background: var(--weft-ok); }
 .weft-dot.weft-run { background: var(--weft-status-run); }
@@ -152,7 +153,7 @@ export const PANEL_CSS = `
   border-radius: var(--weft-radius-sm); font: inherit; font-size: 11px; }
 .weft-btn {
   background: none; border: 1px solid var(--weft-line); border-radius: var(--weft-radius-sm);
-  color: var(--weft-dim); cursor: pointer; padding: 1px 6px; font: inherit;
+  color: var(--weft-dim); cursor: pointer; padding: 1px 6px; font: inherit; text-decoration: none;
 }
 .weft-btn:hover { color: var(--weft-fg); background: var(--weft-bg3); }
 .weft-btn.weft-active { color: var(--weft-accent); border-color: var(--weft-accent); }
@@ -214,7 +215,7 @@ details[data-depth] { margin-left: -10px; }
 .weft-badge.weft-err { border-color: var(--weft-err); color: var(--weft-err); }
 .weft-badge.weft-info { border-color: var(--weft-info); color: var(--weft-info); }
 .weft-holes { display: inline-flex; flex-wrap: wrap; gap: 4px; }
-.weft-chip.weft-tag { border: 1px solid var(--weft-line); color: var(--weft-dim); }
+.weft-tag { border: 1px solid var(--weft-line); color: var(--weft-dim); }
 .weft-unp { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--weft-dim); }
 .weft-tag[data-tone=bad] { color: var(--weft-err); }
 .weft-note { color: var(--weft-dim); border: 1px dashed var(--weft-line); border-radius: var(--weft-radius);
@@ -269,7 +270,7 @@ ${toneRules()}
 .weft-tv { overflow: hidden; text-overflow: ellipsis; }
 .weft-tc { margin-left: auto; flex: none; background: none; border: none; color: var(--weft-dim); cursor: pointer; font: inherit; }
 .weft-tmore { margin: 1px 0; }
-.weft-rq-steps, .weft-rq-head { margin-bottom: 6px; align-items: center; }
+.weft-rq-head { margin-bottom: 6px; align-items: center; }
 .weft-rq-row { display: flex; gap: 8px; margin-top: 7px; }
 .weft-rq-k { width: 76px; flex: none; color: var(--weft-dim); }
 .weft-rq-v { flex: 1; min-width: 0; }

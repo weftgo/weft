@@ -610,7 +610,7 @@ describe("the redraw keeps what is the user's", () => {
   it("the raw view (D4: the Raw tab) and the shortcuts overlay sit inside the dock, not over the page", async () => {
     fakeStudio(baseRoutes())
     const el = await mount()
-    click(button(el, "raw"))
+    click($(el, "#weft-tab-raw"))
     $(el, ".weft-dock")!.dispatchEvent(
       new KeyboardEvent("keydown", { key: "?", bubbles: true, composed: true })
     )

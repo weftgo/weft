@@ -627,10 +627,8 @@ describe("the rung-1 surfaces against a fake Studio", () => {
       "data-public-id": "pub_orders",
       "data-open": "true",
     })
-    const rawBtn = all(el, ".weft-head .weft-btn").find(
-      (b) => b.textContent === "raw"
-    ) as HTMLElement
-    rawBtn.click()
+    // The Raw tab (the header's raw button is gone, UX-F-22).
+    ;($(el, "#weft-tab-raw") as HTMLElement).click()
     await idle()
     const raw = $(el, ".weft-raw")?.textContent ?? ""
     expect(raw).toContain('"run_start"')

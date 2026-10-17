@@ -340,14 +340,14 @@ describe("ARIA", () => {
     ).toEqual([])
   })
 
-  it("aria-expanded follows the expanders: how to scope (a child run's: subagents.test); raw is a toggle (aria-pressed, D4: it switches tabs)", async () => {
+  it("aria-expanded follows the expanders: how to scope (a child run's: subagents.test); Raw is a tab, not an expander", async () => {
     fakeStudio(baseRoutes())
     const el = await mount(BASE)
-    const raw = () => all(el, "button").find((b) => b.textContent === "raw")!
-    expect(raw().getAttribute("aria-pressed")).toBe("false")
+    const raw = () => $(el, "#weft-tab-raw")!
+    expect(raw().getAttribute("aria-selected")).toBe("false")
     click(raw())
     await settle()
-    expect(raw().getAttribute("aria-pressed")).toBe("true")
+    expect(raw().getAttribute("aria-selected")).toBe("true")
     expect(raw().hasAttribute("aria-expanded")).toBe(false)
     expect($(el, ".weft-raw")).not.toBeNull()
     // The fallback's how-to-scope expander.

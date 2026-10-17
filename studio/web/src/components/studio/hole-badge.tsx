@@ -56,7 +56,7 @@ export function HoleBadge({
       data-hole={hole}
       className={`font-mono text-[10px] font-normal ${
         w.tone === "note"
-          ? "border-thread/40 text-muted-foreground"
+          ? "border-border text-muted-foreground"
           : "border-ev-error/40 text-ev-error"
       }`}
       title={w.fix ? `${w.reason} — fix: ${w.fix}` : w.reason}

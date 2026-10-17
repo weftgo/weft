@@ -36,6 +36,22 @@ describe("HoleBadge", () => {
     expect(badge("gap").textContent).toBe(b.textContent)
   })
 
+  it("a note-toned hole is a neutral outline, the panel's too; a loss keeps the error outline (UX-F-21)", () => {
+    expect(HOLES.stripped.tone).toBe("note")
+    const { container } = render(
+      <>
+        <HoleBadge hole="stripped" />
+        <HoleBadge hole="gap" />
+      </>
+    )
+    const note = container.querySelector<HTMLElement>('[data-hole="stripped"]')!
+    expect(note.className).toContain("border-border text-muted-foreground")
+    expect(note.className).not.toContain("border-thread")
+    expect(badge("stripped").className).toContain("weft-tag")
+    const loss = container.querySelector<HTMLElement>('[data-hole="gap"]')!
+    expect(loss.className).toContain("border-ev-error/40 text-ev-error")
+  })
+
   it("a note stays visible between the label and the hidden words", () => {
     const { container } = render(
       <HoleBadge hole="truncated" note="2.0 KiB cut" />

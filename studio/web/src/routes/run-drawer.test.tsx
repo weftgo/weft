@@ -227,11 +227,15 @@ describe("the drawer on opt.usage-limit (the Done line)", () => {
     await waitFor(() =>
       expect(router.state.location.search).toMatchObject({ tab: "raw" })
     )
-    // The tablist alone: the Raw panel's event rows are the events
-    // explorer's own (not this drawer's tabs).
-    const res = await axe.run(
-      drawer().querySelector<HTMLElement>("[role=tablist]")!
+    // The whole drawer on its Raw OTel tab, the events explorer's rows
+    // included: each row's toggle is a button beside its verbs, not a
+    // role=button row around them (U29.5: axe nested-interactive).
+    await waitFor(() =>
+      expect(
+        document.querySelector('[data-drawer-panel="raw"] [data-ev-toggle]')
+      ).toBeTruthy()
     )
+    const res = await axe.run(drawer())
     expect(
       res.violations.map(
         (v) =>

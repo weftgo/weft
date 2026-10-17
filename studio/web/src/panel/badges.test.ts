@@ -64,7 +64,7 @@ describe("badge (the one renderer)", () => {
       expect(b.querySelector(".weft-sr")?.textContent).toBe(` — ${words}`)
       expect(b.textContent).toBe(`${n.label} — ${words}`)
       expect(b.className).toContain(
-        n.tone === "loss" ? "weft-warn-badge" : "weft-info"
+        n.tone === "loss" ? "weft-warn-badge" : "weft-tag"
       )
     }
   })

@@ -57,7 +57,6 @@ export function stepDiffBlock(doc: DiffDoc, base: string): HTMLElement {
     rel: "noopener",
     "aria-label": `open the step compare of ${v.a.run_id} and ${v.b.run_id} in Studio`,
   })
-  link.style.textDecoration = "none"
   box.appendChild(
     el("div", "weft-diff-h", [
       document.createTextNode(`steps vs source: ${summaryWords(v)} `),

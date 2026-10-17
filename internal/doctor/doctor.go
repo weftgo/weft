@@ -42,7 +42,7 @@ var Lines = []Line{
 	{"token", []string{"status", "auth_required"}},
 	{"db", []string{"db.kind", "db.path", "db.size"}},
 	{"content", []string{"content.ingest", "content.latest.run_id", "content.latest.mark", "content.latest.note", "content.latest.fix", "content.error"}},
-	{"ingest", []string{"ingest.dropped"}},
+	{"ingest", []string{"ingest.dropped", "ingest.accepted", "ingest.refused", "ingest.last_error", "ingest.last_at"}},
 	{"runtimes", []string{"runtimes", "capabilities", "env:WEFT_ENV", "env:WEFT_STUDIO_URL"}},
 	{"panel", []string{"panel_version", "studio_version"}},
 	{"weft.json", []string{"has_manifest", "manifest_check.source", "manifest_check.agents", "manifest_check.checked", "manifest_check.stale", "manifest_check.error"}},
@@ -75,6 +75,13 @@ type meta struct {
 			Records   int64     `json:"records"`
 			LastHeard time.Time `json:"last_heard"`
 		} `json:"dropped"`
+		// Accepted and Refused count the OTLP batches Studio answered
+		// 2xx and 4xx/5xx since it started, LastError / LastAt the last
+		// refusal (UX-E-37): nil from a Studio older than them.
+		Accepted  *int64     `json:"accepted"`
+		Refused   *int64     `json:"refused"`
+		LastError string     `json:"last_error"`
+		LastAt    *time.Time `json:"last_at"`
 	} `json:"ingest"`
 	Runtimes      int `json:"runtimes"`
 	ManifestCheck *struct {
@@ -254,19 +261,41 @@ func (p *printer) content(m meta) {
 	}
 }
 
-// ingest prints the ingest health: the services whose heartbeats said
-// their destination lost records on the way (weft.records.dropped). A
-// warning, not a failure: the runs say which of theirs are missing (the
-// gap badge, "N of M events were lost").
+// ingest prints the ingest health: the OTLP batches this Studio
+// accepted and refused (and the last refusal), then the services whose
+// heartbeats said their destination lost records on the way
+// (weft.records.dropped). A warning, not a failure: the runs say which
+// of theirs are missing (the gap badge, "N of M events were lost").
 func (p *printer) ingest(m meta) {
-	switch {
-	case m.Ingest == nil:
+	if m.Ingest == nil {
 		p.line(ok, "ingest", "not served (no ingest.dropped): a studio older than ingest health, or a panel token — it is the dev token's")
-	case len(m.Ingest.Dropped) == 0:
-		p.line(ok, "ingest", "no app reported lost records (weft.records.dropped on its heartbeats and run brackets)")
-	default:
-		p.line(warn, "ingest", "%d service(s) reported records lost on the way here", len(m.Ingest.Dropped))
-		for _, d := range m.Ingest.Dropped {
+		return
+	}
+	in := m.Ingest
+	counts := ""
+	refused := in.Refused != nil && *in.Refused > 0
+	if in.Accepted != nil && in.Refused != nil {
+		counts = fmt.Sprintf("%d OTLP batches accepted, %d refused; ", *in.Accepted, *in.Refused)
+	}
+	status := ok
+	if refused || len(in.Dropped) > 0 {
+		status = warn
+	}
+	if len(in.Dropped) == 0 {
+		p.line(status, "ingest", "%sno app reported lost records (weft.records.dropped on its heartbeats and run brackets)", counts)
+	} else {
+		p.line(status, "ingest", "%s%d service(s) reported records lost on the way here", counts, len(in.Dropped))
+	}
+	if in.LastError != "" {
+		at := ""
+		if in.LastAt != nil {
+			at = " at " + in.LastAt.Format(time.RFC3339)
+		}
+		p.sub("last refused%s: %s", at, in.LastError)
+		p.sub("fix: studio's log names each refused batch with its request id (WARN \"studio: ingest batch refused\"); a 401 is the app's ingest token (otel.Studio(url, token), studio.IngestToken)")
+	}
+	if len(in.Dropped) > 0 {
+		for _, d := range in.Dropped {
 			svc := d.Service
 			if svc == "" {
 				svc = "(no service.name)"

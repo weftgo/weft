@@ -201,9 +201,10 @@ clause d "$dok" "make studio-check passes; every panel delta in the ledger (tota
   "Studio dist $kib KiB gzipped (≤ 700: $([ "$kib" -le 700 ] && echo yes || echo NO)); studio/dist + npm left clean by the rebuild: $([ "$dirty" = 0 ] && echo yes || echo "NO ($dirty paths)")"
 
 # ---- (k) the principle gate -------------------------------------------
-n=$(cd "$REPO" && go list -deps ./core | grep -c weft/)
-clause k1 "$([ "$n" = 2 ] && echo PASS || echo FAIL)" "core's imports unchanged: go list -deps ./core | grep -c weft/ = 2" \
-  "$n — $(cd "$REPO" && go list -deps ./core | grep weft/ | tr '\n' ' ')"
+n=$(cd "$REPO" && go list -deps ./core | grep weft/ | grep -vc '^github.com/weftgo/weft/core\(/\|$\)')
+gm=$(cd "$REPO" && git diff --quiet v0.16.0 -- core/go.mod core/go.sum && echo unchanged || echo changed)
+clause k1 "$([ "$n" = 0 ] && [ "$gm" = unchanged ] && echo PASS || echo FAIL)" "core imports nothing above the core module (AGENTS rule 6): packages outside github.com/weftgo/weft/core in its deps = 0, core/go.mod + go.sum unchanged since v0.16.0" \
+  "$n outside · go.mod $gm — $(cd "$REPO" && go list -deps ./core | grep weft/ | tr '\n' ' ')"
 
 T='TestReportingHookChangesNothingModelVisible|TestRequestRecordsChangeNothingModelVisible|TestCompactionViewChangesNothingModelVisible|TestRequestFactsOffComputeNothing'
 res=$(cd "$GO_TEST_DIR/core" && go test -count=1 -run "^($T)\$" -v . 2>&1 | grep -E '^(--- |ok|FAIL|PASS)' | tr '\n' ' ')

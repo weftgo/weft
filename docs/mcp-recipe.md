@@ -15,7 +15,7 @@ claude mcp add weft -- weft mcp                      # Claude Code: the tools ap
 ```
 
 `weft mcp` ships since v0.15.0: `go install github.com/weftgo/weft/cmd/weft@latest`
-(v0.16.0 at the time of writing) has it, as does `go install ./cmd/weft`
+(v0.17.0 at the time of writing) has it, as does `go install ./cmd/weft`
 from a checkout.
 
 `weft studio` (or `weft dev`, which runs Studio and your app together)
@@ -192,7 +192,7 @@ diff a1100000000000000000000000000001 → a1100004000000000000000000000001: 1 ch
 ```text
 > meta {}
 Studio at http://127.0.0.1:33933: capabilities requests, steps, export, logs, diff, traces, search, pricing, delete, proposals, live, ingest, auth, handoff, panel-config
-{"weft_version":"v0.16.0","studio_version":"v0.16.0","panel_version":"v0.16.0","db":{"kind":"sqlite","path":"/tmp/TestMCPLiveCheck3582215505/001/weft.db","size":922888},"title":"weft studio","has_manifest":false,"ingest_open":true,"interrup…
+{"weft_version":"v0.17.0","studio_version":"v0.17.0","panel_version":"v0.17.0","db":{"kind":"sqlite","path":"/tmp/TestMCPLiveCheck3582215505/001/weft.db","size":922888},"title":"weft studio","has_manifest":false,"ingest_open":true,"interrup…
 ```
 
 `capabilities_off` in the JSON names each capability that is off and

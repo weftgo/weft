@@ -35,6 +35,7 @@ export function HoleBadge({
   bytes,
   cause,
   note,
+  count,
   detail = false,
 }: {
   hole: string
@@ -46,9 +47,12 @@ export function HoleBadge({
   cause?: string
   /** Visible words after the label: what this instance lost. */
   note?: string
+  /** hidden: the runs it stands for — holeWords' note when no note. */
+  count?: number
   detail?: boolean
 }) {
-  const w = holeWords({ hole, reason, fix, bytes, cause })
+  const w = holeWords({ hole, reason, fix, bytes, cause, count })
+  note ??= w.note
   const words = `${w.reason}${w.fix ? ` — fix: ${w.fix}` : ""}`
   const badge = (
     <Badge

@@ -89,6 +89,9 @@ function pct(v: number, [lo, hi]: [number, number]): number {
   return ((v - lo) / w) * 100
 }
 
+/** The tree's columns, its header row's too: name, track, figure. */
+const COLS = "grid-cols-[minmax(12rem,17rem)_minmax(0,1fr)_3.5rem]"
+
 export function Waterfall({
   spans,
   domain,
@@ -253,275 +256,284 @@ export function Waterfall({
   return (
     <div
       ref={scroller}
-      className={`waterfall grid grid-cols-[minmax(12rem,17rem)_minmax(0,1fr)_3.5rem] overflow-auto rounded-lg border bg-background font-mono text-[11px] outline-none focus-visible:ring-2 focus-visible:ring-ring/50 ${className}`}
-      role="tree"
-      aria-label={label}
+      className={`waterfall overflow-auto rounded-lg border bg-background font-mono text-[11px] ${className}`}
       data-virtual={virtual ? "" : undefined}
-      tabIndex={0}
-      onKeyDown={onKey}
     >
-      {/* axis */}
-      <div className="sticky top-0 z-10 flex items-center gap-2 border-b bg-secondary/80 px-2 py-1 text-[10px] tracking-wide text-faint uppercase backdrop-blur">
-        {head}
-        {/* Under 480 px the words become two icons (UX-F-35): the
+      {/* The axis: a sticky header row outside the tree (axe
+          aria-required-children: a tree owns treeitems alone), on the
+          tree's own columns. */}
+      <div className={`sticky top-0 z-10 grid ${COLS}`} data-waterfall-head>
+        <div className="flex items-center gap-2 border-b bg-secondary/80 px-2 py-1 text-[10px] tracking-wide text-faint uppercase backdrop-blur">
+          {head}
+          {/* Under 480 px the words become two icons (UX-F-35): the
             header never runs into the time axis beside it. */}
-        <span
-          className="ml-auto flex items-center gap-1 tracking-normal normal-case"
-          data-fold-all
-        >
-          <button
-            type="button"
-            className="hover:text-foreground"
-            aria-label="expand every row"
-            title="expand every row"
-            onClick={() => setFolded(new Set())}
+          <span
+            className="ml-auto flex items-center gap-1 tracking-normal normal-case"
+            data-fold-all
           >
-            <span className="max-[480px]:hidden">expand</span>
-            <ChevronsUpDown className="hidden size-3 max-[480px]:block" />
-          </button>
-          <span className="max-[480px]:hidden" aria-hidden>
-            ·
-          </span>
-          <button
-            type="button"
-            className="hover:text-foreground"
-            aria-label="collapse every row"
-            title="collapse every row"
-            onClick={() =>
-              setFolded(
-                new Set(
-                  spans
-                    .filter(
-                      (s) => s.kind !== "run" && !own(s) && children.has(s.id)
-                    )
-                    .map((s) => s.id)
+            <button
+              type="button"
+              className="hover:text-foreground"
+              aria-label="expand every row"
+              title="expand every row"
+              onClick={() => setFolded(new Set())}
+            >
+              <span className="max-[480px]:hidden">expand</span>
+              <ChevronsUpDown className="hidden size-3 max-[480px]:block" />
+            </button>
+            <span className="max-[480px]:hidden" aria-hidden>
+              ·
+            </span>
+            <button
+              type="button"
+              className="hover:text-foreground"
+              aria-label="collapse every row"
+              title="collapse every row"
+              onClick={() =>
+                setFolded(
+                  new Set(
+                    spans
+                      .filter(
+                        (s) => s.kind !== "run" && !own(s) && children.has(s.id)
+                      )
+                      .map((s) => s.id)
+                  )
                 )
-              )
-            }
-          >
-            <span className="max-[480px]:hidden">collapse</span>
-            <ChevronsDownUp className="hidden size-3 max-[480px]:block" />
-          </button>
-        </span>
+              }
+            >
+              <span className="max-[480px]:hidden">collapse</span>
+              <ChevronsDownUp className="hidden size-3 max-[480px]:block" />
+            </button>
+          </span>
+        </div>
+        <div
+          className="h-6 cursor-pointer border-b bg-secondary/80 backdrop-blur"
+          onClick={seekAt}
+          title={`${unit} position — click to seek`}
+        >
+          <div className="relative h-full">
+            {ticks.map((t, i) => (
+              <span
+                key={t}
+                // Two ticks under 480 px, the first and the last (UX-F-35).
+                data-tick={i === 0 || i === ticks.length - 1 ? "end" : "mid"}
+                className={`absolute top-1 text-[10px] text-faint tabular-nums ${
+                  i === 0
+                    ? "translate-x-1"
+                    : i === ticks.length - 1
+                      ? "-translate-x-full pr-1"
+                      : "-translate-x-1/2 max-[480px]:hidden"
+                }`}
+                style={{
+                  left: `${i === ticks.length - 1 ? 100 : pct(t, domain)}%`,
+                }}
+              >
+                {time && t ? took(t) : t}
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="border-b bg-secondary/80 px-2 py-1 text-right text-[10px] tracking-wide text-faint uppercase backdrop-blur">
+          {unit === "event" ? "events" : unit}
+        </div>
       </div>
       <div
-        className="sticky top-0 z-10 h-6 cursor-pointer border-b bg-secondary/80 backdrop-blur"
-        onClick={seekAt}
-        title={`${unit} position — click to seek`}
+        className={`grid ${COLS} outline-none focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:ring-inset`}
+        role="tree"
+        aria-label={label}
+        tabIndex={0}
+        onKeyDown={onKey}
       >
-        <div className="relative h-full">
-          {ticks.map((t, i) => (
-            <span
-              key={t}
-              // Two ticks under 480 px, the first and the last (UX-F-35).
-              data-tick={i === 0 || i === ticks.length - 1 ? "end" : "mid"}
-              className={`absolute top-1 text-[10px] text-faint tabular-nums ${
-                i === 0
-                  ? "translate-x-1"
-                  : i === ticks.length - 1
-                    ? "-translate-x-full pr-1"
-                    : "-translate-x-1/2 max-[480px]:hidden"
-              }`}
-              style={{
-                left: `${i === ticks.length - 1 ? 100 : pct(t, domain)}%`,
-              }}
-            >
-              {time && t ? took(t) : t}
-            </span>
-          ))}
-        </div>
-      </div>
-      <div className="sticky top-0 z-10 border-b bg-secondary/80 px-2 py-1 text-right text-[10px] tracking-wide text-faint uppercase backdrop-blur">
-        {unit === "event" ? "events" : unit}
-      </div>
-
-      {shown.map((sp, n) => {
-        const mine = own(sp)
-        const kids = mine ? 1 : (children.get(sp.id) ?? 0)
-        const isFolded = mine ? !!sp.collapsed : folded.has(sp.id)
-        const left = pct(sp.from, domain)
-        const end = sp.to ?? hi
-        const width = Math.max(0.6, pct(end + 1, domain) - left)
-        const selected = selectedId === sp.id
-        const revealed = sp.from < at
-        const dim = !!dimmed?.has(sp.key)
-        const gap = pads.before[n] ?? 0
-        return (
-          <Fragment key={sp.id}>
-            {gap > 0 ? (
-              <div
-                className="col-span-3"
-                style={{ height: gap }}
-                aria-hidden
-                data-spacer
-              />
-            ) : null}
-            <div
-              className="group/row contents"
-              role="treeitem"
-              aria-selected={selected}
-              aria-expanded={kids > 0 ? !isFolded : undefined}
-              aria-level={sp.depth + 1}
-              aria-setsize={siblings.count.get(sp.parent ?? "")}
-              aria-posinset={siblings.at.get(sp.id)}
-              data-span={sp.key}
-              data-kind={sp.kind}
-              data-tone={sp.tone}
-              data-critical={sp.critical ? "" : undefined}
-              data-lane={sp.lane}
-              data-lanes={sp.lanes}
-              data-child-run={sp.childRun}
-              data-dimmed={dim ? "" : undefined}
-              data-untimed={sp.untimed}
-            >
-              <div
-                ref={selected ? selRef : undefined}
-                className={`flex min-w-0 cursor-pointer items-center gap-1 border-b border-border/60 py-0.5 pr-2 ${cell(selected)} ${
-                  selected ? "shadow-[inset_2px_0_0_var(--thread)]" : ""
-                } ${revealed && !dim ? "" : "opacity-40"}`}
-                style={{ paddingLeft: `${0.4 + sp.depth * 0.8}rem` }}
-                onClick={() => onSelect?.(sp)}
-                title={`${sp.label}${sp.sub ? ` — ${sp.sub}` : ""}`}
-              >
-                {kids > 0 ? (
-                  <button
-                    type="button"
-                    className="flex size-4 shrink-0 items-center justify-center text-faint hover:text-foreground"
-                    tabIndex={-1}
-                    aria-label={isFolded ? "expand" : "collapse"}
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      if (mine) onExpand!(sp)
-                      else toggle(sp.id)
-                    }}
-                  >
-                    <ChevronRight
-                      className={`size-3 transition-transform ${isFolded ? "" : "rotate-90"}`}
-                    />
-                  </button>
-                ) : (
-                  <span className="size-4 shrink-0" />
-                )}
-                <span
-                  className={`w-3 shrink-0 text-center text-[10px] ${toneText[sp.tone]}`}
+        {shown.map((sp, n) => {
+          const mine = own(sp)
+          const kids = mine ? 1 : (children.get(sp.id) ?? 0)
+          const isFolded = mine ? !!sp.collapsed : folded.has(sp.id)
+          const left = pct(sp.from, domain)
+          const end = sp.to ?? hi
+          const width = Math.max(0.6, pct(end + 1, domain) - left)
+          const selected = selectedId === sp.id
+          const revealed = sp.from < at
+          const dim = !!dimmed?.has(sp.key)
+          const gap = pads.before[n] ?? 0
+          return (
+            <Fragment key={sp.id}>
+              {gap > 0 ? (
+                <div
+                  className="col-span-3"
+                  style={{ height: gap }}
                   aria-hidden
-                >
-                  {KIND_ICON[sp.kind]}
-                </span>
-                {(() => {
-                  const cls = `shrink-0 truncate ${toneText[sp.tone]} ${
-                    sp.kind === "run" || sp.kind === "step" ? "font-medium" : ""
-                  }`
-                  const href = hrefOf?.(sp)
-                  if (!href)
-                    return (
-                      <span className={cls} style={{ maxWidth: "8rem" }}>
-                        {sp.label}
-                      </span>
-                    )
-                  // Out of the tab order: the tree is one stop, its rows
-                  // walked with the arrows (the selection is the URL).
-                  return (
-                    <a
-                      href={href}
-                      tabIndex={-1}
-                      data-span-link
-                      className={`${cls} hover:underline`}
-                      style={{ maxWidth: "8rem" }}
-                      onClick={(e) => {
-                        if (
-                          e.metaKey ||
-                          e.ctrlKey ||
-                          e.shiftKey ||
-                          e.altKey ||
-                          e.button !== 0
-                        ) {
-                          e.stopPropagation()
-                          return
-                        }
-                        e.preventDefault()
-                      }}
-                    >
-                      {sp.label}
-                    </a>
-                  )
-                })()}
-                {sp.badge ? (
-                  <span
-                    className={`max-w-28 shrink-0 truncate rounded-full border px-1.5 text-[9.5px] leading-4 ${badgeTone[sp.tone]}`}
-                    title={sp.badge}
-                  >
-                    {sp.badge}
-                  </span>
-                ) : null}
-                {sp.sub ? (
-                  <span className="min-w-0 truncate text-faint">{sp.sub}</span>
-                ) : null}
-                {trail?.(sp)}
-              </div>
+                  data-spacer
+                />
+              ) : null}
               <div
-                className={`waterfall-track relative h-6 cursor-pointer border-b border-border/60 ${cell(selected)} ${dim ? "opacity-40" : ""}`}
-                onClick={seekAt}
+                className="group/row contents"
+                role="treeitem"
+                aria-selected={selected}
+                aria-expanded={kids > 0 ? !isFolded : undefined}
+                aria-level={sp.depth + 1}
+                aria-setsize={siblings.count.get(sp.parent ?? "")}
+                aria-posinset={siblings.at.get(sp.id)}
+                data-span={sp.key}
+                data-kind={sp.kind}
+                data-tone={sp.tone}
+                data-critical={sp.critical ? "" : undefined}
+                data-lane={sp.lane}
+                data-lanes={sp.lanes}
+                data-child-run={sp.childRun}
+                data-dimmed={dim ? "" : undefined}
+                data-untimed={sp.untimed}
               >
                 <div
-                  className={`absolute rounded-[2px] ${toneBar[sp.tone]} ${
-                    sp.to === null ? "waterfall-open" : ""
-                  } ${
-                    sp.kind === "run" || sp.kind === "subagent"
-                      ? "top-2.5 h-1"
-                      : "top-1.5 h-3"
-                  } ${
-                    // The critical path (U8.2): a thin accent under the bar.
-                    sp.critical ? "shadow-[0_2px_0_0_var(--thread)]" : ""
-                  }`}
-                  style={{ left: `${left}%`, width: `${width}%` }}
-                />
-                {playhead !== null && at <= hi ? (
-                  <>
-                    <div
-                      className="pointer-events-none absolute inset-y-0 right-0 bg-background/70"
-                      style={{ left: `${pct(at, domain)}%` }}
-                    />
-                    <div
-                      className="pointer-events-none absolute inset-y-0 w-0.5 bg-thread"
-                      style={{ left: `${pct(at, domain)}%` }}
-                    />
-                  </>
-                ) : null}
+                  ref={selected ? selRef : undefined}
+                  className={`flex min-w-0 cursor-pointer items-center gap-1 border-b border-border/60 py-0.5 pr-2 ${cell(selected)} ${
+                    selected ? "shadow-[inset_2px_0_0_var(--thread)]" : ""
+                  } ${revealed && !dim ? "" : "opacity-40"}`}
+                  style={{ paddingLeft: `${0.4 + sp.depth * 0.8}rem` }}
+                  onClick={() => onSelect?.(sp)}
+                  title={`${sp.label}${sp.sub ? ` — ${sp.sub}` : ""}`}
+                >
+                  {kids > 0 ? (
+                    <button
+                      type="button"
+                      className="flex size-4 shrink-0 items-center justify-center text-faint hover:text-foreground"
+                      tabIndex={-1}
+                      aria-label={isFolded ? "expand" : "collapse"}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        if (mine) onExpand!(sp)
+                        else toggle(sp.id)
+                      }}
+                    >
+                      <ChevronRight
+                        className={`size-3 transition-transform ${isFolded ? "" : "rotate-90"}`}
+                      />
+                    </button>
+                  ) : (
+                    <span className="size-4 shrink-0" />
+                  )}
+                  <span
+                    className={`w-3 shrink-0 text-center text-[10px] ${toneText[sp.tone]}`}
+                    aria-hidden
+                  >
+                    {KIND_ICON[sp.kind]}
+                  </span>
+                  {(() => {
+                    const cls = `shrink-0 truncate ${toneText[sp.tone]} ${
+                      sp.kind === "run" || sp.kind === "step"
+                        ? "font-medium"
+                        : ""
+                    }`
+                    const href = hrefOf?.(sp)
+                    if (!href)
+                      return (
+                        <span className={cls} style={{ maxWidth: "8rem" }}>
+                          {sp.label}
+                        </span>
+                      )
+                    // Out of the tab order: the tree is one stop, its rows
+                    // walked with the arrows (the selection is the URL).
+                    return (
+                      <a
+                        href={href}
+                        tabIndex={-1}
+                        data-span-link
+                        className={`${cls} hover:underline`}
+                        style={{ maxWidth: "8rem" }}
+                        onClick={(e) => {
+                          if (
+                            e.metaKey ||
+                            e.ctrlKey ||
+                            e.shiftKey ||
+                            e.altKey ||
+                            e.button !== 0
+                          ) {
+                            e.stopPropagation()
+                            return
+                          }
+                          e.preventDefault()
+                        }}
+                      >
+                        {sp.label}
+                      </a>
+                    )
+                  })()}
+                  {sp.badge ? (
+                    <span
+                      className={`max-w-28 shrink-0 truncate rounded-full border px-1.5 text-[9.5px] leading-4 ${badgeTone[sp.tone]}`}
+                      title={sp.badge}
+                    >
+                      {sp.badge}
+                    </span>
+                  ) : null}
+                  {sp.sub ? (
+                    <span className="min-w-0 truncate text-faint">
+                      {sp.sub}
+                    </span>
+                  ) : null}
+                  {trail?.(sp)}
+                </div>
+                <div
+                  className={`waterfall-track relative h-6 cursor-pointer border-b border-border/60 ${cell(selected)} ${dim ? "opacity-40" : ""}`}
+                  onClick={seekAt}
+                >
+                  <div
+                    className={`absolute rounded-[2px] ${toneBar[sp.tone]} ${
+                      sp.to === null ? "waterfall-open" : ""
+                    } ${
+                      sp.kind === "run" || sp.kind === "subagent"
+                        ? "top-2.5 h-1"
+                        : "top-1.5 h-3"
+                    } ${
+                      // The critical path (U8.2): a thin accent under the bar.
+                      sp.critical ? "shadow-[0_2px_0_0_var(--thread)]" : ""
+                    }`}
+                    style={{ left: `${left}%`, width: `${width}%` }}
+                  />
+                  {playhead !== null && at <= hi ? (
+                    <>
+                      <div
+                        className="pointer-events-none absolute inset-y-0 right-0 bg-background/70"
+                        style={{ left: `${pct(at, domain)}%` }}
+                      />
+                      <div
+                        className="pointer-events-none absolute inset-y-0 w-0.5 bg-thread"
+                        style={{ left: `${pct(at, domain)}%` }}
+                      />
+                    </>
+                  ) : null}
+                </div>
+                <div
+                  className={`cursor-pointer border-b border-border/60 px-2 py-1 text-right text-[10px] text-faint tabular-nums ${cell(selected)}`}
+                  onClick={() => onSelect?.(sp)}
+                  title={time ? `+${took(sp.from)}` : undefined}
+                >
+                  {sp.untimed
+                    ? "—"
+                    : time
+                      ? sp.to === null
+                        ? "…"
+                        : took(sp.to - sp.from)
+                      : sp.to === null
+                        ? `${sp.from}–`
+                        : sp.from === sp.to
+                          ? `${sp.from}`
+                          : `${sp.from}–${sp.to}`}
+                </div>
               </div>
-              <div
-                className={`cursor-pointer border-b border-border/60 px-2 py-1 text-right text-[10px] text-faint tabular-nums ${cell(selected)}`}
-                onClick={() => onSelect?.(sp)}
-                title={time ? `+${took(sp.from)}` : undefined}
-              >
-                {sp.untimed
-                  ? "—"
-                  : time
-                    ? sp.to === null
-                      ? "…"
-                      : took(sp.to - sp.from)
-                    : sp.to === null
-                      ? `${sp.from}–`
-                      : sp.from === sp.to
-                        ? `${sp.from}`
-                        : `${sp.from}–${sp.to}`}
-              </div>
-            </div>
-          </Fragment>
-        )
-      })}
-      {pads.after > 0 ? (
-        <div
-          className="col-span-3"
-          style={{ height: pads.after }}
-          aria-hidden
-          data-spacer
-        />
-      ) : null}
+            </Fragment>
+          )
+        })}
+        {pads.after > 0 ? (
+          <div
+            className="col-span-3"
+            style={{ height: pads.after }}
+            aria-hidden
+            data-spacer
+          />
+        ) : null}
+      </div>
       {spans.length === 0 ? (
-        <div className="col-span-3 py-6 text-center text-faint">
-          no spans yet
-        </div>
+        <div className="py-6 text-center text-faint">no spans yet</div>
       ) : null}
     </div>
   )

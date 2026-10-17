@@ -294,10 +294,29 @@ func scopeKids(pub string, kids []obsdb.RunRow) ([]obsdb.RunRow, int) {
 func hiddenChildrenHole(n int) stepHole {
 	return stepHole{
 		Hole:   string(obsdb.HoleHidden),
-		Reason: fmt.Sprintf("%d child runs carry another public id, or none: a panel token reads its own public id's runs, so they are left out", n),
+		Reason: hiddenChildrenReason(n),
 		Fix:    "open the run with the server (dev) token",
 		Count:  n,
 	}
+}
+
+// hiddenChildrenReason is the hidden children hole's reason, its count
+// in the right number: "1 child run carries …, so it is left out".
+func hiddenChildrenReason(n int) string {
+	if n == 1 {
+		return "1 child run carries another public id, or none: a panel token reads its own public id's runs, so it is left out"
+	}
+	return fmt.Sprintf("%d child runs carry another public id, or none: a panel token reads its own public id's runs, so they are left out", n)
+}
+
+// hiddenTreeReason is the span tree's hidden hole's reason
+// (runs/{id}/spans?tree=1): how many runs of the tree the scope left
+// out, their subtrees' runs counted, never named.
+func hiddenTreeReason(n int) string {
+	if n == 1 {
+		return "1 run of this tree carries another public id, or none: a panel token reads its own public id's runs, so its spans are left out"
+	}
+	return fmt.Sprintf("%d runs of this tree carry another public id, or none (or sit under one that does): a panel token reads its own public id's runs, so their spans are left out", n)
 }
 
 // scopeRunsQuery forces a runs query onto the token's public id and

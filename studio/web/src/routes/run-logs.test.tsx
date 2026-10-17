@@ -8,6 +8,7 @@
 // running run's step with no line yet says its spans are pending,
 // never "no line", and the running page's reason is shown.
 import { cleanup, configure, fireEvent, waitFor } from "@testing-library/react"
+import axe from "axe-core"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { LogRow, LogsPage, RunDoc } from "@/lib/api"
@@ -130,6 +131,14 @@ const drawerLines = () =>
     document.querySelectorAll<HTMLElement>("[data-drawer-logs] [data-log-line]")
   ).map((n) => n.textContent)
 
+/** axe's violations under el, one line each (P8-pre-web #3). */
+async function axeLines(el: Element): Promise<string[]> {
+  const res = await axe.run(el)
+  return res.violations.map(
+    (v) => `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(" | ")}`
+  )
+}
+
 describe("a run's app logs on Studio's run page (U11.2)", () => {
   it("one click from the step: its Logs tab lists mw.Log's lines under its chat span, and its tool's", async () => {
     serve()
@@ -157,6 +166,10 @@ describe("a run's app logs on Studio's run page (U11.2)", () => {
     )
     expect(document.querySelector("[data-logs-count]")!.textContent).toBe(
       "7 lines"
+    )
+    // P8-pre-web: axe finds nothing on the logs view.
+    expect(await axeLines(document.querySelector("[data-logs-view]")!)).toEqual(
+      []
     )
     fireEvent.click(document.querySelector('[data-logs-filter="warn"]')!)
     await waitFor(() =>

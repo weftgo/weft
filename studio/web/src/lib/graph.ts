@@ -11,6 +11,7 @@
 // this trace: the graph does not draw them. Plain TypeScript, no React:
 // Studio only (the panel links here).
 import type { Span } from "./api"
+import { plural } from "./format"
 import { attrsOf, instantMs, int, opOf, str, took } from "./waterfall"
 
 export type NodeKind = "agent" | "mcp"
@@ -197,8 +198,6 @@ export function nodeOfRun(g: CallGraph, run: string | undefined) {
 }
 
 // ── Words ──────────────────────────────────────────────────────────
-
-const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`
 
 /** A node's second line: "2 runs · slowest 4.8s · 1 failed". */
 export function nodeLine(n: GraphNode): string {

@@ -19,7 +19,7 @@
 // Plain TypeScript, no React, no DOM: shared by both clients.
 import type { Span as TimedSpan } from "./api"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "./events"
-import { spanMs, stepCount, UNNAMED_AGENT } from "./format"
+import { plural, spanMs, stepCount, UNNAMED_AGENT } from "./format"
 import { NOT_EXECUTED } from "./summarize"
 import type { SpanKind, SpanTone } from "./trace"
 
@@ -342,8 +342,6 @@ function clip(s: string): string {
 }
 
 const quote = (s: string) => `“${clip(s)}”`
-
-const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`
 
 /** A ToolError renders "CODE: message" — the code is the error. */
 const CODED = /^([A-Z][A-Z0-9_]+): /

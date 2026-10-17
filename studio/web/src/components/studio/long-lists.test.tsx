@@ -69,9 +69,13 @@ describe("the virtualised waterfall's geometry", () => {
         onSelect={() => {}}
       />
     )
-    const tree = document.querySelector('[role="tree"]')!
-    expect(tree.hasAttribute("data-virtual")).toBe(true)
-    scrollTo(tree, (N - 40) * ROW)
+    // The scroller holds the axis row, then the tree (P8-pre-web: the
+    // axis outside role=tree).
+    const box = document.querySelector<HTMLElement>(".waterfall")!
+    const tree = box.querySelector('[role="tree"]')!
+    expect(box.hasAttribute("data-virtual")).toBe(true)
+    expect(tree.querySelector("[data-waterfall-head]")).toBeNull()
+    scrollTo(box, (N - 40) * ROW)
     const keys = [...tree.querySelectorAll("[data-span]")].map((n) =>
       n.getAttribute("data-span")
     )
@@ -89,7 +93,7 @@ describe("the virtualised waterfall's geometry", () => {
         continue
       }
       const key = el.getAttribute("data-span")
-      if (!key) continue // the axis row
+      if (!key) continue
       const i = Number(key.slice(1))
       expect(offset).toBe(AXIS + i * ROW)
       offset += ROW

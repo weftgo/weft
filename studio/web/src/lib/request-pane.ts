@@ -15,6 +15,7 @@ import type {
   Transcript,
 } from "./api"
 import { isHoleRef } from "./api"
+import { plural } from "./format"
 
 /** The chips on the pane's header, in that order. */
 export const CHIP_PREPARE_STEP = "changed by PrepareStep"
@@ -253,7 +254,7 @@ export function proposalOf(
       ? "a PrepareStep rewrite"
       : known
         ? parts.length
-          ? `${parts.length} tool snippet${parts.length === 1 ? "" : "s"} or a PrepareStep rewrite`
+          ? `${plural(parts.length, "tool snippet")} or a PrepareStep rewrite`
           : "a PrepareStep rewrite"
         : "the tools' snippets or a PrepareStep rewrite"
   return {

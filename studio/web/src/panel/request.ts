@@ -19,6 +19,7 @@
 // Every absent block is a badge with its reason; a run-wide hole
 // (hidden for a read-scoped token, not_recorded before A1) is that
 // badge and nothing else — a read token never asked for a byte.
+import { plural } from "../lib/format"
 import type { Manifest, RequestRow, RunCompaction, ToolEntry } from "../lib/api"
 import { isHoleRef } from "../lib/api"
 import { attemptLine, factsFromRows } from "../lib/attempts"
@@ -501,7 +502,7 @@ function messagesView(d: RequestTabDeps, r: RequestRow, step: number): Node[] {
       })
     )
   const m = memo.m
-  const n = `${m.count} ${m.count === 1 ? "message" : "messages"}`
+  const n = plural(m.count, "message")
   const out: Node[] = [
     el(
       "div",
@@ -541,7 +542,7 @@ function messagesView(d: RequestTabDeps, r: RequestRow, step: number): Node[] {
       d,
       key,
       (o) =>
-        `${o ? "▾" : "▸"} ${m.before.length} earlier ${m.before.length === 1 ? "message" : "messages"} (raw)`
+        `${o ? "▾" : "▸"} ${plural(m.before.length, "earlier message")} (raw)`
     )
     out.push(b)
     if (open)

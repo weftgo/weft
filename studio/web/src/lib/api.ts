@@ -392,7 +392,6 @@ export interface SpansDoc {
 export interface TreeHole extends StepHole {
   cause?: string
   runs?: string[]
-  count?: number
 }
 
 /** A session row: its cost is its turns' own + delegated (plan A5);
@@ -1180,13 +1179,6 @@ export function runQuery(id: string) {
   })
 }
 
-export function eventsQuery(id: string, after: number, limit = 500) {
-  return queryOptions({
-    queryKey: ["events", id, after, limit],
-    queryFn: () => fetchEventsPage(id, after, limit),
-  })
-}
-
 /** How many of a child run's events the run tree reads (U9.2-fix):
  * pages of 5,000, then a truncated badge on its row. */
 export const CHILD_EVENTS_CAP = 20_000
@@ -1682,6 +1674,10 @@ export interface StepHole {
   hole: string
   reason: string
   fix?: string
+  /** hidden: the child runs a panel token's scope left out (api.go's
+   * hiddenChildrenHole; the tree's hidden hole counts its runs too) —
+   * drawn as the badge's note, holeWords' "N child runs". */
+  count?: number
 }
 
 /** GET /api/runs/{id}/steps/{n}. request is attempt 1's RequestRow
@@ -1973,14 +1969,6 @@ export function sessionQuery(id: string) {
   return queryOptions({
     queryKey: ["session", id],
     queryFn: () => get<SessionDoc>(`sessions/${encodeURIComponent(id)}`),
-  })
-}
-
-export function publicQuery(publicId: string) {
-  return queryOptions({
-    queryKey: ["public", publicId],
-    queryFn: () =>
-      get<PublicResolution>(`public/${encodeURIComponent(publicId)}`),
   })
 }
 

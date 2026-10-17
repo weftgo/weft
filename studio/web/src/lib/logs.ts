@@ -9,6 +9,7 @@
 // lib/run-tree.ts's resolveRowSel reads back, an ancestor's row when
 // no row draws the span itself). Studio only: the panel hands the step
 // off to Studio's drawer Logs tab (lib/links.ts's logsLink).
+import { plural } from "./format"
 import { queryOptions } from "@tanstack/react-query"
 
 import { fetchLogs } from "./api"
@@ -49,7 +50,7 @@ export const LOGS = {
     "this row's spans are not reported yet (spans export when they end): its lines appear once they are",
   noneAtLevel: (l: LogLevel) =>
     `no app log line at ${l.toUpperCase()} or above in this run`,
-  count: (n: number) => `${n} line${n === 1 ? "" : "s"}`,
+  count: (n: number) => plural(n, "line"),
   cutReason: (n: number) =>
     `the first ${n.toLocaleString("en-US")} lines are shown (${LOG_PAGES} pages of ${LOG_PAGE.toLocaleString("en-US")}): later lines of this run were not read here, nothing was lost`,
   cutFix:
@@ -64,8 +65,8 @@ export const LOGS = {
   tickHint: (warn: number, err: number, cut = false) =>
     (cut ? "at least " : "") +
     [
-      err ? `${err} app log error${err === 1 ? "" : "s"}` : "",
-      warn ? `${warn} app log warning${warn === 1 ? "" : "s"}` : "",
+      err ? plural(err, "app log error") : "",
+      warn ? plural(warn, "app log warning") : "",
     ]
       .filter(Boolean)
       .join(", ") +

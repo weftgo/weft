@@ -164,7 +164,13 @@ import {
   timingLine,
 } from "../lib/attempts"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "../lib/events"
-import { duration, relativeTime, stepCount, tokens } from "../lib/format"
+import {
+  duration,
+  plural,
+  relativeTime,
+  stepCount,
+  tokens,
+} from "../lib/format"
 import {
   discoverEndpoint,
   headerRungOn,
@@ -5159,7 +5165,7 @@ export class WeftDevtools extends HTMLElement {
         el(
           "div",
           "weft-note",
-          `waiting for ${left} more decision${left === 1 ? "" : "s"} — the run resumes once every parked call is decided`
+          `waiting for ${plural(left, "more decision")} — the run resumes once every parked call is decided`
         )
       )
     }
@@ -6203,7 +6209,7 @@ export function renderTimeline(
       el(
         "div",
         "weft-note weft-warn",
-        `${lost} span${lost === 1 ? "" : "s"} not placed: unreadable times, or an end before the start`
+        `${plural(lost, "span")} not placed: unreadable times, or an end before the start`
       )
     )
   if (wf.rows.length < 2) {

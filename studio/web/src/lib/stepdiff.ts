@@ -235,12 +235,15 @@ function argsText(args: unknown): string {
 
 /** systemHidden: the side's system prompt is withheld from this
  * token (a read-scoped panel token: system null under hidden). Its
- * hash still compares, so the cell keeps the server's state. */
+ * hash still compares, so the cell keeps the server's state. A hidden
+ * hole with a count is child runs a panel token's scope left out
+ * (StepHole.count): it hides no prompt (P8-pre-web #7; diff.go drops
+ * the count when the prompt is hidden too). */
 export function systemHidden(side: DiffSide | null): boolean {
   return (
     !!side &&
     side.system == null &&
-    list(side.holes).some((h) => h.hole === "hidden")
+    list(side.holes).some((h) => h.hole === "hidden" && !h.count)
   )
 }
 

@@ -49,6 +49,15 @@ export interface StatusWords {
  * heading on both surfaces: one phrase (W7-prep). */
 export const AWAITING = "awaiting a decision"
 
+/** The status filter's "no status picked" (the runs list's select). */
+export const ANY_STATUS = "any status"
+
+/** statusPick is a status filter value's words: STATUS's word, or
+ * ANY_STATUS for "all" (or anything not in the table). */
+export function statusPick(v: string): string {
+  return Object.hasOwn(STATUS, v) ? STATUS[v as StatusKey].word : ANY_STATUS
+}
+
 /** The table: the six words, and the decided park ("parked → tN"). */
 export const STATUS: Record<StatusKey, StatusWords> = {
   running: {

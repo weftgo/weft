@@ -10,6 +10,7 @@
 // lead with — the words a person recognises (the prompt, the session's
 // title), the id a copyable line under them. Studio and the panel read
 // the same helper (parity.test.ts pins both renderers on one row).
+import { plural } from "./format"
 import { isLive } from "./honesty"
 
 /** The suffix every title ends with (the root route's own title). */
@@ -72,8 +73,7 @@ export function pageTitle(place: TitlePlace): string {
       parts.push(
         place.title ? clip(place.title) : `session ${shortId(place.id)}`
       )
-      if (place.turns !== undefined)
-        parts.push(`${place.turns} ${place.turns === 1 ? "turn" : "turns"}`)
+      if (place.turns !== undefined) parts.push(plural(place.turns, "turn"))
       break
     case "compare": {
       const ids = [place.a, ...(place.b ?? [])].filter((x): x is string => !!x)
@@ -240,7 +240,7 @@ export function turnTitle(
 ): Title {
   const x = resumeOf(prev, r)
   if (!x) return runTitle(r)
-  const text = `resume of ${x.of || "the parked turn"} · ${x.decided} decided ${x.decided === 1 ? "call" : "calls"}`
+  const text = `resume of ${x.of || "the parked turn"} · ${plural(x.decided, "decided call")}`
   return {
     text,
     full: `${text}\n${r.prompt_preview ?? ""}`.trim(),
@@ -278,6 +278,6 @@ export function traceRunsWords(t: {
 }): string {
   const n = t.run_ids.length
   if (!n) return "—"
-  const runs = `${n} ${n === 1 ? "run" : "runs"}`
+  const runs = plural(n, "run")
   return t.failed_runs ? `${runs} · ${t.failed_runs} failed` : runs
 }

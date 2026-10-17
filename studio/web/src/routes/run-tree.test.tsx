@@ -193,7 +193,7 @@ describe("the run tree on the director run (the Done line)", () => {
       "s1",
       "s1:m",
     ])
-    expect(document.querySelector('[role="tree"]')!.textContent).toContain(
+    expect(document.querySelector(".waterfall")!.textContent).toContain(
       "events"
     )
     fireEvent.click(

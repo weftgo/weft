@@ -52,13 +52,19 @@ export function duration(started: string, finished: string | null): string {
 /** A run whose agent has no name (UX-A-26): one word on every page —
  * the run header, the runs list, the run tree, a subagent row — drawn
  * muted, with UNNAMED_AGENT_HINT on hover. */
+/** plural is a count with its noun in the right number: "1 run",
+ * "2 runs" (many given where "s" does not make it). One helper for
+ * every lib module (P8-pre-web: four local copies before). */
+export const plural = (k: number, one: string, many = one + "s") =>
+  `${k} ${k === 1 ? one : many}`
+
 export const UNNAMED_AGENT = "unnamed agent"
 export const UNNAMED_AGENT_HINT = "the agent has no name: set weft.Name(…)"
 
 /** A step count in words, "1 step" / "2 steps": the panel's turn row
  * and picker, the run header, a subagent row — one helper (W7-prep). */
 export function stepCount(n: number): string {
-  return `${n} ${n === 1 ? "step" : "steps"}`
+  return plural(n, "step")
 }
 
 /** A span of milliseconds in the tightest unit that still reads. */

@@ -6,6 +6,7 @@
 // transcript costs only the rows that are open. A "/" filter matches
 // keys and values (case-insensitive), opens the path to each match and
 // marks it; copy-node, copy-all and download hand the JSON out.
+import { plural } from "../lib/format"
 import { el, on, stringify } from "./render"
 
 /** A string longer than this many characters (UTF-16 units, so 2,048
@@ -373,7 +374,7 @@ export function treeView(
   // Every match is counted; the paths opened (and rows marked) are the
   // first OPEN_HITS, and the count says so past them.
   const count = found
-    ? `${found.n} match${found.n === 1 ? "" : "es"}${found.n > found.hits.size ? ` · first ${found.hits.size} opened` : ""}`
+    ? `${plural(found.n, "match", "matches")}${found.n > found.hits.size ? ` · first ${found.hits.size} opened` : ""}`
     : ""
   bar.appendChild(el("span", "weft-tree-n", count))
   const all = el("button", "weft-btn", "copy all", {

@@ -757,7 +757,9 @@ row) carry the token's public id under a parent it reads; any other
 descendant (a nested `Generate` or thread turn inside a tool handler
 with its own session's public id, a child whose metadata cleared
 `weft.public_id`) is left out with its whole subtree, unnamed, under
-the `hidden` hole — never a 403 for the tree. The scope cuts before the
+the `hidden` hole, which counts them (`count`: every run it left out,
+its subtree's included — `obsdb.RunTree.HiddenCount`) — never a 403 for
+the tree. The scope cuts before the
 cap (`obsdb.TreeQuery.PublicID`): the backend reads only the runs the
 rows show visible, then the spans' own public ids decide, then the cap
 counts visible spans alone — a hidden run never takes a visible one's

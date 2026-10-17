@@ -291,6 +291,17 @@ func diffSideOf(doc stepDoc, text *string, readable bool) *diffSide {
 	for _, h := range doc.Holes {
 		holes[obsdb.Hole(h.Hole)] = h
 	}
+	// A hidden hole with a count is the child runs' alone
+	// (hiddenChildrenHole): the system prompt stays readable. When the
+	// request block is hidden too (a read token) the one hidden hole is
+	// the prompt's as well: its count goes, so the client's systemHidden
+	// (lib/stepdiff.ts) keys on a hidden hole without one (P8-pre-web #7).
+	if b, ok := doc.Request.(badgeFields); ok && b.Badge == string(obsdb.HoleHidden) {
+		if h, ok := holes[obsdb.HoleHidden]; ok {
+			h.Count = 0
+			holes[obsdb.HoleHidden] = h
+		}
+	}
 	for _, c := range doc.ToolCalls {
 		side.ToolCalls = append(side.ToolCalls, diffToolCall{Name: c.Name, Args: canonicalJSON(c.Args)})
 		if c.Badge == string(obsdb.HoleStripped) {

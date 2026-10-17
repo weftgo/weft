@@ -7,6 +7,8 @@
 // how a surface draws them. Plain TypeScript, no React: the run page
 // (hole-badge.tsx) and the devtools panel both read this one module.
 
+import { plural } from "./format"
+
 export type Hole =
   | "truncated"
   | "stripped"
@@ -207,6 +209,8 @@ export interface HoleMark {
   /** A known cause (CAUSES): its words before the badge's own. fix
    * "" (rather than absent) says no fix applies. */
   cause?: string
+  /** hidden: how many runs the scope left out (StepHole.count). */
+  count?: number
 }
 
 /** The weft.content.* attributes an event row or a live frame carries
@@ -280,6 +284,8 @@ export function holeWords(m: HoleMark): {
   reason: string
   fix?: string
   tone: "loss" | "note"
+  /** Visible words after the label: a hidden hole's count. */
+  note?: string
 } {
   const note = isHole(m.hole) ? HOLES[m.hole] : undefined
   // Own keys only: the cause is the record's ("constructor" names none).
@@ -299,6 +305,8 @@ export function holeWords(m: HoleMark): {
     // already retried): the table's is not added.
     fix: m.fix === "" ? undefined : m.fix || why?.fix || note?.fix,
     tone: note?.tone ?? "loss",
+    note:
+      m.hole === "hidden" && m.count ? plural(m.count, "child run") : undefined,
   }
 }
 
@@ -388,7 +396,7 @@ export function statusHoles(r: {
   if (gaps.length && r.status && !isLive(r))
     out.push({
       hole: "gap",
-      reason: `${gaps.length} ${gaps.length === 1 ? "event" : "events"} missing (${gaps.length === 1 ? "position" : "positions"} ${gaps.slice(0, 8).join(", ")}${gaps.length > 8 ? ", …" : ""}): a destination dropped a batch`,
+      reason: `${plural(gaps.length, "event")} missing (${gaps.length === 1 ? "position" : "positions"} ${gaps.slice(0, 8).join(", ")}${gaps.length > 8 ? ", …" : ""}): a destination dropped a batch`,
     })
   if (r.stop_reason === "max_tokens") out.push({ hole: "max_tokens" })
   return out

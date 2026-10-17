@@ -54,7 +54,7 @@ type TreeQuery struct {
 	// token's, U9.1-fix): the root run's spans stay, and a descendant
 	// run stays when its row and each of its spans carry PublicID and
 	// its parent run stays; any other descendant is left out with its
-	// whole subtree, unnamed and uncounted (RunTree.Hidden). The
+	// whole subtree, unnamed but counted (RunTree.Hidden, HiddenCount). The
 	// backend leaves the rows' outsiders out of its span read, and the
 	// cap counts the visible spans alone.
 	PublicID string
@@ -105,6 +105,10 @@ type RunTree struct {
 	MissingCount int
 	// Hidden says TreeQuery.PublicID's scope left runs out.
 	Hidden bool
+	// HiddenCount is how many runs it left out: each descendant run the
+	// tree knows (from its rows' parents or its spans) that the scope
+	// cut, its subtree's runs included. Never their ids. 0 unless Hidden.
+	HiddenCount int
 }
 
 // TreeRun names one run of a tree: its id, its parent, its public id
@@ -289,7 +293,8 @@ func CapTree(read []Span, more bool, q TreeQuery, parents map[string]string, row
 	members := TreeMembers(q.RunID, parents)
 	out := RunTree{}
 	if q.PublicID != "" {
-		spans, rows, out.Hidden = scopeTree(q, spans, members, rows)
+		spans, rows, out.HiddenCount = scopeTree(q, spans, members, rows)
+		out.Hidden = out.HiddenCount > 0
 	}
 	if more || len(spans) > TreeSpanCap {
 		out.Spans, out.Truncated = spans[:min(len(spans), TreeSpanCap)], true
@@ -367,9 +372,10 @@ func treeVisible(root string, parent map[string]string, own func(string) bool) f
 // scopeTree cuts a run tree to q.PublicID: the root's spans stay, and
 // a descendant run stays when its row (when it has one) and each of
 // its spans carry the public id and its parent run stays; any other
-// run is left out with its whole subtree, hidden true. The rows
-// answered are the visible members'.
-func scopeTree(q TreeQuery, spans []TreeSpan, members map[string]string, rows []TreeRun) ([]TreeSpan, []TreeRun, bool) {
+// run is left out with its whole subtree, counted: the int is how many
+// runs (members or span runs) it left out. The rows answered are the
+// visible members'.
+func scopeTree(q TreeQuery, spans []TreeSpan, members map[string]string, rows []TreeRun) ([]TreeSpan, []TreeRun, int) {
 	parent := make(map[string]string, len(members))
 	for id, p := range members {
 		parent[id] = p
@@ -387,13 +393,18 @@ func scopeTree(q TreeQuery, spans []TreeSpan, members map[string]string, rows []
 		}
 	}
 	visible := treeVisible(q.RunID, parent, func(id string) bool { return !foreign[id] })
-	hidden := false
+	hidden := map[string]bool{}
+	for id := range members {
+		if id != q.RunID && !visible(id) {
+			hidden[id] = true
+		}
+	}
 	kept := make([]TreeSpan, 0, len(spans))
 	for _, sp := range spans {
 		if visible(sp.RunID) {
 			kept = append(kept, sp)
 		} else {
-			hidden = true
+			hidden[sp.RunID] = true
 		}
 	}
 	var runs []TreeRun
@@ -404,10 +415,10 @@ func scopeTree(q TreeQuery, spans []TreeSpan, members map[string]string, rows []
 		if visible(r.ID) {
 			runs = append(runs, r)
 		} else {
-			hidden = true
+			hidden[r.ID] = true
 		}
 	}
-	return kept, runs, hidden
+	return kept, runs, len(hidden)
 }
 
 // TreeMemberIDs is TreeMembers' run ids, sorted: the ids a backend

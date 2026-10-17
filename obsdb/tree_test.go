@@ -154,7 +154,10 @@ func TestCutRunTree(t *testing.T) {
 		t.Errorf("CapTree(scoped) = truncated %v, %d spans, hidden %v, missing %d; want root's and mine's 2 spans, hidden, none missing",
 			sc.Truncated, len(sc.Spans), sc.Hidden, sc.MissingCount)
 	}
-	if un := obsdb.CapTree(mixed, false, q, scopeParents, scopeRows); !un.Truncated || un.Hidden {
+	if sc.HiddenCount != 2 {
+		t.Errorf("CapTree(scoped).HiddenCount = %d, want 2 (theirs and its kid)", sc.HiddenCount)
+	}
+	if un := obsdb.CapTree(mixed, false, q, scopeParents, scopeRows); !un.Truncated || un.Hidden || un.HiddenCount != 0 {
 		t.Errorf("CapTree(unscoped) = truncated %v, hidden %v; want truncated, not hidden", un.Truncated, un.Hidden)
 	}
 

@@ -7,6 +7,7 @@
 // response's when the server sent them (badge, reason, fix, holes[]),
 // the table's else. element.ts and the Request tab (E1.2) call these;
 // no other panel file spells a hole's words (badges.test.ts greps).
+import { plural } from "../lib/format"
 import type { Meta, RunRow } from "../lib/api"
 import {
   DERIVED_HOLE,
@@ -50,6 +51,7 @@ export interface BadgeNote {
   bytes?: number
   cause?: string
   label?: string
+  count?: number
 }
 
 /** title is a badge's tooltip: the reason, and the fix where one
@@ -65,7 +67,8 @@ export function badge(hole: string, note: BadgeNote = {}): HTMLElement {
   const b = el(
     "span",
     `weft-badge ${w.tone === "loss" ? "weft-warn-badge" : "weft-tag"}`,
-    note.label ?? w.label,
+    // A hidden hole's count follows the label (HoleBadge's note).
+    (note.label ?? w.label) + (w.note ? ` · ${w.note}` : ""),
     {
       title: badgeTitle(w.reason, w.fix),
       "data-hole": hole,
@@ -240,7 +243,7 @@ export function capLine(
   if (n) {
     const w = holeWords({ hole: "truncated" })
     return {
-      text: `content on · ${n} ${n === 1 ? "event" : "events"} shortened (${kib(bytes)} cut)${tail}`,
+      text: `content on · ${plural(n, "event")} shortened (${kib(bytes)} cut)${tail}`,
       title: badgeTitle(w.reason, w.fix),
       hole: "truncated",
     }

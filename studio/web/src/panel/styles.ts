@@ -141,10 +141,10 @@ export const PANEL_CSS = `
 .weft-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--weft-faint); flex: none; }
 .weft-dot.weft-on { background: var(--weft-ok); }
 .weft-dot.weft-run { background: var(--weft-status-run); }
-.weft-dot.weft-run, @keyframes weft-pulse { 50% { opacity: .35; } }
+.weft-dot.weft-run, .weft-fab-pulse { animation: weft-pulse 1.2s infinite; }
+@keyframes weft-pulse { 50% { opacity: .35; } }
 .weft-fab-running { border-color: var(--weft-status-run); }
 .weft-fab-count { color: var(--weft-status-run-ink); font-variant-numeric: tabular-nums; }
-.weft-fab-pulse { animation: weft-pulse 1.2s infinite; }
 .weft-howto { display: flex; flex-direction: column; gap: 2px; padding: 6px 10px; border-bottom: 1px solid var(--weft-line); color: var(--weft-dim); }
 @media (prefers-reduced-motion: reduce) { .weft-dot.weft-run, .weft-fab-pulse { animation: none; } }
 .weft-head .weft-title { overflow: hidden; text-overflow: ellipsis; }

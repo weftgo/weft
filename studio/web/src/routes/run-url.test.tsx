@@ -157,6 +157,32 @@ describe("the run page's URL (G2)", () => {
     )
   })
 
+  it("g r on the run page goes to the runs list: the chord's r never toggles the raw view (P8-pre-web #4)", async () => {
+    const { router } = renderApp(`/runs/${RUN}`)
+    await waitFor(() =>
+      expect(document.querySelector("[data-span]")).toBeTruthy()
+    )
+    const entries = router.history.length
+    fireEvent.keyDown(window, { key: "g" })
+    fireEvent.keyDown(window, { key: "r" })
+    await waitFor(() => expect(router.state.location.pathname).toBe("/runs"))
+    // One entry: the runs list, no raw view pushed before it.
+    expect(router.history.length).toBe(entries + 1)
+    router.history.back()
+    await waitFor(() =>
+      expect(router.state.location.pathname).toBe(`/runs/${RUN}`)
+    )
+    expect(router.state.location.search).not.toHaveProperty("view")
+    // Out of the chord, r is the run page's raw view again.
+    await waitFor(() =>
+      expect(document.querySelector("[data-span]")).toBeTruthy()
+    )
+    fireEvent.keyDown(window, { key: "r" })
+    await waitFor(() =>
+      expect(router.state.location.search).toMatchObject({ view: "raw" })
+    )
+  })
+
   it("copies the page as it stands from the header, without a token", async () => {
     renderApp(`/runs/${RUN}?view=raw&q=step`)
     const button = await screen.findByRole("button", { name: "copy link" })

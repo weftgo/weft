@@ -184,7 +184,7 @@ func TestSpansTreeGolden(t *testing.T) {
 			{Span: treeTestSpan("eeeeeeeeeeeeeeeeeeeeeeeeeeeeeee3", "0f00000000000002", "tg_root/0/call_a", "tg_root", "", base, 1),
 				RunID: "tg_root/0/call_a", ParentRunID: "tg_root"},
 		},
-		Truncated: true, TraceTruncated: true, Hidden: true,
+		Truncated: true, TraceTruncated: true, Hidden: true, HiddenCount: 3,
 		Missing:      []obsdb.TreeRun{{ID: "tg_root/1/call_b", ParentRunID: "tg_root", Started: base}},
 		MissingCount: 101,
 	}
@@ -206,5 +206,25 @@ func TestSpansTreeGolden(t *testing.T) {
 	}
 	if h := d.Holes[2]; h.Count != 101 || len(h.Runs) != 1 || !strings.Contains(h.Reason, "the first 1 by start are named") {
 		t.Errorf("no_spans hole = %+v, want count 101, one run named, the reason saying so", h)
+	}
+	if h := d.Holes[3]; h.Count != 3 || !strings.HasPrefix(h.Reason, "3 runs of this tree carry ") {
+		t.Errorf("hidden hole = %+v, want count 3, the reason saying so", h)
+	}
+}
+
+// TestHiddenHoleReasonsCount (P8-pre-web #2): the hidden holes' reasons
+// say their count in the right number, and the hole carries it.
+func TestHiddenHoleReasonsCount(t *testing.T) {
+	if got := hiddenChildrenHole(1); !strings.HasPrefix(got.Reason, "1 child run carries ") || !strings.HasSuffix(got.Reason, "so it is left out") || got.Count != 1 {
+		t.Errorf("hiddenChildrenHole(1) = %+v, want \"1 child run carries … so it is left out\", count 1", got)
+	}
+	if got := hiddenChildrenHole(2); !strings.HasPrefix(got.Reason, "2 child runs carry ") || !strings.HasSuffix(got.Reason, "so they are left out") || got.Count != 2 {
+		t.Errorf("hiddenChildrenHole(2) = %+v, want \"2 child runs carry … so they are left out\", count 2", got)
+	}
+	if got := hiddenTreeReason(1); !strings.HasPrefix(got, "1 run of this tree carries ") {
+		t.Errorf("hiddenTreeReason(1) = %q, want \"1 run of this tree carries …\"", got)
+	}
+	if got := hiddenTreeReason(3); !strings.HasPrefix(got, "3 runs of this tree carry ") {
+		t.Errorf("hiddenTreeReason(3) = %q, want \"3 runs of this tree carry …\"", got)
 	}
 }

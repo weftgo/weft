@@ -64,8 +64,9 @@
     },
     {
       "hole": "hidden",
-      "reason": "runs of this tree carry another public id, or none: a panel token reads its own public id's runs, so their spans and their subtrees' are left out",
-      "fix": "open the tree with the server (dev) token"
+      "reason": "3 runs of this tree carry another public id, or none (or sit under one that does): a panel token reads its own public id's runs, so their spans are left out",
+      "fix": "open the tree with the server (dev) token",
+      "count": 3
     }
   ]
 }

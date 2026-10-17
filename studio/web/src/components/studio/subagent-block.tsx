@@ -167,7 +167,7 @@ export function SubagentBlock({
             data-slot="icon"
             className={`size-3.5 text-faint transition-transform ${open ? "rotate-90" : ""}`}
           />
-          <span className="eyebrow">subagent</span>
+          <span className="eyebrow">subagent</span>{" "}
           <span
             className={`font-mono text-xs ${child.agent ? "" : "text-muted-foreground"}`}
             title={child.agent ? undefined : UNNAMED_AGENT_HINT}

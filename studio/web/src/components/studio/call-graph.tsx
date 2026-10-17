@@ -142,7 +142,9 @@ export function CallGraphView({
               role="button"
               tabIndex={0}
               aria-pressed={on}
-              aria-label={`${n.label}: ${nodeLine(n)}`}
+              // The name starts with the visible words, in their order
+              // (axe label-content-name-mismatch): the glyph is aria-hidden.
+              aria-label={`${n.label} ${nodeLine(n)}`}
               data-node={n.id}
               className="group cursor-pointer outline-none"
               onClick={() => onSelect(n)}
@@ -180,8 +182,8 @@ export function CallGraphView({
                 y={18}
                 className={`text-[11px] font-medium ${n.fails ? "fill-ev-error" : "fill-foreground"}`}
               >
-                {n.kind === "agent" ? "▣ " : "⧉ "}
-                {n.label}
+                <tspan aria-hidden>{n.kind === "agent" ? "▣ " : "⧉ "}</tspan>
+                {n.label}{" "}
               </text>
               <text x={10} y={34} className="fill-faint text-[10px]">
                 {nodeLine(n)}

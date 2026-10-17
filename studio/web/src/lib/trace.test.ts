@@ -7,7 +7,6 @@ import { describe, expect, it } from "vitest"
 import type { EventsPage, WireEvent, Span as TimedSpan } from "./api"
 import { fold } from "./events"
 import {
-  defaultSelection,
   flowFromFold,
   isGenAISpan,
   spansFromFold,
@@ -38,8 +37,6 @@ describe("spansFromFold", () => {
     expect(call.tone).toBe("tool")
     expect(call.badge).toBe("ok")
     expect(spans.map((s) => s.key)).toEqual(["run", "s0", "c:0:call_3"])
-    // Nothing went wrong: start at the first step.
-    expect(defaultSelection(spans)?.key).toBe("s0")
     // The flow strip: one pill per top-level step; no stored text, so
     // the pill is the call.
     expect(flowFromFold(fold(events), "succeeded")).toEqual([
@@ -75,8 +72,6 @@ describe("spansFromFold", () => {
     expect(dead[2].badge).toBe("never")
     expect(dead[1].tone).toBe("bad")
     expect(dead[1].sub).toBe("failed here")
-    // Start where it went wrong.
-    expect(defaultSelection(dead)?.key).toBe("s0")
   })
 
   it("is empty for an empty stream", () => {

@@ -10,6 +10,8 @@
 /** What the attempt line says: the answering attempt's number (0 when
  * the step ended with none answering), how many attempts the step
  * made, the model asked for and the one that answered. */
+import { plural } from "./format"
+
 export interface AttemptFacts {
   n: number
   total: number
@@ -114,9 +116,7 @@ export function factsFromStep(doc: StepLike): AttemptFacts | null {
 export function attemptLine(f: AttemptFacts | null | undefined): string | null {
   if (!f) return null
   if (f.n === 0)
-    return f.total > 0
-      ? `${f.total} ${f.total === 1 ? "attempt" : "attempts"} · none answered`
-      : null
+    return f.total > 0 ? `${plural(f.total, "attempt")} · none answered` : null
   if (f.n <= 1) return null
   let s = `attempt ${f.n} of ${Math.max(f.total, f.n)}`
   if (f.requested && f.answered)

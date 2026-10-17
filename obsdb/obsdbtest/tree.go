@@ -198,6 +198,9 @@ func runTree(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			t.Errorf("RunTreeSpans(deep, pub_t) = %v, hidden %v, truncated %v, missing %+v; want %v, hidden, %s missing",
 				keys(sc.Spans), sc.Hidden, sc.Truncated, sc.Missing, wantDeep[:2], bare)
 		}
+		if sc.HiddenCount != 2 || got.HiddenCount != 0 {
+			t.Errorf("RunTreeSpans(deep, pub_t).HiddenCount = %d (unscoped %d), want 2 (the nested turn and its child), 0", sc.HiddenCount, got.HiddenCount)
+		}
 
 		// The id rule is core's shape alone (U9.1-fix2): an app's own
 		// hierarchical ids — "tree_job/1" and "tree_job/1/retry/2", rows

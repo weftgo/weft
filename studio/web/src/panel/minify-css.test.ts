@@ -3,6 +3,8 @@
 // the same count as the browser's CSS parser reads them, the same
 // selectors, the same declarations — so a whitespace rule that ate a
 // descendant space or a quoted value would fail here, not in a page.
+import { createRequire } from "node:module"
+
 import { describe, expect, it } from "vitest"
 
 import { minifyCss } from "../../vite.panel.config"
@@ -94,5 +96,109 @@ describe("minifyCss over PANEL_CSS", () => {
     expect(minifyCss('.a::before { content: "\\25B8 "; }')).toBe(
       '.a::before{content:"\\25B8 "}'
     )
+  })
+})
+
+// P8-pre-web #1: a real CSS parser over PANEL_CSS, raw and squeezed —
+// the one jsdom carries (css-tree), so a rule the page's adopted sheet
+// would drop ("Could not parse CSS stylesheet": a selector list that
+// swallowed an @keyframes) fails here, not in make devtools-vite-check.
+// Every animation name used is a declared @keyframes.
+type CssTree = {
+  parse: (css: string, opts: Record<string, unknown>) => unknown
+  walk: (
+    ast: unknown,
+    fn: (node: {
+      type: string
+      name?: string
+      prelude?: unknown
+      property?: string
+      value?: unknown
+    }) => void
+  ) => void
+  generate: (node: unknown) => string
+}
+const csstree = createRequire(import.meta.url)("css-tree") as CssTree
+
+function cssErrors(css: string): string[] {
+  const errs: string[] = []
+  csstree.parse(css, {
+    context: "stylesheet",
+    parseCustomProperty: false,
+    onParseError: (e: { message: string; offset: number }) =>
+      errs.push(
+        `${e.message} @ ${JSON.stringify(css.slice(Math.max(0, e.offset - 60), e.offset + 30))}`
+      ),
+  })
+  return errs
+}
+
+function animationNames(css: string): {
+  used: Set<string>
+  declared: Set<string>
+} {
+  const used = new Set<string>()
+  const declared = new Set<string>()
+  const ast = csstree.parse(css, { context: "stylesheet" })
+  csstree.walk(ast, (node) => {
+    if (node.type === "Atrule" && node.name === "keyframes" && node.prelude)
+      declared.add(csstree.generate(node.prelude).trim())
+    if (
+      node.type === "Declaration" &&
+      (node.property === "animation" || node.property === "animation-name")
+    ) {
+      for (const part of csstree.generate(node.value).split(",")) {
+        const name = part
+          .trim()
+          .split(/\s+/)
+          .find(
+            (w) =>
+              /^[a-z-][\w-]*$/i.test(w) &&
+              !/^(none|infinite|linear|ease(-in|-out|-in-out)?|alternate|forwards|backwards|both|normal|reverse|running|paused)$/.test(
+                w
+              )
+          )
+        if (name) used.add(name)
+      }
+    }
+  })
+  return { used, declared }
+}
+
+describe("PANEL_CSS through a real CSS parser", () => {
+  for (const [label, css] of [
+    ["raw", PANEL_CSS],
+    ["minified", minifyCss(PANEL_CSS)],
+  ] as const) {
+    it(`${label}: parses without an error`, () => {
+      expect(cssErrors(css)).toEqual([])
+    })
+    it(`${label}: every animation name has its @keyframes`, () => {
+      const { used, declared } = animationNames(css)
+      expect(used.size).toBeGreaterThan(0)
+      for (const n of used) expect(declared, n).toContain(n)
+    })
+  }
+
+  it("the running dot and the pill's pulse both animate", () => {
+    expect(animationNames(PANEL_CSS).used).toContain("weft-pulse")
+    const ast = csstree.parse(PANEL_CSS, { context: "stylesheet" })
+    const animated: string[] = []
+    csstree.walk(ast, (node) => {
+      if (node.type !== "Rule" || !node.prelude) return
+      const block = csstree.generate(node)
+      if (/animation:weft-pulse/.test(block))
+        animated.push(csstree.generate(node.prelude))
+    })
+    expect(animated.join(",")).toContain(".weft-dot.weft-run")
+    expect(animated.join(",")).toContain(".weft-fab-pulse")
+  })
+
+  it("the reviewer's broken rule is caught", () => {
+    expect(
+      cssErrors(
+        ".a{color:red}\n.b, @keyframes p { 50% { opacity: .35; } }\n.c{animation:p 1s}"
+      )
+    ).not.toEqual([])
   })
 })

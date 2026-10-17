@@ -3,6 +3,7 @@
 // Request tab only links to it (it never draws a body). Pure values,
 // no React, no DOM.
 import type { RawRecord, RawSide } from "./api"
+import { plural } from "./format"
 import { kib } from "./honesty"
 
 // hasWire — whether a row carries its exchange, the one test both
@@ -55,7 +56,7 @@ export function withheld(
 ): string | null {
   const n = names?.length ?? 0
   if (!n) return null
-  return `${n} ${what}${n === 1 ? "" : "s"} withheld: ${names!.join(", ")}`
+  return `${plural(n, what)} withheld: ${names!.join(", ")}`
 }
 
 /** The pair's download name: run, step, attempt. */

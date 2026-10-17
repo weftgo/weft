@@ -16,6 +16,7 @@ import {
   sideView,
   stepDiffView,
   summaryWords,
+  systemHidden,
 } from "./stepdiff"
 import type { DiffDoc, DiffRowDoc } from "./stepdiff"
 import { HOLES, holeWords } from "./honesty"
@@ -186,5 +187,27 @@ describe("missing steps, marks and the response's holes", () => {
 
   it("the path is the route's", () => {
     expect(diffPath("r a", "r#b")).toBe("diff?a=r+a&b=r%23b")
+  })
+})
+
+describe("a hidden children hole hides no system prompt (P8-pre-web #7)", () => {
+  const kids = {
+    hole: "hidden",
+    reason:
+      "2 child runs carry another public id, or none: a panel token reads its own public id's runs, so they are left out",
+    count: 2,
+  }
+  it("a side whose child runs were left out keeps its system cell", () => {
+    const doc = golden("diff")
+    const side = { ...doc.steps[0].a!, holes: [kids] }
+    expect(systemHidden(side)).toBe(false)
+    expect(cellHole("system", side, doc.steps[0].b)).toBeUndefined()
+    // Its prompt null for another reason: still not "hidden".
+    expect(systemHidden({ ...side, system: null })).toBe(false)
+  })
+  it("the read token's hidden hole (no count) still hides it", () => {
+    const side = golden("diff-hidden").steps[0].a!
+    expect(side.holes.every((h) => !("count" in h))).toBe(true)
+    expect(systemHidden(side)).toBe(true)
   })
 })

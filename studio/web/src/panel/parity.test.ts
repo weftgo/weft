@@ -581,6 +581,43 @@ describe("badge parity over the A3 table (D5)", () => {
     it.skip(`${hole}: ${why}`, () => {})
 })
 
+// P8-pre-web #2: a run document's hidden children hole carries its
+// count; both surfaces say it beside the badge, in the same words.
+describe("a hidden children hole's count (P8-pre-web)", () => {
+  it("the run header badges hidden with '2 child runs' on both surfaces", async () => {
+    const fx = (): Fixture => ({
+      doc: {
+        holes: [
+          {
+            hole: "hidden",
+            reason:
+              "2 child runs carry another public id, or none: a panel token reads its own public id's runs, so they are left out",
+            fix: "open the run with the server (dev) token",
+            count: 2,
+          },
+        ] as RunDoc["holes"],
+      },
+      events: events(),
+    })
+    const panelSel = `${PANEL.header} [data-hole="hidden"]`
+    const p = await inPanel(fx(), panelSel)
+    expect(badgeLabel($(p.el, panelSel))).toBe(
+      `${HOLES.hidden.label} · 2 child runs`
+    )
+    p.el.remove()
+    await settle()
+    cleanup()
+    document.body.innerHTML = ""
+    const studioSel = `${STUDIO.header} [data-hole="hidden"]`
+    await inStudio(fx(), studioSel)
+    const b = document.querySelector(studioSel)!
+    expect(b.firstChild?.textContent).toBe(HOLES.hidden.label)
+    expect(b.querySelector("[data-hole-note]")?.textContent).toBe(
+      " · 2 child runs"
+    )
+  })
+})
+
 describe("the loop's cut words are shared", () => {
   it("result_cap and the unrun call read the same words the table and lib/events give", () => {
     expect(resultCapReason(4096)).toBe(

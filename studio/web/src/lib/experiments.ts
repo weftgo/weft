@@ -6,6 +6,7 @@
 // it: the session page finds the forks by asking for playground runs
 // and joining on forked_from.
 import { fetchRuns, nextCursor } from "./api"
+import { plural } from "./format"
 import type { ExperimentRow, PageCursor, RunRow, SessionRow } from "./api"
 
 /** The run an experiment was forked from, and the step it continued
@@ -117,8 +118,7 @@ export function mintExperimentID(
 
 /** counted is "1 variant" / "2 variants": a count with its noun, the
  * plural only past one. */
-export const counted = (n: number, noun: string): string =>
-  `${n} ${noun}${n === 1 ? "" : "s"}`
+export const counted = (n: number, noun: string): string => plural(n, noun)
 
 /** matrixSize is a matrix's shape in words (UX-C-44): "1 variant × 1
  * input", "2 variants × 3 inputs" — the playground's Matrix header and

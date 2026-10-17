@@ -4,7 +4,8 @@
 // turn read against its session's complete turn list).
 import { describe, expect, it } from "vitest"
 
-import { FILTER_KEYS, STATUS, statusOf } from "./status"
+import { STATUS_PICKS } from "./run-filters"
+import { ANY_STATUS, FILTER_KEYS, STATUS, statusOf, statusPick } from "./status"
 import type { StatusRow } from "./status"
 
 const turn = (n: number, o: Partial<StatusRow> = {}): StatusRow => ({
@@ -193,5 +194,13 @@ describe("statusOf (U1-fix)", () => {
       "resumed",
       "cancelled",
     ])
+  })
+})
+
+describe("statusPick (P8-pre-web #6)", () => {
+  it("the runs list's status filter reads the table's words, any status for all", () => {
+    for (const s of STATUS_PICKS) expect(statusPick(s)).toBe(STATUS[s].word)
+    expect(statusPick("all")).toBe(ANY_STATUS)
+    expect(statusPick("constructor")).toBe(ANY_STATUS)
   })
 })

@@ -332,6 +332,36 @@ describe("child rows (U9.2-fix W2, W3)", () => {
   })
 })
 
+describe("the waterfall tree (P8-pre-web #3)", () => {
+  it("its axis row sits outside role=tree, and axe finds nothing on the tree", async () => {
+    serve()
+    renderApp(`/runs/${DIR}`)
+    await waitFor(() =>
+      expect(
+        document.querySelector('[role="tree"] [role="treeitem"]')
+      ).not.toBeNull()
+    )
+    const box = document.querySelector<HTMLElement>(".waterfall")!
+    const tree = box.querySelector<HTMLElement>('[role="tree"]')!
+    // Every child of the tree is a treeitem (or an aria-hidden spacer).
+    for (const c of tree.children)
+      expect(
+        c.getAttribute("role") === "treeitem" || c.hasAttribute("data-spacer"),
+        c.outerHTML.slice(0, 80)
+      ).toBe(true)
+    expect(
+      box.querySelector("[data-waterfall-head] [data-fold-all]")
+    ).not.toBeNull()
+    const res = await axe.run(box)
+    expect(
+      res.violations.map(
+        (v) =>
+          `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(" | ")}`
+      )
+    ).toEqual([])
+  })
+})
+
 describe("the call graph (U9.2-fix W5, W6)", () => {
   it("nodes take a focus ring, axe finds nothing; a child run's MCP calls are said not shown", async () => {
     serve()

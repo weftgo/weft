@@ -11,6 +11,8 @@
 // their words here and nowhere else.
 
 /** A kind's words: the chip's text, its one-line hint, its tone. */
+import { plural } from "./format"
+
 export interface KindWords {
   word: string
   hint: string
@@ -110,8 +112,6 @@ export interface ProblemBadge {
 }
 
 const n = (v?: number) => v ?? 0
-const plural = (k: number, one: string, many = one + "s") =>
-  `${k} ${k === 1 ? one : many}`
 
 /** problemBadges lists a run's problems, in one fixed order — none for
  * a clean run (badges only on problems). Parked calls ride ✋ with the

@@ -395,47 +395,48 @@ export function ToolCallRow({
       }`}
       data-call={call.callId}
     >
-      <div
-        className="-ml-3 flex cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 rounded-r-md py-0.5 pl-3 hover:bg-secondary/60"
-        onClick={() => setOpen((o) => !o)}
-        role="button"
-        aria-expanded={open}
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault()
-            setOpen((o) => !o)
-          }
-        }}
-      >
-        <ChevronRight
-          className={`size-3 shrink-0 text-faint transition-transform ${open ? "rotate-90" : ""}`}
-          data-slot="icon"
-        />
-        <span className="font-mono text-[13px] text-ev-tool">{call.name}</span>
-        {summary ? (
-          <span
-            className="max-w-[40ch] truncate font-mono text-[11px] text-muted-foreground"
-            title={
-              call.args !== undefined ? JSON.stringify(call.args) : undefined
-            }
-          >
-            {summary}
+      {/* The toggle is a button beside the row's verbs, not a
+          role=button row around them (axe nested-interactive; the
+          events explorer's U29.5 pattern). */}
+      <div className="-ml-3 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-r-md py-0.5 pl-3 hover:bg-secondary/60">
+        <button
+          type="button"
+          className="flex min-w-0 flex-1 cursor-pointer flex-wrap items-center gap-x-2 gap-y-1 text-left"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          data-call-toggle
+        >
+          <ChevronRight
+            className={`size-3 shrink-0 text-faint transition-transform ${open ? "rotate-90" : ""}`}
+            data-slot="icon"
+          />
+          <span className="font-mono text-[13px] text-ev-tool">
+            {call.name}
           </span>
-        ) : null}
-        <CallPill
-          call={call}
-          state={state}
-          step={step}
-          child={!!(child || call.childRunId)}
-        />
-        <span className="ml-auto flex items-center gap-1">
+          {summary ? (
+            <span
+              className="max-w-[40ch] truncate font-mono text-[11px] text-muted-foreground"
+              title={
+                call.args !== undefined ? JSON.stringify(call.args) : undefined
+              }
+            >
+              {summary}
+            </span>
+          ) : null}
+          <CallPill
+            call={call}
+            state={state}
+            step={step}
+            child={!!(child || call.childRunId)}
+          />
           <span
-            className="font-mono text-[10px] text-faint"
+            className="ml-auto font-mono text-[10px] text-faint"
             title="the call id (call_id on the wire)"
           >
             {call.callId}
           </span>
+        </button>
+        <span className="flex items-center gap-1">
           {replayAt ? (
             <CallVerbs
               at={replayAt}

@@ -73,6 +73,14 @@ const chipKeys = () =>
     (c) => c.dataset.chip
   )
 
+/** axe's violations under el, one line each (P8-pre-web #3). */
+async function axeLines(el: Element): Promise<string[]> {
+  const res = await axe.run(el)
+  return res.violations.map(
+    (v) => `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(" | ")}`
+  )
+}
+
 describe("the Runs search box and its URL chips", () => {
   it('searches "refund failed" sorted by cost through /api/search, in the API\'s order', async () => {
     const dear = row("r_dear")
@@ -405,6 +413,23 @@ describe("the Runs search box and its URL chips", () => {
       document.querySelector<HTMLElement>('[data-chip="status"]')!.dataset
         .chipApplied
     ).toBe("true")
+  })
+
+  it("a status-filtered runs list (status=failed): axe finds nothing in the page's main (P8-pre-web)", async () => {
+    studio
+      .on("GET meta", meta(["pricing"]))
+      .on("GET runs", (req) =>
+        req.query.get("status") === "failed"
+          ? { total: 1, runs: [rOK], next_before: null }
+          : runs
+      )
+    renderApp("/runs?status=failed")
+    await waitFor(() =>
+      expect(document.querySelector("[data-runs-count]")!.textContent).toBe(
+        "1 matching"
+      )
+    )
+    expect(await axeLines(document.querySelector("main")!)).toEqual([])
   })
 
   it("a row listed as parked that reads decided by a later turn says the record does not link it (P8-fix-b #6)", async () => {

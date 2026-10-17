@@ -14,6 +14,7 @@
 //     (unpricedLine), never a sentence per row (U7).
 // The devtools panel imports it too (A5.3: a turn's cost, the header's
 // sum, the result pane's): the same figures and words on both surfaces.
+import { plural } from "./format"
 import type { CostFields, DelegatedCostFields, RunRow } from "./api"
 import { isDerived } from "./honesty"
 import { CELL_REASONS, CELL_WORDS } from "./stepdiff"
@@ -224,7 +225,7 @@ export function costSortNote(
 ): string | null {
   const n = rows.filter((r) => !runTotal(r).known).length
   if (!n) return null
-  return `${n} ${n === 1 ? "run" : "runs"} with no known cost: listed last, newest first — not sorted by cost${more ? " · the loaded rows" : ""}`
+  return `${plural(n, "run")} with no known cost: listed last, newest first — not sorted by cost${more ? " · the loaded rows" : ""}`
 }
 
 /** sumCost totals runs' whole bills (a playground variant's runs):

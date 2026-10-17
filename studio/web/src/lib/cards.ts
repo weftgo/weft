@@ -9,7 +9,7 @@
 import type { Part, Usage } from "./api"
 import { attemptLabel, msText } from "./attempts"
 import type { FoldedRun, TranscriptBatch } from "./events"
-import { tokens } from "./format"
+import { plural, tokens } from "./format"
 import { AWAITING } from "./status"
 
 type Attrs = Record<string, unknown>
@@ -358,7 +358,7 @@ export function tokenSplit(doc: {
     }
   if (!sub) return null
   const u = doc.usage.input_tokens
-  return `${tokens(u)} in = ${tokens(u - sub)} own + ${tokens(sub)} via ${n} child${n === 1 ? "" : "ren"}`
+  return `${tokens(u)} in = ${tokens(u - sub)} own + ${tokens(sub)} via ${plural(n, "child", "children")}`
 }
 
 /** The structured output's words (UX-S1-06). */
@@ -367,7 +367,7 @@ export const OUTPUT = {
   none: "no output submitted",
 }
 export const repairedWords = (n: number) =>
-  `repaired after ${n} invalid submission${n === 1 ? "" : "s"}`
+  `repaired after ${plural(n, "invalid submission")}`
 
 /** outputOf reads a run's structured output from its fold: the last
  * valid submit_output call's arguments and the invalid ones before it;

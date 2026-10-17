@@ -249,19 +249,6 @@ export function spansFromFold(
   return out
 }
 
-/**
- * Where to start reading: the first thing that went wrong (a tool
- * error, a step the run died in), else the first step, else the run.
- */
-export function defaultSelection(spans: Span[]): Span | undefined {
-  return (
-    spans.find((s) => s.tone === "error" || s.tone === "bad") ??
-    spans.find((s) => s.tone === "never" && s.kind === "tool") ??
-    spans.find((s) => s.kind === "step") ??
-    spans.at(0)
-  )
-}
-
 /** One pill per top-level step for the flow strip: the loop at a glance. */
 export interface FlowPill {
   key: string

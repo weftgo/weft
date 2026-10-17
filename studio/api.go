@@ -1511,8 +1511,9 @@ func (s *Server) serveRunSpans(w http.ResponseWriter, r *http.Request, id string
 	if rt.Hidden {
 		doc.Holes = append(doc.Holes, treeHole{
 			Hole:   string(obsdb.HoleHidden),
-			Reason: "runs of this tree carry another public id, or none: a panel token reads its own public id's runs, so their spans and their subtrees' are left out",
+			Reason: hiddenTreeReason(rt.HiddenCount),
 			Fix:    "open the tree with the server (dev) token",
+			Count:  rt.HiddenCount,
 		})
 	}
 	writeJSON(w, r, http.StatusOK, doc)

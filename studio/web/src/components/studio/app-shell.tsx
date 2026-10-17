@@ -15,7 +15,13 @@
 // mount (plan §9 Q3).
 import { useEffect, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { ClientOnly, Link, Outlet, useLocation } from "@tanstack/react-router"
+import {
+  ClientOnly,
+  Link,
+  Outlet,
+  useLocation,
+  useNavigate,
+} from "@tanstack/react-router"
 import {
   Activity,
   Bot,
@@ -32,7 +38,7 @@ import {
 import { metaQuery, studioToken } from "@/lib/api"
 import { canReplay } from "@/lib/replay"
 import { applyStoredDensity } from "@/lib/density"
-import { isPlainShortcut } from "@/lib/keys"
+import { goChord, isPlainShortcut } from "@/lib/keys"
 import { useCopyLink } from "@/hooks/use-copy-link"
 import { useLiveGaveUpNotices, useRuntimeNotices } from "@/hooks/use-notices"
 import { Toaster } from "@/components/ui/sonner"
@@ -273,6 +279,24 @@ export function AppShell() {
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
   }, [copyLink])
+  // The go-to chord (g r, g a; kbd-help's global rows) on every page
+  // (P8-pre-web #4): heard first (capture), and a key that belongs to
+  // it reaches no page's single-key handler — the run page's r is its
+  // raw view.
+  const navigate = useNavigate()
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const c = goChord(e)
+      if (c === null) return
+      e.stopImmediatePropagation()
+      if (c === "/runs" || c === "/agents") {
+        e.preventDefault()
+        void navigate({ to: c })
+      }
+    }
+    window.addEventListener("keydown", onKey, true)
+    return () => window.removeEventListener("keydown", onKey, true)
+  }, [navigate])
 
   return (
     <SidebarProvider>

@@ -3,6 +3,7 @@
 // header's "compare with…" links, gated on capability "diff" — every
 // response served from the E3.1 goldens (studio/testdata/api/diff*).
 import { cleanup, configure, fireEvent, waitFor } from "@testing-library/react"
+import axe from "axe-core"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
@@ -82,6 +83,14 @@ const markers = () =>
     text: m.querySelector("a")!.textContent,
   }))
 
+/** axe's violations under el, one line each (P8-pre-web #3). */
+async function axeLines(el: Element): Promise<string[]> {
+  const res = await axe.run(el)
+  return res.violations.map(
+    (v) => `${v.id}: ${v.nodes.map((n) => n.html.slice(0, 120)).join(" | ")}`
+  )
+}
+
 describe("the compare page", () => {
   it("diff.golden.json: one 'changed at step 3' marker (tool results) and every other row the same", async () => {
     const doc = golden<DiffDoc>("diff")
@@ -115,6 +124,8 @@ describe("the compare page", () => {
     expect(studio.calls("GET diff").map((r) => r.query.toString())).toEqual([
       "a=r_da&b=r_db",
     ])
+    // P8-pre-web: axe finds nothing on the compare page.
+    expect(await axeLines(document.querySelector("main")!)).toEqual([])
   })
 
   it("N-way: one call per compared run against the same base, side by side", async () => {

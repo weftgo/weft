@@ -14,10 +14,8 @@
 
 import { fileWords } from "./cards"
 import type { Message, Part, RunCompaction, Transcript } from "./api"
-import { tokens } from "./format"
+import { plural, tokens } from "./format"
 import { isRepaired, REPAIRED } from "./error-kind"
-
-const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`
 
 /** A session marker (thread's compaction) rather than a run-scope view. */
 export function isSessionMarker(c: RunCompaction): boolean {

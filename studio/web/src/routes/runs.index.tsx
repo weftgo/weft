@@ -66,6 +66,7 @@ import { nest, RUNS_TREE } from "@/lib/delegation"
 import { runLink } from "@/lib/links"
 import type { RunsSearch } from "@/lib/links"
 import { useDocumentTitle } from "@/hooks/use-document-title"
+import { ANY_STATUS, statusPick } from "@/lib/status"
 
 export { filtersFromSearch }
 
@@ -75,15 +76,6 @@ function experimentsLabel(v: "on" | "off" | undefined): string {
     : v === "off"
       ? "experiments off"
       : "any runs"
-}
-const statusLabel: Record<string, string> = {
-  all: "any status",
-  running: "running",
-  succeeded: "succeeded",
-  failed: "failed",
-  interrupted: "interrupted",
-  parked: "parked",
-  cancelled: "cancelled",
 }
 
 export const Route = createFileRoute("/runs/")({
@@ -303,19 +295,13 @@ function RunsPage() {
   const moreSet = moreFilterCount(search, costCapable)
   const searchInput = useRef<HTMLInputElement>(null)
   const agentInput = useRef<HTMLInputElement>(null)
-  const [chord, setChord] = useState<"g" | null>(null)
   const listKey = JSON.stringify(search)
   useEffect(() => setSelected(-1), [listKey])
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // The g chord is the shell's (app-shell, lib/keys goChord).
       if (!isPlainShortcut(e)) return
-      if (chord === "g") {
-        setChord(null)
-        if (e.key === "r") void router.navigate({ to: "/runs" })
-        else if (e.key === "a") void router.navigate({ to: "/agents" })
-        return
-      }
       switch (e.key) {
         case "/": {
           e.preventDefault()
@@ -339,9 +325,6 @@ function RunsPage() {
           e.preventDefault()
           setSelected((s) => Math.max(0, s - 1))
           return
-        case "g":
-          setChord("g")
-          return
         case "Escape":
           setSelected(-1)
           return
@@ -354,7 +337,7 @@ function RunsPage() {
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [chord, runs, selected, router])
+  }, [runs, selected, router])
 
   const setSearch = (patch: Partial<RunsSearch>) =>
     void navigate({
@@ -433,15 +416,13 @@ function RunsPage() {
             className="h-8 w-32 text-xs"
             aria-label="filter by status"
           >
-            <SelectValue>
-              {(v: string) => statusLabel[v] ?? "any status"}
-            </SelectValue>
+            <SelectValue>{(v: string) => statusPick(v)}</SelectValue>
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">any status</SelectItem>
+            <SelectItem value="all">{ANY_STATUS}</SelectItem>
             {STATUS_PICKS.map((s) => (
               <SelectItem key={s} value={s}>
-                {s}
+                {statusPick(s)}
               </SelectItem>
             ))}
           </SelectContent>

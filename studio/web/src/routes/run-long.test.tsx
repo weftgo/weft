@@ -280,11 +280,9 @@ describe("a 5,000-step run scrolls (plan H2)", () => {
     )
     const scrubber = document.querySelector<HTMLElement>("[data-scrubber]")!
     for (const el of [scrubber, list]) {
-      // nested-interactive is the call row's own (a role=button row
-      // holding its verbs, ToolCallRow before H2) — not the list's.
-      const res = await axe.run(el, {
-        rules: { "nested-interactive": { enabled: false } },
-      })
+      // Every rule on (P8-pre-web): the call row's toggle is a button
+      // beside its verbs, no role=button row around them.
+      const res = await axe.run(el)
       expect(
         res.violations.map(
           (v) =>
@@ -319,7 +317,9 @@ describe("a 5,000-step run scrolls (plan H2)", () => {
       { name: "waterfall" },
       { timeout: 60_000 }
     )
-    await waitFor(() => expect(tree.hasAttribute("data-virtual")).toBe(true), {
+    // The scroller around the tree (its axis row outside the tree).
+    const box = tree.closest<HTMLElement>(".waterfall")!
+    await waitFor(() => expect(box.hasAttribute("data-virtual")).toBe(true), {
       timeout: 60_000,
     })
     const rows = () => tree.querySelectorAll('[role="treeitem"]')
@@ -327,7 +327,7 @@ describe("a 5,000-step run scrolls (plan H2)", () => {
     expect(rows().length).toBeLessThan(80)
     // The spacers keep the whole height: scrolled to the end, the last
     // step's call row is mounted.
-    scrollTo(tree, 15_001 * 25)
+    scrollTo(box, 15_001 * 25)
     await waitFor(() =>
       expect(tree.querySelector('[data-span="c:4999:c4999"]')).toBeTruthy()
     )

@@ -1930,12 +1930,15 @@ func TestAuthMatrixTreeScope(t *testing.T) {
 		}
 		if tc.hidden > 0 {
 			for _, f := range []string{"json", "jsonl"} {
-				// The root's own document lists its direct children
-				// (GET /api/runs/{id}'s rows); a grandchild under a
-				// hidden child is in no exported document.
+				// The root's own document lists its public id's
+				// children alone (P8-scope-fix, GET /api/runs/{id}'s
+				// rule): no hidden child, nor a grandchild under one,
+				// is in any exported document.
 				_, b := export(tc.tok, f)
-				if strings.Contains(b, under) {
-					t.Errorf("%s: the %s tree export names %q, a run under a hidden subtree", tc.name, f, under)
+				for _, leak := range []string{under, nested, cleared, bareB, "pub_b"} {
+					if strings.Contains(b, leak) {
+						t.Errorf("%s: the %s tree export names %q, a run outside the token's scope", tc.name, f, leak)
+					}
 				}
 			}
 		}
@@ -1951,3 +1954,218 @@ func TestAuthMatrixTreeScope(t *testing.T) {
 }
 
 func hasKey(m map[string][]string, k string) bool { _, ok := m[k]; return ok }
+
+// TestAuthMatrixChildScope (P8-scope-fix): every route that names a
+// run's child runs serves a panel token — read-scoped or playground —
+// the children of its own public id alone (inScope, the tree scope's
+// rule), the rest one hidden hole counting them: never a child id, its
+// public id, its prompt, or a count or delegated figure that includes
+// it. The fixture is TestAuthMatrixTreeScope's shape: a pub_a root
+// whose Subagent children are pub_a (mine), pub_b (foreign), cleared
+// (none) and a pub_b pool child run linked by parent id; mine has a
+// pub_b grandchild. The server token reads every one.
+func TestAuthMatrixChildScope(t *testing.T) {
+	const serverTok = "srv-token"
+	srv := New(Open(t.TempDir()+"/children.db"), Token(serverTok))
+	t.Cleanup(func() { _ = srv.Close() })
+	ts := httptest.NewServer(srv.Handler())
+	t.Cleanup(ts.Close)
+
+	const (
+		root    = "kid_root"
+		mine    = "kid_root/0/c1"
+		foreign = "kid_root/0/c2"
+		cleared = "kid_root/0/c3"
+		pool    = "kid_pool_turn"
+		grand   = "kid_root/0/c1/0/g"
+		session = "s_kids"
+	)
+	parent := func(p string) map[string]any { return map[string]any{"weft.parent.run.id": p} }
+	seedRun(t, srv.db, root, "pub_a", session, "", nil)
+	seedRun(t, srv.db, mine, "pub_a", session, "", parent(root))
+	seedRun(t, srv.db, foreign, "pub_b", session, "", parent(root))
+	seedRun(t, srv.db, cleared, "", session, "", parent(root))
+	seedRun(t, srv.db, pool, "pub_b", "s_other", "", parent(root))
+	seedRun(t, srv.db, grand, "pub_b", session, "", parent(mine))
+	leaks := []string{foreign, cleared, pool, grand, "pub_b", "secret of pub_b", "s_other"}
+
+	sign := func(scope string) string {
+		tok, err := signPanelToken([]byte(serverTok), panelClaims{PublicID: "pub_a", Scope: scope, Exp: time.Now().Add(time.Hour)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tok
+	}
+	get := func(tok, path string) string {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodGet, ts.URL+path, nil)
+		req.Header.Set("Authorization", "Bearer "+tok)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		b, _ := io.ReadAll(resp.Body)
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("GET %s = %d %s, want 200", path, resp.StatusCode, b)
+		}
+		return string(b)
+	}
+	type row struct {
+		ID                  string `json:"id"`
+		ChildrenCount       int    `json:"children_count"`
+		DelegatedCostKnown  bool   `json:"delegated_cost_known"`
+		DelegatedCostReason string `json:"delegated_cost_reason"`
+	}
+	type hole struct {
+		Hole  string `json:"hole"`
+		Count int    `json:"count"`
+	}
+	hiddenOf := func(hs []hole) int {
+		for _, h := range hs {
+			if h.Hole == string(obsdb.HoleHidden) {
+				return h.Count
+			}
+		}
+		return 0
+	}
+	rowOf := func(rows []row, id string) row {
+		for _, r := range rows {
+			if r.ID == id {
+				return r
+			}
+		}
+		t.Fatalf("no row %s in %+v", id, rows)
+		return row{}
+	}
+
+	for _, tc := range []struct {
+		name, tok string
+		kids      []string // the run document's children, sorted
+		hidden    int      // its hidden hole's count
+		stepKids  []string // step 0's children
+		stepHide  int
+		mineKids  int // mine's children_count
+	}{
+		{"read panel token", sign(scopeRead), []string{mine}, 3, []string{mine}, 2, 0},
+		{"playground panel token", sign(scopePlayground), []string{mine}, 3, []string{mine}, 2, 0},
+		{"server token", serverTok, []string{pool, mine, foreign, cleared}, 0, []string{mine, foreign, cleared}, 0, 1},
+	} {
+		panel := tc.tok != serverTok
+		noLeak := func(route, body string) {
+			t.Helper()
+			if !panel {
+				return
+			}
+			for _, l := range leaks {
+				if strings.Contains(body, l) {
+					t.Errorf("%s: %s names %q: %s", tc.name, route, l, body)
+				}
+			}
+		}
+
+		// GET /api/runs/{id}: children, children_count, the hidden hole,
+		// the delegated figure.
+		body := get(tc.tok, "/api/runs/"+root)
+		noLeak("the run document", body)
+		var doc struct {
+			row
+			Children []row  `json:"children"`
+			Holes    []hole `json:"holes"`
+		}
+		decode(t, body, &doc)
+		var kids []string
+		for _, k := range doc.Children {
+			kids = append(kids, k.ID)
+		}
+		slices.Sort(kids)
+		if !slices.Equal(kids, tc.kids) || doc.ChildrenCount != len(tc.kids) || hiddenOf(doc.Holes) != tc.hidden {
+			t.Errorf("%s: run document children %v (count %d, hidden %d), want %v (hidden %d)", tc.name, kids, doc.ChildrenCount, hiddenOf(doc.Holes), tc.kids, tc.hidden)
+		}
+		if panel && (doc.DelegatedCostKnown || !strings.Contains(doc.DelegatedCostReason, "another public id")) {
+			t.Errorf("%s: delegated cost known %v, reason %q: want not known, the scope cut said", tc.name, doc.DelegatedCostKnown, doc.DelegatedCostReason)
+		}
+		if got := rowOf(doc.Children, mine).ChildrenCount; got != tc.mineKids {
+			t.Errorf("%s: mine's children_count = %d, want %d", tc.name, got, tc.mineKids)
+		}
+
+		// The run list rows, the child list, search, the session.
+		for _, path := range []string{"/api/runs", "/api/runs?all=1", "/api/search?q=secret", "/api/sessions/" + session} {
+			body := get(tc.tok, path)
+			noLeak(path, body)
+			var page struct {
+				Runs []row `json:"runs"`
+			}
+			decode(t, body, &page)
+			if got := rowOf(page.Runs, root).ChildrenCount; got != len(tc.kids) {
+				t.Errorf("%s: %s root children_count = %d, want %d", tc.name, path, got, len(tc.kids))
+			}
+		}
+		noLeak("the child list", get(tc.tok, "/api/runs?parent="+root))
+
+		// One step: its children, its calls' child ids, the hidden hole.
+		body = get(tc.tok, "/api/runs/"+root+"/steps/0")
+		noLeak("step 0", body)
+		var step struct {
+			Children []struct {
+				ID string `json:"id"`
+			} `json:"children"`
+			Holes []hole `json:"holes"`
+		}
+		decode(t, body, &step)
+		var sk []string
+		for _, k := range step.Children {
+			sk = append(sk, k.ID)
+		}
+		slices.Sort(sk)
+		if !slices.Equal(sk, tc.stepKids) || hiddenOf(step.Holes) != tc.stepHide {
+			t.Errorf("%s: step 0 children %v (hidden %d), want %v (hidden %d)", tc.name, sk, hiddenOf(step.Holes), tc.stepKids, tc.stepHide)
+		}
+
+		// The diff of the run with itself (steps assembled as above).
+		noLeak("the diff", get(tc.tok, "/api/diff?a="+root+"&b="+root))
+
+		// The export's root document (json, jsonl), tree or not.
+		for _, q := range []string{"format=json", "format=jsonl", "format=json&tree=1", "format=jsonl&tree=1"} {
+			body := get(tc.tok, "/api/runs/"+root+"/export?"+q)
+			noLeak("the export "+q, body)
+			if q == "format=json" {
+				var x struct {
+					Run struct {
+						Children []row  `json:"children"`
+						Holes    []hole `json:"holes"`
+					} `json:"run"`
+				}
+				decode(t, body, &x)
+				if len(x.Run.Children) != len(tc.kids) || hiddenOf(x.Run.Holes) != tc.hidden {
+					t.Errorf("%s: export run block children %d (hidden %d), want %d (hidden %d)", tc.name, len(x.Run.Children), hiddenOf(x.Run.Holes), len(tc.kids), tc.hidden)
+				}
+			}
+		}
+	}
+
+	// The live lane: a run frame's row counts the token's children only.
+	req, _ := http.NewRequest(http.MethodGet, ts.URL+"/api/live?public_id=pub_a&kinds=run", nil)
+	req.Header.Set("Authorization", "Bearer "+sign(scopeRead))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("live = %d", resp.StatusCode)
+	}
+	srv.live.Publish(context.Background(), obsdb.RunFrame(obsdb.RunRow{ID: root, PublicID: "pub_a", Status: obsdb.StatusSucceeded}))
+	frames := readSSE(t, resp, 1, 5*time.Second)
+	if len(frames) != 1 || frames[0].event != "run" {
+		t.Fatalf("live frames = %+v, want one run frame", frames)
+	}
+	for _, l := range leaks {
+		if strings.Contains(frames[0].data, l) {
+			t.Errorf("the live run frame names %q: %s", l, frames[0].data)
+		}
+	}
+	if !strings.Contains(frames[0].data, `"children_count":1`) {
+		t.Errorf("the live run frame's children_count is not the token's 1: %s", frames[0].data)
+	}
+}

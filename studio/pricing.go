@@ -585,6 +585,16 @@ type coster struct {
 	// a set's (setCost) whose one-level read (primeChildren) failed —
 	// the row's children_count is then not known (children_unknown).
 	partKids map[string]bool
+	// scope is the request's panel token public id (scopeOf), "" for any
+	// other identity. Under it, kids holds each run's children inScope
+	// only — every count, children list and delegated figure read from
+	// the coster is the token's — and hidden counts the rest, per run;
+	// hiddenUsage sums the hidden core Subagent children's usage, which
+	// the run's own figure still takes out (the core rolled it in).
+	scope       string
+	hidden      map[string]int
+	hiddenSubs  map[string]int
+	hiddenUsage map[string]core.Usage
 }
 
 // runCost is one run's own and delegated figures.
@@ -599,15 +609,41 @@ func (rc runCost) total() (float64, bool) {
 }
 
 func (s *Server) coster(ctx context.Context) *coster {
-	return &coster{ctx: ctx, db: s.db, table: s.pricing, kids: map[string][]obsdb.RunRow{}, memo: map[string]runCost{}, partKids: map[string]bool{}}
+	return &coster{ctx: ctx, db: s.db, table: s.pricing, kids: map[string][]obsdb.RunRow{}, memo: map[string]runCost{}, partKids: map[string]bool{},
+		scope: scopeOf(ctx), hidden: map[string]int{}, hiddenSubs: map[string]int{}, hiddenUsage: map[string]core.Usage{}}
 }
 
-// prime records a run's children already read (a run document's).
+// prime records a run's children already read (a run document's),
+// cut to the coster's scope (scopeKids): the rest are counted, never
+// kept.
 func (c *coster) prime(id string, kids []obsdb.RunRow) {
 	if kids == nil {
 		kids = []obsdb.RunRow{}
 	}
-	c.kids[id] = kids
+	visible, n := scopeKids(c.scope, kids)
+	c.kids[id] = visible
+	delete(c.hidden, id)
+	delete(c.hiddenSubs, id)
+	delete(c.hiddenUsage, id)
+	if n == 0 {
+		return
+	}
+	c.hidden[id] = n
+	var u core.Usage
+	for _, k := range subagents(id, kids) {
+		if !inScope(c.scope, k) {
+			c.hiddenSubs[id]++
+			u = u.Add(k.Usage)
+		}
+	}
+	c.hiddenUsage[id] = u
+}
+
+// visibleKids is a primed run's children in the coster's scope and the
+// count of the rest (prime): a run document's children[] and its
+// hidden hole.
+func (c *coster) visibleKids(id string) ([]obsdb.RunRow, int) {
+	return c.kids[id], c.hidden[id]
 }
 
 // primeTrees reads the subagent trees of a page of runs before they are
@@ -638,7 +674,7 @@ func (c *coster) primeTrees(recs []obsdb.RunRow) {
 		var next []string
 		for _, id := range ids {
 			c.prime(id, kids[id])
-			for _, k := range subagents(id, kids[id]) {
+			for _, k := range subagents(id, c.kids[id]) { // the scope's: a hidden child is never walked
 				if _, done := c.kids[k.ID]; !done {
 					next = append(next, k.ID)
 				}
@@ -738,10 +774,16 @@ func (c *coster) compute(rec obsdb.RunRow) runCost {
 		kc.id = k.ID
 		parts = append(parts, kc)
 	}
+	// A child outside a panel token's scope (prime) is out of every
+	// figure but the own split: its usage is still the core's roll-up.
+	own = sub(own, c.hiddenUsage[rec.ID])
 	// The cause is carried: one child whose figure is unknown (running,
 	// its end never arrived, its children unreadable) makes the
 	// delegated figure unknown, not unpriced.
 	del := tally(parts, "subagent run", true)
+	if n := c.hiddenSubs[rec.ID]; n > 0 {
+		del = scopeCutDelegated(del, n)
+	}
 	if why := usagePending(rec); why != "" {
 		return runCost{own: cost{badge: costUnknown, reason: why, cache: cacheOf(own)}, delegated: del}
 	}
@@ -813,6 +855,26 @@ func tally(parts []runCost, noun string, nested bool) cost {
 		out.reason += ": no price for " + strings.Join(capModels(out.models), ", ")
 	}
 	return out
+}
+
+// scopeCutDelegated is a delegated figure (tally's, over the subagent
+// runs in scope) once n more were left out by a panel token's scope
+// (coster.prime): not known — the token reads no part of their bill —
+// counted, the hidden runs never named; a reason the visible parts had
+// follows the scope's.
+func scopeCutDelegated(del cost, n int) cost {
+	del.runs += n
+	del.unknown += n
+	del.known, del.usd, del.badge = false, 0, costUnknown
+	why := fmt.Sprintf("%d of %d subagent runs carry another public id, or none: a panel token does not read their cost", n, del.runs)
+	if del.reason != "" {
+		why += "; " + del.reason
+	}
+	del.reason = why
+	if del.why == "" {
+		del.why, del.cause = why, why
+	}
+	return del
 }
 
 // subagents is the core Subagent children among a run's parent-linked

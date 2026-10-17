@@ -115,7 +115,21 @@ names another. The recipe, with worked examples and troubleshooting:
 **C · hosted** — the same handler behind `studio.Token`: the panel's
 scoped tokens are HMAC-signed `{public_id, scope, exp}` minted by your
 backend through `POST /api/panel-tokens`; every data route refuses
-anything outside the token's public id. A token is read-only unless
+anything outside the token's public id. A run the token may read can
+have child runs that carry another public id, or none (a nested
+`Generate` or thread turn inside a tool handler, a pool child session,
+a child whose `Metadata` cleared `weft.public_id`): every route that
+reaches runs through another — the run document's `children[]` and the
+export's run block, a step's `children` and its calls' `child_run_id`,
+every row's `children_count` / `children_failed` (runs list, search, a
+session's turns, the live lane's run frames), `?tree=1` on spans and
+the export — keeps the token's public id's children alone (a child row
+must carry it, the tree's rule) and says the rest as one `hidden` hole
+with a `count` (the run document's and the step's `holes`, the tree
+export's `subagent_holes`), never by id, public id or prompt. The
+run's own cost still takes their usage out (the core rolled it in);
+its delegated figure is not known to the token (`delegated_cost_known:
+false`, the reason counting the runs it cannot read). A token is read-only unless
 minted with `"playground": true` — a read-scoped one neither acts nor
 reads the agents' system prompts (`/api/manifest`, the runtimes'
 instructions) — and experiments (`experiment_id` included) are the

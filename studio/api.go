@@ -983,13 +983,19 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 	}
 	c := s.coster(r.Context())
 	c.prime(det.ID, det.Children)
-	c.primeTrees(det.Children)
-	doc := runDoc{runRow: c.row(det.RunRow), Children: s.childRows(r.Context(), c, det.Children)}
+	c.primeTrees(c.kids[det.ID]) // the scope's children (prime)
+	kids, hidden := c.visibleKids(det.ID)
+	doc := runDoc{runRow: c.row(det.RunRow), Children: s.childRows(r.Context(), c, kids)}
 	doc.LogWarn, doc.LogError, doc.LogsCapped = s.logCounts(r.Context(), id)
 	holes, err := s.runHoles(r.Context(), det.RunRow)
 	if err != nil {
 		dbError(w, r, "run", id, err)
 		return
+	}
+	if hidden > 0 {
+		// A panel token's run document lists its public id's children
+		// only (inScope); the rest are one counted hole, never named.
+		holes = append(holes, hiddenChildrenHole(hidden))
 	}
 	doc.Holes = holes
 	comps, err := s.db.Compactions(r.Context(), id)
@@ -1002,7 +1008,8 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 }
 
 // childRows is a run document's children[] rows, each with its own
-// runHoles (plan A10) — the run page's and the export's. A child whose
+// runHoles (plan A10) — the run page's and the export's; kids are the
+// coster's scoped ones (coster.visibleKids), never det.Children. A child whose
 // holes cannot be read goes out without them: one unreadable child
 // never fails its parent's page.
 func (s *Server) childRows(ctx context.Context, c *coster, kids []obsdb.RunRow) []runRow {
@@ -1686,10 +1693,7 @@ func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
 // panelPublicID is the request's panel token's public id, "" for any
 // other identity.
 func panelPublicID(r *http.Request) string {
-	if p := idFrom(r).panel; p != nil {
-		return p.PublicID
-	}
-	return ""
+	return scopeOf(r.Context())
 }
 
 // withPublicID keeps the runs carrying pub.

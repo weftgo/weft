@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -248,6 +249,55 @@ func tokenEqual(got, want string) bool {
 func forbidden(w http.ResponseWriter, r *http.Request) {
 	writeError(w, r, http.StatusForbidden, "forbidden",
 		"this token is scoped to public id "+idFrom(r).panel.PublicID)
+}
+
+// scopeOf is the panel token's public id the request runs under, ""
+// for any other identity: panelPublicID for code that holds the
+// request's context only (the coster, which every route prices with).
+func scopeOf(ctx context.Context) string {
+	if id, _ := ctx.Value(identityCtxKey{}).(identity); id.panel != nil {
+		return id.panel.PublicID
+	}
+	return ""
+}
+
+// inScope is the one rule for a run a reader reaches through another
+// (a run document's children and its export's, a step's children, a
+// row's children counts and delegated cost, the tree export's
+// subagents): under a panel token's public id pub, a run is in scope
+// when its row carries pub — withPublicID's rule, and obsdb's tree
+// scope (scopeTree) for a row. pub "" admits every run.
+func inScope(pub string, rr obsdb.RunRow) bool {
+	return pub == "" || rr.PublicID == pub
+}
+
+// scopeKids splits a run's children by inScope: the ones pub reaches,
+// and the count of the rest — which go out as one hidden hole
+// (hiddenChildrenHole), never by id or public id.
+func scopeKids(pub string, kids []obsdb.RunRow) ([]obsdb.RunRow, int) {
+	if pub == "" {
+		return kids, 0
+	}
+	out := make([]obsdb.RunRow, 0, len(kids))
+	for _, k := range kids {
+		if inScope(pub, k) {
+			out = append(out, k)
+		}
+	}
+	return out, len(kids) - len(out)
+}
+
+// hiddenChildrenHole is the hidden hole (ADR 0028 §11's table) of a
+// run document or a step whose n child runs a panel token's scope left
+// out: counted, never named — their ids and public ids are another
+// app's.
+func hiddenChildrenHole(n int) stepHole {
+	return stepHole{
+		Hole:   string(obsdb.HoleHidden),
+		Reason: fmt.Sprintf("%d child runs carry another public id, or none: a panel token reads its own public id's runs, so they are left out", n),
+		Fix:    "open the run with the server (dev) token",
+		Count:  n,
+	}
 }
 
 // scopeRunsQuery forces a runs query onto the token's public id and

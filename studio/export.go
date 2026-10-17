@@ -175,17 +175,14 @@ const exportTreeCap = 200
 // skipped. Never nil holes: [] when the tree is whole.
 func (s *Server) collectSubtree(r *http.Request, x *runExport) ([]*runExport, []treeHole, error) {
 	ctx := r.Context()
-	panel := idFrom(r).panel
+	// run.Children are in scope already (collectExport: inScope); each
+	// block counts the children it left out.
 	queue := append([]obsdb.RunRow(nil), x.run.Children...)
 	var out []*runExport
-	hidden, truncated := 0, false
+	hidden, truncated := x.hiddenKids, false
 	for len(queue) > 0 {
 		kid := queue[0]
 		queue = queue[1:]
-		if panel != nil && kid.PublicID != panel.PublicID {
-			hidden++
-			continue
-		}
 		if len(out) >= exportTreeCap {
 			truncated = true
 			break
@@ -198,6 +195,7 @@ func (s *Server) collectSubtree(r *http.Request, x *runExport) ([]*runExport, []
 			return nil, nil, err
 		}
 		c.spans = spansFor(r, c.spans)
+		hidden += c.hiddenKids
 		out = append(out, c)
 		queue = append(queue, c.run.Children...)
 	}
@@ -450,6 +448,9 @@ type runExport struct {
 	// hidden: the identity is a read-scoped panel token — the request
 	// block and the compaction views' bodies are not its.
 	hidden bool
+	// hiddenKids counts the run's children a panel token's scope left
+	// out of run.Children (coster.visibleKids).
+	hiddenKids int
 	// stripped is whether any request record came through a content-off
 	// chain — read even when the request block is hidden, so a read
 	// token's transcript badge says stripped, not gap.
@@ -485,10 +486,18 @@ func (s *Server) collectExport(ctx context.Context, id string, hidden bool) (*ru
 	}
 	c := s.coster(ctx)
 	c.prime(det.ID, det.Children)
-	c.primeTrees(det.Children)
-	x := &runExport{run: det, hidden: hidden, row: c.row(det.RunRow), children: s.childRows(ctx, c, det.Children)}
+	c.primeTrees(c.kids[det.ID]) // the scope's children (prime)
+	// A panel token's export lists its public id's children only
+	// (inScope, the run document's rule): the rest are one counted
+	// hidden hole, and the tree walk (collectSubtree) never reaches them.
+	kids, nHidden := c.visibleKids(det.ID)
+	det.Children = kids
+	x := &runExport{run: det, hidden: hidden, hiddenKids: nHidden, row: c.row(det.RunRow), children: s.childRows(ctx, c, det.Children)}
 	if x.runHoles, err = s.runHoles(ctx, det.RunRow); err != nil {
 		return nil, err
+	}
+	if x.hiddenKids > 0 {
+		x.runHoles = append(x.runHoles, hiddenChildrenHole(x.hiddenKids))
 	}
 	if x.events, x.gaps, err = allEvents(ctx, s.db, id); err != nil {
 		return nil, err

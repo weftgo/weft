@@ -235,6 +235,9 @@ type stepHole struct {
 	Hole   string `json:"hole"`
 	Reason string `json:"reason"`
 	Fix    string `json:"fix,omitempty"`
+	// Count is the runs a hidden hole stands for (hiddenChildrenHole):
+	// child runs a panel token's scope left out. Absent elsewhere.
+	Count int `json:"count,omitempty"`
 }
 
 // truncatedMarker is the marker core's capResult ends a cut tool
@@ -865,8 +868,17 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 	// child named <run>/<step>/<call> (the core's childRunID) is this
 	// step's by its id alone — a call id may repeat across steps; only a
 	// child named otherwise joins on its parent call id.
+	// Under a panel token, a child outside its public id (inScope) is
+	// neither listed nor joined to its call: one counted hidden hole.
 	prefix := id + "/" + item + "/"
+	pub, hiddenKids := scopeOf(ctx), 0
 	for _, kid := range det.Children {
+		if !inScope(pub, kid) {
+			if strings.HasPrefix(kid.ID, prefix) || (!strings.HasPrefix(kid.ID, id+"/") && calls[kid.ParentCallID] != nil) {
+				hiddenKids++
+			}
+			continue
+		}
 		var c *stepToolCall
 		ok := false
 		switch {
@@ -885,6 +897,13 @@ func (sr *stepRun) assembleStep(n int, prompts bool) (stepDoc, error) {
 		doc.Children = append(doc.Children, stepChild{
 			ID: kid.ID, CallID: kid.ParentCallID, Agent: kid.Agent, Status: string(kid.Status), Usage: kid.Usage, rec: kid,
 		})
+	}
+	if hiddenKids > 0 {
+		h := hiddenChildrenHole(hiddenKids)
+		holes.also(obsdb.HoleHidden, h.Reason, h.Fix)
+		cur := holes[obsdb.HoleHidden]
+		cur.Count = hiddenKids
+		holes[obsdb.HoleHidden] = cur
 	}
 	for _, cid := range order {
 		doc.ToolCalls = append(doc.ToolCalls, *calls[cid])

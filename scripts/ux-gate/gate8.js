@@ -310,7 +310,7 @@ async function panelAll(page) {
       labRun ? { name: `runtimelab.option-lab (its playground run ${labRun.id}: the scenario's runs carry no arena.scenario; picked by weft.override.* on invoke_agent)`, fact: "overridden-by-experiment chip", run: labRun, studio: /overridden by experiment/, panel: /overridden by experiment/ } : { name: "runtimelab.option-lab", missing: "no playground run with weft.override.* in the seed" },
       fileRun ? { name: `msg.parts (${fileRun.id})`, fact: "attachment chip", run: fileRun, studio: /attachment|image\/|application\/pdf|📎/, panel: /attachment|image\/|application\/pdf|📎/ } : { name: "msg.parts", missing: "no run in the seed has a user file part: msg.parts is a 0-event scenario (its 8 checks are on the message types, no run is exported); no other scenario sends a FilePart" },
       { name: "sub.failed", fact: "typed child outcome", run: sc("sub.failed").find((r) => !r.parent_run_id) || sc("sub.failed")[0], studio: /child failed/i, panel: /child failed/i },
-      { name: "opt.prepare-step", fact: "PrepareStep chip", run: sc("opt.prepare-step")[0], studio: /changed by PrepareStep|PrepareStep: /, panel: /changed by PrepareStep|PrepareStep/ },
+      { name: "opt.prepare-step", fact: "PrepareStep chip", run: sc("opt.prepare-step")[0], studio: /changed by PrepareStep|PrepareStep: [a-z_]+(?:, [a-z_]+)*/, panel: /changed by PrepareStep|PrepareStep: [a-z_]+(?:, [a-z_]+)*/ },
     ];
     for (const [i, s] of shapes.entries()) {
       if (s.missing || !s.run) {

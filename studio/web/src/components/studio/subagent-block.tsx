@@ -15,7 +15,12 @@ import type { RunRow, RunStatus, StepChild, Usage } from "@/lib/api"
 import { runQuery, transcriptQuery } from "@/lib/api"
 import { compactionsOf } from "@/lib/compaction"
 import { applyTranscript, linkView } from "@/lib/events"
-import { stepCount, usageSummary } from "@/lib/format"
+import {
+  stepCount,
+  UNNAMED_AGENT,
+  UNNAMED_AGENT_HINT,
+  usageSummary,
+} from "@/lib/format"
 import {
   mergeHoles,
   rowHoles,
@@ -156,15 +161,19 @@ export function SubagentBlock({
           className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-left"
           onClick={() => setOpen((o) => !o)}
           aria-expanded={open}
-          aria-label={`subagent ${child.agent || "unnamed"}: ${open ? "close" : "open"} the child run`}
+          aria-label={`subagent ${child.agent || UNNAMED_AGENT}: ${open ? "close" : "open"} the child run`}
         >
           <ChevronRight
             data-slot="icon"
             className={`size-3.5 text-faint transition-transform ${open ? "rotate-90" : ""}`}
           />
           <span className="eyebrow">subagent</span>
-          <span className="font-mono text-xs" data-child-agent>
-            {child.agent || "unnamed"}
+          <span
+            className={`font-mono text-xs ${child.agent ? "" : "text-muted-foreground"}`}
+            title={child.agent ? undefined : UNNAMED_AGENT_HINT}
+            data-child-agent
+          >
+            {child.agent || UNNAMED_AGENT}
           </span>
         </button>
         {child.model ? (

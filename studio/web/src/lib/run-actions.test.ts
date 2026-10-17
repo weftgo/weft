@@ -40,12 +40,12 @@ describe("deleteOffWhy", () => {
   })
   it("the confirm names the children and says what stays", () => {
     expect(deleteConfirmWords({ id: "r", children: [] }).children).toBe(
-      "No subagent run is known under it; any recorded under it goes with it."
+      "No child run is known under it; any recorded under it goes with it."
     )
     expect(
       deleteConfirmWords({ id: "r", children: [{ id: "a" }, { id: "b" }] })
         .children
-    ).toBe("It goes with every subagent run under it, at any depth (2 known):")
+    ).toBe("It goes with every child run under it, at any depth (2 known):")
     // P8-fix-b #2: the server deletes the whole closure — a child's own
     // children count, as a floor (their children are not read here).
     expect(
@@ -53,12 +53,12 @@ describe("deleteOffWhy", () => {
         id: "r",
         children: [{ id: "a", children_count: 3 }, { id: "b" }],
       }).children
-    ).toBe("It goes with every subagent run under it, at any depth (5+ known):")
+    ).toBe("It goes with every child run under it, at any depth (5+ known):")
     expect(deleteConfirmWords({ id: "r", children: [] }).derived).toMatch(
       /Derived runs read from its tools' spans/
     )
-    expect(childrenUnder(1)).toBe("(+1 subagent run under it)")
-    expect(childrenUnder(3)).toBe("(+3 subagent runs under it)")
+    expect(childrenUnder(1)).toBe("(+1 child run under it)")
+    expect(childrenUnder(3)).toBe("(+3 child runs under it)")
     expect(deleteConfirmWords({ id: "r", children: [] }).body).toMatch(
       /studio's database only/
     )

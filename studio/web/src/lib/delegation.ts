@@ -101,3 +101,13 @@ export function nest<T extends Pick<RunRow, "id" | "parent_run_id">>(
   for (const r of rows) place(r, 0)
   return out
 }
+
+/** The runs list's children toggle (UX-F-15: subagent = the agent,
+ * child run = its run, delegated = cost and usage only). */
+export const RUNS_TREE = {
+  on: "with child runs",
+  off: "top-level only",
+  onTitle: "child runs are listed too (all=1) — show top-level runs only",
+  offTitle:
+    "top-level runs only: child runs are on their parent's page — list them too",
+} as const

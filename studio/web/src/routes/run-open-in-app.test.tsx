@@ -169,7 +169,11 @@ describe("OpenInApp", () => {
     render(<OpenInApp doc={runDoc({ meta: {} })} />)
     const b = verb()!
     expect(b.tagName).toBe("BUTTON")
-    expect((b as HTMLButtonElement).disabled).toBe(true)
+    // Focusable, its reason read by a screen reader (UX-A-28).
+    expect((b as HTMLButtonElement).disabled).toBe(false)
+    expect(b.getAttribute("aria-disabled")).toBe("true")
+    const why = document.getElementById(b.getAttribute("aria-describedby")!)
+    expect(why!.textContent).toBe(NO_PAGE_URL)
     expect(b.parentElement!.title).toBe(NO_PAGE_URL)
   })
 })

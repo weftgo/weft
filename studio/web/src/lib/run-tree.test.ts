@@ -20,11 +20,13 @@ import {
   expandFor,
   qualifyKey,
   resolveRowSel,
+  treeBadge,
   treeSpans,
 } from "./run-tree"
 import { spansFromFold, spansFromTimed } from "./trace"
 import { keyRows, resolveSel } from "./trace-sel"
 import { rowBadge } from "./waterfall"
+import type { WaterfallRow } from "./waterfall"
 // The run page's build (the ?tree=1 read's descendant rules in).
 import { treeRows as waterfallRows } from "./waterfall-tree"
 
@@ -241,5 +243,38 @@ describe("the child subtree in place (U9.2)", () => {
           : r
     )
     expect(resolveSel(app, qualifyKey("s1:m", DIR)).key).toBe(`s:${DIR}:1:m`)
+  })
+})
+
+// UX-A-30: a failed tool row reads the story's taxonomy, not "error".
+describe("treeBadge", () => {
+  const row = (
+    error: string | undefined,
+    attrs: Record<string, unknown> = {}
+  ) =>
+    ({
+      key: "t:x",
+      kind: "tool",
+      status: "error",
+      error,
+      span: { attrs },
+    }) as unknown as WaterfallRow
+  it("names the failure kind from error.type and the span's facts", () => {
+    expect(treeBadge(row("panic", { "weft.panic.layer": "handler" }))).toBe(
+      "panic · handler"
+    )
+    expect(treeBadge(row("timeout"))).toBe("timeout")
+    expect(treeBadge(row("tool_error"))).toBe("tool error")
+    expect(
+      treeBadge(
+        row("RETRY", { "weft.tool.retry": 1, "weft.tool.retry_budget": "3" })
+      )
+    ).toBe("retry 1/3")
+    expect(treeBadge(row("RATE_LIMITED"))).toBe("RATE_LIMITED")
+  })
+  it("keeps rowBadge for the rest", () => {
+    const ok = { ...row(undefined), status: "ok" } as WaterfallRow
+    expect(treeBadge(ok)).toBe(rowBadge(ok))
+    expect(treeBadge(row(undefined))).toBe("error")
   })
 })

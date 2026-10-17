@@ -219,6 +219,11 @@ describe("the app turn's kinds and refusal words", () => {
     expect(parkedKind(child, [rt()])).toBe("pool-child")
     const w = refusalWords(parkedKind(child, [rt()]), child, [rt()], false)
     expect(refusalLine(w)).toBe(`${POOL_CHILD} s ${POOL_CHILD_TURN} s-t1`)
+    // UX-F-15: a pool child is a pool session; "delegated" is cost and
+    // usage's word alone.
+    expect(refusalLine(w)).toBe(
+      "parked · a pool session's turn — decide on the parent session s · started by turn s-t1"
+    )
     expect(w.fix).toBe("")
     expect(refusalLine(w)).not.toContain(APP_RUN)
     expect(go("../thread/turn.go")).toMatch(/"weft\.session\.parent"/)

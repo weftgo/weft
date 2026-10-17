@@ -193,6 +193,9 @@ describe("subagents on the run page (A10)", () => {
     expect(decodeURIComponent(link.getAttribute("href") ?? "")).toContain(
       `/runs/${CHILD}`
     )
+    // UX-F-15: the header lists the parent's child runs in those words
+    // (subagent = the agent, child run = its run).
+    expect(screen.getByText("child run", { selector: ".eyebrow" })).toBeTruthy()
     // Only step 1 called it.
     expect(
       document.querySelector(`[data-step="0"] [data-child-row]`)
@@ -418,7 +421,7 @@ describe("the runs list keeps subagent children out by default (A10)", () => {
     expect(
       decodeURIComponent(parentLink?.getAttribute("href") ?? "")
     ).toContain(`/runs/r_gone`)
-    expect(screen.getByRole("button", { name: "with subagents" })).toBeTruthy()
+    expect(screen.getByRole("button", { name: "with child runs" })).toBeTruthy()
   })
 
   it("parent=<run id> in the URL lists that run's children", async () => {

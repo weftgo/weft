@@ -1,6 +1,7 @@
 // Event summaries: one line per wire event for the replay gutter,
 // the raw explorer and the current-event readout. Pure functions.
 import type { Message, WireEvent } from "./api"
+import type { FoldedStep } from "./events"
 import { msText } from "./attempts"
 import { endCard, failedAtStep, stopDetail, stoppedByWords } from "./stopped-by"
 
@@ -37,6 +38,48 @@ export function eventKind(ev: WireEvent): EventKind {
     default:
       return "step"
   }
+}
+
+/** The story's shape controls (UX-A-38): a long story folded to its
+ * step heads, or its quiet steps dimmed so the problems stand out. */
+export const STORY_SHAPE = {
+  collapse: "collapse all steps",
+  expand: "expand all steps",
+  problems: "only problems",
+  problemsHint:
+    "dim the steps that went smoothly: every tool call answered ok and the step finished normally",
+}
+
+/** stepHasProblem: the step a reader looking for what went wrong wants
+ * (STORY_SHAPE.problems) — it ended without step_finish on a run that
+ * is not running, stopped at max_tokens, or holds a tool call that
+ * failed or never finished. */
+export function stepHasProblem(step: FoldedStep, runStatus: string): boolean {
+  const over = runStatus !== "running"
+  if (!step.finish) return over
+  if (step.finish.reason === "max_tokens") return true
+  return step.toolCalls.some((c) => c.result?.isError || (!c.result && over))
+}
+
+/** The replay bar's words with nothing hidden (UX-A-24): "live" only
+ * while the run runs; a finished run's stream is at its end. `back` is
+ * the verb that returns there from a scrubbed position. */
+export function replayEnd(
+  running: boolean,
+  total: number
+): { readout: string; back: string; key: string } {
+  return running
+    ? {
+        readout:
+          "live · every event shown · press space or click the bar to replay",
+        back: "back to live",
+        key: "live",
+      }
+    : {
+        readout: `end · all ${total.toLocaleString()} ${total === 1 ? "event" : "events"} · press space or click the bar to replay`,
+        back: "back to the end",
+        key: "end",
+      }
 }
 
 /** Deltas stream; everything else is a boundary the eye can land on. */

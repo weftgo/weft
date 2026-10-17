@@ -129,6 +129,7 @@ import {
 import { DerivedNote, DerivedStory } from "@/components/studio/derived-story"
 import { derivedWords, isDerived, isLive } from "@/lib/honesty"
 import { ReplayBar } from "@/components/studio/replay-bar"
+import { LoadFailed } from "@/components/studio/empty-state"
 import { ReplayContext, ReplayDrawer } from "@/components/studio/replay-drawer"
 import type { ReplayRequest } from "@/components/studio/replay-drawer"
 import { SpanDetail } from "@/components/studio/span-detail"
@@ -1221,22 +1222,12 @@ function RunPage() {
   if (run.isError) {
     if (isNotFound(run.error)) return <NotFound kind="run" id={id} />
     return (
-      <div className="mx-auto max-w-md space-y-3 py-24 text-center">
-        <p className="font-mono text-xs text-faint">{id}</p>
-        <p className="text-sm text-status-bad">{run.error.message}</p>
-        <div className="flex justify-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => void run.refetch()}
-          >
-            retry
-          </Button>
-          <Button variant="ghost" size="sm" render={<Link to="/runs" />}>
-            back to runs
-          </Button>
-        </div>
-      </div>
+      <LoadFailed
+        kind="run"
+        id={id}
+        error={run.error}
+        onRetry={() => void run.refetch()}
+      />
     )
   }
   const doc = run.data
@@ -1317,6 +1308,7 @@ function RunPage() {
               playhead={playhead}
               onTick={setPlayhead}
               onSeek={seek}
+              running={runStatus === "running"}
             />
           ) : null}
           {/* While running: positions may still be in flight. Once over,

@@ -5,7 +5,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { ArrowUpRight, Check, ChevronRight, Link2 } from "lucide-react"
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 
 import { sessionQuery, storedManifestQuery } from "@/lib/api"
 import { concurrencyWords } from "@/lib/request-pane"
@@ -34,6 +34,8 @@ import {
   elapsed,
   relativeTime,
   stepCount,
+  UNNAMED_AGENT,
+  UNNAMED_AGENT_HINT,
   usageSummary,
 } from "@/lib/format"
 import { CopyButton } from "@/components/studio/codewin"
@@ -149,25 +151,33 @@ export function OpenInApp({
   const href = page
     ? appLink(page, { publicId, session: doc.session_id, run: doc.id })
     : null
-  if (!href)
+  if (!href) {
+    // aria-disabled, not disabled (UX-A-28): the button stays focusable
+    // and its reason is read through aria-describedby, not a hover title.
+    const why = page
+      ? `weft.page_url is not an http(s) URL: ${page}`
+      : NO_PAGE_URL
+    const whyId = `open-in-app-why-${doc.id}`
     return (
-      <span
-        title={
-          page ? `weft.page_url is not an http(s) URL: ${page}` : NO_PAGE_URL
-        }
-      >
+      <span title={why}>
         <Button
           variant="outline"
           size="xs"
-          className="font-mono"
-          disabled
+          className="font-mono opacity-50"
+          aria-disabled="true"
+          aria-describedby={whyId}
+          onClick={(e) => e.preventDefault()}
           data-open-in-app=""
         >
           <ArrowUpRight data-slot="icon" />
           open in app
         </Button>
+        <span id={whyId} className="sr-only">
+          {why}
+        </span>
       </span>
     )
+  }
   return (
     <a
       href={href}
@@ -383,6 +393,15 @@ export function RunHeader({
   const now = useNow(doc.status === "running")
   const title = runTitle(doc)
   const costCapable = useCostCapable()
+  // Focus starts at the page's title (UX-A-37), once per run opened and
+  // only when nothing holds it: the first Tab then walks the header,
+  // not the sidebar or the run tree's controls.
+  const heading = useRef<HTMLHeadingElement>(null)
+  useEffect(() => {
+    const at = document.activeElement
+    if (at && at !== document.body) return
+    heading.current?.focus({ preventScroll: true })
+  }, [doc.id])
   // A parked turn's resume (U1): its session's turns — the query the
   // parked-calls block polls — say whether a later turn resumed it.
   // Only a turn of its own session is looked up: a child of either
@@ -468,7 +487,10 @@ export function RunHeader({
             runTitle); the id is the copyable mono line under it. */}
         <div className="max-w-full min-w-0">
           <h1
-            className="flex min-w-0 items-baseline gap-1.5 text-base font-medium tracking-tight"
+            ref={heading}
+            tabIndex={-1}
+            data-skip-target
+            className="flex min-w-0 items-baseline gap-1.5 text-base font-medium tracking-tight outline-none"
             data-run-title
           >
             {/* Kind agent already leads with the agent (runTitle's
@@ -479,7 +501,12 @@ export function RunHeader({
               <>
                 <span className="shrink-0">
                   {doc.agent || (
-                    <span className="text-muted-foreground">unnamed agent</span>
+                    <span
+                      className="text-muted-foreground"
+                      title={UNNAMED_AGENT_HINT}
+                    >
+                      {UNNAMED_AGENT}
+                    </span>
                   )}
                 </span>
                 {title.kind === "id" ? null : (
@@ -576,7 +603,7 @@ export function RunHeader({
         )}
         {split ? (
           <span
-            title={`input tokens: this run's own and its subagent children's (${doc.children
+            title={`input tokens: this run's own and its child runs' (${doc.children
               .map((c) => `${c.agent || c.id}: ${c.usage.input_tokens}`)
               .join(", ")})`}
             data-token-split
@@ -769,7 +796,7 @@ export function RunHeader({
       {doc.children.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <span className="eyebrow">
-            {doc.children.length === 1 ? "subagent run" : "subagent runs"}
+            {doc.children.length === 1 ? "child run" : "child runs"}
           </span>
           {doc.children.map((c) => (
             <Link

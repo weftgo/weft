@@ -3,7 +3,7 @@
 // badge on capped results.
 import { readFileSync } from "node:fs"
 import { resolve } from "node:path"
-import { screen } from "@testing-library/react"
+import { fireEvent, screen } from "@testing-library/react"
 import { QueryClient } from "@tanstack/react-query"
 import { describe, expect, it, vi } from "vitest"
 
@@ -641,5 +641,42 @@ describe("the loop marks (UX-S1-07)", () => {
       <StepList events={events} folded={fold(events)} doc={doc} />
     )
     expect(document.querySelector("[data-loop-repeat]")).toBeNull()
+  })
+
+  // UX-A-38: a long story folds to its step heads, or dims its quiet
+  // steps so the problems stand out; the named step stays whole.
+  it("collapse all steps and only problems (UX-A-38)", async () => {
+    Element.prototype.scrollIntoView ??= () => {}
+    const events: WireEvent[] = [
+      { type: "run_start", id: "r_l", model: { provider: "p", name: "m" } },
+      ...step(0),
+      ...step(1, "boom"),
+      ...step(2),
+    ]
+    const doc = {
+      ...subDoc,
+      id: "r_l",
+      children: [],
+      status: "succeeded",
+      steps: 3,
+    } as RunDoc
+    await renderWithRouter(
+      <StepList events={events} folded={fold(events)} doc={doc} highlight={2} />
+    )
+    const card = (n: number) =>
+      document.querySelector<HTMLElement>(`[data-step="${n}"]`)!
+    fireEvent.click(screen.getByRole("button", { name: "collapse all steps" }))
+    expect(card(0).dataset.folded).toBe("")
+    expect(card(0).querySelector("[data-step-body]")!.className).toContain(
+      "hidden"
+    )
+    expect(card(2).dataset.folded).toBeUndefined() // the named step
+    fireEvent.click(screen.getByRole("button", { name: "expand all steps" }))
+    expect(card(0).dataset.folded).toBeUndefined()
+
+    fireEvent.click(screen.getByRole("button", { name: "only problems" }))
+    expect(card(0).dataset.dimmed).toBe("")
+    expect(card(1).dataset.dimmed).toBeUndefined() // its call failed
+    expect(card(2).dataset.dimmed).toBeUndefined()
   })
 })

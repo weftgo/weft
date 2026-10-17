@@ -34,6 +34,8 @@ import {
   elapsed,
   relativeTime,
   tokens,
+  UNNAMED_AGENT,
+  UNNAMED_AGENT_HINT,
 } from "@/lib/format"
 import { copyText } from "@/lib/json"
 import { Badge } from "@/components/ui/badge"
@@ -600,6 +602,8 @@ function RunTableRow({
       <TableRow
         ref={selected ? selectedRef : undefined}
         data-selected={selected ? "" : undefined}
+        // j/k's selection announced, not only drawn (UX-A-27).
+        aria-current={selected ? "true" : undefined}
         data-depth={depth || undefined}
         className={`group h-9 cursor-pointer ${
           selected ? "bg-accent shadow-[inset_2px_0_0_var(--thread)]" : ""
@@ -679,7 +683,11 @@ function RunTableRow({
         <TableCell
           className={`max-w-32 truncate whitespace-nowrap ${COL.agent}`}
         >
-          {run.agent || <span className="text-faint">—</span>}
+          {run.agent || (
+            <span className="text-faint" title={UNNAMED_AGENT_HINT}>
+              {UNNAMED_AGENT}
+            </span>
+          )}
         </TableCell>
         <TableCell className={`whitespace-nowrap ${COL.session}`}>
           {run.session_id ? (

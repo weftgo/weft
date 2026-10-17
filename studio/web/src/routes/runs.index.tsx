@@ -62,7 +62,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
-import { nest } from "@/lib/delegation"
+import { nest, RUNS_TREE } from "@/lib/delegation"
 import { runLink } from "@/lib/links"
 import type { RunsSearch } from "@/lib/links"
 import { useDocumentTitle } from "@/hooks/use-document-title"
@@ -470,8 +470,8 @@ function RunsPage() {
             aria-pressed={search.subagents !== "all"}
             title={
               search.subagents === "all"
-                ? "subagent children are listed too (all=1) — show top-level runs only"
-                : "top-level runs only: subagent children are on their parent's page — list them too"
+                ? RUNS_TREE.onTitle
+                : RUNS_TREE.offTitle
             }
             onClick={() =>
               setSearch({
@@ -479,7 +479,7 @@ function RunsPage() {
               })
             }
           >
-            {search.subagents === "all" ? "with subagents" : "top-level only"}
+            {search.subagents === "all" ? RUNS_TREE.on : RUNS_TREE.off}
           </Button>
         )}
         {search.agent && liveCapable ? (

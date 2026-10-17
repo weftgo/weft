@@ -1,8 +1,49 @@
 // The empty state (plan §4.3): the weft loop mark, the command that
 // starts Studio, and where a first run comes from — nothing to sign up
 // for (L3).
+import { Link } from "@tanstack/react-router"
+
 import { WeftMark } from "@/components/studio/weft-mark"
+import { Button } from "@/components/ui/button"
 import { Kbd } from "@/components/ui/kbd"
+import { notFoundBack } from "@/lib/not-found"
+
+/**
+ * LoadFailed is a detail page's read that failed with anything but a
+ * 404 (a 404 is components/studio/not-found.tsx's NotFound): the
+ * server's message, retry — the read may answer next time — and the
+ * way back to the page's list (UX-A-29).
+ */
+export function LoadFailed({
+  kind,
+  id,
+  error,
+  onRetry,
+}: {
+  kind: "run" | "trace"
+  id: string
+  error: Error
+  onRetry: () => void
+}) {
+  const back = notFoundBack(kind)
+  return (
+    <div
+      className="mx-auto max-w-md space-y-3 py-24 text-center"
+      data-load-failed
+    >
+      <p className="font-mono text-xs text-faint">{id}</p>
+      <p className="text-sm text-status-bad">{error.message}</p>
+      <div className="flex justify-center gap-2">
+        <Button variant="outline" size="sm" onClick={onRetry}>
+          retry
+        </Button>
+        <Button variant="ghost" size="sm" render={<Link to={back.to} />}>
+          {back.label}
+        </Button>
+      </div>
+    </div>
+  )
+}
 
 export function EmptyState({ command }: { command: string }) {
   return (

@@ -49,6 +49,12 @@ export function duration(started: string, finished: string | null): string {
   return spanMs(b - a)
 }
 
+/** A run whose agent has no name (UX-A-26): one word on every page —
+ * the run header, the runs list, the run tree, a subagent row — drawn
+ * muted, with UNNAMED_AGENT_HINT on hover. */
+export const UNNAMED_AGENT = "unnamed agent"
+export const UNNAMED_AGENT_HINT = "the agent has no name: set weft.Name(…)"
+
 /** A step count in words, "1 step" / "2 steps": the panel's turn row
  * and picker, the run header, a subagent row — one helper (W7-prep). */
 export function stepCount(n: number): string {

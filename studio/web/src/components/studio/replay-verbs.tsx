@@ -21,6 +21,7 @@ import {
   rerun,
 } from "@/lib/replay"
 import type { ReplayDraft } from "@/lib/replay"
+import { UNNAMED_AGENT } from "@/lib/format"
 import { useReplay } from "@/components/studio/replay-drawer"
 import { Button } from "@/components/ui/button"
 
@@ -189,7 +190,7 @@ export function ChildVerb({ runID, agent }: { runID: string; agent: string }) {
   return (
     <Verb
       at={{ runID, agent, step: 0, maxFromStep: null }}
-      label={`replay the child run ${runID} (agent ${agent || "unnamed"})`}
+      label={`replay the child run ${runID} (${agent ? `agent ${agent}` : UNNAMED_AGENT})`}
       icon={<RotateCcw data-slot="icon" />}
       draft={rerun()}
     />

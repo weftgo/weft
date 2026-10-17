@@ -220,3 +220,24 @@ describe("RunsTable problem badges (U4)", () => {
     expect(chip.getAttribute("title") ?? chip.innerHTML).toBeTruthy()
   })
 })
+
+describe("RunsTable polish (U29.1)", () => {
+  it("announces the j/k selection with aria-current (UX-A-27)", async () => {
+    Element.prototype.scrollIntoView ??= () => {}
+    await renderWithRouter(
+      <RunsTable runs={goldenRuns()} now={NOW} selectedId="r_ok" />
+    )
+    const row = document.querySelector<HTMLElement>("[data-selected]")!
+    expect(row.getAttribute("aria-current")).toBe("true")
+    expect(document.querySelectorAll('[aria-current="true"]')).toHaveLength(1)
+  })
+
+  it("spells a nameless agent 'unnamed agent' with the weft.Name hint (UX-A-26)", async () => {
+    const [base] = goldenRuns()
+    await renderWithRouter(
+      <RunsTable runs={[{ ...base, agent: "" }]} now={NOW} />
+    )
+    const word = screen.getByText("unnamed agent")
+    expect(word.getAttribute("title")).toContain("weft.Name(")
+  })
+})

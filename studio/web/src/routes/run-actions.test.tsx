@@ -128,7 +128,7 @@ describe("export on the run page", () => {
     }
   })
 
-  it("a run with subagents offers 'with subagents', which adds tree=1 (UX-A-31); a run without none", async () => {
+  it("a run with subagents offers 'with child runs', which adds tree=1 (UX-A-31); a run without none", async () => {
     const kids = [
       { ...rOK, id: `${RUN}/call_1`, agent: "worker" },
     ] as unknown as RunDoc["children"]
@@ -190,7 +190,7 @@ describe("delete on the run page", () => {
       "removed from studio's database only — the app's own conversation store is untouched"
     )
     expect(dialog.textContent).toContain(w.children)
-    expect(w.children).toContain("every subagent run under it, at any depth")
+    expect(w.children).toContain("every child run under it, at any depth")
     expect(
       dialog.querySelector(`[data-delete-child="${RUN}/call_1"]`)
     ).toBeTruthy()

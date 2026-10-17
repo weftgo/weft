@@ -53,7 +53,7 @@ export const bindings: Binding[] = [
   },
   {
     keys: ["home", "end"],
-    action: "first event / back to live (bar focused)",
+    action: "first event / the end — live while running (bar focused)",
     where: "run",
   },
   { keys: ["g", "r"], action: "go to runs" },

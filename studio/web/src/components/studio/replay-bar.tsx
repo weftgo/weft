@@ -31,6 +31,7 @@ import {
   eventType,
   isBoundary,
   kindClass,
+  replayEnd,
 } from "@/lib/summarize"
 import { Button } from "@/components/ui/button"
 
@@ -74,6 +75,9 @@ export interface ReplayBarProps {
   onTick: (t: number) => void
   /** A deliberate seek — writes t to the URL. */
   onSeek: (t: number | null) => void
+  /** The run is still running: the unscrubbed bar reads "live", else
+   * "end" (UX-A-24). Absent = running, the bar's old words. */
+  running?: boolean
 }
 
 export function ReplayBar({
@@ -82,6 +86,7 @@ export function ReplayBar({
   playhead,
   onTick,
   onSeek,
+  running = true,
 }: ReplayBarProps) {
   const [playing, setPlaying] = useState(false)
   const [speed, setSpeed] = useState<1 | 4>(1)
@@ -167,11 +172,12 @@ export function ReplayBar({
   const current = at > 0 ? events[at - 1] : undefined
   const live = playhead === null
   const expected = eventCount != null && eventCount > total ? eventCount : total
+  const end = replayEnd(running, expected)
 
   return (
     <div
       className="space-y-1.5 rounded-lg border bg-background px-2 py-1.5"
-      data-replay={live ? "live" : "scrubbed"}
+      data-replay={live ? end.key : "scrubbed"}
     >
       <div className="flex items-center gap-1.5">
         <Button
@@ -285,8 +291,8 @@ export function ReplayBar({
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label="back to live"
-            title="back to live (End)"
+            aria-label={end.back}
+            title={`${end.back} (End)`}
             onClick={() => {
               setPlaying(false)
               onSeek(null)
@@ -312,8 +318,8 @@ export function ReplayBar({
       {/* The readout: what the playhead just revealed. */}
       <div className="flex min-w-0 items-center gap-2 pl-1 font-mono text-[11px]">
         {live ? (
-          <span className="text-faint">
-            live · every event shown · press space or click the bar to replay
+          <span className="text-faint" data-replay-readout>
+            {end.readout}
           </span>
         ) : current ? (
           <>

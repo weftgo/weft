@@ -125,3 +125,40 @@ describe("ReplayBar", () => {
     expect(screen.getByTestId("ph").textContent).toBe("6/6")
   })
 })
+
+// UX-A-24: "live" is a running run's word; a finished run's unscrubbed
+// bar is at its end, and the verb back from a seek says so.
+describe("the readout's end word", () => {
+  const bar = (playhead: number | null, running: boolean) => (
+    <ReplayBar
+      events={events}
+      playhead={playhead}
+      onTick={() => {}}
+      onSeek={() => {}}
+      running={running}
+    />
+  )
+
+  it("reads end · all N events on a finished run", async () => {
+    await renderWithRouter(bar(null, false))
+    const r = document.querySelector("[data-replay-readout]")!
+    expect(r.textContent).toBe(
+      "end · all 6 events · press space or click the bar to replay"
+    )
+    expect(
+      document.querySelector("[data-replay]")!.getAttribute("data-replay")
+    ).toBe("end")
+  })
+
+  it("keeps live for a running run", async () => {
+    await renderWithRouter(bar(null, true))
+    expect(
+      document.querySelector("[data-replay-readout]")!.textContent
+    ).toMatch(/^live · every event shown/)
+  })
+
+  it("offers back to the end once a finished run is scrubbed", async () => {
+    await renderWithRouter(bar(2, false))
+    expect(screen.getByRole("button", { name: "back to the end" })).toBeTruthy()
+  })
+})

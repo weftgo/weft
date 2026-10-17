@@ -10,6 +10,7 @@
 // React: Studio only (the panel draws the model itself, U8.3).
 import type { Span as TimedSpan } from "./api"
 import type { AnswerStep } from "./summarize"
+import { toolFailure } from "./error-kind"
 import { isLive } from "./honesty"
 import { landStep } from "./summarize"
 import type { Span, SpanKind } from "./trace"
@@ -23,6 +24,29 @@ function timedOf(span: TimedSpan, r: WaterfallRow): Span["timed"] {
     fromMs: r.start,
     toMs: r.took === null ? null : r.start + r.took,
   }
+}
+
+/**
+ * treeBadge is a row's badge on the run tree: rowBadge, except a failed
+ * tool call reads the story's taxonomy (UX-A-30) — lib/error-kind.ts's
+ * toolFailure over its error.type and the facts on its span ("panic ·
+ * handler", "timeout", "retry 1/3", "invalid input", a ToolError code),
+ * never a bare "error" when the span names its kind.
+ */
+export function treeBadge(r: WaterfallRow): string | undefined {
+  if (r.kind !== "tool" || r.status !== "error" || !r.error) return rowBadge(r)
+  const a = r.span?.attrs ?? {}
+  const s = (v: unknown) => (typeof v === "string" && v ? v : undefined)
+  const n = (v: unknown) => {
+    const k = typeof v === "string" ? Number(v) : v
+    return typeof k === "number" && Number.isInteger(k) ? k : undefined
+  }
+  return toolFailure(r.error, {
+    panic_layer: s(a["weft.panic.layer"]),
+    input_error: s(a["weft.tool.input_error"]),
+    retry: n(a["weft.tool.retry"]),
+    retry_budget: n(a["weft.tool.retry_budget"]),
+  })!.word
 }
 
 /**
@@ -46,7 +70,7 @@ export function treeSpans(model: WaterfallModel): Span[] {
       kind: ROW_KIND[r.kind],
       label: r.label,
       sub: sub || undefined,
-      badge: rowBadge(r),
+      badge: treeBadge(r),
       tone: rowTone(r),
       from: r.start,
       to: r.took === null ? null : r.start + r.took,

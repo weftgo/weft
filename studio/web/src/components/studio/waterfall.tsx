@@ -10,7 +10,7 @@
 // mounted, between two spacers that keep the scroll height whole.
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { shared, spacers } from "@/lib/virtual"
-import { ChevronRight } from "lucide-react"
+import { ChevronRight, ChevronsDownUp, ChevronsUpDown } from "lucide-react"
 import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 
 import type { Span, SpanTone } from "@/lib/trace"
@@ -263,18 +263,30 @@ export function Waterfall({
       {/* axis */}
       <div className="sticky top-0 z-10 flex items-center gap-2 border-b bg-secondary/80 px-2 py-1 text-[10px] tracking-wide text-faint uppercase backdrop-blur">
         {head}
-        <span className="ml-auto flex gap-1 tracking-normal normal-case">
+        {/* Under 480 px the words become two icons (UX-F-35): the
+            header never runs into the time axis beside it. */}
+        <span
+          className="ml-auto flex items-center gap-1 tracking-normal normal-case"
+          data-fold-all
+        >
           <button
             type="button"
             className="hover:text-foreground"
+            aria-label="expand every row"
+            title="expand every row"
             onClick={() => setFolded(new Set())}
           >
-            expand
+            <span className="max-[480px]:hidden">expand</span>
+            <ChevronsUpDown className="hidden size-3 max-[480px]:block" />
           </button>
-          ·
+          <span className="max-[480px]:hidden" aria-hidden>
+            ·
+          </span>
           <button
             type="button"
             className="hover:text-foreground"
+            aria-label="collapse every row"
+            title="collapse every row"
             onClick={() =>
               setFolded(
                 new Set(
@@ -287,7 +299,8 @@ export function Waterfall({
               )
             }
           >
-            collapse
+            <span className="max-[480px]:hidden">collapse</span>
+            <ChevronsDownUp className="hidden size-3 max-[480px]:block" />
           </button>
         </span>
       </div>
@@ -300,12 +313,14 @@ export function Waterfall({
           {ticks.map((t, i) => (
             <span
               key={t}
+              // Two ticks under 480 px, the first and the last (UX-F-35).
+              data-tick={i === 0 || i === ticks.length - 1 ? "end" : "mid"}
               className={`absolute top-1 text-[10px] text-faint tabular-nums ${
                 i === 0
                   ? "translate-x-1"
                   : i === ticks.length - 1
                     ? "-translate-x-full pr-1"
-                    : "-translate-x-1/2"
+                    : "-translate-x-1/2 max-[480px]:hidden"
               }`}
               style={{
                 left: `${i === ticks.length - 1 ? 100 : pct(t, domain)}%`,
@@ -372,6 +387,7 @@ export function Waterfall({
                   <button
                     type="button"
                     className="flex size-4 shrink-0 items-center justify-center text-faint hover:text-foreground"
+                    tabIndex={-1}
                     aria-label={isFolded ? "expand" : "collapse"}
                     onClick={(e) => {
                       e.stopPropagation()

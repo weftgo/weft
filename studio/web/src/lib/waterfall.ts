@@ -19,7 +19,7 @@
 // Plain TypeScript, no React, no DOM: shared by both clients.
 import type { Span as TimedSpan } from "./api"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "./events"
-import { spanMs, stepCount } from "./format"
+import { spanMs, stepCount, UNNAMED_AGENT } from "./format"
 import type { SpanKind, SpanTone } from "./trace"
 
 /** The axis: wall time from spans, or stream order from events. */
@@ -372,7 +372,7 @@ const runRow = (
   node({
     key: `r:${run}`,
     kind: isChild ? "child" : "run",
-    label: agent || (isChild ? "subagent" : "run"),
+    label: agent || UNNAMED_AGENT,
     gist: steps === undefined ? undefined : stepCount(steps),
     runId: run,
     start,

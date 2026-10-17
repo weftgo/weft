@@ -53,14 +53,14 @@ export const EXPORT_FORMATS: readonly ExportFormat[] = [
 
 export const EXPORT_LABEL = "export"
 
-/** The "with subagents" toggle beside the formats (UX-A-31: &tree=1),
+/** The "with child runs" toggle beside the formats (UX-A-31: &tree=1),
  * offered on a run with children: the export carries every subagent
  * run under it, each its own document, and the file is named
  * <run>.tree.<ext>. */
 export const EXPORT_TREE = {
-  label: "with subagents",
+  label: "with child runs",
   title:
-    "also export every subagent run under this one (at most 200), each with its own events, transcript, requests and spans — a cut or a run another public id holds is said in subagent_holes",
+    "also export every child run under this one (at most 200), each with its own events, transcript, requests and spans — a cut or a run another public id holds is said in subagent_holes",
 } as const
 
 /** exportFormatsFor is what the identity may download: none without
@@ -139,8 +139,8 @@ export function deleteConfirmWords(run: {
     body: "Its spans, records, app logs and search index are removed from studio's database only — the app's own conversation store is untouched. This cannot be undone.",
     children:
       known === 0
-        ? "No subagent run is known under it; any recorded under it goes with it."
-        : `It goes with every subagent run under it, at any depth (${known}${floor} known):`,
+        ? "No child run is known under it; any recorded under it goes with it."
+        : `It goes with every child run under it, at any depth (${known}${floor} known):`,
     derived:
       "Derived runs read from its tools' spans (a stock agent under one of its tools) go too.",
     action: "delete run",
@@ -148,11 +148,9 @@ export function deleteConfirmWords(run: {
   }
 }
 
-/** A listed child's own subagent runs, beside it in the confirm. */
+/** A listed child's own child runs, beside it in the confirm. */
 export function childrenUnder(n: number): string {
-  return n === 1
-    ? "(+1 subagent run under it)"
-    : `(+${n} subagent runs under it)`
+  return n === 1 ? "(+1 child run under it)" : `(+${n} child runs under it)`
 }
 
 /** The delete's outcome line (the toast). */

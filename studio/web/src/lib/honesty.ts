@@ -497,9 +497,10 @@ export const SUBAGENT_CALL =
  * stamps weft.parent.run.id only from a running call's ctx),
  * POOL_CHILD_TURN and that turn. */
 export const POOL_CHILD =
-  "parked · a delegated session's turn — decide on the parent session"
-/** After POOL_CHILD's session id: the parent turn whose call delegated it. */
-export const POOL_CHILD_TURN = "· delegated by turn"
+  "parked · a pool session's turn — decide on the parent session"
+/** After POOL_CHILD's session id: the parent turn whose call started it
+ * ("delegated" is cost and usage's word alone, UX-F-15). */
+export const POOL_CHILD_TURN = "· started by turn"
 
 /** What a parked run's calls get: an experiment's verbs (its result
  * pane), the app turn's verbs, the app turn read-only, an app turn a

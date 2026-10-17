@@ -27,6 +27,7 @@ import type { Span as TraceRow } from "@/lib/trace"
 import { keyRows, OLD_KEY_NOTE, resolveSel, traceRuns } from "@/lib/trace-sel"
 import { useCapabilities } from "@/hooks/use-capabilities"
 import { HoleBadge } from "@/components/studio/hole-badge"
+import { LoadFailed } from "@/components/studio/empty-state"
 import { JsonTree } from "@/components/studio/json-tree"
 import { ReplayDrawer } from "@/components/studio/replay-drawer"
 import type { ReplayRequest } from "@/components/studio/replay-drawer"
@@ -125,13 +126,12 @@ function TracePage() {
   if (q.isError) {
     if (isNotFound(q.error)) return <NotFound kind="trace" id={id} />
     return (
-      <div className="mx-auto max-w-md space-y-3 py-24 text-center">
-        <p className="font-mono text-xs text-faint">{id}</p>
-        <p className="text-sm text-status-bad">{q.error.message}</p>
-        <Button variant="outline" size="sm" onClick={() => void q.refetch()}>
-          retry
-        </Button>
-      </div>
+      <LoadFailed
+        kind="trace"
+        id={id}
+        error={q.error}
+        onRetry={() => void q.refetch()}
+      />
     )
   }
   const genai = spans.filter(isGenAISpan)

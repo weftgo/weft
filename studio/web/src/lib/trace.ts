@@ -7,6 +7,7 @@
 // positions).
 import type { Span as TimedSpan } from "./api"
 import type { FoldedRun, FoldedStep, FoldedToolCall } from "./events"
+import { UNNAMED_AGENT } from "./format"
 import { earliestStart, instantMs, spanTree } from "./waterfall"
 
 /** The time axis's domain, lib/waterfall.ts's (one implementation). */
@@ -204,7 +205,7 @@ function runSpans(
     parent,
     depth,
     kind: sub ? "subagent" : "run",
-    label: sub ? run.agent || "subagent" : run.agent || "run",
+    label: run.agent || UNNAMED_AGENT,
     sub: `${run.steps.length} ${run.steps.length === 1 ? "step" : "steps"}${
       run.usage ? ` · ${usage(run.usage)}` : ""
     }`,

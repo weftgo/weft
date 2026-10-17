@@ -71,7 +71,7 @@ import type { LoopRepeats } from "@/lib/stopped-by"
 import type { HoleMark } from "@/lib/honesty"
 import { tokens } from "@/lib/format"
 import { replayBounds } from "@/lib/experiment-body"
-import { bytes } from "@/lib/summarize"
+import { bytes, STORY_SHAPE, stepHasProblem } from "@/lib/summarize"
 import { CodeWin } from "@/components/studio/codewin"
 import { CompactionMarker } from "@/components/studio/compaction-marker"
 import { HoleBadge, HoleBadges } from "@/components/studio/hole-badge"
@@ -717,9 +717,16 @@ function StepCard({
   scrollOnHighlight = true,
   pane,
   loop,
+  folded = false,
+  dimmed = false,
 }: {
   step: FoldedStep
   runId: string
+  /** STORY_SHAPE's collapse (UX-A-38): the card shows its head only;
+   * its body stays mounted (a draft in its editor survives). */
+  folded?: boolean
+  /** STORY_SHAPE's only problems: a quiet step, drawn faint. */
+  dimmed?: boolean
   /** The run's DetectLoops set (loopRepeats): a repeat's card links
    * the first of them (UX-S1-07). */
   loop?: LoopRepeats | null
@@ -833,9 +840,13 @@ function StepCard({
       ref={ref}
       data-step={step.index}
       data-highlighted={highlighted ? "" : undefined}
+      data-folded={folded ? "" : undefined}
+      data-dimmed={dimmed ? "" : undefined}
       className={`group/row space-y-2 rounded-lg border bg-background px-4 py-3 ${
         highlighted ? "ring-2 ring-thread/60" : ""
-      } ${failedHere ? "border-status-bad/40" : ""}`}
+      } ${failedHere ? "border-status-bad/40" : ""} ${
+        dimmed ? "opacity-40 transition-opacity hover:opacity-100" : ""
+      }`}
     >
       <div className="flex flex-wrap items-center gap-2">
         <span className="eyebrow">step {step.index}</span>
@@ -881,52 +892,54 @@ function StepCard({
           />
         </span>
       </div>
-      {compactions
-        .filter((c) => !isSessionMarker(c) && c.step === step.index)
-        .map((c) => (
-          <CompactionMarker
-            key={c.hash || c.index}
-            c={c}
-            all={compactions}
-            runId={runId}
-            transcript={transcript}
-            transcriptError={transcriptError}
-          />
-        ))}
-      {/* The story beside the open Request pane (plan H3): the
+      <div className={folded ? "hidden" : "space-y-2"} data-step-body>
+        {compactions
+          .filter((c) => !isSessionMarker(c) && c.step === step.index)
+          .map((c) => (
+            <CompactionMarker
+              key={c.hash || c.index}
+              c={c}
+              all={compactions}
+              runId={runId}
+              transcript={transcript}
+              transcriptError={transcriptError}
+            />
+          ))}
+        {/* The story beside the open Request pane (plan H3): the
           divider dragged or arrowed, one remembered size for every card;
           narrower than lg the pane stays inline, above the story. One
           tree shape either way — the story's pane never remounts, so a
           draft in its editor survives the Request pane opening. */}
-      <SplitPane
-        split={SPLITS.storyRequest}
-        instance={`story-request-${runId}-${step.index}`}
-        second={split}
-        panes={[
-          {
-            id: "story",
-            label: "the step's story",
-            defaultSize: 55,
-            minSize: 30,
-            className: split ? "space-y-2 pr-1" : "space-y-2",
-            children: (
-              <>
-                {promptEl}
-                {split ? null : request}
-                {rest}
-              </>
-            ),
-          },
-          {
-            id: "request",
-            label: "the step's request",
-            defaultSize: 45,
-            minSize: 25,
-            className: "pl-1",
-            children: split ? request : null,
-          },
-        ]}
-      />
+        <SplitPane
+          split={SPLITS.storyRequest}
+          instance={`story-request-${runId}-${step.index}`}
+          second={split}
+          panes={[
+            {
+              id: "story",
+              label: "the step's story",
+              defaultSize: 55,
+              minSize: 30,
+              className: split ? "space-y-2 pr-1" : "space-y-2",
+              children: (
+                <>
+                  {promptEl}
+                  {split ? null : request}
+                  {rest}
+                </>
+              ),
+            },
+            {
+              id: "request",
+              label: "the step's request",
+              defaultSize: 45,
+              minSize: 25,
+              className: "pl-1",
+              children: split ? request : null,
+            },
+          ]}
+        />
+      </div>
     </div>
   )
 }
@@ -1174,10 +1187,20 @@ export function StepList({
     onStep?.(n, mode)
   }
 
+  // The story's shape (UX-A-38): the named step is never folded or
+  // dimmed — a ?step= link always lands on a whole card.
+  const [allFolded, setAllFolded] = useState(false)
+  const [problemsOnly, setProblemsOnly] = useState(false)
   const stepBlock = (step: FoldedStep) => (
     <>
       <InsertHere step={step.index} />
       <StepCard
+        folded={allFolded && step.index !== highlight}
+        dimmed={
+          problemsOnly &&
+          step.index !== highlight &&
+          !stepHasProblem(step, runStatus)
+        }
         step={step}
         runId={doc.id}
         runHoles={doc.holes}
@@ -1221,6 +1244,34 @@ export function StepList({
                 onStep={scrubTo}
                 inputRef={stepInputRef}
               />
+            ) : null}
+            {steps.length > 1 ? (
+              <div
+                className="flex items-center justify-end gap-1"
+                role="group"
+                aria-label="story shape"
+                data-story-shape
+              >
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="font-mono text-[11px]"
+                  aria-pressed={allFolded}
+                  onClick={() => setAllFolded((f) => !f)}
+                >
+                  {allFolded ? STORY_SHAPE.expand : STORY_SHAPE.collapse}
+                </Button>
+                <Button
+                  variant={problemsOnly ? "secondary" : "ghost"}
+                  size="xs"
+                  className="font-mono text-[11px]"
+                  aria-pressed={problemsOnly}
+                  title={STORY_SHAPE.problemsHint}
+                  onClick={() => setProblemsOnly((p) => !p)}
+                >
+                  {STORY_SHAPE.problems}
+                </Button>
+              </div>
             ) : null}
             <EditsMark row={doc} batches={transcript?.batches} />
             {sessionMarkers.map((c, i) => (

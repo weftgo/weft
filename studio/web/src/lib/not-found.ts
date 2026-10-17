@@ -24,6 +24,15 @@ const BACK: Record<NotFoundKind, { to: string; label: string }> = {
   page: { to: runsLink().to, label: "back to runs" },
 }
 
+/** notFoundBack is a kind's way back to its list — the not-found
+ * state's and a failed read's (LoadFailed) alike. */
+export function notFoundBack(kind: NotFoundKind): {
+  to: string
+  label: string
+} {
+  return BACK[kind]
+}
+
 /** The ⌘K hand-off's verb, a run's only. */
 export const SEARCH_FOR_IT = "search for it"
 

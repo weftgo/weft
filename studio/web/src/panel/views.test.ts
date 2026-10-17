@@ -242,7 +242,8 @@ describe("the timeline", () => {
       "2000 ms",
     ])
     expect(all(el, ".weft-tl .weft-tl-l").map((n) => n.textContent)).toEqual([
-      "run",
+      // A nameless agent reads lib/format.ts's one word (UX-A-26).
+      "unnamed agent",
       "step 0",
       "model · script",
       "chat",

@@ -414,7 +414,7 @@ export function RunHeader({
   // (UX-S1-13), the own / delegated token split (UX-S3-13).
   const output = outputOf(folded, spans, doc.id)
   const files = attachmentsOf(transcript?.batches)
-  const split = tokenSplit(doc.usage, doc.children)
+  const split = tokenSplit(doc)
   const timing =
     doc.status === "running"
       ? `running for ${elapsed(doc.started, now)}`
@@ -674,6 +674,24 @@ export function RunHeader({
               </span>
             ) : null}
           </div>
+        </div>
+      ) : output?.stripped ? (
+        <div
+          className="flex flex-wrap items-baseline gap-1.5 font-mono text-[10px] text-muted-foreground"
+          data-output-stripped
+        >
+          <span title="the run submitted its typed output (weft.output.submitted); the record carries no arguments for it">
+            {OUTPUT.typed}
+          </span>
+          <HoleBadge hole="stripped" />
+          {output.repairs ? (
+            <span
+              className="text-status-int"
+              data-output-repairs={output.repairs}
+            >
+              {repairedWords(output.repairs)}
+            </span>
+          ) : null}
         </div>
       ) : output?.none ? (
         <div

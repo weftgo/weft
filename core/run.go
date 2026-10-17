@@ -394,7 +394,7 @@ const (
 	parkByParkOn     = "park_on"         // the run's ParkOn
 	parkBySource     = "park_source"     // an agent ParkSource (a breakpoint)
 	parkByParkAll    = "park_all_except" // ParkAllExcept, the run's or inherited
-	parkByMiddleware = "middleware"      // a tool middleware's ErrApprovalRequired
+	parkByMiddleware = "middleware"      // ErrApprovalRequired from a tool middleware or the handler
 )
 
 // parkedBy names why the rule parks a call to the named tool, "" when
@@ -825,7 +825,7 @@ const (
 // changed value, text included, as sha256 over the canonical JSON of a
 // map (encoding/json sorts map keys, so equal changes hash equal); the
 // tool subset and the parked tools enter it as sets (nameSet).
-func (c *runConfig) overrideAttrs() []attribute.KeyValue {
+func (c *runConfig) overrideAttrs(agentParams RequestParams) []attribute.KeyValue {
 	values := map[string]any{}
 	var attrs []attribute.KeyValue
 	add := func(name string, attrValue any, kv attribute.KeyValue) {
@@ -868,10 +868,14 @@ func (c *runConfig) overrideAttrs() []attribute.KeyValue {
 		add("tool_choice", value, attribute.String(attrOverrideToolChoice, value))
 	}
 	if c.paramsSet {
-		// The set knobs only, by the request record's lower-case names
-		// (UX-S5b-03): {"temperature":0.4,"top_p":0.9}, never the Go
-		// struct with its nulls.
-		b, err := json.Marshal(paramsBody{
+		// The set knobs by the request record's lower-case names
+		// (UX-S5b-03), and — since a Params option replaces the agent's
+		// struct whole (effectiveParams) — each knob the agent set that
+		// the replacement leaves unset, as null: {"temperature":0.4,
+		// "top_p":null} over an agent with TopP, never a one-knob merge.
+		// The hash takes the set knobs alone, so equal overrides hash
+		// equal whatever the agent's defaults.
+		set, err := json.Marshal(paramsBody{
 			Temperature: c.params.Temperature,
 			TopP:        c.params.TopP,
 			MaxTokens:   c.params.MaxTokens,
@@ -879,9 +883,9 @@ func (c *runConfig) overrideAttrs() []attribute.KeyValue {
 			Seed:        c.params.Seed,
 		})
 		if err != nil {
-			b = []byte("{}")
+			set = []byte("{}")
 		}
-		add("params", json.RawMessage(b), attribute.String(attrOverrideParams, string(b)))
+		add("params", json.RawMessage(set), attribute.String(attrOverrideParams, paramsReplacement(c.params, agentParams)))
 	}
 	if c.maxStepsSet {
 		add("max_steps", c.maxSteps, attribute.Int(attrOverrideMaxSteps, c.maxSteps))
@@ -909,6 +913,40 @@ func (c *runConfig) overrideAttrs() []attribute.KeyValue {
 	}
 	sum := sha256.Sum256(b)
 	return append([]attribute.KeyValue{attribute.String(attrOverrideHash, hex.EncodeToString(sum[:]))}, attrs...)
+}
+
+// paramsReplacement renders weft.override.params: the replacing
+// struct's set knobs in the request record's order and names, with
+// null for each knob the agent's default set and the replacement
+// leaves unset — what the run lost by the whole-struct replace.
+func paramsReplacement(run, agent RequestParams) string {
+	var b strings.Builder
+	b.WriteByte('{')
+	knob := func(name string, set, agentSet bool, v any) {
+		if !set && !agentSet {
+			return
+		}
+		if b.Len() > 1 {
+			b.WriteByte(',')
+		}
+		b.WriteString(strconv.Quote(name) + ":")
+		if !set {
+			b.WriteString("null")
+			return
+		}
+		j, err := json.Marshal(v)
+		if err != nil {
+			j = []byte("null")
+		}
+		b.Write(j)
+	}
+	knob("temperature", run.Temperature != nil, agent.Temperature != nil, run.Temperature)
+	knob("top_p", run.TopP != nil, agent.TopP != nil, run.TopP)
+	knob("max_tokens", run.MaxTokens != nil, agent.MaxTokens != nil, run.MaxTokens)
+	knob("stop", len(run.Stop) > 0, len(agent.Stop) > 0, run.Stop)
+	knob("seed", run.Seed != nil, agent.Seed != nil, run.Seed)
+	b.WriteByte('}')
+	return b.String()
 }
 
 // nameSet renders an option's accumulated tool names as the set they

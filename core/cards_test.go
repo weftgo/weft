@@ -88,6 +88,33 @@ func TestRetryWaitReachesFallback(t *testing.T) {
 	}
 }
 
+// TestNestedRetryKeepsOuterWait: under Retry(Fallback(Retry(primary)))
+// the inner Retry's first try is the request the outer Retry's backoff
+// preceded — it keeps that wait instead of clearing it — and the
+// backup, sent at once, carries none.
+func TestNestedRetryKeepsOuterWait(t *testing.T) {
+	tp := newRecProvider()
+	all := mw.Classifier(func(error) bool { return true })
+	primary := wefttest.Script(wefttest.Fail(statusError{503}), wefttest.Say("ok"))
+	backup := wefttest.Script(wefttest.Fail(statusError{503}), wefttest.Fail(statusError{503}))
+	agt := core.New(primary, core.TracerProvider(tp), core.WrapModel(
+		mw.Retry(mw.MaxRetries(1), mw.BaseDelay(time.Millisecond), all),
+		mw.Fallback(backup),
+		mw.Retry(mw.MaxRetries(0), all)))
+	if _, err := agt.Generate(context.Background(), core.Prompt("x")); err != nil {
+		t.Fatal(err)
+	}
+	var waited []bool
+	for _, a := range spansOf(tp, "attempt") {
+		waited = append(waited, a["weft.attempt.wait_ms"] != "")
+	}
+	// try 1: primary, backup (no wait); try 2: primary answering after
+	// the outer backoff.
+	if !slices.Equal(waited, []bool{false, false, true}) {
+		t.Errorf("attempts waited = %v, want [false false true]", waited)
+	}
+}
+
 // TestToolSpanFacts pins the execute_tool span's U25 facts: the
 // deadline in force, the park source of each way a call parks, and a
 // parked Subagent child's calls.
@@ -145,9 +172,11 @@ func TestToolSpanFacts(t *testing.T) {
 	agt := core.New(wefttest.Script(
 		wefttest.ToolCalls(wefttest.Call{Name: "own", ID: "c1"}),
 		wefttest.ToolCalls(wefttest.Call{Name: "inherits", ID: "c2"}),
+		wefttest.ToolCalls(wefttest.Call{Name: "tiny", ID: "c3"}),
 		wefttest.Say("ok"),
 	), core.TracerProvider(tp), core.Timeout(2*time.Second),
-		noop("own", core.Timeout(250*time.Millisecond)), noop("inherits"))
+		noop("own", core.Timeout(250*time.Millisecond)), noop("inherits"),
+		noop("tiny", core.Timeout(500*time.Microsecond)))
 	if _, err := agt.Generate(ctx, core.Prompt("go")); err != nil {
 		t.Fatal(err)
 	}
@@ -155,8 +184,10 @@ func TestToolSpanFacts(t *testing.T) {
 	for _, s := range spansOf(tp, "execute_tool") {
 		limits = append(limits, s["weft.tool.timeout_ms"])
 	}
-	if !slices.Equal(limits, []string{"250", "2000"}) {
-		t.Errorf("timeout_ms = %q, want [250 2000]", limits)
+	// A sub-millisecond deadline rounds up: a limit is never recorded
+	// as none.
+	if !slices.Equal(limits, []string{"250", "2000", "1"}) {
+		t.Errorf("timeout_ms = %q, want [250 2000 1]", limits)
 	}
 
 	// A parked Subagent child: SUBAGENT_PENDING names its parked calls.
@@ -202,6 +233,26 @@ func TestToolQueueWait(t *testing.T) {
 	}
 	if queued["a"] != "" || queued["b"] == "" || queued["b"] == "0" {
 		t.Errorf("queue_ms = %v, want none on a and a wait on b", queued)
+	}
+
+	// A barrier call waits only when something is in flight: s1 first
+	// and s2 after another barrier start at once; s3 waits for p.
+	tp = newRecProvider()
+	seq := core.Tool("seq", "Alone.", func(context.Context, struct{}) (string, error) { return "done", nil }, core.Sequential())
+	agt = core.New(wefttest.Script(
+		wefttest.ToolCalls(wefttest.Call{Name: "seq", ID: "s1"}, wefttest.Call{Name: "seq", ID: "s2"},
+			wefttest.Call{Name: "slow", ID: "p"}, wefttest.Call{Name: "seq", ID: "s3"}),
+		wefttest.Say("ok"),
+	), core.TracerProvider(tp), slow, seq)
+	if _, err := agt.Generate(context.Background(), core.Prompt("go")); err != nil {
+		t.Fatal(err)
+	}
+	queued = map[string]string{}
+	for _, s := range spansOf(tp, "execute_tool") {
+		queued[s["gen_ai.tool.call.id"]] = s["weft.tool.queue_ms"]
+	}
+	if queued["s1"] != "" || queued["s2"] != "" || queued["p"] != "" || queued["s3"] == "" {
+		t.Errorf("barrier queue_ms = %v, want a wait on s3 only", queued)
 	}
 }
 
@@ -355,10 +406,66 @@ func TestOverrideParamsFlat(t *testing.T) {
 	if got := tp.find(t, "invoke_agent").attrsMap()["weft.override.params"]; got != `{"temperature":0.4,"stop":["END"],"seed":7}` {
 		t.Errorf("weft.override.params = %s", got)
 	}
+	plainHash := tp.find(t, "invoke_agent").attrsMap()["weft.override.hash"]
+	// Params replaces the agent's struct whole: a knob the agent set
+	// that the override leaves unset reads null, so a one-knob override
+	// never reads like a merge — and the fingerprint is the override's
+	// alone, equal to the same override over an agent with no defaults.
+	tp = newRecProvider()
+	topP, mt := 0.9, 64
+	agt = core.New(wefttest.Script(wefttest.Say("hi")), core.TracerProvider(tp),
+		core.Params(core.RequestParams{TopP: &topP, MaxTokens: &mt}))
+	if _, err := agt.Generate(context.Background(), core.Prompt("x"),
+		core.Params(core.RequestParams{Temperature: &temp, Seed: &seed, Stop: []string{"END"}})); err != nil {
+		t.Fatal(err)
+	}
+	root := tp.find(t, "invoke_agent").attrsMap()
+	if got := root["weft.override.params"]; got != `{"temperature":0.4,"top_p":null,"max_tokens":null,"stop":["END"],"seed":7}` {
+		t.Errorf("weft.override.params over agent defaults = %s", got)
+	}
+	if root["weft.override.hash"] != plainHash {
+		t.Errorf("weft.override.hash = %s over agent defaults, %s without: want equal", root["weft.override.hash"], plainHash)
+	}
 	tp = newRecProvider()
 	agt = core.New(wefttest.Script(wefttest.Say("hi")), core.TracerProvider(tp))
 	_, _ = agt.Generate(context.Background(), core.Prompt("x"), core.ToolChoice(core.ToolChoiceConfig{Mode: core.ToolChoiceNamed}))
 	if got := tp.find(t, "invoke_agent").attrsMap()["weft.override.tool_choice"]; got != "tool" {
 		t.Errorf("weft.override.tool_choice = %q, want tool", got)
+	}
+}
+
+// countingWire counts how often the loop asks for its thinking wire.
+type countingWire struct {
+	core.Model
+	n *int
+}
+
+func (m countingWire) ThinkingWire(core.ThinkingConfig) string { *m.n++; return "effort" }
+
+// TestRequestFactsOffComputeNothing: with no destination wanting
+// request records, the request record's derived facts — prepared[]
+// (the PrepareStep comparison, which encodes cloned schemas) and
+// thinking.wire — are never computed (ADR 0016: observability off
+// costs nothing); with the request kind on they are, once per step.
+func TestRequestFactsOffComputeNothing(t *testing.T) {
+	for _, on := range []bool{false, true} {
+		lp := newRecLogProvider()
+		lp.enabled = func(n string) bool { return on && n == "weft.request" }
+		n := 0
+		agt := core.New(countingWire{wefttest.Script(
+			wefttest.ToolCalls(wefttest.Call{Name: "t", ID: "c1"}), wefttest.Say("done"),
+		), &n}, core.LoggerProvider(lp),
+			core.Thinking(core.ThinkingConfig{Level: core.ThinkLow}),
+			core.Tool("t", "Do it.", func(context.Context, struct{ X int }) (string, error) { return "ok", nil }),
+			core.PrepareStep(func(_ context.Context, _ int, req core.ModelRequest) (core.ModelRequest, error) {
+				req.System += " More."
+				return req, nil
+			}))
+		if _, err := agt.Generate(context.Background(), core.Prompt("go")); err != nil {
+			t.Fatal(err)
+		}
+		if want := map[bool]int{false: 0, true: 2}[on]; n != want {
+			t.Errorf("request records on=%v: ThinkingWire asked %d times, want %d", on, n, want)
+		}
 	}
 }

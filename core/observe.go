@@ -542,7 +542,7 @@ func (o *observer) tool(ctx context.Context, c Call, seq int64, facts toolStartF
 			attrs = append(attrs, attrToolApproved.Bool(true))
 		}
 		if facts.timeout > 0 {
-			attrs = append(attrs, attrToolTimeoutMS.Int64(facts.timeout.Milliseconds()))
+			attrs = append(attrs, attrToolTimeoutMS.Int64(ceilMS(facts.timeout)))
 		}
 		if facts.queue > 0 {
 			attrs = append(attrs, attrToolQueueMS.Int64(ceilMS(facts.queue)))

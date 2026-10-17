@@ -494,3 +494,20 @@ amendment of this ADR. The Responses API is its own sub-question
 (reasoning items, `previous_response_id` statefulness vs weft's
 caller-owned transcripts) — named here so the next person does not
 rediscover it.
+
+## Amendment (2026-10-17 — the optional `ThinkingWire` method, U25)
+
+An adapter may declare how it sends a thinking level with the optional
+method `ThinkingWire(ThinkingConfig) string`: the provider field it
+writes for that configuration — `reasoning_effort`, `thinking`,
+`budget_tokens`, `thinking_budget`, … — or `"none"` when it sends
+nothing for it. A name, never a value, and never a provider call. Like
+`ReportsAttempts`, it is duck-typed (core exports no interface), found
+by walking the `Unwrap` chain (at most 64 hops; the first layer with
+the method answers), and a panic out of it reads as no answer. The
+loop asks only when a request record is wanted (ADR 0016's
+nothing-when-off rule) and records the answer as the request record's
+`thinking.wire` (ADR 0028's amendment of this date); an adapter without
+the method is fully conformant and `wefttest/conformance` does not test
+for it. The first-party adapters (`openai`, `anthropic`, `google`)
+implement it, each pinned by its `TestThinkingWire`.

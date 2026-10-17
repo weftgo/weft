@@ -5,7 +5,7 @@
 // words the run page draws (routes/run-cards.test.tsx).
 import { afterEach, beforeEach, describe, expect, it } from "vitest"
 
-import { BREAKPOINT, OUTPUT, repairedWords } from "../lib/cards"
+import { BREAKPOINT, BY_SOURCE, OUTPUT, repairedWords } from "../lib/cards"
 import { UNRUN_CALL_REASON } from "../lib/events"
 import { AWAITING } from "../lib/status"
 import { panelRoutes } from "../test/cards-fixture"
@@ -88,17 +88,44 @@ describe("the Story's cards tell the whole truth (U25)", () => {
   })
 
   it.each([
-    ["appr.breakpoint-own", "b1"],
-    ["appr.breakpoint-playground", "b2"],
+    ["appr.breakpoint-own", "b1", BY_SOURCE],
+    ["appr.breakpoint-playground", "b2", BREAKPOINT],
   ])(
-    "%s: a breakpoint park is distinct from an approval gate",
-    async (name, id) => {
+    "%s: a breakpoint or ParkSource park is distinct from an approval gate",
+    async (name, id, word) => {
+      // A ParkSource park with no breakpoints_own runtime known is the
+      // general option's, never a claimed breakpoint (ADR 0030).
       const el = await story(name)
-      expect(call(el, id)!.querySelector(".weft-warn")?.textContent).toBe(
-        BREAKPOINT
-      )
+      expect(call(el, id)!.querySelector(".weft-warn")?.textContent).toBe(word)
     }
   )
+
+  // The args field absent (a read token's strip) — the shape that read
+  // "no output submitted" before U25-fix.
+  it("out.invalid-repaired, content off: a submitted output whose args the record lacks is typed + stripped, never 'no output submitted'", async () => {
+    const routes = panelRoutes("out.invalid-repaired")
+    const key = Object.keys(routes).find((k) => k.includes("/events?"))!
+    const page = routes[key] as { events: { event: { type: string } }[] }
+    routes[key] = {
+      ...page,
+      events: page.events.map((e) =>
+        e.event.type === "tool_start"
+          ? { ...e, event: { ...e.event, args: undefined } }
+          : e
+      ),
+    }
+    const tkey = Object.keys(routes).find((k) => k.endsWith("/transcript"))!
+    routes[tkey] = { batches: [] }
+    fakeStudio(routes, CAPS)
+    const el = await mount()
+    await settle()
+    const out = $(el, "[data-weft-output]")!
+    expect(out.firstChild?.textContent).toBe(
+      `${OUTPUT.typed} · ${repairedWords(1)}`
+    )
+    expect(out.querySelector('[data-hole="stripped"]')).not.toBeNull()
+    expect(out.textContent).not.toContain(OUTPUT.none)
+  })
 
   it("runtimelab.option-lab: the Request tab's 'overridden by experiment' chip", async () => {
     const el = await story("runtimelab.option-lab")

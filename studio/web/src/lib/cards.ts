@@ -87,30 +87,45 @@ export function execLine(f?: CallFacts): string | null {
 /** A parked call's words (UX-S3-12, UX-H-18): never "never completed"
  * — an approval gate, a debugger's breakpoint, a park rule. */
 export const BREAKPOINT = "paused at breakpoint"
+/** A ParkSource's park that no debugger is known to have set:
+ * ParkSource is a general option (ADR 0030), runtime.Breakpoints() one
+ * source of it. */
+export const BY_SOURCE = "paused by ParkSource"
 const PARKED: Record<string, string | undefined> = {
   park_on: "ParkOn",
-  park_all_except: "side effects",
+  park_all_except: "ParkAllExcept",
   middleware: "middleware",
 }
 
-/** parkWord reads why a call parked: a ParkSource's park (the app's
- * runtime.Breakpoints()), or a ParkOn the run names in
- * weft.playground.breakpoints, is a breakpoint; an approval gate, or
- * a record from before U25 that names no source, awaits a decision;
- * a park rule says which. */
+/** parkWord reads why a call parked: a ParkSource's park is a
+ * breakpoint on a playground run (weft.playground, the row's
+ * playground) or when the page knows the run's runtime registered
+ * breakpoints_own (own), else "paused by ParkSource"; a ParkOn the run
+ * names in weft.playground.breakpoints is a breakpoint; an approval
+ * gate, or a record from before U25 that names no source, awaits a
+ * decision; a park rule says which. run is the run's row or doc. */
 export function parkWord(
   f: CallFacts | undefined,
   tool: string,
-  breakpoints?: string
+  run?: { meta?: Record<string, string>; playground?: boolean } | null,
+  own = false
 ): string {
   const p = f?.park ?? ""
-  if (
-    p === "park_source" ||
-    (p === "park_on" && `,${breakpoints},`.includes(`,${tool},`))
-  )
+  const bp = run?.meta?.["weft.playground.breakpoints"]
+  if (p === "park_source")
+    return own || run?.playground ? BREAKPOINT : BY_SOURCE
+  if (p === "park_on" && bp && `,${bp},`.includes(`,${tool},`))
     return BREAKPOINT
   return PARKED[p] ? `${AWAITING} · ${PARKED[p]}` : AWAITING
 }
+
+/** ownBreakpoints says a run's service has a runtime that registered
+ * breakpoints_own (runtime.Breakpoints() on the app's agents) — what
+ * makes its ParkSource parks breakpoints. */
+export const ownBreakpoints = (
+  rts: { service: string; breakpoints_own?: boolean }[] | undefined,
+  service: string | undefined
+) => !!service && !!rts?.some((r) => r.breakpoints_own && r.service === service)
 
 /** The parked words' hovers — the run page's (the panel draws the
  * words alone). */
@@ -120,10 +135,12 @@ export const PARK_HINT: Record<string, string> = {
   [AWAITING]:
     "the approval boundary: RequireApproval, approve, deny or resolve",
   [`${AWAITING} · ParkOn`]: "the run's ParkOn named this tool",
-  [`${AWAITING} · side effects`]:
-    "ParkAllExcept: a call no one vouched safe parks (the playground's side-effect rule)",
+  [BY_SOURCE]:
+    "an agent ParkSource named this tool (ADR 0030): approve, deny or resolve it",
+  [`${AWAITING} · ParkAllExcept`]:
+    "ParkAllExcept: every call outside its except-list parks (the playground's side-effect rule uses it)",
   [`${AWAITING} · middleware`]:
-    "a tool middleware returned ErrApprovalRequired",
+    "a tool middleware or the handler returned ErrApprovalRequired",
 }
 
 /** A Subagent call's typed outcome (UX-S3-15), from its error.type —
@@ -238,9 +255,59 @@ export function thinkingWords(t?: {
 }
 
 /** overrideTitle names an experiment's overridden knobs (UX-S5b-03):
- * the chip's hover. */
-export function overrideTitle(fields: string[]): string {
-  return `weft.override.*: ${fields.join(", ")}`
+ * the chip's hover — with the params override read out when the run's
+ * own invoke_agent span carries it (paramsOverride). */
+export function overrideTitle(
+  fields: string[],
+  spans?: SpanLike[] | null,
+  runId?: string
+): string {
+  const p = paramsOverride(
+    spans?.find(
+      (s) =>
+        s.attrs?.["gen_ai.operation.name"] === "invoke_agent" &&
+        s.attrs["weft.run.id"] === runId
+    )?.attrs?.["weft.override.params"]
+  )
+  return `weft.override.*: ${fields.join(", ")}${p ? `\nparams ${p}` : ""}`
+}
+
+/** The pre-U25 Go struct's field names (weft.override.params as
+ * RequestParams' JSON) by the request record's. */
+const PARAM: Record<string, string> = {
+  Temperature: "temperature",
+  TopP: "top_p",
+  MaxTokens: "max_tokens",
+  Stop: "stop",
+  Seed: "seed",
+}
+
+/** paramsOverride reads weft.override.params in any stored shape — a
+ * Params run option replaces the agent's struct whole, never one knob:
+ * "replaced whole: temperature 0.4, top_p cleared". The current shape
+ * names a knob the agent set and the replacement leaves unset as null
+ * (cleared); U25.1's carried the set knobs alone; the pre-U25 Go struct
+ * (PascalCase, every field, unset ones null) says nothing of the
+ * agent's, so its nulls are dropped. Null when unreadable. */
+export function paramsOverride(v: unknown): string | null {
+  let o = v
+  if (typeof v === "string")
+    try {
+      o = JSON.parse(v)
+    } catch {
+      return null
+    }
+  if (!o || typeof o !== "object" || Array.isArray(o)) return null
+  const entries = Object.entries(o)
+  const old = entries.some(([k]) => k in PARAM)
+  const out: string[] = []
+  for (const [k, x] of entries) {
+    const name = PARAM[k] ?? k
+    if (x !== null && !(Array.isArray(x) && !x.length))
+      out.push(`${name} ${JSON.stringify(x)}`)
+    else if (!old) out.push(`${name} cleared`)
+  }
+  return `replaced whole: ${out.join(", ") || "every knob the adapter's default"}`
 }
 
 /** fileWords is a file part as a chip (UX-S1-13): "file image/png ·
@@ -273,16 +340,25 @@ export function attachmentsOf(
 }
 
 /** tokenSplit is the roll-up's own vs delegated (UX-S3-13): "60 in =
- * 20 own + 40 via 1 child". Null with no child usage. */
-export function tokenSplit(
-  u: Usage,
-  children: { usage?: Usage }[]
-): string | null {
+ * 20 own + 40 via 1 child". Only the core's Subagent children —
+ * `<id>/…`, the ones its usage rolls up (pricing.go's rule) — count: a
+ * pool child session or a Generate inside a tool handler is linked to
+ * the run but not in its usage. Null with no such child usage. */
+export function tokenSplit(doc: {
+  id: string
+  usage: Usage
+  children: { id: string; usage?: Usage }[]
+}): string | null {
   let sub = 0
-  for (const c of children) sub += c.usage?.input_tokens ?? 0
-  if (!children.length || !sub) return null
-  const n = children.length
-  return `${tokens(u.input_tokens)} in = ${tokens(u.input_tokens - sub)} own + ${tokens(sub)} via ${n} child${n === 1 ? "" : "ren"}`
+  let n = 0
+  for (const c of doc.children)
+    if (c.id.startsWith(`${doc.id}/`)) {
+      n++
+      sub += c.usage?.input_tokens ?? 0
+    }
+  if (!sub) return null
+  const u = doc.usage.input_tokens
+  return `${tokens(u)} in = ${tokens(u - sub)} own + ${tokens(sub)} via ${n} child${n === 1 ? "" : "ren"}`
 }
 
 /** The structured output's words (UX-S1-06). */
@@ -296,12 +372,21 @@ export const repairedWords = (n: number) =>
 /** outputOf reads a run's structured output from its fold: the last
  * valid submit_output call's arguments and the invalid ones before it;
  * submitted is its own root span's weft.output.submitted (an Output
- * agent's). Null for a run with neither (no Output agent). */
+ * agent's). none only when nothing was submitted — the root says
+ * false, or (a record from before it) no valid call is held; a
+ * submission whose arguments the record does not carry (content off,
+ * a read token) is stripped, never none. Null for a run with neither
+ * (no Output agent). */
 export function outputOf(
   view: FoldedRun,
   spans: SpanLike[] | null | undefined,
   runId: string
-): { args?: unknown; repairs: number; none: boolean } | null {
+): {
+  args?: unknown
+  repairs: number
+  none: boolean
+  stripped: boolean
+} | null {
   const v = spans?.find(
     (s) =>
       s.attrs?.["gen_ai.operation.name"] === "invoke_agent" &&
@@ -311,13 +396,18 @@ export function outputOf(
   let args: unknown
   let repairs = 0
   let seen = false
+  let valid = false
   for (const st of view.steps)
     for (const c of st.toolCalls)
       if (c.name === "submit_output" && c.result) {
         seen = true
         if (c.result.isError) repairs++
-        else args = c.args
+        else {
+          valid = true
+          args = c.args ?? undefined
+        }
       }
   if (!seen && submitted === undefined) return null
-  return { args, repairs, none: submitted === false || (!seen && !args) }
+  const none = submitted === false || (submitted === undefined && !valid)
+  return { args, repairs, none, stripped: !none && args === undefined }
 }

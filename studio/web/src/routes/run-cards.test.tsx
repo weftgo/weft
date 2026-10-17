@@ -12,10 +12,11 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { setStudioToken } from "@/lib/api"
-import { BREAKPOINT } from "@/lib/cards"
+import { BREAKPOINT, BY_SOURCE, OUTPUT } from "@/lib/cards"
 import { AWAITING } from "@/lib/status"
 import { renderApp, stubBrowser } from "@/test/app"
 import { shape, studioFor } from "@/test/cards-fixture"
+import { pagedEvents } from "@/test/fake-studio"
 import { FakeEventSource } from "@/test/fake-event-source"
 
 configure({ asyncUtilTimeout: 10_000 })
@@ -32,8 +33,14 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function open(name: string, query = "view=story") {
-  studioFor(name).install()
+function open(
+  name: string,
+  query = "view=story",
+  more?: (st: ReturnType<typeof studioFor>) => void
+) {
+  const st = studioFor(name)
+  more?.(st)
+  st.install()
   renderApp(`/runs/${shape(name).run.id}?${query}`)
 }
 
@@ -119,12 +126,28 @@ describe("the run cards tell the whole truth (U25)", () => {
   })
 
   it.each([
-    ["appr.breakpoint-own", "b1", "park_source"],
-    ["appr.breakpoint-playground", "b2", "park_on"],
+    ["appr.breakpoint-own", "b1", "park_source", true],
+    ["appr.breakpoint-playground", "b2", "park_on", false],
   ])(
     "%s: a breakpoint park is distinct from an approval gate",
-    async (name, id, source) => {
-      open(name)
+    async (name, id, source, own) => {
+      // A ParkSource park is a breakpoint when the run's service has a
+      // runtime that registered breakpoints_own (runtime.Breakpoints()).
+      open(name, undefined, (st) =>
+        own
+          ? st.on("GET runtimes", {
+              runtimes: [
+                {
+                  id: "rt_1",
+                  service: shape(name).run.service,
+                  breakpoints_own: true,
+                  connected: true,
+                  agents: [],
+                },
+              ],
+            })
+          : undefined
+      )
       await waitFor(() =>
         expect(call(id)?.querySelector("[data-parked-call]")?.textContent).toBe(
           BREAKPOINT
@@ -140,6 +163,43 @@ describe("the run cards tell the whole truth (U25)", () => {
       ).toBe(BREAKPOINT)
     }
   )
+
+  it("appr.breakpoint-own with no breakpoints_own runtime: paused by ParkSource, never a claimed breakpoint", async () => {
+    open("appr.breakpoint-own")
+    await waitFor(() =>
+      expect(call("b1")?.querySelector("[data-parked-call]")?.textContent).toBe(
+        BY_SOURCE
+      )
+    )
+  })
+
+  it("out.invalid-repaired, content off: the submitted output reads typed + stripped, never 'no output submitted'", async () => {
+    const s = shape("out.invalid-repaired")
+    open("out.invalid-repaired", undefined, (st) =>
+      st
+        .on(`GET runs/${s.run.id}/transcript`, { batches: [] })
+        .on(
+          `GET runs/${s.run.id}/events`,
+          pagedEvents(
+            s.events.events.map((e) =>
+              (e.event as { type: string }).type === "tool_start"
+                ? { ...e, event: { ...(e.event as object), args: null } }
+                : e
+            )
+          )
+        )
+    )
+    await waitFor(() =>
+      expect(document.querySelector("[data-output-stripped]")).not.toBeNull()
+    )
+    const out = document.querySelector<HTMLElement>("[data-output-stripped]")!
+    expect(out.textContent).toContain(OUTPUT.typed)
+    expect(out.querySelector('[data-hole="stripped"]')).not.toBeNull()
+    expect(out.querySelector("[data-output-repairs]")?.textContent).toBe(
+      "repaired after 1 invalid submission"
+    )
+    expect(document.querySelector("[data-output-none]")).toBeNull()
+  })
 
   it("runtimelab.option-lab: 'overridden by experiment' names every overridden knob", async () => {
     open("runtimelab.option-lab", "view=story&step=0&pane=request")

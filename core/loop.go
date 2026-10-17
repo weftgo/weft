@@ -101,7 +101,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 	}
 	resumeCalls := resumeCallsAttr(resume, cfg.decisions)
 	var runExtra []attribute.KeyValue
-	runExtra = append(runExtra, cfg.overrideAttrs()...)
+	runExtra = append(runExtra, cfg.overrideAttrs(a.params)...)
 	if resumeCalls != "" {
 		runExtra = append(runExtra, attrResumeCalls.String(resumeCalls))
 	}
@@ -473,14 +473,13 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 				return fail(step, err)
 			}
 		}
-		// What the chain changed (O9): the request record's prepared[],
-		// names only. Compared against the step's own inputs — the
-		// transcript and the fetched tools, which the chain's deep copies
-		// leave untouched.
-		var prepared []string
-		if a.prepare != nil {
-			prepared = preparedFields(before, req, res.Messages, tools)
-		}
+		// What the chain changed (O9) is the request record's
+		// prepared[], derived inside recordRequest only when a request
+		// record is wanted (ADR 0016: nothing computed when nothing
+		// records) — against the step's own inputs, the transcript and
+		// the fetched tools, which the chain's deep copies leave
+		// untouched.
+		inputs := stepInputs{model: model, before: before, tools: tools, prepared: a.prepare != nil}
 		tools = req.Tools
 		if a.prepare != nil {
 			if err := validateSnapshot(tools); err != nil {
@@ -521,7 +520,7 @@ func (a *Agent) execute(ctx context.Context, cfg runConfig, sink func(Event)) (*
 		// then the request record (attempt 1), on the chat span's
 		// context, after PrepareStep, validation and composition, right
 		// before the chain runs. Reporting only: req is not touched.
-		reqRec := records.recordRequest(mctx, a, step, req, info, parkSet, res.Messages, a.prepare != nil, prepared, thinkingWire(model, req.Thinking))
+		reqRec := records.recordRequest(mctx, a, step, req, info, parkSet, res.Messages, &inputs)
 		// The chain's reporting path (ReportFromContext): attempts and
 		// wire bodies the chain reports land on this step's record; each
 		// attempt after the first adds its own request record.
@@ -1087,6 +1086,7 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 	}
 
 	var wg sync.WaitGroup
+	var inflight atomic.Int64 // calls started and not yet returned
 	for i, call := range calls {
 		def, _ := findTool(tools, call.Name)
 		barrier := def != nil && def.sequential
@@ -1095,7 +1095,10 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 		// a Parallelism slot — so a call that started at once has none.
 		var queued time.Time
 		if barrier {
-			if i > 0 {
+			// Only a Wait that blocks is a wait: a barrier call with
+			// nothing in flight (first in the batch, or after another
+			// barrier) starts at once.
+			if inflight.Load() > 0 {
 				queued = time.Now()
 			}
 			// Let everything in flight finish before this call starts.
@@ -1144,8 +1147,10 @@ func (a *Agent) execTools(ctx context.Context, runID string, step int, tools []*
 		})
 		c := Call{RunID: runID, Step: step, CallID: call.ID, Name: call.Name, Approved: approved}
 		wg.Add(1)
+		inflight.Add(1)
 		go func() {
 			defer wg.Done()
+			defer inflight.Add(-1)
 			defer func() { <-sem }()
 			n := nestFor(call)
 			callCtx := withNest(withCall(ctx, c), n)

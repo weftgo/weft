@@ -755,3 +755,27 @@ columns and the badges are one contract and are read together.
   A9.
 - Every attribute name above joins ADR 0024's pinned set: changing one
   is an amendment to this ADR.
+
+## Amendment (2026-10-17 — `prepared[]`, `thinking.wire`, the tools record's `output`, U25)
+
+Three fields join the records of §2–§4, names and flags only, under the
+same content policy:
+
+- **`request.body.prepared[]`** (O9): the parts of the request the
+  `PrepareStep` chain changed, in a fixed order — `system`, `messages`,
+  `tools`, `tool_choice`, `params`, `thinking`, `sequential_tools` —
+  compared against the request the loop built and the step's own
+  transcript and fetched tools (an in-place edit of the chain's deep
+  copies counts). Absent when no chain ran or it changed nothing. It is
+  derived only after the request kind's `Enabled` answered yes: a run
+  recording no request records pays nothing for it.
+- **`request.body.thinking.wire`** (O16): how the adapter sends the
+  level, from the optional `ThinkingWire` method (ADR 0013's amendment
+  of this date); absent when the model chain declares none. Asked
+  under the same gate.
+- **The tools record's `output: true`**: on the `submit_output` tool an
+  `Output[T]` agent adds, so a reader marks the typed output without
+  matching the name.
+
+`docs/record-contract.md` §3 carries the rows; the `run_cards`
+conformance case pins them.

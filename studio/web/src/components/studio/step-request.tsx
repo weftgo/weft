@@ -952,7 +952,10 @@ export function RequestSection({
           </Mark>
         ) : null}
         {overridden.length ? (
-          <Mark mark="experiment" title={overrideTitle(overridden)}>
+          <Mark
+            mark="experiment"
+            title={overrideTitle(overridden, req.ctx?.spans, req.ctx?.runId)}
+          >
             {CHIP_EXPERIMENT}
           </Mark>
         ) : null}

@@ -28,13 +28,14 @@ import {
   useState,
 } from "react"
 
-import { isHoleRef, stepQuery } from "@/lib/api"
+import { isHoleRef, runtimesQuery, stepQuery } from "@/lib/api"
 import {
   CHILD_HINT,
   childOutcome,
   execLine,
   PARK_HINT,
   parkWord,
+  ownBreakpoints,
 } from "@/lib/cards"
 import type { CallFacts } from "@/lib/cards"
 import { toolFailure } from "@/lib/error-kind"
@@ -1060,12 +1061,27 @@ export function StepList({
   const runStatus = replaying ? "running" : doc.status
   // The parked calls' words (UX-S3-12, UX-H-18): an approval gate or a
   // breakpoint, by the span's park source; the tools' origins by name.
+  // A ParkSource park is a breakpoint when the run's service has a
+  // runtime that registered breakpoints_own: the runtimes are read
+  // only while such a park is drawn (the parked block's own read
+  // shares the cache).
+  const parkFacts = view.pending.map(
+    (c) =>
+      [
+        c,
+        [...(callFacts ?? [])].find(
+          ([k, v]) => v.park && k.endsWith(`:${c.id}`)
+        )?.[1],
+      ] as const
+  )
+  const rts = useQuery({
+    ...runtimesQuery(),
+    enabled: parkFacts.some(([, f]) => f?.park === "park_source"),
+  })
+  const own = ownBreakpoints(rts.data?.runtimes, doc.service)
   const parked = new Map(
-    view.pending.map((c) => {
-      const f = [...(callFacts ?? [])].find(
-        ([k, v]) => v.park && k.endsWith(`:${c.id}`)
-      )?.[1]
-      const word = parkWord(f, c.name, doc.meta["weft.playground.breakpoints"])
+    parkFacts.map(([c, f]) => {
+      const word = parkWord(f, c.name, doc, own)
       return [c.id, { word, hint: PARK_HINT[word] ?? "" }] as const
     })
   )

@@ -141,7 +141,10 @@ func (m *retryModel) Unwrap() core.Model { return m.next }
 
 func (m *retryModel) Stream(ctx context.Context, req core.ModelRequest) iter.Seq2[core.ModelEvent, error] {
 	return func(yield func(core.ModelEvent, error) bool) {
-		var wait time.Duration // slept before this try (AttemptInfo.Wait)
+		// Slept before this try (AttemptInfo.Wait). The first try keeps
+		// what an enclosing Retry slept before this request — a Retry
+		// nested under a Fallback under a Retry must not clear it.
+		wait := waitOf(ctx)
 		for attempt := 0; ; attempt++ {
 			yielded, failed := replay(withWait(ctx, wait), m.next, req, "", wait, yield)
 			if failed == nil {

@@ -5286,25 +5286,28 @@ export class WeftDevtools extends HTMLElement {
       wrap.appendChild(
         el("div", "weft-reason", files.join(" · "), { "data-weft-files": "" })
       )
-    const split = t.doc && tokenSplit(t.doc.usage, t.doc.children)
+    const split = t.doc && tokenSplit(t.doc)
     if (split)
       wrap.appendChild(
         el("div", "weft-reason", split, { "data-weft-split": "" })
       )
+    // none only when nothing was submitted; a submission whose args
+    // the record does not carry is typed + the stripped badge.
     const out = outputOf(t.folded, t.spans, t.id)
-    if (out)
-      wrap.appendChild(
-        el(
-          "div",
-          "weft-reason",
-          out.args === undefined
-            ? OUTPUT.none
-            : out.repairs
-              ? `${OUTPUT.typed} · ${repairedWords(out.repairs)}`
-              : OUTPUT.typed,
-          { "data-weft-output": "" }
-        )
+    if (out) {
+      const o = el(
+        "div",
+        "weft-reason",
+        out.none
+          ? OUTPUT.none
+          : out.repairs
+            ? `${OUTPUT.typed} · ${repairedWords(out.repairs)}`
+            : OUTPUT.typed,
+        { "data-weft-output": "" }
       )
+      if (out.stripped) o.appendChild(badge("stripped"))
+      wrap.appendChild(o)
+    }
     // A replayed run whose prefix was edited says which pairs (weft.edits).
     const mark = marksBlock(this.rowOf(t.id) ?? t.doc, t.transcript?.batches)
     if (mark) wrap.appendChild(mark)
@@ -6998,7 +7001,7 @@ function renderCall(
         "div",
         "weft-res weft-warn",
         t?.folded.pending.some((c) => c.id === call.callId)
-          ? parkWord(f, call.name, t.doc?.meta["weft.playground.breakpoints"])
+          ? parkWord(f, call.name, t.doc)
           : "never completed"
       )
     )

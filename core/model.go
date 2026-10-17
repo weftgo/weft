@@ -83,6 +83,12 @@ const (
 // without a Budget leaves the depth to the provider (Anthropic adaptive
 // thinking, Gemini's own level mapping); a Budget without a level pins
 // it. Off wins over a Budget when both are set.
+//
+// An adapter may declare how it sends a configuration with the optional
+// method ThinkingWire(ThinkingConfig) string — the provider field it
+// writes, or "none" — found along the Unwrap chain and recorded as the
+// request record's thinking.wire (ADR 0013, a convention like
+// ReportsAttempts; core exports no interface for it).
 type ThinkingConfig struct {
 	Level  ThinkingLevel
 	Budget int64

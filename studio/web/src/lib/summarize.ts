@@ -220,6 +220,8 @@ export interface AnswerStep {
     args?: unknown
     result?: { isError: boolean; content: string }
     finishPos?: number
+    /** A max_tokens step's call the loop never ran (rule 11). */
+    unrun?: boolean
   }[]
   finish?: {
     reason: string
@@ -372,17 +374,24 @@ export function repliedLine(step: AnswerStep, running = false): string {
   return "— (no text, no calls)"
 }
 
+/** A max_tokens step's calls (rule 11): counted apart, never as
+ * "never finished" — the loop chose not to run them. */
+export const NOT_EXECUTED = "not executed"
+
 /** toolsLine is what the step's calls did: "2 ran · 1 error", "1
- * never finished", or "none — the model called no tool". */
+ * never finished", "1 not executed" (a max_tokens cut), or "none — the
+ * model called no tool". */
 export function toolsLine(step: AnswerStep, running = false): string {
   const calls = step.toolCalls
   if (!calls.length) return "none — the model called no tool"
   const done = calls.filter((c) => c.finishPos !== undefined)
   const errors = done.filter((c) => c.result?.isError).length
-  const open = calls.length - done.length
+  const unrun = calls.filter((c) => c.unrun).length
+  const open = calls.length - done.length - unrun
   return [
-    `${done.length} ran`,
+    done.length || !unrun ? `${done.length} ran` : "",
     errors ? count(errors, "error") : "",
+    unrun ? `${unrun} ${NOT_EXECUTED}` : "",
     open ? `${open} ${running ? "running" : "never finished"}` : "",
   ]
     .filter(Boolean)

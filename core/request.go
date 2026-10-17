@@ -152,6 +152,18 @@ type thinkingBody struct {
 	Wire string `json:"wire,omitempty"`
 }
 
+// stepInputs is what a step's request record is compared against:
+// the model chain (for thinking.wire), the request the loop built
+// before the PrepareStep chain and the step's fetched tools (for
+// prepared[]), and whether a chain ran. Held on the loop goroutine's
+// stack; recordRequest reads it only past the request kind's gate.
+type stepInputs struct {
+	model    Model
+	before   ModelRequest
+	tools    []*ToolDef
+	prepared bool
+}
+
 // thinkingWire asks the model chain how it sends a thinking level: the
 // first model along the Unwrap chain with the optional method
 // ThinkingWire(ThinkingConfig) string answers (a convention like
@@ -473,12 +485,14 @@ type requestRecord struct {
 // out of the logger is contained and counted; a body that does not
 // encode is dropped into the Debug log. Runs on the loop goroutine.
 //
-// transcript is the run's transcript as the loop holds it; rewritten
+// transcript is the run's transcript as the loop holds it; in.prepared
 // says a PrepareStep chain ran, so req.Messages may differ from it.
+// The record's prepared[] and thinking.wire are derived from in after
+// the request kind's gate, never before it.
 // When it does, the run-scope compaction view (ADR 0028 §8) is emitted
 // right before the request record and the request's messages_ref
 // names it; otherwise the ref names the latest growth record.
-func (r *recorder) recordRequest(mctx context.Context, a *Agent, step int, req ModelRequest, info ModelInfo, parkSet *parkRule, transcript []Message, rewritten bool, prepared []string, wire string) (rr *requestRecord) {
+func (r *recorder) recordRequest(mctx context.Context, a *Agent, step int, req ModelRequest, info ModelInfo, parkSet *parkRule, transcript []Message, in *stepInputs) (rr *requestRecord) {
 	defer r.contain(mctx, step, "request")
 	if mctx.Err() != nil {
 		return nil
@@ -490,7 +504,7 @@ func (r *recorder) recordRequest(mctx context.Context, a *Agent, step int, req M
 	// The view record is content (the replacement messages), so it
 	// rides the messages kind's question; only a PrepareStep can make
 	// the request's messages differ from the transcript.
-	viewOn := capture && rewritten && r.elog.Enabled(mctx, log.EnabledParameters{EventName: eventNameMessages})
+	viewOn := capture && in.prepared && r.elog.Enabled(mctx, log.EnabledParameters{EventName: eventNameMessages})
 	if !reqOn && !promptOn && !toolsOn && !viewOn {
 		return nil
 	}
@@ -546,6 +560,10 @@ func (r *recorder) recordRequest(mctx context.Context, a *Agent, step int, req M
 	if !reqOn {
 		return nil
 	}
+	var prepared []string
+	if in.prepared {
+		prepared = preparedFields(in.before, req, transcript, in.tools)
+	}
 
 	names := make([]string, len(req.Tools))
 	for i, t := range req.Tools {
@@ -592,7 +610,7 @@ func (r *recorder) recordRequest(mctx context.Context, a *Agent, step int, req M
 		body.ToolChoice = &toolChoiceBody{Mode: string(req.ToolChoice.Mode), Name: req.ToolChoice.Name}
 	}
 	if req.Thinking != (ThinkingConfig{}) {
-		body.Thinking = &thinkingBody{Level: thinkingLevelName(req.Thinking.Level), Budget: req.Thinking.Budget, Wire: wire}
+		body.Thinking = &thinkingBody{Level: thinkingLevelName(req.Thinking.Level), Budget: req.Thinking.Budget, Wire: thinkingWire(in.model, req.Thinking)}
 	}
 	rr = &requestRecord{r: r, body: body}
 	rr.emit(mctx, body)

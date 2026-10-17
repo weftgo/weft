@@ -74,11 +74,11 @@ func (m *fallbackModel) Stream(ctx context.Context, req core.ModelRequest) iter.
 			}
 			// The wait an enclosing Retry slept before this try belongs to
 			// the chain's first request alone; a backup is sent at once.
-			var wait time.Duration
+			actx, wait := withWait(ctx, 0), time.Duration(0)
 			if i == 0 {
-				wait = waitOf(ctx)
+				actx, wait = ctx, waitOf(ctx)
 			}
-			yielded, failed := replay(ctx, model, req, layer, wait, yield)
+			yielded, failed := replay(actx, model, req, layer, wait, yield)
 			if failed == nil {
 				return
 			}
@@ -119,7 +119,8 @@ func replay(ctx context.Context, model core.Model, req core.ModelRequest, layer 
 
 // waitKey carries the backoff Retry slept before a try to the layer
 // that reports it, when that is a Fallback beneath it (a self-reporting
-// model Retry stays silent over).
+// model Retry stays silent over) or a Retry nested further down, whose
+// first try keeps it; a Fallback's backups are given 0.
 type waitKey struct{}
 
 func withWait(ctx context.Context, d time.Duration) context.Context {

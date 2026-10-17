@@ -19,6 +19,21 @@
   `tracer_only` contract fixture, walks the journeys (API, Studio UI, the panel) and
   the principle gate, and prints one PASS / FAIL / RECORDED line per clause to
   `$RUN/gate7.txt` (screenshots in `$RUN/shots`); exit 1 when a clause FAILs.
+- `gate8.sh` + `gate8.js` — the phase 8 gate (audit §9, gate 8). Run it with
+  `ARENA=<weft-arena checkout> RUN=<scratch dir> PLAYWRIGHT_DIR=<playwright install> scripts/ux-gate/gate8.sh`
+  (`REPO` defaults to this script's own tree — the Studio, the demo and the principle
+  gate's tests are built from it; the arena still compiles against its own `go.work`
+  sibling, which the header names): a fresh `weft studio` on `$RUN/studio.db`
+  (127.0.0.1:7341, token `gate8tok`), the arena seeded `--offline` under `strace -e connect`,
+  one `examples/studio-local` turn exported to it (its `otel.Slog()` lines: the logs path),
+  then gate8.js — (a) the failed-run journey on rw.budget-guards, click by click; (b) the
+  subagent tree in place on rw.deep-delegation (`?sel=` after a reload, the graph scale);
+  (c) the panel's Timeline against Studio's tree, row for row, and its ⤢; (f) U25's named
+  shapes on the run page and the panel's Story; (g) I3's `status=parked`; (h) U11's logs —
+  then (e) `h9.js` with a scripted director it writes and builds under `$RUN/demo` (never
+  in the repo), (d) `make studio-check` (`STUDIO_CHECK=0` skips it) with the panel ledger,
+  and the k-clauses. One PASS / FAIL / RECORDED line per clause in `$RUN/gate8.txt`
+  (screenshots in `$RUN/shots`); exit 1 when a clause FAILs.
 - `h9.js` — item H9's done line in a real browser: the runs list (toolbar folded, "with
   subagents" nested), `/compare` (its picker, two picks) and a subagent parent's run page fit
   1440 and 360 px with no sideways page scroll, and `/live` during an offline run draws the

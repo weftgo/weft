@@ -19,6 +19,7 @@ import { sessionTitle } from "@/lib/title"
 import {
   CHILD_TITLES,
   DELEGATED_BLOCK,
+  delegatedHoles,
   LINEAGE,
   lineageOfSession,
   OPEN_SESSION,
@@ -28,6 +29,7 @@ import type { SessionDoc, SessionRow } from "@/lib/api"
 import { runLink, sessionLink } from "@/lib/links"
 import { LineageLine } from "@/components/studio/lineage"
 import { Cost, useCostCapable } from "@/components/studio/cost"
+import { HoleBadge } from "@/components/studio/hole-badge"
 
 export const Route = createFileRoute("/sessions/$id")({
   component: SessionPage,
@@ -200,17 +202,17 @@ function DelegatedSessions({
                 ? undefined
                 : "unknown",
               cost_reason: doc.delegated_sessions_cost_reason,
-              cache: "exact",
+              // The server's cacheOf over the delegated usage, as every
+              // figure's: not_reported draws the cost lib's hint.
+              cache: doc.delegated_sessions_cache,
             }}
             chip={false}
           />
         ) : null}
+        {delegatedHoles(doc).map((m) => (
+          <HoleBadge key={m.hole} {...m} />
+        ))}
       </div>
-      {doc.delegated_unknown ? (
-        <p className="font-mono text-[11px] text-status-int">
-          {DELEGATED_BLOCK.unknown}
-        </p>
-      ) : null}
       <ul className="divide-y rounded-lg border bg-background">
         {rows.map((d) => (
           <li
@@ -249,11 +251,6 @@ function DelegatedSessions({
           </li>
         ))}
       </ul>
-      {doc.delegated_more ? (
-        <p className="text-center font-mono text-[11px] text-faint">
-          {DELEGATED_BLOCK.more}
-        </p>
-      ) : null}
     </section>
   )
 }

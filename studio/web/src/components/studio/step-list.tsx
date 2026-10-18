@@ -58,7 +58,7 @@ import type {
   FoldedToolCall,
   PlacedBatch,
 } from "@/lib/events"
-import { isLive, mergeHoles } from "@/lib/honesty"
+import { childRun, isLive, mergeHoles } from "@/lib/honesty"
 import {
   endCard,
   endStep,
@@ -1204,7 +1204,7 @@ export function StepList({
   // transcript's to say (the server's rule, replayBounds), never the
   // fold's — a step_start without a reply counts there and would 400.
   const maxFrom = transcript ? replayBounds(transcript.batches).max : null
-  const canFork = !doc.parent_run_id && Boolean(doc.session_id)
+  const canFork = !childRun(doc) && Boolean(doc.session_id)
   const loop = loopRepeats(doc)
   // The user messages the editor counts (plan F2): step 0's prompt on
   // its card, a steer by its words.

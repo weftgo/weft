@@ -5,6 +5,9 @@
 // under its parent, indented by its depth — for the runs list's "with
 // subagents" view and the Live page. Plain TypeScript, no React.
 import type { RunRow } from "./api"
+import { plural } from "./format"
+import { ownTurn, poolParent, subagentRun } from "./honesty"
+import type { HoleMark } from "./honesty"
 
 /** The "⑂ n" chip's words, or null when the run started none. */
 export interface ChildrenChip {
@@ -134,12 +137,8 @@ export function childKind(row: {
   parent_run_id?: string
   meta?: Record<string, string>
 }): ChildKind {
-  if (row.parent_run_id && row.id.startsWith(`${row.parent_run_id}/`))
-    return "subagent"
-  const s = row.session_id
-  if (row.meta?.["weft.session.parent"] && s && row.id.startsWith(`${s}-t`))
-    return /^\d+$/.test(row.id.slice(s.length + 2)) ? "delegated" : "started"
-  return "started"
+  if (subagentRun(row)) return "subagent"
+  return poolParent(row) && ownTurn(row) ? "delegated" : "started"
 }
 
 /** The chip and eyebrow words per kind, singular and plural. */
@@ -245,13 +244,54 @@ export const DELEGATED_BLOCK = {
     `delegated ${inTok} in / ${outTok} out`,
   usageTitle:
     "every session delegated under this one, any depth — beside the session's own usage, never folded into it",
-  more: "more delegated sessions than are listed here",
+  more: "more delegated sessions than are listed here: the first 100, newest first (the delegated figures count every one)",
   unknown: "the delegated sessions could not be read",
-  linkedMore: "more runs were started by its calls than are listed here",
-  linkedHidden: (n: number) =>
-    `${n} more ${n === 1 ? "run" : "runs"} started by its calls carry another public id`,
-  linkedUnknown: "the runs its calls started could not be read",
 } as const
+
+/** A run page's caller_linked holes' words (linkedHoles; the panel's
+ * too — kept apart from the session page's block). */
+export const LINKED_HOLES = {
+  more: "its calls started more runs than the first 100 listed (in start order)",
+  hidden: (n: number) =>
+    `${plural(n, "run")} its calls started carry another public id`,
+  unknown: "the runs its calls started could not be read",
+} as const
+
+/** marks is the set conditions' holes, each in its own words, no fix
+ * (the table's fix is another cause's). */
+const marks = (
+  ...m: (false | 0 | undefined | readonly [string, string])[]
+): HoleMark[] =>
+  m.flatMap((x) => (x ? [{ hole: x[0], reason: x[1], fix: "" }] : []))
+
+/** linkedHoles is a run page's caller_linked holes as the badges every
+ * hole is (lib/honesty's table, both surfaces): the list cut at its cap
+ * (truncated), runs another public id holds (hidden) and a failed read
+ * (not_recorded). */
+export const linkedHoles = (d: {
+  caller_linked_more?: boolean
+  caller_linked_hidden?: number
+  caller_linked_unknown?: boolean
+}) =>
+  marks(
+    d.caller_linked_more && ["truncated", LINKED_HOLES.more],
+    !!d.caller_linked_hidden && [
+      "hidden",
+      LINKED_HOLES.hidden(d.caller_linked_hidden),
+    ],
+    d.caller_linked_unknown && ["not_recorded", LINKED_HOLES.unknown]
+  )
+
+/** delegatedHoles is a session document's delegated block's holes:
+ * the rows cut at 100 (truncated) and a failed read (not_recorded). */
+export const delegatedHoles = (d: {
+  delegated_more?: boolean
+  delegated_unknown?: boolean
+}) =>
+  marks(
+    d.delegated_more && ["truncated", DELEGATED_BLOCK.more],
+    d.delegated_unknown && ["not_recorded", DELEGATED_BLOCK.unknown]
+  )
 
 /** The meta keys a lineage line draws (never repeated as raw chips). */
 export const LINEAGE_KEYS: readonly string[] = [

@@ -491,7 +491,7 @@ parent session never listed it. Since U14 the core keeps
 child's turn carries `weft.caller.run.id` / `weft.caller.call.id`; obsdb
 groups a session over its own turns (`<session>-t<n>`, or a run linked
 to no run) and lists a session's delegated sessions by their
-`weft.session.parent` (`SessionQuery.Parent`). The store treats a pool
+`weft.session.parent` (`SessionQuery.Parents`). The store treats a pool
 child as the separate session with lineage this ADR decided; its usage
 stays on the receipt and in the parent session's `Usage().Delegated`,
 which Studio now shows beside the parent session's own.

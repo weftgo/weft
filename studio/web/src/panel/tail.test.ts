@@ -575,6 +575,27 @@ describe("the turn list", () => {
     expect(all(el, ".weft-turn")).toHaveLength(1)
   })
 
+  // U14-fix: since O11 a run a turn's tool call started (a nested
+  // Generate, a pool child's turn) has no parent_run_id but its
+  // caller_run_id, and it inherits the turn's session and public id:
+  // runs?public_id= lists it as no turn, so the live frame must not
+  // either (pushed live, then dropped on refresh).
+  it("a caller-linked run frame is not a turn", async () => {
+    fakeStudio(baseRoutes())
+    const el = await mount()
+    FakeEventSource.last("public_id=")!.emit("run", {
+      run: runRow({
+        id: "r_nested",
+        parent_run_id: "",
+        caller_run_id: "s_01-t1",
+        caller_call_id: "c1",
+      }),
+    })
+    await settle()
+    expect(all(el, ".weft-turn")).toHaveLength(1)
+    expect(row(el, "r_nested")).toBeFalsy()
+  })
+
   it("says when the page was full: older turns exist, and loads them (D4: no Studio note)", async () => {
     const routes = baseRoutes()
     routes["runs?public_id=pub_orders&limit=50"] = {

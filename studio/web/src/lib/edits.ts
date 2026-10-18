@@ -8,6 +8,7 @@
 // transcript_edits from either surface.
 import type { Message, Part } from "./api"
 import { placeBatches } from "./events"
+import { childRun } from "./honesty"
 import type { TranscriptBatch } from "./events"
 
 /** The five kinds (the wire's `kind`). */
@@ -388,9 +389,17 @@ export const MARK_CHIPS: Record<EditMark["what"], string> = {
  * inherits its parent's mark, and its own transcript was not edited. */
 export function editMarks(
   row:
-    { meta?: Record<string, string>; parent_run_id?: string } | null | undefined
+    | {
+        id?: string
+        session_id?: string
+        meta?: Record<string, string>
+        parent_run_id?: string
+        caller_run_id?: string
+      }
+    | null
+    | undefined
 ): { marks: EditMark[]; more: number } {
-  const v = row?.parent_run_id ? "" : (row?.meta?.["weft.edits"] ?? "")
+  const v = childRun(row) ? "" : (row?.meta?.["weft.edits"] ?? "")
   const marks: EditMark[] = []
   let more = 0
   for (const tok of v ? v.split(",") : []) {

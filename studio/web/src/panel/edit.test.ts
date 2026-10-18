@@ -276,7 +276,14 @@ describe("the replayed run carries the mark (weft.edits)", () => {
     expect(text(el, '[data-weft-edit-mark="args"]')).toBe(
       "args edited step 0 · call c1 "
     )
-    expect(marksBlock({ ...row, parent_run_id: "pg_new" })).toBeNull()
+    // A child run (a Subagent's, under its parent's id) inherits the
+    // mark; a caller-linked Generate too (U14-fix: childRun).
+    expect(
+      marksBlock({ ...row, id: "pg_new/0/c1", parent_run_id: "pg_new" })
+    ).toBeNull()
+    expect(
+      marksBlock({ ...row, id: "r_nested", caller_run_id: "pg_new" })
+    ).toBeNull()
   })
 })
 

@@ -15,6 +15,7 @@ import type {
 import { isHoleRef } from "../lib/api"
 import {
   appVerbWords,
+  childRun,
   DERIVED_HOLE,
   derivedUsageUnknown,
   isDerived,
@@ -187,7 +188,12 @@ import type { HeaderRung } from "./detect"
 import { installMarkerRung, markerOf } from "./markers"
 import type { Marker, MarkerRung } from "./markers"
 import { parseScope, serializeScope } from "../lib/scope"
-import { CHILD_EYEBROW, childKind } from "../lib/delegation"
+import {
+  CHILD_EYEBROW,
+  childKind,
+  linkedHoles,
+  OPEN_SESSION,
+} from "../lib/delegation"
 import { clip as clipTitle, turnLabel, turnTitle } from "../lib/title"
 import type { Scope } from "../lib/scope"
 import { el, fmtJSON, on, patch } from "./render"
@@ -5357,7 +5363,7 @@ export class WeftDevtools extends HTMLElement {
                   // select() is no conversation to fork).
                   fork:
                     !!(row?.session_id || t.doc?.session_id) &&
-                    !(row?.parent_run_id || t.doc?.parent_run_id),
+                    !(childRun(row) || childRun(t.doc)),
                   open: (runId, draft, agent, from) => {
                     this.opener = from
                     this.go(
@@ -5529,7 +5535,10 @@ export class WeftDevtools extends HTMLElement {
     box.setAttribute("data-weft-turn-holes", "")
     const row = this.rowOf(t.id)
     const holes = turnHoles(t, row)
-    for (const m of holes) box.appendChild(holeLine(m))
+    // The runs its calls started (U14): cut, hidden or unread — never
+    // merged into a badge of the run's own (mergeHoles keeps one each).
+    for (const m of [...holes, ...linkedHoles(t.doc ?? {})])
+      box.appendChild(holeLine(m))
     if (t.capped) {
       box.appendChild(
         el(
@@ -6920,17 +6929,22 @@ function renderCall(
   if (argsEd !== args) box.appendChild(argsEd)
   const replay = ctx?.replay
   if (call.childRunId && (t || ctx?.child)) {
-    // The badge is the child's run page too, in its kind's word (U14:
-    // a subagent, a delegated session, a run the call started).
+    // The badge is the child's page too, in its kind's word (U14: a
+    // subagent, a delegated session, a run the call started) — a
+    // delegated session's own session first (UX-B-06), else the run.
     const kid = t && childRow(t, call.childRunId)
-    const word = kid ? CHILD_EYEBROW[childKind(kid)] : CHILD_EYEBROW.subagent
+    const kind = kid ? childKind(kid) : "subagent"
+    const word = CHILD_EYEBROW[kind]
+    const sess = kind === "delegated" && kid ? kid.session_id : ""
     head.appendChild(
       ctx?.endpoint
         ? el("a", "weft-badge weft-info", word, {
-            href: studioLink(ctx.endpoint, call.childRunId),
+            href: sess
+              ? href(ctx.endpoint, sessionLink(sess))
+              : studioLink(ctx.endpoint, call.childRunId),
             target: "_blank",
             rel: "noopener",
-            title: call.childRunId,
+            title: sess ? `${OPEN_SESSION} ${sess}` : call.childRunId,
             "data-weft-subagent-link": call.childRunId,
           })
         : el("span", "weft-badge weft-info", word, {

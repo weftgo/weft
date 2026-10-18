@@ -17,9 +17,10 @@ import (
 // session id, its lineage in weft.session.parent / parent_call); a
 // child recorded before weft 0.18 (s_old-t1) names the lead's turn in
 // weft.parent.run.id instead. A session is grouped over its own turns:
-// the lead's is one turn, its usage its own; the two child sessions
-// exist, carry their lineage and resolve; SessionQuery.Parent lists
-// them; RunQuery.CallerRunID lists the caller-linked runs; the caller
+// the lead's is one turn, its usage its own; the child sessions
+// exist, carry their lineage and resolve; SessionQuery.Parents lists
+// them, a whole tree level per read; a session's top-level runs
+// (RunQuery.SessionID) are its own turns; RunQuery.CallerRunID lists the caller-linked runs; the caller
 // keys never land in a row's meta.
 func poolChild(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 	return func(t *testing.T) {
@@ -63,6 +64,12 @@ func poolChild(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			"weft.session.parent": "s_lead", "weft.session.parent_call": "d2",
 			"weft.parent.run.id": "s_lead-t1", "weft.parent.call.id": "d2",
 		})...)
+		// A session the child delegated in turn (one level deeper).
+		recs = append(recs, run("s_grand-t1", 5*time.Second, 9, map[string]any{
+			"weft.session.id": "s_grand", "weft.public_id": "pub_lead", "weft.turn": int64(1), "gen_ai.agent.name": "fact-checker",
+			"weft.session.parent": "s_child", "weft.session.parent_call": "g1",
+			"weft.caller.run.id": "s_child-t1", "weft.caller.call.id": "g1",
+		})...)
 		span := invokeSpan("s_child-t1", 1, with(child, "gen_ai.usage.input_tokens", int64(30), "gen_ai.usage.output_tokens", int64(2)))
 		span.Start, span.End = at(3*time.Second), at(5*time.Second)
 		if err := db.Write(ctx(), obsdb.Batch{Records: recs, Spans: []obsdb.Span{span}}); err != nil {
@@ -103,6 +110,22 @@ func poolChild(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if ids := idsOf(cp.Runs); len(ids) != 2 || !slices.Contains(ids, "s_child-t1") || !slices.Contains(ids, "r_nested") {
 			t.Errorf("caller-linked runs of s_lead-t1 = %v, want s_child-t1 and r_nested", ids)
 		}
+		// RunQuery.Oldest: start order, the cursor paging forward.
+		first, err := db.Runs(ctx(), obsdb.RunQuery{ParentRunID: "*", CallerRunID: "s_lead-t1", Oldest: true, Limit: 1})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ids := idsOf(first.Runs); len(ids) != 1 || ids[0] != "r_nested" || first.NextBefore == nil || first.Total != 2 {
+			t.Fatalf("oldest caller-linked run of s_lead-t1 = %v (total %d), want [r_nested] and a cursor", ids, first.Total)
+		}
+		next, err := db.Runs(ctx(), obsdb.RunQuery{ParentRunID: "*", CallerRunID: "s_lead-t1", Oldest: true, Limit: 1,
+			Before: *first.NextBefore, BeforeID: first.NextBeforeID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ids := idsOf(next.Runs); len(ids) != 1 || ids[0] != "s_child-t1" {
+			t.Errorf("next oldest caller-linked run = %v, want [s_child-t1]", ids)
+		}
 
 		// Top-level runs: started from no run — no parent, no caller.
 		top, err := db.Runs(ctx(), obsdb.RunQuery{})
@@ -113,7 +136,21 @@ func poolChild(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			t.Errorf("top-level runs = %v (total %d), want [s_lead-t1]: a caller-linked run is on its caller's page", ids, top.Total)
 		}
 
-		// Sessions: the lead's, the child's, the pre-0.18 child's.
+		// A session's top-level runs are its own turns (D3), a delegated
+		// session's caller-linked turn included; the lead's Subagent
+		// child and nested Generate are not.
+		for sid, want := range map[string]string{"s_child": "s_child-t1", "s_lead": "s_lead-t1"} {
+			sp, err := db.Runs(ctx(), obsdb.RunQuery{SessionID: sid})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ids := idsOf(sp.Runs); len(ids) != 1 || ids[0] != want || sp.Total != 1 {
+				t.Errorf("top-level runs of session %s = %v (total %d), want [%s]: its own turns", sid, ids, sp.Total, want)
+			}
+		}
+
+		// Sessions: the lead's, the child's, the pre-0.18 child's, the
+		// grandchild's.
 		page, err := db.Sessions(ctx(), obsdb.SessionQuery{})
 		if err != nil {
 			t.Fatal(err)
@@ -122,8 +159,8 @@ func poolChild(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		for _, s := range page.Sessions {
 			byID[s.ID] = s
 		}
-		if page.Total != 3 || len(byID) != 3 {
-			t.Fatalf("sessions = %+v (total %d), want s_lead, s_child and s_old", page.Sessions, page.Total)
+		if page.Total != 4 || len(byID) != 4 {
+			t.Fatalf("sessions = %+v (total %d), want s_lead, s_child, s_old and s_grand", page.Sessions, page.Total)
 		}
 		ls := byID["s_lead"]
 		if ls.Turns != 1 || ls.Usage.InputTokens != 20 || ls.ParentSession != "" || ls.ParentRun != "" || ls.ParentCall != "" {
@@ -154,8 +191,8 @@ func poolChild(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 			t.Errorf("Session(s_lead) = runs %v, input %d; want [s_lead-t1], 20", ids, ld.Usage.InputTokens)
 		}
 
-		// SessionQuery.Parent: the sessions it delegated.
-		kids, err := db.Sessions(ctx(), obsdb.SessionQuery{Parent: "s_lead"})
+		// SessionQuery.Parents: the sessions it delegated.
+		kids, err := db.Sessions(ctx(), obsdb.SessionQuery{Parents: []string{"s_lead"}})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -167,10 +204,27 @@ func poolChild(open func(t *testing.T) obsdb.DB) func(*testing.T) {
 		if kids.Total != 2 || !slices.Equal(kidIDs, []string{"s_child", "s_old"}) {
 			t.Errorf("sessions delegated by s_lead = %v (total %d), want [s_child s_old]", kidIDs, kids.Total)
 		}
-		if none, err := db.Sessions(ctx(), obsdb.SessionQuery{Parent: "s_child"}); err != nil || none.Total != 0 {
-			t.Errorf("sessions delegated by s_child = %+v (%v), want none", none.Sessions, err)
+		if none, err := db.Sessions(ctx(), obsdb.SessionQuery{Parents: []string{"s_grand"}}); err != nil || none.Total != 0 {
+			t.Errorf("sessions delegated by s_grand = %+v (%v), want none", none.Sessions, err)
 		}
-		if scoped, err := db.Sessions(ctx(), obsdb.SessionQuery{Parent: "s_lead", PublicID: "pub_lead"}); err != nil || scoped.Total != 1 || scoped.Sessions[0].ID != "s_child" {
+		// One read lists a whole tree level: every session delegated by
+		// any of them.
+		level, err := db.Sessions(ctx(), obsdb.SessionQuery{Parents: []string{"s_child", "s_old", "s_lead"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var levelIDs []string
+		for _, s := range level.Sessions {
+			levelIDs = append(levelIDs, s.ID)
+		}
+		slices.Sort(levelIDs)
+		if level.Total != 3 || !slices.Equal(levelIDs, []string{"s_child", "s_grand", "s_old"}) {
+			t.Errorf("sessions delegated by [s_child s_old s_lead] = %v (total %d), want [s_child s_grand s_old]", levelIDs, level.Total)
+		}
+		if scoped, err := db.Sessions(ctx(), obsdb.SessionQuery{Parents: []string{"s_child", "s_lead"}, PublicID: "pub_lead"}); err != nil || scoped.Total != 2 {
+			t.Errorf("sessions delegated by [s_child s_lead] under pub_lead = %+v (%v), want s_child and s_grand", scoped.Sessions, err)
+		}
+		if scoped, err := db.Sessions(ctx(), obsdb.SessionQuery{Parents: []string{"s_lead"}, PublicID: "pub_lead"}); err != nil || scoped.Total != 1 || scoped.Sessions[0].ID != "s_child" {
 			t.Errorf("sessions delegated by s_lead under pub_lead = %+v (%v), want s_child alone", scoped.Sessions, err)
 		}
 	}

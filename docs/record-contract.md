@@ -822,9 +822,9 @@ its lineage (`obsdb.SessionRow.ParentSession` / `ParentCall` /
 `ParentRun`): its turns' `weft.session.parent` and
 `weft.session.parent_call`, and its first turn's `caller_run_id` (else,
 recorded before weft 0.18, its `parent_run_id`) — `""` for a session
-nothing delegated. `SessionQuery.Parent` lists the sessions one session
-delegated (SQLite reads `weft.session.parent` through the expression
-index `runs_session_parent`, 0021; ClickHouse from `Meta` at read time). Its row's `title` is the newest turn's (by
+nothing delegated. `SessionQuery.Parents` lists the sessions any of those sessions
+delegated, one read per tree level (SQLite reads `weft.session.parent` through the expression
+index `runs_session_parent`, 0021; ClickHouse from the `SessionParent` column both views fill, 0023, narrowed by `idx_session_parent` before the collapse). A session's top-level runs (`RunQuery.SessionID` with `ParentRunID` `""`) are its own turns by the same rule. Its row's `title` is the newest turn's (by
 `weft.turn`, then `started`) non-empty `weft.session.title`, `""` when
 no turn carried one; its `first_prompt` is the first turn's
 `prompt_preview` — `""` when that turn stored no content, never a later

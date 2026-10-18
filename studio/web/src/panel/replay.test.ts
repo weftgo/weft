@@ -753,7 +753,14 @@ describe("F1.3 review fixes", () => {
 
   it("7: continue here is not offered on a run with a parent (a child adopted by select)", async () => {
     const r = replayRoutes()
-    const row = runRow({ id: RUN, steps: 4, parent_run_id: "r_parent" })
+    // A run started from another (U14-fix: childRun) that is no turn of
+    // the session it inherited: its id is not s_parent-tN.
+    const row = runRow({
+      id: RUN,
+      steps: 4,
+      parent_run_id: "r_parent",
+      session_id: "s_parent",
+    })
     r["runs?public_id=pub_orders&limit=50"] = {
       total: 1,
       runs: [row],

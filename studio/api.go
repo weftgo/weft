@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"maps"
 	"net/http"
-	"slices"
 	"strconv"
 
 	"strings"
@@ -798,7 +797,7 @@ type sessionsPage struct {
 
 // sessionDoc is GET /api/sessions/{id}: the row and its own turns in
 // order; experiments hang off runs via forked_from. Delegated is the
-// sessions it delegated (thread/pool children, SessionQuery.Parent,
+// sessions it delegated (thread/pool children, SessionQuery.Parents,
 // U14): each a row with its lineage and its own cost, newest first, at
 // most delegatedCap (DelegatedMore past it), [] when none;
 // DelegatedUnknown says the read failed. DelegatedUsage and the
@@ -821,6 +820,10 @@ type delegatedSessionsFields struct {
 	CostUSD    *float64 `json:"delegated_sessions_cost_usd"`
 	CostKnown  bool     `json:"delegated_sessions_cost_known"`
 	CostReason string   `json:"delegated_sessions_cost_reason,omitempty"`
+	// Cache is cacheOf over the delegated usage (cost_fields' cache:
+	// exact, or not_reported when no delegated session reported a cache
+	// split); absent when nothing was delegated.
+	Cache string `json:"delegated_sessions_cache,omitempty"`
 }
 
 // delegatedCap bounds a session document's delegated rows, and
@@ -1101,7 +1104,7 @@ func (s *Server) serveRun(w http.ResponseWriter, r *http.Request, id string) {
 // callerLinkedCap; a panel token's public id's alone (inScope), the
 // rest counted.
 func (s *Server) callerLinked(ctx context.Context, c *coster, id string, out *runPage) {
-	page, err := s.db.Runs(ctx, obsdb.RunQuery{CallerRunID: id, ParentRunID: "*", Limit: callerLinkedCap})
+	page, err := s.db.Runs(ctx, obsdb.RunQuery{CallerRunID: id, ParentRunID: "*", Oldest: true, Limit: callerLinkedCap})
 	if err != nil {
 		slog.DebugContext(ctx, "studio: a run's caller-linked runs could not be read", "run", id, "err", err)
 		out.CallerLinkedUnknown = true
@@ -1113,12 +1116,6 @@ func (s *Server) callerLinked(ctx context.Context, c *coster, id string, out *ru
 		recs = recs[:callerLinkedCap]
 	}
 	out.CallerLinkedMore = page.Total > len(recs)
-	slices.SortFunc(recs, func(a, b obsdb.RunRow) int {
-		if d := a.Started.Compare(b.Started); d != 0 {
-			return d
-		}
-		return strings.Compare(a.ID, b.ID)
-	})
 	for _, rec := range recs {
 		if !inScope(pub, rec) {
 			out.CallerLinkedHidden++
@@ -1816,63 +1813,66 @@ func (s *Server) serveSessionRoutes(w http.ResponseWriter, r *http.Request) {
 }
 
 // delegatedSessions fills a session document's delegated block (U14):
-// its direct delegated sessions as rows (SessionQuery.Parent, the
-// panel token's public id's alone — the list's scope), and the usage
-// and cost of every session delegated under it, walked breadth first
-// up to delegatedTreeCap sessions: past it, or when a read fails, the
-// delegated cost is not known and the reason says why (the usage then
-// a floor, said in the same reason).
+// its direct delegated sessions as rows (SessionQuery.Parents, the
+// panel token's public id's alone — the list's scope), newest first,
+// the first delegatedCap of them, and the usage and cost of every
+// session delegated under it, walked breadth first — one paged
+// Sessions read per tree level (Parents IN the level), never one per
+// session — up to delegatedTreeCap sessions: past it, or when a read
+// fails, the delegated cost is not known and the reason says why (the
+// usage then a floor, said in the same reason). The direct level is
+// paged whole, so a session delegating more than delegatedCap still
+// has every one of them in its figures.
 func (s *Server) delegatedSessions(ctx context.Context, id, pub string, doc *sessionDoc) {
 	doc.Delegated = []sessionRow{}
 	seen := map[string]bool{id: true}
-	queue := []string{id}
+	level := []string{id}
 	var parts []runCost
 	var why string
 	walked := 0
-	for depth := 0; len(queue) > 0; depth++ {
-		parent := queue[0]
-		queue = queue[1:]
-		limit := delegatedCap
-		if depth > 0 {
-			limit = 500
-		}
-		page, err := s.db.Sessions(ctx, obsdb.SessionQuery{Parent: parent, PublicID: pub, Limit: limit})
-		if err != nil {
-			slog.DebugContext(ctx, "studio: a session's delegated sessions could not be read", "session", parent, "err", err)
-			if parent == id {
-				doc.DelegatedUnknown = true
-			}
-			why = "the delegated sessions of " + parent + " could not be read"
-			break
-		}
-		if parent == id {
-			doc.DelegatedMore = page.Total > len(page.Sessions)
-		} else if page.Total > len(page.Sessions) && why == "" {
-			why = fmt.Sprintf("%s delegated %d sessions: more than one read lists", parent, page.Total)
-		}
-		for _, sr := range page.Sessions {
-			if seen[sr.ID] {
-				continue
-			}
-			seen[sr.ID] = true
-			if walked == delegatedTreeCap {
-				if why == "" {
-					why = fmt.Sprintf("more than %d sessions are delegated under this one: too many to price at read time", delegatedTreeCap)
+walk:
+	for depth := 0; len(level) > 0; depth++ {
+		var next []string
+		q := obsdb.SessionQuery{Parents: level, PublicID: pub, Limit: 500}
+		for {
+			page, err := s.db.Sessions(ctx, q)
+			if err != nil {
+				slog.DebugContext(ctx, "studio: a session's delegated sessions could not be read", "session", id, "depth", depth, "err", err)
+				if depth == 0 {
+					doc.DelegatedUnknown = true
 				}
-				queue = nil
+				why = fmt.Sprintf("the sessions delegated %d level(s) under this one could not be read", depth+1)
+				break walk
+			}
+			if depth == 0 {
+				doc.DelegatedMore = page.Total > delegatedCap
+			}
+			for _, sr := range page.Sessions {
+				if seen[sr.ID] {
+					continue
+				}
+				seen[sr.ID] = true
+				if walked == delegatedTreeCap {
+					why = fmt.Sprintf("more than %d sessions are delegated under this one: too many to price at read time", delegatedTreeCap)
+					break walk
+				}
+				walked++
+				sc, _, _ := s.sessionCost(ctx, sr.ID, pub)
+				doc.DelegatedUsage = doc.DelegatedUsage.Add(sr.Usage)
+				parts = append(parts, runCost{id: sr.ID, own: sc, delegated: cost{known: true}})
+				if depth == 0 && len(doc.Delegated) < delegatedCap {
+					row := sessRow(sr)
+					row.costFields = sc.fields()
+					doc.Delegated = append(doc.Delegated, row)
+				}
+				next = append(next, sr.ID)
+			}
+			if page.NextBefore == nil || len(page.Sessions) == 0 {
 				break
 			}
-			walked++
-			sc, _, _ := s.sessionCost(ctx, sr.ID, pub)
-			doc.DelegatedUsage = doc.DelegatedUsage.Add(sr.Usage)
-			parts = append(parts, runCost{id: sr.ID, own: sc, delegated: cost{known: true}})
-			if parent == id {
-				row := sessRow(sr)
-				row.costFields = sc.fields()
-				doc.Delegated = append(doc.Delegated, row)
-			}
-			queue = append(queue, sr.ID)
+			q.Before, q.BeforeID = *page.NextBefore, page.NextBeforeID
 		}
+		level = next
 	}
 	if len(parts) == 0 && why == "" {
 		zero := 0.0
@@ -1887,7 +1887,10 @@ func (s *Server) delegatedSessions(ctx context.Context, id, pub string, doc *ses
 		}
 		total.reason = why
 	}
-	out := delegatedSessionsFields{CostKnown: total.known, CostReason: total.reason}
+	out := delegatedSessionsFields{CostKnown: total.known, CostReason: total.reason, Cache: cacheOf(doc.DelegatedUsage)}
+	if out.CostKnown && out.Cache == cacheNotReported && out.CostReason == "" {
+		out.CostReason = cacheNote // fields()' rule
+	}
 	if total.known {
 		v := round6(total.usd)
 		out.CostUSD = &v

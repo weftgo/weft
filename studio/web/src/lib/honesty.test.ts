@@ -30,6 +30,7 @@ import {
   SUBAGENT_CALL,
   appTurn,
   appVerbWords,
+  childRun,
   nextTurn,
   noPublicIDWords,
   parkedKind,
@@ -409,5 +410,21 @@ describe("the app turn's kinds and refusal words", () => {
     ).toBe("decided")
     // The panel's steer carries no decision: steered without the argument.
     expect(appVerbWords({ state: "finished" }, "r").text).toBe("steered")
+  })
+})
+
+describe("childRun (U14-fix)", () => {
+  it("is a run started from another that is no turn of its own session", () => {
+    expect(
+      childRun({ id: "s-t1/0/c", parent_run_id: "s-t1", session_id: "s" })
+    ).toBe(true)
+    expect(
+      childRun({ id: "r_n", caller_run_id: "s-t1", session_id: "s" })
+    ).toBe(true)
+    expect(
+      childRun({ id: "c-t1", caller_run_id: "s-t1", session_id: "c" })
+    ).toBe(false)
+    expect(childRun({ id: "s-t2", session_id: "s" })).toBe(false)
+    expect(childRun(null)).toBe(false)
   })
 })

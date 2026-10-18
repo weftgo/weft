@@ -69,7 +69,8 @@ func TestExperimentRunsUseTheIndex(t *testing.T) {
 // runs or of every top-level run:
 //
 //   - the public id's list (the panel's) and a session's runs on the
-//     partial indexes runs_public and runs_session_started — runWhere
+//     partial indexes runs_public and runs_session_turns (0021: a session's
+//     runs by start, its own-turn rule a filter, U14-fix) — runWhere
 //     states their own condition (<> ”) beside the equality, without
 //     which sqlite never uses a partial index (the finding: both were
 //     planned on runs_started, every top-level run walked);
@@ -83,9 +84,9 @@ func TestExperimentRunsUseTheIndex(t *testing.T) {
 //     until the LIMIT filled).
 //   - not under a public id or session equality (P7-fix): runOrder
 //     keeps the plain spelling there and runs_public /
-//     runs_session(_started) narrow the read — in their order under a
-//     parent equality; with all=1 they lead with parent_run_id before
-//     started_ns, so the matches of one public id or session sort in a
+//     runs_session_turns narrow the read — the public id's in its order under a
+//     parent equality, a session's in its own; with all=1 runs_public leads with parent_run_id before
+//     started_ns, so the matches of one public id sort in a
 //     temp B-tree whichever spelling (pinned on the index only).
 //
 // The status filter, honestly: statusExpr's CASE takes a bind parameter
@@ -115,7 +116,7 @@ func TestRunListsUseTheirIndexes(t *testing.T) {
 	}{
 		{name: "public id", q: obsdb.RunQuery{PublicID: "pub_1"}, count: "runs_public", page: "runs_public", noTempBy: true},
 		{name: "public id, all", q: obsdb.RunQuery{PublicID: "pub_1", ParentRunID: "*"}, count: "runs_public", page: "runs_public"},
-		{name: "session", q: obsdb.RunQuery{SessionID: "s_1"}, count: "runs_session_started", page: "runs_session_started", noTempBy: true},
+		{name: "session", q: obsdb.RunQuery{SessionID: "s_1"}, count: "runs_session_turns", page: "runs_session_turns", noTempBy: true},
 		{name: "all runs", q: obsdb.RunQuery{ParentRunID: "*"}, page: "runs_all", noTempBy: true},
 		{name: "top-level", q: obsdb.RunQuery{}, count: "runs_started", page: "runs_started", noTempBy: true},
 		{name: "last seen after", q: obsdb.RunQuery{ParentRunID: "*", LastSeenAfter: time.Now()}, count: "runs_last_seen", page: "runs_last_seen", search: true},
@@ -125,8 +126,8 @@ func TestRunListsUseTheirIndexes(t *testing.T) {
 		{name: "running", q: obsdb.RunQuery{Status: obsdb.StatusRunning}, count: "runs_started", page: "runs_started", noTempBy: true},
 		{name: "public id, all, last seen after", q: obsdb.RunQuery{PublicID: "pub_1", ParentRunID: "*", LastSeenAfter: time.Now()}, count: "runs_public", page: "runs_public"},
 		{name: "public id, last seen after", q: obsdb.RunQuery{PublicID: "pub_1", LastSeenAfter: time.Now()}, count: "runs_public", page: "runs_public", noTempBy: true},
-		{name: "session, all, running", q: obsdb.RunQuery{SessionID: "s_1", ParentRunID: "*", Status: obsdb.StatusRunning}, count: "runs_session_started", page: "runs_session"},
-		{name: "session, running", q: obsdb.RunQuery{SessionID: "s_1", Status: obsdb.StatusRunning}, count: "runs_session_started", page: "runs_session_started", noTempBy: true},
+		{name: "session, all, running", q: obsdb.RunQuery{SessionID: "s_1", ParentRunID: "*", Status: obsdb.StatusRunning}, count: "runs_session_turns", page: "runs_session_turns", noTempBy: true},
+		{name: "session, running", q: obsdb.RunQuery{SessionID: "s_1", Status: obsdb.StatusRunning}, count: "runs_session_turns", page: "runs_session_turns", noTempBy: true},
 		{name: "succeeded, all", q: obsdb.RunQuery{Status: obsdb.StatusSucceeded, ParentRunID: "*"}, page: "runs_all", countScan: true},
 	} {
 		count, page, args := runListSQL(c.q)

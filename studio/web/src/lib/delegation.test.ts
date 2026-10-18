@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest"
 import {
   CHILDREN_COUNT_UNKNOWN,
   childKind,
+  delegatedHoles,
+  linkedHoles,
   lineageOfRun,
   lineageOfSession,
   storyChildren,
@@ -158,5 +160,29 @@ describe("storyChildren", () => {
       ["s_c-t1", "d1"],
     ])
     expect(storyChildren({ children: [] })).toEqual([])
+  })
+})
+
+describe("linkedHoles / delegatedHoles (U14-fix)", () => {
+  it("are the shared table's badges in their own words, no fix", () => {
+    expect(linkedHoles({})).toEqual([])
+    const h = linkedHoles({
+      caller_linked_more: true,
+      caller_linked_hidden: 1,
+      caller_linked_unknown: true,
+    })
+    expect(h.map((m) => m.hole)).toEqual([
+      "truncated",
+      "hidden",
+      "not_recorded",
+    ])
+    expect(h.every((m) => m.fix === "" && !!m.reason)).toBe(true)
+    expect(h[1].reason).toBe("1 run its calls started carry another public id")
+    expect(
+      delegatedHoles({ delegated_more: true, delegated_unknown: true }).map(
+        (m) => m.hole
+      )
+    ).toEqual(["truncated", "not_recorded"])
+    expect(delegatedHoles({})).toEqual([])
   })
 })

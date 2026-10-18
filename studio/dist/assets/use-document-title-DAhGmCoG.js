@@ -1,0 +1,1 @@
+import{Ai as e,Mi as t,t as n}from"./title-DcZ6e5Tv.js";var r=t(e(),1);function i(e){let t=n(e);(0,r.useEffect)(()=>{typeof document<`u`&&(document.title=t)},[t])}export{i as t};

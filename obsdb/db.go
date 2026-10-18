@@ -235,6 +235,12 @@ type RunQuery struct {
 	// Generates. Pair it with ParentRunID "*" — a caller-linked run is
 	// top-level by ParentRunID.
 	CallerRunID string
+	// Oldest turns the list around: oldest first, in start order (run
+	// id breaking ties, ascending), and the (Before, BeforeID) cursor
+	// then reads the runs after that one — RunPage.NextBefore pages
+	// forward. A run page's caller_linked rows are its first page. Runs
+	// alone: Search keeps its own sort.
+	Oldest bool
 }
 
 // TraceQuery selects traces for Traces. The zero value lists every
@@ -623,12 +629,13 @@ const MaxGaps = 1000
 // ASCII-only on SQLite (lower()), Unicode on ClickHouse
 // (positionCaseInsensitiveUTF8).
 //
-// Parent keeps the sessions delegated by that session (SessionRow's
-// ParentSession: thread/pool child sessions, ADR 0022), "" any.
+// Parents keeps the sessions delegated by any of those sessions
+// (SessionRow's ParentSession: thread/pool child sessions, ADR 0022),
+// empty any: one read lists a whole level of a delegation tree.
 type SessionQuery struct {
 	Agent, PublicID string
 	Q               string
-	Parent          string
+	Parents         []string
 	Before          time.Time // cursor on LastSeen; zero = newest
 	BeforeID        string    // with Before: the (LastSeen, ID) pair, as RunQuery.BeforeID
 	Limit           int       // 0 = 50, max 500

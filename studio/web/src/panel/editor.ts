@@ -146,11 +146,7 @@ export function editList(
  * EditsMark): none on a child run, which inherits its parent's. */
 export function marksBlock(
   row:
-    | {
-        meta?: Record<string, string>
-        parent_run_id?: string
-        forked_from?: string
-      }
+    | (NonNullable<Parameters<typeof editMarks>[0]> & { forked_from?: string })
     | null
     | undefined,
   batches?: TranscriptBatch[]

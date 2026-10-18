@@ -108,6 +108,11 @@ func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (_ obsdb.RunPage, err e
 	}
 	pageArgs := append(append([]any{}, args...), outerArgs...)
 	frag := "SELECT * FROM (" + inner + ") WHERE " + strings.Join(or1(conds), " AND ")
+	// past is the cursor's direction: older runs, or newer under Oldest.
+	past, dir := "<", "DESC"
+	if q.Oldest {
+		past, dir = ">", "ASC"
+	}
 	if !q.Before.IsZero() {
 		// Integer nanoseconds, not a time.Time bind: the driver renders
 		// positional time.Time at Seconds scale, so `Started < ?`
@@ -117,10 +122,10 @@ func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (_ obsdb.RunPage, err e
 		// essentially every page boundary).
 		ns := q.Before.UnixNano()
 		if q.BeforeID != "" {
-			frag += " AND (toUnixTimestamp64Nano(Started) < ? OR (toUnixTimestamp64Nano(Started) = ? AND RunId < ?))"
+			frag += " AND (toUnixTimestamp64Nano(Started) " + past + " ? OR (toUnixTimestamp64Nano(Started) = ? AND RunId " + past + " ?))"
 			pageArgs = append(pageArgs, ns, ns, q.BeforeID)
 		} else {
-			frag += " AND toUnixTimestamp64Nano(Started) < ?"
+			frag += " AND toUnixTimestamp64Nano(Started) " + past + " ?"
 			pageArgs = append(pageArgs, ns)
 		}
 	}
@@ -131,7 +136,7 @@ func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (_ obsdb.RunPage, err e
 	// MaxTies, so one page stays bounded however large the tie; past
 	// the cap the (Before, BeforeID) cursor resumes inside the group.
 	limit := obsdb.LimitOf(q.Limit)
-	frag = "SELECT * FROM (" + frag + " ORDER BY Started DESC LIMIT ? WITH TIES) ORDER BY Started DESC, RunId DESC LIMIT ?"
+	frag = "SELECT * FROM (" + frag + " ORDER BY Started " + dir + " LIMIT ? WITH TIES) ORDER BY Started " + dir + ", RunId " + dir + " LIMIT ?"
 	pageArgs = append(pageArgs, limit, limit+obsdb.MaxTies)
 	rows, err := d.queryRunRows(ctx, now, frag, pageArgs...)
 	if err != nil {
@@ -186,11 +191,16 @@ func runsInner(q obsdb.RunQuery) (string, []any) {
 	if q.CallerRunID != "" {
 		eq("CallerRunID", q.CallerRunID)
 	}
-	switch q.ParentRunID {
-	case "":
+	switch {
+	case q.ParentRunID == "" && q.SessionID != "":
+		// A session's top-level runs are its own turns (D3, the
+		// sessions' rule): a delegated session's turns carry a caller
+		// link and are its turns all the same.
+		conds = append(conds, ownTurnCH)
+	case q.ParentRunID == "":
 		// Top-level: no Subagent parent, no caller link (O11).
 		conds = append(conds, "ParentRunID = '' AND CallerRunID = ''")
-	case "*":
+	case q.ParentRunID == "*":
 	default:
 		eq("ParentRunID", q.ParentRunID)
 	}
@@ -1425,22 +1435,37 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 	defer d.closedErr(&err)
 	var having []string
 	var hargs, runArgs []any // runArgs: the runs subquery's parameters
-	narrow, cond := "", ""
+	var narrows []string
+	var narrowArgs, condArgs []any
+	cond := ""
 	if q.PublicID != "" {
 		// The scope is on the runs, before the GROUP BY (the SQLite
 		// backend's rule, RunQuery.PublicID's): every aggregate, the
 		// order, Total and the cursor are the public id's runs alone.
 		// The narrow prunes the collapse by primary key, the cond keeps
 		// the collapsed rows whose public id is it.
-		narrow, cond = " WHERE RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.PublicID = ?)", " AND PublicID = ?"
-		runArgs = append(runArgs, q.PublicID, q.PublicID)
+		narrows = append(narrows, "RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.PublicID = ?)")
+		cond += " AND PublicID = ?"
+		narrowArgs, condArgs = append(narrowArgs, q.PublicID), append(condArgs, q.PublicID)
 	}
-	if q.Parent != "" {
+	if len(q.Parents) > 0 {
 		// A delegated session's every turn carries its lineage (thread's
-		// identityMetadata): the cond keeps those turns.
-		cond += " AND SessionParent = ?"
-		runArgs = append(runArgs, q.Parent)
+		// identityMetadata; the SessionParent column, 0023): the narrow
+		// reads those runs by idx_session_parent before the collapse —
+		// eq()'s rule in runsInner — the cond keeps the collapsed turns.
+		// One IN lists a whole level of a delegation tree.
+		in := " IN (" + placeholders(len(q.Parents)) + ")"
+		narrows = append(narrows, "RunId IN (SELECT r.RunId FROM weft_runs AS r WHERE r.SessionParent"+in+")")
+		cond += " AND SessionParent" + in
+		for _, p := range q.Parents {
+			narrowArgs, condArgs = append(narrowArgs, p), append(condArgs, p)
+		}
 	}
+	narrow := ""
+	if len(narrows) > 0 {
+		narrow = " WHERE " + strings.Join(narrows, " AND ")
+	}
+	runArgs = append(narrowArgs, condArgs...)
 	runs := sessionRuns(narrow, cond)
 	hargs = append(hargs, runArgs...)
 	if q.Agent != "" {
@@ -1631,7 +1656,7 @@ func sessionRuns(narrow, cond string) string {
 				max(CachedInputTokens) AS CachedInputTokens, max(CacheWriteTokens) AS CacheWriteTokens,
 				max(ReasoningTokens) AS ReasoningTokens, max(Derived) AS Derived,
 				max(JSONExtractString(Meta, '` + obsdb.SessionTitleKey + `')) AS Title,
-				max(JSONExtractString(Meta, 'weft.session.parent')) AS SessionParent,
+				max(SessionParent) AS SessionParent,
 				max(JSONExtractString(Meta, 'weft.session.parent_call')) AS SessionParentCall
 			FROM weft_runs` + narrow + `
 			GROUP BY RunId)

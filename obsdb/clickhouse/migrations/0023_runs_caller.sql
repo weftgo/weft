@@ -15,17 +15,27 @@
 -- QUERY swaps each select in place (0003's reasoning).
 --
 -- A session is grouped over its own turns (D3) and its delegated
--- sessions are found by their turns' weft.session.parent, read from
--- Meta at query time (obsdb.SessionQuery.Parent): no column.
+-- sessions are found by their turns' weft.session.parent
+-- (obsdb.SessionQuery.Parents): weft_runs.SessionParent keeps that key
+-- (still in Meta too, where the run header reads it), fed by both
+-- views, so a delegated walk narrows by idx_session_parent before the
+-- GROUP BY instead of extracting Meta from every run. The UPDATE fills
+-- it on the rows stored before this migration (thread stamped the key
+-- before weft.caller.* existed).
 --
--- No backfill: weft.caller.* is new with this version. A run recorded
--- before it that a tool call started keeps its ParentRunID; the own-
--- turn rule reads a pool child's turn of that age by its id.
+-- No backfill of weft.caller.*: it is new with this version. A run
+-- recorded before it that a tool call started keeps its ParentRunID;
+-- the own-turn rule reads a pool child's turn of that age by its id.
 
 ALTER TABLE weft_runs ADD COLUMN IF NOT EXISTS CallerRunID SimpleAggregateFunction(max, String);
 ALTER TABLE weft_runs ADD COLUMN IF NOT EXISTS CallerCallID SimpleAggregateFunction(max, String);
+ALTER TABLE weft_runs ADD COLUMN IF NOT EXISTS SessionParent SimpleAggregateFunction(max, String);
 
 ALTER TABLE weft_runs ADD INDEX IF NOT EXISTS idx_caller_run CallerRunID TYPE bloom_filter GRANULARITY 4;
+ALTER TABLE weft_runs ADD INDEX IF NOT EXISTS idx_session_parent SessionParent TYPE bloom_filter GRANULARITY 4;
+
+ALTER TABLE weft_runs UPDATE SessionParent = JSONExtractString(Meta, 'weft.session.parent')
+WHERE SessionParent = '' AND position(Meta, 'weft.session.parent') > 0;
 
 ALTER TABLE weft_runs_logs_mv MODIFY QUERY
 WITH mapFilter((k, v) -> NOT has([
@@ -108,7 +118,8 @@ SELECT
     if(LogAttributes['weft.event.type'] = 'run_finish', JSONExtractString(Body, 'stopped_by'), '') AS StoppedBy,
     LogAttributes['weft.resumed_from'] AS ResumedFrom,
     LogAttributes['weft.caller.run.id'] AS CallerRunID,
-    LogAttributes['weft.caller.call.id'] AS CallerCallID
+    LogAttributes['weft.caller.call.id'] AS CallerCallID,
+    LogAttributes['weft.session.parent'] AS SessionParent
 FROM otel_logs
 WHERE LogAttributes['weft.run.id'] != '';
 
@@ -216,6 +227,7 @@ SELECT
     ]) AS Problems,
     SpanAttributes['weft.resumed_from'] AS ResumedFrom,
     SpanAttributes['weft.caller.run.id'] AS CallerRunID,
-    SpanAttributes['weft.caller.call.id'] AS CallerCallID
+    SpanAttributes['weft.caller.call.id'] AS CallerCallID,
+    SpanAttributes['weft.session.parent'] AS SessionParent
 FROM otel_traces
 WHERE SpanAttributes['weft.run.id'] != '';

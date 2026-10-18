@@ -91,7 +91,7 @@ import {
   LineageLine,
   StartedBy,
 } from "@/components/studio/lineage"
-import { DELEGATED_BLOCK, LINEAGE_KEYS, lineageOfRun } from "@/lib/delegation"
+import { LINEAGE_KEYS, lineageOfRun, linkedHoles } from "@/lib/delegation"
 import type { ToolFactsMap } from "@/lib/error-kind"
 
 /** StoppedByChip is what ended the run (U3.2), in lib/stopped-by.ts's
@@ -827,20 +827,12 @@ export function RunHeader({
           <ChildChips key={kind} kind={kind} rows={rows} />
         )
       )}
-      {doc.caller_linked_more ? (
-        <p className="font-mono text-[11px] text-faint">
-          {DELEGATED_BLOCK.linkedMore}
-        </p>
-      ) : null}
-      {doc.caller_linked_hidden ? (
-        <p className="font-mono text-[11px] text-faint">
-          {DELEGATED_BLOCK.linkedHidden(doc.caller_linked_hidden)}
-        </p>
-      ) : null}
-      {doc.caller_linked_unknown ? (
-        <p className="font-mono text-[11px] text-status-int">
-          {DELEGATED_BLOCK.linkedUnknown}
-        </p>
+      {linkedHoles(doc).length > 0 ? (
+        <div className="flex flex-wrap gap-1.5" data-caller-linked-holes>
+          {linkedHoles(doc).map((m) => (
+            <HoleBadge key={m.hole} {...m} />
+          ))}
+        </div>
       ) : null}
     </div>
   )

@@ -368,9 +368,33 @@ describe("a delegated session in the panel's story (U14)", () => {
     expect(row.querySelector("summary")?.textContent).toBe(
       "delegated session market-analyst · succeeded · 10→5 tok"
     )
-    expect(
-      $(el, `[data-weft-subagent-link="${CSS.escape(`${POOL}-t1`)}"]`)
-        ?.textContent
-    ).toBe("delegated session")
+    const badge = $(
+      el,
+      `[data-weft-subagent-link="${CSS.escape(`${POOL}-t1`)}"]`
+    )
+    expect(badge?.textContent).toBe("delegated session")
+    // U14-fix (UX-B-06): its primary link is the delegated session.
+    expect(badge?.getAttribute("href")).toContain(`/sessions/${POOL}`)
+  })
+
+  // U14-fix: the caller_linked holes are badges from the shared table —
+  // a hidden delegation is said, never just absent.
+  it("draws the caller-linked holes as badges", async () => {
+    const r = routes()
+    r[`runs/${RUN}`] = {
+      ...runRow({}),
+      children: [],
+      caller_linked_more: true,
+      caller_linked_hidden: 2,
+      caller_linked_unknown: true,
+    }
+    fakeStudio(r, metaWithRequests)
+    const el = await mount({ ...ATTRS, "data-token": claims("playground") })
+    const holes = $(el, "[data-weft-turn-holes]")!
+    for (const h of ["truncated", "hidden", "not_recorded"])
+      expect(holes.querySelector(`[data-hole="${h}"]`)).toBeTruthy()
+    expect(holes.textContent).toContain(
+      "2 runs its calls started carry another public id"
+    )
   })
 })

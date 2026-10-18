@@ -71,13 +71,18 @@ func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (_ obsdb.RunPage, err e
 	}
 	limit := obsdb.LimitOf(q.Limit)
 	frag, qargs := where, append([]any{}, args...)
+	// past is the cursor's direction: older runs, or newer under Oldest.
+	past, dir := "<", "DESC"
+	if q.Oldest {
+		past, dir = ">", "ASC"
+	}
 	if !q.Before.IsZero() {
 		ns := q.Before.UnixNano()
 		if q.BeforeID != "" {
-			frag += " AND (started_ns < ? OR (started_ns = ? AND run_id < ?))"
+			frag += " AND (started_ns " + past + " ? OR (started_ns = ? AND run_id " + past + " ?))"
 			qargs = append(qargs, ns, ns, q.BeforeID)
 		} else {
-			frag += " AND started_ns < ?"
+			frag += " AND started_ns " + past + " ?"
 			qargs = append(qargs, ns)
 		}
 	}
@@ -97,7 +102,7 @@ func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (_ obsdb.RunPage, err e
 		// the (Before, BeforeID) cursor resumes inside the group.
 		last := rows[len(rows)-1]
 		ties, err := d.queryRunRows(ctx,
-			where+` AND started_ns = ? AND run_id < ? ORDER BY run_id DESC LIMIT ?`,
+			where+` AND started_ns = ? AND run_id `+past+` ? ORDER BY run_id `+dir+` LIMIT ?`,
 			append(append([]any{}, args...), last.Started.UnixNano(), last.ID, obsdb.MaxTies), now)
 		if err != nil {
 			return obsdb.RunPage{}, err
@@ -119,10 +124,13 @@ func (d *DB) Runs(ctx context.Context, q obsdb.RunQuery) (_ obsdb.RunPage, err e
 // SEARCH runs USING INDEX runs_last_seen (last_seen_ns>?) and a temp
 // B-tree over the matches (TestRunListsUseTheirIndexes pins both).
 // Not under a public id or session equality (the panel's public-id live
-// backfill, a session's running list): runs_public / runs_session_started
+// backfill, a session's running list): runs_public / runs_session_turns
 // lead with that equality and narrow better than runs_last_seen, so the
 // plain spelling stays and the planner keeps them.
 func runOrder(q obsdb.RunQuery) string {
+	if q.Oldest {
+		return ` ORDER BY started_ns, run_id`
+	}
 	if q.ParentRunID == "*" && q.PublicID == "" && q.SessionID == "" &&
 		(q.Status == obsdb.StatusRunning || !q.LastSeenAfter.IsZero()) {
 		return ` ORDER BY +started_ns DESC, run_id DESC`
@@ -218,14 +226,19 @@ func runWhere(q obsdb.RunQuery, now time.Time) (string, []any) {
 		conds = append(conds, "caller_run_id = ? AND caller_run_id <> ''") // runs_caller (0021)
 		args = append(args, q.CallerRunID)
 	}
-	switch q.ParentRunID {
-	case "":
+	switch {
+	case q.ParentRunID == "" && q.SessionID != "":
+		// A session's top-level runs are its own turns (D3, the
+		// sessions' rule): a delegated session's turns carry a caller
+		// link and are its turns all the same.
+		conds = append(conds, ownTurn("runs"))
+	case q.ParentRunID == "":
 		// Top-level: started from no run — no Subagent parent, no
 		// caller link (O11: a pool child turn, a nested Generate is on
 		// its caller's page, as it was when the core linked it as a
 		// child). runs_started still leads on parent_run_id.
 		conds = append(conds, "parent_run_id = '' AND caller_run_id = ''")
-	case "*":
+	case q.ParentRunID == "*":
 	default:
 		conds = append(conds, "parent_run_id = ?")
 		args = append(args, q.ParentRunID)
@@ -1201,11 +1214,14 @@ func (d *DB) Sessions(ctx context.Context, q obsdb.SessionQuery) (_ obsdb.Sessio
 		scope += ` AND public_id = ? AND public_id <> ''`
 		sargs = []any{q.PublicID}
 	}
-	if q.Parent != "" {
+	if len(q.Parents) > 0 {
 		// Every turn of a delegated session carries its lineage
-		// (thread's identityMetadata), so the scope is the turns'.
-		scope += ` AND ` + sessionParentExpr("runs") + ` = ?`
-		sargs = append(sargs, q.Parent)
+		// (thread's identityMetadata), so the scope is the turns'; one
+		// IN over runs_session_parent lists a whole tree level.
+		scope += ` AND ` + sessionParentExpr("runs") + ` IN (?` + strings.Repeat(",?", len(q.Parents)-1) + `)`
+		for _, p := range q.Parents {
+			sargs = append(sargs, p)
+		}
 	}
 	// Total is the whole match, as Runs' is: the cursor pages through
 	// it and never narrows it.

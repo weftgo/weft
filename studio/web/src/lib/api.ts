@@ -470,6 +470,9 @@ export interface SessionDoc extends SessionRow {
   delegated_sessions_cost_usd?: number | null
   delegated_sessions_cost_known?: boolean
   delegated_sessions_cost_reason?: string
+  /** cacheOf over delegated_usage: "exact" | "not_reported"; absent
+   * when nothing was delegated. */
+  delegated_sessions_cache?: string
 }
 
 /** GET /api/public/{public_id}. */

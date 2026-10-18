@@ -246,7 +246,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    cost_sort_cap when cut; run rows
 //    //    only, scoped like runs; capability "search" — obsdb.Searcher: SQLite FTS5 trigram,
 //    //    migration 0004; ClickHouse one derivation per search + positionCaseInsensitiveUTF8, no migration; short terms ASCII-folded on SQLite), runs/{id} (with its compactions: run-scope views, then session markers; caller_linked: the runs its calls started
-//    //    that are no Subagent children — caller_run_id names it (U14), ≤ 100, caller_linked_more/_hidden/_unknown; a panel token reads only its public id's child runs — children[], a step's children, every children_count and delegated figure — the rest one hidden hole with a count, P8-scope-fix),
+//    //    that are no Subagent children — caller_run_id names it (U14), the first 100 in start order (obsdb.RunQuery.Oldest), caller_linked_more/_hidden/_unknown drawn as truncated/hidden/not_recorded badges; a panel token reads only its public id's child runs — children[], a step's children, every children_count and delegated figure — the rest one hidden hole with a count, P8-scope-fix),
 //    //    runs/{id}/events|transcript|spans|requests|tools (spans: run_id on each; ?tree=1 — capability spans_tree, obsdb.TreeReader, U9.1 — every descendant run's spans too, by the weft.parent.run.id chain and core's id rule (<parent>/<step>/<call>), found from the run rows and read by run id — never the whole trace — keyed run_id + span_id with parent_run_id, at most 10,000 (obsdb.TreeSpanCap), holes: truncated/response_cap past it (and past a derived run's 50,000-span trace read), not_recorded/no_spans naming a finished child with no span (runs the first 100, count all; a running child is not missing), hidden for a panel token's other-public-id descendants (left out with their subtrees before the cap, counted — the hole's count, obsdb.RunTree.HiddenCount —, never a 403; obsdb.TreeQuery.PublicID); each requests row's `raw`: the attempt's wire pair under otel.RawBodies, else null + raw_badge not_recorded; transcript?step=N adds what step N's
 //    //    model call carried — the record's truth, the replay prefix for N > 0 (from_step 0 re-runs
 //    //    step 0's PrepareStep), compacted_at naming its view; null under hidden for a read token, ADR 0029),
@@ -288,7 +288,7 @@ dec := weft.NewOutputDecoder[Verdict]()                                 // parti
 //    //    (weft.session.title, the newest turn's), first_prompt and content_off (the first turn stored no content);
 //    //    obsdb.SessionQuery.Q; a session is its own turns — <session>-t<turn> or a run linked to no run, D3 —
 //    //    so a thread/pool child session is listed, with its lineage parent_session/parent_turn/parent_call/parent_run,
-//    //    obsdb.SessionQuery.Parent listing a session's delegated ones), sessions/{id} (+ delegated: its delegated sessions,
+//    //    obsdb.SessionQuery.Parents listing the sessions any of them delegated, one tree level per read), sessions/{id} (+ delegated: its delegated sessions,
 //    //    each with its cost; delegated_usage and delegated_sessions_cost_* the whole delegated tree's, beside its own, U14),
 //    //    sessions/{id}/public_id (the reverse of public/{public_id}: the dev token's
 //    //    alone, every panel token 403 hidden), public/{public_id}, DELETE runs/{id} and DELETE

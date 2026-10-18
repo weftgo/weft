@@ -23,7 +23,7 @@ import type {
   ToolCallPart,
   Transcript,
 } from "../lib/api"
-import { HOLES, isLive } from "../lib/honesty"
+import { HOLES, isLive, linkedRun } from "../lib/honesty"
 import { byStep } from "../lib/requests"
 import type { StepRequests } from "../lib/requests"
 import { serializeScope } from "../lib/scope"
@@ -1174,10 +1174,12 @@ export class PanelModel {
     // The dev list's agent stream carries every conversation's runs.
     if (this.publicId && run.public_id && run.public_id !== this.publicId)
       return
-    // A subagent's run inherits the public id, but it is not a turn:
+    // A subagent's run — or any run a call started (caller_run_id,
+    // U14: a pool child turn, a nested Generate) — inherits the public
+    // id, but it is not a turn:
     // the list is top-level runs (runs?public_id= reads the same way)
     // and the child hangs off its parent's call.
-    if (run.parent_run_id) return
+    if (linkedRun(run)) return
     // Another session's run is not a turn of the narrowed list.
     if (!this.inSession(run)) return
     for (const c of this.collectors) c.push(run)
@@ -1681,7 +1683,7 @@ export class PanelModel {
     }
     if (this.disposed || !raw || typeof raw !== "object") return "unreachable"
     const doc = raw as RunDoc
-    if (doc.id !== id || doc.parent_run_id) return "foreign"
+    if (doc.id !== id || linkedRun(doc)) return "foreign"
     if (this.publicId && doc.public_id !== this.publicId) return "foreign"
     if (!this.inSession(doc)) return "foreign"
     // The row, not the document: children and holes stay the view's.

@@ -25,3 +25,9 @@ ALTER TABLE runs ADD COLUMN caller_call_id TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS runs_caller ON runs(caller_run_id, started_ns) WHERE caller_run_id <> '';
 CREATE INDEX IF NOT EXISTS runs_session_parent ON runs(json_extract(meta, '$."weft.session.parent"'))
   WHERE session_id <> '';
+-- A session's top-level runs are its own turns by the same rule
+-- (RunQuery.SessionID, ParentRunID ""): an OR over the link columns no
+-- runs_session_started prefix serves, so runs_session_turns orders a
+-- session's runs by start alone and the rule filters them (U14-fix).
+CREATE INDEX IF NOT EXISTS runs_session_turns ON runs(session_id, started_ns DESC, run_id DESC)
+  WHERE session_id <> '';

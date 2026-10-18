@@ -559,13 +559,38 @@ export const poolParent = (
  * (`<session>-t1/0/call`) and a Generate that inherited the session id
  * through core's ctx metadata (an id of its own) are not. */
 export function ownTurn(
-  row: { id: string; session_id?: string } | null | undefined
+  row: { id?: string; session_id?: string } | null | undefined
 ): boolean {
   const s = row?.session_id
-  if (!s || !row.id.startsWith(`${s}-t`)) return false
-  const n = row.id.slice(s.length + 2)
-  return /^\d+$/.test(n)
+  const id = row?.id
+  return (
+    !!s && !!id?.startsWith(`${s}-t`) && /^\d+$/.test(id.slice(s.length + 2))
+  )
 }
+
+/** subagentRun: a core Subagent's child — its id under its parent's
+ * (`<parent>/<step>/<call>`, core's id rule; pricing.go's subagents()
+ * tells it apart the same way). */
+export const subagentRun = (
+  row: { id?: string; parent_run_id?: string } | null | undefined
+) => !!row?.parent_run_id && !!row.id?.startsWith(`${row.parent_run_id}/`)
+
+/** childRun: a run started from another run that is no turn of its own
+ * session — a Subagent child, a nested Generate (U14: linked by its
+ * caller since O11, by its parent before) — not a conversation turn:
+ * no turn of a list, nothing to fork, its parent's marks not its own.
+ * A thread/pool child session's turn is a turn (ownTurn). */
+export const childRun = (
+  row:
+    | {
+        id?: string
+        session_id?: string
+        parent_run_id?: string
+        caller_run_id?: string
+      }
+    | null
+    | undefined
+) => !!linkedRun(row) && !ownTurn(row)
 
 const live = (
   rts: readonly RuntimeLike[] | null | undefined,
@@ -618,15 +643,13 @@ export function parkedKind(
   if (row?.playground) return "experiment"
   // Only core's Subagent child parks onto its parent as SUBAGENT_PENDING
   // (pricing.go's subagents() tells it apart the same way).
-  if (row?.parent_run_id && row.id.startsWith(`${row.parent_run_id}/`))
-    return "child"
+  if (subagentRun(row)) return "child"
   // weft.session.parent rides ctx like any run metadata (core's
   // mergeMetadata): a run that merely inherited it under a pool child's
   // turn is linked to a run (its caller since U14, its parent before)
   // and its id is not its own session's turn.
-  const linked = linkedRun(row)
-  if (poolParent(row) && (!linked || ownTurn(row))) return "pool-child"
-  if (linked && !ownTurn(row)) return "plain"
+  if (poolParent(row) && !childRun(row)) return "pool-child"
+  if (childRun(row)) return "plain"
   if (!row?.session_id) return "plain"
   if (!row.public_id) return "no-public-id"
   if (next) return "resumed"
@@ -635,7 +658,7 @@ export function parkedKind(
 
 /** linkedRun is the run a row was started from: its Subagent parent,
  * else its caller (weft.caller.run.id, U14), "" for neither. */
-const linkedRun = (
+export const linkedRun = (
   row: { parent_run_id?: string; caller_run_id?: string } | null | undefined
 ) => row?.parent_run_id || row?.caller_run_id || ""
 
@@ -666,13 +689,12 @@ export function nextTurn(
   let best: { id: string; turn?: number } | undefined
   // A child run (linked to a run, and not its own session's turn — a
   // Subagent child, a nested Generate) is no turn of the session.
-  if (!row?.session_id || (linkedRun(row) && !ownTurn(row)) || runs == null)
-    return undefined
+  if (!row?.session_id || childRun(row) || runs == null) return undefined
   for (const r of runs)
     if (
       r &&
       r.session_id === row.session_id &&
-      (!linkedRun(r) || ownTurn(r)) &&
+      !childRun(r) &&
       (r.turn ?? 0) > (row.turn ?? 0) &&
       (!best || (r.turn ?? 0) < (best.turn ?? 0))
     )
